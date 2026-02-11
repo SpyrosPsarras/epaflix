@@ -1,0 +1,13 @@
+Host epaflix-jumpbox-vidar
+    HostName vidar.epaflix.com
+    Port 10022
+    User vidar
+    IdentityFile ~/.ssh/vidar_ed25519
+    IdentitiesOnly yes
+
+Host vidar-vm
+    HostName vidar.internal.epaflix.com
+    User vidar
+    ProxyJump epaflix-jumpbox-vidar
+    IdentityFile ~/.ssh/vidar_ed25519
+    IdentitiesOnly yes

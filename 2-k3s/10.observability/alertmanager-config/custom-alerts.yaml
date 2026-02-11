@@ -1,0 +1,112 @@
+---
+# Custom Prometheus Alert Rules
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: custom-alerts
+  namespace: observability
+  labels:
+    prometheus: kube-prometheus-stack-prometheus
+    role: alert-rules
+spec:
+  groups:
+    - name: loki-storage
+      interval: 60s
+      rules:
+        - alert: LokiStorageNearFull
+          expr: |
+            (
+              kubelet_volume_stats_used_bytes{namespace="observability",persistentvolumeclaim=~"loki-.*"}
+              /
+              kubelet_volume_stats_capacity_bytes{namespace="observability",persistentvolumeclaim=~"loki-.*"}
+            ) > 0.85
+          for: 10m
+          labels:
+            severity: warning
+            component: loki
+          annotations:
+            summary: "Loki storage usage high"
+            description: "Loki PVC {{ $labels.persistentvolumeclaim }} is {{ $value | humanizePercentage }} full (threshold 85%). Consider increasing retention policy or storage size."
+
+        - alert: LokiStorageCritical
+          expr: |
+            (
+              kubelet_volume_stats_used_bytes{namespace="observability",persistentvolumeclaim=~"loki-.*"}
+              /
+              kubelet_volume_stats_capacity_bytes{namespace="observability",persistentvolumeclaim=~"loki-.*"}
+            ) > 0.95
+          for: 5m
+          labels:
+            severity: critical
+            component: loki
+          annotations:
+            summary: "Loki storage critically full"
+            description: "Loki PVC {{ $labels.persistentvolumeclaim }} is {{ $value | humanizePercentage }} full (threshold 95%). Immediate action required!"
+
+    - name: prometheus-storage
+      interval: 60s
+      rules:
+        - alert: PrometheusStorageNearFull
+          expr: |
+            (
+              kubelet_volume_stats_used_bytes{namespace="observability",persistentvolumeclaim=~"prometheus-.*"}
+              /
+              kubelet_volume_stats_capacity_bytes{namespace="observability",persistentvolumeclaim=~"prometheus-.*"}
+            ) > 0.85
+          for: 10m
+          labels:
+            severity: warning
+            component: prometheus
+          annotations:
+            summary: "Prometheus storage usage high"
+            description: "Prometheus PVC {{ $labels.persistentvolumeclaim }} is {{ $value | humanizePercentage }} full (threshold 85%)."
+
+    - name: proxmox
+      interval: 60s
+      rules:
+        - alert: ProxmoxHostDown
+          expr: up{job="pve-exporter"} == 0
+          for: 5m
+          labels:
+            severity: critical
+            component: infrastructure
+          annotations:
+            summary: "Proxmox host unreachable"
+            description: "Proxmox VE exporter cannot reach host {{ $labels.instance }} for 5 minutes."
+
+    - name: cilium
+      interval: 60s
+      rules:
+        - alert: CiliumAgentDown
+          expr: up{job="cilium-agent"} == 0
+          for: 5m
+          labels:
+            severity: critical
+            component: network
+          annotations:
+            summary: "Cilium agent down"
+            description: "Cilium agent on {{ $labels.instance }} is down for 5 minutes."
+
+        - alert: CiliumHighPacketDrop
+          expr: rate(cilium_drop_count_total[5m]) > 100
+          for: 5m
+          labels:
+            severity: warning
+            component: network
+          annotations:
+            summary: "High packet drop rate in Cilium"
+            description: "Cilium is dropping packets at {{ $value | humanize }} packets/sec on {{ $labels.instance }}."
+
+    - name: istio
+      interval: 60s
+      rules:
+        - alert: IstioSidecarCrashLoop
+          expr: rate(container_restart_count_total{namespace=~"app-.*",container="istio-proxy"}[15m]) > 0
+          for: 5m
+          labels:
+            severity: warning
+            component: service-mesh
+          annotations:
+            summary: "Istio sidecar crash looping"
+            description: "Istio sidecar in pod {{ $labels.pod }} (namespace {{ $labels.namespace }}) is crash looping."

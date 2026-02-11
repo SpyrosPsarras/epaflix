@@ -1,0 +1,111 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: servarr-postgres-setup
+  namespace: postgres-system
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: postgres-setup
+          image: postgres:16
+          command:
+            - bash
+            - -c
+            - |
+              # Generate passwords
+              SONARR_PW=$(openssl rand -base64 24 | tr -d "=+/" | cut -c1-20)
+              SONARR2_PW=$(openssl rand -base64 24 | tr -d "=+/" | cut -c1-20)
+              RADARR_PW=$(openssl rand -base64 24 | tr -d "=+/" | cut -c1-20)
+              PROWLARR_PW=$(openssl rand -base64 24 | tr -d "=+/" | cut -c1-20)
+              JELLYSEERR_PW=$(openssl rand -base64 24 | tr -d "=+/" | cut -c1-20)
+
+              # Create databases
+              PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres-cluster-rw -U postgres <<SQL
+              CREATE DATABASE IF NOT EXISTS "sonarr-main";
+              CREATE DATABASE IF NOT EXISTS "sonarr2-main";
+              CREATE DATABASE IF NOT EXISTS "radarr-main";
+              CREATE DATABASE IF NOT EXISTS "prowlarr-main";
+              CREATE DATABASE IF NOT EXISTS jellyseerr;
+
+              CREATE USER sonarr WITH PASSWORD '$SONARR_PW';
+              CREATE USER sonarr2 WITH PASSWORD '$SONARR2_PW';
+              CREATE USER radarr WITH PASSWORD '$RADARR_PW';
+              CREATE USER prowlarr WITH PASSWORD '$PROWLARR_PW';
+              CREATE USER jellyseerr WITH PASSWORD '$JELLYSEERR_PW';
+
+              GRANT ALL PRIVILEGES ON DATABASE "sonarr-main" TO sonarr;
+              GRANT ALL PRIVILEGES ON DATABASE "sonarr2-main" TO sonarr2;
+              GRANT ALL PRIVILEGES ON DATABASE "radarr-main" TO radarr;
+              GRANT ALL PRIVILEGES ON DATABASE "prowlarr-main" TO prowlarr;
+              GRANT ALL PRIVILEGES ON DATABASE jellyseerr TO jellyseerr;
+              SQL
+
+              # Create Kubernetes secret
+              kubectl create secret generic servarr-postgres -n servarr \
+                --from-literal=sonarr-host=192.168.10.105 \
+                --from-literal=sonarr-port=5432 \
+                --from-literal=sonarr-database=sonarr-main \
+                --from-literal=sonarr-user=sonarr \
+                --from-literal=sonarr-password=$SONARR_PW \
+                --from-literal=sonarr2-host=192.168.10.105 \
+                --from-literal=sonarr2-port=5432 \
+                --from-literal=sonarr2-database=sonarr2-main \
+                --from-literal=sonarr2-user=sonarr2 \
+                --from-literal=sonarr2-password=$SONARR2_PW \
+                --from-literal=radarr-host=192.168.10.105 \
+                --from-literal=radarr-port=5432 \
+                --from-literal=radarr-database=radarr-main \
+                --from-literal=radarr-user=radarr \
+                --from-literal=radarr-password=$RADARR_PW \
+                --from-literal=prowlarr-host=192.168.10.105 \
+                --from-literal=prowlarr-port=5432 \
+                --from-literal=prowlarr-database=prowlarr-main \
+                --from-literal=prowlarr-user=prowlarr \
+                --from-literal=prowlarr-password=$PROWLARR_PW \
+                --from-literal=jellyseerr-host=192.168.10.105 \
+                --from-literal=jellyseerr-port=5432 \
+                --from-literal=jellyseerr-database=jellyseerr \
+                --from-literal=jellyseerr-user=jellyseerr \
+                --from-literal=jellyseerr-password=$JELLYSEERR_PW \
+                --dry-run=client -o yaml | kubectl apply -f -
+
+              echo "✅ Databases and users created successfully!"
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-superuser
+                  key: password
+      serviceAccountName: postgres-setup-sa
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: postgres-setup-sa
+  namespace: postgres-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: secret-creator
+  namespace: servarr
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: postgres-setup-secret-creator
+  namespace: servarr
+subjects:
+  - kind: ServiceAccount
+    name: postgres-setup-sa
+    namespace: postgres-system
+roleRef:
+  kind: Role
+  name: secret-creator
+  apiGroup: rbac.authorization.k8s.io

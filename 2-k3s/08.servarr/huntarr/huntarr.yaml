@@ -1,0 +1,111 @@
+---
+# Huntarr - Quality management for *arr apps
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: huntarr
+  namespace: servarr
+  labels:
+    app: huntarr
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: huntarr
+  template:
+    metadata:
+      labels:
+        app: huntarr
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: huntarr
+      containers:
+        - name: huntarr
+          image: huntarr/huntarr:latest
+          env:
+            - name: PUID
+              value: "568"
+            - name: PGID
+              value: "568"
+            - name: TZ
+              value: "Europe/Oslo"
+            - name: HUNTARR_PORT
+              value: "30262"
+            - name: UMASK
+              value: "002"
+            - name: LOCAL_NETWORK
+              value: "192.168.10.0/24"
+            - name: BYPASS_AUTH_FOR_LOCAL_ADDRESSES
+              value: "1"
+            - name: STATEFUL_EXPIRATION_HOURS
+              value: "72"
+          ports:
+            - containerPort: 30262
+              name: http
+            - containerPort: 9705
+              name: metrics
+          volumeMounts:
+            - name: config
+              mountPath: /config
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "200m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: huntarr-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: huntarr
+  namespace: servarr
+  labels:
+    app: huntarr
+spec:
+  type: ClusterIP
+  selector:
+    app: huntarr
+  ports:
+    - name: http
+      port: 30262
+      targetPort: http
+    - name: metrics
+      port: 9705
+      targetPort: metrics
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: huntarr-config
+  namespace: servarr
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: local-path

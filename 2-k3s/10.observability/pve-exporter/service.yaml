@@ -1,0 +1,18 @@
+---
+# Proxmox VE Exporter Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: pve-exporter
+  namespace: observability
+  labels:
+    app: pve-exporter
+spec:
+  type: ClusterIP
+  selector:
+    app: pve-exporter
+  ports:
+    - name: metrics
+      port: 9221
+      targetPort: metrics
+      protocol: TCP

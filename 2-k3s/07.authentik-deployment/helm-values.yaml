@@ -1,0 +1,227 @@
+# Authentik Helm Chart Values
+# External PostgreSQL (CloudNativePG), Local Storage, Traefik IngressRoute
+
+# Global configuration
+global:
+  image:
+    repository: ghcr.io/goauthentik/server
+    tag: "2026.2.0"
+    pullPolicy: IfNotPresent
+
+  deploymentStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+
+# Authentik core configuration
+authentik:
+  # Secret key for cookie signing and user IDs (DO NOT CHANGE after first install)
+  secret_key: "<AUTHENTIK_SECRET_KEY>"
+
+  # Logging
+  log_level: info
+
+  # Error reporting (disabled)
+  error_reporting:
+    enabled: false
+
+  # External PostgreSQL configuration (CloudNativePG pooler)
+  postgresql:
+    host: "postgres-rw.postgres-system.svc.cluster.local"
+    port: 5432
+    name: "authentik"
+    user: "authentik"
+    password: "<AUTHENTIK_DB_PASSWORD>"
+
+  # SMTP/Email configuration
+  email:
+    host: "mail.epaflix.com"
+    port: 587
+    username: "truenas_admin"
+    password: "<SMTP_PASSWORD>"
+    use_tls: true
+    use_ssl: false
+    timeout: 30
+    from: "noreply@epaflix.com"
+
+# Server configuration
+server:
+  enabled: true
+  name: server
+  replicas: 1 # Single replica due to ReadWriteOnce storage
+
+  # Disable built-in Kubernetes Ingress (using Traefik IngressRoute instead)
+  ingress:
+    enabled: false
+
+  # Service configuration
+  service:
+    type: ClusterIP
+    servicePortHttp: 80
+    servicePortHttps: 443
+
+  # Resource limits
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+
+  # Health probes
+  livenessProbe:
+    httpGet:
+      path: /-/health/live/
+      port: http
+    initialDelaySeconds: 60
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    httpGet:
+      path: /-/health/ready/
+      port: http
+    initialDelaySeconds: 60
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  # Local storage for media files (ReadWriteOnce PVC, shared with worker on same node)
+  volumeMounts:
+    - name: media
+      mountPath: /media
+
+  volumes:
+    - name: media
+      persistentVolumeClaim:
+        claimName: authentik-media-pvc
+
+  # Pod affinity to ensure server and worker run on same node (required for RWO storage)
+  affinity:
+    podAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - authentik
+          topologyKey: kubernetes.io/hostname
+
+# Worker configuration
+worker:
+  enabled: true
+  name: worker
+  replicas: 3
+
+  # Resource limits
+  resources:
+    requests:
+      memory: "1024Mi"
+      cpu: "500m"
+
+  # Health probes - more lenient for background tasks
+  livenessProbe:
+    exec:
+      command:
+        - ak
+        - healthcheck
+    initialDelaySeconds: 20
+    periodSeconds: 30
+    timeoutSeconds: 10
+    failureThreshold: 5
+
+  readinessProbe:
+    exec:
+      command:
+        - ak
+        - healthcheck
+    initialDelaySeconds: 20
+    periodSeconds: 30
+    timeoutSeconds: 10
+    failureThreshold: 5
+
+  startupProbe:
+    exec:
+      command:
+        - ak
+        - healthcheck
+    initialDelaySeconds: 60
+    periodSeconds: 15
+    timeoutSeconds: 10
+    failureThreshold: 20
+
+  # Local storage for media files (ReadWriteOnce PVC, shared with worker on same node)
+  volumeMounts:
+    - name: media
+      mountPath: /media
+
+  volumes:
+    - name: media
+      persistentVolumeClaim:
+        claimName: authentik-media-pvc
+
+  # Pod affinity to ensure server and worker run on same node (required for RWO storage)
+  affinity:
+    podAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - authentik
+          topologyKey: kubernetes.io/hostname
+
+# Disable bundled PostgreSQL (using external CloudNativePG)
+postgresql:
+  enabled: false
+
+# Service account configuration
+serviceAccount:
+  create: true
+  fullnameOverride: "authentik"
+
+# Additional Kubernetes resources managed by Helm
+# Traefik IngressRoute for auth.epaflix.com
+additionalObjects:
+  # HTTP IngressRoute - Redirect to HTTPS
+  - apiVersion: traefik.io/v1alpha1
+    kind: IngressRoute
+    metadata:
+      name: authentik-http
+      namespace: app-authentik
+    spec:
+      entryPoints:
+        - web
+      routes:
+        - match: Host(`auth.epaflix.com`)
+          kind: Rule
+          middlewares:
+            - name: redirect-https
+              namespace: traefik-system
+          services:
+            - name: authentik-server
+              port: 80
+
+  # HTTPS IngressRoute - Let's Encrypt via Cloudflare DNS-01
+  - apiVersion: traefik.io/v1alpha1
+    kind: IngressRoute
+    metadata:
+      name: authentik-https
+      namespace: app-authentik
+    spec:
+      entryPoints:
+        - websecure
+      routes:
+        - match: Host(`auth.epaflix.com`)
+          kind: Rule
+          services:
+            - name: authentik-server
+              port: 80
+      tls:
+        certResolver: cloudflare
+        domains:
+          - main: epaflix.com
+            sans:
+              - "*.epaflix.com"

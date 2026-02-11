@@ -1,0 +1,80 @@
+# Redirect jellyfin.epaflix.com to TrueNAS Jellyfin (192.168.10.200:30013)
+#
+# This is automatically applied by deploy.sh to ensure persistence across reboots.
+# The Jellyfin pod runs in k3s but jellyfin.epaflix.com routes to TrueNAS.
+#
+# To revert to k3s Jellyfin:
+#   kubectl delete -f jellyfin-truenas-redirect.yaml
+#   kubectl apply -f ../_shared/ingress/public-routes.yaml
+#
+# This creates an Endpoints/Service pointing to TrueNAS and overrides the IngressRoute
+---
+# External endpoint pointing to TrueNAS Jellyfin
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: jellyfin-truenas
+  namespace: servarr
+subsets:
+  - addresses:
+      - ip: 192.168.10.200
+    ports:
+      - name: http
+        port: 30013
+        protocol: TCP
+---
+# Headless service for the external endpoint
+apiVersion: v1
+kind: Service
+metadata:
+  name: jellyfin-truenas
+  namespace: servarr
+  labels:
+    app: jellyfin-truenas
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - name: http
+      port: 30013
+---
+# Override the HTTPS IngressRoute to point to TrueNAS
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: jellyfin-https
+  namespace: servarr
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`jellyfin.epaflix.com`)
+      kind: Rule
+      services:
+        - name: jellyfin-truenas
+          port: 30013
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
+---
+# Override the HTTP IngressRoute (redirect to HTTPS)
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: jellyfin-http
+  namespace: servarr
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`jellyfin.epaflix.com`)
+      kind: Rule
+      middlewares:
+        - name: redirect-https
+          namespace: traefik-system
+      services:
+        - name: jellyfin-truenas
+          port: 30013

@@ -1,0 +1,113 @@
+---
+# K3s Automated Upgrade Plans using system-upgrade-controller
+#
+# Prerequisites:
+#   Install the controller first (one-time):
+#   kubectl apply -f https://github.com/rancher/system-upgrade-controller/releases/latest/download/system-upgrade-controller.yaml
+#
+# Deploy these plans:
+#   kubectl apply -f system-upgrade-plans.yaml
+#
+# Monitor progress:
+#   kubectl -n system-upgrade get plans,jobs -o wide
+#   kubectl -n system-upgrade get pods
+#
+# How it works:
+#   1. The controller watches the K3s stable release channel for new versions
+#   2. When a new version is available, it upgrades server (master) nodes first, one at a time
+#   3. Once ALL masters are upgraded, it upgrades worker (agent) nodes, two at a time
+#   4. Each node is cordoned and drained before upgrading, then uncordoned after
+#
+# Upgrade order for this cluster:
+#   Masters (one at a time): k3s-master-51 → k3s-master-52 → k3s-master-53
+#   Workers (two at a time): k3s-worker-61+62 → k3s-worker-63+65
+
+---
+# Server (Master Node) Upgrade Plan
+# Upgrades all nodes with the control-plane role, one at a time
+apiVersion: upgrade.cattle.io/v1
+kind: Plan
+metadata:
+  name: k3s-server
+  namespace: system-upgrade
+  labels:
+    k3s-upgrade: server
+spec:
+  # Track the K3s stable release channel automatically
+  # Upgrades happen whenever a new stable K3s version is published
+  channel: https://update.k3s.io/v1-release/channels/stable
+
+  # Upgrade masters one at a time to maintain quorum (3-node etcd)
+  concurrency: 1
+
+  # Cordon the node so no new pods are scheduled during upgrade
+  cordon: true
+
+  # Drain the node before upgrading (evict all workloads gracefully)
+  drain:
+    force: true
+    skipWaitForDeleteTimeout: 60  # Skip pods that don't terminate within 60s
+
+  # Only target master (control-plane) nodes
+  nodeSelector:
+    matchExpressions:
+      - key: node-role.kubernetes.io/control-plane
+        operator: In
+        values:
+          - "true"
+
+  # ServiceAccount created by system-upgrade-controller installation
+  serviceAccountName: system-upgrade
+
+  # The upgrade job image — handles the actual K3s binary replacement
+  upgrade:
+    image: rancher/k3s-upgrade
+
+---
+# Agent (Worker Node) Upgrade Plan
+# Upgrades all worker nodes AFTER all masters have been upgraded
+apiVersion: upgrade.cattle.io/v1
+kind: Plan
+metadata:
+  name: k3s-agent
+  namespace: system-upgrade
+  labels:
+    k3s-upgrade: agent
+spec:
+  # Must match the same channel as the server plan
+  channel: https://update.k3s.io/v1-release/channels/stable
+
+  # Upgrade 2 workers at a time — we have 4 workers (61, 62, 63, 65)
+  # This keeps at least 2 workers running for active workloads
+  concurrency: 2
+
+  # Cordon the node so no new pods are scheduled during upgrade
+  cordon: true
+
+  # Drain the node before upgrading (evict all workloads gracefully)
+  drain:
+    force: true
+    skipWaitForDeleteTimeout: 60  # Skip pods that don't terminate within 60s
+
+  # Only target worker (non-control-plane) nodes
+  nodeSelector:
+    matchExpressions:
+      - key: node-role.kubernetes.io/control-plane
+        operator: NotIn
+        values:
+          - "true"
+
+  # CRITICAL: Wait for all server nodes to complete their upgrade before
+  # starting any worker upgrades. This ensures the control plane is stable.
+  prepare:
+    image: rancher/k3s-upgrade
+    args:
+      - prepare
+      - k3s-server  # Must match the server plan name above
+
+  # ServiceAccount created by system-upgrade-controller installation
+  serviceAccountName: system-upgrade
+
+  # The upgrade job image — handles the actual K3s binary replacement
+  upgrade:
+    image: rancher/k3s-upgrade

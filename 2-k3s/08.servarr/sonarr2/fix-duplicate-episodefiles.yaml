@@ -1,0 +1,126 @@
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: fix-sonarr2-duplicate-episodefiles
+  namespace: servarr
+spec:
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: fix-duplicates
+        image: postgres:15-alpine
+        env:
+        - name: PGHOST
+          value: "192.168.10.105"
+        - name: PGUSER
+          value: "sonarr2"
+        - name: PGDATABASE
+          value: "sonarr2-main"
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: servarr-postgres
+              key: sonarr2-password
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+
+          echo "=========================================="
+          echo "Sonarr2 Duplicate EpisodeFiles Fix"
+          echo "=========================================="
+          echo ""
+
+          echo "📊 Current State:"
+          psql -c "SELECT COUNT(*) as total_episodefiles FROM \"EpisodeFiles\";"
+          psql -c "SELECT MAX(\"Id\") as max_id FROM \"EpisodeFiles\";"
+          psql -c "SELECT last_value as sequence_value FROM \"EpisodeFiles_Id_seq\";"
+          echo ""
+
+          echo "🔍 Duplicate EpisodeFile IDs (showing first 20):"
+          psql -c "SELECT \"Id\", COUNT(*) FROM \"EpisodeFiles\" GROUP BY \"Id\" HAVING COUNT(*) > 1 ORDER BY \"Id\" LIMIT 20;"
+          echo ""
+
+          # Count total duplicates
+          DUPLICATE_COUNT=$(psql -t -c "SELECT COUNT(*) FROM (SELECT \"Id\" FROM \"EpisodeFiles\" GROUP BY \"Id\" HAVING COUNT(*) > 1) sub;")
+          echo "📝 Total duplicate IDs found: $DUPLICATE_COUNT"
+          echo ""
+
+          if [ "$DUPLICATE_COUNT" -eq 0 ]; then
+            echo "✅ No duplicates found! Database is healthy."
+            echo "=========================================="
+            exit 0
+          fi
+
+          echo "📝 Details of first 10 duplicates:"
+          psql -c "SELECT \"Id\", \"SeriesId\", \"SeasonNumber\", \"RelativePath\", \"DateAdded\" FROM \"EpisodeFiles\" WHERE \"Id\" IN (SELECT \"Id\" FROM \"EpisodeFiles\" GROUP BY \"Id\" HAVING COUNT(*) > 1 ORDER BY \"Id\" LIMIT 10) ORDER BY \"Id\", \"DateAdded\";"
+          echo ""
+
+          echo "🔧 Starting fix..."
+          echo ""
+
+          # Create fix SQL file
+          cat > /tmp/fix-duplicates.sql << 'EOSQL'
+          -- Sonarr2 EpisodeFiles Duplicate Fix
+          BEGIN;
+
+          -- Create temp table with one row per unique episodefile ID (keep earliest by ctid)
+          CREATE TEMP TABLE episodefiles_to_keep AS
+          SELECT DISTINCT ON ("Id")
+            "Id",
+            ctid as keep_ctid
+          FROM "EpisodeFiles"
+          ORDER BY "Id", ctid;
+
+          -- Show counts before deletion
+          \echo 'Before deletion:'
+          SELECT COUNT(*) as total_episodefiles FROM "EpisodeFiles";
+
+          -- Delete duplicate rows (keep only the ones in episodefiles_to_keep)
+          DELETE FROM "EpisodeFiles" ef
+          WHERE NOT EXISTS (
+            SELECT 1 FROM episodefiles_to_keep k
+            WHERE k."Id" = ef."Id" AND k.keep_ctid = ef.ctid
+          );
+
+          \echo 'After deletion:'
+          SELECT COUNT(*) as total_episodefiles FROM "EpisodeFiles";
+
+          -- Fix the sequence to prevent future duplicates
+          SELECT setval('"EpisodeFiles_Id_seq"', (SELECT MAX("Id") FROM "EpisodeFiles") + 1, false);
+
+          -- Verify no duplicates remain
+          \echo 'Verification - Remaining duplicates (should be 0):'
+          SELECT COUNT(*) as duplicate_count
+          FROM (
+            SELECT "Id"
+            FROM "EpisodeFiles"
+            GROUP BY "Id"
+            HAVING COUNT(*) > 1
+          ) duplicates;
+
+          COMMIT;
+          EOSQL
+
+          # Execute the fix
+          psql -f /tmp/fix-duplicates.sql
+
+          echo ""
+          echo "✅ Fix completed!"
+          echo ""
+          echo "📊 Final State:"
+          psql -c "SELECT COUNT(*) as total_episodefiles FROM \"EpisodeFiles\";"
+          psql -c "SELECT MAX(\"Id\") as max_id FROM \"EpisodeFiles\";"
+          psql -c "SELECT last_value as sequence_value FROM \"EpisodeFiles_Id_seq\";"
+          echo ""
+          echo "🔍 Verify no duplicates remain:"
+          psql -c "SELECT \"Id\", COUNT(*) FROM \"EpisodeFiles\" GROUP BY \"Id\" HAVING COUNT(*) > 1;"
+          echo ""
+          echo "⚠️  IMPORTANT: Restart Sonarr2 to clear caches:"
+          echo "   kubectl rollout restart deployment/sonarr2 -n servarr"
+          echo ""
+          echo "=========================================="

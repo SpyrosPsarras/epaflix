@@ -1,0 +1,56 @@
+---
+# Weekly Container Image Cleanup
+# Runs every Sunday at 2 AM to remove unused images and containers
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: containerd-cleanup
+  namespace: kube-system
+  labels:
+    app: containerd-cleanup
+spec:
+  schedule: "0 2 * * 0" # 2 AM every Sunday
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: containerd-cleanup
+        spec:
+          hostNetwork: true
+          hostPID: true
+          restartPolicy: OnFailure
+          tolerations:
+            - operator: Exists
+          nodeSelector:
+            node-role.kubernetes.io/control-plane: "true"
+          containers:
+            - name: cleanup
+              image: alpine:3.19
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  apk add --no-cache openssh-client
+                  echo "=== Containerd Cleanup Started at $(date) ==="
+                  for NODE in 192.168.10.61 192.168.10.62 192.168.10.63 192.168.10.65; do
+                    echo "=== Cleaning worker $NODE ==="
+                    ssh -o StrictHostKeyChecking=no ubuntu@$NODE \
+                      'df -h / | tail -1 && \
+                       sudo crictl rm $(sudo crictl ps -a --state=Exited -q 2>/dev/null) 2>/dev/null || echo "No stopped containers" && \
+                       sudo crictl rmi --prune 2>/dev/null || echo "No unused images" && \
+                       df -h / | tail -1'
+                  done
+                  echo "=== Containerd Cleanup Finished at $(date) ==="
+              volumeMounts:
+                - name: ssh-key
+                  mountPath: /root/.ssh
+                  readOnly: true
+          volumes:
+            - name: ssh-key
+              hostPath:
+                path: /root/.ssh
+                type: Directory

@@ -1,0 +1,190 @@
+---
+# Servarr Image Updater
+#
+# Performs a weekly rolling restart of all Deployments in the servarr namespace
+# so that the latest version of each container image is pulled and applied.
+#
+# How image updates work in Kubernetes:
+#   - Images tagged `:latest` have imagePullPolicy: Always by default, so a pod
+#     restart is enough to pull a newer upstream image.
+#   - Images tagged with a non-latest mutable tag (e.g. :development, :preview-OIDC)
+#     require imagePullPolicy: Always to be set EXPLICITLY in their Deployment spec
+#     so that Kubernetes doesn't skip the pull.
+#
+# Deployments that require explicit imagePullPolicy: Always (non-latest tags):
+#   - bazarr          (lscr.io/linuxserver/bazarr:development)
+#   - jellyseerr      (fallenbagel/jellyseerr:preview-OIDC)
+#   - seerr           (fallenbagel/jellyseerr:preview-OIDC)
+#
+# Schedule: 3 AM every Sunday — runs one hour after the containerd-cleanup CronJob
+# so that disk space has already been freed before new images are pulled.
+#
+# Deploy:
+#   kubectl apply -f servarr-image-updater-cronjob.yaml
+#
+# Trigger manually:
+#   kubectl create job --from=cronjob/servarr-image-updater servarr-update-manual -n kube-system
+#   kubectl -n kube-system logs -f job/servarr-update-manual
+
+---
+# ServiceAccount used by the CronJob pod
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: servarr-image-updater
+  namespace: kube-system
+  labels:
+    app: servarr-image-updater
+
+---
+# ClusterRole: permission to list/get/patch Deployments in the servarr namespace.
+# Scoped to only the resources the job actually needs.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: servarr-image-updater
+  namespace: servarr
+  labels:
+    app: servarr-image-updater
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "patch", "update"]
+  - apiGroups: ["apps"]
+    resources: ["deployments/status"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+
+---
+# RoleBinding: bind the ServiceAccount (in kube-system) to the Role (in servarr)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: servarr-image-updater
+  namespace: servarr
+  labels:
+    app: servarr-image-updater
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: servarr-image-updater
+subjects:
+  - kind: ServiceAccount
+    name: servarr-image-updater
+    namespace: kube-system
+
+---
+# Weekly CronJob — restarts all servarr Deployments and waits for each rollout
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: servarr-image-updater
+  namespace: kube-system
+  labels:
+    app: servarr-image-updater
+spec:
+  # 3 AM every Sunday (one hour after containerd-cleanup at 2 AM)
+  schedule: "0 3 * * 0"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  # Prevent a second run if a previous update is still in progress
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      # Give the job up to 45 minutes before it is considered failed.
+      # Each rollout waits up to 5 minutes, and there are ~14 deployments.
+      activeDeadlineSeconds: 2700
+      template:
+        metadata:
+          labels:
+            app: servarr-image-updater
+        spec:
+          serviceAccountName: servarr-image-updater
+          restartPolicy: OnFailure
+
+          containers:
+            - name: updater
+              # bitnami/kubectl mirrors the cluster's kubectl version and is
+              # regularly updated. The `latest` tag tracks the most recent stable release.
+              image: bitnami/kubectl:latest
+              imagePullPolicy: Always
+
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  set -euo pipefail
+
+                  NAMESPACE="servarr"
+                  ROLLOUT_TIMEOUT="5m"
+
+                  echo "============================================"
+                  echo "Servarr Image Updater — $(date)"
+                  echo "============================================"
+
+                  # Collect all Deployment names in the servarr namespace
+                  DEPLOYMENTS=$(kubectl get deployments -n "$NAMESPACE" \
+                    -o jsonpath='{.items[*].metadata.name}')
+
+                  if [[ -z "$DEPLOYMENTS" ]]; then
+                    echo "No deployments found in namespace $NAMESPACE. Exiting."
+                    exit 0
+                  fi
+
+                  echo ""
+                  echo "Deployments to update:"
+                  for deploy in $DEPLOYMENTS; do
+                    IMAGE=$(kubectl get deployment "$deploy" -n "$NAMESPACE" \
+                      -o jsonpath='{.spec.template.spec.containers[0].image}')
+                    echo "  - $deploy  →  $IMAGE"
+                  done
+                  echo ""
+
+                  # Rolling restart each deployment one at a time.
+                  # This ensures only one app is restarting at any moment,
+                  # keeping the *arr ecosystem healthy during the update window.
+                  FAILED=""
+                  for deploy in $DEPLOYMENTS; do
+                    echo "--------------------------------------------"
+                    echo "Restarting $deploy ..."
+                    kubectl rollout restart deployment/"$deploy" -n "$NAMESPACE"
+
+                    echo "Waiting for $deploy rollout (timeout: $ROLLOUT_TIMEOUT) ..."
+                    if kubectl rollout status deployment/"$deploy" -n "$NAMESPACE" \
+                        --timeout="$ROLLOUT_TIMEOUT"; then
+                      echo "✅ $deploy updated successfully"
+                    else
+                      echo "❌ $deploy rollout timed out or failed"
+                      FAILED="$FAILED $deploy"
+                    fi
+                    echo ""
+                  done
+
+                  echo "============================================"
+                  echo "Update complete — $(date)"
+
+                  if [[ -n "$FAILED" ]]; then
+                    echo ""
+                    echo "⚠️  The following deployments did not roll out cleanly:"
+                    for f in $FAILED; do
+                      echo "  - $f"
+                    done
+                    echo ""
+                    echo "Run the following to investigate:"
+                    echo "  kubectl get pods -n servarr"
+                    echo "  kubectl describe pod -n servarr <pod-name>"
+                    exit 1
+                  fi
+
+                  echo "All deployments updated successfully ✅"
+                  echo "============================================"
+
+              resources:
+                requests:
+                  memory: "64Mi"
+                  cpu: "50m"
+                limits:
+                  memory: "128Mi"
+                  cpu: "200m"

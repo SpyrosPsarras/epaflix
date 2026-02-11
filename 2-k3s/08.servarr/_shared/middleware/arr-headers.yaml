@@ -1,0 +1,16 @@
+---
+# Middleware for *arr apps to handle proxy headers properly
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: arr-headers
+  namespace: servarr
+spec:
+  headers:
+    customRequestHeaders:
+      X-Forwarded-Proto: "http"
+    customResponseHeaders:
+      Access-Control-Allow-Origin: "*"
+      Access-Control-Allow-Methods: "GET, POST, PUT, DELETE, OPTIONS"
+      Access-Control-Allow-Headers: "DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,X-Api-Key,X-Prowlarr-Client"
+      Access-Control-Expose-Headers: "Content-Length,Content-Range"

@@ -1,0 +1,86 @@
+# Loki Helm Values
+# SingleBinary mode with filesystem storage (simpler for small clusters)
+
+deploymentMode: SingleBinary
+
+loki:
+  commonConfig:
+    replication_factor: 1
+
+  schemaConfig:
+    configs:
+      - from: "2024-01-01"
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: loki_index_
+          period: 24h
+
+  storage:
+    type: "filesystem"
+    filesystem:
+      chunks_directory: /var/loki/chunks
+      rules_directory: /var/loki/rules
+
+  limits_config:
+    retention_period: 744h # 31 days
+    max_query_series: 10000
+    max_query_lookback: 720h
+    ingestion_rate_mb: 50
+    ingestion_burst_size_mb: 100
+
+  compactor:
+    retention_enabled: true
+    retention_delete_delay: 2h
+    retention_delete_worker_count: 150
+    compaction_interval: 2h
+    delete_request_store: filesystem
+
+# Single Binary deployment
+singleBinary:
+  replicas: 1 # Only 1 replica supported with filesystem storage
+  persistence:
+    enabled: true
+    storageClass: local-path
+    size: 15Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+# Explicitly disable scalable components
+write:
+  replicas: 0
+read:
+  replicas: 0
+backend:
+  replicas: 0
+# Gateway (nginx)
+gateway:
+  enabled: true
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+# Monitoring
+monitoring:
+  selfMonitoring:
+    enabled: false
+    grafanaAgent:
+      installOperator: false
+  serviceMonitor:
+    enabled: true
+  lokiCanary:
+    enabled: false
+
+# Test
+test:
+  enabled: false

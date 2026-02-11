@@ -1,0 +1,63 @@
+---
+# Wizarr - User Invitation System
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wizarr
+  namespace: servarr
+  labels:
+    app: wizarr
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: wizarr
+  template:
+    metadata:
+      labels:
+        app: wizarr
+    spec:
+      securityContext:
+        runAsUser: 568
+        runAsGroup: 568
+        fsGroup: 568
+      containers:
+        - name: wizarr
+          image: ghcr.io/wizarrrr/wizarr:latest
+          env:
+            - name: PUID
+              value: "568"
+            - name: PGID
+              value: "568"
+            - name: TZ
+              value: "Europe/Oslo"
+          ports:
+            - containerPort: 5690
+              name: http
+          volumeMounts:
+            - name: config
+              mountPath: /data/database
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: wizarr-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: wizarr
+  namespace: servarr
+  labels:
+    app: wizarr
+spec:
+  type: ClusterIP
+  selector:
+    app: wizarr
+  ports:
+    - name: http
+      port: 5690
+      targetPort: http

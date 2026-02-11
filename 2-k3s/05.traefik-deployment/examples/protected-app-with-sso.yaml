@@ -1,0 +1,72 @@
+---
+# Example: Protected Application with Authentik SSO (Single Application Mode)
+# Based on: https://docs.goauthentik.io/add-secure-apps/providers/proxy/server_traefik/
+#
+# For each app you want to protect, you need:
+# 1. Proxy Provider in Authentik → "Forward auth (single application)"
+#    - External host: https://myapp.epaflix.com
+# 2. Application in Authentik linked to the provider
+# 3. This IngressRoute (app route with middleware)
+# 4. Outpost IngressRoute (handles /outpost.goauthentik.io/ on app domain)
+#
+# Replace:
+#   - myapp.epaflix.com → your app hostname
+#   - myapp-service → your app's ClusterIP service name
+#   - app-myapp → your app's namespace
+#   - 80 → your app's service port
+
+# App route - protected by ForwardAuth middleware
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: myapp-https
+  namespace: app-myapp
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`myapp.epaflix.com`)
+      kind: Rule
+      priority: 10 # Lower than outpost routes (15)
+      middlewares:
+        # Authentik SSO - redirects to login if not authenticated
+        - name: authentik-forwardauth
+          namespace: traefik-system
+        # Optional: security headers
+        - name: security-headers
+          namespace: traefik-system
+      services:
+        - name: myapp-service
+          port: 80
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
+
+---
+# Outpost route - handles auth callback on THIS app's domain
+# REQUIRED for single application mode
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: myapp-outpost-https
+  namespace: app-myapp
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`myapp.epaflix.com`) && PathPrefix(`/outpost.goauthentik.io/`)
+      kind: Rule
+      priority: 15 # Higher than app route
+      services:
+        - name: authentik-server
+          namespace: app-authentik # Cross-namespace reference
+          port: 80
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"

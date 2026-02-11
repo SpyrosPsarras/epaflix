@@ -1,0 +1,123 @@
+---
+# Radarr - Movies Manager
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: radarr
+  namespace: servarr
+  labels:
+    app: radarr
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: radarr
+  template:
+    metadata:
+      labels:
+        app: radarr
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: radarr
+      securityContext:
+        runAsUser: 568
+        runAsGroup: 568
+        fsGroup: 568
+      containers:
+        - name: radarr
+          image: lscr.io/linuxserver/radarr:latest
+          env:
+            - name: PUID
+              value: "568"
+            - name: PGID
+              value: "568"
+            - name: TZ
+              value: "Europe/Oslo"
+            # PostgreSQL configuration
+            - name: RADARR__POSTGRES__HOST
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: radarr-host
+            - name: RADARR__POSTGRES__PORT
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: radarr-port
+            - name: RADARR__POSTGRES__DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: radarr-database
+            - name: RADARR__POSTGRES__USER
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: radarr-user
+            - name: RADARR__POSTGRES__PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: radarr-password
+          ports:
+            - containerPort: 7878
+              name: http
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: movies
+              mountPath: /movies
+            - name: downloads
+              mountPath: /downloads
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "200m"
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: radarr-config
+        - name: movies
+          persistentVolumeClaim:
+            claimName: servarr-media-movies
+        - name: downloads
+          persistentVolumeClaim:
+            claimName: servarr-media-downloads
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: radarr
+  namespace: servarr
+  labels:
+    app: radarr
+spec:
+  type: ClusterIP
+  selector:
+    app: radarr
+  ports:
+    - name: http
+      port: 7878
+      targetPort: http

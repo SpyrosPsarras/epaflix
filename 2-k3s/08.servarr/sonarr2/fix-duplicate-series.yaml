@@ -1,0 +1,112 @@
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: fix-sonarr2-duplicate-series
+  namespace: servarr
+spec:
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: fix-duplicates
+        image: postgres:15-alpine
+        env:
+        - name: PGHOST
+          value: "192.168.10.105"
+        - name: PGUSER
+          value: "sonarr2"
+        - name: PGDATABASE
+          value: "sonarr2-main"
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: servarr-postgres
+              key: sonarr2-password
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+
+          echo "=========================================="
+          echo "Sonarr2 Duplicate Series Fix"
+          echo "=========================================="
+          echo ""
+
+          echo "📊 Current State:"
+          psql -c "SELECT COUNT(*) as total_series FROM \"Series\";"
+          psql -c "SELECT MAX(\"Id\") as max_id FROM \"Series\";"
+          psql -c "SELECT last_value as sequence_value FROM \"Series_Id_seq\";"
+          echo ""
+
+          echo "🔍 Duplicate Series IDs:"
+          psql -c "SELECT \"Id\", COUNT(*) FROM \"Series\" GROUP BY \"Id\" HAVING COUNT(*) > 1 ORDER BY \"Id\";"
+          echo ""
+
+          echo "📝 Details of duplicates:"
+          psql -c "SELECT \"Id\", \"TvdbId\", \"Title\", \"CleanTitle\" FROM \"Series\" WHERE \"Id\" IN (SELECT \"Id\" FROM \"Series\" GROUP BY \"Id\" HAVING COUNT(*) > 1) ORDER BY \"Id\";"
+          echo ""
+
+          echo "🔧 Starting fix..."
+          echo ""
+
+          # Create fix SQL file
+          cat > /tmp/fix-duplicates.sql << 'EOSQL'
+          -- Sonarr2 Series Duplicate Fix
+          BEGIN;
+
+          -- Create temp table with one row per unique series ID (keep earliest by ctid)
+          CREATE TEMP TABLE series_to_keep AS
+          SELECT DISTINCT ON ("Id")
+            "Id",
+            ctid as keep_ctid
+          FROM "Series"
+          ORDER BY "Id", ctid;
+
+          -- Show counts before deletion
+          \echo 'Before deletion:'
+          SELECT COUNT(*) as total_series FROM "Series";
+
+          -- Delete duplicate rows (keep only the ones in series_to_keep)
+          DELETE FROM "Series" s
+          WHERE NOT EXISTS (
+            SELECT 1 FROM series_to_keep k
+            WHERE k."Id" = s."Id" AND k.keep_ctid = s.ctid
+          );
+
+          \echo 'After deletion:'
+          SELECT COUNT(*) as total_series FROM "Series";
+
+          -- Fix the sequence to prevent future duplicates
+          SELECT setval('"Series_Id_seq"', (SELECT MAX("Id") FROM "Series") + 1, false);
+
+          -- Verify no duplicates remain
+          \echo 'Verification - Remaining duplicates (should be 0):'
+          SELECT COUNT(*) as duplicate_count
+          FROM (
+            SELECT "Id"
+            FROM "Series"
+            GROUP BY "Id"
+            HAVING COUNT(*) > 1
+          ) duplicates;
+
+          COMMIT;
+          EOSQL
+
+          # Execute the fix
+          psql -f /tmp/fix-duplicates.sql
+
+          echo ""
+          echo "✅ Fix completed!"
+          echo ""
+          echo "📊 Final State:"
+          psql -c "SELECT COUNT(*) as total_series FROM \"Series\";"
+          psql -c "SELECT MAX(\"Id\") as max_id FROM \"Series\";"
+          psql -c "SELECT last_value as sequence_value FROM \"Series_Id_seq\";"
+          echo ""
+          echo "🔍 Verify no duplicates remain:"
+          psql -c "SELECT \"Id\", COUNT(*) FROM \"Series\" GROUP BY \"Id\" HAVING COUNT(*) > 1;"
+          echo ""
+          echo "=========================================="

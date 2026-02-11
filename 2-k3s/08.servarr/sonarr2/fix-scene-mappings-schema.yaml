@@ -1,0 +1,60 @@
+---
+# Job to fix missing Type column in sonarr2 SceneMappings table
+# Error: column SceneMappings.Type does not exist (SqlState: 42703)
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: sonarr2-fix-scene-mappings-schema
+  namespace: servarr
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: postgres-fix
+          image: postgres:16-alpine
+          env:
+            - name: PGHOST
+              value: "192.168.10.105"
+            - name: PGUSER
+              value: "sonarr2"
+            - name: PGDATABASE
+              value: "sonarr2-main"
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: sonarr2-password
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+
+              echo "=========================================="
+              echo "Sonarr2 SceneMappings Schema Fix"
+              echo "=========================================="
+              echo ""
+
+              echo "📊 Current SceneMappings columns:"
+              psql -c "SELECT column_name, data_type, is_nullable
+                       FROM information_schema.columns
+                       WHERE table_name = 'SceneMappings'
+                       ORDER BY ordinal_position;"
+              echo ""
+
+              echo "🔧 Adding missing Type column (if not exists)..."
+              psql -c "ALTER TABLE \"SceneMappings\" ADD COLUMN IF NOT EXISTS \"Type\" text;"
+              echo ""
+
+              echo "✅ Fix applied!"
+              echo ""
+
+              echo "📊 Updated SceneMappings columns:"
+              psql -c "SELECT column_name, data_type, is_nullable
+                       FROM information_schema.columns
+                       WHERE table_name = 'SceneMappings'
+                       ORDER BY ordinal_position;"
+              echo ""
+              echo "=========================================="

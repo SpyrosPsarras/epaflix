@@ -1,0 +1,59 @@
+---
+# Example: nginx deployment with LoadBalancer service
+# This demonstrates basic LoadBalancer usage with automatic IP assignment
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-example
+  labels:
+    app: nginx
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:alpine
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-loadbalancer
+spec:
+  type: LoadBalancer
+  selector:
+    app: nginx
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+      protocol: TCP
+
+---
+# To deploy:
+# kubectl apply -f example-nginx-lb.yaml
+#
+# To check the assigned IP:
+# kubectl get svc nginx-loadbalancer
+#
+# To test:
+# curl http://<EXTERNAL-IP>
+#
+# To delete:
+# kubectl delete -f example-nginx-lb.yaml

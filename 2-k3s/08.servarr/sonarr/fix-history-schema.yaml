@@ -1,0 +1,39 @@
+---
+# Job to fix missing DownloadId column in Sonarr History table
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: sonarr-fix-history-schema
+  namespace: servarr
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: postgres-fix
+          image: postgres:16
+          command:
+            - psql
+            - -h
+            - "192.168.10.105"
+            - -U
+            - sonarr
+            - -d
+            - sonarr-main
+            - -c
+            - |
+              -- Add missing DownloadId column if it doesn't exist
+              ALTER TABLE "History" ADD COLUMN IF NOT EXISTS "DownloadId" text;
+
+              -- Add missing Languages column if it doesn't exist
+              ALTER TABLE "History" ADD COLUMN IF NOT EXISTS "Languages" text DEFAULT '[]'::text NOT NULL;
+
+              -- Verify the columns were added
+              SELECT column_name, data_type
+              FROM information_schema.columns
+              WHERE table_name = 'History'
+              ORDER BY ordinal_position;
+          env:
+            - name: PGPASSWORD
+              value: "<SONARR_DB_PASSWORD>"

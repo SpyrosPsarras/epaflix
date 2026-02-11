@@ -1,0 +1,205 @@
+version: "3.8"
+
+# =============================================================================
+# Traefik v3.6.11 Reverse Proxy - Docker Swarm Stack
+# =============================================================================
+#
+# Traefik v3.6.11 fixes the confirmed P0 bug (#12253) where the internal Go
+# Docker client hardcoded API negotiation to 1.24, breaking compatibility with
+# Docker 29+ (which dropped support for API < 1.40).
+# Fix confirmed in v3.6.6+. Using v3.6.11 (latest stable as of 2026-03-22).
+#
+# Features:
+#   - Let's Encrypt wildcard TLS via Cloudflare DNS-01 challenge (*.epaflix.com)
+#   - HTTP → HTTPS redirect at entrypoint level (no per-app config needed)
+#   - Traefik dashboard at traefik.epaflix.com
+#   - Shared middlewares: redirect-https, security-headers, compress
+#   - Pinned to ds-master (192.168.10.71) — acme.json is a local bind mount
+#
+# Prerequisites (run once before deploying):
+#
+#   1. Create the overlay network:
+#        ssh ubuntu@192.168.10.71 \
+#          "docker network create --driver overlay --attachable traefik-public"
+#
+#   2. Create the Cloudflare API token secret:
+#        ssh ubuntu@192.168.10.71 \
+#          "echo '<CF_API_TOKEN>' | docker secret create cloudflare_api_token -"
+#        (token value is in .github/instructions/secrets.yml)
+#
+#   3. Prepare acme.json on ds-master:
+#        ssh ubuntu@192.168.10.71 "
+#          sudo mkdir -p /opt/traefik &&
+#          sudo touch /opt/traefik/acme.json &&
+#          sudo chmod 600 /opt/traefik/acme.json &&
+#          sudo chown root:root /opt/traefik/acme.json"
+#
+#   4. (Recommended) Seed acme.json from existing K3s Traefik to reuse the
+#      already-issued wildcard cert and avoid Let's Encrypt rate limits:
+#        kubectl exec -n traefik-system deploy/traefik -- cat /data/acme.json \
+#          > /tmp/acme.json
+#        scp /tmp/acme.json ubuntu@192.168.10.71:/tmp/acme.json
+#        ssh ubuntu@192.168.10.71 "
+#          sudo cp /tmp/acme.json /opt/traefik/acme.json &&
+#          sudo chmod 600 /opt/traefik/acme.json &&
+#          sudo chown root:root /opt/traefik/acme.json &&
+#          rm /tmp/acme.json"
+#        rm /tmp/acme.json
+#
+# Deploy:
+#   scp docker-compose.yml ubuntu@192.168.10.71:/tmp/traefik-compose.yml
+#   ssh ubuntu@192.168.10.71 "docker stack deploy -c /tmp/traefik-compose.yml traefik && rm /tmp/traefik-compose.yml"
+#
+# =============================================================================
+
+networks:
+  traefik-public:
+    external: true
+
+secrets:
+  cloudflare_api_token:
+    external: true
+
+services:
+  traefik:
+    image: traefik:v3.6.11
+
+    command:
+      # --- Global ---
+      - "--global.checknewversion=false"
+      - "--global.sendanonymoususage=false"
+
+      # --- API & Dashboard ---
+      - "--api.dashboard=true"
+      - "--api.insecure=false"
+
+      # --- Logging ---
+      - "--log.level=INFO"
+      - "--accesslog=true"
+      - "--accesslog.format=json"
+
+      # --- Provider: Docker Swarm ---
+      # In Traefik v3, Docker Swarm uses the dedicated "swarm" provider.
+      # Bug #12253 (client version 1.24 too old) is fixed in v3.6.6+.
+      - "--providers.swarm=true"
+      - "--providers.swarm.endpoint=unix:///var/run/docker.sock"
+      - "--providers.swarm.exposedByDefault=false"
+      - "--providers.swarm.network=traefik-public"
+      # Poll interval for swarm service discovery
+      - "--providers.swarm.refreshSeconds=15"
+
+      # --- Entrypoints ---
+      # web: HTTP on 80 — redirect everything to HTTPS at entrypoint level.
+      # This means NO per-app redirect middleware is needed for HTTP.
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
+      - "--entrypoints.web.http.redirections.entryPoint.permanent=true"
+      # websecure: HTTPS on 443
+      - "--entrypoints.websecure.address=:443"
+
+      # --- Certificate Resolver: Cloudflare DNS-01 ---
+      - "--certificatesresolvers.cloudflare.acme.email=admin@epaflix.com"
+      - "--certificatesresolvers.cloudflare.acme.storage=/certs/acme.json"
+      - "--certificatesresolvers.cloudflare.acme.dnschallenge=true"
+      - "--certificatesresolvers.cloudflare.acme.dnschallenge.provider=cloudflare"
+      - "--certificatesresolvers.cloudflare.acme.dnschallenge.resolvers=1.1.1.1:53,1.0.0.1:53"
+      - "--certificatesresolvers.cloudflare.acme.dnschallenge.propagation.delayBeforeChecks=30"
+
+    environment:
+      # Traefik reads CF_DNS_API_TOKEN_FILE and loads the token from the secret file path
+      - CF_DNS_API_TOKEN_FILE=/run/secrets/cloudflare_api_token
+
+    secrets:
+      - cloudflare_api_token
+
+    ports:
+      # host mode: real client IP is preserved in X-Forwarded-For.
+      # Traefik is pinned to ds-master so ports always bind on 192.168.10.71.
+      # stop-first update order is required — two containers cannot bind the
+      # same host port simultaneously.
+      - target: 80
+        published: 80
+        protocol: tcp
+        mode: host
+      - target: 443
+        published: 443
+        protocol: tcp
+        mode: host
+
+    volumes:
+      # Docker socket — read-only is sufficient for the swarm provider
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # ACME certificate storage — bind mount on ds-master, must be chmod 600
+      - /opt/traefik/acme.json:/certs/acme.json
+
+    networks:
+      - traefik-public
+
+    deploy:
+      replicas: 1
+
+      placement:
+        constraints:
+          # Must run on a manager node to access the Swarm API
+          - node.role == manager
+          # Pin to ds-master specifically — acme.json is a local bind mount
+          - node.hostname == ds-master
+
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 3
+
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+        # stop-first required: host-mode ports cannot be bound by two containers
+        # at the same time on the same node
+        order: stop-first
+
+      labels:
+        - "traefik.enable=true"
+
+        # -------------------------------------------------------------------
+        # Traefik Dashboard — traefik.epaflix.com
+        # -------------------------------------------------------------------
+
+        # HTTPS router — serves the Traefik dashboard
+        - "traefik.http.routers.traefik-dashboard.rule=Host(`traefik.epaflix.com`)"
+        - "traefik.http.routers.traefik-dashboard.entrypoints=websecure"
+        - "traefik.http.routers.traefik-dashboard.service=api@internal"
+        - "traefik.http.routers.traefik-dashboard.tls=true"
+        - "traefik.http.routers.traefik-dashboard.tls.certresolver=cloudflare"
+        - "traefik.http.routers.traefik-dashboard.tls.domains[0].main=epaflix.com"
+        - "traefik.http.routers.traefik-dashboard.tls.domains[0].sans=*.epaflix.com"
+        - "traefik.http.routers.traefik-dashboard.middlewares=security-headers@swarm"
+
+        # Dummy service — required by Swarm provider when router uses api@internal
+        - "traefik.http.services.traefik-dashboard-svc.loadbalancer.server.port=8080"
+
+        # -------------------------------------------------------------------
+        # Shared Middlewares
+        # Defined here on the Traefik service so all other stacks can reference
+        # them as <name>@docker without needing to redefine them.
+        # -------------------------------------------------------------------
+
+        # redirect-https: explicit HTTP → HTTPS (available to any router that
+        # still wants it as a middleware, in addition to the entrypoint redirect)
+        - "traefik.http.middlewares.redirect-https.redirectscheme.scheme=https"
+        - "traefik.http.middlewares.redirect-https.redirectscheme.permanent=true"
+
+        # security-headers: HSTS, XSS filter, content-type sniff protection,
+        # noindex robots — mirrors the K3s Traefik middleware configuration
+        - "traefik.http.middlewares.security-headers.headers.sslRedirect=true"
+        - "traefik.http.middlewares.security-headers.headers.browserXssFilter=true"
+        - "traefik.http.middlewares.security-headers.headers.contentTypeNosniff=true"
+        - "traefik.http.middlewares.security-headers.headers.forceSTSHeader=true"
+        - "traefik.http.middlewares.security-headers.headers.stsSeconds=31536000"
+        - "traefik.http.middlewares.security-headers.headers.stsIncludeSubdomains=true"
+        - "traefik.http.middlewares.security-headers.headers.stsPreload=true"
+        - "traefik.http.middlewares.security-headers.headers.customResponseHeaders.X-Robots-Tag=noindex,nofollow,nosnippet,noarchive,notranslate,noimageindex"
+
+        # compress: gzip/brotli response compression
+        - "traefik.http.middlewares.compress.compress=true"

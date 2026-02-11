@@ -1,0 +1,10 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: sonarr2-pdb
+  namespace: servarr
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: sonarr2

@@ -1,0 +1,66 @@
+---
+# Authentik Outpost IngressRoutes for Forward Auth (Single Application Mode)
+# Based on: https://docs.goauthentik.io/add-secure-apps/providers/proxy/server_traefik/
+#
+# For SINGLE-APPLICATION forward auth:
+#   - Each protected app needs its own outpost route on ITS domain
+#   - Create one Proxy Provider per app with "External host" = app URL
+#   - Create one Application per app linked to its provider
+#
+# This file contains the outpost route for auth.epaflix.com itself.
+# Copy the template below for each app you want to protect.
+
+# Outpost route for Authentik itself (auth.epaflix.com)
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: authentik-outpost-https
+  namespace: app-authentik
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`auth.epaflix.com`) && PathPrefix(`/outpost.goauthentik.io/`)
+      kind: Rule
+      priority: 15
+      services:
+        - name: authentik-server
+          port: 80
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
+
+---
+# =============================================================================
+# TEMPLATE: Copy this for each app you want to protect
+# =============================================================================
+# Replace:
+#   - myapp.epaflix.com → your app's hostname
+#   - myapp-outpost-https → unique name for the outpost route
+#   - app-myapp → your app's namespace (where the route lives)
+#
+# apiVersion: traefik.io/v1alpha1
+# kind: IngressRoute
+# metadata:
+#   name: myapp-outpost-https
+#   namespace: app-myapp
+# spec:
+#   entryPoints:
+#     - websecure
+#   routes:
+#     - match: Host(`myapp.epaflix.com`) && PathPrefix(`/outpost.goauthentik.io/`)
+#       kind: Rule
+#       priority: 15
+#       services:
+#         - name: authentik-server
+#           namespace: app-authentik  # Always point to authentik
+#           port: 80
+#   tls:
+#     certResolver: cloudflare
+#     domains:
+#       - main: epaflix.com
+#         sans:
+#           - "*.epaflix.com"

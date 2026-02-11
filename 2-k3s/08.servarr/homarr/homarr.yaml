@@ -1,0 +1,81 @@
+---
+# Homarr - Dashboard
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: homarr
+  namespace: servarr
+  labels:
+    app: homarr
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: homarr
+  template:
+    metadata:
+      labels:
+        app: homarr
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: homarr
+      securityContext:
+        runAsUser: 568
+        runAsGroup: 568
+        fsGroup: 568
+      containers:
+        - name: homarr
+          image: ghcr.io/ajnart/homarr:latest
+          env:
+            - name: PUID
+              value: "568"
+            - name: PGID
+              value: "568"
+            - name: TZ
+              value: "Europe/Oslo"
+          ports:
+            - containerPort: 7575
+              name: http
+          volumeMounts:
+            - name: config
+              mountPath: /app/data/configs
+            - name: icons
+              mountPath: /app/public/icons
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: homarr-config
+        - name: icons
+          emptyDir: {}
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: homarr
+  namespace: servarr
+  labels:
+    app: homarr
+spec:
+  type: ClusterIP
+  selector:
+    app: homarr
+  ports:
+    - name: http
+      port: 7575
+      targetPort: http

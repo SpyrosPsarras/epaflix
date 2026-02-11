@@ -1,0 +1,401 @@
+---
+# Node OS Updater
+#
+# Runs `apt upgrade` on every K3s node (masters + workers).
+# When a kernel or system package update requires a reboot, it safely:
+#   1. Cordons the node   (no new pods scheduled)
+#   2. Drains the node    (evicts existing pods gracefully)
+#   3. Reboots via SSH
+#   4. Waits for NotReady (reboot started) → Ready (node back online)
+#   5. Uncordons the node
+#
+# Special handling for the master node where THIS pod is running:
+#   It is processed LAST. Since draining the current node would evict the job
+#   pod itself (aborting the run mid-way), the drain step is skipped for it.
+#   The node is simply rebooted at the very end of the job — no cordon needed
+#   either, because Kubernetes will not schedule pods onto a NotReady node.
+#
+# Upgrade order:
+#   Phase 1: Other master nodes, one at a time  (preserves etcd quorum)
+#   Phase 2: Worker nodes,       one at a time  (keeps workloads stable)
+#   Phase 3: Current master node                (reboot only, no drain)
+#
+# Maintenance window (all UTC+1):
+#   Sat 02:00 — node-os-updater       ← this job (OS packages + reboots)
+#   Sun 02:00 — containerd-cleanup    (remove unused images from workers)
+#   Sun 03:00 — servarr-image-updater (restart servarr pods, pull latest images)
+#
+# Deploy:
+#   kubectl apply -f node-os-updater-cronjob.yaml
+#
+# Trigger manually:
+#   kubectl create job --from=cronjob/node-os-updater node-os-update-manual -n kube-system
+#   kubectl -n kube-system logs -f job/node-os-update-manual
+#
+# Prerequisites:
+#   A Kubernetes Secret named `node-os-updater-ssh` must exist in kube-system
+#   containing the private key `id_ed25519` whose public key is in
+#   ~/.ssh/authorized_keys (ubuntu user) on every cluster node.
+#
+#   One-time setup (run from your local machine):
+#     # 1. Generate a dedicated key pair (no passphrase)
+#     ssh-keygen -t ed25519 -C "k8s-node-os-updater" -f /tmp/node-os-updater-key -N ""
+#
+#     # 2. Authorise the public key on every node
+#     for ip in 51 52 53 61 62 63 65; do
+#       ssh ubuntu@192.168.10.$ip \
+#         "echo '$(cat /tmp/node-os-updater-key.pub)' >> ~/.ssh/authorized_keys && echo $ip ok"
+#     done
+#
+#     # 3. Store the private key as a Kubernetes Secret
+#     kubectl create secret generic node-os-updater-ssh \
+#       --from-file=id_ed25519=/tmp/node-os-updater-key \
+#       -n kube-system
+#
+#     # 4. Remove the local key files (the secret is the source of truth)
+#     rm /tmp/node-os-updater-key /tmp/node-os-updater-key.pub
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: node-os-updater
+  namespace: kube-system
+  labels:
+    app: node-os-updater
+
+---
+# ClusterRole: permissions required for cordon / drain / uncordon
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: node-os-updater
+  labels:
+    app: node-os-updater
+rules:
+  # Nodes — read + patch (cordon/uncordon = patch spec.unschedulable)
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  # Pods — read + delete (drain inspects and removes pods)
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "delete"]
+  # Pod evictions — required by `kubectl drain`
+  - apiGroups: [""]
+    resources: ["pods/eviction"]
+    verbs: ["create"]
+  # DaemonSets — drain reads these to honour --ignore-daemonsets
+  - apiGroups: ["apps"]
+    resources: ["daemonsets"]
+    verbs: ["get", "list", "watch"]
+  # ReplicaSets / StatefulSets / Deployments — drain reads pod owners
+  - apiGroups: ["apps"]
+    resources: ["replicasets", "statefulsets", "deployments"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: node-os-updater
+  labels:
+    app: node-os-updater
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: node-os-updater
+subjects:
+  - kind: ServiceAccount
+    name: node-os-updater
+    namespace: kube-system
+
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: node-os-updater
+  namespace: kube-system
+  labels:
+    app: node-os-updater
+spec:
+  schedule: "0 2 * * 6" # 2 AM every Saturday
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid # Never run two update jobs in parallel
+  jobTemplate:
+    spec:
+      # 7 nodes × ~10 min each (update + reboot + wait) = ~70 min worst case.
+      # Hard-kill at 90 minutes so a hung job does not block next week's run.
+      activeDeadlineSeconds: 5400
+      template:
+        metadata:
+          labels:
+            app: node-os-updater
+        spec:
+          serviceAccountName: node-os-updater
+
+          # Must run on a master node so it can cordon/drain others without
+          # risking its own eviction (current-node handling in Phase 3).
+          nodeSelector:
+            node-role.kubernetes.io/control-plane: "true"
+
+          # Required: master nodes carry a NoSchedule taint by default in K3s
+          tolerations:
+            - operator: Exists
+
+          restartPolicy: OnFailure
+
+          containers:
+            - name: updater
+              # alpine:3.19 is minimal and has both kubectl and openssh-client
+              # available via apk — consistent with the containerd-cleanup CronJob.
+              image: alpine:3.19
+              imagePullPolicy: Always
+
+              # Inject the name of the Kubernetes node this pod lands on.
+              # Used to skip draining the node that is running the job itself.
+              env:
+                - name: MY_NODE_NAME
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: spec.nodeName
+
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -eu
+
+                  # ── Bootstrap ─────────────────────────────────────────────────────
+                  # Install kubectl (community repo) and openssh-client via apk.
+                  apk add --no-cache openssh-client kubectl >/dev/null
+
+                  # Common SSH options — strict host checking disabled for automation.
+                  # UserKnownHostsFile=/dev/null suppresses the "Failed to add host to
+                  # known_hosts" warning caused by the secret volume being read-only.
+                  SSH_OPTS="-o StrictHostKeyChecking=no -o ConnectTimeout=30 -o BatchMode=yes -o UserKnownHostsFile=/dev/null"
+
+                  # ── Cluster node lists ────────────────────────────────────────────
+                  MASTERS="k3s-master-51 k3s-master-52 k3s-master-53"
+                  WORKERS="k3s-worker-61 k3s-worker-62 k3s-worker-63 k3s-worker-65"
+
+                  # ── Pre-resolve ALL node IPs at startup ───────────────────────────
+                  # We do this once before any reboots begin.  When a master reboots,
+                  # the K3s API may be briefly unavailable; resolving IPs upfront means
+                  # those transient failures cannot affect later SSH targets.
+                  echo "Resolving node IPs..."
+                  NODE_IPS=$(kubectl get nodes \
+                    -o jsonpath='{range .items[*]}{.metadata.name}={.status.addresses[?(@.type=="InternalIP")].address}{"\n"}{end}')
+                  echo "${NODE_IPS}" | while IFS='=' read -r name ip; do
+                    echo "  ${name} → ${ip}"
+                  done
+                  echo ""
+
+                  # ── Helper: look up a pre-resolved IP (no API call) ───────────────
+                  get_ip() {
+                    echo "${NODE_IPS}" | grep "^$1=" | cut -d'=' -f2
+                  }
+
+                  # ── Helper: run apt update + upgrade on a remote node ─────────────
+                  run_apt_upgrade() {
+                    local node="$1"
+                    local ip="$2"
+                    echo "  [${node}] Running apt update + upgrade..."
+                    ssh $SSH_OPTS ubuntu@"${ip}" \
+                      'export DEBIAN_FRONTEND=noninteractive
+                       sudo apt-get update -qq
+                       sudo apt-get upgrade -y \
+                         -o Dpkg::Options::="--force-confdef" \
+                         -o Dpkg::Options::="--force-confold" \
+                         -q
+                       sudo apt-get autoremove -y -q
+                       sudo apt-get clean -q
+                       echo "apt upgrade complete."'
+                  }
+
+                  # ── Helper: check if /var/run/reboot-required exists ──────────────
+                  needs_reboot() {
+                    local ip="$1"
+                    ssh $SSH_OPTS ubuntu@"${ip}" \
+                      'test -f /var/run/reboot-required && echo yes || echo no'
+                  }
+
+                  # ── Helper: cordon → drain → reboot → wait → uncordon ────────────
+                  # Used for every node EXCEPT the one running this pod.
+                  safe_reboot() {
+                    local node="$1"
+                    local ip="$2"
+
+                    echo "  [${node}] Cordoning..."
+                    kubectl cordon "${node}"
+
+                    echo "  [${node}] Draining (ignoring daemonsets, deleting emptyDir)..."
+                    kubectl drain "${node}" \
+                      --ignore-daemonsets \
+                      --delete-emptydir-data \
+                      --force \
+                      --grace-period=60 \
+                      --timeout=5m
+
+                    echo "  [${node}] Sending reboot command..."
+                    # SSH exits non-zero when the connection drops mid-reboot — that is normal
+                    ssh $SSH_OPTS ubuntu@"${ip}" 'sudo reboot' || true
+
+                    # Wait for the node to become NotReady (confirms reboot actually started).
+                    # Tolerate timeout: if the node was very quick to reboot it may already
+                    # be cycling back to Ready before we check.
+                    echo "  [${node}] Waiting for node to go offline (NotReady)..."
+                    kubectl wait --for=condition=Ready=false node/"${node}" \
+                      --timeout=120s || true
+
+                    # Wait for the node to become Ready again (kubelet reconnected, node healthy)
+                    echo "  [${node}] Waiting for node to come back online (Ready)..."
+                    kubectl wait --for=condition=Ready node/"${node}" --timeout=300s
+
+                    echo "  [${node}] Uncordoning..."
+                    kubectl uncordon "${node}"
+
+                    echo "  [${node}] ✅ Reboot complete — node is Ready."
+                  }
+
+                  # ── Helper: update any node that is not the current pod's node ─────
+                  update_remote_node() {
+                    local node="$1"
+                    local ip
+                    ip=$(get_ip "${node}")
+
+                    echo ""
+                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                    echo "  Node: ${node}  (${ip})"
+                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+                    run_apt_upgrade "${node}" "${ip}"
+
+                    local reboot
+                    reboot=$(needs_reboot "${ip}")
+                    if [ "${reboot}" = "yes" ]; then
+                      echo "  [${node}] Kernel/system package updated — reboot required."
+                      safe_reboot "${node}" "${ip}"
+                    else
+                      echo "  [${node}] No reboot required. ✅"
+                    fi
+                  }
+
+                  # ── Helper: update the master node THIS pod is running on ──────────
+                  # Drain is skipped to avoid self-eviction.
+                  # Reboot (if needed) is the very last action — the pod dies with it.
+                  update_current_node() {
+                    local node="$1"
+                    local ip
+                    ip=$(get_ip "${node}")
+
+                    echo ""
+                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                    echo "  Node (current): ${node}  (${ip})"
+                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+                    run_apt_upgrade "${node}" "${ip}"
+
+                    local reboot
+                    reboot=$(needs_reboot "${ip}")
+                    if [ "${reboot}" = "yes" ]; then
+                      echo "  [${node}] Kernel/system package updated — reboot required."
+                      echo "  [${node}] This is the node running the job pod."
+                      echo "  [${node}] Skipping cordon + drain to avoid self-eviction."
+                      echo "  [${node}] Kubernetes will not schedule pods onto a NotReady"
+                      echo "  [${node}] node, so no pods will land here during the reboot."
+                      echo ""
+                      echo "  [${node}] Rebooting now — this is the final step of the job."
+                      echo "  [${node}] The node will self-uncordon once kubelet reconnects."
+                      # SSH exits non-zero when the connection drops — expected
+                      ssh $SSH_OPTS ubuntu@"${ip}" 'sudo reboot' || true
+                      # The pod is killed here when the master reboots.
+                      # The exit code will be 0 (last real command was || true).
+                    else
+                      echo "  [${node}] No reboot required. ✅"
+                    fi
+                  }
+
+                  # ════════════════════════════════════════════════════════════════════
+                  # MAIN
+                  # ════════════════════════════════════════════════════════════════════
+
+                  echo "================================================"
+                  echo "  Node OS Updater  —  $(date)"
+                  echo "  Job pod running on: ${MY_NODE_NAME}"
+                  echo "================================================"
+
+                  FAILED=""
+
+                  # ── Phase 1: Other masters (not the current node) ─────────────────
+                  # One at a time: only 1 master may be down at once (etcd needs quorum).
+                  echo ""
+                  echo "▶  Phase 1: Masters (excluding current node)"
+                  for node in ${MASTERS}; do
+                    if [ "${node}" = "${MY_NODE_NAME}" ]; then
+                      echo "  [${node}] Deferring — this is the current node (Phase 3)."
+                      continue
+                    fi
+                    update_remote_node "${node}" \
+                      || { echo "  ❌ Error updating ${node}"; FAILED="${FAILED} ${node}"; }
+                  done
+
+                  # ── Phase 2: Workers ──────────────────────────────────────────────
+                  # One at a time: avoids all workers rebooting simultaneously.
+                  echo ""
+                  echo "▶  Phase 2: Workers"
+                  for node in ${WORKERS}; do
+                    update_remote_node "${node}" \
+                      || { echo "  ❌ Error updating ${node}"; FAILED="${FAILED} ${node}"; }
+                  done
+
+                  # ── Phase 3: Current master node (last, reboot only) ──────────────
+                  echo ""
+                  echo "▶  Phase 3: Current master node (${MY_NODE_NAME})"
+                  update_current_node "${MY_NODE_NAME}" \
+                    || { echo "  ❌ Error updating ${MY_NODE_NAME}"; FAILED="${FAILED} ${MY_NODE_NAME}"; }
+
+                  # ── Summary ───────────────────────────────────────────────────────
+                  echo ""
+                  echo "================================================"
+                  echo "  Node OS Updater Complete  —  $(date)"
+                  if [ -n "${FAILED}" ]; then
+                    echo ""
+                    echo "  ⚠️  Nodes with errors:"
+                    for f in ${FAILED}; do
+                      echo "      - ${f}"
+                    done
+                    echo ""
+                    echo "  Investigate with:"
+                    echo "    kubectl get nodes"
+                    echo "    kubectl describe node <node-name>"
+                    echo "    ssh ubuntu@<node-ip> 'sudo journalctl -u unattended-upgrades --since today'"
+                    echo "================================================"
+                    exit 1
+                  fi
+                  echo "  All nodes updated successfully ✅"
+                  echo "================================================"
+
+              resources:
+                requests:
+                  memory: "64Mi"
+                  cpu: "50m"
+                limits:
+                  memory: "128Mi"
+                  cpu: "200m"
+
+              volumeMounts:
+                - name: ssh-key
+                  mountPath: /root/.ssh
+                  readOnly: true
+
+          volumes:
+            # SSH private key stored as a Kubernetes Secret.
+            # The secret must contain a key named `id_ed25519`.
+            # Its corresponding public key must be in authorized_keys (ubuntu user)
+            # on all cluster nodes. See the setup instructions at the top of this file.
+            - name: ssh-key
+              secret:
+                secretName: node-os-updater-ssh
+                defaultMode: 0400

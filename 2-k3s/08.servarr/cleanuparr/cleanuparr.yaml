@@ -1,0 +1,105 @@
+---
+# Cleanuparr - Automated cleanup for *arr apps
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cleanuparr
+  namespace: servarr
+  labels:
+    app: cleanuparr
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cleanuparr
+  template:
+    metadata:
+      labels:
+        app: cleanuparr
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: cleanuparr
+      containers:
+        - name: cleanuparr
+          image: ghcr.io/cleanuparr/cleanuparr:latest
+          env:
+            - name: PUID
+              value: "568"
+            - name: PGID
+              value: "568"
+            - name: TZ
+              value: "Europe/Oslo"
+            - name: PORT
+              value: "30263"
+            - name: UMASK
+              value: "002"
+          ports:
+            - containerPort: 30263
+              name: http
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: media
+              mountPath: /data
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "200m"
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: cleanuparr-config
+        - name: media
+          persistentVolumeClaim:
+            claimName: servarr-media-downloads
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cleanuparr
+  namespace: servarr
+  labels:
+    app: cleanuparr
+spec:
+  type: ClusterIP
+  selector:
+    app: cleanuparr
+  ports:
+    - name: http
+      port: 30263
+      targetPort: http
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cleanuparr-config
+  namespace: servarr
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: local-path

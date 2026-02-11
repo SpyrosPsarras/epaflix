@@ -1,0 +1,124 @@
+---
+# Media Storage PersistentVolumes - Using hostPath to node NFS mounts
+# Each node has NFS mounts at /mnt/k3s-animes, /mnt/k3s-movies, /mnt/k3s-tvshows, /mnt/k3s-downloads
+# These PVs use hostPath to access the node-mounted NFS shares
+
+# Animes PV (500Gi)
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: servarr-media-animes-pv
+spec:
+  capacity:
+    storage: 500Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: media-storage
+  hostPath:
+    path: /mnt/k3s-animes
+    type: Directory
+---
+# Animes PVC
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: servarr-media-animes
+  namespace: servarr
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: media-storage
+  resources:
+    requests:
+      storage: 500Gi
+---
+# TV Shows PV (500Gi)
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: servarr-media-tvshows-pv
+spec:
+  capacity:
+    storage: 500Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: media-storage
+  hostPath:
+    path: /mnt/k3s-tvshows
+    type: Directory
+---
+# TV Shows PVC
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: servarr-media-tvshows
+  namespace: servarr
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: media-storage
+  resources:
+    requests:
+      storage: 500Gi
+---
+# Movies PV (2Ti)
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: servarr-media-movies-pv
+spec:
+  capacity:
+    storage: 2Ti
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: media-storage
+  hostPath:
+    path: /mnt/k3s-movies
+    type: Directory
+---
+# Movies PVC
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: servarr-media-movies
+  namespace: servarr
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: media-storage
+  resources:
+    requests:
+      storage: 2Ti
+---
+# Downloads PV (1Ti)
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: servarr-media-downloads-pv
+spec:
+  capacity:
+    storage: 1Ti
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: media-storage
+  hostPath:
+    path: /mnt/k3s-downloads
+    type: Directory
+---
+# Downloads PVC
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: servarr-media-downloads
+  namespace: servarr
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: media-storage
+  resources:
+    requests:
+      storage: 1Ti

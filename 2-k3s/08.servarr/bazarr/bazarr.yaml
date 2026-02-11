@@ -1,0 +1,128 @@
+---
+# Bazarr - Subtitle Manager (Development Branch)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bazarr
+  namespace: servarr
+  labels:
+    app: bazarr
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bazarr
+  template:
+    metadata:
+      labels:
+        app: bazarr
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: bazarr
+      securityContext:
+        runAsUser: 568
+        runAsGroup: 568
+        fsGroup: 568
+      containers:
+        - name: bazarr
+          image: lscr.io/linuxserver/bazarr:development
+          imagePullPolicy: Always
+          env:
+            - name: PUID
+              value: "568"
+            - name: PGID
+              value: "568"
+            - name: TZ
+              value: "Europe/Oslo"
+            # PostgreSQL configuration
+            - name: POSTGRES_ENABLED
+              value: "true"
+            - name: POSTGRES_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: bazarr-host
+            - name: POSTGRES_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: bazarr-port
+            - name: POSTGRES_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: bazarr-database
+            - name: POSTGRES_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: bazarr-user
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: bazarr-password
+            - name: PGSSLCERT
+              value: "/tmp/postgresql.crt"
+          ports:
+            - containerPort: 6767
+              name: http
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: movies
+              mountPath: /movies
+            - name: tv
+              mountPath: /tv
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "2000m"
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: bazarr-config
+        - name: movies
+          persistentVolumeClaim:
+            claimName: servarr-media-movies
+        - name: tv
+          persistentVolumeClaim:
+            claimName: servarr-media-tvshows
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bazarr
+  namespace: servarr
+  labels:
+    app: bazarr
+spec:
+  type: ClusterIP
+  selector:
+    app: bazarr
+  ports:
+    - name: http
+      port: 6767
+      targetPort: http

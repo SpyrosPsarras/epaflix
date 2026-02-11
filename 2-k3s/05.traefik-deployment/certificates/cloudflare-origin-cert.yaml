@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cloudflare-origin-cert
+  namespace: traefik-system
+type: kubernetes.io/tls
+data:
+  tls.crt: <base64-encoded-origin-cert>
+  tls.key: <base64-encoded-origin-key>

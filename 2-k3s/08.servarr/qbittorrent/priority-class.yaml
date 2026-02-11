@@ -1,0 +1,42 @@
+# PriorityClass for high-memory workloads like qBittorrent.
+#
+# HOW IT WORKS:
+# When qBittorrent is scheduled (or rescheduled after a restart), the Kubernetes
+# scheduler looks for a node that has enough free memory to satisfy its
+# requests.memory (9Gi). If no node has that much free, it will PREEMPT
+# (evict) lower-priority pods from the best candidate node until enough room
+# is freed up. Those evicted pods then reschedule on other nodes.
+#
+# This means qBittorrent "pushes" other pods out of the way rather than
+# competing with them on an already full node.
+#
+# PRIORITY VALUE CONTEXT:
+#   system-cluster-critical : 2000000000
+#   system-node-critical    : 2000001000
+#   high-memory-workload    : 100000      ← this class
+#   (default, no class)     : 0
+#
+# All regular servarr pods (sonarr, radarr, jellyfin, etc.) use the default
+# priority of 0 and will be candidates for preemption.
+#
+# APPLY:
+#   kubectl apply -f priority-class.yaml
+#
+# VERIFY:
+#   kubectl get priorityclass high-memory-workload
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: high-memory-workload
+  labels:
+    app: qbittorrent
+    component: scheduling
+value: 100000
+globalDefault: false
+preemptionPolicy: PreemptLowerPriority
+description: >
+  High priority class for memory-intensive workloads (e.g. qBittorrent during
+  torrent rechecks). Pods using this class will preempt lower-priority pods on
+  a target node to claim their declared memory requests. Only assign to pods
+  that genuinely require large, guaranteed memory headroom.

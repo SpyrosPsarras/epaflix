@@ -1,0 +1,16 @@
+---
+# Loki PersistentVolumeClaim
+# Uses local-path StorageClass (iSCSI-backed node storage)
+# 15Gi storage for logs (worker nodes have 40GB total disk)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: loki-storage
+  namespace: observability
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 15Gi

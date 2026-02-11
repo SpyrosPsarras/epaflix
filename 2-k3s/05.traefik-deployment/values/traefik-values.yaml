@@ -1,0 +1,102 @@
+# Service configuration - fixed IP via kube-vip
+service:
+  enabled: true
+  type: LoadBalancer
+  loadBalancerIP: 192.168.10.101
+  annotations: {}
+
+# NOTE: deployment.replicas is set below with initContainers
+
+podSecurityContext:
+  fsGroup: 986
+
+securityContext:
+  runAsUser: 986
+  runAsGroup: 986
+
+# Ports configuration
+ports:
+  web:
+    port: 80
+    exposedPort: 80
+    # Redirect HTTP to HTTPS
+    redirectTo:
+      port: websecure
+  websecure:
+    port: 443
+    exposedPort: 443
+
+# Dashboard (optional - secure it!)
+ingressRoute:
+  dashboard:
+    enabled: true
+    matchRule: Host(`traefik.epaflix.com`)
+    entryPoints: ["websecure"]
+    tls:
+      certResolver: cloudflare
+
+# Logs
+logs:
+  general:
+    level: INFO
+  access:
+    enabled: true
+
+# Cloudflare DNS Challenge for Let's Encrypt
+# NOTE: certificatesResolvers here is NOT used - we use additionalArguments instead
+# to ensure correct storage path /data/acme.json (not /data/acme/acme.json)
+
+# Environment variables for Cloudflare API token
+env:
+  - name: CF_DNS_API_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: cloudflare-api-token
+        key: api-token
+
+# Persistence for ACME certificates - using local-path (PVC already exists)
+persistence:
+  enabled: true
+  storageClass: local-path
+  accessMode: ReadWriteOnce
+  size: 128Mi
+
+# Deployment configuration
+deployment:
+  replicas: 1 # ACME requires single replica for certificate management
+  # Init container to fix acme.json permissions (must be 600 for Traefik)
+  # This ensures permissions are correct even after node reboots or pod restarts
+  initContainers:
+    - name: fix-acme-permissions
+      image: busybox:latest
+      command:
+        ["sh", "-c", "touch /data/acme.json && chmod 600 /data/acme.json"]
+      securityContext:
+        runAsUser: 986
+        runAsGroup: 986
+      volumeMounts:
+        - name: data
+          mountPath: /data
+
+# Additional arguments
+additionalArguments:
+  - "--providers.kubernetesingress.ingressclass=traefik"
+  - "--providers.kubernetescrd"
+  - "--providers.kubernetescrd.allowCrossNamespace=true"
+  - "--certificatesresolvers.cloudflare.acme.email=admin@epaflix.com"
+  - "--certificatesresolvers.cloudflare.acme.storage=/data/acme.json"
+  - "--certificatesresolvers.cloudflare.acme.dnschallenge=true"
+  - "--certificatesresolvers.cloudflare.acme.dnschallenge.provider=cloudflare"
+  - "--certificatesresolvers.cloudflare.acme.dnschallenge.resolvers=1.1.1.1:53,1.0.0.1:53"
+  - "--certificatesresolvers.cloudflare.acme.dnschallenge.delaybeforecheck=30"
+
+# Resource limits
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+# Run on worker nodes (default - no tolerations or nodeSelector needed)
+# Masters are tainted NoSchedule, so workloads naturally schedule to workers

@@ -1,0 +1,18 @@
+secrets.yml
+.history/
+.torrent-cache
+*.log
+!.history/*.md
+!.history/*.sh
+raid-migration
+
+# Sensitive data - database dumps, backups, research extracts with credentials
+2-k3s/08.servarr/_backups/postgres-dumps/
+2-k3s/08.servarr/_backups/sqlite-zips/
+2-k3s/08.servarr/_backups/postgres-schemas-*/
+2-k3s/08.servarr/research/app-configs.xml
+2-k3s/08.servarr/research/truenas-configs.txt
+2-k3s/08.servarr/research/truenas-ix-apps-full.txt
+*.sql
+*.sql.gz
+*.zip

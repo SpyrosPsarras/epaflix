@@ -1,0 +1,77 @@
+---
+# Example: Service with specific IP address
+# This demonstrates requesting a specific LoadBalancer IP
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webapp
+  labels:
+    app: webapp
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: webapp
+  template:
+    metadata:
+      labels:
+        app: webapp
+    spec:
+      containers:
+        - name: webapp
+          image: nginx:alpine
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: html
+              mountPath: /usr/share/nginx/html
+      volumes:
+        - name: html
+          configMap:
+            name: webapp-html
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: webapp-html
+data:
+  index.html: |
+    <!DOCTYPE html>
+    <html>
+    <head><title>kube-vip LoadBalancer Demo</title></head>
+    <body>
+      <h1>kube-vip Cloud Provider Working!</h1>
+      <p>This service has a specific LoadBalancer IP assigned.</p>
+    </body>
+    </html>
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: webapp-custom-ip
+spec:
+  type: LoadBalancer
+  # Request a specific IP address (must be in your pool or outside range)
+  loadBalancerIP: "192.168.10.150"
+  selector:
+    app: webapp
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+      protocol: TCP
+
+---
+# To deploy:
+# kubectl apply -f example-custom-ip.yaml
+#
+# To verify:
+# kubectl get svc webapp-custom-ip
+# Expected EXTERNAL-IP: 192.168.10.150
+#
+# To test:
+# curl http://192.168.10.150
+#
+# To delete:
+# kubectl delete -f example-custom-ip.yaml

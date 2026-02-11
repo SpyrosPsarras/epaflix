@@ -1,0 +1,105 @@
+---
+# Jellyseerr - Media Request Management
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jellyseerr
+  namespace: servarr
+  labels:
+    app: jellyseerr
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jellyseerr
+  template:
+    metadata:
+      labels:
+        app: jellyseerr
+    spec:
+      securityContext:
+        runAsUser: 568
+        runAsGroup: 568
+        fsGroup: 568
+      containers:
+        - name: jellyseerr
+          image: fallenbagel/jellyseerr:preview-OIDC
+          imagePullPolicy: Always
+          env:
+            - name: PUID
+              value: "568"
+            - name: PGID
+              value: "568"
+            - name: TZ
+              value: "Europe/Oslo"
+            - name: DB_TYPE
+              value: "postgres"
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: jellyseerr-host
+            - name: DB_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: jellyseerr-port
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: jellyseerr-user
+            - name: DB_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: jellyseerr-password
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: jellyseerr-database
+          ports:
+            - containerPort: 5055
+              name: http
+          volumeMounts:
+            - name: config
+              mountPath: /app/config
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 300
+            periodSeconds: 30
+            timeoutSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 120
+            timeoutSeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: jellyseerr-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jellyseerr
+  namespace: servarr
+  labels:
+    app: jellyseerr
+spec:
+  type: ClusterIP
+  selector:
+    app: jellyseerr
+  ports:
+    - name: http
+      port: 5055
+      targetPort: http

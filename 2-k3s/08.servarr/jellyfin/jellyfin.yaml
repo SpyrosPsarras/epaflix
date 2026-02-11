@@ -1,0 +1,128 @@
+---
+# Jellyfin - Media Server with NVIDIA GPU Transcoding
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jellyfin
+  namespace: servarr
+  labels:
+    app: jellyfin
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jellyfin
+  template:
+    metadata:
+      labels:
+        app: jellyfin
+    spec:
+      securityContext:
+        runAsUser: 568
+        runAsGroup: 568
+        supplementalGroups: [44, 107, 568]
+        fsGroup: 568
+      containers:
+        - name: jellyfin
+          image: jellyfin/jellyfin:latest
+          env:
+            - name: PUID
+              value: "568"
+            - name: PGID
+              value: "568"
+            - name: TZ
+              value: "Europe/Oslo"
+            - name: JELLYFIN_PublishedServerUrl
+              value: "jellyfin.epaflix.com"
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: "all"
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: "all"
+          ports:
+            - containerPort: 8096
+              name: http
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: cache
+              mountPath: /cache
+            - name: transcodes
+              mountPath: /cache/transcodes
+            - name: media-animes
+              mountPath: /media/animes
+              readOnly: true
+            - name: media-tvshows
+              mountPath: /media/tvshows
+              readOnly: true
+            - name: media-movies
+              mountPath: /media/movies
+              readOnly: true
+          securityContext:
+            runAsUser: 568
+            runAsGroup: 568
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "500m"
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: jellyfin-config
+        - name: cache
+          persistentVolumeClaim:
+            claimName: jellyfin-cache
+        - name: transcodes
+          persistentVolumeClaim:
+            claimName: jellyfin-transcodes
+        # Direct hostPath volumes for media (backed by NFS mounts)
+        - name: media-animes
+          hostPath:
+            path: /mnt/k3s-animes
+            type: Directory
+        - name: media-tvshows
+          hostPath:
+            path: /mnt/k3s-tvshows
+            type: Directory
+        - name: media-movies
+          hostPath:
+            path: /mnt/k3s-movies
+            type: Directory
+      # Schedule on node with GPU
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: nvidia.com/gpu
+                    operator: Exists
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jellyfin
+  namespace: servarr
+  labels:
+    app: jellyfin
+spec:
+  type: ClusterIP
+  selector:
+    app: jellyfin
+  ports:
+    - name: http
+      port: 8096
+      targetPort: http

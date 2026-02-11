@@ -1,0 +1,120 @@
+---
+# Prowlarr - Indexer Manager
+# Manages indexers for all *arr apps
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prowlarr
+  namespace: servarr
+  labels:
+    app: prowlarr
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prowlarr
+  template:
+    metadata:
+      labels:
+        app: prowlarr
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: prowlarr
+      securityContext:
+        runAsUser: 568
+        runAsGroup: 568
+        fsGroup: 568
+      containers:
+        - name: prowlarr
+          image: lscr.io/linuxserver/prowlarr:latest
+          env:
+            - name: PUID
+              value: "568"
+            - name: PGID
+              value: "568"
+            - name: TZ
+              value: "Europe/Oslo"
+            # PostgreSQL configuration
+            - name: PROWLARR__POSTGRES__HOST
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: prowlarr-host
+            - name: PROWLARR__POSTGRES__PORT
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: prowlarr-port
+            - name: PROWLARR__POSTGRES__DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: prowlarr-database
+            - name: PROWLARR__POSTGRES__USER
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: prowlarr-user
+            - name: PROWLARR__POSTGRES__PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: prowlarr-password
+          ports:
+            - containerPort: 9696
+              name: http
+          volumeMounts:
+            - name: config
+              mountPath: /config
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "200m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+      terminationGracePeriodSeconds: 120
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: prowlarr-config
+      # Extra host for bitmagnet
+      hostAliases:
+        - ip: "192.168.10.1" # Replace with actual host-gateway IP if needed
+          hostnames:
+            - "bitmagnet"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prowlarr
+  namespace: servarr
+  labels:
+    app: prowlarr
+spec:
+  type: ClusterIP
+  selector:
+    app: prowlarr
+  ports:
+    - name: http
+      port: 9696
+      targetPort: http

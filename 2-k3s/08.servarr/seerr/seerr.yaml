@@ -1,0 +1,121 @@
+---
+# Seerr - Media Request Management (Using OIDC Preview)
+# Using Jellyseerr OIDC preview image with Seerr naming for OIDC support
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: seerr
+  namespace: servarr
+  labels:
+    app: seerr
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: seerr
+  template:
+    metadata:
+      labels:
+        app: seerr
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: seerr
+      # Security context for Jellyseerr OIDC preview (UID 568)
+      securityContext:
+        runAsUser: 568
+        runAsGroup: 568
+        fsGroup: 568
+      containers:
+        - name: seerr
+          # Using Jellyseerr OIDC preview image for OIDC support
+          image: fallenbagel/jellyseerr:preview-OIDC
+          imagePullPolicy: Always
+          env:
+            - name: PUID
+              value: "568"
+            - name: PGID
+              value: "568"
+            - name: TZ
+              value: "Europe/Oslo"
+            # PostgreSQL database configuration (same as jellyseerr)
+            - name: DB_TYPE
+              value: "postgres"
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: jellyseerr-host
+            - name: DB_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: jellyseerr-port
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: jellyseerr-user
+            - name: DB_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: jellyseerr-password
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: jellyseerr-database
+          ports:
+            - containerPort: 5055
+              name: http
+          volumeMounts:
+            - name: config
+              mountPath: /app/config
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 300
+            periodSeconds: 30
+            timeoutSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 120
+            timeoutSeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "2Gi"
+              cpu: "500m"
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            # Reusing the jellyseerr config PVC
+            claimName: jellyseerr-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: seerr
+  namespace: servarr
+  labels:
+    app: seerr
+spec:
+  type: ClusterIP
+  selector:
+    app: seerr
+  ports:
+    - name: http
+      port: 5055
+      targetPort: http

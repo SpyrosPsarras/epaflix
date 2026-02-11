@@ -1,0 +1,28 @@
+---
+# Proxmox VE Exporter Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pve-exporter-config
+  namespace: observability
+data:
+  pve.yml: |
+    default:
+      user: root@pam
+      token_name: grafana
+      token_value: <PROXMOX_API_TOKEN_VALUE>
+      verify_ssl: false
+
+    # Takaros (192.168.10.10)
+    takaros:
+      user: root@pam
+      token_name: grafana
+      token_value: <PROXMOX_API_TOKEN_VALUE>
+      verify_ssl: false
+
+    # Evanthoulaki (192.168.10.11)
+    evanthoulaki:
+      user: root@pam
+      token_name: grafana
+      token_value: <PROXMOX_API_TOKEN_VALUE>
+      verify_ssl: false

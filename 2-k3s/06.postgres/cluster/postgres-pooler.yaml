@@ -1,0 +1,54 @@
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata:
+  name: postgres-pooler
+  namespace: postgres-system
+spec:
+  cluster:
+    name: postgres-cluster
+
+  instances: 3
+  type: rw
+
+  pgbouncer:
+    poolMode: session
+    parameters:
+      max_client_conn: "1000"
+      ignore_startup_parameters: "search_path,extra_float_digits,options"
+      default_pool_size: "25"
+      min_pool_size: "5"
+      reserve_pool_size: "5"
+      reserve_pool_timeout: "5"
+      max_db_connections: "100"
+      max_user_connections: "100"
+      server_idle_timeout: "600"
+      server_lifetime: "3600"
+      server_connect_timeout: "30"
+      query_timeout: "0"
+      query_wait_timeout: "120"
+      client_idle_timeout: "0"
+      idle_transaction_timeout: "0"
+      log_connections: "1"
+      log_disconnections: "1"
+      log_pooler_errors: "1"
+
+  template:
+    metadata:
+      labels:
+        app: postgres-pooler
+    spec:
+      # Topology spread constraints for even distribution
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: postgres-pooler
+      containers:
+        - name: pgbouncer
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"

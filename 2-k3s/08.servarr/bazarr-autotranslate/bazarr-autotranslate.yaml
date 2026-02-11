@@ -1,0 +1,61 @@
+---
+# Bazarr Auto-Translate - Automatic subtitle translation
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bazarr-autotranslate
+  namespace: servarr
+  labels:
+    app: bazarr-autotranslate
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bazarr-autotranslate
+  template:
+    metadata:
+      labels:
+        app: bazarr-autotranslate
+    spec:
+      containers:
+        - name: bazarr-autotranslate
+          image: ghcr.io/zelak312/bazarr_autotranslate:latest
+          env:
+            - name: BAZARR_BASE_URL
+              value: "http://bazarr.epaflix.com"
+            - name: BAZARR_API_KEY
+              value: "cd4a4ec290a973fbbe992412c524c9c1"
+            - name: BASE_LANGUAGES
+              value: "en"
+            - name: TO_LANGUAGES
+              value: "el"
+            - name: TRANSLATION_REQUEST_TIMEOUT
+              value: "900"
+            - name: INTERVAL_BETWEEN_SCANS
+              value: "3600"
+            - name: LOG_LEVEL
+              value: "info"
+          volumeMounts:
+            - name: logs
+              mountPath: /usr/src/app/logs
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+      volumes:
+        - name: logs
+          persistentVolumeClaim:
+            claimName: bazarr-autotranslate-logs
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: bazarr-autotranslate-logs
+  namespace: servarr
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 500Mi
+  storageClassName: local-path

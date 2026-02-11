@@ -1,0 +1,102 @@
+---
+# FileBrowser Quantum Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: filebrowser
+  namespace: filebrowser
+  labels:
+    app: filebrowser
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate  # Ensures only 1 instance runs at a time
+  selector:
+    matchLabels:
+      app: filebrowser
+  template:
+    metadata:
+      labels:
+        app: filebrowser
+    spec:
+      securityContext:
+        runAsUser: 568
+        runAsGroup: 568
+        fsGroup: 568
+      containers:
+        - name: filebrowser
+          image: gtstef/filebrowser:latest
+          env:
+            - name: PUID
+              value: "568"
+            - name: PGID
+              value: "568"
+            - name: TZ
+              value: "Europe/Oslo"
+            - name: FILEBROWSER_CONFIG
+              value: "/app-config/config.yaml"
+            - name: FILEBROWSER_OIDC_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: filebrowser-oidc
+                  key: client-id
+            - name: FILEBROWSER_OIDC_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: filebrowser-oidc
+                  key: client-secret
+          ports:
+            - containerPort: 80
+              name: http
+          volumeMounts:
+            - name: config
+              mountPath: /config  # SQLite DB and cache
+            - name: app-config
+              mountPath: /app-config  # FileBrowser config.yaml
+            - name: animes
+              mountPath: /srv/animes  # NFS: Anime library
+            - name: movies
+              mountPath: /srv/movies  # NFS: Movies library
+            - name: tvshows
+              mountPath: /srv/tvshows  # NFS: TV shows library
+            - name: downloads
+              mountPath: /srv/downloads  # NFS: Downloads directory
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            # No limits - allow pod to use as much memory/CPU as needed
+      terminationGracePeriodSeconds: 30
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: filebrowser-config
+        - name: app-config
+          configMap:
+            name: filebrowser-config
+        - name: animes
+          persistentVolumeClaim:
+            claimName: filebrowser-animes
+        - name: movies
+          persistentVolumeClaim:
+            claimName: filebrowser-movies
+        - name: tvshows
+          persistentVolumeClaim:
+            claimName: filebrowser-tvshows
+        - name: downloads
+          persistentVolumeClaim:
+            claimName: filebrowser-downloads

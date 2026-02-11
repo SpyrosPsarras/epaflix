@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kubevip
+  namespace: kube-system
+data:
+  # Reserved:
+  # - 192.168.10.100 for control-plane VIP (kube-vip)
+
+  # Internet-facing services ONLY (9 IPs)
+  # Only services in 'traefik-system' namespace can use these IPs
+  # Use this range for services exposed to the internet (Traefik, public ingress, etc.)
+  range-traefik-system: 192.168.10.101-192.168.10.109
+
+  # Internal cluster services (90 IPs)
+  # Available to all other namespaces for internal services
+  range-global: 192.168.10.110-192.168.10.199

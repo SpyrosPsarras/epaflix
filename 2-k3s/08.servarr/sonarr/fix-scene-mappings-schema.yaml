@@ -1,0 +1,80 @@
+---
+# Job to fix missing Type (and other optional) columns in Sonarr SceneMappings table
+# Error: column SceneMappings.Type does not exist (SqlState: 42703)
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: sonarr-fix-scene-mappings-schema
+  namespace: servarr
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: postgres-fix
+          image: postgres:16
+          env:
+            - name: PGHOST
+              value: "192.168.10.105"
+            - name: PGUSER
+              value: "sonarr"
+            - name: PGDATABASE
+              value: "sonarr-main"
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: sonarr-password
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+
+              echo "=========================================="
+              echo "Sonarr SceneMappings Schema Fix"
+              echo "=========================================="
+              echo ""
+
+              echo "📊 Current SceneMappings columns:"
+              psql -c "SELECT column_name, data_type, is_nullable
+                       FROM information_schema.columns
+                       WHERE table_name = 'SceneMappings'
+                       ORDER BY ordinal_position;"
+              echo ""
+
+              echo "🔧 Adding missing columns (IF NOT EXISTS — safe to re-run)..."
+              psql << 'EOSQL'
+              -- Add all optional columns that may be missing after a schema drift or restore
+
+              ALTER TABLE "SceneMappings" ADD COLUMN IF NOT EXISTS "Type" text;
+
+              ALTER TABLE "SceneMappings" ADD COLUMN IF NOT EXISTS "SeasonNumber" integer;
+
+              ALTER TABLE "SceneMappings" ADD COLUMN IF NOT EXISTS "SceneSeasonNumber" integer;
+
+              ALTER TABLE "SceneMappings" ADD COLUMN IF NOT EXISTS "FilterRegex" text;
+
+              ALTER TABLE "SceneMappings" ADD COLUMN IF NOT EXISTS "SceneOrigin" text;
+
+              ALTER TABLE "SceneMappings" ADD COLUMN IF NOT EXISTS "SearchMode" integer;
+
+              ALTER TABLE "SceneMappings" ADD COLUMN IF NOT EXISTS "Comment" text;
+
+              ALTER TABLE "SceneMappings" ADD COLUMN IF NOT EXISTS "Title" text;
+              EOSQL
+
+              echo ""
+              echo "✅ Columns added (or already existed)."
+              echo ""
+
+              echo "📊 Final SceneMappings columns:"
+              psql -c "SELECT column_name, data_type, is_nullable
+                       FROM information_schema.columns
+                       WHERE table_name = 'SceneMappings'
+                       ORDER BY ordinal_position;"
+              echo ""
+              echo "=========================================="
+              echo "Done. Restart Sonarr if errors persisted."
+              echo "=========================================="

@@ -1,0 +1,132 @@
+---
+# FileBrowser Media Storage - Using hostPath to node NFS mounts
+# Nodes have separate NFS mounts at /mnt/k3s-animes, /mnt/k3s-movies, /mnt/k3s-tvshows, /mnt/k3s-downloads
+# This gives FileBrowser access to all media directories mounted individually
+
+# Animes PV
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: filebrowser-animes-pv
+spec:
+  capacity:
+    storage: 500Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: filebrowser-media
+  hostPath:
+    path: /mnt/k3s-animes
+    type: Directory
+---
+# Movies PV
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: filebrowser-movies-pv
+spec:
+  capacity:
+    storage: 2Ti
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: filebrowser-media
+  hostPath:
+    path: /mnt/k3s-movies
+    type: Directory
+---
+# TV Shows PV
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: filebrowser-tvshows-pv
+spec:
+  capacity:
+    storage: 500Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: filebrowser-media
+  hostPath:
+    path: /mnt/k3s-tvshows
+    type: Directory
+---
+# Downloads PV
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: filebrowser-downloads-pv
+spec:
+  capacity:
+    storage: 1Ti
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: filebrowser-media
+  hostPath:
+    path: /mnt/k3s-downloads
+    type: Directory
+---
+# Animes PVC
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: filebrowser-animes
+  namespace: filebrowser
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: filebrowser-media
+  resources:
+    requests:
+      storage: 500Gi
+---
+# Movies PVC
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: filebrowser-movies
+  namespace: filebrowser
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: filebrowser-media
+  resources:
+    requests:
+      storage: 2Ti
+---
+# TV Shows PVC
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: filebrowser-tvshows
+  namespace: filebrowser
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: filebrowser-media
+  resources:
+    requests:
+      storage: 500Gi
+---
+# Downloads PVC
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: filebrowser-downloads
+  namespace: filebrowser
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: filebrowser-media
+  resources:
+    requests:
+      storage: 1Ti
+---
+# Storage class for FileBrowser media
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: filebrowser-media
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: WaitForFirstConsumer

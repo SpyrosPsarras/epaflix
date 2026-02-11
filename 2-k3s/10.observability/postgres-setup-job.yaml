@@ -1,0 +1,50 @@
+---
+# PostgreSQL Database Setup Job for Grafana
+# Creates 'observability' database and user on CloudNativePG cluster
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: postgres-setup-observability
+  namespace: observability
+spec:
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: postgres-setup
+          image: postgres:16
+          env:
+            - name: PGHOST
+              value: "postgres-rw.postgres-system.svc.cluster.local"
+            - name: PGPORT
+              value: "5432"
+            - name: PGUSER
+              value: "postgres"
+            - name: PGPASSWORD
+              value: "<POSTGRES_PASSWORD>"
+            - name: PGDATABASE
+              value: "postgres"
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              echo "Creating observability database and user..."
+
+              # Create database if it doesn't exist
+              psql -tc "SELECT 1 FROM pg_database WHERE datname = 'observability'" | grep -q 1 || \
+                psql -c "CREATE DATABASE observability;"
+
+              # Create user if it doesn't exist
+              psql -tc "SELECT 1 FROM pg_roles WHERE rolname = 'observability'" | grep -q 1 || \
+                psql -c "CREATE USER observability WITH PASSWORD '<POSTGRES_PASSWORD>';"
+
+              # Grant privileges
+              psql -c "GRANT ALL PRIVILEGES ON DATABASE observability TO observability;"
+              psql -d observability -c "GRANT ALL ON SCHEMA public TO observability;"
+
+              echo "Database setup complete!"
+              echo "Database: observability"
+              echo "User: observability"
+              echo "Connection: postgres-rw.postgres-system.svc.cluster.local:5432"

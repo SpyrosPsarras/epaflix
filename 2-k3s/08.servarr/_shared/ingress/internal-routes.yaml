@@ -1,0 +1,204 @@
+---
+# Internal LAN-only IngressRoutes (*.internal.epaflix.com domains via Pi-hole DNS)
+# All route to Traefik at 192.168.10.101
+# TLS certificates managed by cert-manager (Let's Encrypt for internal use)
+
+# Sonarr - TV Shows
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: sonarr-internal
+  namespace: servarr
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`sonarr.internal.epaflix.com`)
+      kind: Rule
+      services:
+        - name: sonarr
+          port: 8989
+  tls:
+    secretName: internal-epaflix-tls
+---
+# Sonarr2 - Anime
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: sonarr2-internal
+  namespace: servarr
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`sonarr2.internal.epaflix.com`)
+      kind: Rule
+      services:
+        - name: sonarr2
+          port: 8989
+  tls:
+    secretName: internal-epaflix-tls
+---
+# Radarr - Movies
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: radarr-internal
+  namespace: servarr
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`radarr.internal.epaflix.com`)
+      kind: Rule
+      services:
+        - name: radarr
+          port: 7878
+  tls:
+    secretName: internal-epaflix-tls
+---
+# Prowlarr - Indexers
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: prowlarr-internal
+  namespace: servarr
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`prowlarr.internal.epaflix.com`)
+      kind: Rule
+      middlewares:
+        - name: arr-headers
+      services:
+        - name: prowlarr
+          port: 9696
+  tls:
+    secretName: internal-epaflix-tls
+---
+# Bazarr - Subtitles
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: bazarr-internal
+  namespace: servarr
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`bazarr.internal.epaflix.com`)
+      kind: Rule
+      services:
+        - name: bazarr
+          port: 6767
+  tls:
+    secretName: internal-epaflix-tls
+---
+# qBittorrent - Downloads
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: qbittorrent-internal
+  namespace: servarr
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`qbittorrent.internal.epaflix.com`)
+      kind: Rule
+      services:
+        - name: qbittorrent
+          port: 8080
+  tls:
+    secretName: internal-epaflix-tls
+---
+# Tdarr - Transcoding
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: tdarr-internal
+  namespace: servarr
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`tdarr.internal.epaflix.com`)
+      kind: Rule
+      services:
+        - name: tdarr
+          port: 8265
+  tls:
+    secretName: internal-epaflix-tls
+---
+# Homarr - Dashboard
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: homarr-internal
+  namespace: servarr
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`homarr.internal.epaflix.com`)
+      kind: Rule
+      services:
+        - name: homarr
+          port: 7575
+  tls:
+    secretName: internal-epaflix-tls
+---
+# Wizarr - User Invitations
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: wizarr-internal
+  namespace: servarr
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`wizarr.internal.epaflix.com`)
+      kind: Rule
+      services:
+        - name: wizarr
+          port: 5690
+  tls:
+    secretName: internal-epaflix-tls
+---
+# Huntarr - Quality Management
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: huntarr-internal
+  namespace: servarr
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`huntarr.internal.epaflix.com`)
+      kind: Rule
+      services:
+        - name: huntarr
+          port: 30262
+  tls:
+    secretName: internal-epaflix-tls
+---
+# Cleanuparr - Automated Cleanup
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: cleanuparr-internal
+  namespace: servarr
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`cleanuparr.internal.epaflix.com`)
+      kind: Rule
+      services:
+        - name: cleanuparr
+          port: 30263
+  tls:
+    secretName: internal-epaflix-tls

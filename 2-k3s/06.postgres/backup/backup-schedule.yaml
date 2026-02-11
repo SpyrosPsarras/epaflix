@@ -1,0 +1,18 @@
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: postgres-daily-backup
+  namespace: postgres-system
+spec:
+  # Daily backup at 2:00 AM UTC
+  schedule: "0 2 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: postgres-cluster
+
+  # Online/Hot backup
+  immediate: false
+
+  # Suspend to false means backups will run on schedule
+  suspend: false

@@ -1,0 +1,2248 @@
+"authentik":
+  "TZ": "Europe/Oslo"
+  "authentik":
+    "additional_envs": []
+    "db_password": "<AUTHENTIK_DB_PASSWORD>"
+    "email":
+      "from": "noreply@epaflix.com"
+      "host": "mail.epaflix.com"
+      "password": "<POSTGRES_PASSWORD>"
+      "port": 587
+      "security": "tls"
+      "username": "noreply@epaflix.com"
+    "mount_docker_socket": true
+    "postgres_image_selector": "postgres_17_image"
+    "secret_key": "<AUTHENTIK_DB_PASSWORD>"
+    "setup_email": true
+  "ix_certificate_authorities": {}
+  "ix_certificates": {}
+  "ix_context":
+    "app_metadata": &id001
+      "app_version": "2025.12.1"
+      "capabilities": []
+      "categories":
+      - "authentication"
+      "changelog_url": "https://docs.goauthentik.io/docs/releases/"
+      "date_added": "2025-03-25"
+      "description": "The authentication glue you need."
+      "home": "https://goauthentik.io/"
+      "host_mounts":
+      - "description": "Docker socket"
+        "host_path": "/var/run/docker.sock"
+      "icon": "https://media.sys.truenas.net/apps/authentik/icons/icon.svg"
+      "keywords":
+      - "authentik"
+      - "auth"
+      "lib_version": "2.1.77"
+      "lib_version_hash": "1837f8e69ae1adc313330c3b1c2615e9b4d03c5459d657a5898bae78090f8195"
+      "maintainers":
+      - "email": "dev@truenas.com"
+        "name": "truenas"
+        "url": "https://www.truenas.com/"
+      "name": "authentik"
+      "run_as_context":
+      - "description": "Authentik runs as any non-root user."
+        "gid": 568
+        "group_name": "authentik"
+        "uid": 568
+        "user_name": "authentik"
+      - "description": "Postgres runs as non-root user."
+        "gid": 999
+        "group_name": "postgres"
+        "uid": 999
+        "user_name": "postgres"
+      "screenshots":
+      - "https://media.sys.truenas.net/apps/authentik/screenshots/screenshot1.png"
+      - "https://media.sys.truenas.net/apps/authentik/screenshots/screenshot2.png"
+      - "https://media.sys.truenas.net/apps/authentik/screenshots/screenshot3.png"
+      - "https://media.sys.truenas.net/apps/authentik/screenshots/screenshot4.png"
+      "sources":
+      - "https://goauthentik.io/"
+      - "https://github.com/goauthentik/authentik"
+      "title": "Authentik"
+      "train": "community"
+      "version": "1.1.3"
+    "app_name": "authentik"
+    "is_install": false
+    "is_rollback": false
+    "is_update": false
+    "is_upgrade": true
+    "operation": "UPGRADE"
+    "scale_version": "TrueNAS-25.10.0.1"
+    "upgrade_metadata":
+      "new_version_metadata": *id001
+      "old_version_metadata":
+        "app_version": "2025.10.3"
+        "capabilities": []
+        "categories":
+        - "authentication"
+        "changelog_url": "https://docs.goauthentik.io/docs/releases/"
+        "date_added": "2025-03-25"
+        "description": "The authentication glue you need."
+        "home": "https://goauthentik.io/"
+        "host_mounts":
+        - "description": "Docker socket"
+          "host_path": "/var/run/docker.sock"
+        "icon": "https://media.sys.truenas.net/apps/authentik/icons/icon.svg"
+        "keywords":
+        - "authentik"
+        - "auth"
+        "lib_version": "2.1.65"
+        "lib_version_hash": "f92a9ee78c78fc77f86e7d8b545bd4c605c31c599e2c5da59f1615aa516cb8b5"
+        "maintainers":
+        - "email": "dev@truenas.com"
+          "name": "truenas"
+          "url": "https://www.truenas.com/"
+        "name": "authentik"
+        "run_as_context":
+        - "description": "Authentik runs as any non-root user."
+          "gid": 568
+          "group_name": "authentik"
+          "uid": 568
+          "user_name": "authentik"
+        - "description": "Postgres runs as non-root user."
+          "gid": 999
+          "group_name": "postgres"
+          "uid": 999
+          "user_name": "postgres"
+        "screenshots":
+        - "https://media.sys.truenas.net/apps/authentik/screenshots/screenshot1.png"
+        - "https://media.sys.truenas.net/apps/authentik/screenshots/screenshot2.png"
+        - "https://media.sys.truenas.net/apps/authentik/screenshots/screenshot3.png"
+        - "https://media.sys.truenas.net/apps/authentik/screenshots/screenshot4.png"
+        "sources":
+        - "https://goauthentik.io/"
+        - "https://github.com/goauthentik/authentik"
+        "title": "Authentik"
+        "train": "community"
+        "version": "1.0.58"
+  "ix_volumes":
+    "data": "/mnt/.ix-apps/app_mounts/authentik/data"
+  "labels": []
+  "network":
+    "http_port":
+      "bind_mode": "published"
+      "host_ips":
+      - "0.0.0.0"
+      "port_number": 30140
+    "https_port":
+      "bind_mode": "published"
+      "host_ips":
+      - "0.0.0.0"
+      "port_number": 30141
+  "release_name": "authentik"
+  "resources":
+    "limits":
+      "cpus": 4
+      "memory": 4096
+  "run_as":
+    "group": 568
+    "user": 568
+  "storage":
+    "additional_storage": []
+    "certs":
+      "host_path_config":
+        "acl_enable": false
+        "path": "/mnt/apps/authentik/certs"
+      "type": "host_path"
+    "data":
+      "ix_volume_config":
+        "acl_enable": false
+        "dataset_name": "data"
+      "type": "ix_volume"
+    "media":
+      "host_path_config":
+        "acl_enable": false
+        "path": "/mnt/apps/authentik/media"
+      "type": "host_path"
+    "postgres_data":
+      "host_path_config":
+        "acl_enable": false
+        "auto_permissions": true
+        "path": "/mnt/apps/authentik/postgres"
+      "type": "host_path"
+    "templates":
+      "host_path_config":
+        "acl_enable": false
+        "path": "/mnt/apps/authentik"
+      "type": "host_path"
+    "uses_deprecated_media": true
+"bazarr":
+  "services":
+    "bazarr":
+      "container_name": "bazarr"
+      "deploy":
+        "resources":
+          "reservations":
+            "devices":
+            - "capabilities":
+              - "gpu"
+              "count": 1
+              "driver": "nvidia"
+      "environment":
+      - "PUID=568"
+      - "GUID=568"
+      - "TZ=Europe/Oslo"
+      "image": "lscr.io/linuxserver/bazarr:development"
+      "ports":
+      - "6767:6767"
+      "restart": "unless-stopped"
+      "volumes":
+      - "/mnt/apps/bazarr/config:/config"
+      - "/mnt/pool1/dataset01/movies:/movies"
+      - "/mnt/pool1/dataset01/tvshows:/tv"
+"bazarr-autotranslate":
+  "services":
+    "bazarr-autotranslate":
+      "environment":
+      - "BAZARR_BASE_URL=http://192.168.10.200:6767"
+      - "BAZARR_API_KEY=cd4a4ec290a973fbbe992412c524c9c1"
+      - "BASE_LANGUAGES=en"
+      - "TO_LANGUAGES=el"
+      - "LOG_LEVEL=debug"
+      "image": "ghcr.io/zelak312/bazarr_autotranslate:latest"
+      "restart": "unless-stopped"
+      "volumes":
+      - "/mnt/apps/bazarr-autotranslate/logs:/usr/src/app/logs"
+"beszel":
+  "services":
+    "beszel":
+      "container_name": "beszel"
+      "image": "henrygd/beszel:latest"
+      "ports":
+      - "8090:8090"
+      "restart": "unless-stopped"
+      "volumes":
+      - "/mnt/apps/beszel/host/beszel_data:/beszel_data"
+      - "/mnt/apps/beszel/host/beszel_socket:/beszel_socket"
+    "beszel-agent":
+      "container_name": "beszel-agent"
+      "deploy":
+        "resources":
+          "reservations":
+            "devices":
+            - "capabilities":
+              - "utility"
+              "count": "all"
+              "driver": "nvidia"
+      "environment":
+        "HUB_URL": "http://192.168.10.200:8090"
+        "KEY": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINh3P9t4WAmFGJ3/ulz1PbnoG+vJ5vAfLnLLd8Vuunlz"
+        "LISTEN": 45876
+        "TOKEN": "a00c-d21a14dc88-f925-bc716640a8"
+      "image": "henrygd/beszel-agent-nvidia:latest"
+      "network_mode": "host"
+      "restart": "unless-stopped"
+      "volumes":
+      - "/mnt/apps/beszel/agent/beszel_agent_data:/var/lib/beszel-agent"
+      - "/mnt/apps/beszel/agent/beszel_socket:/beszel_socket"
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+"cleanuparr":
+  "TZ": "Europe/Oslo"
+  "cleanuparr":
+    "additional_envs": []
+  "ix_certificate_authorities": {}
+  "ix_certificates": {}
+  "ix_context":
+    "app_metadata": &id002
+      "app_version": "2.5.1"
+      "capabilities":
+      - "description": "Cleanuparr is able to change file ownership arbitrarily"
+        "name": "CHOWN"
+      - "description": "Cleanuparr is able to bypass file permission checks"
+        "name": "DAC_OVERRIDE"
+      - "description": "Cleanuparr is able to bypass permission checks for file operations"
+        "name": "FOWNER"
+      - "description": "Cleanuparr is able to change group ID of processes"
+        "name": "SETGID"
+      - "description": "Cleanuparr is able to change user ID of processes"
+        "name": "SETUID"
+      "categories":
+      - "media"
+      "changelog_url": "https://github.com/Cleanuparr/Cleanuparr/releases"
+      "date_added": "2025-09-25"
+      "description": "Cleanuparr is a tool for automating the cleanup of unwanted\
+        \ or blocked files in Sonarr, Radarr, and supported download clients like\
+        \ qBittorrent, Deluge and Transmission."
+      "home": "https://github.com/Cleanuparr/Cleanuparr"
+      "host_mounts": []
+      "icon": "https://media.sys.truenas.net/apps/cleanuparr/icons/icon.svg"
+      "keywords":
+      - "media"
+      "lib_version": "2.1.77"
+      "lib_version_hash": "1837f8e69ae1adc313330c3b1c2615e9b4d03c5459d657a5898bae78090f8195"
+      "maintainers":
+      - "email": "dev@truenas.com"
+        "name": "truenas"
+        "url": "https://www.truenas.com/"
+      "name": "cleanuparr"
+      "run_as_context":
+      - "description": "Cleanuparr runs as root user."
+        "gid": 0
+        "group_name": "root"
+        "uid": 0
+        "user_name": "root"
+      "screenshots": []
+      "sources":
+      - "https://github.com/Cleanuparr/Cleanuparr"
+      "title": "Cleanuparr"
+      "train": "community"
+      "version": "1.0.15"
+    "app_name": "cleanuparr"
+    "is_install": false
+    "is_rollback": false
+    "is_update": false
+    "is_upgrade": true
+    "operation": "UPGRADE"
+    "scale_version": "TrueNAS-25.10.0.1"
+    "upgrade_metadata":
+      "new_version_metadata": *id002
+      "old_version_metadata":
+        "app_version": "2.5.0"
+        "capabilities":
+        - "description": "Cleanuparr is able to change file ownership arbitrarily"
+          "name": "CHOWN"
+        - "description": "Cleanuparr is able to bypass file permission checks"
+          "name": "DAC_OVERRIDE"
+        - "description": "Cleanuparr is able to bypass permission checks for file\
+            \ operations"
+          "name": "FOWNER"
+        - "description": "Cleanuparr is able to change group ID of processes"
+          "name": "SETGID"
+        - "description": "Cleanuparr is able to change user ID of processes"
+          "name": "SETUID"
+        "categories":
+        - "media"
+        "changelog_url": "https://github.com/Cleanuparr/Cleanuparr/releases"
+        "date_added": "2025-09-25"
+        "description": "Cleanuparr is a tool for automating the cleanup of unwanted\
+          \ or blocked files in Sonarr, Radarr, and supported download clients like\
+          \ qBittorrent, Deluge and Transmission."
+        "home": "https://github.com/Cleanuparr/Cleanuparr"
+        "host_mounts": []
+        "icon": "https://media.sys.truenas.net/apps/cleanuparr/icons/icon.svg"
+        "keywords":
+        - "media"
+        "lib_version": "2.1.65"
+        "lib_version_hash": "f92a9ee78c78fc77f86e7d8b545bd4c605c31c599e2c5da59f1615aa516cb8b5"
+        "maintainers":
+        - "email": "dev@truenas.com"
+          "name": "truenas"
+          "url": "https://www.truenas.com/"
+        "name": "cleanuparr"
+        "run_as_context":
+        - "description": "Cleanuparr runs as root user."
+          "gid": 0
+          "group_name": "root"
+          "uid": 0
+          "user_name": "root"
+        "screenshots": []
+        "sources":
+        - "https://github.com/Cleanuparr/Cleanuparr"
+        "title": "Cleanuparr"
+        "train": "community"
+        "version": "1.0.13"
+  "ix_volumes": {}
+  "labels": []
+  "network":
+    "host_network": false
+    "web_port":
+      "bind_mode": "published"
+      "host_ips": []
+      "port_number": 30263
+  "release_name": "cleanuparr"
+  "resources":
+    "limits":
+      "cpus": 2
+      "memory": 4096
+  "run_as":
+    "group": 568
+    "user": 568
+  "storage":
+    "additional_storage": []
+    "config":
+      "host_path_config":
+        "acl_enable": false
+        "path": "/mnt/apps/cleanuparr"
+      "type": "host_path"
+"ddns-updater":
+  "TZ": "Europe/Oslo"
+  "ddns":
+    "additional_envs": []
+    "backup_period": "24h"
+    "config":
+    - "cloudflare_api_key": ""
+      "cloudflare_email": ""
+      "cloudflare_proxied": true
+      "cloudflare_token": "<CLOUDFLARE_TOKEN>"
+      "cloudflare_ttl": 1
+      "cloudflare_user_service_key": ""
+      "cloudflare_zone_id": "fe8661d923f772a0c8fb6ab8375ad93e"
+      "domain": "*.epaflix.com"
+      "host": ""
+      "ip_version": ""
+      "provider": "cloudflare"
+    "http_timeout": "10s"
+    "period": "5m"
+    "public_dns_timeout": "3s"
+    "public_ip_dns_providers":
+    - "provider": "cloudflare"
+    "public_ip_fetchers":
+    - "provider": "dns"
+    "public_ip_http_providers":
+    - "provider": "ifconfig"
+    "public_ipv4_http_providers":
+    - "provider": "wtfismyip"
+    "public_ipv6_http_providers":
+    - "provider": "wtfismyip"
+    "shoutrrr_addresses": []
+    "update_cooldown_period": "5m"
+  "ix_certificate_authorities": {}
+  "ix_certificates": {}
+  "ix_context":
+    "app_metadata": &id003
+      "annotations":
+        "min_scale_version": "24.10.2.2"
+      "app_version": "v2.9.0"
+      "capabilities": []
+      "categories":
+      - "networking"
+      "changelog_url": "https://github.com/qdm12/ddns-updater/releases"
+      "date_added": "2024-08-01"
+      "description": "Lightweight universal DDNS Updater with web UI"
+      "home": "https://github.com/qdm12/ddns-updater"
+      "host_mounts": []
+      "icon": "https://media.sys.truenas.net/apps/ddns-updater/icons/icon.svg"
+      "keywords":
+      - "ddns-updater"
+      - "ddns"
+      "lib_version": "2.1.77"
+      "lib_version_hash": "1837f8e69ae1adc313330c3b1c2615e9b4d03c5459d657a5898bae78090f8195"
+      "maintainers":
+      - "email": "dev@truenas.com"
+        "name": "truenas"
+        "url": "https://www.truenas.com/"
+      "name": "ddns-updater"
+      "run_as_context":
+      - "description": "DDNS Updater runs as any non-root user."
+        "gid": 568
+        "group_name": "ddns-updater"
+        "uid": 568
+        "user_name": "ddns-updater"
+      "screenshots":
+      - "https://media.sys.truenas.net/apps/ddns-updater/screenshots/screenshot1.png"
+      "sources":
+      - "https://github.com/qdm12/ddns-updater"
+      - "https://hub.docker.com/r/qmcgaw/ddns-updater"
+      "title": "DDNS Updater"
+      "train": "community"
+      "version": "1.2.16"
+    "app_name": "ddns-updater"
+    "is_install": false
+    "is_rollback": false
+    "is_update": false
+    "is_upgrade": true
+    "operation": "UPGRADE"
+    "scale_version": "TrueNAS-25.10.0.1"
+    "upgrade_metadata":
+      "new_version_metadata": *id003
+      "old_version_metadata":
+        "annotations":
+          "min_scale_version": "24.10.2.2"
+        "app_version": "v2.9.0"
+        "capabilities": []
+        "categories":
+        - "networking"
+        "changelog_url": "https://github.com/qdm12/ddns-updater/releases"
+        "date_added": "2024-08-01"
+        "description": "Lightweight universal DDNS Updater with web UI"
+        "home": "https://github.com/qdm12/ddns-updater"
+        "host_mounts": []
+        "icon": "https://media.sys.truenas.net/apps/ddns-updater/icons/icon.svg"
+        "keywords":
+        - "ddns-updater"
+        - "ddns"
+        "lib_version": "2.1.65"
+        "lib_version_hash": "f92a9ee78c78fc77f86e7d8b545bd4c605c31c599e2c5da59f1615aa516cb8b5"
+        "maintainers":
+        - "email": "dev@truenas.com"
+          "name": "truenas"
+          "url": "https://www.truenas.com/"
+        "name": "ddns-updater"
+        "run_as_context":
+        - "description": "DDNS Updater runs as any non-root user."
+          "gid": 568
+          "group_name": "ddns-updater"
+          "uid": 568
+          "user_name": "ddns-updater"
+        "screenshots":
+        - "https://media.sys.truenas.net/apps/ddns-updater/screenshots/screenshot1.png"
+        "sources":
+        - "https://github.com/qdm12/ddns-updater"
+        - "https://hub.docker.com/r/qmcgaw/ddns-updater"
+        "title": "DDNS Updater"
+        "train": "community"
+        "version": "1.2.15"
+  "ix_volumes": {}
+  "labels": []
+  "network":
+    "host_network": false
+    "web_port":
+      "bind_mode": "published"
+      "host_ips": []
+      "port_number": 30007
+  "release_name": "ddns-updater"
+  "resources":
+    "limits":
+      "cpus": 1
+      "memory": 1024
+  "run_as":
+    "group": 568
+    "user": 568
+  "storage":
+    "additional_storage": []
+    "data":
+      "host_path_config":
+        "acl":
+          "entries": []
+          "options":
+            "force": true
+          "path": "/mnt/apps/ddns-updater"
+        "acl_enable": true
+      "type": "host_path"
+"flaresolverr":
+  "services":
+    "flaresolverr":
+      "container_name": "flaresolverr"
+      "environment":
+      - "LOG_LEVEL=${LOG_LEVEL:-info}"
+      - "LOG_HTML=${LOG_HTML:-false}"
+      - "CAPTCHA_SOLVER=${CAPTCHA_SOLVER:-none}"
+      - "TZ=Europe/Oslo"
+      "image": "ghcr.io/flaresolverr/flaresolverr:latest"
+      "ports":
+      - "8191:8191"
+      "restart": "unless-stopped"
+"homarr":
+  "TZ": "Europe/Oslo"
+  "homarr":
+    "additional_envs": []
+    "mount_docker_socket": true
+    "secret_encryption_key": "<SECRET_ENCRYPTION_KEY>"
+  "ix_certificate_authorities": {}
+  "ix_certificates": {}
+  "ix_context":
+    "app_metadata":
+      "app_version": "v1.43.1"
+      "capabilities":
+      - "description": "Homarr is able to change file ownership arbitrarily"
+        "name": "CHOWN"
+      - "description": "Homarr is able to bypass file permission checks"
+        "name": "DAC_OVERRIDE"
+      - "description": "Homarr is able to bypass permission checks for file operations"
+        "name": "FOWNER"
+      - "description": "Homarr is able to change group ID of processes"
+        "name": "SETGID"
+      - "description": "Homarr is able to change user ID of processes"
+        "name": "SETUID"
+      "categories":
+      - "productivity"
+      "changelog_url": "https://github.com/homarr-labs/homarr/releases"
+      "date_added": "2024-08-02"
+      "description": "Homarr a modern and easy to use dashboard. 14+ integrations.\
+        \ 10K+ icons built in. Authentication out of the box. No YAML, drag and drop\
+        \ configuration."
+      "home": "https://homarr.dev/"
+      "host_mounts":
+      - "description": "Docker socket"
+        "host_path": "/var/run/docker.sock"
+      "icon": "https://media.sys.truenas.net/apps/homarr/icons/icon.svg"
+      "keywords":
+      - "dashboard"
+      "last_update": "2025-11-07 19:02:19"
+      "lib_version": "2.1.57"
+      "lib_version_hash": "6659ad369fff2f1df318cb6353bb32bffe7047dc21df4823750d39be7284e605"
+      "maintainers":
+      - "email": "dev@truenas.com"
+        "name": "truenas"
+        "url": "https://www.truenas.com/"
+      "name": "homarr"
+      "run_as_context":
+      - "description": "Homarr runs as root user."
+        "gid": 0
+        "group_name": "root"
+        "uid": 0
+        "user_name": "root"
+      "screenshots":
+      - "https://media.sys.truenas.net/apps/homarr/screenshots/screenshot1.png"
+      - "https://media.sys.truenas.net/apps/homarr/screenshots/screenshot2.png"
+      - "https://media.sys.truenas.net/apps/homarr/screenshots/screenshot3.png"
+      "sources":
+      - "https://homarr.dev/"
+      - "https://github.com/homarr-labs/homarr"
+      "title": "Homarr"
+      "train": "community"
+      "version": "2.1.33"
+    "app_name": "homarr"
+    "is_install": false
+    "is_rollback": false
+    "is_update": true
+    "is_upgrade": false
+    "operation": "UPDATE"
+    "scale_version": "TrueNAS-25.10.0"
+    "upgrade_metadata": {}
+  "ix_volumes": {}
+  "labels": []
+  "network":
+    "host_network": false
+    "web_port":
+      "bind_mode": "published"
+      "host_ips": []
+      "port_number": 30100
+  "release_name": "homarr"
+  "resources":
+    "limits":
+      "cpus": 4
+      "memory": 4096
+  "run_as":
+    "group": 568
+    "user": 568
+  "storage":
+    "additional_storage": []
+    "data":
+      "host_path_config":
+        "acl":
+          "entries": []
+          "options":
+            "force": false
+          "path": "/mnt/apps/homarr"
+        "acl_enable": true
+      "type": "host_path"
+"home-assistant":
+  "TZ": "Europe/Oslo"
+  "home_assistant":
+    "additional_envs": []
+    "db_name": "home-assistant"
+    "db_password": "<POSTGRES_PASSWORD>"
+    "db_user": "home-assistant"
+    "devices": []
+    "postgres_image_selector": "postgres_17_image"
+  "ix_certificate_authorities": {}
+  "ix_certificates": {}
+  "ix_context":
+    "app_metadata": &id004
+      "annotations":
+        "min_scale_version": "24.10.2.2"
+      "app_version": "2025.11.0"
+      "capabilities":
+      - "description": "Home Assistant is able to change file ownership arbitrarily"
+        "name": "CHOWN"
+      - "description": "Home Assistant is able to bypass file permission checks"
+        "name": "DAC_OVERRIDE"
+      - "description": "Home Assistant is able to bypass permission checks for file\
+          \ operations"
+        "name": "FOWNER"
+      - "description": "Home Assistant is able to bind to privileged ports (< 1024)"
+        "name": "NET_BIND_SERVICE"
+      - "description": "Home Assistant is able to use raw and packet sockets"
+        "name": "NET_RAW"
+      "categories":
+      - "productivity"
+      "changelog_url": "https://github.com/home-assistant/core/releases"
+      "date_added": "2024-08-13"
+      "description": "Home Assistant is an open source home automation that puts local\
+        \ control and privacy first."
+      "home": "https://www.home-assistant.io/"
+      "host_mounts": []
+      "icon": "https://media.sys.truenas.net/apps/home-assistant/icons/icon.png"
+      "keywords":
+      - "home-automation"
+      - "assistant"
+      "lib_version": "2.1.57"
+      "lib_version_hash": "6659ad369fff2f1df318cb6353bb32bffe7047dc21df4823750d39be7284e605"
+      "maintainers":
+      - "email": "dev@truenas.com"
+        "name": "truenas"
+        "url": "https://www.truenas.com/"
+      "name": "home-assistant"
+      "run_as_context":
+      - "description": "Home Assistant runs as root user."
+        "gid": 0
+        "group_name": "root"
+        "uid": 0
+        "user_name": "root"
+      - "description": "Postgres runs as non-root user."
+        "gid": 999
+        "group_name": "postgres"
+        "uid": 999
+        "user_name": "postgres"
+      "screenshots":
+      - "https://media.sys.truenas.net/apps/home-assistant/screenshots/screenshot1.png"
+      "sources":
+      - "https://github.com/home-assistant/home-assistant"
+      "title": "Home Assistant"
+      "train": "stable"
+      "version": "1.6.5"
+    "app_name": "home-assistant"
+    "is_install": false
+    "is_rollback": false
+    "is_update": false
+    "is_upgrade": true
+    "operation": "UPGRADE"
+    "scale_version": "TrueNAS-25.10.0"
+    "upgrade_metadata":
+      "new_version_metadata": *id004
+      "old_version_metadata":
+        "annotations":
+          "min_scale_version": "24.10.2.2"
+        "app_version": "2025.10.4"
+        "capabilities":
+        - "description": "Home Assistant is able to change file ownership arbitrarily"
+          "name": "CHOWN"
+        - "description": "Home Assistant is able to bypass file permission checks"
+          "name": "DAC_OVERRIDE"
+        - "description": "Home Assistant is able to bypass permission checks for file\
+            \ operations"
+          "name": "FOWNER"
+        - "description": "Home Assistant is able to bind to privileged ports (< 1024)"
+          "name": "NET_BIND_SERVICE"
+        - "description": "Home Assistant is able to use raw and packet sockets"
+          "name": "NET_RAW"
+        "categories":
+        - "productivity"
+        "changelog_url": "https://github.com/home-assistant/core/releases"
+        "date_added": "2024-08-13"
+        "description": "Home Assistant is an open source home automation that puts\
+          \ local control and privacy first."
+        "home": "https://www.home-assistant.io/"
+        "host_mounts": []
+        "icon": "https://media.sys.truenas.net/apps/home-assistant/icons/icon.png"
+        "keywords":
+        - "home-automation"
+        - "assistant"
+        "lib_version": "2.1.57"
+        "lib_version_hash": "6659ad369fff2f1df318cb6353bb32bffe7047dc21df4823750d39be7284e605"
+        "maintainers":
+        - "email": "dev@truenas.com"
+          "name": "truenas"
+          "url": "https://www.truenas.com/"
+        "name": "home-assistant"
+        "run_as_context":
+        - "description": "Home Assistant runs as root user."
+          "gid": 0
+          "group_name": "root"
+          "uid": 0
+          "user_name": "root"
+        - "description": "Postgres runs as non-root user."
+          "gid": 999
+          "group_name": "postgres"
+          "uid": 999
+          "user_name": "postgres"
+        "screenshots":
+        - "https://media.sys.truenas.net/apps/home-assistant/screenshots/screenshot1.png"
+        "sources":
+        - "https://github.com/home-assistant/home-assistant"
+        "title": "Home Assistant"
+        "train": "stable"
+        "version": "1.6.4"
+  "ix_volumes": {}
+  "labels": []
+  "network":
+    "additional_ports": []
+    "certificate_id": null
+    "dns_opts": []
+    "web_port":
+      "bind_mode": "published"
+      "host_ips": []
+      "port_number": 30103
+  "release_name": "home-assistant"
+  "resources":
+    "limits":
+      "cpus": 4
+      "memory": 4096
+  "run_as":
+    "group": 568
+    "user": 568
+  "storage":
+    "additional_storage": []
+    "config":
+      "host_path_config":
+        "acl_enable": false
+        "path": "/mnt/apps/home-assistant/config"
+      "type": "host_path"
+    "media":
+      "host_path_config":
+        "acl_enable": false
+        "path": "/mnt/apps/home-assistant/media"
+      "type": "host_path"
+    "postgres_data":
+      "host_path_config":
+        "acl_enable": false
+        "auto_permissions": true
+        "path": "/mnt/apps/home-assistant/postgres_data"
+      "type": "host_path"
+"huntarr":
+  "TZ": "Europe/Oslo"
+  "huntarr":
+    "additional_envs": []
+  "ix_certificate_authorities": {}
+  "ix_certificates": {}
+  "ix_context":
+    "app_metadata": &id005
+      "app_version": "8.2.11"
+      "capabilities": []
+      "categories":
+      - "media"
+      "changelog_url": "https://github.com/plexguide/Huntarr.io/releases"
+      "date_added": "2025-09-24"
+      "description": "A specialized utility that automates discovering missing and\
+        \ upgrading your media collection!"
+      "home": "https://github.com/plexguide/Huntarr.io"
+      "host_mounts": []
+      "icon": "https://media.sys.truenas.net/apps/huntarr/icons/icon.svg"
+      "keywords":
+      - "media"
+      "lib_version": "2.1.77"
+      "lib_version_hash": "1837f8e69ae1adc313330c3b1c2615e9b4d03c5459d657a5898bae78090f8195"
+      "maintainers":
+      - "email": "dev@truenas.com"
+        "name": "truenas"
+        "url": "https://www.truenas.com/"
+      "name": "huntarr"
+      "run_as_context":
+      - "description": "Huntarr runs as any non-root user."
+        "gid": 568
+        "group_name": "huntarr"
+        "uid": 568
+        "user_name": "huntarr"
+      "screenshots": []
+      "sources":
+      - "https://github.com/plexguide/Huntarr.io"
+      "title": "Huntarr"
+      "train": "community"
+      "version": "1.0.9"
+    "app_name": "huntarr"
+    "is_install": false
+    "is_rollback": false
+    "is_update": false
+    "is_upgrade": true
+    "operation": "UPGRADE"
+    "scale_version": "TrueNAS-25.10.0.1"
+    "upgrade_metadata":
+      "new_version_metadata": *id005
+      "old_version_metadata":
+        "app_version": "8.2.11"
+        "capabilities": []
+        "categories":
+        - "media"
+        "changelog_url": "https://github.com/plexguide/Huntarr.io/releases"
+        "date_added": "2025-09-24"
+        "description": "A specialized utility that automates discovering missing and\
+          \ upgrading your media collection!"
+        "home": "https://github.com/plexguide/Huntarr.io"
+        "host_mounts": []
+        "icon": "https://media.sys.truenas.net/apps/huntarr/icons/icon.svg"
+        "keywords":
+        - "media"
+        "lib_version": "2.1.65"
+        "lib_version_hash": "f92a9ee78c78fc77f86e7d8b545bd4c605c31c599e2c5da59f1615aa516cb8b5"
+        "maintainers":
+        - "email": "dev@truenas.com"
+          "name": "truenas"
+          "url": "https://www.truenas.com/"
+        "name": "huntarr"
+        "run_as_context":
+        - "description": "Huntarr runs as any non-root user."
+          "gid": 568
+          "group_name": "huntarr"
+          "uid": 568
+          "user_name": "huntarr"
+        "screenshots": []
+        "sources":
+        - "https://github.com/plexguide/Huntarr.io"
+        "title": "Huntarr"
+        "train": "community"
+        "version": "1.0.8"
+  "ix_volumes": {}
+  "labels": []
+  "network":
+    "host_network": false
+    "web_port":
+      "bind_mode": "published"
+      "host_ips": []
+      "port_number": 30262
+  "release_name": "huntarr"
+  "resources":
+    "limits":
+      "cpus": 2
+      "memory": 4096
+  "run_as":
+    "group": 568
+    "user": 568
+  "storage":
+    "additional_storage": []
+    "config":
+      "host_path_config":
+        "acl_enable": false
+        "path": "/mnt/apps/huntarr"
+      "type": "host_path"
+"jellyfin":
+  "services":
+    "jellyfin":
+      "cap_drop":
+      - "ALL"
+      "deploy":
+        "resources":
+          "reservations":
+            "devices":
+            - "capabilities":
+              - "gpu"
+              "count": "all"
+              "driver": "nvidia"
+      "environment":
+        "GID": 568
+        "GROUP_ID": 568
+        "JELLYFIN_CACHE_DIR": "/cache"
+        "JELLYFIN_PublishedServerUrl": "jellyfin.epaflix.com"
+        "NVIDIA_DRIVER_CAPABILITIES": "all"
+        "NVIDIA_VISIBLE_DEVICES": "GPU-4d588edf-ae80-174a-1f40-0f05771b06c0"
+        "PGID": 568
+        "PUID": 568
+        "TZ": "Europe/Oslo"
+        "UID": 568
+        "UMASK": 2
+        "UMASK_SET": 2
+        "USER_ID": 568
+      "expose":
+      - "7359/udp"
+      "group_add":
+      - 44
+      - 107
+      - 568
+      "healthcheck":
+        "interval": "30s"
+        "retries": 5
+        "start_interval": "2s"
+        "start_period": "15s"
+        "test":
+        - "CMD-SHELL"
+        - "curl --request GET --silent --output /dev/null --show-error --fail http://127.0.0.1:8096/health"
+        "timeout": "5s"
+      "image": "jellyfin/jellyfin:latest"
+      "platform": "linux/amd64"
+      "ports":
+      - "30013:8096"
+      "restart": "unless-stopped"
+      "security_opt":
+      - "no-new-privileges=true"
+      "stdin_open": false
+      "tty": false
+      "user": "568:568"
+      "volumes":
+      - "/mnt/pool1/dataset01/animes:/animes"
+      - "/mnt/pool1/jellyfin-cache:/cache"
+      - "/mnt/pool1/jellyfin-transcode-storage:/cache/transcodes"
+      - "/mnt/apps/jellyfin/config:/config"
+      - "/mnt/pool1/jellyfin-transcode-storage:/config/transcodes"
+      - "/mnt/apps/jellyfin/custom-cont-init.d:/custom-cont-init.d"
+      - "/mnt/pool1/dataset01/movies:/movies"
+      - "/mnt/pool1/dataset01/tvshows:/tvshows"
+      - "/home/truenas_admin/tdarr-input-test:/tdarr-input-test"
+      - "/home/truenas_admin/tdarr-output-test:/tdarr-output-test"
+"jellyseerr":
+  "TZ": "Europe/Oslo"
+  "ix_certificate_authorities": {}
+  "ix_certificates": {}
+  "ix_context":
+    "app_metadata": &id006
+      "annotations":
+        "min_scale_version": "24.10.2.2"
+      "app_version": "2.7.3"
+      "capabilities": []
+      "categories":
+      - "media"
+      "changelog_url": "https://github.com/fallenbagel/jellyseerr/releases"
+      "date_added": "2024-08-02"
+      "description": "Jellyseerr is a free and open source software application for\
+        \ managing requests for your media library."
+      "home": "https://github.com/Fallenbagel/jellyseerr"
+      "host_mounts": []
+      "icon": "https://media.sys.truenas.net/apps/jellyseerr/icons/icon.svg"
+      "keywords":
+      - "media"
+      "lib_version": "2.1.77"
+      "lib_version_hash": "1837f8e69ae1adc313330c3b1c2615e9b4d03c5459d657a5898bae78090f8195"
+      "maintainers":
+      - "email": "dev@truenas.com"
+        "name": "truenas"
+        "url": "https://www.truenas.com/"
+      "name": "jellyseerr"
+      "run_as_context":
+      - "description": "Jellyseerr runs as any non-root user."
+        "gid": 568
+        "group_name": "jellyseerr"
+        "uid": 568
+        "user_name": "jellyseerr"
+      "screenshots":
+      - "https://media.sys.truenas.net/apps/jellyseerr/screenshots/screenshot1.png"
+      "sources":
+      - "https://github.com/Fallenbagel/jellyseerr"
+      - "https://hub.docker.com/r/fallenbagel/jellyseerr"
+      "title": "Jellyseerr"
+      "train": "community"
+      "version": "1.2.19"
+    "app_name": "jellyseerr"
+    "is_install": false
+    "is_rollback": false
+    "is_update": false
+    "is_upgrade": true
+    "operation": "UPGRADE"
+    "scale_version": "TrueNAS-25.10.0.1"
+    "upgrade_metadata":
+      "new_version_metadata": *id006
+      "old_version_metadata":
+        "annotations":
+          "min_scale_version": "24.10.2.2"
+        "app_version": "2.7.3"
+        "capabilities": []
+        "categories":
+        - "media"
+        "changelog_url": "https://github.com/fallenbagel/jellyseerr/releases"
+        "date_added": "2024-08-02"
+        "description": "Jellyseerr is a free and open source software application\
+          \ for managing requests for your media library."
+        "home": "https://github.com/Fallenbagel/jellyseerr"
+        "host_mounts": []
+        "icon": "https://media.sys.truenas.net/apps/jellyseerr/icons/icon.svg"
+        "keywords":
+        - "media"
+        "lib_version": "2.1.65"
+        "lib_version_hash": "f92a9ee78c78fc77f86e7d8b545bd4c605c31c599e2c5da59f1615aa516cb8b5"
+        "maintainers":
+        - "email": "dev@truenas.com"
+          "name": "truenas"
+          "url": "https://www.truenas.com/"
+        "name": "jellyseerr"
+        "run_as_context":
+        - "description": "Jellyseerr runs as any non-root user."
+          "gid": 568
+          "group_name": "jellyseerr"
+          "uid": 568
+          "user_name": "jellyseerr"
+        "screenshots":
+        - "https://media.sys.truenas.net/apps/jellyseerr/screenshots/screenshot1.png"
+        "sources":
+        - "https://github.com/Fallenbagel/jellyseerr"
+        - "https://hub.docker.com/r/fallenbagel/jellyseerr"
+        "title": "Jellyseerr"
+        "train": "community"
+        "version": "1.2.18"
+  "ix_volumes": {}
+  "jellyseerr":
+    "additional_envs": []
+  "labels": []
+  "network":
+    "host_network": true
+    "web_port":
+      "bind_mode": "published"
+      "host_ips": []
+      "port_number": 30042
+  "release_name": "jellyseerr"
+  "resources":
+    "limits":
+      "cpus": 4
+      "memory": 4096
+  "run_as":
+    "group": 568
+    "user": 568
+  "storage":
+    "additional_storage": []
+    "config":
+      "host_path_config":
+        "acl_enable": false
+        "path": "/mnt/apps/jellyseerr"
+      "type": "host_path"
+"lingarr":
+  "services":
+    "libretranslate":
+      "container_name": "LibreTranslate"
+      "deploy":
+        "resources":
+          "reservations":
+            "devices":
+            - "capabilities":
+              - "gpu"
+              "count": 1
+              "driver": "nvidia"
+      "environment":
+      - "LT_LOAD_ONLY=el,en"
+      "healthcheck":
+        "interval": "10s"
+        "retries": 4
+        "start_period": "5s"
+        "test":
+        - "CMD-SHELL"
+        - "python scripts/healthcheck.py"
+        "timeout": "4s"
+      "image": "libretranslate/libretranslate:v1.8.1-cuda"
+      "ports":
+      - "5000:5000"
+      "restart": "unless-stopped"
+      "volumes":
+      - "/mnt/apps/libretranslate:/home/libretranslate/.local/"
+    "libretranslate-waiter":
+      "depends_on":
+        "libretranslate":
+          "condition": "service_healthy"
+      "entrypoint": |
+        sh -c "
+          echo 'Waiting for LibreTranslate...';
+          for i in $(seq 1 30); do
+            curl -fs http://libretranslate:5000/ && echo 'LibreTranslate is up!' && exit 0;
+            sleep 2;
+          done;
+          echo 'LibreTranslate did not start in time.' >&2;
+          exit 1;
+        "
+      "image": "curlimages/curl:latest"
+    "lingarr":
+      "container_name": "lingarr"
+      "depends_on":
+        "libretranslate-waiter":
+          "condition": "service_completed_successfully"
+      "environment":
+      - "PUID=568"
+      - "PGID=568"
+      - "ASPNETCORE_URLS=http://+:9876"
+      "image": "lingarr/lingarr:latest"
+      "ports":
+      - "9876:9876"
+      "restart": "unless-stopped"
+      "user": "568:568"
+      "volumes":
+      - "/mnt/pool1/dataset01/movies:/movies"
+      - "/mnt/pool1/dataset01/tvshows:/tv"
+      - "/mnt/apps/lingarr:/app/config"
+"nginx-proxy-manager":
+  "TZ": "Europe/Oslo"
+  "ix_certificate_authorities": {}
+  "ix_certificates": {}
+  "ix_context":
+    "app_metadata": &id007
+      "annotations":
+        "min_scale_version": "24.10.2.2"
+      "app_version": "2.13.6"
+      "capabilities":
+      - "description": "Nginx Proxy Manager is able to change file ownership arbitrarily"
+        "name": "CHOWN"
+      - "description": "Nginx Proxy Manager is able to bypass file permission checks"
+        "name": "DAC_OVERRIDE"
+      - "description": "Nginx Proxy Manager is able to bypass permission checks for\
+          \ file operations"
+        "name": "FOWNER"
+      - "description": "Nginx Proxy Manager is able to change group ID of processes"
+        "name": "SETGID"
+      - "description": "Nginx Proxy Manager is able to change user ID of processes"
+        "name": "SETUID"
+      "categories":
+      - "networking"
+      "changelog_url": "https://github.com/NginxProxyManager/nginx-proxy-manager/releases"
+      "date_added": "2024-08-02"
+      "description": "Expose your services easily and securely"
+      "home": "https://nginxproxymanager.com/"
+      "host_mounts": []
+      "icon": "https://media.sys.truenas.net/apps/nginx-proxy-manager/icons/icon.svg"
+      "keywords":
+      - "reverse"
+      - "nginx"
+      - "proxy"
+      "lib_version": "2.1.77"
+      "lib_version_hash": "1837f8e69ae1adc313330c3b1c2615e9b4d03c5459d657a5898bae78090f8195"
+      "maintainers":
+      - "email": "dev@truenas.com"
+        "name": "truenas"
+        "url": "https://www.truenas.com/"
+      "name": "nginx-proxy-manager"
+      "run_as_context":
+      - "description": "Nginx Proxy Manager runs as root user."
+        "gid": 0
+        "group_name": "root"
+        "uid": 0
+        "user_name": "root"
+      "screenshots":
+      - "https://media.sys.truenas.net/apps/nginx-proxy-manager/screenshots/screenshot1.png"
+      - "https://media.sys.truenas.net/apps/nginx-proxy-manager/screenshots/screenshot2.png"
+      - "https://media.sys.truenas.net/apps/nginx-proxy-manager/screenshots/screenshot3.png"
+      "sources":
+      - "https://nginxproxymanager.com/"
+      - "https://hub.docker.com/r/jc21/nginx-proxy-manager"
+      "title": "Nginx Proxy Manager"
+      "train": "community"
+      "version": "1.2.26"
+    "app_name": "nginx-proxy-manager"
+    "is_install": false
+    "is_rollback": false
+    "is_update": false
+    "is_upgrade": true
+    "operation": "UPGRADE"
+    "scale_version": "TrueNAS-25.10.0.1"
+    "upgrade_metadata":
+      "new_version_metadata": *id007
+      "old_version_metadata":
+        "annotations":
+          "min_scale_version": "24.10.2.2"
+        "app_version": "2.13.5"
+        "capabilities":
+        - "description": "Nginx Proxy Manager is able to change file ownership arbitrarily"
+          "name": "CHOWN"
+        - "description": "Nginx Proxy Manager is able to bypass file permission checks"
+          "name": "DAC_OVERRIDE"
+        - "description": "Nginx Proxy Manager is able to bypass permission checks\
+            \ for file operations"
+          "name": "FOWNER"
+        - "description": "Nginx Proxy Manager is able to change group ID of processes"
+          "name": "SETGID"
+        - "description": "Nginx Proxy Manager is able to change user ID of processes"
+          "name": "SETUID"
+        "categories":
+        - "networking"
+        "changelog_url": "https://github.com/NginxProxyManager/nginx-proxy-manager/releases"
+        "date_added": "2024-08-02"
+        "description": "Expose your services easily and securely"
+        "home": "https://nginxproxymanager.com/"
+        "host_mounts": []
+        "icon": "https://media.sys.truenas.net/apps/nginx-proxy-manager/icons/icon.svg"
+        "keywords":
+        - "reverse"
+        - "nginx"
+        - "proxy"
+        "lib_version": "2.1.65"
+        "lib_version_hash": "f92a9ee78c78fc77f86e7d8b545bd4c605c31c599e2c5da59f1615aa516cb8b5"
+        "maintainers":
+        - "email": "dev@truenas.com"
+          "name": "truenas"
+          "url": "https://www.truenas.com/"
+        "name": "nginx-proxy-manager"
+        "run_as_context":
+        - "description": "Nginx Proxy Manager runs as root user."
+          "gid": 0
+          "group_name": "root"
+          "uid": 0
+          "user_name": "root"
+        "screenshots":
+        - "https://media.sys.truenas.net/apps/nginx-proxy-manager/screenshots/screenshot1.png"
+        - "https://media.sys.truenas.net/apps/nginx-proxy-manager/screenshots/screenshot2.png"
+        - "https://media.sys.truenas.net/apps/nginx-proxy-manager/screenshots/screenshot3.png"
+        "sources":
+        - "https://nginxproxymanager.com/"
+        - "https://hub.docker.com/r/jc21/nginx-proxy-manager"
+        "title": "Nginx Proxy Manager"
+        "train": "community"
+        "version": "1.2.23"
+  "ix_volumes": {}
+  "labels": []
+  "network":
+    "additional_ports": []
+    "http_port":
+      "bind_mode": "published"
+      "host_ips":
+      - "0.0.0.0"
+      "port_number": 80
+    "https_port":
+      "bind_mode": "published"
+      "host_ips":
+      - "0.0.0.0"
+      "port_number": 443
+    "web_port":
+      "bind_mode": "published"
+      "host_ips": []
+      "port_number": 30020
+  "npm":
+    "additional_envs": []
+  "release_name": "nginx-proxy-manager"
+  "resources":
+    "limits":
+      "cpus": 4
+      "memory": 4096
+  "run_as":
+    "group": 0
+    "user": 0
+  "storage":
+    "additional_storage": []
+    "certs":
+      "host_path_config":
+        "acl_enable": false
+        "path": "/mnt/apps/nginx-proxy-manager/certs"
+      "type": "host_path"
+    "data":
+      "host_path_config":
+        "acl_enable": false
+        "path": "/mnt/apps/nginx-proxy-manager/data"
+      "type": "host_path"
+"ollama":
+  "ix_certificate_authorities": {}
+  "ix_certificates": {}
+  "ix_context":
+    "app_metadata": &id008
+      "annotations":
+        "min_scale_version": "24.10.2.2"
+      "app_version": "0.14.2"
+      "capabilities": []
+      "categories":
+      - "ai"
+      "changelog_url": "https://github.com/ollama/ollama/releases"
+      "date_added": "2024-10-24"
+      "description": "Get up and running with Llama 3.2, Mistral, Gemma 2, and other\
+        \ large language models."
+      "home": "https://github.com/ollama/ollama"
+      "host_mounts": []
+      "icon": "https://media.sys.truenas.net/apps/ollama/icons/icon.png"
+      "keywords":
+      - "ai"
+      - "llm"
+      "lib_version": "2.1.77"
+      "lib_version_hash": "1837f8e69ae1adc313330c3b1c2615e9b4d03c5459d657a5898bae78090f8195"
+      "maintainers":
+      - "email": "dev@truenas.com"
+        "name": "truenas"
+        "url": "https://www.truenas.com/"
+      "name": "ollama"
+      "run_as_context":
+      - "description": "Ollama runs as root user."
+        "gid": 0
+        "group_name": "root"
+        "uid": 0
+        "user_name": "root"
+      "screenshots": []
+      "sources":
+      - "https://github.com/ollama/ollama"
+      "title": "Ollama"
+      "train": "community"
+      "version": "1.1.51"
+    "app_name": "ollama"
+    "is_install": false
+    "is_rollback": false
+    "is_update": false
+    "is_upgrade": true
+    "operation": "UPGRADE"
+    "scale_version": "TrueNAS-25.10.0.1"
+    "upgrade_metadata":
+      "new_version_metadata": *id008
+      "old_version_metadata":
+        "annotations":
+          "min_scale_version": "24.10.2.2"
+        "app_version": "0.13.5"
+        "capabilities": []
+        "categories":
+        - "ai"
+        "changelog_url": "https://github.com/ollama/ollama/releases"
+        "date_added": "2024-10-24"
+        "description": "Get up and running with Llama 3.2, Mistral, Gemma 2, and other\
+          \ large language models."
+        "home": "https://github.com/ollama/ollama"
+        "host_mounts": []
+        "icon": "https://media.sys.truenas.net/apps/ollama/icons/icon.png"
+        "keywords":
+        - "ai"
+        - "llm"
+        "lib_version": "2.1.65"
+        "lib_version_hash": "f92a9ee78c78fc77f86e7d8b545bd4c605c31c599e2c5da59f1615aa516cb8b5"
+        "maintainers":
+        - "email": "dev@truenas.com"
+          "name": "truenas"
+          "url": "https://www.truenas.com/"
+        "name": "ollama"
+        "run_as_context":
+        - "description": "Ollama runs as root user."
+          "gid": 0
+          "group_name": "root"
+          "uid": 0
+          "user_name": "root"
+        "screenshots": []
+        "sources":
+        - "https://github.com/ollama/ollama"
+        "title": "Ollama"
+        "train": "community"
+        "version": "1.1.47"
+  "ix_volumes": {}
+  "labels": []
+  "network":
+    "api_port":
+      "bind_mode": "published"
+      "host_ips": []
+      "port_number": 30068
+    "host_network": false
+  "ollama":
+    "additional_envs":
+    - "name": "OLLAMA_ORIGINS"
+      "value": "*"
+    - "name": "OLLAMA_CONTEXT_LENGTH"
+      "value": "16000"
+    "image_selector": "image"
+  "release_name": "ollama"
+  "resources":
+    "gpus":
+      "kfd_device_exists": false
+      "nvidia_gpu_selection":
+        "0000:01:00.0":
+          "use_gpu": true
+          "uuid": "GPU-4d588edf-ae80-174a-1f40-0f05771b06c0"
+      "use_all_gpus": false
+    "limits":
+      "cpus": 4
+      "memory": 16384
+  "storage":
+    "additional_storage": []
+    "data":
+      "host_path_config":
+        "acl_enable": false
+        "path": "/mnt/pool1/ollama"
+      "type": "host_path"
+"open-webui":
+  "TZ": "Europe/Oslo"
+  "ix_certificate_authorities": {}
+  "ix_certificates": {}
+  "ix_context":
+    "app_metadata": &id009
+      "annotations":
+        "min_scale_version": "24.10.2.2"
+      "app_version": "0.7.2"
+      "capabilities": []
+      "categories":
+      - "ai"
+      "changelog_url": "https://github.com/open-webui/open-webui/releases"
+      "date_added": "2024-10-24"
+      "description": "Open WebUI is an extensible, feature-rich, and user-friendly\
+        \ self-hosted WebUI designed to operate entirely offline. It supports various\
+        \ LLM runners, including Ollama and OpenAI-compatible APIs."
+      "home": "https://github.com/open-webui/open-webui"
+      "host_mounts": []
+      "icon": "https://media.sys.truenas.net/apps/open-webui/icons/icon.png"
+      "keywords":
+      - "ai"
+      - "llm"
+      - "webui"
+      - "open-webui"
+      "lib_version": "2.1.77"
+      "lib_version_hash": "1837f8e69ae1adc313330c3b1c2615e9b4d03c5459d657a5898bae78090f8195"
+      "maintainers":
+      - "email": "dev@truenas.com"
+        "name": "truenas"
+        "url": "https://www.truenas.com/"
+      "name": "open-webui"
+      "run_as_context":
+      - "description": "Open WebUI runs as root user."
+        "gid": 0
+        "group_name": "root"
+        "uid": 0
+        "user_name": "root"
+      - "description": "Redis runs as any non-root user."
+        "gid": 568
+        "group_name": "redis"
+        "uid": 568
+        "user_name": "redis"
+      "screenshots":
+      - "https://media.sys.truenas.net/apps/open-webui/screenshots/screenshot1.png"
+      "sources":
+      - "https://github.com/open-webui/open-webui"
+      "title": "Open WebUI"
+      "train": "community"
+      "version": "1.1.47"
+    "app_name": "open-webui"
+    "is_install": false
+    "is_rollback": false
+    "is_update": false
+    "is_upgrade": true
+    "operation": "UPGRADE"
+    "scale_version": "TrueNAS-25.10.0.1"
+    "upgrade_metadata":
+      "new_version_metadata": *id009
+      "old_version_metadata":
+        "annotations":
+          "min_scale_version": "24.10.2.2"
+        "app_version": "0.7.1"
+        "capabilities": []
+        "categories":
+        - "ai"
+        "changelog_url": "https://github.com/open-webui/open-webui/releases"
+        "date_added": "2024-10-24"
+        "description": "Open WebUI is an extensible, feature-rich, and user-friendly\
+          \ self-hosted WebUI designed to operate entirely offline. It supports various\
+          \ LLM runners, including Ollama and OpenAI-compatible APIs."
+        "home": "https://github.com/open-webui/open-webui"
+        "host_mounts": []
+        "icon": "https://media.sys.truenas.net/apps/open-webui/icons/icon.png"
+        "keywords":
+        - "ai"
+        - "llm"
+        - "webui"
+        - "open-webui"
+        "lib_version": "2.1.65"
+        "lib_version_hash": "f92a9ee78c78fc77f86e7d8b545bd4c605c31c599e2c5da59f1615aa516cb8b5"
+        "maintainers":
+        - "email": "dev@truenas.com"
+          "name": "truenas"
+          "url": "https://www.truenas.com/"
+        "name": "open-webui"
+        "run_as_context":
+        - "description": "Open WebUI runs as root user."
+          "gid": 0
+          "group_name": "root"
+          "uid": 0
+          "user_name": "root"
+        - "description": "Redis runs as any non-root user."
+          "gid": 568
+          "group_name": "redis"
+          "uid": 568
+          "user_name": "redis"
+        "screenshots":
+        - "https://media.sys.truenas.net/apps/open-webui/screenshots/screenshot1.png"
+        "sources":
+        - "https://github.com/open-webui/open-webui"
+        "title": "Open WebUI"
+        "train": "community"
+        "version": "1.1.45"
+  "ix_volumes": {}
+  "labels": []
+  "network":
+    "web_port":
+      "bind_mode": "published"
+      "host_ips": []
+      "port_number": 31028
+  "open_webui":
+    "additional_envs":
+    - "name": "ENV"
+      "value": "dev"
+    - "name": "CORS_ALLOW_ORIGIN"
+      "value": "*"
+    "image_selector": "ollama_image"
+    "redis_password": "<REDIS_PASSWORD>"
+    "webui_secret_key": "<POSTGRES_PASSWORD>"
+  "release_name": "open-webui"
+  "resources":
+    "gpus":
+      "kfd_device_exists": false
+      "nvidia_gpu_selection":
+        "0000:01:00.0":
+          "use_gpu": false
+          "uuid": "GPU-4d588edf-ae80-174a-1f40-0f05771b06c0"
+      "use_all_gpus": false
+    "limits":
+      "cpus": 2
+      "memory": 4096
+  "run_as":
+    "group": 568
+    "user": 568
+  "storage":
+    "additional_storage": []
+    "data":
+      "host_path_config":
+        "acl_enable": false
+        "path": "/mnt/apps/oi"
+      "type": "host_path"
+    "ollama":
+      "host_path_config":
+        "acl_enable": false
+        "path": "/mnt/pool1/ollama"
+      "type": "host_path"
+"pihole":
+  "TZ": "Europe/Oslo"
+  "ix_certificate_authorities": {}
+  "ix_certificates": {}
+  "ix_context":
+    "app_metadata": &id010
+      "annotations":
+        "min_scale_version": "24.10.2.2"
+      "app_version": "2025.11.1"
+      "capabilities":
+      - "description": "Pi-hole is able to change file ownership arbitrarily"
+        "name": "CHOWN"
+      - "description": "Pi-hole is able to bypass file permission checks"
+        "name": "DAC_OVERRIDE"
+      - "description": "Pi-hole is able to bypass permission checks for file operations"
+        "name": "FOWNER"
+      - "description": "Pi-hole is able to send signals to any process"
+        "name": "KILL"
+      - "description": "Pi-hole is able to perform network administration tasks"
+        "name": "NET_ADMIN"
+      - "description": "Pi-hole is able to bind to privileged ports (< 1024)"
+        "name": "NET_BIND_SERVICE"
+      - "description": "Pi-hole is able to use raw and packet sockets"
+        "name": "NET_RAW"
+      - "description": "Pi-hole is able to set file capabilities on other files"
+        "name": "SETFCAP"
+      - "description": "Pi-hole is able to change group ID of processes"
+        "name": "SETGID"
+      - "description": "Pi-hole is able to transfer capabilities between processes"
+        "name": "SETPCAP"
+      - "description": "Pi-hole is able to change user ID of processes"
+        "name": "SETUID"
+      - "description": "Pi-hole is able to modify process scheduling priority"
+        "name": "SYS_NICE"
+      - "description": "Pi-hole is able to set system clock and real-time clock"
+        "name": "SYS_TIME"
+      "categories":
+      - "networking"
+      "changelog_url": "https://github.com/pi-hole/docker-pi-hole/releases"
+      "date_added": "2024-07-30"
+      "description": "DNS and Ad-filtering for your network."
+      "home": "https://pi-hole.net"
+      "host_mounts": []
+      "icon": "https://media.sys.truenas.net/apps/pihole/icons/icon.png"
+      "keywords":
+      - "networking"
+      - "dns"
+      "lib_version": "2.1.77"
+      "lib_version_hash": "1837f8e69ae1adc313330c3b1c2615e9b4d03c5459d657a5898bae78090f8195"
+      "maintainers":
+      - "email": "dev@truenas.com"
+        "name": "truenas"
+        "url": "https://www.truenas.com/"
+      "name": "pihole"
+      "run_as_context":
+      - "description": "Pi-hole runs as root user."
+        "gid": 0
+        "group_name": "root"
+        "uid": 0
+        "user_name": "root"
+      "screenshots":
+      - "https://media.sys.truenas.net/apps/pihole/screenshots/screenshot1.png"
+      "sources":
+      - "https://pi-hole.net/"
+      - "https://github.com/pi-hole/docker-pi-hole"
+      "title": "Pi-hole"
+      "train": "stable"
+      "version": "1.3.26"
+    "app_name": "pihole"
+    "is_install": false
+    "is_rollback": false
+    "is_update": false
+    "is_upgrade": true
+    "operation": "UPGRADE"
+    "scale_version": "TrueNAS-25.10.0.1"
+    "upgrade_metadata":
+      "new_version_metadata": *id010
+      "old_version_metadata":
+        "annotations":
+          "min_scale_version": "24.10.2.2"
+        "app_version": "2025.11.1"
+        "capabilities":
+        - "description": "Pi-hole is able to change file ownership arbitrarily"
+          "name": "CHOWN"
+        - "description": "Pi-hole is able to bypass file permission checks"
+          "name": "DAC_OVERRIDE"
+        - "description": "Pi-hole is able to bypass permission checks for file operations"
+          "name": "FOWNER"
+        - "description": "Pi-hole is able to send signals to any process"
+          "name": "KILL"
+        - "description": "Pi-hole is able to perform network administration tasks"
+          "name": "NET_ADMIN"
+        - "description": "Pi-hole is able to bind to privileged ports (< 1024)"
+          "name": "NET_BIND_SERVICE"
+        - "description": "Pi-hole is able to use raw and packet sockets"
+          "name": "NET_RAW"
+        - "description": "Pi-hole is able to set file capabilities on other files"
+          "name": "SETFCAP"
+        - "description": "Pi-hole is able to change group ID of processes"
+          "name": "SETGID"
+        - "description": "Pi-hole is able to transfer capabilities between processes"
+          "name": "SETPCAP"
+        - "description": "Pi-hole is able to change user ID of processes"
+          "name": "SETUID"
+        - "description": "Pi-hole is able to modify process scheduling priority"
+          "name": "SYS_NICE"
+        - "description": "Pi-hole is able to set system clock and real-time clock"
+          "name": "SYS_TIME"
+        "categories":
+        - "networking"
+        "changelog_url": "https://github.com/pi-hole/docker-pi-hole/releases"
+        "date_added": "2024-07-30"
+        "description": "DNS and Ad-filtering for your network."
+        "home": "https://pi-hole.net"
+        "host_mounts": []
+        "icon": "https://media.sys.truenas.net/apps/pihole/icons/icon.png"
+        "keywords":
+        - "networking"
+        - "dns"
+        "lib_version": "2.1.65"
+        "lib_version_hash": "f92a9ee78c78fc77f86e7d8b545bd4c605c31c599e2c5da59f1615aa516cb8b5"
+        "maintainers":
+        - "email": "dev@truenas.com"
+          "name": "truenas"
+          "url": "https://www.truenas.com/"
+        "name": "pihole"
+        "run_as_context":
+        - "description": "Pi-hole runs as root user."
+          "gid": 0
+          "group_name": "root"
+          "uid": 0
+          "user_name": "root"
+        "screenshots":
+        - "https://media.sys.truenas.net/apps/pihole/screenshots/screenshot1.png"
+        "sources":
+        - "https://pi-hole.net/"
+        - "https://github.com/pi-hole/docker-pi-hole"
+        "title": "Pi-hole"
+        "train": "stable"
+        "version": "1.3.25"
+  "ix_volumes": {}
+  "labels": []
+  "network":
+    "dns_opts": []
+    "dns_port":
+      "bind_mode": "published"
+      "host_ips": []
+      "port_number": 53
+    "host_network": false
+    "https_port":
+      "bind_mode": "published"
+      "host_ips":
+      - "0.0.0.0"
+      "port_number": 30132
+    "web_port":
+      "bind_mode": "published"
+      "host_ips": []
+      "port_number": 20720
+  "pihole":
+    "additional_envs": []
+    "shm_size_mb": 64
+    "web_password": "<POSTGRES_PASSWORD>"
+  "release_name": "pihole"
+  "resources":
+    "limits":
+      "cpus": 4
+      "memory": 4096
+  "storage":
+    "additional_storage": []
+    "config":
+      "host_path_config":
+        "acl_enable": false
+        "path": "/mnt/apps/pihole/config"
+      "type": "host_path"
+    "dnsmasq":
+      "host_path_config":
+        "acl_enable": false
+        "path": "/mnt/apps/pihole/dnsmasq"
+      "type": "host_path"
+"prowlarr":
+  "services":
+    "prowlarr":
+      "container_name": "prowlarr"
+      "environment":
+      - "PUID=568"
+      - "GUID=568"
+      - "TZ=Europe/Oslo"
+      "extra_hosts":
+      - "bitmagnet:host-gateway"
+      "image": "lscr.io/linuxserver/prowlarr:latest"
+      "ports":
+      - "9696:9696"
+      "restart": "unless-stopped"
+      "volumes":
+      - "/mnt/apps/prowlarr:/config"
+"proxmox":
+  "networks":
+    "vlan":
+      "driver": "macvlan"
+      "driver_opts":
+        "parent": "enp7s0"
+      "ipam":
+        "config":
+        - "gateway": "192.168.10.1"
+          "ip_range": "192.168.10.9/32"
+          "subnet": "192.168.10.0/24"
+        "driver": "default"
+  "services":
+    "qnetd":
+      "container_name": "proxmox-qdevice"
+      "environment":
+      - "NEW_ROOT_PASSWORD=<POSTGRES_PASSWORD>"
+      "hostname": "proxmox-qdevice"
+      "image": "bcleonard/proxmox-qdevice:v2.0"
+      "networks":
+        "vlan":
+          "ipv4_address": "192.168.10.9"
+      "ports":
+      - "22:22"
+      - "5403:5403"
+      "restart": "unless-stopped"
+      "volumes":
+      - "/run/sshd"
+      - "/mnt/apps/proxmox/corosync:/etc/corosync"
+"qbittorrent":
+  "services":
+    "qbittorrent-wireguard":
+      "cap_add":
+      - "NET_ADMIN"
+      "container_name": "qbittorrent-wireguard"
+      "entrypoint":
+      - "/bin/bash"
+      - "/start.sh"
+      "environment":
+      - "PUID=568"
+      - "PGID=568"
+      - "LAN_NETWORK=192.168.10.0/24"
+      - "QBT_LEGAL_NOTICE=confirm"
+      - "TZ=Europe/Oslo"
+      "image": "tenseiken/qbittorrent-wireguard:latest"
+      "ipc": "private"
+      "network_mode": "bridge"
+      "ports":
+      - "8080:8080"
+      - "8999:8999/tcp"
+      - "8999:8999/udp"
+      "restart": "unless-stopped"
+      "security_opt":
+      - "label=disable"
+      "stdin_open": true
+      "sysctls":
+      - "net.ipv4.conf.all.src_valid_mark=1"
+      - "net.ipv6.conf.all.disable_ipv6=0"
+      "tty": true
+      "volumes":
+      - "/mnt/pool1/dataset01/downloads:/downloads"
+      - "/mnt/apps/qbittorrent:/config"
+      "working_dir": "/opt"
+"radarr":
+  "services":
+    "radarr":
+      "container_name": "radarr"
+      "environment":
+      - "PUID=568"
+      - "GUID=568"
+      - "TZ=Europe/Oslo"
+      "image": "lscr.io/linuxserver/radarr:latest"
+      "ports":
+      - "7878:7878"
+      "restart": "unless-stopped"
+      "volumes":
+      - "/mnt/apps/radarr:/config"
+      - "/mnt/pool1/dataset01/movies:/movies"
+      - "/mnt/pool1/dataset01/downloads:/downloads"
+"sonarr":
+  "services":
+    "sonarr":
+      "container_name": "sonarr"
+      "environment":
+      - "PUID=568"
+      - "GUID=568"
+      - "TZ=Europe/Oslo"
+      "image": "lscr.io/linuxserver/sonarr:latest"
+      "ports":
+      - "8989:8989"
+      "restart": "unless-stopped"
+      "volumes":
+      - "/mnt/apps/sonarr:/config"
+      - "/mnt/pool1/dataset01/tvshows:/tv"
+      - "/mnt/pool1/dataset01/downloads:/downloads"
+"sonarr2":
+  "services":
+    "sonarr":
+      "container_name": "sonarr2"
+      "environment":
+      - "PUID=568"
+      - "GUID=568"
+      - "TZ=Europe/Oslo"
+      "image": "lscr.io/linuxserver/sonarr:latest"
+      "ports":
+      - "28989:8989"
+      "restart": "unless-stopped"
+      "volumes":
+      - "/mnt/apps/sonarr2:/config"
+      - "/mnt/pool1/dataset01/animes:/animes"
+      - "/mnt/pool1/dataset01/downloads:/downloads"
+"tdarr-denix":
+  "services":
+    "tdarr_DoVi":
+      "container_name": "tdarr_denix"
+      "deploy":
+        "resources":
+          "reservations":
+            "devices":
+            - "capabilities":
+              - "gpu"
+              "count": "all"
+              "driver": "nvidia"
+      "environment":
+        "GPU_VENDOR": "nvidia"
+        "PGID": 568
+        "PUID": 568
+        "TDARR_MODE": "both"
+        "TZ": "Europe/Oslo"
+        "UMASK_SET": 2
+        "serverIP": "0.0.0.0"
+        "serverPort": 8266
+        "webUIPort": 8265
+      "healthcheck":
+        "interval": "30s"
+        "retries": 5
+        "start_period": "15s"
+        "test":
+        - "CMD-SHELL"
+        - "curl --request GET --silent --output /dev/null --show-error --fail http://127.0.0.1:8265/api/v2/status"
+        "timeout": "5s"
+      "image": "denix811/tdarr-denix:latest"
+      "ports":
+      - "3265:8265"
+      - "3266:8266"
+      "privileged": true
+      "runtime": "nvidia"
+      "volumes":
+      - "/home/truenas_admin/tdarr-test/tdarr/config:/app/config:rw"
+      - "/home/truenas_admin/tdarr-test/tdarr/hostconfiguration:/app/logs:rw"
+      - "/home/truenas_admin/tdarr-test/tdarr/storage:/app/server:rw"
+      - "/home/truenas_admin/tdarr-test/tdarr-transcode-cache:/temp:rw"
+      - "/home/truenas_admin/tdarr-test:/tdarr-test"
+"tdarr-dovi":
+  "services":
+    "tdarr_DoVi":
+      "container_name": "tdarr_DoVi"
+      "deploy":
+        "resources":
+          "reservations":
+            "devices":
+            - "capabilities":
+              - "gpu"
+              "count": "all"
+              "driver": "nvidia"
+      "environment":
+        "PGID": 568
+        "PUID": 568
+        "TZ": "Europe/Oslo"
+        "UMASK_SET": 2
+        "ffmpegVersion": 7
+        "inContainer": false
+        "internalNode": false
+        "nodeName": "Yeezy"
+        "serverIP": "0.0.0.0"
+        "serverPort": 8266
+        "webUIPort": 8265
+      "group_add":
+      - 44
+      - 46
+      - 568
+      "healthcheck":
+        "interval": "30s"
+        "retries": 5
+        "start_period": "15s"
+        "test":
+        - "CMD-SHELL"
+        - "curl --request GET --silent --output /dev/null --show-error --fail http://127.0.0.1:8265/api/v2/status"
+        "timeout": "5s"
+      "image": "ghcr.io/haveagitgat/tdarr:latest"
+      "ports":
+      - "8265:8265"
+      - "8266:8266"
+      "privileged": true
+      "restart": "unless-stopped"
+      "volumes":
+      - "/mnt/apps/tdarr/config:/app/config:rw"
+      - "/mnt/apps/tdarr/hostconfiguration:/app/logs:rw"
+      - "/mnt/apps/tdarr/storage:/app/server:rw"
+      - "/mnt/pool1/tdarr-transcode-cache:/temp:rw"
+      - "/mnt/pool1/dataset01/movies:/movies:rw"
+      - "/mnt/pool1/dataset01/tvshows:/tvshows:rw"
+      - "/mnt/pool1/dataset01/animes:/animes:rw"
+      - "/home/truenas_admin/tdarr-test:/tdarr-test"
+      - "/home/truenas_admin/tdarr-input-test:/tdarr-input-test"
+      - "/home/truenas_admin/tdarr-output-test:/tdarr-output-test"
+    "tdarr_DoVi-node":
+      "container_name": "tdarr_DoVi-node"
+      "depends_on":
+      - "tdarr_DoVi"
+      "deploy":
+        "resources":
+          "reservations":
+            "devices":
+            - "capabilities":
+              - "gpu"
+              "count": "all"
+              "driver": "nvidia"
+      "devices":
+      - "/dev/dri:/dev/dri"
+      "environment":
+        "NVIDIA_DRIVER_CAPABILITIES": "all"
+        "NVIDIA_VISIBLE_DEVICES": "all"
+        "PGID": 568
+        "PUID": 568
+        "TZ": "Europe/Oslo"
+        "UMASK_SET": 2
+        "ffmpegVersion": 7
+        "inContainer": true
+        "nodeName": "DoVi_Yeezy"
+        "serverPort": 8266
+        "webUIPort": 8265
+      "group_add":
+      - 44
+      - 46
+      - 568
+      "image": "nichols89ben/dovi-tdarr-node:latest"
+      "network_mode": "service:tdarr_DoVi"
+      "restart": "unless-stopped"
+      "volumes":
+      - "/mnt/apps/tdarr/nodeconfiguration:/app/server:rw"
+      - "/mnt/apps/tdarr/nodeconfiguration/config:/app/configs:rw"
+      - "/mnt/apps/tdarr/nodeconfiguration/logs:/app/logs:rw"
+      - "/mnt/pool1/tdarr-transcode-cache:/temp:rw"
+      - "/mnt/pool1/dataset01/movies:/movies:rw"
+      - "/mnt/pool1/dataset01/tvshows:/tvshows:rw"
+      - "/mnt/pool1/dataset01/animes:/animes:rw"
+      - "/home/truenas_admin/tdarr-test:/tdarr-test"
+      - "/home/truenas_admin/tdarr-input-test:/tdarr-input-test"
+      - "/home/truenas_admin/tdarr-output-test:/tdarr-output-test"
+"truenas-auto-update":
+  "services":
+    "truenas-auto-update":
+      "environment":
+        "API_KEY": "5-xS7gYZ24sxBP4cqBA1UdHij4UUn9OLDXv1xNJLTT2pTBJ5GdroiFwfPLflXLPajb"
+        "AUTO_CLEANUP_IMAGES": "true"
+        "BASE_URL": "https://truenas.epaflix.com"
+        "CRON_SCHEDULE": "0 4 * * *"
+        "NVIDIA_VISIBLE_DEVICES": "void"
+        "ONLY_UPDATE_STARTED_APPS": "true"
+        "TZ": "Europe/Oslo"
+      "group_add":
+      - 568
+      "hostname": "truenas.epaflix.com"
+      "image": "ghcr.io/marvinvr/truenas-auto-update:latest"
+      "platform": "linux/amd64"
+      "privileged": true
+      "pull_policy": "missing"
+      "restart": "unless-stopped"
+      "stdin_open": false
+      "tty": false
+      "volumes":
+      - "/var/run/docker.sock:/var/run/docker.sock"
+"wg-easy":
+  "ix_certificate_authorities": {}
+  "ix_certificates": {}
+  "ix_context":
+    "app_metadata": &id011
+      "app_version": "15.2.1"
+      "capabilities":
+      - "description": "WG Easy is able to perform network administration tasks"
+        "name": "NET_ADMIN"
+      - "description": "WG Easy is able to use raw and packet sockets"
+        "name": "NET_RAW"
+      - "description": "WG Easy is able to load and unload kernel modules"
+        "name": "SYS_MODULE"
+      "categories":
+      - "networking"
+      "changelog_url": "https://github.com/wg-easy/wg-easy/releases"
+      "date_added": "2024-08-07"
+      "description": "WG-Easy is the easiest way to install & manage WireGuard!"
+      "home": "https://github.com/wg-easy/wg-easy"
+      "host_mounts":
+      - "description": "Host modules (Read-only)"
+        "host_path": "/lib/modules"
+      "icon": "https://media.sys.truenas.net/apps/wg-easy/icons/icon.png"
+      "keywords":
+      - "wireguard"
+      - "network"
+      - "vpn"
+      "lib_version": "2.1.77"
+      "lib_version_hash": "1837f8e69ae1adc313330c3b1c2615e9b4d03c5459d657a5898bae78090f8195"
+      "maintainers":
+      - "email": "dev@truenas.com"
+        "name": "truenas"
+        "url": "https://www.truenas.com/"
+      "name": "wg-easy"
+      "run_as_context":
+      - "description": "WG Easy runs as root user."
+        "gid": 0
+        "group_name": "root"
+        "uid": 0
+        "user_name": "root"
+      "screenshots":
+      - "https://media.sys.truenas.net/apps/wg-easy/screenshots/screenshot1.png"
+      "sources":
+      - "https://github.com/wg-easy/wg-easy"
+      "title": "WG Easy"
+      "train": "stable"
+      "version": "2.0.17"
+    "app_name": "wg-easy"
+    "is_install": false
+    "is_rollback": false
+    "is_update": false
+    "is_upgrade": true
+    "operation": "UPGRADE"
+    "scale_version": "TrueNAS-25.10.0.1"
+    "upgrade_metadata":
+      "new_version_metadata": *id011
+      "old_version_metadata":
+        "app_version": "15.1.0"
+        "capabilities":
+        - "description": "WG Easy is able to perform network administration tasks"
+          "name": "NET_ADMIN"
+        - "description": "WG Easy is able to use raw and packet sockets"
+          "name": "NET_RAW"
+        - "description": "WG Easy is able to load and unload kernel modules"
+          "name": "SYS_MODULE"
+        "categories":
+        - "networking"
+        "changelog_url": "https://github.com/wg-easy/wg-easy/releases"
+        "date_added": "2024-08-07"
+        "description": "WG-Easy is the easiest way to install & manage WireGuard!"
+        "home": "https://github.com/wg-easy/wg-easy"
+        "host_mounts":
+        - "description": "Host modules (Read-only)"
+          "host_path": "/lib/modules"
+        "icon": "https://media.sys.truenas.net/apps/wg-easy/icons/icon.png"
+        "keywords":
+        - "wireguard"
+        - "network"
+        - "vpn"
+        "lib_version": "2.1.65"
+        "lib_version_hash": "f92a9ee78c78fc77f86e7d8b545bd4c605c31c599e2c5da59f1615aa516cb8b5"
+        "maintainers":
+        - "email": "dev@truenas.com"
+          "name": "truenas"
+          "url": "https://www.truenas.com/"
+        "name": "wg-easy"
+        "run_as_context":
+        - "description": "WG Easy runs as root user."
+          "gid": 0
+          "group_name": "root"
+          "uid": 0
+          "user_name": "root"
+        "screenshots":
+        - "https://media.sys.truenas.net/apps/wg-easy/screenshots/screenshot1.png"
+        "sources":
+        - "https://github.com/wg-easy/wg-easy"
+        "title": "WG Easy"
+        "train": "stable"
+        "version": "2.0.14"
+  "ix_volumes": {}
+  "labels": []
+  "network":
+    "host_network": true
+    "web_port":
+      "bind_mode": "published"
+      "host_ips": []
+      "port_number": 30058
+  "release_name": "wg-easy"
+  "resources":
+    "limits":
+      "cpus": 4
+      "memory": 4096
+  "storage":
+    "additional_storage": []
+    "config":
+      "host_path_config":
+        "acl_enable": false
+        "path": "/mnt/apps/wg-easy/config"
+      "type": "host_path"
+  "wg_easy":
+    "additional_envs": []
+    "insecure": true
+"wizarr":
+  "TZ": "Europe/Oslo"
+  "ix_certificate_authorities": {}
+  "ix_certificates": {}
+  "ix_context":
+    "app_metadata": &id012
+      "app_version": "v2025.11.1"
+      "capabilities": []
+      "categories":
+      - "media"
+      "changelog_url": "https://github.com/wizarrrr/wizarr/releases"
+      "date_added": "2025-07-11"
+      "description": "Wizarr is an advanced user invitation and management system\
+        \ for Jellyfin, Plex, Emby etc."
+      "home": "https://github.com/wizarrrr/wizarr"
+      "host_mounts": []
+      "icon": "https://media.sys.truenas.net/apps/wizarr/icons/icon.png"
+      "keywords":
+      - "media"
+      - "invitation"
+      - "management"
+      "lib_version": "2.1.57"
+      "lib_version_hash": "6659ad369fff2f1df318cb6353bb32bffe7047dc21df4823750d39be7284e605"
+      "maintainers":
+      - "email": "dev@truenas.com"
+        "name": "truenas"
+        "url": "https://www.truenas.com/"
+      "name": "wizarr"
+      "run_as_context":
+      - "description": "Wizarr runs as any non-root user."
+        "gid": 568
+        "group_name": "wizarr"
+        "uid": 568
+        "user_name": "wizarr"
+      "screenshots": []
+      "sources":
+      - "https://github.com/wizarrrr/wizarr"
+      "title": "Wizarr"
+      "train": "community"
+      "version": "1.0.25"
+    "app_name": "wizarr"
+    "is_install": false
+    "is_rollback": false
+    "is_update": false
+    "is_upgrade": true
+    "operation": "UPGRADE"
+    "scale_version": "TrueNAS-25.04.2.4"
+    "upgrade_metadata":
+      "new_version_metadata": *id012
+      "old_version_metadata":
+        "app_version": "v2025.11.0"
+        "capabilities": []
+        "categories":
+        - "media"
+        "changelog_url": "https://github.com/wizarrrr/wizarr/releases"
+        "date_added": "2025-07-11"
+        "description": "Wizarr is an advanced user invitation and management system\
+          \ for Jellyfin, Plex, Emby etc."
+        "home": "https://github.com/wizarrrr/wizarr"
+        "host_mounts": []
+        "icon": "https://media.sys.truenas.net/apps/wizarr/icons/icon.png"
+        "keywords":
+        - "media"
+        - "invitation"
+        - "management"
+        "lib_version": "2.1.57"
+        "lib_version_hash": "6659ad369fff2f1df318cb6353bb32bffe7047dc21df4823750d39be7284e605"
+        "maintainers":
+        - "email": "dev@truenas.com"
+          "name": "truenas"
+          "url": "https://www.truenas.com/"
+        "name": "wizarr"
+        "run_as_context":
+        - "description": "Wizarr runs as any non-root user."
+          "gid": 568
+          "group_name": "wizarr"
+          "uid": 568
+          "user_name": "wizarr"
+        "screenshots": []
+        "sources":
+        - "https://github.com/wizarrrr/wizarr"
+        "title": "Wizarr"
+        "train": "community"
+        "version": "1.0.24"
+  "ix_volumes": {}
+  "labels": []
+  "network":
+    "host_network": false
+    "web_port":
+      "bind_mode": "published"
+      "host_ips": []
+      "port_number": 30229
+  "release_name": "wizarr"
+  "resources":
+    "limits":
+      "cpus": 2
+      "memory": 4096
+  "run_as":
+    "group": 568
+    "user": 568
+  "storage":
+    "additional_storage": []
+    "database":
+      "host_path_config":
+        "acl_enable": false
+        "path": "/mnt/apps/wizarr"
+      "type": "host_path"
+  "wizarr":
+    "additional_envs":
+    - "name": "DISABLE_BUILTIN_AUTH"
+      "value": "true"

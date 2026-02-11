@@ -1,0 +1,26 @@
+---
+# Custom CoreDNS ConfigMap for k3s
+#
+# This configures CoreDNS to forward DNS queries directly to the Pi-hole
+# instead of using the node's /etc/resolv.conf (which may have search domains
+# that cause issues with the *.epaflix.com wildcard catchall).
+#
+# PREFERRED METHOD: Patch the main coredns configmap directly:
+#
+#   kubectl patch configmap coredns -n kube-system --type=json \
+#     -p='[{"op":"replace","path":"/data/Corefile","value":".:53 {\n    errors\n    health\n    ready\n    kubernetes cluster.local in-addr.arpa ip6.arpa {\n      pods insecure\n      fallthrough in-addr.arpa ip6.arpa\n    }\n    hosts /etc/coredns/NodeHosts {\n      ttl 60\n      reload 15s\n      fallthrough\n    }\n    prometheus :9153\n    cache 30\n    loop\n    reload\n    loadbalance\n    import /etc/coredns/custom/*.override\n    forward . 192.168.10.30\n}\nimport /etc/coredns/custom/*.server\n"}]'
+#   kubectl rollout restart deployment/coredns -n kube-system
+#
+# ALTERNATIVE: Apply this custom configmap (k3s auto-mounts it):
+#   kubectl apply -f coredns-custom.yaml
+#   kubectl rollout restart deployment/coredns -n kube-system
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns-custom
+  namespace: kube-system
+data:
+  # Override the forward directive to use Pi-hole directly
+  # This prevents the epaflix.com search domain from being inherited
+  # Note: The import statement in Corefile loads this before the default forward

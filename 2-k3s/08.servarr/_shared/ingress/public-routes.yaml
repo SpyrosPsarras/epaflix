@@ -1,0 +1,124 @@
+---
+# Public Internet-facing IngressRoutes with Let's Encrypt TLS
+# Jellyfin - Media Server
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: jellyfin-https
+  namespace: servarr
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`jellyfin.epaflix.com`)
+      kind: Rule
+      services:
+        - name: jellyfin
+          port: 8096
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
+---
+# HTTP to HTTPS redirect for Jellyfin
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: jellyfin-http
+  namespace: servarr
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`jellyfin.epaflix.com`)
+      kind: Rule
+      middlewares:
+        - name: redirect-https
+          namespace: traefik-system
+      services:
+        - name: jellyfin
+          port: 8096
+---
+# Seerr - Media Requests (migrated from Jellyseerr)
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: seerr-https
+  namespace: servarr
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`seerr.epaflix.com`)
+      kind: Rule
+      services:
+        - name: seerr
+          port: 5055
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
+---
+# HTTP to HTTPS redirect for Seerr
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: seerr-http
+  namespace: servarr
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`seerr.epaflix.com`)
+      kind: Rule
+      middlewares:
+        - name: redirect-https
+          namespace: traefik-system
+      services:
+        - name: seerr
+          port: 5055
+---
+# Jellyseerr - Legacy domain (both domains work, no redirect to preserve OIDC compatibility)
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: jellyseerr-https
+  namespace: servarr
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`jellyseerr.epaflix.com`)
+      kind: Rule
+      services:
+        - name: seerr
+          port: 5055
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
+---
+# HTTP to HTTPS redirect for Jellyseerr (legacy)
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: jellyseerr-http
+  namespace: servarr
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`jellyseerr.epaflix.com`)
+      kind: Rule
+      middlewares:
+        - name: redirect-https
+          namespace: traefik-system
+      services:
+        - name: seerr
+          port: 5055

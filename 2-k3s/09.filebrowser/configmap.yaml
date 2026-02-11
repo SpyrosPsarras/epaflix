@@ -1,0 +1,47 @@
+---
+# FileBrowser configuration with OIDC authentication
+# This ConfigMap defines the config.yaml for FileBrowser Quantum
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: filebrowser-config
+  namespace: filebrowser
+data:
+  config.yaml: |
+    server:
+      port: 80
+      database: "/config/database.db"
+      cacheDir: "/config/cache"
+      externalUrl: "https://filebrowser.epaflix.com"
+      filesystem:
+        createFilePermission: "644"
+        createDirectoryPermission: "755"
+      minSearchLength: 3
+      disableUpdateCheck: false
+      sources:
+        - path: "/srv"
+          name: "Media Files"
+          config:
+            defaultEnabled: true
+
+    # Authentication via Authentik OIDC
+    auth:
+      methods:
+        password:
+          enabled: false  # Disable password auth, OIDC only
+        oidc:
+          enabled: true
+          clientId: "<FILEBROWSER_OIDC_CLIENT_ID>"
+          clientSecret: "<FILEBROWSER_OIDC_CLIENT_SECRET>"
+          issuerUrl: "https://auth.epaflix.com/application/o/filebrowser/"
+          scopes: "openid email profile groups"
+          userIdentifier: "preferred_username"
+          createUser: true  # Auto-create users on first OIDC login
+          adminGroup: "filebrowser-admins"  # Users in this Authentik group get admin rights
+          groupsClaim: "groups"
+
+    # Logging configuration
+    logging:
+      level: "debug"
+      format: "json"
+      output: "stdout"

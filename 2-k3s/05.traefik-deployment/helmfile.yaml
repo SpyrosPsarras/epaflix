@@ -1,0 +1,15 @@
+repositories:
+  - name: traefik
+    url: https://traefik.github.io/charts
+
+releases:
+  - name: traefik
+    namespace: traefik-system
+    chart: traefik/traefik
+    version: "26.0.0" # Latest stable version
+    values:
+      - values/traefik-values.yaml
+    installed: true
+    wait: true
+    timeout: 300
+    atomic: true
