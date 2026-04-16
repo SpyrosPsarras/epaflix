@@ -1,27 +1,41 @@
 ---
-apiVersion: networking.k8s.io/v1
-kind: Ingress
+# FileBrowser - HTTPS IngressRoute with Let's Encrypt TLS via Cloudflare
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
 metadata:
-  name: filebrowser
+  name: filebrowser-https
   namespace: filebrowser
-  annotations:
-    traefik.ingress.kubernetes.io/router.entrypoints: websecure
-    traefik.ingress.kubernetes.io/router.tls: "true"
-    cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
-  ingressClassName: traefik
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`filebrowser.epaflix.com`)
+      kind: Rule
+      services:
+        - name: filebrowser
+          port: 80
   tls:
-    - hosts:
-        - filebrowser.epaflix.com
-      secretName: filebrowser-tls
-  rules:
-    - host: filebrowser.epaflix.com
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: filebrowser
-                port:
-                  number: 80
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
+---
+# HTTP to HTTPS redirect for FileBrowser
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: filebrowser-http
+  namespace: filebrowser
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`filebrowser.epaflix.com`)
+      kind: Rule
+      middlewares:
+        - name: redirect-https
+          namespace: traefik-system
+      services:
+        - name: filebrowser
+          port: 80
