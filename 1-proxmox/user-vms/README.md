@@ -17,16 +17,16 @@ This directory contains SSH config files for individual user VMs and documents t
 ```
 
 External DNS (Cloudflare) → `<user>.epaflix.com` → `81.167.233.67` (router) → port 10022 → jumpbox port 22
-Internal DNS (Pi-hole) → `<user>.internal.epaflix.com` → `192.168.10.4X`
+Internal DNS (Pi-hole) → `<user>.vm.epaflix.com` → `192.168.10.4X` (LAN-only, no public record)
 
 ---
 
 ## Inventory
 
-| User  | VMID | IP             | Hostname                     |
-|-------|------|----------------|------------------------------|
-| nick  | 1041 | 192.168.10.41  | nick.internal.epaflix.com    |
-| vidar | 1042 | 192.168.10.42  | vidar.internal.epaflix.com   |
+| User  | VMID | IP             | Hostname               |
+|-------|------|----------------|------------------------|
+| nick  | 1041 | 192.168.10.41  | nick.vm.epaflix.com    |
+| vidar | 1042 | 192.168.10.42  | vidar.vm.epaflix.com   |
 
 ---
 
@@ -181,18 +181,19 @@ ssh root@192.168.10.10 "pct exec 1040 -- sh -c 'grep ${USER} /etc/shadow'"
 
 ```bash
 ssh root@192.168.10.30 "
-  echo 'address=/${USER}.internal.epaflix.com/${IP}' >> /etc/dnsmasq.d/10-internal-epaflix.conf
+  echo 'address=/${USER}.vm.epaflix.com/${IP}' >> /etc/dnsmasq.d/10-vm-epaflix.conf
   systemctl restart pihole-FTL
 "
 
 # Verify (pihole reloaddns alone is NOT enough for new entries — use full FTL restart)
-dig ${USER}.internal.epaflix.com @192.168.10.30 +short
+dig ${USER}.vm.epaflix.com @192.168.10.30 +short
 # Expected: <IP>
 ```
 
 > ⚠️ **Use `systemctl restart pihole-FTL`**, not just `pihole reloaddns`, when adding new
-> `*.internal.epaflix.com` entries. A reload (SIGHUP) does not always pick up new dnsmasq
-> directives for this zone.
+> `*.vm.epaflix.com` entries. A reload (SIGHUP) does not always pick up new dnsmasq
+> directives for this zone. Unbound's `local-zone: "vm.epaflix.com." static` directive
+> guarantees NXDOMAIN for any unlisted name in this zone — it never leaks to public DNS.
 
 ### 9. Add external DNS record (Cloudflare — manual)
 
@@ -211,7 +212,7 @@ ssh -i /tmp/${USER}_ed25519 \
   -o IdentitiesOnly=yes \
   -o StrictHostKeyChecking=no \
   -o ProxyCommand="ssh -q -W %h:%p -i /tmp/${USER}_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -p 22 ${USER}@192.168.10.40" \
-  ${USER}@${USER}.internal.epaflix.com \
+  ${USER}@${USER}.vm.epaflix.com \
   "echo ok && hostname && uptime"
 ```
 
@@ -235,7 +236,7 @@ Host epaflix-jumpbox-<user>
     IdentitiesOnly yes
 
 Host <user>-vm
-    HostName <user>.internal.epaflix.com
+    HostName <user>.vm.epaflix.com
     User <user>
     ProxyJump epaflix-jumpbox-<user>
     IdentityFile ~/.ssh/<user>_ed25519
@@ -306,14 +307,14 @@ extra keys before the right one.
 This happens when the `ProxyCommand` or `ProxyJump` could not forward to the internal VM. Check:
 1. The jumpbox auth works: `ssh -i <key> -o IdentitiesOnly=yes -p 10022 <user>@<user>.epaflix.com hostname`
 2. The jumpbox can reach the VM: `pct exec 1040 -- nc -zv 192.168.10.4X 22`
-3. Internal DNS resolves on the jumpbox: `pct exec 1040 -- nslookup <user>.internal.epaflix.com`
+3. Internal DNS resolves on the jumpbox: `pct exec 1040 -- nslookup <user>.vm.epaflix.com`
 4. `AllowTcpForwarding yes` is set in `/etc/ssh/sshd_config.d/epaflix.conf` on the jumpbox
 5. The user is in the `ssh-users` group: `pct exec 1040 -- getent group ssh-users`
 6. The config uses `ProxyJump`, not `ProxyCommand` with a host alias — see note in step 11 above
 
 ### Internal DNS not resolving after adding record
 
-`pihole reloaddns` is not always sufficient for new `*.internal.epaflix.com` entries.
+`pihole reloaddns` is not always sufficient for new `*.vm.epaflix.com` entries.
 Use a full restart:
 
 ```bash

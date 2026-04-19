@@ -2,12 +2,12 @@
 # CoreDNS Custom Configuration for epaflix.com domains
 #
 # This allows pods to access services using their external domain names
-# (e.g., https://sonarr.internal.epaflix.com) instead of internal service names
+# (e.g., https://sonarr.epaflix.com) instead of internal service names
 # (e.g., http://sonarr:8989).
 #
-# ALL *.epaflix.com and *.internal.epaflix.com domains resolve to the Traefik
-# LoadBalancer IP (192.168.10.101), allowing pods to use HTTPS with proper
-# certificates when communicating with other services.
+# *.epaflix.com queries forward to the K3s master nodes (systemd-resolved),
+# which forward to Pi-hole at 192.168.10.30. This covers every subdomain
+# including *.vm.epaflix.com (user VMs) as a zone-match under epaflix.com.
 #
 # IMPORTANT: Before applying this configuration:
 #   1. Configure systemd-resolved on all nodes to listen on node IPs
@@ -20,7 +20,7 @@
 #
 # Verification:
 #   kubectl run test-dns --image=busybox:latest --restart=Never --rm -it -- \
-#     nslookup sonarr.internal.epaflix.com
+#     nslookup auth.epaflix.com
 #   # Should return: 192.168.10.101
 
 apiVersion: v1
@@ -29,13 +29,13 @@ metadata:
   name: coredns-custom
   namespace: kube-system
 data:
-  # Server block for *.epaflix.com and *.internal.epaflix.com
+  # Server block for *.epaflix.com
   # Forwards queries to K3s master nodes which have systemd-resolved
   # listening on their IPs. The nodes then forward to Pi-hole (192.168.10.30).
   # This is required because Pi-hole only accepts queries from 192.168.10.0/24
   # network, not from the pod network (10.42.x.x).
   epaflix.server: |
-    epaflix.com:53 internal.epaflix.com:53 {
+    epaflix.com:53 {
         errors
         cache 30
         forward . 192.168.10.51 192.168.10.52 192.168.10.53

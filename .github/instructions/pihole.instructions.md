@@ -29,7 +29,7 @@ LAN clients
 Pi-hole FTL / dnsmasq (192.168.10.30)
     │
     ├── 1. dnsmasq address= directives  ← /etc/dnsmasq.d/10-epaflix.conf          ← WINS (public A records)
-    ├── 2. dnsmasq address= directives  ← /etc/dnsmasq.d/10-internal-epaflix.conf ← WINS (internal A records)
+    ├── 2. dnsmasq address= directives  ← /etc/dnsmasq.d/10-vm-epaflix.conf       ← WINS (user-VM A records)
     ├── 3. filter-rr=HTTPS              ← /etc/dnsmasq.d/20-filter-https-records.conf ← NODATA for HTTPS type queries
     └── 4. Upstream: Unbound            ← 127.0.0.1:5335                          ← all other queries
                 │
@@ -39,7 +39,7 @@ Pi-hole FTL / dnsmasq (192.168.10.30)
 `/etc/dnsmasq.d/` is the **single source of truth** for all `epaflix.com` DNS records.
 Pi-hole's `custom.list` is intentionally empty. Unbound holds no `local-data` for `epaflix.com`
 domains — its only role is upstream resolution for everything not in dnsmasq.d, and a
-`local-zone: static` directive to prevent unknown `*.internal.epaflix.com` names from
+`local-zone: static` directive to prevent unknown `*.vm.epaflix.com` names from
 leaking to public DNS.
 
 > **HTTPS record type filtering (verified 2026-03-22):** Modern browsers (Firefox, Chrome)
@@ -59,11 +59,11 @@ leaking to public DNS.
 | File | Role |
 |---|---|
 | `/etc/dnsmasq.d/10-epaflix.conf` | **Active** — all `*.epaflix.com` public subdomain A records |
-| `/etc/dnsmasq.d/10-internal-epaflix.conf` | **Active** — `nick.internal.epaflix.com` only |
+| `/etc/dnsmasq.d/10-vm-epaflix.conf` | **Active** — `*.vm.epaflix.com` user-VM A records (LAN-only) |
 | `/etc/dnsmasq.d/20-filter-https-records.conf` | **Active** — `filter-rr=HTTPS` blocks HTTPS type queries from reaching public DNS |
 | `/etc/pihole/custom.list` | **Empty** — intentionally cleared, do not repopulate |
 | `/etc/unbound/unbound.conf.d/pi-hole.conf` | Unbound core: port 5335, cache, DoT upstream |
-| `/etc/unbound/unbound.conf.d/internal-epaflix.conf` | `local-zone: static` security directive only — no data entries |
+| `/etc/unbound/unbound.conf.d/vm-epaflix.conf` | `local-zone: static` security directive only — no data entries |
 | `/etc/unbound/unbound.conf.d/remote-control.conf` | Enables `unbound-control` via `/run/unbound.ctl` |
 | `/etc/unbound/unbound.conf.d/disable-ipv6.conf` | Placeholder (`server:` stanza only, no directives) |
 | `/etc/pihole/pihole.toml` | Pi-hole v6 config — managed by FTL, do not edit directly |
@@ -100,22 +100,23 @@ As services migrate to Docker Swarm, individual records will be updated to `192.
 > **No wildcard**: any unlisted `*.epaflix.com` subdomain falls through to public DNS
 > and resolves to the real Cloudflare IPs (`172.67.179.219` / `104.21.59.155`).
 
-### `/etc/dnsmasq.d/10-internal-epaflix.conf` — internal subdomains
+### `/etc/dnsmasq.d/10-vm-epaflix.conf` — user-VM subdomains
 
-Two entries exist. All other `*.internal.epaflix.com` entries were removed on
-2026-03-22 — K3s has zero IngressRoutes for `internal.epaflix.com` (verified).
+LAN-only names for individual user VMs. No public DNS records exist for this zone —
+Unbound's static zone directive ensures unlisted names NXDOMAIN instead of leaking
+to public DNS. The zone was renamed from `internal.epaflix.com` on 2026-04-18.
 
 | Domain | IP | Notes |
 |---|---|---|
-| `nick.internal.epaflix.com` | 192.168.10.41 | Individual user VM |
-| `vidar.internal.epaflix.com` | 192.168.10.42 | Individual user VM — added 2026-04-11 |
+| `nick.vm.epaflix.com` | 192.168.10.41 | Individual user VM |
+| `vidar.vm.epaflix.com` | 192.168.10.42 | Individual user VM |
 
-> **NXDOMAIN protection**: Unbound's `local-zone: "internal.epaflix.com." static` ensures
-> any unlisted `*.internal.epaflix.com` name returns NXDOMAIN and never leaks to public DNS.
-> Verified: `random999.internal.epaflix.com` → NXDOMAIN.
+> **NXDOMAIN protection**: Unbound's `local-zone: "vm.epaflix.com." static` ensures
+> any unlisted `*.vm.epaflix.com` name returns NXDOMAIN and never leaks to public DNS.
+> Verified: `random999.vm.epaflix.com` → NXDOMAIN.
 
 > ⚠️ **FTL restart required for new entries**: `pihole reloaddns` (SIGHUP) does **not** always
-> pick up new `address=` entries for the `*.internal.epaflix.com` zone. Always use
+> pick up new `address=` entries for the `*.vm.epaflix.com` zone. Always use
 > `systemctl restart pihole-FTL` after adding a new entry here.
 
 ---
@@ -125,7 +126,7 @@ Two entries exist. All other `*.internal.epaflix.com` entries were removed on
 ### The Golden Rule
 
 **Edit only `/etc/dnsmasq.d/10-epaflix.conf`** for public services, or
-**`/etc/dnsmasq.d/10-internal-epaflix.conf`** for internal VM entries.
+**`/etc/dnsmasq.d/10-vm-epaflix.conf`** for user-VM entries.
 Do not touch `custom.list`, Unbound data entries, or `pihole.toml` hosts for this purpose.
 
 ### Adding a new record
@@ -136,8 +137,8 @@ ssh root@192.168.10.30
 # Public service (*.epaflix.com)
 echo "address=/newapp.epaflix.com/192.168.10.71" >> /etc/dnsmasq.d/10-epaflix.conf
 
-# Internal VM (*.internal.epaflix.com)
-echo "address=/newvm.internal.epaflix.com/192.168.10.50" >> /etc/dnsmasq.d/10-internal-epaflix.conf
+# User VM (*.vm.epaflix.com)
+echo "address=/newvm.vm.epaflix.com/192.168.10.50" >> /etc/dnsmasq.d/10-vm-epaflix.conf
 
 # Apply
 pihole reloaddns
@@ -375,36 +376,39 @@ Answered by `address=` directives in `/etc/dnsmasq.d/10-epaflix.conf`.
 - Currently all → `192.168.10.101` (K3s Traefik)
 - Will be selectively updated to `192.168.10.71` (Docker Swarm Traefik) as services migrate
 
-### `internal.epaflix.com` — internal subdomains
+### `vm.epaflix.com` — user-VM subdomains
 
-Two active entries in `/etc/dnsmasq.d/10-internal-epaflix.conf`:
-- `nick.internal.epaflix.com` → `192.168.10.41`
-- `vidar.internal.epaflix.com` → `192.168.10.42`
+Two active entries in `/etc/dnsmasq.d/10-vm-epaflix.conf`:
+- `nick.vm.epaflix.com` → `192.168.10.41`
+- `vidar.vm.epaflix.com` → `192.168.10.42`
 
-All other `*.internal.epaflix.com` entries were removed on 2026-03-22. K3s has zero
-IngressRoutes for `internal.epaflix.com` (verified by `kubectl get ingressroute -A`).
+No public DNS records exist for this zone — it is LAN-only and only traversed
+after a jumpbox hop (see `1-proxmox/user-vms/README.md`). K3s has zero
+IngressRoutes for `vm.epaflix.com`.
 
-Unbound's `local-zone: "internal.epaflix.com." static` (in `internal-epaflix.conf`)
+Unbound's `local-zone: "vm.epaflix.com." static` (in `vm-epaflix.conf`)
 ensures any unlisted name in this zone returns NXDOMAIN instead of leaking to public DNS.
 This is a security directive — keep it even if no `local-data` entries exist.
+
+> Renamed from `internal.epaflix.com` on 2026-04-18.
 
 ### `lan` — DHCP domain
 
 `dns.domain.name = "lan"` in `pihole.toml`. DHCP hostnames get a `.lan` suffix.
 Queries for `.lan` never forward upstream.
 
-### `nick.internal.epaflix.com` and `vidar.internal.epaflix.com`
+### `nick.vm.epaflix.com` and `vidar.vm.epaflix.com`
 
 These are individual user VM entries. Each lives in **exactly one place**:
-`/etc/dnsmasq.d/10-internal-epaflix.conf`.
+`/etc/dnsmasq.d/10-vm-epaflix.conf`.
 - `custom.list`: not present
 - `pihole.toml` hosts: `[]` (empty)
 - Unbound: no `local-data` entries (only `local-zone: static` remains)
 
 | Entry | IP |
 |---|---|
-| `nick.internal.epaflix.com` | `192.168.10.41` |
-| `vidar.internal.epaflix.com` | `192.168.10.42` |
+| `nick.vm.epaflix.com` | `192.168.10.41` |
+| `vidar.vm.epaflix.com` | `192.168.10.42` |
 
 ---
 
@@ -417,7 +421,7 @@ ssh root@192.168.10.30
 
 # 1. Check the active source files
 grep "myapp.epaflix.com" /etc/dnsmasq.d/10-epaflix.conf
-grep "myapp.internal.epaflix.com" /etc/dnsmasq.d/10-internal-epaflix.conf
+grep "myapp.vm.epaflix.com" /etc/dnsmasq.d/10-vm-epaflix.conf
 
 # 2. Test resolution at each layer
 dig myapp.epaflix.com @127.0.0.1 +short          # Pi-hole (dnsmasq layer)
@@ -495,7 +499,7 @@ dig google.com @127.0.0.1 -p 5335 +short
 - `qname-minimisation` reduces data sent to upstream resolvers
 - `private-address` rules block RFC1918 responses from upstream (DNS rebinding protection)
 - `harden-glue` and `harden-dnssec-stripped` protect against DNS spoofing attacks
-- `local-zone: "internal.epaflix.com." static` — unknown internal names never reach public DNS
+- `local-zone: "vm.epaflix.com." static` — unknown user-VM names never reach public DNS
 - `filter-rr=HTTPS` — blocks DNS type 65 (HTTPS record) queries from reaching public DNS, preventing browsers from receiving Cloudflare ECH/ipv4hint overrides that would bypass local A record resolution
 - DNSSEC: **disabled** (`dnssec = false` in `pihole.toml`) — can be enabled if needed
 

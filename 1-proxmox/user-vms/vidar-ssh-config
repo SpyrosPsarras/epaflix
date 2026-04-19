@@ -6,7 +6,7 @@ Host epaflix-jumpbox-vidar
     IdentitiesOnly yes
 
 Host vidar-vm
-    HostName vidar.internal.epaflix.com
+    HostName vidar.vm.epaflix.com
     User vidar
     ProxyJump epaflix-jumpbox-vidar
     IdentityFile ~/.ssh/vidar_ed25519
