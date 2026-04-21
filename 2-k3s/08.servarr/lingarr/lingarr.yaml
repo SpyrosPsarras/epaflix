@@ -1,0 +1,124 @@
+---
+# Lingarr — AI subtitle translator (forked image with zombie/concurrency fix, upstream PR #377)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lingarr
+  namespace: servarr
+  labels:
+    app: lingarr
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate   # Single-writer; avoid double-writer races on config volume
+  selector:
+    matchLabels:
+      app: lingarr
+  template:
+    metadata:
+      labels:
+        app: lingarr
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: lingarr
+      securityContext:
+        runAsUser: 568
+        runAsGroup: 568
+        fsGroup: 568
+      containers:
+        - name: lingarr
+          image: ghcr.io/spyrospsarras/lingarr:fix-zombie-concurrency-exec-update
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: ASPNETCORE_URLS
+              value: "http://+:9876"
+            # Postgres (managed by CloudNativePG in postgres-system ns)
+            - name: DB_CONNECTION
+              value: "postgres"
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: lingarr-host
+            - name: DB_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: lingarr-port
+            - name: DB_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: lingarr-database
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: lingarr-user
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: lingarr-password
+          ports:
+            - containerPort: 9876
+              name: http
+          volumeMounts:
+            - name: config
+              mountPath: /app/config
+            - name: movies
+              mountPath: /movies
+            - name: tv
+              mountPath: /tv
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "1Gi"
+              cpu: "2000m"
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: lingarr-config
+        - name: movies
+          persistentVolumeClaim:
+            claimName: servarr-media-movies
+        - name: tv
+          persistentVolumeClaim:
+            claimName: servarr-media-tvshows
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lingarr
+  namespace: servarr
+  labels:
+    app: lingarr
+spec:
+  type: ClusterIP
+  selector:
+    app: lingarr
+  ports:
+    - name: http
+      port: 9876
+      targetPort: http

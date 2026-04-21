@@ -20,6 +20,8 @@ This directory contains the Kubernetes manifests for deploying the complete Serv
 ├── sonarr/               # TV show management deployment
 ├── sonarr2/              # Anime management deployment
 ├── bazarr/               # Subtitle management deployment
+├── bazarr-autotranslate/ # Periodic scanner that requests Bazarr translations
+├── lingarr/              # AI subtitle translator (Postgres-backed)
 ├── qbittorrent/          # Torrent client with VPN
 ├── jellyfin/             # Media server
 ├── jellyseerr/           # Media request system
@@ -44,7 +46,9 @@ This directory contains the Kubernetes manifests for deploying the complete Serv
 - **Sonarr2**: Anime management (port 28989) → `/animes` = `/mnt/pool1/dataset01/animes`
 - **Radarr**: Movies management (port 7878) → `/movies` = `/mnt/pool1/dataset01/movies`
 - **Prowlarr**: Indexer manager (port 9696)
-- **Bazarr**: Subtitle management (port 6767, development branch)
+- **Bazarr**: Subtitle management (port 6767, development branch) — configured with `translator_type: lingarr`
+- **bazarr-autotranslate**: Hourly scanner that asks Bazarr to translate subs in BASE_LANGUAGES (en, ko) → TO_LANGUAGES (el)
+- **Lingarr**: AI subtitle translator (port 9876) — backend for Bazarr's translation. Postgres-backed (`lingarr-main` DB). Uses custom fork image with zombie/concurrency fix pending upstream (PR #377).
 
 ### Media & Downloads
 - **Jellyfin**: Media server (port 8096) with NVIDIA GPU transcoding

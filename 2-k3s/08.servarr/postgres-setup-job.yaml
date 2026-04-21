@@ -20,6 +20,7 @@ spec:
               RADARR_PW=$(openssl rand -base64 24 | tr -d "=+/" | cut -c1-20)
               PROWLARR_PW=$(openssl rand -base64 24 | tr -d "=+/" | cut -c1-20)
               JELLYSEERR_PW=$(openssl rand -base64 24 | tr -d "=+/" | cut -c1-20)
+              LINGARR_PW=$(openssl rand -base64 24 | tr -d "=+/" | cut -c1-20)
 
               # Create databases
               PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres-cluster-rw -U postgres <<SQL
@@ -28,18 +29,27 @@ spec:
               CREATE DATABASE IF NOT EXISTS "radarr-main";
               CREATE DATABASE IF NOT EXISTS "prowlarr-main";
               CREATE DATABASE IF NOT EXISTS jellyseerr;
+              CREATE DATABASE IF NOT EXISTS "lingarr-main";
 
               CREATE USER sonarr WITH PASSWORD '$SONARR_PW';
               CREATE USER sonarr2 WITH PASSWORD '$SONARR2_PW';
               CREATE USER radarr WITH PASSWORD '$RADARR_PW';
               CREATE USER prowlarr WITH PASSWORD '$PROWLARR_PW';
               CREATE USER jellyseerr WITH PASSWORD '$JELLYSEERR_PW';
+              CREATE USER lingarr WITH PASSWORD '$LINGARR_PW';
 
               GRANT ALL PRIVILEGES ON DATABASE "sonarr-main" TO sonarr;
               GRANT ALL PRIVILEGES ON DATABASE "sonarr2-main" TO sonarr2;
               GRANT ALL PRIVILEGES ON DATABASE "radarr-main" TO radarr;
               GRANT ALL PRIVILEGES ON DATABASE "prowlarr-main" TO prowlarr;
               GRANT ALL PRIVILEGES ON DATABASE jellyseerr TO jellyseerr;
+              GRANT ALL PRIVILEGES ON DATABASE "lingarr-main" TO lingarr;
+              SQL
+
+              # Lingarr needs schema ownership on its DB (EF Core creates/alters tables in public)
+              PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres-cluster-rw -U postgres -d lingarr-main <<SQL
+              GRANT ALL ON SCHEMA public TO lingarr;
+              ALTER SCHEMA public OWNER TO lingarr;
               SQL
 
               # Create Kubernetes secret
@@ -69,6 +79,11 @@ spec:
                 --from-literal=jellyseerr-database=jellyseerr \
                 --from-literal=jellyseerr-user=jellyseerr \
                 --from-literal=jellyseerr-password=$JELLYSEERR_PW \
+                --from-literal=lingarr-host=192.168.10.105 \
+                --from-literal=lingarr-port=5432 \
+                --from-literal=lingarr-database=lingarr-main \
+                --from-literal=lingarr-user=lingarr \
+                --from-literal=lingarr-password=$LINGARR_PW \
                 --dry-run=client -o yaml | kubectl apply -f -
 
               echo "✅ Databases and users created successfully!"

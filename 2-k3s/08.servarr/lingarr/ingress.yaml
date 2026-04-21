@@ -1,0 +1,47 @@
+---
+# lingarr.epaflix.com
+# Internal-only follows the project convention used by sonarr/radarr/cleanuparr/etc:
+#   * Pi-hole (192.168.10.30) resolves lingarr.epaflix.com -> 192.168.10.101
+#     via /etc/dnsmasq.d/10-epaflix.conf
+#   * No public Cloudflare DNS record for this host -> external NXDOMAIN
+#   * Traefik still serves the real Let's Encrypt wildcard cert (*.epaflix.com)
+#     issued by the cloudflare certResolver via DNS-01 (wildcard cert doesn't
+#     need an A record for this specific host).
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: lingarr-https
+  namespace: servarr
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`lingarr.epaflix.com`)
+      kind: Rule
+      services:
+        - name: lingarr
+          port: 9876
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: lingarr-http
+  namespace: servarr
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`lingarr.epaflix.com`)
+      kind: Rule
+      middlewares:
+        - name: redirect-https
+          namespace: traefik-system
+      services:
+        - name: lingarr
+          port: 9876

@@ -1,0 +1,23 @@
+-- pgloader command template. Fill in <PG_PASSWORD> before running.
+-- Run as:
+--   kubectl -n servarr run pgloader --image=dimitri/pgloader:latest --restart=Never \
+--     --command -- sleep 300
+--   kubectl -n servarr cp /path/to/local.db pgloader:/tmp/lingarr.db
+--   kubectl -n servarr cp pgloader.load pgloader:/tmp/pgload.load
+--   kubectl -n servarr exec pgloader -- pgloader /tmp/pgload.load
+--   kubectl -n servarr delete pod pgloader
+--
+-- WHY `data only`: Lingarr's EF Core migrations own the Postgres schema. We
+-- don't want pgloader rebuilding it from the SQLite column types (SQLite is
+-- untyped; pgloader would pick wider types like bigint where EF used integer).
+-- WHY excluding `version_info` and `__EFMigrationsLock`: same reason — EF
+-- writes these itself on first boot against Postgres, we must not stomp them.
+
+LOAD DATABASE
+  FROM sqlite:///tmp/lingarr.db
+  INTO postgresql://lingarr:<PG_PASSWORD>@192.168.10.105:5432/lingarr-main
+
+  WITH include no drop, truncate, data only, reset sequences
+
+  EXCLUDING TABLE NAMES LIKE 'sqlite_%', '__EFMigrationsLock', 'version_info'
+;
