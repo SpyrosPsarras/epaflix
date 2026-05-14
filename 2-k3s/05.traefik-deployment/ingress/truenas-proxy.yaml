@@ -1,10 +1,14 @@
 ---
-# Proxy truenas.epaflix.com (192.168.10.101, Traefik) → TrueNAS SCALE UI (192.168.10.200:443)
+# Proxy truenas.epaflix.com (192.168.10.101, Traefik) → TrueNAS SCALE UI (192.168.10.200:8443)
 #
 # Real Let's Encrypt wildcard cert terminates at Traefik.
 # Backend is TrueNAS with a self-signed cert, so serversTransport skips verify.
 # DNS for truenas.epaflix.com is internal-only (Pi-hole address= → 192.168.10.101).
 # No public A record needed — DNS-01 ACME via Cloudflare proves domain ownership.
+#
+# Target :8443 (TrueNAS ui_httpsport), NOT :443. Port 443 on the host is bound by
+# the nginx-proxy-manager app — going through it adds a second proxy hop and breaks
+# WebSocket reconnect (SPA logs you out on page refresh).
 
 apiVersion: v1
 kind: Endpoints
@@ -16,7 +20,7 @@ subsets:
       - ip: 192.168.10.200
     ports:
       - name: https
-        port: 443
+        port: 8443
         protocol: TCP
 
 ---
@@ -32,7 +36,7 @@ spec:
   clusterIP: None
   ports:
     - name: https
-      port: 443
+      port: 8443
       protocol: TCP
 
 ---
@@ -62,7 +66,7 @@ spec:
           namespace: traefik-system
       services:
         - name: truenas-ui
-          port: 443
+          port: 8443
 
 ---
 apiVersion: traefik.io/v1alpha1
@@ -78,7 +82,7 @@ spec:
       kind: Rule
       services:
         - name: truenas-ui
-          port: 443
+          port: 8443
           scheme: https
           serversTransport: truenas-insecure
   tls:
