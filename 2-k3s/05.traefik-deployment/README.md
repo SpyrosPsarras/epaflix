@@ -23,24 +23,48 @@ This deployment configures Traefik as a reverse proxy with automatic TLS certifi
 
 ### 0. Configure k3s to use custom DNS resolv.conf (REQUIRED for Let's Encrypt)
 
-This prevents pods from inheriting the host's DNS search domain, which would cause ACME DNS queries to fail.
+This prevents pods from inheriting the host's DNS search domain (which would cause ACME DNS queries to fail) and pins pod-side resolv.conf to the main Pi-hole at `192.168.10.30`.
 
-**On all k3s master nodes (51, 52, 53):**
+**Why every node (not just masters):** kubelet writes the pod sandbox `/etc/resolv.conf` from this file on the node where the pod runs. Pods scheduled to workers use the worker's `/etc/k3s-resolv.conf`, not any master's. Skipping workers leaves their pods on whatever DNS was in the file at install time — a real incident we hit on 2026-05-16 when `192.168.10.200` lingered on every node and caused CoreDNS to forward all `.` queries to TrueNAS instead of `192.168.10.30`.
+
+**On all k3s nodes — masters and workers:**
 
 ```bash
+# Masters (51, 52, 53) — service is k3s.service
 for ip in 192.168.10.51 192.168.10.52 192.168.10.53; do
-  echo "Configuring k3s on $ip..."
+  echo "Configuring k3s master on $ip..."
   ssh ubuntu@$ip "sudo mkdir -p /etc/rancher/k3s && \
     echo 'kubelet-arg:
   - \"resolv-conf=/etc/k3s-resolv.conf\"' | sudo tee /etc/rancher/k3s/config.yaml && \
     echo 'nameserver 192.168.10.30' | sudo tee /etc/k3s-resolv.conf && \
     sudo systemctl restart k3s"
 done
+
+# Workers (61, 62, 63, 65) — service is k3s-agent.service
+for ip in 192.168.10.61 192.168.10.62 192.168.10.63 192.168.10.65; do
+  echo "Configuring k3s worker on $ip..."
+  ssh ubuntu@$ip "sudo mkdir -p /etc/rancher/k3s && \
+    echo 'kubelet-arg:
+  - \"resolv-conf=/etc/k3s-resolv.conf\"' | sudo tee /etc/rancher/k3s/config.yaml && \
+    echo 'nameserver 192.168.10.30' | sudo tee /etc/k3s-resolv.conf && \
+    sudo systemctl restart k3s-agent"
+done
 ```
 
 Wait for cluster to stabilize:
 ```bash
 kubectl get nodes
+```
+
+If you only need to update an already-deployed cluster (without restarting k3s), edit `/etc/k3s-resolv.conf` on every node then bounce CoreDNS so new pod sandboxes pick up the change:
+```bash
+kubectl rollout restart -n kube-system deployment/coredns
+```
+
+Verify the new CoreDNS sandbox `/etc/resolv.conf` only lists `192.168.10.30`:
+```bash
+ssh ubuntu@<node-running-coredns> \
+  "sudo cat /var/lib/rancher/k3s/agent/containerd/io.containerd.grpc.v1.cri/sandboxes/\$(sudo crictl pods --name coredns -q | head -1)/resolv.conf"
 ```
 
 ### 1. Create namespace
