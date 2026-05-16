@@ -471,6 +471,14 @@ ssh root@192.168.10.30 "pihole -q somedomain.com"
 ssh root@192.168.10.30 "pihole allow somedomain.com"
 ```
 
+#### Persistent allowlist entries
+
+| Domain | Reason | Added |
+|---|---|---|
+| `link.storjshare.io` | TrueNAS update domains (`update.ixsystems.com`, `update.sys.truenas.net`, `download.sys.truenas.net`) all CNAME here. Firebog Prigent-Malware list classifies it as malware (false positive — Storj is the legitimate CDN iXsystems uses for SCALE updates). Without this, TrueNAS update checks fail with `ECONNRESET` / `TLSV1_UNRECOGNIZED_NAME`. | 2026-05-16 |
+
+> If Firebog re-adds the entry on a future gravity refresh, Pi-hole's exact-match allow still wins over the blocklist (verified). If you ever see `pihole -q link.storjshare.io` report no allow row, re-run `pihole allow link.storjshare.io`.
+
 ### External DNS queries failing (upstream DoT down)
 
 ```bash
