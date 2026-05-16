@@ -1,0 +1,140 @@
+---
+# Weekly Postgres Sequence Drift Audit
+# Scans all sequence-backed columns in sonarr-main, sonarr2-main, radarr-main,
+# bazarr-main and reports any sequence whose last_value is below MAX(<column>).
+# Output goes to pod logs only (no notifications). Empty drift list = clean.
+#
+# Background: existing sync_sequence_after_insert() triggers (see
+# 2-k3s/08.servarr/_shared/postgres/SEQUENCE-TRIGGERS-PERMANENT-FIX.md) only
+# cover hardcoded "Id" column on a subset of tables, so drift can still occur
+# (e.g. bazarr 2026-05-01 incident — table_history_movie seq=310 vs max=1447).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-sequence-audit-sql
+  namespace: servarr
+data:
+  audit.sql: |
+    \set ON_ERROR_STOP on
+    \pset format aligned
+    \pset border 2
+    \pset null '(null)'
+
+    DROP TABLE IF EXISTS _drift;
+    CREATE TEMP TABLE _drift (
+      schema_name  text,
+      table_name   text,
+      column_name  text,
+      sequence_fq  text,
+      seq_last     bigint,
+      col_max      bigint,
+      gap          bigint
+    );
+
+    DO $audit$
+    DECLARE
+      r          RECORD;
+      mx         BIGINT;
+      sv         BIGINT;
+    BEGIN
+      FOR r IN
+        SELECT n.nspname AS schema,
+               c.relname AS tbl,
+               a.attname AS col,
+               pg_get_serial_sequence(format('%I.%I', n.nspname, c.relname), a.attname) AS seq
+        FROM   pg_class c
+        JOIN   pg_namespace n ON n.oid = c.relnamespace
+        JOIN   pg_attribute a ON a.attrelid = c.oid
+                              AND a.attnum > 0
+                              AND NOT a.attisdropped
+        WHERE  c.relkind IN ('r','p')
+          AND  n.nspname NOT IN ('pg_catalog','information_schema')
+          AND  pg_get_serial_sequence(format('%I.%I', n.nspname, c.relname), a.attname) IS NOT NULL
+      LOOP
+        EXECUTE format('SELECT MAX(%I)::bigint FROM %I.%I', r.col, r.schema, r.tbl) INTO mx;
+        EXECUTE format('SELECT last_value FROM %s', r.seq) INTO sv;
+
+        IF mx IS NOT NULL AND sv < mx THEN
+          INSERT INTO _drift
+          VALUES (r.schema, r.tbl, r.col, r.seq, sv, mx, mx - sv);
+        END IF;
+      END LOOP;
+    END
+    $audit$;
+
+    SELECT format('drift_count=%s', COUNT(*)) AS summary FROM _drift;
+    SELECT * FROM _drift ORDER BY gap DESC, schema_name, table_name;
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-sequence-audit
+  namespace: servarr
+  labels:
+    app: postgres-sequence-audit
+spec:
+  # Mondays 06:00 UTC = 08:00 Europe/Oslo
+  schedule: "0 6 * * 1"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 6
+  failedJobsHistoryLimit: 6
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 2592000  # keep 30 days
+      template:
+        metadata:
+          labels:
+            app: postgres-sequence-audit
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: audit
+              image: postgres:16-alpine
+              imagePullPolicy: IfNotPresent
+              command: ["/bin/sh", "-eu", "-c"]
+              args:
+                - |
+                  echo "=== Postgres sequence drift audit @ $(date -u +%FT%TZ) ==="
+                  fail=0
+                  for app in sonarr sonarr2 radarr bazarr; do
+                    PGHOST=$(cat /secrets/${app}-host)
+                    PGPORT=$(cat /secrets/${app}-port)
+                    PGDATABASE=$(cat /secrets/${app}-database)
+                    PGUSER=$(cat /secrets/${app}-user)
+                    PGPASSWORD=$(cat /secrets/${app}-password)
+                    export PGHOST PGPORT PGDATABASE PGUSER PGPASSWORD
+                    echo
+                    echo "--- ${app} (${PGDATABASE} @ ${PGHOST}) ---"
+                    if ! psql -v ON_ERROR_STOP=1 -f /sql/audit.sql; then
+                      echo "ERROR: audit failed for ${app}" >&2
+                      fail=1
+                    fi
+                    unset PGPASSWORD
+                  done
+                  echo
+                  echo "=== Audit done @ $(date -u +%FT%TZ) ==="
+                  exit ${fail}
+              volumeMounts:
+                - name: secrets
+                  mountPath: /secrets
+                  readOnly: true
+                - name: sql
+                  mountPath: /sql
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "500m"
+                  memory: "256Mi"
+          volumes:
+            - name: secrets
+              secret:
+                secretName: servarr-postgres
+                defaultMode: 0400
+            - name: sql
+              configMap:
+                name: postgres-sequence-audit-sql
+                defaultMode: 0444
