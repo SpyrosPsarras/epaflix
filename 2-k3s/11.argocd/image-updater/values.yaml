@@ -6,10 +6,12 @@
 config:
   argocd:
     # Talk to ArgoCD via in-cluster Service.
+    # argocd-server runs with `--insecure` (TLS terminated at Traefik),
+    # so we use plaintext gRPC over the Service's port 80.
     grpcWeb: true
     serverAddress: argocd-server.argocd.svc.cluster.local
-    insecure: false
-    plaintext: false
+    insecure: true
+    plaintext: true
   # Re-check images this often (default 2m). Bump if registry rate-limits bite.
   applicationsAPIKind: argocd
   logLevel: info

@@ -50,9 +50,17 @@ GitHub repo  ─── ArgoCD repo-server (poll)
 ## Versions
 
 - argo-cd chart **9.5.14** (app v3.4.2)
-- argocd-image-updater chart **1.2.1** (app v1.2.0)
+- argocd-image-updater chart **0.14.0** (app v0.17.0)
 
 Pinned in `install.sh` (`CHART_VERSION=…`). Bump deliberately.
+
+**Important — pinned to v0.17 on purpose**: chart 1.x ships
+argocd-image-updater v1.x, which switched to a CRD-driven `ImageUpdater`
+operator model AND introduced a registry-prefix normalization bug that
+silently drops `lscr.io/`-prefixed images during the "live image" match.
+The v0.x line still reads the classic
+`argocd-image-updater.argoproj.io/*` annotations on the Application
+itself (see `apps/app-servarr.yaml`) and works end-to-end for this stack.
 
 ## Image Updater scope
 

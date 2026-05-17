@@ -26,6 +26,10 @@ configs:
     url: https://argocd.epaflix.com
     # Allow the dot in resource names + Application API extensions.
     application.resourceTrackingMethod: annotation
+    # Local API-key account for argocd-image-updater (so it can list /
+    # update Application image overrides). Token generated post-install
+    # via `argocd account generate-token --account image-updater`.
+    accounts.image-updater: apiKey
     # Authentik OIDC. Provider must be created in Authentik first (see
     # 2-k3s/05.traefik-deployment/examples/app-with-native-oidc-authentik.md).
     # The OIDC provider's app slug in Authentik must be `argocd`.
@@ -46,8 +50,13 @@ configs:
   rbac:
     policy.default: role:readonly
     # Map Authentik group "ArgoCD Admins" → ArgoCD admin.
+    # Local account `image-updater` gets just enough perms to patch
+    # Applications (image override annotations).
     policy.csv: |
       g, ArgoCD Admins, role:admin
+      p, role:image-updater, applications, get, */*, allow
+      p, role:image-updater, applications, update, */*, allow
+      g, image-updater, role:image-updater
     scopes: "[groups]"
 
   # Disable the bundled SSO-disabling notices.

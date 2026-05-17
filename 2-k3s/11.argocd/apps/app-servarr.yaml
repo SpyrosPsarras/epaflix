@@ -28,18 +28,20 @@ metadata:
   name: servarr
   namespace: argocd
   annotations:
+    # image-list entries MUST carry the floating tag they ride (digest
+    # strategy needs to know which tag to resolve to a digest).
     argocd-image-updater.argoproj.io/image-list: |
-      sonarr=lscr.io/linuxserver/sonarr,
-      radarr=lscr.io/linuxserver/radarr,
-      prowlarr=lscr.io/linuxserver/prowlarr,
-      bazarr=lscr.io/linuxserver/bazarr,
-      huntarr=huntarr/huntarr,
-      cleanuparr=ghcr.io/cleanuparr/cleanuparr,
-      flaresolverr=ghcr.io/flaresolverr/flaresolverr,
-      jellyfin=jellyfin/jellyfin,
-      homarr=ghcr.io/ajnart/homarr,
-      wizarr=ghcr.io/wizarrrr/wizarr,
-      bazarr-autotranslate=ghcr.io/zelak312/bazarr_autotranslate
+      sonarr=lscr.io/linuxserver/sonarr:latest,
+      radarr=lscr.io/linuxserver/radarr:latest,
+      prowlarr=lscr.io/linuxserver/prowlarr:latest,
+      bazarr=lscr.io/linuxserver/bazarr:development,
+      huntarr=huntarr/huntarr:latest,
+      cleanuparr=ghcr.io/cleanuparr/cleanuparr:latest,
+      flaresolverr=ghcr.io/flaresolverr/flaresolverr:latest,
+      jellyfin=jellyfin/jellyfin:latest,
+      homarr=ghcr.io/ajnart/homarr:latest,
+      wizarr=ghcr.io/wizarrrr/wizarr:latest,
+      bazarr-autotranslate=ghcr.io/zelak312/bazarr_autotranslate:latest
     # Every tracked image uses digest strategy by default; per-image tag
     # restrictions go below.
     argocd-image-updater.argoproj.io/sonarr.update-strategy: digest

@@ -100,23 +100,55 @@ sudo snap install argocd --classic        # ubuntu
 argocd login argocd.epaflix.com --sso
 ```
 
-## 6. Image Updater git creds
+## 6. Register the repo in ArgoCD (image-updater reuses these creds)
 
 ```
-PAT=$(yq '.argocd.image_updater.github_pat' .github/instructions/secrets.yml)
-kubectl -n argocd create secret generic git-creds \
-  --from-literal=username=git \
-  --from-literal=password="$PAT" \
+PAT=$(yq '.argocd_image_updater_github_pat' .github/instructions/secrets.yml)
+kubectl -n argocd apply -f - <<EOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: github-epaflix-repo
+  namespace: argocd
+  labels:
+    argocd.argoproj.io/secret-type: repository
+stringData:
+  type: git
+  url: https://github.com/SpyrosPsarras/epaflix.git
+  username: git
+  password: "$PAT"
+EOF
+```
+
+## 7. Generate ArgoCD API token for image-updater
+
+The local `image-updater` account is provisioned by `helm-values.yaml`
+(`configs.cm.accounts.image-updater: apiKey` + RBAC role). Generate the
+token by logging in as admin from inside the argocd-server pod:
+
+```
+ADMIN_PW=$(kubectl -n argocd get secret argocd-initial-admin-secret \
+  -o jsonpath='{.data.password}' | base64 -d)
+TOKEN=$(kubectl -n argocd exec deploy/argocd-server -- sh -c \
+  "argocd login argocd-server.argocd.svc.cluster.local:443 \
+   --username admin --password '$ADMIN_PW' --insecure --plaintext \
+   --grpc-web >/dev/null && argocd account generate-token \
+   --account image-updater")
+kubectl -n argocd create secret generic argocd-image-updater-secret \
+  --from-literal=argocd.token="$TOKEN" \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-## 7. Install Image Updater
+## 8. Install Image Updater (chart 0.14.0, app v0.17.0)
 
 ```
 ./2-k3s/11.argocd/image-updater/install.sh
 ```
 
-## 8. Create the servarr Application
+(Pinned to v0.x on purpose — v1.x has a registry-prefix matching bug.
+See README for details.)
+
+## 9. Create the servarr Application
 
 ```
 kubectl apply -f 2-k3s/11.argocd/apps/app-servarr.yaml
@@ -140,7 +172,7 @@ argocd app set servarr --sync-policy automated --self-heal
 
 (Leave `--auto-prune` off for a week.)
 
-## 9. End-to-end image bump test
+## 10. End-to-end image bump test
 
 Make sure Image Updater is healthy and the test is observable:
 
