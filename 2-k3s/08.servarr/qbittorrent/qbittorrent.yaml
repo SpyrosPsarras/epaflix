@@ -1,29 +1,22 @@
 ---
-# qBittorrent with OpenVPN
-# Uses binhex/arch-qbittorrentvpn image with embedded VPN
+# qBittorrent with WireGuard VPN
 #
-# Base: actual cluster state at revision 19 (OpenVPN, no gost-socks5)
+# Source of truth: live cluster state in `servarr` ns. Manifest below was
+# regenerated from `kubectl get deploy qbittorrent -o yaml` on 2026-05-17
+# after ArgoCD adoption surfaced a wholesale divergence — repo had been
+# tracking the older OpenVPN/binhex build for a long time, while live had
+# already moved to `tenseiken/qbittorrent-wireguard:latest`. Live wins by
+# design: see project memory `project_argocd_servarr` / drift policy.
 #
-# Changes merged on top of cluster state:
-#   - priorityClassName: high-memory-workload
-#       When qBittorrent is pending, the scheduler will preempt lower-priority
-#       pods from the target node to free up the declared 9Gi request.
-#       See priority-class.yaml for the PriorityClass definition.
-#   - resources.requests.memory: 10Gi (was 512Mi)
-#   - resources.limits.memory: 10Gi / 2000m CPU (were absent)
-#       requests == limits → Guaranteed QoS. The scheduler reserves the full
-#       10Gi upfront and qBittorrent is the absolute last pod to be OOM-evicted.
-#       Combined with high-memory-workload PriorityClass, the scheduler will
-#       preempt lower-priority pods from the target node to free up 10Gi.
-#   - startupProbe added (new)
-#       Handles the slow initial startup (VPN connect + full torrent library
-#       indexing). Gives up to 15 min before handing off to livenessProbe.
-#       This replaces the need for a long initialDelaySeconds on liveness.
-#   - livenessProbe.initialDelaySeconds: 0s (was 120s, startup probe takes over)
-#   - readinessProbe.initialDelaySeconds: 0s (was 60s, startup probe takes over)
-#   - readinessProbe.periodSeconds: 15s (was 10s)
-#   - readinessProbe.failureThreshold: 10 (was 3)
-#       Readiness failures only stop traffic routing, not the container.
+# VPN config lives in Secret `qbittorrent-wireguard` (NOT in this repo —
+# committed real values would leak; see secrets.yml + the
+# `_shared/secrets/wireguard-secret.yaml` template).
+#
+# Why postStart iptables hack: tenseiken/qbittorrent-wireguard's
+# `iptables.sh` installs a default-DROP OUTPUT chain so traffic is
+# forced through `wg0`. We need to punch holes for the LAN (192.168.10.0/24)
+# and cluster Pod / Service CIDRs (10.42.0.0/16, 10.43.0.0/16) so Pi-hole
+# DNS and intra-cluster calls still work.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -33,12 +26,9 @@ metadata:
     app: qbittorrent
 spec:
   replicas: 1
-  revisionHistoryLimit: 2
   strategy:
-    # Recreate kills the old pod before starting the new one.
-    # Required because the VPN provider only allows one simultaneous session
-    # per credentials. With RollingUpdate both pods overlap and keep kicking
-    # each other off the VPN, creating a deadlock where neither can start.
+    # Recreate — VPN provider allows one session at a time; RollingUpdate
+    # would have two pods kick each other off the tunnel.
     type: Recreate
   selector:
     matchLabels:
@@ -48,27 +38,26 @@ spec:
       labels:
         app: qbittorrent
     spec:
-      priorityClassName: high-memory-workload
       dnsPolicy: None
       dnsConfig:
         nameservers:
+          - 192.168.10.30
           - 1.1.1.1
-          - 1.0.0.1
       initContainers:
-        - name: init-resolv
+        - name: init-sysctls
           image: busybox:latest
           command:
-            - sh
+            - /bin/sh
             - -c
             - |
-              echo "nameserver 1.1.1.1" > /tmp/resolv/resolv.conf
-              echo "nameserver 1.0.0.1" >> /tmp/resolv/resolv.conf
-          volumeMounts:
-            - name: resolv-conf
-              mountPath: /tmp/resolv
+              sysctl -w net.ipv4.conf.all.rp_filter=2
+              sysctl -w net.ipv4.conf.all.src_valid_mark=1
+              sysctl -w net.ipv6.conf.all.disable_ipv6=1
+          securityContext:
+            privileged: true
       containers:
         - name: qbittorrent
-          image: binhex/arch-qbittorrentvpn:latest
+          image: tenseiken/qbittorrent-wireguard:latest
           env:
             - name: PUID
               value: "568"
@@ -79,99 +68,74 @@ spec:
             - name: LAN_NETWORK
               value: "192.168.10.0/24,10.42.0.0/16,10.43.0.0/16"
             - name: NAME_SERVERS
-              value: "1.1.1.1,1.0.0.1"
+              value: "192.168.10.30,1.1.1.1"
+            - name: QBT_LEGAL_NOTICE
+              value: "confirm"
             - name: VPN_ENABLED
               value: "yes"
-            - name: VPN_CLIENT
-              value: "openvpn"
-            - name: VPN_PROV
-              value: "custom"
-            - name: VPN_USER
-              value: "none"
-            - name: VPN_PASS
-              value: "none"
-            - name: ENABLE_PRIVOXY
-              value: "no"
-            - name: WEBUI_PORT
-              value: "8080"
             - name: ADDITIONAL_PORTS
               value: "8999"
           ports:
             - containerPort: 8080
               name: webui
-              protocol: TCP
             - containerPort: 8999
               name: bt-tcp
               protocol: TCP
             - containerPort: 8999
               name: bt-udp
               protocol: UDP
-          volumeMounts:
-            - name: config
-              mountPath: /config
-            - name: downloads
-              mountPath: /downloads
-            - name: openvpn-config
-              mountPath: /config/openvpn
-              readOnly: true
-            - name: tun
-              mountPath: /dev/net/tun
-            - name: resolv-conf
-              mountPath: /etc/resolv.conf
-              subPath: resolv.conf
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    # Wait for iptables.sh to finish setting up the DROP policy
+                    until iptables -L OUTPUT -n 2>/dev/null | grep -q 'policy DROP'; do sleep 2; done
+                    # Insert ACCEPT rules at position 1 for all LAN_NETWORK subnets
+                    # so Pi-hole DNS (192.168.10.30) and cluster traffic are not blocked.
+                    # Using -I (insert) ensures these rules take priority over the DROP policy.
+                    iptables -I OUTPUT 1 -d 192.168.10.0/24 -j ACCEPT
+                    iptables -I INPUT  1 -s 192.168.10.0/24 -j ACCEPT
+                    iptables -I OUTPUT 2 -d 10.42.0.0/16 -j ACCEPT
+                    iptables -I INPUT  2 -s 10.42.0.0/16 -j ACCEPT
+                    iptables -I OUTPUT 3 -d 10.43.0.0/16 -j ACCEPT
+                    iptables -I INPUT  3 -s 10.43.0.0/16 -j ACCEPT
+          livenessProbe:
+            httpGet:
+              path: /
+              port: webui
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            timeoutSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: webui
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "200m"
           securityContext:
             capabilities:
               add:
                 - NET_ADMIN
             runAsUser: 0
             privileged: true
-          # startupProbe runs first and blocks liveness/readiness until it passes.
-          # qBittorrent needs time to: connect OpenVPN + load the full torrent
-          # library before port 8080 becomes available.
-          # Budget: 30s delay + (30 attempts × 30s) = up to 15 min 30s.
-          # Once it passes once, liveness takes over for ongoing health checks.
-          startupProbe:
-            httpGet:
-              path: /
-              port: webui
-            initialDelaySeconds: 30
-            periodSeconds: 30
-            timeoutSeconds: 10
-            failureThreshold: 30
-          livenessProbe:
-            httpGet:
-              path: /
-              port: webui
-            # startupProbe already handled the slow start — liveness only needs
-            # to detect if the process dies/hangs after it was once healthy.
-            initialDelaySeconds: 0
-            periodSeconds: 30
-            timeoutSeconds: 10
-            failureThreshold: 3
-          readinessProbe:
-            httpGet:
-              path: /
-              port: webui
-            # Readiness failures only block traffic routing — they do not kill
-            # the container — so we can afford more retries.
-            initialDelaySeconds: 0
-            periodSeconds: 15
-            timeoutSeconds: 5
-            failureThreshold: 10
-          resources:
-            requests:
-              # requests == limits → Guaranteed QoS.
-              # Scheduler reserves the full 10Gi upfront. Combined with the
-              # high-memory-workload PriorityClass, lower-priority pods will be
-              # preempted from the target node if 10Gi is not already free.
-              # Guaranteed QoS also makes qBittorrent the last pod the kubelet
-              # will evict during node memory pressure.
-              memory: "10Gi"
-              cpu: "500m"
-            limits:
-              memory: "10Gi"
-              cpu: "2000m"
-      hostNetwork: false
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: downloads
+              mountPath: /downloads
+            - name: wireguard-config
+              mountPath: /config/wireguard
+              readOnly: true
+            - name: tun
+              mountPath: /dev/net/tun
       volumes:
         - name: config
           persistentVolumeClaim:
@@ -179,15 +143,13 @@ spec:
         - name: downloads
           persistentVolumeClaim:
             claimName: servarr-media-downloads
-        - name: openvpn-config
+        - name: wireguard-config
           secret:
-            secretName: qbittorrent-openvpn
+            secretName: qbittorrent-wireguard
         - name: tun
           hostPath:
             path: /dev/net/tun
             type: CharDevice
-        - name: resolv-conf
-          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

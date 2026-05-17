@@ -31,7 +31,7 @@ spec:
       containers:
         - name: bazarr
           image: lscr.io/linuxserver/bazarr:development
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
           env:
             - name: PUID
               value: "568"

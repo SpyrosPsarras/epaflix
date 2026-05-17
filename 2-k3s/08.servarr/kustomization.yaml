@@ -61,14 +61,16 @@ resources:
   - jellyfin/jellyfin.yaml
   - jellyfin/jellyfin-truenas-redirect.yaml
   - jellyseerr/jellyseerr.yaml
-  - jellyseerr/ingress.yaml
+  # jellyseerr/ingress.yaml DELETED 2026-05-17 — dead duplicate of the
+  # Traefik IngressRoute in _shared/ingress/public-routes.yaml; was never
+  # applied live.
   - seerr/seerr.yaml
   - seerr/pdb.yaml
-  - seerr/ingress.yaml
+  # seerr/ingress.yaml DELETED 2026-05-17 — same reason.
   # download + invites + dashboard
   - qbittorrent/qbittorrent.yaml
   - qbittorrent/pdb.yaml
-  - qbittorrent/ingress.yaml
+  # qbittorrent/ingress.yaml DELETED 2026-05-17 — same reason.
   - qbittorrent/priority-class.yaml
   - homarr/homarr.yaml
   - homarr/pdb.yaml
