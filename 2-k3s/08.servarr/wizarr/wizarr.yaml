@@ -8,7 +8,10 @@ metadata:
   labels:
     app: wizarr
 spec:
-  replicas: 1
+  # Scaled to 0 on 2026-05-17 — Wizarr unused. Manifest kept so the
+  # Service / Ingress / PVC don't disappear on `argocd app sync`. To
+  # bring back: replicas: 1.
+  replicas: 0
   selector:
     matchLabels:
       app: wizarr
