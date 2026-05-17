@@ -1,0 +1,101 @@
+---
+# argo-cd Helm chart values
+#
+# Chart: argo/argo-cd 9.5.14 (app v3.4.2)
+# Repo:  https://argoproj.github.io/argo-helm
+#
+# Design notes:
+#   - TLS is terminated at Traefik (see ingress.yaml). argocd-server runs with
+#     `--insecure` so it does not also terminate TLS itself; the external URL
+#     is still https://argocd.epaflix.com.
+#   - OIDC is wired to Authentik (auth.epaflix.com). The client-id/secret live
+#     in the `argocd-secret` Secret keys `oidc.authentik.clientId` /
+#     `oidc.authentik.clientSecret` (see oidc-secret.yaml).
+#   - RBAC: Authentik group `ArgoCD Admins` maps to ArgoCD `role:admin`.
+#     Everyone else gets read-only.
+
+global:
+  domain: argocd.epaflix.com
+
+configs:
+  params:
+    # TLS terminated at Traefik; argocd-server speaks plain HTTP on :8080.
+    server.insecure: true
+
+  cm:
+    url: https://argocd.epaflix.com
+    # Allow the dot in resource names + Application API extensions.
+    application.resourceTrackingMethod: annotation
+    # Authentik OIDC. Provider must be created in Authentik first (see
+    # 2-k3s/05.traefik-deployment/examples/app-with-native-oidc-authentik.md).
+    # The OIDC provider's app slug in Authentik must be `argocd`.
+    oidc.config: |
+      name: authentik
+      issuer: https://auth.epaflix.com/application/o/argocd/
+      clientID: $argocd-secret:oidc.authentik.clientId
+      clientSecret: $argocd-secret:oidc.authentik.clientSecret
+      requestedScopes:
+        - openid
+        - profile
+        - email
+        - groups
+      requestedIDTokenClaims:
+        groups:
+          essential: true
+
+  rbac:
+    policy.default: role:readonly
+    # Map Authentik group "ArgoCD Admins" → ArgoCD admin.
+    policy.csv: |
+      g, ArgoCD Admins, role:admin
+    scopes: "[groups]"
+
+  # Disable the bundled SSO-disabling notices.
+  cmp:
+    create: false
+
+server:
+  # IngressRoute lives in ingress.yaml (Traefik IngressRoute, not k8s Ingress).
+  ingress:
+    enabled: false
+  service:
+    type: ClusterIP
+  # Resource limits suitable for a small homelab.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+controller:
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 1Gi
+
+repoServer:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+applicationSet:
+  enabled: true
+
+notifications:
+  enabled: false
+
+dex:
+  # OIDC via Authentik directly — Dex not used.
+  enabled: false
+
+redis-ha:
+  enabled: false
+
+redis:
+  enabled: true

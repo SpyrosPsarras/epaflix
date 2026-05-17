@@ -1,0 +1,88 @@
+---
+# ArgoCD-managed kustomization for the servarr stack.
+#
+# Owned by ArgoCD Application "servarr" (see 2-k3s/11.argocd/apps/app-servarr.yaml).
+# Argo CD Image Updater writes new image tags/digests to the `images:` block at
+# the bottom of this file via `kustomize edit set image`.
+#
+# DELIBERATELY EXCLUDED from `resources:`:
+#   - _shared/secrets/*               — placeholder values; real secrets are
+#                                       generated locally and applied imperatively.
+#                                       Letting ArgoCD reconcile them would
+#                                       overwrite live secrets with placeholders.
+#   - seerr/authentik-oidc-secret.yaml — same reason (placeholder OIDC creds).
+#   - postgres-setup-job.yaml         — one-shot Job, already executed.
+#   - **/fix-*.yaml                   — one-shot remediation Jobs from past
+#                                       migrations (sonarr/radarr/sonarr2 schema
+#                                       and dedup fixes). Kept on disk for audit.
+#   - research/                       — config dumps, not k8s manifests.
+#   - _shared/scripts/                — shell helpers, not k8s manifests.
+#
+# Re-add a Job here only if you intend Argo to re-run it on every sync.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: servarr
+
+resources:
+  # namespace + shared infra
+  - namespace.yaml
+  - _shared/tls-options.yaml
+  - _shared/middleware/arr-headers.yaml
+  - _shared/ingress/public-routes.yaml
+  - _shared/storage/arr-configs.yaml
+  # local-caches-pvc.yaml intentionally OMITTED — its 3 PVCs
+  # (jellyfin-cache, jellyfin-transcodes, tdarr-transcode-cache) are duplicates
+  # of entries in media-app-configs.yaml. Including both fails kustomize build.
+  - _shared/storage/media-app-configs.yaml
+  - _shared/storage/media-pvcs.yaml
+  - _shared/storage/media-storageclass.yaml
+  - _shared/storage/utility-configs.yaml
+
+  # *arr apps
+  - sonarr/sonarr.yaml
+  - sonarr/pdb.yaml
+  - sonarr2/sonarr2.yaml
+  - sonarr2/pdb.yaml
+  - radarr/radarr.yaml
+  - radarr/pdb.yaml
+  - prowlarr/prowlarr.yaml
+  - prowlarr/pdb.yaml
+  - bazarr/bazarr.yaml
+  - bazarr/pdb.yaml
+  - bazarr-autotranslate/bazarr-autotranslate.yaml
+
+  # utilities
+  - huntarr/huntarr.yaml
+  - huntarr/pdb.yaml
+  - cleanuparr/cleanuparr.yaml
+  - cleanuparr/pdb.yaml
+  - flaresolverr/flaresolverr.yaml
+  - flaresolverr/pdb.yaml
+  - lingarr/lingarr.yaml
+  - lingarr/pdb.yaml
+  - lingarr/ingress.yaml
+
+  # media servers
+  - jellyfin/jellyfin.yaml
+  - jellyfin/jellyfin-truenas-redirect.yaml
+  - jellyseerr/jellyseerr.yaml
+  - jellyseerr/ingress.yaml
+  - seerr/seerr.yaml
+  - seerr/pdb.yaml
+  - seerr/ingress.yaml
+
+  # download + invites + dashboard
+  - qbittorrent/qbittorrent.yaml
+  - qbittorrent/pdb.yaml
+  - qbittorrent/ingress.yaml
+  - qbittorrent/priority-class.yaml
+  - homarr/homarr.yaml
+  - homarr/pdb.yaml
+  - wizarr/wizarr.yaml
+
+# `images:` is the write-target for argocd-image-updater. Entries are inserted
+# / mutated by `kustomize edit set image …` whenever updater finds a newer
+# digest for a tracked image. Empty on first install — updater will populate.
+images: []

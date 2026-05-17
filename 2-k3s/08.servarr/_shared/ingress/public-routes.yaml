@@ -1,46 +1,12 @@
 ---
 # Public Internet-facing IngressRoutes with Let's Encrypt TLS
-# Jellyfin - Media Server
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
-metadata:
-  name: jellyfin-https
-  namespace: servarr
-spec:
-  entryPoints:
-    - websecure
-  routes:
-    - match: Host(`jellyfin.epaflix.com`)
-      kind: Rule
-      services:
-        - name: jellyfin
-          port: 8096
-  tls:
-    certResolver: cloudflare
-    domains:
-      - main: epaflix.com
-        sans:
-          - "*.epaflix.com"
----
-# HTTP to HTTPS redirect for Jellyfin
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
-metadata:
-  name: jellyfin-http
-  namespace: servarr
-spec:
-  entryPoints:
-    - web
-  routes:
-    - match: Host(`jellyfin.epaflix.com`)
-      kind: Rule
-      middlewares:
-        - name: redirect-https
-          namespace: traefik-system
-      services:
-        - name: jellyfin
-          port: 8096
----
+#
+# NOTE: jellyfin-https / jellyfin-http IngressRoutes intentionally NOT defined
+# here. jellyfin.epaflix.com is served by ../../jellyfin/jellyfin-truenas-redirect.yaml,
+# which routes to the Jellyfin instance on TrueNAS (192.168.10.200:30013) via
+# an Endpoints/Service named `jellyfin-truenas`. Defining them in both files
+# breaks kustomize accumulation under ArgoCD.
+#
 # Seerr - Media Requests (migrated from Jellyseerr)
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
