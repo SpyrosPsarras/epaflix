@@ -1,4 +1,3 @@
----
 # ArgoCD-managed kustomization for the servarr stack.
 #
 # Owned by ArgoCD Application "servarr" (see 2-k3s/11.argocd/apps/app-servarr.yaml).
@@ -19,12 +18,9 @@
 #   - _shared/scripts/                — shell helpers, not k8s manifests.
 #
 # Re-add a Job here only if you intend Argo to re-run it on every sync.
-
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-
 namespace: servarr
-
 resources:
   # namespace + shared infra
   - namespace.yaml
@@ -39,7 +35,6 @@ resources:
   - _shared/storage/media-pvcs.yaml
   - _shared/storage/media-storageclass.yaml
   - _shared/storage/utility-configs.yaml
-
   # *arr apps
   - sonarr/sonarr.yaml
   - sonarr/pdb.yaml
@@ -52,7 +47,6 @@ resources:
   - bazarr/bazarr.yaml
   - bazarr/pdb.yaml
   - bazarr-autotranslate/bazarr-autotranslate.yaml
-
   # utilities
   - huntarr/huntarr.yaml
   - huntarr/pdb.yaml
@@ -63,7 +57,6 @@ resources:
   - lingarr/lingarr.yaml
   - lingarr/pdb.yaml
   - lingarr/ingress.yaml
-
   # media servers
   - jellyfin/jellyfin.yaml
   - jellyfin/jellyfin-truenas-redirect.yaml
@@ -72,7 +65,6 @@ resources:
   - seerr/seerr.yaml
   - seerr/pdb.yaml
   - seerr/ingress.yaml
-
   # download + invites + dashboard
   - qbittorrent/qbittorrent.yaml
   - qbittorrent/pdb.yaml
@@ -81,8 +73,7 @@ resources:
   - homarr/homarr.yaml
   - homarr/pdb.yaml
   - wizarr/wizarr.yaml
-
 # `images:` is the write-target for argocd-image-updater. Entries are inserted
 # / mutated by `kustomize edit set image …` whenever updater finds a newer
 # digest for a tracked image. Empty on first install — updater will populate.
-images: []
+images: [{name: lscr.io/linuxserver/sonarr, digest: 'sha256:60f3b6b5c7647ba2bafd81163acfe34b11117b9b834ebd7fbcc3e5f1b309c7ef'}, {name: lscr.io/linuxserver/radarr, digest: 'sha256:15417a594ebda4c660a9fa9748e7199d33e2d17b31bbc5ad7ba2e86f0b414763'}, {name: lscr.io/linuxserver/prowlarr, digest: 'sha256:a89f252d6a22bd25af14a5380aec0adcc3c3af2e3282164f981680e6844070f3'}, {name: lscr.io/linuxserver/bazarr, digest: 'sha256:a0751f77dea1040d2c353c0d8c5ef6f304872f89225f1a7498903ed8ca46afa1'}, {name: ghcr.io/cleanuparr/cleanuparr, digest: 'sha256:4ad626da7e1d2774ca51bbfa812f832d5639264b3fe308909e47de02ba2188f7'}, {name: ghcr.io/flaresolverr/flaresolverr, digest: 'sha256:7962759d99d7e125e108e0f5e7f3cdbcd36161776d058d1d9b7153b92ef1af9e'}, {name: jellyfin/jellyfin, digest: 'sha256:1694ff069f0c9dafb283c36765175606866769f5d72f2ed56b6a0f1be922fc37'}, {name: ghcr.io/ajnart/homarr, digest: 'sha256:e103abadfb527186af5b4bd43df4eff7c67afa5cd4df8e65fa97910c8840b2a9'}, {name: ghcr.io/zelak312/bazarr_autotranslate, digest: 'sha256:5388463f8e45320c00a472763a8e0fb4584a255d6d31b98f9063b9eb5cada5cf'}]
