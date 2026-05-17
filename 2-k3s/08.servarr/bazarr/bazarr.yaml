@@ -30,7 +30,7 @@ spec:
         fsGroup: 568
       containers:
         - name: bazarr
-          image: lscr.io/linuxserver/bazarr:development
+          image: lscr.io/linuxserver/bazarr:latest
           imagePullPolicy: IfNotPresent
           env:
             - name: PUID
