@@ -8,7 +8,10 @@ metadata:
   labels:
     app: jellyfin
 spec:
-  replicas: 1
+  # Scaled to 0 on 2026-05-17 — jellyfin.epaflix.com is served by the
+  # TrueNAS Jellyfin instance (see jellyfin-truenas-redirect.yaml). The
+  # k3s pod is kept as manifest-only for fast failover.
+  replicas: 0
   selector:
     matchLabels:
       app: jellyfin
