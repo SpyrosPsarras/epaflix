@@ -1,0 +1,142 @@
+---
+# ImageUpdater CR for argocd-image-updater v1.2.x.
+#
+# v1.2 dropped the old `argocd-image-updater.argoproj.io/*` annotation model
+# (those annotations on the Application are now ignored) in favour of this
+# CRD. One CR can target many Applications via `applicationRefs[].namePattern`.
+#
+# Git credentials: image-updater reuses ArgoCD's repository registration.
+# See `github-epaflix-repo` Secret in this namespace (labelled
+# `argocd.argoproj.io/secret-type: repository`).
+#
+# Update path:
+#   registry → image-updater (poll 2m) → kustomize edit set image
+#   → git commit/push → ArgoCD auto-sync (once enabled on Application).
+#
+# Excluded (NOT in `images:`):
+#   - qbittorrent (binhex/arch-qbittorrentvpn, VPN-coupled)
+#   - jellyseerr/seerr (custom :preview-OIDC fork tag)
+#   - lingarr (pinned to a private branch tag)
+
+apiVersion: argocd-image-updater.argoproj.io/v1alpha1
+kind: ImageUpdater
+metadata:
+  name: servarr
+  namespace: argocd
+spec:
+  commonUpdateSettings:
+    updateStrategy: digest
+
+  applicationRefs:
+    - namePattern: "servarr"
+      writeBackConfig:
+        method: git
+        gitConfig:
+          repository: https://github.com/SpyrosPsarras/epaflix.git
+          branch: main
+          writeBackTarget: "kustomization:./2-k3s/08.servarr"
+      images:
+        - alias: sonarr
+          imageName: lscr.io/linuxserver/sonarr
+          commonUpdateSettings:
+            updateStrategy: digest
+            allowTags: "regexp:^latest$"
+          manifestTargets:
+            kustomize:
+              name: lscr.io/linuxserver/sonarr
+
+        # NOTE: sonarr2 deliberately omitted — it uses the SAME image
+        # `lscr.io/linuxserver/sonarr` and `kustomize edit set image`
+        # matches by image name, so the entry above already rolls both
+        # `sonarr` and `sonarr2` Deployments together.
+
+        - alias: radarr
+          imageName: lscr.io/linuxserver/radarr
+          commonUpdateSettings:
+            updateStrategy: digest
+            allowTags: "regexp:^latest$"
+          manifestTargets:
+            kustomize:
+              name: lscr.io/linuxserver/radarr
+
+        - alias: prowlarr
+          imageName: lscr.io/linuxserver/prowlarr
+          commonUpdateSettings:
+            updateStrategy: digest
+            allowTags: "regexp:^latest$"
+          manifestTargets:
+            kustomize:
+              name: lscr.io/linuxserver/prowlarr
+
+        - alias: bazarr
+          imageName: lscr.io/linuxserver/bazarr
+          commonUpdateSettings:
+            updateStrategy: digest
+            # Bazarr deliberately rides the floating `:development` tag.
+            allowTags: "regexp:^development$"
+          manifestTargets:
+            kustomize:
+              name: lscr.io/linuxserver/bazarr
+
+        - alias: huntarr
+          imageName: huntarr/huntarr
+          commonUpdateSettings:
+            updateStrategy: digest
+            allowTags: "regexp:^latest$"
+          manifestTargets:
+            kustomize:
+              name: huntarr/huntarr
+
+        - alias: cleanuparr
+          imageName: ghcr.io/cleanuparr/cleanuparr
+          commonUpdateSettings:
+            updateStrategy: digest
+            allowTags: "regexp:^latest$"
+          manifestTargets:
+            kustomize:
+              name: ghcr.io/cleanuparr/cleanuparr
+
+        - alias: flaresolverr
+          imageName: ghcr.io/flaresolverr/flaresolverr
+          commonUpdateSettings:
+            updateStrategy: digest
+            allowTags: "regexp:^latest$"
+          manifestTargets:
+            kustomize:
+              name: ghcr.io/flaresolverr/flaresolverr
+
+        - alias: jellyfin
+          imageName: jellyfin/jellyfin
+          commonUpdateSettings:
+            updateStrategy: digest
+            allowTags: "regexp:^latest$"
+          manifestTargets:
+            kustomize:
+              name: jellyfin/jellyfin
+
+        - alias: homarr
+          imageName: ghcr.io/ajnart/homarr
+          commonUpdateSettings:
+            updateStrategy: digest
+            allowTags: "regexp:^latest$"
+          manifestTargets:
+            kustomize:
+              name: ghcr.io/ajnart/homarr
+
+        - alias: wizarr
+          imageName: ghcr.io/wizarrrr/wizarr
+          commonUpdateSettings:
+            updateStrategy: digest
+            allowTags: "regexp:^latest$"
+          manifestTargets:
+            kustomize:
+              name: ghcr.io/wizarrrr/wizarr
+
+        - alias: bazarr-autotranslate
+          imageName: ghcr.io/zelak312/bazarr_autotranslate
+          commonUpdateSettings:
+            updateStrategy: digest
+            allowTags: "regexp:^latest$"
+          manifestTargets:
+            kustomize:
+              name: ghcr.io/zelak312/bazarr_autotranslate

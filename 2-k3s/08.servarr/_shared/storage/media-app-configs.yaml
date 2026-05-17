@@ -77,4 +77,7 @@ spec:
   storageClassName: local-path
   resources:
     requests:
-      storage: 100Gi
+      # 50Gi matches live PVC (currently Pending — no tdarr workload deployed).
+      # Manifest previously said 100Gi but live was never re-applied. Aligned
+      # 2026-05-17 to keep ArgoCD's initial sync clean.
+      storage: 50Gi

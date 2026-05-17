@@ -1,0 +1,49 @@
+---
+# Traefik IngressRoute for ArgoCD UI/API.
+#
+# Hostname:    argocd.epaflix.com
+# DNS:         Pi-hole entry → 192.168.10.101 (Traefik LB).
+# TLS:         cert-manager-issued via cloudflare DNS-01 (certResolver: cloudflare).
+# Backend:     argocd-server Service in `argocd` ns, port 80 (plain HTTP;
+#              TLS terminated at Traefik. helm-values sets server.insecure=true).
+#
+# Pattern mirrors 2-k3s/08.servarr/_shared/ingress/public-routes.yaml.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: argocd-https
+  namespace: argocd
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`argocd.epaflix.com`)
+      kind: Rule
+      services:
+        - name: argocd-server
+          port: 80
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
+---
+# HTTP → HTTPS redirect.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: argocd-http
+  namespace: argocd
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`argocd.epaflix.com`)
+      kind: Rule
+      middlewares:
+        - name: redirect-https
+          namespace: traefik-system
+      services:
+        - name: argocd-server
+          port: 80
