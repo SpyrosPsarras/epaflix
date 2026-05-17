@@ -52,32 +52,8 @@ spec:
   resources:
     requests:
       storage: 2Gi
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: tdarr-config
-  namespace: servarr
-spec:
-  accessModes:
-    - ReadWriteOnce
-  storageClassName: local-path
-  resources:
-    requests:
-      storage: 5Gi
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: tdarr-transcode-cache
-  namespace: servarr
-spec:
-  accessModes:
-    - ReadWriteOnce
-  storageClassName: local-path
-  resources:
-    requests:
-      # 50Gi matches live PVC (currently Pending — no tdarr workload deployed).
-      # Manifest previously said 100Gi but live was never re-applied. Aligned
-      # 2026-05-17 to keep ArgoCD's initial sync clean.
-      storage: 50Gi
+# tdarr-config and tdarr-transcode-cache PVCs REMOVED 2026-05-17 —
+# tdarr is not deployed in this cluster (no Deployment, no Service).
+# Their Pending state was keeping the ArgoCD Application stuck at
+# Health: Progressing. Re-add together with a tdarr Deployment when
+# transcoding workload is needed.
