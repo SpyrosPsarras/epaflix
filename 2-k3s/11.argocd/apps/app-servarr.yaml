@@ -40,7 +40,6 @@ metadata:
       flaresolverr=ghcr.io/flaresolverr/flaresolverr:latest,
       jellyfin=jellyfin/jellyfin:latest,
       homarr=ghcr.io/ajnart/homarr:latest,
-      wizarr=ghcr.io/wizarrrr/wizarr:latest,
       bazarr-autotranslate=ghcr.io/zelak312/bazarr_autotranslate:latest
     # Every tracked image uses digest strategy by default; per-image tag
     # restrictions go below.
@@ -63,8 +62,6 @@ metadata:
     argocd-image-updater.argoproj.io/jellyfin.allow-tags: regexp:^latest$
     argocd-image-updater.argoproj.io/homarr.update-strategy: digest
     argocd-image-updater.argoproj.io/homarr.allow-tags: regexp:^latest$
-    argocd-image-updater.argoproj.io/wizarr.update-strategy: digest
-    argocd-image-updater.argoproj.io/wizarr.allow-tags: regexp:^latest$
     argocd-image-updater.argoproj.io/bazarr-autotranslate.update-strategy: digest
     argocd-image-updater.argoproj.io/bazarr-autotranslate.allow-tags: regexp:^latest$
     # NOTE: lscr.io/linuxserver/sonarr is used by both `sonarr` and `sonarr2`
