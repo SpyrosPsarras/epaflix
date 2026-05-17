@@ -76,8 +76,11 @@ spec:
             timeoutSeconds: 5
           resources:
             requests:
-              memory: "1Gi"
-              cpu: "500m"
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "4Gi"
+              cpu: "4000m"
       volumes:
         - name: config
           persistentVolumeClaim:

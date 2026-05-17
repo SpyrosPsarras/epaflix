@@ -24,7 +24,7 @@ spec:
       containers:
         - name: jellyseerr
           image: fallenbagel/jellyseerr:preview-OIDC
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
           env:
             - name: PUID
               value: "568"

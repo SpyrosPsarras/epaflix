@@ -22,7 +22,7 @@ spec:
           image: ghcr.io/zelak312/bazarr_autotranslate:latest
           env:
             - name: BAZARR_BASE_URL
-              value: "http://bazarr.epaflix.com"
+              value: "https://bazarr.epaflix.com"
             - name: BAZARR_API_KEY
               value: "cd4a4ec290a973fbbe992412c524c9c1"
             - name: BASE_LANGUAGES
