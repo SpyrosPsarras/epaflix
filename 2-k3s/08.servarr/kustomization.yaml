@@ -85,8 +85,13 @@ images:
     digest: sha256:15417a594ebda4c660a9fa9748e7199d33e2d17b31bbc5ad7ba2e86f0b414763
   - name: lscr.io/linuxserver/prowlarr
     digest: sha256:a89f252d6a22bd25af14a5380aec0adcc3c3af2e3282164f981680e6844070f3
-  - name: lscr.io/linuxserver/bazarr
-    digest: sha256:a0751f77dea1040d2c353c0d8c5ef6f304872f89225f1a7498903ed8ca46afa1
+  # bazarr — switched 2026-05-17 from `:development` to `:latest` (stable)
+  # to match the sonarr/radarr/prowlarr pattern. The :development tag
+  # shipped a broken Alembic migration (0124f9e278fb) that FK-violates
+  # against table_shows. We took a Postgres dump just before the switch
+  # in case :latest can't apply its migration history on top of the
+  # development-head (df76a4410347). image-updater handles the digest
+  # pin on next poll — no static digest here for bazarr.
   - name: ghcr.io/cleanuparr/cleanuparr
     digest: sha256:4ad626da7e1d2774ca51bbfa812f832d5639264b3fe308909e47de02ba2188f7
   - name: ghcr.io/flaresolverr/flaresolverr

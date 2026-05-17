@@ -34,6 +34,7 @@ metadata:
       sonarr=lscr.io/linuxserver/sonarr:latest,
       radarr=lscr.io/linuxserver/radarr:latest,
       prowlarr=lscr.io/linuxserver/prowlarr:latest,
+      bazarr=lscr.io/linuxserver/bazarr:latest,
       huntarr=huntarr/huntarr:latest,
       cleanuparr=ghcr.io/cleanuparr/cleanuparr:latest,
       flaresolverr=ghcr.io/flaresolverr/flaresolverr:latest,
@@ -48,9 +49,8 @@ metadata:
     argocd-image-updater.argoproj.io/radarr.allow-tags: regexp:^latest$
     argocd-image-updater.argoproj.io/prowlarr.update-strategy: digest
     argocd-image-updater.argoproj.io/prowlarr.allow-tags: regexp:^latest$
-    # Bazarr deliberately pinned in kustomization.yaml; image-updater
-    # disabled for this alias on 2026-05-17 due to upstream :development
-    # migration FK bug (see kustomization.yaml comment).
+    argocd-image-updater.argoproj.io/bazarr.update-strategy: digest
+    argocd-image-updater.argoproj.io/bazarr.allow-tags: regexp:^latest$
     argocd-image-updater.argoproj.io/huntarr.update-strategy: digest
     argocd-image-updater.argoproj.io/huntarr.allow-tags: regexp:^latest$
     argocd-image-updater.argoproj.io/cleanuparr.update-strategy: digest
