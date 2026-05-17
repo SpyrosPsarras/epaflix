@@ -80,9 +80,18 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: servarr
-  # Manual sync on first install — flip to `automated` after drift is
-  # reconciled. Self-heal would otherwise overwrite live imperative edits.
-  syncPolicy: {}
+  # Auto-sync ON 2026-05-17 after the live cluster was reconciled to match
+  # repo (live = source of truth pull-up done earlier in the day). selfHeal
+  # reverts any manual `kubectl edit` on managed resources. ServerSideApply
+  # avoids noisy `tracking-id` annotation diffs. prune is OFF for now —
+  # flip to `prune: true` after a week of clean operation so that
+  # accidentally removing a manifest file doesn't yet delete the resource.
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: false
+    syncOptions:
+      - ServerSideApply=true
   # ignoreDifferences keeps Argo quiet about fields that controllers mutate.
   ignoreDifferences:
     - group: apps
