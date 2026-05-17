@@ -26,6 +26,17 @@ configs:
     url: https://argocd.epaflix.com
     # Allow the dot in resource names + Application API extensions.
     application.resourceTrackingMethod: annotation
+    # Default `resource.exclusions` drops both `Endpoints` and
+    # `discovery.k8s.io/EndpointSlice` (assumed to be auto-managed by the
+    # endpoints controller per Service selector). We rely on a STATIC
+    # EndpointSlice for jellyfin-truenas (no selector, points at the
+    # TrueNAS IP), so we need ArgoCD to track EndpointSlice.
+    # Keep the legacy `Endpoints` exclusion (still controller-managed).
+    resource.exclusions: |
+      - apiGroups:
+          - ""
+        kinds:
+          - Endpoints
     # Local API-key account for argocd-image-updater (so it can list /
     # update Application image overrides). Token generated post-install
     # via `argocd account generate-token --account image-updater`.
