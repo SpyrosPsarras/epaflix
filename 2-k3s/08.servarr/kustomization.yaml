@@ -80,27 +80,20 @@ resources:
 # digest for a tracked image. Empty on first install — updater will populate.
 images:
   - name: lscr.io/linuxserver/sonarr
-    digest: 'sha256:60f3b6b5c7647ba2bafd81163acfe34b11117b9b834ebd7fbcc3e5f1b309c7ef'
+    digest: sha256:60f3b6b5c7647ba2bafd81163acfe34b11117b9b834ebd7fbcc3e5f1b309c7ef
   - name: lscr.io/linuxserver/radarr
-    digest: 'sha256:15417a594ebda4c660a9fa9748e7199d33e2d17b31bbc5ad7ba2e86f0b414763'
+    digest: sha256:15417a594ebda4c660a9fa9748e7199d33e2d17b31bbc5ad7ba2e86f0b414763
   - name: lscr.io/linuxserver/prowlarr
-    digest: 'sha256:a89f252d6a22bd25af14a5380aec0adcc3c3af2e3282164f981680e6844070f3'
-  # bazarr REVERTED 2026-05-17 to last-known-good digest. Current
-  # `:development` builds ship a buggy migration (0124f9e278fb) that
-  # INSERTs into table_episodes_subtitles with sonarrSeriesId values
-  # that aren't in table_shows → FK violation, container crashloops.
-  # Bazarr is also removed from app-servarr.yaml's image-list so
-  # argocd-image-updater stops re-introducing the broken digest.
-  # Re-enable once upstream ships a fix.
+    digest: sha256:a89f252d6a22bd25af14a5380aec0adcc3c3af2e3282164f981680e6844070f3
   - name: lscr.io/linuxserver/bazarr
-    digest: 'sha256:1f20f06e824d12ca14f2ff5bcb9ebb8dd93634d8a269b94c751b2ac14b96d2fd'
+    digest: sha256:a0751f77dea1040d2c353c0d8c5ef6f304872f89225f1a7498903ed8ca46afa1
   - name: ghcr.io/cleanuparr/cleanuparr
-    digest: 'sha256:4ad626da7e1d2774ca51bbfa812f832d5639264b3fe308909e47de02ba2188f7'
+    digest: sha256:4ad626da7e1d2774ca51bbfa812f832d5639264b3fe308909e47de02ba2188f7
   - name: ghcr.io/flaresolverr/flaresolverr
-    digest: 'sha256:7962759d99d7e125e108e0f5e7f3cdbcd36161776d058d1d9b7153b92ef1af9e'
+    digest: sha256:7962759d99d7e125e108e0f5e7f3cdbcd36161776d058d1d9b7153b92ef1af9e
   - name: jellyfin/jellyfin
-    digest: 'sha256:1694ff069f0c9dafb283c36765175606866769f5d72f2ed56b6a0f1be922fc37'
+    digest: sha256:1694ff069f0c9dafb283c36765175606866769f5d72f2ed56b6a0f1be922fc37
   - name: ghcr.io/ajnart/homarr
-    digest: 'sha256:e103abadfb527186af5b4bd43df4eff7c67afa5cd4df8e65fa97910c8840b2a9'
+    digest: sha256:e103abadfb527186af5b4bd43df4eff7c67afa5cd4df8e65fa97910c8840b2a9
   - name: ghcr.io/zelak312/bazarr_autotranslate
-    digest: 'sha256:5388463f8e45320c00a472763a8e0fb4584a255d6d31b98f9063b9eb5cada5cf'
+    digest: sha256:5388463f8e45320c00a472763a8e0fb4584a255d6d31b98f9063b9eb5cada5cf
