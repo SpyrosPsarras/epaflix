@@ -26,6 +26,11 @@ configs:
     url: https://argocd.epaflix.com
     # Allow the dot in resource names + Application API extensions.
     application.resourceTrackingMethod: annotation
+    # Kustomize-with-Helm inflation. The `authentik` Application's
+    # 2-k3s/07.authentik-deployment/kustomization.yaml uses `helmCharts:`
+    # to render the upstream chart at build time so image-updater can
+    # write back to the standard `images:` block (same pattern as servarr).
+    kustomize.buildOptions: --enable-helm
     # Default `resource.exclusions` drops both `Endpoints` and
     # `discovery.k8s.io/EndpointSlice` (assumed to be auto-managed by the
     # endpoints controller per Service selector). We rely on a STATIC

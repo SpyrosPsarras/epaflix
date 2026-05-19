@@ -14,10 +14,22 @@ global:
       maxSurge: 1
       maxUnavailable: 0
 
+  # Runtime secrets live in the `authentik-app-secrets` Secret (applied
+  # imperatively — see secret-app.yaml). Appended AFTER the chart-managed
+  # `authentik` Secret so its keys win on the merged envFrom.
+  # Keys:
+  #   AUTHENTIK_SECRET_KEY  AUTHENTIK_POSTGRESQL__PASSWORD  AUTHENTIK_EMAIL__PASSWORD
+  envFrom:
+    - secretRef:
+        name: authentik-app-secrets
+
 # Authentik core configuration
 authentik:
-  # Secret key for cookie signing and user IDs (DO NOT CHANGE after first install)
-  secret_key: "<AUTHENTIK_SECRET_KEY>"
+  # Sensitive values (secret_key, postgresql.password, email.password) are
+  # supplied via global.envFrom → authentik-app-secrets above. Empty strings
+  # here keep them OUT of the chart-managed `authentik` Secret so ArgoCD can
+  # safely render this file from git.
+  secret_key: ""
 
   # Logging
   log_level: info
@@ -32,14 +44,14 @@ authentik:
     port: 5432
     name: "authentik"
     user: "authentik"
-    password: "<AUTHENTIK_DB_PASSWORD>"
+    password: ""
 
   # SMTP/Email configuration
   email:
     host: "mail.epaflix.com"
     port: 587
     username: "truenas_admin"
-    password: "<SMTP_PASSWORD>"
+    password: ""
     use_tls: true
     use_ssl: false
     timeout: 30

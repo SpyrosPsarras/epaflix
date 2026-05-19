@@ -1,0 +1,45 @@
+---
+# Kustomize + Helm inflation for Authentik. Rendered by ArgoCD's repo-server
+# with `kustomize build --enable-helm` (set via configs.cm.kustomize.buildOptions
+# in 2-k3s/11.argocd/helm-values.yaml).
+#
+# Why this layer and not a direct Helm Application:
+#   argocd-image-updater write-back for multi-source Helm Applications goes
+#   through ArgoCD's gRPC `UpdateSpec`, which validates every source's repo
+#   creds. The upstream `charts.goauthentik.io` repo has no creds (it's
+#   public), but ArgoCD still rejects the update. Inflating the chart with
+#   kustomize sidesteps the multi-source path: the Application has a single
+#   git source, and image-updater writes back to the `images:` block below
+#   exactly like the servarr stack.
+#
+# What image-updater touches:
+#   `kustomize edit set image ghcr.io/goauthentik/server=ghcr.io/goauthentik/server:<newtag>`
+#   rewrites the `newTag` field below; kustomize replaces the chart-rendered
+#   server + worker image references in-place.
+#
+# Secrets (AUTHENTIK_SECRET_KEY etc.) are NOT in this kustomization — they
+# live in `authentik-app-secrets`, applied imperatively from secret-app.yaml
+# after substituting real values from .github/instructions/secrets.yml.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: app-authentik
+
+resources:
+  - namespace.yaml
+  - storage/pv-pvc.yaml
+  - ingress/outpost-ingressroute.yaml
+
+helmCharts:
+  - name: authentik
+    repo: https://charts.goauthentik.io
+    version: "2026.2.0"   # bump in lockstep with the image MINOR
+    releaseName: authentik
+    namespace: app-authentik
+    valuesFile: helm-values.yaml
+    includeCRDs: false
+
+images:
+  - name: ghcr.io/goauthentik/server
+    newTag: "2026.2.0"
