@@ -1,0 +1,90 @@
+---
+# Proxy pegaprox.epaflix.com (192.168.10.101, Traefik) → PegaProx UI (192.168.10.21:5000)
+#
+# PegaProx runs in LXC 1021 on evanthoulaki as a Flask app on :5000 with a
+# self-signed cert. Real Let's Encrypt wildcard cert terminates at Traefik;
+# backend hop is HTTPS-with-skipverify, same pattern as truenas-proxy.yaml.
+# DNS for pegaprox.epaflix.com is internal-only (Pi-hole address= → 192.168.10.101).
+# DNS-01 ACME via Cloudflare proves domain ownership — no public A record needed.
+
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: pegaprox-ui
+  namespace: traefik-system
+subsets:
+  - addresses:
+      - ip: 192.168.10.21
+    ports:
+      - name: https
+        port: 5000
+        protocol: TCP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pegaprox-ui
+  namespace: traefik-system
+  labels:
+    app: pegaprox-ui
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - name: https
+      port: 5000
+      protocol: TCP
+
+---
+apiVersion: traefik.io/v1alpha1
+kind: ServersTransport
+metadata:
+  name: pegaprox-insecure
+  namespace: traefik-system
+spec:
+  insecureSkipVerify: true
+  serverName: pegaprox.epaflix.com
+
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: pegaprox-http
+  namespace: traefik-system
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`pegaprox.epaflix.com`)
+      kind: Rule
+      middlewares:
+        - name: redirect-https
+          namespace: traefik-system
+      services:
+        - name: pegaprox-ui
+          port: 5000
+
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: pegaprox-https
+  namespace: traefik-system
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`pegaprox.epaflix.com`)
+      kind: Rule
+      services:
+        - name: pegaprox-ui
+          port: 5000
+          scheme: https
+          serversTransport: pegaprox-insecure
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
