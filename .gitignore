@@ -16,3 +16,6 @@ raid-migration
 *.sql
 *.sql.gz
 *.zip
+
+# Local cache from kustomize+helm pull (per-Application 2-k3s/0X.*/charts/)
+charts/

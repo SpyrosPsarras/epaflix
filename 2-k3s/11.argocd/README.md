@@ -1,16 +1,22 @@
 # 11.argocd — ArgoCD + Image Updater
 
-GitOps for k3s. ArgoCD reconciles servarr manifests from this repo;
-Argo CD Image Updater bumps container image tags by committing back to git.
+GitOps for k3s. ArgoCD reconciles servarr + authentik manifests from this
+repo; Argo CD Image Updater bumps container image tags by committing back
+to git.
 
 ## What this gives you
 
 - **`argocd.epaflix.com`** — ArgoCD UI/API, Authentik SSO.
 - **Application `servarr`** — watches `2-k3s/08.servarr/` and keeps the
   `servarr` namespace in sync with git.
+- **Application `authentik`** — watches `2-k3s/07.authentik-deployment/`
+  whose `kustomization.yaml` inflates the upstream `authentik/authentik`
+  Helm chart (`helmCharts:`) with `helm-values.yaml`, into the
+  `app-authentik` namespace.
 - **Auto image bumps** — Image Updater polls registries every 2 minutes and
-  commits new digests to `2-k3s/08.servarr/kustomization.yaml`'s
-  `images:` block; ArgoCD then auto-syncs the Deployment.
+  commits new tags/digests to the `images:` block in each Application's
+  `kustomization.yaml` (servarr → `2-k3s/08.servarr/`, authentik →
+  `2-k3s/07.authentik-deployment/`); ArgoCD then auto-syncs the Deployments.
 
 ## Layout
 
@@ -24,7 +30,8 @@ Argo CD Image Updater bumps container image tags by committing back to git.
 ├── ingress.yaml           # Traefik IngressRoute for argocd.epaflix.com
 ├── oidc-secret.yaml       # template (DO NOT apply as-is — see below)
 ├── apps/
-│   └── app-servarr.yaml   # Argo Application for the servarr stack
+│   ├── app-servarr.yaml   # Argo Application for the servarr stack
+│   └── app-authentik.yaml # Argo Application for Authentik (Helm chart)
 └── image-updater/
     ├── install.sh
     ├── values.yaml
@@ -79,8 +86,16 @@ Tracked (digest strategy on the moving tag):
 | homarr                 | ghcr.io/ajnart/homarr                      | latest      |
 | wizarr                 | ghcr.io/wizarrrr/wizarr                    | latest      |
 | bazarr-autotranslate   | ghcr.io/zelak312/bazarr_autotranslate      | latest      |
+| authentik              | ghcr.io/goauthentik/server                 | `^2026\.2\.\d+$` (semver, patch-only) |
 
 *`sonarr2` shares the linuxserver/sonarr image with `sonarr`; both roll together.
+
+†Authentik uses **semver + MINOR-pinned regex**, not `digest+latest`. The
+chart and image versions are released in lockstep upstream; image-updater
+only bumps the image, so allowing arbitrary tags would desync the chart's
+template from the image's schema. MINOR-bump procedure: edit `helmCharts.version`
+*and* `images.newTag` in `2-k3s/07.authentik-deployment/kustomization.yaml`
+*and* the `allow-tags` regex in `apps/app-authentik.yaml`, all in the same commit.
 
 Excluded deliberately:
 
@@ -135,9 +150,60 @@ spec:
   servarr Deployments stay running; `kustomization.yaml` is still in repo
   and applies with `kubectl apply -k 2-k3s/08.servarr/` if needed.
 
+## Authentik onboarding (one-time)
+
+Authentik was Helm-installed before ArgoCD existed. To put it under ArgoCD
+without breaking sessions:
+
+1. **Enable kustomize-with-helm in ArgoCD** (already in
+   `2-k3s/11.argocd/helm-values.yaml` as `configs.cm.kustomize.buildOptions: --enable-helm`).
+   If the cluster predates this change: `helm upgrade argocd argo/argo-cd
+   --version 9.5.14 -n argocd -f helm-values.yaml --wait` then
+   `kubectl -n argocd rollout restart deploy/argocd-repo-server`.
+
+2. **Apply the runtime-secrets Secret** (substitute real values from
+   `.github/instructions/secrets.yml` first — never commit the rendered file):
+   ```
+   kubectl apply -f 2-k3s/07.authentik-deployment/secret-app.yaml
+   ```
+   Keys: `AUTHENTIK_SECRET_KEY`, `AUTHENTIK_POSTGRESQL__PASSWORD`,
+   `AUTHENTIK_EMAIL__PASSWORD`. `AUTHENTIK_SECRET_KEY` MUST match the value
+   currently live in the chart-managed `authentik` Secret —
+   `kubectl -n app-authentik get secret authentik -o jsonpath='{.data.AUTHENTIK_SECRET_KEY}' | base64 -d`.
+   Mismatch invalidates every session/cookie/token.
+
+3. **Re-render the chart locally** so the cluster matches the new
+   git-tracked values file *before* ArgoCD adopts it:
+   ```
+   cd 2-k3s/07.authentik-deployment
+   helm upgrade authentik authentik/authentik --version 2026.2.0 \
+     -n app-authentik -f helm-values.yaml --wait
+   ```
+   Verify pods roll cleanly and `https://auth.epaflix.com` still works.
+
+4. **Create the Application** (still manual sync):
+   ```
+   kubectl apply -f 2-k3s/11.argocd/apps/app-authentik.yaml
+   ```
+   In the UI: should be Healthy + (near-)Synced after the first refresh.
+   Reconcile any drift, then flip `syncPolicy` to:
+   ```yaml
+   syncPolicy:
+     automated: { selfHeal: true, prune: false }
+     syncOptions: [ServerSideApply=true]
+   ```
+
+5. **Image-updater bumps**: appear in
+   `kubectl -n argocd logs -l app.kubernetes.io/name=argocd-image-updater`.
+   A new `2026.2.x` tag → commit on `main` editing `images.newTag` in
+   `2-k3s/07.authentik-deployment/kustomization.yaml` → ArgoCD sync → rolling
+   restart of server + worker.
+
 ## See also
 
 - `QUICKSTART.md` — ordered install steps with the exact commands.
 - `2-k3s/05.traefik-deployment/examples/app-with-native-oidc-authentik.md`
   — Authentik OIDC provider setup (mirror those steps for `argocd`).
-- `2-k3s/08.servarr/kustomization.yaml` — what ArgoCD watches.
+- `2-k3s/08.servarr/kustomization.yaml` — what ArgoCD watches for servarr.
+- `2-k3s/07.authentik-deployment/kustomization.yaml` — what ArgoCD watches
+  for authentik (image-updater write-back target = `images:` block).

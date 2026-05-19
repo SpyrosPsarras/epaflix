@@ -1,0 +1,80 @@
+---
+# ArgoCD Application: Authentik (SSO / IdP).
+#
+# Source:       this repo, path 2-k3s/07.authentik-deployment (kustomization.yaml
+#               with `helmCharts:` that inflates the upstream authentik chart
+#               at build time — requires kustomize.buildOptions: --enable-helm
+#               on argocd-cm, set via 2-k3s/11.argocd/helm-values.yaml).
+# Destination:  in-cluster `app-authentik` namespace.
+# Sync:         MANUAL on first install (syncPolicy: {}). The Helm release
+#               `authentik` already owns these resources — ArgoCD will adopt
+#               them on the first sync. After one clean diff, flip to:
+#                 syncPolicy:
+#                   automated: { selfHeal: true, prune: false }
+#                   syncOptions: [ServerSideApply=true]
+#
+# Image Updater (argocd-image-updater.argoproj.io/*):
+#   - Tracks ghcr.io/goauthentik/server with semver strategy constrained to
+#     the currently-pinned MINOR (^2026\.2\.\d+$). Image Updater does NOT
+#     bump the chart version, so MINOR changes need a manual two-line edit
+#     in 2-k3s/07.authentik-deployment/kustomization.yaml (`helmCharts.version`
+#     + `images.newTag`) AND the allow-tags regex here.
+#   - Write-back is `kustomization:.` — Image Updater runs
+#     `kustomize edit set image ghcr.io/goauthentik/server=…:<newtag>`
+#     against 2-k3s/07.authentik-deployment/kustomization.yaml's `images:`
+#     block and commits to `main`, same pattern as the servarr stack.
+#
+# Why single-source kustomize-with-helm and not Helm multi-source:
+#   argocd-image-updater write-back for multi-source Helm Applications goes
+#   through ArgoCD's gRPC `UpdateSpec`, which validates every source's repo
+#   creds — for `charts.goauthentik.io` it fails even though the repo is
+#   public ("could not get creds for repo"). The kustomize-with-helm route
+#   reduces the Application to a single git source and avoids that path.
+#
+# Secrets:
+#   The 3 sensitive values (AUTHENTIK_SECRET_KEY, AUTHENTIK_POSTGRESQL__PASSWORD,
+#   AUTHENTIK_EMAIL__PASSWORD) live in K8s Secret `authentik-app-secrets`
+#   (applied imperatively from secret-app.yaml). global.envFrom on the
+#   chart's helm-values.yaml merges them onto server + worker. The chart's
+#   bundled `authentik` Secret carries the non-sensitive config but omits
+#   those three keys (empty strings in helm-values.yaml).
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: authentik
+  namespace: argocd
+  annotations:
+    argocd-image-updater.argoproj.io/image-list: |
+      authentik=ghcr.io/goauthentik/server
+    argocd-image-updater.argoproj.io/authentik.update-strategy: semver
+    argocd-image-updater.argoproj.io/authentik.allow-tags: regexp:^2026\.2\.\d+$
+    argocd-image-updater.argoproj.io/write-back-method: git
+    argocd-image-updater.argoproj.io/write-back-target: kustomization:.
+    argocd-image-updater.argoproj.io/git-branch: main
+    argocd-image-updater.argoproj.io/git-credentials: argocd:git-creds
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/SpyrosPsarras/epaflix.git
+    targetRevision: main
+    path: 2-k3s/07.authentik-deployment
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: app-authentik
+  # Manual until the first adoption-diff is clean. Flip to:
+  #   syncPolicy:
+  #     automated: { selfHeal: true, prune: false }
+  #     syncOptions: [ServerSideApply=true]
+  syncPolicy: {}
+  # Quiet noisy controller-mutated fields once auto-sync is on.
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas
+    - group: ""
+      kind: Service
+      jsonPointers:
+        - /spec/clusterIP
+        - /spec/clusterIPs
