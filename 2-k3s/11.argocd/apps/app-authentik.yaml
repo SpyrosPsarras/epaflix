@@ -6,12 +6,12 @@
 #               at build time — requires kustomize.buildOptions: --enable-helm
 #               on argocd-cm, set via 2-k3s/11.argocd/helm-values.yaml).
 # Destination:  in-cluster `app-authentik` namespace.
-# Sync:         MANUAL on first install (syncPolicy: {}). The Helm release
-#               `authentik` already owns these resources — ArgoCD will adopt
-#               them on the first sync. After one clean diff, flip to:
-#                 syncPolicy:
-#                   automated: { selfHeal: true, prune: false }
-#                   syncOptions: [ServerSideApply=true]
+# Sync:         AUTOMATED with selfHeal (enabled 2026-05-19 after the
+#               first manual sync at revision 634b800 landed clean —
+#               adoption diff was tracking-id annotation + a-k-i-of-instance
+#               label only). prune is OFF for the same reason as servarr:
+#               keep accidental manifest deletes from cascading to live
+#               resources for at least a week.
 #
 # Image Updater (argocd-image-updater.argoproj.io/*):
 #   - Tracks ghcr.io/goauthentik/server with semver strategy constrained to
@@ -62,11 +62,12 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: app-authentik
-  # Manual until the first adoption-diff is clean. Flip to:
-  #   syncPolicy:
-  #     automated: { selfHeal: true, prune: false }
-  #     syncOptions: [ServerSideApply=true]
-  syncPolicy: {}
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: false
+    syncOptions:
+      - ServerSideApply=true
   # Quiet noisy controller-mutated fields once auto-sync is on.
   ignoreDifferences:
     - group: apps
