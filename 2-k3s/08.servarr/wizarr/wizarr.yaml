@@ -8,7 +8,8 @@ metadata:
   labels:
     app: wizarr
 spec:
-  replicas: 1
+  # Paused — set back to 1 when needed.
+  replicas: 0
   selector:
     matchLabels:
       app: wizarr
@@ -41,6 +42,9 @@ spec:
             requests:
               memory: "256Mi"
               cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
       volumes:
         - name: config
           persistentVolumeClaim:
