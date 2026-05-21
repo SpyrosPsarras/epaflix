@@ -8,7 +8,8 @@ metadata:
   labels:
     app: homarr
 spec:
-  replicas: 1
+  # Paused — set back to 1 when needed.
+  replicas: 0
   selector:
     matchLabels:
       app: homarr
