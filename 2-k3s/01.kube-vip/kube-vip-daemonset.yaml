@@ -60,10 +60,11 @@ spec:
         node-role.kubernetes.io/control-plane: "true"
       containers:
         - name: kube-vip
-          # Pinned 2026-05-22 after :latest pulled a broken digest (5e0d817b)
-          # that stopped advertising service LB IPs via ARP. Roll forward by
-          # updating this digest after testing in a single master.
-          image: ghcr.io/kube-vip/kube-vip@sha256:a9e5374a40de4ff219c5f57b559f14d86618afc10ce81871fc73b0d1326c66c8
+          # Pinned to v0.8.7 stable. Two prior digests broke service VIP ARP:
+          #   :latest @ 5e0d817b (broken) → swapped 2026-05-22 08:09
+          #   a9e5374a (v1.2.0-rc.0, also broken — detects svc, never plumbs IP to eth0)
+          # Roll forward only after verifying VIP ARP on one master.
+          image: ghcr.io/kube-vip/kube-vip:v0.8.7@sha256:32829cc6f8630eba4e1b5e4df5bcbc34c767e70703d26e64a0f7317951c7b517
           imagePullPolicy: IfNotPresent
           args:
             - manager
