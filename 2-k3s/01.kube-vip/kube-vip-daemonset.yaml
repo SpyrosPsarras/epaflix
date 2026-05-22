@@ -12,6 +12,13 @@ rules:
   - apiGroups: [""]
     resources: ["services", "services/status", "nodes", "endpoints"]
     verbs: ["list", "get", "watch", "update"]
+  # Newer kube-vip (post a9e5374a digest) watches EndpointSlices instead of
+  # the deprecated v1 Endpoints. Without this, ARP-leader floods logs with
+  # "endpointslices.discovery.k8s.io is forbidden" and skips advertising
+  # service LB IPs.
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["list", "get", "watch"]
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]
     verbs: ["list", "get", "watch", "update", "create"]
@@ -53,8 +60,11 @@ spec:
         node-role.kubernetes.io/control-plane: "true"
       containers:
         - name: kube-vip
-          image: ghcr.io/kube-vip/kube-vip:latest
-          imagePullPolicy: Always
+          # Pinned 2026-05-22 after :latest pulled a broken digest (5e0d817b)
+          # that stopped advertising service LB IPs via ARP. Roll forward by
+          # updating this digest after testing in a single master.
+          image: ghcr.io/kube-vip/kube-vip@sha256:a9e5374a40de4ff219c5f57b559f14d86618afc10ce81871fc73b0d1326c66c8
+          imagePullPolicy: IfNotPresent
           args:
             - manager
           env:
