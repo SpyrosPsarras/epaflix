@@ -1,0 +1,128 @@
+---
+# Proxy minio.epaflix.com (192.168.10.101, Traefik) → TrueNAS MinIO (192.168.10.200:9000)
+#
+# Real Let's Encrypt wildcard cert terminates at Traefik. Backend is plain HTTP,
+# so no serversTransport is needed.
+# DNS for minio.epaflix.com is internal-only (Pi-hole address= → 192.168.10.101).
+# No public A record needed — DNS-01 ACME via Cloudflare proves domain ownership.
+#
+# Used by cnpg backup pipeline (postgres-cluster.spec.backup.barmanObjectStore)
+# and humans for the MinIO web console.
+
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: minio-external
+  namespace: traefik-system
+subsets:
+  - addresses:
+      - ip: 192.168.10.200
+    ports:
+      - name: api
+        port: 9000
+        protocol: TCP
+      - name: console
+        port: 9001
+        protocol: TCP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio-external
+  namespace: traefik-system
+  labels:
+    app: minio-external
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - name: api
+      port: 9000
+      protocol: TCP
+    - name: console
+      port: 9001
+      protocol: TCP
+
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: minio-http
+  namespace: traefik-system
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`minio.epaflix.com`)
+      kind: Rule
+      middlewares:
+        - name: redirect-https
+          namespace: traefik-system
+      services:
+        - name: minio-external
+          port: 9000
+
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: minio-https
+  namespace: traefik-system
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`minio.epaflix.com`)
+      kind: Rule
+      services:
+        - name: minio-external
+          port: 9000
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
+
+---
+# Web console on a separate hostname so the S3 API and the UI are decoupled.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: minio-console-http
+  namespace: traefik-system
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`minio-console.epaflix.com`)
+      kind: Rule
+      middlewares:
+        - name: redirect-https
+          namespace: traefik-system
+      services:
+        - name: minio-external
+          port: 9001
+
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: minio-console-https
+  namespace: traefik-system
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`minio-console.epaflix.com`)
+      kind: Rule
+      services:
+        - name: minio-external
+          port: 9001
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
