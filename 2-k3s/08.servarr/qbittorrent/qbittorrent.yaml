@@ -17,6 +17,12 @@
 # forced through `wg0`. We need to punch holes for the LAN (192.168.10.0/24)
 # and cluster Pod / Service CIDRs (10.42.0.0/16, 10.43.0.0/16) so Pi-hole
 # DNS and intra-cluster calls still work.
+#
+# BT listen port: 39998 (forwarded by AirVPN on nl3.vpn.airdns.org for
+# tunnel IP 10.135.227.175, both TCP+UDP). Set qBit's "Connections →
+# Port used for incoming connections" to 39998 in the Web UI so the
+# bind matches the forwarded port. ADDITIONAL_PORTS below only opens
+# the iptables holes; it does not change qBit's listen port.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -74,14 +80,14 @@ spec:
             - name: VPN_ENABLED
               value: "yes"
             - name: ADDITIONAL_PORTS
-              value: "8999"
+              value: "39998"
           ports:
             - containerPort: 8080
               name: webui
-            - containerPort: 8999
+            - containerPort: 39998
               name: bt-tcp
               protocol: TCP
-            - containerPort: 8999
+            - containerPort: 39998
               name: bt-udp
               protocol: UDP
           lifecycle:
@@ -168,10 +174,10 @@ spec:
       targetPort: webui
       protocol: TCP
     - name: bt-tcp
-      port: 8999
+      port: 39998
       targetPort: bt-tcp
       protocol: TCP
     - name: bt-udp
-      port: 8999
+      port: 39998
       targetPort: bt-udp
       protocol: UDP
