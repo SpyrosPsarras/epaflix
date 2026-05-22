@@ -103,3 +103,28 @@ spec:
       owner: authentik
       secret:
         name: postgres-app-user
+
+  # Off-cluster backup target: TrueNAS-hosted MinIO at 192.168.10.200:9000.
+  # Bucket "postgres-backups" was provisioned manually. Credentials live in
+  # the minio-backup-credentials secret (ACCESS_KEY_ID / ACCESS_SECRET_KEY).
+  # Currently using the MinIO root credentials — narrow to a bucket-scoped
+  # IAM user once mc CLI is reachable from this cluster.
+  # HTTP today; flip to HTTPS once we front MinIO with Traefik + a cert.
+  backup:
+    retentionPolicy: "10d"
+    barmanObjectStore:
+      destinationPath: s3://postgres-backups/
+      endpointURL: http://192.168.10.200:9000
+      s3Credentials:
+        accessKeyId:
+          name: minio-backup-credentials
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: minio-backup-credentials
+          key: ACCESS_SECRET_KEY
+      wal:
+        compression: gzip
+        maxParallel: 4
+      data:
+        compression: gzip
+        jobs: 2
