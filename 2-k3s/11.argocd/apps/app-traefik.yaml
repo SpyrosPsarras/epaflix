@@ -5,9 +5,10 @@
 #               (kustomization.yaml with `helmCharts:` that inflates the
 #               upstream traefik/traefik chart using values/traefik-values.yaml).
 # Destination:  in-cluster `traefik-system` namespace.
-# Sync:         manual for first adoption. Traefik owns the active
-#               192.168.10.101 ingress endpoint and ACME storage, so review
-#               `argocd app diff traefik` before the first sync.
+# Sync:         manual for first adoption, using ArgoCD's default client-side
+#               apply. Traefik owns the active 192.168.10.101 ingress endpoint
+#               and ACME storage, so review `argocd app diff traefik` before
+#               the first sync.
 # Secrets:      cloudflare-api-token is intentionally created imperatively from
 #               .github/instructions/secrets.yml and only referenced by values.
 
@@ -25,9 +26,6 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: traefik-system
-  syncPolicy:
-    syncOptions:
-      - ServerSideApply=true
   ignoreDifferences:
     - group: ""
       kind: Service

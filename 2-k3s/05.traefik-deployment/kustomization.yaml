@@ -6,6 +6,8 @@
 # - cloudflare-api-token is created imperatively from .github/instructions/secrets.yml
 # - /data/acme.json lives on the chart-managed persistence volume
 # - certificates/cloudflare-origin-cert.yaml is only a placeholder/template
+# - Traefik CRDs already exist from the Helmfile bootstrap and are not adopted
+#   here, avoiding server-side apply conflicts with Helm-owned CRD fields
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: traefik-system
@@ -22,8 +24,8 @@ resources:
 helmCharts:
   - name: traefik
     repo: https://traefik.github.io/charts
-    version: "26.0.0"
+    version: "39.0.1"
     releaseName: traefik
     namespace: traefik-system
     valuesFile: values/traefik-values.yaml
-    includeCRDs: true
+    includeCRDs: false

@@ -21,8 +21,12 @@ ports:
     port: 80
     exposedPort: 80
     # Redirect HTTP to HTTPS
-    redirectTo:
-      port: websecure
+    http:
+      redirections:
+        entryPoint:
+          permanent: true
+          scheme: https
+          to: websecure
   websecure:
     port: 443
     exposedPort: 443
@@ -30,7 +34,8 @@ ports:
 # Dashboard (optional - secure it!)
 ingressRoute:
   dashboard:
-    enabled: true
+    # Git tracks the SSO-protected dashboard route in ingress/traefik-dashboard-sso.yaml.
+    enabled: false
     matchRule: Host(`traefik.epaflix.com`)
     entryPoints: ["websecure"]
     tls:
