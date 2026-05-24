@@ -25,6 +25,13 @@ Web-based file manager with OIDC authentication via Authentik, accessing NFS med
   - Media: hostPath to `/mnt/k3s-media` (NFS with UID 568)
 - **Image**: `gtstef/filebrowser:latest` (FileBrowser Quantum)
 - **Version**: Latest from [FileBrowser Quantum](https://filebrowserquantum.com/)
+- **GitOps**: Managed by ArgoCD Application `filebrowser` (see [2-k3s/11.argocd/apps/app-filebrowser.yaml](../11.argocd/apps/app-filebrowser.yaml)). The `filebrowser-oidc` Secret is created imperatively from `.github/instructions/secrets.yml` and is **not** tracked in git — same convention as Traefik's `cloudflare-api-token`.
+
+## Lifecycle
+
+- **First-time bootstrap** (fresh cluster): run `./deploy.sh` to create the namespace, storage, ConfigMap, and OIDC secret interactively, then apply the ArgoCD Application.
+- **Day-2** (existing cluster): all changes to manifests under this directory flow through git → ArgoCD auto-sync. The OIDC Secret is the only resource not managed by ArgoCD; rotate it via `kubectl create secret ... --dry-run=client -o yaml | kubectl apply -f -` and then `kubectl rollout restart deployment/filebrowser -n filebrowser`.
+- **OIDC creds substitution**: `configmap.yaml`'s `config.yaml` carries `${FILEBROWSER_OIDC_CLIENT_ID}` / `${FILEBROWSER_OIDC_CLIENT_SECRET}` placeholders. The `render-config` initContainer in `deployment.yaml` reads the values from the `filebrowser-oidc` Secret and writes a rendered file to an `emptyDir` that the main container reads — so real credentials never live in the ConfigMap.
 
 ## Prerequisites
 
@@ -175,8 +182,9 @@ Set in [deployment.yaml](deployment.yaml):
 
 - `PUID=568` / `PGID=568`: Match NFS file ownership
 - `TZ=Europe/Oslo`: Timezone
-- `FILEBROWSER_CONFIG=/app-config/config.yaml`: Config file path
-- `FILEBROWSER_OIDC_SECRET`: Injected from secret
+- `FILEBROWSER_CONFIG=/app-config/config.yaml`: Config file path (mounted from the emptyDir written by the `render-config` initContainer)
+
+The `render-config` initContainer reads `client-id` / `client-secret` from the `filebrowser-oidc` Secret and substitutes them into the ConfigMap template before the main container starts.
 
 ## Storage Layout
 
@@ -260,9 +268,9 @@ ssh <node-ip> "ls -la /mnt/ | grep k3s-"
 
 ### OIDC Secret Missing
 
-**Symptom**: Pod logs show "FILEBROWSER_OIDC_SECRET not set"
+**Symptom**: `render-config` initContainer fails with `No such file or directory` for `/secret/client-id` or `/secret/client-secret`, or the pod crash-loops with OIDC errors.
 
-**Solution**: Recreate secret:
+**Solution**: Recreate the imperative Secret:
 ```bash
 kubectl create secret generic filebrowser-oidc \
   -n filebrowser \
@@ -271,6 +279,12 @@ kubectl create secret generic filebrowser-oidc \
   --dry-run=client -o yaml | kubectl apply -f -
 
 kubectl rollout restart deployment/filebrowser -n filebrowser
+
+# Verify the initContainer substituted creds:
+kubectl -n filebrowser logs deploy/filebrowser -c render-config
+kubectl -n filebrowser exec deploy/filebrowser -c filebrowser -- \
+  grep -E 'clientId|clientSecret' /app-config/config.yaml
+# (Should show real values, not ${FILEBROWSER_OIDC_CLIENT_ID})
 ```
 
 ## Backup
@@ -309,11 +323,14 @@ kubectl rollout restart deployment/filebrowser -n filebrowser
 ## Uninstall
 
 ```bash
-# Delete all resources
+# 1. Remove ArgoCD Application first (otherwise it'll re-sync everything you delete)
+kubectl delete -n argocd application filebrowser
+
+# 2. Delete cluster resources
 kubectl delete -f ingress.yaml
 kubectl delete -f service.yaml
 kubectl delete -f deployment.yaml
-kubectl delete -f config/config.yaml
+kubectl delete -f configmap.yaml
 kubectl delete secret filebrowser-oidc -n filebrowser
 kubectl delete -f storage/
 kubectl delete -f namespace.yaml

@@ -1,6 +1,12 @@
 ---
-# FileBrowser configuration with OIDC authentication
-# This ConfigMap defines the config.yaml for FileBrowser Quantum
+# FileBrowser configuration with OIDC authentication.
+#
+# config.yaml here is a TEMPLATE: ${FILEBROWSER_OIDC_CLIENT_ID} and
+# ${FILEBROWSER_OIDC_CLIENT_SECRET} are substituted at pod start by the
+# render-config initContainer (see deployment.yaml). The rendered file is
+# written to an emptyDir and mounted at FILEBROWSER_CONFIG. Real credentials
+# never live in this ConfigMap — keeping them out is what makes this safe
+# to GitOps-manage via ArgoCD.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -31,8 +37,8 @@ data:
           enabled: false  # Disable password auth, OIDC only
         oidc:
           enabled: true
-          clientId: "<FILEBROWSER_OIDC_CLIENT_ID>"
-          clientSecret: "<FILEBROWSER_OIDC_CLIENT_SECRET>"
+          clientId: "${FILEBROWSER_OIDC_CLIENT_ID}"
+          clientSecret: "${FILEBROWSER_OIDC_CLIENT_SECRET}"
           issuerUrl: "https://auth.epaflix.com/application/o/filebrowser/"
           scopes: "openid email profile groups"
           userIdentifier: "preferred_username"
