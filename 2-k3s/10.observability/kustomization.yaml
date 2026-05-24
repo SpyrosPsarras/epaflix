@@ -14,10 +14,15 @@
 # Intentionally NOT rendered here (applied imperatively from
 # .github/instructions/secrets.yml so real secrets never enter git):
 #   - grafana-db-secret           (Grafana → Postgres password)
-#   - grafana-oauth-secret        (Grafana → Authentik client_id + client_secret)
+#   - grafana-oauth-secret        (Grafana → Authentik client_secret)
 #   - grafana-admin-secret        (Grafana admin user/password)
 #   - alertmanager-config-secret  (full alertmanager.yaml incl. SMTP creds)
 #   - pve-exporter-secrets        (Proxmox API token for pve-exporter)
+#   - pve-exporter/configmap.yaml — embeds the Proxmox API token inline (chart
+#     consumes it as a file mount, not env-var-driven). Real value baked at
+#     deploy time via deploy.sh sed-substitution; placeholder in git means
+#     rendering it here would clobber the live token on every sync. Convert to
+#     env-var driven Secret as a follow-up to bring it under ArgoCD.
 #
 # Also excluded:
 #   - storage/{prometheus,loki}-pvc.yaml — DEAD CODE. The kube-prometheus-stack
@@ -38,7 +43,6 @@ resources:
   - namespace.yaml
   - alertmanager-config/custom-alerts.yaml
   - ingress/grafana-ingressroute.yaml
-  - pve-exporter/configmap.yaml
   - pve-exporter/service.yaml
   - pve-exporter/deployment.yaml
   - pve-exporter/servicemonitor.yaml
