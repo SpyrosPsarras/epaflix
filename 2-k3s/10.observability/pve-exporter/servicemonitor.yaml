@@ -24,8 +24,13 @@ spec:
         target: ["192.168.10.11"]
         module: ["default"]
       relabelings:
-        # Set instance to the Proxmox cluster endpoint instead of pod IP
-        - targetLabel: instance
+        # Set instance to the Proxmox cluster endpoint instead of pod IP.
+        # `action: replace` is the Prometheus Operator default — committing it
+        # explicitly so ArgoCD does not see the operator-injected default as
+        # drift under ServerSideApply.
+        - action: replace
+          targetLabel: instance
           replacement: "192.168.10.11"
-        - targetLabel: cluster
+        - action: replace
+          targetLabel: cluster
           replacement: "e-pavli"
