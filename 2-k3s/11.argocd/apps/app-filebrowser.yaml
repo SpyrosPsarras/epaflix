@@ -1,0 +1,46 @@
+---
+# ArgoCD Application: FileBrowser Quantum (web file manager + OIDC).
+#
+# Source:       this repo, path 2-k3s/09.filebrowser, plain manifests
+#               (no Helm or Kustomize). directory.recurse picks up storage/
+#               sub-dir with PVs/PVCs/StorageClass.
+# Destination:  in-cluster `filebrowser` namespace.
+# Sync:         initial adoption — automated sync on, selfHeal OFF until a
+#               clean window confirms the new render-config initContainer
+#               flow works end-to-end with the live filebrowser-oidc Secret.
+#               After the window, flip selfHeal: true (mirrors the Traefik
+#               adoption sequence: 8387f07 → db5d173 → 7d85fd1).
+# Secrets:      `filebrowser-oidc` is created imperatively from
+#               .github/instructions/secrets.yml (see 2-k3s/09.filebrowser/
+#               deploy.sh step 5) and is intentionally NOT tracked here.
+#               The render-config initContainer reads it at pod start and
+#               substitutes ${FILEBROWSER_OIDC_CLIENT_ID/_SECRET} into the
+#               ConfigMap-templated config.yaml.
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: filebrowser
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/SpyrosPsarras/epaflix.git
+    targetRevision: main
+    path: 2-k3s/09.filebrowser
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: filebrowser
+  syncPolicy:
+    automated:
+      selfHeal: false
+      prune: false
+  ignoreDifferences:
+    - group: ""
+      kind: Service
+      jsonPointers:
+        - /spec/clusterIP
+        - /spec/clusterIPs
+        - /status
