@@ -249,6 +249,74 @@ without breaking sessions:
    `2-k3s/07.authentik-deployment/kustomization.yaml` → ArgoCD sync → rolling
    restart of server + worker.
 
+## Observability onboarding (one-time)
+
+The observability stack (kube-prometheus-stack 82.2.0, Loki 6.53.0,
+Promtail 6.17.1) was Helm-installed before ArgoCD. Single Application with
+three `helmCharts:` entries in one kustomization — Loki/Promtail
+ServiceMonitors hard-depend on kube-prometheus-stack CRDs so splitting them
+into separate Apps would force a sync-wave dance ArgoCD does not solve
+cleanly.
+
+1. **Apply the new imperative Secrets BEFORE touching Helm** (real values
+   substituted from `.github/instructions/secrets.yml`; never commit the
+   rendered Secrets):
+   - `grafana-admin-secret` — keys `admin-user`, `admin-password`
+   - `alertmanager-config-secret` — single key `alertmanager.yaml` carrying
+     the full route/receivers/SMTP-globals block
+   - Patch `grafana-oauth-secret` to add a `client_id` key alongside the
+     existing `client_secret`:
+     ```
+     kubectl -n observability patch secret grafana-oauth-secret \
+       --type=merge -p '{"stringData":{"client_id":"<id-from-secrets.yml>"}}'
+     ```
+   - Verify pre-existing `grafana-db-secret`, `grafana-oauth-secret`,
+     `pve-exporter-secrets` are intact.
+
+2. **Re-render each chart locally** so the cluster matches the new
+   git-tracked values *before* ArgoCD adopts it. This rolls Alertmanager
+   once (config → configSecret transition: ~30s/pod, ~3min total alert
+   delivery gap with 3 replicas) and Grafana once (adminPassword →
+   existingSecret: ~30s):
+   ```
+   cd 2-k3s/10.observability
+   helm upgrade kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+     --version 82.2.0 -n observability -f prometheus-values.yaml --wait
+   helm upgrade loki     grafana/loki     --version 6.53.0 -n observability -f loki-values.yaml     --wait
+   helm upgrade promtail grafana/promtail --version 6.17.1 -n observability -f promtail-values.yaml --wait
+   ```
+   Verify rollouts and that `https://grafana.epaflix.com` still SSO-logs-in.
+
+3. **Render-then-diff** against the live cluster (the step omitted on the
+   filebrowser adoption that lost its OIDC Secret — non-negotiable):
+   ```
+   kubectl diff -f <(kubectl kustomize --enable-helm 2-k3s/10.observability)
+   ```
+   The diff MUST be empty modulo `ignoreDifferences`-covered fields. If
+   anything else shows, fix git — do not proceed.
+
+4. **Create the Application** (still manual sync):
+   ```
+   kubectl apply -f 2-k3s/11.argocd/apps/app-observability.yaml
+   argocd app diff observability   # must be empty
+   argocd app sync observability
+   argocd app get observability    # Healthy + Synced
+   ```
+
+5. **Enable automated self-heal** after one clean sync — edit
+   `app-observability.yaml` to:
+   ```yaml
+   syncPolicy:
+     automated: { selfHeal: true, prune: false }
+     syncOptions: [ServerSideApply=true]
+   ```
+   Commit, push, ArgoCD applies the new policy to itself. Hold `prune: false`
+   for at least a week before considering `prune: true`.
+
+6. **Image-updater not enabled.** kube-prometheus-stack chart bumps require
+   coordinated CRD migrations; manual PRs editing `helmCharts[*].version`
+   in `2-k3s/10.observability/kustomization.yaml`.
+
 ## See also
 
 - `QUICKSTART.md` — ordered install steps with the exact commands.
@@ -259,3 +327,5 @@ without breaking sessions:
 - `2-k3s/08.servarr/kustomization.yaml` — what ArgoCD watches for servarr.
 - `2-k3s/07.authentik-deployment/kustomization.yaml` — what ArgoCD watches
   for authentik (image-updater write-back target = `images:` block).
+- `2-k3s/10.observability/kustomization.yaml` — what ArgoCD watches for
+  observability (three `helmCharts:` entries — no image-updater).
