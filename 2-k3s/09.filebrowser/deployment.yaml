@@ -1,5 +1,11 @@
 ---
-# FileBrowser Quantum Deployment
+# FileBrowser Quantum Deployment.
+#
+# The `render-config` initContainer reads the OIDC client_id/secret from the
+# imperatively-created `filebrowser-oidc` Secret and substitutes them into the
+# ConfigMap template, writing the rendered config.yaml to an emptyDir that the
+# main container reads via FILEBROWSER_CONFIG. This keeps real credentials out
+# of the ArgoCD-managed ConfigMap.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -23,6 +29,30 @@ spec:
         runAsUser: 568
         runAsGroup: 568
         fsGroup: 568
+      initContainers:
+        - name: render-config
+          image: bash:5.2-alpine3.19
+          command:
+            - bash
+            - -c
+            - |
+              set -euo pipefail
+              CID="$(< /secret/client-id)"
+              CSEC="$(< /secret/client-secret)"
+              tpl="$(< /template/config.yaml)"
+              tpl="${tpl//'${FILEBROWSER_OIDC_CLIENT_ID}'/$CID}"
+              tpl="${tpl//'${FILEBROWSER_OIDC_CLIENT_SECRET}'/$CSEC}"
+              printf '%s' "$tpl" > /rendered/config.yaml
+              echo "render-config: wrote $(wc -c < /rendered/config.yaml) bytes"
+          volumeMounts:
+            - name: app-config-template
+              mountPath: /template
+              readOnly: true
+            - name: filebrowser-oidc
+              mountPath: /secret
+              readOnly: true
+            - name: app-config
+              mountPath: /rendered
       containers:
         - name: filebrowser
           image: gtstef/filebrowser:latest
@@ -35,16 +65,6 @@ spec:
               value: "Europe/Oslo"
             - name: FILEBROWSER_CONFIG
               value: "/app-config/config.yaml"
-            - name: FILEBROWSER_OIDC_CLIENT_ID
-              valueFrom:
-                secretKeyRef:
-                  name: filebrowser-oidc
-                  key: client-id
-            - name: FILEBROWSER_OIDC_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: filebrowser-oidc
-                  key: client-secret
           ports:
             - containerPort: 80
               name: http
@@ -52,7 +72,7 @@ spec:
             - name: config
               mountPath: /config  # SQLite DB and cache
             - name: app-config
-              mountPath: /app-config  # FileBrowser config.yaml
+              mountPath: /app-config  # rendered config.yaml (from initContainer)
             - name: animes
               mountPath: /srv/animes  # NFS: Anime library
             - name: movies
@@ -85,9 +105,14 @@ spec:
         - name: config
           persistentVolumeClaim:
             claimName: filebrowser-config
-        - name: app-config
+        - name: app-config-template
           configMap:
             name: filebrowser-config
+        - name: app-config
+          emptyDir: {}
+        - name: filebrowser-oidc
+          secret:
+            secretName: filebrowser-oidc
         - name: animes
           persistentVolumeClaim:
             claimName: filebrowser-animes
