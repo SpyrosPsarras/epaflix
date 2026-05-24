@@ -21,6 +21,36 @@ This deployment configures Traefik as a reverse proxy with automatic TLS certifi
 
 ## Deployment Steps
 
+### Preferred: adopt with ArgoCD
+
+For an already-running cluster with ArgoCD installed, Traefik is reconciled
+from this directory through `2-k3s/11.argocd/apps/app-traefik.yaml`. The
+`kustomization.yaml` renders the upstream Traefik Helm chart with
+`values/traefik-values.yaml` and includes the git-tracked middleware,
+dashboard route, and external service proxy manifests.
+
+Keep runtime secrets and certificate state outside git:
+- `cloudflare-api-token` is created imperatively from
+  `.github/instructions/secrets.yml`.
+- ACME state remains in the chart-managed persistence volume at
+  `/data/acme.json`.
+- `certificates/cloudflare-origin-cert.yaml` is a placeholder/template and is
+  not included in the ArgoCD kustomization.
+
+Safe adoption flow:
+```bash
+kubectl kustomize --enable-helm 2-k3s/05.traefik-deployment >/tmp/traefik-rendered.yaml
+kubectl -n traefik-system get secret cloudflare-api-token
+kubectl -n traefik-system get pvc
+kubectl -n traefik-system get svc traefik -o wide
+kubectl apply -f 2-k3s/11.argocd/apps/app-traefik.yaml
+argocd app diff traefik
+argocd app sync traefik
+```
+
+Only sync after confirming the diff preserves `192.168.10.101`, one Traefik
+replica, the existing ACME volume, and the Cloudflare token Secret reference.
+
 ### 0. Configure k3s to use custom DNS resolv.conf (REQUIRED for Let's Encrypt)
 
 This prevents pods from inheriting the host's DNS search domain (which would cause ACME DNS queries to fail) and pins pod-side resolv.conf to the main Pi-hole at `192.168.10.30`.
@@ -72,7 +102,7 @@ ssh ubuntu@<node-running-coredns> \
 kubectl apply -f namespace.yaml
 ```
 
-### 2. Use the automated deployment script (Recommended)
+### 2. Bootstrap/manual deployment script
 ```bash
 ./01.deploy.sh
 ```
@@ -83,6 +113,9 @@ This script will:
 3. Deploy Traefik with Helm (automatically creates local-path PVC)
 4. Wait for LoadBalancer IP assignment
 5. Apply middleware
+
+Use this path for initial bootstrap before ArgoCD exists, or for emergency
+manual recovery. Do not run `helmfile destroy` during ArgoCD adoption.
 
 ### Manual deployment (Alternative)
 

@@ -1,12 +1,16 @@
 # 11.argocd — ArgoCD + Image Updater
 
-GitOps for k3s. ArgoCD reconciles servarr + authentik manifests from this
-repo; Argo CD Image Updater bumps container image tags by committing back
-to git.
+GitOps for k3s. ArgoCD reconciles Traefik, servarr, and authentik manifests
+from this repo; Argo CD Image Updater bumps selected container image tags by
+committing back to git.
 
 ## What this gives you
 
 - **`argocd.epaflix.com`** — ArgoCD UI/API, Authentik SSO.
+- **Application `traefik`** — watches `2-k3s/05.traefik-deployment/`
+  whose `kustomization.yaml` inflates the upstream `traefik/traefik`
+  Helm chart and reconciles middleware, dashboard routes, external
+  service proxies, and TLS-related Traefik CRDs.
 - **Application `servarr`** — watches `2-k3s/08.servarr/` and keeps the
   `servarr` namespace in sync with git.
 - **Application `authentik`** — watches `2-k3s/07.authentik-deployment/`
@@ -31,7 +35,8 @@ to git.
 ├── oidc-secret.yaml       # template (DO NOT apply as-is — see below)
 ├── apps/
 │   ├── app-servarr.yaml   # Argo Application for the servarr stack
-│   └── app-authentik.yaml # Argo Application for Authentik (Helm chart)
+│   ├── app-authentik.yaml # Argo Application for Authentik (Helm chart)
+│   └── app-traefik.yaml   # Argo Application for Traefik (Helm chart)
 └── image-updater/
     ├── install.sh
     ├── values.yaml
@@ -44,7 +49,7 @@ to git.
 GitHub repo  ─── ArgoCD repo-server (poll)
                     │
                     ▼
-              ArgoCD controller ── reconciles ──► servarr ns
+              ArgoCD controller ── reconciles ──► traefik-system / servarr / app-authentik
                     ▲
                     │ Application API
                     │
@@ -150,6 +155,51 @@ spec:
   servarr Deployments stay running; `kustomization.yaml` is still in repo
   and applies with `kubectl apply -k 2-k3s/08.servarr/` if needed.
 
+## Traefik onboarding (safe adoption)
+
+Traefik was Helmfile-installed before ArgoCD managed it, and it owns the
+active ingress endpoint `192.168.10.101`. Adopt it manually first; do not
+enable prune during initial adoption.
+
+1. **Confirm runtime-only state exists**. These are not committed to git:
+  ```
+  kubectl -n traefik-system get secret cloudflare-api-token
+  kubectl -n traefik-system get pvc
+  kubectl -n traefik-system get svc traefik -o wide
+  ```
+  The Service must still show `192.168.10.101`, and the ACME PVC must be the
+  same one currently mounted by Traefik.
+
+2. **Render the git source before ArgoCD syncs it**:
+  ```
+  kubectl kustomize --enable-helm 2-k3s/05.traefik-deployment >/tmp/traefik-rendered.yaml
+  ```
+  Check that the rendered Traefik values still reference
+  `cloudflare-api-token`, mount ACME storage at `/data/acme.json`, keep
+  one replica, and keep the rendered Service `loadBalancerIP: 192.168.10.101`.
+
+3. **Create the Application**:
+  ```
+  kubectl apply -f 2-k3s/11.argocd/apps/app-traefik.yaml
+  ```
+
+4. **Review the first diff, then sync manually only if safe**:
+  ```
+  argocd app diff traefik
+  argocd app sync traefik
+  ```
+
+5. **Verify ingress after sync**:
+  ```
+  kubectl -n traefik-system rollout status deploy/traefik
+  kubectl -n traefik-system get svc traefik -o wide
+  curl -Ik https://traefik.epaflix.com/dashboard/
+  ```
+
+After a clean manual adoption window, switch the Application to automated
+self-heal with `prune: false`. Leave prune disabled until deleting a manifest
+from git should intentionally delete the live resource.
+
 ## Authentik onboarding (one-time)
 
 Authentik was Helm-installed before ArgoCD existed. To put it under ArgoCD
@@ -204,6 +254,8 @@ without breaking sessions:
 - `QUICKSTART.md` — ordered install steps with the exact commands.
 - `2-k3s/05.traefik-deployment/examples/app-with-native-oidc-authentik.md`
   — Authentik OIDC provider setup (mirror those steps for `argocd`).
+- `2-k3s/05.traefik-deployment/kustomization.yaml` — what ArgoCD watches
+  for Traefik.
 - `2-k3s/08.servarr/kustomization.yaml` — what ArgoCD watches for servarr.
 - `2-k3s/07.authentik-deployment/kustomization.yaml` — what ArgoCD watches
   for authentik (image-updater write-back target = `images:` block).
