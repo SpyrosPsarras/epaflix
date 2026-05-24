@@ -6,7 +6,7 @@ releases:
   - name: traefik
     namespace: traefik-system
     chart: traefik/traefik
-    version: "26.0.0" # Latest stable version
+    version: "39.0.1" # Matches the live Helm release adopted by ArgoCD
     values:
       - values/traefik-values.yaml
     installed: true
