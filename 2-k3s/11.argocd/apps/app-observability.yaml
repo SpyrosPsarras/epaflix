@@ -6,10 +6,10 @@
 #               kube-prometheus-stack, loki, and promtail from their upstream
 #               chart repos using the *-values.yaml in the same directory).
 # Destination:  in-cluster `observability` namespace.
-# Sync:         INITIAL ADOPTION — syncPolicy is empty (manual-only) until the
-#               first `argocd app sync` is clean. After confirmation, flip to
-#               `automated: { selfHeal: true, prune: false }` and add
-#               `syncOptions: [ServerSideApply=true]`.
+# Sync:         automated self-heal after clean manual adoption on 2026-05-24,
+#               with prune disabled. Mirrors Traefik / Authentik / filebrowser
+#               convention. Image-updater not enabled — chart bumps are coordinated
+#               CRD migrations handled manually via PRs editing helmCharts[*].version.
 # Secrets:      grafana-db-secret, grafana-oauth-secret, grafana-admin-secret,
 #               alertmanager-config-secret, and pve-exporter-secrets are all
 #               created imperatively from .github/instructions/secrets.yml and
@@ -32,7 +32,12 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: observability
-  syncPolicy: {}
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: false
+    syncOptions:
+      - ServerSideApply=true
   ignoreDifferences:
     - group: ""
       kind: Service
