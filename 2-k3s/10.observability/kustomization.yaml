@@ -1,0 +1,66 @@
+# Kustomize + Helm inflation for the observability stack. Rendered by ArgoCD's
+# repo-server with `kustomize build --enable-helm` (set via
+# configs.cm.kustomize.buildOptions in 2-k3s/11.argocd/helm-values.yaml).
+#
+# Three Helm releases share one namespace and one CRD set:
+#   - kube-prometheus-stack: Prometheus + Grafana + Alertmanager + node-exporter
+#                            + kube-state-metrics + Prometheus Operator + CRDs
+#   - loki:                  SingleBinary log store
+#   - promtail:              DaemonSet log shipper
+#
+# Single Application avoids the sync-wave ordering problem that would arise if
+# promtail/loki ServiceMonitors landed before kube-prometheus-stack's CRDs.
+#
+# Intentionally NOT rendered here (applied imperatively from
+# .github/instructions/secrets.yml so real secrets never enter git):
+#   - grafana-db-secret           (Grafana → Postgres password)
+#   - grafana-oauth-secret        (Grafana → Authentik client_id + client_secret)
+#   - grafana-admin-secret        (Grafana admin user/password)
+#   - alertmanager-config-secret  (full alertmanager.yaml incl. SMTP creds)
+#   - pve-exporter-secrets        (Proxmox API token for pve-exporter)
+#
+# Also excluded:
+#   - storage/{prometheus,loki}-pvc.yaml — DEAD CODE. The kube-prometheus-stack
+#     chart creates the Prometheus PVC via `prometheus.prometheusSpec.storageSpec
+#     .volumeClaimTemplate`, and the loki chart creates the Loki PVC via
+#     `singleBinary.persistence`. Rendering these manifests would create a
+#     second, orphan PVC with a different name on each sync.
+#   - postgres-setup-job.yaml, deploy.sh, *.md — one-shot bootstrap + docs.
+#
+# CRDs (`includeCRDs: false`) stay operator-managed from the original Helmfile
+# install, matching Traefik and Authentik. Re-rendering CRDs through ArgoCD
+# with SSA produces field-manager conflicts.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: observability
+resources:
+  - namespace.yaml
+  - alertmanager-config/custom-alerts.yaml
+  - ingress/grafana-ingressroute.yaml
+  - pve-exporter/configmap.yaml
+  - pve-exporter/service.yaml
+  - pve-exporter/deployment.yaml
+  - pve-exporter/servicemonitor.yaml
+helmCharts:
+  - name: kube-prometheus-stack
+    repo: https://prometheus-community.github.io/helm-charts
+    version: "82.2.0"
+    releaseName: kube-prometheus-stack
+    namespace: observability
+    valuesFile: prometheus-values.yaml
+    includeCRDs: false
+  - name: loki
+    repo: https://grafana.github.io/helm-charts
+    version: "6.53.0"
+    releaseName: loki
+    namespace: observability
+    valuesFile: loki-values.yaml
+    includeCRDs: false
+  - name: promtail
+    repo: https://grafana.github.io/helm-charts
+    version: "6.17.1"
+    releaseName: promtail
+    namespace: observability
+    valuesFile: promtail-values.yaml
+    includeCRDs: false
