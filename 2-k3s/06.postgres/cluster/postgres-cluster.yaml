@@ -12,6 +12,26 @@ spec:
     size: 20Gi
     resizeInUseVolumes: true
 
+  backup:
+    barmanObjectStore:
+      destinationPath: s3://postgres-backups/
+      endpointURL: https://minio.epaflix.com
+      s3Credentials:
+        accessKeyId:
+          name: minio-backup-credentials
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: minio-backup-credentials
+          key: ACCESS_SECRET_KEY
+      wal:
+        compression: gzip
+        maxParallel: 4
+      data:
+        compression: gzip
+        jobs: 2
+    retentionPolicy: 10d
+    target: prefer-standby
+
   affinity:
     podAntiAffinityType: preferred
   enablePDB: true

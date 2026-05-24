@@ -196,7 +196,7 @@ SELECT current_user, current_database();
 
 ## Backup and Recovery
 
-**Important:** The current configuration uses local volume snapshots for backups. For production use with Point-in-Time Recovery (PITR) and WAL archiving to NFS/S3, you should configure `barmanObjectStore` with proper object storage or use the barman-cloud plugin. See the [official backup documentation](https://cloudnative-pg.io/docs/1.28/backup/) for details.
+**Important:** The current configuration uses native CloudNativePG `barmanObjectStore` backups to MinIO/S3 with WAL archiving and a `10d` retention policy. Native `barmanObjectStore` support is deprecated and should be migrated to the Barman Cloud Plugin before upgrading CloudNativePG to `1.30.0` or newer. See the [official backup documentation](https://cloudnative-pg.io/docs/1.29/backup/) and [Barman Cloud Plugin migration guide](https://cloudnative-pg.io/plugin-barman-cloud/docs/migration/) for details.
 
 ### Verify Backup Configuration
 
