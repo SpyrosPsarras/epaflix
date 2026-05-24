@@ -1,0 +1,29 @@
+# Kustomize + Helm inflation for Traefik. Rendered by ArgoCD's repo-server
+# with `kustomize build --enable-helm` (set via configs.cm.kustomize.buildOptions
+# in 2-k3s/11.argocd/helm-values.yaml).
+#
+# Secrets and ACME state are intentionally not rendered here:
+# - cloudflare-api-token is created imperatively from .github/instructions/secrets.yml
+# - /data/acme.json lives on the chart-managed persistence volume
+# - certificates/cloudflare-origin-cert.yaml is only a placeholder/template
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: traefik-system
+resources:
+  - namespace.yaml
+  - middleware/tls-options.yaml
+  - middleware/redirect-https.yaml
+  - middleware/security-headers.yaml
+  - middleware/authentik-forwardauth.yaml
+  - ingress/traefik-dashboard-sso.yaml
+  - ingress/truenas-proxy.yaml
+  - ingress/pegaprox-proxy.yaml
+  - ingress/minio-proxy.yaml
+helmCharts:
+  - name: traefik
+    repo: https://traefik.github.io/charts
+    version: "26.0.0"
+    releaseName: traefik
+    namespace: traefik-system
+    valuesFile: values/traefik-values.yaml
+    includeCRDs: true

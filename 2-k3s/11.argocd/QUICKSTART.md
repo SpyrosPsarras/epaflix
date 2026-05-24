@@ -148,7 +148,21 @@ kubectl -n argocd create secret generic argocd-image-updater-secret \
 (Pinned to v0.x on purpose — v1.x has a registry-prefix matching bug.
 See README for details.)
 
-## 9. Create the servarr Application
+## 9. Create the Traefik Application
+
+Traefik owns the active ingress endpoint (`192.168.10.101`) and ACME
+certificate storage, so the first sync is manual.
+
+```
+kubectl apply -f 2-k3s/11.argocd/apps/app-traefik.yaml
+argocd app diff traefik     # review before first sync
+argocd app sync traefik     # apply only once the diff is safe
+```
+
+Leave prune disabled after adoption. Enable automated self-heal only after
+the manual sync is confirmed clean.
+
+## 10. Create the servarr Application
 
 ```
 kubectl apply -f 2-k3s/11.argocd/apps/app-servarr.yaml
@@ -172,7 +186,7 @@ argocd app set servarr --sync-policy automated --self-heal
 
 (Leave `--auto-prune` off for a week.)
 
-## 10. End-to-end image bump test
+## 11. End-to-end image bump test
 
 Make sure Image Updater is healthy and the test is observable:
 

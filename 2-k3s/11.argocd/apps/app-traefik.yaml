@@ -1,0 +1,37 @@
+---
+# ArgoCD Application: Traefik ingress controller and edge routes.
+#
+# Source:       this repo, path 2-k3s/05.traefik-deployment
+#               (kustomization.yaml with `helmCharts:` that inflates the
+#               upstream traefik/traefik chart using values/traefik-values.yaml).
+# Destination:  in-cluster `traefik-system` namespace.
+# Sync:         manual for first adoption. Traefik owns the active
+#               192.168.10.101 ingress endpoint and ACME storage, so review
+#               `argocd app diff traefik` before the first sync.
+# Secrets:      cloudflare-api-token is intentionally created imperatively from
+#               .github/instructions/secrets.yml and only referenced by values.
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: traefik
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/SpyrosPsarras/epaflix.git
+    targetRevision: main
+    path: 2-k3s/05.traefik-deployment
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: traefik-system
+  syncPolicy:
+    syncOptions:
+      - ServerSideApply=true
+  ignoreDifferences:
+    - group: ""
+      kind: Service
+      jsonPointers:
+        - /spec/clusterIP
+        - /spec/clusterIPs
+        - /status

@@ -3,15 +3,35 @@
 ## One-Command Deployment
 
 ```bash
-./deploy.sh
+./01.deploy.sh
 ```
 
-This will:
+Use this for initial bootstrap before ArgoCD exists, or emergency manual
+recovery. This will:
 1. Create the `traefik-system` namespace
 2. Create the Cloudflare API token secret
 3. Deploy Traefik with LoadBalancer on `192.168.10.101`
 4. Apply middleware (HTTPS redirect + security headers)
 5. Deploy whoami test app
+
+## Preferred ArgoCD Adoption
+
+For an already-running cluster with ArgoCD installed, use the Traefik
+Application instead of re-running Helmfile:
+
+```bash
+kubectl kustomize --enable-helm 2-k3s/05.traefik-deployment >/tmp/traefik-rendered.yaml
+kubectl -n traefik-system get secret cloudflare-api-token
+kubectl -n traefik-system get pvc
+kubectl -n traefik-system get svc traefik -o wide
+kubectl apply -f 2-k3s/11.argocd/apps/app-traefik.yaml
+argocd app diff traefik
+argocd app sync traefik
+```
+
+Review the first diff before syncing. It must preserve `192.168.10.101`, one
+Traefik replica, existing ACME storage at `/data/acme.json`, and the
+`cloudflare-api-token` Secret reference. Leave prune disabled during adoption.
 
 ## Manual Step-by-Step
 
@@ -126,13 +146,14 @@ kubectl delete namespace traefik-system
 ## Configuration Files Summary
 
 - **namespace.yaml**: Creates `traefik-system` namespace
-- **helmfile.yaml**: Helm release configuration
+- **kustomization.yaml**: ArgoCD entrypoint; renders the Traefik Helm chart and static Traefik resources
+- **helmfile.yaml**: Bootstrap/manual Helm release configuration
 - **values/traefik-values.yaml**: Traefik settings (DNS challenge, LoadBalancer IP, etc.)
 - **middleware/redirect-https.yaml**: HTTP → HTTPS redirect
 - **middleware/security-headers.yaml**: Security headers for all responses
 - **examples/whoami-demo.yaml**: Test application with IngressRoute
 - **certificates/create-cloudflare-secret.sh**: Helper script for secret creation
-- **deploy.sh**: Full automated deployment
+- **01.deploy.sh**: Bootstrap/manual automated deployment
 
 ## Key Configuration Details
 
