@@ -78,8 +78,12 @@ monitoring:
       installOperator: false
   serviceMonitor:
     enabled: true
-  lokiCanary:
-    enabled: false
+
+# loki-canary toggle moved to top level in chart 6.x; the `monitoring.lokiCanary`
+# path above is ignored and the chart default (enabled: true) used to apply.
+# Disabling fully — we don't need synthetic canary metrics.
+lokiCanary:
+  enabled: false
 
 # Test
 test:
