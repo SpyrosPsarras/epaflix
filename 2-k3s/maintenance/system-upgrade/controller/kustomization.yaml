@@ -1,0 +1,18 @@
+# system-upgrade-controller install — vendored from upstream.
+#
+# Pinned to v0.19.2 (https://github.com/rancher/system-upgrade-controller/
+# releases/tag/v0.19.2). The controller is benign when running without any
+# `Plan` CRs in the cluster — it simply watches for Plans and does nothing
+# until one appears. This kustomization is therefore safe to enable as a
+# standalone Application; the actual upgrade Plans
+# (system-upgrade-plans.yaml one directory up) stay parked until a
+# maintainer-supervised first rolling upgrade has been done.
+#
+# Closes the controller-install half of Issue #44; the Plan-onboarding
+# half remains a follow-up issue.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - crd.yaml
+  - system-upgrade-controller.yaml
