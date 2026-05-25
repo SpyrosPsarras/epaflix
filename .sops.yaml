@@ -1,0 +1,21 @@
+# SOPS creation rules.
+#
+# All files matching the regex below are encrypted to the listed age
+# recipient(s). The matching private key is stored:
+#   - on the maintainer workstation: ~/.config/sops/age/k3s-cluster.txt
+#   - mirrored to TrueNAS (pool1/dataset01/sops-age-backup/ — to be
+#     moved to an encrypted dataset, tracked in issue #57)
+#   - seeded into the cluster as Secret argocd/sops-age (read by the
+#     ksops install on argocd-repo-server)
+#
+# Convention: encrypted Secret files use the suffix `.enc.yaml` so they
+# are easy to distinguish in PR diffs and so the pre-commit hook can
+# treat unencrypted `kind: Secret` files as a hard error.
+#
+# `encrypted_regex` keeps apiVersion, kind, metadata in cleartext —
+# diffs in PR review stay meaningful, only the actual secret data is
+# ciphertext.
+creation_rules:
+  - path_regex: \.enc\.yaml$
+    encrypted_regex: ^(data|stringData)$
+    age: age1586thf5vkcdf5lcn3zwjpu8ltkwyq8efrhj8lr0vdrrt9k5f3qgsxeg7gx

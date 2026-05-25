@@ -9,10 +9,10 @@
 #               (initContainer + curl OIDC handshake + pod-restart probe all
 #               PASSed). Mirrors the Traefik adoption sequence
 #               8387f07 → db5d173 → 7d85fd1. Prune stays off.
-# Secrets:      `filebrowser-oidc` is created imperatively from
-#               .github/instructions/secrets.yml (see 2-k3s/09.filebrowser/
-#               deploy.sh step 5) and is intentionally NOT tracked here.
-#               The render-config initContainer reads it at pod start and
+# Secrets:      `filebrowser-oidc` is reconciled from
+#               filebrowser-oidc.enc.yaml via the kustomization's ksops
+#               generator (Issue #29 — sops + age). The render-config
+#               initContainer reads the resulting Secret at pod start and
 #               substitutes ${FILEBROWSER_OIDC_CLIENT_ID/_SECRET} into the
 #               ConfigMap-templated config.yaml.
 
@@ -27,8 +27,9 @@ spec:
     repoURL: https://github.com/SpyrosPsarras/epaflix.git
     targetRevision: main
     path: 2-k3s/09.filebrowser
-    directory:
-      recurse: true
+    # kustomize-managed; the kustomization.yaml inflates the ksops
+    # generator which decrypts filebrowser-oidc.enc.yaml at render
+    # time. See Issue #29.
   destination:
     server: https://kubernetes.default.svc
     namespace: filebrowser

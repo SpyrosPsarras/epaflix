@@ -317,6 +317,28 @@ cleanly.
    coordinated CRD migrations; manual PRs editing `helmCharts[*].version`
    in `2-k3s/10.observability/kustomization.yaml`.
 
+## SOPS age key bootstrap (run ONCE per fresh cluster)
+
+Before ArgoCD can decrypt any `*.enc.yaml` Secret, the cluster needs the
+age private key. This is the one Secret that cannot itself be GitOps-
+managed (chicken-egg).
+
+```bash
+# From the maintainer workstation:
+kubectl create secret generic sops-age \
+  -n argocd \
+  --from-file=keys.txt=$HOME/.config/sops/age/k3s-cluster.txt
+
+# Verify the repo-server picked it up:
+kubectl -n argocd rollout restart deploy/argocd-repo-server
+kubectl -n argocd rollout status deploy/argocd-repo-server
+kubectl -n argocd logs deploy/argocd-repo-server -c install-ksops | tail
+# Expected: "Done."
+```
+
+Rotation, encrypt, and decrypt recipes:
+`.github/instructions/sops.instructions.md`.
+
 ## See also
 
 - `QUICKSTART.md` — ordered install steps with the exact commands.
