@@ -20,3 +20,7 @@ raid-migration
 
 # Local cache from kustomize+helm pull (per-Application 2-k3s/0X.*/charts/)
 charts/
+
+# SOPS plaintext drafts — never commit. Always encrypt to *.enc.yaml first.
+*-plaintext.yaml
+*.plaintext.yaml
