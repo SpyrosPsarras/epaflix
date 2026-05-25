@@ -53,5 +53,5 @@ spec:
 
       volumes:
         - name: config
-          configMap:
-            name: pve-exporter-config
+          secret:
+            secretName: pve-exporter-secrets

@@ -81,16 +81,27 @@ echo ""
 
 # Step 7: Deploy Proxmox VE Exporter
 echo -e "${YELLOW}Step 7: Deploying Proxmox VE Exporter...${NC}"
-echo -e "${RED}IMPORTANT: Edit pve-exporter/secret.yaml with actual Proxmox API tokens before applying!${NC}"
-read -p "Have you updated the Proxmox API tokens in pve-exporter/secret.yaml? (yes/no): " confirm
-if [[ "$confirm" == "yes" ]]; then
-  kubectl apply -f pve-exporter/secret.yaml
+# Real token comes from .github/instructions/secrets.yml (git-ignored). The
+# Secret in git carries `<PROXMOX_API_TOKEN_VALUE>` as a placeholder — sed
+# substitutes it in-flight before kubectl apply so the real value never lands
+# on disk in the repo path.
+SECRETS_YML="${SECRETS_YML:-../../.github/instructions/secrets.yml}"
+if [[ ! -f "$SECRETS_YML" ]]; then
+  echo -e "${RED}secrets.yml not found at $SECRETS_YML — skipping pve-exporter${NC}"
+else
+  PROXMOX_API_TOKEN_VALUE=$(grep '^proxmox_grafana_api_token:' "$SECRETS_YML" \
+    | sed -E 's/^[^:]+:\s*"?([^"]*)"?$/\1/' \
+    | sed -E 's/^.*=//')
+  if [[ -z "$PROXMOX_API_TOKEN_VALUE" ]]; then
+    echo -e "${RED}Could not extract proxmox_grafana_api_token from $SECRETS_YML${NC}"
+    exit 1
+  fi
+  sed "s|<PROXMOX_API_TOKEN_VALUE>|$PROXMOX_API_TOKEN_VALUE|g" pve-exporter/secret.yaml \
+    | kubectl apply -f -
   kubectl apply -f pve-exporter/deployment.yaml
   kubectl apply -f pve-exporter/service.yaml
   kubectl apply -f pve-exporter/servicemonitor.yaml
   echo -e "${GREEN}✓ PVE Exporter deployed${NC}"
-else
-  echo -e "${YELLOW}⚠ Skipping PVE Exporter deployment. Deploy manually after updating tokens.${NC}"
 fi
 echo ""
 
