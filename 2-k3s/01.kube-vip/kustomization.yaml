@@ -1,0 +1,14 @@
+# ArgoCD-managed kustomization for the kube-vip control-plane VIP.
+# Owned by ArgoCD Application "kube-vip" (2-k3s/11.argocd/apps/app-kube-vip.yaml).
+#
+# Adopted under ArgoCD per Issue #39 (sister to #16/PR #37 which brought
+# kube-vip-cloud-provider in). This DaemonSet carries the K3s control-
+# plane VIP 192.168.10.100 across the 3 masters — losing it drops the
+# kubeconfig endpoint, so the Application uses syncPolicy: {} (manual
+# first; selfHeal flip is a soak-gated follow-up) and prune NEVER turns
+# on.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - kube-vip-daemonset.yaml
