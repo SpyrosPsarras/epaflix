@@ -16,9 +16,14 @@
 #   rewrites the `newTag` field below; kustomize replaces the chart-rendered
 #   server + worker image references in-place.
 #
-# Secrets (AUTHENTIK_SECRET_KEY etc.) are NOT in this kustomization — they
-# live in `authentik-app-secrets`, applied imperatively from secret-app.yaml
-# after substituting real values from .github/instructions/secrets.yml.
+# Secrets:
+#   - authentik-app-secrets (AUTHENTIK_SECRET_KEY, AUTHENTIK_POSTGRESQL__
+#     PASSWORD, AUTHENTIK_EMAIL__PASSWORD) reconciled via the ksops
+#     generator below from authentik-app-secrets.enc.yaml
+#     (Issue #29 / PR #58, follow-up #59).
+#     The placeholder file `secret-app.yaml` is kept for reference.
+#   - The chart-generated `authentik` Secret (20 non-sensitive config
+#     keys) stays operator-managed.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: app-authentik
@@ -26,6 +31,10 @@ resources:
   - namespace.yaml
   - storage/pv-pvc.yaml
   - ingress/outpost-ingressroute.yaml
+
+generators:
+  - ksops-generator.yaml
+
 helmCharts:
   - name: authentik
     repo: https://charts.goauthentik.io
