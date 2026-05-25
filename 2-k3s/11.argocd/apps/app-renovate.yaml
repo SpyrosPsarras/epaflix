@@ -1,0 +1,44 @@
+---
+# ArgoCD Application: self-hosted Renovate.
+#
+# Source:       this repo, path 2-k3s/12.renovate (CronJob + ServiceAccount).
+# Destination:  in-cluster `renovate` namespace.
+# Sync:         AUTOMATED with selfHeal from the start — nothing pre-existed
+#               in-cluster, no adoption drift to worry about. prune stays
+#               OFF (consistent with the other Applications).
+#
+# Image Updater:
+#   - Tracks ghcr.io/renovatebot/renovate with semver strategy. Patch + minor
+#     within MAJOR 39 only; Renovate's own MAJOR bumps need a renovate.json
+#     compatibility check first.
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: renovate
+  namespace: argocd
+  annotations:
+    argocd-image-updater.argoproj.io/image-list: |
+      renovate=ghcr.io/renovatebot/renovate
+    argocd-image-updater.argoproj.io/renovate.update-strategy: semver
+    argocd-image-updater.argoproj.io/renovate.allow-tags: regexp:^39(\.\d+){0,2}$
+    argocd-image-updater.argoproj.io/write-back-method: git
+    argocd-image-updater.argoproj.io/write-back-target: kustomization:.
+    argocd-image-updater.argoproj.io/git-branch: main
+    argocd-image-updater.argoproj.io/git-credentials: argocd:git-creds
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/SpyrosPsarras/epaflix.git
+    targetRevision: main
+    path: 2-k3s/12.renovate
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: renovate
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: false
+    syncOptions:
+      - ServerSideApply=true
+      - CreateNamespace=true
