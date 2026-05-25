@@ -11,8 +11,8 @@
 # Single Application avoids the sync-wave ordering problem that would arise if
 # promtail/loki ServiceMonitors landed before kube-prometheus-stack's CRDs.
 #
-# Intentionally NOT rendered here (applied imperatively from
-# .github/instructions/secrets.yml so real secrets never enter git):
+# Reconciled via the ksops generator below
+# (secrets/ksops-generator.yaml — Issue #29 / PR #58, follow-up #62):
 #   - grafana-db-secret           (Grafana → Postgres password)
 #   - grafana-oauth-secret        (Grafana → Authentik client_secret)
 #   - grafana-admin-secret        (Grafana admin user/password)
@@ -44,6 +44,10 @@ resources:
   - pve-exporter/service.yaml
   - pve-exporter/deployment.yaml
   - pve-exporter/servicemonitor.yaml
+
+generators:
+  - secrets/ksops-generator.yaml
+
 helmCharts:
   - name: kube-prometheus-stack
     repo: https://prometheus-community.github.io/helm-charts
