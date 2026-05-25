@@ -1,0 +1,31 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Adopted under ArgoCD 2026-05-25 (Issue #18).
+#
+# Scope: recurring maintenance CronJobs (+ their RBAC and ConfigMap
+# sidecars) that are already live in the cluster. Manifests span two
+# namespaces — each carries its own `metadata.namespace`, so no
+# top-level `namespace:` is set here.
+#
+#   kube-system : containerd-cleanup, node-os-updater (+ SA/CR/CRB)
+#   servarr     : postgres-sequence-audit (+ sql ConfigMap)
+#
+# DELIBERATELY EXCLUDED from `resources:`:
+#   - servarr-image-updater-cronjob.yaml — superseded by
+#     argocd-image-updater; no live counterpart in the cluster (RBAC
+#     not provisioned). Kept on disk for historical reference.
+#   - system-upgrade/system-upgrade-plans.yaml — depends on the
+#     system-upgrade-controller CRD (Plan, system-upgrade.cattle.io),
+#     which is NOT installed. Adding it would break the Application's
+#     sync. Bring this back under ArgoCD once the controller is
+#     installed (separate change).
+#   - backup-all-databases.sh, fix-worker-61-diskpressure.sh — shell
+#     tooling, not k8s manifests.
+#   - backups/*.sql.gz — DB dumps.
+#   - README.md, system-upgrade/README.md — docs.
+
+resources:
+  - image-cleanup-cronjob.yaml
+  - node-os-updater-cronjob.yaml
+  - postgres-sequence-audit-cronjob.yaml
