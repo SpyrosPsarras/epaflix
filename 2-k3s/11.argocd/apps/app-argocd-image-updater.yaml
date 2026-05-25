@@ -1,0 +1,46 @@
+---
+# ArgoCD Application: argocd-image-updater (self-management).
+# Closes Issue #47 (image-updater half of #19 scope).
+#
+# Source:       this repo, path 2-k3s/11.argocd/image-updater. The
+#               kustomization.yaml there inflates the argocd-image-updater
+#               Helm chart at the pinned 0.14.0 (app v0.17.0) version,
+#               matching the original `helm install` performed by
+#               image-updater/install.sh.
+# Destination:  in-cluster `argocd` namespace.
+# Sync:         MANUAL on first install (syncPolicy: {}). After a clean
+#               sync with no pod-restart cascade AND a 48h soak, flip to:
+#                 syncPolicy:
+#                   automated: { selfHeal: true, prune: false }
+#                   syncOptions: [ServerSideApply=true]
+#               `prune` NEVER turns on — accidental file deletion must NOT
+#               cascade-drop the image-updater Deployment.
+#
+# Secrets: reconciled from secrets/*.enc.yaml via the ksops generator in
+#          the kustomization (Issue #29 / PR #58):
+#            - git-creds                    image-updater's git push creds
+#            - github-epaflix-repo          ArgoCD repository registration
+#            - argocd-image-updater-secret  local API token
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argocd-image-updater
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/SpyrosPsarras/epaflix.git
+    targetRevision: main
+    path: 2-k3s/11.argocd/image-updater
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy: {}
+  ignoreDifferences:
+    # Chart helm-release secrets are operator-managed.
+    - group: ""
+      kind: Secret
+      jsonPointers:
+        - /metadata/labels
+        - /metadata/annotations
