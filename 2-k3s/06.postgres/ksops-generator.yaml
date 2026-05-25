@@ -1,0 +1,18 @@
+# ksops generator — decrypts encrypted Secret files at render time.
+# Decryption performed inside argocd-repo-server via the ksops binary
+# (see 2-k3s/11.argocd/helm-values.yaml).
+#
+# Scope: ONLY minio-backup-credentials (the user-managed backup creds).
+# postgres-superuser and postgres-app-user are CNPG-bootstrap-generated
+# and stay operator-managed; the placeholder file `cluster/postgres-
+# secret.yaml` remains excluded from `resources:`.
+apiVersion: viaduct.ai/v1
+kind: ksops
+metadata:
+  name: postgres-secrets
+  annotations:
+    config.kubernetes.io/function: |
+      exec:
+        path: ksops
+files:
+  - minio-backup-credentials.enc.yaml
