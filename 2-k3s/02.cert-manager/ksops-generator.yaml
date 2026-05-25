@@ -1,0 +1,19 @@
+# ksops generator — decrypts cloudflare-api-token.enc.yaml at render
+# time. Decryption performed inside argocd-repo-server via the ksops
+# binary installed by the install-ksops initContainer (see 2-k3s/
+# 11.argocd/helm-values.yaml).
+#
+# Note: letsencrypt-dns-private-key is the ACME account key that
+# cert-manager auto-generates the first time the ClusterIssuer calls
+# the ACME API. It is NOT covered here; it remains operator-managed
+# (similar to CNPG webhook TLS).
+apiVersion: viaduct.ai/v1
+kind: ksops
+metadata:
+  name: cert-manager-secrets
+  annotations:
+    config.kubernetes.io/function: |
+      exec:
+        path: ksops
+files:
+  - cloudflare-api-token.enc.yaml
