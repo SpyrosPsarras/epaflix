@@ -16,6 +16,14 @@
 
 global:
   domain: argocd.epaflix.com
+  # fsGroup 999 lets the argocd user (uid/gid 999) read group-readable
+  # mounted files — needed so the sops-age Secret volume on
+  # argocd-repo-server (mode 0440, see `repoServer.volumes.sops-age`)
+  # is readable by the running process. Applied pod-wide via the
+  # chart's global.securityContext slot (not repoServer.securityContext,
+  # which the chart does not recognize). See Issue #29.
+  securityContext:
+    fsGroup: 999
 
 # CRDs (applications, applicationsets, appprojects.argoproj.io) were installed
 # at original `helm install` time and stay operator-managed. The ArgoCD self-
@@ -121,11 +129,6 @@ repoServer:
       memory: 256Mi
     limits:
       memory: 512Mi
-  # Pod-level fsGroup so the sops-age Secret volume mount is readable
-  # by the argocd user (uid/gid 999) while staying restrictive to
-  # everyone else. See volumes.sops-age.secret.defaultMode below.
-  securityContext:
-    fsGroup: 999
   # ksops CMP — see Issue #29 and .github/instructions/sops.instructions.md.
   # Canonical install pattern (matches viaduct.ai/ksops upstream docs):
   #   - initContainer copies the ksops + kustomize binaries into an
