@@ -1,24 +1,30 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Install cert-manager via Helm (latest stable release)
-# Provides automatic certificate management for Kubernetes
+# Bootstrap-only install for cert-manager (jetstack chart).
+#
+# Day-to-day cert-manager lifecycle is owned by ArgoCD Application "cert-manager"
+# (2-k3s/11.argocd/apps/app-cert-manager.yaml), which kustomize-with-helm renders
+# the same jetstack chart from this directory's `kustomization.yaml` +
+# `values/cert-manager-values.yaml`.
+#
+# Run this script ONLY for the very first install (fresh cluster, before ArgoCD
+# is up) — it installs the CRDs and the operator imperatively so ArgoCD can
+# then adopt the ClusterIssuers without a chicken-and-egg.
 
 cd "$(dirname "$0")"
 
-echo "Installing cert-manager via Helm..."
+echo "Installing cert-manager via Helm (bootstrap-only)..."
 
-# Add Jetstack Helm repository
 helm repo add jetstack https://charts.jetstack.io --force-update
 helm repo update
 
-# Install cert-manager with CRDs
-# --replace flag allows overwriting stuck/failed installations
-helm install cert-manager jetstack/cert-manager \
+helm upgrade --install cert-manager jetstack/cert-manager \
   --namespace cert-manager \
   --create-namespace \
-  --set installCRDs=true \
-  --replace
+  --version v1.19.3 \
+  --set crds.enabled=true \
+  --set crds.keep=true
 
 echo "Waiting for cert-manager to be ready..."
 kubectl wait --for=condition=Available --timeout=300s \
@@ -28,29 +34,16 @@ kubectl wait --for=condition=Available --timeout=300s \
   -n cert-manager
 
 echo ""
-echo "✅ cert-manager installed successfully"
+echo "✅ cert-manager installed."
 echo ""
-echo "Applying issuers..."
-kubectl apply -f issuers/
-
+echo "Next: create the Cloudflare API token and ACME account-key Secrets:"
+echo "  kubectl -n cert-manager create secret generic cloudflare-api-token \\"
+echo "    --from-literal=api-token='<CLOUDFLARE_API_TOKEN>'"
 echo ""
-echo "Waiting for CA certificate to be ready..."
-kubectl wait --for=condition=Ready certificate/epavli-ca -n cert-manager --timeout=60s
-
+echo "Then either:"
+echo "  - Apply issuers/* directly:  kubectl apply -f issuers/"
+echo "  - Or let ArgoCD adopt them:  kubectl apply -f ../11.argocd/apps/app-cert-manager.yaml"
 echo ""
-echo "Applying certificates..."
-kubectl apply -f certificates/
-
-echo ""
-echo "Waiting for wildcard certificate to be ready..."
-kubectl wait --for=condition=Ready certificate/epavli-wildcard-cert -n traefik-system --timeout=60s
-
-echo ""
-echo "✅ All certificates deployed successfully"
-echo ""
-echo "Verify with:"
+echo "Verify:"
+echo "  kubectl get clusterissuer"
 echo "  kubectl get certificate -A"
-echo "  kubectl get secret epavli-tls -n traefik-system"
-echo ""
-echo "To upgrade in the future:"
-echo "  helm upgrade cert-manager jetstack/cert-manager -n cert-manager"
