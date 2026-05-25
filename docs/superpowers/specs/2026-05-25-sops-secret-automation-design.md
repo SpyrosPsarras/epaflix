@@ -119,14 +119,16 @@ k3s-swarm-proxmox/
 
 - Image: `viaductoss/ksops:vX.Y.Z` (latest stable at implementation time;
   pin via Renovate / image-updater).
-- Runs as a **sidecar** on `argocd-repo-server`, sharing the
-  `/custom-tools` volume with the main container so the `ksops` and
-  `kustomize` binaries are discoverable.
+- Installed via the canonical pattern: an **initContainer** on
+  `argocd-repo-server` copies the `ksops` and `kustomize` binaries into
+  an emptyDir shared with the main repo-server container at
+  `/custom-tools/`.
+- The main repo-server container mounts the age key Secret at
+  `/var/sops/keys.txt` and exports `SOPS_AGE_KEY_FILE` so that `ksops`,
+  invoked by `kustomize build`, can decrypt at render time.
 - Requires `kustomize.buildOptions: "--enable-alpha-plugins --enable-exec"`
   in the `argocd-cm` ConfigMap (set via Helm values
   `configs.cm.kustomize.buildOptions`).
-- Reads age private key from `SOPS_AGE_KEY_FILE=/var/sops/keys.txt`
-  mounted read-only from Secret `argocd/sops-age`.
 
 ### `.sops.yaml`
 
@@ -246,7 +248,7 @@ T3. ArgoCD diff pre-sync
 
 T4. Repo-server pod healthy after Helm/values bump
     kubectl -n argocd get pods -l app.kubernetes.io/component=repo-server
-    → 2/2 Ready (main + ksops sidecar)
+    → 1/1 Ready; describe shows initContainer "install-ksops" Completed
 
 T5. Pre-commit safety
     Stage plaintext filebrowser-oidc.yaml ; git commit
