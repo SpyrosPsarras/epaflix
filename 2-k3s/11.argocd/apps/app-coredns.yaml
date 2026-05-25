@@ -1,0 +1,43 @@
+---
+# ArgoCD Application: CoreDNS custom config — the user-managed
+# `coredns-custom` ConfigMap that adds an `epaflix.com:53` server block,
+# forwarding *.epaflix.com queries via the K3s master node IPs (which run
+# systemd-resolved listeners) to Pi-hole at 192.168.10.30.
+#
+# Source:       this repo, path 2-k3s/04.coredns
+#               (kustomization.yaml → coredns-epaflix-domains.yaml only).
+# Destination:  in-cluster `kube-system` namespace.
+# Sync:         MANUAL on first install (syncPolicy: {}). After a clean
+#               `argocd app diff` showing only `argocd.argoproj.io/tracking-id`
+#               and a 48 h soak with no CoreDNS log errors and no pod-side
+#               *.epaflix.com resolution regressions, flip to:
+#                 syncPolicy:
+#                   automated: { selfHeal: true, prune: false }
+#                   syncOptions: [ServerSideApply=true]
+#               `prune` NEVER turns on — accidental file deletion must NOT
+#               cascade-drop `coredns-custom`. Wiping it would leave pods
+#               unable to resolve sonarr.epaflix.com / auth.epaflix.com /
+#               jellyfin.epaflix.com / ... via the cluster DNS path.
+#
+# Scope (per Issue #17): only `coredns-custom`. The main `coredns`
+# ConfigMap is k3s-addon-owned (objectset.rio.cattle.io annotations) and is
+# intentionally NOT under ArgoCD — adopting it would fight k3s's helm
+# controller. The systemd-resolved listener config on each node lives in
+# `configure-dns.sh` (one-shot bootstrap, not GitOps).
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: coredns
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/SpyrosPsarras/epaflix.git
+    targetRevision: main
+    path: 2-k3s/04.coredns
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  # PHASE 1: manual only.
+  syncPolicy: {}
