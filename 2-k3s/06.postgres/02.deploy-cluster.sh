@@ -5,15 +5,6 @@ echo "======================================"
 echo "Deploying PostgreSQL HA Cluster"
 echo "======================================"
 
-# Create NFS storage for backups (dynamic provisioning via CSI)
-echo "Creating NFS backup storage..."
-kubectl apply -f storage/backup-nfs-storage.yaml
-
-# Wait for PVC to be bound
-echo "Waiting for backup PVC to be bound..."
-kubectl wait --for=jsonpath='{.status.phase}'=Bound --timeout=60s \
-  pvc/postgres-backup-pvc -n postgres-system
-
 # Create secrets
 echo "Creating PostgreSQL secrets..."
 kubectl apply -f cluster/postgres-secret.yaml
