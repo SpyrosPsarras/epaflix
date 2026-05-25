@@ -161,6 +161,11 @@ repoServer:
       value: /var/sops/keys.txt
     - name: XDG_CONFIG_HOME
       value: /.config
+    # Make ksops + the ksops-bundled kustomize discoverable to the
+    # in-pod `kustomize build`. The generator annotation uses bare
+    # `path: ksops`, so the binary has to be on PATH.
+    - name: PATH
+      value: /custom-tools:/usr/local/bin:/usr/bin:/bin
   initContainers:
     - name: install-ksops
       image: viaductoss/ksops:v4.3.3
