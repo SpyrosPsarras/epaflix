@@ -10,6 +10,7 @@ Infrastructure-as-code and documentation for a K3s Kubernetes cluster + Docker S
 - **NEVER** commit `secrets.yml`. It is git-ignored and must stay that way.
 - Log significant commands and outputs to `.history/` for future reference.
 - Repo path is `/home/spy/Documents/Epaflix/k3s-swarm-proxmox` — not `k3s-proxmox`.
+- **Open a GitHub issue for every follow-up.** Any time work surfaces a step that has to happen later — soak-window flip, deferred cleanup, scope-cut spinoff, future migration, "out of scope of this PR" item — open a `gh issue` on `SpyrosPsarras/epaflix` for it before closing the thread. Don't park follow-ups in chat history, PR descriptions only, or local memory; the issue list is the durable shared queue. Use the existing enhancement-issue shape (`## Finding` / `## Current state` / `## Desired outcome` / `## Notes`) and cross-link related issues.
 
 ## Cluster Inventory
 
