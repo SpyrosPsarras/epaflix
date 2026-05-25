@@ -1,0 +1,17 @@
+# ksops generator — decrypts cloudflare-api-token.enc.yaml at render
+# time. Decryption performed inside argocd-repo-server via the ksops
+# binary installed by the install-ksops initContainer (see 2-k3s/
+# 11.argocd/helm-values.yaml). For local kustomize builds, run with:
+#   PATH=/opt/kustomize:$PATH \
+#   SOPS_AGE_KEY_FILE=$HOME/.config/sops/age/k3s-cluster.txt \
+#   kustomize build --enable-helm --enable-alpha-plugins --enable-exec .
+apiVersion: viaduct.ai/v1
+kind: ksops
+metadata:
+  name: traefik-secrets
+  annotations:
+    config.kubernetes.io/function: |
+      exec:
+        path: ksops
+files:
+  - cloudflare-api-token.enc.yaml
