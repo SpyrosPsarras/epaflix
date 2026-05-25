@@ -1,0 +1,22 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Adopted under ArgoCD 2026-05-25 (Issue #17).
+#
+# Scope is intentionally narrow: only the user-managed `coredns-custom`
+# ConfigMap (the k3s-supported extension mechanism, mounted at
+# /etc/coredns/custom/ by the addon-owned `coredns` Deployment). The main
+# `coredns` ConfigMap is NOT in this Application — it is owned by the k3s
+# helm/addon controller (objectset.rio.cattle.io annotations) and adopting
+# it would fight that controller.
+#
+# The deprecated `coredns-custom.yaml` stub in this dir (empty data, kept
+# only as historical doc) is excluded; it shares the same ConfigMap name as
+# `coredns-epaflix-domains.yaml` and would clobber the live data keys.
+#
+# Bootstrap-only assets in this dir (not part of the Application):
+#   - configure-dns.sh — one-shot systemd-resolved listener setup on nodes.
+#   - DNS-FIX-2026-02-26.md, README.md — docs.
+
+resources:
+  - coredns-epaflix-domains.yaml

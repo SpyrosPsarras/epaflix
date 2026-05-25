@@ -14,9 +14,9 @@
 #   2. See README.md for complete DNS configuration steps
 #
 # Installation:
-#   kubectl apply -f coredns-epaflix-domains.yaml
-#   kubectl rollout restart deployment/coredns -n kube-system
-#   kubectl rollout status deployment/coredns -n kube-system
+#   Managed by the ArgoCD `coredns` Application
+#   (2-k3s/11.argocd/apps/app-coredns.yaml). CoreDNS hot-reloads the
+#   coredns-custom ConfigMap from /etc/coredns/custom/ — no rollout required.
 #
 # Verification:
 #   kubectl run test-dns --image=busybox:latest --restart=Never --rm -it -- \

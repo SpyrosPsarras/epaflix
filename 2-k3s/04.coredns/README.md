@@ -2,10 +2,11 @@
 
 ## Overview
 
-This directory contains CoreDNS custom configurations for the K3s cluster:
+This directory contains the CoreDNS custom configuration for the K3s cluster.
 
-1. **External Domain Resolution** (`coredns-epaflix-domains.yaml`) - Allows pods to access services using external domain names (e.g., `https://sonarr.epaflix.com`)
-2. **Search Domain Fix** (`coredns-custom.yaml`) - DEPRECATED: Fixes search domain issues (see Alternative section below)
+- **External Domain Resolution** (`coredns-epaflix-domains.yaml`) — `coredns-custom` ConfigMap with an `epaflix.com:53` server block so pods can resolve `https://<svc>.epaflix.com` (e.g. `https://sonarr.epaflix.com`).
+- **GitOps**: managed by the ArgoCD `coredns` Application (`2-k3s/11.argocd/apps/app-coredns.yaml`, scope: `coredns-custom` ConfigMap only). The k3s-addon-owned main `coredns` ConfigMap is **not** under ArgoCD — k3s's helm/addon controller owns it.
+- **One-shot bootstrap** (`configure-dns.sh`) — systemd-resolved listener config on each node; runs once per new node, not GitOps-managed.
 
 ## DNS Configuration Fix (Required)
 
@@ -51,16 +52,16 @@ curl https://auth.epaflix.com
 5. Traefik routes based on Host header to the appropriate service
 6. Request goes through ingress middleware (auth, headers, etc.)
 
-### Installation
+### Installation (GitOps)
+
+Managed by the `coredns` ArgoCD Application — `2-k3s/11.argocd/apps/app-coredns.yaml`. Bootstrap once per cluster:
 
 ```bash
-# Apply the configuration
-kubectl apply -f coredns-epaflix-domains.yaml
-
-# Restart CoreDNS to load the new configuration
-kubectl rollout restart deployment/coredns -n kube-system
-kubectl rollout status deployment/coredns -n kube-system
+kubectl apply -f 2-k3s/11.argocd/apps/app-coredns.yaml
+argocd app sync coredns --core --prune=false
 ```
+
+After the first sync, edits to `coredns-epaflix-domains.yaml` reconcile via Argo. CoreDNS hot-reloads the `coredns-custom` ConfigMap from `/etc/coredns/custom/`; no Deployment rollout is required (a `kubectl rollout restart deployment/coredns -n kube-system` is only needed if a reload misfires).
 
 ### Verification
 
@@ -135,11 +136,7 @@ kubectl patch configmap coredns -n kube-system --type=json -p='[{"op":"replace",
 
 ### 3. Update Custom epaflix Domains Configuration
 
-Update the custom ConfigMap to also forward to node IPs:
-
-```bash
-kubectl patch configmap coredns-custom -n kube-system --type=json -p='[{"op":"replace","path":"/data/epaflix.server","value":"epaflix.com:53 {\n    errors\n    cache 30\n    forward . 192.168.10.51 192.168.10.52 192.168.10.53\n    log\n}\n"}]'
-```
+`coredns-custom` is managed by the ArgoCD `coredns` Application — edit `coredns-epaflix-domains.yaml`, commit, and let Argo reconcile (or `argocd app sync coredns --core`). Avoid `kubectl patch configmap coredns-custom` directly; the next Argo sync would revert it.
 
 ### 4. Restart CoreDNS
 
