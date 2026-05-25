@@ -1,0 +1,25 @@
+# ArgoCD-managed kustomization for the Postgres/CNPG data plane.
+# Owned by ArgoCD Application "postgres" (2-k3s/11.argocd/apps/app-postgres.yaml).
+#
+# Deliberately excluded:
+#   - operator/cnpg-operator.yaml   — operator stays imperative for now
+#                                     (applied via 01.install-operator.sh);
+#                                     see issue #14.
+#   - cluster/postgres-secret.yaml  — file holds placeholder values; live
+#                                     Secrets postgres-superuser / postgres-app-user
+#                                     hold real bootstrap-generated creds.
+#                                     Reconciling this file would corrupt them.
+#   - minio-backup-credentials      — not in this repo at all; stays imperative.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: postgres-system
+resources:
+  - namespace.yaml
+  - storage/backup-nfs-storage.yaml
+  - services/postgres-lb-rw.yaml
+  - services/postgres-lb-ro.yaml
+  - services/postgres-lb-r.yaml
+  - services/postgres-pooler-lb.yaml
+  - cluster/postgres-cluster.yaml
+  - cluster/postgres-pooler.yaml
+  - backup/backup-schedule.yaml
