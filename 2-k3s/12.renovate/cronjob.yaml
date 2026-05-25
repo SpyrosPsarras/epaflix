@@ -1,0 +1,75 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: renovate
+  namespace: renovate
+---
+# Self-hosted Renovate: runs against SpyrosPsarras/epaflix once per hour,
+# discovers updates via renovate.json at the repo root (.github/renovate.json),
+# opens PRs on main. See `2-k3s/11.argocd/README.md` (Renovate section)
+# for the end-to-end flow.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: renovate
+  namespace: renovate
+  labels:
+    app.kubernetes.io/name: renovate
+spec:
+  # Hourly is the standard cadence for self-hosted Renovate — schedule
+  # window inside renovate.json (Europe/Athens after 2am and before 6am)
+  # decides which PRs actually open; the CronJob can wake any time.
+  schedule: "17 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 300
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 1800
+      template:
+        spec:
+          serviceAccountName: renovate
+          restartPolicy: OnFailure
+          containers:
+            - name: renovate
+              # Pinned tag tracked by Renovate itself once the bot is live;
+              # bump deliberately when the renovate.json schema changes.
+              image: ghcr.io/renovatebot/renovate:39
+              imagePullPolicy: IfNotPresent
+              args:
+                - "SpyrosPsarras/epaflix"
+              env:
+                - name: RENOVATE_PLATFORM
+                  value: github
+                - name: RENOVATE_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: renovate-secrets
+                      key: RENOVATE_TOKEN
+                - name: RENOVATE_GIT_AUTHOR
+                  value: "Renovate Bot <renovate@epaflix.com>"
+                - name: RENOVATE_ONBOARDING
+                  value: "false"
+                - name: RENOVATE_REQUIRE_CONFIG
+                  value: "required"
+                - name: LOG_LEVEL
+                  value: info
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  memory: 1Gi
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+                - name: cache
+                  mountPath: /opt/renovate/cache
+          volumes:
+            - name: tmp
+              emptyDir: {}
+            - name: cache
+              emptyDir: {}
