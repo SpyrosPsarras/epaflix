@@ -1,0 +1,45 @@
+---
+# ArgoCD Application: K3s maintenance CronJobs.
+#
+# Adopts the recurring maintenance jobs that have been running outside
+# of GitOps (applied imperatively with `kubectl apply -f`):
+#   - containerd-cleanup        (kube-system, weekly Sun 02:00)
+#   - node-os-updater + RBAC    (kube-system, weekly Sat 02:00)
+#   - postgres-sequence-audit   (servarr,     weekly Mon 06:00)
+#
+# Source:       this repo, path 2-k3s/maintenance
+#               (kustomization.yaml — explicit resources list; see that
+#               file for what is intentionally excluded).
+# Destination:  in-cluster. Per-resource `metadata.namespace` rules.
+#               `spec.destination.namespace` is set to `kube-system`
+#               only as the fallback; cluster-scoped objects
+#               (ClusterRole, ClusterRoleBinding) and `servarr` objects
+#               keep their explicit namespace.
+# Sync:         MANUAL on first install (syncPolicy: {}). After a clean
+#               `argocd app diff` (only `argocd.argoproj.io/tracking-id`
+#               annotations show as added) and a 48 h soak with the
+#               next scheduled run of each CronJob completing
+#               successfully, flip to:
+#                 syncPolicy:
+#                   automated: { selfHeal: true, prune: false }
+#                   syncOptions: [ServerSideApply=true]
+#               `prune` stays OFF — accidental deletion of a CronJob
+#               file must NOT cascade-drop the live job and silently
+#               disable weekly maintenance.
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: maintenance
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/SpyrosPsarras/epaflix.git
+    targetRevision: main
+    path: 2-k3s/maintenance
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  # PHASE 1: manual only.
+  syncPolicy: {}
