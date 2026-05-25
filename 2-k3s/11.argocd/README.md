@@ -91,7 +91,7 @@ Tracked (digest strategy on the moving tag):
 | homarr                 | ghcr.io/ajnart/homarr                      | latest      |
 | wizarr                 | ghcr.io/wizarrrr/wizarr                    | latest      |
 | bazarr-autotranslate   | ghcr.io/zelak312/bazarr_autotranslate      | latest      |
-| authentik              | ghcr.io/goauthentik/server                 | `^2026\.2\.\d+$` (semver, patch-only) |
+| authentik              | ghcr.io/goauthentik/server                 | `^2026\.5\.\d+$` (semver, patch-only) |
 
 *`sonarr2` shares the linuxserver/sonarr image with `sonarr`; both roll together.
 
