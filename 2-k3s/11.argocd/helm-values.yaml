@@ -121,6 +121,11 @@ repoServer:
       memory: 256Mi
     limits:
       memory: 512Mi
+  # Pod-level fsGroup so the sops-age Secret volume mount is readable
+  # by the argocd user (uid/gid 999) while staying restrictive to
+  # everyone else. See volumes.sops-age.secret.defaultMode below.
+  securityContext:
+    fsGroup: 999
   # ksops CMP — see Issue #29 and .github/instructions/sops.instructions.md.
   # Canonical install pattern (matches viaduct.ai/ksops upstream docs):
   #   - initContainer copies the ksops + kustomize binaries into an
@@ -136,7 +141,12 @@ repoServer:
     - name: sops-age
       secret:
         secretName: sops-age
-        defaultMode: 0400
+        # 0400 with default kubelet behavior makes the file root-only,
+        # but the repo-server container runs as uid/gid 999 (argocd) and
+        # cannot read it. Setting `0440` plus a pod-level fsGroup=999
+        # (configured below under `securityContext`) puts the file in
+        # the argocd group while keeping it inaccessible to others.
+        defaultMode: 0440
   volumeMounts:
     - name: custom-tools
       mountPath: /custom-tools
