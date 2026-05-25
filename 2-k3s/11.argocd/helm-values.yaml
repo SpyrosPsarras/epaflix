@@ -17,6 +17,15 @@
 global:
   domain: argocd.epaflix.com
 
+# CRDs (applications, applicationsets, appprojects.argoproj.io) were installed
+# at original `helm install` time and stay operator-managed. The ArgoCD self-
+# management Application uses `includeCRDs: false` in its kustomization, but
+# the argo-cd chart embeds CRDs as regular templates (not in the `crds/` dir),
+# so `--include-crds=false` alone does not suppress them. This explicit flag
+# does. Matches the repo-wide convention (cert-manager, authentik, traefik).
+crds:
+  install: false
+
 configs:
   params:
     # TLS terminated at Traefik; argocd-server speaks plain HTTP on :8080.
@@ -124,3 +133,11 @@ redis-ha:
 
 redis:
   enabled: true
+
+# Disable the chart's pre-install/pre-upgrade redis-secret-init hook (Job + SA
+# + Role + RoleBinding). The `argocd-redis` Secret already exists in-cluster
+# from the original `helm install`. Under ArgoCD self-management the hook
+# resources would otherwise be rendered as regular manifests and cause sync
+# noise (the Job has no idempotent "already initialized" exit path).
+redisSecretInit:
+  enabled: false
