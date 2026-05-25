@@ -1,17 +1,13 @@
----
 # Self-hosted Renovate. Single CronJob in a dedicated namespace, owns
 # nothing in-cluster beyond its own job pods. Authoritative config lives
 # in .github/renovate.json at the repo root.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-
 namespace: renovate
-
 resources:
   - namespace.yaml
   - cronjob.yaml
-
 # Pinned by Renovate itself once the bot is live.
 images:
   - name: ghcr.io/renovatebot/renovate
-    newTag: "39"
+    newTag: 39.264.0
