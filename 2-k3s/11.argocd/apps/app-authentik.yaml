@@ -9,9 +9,9 @@
 # Sync:         AUTOMATED with selfHeal (enabled 2026-05-19 after the
 #               first manual sync at revision 634b800 landed clean —
 #               adoption diff was tracking-id annotation + a-k-i-of-instance
-#               label only). prune is OFF for the same reason as servarr:
-#               keep accidental manifest deletes from cascading to live
-#               resources for at least a week.
+#               label only). prune ENABLED 2026-05-25 — 6-day clean soak
+#               on selfHeal, picked as the lowest-risk canary for the
+#               repo-wide prune rollout tracked in issue #21.
 #
 # Image Updater (argocd-image-updater.argoproj.io/*):
 #   - Tracks ghcr.io/goauthentik/server with semver strategy constrained to
@@ -65,7 +65,7 @@ spec:
   syncPolicy:
     automated:
       selfHeal: true
-      prune: false
+      prune: true
     syncOptions:
       - ServerSideApply=true
   # Quiet noisy controller-mutated fields once auto-sync is on.
