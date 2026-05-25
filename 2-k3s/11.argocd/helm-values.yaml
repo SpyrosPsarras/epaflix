@@ -39,7 +39,11 @@ configs:
     # 2-k3s/07.authentik-deployment/kustomization.yaml uses `helmCharts:`
     # to render the upstream chart at build time so image-updater can
     # write back to the standard `images:` block (same pattern as servarr).
-    kustomize.buildOptions: --enable-helm
+    # --enable-helm: kustomize-with-helm inflation (authentik, servarr).
+    # --enable-alpha-plugins / --enable-exec: required by ksops generator
+    # (encrypted Secret decryption sidecar; see Issue #29 / .github/
+    # instructions/sops.instructions.md).
+    kustomize.buildOptions: --enable-helm --enable-alpha-plugins --enable-exec
     # Default `resource.exclusions` drops both `Endpoints` and
     # `discovery.k8s.io/EndpointSlice` (assumed to be auto-managed by the
     # endpoints controller per Service selector). We rely on a STATIC
@@ -117,6 +121,47 @@ repoServer:
       memory: 256Mi
     limits:
       memory: 512Mi
+  # ksops CMP — see Issue #29 and .github/instructions/sops.instructions.md.
+  # Canonical install pattern (matches viaduct.ai/ksops upstream docs):
+  #   - initContainer copies the ksops + kustomize binaries into an
+  #     emptyDir shared with the main repo-server container.
+  #   - The age private key is mounted on the main container so `ksops`
+  #     can decrypt at `kustomize build` time.
+  #   - --enable-alpha-plugins --enable-exec already set via configs.cm
+  #     above.
+  # Image pinned by digest after first successful sync (Renovate).
+  volumes:
+    - name: custom-tools
+      emptyDir: {}
+    - name: sops-age
+      secret:
+        secretName: sops-age
+        defaultMode: 0400
+  volumeMounts:
+    - name: custom-tools
+      mountPath: /custom-tools
+    - name: sops-age
+      mountPath: /var/sops
+      readOnly: true
+  env:
+    - name: SOPS_AGE_KEY_FILE
+      value: /var/sops/keys.txt
+    - name: XDG_CONFIG_HOME
+      value: /.config
+  initContainers:
+    - name: install-ksops
+      image: viaductoss/ksops:v4.3.3
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          set -e
+          echo "Copying ksops + kustomize into shared volume..."
+          cp /usr/local/bin/ksops /custom-tools/
+          cp /usr/local/bin/kustomize /custom-tools/
+          echo "Done."
+      volumeMounts:
+        - name: custom-tools
+          mountPath: /custom-tools
 
 applicationSet:
   enabled: true
