@@ -29,45 +29,39 @@ This cluster uses a **dual-network setup**:
 
 ## Installation Steps
 
-### 1. Install the kube-vip Cloud Provider
+Since 2026-05-25 (Issue #16) this stack is GitOps-managed by ArgoCD. The cloud-controller manifest (`cloud-controller.yaml`, vendored from upstream `v0.0.12`) and the IP-pool ConfigMap (`ip-pool-configmap.yaml`) are both rolled up by `kustomization.yaml`.
 
-Deploy the cloud provider controller:
-
-```bash
-kubectl apply -f https://raw.githubusercontent.com/kube-vip/kube-vip-cloud-provider/main/manifest/kube-vip-cloud-controller.yaml
-```
-
-Verify the deployment:
+### Fresh cluster (before ArgoCD exists)
 
 ```bash
-kubectl get pods -n kube-system | grep kube-vip-cloud-provider
+./install.sh
+# or directly:
+kubectl apply -k .
 ```
 
-### 2. Create IP Address Pool ConfigMap
-
-The cloud provider uses a ConfigMap to manage IP address pools for LoadBalancer services. You can configure:
-
-- **Global CIDR**: Available to all namespaces
-- **Global Range**: IP range available to all namespaces
-- **Namespace-specific CIDR**: Only available in specific namespace
-- **Namespace-specific Range**: IP range only available in specific namespace
-
-#### Current Configuration (Deployed)
+### Adopting under ArgoCD
 
 ```bash
-kubectl apply -f - <<EOF
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: kubevip
-  namespace: kube-system
-data:
-  range-traefik-system: 192.168.10.101-192.168.10.109  # Dedicated to Traefik namespace (9 IPs)
-  range-global: 192.168.10.110-192.168.10.199           # Available to all other namespaces (90 IPs)
-EOF
+kubectl apply -f ../11.argocd/apps/app-kube-vip-cloud-provider.yaml
+argocd app sync kube-vip-cloud-provider
 ```
 
-This splits the pool so Traefik always gets IPs in the .101-.109 range (currently uses .101), and all other services get .110+.
+The first sync only adds the `argocd.argoproj.io/tracking-id` annotation — no pod restart, no LoadBalancer IP churn.
+
+### Bumping kube-vip-cloud-provider
+
+1. Replace `cloud-controller.yaml` with the upstream file at the target tag and update the version reference in the header comment.
+2. `kubectl diff -k .` against the live cluster to inspect changes.
+3. Commit; ArgoCD reconciles.
+
+### Current IP-pool configuration
+
+```yaml
+range-traefik-system: 192.168.10.101-192.168.10.109   # 9 IPs reserved for Traefik (currently uses .101)
+range-global:         192.168.10.110-192.168.10.199   # 90 IPs available to all other namespaces
+```
+
+Reserved: `192.168.10.100` for the control-plane VIP (kube-vip itself).
 
 Verify the ConfigMap:
 
