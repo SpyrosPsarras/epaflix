@@ -1,9 +1,12 @@
 ---
-# Self-Signed ClusterIssuer for Internal Domains
-# Used for .epaflix.com domains which are internal-only (not publicly routable)
+# Self-Signed ClusterIssuer.
+# Used by any namespace that needs a quick self-signed cert (e.g. webhook
+# bootstrap, internal-only TLS handoffs).
 #
-# This creates a CA that can issue certificates for any namespace
-# Certificates are automatically renewed before expiration
+# Note: the original `epavli-ca` / `epavli-ca-issuer` CA chain that used to
+# live in this file was retired in April 2026 — all public-facing TLS is
+# issued via the `letsencrypt-dns` ClusterIssuer (Cloudflare DNS-01 +
+# Let's Encrypt) in issuers/letsencrypt-dns-issuer.yaml.
 
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
@@ -11,38 +14,3 @@ metadata:
   name: selfsigned-issuer
 spec:
   selfSigned: {}
-
----
-# CA Issuer - creates a proper CA certificate for internal use
-# This allows us to have a root CA that browsers can trust (after importing)
-
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: epavli-ca
-  namespace: cert-manager
-spec:
-  isCA: true
-  commonName: Epaflix Internal CA
-  secretName: epavli-ca-secret
-  privateKey:
-    algorithm: RSA
-    size: 4096
-  issuerRef:
-    name: selfsigned-issuer
-    kind: ClusterIssuer
-    group: cert-manager.io
-  duration: 87600h # 10 years
-  renewBefore: 8760h # 1 year before expiration
-
----
-# CA Cluster Issuer - uses the CA cert to sign domain certificates
-# This is what we'll reference in Certificate resources
-
-apiVersion: cert-manager.io/v1
-kind: ClusterIssuer
-metadata:
-  name: epavli-ca-issuer
-spec:
-  ca:
-    secretName: epavli-ca-secret

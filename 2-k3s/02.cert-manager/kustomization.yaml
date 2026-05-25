@@ -1,0 +1,29 @@
+# ArgoCD-managed kustomization for cert-manager (jetstack chart) + ClusterIssuers.
+# Owned by ArgoCD Application "cert-manager" (2-k3s/11.argocd/apps/app-cert-manager.yaml).
+#
+# CRDs are deliberately NOT inflated here (`includeCRDs: false`); they were
+# installed at original `helm install` time and stay operator-managed.
+# Re-rendering CRDs under ArgoCD ServerSideApply produces field-manager
+# conflicts. Matches the repo-wide convention (authentik, traefik, observability).
+#
+# Secrets are NOT in this kustomization (Issue #29):
+#   - cloudflare-api-token            (DNS-01 solver for letsencrypt-dns)
+#   - letsencrypt-dns-private-key     (ACME account key — operator-maintained)
+# Both must already exist in the cert-manager namespace before this Application
+# is created.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+helmCharts:
+  - name: cert-manager
+    repo: https://charts.jetstack.io
+    version: "v1.19.3"
+    releaseName: cert-manager
+    namespace: cert-manager
+    valuesFile: values/cert-manager-values.yaml
+    includeCRDs: false
+
+resources:
+  - namespace.yaml
+  - issuers/letsencrypt-dns-issuer.yaml
+  - issuers/self-signed-issuer.yaml
