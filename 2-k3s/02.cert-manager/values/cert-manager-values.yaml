@@ -1,0 +1,22 @@
+# cert-manager Helm chart values (jetstack/cert-manager v1.19.3).
+#
+# Mirrors the original `helm install --set installCRDs=true` from 2026-02-17
+# (only user-supplied value was installCRDs=true). For ArgoCD adoption we keep
+# CRDs operator-managed (chart `crds.enabled: false`, kustomization
+# `includeCRDs: false`) — same pattern as authentik / traefik / observability
+# in this repo. Re-rendering CRDs under ArgoCD ServerSideApply produces
+# field-manager conflicts and the CRDs already live in-cluster.
+
+crds:
+  enabled: false
+  keep: true
+
+# Disable the post-install startupapicheck Job — its purpose is to verify
+# that the webhook is responding after a fresh install. Under ArgoCD the
+# Job would be rendered on every sync, and Jobs are immutable, so a second
+# sync would fail to update it. The webhook is already healthy and has been
+# for 96+ days; we don't need the bootstrap probe anymore. The leftover
+# ServiceAccount / Role / RoleBinding in the cert-manager namespace from
+# the original install are harmless orphans and stay untracked.
+startupapicheck:
+  enabled: false
