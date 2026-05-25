@@ -1,0 +1,99 @@
+---
+# ArgoCD Application: argocd itself (self-management).
+# Closes Issue #19.
+#
+# Source:       this repo, path 2-k3s/11.argocd (kustomization.yaml with a
+#               single `helmCharts:` entry pinned to argo-cd 9.5.14, plus
+#               namespace.yaml and ingress.yaml).
+# Destination:  in-cluster `argocd` namespace.
+# Sync:         MANUAL on first install (syncPolicy: {}). After a clean
+#               `argocd app diff argocd --core` showing only the
+#               argocd.argoproj.io/tracking-id annotation per resource, AND
+#               a manual sync with no argocd-server / repo-server / controller
+#               restart cascade, AND a 48 h soak, flip to:
+#                 syncPolicy:
+#                   automated: { selfHeal: true, prune: false }
+#                   syncOptions: [ServerSideApply=true]
+#               `prune` NEVER turns on — accidental file deletion must NOT
+#               cascade-drop the argocd Deployments / StatefulSet.
+#
+# CRDs: NOT managed by this Application (`includeCRDs: false` in the
+#       kustomization). applications.argoproj.io, applicationsets.argoproj.io
+#       and appprojects.argoproj.io were installed at original helm install
+#       time and stay operator-managed. Same convention as the rest of the repo.
+#
+# argocd-image-updater is a separate helm release in this same namespace
+# and is intentionally NOT in scope for this Application — its self-management
+# is tracked as a separate follow-up.
+#
+# Secrets carved out (pending Issue #29):
+#   - argocd-secret                  (chart-generated server.secretkey +
+#                                     OIDC client-id/secret merge-patched in)
+#   - argocd-initial-admin-secret    (ephemeral bootstrap secret)
+#   - argocd-redis                   (chart-generated redis auth)
+#   - git-creds / github-epaflix-repo (operator-maintained repo creds)
+#
+# Field-manager / takeover note: the original install used field manager
+# "helm". ArgoCD applies under "argocd-controller" with ServerSideApply=true.
+# The first sync will force-conflict-take fields on chart-rendered resources.
+# Self-management twist: the controller is reconciling its own Deployment.
+# Mitigation = manual first sync + soak. If the controller restart hangs,
+# `kubectl -n argocd rollout status statefulset/argocd-application-controller`
+# from kube-vip-protected control plane should still work.
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argocd
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/SpyrosPsarras/epaflix.git
+    targetRevision: main
+    path: 2-k3s/11.argocd
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  # PHASE 1: manual only. Flip to automated+selfHeal after 48 h soak.
+  syncPolicy: {}
+  ignoreDifferences:
+    - group: ""
+      kind: Service
+      jsonPointers:
+        - /spec/clusterIP
+        - /spec/clusterIPs
+        - /status
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas
+    - group: apps
+      kind: StatefulSet
+      jsonPointers:
+        - /spec/replicas
+    # argocd-secret is chart-created with a random `server.secretkey` and is
+    # then merge-patched out-of-band with OIDC client-id/secret. The chart's
+    # rendered Secret has no `data` block, so the live state will diverge by
+    # design. Keep the chart-rendered metadata/type aligned, ignore data.
+    - group: ""
+      kind: Secret
+      name: argocd-secret
+      jsonPointers:
+        - /data
+        - /stringData
+    # Ephemeral; helm chart creates an empty placeholder, real password gets
+    # written by the initial admin job. Live state diverges by design.
+    - group: ""
+      kind: Secret
+      name: argocd-initial-admin-secret
+      jsonPointers:
+        - /data
+        - /stringData
+    # Chart-generated redis auth — random per install, not in git.
+    - group: ""
+      kind: Secret
+      name: argocd-redis
+      jsonPointers:
+        - /data
+        - /stringData
