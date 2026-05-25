@@ -15,7 +15,6 @@ kind: Kustomization
 namespace: postgres-system
 resources:
   - namespace.yaml
-  - storage/backup-nfs-storage.yaml
   - services/postgres-lb-rw.yaml
   - services/postgres-lb-ro.yaml
   - services/postgres-lb-r.yaml

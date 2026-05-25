@@ -43,8 +43,6 @@ All services exposed via kube-vip LoadBalancer:
 ├── 02.deploy-cluster.sh                # Deploy PostgreSQL cluster
 ├── operator/
 │   └── cnpg-operator.yaml             # CNPG operator v1.28.0 manifest
-├── storage/
-│   └── backup-nfs-storage.yaml        # NFS PV/PVC for backups
 ├── cluster/
 │   ├── postgres-secret.yaml           # Superuser and app user credentials
 │   ├── postgres-cluster.yaml          # PostgreSQL cluster definition
@@ -91,7 +89,6 @@ kubectl get crd | grep postgresql
 ```
 
 This will:
-- Create NFS PV/PVC for backup storage
 - Create secrets for superuser and app user
 - Deploy PostgreSQL cluster with 3 instances
 - Deploy PgBouncer connection pooler (3 replicas)
@@ -528,9 +525,6 @@ kubectl delete cluster postgres-cluster -n postgres-system
 # Delete secrets
 kubectl delete secret postgres-superuser postgres-app-user -n postgres-system
 
-# Delete storage
-kubectl delete -f storage/backup-nfs-storage.yaml
-
 # Delete namespace
 kubectl delete namespace postgres-system
 ```
@@ -540,14 +534,6 @@ kubectl delete namespace postgres-system
 ```bash
 kubectl delete -f operator/cnpg-operator.yaml
 kubectl delete namespace cnpg-system
-```
-
-### Clean Backup PVC Data
-
-**WARNING**: This will permanently delete all backups!
-
-```bash
-kubectl delete pvc postgres-backup-pvc -n postgres-system
 ```
 
 ## Additional Resources
