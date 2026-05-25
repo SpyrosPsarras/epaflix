@@ -1,0 +1,44 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard",
+    ":semanticCommits"
+  ],
+  "timezone": "Europe/Athens",
+  "schedule": ["after 2am and before 6am"],
+  "prHourlyLimit": 4,
+  "prConcurrentLimit": 6,
+  "labels": ["renovate"],
+  "commitMessagePrefix": "[renovate]",
+  "packageRules": [
+    {
+      "description": "Authentik: chart version and container image move together upstream. Group them in one PR so ArgoCD never sees a chart/image schema mismatch.",
+      "matchManagers": ["kustomize"],
+      "matchPackageNames": [
+        "authentik",
+        "ghcr.io/goauthentik/server"
+      ],
+      "matchFileNames": ["2-k3s/07.authentik-deployment/kustomization.yaml"],
+      "groupName": "authentik",
+      "groupSlug": "authentik",
+      "commitMessageTopic": "authentik"
+    },
+    {
+      "description": "Auto-merge patches across the repo (image-updater already covers most patch bumps; Renovate picks up anything image-updater misses, e.g. chart-only patches).",
+      "matchUpdateTypes": ["patch"],
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": true
+    },
+    {
+      "description": "Authentik MINOR/MAJOR: never auto-merge — release notes can carry DB migrations and breaking changes. PR opens, you review, you click merge.",
+      "matchPackageNames": [
+        "authentik",
+        "ghcr.io/goauthentik/server"
+      ],
+      "matchUpdateTypes": ["minor", "major"],
+      "automerge": false
+    }
+  ]
+}
