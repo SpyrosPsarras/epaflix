@@ -5,17 +5,24 @@
 # the bottom of this file via `kustomize edit set image`.
 #
 # DELIBERATELY EXCLUDED from `resources:`:
-#   - _shared/secrets/*               — placeholder values; real secrets are
-#                                       generated locally and applied imperatively.
-#                                       Letting ArgoCD reconcile them would
-#                                       overwrite live secrets with placeholders.
-#   - seerr/authentik-oidc-secret.yaml — same reason (placeholder OIDC creds).
+#   - _shared/secrets/*-secret.yaml   — placeholder values kept for reference.
+#                                       Real values are reconciled via the
+#                                       ksops generator in _shared/secrets/
+#                                       (Issue #29 / PR #58, follow-up #61).
+#   - seerr/authentik-oidc-secret.yaml — placeholder OIDC creds; still
+#                                       imperative until migrated (covered by
+#                                       follow-up #61, scope-limited PR).
 #   - postgres-setup-job.yaml         — one-shot Job, already executed.
 #   - **/fix-*.yaml                   — one-shot remediation Jobs from past
 #                                       migrations (sonarr/radarr/sonarr2 schema
 #                                       and dedup fixes). Kept on disk for audit.
 #   - research/                       — config dumps, not k8s manifests.
 #   - _shared/scripts/                — shell helpers, not k8s manifests.
+#
+# Reconciled via the ksops generator (_shared/secrets/ksops-generator.yaml):
+#   - servarr-postgres                from _shared/secrets/servarr-postgres.enc.yaml
+#   - qbittorrent-wireguard           from _shared/secrets/qbittorrent-wireguard.enc.yaml
+#   - qbittorrent-openvpn             from _shared/secrets/qbittorrent-openvpn.enc.yaml
 #
 # Re-add a Job here only if you intend Argo to re-run it on every sync.
 apiVersion: kustomize.config.k8s.io/v1beta1
@@ -75,6 +82,10 @@ resources:
   - homarr/homarr.yaml
   - homarr/pdb.yaml
   - wizarr/wizarr.yaml
+
+generators:
+  - _shared/secrets/ksops-generator.yaml
+
 # `images:` is the write-target for argocd-image-updater. Entries are inserted
 # / mutated by `kustomize edit set image …` whenever updater finds a newer
 # digest for a tracked image. Empty on first install — updater will populate.
