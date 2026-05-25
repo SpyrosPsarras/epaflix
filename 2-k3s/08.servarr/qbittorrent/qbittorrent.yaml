@@ -81,6 +81,15 @@ spec:
               value: "yes"
             - name: ADDITIONAL_PORTS
               value: "39998"
+            # Health-check tweaks (2026-05-25): after AirVPN swap the default
+            # ping-1.1.1.1 every 300s with AMOUNT=1 kills the pod on any single
+            # transient tunnel drop (~89 restarts in 2d4h). Ping the AirVPN
+            # gateway instead (in-tunnel, no upstream ICMP filtering), and
+            # require 3 consecutive misses before forcing restart.
+            - name: HEALTH_CHECK_HOST
+              value: "10.128.0.1"
+            - name: HEALTH_CHECK_AMOUNT
+              value: "3"
           ports:
             - containerPort: 8080
               name: webui
