@@ -1,0 +1,17 @@
+# ksops generator — decrypts authentik-app-secrets.enc.yaml at render time.
+# Decryption performed inside argocd-repo-server via the ksops binary
+# (see 2-k3s/11.argocd/helm-values.yaml).
+#
+# The chart-generated `authentik` Secret (20 keys, non-sensitive config)
+# remains operator-managed via the goauthentik chart's `secret-env`
+# template — NOT covered here.
+apiVersion: viaduct.ai/v1
+kind: ksops
+metadata:
+  name: authentik-secrets
+  annotations:
+    config.kubernetes.io/function: |
+      exec:
+        path: ksops
+files:
+  - authentik-app-secrets.enc.yaml
