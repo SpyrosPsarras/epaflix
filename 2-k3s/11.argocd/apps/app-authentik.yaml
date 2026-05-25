@@ -48,7 +48,7 @@ metadata:
     argocd-image-updater.argoproj.io/image-list: |
       authentik=ghcr.io/goauthentik/server
     argocd-image-updater.argoproj.io/authentik.update-strategy: semver
-    argocd-image-updater.argoproj.io/authentik.allow-tags: regexp:^2026\.2\.\d+$
+    argocd-image-updater.argoproj.io/authentik.allow-tags: regexp:^2026\.5\.\d+$
     argocd-image-updater.argoproj.io/write-back-method: git
     argocd-image-updater.argoproj.io/write-back-target: kustomization:.
     argocd-image-updater.argoproj.io/git-branch: main
