@@ -35,9 +35,10 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: renovate
-              # Pinned tag tracked by Renovate itself once the bot is live;
-              # bump deliberately when the renovate.json schema changes.
-              image: ghcr.io/renovatebot/renovate:39
+              # Pinned to a specific patch so Renovate-the-bot's own kustomize
+              # manager has a concrete tag to bump; kustomization.yaml `images:`
+              # also pins the same tag, both update in lockstep via PR.
+              image: ghcr.io/renovatebot/renovate:39.264.0
               imagePullPolicy: IfNotPresent
               args:
                 - "SpyrosPsarras/epaflix"
