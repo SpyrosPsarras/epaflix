@@ -82,10 +82,8 @@ resources:
   - homarr/homarr.yaml
   - homarr/pdb.yaml
   - wizarr/wizarr.yaml
-
 generators:
   - _shared/secrets/ksops-generator.yaml
-
 # `images:` is the write-target for argocd-image-updater. Entries are inserted
 # / mutated by `kustomize edit set image …` whenever updater finds a newer
 # digest for a tracked image. Empty on first install — updater will populate.
@@ -99,7 +97,7 @@ images:
   - name: ghcr.io/cleanuparr/cleanuparr
     digest: sha256:4ad626da7e1d2774ca51bbfa812f832d5639264b3fe308909e47de02ba2188f7
   - name: ghcr.io/flaresolverr/flaresolverr
-    digest: sha256:7962759d99d7e125e108e0f5e7f3cdbcd36161776d058d1d9b7153b92ef1af9e
+    digest: sha256:139dfee1c6f89249c8d665d1333a42e8ec74ec0a86bc6bb1c8461e10d3a66a47
   - name: jellyfin/jellyfin
     digest: sha256:1694ff069f0c9dafb283c36765175606866769f5d72f2ed56b6a0f1be922fc37
   - name: ghcr.io/ajnart/homarr
