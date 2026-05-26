@@ -22,21 +22,16 @@ kubectl create secret generic cloudflare-api-token \
   --from-literal=api-token=<CLOUDFLARE_API_TOKEN> \
   --dry-run=client -o yaml | kubectl apply -f -
 
-# Step 3: Deploy Traefik via Helmfile
+# Step 3: Deploy Traefik via Helm
 echo "[3/5] Deploying Traefik (initially with 1 replica)..."
 # Note: Helm chart requires 1 replica for initial ACME setup
 # We'll scale to 2 after deployment
-if command -v helmfile &> /dev/null; then
-    helmfile sync
-else
-    echo "Helmfile not found, using Helm directly..."
-    helm repo add traefik https://traefik.github.io/charts
-    helm repo update
-    helm upgrade --install traefik traefik/traefik \
-      -n traefik-system \
-      -f values/traefik-values.yaml \
-      --wait
-fi
+helm repo add traefik https://traefik.github.io/charts
+helm repo update
+helm upgrade --install traefik traefik/traefik \
+  -n traefik-system \
+  -f values/traefik-values.yaml \
+  --wait
 
 # Step 4: Wait for LoadBalancer IP
 echo "[4/5] Waiting for LoadBalancer IP assignment..."

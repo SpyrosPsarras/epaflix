@@ -115,7 +115,7 @@ This script will:
 5. Apply middleware
 
 Use this path for initial bootstrap before ArgoCD exists, or for emergency
-manual recovery. Do not run `helmfile destroy` during ArgoCD adoption.
+manual recovery. Do not run `helm uninstall traefik` during ArgoCD adoption.
 
 ### Manual deployment (Alternative)
 
@@ -126,12 +126,7 @@ kubectl create secret generic cloudflare-api-token \
   --from-literal=api-token=<CLOUDFLARE_API_TOKEN>
 ```
 
-### 4. Deploy Traefik via Helmfile
-```bash
-helmfile sync
-```
-
-**OR using Helm directly:**
+### 4. Deploy Traefik via Helm
 ```bash
 helm repo add traefik https://traefik.github.io/charts
 helm repo update
