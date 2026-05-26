@@ -17,7 +17,7 @@ recovery. This will:
 ## Preferred ArgoCD Adoption
 
 For an already-running cluster with ArgoCD installed, use the Traefik
-Application instead of re-running Helmfile:
+Application instead of re-running `./01.deploy.sh`:
 
 ```bash
 kubectl kustomize --enable-helm 2-k3s/05.traefik-deployment >/tmp/traefik-rendered.yaml
@@ -43,7 +43,12 @@ kubectl apply -f namespace.yaml
 ./certificates/create-cloudflare-secret.sh
 
 # 3. Deploy Traefik
-helmfile sync
+helm repo add traefik https://traefik.github.io/charts
+helm repo update
+helm upgrade --install traefik traefik/traefik \
+  -n traefik-system \
+  -f values/traefik-values.yaml \
+  --wait
 
 # 4. Apply middleware
 kubectl apply -f middleware/
@@ -131,7 +136,7 @@ ssh <pihole-ip> "dig whoami.epaflix.com"
 kubectl delete -f examples/whoami-demo.yaml
 
 # Remove Traefik
-helmfile destroy
+helm -n traefik-system uninstall traefik
 
 # Remove middleware
 kubectl delete -f middleware/
@@ -147,7 +152,6 @@ kubectl delete namespace traefik-system
 
 - **namespace.yaml**: Creates `traefik-system` namespace
 - **kustomization.yaml**: ArgoCD entrypoint; renders the Traefik Helm chart and static Traefik resources
-- **helmfile.yaml**: Bootstrap/manual Helm release configuration
 - **values/traefik-values.yaml**: Traefik settings (DNS challenge, LoadBalancer IP, etc.)
 - **middleware/redirect-https.yaml**: HTTP → HTTPS redirect
 - **middleware/security-headers.yaml**: Security headers for all responses
