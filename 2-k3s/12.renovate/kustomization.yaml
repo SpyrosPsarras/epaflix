@@ -10,4 +10,4 @@ resources:
 # Pinned by Renovate itself once the bot is live.
 images:
   - name: ghcr.io/renovatebot/renovate
-    newTag: 39.264.0
+    newTag: 43.33.2
