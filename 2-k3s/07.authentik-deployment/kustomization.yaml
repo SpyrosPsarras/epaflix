@@ -31,10 +31,8 @@ resources:
   - namespace.yaml
   - storage/pv-pvc.yaml
   - ingress/outpost-ingressroute.yaml
-
 generators:
   - ksops-generator.yaml
-
 helmCharts:
   - name: authentik
     repo: https://charts.goauthentik.io
@@ -45,4 +43,4 @@ helmCharts:
     includeCRDs: false
 images:
   - name: ghcr.io/goauthentik/server
-    newTag: 2026.5.0
+    newTag: 2026.5.2
