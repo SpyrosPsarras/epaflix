@@ -42,4 +42,9 @@ spec:
     server: https://kubernetes.default.svc
     namespace: kube-system
   # PHASE 1: manual only.
-  syncPolicy: {}
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: false
+    syncOptions:
+      - ServerSideApply=true
