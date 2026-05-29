@@ -1,0 +1,99 @@
+name: ci
+
+# Secret-free validation gate so Renovate's platform auto-merge has a required
+# check to wait on. Validates exactly Renovate's change surface — malformed
+# YAML, unresolvable Helm chart pins, broken kustomize overlays — WITHOUT
+# needing the SOPS age key (so sops/ksops dirs are never fully rendered here).
+# See issue #88.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          set -euo pipefail
+          # helm
+          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          # kustomize
+          curl -fsSL "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+          sudo mv kustomize /usr/local/bin/
+          helm version
+          kustomize version
+
+      - name: YAML parse check (syntax only, no style)
+        run: |
+          python3 - <<'PY'
+          import glob, sys, yaml
+          bad = []
+          for f in glob.glob("**/*.yaml", recursive=True) + glob.glob("**/*.yml", recursive=True):
+              if "/charts/" in f:  # vendored chart caches, if any
+                  continue
+              try:
+                  list(yaml.safe_load_all(open(f)))
+              except yaml.YAMLError as e:
+                  bad.append(f"{f}: {e}")
+          if bad:
+              print("Malformed YAML:")
+              print("\n".join(bad))
+              sys.exit(1)
+          print("All YAML parses cleanly.")
+          PY
+
+      - name: Helm chart pins resolve
+        run: |
+          python3 - <<'PY'
+          import glob, subprocess, sys, yaml, os
+          os.makedirs("/tmp/charts", exist_ok=True)
+          fail = []
+          for f in glob.glob("2-k3s/**/kustomization.yaml", recursive=True):
+              doc = yaml.safe_load(open(f)) or {}
+              for c in doc.get("helmCharts", []):
+                  name, repo, ver = c.get("name"), c.get("repo"), str(c.get("version", ""))
+                  if not (name and repo and ver):
+                      continue
+                  print(f"[{f}] {name} {ver} <- {repo}")
+                  if repo.startswith("oci://"):
+                      cmd = ["helm", "pull", f"{repo}/{name}", "--version", ver, "-d", "/tmp/charts"]
+                  else:
+                      cmd = ["helm", "pull", name, "--repo", repo, "--version", ver, "-d", "/tmp/charts"]
+                  r = subprocess.run(cmd, capture_output=True, text=True)
+                  if r.returncode != 0:
+                      fail.append(f"{name} {ver} ({repo}): {r.stderr.strip()}")
+          if fail:
+              print("\nUnresolvable Helm chart pins:")
+              print("\n".join(fail))
+              sys.exit(1)
+          print("\nAll Helm chart pins resolve.")
+          PY
+
+      - name: Kustomize build (sops-free dirs)
+        run: |
+          set -euo pipefail
+          # Only dirs with neither helmCharts nor sops/ksops generators — these
+          # render fully offline. sops/helm dirs are covered by the YAML parse
+          # and Helm-pin checks above (full render needs the age key, withheld).
+          dirs="
+            2-k3s/01.kube-vip
+            2-k3s/03.kube-vip-cloud-provider
+            2-k3s/04.coredns
+            2-k3s/11.argocd/apps
+            2-k3s/12.renovate
+            2-k3s/maintenance
+            2-k3s/maintenance/system-upgrade/controller
+          "
+          for d in $dirs; do
+            echo "kustomize build $d"
+            kustomize build "$d" >/dev/null
+          done
+          echo "All sops-free overlays build."
