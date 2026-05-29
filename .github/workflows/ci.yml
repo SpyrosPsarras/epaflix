@@ -16,6 +16,12 @@ permissions:
 
 jobs:
   validate:
+    # Fork-guard: only run for PRs from branches in THIS repo (and pushes to
+    # main). Fork PRs trigger nothing — no fork-authored workflow code ever
+    # executes on the runner. Public repo, so this is the safety boundary.
+    if: >-
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
