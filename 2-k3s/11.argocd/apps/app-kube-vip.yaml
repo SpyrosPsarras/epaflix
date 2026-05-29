@@ -29,4 +29,9 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: kube-system
-  syncPolicy: {}
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: false
+    syncOptions:
+      - ServerSideApply=true
