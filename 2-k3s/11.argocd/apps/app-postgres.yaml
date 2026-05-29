@@ -41,8 +41,14 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: postgres-system
-  # PHASE 1: manual only.
-  syncPolicy: {}
+  # PHASE 2: automated self-heal after clean 48h soak (issue #34).
+  # prune stays OFF — accidental file deletion must NOT cascade-drop the live Cluster CR.
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: false
+    syncOptions:
+      - ServerSideApply=true
   ignoreDifferences:
     - group: ""
       kind: Service
