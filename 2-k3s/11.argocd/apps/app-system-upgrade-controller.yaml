@@ -31,4 +31,4 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: system-upgrade
-  syncPolicy: {}
+  # syncPolicy omitted = manual sync (empty `{}` caused cosmetic OutOfSync vs live `null`).

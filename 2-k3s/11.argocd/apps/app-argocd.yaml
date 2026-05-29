@@ -55,8 +55,8 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
-  # PHASE 1: manual only. Flip to automated+selfHeal after 48 h soak.
-  syncPolicy: {}
+  # Manual sync only — self-managed ArgoCD control plane; see #96/#46 before enabling selfHeal.
+  # (syncPolicy omitted = manual. Empty `{}` caused a permanent cosmetic OutOfSync vs live `null`.)
   ignoreDifferences:
     - group: ""
       kind: Service
