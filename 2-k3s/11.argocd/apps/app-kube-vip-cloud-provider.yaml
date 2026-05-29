@@ -43,8 +43,15 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: kube-system
-  # PHASE 1: manual only.
-  syncPolicy: {}
+  # PHASE 2: automated self-heal after clean 48h soak (issue #38).
+  # prune stays OFF — accidental file deletion must NOT cascade-drop the IP-pool
+  # ConfigMap (would re-allocate every LoadBalancer IP) or the cloud-controller Deployment.
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: false
+    syncOptions:
+      - ServerSideApply=true
   ignoreDifferences:
     - group: apps
       kind: Deployment
