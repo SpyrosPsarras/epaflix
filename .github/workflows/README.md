@@ -1,0 +1,100 @@
+# GitHub Actions — CI
+
+GitHub Actions runs **on GitHub's hosted runners**, not in the cluster. It is
+separate from ArgoCD:
+
+| System | Where | Role |
+|--------|-------|------|
+| GitHub Actions (`ci.yml`) | GitHub-hosted `ubuntu-latest` VM | **validates** a PR before merge |
+| ArgoCD | in-cluster (`2-k3s/11.argocd/`) | **deploys** merged manifests |
+
+Flow: open PR → Actions validates → you merge → ArgoCD deploys.
+
+## `ci.yml` — the `validate` check
+
+A **secret-free** gate that validates exactly Renovate's change surface
+without ever needing the SOPS age key. Three steps:
+
+1. **YAML parse check** — every `*.yaml`/`*.yml` must parse. Syntax only, no
+   style rules (so it never false-fails on existing formatting).
+2. **Helm chart pins resolve** — for every `helmCharts:` entry in any
+   `2-k3s/**/kustomization.yaml`, `helm pull <chart>@<version>` must succeed.
+   This is what catches a Renovate chart bump to a version that does not exist.
+3. **kustomize build (sops-free dirs)** — full offline render of the overlays
+   that use neither Helm nor sops/ksops:
+   `01.kube-vip`, `03.kube-vip-cloud-provider`, `04.coredns`,
+   `11.argocd/apps`, `12.renovate`, `maintenance`,
+   `maintenance/system-upgrade/controller`.
+
+### Why sops/Helm dirs are not fully rendered
+
+Most chart dirs (`02.cert-manager`, `05.traefik-deployment`,
+`07.authentik-deployment`, `10.observability`, `11.argocd`,
+`11.argocd/image-updater`, plus `06.postgres`, `08.servarr`,
+`09.filebrowser`) decrypt secrets via a ksops/sops generator. A full
+`kustomize build` of those needs the **age private key**, which is
+deliberately **withheld from CI** — putting the key that decrypts every
+cluster secret onto a GitHub runner is not acceptable. Those dirs are covered
+indirectly: chart bumps by step 2, structure by step 1.
+
+## Security model (public repo)
+
+This repo is public, so anyone can fork and open a PR. The workflow is built
+so a fork PR is harmless:
+
+- **`pull_request` trigger, not `pull_request_target`.** Fork PRs get a
+  read-only `GITHUB_TOKEN` and **no repo secrets** by GitHub default.
+- **No secrets used at all** — nothing to leak even in same-repo runs.
+- **`permissions: contents: read`** — cannot push, tag, or merge.
+- **Fork-guard** — the job only runs for PRs whose head branch is in *this*
+  repo (plus pushes to `main`):
+
+  ```yaml
+  if: >-
+    github.event_name == 'push' ||
+    github.event.pull_request.head.repo.full_name == github.repository
+  ```
+
+  Fork PRs therefore execute **nothing** — no fork-authored `ci.yml` ever runs
+  on the runner. Combined with the repo Actions setting
+  *fork-PR approval = all external contributors*, an outside PR can neither run
+  workflows nor reach anything.
+- Runs on **ephemeral GitHub VMs** — never touches Proxmox, the cluster, or any
+  kubeconfig.
+
+## Merge policy — no auto-merge
+
+`validate` is **informational only**:
+
+- It is **not** a required status check; `main` branch protection is untouched.
+- **Auto-merge is off.** Although `renovate.json` marks `patch` updates
+  `automerge: true`, GitHub native auto-merge does not fire because there is no
+  required check — by design.
+- PRs (including Renovate's) are **merged manually** after a glance at the
+  green/red `validate` result.
+
+If hands-off patch→deploy is ever wanted later: mark `validate` a required
+check on `main` and enable *Allow auto-merge*. Note this repo has
+`enforce_admins: true`, so a required check would gate the owner's own merges
+too.
+
+## Local equivalent
+
+Reproduce the check before pushing:
+
+```bash
+# YAML parses
+python3 -c 'import glob,yaml,sys; [list(yaml.safe_load_all(open(f))) for f in glob.glob("**/*.y*ml",recursive=True)]'
+
+# chart pins resolve (needs helm)
+# for each helmCharts entry: helm pull <name> --repo <repo> --version <ver>
+
+# sops-free overlays build (kustomize, or `kubectl kustomize`)
+for d in 2-k3s/01.kube-vip 2-k3s/03.kube-vip-cloud-provider 2-k3s/04.coredns \
+         2-k3s/11.argocd/apps 2-k3s/12.renovate 2-k3s/maintenance \
+         2-k3s/maintenance/system-upgrade/controller; do
+  kubectl kustomize "$d" >/dev/null && echo "OK $d"
+done
+```
+
+See also: `2-k3s/11.argocd/README.md` (sync policy), issue #88.
