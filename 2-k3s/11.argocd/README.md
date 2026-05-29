@@ -124,6 +124,34 @@ Opt-in later by adding the alias to the `image-list` annotation on
    Deployment rolls.
 4. Audit trail: `git log -- 2-k3s/08.servarr/kustomization.yaml`.
 
+## Sync policy: app-of-apps drives auto-apply
+
+As of 2026-05-29 (PR #97), the root **`app-of-apps`** Application has
+`automated.selfHeal: true, prune: false`. It reconciles every child
+`Application` definition in `apps/` directly from git.
+
+**Merged `apps/` changes auto-apply — no more manual `app-of-apps`
+sync.** Push a change to a child `Application` (or merge a PR touching
+`2-k3s/11.argocd/apps/`) and ArgoCD propagates it on its own.
+
+Before #97, `app-of-apps` was manual-sync, which silently left merged
+child changes **dormant until someone ran a manual sync**. If a merged
+change isn't live, first check whether the owning parent Application is
+manual-sync.
+
+Most child apps now run `automated.selfHeal: true, prune: false`.
+Deliberate exceptions stay **manual** (no `automated` block) — do not
+flip casually:
+
+- **`argocd`** — self-manages the ArgoCD control plane; a bad self-sync
+  can take it down. Upgrade in a maintenance window. See issues #96 / #46.
+- **`system-upgrade-controller`** — manual.
+
+`prune` is OFF everywhere on purpose (issue #21 tracks enabling it).
+Note: an empty `syncPolicy: {}` in a manifest causes a permanent
+*cosmetic* OutOfSync (never matches live `null`) — omit `syncPolicy`
+entirely for a manual app instead.
+
 ## First-install gotcha: adoption drift
 
 The cluster has imperative `kubectl edit` changes that diverge from the
