@@ -3,19 +3,27 @@
 # Closes Issue #19.
 #
 # Source:       this repo, path 2-k3s/11.argocd (kustomization.yaml with a
-#               single `helmCharts:` entry pinned to argo-cd 9.5.14, plus
+#               single `helmCharts:` entry pinned to argo-cd 9.5.17, plus
 #               namespace.yaml and ingress.yaml).
 # Destination:  in-cluster `argocd` namespace.
-# Sync:         MANUAL on first install (syncPolicy: {}). After a clean
-#               `argocd app diff argocd --core` showing only the
-#               argocd.argoproj.io/tracking-id annotation per resource, AND
-#               a manual sync with no argocd-server / repo-server / controller
-#               restart cascade, AND a 48 h soak, flip to:
-#                 syncPolicy:
-#                   automated: { selfHeal: true, prune: false }
-#                   syncOptions: [ServerSideApply=true]
-#               `prune` NEVER turns on — accidental file deletion must NOT
+# Sync:         MANUAL / selfHeal OFF — PERMANENTLY. This is a settled
+#               decision (option B), not a soak-then-flip plan. Syncing this
+#               Application re-applies ArgoCD's OWN manifests and can restart
+#               the control plane (server / repo-server / controller) that
+#               reconciles every other Application in the cluster; a bad
+#               self-sync risks taking down the whole GitOps loop. Manual sync
+#               is the deliberate safety gate, applied only in a maintenance
+#               window where the operator can watch the rollout.
+#               Renovate keeps this repo's argo-cd chart version AHEAD of live,
+#               so every chart bump is intentional: review the Renovate PR,
+#               merge it, then run a deliberate `argocd app sync argocd` in a
+#               maintenance window. Record: chart 9.5.17 / image v3.4.3 landed
+#               live this way on 2026-05-30.
+#               `prune` also stays OFF — accidental file deletion must NOT
 #               cascade-drop the argocd Deployments / StatefulSet.
+#               Decision adopted from Issue #96 (control-plane self-sync
+#               safety analysis); SUPERSEDES the "flip to selfHeal" plan that
+#               was tracked in Issue #46.
 #
 # CRDs: NOT managed by this Application (`includeCRDs: false` in the
 #       kustomization). applications.argoproj.io, applicationsets.argoproj.io
