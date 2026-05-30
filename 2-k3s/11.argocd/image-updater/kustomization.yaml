@@ -28,7 +28,7 @@ namespace: argocd
 helmCharts:
   - name: argocd-image-updater
     repo: https://argoproj.github.io/argo-helm
-    version: "0.14.0"
+    version: "1.2.2"
     releaseName: argocd-image-updater
     namespace: argocd
     valuesFile: values.yaml
