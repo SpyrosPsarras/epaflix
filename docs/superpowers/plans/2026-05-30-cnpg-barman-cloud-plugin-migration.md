@@ -51,7 +51,7 @@ Run:
 ```bash
 grep -E '^kind:|cloudnative-pg/plugin-barman-cloud:' 2-k3s/06.postgres/barman-cloud-plugin/manifest.yaml | sort -u
 ```
-Expected: `kind:` set includes `CustomResourceDefinition`, `Deployment`, `Issuer`, `Certificate`, `Secret`, plus RBAC; a pinned `:v0.12.0` image tag. CRDs include `objectstores.barmancloud.cnpg.io` and `backupconfigurations.barmancloud.cnpg.io`.
+Expected: `kind:` set includes `CustomResourceDefinition`, `Deployment`, `Issuer`, `Certificate`, `Secret`, plus RBAC; a pinned `:v0.12.0` image tag. CRD: `objectstores.barmancloud.cnpg.io` (v0.12.0 ships only this CRD — our flow needs no `BackupConfiguration`).
 
 - [ ] **Step 3: Allowlist the plugin's placeholder Secret in the pre-commit hook**
 
@@ -106,8 +106,9 @@ Create `2-k3s/06.postgres/barman-cloud-plugin/README.md`:
 ```markdown
 # Barman Cloud Plugin (imperative)
 
-CNPG Barman Cloud Plugin operator + CRDs (`ObjectStore`, `BackupConfiguration`),
-installed into `cnpg-system`. Pinned to **v0.12.0**.
+CNPG Barman Cloud Plugin operator + `ObjectStore` CRD, installed into
+`cnpg-system`. Pinned to **v0.12.0**. Added to migrate postgres-cluster off
+in-tree `barmanObjectStore` (issue #10).
 
 Installed imperatively via `../03.install-barman-plugin.sh` — NOT under ArgoCD,
 mirroring the CNPG operator (`../operator/cnpg-operator.yaml`). ArgoCD adoption of
@@ -140,7 +141,7 @@ Run:
 kubectl get pods -n cnpg-system | grep barman
 kubectl get crd | grep barmancloud
 ```
-Expected: a `barman-cloud-...` pod `Running` 1/1 (or 2/2 with sidecar); CRDs `objectstores.barmancloud.cnpg.io` and `backupconfigurations.barmancloud.cnpg.io` listed.
+Expected: a `barman-cloud-...` pod `Running` 1/1 (or 2/2 with sidecar); CRD `objectstores.barmancloud.cnpg.io` listed.
 
 If the pod crashloops citing an incompatible CNPG/API version on 1.28, re-vendor v0.11.0 (Step 1 with `v0.11.0`), re-run Steps 6–7, and update the README/script version strings.
 

@@ -8,8 +8,8 @@
 ## Goal
 
 Move `postgres-cluster` backups off CNPG's in-tree `spec.backup.barmanObjectStore`
-onto the standalone **Barman Cloud Plugin** (operator + `ObjectStore`/`BackupConfiguration`
-CRDs + per-pod sidecar). This removes the deprecation warning and is the prerequisite
+onto the standalone **Barman Cloud Plugin** (operator + `ObjectStore` CRD
++ per-pod sidecar). This removes the deprecation warning and is the prerequisite
 that unblocks the eventual CNPG 1.30 operator upgrade (#102), where native
 `barmanObjectStore` is removed entirely.
 
@@ -45,7 +45,7 @@ requires the restore test, not just a successful apply.
 
 | Item | Path | Managed by | Notes |
 |------|------|-----------|-------|
-| Plugin operator + CRDs (`ObjectStore`, `BackupConfiguration`) | `2-k3s/06.postgres/barman-cloud-plugin/` + install script | **Imperative** (mirrors `cnpg-operator.yaml`) | Lands in `cnpg-system`. NOT under ArgoCD — operator/CRD ArgoCD adoption stays #93's scope. |
+| Plugin operator + `ObjectStore` CRD | `2-k3s/06.postgres/barman-cloud-plugin/` + install script | **Imperative** (mirrors `cnpg-operator.yaml`) | Lands in `cnpg-system`. NOT under ArgoCD — operator/CRD ArgoCD adoption stays #93's scope. |
 | `ObjectStore` CR `postgres-minio-store` | `2-k3s/06.postgres/cluster/postgres-object-store.yaml` | ArgoCD (`app-postgres`) | `spec.configuration` = current `barmanObjectStore` block verbatim; reuses `minio-backup-credentials`; `retentionPolicy: 10d` moves here. |
 | Cluster manifest | `2-k3s/06.postgres/cluster/postgres-cluster.yaml` (edit) | ArgoCD | Remove `spec.backup.barmanObjectStore` + `spec.backup.retentionPolicy`; add `spec.plugins`. |
 | ScheduledBackup | `2-k3s/06.postgres/backup/backup-schedule.yaml` (edit) | ArgoCD | `method: plugin` + `pluginConfiguration.name`; keep `0 0 2 * * *`. |

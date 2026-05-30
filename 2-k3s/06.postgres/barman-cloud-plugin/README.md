@@ -1,7 +1,8 @@
 # Barman Cloud Plugin (imperative)
 
-CNPG Barman Cloud Plugin operator + CRDs (`ObjectStore`, `BackupConfiguration`),
-installed into `cnpg-system`. Pinned to **v0.12.0**.
+CNPG Barman Cloud Plugin operator + `ObjectStore` CRD, installed into
+`cnpg-system`. Pinned to **v0.12.0**. Added to migrate postgres-cluster off
+in-tree `barmanObjectStore` (issue #10).
 
 Installed imperatively via `../03.install-barman-plugin.sh` — NOT under ArgoCD,
 mirroring the CNPG operator (`../operator/cnpg-operator.yaml`). ArgoCD adoption of
