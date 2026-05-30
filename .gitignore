@@ -6,7 +6,18 @@ secrets.yml
 !.history/*.sh
 raid-migration
 .claude/
-.a5c/
+# Babysitter (.a5c) — best-practice (BEST-PRACTICES.md): track institutional
+# knowledge (.a5c/processes/, .a5c/project-profile.json/.md) by NOT ignoring it;
+# ignore only noisy/large/sensitive artifacts. Cannot use a blanket `.a5c/`
+# because git can't re-include children of a wholly-excluded directory.
+.a5c/node_modules/
+.a5c/runs/
+.a5c/logs/
+.a5c/cache/
+.a5c/inputs/
+.a5c/package-lock.json
+.a5c/creds.env
+.a5c/creds.env.tmp.*
 
 # Sensitive data - database dumps, backups, research extracts with credentials
 2-k3s/08.servarr/_backups/postgres-dumps/
