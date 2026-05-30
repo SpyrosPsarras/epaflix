@@ -1,0 +1,11 @@
+{
+  "repoRoot": "/home/spy/Documents/Epaflix/k3s-swarm-proxmox",
+  "appName": "renovate",
+  "ns": "renovate",
+  "masterSsh": "ssh ubuntu@192.168.10.51",
+  "branch": "renovate/ghcr.io-renovatebot-renovate-43.x",
+  "fromTag": "43.33.2",
+  "toTag": "43.205.1",
+  "kustomization": "2-k3s/12.renovate/kustomization.yaml",
+  "repo": "SpyrosPsarras/epaflix"
+}
