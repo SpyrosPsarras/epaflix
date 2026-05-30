@@ -8,7 +8,8 @@
 # Sync:         automated self-heal after clean adoption on 2026-05-24
 #               (initContainer + curl OIDC handshake + pod-restart probe all
 #               PASSed). Mirrors the Traefik adoption sequence
-#               8387f07 → db5d173 → 7d85fd1. Prune stays off.
+#               8387f07 → db5d173 → 7d85fd1. Prune enabled after the
+#               48h soak (Issue #52).
 # Secrets:      `filebrowser-oidc` is reconciled from
 #               filebrowser-oidc.enc.yaml via the kustomization's ksops
 #               generator (Issue #29 — sops + age). The render-config
@@ -36,7 +37,7 @@ spec:
   syncPolicy:
     automated:
       selfHeal: true
-      prune: false
+      prune: true
   ignoreDifferences:
     - group: ""
       kind: Service
