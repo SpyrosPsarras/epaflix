@@ -21,6 +21,7 @@ resources:
   - services/postgres-lb-ro.yaml
   - services/postgres-lb-r.yaml
   - services/postgres-pooler-lb.yaml
+  - cluster/postgres-object-store.yaml
   - cluster/postgres-cluster.yaml
   - cluster/postgres-pooler.yaml
   - backup/backup-schedule.yaml

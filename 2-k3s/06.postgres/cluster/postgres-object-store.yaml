@@ -1,0 +1,27 @@
+---
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: postgres-minio-store
+  namespace: postgres-system
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  # .spec.configuration mirrors the in-tree spec.backup.barmanObjectStore block.
+  configuration:
+    destinationPath: s3://postgres-backups/
+    endpointURL: https://minio.epaflix.com
+    s3Credentials:
+      accessKeyId:
+        name: minio-backup-credentials
+        key: ACCESS_KEY_ID
+      secretAccessKey:
+        name: minio-backup-credentials
+        key: ACCESS_SECRET_KEY
+    wal:
+      compression: gzip
+      maxParallel: 4
+    data:
+      compression: gzip
+      jobs: 2
+  retentionPolicy: "10d"
