@@ -39,6 +39,20 @@
       ],
       "matchUpdateTypes": ["minor", "major"],
       "automerge": false
+    },
+    {
+      "description": "Self-hosted Renovate image: cut noise — suppress minor+patch (no branch/PR). Only major updates remain, so a branch on this image always signals a major.",
+      "matchManagers": ["kustomize"],
+      "matchPackageNames": ["ghcr.io/renovatebot/renovate"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "enabled": false
+    },
+    {
+      "description": "Self-hosted Renovate image: major updates open a PR on renovate/<image>-<newMajor>.x for manual review — never auto-merge.",
+      "matchManagers": ["kustomize"],
+      "matchPackageNames": ["ghcr.io/renovatebot/renovate"],
+      "matchUpdateTypes": ["major"],
+      "automerge": false
     }
   ]
 }
