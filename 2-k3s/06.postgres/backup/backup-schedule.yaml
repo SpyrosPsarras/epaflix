@@ -10,7 +10,9 @@ spec:
   backupOwnerReference: self
   cluster:
     name: postgres-cluster
-  method: barmanObjectStore
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
 
   # Online/Hot backup
   immediate: false
