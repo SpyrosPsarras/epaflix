@@ -137,7 +137,7 @@ Evolutionary — mature IaC repo with no unit tests, so favor small reversible i
 
 ### Project Guardrails for Babysitter
 
-- Respect the **rebase-merge-only (linear history) + PR policy** (see Critical Rules / Epaflix merge policy). Use `gh pr merge --rebase`; merge commits are blocked by branch protection.
+- Respect the **merge-commit + mandatory-rebase (semi-linear) + PR policy** (see Critical Rules / Epaflix merge policy). Every commit on main arrives via a branch+PR as a `Merge pull request #N` marker. Before merging: rebase the branch onto `origin/main` and `push --force-with-lease` (the required `validate` check + strict up-to-date block stale branches). Merge with `gh pr merge <n> --merge`.
 - **Open a `gh issue` on `SpyrosPsarras/epaflix` for every follow-up** before closing the thread (see Critical Rules).
 - **Never commit secrets** or plaintext `*.enc.yaml` — pre-commit hook refuses plaintext `kind: Secret` (see Critical Rules).
 - **ArgoCD adoption order**: push aligned git BEFORE creating an Application, otherwise automated sync reverts live to pre-adoption main.
