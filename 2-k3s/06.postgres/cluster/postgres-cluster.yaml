@@ -12,25 +12,11 @@ spec:
     size: 20Gi
     resizeInUseVolumes: true
 
-  backup:
-    barmanObjectStore:
-      destinationPath: s3://postgres-backups/
-      endpointURL: https://minio.epaflix.com
-      s3Credentials:
-        accessKeyId:
-          name: minio-backup-credentials
-          key: ACCESS_KEY_ID
-        secretAccessKey:
-          name: minio-backup-credentials
-          key: ACCESS_SECRET_KEY
-      wal:
-        compression: gzip
-        maxParallel: 4
-      data:
-        compression: gzip
-        jobs: 2
-    retentionPolicy: 10d
-    target: prefer-standby
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: postgres-minio-store
 
   affinity:
     podAntiAffinityType: preferred
@@ -124,9 +110,11 @@ spec:
       secret:
         name: postgres-app-user
 
-  # Backup target = TrueNAS-hosted MinIO at https://minio.epaflix.com,
-  # bucket "postgres-backups". Credentials in `minio-backup-credentials` Secret
-  # (ACCESS_KEY_ID / ACCESS_SECRET_KEY) — bucket-scoped "postgres-backup" user.
-  # The backup config itself lives in the `backup:` stanza above; this is the
-  # only `backup:` block (a duplicate stanza was removed 2026-05-25 ahead of
-  # ArgoCD adoption — see issue #14).
+  # Backups now go through the Barman Cloud Plugin (migrated from in-tree
+  # `barmanObjectStore` per issue #10). The `plugins:` entry above references
+  # the `ObjectStore` CR `postgres-minio-store` (see
+  # `2-k3s/06.postgres/backup/postgres-object-store.yaml`), which carries the
+  # full destination/credentials config. Target: TrueNAS-hosted MinIO at
+  # https://minio.epaflix.com, bucket "postgres-backups". Credentials in the
+  # `minio-backup-credentials` Secret (ACCESS_KEY_ID / ACCESS_SECRET_KEY) —
+  # bucket-scoped "postgres-backup" user.
