@@ -1,7 +1,7 @@
 ---
 # argo-cd Helm chart values
 #
-# Chart: argo/argo-cd 9.5.14 (app v3.4.2)
+# Chart: argo/argo-cd 9.5.17 (app v3.4.3)
 # Repo:  https://argoproj.github.io/argo-helm
 #
 # Design notes:

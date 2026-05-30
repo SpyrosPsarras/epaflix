@@ -6,6 +6,7 @@ secrets.yml
 !.history/*.sh
 raid-migration
 .claude/
+.a5c/
 
 # Sensitive data - database dumps, backups, research extracts with credentials
 2-k3s/08.servarr/_backups/postgres-dumps/
