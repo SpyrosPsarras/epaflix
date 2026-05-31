@@ -123,10 +123,10 @@ The databases were preserved in old PVCs on worker-62 from before the cluster cr
 
 ---
 
-## Incident 2026-05-31 — Cleanuparr "K-foodie S04E13" strike runaway (#138)
+## Incident 2026-05-31 — Cleanuparr seriesId 40 S04E13 strike runaway (#138)
 
 **Symptom:** Cleanuparr reported "download keeps coming back after deletion" for
-`K-foodie.meets.J-foodie.S04E13.1080p.WEB.h264-EDITH`
+the Sonarr seriesId 40 / episodeId 3143 (S04E13) release
 (hash `66a4dc6201cb149ff70eed12b9902317cb82ed87`), strikeCount up to 285, 76
 Action Required events.
 
@@ -143,8 +143,8 @@ still-monitored+missing S04E13 that could **re-arm** via newtarr
 1. Archived + resolved the 76 stale Cleanuparr `manual_events` (76 → 0).
 2. Unmonitored Sonarr `episodeId 3143` (seriesId 40).
 3. Cleanuparr content-blocker: created `/config/custom-blocklist-sonarr.txt`
-   (850 upstream `flmorg/cleanuperr` entries + regex
-   `/K.?foodie.?meets.?J.?foodie.*S04E13.*EDITH/i`) and repointed
+   (850 upstream `flmorg/cleanuperr` entries + a regex matching the
+   seriesId 40 / episodeId 3143 (S04E13) release name) and repointed
    `sonarr_blocklist_path` at it.
 4. Confirmed no live S04E13 torrent. Cleanuparr healthy after restart.
    DBs backed up in-pod (`.bak-20260531-135309`).
@@ -154,6 +154,6 @@ still-monitored+missing S04E13 that could **re-arm** via newtarr
 > they are NOT in any git manifest, so this fix is lost on a PVC rebuild. The
 > custom list is also a static snapshot of upstream (won't auto-track updates,
 > unlike the Radarr list which still uses the live URL). Soak-confirm + codify
-> tracked in **#138**. A separate stalled torrent K-foodie S04E07
+> tracked in **#138**. A separate stalled torrent seriesId 40 S04E07
 > (`828ea9eb36f00f821772d4d431dddf12ea6bd0c2`, `stalledDL`) is triaged
 > independently in **#139**.
