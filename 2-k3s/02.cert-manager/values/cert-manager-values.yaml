@@ -1,14 +1,15 @@
 # cert-manager Helm chart values (jetstack/cert-manager v1.19.3).
 #
 # Mirrors the original `helm install --set installCRDs=true` from 2026-02-17
-# (only user-supplied value was installCRDs=true). For ArgoCD adoption we keep
-# CRDs operator-managed (chart `crds.enabled: false`, kustomization
-# `includeCRDs: false`) — same pattern as authentik / traefik / observability
-# in this repo. Re-rendering CRDs under ArgoCD ServerSideApply produces
-# field-manager conflicts and the CRDs already live in-cluster.
+# (only user-supplied value was installCRDs=true). CRDs are now ArgoCD-managed
+# (issue #93): the chart renders them (`crds.enabled: true`) and the
+# kustomization inflates them (`includeCRDs: true`). `crds.keep: true` keeps
+# the CRDs (and their CRs) in-cluster even if this Application is pruned/deleted.
+# First sync needs a one-time `--force-conflicts` to move CRD field-manager
+# ownership from "helm" to "argocd-controller".
 
 crds:
-  enabled: false
+  enabled: true
   keep: true
 
 # Disable the post-install startupapicheck Job — its purpose is to verify

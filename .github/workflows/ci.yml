@@ -93,6 +93,7 @@ jobs:
             2-k3s/01.kube-vip
             2-k3s/03.kube-vip-cloud-provider
             2-k3s/04.coredns
+            2-k3s/06.postgres/operator-kustomization
             2-k3s/11.argocd/apps
             2-k3s/12.renovate
             2-k3s/maintenance

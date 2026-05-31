@@ -2,7 +2,7 @@
 # ArgoCD Application: cert-manager (jetstack chart inflated via kustomize+helm).
 #
 # Source:       this repo, path 2-k3s/02.cert-manager (kustomization.yaml with
-#               a single `helmCharts:` entry pinned to jetstack v1.19.3, plus
+#               a single `helmCharts:` entry pinned to jetstack v1.20.2, plus
 #               the two ClusterIssuers).
 # Destination:  in-cluster `cert-manager` namespace.
 # Sync:         MANUAL on first install (syncPolicy: {}). After a clean
@@ -16,10 +16,18 @@
 #               `prune` NEVER turns on — accidental file deletion must NOT
 #               cascade-drop the cert-manager Deployment or ClusterIssuers.
 #
-# CRDs: NOT managed by this Application (`includeCRDs: false` in the
-#       kustomization, `crds.enabled: false` in the chart values). The CRDs
-#       were installed at the original `helm install` time and stay
-#       operator-managed — same convention as the rest of this repo.
+# CRDs: NOW managed by this Application (`includeCRDs: true` in the
+#       kustomization, `crds.enabled: true` + `crds.keep: true` in the chart
+#       values) — adopted under issue #93. The CRDs were originally installed
+#       at `helm install` time under field manager "helm"; the first ArgoCD
+#       sync after this flip needs a ONE-TIME `--force-conflicts` to take over
+#       the CRD field managership (helm -> argocd-controller):
+#         argocd app sync cert-manager \
+#           --server-side --force-conflicts
+#       This also reconciles the live v1.19.3 -> v1.20.2 CRD drift (the live
+#       CRDs were never bumped when the chart pin moved to v1.20.2).
+#       `crds.keep: true` keeps the CRDs (and their CRs) safe if this
+#       Application is ever pruned/deleted.
 #
 # Secrets (excluded; pending Issue #29 cluster-wide secret automation):
 #   - cloudflare-api-token            (DNS-01 solver for letsencrypt-dns)

@@ -1,0 +1,71 @@
+---
+# ArgoCD Application: CloudNativePG operator + Barman Cloud Plugin (the
+# cnpg-system control plane: CRDs, Deployments, ClusterRoles, webhook configs).
+#
+# Brings the operator/CRDs under GitOps — issue #93. The data plane
+# (postgres-system Cluster/Pooler/ScheduledBackup/ObjectStore) stays in the
+# separate "postgres" Application; this App owns ONLY the operator layer.
+#
+# Source:       this repo, path 2-k3s/06.postgres/operator-kustomization.
+# Destination:  in-cluster `cnpg-system` namespace.
+#
+# Sync: MANUAL on adoption (syncPolicy: {}). The operator + plugin already run
+# live (bootstrap 01.install-operator.sh / 03.install-barman-plugin.sh), so the
+# FIRST sync is a field-manager takeover: the vendored manifests were applied
+# with `kubectl apply --server-side`, and ArgoCD must take ownership as
+# "argocd-controller". Run that first sync with --force-conflicts, e.g.:
+#   argocd app sync cnpg-operator --server-side --force
+# After a clean dry-run + a 48 h soak with no reconcile loop, flip to:
+#   syncPolicy:
+#     automated: { selfHeal: true, prune: false }
+#     syncOptions: [ServerSideApply=true]
+# in a SEPARATE PR. `prune` NEVER turns on — these raw-vendored CRDs have no
+# Helm `crds.keep` safety net, so a prune/cascade-delete would drop every CRD
+# and cascade-delete the live Postgres Cluster. Detach is always
+# `argocd app delete cnpg-operator --cascade=false`.
+#
+# CNPG 1.30 bump (#102/#10) follows adoption as a normal reviewable manifest
+# swap — adopting v1.28.0 now decouples it.
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cnpg-operator
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/SpyrosPsarras/epaflix.git
+    targetRevision: main
+    path: 2-k3s/06.postgres/operator-kustomization
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cnpg-system
+  # MANUAL sync at adoption — see header. selfHeal flip is a separate PR after
+  # a 48 h soak (issue #34 convention). prune stays OFF permanently (issue #21).
+  syncPolicy: {}
+  ignoreDifferences:
+    # cert-manager injects the webhook CA at runtime via the cainjector.
+    - group: admissionregistration.k8s.io
+      kind: MutatingWebhookConfiguration
+      jqPathExpressions:
+        - .webhooks[].clientConfig.caBundle
+    - group: admissionregistration.k8s.io
+      kind: ValidatingWebhookConfiguration
+      jqPathExpressions:
+        - .webhooks[].clientConfig.caBundle
+    # The plugin ships an empty placeholder Secret; cert-manager fills its data
+    # at runtime (CNPG-i gRPC TLS). Allowlisted in check-sops-encrypted.sh.
+    - group: ""
+      kind: Secret
+      jsonPointers:
+        - /data
+    # cert-manager Issuer/Certificate status is controller-maintained.
+    - group: cert-manager.io
+      kind: Certificate
+      jsonPointers:
+        - /status
+    - group: cert-manager.io
+      kind: Issuer
+      jsonPointers:
+        - /status
