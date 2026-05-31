@@ -7,13 +7,15 @@
 #               chart repos using the *-values.yaml in the same directory).
 # Destination:  in-cluster `observability` namespace.
 # Sync:         automated self-heal after clean manual adoption on 2026-05-24,
-#               with prune disabled. Mirrors Traefik / Authentik / filebrowser
-#               convention. Image-updater not enabled — chart bumps are coordinated
-#               CRD migrations handled manually via PRs editing helmCharts[*].version.
+#               prune enabled 2026-05-31 after soak (#53). Mirrors Traefik /
+#               Authentik / filebrowser convention. Image-updater not enabled —
+#               chart bumps are coordinated CRD migrations handled manually via
+#               PRs editing helmCharts[*].version.
 # Secrets:      grafana-db-secret, grafana-oauth-secret, grafana-admin-secret,
-#               alertmanager-config-secret, and pve-exporter-secrets are all
-#               created imperatively from .github/instructions/secrets.yml and
-#               must exist BEFORE this Application is created or synced.
+#               alertmanager-config-secret, and pve-exporter-secrets are
+#               reconciled from git via the ksops generator (secrets/*.enc.yaml,
+#               SOPS+age — issue #29 / PR #58) so prune treats them as desired
+#               state, never deleting them.
 # Image-updater: not enabled. kube-prometheus-stack chart bumps require
 #               coordinated CRD migrations and are handled manually via PRs
 #               editing `helmCharts[*].version` in kustomization.yaml.
@@ -35,7 +37,7 @@ spec:
   syncPolicy:
     automated:
       selfHeal: true
-      prune: false
+      prune: true
     syncOptions:
       - ServerSideApply=true
   ignoreDifferences:
