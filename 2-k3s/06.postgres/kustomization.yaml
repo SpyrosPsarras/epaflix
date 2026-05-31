@@ -1,10 +1,13 @@
 # ArgoCD-managed kustomization for the Postgres/CNPG data plane.
 # Owned by ArgoCD Application "postgres" (2-k3s/11.argocd/apps/app-postgres.yaml).
 #
-# Deliberately excluded:
-#   - operator/cnpg-operator.yaml   — operator stays imperative for now
-#                                     (applied via 01.install-operator.sh);
-#                                     see issue #14.
+# Deliberately excluded (this is the DATA plane only):
+#   - operator-kustomization/cnpg-operator.yaml   — operator + Barman plugin are now their
+#                                     own ArgoCD Application "cnpg-operator"
+#                                     (2-k3s/11.argocd/apps/app-cnpg-operator.yaml,
+#                                     rendered from operator-kustomization/);
+#                                     adopted under issue #93. Do NOT pull the
+#                                     operator manifests into this kustomization.
 #   - cluster/postgres-secret.yaml  — placeholder values. Live Secrets
 #                                     postgres-superuser / postgres-app-user
 #                                     are CNPG-bootstrap-generated and stay

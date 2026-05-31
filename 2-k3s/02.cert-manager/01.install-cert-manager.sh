@@ -22,7 +22,7 @@ helm repo update
 helm upgrade --install cert-manager jetstack/cert-manager \
   --namespace cert-manager \
   --create-namespace \
-  --version v1.19.3 \
+  --version v1.20.2 \
   --set crds.enabled=true \
   --set crds.keep=true
 

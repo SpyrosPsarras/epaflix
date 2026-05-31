@@ -1,10 +1,12 @@
 # ArgoCD-managed kustomization for cert-manager (jetstack chart) + ClusterIssuers.
 # Owned by ArgoCD Application "cert-manager" (2-k3s/11.argocd/apps/app-cert-manager.yaml).
 #
-# CRDs are deliberately NOT inflated here (`includeCRDs: false`); they were
-# installed at original `helm install` time and stay operator-managed.
-# Re-rendering CRDs under ArgoCD ServerSideApply produces field-manager
-# conflicts. Matches the repo-wide convention (authentik, traefik, observability).
+# CRDs ARE now inflated here (`includeCRDs: true`) and reconciled under ArgoCD
+# (issue #93) — previously they were left operator-managed. `crds.keep: true`
+# in the chart values keeps the CRDs (and the CRs they own) safe even if this
+# Application is ever pruned/deleted. First sync needs a one-time
+# `--force-conflicts` to take field-manager ownership from "helm" to
+# "argocd-controller"; see app-cert-manager.yaml.
 #
 # Secrets:
 #   - cloudflare-api-token            reconciled via the ksops generator below
@@ -29,7 +31,7 @@ helmCharts:
     releaseName: cert-manager
     namespace: cert-manager
     valuesFile: values/cert-manager-values.yaml
-    includeCRDs: false
+    includeCRDs: true
 
 resources:
   - namespace.yaml
