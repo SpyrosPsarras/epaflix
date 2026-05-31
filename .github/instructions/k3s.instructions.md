@@ -45,7 +45,7 @@ k3sup install \
   --host 192.168.10.51 \
   --user ubuntu \
   --k3s-channel stable \
-  --k3s-extra-args "--disable servicelb --disable traefik --node-ip 10.0.0.51 --advertise-address 10.0.0.51 --flannel-iface eth1 --node-taint node-role.kubernetes.io/control-plane:NoSchedule --write-kubeconfig-mode=644 --tls-san 192.168.10.100 --tls-san 192.168.10.51 --tls-san 192.168.10.52 --tls-san 192.168.10.53 --tls-san 10.0.0.51 --tls-san 10.0.0.52 --tls-san 10.0.0.53 --etcd-arg=--auto-compaction-mode=periodic --etcd-arg=--auto-compaction-retention=1h --etcd-arg=--quota-backend-bytes=8589934592"
+  --k3s-extra-args "--disable servicelb --disable traefik --node-ip 10.0.0.51 --advertise-address 10.0.0.51 --flannel-iface eth1 --node-taint node-role.kubernetes.io/control-plane:NoSchedule --write-kubeconfig-mode=644 --tls-san 192.168.10.100 --tls-san 192.168.10.51 --tls-san 192.168.10.52 --tls-san 192.168.10.53 --tls-san 10.0.0.51 --tls-san 10.0.0.52 --tls-san 10.0.0.53 --etcd-arg=--auto-compaction-mode=periodic --etcd-arg=--auto-compaction-retention=1h --etcd-arg=--quota-backend-bytes=8589934592 --kube-controller-manager-arg=bind-address=0.0.0.0 --kube-scheduler-arg=bind-address=0.0.0.0 --etcd-expose-metrics=true"
 
 # Add Master Node 2
 k3sup join \
@@ -55,7 +55,7 @@ k3sup join \
   --host 192.168.10.52 \
   --user ubuntu \
   --k3s-channel stable \
-  --k3s-extra-args "--node-ip 10.0.0.52 --advertise-address 10.0.0.52 --flannel-iface eth1 --node-taint node-role.kubernetes.io/control-plane:NoSchedule --write-kubeconfig-mode=644 --disable servicelb --disable traefik --tls-san 192.168.10.100 --tls-san 192.168.10.51 --tls-san 192.168.10.52 --tls-san 192.168.10.53 --tls-san 10.0.0.51 --tls-san 10.0.0.52 --tls-san 10.0.0.53 --etcd-arg=--auto-compaction-mode=periodic --etcd-arg=--auto-compaction-retention=1h --etcd-arg=--quota-backend-bytes=8589934592"
+  --k3s-extra-args "--node-ip 10.0.0.52 --advertise-address 10.0.0.52 --flannel-iface eth1 --node-taint node-role.kubernetes.io/control-plane:NoSchedule --write-kubeconfig-mode=644 --disable servicelb --disable traefik --tls-san 192.168.10.100 --tls-san 192.168.10.51 --tls-san 192.168.10.52 --tls-san 192.168.10.53 --tls-san 10.0.0.51 --tls-san 10.0.0.52 --tls-san 10.0.0.53 --etcd-arg=--auto-compaction-mode=periodic --etcd-arg=--auto-compaction-retention=1h --etcd-arg=--quota-backend-bytes=8589934592 --kube-controller-manager-arg=bind-address=0.0.0.0 --kube-scheduler-arg=bind-address=0.0.0.0 --etcd-expose-metrics=true"
 
 # Add Master Node 3
 k3sup join \
@@ -65,13 +65,30 @@ k3sup join \
   --host 192.168.10.53 \
   --user ubuntu \
   --k3s-channel stable \
-  --k3s-extra-args "--node-ip 10.0.0.53 --advertise-address 10.0.0.53 --flannel-iface eth1 --node-taint node-role.kubernetes.io/control-plane:NoSchedule --write-kubeconfig-mode=644 --disable servicelb --disable traefik --tls-san 192.168.10.100 --tls-san 192.168.10.51 --tls-san 192.168.10.52 --tls-san 192.168.10.53 --tls-san 10.0.0.51 --tls-san 10.0.0.52 --tls-san 10.0.0.53 --etcd-arg=--auto-compaction-mode=periodic --etcd-arg=--auto-compaction-retention=1h --etcd-arg=--quota-backend-bytes=8589934592"
+  --k3s-extra-args "--node-ip 10.0.0.53 --advertise-address 10.0.0.53 --flannel-iface eth1 --node-taint node-role.kubernetes.io/control-plane:NoSchedule --write-kubeconfig-mode=644 --disable servicelb --disable traefik --tls-san 192.168.10.100 --tls-san 192.168.10.51 --tls-san 192.168.10.52 --tls-san 192.168.10.53 --tls-san 10.0.0.51 --tls-san 10.0.0.52 --tls-san 10.0.0.53 --etcd-arg=--auto-compaction-mode=periodic --etcd-arg=--auto-compaction-retention=1h --etcd-arg=--quota-backend-bytes=8589934592 --kube-controller-manager-arg=bind-address=0.0.0.0 --kube-scheduler-arg=bind-address=0.0.0.0 --etcd-expose-metrics=true"
 ```
 
 **Etcd Configuration Explained:**
 - `--auto-compaction-mode=periodic`: Enables automatic compaction every hour
 - `--auto-compaction-retention=1h`: Removes old etcd revisions older than 1 hour
 - `--quota-backend-bytes=8589934592`: Sets 8GB quota (default is 2GB) to prevent "database full" errors
+
+**Control-plane metrics exposure (issue #121):**
+The three flags appended to each master's `--k3s-extra-args` above keep control-plane metrics
+reachable on a fresh rebuild. The **running** cluster applies the same three args out-of-band via a
+merged `/etc/rancher/k3s/config.yaml` drop-in on each master:
+
+```yaml
+kube-controller-manager-arg:
+  - "bind-address=0.0.0.0"
+kube-scheduler-arg:
+  - "bind-address=0.0.0.0"
+etcd-expose-metrics: true
+```
+
+This exposes kube-controller-manager (10257/https), kube-scheduler (10259/https) and etcd (2381/http)
+metrics so Prometheus (kube-prometheus-stack) can scrape them. Without these binds, those components
+listen only on 127.0.0.1 and the exporter Services show empty Endpoints.
 
 ### Get Join Token
 ```bash
