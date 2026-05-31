@@ -84,7 +84,7 @@ Tracked (digest strategy on the moving tag):
 | radarr                 | lscr.io/linuxserver/radarr                 | latest      |
 | prowlarr               | lscr.io/linuxserver/prowlarr               | latest      |
 | bazarr                 | lscr.io/linuxserver/bazarr                 | development |
-| huntarr                | huntarr/huntarr                            | latest      |
+| newtarr                | ghcr.io/elfhosted/newtarr                  | rolling     |
 | cleanuparr             | ghcr.io/cleanuparr/cleanuparr              | latest      |
 | flaresolverr           | ghcr.io/flaresolverr/flaresolverr          | latest      |
 | jellyfin               | jellyfin/jellyfin                          | latest      |

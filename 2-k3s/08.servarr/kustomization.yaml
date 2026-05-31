@@ -55,8 +55,9 @@ resources:
   - bazarr/pdb.yaml
   - bazarr-autotranslate/bazarr-autotranslate.yaml
   # utilities
-  - huntarr/huntarr.yaml
-  - huntarr/pdb.yaml
+  - newtarr/newtarr.yaml
+  - newtarr/pdb.yaml
+  - newtarr/ingressroute.yaml
   - cleanuparr/cleanuparr.yaml
   - cleanuparr/pdb.yaml
   - flaresolverr/flaresolverr.yaml

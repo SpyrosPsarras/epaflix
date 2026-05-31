@@ -1,21 +1,26 @@
 ---
-# Huntarr - Quality management for *arr apps
+# Newtarr - Quality management for *arr apps
+#
+# This is the ElfHosted "newtarr" fork of Huntarr
+# (ghcr.io/elfhosted/newtarr:rolling). It is community-maintained and carries
+# NO upstream support guarantee — treat upgrades and behaviour changes with
+# care.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: huntarr
+  name: newtarr
   namespace: servarr
   labels:
-    app: huntarr
+    app: newtarr
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: huntarr
+      app: newtarr
   template:
     metadata:
       labels:
-        app: huntarr
+        app: newtarr
     spec:
       topologySpreadConstraints:
         - maxSkew: 1
@@ -23,10 +28,10 @@ spec:
           whenUnsatisfiable: ScheduleAnyway
           labelSelector:
             matchLabels:
-              app: huntarr
+              app: newtarr
       containers:
-        - name: huntarr
-          image: huntarr/huntarr:latest
+        - name: newtarr
+          image: ghcr.io/elfhosted/newtarr:rolling
           env:
             - name: PUID
               value: "568"
@@ -34,6 +39,7 @@ spec:
               value: "568"
             - name: TZ
               value: "Europe/Oslo"
+            # TODO #131: confirm Newtarr fork honours HUNTARR_PORT vs NEWTARR_PORT
             - name: HUNTARR_PORT
               value: "30262"
             - name: UMASK
@@ -76,19 +82,19 @@ spec:
       volumes:
         - name: config
           persistentVolumeClaim:
-            claimName: huntarr-config
+            claimName: newtarr-config
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: huntarr
+  name: newtarr
   namespace: servarr
   labels:
-    app: huntarr
+    app: newtarr
 spec:
   type: ClusterIP
   selector:
-    app: huntarr
+    app: newtarr
   ports:
     - name: http
       port: 30262
@@ -100,7 +106,7 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: huntarr-config
+  name: newtarr-config
   namespace: servarr
 spec:
   accessModes:

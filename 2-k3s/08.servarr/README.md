@@ -70,7 +70,7 @@ Each app gets a `local-path` PVC for its config directory (auto-provisioned on d
 - `sonarr-config`, `sonarr2-config`, `radarr-config`, `prowlarr-config`
 - `bazarr-config`, `jellyseerr-config`, `qbittorrent-config`
 - `jellyfin-config`, `jellyfin-cache`, `jellyfin-transcodes`
-- `homarr-config`, `huntarr-config`, `cleanuparr-config`, `wizarr-config`
+- `homarr-config`, `newtarr-config`, `cleanuparr-config`, `wizarr-config`
 
 ### NFS Media Storage (TrueNAS 192.168.10.200)
 Mounted on K3s worker nodes via fstab, exposed as hostPath PVs:
