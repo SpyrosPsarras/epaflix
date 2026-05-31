@@ -157,3 +157,49 @@ still-monitored+missing S04E13 that could **re-arm** via newtarr
 > tracked in **#138**. A separate stalled torrent seriesId 40 S04E07
 > (`828ea9eb36f00f821772d4d431dddf12ea6bd0c2`, `stalledDL`) is triaged
 > independently in **#139**.
+
+---
+
+## Incident 2026-05-31 — Orphaned-stalled torrents (manual-remove orphans, #142)
+
+**Symptom:** 12 dead 0-seed torrents stuck in qBittorrent (10 "Genius" episodes +
+K-Foodie S04E07 + Jigokuraku/Hell's Paradise S02E11) that neither Cleanuparr nor
+newtarr ever cleaned or replaced.
+
+**Orphan mechanism:** a bulk **manual Sonarr "Remove from queue" on 2026-05-08
+19:47 with "Remove from download client" UNCHECKED** marked the releases
+`downloadIgnored` — the torrents stayed in qBittorrent but were no longer
+referenced by any *arr queue. Cleanuparr's **QueueCleaner only strikes torrents
+that appear in an arr queue**, so these orphans are invisible to it. Meanwhile the
+underlying episodes stayed `missing + monitored`, and newtarr (v1.0.0,
+`hunt_missing_items=1`, no dead-release blocklist) kept recycling dead 0-seed
+grabs.
+
+**Fix applied (4 steps, all verified):**
+1. Deleted the 12 orphans **with data** (backups taken first); verified 139
+   healthy seeders intact (none wrongly deleted).
+2. Blocklisted 11/12 dead releases. **K-Foodie S04E07 could not be blocklisted** —
+   its Sonarr history row was already purged and Sonarr v3 has no API to add an
+   arbitrary blocklist entry without a history id (low impact; already
+   `hasFile=true`).
+3. Triggered EpisodeSearch for the 13 missing Genius episodes (re-search grabs are
+   currently 0-seed — a separate "no healthy release available" condition, not the
+   orphan bug; needs soak).
+4. **Left the Cleanuparr DownloadCleaner unlinked/orphan rule OFF** (verified still
+   0). New grabs are now queue-tracked rather than orphaned.
+
+> **⚠️ DO NOT enable Cleanuparr's DownloadCleaner unlinked/orphan rule in this
+> dataset topology — it would delete ALL ~139 healthy seeders.** Downloads
+> (`dataset01/downloads`) and library (`dataset01/{tvshows,animes,movies}`) are
+> **separate ZFS datasets**, so hardlinks cannot span them; every imported seeder
+> is `nlink=1`, identical to a true orphan. Sonarr2 also uses
+> `copyUsingHardlinks=false`, and the Cleanuparr container has **no mount of the
+> library roots**, so it physically cannot tell a seeder from an orphan. Safe
+> automated reaping requires either co-locating downloads + library on one dataset
+> AND mounting `/tv`,`/animes`,`/movies` into Cleanuparr (so `nlink>1` works), or a
+> tag/category-scoped or seed-time/ratio-guarded rule. Tracked in **#142**
+> (cross-links #138 PVC-only config, #131/#137 newtarr migration).
+
+> **Operator rule:** when manually removing items from an *arr queue, ALWAYS tick
+> **"Remove from download client"** (and usually **"Blocklist"**) — otherwise the
+> torrent is orphaned out of QueueCleaner's reach.
