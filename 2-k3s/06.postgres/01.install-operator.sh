@@ -1,6 +1,12 @@
 #!/bin/bash
 set -e
 
+# Bootstrap-only. Day-to-day CNPG operator lifecycle is now owned by ArgoCD
+# Application "cnpg-operator" (2-k3s/11.argocd/apps/app-cnpg-operator.yaml),
+# which renders operator-kustomization/cnpg-operator.yaml via
+# operator-kustomization/kustomization.yaml (issue #93). Run this script ONLY
+# for the very first install on a fresh cluster before ArgoCD is up.
+
 echo "======================================"
 echo "Installing CloudNativePG Operator"
 echo "======================================"
@@ -11,7 +17,7 @@ kubectl apply -f namespace.yaml
 
 # Install CloudNativePG operator
 echo "Installing CloudNativePG operator v1.28.0..."
-kubectl apply --server-side --force-conflicts -f operator/cnpg-operator.yaml
+kubectl apply --server-side --force-conflicts -f operator-kustomization/cnpg-operator.yaml
 
 # Wait for operator to be ready
 echo "Waiting for operator deployment to be ready..."

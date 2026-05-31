@@ -41,8 +41,10 @@ All services exposed via kube-vip LoadBalancer:
 ├── namespace.yaml                      # postgres-system namespace
 ├── 01.install-operator.sh              # Install CloudNativePG operator
 ├── 02.deploy-cluster.sh                # Deploy PostgreSQL cluster
-├── operator/
-│   └── cnpg-operator.yaml             # CNPG operator v1.28.0 manifest
+├── operator-kustomization/             # ArgoCD "cnpg-operator" App render dir (issue #93)
+│   ├── kustomization.yaml             # bundles the two vendored operator manifests
+│   ├── cnpg-operator.yaml             # CNPG operator v1.28.0 manifest
+│   └── barman-manifest.yaml           # Barman Cloud Plugin v0.12.0 manifest
 ├── cluster/
 │   ├── postgres-secret.yaml           # Superuser and app user credentials
 │   ├── postgres-cluster.yaml          # PostgreSQL cluster definition
@@ -532,7 +534,10 @@ kubectl delete namespace postgres-system
 ### Remove Operator
 
 ```bash
-kubectl delete -f operator/cnpg-operator.yaml
+# Operator + Barman plugin are ArgoCD-managed (App "cnpg-operator"). Detach
+# WITHOUT pruning live CRs first: argocd app delete cnpg-operator --cascade=false
+kubectl delete -f operator-kustomization/cnpg-operator.yaml
+kubectl delete -f operator-kustomization/barman-manifest.yaml
 kubectl delete namespace cnpg-system
 ```
 
