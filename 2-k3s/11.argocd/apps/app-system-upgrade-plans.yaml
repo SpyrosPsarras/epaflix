@@ -1,0 +1,32 @@
+---
+# ArgoCD Application: system-upgrade Plans (k3s-server + k3s-agent).
+# AUTOMATED per owner decision (no manual sync). MERGE auto-applies the
+# Plans via app-of-apps + selfHeal and starts the rolling K3s upgrade;
+# future stable-channel bumps then auto-roll unsupervised (Issue #74).
+#
+# Source:       this repo, path 2-k3s/maintenance/system-upgrade/plans.
+#               kustomization.yaml references system-upgrade-plans.yaml
+#               (the k3s-server + k3s-agent Plans, stable channel).
+# Destination:  `system-upgrade` namespace (owned by the controller App).
+# Sync:         AUTOMATED — selfHeal: true, prune: false, ServerSideApply.
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: system-upgrade-plans
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/SpyrosPsarras/epaflix.git
+    targetRevision: main
+    path: 2-k3s/maintenance/system-upgrade/plans
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: system-upgrade
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: false
+    syncOptions:
+      - ServerSideApply=true
