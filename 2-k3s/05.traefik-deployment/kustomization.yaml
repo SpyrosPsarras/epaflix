@@ -18,6 +18,7 @@ resources:
   - middleware/redirect-https.yaml
   - middleware/security-headers.yaml
   - middleware/authentik-forwardauth.yaml
+  - ingress/https-redirect.yaml
   - ingress/traefik-dashboard-sso.yaml
   - ingress/truenas-proxy.yaml
   - ingress/pegaprox-proxy.yaml
