@@ -162,9 +162,9 @@ still-monitored+missing S04E13 that could **re-arm** via newtarr
 
 ## Incident 2026-05-31 — Orphaned-stalled torrents (manual-remove orphans, #142)
 
-**Symptom:** 12 dead 0-seed torrents stuck in qBittorrent (10 "Genius" episodes +
-K-Foodie S04E07 + Jigokuraku/Hell's Paradise S02E11) that neither Cleanuparr nor
-newtarr ever cleaned or replaced.
+**Symptom:** 12 dead 0-seed torrents stuck in qBittorrent (10 Sonarr seriesId 272
+episodes + Sonarr seriesId 40 S04E07 (episodeId 3137) + Sonarr2 seriesId 36 S02E11
+(episodeId 1990)) that neither Cleanuparr nor newtarr ever cleaned or replaced.
 
 **Orphan mechanism:** a bulk **manual Sonarr "Remove from queue" on 2026-05-08
 19:47 with "Remove from download client" UNCHECKED** marked the releases
@@ -178,11 +178,11 @@ grabs.
 **Fix applied (4 steps, all verified):**
 1. Deleted the 12 orphans **with data** (backups taken first); verified 139
    healthy seeders intact (none wrongly deleted).
-2. Blocklisted 11/12 dead releases. **K-Foodie S04E07 could not be blocklisted** —
-   its Sonarr history row was already purged and Sonarr v3 has no API to add an
-   arbitrary blocklist entry without a history id (low impact; already
-   `hasFile=true`).
-3. Triggered EpisodeSearch for the 13 missing Genius episodes (re-search grabs are
+2. Blocklisted 11/12 dead releases. **Sonarr seriesId 40 S04E07 (episodeId 3137)
+   could not be blocklisted** — its Sonarr history row was already purged and Sonarr
+   v3 has no API to add an arbitrary blocklist entry without a history id (low
+   impact; already `hasFile=true`).
+3. Triggered EpisodeSearch for the 13 missing seriesId 272 episodes (re-search grabs are
    currently 0-seed — a separate "no healthy release available" condition, not the
    orphan bug; needs soak).
 4. **Left the Cleanuparr DownloadCleaner unlinked/orphan rule OFF** (verified still
