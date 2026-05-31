@@ -1,6 +1,12 @@
 #!/bin/bash
 set -e
 
+# Bootstrap-only. Day-to-day Barman Cloud Plugin lifecycle is now owned by
+# ArgoCD Application "cnpg-operator" (2-k3s/11.argocd/apps/app-cnpg-operator.yaml),
+# which renders operator-kustomization/barman-manifest.yaml via
+# operator-kustomization/kustomization.yaml (issue #93). Run this script ONLY
+# for the very first install on a fresh cluster before ArgoCD is up.
+
 echo "======================================"
 echo "Installing Barman Cloud Plugin (v0.12.0)"
 echo "======================================"
@@ -9,7 +15,7 @@ echo "======================================"
 # (plugin uses a cert-manager Issuer/Certificate for its CNPG-i gRPC TLS).
 echo "Applying vendored plugin manifest into cnpg-system..."
 kubectl apply --server-side --force-conflicts \
-  -f barman-cloud-plugin/manifest.yaml
+  -f operator-kustomization/barman-manifest.yaml
 
 echo "Waiting for plugin deployment to be ready..."
 kubectl wait --for=condition=available --timeout=300s \

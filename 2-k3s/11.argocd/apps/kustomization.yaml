@@ -16,6 +16,7 @@ resources:
   - app-argocd.yaml
   - app-argocd-image-updater.yaml
   - app-authentik.yaml
+  - app-cnpg-operator.yaml
   - app-cert-manager.yaml
   - app-coredns.yaml
   - app-filebrowser.yaml

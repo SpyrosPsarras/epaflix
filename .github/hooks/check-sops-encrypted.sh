@@ -11,7 +11,7 @@ set -euo pipefail
 # Each entry is a relative path from repo root.
 ALLOWLIST=(
   "2-k3s/11.argocd/oidc-secret.yaml"
-  "2-k3s/06.postgres/barman-cloud-plugin/manifest.yaml"
+  "2-k3s/06.postgres/operator-kustomization/barman-manifest.yaml"
 )
 
 fail=0
