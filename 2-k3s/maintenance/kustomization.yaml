@@ -15,11 +15,10 @@ kind: Kustomization
 #   - servarr-image-updater-cronjob.yaml — superseded by
 #     argocd-image-updater; no live counterpart in the cluster (RBAC
 #     not provisioned). Kept on disk for historical reference.
-#   - system-upgrade/system-upgrade-plans.yaml — depends on the
-#     system-upgrade-controller CRD (Plan, system-upgrade.cattle.io),
-#     which is NOT installed. Adding it would break the Application's
-#     sync. Bring this back under ArgoCD once the controller is
-#     installed (separate change).
+#   - system-upgrade/plans/ — the K3s rolling-upgrade Plans (k3s-server,
+#     k3s-agent). Owned by their own automated `system-upgrade-plans`
+#     ArgoCD Application (Issue #74), NOT this maintenance App. Kept out
+#     of this resource list so the two Apps don't fight over the Plans.
 #   - backup-all-databases.sh, fix-worker-61-diskpressure.sh — shell
 #     tooling, not k8s manifests.
 #   - backups/*.sql.gz — DB dumps.
