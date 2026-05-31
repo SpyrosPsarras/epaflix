@@ -120,3 +120,40 @@ kubectl -n servarr logs cleanuparr-c8c65cb64-lx75l --tail=30
 Newtarr (formerly Huntarr) and Cleanuparr are **configuration management tools** that store their settings and state in SQLite databases within their config directories. They don't have dedicated PostgreSQL databases like the *arr apps (Sonarr, Radarr, etc.).
 
 The databases were preserved in old PVCs on worker-62 from before the cluster crash and have now been successfully restored to the new cluster.
+
+---
+
+## Incident 2026-05-31 — Cleanuparr "K-foodie S04E13" strike runaway (#138)
+
+**Symptom:** Cleanuparr reported "download keeps coming back after deletion" for
+`K-foodie.meets.J-foodie.S04E13.1080p.WEB.h264-EDITH`
+(hash `66a4dc6201cb149ff70eed12b9902317cb82ed87`), strikeCount up to 285, 76
+Action Required events.
+
+**Reality:** the active loop had already ended months earlier — all 76 events
+dated 2026-03-26..03-29, the torrent was gone from qbittorrent, and Cleanuparr's
+queue-cleaner striking for Sonarr was already disabled (per-arr
+`failed_import_max_strikes=-1`). What remained was stale residue plus a
+still-monitored+missing S04E13 that could **re-arm** via newtarr
+(`hunt_missing_items=1`, 15-min cadence) combined with Sonarr
+`autoRedownloadFailed=true`. The Sonarr blocklist is keyed by
+**title+indexer+GUID, not infohash**, so cross-posted variants slipped past it.
+
+**Fix applied (4 steps, all verified):**
+1. Archived + resolved the 76 stale Cleanuparr `manual_events` (76 → 0).
+2. Unmonitored Sonarr `episodeId 3143` (seriesId 40).
+3. Cleanuparr content-blocker: created `/config/custom-blocklist-sonarr.txt`
+   (850 upstream `flmorg/cleanuperr` entries + regex
+   `/K.?foodie.?meets.?J.?foodie.*S04E13.*EDITH/i`) and repointed
+   `sonarr_blocklist_path` at it.
+4. Confirmed no live S04E13 torrent. Cleanuparr healthy after restart.
+   DBs backed up in-pod (`.bak-20260531-135309`).
+
+> **Durability caveat:** `custom-blocklist-sonarr.txt` and the repointed
+> `sonarr_blocklist_path` live **only on the Cleanuparr config local-path PVC** —
+> they are NOT in any git manifest, so this fix is lost on a PVC rebuild. The
+> custom list is also a static snapshot of upstream (won't auto-track updates,
+> unlike the Radarr list which still uses the live URL). Soak-confirm + codify
+> tracked in **#138**. A separate stalled torrent K-foodie S04E07
+> (`828ea9eb36f00f821772d4d431dddf12ea6bd0c2`, `stalledDL`) is triaged
+> independently in **#139**.
