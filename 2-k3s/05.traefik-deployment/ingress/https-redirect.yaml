@@ -1,0 +1,37 @@
+---
+# Global catch-all HTTP→HTTPS redirect for *.epaflix.com / epaflix.com.
+#
+# Matches any epaflix.com host on the `web` (plain HTTP) entrypoint and bounces
+# it to HTTPS via the redirect-https middleware. The route points at the
+# built-in noop@internal TraefikService because the middleware short-circuits
+# the request with a 30x before any backend is hit.
+#
+# Codified into git for issue #108: this resource previously lived in the
+# cluster only as an untracked imperative orphan (kubectl apply, never in
+# GitOps). It is now tracked here so ArgoCD owns it and traefik-system carries
+# zero untracked drift.
+#
+# Note: this is largely redundant with the entrypoint-level redirect configured
+# in values/traefik-values.yaml (ports.web.http.redirections.entryPoint), which
+# already forces web→websecure for all traffic. It is kept here anyway so the
+# previously-orphaned object becomes ArgoCD-managed rather than being left as
+# silent live drift.
+#
+# Namespace is intentionally omitted — the parent kustomization.yaml applies
+# `namespace: traefik-system` globally, matching the other ingress/*.yaml files.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: https-redirect-epaflix
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: HostRegexp(`{subdomain:[a-z0-9-]+}.epaflix.com`) || Host(`epaflix.com`)
+      kind: Rule
+      middlewares:
+        - name: redirect-https
+          namespace: traefik-system
+      services:
+        - kind: TraefikService
+          name: noop@internal
