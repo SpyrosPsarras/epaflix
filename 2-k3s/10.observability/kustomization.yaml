@@ -36,7 +36,21 @@
 
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-namespace: observability
+# NO top-level `namespace:` transformer here on purpose.
+#
+# A blanket `namespace: observability` force-rewrites EVERY namespaced resource,
+# including kube-prometheus-stack's control-plane exporter Services
+# (kube-controller-manager / kube-scheduler / kube-etcd / coredns) which the
+# chart deliberately templates into `kube-system` so their manually-managed
+# Endpoints resolve against the control-plane nodes. Moving them to
+# `observability` produces endpoint-less Service shells that scrape nothing,
+# while the real (kube-system) Services drift out of git and become prune bait.
+#
+# Instead: each Helm release pins its own namespace via `helmCharts[*].namespace`
+# (release namespace = observability), and every local resource below carries an
+# explicit `namespace: observability` in its own manifest. Control-plane
+# exporter Services correctly stay in kube-system. See issue #53 / the
+# prune-enable work for the regression this prevents.
 resources:
   - namespace.yaml
   - alertmanager-config/custom-alerts.yaml
