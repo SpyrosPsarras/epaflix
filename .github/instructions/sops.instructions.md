@@ -11,9 +11,12 @@ issue #29. Design spec:
 - `.sops.yaml` at repo root is the only creation rule — single
   cluster-wide age recipient.
 - The private age key lives at `~/.config/sops/age/k3s-cluster.txt` on
-  the maintainer workstation, mirrored to TrueNAS at
-  `pool1/dataset01/sops-age-backup/` (to be moved to a ZFS-encrypted
-  dataset — tracked in issue #57).
+  the maintainer workstation, mirrored to TrueNAS on the ZFS-encrypted
+  dataset at `/mnt/pool1/encrypted-backups/sops-age-backup/k3s-cluster.txt`
+  (ZFS native encryption, passphrase unlock; the passphrase is recorded in
+  the git-ignored `.github/instructions/secrets.yml` under
+  `truenas_zfs_encrypted_backups_passphrase`). The dataset must be manually
+  unlocked after a TrueNAS reboot before this backup is readable.
 - The cluster reads the key from Secret `argocd/sops-age` (created
   imperatively, once per cluster rebuild — chicken-egg).
 - `ksops` runs on `argocd-repo-server` (initContainer that copies the
@@ -109,8 +112,8 @@ git push
 # 8. Securely destroy old key.
 shred -u ~/.config/sops/age/k3s-cluster.txt
 mv ~/.config/sops/age/k3s-cluster-new.txt ~/.config/sops/age/k3s-cluster.txt
-ssh truenas_admin@192.168.10.200 'shred -u /mnt/pool1/dataset01/sops-age-backup/k3s-cluster.txt'
-scp ~/.config/sops/age/k3s-cluster.txt truenas_admin@192.168.10.200:/mnt/pool1/dataset01/sops-age-backup/
+ssh truenas_admin@192.168.10.200 'shred -u /mnt/pool1/encrypted-backups/sops-age-backup/k3s-cluster.txt'
+scp ~/.config/sops/age/k3s-cluster.txt truenas_admin@192.168.10.200:/mnt/pool1/encrypted-backups/sops-age-backup/
 ```
 
 ## Cluster bootstrap (fresh cluster)
