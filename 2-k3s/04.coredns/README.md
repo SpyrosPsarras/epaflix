@@ -89,7 +89,7 @@ All the following domains now work from inside pods:
 - bazarr.epaflix.com
 - qbittorrent.epaflix.com
 - homarr.epaflix.com
-- huntarr.epaflix.com
+- newtarr.epaflix.com
 - cleanuparr.epaflix.com
 - jellyfin.epaflix.com
 - seerr.epaflix.com

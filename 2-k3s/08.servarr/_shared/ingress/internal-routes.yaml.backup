@@ -167,24 +167,6 @@ spec:
   tls:
     secretName: epavli-tls
 ---
-# Huntarr - Quality Management
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
-metadata:
-  name: huntarr-internal
-  namespace: servarr
-spec:
-  entryPoints:
-    - websecure
-  routes:
-    - match: Host(`huntarr.epavli`)
-      kind: Rule
-      services:
-        - name: huntarr
-          port: 30262
-  tls:
-    secretName: epavli-tls
----
 # Cleanuparr - Automated Cleanup
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute

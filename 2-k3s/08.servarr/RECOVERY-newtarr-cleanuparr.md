@@ -1,7 +1,16 @@
-# Huntarr & Cleanuparr Database Recovery
+# Newtarr & Cleanuparr Database Recovery
+
+> **Note (#131, 2026-05-31):** Huntarr was renamed to **Newtarr** (ElfHosted
+> fork, `ghcr.io/elfhosted/newtarr:rolling`); the config PVC is now
+> `newtarr-config` and the Deployment/Service/PDB are `newtarr`. The historical
+> commands below are preserved verbatim and still reference the old `huntarr`
+> Deployment, `huntarr-config` PVC, and `huntarr.db*` filenames — substitute the
+> `newtarr` equivalents when running this runbook today. The on-disk SQLite file
+> may remain `huntarr.db` if the fork keeps the original filename, so do NOT
+> blindly rename it (see TODO in `newtarr/newtarr.yaml`).
 
 ## Recovery Date
-February 3, 2026
+February 3, 2026 (original; Huntarr-era)
 
 ## Problem
 - huntarr.epaflix.com and cleanuparr.epaflix.com showed no data from previous installation
@@ -108,6 +117,6 @@ kubectl -n servarr logs cleanuparr-c8c65cb64-lx75l --tail=30
 - No PostgreSQL migration was needed - these apps use SQLite
 
 ## Key Insight
-Huntarr and Cleanuparr are **configuration management tools** that store their settings and state in SQLite databases within their config directories. They don't have dedicated PostgreSQL databases like the *arr apps (Sonarr, Radarr, etc.).
+Newtarr (formerly Huntarr) and Cleanuparr are **configuration management tools** that store their settings and state in SQLite databases within their config directories. They don't have dedicated PostgreSQL databases like the *arr apps (Sonarr, Radarr, etc.).
 
 The databases were preserved in old PVCs on worker-62 from before the cluster crash and have now been successfully restored to the new cluster.

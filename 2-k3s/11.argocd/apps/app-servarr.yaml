@@ -35,7 +35,7 @@ metadata:
       radarr=lscr.io/linuxserver/radarr:latest,
       prowlarr=lscr.io/linuxserver/prowlarr:latest,
       bazarr=lscr.io/linuxserver/bazarr:latest,
-      huntarr=huntarr/huntarr:latest,
+      newtarr=ghcr.io/elfhosted/newtarr:rolling,
       cleanuparr=ghcr.io/cleanuparr/cleanuparr:latest,
       flaresolverr=ghcr.io/flaresolverr/flaresolverr:latest,
       jellyfin=jellyfin/jellyfin:latest,
@@ -51,8 +51,8 @@ metadata:
     argocd-image-updater.argoproj.io/prowlarr.allow-tags: regexp:^latest$
     argocd-image-updater.argoproj.io/bazarr.update-strategy: digest
     argocd-image-updater.argoproj.io/bazarr.allow-tags: regexp:^latest$
-    argocd-image-updater.argoproj.io/huntarr.update-strategy: digest
-    argocd-image-updater.argoproj.io/huntarr.allow-tags: regexp:^latest$
+    argocd-image-updater.argoproj.io/newtarr.update-strategy: digest
+    argocd-image-updater.argoproj.io/newtarr.allow-tags: regexp:^rolling$
     argocd-image-updater.argoproj.io/cleanuparr.update-strategy: digest
     argocd-image-updater.argoproj.io/cleanuparr.allow-tags: regexp:^latest$
     argocd-image-updater.argoproj.io/flaresolverr.update-strategy: digest
