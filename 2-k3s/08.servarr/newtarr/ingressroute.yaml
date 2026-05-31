@@ -1,0 +1,49 @@
+---
+# Newtarr - Public Internet-facing IngressRoutes with Let's Encrypt TLS.
+#
+# Brought into git as part of the huntarr -> newtarr migration (#131). The
+# previous huntarr routes existed live-only (applied 2026-03-09, never tracked).
+#
+# Auth is IN-APP (Newtarr STANDARD mode + BYPASS_AUTH_FOR_LOCAL_ADDRESSES=1 +
+# LOCAL_NETWORK=192.168.10.0/24) — parity with the prior huntarr setup.
+# These routes carry NO forward-auth middleware. Adding Authentik SSO is a
+# deferred follow-up (Option B), NOT part of this change.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: newtarr-https
+  namespace: servarr
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`newtarr.epaflix.com`)
+      kind: Rule
+      services:
+        - name: newtarr
+          port: 30262
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
+---
+# HTTP to HTTPS redirect for Newtarr
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: newtarr-http
+  namespace: servarr
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`newtarr.epaflix.com`)
+      kind: Rule
+      middlewares:
+        - name: redirect-https
+          namespace: traefik-system
+      services:
+        - name: newtarr
+          port: 30262
