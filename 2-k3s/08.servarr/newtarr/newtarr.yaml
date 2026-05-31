@@ -39,9 +39,12 @@ spec:
               value: "568"
             - name: TZ
               value: "Europe/Oslo"
-            # TODO #131: confirm Newtarr fork honours HUNTARR_PORT vs NEWTARR_PORT
-            - name: HUNTARR_PORT
-              value: "30262"
+            # Newtarr/Huntarr v1.0.0 binds its web UI on 0.0.0.0:9705 and reads
+            # ONLY the PORT env (main.py: os.environ.get('PORT', 9705)). It does
+            # NOT honour HUNTARR_PORT/NEWTARR_PORT. Leaving PORT unset keeps the
+            # documented default of 9705 (see #131). The previous HUNTARR_PORT
+            # env was inert AND collided with the k8s-injected HUNTARR_PORT from
+            # the legacy huntarr Service, so it is removed.
             - name: UMASK
               value: "002"
             - name: LOCAL_NETWORK
@@ -51,10 +54,12 @@ spec:
             - name: STATEFUL_EXPIRATION_HOURS
               value: "72"
           ports:
-            - containerPort: 30262
-              name: http
+            # Web UI (the app binds 0.0.0.0:9705). v1.0.0 exposes NO separate
+            # Prometheus endpoint — /metrics returns 404 — so the prior
+            # "metrics" containerPort (which had wrongly claimed 9705, the real
+            # web port) is dropped. See #131.
             - containerPort: 9705
-              name: metrics
+              name: http
           volumeMounts:
             - name: config
               mountPath: /config
@@ -96,12 +101,13 @@ spec:
   selector:
     app: newtarr
   ports:
+    # Stable in-cluster Service port 30262 is preserved so the existing
+    # IngressRoutes (svc newtarr port 30262) keep working unchanged; it now
+    # targets the real web port 9705. The metrics port is dropped (no metrics
+    # endpoint — see #131).
     - name: http
       port: 30262
       targetPort: http
-    - name: metrics
-      port: 9705
-      targetPort: metrics
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
