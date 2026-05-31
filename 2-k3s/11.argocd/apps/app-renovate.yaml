@@ -4,8 +4,9 @@
 # Source:       this repo, path 2-k3s/12.renovate (CronJob + ServiceAccount).
 # Destination:  in-cluster `renovate` namespace.
 # Sync:         AUTOMATED with selfHeal from the start — nothing pre-existed
-#               in-cluster, no adoption drift to worry about. prune stays
-#               OFF (consistent with the other Applications).
+#               in-cluster, no adoption drift to worry about. prune is now
+#               ENABLED after the 48h soak (issue #54) — last of the 5 split
+#               prune-flips.
 #
 # Versioning:   Renovate-the-bot owns its own image tag. Its kustomize
 #               manager scans 2-k3s/12.renovate/kustomization.yaml + cronjob.yaml
@@ -31,7 +32,7 @@ spec:
   syncPolicy:
     automated:
       selfHeal: true
-      prune: false
+      prune: true
     syncOptions:
       - ServerSideApply=true
       - CreateNamespace=true
