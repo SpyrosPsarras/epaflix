@@ -59,6 +59,18 @@ spec:
   # ServiceAccount created by system-upgrade-controller installation
   serviceAccountName: system-upgrade
 
+  # REQUIRED: master/control-plane nodes carry the taint
+  #   node-role.kubernetes.io/control-plane=true:NoSchedule
+  # Without these tolerations the upgrade Job pod cannot be scheduled onto
+  # the very nodes it must upgrade — it sits Pending/FailedScheduling and the
+  # whole rollout deadlocks at 0/7. This is the standard SUC toleration set
+  # covering control-plane / master / etcd taints.
+  tolerations:
+    - {key: "CriticalAddonsOnly", operator: "Exists"}
+    - {key: "node-role.kubernetes.io/control-plane", operator: "Exists", effect: "NoSchedule"}
+    - {key: "node-role.kubernetes.io/master", operator: "Exists", effect: "NoSchedule"}
+    - {key: "node-role.kubernetes.io/etcd", operator: "Exists", effect: "NoExecute"}
+
   # The upgrade job image — handles the actual K3s binary replacement
   upgrade:
     image: rancher/k3s-upgrade
@@ -107,6 +119,15 @@ spec:
 
   # ServiceAccount created by system-upgrade-controller installation
   serviceAccountName: system-upgrade
+
+  # Mirror the same SUC toleration set as the server Plan. Harmless on the
+  # currently-untainted workers, and correct should any worker carry a
+  # control-plane/etcd taint — ensures the upgrade Job can always schedule.
+  tolerations:
+    - {key: "CriticalAddonsOnly", operator: "Exists"}
+    - {key: "node-role.kubernetes.io/control-plane", operator: "Exists", effect: "NoSchedule"}
+    - {key: "node-role.kubernetes.io/master", operator: "Exists", effect: "NoSchedule"}
+    - {key: "node-role.kubernetes.io/etcd", operator: "Exists", effect: "NoExecute"}
 
   # The upgrade job image — handles the actual K3s binary replacement
   upgrade:
