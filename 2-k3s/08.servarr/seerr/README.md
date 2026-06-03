@@ -1,298 +1,148 @@
-# Jellyseerr to Seerr Migration Guide
+# Seerr — Media Request Management
 
-This directory contains the deployment manifests and instructions for migrating from Jellyseerr to Seerr.
+This directory contains the single, canonical media-request deployment for the
+servarr stack. It is named **seerr** and is reconciled by ArgoCD via
+`2-k3s/08.servarr/kustomization.yaml`.
 
-## What is Seerr?
+## What this is (and is NOT)
 
-Seerr is the official successor to Jellyseerr, providing a unified media request management solution. This migration is necessary as Jellyseerr has been discontinued in favor of Seerr.
+This is a **NAME consolidation**, not an image migration. There used to be two
+identical media-request deployments — `jellyseerr` and `seerr` — running the
+**same** image on the **same** PVC and the **same** ClusterIP port 5055. The
+redundant `jellyseerr` Deployment/Service has been **retired**; `seerr` is the
+surviving deployment.
 
-For more information, see:
-- [Seerr Release Announcement](https://docs.seerr.dev/blog/seerr-release)
-- [Official Migration Guide](https://docs.seerr.dev/migration-guide)
+It deliberately keeps running the upstream **fork** image, because OIDC support
+is not in any stable seerr release:
 
-## Migration Overview
+| Property         | Value                                    |
+|------------------|------------------------------------------|
+| Image            | `fallenbagel/jellyseerr:preview-OIDC`    |
+| Security context | UID/GID/fsGroup **568** (`PUID`/`PGID` 568) |
+| Config storage   | PVC **`jellyseerr-config`** (legacy name, reused) |
+| Database         | Postgres DB/user **`jellyseerr`** (legacy names) |
+| DB credentials   | `servarr-postgres` Secret, keys `jellyseerr-host/-port/-user/-password/-database` |
+| Health probes    | HTTP `GET /` on the `http` port (5055)   |
+| Service          | ClusterIP `seerr:5055`                   |
 
-The migration process involves:
-1. **Backing up** the existing Jellyseerr database and configuration
-2. **Scaling down** the Jellyseerr deployment
-3. **Deploying** Seerr with updated configuration
-4. **Automatic migration** - Seerr will automatically migrate your data on first startup
-5. **Updating** ingress and DNS (optional, to use seerr.epaflix.com)
+> There is **no** upstream `ghcr.io/seerr-team/seerr` image in use, **no** init
+> container, **no** UID-1000 user, and **no** `/api/v1/status` probe. Earlier
+> revisions of this README described a migration to that upstream image — that
+> migration never happened and the description was removed to avoid steering an
+> operator into an unintended image swap + permission change against the live
+> data PVC.
 
-## Key Changes
+## Data-safety rule
 
-### Image
-- **Old**: `fallenbagel/jellyseerr:preview-OIDC`
-- **New**: `ghcr.io/seerr-team/seerr:latest`
+**Never rename** the PVC `jellyseerr-config`, the Postgres DB/user `jellyseerr`,
+or the `jellyseerr-*` keys in the `servarr-postgres` Secret. They are legacy
+names retained on purpose; renaming any of them forces a data migration that is
+out of scope. The `jellyseerr/backups/` directory and
+`jellyseerr/backup-jellyseerr-db.sh` remain valid for rollback.
 
-### Security Context
-- **Old**: UID 568 (custom user)
-- **New**: UID 1000 (node user)
-- An init container fixes permissions on the config directory
+## Ingress / routing
 
-### Environment Variables
-- Removed: `PUID`, `PGID` (Seerr manages user internally)
-- Added: `LOG_LEVEL`, `PORT`
-- Database credentials: Unchanged (still using same PostgreSQL database)
+Both hosts resolve to the `seerr` Service (see
+`../_shared/ingress/public-routes.yaml`):
 
-### Health Checks
-- Updated to use `/api/v1/status` endpoint (recommended by Seerr)
+- `seerr.epaflix.com` — canonical
+- `jellyseerr.epaflix.com` — legacy, kept so the OIDC redirect/callback URIs
+  registered per-host keep resolving. There is intentionally **no** redirect
+  from the legacy host to the canonical one.
 
-## Files in this Directory
+## Files in this directory
 
-- `seerr.yaml` - Main deployment and service manifest
-- `ingress.yaml` - Ingress configuration for seerr.epaflix.com
-- `README.md` - This file
+- `seerr.yaml` — the Deployment + ClusterIP Service (canonical)
+- `pdb.yaml` — PodDisruptionBudget
+- `authentik-oidc-secret.yaml` — OIDC credentials template (imperative; see kustomization notes)
+- `authentik-provider-config.md` — Authentik OIDC provider setup
+- `AUTHENTIK-SECURITY-IMPLEMENTATION.md` — security model notes
+- `README.md` — this file
+- `QUICKSTART.md` — quick reference
 
-## Prerequisites
+## Operations
 
-Before starting the migration:
-1. Ensure you have kubectl access to the cluster
-2. Verify the jellyseerr deployment is running
-3. Have access to the servarr namespace
+```bash
+# Status / logs
+kubectl get pods -n servarr -l app=seerr
+kubectl logs -n servarr -l app=seerr -f
 
-## Migration Steps
+# Internal reachability
+kubectl get svc seerr -n servarr
+kubectl get endpoints seerr -n servarr
+```
 
-### 1. Backup Jellyseerr Data
+ArgoCD owns these manifests — do not `kubectl apply` or `kubectl edit` against
+the live cluster for routine changes; commit to git and let ArgoCD reconcile.
+selfHeal will revert manual edits to managed resources.
 
-**CRITICAL**: Always backup before migration!
-
-Run the backup script in the jellyseerr directory:
+### Backups
 
 ```bash
 cd ../jellyseerr
-chmod +x backup-jellyseerr-db.sh
-./backup-jellyseerr-db.sh
+./backup-jellyseerr-db.sh   # dumps the jellyseerr DB + the running seerr pod's /app/config
 ```
 
-This will create:
-- `backups/jellyseerr-db-backup-<timestamp>.sql.gz` - PostgreSQL database dump
-- `backups/jellyseerr-config-<timestamp>.tar.gz` - Config directory backup
+This produces `jellyseerr/backups/jellyseerr-db-backup-<ts>.sql.gz` and
+`jellyseerr/backups/jellyseerr-config-<ts>.tar.gz`.
 
-**Keep these backups safe!** You'll need them if you need to rollback.
+### Rollback
 
-### 2. Scale Down Jellyseerr
-
-Stop the jellyseerr deployment:
-
-```bash
-kubectl scale deployment jellyseerr -n servarr --replicas=0
-```
-
-Verify it's stopped:
+The consolidation is a pure-GitOps change with **no data risk** (no
+data-bearing resource was renamed or deleted). To re-introduce the redundant
+`jellyseerr` Deployment, `git revert` the consolidation commit and let ArgoCD
+re-sync. If you ever need to restore the database from a backup:
 
 ```bash
-kubectl get pods -n servarr -l app=jellyseerr
-# Should show no pods or STATUS=Terminating
-```
-
-### 3. Fix Config Directory Permissions (Optional but Recommended)
-
-Since Seerr runs as UID 1000 instead of UID 568, we need to fix permissions. The seerr.yaml includes an init container that does this automatically, but you can also do it manually:
-
-```bash
-# Get the PV name
-kubectl get pvc jellyseerr-config -n servarr
-
-# The init container in seerr.yaml will handle this automatically
-```
-
-### 4. Deploy Seerr
-
-Apply the Seerr manifests:
-
-```bash
-cd ../seerr
-kubectl apply -f seerr.yaml
-```
-
-### 5. Monitor the Migration
-
-Watch the Seerr pod startup and automatic migration:
-
-```bash
-# Watch pod status
-kubectl get pods -n servarr -l app=seerr -w
-
-# View logs to see migration progress
-kubectl logs -n servarr -l app=seerr -f
-```
-
-You should see logs indicating:
-- Database connection established
-- Automatic migration running (if coming from Jellyseerr)
-- Application startup
-
-### 6. Verify Seerr is Working
-
-Check the service:
-
-```bash
-kubectl get svc seerr -n servarr
-```
-
-Test internal access:
-
-```bash
-kubectl run -it --rm test-seerr --image=busybox --restart=Never -- wget -O- http://seerr:5055/api/v1/status
-```
-
-You should see a JSON response with status information.
-
-### 7. Update Ingress (Optional)
-
-If you want to use the new domain `seerr.epaflix.com`:
-
-```bash
-kubectl apply -f ingress.yaml
-```
-
-This will:
-- Create a new ingress for seerr.epaflix.com
-- Request a new TLS certificate from Let's Encrypt
-- The old jellyseerr.epaflix.com ingress will remain active
-
-**Option A**: Keep both domains pointing to Seerr
-```bash
-# Point jellyseerr ingress to seerr service
-kubectl patch ingress jellyseerr -n servarr --type='json' -p='[{"op": "replace", "path": "/spec/rules/0/http/paths/0/backend/service/name", "value":"seerr"}]'
-```
-
-**Option B**: Use only new domain
-```bash
-# Delete old ingress
-kubectl delete ingress jellyseerr -n servarr
-```
-
-### 8. Update DNS (if using new domain)
-
-Add a DNS record pointing `seerr.epaflix.com` to your ingress IP or update your existing jellyseerr DNS.
-
-### 9. Clean Up Old Jellyseerr Deployment (After Verification)
-
-Once you've verified everything works for at least 24-48 hours:
-
-```bash
-# Delete the jellyseerr deployment (keeps PVC)
-kubectl delete deployment jellyseerr -n servarr
-kubectl delete service jellyseerr -n servarr
-
-# Optionally delete the old ingress if you created a new one
-kubectl delete ingress jellyseerr -n servarr
-```
-
-**DO NOT delete the PVC** - Seerr is using the same config storage!
-
-## Rollback Procedure
-
-If something goes wrong:
-
-### Quick Rollback (if Seerr pod is failing)
-
-```bash
-# Scale down Seerr
-kubectl scale deployment seerr -n servarr --replicas=0
-
-# Scale up Jellyseerr
-kubectl scale deployment jellyseerr -n servarr --replicas=1
-```
-
-### Full Rollback (if database was migrated and broken)
-
-```bash
-# Scale down Seerr
-kubectl delete deployment seerr -n servarr
-
-# Restore database backup
 cd ../jellyseerr/backups
 gunzip jellyseerr-db-backup-<timestamp>.sql.gz
 
-# Get DB credentials
 DB_HOST=$(kubectl get secret -n servarr servarr-postgres -o jsonpath='{.data.jellyseerr-host}' | base64 -d)
 DB_PORT=$(kubectl get secret -n servarr servarr-postgres -o jsonpath='{.data.jellyseerr-port}' | base64 -d)
 DB_USER=$(kubectl get secret -n servarr servarr-postgres -o jsonpath='{.data.jellyseerr-user}' | base64 -d)
 DB_PASS=$(kubectl get secret -n servarr servarr-postgres -o jsonpath='{.data.jellyseerr-password}' | base64 -d)
 DB_NAME=$(kubectl get secret -n servarr servarr-postgres -o jsonpath='{.data.jellyseerr-database}' | base64 -d)
 
-# Restore database
 kubectl run jellyseerr-restore-pod \
-  --namespace=servarr \
-  --image=postgres:15-alpine \
-  --restart=Never \
-  --rm \
-  --attach \
+  --namespace=servarr --image=postgres:16-alpine --restart=Never --rm --attach \
   --env="PGPASSWORD=${DB_PASS}" \
-  --command -- psql \
-  -h "${DB_HOST}" \
-  -p "${DB_PORT}" \
-  -U "${DB_USER}" \
-  -d "${DB_NAME}" \
+  --command -- psql -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_USER}" -d "${DB_NAME}" \
   < jellyseerr-db-backup-<timestamp>.sql
-
-# Scale up Jellyseerr
-kubectl scale deployment jellyseerr -n servarr --replicas=1
 ```
 
 ## Troubleshooting
 
-### Seerr pod stuck in CrashLoopBackOff
+### Pod stuck in CrashLoopBackOff
 
-Check logs:
 ```bash
 kubectl logs -n servarr -l app=seerr --tail=100
 ```
 
-Common issues:
-- **Permission denied on /app/config**: The init container should fix this, but verify PVC permissions
-- **Database connection failed**: Check database credentials and connectivity
-- **Migration failed**: Check logs for specific migration errors
+Common causes: permission issues on `/app/config` (the pod runs as UID 568 —
+the `jellyseerr-config` PVC contents must be owned 568:568), or a database
+connection failure (check the `servarr-postgres` Secret keys and connectivity).
 
-### Cannot access Seerr via ingress
+### Cannot access via ingress
 
 ```bash
-# Check ingress status
-kubectl get ingress seerr -n servarr
-kubectl describe ingress seerr -n servarr
-
-# Check certificate status
-kubectl get certificate seerr-tls -n servarr
-kubectl describe certificate seerr-tls -n servarr
-
-# Check service endpoints
+kubectl get ingressroute -n servarr | grep -E 'seerr'
 kubectl get endpoints seerr -n servarr
 ```
 
-### Data is missing after migration
-
-Seerr performs an automatic migration. If data is missing:
-1. Check the logs during first startup for migration messages
-2. Verify you're using the same database (check DB_NAME, DB_HOST)
-3. Consider restoring from backup and trying again
-
-## Post-Migration Tasks
-
-After successful migration:
-
-1. **Test all functionality**:
-   - Login with your existing credentials
-   - Verify media requests are visible
-   - Test creating new requests
-   - Check integrations (Sonarr, Radarr, etc.)
-
-2. **Update bookmarks** and links to use the new domain (if changed)
-
-3. **Update any automation** or scripts that reference the old service
-
-4. **Monitor for a few days** before deleting the old Jellyseerr deployment
+All four IngressRoutes (`seerr-https`, `seerr-http`, `jellyseerr-https`,
+`jellyseerr-http`) must back the `seerr` Service. If any backed the retired
+`jellyseerr` Service, both hosts would 503.
 
 ## OIDC Authentication Setup with Authentik
 
-Jellyseerr/Seerr supports OIDC authentication via the `fallenbagel/jellyseerr:preview-OIDC` image. This section describes how to integrate with Authentik for secure, group-based access control.
+The `fallenbagel/jellyseerr:preview-OIDC` image supports OIDC authentication.
+This section describes how to integrate with Authentik for secure, group-based
+access control.
 
 ### Why OIDC Authentication?
 
 - **Centralized authentication**: Users sign in with Google OAuth through Authentik
-- **Group-based authorization**: Only users in specific Authentik groups can access Jellyseerr
+- **Group-based authorization**: Only users in specific Authentik groups can access Seerr
 - **Separation of concerns**: Authentication (who can sign in) is separate from authorization (who can access this app)
 - **Security**: Prevents anyone with a Google account from automatically accessing your media server
 
@@ -305,7 +155,7 @@ Jellyseerr/Seerr supports OIDC authentication via the `fallenbagel/jellyseerr:pr
 
 1. **Configure Authentik** (see [authentik-provider-config.md](authentik-provider-config.md) for detailed instructions):
    - Create "Servarr Users" group in Authentik (covers all media services)
-   - Create OAuth2/OIDC provider for Jellyseerr
+   - Create OAuth2/OIDC provider for Seerr
    - Create application with group-based access policy
    - Only users in "Servarr Users" group will be authorized
 
@@ -317,7 +167,7 @@ Jellyseerr/Seerr supports OIDC authentication via the `fallenbagel/jellyseerr:pr
      --from-literal=client-secret='<AUTHENTIK_CLIENT_SECRET>'
    ```
 
-3. **Configure Jellyseerr OIDC** (via web UI at https://seerr.epaflix.com):
+3. **Configure OIDC** (via web UI at https://seerr.epaflix.com):
    - Navigate to Settings → Authentication (or Settings → Services → OIDC)
    - Enable OIDC authentication
    - Configure with Authentik endpoints:
@@ -330,7 +180,7 @@ Jellyseerr/Seerr supports OIDC authentication via the `fallenbagel/jellyseerr:pr
      - **Button Label**: "Sign in with Authentik"
 
 4. **Test authorization**:
-   - Sign out of Jellyseerr
+   - Sign out
    - Visit https://seerr.epaflix.com
    - Click "Sign in with Authentik"
    - Sign in with Google (via Authentik)
@@ -341,11 +191,11 @@ Jellyseerr/Seerr supports OIDC authentication via the `fallenbagel/jellyseerr:pr
 
 **Adding Users:**
 1. User signs in with Google → Account created in Authentik
-2. User tries to access Jellyseerr → Access denied (not in group)
+2. User tries to access Seerr → Access denied (not in group)
 3. Admin logs into Authentik (https://auth.epaflix.com)
 4. Navigate to Directory → Users → select user
 5. Go to Groups tab → Add to "Servarr Users" group
-6. User can now access Jellyseerr and all other Servarr/Jellyfin services
+6. User can now access Seerr and all other Servarr/Jellyfin services
 
 **Removing Users:**
 1. Admin logs into Authentik
@@ -356,14 +206,8 @@ Jellyseerr/Seerr supports OIDC authentication via the `fallenbagel/jellyseerr:pr
 ### Security Notes
 
 - **Google OAuth does NOT grant automatic access**: Signing in with Google creates an account in Authentik but does not grant access to applications
-- **Manual approval required**: Admins must explicitly add users to the "Jellyseerr Users" group
+- **Manual approval required**: Admins must explicitly add users to the "Servarr Users" group
 - **Group-based authorization**: Application-level policies enforce that only group members can access
 - **Audit regularly**: Review Directory → Users in Authentik to monitor new sign-ups
 
 For complete configuration instructions, see [authentik-provider-config.md](authentik-provider-config.md).
-
-## Support
-
-- [Seerr Documentation](https://docs.seerr.dev/)
-- [Seerr Discord](https://discord.gg/seerr)
-- [Seerr GitHub Issues](https://github.com/seerr-team/seerr/issues)

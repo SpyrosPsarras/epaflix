@@ -60,7 +60,9 @@ CREATE USER prowlarr WITH PASSWORD '$PROWLARR_PASSWORD';
 GRANT ALL PRIVILEGES ON DATABASE "prowlarr-main" TO prowlarr;
 ALTER DATABASE "prowlarr-main" OWNER TO prowlarr;
 
--- Jellyseerr (Requests)
+-- Seerr / media requests — "jellyseerr" DB, user, and the jellyseerr-* secret
+-- keys below are the canonical LEGACY names consumed by the `seerr` deployment.
+-- Do NOT rename them: renaming forces a data migration.
 CREATE DATABASE "jellyseerr";
 CREATE USER jellyseerr WITH PASSWORD '$JELLYSEERR_PASSWORD';
 GRANT ALL PRIVILEGES ON DATABASE "jellyseerr" TO jellyseerr;

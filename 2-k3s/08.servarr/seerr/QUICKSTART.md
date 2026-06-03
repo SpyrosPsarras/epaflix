@@ -1,122 +1,71 @@
-# Jellyseerr to Seerr Migration - Quick Start
+# Seerr — Quick Reference
 
-## Prerequisites
-- kubectl access to the cluster
-- Namespace: `servarr`
-- Existing Jellyseerr deployment
+`seerr` is the single, canonical media-request deployment in the servarr stack.
+It is reconciled by **ArgoCD** via `2-k3s/08.servarr/kustomization.yaml` — there
+is nothing to deploy by hand and there is no migration to run.
 
-## Quick Migration (Automated)
+> This was a **name consolidation**: the redundant `jellyseerr` Deployment was
+> retired. `seerr` runs the `fallenbagel/jellyseerr:preview-OIDC` fork image
+> (UID 568) on the existing `jellyseerr-config` PVC and `jellyseerr` Postgres
+> DB — same image, same data. NOT an image migration.
 
-The easiest way to migrate is using the automated script:
+## Make a change
+
+Edit the manifests in git and let ArgoCD reconcile (selfHeal is on — manual
+`kubectl edit` against managed resources gets reverted):
+
+- Deployment / Service: `seerr/seerr.yaml`
+- PodDisruptionBudget: `seerr/pdb.yaml`
+- Ingress (both hosts → `seerr` Service): `../_shared/ingress/public-routes.yaml`
+
+## Verify
 
 ```bash
-cd /home/spy/Documents/Epaflix/k3s-swarm-proxmox/2-k3s/08.servarr/seerr
-./migrate.sh
+# Pod status
+kubectl get pods -n servarr -l app=seerr
+
+# Service + endpoints
+kubectl get svc seerr -n servarr
+kubectl get endpoints seerr -n servarr
+
+# Logs
+kubectl logs -n servarr -l app=seerr -f
 ```
 
-This script will:
-1. ✅ Backup Jellyseerr database and config
-2. ✅ Stop Jellyseerr safely
-3. ✅ Deploy Seerr
-4. ✅ Monitor automatic migration
-5. ✅ Verify deployment
-6. ✅ Optionally update ingress
+## Access
 
-**Total time**: ~5-10 minutes (depending on database size)
+- **Internal**: http://seerr:5055
+- **External**: https://seerr.epaflix.com
+- **Legacy** (also resolves to seerr): https://jellyseerr.epaflix.com
 
-## Manual Migration (Step-by-Step)
+## Data-safety
 
-If you prefer manual control:
+⚠️ **DO NOT** rename or delete the PVC `jellyseerr-config`, the `jellyseerr`
+Postgres DB/user, or the `jellyseerr-*` keys in the `servarr-postgres` Secret.
+They are legacy names reused by `seerr`; renaming forces a data migration.
 
-### 1. Backup (REQUIRED!)
+## Backup
+
 ```bash
 cd ../jellyseerr
 ./backup-jellyseerr-db.sh
 ```
 
-### 2. Stop Jellyseerr
-```bash
-kubectl scale deployment jellyseerr -n servarr --replicas=0
-kubectl wait --for=delete pod -l app=jellyseerr -n servarr --timeout=60s
-```
-
-### 3. Deploy Seerr
-```bash
-cd ../seerr
-kubectl apply -f seerr.yaml
-```
-
-### 4. Monitor Migration
-```bash
-kubectl logs -n servarr -l app=seerr -f
-```
-
-Wait for "Server ready" or similar message.
-
-### 5. Deploy Ingress (Optional)
-```bash
-kubectl apply -f ingress.yaml
-```
-
-## Verify Migration
-
-```bash
-# Check pod status
-kubectl get pods -n servarr -l app=seerr
-
-# Check service
-kubectl get svc seerr -n servarr
-
-# Test API
-kubectl run test-seerr --image=busybox --restart=Never --rm -it -n servarr -- \
-  wget -O- http://seerr:5055/api/v1/status
-```
-
-## Access Seerr
-
-- **Internal**: http://seerr:5055
-- **External** (if ingress deployed): https://seerr.epaflix.com
-
-## Rollback (If Needed)
-
-```bash
-kubectl scale deployment seerr -n servarr --replicas=0
-kubectl scale deployment jellyseerr -n servarr --replicas=1
-```
-
-## Cleanup (After 24-48h verification)
-
-```bash
-kubectl delete deployment jellyseerr -n servarr
-kubectl delete service jellyseerr -n servarr
-# Optionally delete old ingress
-kubectl delete ingress jellyseerr -n servarr
-```
-
-⚠️ **DO NOT** delete the PVC `jellyseerr-config` - it's being used by Seerr!
-
 ## Troubleshooting
 
-### Pod not starting?
 ```bash
+# Pod not starting?
 kubectl describe pod -n servarr -l app=seerr
 kubectl logs -n servarr -l app=seerr --tail=100
-```
 
-### Permission errors?
-The init container should fix permissions automatically. If issues persist:
-```bash
+# Config permission issues (pod runs as UID 568)?
 kubectl get pvc jellyseerr-config -n servarr
 kubectl describe pvc jellyseerr-config -n servarr
+
+# Database connection issues?
+kubectl get secret servarr-postgres -n servarr -o jsonpath='{.data.jellyseerr-host}' | base64 -d
 ```
 
-### Database connection issues?
-```bash
-kubectl get secret servarr-postgres -n servarr -o yaml
-```
+## See also
 
-## Need Help?
-
-- See [README.md](README.md) for detailed documentation
-- [Seerr Documentation](https://docs.seerr.dev/)
-- [Seerr Discord](https://discord.gg/seerr)
+- [README.md](README.md) — full detail, rollback, and OIDC/Authentik setup

@@ -107,7 +107,7 @@ Excluded deliberately:
 | Deployment       | Image                              | Why excluded                          |
 |------------------|------------------------------------|---------------------------------------|
 | qbittorrent      | binhex/arch-qbittorrentvpn         | VPN-coupled, manual bumps             |
-| jellyseerr/seerr | fallenbagel/jellyseerr:preview-OIDC| custom fork tag                       |
+| seerr            | fallenbagel/jellyseerr:preview-OIDC| custom fork tag                       |
 | lingarr          | ghcr.io/spyrospsarras/lingarr:…    | pinned to a private branch tag        |
 
 Opt-in later by adding the alias to the `image-list` annotation on

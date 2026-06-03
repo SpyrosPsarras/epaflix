@@ -24,7 +24,7 @@ This directory contains the Kubernetes manifests for deploying the complete Serv
 ├── lingarr/              # AI subtitle translator (Postgres-backed)
 ├── qbittorrent/          # Torrent client with VPN
 ├── jellyfin/             # Media server
-├── jellyseerr/           # Media request system
+├── seerr/                # Media request system (canonical; legacy jellyseerr/ retired)
 ├── homarr/               # Dashboard
 ├── wizarr/               # User invitation system
 ├── tdarr/                # Media transcoding
@@ -54,7 +54,7 @@ This directory contains the Kubernetes manifests for deploying the complete Serv
 - **Jellyfin**: Media server (port 8096) with NVIDIA GPU transcoding
   - **Note**: `jellyfin.epaflix.com` is redirected to TrueNAS (192.168.10.200:30013) via `jellyfin/jellyfin-truenas-redirect.yaml`
   - The k3s Jellyfin pod runs but is not publicly accessible
-- **Jellyseerr**: Media request management (port 5055)
+- **Seerr**: Media request management (port 5055) — served at seerr.epaflix.com and the legacy jellyseerr.epaflix.com (both route to the `seerr` Service). Reuses the legacy `jellyseerr-config` PVC and `jellyseerr` Postgres DB.
 - **qBittorrent**: Torrent client with WireGuard VPN (ports 8080, 8999)
 - **FlareSolverr**: Cloudflare bypass (port 8191)
 
@@ -68,7 +68,7 @@ This directory contains the Kubernetes manifests for deploying the complete Serv
 ### App Config Storage (local-path PVCs on K3s nodes)
 Each app gets a `local-path` PVC for its config directory (auto-provisioned on deploy):
 - `sonarr-config`, `sonarr2-config`, `radarr-config`, `prowlarr-config`
-- `bazarr-config`, `jellyseerr-config`, `qbittorrent-config`
+- `bazarr-config`, `jellyseerr-config` (legacy name, used by the `seerr` deployment), `qbittorrent-config`
 - `jellyfin-config`, `jellyfin-cache`, `jellyfin-transcodes`
 - `homarr-config`, `newtarr-config`, `cleanuparr-config`, `wizarr-config`
 
@@ -94,6 +94,7 @@ CREATE DATABASE "sonarr-main";
 CREATE DATABASE "sonarr2-main";
 CREATE DATABASE "radarr-main";
 CREATE DATABASE "prowlarr-main";
+-- "jellyseerr" DB/user are legacy names reused by the canonical `seerr` deployment (no migration)
 CREATE DATABASE "jellyseerr";
 
 # Create users with secure passwords
@@ -154,7 +155,7 @@ WireGuard config is stored in `secrets.yml`. Create the K8s secret from `_shared
 
    # Deploy media apps
    kubectl apply -f jellyfin/
-   kubectl apply -f jellyseerr/
+   kubectl apply -f seerr/
 
    # Deploy utilities
    kubectl apply -f homarr/
@@ -207,7 +208,7 @@ ls -i /mnt/pool1/dataset01/tvshows/Show/Season\ 01/show.mkv
 
 ### Internet (via Cloudflare + Traefik 192.168.10.101)
 - Jellyfin: https://jellyfin.epaflix.com
-- Jellyseerr: https://jellyseerr.epaflix.com
+- Seerr: https://seerr.epaflix.com (legacy https://jellyseerr.epaflix.com also resolves to seerr)
 
 ### Internal LAN (*.epaflix.com → 192.168.10.101 via Pi-hole)
 - Sonarr: http://sonarr.epaflix.com
