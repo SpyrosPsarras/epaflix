@@ -7,9 +7,11 @@
 # an Endpoints/Service named `jellyfin-truenas`. Defining them in both files
 # breaks kustomize accumulation under ArgoCD.
 #
-# Seerr - Media Requests. Both hosts (seerr.epaflix.com and the legacy
-# jellyseerr.epaflix.com) permanently target the consolidated `seerr`
-# Service; the legacy host is kept so its OIDC redirect URIs keep resolving.
+# Seerr - Media Requests. seerr.epaflix.com is the canonical host and targets
+# the consolidated `seerr` Service. The legacy jellyseerr.epaflix.com host
+# 301-redirects to seerr.epaflix.com (see jellyseerr-to-seerr Middleware below)
+# so OIDC works: Authentik's `seerr` provider only allows seerr.epaflix.com
+# redirect URIs, so the browser must land on seerr.epaflix.com before login.
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -50,7 +52,26 @@ spec:
         - name: seerr
           port: 5055
 ---
-# Jellyseerr - Legacy domain (both domains work, no redirect to preserve OIDC compatibility)
+# Middleware: 301-redirect the legacy host jellyseerr.epaflix.com -> seerr.epaflix.com
+# (preserves path + query). Required so OIDC login works: the browser must reach
+# seerr.epaflix.com before initiating the Authentik flow, otherwise the app builds
+# a redirect_uri on jellyseerr.epaflix.com which the `seerr` provider rejects
+# (redirect_uri_no_match). Matches both http and https sources.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: jellyseerr-to-seerr
+  namespace: servarr
+spec:
+  redirectRegex:
+    regex: ^https?://jellyseerr\.epaflix\.com/(.*)
+    replacement: https://seerr.epaflix.com/${1}
+    permanent: true
+---
+# Jellyseerr - Legacy domain. Permanent (301) redirect to seerr.epaflix.com.
+# No longer backends the app directly; the redirect Middleware short-circuits
+# with a 301 before the service is reached (the service entry is required by
+# Traefik but is not hit for redirected requests).
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -62,6 +83,9 @@ spec:
   routes:
     - match: Host(`jellyseerr.epaflix.com`)
       kind: Rule
+      middlewares:
+        - name: jellyseerr-to-seerr
+          namespace: servarr
       services:
         - name: seerr
           port: 5055
@@ -72,7 +96,7 @@ spec:
         sans:
           - "*.epaflix.com"
 ---
-# HTTP to HTTPS redirect for Jellyseerr (legacy)
+# HTTP for Jellyseerr (legacy) - also 301-redirects to https://seerr.epaflix.com
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -85,8 +109,8 @@ spec:
     - match: Host(`jellyseerr.epaflix.com`)
       kind: Rule
       middlewares:
-        - name: redirect-https
-          namespace: traefik-system
+        - name: jellyseerr-to-seerr
+          namespace: servarr
       services:
         - name: seerr
           port: 5055
