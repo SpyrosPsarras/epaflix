@@ -3,6 +3,11 @@
 **Date:** January 25, 2026
 **Status:** ✅ Complete
 
+> **Update:** The `jellyseerr/` directory was later consolidated into `seerr/`
+> (the redundant jellyseerr Deployment/Service was retired). The legacy data
+> names — PVC `jellyseerr-config` and the `jellyseerr` Postgres DB/user — are
+> intentionally retained. This historical snapshot is otherwise unchanged.
+
 ## What Changed
 
 ### Before
@@ -44,7 +49,7 @@
 │   └── qbittorrent.yaml
 ├── jellyfin/
 │   └── jellyfin.yaml
-├── jellyseerr/
+├── jellyseerr/          # later consolidated into seerr/ — jellyseerr.yaml retired
 │   └── jellyseerr.yaml
 ├── homarr/
 │   └── homarr.yaml

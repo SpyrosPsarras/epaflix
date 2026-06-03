@@ -86,8 +86,8 @@ In each app (Sonarr, Sonarr2, Radarr):
 4. Enable hardware decoding for all codecs
 5. Test with a high-bitrate video
 
-#### D. Configure Jellyseerr
-1. Open https://jellyseerr.epaflix.com
+#### D. Configure Seerr
+1. Open https://seerr.epaflix.com (the legacy https://jellyseerr.epaflix.com also works)
 2. Connect to Jellyfin: http://jellyfin:8096
 3. Connect to Sonarr and Radarr using internal service URLs
 4. Configure request permissions
@@ -155,7 +155,7 @@ kubectl describe node <gpu-node>
 
 ### Public (via Cloudflare)
 - **Jellyfin**: https://jellyfin.epaflix.com
-- **Jellyseerr**: https://jellyseerr.epaflix.com
+- **Seerr**: https://seerr.epaflix.com (legacy https://jellyseerr.epaflix.com also resolves to seerr)
 
 ### Internal LAN (*.epaflix.com via Pi-hole DNS → 192.168.10.101)
 - **Sonarr**: http://sonarr.epaflix.com

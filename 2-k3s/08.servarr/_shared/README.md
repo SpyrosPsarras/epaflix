@@ -7,7 +7,7 @@ Resources shared across multiple Servarr applications.
 ### ingress/
 Traefik IngressRoute configurations:
 - `internal-routes.yaml` - Internal network access routes
-- `public-routes.yaml` - Public-facing routes (Jellyfin, Jellyseerr, Wizarr)
+- `public-routes.yaml` - Public-facing routes (Jellyfin, Seerr — also serves legacy jellyseerr.epaflix.com, Wizarr)
 
 ### middleware/
 Traefik middleware configurations:

@@ -7,7 +7,9 @@
 # an Endpoints/Service named `jellyfin-truenas`. Defining them in both files
 # breaks kustomize accumulation under ArgoCD.
 #
-# Seerr - Media Requests (migrated from Jellyseerr)
+# Seerr - Media Requests. Both hosts (seerr.epaflix.com and the legacy
+# jellyseerr.epaflix.com) permanently target the consolidated `seerr`
+# Service; the legacy host is kept so its OIDC redirect URIs keep resolving.
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:

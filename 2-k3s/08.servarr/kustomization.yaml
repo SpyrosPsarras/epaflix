@@ -68,7 +68,11 @@ resources:
   # media servers
   - jellyfin/jellyfin.yaml
   - jellyfin/jellyfin-truenas-redirect.yaml
-  - jellyseerr/jellyseerr.yaml
+  # jellyseerr/jellyseerr.yaml RETIRED — the media-request Deployment is
+  # consolidated into seerr/ (canonical). The legacy data names are
+  # intentionally retained: PVC jellyseerr-config, Postgres DB/user
+  # jellyseerr, and the jellyseerr-* keys in the servarr-postgres Secret —
+  # renaming any of those would force a data migration.
   # jellyseerr/ingress.yaml DELETED 2026-05-17 — dead duplicate of the
   # Traefik IngressRoute in _shared/ingress/public-routes.yaml; was never
   # applied live.
