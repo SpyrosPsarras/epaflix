@@ -76,7 +76,7 @@ echo "📁 Backing up Jellyseerr config volume..."
 CONFIG_BACKUP="${BACKUP_DIR}/jellyseerr-config-${TIMESTAMP}.tar.gz"
 
 # Get the pod name
-POD_NAME=$(kubectl get pods -n ${NAMESPACE} -l app=jellyseerr -o jsonpath='{.items[0].metadata.name}')
+POD_NAME=$(kubectl get pods -n ${NAMESPACE} -l app=seerr -o jsonpath='{.items[0].metadata.name}')
 
 if [ -n "${POD_NAME}" ]; then
   echo "📦 Found pod: ${POD_NAME}"
@@ -84,7 +84,7 @@ if [ -n "${POD_NAME}" ]; then
   CONFIG_SIZE=$(du -h "${CONFIG_BACKUP}" | cut -f1)
   echo "✅ Config backup completed: ${CONFIG_BACKUP} (${CONFIG_SIZE})"
 else
-  echo "⚠️  No running jellyseerr pod found, skipping config backup"
+  echo "⚠️  No running seerr pod found, skipping config backup"
 fi
 
 echo ""

@@ -19,7 +19,7 @@
 #     to `main`.
 #   - Excluded by design (NOT in image-list):
 #       qbittorrent (binhex/arch-qbittorrentvpn — VPN-coupled, manual bumps)
-#       jellyseerr / seerr (custom :preview-OIDC fork tag)
+#       seerr (custom fallenbagel/jellyseerr:preview-OIDC fork tag)
 #       lingarr     (pinned to a custom branch image)
 
 apiVersion: argoproj.io/v1alpha1
