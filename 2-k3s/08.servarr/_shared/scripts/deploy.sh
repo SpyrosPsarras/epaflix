@@ -160,10 +160,11 @@ echo "Step 7: Deploying media applications..."
 kubectl apply -f "$BASE_DIR/jellyfin/jellyfin.yaml"
 # Apply TrueNAS redirect (routes jellyfin.epaflix.com to 192.168.10.200:30013)
 kubectl apply -f "$BASE_DIR/jellyfin/jellyfin-truenas-redirect.yaml"
-kubectl apply -f "$BASE_DIR/jellyseerr/jellyseerr.yaml"
-info "Jellyfin (TrueNAS redirect) and Jellyseerr deployed"
+kubectl apply -f "$BASE_DIR/seerr/seerr.yaml"
+kubectl apply -f "$BASE_DIR/seerr/pdb.yaml"
+info "Jellyfin (TrueNAS redirect) and Seerr deployed"
 
-wait_for_pods servarr "app in (jellyfin,jellyseerr)" 300
+wait_for_pods servarr "app in (jellyfin,seerr)" 300
 echo ""
 
 # Step 8: Deploy utility apps
@@ -194,7 +195,7 @@ echo "Access URLs:"
 echo ""
 echo "Public (Internet):"
 echo "  Jellyfin:    https://jellyfin.epaflix.com"
-echo "  Jellyseerr:  https://jellyseerr.epaflix.com"
+echo "  Seerr:       https://seerr.epaflix.com (legacy: https://jellyseerr.epaflix.com)"
 echo ""
 echo "Internal (LAN - *.epaflix.com):"
 echo "  Sonarr:      http://sonarr.epaflix.com"

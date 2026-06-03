@@ -1,6 +1,13 @@
 ---
-# Seerr - Media Request Management (Using OIDC Preview)
-# Using Jellyseerr OIDC preview image with Seerr naming for OIDC support
+# Seerr - Media Request Management (single canonical deployment)
+#
+# This is the ONLY media-request Deployment/Service in the stack — the
+# redundant `jellyseerr` Deployment has been retired (consolidated here).
+# This is a NAME consolidation, not an image migration: it runs the
+# fallenbagel/jellyseerr:preview-OIDC fork image (UID 568) because OIDC is
+# not in any stable seerr release. The jellyseerr-named data resources are
+# retained legacy names (no migration): PVC jellyseerr-config, Postgres
+# DB/user jellyseerr, and the jellyseerr-* keys in the servarr-postgres Secret.
 
 apiVersion: apps/v1
 kind: Deployment
