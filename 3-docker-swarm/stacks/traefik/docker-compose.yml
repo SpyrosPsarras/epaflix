@@ -62,7 +62,7 @@ secrets:
 
 services:
   traefik:
-    image: traefik:v3.7.3
+    image: traefik:v3.7.4
 
     command:
       # --- Global ---
