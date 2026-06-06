@@ -149,12 +149,14 @@ still-monitored+missing S04E13 that could **re-arm** via newtarr
 4. Confirmed no live S04E13 torrent. Cleanuparr healthy after restart.
    DBs backed up in-pod (`.bak-20260531-135309`).
 
-> **Durability caveat:** `custom-blocklist-sonarr.txt` and the repointed
-> `sonarr_blocklist_path` live **only on the Cleanuparr config local-path PVC** —
-> they are NOT in any git manifest, so this fix is lost on a PVC rebuild. The
-> custom list is also a static snapshot of upstream (won't auto-track updates,
-> unlike the Radarr list which still uses the live URL). Soak-confirm + codify
-> tracked in **#138**. A separate stalled torrent seriesId 40 S04E07
+> **Durability caveat (UPDATED #138 done):** the `custom-blocklist-sonarr.txt`
+> file is now **codified in git** as a SOPS-encrypted seed Secret and restored on
+> a fresh PVC by the cleanuparr `seed-config` initContainer (see the "#138" section
+> below). The repointed `sonarr_blocklist_path` is SQLite-resident
+> (`cleanuparr.db`) and remains the one **manual** action on a PVC rebuild. The
+> custom list is still a static snapshot of upstream (won't auto-track updates,
+> unlike the Radarr list which still uses the live URL) — refresh tracked under
+> **#180**. A separate stalled torrent seriesId 40 S04E07
 > (`828ea9eb36f00f821772d4d431dddf12ea6bd0c2`, `stalledDL`) is triaged
 > independently in **#139**.
 
@@ -276,3 +278,49 @@ sops -d 2-k3s/08.servarr/_shared/secrets/newtarr-config-seed.enc.yaml | head
 > would receive. To force live re-seeding you must first remove the specific
 > `/config/*.json` files (or recreate the PVC). Tracked alongside #135/#177
 > (PVC-only config not yet fully in git).
+
+## #138 — Cleanuparr Sonarr custom-blocklist seed (SOPS) + the seriesId 40 S04E13 re-arm guard
+
+Cleanuparr v2+ stores its configuration in **SQLite** (`/config/cleanuparr.db`),
+not JSON. The only **file-seedable** artifact is the flat
+`/config/custom-blocklist-sonarr.txt` referenced by the content-blocker
+`sonarr_blocklist_path` DB row. On a fresh `local-path` PVC Cleanuparr comes up
+without that file, dropping the seriesId 40 S04E13 re-arm guard.
+
+**(i) What's codified — the durable SOPS seed.** The
+`custom-blocklist-sonarr.txt` file (the ~850 upstream `flmorg/cleanuperr`
+entries plus the seriesId 40 S04E13 re-arm guard regex) is captured verbatim
+into a SOPS-encrypted Opaque Secret `cleanuparr-blocklist-seed`
+(`_shared/secrets/cleanuparr-blocklist-seed.enc.yaml`, single key
+`custom-blocklist-sonarr.txt`), reconciled by the servarr ksops generator. The
+cleanuparr Deployment runs a `seed-config` initContainer (busybox `1.36`,
+`runAsUser: 0`) that mounts the PVC at `/config` and the Secret at `/seed`
+(readOnly), copies each seed file ONLY when the destination does not already
+exist, then `chown -R 568:568 /config`. It is **idempotent and
+NON-CLOBBERING**:
+
+- **Fresh / empty PVC:** `custom-blocklist-sonarr.txt` is seeded → the guard is
+  present (still needs the pointer step below).
+- **Populated PVC (normal case):** the file already exists → skipped, no-op. We
+  never clobber a live, possibly UI-edited, blocklist.
+
+**(ii) ONE-TIME manual UI repoint on a PVC rebuild (pointer durability).** The
+`sonarr_blocklist_path` pointer is **SQLite-resident** (`cleanuparr.db`), so it
+is NOT file-seedable and is rewritten at runtime. After the initContainer
+restores the file on a fresh PVC, set it once in the Cleanuparr UI →
+**Content Blocker → Sonarr → blocklist path = `/config/custom-blocklist-sonarr.txt`**
+(and confirm the Sonarr content-blocker is enabled). Until this is set the
+restored file is present but **unreferenced** (the guard is silently inactive).
+The companion `failed_import_max_strikes = -1` (Sonarr striking disabled) is also
+SQLite-resident and intentionally KEPT — do not touch it.
+
+**(iii) Soak result (part a) — PASS.** The seriesId 40 S04E13 re-arm guard held
+across **145 hunt intervals** with **zero** recurrence (no post-fix grabs /
+strikes / Action-Required events).
+
+**(iv) Static-snapshot caveat.** This is a frozen point-in-time snapshot of
+upstream `flmorg/cleanuperr`; it will NOT auto-track upstream blocklist updates
+(unlike the Radarr list, which still consumes the live upstream URL). A refresh
+mechanism (periodic re-snapshot runbook, or switch the Sonarr list to the live
+URL while appending the local re-arm guard) is tracked as a follow-up under
+umbrella **#180**.
