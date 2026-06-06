@@ -26,6 +26,10 @@
 #   - newtarr-config-seed             from _shared/secrets/newtarr-config-seed.enc.yaml
 #                                       (issue #137 — newtarr JSON config seed,
 #                                       consumed by the seed-config initContainer)
+#   - cleanuparr-blocklist-seed       from _shared/secrets/cleanuparr-blocklist-seed.enc.yaml
+#                                       (issue #138 — Sonarr custom-blocklist
+#                                       seriesId 40 S04E13 re-arm guard, consumed
+#                                       by the cleanuparr seed-config initContainer)
 #
 # Re-add a Job here only if you intend Argo to re-run it on every sync.
 apiVersion: kustomize.config.k8s.io/v1beta1
