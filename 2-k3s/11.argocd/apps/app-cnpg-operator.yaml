@@ -9,19 +9,21 @@
 # Source:       this repo, path 2-k3s/06.postgres/operator-kustomization.
 # Destination:  in-cluster `cnpg-system` namespace.
 #
-# Sync: MANUAL on adoption (syncPolicy: {}). The operator + plugin already run
-# live (bootstrap 01.install-operator.sh / 03.install-barman-plugin.sh), so the
-# FIRST sync is a field-manager takeover: the vendored manifests were applied
-# with `kubectl apply --server-side`, and ArgoCD must take ownership as
-# "argocd-controller". Run that first sync with --force-conflicts, e.g.:
-#   argocd app sync cnpg-operator --server-side --force
-# After a clean dry-run + a 48 h soak with no reconcile loop, flip to:
-#   syncPolicy:
-#     automated: { selfHeal: true, prune: false }
-#     syncOptions: [ServerSideApply=true]
-# in a SEPARATE PR. `prune` NEVER turns on — these raw-vendored CRDs have no
-# Helm `crds.keep` safety net, so a prune/cascade-delete would drop every CRD
-# and cascade-delete the live Postgres Cluster. Detach is always
+# Sync: AUTOMATED selfHeal (issue #127) after a clean 48 h adoption soak with no
+# reconcile loop. The operator + plugin first ran live (bootstrap
+# 01.install-operator.sh / 03.install-barman-plugin.sh) and were adopted (#93)
+# via a manual `argocd app sync --server-side --force` field-manager takeover;
+# selfHeal now keeps live == git automatically.
+#
+# `syncOptions: [ServerSideApply=true]` is MANDATORY, not cosmetic: the vendored
+# cnpg-operator.yaml is ~1 MB, which overflows the client-side
+# last-applied-configuration annotation, so a client-side apply fails. The
+# adoption sync only succeeded because `--server-side` was passed by hand —
+# selfHeal uses the App's own syncOptions, so without this it would loop-fail.
+#
+# `prune` NEVER turns on — these raw-vendored CRDs have no Helm `crds.keep`
+# safety net, so a prune/cascade-delete would drop every CRD and
+# cascade-delete the live Postgres Cluster. Detach is always
 # `argocd app delete cnpg-operator --cascade=false`.
 #
 # CNPG 1.30 bump (#102/#10) follows adoption as a normal reviewable manifest
@@ -41,9 +43,16 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: cnpg-system
-  # MANUAL sync at adoption — see header. selfHeal flip is a separate PR after
-  # a 48 h soak (issue #34 convention). prune stays OFF permanently (issue #21).
-  syncPolicy: {}
+  # AUTOMATED selfHeal after a clean 48 h adoption soak (issue #127, #34
+  # convention). ServerSideApply=true is mandatory — the ~1 MB manifest
+  # overflows the client-side apply annotation. prune stays OFF permanently
+  # (issue #21) — raw-vendored CRDs have no crds.keep net.
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: false
+    syncOptions:
+      - ServerSideApply=true
   ignoreDifferences:
     # cert-manager injects the webhook CA at runtime via the cainjector.
     - group: admissionregistration.k8s.io
