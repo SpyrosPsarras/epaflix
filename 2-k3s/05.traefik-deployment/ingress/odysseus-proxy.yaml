@@ -1,0 +1,121 @@
+---
+# Proxy odysseus.epaflix.com (192.168.10.101, Traefik) → Odysseus TrueNAS Custom App
+# (192.168.10.200:30070, plain HTTP host port published by the docker compose).
+#
+# Backend is plain HTTP, so NO ServersTransport (unlike truenas/pegaprox which are
+# HTTPS-with-skipverify). Real Let's Encrypt wildcard cert terminates at Traefik;
+# DNS-01 ACME via Cloudflare proves domain ownership.
+#
+# This is the perimeter for a publicly (Cloudflare-proxied) reachable, GPU-enabled
+# agent app whose agent has a built-in shell tool. The route is gated by Authentik
+# forward-auth (authentik-forwardauth middleware) — mirrors traefik-dashboard-sso.yaml:
+#   - app route (priority 10) carries the authentik-forwardauth middleware
+#   - outpost route (priority 15) handles /outpost.goauthentik.io/ auth callbacks
+#     and MUST out-prioritise the app route or callbacks break.
+# This only gates the perimeter — Odysseus has NO trusted-header SSO, so it ALSO
+# keeps its own built-in login (AUTH_ENABLED=true). Result is a double login by
+# design (see README). The raw host port 0.0.0.0:30070 on the LAN bypasses Authentik
+# entirely and is gated ONLY by Odysseus's built-in login.
+#
+# SSO objects (group "Odysseus users", proxy provider + application slug odysseus,
+# embedded-outpost binding) must exist in Authentik BEFORE this is merged, else the
+# route would expose the raw backend behind only Odysseus's own login.
+
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: odysseus
+  namespace: traefik-system
+subsets:
+  - addresses:
+      - ip: 192.168.10.200
+    ports:
+      - name: http
+        port: 30070
+        protocol: TCP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: odysseus
+  namespace: traefik-system
+  labels:
+    app: odysseus
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - name: http
+      port: 30070
+      protocol: TCP
+
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: odysseus-http
+  namespace: traefik-system
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`odysseus.epaflix.com`)
+      kind: Rule
+      middlewares:
+        - name: redirect-https
+          namespace: traefik-system
+      services:
+        - name: odysseus
+          port: 30070
+
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: odysseus-https
+  namespace: traefik-system
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`odysseus.epaflix.com`)
+      kind: Rule
+      priority: 10
+      middlewares:
+        - name: authentik-forwardauth
+          namespace: traefik-system
+      services:
+        - name: odysseus
+          port: 30070
+          scheme: http
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
+
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: odysseus-outpost-https
+  namespace: traefik-system
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`odysseus.epaflix.com`) && PathPrefix(`/outpost.goauthentik.io/`)
+      kind: Rule
+      priority: 15
+      services:
+        - name: authentik-server
+          namespace: app-authentik
+          port: 80
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"

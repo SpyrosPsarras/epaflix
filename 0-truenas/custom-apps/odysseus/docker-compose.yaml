@@ -1,0 +1,103 @@
+services:
+  odysseus:
+    image: odysseus:73673258
+    restart: unless-stopped
+    # GPU overlay merged in (docker/gpu.nvidia.yml). count: all is fine - only ONE GPU exists;
+    # it is shared with the already-running ollama app, VRAM permitting.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "0.0.0.0:30070:7000"
+    environment:
+      # --- bind / serving ---
+      APP_BIND: "0.0.0.0"
+      APP_PORT: "7000"
+      # --- GPU (nvidia runtime, no CDI on this host) ---
+      NVIDIA_VISIBLE_DEVICES: "all"
+      NVIDIA_DRIVER_CAPABILITIES: "compute,utility"
+      # --- auth / perimeter posture ---
+      AUTH_ENABLED: "true"
+      LOCALHOST_BYPASS: "false"
+      SECURE_COOKIES: "true"
+      ALLOWED_ORIGINS: "https://odysseus.epaflix.com"
+      ODYSSEUS_ADMIN_USER: "admin"
+      ODYSSEUS_ADMIN_PASSWORD: "<ODYSSEUS_ADMIN_PASSWORD>"
+      # --- agent shell hardening (do NOT point at a real host) ---
+      ODYSSEUS_SCRIPT_HOST: "localhost"
+      # --- local model serving: REUSE existing GPU-pinned ollama on host port 30068 ---
+      OLLAMA_BASE_URL: "http://host.docker.internal:30068/v1"
+      LLM_HOST: "localhost"
+      # --- sidecar wiring (compose-internal) ---
+      SEARXNG_INSTANCE: "http://searxng:8080"
+      CHROMADB_HOST: "chromadb"
+      CHROMADB_PORT: "8000"
+      DATABASE_URL: "sqlite:///./data/app.db"
+      FASTEMBED_MODEL: "sentence-transformers/all-MiniLM-L6-v2"
+      NTFY_BASE_URL: "http://localhost:8091"
+      PUID: "1000"
+      PGID: "1000"
+      # --- optional provider keys (placeholders, default empty if unused) ---
+      OPENAI_API_KEY: "<OPENAI_API_KEY>"
+      HF_TOKEN: "<HF_TOKEN>"
+      SEARXNG_SECRET: "<SEARXNG_SECRET>"
+    volumes:
+      - /mnt/pool1/odysseus/data:/app/data:z
+      - /mnt/pool1/odysseus/logs:/app/logs:z
+      - /mnt/pool1/odysseus/data/huggingface:/app/.cache/huggingface:z
+      - /mnt/pool1/odysseus/data/local:/app/.local:z
+      # NOTE: ./data/ssh:/app/.ssh DELIBERATELY OMITTED (RCE hardening, see sshMountDecision)
+    depends_on:
+      searxng:
+        condition: service_healthy
+      chromadb:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:7000/',timeout=5).status<500 else 1)\""]
+      interval: 15s
+      timeout: 6s
+      retries: 10
+      start_period: 30s
+
+  chromadb:
+    image: docker.io/chromadb/chroma:latest
+    restart: unless-stopped
+    environment:
+      ANONYMIZED_TELEMETRY: "FALSE"
+    volumes:
+      - chromadb-data:/chroma/chroma
+
+  searxng:
+    image: docker.io/searxng/searxng:2026.5.31-7159b8aed
+    restart: unless-stopped
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETGID, SETUID, DAC_OVERRIDE]
+    volumes:
+      - searxng-data:/etc/searxng
+      - /mnt/pool1/odysseus/config/searxng/settings.yml:/tmp/searxng-settings.yml.template:ro,z
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/',timeout=5)\""]
+      interval: 5s
+      timeout: 6s
+      retries: 20
+      start_period: 10s
+
+  ntfy:
+    image: docker.io/binwiederhier/ntfy
+    command: serve
+    restart: unless-stopped
+    environment:
+      NTFY_BASE_URL: "http://localhost:8091"
+    volumes:
+      - ntfy-cache:/var/cache/ntfy
+
+volumes:
+  searxng-data:
+  chromadb-data:
+  ntfy-cache:

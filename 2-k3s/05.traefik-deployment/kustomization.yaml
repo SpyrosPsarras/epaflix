@@ -23,6 +23,7 @@ resources:
   - ingress/truenas-proxy.yaml
   - ingress/pegaprox-proxy.yaml
   - ingress/minio-proxy.yaml
+  - ingress/odysseus-proxy.yaml
 generators:
   - ksops-generator.yaml
 helmCharts:
