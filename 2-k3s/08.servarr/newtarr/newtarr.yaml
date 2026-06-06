@@ -47,10 +47,12 @@ spec:
             # the legacy huntarr Service, so it is removed.
             - name: UMASK
               value: "002"
-            - name: LOCAL_NETWORK
-              value: "192.168.10.0/24"
-            - name: BYPASS_AUTH_FOR_LOCAL_ADDRESSES
-              value: "1"
+            # Auth is handled ENTIRELY by Authentik forward-auth at Traefik
+            # (issue #134). newtarr's in-app login is disabled via its
+            # Authentication Mode = "No Login Mode" (general.proxy_auth_bypass=true,
+            # persisted in the /config PVC, NOT an env var). NOTE: newtarr v1.0.0
+            # does NOT read LOCAL_NETWORK / BYPASS_AUTH_FOR_LOCAL_ADDRESSES — those
+            # were inert and have been removed.
             - name: STATEFUL_EXPIRATION_HOURS
               value: "72"
           ports:
