@@ -29,6 +29,51 @@ spec:
           labelSelector:
             matchLabels:
               app: newtarr
+      initContainers:
+        # Seed the /config PVC from the SOPS-encrypted newtarr-config-seed
+        # Secret (issue #137). This codifies the app's JSON config (sonarr.json,
+        # radarr.json, …, scheduling/list.json) in git so a freshly-provisioned
+        # local-path PVC comes up pre-configured instead of empty.
+        #
+        # IDEMPOTENT + NON-CLOBBERING: each seed key is only copied when the
+        # destination file does NOT already exist. On a populated PVC every
+        # file is skipped, so this is a no-op — the app rewrites these JSONs at
+        # runtime (#135/#177), and we never overwrite live state. The
+        # scheduling-list.json key is remapped to /config/scheduling/list.json
+        # (k8s Secret keys cannot contain '/'). Secret projection exposes each
+        # key as a symlink to a regular file under /seed, while the internal
+        # ..data / ..<ts> dirs start with '.' and are not matched by /seed/*.
+        - name: seed-config
+          image: busybox:1.36
+          securityContext:
+            runAsUser: 0
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              mkdir -p /config/scheduling
+              for f in /seed/*; do
+                [ -f "$f" ] || continue
+                name=$(basename "$f")
+                if [ "$name" = "scheduling-list.json" ]; then
+                  dest=/config/scheduling/list.json
+                else
+                  dest=/config/$name
+                fi
+                if [ -e "$dest" ]; then
+                  echo "skip (exists): $dest"
+                else
+                  cp "$f" "$dest" && echo "seeded: $dest"
+                fi
+              done
+              chown -R 568:568 /config
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: seed
+              mountPath: /seed
+              readOnly: true
       containers:
         - name: newtarr
           image: ghcr.io/elfhosted/newtarr:rolling
@@ -90,6 +135,12 @@ spec:
         - name: config
           persistentVolumeClaim:
             claimName: newtarr-config
+        # SOPS-encrypted seed config (issue #137), reconciled by the servarr
+        # ksops generator from _shared/secrets/newtarr-config-seed.enc.yaml.
+        # Consumed only by the seed-config initContainer.
+        - name: seed
+          secret:
+            secretName: newtarr-config-seed
 ---
 apiVersion: v1
 kind: Service
