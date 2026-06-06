@@ -203,3 +203,76 @@ grabs.
 > **Operator rule:** when manually removing items from an *arr queue, ALWAYS tick
 > **"Remove from download client"** (and usually **"Blocklist"**) — otherwise the
 > torrent is orphaned out of QueueCleaner's reach.
+
+## #137 — newtarr JSON config seed (SOPS)
+
+newtarr v1.0.0 stores its entire configuration as JSON files under the
+`newtarr-config` PVC (`/config`), NOT in `huntarr.db`: per-app instance lists +
+hunt settings (`sonarr.json`, `radarr.json`, `lidarr.json`, `readarr.json`,
+`whisparr.json`, `eros.json`), `swaparr.json`, `general.json` (holds
+`proxy_auth_bypass` for the Authentik forward-auth "No Login Mode", #134), and
+the scheduler `scheduling/list.json`. Because the PVC is `local-path` on a single
+worker, a node loss / fresh re-provision would bring newtarr up **empty** — every
+instance and the global hunt cadence (#135) would have to be re-entered by hand.
+
+**What's codified.** Those JSON files are captured into a SOPS-encrypted Opaque
+Secret `newtarr-config-seed`
+(`_shared/secrets/newtarr-config-seed.enc.yaml`), reconciled by the servarr ksops
+generator. The scheduler file is stored under the flat key
+`scheduling-list.json` because k8s Secret keys cannot contain `/`.
+
+**How it's restored.** The newtarr Deployment runs a `seed-config` initContainer
+(busybox, `runAsUser: 0`) that mounts the PVC at `/config` and the Secret at
+`/seed` (readOnly). It is **idempotent and NON-CLOBBERING**: each key is copied
+ONLY when the destination does not already exist (`scheduling-list.json` is
+remapped to `/config/scheduling/list.json`), then `chown -R 568:568 /config`.
+
+- **Fresh / empty PVC:** files are seeded → newtarr boots pre-configured.
+- **Populated PVC (normal case):** every file already exists → all skipped, no-op.
+
+This deliberately never overwrites live state, because **newtarr rewrites these
+JSONs at runtime** (the app persists hunt-setting and instance edits straight to
+`/config`, #135/#177). The seed is therefore a point-in-time floor, not a
+source of truth that tracks live edits.
+
+### DRIFT-REFRESH runbook (manual)
+
+Because the app mutates `/config` at runtime, the committed seed drifts from
+live. Re-snapshot it periodically (or after any deliberate config change you want
+preserved):
+
+```sh
+# 1. Pull the live JSON verbatim from the running pod
+mkdir -p /tmp/newtarr-seed
+for f in sonarr.json radarr.json lidarr.json readarr.json whisparr.json \
+         eros.json swaparr.json general.json; do
+  ssh ubuntu@192.168.10.51 \
+    "kubectl -n servarr exec deploy/newtarr -- sh -c 'cat /config/$f'" \
+    > /tmp/newtarr-seed/$f
+done
+ssh ubuntu@192.168.10.51 \
+  "kubectl -n servarr exec deploy/newtarr -- sh -c 'cat /config/scheduling/list.json'" \
+  > /tmp/newtarr-seed/scheduling-list.json
+
+# 2. Rebuild a PLAINTEXT manifest (kind: Secret, name newtarr-config-seed,
+#    namespace servarr, type Opaque) under stringData, one block scalar (|-)
+#    per file, indented 4 spaces. Write it OUTSIDE the repo, e.g.
+#    /tmp/newtarr-seed-plain.yaml. (Key for the scheduler file = scheduling-list.json.)
+
+# 3. Re-encrypt OVER the committed file. --filename-override makes the .sops.yaml
+#    `\.enc\.yaml$` creation rule apply to the /tmp input path.
+sops --filename-override \
+  2-k3s/08.servarr/_shared/secrets/newtarr-config-seed.enc.yaml \
+  -e /tmp/newtarr-seed-plain.yaml \
+  > 2-k3s/08.servarr/_shared/secrets/newtarr-config-seed.enc.yaml
+
+# 4. Destroy the plaintext, verify, commit.
+shred -u /tmp/newtarr-seed-plain.yaml && rm -rf /tmp/newtarr-seed
+sops -d 2-k3s/08.servarr/_shared/secrets/newtarr-config-seed.enc.yaml | head
+```
+
+> **Note:** the initContainer's non-clobber guard means a refreshed seed does
+> NOT auto-apply to the existing PVC — it only changes what a *future* empty PVC
+> would receive. To force live re-seeding you must first remove the specific
+> `/config/*.json` files (or recreate the PVC). Tracked alongside #135/#177
+> (PVC-only config not yet fully in git).
