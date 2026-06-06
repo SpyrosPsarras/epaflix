@@ -1,13 +1,17 @@
 ---
-# Newtarr - Public Internet-facing IngressRoutes with Let's Encrypt TLS.
+# Newtarr - Public Internet-facing IngressRoutes with Let's Encrypt TLS,
+# fronted by Authentik forward-auth SSO (issue #134, Option B done).
 #
-# Brought into git as part of the huntarr -> newtarr migration (#131). The
-# previous huntarr routes existed live-only (applied 2026-03-09, never tracked).
+# Access is SSO-ONLY: the authentik-forwardauth middleware (Authentik
+# embedded outpost, provider + app slug `newtarr`) gates BOTH local and
+# internet traffic to newtarr, authorized by the "Servarr users" group.
+# newtarr's own in-app login is disabled (Authentication Mode = "No Login
+# Mode" / general.proxy_auth_bypass=true in its /config) so there is no
+# double login.
 #
-# Auth is IN-APP (Newtarr STANDARD mode + BYPASS_AUTH_FOR_LOCAL_ADDRESSES=1 +
-# LOCAL_NETWORK=192.168.10.0/24) — parity with the prior huntarr setup.
-# These routes carry NO forward-auth middleware. Adding Authentik SSO is a
-# deferred follow-up (Option B), NOT part of this change.
+# Pattern mirrors 05.traefik-deployment/ingress/traefik-dashboard-sso.yaml:
+#   - app route priority:10 + authentik-forwardauth middleware
+#   - outpost route priority:15 matching PathPrefix(/outpost.goauthentik.io/)
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -19,9 +23,37 @@ spec:
   routes:
     - match: Host(`newtarr.epaflix.com`)
       kind: Rule
+      priority: 10
+      middlewares:
+        - name: authentik-forwardauth
+          namespace: traefik-system
       services:
         - name: newtarr
           port: 30262
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
+---
+# Outpost route - handles auth callback on newtarr.epaflix.com
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: newtarr-outpost-https
+  namespace: servarr
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`newtarr.epaflix.com`) && PathPrefix(`/outpost.goauthentik.io/`)
+      kind: Rule
+      priority: 15
+      services:
+        - name: authentik-server
+          namespace: app-authentik
+          port: 80
   tls:
     certResolver: cloudflare
     domains:

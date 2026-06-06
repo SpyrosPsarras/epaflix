@@ -303,6 +303,7 @@ For applications that don't support OIDC, use Authentik's Forward Auth (Proxy Pr
 
 **Current Forward Auth Applications**:
 - **Traefik Dashboard**: `traefik.epaflix.com`
+- **Newtarr**: `newtarr.epaflix.com` (group `Servarr users`; in-app login disabled — see issue #134 and [08.servarr/newtarr/ingressroute.yaml](../../08.servarr/newtarr/ingressroute.yaml))
 
 ### Granting Service Access
 
