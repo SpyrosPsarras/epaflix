@@ -36,3 +36,4 @@ charts/
 # SOPS plaintext drafts — never commit. Always encrypt to *.enc.yaml first.
 *-plaintext.yaml
 *.plaintext.yaml
+.a5c/processes/
