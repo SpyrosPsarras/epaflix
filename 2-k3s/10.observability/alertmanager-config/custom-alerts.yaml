@@ -110,3 +110,26 @@ spec:
           annotations:
             summary: "Istio sidecar crash looping"
             description: "Istio sidecar in pod {{ $labels.pod }} (namespace {{ $labels.namespace }}) is crash looping."
+
+    - name: k3s-system-upgrade
+      interval: 60s
+      rules:
+        - alert: K3sUpgradeJobActive
+          expr: kube_job_status_active{namespace="system-upgrade"} > 0
+          for: 1m
+          labels:
+            severity: warning
+            component: system-upgrade
+          annotations:
+            summary: "K3s system-upgrade Job running"
+            description: "A system-upgrade-controller rolling upgrade Job ({{ $labels.job_name }}) is active in the system-upgrade namespace. K3s nodes are being upgraded — confirm this was an intended, reviewed version bump (the upgrade target is pinned in plans/system-upgrade-plans.yaml, issue #130)."
+
+        - alert: K3sNodeVersionSkew
+          expr: count(count by (kubelet_version) (kube_node_info)) > 1
+          for: 10m
+          labels:
+            severity: warning
+            component: system-upgrade
+          annotations:
+            summary: "K3s nodes running mixed kubelet versions (roll in progress)"
+            description: "K3s nodes are on {{ $value }} distinct kubelet versions — likely a rolling upgrade in progress. Confirm this was an intended, reviewed version bump (pinned spec.version, issue #130). See the Future-Upgrade SOP: 2-k3s/maintenance/system-upgrade/README.md."
