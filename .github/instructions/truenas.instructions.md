@@ -48,6 +48,26 @@ ssh <TRUENAS_USER>@<TRUENAS_IP> "echo '<TRUENAS_PASSWORD>' | sudo -S midclt call
 - Never commit actual credentials - always use placeholders in documentation
 - The secrets file is gitignored but exists in the repository locally
 
+### midclt -j job methods (TrueNAS 25.10 caveat)
+On TrueNAS **25.10.0.1**, `midclt call -j <job-method>` (job-based methods such as `pool.dataset.create` / `pool.dataset.delete`) runs the job **successfully server-side**, but the midclt client then crashes while polling the already-finished job:
+
+```
+TypeError: unhashable type: 'dict'
+```
+
+The client **exits non-zero** even though the operation completed. Automation that trusts the client exit code will mistake a success for a failure. During #57 / PR #122 this caused a successful `pool.dataset.create` to leave an orphaned empty dataset whose passphrase was never captured; it was recovered by destroying it and cleanly re-creating, **printing the passphrase to stdout BEFORE the midclt call**.
+
+Notes:
+- **No `@file` payload expansion.** midclt does not read payloads from files — pass the payload as an inline positional JSON string:
+  ```bash
+  ssh <TRUENAS_USER>@<TRUENAS_IP> "echo '<TRUENAS_PASSWORD>' | sudo -S midclt call -j pool.dataset.create \"\$PAYLOAD\""
+  ```
+- **Treat post-completion midclt `TypeError`s as cosmetic.** ALWAYS verify the real outcome with `zfs get` / `zfs list` rather than the client exit code:
+  ```bash
+  ssh <TRUENAS_USER>@<TRUENAS_IP> "echo '<TRUENAS_PASSWORD>' | sudo -S zfs list <dataset>"
+  ```
+- For passphrase-bearing creates, **print the passphrase before the call** so a client crash cannot lose it.
+
 # TrueNAS Hardware Overview
 - The TrueNAS server is an workstation with 32GB of RAM, 3 SSD disks on RAIDZ1 with a dataset apps and 2 HDD disks on device GUIDs making a stripe vdev with a dataset pool1. The media files are stored on the pool1 dataset and the VMs are stored on the apps dataset. The TrueNAS server is connected to the switch with 1 GiB ethernet. SSH access is available with passwordless authentication using SSH keys. The TrueNAS server is also connected to the Proxmox VE servers via iSCSI targets for VM storage and NFS shares for shared storage. All credentials are stored in `.github/instructions/secrets.yml`.
 
