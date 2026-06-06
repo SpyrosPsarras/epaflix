@@ -43,7 +43,7 @@ All services exposed via kube-vip LoadBalancer:
 ├── 02.deploy-cluster.sh                # Deploy PostgreSQL cluster
 ├── operator-kustomization/             # ArgoCD "cnpg-operator" App render dir (issue #93)
 │   ├── kustomization.yaml             # bundles the two vendored operator manifests
-│   ├── cnpg-operator.yaml             # CNPG operator v1.28.0 manifest
+│   ├── cnpg-operator.yaml             # CNPG operator v1.29.1 manifest
 │   └── barman-manifest.yaml           # Barman Cloud Plugin v0.12.0 manifest
 ├── cluster/
 │   ├── postgres-secret.yaml           # Superuser and app user credentials
@@ -75,7 +75,7 @@ cd /home/spy/Documents/Epaflix/k3s-swarm-proxmox/2-k3s/06.postgres
 
 This will:
 - Create the `postgres-system` namespace
-- Install CloudNativePG operator v1.28.0 in `cnpg-system` namespace
+- Install CloudNativePG operator v1.29.1 in `cnpg-system` namespace
 - Wait for the operator to be ready
 
 Verify operator installation:
