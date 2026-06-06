@@ -13,8 +13,11 @@
 #   kubectl -n system-upgrade get pods
 #
 # How it works:
-#   1. The controller watches the K3s stable release channel for new versions
-#   2. When a new version is available, it upgrades server (master) nodes first, one at a time
+#   1. The controller compares each node's running K3s version to the pinned
+#      spec.version below; when they differ it rolls the cluster to that version.
+#      The version is PR-gated in git (issue #130) — not auto-tracked from a
+#      release channel — so every bump is an explicit, reviewed change.
+#   2. It upgrades server (master) nodes first, one at a time
 #   3. Once ALL masters are upgraded, it upgrades worker (agent) nodes, two at a time
 #   4. Each node is cordoned and drained before upgrading, then uncordoned after
 #
@@ -33,9 +36,10 @@ metadata:
   labels:
     k3s-upgrade: server
 spec:
-  # Track the K3s stable release channel automatically
-  # Upgrades happen whenever a new stable K3s version is published
-  channel: https://update.k3s.io/v1-release/channels/stable
+  # Explicitly PINNED upgrade target — every bump is a reviewed git change
+  # (issue #130). We no longer track the moving `channel: stable`. To bump,
+  # edit this tag (and the matching one on k3s-agent below) and open a PR.
+  version: v1.35.5+k3s1
 
   # Upgrade masters one at a time to maintain quorum (3-node etcd)
   concurrency: 1
@@ -86,8 +90,8 @@ metadata:
   labels:
     k3s-upgrade: agent
 spec:
-  # Must match the same channel as the server plan
-  channel: https://update.k3s.io/v1-release/channels/stable
+  # Must match the same pinned version as the server plan
+  version: v1.35.5+k3s1
 
   # Upgrade 2 workers at a time — we have 4 workers (61, 62, 63, 65)
   # This keeps at least 2 workers running for active workloads
