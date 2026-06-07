@@ -58,6 +58,14 @@ resources:
   - pve-exporter/service.yaml
   - pve-exporter/deployment.yaml
   - pve-exporter/servicemonitor.yaml
+  # Static EndpointSlices in kube-system that back the chart's selector-less
+  # control-plane exporter Services (kube-controller-manager / kube-scheduler /
+  # kube-etcd). Git-durable, selfHeal-recreatable replacement for the chart's
+  # out-of-band v1 Endpoints that ArgoCD's global exclusion silently drops
+  # (issue #147; #121). Each object carries its own `namespace: kube-system`
+  # — there is no top-level namespace transformer, so they are NOT rewritten to
+  # observability (intentional: they must resolve against the control plane).
+  - control-plane-endpointslices.yaml
 
 generators:
   - secrets/ksops-generator.yaml
