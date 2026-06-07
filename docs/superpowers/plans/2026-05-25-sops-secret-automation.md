@@ -105,20 +105,27 @@ export SOPS_AGE_KEY_FILE=$HOME/.config/sops/age/k3s-cluster.txt
 
 - [ ] **Step 4: Backup age key to TrueNAS encrypted dataset**
 
+> Update (2026-06-07, #149): the age-key backup was relocated to the
+> redundant `apps` pool (3×SSD RAIDZ1) at `apps/encrypted-backups`. The
+> original `pool1/encrypted-backups` dataset lived on a non-redundant
+> single-disk stripe and has been retired/destroyed. Paths below reflect
+> the live location; same passphrase and ZFS encryption params, no key
+> rotation.
+
 ```bash
-# Use the existing encrypted dataset on TrueNAS (pool1/encrypted-backups
-# or equivalent). Adjust path if your dataset name differs.
-ssh truenas_admin@192.168.10.200 'mkdir -p /mnt/pool1/encrypted-backups/sops-age && chmod 700 /mnt/pool1/encrypted-backups/sops-age'
-scp ~/.config/sops/age/k3s-cluster.txt truenas_admin@192.168.10.200:/mnt/pool1/encrypted-backups/sops-age/k3s-cluster.txt
-ssh truenas_admin@192.168.10.200 'chmod 600 /mnt/pool1/encrypted-backups/sops-age/k3s-cluster.txt'
+# Use the encrypted dataset on TrueNAS (apps/encrypted-backups, on the
+# redundant apps RAIDZ1 pool). Adjust path if your dataset name differs.
+ssh truenas_admin@192.168.10.200 'mkdir -p /mnt/apps/encrypted-backups/sops-age && chmod 700 /mnt/apps/encrypted-backups/sops-age'
+scp ~/.config/sops/age/k3s-cluster.txt truenas_admin@192.168.10.200:/mnt/apps/encrypted-backups/sops-age/k3s-cluster.txt
+ssh truenas_admin@192.168.10.200 'chmod 600 /mnt/apps/encrypted-backups/sops-age/k3s-cluster.txt'
 ```
 
-If your TrueNAS doesn't have an encrypted dataset yet, create one via the TrueNAS web UI: Pools → pool1 → Add Dataset → Encryption On.
+If your TrueNAS doesn't have an encrypted dataset yet, create one via the TrueNAS web UI: Pools → apps → Add Dataset → Encryption On.
 
 - [ ] **Step 5: Verify backup**
 
 ```bash
-ssh truenas_admin@192.168.10.200 'sha256sum /mnt/pool1/encrypted-backups/sops-age/k3s-cluster.txt'
+ssh truenas_admin@192.168.10.200 'sha256sum /mnt/apps/encrypted-backups/sops-age/k3s-cluster.txt'
 sha256sum ~/.config/sops/age/k3s-cluster.txt
 ```
 
@@ -488,8 +495,8 @@ git push
 # 8. Securely destroy old key.
 shred -u ~/.config/sops/age/k3s-cluster.txt
 mv ~/.config/sops/age/k3s-cluster-new.txt ~/.config/sops/age/k3s-cluster.txt
-ssh truenas_admin@192.168.10.200 'shred -u /mnt/pool1/encrypted-backups/sops-age/k3s-cluster.txt'
-scp ~/.config/sops/age/k3s-cluster.txt truenas_admin@192.168.10.200:/mnt/pool1/encrypted-backups/sops-age/
+ssh truenas_admin@192.168.10.200 'shred -u /mnt/apps/encrypted-backups/sops-age/k3s-cluster.txt'
+scp ~/.config/sops/age/k3s-cluster.txt truenas_admin@192.168.10.200:/mnt/apps/encrypted-backups/sops-age/
 ```
 
 ## Cluster bootstrap (fresh cluster)
