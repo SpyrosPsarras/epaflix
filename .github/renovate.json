@@ -13,6 +13,12 @@
   "commitMessagePrefix": "[renovate]",
   "packageRules": [
     {
+      "description": "odysseus is a locally-built image (no registry repo) — Renovate can't look it up, which raises a permanent 'Package lookup failures' WARN on the Dependency Dashboard. Disable tracking for it (docker datasource, package name 'odysseus'); the other images in that compose file still resolve normally.",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["odysseus"],
+      "enabled": false
+    },
+    {
       "description": "Authentik: chart version and container image move together upstream. Group them in one PR so ArgoCD never sees a chart/image schema mismatch.",
       "matchManagers": ["kustomize"],
       "matchPackageNames": [
