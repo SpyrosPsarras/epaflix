@@ -101,7 +101,7 @@ generators:
 # digest for a tracked image. Empty on first install — updater will populate.
 images:
   - name: lscr.io/linuxserver/sonarr
-    digest: sha256:0b5c4803f92456fb9b65bae8375716ea120b4ea17b3cced7da32b63f0085782b
+    digest: sha256:0b3f344388bd7bed4f2f770058de795e76447e4a481b83c8d5f8fed489371fde
   - name: lscr.io/linuxserver/radarr
     digest: sha256:c0a4335d4249b46102f64cf6fa27ffc3bddfd9138fac1e4ddf238afd37f02d1f
   - name: lscr.io/linuxserver/prowlarr
