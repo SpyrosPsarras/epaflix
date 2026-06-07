@@ -111,7 +111,7 @@ images:
   - name: ghcr.io/flaresolverr/flaresolverr
     digest: sha256:139dfee1c6f89249c8d665d1333a42e8ec74ec0a86bc6bb1c8461e10d3a66a47
   - name: jellyfin/jellyfin
-    digest: sha256:f66273e014b307e4ac46778845ebc1e9ee24b2e57c1fc17d5ec5ac3015649bfa
+    digest: sha256:aefb67e6a7ff1debdd154a78a7bbb780fd0c873d8639210a7f6a2016ad2b35db
   - name: ghcr.io/ajnart/homarr
     digest: sha256:e103abadfb527186af5b4bd43df4eff7c67afa5cd4df8e65fa97910c8840b2a9
   - name: ghcr.io/zelak312/bazarr_autotranslate
