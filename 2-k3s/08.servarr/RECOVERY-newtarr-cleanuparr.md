@@ -191,20 +191,86 @@ grabs.
    0). New grabs are now queue-tracked rather than orphaned.
 
 > **⚠️ DO NOT enable Cleanuparr's DownloadCleaner unlinked/orphan rule in this
-> dataset topology — it would delete ALL ~139 healthy seeders.** Downloads
-> (`dataset01/downloads`) and library (`dataset01/{tvshows,animes,movies}`) are
-> **separate ZFS datasets**, so hardlinks cannot span them; every imported seeder
-> is `nlink=1`, identical to a true orphan. Sonarr2 also uses
-> `copyUsingHardlinks=false`, and the Cleanuparr container has **no mount of the
-> library roots**, so it physically cannot tell a seeder from an orphan. Safe
-> automated reaping requires either co-locating downloads + library on one dataset
-> AND mounting `/tv`,`/animes`,`/movies` into Cleanuparr (so `nlink>1` works), or a
-> tag/category-scoped or seed-time/ratio-guarded rule. Tracked in **#142**
-> (cross-links #138 PVC-only config, #131/#137 newtarr migration).
+> topology — it would delete ALL the healthy imported seeders (~118 live as of
+> 2026-06-07; was ~139 at the PR #144 firefight, decayed via normal
+> ratio/seed-time expiry).** Downloads (`pool1/dataset01/downloads`) and library
+> (`pool1/dataset01/{tvshows,animes,movies}`) are **plain directories on ONE ZFS
+> dataset** (`pool1/dataset01`; all four report the same `st_dev`). Hardlinks are
+> blocked **NOT by a dataset boundary** but because each media root is published as
+> a **separate NFS4 export** (its own `fsid`), so a cross-export `link()` returns
+> `EXDEV` — every imported seeder lands as `nlink=1`, indistinguishable from a true
+> orphan. Sonarr2 also uses `copyUsingHardlinks=false`, and the Cleanuparr
+> container has **no mount of the library roots** (verified: `cleanuparr.yaml`
+> mounts only `config`→`/config` and `servarr-media-downloads`→`/data`), so it
+> physically cannot tell a seeder from an orphan. Bottom line: the unlinked/orphan
+> rule stays **OFF**. Safe automated reaping requires either the single-NFS-export
+> Option A migration below (so intra-export hardlinks give `nlink>1`) AND mounting
+> the library roots into Cleanuparr, or a category-scoped / seed-time / ratio
+> guarded rule that never keys on `nlink`. Tracked in **#142** (cross-links #138
+> PVC-only config, #131/#137 newtarr migration).
 
 > **Operator rule:** when manually removing items from an *arr queue, ALWAYS tick
 > **"Remove from download client"** (and usually **"Blocklist"**) — otherwise the
 > torrent is orphaned out of QueueCleaner's reach.
+
+### Safe reaper — already in place (#142 deliverable #2)
+
+The **safe automated reaper** that #142 deliverable #2 calls for **already exists
+and is enabled** — no live DB change was made for this close-out:
+
+- **Cleanuparr `download_cleaner_configs` → `q_bit_seeding_rules`** (`enabled=1`),
+  per-category (`radarr`, `tv-sonarr`, `animes`), gated **purely** on `max_ratio=1.0`
+  / `max_seed_time=400h`. It **never keys on `nlink`**, so it cannot touch an
+  `nlink=1` imported seeder.
+- **QueueCleaner stall rules** (public `max_strikes=3`), which only strike torrents
+  still **referenced in an *arr queue**.
+
+This seeding-rule + QueueCleaner combination is what satisfies **#142 #2**. The
+`nlink` / `unlinked_configs` detector stays **OFF** (`enabled=0`) until the
+single-NFS-export Option A migration below lands. The Cleanuparr DB is PVC-only
+SQLite (durability class per **#138**), so this state is not codified — any change
+is a manual repoint.
+
+> *(Optional future tightening — a stalled-age / 0-seed rule scoped to a DOWNLOAD
+> category, never `nlink` — is explicitly NOT this run and must be soak-gated.)*
+
+### seriesId 272 soak — PASSED
+
+The post-fix re-search soak **passed**. seriesId 272 **S03E04** went from a
+0-seed grab→fail loop to a **seeded release grabbed AND `downloadFolderImported`
+on 2026-06-01** (now seeding healthily, `prog=1.00`, `hasFile=true`). Series state
+is **27/36 `hasFile`**, 9 missing + monitored. Residual
+grab→stall→Cleanuparr-strike→"manually marked as failed" churn persists **only** on
+episodes with **no healthy release available** (S03E03 / S03E05 / S03E08) and is
+the **QueueCleaner stall rule working as designed** (3 strikes → fail + blocklist),
+**NOT an orphan regression** — 0 unreferenced + incomplete torrents exist.
+
+### newtarr `hunt_missing_items` — KEEP at 1
+
+`newtarr hunt_missing_items=1` is **KEPT** (do **NOT** bump). It is **GLOBAL across
+BOTH Sonarr instances** (#135). Raising it would multiply the `seasons_packs`
+add-search-on-add race and the seriesId 272 no-healthy-release churn for **zero
+orphan benefit** — the orphan class was a one-time **manual operator action**, not a
+hunt-cadence symptom. Cross-link **#135**.
+
+### Option A — heavyweight fix (DEFERRED, trigger-gated)
+
+The heavyweight fix is **medium-risk / low-urgency** (orphan recurrence is
+currently **zero**) and is **DEFERRED to its own gh issue**. Steps, when triggered:
+
+1. Collapse to **ONE NFS export** of `/mnt/pool1/dataset01` (so intra-export
+   `link()` works — **no data move** required, all four roots are already on one
+   dataset).
+2. Remap qbt save path + Sonarr / Sonarr2 / Radarr root folders + media PV/PVC
+   `subPath`s onto the single export.
+3. Set `copyUsingHardlinks=true`.
+4. Mount the library roots **read-only** into Cleanuparr.
+5. Enable the `unlinked` rule in **dry-run first**, then live.
+
+**Documented trigger to revisit: only if orphan recurrence returns.** Follow-up
+issues will be opened — (1) the Option-A migration; (2) codify / runbook the
+PVC-only Cleanuparr DB state per **#138**; (3) optional owner-gated quieting of the
+seriesId 272 no-healthy-release loop.
 
 ## #137 — newtarr JSON config seed (SOPS)
 
