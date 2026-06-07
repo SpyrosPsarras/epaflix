@@ -1,0 +1,83 @@
+---
+# ntfy — notification sidecar for Odysseus.
+#
+# The compose published host 8091 -> ntfy default 80. Here ntfy is told to
+# listen on :8091 directly (NTFY_LISTEN_HTTP) so the in-cluster Service and
+# NTFY_BASE_URL=http://ntfy:8091 line up. The ntfy cache is non-critical so an
+# emptyDir is fine.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ntfy
+  namespace: odysseus
+  labels:
+    app: ntfy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ntfy
+  template:
+    metadata:
+      labels:
+        app: ntfy
+    spec:
+      containers:
+        - name: ntfy
+          image: binwiederhier/ntfy:latest
+          args:
+            - serve
+          env:
+            - name: NTFY_LISTEN_HTTP
+              value: ":8091"
+            - name: NTFY_CACHE_FILE
+              value: "/var/cache/ntfy/cache.db"
+            - name: NTFY_BASE_URL
+              value: "http://ntfy:8091"
+          ports:
+            - containerPort: 8091
+              name: http
+          volumeMounts:
+            - name: cache
+              mountPath: /var/cache/ntfy
+          resources:
+            requests:
+              memory: "32Mi"
+              cpu: "10m"
+            limits:
+              memory: "128Mi"
+              cpu: "250m"
+          readinessProbe:
+            httpGet:
+              path: /v1/health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /v1/health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 10
+      volumes:
+        - name: cache
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ntfy
+  namespace: odysseus
+  labels:
+    app: ntfy
+spec:
+  type: ClusterIP
+  selector:
+    app: ntfy
+  ports:
+    # In-cluster DNS ntfy:8091 — matches NTFY_BASE_URL in odysseus-config.
+    - name: http
+      port: 8091
+      targetPort: http

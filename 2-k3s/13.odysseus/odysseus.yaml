@@ -1,0 +1,195 @@
+---
+# Odysseus — AI workspace / agent app (pewdiepie-archdaemon/odysseus).
+#
+# Migrated from a 4-container TrueNAS Custom App (port 30070) to this GitOps
+# tier (issue #184). On k3s the GPU reservation is DROPPED — cluster workers
+# have no GPU; chat/embedding models are served by the EXISTING remote Ollama
+# on TrueNAS (http://192.168.10.200:30068/v1), and fastembed runs on CPU.
+#
+# Sidecars (searxng, chromadb, ntfy) live in the same `odysseus` namespace and
+# are reached by intra-namespace DNS (searxng:8080, chromadb:8000, ntfy:8091).
+#
+# Auth: the perimeter is gated by Authentik forward-auth at Traefik
+# (odysseus.epaflix.com). Odysseus ALSO keeps its own built-in login
+# (AUTH_ENABLED=true) — double-login by design, mirrors the pre-migration
+# TrueNAS posture. There is NO trusted-header SSO into Odysseus.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: odysseus
+  namespace: odysseus
+  labels:
+    app: odysseus
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: odysseus
+  template:
+    metadata:
+      labels:
+        app: odysseus
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: odysseus
+      initContainers:
+        # Seed the /app/data PVC from the SOPS-encrypted odysseus-data-seed
+        # Secret. This codifies the small IRREPLACEABLE state (auth.json with
+        # the owner's hashed login, settings.json incl. the SearXNG-json /
+        # disabled_tools state) so a freshly-provisioned local-path PVC comes
+        # up pre-configured instead of empty.
+        #
+        # IDEMPOTENT + NON-CLOBBERING: each seed key is only copied when the
+        # destination file does NOT already exist. On a populated PVC every
+        # file is skipped, so this is a no-op — the app rewrites these JSONs at
+        # runtime and we NEVER overwrite live state. This is critical: the
+        # large binary state (app.db) and the dir trees (skills/, personal_docs/,
+        # rag/) are migrated out-of-band by tarring from TrueNAS into the PVC
+        # (see README — data migration), and that migration MUST land before
+        # Odysseus serves so the app never auto-creates a fresh admin that
+        # would clobber the migrated auth.json. The skip-if-exists guard means
+        # the tar-restore and this seed can run in any order safely.
+        #
+        # Pattern copied verbatim from 08.servarr/newtarr/newtarr.yaml.
+        - name: seed-data
+          image: busybox:1.36
+          securityContext:
+            runAsUser: 0
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              mkdir -p /app/data
+              for f in /seed/*; do
+                [ -f "$f" ] || continue
+                name=$(basename "$f")
+                dest=/app/data/$name
+                if [ -e "$dest" ]; then
+                  echo "skip (exists): $dest"
+                else
+                  cp "$f" "$dest" && echo "seeded: $dest"
+                fi
+              done
+              chown -R 1000:1000 /app/data
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+            - name: seed
+              mountPath: /seed
+              readOnly: true
+      containers:
+        - name: odysseus
+          # Pushed from the TrueNAS docker engine to GHCR (lowercase namespace),
+          # made public so k3s containerd can pull without an imagePullSecret.
+          # Immutable numeric tag — no image-updater tracking needed initially.
+          image: ghcr.io/spyrospsarras/odysseus:73673258
+          env:
+            - name: PUID
+              value: "1000"
+            - name: PGID
+              value: "1000"
+            # Secret values (SOPS odysseus-secrets). ODYSSEUS_ADMIN_PASSWORD is
+            # the bootstrap/admin-reset password — the seeded auth.json carries
+            # the owner's ACTUAL login hash, so this is only a fallback.
+            - name: ODYSSEUS_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: odysseus-secrets
+                  key: ODYSSEUS_ADMIN_PASSWORD
+            - name: SEARXNG_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: odysseus-secrets
+                  key: SEARXNG_SECRET
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: odysseus-secrets
+                  key: OPENAI_API_KEY
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: odysseus-secrets
+                  key: HF_TOKEN
+          # Non-secret env (APP_BIND/APP_PORT/AUTH_ENABLED/ALLOWED_ORIGINS/
+          # OLLAMA_BASE_URL/SEARXNG_INSTANCE/CHROMADB_*/etc) from the ConfigMap.
+          # NOTE: NO /app/.ssh mount — deliberately omitted (RCE hardening
+          # carried from the compose; the data/ssh dir never existed live).
+          envFrom:
+            - configMapRef:
+                name: odysseus-config
+          ports:
+            - containerPort: 7000
+              name: http
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "2Gi"
+              cpu: "2000m"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: odysseus-data
+        # SOPS-encrypted data seed, reconciled by the odysseus ksops generator
+        # from odysseus-data-seed.enc.yaml. Consumed only by the seed-data
+        # initContainer.
+        - name: seed
+          secret:
+            secretName: odysseus-data-seed
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: odysseus
+  namespace: odysseus
+  labels:
+    app: odysseus
+spec:
+  type: ClusterIP
+  selector:
+    app: odysseus
+  ports:
+    - name: http
+      port: 7000
+      targetPort: http
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: odysseus-data
+  namespace: odysseus
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      # Irreplaceable state is a few MB (app.db, auth.json, settings.json,
+      # skills/personal_docs/rag). The ~4.8G HF/fastembed caches are NOT
+      # migrated — they re-download on first run on CPU.
+      storage: 5Gi
+  storageClassName: local-path
