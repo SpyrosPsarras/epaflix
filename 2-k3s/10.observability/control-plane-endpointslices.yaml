@@ -1,0 +1,116 @@
+# Static EndpointSlices for the control-plane metric exporters (issue #147).
+#
+# WHY THIS EXISTS
+# ---------------
+# The kube-prometheus-stack chart renders three *selector-less* headless
+# Services into `kube-system` for the control-plane exporters
+# (kubeControllerManager / kubeScheduler / kubeEtcd in prometheus-values.yaml,
+# each with an `endpoints:` list of the master InternalIPs). Because those
+# Services have no pod selector, Kubernetes does NOT populate their backing
+# Endpoints — the chart hand-rolls a v1 `Endpoints` object instead (#121).
+#
+# ArgoCD's global `resource.exclusions` (2-k3s/11.argocd/helm-values.yaml)
+# drops core `Endpoints` cluster-wide, so those chart-rendered Endpoints are
+# NOT part of any Application's managed set: they live out-of-band, are not
+# selfHeal-recreatable, and silently vanish if anything deletes them — the
+# fragility tracked in #147. (`discovery.k8s.io/EndpointSlice` is NOT excluded,
+# proven by the jellyfin-truenas static slice in 08.servarr.)
+#
+# THE FIX (Option B)
+# ------------------
+# Declare the backing endpoints as git-managed static EndpointSlices, scoped to
+# the observability Application. They are reconciled by ArgoCD, selfHeal can
+# recreate them, and EndpointSlice is the v1 replacement that is future-proof
+# against the v1 `Endpoints` deprecation in k8s 1.33+.
+#
+# The chart still renders the selector-less Service AND a (now redundant) v1
+# Endpoints object that ArgoCD excludes — we deliberately keep the `endpoints:`
+# lists in prometheus-values.yaml so the Services stay selector-less (no
+# recurring manual selector-strip). Prometheus deduplicates targets discovered
+# via both the legacy Endpoints and these EndpointSlices, so the redundant
+# chart Endpoints is harmless.
+#
+# The `kubernetes.io/service-name` label binds each slice to its headless
+# Service so the matching ServiceMonitor target resolves to the master IPs.
+# Port name `http-metrics` matches the chart Service port name.
+#
+# DR / verify runbook: see 2-k3s/10.observability/README.md
+# ("Control-plane exporter Endpoints").
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: kube-prometheus-stack-kube-controller-manager-static
+  namespace: kube-system
+  labels:
+    kubernetes.io/service-name: kube-prometheus-stack-kube-controller-manager
+addressType: IPv4
+ports:
+  - name: http-metrics
+    port: 10257
+    protocol: TCP
+endpoints:
+  - addresses:
+      - 10.0.0.51
+    conditions:
+      ready: true
+  - addresses:
+      - 10.0.0.52
+    conditions:
+      ready: true
+  - addresses:
+      - 10.0.0.53
+    conditions:
+      ready: true
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: kube-prometheus-stack-kube-scheduler-static
+  namespace: kube-system
+  labels:
+    kubernetes.io/service-name: kube-prometheus-stack-kube-scheduler
+addressType: IPv4
+ports:
+  - name: http-metrics
+    port: 10259
+    protocol: TCP
+endpoints:
+  - addresses:
+      - 10.0.0.51
+    conditions:
+      ready: true
+  - addresses:
+      - 10.0.0.52
+    conditions:
+      ready: true
+  - addresses:
+      - 10.0.0.53
+    conditions:
+      ready: true
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: kube-prometheus-stack-kube-etcd-static
+  namespace: kube-system
+  labels:
+    kubernetes.io/service-name: kube-prometheus-stack-kube-etcd
+addressType: IPv4
+ports:
+  - name: http-metrics
+    port: 2381
+    protocol: TCP
+endpoints:
+  - addresses:
+      - 10.0.0.51
+    conditions:
+      ready: true
+  - addresses:
+      - 10.0.0.52
+    conditions:
+      ready: true
+  - addresses:
+      - 10.0.0.53
+    conditions:
+      ready: true

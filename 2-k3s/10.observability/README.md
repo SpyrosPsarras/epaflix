@@ -361,6 +361,63 @@ kubectl get servicemonitor -n observability
 kubectl describe servicemonitor -n observability <name>
 ```
 
+### Control-plane exporter Endpoints (issue #147)
+
+The three control-plane exporters — `kube-controller-manager` (:10257),
+`kube-scheduler` (:10259) and `kube-etcd` (:2381) — are scraped via
+**selector-less headless Services** that the kube-prometheus-stack chart
+templates into `kube-system`. Their `endpoints:` lists (the three master
+InternalIPs `10.0.0.51/52/53`) live in `prometheus-values.yaml` under the
+`kubeControllerManager` / `kubeScheduler` / `kubeEtcd` blocks.
+
+**Mechanism (Option B).** Because those Services have no pod selector,
+Kubernetes does not auto-populate their backing endpoints; the chart hand-rolls
+a legacy v1 `Endpoints` object (#121). ArgoCD's global `resource.exclusions`
+(`2-k3s/11.argocd/helm-values.yaml`) drops core `Endpoints` cluster-wide, so
+those chart Endpoints are **out-of-band**: not in any Application's managed set,
+not selfHeal-recreatable, and they silently vanish if anything deletes them —
+the fragility tracked in **#147**.
+
+The fix declares the backing endpoints as **git-managed static
+`discovery.k8s.io/v1` EndpointSlices** in
+`control-plane-endpointslices.yaml`, scoped to the observability Application.
+`EndpointSlice` is **not** in the ArgoCD exclusion list (proven by the
+`jellyfin-truenas` static slice in `08.servarr`), so ArgoCD reconciles them and
+selfHeal recreates them. EndpointSlice is also the v1 replacement that is
+future-proof against the v1 `Endpoints` deprecation in **k8s 1.33+**.
+
+**Selector-strip truth.** Keeping the `endpoints:` lists in
+`prometheus-values.yaml` is what makes the chart render the Services
+*selector-less* in the first place — so there is **no recurring manual
+selector-strip step**. Leave those lists in place. The chart still renders a
+now-redundant excluded v1 `Endpoints` alongside our EndpointSlices; Prometheus
+deduplicates the targets, so the overlap is harmless. The
+`kubernetes.io/service-name` label on each slice binds it to its headless
+Service so the matching ServiceMonitor target resolves to the master IPs.
+
+**DR / verify runbook.**
+
+```bash
+# Recreate the slices after any loss (ArgoCD owns them now):
+argocd app sync observability
+
+# Confirm the 3 static slices exist with the three master IPs:
+kubectl -n kube-system get endpointslice | grep -Ei "controller-manager|scheduler|etcd"
+kubectl -n kube-system get endpointslice \
+  kube-prometheus-stack-kube-controller-manager-static \
+  kube-prometheus-stack-kube-scheduler-static \
+  kube-prometheus-stack-kube-etcd-static \
+  -o custom-columns=NAME:.metadata.name,IPS:.endpoints[*].addresses,PORT:.ports[*].port
+
+# Confirm Prometheus targets are UP for all three control-plane jobs:
+kubectl port-forward -n observability svc/kube-prometheus-stack-prometheus 9090:9090
+# Open http://localhost:9090/targets and check that
+#   serviceMonitor/observability/kube-prometheus-stack-kube-controller-manager
+#   serviceMonitor/observability/kube-prometheus-stack-kube-scheduler
+#   serviceMonitor/observability/kube-prometheus-stack-kube-etcd
+# each show 3 endpoints (10.0.0.51/52/53) in state UP.
+```
+
 ### Loki Not Receiving Logs
 
 ```bash
