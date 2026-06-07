@@ -1,0 +1,48 @@
+---
+# Non-secret app env for Odysseus. NO secret values, NO NVIDIA_* keys (GPU
+# dropped on k3s). Consumed by the odysseus Deployment via envFrom.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: odysseus-config
+  namespace: odysseus
+  labels:
+    app: odysseus
+data:
+  APP_BIND: "0.0.0.0"
+  APP_PORT: "7000"
+  AUTH_ENABLED: "true"
+  LOCALHOST_BYPASS: "false"
+  SECURE_COOKIES: "true"
+  ALLOWED_ORIGINS: "https://odysseus.epaflix.com"
+  # Models served by the EXISTING remote Ollama on TrueNAS (no GPU on k3s).
+  OLLAMA_BASE_URL: "http://192.168.10.200:30068/v1"
+  LLM_HOST: "http://192.168.10.200:30068/v1"
+  # Intra-namespace sidecars.
+  SEARXNG_INSTANCE: "http://searxng:8080"
+  CHROMADB_HOST: "chromadb"
+  CHROMADB_PORT: "8000"
+  NTFY_BASE_URL: "http://ntfy:8091"
+  DATABASE_URL: "sqlite:////app/data/app.db"
+---
+# SearXNG settings.yml shipped as a ConfigMap and mounted at
+# /etc/searxng/settings.yml (issue #184 — fixes the JSON-403 search bug).
+# Kept SECRET-FREE: server.secret_key is populated by SearXNG from the
+# SEARXNG_SECRET env, so nothing sensitive is committed here.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: searxng-settings
+  namespace: odysseus
+  labels:
+    app: searxng
+data:
+  settings.yml: |
+    use_default_settings: true
+    server:
+      # secret_key is injected at runtime from the SEARXNG_SECRET env.
+      limiter: false
+    search:
+      formats:
+        - html
+        - json

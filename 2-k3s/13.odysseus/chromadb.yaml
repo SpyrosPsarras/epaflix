@@ -1,0 +1,88 @@
+---
+# ChromaDB — vector store backing Odysseus's RAG.
+#
+# COLD START is accepted: the TrueNAS chromadb-data volume was ~empty, so RAG
+# re-embeds on first use. An optional volume-export path to carry existing
+# vectors is documented in the README.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chromadb
+  namespace: odysseus
+  labels:
+    app: chromadb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chromadb
+  template:
+    metadata:
+      labels:
+        app: chromadb
+    spec:
+      containers:
+        - name: chromadb
+          image: chromadb/chroma:latest
+          ports:
+            - containerPort: 8000
+              name: http
+          volumeMounts:
+            # Matches the compose named-volume mount point.
+            - name: data
+              mountPath: /chroma/chroma
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+          readinessProbe:
+            httpGet:
+              path: /api/v1/heartbeat
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /api/v1/heartbeat
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: chromadb-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chromadb
+  namespace: odysseus
+  labels:
+    app: chromadb
+spec:
+  type: ClusterIP
+  selector:
+    app: chromadb
+  ports:
+    # In-cluster DNS chromadb:8000 — matches CHROMADB_HOST/PORT in odysseus-config.
+    - name: http
+      port: 8000
+      targetPort: http
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: chromadb-data
+  namespace: odysseus
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+  storageClassName: local-path

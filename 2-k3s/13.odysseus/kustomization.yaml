@@ -1,0 +1,30 @@
+# ArgoCD-managed kustomization for the Odysseus tier (issue #184).
+#
+# Owned by ArgoCD Application "odysseus"
+# (2-k3s/11.argocd/apps/app-odysseus.yaml) — MANUAL sync on first install.
+#
+# Secrets are reconciled via the ksops generator (ksops-generator.yaml):
+#   - odysseus-secrets    from odysseus-secrets.enc.yaml
+#                         (ODYSSEUS_ADMIN_PASSWORD, SEARXNG_SECRET,
+#                          OPENAI_API_KEY, HF_TOKEN)
+#   - odysseus-data-seed  from odysseus-data-seed.enc.yaml
+#                         (small irreplaceable JSON state — auth.json /
+#                          settings.json — consumed by the seed-data
+#                          initContainer; see README for the tar-staging of
+#                          app.db + the dir trees)
+#
+# No `images:` block — the odysseus image is pinned to the immutable numeric
+# tag 73673258 in odysseus.yaml, so digest tracking is not needed initially.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: odysseus
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - odysseus.yaml
+  - searxng.yaml
+  - chromadb.yaml
+  - ntfy.yaml
+  - pdb.yaml
+generators:
+  - ksops-generator.yaml

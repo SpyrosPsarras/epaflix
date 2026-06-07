@@ -24,6 +24,7 @@ resources:
   - app-kube-vip-cloud-provider.yaml
   - app-maintenance.yaml
   - app-observability.yaml
+  - app-odysseus.yaml
   - app-postgres.yaml
   - app-renovate.yaml
   - app-servarr.yaml
