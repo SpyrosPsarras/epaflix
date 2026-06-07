@@ -1,56 +1,32 @@
 ---
-# Proxy odysseus.epaflix.com (192.168.10.101, Traefik) → Odysseus TrueNAS Custom App
-# (192.168.10.200:30070, plain HTTP host port published by the docker compose).
+# Proxy odysseus.epaflix.com (192.168.10.101, Traefik) → in-cluster Odysseus
+# Service `odysseus` in namespace `odysseus`, port 7000 (the k3s GitOps tier
+# 13.odysseus — issue #184). Cross-namespace reference relies on Traefik's
+# providers.kubernetescrd.allowCrossNamespace=true.
 #
-# Backend is plain HTTP, so NO ServersTransport (unlike truenas/pegaprox which are
-# HTTPS-with-skipverify). Real Let's Encrypt wildcard cert terminates at Traefik;
-# DNS-01 ACME via Cloudflare proves domain ownership.
+# This SUPERSEDES the earlier TrueNAS-backend cutover (Endpoints/headless
+# Service → 192.168.10.200:30070). Now that the workload runs on k3s the route
+# targets it directly — no manual Endpoints object needed.
 #
-# This is the perimeter for a publicly (Cloudflare-proxied) reachable, GPU-enabled
-# agent app whose agent has a built-in shell tool. The route is gated by Authentik
-# forward-auth (authentik-forwardauth middleware) — mirrors traefik-dashboard-sso.yaml:
+# Backend is plain HTTP (uvicorn :7000), so NO ServersTransport. The real
+# Let's Encrypt wildcard cert terminates at Traefik; DNS-01 ACME via Cloudflare
+# proves domain ownership.
+#
+# This is the perimeter for a publicly (Cloudflare-proxied) reachable, GPU-less
+# agent app whose agent has a built-in shell tool. The route is gated by
+# Authentik forward-auth (authentik-forwardauth middleware) — mirrors
+# traefik-dashboard-sso.yaml:
 #   - app route (priority 10) carries the authentik-forwardauth middleware
 #   - outpost route (priority 15) handles /outpost.goauthentik.io/ auth callbacks
 #     and MUST out-prioritise the app route or callbacks break.
 # This only gates the perimeter — Odysseus has NO trusted-header SSO, so it ALSO
 # keeps its own built-in login (AUTH_ENABLED=true). Result is a double login by
-# design (see README). The raw host port 0.0.0.0:30070 on the LAN bypasses Authentik
-# entirely and is gated ONLY by Odysseus's built-in login.
+# design (see README).
 #
 # SSO objects (group "Odysseus users", proxy provider + application slug odysseus,
 # embedded-outpost binding) must exist in Authentik BEFORE this is merged, else the
 # route would expose the raw backend behind only Odysseus's own login.
 
-apiVersion: v1
-kind: Endpoints
-metadata:
-  name: odysseus
-  namespace: traefik-system
-subsets:
-  - addresses:
-      - ip: 192.168.10.200
-    ports:
-      - name: http
-        port: 30070
-        protocol: TCP
-
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: odysseus
-  namespace: traefik-system
-  labels:
-    app: odysseus
-spec:
-  type: ClusterIP
-  clusterIP: None
-  ports:
-    - name: http
-      port: 30070
-      protocol: TCP
-
----
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -67,7 +43,8 @@ spec:
           namespace: traefik-system
       services:
         - name: odysseus
-          port: 30070
+          namespace: odysseus
+          port: 7000
 
 ---
 apiVersion: traefik.io/v1alpha1
@@ -87,7 +64,8 @@ spec:
           namespace: traefik-system
       services:
         - name: odysseus
-          port: 30070
+          namespace: odysseus
+          port: 7000
           scheme: http
   tls:
     certResolver: cloudflare

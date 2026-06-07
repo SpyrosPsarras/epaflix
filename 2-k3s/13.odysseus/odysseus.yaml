@@ -30,6 +30,11 @@ spec:
       labels:
         app: odysseus
     spec:
+      # Odysseus addresses its sidecars by explicit env (CHROMADB_HOST,
+      # SEARXNG_INSTANCE, NTFY_BASE_URL, OLLAMA_BASE_URL) so the injected
+      # per-Service env vars are unneeded; disabled for consistency/safety
+      # across the namespace (searxng crashloops on them).
+      enableServiceLinks: false
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: kubernetes.io/hostname
