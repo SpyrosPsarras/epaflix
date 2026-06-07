@@ -22,6 +22,10 @@ spec:
       labels:
         app: ntfy
     spec:
+      # Disable per-Service env-var injection across this namespace for
+      # consistency/safety (searxng crashloops on it; ntfy is told its
+      # listen addr explicitly via NTFY_* env).
+      enableServiceLinks: false
       containers:
         - name: ntfy
           image: binwiederhier/ntfy:latest

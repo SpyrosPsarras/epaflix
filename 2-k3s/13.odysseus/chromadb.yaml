@@ -21,6 +21,10 @@ spec:
       labels:
         app: chromadb
     spec:
+      # Disable per-Service env-var injection across this namespace to avoid
+      # surprises (consistency with the other odysseus deployments — searxng
+      # outright crashloops on it; chroma is told its endpoints explicitly).
+      enableServiceLinks: false
       containers:
         - name: chromadb
           image: chromadb/chroma:latest
@@ -38,16 +42,21 @@ spec:
             limits:
               memory: "1Gi"
               cpu: "1000m"
+          # chroma:latest deprecated the v1 API — /api/v1/heartbeat now returns
+          # HTTP 410 Gone, so the v1 probe failed the pod indefinitely (0/1,
+          # liveness-killed loop) and dropped it from the Service endpoints, which
+          # is why Odysseus reported "ChromaDB not reachable at chromadb:8000".
+          # Probe the live v2 endpoint instead.
           readinessProbe:
             httpGet:
-              path: /api/v1/heartbeat
+              path: /api/v2/heartbeat
               port: http
             initialDelaySeconds: 10
             periodSeconds: 10
             timeoutSeconds: 5
           livenessProbe:
             httpGet:
-              path: /api/v1/heartbeat
+              path: /api/v2/heartbeat
               port: http
             initialDelaySeconds: 30
             periodSeconds: 30
