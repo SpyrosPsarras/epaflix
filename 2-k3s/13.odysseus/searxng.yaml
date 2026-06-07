@@ -26,6 +26,11 @@ spec:
       labels:
         app: searxng
     spec:
+      # K8s injects per-Service env vars (e.g. SEARXNG_PORT=tcp://10.x.x.x:8080)
+      # for every Service in the namespace. granian mis-parses SEARXNG_PORT as
+      # its --port flag and crashloops ("Invalid value for '--port': 'tcp://...'").
+      # Disable service-link injection — searxng needs none of it (issue #184).
+      enableServiceLinks: false
       containers:
         - name: searxng
           # Pinned from the compose stack.
