@@ -1,0 +1,43 @@
+---
+# ArgoCD Application: Odysseus AI workspace (issue #184).
+#
+# Source:       this repo, path 2-k3s/13.odysseus (kustomization.yaml).
+#               kustomize-managed; the kustomization inflates the ksops
+#               generator which decrypts odysseus-secrets.enc.yaml +
+#               odysseus-data-seed.enc.yaml at render time inside
+#               argocd-repo-server (Issue #29 — sops + age).
+# Destination:  in-cluster `odysseus` namespace.
+# Sync:         MANUAL on first install (syncPolicy: {}) — no automated, no
+#               selfHeal, no prune. The image must be pushed + made public and
+#               the secrets encrypted in git BEFORE this Application exists, so
+#               that when the selfHeal:true app-of-apps auto-creates this
+#               Application there is nothing for an accidental sync to revert
+#               to a broken state (adoption-order rule). After a clean explicit
+#               `argocd app sync odysseus` + Synced/Healthy + a soak window
+#               (~48h–1week), flip to automated:{selfHeal:true, prune:false}
+#               with syncOptions:[ServerSideApply=true]. prune stays OFF until
+#               a week clean (matches servarr/postgres/cert-manager cadence).
+#               Follow-up issues track the selfHeal + prune flips.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: odysseus
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/SpyrosPsarras/epaflix.git
+    targetRevision: main
+    path: 2-k3s/13.odysseus
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: odysseus
+  # MANUAL sync on first install — see header. No automated block yet.
+  syncPolicy: {}
+  ignoreDifferences:
+    - group: ""
+      kind: Service
+      jsonPointers:
+        - /spec/clusterIP
+        - /spec/clusterIPs
+        - /status
