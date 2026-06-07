@@ -90,6 +90,75 @@ This exposes kube-controller-manager (10257/https), kube-scheduler (10259/https)
 metrics so Prometheus (kube-prometheus-stack) can scrape them. Without these binds, those components
 listen only on 127.0.0.1 and the exporter Services show empty Endpoints.
 
+The drop-in above is the *partial* (#121-era) form. It has since been consolidated into the full
+single-source-of-truth file below (issue #148).
+
+**Single source of truth: `/etc/rancher/k3s/config.yaml` (issue #148):**
+All three masters (51/52/53) standardize on `/etc/rancher/k3s/config.yaml` as the **single source of
+truth** for server + kubelet args, and the k3sup-generated systemd unit `ExecStart` is reduced to a
+bare `/usr/local/bin/k3s server`.
+
+**Why:** k3s CLI flags **override** `config.yaml`, so inline `ExecStart` args must NOT coexist with
+the config file — that mixed state was the #148 drift. All three masters had carried their full
+server/kubelet args inline in `ExecStart` while also sharing a partial `config.yaml`; the issue
+originally mis-scoped this to only master-52, but inspection found all three affected.
+
+Canonical consolidated `config.yaml` for a **joining** master (52/53) — the join token is NOT in this
+file:
+
+```yaml
+server: https://<join-endpoint>:6443     # 52 -> 192.168.10.100 (VIP); 53 -> 10.0.0.51
+node-ip: 10.0.0.5X
+advertise-address: 10.0.0.5X
+flannel-iface: eth1
+write-kubeconfig-mode: "644"
+embedded-registry: true
+node-taint:
+  - "node-role.kubernetes.io/control-plane:NoSchedule"
+tls-san:
+  - "192.168.10.100"
+  - "192.168.10.51"
+  - "192.168.10.52"
+  - "192.168.10.53"
+  - "10.0.0.51"
+  - "10.0.0.52"
+  - "10.0.0.53"
+disable:
+  - servicelb
+  - traefik
+etcd-arg:
+  - "auto-compaction-mode=periodic"
+  - "auto-compaction-retention=1h"
+  - "quota-backend-bytes=8589934592"
+etcd-expose-metrics: true
+kubelet-arg:
+  - "resolv-conf=/etc/k3s-resolv.conf"
+kube-controller-manager-arg:
+  - "bind-address=0.0.0.0"
+kube-scheduler-arg:
+  - "bind-address=0.0.0.0"
+# join token NOT in this file — supplied via /etc/systemd/system/k3s.service.env (K3S_TOKEN, mode 0600)
+```
+
+Per-master distinctions:
+- **51** = founding etcd member: the same file but with `cluster-init: true` instead of `server:`,
+  and no join token at all.
+- **52** = joins the VIP `https://192.168.10.100:6443`.
+- **53** = joins 51's real IP `https://10.0.0.51:6443`.
+
+**Join identity:** the join token stays in `/etc/systemd/system/k3s.service.env` as `K3S_TOKEN`
+(mode `0600`, referenced by the unit's `EnvironmentFile=`), NEVER inline in `ExecStart` and NEVER in
+`config.yaml`. (master-53's previously-inline token — a secret-hygiene issue in its 0644 unit — was
+relocated here as part of the reconcile.)
+
+**Gotchas:**
+- `etcd-arg` list entries omit the leading `--` (k3s prepends it); contrast the `--k3s-extra-args`
+  CLI form above, which keeps `--etcd-arg=--…`.
+- `cluster-init: true` and `server:` are **mutually exclusive** — 51 uses the former, 52/53 the latter.
+
+**Forward note (#44):** under system-upgrade-controller bring-up (#44), confirm this `config.yaml`
+drop-in + reduced unit survive controller-driven k3s upgrades, which may regenerate the systemd unit.
+
 ### Get Join Token
 ```bash
 # On master node
