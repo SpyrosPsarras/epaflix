@@ -63,11 +63,11 @@
   ],
   "customManagers": [
     {
-      "description": "Keep the pinned helm + kustomize versions in ci.yml (the secret-free validate gate's Install tools step) fresh. Markers are '# renovate: datasource=... depName=...' placed directly above each KUSTOMIZE_VERSION=/HELM_VERSION= line.",
+      "description": "Keep the pinned helm + kustomize versions in ci.yml (the secret-free validate gate's Install tools step) fresh. Markers are inline trailing comments '# renovate: datasource=... depName=...' on each KUSTOMIZE_VERSION=/HELM_VERSION= line.",
       "customType": "regex",
       "managerFilePatterns": ["/^\\.github/workflows/ci\\.yml$/"],
       "matchStrings": [
-        "#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)\\s*\\n\\s*\\w+_VERSION=(?<currentValue>\\S+)"
+        "\\w+_VERSION=(?<currentValue>\\S+)\\s*#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)"
       ],
       "versioningTemplate": "semver"
     }
