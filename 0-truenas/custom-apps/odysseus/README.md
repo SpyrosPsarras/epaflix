@@ -1,5 +1,11 @@
 # Odysseus — TrueNAS Custom App (GPU agent) + Authentik SSO
 
+> **SUPERSEDED (2026-06-07, #184).** This TrueNAS Custom App path is **no longer the
+> live deployment.** Odysseus now runs on k3s (GitOps tier **`2-k3s/13.odysseus`**),
+> pulling `ghcr.io/spyrospsarras/odysseus:73673258` from GHCR. This runbook is retained
+> for provenance — it documents how the pinned image was originally built and run on the
+> TrueNAS docker engine. For the current deployment see `2-k3s/13.odysseus` and **#184**.
+
 Runbook for deploying **Odysseus** as a TrueNAS SCALE Custom App on `192.168.10.200`,
 fronted by Traefik + Authentik forward-auth at `https://odysseus.epaflix.com`.
 
@@ -53,18 +59,26 @@ SHA with `INSTALL_OPTIONAL=true` and re-tag (e.g. `odysseus:73673258-optional`).
 
 ## 2. Land the image on the TrueNAS docker engine (no registry needed)
 
-The TrueNAS docker socket needs root, so `docker load` runs via `sudo` over SSH.
-`truenas_admin` sudo prompts for a password — run this **interactively** (owner enters
-the sudo password); do **not** script the password.
+**Actual path used:** the image was built **directly on the TrueNAS docker engine**, so
+no cross-host transfer was needed — the `git clone … && docker build …` from section 1
+was run on TrueNAS itself (the docker socket needs root, so via `sudo`), and the image
+was already present on the engine the Custom App runs against. Verify and record the
+immutable image ID so the Custom App is provably pinned:
 
 ```bash
-docker save odysseus:73673258 | ssh truenas_admin@192.168.10.200 'sudo docker load'
-
-# Verify and record the immutable image ID so the Custom App is provably pinned:
 ssh truenas_admin@192.168.10.200 'sudo docker images odysseus:73673258'
 ```
 
-**Pinned image ID:** `<RECORD_IMAGE_ID_HERE_AFTER_LOAD>`
+**Pinned image ID:** `44a5ac0a2364`
+
+> **Alternative — remote builder + transfer.** If you build on a separate host (e.g.
+> `ds-master`) instead of on-engine, ship the image over SSH with `docker load`. The
+> TrueNAS docker socket needs root, so `docker load` runs via `sudo` — run it
+> **interactively** (owner enters the sudo password); do **not** script the password:
+>
+> ```bash
+> docker save odysseus:73673258 | ssh truenas_admin@192.168.10.200 'sudo docker load'
+> ```
 
 > Optional registry path: if a private registry is later preferred over docker-save,
 > `docker tag odysseus:73673258 <registry>/odysseus:73673258 && docker push`, then
