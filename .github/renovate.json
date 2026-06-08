@@ -9,6 +9,7 @@
   "schedule": ["after 2am and before 6am"],
   "prHourlyLimit": 4,
   "prConcurrentLimit": 6,
+  "rebaseWhen": "behind-base-branch",
   "labels": ["renovate"],
   "commitMessagePrefix": "[renovate]",
   "packageRules": [
@@ -31,8 +32,17 @@
       "commitMessageTopic": "authentik"
     },
     {
-      "description": "Auto-merge patches across the repo (image-updater already covers most patch bumps; Renovate picks up anything image-updater misses, e.g. chart-only patches).",
+      "description": "Auto-merge patches across the repo. Renovate now owns all docker digest + patch bumps for the servarr stack end-to-end (Image Updater retired — #192); this rule covers patch bumps repo-wide (incl. chart-only patches), with the dedicated servarr-digest rule below handling digest re-rolls.",
       "matchUpdateTypes": ["patch"],
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": true
+    },
+    {
+      "description": "Servarr image digests: Renovate owns these end-to-end (Image Updater retired — #192). The images: block in 2-k3s/08.servarr/kustomization.yaml is digest-pinned moving tags (:latest etc.); auto-merge digest bumps through the normal PR + validate gate. File+datasource+digest scoped so it cannot reach authentik (different file) or any minor/major/patch update.",
+      "matchFileNames": ["2-k3s/08.servarr/kustomization.yaml"],
+      "matchDatasources": ["docker"],
+      "matchUpdateTypes": ["digest"],
       "automerge": true,
       "automergeType": "pr",
       "platformAutomerge": true
