@@ -122,3 +122,38 @@ spec:
   resources:
     requests:
       storage: 1Ti
+---
+# Unified media PV (issue #195) — single NFS parent export
+# /mnt/pool1/dataset01 mounted on each worker at /mnt/k3s-media.
+# Collapses the four child exports (animes/tvshows/movies/downloads) onto
+# ONE on-wire fsid so intra-export hardlinks work (no EXDEV). Consumers mount
+# this via subPath to keep in-container paths identical.
+# Capacity is nominal (RWX hostPath); >= the dataset capacity.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: servarr-media-pv
+spec:
+  capacity:
+    storage: 9Ti
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: media-storage
+  hostPath:
+    path: /mnt/k3s-media
+    type: Directory
+---
+# Unified media PVC (issue #195)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: servarr-media
+  namespace: servarr
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: media-storage
+  resources:
+    requests:
+      storage: 9Ti
