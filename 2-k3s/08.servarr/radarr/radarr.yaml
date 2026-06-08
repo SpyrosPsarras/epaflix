@@ -70,10 +70,12 @@ spec:
           volumeMounts:
             - name: config
               mountPath: /config
-            - name: movies
+            - name: media
               mountPath: /movies
-            - name: downloads
+              subPath: movies
+            - name: media
               mountPath: /downloads
+              subPath: downloads
           livenessProbe:
             httpGet:
               path: /
@@ -99,12 +101,9 @@ spec:
         - name: config
           persistentVolumeClaim:
             claimName: radarr-config
-        - name: movies
+        - name: media
           persistentVolumeClaim:
-            claimName: servarr-media-movies
-        - name: downloads
-          persistentVolumeClaim:
-            claimName: servarr-media-downloads
+            claimName: servarr-media
 ---
 apiVersion: v1
 kind: Service
