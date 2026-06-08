@@ -190,6 +190,13 @@ grabs.
 4. **Left the Cleanuparr DownloadCleaner unlinked/orphan rule OFF** (verified still
    0). New grabs are now queue-tracked rather than orphaned.
 
+> **⚠️ HISTORICAL (pre-#195) — the EXDEV topology below is now REMOVED.** As of
+> 2026-06-08 the single-`/media`-mount migration (#195, see the "Option A —
+> DELIVERED" section further down) collapsed the four child exports to one and
+> hardlinks now work (`nlink>=2`). The warning below describes the OLD topology
+> and is kept for history. The unlinked rule is STILL OFF, but now for a
+> different reason (pre-fix copy-seeders, not EXDEV) — see that section.
+>
 > **⚠️ DO NOT enable Cleanuparr's DownloadCleaner unlinked/orphan rule in this
 > topology — it would delete ALL the healthy imported seeders (~118 live as of
 > 2026-06-07; was ~139 at the PR #144 firefight, decayed via normal
@@ -271,6 +278,60 @@ currently **zero**) and is **DEFERRED to its own gh issue**. Steps, when trigger
 issues will be opened — (1) the Option-A migration; (2) codify / runbook the
 PVC-only Cleanuparr DB state per **#138**; (3) optional owner-gated quieting of the
 seriesId 272 no-healthy-release loop.
+
+### Option A — DELIVERED 2026-06-08 (#195): single `/media` mount, EXDEV barrier REMOVED
+
+Issue **#195** delivered the single-NFS-export migration. The EXDEV barrier
+described in the "DO NOT enable" warning above is now **structurally REMOVED** for
+the five media pods. State of play:
+
+- **Unified export.** The four child exports of `/mnt/pool1/dataset01`
+  (animes/downloads/movies/tvshows) were collapsed to **ONE** parent export
+  (id **32**, apps:apps 568) of `/mnt/pool1/dataset01`. One export = one on-wire
+  `fsid`, so a cross-directory `link()` no longer returns `EXDEV`.
+- **Single `/media` mount (no subPath).** All five media pods (qbittorrent /
+  sonarr / sonarr2 / radarr / cleanuparr) now mount the whole export at a SINGLE
+  `/media` mount — **no subPath**. Path mapping:
+  `qbt downloads -> /media/downloads`, `sonarr -> /media/tvshows`,
+  `sonarr2 -> /media/animes`, `radarr -> /media/movies`.
+- **Root folders repointed (DB-only, no byte move).** Sonarr/Sonarr2/Radarr root
+  folders repointed to `/media/{tvshows,animes,movies}` and qbt save path to
+  `/media/downloads`; `copyUsingHardlinks=true` on sonarr/sonarr2/radarr.
+- **Hardlink PROVEN.** A real in-pod import is confirmed hardlinked
+  (`nlink>=2`, one device) — the #142 EXDEV barrier is gone.
+
+> **⚠️ kubelet subPath = separate-submount EXDEV GOTCHA — never repeat it.**
+> The FIRST attempt (PR #239) mounted the unified PVC via **subPath** per
+> directory to keep container paths identical. This FAILED: the kubelet
+> materializes **each subPath as a separate NFS submount** (its own mount,
+> distinct device), so `link(2)` across `/downloads` and `/tv` still returned
+> **EXDEV** — exactly the defect we were fixing. The fix (PR #242, issue #240)
+> was to drop subPath entirely and mount the unified PVC **once** at `/media`;
+> downloads + library are then subdirectories under one mount (one device) and
+> hardlinks work. **Rule: to hardlink across two paths in one pod they must share
+> a single non-subPath volumeMount.**
+
+> **Reaper still OFF / DEFERRED — pre-fix copy-seeder reason.** Even though
+> hardlinking is now unblocked, the Cleanuparr **unlinked/orphan rule remains
+> OFF (`enabled=0`)**. A dry-run found **96 of 97** candidates are **pre-fix
+> copy-seeders** — they were imported BEFORE the hardlink fix and are genuinely
+> `nlink=1` (real seeders, not orphans). Arming the rule now would delete ~96
+> healthy seeders. The rule will be armed only after those pre-fix copies age out
+> (re-run dry-run; arm when false-positives = 0) — tracked in a follow-up issue.
+> So #195 **UNBLOCKS** safe reaping but production orphan-reaping is **NOT yet
+> active**.
+
+> **Teardown DEFERRED.** The four OLD child exports + their node mounts + the old
+> four PV/PVC are **retained** as the soak-window rollback (ZFS snapshot
+> `pool1/dataset01@pre-unify-issue195`) AND because bazarr + lingarr still bind
+> the old movies/tvshows claims. Teardown happens only after soak AND after
+> bazarr/lingarr migrate to the unified `/media` mount (follow-up issues).
+
+> **PVC/live-only config (cross-ref #244, #196).** Two changes made during the
+> #195 cutover live ONLY in PVC/live state, not in git: the Cleanuparr
+> unlinked-rule DB config (SQLite `cleanuparr.db`, durability class per #138 —
+> see #196) and the qbittorrent `LocalHostAuth=false` WebUI change (#244).
+> Reconcile/codify per those issues.
 
 ## #137 — newtarr JSON config seed (SOPS)
 
