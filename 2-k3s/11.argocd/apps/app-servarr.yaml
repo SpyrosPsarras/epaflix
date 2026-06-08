@@ -10,67 +10,18 @@
 #               `syncPolicy.automated: { selfHeal: true, prune: false }`.
 #               Flip `prune: true` only after a week of clean operation.
 #
-# Image Updater annotations (argocd-image-updater.argoproj.io/*):
-#   - Tracks images with `update-strategy: digest` so we re-roll whenever
-#     upstream rebuilds the moving tag (`:latest` or `:development`).
-#   - Write-back is `kustomization:.` — Image Updater runs
-#     `kustomize edit set image <name>=<repo>:<tag>@<digest>` against
-#     2-k3s/08.servarr/kustomization.yaml's `images:` block and commits
-#     to `main`.
-#   - Excluded by design (NOT in image-list):
-#       qbittorrent (binhex/arch-qbittorrentvpn — VPN-coupled, manual bumps)
-#       seerr (custom fallenbagel/jellyseerr:preview-OIDC fork tag)
-#       lingarr     (pinned to a custom branch image)
+# Image bumps:   Digest/patch updates for the servarr stack are now delivered
+#                by auto-merged Renovate PRs (see .github/renovate.json) that
+#                bump the digest-pinned `images:` block in
+#                2-k3s/08.servarr/kustomization.yaml. The old ArgoCD Image
+#                Updater git write-back was retired (#192) — it pushed to main
+#                directly, which the required `validate` check rejects.
 
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: servarr
   namespace: argocd
-  annotations:
-    # image-list entries MUST carry the floating tag they ride (digest
-    # strategy needs to know which tag to resolve to a digest).
-    argocd-image-updater.argoproj.io/image-list: |
-      sonarr=lscr.io/linuxserver/sonarr:latest,
-      radarr=lscr.io/linuxserver/radarr:latest,
-      prowlarr=lscr.io/linuxserver/prowlarr:latest,
-      bazarr=lscr.io/linuxserver/bazarr:latest,
-      newtarr=ghcr.io/elfhosted/newtarr:rolling,
-      cleanuparr=ghcr.io/cleanuparr/cleanuparr:latest,
-      flaresolverr=ghcr.io/flaresolverr/flaresolverr:latest,
-      jellyfin=jellyfin/jellyfin:latest,
-      homarr=ghcr.io/ajnart/homarr:latest,
-      bazarr-autotranslate=ghcr.io/zelak312/bazarr_autotranslate:latest
-    # Every tracked image uses digest strategy by default; per-image tag
-    # restrictions go below.
-    argocd-image-updater.argoproj.io/sonarr.update-strategy: digest
-    argocd-image-updater.argoproj.io/sonarr.allow-tags: regexp:^latest$
-    argocd-image-updater.argoproj.io/radarr.update-strategy: digest
-    argocd-image-updater.argoproj.io/radarr.allow-tags: regexp:^latest$
-    argocd-image-updater.argoproj.io/prowlarr.update-strategy: digest
-    argocd-image-updater.argoproj.io/prowlarr.allow-tags: regexp:^latest$
-    argocd-image-updater.argoproj.io/bazarr.update-strategy: digest
-    argocd-image-updater.argoproj.io/bazarr.allow-tags: regexp:^latest$
-    argocd-image-updater.argoproj.io/newtarr.update-strategy: digest
-    argocd-image-updater.argoproj.io/newtarr.allow-tags: regexp:^rolling$
-    argocd-image-updater.argoproj.io/cleanuparr.update-strategy: digest
-    argocd-image-updater.argoproj.io/cleanuparr.allow-tags: regexp:^latest$
-    argocd-image-updater.argoproj.io/flaresolverr.update-strategy: digest
-    argocd-image-updater.argoproj.io/flaresolverr.allow-tags: regexp:^latest$
-    argocd-image-updater.argoproj.io/jellyfin.update-strategy: digest
-    argocd-image-updater.argoproj.io/jellyfin.allow-tags: regexp:^latest$
-    argocd-image-updater.argoproj.io/homarr.update-strategy: digest
-    argocd-image-updater.argoproj.io/homarr.allow-tags: regexp:^latest$
-    argocd-image-updater.argoproj.io/bazarr-autotranslate.update-strategy: digest
-    argocd-image-updater.argoproj.io/bazarr-autotranslate.allow-tags: regexp:^latest$
-    # NOTE: lscr.io/linuxserver/sonarr is used by both `sonarr` and `sonarr2`
-    # Deployments. `kustomize edit set image` matches by image name, so both
-    # roll together to the same digest. This is correct — they ARE the same
-    # image; sonarr2 is a second instance for anime.
-    argocd-image-updater.argoproj.io/write-back-method: git
-    argocd-image-updater.argoproj.io/write-back-target: kustomization:.
-    argocd-image-updater.argoproj.io/git-branch: main
-    argocd-image-updater.argoproj.io/git-credentials: argocd:git-creds
 spec:
   project: default
   source:
