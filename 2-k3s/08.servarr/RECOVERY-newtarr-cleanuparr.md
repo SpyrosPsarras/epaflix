@@ -345,6 +345,18 @@ sops -d 2-k3s/08.servarr/_shared/secrets/newtarr-config-seed.enc.yaml | head
 > `/config/*.json` files (or recreate the PVC). Tracked alongside #135/#177
 > (PVC-only config not yet fully in git).
 
+### Re-assert No Login Mode (proxy_auth_bypass) — #174
+
+The `seed-config` initContainer only writes `general.json` on an *empty* PVC (non-clobber), and newtarr rewrites `/config/*.json` at runtime — so a live UI/edit (or a partial restore) can silently flip `proxy_auth_bypass` back to `false`, which would re-expose newtarr's own login page behind the Authentik forward-auth route. To keep "No Login Mode" durable, the Deployment runs a second initContainer `enforce-auth-bypass` (the app image, `runAsUser: 0`) AFTER `seed-config`. It opens `general.json`, sets ONLY the top-level `proxy_auth_bypass` to `true` (atomic tmp + `os.replace` on the same `/config` filesystem, then `chown 568:568`), and preserves all other keys. It is idempotent — a correct file logs `ok: already true` and writes nothing — and it is write-only-to-`true`, so it can never re-enable in-app login. No Secret / `*.enc.yaml` change is needed: the committed `newtarr-config-seed` already carries `proxy_auth_bypass: true`.
+
+To force it live immediately without waiting for a restart (e.g. if the flag was flipped off in the UI), patch it in-pod then bounce:
+
+```sh
+ssh ubuntu@192.168.10.51 "kubectl -n servarr exec deploy/newtarr -- python3 -c 'import json;p=\"/config/general.json\";c=json.load(open(p));c[\"proxy_auth_bypass\"]=True;json.dump(c,open(p,\"w\"),indent=2)' && kubectl -n servarr rollout restart deploy/newtarr"
+```
+
+> **Caveat:** this initContainer assumes `python3` is on PATH in `ghcr.io/elfhosted/newtarr:rolling`; if a future tag drops it the pod CrashLoops at init and the enforcer must be re-expressed in busybox. Like the #137 seed it does NOT codify the rest of newtarr's live config — it guarantees ONLY that `proxy_auth_bypass` is `true` on each pod start.
+
 ## #138 — Cleanuparr Sonarr custom-blocklist seed (SOPS) + the seriesId 40 S04E13 re-arm guard
 
 Cleanuparr v2+ stores its configuration in **SQLite** (`/config/cleanuparr.db`),
