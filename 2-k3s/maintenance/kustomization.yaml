@@ -28,3 +28,18 @@ resources:
   - image-cleanup-cronjob.yaml
   - node-os-updater-cronjob.yaml
   - postgres-sequence-audit-cronjob.yaml
+  # Issue #182: weekly Cleanuparr Sonarr blocklist drift detector (servarr ns).
+  # Carries its own ConfigMap (compare script) + CronJob; the upstream-only diff
+  # baseline ConfigMap is built by the configMapGenerator below.
+  - cleanuparr-blocklist-drift-cronjob.yaml
+
+# Issue #182: diff baseline for the cleanuparr-blocklist-drift CronJob. Single
+# on-disk source of truth = files/cleanuparr-blocklist-expected.txt (verbatim
+# upstream Cleanuparr/Cleanuparr `blacklist`, public data -> NOT a Secret). The
+# generated name carries a content-hash suffix; kustomize rewrites the CronJob
+# volume reference automatically.
+configMapGenerator:
+  - name: cleanuparr-blocklist-expected
+    namespace: servarr
+    files:
+      - files/cleanuparr-blocklist-expected.txt
