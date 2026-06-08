@@ -13,23 +13,17 @@
 #               on selfHeal, picked as the lowest-risk canary for the
 #               repo-wide prune rollout tracked in issue #21.
 #
-# Image Updater (argocd-image-updater.argoproj.io/*):
-#   - Tracks ghcr.io/goauthentik/server with semver strategy constrained to
-#     the currently-pinned MINOR (^2026\.2\.\d+$). Image Updater does NOT
-#     bump the chart version, so MINOR changes need a manual two-line edit
-#     in 2-k3s/07.authentik-deployment/kustomization.yaml (`helmCharts.version`
-#     + `images.newTag`) AND the allow-tags regex here.
-#   - Write-back is `kustomization:.` — Image Updater runs
-#     `kustomize edit set image ghcr.io/goauthentik/server=…:<newtag>`
-#     against 2-k3s/07.authentik-deployment/kustomization.yaml's `images:`
-#     block and commits to `main`, same pattern as the servarr stack.
+# Image bumps:
+#   Authentik image + chart bumps are delivered by Renovate (grouped in one
+#   PR via the `authentik` packageRule in .github/renovate.json so the chart
+#   version and container image move together; MINOR/MAJOR are manual-merge,
+#   only patch auto-merges). The old ArgoCD Image Updater git write-back was
+#   retired (#192).
 #
 # Why single-source kustomize-with-helm and not Helm multi-source:
-#   argocd-image-updater write-back for multi-source Helm Applications goes
-#   through ArgoCD's gRPC `UpdateSpec`, which validates every source's repo
-#   creds — for `charts.goauthentik.io` it fails even though the repo is
-#   public ("could not get creds for repo"). The kustomize-with-helm route
-#   reduces the Application to a single git source and avoids that path.
+#   Keeping the Application a single git source (kustomize-with-helm inflating
+#   the upstream chart at build time) avoids ArgoCD's multi-source Helm repo
+#   credential validation path for `charts.goauthentik.io`.
 #
 # Secrets:
 #   The 3 sensitive values (AUTHENTIK_SECRET_KEY, AUTHENTIK_POSTGRESQL__PASSWORD,
@@ -44,15 +38,6 @@ kind: Application
 metadata:
   name: authentik
   namespace: argocd
-  annotations:
-    argocd-image-updater.argoproj.io/image-list: |
-      authentik=ghcr.io/goauthentik/server
-    argocd-image-updater.argoproj.io/authentik.update-strategy: semver
-    argocd-image-updater.argoproj.io/authentik.allow-tags: regexp:^2026\.5\.\d+$
-    argocd-image-updater.argoproj.io/write-back-method: git
-    argocd-image-updater.argoproj.io/write-back-target: kustomization:.
-    argocd-image-updater.argoproj.io/git-branch: main
-    argocd-image-updater.argoproj.io/git-credentials: argocd:git-creds
 spec:
   project: default
   source:
