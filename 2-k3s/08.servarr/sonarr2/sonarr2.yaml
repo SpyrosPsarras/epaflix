@@ -45,10 +45,12 @@ spec:
           volumeMounts:
             - name: config
               mountPath: /config
-            - name: animes
+            - name: media
               mountPath: /animes
-            - name: downloads
+              subPath: animes
+            - name: media
               mountPath: /downloads
+              subPath: downloads
           livenessProbe:
             httpGet:
               path: /
@@ -74,12 +76,9 @@ spec:
         - name: config
           persistentVolumeClaim:
             claimName: sonarr2-config
-        - name: animes
+        - name: media
           persistentVolumeClaim:
-            claimName: servarr-media-animes
-        - name: downloads
-          persistentVolumeClaim:
-            claimName: servarr-media-downloads
+            claimName: servarr-media
 ---
 apiVersion: v1
 kind: Service

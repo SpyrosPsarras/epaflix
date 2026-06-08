@@ -84,6 +84,23 @@ spec:
               mountPath: /config
             - name: media
               mountPath: /data
+              subPath: downloads
+            # Read-only library mounts so the unlinked-orphan detector can
+            # see hardlinks across the unified export (issue #195 / #142).
+            # The unlinked rule itself stays DISABLED (in-app DB config);
+            # these mounts only give Cleanuparr visibility into nlink>1.
+            - name: media
+              mountPath: /tv
+              subPath: tvshows
+              readOnly: true
+            - name: media
+              mountPath: /animes
+              subPath: animes
+              readOnly: true
+            - name: media
+              mountPath: /movies
+              subPath: movies
+              readOnly: true
           resources:
             requests:
               memory: "512Mi"
@@ -111,7 +128,7 @@ spec:
             claimName: cleanuparr-config
         - name: media
           persistentVolumeClaim:
-            claimName: servarr-media-downloads
+            claimName: servarr-media
         # SOPS-encrypted Sonarr custom-blocklist seed (issue #138 — the
         # seriesId 40 S04E13 re-arm guard), reconciled by the servarr ksops
         # generator from _shared/secrets/cleanuparr-blocklist-seed.enc.yaml.
