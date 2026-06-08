@@ -396,9 +396,98 @@ SQLite-resident and intentionally KEPT — do not touch it.
 across **145 hunt intervals** with **zero** recurrence (no post-fix grabs /
 strikes / Action-Required events).
 
-**(iv) Static-snapshot caveat.** This is a frozen point-in-time snapshot of
-upstream `flmorg/cleanuperr`; it will NOT auto-track upstream blocklist updates
-(unlike the Radarr list, which still consumes the live upstream URL). A refresh
-mechanism (periodic re-snapshot runbook, or switch the Sonarr list to the live
-URL while appending the local re-arm guard) is tracked as a follow-up under
-umbrella **#180**.
+**(iv) Static-snapshot caveat (RESOLVED via drift-detector, #182).** This is a
+frozen point-in-time snapshot of upstream `Cleanuparr/Cleanuparr` (`flmorg/cleanuperr`
+redirects there); it will NOT auto-track upstream blocklist updates (unlike the
+Radarr list, which still consumes the live upstream URL). Rather than auto-merge
+(rejected — overkill for ~1 upstream change/yr, and the git write-back to `main` is
+broken per #192), the chosen mechanism is a **weekly drift-DETECTOR CronJob**
+`cleanuparr-blocklist-drift` (`2-k3s/maintenance/cleanuparr-blocklist-drift-cronjob.yaml`,
+#182): it diffs the live upstream `blacklist` against a committed **upstream-only**
+baseline (`2-k3s/maintenance/files/cleanuparr-blocklist-expected.txt`, the local
+seriesId 40 overlay deliberately excluded so it never false-positives) and exits
+non-zero on drift or fetch failure, firing `KubeJobFailed` + the scoped
+`CleanuparrBlocklistDriftCheckFailed` alert. The re-merge/re-encrypt is the **manual
+runbook** in the "#182 — Drift refresh" subsection below. (Earlier follow-up
+umbrella **#180** is superseded by this detector.)
+
+## #182 — Drift refresh (manual re-snapshot when the drift alert fires)
+
+When **`CleanuparrBlocklistDriftCheckFailed`** (or the chart's generic
+`KubeJobFailed` for the `cleanuparr-blocklist-drift` Job, namespace `servarr`)
+fires, upstream has changed (or the fetch failed). First check the failed Job's
+logs for the printed diff:
+
+```sh
+kubectl -n servarr logs job/$(kubectl -n servarr get jobs \
+  -l app=cleanuparr-blocklist-drift --sort-by=.metadata.creationTimestamp \
+  -o name | tail -1 | cut -d/ -f2)
+```
+
+If it is a transient fetch failure, no action is needed (next weekly run clears
+it). If it is real drift, re-snapshot — refreshing BOTH the SOPS seed's upstream
+portion AND the diff baseline, **without ever retyping the seriesId 40 regex**:
+
+```sh
+# 1. Pull the live upstream blacklist (single shared upstream file -- there is NO
+#    separate sonarr file upstream; the local filename is an Epaflix convention).
+curl -fsSL https://raw.githubusercontent.com/Cleanuparr/Cleanuparr/refs/heads/main/blacklist \
+  > /tmp/blacklist-upstream
+
+# 2. Recover the local overlay VERBATIM from the committed seed -- do NOT retype it
+#    (scrub-media-titles rule; it carries the seriesId 40 re-arm guard only). The
+#    overlay = the marker line onward. (yq if available; otherwise the python
+#    fallback below avoids a yq dependency.)
+sops -d 2-k3s/08.servarr/_shared/secrets/cleanuparr-blocklist-seed.enc.yaml \
+  | python3 -c 'import sys,yaml; \
+      v=yaml.safe_load(sys.stdin)["stringData"]["custom-blocklist-sonarr.txt"]; \
+      ls=v.split("\n"); \
+      i=next(j for j,l in enumerate(ls) if l.strip()=="# --- Epaflix custom entries ---"); \
+      sys.stdout.write("\n".join(ls[i:]))' \
+  > /tmp/overlay
+
+# 3a. Refresh the drift baseline (UPSTREAM-ONLY) -- this is the single source of
+#     truth for the detector's configMapGenerator:
+cp /tmp/blacklist-upstream \
+   2-k3s/maintenance/files/cleanuparr-blocklist-expected.txt
+
+# 3b. Re-merge upstream + overlay into the seed body, preserving the 2-line
+#     Epaflix header comments that prefix the seed (keep them OUT of the baseline
+#     above -- baseline is pure upstream). Build the merged body OUTSIDE the repo:
+{ printf '# Cleanuparr custom Sonarr blocklist\n'; \
+  printf '# Composed: upstream Cleanuparr/Cleanuparr blacklist + Epaflix custom entries (seriesId 40 re-arm guard)\n'; \
+  cat /tmp/blacklist-upstream; printf '\n'; cat /tmp/overlay; } \
+  > /tmp/custom-blocklist-sonarr.txt
+
+# 4. Re-encrypt the seed OVER the committed file (same recipe as #137 newtarr):
+#    build a PLAINTEXT kind:Secret (name cleanuparr-blocklist-seed, ns servarr,
+#    type Opaque, stringData key custom-blocklist-sonarr.txt = the merged body)
+#    OUTSIDE the repo (/tmp/seed-plain.yaml), then:
+sops --filename-override \
+  2-k3s/08.servarr/_shared/secrets/cleanuparr-blocklist-seed.enc.yaml \
+  -e /tmp/seed-plain.yaml \
+  > 2-k3s/08.servarr/_shared/secrets/cleanuparr-blocklist-seed.enc.yaml
+shred -u /tmp/seed-plain.yaml
+
+# 5. Live-apply the merged file. The non-clobber seed-config initContainer will
+#    NOT overwrite a populated PVC, so push the file into the running pod once
+#    (the sonarr_blocklist_path pointer is unchanged, still SQLite-resident):
+kubectl -n servarr cp /tmp/custom-blocklist-sonarr.txt \
+  "$(kubectl -n servarr get pod -l app=cleanuparr -o name | head -1 | cut -d/ -f2)":/config/custom-blocklist-sonarr.txt
+kubectl -n servarr rollout restart deploy/cleanuparr   # reload patterns
+
+# 6. Commit the refreshed seed + baseline via a branch+PR (rebase onto origin/main,
+#    push --force-with-lease, wait for `validate`, gh pr merge --merge). The drift
+#    Job goes green on its next weekly run. Destroy all /tmp plaintext.
+shred -u /tmp/seed-plain.yaml 2>/dev/null; rm -f /tmp/blacklist-upstream /tmp/overlay /tmp/custom-blocklist-sonarr.txt
+```
+
+> **Two-place update caveat:** the seed body (step 3b/4) and the baseline file
+> (step 3a) must both be refreshed in lockstep, or the detector will keep alerting
+> against a stale baseline. The baseline is the upstream-only slice; the seed is
+> upstream + the 2 Epaflix header comments + the overlay.
+>
+> **Live-apply caveat (carried from #138):** the non-clobber `seed-config`
+> initContainer means a refreshed seed does NOT auto-apply to the existing PVC
+> (step 5 is the live push). The `sonarr_blocklist_path` pointer remains
+> SQLite-resident / manual on a PVC rebuild (#138 (ii)).

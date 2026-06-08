@@ -1,0 +1,117 @@
+---
+# Weekly Cleanuparr Sonarr blocklist drift detector (Issue #182).
+#
+# The Cleanuparr Sonarr content-blocker reads a LOCAL file
+# /config/custom-blocklist-sonarr.txt, codified in git as the SOPS seed
+# cleanuparr-blocklist-seed (2-k3s/08.servarr/_shared/secrets/) and restored on a
+# fresh PVC by the cleanuparr seed-config initContainer (#138). That file is the
+# upstream Cleanuparr/Cleanuparr `blacklist` PLUS a 2-line local overlay (the
+# seriesId 40 re-arm guard regex). Because it is a static snapshot it does NOT
+# auto-track upstream blocklist changes.
+#
+# This Job is a DETECTOR, not an auto-updater. Weekly it fetches the live upstream
+# `blacklist`, normalizes both sides identically (trim trailing whitespace, drop
+# blank lines, sort -> order-insensitive), and diffs the live upstream against the
+# committed UPSTREAM-ONLY baseline (the local seriesId 40 overlay is intentionally
+# NOT part of the baseline, so it can never produce a false positive). It exits
+# non-zero on ANY drift OR on a fetch failure, so the chart's default KubeJobFailed
+# rule + the scoped CleanuparrBlocklistDriftCheckFailed PrometheusRule fire. The
+# actual re-snapshot/re-encrypt stays a MANUAL runbook in
+# 2-k3s/08.servarr/RECOVERY-newtarr-cleanuparr.md (#182 section).
+#
+# The baseline ConfigMap cleanuparr-blocklist-expected is generated from the plain
+# file 2-k3s/maintenance/files/cleanuparr-blocklist-expected.txt by the
+# configMapGenerator in kustomization.yaml (public upstream data -> NOT a Secret).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cleanuparr-blocklist-drift-script
+  namespace: servarr
+data:
+  check.sh: |
+    set -eu
+    UPSTREAM_URL="https://raw.githubusercontent.com/Cleanuparr/Cleanuparr/refs/heads/main/blacklist"
+    echo "=== cleanuparr blocklist drift check @ $(date -u +%FT%TZ) ==="
+
+    # 1. Fetch upstream. Fail LOUD on a network error so the alert distinguishes
+    #    'cannot reach upstream' from 'drift' -- both warrant a look.
+    if ! wget -q -O /tmp/upstream "$UPSTREAM_URL"; then
+      echo "ERROR: upstream fetch failed ($UPSTREAM_URL)"
+      exit 1
+    fi
+
+    # 2. Normalize both sides identically: strip trailing whitespace, drop blank
+    #    lines, sort (order-insensitive, robust to trailing-newline noise).
+    norm() { sed 's/[[:space:]]*$//' "$1" | sed '/^$/d' | LC_ALL=C sort; }
+    norm /expected/cleanuparr-blocklist-expected.txt > /tmp/exp.n
+    norm /tmp/upstream                                > /tmp/up.n
+
+    # 3. Diff. The /expected baseline is upstream-ONLY (the local seriesId 40
+    #    overlay was stripped at commit time), so any non-empty diff == a real
+    #    upstream divergence -- the local regex is never compared.
+    if diff -u /tmp/exp.n /tmp/up.n > /tmp/diff.txt; then
+      echo "OK: committed upstream baseline matches live upstream (0 drift)."
+      exit 0
+    fi
+    echo "DRIFT DETECTED -- upstream Cleanuparr/Cleanuparr 'blacklist' has changed:"
+    echo "  added-upstream (need to merge into seed + baseline):"
+    grep '^+' /tmp/diff.txt | grep -v '^+++' | sed 's/^+/    + /'
+    echo "  removed-upstream:"
+    grep '^-' /tmp/diff.txt | grep -v '^---' | sed 's/^-/    - /'
+    echo
+    echo "ACTION: run the manual re-snapshot runbook in"
+    echo "  2-k3s/08.servarr/RECOVERY-newtarr-cleanuparr.md (#182 section)."
+    exit 1
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cleanuparr-blocklist-drift
+  namespace: servarr
+  labels:
+    app: cleanuparr-blocklist-drift
+spec:
+  # Mondays 06:30 UTC = 08:30 Europe/Oslo (just after postgres-sequence-audit at
+  # 06:00). Weekly cadence -- proportional to ~1 upstream change/year.
+  schedule: "30 6 * * 1"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 6
+  failedJobsHistoryLimit: 6
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 2592000  # keep 30 days
+      template:
+        metadata:
+          labels:
+            app: cleanuparr-blocklist-drift
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: drift-check
+              image: alpine:3.20
+              imagePullPolicy: IfNotPresent
+              command: ["/bin/sh", "/script/check.sh"]
+              volumeMounts:
+                - name: expected
+                  mountPath: /expected
+                  readOnly: true
+                - name: script
+                  mountPath: /script
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "500m"
+                  memory: "256Mi"
+          volumes:
+            - name: expected
+              configMap:
+                name: cleanuparr-blocklist-expected
+                defaultMode: 0444
+            - name: script
+              configMap:
+                name: cleanuparr-blocklist-drift-script
+                defaultMode: 0444

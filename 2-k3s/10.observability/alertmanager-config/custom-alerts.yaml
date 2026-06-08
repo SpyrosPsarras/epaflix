@@ -133,3 +133,16 @@ spec:
           annotations:
             summary: "K3s nodes running mixed kubelet versions (roll in progress)"
             description: "K3s nodes are on {{ $value }} distinct kubelet versions — likely a rolling upgrade in progress. Confirm this was an intended, reviewed version bump (pinned spec.version, issue #130). See the Future-Upgrade SOP: 2-k3s/maintenance/system-upgrade/README.md."
+
+    - name: cleanuparr-blocklist
+      interval: 60s
+      rules:
+        - alert: CleanuparrBlocklistDriftCheckFailed
+          expr: kube_job_failed{namespace="servarr", job_name=~"cleanuparr-blocklist-drift.*"} > 0
+          for: 5m
+          labels:
+            severity: warning
+            component: servarr
+          annotations:
+            summary: "Cleanuparr Sonarr blocklist drifted from upstream (or check failed)"
+            description: "The weekly cleanuparr-blocklist-drift Job ({{ $labels.job_name }}) failed — either upstream Cleanuparr/Cleanuparr 'blacklist' diverged from the committed snapshot, or the upstream fetch failed. Inspect the Job logs for the diff, then run the manual re-snapshot runbook in 2-k3s/08.servarr/RECOVERY-newtarr-cleanuparr.md (#182). Keeps the local seriesId 40 re-arm guard; resolves the #138 static-snapshot caveat (detect-and-alert, manual re-snapshot)."
