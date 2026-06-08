@@ -29,11 +29,46 @@ jobs:
       - name: Install tools
         run: |
           set -euo pipefail
-          # helm
-          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-          # kustomize
-          curl -fsSL "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
-          sudo mv kustomize /usr/local/bin/
+          # Pinned, direct release-asset downloads only — NO unauthenticated
+          # GitHub API tag lookup (the install_kustomize.sh rate-limit flake,
+          # issue #164) and NO curl|bash from a moving branch. Renovate keeps
+          # the two pins below fresh via a customManager regex.
+          KUSTOMIZE_VERSION=5.8.1  # renovate: datasource=github-releases depName=kubernetes-sigs/kustomize
+          HELM_VERSION=3.21.0      # renovate: datasource=github-releases depName=helm/helm
+
+          # Bounded retry: 3 attempts, 5s then 10s backoff, so a transient
+          # CDN blip self-heals instead of red-flagging the required check.
+          dl() {
+            url=$1; out=$2; n=0
+            until curl -fsSL -o "$out" "$url"; do
+              n=$((n+1))
+              if [ "$n" -ge 3 ]; then
+                echo "download failed after 3 attempts: $url" >&2
+                return 1
+              fi
+              sleep $((n*5))
+            done
+          }
+
+          tmp=$(mktemp -d)
+
+          # helm — official dist CDN (get.helm.sh), with checksum verification.
+          # Keep the canonical asset filename: the published .sha256sum line
+          # references "helm-v${HELM_VERSION}-linux-amd64.tar.gz", so `sha256sum -c`
+          # must run against that exact name.
+          helm_tgz="helm-v${HELM_VERSION}-linux-amd64.tar.gz"
+          dl "https://get.helm.sh/${helm_tgz}" "$tmp/${helm_tgz}"
+          dl "https://get.helm.sh/${helm_tgz}.sha256sum" "$tmp/${helm_tgz}.sha256sum"
+          ( cd "$tmp" && sha256sum -c "${helm_tgz}.sha256sum" )
+          tar -xzf "$tmp/${helm_tgz}" -C "$tmp"
+          sudo mv "$tmp/linux-amd64/helm" /usr/local/bin/helm
+
+          # kustomize — GitHub release-asset CDN (302 -> objects.githubusercontent.com)
+          dl "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv${KUSTOMIZE_VERSION}/kustomize_v${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" "$tmp/kustomize.tar.gz"
+          tar -xzf "$tmp/kustomize.tar.gz" -C "$tmp"
+          sudo mv "$tmp/kustomize" /usr/local/bin/kustomize
+
+          rm -rf "$tmp"
           helm version
           kustomize version
 
