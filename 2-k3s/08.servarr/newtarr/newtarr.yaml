@@ -74,6 +74,48 @@ spec:
             - name: seed
               mountPath: /seed
               readOnly: true
+        # ENFORCE the Authentik forward-auth "No Login Mode" (#134/#174).
+        # Runs AFTER seed-config so a fresh PVC is seeded first. Surgically
+        # forces ONLY general.json's top-level proxy_auth_bypass=true and
+        # preserves every other key. Idempotent: a correct PVC logs
+        # "ok: already true" and writes nothing. It can ONLY set the flag to
+        # true (keep Authentik in front) — it never writes false, so it can
+        # never re-enable newtarr's own login behind the trusted route.
+        # NOTE: assumes the newtarr app image provides `python3` on PATH (it is
+        # a Python v1.0.0 rewrite). If a future tag drops python3 from PATH this
+        # initContainer CrashLoops the pod — swap to the busybox+jq/sed pattern
+        # used by seed-config (tracked: open a follow-up if it ever fires).
+        - name: enforce-auth-bypass
+          image: ghcr.io/elfhosted/newtarr:rolling
+          securityContext:
+            runAsUser: 0
+          command:
+            - python3
+            - -c
+            - |
+              import json, os
+              p = "/config/general.json"
+              try:
+                  with open(p) as fh:
+                      cfg = json.load(fh)
+                  if not isinstance(cfg, dict):
+                      raise ValueError("not a JSON object")
+              except Exception as e:
+                  print(f"general.json absent/corrupt ({e!r}); writing minimal")
+                  cfg = {}
+              if cfg.get("proxy_auth_bypass") is True:
+                  print("ok: already true")
+              else:
+                  cfg["proxy_auth_bypass"] = True
+                  tmp = p + ".tmp"
+                  with open(tmp, "w") as fh:
+                      json.dump(cfg, fh, indent=2)
+                  os.replace(tmp, p)
+                  os.chown(p, 568, 568)
+                  print("enforced: proxy_auth_bypass=true")
+          volumeMounts:
+            - name: config
+              mountPath: /config
       containers:
         - name: newtarr
           image: ghcr.io/elfhosted/newtarr:rolling
@@ -95,7 +137,10 @@ spec:
             # Auth is handled ENTIRELY by Authentik forward-auth at Traefik
             # (issue #134). newtarr's in-app login is disabled via its
             # Authentication Mode = "No Login Mode" (general.proxy_auth_bypass=true,
-            # persisted in the /config PVC, NOT an env var). NOTE: newtarr v1.0.0
+            # persisted in the /config PVC, NOT an env var). This flag is now
+            # ENFORCED declaratively on every pod start by the
+            # enforce-auth-bypass initContainer above (#174), so a live UI edit
+            # can't silently re-expose the in-app login. NOTE: newtarr v1.0.0
             # does NOT read LOCAL_NETWORK / BYPASS_AUTH_FOR_LOCAL_ADDRESSES — those
             # were inert and have been removed.
             - name: STATEFUL_EXPIRATION_HOURS
