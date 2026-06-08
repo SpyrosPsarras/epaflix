@@ -71,11 +71,7 @@ spec:
             - name: config
               mountPath: /config
             - name: media
-              mountPath: /movies
-              subPath: movies
-            - name: media
-              mountPath: /downloads
-              subPath: downloads
+              mountPath: /media
           livenessProbe:
             httpGet:
               path: /
