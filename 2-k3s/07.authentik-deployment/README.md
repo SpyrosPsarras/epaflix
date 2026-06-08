@@ -340,6 +340,86 @@ For applications that don't support OIDC, use Authentik's Forward Auth (Proxy Pr
 5. Click **Remove** (trash icon)
 6. User loses access to all services in that group on next authentication
 
+### Admin / Automation API tokens
+
+This is the single source of truth for how Authentik API tokens are issued and
+used. Three distinct paths exist; pick the right one:
+
+#### 1. Durable service-account token — the sanctioned path for IaC / automation (#185)
+
+Any automation that **mutates Authentik objects** (providers, outpost provider
+arrays, groups, bindings) during deploys uses a durable machine identity, **not**
+an ad-hoc human token. This identity is created **declaratively** by a blueprint
+shipped inside a SOPS-encrypted Secret:
+
+- **Source of truth**: `authentik-iac-blueprint.enc.yaml` (this directory),
+  decrypted by ksops on `argocd-repo-server`, mounted via the chart's
+  `blueprints.secrets` (`helm-values.yaml`). The Authentik worker auto-applies
+  the `*.yaml` key on sync.
+- **What the blueprint creates**:
+  - `ak-iac` — service account (`authentik_core.user`, `type: service_account`,
+    path `users/service-accounts`).
+  - membership in the built-in **`authentik Admins`** superuser group.
+  - `ak-iac-token` — a **non-expiring** `intent: api` token whose `key` lives
+    only in the SOPS Secret and (mirrored, for break-glass) in the git-ignored
+    `.github/instructions/secrets.yml` as `authentik_iac_service_account_token`.
+
+Because the token is declared in git-as-SOPS, it survives Authentik DB rebuilds
+(re-applied from the blueprint) and never silently expires mid-deploy — which is
+exactly the failure #185 fixed (the old personal token expired twice mid-run
+during the Odysseus SSO bring-up #183).
+
+**Use it** (read the value from `secrets.yml` / the SOPS Secret; never paste a
+literal token into git):
+
+```bash
+# Verify the service-account token is live and superuser:
+curl -s -H "Authorization: Bearer <AUTHENTIK_IAC_SERVICE_ACCOUNT_TOKEN>" \
+  https://auth.epaflix.com/api/v3/core/users/me/ | jq '.user.username, .user.is_superuser'
+# Expect: "ak-iac"  (and is_superuser true via authentik Admins)
+```
+
+**Rotation**: edit the `key` in `authentik-iac-blueprint.enc.yaml`
+(`sops 2-k3s/07.authentik-deployment/authentik-iac-blueprint.enc.yaml`), update
+the mirror in `secrets.yml`, commit, sync. The blueprint upserts the token on
+the existing `ak-iac-token` identifier.
+
+#### 2. Personal superuser admin token — RETIRED (#175)
+
+The standing, long-lived **personal** superuser admin API token (formerly the
+`secrets.yml` key `authentik_admin_api_token`) has been **retired**. There is
+**no** standing personal admin token kept at rest anywhere — not in
+`secrets.yml`, not in any SOPS file, not in cluster Secrets. The live token
+object was deleted in Authentik by the owner. The durable service-account token
+above (#185) is its supervised replacement for automation.
+
+#### 3. On-demand scoped + expiring token — for one-off human use
+
+When a human needs a one-off privileged API call (and does not want to use the
+service-account token), mint a short-lived, scoped token by hand:
+
+1. **Mint**: Authentik UI → **Directory → Tokens → Create** (or create a
+   dedicated service account and issue its token). Set an explicit **short
+   expiry** and a **least-privilege** intent — only the access the task needs.
+2. **Use it** for the single task at hand.
+3. **Delete it immediately** afterward: **Directory → Tokens** → trash icon. Do
+   not leave the token at rest or copy it into a file.
+
+**Verify** it is live (and later that it is gone):
+
+```bash
+curl -s -o /dev/null -w "%{http_code}" -m 10 \
+  -H "Authorization: Bearer <SCOPED_TOKEN>" \
+  https://auth.epaflix.com/api/v3/core/users/me/
+```
+
+`200` while valid; `401`/`403` once deleted or expired.
+
+> Issue #134 created the original standing personal admin token; #175 retired it;
+> #185 introduced the durable declarative service-account token as the standing
+> automation identity. This section supersedes the standalone runbook drafted in
+> PR #225.
+
 ### Google OAuth Configuration
 
 To allow users to sign in with Google (creates accounts but doesn't grant app access):
