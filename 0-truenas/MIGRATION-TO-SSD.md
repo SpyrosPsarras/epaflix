@@ -387,11 +387,18 @@ sudo zfs list Pool1 | grep iscsi
 
 **NFS Exports - Verify correct paths:**
 
+> **NOTE (issue #195):** the servarr media is now served by ONE **unified NFS
+> export** of the parent `/mnt/pool1/dataset01` (id 32), mounted by the media
+> pods at a single `/media`. The four child exports below are kept TEMPORARILY
+> for bazarr/lingarr + rollback and will be torn down after soak. See
+> `0-truenas/README.md` and `2-k3s/08.servarr/RECOVERY-newtarr-cleanuparr.md`.
+
 The following NFS exports should remain on Pool1 (HDD) for media:
-- `/mnt/pool1/dataset01/animes`
-- `/mnt/pool1/dataset01/downloads`
-- `/mnt/pool1/dataset01/movies`
-- `/mnt/pool1/dataset01/tvshows`
+- `/mnt/pool1/dataset01` (unified export id 32 — the live media export)
+- `/mnt/pool1/dataset01/animes` (legacy child export, retained pending teardown)
+- `/mnt/pool1/dataset01/downloads` (legacy child export, retained pending teardown)
+- `/mnt/pool1/dataset01/movies` (legacy child export, retained pending teardown)
+- `/mnt/pool1/dataset01/tvshows` (legacy child export, retained pending teardown)
 
 New NFS export for VM backups:
 - `/mnt/Pool1/proxmox-vm-backups`

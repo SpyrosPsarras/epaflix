@@ -1,5 +1,18 @@
 ---
 # Media Storage PersistentVolumes - Using hostPath to node NFS mounts
+#
+# LIVE CLAIM (issue #195): `servarr-media` (hostPath /mnt/k3s-media, the unified
+# parent NFS export id 32 of /mnt/pool1/dataset01) is the SINGLE live media claim.
+# All five media pods (qbittorrent/sonarr/sonarr2/radarr/cleanuparr) mount it once
+# at /media (no subPath) so intra-export hardlinks work (nlink>=2, no EXDEV).
+#
+# RETAINED-PENDING-TEARDOWN: the four legacy PV/PVC below
+# (servarr-media-{animes,tvshows,movies,downloads}, hostPath /mnt/k3s-{animes,...})
+# are KEPT only because bazarr + lingarr still bind the old movies/tvshows claims
+# (migration pending) and they are the #195 soak-window rollback. They will be
+# removed after soak AND after bazarr/lingarr migrate to the unified /media mount
+# (follow-up issues). Do NOT add new consumers of these legacy claims.
+#
 # Each node has NFS mounts at /mnt/k3s-animes, /mnt/k3s-movies, /mnt/k3s-tvshows, /mnt/k3s-downloads
 # These PVs use hostPath to access the node-mounted NFS shares
 
