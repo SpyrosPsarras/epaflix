@@ -101,8 +101,12 @@ Prerequisites (owner-side, NOT part of the manifest PR):
    then make the package **public** (k3s has no GHCR imagePullSecret). Verify
    `sudo k3s ctr images pull ghcr.io/spyrospsarras/odysseus:73673258` on a
    worker.
-2. Regenerate the (expired) Authentik admin API token and re-verify `pk83` /
-   slug `odysseus` / `external_host` — expect zero edits.
+2. Re-verify `pk83` / slug `odysseus` / `external_host` — expect zero edits.
+   The standing Authentik admin API token was **retired by #175**, so there is
+   nothing to regenerate; do this check in the UI, or if scripting, mint a
+   short-lived scoped token on demand per the **Admin API Token** runbook in
+   [../07.authentik-deployment/README.md](../07.authentik-deployment/README.md)
+   and delete it immediately after use.
 
 Then (per the Epaflix adoption-order rule — git aligned BEFORE the Application
 exists):

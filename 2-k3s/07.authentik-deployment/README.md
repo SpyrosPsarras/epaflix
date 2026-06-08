@@ -331,6 +331,37 @@ For applications that don't support OIDC, use Authentik's Forward Auth (Proxy Pr
 5. Select multiple users
 6. Click **Add**
 
+### Admin API Token
+
+The standing, long-lived superuser admin API token (formerly the `secrets.yml` key
+`authentik_admin_api_token`) has been **RETIRED** under issue #175. There is now **NO**
+standing admin token kept at rest anywhere — not in `secrets.yml`, not in any SOPS file,
+not in cluster Secrets. The #134 automation that originally required it (newtarr forward-auth
+provider/outpost wiring) is complete, so nothing depends on a persistent admin token.
+
+**On-demand pattern** — when a future one-off API task genuinely needs admin access (e.g.
+wiring a new SSO provider/outpost, scripting a bulk change):
+
+1. **Mint a short-lived, scoped token**: Authentik UI → **Directory → Tokens → Create**
+   (or create a dedicated service account and issue its token). Set an explicit **short
+   expiry** and a **least-privilege** intent — only the access the task actually needs.
+2. **Use it** for the single task at hand.
+3. **Delete it immediately** afterward: **Directory → Tokens** → trash icon. Do not leave
+   the token sitting at rest or copy it into a file.
+
+**Verify** the token is live (and later that it is gone):
+
+```bash
+curl -s -o /dev/null -w "%{http_code}" -m 10 \
+  -H "Authorization: Bearer <SCOPED_TOKEN>" \
+  https://auth.epaflix.com/api/v3/core/users/me/
+```
+
+`200` while the token is valid; `401`/`403` once it has been deleted or has expired.
+
+> Issue #134 created the original standing admin token; issue #175 retired it in favour of
+> this mint-on-demand-then-delete workflow.
+
 ### Removing Service Access
 
 1. Admin logs into Authentik
