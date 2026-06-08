@@ -174,11 +174,17 @@ Hardening already baked into the compose: `AUTH_ENABLED=true`, `LOCALHOST_BYPASS
 mount is **omitted entirely**. Post-deploy, **disable the agent `shell` tool** if a
 tool allowlist exists, and record it here.
 
-**Step 0 — PREREQUISITE / BLOCKER (secrets-rotation breakpoint):** the
-`authentik_admin_api_token` in `secrets.yml` is **expired** (HTTP 403). All steps below are
-blocked until the **owner** rotates it (Authentik UI → Directory → Tokens, or a
-service-account admin token), updates `secrets.yml` (git-ignored), and confirms
-`GET /api/v3/outposts/instances/209f71f9-95f8-4264-91c2-4b065bbd6b07/` returns **200**.
+**Step 0 — admin API access (durable service-account token, #185):** the old
+standing personal `authentik_admin_api_token` was **retired** (#175); there is no
+longer a personal admin token at rest. Automation that mutates Authentik objects
+now uses the durable **`ak-iac` service-account token** (`secrets.yml` key
+`authentik_iac_service_account_token`, created declaratively by the
+`authentik-iac-blueprint`). The Authentik steps below can also be done entirely in
+the UI. See the **Admin / Automation API tokens** runbook in
+[../../../2-k3s/07.authentik-deployment/README.md](../../../2-k3s/07.authentik-deployment/README.md).
+Confirm access (and that the outpost exists) with
+`GET /api/v3/outposts/instances/209f71f9-95f8-4264-91c2-4b065bbd6b07/` returning
+**200**.
 
 1. **Group** — create a NEW group **`Odysseus users`** (mirrors `Servarr users`). Add the
    owner (spy) as founding member. Only this group can reach the perimeter.
@@ -212,7 +218,10 @@ the perimeter only opens once Authentik is ready and the app is fully proven off
 1. **Author + validate repo** (this PR) — `kustomize build 2-k3s/05.traefik-deployment` OK.
    Do **not** merge yet; do **not** create Authentik objects yet.
 2. **TrueNAS deploy + local GPU verify** (steps 1–6 above), off the public path.
-3. **Rotate the Authentik admin token** (owner-authorized breakpoint).
+3. **Authentik admin API access** — no personal standing token exists (retired by
+   #175). Use the durable `ak-iac` service-account token (#185) or do the step-7
+   objects in the UI — see the **Admin / Automation API tokens** runbook in
+   [../../../2-k3s/07.authentik-deployment/README.md](../../../2-k3s/07.authentik-deployment/README.md).
 4. **Create Authentik objects** (step 7), confirm outpost healthy.
 5. **Merge GitOps** — rebase branch onto `origin/main`, `push --force-with-lease`, wait for
    `validate`, `gh pr merge <n> --merge`. ArgoCD reconciles the Endpoints/Service/IngressRoutes.
@@ -229,5 +238,5 @@ the perimeter only opens once Authentik is ready and the app is fully proven off
 | **TrueNAS app** | Stop + delete the `odysseus` Custom App (UI or `midclt app.delete odysseus`). Optionally `sudo docker rmi odysseus:73673258`. `/mnt/pool1/odysseus` (SQLite db, logs) persists for re-deploy, or `pool.dataset.delete` if abandoning. Ollama, open-webui and the GPU are unaffected — we only reused Ollama's API. |
 | **Ollama model** | If unwanted: `sudo docker exec ollama ollama rm qwen2.5:7b-instruct-q4_K_M`. Existing models untouched. |
 | **k3s manifests** | `git revert` the merge (or revert PR) removing `odysseus-proxy.yaml` + the kustomization entry; rebase + force-with-lease + `validate` + merge. ArgoCD prunes the Endpoints/Service/IngressRoutes; `odysseus.epaflix.com` returns Traefik 404. No other route affected. |
-| **Authentik** | Remove the `odysseus` Application + Proxy Provider; remove the provider pk from the embedded outpost `providers` array (append-reverse, **preserving newtarr pk 82**); optionally delete the `Odysseus users` group. The rotated admin token **stays rotated** — do not revert a security rotation. |
+| **Authentik** | Remove the `odysseus` Application + Proxy Provider; remove the provider pk from the embedded outpost `providers` array (append-reverse, **preserving newtarr pk 82**); optionally delete the `Odysseus users` group. No personal standing admin token exists to revert (retired by #175); the durable `ak-iac` service-account token (#185) is unrelated to Odysseus and stays. |
 | **Cloudflare / DNS** | Nothing to roll back (wildcard pre-existed; no DNS-only shadow record was created). If a Pi-hole LAN-hairpin line was added, remove the `address=/odysseus.epaflix.com` line from the `dnsmasq.d` file. |
