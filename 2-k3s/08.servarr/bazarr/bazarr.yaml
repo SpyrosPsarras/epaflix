@@ -75,10 +75,8 @@ spec:
           volumeMounts:
             - name: config
               mountPath: /config
-            - name: movies
-              mountPath: /movies
-            - name: tv
-              mountPath: /tv
+            - name: media
+              mountPath: /media
           livenessProbe:
             httpGet:
               path: /
@@ -104,12 +102,9 @@ spec:
         - name: config
           persistentVolumeClaim:
             claimName: bazarr-config
-        - name: movies
+        - name: media
           persistentVolumeClaim:
-            claimName: servarr-media-movies
-        - name: tv
-          persistentVolumeClaim:
-            claimName: servarr-media-tvshows
+            claimName: servarr-media
 ---
 apiVersion: v1
 kind: Service
