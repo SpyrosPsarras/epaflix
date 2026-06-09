@@ -8,10 +8,10 @@
 #
 # RETAINED-PENDING-TEARDOWN: the four legacy PV/PVC below
 # (servarr-media-{animes,tvshows,movies,downloads}, hostPath /mnt/k3s-{animes,...})
-# are KEPT only because bazarr + lingarr still bind the old movies/tvshows claims
-# (migration pending) and they are the #195 soak-window rollback. They will be
-# removed after soak AND after bazarr/lingarr migrate to the unified /media mount
-# (follow-up issues). Do NOT add new consumers of these legacy claims.
+# now have NO consumer: bazarr + lingarr are migrated to the unified servarr-media
+# /media mount (issue #250), matching sonarr/radarr. They are KEPT ONLY as the #195
+# soak-window rollback and are now eligible for teardown in the #195 teardown
+# follow-up. Do NOT add new consumers of these legacy claims.
 #
 # Each node has NFS mounts at /mnt/k3s-animes, /mnt/k3s-movies, /mnt/k3s-tvshows, /mnt/k3s-downloads
 # These PVs use hostPath to access the node-mounted NFS shares
