@@ -44,7 +44,8 @@ cat <<EOF
         kubectl -n argocd patch secret argocd-secret --type=merge \\
           -p '{"stringData":{"oidc.authentik.clientId":"<CID>","oidc.authentik.clientSecret":"<CSEC>"}}'
         kubectl -n argocd rollout restart deploy/argocd-server
-  • Install argocd-image-updater:  ${SCRIPT_DIR}/image-updater/install.sh
+  • Image bumps are delivered by Renovate (2-k3s/12.renovate/), not
+    Image Updater — nothing to install here (retired in #192/#265).
   • Get the initial admin password (only valid before OIDC works):
         kubectl -n argocd get secret argocd-initial-admin-secret \\
           -o jsonpath='{.data.password}' | base64 -d ; echo

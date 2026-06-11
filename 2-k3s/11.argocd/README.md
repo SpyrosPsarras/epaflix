@@ -1,8 +1,17 @@
-# 11.argocd — ArgoCD + Image Updater
+# 11.argocd — ArgoCD (GitOps control plane)
 
-GitOps for k3s. ArgoCD reconciles Traefik, servarr, and authentik manifests
-from this repo; Argo CD Image Updater bumps selected container image tags by
-committing back to git.
+GitOps for k3s. ArgoCD reconciles every tier in this repo (Traefik, servarr,
+authentik, observability, …) from git. Container-image bumps are **not** an
+ArgoCD concern — they are delivered as git commits by **Renovate**
+(`2-k3s/12.renovate/`, config `.github/renovate.json`), which ArgoCD then
+syncs like any other change.
+
+> **History:** image bumps used to be driven by Argo CD Image Updater (its own
+> Helm release in this tier), which committed new tags back to `main`. That was
+> retired in PR #192 / #265 because its git write-back pushed directly to `main`
+> and the required `validate` branch-protection check rejected the pushes.
+> Renovate now owns image delivery end-to-end through the normal PR + `validate`
+> gate. Nothing in this tier installs Image Updater anymore.
 
 ## What this gives you
 
@@ -17,10 +26,11 @@ committing back to git.
   whose `kustomization.yaml` inflates the upstream `authentik/authentik`
   Helm chart (`helmCharts:`) with `helm-values.yaml`, into the
   `app-authentik` namespace.
-- **Auto image bumps** — Image Updater polls registries every 2 minutes and
-  commits new tags/digests to the `images:` block in each Application's
-  `kustomization.yaml` (servarr → `2-k3s/08.servarr/`, authentik →
-  `2-k3s/07.authentik-deployment/`); ArgoCD then auto-syncs the Deployments.
+- **Image bumps via Renovate** — Renovate opens PRs that re-pin the
+  digest-locked `images:` blocks in each tier's `kustomization.yaml`
+  (servarr → `2-k3s/08.servarr/`, authentik → `2-k3s/07.authentik-deployment/`);
+  once merged, ArgoCD auto-syncs the Deployments. See **Image bumps (Renovate)**
+  below.
 
 ## Layout
 
@@ -33,14 +43,14 @@ committing back to git.
 ├── install.sh             # helm upgrade + ingress
 ├── ingress.yaml           # Traefik IngressRoute for argocd.epaflix.com
 ├── oidc-secret.yaml       # template (DO NOT apply as-is — see below)
-├── apps/
-│   ├── app-servarr.yaml   # Argo Application for the servarr stack
-│   ├── app-authentik.yaml # Argo Application for Authentik (Helm chart)
-│   └── app-traefik.yaml   # Argo Application for Traefik (Helm chart)
-└── image-updater/
-    ├── install.sh
-    ├── values.yaml
-    └── git-creds-secret.yaml   # template
+├── kustomization.yaml     # inflates the argo-cd chart for self-management
+└── apps/                  # app-of-apps child Applications (one file per app)
+    ├── app-of-apps.yaml   # self-referential root (selfHeal: true)
+    ├── app-argocd.yaml    # ArgoCD self-management (manual sync)
+    ├── app-servarr.yaml   # servarr stack
+    ├── app-authentik.yaml # Authentik (Helm chart)
+    ├── app-traefik.yaml   # Traefik (Helm chart)
+    └── …                  # one app-*.yaml per managed tier
 ```
 
 ## Architecture
@@ -49,80 +59,56 @@ committing back to git.
 GitHub repo  ─── ArgoCD repo-server (poll)
                     │
                     ▼
-              ArgoCD controller ── reconciles ──► traefik-system / servarr / app-authentik
+              ArgoCD controller ── reconciles ──► traefik-system / servarr / app-authentik / …
                     ▲
-                    │ Application API
+                    │ git commits (merged PRs)
                     │
-        argocd-image-updater  ── git push ──► GitHub
-              (polls registries every 2m, runs
-               `kustomize edit set image` on
-               2-k3s/08.servarr/kustomization.yaml)
+                Renovate  ── opens PRs ──► GitHub
+              (re-pins digests in the images: blocks;
+               auto-merges digest/patch bumps through
+               the validate gate — see 12.renovate)
 ```
 
 ## Versions
 
-- argo-cd chart **9.5.14** (app v3.4.2)
-- argocd-image-updater chart **0.14.0** (app v0.17.0)
+- argo-cd chart **9.5.20** (app v3.4.3)
 
-Pinned in `install.sh` (`CHART_VERSION=…`). Bump deliberately.
+Pinned in `kustomization.yaml` (`helmCharts[*].version`). Renovate opens PRs for
+chart bumps; the `argocd` Application self-syncs **manually** in a maintenance
+window (see **Sync policy** below). Bump deliberately.
 
-**Important — pinned to v0.17 on purpose**: chart 1.x ships
-argocd-image-updater v1.x, which switched to a CRD-driven `ImageUpdater`
-operator model AND introduced a registry-prefix normalization bug that
-silently drops `lscr.io/`-prefixed images during the "live image" match.
-The v0.x line still reads the classic
-`argocd-image-updater.argoproj.io/*` annotations on the Application
-itself (see `apps/app-servarr.yaml`) and works end-to-end for this stack.
+## Image bumps (Renovate)
 
-## Image Updater scope
+ArgoCD only reconciles git → cluster. Keeping the `images:` blocks fresh is
+Renovate's job (`2-k3s/12.renovate/`, rules in `.github/renovate.json`):
 
-Tracked (digest strategy on the moving tag):
+- **servarr digests** — the `images:` block in
+  `2-k3s/08.servarr/kustomization.yaml` is digest-pinned on moving tags
+  (`:latest`, `:development`, …). A dedicated Renovate rule
+  (`matchFileNames: 2-k3s/08.servarr/kustomization.yaml`,
+  `matchUpdateTypes: [digest]`) **auto-merges** digest re-rolls through the
+  normal PR + `validate` gate. File+datasource+digest scoped, so it cannot reach
+  authentik or any minor/major/patch update.
+- **repo-wide patches** — a separate rule auto-merges `patch` bumps repo-wide
+  (including chart-only patches).
+- **authentik** — chart version and container image move together upstream, so
+  Renovate groups them in one PR (`groupName: authentik`). Patch auto-merges;
+  **minor/major open a PR you review and merge manually** (release notes can
+  carry DB migrations / breaking changes).
+- **auto-rebase** — top-level `rebaseWhen: behind-base-branch` keeps every
+  Renovate branch rebased onto `main` so the strict up-to-date branch
+  protection never strands a stale branch.
 
-| Alias                  | Image                                      | Tag         |
-|------------------------|--------------------------------------------|-------------|
-| sonarr / sonarr2*      | lscr.io/linuxserver/sonarr                 | latest      |
-| radarr                 | lscr.io/linuxserver/radarr                 | latest      |
-| prowlarr               | lscr.io/linuxserver/prowlarr               | latest      |
-| bazarr                 | lscr.io/linuxserver/bazarr                 | development |
-| newtarr                | ghcr.io/elfhosted/newtarr                  | rolling     |
-| cleanuparr             | ghcr.io/cleanuparr/cleanuparr              | latest      |
-| flaresolverr           | ghcr.io/flaresolverr/flaresolverr          | latest      |
-| jellyfin               | jellyfin/jellyfin                          | latest      |
-| homarr                 | ghcr.io/ajnart/homarr                      | latest      |
-| wizarr                 | ghcr.io/wizarrrr/wizarr                    | latest      |
-| bazarr-autotranslate   | ghcr.io/zelak312/bazarr_autotranslate      | latest      |
-| authentik              | ghcr.io/goauthentik/server                 | `^2026\.5\.\d+$` (semver, patch-only) |
+Once a Renovate PR merges, ArgoCD observes the git change and rolls the
+Deployment. Audit trail: `git log -- 2-k3s/08.servarr/kustomization.yaml` plus
+the merged Renovate PRs.
 
-*`sonarr2` shares the linuxserver/sonarr image with `sonarr`; both roll together.
-
-†Authentik uses **semver + MINOR-pinned regex**, not `digest+latest`. The
-chart and image versions are released in lockstep upstream; image-updater
-only bumps the image, so allowing arbitrary tags would desync the chart's
-template from the image's schema. MINOR-bump procedure: edit `helmCharts.version`
-*and* `images.newTag` in `2-k3s/07.authentik-deployment/kustomization.yaml`
-*and* the `allow-tags` regex in `apps/app-authentik.yaml`, all in the same commit.
-
-Excluded deliberately:
-
-| Deployment       | Image                              | Why excluded                          |
-|------------------|------------------------------------|---------------------------------------|
-| qbittorrent      | binhex/arch-qbittorrentvpn         | VPN-coupled, manual bumps             |
-| seerr            | fallenbagel/jellyseerr:preview-OIDC| custom fork tag                       |
-| lingarr          | ghcr.io/spyrospsarras/lingarr:…    | pinned to a private branch tag        |
-
-Opt-in later by adding the alias to the `image-list` annotation on
-`apps/app-servarr.yaml`.
-
-## How updates flow
-
-1. Image Updater wakes (2-minute interval), compares each tracked image's
-   live digest with the digest currently pinned in
-   `08.servarr/kustomization.yaml`'s `images:` block.
-2. On change: `kustomize edit set image <name>=<repo>:<tag>@<digest>` →
-   `git commit -m "[image-updater] bump …"` → `git push origin main`.
-3. ArgoCD controller observes the git change, syncs the Application,
-   Deployment rolls.
-4. Audit trail: `git log -- 2-k3s/08.servarr/kustomization.yaml`.
+**Floating tags not in an `images:` block** (e.g. `newtarr` is a hardcoded
+`ghcr.io/elfhosted/newtarr:rolling` tag in `2-k3s/08.servarr/newtarr/newtarr.yaml`,
+not in the digest-pinned block — known gap from #192) are refreshed by the
+weekly **servarr image-refresh CronJob**
+(`2-k3s/maintenance/servarr-image-updater-cronjob.yaml`), which rolling-restarts
+the servarr Deployments so `imagePullPolicy: Always` re-pulls the mutable tag.
 
 ## Sync policy: app-of-apps drives auto-apply
 
@@ -144,7 +130,16 @@ Deliberate exceptions stay **manual** (no `automated` block) — do not
 flip casually:
 
 - **`argocd`** — self-manages the ArgoCD control plane; a bad self-sync
-  can take it down. Upgrade in a maintenance window. See issues #96 / #46.
+  can take it down. Upgrade in a maintenance window. There is no `argocd`
+  CLI on the workstation — trigger a manual self-sync with:
+  ```
+  kubectl --context epaflix -n argocd patch application argocd --type merge \
+    -p '{"operation":{"initiatedBy":{"username":"<you>-manual"},"sync":{"revision":"main","syncStrategy":{"apply":{}}}}}'
+  # if it still reports OutOfSync afterwards (stale compare cache), hard-refresh:
+  kubectl --context epaflix -n argocd annotate application argocd \
+    argocd.argoproj.io/refresh=hard --overwrite
+  ```
+  See issues #96 / #46.
 - **`system-upgrade-controller`** — manual.
 
 `prune` is OFF everywhere on purpose (issue #21 tracks enabling it).
@@ -173,14 +168,15 @@ spec:
 
 ## Rollback
 
-- Disable Image Updater: `kubectl -n argocd scale deploy/argocd-image-updater --replicas=0`
-- Remove auto-sync: `argocd app set servarr --sync-policy none`
-- Full uninstall:
+- Remove auto-sync from an app: edit its `app-*.yaml` to drop the
+  `automated:` block (or `argocd app set servarr --sync-policy none` if you
+  have the CLI), commit, push.
+- Full ArgoCD uninstall:
   ```
-  helm uninstall argocd-image-updater argocd -n argocd
+  helm uninstall argocd -n argocd
   kubectl delete ns argocd
   ```
-  servarr Deployments stay running; `kustomization.yaml` is still in repo
+  Workloads stay running; each tier's `kustomization.yaml` is still in repo
   and applies with `kubectl apply -k 2-k3s/08.servarr/` if needed.
 
 ## Traefik onboarding (safe adoption)
@@ -236,7 +232,7 @@ without breaking sessions:
 1. **Enable kustomize-with-helm in ArgoCD** (already in
    `2-k3s/11.argocd/helm-values.yaml` as `configs.cm.kustomize.buildOptions: --enable-helm`).
    If the cluster predates this change: `helm upgrade argocd argo/argo-cd
-   --version 9.5.14 -n argocd -f helm-values.yaml --wait` then
+   --version 9.5.20 -n argocd -f helm-values.yaml --wait` then
    `kubectl -n argocd rollout restart deploy/argocd-repo-server`.
 
 2. **Apply the runtime-secrets Secret** (substitute real values from
@@ -271,11 +267,13 @@ without breaking sessions:
      syncOptions: [ServerSideApply=true]
    ```
 
-5. **Image-updater bumps**: appear in
-   `kubectl -n argocd logs -l app.kubernetes.io/name=argocd-image-updater`.
-   A new `2026.2.x` tag → commit on `main` editing `images.newTag` in
-   `2-k3s/07.authentik-deployment/kustomization.yaml` → ArgoCD sync → rolling
-   restart of server + worker.
+5. **Image bumps**: Renovate opens a grouped `authentik` PR when a new chart +
+   image release lands (`groupName: authentik` in `.github/renovate.json`).
+   Patch bumps auto-merge; **minor/major you review and merge manually**. On
+   merge, ArgoCD edits `images.newTag` + `helmCharts.version` in
+   `2-k3s/07.authentik-deployment/kustomization.yaml` and rolling-restarts
+   server + worker. (Chart and image move in lockstep upstream — keep them in
+   one commit, which the grouped Renovate rule guarantees.)
 
 ## Observability onboarding (one-time)
 
@@ -341,9 +339,9 @@ cleanly.
    Commit, push, ArgoCD applies the new policy to itself. Hold `prune: false`
    for at least a week before considering `prune: true`.
 
-6. **Image-updater not enabled.** kube-prometheus-stack chart bumps require
-   coordinated CRD migrations; manual PRs editing `helmCharts[*].version`
-   in `2-k3s/10.observability/kustomization.yaml`.
+6. **Chart bumps are manual.** kube-prometheus-stack bumps require coordinated
+   CRD migrations; Renovate opens minor/major PRs editing `helmCharts[*].version`
+   in `2-k3s/10.observability/kustomization.yaml` for you to review and merge.
 
 ## SOPS age key bootstrap (run ONCE per fresh cluster)
 
@@ -370,12 +368,14 @@ Rotation, encrypt, and decrypt recipes:
 ## See also
 
 - `QUICKSTART.md` — ordered install steps with the exact commands.
+- `2-k3s/12.renovate/` + `.github/renovate.json` — image/chart bump delivery.
 - `2-k3s/05.traefik-deployment/examples/app-with-native-oidc-authentik.md`
   — Authentik OIDC provider setup (mirror those steps for `argocd`).
 - `2-k3s/05.traefik-deployment/kustomization.yaml` — what ArgoCD watches
   for Traefik.
-- `2-k3s/08.servarr/kustomization.yaml` — what ArgoCD watches for servarr.
+- `2-k3s/08.servarr/kustomization.yaml` — what ArgoCD watches for servarr
+  (Renovate digest-bump target = `images:` block).
 - `2-k3s/07.authentik-deployment/kustomization.yaml` — what ArgoCD watches
-  for authentik (image-updater write-back target = `images:` block).
+  for authentik (Renovate grouped chart+image target = `images:` block).
 - `2-k3s/10.observability/kustomization.yaml` — what ArgoCD watches for
-  observability (three `helmCharts:` entries — no image-updater).
+  observability (three `helmCharts:` entries).

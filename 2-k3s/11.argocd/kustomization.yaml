@@ -14,8 +14,6 @@
 # Excluded from `resources:` (left operator-managed for now):
 #   - apps/*.yaml          — ArgoCD Application objects (app-of-apps is a
 #                            separate follow-up, see Issue #19 thread).
-#   - image-updater/       — argocd-image-updater is its own helm release;
-#                            self-management is a separate follow-up.
 #   - oidc-secret.yaml     — placeholder only; real OIDC client-id/secret are
 #                            merge-patched into the chart-generated argocd-secret
 #                            (see install.sh step 4). Out of scope until Issue #29.
