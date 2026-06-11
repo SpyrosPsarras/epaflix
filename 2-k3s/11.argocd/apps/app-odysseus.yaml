@@ -32,8 +32,11 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: odysseus
-  # MANUAL sync on first install — see header. No automated block yet.
-  syncPolicy: {}
+  # MANUAL sync — no `automated` block (see header). `syncPolicy` is omitted
+  # entirely on purpose: an empty `syncPolicy: {}` never matches ArgoCD's live
+  # `null`, producing a permanent cosmetic OutOfSync on the parent app-of-apps
+  # (see 11.argocd/README.md → Sync policy). Re-add `syncPolicy.automated` here
+  # at the selfHeal-flip.
   ignoreDifferences:
     - group: ""
       kind: Service
