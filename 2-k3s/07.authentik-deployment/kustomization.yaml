@@ -50,4 +50,4 @@ helmCharts:
     includeCRDs: false
 images:
   - name: ghcr.io/goauthentik/server
-    newTag: 2026.5.2
+    newTag: 2026.5.3
