@@ -8,8 +8,12 @@ Run from the repo root.
 - Traefik + cert-manager already deployed (`05.traefik-deployment/`,
   `02.cert-manager/`).
 - Authentik already deployed (`07.authentik-deployment/`).
-- GitHub PAT with `contents: write` on `SpyrosPsarras/epaflix`.
 - Pi-hole admin access (192.168.10.30) to add a DNS record.
+
+> Image bumps are delivered by Renovate, **not** ArgoCD Image Updater
+> (retired in #192 / #265). There is nothing to install in this tier for
+> image automation — see `2-k3s/12.renovate/` and the README's
+> **Image bumps (Renovate)** section.
 
 ## 1. DNS record
 
@@ -70,8 +74,6 @@ argocd:
   oidc:
     client_id: <fill-me-in>
     client_secret: <fill-me-in>
-  image_updater:
-    github_pat: <fill-me-in>
 ```
 
 ## 4. Wire OIDC into ArgoCD
@@ -100,55 +102,11 @@ sudo snap install argocd --classic        # ubuntu
 argocd login argocd.epaflix.com --sso
 ```
 
-## 6. Register the repo in ArgoCD (image-updater reuses these creds)
+> No CLI? The `argocd` self-management app can be synced via
+> `kubectl patch application argocd … operation …` — see the README's
+> **Sync policy** section.
 
-```
-PAT=$(yq '.argocd_image_updater_github_pat' .github/instructions/secrets.yml)
-kubectl -n argocd apply -f - <<EOF
-apiVersion: v1
-kind: Secret
-metadata:
-  name: github-epaflix-repo
-  namespace: argocd
-  labels:
-    argocd.argoproj.io/secret-type: repository
-stringData:
-  type: git
-  url: https://github.com/SpyrosPsarras/epaflix.git
-  username: git
-  password: "$PAT"
-EOF
-```
-
-## 7. Generate ArgoCD API token for image-updater
-
-The local `image-updater` account is provisioned by `helm-values.yaml`
-(`configs.cm.accounts.image-updater: apiKey` + RBAC role). Generate the
-token by logging in as admin from inside the argocd-server pod:
-
-```
-ADMIN_PW=$(kubectl -n argocd get secret argocd-initial-admin-secret \
-  -o jsonpath='{.data.password}' | base64 -d)
-TOKEN=$(kubectl -n argocd exec deploy/argocd-server -- sh -c \
-  "argocd login argocd-server.argocd.svc.cluster.local:443 \
-   --username admin --password '$ADMIN_PW' --insecure --plaintext \
-   --grpc-web >/dev/null && argocd account generate-token \
-   --account image-updater")
-kubectl -n argocd create secret generic argocd-image-updater-secret \
-  --from-literal=argocd.token="$TOKEN" \
-  --dry-run=client -o yaml | kubectl apply -f -
-```
-
-## 8. Install Image Updater (chart 0.14.0, app v0.17.0)
-
-```
-./2-k3s/11.argocd/image-updater/install.sh
-```
-
-(Pinned to v0.x on purpose — v1.x has a registry-prefix matching bug.
-See README for details.)
-
-## 9. Create the Traefik Application
+## 6. Create the Traefik Application
 
 Traefik owns the active ingress endpoint (`192.168.10.101`) and ACME
 certificate storage, so the first sync is manual.
@@ -162,7 +120,7 @@ argocd app sync traefik     # apply only once the diff is safe
 Leave prune disabled after adoption. Enable automated self-heal only after
 the manual sync is confirmed clean.
 
-## 10. Create the servarr Application
+## 7. Create the servarr Application
 
 ```
 kubectl apply -f 2-k3s/11.argocd/apps/app-servarr.yaml
@@ -186,24 +144,25 @@ argocd app set servarr --sync-policy automated --self-heal
 
 (Leave `--auto-prune` off for a week.)
 
-## 11. End-to-end image bump test
+## 8. Verify image-bump delivery (Renovate)
 
-Make sure Image Updater is healthy and the test is observable:
+Image bumps arrive as Renovate PRs, not Image Updater commits. To confirm the
+pipeline is live:
 
-```
-kubectl -n argocd logs -f deploy/argocd-image-updater
-```
+1. Renovate runs on its schedule (`2-k3s/12.renovate/`). Check the
+   **Dependency Dashboard** issue on `SpyrosPsarras/epaflix`, or list open
+   Renovate PRs:
+   ```
+   gh pr list --repo SpyrosPsarras/epaflix --author 'app/renovate'
+   ```
+2. A servarr digest re-roll PR (`matchFileNames: 2-k3s/08.servarr/kustomization.yaml`,
+   update type `digest`) auto-merges once the `validate` check is green.
+3. After merge, ArgoCD syncs the servarr Application and rolls the Deployment:
+   ```
+   kubectl -n servarr rollout status deploy/<app>
+   git log -- 2-k3s/08.servarr/kustomization.yaml   # audit trail
+   ```
 
-To force a real bump, simulate stale digest (one of the tracked images):
-
-```
-# inside the repo
-cd 2-k3s/08.servarr
-kustomize edit set image lscr.io/linuxserver/bazarr=lscr.io/linuxserver/bazarr:development@sha256:0000000000000000000000000000000000000000000000000000000000000000
-git commit -am "[test] stale bazarr digest"
-git push
-```
-
-Within ~2 minutes Image Updater should commit a corrected digest. Argo
-auto-syncs, `kubectl rollout status deploy/bazarr -n servarr` reports
-fresh.
+Floating mutable tags not in the digest-pinned `images:` block (e.g.
+`newtarr:rolling`) are refreshed by the weekly CronJob
+`2-k3s/maintenance/servarr-image-updater-cronjob.yaml` instead.

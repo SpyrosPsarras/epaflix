@@ -96,9 +96,11 @@ resources:
   - wizarr/wizarr.yaml
 generators:
   - _shared/secrets/ksops-generator.yaml
-# `images:` is the write-target for argocd-image-updater. Entries are inserted
-# / mutated by `kustomize edit set image …` whenever updater finds a newer
-# digest for a tracked image. Empty on first install — updater will populate.
+# `images:` is digest-pinned on moving tags (:latest, :development, …) and is
+# the bump-target for Renovate (Image Updater retired — #192/#265). Renovate's
+# servarr-scoped digest rule (.github/renovate.json,
+# matchFileNames: 2-k3s/08.servarr/kustomization.yaml) auto-merges digest
+# re-rolls through the PR + validate gate; ArgoCD then syncs the Deployments.
 images:
   - name: lscr.io/linuxserver/sonarr
     digest: sha256:0b3f344388bd7bed4f2f770058de795e76447e4a481b83c8d5f8fed489371fde
