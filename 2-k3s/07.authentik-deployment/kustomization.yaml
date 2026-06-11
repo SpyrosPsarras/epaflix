@@ -3,18 +3,19 @@
 # in 2-k3s/11.argocd/helm-values.yaml).
 #
 # Why this layer and not a direct Helm Application:
-#   argocd-image-updater write-back for multi-source Helm Applications goes
-#   through ArgoCD's gRPC `UpdateSpec`, which validates every source's repo
-#   creds. The upstream `charts.goauthentik.io` repo has no creds (it's
-#   public), but ArgoCD still rejects the update. Inflating the chart with
-#   kustomize sidesteps the multi-source path: the Application has a single
-#   git source, and image-updater writes back to the `images:` block below
-#   exactly like the servarr stack.
+#   Inflating the chart with kustomize keeps the Application a single git
+#   source and exposes a normal `images:` block (below) that bump tooling can
+#   edit in-place — exactly like the servarr stack. (The original driver was
+#   argocd-image-updater's multi-source write-back limitation; Image Updater
+#   was retired in #192/#265 and the single-source layer is still the right
+#   shape for Renovate.)
 #
-# What image-updater touches:
-#   `kustomize edit set image ghcr.io/goauthentik/server=ghcr.io/goauthentik/server:<newtag>`
-#   rewrites the `newTag` field below; kustomize replaces the chart-rendered
-#   server + worker image references in-place.
+# Image bumps (Renovate — .github/renovate.json):
+#   Chart version + container image move together upstream, so Renovate groups
+#   them in one PR (groupName: authentik). Patch bumps auto-merge; minor/major
+#   open a PR you review and merge manually. On merge, the `newTag` field below
+#   (and helmCharts.version) is updated and kustomize replaces the chart-
+#   rendered server + worker image references in-place.
 #
 # Secrets:
 #   - authentik-app-secrets (AUTHENTIK_SECRET_KEY, AUTHENTIK_POSTGRESQL__
