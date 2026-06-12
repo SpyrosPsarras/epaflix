@@ -32,7 +32,11 @@ spec:
         fsGroup: 568
       containers:
         - name: lingarr
-          image: ghcr.io/spyrospsarras/lingarr:fix-zombie-concurrency-exec-update
+          # Upstream Lingarr (off the retired SpyrosPsarras fork). Effective image is
+          # digest-pinned in ../kustomization.yaml images: block (moving :main tag).
+          # :main carries the #432 "convert DateTime to utc" fix (not in any release
+          # tag yet — latest 1.2.4 predates it); revisit when upstream cuts >1.2.4. #270
+          image: ghcr.io/lingarr-translate/lingarr:main
           imagePullPolicy: IfNotPresent
           env:
             - name: ASPNETCORE_URLS
