@@ -91,6 +91,7 @@ resources:
   - qbittorrent/pdb.yaml
   # qbittorrent/ingress.yaml DELETED 2026-05-17 — same reason.
   - qbittorrent/priority-class.yaml
+  - unpackerr/unpackerr.yaml
   - homarr/homarr.yaml
   - homarr/pdb.yaml
   - wizarr/wizarr.yaml
@@ -113,6 +114,9 @@ images:
   # Byparr — FlareSolverr replacement (#275); seleniumbase/Chromium solver.
   - name: ghcr.io/thephaseless/byparr
     digest: sha256:01a46a2865d9a6db5eb8ead04ec0dd33b8fbe233e8565ae70b50d4cc0af4cfb0
+  # Unpackerr — extracts archive-packed releases for Sonarr (#275 follow-up).
+  - name: ghcr.io/hotio/unpackerr
+    digest: sha256:09ddde42bac0282114bff354fa015f3611582d21ead10b5f06ae40a0b40934a8
   - name: jellyfin/jellyfin
     digest: sha256:aefb67e6a7ff1debdd154a78a7bbb780fd0c873d8639210a7f6a2016ad2b35db
   - name: ghcr.io/ajnart/homarr
