@@ -1,0 +1,106 @@
+---
+# Bazarr - Public Internet-facing IngressRoutes with Let's Encrypt TLS,
+# fronted by Authentik forward-auth SSO (issue #176, servarr forward-auth
+# rollout).
+#
+# Bazarr is an INTEGRATION TARGET: it calls out to sonarr/radarr and may be
+# called by lingarr via its API. So only the UI is newly SSO-gated; the
+# /api path is left EXEMPT (priority 20, NO forward-auth middleware) so
+# API-key callers and deep-links keep working (Bazarr's /api is already
+# protected by its own API key). Only the UI is newly SSO-gated.
+#
+# Pattern mirrors 08.servarr/newtarr/ingressroute.yaml:
+#   - app route priority:10 + authentik-forwardauth middleware
+#   - outpost route priority:15 matching PathPrefix(/outpost.goauthentik.io/)
+#   - api route priority:20 matching PathPrefix(/api), no middleware
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: bazarr-https
+  namespace: servarr
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`bazarr.epaflix.com`)
+      kind: Rule
+      priority: 10
+      middlewares:
+        - name: authentik-forwardauth
+          namespace: traefik-system
+      services:
+        - name: bazarr
+          port: 6767
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
+---
+# Outpost route - handles auth callback on bazarr.epaflix.com
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: bazarr-outpost-https
+  namespace: servarr
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`bazarr.epaflix.com`) && PathPrefix(`/outpost.goauthentik.io/`)
+      kind: Rule
+      priority: 15
+      services:
+        - name: authentik-server
+          namespace: app-authentik
+          port: 80
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
+---
+# API route - EXEMPT from forward-auth (priority 20, no middleware) so
+# API-key callers (sonarr/radarr/lingarr) and deep-links keep working.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: bazarr-api
+  namespace: servarr
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`bazarr.epaflix.com`) && PathPrefix(`/api`)
+      kind: Rule
+      priority: 20
+      services:
+        - name: bazarr
+          port: 6767
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
+---
+# HTTP to HTTPS redirect for Bazarr
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: bazarr-http
+  namespace: servarr
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`bazarr.epaflix.com`)
+      kind: Rule
+      middlewares:
+        - name: redirect-https
+          namespace: traefik-system
+      services:
+        - name: bazarr
+          port: 6767

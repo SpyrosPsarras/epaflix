@@ -7,6 +7,14 @@
 #   * Traefik still serves the real Let's Encrypt wildcard cert (*.epaflix.com)
 #     issued by the cloudflare certResolver via DNS-01 (wildcard cert doesn't
 #     need an A record for this specific host).
+#
+# Issue #176 (servarr forward-auth rollout): the lingarr UI is now gated by
+# Authentik forward-auth (authentik-forwardauth middleware, "Servarr users"
+# group). lingarr is a pure-UI / caller-only app with no inbound API, so the
+# WHOLE host is gated -- there is deliberately no /api bypass route.
+# Pattern mirrors 08.servarr/newtarr/ingressroute.yaml:
+#   - app route priority:10 + authentik-forwardauth middleware
+#   - outpost route priority:15 matching PathPrefix(/outpost.goauthentik.io/)
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -18,9 +26,37 @@ spec:
   routes:
     - match: Host(`lingarr.epaflix.com`)
       kind: Rule
+      priority: 10
+      middlewares:
+        - name: authentik-forwardauth
+          namespace: traefik-system
       services:
         - name: lingarr
           port: 9876
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
+---
+# Outpost route - handles auth callback on lingarr.epaflix.com
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: lingarr-outpost-https
+  namespace: servarr
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`lingarr.epaflix.com`) && PathPrefix(`/outpost.goauthentik.io/`)
+      kind: Rule
+      priority: 15
+      services:
+        - name: authentik-server
+          namespace: app-authentik
+          port: 80
   tls:
     certResolver: cloudflare
     domains:

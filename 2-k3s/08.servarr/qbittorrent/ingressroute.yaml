@@ -1,0 +1,109 @@
+---
+# qBittorrent - Public Internet-facing IngressRoutes with Let's Encrypt TLS,
+# fronted by Authentik forward-auth SSO (issue #176, servarr forward-auth rollout).
+#
+# qBittorrent is an INTEGRATION TARGET (apiBypass=true): it is called by the
+# sonarr / sonarr2 / radarr download-client integrations plus cleanuparr and
+# newtarr. Only the WEB UI is newly SSO-gated via the authentik-forwardauth
+# middleware (authorized by the "Servarr users" group). The /api PathPrefix
+# (which covers qBittorrent's /api/v2 endpoints) is EXEMPT at priority 20 with
+# NO middleware, so those download clients + cleanuparr + newtarr keep working
+# over the public host. The qBittorrent API stays protected by its own
+# credentials.
+#
+# Pattern mirrors 08.servarr/newtarr/ingressroute.yaml:
+#   - app route priority:10 + authentik-forwardauth middleware
+#   - outpost route priority:15 matching PathPrefix(/outpost.goauthentik.io/)
+#   - api route priority:20 PathPrefix(/api), no middleware
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: qbittorrent-https
+  namespace: servarr
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`qbittorrent.epaflix.com`)
+      kind: Rule
+      priority: 10
+      middlewares:
+        - name: authentik-forwardauth
+          namespace: traefik-system
+      services:
+        - name: qbittorrent
+          port: 8080
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
+---
+# Outpost route - handles auth callback on qbittorrent.epaflix.com
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: qbittorrent-outpost-https
+  namespace: servarr
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`qbittorrent.epaflix.com`) && PathPrefix(`/outpost.goauthentik.io/`)
+      kind: Rule
+      priority: 15
+      services:
+        - name: authentik-server
+          namespace: app-authentik
+          port: 80
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
+---
+# API route - EXEMPT from SSO so the *arr download clients, cleanuparr and
+# newtarr keep working over the public host. PathPrefix(/api) covers qBit's
+# /api/v2 endpoints; protected by qBittorrent's own credentials.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: qbittorrent-api
+  namespace: servarr
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`qbittorrent.epaflix.com`) && PathPrefix(`/api`)
+      kind: Rule
+      priority: 20
+      services:
+        - name: qbittorrent
+          port: 8080
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
+---
+# HTTP to HTTPS redirect for qBittorrent
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: qbittorrent-http
+  namespace: servarr
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`qbittorrent.epaflix.com`)
+      kind: Rule
+      middlewares:
+        - name: redirect-https
+          namespace: traefik-system
+      services:
+        - name: qbittorrent
+          port: 8080

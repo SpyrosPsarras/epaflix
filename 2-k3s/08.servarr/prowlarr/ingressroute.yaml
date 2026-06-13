@@ -1,0 +1,116 @@
+---
+# Prowlarr - Public Internet-facing IngressRoutes with Let's Encrypt TLS,
+# fronted by Authentik forward-auth SSO (issue #176, servarr forward-auth rollout).
+#
+# The Prowlarr UI is SSO-gated: the authentik-forwardauth middleware (Authentik
+# embedded outpost, provider + app slug `prowlarr`) gates browser traffic,
+# authorized by the "Servarr users" group.
+#
+# /api is EXEMT from forward-auth (prowlarr-api, priority 20 > UI priority 10):
+# Prowlarr is an INTEGRATION TARGET. newtarr calls prowlarr.epaflix.com/api,
+# and machine/API-key clients + deep-links need an unauthenticated path. This
+# is safe because the /api surface is already protected by Prowlarr's own
+# API key. (Note: sonarr/radarr reach Prowlarr over INTERNAL cluster DNS, not
+# this public host, so they are unaffected either way.)
+#
+# Pattern mirrors 08.servarr/newtarr/ingressroute.yaml:
+#   - app route priority:10 + authentik-forwardauth middleware
+#   - outpost route priority:15 matching PathPrefix(/outpost.goauthentik.io/)
+#   - api route priority:20, no middleware, PathPrefix(/api)
+#
+# NOTE: the live cluster has a DUPLICATE legacy IngressRoute `prowlarr-external`
+# (imperative-only, NOT in git) serving the same Host. This canonical set
+# SUPERSEDES it. After this merges, manually remove the stale route — prune is
+# OFF, so ArgoCD will not delete it for us:
+#   kubectl -n servarr delete ingressroute prowlarr-external
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: prowlarr-https
+  namespace: servarr
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`prowlarr.epaflix.com`)
+      kind: Rule
+      priority: 10
+      middlewares:
+        - name: authentik-forwardauth
+          namespace: traefik-system
+      services:
+        - name: prowlarr
+          port: 9696
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
+---
+# Outpost route - handles auth callback on prowlarr.epaflix.com
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: prowlarr-outpost-https
+  namespace: servarr
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`prowlarr.epaflix.com`) && PathPrefix(`/outpost.goauthentik.io/`)
+      kind: Rule
+      priority: 15
+      services:
+        - name: authentik-server
+          namespace: app-authentik
+          port: 80
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
+---
+# API route - /api is exempt from forward-auth (machine/API-key clients,
+# newtarr integration, deep-links). priority 20 beats the UI route's 10.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: prowlarr-api
+  namespace: servarr
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`prowlarr.epaflix.com`) && PathPrefix(`/api`)
+      kind: Rule
+      priority: 20
+      services:
+        - name: prowlarr
+          port: 9696
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
+---
+# HTTP to HTTPS redirect for Prowlarr
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: prowlarr-http
+  namespace: servarr
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`prowlarr.epaflix.com`)
+      kind: Rule
+      middlewares:
+        - name: redirect-https
+          namespace: traefik-system
+      services:
+        - name: prowlarr
+          port: 9696
