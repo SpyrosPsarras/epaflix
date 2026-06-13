@@ -32,6 +32,11 @@ resources:
   # Carries its own ConfigMap (compare script) + CronJob; the upstream-only diff
   # baseline ConfigMap is built by the configMapGenerator below.
   - cleanuparr-blocklist-drift-cronjob.yaml
+  # Issue #179: weekly newtarr config-seed drift detector (servarr ns). Carries
+  # its own check-script ConfigMap + scoped SA/Role/RoleBinding + CronJob; the
+  # BASELINE is the ksops-rendered newtarr-config-seed Secret (mounted RO), so no
+  # configMapGenerator is needed here.
+  - newtarr-config-drift-cronjob.yaml
 
 # Issue #182: diff baseline for the cleanuparr-blocklist-drift CronJob. Single
 # on-disk source of truth = files/cleanuparr-blocklist-expected.txt (verbatim
