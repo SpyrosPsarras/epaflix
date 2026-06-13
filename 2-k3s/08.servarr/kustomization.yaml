@@ -30,6 +30,9 @@
 #                                       (issue #138 — Sonarr custom-blocklist
 #                                       seriesId 40 S04E13 re-arm guard, consumed
 #                                       by the cleanuparr seed-config initContainer)
+#   - bazarr-autotranslate-secret    from _shared/secrets/bazarr-autotranslate-secret.enc.yaml
+#                                       (issue #283 — bazarr-autotranslate
+#                                       BAZARR_API_KEY, was inline plaintext)
 #
 # Re-add a Job here only if you intend Argo to re-run it on every sync.
 apiVersion: kustomize.config.k8s.io/v1beta1
