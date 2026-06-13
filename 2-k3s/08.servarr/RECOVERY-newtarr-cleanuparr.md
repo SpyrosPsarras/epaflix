@@ -418,6 +418,49 @@ ssh ubuntu@192.168.10.51 "kubectl -n servarr exec deploy/newtarr -- python3 -c '
 
 > **Caveat:** this initContainer assumes `python3` is on PATH in `ghcr.io/elfhosted/newtarr:rolling`; if a future tag drops it the pod CrashLoops at init and the enforcer must be re-expressed in busybox. Like the #137 seed it does NOT codify the rest of newtarr's live config — it guarantees ONLY that `proxy_auth_bypass` is `true` on each pod start.
 
+### #179 — drift detection (weekly detect-and-alert)
+
+Because the app mutates `/config` at runtime (#135/#177), the committed
+`newtarr-config-seed` steadily drifts from live. A **weekly drift-DETECTOR
+CronJob** `newtarr-config-drift`
+(`2-k3s/maintenance/newtarr-config-drift-cronjob.yaml`, #179) makes that drift
+**visible** — it mirrors the #182 `cleanuparr-blocklist-drift` job:
+
+- It reads the **baseline** from the ksops-rendered `newtarr-config-seed` Secret
+  mounted **read-only** (NO sops decrypt in-job, no private key — same Secret the
+  `seed-config` initContainer consumes), and the **live** side via
+  `kubectl exec` into the newtarr pod (`cat /config/<file>`), using a **scoped**
+  ServiceAccount/Role/RoleBinding in `servarr` (pods get/list, pods/exec create,
+  deployments get — no cluster-wide/wildcard rules).
+- It normalizes **both** sides with `jq -S .` (canonical sort-keys) and diffs,
+  comparing ONLY the declarative keys: `sonarr.json`, `radarr.json`,
+  `lidarr.json`, `readarr.json`, `whisparr.json`, `eros.json`, `swaparr.json`,
+  `general.json`, and the scheduler (`scheduling-list.json` →
+  `/config/scheduling/list.json`).
+- It runs **Mondays 06:45 UTC** and exits **non-zero on ANY normalized diff OR
+  any read/exec failure** (fail loud), firing the chart's generic `KubeJobFailed`
+  rule + the scoped `NewtarrConfigDriftCheckFailed` PrometheusRule.
+
+> **It DETECTS, it does NOT auto-fix.** There is deliberately **no auto-PR**
+> write-back (rejected per the #192 lesson — the git push to `main` is gated by
+> the required `validate` check). When the alert fires, **refresh stays the
+> MANUAL #137 "DRIFT-REFRESH runbook (manual)" above** (re-snapshot the live JSON
+> into the SOPS seed). The detector only tells you *when* to do it.
+
+> **`nzb_hunt_bandwidth.json` is intentionally EXCLUDED** — both from the seed and
+> from this comparison. It is volatile runtime state (per-run bandwidth
+> bookkeeping), not declarative config, so codifying or diffing it would produce
+> constant false-positive drift. Any other non-declarative/runtime JSON the app
+> writes is likewise out of scope.
+
+To inspect a failed run's per-file diff:
+
+```sh
+kubectl -n servarr logs job/$(kubectl -n servarr get jobs \
+  -l app=newtarr-config-drift --sort-by=.metadata.creationTimestamp \
+  -o name | tail -1 | cut -d/ -f2)
+```
+
 ## #138 — Cleanuparr Sonarr custom-blocklist seed (SOPS) + the seriesId 40 S04E13 re-arm guard
 
 Cleanuparr v2+ stores its configuration in **SQLite** (`/config/cleanuparr.db`),
