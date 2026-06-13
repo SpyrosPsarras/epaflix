@@ -55,14 +55,19 @@ resources:
   # *arr apps
   - sonarr/sonarr.yaml
   - sonarr/pdb.yaml
+  - sonarr/ingressroute.yaml
   - sonarr2/sonarr2.yaml
   - sonarr2/pdb.yaml
+  - sonarr2/ingressroute.yaml
   - radarr/radarr.yaml
   - radarr/pdb.yaml
+  - radarr/ingressroute.yaml
   - prowlarr/prowlarr.yaml
   - prowlarr/pdb.yaml
+  - prowlarr/ingressroute.yaml
   - bazarr/bazarr.yaml
   - bazarr/pdb.yaml
+  - bazarr/ingressroute.yaml
   - bazarr-autotranslate/bazarr-autotranslate.yaml
   # utilities
   - newtarr/newtarr.yaml
@@ -70,6 +75,7 @@ resources:
   - newtarr/ingressroute.yaml
   - cleanuparr/cleanuparr.yaml
   - cleanuparr/pdb.yaml
+  - cleanuparr/ingressroute.yaml
   - byparr/byparr.yaml
   - byparr/pdb.yaml
   - lingarr/lingarr.yaml
@@ -92,12 +98,15 @@ resources:
   # download + invites + dashboard
   - qbittorrent/qbittorrent.yaml
   - qbittorrent/pdb.yaml
+  - qbittorrent/ingressroute.yaml
   # qbittorrent/ingress.yaml DELETED 2026-05-17 — same reason.
   - qbittorrent/priority-class.yaml
   - unpackerr/unpackerr.yaml
   - homarr/homarr.yaml
   - homarr/pdb.yaml
+  - homarr/ingressroute.yaml
   - wizarr/wizarr.yaml
+  - wizarr/ingressroute.yaml
 generators:
   - _shared/secrets/ksops-generator.yaml
 # `images:` is digest-pinned on moving tags (:latest, :development, …) and is
