@@ -333,6 +333,109 @@ the five media pods. State of play:
 > see #196) and the qbittorrent `LocalHostAuth=false` WebUI change (#244).
 > Reconcile/codify per those issues.
 
+## #196 — Cleanuparr safe-reaping DB state (restore runbook)
+
+The safe-reaping configuration that **#142** relies on (the seeding rules +
+QueueCleaner stall rules that purge healthy seeders by ratio/seed-time, and the
+deliberately-OFF `unlinked`/orphan rule) lives **PVC-only inside the Cleanuparr
+SQLite DB** (`/config/cleanuparr.db`, binary). It is **NOT git-seeded.** Unlike
+the **#138** flat blocklist (`custom-blocklist-sonarr.txt`), which IS codified as
+a SOPS seed + non-clobber initContainer, the rest of Cleanuparr's config is churny
+binary SQLite the app rewrites at runtime — so a SOPS seed / drift-detector is the
+wrong tool (binary, no stable diff). This section is the **runbook** instead: an
+authoritative values table + a numbered fresh/reset-PVC restore procedure. On a
+lost or reset `cleanuparr-config` PVC these settings come up **empty** and must be
+**re-entered by hand in the UI**.
+
+### (a) Authoritative values table
+
+Sourced **LIVE** from a read-only copy of `/config/cleanuparr.db` on
+2026-06-13 (`cp /config/cleanuparr.db /tmp/cu-ro.db` in-pod → `kubectl cp` out →
+`sqlite3` SELECTs on the copy; **no writes, no rule changes, no pod restart**).
+All values below are live unless the source column says otherwise.
+
+| Setting | Value | Where it lives (`cleanuparr.db` table) | Source |
+|---|---|---|---|
+| Download Cleaner enabled | `1` (ON), cron `0 0 0/1 ? * * *` (hourly) | `download_cleaner_configs.enabled` | live |
+| qBit seeding rule — `radarr` | `max_ratio=1.0`, `min_seed_time=0`, `max_seed_time=400h`, `delete_source_files=1`, categories `["radarr"]` | `q_bit_seeding_rules` | live |
+| qBit seeding rule — `tv-sonarr` | `max_ratio=1.0`, `min_seed_time=0`, `max_seed_time=400h`, `delete_source_files=1`, categories `["tv-sonarr"]` | `q_bit_seeding_rules` | live |
+| qBit seeding rule — `animes` | `max_ratio=1.0`, `min_seed_time=0`, `max_seed_time=400h`, `delete_source_files=1`, categories `["animes"]` | `q_bit_seeding_rules` | live |
+| QueueCleaner — enabled | `1` (ON), cron `0 0 0/1 ? * * *` (hourly) | `queue_cleaner_configs.enabled` | live |
+| QueueCleaner stall — `Stall` (public) | `enabled=1`, `max_strikes=3`, `privacy_type=public`, `reset_strikes_on_progress=1` | `stall_rules` | live |
+| QueueCleaner stall — `private stalled` | `enabled=1`, `max_strikes=30`, `privacy_type=private` | `stall_rules` | live (not in earlier prose) |
+| QueueCleaner slow — `Slow-rule` | `enabled=1`, `max_strikes=3`, `max_time_hours=336`, `min_speed=10KB` | `slow_rules` | live (not in earlier prose) |
+| QueueCleaner failed-import strikes (global) | `failed_import_max_strikes=3`, pattern_mode `include` (3 `failed_import_patterns`) | `queue_cleaner_configs.failed_import_max_strikes` | live |
+| **Dry Run — OFF** | **`dry_run=0`** (reaper actually deletes; if `1` every rule silently no-ops) | `general_configs.dry_run` | live |
+| **`unlinked`/orphan rule — DISABLED** | **`enabled=0`** (target_category `cleanuparr-unlinked`) | `unlinked_configs.enabled` | live |
+| Sonarr `failed_import_max_strikes` (per-arr) | `-1` (striking disabled) — see #138 (ii) | `arr_configs` (type `sonarr`) | live |
+| Other per-arr `failed_import_max_strikes` | `-1` for `radarr`, `lidarr`, `readarr`, `whisparr` too | `arr_configs` | live (prose only noted Sonarr) |
+
+> **⚠️ DO NOT ARM the `unlinked`/orphan rule.** `unlinked_configs.enabled` MUST
+> stay `0`. Even though #195 removed the EXDEV barrier (hardlinks now work,
+> `nlink>1`), a dry-run found ~96/97 candidates are **pre-fix copy-seeders**
+> (genuinely `nlink=1`, real seeders not orphans) — arming now would delete them.
+> The flip `0 -> 1` is gated and owned by **#246** (arm only after pre-fix copies
+> age out / dry-run false-positives = 0). See the #195 + #142 sections above and
+> #249.
+
+### (b) Fresh / reset-PVC restore procedure
+
+Run in the Cleanuparr UI (`cleanuparr.epaflix.com`). Order matters — restore the
+file seed first so the blocklist pointer has a target, then the reaping rules.
+
+1. **Confirm the #138 blocklist file is present.** On a fresh PVC the
+   `seed-config` initContainer restores `/config/custom-blocklist-sonarr.txt`
+   automatically (non-clobber; see the "#138" section). Verify:
+   `kubectl -n servarr exec deploy/cleanuparr -- ls -l /config/custom-blocklist-sonarr.txt`.
+2. **Re-point the Sonarr content-blocker (manual, SQLite-resident).** UI →
+   **Content Blocker → Sonarr**: set blocklist path =
+   `/config/custom-blocklist-sonarr.txt`, confirm Sonarr content-blocker
+   **enabled**. This pointer is the **same one manual DB step as #138 (ii)** — it
+   is NOT file-seedable. (Radarr keeps the live upstream URL
+   `https://raw.githubusercontent.com/flmorg/cleanuperr/refs/heads/main/blacklist`.)
+   Verify: `content_blocker_configs.sonarr_blocklist_path` +
+   `sonarr_enabled=1`.
+3. **Re-enable Download Cleaner + qBit seeding rules.** UI → **Download Cleaner**:
+   set enabled, then add one qBit seeding rule per category exactly as the table
+   above — `radarr`, `tv-sonarr`, `animes`, each `max_ratio=1.0` /
+   `max_seed_time=400h` / `delete_source_files=on`. These are gated **purely** on
+   ratio/seed-time and **never key on `nlink`**, so they cannot touch an
+   `nlink=1` imported seeder. Verify: `download_cleaner_configs.enabled=1` and
+   three rows in `q_bit_seeding_rules`.
+4. **Re-create QueueCleaner stall/slow rules.** UI → **Queue Cleaner**: enable,
+   add the `Stall` (public, `max_strikes=3`), `private stalled`
+   (private, `max_strikes=30`), and `Slow-rule` (`max_strikes=3`,
+   `max_time_hours=336`, `min_speed=10KB`) rules, and set the global
+   failed-import strikes = `3` with the 3 include-patterns. QueueCleaner only
+   strikes torrents still **referenced in an *arr queue**. Verify rows in
+   `stall_rules` / `slow_rules` / `queue_cleaner_configs`.
+5. **Leave per-arr `failed_import_max_strikes = -1`.** UI → each *arr instance →
+   failed-import strikes = `-1` (disabled) for Sonarr (and the others), per
+   #138 (ii). Do NOT set these positive.
+6. **Leave the `unlinked`/orphan rule DISABLED.** Do NOT enable
+   `unlinked_configs` (see the DO-NOT-ARM warning above; arming is #246's job).
+7. **Confirm Dry Run is OFF.** UI → **General settings**: verify Dry Run is
+   **disabled** (`general_configs.dry_run=0`). If Dry Run is ON the reaper
+   silently no-ops — every rule above evaluates but deletes nothing.
+8. **Restart + verify.** `kubectl -n servarr rollout restart deploy/cleanuparr`;
+   confirm the pod is healthy and the Download Cleaner / Queue Cleaner schedules
+   show in the logs. Re-confirm against live with a read-only DB copy if in doubt
+   (same `cp … /tmp/cu-ro.db` + `sqlite3` recipe used to source this table —
+   operate on a COPY, never the live DB).
+
+> **Why runbook, not seed/detector.** The DB is binary SQLite that the app
+> rewrites at runtime, so there is no stable text to diff or non-clobber-seed
+> (the #138 precedent only seeded the flat `.txt`). The blocklist *pointer*
+> (`sonarr_blocklist_path`) stays a **manual** re-entry on a PVC rebuild, exactly
+> as #138 (ii) documents.
+
+**Cross-links:** #138 (the flat-blocklist SOPS seed sibling — same PVC-only
+durability gap, file-seedable half), #142 (the safe reaper this state implements
+and protects), #195 (single-`/media` mount; copy-seeder gate that keeps the
+`unlinked` rule off), #244 (qbittorrent `LocalHostAuth=false` — sibling
+PVC-only/live-only config from the same #195 cutover), #246 (arming the reaper —
+flips `unlinked_configs.enabled` `0 -> 1` once pre-fix copies age out), #249.
+
 ## #137 — newtarr JSON config seed (SOPS)
 
 newtarr v1.0.0 stores its entire configuration as JSON files under the
