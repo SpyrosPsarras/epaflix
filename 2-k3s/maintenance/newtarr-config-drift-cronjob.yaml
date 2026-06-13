@@ -1,0 +1,230 @@
+---
+# Weekly newtarr config-seed drift detector (Issue #179).
+#
+# newtarr v1.0.0 stores its entire configuration as JSON files under the
+# `newtarr-config` PVC (/config). Those files are codified in git as the
+# SOPS-encrypted seed Secret `newtarr-config-seed`
+# (2-k3s/08.servarr/_shared/secrets/newtarr-config-seed.enc.yaml) and restored on
+# a FRESH PVC by the newtarr `seed-config` initContainer (#137). The seed is
+# NON-CLOBBERING — it never overwrites a populated PVC — and the app rewrites
+# these JSONs at runtime (#135/#177), so the committed seed steadily DRIFTS from
+# the live /config.
+#
+# This Job is a DETECTOR, not an auto-updater (mirrors the #182
+# cleanuparr-blocklist-drift CronJob; auto-PR write-back to main is rejected per
+# the #192 lesson). Weekly it:
+#   1. Reads the BASELINE from the ksops-rendered newtarr-config-seed Secret,
+#      mounted READ-ONLY as a volume (NO sops decrypt in-job, no private key) —
+#      the same Secret the deployment's seed-config initContainer consumes.
+#   2. Reads the LIVE side via `kubectl exec` into the newtarr pod (cat each
+#      declarative /config file).
+#   3. Normalizes BOTH sides with `jq -S .` (canonical sort-keys) and diffs.
+# It compares ONLY the declarative keys (per-app instance lists + hunt settings,
+# swaparr, general, and the scheduler list). It EXCLUDES nzb_hunt_bandwidth.json
+# and any other volatile runtime JSON. It exits NON-ZERO on ANY normalized diff
+# OR any read/exec failure (fail LOUD), so the chart's default KubeJobFailed rule
+# + the scoped NewtarrConfigDriftCheckFailed PrometheusRule fire. The actual
+# re-snapshot/re-encrypt stays the MANUAL #137 runbook in
+# 2-k3s/08.servarr/RECOVERY-newtarr-cleanuparr.md (#179 section).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: newtarr-config-drift-script
+  namespace: servarr
+data:
+  check.sh: |
+    set -eu
+    echo "=== newtarr config-seed drift check @ $(date -u +%FT%TZ) ==="
+
+    # Declarative keys to compare. Format: "<seed-key>:<live-path>". The seed
+    # Secret stores the scheduler under the flat key scheduling-list.json (k8s
+    # Secret keys cannot contain '/'); live it is /config/scheduling/list.json.
+    # nzb_hunt_bandwidth.json is INTENTIONALLY EXCLUDED — volatile runtime state,
+    # not part of the seed.
+    PAIRS="
+    sonarr.json:/config/sonarr.json
+    radarr.json:/config/radarr.json
+    lidarr.json:/config/lidarr.json
+    readarr.json:/config/readarr.json
+    whisparr.json:/config/whisparr.json
+    eros.json:/config/eros.json
+    swaparr.json:/config/swaparr.json
+    general.json:/config/general.json
+    scheduling-list.json:/config/scheduling/list.json
+    "
+
+    # Resolve the running newtarr pod once (fail LOUD if none is Ready).
+    POD=$(kubectl -n servarr get pod -l app=newtarr \
+      -o jsonpath='{.items[?(@.status.phase=="Running")].metadata.name}' \
+      | awk '{print $1}')
+    if [ -z "$POD" ]; then
+      echo "ERROR: no Running newtarr pod found (label app=newtarr)" >&2
+      exit 1
+    fi
+    echo "live pod: $POD"
+
+    drift=0
+    for pair in $PAIRS; do
+      [ -n "$pair" ] || continue
+      key=${pair%%:*}
+      live=${pair#*:}
+
+      # BASELINE: the seed Secret, mounted read-only at /seed. A declarative key
+      # MUST be present in the seed — its absence is a fail-loud condition.
+      seedfile=/seed/$key
+      if [ ! -f "$seedfile" ]; then
+        echo "ERROR: seed key '$key' missing from newtarr-config-seed Secret" >&2
+        drift=1
+        continue
+      fi
+
+      # LIVE: cat the file out of the pod. A missing/unreadable live file or a
+      # non-JSON body is a fail-loud condition (do NOT silently pass).
+      if ! kubectl -n servarr exec "$POD" -- cat "$live" > /tmp/live.raw 2>/tmp/live.err; then
+        echo "ERROR: cannot read live $live from pod $POD:" >&2
+        cat /tmp/live.err >&2
+        drift=1
+        continue
+      fi
+
+      # Normalize BOTH sides canonically (sort-keys). Invalid JSON on either
+      # side fails loud.
+      if ! jq -S . "$seedfile" > /tmp/seed.n 2>/dev/null; then
+        echo "ERROR: seed key '$key' is not valid JSON" >&2
+        drift=1
+        continue
+      fi
+      if ! jq -S . /tmp/live.raw > /tmp/live.n 2>/dev/null; then
+        echo "ERROR: live $live is not valid JSON" >&2
+        drift=1
+        continue
+      fi
+
+      if diff -u /tmp/seed.n /tmp/live.n > /tmp/diff.txt; then
+        echo "OK: $key matches live $live (0 drift)."
+      else
+        echo "DRIFT DETECTED for $key (seed vs live $live):"
+        sed 's/^/    /' /tmp/diff.txt
+        drift=1
+      fi
+    done
+
+    echo
+    if [ "$drift" -eq 0 ]; then
+      echo "OK: committed newtarr-config-seed matches live /config (0 drift)."
+      exit 0
+    fi
+    echo "ACTION: the committed seed has drifted from live newtarr /config (or a"
+    echo "  read/exec failed). Re-snapshot via the MANUAL #137 runbook in"
+    echo "  2-k3s/08.servarr/RECOVERY-newtarr-cleanuparr.md (#179 section). The"
+    echo "  detector NEVER auto-fixes; refresh stays manual."
+    exit 1
+---
+# ServiceAccount for the drift-check pod — scoped to namespace servarr.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: newtarr-config-drift
+  namespace: servarr
+  labels:
+    app: newtarr-config-drift
+---
+# Role: the MINIMUM to resolve + exec into the newtarr pod. No cluster-wide /
+# wildcard rules; scoped to namespace servarr only.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: newtarr-config-drift
+  namespace: servarr
+  labels:
+    app: newtarr-config-drift
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: newtarr-config-drift
+  namespace: servarr
+  labels:
+    app: newtarr-config-drift
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: newtarr-config-drift
+subjects:
+  - kind: ServiceAccount
+    name: newtarr-config-drift
+    namespace: servarr
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: newtarr-config-drift
+  namespace: servarr
+  labels:
+    app: newtarr-config-drift
+spec:
+  # Mondays 06:45 UTC = 08:45 Europe/Oslo (just after postgres-sequence-audit at
+  # 06:00 and cleanuparr-blocklist-drift at 06:30). Weekly cadence — proportional
+  # to a slowly-drifting point-in-time seed.
+  schedule: "45 6 * * 1"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 6
+  failedJobsHistoryLimit: 6
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 2592000  # keep 30 days
+      template:
+        metadata:
+          labels:
+            app: newtarr-config-drift
+        spec:
+          restartPolicy: Never
+          serviceAccountName: newtarr-config-drift
+          containers:
+            - name: drift-check
+              # alpine 3.20 (matches the cleanuparr-blocklist-drift precedent);
+              # jq + kubectl pulled from the alpine community repo at start.
+              image: alpine:3.20
+              imagePullPolicy: IfNotPresent
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  apk add --no-cache jq kubectl >/dev/null
+                  exec /bin/sh /script/check.sh
+              volumeMounts:
+                - name: seed
+                  mountPath: /seed
+                  readOnly: true
+                - name: script
+                  mountPath: /script
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "500m"
+                  memory: "256Mi"
+          volumes:
+            # Same Secret the deployment's seed-config initContainer consumes —
+            # the ksops-rendered BASELINE, mounted read-only. NO sops key in-job.
+            - name: seed
+              secret:
+                secretName: newtarr-config-seed
+                defaultMode: 0444
+            - name: script
+              configMap:
+                name: newtarr-config-drift-script
+                defaultMode: 0444
