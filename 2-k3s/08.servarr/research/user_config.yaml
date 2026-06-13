@@ -196,7 +196,7 @@
     "bazarr-autotranslate":
       "environment":
       - "BAZARR_BASE_URL=http://192.168.10.200:6767"
-      - "BAZARR_API_KEY=cd4a4ec290a973fbbe992412c524c9c1"
+      - "BAZARR_API_KEY=<BAZARR_API_KEY>"
       - "BASE_LANGUAGES=en"
       - "TO_LANGUAGES=el"
       - "LOG_LEVEL=debug"
