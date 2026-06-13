@@ -146,3 +146,16 @@ spec:
           annotations:
             summary: "Cleanuparr Sonarr blocklist drifted from upstream (or check failed)"
             description: "The weekly cleanuparr-blocklist-drift Job ({{ $labels.job_name }}) failed — either upstream Cleanuparr/Cleanuparr 'blacklist' diverged from the committed snapshot, or the upstream fetch failed. Inspect the Job logs for the diff, then run the manual re-snapshot runbook in 2-k3s/08.servarr/RECOVERY-newtarr-cleanuparr.md (#182). Keeps the local seriesId 40 re-arm guard; resolves the #138 static-snapshot caveat (detect-and-alert, manual re-snapshot)."
+
+    - name: newtarr-config-drift
+      interval: 60s
+      rules:
+        - alert: NewtarrConfigDriftCheckFailed
+          expr: kube_job_failed{namespace="servarr", job_name=~"newtarr-config-drift.*"} > 0
+          for: 5m
+          labels:
+            severity: warning
+            component: servarr
+          annotations:
+            summary: "newtarr config-seed drifted from live /config (or check failed)"
+            description: "The weekly newtarr-config-drift Job ({{ $labels.job_name }}) failed — either the committed SOPS seed newtarr-config-seed diverged from the live newtarr /config JSON, or a read/exec into the pod failed. Inspect the Job logs for the per-file diff, then re-snapshot via the MANUAL #137 runbook in 2-k3s/08.servarr/RECOVERY-newtarr-cleanuparr.md (#179 section). The detector NEVER auto-fixes; refresh stays manual (no auto-PR per #192). nzb_hunt_bandwidth.json is intentionally excluded (volatile runtime state)."
