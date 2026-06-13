@@ -24,7 +24,10 @@ spec:
             - name: BAZARR_BASE_URL
               value: "https://bazarr.epaflix.com"
             - name: BAZARR_API_KEY
-              value: "cd4a4ec290a973fbbe992412c524c9c1"
+              valueFrom:
+                secretKeyRef:
+                  name: bazarr-autotranslate-secret
+                  key: BAZARR_API_KEY
             - name: BASE_LANGUAGES
               value: "en,ko"
             - name: TO_LANGUAGES
