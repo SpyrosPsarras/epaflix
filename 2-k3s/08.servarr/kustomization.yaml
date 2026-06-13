@@ -67,8 +67,8 @@ resources:
   - newtarr/ingressroute.yaml
   - cleanuparr/cleanuparr.yaml
   - cleanuparr/pdb.yaml
-  - flaresolverr/flaresolverr.yaml
-  - flaresolverr/pdb.yaml
+  - byparr/byparr.yaml
+  - byparr/pdb.yaml
   - lingarr/lingarr.yaml
   - lingarr/pdb.yaml
   - lingarr/ingress.yaml
@@ -110,8 +110,9 @@ images:
     digest: sha256:a46d0ce0a8236bc4e065fe7c91a55d026c9d849620c5845250519b977d8857f3
   - name: ghcr.io/cleanuparr/cleanuparr
     digest: sha256:4ad626da7e1d2774ca51bbfa812f832d5639264b3fe308909e47de02ba2188f7
-  - name: ghcr.io/flaresolverr/flaresolverr
-    digest: sha256:139dfee1c6f89249c8d665d1333a42e8ec74ec0a86bc6bb1c8461e10d3a66a47
+  # Byparr — FlareSolverr replacement (#275); seleniumbase/Chromium solver.
+  - name: ghcr.io/thephaseless/byparr
+    digest: sha256:01a46a2865d9a6db5eb8ead04ec0dd33b8fbe233e8565ae70b50d4cc0af4cfb0
   - name: jellyfin/jellyfin
     digest: sha256:aefb67e6a7ff1debdd154a78a7bbb780fd0c873d8639210a7f6a2016ad2b35db
   - name: ghcr.io/ajnart/homarr

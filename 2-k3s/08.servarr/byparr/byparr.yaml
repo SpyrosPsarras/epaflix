@@ -1,0 +1,90 @@
+---
+# Byparr — Cloudflare-challenge solver for Prowlarr indexers (drop-in
+# FlareSolverr-API replacement, exposes the same /v1 endpoint on :8191).
+# Replaces FlareSolverr (#275): FlareSolverr could detect but not SOLVE
+# 1337x's "Just a moment…" Cloudflare challenge (timeout @60s) → 1337x
+# perpetually disabled. Byparr (seleniumbase/Chromium) handles modern
+# Cloudflare. Heavier on RAM than FlareSolverr; needs /dev/shm headroom.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: byparr
+  namespace: servarr
+  labels:
+    app: byparr
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: byparr
+  template:
+    metadata:
+      labels:
+        app: byparr
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: byparr
+      containers:
+        - name: byparr
+          image: ghcr.io/thephaseless/byparr:latest
+          env:
+            - name: PORT
+              value: "8191"
+            - name: TZ
+              value: "Europe/Oslo"
+          ports:
+            - containerPort: 8191
+              name: http
+          # Chromium needs more than the default 64Mi /dev/shm or it crashes.
+          volumeMounts:
+            - name: dshm
+              mountPath: /dev/shm
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 60
+            timeoutSeconds: 30
+            failureThreshold: 5
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "2Gi"
+              cpu: "1"
+      volumes:
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: byparr
+  namespace: servarr
+  labels:
+    app: byparr
+spec:
+  type: ClusterIP
+  selector:
+    app: byparr
+  ports:
+    - name: http
+      port: 8191
+      targetPort: http
