@@ -117,11 +117,11 @@ echo ""
 # Step 4: Deploy core infrastructure apps
 echo "Step 4: Deploying core infrastructure..."
 kubectl apply -f "$BASE_DIR/prowlarr/prowlarr.yaml"
-kubectl apply -f "$BASE_DIR/flaresolverr/flaresolverr.yaml"
-info "Prowlarr and FlareSolverr deployed"
+kubectl apply -f "$BASE_DIR/byparr/byparr.yaml"
+info "Prowlarr and Byparr deployed"
 
 wait_for_pods servarr "app=prowlarr" 180
-wait_for_pods servarr "app=flaresolverr" 180
+wait_for_pods servarr "app=byparr" 180
 echo ""
 
 # Step 5: Deploy download client

@@ -63,7 +63,7 @@ backup-manifest.txt
 | **jellyseerr-config** | Request history | LOW |
 | **qbittorrent-config** | Torrent state | LOW |
 | **homarr-config** | Dashboard settings | LOW |
-| **flaresolverr-config** | CloudFlare bypass settings | LOW |
+| **byparr** | Cloudflare bypass (stateless — no PVC; replaced FlareSolverr #275) | LOW |
 
 ### 3. Proxmox VM Backups
 **Location:** `truenas_admin@192.168.10.200:/mnt/pool1/dataset01/VMs/backup/20260204-090744/`
@@ -370,8 +370,8 @@ cd jellyseerr
 kubectl apply -f .
 cd ..
 
-# 9. FlareSolverr (Cloudflare Bypass)
-cd flaresolverr
+# 9. Byparr (Cloudflare Bypass — replaced FlareSolverr, #275)
+cd byparr
 kubectl apply -f .
 cd ..
 
