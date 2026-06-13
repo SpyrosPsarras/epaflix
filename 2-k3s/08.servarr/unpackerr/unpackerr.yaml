@@ -1,0 +1,108 @@
+---
+# Unpackerr — extracts RAR/archive-packed releases so Sonarr can import them.
+# Needed because qBittorrent's "excluded_file_names" no longer skips archives
+# (#275 follow-up): scene releases (e.g. *-ARISTA) ship as .rar/.r00…; qBit now
+# downloads them and unpackerr extracts the video in-place, then the *arr imports.
+# Covers Sonarr + Sonarr2 (anime) + Radarr (keys read from k3s configs, #275).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: unpackerr
+  namespace: servarr
+  labels:
+    app: unpackerr
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: unpackerr
+  template:
+    metadata:
+      labels:
+        app: unpackerr
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: unpackerr
+      containers:
+        - name: unpackerr
+          image: ghcr.io/hotio/unpackerr:release
+          env:
+            - name: PUID
+              value: "568"
+            - name: PGID
+              value: "568"
+            - name: UMASK
+              value: "002"
+            - name: TZ
+              value: "Europe/Oslo"
+            # global behaviour
+            - name: UN_INTERVAL
+              value: "2m0s"
+            - name: UN_START_DELAY
+              value: "1m0s"
+            - name: UN_PARALLEL
+              value: "1"
+            # Sonarr instance (Genius/Ángela live here). Path must match what
+            # Sonarr sees so the extracted file imports cleanly.
+            - name: UN_SONARR_0_URL
+              value: "http://sonarr:8989"
+            - name: UN_SONARR_0_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: unpackerr-secret
+                  key: UN_SONARR_0_API_KEY
+            - name: UN_SONARR_0_PATHS_0
+              value: "/media/downloads"
+            - name: UN_SONARR_0_PROTOCOLS
+              value: "torrent"
+            - name: UN_SONARR_0_DELETE_DELAY
+              value: "5m0s"
+            # Sonarr2 (anime)
+            - name: UN_SONARR_1_URL
+              value: "http://sonarr2:8989"
+            - name: UN_SONARR_1_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: unpackerr-secret
+                  key: UN_SONARR_1_API_KEY
+            - name: UN_SONARR_1_PATHS_0
+              value: "/media/downloads"
+            - name: UN_SONARR_1_PROTOCOLS
+              value: "torrent"
+            - name: UN_SONARR_1_DELETE_DELAY
+              value: "5m0s"
+            # Radarr (movies)
+            - name: UN_RADARR_0_URL
+              value: "http://radarr:7878"
+            - name: UN_RADARR_0_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: unpackerr-secret
+                  key: UN_RADARR_0_API_KEY
+            - name: UN_RADARR_0_PATHS_0
+              value: "/media/downloads"
+            - name: UN_RADARR_0_PROTOCOLS
+              value: "torrent"
+            - name: UN_RADARR_0_DELETE_DELAY
+              value: "5m0s"
+          volumeMounts:
+            - name: media
+              mountPath: /media
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "1Gi"
+              cpu: "1"
+      volumes:
+        - name: media
+          persistentVolumeClaim:
+            claimName: servarr-media
