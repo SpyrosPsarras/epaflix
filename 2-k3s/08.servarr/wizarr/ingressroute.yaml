@@ -1,38 +1,35 @@
 ---
-# lingarr.epaflix.com
-# Internal-only follows the project convention used by sonarr/radarr/cleanuparr/etc:
-#   * Pi-hole (192.168.10.30) resolves lingarr.epaflix.com -> 192.168.10.101
-#     via /etc/dnsmasq.d/10-epaflix.conf
-#   * No public Cloudflare DNS record for this host -> external NXDOMAIN
-#   * Traefik still serves the real Let's Encrypt wildcard cert (*.epaflix.com)
-#     issued by the cloudflare certResolver via DNS-01 (wildcard cert doesn't
-#     need an A record for this specific host).
+# Wizarr - Public Internet-facing IngressRoutes with Let's Encrypt TLS,
+# fronted by Authentik forward-auth SSO (issue #176, servarr forward-auth rollout).
 #
-# Issue #176 (servarr forward-auth rollout): the lingarr UI is now gated by
-# Authentik forward-auth (authentik-forwardauth middleware, "Servarr users"
-# group). lingarr is a pure-UI / caller-only app with no inbound API, so the
-# WHOLE host is gated -- there is deliberately no /api bypass route.
+# The WHOLE host is gated by Authentik forward-auth, authorized by the
+# "Servarr users" group. Wizarr is a pure-UI app with no /api bypass route
+# (apiBypass=FALSE).
+#
+# Wizarr is currently DOWN/unused; gating it removes its previously-anonymous
+# public exposure.
+#
 # Pattern mirrors 08.servarr/newtarr/ingressroute.yaml:
 #   - app route priority:10 + authentik-forwardauth middleware
 #   - outpost route priority:15 matching PathPrefix(/outpost.goauthentik.io/)
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
-  name: lingarr-https
+  name: wizarr-https
   namespace: servarr
 spec:
   entryPoints:
     - websecure
   routes:
-    - match: Host(`lingarr.epaflix.com`)
+    - match: Host(`wizarr.epaflix.com`)
       kind: Rule
       priority: 10
       middlewares:
         - name: authentik-forwardauth
           namespace: traefik-system
       services:
-        - name: lingarr
-          port: 9876
+        - name: wizarr
+          port: 5690
   tls:
     certResolver: cloudflare
     domains:
@@ -40,17 +37,17 @@ spec:
         sans:
           - "*.epaflix.com"
 ---
-# Outpost route - handles auth callback on lingarr.epaflix.com
+# Outpost route - handles auth callback on wizarr.epaflix.com
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
-  name: lingarr-outpost-https
+  name: wizarr-outpost-https
   namespace: servarr
 spec:
   entryPoints:
     - websecure
   routes:
-    - match: Host(`lingarr.epaflix.com`) && PathPrefix(`/outpost.goauthentik.io/`)
+    - match: Host(`wizarr.epaflix.com`) && PathPrefix(`/outpost.goauthentik.io/`)
       kind: Rule
       priority: 15
       services:
@@ -64,20 +61,21 @@ spec:
         sans:
           - "*.epaflix.com"
 ---
+# HTTP to HTTPS redirect for Wizarr
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
-  name: lingarr-http
+  name: wizarr-http
   namespace: servarr
 spec:
   entryPoints:
     - web
   routes:
-    - match: Host(`lingarr.epaflix.com`)
+    - match: Host(`wizarr.epaflix.com`)
       kind: Rule
       middlewares:
         - name: redirect-https
           namespace: traefik-system
       services:
-        - name: lingarr
-          port: 9876
+        - name: wizarr
+          port: 5690
