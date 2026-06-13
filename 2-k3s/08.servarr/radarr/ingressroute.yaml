@@ -1,0 +1,109 @@
+---
+# Radarr - Public Internet-facing IngressRoutes with Let's Encrypt TLS,
+# fronted by Authentik forward-auth SSO (issue #176, servarr forward-auth rollout).
+#
+# The Radarr WEB UI is gated by the authentik-forwardauth middleware (Authentik
+# embedded outpost, provider + app slug `radarr`), authorized by the
+# "Servarr users" group, for BOTH local and internet traffic.
+#
+# /api is EXEMPT from forward-auth (radarr-api, priority 20): Radarr is an
+# INTEGRATION TARGET called machine-to-machine by seerr, bazarr, cleanuparr and
+# newtarr, which authenticate with an X-Api-Key header rather than an SSO
+# session. The API surface is already key-protected by Radarr itself, so leaving
+# it un-gated is safe and also keeps deep-links to /api working.
+#
+# Pattern mirrors 08.servarr/newtarr/ingressroute.yaml:
+#   - app route priority:10 + authentik-forwardauth middleware
+#   - outpost route priority:15 matching PathPrefix(/outpost.goauthentik.io/)
+#   - api route priority:20 (most specific) with NO middleware
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: radarr-https
+  namespace: servarr
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`radarr.epaflix.com`)
+      kind: Rule
+      priority: 10
+      middlewares:
+        - name: authentik-forwardauth
+          namespace: traefik-system
+      services:
+        - name: radarr
+          port: 7878
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
+---
+# Outpost route - handles auth callback on radarr.epaflix.com
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: radarr-outpost-https
+  namespace: servarr
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`radarr.epaflix.com`) && PathPrefix(`/outpost.goauthentik.io/`)
+      kind: Rule
+      priority: 15
+      services:
+        - name: authentik-server
+          namespace: app-authentik
+          port: 80
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
+---
+# API route - EXEMPT from forward-auth so seerr/bazarr/cleanuparr/newtarr can
+# reach Radarr machine-to-machine via X-Api-Key (priority 20 = most specific).
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: radarr-api
+  namespace: servarr
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`radarr.epaflix.com`) && PathPrefix(`/api`)
+      kind: Rule
+      priority: 20
+      services:
+        - name: radarr
+          port: 7878
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
+---
+# HTTP to HTTPS redirect for Radarr
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: radarr-http
+  namespace: servarr
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`radarr.epaflix.com`)
+      kind: Rule
+      middlewares:
+        - name: redirect-https
+          namespace: traefik-system
+      services:
+        - name: radarr
+          port: 7878
