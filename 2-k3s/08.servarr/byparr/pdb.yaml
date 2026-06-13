@@ -1,10 +1,10 @@
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: flaresolverr-pdb
+  name: byparr-pdb
   namespace: servarr
 spec:
   maxUnavailable: 1
   selector:
     matchLabels:
-      app: flaresolverr
+      app: byparr
