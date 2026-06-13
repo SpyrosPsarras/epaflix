@@ -4,7 +4,8 @@
 # Replaces FlareSolverr (#275): FlareSolverr could detect but not SOLVE
 # 1337x's "Just a moment…" Cloudflare challenge (timeout @60s) → 1337x
 # perpetually disabled. Byparr (seleniumbase/Chromium) handles modern
-# Cloudflare. Heavier on RAM than FlareSolverr; needs /dev/shm headroom.
+# Cloudflare. Uses Camoufox (Firefox) — CPU/RAM-heavy; /health runs a real
+# browser solve, so it needs real CPU headroom and a generous startupProbe.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -40,33 +41,40 @@ spec:
           ports:
             - containerPort: 8191
               name: http
-          # Chromium needs more than the default 64Mi /dev/shm or it crashes.
+          # Camoufox (Firefox) needs more than the default 64Mi /dev/shm.
           volumeMounts:
             - name: dshm
               mountPath: /dev/shm
-          readinessProbe:
+          # /health runs a REAL browser solve (Camoufox) — expensive + slow,
+          # so: a generous startupProbe gates on the first successful solve
+          # (proves Byparr can bypass Cloudflare), then cheap TCP readiness/
+          # liveness keep it serving without hammering the browser every probe.
+          startupProbe:
             httpGet:
               path: /health
               port: http
-            initialDelaySeconds: 20
             periodSeconds: 15
-            timeoutSeconds: 10
-            failureThreshold: 6
-          livenessProbe:
-            httpGet:
-              path: /health
+            timeoutSeconds: 45
+            failureThreshold: 24   # ~6 min budget for cold start + first solve
+          readinessProbe:
+            tcpSocket:
               port: http
-            initialDelaySeconds: 60
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: http
             periodSeconds: 60
-            timeoutSeconds: 30
+            timeoutSeconds: 10
             failureThreshold: 5
           resources:
             requests:
-              memory: "512Mi"
-              cpu: "250m"
+              memory: "1Gi"
+              cpu: "500m"
             limits:
-              memory: "2Gi"
-              cpu: "1"
+              memory: "3Gi"
+              cpu: "2"
       volumes:
         - name: dshm
           emptyDir:
