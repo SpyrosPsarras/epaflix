@@ -28,7 +28,7 @@ This directory contains the Kubernetes manifests for deploying the complete Serv
 ├── homarr/               # Dashboard
 ├── wizarr/               # User invitation system
 ├── tdarr/                # Media transcoding
-└── flaresolverr/         # Cloudflare bypass
+└── byparr/               # Cloudflare bypass for indexers (replaced FlareSolverr, #275)
 ```
 
 ## Architecture
@@ -56,7 +56,7 @@ This directory contains the Kubernetes manifests for deploying the complete Serv
   - The k3s Jellyfin pod runs but is not publicly accessible
 - **Seerr**: Media request management (port 5055) — served at seerr.epaflix.com and the legacy jellyseerr.epaflix.com (both route to the `seerr` Service). Reuses the legacy `jellyseerr-config` PVC and `jellyseerr` Postgres DB.
 - **qBittorrent**: Torrent client with WireGuard VPN (ports 8080, 8999)
-- **FlareSolverr**: Cloudflare bypass (port 8191)
+- **Byparr**: Cloudflare bypass for indexers (port 8191; FlareSolverr-API drop-in, replaced FlareSolverr — #275)
 
 ### Utilities
 - **Tdarr**: Media transcoding with DoVi node (ports 8265, 8266, NVIDIA GPU)
@@ -141,7 +141,7 @@ WireGuard config is stored in `secrets.yml`. Create the K8s secret from `_shared
    ```bash
    # Deploy in order (some apps depend on others)
    kubectl apply -f prowlarr/
-   kubectl apply -f flaresolverr/
+   kubectl apply -f byparr/
    kubectl apply -f qbittorrent/
 
    # Wait for download client to be ready
