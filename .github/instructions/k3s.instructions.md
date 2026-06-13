@@ -156,8 +156,25 @@ relocated here as part of the reconcile.)
   CLI form above, which keeps `--etcd-arg=--…`.
 - `cluster-init: true` and `server:` are **mutually exclusive** — 51 uses the former, 52/53 the latter.
 
-**Forward note (#44):** under system-upgrade-controller bring-up (#44), confirm this `config.yaml`
-drop-in + reduced unit survive controller-driven k3s upgrades, which may regenerate the systemd unit.
+**Canonical master config invariants (#148):** treat the following as the host-local
+contract for every master, applied out-of-band (NOT reconciled by ArgoCD):
+- `/etc/rancher/k3s/config.yaml` is the **single source of truth** for server + kubelet args.
+- The systemd unit `ExecStart` stays **bare** — `ExecStart=/usr/local/bin/k3s server`, with NO
+  inline server/kubelet flags (CLI flags override `config.yaml`, so the two must not mix).
+- The join token lives ONLY in `/etc/systemd/system/k3s.service.env` as `K3S_TOKEN` (mode `0600`,
+  referenced via `EnvironmentFile=`) — NEVER inline in `ExecStart`, NEVER in `config.yaml`.
+- The pod-side DNS pin `/etc/k3s-resolv.conf` = `nameserver 192.168.10.30`, wired via
+  `kubelet-arg: resolv-conf=/etc/k3s-resolv.conf`.
+- The #121 control-plane metrics binds (`kube-controller-manager-arg`/`kube-scheduler-arg`
+  `bind-address=0.0.0.0`, `etcd-expose-metrics: true`) stay in `config.yaml`.
+
+**Forward note (#44 / #201):** the system-upgrade-controller k3s upgrade is a **binary swap** — it
+does NOT re-run `install.sh` and does NOT regenerate the systemd unit, so these invariants are
+expected to survive controller-driven upgrades by construction. Because they are host-local and
+un-reconciled, **verify them after the next real k3s bump** with the
+"#148/#121 invariant checklist" + "Remediation" recipe in
+`2-k3s/maintenance/system-upgrade/README.md` (Verification After Upgrade). On-host `.bak-148`
+backups are the restore source if a check ever fails.
 
 ### Get Join Token
 ```bash
