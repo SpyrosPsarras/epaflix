@@ -141,3 +141,9 @@ images:
   # resolves the Bazarr->Lingarr 500 (timestamptz write). Not in a release tag yet.
   - name: ghcr.io/lingarr-translate/lingarr
     digest: sha256:1acaed7642794141978d836a75227de4e5d927d580f99beffdd62cff0aa4ad41
+  # ElfHosted newtarr :rolling (fast-moving community fork, newtarr v1.0.0). Pinned to
+  # the running digest so Renovate's servarr-digest rule (#192) tracks + auto-merges it
+  # and there are no surprise mid-day re-rolls (#238). The Deployment keeps the bare
+  # :rolling tag; this override swaps in the digest for both refs.
+  - name: ghcr.io/elfhosted/newtarr
+    digest: sha256:6abafe8ee23c96e3c9e298b5f9ef8313f1d231546b794900d4da36caa22912f0
