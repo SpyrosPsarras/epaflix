@@ -133,3 +133,31 @@ Copied all files while qBittorrent deployment was scaled to 0 replicas to ensure
 - Deployment: [qbittorrent.yaml](qbittorrent.yaml)
 - Ingress: [../_shared/ingress/internal-routes.yaml](../_shared/ingress/internal-routes.yaml)
 - Service: Defined in qbittorrent.yaml
+
+## Config is PVC-only runtime state — credential recovery path (#244)
+
+The qBittorrent config (`qBittorrent.conf`, including the WebUI settings and the
+PBKDF2-hashed WebUI password) lives **only** on the `qbittorrent-config`
+local-path PVC (currently on `k3s-worker-61`). It is **not** in git and **not**
+codified as a SOPS seed. The on-disk WebUI password hash (`WebUI\Password_PBKDF2`)
+is non-recoverable.
+
+**Recovery path / single source of truth for WebUI credentials:** the plaintext
+WebUI username + password are stored in `.github/instructions/secrets.yml` under
+`qbittorrent_webui_username` / `qbittorrent_webui_password`. Any future
+API-driven maintenance (e.g. a save-path migration like #195) must authenticate
+to the WebUI API with **those credentials** — they work over the network
+regardless of the `LocalHostAuth` setting. There is no need to ever toggle the
+localhost auth bypass again.
+
+### `WebUI\LocalHostAuth` history (#244)
+
+- During the #195 save-path cutover, `WebUI\LocalHostAuth=false` was set live in
+  the PVC config (with qbt scaled to 0) to reach the localhost API while the
+  WebUI password hash was unavailable.
+- **2026-06-14 (#244):** reverted to `WebUI\LocalHostAuth=true` (the qBittorrent
+  default) now that the migration is done. Verified after the flip: WebUI login
+  with the `secrets.yml` creds returns `204`, Sonarr + Radarr download-client
+  Test both return `200`, and all #195-migrated torrents are present and healthy
+  (0 errored, 0 missing files). The bypass is no longer needed because the
+  `secrets.yml` credentials are the durable recovery path described above.
