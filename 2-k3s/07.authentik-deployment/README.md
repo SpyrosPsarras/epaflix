@@ -418,6 +418,44 @@ curl -s -o /dev/null -w "%{http_code}" -m 10 \
 
 `200` while valid; `401`/`403` once deleted or expired.
 
+##### API-scriptable path
+
+The same lifecycle is fully scriptable against the admin API — useful when an
+operator wants to drive it from a shell rather than the UI. Authenticate the
+mint / revoke calls with an existing admin credential (e.g. the durable `ak-iac`
+service-account token read from `secrets.yml`, key
+`authentik_iac_service_account_token` — never paste a literal token into git):
+
+```bash
+BASE=https://auth.epaflix.com
+H=(-H "Authorization: Bearer <ADMIN_TOKEN>" -H "Content-Type: application/json")
+
+# 1. Mint a scoped, expiring token (Authentik applies a default expiry):
+curl -s "${H[@]}" -X POST $BASE/api/v3/core/tokens/ \
+  -d '{"identifier":"my-task","intent":"api","expiring":true,"description":"one-off"}'   # -> 201
+
+# 2. Retrieve the key — ONLY via the view_key/ sub-resource (the token object
+#    itself never returns the key):
+curl -s "${H[@]}" $BASE/api/v3/core/tokens/my-task/view_key/   # -> {"key":"..."}
+
+# 3. Use the key for the task, then revoke:
+curl -s -o /dev/null -w "%{http_code}" "${H[@]}" \
+  -X DELETE $BASE/api/v3/core/tokens/my-task/   # -> 204
+```
+
+The minted token's `key` is retrievable **only** through
+`GET /api/v3/core/tokens/{identifier}/view_key/`; the `GET .../tokens/{id}/`
+object never includes it.
+
+**Least-privilege option**: pass an explicit `"user": <pk>` in the mint body to
+issue the token against a dedicated **non-superuser** service account scoped to
+exactly the objects the task touches, instead of inheriting the `ak-iac`
+superuser identity.
+
+> Validated end-to-end 2026-06-14 against live Authentik: mint `201` → retrieve
+> key via `view_key/` → admin read (`GET /api/v3/admin/version/`) `200` → revoke
+> `204` → post-revoke read `403`.
+
 > Issue #134 created the original standing personal admin token; #175 retired it;
 > #185 introduced the durable declarative service-account token as the standing
 > automation identity. This section supersedes the standalone runbook drafted in
