@@ -5,6 +5,11 @@
 > pulling `ghcr.io/spyrospsarras/odysseus:73673258` from GHCR. This runbook is retained
 > for provenance — it documents how the pinned image was originally built and run on the
 > TrueNAS docker engine. For the current deployment see `2-k3s/13.odysseus` and **#184**.
+>
+> **Authoritative image refresh runbook:** the current rebuild → push → deploy
+> cadence lives in the **Image refresh / rebuild** section of
+> [`../../../2-k3s/13.odysseus/README.md`](../../../2-k3s/13.odysseus/README.md) (#211).
+> The build recipe below is still accurate and is referenced from there.
 
 Runbook for deploying **Odysseus** as a TrueNAS SCALE Custom App on `192.168.10.200`,
 fronted by Traefik + Authentik forward-auth at `https://odysseus.epaflix.com`.
