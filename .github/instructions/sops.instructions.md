@@ -16,7 +16,8 @@ issue #29. Design spec:
   (ZFS native encryption, passphrase unlock; the passphrase is recorded in
   the git-ignored `.github/instructions/secrets.yml` under
   `truenas_zfs_encrypted_backups_passphrase`). The dataset must be manually
-  unlocked after a TrueNAS reboot before this backup is readable.
+  unlocked after a TrueNAS reboot before this backup is readable — see
+  [Post-reboot: unlock the TrueNAS encrypted backup dataset](#post-reboot-unlock-the-truenas-encrypted-backup-dataset).
   As of 2026-06-07 (#149) this backup lives on the redundant `apps` pool
   (3×SSD RAIDZ1) — it was relocated off the non-redundant single-disk
   `pool1` stripe (where a single disk failure meant total loss); the
@@ -27,6 +28,72 @@ issue #29. Design spec:
   imperatively, once per cluster rebuild — chicken-egg).
 - `ksops` runs on `argocd-repo-server` (initContainer that copies the
   binary into a shared volume) and decrypts at sync render time.
+
+## Post-reboot: unlock the TrueNAS encrypted backup dataset
+
+`apps/encrypted-backups` is its own ZFS encryption root with
+`keylocation=prompt`, so it does **not** auto-unlock on boot. After **every**
+TrueNAS reboot it comes up **locked**, and the age-key backup at
+`/mnt/apps/encrypted-backups/sops-age-backup/k3s-cluster.txt` is unreadable
+until you load the key. Same passphrase and encryption params as before (#149,
+#57) — no rotation; only the dataset path changed.
+
+The passphrase is the git-ignored `secrets.yml` value
+`truenas_zfs_encrypted_backups_passphrase` (NEVER inline it; paste it at the
+prompt / UI field).
+
+`truenas_admin` can read ZFS props directly and **does have password-prompted
+`sudo`** (it has **no _passwordless_ sudo**, so non-interactive `sudo zfs ...`
+without a password will fail). Any of the following are valid ways to unlock —
+pick whichever fits the access you have. Paste the passphrase from `secrets.yml`
+(`truenas_zfs_encrypted_backups_passphrase`) at the prompt / UI field in place of
+the placeholders below; **NEVER inline the real value**.
+
+> **`pool.dataset.unlock` is a long-running JOB method.** Invoke it with the
+> job flag (`midclt -j call ...`) so the client follows the job. Per the
+> truenas.instructions.md #125 caveat, the job-method `midclt` client may still
+> **crash on poll even though the server-side unlock SUCCEEDED** — so do not
+> trust `midclt`'s exit code. Always confirm with the `zfs get
+> keystatus,mounted` verify step below (keystatus=available, mounted=yes).
+
+```bash
+# Option A (recommended) — middleware unlock via SSH as truenas_admin (job method).
+# Works for truenas_admin (in builtin_administrators); also mounts on success.
+ssh truenas_admin@192.168.10.200 \
+  'midclt -j call pool.dataset.unlock apps/encrypted-backups \
+     "{\"datasets\": [{\"name\": \"apps/encrypted-backups\", \"passphrase\": \"<PASSPHRASE>\"}]}"'
+```
+
+```bash
+# Option B — truenas_admin via password-prompted sudo (interactive shell on the box):
+sudo zfs load-key apps/encrypted-backups        # prompts for the SUDO password,
+                                                #   then the dataset passphrase
+sudo zfs mount apps/encrypted-backups           # only if not auto-mounted on unlock
+
+# ...or non-interactively pipe the SUDO password to sudo -S (passphrase still
+#    prompted by zfs unless keylocation provides it):
+echo '<SUDO_OR_PASSPHRASE>' | sudo -S zfs load-key apps/encrypted-backups
+sudo zfs mount apps/encrypted-backups
+```
+
+```bash
+# Option C — raw zfs as root (console or `ssh root@...`):
+zfs load-key apps/encrypted-backups && zfs mount apps/encrypted-backups
+```
+
+Option D — TrueNAS UI: **Storage > Datasets >** select `apps/encrypted-backups`
+**> Unlock**, paste the passphrase, leave "Unlock Children" as needed.
+
+Verify (read-only, works as `truenas_admin` with no privilege):
+
+```bash
+ssh truenas_admin@192.168.10.200 \
+  'zfs get keystatus,mounted apps/encrypted-backups'
+# expect: keystatus=available, mounted=yes
+ssh truenas_admin@192.168.10.200 \
+  'ls -l /mnt/apps/encrypted-backups/sops-age-backup/k3s-cluster.txt'
+# expect: the age-key backup file is now listable (mode 0600, owner truenas_admin)
+```
 
 ## Encrypt a new Secret
 
