@@ -786,3 +786,94 @@ a PVC restore from old media is the *only* thing that can revert this flag — a
 arrs have no SOPS-seedable config like newtarr/cleanuparr. This runbook makes the
 revert **one-command-recoverable**, but it is **not itself a backup**; closing the
 backup gap is tracked in the #180 family.
+
+## #249 — #195 orphan-reaping: FINISHED (safe reaper canonical; nlink unlinked detector OFF by design)
+
+**#195 is FINISHED.** Orphan-reaping is both *structurally solved* and
+*operationally covered*; there is no remaining "unblocked-but-unsolved" gap. This
+section is the decision-of-record (Path D) for #249.
+
+### Structurally solved — single `/media` mount, hardlinks PROVEN
+
+The EXDEV barrier that defined the original orphan problem is **gone**: the four
+child NFS exports of `/mnt/pool1/dataset01` were collapsed to ONE unified export,
+all five media pods mount it once at a single non-subPath `/media`, and the arr
+root folders / qbt save path were repointed under that one mount with
+`copyUsingHardlinks=true` (see the "Option A — DELIVERED (#195)" and "#241"
+sections above). Cross-directory `link()` (downloads → library) now succeeds.
+
+**Proven by spot-check (2026-06-14, read-only `find -printf "%n %p"` in-pod):**
+
+- **sonarr** (`/media/tvshows`): 3 files at `nlink>=2`.
+- **sonarr2** (`/media/animes`): 3 files at `nlink>=2`.
+- **radarr** (`/media/movies`): 3 files at `nlink>=2`.
+
+This generalizes the single #240 proof: cross-dir hardlinking is **consistent
+across all three arrs**, not a one-off. Imports are hardlinked (one copy on disk),
+so a healthy imported seeder is `nlink>=2` and structurally distinguishable from a
+true orphan.
+
+### Operationally covered — the SAFE reaper is canonical
+
+The orphan/stalled-queue reaping that #142 calls for is **already enabled and is
+the canonical mechanism** — it does **NOT** use `nlink`:
+
+- **Cleanuparr `download_cleaner` → qBit seeding rules** (`enabled=1`, hourly),
+  per category (`radarr` / `tv-sonarr` / `animes`), gated **purely** on
+  `max_ratio=1.0` / `max_seed_time=400h`. It can never touch a torrent on
+  `nlink` grounds.
+- **Cleanuparr `QueueCleaner`** (stall + slow rules, hourly), which only strikes
+  torrents still **referenced in an *arr queue**.
+
+These two together reap orphaned and stalled queue items safely and continuously.
+See the "#196" authoritative values table + restore runbook for the exact live
+config and how to rebuild it on a fresh PVC.
+
+### The `nlink`-based unlinked reaper is OFF PERMANENTLY — NOT a TODO
+
+`unlinked_configs.enabled` stays **`0` by design**. This is a deliberate terminal
+decision, not deferred work. Rationale:
+
+1. **Private-tracker safety.** The owner runs **private trackers** with ratio
+   requirements and hit-and-run (H&R) penalties. Deleting a torrent to satisfy an
+   `nlink` rule **burns ratio and can trigger H&R**. The long-lived `nlink=1`
+   seeders are exactly those private/ratio-protected torrents that must keep
+   seeding. Per `feedback_private_trackers`, private torrents must **not** be
+   deleted by automation.
+2. **FP=0 is unreachable.** A dry-run can never reach zero false-positives,
+   because those private seeders **never age out** — they are kept seeding on
+   purpose. The #246 census found **273 `nlink=1` torrents, 111 of them >90d and
+   still seeding**: these are protected seeders, not orphans, so an unscoped
+   `nlink` reaper would always have a non-empty (and harmful) delete set.
+
+Therefore the `unlinked` detector is left OFF as the **final** state. #246 (the
+"arm once FP=0" tracker) is superseded by this decision and closed.
+
+### Alternative for the record (Path C) — privacy-scoped, if ever wanted
+
+IF nlink-based reaping of **public** orphans is ever desired, the ONLY acceptable
+form is a **privacy-scoped** unlinked rule — **never** an unscoped `nlink` reaper:
+
+- set `delete_private=false` (a.k.a. ignore-private) so private torrents are
+  excluded from the delete set;
+- set `ignored_root_dir` at the **library root** so imported library files are not
+  treated as orphans;
+- keep it **dry-run-gated**, and arm only after confirming **zero private
+  torrents** appear in the delete set.
+
+This is documented as a contingency only; it is not planned work.
+
+### Manual orphan handling — the rare genuine orphan
+
+The rare genuine public orphan (e.g. the one-time manual-remove-without-"remove
+from client" class) is handled by the **#142 operator runbook**: manual queue
+removal **with** "Remove from download client" ticked + content-blocker entry.
+This is accepted as a low-frequency manual task, which is why no automated
+`nlink` reaper is warranted.
+
+**Cross-links:** #142 (orphan mechanism + manual operator runbook + safe-reaper
+deliverable), #195 (single-`/media` unification that removed EXDEV), #240 / #242
+(kubelet-subPath EXDEV fix), #246 (superseded — the "arm the unlinked reaper"
+tracker, now closed by this Path D decision), #196 (Cleanuparr safe-reaper DB
+values + restore runbook), `feedback_private_trackers` (never delete private
+torrents).
