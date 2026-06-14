@@ -8,7 +8,9 @@ src_dir=".github/hooks"
 
 mkdir -p "$hooks_dir"
 
-ln -sf "../../$src_dir/check-sops-encrypted.sh" "$hooks_dir/pre-commit"
+ln -sf "../../$src_dir/run-pre-commit.sh" "$hooks_dir/pre-commit"
 chmod +x "$hooks_dir/pre-commit"
+chmod +x "$src_dir"/check-*.sh "$src_dir/run-pre-commit.sh"
 
-echo "Installed pre-commit hook: $hooks_dir/pre-commit -> $src_dir/check-sops-encrypted.sh"
+echo "Installed pre-commit hook: $hooks_dir/pre-commit -> $src_dir/run-pre-commit.sh"
+echo "  runs: $(cd "$src_dir" && echo check-*.sh)"
