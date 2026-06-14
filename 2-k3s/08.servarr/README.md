@@ -256,6 +256,25 @@ kubectl get nodes -o yaml | grep -A10 allocatable
 kubectl describe node <gpu-node>
 ```
 
+### ArgoCD SyncFailed on a volumeMounts list-restructure (SSA list-merge)
+
+**Symptom**: `app-servarr` (App-wide `ServerSideApply=true`) sits SyncFailed / Running, `selfHeal` can't converge, with an error like `spec.template.spec.containers[0].volumeMounts[1].name: Required value` or phantom empty-name entries. This happens when an *arr Deployment's `volumeMounts` **list** is restructured — e.g. the #195/#242 collapse of two media subPath mounts into one `/media` mount on `sonarr`, `sonarr2`, `radarr`. SSA strategic-merge can't reconcile the change of the list merge-key.
+
+**Standard remediation** (out-of-band, one-time per restructure): replace the *whole* `volumeMounts` array to match git via a JSON patch, then let ArgoCD reconverge. Pull the exact `value` array from the Deployment manifest in git (currently `config` → `/config` and `media` → `/media`):
+```bash
+kubectl -n servarr patch deployment sonarr --type=json \
+  -p='[{"op":"replace","path":"/spec/template/spec/containers/0/volumeMounts","value":[
+        {"name":"config","mountPath":"/config"},
+        {"name":"media","mountPath":"/media"}
+      ]}]'
+# repeat for sonarr2 and radarr
+```
+After the patch the live object matches git, ArgoCD reconverges to Synced + Healthy, and the result is durable (`selfHeal` keeps it).
+
+**Why not `Replace=true`**: `argocd.argoproj.io/sync-options: Replace=true` was deliberately **not** adopted. It forces a full-object `kubectl replace` on *every* sync (not just restructures), risking steady-state churn, dropped server-managed fields, and conflicts with the App-level ServerSideApply plus the `/spec/replicas` `ignoreDifferences` — all to cover a rare event. The patch-on-restructure remediation is preferred (same posture as #147).
+
+Cross-links: #243, #147 (same SSA list-merge class, fixed git-durably in PR #198), #195/#242 (the cutover that triggered it), #240.
+
 ## Notes
 
 - All apps run as PUID=568, PGID=568 (matching TrueNAS permissions)
