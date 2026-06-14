@@ -19,6 +19,13 @@
 #   - app route (priority 10) carries the authentik-forwardauth middleware
 #   - outpost route (priority 15) handles /outpost.goauthentik.io/ auth callbacks
 #     and MUST out-prioritise the app route or callbacks break.
+#   - api route (priority 20) for PathPrefix(`/api`) is EXEMPT from forward-auth
+#     so programmatic/API clients (which can't do browser SSO) can reach it. This
+#     is safe and mirrors the servarr /api-bypass (#176): Odysseus's API is
+#     independently authenticated (AUTH_ENABLED=true) — every agent/shell-capable
+#     endpoint (/api/chat, /api/agent, /api/run, /api/execute, /api/shell, /api/tools,
+#     …) returns 401 unauthenticated; only /api/health + /api/auth/status are open
+#     and harmless. So the agent-with-shell stays behind Odysseus's own login.
 # This only gates the perimeter — Odysseus has NO trusted-header SSO, so it ALSO
 # keeps its own built-in login (AUTH_ENABLED=true). Result is a double login by
 # design (see README).
@@ -62,6 +69,35 @@ spec:
       middlewares:
         - name: authentik-forwardauth
           namespace: traefik-system
+      services:
+        - name: odysseus
+          namespace: odysseus
+          port: 7000
+          scheme: http
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
+
+---
+# /api bypass — priority 20 (out-prioritises the app route) so PathPrefix(`/api`)
+# is served WITHOUT the authentik-forwardauth middleware. Odysseus's API enforces
+# its own auth (AUTH_ENABLED=true; sensitive endpoints return 401), so this exposes
+# no agent/shell surface unauthenticated. Mirrors the servarr /api-bypass (#176).
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: odysseus-api
+  namespace: traefik-system
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`odysseus.epaflix.com`) && PathPrefix(`/api`)
+      kind: Rule
+      priority: 20
       services:
         - name: odysseus
           namespace: odysseus
