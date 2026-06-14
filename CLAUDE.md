@@ -96,6 +96,7 @@ raid-migration/     # Proxmox RAID migration guides
 - K3s subdirs numbered in deploy order: `01.kube-vip/`, `02.cert-manager/`, etc.
 - Stack compose files: `3-docker-swarm/stacks/<name>/docker-compose.yml`
 - Placeholders for secrets: `<POSTGRES_PASSWORD>`, `<AUTHENTIK_DB_PASSWORD>`, `<CLOUDFLARE_API_TOKEN>`, `<SMTP_PASSWORD>`, `<TRUENAS_PASSWORD>`
+- VM CPU type: standardize on `cpu: host` — see proxmox.instructions.md (#216)
 
 ## Detailed Instructions
 

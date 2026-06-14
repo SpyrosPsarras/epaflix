@@ -452,6 +452,53 @@ sudo fsck -f /dev/sda1  # Replace with actual device
 - **RAM**: 22 GB
 - **Disk**: 50 GB (local-raid)
 
+## CPU Type Standard
+
+> Supersedes #213 (the narrow masters-only question, already closed as subsumed). Tracked by #216.
+
+**STANDARD: all PVE guest VMs use `cpu: host`.**
+
+Both Proxmox hosts are identical Intel Xeon E5-2623 v4 (Broadwell-EP), so `host` exposes the full CPU feature set — including SSE4.2/POPCNT/AVX/AVX2 (i.e. `x86-64-v3`; no AVX-512, so `x86-64-v4` is unavailable) — and is live-migration-safe between the two identical hosts. The Proxmox default `kvm64` is only `x86-64-v1` (no AVX2) and crashlooped the Odysseus NumPy image (#207) until the workers were bumped; `host` prevents that entire class of bug.
+
+**CAVEAT:** `cpu: host` ties live migration to identical-CPU hosts. If a NON-identical-CPU Proxmox host is ever added to the cluster, switch the standard to a portable named model (`Broadwell-noTSX`) or a synthetic baseline (`x86-64-v3`) instead of `host`.
+
+**SCOPE:**
+- **VMs** — applies (all PVE guest VMs).
+- **LXC containers** (e.g. wg-hop 1045) share the host kernel/CPU, so CPU-type is N/A.
+- The **qdevice** is a TrueNAS Docker container, not a PVE guest — N/A.
+
+**APPLY PROCEDURE** — one node at a time. A CPU-model change requires a full power-cycle (`qm stop` + `qm start`), NOT a soft reboot, for the new model to take effect.
+
+- **K3s nodes:**
+  ```bash
+  kubectl cordon <node>
+  kubectl drain <node> --ignore-daemonsets --delete-emptydir-data   # respect CNPG/etcd PodDisruptionBudgets
+  ssh root@<pvehost> 'qm stop <vmid>; qm set <vmid> --cpu host; qm start <vmid>'
+  # wait for the node to report Ready
+  # for MASTERS also verify: etcd 3/3 with has_leader, the #121 control-plane metrics
+  #   (cm/scheduler/etcd up=1), and the /etc/k3s-resolv.conf pin
+  kubectl uncordon <node>
+  # only then proceed to the next node
+  ```
+  Master order: **1052 → 1053 → 1051** (1051 is the founding etcd member, do it last — per #148).
+
+- **Docker Swarm nodes:**
+  ```bash
+  docker node update --availability drain <node>
+  ssh root@<pvehost> 'qm stop <vmid>; qm set <vmid> --cpu host; qm start <vmid>'
+  # confirm the node rejoins the swarm
+  docker node update --availability active <node>
+  ```
+
+- **Templates (9000/9001):** set `cpu: host` while the template is stopped so future clones inherit it (no power-cycle needed):
+  ```bash
+  ssh root@<pvehost> 'qm set <template-vmid> --cpu host'
+  ```
+
+**Current state (2026-06-14):**
+- Workers **1061 / 1062 / 1063 / 1065** — already `host`.
+- Masters **1051 / 1052 / 1053** and swarm **1071 / 1072 / 1073** — still `kvm64`; apply pending (tracked in the #216 follow-up issue).
+
 ## Security Notes
 
 - Use SSH keys, not passwords
