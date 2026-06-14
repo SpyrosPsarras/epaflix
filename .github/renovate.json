@@ -85,13 +85,23 @@
   ],
   "customManagers": [
     {
-      "description": "Keep the pinned helm + kustomize versions in ci.yml (the secret-free validate gate's Install tools step) fresh. Markers are inline trailing comments '# renovate: datasource=... depName=...' on each KUSTOMIZE_VERSION=/HELM_VERSION= line.",
+      "description": "Keep the pinned HELM_VERSION in ci.yml (the secret-free validate gate's Install tools step) fresh. Marker is an inline trailing comment '# renovate: datasource=... depName=...' on the HELM_VERSION= line. Split out from a single shared regex manager (was kustomize+helm) because one regex manager carries only one extractVersionTemplate, and kustomize needs one while helm does not — helm/helm github-releases auto-strips the leading v, so no extractVersion here. #222/#220.",
       "customType": "regex",
       "managerFilePatterns": ["/^\\.github/workflows/ci\\.yml$/"],
       "matchStrings": [
-        "\\w+_VERSION=(?<currentValue>\\S+)\\s*#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)"
+        "HELM_VERSION=(?<currentValue>\\S+)\\s*#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)"
       ],
       "versioningTemplate": "semver"
+    },
+    {
+      "description": "Keep the pinned KUSTOMIZE_VERSION in ci.yml (the secret-free validate gate's Install tools step) fresh. Marker is an inline trailing comment '# renovate: datasource=... depName=...' on the KUSTOMIZE_VERSION= line. Split out from the shared helm+kustomize regex manager (#222/#220): kustomize github-releases tags are 'kustomize/vX.Y.Z', so extractVersion strips that prefix — without it the bump would be silently no-op or wrong. One regex manager carries only one extractVersionTemplate, hence the split from helm.",
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github/workflows/ci\\.yml$/"],
+      "matchStrings": [
+        "KUSTOMIZE_VERSION=(?<currentValue>\\S+)\\s*#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)"
+      ],
+      "versioningTemplate": "semver",
+      "extractVersionTemplate": "^kustomize/v(?<version>.+)$"
     }
   ]
 }
