@@ -15,7 +15,7 @@ This deployment configures Authentik as an identity provider for Single Sign-On 
 - **Storage**: `local-path` PVC (10Gi, ReadWriteOnce) for media files
 - **Redis**: Not required (removed in Authentik 2024+)
 - **Ingress**: Traefik IngressRoute at `192.168.10.101`
-- **Version**: 2025.12.1 (configurable in [helm-values.yaml](helm-values.yaml))
+- **Version**: 2026.5.3 (pinned in [kustomization.yaml](kustomization.yaml) — `helmCharts.version` + `images` `newTag`, the single source of truth)
 
 ## Prerequisites
 
@@ -188,7 +188,7 @@ helm upgrade authentik authentik/authentik \
 helm upgrade authentik authentik/authentik \
   --namespace app-authentik \
   --values helm-values.yaml \
-  --version 2025.12.1
+  --version 2026.5.3
 ```
 
 ### Rollback Helm Upgrade
