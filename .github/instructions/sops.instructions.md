@@ -97,10 +97,20 @@ ssh truenas_admin@192.168.10.200 \
 
 ## Encrypt a new Secret
 
+> **Why the file must already be named `*.enc.yaml` before you encrypt:** the
+> `.sops.yaml` creation rule matches on `path_regex: \.enc\.yaml$`, i.e. it keys
+> off the **file path being encrypted**. A `*-plaintext.yaml` input name does
+> **not** match that regex, so SOPS fails with `no matching creation rules`
+> (surfaced during #230). Always create the file with its final `*.enc.yaml`
+> name first, then encrypt **in place** — never `sops -e <plaintext> > <enc>`
+> (that redirect form was the broken recipe).
+
 ```bash
-# 1. Draft plaintext (use a -plaintext suffix so .gitignore catches it).
+# 1. Draft the Secret directly into its canonical *.enc.yaml filename (this is
+#    what .sops.yaml matches; .gitignore still catches a stray plaintext body
+#    until it is encrypted in step 2, so do NOT commit between 1 and 2).
 cd 2-k3s/<App>
-cat > my-thing-plaintext.yaml <<EOF
+cat > my-thing.enc.yaml <<EOF
 apiVersion: v1
 kind: Secret
 metadata:
@@ -110,9 +120,8 @@ stringData:
   password: "actual-secret-value-from-secrets.yml"
 EOF
 
-# 2. Encrypt to the canonical filename.
-sops -e my-thing-plaintext.yaml > my-thing.enc.yaml
-shred -u my-thing-plaintext.yaml
+# 2. Encrypt IN PLACE (the .enc.yaml path matches .sops.yaml's creation rule).
+sops -e -i my-thing.enc.yaml          # or: sops --encrypt --in-place my-thing.enc.yaml
 
 # 3. Reference it from kustomization.yaml via the ksops generator:
 #    Add (or extend) ksops-generator.yaml:
@@ -122,7 +131,8 @@ shred -u my-thing-plaintext.yaml
 #      generators:
 #        - ksops-generator.yaml
 
-# 4. Verify locally:
+# 4. Verify locally (the file is encrypted in place; the pre-commit hook will
+#    reject it if it is still plaintext):
 sops -d my-thing.enc.yaml | head
 kustomize build --enable-alpha-plugins --enable-exec . | grep -A5 'name: my-thing'
 
