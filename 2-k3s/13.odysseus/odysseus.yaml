@@ -35,6 +35,15 @@ spec:
       # per-Service env vars are unneeded; disabled for consistency/safety
       # across the namespace (searxng crashloops on them).
       enableServiceLinks: false
+      # The NFS workspace export is scoped to worker IPs only; pin off
+      # control-plane nodes so the pod never lands where the mount is denied.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: DoesNotExist
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: kubernetes.io/hostname
@@ -88,6 +97,40 @@ spec:
             - name: seed
               mountPath: /seed
               readOnly: true
+        # Assemble /root/.ssh for the pod->bastion channel with correct perms.
+        # A secret/configMap subPath mount leaves the key world-readable (ssh
+        # refuses it), so copy into an emptyDir and chmod here instead.
+        - name: seed-ssh
+          image: busybox:1.36
+          securityContext:
+            runAsUser: 0
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              mkdir -p /root/.ssh && chmod 700 /root/.ssh
+              cp /src-key/id_bastion /root/.ssh/id_bastion && chmod 600 /root/.ssh/id_bastion
+              cp /src-cfg/config /root/.ssh/config && chmod 600 /root/.ssh/config
+              cp /src-cfg/known_hosts /root/.ssh/known_hosts && chmod 644 /root/.ssh/known_hosts
+              chown -R 0:0 /root/.ssh
+              echo "seeded /root/.ssh"
+          resources:
+            requests:
+              memory: "32Mi"
+              cpu: "25m"
+            limits:
+              memory: "128Mi"
+              cpu: "100m"
+          volumeMounts:
+            - name: bastion-ssh-key
+              mountPath: /src-key
+              readOnly: true
+            - name: ssh-config
+              mountPath: /src-cfg
+              readOnly: true
+            - name: ssh-home
+              mountPath: /root/.ssh
       containers:
         - name: odysseus
           # Pushed from the TrueNAS docker engine to GHCR (lowercase namespace),
@@ -135,6 +178,13 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /app/data
+            # Shared NFS workspace (same path on pod + bastion VM).
+            - name: workspace
+              mountPath: /workspace
+            # /root/.ssh assembled by the seed-ssh initContainer (id_bastion,
+            # config with the `bastion` alias, pre-seeded known_hosts).
+            - name: ssh-home
+              mountPath: /root/.ssh
           resources:
             requests:
               memory: "512Mi"
@@ -166,6 +216,23 @@ spec:
         - name: seed
           secret:
             secretName: odysseus-data-seed
+        # Shared NFS workspace (TrueNAS apps/odysseus-bastion).
+        - name: workspace
+          persistentVolumeClaim:
+            claimName: odysseus-bastion-workspace
+        # pod->bastion private key (single key from the SOPS odysseus-secrets);
+        # copied into /root/.ssh by the seed-ssh initContainer.
+        - name: bastion-ssh-key
+          secret:
+            secretName: odysseus-secrets
+            items:
+              - key: ODYSSEUS_BASTION_SSH_KEY
+                path: id_bastion
+        - name: ssh-config
+          configMap:
+            name: odysseus-ssh-config
+        - name: ssh-home
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
