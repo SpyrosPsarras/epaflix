@@ -24,5 +24,9 @@ data:
         IdentitiesOnly yes
         UserKnownHostsFile /root/.ssh/known_hosts
         StrictHostKeyChecking accept-new
+        ConnectTimeout 10
+        ConnectionAttempts 3
+        ServerAliveInterval 15
+        ServerAliveCountMax 3
   known_hosts: |
     192.168.10.43 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKUi2iW6pMaqS1T25aacWlicRiIkmaQYvQddblBgNlR6
