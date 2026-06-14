@@ -97,9 +97,12 @@ spec:
             - name: seed
               mountPath: /seed
               readOnly: true
-        # Assemble /root/.ssh for the pod->bastion channel with correct perms.
-        # A secret/configMap subPath mount leaves the key world-readable (ssh
-        # refuses it), so copy into an emptyDir and chmod here instead.
+        # Assemble /app/.ssh for the pod->bastion channel with correct perms.
+        # /app is uid 1000's (user `odysseus`) passwd HOME, and the app + its
+        # bash tool run as 1000 — so ssh reads /app/.ssh/config and the key must
+        # be owned/readable by 1000. (A subPath secret mount would be
+        # world-readable and ssh would refuse it; /root/.ssh is unreadable to
+        # uid 1000 — both fail. Hence: copy into an emptyDir, chown 1000, here.)
         - name: seed-ssh
           image: busybox:1.36
           securityContext:
@@ -109,12 +112,12 @@ spec:
             - -c
             - |
               set -e
-              mkdir -p /root/.ssh && chmod 700 /root/.ssh
-              cp /src-key/id_bastion /root/.ssh/id_bastion && chmod 600 /root/.ssh/id_bastion
-              cp /src-cfg/config /root/.ssh/config && chmod 600 /root/.ssh/config
-              cp /src-cfg/known_hosts /root/.ssh/known_hosts && chmod 644 /root/.ssh/known_hosts
-              chown -R 0:0 /root/.ssh
-              echo "seeded /root/.ssh"
+              mkdir -p /app/.ssh && chmod 700 /app/.ssh
+              cp /src-key/id_bastion /app/.ssh/id_bastion && chmod 600 /app/.ssh/id_bastion
+              cp /src-cfg/config /app/.ssh/config && chmod 600 /app/.ssh/config
+              cp /src-cfg/known_hosts /app/.ssh/known_hosts && chmod 644 /app/.ssh/known_hosts
+              chown -R 1000:1000 /app/.ssh
+              echo "seeded /app/.ssh (owned 1000)"
           resources:
             requests:
               memory: "32Mi"
@@ -130,7 +133,7 @@ spec:
               mountPath: /src-cfg
               readOnly: true
             - name: ssh-home
-              mountPath: /root/.ssh
+              mountPath: /app/.ssh
       containers:
         - name: odysseus
           # Pushed from the TrueNAS docker engine to GHCR (lowercase namespace),
@@ -167,8 +170,9 @@ spec:
                   key: HF_TOKEN
           # Non-secret env (APP_BIND/APP_PORT/AUTH_ENABLED/ALLOWED_ORIGINS/
           # OLLAMA_BASE_URL/SEARXNG_INSTANCE/CHROMADB_*/etc) from the ConfigMap.
-          # NOTE: NO /app/.ssh mount — deliberately omitted (RCE hardening
-          # carried from the compose; the data/ssh dir never existed live).
+          # NOTE: /app/.ssh IS now mounted (seed-ssh initContainer) — a single
+          # bastion-only key, the deliberate exception to the original
+          # no-SSH hardening, for the odysseus-bastion execution sandbox.
           envFrom:
             - configMapRef:
                 name: odysseus-config
@@ -181,10 +185,11 @@ spec:
             # Shared NFS workspace (same path on pod + bastion VM).
             - name: workspace
               mountPath: /workspace
-            # /root/.ssh assembled by the seed-ssh initContainer (id_bastion,
-            # config with the `bastion` alias, pre-seeded known_hosts).
+            # /app/.ssh (uid 1000's HOME/.ssh) assembled by the seed-ssh
+            # initContainer (id_bastion, config with the `bastion` alias,
+            # pre-seeded known_hosts) — owned 1000 so the bash tool can use it.
             - name: ssh-home
-              mountPath: /root/.ssh
+              mountPath: /app/.ssh
           resources:
             requests:
               memory: "512Mi"
@@ -221,7 +226,7 @@ spec:
           persistentVolumeClaim:
             claimName: odysseus-bastion-workspace
         # pod->bastion private key (single key from the SOPS odysseus-secrets);
-        # copied into /root/.ssh by the seed-ssh initContainer.
+        # copied into /app/.ssh by the seed-ssh initContainer.
         - name: bastion-ssh-key
           secret:
             secretName: odysseus-secrets
