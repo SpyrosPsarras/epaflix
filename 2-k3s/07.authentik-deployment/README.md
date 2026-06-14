@@ -426,10 +426,72 @@ curl -s -H "Authorization: Bearer <AUTHENTIK_IAC_SERVICE_ACCOUNT_TOKEN>" \
 # Expect: "ak-iac"  (and is_superuser true via authentik Admins)
 ```
 
-**Rotation**: edit the `key` in `authentik-iac-blueprint.enc.yaml`
-(`sops 2-k3s/07.authentik-deployment/authentik-iac-blueprint.enc.yaml`), update
-the mirror in `secrets.yml`, commit, sync. The blueprint upserts the token on
-the existing `ak-iac-token` identifier.
+##### Rotation
+
+**Last rotated:** 2026-06-14 (issued #185) — bump this line every rotation.
+
+**Cadence:** rotate **annually**, plus a **mandatory out-of-cycle rotation on
+any suspected exposure** (age-key leak, `secrets.yml` leak, lost/stolen device,
+or any reason to believe the token value escaped its at-rest stores). The
+due-date is tracked via the **#169 periodic-review cadence** — there is no
+CronJob or alert by design, because there is no in-cluster token-age signal to
+fire one off.
+
+**What "rotating" means here.** The token is **authoritative in the blueprint**:
+the `key:` field of the `ak-iac-token` entry in
+`authentik-iac-blueprint.enc.yaml`, which the Authentik worker **upserts** on the
+stable `ak-iac-token` identifier. It is **mirrored** (for break-glass only) in the
+git-ignored `secrets.yml` as `authentik_iac_service_account_token`. Rotating
+therefore means **setting a NEW value in the blueprint** — do **NOT** mint a fresh
+token in the Authentik UI, because a UI-minted value diverges from git and the next
+blueprint apply would overwrite it.
+
+**No consumer rollout-restart is required.** The token is **not** consumed by any
+pod via a `secretKeyRef`/env var — it is used only ad-hoc by humans/IaC and by the
+Authentik worker's blueprint engine — so the #299 env-var-secret rollout gotcha
+(stale env value pinned until `rollout restart`) does **not** apply here.
+
+**Re-key recipe** (use the CORRECT in-place SOPS form — never the broken
+`sops -e <plaintext> > <enc>` redirect; see
+[sops.instructions.md](../../.github/instructions/sops.instructions.md)):
+
+```bash
+# 1. Generate a new value (do NOT paste any real value into git):
+openssl rand -hex 32
+
+# 2. Edit the blueprint IN PLACE and replace ONLY the ak-iac-token `key:` value
+#    (keep the `ak-iac-token` identifier so the worker UPSERTS rather than
+#    creating a second token). Save re-encrypts via .sops.yaml:
+sops 2-k3s/07.authentik-deployment/authentik-iac-blueprint.enc.yaml
+
+# 3. Update the secrets.yml mirror to the SAME value, then confirm no stale copy
+#    of the OLD value lingers anywhere in the tree:
+#    set authentik_iac_service_account_token = <new value>
+git grep '<OLD_TOKEN_VALUE>'   # expect: no matches
+
+# 4. Branch, rebase onto origin/main, push --force-with-lease, wait for the
+#    `validate` check, then:
+gh pr merge <n> --merge
+
+# 5. ArgoCD: sync app-authentik (Synced/Healthy), then make the worker re-apply
+#    the blueprint:
+argocd app sync app-authentik
+kubectl -n authentik rollout restart deploy/authentik-worker
+#    Confirm the BlueprintInstance reconciled: status = successful.
+
+# 6. Validate the swap against live Authentik:
+#    NEW token -> 200, username "ak-iac":
+curl -s -H "Authorization: Bearer <NEW_AUTHENTIK_IAC_SERVICE_ACCOUNT_TOKEN>" \
+  https://auth.epaflix.com/api/v3/core/users/me/ | jq '.user.username'
+#    OLD token -> 401/403 (mint/use/revoke mechanics per #227).
+```
+
+Cross-references: **#185** (issued the durable declarative token); **#230** (the
+scoped-RBAC flip — once its Phase 2/3 flip lands and `ak-iac` drops
+`authentik Admins`, the validate step's expectation changes from
+`is_superuser: true` to the scoped `ak-iac IaC` role); **#339**; the in-place SOPS
+recipe lives in
+[sops.instructions.md](../../.github/instructions/sops.instructions.md).
 
 #### 2. Personal superuser admin token — RETIRED (#175)
 
