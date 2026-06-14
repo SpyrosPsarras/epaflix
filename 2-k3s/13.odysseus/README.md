@@ -151,6 +151,77 @@ The priority:10 app route (`authentik-forwardauth`), priority:15 outpost route
 - **Decommission of the TrueNAS Custom App is a SEPARATE post-soak gate** —
   do not stop `ix-odysseus` until the k3s deployment has soaked clean.
 
+## Image refresh / rebuild
+
+The container is a **locally-built image** (`ghcr.io/spyrospsarras/odysseus`),
+not an upstream-published tag — there is no semver/`:latest` stream to track, so
+the refresh is a deliberate manual flow. Resolves **#211**.
+
+### Source + reproducible build
+
+- **Upstream:** `pewdiepie-archdaemon/odysseus`, pinned at commit
+  `73673258199b353f9b3e04da9b37ae95077e2c8b` (= the short image tag `73673258`).
+- **Build:** `docker build --build-arg INSTALL_OPTIONAL=false …` — MIT-clean
+  (`INSTALL_OPTIONAL=true` pulls PyMuPDF AGPL-3.0 + markitdown; deliberately
+  omitted). The detailed, step-by-step recipe (clone → `git checkout <sha>` →
+  `git rev-parse HEAD` guard → build) lives in the provenance runbook at
+  [../../0-truenas/custom-apps/odysseus/README.md](../../0-truenas/custom-apps/odysseus/README.md).
+- **Config is NOT baked into the image.** Two pieces of runtime behavior live
+  outside the image and therefore survive a rebuild unchanged — do **not**
+  re-apply them when refreshing:
+  - the **SearXNG JSON search fix** lives in the `searxng-settings` ConfigMap
+    (`configmap.yaml`), mounted at `/etc/searxng/settings.yml`;
+  - `disabled_tools` lives in the `odysseus-data-seed` SOPS Secret
+    (`settings.json`, applied by the `seed-data` initContainer into the data
+    PVC).
+
+### Manual rebuild → deploy flow
+
+1. **Build** the new image at the chosen upstream commit, tagged with its short
+   SHA: `docker build --build-arg INSTALL_OPTIONAL=false -t odysseus:<newshortsha> .`
+   (`git rev-parse HEAD` must match the full SHA before building).
+2. **Push to GHCR** (lowercase namespace):
+
+   ```bash
+   docker tag odysseus:<newshortsha> ghcr.io/spyrospsarras/odysseus:<newshortsha>
+   docker push ghcr.io/spyrospsarras/odysseus:<newshortsha>
+   ```
+
+3. **Make the package PUBLIC** in the GitHub web UI (k3s has no GHCR
+   imagePullSecret, so containerd pulls anonymously). This is a **manual web-UI
+   step** — see the PAT caveat below.
+4. **Verify the pull** on a k3s worker before bumping the manifest:
+
+   ```bash
+   sudo k3s ctr images pull ghcr.io/spyrospsarras/odysseus:<newshortsha>
+   ```
+
+   (or let the kubelet pull once the manifest lands).
+5. **Bump the manifest.** Edit the **literal** image tag in `odysseus.yaml`
+   (`image: ghcr.io/spyrospsarras/odysseus:<newshortsha>`, ~line 139) — it is a
+   plain literal, **not** a kustomize `images:`/`newTag` override. Open a PR.
+6. **After merge, confirm the sync.** The `odysseus` ArgoCD app reconciles the
+   new tag automatically (selfHeal is **on** since **#210**) — confirm
+   Synced/Healthy and the new image is running.
+
+### Refresh cadence / trigger
+
+- **Quarterly review** of `pewdiepie-archdaemon/odysseus` commits since the
+  pinned SHA, **plus** an on-demand rebuild on any upstream **security advisory**
+  or needed fix. **Watch** the upstream repo for the signal.
+- **Renovate stays DISABLED** for this image (no semver stream to track — see
+  the `ghcr.io/spyrospsarras/odysseus` rule in `.github/renovate.json`).
+  Reconsider a constrained image-updater alias only if a stable published tag
+  scheme emerges upstream.
+
+### GHCR PAT caveat
+
+`ghcr_write_packages_pat` (in `.github/instructions/secrets.yml`) has only the
+`write:packages` scope, **not** `admin:packages` — so package **visibility**
+toggles (public/private) must be done in the **GitHub web UI**, not via the API
+or CLI. The token is sufficient to `docker push` the new tag, but not to flip
+visibility.
+
 ## Follow-ups
 
 selfHeal flip, prune flip, TrueNAS decommission, the `write:packages` PAT
