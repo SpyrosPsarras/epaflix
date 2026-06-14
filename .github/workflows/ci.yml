@@ -94,8 +94,35 @@ jobs:
       - name: Helm chart pins resolve
         run: |
           python3 - <<'PY'
-          import glob, subprocess, sys, yaml, os
+          import glob, subprocess, sys, yaml, os, time
           os.makedirs("/tmp/charts", exist_ok=True)
+
+          # Several pins are GitHub-release-hosted charts (argo-cd, authentik,
+          # loki) whose CDN intermittently 504s, hard-failing this required gate
+          # and blocking Renovate auto-merge — same transient-flake class as the
+          # install-tools download retry (#164). Retry ONLY on transient
+          # network/5xx markers; a genuine error (404 / chart-not-found /
+          # invalid version) is non-transient and fast-fails on attempt 1, so
+          # every pin is still validated.
+          def helm_pull(cmd, attempts=4):
+              for i in range(attempts):
+                  r = subprocess.run(cmd, capture_output=True, text=True)
+                  if r.returncode == 0:
+                      return r
+                  blob = (r.stderr + r.stdout).lower()
+                  TRANSIENT = any(m in blob for m in (
+                      "504", "502", "503", "gateway", "timed out", "timeout",
+                      "connection reset", "reset by peer", "eof",
+                      "tls handshake", "temporary failure", "i/o timeout",
+                  ))
+                  if not TRANSIENT or i == attempts - 1:
+                      return r  # let caller record the failure
+                  wait = (i + 1) * 5
+                  print(f"  transient pull error (attempt {i+1}/{attempts}), "
+                        f"retrying in {wait}s", file=sys.stderr)
+                  time.sleep(wait)
+              return r
+
           fail = []
           for f in glob.glob("2-k3s/**/kustomization.yaml", recursive=True):
               doc = yaml.safe_load(open(f)) or {}
@@ -108,7 +135,7 @@ jobs:
                       cmd = ["helm", "pull", f"{repo}/{name}", "--version", ver, "-d", "/tmp/charts"]
                   else:
                       cmd = ["helm", "pull", name, "--repo", repo, "--version", ver, "-d", "/tmp/charts"]
-                  r = subprocess.run(cmd, capture_output=True, text=True)
+                  r = helm_pull(cmd)
                   if r.returncode != 0:
                       fail.append(f"{name} {ver} ({repo}): {r.stderr.strip()}")
           if fail:
