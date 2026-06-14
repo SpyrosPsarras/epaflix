@@ -10,6 +10,16 @@ Apps is a pool that has a VDEV in RAIDZ1, and it consists of three SSD disks 250
 ### Pool1
 Pool1 is a pood that has a VDEV in device GUIDs and it consists of two mechanical disks 10 and 14TB.
 
+### Encrypted backups dataset
+`apps/encrypted-backups` is a ZFS-native-encrypted child of the `apps` pool and
+its own encryption root (`keylocation=prompt`). It holds the SOPS cluster
+age-key backup at
+`/mnt/apps/encrypted-backups/sops-age-backup/k3s-cluster.txt`. Because the key
+location is `prompt`, the dataset comes up **locked after every reboot** and must
+be manually unlocked before that backup is readable. The unlock procedure (the
+single source of truth) lives in
+[`.github/instructions/sops.instructions.md` → Post-reboot: unlock the TrueNAS encrypted backup dataset](../.github/instructions/sops.instructions.md#post-reboot-unlock-the-truenas-encrypted-backup-dataset).
+
 ## ISCSI targets
 
 Each VM should have its own ISCSI target on the Truenas Server and the targets should be attached to both proxmox servers. The reasoning behind that is that if one HPE server goes down, the other one could take over the VMs for the k3s cluster. There is not going to be any HA on the proxmox level, but its good to have the option.
