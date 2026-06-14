@@ -18,6 +18,22 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: odysseus
+
+# ChromaDB now comes from the amikos-tech Helm chart instead of the old
+# hand-rolled chromadb.yaml (issue #215, closes #189). The chart renders a
+# StatefulSet + Service both named "chromadb" (releaseName) on port 8000, so
+# Odysseus's CHROMADB_HOST=chromadb / CHROMADB_PORT=8000 are unchanged. Mirror
+# the cert-manager/traefik helmCharts: pattern. Pin the chart version (Renovate
+# tracks the image tag via a hint in values/chromadb-values.yaml).
+helmCharts:
+  - name: chromadb
+    repo: https://amikos-tech.github.io/chromadb-chart/
+    version: "0.2.2"  # renovate: datasource=helm depName=chromadb registryUrl=https://amikos-tech.github.io/chromadb-chart/
+    releaseName: chromadb
+    namespace: odysseus
+    valuesFile: values/chromadb-values.yaml
+    includeCRDs: true
+
 resources:
   - namespace.yaml
   - configmap.yaml
@@ -25,7 +41,6 @@ resources:
   - odysseus-ssh-config.yaml
   - odysseus-bastion-pv.yaml
   - searxng.yaml
-  - chromadb.yaml
   - ntfy.yaml
   - pdb.yaml
 generators:
