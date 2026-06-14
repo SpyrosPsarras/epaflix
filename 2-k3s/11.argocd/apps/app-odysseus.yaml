@@ -7,17 +7,17 @@
 #               odysseus-data-seed.enc.yaml at render time inside
 #               argocd-repo-server (Issue #29 — sops + age).
 # Destination:  in-cluster `odysseus` namespace.
-# Sync:         MANUAL on first install (syncPolicy: {}) — no automated, no
-#               selfHeal, no prune. The image must be pushed + made public and
-#               the secrets encrypted in git BEFORE this Application exists, so
-#               that when the selfHeal:true app-of-apps auto-creates this
-#               Application there is nothing for an accidental sync to revert
-#               to a broken state (adoption-order rule). After a clean explicit
-#               `argocd app sync odysseus` + Synced/Healthy + a soak window
-#               (~48h–1week), flip to automated:{selfHeal:true, prune:false}
-#               with syncOptions:[ServerSideApply=true]. prune stays OFF until
-#               a week clean (matches servarr/postgres/cert-manager cadence).
-#               Follow-up issues track the selfHeal + prune flips.
+# Sync:         AUTOMATED self-heal as of the #210 flip (post-soak — migrated
+#               off TrueNAS 2026-06-07, ~7d clean / zero drift). The image was
+#               pushed + made public and the secrets encrypted in git BEFORE
+#               this Application existed (adoption-order rule), then a clean
+#               explicit `argocd app sync odysseus` + Synced/Healthy + soak
+#               window gated this flip. selfHeal reverts any manual `kubectl
+#               edit` on managed resources; ServerSideApply avoids noisy
+#               tracking-id annotation diffs. prune stays OFF — accidental file
+#               deletion must NOT cascade-drop the odysseus Deployment or its
+#               stateful PVCs (matches servarr/postgres/cert-manager cadence);
+#               the prune flip is a separate gated follow-up.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -32,11 +32,17 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: odysseus
-  # MANUAL sync — no `automated` block (see header). `syncPolicy` is omitted
-  # entirely on purpose: an empty `syncPolicy: {}` never matches ArgoCD's live
-  # `null`, producing a permanent cosmetic OutOfSync on the parent app-of-apps
-  # (see 11.argocd/README.md → Sync policy). Re-add `syncPolicy.automated` here
-  # at the selfHeal-flip.
+  # AUTOMATED self-heal after a clean post-migration soak (#210). selfHeal
+  # reverts any manual `kubectl edit` on managed resources; ServerSideApply
+  # avoids noisy tracking-id annotation diffs. prune is OFF — accidental file
+  # deletion must NOT cascade-drop the odysseus Deployment or its stateful
+  # PVCs; the prune flip is a separate gated follow-up.
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: false
+    syncOptions:
+      - ServerSideApply=true
   ignoreDifferences:
     - group: ""
       kind: Service
