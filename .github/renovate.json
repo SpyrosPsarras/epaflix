@@ -69,6 +69,18 @@
       "matchPackageNames": ["ghcr.io/renovatebot/renovate"],
       "matchUpdateTypes": ["major"],
       "automerge": false
+    },
+    {
+      "description": "Pin the CI validate-gate helm to 3.x: helm v4 has shipped (v4.2.1) but its pull/OCI semantics are unsoaked for this gate; bump this cap when adopting v4 deliberately. #221/#164.",
+      "matchDatasources": ["github-releases"],
+      "matchPackageNames": ["helm/helm"],
+      "allowedVersions": "<4"
+    },
+    {
+      "description": "Pin the CI validate-gate kustomize to 5.x for the same reason (no v6 exists yet; deliberate major adoption only). #221/#164.",
+      "matchDatasources": ["github-releases"],
+      "matchPackageNames": ["kubernetes-sigs/kustomize"],
+      "allowedVersions": "<6"
     }
   ],
   "customManagers": [
