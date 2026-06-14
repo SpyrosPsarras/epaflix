@@ -698,3 +698,91 @@ shred -u /tmp/seed-plain.yaml 2>/dev/null; rm -f /tmp/blacklist-upstream /tmp/ov
 > initContainer means a refreshed seed does NOT auto-apply to the existing PVC
 > (step 5 is the live push). The `sonarr_blocklist_path` pointer remains
 > SQLite-resident / manual on a PVC rebuild (#138 (ii)).
+
+## #241 — arr `copyUsingHardlinks` is PVC-only runtime state
+
+**Desired state.** `copyUsingHardlinks=true` on **all three arrs** — `sonarr`
+(HD), `sonarr2` (anime), and `radarr`. This is **required** so that #195's unified
+single `/media` mount actually **hardlinks** imports (downloads → library) instead
+of byte-copying them. With it `false`, every import is a full copy: double the disk
+usage and a fresh `nlink=1` file indistinguishable from an orphan. The in-pod
+EXDEV blocker that previously made hardlinking impossible regardless of this flag
+was **#240**, resolved by **#242** (drop the kubelet `subPath`, mount the unified
+PVC once at `/media`); see the "#195" / "subPath EXDEV gotcha" sections above. With
+that barrier gone, `copyUsingHardlinks=true` is the flag that makes the unification
+pay off.
+
+**Where it lives.** Each arr persists this in its **config PVC SQLite DB**
+(`/config/sonarr.db`, `/config/radarr.db`, etc.), which the app **rewrites at
+runtime**. It is **NOT git-managed.** The newtarr (#137, JSON) and cleanuparr
+(#138, flat `.txt`) SOPS-seed pattern does **NOT** apply here: a binary SQLite DB
+has no stable text to diff or non-clobber-seed. arr config is **PVC-managed runtime
+state — same durability class as #196** (the Cleanuparr DB). The current live value
+is `copyUsingHardlinks=true` on all three (set during the #195 cutover, see the
+"Option A — DELIVERED" section).
+
+### Re-apply runbook (only triggered by a pre-#195 PVC restore)
+
+The **sole revert trigger** is restoring an arr config PVC from a backup taken
+**before** the #195 cutover — such a backup silently carries `copyUsingHardlinks=false`
+and the arr reverts to copy-mode on next start. (There is no other way this flips:
+the app never changes it on its own.) When that happens, re-apply with a
+**read-modify-write** against the arr API so other `mediamanagement` fields are
+preserved — never blind-PUT a hand-built body.
+
+The ingress for each arr is **forward-auth gated** (#176), so call the in-cluster
+**ClusterIP Service** directly. Service names / ports (confirmed against the
+manifests, namespace `servarr`): `sonarr:8989`, `sonarr2:8989`, `radarr:7878`.
+The API key for each arr lives in that pod's `/config/config.xml` `<ApiKey>`
+element (also mirrored in `secrets.yml`); substitute it for `<APIKEY>` below —
+**never** print or commit the real key.
+
+```sh
+# Per arr — example uses sonarr (svc sonarr:8989). Repeat for sonarr2:8989 and radarr:7878.
+# Run from a pod/host with in-cluster network reach (e.g. kubectl exec into the arr pod,
+# or a debug pod in namespace servarr).
+
+# 1. GET the current mediamanagement config (read).
+curl -s -H "X-Api-Key: <APIKEY>" http://sonarr:8989/api/v3/config/mediamanagement -o /tmp/mm.json
+
+# 2. Flip ONLY copyUsingHardlinks, preserving every other field (modify), then PUT it back (write).
+#    (jq keeps all other keys intact; the resource id is required on the PUT path.)
+ID=$(jq -r .id /tmp/mm.json)
+jq '.copyUsingHardlinks = true' /tmp/mm.json \
+  | curl -s -X PUT -H "X-Api-Key: <APIKEY>" -H "Content-Type: application/json" \
+      --data @- "http://sonarr:8989/api/v3/config/mediamanagement/${ID}"
+```
+
+**OR simply, in the UI:** Sonarr / Sonarr2 / Radarr → **Settings → Media
+Management → enable "Use Hardlinks instead of Copy" → Save.**
+
+### Verify (post-restore)
+
+1. **API check all 3** — confirm the flag is back on:
+   ```sh
+   for svc in sonarr:8989 sonarr2:8989 radarr:7878; do
+     echo -n "$svc copyUsingHardlinks="; \
+     curl -s -H "X-Api-Key: <APIKEY>" "http://${svc}/api/v3/config/mediamanagement" \
+       | jq -r .copyUsingHardlinks
+   done
+   ```
+   All three must print `true`.
+2. **Spot-check a real cross-dir hardlink in-pod** — pick a recently imported file
+   and confirm it shares an inode (`nlink>=2`, same device) across
+   `downloads/` and the library (e.g. `tvshows/`):
+   ```sh
+   kubectl -n servarr exec deploy/sonarr -- \
+     stat -c '%i %h %n' /media/downloads/<file> /media/tvshows/<path>/<file>
+   ```
+   Same inode number + link-count `2` = the import hardlinked (not copied).
+
+**Cross-links:** #195 (origin — the single-`/media` unification that makes
+hardlinking possible), #240 / #242 (the kubelet-subPath EXDEV fix that removes the
+in-pod barrier so this flag is effective), #142 / #196 (the safe reaper depends on
+hardlinks: `nlink>1` is what distinguishes a healthy imported seeder from a true
+orphan), and the **#180-family** arr-config off-PVC backup gap. That last is the
+**real durability gap**: the arr SQLite DBs have **no scheduled off-PVC backup**, so
+a PVC restore from old media is the *only* thing that can revert this flag — and the
+arrs have no SOPS-seedable config like newtarr/cleanuparr. This runbook makes the
+revert **one-command-recoverable**, but it is **not itself a backup**; closing the
+backup gap is tracked in the #180 family.
