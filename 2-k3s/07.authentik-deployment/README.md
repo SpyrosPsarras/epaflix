@@ -372,6 +372,50 @@ Because the token is declared in git-as-SOPS, it survives Authentik DB rebuilds
 exactly the failure #185 fixed (the old personal token expired twice mid-run
 during the Odysseus SSO bring-up #183).
 
+##### Scoped RBAC role — `ak-iac IaC` (Phase 1 of #230, additive)
+
+As of Phase 1 of #230, the same blueprint **also** provisions a least-privilege
+path for `ak-iac`, so that the eventual flip off blanket superuser is a one-line
+change rather than a re-design:
+
+- `authentik_rbac.role` **`ak-iac`** — a role whose `attrs.permissions` lists only
+  the **global** permissions the IaC blueprints actually exercise: view/add/change
+  proxy + OAuth2 providers, view/change outposts, view/add/change applications,
+  view/add/change groups, view/add policy bindings, view/add users, and view flows.
+- `authentik_core.group` **`ak-iac IaC`** — a non-superuser group bound to that
+  role via the group `roles` relation.
+- The `ak-iac` user is now a member of **both** the new `ak-iac IaC` group **and**
+  the existing built-in **`authentik Admins`** superuser group.
+
+**This change is purely additive.** `ak-iac` is still a superuser this PR (it keeps
+its `authentik Admins` membership); the scoped role does not *reduce* any capability.
+Dropping `authentik Admins` (the actual privilege reduction) is deliberately
+**deferred** to the verify-then-flip follow-up of #230 so it can be gated on proof
+that the scoped permission set is sufficient.
+
+> **The `authentik Admins` group itself is untouched** — its membership and
+> `is_superuser: true` are unchanged. Nothing else depends on this blueprint's
+> group set: **Grafana** authorizes off its own `Grafana Admins` / `Grafana Editors`
+> groups, and **Jellyfin / servarr** authorize off their own groups (e.g.
+> `Servarr users`). None of them reference `ak-iac` or `ak-iac IaC`.
+
+**Phase 2/3 verification plan (before the flip):** mint a **scoped-ONLY** token on a
+*temporary* service account that carries the `ak-iac IaC` role **but not**
+`authentik Admins`, then exercise the full IaC op-list against the admin API as that
+token:
+
+- `POST` create a proxy/OAuth2 **provider**, an **application**, a **group**, and a
+  **policy binding**;
+- `GET` then `PATCH` an **outpost**'s `providers[]` array (the embedded outpost
+  assignment the forward-auth blueprints rely on, per #185);
+- `GET` **users** and **flows** (the `!Find`/`!KeyOf` lookups the blueprints resolve).
+
+If any call returns **403**, widen `ak-iac` role `attrs.permissions` by exactly the
+missing codename and re-verify; only once every op succeeds do we drop `ak-iac` from
+`authentik Admins`. Delete the temporary SA + token immediately after the exercise.
+Reverting the flip is trivial — re-add the `authentik Admins` `!Find` to the
+membership entry.
+
 **Use it** (read the value from `secrets.yml` / the SOPS Secret; never paste a
 literal token into git):
 
