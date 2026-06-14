@@ -3,10 +3,12 @@
 # pod->bastion channel (issue: odysseus-bastion sandbox).
 #
 # Consumed only by the `seed-ssh` initContainer, which copies these into an
-# emptyDir at /root/.ssh with correct 0600/0644 perms (a secret/configMap
-# subPath mount would leave the private key world-readable and ssh would
-# refuse it). The private key itself is the SOPS Secret key
-# ODYSSEUS_BASTION_SSH_KEY (odysseus-secrets), NOT in this ConfigMap.
+# emptyDir at /app/.ssh owned 1000:1000 with correct 0600/0644 perms. /app is
+# the passwd HOME of uid 1000 (user `odysseus`), which the app + its bash tool
+# run as — so ssh reads /app/.ssh/config and the key must be 1000-readable.
+# (/root/.ssh is unreadable to uid 1000; a subPath secret mount would be
+# world-readable — both make ssh fail.) The private key itself is the SOPS
+# Secret key ODYSSEUS_BASTION_SSH_KEY (odysseus-secrets), NOT in this ConfigMap.
 #
 # known_hosts is pre-seeded with the bastion's host key so the first
 # connection is not blind TOFU.
@@ -20,9 +22,9 @@ data:
     Host bastion
         HostName 192.168.10.43
         User ubuntu
-        IdentityFile /root/.ssh/id_bastion
+        IdentityFile /app/.ssh/id_bastion
         IdentitiesOnly yes
-        UserKnownHostsFile /root/.ssh/known_hosts
+        UserKnownHostsFile /app/.ssh/known_hosts
         StrictHostKeyChecking accept-new
         ConnectTimeout 10
         ConnectionAttempts 3
