@@ -1,0 +1,49 @@
+---
+# NFS workspace shared between the Odysseus pod and the odysseus-bastion VM
+# (TrueNAS apps/odysseus-bastion, export id 33, mapall_user=apps).
+#
+# Static NFS PV (storageClassName "") — no dynamic provisioner. The export is
+# scoped to the k3s worker IPs + the bastion (.43); the Deployment pins the pod
+# off control-plane nodes via nodeAffinity (odysseus.yaml) so it always lands
+# on a worker that the export permits. mapall squashes all access to `apps`, so
+# the root-running pod and the bastion's `ubuntu` user share consistent
+# ownership.
+#
+# Reclaim policy is Retain: the real data lives on TrueNAS, so the PV is only a
+# mount pointer and we never want k8s reclaiming it. The explicit claimRef
+# pre-binds this PV to the PVC below for deterministic binding. RECOVERY: if the
+# PVC is ever deleted on its own, this PV goes Released and won't auto-rebind —
+# clear it with `kubectl patch pv odysseus-bastion-workspace --type merge -p
+# '{"spec":{"claimRef":null}}'` (or delete the PV and let ArgoCD recreate it).
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: odysseus-bastion-workspace
+spec:
+  capacity:
+    storage: 60Gi
+  accessModes: ["ReadWriteMany"]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  claimRef:
+    namespace: odysseus
+    name: odysseus-bastion-workspace
+  mountOptions:
+    - vers=4
+    - _netdev
+  nfs:
+    server: 192.168.10.200
+    path: /mnt/apps/odysseus-bastion
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: odysseus-bastion-workspace
+  namespace: odysseus
+spec:
+  accessModes: ["ReadWriteMany"]
+  storageClassName: ""
+  volumeName: odysseus-bastion-workspace
+  resources:
+    requests:
+      storage: 60Gi

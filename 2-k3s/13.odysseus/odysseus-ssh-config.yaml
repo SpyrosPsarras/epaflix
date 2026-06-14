@@ -1,0 +1,28 @@
+---
+# SSH client config + pre-seeded known_hosts for the Odysseus pod's
+# pod->bastion channel (issue: odysseus-bastion sandbox).
+#
+# Consumed only by the `seed-ssh` initContainer, which copies these into an
+# emptyDir at /root/.ssh with correct 0600/0644 perms (a secret/configMap
+# subPath mount would leave the private key world-readable and ssh would
+# refuse it). The private key itself is the SOPS Secret key
+# ODYSSEUS_BASTION_SSH_KEY (odysseus-secrets), NOT in this ConfigMap.
+#
+# known_hosts is pre-seeded with the bastion's host key so the first
+# connection is not blind TOFU.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: odysseus-ssh-config
+  namespace: odysseus
+data:
+  config: |
+    Host bastion
+        HostName 192.168.10.43
+        User ubuntu
+        IdentityFile /root/.ssh/id_bastion
+        IdentitiesOnly yes
+        UserKnownHostsFile /root/.ssh/known_hosts
+        StrictHostKeyChecking accept-new
+  known_hosts: |
+    192.168.10.43 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKUi2iW6pMaqS1T25aacWlicRiIkmaQYvQddblBgNlR6

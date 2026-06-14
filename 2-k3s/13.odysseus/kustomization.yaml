@@ -22,6 +22,8 @@ resources:
   - namespace.yaml
   - configmap.yaml
   - odysseus.yaml
+  - odysseus-ssh-config.yaml
+  - odysseus-bastion-pv.yaml
   - searxng.yaml
   - chromadb.yaml
   - ntfy.yaml
