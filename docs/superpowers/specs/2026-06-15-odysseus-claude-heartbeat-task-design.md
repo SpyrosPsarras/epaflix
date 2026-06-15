@@ -76,12 +76,16 @@ api.anthropic.com  →  "pong"
 - `DISABLE_AUTOUPDATER=1` (reinstalled each start; no in-place self-update needed).
 - New env `CLAUDE_CODE_OAUTH_TOKEN` from the odysseus secret (below).
 
-### 3. Subscription token (`odysseus-secrets.enc.yaml`)
+### 3. Subscription token (`claude-oauth-token.enc.yaml`)
 
-- Add key **`CLAUDE_CODE_OAUTH_TOKEN`** to the existing SOPS-encrypted
-  `odysseus-secrets` (already holds `ODYSSEUS_ADMIN_PASSWORD`, `SEARXNG_SECRET`,
-  `OPENAI_API_KEY`, `HF_TOKEN`, `ODYSSEUS_BASTION_SSH_KEY`). No new Secret object,
-  no new ksops generator entry.
+- **DEVIATION FROM ORIGINAL PLAN (option B):** the token lives in a **standalone
+  SOPS Secret `claude-oauth-token`** (`claude-oauth-token.enc.yaml`), added to the
+  ksops generator `files:` list, with the deployment `secretKeyRef` pointing at it.
+  Reason: the cluster age **private key was not present on the implementation
+  machine**, so editing the existing `odysseus-secrets.enc.yaml` (which requires
+  decrypt → re-encrypt) was impossible. Encrypting a *new* file needs only the
+  **public** recipient (`age1586…` from `.sops.yaml`), so a standalone file
+  unblocked the work and is fully reproducible.
 - Token is minted once locally by the owner: `claude setup-token` (needs an active
   Pro/Max login). Never committed in plaintext; the SOPS+age pre-commit guard
   enforces this.

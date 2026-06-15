@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Secret
+metadata:
+    name: claude-oauth-token
+    namespace: odysseus
+type: Opaque
+stringData:
+    CLAUDE_CODE_OAUTH_TOKEN: ENC[AES256_GCM,data:3uX4OMSpY/Sz17CxRjv4Isa44vEPaZlqRXl7k/Ck55HY0XANmGS4mlbAKIT/H+f/V4tJpPJB4QO38j+R8TRnRgX4czkWfMqI3XjKczyBZ19PoBNK66sZvQFVcycNsXsDz3rfVkwM29pfF7NQ,iv:2Mcj0+nYTUnTU6hoWbfAqGJfFOiYrkPrwHv0NyT6Xhs=,tag:v13OdjpjJG4Mwmxtp/D6UQ==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBpUDg3dkU4KzBkcUpSdGJt
+            QWZMYzE1RkRkWkgzNWlIZzV5ZkZKK21qQ1U0CnpPSzR6N01XUnlrNXRvKzJSczJw
+            Y0RJSHAzMzdmeW9ZdThTdWJQdXlCMVEKLS0tIGNPYXdrOUZYTUs5Lzcra3FSZDha
+            K1NYYitWdW9ndW5wamRqUUdRWlFYb3MK4M9/p+LrmaQaO5/9JrziIKzFUXHUJfT6
+            ut72C3e5954Mk5y7bfPawZAqnjKiPgWUNYLhT6IzPpz9olpiucfdjQ==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1586thf5vkcdf5lcn3zwjpu8ltkwyq8efrhj8lr0vdrrt9k5f3qgsxeg7gx
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-06-15T12:13:06Z"
+    mac: ENC[AES256_GCM,data:q6lDH0Arvlne8Px2E8a51i4kT+Dk47P2pBUU1nfTRhjE8wjO7KvQ3isK1/TEOM6pDS6uo4FsLTDCz6rN9Q62rCa5x0NRDwqh015p+xpmBtUaPhCDMW9PF2gIg/cWs8H96fmDZUXN5wMNPm/ZKhsYGT1ycHKgif1KJdfIPe5EQxw=,iv:hCzWIz6rprqZTWfH9D/PUN4Lk2xuBv8QoIWQFajqgF4=,tag:O9OZs4aBDECW/WTj/aP7sA==,type:str]
+    version: 3.13.1
