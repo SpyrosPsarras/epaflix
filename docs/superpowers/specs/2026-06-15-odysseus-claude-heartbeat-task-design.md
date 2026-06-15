@@ -53,8 +53,10 @@ api.anthropic.com  →  "pong"
 
 ### 1. `install-claude` initContainer (`odysseus.yaml`)
 
-- Base image: `debian:stable-slim` (digest-pinned, Renovate-tracked) — has/installs
-  `curl` + `ca-certificates`.
+- Base image: **the odysseus image itself** (`ghcr.io/spyrospsarras/odysseus:73673258`).
+  Confirmed `python:3.12-slim` (Debian, **glibc**) and it **already ships `curl`** — so
+  there is no second image to pull (already cached on the node) and the installed glibc
+  binary is guaranteed compatible with the main container.
 - Command: `curl -fsSL https://claude.ai/install.sh | bash` with `HOME=/opt/claude`,
   so the **native installer** (the documented recommended path) drops a standalone
   binary at `/opt/claude/.local/bin/claude`. No Node, no npm.
@@ -65,9 +67,12 @@ api.anthropic.com  →  "pong"
 
 ### 2. odysseus container changes (`odysseus.yaml`)
 
-- Mount the `claude-bin` emptyDir at `/opt/claude`.
+- Mount the `claude-bin` emptyDir at `/opt/claude` (readOnly).
 - Prepend `/opt/claude/.local/bin` to `PATH` (env), plus the task script sets it
   explicitly (belt-and-suspenders).
+- `CLAUDE_CONFIG_DIR=/app/data/.claude` — `/app` is root-owned (entrypoint only chowns
+  `/app/data`+`/app/logs` to uid 1000), so claude's config/credentials cache lives on
+  the writable data PVC, not the default `~/.claude` under `/app`.
 - `DISABLE_AUTOUPDATER=1` (reinstalled each start; no in-place self-update needed).
 - New env `CLAUDE_CODE_OAUTH_TOKEN` from the odysseus secret (below).
 
@@ -104,13 +109,13 @@ no Kubernetes Job to scrape — the run is in-process inside the long-lived pod)
 
 ## Risks / verification
 
-- **libc compatibility (must verify during implementation):** the claude native
-  binary is glibc. If the `ghcr.io/spyrospsarras/odysseus` image is musl/Alpine,
-  the glibc binary won't run — the initContainer would need the musl build +
-  `libgcc`/`libstdc++` and `USE_BUILTIN_RIPGREP=0`. Check the image base
-  (`ldd --version` / `/etc/os-release`) before finalizing.
-- **`HOME=/app` writability:** claude writes config under `~/.claude`; `/app` is
-  uid 1000's home and writable. If not, set `CLAUDE_CONFIG_DIR` to a writable path.
+- **libc compatibility — RESOLVED:** the odysseus image is `python:3.12-slim`
+  (Debian, glibc), confirmed from the upstream Dockerfile, so the claude native glibc
+  binary runs. No musl build needed. (Bonus: the image already ships `curl`, so the
+  initContainer reuses the odysseus image — see component 1.)
+- **`HOME=/app` writability — RESOLVED:** `/app` is root-owned (the entrypoint only
+  chowns `/app/data`+`/app/logs` to uid 1000), so the default `~/.claude` would fail to
+  write. `CLAUDE_CONFIG_DIR=/app/data/.claude` (writable, on the data PVC) handles it.
 - **Network egress:** pod must reach `claude.ai` (install) + `api.anthropic.com`
   (inference). The pod already has internet egress (Ollama, GHCR).
 - **300s timeout:** a `-p "pong"` round-trip is well under 300s; the first run also
