@@ -158,10 +158,14 @@ spec:
               /opt/claude/.local/bin/claude --version
           resources:
             requests:
-              memory: "128Mi"
+              memory: "256Mi"
               cpu: "100m"
             limits:
-              memory: "512Mi"
+              # The native installer + first `claude --version` spikes well past
+              # 512Mi (OOMKilled / exit 137 observed). 2Gi matches the main
+              # container ceiling; the initContainer is transient so this does
+              # not raise steady-state usage.
+              memory: "2Gi"
               cpu: "1000m"
           volumeMounts:
             - name: claude-bin
