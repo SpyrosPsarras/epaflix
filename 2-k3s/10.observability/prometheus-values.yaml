@@ -160,6 +160,12 @@ grafana:
           access: proxy
           jsonData:
             maxLines: 1000
+            # Loki runs with auth_enabled: true (multi-tenant). Promtail writes as
+            # tenant "1" (promtail-values.yaml tenant_id). Queries MUST carry the
+            # matching X-Scope-OrgID header or Loki returns 401 "no org id".
+            httpHeaderName1: "X-Scope-OrgID"
+          secureJsonData:
+            httpHeaderValue1: "1"
 
   # Dashboard providers
   dashboardProviders:
