@@ -10,11 +10,16 @@
 # Alertmanager (alertmanager_url set in loki-values.yaml rulerConfig), which
 # routes by severity/namespace and emails admin@epaflix.com.
 #
-# Scope: ships the reliable, pattern-stable groups (A = servarr error spikes,
-# D = cluster-wide panic/fatal). The app-specific known-bad-line rules
-# (B: qBittorrent/gluetun VPN drop, Postgres fatals; C: Authentik login
-# failures, Traefik 5xx) are deferred until their real log strings can be read
-# now that queries work again — tracked as a follow-up issue.
+# Scope: groups A (servarr error spikes) and D (cluster-wide panic/fatal) plus
+# the app-specific log rules authored against real log strings read from the live
+# cluster (#352):
+#   B — Postgres FATAL/PANIC/deadlock (CloudNativePG JSON: record.error_severity)
+#   C — Authentik failed logins (audit action login_failed)
+# Two B/C items are NOT log rules and live elsewhere:
+#   - qBittorrent VPN flap → restart-count PrometheusRule in custom-alerts.yaml
+#     (0 error lines exist in-container; a "flap" is the container restarting).
+#   - Traefik 5xx → needs Traefik Prometheus metrics + ServiceMonitor enabled
+#     first (still open in #352); 5xx is a metric, not a log line.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -71,3 +76,78 @@ data:
                 {{ $value }} panic/fatal/OOM/segfault lines in the last 5m in
                 namespace {{ $labels.namespace }}. Identify the offending pod in
                 Grafana → Explore → Loki and investigate.
+
+      # B — Postgres (CloudNativePG). Logs are JSON with the server line under
+      #     record.error_severity. Match ONLY severe events; the benign, chatty
+      #     `WARNING ... you don't own a lock of type ExclusiveLock` is excluded
+      #     by matching FATAL/PANIC/"deadlock detected" rather than bare severity.
+      - name: postgres-health
+        rules:
+          - alert: PostgresPanic
+            expr: |
+              sum (
+                count_over_time({namespace="postgres-system", container="postgres"} |~ `"error_severity":"PANIC"` [5m])
+              ) > 0
+            for: 0m
+            labels:
+              severity: critical
+              component: postgres
+            annotations:
+              summary: "PostgreSQL PANIC logged"
+              description: >-
+                CloudNativePG logged a PANIC in the last 5m — possible crash or
+                data-integrity event. Inspect postgres-system pod logs and CNPG
+                cluster status immediately.
+          - alert: PostgresFatalSpike
+            expr: |
+              sum (
+                count_over_time({namespace="postgres-system", container="postgres"} |~ `"error_severity":"FATAL"` [5m])
+              ) > 10
+            for: 5m
+            labels:
+              severity: warning
+              component: postgres
+            annotations:
+              summary: "Elevated PostgreSQL FATAL rate"
+              description: >-
+                {{ $value }} FATAL log lines in 5m (threshold 10) — e.g. failed
+                auth, dropped/terminated connections, or startup failures. Check
+                in Grafana → Explore → Loki:
+                {namespace="postgres-system", container="postgres"} |~ `"error_severity":"FATAL"`
+          - alert: PostgresDeadlock
+            expr: |
+              sum (
+                count_over_time({namespace="postgres-system", container="postgres"} |~ `deadlock detected` [10m])
+              ) > 0
+            for: 0m
+            labels:
+              severity: warning
+              component: postgres
+            annotations:
+              summary: "PostgreSQL deadlock detected"
+              description: >-
+                A deadlock was detected in the last 10m. One transaction was
+                rolled back. Investigate concurrent writers (servarr / authentik).
+
+      # C — Authentik failed logins (brute-force signal). Authentik logs the
+      #     audit action `login_failed`. NOTE: no failed-login sample was
+      #     available when authored — the alternate phrasings below hedge the
+      #     match; confirm against a real failed login and tighten if needed.
+      - name: authentik-auth
+        rules:
+          - alert: AuthentikLoginFailures
+            expr: |
+              sum (
+                count_over_time({namespace="app-authentik"} |~ `(?i)login_failed|invalid credentials|authentication failed` [5m])
+              ) > 10
+            for: 5m
+            labels:
+              severity: warning
+              component: authentik
+            annotations:
+              summary: "Spike in Authentik login failures"
+              description: >-
+                {{ $value }} Authentik login-failure events in 5m (threshold 10)
+                — possible credential-stuffing/brute force. Review source IPs in
+                Grafana → Explore → Loki:
+                {namespace="app-authentik"} |~ `login_failed`
