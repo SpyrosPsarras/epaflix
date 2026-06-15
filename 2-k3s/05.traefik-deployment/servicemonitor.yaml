@@ -1,0 +1,33 @@
+---
+# Standalone ServiceMonitor for Traefik metrics (#352).
+#
+# Authored as a plain manifest rather than via the chart's
+# `metrics.prometheus.serviceMonitor.enabled` ON PURPOSE: the chart's SM template
+# hard-fails (`fail "You have to deploy monitoring.coreos.com/v1 first"`) when the
+# monitoring.coreos.com/v1 CRD capability is not known at render time — which is
+# the case for ArgoCD's `kustomize build --enable-helm` (no --helm-api-versions).
+# That would break the whole Traefik app render. This manifest is applied directly
+# by ArgoCD (the CRD already exists in-cluster). Same pattern as pve-exporter.
+#
+# Targets the chart's `traefik-metrics` ClusterIP Service (port name `metrics`,
+# 9100). The main `traefik` LB Service has no `metrics` port, so it yields no
+# target. The cluster Prometheus selects all ServiceMonitors
+# (serviceMonitorSelector: {}), so no release label is required.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: traefik
+  namespace: traefik-system
+  labels:
+    app.kubernetes.io/name: traefik
+spec:
+  namespaceSelector:
+    matchNames:
+      - traefik-system
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: traefik
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
