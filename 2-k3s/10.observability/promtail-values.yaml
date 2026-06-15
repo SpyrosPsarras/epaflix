@@ -25,8 +25,12 @@ config:
         relabel_configs:
         - source_labels: [__meta_kubernetes_pod_node_name]
           target_label: __host__
-        - action: labelmap
-          regex: __meta_kubernetes_pod_label_(.+)
+        # NOTE: no blanket `labelmap` of pod labels here. Mapping every pod label
+        # into a Loki stream label pushed busy pods (argocd, postgres) past Loki's
+        # max_label_names_per_series (15) → those streams were dropped with HTTP 400
+        # and never stored. It also explodes index cardinality. We keep only the
+        # curated low-cardinality labels below (namespace/pod/container/job/host);
+        # filter on app/container or line content in LogQL instead.
         - action: replace
           replacement: $1
           separator: /
