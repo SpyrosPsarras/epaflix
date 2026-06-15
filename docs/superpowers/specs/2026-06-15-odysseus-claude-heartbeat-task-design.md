@@ -68,8 +68,10 @@ api.anthropic.com  →  "pong"
 ### 2. odysseus container changes (`odysseus.yaml`)
 
 - Mount the `claude-bin` emptyDir at `/opt/claude` (readOnly).
-- Prepend `/opt/claude/.local/bin` to `PATH` (env), plus the task script sets it
-  explicitly (belt-and-suspenders).
+- **Do NOT set a container-wide `PATH` env** — overriding the image default drops
+  `/usr/sbin` (`groupadd`/`gosu`/`useradd`) and crashes the entrypoint
+  (`groupadd: not found`, observed). The `run_local` Task prepends the CLI dir
+  itself: `export PATH=/opt/claude/.local/bin:$PATH; claude -p …`.
 - `CLAUDE_CONFIG_DIR=/app/data/.claude` — `/app` is root-owned (entrypoint only chowns
   `/app/data`+`/app/logs` to uid 1000), so claude's config/credentials cache lives on
   the writable data PVC, not the default `~/.claude` under `/app`.

@@ -138,9 +138,9 @@ And add to that container's `env:` list (after the `HF_TOKEN` block):
                 secretKeyRef:
                   name: odysseus-secrets
                   key: CLAUDE_CODE_OAUTH_TOKEN
-            # Put the CLI on PATH for the run_local Task shell.
-            - name: PATH
-              value: "/opt/claude/.local/bin:/usr/local/bin:/usr/bin:/bin"
+            # NOTE: do NOT set a container-wide PATH env — it drops /usr/sbin
+            # (groupadd/gosu/useradd) and crashes the entrypoint. The run_local
+            # Task prepends the CLI dir itself (export PATH=...:$PATH).
             # /app is root-owned; point claude config at the writable data PVC.
             - name: CLAUDE_CONFIG_DIR
               value: "/app/data/.claude"
@@ -149,10 +149,10 @@ And add to that container's `env:` list (after the `HF_TOKEN` block):
               value: "1"
 ```
 
-> NOTE: setting an explicit `PATH` overrides the image default. The value above
-> matches the Debian default plus the claude dir. If the app relies on extra PATH
-> entries (e.g. for `npx`/`ssh`), confirm `/usr/local/bin:/usr/bin:/bin` covers
-> them (it does for `nodejs`/`npm`/`git`/`ssh`, all in `/usr/bin`).
+> NOTE: an earlier revision set a container-wide `PATH` env and it crashed the
+> entrypoint (`groupadd: not found`) by dropping `/usr/sbin`. Resolved by removing
+> the env entirely; the task script's `export PATH=/opt/claude/.local/bin:$PATH`
+> is the only place PATH is touched. (Fix shipped in PR #358.)
 
 - [ ] **Step 4: Render the kustomization to validate structure**
 
