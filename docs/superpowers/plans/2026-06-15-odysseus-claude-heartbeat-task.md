@@ -18,8 +18,18 @@
 
 ### Task 1: Mint and encrypt the subscription token
 
+> **IMPLEMENTATION NOTE (option B, as executed):** the cluster age *private* key
+> was not on the implementation machine, so the token went into a **standalone**
+> `2-k3s/13.odysseus/claude-oauth-token.enc.yaml` (Secret `claude-oauth-token`),
+> encrypted with only the **public** recipient `age1586…` (no private key needed),
+> added to `ksops-generator.yaml`, with the deployment `secretKeyRef` pointing at
+> it — instead of editing the existing `odysseus-secrets.enc.yaml`. Encrypt via a
+> `.enc.yaml`-named temp so sops matches the `.sops.yaml` rule:
+> `sops --encrypt /tmp/x.enc.yaml > 2-k3s/13.odysseus/claude-oauth-token.enc.yaml`.
+
 **Files:**
-- Modify: `2-k3s/13.odysseus/odysseus-secrets.enc.yaml` (add one SOPS-encrypted key)
+- Create: `2-k3s/13.odysseus/claude-oauth-token.enc.yaml` (new standalone SOPS Secret)
+- Modify: `2-k3s/13.odysseus/ksops-generator.yaml` (add to `files:`)
 
 **Pre-req (owner action, local machine, NOT committed):**
 Mint a long-lived token from an active Pro/Max login:
