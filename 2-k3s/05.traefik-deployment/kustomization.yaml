@@ -24,6 +24,9 @@ resources:
   - ingress/pegaprox-proxy.yaml
   - ingress/minio-proxy.yaml
   - ingress/odysseus-proxy.yaml
+  # Standalone ServiceMonitor for Traefik metrics (#352) — NOT the chart's SM,
+  # which hard-fails under ArgoCD's helm render (see servicemonitor.yaml header).
+  - servicemonitor.yaml
 generators:
   - ksops-generator.yaml
 helmCharts:
