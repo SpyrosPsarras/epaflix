@@ -37,6 +37,24 @@ loki:
     compaction_interval: 2h
     delete_request_store: filesystem
 
+  # Ruler — evaluate LogQL alerting rules and forward firing alerts to the
+  # existing Alertmanager (kube-prometheus-stack). The chart already runs a rules
+  # sidecar (loki-sc-rules) that watches ConfigMaps labelled `loki_rule` and
+  # writes them into /rules; the ONLY missing piece was `alertmanager_url`, so
+  # rules previously had nowhere to fire. Rules for tenant "1" (matching the
+  # promtail tenant_id) land in /rules/1 via the rule ConfigMap's
+  # k8s-sidecar-target-directory annotation
+  # (alertmanager-config/loki-log-alerts.yaml).
+  rulerConfig:
+    storage:
+      type: local
+      local:
+        directory: /rules
+    rule_path: /tmp/loki/scratch
+    alertmanager_url: http://kube-prometheus-stack-alertmanager.observability.svc.cluster.local:9093
+    enable_alertmanager_v2: true
+    enable_api: true
+
 # Single Binary deployment
 singleBinary:
   replicas: 1 # Only 1 replica supported with filesystem storage

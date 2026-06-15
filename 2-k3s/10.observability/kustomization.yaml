@@ -54,6 +54,10 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - alertmanager-config/custom-alerts.yaml
+  # Loki LogQL log-content alert rules (delivered to the loki rules sidecar via
+  # the `loki_rule` label; forwarded to Alertmanager by the ruler). Distinct from
+  # the metric-based PrometheusRule in custom-alerts.yaml above.
+  - alertmanager-config/loki-log-alerts.yaml
   - ingress/grafana-ingressroute.yaml
   - pve-exporter/service.yaml
   - pve-exporter/deployment.yaml

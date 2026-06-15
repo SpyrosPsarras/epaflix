@@ -1,0 +1,73 @@
+---
+# Loki LogQL alerting rules (log-CONTENT alerts), as distinct from the
+# metric-based PrometheusRules in custom-alerts.yaml.
+#
+# Delivery: the loki chart's rules sidecar (loki-sc-rules) WATCHes ConfigMaps
+# labelled `loki_rule` and writes each data key as a file under FOLDER=/rules.
+# Loki runs with auth_enabled: true (multi-tenant) and promtail writes as tenant
+# "1", so rules must live under /rules/1 — the k8s-sidecar-target-directory
+# annotation places them there. The ruler forwards firing alerts to the existing
+# Alertmanager (alertmanager_url set in loki-values.yaml rulerConfig), which
+# routes by severity/namespace and emails admin@epaflix.com.
+#
+# Scope: ships the reliable, pattern-stable groups (A = servarr error spikes,
+# D = cluster-wide panic/fatal). The app-specific known-bad-line rules
+# (B: qBittorrent/gluetun VPN drop, Postgres fatals; C: Authentik login
+# failures, Traefik 5xx) are deferred until their real log strings can be read
+# now that queries work again — tracked as a follow-up issue.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-log-alerts
+  namespace: observability
+  labels:
+    # Matches the rules sidecar's LABEL=loki_rule selector.
+    loki_rule: "1"
+  annotations:
+    # kiwigrid k8s-sidecar: write this ConfigMap's files into /rules/1 (tenant 1)
+    # so the multi-tenant ruler loads them for the tenant promtail writes to.
+    k8s-sidecar-target-directory: "/rules/1"
+data:
+  log-alerts.yaml: |
+    groups:
+      # A — application error spikes across the servarr stack
+      #     (sonarr/sonarr2/radarr/qbittorrent/prowlarr/bazarr). Threshold is a
+      #     conservative starting point; tune against observed steady-state.
+      - name: servarr-app-errors
+        rules:
+          - alert: ServarrErrorSpike
+            expr: |
+              sum by (namespace, container) (
+                count_over_time({namespace="servarr"} |~ `(?i)\b(error|fatal|panic)\b` [5m])
+              ) > 25
+            for: 10m
+            labels:
+              severity: warning
+              component: servarr
+            annotations:
+              summary: "Elevated error log rate in servarr/{{ $labels.container }}"
+              description: >-
+                {{ $labels.container }} logged {{ $value }} error/fatal/panic
+                lines in the last 5m (threshold 25). Inspect in Grafana →
+                Explore → Loki:
+                {namespace="servarr", container="{{ $labels.container }}"} |~ `(?i)error`
+
+      # D — cluster-wide safety net for hard failures in any namespace.
+      #     Specific tokens (not bare "error") to stay low-noise.
+      - name: cluster-fatal
+        rules:
+          - alert: PodPanicOrFatal
+            expr: |
+              sum by (namespace) (
+                count_over_time({namespace=~".+"} |~ `(?i)(panic:|fatal error|out of memory|segfault|runtime error)` [5m])
+              ) > 5
+            for: 5m
+            labels:
+              severity: critical
+              component: platform
+            annotations:
+              summary: "Panic/fatal log burst in namespace {{ $labels.namespace }}"
+              description: >-
+                {{ $value }} panic/fatal/OOM/segfault lines in the last 5m in
+                namespace {{ $labels.namespace }}. Identify the offending pod in
+                Grafana → Explore → Loki and investigate.
