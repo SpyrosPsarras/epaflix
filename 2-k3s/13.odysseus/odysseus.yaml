@@ -134,6 +134,38 @@ spec:
               readOnly: true
             - name: ssh-home
               mountPath: /app/.ssh
+        # Install the Claude Code CLI via the official native installer on every
+        # pod start (no prebuilt image; always latest). Reuses the odysseus image
+        # (already ships curl + glibc, python:3.12-slim) so there is no second
+        # image to pull. The standalone binary lands at /opt/claude/.local/bin/
+        # claude in the shared claude-bin emptyDir, world-executable so the
+        # uid-1000 app can run it from the run_local heartbeat Task. See
+        # docs/superpowers/specs/2026-06-15-odysseus-claude-heartbeat-task-design.md
+        - name: install-claude
+          image: ghcr.io/spyrospsarras/odysseus:73673258
+          securityContext:
+            runAsUser: 0
+          env:
+            - name: HOME
+              value: /opt/claude
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              curl -fsSL https://claude.ai/install.sh | bash
+              chmod -R a+rX /opt/claude
+              /opt/claude/.local/bin/claude --version
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "1000m"
+          volumeMounts:
+            - name: claude-bin
+              mountPath: /opt/claude
       containers:
         - name: odysseus
           # Pushed from the TrueNAS docker engine to GHCR (lowercase namespace),
@@ -168,6 +200,26 @@ spec:
                 secretKeyRef:
                   name: odysseus-secrets
                   key: HF_TOKEN
+            # Claude subscription heartbeat (run_local Task). Long-lived OAuth
+            # token from `claude setup-token`; keeps the subscription warm.
+            - name: CLAUDE_CODE_OAUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: claude-oauth-token
+                  key: CLAUDE_CODE_OAUTH_TOKEN
+            # Put the install-claude CLI on PATH for the run_local Task shell.
+            # Explicit PATH overrides the image default; /usr/local/bin:/usr/bin:
+            # /bin covers nodejs/npm/git/ssh (all in /usr/bin).
+            - name: PATH
+              value: "/opt/claude/.local/bin:/usr/local/bin:/usr/bin:/bin"
+            # /app is root-owned (entrypoint only chowns /app/data + /app/logs to
+            # 1000), so point claude's config/credentials cache at the writable
+            # data PVC instead of the default ~/.claude under /app.
+            - name: CLAUDE_CONFIG_DIR
+              value: "/app/data/.claude"
+            # Reinstalled each pod start by install-claude; no self-update needed.
+            - name: DISABLE_AUTOUPDATER
+              value: "1"
           # Non-secret env (APP_BIND/APP_PORT/AUTH_ENABLED/ALLOWED_ORIGINS/
           # OLLAMA_BASE_URL/SEARXNG_INSTANCE/CHROMADB_*/etc) from the ConfigMap.
           # NOTE: /app/.ssh IS now mounted (seed-ssh initContainer) — a single
@@ -190,6 +242,11 @@ spec:
             # pre-seeded known_hosts) — owned 1000 so the bash tool can use it.
             - name: ssh-home
               mountPath: /app/.ssh
+            # Claude CLI installed fresh each pod start by the install-claude
+            # initContainer; read-only here, run by the run_local heartbeat Task.
+            - name: claude-bin
+              mountPath: /opt/claude
+              readOnly: true
           resources:
             requests:
               memory: "512Mi"
@@ -237,6 +294,12 @@ spec:
           configMap:
             name: odysseus-ssh-config
         - name: ssh-home
+          emptyDir: {}
+        # Claude CLI is (re)installed fresh on every pod start by the
+        # install-claude initContainer into this emptyDir; the main container
+        # runs it from /opt/claude/.local/bin. Ephemeral on purpose — always
+        # latest CLI, no prebuilt image to maintain.
+        - name: claude-bin
           emptyDir: {}
 ---
 apiVersion: v1
