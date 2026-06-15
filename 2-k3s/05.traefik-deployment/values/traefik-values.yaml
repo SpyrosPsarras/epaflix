@@ -48,6 +48,27 @@ logs:
   access:
     enabled: true
 
+# Prometheus metrics (#352). Traefik already serves request metrics on the in-pod
+# `metrics` entrypoint (port 9100, NOT exposed on the public LB). This enables the
+# ClusterIP metrics Service so the metrics port is scrapeable.
+# addServicesLabels gives per-service `code`/`service` labels on
+# traefik_service_requests_total, which the TraefikHigh5xxRate alert in
+# 2-k3s/10.observability/alertmanager-config/custom-alerts.yaml depends on.
+#
+# We deliberately DO NOT use the chart's `serviceMonitor.enabled`: its template
+# hard-fails (`fail "You have to deploy monitoring.coreos.com/v1 first"`) under
+# plain `helm template`, which is exactly how ArgoCD renders this app
+# (`kustomize build --enable-helm`, no --helm-api-versions). That would break the
+# whole Traefik app render. Instead a standalone ServiceMonitor manifest
+# (servicemonitor.yaml) is added to the kustomization — same pattern as
+# pve-exporter — which ArgoCD applies directly (the CRD already exists in-cluster).
+metrics:
+  prometheus:
+    addServicesLabels: true
+    addEntryPointsLabels: true
+    service:
+      enabled: true
+
 # Cloudflare DNS Challenge for Let's Encrypt
 # NOTE: certificatesResolvers here is NOT used - we use additionalArguments instead
 # to ensure correct storage path /data/acme.json (not /data/acme/acme.json)
