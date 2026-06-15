@@ -211,11 +211,10 @@ spec:
                 secretKeyRef:
                   name: claude-oauth-token
                   key: CLAUDE_CODE_OAUTH_TOKEN
-            # Put the install-claude CLI on PATH for the run_local Task shell.
-            # Explicit PATH overrides the image default; /usr/local/bin:/usr/bin:
-            # /bin covers nodejs/npm/git/ssh (all in /usr/bin).
-            - name: PATH
-              value: "/opt/claude/.local/bin:/usr/local/bin:/usr/bin:/bin"
+            # NOTE: do NOT set a container-wide PATH env here — overriding the
+            # image default drops /usr/sbin (groupadd/gosu/useradd) and breaks
+            # the entrypoint. The run_local heartbeat Task prepends the CLI dir
+            # itself: `export PATH=/opt/claude/.local/bin:$PATH; claude -p ...`.
             # /app is root-owned (entrypoint only chowns /app/data + /app/logs to
             # 1000), so point claude's config/credentials cache at the writable
             # data PVC instead of the default ~/.claude under /app.
