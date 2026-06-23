@@ -50,3 +50,10 @@ spec:
         - /spec/clusterIP
         - /spec/clusterIPs
         - /status
+    # The bastion NFS PV binds at runtime — k8s populates claimRef/status that
+    # are not in git, so ignore them to keep the app Synced.
+    - group: ""
+      kind: PersistentVolume
+      jsonPointers:
+        - /spec/claimRef
+        - /status
