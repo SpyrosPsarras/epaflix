@@ -48,3 +48,18 @@ resources:
   - pdb.yaml
 generators:
   - ksops-generator.yaml
+
+# Strip the Helm-hook annotations the ChromaDB chart puts on its v1-config
+# ConfigMap. ArgoCD treats helm.sh/hook resources as hooks and perpetually
+# reports them OutOfSync; removing the annotations makes it a normal, Synced
+# resource (the ConfigMap is applied before the StatefulSet regardless).
+patches:
+  - target:
+      version: v1
+      kind: ConfigMap
+      name: v1-config
+    patch: |-
+      - op: remove
+        path: /metadata/annotations/helm.sh~1hook
+      - op: remove
+        path: /metadata/annotations/helm.sh~1hook-weight
