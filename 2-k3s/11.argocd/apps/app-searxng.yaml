@@ -5,8 +5,8 @@
 #               kustomization inflates the ksops generator which decrypts
 #               searxng-secret.enc.yaml at render time (Issue #29).
 # Destination:  in-cluster `searxng` namespace.
-# Sync:         selfHeal on, prune OFF for first adoption. Flip prune true
-#               after the soak window (follow-up issue).
+# Sync:         selfHeal on, prune enabled. Spyros opted to flip immediately
+#               rather than wait the soak window (#375).
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -24,7 +24,7 @@ spec:
   syncPolicy:
     automated:
       selfHeal: true
-      prune: false
+      prune: true
   ignoreDifferences:
     - group: ""
       kind: Service
