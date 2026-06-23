@@ -22,6 +22,11 @@ spec:
       labels:
         app: searxng
     spec:
+      # Service is named `searxng`, so kubelet would inject a Docker-link
+      # env var SEARXNG_PORT=tcp://<clusterIP>:8080 that collides with the
+      # SEARXNG_PORT the image reads for its bind port (granian --port).
+      # Disable service-link env injection to avoid the collision.
+      enableServiceLinks: false
       securityContext:
         runAsUser: 977
         runAsGroup: 977
