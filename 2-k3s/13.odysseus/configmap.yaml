@@ -15,6 +15,8 @@ data:
   LOCALHOST_BYPASS: "false"
   SECURE_COOKIES: "true"
   ALLOWED_ORIGINS: "https://odysseus.epaflix.com"
+  # Hard sandbox: route the agent shell tool through the bastion over SSH (see services/shell/service.py patch).
+  SHELL_EXEC_HOST: "bastion"
   # Models served by the EXISTING remote Ollama on TrueNAS (no GPU on k3s).
   OLLAMA_BASE_URL: "http://192.168.10.200:30068/v1"
   LLM_HOST: "http://192.168.10.200:30068/v1"
