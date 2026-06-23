@@ -57,3 +57,21 @@ spec:
       jsonPointers:
         - /spec/claimRef
         - /status
+    # ChromaDB Helm chart drift (none are real config changes): the StatefulSet
+    # and its PVC carry fields the k3s controller populates at runtime, and
+    # v1-config is a chart hook ConfigMap (helm.sh/hook) ArgoCD perpetually flags.
+    - group: apps
+      kind: StatefulSet
+      name: chromadb
+      managedFieldsManagers:
+        - k3s
+    - group: ""
+      kind: PersistentVolumeClaim
+      name: chromadb-data
+      managedFieldsManagers:
+        - k3s
+    - group: ""
+      kind: ConfigMap
+      name: v1-config
+      jsonPointers:
+        - /metadata/annotations
