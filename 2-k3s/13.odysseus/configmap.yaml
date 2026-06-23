@@ -26,25 +26,3 @@ data:
   CHROMADB_PORT: "8000"
   NTFY_BASE_URL: "http://ntfy:8091"
   DATABASE_URL: "sqlite:////app/data/app.db"
----
-# SearXNG settings.yml shipped as a ConfigMap and mounted at
-# /etc/searxng/settings.yml (issue #184 — fixes the JSON-403 search bug).
-# Kept SECRET-FREE: server.secret_key is populated by SearXNG from the
-# SEARXNG_SECRET env, so nothing sensitive is committed here.
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: searxng-settings
-  namespace: odysseus
-  labels:
-    app: searxng
-data:
-  settings.yml: |
-    use_default_settings: true
-    server:
-      # secret_key is injected at runtime from the SEARXNG_SECRET env.
-      limiter: false
-    search:
-      formats:
-        - html
-        - json
