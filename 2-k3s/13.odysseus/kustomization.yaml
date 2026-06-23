@@ -44,7 +44,6 @@ resources:
   - odysseus.yaml
   - odysseus-ssh-config.yaml
   - odysseus-bastion-pv.yaml
-  - searxng.yaml
   - ntfy.yaml
   - pdb.yaml
 generators:
