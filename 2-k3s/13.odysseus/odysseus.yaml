@@ -142,7 +142,7 @@ spec:
         # uid-1000 app can run it from the run_local heartbeat Task. See
         # docs/superpowers/specs/2026-06-15-odysseus-claude-heartbeat-task-design.md
         - name: install-claude
-          image: ghcr.io/spyrospsarras/odysseus:73673258
+          image: ghcr.io/spyrospsarras/odysseus:73673258-bastion
           securityContext:
             runAsUser: 0
           env:
@@ -175,7 +175,7 @@ spec:
           # Pushed from the TrueNAS docker engine to GHCR (lowercase namespace),
           # made public so k3s containerd can pull without an imagePullSecret.
           # Immutable numeric tag — no image-updater tracking needed initially.
-          image: ghcr.io/spyrospsarras/odysseus:73673258
+          image: ghcr.io/spyrospsarras/odysseus:73673258-bastion
           env:
             - name: PUID
               value: "1000"
