@@ -1,0 +1,31 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: searxng-settings
+  namespace: searxng
+  labels:
+    app: searxng
+data:
+  settings.yml: |
+    use_default_settings: true
+    general:
+      instance_name: "epaflix-searxng"
+      debug: false
+    search:
+      safe_search: 1
+      default_lang: "en"
+      formats:
+        - html
+        - json
+    server:
+      bind_address: "0.0.0.0"
+      port: 8080
+      base_url: "https://searxng.epaflix.com/"
+      secret_key: "${SEARXNG_SECRET}"
+      limiter: false
+      public_instance: false
+      image_proxy: false
+      method: "GET"
+    ui:
+      static_use_hash: true

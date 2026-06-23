@@ -1,0 +1,92 @@
+---
+# SearXNG deployment. The render-config initContainer substitutes the
+# secret_key from the searxng-secret Secret into the ConfigMap-templated
+# settings.yml, writing the result to an emptyDir the main container reads.
+# Keeps the real secret_key out of the ArgoCD-managed ConfigMap.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: searxng
+  namespace: searxng
+  labels:
+    app: searxng
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: searxng
+  template:
+    metadata:
+      labels:
+        app: searxng
+    spec:
+      securityContext:
+        runAsUser: 977
+        runAsGroup: 977
+        fsGroup: 977
+      initContainers:
+        - name: render-config
+          image: bash:5.2-alpine3.19
+          command:
+            - bash
+            - -c
+            - |
+              set -euo pipefail
+              SEC="$(< /secret/secret_key)"
+              tpl="$(< /template/settings.yml)"
+              tpl="${tpl//'${SEARXNG_SECRET}'/$SEC}"
+              printf '%s' "$tpl" > /rendered/settings.yml
+              echo "render-config: wrote $(wc -c < /rendered/settings.yml) bytes"
+          volumeMounts:
+            - name: settings-template
+              mountPath: /template
+              readOnly: true
+            - name: searxng-secret
+              mountPath: /secret
+              readOnly: true
+            - name: searxng-config
+              mountPath: /rendered
+      containers:
+        - name: searxng
+          image: searxng/searxng:2026.6.22-cce0957f5
+          env:
+            - name: SEARXNG_SETTINGS_PATH
+              value: /etc/searxng/settings.yml
+            - name: TZ
+              value: "Europe/Oslo"
+          ports:
+            - containerPort: 8080
+              name: http
+          volumeMounts:
+            - name: searxng-config
+              mountPath: /etc/searxng
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            timeoutSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+      terminationGracePeriodSeconds: 30
+      volumes:
+        - name: settings-template
+          configMap:
+            name: searxng-settings
+        - name: searxng-secret
+          secret:
+            secretName: searxng-secret
+        - name: searxng-config
+          emptyDir: {}
