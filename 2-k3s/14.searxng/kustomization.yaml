@@ -1,0 +1,15 @@
+# SearXNG — kustomization for the ArgoCD-managed App. The ksops generator
+# inflates the searxng-secret Secret from searxng-secret.enc.yaml at render
+# time (SOPS+age, Issue #29 pattern).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+
+generators:
+  - ksops-generator.yaml
