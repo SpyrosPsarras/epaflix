@@ -19,7 +19,7 @@ data:
   OLLAMA_BASE_URL: "http://192.168.10.200:30068/v1"
   LLM_HOST: "http://192.168.10.200:30068/v1"
   # Intra-namespace sidecars.
-  SEARXNG_INSTANCE: "http://searxng:8080"
+  SEARXNG_INSTANCE: "http://searxng.searxng.svc.cluster.local:8080"
   CHROMADB_HOST: "chromadb"
   CHROMADB_PORT: "8000"
   NTFY_BASE_URL: "http://ntfy:8091"
