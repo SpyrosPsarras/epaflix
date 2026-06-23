@@ -4,7 +4,7 @@
 
 **Goal:** Give the `pi` coding agent a `web_search` tool backed by a self-hosted SearXNG running on the Epaflix K3s cluster, so Pi (using local Ollama models) can search the web with nothing but outbound engine calls leaving the LAN.
 
-**Architecture:** SearXNG is deployed as a new ArgoCD-managed app `2-k3s/13.searxng/` (kustomize + ksops + Traefik IngressRoute), mirroring `2-k3s/09.filebrowser/`. Pi gets a global auto-discovered TypeScript extension at `~/.pi/agent/extensions/searxng-web-search/` that calls SearXNG's JSON API over the internal Traefik path.
+**Architecture:** SearXNG is deployed as a new ArgoCD-managed app `2-k3s/14.searxng/` (kustomize + ksops + Traefik IngressRoute), mirroring `2-k3s/09.filebrowser/`. Pi gets a global auto-discovered TypeScript extension at `~/.pi/agent/extensions/searxng-web-search/` that calls SearXNG's JSON API over the internal Traefik path.
 
 **Tech Stack:** K3s, ArgoCD (app-of-apps), Kustomize, KSOPS (SOPS+age), Traefik IngressRoute + cert-manager wildcard cert (Let's Encrypt via Cloudflare DNS-01), SearXNG container, Pi extension (TypeScript via jiti, typebox).
 
@@ -25,9 +25,9 @@
 ### Task 1: Feature branch + core manifests (namespace, configmap, service)
 
 **Files:**
-- Create: `2-k3s/13.searxng/namespace.yaml`
-- Create: `2-k3s/13.searxng/configmap.yaml`
-- Create: `2-k3s/13.searxng/service.yaml`
+- Create: `2-k3s/14.searxng/namespace.yaml`
+- Create: `2-k3s/14.searxng/configmap.yaml`
+- Create: `2-k3s/14.searxng/service.yaml`
 
 **Interfaces:**
 - Produces: namespace `searxng`; ConfigMap `searxng-settings` (key `settings.yml`, contains literal token `${SEARXNG_SECRET}` to be rendered at pod start); Service `searxng` (ClusterIP, port `8080` name `http`, selector `app: searxng`).
@@ -113,14 +113,14 @@ spec:
 
 Run:
 ```bash
-kubectl create --dry-run=client -o name -f 2-k3s/13.searxng/namespace.yaml -f 2-k3s/13.searxng/configmap.yaml -f 2-k3s/13.searxng/service.yaml
+kubectl create --dry-run=client -o name -f 2-k3s/14.searxng/namespace.yaml -f 2-k3s/14.searxng/configmap.yaml -f 2-k3s/14.searxng/service.yaml
 ```
 Expected: prints `namespace/searxng`, `configmap/searxng-settings`, `service/searxng` with no error.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add 2-k3s/13.searxng/namespace.yaml 2-k3s/13.searxng/configmap.yaml 2-k3s/13.searxng/service.yaml
+git add 2-k3s/14.searxng/namespace.yaml 2-k3s/14.searxng/configmap.yaml 2-k3s/14.searxng/service.yaml
 git commit -m "feat(searxng): namespace, settings configmap, service"
 ```
 
@@ -129,8 +129,8 @@ git commit -m "feat(searxng): namespace, settings configmap, service"
 ### Task 2: Deployment (with secret-render initContainer) + Traefik ingress
 
 **Files:**
-- Create: `2-k3s/13.searxng/deployment.yaml`
-- Create: `2-k3s/13.searxng/ingress.yaml`
+- Create: `2-k3s/14.searxng/deployment.yaml`
+- Create: `2-k3s/14.searxng/ingress.yaml`
 
 **Interfaces:**
 - Consumes: ConfigMap `searxng-settings`, Service `searxng:8080` (Task 1); Secret `searxng-secret` with key `secret_key` (created in Task 3 — referenced here by name).
@@ -284,15 +284,15 @@ spec:
 Run (server dry-run validates the Traefik CRD; requires the epaflix kubeconfig context):
 ```bash
 kubectl config current-context   # confirm it targets the epaflix cluster
-kubectl apply --dry-run=server -f 2-k3s/13.searxng/deployment.yaml -f 2-k3s/13.searxng/ingress.yaml
+kubectl apply --dry-run=server -f 2-k3s/14.searxng/deployment.yaml -f 2-k3s/14.searxng/ingress.yaml
 ```
 Expected: `deployment.apps/searxng created (server dry run)` and both IngressRoutes `created (server dry run)`, no schema errors. (The Deployment will reference Secret `searxng-secret`, not yet present — dry-run does not check that.)
-Fallback if no cluster context: `kubectl create --dry-run=client -o name -f 2-k3s/13.searxng/deployment.yaml` for the Deployment, and lint the IngressRoute YAML with `python3 -c "import yaml,sys; list(yaml.safe_load_all(open('2-k3s/13.searxng/ingress.yaml')))"` (expected: no output = valid YAML).
+Fallback if no cluster context: `kubectl create --dry-run=client -o name -f 2-k3s/14.searxng/deployment.yaml` for the Deployment, and lint the IngressRoute YAML with `python3 -c "import yaml,sys; list(yaml.safe_load_all(open('2-k3s/14.searxng/ingress.yaml')))"` (expected: no output = valid YAML).
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add 2-k3s/13.searxng/deployment.yaml 2-k3s/13.searxng/ingress.yaml
+git add 2-k3s/14.searxng/deployment.yaml 2-k3s/14.searxng/ingress.yaml
 git commit -m "feat(searxng): deployment with secret-render initContainer and Traefik ingress"
 ```
 
@@ -301,9 +301,9 @@ git commit -m "feat(searxng): deployment with secret-render initContainer and Tr
 ### Task 3: SOPS secret + ksops generator + kustomization
 
 **Files:**
-- Create: `2-k3s/13.searxng/searxng-secret.enc.yaml` (written plaintext, then encrypted in place)
-- Create: `2-k3s/13.searxng/ksops-generator.yaml`
-- Create: `2-k3s/13.searxng/kustomization.yaml`
+- Create: `2-k3s/14.searxng/searxng-secret.enc.yaml` (written plaintext, then encrypted in place)
+- Create: `2-k3s/14.searxng/ksops-generator.yaml`
+- Create: `2-k3s/14.searxng/kustomization.yaml`
 
 **Interfaces:**
 - Produces: Secret `searxng-secret` (namespace `searxng`, `stringData.secret_key`) consumed by the Task 2 initContainer; a kustomization that aggregates all resources + the ksops generator.
@@ -313,7 +313,7 @@ git commit -m "feat(searxng): deployment with secret-render initContainer and Tr
 ```bash
 cd ~/Documents/Epaflix/k3s-proxmox/epaflix
 SECRET_KEY="$(openssl rand -hex 32)"
-cat > 2-k3s/13.searxng/searxng-secret.enc.yaml <<EOF
+cat > 2-k3s/14.searxng/searxng-secret.enc.yaml <<EOF
 apiVersion: v1
 kind: Secret
 metadata:
@@ -329,16 +329,16 @@ unset SECRET_KEY
 - [ ] **Step 2: Encrypt in place with SOPS** (uses `.sops.yaml` rule automatically via the `.enc.yaml` path)
 
 ```bash
-sops --encrypt --in-place 2-k3s/13.searxng/searxng-secret.enc.yaml
+sops --encrypt --in-place 2-k3s/14.searxng/searxng-secret.enc.yaml
 ```
 
 - [ ] **Step 3: Verify it is encrypted and round-trips**
 
 Run:
 ```bash
-grep -q 'secret_key: ENC\[' 2-k3s/13.searxng/searxng-secret.enc.yaml && echo "ENCRYPTED-OK"
-grep -q 'kind: Secret' 2-k3s/13.searxng/searxng-secret.enc.yaml && echo "METADATA-CLEARTEXT-OK"
-SOPS_AGE_KEY_FILE=~/.config/sops/age/k3s-cluster.txt sops -d 2-k3s/13.searxng/searxng-secret.enc.yaml | grep -q 'secret_key:' && echo "DECRYPT-OK"
+grep -q 'secret_key: ENC\[' 2-k3s/14.searxng/searxng-secret.enc.yaml && echo "ENCRYPTED-OK"
+grep -q 'kind: Secret' 2-k3s/14.searxng/searxng-secret.enc.yaml && echo "METADATA-CLEARTEXT-OK"
+SOPS_AGE_KEY_FILE=~/.config/sops/age/k3s-cluster.txt sops -d 2-k3s/14.searxng/searxng-secret.enc.yaml | grep -q 'secret_key:' && echo "DECRYPT-OK"
 ```
 Expected: `ENCRYPTED-OK`, `METADATA-CLEARTEXT-OK`, `DECRYPT-OK`. If any fails, do NOT proceed (a plaintext secret must never be committed).
 
@@ -387,14 +387,14 @@ generators:
 Only if `kustomize` and `ksops` are installed locally (both currently MISSING — install: `kustomize` via `pacman -S kustomize` or the official release; `ksops` from `https://github.com/viaduct-ai/kustomize-sops/releases`). Then:
 ```bash
 SOPS_AGE_KEY_FILE=~/.config/sops/age/k3s-cluster.txt \
-KSOPS_BIN=$(which ksops) kustomize build --enable-alpha-plugins --enable-exec 2-k3s/13.searxng | kubectl apply --dry-run=client -f -
+KSOPS_BIN=$(which ksops) kustomize build --enable-alpha-plugins --enable-exec 2-k3s/14.searxng | kubectl apply --dry-run=client -f -
 ```
 Expected: all resources incl. `secret/searxng-secret` print as `(dry run)`. If tools are not installed, skip — the authoritative render happens in-cluster via ArgoCD at Task 9.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add 2-k3s/13.searxng/searxng-secret.enc.yaml 2-k3s/13.searxng/ksops-generator.yaml 2-k3s/13.searxng/kustomization.yaml
+git add 2-k3s/14.searxng/searxng-secret.enc.yaml 2-k3s/14.searxng/ksops-generator.yaml 2-k3s/14.searxng/kustomization.yaml
 git commit -m "feat(searxng): SOPS secret_key + ksops generator + kustomization"
 ```
 
@@ -403,7 +403,7 @@ git commit -m "feat(searxng): SOPS secret_key + ksops generator + kustomization"
 ### Task 4: Pin the SearXNG image tag
 
 **Files:**
-- Modify: `2-k3s/13.searxng/deployment.yaml` (replace `SEARXNG_TAG`)
+- Modify: `2-k3s/14.searxng/deployment.yaml` (replace `SEARXNG_TAG`)
 
 - [ ] **Step 1: Resolve the latest release tag**
 
@@ -418,15 +418,15 @@ Expected: a list of date-style tags (e.g. `2026.6.15-abc1234`). Pick the newest 
 
 ```bash
 # Replace RESOLVED_TAG with the tag chosen in Step 1
-sed -i 's#searxng/searxng:SEARXNG_TAG#searxng/searxng:RESOLVED_TAG#' 2-k3s/13.searxng/deployment.yaml
-grep 'image: searxng/searxng:' 2-k3s/13.searxng/deployment.yaml
+sed -i 's#searxng/searxng:SEARXNG_TAG#searxng/searxng:RESOLVED_TAG#' 2-k3s/14.searxng/deployment.yaml
+grep 'image: searxng/searxng:' 2-k3s/14.searxng/deployment.yaml
 ```
 Expected: the `image:` line shows the resolved tag and no longer contains `SEARXNG_TAG`.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add 2-k3s/13.searxng/deployment.yaml
+git add 2-k3s/14.searxng/deployment.yaml
 git commit -m "feat(searxng): pin searxng/searxng image tag"
 ```
 
@@ -441,7 +441,7 @@ Note: Renovate's kubernetes manager (`12.renovate`) picks up the `image:` line a
 - Modify: `2-k3s/11.argocd/apps/kustomization.yaml` (add `- app-searxng.yaml`, keep alphabetical)
 
 **Interfaces:**
-- Consumes: the `2-k3s/13.searxng` kustomization (Task 1-4).
+- Consumes: the `2-k3s/14.searxng` kustomization (Task 1-4).
 - Produces: ArgoCD Application `searxng` in the app-of-apps set.
 
 - [ ] **Step 1: Write `app-searxng.yaml`** (adopt with `prune: false`; flip after soak per follow-up issue)
@@ -450,7 +450,7 @@ Note: Renovate's kubernetes manager (`12.renovate`) picks up the `image:` line a
 ---
 # ArgoCD Application: SearXNG (self-hosted metasearch, JSON API for Pi).
 #
-# Source:       this repo, path 2-k3s/13.searxng, kustomize. The
+# Source:       this repo, path 2-k3s/14.searxng, kustomize. The
 #               kustomization inflates the ksops generator which decrypts
 #               searxng-secret.enc.yaml at render time (Issue #29).
 # Destination:  in-cluster `searxng` namespace.
@@ -466,7 +466,7 @@ spec:
   source:
     repoURL: https://github.com/SpyrosPsarras/epaflix.git
     targetRevision: main
-    path: 2-k3s/13.searxng
+    path: 2-k3s/14.searxng
   destination:
     server: https://kubernetes.default.svc
     namespace: searxng
@@ -517,8 +517,8 @@ git commit -m "feat(searxng): ArgoCD Application + register in app-of-apps"
 ### Task 6: App docs (README + QUICKSTART)
 
 **Files:**
-- Create: `2-k3s/13.searxng/README.md`
-- Create: `2-k3s/13.searxng/QUICKSTART.md`
+- Create: `2-k3s/14.searxng/README.md`
+- Create: `2-k3s/14.searxng/QUICKSTART.md`
 
 - [ ] **Step 1: Write `README.md`**
 
@@ -543,7 +543,7 @@ maintainer workstation, which calls the JSON API for its `web_search` tool.
       'https://searxng.epaflix.com/search?q=test&format=json' | jq '.results | length'
 
 ## Roll back
-Revert the `13.searxng` manifests on `main`; ArgoCD prunes after the
+Revert the `14.searxng` manifests on `main`; ArgoCD prunes after the
 soak-window prune flip, or delete the Application + namespace manually.
 ```
 
@@ -553,7 +553,7 @@ soak-window prune flip, or delete the Application + namespace manually.
 # SearXNG — quickstart
 
 ## Deploy (GitOps)
-1. Merge the `13.searxng` manifests + `app-searxng.yaml` to `main`.
+1. Merge the `14.searxng` manifests + `app-searxng.yaml` to `main`.
 2. app-of-apps reconciles → ArgoCD creates the `searxng` Application.
 3. Add Pi-hole record `searxng.epaflix.com → 192.168.10.101` in
    `/etc/dnsmasq.d/10-epaflix.conf`, reload FTL.
@@ -572,7 +572,7 @@ Test: `pi -p "search the web for the latest k3s release"`.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add 2-k3s/13.searxng/README.md 2-k3s/13.searxng/QUICKSTART.md
+git add 2-k3s/14.searxng/README.md 2-k3s/14.searxng/QUICKSTART.md
 git commit -m "docs(searxng): README and QUICKSTART"
 ```
 
