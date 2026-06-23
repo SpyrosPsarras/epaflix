@@ -28,7 +28,7 @@ pi (workstation 192.168.10.177)
 
 The model then reads result URLs with the existing built-in `bash`+`curl` tool. A dedicated `fetch_url` tool is out of scope for v1 (see Out of scope).
 
-## Component 1 — K3s app `2-k3s/13.searxng/`
+## Component 1 — K3s app `2-k3s/14.searxng/`
 
 Mirrors `2-k3s/09.filebrowser/` conventions (kustomize + ksops + Traefik IngressRoute + ArgoCD app).
 
@@ -63,7 +63,7 @@ No Valkey/Redis, no PVC (SearXNG is stateless with the limiter off).
 ## Component 2 — ArgoCD + DNS wiring
 
 - `2-k3s/11.argocd/apps/app-searxng.yaml` — ArgoCD `Application`:
-  - `repoURL: https://github.com/SpyrosPsarras/epaflix.git`, `targetRevision: main`, `path: 2-k3s/13.searxng` (kustomize).
+  - `repoURL: https://github.com/SpyrosPsarras/epaflix.git`, `targetRevision: main`, `path: 2-k3s/14.searxng` (kustomize).
   - `destination` namespace `searxng`.
   - `syncPolicy.automated: { selfHeal: true, prune: false }` for adoption. Flip `prune: true` after a soak window (tracked by a follow-up `gh issue`).
   - `ignoreDifferences` on Service `clusterIP`/`clusterIPs`/`status` (repo convention).
@@ -102,7 +102,7 @@ No Valkey/Redis, no PVC (SearXNG is stateless with the limiter off).
 
 ## Verification (run during implementation)
 
-1. `kustomize build --enable-alpha-plugins --enable-exec 2-k3s/13.searxng` renders (with KSOPS).
+1. `kustomize build --enable-alpha-plugins --enable-exec 2-k3s/14.searxng` renders (with KSOPS).
 2. After merge + sync: ArgoCD app `searxng` Synced/Healthy.
 3. `curl --resolve searxng.epaflix.com:443:192.168.10.101 'https://searxng.epaflix.com/search?q=test&format=json'` returns JSON `results`.
 4. From the workstation after the DNS record: `getent ahostsv4 searxng.epaflix.com` -> `192.168.10.101`.
