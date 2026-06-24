@@ -65,6 +65,12 @@ spec:
       name: chromadb
       managedFieldsManagers:
         - k3s
+      # spec.volumeClaimTemplates is owned by argocd-controller (not k3s), so the
+      # managedFields ignore above is a no-op for it; the cluster injects
+      # volumeMode: Filesystem (chart never sets it) => perpetual cosmetic diff.
+      # Explicit jsonPointer normalizes it. (#327)
+      jsonPointers:
+        - /spec/volumeClaimTemplates
     - group: ""
       kind: PersistentVolumeClaim
       name: chromadb-data
