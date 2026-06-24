@@ -26,6 +26,24 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: No gitignored secret is tracked
+        run: |
+          set -euo pipefail
+          # Server-side, --no-verify-proof complement to the local pre-commit
+          # hook (PR #302): fail if the gitignored secrets file is ever tracked
+          # (via `git commit --no-verify` or a clone without hooks installed).
+          # Scoped to the sensitive path (#303 "at minimum"). The broader
+          # ls-files ∩ check-ignore --no-index rule can't gate yet because
+          # intentionally-tracked .history/*.{md,sh} and .a5c/processes/* match
+          # .gitignore for lack of negations — see #389.
+          secret=".github/instructions/secrets.yml"
+          if git ls-files --error-unmatch -- "$secret" >/dev/null 2>&1; then
+            echo "ERROR: $secret is tracked — it must stay gitignored." >&2
+            echo "Untrack with: git rm --cached $secret" >&2
+            exit 1
+          fi
+          echo "Gitignored secret '$secret' is not tracked."
+
       - name: Install tools
         run: |
           set -euo pipefail
