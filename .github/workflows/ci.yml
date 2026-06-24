@@ -150,17 +150,30 @@ jobs:
                       continue
                   print(f"[{f}] {name} {ver} <- {repo}")
                   if repo.startswith("oci://"):
-                      cmd = ["helm", "pull", f"{repo}/{name}", "--version", ver, "-d", "/tmp/charts"]
+                      cmd = ["helm", "pull", f"{repo}/{name}", "--version", ver, "-d", "/tmp/charts", "--untar"]
                   else:
-                      cmd = ["helm", "pull", name, "--repo", repo, "--version", ver, "-d", "/tmp/charts"]
+                      cmd = ["helm", "pull", name, "--repo", repo, "--version", ver, "-d", "/tmp/charts", "--untar"]
                   r = helm_pull(cmd)
                   if r.returncode != 0:
                       fail.append(f"{name} {ver} ({repo}): {r.stderr.strip()}")
+                      continue
+                  # Validate the values file against the chart's values.schema.json.
+                  # ArgoCD's repo-server enforces it at inflation; plain `helm pull`
+                  # does NOT — the gap that let traefik v41's stale `logs:` key pass
+                  # CI yet break the live render (#386, #384/#385). No age key needed:
+                  # schema enforcement happens before any ksops decryption.
+                  vf = c.get("valuesFile")
+                  tcmd = ["helm", "template", name, f"/tmp/charts/{name}"]
+                  if vf:
+                      tcmd += ["-f", os.path.join(os.path.dirname(f), vf)]
+                  t = subprocess.run(tcmd, capture_output=True, text=True)
+                  if t.returncode != 0:
+                      fail.append(f"{name} {ver} values schema: {t.stderr.strip()}")
           if fail:
-              print("\nUnresolvable Helm chart pins:")
+              print("\nUnresolvable Helm chart pins or invalid values:")
               print("\n".join(fail))
               sys.exit(1)
-          print("\nAll Helm chart pins resolve.")
+          print("\nAll Helm chart pins resolve and values validate.")
           PY
 
       - name: Kustomize build (sops-free dirs)
