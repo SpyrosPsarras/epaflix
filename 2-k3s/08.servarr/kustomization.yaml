@@ -136,7 +136,7 @@ images:
   - name: ghcr.io/zelak312/bazarr_autotranslate
     digest: sha256:5388463f8e45320c00a472763a8e0fb4584a255d6d31b98f9063b9eb5cada5cf
   - name: lscr.io/linuxserver/bazarr
-    digest: sha256:8e48a2950e3806a2a914fe031fa21b1c0a0f2824eede4ea747e26213e941fbf2
+    digest: sha256:aaaa087af75a73b7ac765dcc5d748874cfafdb93c23ec9f64fbb481dea291b23
   # Upstream Lingarr :main (moving tag) — carries the #432 DateTime->UTC fix that
   # resolves the Bazarr->Lingarr 500 (timestamptz write). Not in a release tag yet.
   - name: ghcr.io/lingarr-translate/lingarr
