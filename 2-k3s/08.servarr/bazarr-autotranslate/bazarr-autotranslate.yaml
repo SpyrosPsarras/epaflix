@@ -29,7 +29,7 @@ spec:
                   name: bazarr-autotranslate-secret
                   key: BAZARR_API_KEY
             - name: BASE_LANGUAGES
-              value: "en,ko"
+              value: "en,no"
             - name: TO_LANGUAGES
               value: "el"
             - name: TRANSLATION_REQUEST_TIMEOUT
