@@ -51,14 +51,8 @@ spec:
               mountPath: /cache
             - name: transcodes
               mountPath: /cache/transcodes
-            - name: media-animes
-              mountPath: /media/animes
-              readOnly: true
-            - name: media-tvshows
-              mountPath: /media/tvshows
-              readOnly: true
-            - name: media-movies
-              mountPath: /media/movies
+            - name: media
+              mountPath: /media
               readOnly: true
           securityContext:
             runAsUser: 568
@@ -94,19 +88,13 @@ spec:
         - name: transcodes
           persistentVolumeClaim:
             claimName: jellyfin-transcodes
-        # Direct hostPath volumes for media (backed by NFS mounts)
-        - name: media-animes
-          hostPath:
-            path: /mnt/k3s-animes
-            type: Directory
-        - name: media-tvshows
-          hostPath:
-            path: /mnt/k3s-tvshows
-            type: Directory
-        - name: media-movies
-          hostPath:
-            path: /mnt/k3s-movies
-            type: Directory
+        # Unified media on the servarr-media PVC (#256, matches bazarr/lingarr
+        # #250/#251). Library paths /media/{animes,tvshows,movies} resolve to the
+        # subdirs of the single mount; retires the legacy /mnt/k3s-* hostPaths
+        # so this no longer blocks the #247 NFS teardown.
+        - name: media
+          persistentVolumeClaim:
+            claimName: servarr-media
       # Schedule on node with GPU
       affinity:
         nodeAffinity:
