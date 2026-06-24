@@ -42,11 +42,14 @@ ingressRoute:
       certResolver: cloudflare
 
 # Logs
-logs:
-  general:
-    level: INFO
-  access:
-    enabled: true
+# Traefik chart v41 (PR #360) reorganized logging values: general logging moved to
+# top-level `log:` (level set directly, no `general:` nesting) and access logging to
+# top-level `accessLog:`. The chart's values.schema.json is now `additionalProperties:
+# false`, so the old `logs:` key hard-fails the ArgoCD helm render. See issue #384.
+log:
+  level: INFO
+accessLog:
+  enabled: true
 
 # Prometheus metrics (#352). Traefik already serves request metrics on the in-pod
 # `metrics` entrypoint (port 9100, NOT exposed on the public LB). This enables the
