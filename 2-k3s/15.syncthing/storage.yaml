@@ -1,0 +1,47 @@
+---
+# Node-pinned local storage for Syncthing. The data lives on a 1 TiB ext4
+# disk on evanthoulaki local-raid (hardware RAID), mounted at
+# /mnt/syncthing-data inside k3s-worker-63. A `local` volume + nodeAffinity
+# pins the pod to that node (the disk is host-local, not network storage).
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: syncthing-local
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Retain
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: syncthing-data-pv
+spec:
+  capacity:
+    storage: 1Ti
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: syncthing-local
+  local:
+    path: /mnt/syncthing-data
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - k3s-worker-63
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: syncthing-data
+  namespace: syncthing
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: syncthing-local
+  resources:
+    requests:
+      storage: 1Ti
