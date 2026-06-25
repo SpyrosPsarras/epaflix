@@ -1,6 +1,6 @@
 # Syncthing — post-deploy checklist
 
-One-time hardening after the first ArgoCD sync. Do these in the GUI at `https://syncthing.epaflix.com` (Authentik login required). `kubectl exec` is not available in this cluster — use the GUI only.
+One-time hardening after the first ArgoCD sync. Do these in the GUI at `http://192.168.10.110:8384` (kube-vip LoadBalancer, LAN/WireGuard only).
 
 ## GUI hardening (Settings → Connections)
 
@@ -16,7 +16,7 @@ One-time hardening after the first ArgoCD sync. Do these in the GUI at `https://
 
 ## GUI hardening (Settings → GUI)
 
-- [ ] Set a GUI username and password (defense-in-depth behind Authentik)
+- [ ] Set a GUI username and password — **required**: this is the only GUI auth now that Authentik is removed
 
 ## Verify
 
