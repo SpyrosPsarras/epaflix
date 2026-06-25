@@ -116,7 +116,7 @@ generators:
 # re-rolls through the PR + validate gate; ArgoCD then syncs the Deployments.
 images:
   - name: lscr.io/linuxserver/sonarr
-    digest: sha256:02bc962946fef994e67a38152446df25c10a52f8583aefeeb6467f9dd44cab99
+    digest: sha256:916844aff737c06c12066be9146cc604c104cec66eb8e07e545cb3719a4b771a
   - name: lscr.io/linuxserver/radarr
     digest: sha256:1e95b5c13fe015361a9ae1c4d99fc2336816790aaea60fa74b2ffebe076a69e0
   - name: lscr.io/linuxserver/prowlarr
