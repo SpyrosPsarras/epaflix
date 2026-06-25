@@ -1,0 +1,30 @@
+---
+# ArgoCD Application: Syncthing (internal-only, RAID-backed sync node).
+# Source:      this repo, path 2-k3s/15.syncthing, plain kustomize.
+# Destination: in-cluster `syncthing` namespace.
+# Sync:        selfHeal on, prune enabled.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: syncthing
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/SpyrosPsarras/epaflix.git
+    targetRevision: main
+    path: 2-k3s/15.syncthing
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: syncthing
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: true
+  ignoreDifferences:
+    - group: ""
+      kind: Service
+      jsonPointers:
+        - /spec/clusterIP
+        - /spec/clusterIPs
+        - /status

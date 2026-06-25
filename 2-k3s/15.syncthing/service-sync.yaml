@@ -1,0 +1,19 @@
+---
+# Backing Service for the sync protocol (BEP). Reached via the Traefik
+# `syncthing` TCP entrypoint on 192.168.10.101:22000 (IngressRouteTCP).
+apiVersion: v1
+kind: Service
+metadata:
+  name: syncthing-sync
+  namespace: syncthing
+  labels:
+    app: syncthing
+spec:
+  type: ClusterIP
+  selector:
+    app: syncthing
+  ports:
+    - name: sync
+      port: 22000
+      targetPort: sync-tcp
+      protocol: TCP
