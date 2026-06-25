@@ -35,6 +35,10 @@ ports:
   # Routed by 2-k3s/15.syncthing/ingressroute-tcp.yaml (HostSNI(`*`), passthrough).
   syncthing:
     port: 22000
+    # Custom ports do NOT inherit the chart's default expose; set it so the
+    # port lands on the LoadBalancer Service (.101), not just the pod.
+    expose:
+      default: true
     exposedPort: 22000
     protocol: TCP
 
