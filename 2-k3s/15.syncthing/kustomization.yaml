@@ -10,5 +10,4 @@ resources:
   - deployment.yaml
   - service-gui.yaml
   - service-sync.yaml
-  - ingress-gui.yaml
   - ingressroute-tcp.yaml
