@@ -1,0 +1,81 @@
+---
+# Syncthing — single always-on sync node. Pinned to k3s-worker-63 where the
+# 1 TiB RAID-backed data disk lives. Config + synced data both on the local PV
+# (subdirs /var/syncthing/config and /var/syncthing/data). Runs as 1000:1000 to
+# match the host chown. Global discovery / relays / usage-reporting are turned
+# OFF post-deploy via the GUI (internal-only); peers use tcp://192.168.10.101:22000.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: syncthing
+  namespace: syncthing
+  labels:
+    app: syncthing
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: syncthing
+  template:
+    metadata:
+      labels:
+        app: syncthing
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: k3s-worker-63
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: syncthing
+          image: syncthing/syncthing:1.30.0   # pin to current release at apply time; Renovate manages bumps
+          env:
+            - name: PUID
+              value: "1000"
+            - name: PGID
+              value: "1000"
+            - name: STGUIADDRESS
+              value: "0.0.0.0:8384"
+            - name: HOME
+              value: /var/syncthing/config
+            - name: TZ
+              value: "Europe/Oslo"
+          args:
+            - "--home=/var/syncthing/config"
+            - "--no-browser"
+            - "--no-restart"
+          ports:
+            - containerPort: 8384
+              name: gui
+            - containerPort: 22000
+              name: sync-tcp
+              protocol: TCP
+          volumeMounts:
+            - name: data
+              mountPath: /var/syncthing
+          livenessProbe:
+            httpGet:
+              path: /rest/noauth/health
+              port: gui
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /rest/noauth/health
+              port: gui
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+      terminationGracePeriodSeconds: 30
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: syncthing-data

@@ -28,6 +28,7 @@ resources:
   - app-renovate.yaml
   - app-searxng.yaml
   - app-servarr.yaml
+  - app-syncthing.yaml
   - app-system-upgrade-controller.yaml
   - app-system-upgrade-plans.yaml
   - app-traefik.yaml

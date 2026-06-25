@@ -30,6 +30,13 @@ ports:
   websecure:
     port: 443
     exposedPort: 443
+  # Syncthing sync protocol (BEP). Dedicated TCP entrypoint so the sync port
+  # rides the existing Traefik LB (192.168.10.101) instead of a new LB IP.
+  # Routed by 2-k3s/15.syncthing/ingressroute-tcp.yaml (HostSNI(`*`), passthrough).
+  syncthing:
+    port: 22000
+    exposedPort: 22000
+    protocol: TCP
 
 # Dashboard (optional - secure it!)
 ingressRoute:
