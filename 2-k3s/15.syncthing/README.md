@@ -14,7 +14,7 @@ Internal-only, RAID-backed Syncthing node on K3s. Not exposed to the public inte
 
 ## Networking
 
-- GUI: `https://syncthing.epaflix.com` → Traefik `websecure` entrypoint → Authentik forward-auth → `syncthing-gui:8384`. LAN/WireGuard only. Pi-hole resolves `syncthing.epaflix.com` → `192.168.10.101`.
+- GUI: `http://192.168.10.110:8384` — kube-vip `LoadBalancer` (`syncthing-gui`). LAN/WireGuard only, RFC1918 (not internet-routable). No Traefik ingress, no Authentik; GUI auth is Syncthing's own username/password (see QUICKSTART.md).
 - Sync (BEP): `tcp://192.168.10.101:22000` → Traefik `syncthing` TCP entrypoint → `syncthing-sync:22000`. Peers use this address. No relay, no global discovery (turn off in GUI after first deploy — see QUICKSTART.md).
 
 ## Backup
