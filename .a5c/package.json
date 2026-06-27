@@ -1,6 +1,6 @@
 {
   "dependencies": {
-    "@a5c-ai/babysitter-sdk": "^0.0.187"
+    "@a5c-ai/babysitter-sdk": "^0.0.188"
   },
   "name": "k3s-swarm-proxmox-a5c",
   "version": "1.0.0",
