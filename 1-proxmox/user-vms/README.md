@@ -36,6 +36,35 @@ Internal DNS (Pi-hole) → `<user>.vm.epaflix.com` → `192.168.10.4X` (LAN-only
 > `docs/superpowers/specs/2026-06-14-odysseus-bastion-design.md`. SSH config:
 > `odysseus-bastion-ssh-config`.
 
+### Bastion → k3s cluster SSH (Odysseus skills)
+
+The Odysseus agent skills triage the cluster over a **double SSH hop**:
+`Odysseus pod → bastion → k3s node` (e.g. `ssh bastion "ssh k3s-master-51 kubectl ..."`).
+For the second hop to work, the bastion's `id_ed25519.pub` must be in the
+`ubuntu` user's `authorized_keys` on every k3s node (masters `51-53`, workers
+`61-63`,`65`). The bastion's `~/.ssh/config` already aliases all 7 nodes.
+
+Bastion public key (`ubuntu@bastion:~/.ssh/id_ed25519.pub`):
+
+```
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILE5gxfynqrw8z5EVEYlPpriGzAGk6lUxQdXxiyy/2xU spypsarras@gmail.com
+```
+
+Apply / re-apply (e.g. after a node rebuild), from a host that can reach the nodes:
+
+```bash
+PUBKEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILE5gxfynqrw8z5EVEYlPpriGzAGk6lUxQdXxiyy/2xU spypsarras@gmail.com'
+for ip in 51 52 53 61 62 63 65; do
+  ssh ubuntu@192.168.10.$ip "umask 077; mkdir -p ~/.ssh; \
+    grep -qF 'spypsarras@gmail.com' ~/.ssh/authorized_keys 2>/dev/null \
+    || echo \"$PUBKEY\" >> ~/.ssh/authorized_keys"
+done
+```
+
+> Node SSH keys are otherwise injected only at VM creation via `qm set --sshkeys`,
+> so a rebuilt k3s node loses the bastion key until this is re-run — include the
+> bastion key in the node's `--sshkeys` set on rebuild.
+
 ---
 
 ## SSH Config Files
