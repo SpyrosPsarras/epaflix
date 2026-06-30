@@ -32,7 +32,7 @@ generators:
 helmCharts:
   - name: traefik
     repo: https://traefik.github.io/charts
-    version: "41.0.0"
+    version: "41.0.1"
     releaseName: traefik
     namespace: traefik-system
     valuesFile: values/traefik-values.yaml
