@@ -294,6 +294,7 @@ If `wg show wg0` on the LXC stays empty after an external client tries to connec
 - **GRE blocked**: PPTP needs GRE (proto 47). Outbound is fine here because the upstream router NATs GRE. If broken, check router firewall.
 - **Egress goes via eth0 instead of ppp0**: confirm `ip rule` lists `from 10.0.9.0/24 lookup vpn` and `ip route show table vpn` has `default dev ppp0`. The `ip-up.d` script must have fired.
 - **wg-easy can't write to /etc/wireguard**: check volume mount is `/etc/wg-easy:/etc/wireguard`.
+- **Client connects (handshake OK) but no egress — pages never load**: large packets blackhole on the double tunnel (WG client → `wg0` → `ppp0`). Tell-tale: `wg show wg-hop` shows a recent handshake with only a few KiB `received`, `ping` works, but any HTTPS/TLS request stalls. Cause: no TCP MSS clamping on forwarded traffic, and PPTP breaks PMTU discovery, so the small handshake/ping packets pass while the larger TLS packets are dropped. Fix (now in `ip-up.d/01-wg-hop`, re-applied on every PPTP reconnect): `iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1340`. `ppp0` MTU is 1446 and `wg0` is 1420; `1340` leaves headroom for the public client↔hop path. `--clamp-mss-to-pmtu` is the cleaner alternative but clamps to wg0's 1380, which can still be too high over a real internet path between client and hop.
 
 ## Related
 
