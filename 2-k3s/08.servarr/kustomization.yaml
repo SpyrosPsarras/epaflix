@@ -128,7 +128,7 @@ images:
     digest: sha256:01a46a2865d9a6db5eb8ead04ec0dd33b8fbe233e8565ae70b50d4cc0af4cfb0
   # Unpackerr — extracts archive-packed releases for Sonarr (#275 follow-up).
   - name: ghcr.io/hotio/unpackerr
-    digest: sha256:69f1c1dc0afe77a18f845a275a8cf9df2f6b87d62eaacc37b9abbb2f660a2838
+    digest: sha256:7ba4faeb6ae86cef624d333a6e4d394617167393bf2c9a4c208eb2b7658f7053
   - name: jellyfin/jellyfin
     digest: sha256:aefb67e6a7ff1debdd154a78a7bbb780fd0c873d8639210a7f6a2016ad2b35db
   - name: ghcr.io/ajnart/homarr
