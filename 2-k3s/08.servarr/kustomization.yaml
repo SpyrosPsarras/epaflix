@@ -120,7 +120,7 @@ images:
   - name: lscr.io/linuxserver/radarr
     digest: sha256:39da107b5a9371fdaa651bd188049b863716a815385eb3a30d41071b7e1aeb33
   - name: lscr.io/linuxserver/prowlarr
-    digest: sha256:3950b5e48cf4ba9dab78fe14038dd7f062e66b7b4ab368b02c94a13f6a3dae9f
+    digest: sha256:3e9bd62ca90c97c5df75b7012e10a29f6926e62807deeddc1dc89e6e2fd141e1
   - name: ghcr.io/cleanuparr/cleanuparr
     digest: sha256:a17be5104c2749cc8120e07dd63cb07fe8271f36fdb8f4a27ec46ddcf8581422
   # Byparr — FlareSolverr replacement (#275); seleniumbase/Chromium solver.
