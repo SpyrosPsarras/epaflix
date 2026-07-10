@@ -333,6 +333,49 @@ the five media pods. State of play:
 > see #196) and the qbittorrent `LocalHostAuth=false` WebUI change (#244).
 > Reconcile/codify per those issues.
 
+## Incident 2026-07-10 — Cleanuparr blind for 27 days behind forward-auth (#176 fallout)
+
+**Symptom:** stuck Sonarr queue items piling up again — 14 stalled dead-swarm
+torrents, 22 importBlocked `Episode file already imported` (a series-314
+season-pack + singles double grab), 20 importPending `Not an upgrade ...` —
+plus 224 finished torrents left in qBittorrent `stoppedUP` (~1.85 TB of
+download-dir data) never reaped.
+
+**Root cause:** the #176 forward-auth rollout (2026-06-13) put
+`qbittorrent.epaflix.com` behind Authentik with a priority-20 `/api` PathPrefix
+bypass. Cleanuparr's .NET `QBittorrent.Client` probes the LEGACY endpoint
+`/version/api` first — not under `/api` — so it received the Authentik login
+HTML and threw `FormatException` in `QBitService.LoginAsync()`. With no
+download client initialized, QueueCleaner skipped EVERY item
+(`skip | torrent not found in any torrent client`,
+`failed_import_skip_if_not_found_in_client=1`) and Download Cleaner never
+reaped. Sonarr itself was unaffected (its qbt client only calls `/api/v2/*`,
+which the bypass covers); newtarr unaffected (already on internal URLs).
+
+**Log signature:** `System.FormatException: The input string '...' was not in a
+correct format` from `GetLegacyApiVersionPrivateAsync`, ~2,500/day in
+`/config/logs/cleanuparr-*.txt.gz` from 2026-06-13 on; zero before.
+
+**Fix (2026-07-10):**
+
+1. Download client host repointed `https://qbittorrent.epaflix.com` →
+   `http://qbittorrent:8080` (internal Service; UI edit, applied live — client
+   health recovered immediately).
+2. Added the 2 missing failed-import patterns `Not an upgrade for existing` +
+   `Not a quality revision upgrade` (live queue messages use these strings; the
+   existing 3 patterns did not match them). Applied via `sqlite3` UPDATE on the
+   worker-61 PVC file (backup `cleanuparr.db.bak-20260710-patterns` next to it)
+   + pod bounce — Cleanuparr's config API is JWT-gated, so DB edit + restart is
+   the scripted path.
+
+**Rule going forward:** an IN-CLUSTER consumer of another app uses the INTERNAL
+Service URL (`http://qbittorrent:8080`, `http://sonarr:8989`, ...), never the
+public `*.epaflix.com` hostname — the public route only bypasses Authentik
+under `/api`, and clients that probe any other path (legacy qbt API, health
+endpoints) get the login page. Cleanuparr's three *arr instance URLs are still
+the public hostnames (they work via the `/api` bypass); moving them internal is
+part of the #296 hardening. Cross-links: #176, #296, #287.
+
 ## #196 — Cleanuparr safe-reaping DB state (restore runbook)
 
 The safe-reaping configuration that **#142** relies on (the seeding rules +
@@ -352,10 +395,13 @@ lost or reset `cleanuparr-config` PVC these settings come up **empty** and must 
 Sourced **LIVE** from a read-only copy of `/config/cleanuparr.db` on
 2026-06-13 (`cp /config/cleanuparr.db /tmp/cu-ro.db` in-pod → `kubectl cp` out →
 `sqlite3` SELECTs on the copy; **no writes, no rule changes, no pod restart**).
+Download-client host + failed-import rows re-verified/updated 2026-07-10 (see
+the 2026-07-10 incident section above).
 All values below are live unless the source column says otherwise.
 
 | Setting | Value | Where it lives (`cleanuparr.db` table) | Source |
 |---|---|---|---|
+| Download client (qBittorrent) host | `http://qbittorrent:8080` — INTERNAL Service URL, NEVER `https://qbittorrent.epaflix.com` (2026-07-10 incident: the public route only bypasses Authentik under `/api`, and the qbt client probes legacy `/version/api`) | `download_clients.host` | live |
 | Download Cleaner enabled | `1` (ON), cron `0 0 0/1 ? * * *` (hourly) | `download_cleaner_configs.enabled` | live |
 | qBit seeding rule — `radarr` | `max_ratio=1.0`, `min_seed_time=0`, `max_seed_time=400h`, `delete_source_files=1`, categories `["radarr"]` | `q_bit_seeding_rules` | live |
 | qBit seeding rule — `tv-sonarr` | `max_ratio=1.0`, `min_seed_time=0`, `max_seed_time=400h`, `delete_source_files=1`, categories `["tv-sonarr"]` | `q_bit_seeding_rules` | live |
@@ -364,11 +410,10 @@ All values below are live unless the source column says otherwise.
 | QueueCleaner stall — `Stall` (public) | `enabled=1`, `max_strikes=3`, `privacy_type=public`, `reset_strikes_on_progress=1` | `stall_rules` | live |
 | QueueCleaner stall — `private stalled` | `enabled=1`, `max_strikes=30`, `privacy_type=private` | `stall_rules` | live (not in earlier prose) |
 | QueueCleaner slow — `Slow-rule` | `enabled=1`, `max_strikes=3`, `max_time_hours=336`, `min_speed=10KB` | `slow_rules` | live (not in earlier prose) |
-| QueueCleaner failed-import strikes (global) | `failed_import_max_strikes=3`, pattern_mode `include` (3 `failed_import_patterns`) | `queue_cleaner_configs.failed_import_max_strikes` | live |
+| QueueCleaner failed-import strikes (global) | `failed_import_max_strikes=3`, pattern_mode `include`, 5 `failed_import_patterns`: `Episode file already imported`, `Not a Custom Format upgrade`, `One or more episodes expected in this release were not imported`, `Not an upgrade for existing`, `Not a quality revision upgrade` (last 2 added 2026-07-10) | `queue_cleaner_configs` | live |
 | **Dry Run — OFF** | **`dry_run=0`** (reaper actually deletes; if `1` every rule silently no-ops) | `general_configs.dry_run` | live |
 | **`unlinked`/orphan rule — DISABLED** | **`enabled=0`** (target_category `cleanuparr-unlinked`) | `unlinked_configs.enabled` | live |
-| Sonarr `failed_import_max_strikes` (per-arr) | `-1` (striking disabled) — see #138 (ii) | `arr_configs` (type `sonarr`) | live |
-| Other per-arr `failed_import_max_strikes` | `-1` for `radarr`, `lidarr`, `readarr`, `whisparr` too | `arr_configs` | live (prose only noted Sonarr) |
+| Per-arr `failed_import_max_strikes` (all 5 arr types) | `-1` = **inherit the global `3`** (NOT "disabled" as earlier revisions of this runbook claimed — upstream `ArrClient.ShouldRemoveFromQueue`: `0` disables, `>0` overrides, negative falls back to the global value) | `arr_configs` | live, semantics verified in source 2026-07-10 |
 
 > **⚠️ DO NOT ARM the `unlinked`/orphan rule.** `unlinked_configs.enabled` MUST
 > stay `0`. Even though #195 removed the EXDEV barrier (hardlinks now work,
@@ -395,7 +440,11 @@ file seed first so the blocklist pointer has a target, then the reaping rules.
    `https://raw.githubusercontent.com/flmorg/cleanuperr/refs/heads/main/blacklist`.)
    Verify: `content_blocker_configs.sonarr_blocklist_path` +
    `sonarr_enabled=1`.
-3. **Re-enable Download Cleaner + qBit seeding rules.** UI → **Download Cleaner**:
+3. **Re-create the download client with the INTERNAL URL.** UI → **Download
+   Client**: qbittorrent, host `http://qbittorrent:8080` (NEVER the public
+   `https://qbittorrent.epaflix.com` — see the 2026-07-10 incident section),
+   WebUI credentials from `secrets.yml`. Then **re-enable Download Cleaner +
+   qBit seeding rules.** UI → **Download Cleaner**:
    set enabled, then add one qBit seeding rule per category exactly as the table
    above — `radarr`, `tv-sonarr`, `animes`, each `max_ratio=1.0` /
    `max_seed_time=400h` / `delete_source_files=on`. These are gated **purely** on
@@ -406,12 +455,17 @@ file seed first so the blocklist pointer has a target, then the reaping rules.
    add the `Stall` (public, `max_strikes=3`), `private stalled`
    (private, `max_strikes=30`), and `Slow-rule` (`max_strikes=3`,
    `max_time_hours=336`, `min_speed=10KB`) rules, and set the global
-   failed-import strikes = `3` with the 3 include-patterns. QueueCleaner only
+   failed-import strikes = `3` with the 5 include-patterns from the table
+   above. QueueCleaner only
    strikes torrents still **referenced in an *arr queue**. Verify rows in
    `stall_rules` / `slow_rules` / `queue_cleaner_configs`.
-5. **Leave per-arr `failed_import_max_strikes = -1`.** UI → each *arr instance →
-   failed-import strikes = `-1` (disabled) for Sonarr (and the others), per
-   #138 (ii). Do NOT set these positive.
+5. **Leave per-arr `failed_import_max_strikes = -1` (= inherit the global `3`).**
+   Earlier revisions called `-1` "striking disabled" — that is wrong. Upstream
+   `ArrClient.ShouldRemoveFromQueue` treats `0` as disabled, `>0` as a per-arr
+   override, and any negative value as "use the global
+   `queue_cleaner_configs.failed_import_max_strikes`". Failed-import striking
+   IS active at 3 strikes. Set `0` only if you deliberately want it off for an
+   arr type.
 6. **Leave the `unlinked`/orphan rule DISABLED.** Do NOT enable
    `unlinked_configs` (see the DO-NOT-ARM warning above; arming is #246's job).
 7. **Confirm Dry Run is OFF.** UI → **General settings**: verify Dry Run is
