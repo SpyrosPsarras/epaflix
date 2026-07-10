@@ -181,6 +181,16 @@ Update each app (Sonarr, Sonarr2, Radarr) to use:
 - Port: `8080`
 - Category: `tv` / `anime` / `movies` respectively
 
+> **In-cluster clients MUST use the internal Service URL (`qbittorrent:8080`),
+> never the public `qbittorrent.epaflix.com`.** The public hostname sits behind
+> Authentik forward-auth (#176) with only a priority-20 `/api` bypass. A client
+> that probes any other path gets the Authentik login HTML instead of a JSON
+> response. This silently broke Cleanuparr for 27 days (its qBittorrent client
+> probes the legacy `/version/api` endpoint) — see the "Cleanuparr blind for 27
+> days behind forward-auth" incident in `RECOVERY-newtarr-cleanuparr.md`. The
+> same rule applies to every service-to-service call (`http://sonarr:8989`,
+> etc.); the `.epaflix.com` URLs under *Access URLs* below are browser-only.
+
 ### 3. Configure Prowlarr Sync
 Add applications in Prowlarr:
 - Sonarr: `http://sonarr:8989`
