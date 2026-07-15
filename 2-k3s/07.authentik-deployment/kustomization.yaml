@@ -44,11 +44,11 @@ generators:
 helmCharts:
   - name: authentik
     repo: https://charts.goauthentik.io
-    version: "2026.5.3" # bump in lockstep with the image MINOR
+    version: "2026.5.4" # bump in lockstep with the image MINOR
     releaseName: authentik
     namespace: app-authentik
     valuesFile: helm-values.yaml
     includeCRDs: false
 images:
   - name: ghcr.io/goauthentik/server
-    newTag: 2026.5.4
+    newTag: 2026.5.5
