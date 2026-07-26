@@ -190,6 +190,16 @@ Update each app (Sonarr, Sonarr2, Radarr) to use:
 > days behind forward-auth" incident in `RECOVERY-newtarr-cleanuparr.md`. The
 > same rule applies to every service-to-service call (`http://sonarr:8989`,
 > etc.); the `.epaflix.com` URLs under *Access URLs* below are browser-only.
+>
+> Confirmed a second time on 2026-07-26: bazarr pointed at
+> `sonarr.epaflix.com:443` / `radarr.epaflix.com:443` and its SignalR event feed
+> died every few hours (20 restarts in 4d10h) because `/signalr/negotiate`
+> returns the Authentik 302 as `text/html` and bazarr parses it as JSON. Its
+> `/api/v3` calls worked the whole time, which is why it looked half-healthy.
+> Fixed by repointing to `sonarr.servarr.svc.cluster.local:8989` and
+> `radarr.servarr.svc.cluster.local:7878` with `ssl: false` (#465, #466).
+> **When a client looks forward-auth-broken, check which path it calls first —
+> `/api/*` works, everything else on a gated host does not.**
 
 ### 3. Configure Prowlarr Sync
 Add applications in Prowlarr:
