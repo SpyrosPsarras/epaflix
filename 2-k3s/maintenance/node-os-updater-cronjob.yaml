@@ -128,6 +128,11 @@ spec:
       # 7 nodes × ~10 min each (update + reboot + wait) = ~70 min worst case.
       # Hard-kill at 90 minutes so a hung job does not block next week's run.
       activeDeadlineSeconds: 5400
+      # Delete finished Jobs after 30 days, matching the other maintenance
+      # CronJobs. Without this, failedJobsHistoryLimit pins the last 3 failures
+      # forever and KubeJobFailed never clears (#464) — three aborted runs from
+      # 85, 78 and 57 days ago were still firing.
+      ttlSecondsAfterFinished: 2592000
       template:
         metadata:
           labels:
@@ -228,6 +233,10 @@ spec:
                     local ip="$2"
 
                     echo "  [${node}] Cordoning..."
+                    # Mark the cordon as ours BEFORE setting it, so an abort between
+                    # these two commands still leaves a marker to reconcile from.
+                    # A label (not an annotation) so `kubectl get -l` can find it.
+                    kubectl label node "${node}" node-os-updater-cordoned=true --overwrite
                     kubectl cordon "${node}"
 
                     echo "  [${node}] Draining (ignoring daemonsets, deleting emptyDir)..."
@@ -255,6 +264,7 @@ spec:
 
                     echo "  [${node}] Uncordoning..."
                     kubectl uncordon "${node}"
+                    kubectl label node "${node}" node-os-updater-cordoned- --overwrite
 
                     echo "  [${node}] ✅ Reboot complete — node is Ready."
                   }
@@ -327,6 +337,28 @@ spec:
                   echo "================================================"
 
                   FAILED=""
+
+                  # ── Phase 0: Clear cordons left behind by an aborted previous run ──
+                  # This pod is `restartPolicy: OnFailure` with `set -eu`. If a run dies
+                  # between cordon and uncordon, the retry starts from the top, finds the
+                  # node already patched, never calls safe_reboot — and the cordon stays
+                  # forever. That happened on 2026-07-25: k3s-master-52 was cordoned for
+                  # 33h while the job still reported success (#462).
+                  # Only nodes WE labelled are touched, so a manual cordon by a human
+                  # survives the weekly run untouched.
+                  echo ""
+                  echo "▶  Phase 0: Reconciling cordons from previous runs"
+                  STALE=$(kubectl get nodes -l node-os-updater-cordoned=true \
+                    -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')
+                  if [ -z "${STALE}" ]; then
+                    echo "  None found. ✅"
+                  else
+                    for node in ${STALE}; do
+                      echo "  [${node}] Left cordoned by a previous run — uncordoning."
+                      kubectl uncordon "${node}"
+                      kubectl label node "${node}" node-os-updater-cordoned- --overwrite
+                    done
+                  fi
 
                   # ── Phase 1: Other masters (not the current node) ─────────────────
                   # One at a time: only 1 master may be down at once (etcd needs quorum).
