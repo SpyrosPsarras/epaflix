@@ -6,7 +6,13 @@ prometheus:
   prometheusSpec:
     replicas: 1 # Single replica due to PV limitations
     retention: 15d
-    retentionSize: "45GB"
+    # Must stay BELOW the PVC claim below (25Gi). local-path is a bind mount with
+    # no quota, so the claim is advisory — retentionSize is the only real bound,
+    # and the node root disk is only 48G. At "45GB" Prometheus grew to 30G and
+    # pushed k3s-worker-62 to 85%, which broke kubelet image GC (#463).
+    # If 15d of history matters more than node headroom, grow the PVC — do not
+    # raise this back above the claim.
+    retentionSize: "20GB"
 
     # Resource limits
     resources:
