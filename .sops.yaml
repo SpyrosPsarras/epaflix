@@ -3,10 +3,19 @@
 # All files matching the regex below are encrypted to the listed age
 # recipient(s). The matching private key is stored:
 #   - on the maintainer workstation: ~/.config/sops/age/k3s-cluster.txt
-#   - mirrored to TrueNAS (pool1/dataset01/sops-age-backup/ — to be
-#     moved to an encrypted dataset, tracked in issue #57)
+#   - mirrored to TrueNAS at
+#     /mnt/apps/encrypted-backups/sops-age-backup/k3s-cluster.txt — a
+#     ZFS-encrypted (aes-256-gcm) dataset. #57 created it and #149 moved
+#     the key there; the old pool1/dataset01/sops-age-backup/ path is
+#     GONE. The dataset comes up LOCKED after a TrueNAS reboot, so the
+#     backup is unreadable until it is unlocked — see the unlock options
+#     in .github/instructions/sops.instructions.md.
 #   - seeded into the cluster as Secret argocd/sops-age (read by the
 #     ksops install on argocd-repo-server)
+#
+# Only the PUBLIC recipient below is needed to ENCRYPT. Decrypting (and
+# so the `sops -d` verify step in any runbook) needs one of the private
+# copies above.
 #
 # Convention: encrypted Secret files use the suffix `.enc.yaml` so they
 # are easy to distinguish in PR diffs and so the pre-commit hook can
