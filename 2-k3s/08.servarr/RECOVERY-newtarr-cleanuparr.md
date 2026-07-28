@@ -563,6 +563,45 @@ sops -d 2-k3s/08.servarr/_shared/secrets/newtarr-config-seed.enc.yaml | head
 > `/config/*.json` files (or recreate the PVC). Tracked alongside #135/#177
 > (PVC-only config not yet fully in git).
 
+### Tuned values inside the seed: `hourly_cap` and `command_wait_*`
+
+The seed is ciphertext, so these two deliberate values are invisible in a PR diff.
+Documenting them here so nobody "restores" them to the defaults.
+
+**`sonarr.json: hourly_cap = 200`** (default 20). The cap does NOT count API calls
+despite the `api_hits` key name — it counts **hunted media items**. `increment_stat()`
+calls `increment_hourly_cap(app_type, count)` (`stats_manager.py:402`), and in
+`seasons_packs` mode `missing.py:342` increments once per missing episode in the pack.
+So one legitimate season-pack search registers as many hits as the season has missing
+episodes — a 24-episode season instantly blows a cap of 20 and the next cycle inside the
+same clock hour is skipped with:
+
+```
+SONARR hourly cap reached 24 of 20 (app-specific limit). Skipping cycle!
+```
+
+The cap must therefore exceed the LARGEST single missing season, not the number of
+searches. 200 covers the current worst case (94 missing episodes in one season) with
+headroom for raising `hunt_missing_items` above 1.
+
+> There is no disable value. `get_hourly_cap_status()` computes
+> `exceeded = current_usage >= hourly_limit`, so `0` or `-1` means *permanently*
+> exceeded, i.e. hunting never runs. Only a high number works.
+
+**`general.json: command_wait_delay = 5`, `command_wait_attempts = 150`**
+(defaults 1 and 600). After triggering the search, `missing.py` calls
+`wait_for_command(...)` and **discards the result** (`if wait_for_command(...): pass`),
+so the wait buys nothing functionally — it only paces hunts. At the defaults that was up
+to 600 status polls at 1s each per hunt.
+
+`5 x 150 = 750s` keeps the same ~12.5 min ceiling (an observed real `SeasonSearch` took
+11 min) while cutting the polling 4x. Do NOT simply lower `attempts` — any ceiling below
+the real search duration makes every cycle log
+`Timed out waiting for command <id> to complete`.
+
+Radarr is intentionally left at `hourly_cap: 20`: it hunts whole movies, so one hunt is
+one increment, and the episode-inflation problem does not apply.
+
 ### Re-assert No Login Mode (proxy_auth_bypass) — #174
 
 The `seed-config` initContainer only writes `general.json` on an *empty* PVC (non-clobber), and newtarr rewrites `/config/*.json` at runtime — so a live UI/edit (or a partial restore) can silently flip `proxy_auth_bypass` back to `false`, which would re-expose newtarr's own login page behind the Authentik forward-auth route. To keep "No Login Mode" durable, the Deployment runs a second initContainer `enforce-auth-bypass` (the app image, `runAsUser: 0`) AFTER `seed-config`. It opens `general.json`, sets ONLY the top-level `proxy_auth_bypass` to `true` (atomic tmp + `os.replace` on the same `/config` filesystem, then `chown 568:568`), and preserves all other keys. It is idempotent — a correct file logs `ok: already true` and writes nothing — and it is write-only-to-`true`, so it can never re-enable in-app login. No Secret / `*.enc.yaml` change is needed: the committed `newtarr-config-seed` already carries `proxy_auth_bypass: true`.
