@@ -76,6 +76,28 @@ read:
   replicas: 0
 backend:
   replicas: 0
+
+# memcached caches — right-sized for this cluster.
+#
+# The chart defaults are built for object-storage backends where every chunk
+# read is a network round trip: chunksCache.allocatedMemory 8192 and
+# resultsCache.allocatedMemory 1024 (MB). The chart turns those into pod
+# requests AND limits of floor(1.2 * allocatedMemory), so the defaults reserved
+# 9830Mi + 1229Mi = 11Gi of schedulable memory.
+#
+# Measured 2026-07-28: chunks-cache held 230Mi, results-cache 25Mi. The 9830Mi
+# request alone was 44% of k3s-worker-61 and was the single reason that node
+# looked different from the other three (67% memory requested vs 17-28%). It
+# blocked any uniform, low balloon floor across the worker VMs, because the
+# Proxmox host is only safe to squeeze a node down to its pod requests.
+#
+# We use `object_store: filesystem` on local-path, so there is no network round
+# trip for these caches to save — the guest page cache already covers it.
+chunksCache:
+  allocatedMemory: 1024 # -> requests/limits 1229Mi (was 9830Mi)
+resultsCache:
+  allocatedMemory: 256 # -> requests/limits 307Mi (was 1229Mi)
+
 # Gateway (nginx)
 gateway:
   enabled: true
