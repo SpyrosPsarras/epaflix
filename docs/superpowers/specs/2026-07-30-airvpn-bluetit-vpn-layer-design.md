@@ -69,8 +69,10 @@ Bluetit takes server *lists* and picks from them:
   `airVPN_password`; the owner renamed them to match the block on 2026-07-30, mid-implementation.)
 - **Image build.** New capability for this repo: Dockerfile + GitHub Actions workflow publishing
   to GHCR. This repo has no Dockerfiles today.
-- **Architecture.** Bluetit runs as a **native sidecar**; qBittorrent keeps its current image.
-- **Degradation handling.** Auto-reconnect via SIGUSR2 plus an alert.
+- **Architecture.** Bluetit runs as a **native sidecar**. The app container moves to
+  `qbittorrentofficial/qbittorrent-nox` (the tenseiken image cannot run without a VPN).
+- **Degradation handling.** SIGUSR2 reconnect plus an alert. The reconnect is a retry, not a
+  cure - see Component 4 for why it cannot be called self-healing.
 - **Server pool.** Whitelist countries `nl,de,se`; blacklist the three measured-bad boxes.
 - Cluster is `v1.35.5+k3s1`, so native sidecars (initContainer with `restartPolicy: Always`,
   GA since 1.29) are available.
@@ -168,6 +170,8 @@ networklock                 iptables
 allowprivatenetwork         yes
 allowping                   yes
 airipv6                     no
+air6to4                     no
+ignorednspush               yes
 tunpersist                  yes
 airkey                      Default
 ```
@@ -186,9 +190,15 @@ Notes on specific directives:
   connection has been attempted yet. On the verification list; if it needs the device, add the
   mount back.
 - `allowping yes` is required, not optional: the network lock would otherwise drop the ICMP the
-  degradation probe depends on, and the probe would read a healthy tunnel as dead.
-- `airipv6 no` matches the existing `init-sysctls` container, which disables IPv6. Bluetit
-  otherwise reports "IPv6 is available in this system" and may try to use it.
+  degradation probe depends on, and the probe would read a healthy tunnel as dead. Verified —
+  the connected status reports "Ping is allowed to pass the network filter".
+- `ignorednspush yes` is **load-bearing and was the subtlest failure found**. Without it Bluetit
+  throws `Cannot set pushed DNS to system` when it tries to rewrite `/etc/resolv.conf`, which
+  kubelet owns. That exception does not merely warn — it **tears down a tunnel that has already
+  connected**, leaving `goldcrest` reporting "Bluetit is not connected" with no error visible in
+  the status output.
+- `airipv6 no` and `air6to4 no` do **not** stop Bluetit assigning the device's IPv6 address to
+  `tun0`. They are kept to express intent, but the pod must not disable IPv6 (see Component 3).
 - `country NO` is technically optional — Bluetit auto-detects it correctly via ipleak.net — but
   pinning it avoids an outbound call on every start and removes a dependency on that service.
 - `networkcheck <on|gateway|airvpn|off>` exists and overlaps with our own probe. Leave it at the
@@ -205,29 +215,47 @@ Notes on specific directives:
 ## Component 3 — the Deployment
 
 Unchanged: `dnsPolicy: None` + `dnsConfig`, the `Recreate` strategy (still one VPN session at a
-time), ports 8080 / 39998, both PVCs, and the `init-sysctls` initContainer.
+time), ports 8080 / 39998, and both PVCs.
+
+**The app container changes image.** `tenseiken/qbittorrent-wireguard` has **no way to disable its
+VPN** — `VPN_ENABLED` does not exist in it, and the live Deployment's `VPN_ENABLED=yes` has always
+been a no-op. Its author is explicit: *"I also dropped the option to just not use a VPN. If you
+don't wish to use a VPN, I highly recommend you make use of the official qBittorrent repo"*. With
+a config present it hard-exits 1 on `No WireGuard config file found`.
+
+So the app container becomes **`qbittorrentofficial/qbittorrent-nox`**, pinned by digest. The
+feared `/config` migration does not exist: that image's entrypoint uses `profilePath="/config"`
+and `/config/qBittorrent/config/qBittorrent.conf`, byte-identical to the live PVC — unsurprising,
+since tenseiken wraps it. It honours the same `PUID`/`PGID`, the same `qbtUser`, and the same
+`QBT_LEGAL_NOTICE=confirm` the Deployment already sets. It also accepts
+**`QBT_TORRENTING_PORT=39998`**, which makes the BT port declarative and deletes the old manual
+"set it in the WebUI" step.
+
+Removed from the app container: the `postStart` iptables block, the `wireguard-config` volume, and
+the wrapper env `VPN_ENABLED` / `LAN_NETWORK` / `NAME_SERVERS` / `ADDITIONAL_PORTS` /
+`HEALTH_CHECK_*`. Since it no longer touches the network it **drops `privileged: true` and
+`NET_ADMIN`** — only the sidecar keeps privileges. That is the one real security improvement here.
 
 Added — `airvpn` native sidecar:
 
-- our image, `NET_ADMIN`, `runAsUser: 0`
+- our image, `runAsUser: 0`, capabilities **`NET_ADMIN` + `SYS_MODULE`**
 - ConfigMap mounted as a file, Secret as env
-- **no `/dev/net/tun` mount** — that is an OpenVPN need; WireGuard uses the kernel module the
-  current pod already relies on
-- startup/liveness probe via Goldcrest confirming a connected state
+- a **`/lib/modules` hostPath mount, read-only**
+- **no `/dev/net/tun` mount** — confirmed unnecessary; WireGuard goes through the kernel module
+- liveness probe keyed on the string `Connected to AirVPN server`
 
-Removed from the qBittorrent container: the `postStart` iptables block, the `wireguard-config`
-volume, and the wrapper env `VPN_ENABLED` / `LAN_NETWORK` / `NAME_SERVERS` / `ADDITIONAL_PORTS` /
-`HEALTH_CHECK_*`. It sets `VPN_ENABLED=no` and, since it no longer touches the network, **drops
-`privileged: true` and `NET_ADMIN`** — only the sidecar keeps them. This is the one real security
-improvement in the change.
+`SYS_MODULE` and `/lib/modules` are both mandatory, and neither was in the original design.
+Bluetit insists on loading `iptable_filter`, `iptable_nat`, `iptable_mangle`, `iptable_security`,
+`iptable_raw` and `wireguard` itself — **even though they are already loaded on the node** — and
+without them it fails with `Error while loading kernel module ... (-3)` and never connects. This
+does mean the sidecar is more privileged than first designed; the app container being unprivileged
+is still a net gain over today, where qBittorrent itself runs `privileged: true`.
 
-**Known assumption to verify, not assert.** We keep `tenseiken/qbittorrent-wireguard` as the app
-container with its VPN switched off, rather than swapping to a stock qBittorrent image, because
-its `/config` layout is what the existing PVC holds and a data migration should not ride along
-with this change. Whether that image behaves cleanly with `VPN_ENABLED=no` — in particular whether
-it still tries to install iptables rules — **must be verified on a scratch pod before the live one
-is touched**. If it misbehaves, fall back to a stock qBittorrent image and accept the `/config`
-migration as separate work.
+**`init-sysctls` must stop disabling IPv6.** It keeps `rp_filter=2` and `src_valid_mark=1`, but
+`net.ipv6.conf.all.disable_ipv6=1` has to go. Bluetit unconditionally assigns the AirVPN device's
+IPv6 address to `tun0`, and with IPv6 off the connect thread dies on
+`Error: ipv6: IPv6 is disabled on this device` and the tunnel never establishes. `airipv6 no` and
+`air6to4 no` do not prevent this.
 
 ## Component 4 — degradation handling
 
@@ -239,8 +267,16 @@ Three failure modes, deliberately separated:
 2. **Tunnel drops but Bluetit lives.** Bluetit reconnects on its own.
 3. **Server stays up but goes bad** — today's failure. Neither the network lock nor a restart
    notices it. A loop in the sidecar pings the tunnel gateway; after N consecutive bad checks it
-   sends **SIGUSR2**, Bluetit reconnects, and quick-mode picks a fresh recommended server outside
-   the blacklist. A cooldown between reconnects prevents flapping.
+   sends **SIGUSR2** and Bluetit reconnects. A cooldown between reconnects prevents flapping.
+
+   **This is weaker than "self-healing", and the spec should not claim otherwise.** SIGUSR2 was
+   verified to reconnect cleanly (`Reconnecting VPN server` → disconnect → 3 s wait → connected),
+   but it reconnected to **the same server**, because quick-mode simply re-asks AirVPN for its
+   recommendation and AirVPN still rated that server healthy — which is the original problem, since
+   its status API reported `health=ok` for servers dropping 9% of packets. So the reconnect only
+   escapes a bad server when AirVPN's own view changes. The real recovery loop is the alert below
+   telling the owner to add the server to `airblackserverlist`. The probe's value is that it makes
+   a degrading tunnel *visible and logged* rather than silent, plus a free retry.
 
 Starting thresholds — chosen so today's fault trips it and ordinary jitter does not, and to be
 re-tuned once we have real numbers from the new server:
@@ -248,9 +284,14 @@ re-tuned once we have real numbers from the new server:
 | Knob | Start value | Reason |
 |---|---|---|
 | probe | 20 pings to the tunnel gateway `10.128.0.1`, every 60 s | in-tunnel, no upstream ICMP filtering; same target the current health check uses |
-| trip threshold | > 5% loss | measured bad servers were 6.7-9%; healthy ones were 0% |
+| trip threshold | > 5% loss | measured bad servers were 6.7-9%; healthy ones were 0%, and the verified good tunnel measured 0/100 |
 | consecutive checks | 3 | ~3 minutes of sustained loss, so a transient blip is ignored |
 | cooldown | 15 min | one reconnect per window at worst, so a bad pool cannot cause a reconnect storm |
+
+The alert threshold must respect that cooldown. Three log lines are **at least** 1800 s apart, so
+`count_over_time(... [30m]) > 2` can never be satisfied — a rule that reads as coverage and never
+fires. Owner chose **`> 0` over `[30m]`**: any forced reconnect is worth surfacing, and the 15 min
+cooldown already caps it at two alerts an hour.
 
 **Alerting.** The sidecar logs a single distinct line on every reconnect
 (`airvpn-bluetit: reconnect triggered, loss=<n>%`) and a Loki rule alerts on it. This reuses the
@@ -279,10 +320,31 @@ On a scratch pod first, then live:
 - port 39998 reachable (AirVPN's forward is account-wide, so it follows the chosen server)
 - ArgoCD `servarr` Synced/Healthy
 - restart count flat over 24h
-- SIGUSR2 path exercised deliberately once, confirming it reconnects to a different server
-- `tunpersist = on` works without a `/dev/net/tun` mount under `airvpntype = wireguard` (see the
-  open question in Component 2) — if not, the mount goes back and the spec is corrected
-- `VPN_ENABLED=no` leaves the qBittorrent container's iptables untouched (see Component 3)
+
+### Verified on a scratch pod, 2026-07-30
+
+Run on `k3s-worker-61` against a dedicated AirVPN device key `k3s-test`, so the live tunnel was
+never disturbed — `goldcrest` confirmed `AirVPN user: <redacted> - Key: k3s-test`. The image was
+side-loaded with `k3s ctr images import`, since the build workflow only publishes from `main`.
+
+Confirmed working: credentials log in; `airkey` selects the intended device; quick-mode honoured
+the blacklist (picked Aspidiske, not Cygnus/Hassaleh/Kajam); the network lock came up reporting
+"Private network is allowed" and "Ping is allowed"; `tunpersist` works with **no** `/dev/net/tun`
+mount; SIGUSR2 reconnects.
+
+| Measurement | Broken tunnel (baseline) | Bluetit sidecar |
+|---|---|---|
+| Loss to `10.128.0.1` | 60% | **0 / 100 packets** |
+| RTT avg | up to 8600 ms | **30.6 ms** |
+| Download 50 MB | 1.61 MB/s | **6.69 MB/s** |
+| Upload 10 MB | 0.03 MB/s | **1.70 MB/s** |
+
+Upload is 56x better but still short of the 16.6 MB/s measured on the bare host, so the tunnel
+costs real throughput — it is simply no longer the bottleneck.
+
+One non-fatal oddity seen once: `AirVPNManifest->loadManifest() failed: AES decryption error`
+during a manifest refresh. It fell back to the local copy and the tunnel stayed up. Worth watching
+rather than acting on.
 
 ## Rollback
 
@@ -292,8 +354,7 @@ Secret stays in git until the soak passes, so rollback needs no key recovery.
 ## Out of scope
 
 - Moving other `servarr` apps behind the VPN.
-- Replacing the qBittorrent image / `/config` migration (only a fallback if the
-  `VPN_ENABLED=no` assumption fails).
+- Any `/config` data migration. The app-image swap turned out not to need one (Component 3).
 - Rotating the AirVPN account password.
 - The parked `airvpn-server-swap` branch, which pinned Dedalus as an interim fix and was
   superseded by this design.
