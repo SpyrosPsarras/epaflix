@@ -37,3 +37,7 @@ charts/
 *-plaintext.yaml
 *.plaintext.yaml
 .a5c/processes/
+
+# Superpowers subagent-driven-development scratch (ledger, briefs, review packages).
+# Per-plan workspaces under .superpowers/sdd/<plan>/ — the git history is the record.
+.superpowers/
