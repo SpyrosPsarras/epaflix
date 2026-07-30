@@ -160,7 +160,9 @@ data:
       #     inside a [30m]=1800s count_over_time window - any threshold above
       #     `> 1` here is mathematically unreachable and would silently never
       #     fire. One forced reconnect already means 3 consecutive loss strikes
-      #     against the gateway, and the same cooldown caps this at 2 alerts/hr.
+      #     against the gateway. This will not spam: the rule is level-triggered,
+      #     so sustained degradation holds one continuous firing state rather than
+      #     alerting per reconnect (900s spacing is well inside the 30m window).
       - name: airvpn-bluetit
         rules:
           - alert: AirVPNBluetitReconnecting
