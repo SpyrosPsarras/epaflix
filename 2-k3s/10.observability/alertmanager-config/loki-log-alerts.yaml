@@ -151,3 +151,29 @@ data:
                 — possible credential-stuffing/brute force. Review source IPs in
                 Grafana → Explore → Loki:
                 {namespace="app-authentik"} |~ `login_failed`
+
+      # E — AirVPN Bluetit sidecar (servarr namespace). The degradation probe
+      #     forces a reconnect when the in-tunnel gateway sustains packet loss;
+      #     match the entrypoint's log line exactly or this alert never fires.
+      - name: airvpn-bluetit
+        rules:
+          - alert: AirVPNBluetitReconnecting
+            expr: |
+              sum (
+                count_over_time({namespace="servarr", container="airvpn"} |= "reconnect triggered" [30m])
+              ) > 2
+            for: 5m
+            labels:
+              severity: warning
+              component: servarr
+            annotations:
+              summary: "AirVPN server degrading - Bluetit reconnected repeatedly"
+              description: >-
+                The Bluetit sidecar forced more than 2 reconnects in 30m because
+                the tunnel gateway was losing packets. quick-mode should have
+                moved to another recommended server; if this keeps firing the
+                whitelisted pool (nl,de,se) is bad, not one server. Measure the
+                candidate entry-3 IPs from the node before editing
+                airblackserverlist - AirVPN's status API reported health=ok for
+                all three servers that caused this. Recipe:
+                docs/superpowers/specs/2026-07-30-airvpn-bluetit-vpn-layer-design.md

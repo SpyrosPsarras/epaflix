@@ -200,4 +200,4 @@ spec:
             component: servarr
           annotations:
             summary: "qBittorrent container restarting repeatedly (VPN flap?)"
-            description: "qBittorrent ({{ $labels.pod }}) restarted {{ $value }} times in 15m. The WireGuard kill-switch drops traffic on tunnel loss and the container re-inits — likely an AirVPN/WireGuard flap. Check the qbittorrent container logs (Grafana → Explore → Loki: {namespace=\"servarr\", container=\"qbittorrent\"}) and the forwarded port (#qbittorrent-vpn)."
+            description: "qBittorrent ({{ $labels.pod }}) restarted {{ $value }} times in 15m. The Bluetit sidecar's network lock drops traffic on tunnel loss and the pod re-inits — likely an AirVPN flap. Check the airvpn container logs (Grafana → Explore → Loki: {namespace=\"servarr\", container=\"airvpn\"}) and the forwarded port (#qbittorrent-vpn)."
