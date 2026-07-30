@@ -290,8 +290,9 @@ re-tuned once we have real numbers from the new server:
 
 The alert threshold must respect that cooldown. Three log lines are **at least** 1800 s apart, so
 `count_over_time(... [30m]) > 2` can never be satisfied — a rule that reads as coverage and never
-fires. Owner chose **`> 0` over `[30m]`**: any forced reconnect is worth surfacing, and the 15 min
-cooldown already caps it at two alerts an hour.
+fires. Owner chose **`> 0` over `[30m]`**: any forced reconnect is worth surfacing. It will not spam,
+because the rule is level-triggered — sustained degradation holds one continuous firing state
+rather than alerting per reconnect.
 
 **Alerting.** The sidecar logs a single distinct line on every reconnect
 (`airvpn-bluetit: reconnect triggered, loss=<n>%`) and a Loki rule alerts on it. This reuses the
