@@ -8,7 +8,7 @@
 # owns the WireGuard tunnel and the iptables network lock. It replaces the
 # old `tenseiken/qbittorrent-wireguard` image's built-in wg-quick + the
 # postStart iptables hack that used to punch LAN/cluster CIDR holes in its
-# default-DROP OUTPUT chain — Bluetit's own `networklock iptables` +
+# default-DROP OUTPUT chain — Bluetit's own `networklockpersist iptables` +
 # `allowprivatenetwork yes` (see bluetit-config.yaml) does that instead. The
 # app container now runs the official `qbittorrentofficial/qbittorrent-nox`
 # image and shares the pod netns with the sidecar, so it no longer touches
