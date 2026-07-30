@@ -104,15 +104,24 @@
       "extractVersionTemplate": "^kustomize/v(?<version>.+)$"
     },
     {
-      "description": "Keep the pinned AIRVPN_SUITE_VERSION in images/airvpn-bluetit/Dockerfile fresh. Renovate only ever sees the image tag we publish ourselves (ghcr.io/spyrospsarras/airvpn-bluetit), so without this regex manager nothing would ever report the vendored 2.1.0 tarball as stale. The bump also needs AIRVPN_SUITE_SHA512 updated by hand from AirVPN's published checksum - Renovate cannot compute that, see images/airvpn-bluetit/README.md. Uses fileMatch, not managerFilePatterns: the deployed self-hosted Renovate is pinned to 39.264.0 (2-k3s/12.renovate/cronjob.yaml), and managerFilePatterns only became a recognized customManagers field in v41 - confirmed by running renovate-config-validator@39.264.0 against this file. The other two customManagers below still use managerFilePatterns and are likely dead against this pin, see #486. Also note: AirVPN/AirVPN-Suite has no upstream git tags or GitLab releases (verified via the GitLab API), so this gitlab-tags lookup can never actually detect a version bump today - #487.",
+      "description": "Keep the pinned AIRVPN_SUITE_VERSION in images/airvpn-bluetit/Dockerfile fresh. Renovate only ever sees the image tag we publish ourselves (ghcr.io/spyrospsarras/airvpn-bluetit), so without this regex manager nothing would ever report the vendored 2.1.0 tarball as stale. The bump also needs AIRVPN_SUITE_SHA512 updated by hand from AirVPN's published checksum - Renovate cannot compute that, see images/airvpn-bluetit/README.md. Uses fileMatch, not managerFilePatterns: the deployed self-hosted Renovate is pinned to 39.264.0 (2-k3s/12.renovate/cronjob.yaml), and managerFilePatterns only became a recognized customManagers field in v41 - confirmed by running renovate-config-validator@39.264.0 against this file. The other two customManagers below still use managerFilePatterns and are likely dead against this pin, see #486. Datasource is the custom.airvpn-suite-x86_64 entry below, not gitlab-tags: AirVPN/AirVPN-Suite has no upstream git tags or GitLab releases at all (verified via the GitLab API) - versions only ever show up as tarball filenames under binary/ on master, see #487.",
       "customType": "regex",
       "fileMatch": ["^images/airvpn-bluetit/Dockerfile$"],
       "matchStrings": [
         "ARG AIRVPN_SUITE_VERSION=(?<currentValue>\\S+)"
       ],
       "depNameTemplate": "AirVPN/AirVPN-Suite",
-      "datasourceTemplate": "gitlab-tags",
-      "registryUrlTemplate": "https://gitlab.com"
+      "datasourceTemplate": "custom.airvpn-suite-x86_64"
     }
-  ]
+  ],
+  "customDatasources": {
+    "airvpn-suite-x86_64": {
+      "description": "AirVPN/AirVPN-Suite publishes no git tags or GitLab releases (#487) - the only signal of a new version is a new tarball filename under binary/ on master. Lists that directory via the GitLab repository-tree API and extracts versions from the x86_64, non-legacy tarball name (AirVPN-Suite-x86_64-<version>.tar.gz). The directory also holds -legacy and aarch64/armv7l/hummingbird-macos-* variants and .sha512 sidecar files for each - the regex anchors on the exact x86_64 non-legacy filename shape so none of those can produce a bogus version.",
+      "defaultRegistryUrlTemplate": "https://gitlab.com/api/v4/projects/AirVPN%2FAirVPN-Suite/repository/tree?path=binary&ref=master&per_page=100",
+      "format": "json",
+      "transformTemplates": [
+        "{\"releases\": [$[$match(name, /^AirVPN-Suite-x86_64-\\d[\\w.]*\\.tar\\.gz$/)].{\"version\": $match(name, /^AirVPN-Suite-x86_64-(\\d[\\w.]*)\\.tar\\.gz$/).groups[0]}]}"
+      ]
+    }
+  }
 }
