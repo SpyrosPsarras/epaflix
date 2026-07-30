@@ -96,7 +96,14 @@ Rejected alternatives:
 `ghcr.io/spyrospsarras/airvpn-bluetit`, built from `images/airvpn-bluetit/`.
 
 - Base `debian:13-slim` (the Suite requires OpenSSL 3.x).
-- Packages: `dbus`, `libxml2`, `libssl3`, `iptables`, `iproute2`, `ca-certificates`, `iputils-ping`.
+- Packages, verified to satisfy `ldd` for both binaries: `dbus`, `libdbus-1-3`, `libssl3`,
+  `libstdc++6`, `libsystemd0`, `libcap2`, `zlib1g`, `libbrotli1`, `libzstd1`, `libxml2`,
+  `iptables`, `iproute2`, `iputils-ping`, `busybox`, `procps`, `ca-certificates`, `curl`.
+- `install.sh` is **bypassed** — it prompts about systemd, boot-start and creating the `airvpn`
+  user/group, which would hang a non-interactive build. The Dockerfile places files directly:
+  `bin/bluetit` → `/sbin/bluetit`, `bin/goldcrest` → `/usr/local/bin/goldcrest`,
+  `etc/airvpn/*` → `/etc/airvpn/`, `etc/dbus-1/system.d/*.conf` → `/etc/dbus-1/system.d/`,
+  plus `groupadd -f airvpn`. The systemd units and init scripts in the tarball are not used.
 - AirVPN Suite pinned by a build arg (`AIRVPN_SUITE_VERSION`, initially `2.1.0`), downloaded from
   GitLab and verified against its published `.sha512`. A checksum mismatch fails the build rather
   than shipping something unverified.
@@ -108,13 +115,35 @@ Rejected alternatives:
 needs something holding the foreground:
 
 1. start `dbus-daemon --system`
-2. render `/etc/airvpn/bluetit.rc` (below)
-3. launch `/sbin/bluetit`
-4. wait for the tunnel to come up
-5. run the degradation probe loop, and watch the PID — if Bluetit dies, exit non-zero so
+2. start `busybox syslogd -n -O /dev/stdout`
+3. render `/etc/airvpn/bluetit.rc` (below)
+4. launch `/sbin/bluetit`
+5. wait for the tunnel to come up
+6. run the degradation probe loop, and watch the PID — if Bluetit dies, exit non-zero so
    Kubernetes restarts the container rather than leaving a live pod with a dead VPN
 
 Bluetit requires `root`.
+
+**The syslog step is mandatory, not cosmetic.** Bluetit has **no `logfile` directive** — the
+complete directive list in the shipped `bluetit.rc` has no logging option at all. It logs to
+syslog only. Without a syslog daemon forwarding to stdout, Bluetit produces *no container output
+whatsoever* — it appears to fail silently even when running perfectly. That also makes the Loki
+alert in Component 4 impossible. This cost real debugging time during design; do not remove it.
+
+### Verified during design (2026-07-30)
+
+Built and run locally with Docker 29.6.2, so these are measured, not assumed:
+
+- The package list below builds on `debian:13-slim` and `ldd` reports **no "not found"** for either
+  `bluetit` or `goldcrest` — this is AirVPN's own documented validation.
+- `bluetit` links `libsystemd.so.0` and `libcap.so.2`, which are easy to miss from the README's
+  dependency list.
+- Bluetit starts correctly in a container with `dbus-daemon --system` plus `NET_ADMIN`: connects to
+  D-Bus, initialises, retrieves the AirVPN manifest, and writes its lock file.
+- It auto-detected the home country as `NO` and read DNS `192.168.10.30` / `192.168.10.1` from the
+  container resolver.
+- Published `.sha512` for `2.1.0` verifies against the downloaded tarball.
+- Goldcrest's status flags are `--bluetit-status` and `--bluetit-stats` (**not** `--status`).
 
 ## Component 2 — configuration
 
@@ -125,18 +154,22 @@ one from scratch.
 **ConfigMap `airvpn-bluetit-config`** — everything non-secret, so server-pool changes are readable
 in a PR diff:
 
+Directives are **whitespace-separated**, not `key = value` — confirmed against the shipped file:
+
 ```
-airvpntype             = wireguard
-airconnectatboot       = quick
-airwhitecountrylist    = nl,de,se
-airblackserverlist     = Cygnus,Hassaleh,Kajam
-airport                = 1637
-country                = NO
-forbidquickhomecountry = on
-networklock            = iptables
-allowprivatenetwork    = yes
-tunpersist             = on
-airkey                 = Default
+airvpntype                  wireguard
+airconnectatboot            quick
+airwhitecountrylist         nl,de,se
+airblackserverlist          Cygnus,Hassaleh,Kajam
+airport                     1637
+country                     NO
+forbidquickhomecountry      yes
+networklock                 iptables
+allowprivatenetwork         yes
+allowping                   yes
+airipv6                     no
+tunpersist                  yes
+airkey                      Default
 ```
 
 **Secret `airvpn-credentials`** (SOPS `.enc.yaml`) — only `airusername` and `airpassword`,
@@ -147,11 +180,20 @@ Notes on specific directives:
 - `airkey` is the only value differing between deployments: `Default` for k3s,
   `nick` for his VM. The two keep separate AirVPN device keys, as they do today
   (`Default` = `10.135.227.175`, `nick` = `10.154.38.229`).
-- `tunpersist = on` is load-bearing, not cosmetic: **SIGUSR2 reconnect only works with TUN
-  persistence enabled**. Whether `tunpersist` also requires a `/dev/net/tun` mount when
-  `airvpntype = wireguard` is **unverified** — the WireGuard path uses the kernel module and
-  creates a `wg` interface rather than a TUN device, but the directive is OpenVPN-flavoured. This
-  is on the verification list; if it does need the device, add the mount back.
+- `tunpersist yes` is load-bearing, not cosmetic: **SIGUSR2 reconnect only works with TUN
+  persistence enabled**. Whether it also needs a `/dev/net/tun` mount under
+  `airvpntype wireguard` is **still unverified** — Bluetit starts without the device, but no
+  connection has been attempted yet. On the verification list; if it needs the device, add the
+  mount back.
+- `allowping yes` is required, not optional: the network lock would otherwise drop the ICMP the
+  degradation probe depends on, and the probe would read a healthy tunnel as dead.
+- `airipv6 no` matches the existing `init-sysctls` container, which disables IPv6. Bluetit
+  otherwise reports "IPv6 is available in this system" and may try to use it.
+- `country NO` is technically optional — Bluetit auto-detects it correctly via ipleak.net — but
+  pinning it avoids an outbound call on every start and removes a dependency on that service.
+- `networkcheck <on|gateway|airvpn|off>` exists and overlaps with our own probe. Leave it at the
+  default; our probe is what drives SIGUSR2, and two competing checks would be harder to reason
+  about than one.
 - `allowprivatenetwork = yes` keeps Pi-hole DNS, the cluster CIDRs and the WebUI reachable once
   the network lock is armed. It replaces the six hand-written iptables rules in the current
   `postStart` hook.
