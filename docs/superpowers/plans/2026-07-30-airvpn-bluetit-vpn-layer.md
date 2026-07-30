@@ -591,10 +591,24 @@ and add the matching comment line to the `# Reconciled via the ksops generator` 
 
 ```bash
 cd /home/spy/Documents/Epaflix/k3s-swarm-proxmox-vpn
-kustomize build 2-k3s/08.servarr >/dev/null && echo "render ok"
+export PATH="$HOME/.local/bin:$PATH"
+export SOPS_AGE_KEY=$(kubectl get secret sops-age -n argocd -o jsonpath='{.data}' \
+  | python3 -c "import sys,json,base64;[print(base64.b64decode(v).decode(),end='') for v in json.load(sys.stdin).values()]")
+kustomize build --enable-alpha-plugins --enable-exec 2-k3s/08.servarr >/dev/null && echo "render ok"
+unset SOPS_AGE_KEY
 ```
 
-Expected: `render ok`. `kustomize` is not installed on this workstation — if unavailable, rely on the `validate` CI job and say so rather than claiming it passed. Do **not** report a green render you did not run.
+Expected: `render ok`.
+
+**CI does not cover this render — do not assume it does.** `.github/workflows/ci.yml`
+deliberately excludes `2-k3s/08.servarr` from its `kustomize build` loop, because the ksops
+generator needs the age key and CI withholds it. The list of directories it does build is
+hardcoded and `08.servarr` is not in it. So if you skip this step, nothing verifies the render
+until ArgoCD tries to sync it.
+
+`kustomize` 5.8.1 (matching the CI pin) and `ksops` 4.5.1 are installed at `~/.local/bin` —
+hence the `PATH` export, `--enable-alpha-plugins --enable-exec` for the ksops exec plugin, and
+the age key pulled from the cluster. Never report a green render you did not run.
 
 - [ ] **Step 6: Commit**
 
@@ -859,7 +873,10 @@ In `2-k3s/08.servarr/kustomization.yaml` under `images:`:
 - [ ] **Step 6: Verify the manifest**
 
 ```bash
-kustomize build 2-k3s/08.servarr | python3 -c "
+export PATH="$HOME/.local/bin:$PATH"
+export SOPS_AGE_KEY=$(kubectl get secret sops-age -n argocd -o jsonpath='{.data}' \
+  | python3 -c "import sys,json,base64;[print(base64.b64decode(v).decode(),end='') for v in json.load(sys.stdin).values()]")
+kustomize build --enable-alpha-plugins --enable-exec 2-k3s/08.servarr | python3 -c "
 import sys,yaml
 docs=[d for d in yaml.safe_load_all(sys.stdin) if d]
 dep=[d for d in docs if d['kind']=='Deployment' and d['metadata']['name']=='qbittorrent'][0]
@@ -877,9 +894,11 @@ assert 'wireguard-config' not in names and 'tun' not in names, names
 assert 'bluetit-config' in names
 print('deployment shape ok')
 "
+unset SOPS_AGE_KEY
 ```
 
-Expected: `deployment shape ok`. If `kustomize` is missing locally, state that this was not run rather than claiming it passed.
+Expected: `deployment shape ok`. This assertion block is the only thing that verifies the new
+pod shape before ArgoCD sees it — CI does not build `08.servarr` (see Task 3 Step 5). Run it.
 
 - [ ] **Step 7: Commit**
 
