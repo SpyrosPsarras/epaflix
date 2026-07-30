@@ -42,8 +42,19 @@ data:
     allowprivatenetwork         yes
     allowping                   yes
 
-    # Matches the init-sysctls container, which disables IPv6.
+    # airipv6/air6to4 no do NOT stop Bluetit assigning the AirVPN device's IPv6
+    # address to tun0 - that's handled by init-sysctls no longer disabling
+    # IPv6 (see qbittorrent.yaml). These just keep Bluetit from routing our
+    # own IPv6 traffic over the tunnel.
     airipv6                     no
+    air6to4                     no
+
+    # REQUIRED. Without it Bluetit throws "Cannot set pushed DNS to system"
+    # because kubelet owns /etc/resolv.conf, and that exception tears down an
+    # already-connected tunnel (goldcrest then reports "Bluetit is not
+    # connected" with no error surfaced). Found on a live scratch-pod run,
+    # 2026-07-30 — the subtlest failure of the bunch.
+    ignorednspush                yes
 
     # SIGUSR2 reconnect only works with TUN persistence on. The probe depends
     # on it - do not set this to no.
