@@ -512,11 +512,16 @@ data:
     # keeps Pi-hole DNS (192.168.10.30), the cluster CIDRs and the WebUI
     # reachable. allowping is REQUIRED - without it the lock drops the ICMP the
     # degradation probe runs on and the probe reads a healthy tunnel as dead.
-    networklock                 iptables
+    #
+    # networklockPERSIST, not networklock: the plain form is scoped to "during
+    # the connection", so a sidecar restart leaves the app container announcing
+    # to trackers unprotected for the ~20s Bluetit needs to reconnect. Do NOT
+    # simplify this back - see the full reasoning in bluetit-config.yaml.
+    networklockpersist          iptables
     allowprivatenetwork         yes
     allowping                   yes
 
-    # Matches the init-sysctls container, which disables IPv6.
+    # init-sysctls does NOT disable IPv6 - doing so kills the tunnel.
     # NB: neither of these stops Bluetit assigning the device's IPv6 to tun0.
     # They express intent only. The pod must NOT disable IPv6 - see Task 5.
     airipv6                     no
@@ -1000,6 +1005,10 @@ cm=[d for d in docs if d['kind']=='ConfigMap' and d['metadata']['name']=='airvpn
 body=cm['data']['bluetit.conf']
 for req in ('ignorednspush','air6to4','allowping','tunpersist'):
     assert req in body, req
+# The lock must be session-scoped, not connection-scoped, or a sidecar restart
+# leaves the app container unprotected. Plain 'networklock' must NOT be present.
+assert 'networklockpersist' in body, 'network lock is not session-scoped'
+assert not any(l.strip().startswith('networklock ') for l in body.splitlines()), 'plain networklock still set'
 print('deployment shape ok')
 "
 unset SOPS_AGE_KEY
