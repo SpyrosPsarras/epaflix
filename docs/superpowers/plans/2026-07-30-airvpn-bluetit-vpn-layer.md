@@ -90,16 +90,27 @@ set -euo pipefail
 IMAGE="${1:-airvpn-bluetit:dev}"
 
 echo "== 1. both binaries resolve every library =="
-docker run --rm "$IMAGE" sh -c 'ldd /sbin/bluetit; ldd /usr/local/bin/goldcrest' \
-  | grep -q "not found" && { echo "FAIL: missing shared library"; exit 1; }
+# NB: `grep -q X && { ...; }` is wrong under `set -e` - when grep finds nothing it
+# returns 1, the && list returns 1, and the script exits on the SUCCESS path.
+# Use if/then for every "fail if found" check in this file.
+if docker run --rm "$IMAGE" sh -c 'ldd /sbin/bluetit; ldd /usr/local/bin/goldcrest' \
+     | grep -q "not found"; then
+  echo "FAIL: missing shared library"; exit 1
+fi
 echo "ok"
 
 echo "== 2. bluetit starts, logs to stdout, writes its lock file =="
+# No /config mount here on purpose: without the fragment there is no
+# `airconnectatboot quick`, so Bluetit never dials out and the live tunnel
+# (which uses the same `Default` key) is not disturbed.
 out=$(docker run --rm --cap-add NET_ADMIN -e AIRVPN_USERNAME= -e AIRVPN_PASSWORD= "$IMAGE" \
   sh -c '/entrypoint.sh & sleep 12; cat /etc/airvpn/bluetit.lock 2>/dev/null || echo NOLOCK' 2>&1)
-echo "$out" | grep -q "Bluetit successfully initialized and ready" \
-  || { echo "FAIL: no init line on stdout (syslog forwarder broken?)"; echo "$out"; exit 1; }
-echo "$out" | grep -q NOLOCK && { echo "FAIL: no lock file"; exit 1; }
+if ! echo "$out" | grep -q "Bluetit successfully initialized and ready"; then
+  echo "FAIL: no init line on stdout (syslog forwarder broken?)"; echo "$out"; exit 1
+fi
+if echo "$out" | grep -q NOLOCK; then
+  echo "FAIL: no lock file"; echo "$out"; exit 1
+fi
 echo "ok"
 
 echo "== 3. our directives landed in bluetit.rc, shipped ones survived =="
