@@ -187,13 +187,13 @@ spec:
     - name: servarr-qbittorrent
       interval: 60s
       rules:
-        # qBittorrent VPN flap (#352). The tenseiken/qbittorrent-wireguard image
-        # carries WireGuard in-container with an iptables kill-switch; a tunnel
-        # failure manifests as the container restarting (re-running "Starting
-        # WireGuard"), not as steady-state error log lines (it emits none). So
-        # the reliable signal is restart churn, not a LogQL match.
+        # qBittorrent VPN flap (#352). The Bluetit sidecar owns the tunnel now,
+        # so a VPN flap restarts the `airvpn` container, not `qbittorrent` -
+        # the app container's own probes only touch the local WebUI and its
+        # restart count stays flat through a VPN flap. Match both containers
+        # or the alert cannot fire for the thing it is named after.
         - alert: QbittorrentVpnFlap
-          expr: increase(kube_pod_container_status_restarts_total{namespace="servarr", pod=~"qbittorrent.*", container="qbittorrent"}[15m]) > 2
+          expr: increase(kube_pod_container_status_restarts_total{namespace="servarr", pod=~"qbittorrent.*", container=~"qbittorrent|airvpn"}[15m]) > 2
           for: 5m
           labels:
             severity: warning

@@ -1109,7 +1109,7 @@ Force-push on a feature branch after a rebase is expected here, but the rule sta
 
 - [ ] **Step 2: Open the PR with a test plan**
 
-Draft the body, **show it to Spyros, and only post after he confirms.** It must include the Task 4 measurements and an unchecked `## Test plan` matching Step 4 below — every box gets run and the result recorded by editing the PR description, never as a new comment.
+Draft the body, **show it to Spyros, and only post after he confirms.** It must include the Task 4 measurements and an unchecked `## Test plan` matching Steps 4-6 below — every box gets run and the result recorded by editing the PR description, never as a new comment.
 
 - [ ] **Step 3: Merge and let ArgoCD sync**
 
@@ -1122,7 +1122,35 @@ kubectl -n servarr rollout status deploy/qbittorrent --timeout=300s
 
 The Deployment uses `Recreate`, so the old pod goes away before the new one starts — expect a short outage, which is correct given one VPN session at a time.
 
-- [ ] **Step 4: Run the verification list**
+- [ ] **Step 4: Bind qBittorrent to `tun0` — REQUIRED, do this BEFORE trusting anything in Step 5**
+
+The live PVC's `/config/qBittorrent/config/qBittorrent.conf` still has `Session\Interface=wg0`,
+`Session\InterfaceName=wg0`, `Connection\Interface=wg0` and `Connection\InterfaceName=wg0`. `wg0`
+was created by the *old* image's internal `wg-quick` and no longer exists — Bluetit's device is
+`tun0`. Left as `wg0`, qBittorrent logs `The configured network interface is invalid. Interface:
+"wg0"`, opens no listen socket, and moves zero data — while the WebUI keeps answering, so **both
+httpGet probes stay green, the pod stays Ready, and ArgoCD stays Synced/Healthy** the whole time.
+That error goes to qBittorrent's own log file, not stdout, so Loki cannot see it either — this is
+not a hypothetical, it was reproduced against the exact pinned image digest.
+
+Two ways to fix it, pick one:
+
+- **WebUI** (no downtime): Settings → Connections → Network Interface → select `tun0` → Save.
+- **Direct conf edit**: qBittorrent must be **stopped first** — it rewrites the whole conf file on
+  exit, so an edit made while it is running gets overwritten. Stop it, change all four keys from
+  `wg0` to `tun0`, then start it again.
+
+Do **not** clear the interface field instead of setting `tun0` — binding to the tunnel device is a
+second, independent leak guard (see the comment on the app container in `qbittorrent.yaml`): a
+socket bound to `tun0` breaks rather than silently falling back to `eth0`.
+
+**Follow-up:** this binding is PVC state, not git, so it does not survive a fresh PVC and nothing
+in this repo enforces it. The same shape was already solved twice for other PVC-only servarr
+config — issue #137 (newtarr config seed) and #138 (Cleanuparr blocklist) — via a SOPS-seeded
+Secret plus a non-clobbering `initContainer`. Worth doing the same here; open as a follow-up issue
+per the repo rule rather than doing it inside this task.
+
+- [ ] **Step 5: Run the verification list**
 
 ```bash
 POD=$(kubectl -n servarr get pod -l app=qbittorrent -o name | head -1)
@@ -1133,15 +1161,40 @@ kubectl -n servarr exec $POD -c airvpn -- sh -c "curl -s -o /dev/null --max-time
 kubectl -n servarr exec $POD -c airvpn -- sh -c "head -c 10000000 /dev/zero | curl -s -o /dev/null --max-time 45 -X POST --data-binary @- -H 'Expect:' -w 'up speed=%{speed_upload} B/s\n' https://speed.cloudflare.com/__up"
 kubectl -n servarr exec $POD -c qbittorrent -- nslookup sonarr.servarr.svc.cluster.local 192.168.10.30
 curl -s -o /dev/null -w "webui http=%{http_code}\n" http://qbittorrent.epaflix.com/
+
+# --- The two checks below are the ones that actually catch the wg0/tun0 bug.
+# A green WebUI curl and a green ArgoCD Synced/Healthy prove NOTHING about the
+# download client here — both only touch/observe the local WebUI HTTP server,
+# which answers fine whether or not qBittorrent could bind its BT socket.
+
+# 1. qBittorrent's own log must show a successful listen on tun0, not the
+#    "configured network interface is invalid" error. Check via the WebUI's
+#    own Log viewer (Execution Log, filter Normal+Info), or if shelling in:
+kubectl -n servarr exec $POD -c qbittorrent -- sh -c \
+  'grep -i "network interface" /config/qBittorrent/data/logs/*.log 2>/dev/null | tail -5 || echo "check the WebUI Log viewer instead"'
+
+# 2. Torrents must genuinely transfer data - not just answer HTTP. Confirm
+#    dl_info_data/up_info_data actually climb across a wait, with an active
+#    torrent present (a flat counter is exactly the wg0-bug symptom):
+kubectl -n servarr exec $POD -c qbittorrent -- sh -c 'curl -s http://localhost:8080/api/v2/transfer/info'
+# ... wait 5-10 minutes with a torrent downloading/seeding, then re-run and
+# diff the two outputs. Also confirm connection status is "Connected"/"Firewalled"
+# and NOT "Disconnected" in the WebUI status bar.
 ```
 
-Expected: connected to a server outside the blacklist; AirVPN exit IP; loss near 0%; throughput in the order of the bare host; DNS resolves; WebUI answers.
+Expected: connected to a server outside the blacklist; AirVPN exit IP; loss near 0%; throughput in
+the order of the bare host; DNS resolves; WebUI answers; qBittorrent's log shows a clean listen on
+`tun0` with no interface error; transfer counters actually increase over time.
 
-- [ ] **Step 5: Confirm the port forward still works**
+- [ ] **Step 6: Verify the port forward**
 
-Set qBit's "Connections → Port used for incoming connections" to `39998` if it did not survive, then check reachability from outside the tunnel. The AirVPN forward is account-wide so it follows the chosen server, but verify rather than assume.
+`QBT_TORRENTING_PORT` already passes `--torrenting-port=39998` to the app container declaratively —
+this is no longer a manual WebUI step, so there is nothing to "set … if it did not survive". Just
+confirm it took: check qBit's Settings → Connections shows `39998`, and check reachability from
+outside the tunnel. The AirVPN forward is account-wide so it follows the chosen server, but verify
+rather than assume.
 
-- [ ] **Step 6: Soak 24h, then record**
+- [ ] **Step 7: Soak 24h, then record**
 
 ```bash
 kubectl -n servarr get pod -l app=qbittorrent -o jsonpath='{.items[0].status.containerStatuses[*].restartCount} {.items[0].status.initContainerStatuses[*].restartCount}{"\n"}'
@@ -1153,6 +1206,11 @@ Expected: restart counts flat (the baseline being 59 restarts in 12 days), and f
 ---
 
 ### Task 8: Nick's VM
+
+> **Corrected from the Task 4 scratch-pod findings** — this task was written before Task 4 ran and
+> still carried three settings the scratch pod proved fatal (see Task 5's "Everything below is
+> derived from a live scratch-pod run" note). Fixed below so executing this task does not
+> reproduce already-diagnosed bugs.
 
 **Files:**
 - Create: `1-proxmox/user-vms/nick/docker-compose.yml`
@@ -1179,14 +1237,21 @@ services:
   airvpn:
     image: ghcr.io/spyrospsarras/airvpn-bluetit:latest
     container_name: airvpn
-    cap_add: ["NET_ADMIN"]
-    sysctls:
-      net.ipv6.conf.all.disable_ipv6: "1"
+    # SYS_MODULE is REQUIRED, not defensive - same as the k8s sidecar. Without
+    # it Bluetit fails with "Error while loading kernel module wireguard (-3)"
+    # and never connects, even though the module is already loaded on the
+    # host. The /lib/modules mount is required for the same reason.
+    cap_add: ["NET_ADMIN", "SYS_MODULE"]
+    volumes:
+      - ./bluetit.conf:/config/bluetit.conf:ro
+      - /lib/modules:/lib/modules:ro
+    # No IPv6-disabling sysctl here - Bluetit unconditionally assigns the
+    # AirVPN device's IPv6 address to tun0, and with IPv6 disabled the connect
+    # thread dies on "IPv6 is disabled on this device" (same failure verified
+    # on the k3s scratch pod in Task 4 / qbittorrent.yaml's init-sysctls).
     environment:
       AIRVPN_USERNAME: ${AIRVPN_USERNAME:?set in .env}
       AIRVPN_PASSWORD: ${AIRVPN_PASSWORD:?set in .env}
-    volumes:
-      - ./bluetit.conf:/config/bluetit.conf:ro
     ports:
       # Published here, not on qbittorrent, because qbittorrent shares this
       # container's network namespace.
@@ -1196,12 +1261,20 @@ services:
     restart: unless-stopped
 
   qbittorrent:
-    image: tenseiken/qbittorrent-wireguard:latest
+    # Must be the official image, matching the Kubernetes side - NOT
+    # tenseiken/qbittorrent-wireguard. VPN_ENABLED does not exist in that
+    # image, its VPN is mandatory, and with no WireGuard config present it
+    # hard-exits 1 on "No WireGuard config file found" - there is no way to
+    # run it VPN-less. See qbittorrent.yaml / Task 5 Step 2 for the same fix
+    # on the cluster side.
+    image: qbittorrentofficial/qbittorrent-nox
     container_name: qbittorrent
     network_mode: "service:airvpn"
     depends_on: [airvpn]
     environment:
-      VPN_ENABLED: "no"
+      # Declarative BT port, matching QBT_TORRENTING_PORT on the k8s side -
+      # no manual WebUI step needed for this part.
+      QBT_TORRENTING_PORT: "39998"
       # remaining env copied verbatim from Step 1
     volumes:
       # copied verbatim from Step 1
@@ -1211,6 +1284,16 @@ services:
 `bluetit.conf` next to it is the ConfigMap body from Task 3 with one change: `airkey nick`.
 
 `cloudflared` stays outside the VPN and is not part of this compose.
+
+- [ ] **Step 2b: Bind qBittorrent to `tun0` — same trap as the cluster side**
+
+Nick's config faces the identical failure mode as plan Task 7 Step 4: his existing
+`qBittorrent.conf` almost certainly still has `Session\Interface`/`Connection\Interface` pointed at
+whatever device his previous setup created, not `tun0`. Left wrong, qBittorrent opens no listen
+socket and moves no data while the WebUI keeps answering. Fix it the same way: either WebUI
+Settings → Connections → Network Interface → `tun0`, or stop qBittorrent, edit all four
+`*Interface`/`*InterfaceName` keys in the conf file to `tun0` by hand (it must be stopped first —
+it rewrites the file on exit), then start it again.
 
 - [ ] **Step 3: Write the README**
 

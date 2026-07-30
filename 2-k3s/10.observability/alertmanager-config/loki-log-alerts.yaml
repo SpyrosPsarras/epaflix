@@ -10,16 +10,22 @@
 # Alertmanager (alertmanager_url set in loki-values.yaml rulerConfig), which
 # routes by severity/namespace and emails admin@epaflix.com.
 #
-# Scope: groups A (servarr error spikes) and D (cluster-wide panic/fatal) plus
-# the app-specific log rules authored against real log strings read from the live
-# cluster (#352):
+# Scope: groups A (servarr error spikes), D (cluster-wide panic/fatal) and E
+# (AirVPN Bluetit sidecar reconnects) plus the app-specific log rules authored
+# against real log strings read from the live cluster (#352):
 #   B — Postgres FATAL/PANIC/deadlock (CloudNativePG JSON: record.error_severity)
 #   C — Authentik failed logins (audit action login_failed)
-# Two B/C items are NOT log rules and live elsewhere:
-#   - qBittorrent VPN flap → restart-count PrometheusRule in custom-alerts.yaml
-#     (0 error lines exist in-container; a "flap" is the container restarting).
+#   E — AirVPN Bluetit forced-reconnect log line (container="airvpn")
+# One item is NOT a log rule and lives elsewhere:
 #   - Traefik 5xx → needs Traefik Prometheus metrics + ServiceMonitor enabled
 #     first (still open in #352); 5xx is a metric, not a log line.
+# qBittorrent VPN flap is NOT purely covered by the restart-count PrometheusRule
+# in custom-alerts.yaml any more, and it is no longer true that zero error lines
+# exist in-container: since the Bluetit sidecar took over the tunnel, the
+# `airvpn` container is precisely the one that emits log lines, and group E
+# above alerts directly on them. The restart-count rule was also fixed to match
+# `container=~"qbittorrent|airvpn"`, since a flap now restarts `airvpn`, not
+# `qbittorrent`.
 apiVersion: v1
 kind: ConfigMap
 metadata:

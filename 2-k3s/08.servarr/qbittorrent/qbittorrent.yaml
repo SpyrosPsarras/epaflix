@@ -119,6 +119,18 @@ spec:
                 - SYS_MODULE
       containers:
         - name: qbittorrent
+          # qBittorrent must be bound to the sidecar's tunnel device, tun0 - a
+          # second, independent leak guard on top of the network lock, and a
+          # strong one: a socket bound to tun0 breaks rather than silently
+          # falling back to eth0. This lives in PVC state, NOT here:
+          # /config/qBittorrent/config/qBittorrent.conf's Session\Interface,
+          # Session\InterfaceName, Connection\Interface and
+          # Connection\InterfaceName. The old tenseiken image created wg0 via
+          # its internal wg-quick; that device no longer exists, so the conf
+          # still pointing at wg0 makes qBittorrent open no listen socket while
+          # the WebUI keeps answering (both probes stay green - see plan
+          # Task 7). Must be changed to tun0 by hand post-deploy; not yet
+          # codified as a SOPS seed (see plan Task 7 follow-up).
           image: qbittorrentofficial/qbittorrent-nox
           env:
             - { name: PUID, value: "568" }
@@ -172,6 +184,10 @@ spec:
           persistentVolumeClaim:
             claimName: servarr-media
         - name: bluetit-config
+          # Plain ConfigMap reference, not a configMapGenerator output - it has
+          # no content-hash suffix, so editing the server pool does NOT roll
+          # this pod automatically. Follow up with:
+          #   kubectl -n servarr rollout restart deploy/qbittorrent
           configMap:
             name: airvpn-bluetit-config
             items:
