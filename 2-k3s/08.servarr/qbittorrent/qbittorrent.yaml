@@ -84,6 +84,16 @@ spec:
             - name: lib-modules
               mountPath: /lib/modules
               readOnly: true
+          # Gates the app container: k8s only waits for a sidecar's PROCESS to
+          # start, so without this qbittorrent would run for ~15s before the
+          # tunnel and the iptables lock exist. Measured on a scratch pod:
+          # ~20s from container start to "Connected to AirVPN server".
+          startupProbe:
+            exec:
+              command: ["sh","-c","goldcrest --bluetit-status | grep -q 'Connected to AirVPN server'"]
+            periodSeconds: 5
+            failureThreshold: 36
+            timeoutSeconds: 10
           livenessProbe:
             exec:
               # The connected output contains "Connected to AirVPN server <name>".
@@ -91,7 +101,6 @@ spec:
               # The disconnected form is "Bluetit is not connected", so do not
               # grep for a bare "connected".
               command: ["sh","-c","goldcrest --bluetit-status | grep -q 'Connected to AirVPN server'"]
-            initialDelaySeconds: 90
             periodSeconds: 60
             timeoutSeconds: 20
             failureThreshold: 3
