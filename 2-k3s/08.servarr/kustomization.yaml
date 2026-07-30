@@ -149,3 +149,12 @@ images:
   # :rolling tag; this override swaps in the digest for both refs.
   - name: ghcr.io/elfhosted/newtarr
     digest: sha256:6abafe8ee23c96e3c9e298b5f9ef8313f1d231546b794900d4da36caa22912f0
+  # Official qBittorrent. Replaced tenseiken/qbittorrent-wireguard, which cannot
+  # run without a VPN of its own (2026-07-30 Bluetit sidecar migration).
+  - name: qbittorrentofficial/qbittorrent-nox
+    digest: sha256:9ebb534fe30bab98622cb84a8c3acecfd88319b2d540f52ecdec7b9f866374d7
+  # ghcr.io/spyrospsarras/airvpn-bluetit intentionally NOT pinned here yet: the
+  # build workflow (Task 2) only pushes from `main`, and this branch is
+  # unmerged, so no real digest exists to pin. The Deployment stays on
+  # its :latest tag until the image is first published; pin it in a
+  # follow-up once a digest is available.
