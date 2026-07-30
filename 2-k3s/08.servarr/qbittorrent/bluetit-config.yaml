@@ -1,0 +1,54 @@
+---
+# Non-secret Bluetit directives. Kept out of the Secret on purpose so that
+# server-pool changes are readable in a PR diff.
+#
+# Syntax is DIRECTIVE<whitespace>VALUE - not `key = value`. Copied from the
+# shipped bluetit.rc, which this fragment is appended to at container start.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: airvpn-bluetit-config
+  namespace: servarr
+data:
+  bluetit.conf: |
+    # quick = connect to an AirVPN-recommended server from the whitelist,
+    # minus the blacklist. This is the whole point of using Bluetit: WireGuard
+    # cannot fail over inside one config, so the client has to choose.
+    airconnectatboot            quick
+    airvpntype                  wireguard
+    airport                     1637
+
+    # Wider than nl on purpose, so a quick-connect has somewhere to go when
+    # Amsterdam is busy.
+    airwhitecountrylist         nl,de,se
+
+    # Measured bad on 2026-07-30 from k3s-worker-61: 6.7-9% packet loss each,
+    # all three are 2 Gbit boxes in Alblasserdam at 50-57% load, and
+    # nl3.vpn.airdns.org rotates between them. AirVPN's own status API still
+    # called them health=ok, so do not trust that flag - measure before editing
+    # this list. Recipe is in the design doc.
+    airblackserverlist          Cygnus,Hassaleh,Kajam
+
+    # Home country. Bluetit auto-detects this correctly via ipleak.net, but
+    # pinning it avoids an outbound call on every start.
+    country                     NO
+    forbidquickhomecountry      yes
+
+    # Real killswitch, replacing the postStart iptables hack. allowprivatenetwork
+    # keeps Pi-hole DNS (192.168.10.30), the cluster CIDRs and the WebUI
+    # reachable. allowping is REQUIRED - without it the lock drops the ICMP the
+    # degradation probe runs on and the probe reads a healthy tunnel as dead.
+    networklock                 iptables
+    allowprivatenetwork         yes
+    allowping                   yes
+
+    # Matches the init-sysctls container, which disables IPv6.
+    airipv6                     no
+
+    # SIGUSR2 reconnect only works with TUN persistence on. The probe depends
+    # on it - do not set this to no.
+    tunpersist                  yes
+
+    # AirVPN device key. Default = the cluster (10.135.227.175). Nick's VM uses
+    # its own key `nick`, so the two never share key material.
+    airkey                      Default
