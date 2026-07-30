@@ -18,7 +18,7 @@
 - Encrypting needs only the public age recipient in `.sops.yaml`. The private key is **not** on this workstation; read it from cluster Secret `argocd/sops-age` if a decrypt is needed.
 - **Push aligned git BEFORE ArgoCD reconciles**, or automated sync reverts live to pre-change main.
 - Merge policy: rebase onto `origin/main`, `push --force-with-lease`, wait for the `validate` check, then `gh pr merge <n> --merge`. **Never merge without Spyros's explicit OK.**
-- Secrets live only in `.github/instructions/secrets.yml` (git-ignored). AirVPN account credentials are already there as `airVPN_user` / `airVPN_password` (that casing, not `airvpn_*`).
+- Secrets live only in `.github/instructions/secrets.yml` (git-ignored). AirVPN account credentials are there as `airvpn_user` / `airvpn_password`, inside the existing `airvpn_*` block.
 - `bluetit.rc` directives are **whitespace-separated**, not `key = value`.
 - AirVPN Suite version pinned to `2.1.0`, sha512 `e17add5769b50683a4d2e480995fbe83d9f4b05b9738de58de9ce922ea80b13317b502ad4a49ee01bd23bcf10b8df96a3242fa3e5f9d20138665373c2445720d`.
 - Image name: `ghcr.io/spyrospsarras/airvpn-bluetit`.
@@ -535,8 +535,8 @@ Write the plaintext **outside the repo** so the pre-commit hook never sees it, a
 ```bash
 mkdir -p /tmp/airvpn-secret && cd /tmp/airvpn-secret
 REPO=/home/spy/Documents/Epaflix/k3s-swarm-proxmox-vpn
-U=$(grep '^airVPN_user:' $REPO/../k3s-swarm-proxmox/.github/instructions/secrets.yml | cut -d'"' -f2)
-P=$(grep '^airVPN_password:' $REPO/../k3s-swarm-proxmox/.github/instructions/secrets.yml | cut -d'"' -f2)
+U=$(grep '^airvpn_user:' $REPO/../k3s-swarm-proxmox/.github/instructions/secrets.yml | cut -d'"' -f2)
+P=$(grep '^airvpn_password:' $REPO/../k3s-swarm-proxmox/.github/instructions/secrets.yml | cut -d'"' -f2)
 cat > airvpn-credentials.enc.yaml <<YAML
 apiVersion: v1
 kind: Secret
