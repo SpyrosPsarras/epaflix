@@ -114,15 +114,20 @@ Rejected alternatives:
   ourselves publish.
 
 **Entrypoint.** Bluetit forks and writes `/etc/airvpn/bluetit.lock` (a PID file), so the container
-needs something holding the foreground:
+needs something holding the foreground. Actual order, matching `images/airvpn-bluetit/entrypoint.sh`:
 
-1. start `dbus-daemon --system`
-2. start `busybox syslogd -n -O /dev/stdout`
-3. render `/etc/airvpn/bluetit.rc` (below)
+1. render `/etc/airvpn/bluetit.rc` (below)
+2. start `dbus-daemon --system --fork`
+3. start `busybox syslogd -n -O /dev/stdout` in the background
 4. launch `/sbin/bluetit`
-5. wait for the tunnel to come up
+5. wait (up to 30s) for `/etc/airvpn/bluetit.lock` to appear — this only confirms Bluetit's
+   process started, **not** that the tunnel connected
 6. run the degradation probe loop, and watch the PID — if Bluetit dies, exit non-zero so
    Kubernetes restarts the container rather than leaving a live pod with a dead VPN
+
+The entrypoint itself never waits for the tunnel to come up. That job belongs to the Kubernetes
+`startupProbe` (Component 3), which polls `goldcrest --bluetit-status` for `Connected to AirVPN
+server` and gates the app container on it.
 
 Bluetit requires `root`.
 
@@ -166,7 +171,7 @@ airblackserverlist          Cygnus,Hassaleh,Kajam
 airport                     1637
 country                     NO
 forbidquickhomecountry      yes
-networklock                 iptables
+networklockpersist           iptables
 allowprivatenetwork         yes
 allowping                   yes
 airipv6                     no
@@ -185,10 +190,10 @@ Notes on specific directives:
   `nick` for his VM. The two keep separate AirVPN device keys, as they do today
   (`Default` = `10.135.227.175`, `nick` = `10.154.38.229`).
 - `tunpersist yes` is load-bearing, not cosmetic: **SIGUSR2 reconnect only works with TUN
-  persistence enabled**. Whether it also needs a `/dev/net/tun` mount under
-  `airvpntype wireguard` is **still unverified** — Bluetit starts without the device, but no
-  connection has been attempted yet. On the verification list; if it needs the device, add the
-  mount back.
+  persistence enabled**. Whether it also needs a `/dev/net/tun` mount under `airvpntype wireguard`
+  was open at design time; it is **no longer unverified** — the Task 4 scratch pod connected with
+  **no** `/dev/net/tun` mount at all (WireGuard goes through the kernel module, not a userspace tun
+  device), so the mount was not added and none is present in the Deployment. See Verification.
 - `allowping yes` is required, not optional: the network lock would otherwise drop the ICMP the
   degradation probe depends on, and the probe would read a healthy tunnel as dead. Verified —
   the connected status reports "Ping is allowed to pass the network filter".
@@ -243,6 +248,13 @@ Added — `airvpn` native sidecar:
 - a **`/lib/modules` hostPath mount, read-only**
 - **no `/dev/net/tun` mount** — confirmed unnecessary; WireGuard goes through the kernel module
 - liveness probe keyed on the string `Connected to AirVPN server`
+- **startupProbe on the same string** — this is the single control standing between pod start and
+  a leak. Kubernetes only waits for a sidecar's *process* to start, not for it to actually be
+  connected, so without this the app container would run for ~20s before the tunnel and the
+  network lock exist. It only gates first pod start, though — it does not re-run on a later
+  sidecar restart, which is exactly why the network lock has to be `networklockpersist`, not
+  `networklock` (Component 2), for the restart case to stay safe. Do not trim this as redundant
+  with the liveness probe; the two cover different moments.
 
 `SYS_MODULE` and `/lib/modules` are both mandatory, and neither was in the original design.
 Bluetit insists on loading `iptable_filter`, `iptable_nat`, `iptable_mangle`, `iptable_security`,
@@ -261,9 +273,16 @@ IPv6 address to `tun0`, and with IPv6 off the connect thread dies on
 
 Three failure modes, deliberately separated:
 
-1. **Bluetit dies.** Entrypoint exits non-zero → sidecar restarts. While it is down the network
-   lock blocks everything except private networks, so there is no leak. This is a real killswitch
-   replacing the one we currently fake with `postStart`.
+1. **Bluetit dies.** Entrypoint exits non-zero → sidecar restarts. This is only a leak-free restart
+   because the lock directive is `networklockpersist`, not plain `networklock` (Component 2):
+   `networklock` only holds *during the connection*, so it would drop the moment the sidecar
+   process restarts and stay down for the ~20s Bluetit takes to reconnect, while Kubernetes leaves
+   the already-running qbittorrent container untouched — the `startupProbe` only gates first pod
+   start, not a later sidecar restart. `networklockpersist` holds for the whole Bluetit *session*
+   instead, so the lock stays armed across the restart. **This claim has not been live-tested
+   end-to-end** (kill the sidecar mid-transfer and confirm zero packets leave during the reconnect
+   window) — that test is still owed, not assumed. This is a real killswitch replacing the one we
+   currently fake with `postStart`.
 2. **Tunnel drops but Bluetit lives.** Bluetit reconnects on its own.
 3. **Server stays up but goes bad** — today's failure. Neither the network lock nor a restart
    notices it. A loop in the sidecar pings the tunnel gateway; after N consecutive bad checks it

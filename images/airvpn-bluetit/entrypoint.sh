@@ -48,6 +48,10 @@ now_secs() { cut -d. -f1 /proc/uptime; }
 strikes=0
 last_reconnect=0
 
+# Known bound, not a surprise: kill -0 is only re-checked at the top of each
+# iteration, and each iteration starts with `sleep "$PROBE_INTERVAL"` before
+# the next check runs - so a Bluetit death right after a check is noticed up
+# to PROBE_INTERVAL (default 60s) later, not immediately.
 while kill -0 "$BLUETIT_PID" 2>/dev/null; do
   sleep "$PROBE_INTERVAL"
 
