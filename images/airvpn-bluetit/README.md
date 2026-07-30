@@ -49,23 +49,23 @@ output and looks like a silent crash. `entrypoint.sh` runs
    the new binary links something not in the current package list.
 
 There is a `customManager` regex on `ARG AIRVPN_SUITE_VERSION` in
-`.github/renovate.json` (`datasourceTemplate: gitlab-tags` against
-`AirVPN/AirVPN-Suite`), meant to open a PR whenever a newer version ships. In
-practice `AirVPN/AirVPN-Suite` has no git tags or GitLab releases at all - only
-tarballs committed straight to `master` under `binary/` - so this lookup has
-nothing to compare against and will not fire today (tracked in
-[#487](https://github.com/SpyrosPsarras/epaflix/issues/487)). Until that is
-resolved, treat this as a fully manual process: watch the
-[binary/ directory](https://gitlab.com/AirVPN/AirVPN-Suite/-/tree/master/binary)
-for a new version yourself and follow steps 1-3 above.
+`.github/renovate.json`, so version bumps ARE detected automatically. Since
+`AirVPN/AirVPN-Suite` has no git tags or GitLab releases at all - only tarballs
+committed straight to `master` under `binary/` (see
+[#487](https://github.com/SpyrosPsarras/epaflix/issues/487)) - the datasource is
+a `custom.airvpn-suite-x86_64` entry (also in `.github/renovate.json`) that
+lists that directory via the GitLab repository-tree API and reads the version
+straight out of the `AirVPN-Suite-x86_64-<version>.tar.gz` filename (the
+non-legacy x86_64 build specifically - the directory also holds `-legacy` and
+aarch64/armv7l/hummingbird-macos-* variants that must not be mistaken for a
+version bump).
 
-Even if the datasource lookup is fixed, Renovate can only ever bump the
-`AIRVPN_SUITE_VERSION` line - it cannot compute or fetch the sha512, so
-`AIRVPN_SUITE_SHA512` would always be left pointing at the old tarball's
-checksum. The build step in the Dockerfile verifies the checksum and fails
-closed rather than build against a mismatched binary, so any Renovate-opened
-PR for this still needs steps 1-2 above done by hand, on top of it, before it
-can merge.
+Renovate can still only ever bump the `AIRVPN_SUITE_VERSION` line - it cannot
+compute or fetch the sha512, so `AIRVPN_SUITE_SHA512` is always left pointing
+at the old tarball's checksum. The build step in the Dockerfile verifies the
+checksum and fails closed rather than build against a mismatched binary, so
+every Renovate-opened PR for this still needs step 1 above (fetch the new
+sha512) done by hand before it can merge.
 
 ## Running the tests
 
