@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace qBittorrent's pinned single AirVPN WireGuard endpoint with the official AirVPN Suite running as a sidecar, so a server whitelist/blacklist replaces the hardcoded IP and a degraded-but-up server self-heals.
+**Goal:** Replace qBittorrent's pinned single AirVPN WireGuard endpoint with the official AirVPN Suite running as a sidecar, so a server whitelist/blacklist replaces the hardcoded IP, and a degrading tunnel is detected and surfaced instead of going unnoticed.
 
-**Architecture:** One small image carries D-Bus + the AirVPN Suite. It runs as a Kubernetes native sidecar (initContainer with `restartPolicy: Always`) owning the WireGuard tunnel and the iptables network lock. qBittorrent keeps its current image with its own VPN switched off and rides the pod's shared network namespace. Nick's VM reuses the same image via `network_mode: "service:airvpn"`.
+**Architecture:** One small image carries D-Bus + the AirVPN Suite. It runs as a Kubernetes native sidecar (initContainer with `restartPolicy: Always`) owning the WireGuard tunnel and the iptables network lock. The app container moves to `qbittorrentofficial/qbittorrent-nox` and rides the pod's shared network namespace - the current `tenseiken` image cannot run without a VPN at all. Nick's VM reuses the same image via `network_mode: "service:airvpn"`.
 
 **Tech Stack:** Debian 13 slim, AirVPN Suite 2.1.0 (Bluetit daemon + Goldcrest client), Docker/GHCR, Kustomize + ksops/SOPS+age, ArgoCD, Prometheus/Loki alerts.
 
@@ -517,7 +517,15 @@ data:
     allowping                   yes
 
     # Matches the init-sysctls container, which disables IPv6.
+    # NB: neither of these stops Bluetit assigning the device's IPv6 to tun0.
+    # They express intent only. The pod must NOT disable IPv6 - see Task 5.
     airipv6                     no
+    air6to4                     no
+
+    # REQUIRED. Without it Bluetit throws "Cannot set pushed DNS to system"
+    # (kubelet owns /etc/resolv.conf) and that exception tears down a tunnel
+    # that has ALREADY connected. Verified on a scratch pod 2026-07-30.
+    ignorednspush               yes
 
     # SIGUSR2 reconnect only works with TUN persistence on. The probe depends
     # on it - do not set this to no.
@@ -769,27 +777,96 @@ Write the measured numbers into the PR description in Task 7. If anything in Ste
 
 **Files:**
 - Modify: `2-k3s/08.servarr/qbittorrent/qbittorrent.yaml`
-- Modify: `2-k3s/08.servarr/kustomization.yaml` (pin the image digest)
-
-**Blocked by:** Task 4 passing.
+- Modify: `2-k3s/08.servarr/qbittorrent/bluetit-config.yaml` (two directives found necessary in Task 4)
+- Modify: `2-k3s/08.servarr/kustomization.yaml` (pin both image digests)
 
 **Interfaces:**
-- Consumes: image digest from Task 2, ConfigMap + Secret names from Task 3, verified findings from Task 4.
+- Consumes: the image from Task 2, ConfigMap `airvpn-bluetit-config` (key `bluetit.conf`) and Secret `airvpn-credentials` (keys `airusername`, `airpassword`) from Task 3.
 - Produces: the final Deployment. Task 7 deploys it.
 
-- [ ] **Step 1: Replace the header comment**
+**Everything below is derived from a live scratch-pod run on 2026-07-30, not from theory.** Seven
+things in the original design were wrong; each correction is marked WHY so it does not get
+"tidied" back to the broken form.
 
-The current comment block (lines 1-26) documents the WireGuard/`postStart` design that this task removes. Rewrite it to describe the sidecar, and keep the two facts that are still true: live-wins drift policy, and that BT port 39998 must also be set in qBit's WebUI under Connections.
+- [ ] **Step 1: Add the two missing directives to the ConfigMap**
 
-- [ ] **Step 2: Add the sidecar**
+In `bluetit-config.yaml`, alongside `airipv6 no`, add:
 
-Insert into `initContainers`, after `init-sysctls` (order matters — native sidecars start in list order, and the sysctls must be set first):
+```
+    air6to4                     no
+    ignorednspush               yes
+```
+
+WHY `ignorednspush`: without it Bluetit throws `Cannot set pushed DNS to system` because kubelet
+owns `/etc/resolv.conf`, and that exception **tears down a tunnel that has already connected** —
+`goldcrest` then reports "Bluetit is not connected" with no error in the status output. This was
+the single subtlest failure found.
+
+- [ ] **Step 2: Swap the app container image**
+
+Replace `tenseiken/qbittorrent-wireguard:latest` with `qbittorrentofficial/qbittorrent-nox`.
+
+WHY: `VPN_ENABLED` **does not exist** in the tenseiken image. Its VPN is mandatory — with no
+config it exits 1 on `No WireGuard config file found`, and the live Deployment's `VPN_ENABLED=yes`
+has always been a no-op. The author's README: *"I also dropped the option to just not use a VPN...
+I highly recommend you make use of the official qBittorrent repo"*.
+
+No `/config` migration is needed. That image's entrypoint uses `profilePath="/config"` and
+`/config/qBittorrent/config/qBittorrent.conf`, which is exactly what the live PVC holds, and it
+honours the same `PUID`/`PGID` and `qbtUser`.
+
+Set its env to exactly:
 
 ```yaml
-        # Native sidecar (restartPolicy: Always) - starts before the app
-        # container and keeps running. This replaces wg-quick inside the
-        # qbittorrent image: Bluetit takes a server whitelist/blacklist and
-        # picks an AirVPN-recommended server, which WireGuard alone cannot do.
+          env:
+            - { name: PUID, value: "568" }
+            - { name: PGID, value: "568" }
+            - { name: TZ, value: "Europe/Oslo" }
+            - { name: QBT_LEGAL_NOTICE, value: "confirm" }
+            - { name: QBT_WEBUI_PORT, value: "8080" }
+            # Declarative BT port - replaces the old manual "set it in the WebUI" step.
+            - { name: QBT_TORRENTING_PORT, value: "39998" }
+```
+
+Delete `VPN_ENABLED`, `LAN_NETWORK`, `NAME_SERVERS`, `ADDITIONAL_PORTS`, `HEALTH_CHECK_HOST`,
+`HEALTH_CHECK_AMOUNT`, the whole `lifecycle.postStart` block, and the `wireguard-config` and `tun`
+volumeMounts.
+
+Replace its `securityContext` with:
+
+```yaml
+          # No longer touches the network - the sidecar owns the tunnel and the
+          # lock, so this drops privileged and NET_ADMIN.
+          securityContext:
+            runAsUser: 0
+```
+
+- [ ] **Step 3: Stop disabling IPv6 in init-sysctls**
+
+Change its command to:
+
+```yaml
+            - |
+              sysctl -w net.ipv4.conf.all.rp_filter=2
+              sysctl -w net.ipv4.conf.all.src_valid_mark=1
+```
+
+WHY: Bluetit unconditionally assigns the AirVPN device's IPv6 address to `tun0`. With
+`net.ipv6.conf.all.disable_ipv6=1` the connect thread dies on
+`Error: ipv6: IPv6 is disabled on this device` and the tunnel never establishes. `airipv6 no` and
+`air6to4 no` do **not** prevent the assignment. Verified: removing the sysctl is what made it
+connect.
+
+- [ ] **Step 4: Add the sidecar**
+
+Append to `initContainers`, after `init-sysctls` (order matters — native sidecars start in list
+order and the sysctls must be set first):
+
+```yaml
+        # Native sidecar (restartPolicy: Always) - starts before the app container
+        # and keeps running. Replaces wg-quick inside the old qbittorrent image:
+        # Bluetit takes a server whitelist/blacklist and picks an AirVPN-recommended
+        # server, which WireGuard alone cannot do.
         - name: airvpn
           image: ghcr.io/spyrospsarras/airvpn-bluetit:latest
           restartPolicy: Always
@@ -808,14 +885,21 @@ Insert into `initContainers`, after `init-sysctls` (order matters — native sid
             - name: bluetit-config
               mountPath: /config
               readOnly: true
+            # REQUIRED. Bluetit checks modules.builtin and loads iptable_* and
+            # wireguard itself, even though the node already has them loaded.
+            - name: lib-modules
+              mountPath: /lib/modules
+              readOnly: true
           livenessProbe:
             exec:
-              # Anchored on purpose: the disconnected string is
-              # "Bluetit is not connected", which an unanchored grep matches.
-              command: ["sh","-c","goldcrest --bluetit-status | grep -q 'Bluetit is connected'"]
-            initialDelaySeconds: 60
+              # The connected output contains "Connected to AirVPN server <name>".
+              # It does NOT say "Bluetit is connected" - that string never appears.
+              # The disconnected form is "Bluetit is not connected", so do not
+              # grep for a bare "connected".
+              command: ["sh","-c","goldcrest --bluetit-status | grep -q 'Connected to AirVPN server'"]
+            initialDelaySeconds: 90
             periodSeconds: 60
-            timeoutSeconds: 15
+            timeoutSeconds: 20
             failureThreshold: 3
           resources:
             requests:
@@ -825,29 +909,19 @@ Insert into `initContainers`, after `init-sysctls` (order matters — native sid
             runAsUser: 0
             capabilities:
               add:
+                # SYS_MODULE is REQUIRED, not defensive. Without it Bluetit fails
+                # with "Error while loading kernel module wireguard (-3)" and never
+                # connects, even though the module is already loaded on the node.
                 - NET_ADMIN
+                - SYS_MODULE
 ```
 
-Use the exact connected string recorded in Task 4 Step 5 if it differs from `Bluetit is connected`.
+Note `initialDelaySeconds: 90` — the scratch pod took roughly 20 s from start to
+`Connected to AirVPN server`, so 90 s leaves headroom without letting a genuinely dead tunnel sit.
 
-- [ ] **Step 3: Strip the VPN wrapper from the app container**
+- [ ] **Step 5: Fix the volumes**
 
-In the `qbittorrent` container, delete the `lifecycle.postStart` block entirely and remove these env entries: `LAN_NETWORK`, `NAME_SERVERS`, `ADDITIONAL_PORTS`, `HEALTH_CHECK_HOST`, `HEALTH_CHECK_AMOUNT`. Set `VPN_ENABLED` to `"no"`. Keep `PUID`, `PGID`, `TZ`, `QBT_LEGAL_NOTICE`.
-
-Replace its `securityContext` with:
-
-```yaml
-          # No longer touches the network - the sidecar owns the tunnel and the
-          # lock, so this drops privileged and NET_ADMIN.
-          securityContext:
-            runAsUser: 0
-```
-
-Remove the `wireguard-config` and `tun` entries from its `volumeMounts`.
-
-- [ ] **Step 4: Fix the volumes**
-
-Remove the `wireguard-config` and `tun` volumes. Add:
+Remove `wireguard-config` and `tun`. Add:
 
 ```yaml
         - name: bluetit-config
@@ -856,21 +930,42 @@ Remove the `wireguard-config` and `tun` volumes. Add:
             items:
               - key: bluetit.conf
                 path: bluetit.conf
+        - name: lib-modules
+          hostPath:
+            path: /lib/modules
+            type: Directory
 ```
 
-Keep `config` and `media`.
+`/dev/net/tun` is confirmed unnecessary — the scratch pod connected without it.
 
-- [ ] **Step 5: Pin the image digest**
+- [ ] **Step 6: Rewrite the header comment**
+
+The current block (lines 1-26) documents the WireGuard/`postStart` design being deleted. Rewrite it
+to describe the sidecar, and keep the two facts still true: the live-wins drift policy, and that BT
+port 39998 is an account-wide AirVPN forward. Drop the "set it in the WebUI" instruction — Step 2
+makes it declarative.
+
+- [ ] **Step 7: Pin both image digests**
 
 In `2-k3s/08.servarr/kustomization.yaml` under `images:`:
 
 ```yaml
   # Our own image - see images/airvpn-bluetit/ and the 2026-07-30 design doc.
   - name: ghcr.io/spyrospsarras/airvpn-bluetit
-    digest: sha256:<digest printed by the build workflow>
+    digest: sha256:<digest printed by the build workflow in Task 2>
+  # Official qBittorrent. Replaced tenseiken/qbittorrent-wireguard, which cannot
+  # run without a VPN of its own.
+  - name: qbittorrentofficial/qbittorrent-nox
+    digest: sha256:<current digest>
 ```
 
-- [ ] **Step 6: Verify the manifest**
+Get the qBittorrent digest with:
+
+```bash
+docker buildx imagetools inspect qbittorrentofficial/qbittorrent-nox:latest --format '{{.Manifest.Digest}}'
+```
+
+- [ ] **Step 8: Verify the rendered Deployment shape**
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
@@ -885,30 +980,52 @@ inits=[c['name'] for c in spec['initContainers']]
 assert inits==['init-sysctls','airvpn'], inits
 side=[c for c in spec['initContainers'] if c['name']=='airvpn'][0]
 assert side['restartPolicy']=='Always'
+caps=side['securityContext']['capabilities']['add']
+assert set(caps)=={'NET_ADMIN','SYS_MODULE'}, caps
+assert any(m['mountPath']=='/lib/modules' for m in side['volumeMounts']), 'lib-modules not mounted'
+sysctls=[c for c in spec['initContainers'] if c['name']=='init-sysctls'][0]
+assert 'disable_ipv6' not in str(sysctls['command']), 'init-sysctls still disables IPv6'
 app=[c for c in spec['containers'] if c['name']=='qbittorrent'][0]
+assert 'qbittorrent-nox' in app['image'], app['image']
 assert 'lifecycle' not in app, 'postStart hook still present'
-assert app['securityContext'].get('privileged') is None, 'still privileged'
+assert app['securityContext'].get('privileged') is None, 'app still privileged'
 assert 'NET_ADMIN' not in str(app.get('securityContext',{})), 'app still has NET_ADMIN'
+env={e['name'] for e in app['env']}
+assert 'VPN_ENABLED' not in env and 'HEALTH_CHECK_HOST' not in env, env
+assert 'QBT_TORRENTING_PORT' in env
 names=[v['name'] for v in spec['volumes']]
 assert 'wireguard-config' not in names and 'tun' not in names, names
-assert 'bluetit-config' in names
+assert 'bluetit-config' in names and 'lib-modules' in names, names
+cm=[d for d in docs if d['kind']=='ConfigMap' and d['metadata']['name']=='airvpn-bluetit-config'][0]
+body=cm['data']['bluetit.conf']
+for req in ('ignorednspush','air6to4','allowping','tunpersist'):
+    assert req in body, req
 print('deployment shape ok')
 "
 unset SOPS_AGE_KEY
 ```
 
-Expected: `deployment shape ok`. This assertion block is the only thing that verifies the new
-pod shape before ArgoCD sees it — CI does not build `08.servarr` (see Task 3 Step 5). Run it.
+Expected: `deployment shape ok`. **CI does not build `08.servarr`** (see Task 3 Step 5), so this
+assertion block is the only thing standing between a broken manifest and ArgoCD. Run it.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add 2-k3s/08.servarr/qbittorrent/qbittorrent.yaml 2-k3s/08.servarr/kustomization.yaml
+git add 2-k3s/08.servarr/
 git -c core.hooksPath=.github/hooks commit -m "feat(servarr): run qbittorrent's VPN through a Bluetit sidecar
 
-Bluetit owns the tunnel and the iptables network lock; qBittorrent runs with
-VPN_ENABLED=no and shares the pod netns. Deletes the postStart iptables hack
-and the wrapper health-check env it needed.
+Bluetit owns the tunnel and the iptables network lock; the app container moves
+to the official qbittorrent-nox image and shares the pod netns. Deletes the
+postStart iptables hack and the wrapper health-check env it needed.
+
+The old tenseiken image had to go: VPN_ENABLED does not exist in it, its VPN is
+mandatory, and the Deployment's VPN_ENABLED=yes was always a no-op. The official
+image needs no /config migration - identical profile layout - and takes
+QBT_TORRENTING_PORT so the BT port stops being a manual WebUI step.
+
+Verified on a scratch pod: the sidecar needs SYS_MODULE and /lib/modules because
+Bluetit loads kernel modules itself, and init-sysctls must stop disabling IPv6
+or the connect thread dies assigning the device's IPv6 to tun0.
 
 Because the app container no longer touches the network it drops privileged and
 NET_ADMIN - only the sidecar keeps them."
@@ -934,13 +1051,13 @@ Follow the existing file's group/rule structure. The rule must match the entrypo
         - alert: AirVPNBluetitReconnecting
           expr: |
             sum(count_over_time({namespace="servarr", container="airvpn"}
-              |= "reconnect triggered" [30m])) > 2
+              |= "reconnect triggered" [30m])) > 0
           for: 5m
           labels:
             severity: warning
           annotations:
             summary: "AirVPN server degrading - Bluetit reconnected repeatedly"
-            description: "The Bluetit sidecar forced more than 2 reconnects in 30m because the tunnel gateway was losing packets. quick-mode should have moved to another recommended server; if this keeps firing the whitelisted pool (nl,de,se) is bad, not one server. Measure the candidate entry-3 IPs from the node before editing airblackserverlist - AirVPN's status API reported health=ok for all three servers that caused this. Recipe: docs/superpowers/specs/2026-07-30-airvpn-bluetit-vpn-layer-design.md"
+            description: "The Bluetit sidecar forced a reconnect because the tunnel gateway was losing packets. quick-mode should have moved to another recommended server; if this keeps firing the whitelisted pool (nl,de,se) is bad, not one server. Measure the candidate entry-3 IPs from the node before editing airblackserverlist - AirVPN's status API reported health=ok for all three servers that caused this. Recipe: docs/superpowers/specs/2026-07-30-airvpn-bluetit-vpn-layer-design.md"
 ```
 
 - [ ] **Step 2: Update the stale #352 description**
