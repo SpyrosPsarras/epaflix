@@ -492,9 +492,9 @@ data:
     airvpntype                  wireguard
     airport                     1637
 
-    # Wider than nl on purpose, so a quick-connect has somewhere to go when
-    # Amsterdam is busy.
-    airwhitecountrylist         nl,de,se
+    # Named 20 Gbit servers, NOT a country whitelist - a country list readmits
+    # the 2 Gbit boxes that caused the outage. All measured at 0% loss.
+    airwhiteserverlist          Dedalus,Piautos,Dalim,Menkent,Felix,Adhil,Ashlesha
 
     # Measured bad on 2026-07-30 from k3s-worker-61: 6.7-9% packet loss each,
     # all three are 2 Gbit boxes in Alblasserdam at 50-57% load, and
