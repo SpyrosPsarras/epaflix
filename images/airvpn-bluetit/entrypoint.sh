@@ -20,6 +20,15 @@ log() { echo "airvpn-bluetit: $*"; }
 /entrypoint-render.sh
 
 mkdir -p /run/dbus
+# A previous life of this container can leave /run/dbus/pid and
+# /run/dbus/system_bus_socket behind when /run/dbus is a shared volume (the
+# #498/#501 agent-sidecar design) - dbus-daemon refuses to start with a stale
+# pid file present (it never checks whether that pid is actually alive), so
+# under set -eu the script aborts before bluetit even starts and the
+# container CrashLoopBackOffs forever. Found by the #509 scratch-pod
+# prototype, reproduced twice. Same failure mode as the bluetit.lock cleanup
+# below, just a different leftover file.
+rm -f /run/dbus/pid /run/dbus/system_bus_socket
 dbus-daemon --system --fork
 
 # Bluetit logs ONLY to syslog - there is no logfile directive. Without this the
