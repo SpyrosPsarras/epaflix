@@ -117,20 +117,55 @@ spec:
                 # connects, even though the module is already loaded on the node.
                 - NET_ADMIN
                 - SYS_MODULE
+
+        # Binds qBittorrent to the tunnel device. Ordinary initContainer (no
+        # restartPolicy), so it runs to completion AFTER the airvpn sidecar is
+        # started and BEFORE the app container - which is the only window where
+        # tun0 exists and qBittorrent is not running.
+        #
+        # Why this cannot be done by hand in the WebUI: the Network interface
+        # dropdown only offers devices that exist at that moment, and today it
+        # lists wg0/lo/eth0 with no tun0, because wg0 is created by the OLD
+        # image we are removing. So the value has to be written while the new
+        # tunnel is up and qBittorrent is stopped - exactly here.
+        #
+        # Editing the file directly is safe only when qBittorrent is not
+        # running, because it rewrites the whole conf on exit and would
+        # clobber us. That holds here by construction.
+        - name: init-bind-interface
+          image: busybox:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              conf=/config/qBittorrent/config/qBittorrent.conf
+              [ -f "$conf" ] || { echo "no conf yet, first run - qBittorrent will create it"; exit 0; }
+              if grep -qE '^(Session|Connection)\\Interface(Name)?=tun0$' "$conf" \
+                 && ! grep -qE '^(Session|Connection)\\Interface(Name)?=(wg0|eth0)$' "$conf"; then
+                echo "already bound to tun0, nothing to do"; exit 0
+              fi
+              cp "$conf" "$conf.bak-$(date +%s)"
+              sed -i -E 's/^(Session|Connection)\\Interface=.*/\1\\Interface=tun0/; s/^(Session|Connection)\\InterfaceName=.*/\1\\InterfaceName=tun0/' "$conf"
+              echo "rebound qBittorrent to tun0:"
+              grep -E '^(Session|Connection)\\Interface(Name)?=' "$conf"
+          volumeMounts:
+            - name: config
+              mountPath: /config
       containers:
         - name: qbittorrent
-          # qBittorrent must be bound to the sidecar's tunnel device, tun0 - a
-          # second, independent leak guard on top of the network lock, and a
-          # strong one: a socket bound to tun0 breaks rather than silently
-          # falling back to eth0. This lives in PVC state, NOT here:
-          # /config/qBittorrent/config/qBittorrent.conf's Session\Interface,
-          # Session\InterfaceName, Connection\Interface and
-          # Connection\InterfaceName. The old tenseiken image created wg0 via
-          # its internal wg-quick; that device no longer exists, so the conf
-          # still pointing at wg0 makes qBittorrent open no listen socket while
-          # the WebUI keeps answering (both probes stay green - see plan
-          # Task 7). Must be changed to tun0 by hand post-deploy; not yet
-          # codified as a SOPS seed (see plan Task 7 follow-up).
+          # Bound to the sidecar's tunnel device tun0 by the
+          # init-bind-interface initContainer above - a second, independent
+          # leak guard on top of the network lock, and a strong one: a socket
+          # bound to tun0 breaks rather than silently falling back to eth0.
+          #
+          # The binding lives in PVC state
+          # (/config/qBittorrent/config/qBittorrent.conf), which is why an
+          # initContainer writes it rather than this manifest. The old
+          # tenseiken image created wg0 via its internal wg-quick; that device
+          # is gone, and a conf still pointing at wg0 makes qBittorrent open no
+          # listen socket at all while the WebUI keeps answering - so both
+          # probes and ArgoCD stay green with the client completely dead.
           image: qbittorrentofficial/qbittorrent-nox
           env:
             - { name: PUID, value: "568" }

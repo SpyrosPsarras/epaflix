@@ -1101,6 +1101,19 @@ container for VPN logs."
 
 ### Task 7: Deploy, verify, soak
 
+> **Superseded — this is now automated.** The `init-bind-interface` initContainer in
+> `qbittorrent.yaml` rewrites `Session\Interface`, `Session\InterfaceName`,
+> `Connection\Interface` and `Connection\InterfaceName` to `tun0` on every pod start,
+> idempotently, in the only window where `tun0` exists and qBittorrent is stopped.
+>
+> It had to be automated rather than done by hand: the WebUI's *Network interface*
+> dropdown only offers devices that exist at that moment, and it currently lists
+> `wg0`/`lo`/`eth0` with no `tun0` — because `wg0` belongs to the image being removed.
+> There is no point before the rollout at which a human can select `tun0`.
+>
+> So the steps below are **verification**, not actions. If the initContainer worked,
+> the values already read `tun0`.
+
 **Files:** none. This task is the PR, the deploy and the evidence.
 
 **Blocked by:** Tasks 1-6.
@@ -1131,7 +1144,7 @@ kubectl -n servarr rollout status deploy/qbittorrent --timeout=300s
 
 The Deployment uses `Recreate`, so the old pod goes away before the new one starts — expect a short outage, which is correct given one VPN session at a time.
 
-- [ ] **Step 4: Bind qBittorrent to `tun0` — REQUIRED, do this BEFORE trusting anything in Step 5**
+- [ ] **Step 4: Bind qBittorrent to `tun0` — AUTOMATED - verify only (see note below)**
 
 The live PVC's `/config/qBittorrent/config/qBittorrent.conf` still has `Session\Interface=wg0`,
 `Session\InterfaceName=wg0`, `Connection\Interface=wg0` and `Connection\InterfaceName=wg0`. `wg0`
