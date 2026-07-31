@@ -45,4 +45,23 @@ docker run --rm --entrypoint sh -e AIRVPN_USERNAME=u -e AIRVPN_PASSWORD=p \
     grep -q "^airvpntype                  wireguard" /etc/airvpn/bluetit.rc || { echo "FAIL: fragment not appended"; exit 1; }
     grep -q "^airusername                 u" /etc/airvpn/bluetit.rc || { echo "FAIL: username not substituted"; exit 1; }
     echo ok'
+echo "== 4. stale /run/dbus/pid + socket from a previous restart do not wedge dbus-daemon (#524) =="
+# Simulates the #509 scratch-pod bug: /run/dbus survives a container restart
+# (a shared emptyDir, per the #498/#501 agent-sidecar design), so a stale pid
+# file and socket from the daemon's previous life are already present when
+# entrypoint.sh starts. dbus-daemon refuses to start with a pre-existing pid
+# file (it never checks if that pid is alive) - reproduced twice on the
+# scratch pod. Without cleanup, the whole script aborts under set -eu before
+# bluetit ever starts, and the container CrashLoopBackOffs forever.
+out=$(docker run --rm --entrypoint sh --cap-add NET_ADMIN -e AIRVPN_USERNAME= -e AIRVPN_PASSWORD= "$IMAGE" \
+  -c 'mkdir -p /run/dbus && echo 99999 > /run/dbus/pid && : > /run/dbus/system_bus_socket
+      /entrypoint.sh & sleep 12; cat /etc/airvpn/bluetit.lock 2>/dev/null || echo NOLOCK' 2>&1)
+if ! echo "$out" | grep -q "Bluetit successfully initialized and ready"; then
+  echo "FAIL: no init line on stdout with stale /run/dbus present"; echo "$out"; exit 1
+fi
+if echo "$out" | grep -q NOLOCK; then
+  echo "FAIL: no lock file with stale /run/dbus present"; echo "$out"; exit 1
+fi
+echo "ok"
+
 echo "ALL CHECKS PASSED"
