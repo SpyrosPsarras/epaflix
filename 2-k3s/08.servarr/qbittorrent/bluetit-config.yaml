@@ -68,12 +68,33 @@ data:
     # rather than left to auto-detect.
     #
     # allowprivatenetwork only opens the iptables filter for RFC1918 - it does
-    # NOT make the LAN reachable outbound. The WireGuard session installs
-    # split /1-/8 default routes that send ALL RFC1918 into tun0, and AirVPN
-    # drops it there. Routing wins over the filter. Verified live:
-    # `ip route get 192.168.10.30` resolves to `dev tun0`, pings to .30/.101
-    # fail, the kube API at 10.43.0.1 is unreachable, and DNS inside the pod
-    # resolves nothing because its only resolver is unreachable this way.
+    # NOT make the LAN reachable outbound. The ~35 split routes the WireGuard
+    # session installs actually EXCLUDE RFC1918 (no `10.0.0.0/8`, no
+    # `172.16.0.0/12`, no `192.168.0.0/16` among them) - it's the blunt
+    # `0.0.0.0/1` + `128.0.0.0/1` pair Bluetit installs alongside them that
+    # re-swallows those ranges into tun0, and AirVPN drops it there. Routing
+    # wins over the filter. A LAN host survives this because it has a
+    # link-scope route to its own /24 that beats a /1 - a pod has no such
+    # route, so `/0` loses to `/1` here where it wouldn't on a host. Verified
+    # live: `ip route get 192.168.10.30` and `ip route get 10.43.0.1` both
+    # resolve to `dev tun0`, pings to .30/.101 fail, and the kube API at
+    # 10.43.0.1 is unreachable.
+    #
+    # DNS survives this, but barely (see #517, correcting #512/#513).
+    # `resolv.conf` lists TWO resolvers: `192.168.10.30` (Pi-hole, RFC1918,
+    # blackholed exactly like above - times out every time) and `1.1.1.1`
+    # (reachable, inside the tunnel). The tunnel-pushed `10.128.0.1` also
+    # answers. End-to-end lookups succeed in well under 100ms (measured
+    # 30-76ms across repeated checks). This only works because the image is
+    # Alpine/musl: musl queries every configured nameserver in PARALLEL and
+    # takes whichever answers first, so the dead `192.168.10.30` never gets
+    # in the way. A glibc image queries resolvers sequentially - it would
+    # burn ~5s timing out on `192.168.10.30` on EVERY lookup, while every
+    # health probe still reads green. Same silent-failure class as the
+    # restart-window leak `networklockpersist` guards against above. If this
+    # image ever moves off musl, DNS resolution silently stalls; the second
+    # resolver alone will not save it.
+    #
     # INBOUND private traffic (WebUI, probes, Service traffic reaching the
     # pod) still works, which is why nobody noticed. allowping IS genuinely
     # required: the degradation probe pings the in-tunnel gateway
