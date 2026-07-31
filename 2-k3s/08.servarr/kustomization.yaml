@@ -153,8 +153,10 @@ images:
   # run without a VPN of its own (2026-07-30 Bluetit sidecar migration).
   - name: qbittorrentofficial/qbittorrent-nox
     digest: sha256:9ebb534fe30bab98622cb84a8c3acecfd88319b2d540f52ecdec7b9f866374d7
-  # ghcr.io/spyrospsarras/airvpn-bluetit intentionally NOT pinned here yet: the
-  # build workflow (Task 2) only pushes from `main`, and this branch is
-  # unmerged, so no real digest exists to pin. The Deployment stays on
-  # its :latest tag until the image is first published; pin it in a
-  # follow-up once a digest is available.
+  # Our own image - see images/airvpn-bluetit/ and the 2026-07-30 design doc.
+  # Published manually before merge, because merging is the deploy here
+  # (servarr is automated+selfHeal) and would otherwise race the build
+  # workflow, leaving the native sidecar unpullable and the app container
+  # never starting.
+  - name: ghcr.io/spyrospsarras/airvpn-bluetit
+    digest: sha256:c5597e020c03316e7d1cf97f84a0e86d85a602aa61aa904fb138a96517f3fcda
