@@ -18,27 +18,22 @@ data:
     airvpntype                  wireguard
     airport                     1637
 
-    # Named servers, NOT a country whitelist. This is deliberate and was
-    # learned the hard way twice.
+    # REVERTED to a country whitelist after a live failure on 2026-07-31.
     #
-    # The original outage was three 2 Gbit boxes dropping 6.7-9% of packets.
-    # The first version of this config whitelisted countries (nl,de,se), which
-    # permits EVERY server in them - including all the other 2 Gbit boxes. So
-    # quick-mode promptly picked Aspidiske, another 2 Gbit box, and throughput
-    # came in at 1.70 MB/s up against 16.6 MB/s on the bare host. AirVPN's
-    # recommendation balances ITS load, not our throughput, and blacklisting
-    # individual bad servers only ever treats symptoms.
+    # `airwhiteserverlist Dedalus,Piautos,Dalim,Menkent,Felix,Adhil,Ashlesha`
+    # was correct in intent - it excluded the 2 Gbit boxes that caused the
+    # original outage - but Bluetit rejected it outright at boot:
+    #     Selected user key: Default
+    #     ERROR: Reached end of AirVPN server list. No suitable server found.
+    # The pod never got past Init, so qBittorrent never started. All seven
+    # names were verified present in the manifest the daemon actually loaded,
+    # so the cause is NOT a typo or a stale manifest and is still unexplained.
     #
-    # Every server below is a 20 Gbit box, and all were measured at 0% loss
-    # from k3s-worker-61 on 2026-07-30. Seven of them across three sites keeps
-    # a real failover pool while structurally excluding the small-box class.
-    #
-    # Before adding one: check bw_max is 20000 and measure it, do not trust
-    # AirVPN's `health` flag - it reported `ok` for all three servers that
-    # caused the outage. Recipe is in the design doc.
-    #   curl -s 'https://airvpn.org/api/status/?format=json' | jq -r \
-    #     '.servers[] | select(.bw_max>=20000) | "\(.public_name) \(.currentload)% \(.ip_v4_in3)"'
-    airwhiteserverlist          Dedalus,Piautos,Dalim,Menkent,Felix,Adhil,Ashlesha
+    # This country list is the configuration that demonstrably connected on a
+    # scratch pod the same day. Do not re-narrow it to named servers without
+    # first reproducing a successful boot on a scratch pod - see the follow-up
+    # issue for the throughput work this was meant to fix.
+    airwhitecountrylist         nl,de,se
 
     # Belt and braces. These three are already excluded by the whitelist above
     # - they are 2 Gbit boxes and simply not named in it - but they are the
