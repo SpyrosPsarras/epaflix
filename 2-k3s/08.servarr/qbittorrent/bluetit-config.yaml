@@ -67,10 +67,18 @@ data:
     # working, which is exactly why `country NO` above is pinned explicitly
     # rather than left to auto-detect.
     #
-    # allowprivatenetwork keeps Pi-hole DNS (192.168.10.30), the cluster CIDRs
-    # and the WebUI reachable. allowping is REQUIRED - without it the lock
-    # drops the ICMP the degradation probe runs on and the probe reads a
-    # healthy tunnel as dead.
+    # allowprivatenetwork only opens the iptables filter for RFC1918 - it does
+    # NOT make the LAN reachable outbound. The WireGuard session installs
+    # split /1-/8 default routes that send ALL RFC1918 into tun0, and AirVPN
+    # drops it there. Routing wins over the filter. Verified live:
+    # `ip route get 192.168.10.30` resolves to `dev tun0`, pings to .30/.101
+    # fail, the kube API at 10.43.0.1 is unreachable, and DNS inside the pod
+    # resolves nothing because its only resolver is unreachable this way.
+    # INBOUND private traffic (WebUI, probes, Service traffic reaching the
+    # pod) still works, which is why nobody noticed. allowping IS genuinely
+    # required: the degradation probe pings the in-tunnel gateway
+    # 10.128.0.1, reachable because it lives inside the tunnel, not because
+    # of anything this directive opens on the LAN.
     networklockpersist          iptables
     allowprivatenetwork         yes
     allowping                   yes
@@ -94,8 +102,16 @@ data:
     # 2026-07-30 — the subtlest failure of the bunch.
     ignorednspush               yes
 
-    # SIGUSR2 reconnect only works with TUN persistence on. The probe depends
-    # on it - do not set this to no.
+    # Inert under WireGuard. Per the AirVPN-Suite 2.1.0 source,
+    # wireguardclient.cpp never reads this directive - only the OpenVPN
+    # client config does (bluetit.cpp). WireGuardClient::stop() unconditionally
+    # calls wg_del_device() on every disconnect and every reconnect, so tun0
+    # is destroyed and rebuilt regardless of this setting; it only comes back
+    # named tun0 because that is the first free tun<N> slot, not because of
+    # persistence. Kept `yes` harmlessly in case this config ever runs
+    # OpenVPN instead. Nothing here may assume tun0 survives a reconnect -
+    # anything that reconnects must re-assert tun0 (or re-check the device
+    # name) afterwards.
     tunpersist                  yes
 
     # AirVPN device key. Default = the cluster (10.135.227.175). Nick's VM uses
