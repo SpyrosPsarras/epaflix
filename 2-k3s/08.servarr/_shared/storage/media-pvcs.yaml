@@ -1,146 +1,25 @@
 ---
-# Media Storage PersistentVolumes - Using hostPath to node NFS mounts
+# Media Storage PersistentVolume - Using hostPath to node NFS mount
 #
 # LIVE CLAIM (issue #195): `servarr-media` (hostPath /mnt/k3s-media, the unified
-# parent NFS export id 32 of /mnt/pool1/dataset01) is the SINGLE live media claim.
+# parent NFS export id 32 of /mnt/pool1/dataset01) is the SINGLE media claim.
 # All five media pods (qbittorrent/sonarr/sonarr2/radarr/cleanuparr) mount it once
 # at /media (no subPath) so intra-export hardlinks work (nlink>=2, no EXDEV).
 #
-# RETAINED-PENDING-TEARDOWN: the four legacy PV/PVC below
-# (servarr-media-{animes,tvshows,movies,downloads}, hostPath /mnt/k3s-{animes,...})
-# now have NO consumer: bazarr + lingarr are migrated to the unified servarr-media
-# /media mount (issue #250), matching sonarr/radarr. They are KEPT ONLY as the #195
-# soak-window rollback and are now eligible for teardown in the #195 teardown
-# follow-up. Do NOT add new consumers of these legacy claims.
+# TORN DOWN (issue #247): the four legacy PV/PVC (servarr-media-{animes,tvshows,
+# movies,downloads}, hostPath /mnt/k3s-{animes,...}) that backed the pre-#195
+# per-category exports have been removed. They had no consumer since bazarr +
+# lingarr migrated to the unified servarr-media /media mount (issue #250) and
+# the #195 soak-window rollback snapshot no longer exists (#444 reclaim).
 #
-# Each node has NFS mounts at /mnt/k3s-animes, /mnt/k3s-movies, /mnt/k3s-tvshows, /mnt/k3s-downloads
-# These PVs use hostPath to access the node-mounted NFS shares
+# Each node has an NFS mount at /mnt/k3s-media (unified export). This PV uses
+# hostPath to access the node-mounted NFS share.
 
-# Animes PV (500Gi)
-apiVersion: v1
-kind: PersistentVolume
-metadata:
-  name: servarr-media-animes-pv
-spec:
-  capacity:
-    storage: 500Gi
-  accessModes:
-    - ReadWriteMany
-  persistentVolumeReclaimPolicy: Retain
-  storageClassName: media-storage
-  hostPath:
-    path: /mnt/k3s-animes
-    type: Directory
----
-# Animes PVC
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: servarr-media-animes
-  namespace: servarr
-spec:
-  accessModes:
-    - ReadWriteMany
-  storageClassName: media-storage
-  resources:
-    requests:
-      storage: 500Gi
----
-# TV Shows PV (500Gi)
-apiVersion: v1
-kind: PersistentVolume
-metadata:
-  name: servarr-media-tvshows-pv
-spec:
-  capacity:
-    storage: 500Gi
-  accessModes:
-    - ReadWriteMany
-  persistentVolumeReclaimPolicy: Retain
-  storageClassName: media-storage
-  hostPath:
-    path: /mnt/k3s-tvshows
-    type: Directory
----
-# TV Shows PVC
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: servarr-media-tvshows
-  namespace: servarr
-spec:
-  accessModes:
-    - ReadWriteMany
-  storageClassName: media-storage
-  resources:
-    requests:
-      storage: 500Gi
----
-# Movies PV (2Ti)
-apiVersion: v1
-kind: PersistentVolume
-metadata:
-  name: servarr-media-movies-pv
-spec:
-  capacity:
-    storage: 2Ti
-  accessModes:
-    - ReadWriteMany
-  persistentVolumeReclaimPolicy: Retain
-  storageClassName: media-storage
-  hostPath:
-    path: /mnt/k3s-movies
-    type: Directory
----
-# Movies PVC
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: servarr-media-movies
-  namespace: servarr
-spec:
-  accessModes:
-    - ReadWriteMany
-  storageClassName: media-storage
-  resources:
-    requests:
-      storage: 2Ti
----
-# Downloads PV (1Ti)
-apiVersion: v1
-kind: PersistentVolume
-metadata:
-  name: servarr-media-downloads-pv
-spec:
-  capacity:
-    storage: 1Ti
-  accessModes:
-    - ReadWriteMany
-  persistentVolumeReclaimPolicy: Retain
-  storageClassName: media-storage
-  hostPath:
-    path: /mnt/k3s-downloads
-    type: Directory
----
-# Downloads PVC
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: servarr-media-downloads
-  namespace: servarr
-spec:
-  accessModes:
-    - ReadWriteMany
-  storageClassName: media-storage
-  resources:
-    requests:
-      storage: 1Ti
----
 # Unified media PV (issue #195) — single NFS parent export
 # /mnt/pool1/dataset01 mounted on each worker at /mnt/k3s-media.
-# Collapses the four child exports (animes/tvshows/movies/downloads) onto
-# ONE on-wire fsid so intra-export hardlinks work (no EXDEV). Consumers mount
-# this via subPath to keep in-container paths identical.
+# Collapses the four legacy child exports (animes/tvshows/movies/downloads,
+# torn down in #247) onto ONE on-wire fsid so intra-export hardlinks work (no
+# EXDEV). Consumers mount this via subPath to keep in-container paths identical.
 # Capacity is nominal (RWX hostPath); >= the dataset capacity.
 apiVersion: v1
 kind: PersistentVolume
