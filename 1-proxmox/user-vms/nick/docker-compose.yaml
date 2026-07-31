@@ -1,0 +1,140 @@
+# Nick's VM (192.168.10.41) - qBittorrent behind an AirVPN Bluetit sidecar.
+#
+# Mirrors the cluster design from PR #489 (2-k3s/08.servarr/qbittorrent). Every
+# non-obvious setting below is load-bearing and was found by a live failure, not
+# by reading docs - see the WHY comments and 1-proxmox/user-vms/nick/README.md.
+#
+# Replaces tenseiken/qbittorrent-wireguard, which cannot run without its own
+# VPN (VPN_ENABLED does not exist in it) and was pinned to a single AirVPN
+# endpoint. Nick's was on Kajam, measured at 6.7% packet loss on 2026-07-30.
+#
+# Secrets come from a git-ignored .env next to this file. Never inline them:
+#   AIRVPN_USERNAME, AIRVPN_PASSWORD   (from secrets.yml airvpn_user/_password)
+#   CLOUDFLARE_TUNNEL_TOKEN            (Nick's existing tunnel token)
+
+services:
+  # Holds the network namespace. qbittorrent-app joins it, so the tunnel and
+  # the iptables lock apply to qBittorrent without it having any privileges.
+  airvpn:
+    image: ghcr.io/spyrospsarras/airvpn-bluetit@sha256:c5597e020c03316e7d1cf97f84a0e86d85a602aa61aa904fb138a96517f3fcda
+    container_name: airvpn
+    cap_add:
+      # SYS_MODULE is REQUIRED, not defensive. Bluetit loads iptable_* and
+      # wireguard itself even though the host already has them; without it it
+      # fails with "Error while loading kernel module wireguard (-3)".
+      - NET_ADMIN
+      - SYS_MODULE
+    sysctls:
+      # NOTE: net.ipv6.conf.all.disable_ipv6=1 was deliberately REMOVED here.
+      # Bluetit unconditionally assigns the AirVPN device's IPv6 address to
+      # tun0, and with IPv6 disabled the connect thread dies on
+      # "IPv6 is disabled on this device" and the tunnel never comes up.
+      - net.ipv4.conf.all.src_valid_mark=1
+    environment:
+      AIRVPN_USERNAME: ${AIRVPN_USERNAME:?set in .env}
+      AIRVPN_PASSWORD: ${AIRVPN_PASSWORD:?set in .env}
+      # Nick's forwarded port, not the cluster's 39998.
+      PROBE_TARGET: 10.128.0.1
+    volumes:
+      - './bluetit.conf:/config/bluetit.conf:ro'
+      # REQUIRED alongside SYS_MODULE - Bluetit checks modules.builtin.
+      - '/lib/modules:/lib/modules:ro'
+    healthcheck:
+      # The connected output contains "Connected to AirVPN server <name>". It
+      # never says "Bluetit is connected"; the disconnected form IS "Bluetit is
+      # not connected", so an unanchored grep would false-pass.
+      test: ["CMD-SHELL", "goldcrest --bluetit-status | grep -q 'Connected to AirVPN server'"]
+      interval: 10s
+      timeout: 15s
+      retries: 18
+      start_period: 20s
+    ports:
+      # Published here, not on qbittorrent-app, because that container shares
+      # this namespace. Local debugging only, as before - the public path is
+      # the Cloudflare tunnel.
+      - '127.0.0.1:8080:8080'
+    networks:
+      qbt:
+        aliases:
+          # Keeps cloudflared's existing "qbittorrent:8080" ingress target
+          # resolving, so the Cloudflare tunnel config needs no change.
+          - qbittorrent
+    restart: unless-stopped
+
+  # One-shot: binds qBittorrent to the tunnel device. Runs after the tunnel is
+  # healthy and before the app starts - the only window where tun0 exists and
+  # qBittorrent is stopped.
+  #
+  # This cannot be done in the WebUI: its Network interface dropdown only lists
+  # devices that exist, and the old wg0 belongs to the image being removed. A
+  # conf still pinned to wg0 leaves qBittorrent with NO listen socket while the
+  # WebUI keeps answering - it looks completely healthy and moves nothing.
+  bind-interface:
+    image: busybox:latest
+    container_name: qbt-bind-interface
+    depends_on:
+      airvpn:
+        condition: service_healthy
+    volumes:
+      - '/home/nick/work/qbit:/config'
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        conf=/config/qBittorrent/config/qBittorrent.conf
+        [ -f "$$conf" ] || { echo "no conf yet, qBittorrent will create it"; exit 0; }
+        if grep -qE '^(Session|Connection)\\Interface(Name)?=tun0$$' "$$conf" \
+           && ! grep -qE '^(Session|Connection)\\Interface(Name)?=(wg0|eth0)$$' "$$conf"; then
+          echo "already bound to tun0, nothing to do"; exit 0
+        fi
+        cp "$$conf" "$$conf.bak-$$(date +%s)"
+        sed -i -E 's/^(Session|Connection)\\Interface=.*/\1\\Interface=tun0/; s/^(Session|Connection)\\InterfaceName=.*/\1\\InterfaceName=tun0/' "$$conf"
+        echo "rebound qBittorrent to tun0:"
+        grep -E '^(Session|Connection)\\Interface(Name)?=' "$$conf"
+    restart: "no"
+
+  qbittorrent-app:
+    # Official image. The old tenseiken one cannot run without its own VPN.
+    # Same /config profile layout, so Nick's existing config is untouched.
+    image: qbittorrentofficial/qbittorrent-nox:latest
+    container_name: qbittorrent
+    # Shares the airvpn namespace: all traffic goes through the tunnel, and
+    # this container needs no NET_ADMIN of its own.
+    network_mode: 'service:airvpn'
+    depends_on:
+      bind-interface:
+        condition: service_completed_successfully
+    environment:
+      PUID: '1000'
+      PGID: '1000'
+      TZ: Europe/Oslo
+      UMASK: '002'
+      QBT_LEGAL_NOTICE: confirm
+      QBT_WEBUI_PORT: '8080'
+      # Declarative now - replaces "set it in the WebUI" and the old
+      # ADDITIONAL_PORTS. This is the port AirVPN forwards for Nick's device.
+      QBT_TORRENTING_PORT: '49135'
+    volumes:
+      - '/home/nick/work/qbit:/config'
+      - '/data/torrents/downloads:/downloads'
+      - '/data/torrents/incomplete:/incomplete'
+    restart: unless-stopped
+
+  # Stays OUTSIDE the VPN, unchanged. Reaches qBittorrent via the airvpn
+  # container's "qbittorrent" network alias above.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?set in .env}
+    networks:
+      - qbt
+    restart: unless-stopped
+
+networks:
+  qbt:
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16

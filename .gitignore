@@ -41,3 +41,9 @@ charts/
 # Superpowers subagent-driven-development scratch (ledger, briefs, review packages).
 # Per-plan workspaces under .superpowers/sdd/<plan>/ — the git history is the record.
 .superpowers/
+
+# Compose .env files - hold the AirVPN account password and Cloudflare tunnel
+# tokens for the user-VM stacks. Never commit these.
+.env
+*.env
+!*.env.example
