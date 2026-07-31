@@ -12,7 +12,7 @@
 # be namespace-rewritten, and the namespaced objects already carry cnpg-system
 # (the operator manifest even ships its own `kind: Namespace`).
 #
-# CNPG operator v1.29.1 (cnpg-operator.yaml) + Barman Cloud Plugin v0.12.0
+# CNPG operator v1.30.0 (cnpg-operator.yaml) + Barman Cloud Plugin v0.12.0
 # (barman-manifest.yaml). Re-vendor recipes: ../README.md and
 # ../barman-cloud-plugin/README.md.
 #
