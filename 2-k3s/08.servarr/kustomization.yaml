@@ -21,7 +21,6 @@
 #
 # Reconciled via the ksops generator (_shared/secrets/ksops-generator.yaml):
 #   - servarr-postgres                from _shared/secrets/servarr-postgres.enc.yaml
-#   - qbittorrent-wireguard           from _shared/secrets/qbittorrent-wireguard.enc.yaml
 #   - qbittorrent-openvpn             from _shared/secrets/qbittorrent-openvpn.enc.yaml
 #   - newtarr-config-seed             from _shared/secrets/newtarr-config-seed.enc.yaml
 #                                       (issue #137 — newtarr JSON config seed,

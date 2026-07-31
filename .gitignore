@@ -41,3 +41,12 @@ charts/
 # Superpowers subagent-driven-development scratch (ledger, briefs, review packages).
 # Per-plan workspaces under .superpowers/sdd/<plan>/ — the git history is the record.
 .superpowers/
+
+# Compose .env files hold runtime secrets (AirVPN account password, Cloudflare
+# tunnel tokens) for the user-VM stacks. Never commit these.
+.env
+*.env
+!*.env.example
+
+# Playwright MCP scratch - browser snapshots, which can capture account pages.
+.playwright-mcp/
