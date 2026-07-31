@@ -326,6 +326,11 @@ the five media pods. State of play:
 > `pool1/dataset01@pre-unify-issue195`) AND because bazarr + lingarr still bind
 > the old movies/tvshows claims. Teardown happens only after soak AND after
 > bazarr/lingarr migrate to the unified `/media` mount (follow-up issues).
+>
+> **UPDATE 2026-07-31 (#247): teardown executed.** Both gates cleared (53d soak;
+> bazarr/lingarr on unified `/media` since #251) and the rollback snapshot was
+> already destroyed in the #444 pool1 reclaim, so the legacy PV/PVC, node
+> mounts, and TrueNAS exports 19-22 were removed — see #247 for the full record.
 
 > **PVC/live-only config (cross-ref #244, #196).** Two changes made during the
 > #195 cutover live ONLY in PVC/live state, not in git: the Cleanuparr
