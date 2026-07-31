@@ -1,28 +1,25 @@
 ---
-# qBittorrent with WireGuard VPN
+# qBittorrent with its VPN run by a Bluetit native sidecar
 #
-# Source of truth: live cluster state in `servarr` ns. Manifest below was
-# regenerated from `kubectl get deploy qbittorrent -o yaml` on 2026-05-17
-# after ArgoCD adoption surfaced a wholesale divergence — repo had been
-# tracking the older OpenVPN/binhex build for a long time, while live had
-# already moved to `tenseiken/qbittorrent-wireguard:latest`. Live wins by
-# design: see project memory `project_argocd_servarr` / drift policy.
+# Source of truth: live cluster state in `servarr` ns — see project memory
+# `project_argocd_servarr` / drift policy: live wins on divergence.
 #
-# VPN config lives in Secret `qbittorrent-wireguard` (NOT in this repo —
-# committed real values would leak; see secrets.yml + the
-# `_shared/secrets/wireguard-secret.yaml` template).
+# The AirVPN Bluetit sidecar (`airvpn` initContainer, restartPolicy: Always)
+# owns the WireGuard tunnel and the iptables network lock. It replaces the
+# old `tenseiken/qbittorrent-wireguard` image's built-in wg-quick + the
+# postStart iptables hack that used to punch LAN/cluster CIDR holes in its
+# default-DROP OUTPUT chain — Bluetit's own `networklockpersist iptables` +
+# `allowprivatenetwork yes` (see bluetit-config.yaml) does that instead. The
+# app container now runs the official `qbittorrentofficial/qbittorrent-nox`
+# image and shares the pod netns with the sidecar, so it no longer touches
+# the network itself.
 #
-# Why postStart iptables hack: tenseiken/qbittorrent-wireguard's
-# `iptables.sh` installs a default-DROP OUTPUT chain so traffic is
-# forced through `wg0`. We need to punch holes for the LAN (192.168.10.0/24)
-# and cluster Pod / Service CIDRs (10.42.0.0/16, 10.43.0.0/16) so Pi-hole
-# DNS and intra-cluster calls still work.
+# AirVPN credentials live in Secret `airvpn-credentials` (NOT in this repo —
+# see secrets.yml + `_shared/secrets/airvpn-credentials.enc.yaml`).
 #
-# BT listen port: 39998 (forwarded by AirVPN on nl3.vpn.airdns.org for
-# tunnel IP 10.135.227.175, both TCP+UDP). Set qBit's "Connections →
-# Port used for incoming connections" to 39998 in the Web UI so the
-# bind matches the forwarded port. ADDITIONAL_PORTS below only opens
-# the iptables holes; it does not change qBit's listen port.
+# BT listen port: 39998, forwarded by AirVPN account-wide — it follows
+# whichever server Bluetit picks, unlike a per-server forward. Declared via
+# QBT_TORRENTING_PORT on the app container, so there's no manual WebUI step.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -58,38 +55,126 @@ spec:
             - |
               sysctl -w net.ipv4.conf.all.rp_filter=2
               sysctl -w net.ipv4.conf.all.src_valid_mark=1
-              sysctl -w net.ipv6.conf.all.disable_ipv6=1
           securityContext:
             privileged: true
+        # Native sidecar (restartPolicy: Always) - starts before the app container
+        # and keeps running. Replaces wg-quick inside the old qbittorrent image:
+        # Bluetit takes a server whitelist/blacklist and picks an AirVPN-recommended
+        # server, which WireGuard alone cannot do.
+        - name: airvpn
+          image: ghcr.io/spyrospsarras/airvpn-bluetit:latest
+          restartPolicy: Always
+          env:
+            - name: AIRVPN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: airvpn-credentials
+                  key: airusername
+            - name: AIRVPN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: airvpn-credentials
+                  key: airpassword
+          volumeMounts:
+            - name: bluetit-config
+              mountPath: /config
+              readOnly: true
+            # REQUIRED. Bluetit checks modules.builtin and loads iptable_* and
+            # wireguard itself, even though the node already has them loaded.
+            - name: lib-modules
+              mountPath: /lib/modules
+              readOnly: true
+          # Gates the app container: k8s only waits for a sidecar's PROCESS to
+          # start, so without this qbittorrent would run for ~15s before the
+          # tunnel and the iptables lock exist. Measured on a scratch pod:
+          # ~20s from container start to "Connected to AirVPN server".
+          startupProbe:
+            exec:
+              command: ["sh","-c","goldcrest --bluetit-status | grep -q 'Connected to AirVPN server'"]
+            periodSeconds: 5
+            failureThreshold: 36
+            timeoutSeconds: 10
+          livenessProbe:
+            exec:
+              # The connected output contains "Connected to AirVPN server <name>".
+              # It does NOT say "Bluetit is connected" - that string never appears.
+              # The disconnected form is "Bluetit is not connected", so do not
+              # grep for a bare "connected".
+              command: ["sh","-c","goldcrest --bluetit-status | grep -q 'Connected to AirVPN server'"]
+            periodSeconds: 60
+            timeoutSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+          securityContext:
+            runAsUser: 0
+            capabilities:
+              add:
+                # SYS_MODULE is REQUIRED, not defensive. Without it Bluetit fails
+                # with "Error while loading kernel module wireguard (-3)" and never
+                # connects, even though the module is already loaded on the node.
+                - NET_ADMIN
+                - SYS_MODULE
+
+        # Binds qBittorrent to the tunnel device. Ordinary initContainer (no
+        # restartPolicy), so it runs to completion AFTER the airvpn sidecar is
+        # started and BEFORE the app container - which is the only window where
+        # tun0 exists and qBittorrent is not running.
+        #
+        # Why this cannot be done by hand in the WebUI: the Network interface
+        # dropdown only offers devices that exist at that moment, and today it
+        # lists wg0/lo/eth0 with no tun0, because wg0 is created by the OLD
+        # image we are removing. So the value has to be written while the new
+        # tunnel is up and qBittorrent is stopped - exactly here.
+        #
+        # Editing the file directly is safe only when qBittorrent is not
+        # running, because it rewrites the whole conf on exit and would
+        # clobber us. That holds here by construction.
+        - name: init-bind-interface
+          image: busybox:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              conf=/config/qBittorrent/config/qBittorrent.conf
+              [ -f "$conf" ] || { echo "no conf yet, first run - qBittorrent will create it"; exit 0; }
+              if grep -qE '^(Session|Connection)\\Interface(Name)?=tun0$' "$conf" \
+                 && ! grep -qE '^(Session|Connection)\\Interface(Name)?=(wg0|eth0)$' "$conf"; then
+                echo "already bound to tun0, nothing to do"; exit 0
+              fi
+              cp "$conf" "$conf.bak-$(date +%s)"
+              sed -i -E 's/^(Session|Connection)\\Interface=.*/\1\\Interface=tun0/; s/^(Session|Connection)\\InterfaceName=.*/\1\\InterfaceName=tun0/' "$conf"
+              echo "rebound qBittorrent to tun0:"
+              grep -E '^(Session|Connection)\\Interface(Name)?=' "$conf"
+          volumeMounts:
+            - name: config
+              mountPath: /config
       containers:
         - name: qbittorrent
-          image: tenseiken/qbittorrent-wireguard:latest
+          # Bound to the sidecar's tunnel device tun0 by the
+          # init-bind-interface initContainer above - a second, independent
+          # leak guard on top of the network lock, and a strong one: a socket
+          # bound to tun0 breaks rather than silently falling back to eth0.
+          #
+          # The binding lives in PVC state
+          # (/config/qBittorrent/config/qBittorrent.conf), which is why an
+          # initContainer writes it rather than this manifest. The old
+          # tenseiken image created wg0 via its internal wg-quick; that device
+          # is gone, and a conf still pointing at wg0 makes qBittorrent open no
+          # listen socket at all while the WebUI keeps answering - so both
+          # probes and ArgoCD stay green with the client completely dead.
+          image: qbittorrentofficial/qbittorrent-nox
           env:
-            - name: PUID
-              value: "568"
-            - name: PGID
-              value: "568"
-            - name: TZ
-              value: "Europe/Oslo"
-            - name: LAN_NETWORK
-              value: "192.168.10.0/24,10.42.0.0/16,10.43.0.0/16"
-            - name: NAME_SERVERS
-              value: "192.168.10.30,1.1.1.1"
-            - name: QBT_LEGAL_NOTICE
-              value: "confirm"
-            - name: VPN_ENABLED
-              value: "yes"
-            - name: ADDITIONAL_PORTS
-              value: "39998"
-            # Health-check tweaks (2026-05-25): after AirVPN swap the default
-            # ping-1.1.1.1 every 300s with AMOUNT=1 kills the pod on any single
-            # transient tunnel drop (~89 restarts in 2d4h). Ping the AirVPN
-            # gateway instead (in-tunnel, no upstream ICMP filtering), and
-            # require 3 consecutive misses before forcing restart.
-            - name: HEALTH_CHECK_HOST
-              value: "10.128.0.1"
-            - name: HEALTH_CHECK_AMOUNT
-              value: "3"
+            - { name: PUID, value: "568" }
+            - { name: PGID, value: "568" }
+            - { name: TZ, value: "Europe/Oslo" }
+            - { name: QBT_LEGAL_NOTICE, value: "confirm" }
+            - { name: QBT_WEBUI_PORT, value: "8080" }
+            # Declarative BT port - replaces the old manual "set it in the WebUI" step.
+            - { name: QBT_TORRENTING_PORT, value: "39998" }
           ports:
             - containerPort: 8080
               name: webui
@@ -99,24 +184,6 @@ spec:
             - containerPort: 39998
               name: bt-udp
               protocol: UDP
-          lifecycle:
-            postStart:
-              exec:
-                command:
-                  - /bin/sh
-                  - -c
-                  - |
-                    # Wait for iptables.sh to finish setting up the DROP policy
-                    until iptables -L OUTPUT -n 2>/dev/null | grep -q 'policy DROP'; do sleep 2; done
-                    # Insert ACCEPT rules at position 1 for all LAN_NETWORK subnets
-                    # so Pi-hole DNS (192.168.10.30) and cluster traffic are not blocked.
-                    # Using -I (insert) ensures these rules take priority over the DROP policy.
-                    iptables -I OUTPUT 1 -d 192.168.10.0/24 -j ACCEPT
-                    iptables -I INPUT  1 -s 192.168.10.0/24 -j ACCEPT
-                    iptables -I OUTPUT 2 -d 10.42.0.0/16 -j ACCEPT
-                    iptables -I INPUT  2 -s 10.42.0.0/16 -j ACCEPT
-                    iptables -I OUTPUT 3 -d 10.43.0.0/16 -j ACCEPT
-                    iptables -I INPUT  3 -s 10.43.0.0/16 -j ACCEPT
           livenessProbe:
             httpGet:
               path: /
@@ -135,22 +202,15 @@ spec:
             requests:
               memory: "512Mi"
               cpu: "200m"
+          # No longer touches the network - the sidecar owns the tunnel and the
+          # lock, so this drops privileged and NET_ADMIN.
           securityContext:
-            capabilities:
-              add:
-                - NET_ADMIN
             runAsUser: 0
-            privileged: true
           volumeMounts:
             - name: config
               mountPath: /config
             - name: media
               mountPath: /media
-            - name: wireguard-config
-              mountPath: /config/wireguard
-              readOnly: true
-            - name: tun
-              mountPath: /dev/net/tun
       volumes:
         - name: config
           persistentVolumeClaim:
@@ -158,13 +218,20 @@ spec:
         - name: media
           persistentVolumeClaim:
             claimName: servarr-media
-        - name: wireguard-config
-          secret:
-            secretName: qbittorrent-wireguard
-        - name: tun
+        - name: bluetit-config
+          # Plain ConfigMap reference, not a configMapGenerator output - it has
+          # no content-hash suffix, so editing the server pool does NOT roll
+          # this pod automatically. Follow up with:
+          #   kubectl -n servarr rollout restart deploy/qbittorrent
+          configMap:
+            name: airvpn-bluetit-config
+            items:
+              - key: bluetit.conf
+                path: bluetit.conf
+        - name: lib-modules
           hostPath:
-            path: /dev/net/tun
-            type: CharDevice
+            path: /lib/modules
+            type: Directory
 ---
 apiVersion: v1
 kind: Service

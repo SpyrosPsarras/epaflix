@@ -1,0 +1,59 @@
+name: build-airvpn-bluetit
+
+# Builds and publishes the AirVPN Bluetit sidecar image (images/airvpn-bluetit/).
+# Additive to the existing `validate` required check in ci.yml — does not
+# modify it. On a pull request this only builds and runs test.sh, it never
+# logs in or pushes, so a broken image cannot reach GHCR.
+
+on:
+  push:
+    branches: [main]
+    paths: ['images/airvpn-bluetit/**', '.github/workflows/build-airvpn-bluetit.yml']
+  pull_request:
+    paths: ['images/airvpn-bluetit/**', '.github/workflows/build-airvpn-bluetit.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    # Fork-guard, same rule as ci.yml's validate job: only run for PRs from
+    # branches in THIS repo (plus pushes and manual dispatch, which are never
+    # fork-authored). Public repo, and this job holds packages:write on push,
+    # so fork PR workflow code must never execute here.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Verify the image before publishing anything
+        run: |
+          cd images/airvpn-bluetit
+          docker build -t airvpn-bluetit:dev .
+          chmod +x test.sh && ./test.sh
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v7
+        with:
+          context: images/airvpn-bluetit
+          push: true
+          tags: |
+            ghcr.io/spyrospsarras/airvpn-bluetit:${{ github.sha }}
+            ghcr.io/spyrospsarras/airvpn-bluetit:latest
+
+      - name: Print the digest to pin
+        if: github.event_name != 'pull_request'
+        run: docker buildx imagetools inspect ghcr.io/spyrospsarras/airvpn-bluetit:${{ github.sha }} --format '{{.Manifest.Digest}}'

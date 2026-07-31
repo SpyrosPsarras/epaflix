@@ -1,0 +1,108 @@
+---
+# Non-secret Bluetit directives. Kept out of the Secret on purpose so that
+# server-pool changes are readable in a PR diff.
+#
+# Syntax is DIRECTIVE<whitespace>VALUE - not `key = value`. Copied from the
+# shipped bluetit.rc, which this fragment is appended to at container start.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: airvpn-bluetit-config
+  namespace: servarr
+data:
+  bluetit.conf: |
+    # quick = connect to an AirVPN-recommended server from the whitelist,
+    # minus the blacklist. This is the whole point of using Bluetit: WireGuard
+    # cannot fail over inside one config, so the client has to choose.
+    airconnectatboot            quick
+    airvpntype                  wireguard
+    airport                     1637
+
+    # Named servers, NOT a country whitelist. This is deliberate and was
+    # learned the hard way twice.
+    #
+    # The original outage was three 2 Gbit boxes dropping 6.7-9% of packets.
+    # The first version of this config whitelisted countries (nl,de,se), which
+    # permits EVERY server in them - including all the other 2 Gbit boxes. So
+    # quick-mode promptly picked Aspidiske, another 2 Gbit box, and throughput
+    # came in at 1.70 MB/s up against 16.6 MB/s on the bare host. AirVPN's
+    # recommendation balances ITS load, not our throughput, and blacklisting
+    # individual bad servers only ever treats symptoms.
+    #
+    # Every server below is a 20 Gbit box, and all were measured at 0% loss
+    # from k3s-worker-61 on 2026-07-30. Seven of them across three sites keeps
+    # a real failover pool while structurally excluding the small-box class.
+    #
+    # Before adding one: check bw_max is 20000 and measure it, do not trust
+    # AirVPN's `health` flag - it reported `ok` for all three servers that
+    # caused the outage. Recipe is in the design doc.
+    #   curl -s 'https://airvpn.org/api/status/?format=json' | jq -r \
+    #     '.servers[] | select(.bw_max>=20000) | "\(.public_name) \(.currentload)% \(.ip_v4_in3)"'
+    airwhiteserverlist          Dedalus,Piautos,Dalim,Menkent,Felix,Adhil,Ashlesha
+
+    # Belt and braces. These three are already excluded by the whitelist above
+    # - they are 2 Gbit boxes and simply not named in it - but they are the
+    # servers that actually caused the outage (6.7-9% packet loss each, all in
+    # Alblasserdam at 50-57% load, with nl3.vpn.airdns.org rotating between
+    # them), so name them explicitly in case the whitelist is ever widened.
+    airblackserverlist          Cygnus,Hassaleh,Kajam
+
+    # Home country. Bluetit auto-detects this correctly via ipleak.net, but
+    # pinning it avoids an outbound call on every start.
+    country                     NO
+    forbidquickhomecountry      yes
+
+    # Real killswitch, replacing the postStart iptables hack. Upstream draws a
+    # hard line between the two lock directives: `networklock` only holds
+    # DURING THE CONNECTION - if the sidecar restarts (its liveness probe kills
+    # a dead Bluetit) the lock goes down with it, and Kubernetes does NOT
+    # restart or pause the already-running qbittorrent container just because
+    # a sidecar restarted. The new Bluetit takes ~20s to reconnect, and
+    # qBittorrent would keep announcing/dialling peers unprotected for that
+    # whole window. `networklockpersist` holds for the WHOLE BLUETIT SESSION -
+    # traffic to/from the external network is blocked whenever Bluetit is not
+    # connected, sidecar restart or not - and it takes priority over
+    # `networklock` per upstream's README. That is why we use it here. Do NOT
+    # revert this to `networklock` "to simplify" - that reopens the
+    # restart-window leak this exists to close.
+    #
+    # Its two documented side-effects are already covered: manifest refresh is
+    # suspended until reconnected (harmless - the image ships a local manifest
+    # copy, see the Dockerfile), and automatic home-country detection stops
+    # working, which is exactly why `country NO` above is pinned explicitly
+    # rather than left to auto-detect.
+    #
+    # allowprivatenetwork keeps Pi-hole DNS (192.168.10.30), the cluster CIDRs
+    # and the WebUI reachable. allowping is REQUIRED - without it the lock
+    # drops the ICMP the degradation probe runs on and the probe reads a
+    # healthy tunnel as dead.
+    networklockpersist          iptables
+    allowprivatenetwork         yes
+    allowping                   yes
+
+    # airipv6/air6to4 no do NOT stop Bluetit assigning the AirVPN device's IPv6
+    # address to tun0 - that's handled by init-sysctls no longer disabling
+    # IPv6 (see qbittorrent.yaml). These just keep Bluetit from routing our
+    # own IPv6 traffic over the tunnel.
+    #
+    # `airipv6 no` does NOT arm an ip6tables lock - networklockpersist above is
+    # iptables (v4) only. IPv6 is only safe here because the pod currently has
+    # no global IPv6 address to leak from. Revisit this if the cluster ever
+    # goes dual-stack - an ip6tables companion lock would be needed then.
+    airipv6                     no
+    air6to4                     no
+
+    # REQUIRED. Without it Bluetit throws "Cannot set pushed DNS to system"
+    # because kubelet owns /etc/resolv.conf, and that exception tears down an
+    # already-connected tunnel (goldcrest then reports "Bluetit is not
+    # connected" with no error surfaced). Found on a live scratch-pod run,
+    # 2026-07-30 — the subtlest failure of the bunch.
+    ignorednspush               yes
+
+    # SIGUSR2 reconnect only works with TUN persistence on. The probe depends
+    # on it - do not set this to no.
+    tunpersist                  yes
+
+    # AirVPN device key. Default = the cluster (10.135.227.175). Nick's VM uses
+    # its own key `nick`, so the two never share key material.
+    airkey                      Default
