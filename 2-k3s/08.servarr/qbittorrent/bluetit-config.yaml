@@ -18,15 +18,33 @@ data:
     airvpntype                  wireguard
     airport                     1637
 
-    # Wider than nl on purpose, so a quick-connect has somewhere to go when
-    # Amsterdam is busy.
-    airwhitecountrylist         nl,de,se
+    # Named servers, NOT a country whitelist. This is deliberate and was
+    # learned the hard way twice.
+    #
+    # The original outage was three 2 Gbit boxes dropping 6.7-9% of packets.
+    # The first version of this config whitelisted countries (nl,de,se), which
+    # permits EVERY server in them - including all the other 2 Gbit boxes. So
+    # quick-mode promptly picked Aspidiske, another 2 Gbit box, and throughput
+    # came in at 1.70 MB/s up against 16.6 MB/s on the bare host. AirVPN's
+    # recommendation balances ITS load, not our throughput, and blacklisting
+    # individual bad servers only ever treats symptoms.
+    #
+    # Every server below is a 20 Gbit box, and all were measured at 0% loss
+    # from k3s-worker-61 on 2026-07-30. Seven of them across three sites keeps
+    # a real failover pool while structurally excluding the small-box class.
+    #
+    # Before adding one: check bw_max is 20000 and measure it, do not trust
+    # AirVPN's `health` flag - it reported `ok` for all three servers that
+    # caused the outage. Recipe is in the design doc.
+    #   curl -s 'https://airvpn.org/api/status/?format=json' | jq -r \
+    #     '.servers[] | select(.bw_max>=20000) | "\(.public_name) \(.currentload)% \(.ip_v4_in3)"'
+    airwhiteserverlist          Dedalus,Piautos,Dalim,Menkent,Felix,Adhil,Ashlesha
 
-    # Measured bad on 2026-07-30 from k3s-worker-61: 6.7-9% packet loss each,
-    # all three are 2 Gbit boxes in Alblasserdam at 50-57% load, and
-    # nl3.vpn.airdns.org rotates between them. AirVPN's own status API still
-    # called them health=ok, so do not trust that flag - measure before editing
-    # this list. Recipe is in the design doc.
+    # Belt and braces. These three are already excluded by the whitelist above
+    # - they are 2 Gbit boxes and simply not named in it - but they are the
+    # servers that actually caused the outage (6.7-9% packet loss each, all in
+    # Alblasserdam at 50-57% load, with nl3.vpn.airdns.org rotating between
+    # them), so name them explicitly in case the whitelist is ever widened.
     airblackserverlist          Cygnus,Hassaleh,Kajam
 
     # Home country. Bluetit auto-detects this correctly via ipleak.net, but
@@ -79,7 +97,7 @@ data:
     # already-connected tunnel (goldcrest then reports "Bluetit is not
     # connected" with no error surfaced). Found on a live scratch-pod run,
     # 2026-07-30 — the subtlest failure of the bunch.
-    ignorednspush                yes
+    ignorednspush               yes
 
     # SIGUSR2 reconnect only works with TUN persistence on. The probe depends
     # on it - do not set this to no.

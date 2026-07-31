@@ -73,7 +73,9 @@ Bluetit takes server *lists* and picks from them:
   `qbittorrentofficial/qbittorrent-nox` (the tenseiken image cannot run without a VPN).
 - **Degradation handling.** SIGUSR2 reconnect plus an alert. The reconnect is a retry, not a
   cure - see Component 4 for why it cannot be called self-healing.
-- **Server pool.** Whitelist countries `nl,de,se`; blacklist the three measured-bad boxes.
+- **Server pool.** Whitelist seven named 20 Gbit servers; keep the three measured-bad boxes
+  blacklisted as belt and braces. A country whitelist was tried first and readmitted the
+  2 Gbit class that caused the outage - see Component 2.
 - Cluster is `v1.35.5+k3s1`, so native sidecars (initContainer with `restartPolicy: Always`,
   GA since 1.29) are available.
 
@@ -166,7 +168,7 @@ Directives are **whitespace-separated**, not `key = value` — confirmed against
 ```
 airvpntype                  wireguard
 airconnectatboot            quick
-airwhitecountrylist         nl,de,se
+airwhiteserverlist          Dedalus,Piautos,Dalim,Menkent,Felix,Adhil,Ashlesha
 airblackserverlist          Cygnus,Hassaleh,Kajam
 airport                     1637
 country                     NO
@@ -212,8 +214,13 @@ Notes on specific directives:
 - `allowprivatenetwork = yes` keeps Pi-hole DNS, the cluster CIDRs and the WebUI reachable once
   the network lock is armed. It replaces the six hand-written iptables rules in the current
   `postStart` hook.
-- The country whitelist is deliberately wider than `nl` so a quick-connect has somewhere to go
-  when Amsterdam is busy.
+- The whitelist names **servers, not countries**, and that is load-bearing.
+  `airwhitecountrylist nl,de,se` was tried first and is the wrong control: it permits every
+  server in those countries, including all the other 2 Gbit boxes. Quick-mode duly picked
+  Aspidiske (2 Gbit, 47% load) and upload measured 1.70 MB/s against 16.6 MB/s on the bare host.
+  AirVPN's recommendation balances *its* load, not our throughput, so excluding the small-box
+  class has to be structural rather than a blacklist of individual offenders. All seven named
+  servers are 20 Gbit and were measured at 0% loss from `k3s-worker-61`.
 - `forbidquickhomecountry = on` is AirVPN's recommended default; home country is `NO`, and we
   connect to NL/DE/SE, so it costs us nothing.
 
