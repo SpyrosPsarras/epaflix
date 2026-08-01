@@ -34,7 +34,7 @@ spec:
       - key: queries
         name: cnpg-default-monitoring
     disableDefaultQueries: false
-    enablePodMonitor: false
+    enablePodMonitor: true  # scrape :9187 so the backup-age alert (#569) has data
   postgresGID: 26
   postgresUID: 26
   postgresql:
