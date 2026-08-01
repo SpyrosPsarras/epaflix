@@ -1,5 +1,9 @@
 secrets.yml
-.history/
+# Glob form, not `.history/`: a directory-level ignore prunes the whole
+# subtree before git ever evaluates the negations below, so `!.history/*.md`
+# would be silently dead (git can't re-include a file whose parent dir is
+# excluded). Keep this as `.history/*` or the negations stop working again.
+.history/*
 .torrent-cache
 *.log
 !.history/*.md
@@ -36,7 +40,23 @@ charts/
 # SOPS plaintext drafts — never commit. Always encrypt to *.enc.yaml first.
 *-plaintext.yaml
 *.plaintext.yaml
-.a5c/processes/
+# Glob form, not `.a5c/processes/`: same trap as .history above - a
+# directory-level ignore prunes the subtree before negations are evaluated,
+# so a negation can't re-include a file whose parent dir is excluded. The 11
+# already-tracked process definitions below need explicit per-file negations
+# to stay reachable; new scratch files under this directory stay ignored.
+.a5c/processes/*
+!.a5c/processes/argocd-selfmanage-reconcile.inputs.json
+!.a5c/processes/argocd-selfmanage-reconcile.js
+!.a5c/processes/argocd-selfmanage-reconcile.mermaid.md
+!.a5c/processes/filebrowser-prune-flip.inputs.json
+!.a5c/processes/filebrowser-prune-flip.js
+!.a5c/processes/filebrowser-prune-flip.mermaid.md
+!.a5c/processes/renovate-self-update-triage.inputs.json
+!.a5c/processes/renovate-self-update-triage.js
+!.a5c/processes/traefik-prune-flip.inputs.json
+!.a5c/processes/traefik-prune-flip.js
+!.a5c/processes/traefik-prune-flip.mermaid.md
 
 # Superpowers subagent-driven-development scratch (ledger, briefs, review packages).
 # Per-plan workspaces under .superpowers/sdd/<plan>/ — the git history is the record.
