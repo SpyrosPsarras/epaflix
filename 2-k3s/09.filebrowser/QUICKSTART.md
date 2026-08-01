@@ -25,19 +25,19 @@ In Authentik admin UI (https://auth.epaflix.com/if/admin/):
 
 ## 2. Verify NFS Mounts
 
-Your K3s nodes should already have these NFS mounts (from Servarr setup):
+Your K3s nodes should already have the unified NFS mount (from Servarr setup, issue #195):
 
 ```bash
-# Verify mounts exist with correct permissions:
-ls -la /mnt/
+# Verify mount exists with correct permissions:
+ls -la /mnt/k3s-media/
 # Should show:
-# drwxrwxrwx+ 568 568 ... k3s-animes
-# drwxrwxrwx+ 568 568 ... k3s-movies
-# drwxrwxrwx+ 568 568 ... k3s-tvshows
-# drwxrwxrwx+ 568 568 ... k3s-downloads
+# drwxrwxrwx+ 568 568 ... animes
+# drwxrwxrwx+ 568 568 ... movies
+# drwxrwxrwx+ 568 568 ... tvshows
+# drwxrwxrwx+ 568 568 ... downloads
 ```
 
-If mounts are missing, they're likely already set up from your Servarr deployment. FileBrowser will use the same NFS shares.
+If the mount is missing, it's likely already set up from your Servarr deployment. FileBrowser uses the same unified NFS share.
 
 ## 3. Deploy FileBrowser
 

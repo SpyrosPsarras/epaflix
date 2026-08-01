@@ -22,7 +22,7 @@ Web-based file manager with OIDC authentication via Authentik, accessing NFS med
 - **Database**: SQLite (`/config/database.db`)
 - **Storage**:
   - Config: local-path PVC (2Gi)
-  - Media: hostPath to `/mnt/k3s-media` (NFS with UID 568)
+  - Media: hostPath to the unified NFS mount `/mnt/k3s-media` (UID 568), mounted once and re-exposed at `/srv/{animes,movies,tvshows,downloads}` via subPath
 - **Image**: `gtstef/filebrowser:latest` (FileBrowser Quantum)
 - **Version**: Latest from [FileBrowser Quantum](https://filebrowserquantum.com/)
 - **GitOps**: Managed by ArgoCD Application `filebrowser` (see [2-k3s/11.argocd/apps/app-filebrowser.yaml](../11.argocd/apps/app-filebrowser.yaml)). The `filebrowser-oidc` Secret is created imperatively from `.github/instructions/secrets.yml` and is **not** tracked in git — same convention as Traefik's `cloudflare-api-token`.
@@ -38,28 +38,25 @@ Web-based file manager with OIDC authentication via Authentik, accessing NFS med
 1. **Traefik** deployed with cert-manager integration
 2. **Authentik** running at `auth.epaflix.com`
 3. **NFS server** with media accessible at `192.168.10.200`
-4. **K3s nodes** with NFS mounts (already configured from Servarr setup):
-   - `/mnt/k3s-animes` (uid=568, gid=568)
-   - `/mnt/k3s-movies` (uid=568, gid=568)
-   - `/mnt/k3s-tvshows` (uid=568, gid=568)
-   - `/mnt/k3s-downloads` (uid=568, gid=568)
+4. **K3s nodes** with the unified NFS mount (already configured from Servarr setup, issue #195):
+   - `/mnt/k3s-media` (uid=568, gid=568) — single export covering animes/movies/tvshows/downloads
 5. **DNS**: `filebrowser.epaflix.com` pointing to Traefik LoadBalancer
 
 ## NFS Mount Verification
 
-Your K3s nodes should already have NFS mounts from the Servarr deployment. Verify they exist:
+Your K3s nodes should already have the unified NFS mount from the Servarr deployment. Verify it exists:
 
 ```bash
 # On any k3s node:
-ls -la /mnt/
+ls -la /mnt/k3s-media/
 # Expected output:
-# drwxrwxrwx+ 568 568 ... k3s-animes
-# drwxrwxrwx+ 568 568 ... k3s-movies
-# drwxrwxrwx+ 568 568 ... k3s-tvshows
-# drwxrwxrwx+ 568 568 ... k3s-downloads
+# drwxrwxrwx+ 568 568 ... animes
+# drwxrwxrwx+ 568 568 ... movies
+# drwxrwxrwx+ 568 568 ... tvshows
+# drwxrwxrwx+ 568 568 ... downloads
 ```
 
-**Note**: If these mounts are missing, refer to the Servarr setup documentation in `08.servarr/README.md` for NFS mount configuration.
+**Note**: If this mount is missing, refer to the Servarr setup documentation in `08.servarr/README.md` for NFS mount configuration.
 
 ## Authentik OIDC Provider Setup
 
@@ -193,11 +190,12 @@ FileBrowser Storage:
 ├── /config/                    # PVC: filebrowser-config (local-path, 2Gi)
 │   ├── database.db            # SQLite database (users, settings)
 │   └── cache/                 # Preview cache, temp files
-└── /srv/                       # Multiple PVCs mounted to separate directories
-    ├── animes/                # PVC: filebrowser-animes (hostPath → /mnt/k3s-animes)
-    ├── movies/                # PVC: filebrowser-movies (hostPath → /mnt/k3s-movies)
-    ├── tvshows/               # PVC: filebrowser-tvshows (hostPath → /mnt/k3s-tvshows)
-    └── downloads/             # PVC: filebrowser-downloads (hostPath → /mnt/k3s-downloads)
+└── /srv/                       # One PVC (filebrowser-media, hostPath → /mnt/k3s-media),
+                                 # mounted 4x with subPath so the layout below is unchanged
+    ├── animes/                # subPath: animes
+    ├── movies/                # subPath: movies
+    ├── tvshows/               # subPath: tvshows
+    └── downloads/             # subPath: downloads
 ```
 
 ## Verification
@@ -238,11 +236,11 @@ https://filebrowser.epaflix.com/api/auth/oidc/callback
 **Solution**: Check NFS mount permissions on nodes:
 ```bash
 # On k3s nodes:
-ls -lan /mnt/ | grep k3s-
-# Should show: drwxrwxrwx+ ... 568 568 ... k3s-animes
-#              drwxrwxrwx+ ... 568 568 ... k3s-movies
-#              drwxrwxrwx+ ... 568 568 ... k3s-tvshows
-#              drwxrwxrwx+ ... 568 568 ... k3s-downloads
+ls -lan /mnt/k3s-media/
+# Should show: drwxrwxrwx+ ... 568 568 ... animes
+#              drwxrwxrwx+ ... 568 568 ... movies
+#              drwxrwxrwx+ ... 568 568 ... tvshows
+#              drwxrwxrwx+ ... 568 568 ... downloads
 
 # Fix if needed (on TrueNAS):
 ssh truenas_admin@192.168.10.200
