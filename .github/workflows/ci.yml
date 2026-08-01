@@ -26,23 +26,24 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
-      - name: No gitignored secret is tracked
+      - name: No tracked file matches .gitignore
         run: |
           set -euo pipefail
-          # Server-side, --no-verify-proof complement to the local pre-commit
-          # hook (PR #302): fail if the gitignored secrets file is ever tracked
-          # (via `git commit --no-verify` or a clone without hooks installed).
-          # Scoped to the sensitive path (#303 "at minimum"). The broader
-          # ls-files ∩ check-ignore --no-index rule can't gate yet because
-          # intentionally-tracked .history/*.{md,sh} and .a5c/processes/* match
-          # .gitignore for lack of negations — see #389.
-          secret=".github/instructions/secrets.yml"
-          if git ls-files --error-unmatch -- "$secret" >/dev/null 2>&1; then
-            echo "ERROR: $secret is tracked — it must stay gitignored." >&2
-            echo "Untrack with: git rm --cached $secret" >&2
+          # Server-side complement to the local pre-commit hook (PR #302):
+          # fail if any tracked file matches .gitignore (via `git commit
+          # --no-verify` or a clone without hooks installed). Widened from
+          # the secrets-only check (#303/PR #388) to the general case now
+          # that .history/*.{md,sh} and .a5c/processes/* have real negations
+          # instead of dead ones (#389) — this is a strict superset, so it
+          # also covers the original secrets.yml scenario for free.
+          tracked_ignored=$(git ls-files -ci --exclude-standard)
+          if [ -n "$tracked_ignored" ]; then
+            echo "ERROR: the following tracked files match .gitignore:" >&2
+            echo "$tracked_ignored" >&2
+            echo "Untrack with: git rm --cached <path>, or add a negation if it should stay tracked." >&2
             exit 1
           fi
-          echo "Gitignored secret '$secret' is not tracked."
+          echo "No tracked file matches .gitignore."
 
       - name: Install tools
         run: |
