@@ -1,0 +1,231 @@
+---
+# Daily encrypted backup of the odysseus-data PVC (issue #321).
+#
+# What it backs up: everything under the odysseus-data PVC (auth.json,
+# settings.json, app.db, scheduled_emails.db, cookbook_state.json,
+# memory.json, presets.json, sessions.json, user_prefs.json, skills/,
+# personal_docs/, rag/, memory_vectors, .claude/, etc.) EXCEPT the two
+# regenerable caches `bin` and `fastembed_cache` (measured live at 57M + 87M
+# = 144M of the ~157M PVC; re-downloadable on first run per the README "NOT
+# migrated" list) — dropping those shrinks the PVC to ~13M of actually-
+# irreplaceable state.
+#
+# Source is odysseus-data itself, mounted READ-ONLY at /source. Its bound PV
+# is local-path and its nodeAffinity pins the pod to k3s-worker-65
+# automatically; local-path PVCs are effectively RWO-single-node so this pod
+# safely coexists on that node alongside the live odysseus Deployment pod
+# without an explicit affinity rule here.
+#
+# Target is the EXISTING odysseus-bastion-workspace RWX NFS PVC (TrueNAS apps
+# RAIDZ1 pool, see odysseus-bastion-pv.yaml), mounted at /backups with
+# subPath backups/odysseus-data. No new NFS export, PV or PVC — reuses what's
+# already there. Deliberately NOT apps/encrypted-backups: that dataset comes
+# up LOCKED after every TrueNAS reboot (see .sops.yaml / project memory), so
+# a write into it would silently no-op until someone remembers to unlock it —
+# exactly the kind of false-green failure this backup exists to avoid.
+#
+# Encryption is straight to the cluster's existing PUBLIC age recipient (see
+# .sops.yaml) via the `age` CLI — no SOPS, no cluster secret needed at backup
+# time, only the public key baked into the script. Decrypting later needs one
+# of the private key copies documented in .sops.yaml /
+# .github/instructions/sops.instructions.md.
+#
+# The two SQLite DBs (app.db, scheduled_emails.db) are captured with
+# `sqlite3 .backup` for a transactionally-consistent snapshot instead of
+# tarring the live files (which can catch a mid-write file and corrupt the
+# restore); each is individually guarded with `test -f` so a DB that doesn't
+# exist (e.g. scheduled_emails.db before its first scheduled email) doesn't
+# fail the job. `PRAGMA busy_timeout=5000` is set on the same connection
+# before `.backup` so a DB mid-write by the live odysseus pod doesn't
+# immediately fail the backup with "database is locked".
+#
+# Two guards here were proven insufficient by direct measurement and have
+# since been hardened:
+#
+# 1. A bare minimum-size floor on the final archive does NOT catch a missing
+#    DB: a live archive with BOTH app.db and scheduled_emails.db absent
+#    measured 4,513,970 bytes against a full 4,887,087-byte archive — easily
+#    clearing any sane MIN_BYTES. The real guard is asserting app.db is
+#    actually a member of the staged tar (`tar -tzf ... | grep -qx
+#    ./app.db`), which also validates the gzip stream's CRC so a truncated
+#    tar is caught too, before anything gets encrypted. The size floor stays
+#    as a cheap secondary check.
+#
+# 2. `tar -czf - . | age -o "$OUT"` under `set -euo pipefail` exits AT that
+#    line on a mid-stream tar failure — but age has ALREADY written a
+#    complete, valid file from the partial stream by then, and the
+#    subsequent size-check-and-rm never runs. A killed tar mid-run measured
+#    a 2,000,680-byte partial archive left on disk: invisible to the size
+#    floor and outliving the 14-day retention. Fixed by staging the tar to a
+#    real file first (so a killed tar fails BEFORE age ever runs), asserting
+#    the app.db member and size on that staged file, then encrypting to
+#    "${OUT}.tmp" and `mv`-ing into place — a failure anywhere leaves at most
+#    a stray .tmp, removed by the EXIT trap; $OUT itself is only ever a
+#    complete, verified archive.
+#
+# Gates #212 (bastion-workspace backup follow-up).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: odysseus-data-backup-script
+  namespace: odysseus
+data:
+  backup.sh: |
+    set -euo pipefail
+
+    # Public age recipient from .sops.yaml — encryption only, no secret needed.
+    RECIPIENT="age1586thf5vkcdf5lcn3zwjpu8ltkwyq8efrhj8lr0vdrrt9k5f3qgsxeg7gx"
+    SRC=/source
+    STAGE=/stage
+    DATA_STAGE="${STAGE}/data"
+    STAGED_TAR="${STAGE}/archive.tar.gz"
+    OUT_DIR=/backups
+    TS=$(date -u +%Y%m%d-%H%M%S)
+    OUT="${OUT_DIR}/odysseus-data-${TS}.tar.gz.age"
+    MIN_BYTES=1048576  # 1MB floor -- secondary guard, see the app.db member check below
+
+    # Encrypt-then-rename: a failure anywhere below leaves at most a stray
+    # "${OUT}.tmp", never a file at $OUT itself. Belt-and-braces for the case
+    # where age (not tar) is what gets killed mid-write.
+    trap 'rm -f "${OUT}.tmp"' EXIT
+
+    echo "=== odysseus-data backup @ $(date -u +%FT%TZ) ==="
+
+    mkdir -p "$DATA_STAGE" "$OUT_DIR"
+
+    echo "staging ${SRC} -> ${DATA_STAGE} (skipping bin/, fastembed_cache/)"
+    find "$SRC" -mindepth 1 -maxdepth 1 ! -name bin ! -name fastembed_cache \
+      -exec cp -a {} "$DATA_STAGE"/ \;
+
+    # Coherent snapshot of the SQLite DBs instead of tarring live files.
+    # busy_timeout=5000 on the same connection avoids "database is locked"
+    # if the live odysseus pod is mid-write when .backup runs.
+    # Guarded with test -f: a missing DB (e.g. scheduled_emails.db before the
+    # first scheduled email) must not fail the job.
+    for db in app.db scheduled_emails.db; do
+      if [ -f "${SRC}/${db}" ]; then
+        echo "sqlite3 .backup: ${db}"
+        printf "PRAGMA busy_timeout=5000;\n.backup '${DATA_STAGE}/${db}'\n" | sqlite3 "${SRC}/${db}"
+      else
+        echo "skip (not present): ${db}"
+      fi
+    done
+
+    # Tar to a real staged file (not piped straight into age) so a killed/
+    # failed tar fails right here, before age ever runs -- see #282 note above.
+    echo "staging tar -> ${STAGED_TAR}"
+    tar -C "$DATA_STAGE" -czf "$STAGED_TAR" .
+
+    # The load-bearing guard: a missing app.db does NOT reliably shrink the
+    # archive below any sane size floor (measured 4,513,970 bytes with both
+    # DBs absent vs. 4,887,087 bytes full), so assert the member directly.
+    # `tar -tzf` also validates the gzip CRC, catching a truncated tar too.
+    echo "verifying required member ./app.db is present"
+    if ! tar -tzf "$STAGED_TAR" | grep -qx './app.db'; then
+      echo "ERROR: ${STAGED_TAR} is missing ./app.db -- refusing to back up without the primary DB, see #282" >&2
+      exit 1
+    fi
+
+    # Minimum-size self-check on the staged (pre-encryption) archive -- cheap
+    # secondary guard alongside the member check above.
+    SIZE=$(wc -c < "$STAGED_TAR")
+    echo "staged archive size: ${SIZE} bytes"
+    if [ "$SIZE" -lt "$MIN_BYTES" ]; then
+      echo "ERROR: ${STAGED_TAR} is only ${SIZE} bytes (< ${MIN_BYTES} floor) -- refusing a near-empty backup, see #282" >&2
+      exit 1
+    fi
+
+    echo "encrypting -> ${OUT}"
+    age -r "$RECIPIENT" -o "${OUT}.tmp" "$STAGED_TAR"
+    mv "${OUT}.tmp" "$OUT"
+
+    echo "pruning archives older than 14 days"
+    find "$OUT_DIR" -maxdepth 1 -name 'odysseus-data-*.tar.gz.age' -mtime +14 -print -delete
+
+    echo "=== done @ $(date -u +%FT%TZ): $(basename "$OUT") (${SIZE} bytes) ==="
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: odysseus-data-backup
+  namespace: odysseus
+  labels:
+    app: odysseus-data-backup
+spec:
+  # 03:15 UTC daily -- ahead of the maintenance-window CronJobs, quiet hours
+  # for the odysseus workspace.
+  schedule: "15 3 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 2592000  # keep 30 days
+      # The NFS mount is `hard`, so a TrueNAS outage would otherwise hang the
+      # pod indefinitely -- and Forbid concurrencyPolicy would then suppress
+      # every later scheduled run behind it.
+      activeDeadlineSeconds: 1800
+      template:
+        metadata:
+          labels:
+            app: odysseus-data-backup
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: backup
+              image: alpine:3.20
+              imagePullPolicy: IfNotPresent
+              # age + sqlite installed fresh at job start (mirrors the
+              # apk-add-at-runtime pattern used by newtarr-config-drift and
+              # cleanuparr-blocklist-drift in this same directory) rather than
+              # a bespoke image to build and maintain.
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -euo pipefail
+                  apk add --no-cache age sqlite >/dev/null
+                  exec /bin/sh /script/backup.sh
+              # Runs as root: the odysseus-data PVC contains a `.ssh`
+              # directory (mode 700) that a non-root reader cannot open.
+              # /source is mounted read-only regardless, so running as root
+              # only widens what this Job can READ, never what it can write
+              # back into odysseus-data.
+              securityContext:
+                runAsUser: 0
+              volumeMounts:
+                - name: source
+                  mountPath: /source
+                  readOnly: true
+                - name: backups
+                  mountPath: /backups
+                  subPath: backups/odysseus-data
+                - name: stage
+                  mountPath: /stage
+                - name: script
+                  mountPath: /script
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "500m"
+                  memory: "256Mi"
+          volumes:
+            # Existing odysseus-data PVC (see odysseus.yaml) -- read-only here.
+            - name: source
+              persistentVolumeClaim:
+                claimName: odysseus-data
+            # Existing odysseus-bastion-workspace RWX NFS PVC (see
+            # odysseus-bastion-pv.yaml) -- reused via subPath, no new PV/PVC.
+            - name: backups
+              persistentVolumeClaim:
+                claimName: odysseus-bastion-workspace
+            - name: stage
+              emptyDir:
+                sizeLimit: 2Gi
+            - name: script
+              configMap:
+                name: odysseus-data-backup-script
+                defaultMode: 0555
