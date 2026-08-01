@@ -8,8 +8,9 @@ metadata:
   labels:
     app: homarr
 spec:
-  # Paused — set back to 1 when needed.
-  replicas: 0
+  replicas: 1
+  strategy:
+    type: Recreate   # Single-writer; avoid double-writer races on config volume
   selector:
     matchLabels:
       app: homarr
@@ -25,13 +26,14 @@ spec:
           labelSelector:
             matchLabels:
               app: homarr
+      # No runAsUser/runAsGroup: entrypoint.sh must start as root to chown
+      # /app + nginx dirs to PUID/PGID, then su-execs to 568 itself (matches
+      # the upstream homarr-labs Helm chart's empty securityContext).
       securityContext:
-        runAsUser: 568
-        runAsGroup: 568
         fsGroup: 568
       containers:
         - name: homarr
-          image: ghcr.io/ajnart/homarr:latest
+          image: ghcr.io/homarr-labs/homarr:latest
           env:
             - name: PUID
               value: "568"
@@ -39,16 +41,24 @@ spec:
               value: "568"
             - name: TZ
               value: "Europe/Oslo"
+            - name: SECRET_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: homarr-secret
+                  key: SECRET_ENCRYPTION_KEY
           ports:
             - containerPort: 7575
               name: http
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
           volumeMounts:
             - name: config
-              mountPath: /app/data/configs
-            - name: icons
-              mountPath: /app/public/icons
-            - name: data
-              mountPath: /data
+              mountPath: /appdata
           resources:
             requests:
               memory: "256Mi"
@@ -60,10 +70,6 @@ spec:
         - name: config
           persistentVolumeClaim:
             claimName: homarr-config
-        - name: icons
-          emptyDir: {}
-        - name: data
-          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
