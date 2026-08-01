@@ -73,14 +73,18 @@ spec:
               mountPath: /config  # SQLite DB and cache
             - name: app-config
               mountPath: /app-config  # rendered config.yaml (from initContainer)
-            - name: animes
+            - name: media
               mountPath: /srv/animes  # NFS: Anime library
-            - name: movies
+              subPath: animes
+            - name: media
               mountPath: /srv/movies  # NFS: Movies library
-            - name: tvshows
+              subPath: movies
+            - name: media
               mountPath: /srv/tvshows  # NFS: TV shows library
-            - name: downloads
+              subPath: tvshows
+            - name: media
               mountPath: /srv/downloads  # NFS: Downloads directory
+              subPath: downloads
           livenessProbe:
             httpGet:
               path: /health
@@ -113,15 +117,6 @@ spec:
         - name: filebrowser-oidc
           secret:
             secretName: filebrowser-oidc
-        - name: animes
+        - name: media
           persistentVolumeClaim:
-            claimName: filebrowser-animes
-        - name: movies
-          persistentVolumeClaim:
-            claimName: filebrowser-movies
-        - name: tvshows
-          persistentVolumeClaim:
-            claimName: filebrowser-tvshows
-        - name: downloads
-          persistentVolumeClaim:
-            claimName: filebrowser-downloads
+            claimName: filebrowser-media

@@ -17,12 +17,9 @@ echo "[1/7] Creating namespace..."
 kubectl apply -f namespace.yaml
 
 # Step 2: Verify NFS mount exists on nodes
-echo "[2/7] Verifying NFS mounts on nodes..."
-echo "FileBrowser requires these NFS mounts (should already exist from Servarr setup):"
-echo "  - /mnt/k3s-animes (uid:gid 568:568)"
-echo "  - /mnt/k3s-movies (uid:gid 568:568)"
-echo "  - /mnt/k3s-tvshows (uid:gid 568:568)"
-echo "  - /mnt/k3s-downloads (uid:gid 568:568)"
+echo "[2/7] Verifying NFS mount on nodes..."
+echo "FileBrowser requires the unified NFS mount (should already exist from Servarr setup):"
+echo "  - /mnt/k3s-media (uid:gid 568:568), covering animes/movies/tvshows/downloads"
 echo ""
 echo "Press Enter when ready to continue..."
 read -r
