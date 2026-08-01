@@ -142,7 +142,8 @@ excluded on `health`.
 ## Component 3 - the published ranking contract
 
 One JSON document carrying the full ranked top 5, not a single winner. The agent needs the list
-for the top-5 band test (Component 5) and for the cached-candidate fallback.
+for the top-5 band test (Component 5), for the cached-candidate fallback, and for walking the pool
+on a failed connect (Component 7).
 
 ```json
 {
@@ -311,7 +312,7 @@ they are validated against the rc directive first and are only read on the quick
 the agent's winner must be inside `nl,de,se` and not one of `Cygnus,Hassaleh,Kajam`. Nothing to
 change today, but the design honours the pool, it does not sidestep it.
 
-**Re-assert `tun0` after every connect.** `tunpersist` is inert under WireGuard (Component 8), so
+**Re-assert `tun0` after every connect.** `tunpersist` is inert under WireGuard (Component 9), so
 the device is destroyed and rebuilt on every switch. It comes back named `tun0` only because the
 device-naming loop picks the first free `tun<N>` and slot 0 happens to be free. If a disconnect
 ever fails to delete the device, the next connect lands on `tun1`, and qBittorrent - bound to
@@ -321,7 +322,7 @@ declare the switch successful otherwise.**
 
 **Never signal Bluetit.** The agent's only Bluetit-affecting calls are `--bluetit-status`,
 `--disconnect` and `--air-connect --async`. No `kill`, no SIGUSR2, no restarting the `airvpn`
-container. The network lock does not survive SIGTERM (Component 8).
+container. The network lock does not survive SIGTERM (Component 9).
 
 **Treat `--disconnect` as retryable.** It reads an uninitialized `VPNClient::Status` in its
 busy-check, so do not trust its return value. Always re-read `--bluetit-status` afterwards.
@@ -332,7 +333,46 @@ forward is applied by AirVPN's own infrastructure, keyed on the account and devi
 live after a `Felix -> Aspidiske` switch: 7 established inbound peer connections on the new
 server, which cannot happen without a working forward on the new exit.
 
-## Component 7 - Nick's VM
+## Component 7 - when a connect fails (#557)
+
+A switch is two calls, and the second one can fail. This is a different problem from "no ranking
+available" (Component 5) - here the pod has already given up its tunnel, the lock is armed, and the
+clock against the liveness probe is running.
+
+**Verify, do not trust the return code.** `--async` returns in about 1.9 s, before the tunnel is
+up, so its exit status proves nothing. After issuing the connect, poll `goldcrest --bluetit-status`
+every 2 s for up to 30 s, and require `Connected to AirVPN server <ExactName>` matching the
+requested server. Names are exact-match on the connect path (Component 6), so a mismatch is a
+failure too.
+
+**Bounded retry, then walk the pool.** Two attempts per candidate: immediate, then one more after
+about 5 s of backoff with jitter. If both fail, move to the next candidate in the ranked top 5.
+This is one more reason the contract publishes the full top 5 and not just a winner (Component 3).
+
+**Terminal fallback is `quick`.** Connected to a mediocre server beats tunnel-less. Same last
+resort as the fallback chain in Component 5.
+
+**The whole recovery has to fit inside the liveness budget - the sharp part of this decision.** The
+sidecar probe is `periodSeconds: 60` and `failureThreshold: 3`, about 180 s end to end. Cap
+recovery at about 120 s to leave margin. Normally you would let the supervisor restart a process
+that is stuck and move on. Not here: a kubelet-driven restart is a SIGTERM, and #535 already proved
+SIGTERM removes the network lock (Component 9). The agent must never let the liveness restart
+become its recovery path - it has to resolve the failure itself, inside the budget, every time.
+
+**Circuit breaker.** If recovery ends on the `quick` fallback rather than a ranked candidate, treat
+the switch as failed and suppress further degradation switches for the full 6 h cooldown (same
+cooldown as Component 5). A bad pool must not cause thrash - every switch costs peer connections
+and a private-tracker re-announce.
+
+**Boot and mid-session are asymmetric.** At boot we are already connected via `quick`, so the
+switch is optional: on failure, fail closed to the working state and stay on `quick`. Mid-session
+the tunnel is already down before any of this logic runs, so recovery is mandatory.
+
+**Jitter before switching.** Both qBittorrent instances read the same ranking. Jitter the switch
+timing so the cluster pod and Nick's VM do not stampede the same winner right after a ranking
+publishes.
+
+## Component 8 - Nick's VM
 
 Same contract, different transport, and it is designed for from day one rather than bolted on.
 
@@ -343,7 +383,7 @@ Same contract, different transport, and it is designed for from day one rather t
   `--disconnect` / `--air-connect --async` switch.
 - Rollout is cluster-first. His box is stage 4.
 
-## Component 8 - constraints that will bite you
+## Component 9 - constraints that will bite you
 
 Each of these cost real debugging. Every one has the failure that proved it.
 
@@ -360,7 +400,9 @@ Each of these cost real debugging. Every one has the failure that proved it.
   (never allow-listed by Bluetit): `http=301` in **7 ms** direct, against **73 ms** tunnelled
   through Amsterdam on the same probe seconds earlier. A clean `--disconnect` and SIGKILL are both
   safe - only SIGTERM leaks. So the agent never signals Bluetit. This contradicts the current
-  comment in `bluetit-config.yaml`; correcting it is #535.
+  comment in `bluetit-config.yaml`; correcting it is #535. A kubelet-driven restart from the
+  liveness probe delivers this same SIGTERM - never let the liveness restart become your recovery
+  path for a failed connect, it drops the lock instead of fixing anything (Component 7, #557).
 - **`tunpersist` is inert under WireGuard.** `wireguardclient.cpp` never reads the directive, only
   the OpenVPN path in `bluetit.cpp` does. `WireGuardClient::stop()` unconditionally calls
   `wg_del_device()` on every disconnect and every reconnect. Nothing may assume `tun0` survives.
@@ -454,7 +496,7 @@ ArgoCD.
 
 ## Open questions
 
-Four came off the map unspecified. Four more surfaced while writing this up. None of them block
+Four came off the map unspecified. Three more surfaced while writing this up. None of them block
 review of the design, all of them block a finished build.
 
 **From the map:**
@@ -476,19 +518,13 @@ review of the design, all of them block a finished build.
 
 **Found while writing this spec:**
 
-5. **What the agent does when the chosen connect fails.** The fallback chain covers "no ranking",
-   not "the connect I just issued was refused". After a `--disconnect`, a failed
-   `--air-connect` leaves the pod tunnel-less with the lock armed, and the liveness probe will
-   restart the `airvpn` container in about 3 minutes - which is the SIGTERM path the design
-   otherwise avoids. Retry the same server, walk down the top 5, or fall straight back to `quick`?
-   Unspecified.
-6. **Where the scorer lives in the repo, and which ArgoCD Application owns it.** The namespace
+5. **Where the scorer lives in the repo, and which ArgoCD Application owns it.** The namespace
    follows from the `servarr-media` PVC being namespaced in `servarr`, but the directory, the
    kustomization and the App are not decided.
-7. **Whether `ranking.json` is published atomically.** Nothing says write-temp-then-rename. A
+6. **Whether `ranking.json` is published atomically.** Nothing says write-temp-then-rename. A
    consumer polling the file can read a half-written document, and a JSON parse failure on a
    partial read is indistinguishable from a corrupt publish.
-8. **Stage 4 has an unowned prerequisite.** Nick's VM cannot get the agent without either
+7. **Stage 4 has an unowned prerequisite.** Nick's VM cannot get the agent without either
    codifying his stack into git or hand-editing his compose. Codifying it is explicitly out of
    scope here and tracked separately, so stage 4 is blocked on work this design does not own.
 
