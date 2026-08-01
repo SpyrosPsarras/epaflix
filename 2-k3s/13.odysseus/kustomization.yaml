@@ -46,6 +46,7 @@ resources:
   - odysseus-bastion-pv.yaml
   - ntfy.yaml
   - pdb.yaml
+  - backup-cronjob.yaml
 generators:
   - ksops-generator.yaml
 

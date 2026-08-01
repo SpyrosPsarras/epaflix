@@ -14,10 +14,9 @@
 #               explicit `argocd app sync odysseus` + Synced/Healthy + soak
 #               window gated this flip. selfHeal reverts any manual `kubectl
 #               edit` on managed resources; ServerSideApply avoids noisy
-#               tracking-id annotation diffs. prune stays OFF — accidental file
-#               deletion must NOT cascade-drop the odysseus Deployment or its
-#               stateful PVCs (matches servarr/postgres/cert-manager cadence);
-#               the prune flip is a separate gated follow-up.
+#               tracking-id annotation diffs. prune ENABLED 2026-08-01 — the
+#               38-day clean Synced+Healthy soak with zero sync activity since
+#               2026-06-24 cleared the #316 gate (7-day minimum).
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -34,13 +33,13 @@ spec:
     namespace: odysseus
   # AUTOMATED self-heal after a clean post-migration soak (#210). selfHeal
   # reverts any manual `kubectl edit` on managed resources; ServerSideApply
-  # avoids noisy tracking-id annotation diffs. prune is OFF — accidental file
-  # deletion must NOT cascade-drop the odysseus Deployment or its stateful
-  # PVCs; the prune flip is a separate gated follow-up.
+  # avoids noisy tracking-id annotation diffs. prune ENABLED 2026-08-01 —
+  # 38-day clean Synced+Healthy soak, zero sync activity since 2026-06-24,
+  # cleared the #316 gate (7-day minimum).
   syncPolicy:
     automated:
       selfHeal: true
-      prune: false
+      prune: true
     syncOptions:
       - ServerSideApply=true
   ignoreDifferences:

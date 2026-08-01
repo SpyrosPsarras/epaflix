@@ -201,3 +201,65 @@ spec:
           annotations:
             summary: "qBittorrent container restarting repeatedly (VPN flap?)"
             description: "qBittorrent ({{ $labels.pod }}) restarted {{ $value }} times in 15m. The Bluetit sidecar's network lock drops traffic on tunnel loss and the pod re-inits — likely an AirVPN flap. Check the airvpn container logs (Grafana → Explore → Loki: {namespace=\"servarr\", container=\"airvpn\"}) and the forwarded port (#qbittorrent-vpn)."
+
+    - name: postgres-backup
+      interval: 60s
+      rules:
+        # Backup-age alert for postgres-cluster (#569). Metric is the CNPG
+        # instance manager's plugin-native
+        # barman_cloud_cloudnative_pg_io_last_available_backup_timestamp on
+        # :9187 (needs spec.monitoring.enablePodMonitor: true, flipped in
+        # 2-k3s/06.postgres/cluster/postgres-cluster.yaml) - deliberately NOT
+        # cnpg_collector_last_available_backup_timestamp, which is permanently
+        # stale under the Barman Cloud Plugin (#571) and would false-fire
+        # forever the moment it's scraped.
+        # max by (namespace) (#577) - the bare metric has 3 series (one per
+        # postgres-cluster instance/pod); a bare max() with no grouping
+        # collapses them to a single value AND drops every label, so the
+        # ALERTS series (and the ntfy .GroupLabels.namespace) came out
+        # empty. `by (namespace)` keeps the exact same one-alert-per-cluster
+        # result (still a single series, since all 3 instances share the
+        # namespace) while carrying the label through.
+        - alert: PostgresBackupAgeHigh
+          expr: (time() - max by (namespace) (barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{namespace="postgres-system"})) > 36*3600
+          for: 10m
+          labels:
+            severity: warning
+            component: postgres
+          annotations:
+            summary: "postgres-cluster backup is aging"
+            description: "postgres-cluster (namespace postgres-system) has had no successful backup for {{ $value | humanizeDuration }} (threshold 36h - covers one missed daily 02:00 UTC run plus a slow failover). Check ObjectStore/postgres-minio-store status and the Barman Cloud plugin logs (Grafana → Explore → Loki: {namespace=\"postgres-system\"})."
+
+        # Same by (namespace) fix as PostgresBackupAgeHigh above (#577).
+        - alert: PostgresBackupAgeCritical
+          expr: (time() - max by (namespace) (barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{namespace="postgres-system"})) > 72*3600
+          for: 10m
+          labels:
+            severity: critical
+            component: postgres
+          annotations:
+            summary: "postgres-cluster backup is critically aged"
+            description: "postgres-cluster (namespace postgres-system) has had no successful backup for {{ $value | humanizeDuration }} (threshold 72h - three missed daily runs in a row, unambiguous). MinIO or the Barman Cloud plugin is almost certainly broken - check ObjectStore/postgres-minio-store status and the plugin/archiver logs immediately (Grafana → Explore → Loki: {namespace=\"postgres-system\"})."
+
+        # If the scrape target disappears (PodMonitor broken, pods gone) the
+        # timestamp metric goes missing rather than stale, and the two alerts
+        # above go quiet with no data instead of firing - the exact silent
+        # hole this issue exists to close. `for: 30m` gives a full CNPG
+        # rolling restart across all 3 instances (sequential, unsupervised
+        # primaryUpdateStrategy) room to complete without a false page.
+        #
+        # No `by (...)`/static label needed here (#577): unlike max(),
+        # absent() re-attaches every EQUALITY matcher from its selector to
+        # the result vector, and namespace="postgres-system" is an equality
+        # matcher - confirmed live: `absent(nonexistent{namespace="postgres-system"})`
+        # returns `{namespace="postgres-system"} 1`, not `{} 1`. The label
+        # was never actually missing on this one.
+        - alert: PostgresBackupMetricMissing
+          expr: absent(barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{namespace="postgres-system"})
+          for: 30m
+          labels:
+            severity: critical
+            component: postgres
+          annotations:
+            summary: "postgres-cluster backup-age metric missing"
+            description: "barman_cloud_cloudnative_pg_io_last_available_backup_timestamp has been absent for 30m - the postgres-system scrape target is down or gone, so the backup-age alerts above cannot fire even if backups are broken. Check that postgres-cluster pods are Running and the PodMonitor is picking them up."

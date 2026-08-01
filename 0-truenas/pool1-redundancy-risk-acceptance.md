@@ -58,9 +58,11 @@ pool. Cross-links: #203 (this decision), #149 (age-key backup relocated, done),
 Risk acceptance does **not** preclude cheap, separate risk-reducers — these are
 tracked as their own issues:
 
-- **Periodic ZFS snapshot task on `pool1/dataset01`** — `pool1` currently has no
-  snapshot task; snapshots are a cheap independent guard (does not protect
-  against disk loss, but covers accidental deletion / corruption).
+- **Periodic ZFS snapshot task on `pool1/dataset01`** — **done** (#311).
+  Recursive snapshot task, daily at 03:30, 3-day retention
+  (`auto-%Y-%m-%d_%H-%M`). This is a cheap independent guard for accidental
+  deletion and bad automation only — it does **not** protect against disk
+  failure on this 2-disk stripe. If a disk dies, the snapshots die with it.
 - **Back up / relocate the 320G `pool1/dataset01/VMs` Proxmox dir** — this is the
   one chunk on the stripe that is **NOT *arr-re-acquirable** and is currently
   unprotected. The `apps` pool has only ~141G free, so it likely needs an
