@@ -69,7 +69,6 @@ spec:
         - /spec/bootstrap
         - /spec/imageCatalogRef
         - /spec/imagePullSecrets
-        - /spec/monitoring
         - /spec/inheritedMetadata
     - group: postgresql.cnpg.io
       kind: Pooler
