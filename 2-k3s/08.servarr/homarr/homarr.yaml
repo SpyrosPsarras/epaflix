@@ -41,6 +41,13 @@ spec:
               value: "568"
             - name: TZ
               value: "Europe/Oslo"
+            # V8's default old-space ceiling auto-scales off the cgroup memory
+            # limit (observed ~258MB heap on a 512Mi limit) with no margin for
+            # RSS overhead - the boot-time ingest of ~28,164 icons blows past
+            # it every time the process starts. Pin the heap explicitly to
+            # ~75% of the limit below instead of trusting auto-detection.
+            - name: NODE_OPTIONS
+              value: "--max-old-space-size=1536"
             - name: SECRET_ENCRYPTION_KEY
               valueFrom:
                 secretKeyRef:
@@ -62,10 +69,13 @@ spec:
           resources:
             requests:
               memory: "256Mi"
-              cpu: "100m"
+              cpu: "200m"
             limits:
-              memory: "512Mi"
-              cpu: "500m"
+              # 512Mi was heap-OOMing on every boot during the icon ingest
+              # (see NODE_OPTIONS above). 2Gi matches the sibling Next.js app
+              # (seerr: 256Mi/2Gi) and clears the ingest with headroom.
+              memory: "2Gi"
+              cpu: "1000m"
       volumes:
         - name: config
           persistentVolumeClaim:
