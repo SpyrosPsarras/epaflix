@@ -327,6 +327,30 @@ For applications that don't support OIDC, use Authentik's Forward Auth (Proxy Pr
   - `sonarr.epaflix.com`, `sonarr2.epaflix.com`, `radarr.epaflix.com`, `prowlarr.epaflix.com`, `qbittorrent.epaflix.com`, `bazarr.epaflix.com` — UI gated, with a **priority-20 `/api` bypass** (no middleware) so API-key / inter-app traffic continues unchanged
   - `cleanuparr.epaflix.com`, `homarr.epaflix.com`, `lingarr.epaflix.com`, `wizarr.epaflix.com` — fully gated (no `/api` bypass)
 
+#### Embedded outpost provider membership — now blueprint-declared (#293)
+
+The embedded outpost's `providers` array (which providers it fronts) used to be
+a **one-time imperative PATCH**: during the servarr rollout (#176) the 10 new
+provider pks were appended to the outpost by hand, invisible to git and
+clobber-prone on any future blueprint apply or Authentik reconcile. As of #293,
+membership is declared in `authentik-iac-blueprint.enc.yaml` as an
+`authentik_outposts.outpost` entry (`identifiers.name: "authentik Embedded
+Outpost"`), listing every provider by `!Find [<model>, [name, "<name>"]]`
+rather than by pk, so the reference survives pk churn and stays readable.
+
+**This is authoritative-replace**: the outposts API treats `providers` as a
+full-replacement list on every apply, not a merge. If the declared list is
+wrong or incomplete, the missing providers silently drop out of the outpost
+and lose their SSO gate on internet-reachable hosts. Keep the blueprint list
+in **exact** sync with the outpost's live membership — after any change,
+diff the declared names against `GET /api/v3/outposts/instances/` for the
+embedded outpost's `providers[]`.
+
+Cross-references: **#176/#289** (rollout that introduced the imperative
+PATCH this replaces); **#404** (tracks removing the orphaned `syncthing`
+provider from this list once its app/provider are torn down — it is
+currently included because it is still live on the outpost).
+
 ### Granting Service Access
 
 **Workflow for adding users to applications:**
