@@ -87,7 +87,7 @@
     {
       "description": "Keep the pinned HELM_VERSION in ci.yml (the secret-free validate gate's Install tools step) fresh. Marker is an inline trailing comment '# renovate: datasource=... depName=...' on the HELM_VERSION= line. Split out from a single shared regex manager (was kustomize+helm) because one regex manager carries only one extractVersionTemplate, and kustomize needs one while helm does not — helm/helm github-releases auto-strips the leading v, so no extractVersion here. #222/#220.",
       "customType": "regex",
-      "managerFilePatterns": ["/^\\.github/workflows/ci\\.yml$/"],
+      "fileMatch": ["^\\.github/workflows/ci\\.yml$"],
       "matchStrings": [
         "HELM_VERSION=(?<currentValue>\\S+)\\s*#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)"
       ],
@@ -96,7 +96,7 @@
     {
       "description": "Keep the pinned KUSTOMIZE_VERSION in ci.yml (the secret-free validate gate's Install tools step) fresh. Marker is an inline trailing comment '# renovate: datasource=... depName=...' on the KUSTOMIZE_VERSION= line. Split out from the shared helm+kustomize regex manager (#222/#220): kustomize github-releases tags are 'kustomize/vX.Y.Z', so extractVersion strips that prefix — without it the bump would be silently no-op or wrong. One regex manager carries only one extractVersionTemplate, hence the split from helm.",
       "customType": "regex",
-      "managerFilePatterns": ["/^\\.github/workflows/ci\\.yml$/"],
+      "fileMatch": ["^\\.github/workflows/ci\\.yml$"],
       "matchStrings": [
         "KUSTOMIZE_VERSION=(?<currentValue>\\S+)\\s*#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)"
       ],
@@ -104,7 +104,7 @@
       "extractVersionTemplate": "^kustomize/v(?<version>.+)$"
     },
     {
-      "description": "Keep the pinned AIRVPN_SUITE_VERSION in images/airvpn-bluetit/Dockerfile fresh. Renovate only ever sees the image tag we publish ourselves (ghcr.io/spyrospsarras/airvpn-bluetit), so without this regex manager nothing would ever report the vendored 2.1.0 tarball as stale. The bump also needs AIRVPN_SUITE_SHA512 updated by hand from AirVPN's published checksum - Renovate cannot compute that, see images/airvpn-bluetit/README.md. Uses fileMatch, not managerFilePatterns: the deployed self-hosted Renovate is pinned to 39.264.0 (2-k3s/12.renovate/cronjob.yaml), and managerFilePatterns only became a recognized customManagers field in v41 - confirmed by running renovate-config-validator@39.264.0 against this file. The other two customManagers below still use managerFilePatterns and are likely dead against this pin, see #486. Datasource is the custom.airvpn-suite-x86_64 entry below, not gitlab-tags: AirVPN/AirVPN-Suite has no upstream git tags or GitLab releases at all (verified via the GitLab API) - versions only ever show up as tarball filenames under binary/ on master, see #487.",
+      "description": "Keep the pinned AIRVPN_SUITE_VERSION in images/airvpn-bluetit/Dockerfile fresh. Renovate only ever sees the image tag we publish ourselves (ghcr.io/spyrospsarras/airvpn-bluetit), so without this regex manager nothing would ever report the vendored 2.1.0 tarball as stale. The bump also needs AIRVPN_SUITE_SHA512 updated by hand from AirVPN's published checksum - Renovate cannot compute that, see images/airvpn-bluetit/README.md. Uses fileMatch, not managerFilePatterns: the deployed self-hosted Renovate is pinned to 39.264.0 (2-k3s/12.renovate/cronjob.yaml), and managerFilePatterns only became a recognized customManagers field in v41 - confirmed by running renovate-config-validator@39.264.0 against this file. The other two customManagers above were fixed to use fileMatch too (#486) — they used managerFilePatterns from creation and were dead against this pin from day one. Datasource is the custom.airvpn-suite-x86_64 entry below, not gitlab-tags: AirVPN/AirVPN-Suite has no upstream git tags or GitLab releases at all (verified via the GitLab API) - versions only ever show up as tarball filenames under binary/ on master, see #487.",
       "customType": "regex",
       "fileMatch": ["^images/airvpn-bluetit/Dockerfile$"],
       "matchStrings": [
