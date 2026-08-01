@@ -10,6 +10,13 @@
 # the files ourselves and skip the systemd units entirely.
 FROM debian:13-slim
 
+# Without this label GitHub does not auto-link the published package to this
+# repo. The package then gets created unlinked on first publish, and
+# GITHUB_TOKEN is denied write_package against it - the exact failure in #534,
+# where the workflow had never once published successfully and the fix needed
+# a manual package-settings change.
+LABEL org.opencontainers.image.source=https://github.com/SpyrosPsarras/epaflix
+
 ARG AIRVPN_SUITE_VERSION=2.1.0
 ARG AIRVPN_SUITE_SHA512=e17add5769b50683a4d2e480995fbe83d9f4b05b9738de58de9ce922ea80b13317b502ad4a49ee01bd23bcf10b8df96a3242fa3e5f9d20138665373c2445720d
 
