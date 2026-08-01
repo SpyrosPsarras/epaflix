@@ -37,18 +37,11 @@ as `nlink=1` copies — see issue #195 and `2-k3s/08.servarr/RECOVERY-newtarr-cl
 
 - /mnt/pool1/dataset01 (unified export, id 32) — the live media export
 
-The **four old child exports** are kept **TEMPORARILY** and will be torn down
-after the soak window (follow-up issue):
-- /mnt/pool1/dataset01/animes
-- /mnt/pool1/dataset01/downloads
-- /mnt/pool1/dataset01/movies
-- /mnt/pool1/dataset01/tvshows
-
-They are retained for two reasons: (1) bazarr + lingarr still bind the old
-movies/tvshows claims pending their migration to the unified `/media` mount, and
-(2) they are the soak-window rollback path (ZFS snapshot
-`pool1/dataset01@pre-unify-issue195` exists). Do NOT delete them until both the
-soak has elapsed AND bazarr/lingarr are migrated.
+The four old per-directory child exports (`/mnt/pool1/dataset01/{animes,
+downloads,movies,tvshows}`) are gone. They were kept temporarily as the
+soak-window rollback path, then torn down once bazarr/lingarr migrated to the
+unified `/media` mount and the soak elapsed (issue #247, PR #514). Export id
+32 is the only export for `pool1/dataset01`.
 
 The rest of the NFS targets are proxmox targets and should not be used by the k3s.
 - /mnt/apps/code-server
