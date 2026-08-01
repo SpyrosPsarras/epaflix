@@ -213,10 +213,15 @@ Confirm access (and that the outpost exists) with
    (as per the servarr provider).
 3. **Application** — name `Odysseus`, slug `odysseus`, link the provider from step 2. Bind
    a group binding so **only** `Odysseus users` is authorized.
-4. **Embedded outpost** — edit outpost pk `209f71f9-95f8-4264-91c2-4b065bbd6b07`: GET its
-   current `providers` array, **APPEND** the new odysseus provider pk (do **not** replace —
-   preserve newtarr provider **pk 82** and any others), PUT/PATCH back, confirm it
-   redeploys healthy.
+4. **Embedded outpost** — since #293/PR #544 this is **declarative**, not an imperative
+   `GET`/`PUT`/`PATCH`. Add a `!Find [authentik_providers_proxy.proxyprovider, [name,
+   "odysseus"]]` line to the `providers` list under the `authentik_outposts.outpost` entry
+   (id `embedded-outpost-membership`) in
+   `2-k3s/07.authentik-deployment/authentik-iac-blueprint.enc.yaml`. That list is
+   **authoritative-replace** on apply, so add the new line without dropping the existing
+   ones (newtarr provider **pk 82** and the rest) — then let the blueprint apply (worker
+   file-watcher picks it up, no restart needed) and confirm the outpost redeploys healthy.
+   Do not PATCH the outpost over the API — the next blueprint apply would revert it.
 
 ## 8. Cloudflare / DNS
 
@@ -257,5 +262,5 @@ the perimeter only opens once Authentik is ready and the app is fully proven off
 | **TrueNAS app** | Stop + delete the `odysseus` Custom App (UI or `midclt app.delete odysseus`). Optionally `sudo docker rmi odysseus:73673258`. `/mnt/pool1/odysseus` (SQLite db, logs) persists for re-deploy, or `pool.dataset.delete` if abandoning. Ollama, open-webui and the GPU are unaffected — we only reused Ollama's API. |
 | **Ollama model** | If unwanted: `sudo docker exec ollama ollama rm qwen2.5:7b-instruct-q4_K_M`. Existing models untouched. |
 | **k3s manifests** | `git revert` the merge (or revert PR) removing `odysseus-proxy.yaml` + the kustomization entry; rebase + force-with-lease + `validate` + merge. ArgoCD prunes the Endpoints/Service/IngressRoutes; `odysseus.epaflix.com` returns Traefik 404. No other route affected. |
-| **Authentik** | Remove the `odysseus` Application + Proxy Provider; remove the provider pk from the embedded outpost `providers` array (append-reverse, **preserving newtarr pk 82**); optionally delete the `Odysseus users` group. No personal standing admin token exists to revert (retired by #175); the durable `ak-iac` service-account token (#185) is unrelated to Odysseus and stays. |
+| **Authentik** | Remove the `odysseus` Application + Proxy Provider; remove its `!Find` line from the embedded outpost's `providers` list in `authentik-iac-blueprint.enc.yaml` (id `embedded-outpost-membership`, declarative since #293/PR #544 — **preserve newtarr's entry** and any others) and let the blueprint apply; optionally delete the `Odysseus users` group. No personal standing admin token exists to revert (retired by #175); the durable `ak-iac` service-account token (#185) is unrelated to Odysseus and stays. |
 | **Cloudflare / DNS** | Nothing to roll back (wildcard pre-existed; no DNS-only shadow record was created). If a Pi-hole LAN-hairpin line was added, remove the `address=/odysseus.epaflix.com` line from the `dnsmasq.d` file. |
