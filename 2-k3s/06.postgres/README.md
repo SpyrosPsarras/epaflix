@@ -8,9 +8,9 @@ This directory contains manifests and scripts for deploying a highly available P
 - **High Availability**: 3 instances (1 primary + 2 hot standby replicas)
 - **Storage Strategy**:
   - PostgreSQL data: `local-path` storage class (20Gi per instance, RWO)
-  - Backups & WAL archives: `local-path` storage class
+  - Backups & WAL archives: MinIO/S3 (`s3://postgres-backups/`) via the Barman Cloud Plugin
 - **Connection Pooling**: PgBouncer (3 replicas, transaction mode)
-- **Backup Schedule**: Daily at 2:00 AM UTC (base backups to PVC)
+- **Backup Schedule**: Daily at 2:00 AM UTC (base backups to MinIO/S3, `10d` retention)
 - **Replication**: Streaming replication with automatic failover
 - **Monitoring**: Manual PodMonitor creation (enablePodMonitor deprecated in v1.28)
 
@@ -195,7 +195,38 @@ SELECT current_user, current_database();
 
 ## Backup and Recovery
 
-**Important:** The current configuration uses native CloudNativePG `barmanObjectStore` backups to MinIO/S3 with WAL archiving and a `10d` retention policy. Native `barmanObjectStore` support is deprecated and should be migrated to the Barman Cloud Plugin before upgrading CloudNativePG to `1.30.0` or newer. See the [official backup documentation](https://cloudnative-pg.io/docs/1.29/backup/) and [Barman Cloud Plugin migration guide](https://cloudnative-pg.io/plugin-barman-cloud/docs/migration/) for details.
+**Important:** Backups run through the **Barman Cloud Plugin** (`barman-cloud.cloudnative-pg.io`, v0.12.0) - the migration off native `barmanObjectStore` landed in #10. Destination is MinIO/S3 (`s3://postgres-backups/`) with WAL archiving and a `10d` retention policy, both configured on the `ObjectStore/postgres-minio-store` resource, not on the `Cluster`. See the [Barman Cloud Plugin docs](https://cloudnative-pg.io/plugin-barman-cloud/docs/).
+
+### Which backup field is authoritative - READ THIS FIRST (#571)
+
+Under the Barman Cloud Plugin the `Cluster` object's backup timestamps are **frozen at their pre-migration values and never update again**. CNPG only ever writes a `barmanObjectStore` key into `status.lastSuccessfulBackupByMethod` / `status.firstRecoverabilityPointByMethod` - it never writes a `plugin` key. So a perfectly healthy cluster reads as months out of date. That is exactly what caused the false alarm in #567.
+
+**Do NOT trust these - stale by design, not a real outage:**
+
+- `Cluster/postgres-cluster.status.lastSuccessfulBackup`
+- `Cluster/postgres-cluster.status.firstRecoverabilityPoint`
+- both matching `...ByMethod` maps
+- `kubectl cnpg status`, which reads the same stale fields and so under-reports continuous backup
+
+**Authoritative - read this instead:**
+
+```bash
+kubectl get objectstore postgres-minio-store -n postgres-system \
+  -o jsonpath='{.status.serverRecoveryWindow.postgres-cluster.lastSuccessfulBackupTime}{"\n"}'
+```
+
+Worked example (2026-08-02): the `ObjectStore` field above returned `2026-08-02T02:03:02Z` while `Cluster.status.lastSuccessfulBackup` returned `2026-05-30T02:02:27Z` on the same healthy cluster. Same day, same cluster, two months apart - trust the first one.
+
+The `Backup` objects are a second, equally current check:
+
+```bash
+kubectl get backup -n postgres-system --sort-by=.metadata.creationTimestamp \
+  -o custom-columns='NAME:.metadata.name,METHOD:.spec.method,PHASE:.status.phase,STOPPED:.status.stoppedAt' | tail -5
+```
+
+Every recent row should read `plugin` / `completed`. Anything still on `method: barmanObjectStore` is pre-migration residue.
+
+Upstream reporting gap, not fixable on our side: `cloudnative-pg/cloudnative-pg#7658` and `#8276`. Any future backup alert (#569) must key off the `ObjectStore` field above - never off the `Cluster` fields.
 
 ### Verify Backup Configuration
 
@@ -231,14 +262,24 @@ metadata:
 spec:
   cluster:
     name: postgres-cluster
-  method: barmanObjectStore
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
 ```
 
-### List Backups on NFS
+`method: barmanObjectStore` no longer works here - it is the pre-#10 form and the plugin will not pick it up. Match `backup/backup-schedule.yaml`, which is the live shape.
 
-Check backup PVC status:
+### List Backups
+
+Backups live in the object store, not on a PVC. List them through the `Backup` objects:
 ```bash
-kubectl get pvc -n postgres-system | grep backup
+kubectl get backup -n postgres-system --sort-by=.metadata.creationTimestamp
+```
+
+Retention (`10d`) and the current recovery window are on the `ObjectStore`:
+```bash
+kubectl get objectstore postgres-minio-store -n postgres-system \
+  -o jsonpath='{.spec.retentionPolicy}{"  "}{.status.serverRecoveryWindow.postgres-cluster}{"\n"}'
 ```
 
 ### Point-in-Time Recovery (PITR)
