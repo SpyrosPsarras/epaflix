@@ -161,4 +161,4 @@ images:
   # workflow, leaving the native sidecar unpullable and the app container
   # never starting.
   - name: ghcr.io/spyrospsarras/airvpn-bluetit
-    digest: sha256:c5597e020c03316e7d1cf97f84a0e86d85a602aa61aa904fb138a96517f3fcda
+    digest: sha256:f58bf6777b43b69482b49f08be6221be79feea9589ca5bdd1d28e528be76afe8
