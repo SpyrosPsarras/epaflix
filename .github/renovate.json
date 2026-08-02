@@ -48,6 +48,13 @@
       "platformAutomerge": true
     },
     {
+      "description": "Lingarr is the one entry in that images: block tracking an unreleased development branch (:main, for the upstream #432 DateTime->UTC fix — #270 retires it for a release tag once >1.2.4 ships). Everything else there tracks a released stream, so a digest roll is a rebuild; a lingarr digest roll is a raw upstream dev commit with no release notes. Open a PR and let a human read it. An unattended lingarr merge is precisely what silently reverted the pin to the pre-fix 1.2.4 build for seven weeks (#273/#530/#531). MUST stay after the servarr-digest rule above — later packageRules win.",
+      "matchFileNames": ["2-k3s/08.servarr/kustomization.yaml"],
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["ghcr.io/lingarr-translate/lingarr"],
+      "automerge": false
+    },
+    {
       "description": "Authentik MINOR/MAJOR: never auto-merge — release notes can carry DB migrations and breaking changes. PR opens, you review, you click merge.",
       "matchPackageNames": [
         "authentik",
