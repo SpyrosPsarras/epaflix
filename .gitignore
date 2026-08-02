@@ -70,3 +70,7 @@ charts/
 
 # Playwright MCP scratch - browser snapshots, which can capture account pages.
 .playwright-mcp/
+
+# Python bytecode. images/vpn-picker/ is the repo's only Python source; running
+# its selftest locally drops a __pycache__ next to it.
+__pycache__/
