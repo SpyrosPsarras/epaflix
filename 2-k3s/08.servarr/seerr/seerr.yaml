@@ -38,6 +38,41 @@ spec:
         runAsUser: 568
         runAsGroup: 568
         fsGroup: 568
+      initContainers:
+        # Seed the /app/config PVC from the SOPS-encrypted seerr-config-seed
+        # Secret (issue #518). This codifies settings.json (service definitions,
+        # main API key, Sonarr/Radarr instance config) in git so a freshly
+        # re-provisioned local-path PVC comes up pre-configured instead of
+        # empty, and durably captures fixes that were previously PVC-only
+        # (e.g. #253's is4k flag flip, #522's Sonarr2 seriesType fix).
+        #
+        # NON-CLOBBERING: only copied when settings.json does NOT already
+        # exist on the PVC. On a populated PVC this is a no-op — the app
+        # rewrites settings.json at runtime, and this never overwrites live
+        # state. Same pattern as newtarr's seed-config initContainer (#137).
+        - name: seed-config
+          image: busybox:1.36
+          securityContext:
+            runAsUser: 0
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              mkdir -p /app/config
+              if [ -e /app/config/settings.json ]; then
+                echo "skip (exists): /app/config/settings.json"
+              else
+                cp /seed/settings.json /app/config/settings.json
+                echo "seeded: /app/config/settings.json"
+              fi
+              chown -R 568:568 /app/config
+          volumeMounts:
+            - name: config
+              mountPath: /app/config
+            - name: seed
+              mountPath: /seed
+              readOnly: true
       containers:
         - name: seerr
           # Using Jellyseerr OIDC preview image for OIDC support
@@ -110,6 +145,12 @@ spec:
           persistentVolumeClaim:
             # Reusing the jellyseerr config PVC
             claimName: jellyseerr-config
+        # SOPS-encrypted seed config (issue #518), reconciled by the servarr
+        # ksops generator from _shared/secrets/seerr-config-seed.enc.yaml.
+        # Consumed only by the seed-config initContainer.
+        - name: seed
+          secret:
+            secretName: seerr-config-seed
 ---
 apiVersion: v1
 kind: Service
