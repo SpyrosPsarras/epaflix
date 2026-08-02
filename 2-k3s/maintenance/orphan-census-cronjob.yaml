@@ -1,0 +1,480 @@
+---
+# Daily orphan census for qBittorrent (Issue #483). SHIPS DISARMED.
+#
+# An ORPHAN here = a torrent that is present in qBittorrent, has NO row in any
+# *arr queue, and is INCOMPLETE (`progress < 1.0`). A completed torrent with no
+# queue row is a normal finished seed and is NOT an orphan.
+#
+# Why this job has to exist at all - Cleanuparr cannot see these (verified in
+# the v2.10.2 source, not inferred):
+#   - QueueCleaner enumerates from the *arr queue, so something with no queue
+#     row is never enumerated, never struck, never removed.
+#   - DownloadCleaner's three sub-features (seeding rules, unlinked detector,
+#     Dead Torrents) all consume ONE list from
+#     `QBitServiceDC.GetSeedingDownloads()`, which is filtered
+#     `TorrentListFilter.Completed`. Anything below 100% is invisible to all
+#     three. "Just enable Dead Torrents" does not work.
+# So no Cleanuparr rule reaches an incomplete, queue-less torrent, at any
+# setting. Hence a CronJob, in the same shape as the two existing detectors
+# (`cleanuparr-blocklist-drift`, `newtarr-config-drift`).
+#
+# Who MAKES the orphans: the Cleanuparr `private stalled` stall rule has
+# `delete_private_torrents_from_client = 0`, so at `max_strikes` 30 it removes
+# the *arr queue row and deliberately leaves the torrent in the client. That is
+# the orphan-creation event - it is NOT the #142 manual-removal pattern, which
+# is why the #142 operator runbook could never have fixed it. Splitting that
+# rule is the owner action written up in the #196 section of
+# 2-k3s/08.servarr/RECOVERY-newtarr-cleanuparr.md. This job is the detector and
+# the (optional, disarmed) reaper for what already leaked.
+#
+# Exit-code contract, same as the two sibling detectors: NON-ZERO on any finding
+# or any failure, so the chart's default KubeJobFailed rule + the scoped
+# OrphanCensusFailed PrometheusRule (2-k3s/10.observability/alertmanager-config/
+# custom-alerts.yaml) fire and route to ntfy. Exit 1 = orphans found, exit 2 =
+# the census could not be completed safely (fail LOUD, never a silent pass).
+#
+# Credentials, no new machinery:
+#   - the three *arr API keys are read from the EXISTING `unpackerr-secret`
+#     (2-k3s/08.servarr/_shared/secrets/unpackerr-secret.enc.yaml) - same three
+#     instances, same keys, no duplication.
+#   - the qBittorrent WebUI credential is the new SOPS Secret
+#     `qbittorrent-webui-credentials`, which lives in the SERVARR overlay
+#     (2-k3s/08.servarr/_shared/secrets/) and not here on purpose: CI's
+#     "Kustomize build (sops-free dirs)" step builds `2-k3s/maintenance`
+#     WITHOUT the age key, so a ksops generator in this overlay would drop the
+#     whole directory out of that gate. Cross-App Secret reference is already
+#     the precedent - `newtarr-config-drift` in this same directory mounts the
+#     servarr-owned `newtarr-config-seed`.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: orphan-census-script
+  namespace: servarr
+data:
+  census.py: |
+    #!/usr/bin/env python3
+    """qBittorrent orphan census (#483). Python stdlib only - no pip, no apk.
+
+    Run with --selftest to exercise the classifier against synthetic torrents
+    without touching the network.
+    """
+    import http.cookiejar
+    import json
+    import os
+    import sys
+    import time
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    TIMEOUT = 30
+
+    # === ARM SWITCH ===
+    # Read from the CronJob env. Anything other than the exact string "true" is
+    # DISARMED - the fail-safe direction. See the CronJob `env:` block; that one
+    # value is the whole arming change.
+    ARMED = os.environ.get("ARMED", "false").strip().lower() == "true"
+
+    # Delete the partial data too when reaping. Deliberate: the only thing this
+    # job can ever reap is an INCOMPLETE torrent that no *arr references and that
+    # has uploaded ZERO bytes. Nothing will ever import that partial - Sonarr and
+    # Radarr only import from a queue row, and there is none. Leaving the bytes
+    # behind just converts an orphan torrent into an orphan FILE, which is the
+    # mirror-image problem and the same disk we keep filling (#444, the #304
+    # DiskPressure work). The cost being accepted: if the same release were
+    # re-grabbed later, qBittorrent could have resumed from the partial instead
+    # of re-downloading. For a 0.4% partial that is worth nothing; for the ~40%
+    # ones it is ~1.25 GB of re-download. Accepted - permanent disk leak is worse
+    # than an occasional re-download.
+    DELETE_FILES = "true"
+
+    # Do not flag anything younger than this. Anti-flap: an *arr queue can be
+    # transiently empty during a restart, and a just-grabbed torrent races its
+    # own queue row. Every real orphan seen so far was 118h+ old.
+    MIN_AGE_HOURS = float(os.environ.get("MIN_AGE_HOURS", "24"))
+
+    # Categories that are NEVER reported and NEVER reaped.
+    #   avistaz-reseed - the two torrents held stopped on purpose at 83.5% and
+    #     93.5% for the live #479 re-seed work. They are indistinguishable from
+    #     an orphan to any naive rule: incomplete, no queue row, no upload.
+    #   manual-import  - a human put it there by hand. #610's torrent lives here;
+    #     it downloaded 33.74 GB and UPLOADED 977 MB, so it is a real snatch with
+    #     real hit-and-run exposure. Its remediation is #610's decision, not this
+    #     job's. This is the general rule behind that one carve-out.
+    KEEP_CATEGORIES = {
+        c.strip()
+        for c in os.environ.get(
+            "KEEP_CATEGORIES", "avistaz-reseed,manual-import"
+        ).split(",")
+        if c.strip()
+    }
+
+    # Belt and braces on top of KEEP_CATEGORIES and the uploaded>0 rule: #610's
+    # torrent stays out even if someone re-categorises it.
+    KEEP_HASH_PREFIXES = ("bf83bdcb",)
+
+    QBT_URL = os.environ.get("QBT_URL", "http://qbittorrent:8080").rstrip("/")
+    ARRS = [
+        ("sonarr", os.environ.get("SONARR_URL", "http://sonarr:8989"),
+         os.environ.get("SONARR_API_KEY", "")),
+        ("sonarr2", os.environ.get("SONARR2_URL", "http://sonarr2:8989"),
+         os.environ.get("SONARR2_API_KEY", "")),
+        ("radarr", os.environ.get("RADARR_URL", "http://radarr:7878"),
+         os.environ.get("RADARR_API_KEY", "")),
+    ]
+
+    GB = 1024.0 ** 3
+
+
+    def fail(msg):
+        """Abort LOUD. Never let a failed read look like 'no orphans'."""
+        print("ERROR: " + msg, file=sys.stderr)
+        sys.exit(2)
+
+
+    def http_status(exc):
+        """Status code only - never echo a response body, it can carry a key."""
+        return str(exc.code) if isinstance(exc, urllib.error.HTTPError) else "-"
+
+
+    def qbt_login():
+        cj = http.cookiejar.CookieJar()
+        opener = urllib.request.build_opener(
+            urllib.request.HTTPCookieProcessor(cj))
+        body = urllib.parse.urlencode({
+            "username": os.environ.get("QBT_USERNAME", ""),
+            "password": os.environ.get("QBT_PASSWORD", ""),
+        }).encode()
+        # Referer satisfies qBittorrent's CSRF check on POST.
+        req = urllib.request.Request(
+            QBT_URL + "/api/v2/auth/login", data=body,
+            headers={"Referer": QBT_URL})
+        try:
+            answer = opener.open(req, timeout=TIMEOUT).read().decode().strip()
+        except Exception as exc:  # noqa: BLE001 - any failure is fatal here
+            fail("qBittorrent login request failed (%s, http=%s)"
+                 % (type(exc).__name__, http_status(exc)))
+        # Version-dependent success shape: qBittorrent 4.x answers 200 "Ok." (and
+        # 200 "Fails." on bad credentials - NOT a 4xx), 5.x answers 204 with an
+        # empty body (verified against v5.2.3 / WebAPI 2.15.1). So reject a
+        # non-empty body that is not "Ok.", and let the first authenticated call
+        # below prove the session for the empty-body case - a 403 there is an
+        # auth failure and aborts.
+        if answer and answer != "Ok.":
+            fail("qBittorrent login rejected")
+        return opener
+
+
+    def qbt_torrents(opener):
+        try:
+            with opener.open(QBT_URL + "/api/v2/torrents/info",
+                             timeout=TIMEOUT) as resp:
+                torrents = json.load(resp)
+        except urllib.error.HTTPError as exc:
+            if exc.code == 403:
+                fail("qBittorrent rejected the session (http=403) - the WebUI "
+                     "credential in Secret qbittorrent-webui-credentials is "
+                     "wrong or the client IP is banned")
+            fail("qBittorrent torrent list failed (HTTPError, http=%d)"
+                 % exc.code)
+        except Exception as exc:  # noqa: BLE001
+            fail("qBittorrent torrent list failed (%s, http=%s)"
+                 % (type(exc).__name__, http_status(exc)))
+        if not isinstance(torrents, list):
+            fail("qBittorrent torrent list was not a JSON array")
+        return torrents
+
+
+    def arr_download_ids(name, url, key):
+        """Return the set of live downloadIds for one *arr, lowercased.
+
+        Fails closed on EVERY error path. A silently-empty queue here would make
+        every torrent in the client look like an orphan.
+        """
+        if not key:
+            fail("%s: API key is empty" % name)
+        query = urllib.parse.urlencode({
+            "page": 1,
+            "pageSize": 1000,
+            # Both *arr flavours default these to false and would then hide real
+            # queue rows from us. Each app ignores the parameter it does not know.
+            "includeUnknownSeriesItems": "true",
+            "includeUnknownMovieItems": "true",
+        })
+        req = urllib.request.Request(
+            "%s/api/v3/queue?%s" % (url.rstrip("/"), query),
+            headers={"X-Api-Key": key})
+        try:
+            with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+                doc = json.load(resp)
+        except Exception as exc:  # noqa: BLE001
+            fail("%s: queue fetch failed (%s, http=%s)"
+                 % (name, type(exc).__name__, http_status(exc)))
+        records = doc.get("records")
+        if not isinstance(records, list):
+            fail("%s: queue response has no 'records' array" % name)
+        total = doc.get("totalRecords", len(records))
+        if total > len(records):
+            fail("%s: queue is paginated (%d records, %d fetched) - refusing to "
+                 "run against a partial queue" % (name, total, len(records)))
+        ids = {r["downloadId"].strip().lower()
+               for r in records
+               if isinstance(r.get("downloadId"), str) and r["downloadId"].strip()}
+        return ids, len(records)
+
+
+    def classify(torrent, queued, now):
+        """('ok'|'held'|'orphan', reason). Order matters.
+
+        The three 'ok' tests run FIRST so that the held list only ever contains
+        things that WOULD have been reported as orphans - it stays short and
+        every line in it is a real exclusion, not noise.
+        """
+        # Match on every infohash the client knows for this torrent. A v2 or
+        # hybrid torrent reports `hash` as the v2 id while an *arr may hold the
+        # v1 infohash as its downloadId; matching only one of them would call a
+        # perfectly healthy queued download an orphan.
+        ids = {str(torrent.get(k, "")).strip().lower()
+               for k in ("hash", "infohash_v1", "infohash_v2")}
+        ids.discard("")
+        # amount_left is an exact integer; progress is a float. Either saying
+        # 'complete' is enough. Being wrong in this direction is the safe way to
+        # be wrong - a finished seed must never be reaped.
+        if torrent.get("amount_left", 1) == 0 or float(
+                torrent.get("progress", 0.0)) >= 1.0:
+            return "ok", "complete"
+        if ids & queued:
+            return "ok", "in-arr-queue"
+        age_h = (now - float(torrent.get("added_on", now))) / 3600.0
+        if age_h < MIN_AGE_HOURS:
+            return "ok", "too-young"
+        # Orphan-shaped from here down. Everything below is an exclusion.
+        if any(i.startswith(KEEP_HASH_PREFIXES) for i in ids):
+            return "held", "keep-hash"
+        if str(torrent.get("category", "")) in KEEP_CATEGORIES:
+            return "held", "keep-category"
+        # A torrent that uploaded ANY bytes may carry a seed obligation on a
+        # private tracker, so it is never this job's to delete. The five known
+        # orphans are all ratio 0.00 / 0 bytes uploaded.
+        if int(torrent.get("uploaded", 0)) > 0:
+            return "held", "uploaded>0"
+        return "orphan", ""
+
+
+    def selftest():
+        now = 1000000.0
+        old = now - 200 * 3600
+        base = {"hash": "a" * 40, "progress": 0.4, "amount_left": 10,
+                "added_on": old, "category": "tv-sonarr", "uploaded": 0}
+
+        def verdict(**over):
+            t = dict(base)
+            t.update(over)
+            return classify(t, set(), now)[0]
+
+        assert verdict() == "orphan"
+        # a finished seed with no queue row is NOT an orphan
+        assert verdict(progress=1.0, amount_left=0) == "ok"
+        assert verdict(amount_left=0) == "ok"
+        # still in an *arr queue -> not an orphan
+        assert classify(dict(base), {"a" * 40}, now)[0] == "ok"
+        # uppercase downloadId from *arr must still match qBittorrent's lowercase
+        assert classify(dict(base), {("a" * 40).upper().lower()}, now)[0] == "ok"
+        # too young
+        assert verdict(added_on=now - 3600) == "ok"
+        # the #479 held torrents
+        assert verdict(category="avistaz-reseed", progress=0.835) == "held"
+        # #610's torrent - by category, by hash prefix, and by uploaded>0
+        assert verdict(category="manual-import") == "held"
+        assert verdict(hash="bf83bdcb" + "0" * 32, category="tv-sonarr") == "held"
+        assert verdict(uploaded=1) == "held"
+        print("selftest OK")
+        return 0
+
+
+    def main():
+        if "--selftest" in sys.argv:
+            return selftest()
+
+        now = time.time()
+        print("=== qbittorrent orphan census @ %s ==="
+              % time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)))
+        print("mode: %s | min age: %.0fh | keep-categories: %s | keep-hashes: %s"
+              % ("ARMED (WILL DELETE)" if ARMED else "DISARMED (report only)",
+                 MIN_AGE_HOURS, ",".join(sorted(KEEP_CATEGORIES)) or "-",
+                 ",".join(KEEP_HASH_PREFIXES)))
+
+        opener = qbt_login()
+        torrents = qbt_torrents(opener)
+
+        queued = set()
+        counts = []
+        for name, url, key in ARRS:
+            ids, n = arr_download_ids(name, url, key)
+            queued |= ids
+            counts.append("%s=%d" % (name, n))
+        print("qbittorrent: %d torrents | arr queue rows: %s | %d distinct "
+              "downloadIds" % (len(torrents), " ".join(counts), len(queued)))
+
+        orphans, held = [], []
+        for t in torrents:
+            verdict, reason = classify(t, queued, now)
+            if verdict == "orphan":
+                orphans.append(t)
+            elif verdict == "held":
+                held.append((str(t.get("hash", ""))[:8], reason))
+
+        # Held items are listed by hash prefix + reason ONLY. They are never
+        # counted as orphans and never affect the exit code - but printing the
+        # count keeps the exclusions auditable instead of silently swallowed,
+        # which is the exact failure mode this whole issue family is about.
+        print("\nheld back (orphan-shaped, excluded, never reaped): %d"
+              % len(held))
+        for digest, reason in sorted(held):
+            print("    %-8s  %s" % (digest, reason))
+
+        if not orphans:
+            print("\nOK: 0 orphans (incomplete + no *arr queue row + older than "
+                  "%.0fh)." % MIN_AGE_HOURS)
+            return 0
+
+        size = sum(int(t.get("size", 0)) for t in orphans)
+        on_disk = sum(int(t.get("completed", 0)) for t in orphans)
+        print("\nORPHANS: %d | torrent size %.2f GB | on disk %.2f GB"
+              % (len(orphans), size / GB, on_disk / GB))
+        # Hash prefixes only. No release names, no series titles - these logs are
+        # readable by anyone with cluster access and end up pasted into issues.
+        print("    %-8s  %-14s  %-12s  %7s  %8s  %-5s  %9s"
+              % ("hash8", "category", "state", "prog%", "age_h", "priv", "up_MB"))
+        for t in sorted(orphans, key=lambda x: x.get("added_on", 0)):
+            private = t.get("private", t.get("is_private"))
+            print("    %-8s  %-14s  %-12s  %7.2f  %8.1f  %-5s  %9.1f" % (
+                str(t.get("hash", ""))[:8],
+                str(t.get("category", ""))[:14] or "-",
+                str(t.get("state", ""))[:12],
+                float(t.get("progress", 0.0)) * 100.0,
+                (now - float(t.get("added_on", now))) / 3600.0,
+                {True: "yes", False: "no"}.get(private, "?"),
+                int(t.get("uploaded", 0)) / (1024.0 * 1024.0),
+            ))
+
+        if not ARMED:
+            print("\nDISARMED - nothing was changed. To reap these, set ARMED="
+                  '"true" on the orphan-census CronJob in git and let ArgoCD '
+                  "sync it.")
+            print("ACTION: also apply the #196 `private stalled` rule split in "
+                  "2-k3s/08.servarr/RECOVERY-newtarr-cleanuparr.md, or new "
+                  "orphans keep being manufactured (#483).")
+            return 1
+
+        hashes = "|".join(str(t.get("hash", "")) for t in orphans)
+        body = urllib.parse.urlencode(
+            {"hashes": hashes, "deleteFiles": DELETE_FILES}).encode()
+        req = urllib.request.Request(
+            QBT_URL + "/api/v2/torrents/delete", data=body,
+            headers={"Referer": QBT_URL})
+        try:
+            opener.open(req, timeout=TIMEOUT).read()
+        except Exception as exc:  # noqa: BLE001
+            fail("delete failed for %d orphans (%s, http=%s)"
+                 % (len(orphans), type(exc).__name__, http_status(exc)))
+        print("\nARMED - deleted %d orphans from qBittorrent (deleteFiles=%s)."
+              % (len(orphans), DELETE_FILES))
+        # Still non-zero: a reap is a finding worth a notification, not a
+        # silent success.
+        return 1
+
+
+    if __name__ == "__main__":
+        sys.exit(main())
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: orphan-census
+  namespace: servarr
+  labels:
+    app: orphan-census
+spec:
+  # Daily 07:00 UTC = 09:00 Europe/Oslo, after postgres-sequence-audit (06:00),
+  # cleanuparr-blocklist-drift (Mon 06:30) and newtarr-config-drift (Mon 06:45).
+  # Daily is proportional to the ~24h detection target in #483; the two oldest
+  # orphans ran 25 days unnoticed.
+  schedule: "0 7 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 6
+  failedJobsHistoryLimit: 6
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 2592000  # keep 30 days
+      template:
+        metadata:
+          labels:
+            app: orphan-census
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: orphan-census
+              # Stdlib-only Python. The alternative (alpine + apk add curl jq)
+              # would put the exclusion logic - the part that decides whether a
+              # torrent gets deleted - into a dense jq filter. This script is
+              # also runnable verbatim on a workstation against `kubectl
+              # port-forward`, which is how it gets dry-run before arming.
+              image: python:3.13-alpine
+              imagePullPolicy: IfNotPresent
+              command: ["python3", "/script/census.py"]
+              env:
+                # ===================== ARM SWITCH =====================
+                # "false" = census only. The job reads qBittorrent and the three
+                # *arr queues, prints what it found and exits non-zero so the
+                # alert fires. It changes NOTHING.
+                # Flip to "true" to let it delete the reported orphans from
+                # qBittorrent (with their partial data). This one line is the
+                # entire arming change - nothing else needs to move.
+                - name: ARMED
+                  value: "false"
+                # ======================================================
+                - name: QBT_USERNAME
+                  valueFrom:
+                    secretKeyRef:
+                      name: qbittorrent-webui-credentials
+                      key: QBT_USERNAME
+                - name: QBT_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: qbittorrent-webui-credentials
+                      key: QBT_PASSWORD
+                # Reuse the existing unpackerr Secret - same three *arr
+                # instances, same keys. No second copy of an API key in git.
+                - name: SONARR_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: unpackerr-secret
+                      key: UN_SONARR_0_API_KEY
+                - name: SONARR2_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: unpackerr-secret
+                      key: UN_SONARR_1_API_KEY
+                - name: RADARR_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: unpackerr-secret
+                      key: UN_RADARR_0_API_KEY
+              volumeMounts:
+                - name: script
+                  mountPath: /script
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "500m"
+                  memory: "256Mi"
+          volumes:
+            - name: script
+              configMap:
+                name: orphan-census-script
+                defaultMode: 0444
