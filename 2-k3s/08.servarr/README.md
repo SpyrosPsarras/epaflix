@@ -201,6 +201,30 @@ Update each app (Sonarr, Sonarr2, Radarr) to use:
 > **When a client looks forward-auth-broken, check which path it calls first —
 > `/api/*` works, everything else on a gated host does not.**
 
+### DNS policy (decided, #466)
+
+**In-cluster clients use internal Kubernetes Service DNS
+(`<svc>.servarr.svc.cluster.local:<port>` or the short `<svc>:<port>` form) as
+the actual connection target. The public `*.epaflix.com` hostname is kept only
+in whichever field an app exposes for its own outbound UI links -
+`external_url` in cleanuparr's schema, or the equivalent - never as the field
+the app uses to make the call.**
+
+This is already live in two places: bazarr's sonarr/radarr fields above
+(#465) and cleanuparr's qBittorrent download-client entry. #468 applies the
+same split to cleanuparr's three `arr_instances` rows (`url` = internal
+Service DNS, `external_url` = the public hostname), which already has the
+column - it was just unset.
+
+The alternative - widening the Authentik forward-auth `/api` bypass to cover
+`/signalr` or other non-`/api` paths - is deliberately **not** being done.
+It would expose an unauthenticated endpoint publicly, and it's the same
+one-bypass-per-symptom pattern that caused this three times already
+(qBittorrent `/version/api`, bazarr `/signalr`, and any future integration
+that isn't `/api`-only). Moving callers to internal DNS instead is lower
+risk: it's plain app config, fails loudly on a typo (connection refused, not
+a silent auth gap), and is reversible in seconds.
+
 ### 3. Configure Prowlarr Sync
 Add applications in Prowlarr:
 - Sonarr: `http://sonarr:8989`
