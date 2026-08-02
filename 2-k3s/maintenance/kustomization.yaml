@@ -37,6 +37,14 @@ resources:
   # BASELINE is the ksops-rendered newtarr-config-seed Secret (mounted RO), so no
   # configMapGenerator is needed here.
   - newtarr-config-drift-cronjob.yaml
+  # Issue #483: daily qBittorrent orphan census (servarr ns). Carries its own
+  # census-script ConfigMap + CronJob; no RBAC (it talks HTTP only, never the
+  # kube API). SHIPS DISARMED — `ARMED: "false"` in the CronJob env. The two
+  # Secrets it reads (qbittorrent-webui-credentials, unpackerr-secret) are
+  # rendered by the SERVARR App's ksops generator, deliberately: a ksops
+  # generator here would drop this whole directory out of CI's sops-free
+  # kustomize gate.
+  - orphan-census-cronjob.yaml
 
 # Issue #182: diff baseline for the cleanuparr-blocklist-drift CronJob. Single
 # on-disk source of truth = files/cleanuparr-blocklist-expected.txt (verbatim

@@ -160,6 +160,19 @@ spec:
             summary: "newtarr config-seed drifted from live /config (or check failed)"
             description: "The weekly newtarr-config-drift Job ({{ $labels.job_name }}) failed — either the committed SOPS seed newtarr-config-seed diverged from the live newtarr /config JSON, or a read/exec into the pod failed. Inspect the Job logs for the per-file diff, then re-snapshot via the MANUAL #137 runbook in 2-k3s/08.servarr/RECOVERY-newtarr-cleanuparr.md (#179 section). The detector NEVER auto-fixes; refresh stays manual (no auto-PR per #192). nzb_hunt_bandwidth.json is intentionally excluded (volatile runtime state)."
 
+    - name: orphan-census
+      interval: 60s
+      rules:
+        - alert: OrphanCensusFailed
+          expr: kube_job_failed{namespace="servarr", job_name=~"orphan-census.*"} > 0
+          for: 5m
+          labels:
+            severity: warning
+            component: servarr
+          annotations:
+            summary: "Orphaned qBittorrent torrents found (or the census failed)"
+            description: "The daily orphan-census Job ({{ $labels.job_name }}) exited non-zero — either it found torrents that are in qBittorrent, in NO *arr queue and incomplete (exit 1), or it could not complete the census safely (exit 2: qBittorrent login, a queue fetch, or a paginated queue). Read the Job log for the per-orphan table (hash prefix / category / state / progress / age / uploaded). The job SHIPS DISARMED (ARMED=\"false\") — it changes nothing until that env value is flipped in 2-k3s/maintenance/orphan-census-cronjob.yaml. Root cause of new orphans is the Cleanuparr `private stalled` rule with delete_private_torrents_from_client=0; the owner-action split is in the #196 section of 2-k3s/08.servarr/RECOVERY-newtarr-cleanuparr.md (#483)."
+
     - name: traefik
       interval: 60s
       rules:

@@ -413,7 +413,9 @@ All values below are live unless the source column says otherwise.
 | qBit seeding rule — `animes` | `max_ratio=1.0`, `min_seed_time=0`, `max_seed_time=400h`, `delete_source_files=1`, categories `["animes"]` | `q_bit_seeding_rules` | live |
 | QueueCleaner — enabled | `1` (ON), cron `0 0 0/1 ? * * *` (hourly) | `queue_cleaner_configs.enabled` | live |
 | QueueCleaner stall — `Stall` (public) | `enabled=1`, `max_strikes=3`, `privacy_type=public`, `reset_strikes_on_progress=1` | `stall_rules` | live |
-| QueueCleaner stall — `private stalled` | `enabled=1`, `max_strikes=30`, `privacy_type=private` | `stall_rules` | live (not in earlier prose) |
+| QueueCleaner stall — `private stalled` | `enabled=1`, `max_strikes=30`, `privacy_type=private`, `min_completion_percentage=0`, `max_completion_percentage=100`, **`delete_private_torrents_from_client=0`** | `stall_rules` | live — **this row is the #483 orphan factory; split it, see (c)** |
+| QueueCleaner stall — `private stalled` **after the #483 split** | `enabled=1`, `max_strikes=30`, `privacy_type=private`, `min_completion_percentage=0`, **`max_completion_percentage=99`**, **`delete_private_torrents_from_client=1`** | `stall_rules` | **INTENDED — NOT APPLIED. Owner action, see (c)** |
+| QueueCleaner stall — `private stalled 99-100` **(new, #483)** | `enabled=1`, `max_strikes=30`, `privacy_type=private`, **`min_completion_percentage=99`**, `max_completion_percentage=100`, **`delete_private_torrents_from_client=0`** | `stall_rules` | **INTENDED — NOT APPLIED. Owner action, see (c)** |
 | QueueCleaner slow — `Slow-rule` | `enabled=1`, `max_strikes=3`, `max_time_hours=336`, `min_speed=10KB` | `slow_rules` | live (not in earlier prose) |
 | QueueCleaner failed-import strikes (global) | `failed_import_max_strikes=3`, pattern_mode `include`, 5 `failed_import_patterns`: `Episode file already imported`, `Not a Custom Format upgrade`, `One or more episodes expected in this release were not imported`, `Not an upgrade for existing`, `Not a quality revision upgrade` (last 2 added 2026-07-10) | `queue_cleaner_configs` | live |
 | **Dry Run — OFF** | **`dry_run=0`** (reaper actually deletes; if `1` every rule silently no-ops) | `general_configs.dry_run` | live |
@@ -458,7 +460,8 @@ file seed first so the blocklist pointer has a target, then the reaping rules.
    three rows in `q_bit_seeding_rules`.
 4. **Re-create QueueCleaner stall/slow rules.** UI → **Queue Cleaner**: enable,
    add the `Stall` (public, `max_strikes=3`), `private stalled`
-   (private, `max_strikes=30`), and `Slow-rule` (`max_strikes=3`,
+   (private, `max_strikes=30`; once (c) is applied this is the `0-99` half and
+   you also add `private stalled 99-100`), and `Slow-rule` (`max_strikes=3`,
    `max_time_hours=336`, `min_speed=10KB`) rules, and set the global
    failed-import strikes = `3` with the 5 include-patterns from the table
    above. QueueCleaner only
@@ -488,12 +491,92 @@ file seed first so the blocklist pointer has a target, then the reaping rules.
 > (`sonarr_blocklist_path`) stays a **manual** re-entry on a PVC rebuild, exactly
 > as #138 (ii) documents.
 
+### (c) #483 — split the `private stalled` rule (OWNER ACTION, not applied)
+
+**Why.** `private stalled` fires at `max_strikes=30` with
+`delete_private_torrents_from_client=0`. When it fires it removes the *arr queue
+row and **deliberately leaves the torrent in the client** — that is the
+orphan-creation event in #483, and it happens automatically every time a private
+torrent stalls for 30 hours. It is **not** the #142 manual-removal pattern, which
+is why the #142 operator runbook could never have fixed it. Log proof, two
+siblings on 2026-07-11 16:00: `strike 30` → `Removing item with max strikes` →
+`queue item removed from arr`, with no client-side delete.
+
+**Why the split and not just `delete_private_torrents_from_client=1`.** The rule
+currently spans `0-100`, so flipping the flag alone would also delete a private
+torrent that stalled at 95% — one that may already owe seed time. The honest
+version keeps the flag OFF near the top of the range:
+
+- `0-99%` → delete from client **ON**. A private torrent that never completed has
+  **no seed obligation and no hit-and-run exposure**: H&R attaches to a *snatch*
+  (a completed download you then stop seeding). All five live #483 orphans are
+  `ratio 0.00`, `uploaded 0 bytes`, never completed.
+- `99-100%` → delete from client **OFF**, as today. A torrent at the top of the
+  range is a real seeder and stays protected, consistent with
+  `feedback_private_trackers` and the #249 decision.
+
+**Boundary semantics, verified in v2.10.2 source**
+(`Cleanuparr.Persistence/Models/Configuration/QueueCleaner/QueueRule.cs`,
+`MatchesCompletionPercentage`): the lower bound is **exclusive** unless it is `0`,
+the upper bound is **inclusive**. So `0-99` covers `[0, 99]` and `99-100` covers
+`(99, 100]` — no overlap, no gap. Do **not** "fix" this to `0-98`/`99-100`; that
+would leave `98 < pct <= 99` uncovered.
+
+**Order matters.** `RuleIntervalValidator.FindAllOverlappingIntervals` rejects any
+new rule that overlaps an existing one for the same `privacy_type`. Adding
+`99-100` while `private stalled` still spans `0-100` overlaps at `99-100` and the
+save is **refused**. Shrink the existing rule first.
+
+Run in the Cleanuparr UI (`cleanuparr.epaflix.com`):
+
+1. **Shrink the existing rule.** UI → **Queue Cleaner → Stalled rules** → edit
+   `private stalled`:
+   - completion range: `0` → **`99`** (was `0` → `100`)
+   - **tick** "delete private torrents from client" (was off)
+   - leave `max_strikes=30`, `privacy_type=private`,
+     `reset_strikes_on_progress=1` untouched.
+
+   Save. This must succeed before step 2 or the overlap check blocks it.
+2. **Add the protected top-of-range rule.** UI → **Queue Cleaner → Stalled
+   rules** → **Add rule**:
+   - name `private stalled 99-100`
+   - `privacy_type` = **private**, `max_strikes` = **30**,
+     `reset_strikes_on_progress` = **on**
+   - completion range: **`99`** → **`100`**
+   - **leave** "delete private torrents from client" **off**.
+3. **Verify against the DB (read-only, never the live file).**
+
+   ```bash
+   kubectl -n servarr exec deploy/cleanuparr -- sh -c 'cp /config/cleanuparr.db /tmp/cu-ro.db'
+   POD=$(kubectl -n servarr get pod -l app=cleanuparr -o jsonpath='{.items[0].metadata.name}')
+   kubectl -n servarr cp "$POD":/tmp/cu-ro.db /tmp/cu-ro.db
+   sqlite3 -readonly -header -column /tmp/cu-ro.db \
+     "select name, enabled, max_strikes, privacy_type,
+             min_completion_percentage, max_completion_percentage,
+             delete_private_torrents_from_client
+        from stall_rules order by privacy_type, min_completion_percentage;"
+   ```
+
+   Expected — three rows: `Stall` (public, `0`-`100`, `3`),
+   `private stalled` (private, `0`-**`99`**, `30`, delete-from-client **`1`**),
+   `private stalled 99-100` (private, **`99`**-`100`, `30`, delete-from-client
+   **`0`**).
+4. **Confirm Dry Run is still OFF** (`general_configs.dry_run=0`) — otherwise the
+   split changes nothing.
+
+**What this does NOT do.** It stops *new* orphans; it does not clear the ones
+already leaked. Those have no *arr queue row left, so no QueueCleaner rule will
+ever revisit them — that is the `orphan-census` CronJob's job
+(`2-k3s/maintenance/orphan-census-cronjob.yaml`, #483), which ships **disarmed**.
+
 **Cross-links:** #138 (the flat-blocklist SOPS seed sibling — same PVC-only
 durability gap, file-seedable half), #142 (the safe reaper this state implements
 and protects), #195 (single-`/media` mount; copy-seeder gate that keeps the
 `unlinked` rule off), #244 (qbittorrent `LocalHostAuth=false` — sibling
 PVC-only/live-only config from the same #195 cutover), #246 (arming the reaper —
-flips `unlinked_configs.enabled` `0 -> 1` once pre-fix copies age out), #249.
+flips `unlinked_configs.enabled` `0 -> 1` once pre-fix copies age out), #249,
+#483 (the `private stalled` split in (c) + the `orphan-census` CronJob that
+cleans up what the un-split rule already leaked).
 
 ## #137 — newtarr JSON config seed (SOPS)
 
@@ -912,6 +995,13 @@ so a healthy imported seeder is `nlink>=2` and structurally distinguishable from
 true orphan.
 
 ### Operationally covered — the SAFE reaper is canonical
+
+> **⚠️ The coverage claim in this subsection is WRONG and is tracked by #614.**
+> Left as-is here on purpose — #614 owns the correction, do not fix it in a #483
+> PR. Short version for anyone reading in the meantime: qBit seeding rules only
+> ever see `TorrentListFilter.Completed` torrents, so neither mechanism below
+> reaps an **incomplete** torrent with no *arr queue row. That blind spot is what
+> `2-k3s/maintenance/orphan-census-cronjob.yaml` (#483) exists to cover.
 
 The orphan/stalled-queue reaping that #142 calls for is **already enabled and is
 the canonical mechanism** — it does **NOT** use `nlink`:
