@@ -106,4 +106,50 @@ fi
 docker rm -f "$cid" >/dev/null; trap - EXIT
 echo "ok"
 
+echo "== 7. a stale WireGuard tun<N> device does not wedge Bluetit =="
+# The device lives in the POD netns, so it survives an `airvpn` container
+# restart, and #535 proved there is no graceful exit path that would remove it
+# (SIGKILL, exitCode 137). Bluetit then refuses to arm the persistent lock and
+# refuses the boot connection, forever, until the POD is deleted. Four occurrences
+# on 2026-08-02. The fixture below is the exact leftover state.
+#
+# Needs the wireguard module on the host kernel to build the fixture at all.
+# Skip rather than fail if it is missing - a false red on every image build is
+# worse than one uncovered check, and the fix is verified by hand on a host that
+# has the module.
+if ! docker run --rm --cap-add NET_ADMIN --entrypoint sh "$IMAGE" \
+       -c 'ip link add tun0 type wireguard' >/dev/null 2>&1; then
+  echo "SKIP: host kernel has no wireguard module, cannot build the stale-device fixture"
+else
+  # testdata/bluetit.conf carries `networklock`, which arms only during a
+  # connection. The production pod uses `networklockpersist`, which arms at boot
+  # and is the directive the stale device actually breaks - so render that shape
+  # here instead of touching the fixture the other checks depend on.
+  out=$(docker run --rm --cap-add NET_ADMIN \
+    -e AIRVPN_USERNAME= -e AIRVPN_PASSWORD= -e BLUETIT_CONFIG=/tmp/lock.conf \
+    --entrypoint sh "$IMAGE" -c '
+      printf "airvpntype wireguard\nnetworklockpersist iptables\nallowprivatenetwork yes\nallowping yes\nairipv6 no\nignorednspush yes\nairkey Default\n" > /tmp/lock.conf
+      ip link add tun0 type wireguard
+      ip link add tun1 type wireguard
+      ip link add wg0  type wireguard
+      /entrypoint.sh & sleep 12
+      echo "REMAINING:$(ip -o link show type wireguard | awk -F"[:@ ]+" "{print \$2}" | tr "\n" ",")"' 2>&1)
+  if echo "$out" | grep -q "An existing WireGuard tunnel device has been found"; then
+    echo "FAIL: Bluetit still saw a stale WireGuard device"; echo "$out"; exit 1
+  fi
+  # "Enabling ..." means Bluetit got PAST the stale-device check and tried, which
+  # is the whole regression. It is deliberately not an assertion that the rules
+  # installed - on a host whose iptables is nft-only the legacy tables are
+  # missing and the install fails after this line, which is a property of the
+  # test host, not of the image.
+  if ! echo "$out" | grep -q "Enabling persistent network filter and lock"; then
+    echo "FAIL: the persistent network lock was not armed after the cleanup"; echo "$out"; exit 1
+  fi
+  # wg0 must survive: it is not a tun<N>, so it is not ours to delete.
+  if ! echo "$out" | grep -q "REMAINING:wg0,"; then
+    echo "FAIL: expected only wg0 to remain"; echo "$out" | grep REMAINING; exit 1
+  fi
+  echo "ok"
+fi
+
 echo "ALL CHECKS PASSED"
