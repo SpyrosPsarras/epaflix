@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 # One-shot installer: symlinks repo hooks into .git/hooks/.
-# Idempotent. Run once per fresh clone.
+# Idempotent. Run once per fresh clone. Safe to re-run from inside a
+# worktree too - worktrees already inherit hooks from the shared checkout,
+# this just refreshes the same shared symlink (see #532: `.git` is a file,
+# not a directory, in a worktree, so `--git-path` is used instead of a
+# hardcoded `.git/hooks`).
 set -euo pipefail
-cd "$(dirname "$0")/../.."  # repo root
-hooks_dir=".git/hooks"
+cd "$(dirname "$0")/../.."  # repo root (or worktree root)
+hooks_dir="$(git rev-parse --git-path hooks)"
 src_dir=".github/hooks"
 
 mkdir -p "$hooks_dir"
