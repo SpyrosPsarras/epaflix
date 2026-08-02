@@ -32,6 +32,12 @@
 #                                       (issue #283 — bazarr-autotranslate
 #                                       BAZARR_API_KEY, was inline plaintext)
 #   - airvpn-credentials              from _shared/secrets/airvpn-credentials.enc.yaml
+#   - airvpn-api-key                  from _shared/secrets/airvpn-api-key.enc.yaml
+#                                       (issue #596 — AirVPN REST API key for the
+#                                       vpn-picker scorer. Separate from
+#                                       airvpn-credentials, which holds the
+#                                       Bluetit login and is read by a different
+#                                       pod)
 #   - homarr-secret                   from _shared/secrets/homarr-secret.enc.yaml
 #                                       (issue #284 — homarr-labs SECRET_ENCRYPTION_KEY,
 #                                       required by the maintained image, ajnart fork
@@ -106,6 +112,10 @@ resources:
   - qbittorrent/priority-class.yaml
   - qbittorrent/bluetit-config.yaml
   - unpackerr/unpackerr.yaml
+  # vpn-picker scorer (#596) — Deployment + LoadBalancer + ServiceMonitor.
+  # A directory, not single files: it is a self-contained component, not part
+  # of an *arr app.
+  - vpn-picker
   - homarr/homarr.yaml
   - homarr/pdb.yaml
   - homarr/ingressroute.yaml
