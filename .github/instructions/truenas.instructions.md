@@ -68,6 +68,23 @@ Notes:
   ```
 - For passphrase-bearing creates, **print the passphrase before the call** so a client crash cannot lose it.
 
+### Before destroying a named ZFS snapshot (disk-reclaim guard)
+
+A disk-reclaim pass frees space by destroying snapshots. Snapshots with a **deliberate name** (`@pre-<something>`, `@before-<issue>`) are usually somebody's rollback plan, and that plan may live in an open issue - not in the snapshot's own metadata. Destroying one early silently removes another issue's safety net.
+
+Check open issues **before** the destroy:
+```bash
+SNAP='pool1/dataset01@pre-unify-issue195'
+gh issue list --repo SpyrosPsarras/epaflix --state open --search "${SNAP##*@}"   # snapshot short name
+gh issue list --repo SpyrosPsarras/epaflix --state open --search "${SNAP%@*}"    # dataset name
+```
+- **Hit** - read the referencing issue. Destroy only if its own stated gates (soak window elapsed, migration done, dependent app moved off) are already met, or the owner signs off. Record which gates you checked in the reclaim issue.
+- **No hit** - destroy.
+
+Verify what you are about to remove first (`zfs list -t snapshot -o name,used,creation <dataset>`); `used` is the space that actually comes back.
+
+Background: #444 (pool1 reclaim) destroyed `pool1/dataset01@pre-unify-issue195` while open teardown #247 still named that exact snapshot as its rollback. Both of #247's retention gates happened to be met already, so nothing broke - but that was a coincidence, not a checked precondition (#515).
+
 # TrueNAS Hardware Overview
 - The TrueNAS server is an workstation with 32GB of RAM, 3 SSD disks on RAIDZ1 with a dataset apps and 2 HDD disks on device GUIDs making a stripe vdev with a dataset pool1. The media files are stored on the pool1 dataset and the VMs are stored on the apps dataset. The TrueNAS server is connected to the switch with 1 GiB ethernet. SSH access is available with passwordless authentication using SSH keys. The TrueNAS server is also connected to the Proxmox VE servers via iSCSI targets for VM storage and NFS shares for shared storage. All credentials are stored in `.github/instructions/secrets.yml`.
 
