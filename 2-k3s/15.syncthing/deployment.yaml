@@ -31,7 +31,7 @@ spec:
         fsGroup: 1000
       containers:
         - name: syncthing
-          image: syncthing/syncthing:1.30.0   # pin to current release at apply time; Renovate manages bumps
+          image: syncthing/syncthing:1.30.0   # tag tracked via kustomization.yaml images override (Renovate)
           env:
             - name: PUID
               value: "1000"
