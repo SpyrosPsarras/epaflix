@@ -40,10 +40,13 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: renovate
-              # Pinned to a specific patch so Renovate-the-bot's own kustomize
-              # manager has a concrete tag to bump; kustomization.yaml `images:`
-              # also pins the same tag, both update in lockstep via PR.
-              image: ghcr.io/renovatebot/renovate:39.264.0
+              # No tag here on purpose. The tag lives only in kustomization.yaml's
+              # `images:` block — that's the single source Renovate's own
+              # kustomize manager bumps and ArgoCD applies. A duplicate tag here
+              # went stale at 39.264.0 while the images: override moved the live
+              # bot to 43.33.2, and the drift was misread as proof the bot never
+              # left 39.264.0 (#486).
+              image: ghcr.io/renovatebot/renovate
               imagePullPolicy: IfNotPresent
               args:
                 - "SpyrosPsarras/epaflix"
