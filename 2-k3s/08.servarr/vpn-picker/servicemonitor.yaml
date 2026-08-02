@@ -1,0 +1,36 @@
+---
+# Metrics from day one, before anything consumes the ranking.
+#
+# Alertmanager email delivery is dead (#461), so no behaviour in this design may
+# depend on a human being told something. Nothing here alerts - it just makes
+# sure the data already exists when alerting is fixed, and gives the manual
+# rollout gates something to read.
+#
+# Exported series: vpn_picker_loss_pct / rtt_ms / load / headroom, each labelled
+# by server and covering every probed candidate (a rejected server at 22% loss
+# is the interesting one), plus vpn_picker_ranking_generated_timestamp_seconds,
+# vpn_picker_candidates_passing_gate and vpn_picker_scrape_success.
+#
+# The cluster Prometheus selects all ServiceMonitors (serviceMonitorSelector:
+# {}), so no `release: kube-prometheus-stack` label is needed. Same pattern as
+# 2-k3s/05.traefik-deployment/servicemonitor.yaml.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: vpn-picker
+  namespace: servarr
+  labels:
+    app: vpn-picker
+spec:
+  namespaceSelector:
+    matchNames:
+      - servarr
+  selector:
+    matchLabels:
+      app: vpn-picker
+  endpoints:
+    # A cycle only runs every 15 min, so a faster scrape buys nothing but
+    # duplicate samples of the same numbers.
+    - port: http
+      path: /metrics
+      interval: 60s
