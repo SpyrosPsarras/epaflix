@@ -103,9 +103,15 @@ spec:
           # start, so without this qbittorrent would run for ~15s before the
           # tunnel and the iptables lock exist. Measured on a scratch pod:
           # ~20s from container start to "Connected to AirVPN server".
+          #
+          # ALSO checks traffic, not just the status string - see the
+          # livenessProbe comment below. Proved live on this exact pod,
+          # 2026-08-02 20:04-20:05 UTC: "Connected to AirVPN server Aspidiske"
+          # both times while Connection time reset 00:00:58 -> 00:00:28 and
+          # transfer stayed "In 0 bytes" - the dead shape, now caught here.
           startupProbe:
             exec:
-              command: ["sh","-c","goldcrest --bluetit-status | grep -q 'Connected to AirVPN server'"]
+              command: ["sh","-c","goldcrest --bluetit-status | grep -q 'Connected to AirVPN server' && ping -c 2 -W 2 10.128.0.1 >/dev/null 2>&1"]
             periodSeconds: 5
             failureThreshold: 36
             timeoutSeconds: 10
@@ -115,7 +121,29 @@ spec:
               # It does NOT say "Bluetit is connected" - that string never appears.
               # The disconnected form is "Bluetit is not connected", so do not
               # grep for a bare "connected".
-              command: ["sh","-c","goldcrest --bluetit-status | grep -q 'Connected to AirVPN server'"]
+              #
+              # The string alone lies: goldcrest --bluetit-status prints
+              # "Connected to AirVPN server X" for a WireGuard interface that
+              # never completed a handshake (#627 rootcause). Bluetit's own
+              # "handshake failed to resume -> Reconnecting" loop rebuilds
+              # tun0 from the cached profile without re-logging in, so it
+              # retries the same dead peer forever and the string never
+              # changes. Incident: tunnel dead from 13:33, both probes green
+              # throughout, only fired at 13:46 when a human ran --disconnect
+              # (which changed the string) - 13 minutes green on 0 bytes
+              # transferred, 100% ICMP loss, no AirVPN session.
+              #
+              # Fix: keep the grep (a dead daemon must still fail) AND require
+              # a small ping to the in-tunnel gateway 10.128.0.1 - already
+              # trusted for this (`allowping yes` in bluetit-config.yaml, and
+              # the vpn-picker agent probes it every 60s). `-c 2 -W 2` costs a
+              # few seconds, well inside timeoutSeconds: 20. Not tightened
+              # further on purpose: a restart here is a SIGTERM, and #535
+              # measured SIGTERM dropping the network lock, so flapping on an
+              # ordinary blip is worse than a slightly slower catch of a truly
+              # dead tunnel - periodSeconds/timeoutSeconds/failureThreshold
+              # unchanged.
+              command: ["sh","-c","goldcrest --bluetit-status | grep -q 'Connected to AirVPN server' && ping -c 2 -W 2 10.128.0.1 >/dev/null 2>&1"]
             periodSeconds: 60
             timeoutSeconds: 20
             failureThreshold: 3
