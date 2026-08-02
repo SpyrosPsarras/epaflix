@@ -31,6 +31,20 @@ This directory contains historical records of commands executed during the setup
 
 While passwords and tokens should still use placeholders (reference `.github/instructions/secrets.yml`), other sensitive but non-credential information can be safely documented here.
 
+## What is tracked in git (#591)
+
+Only these 7 files are tracked, and `.gitignore` negates them **by exact name**:
+
+- `README.md`, `USAGE.md` - the docs for this system
+- `log-cmd.sh`, `shell-functions.sh`, `start-logged-session.sh` - the tooling
+- `2026-05-17-wg-hop-lxc-setup.md`, `2026-05-17-wg-hop-public-exposure.md` - two logs force-added before the rule settled; they are already in history, so they stay
+
+**Every other log stays local.** That is the point of the Security Notice above: these files are written on the assumption that nobody will publish them, and this repo is public. Files in subdirectories (`.history/<subdir>/*.md`) stay ignored too.
+
+Sweeping the backlog in #591 (21 untracked `.md` logs at the time) confirmed the same answer: commit none of them. They are raw command output nobody has reviewed line by line, and reviewing them all is more work than the value of having them in git.
+
+If a write-up really is institutional knowledge - an architecture decision, a runbook, a recovery procedure - **promote the content** into `docs/`, `.github/instructions/`, or the relevant component README, and leave the raw log here. Do not add it to `.gitignore`'s negation list unless it is genuinely a repo document that happens to live in this directory.
+
 ## File Organization
 
 ### Recommended Structure

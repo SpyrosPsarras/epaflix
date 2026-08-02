@@ -6,8 +6,21 @@ secrets.yml
 .history/*
 .torrent-cache
 *.log
-!.history/*.md
-!.history/*.sh
+# Negate the intentionally-tracked files by EXACT NAME, not by `*.md`/`*.sh`
+# glob (#591). This directory holds raw operator command logs - real IPs,
+# hostnames, full command output, written under a "git-ignored so it's safe"
+# assumption (.history/README.md) - and this repo is public. A glob negation
+# means a plain `git add -A` stages every new log; there were 21 untracked
+# ones when #591 was swept. Same shape as the .a5c/processes block below:
+# tracking is opt-in per file, anything new stays local. A write-up that
+# really belongs in git goes to docs/ or .github/instructions/, not here.
+!.history/README.md
+!.history/USAGE.md
+!.history/log-cmd.sh
+!.history/shell-functions.sh
+!.history/start-logged-session.sh
+!.history/2026-05-17-wg-hop-lxc-setup.md
+!.history/2026-05-17-wg-hop-public-exposure.md
 raid-migration
 .claude/
 # Babysitter (.a5c) — best-practice (BEST-PRACTICES.md): track institutional
