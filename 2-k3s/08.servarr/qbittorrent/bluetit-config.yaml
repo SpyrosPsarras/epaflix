@@ -54,12 +54,49 @@ data:
     # restart or pause the already-running qbittorrent container just because
     # a sidecar restarted. The new Bluetit takes ~20s to reconnect, and
     # qBittorrent would keep announcing/dialling peers unprotected for that
-    # whole window. `networklockpersist` holds for the WHOLE BLUETIT SESSION -
-    # traffic to/from the external network is blocked whenever Bluetit is not
-    # connected, sidecar restart or not - and it takes priority over
-    # `networklock` per upstream's README. That is why we use it here. Do NOT
-    # revert this to `networklock` "to simplify" - that reopens the
-    # restart-window leak this exists to close.
+    # whole window. `networklockpersist` holds for the WHOLE BLUETIT SESSION
+    # and takes priority over `networklock` per upstream's README. That is why
+    # we use it here. Do NOT revert this to `networklock` "to simplify" - that
+    # reopens the restart-window leak this exists to close.
+    #
+    # It is NOT unconditional, though (#535, correcting the earlier "sidecar
+    # restart or not" wording here). Measured on a scratch pod, same pod, same
+    # "connected then killed" setup, only the signal differing:
+    #
+    #   clean `goldcrest --disconnect`  lock HOLDS. tun0 gone, OUTPUT policy
+    #                                   still DROP, control probe blocked.
+    #   SIGKILL to bluetit              lock HOLDS. No userspace teardown runs
+    #                                   at all, so the rules simply stay.
+    #   SIGTERM to bluetit              lock DIES. ~1.4s after the signal the
+    #                                   OUTPUT chain is empty and the policy is
+    #                                   back to ACCEPT. Discriminator was a
+    #                                   probe to 1.0.0.1 (never allow-listed):
+    #                                   7ms untunnelled vs 73ms tunnelled to
+    #                                   the same IP seconds earlier.
+    #
+    # The saving grace is that NOTHING IN THIS POD CAN REACH THE SIGTERM CASE.
+    # A kubelet restart - liveness/startup probe failure, `kubectl delete pod`,
+    # a rollout - never signals bluetit. The runtime signals PID 1 only, and
+    # PID 1 here is entrypoint.sh, a /bin/sh script with no `trap`. The kernel
+    # discards a default-disposition signal sent to the init process of a PID
+    # namespace from outside it, so that SIGTERM is dropped on the floor; after
+    # terminationGracePeriodSeconds (30s, qbittorrent.yaml) the runtime SIGKILLs
+    # the whole cgroup and bluetit dies in the column where the lock holds.
+    # Corroborated live on 2026-08-02: the airvpn container's
+    # lastState.terminated.exitCode was 137 (SIGKILL of PID 1 - not 143, not the
+    # entrypoint's own `exit 1`) with reason Error, not OOMKilled, and
+    # startedAt->finishedAt was 209s against a startupProbe budget of 36x5s=180s
+    # plus the 30s grace. Also observed independently in
+    # artifacts/vpn-picker/509-stale-dbus-restart.md, which had to use
+    # `pkill -x bluetit` because `kill 1` "is ignored by the container's own
+    # PID 1".
+    #
+    # Consequence for anyone hardening this later: do NOT add a plain SIGTERM
+    # trap to entrypoint.sh that forwards the signal to bluetit. That is the one
+    # change that would convert today's safe SIGKILL teardown into the single
+    # measured path that drops the lock. If a graceful shutdown is ever wanted,
+    # the trap must run `goldcrest --disconnect` (holds the lock) and must not
+    # SIGTERM the daemon.
     #
     # Its two documented side-effects are already covered: manifest refresh is
     # suspended until reconnected (harmless - the image ships a local manifest
