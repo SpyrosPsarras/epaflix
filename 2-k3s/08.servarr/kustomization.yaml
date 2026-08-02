@@ -166,9 +166,11 @@ images:
   - name: qbittorrentofficial/qbittorrent-nox
     digest: sha256:9ebb534fe30bab98622cb84a8c3acecfd88319b2d540f52ecdec7b9f866374d7
   # Our own image - see images/airvpn-bluetit/ and the 2026-07-30 design doc.
-  # Published manually before merge, because merging is the deploy here
-  # (servarr is automated+selfHeal) and would otherwise race the build
-  # workflow, leaving the native sidecar unpullable and the app container
-  # never starting.
+  # Any PR touching images/airvpn-bluetit/** must bump this digest to the
+  # published build, in the same PR or right after the build workflow
+  # publishes it. Skip this and ArgoCD (servarr is automated+selfHeal)
+  # deploys a manifest pointing at an image that does not have the new code
+  # (#613: agent container CrashLoopBackOff, stat /agent-entrypoint.sh: no
+  # such file or directory).
   - name: ghcr.io/spyrospsarras/airvpn-bluetit
-    digest: sha256:f58bf6777b43b69482b49f08be6221be79feea9589ca5bdd1d28e528be76afe8
+    digest: sha256:ca775cd703c7f93f2bf9998f8c269df97ab0b493e37bf933129792a1bcb3452c
