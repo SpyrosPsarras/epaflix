@@ -232,7 +232,16 @@ and is enabled** — no live DB change was made for this close-out:
 - **QueueCleaner stall rules** (public `max_strikes=3`), which only strike torrents
   still **referenced in an *arr queue**.
 
-This seeding-rule + QueueCleaner combination is what satisfies **#142 #2**. The
+This seeding-rule + QueueCleaner combination is what **#142 #2 was closed
+against**.
+
+> **⚠️ Scope caveat (#614).** Between them these two see *completed* torrents
+> (seeding rules) and *arr queue rows* (QueueCleaner) - an **incomplete torrent
+> with no queue row is covered by neither**. Do not read this section as full
+> orphan coverage. Source-level detail is in the **#249** section at the end of
+> this document; #483 is the reaper meant to close the gap, and it is disarmed.
+
+The
 `nlink` / `unlinked_configs` detector stays **OFF** (`enabled=0`) until the
 single-NFS-export Option A migration below lands. The Cleanuparr DB is PVC-only
 SQLite (durability class per **#138**), so this state is not codified — any change
@@ -1040,9 +1049,16 @@ backup gap is tracked in the #180 family.
 
 ## #249 — #195 orphan-reaping: FINISHED (safe reaper canonical; nlink unlinked detector OFF by design)
 
-**#195 is FINISHED.** Orphan-reaping is both *structurally solved* and
-*operationally covered*; there is no remaining "unblocked-but-unsolved" gap. This
-section is the decision-of-record (Path D) for #249.
+> **⚠️ Read the scope correction in "Operationally covered" below before relying
+> on this section.** The coverage claim this decision-of-record rested on was
+> wrong (#614). The structural half (EXDEV gone, hardlinks proven) still holds;
+> the "operationally covered" half does not. **Whether #249 should be reopened or
+> superseded by #483 is an open owner decision - tracked in #614, not decided
+> here.**
+
+**#195 is structurally FINISHED** - the EXDEV barrier that defined the original
+orphan problem is gone. Orphan *reaping* is **not** fully covered: see the scope
+correction below. This section is the decision-of-record (Path D) for #249.
 
 ### Structurally solved — single `/media` mount, hardlinks PROVEN
 
@@ -1064,26 +1080,52 @@ across all three arrs**, not a one-off. Imports are hardlinked (one copy on disk
 so a healthy imported seeder is `nlink>=2` and structurally distinguishable from a
 true orphan.
 
-### Operationally covered — the SAFE reaper is canonical
+### Operationally covered - COMPLETED torrents and QUEUED items ONLY
 
-> **⚠️ The coverage claim in this subsection is WRONG and is tracked by #614.**
-> Left as-is here on purpose — #614 owns the correction, do not fix it in a #483
-> PR. Short version for anyone reading in the meantime: qBit seeding rules only
-> ever see `TorrentListFilter.Completed` torrents, so neither mechanism below
-> reaps an **incomplete** torrent with no *arr queue row. That blind spot is what
-> `2-k3s/maintenance/orphan-census-cronjob.yaml` (#483) exists to cover.
-
-The orphan/stalled-queue reaping that #142 calls for is **already enabled and is
-the canonical mechanism** — it does **NOT** use `nlink`:
+**Scope correction (#614).** This subsection used to say the two mechanisms below
+"reap orphaned and stalled queue items safely and continuously". That was **false**,
+and #249 was closed partly on the strength of it. What they actually cover, read
+out of the v2.10.2 source we run:
 
 - **Cleanuparr `download_cleaner` → qBit seeding rules** (`enabled=1`, hourly),
   per category (`radarr` / `tv-sonarr` / `animes`), gated **purely** on
   `max_ratio=1.0` / `max_seed_time=400h`. It can never touch a torrent on
-  `nlink` grounds.
-- **Cleanuparr `QueueCleaner`** (stall + slow rules, hourly), which only strikes
-  torrents still **referenced in an *arr queue**.
+  `nlink` grounds. **Sees COMPLETED torrents only.**
+- **Cleanuparr `QueueCleaner`** (stall + slow rules, hourly). **Sees *arr queue
+  rows only** - it enumerates from the *arr queue, so a torrent with no queue row
+  is invisible to it by construction.
 
-These two together reap orphaned and stalled queue items safely and continuously.
+**Neither can see an incomplete torrent that has no *arr queue row.** That blind
+spot is structural, not a misconfiguration:
+
+- `DownloadCleaner.cs:105` makes exactly **one** torrent-fetch call,
+  `GetSeedingDownloads()`.
+- For qBittorrent that resolves to `QBitServiceDC.cs:16` -
+  `GetTorrentListAsync(new TorrentListQuery { Filter = TorrentListFilter.Completed })`.
+- That **single** list is then handed to **all three** consumers:
+  `_unlinkedService` (`:161`), `_deadTorrentService` (`:165`) and
+  `_seedingRulesService` (`:172`). A sub-100% torrent never enters the list, so
+  none of the three can act on it.
+- `QueueCleaner.cs:118` iterates `_arrArrQueueIterator.Iterate(arrClient, instance, …)`
+  - the *arr queue. An orphan is by definition present in qBittorrent and **absent**
+  from that queue.
+
+Visible in the logs too: the hourly `[DownloadCleaner] Evaluating N downloads for
+cleanup` line tracks the completed-in-rule-categories count, not the client total
+(`N=173` at 2026-08-02 22:00).
+
+**The one module that does see every torrent does not close the gap either.**
+`OrphanedFilesCleanupService` (`DownloadCleaner.cs:182`) calls `GetAllTorrentsLite()`,
+which is unfiltered - but it uses those torrents only to build a **claimed-paths**
+set, then moves *unclaimed files on disk* into an orphaned directory. It never
+deletes a torrent. An incomplete queue-less torrent's files are **claimed**, so
+that torrent is *protected* by this module, not reaped by it.
+
+**What is meant to cover the gap:** `2-k3s/maintenance/orphan-census-cronjob.yaml`
+(#483), which ships **disarmed**. Until it is armed, incomplete + queue-less
+torrents are covered by **nothing** and have to be found by hand - see the #142
+manual operator runbook below.
+
 See the "#196" authoritative values table + restore runbook for the exact live
 config and how to rebuild it on a fresh PVC.
 
