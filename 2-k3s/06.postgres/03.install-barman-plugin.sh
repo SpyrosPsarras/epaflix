@@ -11,7 +11,7 @@ echo "======================================"
 echo "Installing Barman Cloud Plugin (v0.12.0)"
 echo "======================================"
 
-# Requires: CNPG operator >= 1.26 (we run 1.28.0) and cert-manager
+# Requires: CNPG operator >= 1.26 (we run 1.30.0) and cert-manager
 # (plugin uses a cert-manager Issuer/Certificate for its CNPG-i gRPC TLS).
 echo "Applying vendored plugin manifest into cnpg-system..."
 kubectl apply --server-side --force-conflicts \
