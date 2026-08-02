@@ -92,6 +92,7 @@ done
 | Directory    | Description                              |
 |--------------|------------------------------------------|
 | `user-vms/`  | User VM provisioning with jumpbox access |
+| `pegaprox/`  | PegaProx (LXC 1021) operational runbook  |
 
 ## Next Steps
 
