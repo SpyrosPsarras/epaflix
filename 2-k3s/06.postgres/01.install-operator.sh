@@ -16,7 +16,7 @@ echo "Creating postgres-system namespace..."
 kubectl apply -f namespace.yaml
 
 # Install CloudNativePG operator
-echo "Installing CloudNativePG operator v1.28.0..."
+echo "Installing CloudNativePG operator v1.30.0..."
 kubectl apply --server-side --force-conflicts -f operator-kustomization/cnpg-operator.yaml
 
 # Wait for operator to be ready
