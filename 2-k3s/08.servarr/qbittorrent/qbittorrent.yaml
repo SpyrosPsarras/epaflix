@@ -242,9 +242,41 @@ spec:
         # WebUI and every *arr download client with it; /agent-entrypoint.sh
         # supervises the process instead so a crash never becomes a
         # CrashLoopBackOff.
+        #
+        # That guard only covers agent.py crashing - it does nothing if
+        # /agent-entrypoint.sh itself is missing, not executable, malformed,
+        # or exits non-zero for any other reason.
+        # #617: a stale digest pin left the file out of the image entirely, the
+        # container hit RunContainerError on every start, CrashLoopBackOff'd,
+        # and took qbittorrent's only Service endpoint down with it - k8s has
+        # no way to let one container opt a Pod out of readiness gating (a
+        # native sidecar counts the same as a regular container here), so the
+        # only real fix is making sure this container can never fail to start.
+        # `command` below wraps the real entrypoint in /bin/sh - which ships in
+        # every debian-slim build regardless of what's in /agent-entrypoint.sh
+        # - so a missing/broken entrypoint falls through to `sleep infinity`
+        # (up, idle, Ready) instead of crash-looping the pod out of the
+        # Service.
+        #
+        # No `exec` on the primary call: `exec`ing a missing/non-executable/
+        # bad-shebang file makes dash (debian's /bin/sh) abort the whole shell
+        # on the spot, bypassing `||` entirely - verified against debian:13-slim
+        # for all three failure shapes (missing file, chmod-less, bad shebang).
+        # A plain (non-exec) invocation turns every one of those into an
+        # ordinary non-zero exit that `||` catches. `exec` is only used for the
+        # fallback `sleep infinity`, which always exists, so that idle case
+        # never crash-loops. `sleep` as PID 1 ignores SIGTERM though, so it
+        # always burns the full terminationGracePeriodSeconds before SIGKILL -
+        # unchanged from before this fix, the baseline behaves the same way.
         - name: agent
           image: ghcr.io/spyrospsarras/airvpn-bluetit:latest
-          command: ["/agent-entrypoint.sh"]
+          command:
+            - /bin/sh
+            - -c
+            - >-
+              /agent-entrypoint.sh ||
+              { echo 'agent-entrypoint.sh missing or failed to run - agent disabled, see #617' >&2;
+              exec sleep infinity; }
           env:
             - { name: TZ, value: "Europe/Oslo" }
             # goldcrest needs these for --air-connect. Without them it does not
