@@ -1,0 +1,59 @@
+name: build-vpn-picker
+
+# Builds and publishes the vpn-picker scorer image (images/vpn-picker/).
+# Additive to the existing `validate` required check in ci.yml — does not
+# modify it. On a pull request this only builds and runs test.sh, it never
+# logs in or pushes, so a broken image cannot reach GHCR.
+
+on:
+  push:
+    branches: [main]
+    paths: ['images/vpn-picker/**', '.github/workflows/build-vpn-picker.yml']
+  pull_request:
+    paths: ['images/vpn-picker/**', '.github/workflows/build-vpn-picker.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    # Fork-guard, same rule as ci.yml's validate job: only run for PRs from
+    # branches in THIS repo (plus pushes and manual dispatch, which are never
+    # fork-authored). Public repo, and this job holds packages:write on push,
+    # so fork PR workflow code must never execute here.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      - name: Verify the image before publishing anything
+        run: |
+          cd images/vpn-picker
+          docker build -t vpn-picker:dev .
+          chmod +x test.sh && ./test.sh
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: images/vpn-picker
+          push: true
+          tags: |
+            ghcr.io/spyrospsarras/vpn-picker:${{ github.sha }}
+            ghcr.io/spyrospsarras/vpn-picker:latest
+
+      - name: Print the digest to pin
+        if: github.event_name != 'pull_request'
+        run: docker buildx imagetools inspect ghcr.io/spyrospsarras/vpn-picker:${{ github.sha }} --format '{{.Manifest.Digest}}'
