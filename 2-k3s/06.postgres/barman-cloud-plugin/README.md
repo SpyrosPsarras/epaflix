@@ -1,7 +1,7 @@
 # Barman Cloud Plugin (imperative)
 
 CNPG Barman Cloud Plugin operator + `ObjectStore` CRD, installed into
-`cnpg-system`. Pinned to **v0.12.0**. Added to migrate postgres-cluster off
+`cnpg-system`. Pinned to **v0.14.0**. Added to migrate postgres-cluster off
 in-tree `barmanObjectStore` (issue #10).
 
 Bootstrapped via `../03.install-barman-plugin.sh` (fresh-cluster only). Day-to-day
