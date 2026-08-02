@@ -64,4 +64,46 @@ if echo "$out" | grep -q NOLOCK; then
 fi
 echo "ok"
 
+echo "== 5. the agent's decision logic (#608, spec Components 4-7) =="
+# Runs against the real agent.py in the built image, not a copy. Covers the
+# stale-ranking rule, the top-5 band test, degradation hysteresis, the cooldown
+# and daily cap, the failed-connect walk, and the goldcrest byte cap.
+docker run --rm --entrypoint python3 "$IMAGE" /agent_selftest.py
+
+echo "== 6. the agent entrypoint runs and serves metrics with no credentials =="
+# No AIRVPN_USERNAME/AIRVPN_PASSWORD and no Bluetit to talk to. It must stay up
+# and keep serving, not exit - a crash-looping agent container makes the whole
+# pod not-ready, which drops qbittorrent out of its Service endpoints.
+cid=$(docker run -d --rm -p 18081:8081 --entrypoint /agent-entrypoint.sh \
+        -e VPN_AGENT_GOLDCREST_TIMEOUT=3 -e VPN_AGENT_BOOT_WAIT_SECONDS=5 \
+        -e VPN_AGENT_PROBE_INTERVAL_SECONDS=5 "$IMAGE")
+trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
+for _ in $(seq 1 30); do
+  metrics=$(curl -s http://127.0.0.1:18081/metrics || true)
+  echo "$metrics" | grep -q "^vpn_agent_dry_run " && break
+  sleep 1
+done
+for m in vpn_agent_dry_run vpn_agent_switches_total vpn_agent_consecutive_bad_windows; do
+  if ! echo "${metrics:-}" | grep -q "$m"; then
+    echo "FAIL: missing metric $m"; echo "${metrics:-none}"; docker logs "$cid"; exit 1
+  fi
+done
+# DRY_RUN defaults OFF - the agent acts. The flag only exists because the spec's
+# rollback is "flip back to dry-run".
+if ! echo "$metrics" | grep -q "^vpn_agent_dry_run 0$"; then
+  echo "FAIL: dry run is not off by default"; echo "$metrics"; exit 1
+fi
+sleep 20
+if ! docker ps --format '{{.ID}}' | grep -q "${cid:0:12}"; then
+  echo "FAIL: the agent container exited instead of staying up"; docker logs "$cid"; exit 1
+fi
+# The credential-less goldcrest calls must not have flooded the log with the
+# 673 MB prompt. 2 MB is generous and still catches an unbounded call.
+size=$(docker logs "$cid" 2>&1 | wc -c)
+if [ "$size" -gt 2000000 ]; then
+  echo "FAIL: agent log is ${size} bytes - a goldcrest call was not bounded"; exit 1
+fi
+docker rm -f "$cid" >/dev/null; trap - EXIT
+echo "ok"
+
 echo "ALL CHECKS PASSED"
