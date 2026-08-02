@@ -319,6 +319,35 @@ After the patch the live object matches git, ArgoCD reconverges to Synced + Heal
 
 Cross-links: #243, #147 (same SSA list-merge class, fixed git-durably in PR #198), #195/#242 (the cutover that triggered it), #240.
 
+### Orphaned `spec.template.spec.volumes` entries (the silent sibling)
+
+**Symptom**: none - and that is the whole problem. A `volumes` entry that no `volumeMounts` references does **not** fail SSA and does **not** show OutOfSync. The App stays Synced/Healthy while the live Deployment carries a volume git no longer declares. During #247, `sonarr`, `sonarr2` and `radarr` each still carried leftover `servarr-media-{animes,tvshows,movies,downloads}` volumes from before the #195 `/media` consolidation - unreferenced, invisible, sitting there 7+ weeks until #247 tripped over them. The cost is not just clutter: an orphaned volume keeps its PVC bound, so a PVC teardown either fails or quietly leaves dead storage attached.
+
+**Detection** - one command over every servarr Deployment. Git-independent: any declared volume that no container mounts is an orphan.
+```bash
+kubectl -n servarr get deploy -o json | jq -r '
+  .items[]
+  | ([.spec.template.spec.containers[].volumeMounts[]?.name]
+     + [.spec.template.spec.initContainers[]?.volumeMounts[]?.name]) as $mounted
+  | [.spec.template.spec.volumes[]?.name] as $declared
+  | select(($declared - $mounted) | length > 0)
+  | "\(.metadata.name): orphaned volumes \($declared - $mounted)"'
+```
+No output = clean. (Run 2026-08-03: clean across all 17 servarr Deployments - #247's out-of-band patch held.)
+
+**Remediation** - same shape as the `volumeMounts` recipe above: replace the whole list with git's. Copy the exact array out of the Deployment manifest in git (`sonarr/sonarr.yaml` and friends), do not hand-write it:
+```bash
+kubectl -n servarr patch deployment sonarr --type=json \
+  -p='[{"op":"replace","path":"/spec/template/spec/volumes","value":[
+        {"name":"config","persistentVolumeClaim":{"claimName":"sonarr-config"}},
+        {"name":"media","persistentVolumeClaim":{"claimName":"servarr-media"}}
+      ]}]'
+```
+
+**Why no drift CronJob for this**: `newtarr-config-drift` and `cleanuparr-blocklist-drift` exist because that state lives only on a PVC - git cannot see it, so only a job can compare. `volumes` is git-declared state; the gap in #247 was that nobody looked, not that looking was impossible. Cheaper answer: run the detection one-liner whenever servarr storage changes (adding/removing a mount, tearing down a PVC), and treat it as a review step on any PVC-removal PR.
+
+Cross-links: #516, #247 (found the orphans), #243/#147 (the `volumeMounts` sibling above), #195/#242 (the consolidation that left them behind).
+
 ## Notes
 
 - All apps run as PUID=568, PGID=568 (matching TrueNAS permissions)
