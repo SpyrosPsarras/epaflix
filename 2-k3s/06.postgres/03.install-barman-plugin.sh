@@ -8,7 +8,7 @@ set -e
 # for the very first install on a fresh cluster before ArgoCD is up.
 
 echo "======================================"
-echo "Installing Barman Cloud Plugin (v0.12.0)"
+echo "Installing Barman Cloud Plugin (v0.14.0)"
 echo "======================================"
 
 # Requires: CNPG operator >= 1.26 (we run 1.30.0) and cert-manager
