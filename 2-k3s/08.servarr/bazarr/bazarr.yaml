@@ -1,5 +1,18 @@
 ---
 # Bazarr - Subtitle Manager (Development Branch)
+#
+# Sonarr/Radarr connection settings (#465) - PVC-only, NOT git-seeded, verify
+# after any config PVC rebuild (they come back empty/default otherwise):
+#   sonarr: ip=sonarr.servarr.svc.cluster.local port=8989 ssl=false
+#   radarr: ip=radarr.servarr.svc.cluster.local port=7878 ssl=false
+# Live in /config/config/config.yaml on the bazarr pod, under `sonarr:`/`radarr:`.
+# Why internal Service DNS and not the public *.epaflix.com hostname: bazarr's
+# SignalR client has no Authentik session, so /signalr/negotiate on the public
+# host returns a 302 (Authentik login) that bazarr can't parse as JSON -> the
+# SignalR feed dies in a loop (20 restarts/4d10h, confirmed 2026-07-26, #466).
+# /api/v3 calls kept working the whole time (Authentik's /api bypass), which is
+# why it looked half-healthy. See 2-k3s/08.servarr/README.md for the general
+# in-cluster-DNS policy this follows (#465, #466, #468).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
