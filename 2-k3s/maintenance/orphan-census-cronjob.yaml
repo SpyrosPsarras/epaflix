@@ -32,6 +32,10 @@
 # OrphanCensusFailed PrometheusRule (2-k3s/10.observability/alertmanager-config/
 # custom-alerts.yaml) fire and route to ntfy. Exit 1 = orphans found, exit 2 =
 # the census could not be completed safely (fail LOUD, never a silent pass).
+# #631 added one more exit-2 case: every *arr queue reading 0 rows while
+# orphan-shaped torrents sit in the client. That is a broken queue read path
+# wearing an orphan costume, not a finding - see queue_read_path_broken()
+# in the script below.
 #
 # Credentials, no new machinery:
 #   - the three *arr API keys are read from the EXISTING `unpackerr-secret`
@@ -223,6 +227,25 @@ data:
         return ids, len(records)
 
 
+    def queue_read_path_broken(arr_ns, orphans):
+        """True iff EVERY configured *arr reports 0 queue rows while at least
+        one torrent would be classified as an orphan under that (all-empty,
+        surely-wrong) queue set (#631, live 2026-08-02: 3/3 *arrs at 0 rows,
+        208 torrents in the client, 9 of them actively downloading their own
+        grabs).
+
+        A single *arr legitimately has nothing queued on plenty of days - a
+        quiet Radarr while Sonarr is busy is normal, so a per-arr zero is not
+        checked here. All three independent apps hitting 0 at once, while the
+        client still holds torrents old enough and unheld enough to be
+        reaped, is not a plausible healthy reading - it means the queue read
+        path is broken, not that every incomplete torrent just became an
+        orphan. A genuinely idle cluster (all zero, and nothing orphan-shaped
+        to reap either) is legitimate and must stay quiet.
+        """
+        return bool(arr_ns) and all(n == 0 for n in arr_ns) and bool(orphans)
+
+
     def classify(torrent, queued, now):
         """('ok'|'held'|'orphan', reason). Order matters.
 
@@ -288,6 +311,17 @@ data:
         assert verdict(category="manual-import") == "held"
         assert verdict(hash="bf83bdcb" + "0" * 32, category="tv-sonarr") == "held"
         assert verdict(uploaded=1) == "held"
+
+        # #631: all *arr queues empty is only suspicious if something would
+        # actually be reaped under that (surely-wrong) reading.
+        assert queue_read_path_broken([0, 0, 0], [{"hash": "x"}]) is True
+        # genuinely idle cluster: all zero, and nothing orphan-shaped either -
+        # must stay quiet.
+        assert queue_read_path_broken([0, 0, 0], []) is False
+        # one *arr legitimately idle while the others carry a real queue -
+        # a per-arr zero alone is never suspicious.
+        assert queue_read_path_broken([0, 5, 2], [{"hash": "x"}]) is False
+
         print("selftest OK")
         return 0
 
@@ -309,10 +343,12 @@ data:
 
         queued = set()
         counts = []
+        arr_ns = []
         for name, url, key in ARRS:
             ids, n = arr_download_ids(name, url, key)
             queued |= ids
             counts.append("%s=%d" % (name, n))
+            arr_ns.append(n)
         print("qbittorrent: %d torrents | arr queue rows: %s | %d distinct "
               "downloadIds" % (len(torrents), " ".join(counts), len(queued)))
 
@@ -323,6 +359,21 @@ data:
                 orphans.append(t)
             elif verdict == "held":
                 held.append((str(t.get("hash", ""))[:8], reason))
+
+        # #631: a queue-less torrent is only trustworthy evidence of an
+        # orphan if the queue read actually worked. All three *arrs at 0 rows
+        # at once is not a plausible healthy state - fail LOUD (exit 2, same
+        # as every other broken-read-path case above) before ARMED is even
+        # consulted. That way a disarmed run reporting "N orphans" can never
+        # train anyone to trust a broken reading, and an armed run can never
+        # delete against one.
+        if queue_read_path_broken(arr_ns, orphans):
+            fail("all %d configured *arr queues report 0 rows (%s) while "
+                 "qBittorrent has %d torrent(s) that are incomplete, unheld "
+                 "and older than %.0fh - that looks like a broken *arr queue "
+                 "read path, not an idle cluster (#631). Refusing to treat "
+                 "every queue-less torrent as an orphan."
+                 % (len(ARRS), " ".join(counts), len(orphans), MIN_AGE_HOURS))
 
         # Held items are listed by hash prefix + reason ONLY. They are never
         # counted as orphans and never affect the exit code - but printing the
