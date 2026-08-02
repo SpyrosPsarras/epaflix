@@ -11,3 +11,7 @@ resources:
   - service-gui.yaml
   - service-sync.yaml
   - ingressroute-tcp.yaml
+
+images:
+  - name: syncthing/syncthing
+    newTag: 1.30.0
