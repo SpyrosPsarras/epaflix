@@ -24,6 +24,10 @@
 #   - newtarr-config-seed             from _shared/secrets/newtarr-config-seed.enc.yaml
 #                                       (issue #137 — newtarr JSON config seed,
 #                                       consumed by the seed-config initContainer)
+#   - seerr-config-seed                from _shared/secrets/seerr-config-seed.enc.yaml
+#                                       (issue #518 — seerr's /app/config/settings.json,
+#                                       same PVC-only durable-state gap as newtarr #137;
+#                                       consumed by the seed-config initContainer)
 #   - cleanuparr-blocklist-seed       from _shared/secrets/cleanuparr-blocklist-seed.enc.yaml
 #                                       (issue #138 — Sonarr custom-blocklist
 #                                       seriesId 40 S04E13 re-arm guard, consumed
