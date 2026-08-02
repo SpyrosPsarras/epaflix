@@ -195,8 +195,16 @@ images:
   # the running digest so Renovate's servarr-digest rule (#192) tracks + auto-merges it
   # and there are no surprise mid-day re-rolls (#238). The Deployment keeps the bare
   # :rolling tag; this override swaps in the digest for both refs.
+  #
+  # MUST be `newTag: <tag>@<digest>`, NOT a bare `digest:` (#587). This repo has no
+  # `:latest` on GHCR - only `rolling` and `v1.0.0`. A tagless `digest:` entry leaves
+  # Renovate's kustomize manager with currentValue undefined, the docker datasource
+  # then falls back to `newValue ?? 'latest'`, and GHCR 404s -> the dashboard warning
+  # "Could not determine new digest". Carrying the tag gives Renovate a real
+  # currentValue to look up. Do NOT set `newTag:` and `digest:` together - that is
+  # skipReason: invalid-dependency-specification and silently disables tracking.
   - name: ghcr.io/elfhosted/newtarr
-    digest: sha256:6abafe8ee23c96e3c9e298b5f9ef8313f1d231546b794900d4da36caa22912f0
+    newTag: rolling@sha256:6abafe8ee23c96e3c9e298b5f9ef8313f1d231546b794900d4da36caa22912f0
   # Official qBittorrent. Replaced tenseiken/qbittorrent-wireguard, which cannot
   # run without a VPN of its own (2026-07-30 Bluetit sidecar migration).
   - name: qbittorrentofficial/qbittorrent-nox
