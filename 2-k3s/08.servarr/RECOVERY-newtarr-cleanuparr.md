@@ -386,9 +386,49 @@ correct format` from `GetLegacyApiVersionPrivateAsync`, ~2,500/day in
 Service URL (`http://qbittorrent:8080`, `http://sonarr:8989`, ...), never the
 public `*.epaflix.com` hostname — the public route only bypasses Authentik
 under `/api`, and clients that probe any other path (legacy qbt API, health
-endpoints) get the login page. Cleanuparr's three *arr instance URLs are still
-the public hostnames (they work via the `/api` bypass); moving them internal is
-part of the #296 hardening. Cross-links: #176, #296, #287.
+endpoints) get the login page. **All three *arr instances were repointed to
+internal Service URLs by #468** - the "still the public hostnames" note that
+used to sit here is out of date. Verified live 2026-08-02:
+
+| instance | `url` - actually called | `external_url` - display only |
+|---|---|---|
+| Sonarr | `http://sonarr.servarr.svc.cluster.local:8989` | `https://sonarr.epaflix.com/` |
+| Sonarr2 | `http://sonarr2.servarr.svc.cluster.local:8989` | `https://sonarr2.epaflix.com/` |
+| Radarr | `http://radarr.servarr.svc.cluster.local:7878` | `https://radarr.epaflix.com/` |
+| qbittorrent (download client, `host`) | `http://qbittorrent:8080` | `https://qbittorrent.epaflix.com/` |
+
+Cross-links: #176, #296, #287, #468.
+
+> **⚠️ TRAP (#615) - the hostname Cleanuparr SHOWS you is not the one it CALLS.**
+>
+> Every instance carries both a `url` and an `external_url`. Cleanuparr **calls**
+> `url` and **displays** `external_url`. In the v2.10.2 source the property is
+> `ArrInstance.ExternalOrInternalUrl => ExternalUrl ?? Url`, and its only
+> consumers are `NotificationPublisher.cs` and `EventPublisher.cs`. So the **UI
+> event log** and **outbound notifications** render the public `*.epaflix.com`
+> hostname while the real HTTP call goes to the internal Service.
+> `DownloadClientConfig` has the identical pair.
+>
+> This is **upstream behaviour and intentional** - `external_url` exists to give
+> a human a clickable link to the real UI. Nothing is misconfigured here, and
+> clearing `external_url` would only break those links.
+>
+> **Consequence when debugging:** a public hostname in the UI event log is **not**
+> evidence that #468 was reverted. It cost real time in the #482/#483 triage. To
+> see what is actually being called, read the `url` column - never the UI:
+>
+> ```bash
+> kubectl exec -n servarr deploy/cleanuparr -- python3 -c "import sqlite3
+> c=sqlite3.connect('file:/config/cleanuparr.db?mode=ro',uri=True)
+> for r in c.execute('SELECT name,url,external_url FROM arr_instances ORDER BY name'): print(r)"
+> ```
+>
+> (Selects only the URL columns on purpose - `arr_instances` also holds
+> `api_key`, so never `SELECT *` here.)
+>
+> The **console log** renders neither. It carries no *arr hostname at all, only
+> the `[Sonarr]` / `[Radarr]` type tag, so the console cannot answer this
+> question either.
 
 ## #196 — Cleanuparr safe-reaping DB state (restore runbook)
 
