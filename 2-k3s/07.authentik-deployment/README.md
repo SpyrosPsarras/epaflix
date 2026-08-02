@@ -410,6 +410,26 @@ shipped inside a SOPS-encrypted Secret:
     only in the SOPS Secret and (mirrored, for break-glass) in the git-ignored
     `.github/instructions/secrets.yml` as `authentik_iac_service_account_token`.
 
+> **Reading the mirror: strip the quotes (#545).** The `secrets.yml` value is
+> double-quoted. A naive `grep`/`awk -F': '` read carries the quotes into the
+> `Authorization: Bearer` header and Authentik answers **403** - which looks
+> exactly like a stale or revoked token, and that is how #293 concluded the
+> mirror had drifted. It had not. Verified 2026-08-03: the quote-stripped mirror
+> is **byte-identical** to the blueprint's `key:` and both return `200`.
+> ```bash
+> SEC=.github/instructions/secrets.yml
+> TOK=$(sed -n 's/^authentik_iac_service_account_token:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p' "$SEC")
+> echo "${#TOK}"   # expect 64 (66 means you captured the quotes) - print the length, never the value
+> curl -s -o /dev/null -w '%{http_code}\n' -m 10 \
+>   -H "Authorization: Bearer $TOK" https://auth.epaflix.com/api/v3/core/users/me/   # expect 200
+> ```
+> Same check straight from the cluster, no age key needed - this is the real
+> break-glass path, since the token is only useful while the API is up anyway:
+> ```bash
+> BP=$(kubectl -n app-authentik get secret authentik-iac-blueprint -o jsonpath='{.data.*}' \
+>      | base64 -d | awk '/identifiers:/,0' | awk -F': *' '/^[[:space:]]*key:/{print $2; exit}')
+> ```
+
 Because the token is declared in git-as-SOPS, it survives Authentik DB rebuilds
 (re-applied from the blueprint) and never silently expires mid-deploy — which is
 exactly the failure #185 fixed (the old personal token expired twice mid-run
@@ -577,7 +597,9 @@ The same lifecycle is fully scriptable against the admin API — useful when an
 operator wants to drive it from a shell rather than the UI. Authenticate the
 mint / revoke calls with an existing admin credential (e.g. the durable `ak-iac`
 service-account token read from `secrets.yml`, key
-`authentik_iac_service_account_token` — never paste a literal token into git):
+`authentik_iac_service_account_token` — never paste a literal token into git;
+read it with the quote-stripping form above, not a bare `grep`, or you get a
+misleading `403`, see #545):
 
 ```bash
 BASE=https://auth.epaflix.com

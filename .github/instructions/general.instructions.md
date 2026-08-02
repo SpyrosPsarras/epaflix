@@ -8,6 +8,22 @@ description: "General Instructions for all setups"
 CRITICAL: Never save username, hostnames and passwords on any documentation, script, yaml or anywhere other than secrets.yml.
 CRITICAL: If we need to reference it, use the `.github/instructions/secrets.yml` file.
 
+## Reading a value out of secrets.yml
+
+Almost every value in `secrets.yml` is **double-quoted** (64 of 73 top-level keys). A naive `grep`/`awk -F': '` read hands you the value **with its quotes still attached**, and a quoted secret fails in a way that looks like a wrong secret: an API answers `403`, a login just fails. Nothing says "you sent quotes".
+
+Strip them at extraction, and never echo the value:
+```bash
+# sed form - no extra tooling needed (yq is not installed on this workstation)
+TOKEN=$(sed -n 's/^<key_name>:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p' .github/instructions/secrets.yml)
+
+# or python3 + PyYAML, if the value has awkward characters
+TOKEN=$(python3 -c 'import sys,yaml;print(yaml.safe_load(open(sys.argv[1]))["<key_name>"])' .github/instructions/secrets.yml)
+```
+Sanity-check with `${#TOKEN}` (a length is safe to print, the value is not). A 64-char hex secret reading as 66 means you captured the quotes.
+
+This trap cost real time: #293 read the `ak-iac` Authentik token with the quotes on, got `403`, and concluded the mirror was stale. It was not - #545 proved the mirror byte-matches the blueprint and returns `200` once the quotes are stripped.
+
 ## Command History Documentation
 
 IMPORTANT: Document all significant commands and their outputs in the `.history/` directory for future LLM reference and troubleshooting.
