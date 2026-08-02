@@ -413,9 +413,8 @@ All values below are live unless the source column says otherwise.
 | qBit seeding rule — `animes` | `max_ratio=1.0`, `min_seed_time=0`, `max_seed_time=400h`, `delete_source_files=1`, categories `["animes"]` | `q_bit_seeding_rules` | live |
 | QueueCleaner — enabled | `1` (ON), cron `0 0 0/1 ? * * *` (hourly) | `queue_cleaner_configs.enabled` | live |
 | QueueCleaner stall — `Stall` (public) | `enabled=1`, `max_strikes=3`, `privacy_type=public`, `reset_strikes_on_progress=1` | `stall_rules` | live |
-| QueueCleaner stall — `private stalled` | `enabled=1`, `max_strikes=30`, `privacy_type=private`, `min_completion_percentage=0`, `max_completion_percentage=100`, **`delete_private_torrents_from_client=0`** | `stall_rules` | live — **this row is the #483 orphan factory; split it, see (c)** |
-| QueueCleaner stall — `private stalled` **after the #483 split** | `enabled=1`, `max_strikes=30`, `privacy_type=private`, `min_completion_percentage=0`, **`max_completion_percentage=99`**, **`delete_private_torrents_from_client=1`** | `stall_rules` | **INTENDED — NOT APPLIED. Owner action, see (c)** |
-| QueueCleaner stall — `private stalled 99-100` **(new, #483)** | `enabled=1`, `max_strikes=30`, `privacy_type=private`, **`min_completion_percentage=99`**, `max_completion_percentage=100`, **`delete_private_torrents_from_client=0`** | `stall_rules` | **INTENDED — NOT APPLIED. Owner action, see (c)** |
+| QueueCleaner stall — `private stalled` (the `0-99` half of the #483 split) | `enabled=1`, `max_strikes=30`, `privacy_type=private`, `min_completion_percentage=0`, **`max_completion_percentage=99`**, **`delete_private_torrents_from_client=1`**, `reset_strikes_on_progress=1`, `change_category=0`, `minimum_progress=NULL` | `stall_rules` | live — **APPLIED 2026-08-02** (#618), see (c) |
+| QueueCleaner stall — `private stalled 99-100` (the protected half) | `enabled=1`, `max_strikes=30`, `privacy_type=private`, **`min_completion_percentage=99`**, `max_completion_percentage=100`, **`delete_private_torrents_from_client=0`**, `reset_strikes_on_progress=1`, `change_category=0`, `minimum_progress=NULL` | `stall_rules` | live — **APPLIED 2026-08-02** (#618), see (c) |
 | QueueCleaner slow — `Slow-rule` | `enabled=1`, `max_strikes=3`, `max_time_hours=336`, `min_speed=10KB` | `slow_rules` | live (not in earlier prose) |
 | QueueCleaner failed-import strikes (global) | `failed_import_max_strikes=3`, pattern_mode `include`, 5 `failed_import_patterns`: `Episode file already imported`, `Not a Custom Format upgrade`, `One or more episodes expected in this release were not imported`, `Not an upgrade for existing`, `Not a quality revision upgrade` (last 2 added 2026-07-10) | `queue_cleaner_configs` | live |
 | **Dry Run — OFF** | **`dry_run=0`** (reaper actually deletes; if `1` every rule silently no-ops) | `general_configs.dry_run` | live |
@@ -460,8 +459,9 @@ file seed first so the blocklist pointer has a target, then the reaping rules.
    three rows in `q_bit_seeding_rules`.
 4. **Re-create QueueCleaner stall/slow rules.** UI → **Queue Cleaner**: enable,
    add the `Stall` (public, `max_strikes=3`), `private stalled`
-   (private, `max_strikes=30`; once (c) is applied this is the `0-99` half and
-   you also add `private stalled 99-100`), and `Slow-rule` (`max_strikes=3`,
+   (private, `max_strikes=30`, `0-99`, delete-from-client **on**), the second
+   private half `private stalled 99-100` (`99-100`, delete-from-client **off**),
+   and `Slow-rule` (`max_strikes=3`,
    `max_time_hours=336`, `min_speed=10KB`) rules, and set the global
    failed-import strikes = `3` with the 5 include-patterns from the table
    above. QueueCleaner only
@@ -491,19 +491,23 @@ file seed first so the blocklist pointer has a target, then the reaping rules.
 > (`sonarr_blocklist_path`) stays a **manual** re-entry on a PVC rebuild, exactly
 > as #138 (ii) documents.
 
-### (c) #483 — split the `private stalled` rule (OWNER ACTION, not applied)
+### (c) #483 / #618 — split the `private stalled` rule (APPLIED 2026-08-02)
 
-**Why.** `private stalled` fires at `max_strikes=30` with
+**Status: APPLIED 2026-08-02 22:11 Oslo.** The values in the table above are
+live. This section is now both the record of what was done and the recipe to
+redo it on a fresh PVC.
+
+**Why.** `private stalled` used to fire at `max_strikes=30` with
 `delete_private_torrents_from_client=0`. When it fires it removes the *arr queue
 row and **deliberately leaves the torrent in the client** — that is the
-orphan-creation event in #483, and it happens automatically every time a private
-torrent stalls for 30 hours. It is **not** the #142 manual-removal pattern, which
+orphan-creation event in #483, and it happened automatically every time a private
+torrent stalled for 30 hours. It is **not** the #142 manual-removal pattern, which
 is why the #142 operator runbook could never have fixed it. Log proof, two
 siblings on 2026-07-11 16:00: `strike 30` → `Removing item with max strikes` →
 `queue item removed from arr`, with no client-side delete.
 
 **Why the split and not just `delete_private_torrents_from_client=1`.** The rule
-currently spans `0-100`, so flipping the flag alone would also delete a private
+spanned `0-100`, so flipping the flag alone would also delete a private
 torrent that stalled at 95% — one that may already owe seed time. The honest
 version keeps the flag OFF near the top of the range:
 
@@ -522,52 +526,117 @@ the upper bound is **inclusive**. So `0-99` covers `[0, 99]` and `99-100` covers
 `(99, 100]` — no overlap, no gap. Do **not** "fix" this to `0-98`/`99-100`; that
 would leave `98 < pct <= 99` uncovered.
 
-**Order matters.** `RuleIntervalValidator.FindAllOverlappingIntervals` rejects any
+**Order matters, and an overlap is worse than a rejected save.**
+`RuleIntervalValidator.FindAllOverlappingIntervals` rejects any
 new rule that overlaps an existing one for the same `privacy_type`. Adding
 `99-100` while `private stalled` still spans `0-100` overlaps at `99-100` and the
-save is **refused**. Shrink the existing rule first.
+save is **refused**. Shrink the existing rule first. The validator is the only
+thing standing between us and a silent outage: if two enabled rules ever did
+match the same torrent, `QueueRuleManager.GetMatchingQueueRule` returns `null`
+and logs `skip | multiple StallRule rules matched` - that torrent is then never
+struck at all.
 
-Run in the Cleanuparr UI (`cleanuparr.epaflix.com`):
+**No restart needed.** `Features/Jobs/QueueCleaner.cs` re-reads
+`_dataContext.StallRules` into the run context at the **start of every run**, so
+a config write is picked up by the next hourly run. There is no in-memory rule
+cache to invalidate. Do not roll the pod for this.
 
-1. **Shrink the existing rule.** UI → **Queue Cleaner → Stalled rules** → edit
-   `private stalled`:
-   - completion range: `0` → **`99`** (was `0` → `100`)
-   - **tick** "delete private torrents from client" (was off)
-   - leave `max_strikes=30`, `privacy_type=private`,
-     `reset_strikes_on_progress=1` untouched.
+#### Recipe - via the HTTP API (what was actually used, 2026-08-02)
 
-   Save. This must succeed before step 2 or the overlap check blocks it.
-2. **Add the protected top-of-range rule.** UI → **Queue Cleaner → Stalled
-   rules** → **Add rule**:
-   - name `private stalled 99-100`
-   - `privacy_type` = **private**, `max_strikes` = **30**,
-     `reset_strikes_on_progress` = **on**
-   - completion range: **`99`** → **`100`**
-   - **leave** "delete private torrents from client" **off**.
-3. **Verify against the DB (read-only, never the live file).**
+The UI works too (see the variant below), but the API is scriptable, gives you
+the HTTP status code, and reads back through the running app. Endpoints are
+`GET|POST /api/queue-rules/stall` and `PUT|DELETE /api/queue-rules/stall/{id}`
+(controller `Cleanuparr.Api/Features/QueueCleaner/Controllers/QueueRulesController.cs`).
+
+Auth: Cleanuparr has its **own** login, separate from Authentik. Unauthenticated
+calls to `/api/*` return `401`. The per-user API key lives in
+`/config/users.db` → `users.api_key` and is sent as `X-Api-Key`. **Never print
+it.** The container has `curl`, `openssl` and a `python3` (the apprise venv, so
+`sqlite3` as a stdlib module) - it does **not** have a `sqlite3` binary.
+
+Everything below runs **inside the pod**, so nothing that could hold a
+credential is copied to a workstation.
+
+1. **Back up first.** Use the SQLite backup API, not `cp` - the DB is in WAL
+   mode, so a plain `cp` of `cleanuparr.db` silently drops anything still in
+   `cleanuparr.db-wal`.
 
    ```bash
-   kubectl -n servarr exec deploy/cleanuparr -- sh -c 'cp /config/cleanuparr.db /tmp/cu-ro.db'
    POD=$(kubectl -n servarr get pod -l app=cleanuparr -o jsonpath='{.items[0].metadata.name}')
-   kubectl -n servarr cp "$POD":/tmp/cu-ro.db /tmp/cu-ro.db
-   sqlite3 -readonly -header -column /tmp/cu-ro.db \
-     "select name, enabled, max_strikes, privacy_type,
-             min_completion_percentage, max_completion_percentage,
-             delete_private_torrents_from_client
-        from stall_rules order by privacy_type, min_completion_percentage;"
+   kubectl -n servarr exec "$POD" -- python3 -c "
+   import sqlite3
+   src=sqlite3.connect('file:/config/cleanuparr.db?mode=ro',uri=True)
+   dst=sqlite3.connect('/config/cleanuparr.db.bak-PRE-CHANGE')
+   src.backup(dst); dst.close()"
    ```
 
-   Expected — three rows: `Stall` (public, `0`-`100`, `3`),
+   Also dump the rules as JSON (`GET /api/queue-rules/stall` → a file under
+   `/config/`). That JSON is the thing you replay to revert.
+2. **Shrink the existing rule** - `PUT /api/queue-rules/stall/{id}` with the
+   full object: same `name`, `enabled: true`, `maxStrikes: 30`,
+   `privacyType: "Private"`, `resetStrikesOnProgress: true`,
+   `minCompletionPercentage: 0`, `maxCompletionPercentage: 99`,
+   `deletePrivateTorrentsFromClient: true`, `changeCategory: false`.
+   Expect `200`. The `PUT` is a full replace, not a patch - omitted fields fall
+   back to DTO defaults (`maxStrikes` would drop to `3`), so always send the
+   whole object.
+3. **Add the protected top-of-range rule** - `POST /api/queue-rules/stall` with
+   `name: "private stalled 99-100"`, `minCompletionPercentage: 99`,
+   `maxCompletionPercentage: 100`, `deletePrivateTorrentsFromClient: false`,
+   everything else as above. Expect `201`.
+4. **Read it back through the running app**, not out of the DB file:
+   `GET /api/queue-rules/stall`. A `200` on the write is not proof; the read-back
+   is. Expect three rows - `Stall` (public, `0`-`100`, `3`),
    `private stalled` (private, `0`-**`99`**, `30`, delete-from-client **`1`**),
    `private stalled 99-100` (private, **`99`**-`100`, `30`, delete-from-client
-   **`0`**).
-4. **Confirm Dry Run is still OFF** (`general_configs.dry_run=0`) — otherwise the
+   **`0`**). The DB is a fine second opinion, read read-only in-pod with
+   `sqlite3.connect('file:/config/cleanuparr.db?mode=ro',uri=True)`.
+5. **Confirm Dry Run is still OFF** (`general_configs.dry_run=0`) — otherwise the
    split changes nothing.
+6. **Force one run and check it is clean.**
+   `POST /api/jobs/QueueCleaner/trigger` → `200`, then confirm the new row in
+   `events.db` `job_runs` has `status='completed'` and the pod log has no `[WRN]`
+   / `[ERR]` after the change.
+
+**UI variant.** Same two steps at `cleanuparr.epaflix.com` → **Queue Cleaner →
+Stalled rules**: edit `private stalled` to range `0` → `99` and tick "delete
+private torrents from client", **save**, then **Add rule** `private stalled
+99-100`, range `99` → `100`, leave the tick off. Same order rule applies.
+
+**Revert.** Reverse order - delete the new rule, then widen the old one back:
+
+```
+DELETE /api/queue-rules/stall/<id of private stalled 99-100>     -> 204
+PUT    /api/queue-rules/stall/79684bce-1e28-45bc-b46d-cefb8bd9a099
+       {maxCompletionPercentage: 100, deletePrivateTorrentsFromClient: false, ...} -> 200
+```
+
+Deleting first is required: widening back to `0-100` while `99-100` still exists
+overlaps and is refused. Last resort is the file backup from step 1 - stop the
+pod, replace `/config/cleanuparr.db`, remove the stale `-wal` / `-shm`, start it.
 
 **What this does NOT do.** It stops *new* orphans; it does not clear the ones
 already leaked. Those have no *arr queue row left, so no QueueCleaner rule will
 ever revisit them — that is the `orphan-census` CronJob's job
-(`2-k3s/maintenance/orphan-census-cronjob.yaml`, #483), which ships **disarmed**.
+(`2-k3s/maintenance/orphan-census-cronjob.yaml`, #483), which ships **disarmed**
+(arming is #618).
+
+**Why the `avistaz-reseed` torrents (#479) are not at risk.** Two private
+torrents are held `stoppedDL` on purpose at 83.5% and 93.5%, so by percentage
+alone they sit inside the new `0-99` band. They still cannot be touched, for two
+independent reasons:
+
+- **No *arr queue row.** `QBitService.ShouldRemoveFromArrQueueAsync(string hash, …)`
+  (`QBitServiceQC.cs`) is called **per *arr queue record**, keyed on that
+  record's `downloadId`. A torrent that no *arr references is never enumerated,
+  so no stall rule is ever evaluated against it.
+- **`stoppedDL` is not `stalledDL`.** `QBitItemWrapper.IsStalled()` is
+  `Info.State is TorrentState.StalledDownload` and nothing else, and
+  `CheckIfStuck` early-returns on `!IsStalled()`. A stopped torrent cannot take
+  a stall strike at any completion percentage.
+
+Deliberately pausing a torrent is therefore a valid way to park it, and the
+`orphan-census` CronJob excludes the `avistaz-reseed` category on top of that.
 
 **Cross-links:** #138 (the flat-blocklist SOPS seed sibling — same PVC-only
 durability gap, file-seedable half), #142 (the safe reaper this state implements
@@ -575,8 +644,9 @@ and protects), #195 (single-`/media` mount; copy-seeder gate that keeps the
 `unlinked` rule off), #244 (qbittorrent `LocalHostAuth=false` — sibling
 PVC-only/live-only config from the same #195 cutover), #246 (arming the reaper —
 flips `unlinked_configs.enabled` `0 -> 1` once pre-fix copies age out), #249,
-#483 (the `private stalled` split in (c) + the `orphan-census` CronJob that
-cleans up what the un-split rule already leaked).
+#479 (the held `avistaz-reseed` torrents), #483 (the `private stalled` split in
+(c) + the `orphan-census` CronJob that cleans up what the un-split rule already
+leaked), #618 (arming that CronJob, gated on this split landing first).
 
 ## #137 — newtarr JSON config seed (SOPS)
 
