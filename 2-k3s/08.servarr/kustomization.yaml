@@ -217,4 +217,4 @@ images:
   # (#613: agent container CrashLoopBackOff, stat /agent-entrypoint.sh: no
   # such file or directory).
   - name: ghcr.io/spyrospsarras/airvpn-bluetit
-    digest: sha256:ca775cd703c7f93f2bf9998f8c269df97ab0b493e37bf933129792a1bcb3452c
+    digest: sha256:c7fd05799443654063064c42f34ccb672f0c3e95dd666debe7df8e2cc2f74cac
