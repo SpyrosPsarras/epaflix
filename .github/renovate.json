@@ -64,6 +64,12 @@
       "automerge": false
     },
     {
+      "description": "Homarr MINOR/MAJOR: never auto-merge — same reasoning as authentik above. It is the only stateful single-writer app in the servarr images: block (SQLite on an RWO PVC, strategy: Recreate), it runs drizzle migrations on boot, and it has already shipped one migration-breaking major upstream (0.x -> 1.0). Patches and digest re-rolls still auto-merge through the normal gate. This rule only works because the kustomization pins homarr to a vX.Y.Z release tag rather than a bare digest — on a digest-only entry Renovate resolves :latest and every release, major included, arrives as an untyped digest bump that no updateType rule can catch (#540, follow-up to #284).",
+      "matchPackageNames": ["ghcr.io/homarr-labs/homarr"],
+      "matchUpdateTypes": ["minor", "major"],
+      "automerge": false
+    },
+    {
       "description": "Self-hosted Renovate image: cut noise — suppress minor+patch (no branch/PR). Only major updates remain, so a branch on this image always signals a major.",
       "matchManagers": ["kustomize"],
       "matchPackageNames": ["ghcr.io/renovatebot/renovate"],
