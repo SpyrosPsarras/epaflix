@@ -24,9 +24,13 @@ ARG AIRVPN_SUITE_SHA512=e17add5769b50683a4d2e480995fbe83d9f4b05b9738de58de9ce922
 # binaries link them - verified with ldd. busybox provides the syslogd that
 # forwards Bluetit's logs to stdout; Bluetit has no logfile directive at all,
 # so without it the container is completely silent.
+#
+# python3 is for the vpn-picker agent (agent.py, #608). The full package, not
+# python3-minimal: the agent serves its metrics from http.server, which the
+# minimal stdlib subset does not carry.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       dbus libdbus-1-3 libssl3 libstdc++6 libsystemd0 libcap2 \
-      zlib1g libbrotli1 libzstd1 libxml2 \
+      zlib1g libbrotli1 libzstd1 libxml2 python3 \
       iptables iproute2 iputils-ping busybox procps ca-certificates curl \
  && rm -rf /var/lib/apt/lists/*
 
@@ -45,6 +49,12 @@ RUN curl -fsSL -o /tmp/suite.tar.gz \
 
 COPY entrypoint.sh /entrypoint.sh
 COPY entrypoint-render.sh /entrypoint-render.sh
-RUN chmod 0755 /entrypoint.sh /entrypoint-render.sh
+# Second entrypoint - the vpn-picker agent (#608). Same image because goldcrest
+# and the D-Bus client libraries are already here, and a second image to hold
+# one binary buys nothing. The manifest picks it with `command`.
+COPY agent-entrypoint.sh /agent-entrypoint.sh
+COPY agent.py /agent.py
+COPY agent_selftest.py /agent_selftest.py
+RUN chmod 0755 /entrypoint.sh /entrypoint-render.sh /agent-entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
