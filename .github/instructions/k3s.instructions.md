@@ -285,111 +285,30 @@ sudo systemctl restart k3s-agent
 sudo journalctl -u k3s-agent -f
 ```
 
-## Essential Add-on Installation Order
+## Deployed Subsystems — go to the app README, not this file
 
-### 1. kube-vip
+This file covers **cluster-level** concerns only (nodes, etcd, config.yaml,
+netplan, DNS pins). Every deployed app has its own README with the real,
+current setup — read that before touching the app. Deploy order:
 
-## Prerequisites
-
-- k3s cluster with kube-vip installed for control-plane HA
-- kubectl configured to access the cluster
-- Available IP address range for LoadBalancer services
-
-## Network Configuration
-
-This cluster uses a **dual-network setup**:
-
-- **External Network (`192.168.10.X`)**: Used for internet access, NFS connections, and **LoadBalancer services**
-- **Internal Network (`10.0.0.X`)**: Used for internal cluster communication (flannel overlay network)
-  - Node IPs: 10.0.0.51, 10.0.0.52, 10.0.0.53
-
-### Important Notes:
-
-1. **LoadBalancer IPs must use the external network (`192.168.10.X`)** - This is the network where clients connect from
-2. kube-vip will advertise LoadBalancer IPs via ARP on the `192.168.10.X` network (eth0 interface)
-3. The internal network (`10.0.0.X`) is already configured with flannel on eth1 and doesn't need changes
-4. All IP pool configurations below should use IPs from the `192.168.10.X` range
-
-### 2. Ingress Controller
-```bash
-# Install Helm first
-curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-
-```
-# Traefik Reverse Proxy for *.epaflix.com
-
-This deployment configures Traefik as a reverse proxy with automatic TLS certificates via Let's Encrypt and Cloudflare DNS challenge.
-
-## Architecture
-
-- **Static IP**: `192.168.10.101` (via kube-vip LoadBalancer)
-- **TLS**: Let's Encrypt with Cloudflare DNS-01 challenge (supports wildcard `*.epaflix.com`)
-- **Namespace**: `traefik-system`
-- **Replicas**: 1
-- **Service Type**: LoadBalancer (kube-vip will handle the virtual IP)
-- **Router**: Forward ports 80/443 → `192.168.10.101`
-- **DNS**: Pi-hole points `*.epaflix.com` → router public IP or `192.168.10.101` for LAN
-
-### 3. Let's Encrypt and Cloudflare DNS challenge (SSL/TLS)
-
-- Cloudflare API Token with DNS edit permissions for `epaflix.com`
-- Router configured to forward 80 and 443 to `192.168.10.101`
-- Pi-hole DNS records -> router public IP for external access and `192.168.10.101` for internal access.
-
-### 4. Monitoring Stack (Optional)
-```bash
-# TO BE ADDED
-```
-
-## Kubernetes Resource Patterns
-
-### Namespace Creation
-```yaml
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: my-app
-```
-
-### Deployment Pattern
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: my-app
-  namespace: my-app
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: my-app
-  template:
-    metadata:
-      labels:
-        app: my-app
-    spec:
-      containers:
-      - name: app
-        image: my-app:latest
-        ports:
-        - containerPort: 8080
-```
-
-### Service with LoadBalancer
-```yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: my-app
-  namespace: my-app
-spec:
-  type: LoadBalancer
-  selector:
-    app: my-app
-  ports:
-  - port: 80
-    targetPort: 8080
-```
+| Dir | Component | Agent notes |
+|-----|-----------|-------------|
+| `01.kube-vip/` | Control-plane VIP `192.168.10.100` | LoadBalancer IPs always come from the external `192.168.10.0/24` net (eth0/ARP); flannel on eth1 needs no changes |
+| `02.cert-manager/` | TLS (Let's Encrypt via Cloudflare DNS-01, wildcard `*.epaflix.com`) | CRDs are ArgoCD-managed (#93) |
+| `03.kube-vip-cloud-provider/` | LoadBalancer IP pool | vendored manifest + IP-pool ConfigMap |
+| `04.coredns/` | Custom DNS forwarding to Pi-hole | ArgoCD scope is `coredns-custom` CM only — the main CM is k3s-addon-owned |
+| `05.traefik-deployment/` | Ingress at `192.168.10.101`, wildcard TLS | the canonical Traefik doc — includes the pod-DNS setup (step 0) |
+| `06.postgres/` | CNPG shared PostgreSQL | backups via barman cloud plugin; never force-manage pg pods |
+| `07.authentik-deployment/` | SSO + forward-auth | in-cluster clients must use internal DNS, never the public forward-auth-gated hostname (see servarr docs, #466) |
+| `08.servarr/` | Media stack — largest, most-incident-prone subsystem | read its README + `RECOVERY-*.md` runbooks first |
+| `09.filebrowser/` | FileBrowser Quantum | |
+| `10.observability/` | kube-prometheus-stack, Loki, Grafana | control-plane metrics depend on the #121/#148 binds above |
+| `11.argocd/` | GitOps app-of-apps + Image Updater | adoption-order rule in CLAUDE.md; most Apps `selfHeal: true, prune: false`; ArgoCD self-management selfHeal stays OFF |
+| `12.renovate/` | In-cluster Renovate | owns image digest pinning (#235) |
+| `13.odysseus/` | Odysseus AI assistant | Ollama-backed via TrueNAS |
+| `14.searxng/` | SearXNG meta-search | |
+| `15.syncthing/` | Syncthing | |
+| `maintenance/` | CronJobs + system-upgrade-controller | Plans pinned to an explicit k3s version (#130) |
 
 ## Common Verification Commands
 
@@ -478,16 +397,6 @@ kubectl get pods -n metallb-system
 kubectl logs -n metallb-system deployment/controller
 ```
 
-## Security Best Practices
-
-- Use RBAC for access control
-- Enable Pod Security Standards
-- Use NetworkPolicies to restrict traffic
-- Regularly update K3s version
-- Use secrets for sensitive data
-- Enable audit logging
-- Use private container registry
-
 ## Uninstalling K3s
 
 ### On Master Node
@@ -508,14 +417,9 @@ kubectl logs -n metallb-system deployment/controller
 - **Service file (master)**: `/etc/systemd/system/k3s.service`
 - **Service file (worker)**: `/etc/systemd/system/k3s-agent.service`
 
-## Performance Tuning
+## Embedded Registry Mirror
 
-- **etcd**: K3s uses embedded etcd
-- **Resource limits**: Set appropriate requests/limits on pods
-- **Node taints/tolerations**: Control workload placement
-- **HPA**: Horizontal Pod Autoscaling for dynamic scaling
-
-- **Embedded Registry Mirror**: Enabled (Spegel P2P image sharing across all nodes via 10.0.0.0/24 network)
+Enabled (`embedded-registry: true` — Spegel P2P image sharing across all nodes via the 10.0.0.0/24 network).
 
 The `secrets.yml` file has the following structure:
 ```yaml
