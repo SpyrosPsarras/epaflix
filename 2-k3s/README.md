@@ -55,6 +55,11 @@ Follow the numbered directories in sequence:
 | 8 | `08.servarr/`                    | Media stack (Sonarr, Radarr, Prowlarr, etc.) |
 | 9 | `09.filebrowser/`                | FileBrowser Quantum                |
 | 10| `10.observability/`              | Prometheus, Loki, Grafana          |
+| 11| `11.argocd/`                     | GitOps app-of-apps (argocd.epaflix.com) + Image Updater |
+| 12| `12.renovate/`                   | In-cluster Renovate (dependency + digest updates) |
+| 13| `13.odysseus/`                   | Odysseus AI assistant (Ollama-backed) |
+| 14| `14.searxng/`                    | SearXNG meta-search                |
+| 15| `15.syncthing/`                  | Syncthing                          |
 
 Each directory has its own README with specific instructions.
 

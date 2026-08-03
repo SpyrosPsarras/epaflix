@@ -10,6 +10,15 @@ separate from ArgoCD:
 
 Flow: open PR → Actions validates → you merge → ArgoCD deploys.
 
+## Workflows in this directory
+
+| Workflow | Trigger | Role |
+|----------|---------|------|
+| `ci.yml` | PR + push to main | the required `validate` check (details below) |
+| `build-vpn-picker.yml` | PR/push touching `images/vpn-picker/**` | build + test the vpn-picker image; push to GHCR only on main, PR runs never push |
+| `build-airvpn-bluetit.yml` | PR/push touching `images/airvpn-bluetit/**` | build the AirVPN Bluetit sidecar image; same PR-safe pattern |
+| `k3s-stable-drift.yml` | schedule (Mon 08:00 UTC) | compares pinned k3s version against upstream stable and opens/updates a drift issue |
+
 ## `ci.yml` — the `validate` check
 
 A **secret-free** gate that validates exactly Renovate's change surface

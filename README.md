@@ -49,7 +49,7 @@ See [2-k3s/README.md](2-k3s/README.md) for full setup instructions.
 
 ### Docker Swarm Cluster
 
-A Docker Swarm cluster running entirely on `evanthoulaki`, using `local-raid` storage.
+A Docker Swarm cluster on `evanthoulaki`, using `local-raid` storage. **Currently dormant: the VMs are stopped and the stack has been down since ~2026-06 — see issue #583.**
 
 | Role    | Hostname     | VMID | IP            | Host         |
 |---------|--------------|------|---------------|--------------|
@@ -133,9 +133,12 @@ Docker Swarm VMs use only `vmbr0` (single NIC), as swarm overlay networking hand
 |-------------------|-------------|
 | `0-truenas/`      | TrueNAS iSCSI target setup, NFS shares, storage pool management |
 | `1-proxmox/`      | Proxmox host configuration, VM templates, network bridges |
-| `2-k3s/`          | K3s install, kube-vip, MetalLB, Traefik, monitoring, app stacks |
-| `3-docker-swarm/` | Docker Swarm init, node join, service stack definitions |
-| `.github/`        | Copilot/AI instructions, domain-specific guidance per directory |
+| `2-k3s/`          | K3s install, kube-vip, Traefik, CNPG Postgres, Authentik, servarr, observability, ArgoCD — numbered subdirs 01-15 in deploy order |
+| `3-docker-swarm/` | Docker Swarm init, node join, service stack definitions (dormant, #583) |
+| `docs/`           | Design docs — `docs/superpowers/{plans,specs}` hold spec-driven feature designs |
+| `raid-migration/` | Proxmox RAID migration guides |
+| `images/`         | Documentation images |
+| `.github/`        | Copilot/AI instructions, CI workflows, git hooks, domain-specific guidance per directory |
 | `.history/`       | Session logs of commands run and their outputs (git-ignored) |
 
 ---
