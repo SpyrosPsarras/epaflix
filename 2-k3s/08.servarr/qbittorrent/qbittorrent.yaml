@@ -326,15 +326,39 @@ spec:
             # rollback is "flip the agent back to dry-run" - one env var, never
             # a manifest revert.
             #
-            # PARKED IN DRY-RUN (rollback for #613): the 2026-08-02 boot_upgrade
-            # switch from Aspidiske to Dalim left Bluetit reporting "Connected
-            # to AirVPN server Dalim" for a tunnel AirVPN never actually
-            # established (no session for the cluster key, 0 bit/s traffic,
-            # 100% ICMP loss to 10.128.0.1, connection time flapping every
-            # 40-60s). WireGuard is connectionless so Bluetit can't tell.
-            # Leave this "true" until the credential path on --air-connect is
-            # fixed - flip back to "false" only after that fix is verified.
-            - { name: VPN_AGENT_DRY_RUN, value: "true" }
+            # THE AGENT IS ALLOWED TO ACT (#670). It was parked in dry-run as
+            # the rollback for #613: the 2026-08-02 boot_upgrade from Aspidiske
+            # to Dalim left Bluetit reporting "Connected to AirVPN server
+            # Dalim" for a tunnel AirVPN never actually established (no session
+            # for the cluster key, 0 bit/s traffic, 100% ICMP loss to
+            # 10.128.0.1, connection time flapping every 40-60s).
+            #
+            # An earlier note here said to leave this "true" until the
+            # credential path on --air-connect was fixed. That framing is
+            # superseded - #627 root-caused it and credentials were never the
+            # cause. `airport`/`airvpntype`/the country lists are all re-applied
+            # on a credentialed connect, the endpoint port was 1637 on every
+            # single connect, and the agent already passes --air-key. The real
+            # cause: `goldcrest --bluetit-status` prints "Connected to AirVPN
+            # server X" for a WireGuard interface that never completed a
+            # handshake, and that string was the agent's ONLY success criterion.
+            #
+            # The safeguards that make acting safe are #627's, both live in the
+            # pinned image:
+            #   1. A switch is verified by TRAFFIC (5 ICMP packets to
+            #      10.128.0.1, <=50% loss), not by the status string, and a
+            #      candidate that fails verification is dropped, never
+            #      re-dialled.
+            #   2. A switch that produced no working tunnel arms
+            #      VPN_AGENT_FAILED_COOLDOWN_SECONDS (300 s), not the full
+            #      21600 s. The 6 h cooldown its own boot upgrade armed is what
+            #      locked the agent out of rescuing itself for six hours.
+            #
+            # ROLLBACK: flip this back to "true". One env var, never a manifest
+            # revert - the agent then probes, reads the ranking, logs
+            # "DRY RUN reason=... would switch from=... to=..." and touches
+            # nothing.
+            - { name: VPN_AGENT_DRY_RUN, value: "false" }
             # Defaults below are the spec's own numbers, set explicitly so a
             # change is a reviewable diff instead of an image rebuild.
             #
