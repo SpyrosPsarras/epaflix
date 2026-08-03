@@ -115,8 +115,13 @@ class FakeBluetit:
                 for c in self.calls if c[0] == "--air-connect"]
 
 
-def build(tmp, ranking=RANKING, server="Aspidiske", refused=(), silent=(), **overrides):
-    """An Agent wired to a fake daemon, a fake clock and a real ranking file."""
+def build(tmp, ranking=RANKING, server="Aspidiske", refused=(), silent=(), dead=(),
+          **overrides):
+    """An Agent wired to a fake daemon, a fake clock and a real ranking file.
+
+    `dead` names servers with the 2026-08-02 shape: they connect, they answer
+    the status grep with their own name, and no packet ever comes back.
+    """
     os.environ["VPN_AGENT_RANKING_PATH"] = os.path.join(tmp, "ranking.json")
     os.environ["VPN_AGENT_CACHE_PATH"] = os.path.join(tmp, "cache", "ranking.json")
     os.environ["VPN_AGENT_BUDGET_PATH"] = os.path.join(tmp, "cache", "switches.json")
@@ -138,7 +143,29 @@ def build(tmp, ranking=RANKING, server="Aspidiske", refused=(), silent=(), **ove
     # old. The switch budget is on wall time because it is persisted.
     agent = ag.Agent(cfg, bluetit=bluetit, sleep=clock.sleep, clock=clock,
                      wallclock=lambda: GENERATED_EPOCH + 60 + (clock() - 1000.0))
+
+    # The probe is the agent's only view of real traffic, so model it off the
+    # fake daemon's CURRENT server: a `dead` one reads as 100% loss exactly the
+    # way the live tunnel did on 2026-08-02 while --bluetit-status kept naming
+    # it. This also keeps every test off a real ping - 10.128.0.1 is
+    # unreachable from a build container, so an unstubbed post-connect
+    # verification would be a slow false red on every check in this file.
+    dead_names = {n.lower() for n in dead}
+    agent.probe = lambda count=None: (
+        100.0 if (fake.server or "").lower() in dead_names else 0.0
+    )
     return agent, fake, clock
+
+
+def scripted_probe(watch, verify=0.0):
+    """Split the agent's two probe callers apart.
+
+    `watch_once()` calls `probe()` with no count; the post-connect verification
+    calls it with an explicit one. A test that scripts degradation windows must
+    not have the verification eat one of them.
+    """
+    take = (lambda: watch.pop(0)) if isinstance(watch, list) else (lambda: watch)
+    return lambda count=None: verify if count is not None else take()
 
 
 def with_tmp(fn):
@@ -234,7 +261,7 @@ def test_degradation_counting(tmp):
     """Three consecutive bad windows, and a good one resets the count."""
     agent, fake, _ = build(tmp, server="Aspidiske")
     losses = []
-    agent.probe = lambda: losses.pop(0)
+    agent.probe = scripted_probe(losses)
 
     losses[:] = [0.0, 6.7, 8.0, 0.5, 9.0, 7.0]
     for _ in range(6):
@@ -249,7 +276,7 @@ def test_degradation_counting(tmp):
 
     # 4.99% is not a bad window. The bar is >= 5%.
     agent2, fake2, _ = build(tmp, server="Aspidiske")
-    agent2.probe = lambda: 4.99
+    agent2.probe = scripted_probe(4.99)
     for _ in range(5):
         agent2.watch_once()
     assert agent2.consecutive_bad == 0, "counted a window under the threshold"
@@ -261,7 +288,7 @@ def test_degradation_counting(tmp):
 def test_dead_tunnel_is_the_liveness_probes_job(tmp):
     """100% loss with Bluetit down is exempt - a switch cannot fix that."""
     agent, fake, _ = build(tmp, server=None)
-    agent.probe = lambda: 100.0
+    agent.probe = scripted_probe(100.0)
     for _ in range(5):
         assert agent.watch_once() is False
     assert agent.consecutive_bad == 0, "counted windows against a disconnected daemon"
@@ -272,7 +299,7 @@ def test_dead_tunnel_is_the_liveness_probes_job(tmp):
 @with_tmp
 def test_cooldown_and_daily_cap(tmp):
     agent, fake, clock = build(tmp, server="Aspidiske")
-    agent.probe = lambda: 9.0
+    agent.probe = scripted_probe(9.0)
 
     def trip():
         for _ in range(agent.cfg.bad_windows):
@@ -390,6 +417,155 @@ def test_wrong_tunnel_device_fails_the_switch(tmp):
 
 
 @with_tmp
+def test_verification_rejects_a_lying_status_string(tmp):
+    """#627 fix 1. `Connected to AirVPN server X` is PROVEN to lie.
+
+    On 2026-08-02 it said exactly that for 13 minutes over a WireGuard
+    interface that never completed a handshake - 0 B transferred, 100% ICMP
+    loss, no AirVPN session for the device key - and it was reproduced
+    deliberately by blackholing only the handshake port. The string was the
+    agent's only success criterion, so the agent declared the switch a success
+    and went to sleep. A switch is only successful when a packet comes back.
+    """
+    agent, fake, _ = build(tmp, server="Aspidiske", dead=("Dalim",))
+    agent.boot_check()
+
+    # Dalim answered the status grep with its own name, exactly as the live
+    # daemon did. Traffic said otherwise, so the agent walked on to Piautos.
+    assert fake.connects()[0] == "Dalim", fake.connects()
+    assert fake.server == "Piautos", \
+        "the agent settled on %s - a status string with no traffic behind it " \
+        "was accepted as a working tunnel" % fake.server
+    assert agent.current_server == "Piautos", agent.current_server
+    assert agent.switches["boot_upgrade"] == 1, agent.switches
+    assert agent.switches["fallback"] == 0, "a verified candidate is not a fallback"
+
+    # And the verified switch arms the FULL cooldown, unchanged.
+    allowed, why = agent.budget.allowed()
+    assert allowed is False and "cooldown" in why, why
+    print("ok  verification: a connected-but-silent tunnel fails the switch")
+
+
+@with_tmp
+def test_a_failed_candidate_is_dropped_not_redialled(tmp):
+    """#627 fix 3. Never re-dial a name that failed verification.
+
+    Re-dialling the same dead peer is precisely what Bluetit's internal
+    reconnect already does, and that was measured doing it four times over a
+    verified-clean path with zero handshakes. A refused connect still gets its
+    two attempts (that is a different failure); a silent tunnel gets one.
+    """
+    agent, fake, _ = build(tmp, server="Aspidiske", dead=("Dalim", "Piautos"))
+    agent.boot_check()
+
+    assert fake.connects() == ["Dalim", "Piautos", "Menkent"], fake.connects()
+    assert fake.connects().count("Dalim") == 1, \
+        "re-dialled a candidate that had already proven it passes no traffic"
+    assert fake.server == "Menkent", fake.server
+    print("ok  walk: a candidate that fails verification is dropped, never re-dialled")
+
+
+@with_tmp
+def test_recovery_is_disconnect_plus_connect_never_a_signal(tmp):
+    """#627 fix 4. Every attempt is a FRESH --disconnect + --air-connect.
+
+    Only a fresh connect re-authenticates with AirVPN ("Logging in AirVPN user
+    ... successfully logged in ... Selected user key"). Bluetit's internal
+    reconnect - what SIGUSR2 triggers - rebuilds tun0 from the cached profile
+    with no login at all, so it can never get a dropped peer back. Bluetit also
+    refuses a connect while it believes it is connected, so the disconnect
+    after a failed verification is load-bearing, not tidiness.
+    """
+    agent, fake, _ = build(tmp, server="Aspidiske", dead=("Dalim",))
+    agent.boot_check()
+
+    pairs = [c[0] for c in fake.calls if c[0] in ("--disconnect", "--air-connect")]
+    assert pairs == ["--disconnect", "--air-connect",   # Dalim, connects and lies
+                     "--disconnect", "--air-connect"], pairs
+    # FakeBluetit raises on anything that is not status/disconnect/air-connect,
+    # so a signal or a listing call cannot pass this line silently.
+    assert all(c[0] in ("--bluetit-status", "--disconnect", "--air-connect")
+               for c in fake.calls), fake.calls
+    print("ok  recovery: fresh disconnect + connect for every attempt, no signal")
+
+
+def test_no_signal_path_survives_in_the_source():
+    """#611. The `kill -USR2` degradation watcher must not come back.
+
+    A grep, because this is the one regression that reads as harmless in a
+    diff. `kill -0` is fine and stays - it sends no signal, it only asks
+    whether Bluetit is still alive.
+    """
+    # Ways either file could actually deliver a signal. Prose about SIGUSR2 is
+    # wanted, a call that sends one is not - so match the call shapes, not the
+    # word. agent.py does not import `signal` at all and must not start.
+    forbidden = ("kill -USR2", "kill -SIG", "os.kill", "pkill",
+                 "import signal", "signal.SIG")
+    here = os.path.dirname(os.path.abspath(__file__))
+    for name in ("agent.py", "entrypoint.sh"):
+        with open(os.path.join(here, name)) as fh:
+            lines = fh.read().splitlines()
+        for line in lines:
+            if line.lstrip().startswith("#"):
+                continue        # a comment explaining the ban is the point
+            for bad in forbidden:
+                assert bad not in line, \
+                    "%s signals Bluetit again (%r): %s" % (name, bad, line.strip())
+            assert "kill -" not in line or "kill -0" in line, \
+                "%s sends a signal to Bluetit: %s" % (name, line.strip())
+        assert any("USR2" in l for l in lines), \
+            "%s lost the comment saying WHY there is no USR2 path - the next " \
+            "person will re-add it" % name
+    print("ok  #611: no USR2 watcher in agent.py or entrypoint.sh, and both say why")
+
+
+@with_tmp
+def test_a_failed_switch_does_not_arm_the_full_cooldown(tmp):
+    """#627 fix 2. The 2026-08-02 lockout, in one test.
+
+    `_finish()` used to record unconditionally, so the boot upgrade onto a
+    tunnel that never handshook armed the full 21600 s. Three minutes later the
+    agent's own degradation watch reached bad_windows=3, called
+    budget.allowed(), was told "cooldown, ~21400s left", logged `degradation
+    switch suppressed` and did nothing for six hours. A switch that produced no
+    working tunnel must never lock out recovery from itself.
+    """
+    agent, fake, clock = build(
+        tmp, server="Aspidiske",
+        dead=("Dalim", "Piautos", "Menkent", "Ashlesha", "QuickPick"))
+    agent.boot_check()
+
+    # Everything lied, including the terminal `quick` fallback.
+    assert fake.connects() == ["Dalim", "Piautos", "Menkent", "Ashlesha", "quick"], \
+        fake.connects()
+
+    allowed, why = agent.budget.allowed()
+    assert allowed is False, "a failed switch must still hold a short cooldown"
+
+    clock.sleep(agent.cfg.failed_cooldown_seconds + 1)
+    allowed, why = agent.budget.allowed()
+    assert allowed is True, \
+        "a switch that produced NO working tunnel armed a cooldown longer than " \
+        "%ds and locked the agent out of its own recovery: %s" \
+        % (agent.cfg.failed_cooldown_seconds, why)
+    assert agent.cfg.failed_cooldown_seconds < agent.cfg.cooldown_seconds
+
+    # It still costs one of the day's three, so a broken pool cannot thrash
+    # instead. Two more failures and the cap holds for the rest of the day.
+    for _ in range(2):
+        agent.switch(["Dalim"], "degradation", mandatory=True)
+        clock.sleep(agent.cfg.failed_cooldown_seconds + 1)
+    allowed, why = agent.budget.allowed()
+    assert allowed is False and "daily cap" in why, \
+        "failed switches do not count against the daily cap: %s" % why
+
+    # A switch that WORKS still arms the full 6 h - the Component 7 circuit
+    # breaker is untouched, and that is checked by
+    # test_every_candidate_fails_ends_on_quick and test_cooldown_and_daily_cap.
+    print("ok  cooldown: a failed switch arms the short one, still costs a daily slot")
+
+
+@with_tmp
 def test_cache_is_the_fallback_when_the_file_goes_away(tmp):
     """fresh ranking > cached last-good > quick."""
     agent, fake, _ = build(tmp, server="Aspidiske")
@@ -420,7 +596,7 @@ def test_budget_survives_a_restart(tmp):
     """The launcher restarts a crashed agent.py. An in-memory budget would let a
     crash loop switch every restart, straight through the 6 h cooldown."""
     agent, _, clock = build(tmp, server="Aspidiske")
-    agent.probe = lambda: 9.0
+    agent.probe = scripted_probe(9.0)
     for _ in range(agent.cfg.bad_windows):
         agent.watch_once()
     assert agent.switches["degradation"] == 1
@@ -532,6 +708,11 @@ if __name__ == "__main__":
     test_every_candidate_fails_ends_on_quick()
     test_recovery_never_spends_the_quick_reserve()
     test_wrong_tunnel_device_fails_the_switch()
+    test_verification_rejects_a_lying_status_string()
+    test_a_failed_candidate_is_dropped_not_redialled()
+    test_recovery_is_disconnect_plus_connect_never_a_signal()
+    test_no_signal_path_survives_in_the_source()
+    test_a_failed_switch_does_not_arm_the_full_cooldown()
     test_cache_is_the_fallback_when_the_file_goes_away()
     test_budget_survives_a_restart()
     test_dry_run_takes_no_action()

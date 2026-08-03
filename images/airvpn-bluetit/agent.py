@@ -95,6 +95,24 @@ class Config:
         self.max_output_bytes = _env_int("VPN_AGENT_MAX_OUTPUT_BYTES", 65536)
         self.verify_seconds = _env_int("VPN_AGENT_VERIFY_SECONDS", 30)
         self.verify_interval = _env_float("VPN_AGENT_VERIFY_INTERVAL", 2.0)
+        # Post-connect traffic check (#627 fix 1). A short burst on purpose:
+        # 5 packets at probe_rate is about 1 s of sending plus the -W 2 wait,
+        # and the failed-connect walk deadline has ~85 s spare, so it fits
+        # without touching the recovery budget.
+        self.verify_probe_count = _env_int("VPN_AGENT_VERIFY_PROBE_COUNT", 5)
+        # The shape this has to catch is 100% loss on a tunnel that never
+        # handshook. Deliberately NOT bad_loss_pct: over 5 packets a 5% bar
+        # means one dropped packet fails a perfectly good candidate. Anything
+        # between "traffic moves" and "traffic moves well" is the degradation
+        # watch's job, not this one's.
+        self.verify_max_loss_pct = _env_float("VPN_AGENT_VERIFY_MAX_LOSS_PCT", 50.0)
+        # What a switch that produced NO working tunnel arms, instead of the
+        # full cooldown (#627 fix 2). Short because the agent must be able to
+        # recover from its own bad switch; longer than one degradation trip
+        # (3 x 60 s windows) so a failure cannot immediately chain into the
+        # next attempt. The daily cap is what actually bounds thrash - a failed
+        # switch counts against it exactly like a successful one.
+        self.failed_cooldown_seconds = _env_int("VPN_AGENT_FAILED_COOLDOWN_SECONDS", 300)
         self.attempts_per_candidate = _env_int("VPN_AGENT_ATTEMPTS", 2)
         self.retry_backoff = _env_float("VPN_AGENT_RETRY_BACKOFF", 5.0)
         # The liveness budget is ~180 s (periodSeconds 60, failureThreshold 3)
@@ -231,6 +249,17 @@ class SwitchBudget:
     restarts a crashed agent.py, and an in-memory budget would start empty every
     time - a crash loop would then switch every restart and walk straight
     through the 6 h cooldown this exists to enforce.
+
+    Each entry is `[when, cooldown]`, not a bare timestamp, because the two
+    outcomes have to cost different amounts of time (#627 fix 2). A switch that
+    produced a working tunnel arms the full cooldown; one that produced nothing
+    arms a short retry window, so the agent can still recover from its own bad
+    switch. Both count against the daily cap.
+
+    The old bare-timestamp file cannot be read by this code and does not need to
+    be: the budget lives on an emptyDir that only survives inside one pod, and
+    the pod is recreated by the same rollout that ships this. An unreadable file
+    already fails safe in _load() - a warning and an empty history.
     """
 
     def __init__(self, cooldown_seconds, max_per_day, clock=time.time, path=None):
@@ -246,7 +275,7 @@ class SwitchBudget:
             return
         try:
             with open(self.path) as fh:
-                self.history = [float(t) for t in json.load(fh)]
+                self.history = [[float(when), float(cd)] for when, cd in json.load(fh)]
         except FileNotFoundError:
             return
         except Exception as exc:
@@ -255,7 +284,7 @@ class SwitchBudget:
         self._prune(self.clock())
         if self.history:
             log.info("adopted switch history, %d in the last day, last %.0fs ago",
-                     len(self.history), self.clock() - self.history[-1])
+                     len(self.history), self.clock() - self.history[-1][0])
 
     def _save(self):
         if not self.path:
@@ -270,23 +299,25 @@ class SwitchBudget:
             log.warning("cannot persist the switch history: %s", exc)
 
     def _prune(self, now):
-        self.history = [t for t in self.history if now - t < 86400]
+        self.history = [e for e in self.history if now - e[0] < 86400]
 
     def allowed(self):
         """Return (allowed, reason). The reason is for the log line."""
         now = self.clock()
         self._prune(now)
-        if self.history and now - self.history[-1] < self.cooldown:
-            left = int(self.cooldown - (now - self.history[-1]))
-            return False, "cooldown, %ds left" % left
+        if self.history:
+            when, cooldown = self.history[-1]
+            if now - when < cooldown:
+                return False, "cooldown, %ds left" % int(cooldown - (now - when))
         if len(self.history) >= self.max_per_day:
             return False, "daily cap %d reached" % self.max_per_day
         return True, ""
 
-    def record(self):
+    def record(self, cooldown=None):
+        """Arm a cooldown. None means the full one - see the class docstring."""
         now = self.clock()
         self._prune(now)
-        self.history.append(now)
+        self.history.append([now, self.cooldown if cooldown is None else cooldown])
         self._save()
 
 
@@ -345,6 +376,17 @@ class Bluetit:
     qBittorrent. `--bluetit-status`, `--disconnect`, `--air-connect --async`,
     nothing else. Listing calls are out too: one against the live daemon on
     2026-07-31 was immediately followed by a full tunnel outage.
+
+    SIGUSR2 is out for a second, independent reason (#627 fix 4, #611). It runs
+    Bluetit's own internal reconnect, which rebuilds tun0 from the CACHED
+    PROFILE without re-logging in to AirVPN, so once the peer is gone
+    server-side it retries the same dead endpoint forever - measured 2026-08-02,
+    four reconnect cycles over a verified-clean network path, zero handshakes,
+    five minutes after the fault was removed. Only a fresh `--disconnect` +
+    `--air-connect` re-authenticates ("Logging in AirVPN user ... successfully
+    logged in ... Selected user key"), and that recovered in under one second.
+    Recovery here is always that pair, never a signal and never waiting for
+    Bluetit to sort itself out.
     """
 
     def __init__(self, cfg, runner=goldcrest, sleep=time.sleep, clock=time.monotonic):
@@ -572,29 +614,46 @@ class Agent:
                 if self.clock() >= walk_deadline:
                     log.warning("recovery budget spent on the candidate walk, "
                                 "falling back to quick")
-                    return self._finish(self._quick(hard_deadline), reason, "fallback")
+                    return self._fall_back(hard_deadline, reason)
                 connected = self.bluetit.connect(name, deadline=walk_deadline)
                 if connected:
                     self.tun_device_ok = self.bluetit.tun_ok()
-                    if self.tun_device_ok:
+                    if not self.tun_device_ok:
+                        # Connected, wrong device. The switch is NOT successful -
+                        # qBittorrent is bound to tun0 and has no listen socket, so
+                        # counting this as a win would hide a client that is dead
+                        # while the WebUI, both probes and ArgoCD stay green.
+                        # Reconnecting cannot free the taken slot either, so stop
+                        # rather than walk the pool creating tun2, tun3, ...
+                        # The FULL cooldown is right here, unlike a verification
+                        # failure below: another switch cannot fix a taken slot,
+                        # it can only take one more.
+                        log.error("connected to %s but the tunnel device is wrong - "
+                                  "the switch FAILED", connected)
+                        return self._finish(connected, reason, None)
+                    if self.verify_tunnel(connected):
                         log.info("connected server=%s reason=%s attempt=%d elapsed=%.1fs",
                                  connected, reason, attempt, self.clock() - started)
                         return self._finish(connected, reason, reason)
-                    # Connected, wrong device. The switch is NOT successful -
-                    # qBittorrent is bound to tun0 and has no listen socket, so
-                    # counting this as a win would hide a client that is dead
-                    # while the WebUI, both probes and ArgoCD stay green.
-                    # Reconnecting cannot free the taken slot either, so stop
-                    # rather than walk the pool creating tun2, tun3, ...
-                    log.error("connected to %s but the tunnel device is wrong - "
-                              "the switch FAILED", connected)
-                    return self._finish(connected, reason, None)
+                    # The name matched and no packet came back (#627 fix 3).
+                    # Drop the candidate rather than re-dial it: re-dialling the
+                    # same dead peer is exactly what Bluetit's internal reconnect
+                    # already does, and that was measured doing it four times
+                    # over a clean path with zero handshakes. The disconnect is
+                    # not optional - Bluetit refuses a connect while it believes
+                    # it is connected, and only a fresh connect re-logs in to
+                    # AirVPN (#627 fix 4).
+                    log.warning("dropping candidate %s - it reported connected but "
+                                "passed no traffic, walking to the next one", name)
+                    self.bluetit.disconnect()
+                    break
                 if attempt < self.cfg.attempts_per_candidate:
                     self.sleep(random.uniform(0.5, 1.5) * self.cfg.retry_backoff)
-            log.warning("candidate %s failed %d attempts, moving on",
-                        name, self.cfg.attempts_per_candidate)
+            else:
+                log.warning("candidate %s failed %d attempts, moving on",
+                            name, self.cfg.attempts_per_candidate)
 
-        return self._finish(self._quick(hard_deadline), reason, "fallback")
+        return self._fall_back(hard_deadline, reason)
 
     def _quick(self, deadline):
         """Terminal fallback. Connected to a mediocre server beats tunnel-less.
@@ -608,18 +667,70 @@ class Agent:
             self.tun_device_ok = self.bluetit.tun_ok()
         return connected
 
-    def _finish(self, connected, reason, counted_as):
-        """counted_as is None when the switch is not to be called a success."""
+    def _fall_back(self, hard_deadline, reason):
+        """`quick`, then the bookkeeping. Verified like any other connect.
+
+        `quick` is the last thing standing between the pod and no tunnel at all,
+        so the one thing it must not do is report a success it cannot back with
+        traffic.
+        """
+        connected = self._quick(hard_deadline)
+        verified = bool(connected) and self.verify_tunnel(connected)
+        return self._finish(
+            connected, reason, "fallback",
+            cooldown=None if verified else self.cfg.failed_cooldown_seconds)
+
+    def verify_tunnel(self, name):
+        """Did the tunnel actually pass a packet? The only signal that cannot lie.
+
+        `goldcrest --bluetit-status` printing `Connected to AirVPN server X` is
+        PROVEN false for a WireGuard interface that never completed a handshake:
+        on 2026-08-02 it said exactly that for 13 minutes over a tunnel with
+        0 B transferred, 100% ICMP loss and no AirVPN session for the device key,
+        and it was reproduced deliberately by blackholing only the handshake port
+        (#627 rootcause). The string was the agent's ONLY success criterion, so
+        the agent logged `connected server=Dalim` and went to sleep on a dead
+        tunnel.
+        """
+        loss = self.probe(self.cfg.verify_probe_count)
+        if loss is None:
+            log.error("cannot verify %s - the probe did not run. Treating the "
+                      "switch as FAILED, because an unverified switch is exactly "
+                      "what the 2026-08-02 incident was", name)
+            return False
+        if loss > self.cfg.verify_max_loss_pct:
+            log.error("connected to %s but the tunnel passes no traffic "
+                      "(loss=%.1f%% over %d packets to %s) - the status string "
+                      "lied, the switch FAILED",
+                      name, loss, self.cfg.verify_probe_count, self.cfg.probe_target)
+            return False
+        log.info("verified %s by traffic, loss=%.1f%%", name, loss)
+        return True
+
+    def _finish(self, connected, reason, counted_as, cooldown=None):
+        """counted_as is None when the switch is not to be called a success.
+
+        `cooldown` is what this attempt arms; None means the full one.
+        """
         with self.lock:
             self.current_server = connected
             self.consecutive_bad = 0
             if connected and counted_as:
                 self.switches[counted_as] = self.switches.get(counted_as, 0) + 1
-        # Every attempt arms the cooldown, successful or not. Ending on `quick`
+        # Every attempt arms a cooldown, successful or not. Ending on `quick`
         # rather than a ranked candidate is the Component 7 circuit breaker -
         # a bad pool must not cause thrash, and every switch costs peer
         # connections and a private-tracker re-announce.
-        self.budget.record()
+        #
+        # But a switch that produced no working tunnel arms the SHORT one
+        # (#627 fix 2). This used to be unconditional: the 2026-08-02 boot
+        # upgrade to a tunnel that never handshook armed the full 21600 s, and
+        # three minutes later the agent's own degradation watch reached
+        # bad_windows=3, asked budget.allowed(), was told "cooldown, ~21400s
+        # left", logged `degradation switch suppressed` and did nothing for six
+        # hours. A switch must never lock out recovery from itself. The daily
+        # cap still counts it, so a broken pool cannot thrash instead.
+        self.budget.record(cooldown)
         if not connected:
             log.error("switch reason=%s ended with NO tunnel - the network lock is "
                       "still armed, so nothing leaks, but qBittorrent has no egress",
@@ -674,15 +785,22 @@ class Agent:
 
     # -- degradation ------------------------------------------------------
 
-    def probe(self):
-        """50 ICMP packets to the in-tunnel gateway. Returns loss percent."""
+    def probe(self, count=None):
+        """50 ICMP packets to the in-tunnel gateway. Returns loss percent.
+
+        `count` overrides the degradation window's packet count. The
+        post-connect verification (#627 fix 1) passes a short burst, because it
+        runs inside the recovery budget and only has to answer "did anything
+        come back", not "how good is this server".
+        """
+        count = self.cfg.probe_count if count is None else count
         interval = 1.0 / self.cfg.probe_rate
         try:
             result = subprocess.run(
-                ["ping", "-n", "-q", "-c", str(self.cfg.probe_count),
+                ["ping", "-n", "-q", "-c", str(count),
                  "-i", "%g" % interval, "-W", "2", self.cfg.probe_target],
                 capture_output=True, text=True,
-                timeout=self.cfg.probe_count * interval + 60,
+                timeout=count * interval + 60,
             )
             # `ping` exits 1 on total loss and still prints the summary, so the
             # return code alone is not a failure signal.
@@ -843,9 +961,12 @@ def main():
     cfg = Config()
     log.info(
         "vpn-picker agent starting dry_run=%s band=%d probe=%d packets to %s every %ds "
-        "bad>=%.1f%% trip=%d cooldown=%ds cap=%d/day",
+        "bad>=%.1f%% trip=%d cooldown=%ds failed_cooldown=%ds cap=%d/day "
+        "verify=%d packets at <=%.0f%% loss",
         cfg.dry_run, cfg.band, cfg.probe_count, cfg.probe_target, cfg.probe_interval,
-        cfg.bad_loss_pct, cfg.bad_windows, cfg.cooldown_seconds, cfg.max_switches_per_day,
+        cfg.bad_loss_pct, cfg.bad_windows, cfg.cooldown_seconds,
+        cfg.failed_cooldown_seconds, cfg.max_switches_per_day,
+        cfg.verify_probe_count, cfg.verify_max_loss_pct,
     )
     agent = Agent(cfg)
     serve(agent)

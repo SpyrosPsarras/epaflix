@@ -152,4 +152,33 @@ else
   echo "ok"
 fi
 
+echo "== 8. the kill -USR2 degradation watcher is gone, the supervisor is not (#611) =="
+# The watcher recovered with `kill -USR2`, which runs Bluetit's INTERNAL
+# reconnect: it rebuilds tun0 from the cached profile without re-logging in to
+# AirVPN, so once the peer is gone server-side it retries the same dead endpoint
+# forever (measured 2026-08-02: four cycles over a verified-clean path, zero
+# handshakes). It was also a second watcher racing the agent's own switch.
+# Removed in #611. Only `kill -0` may remain - that sends no signal, it just
+# asks whether bluetit is alive, and it is what fails the container when it is
+# not. Both halves are checked here, because deleting the loop and deleting the
+# supervisor look almost identical in a diff.
+# Comment lines are stripped first: the header comment above the supervisor
+# explains WHY there is no USR2 path and must survive, or the next person
+# re-adds the loop.
+if docker run --rm --entrypoint sh "$IMAGE" \
+     -c 'grep -vE "^[[:space:]]*#" /entrypoint.sh | grep -nE "kill[[:space:]]+-[^0[:space:]]"'; then
+  echo "FAIL: entrypoint.sh signals bluetit again - only kill -0 is allowed"; exit 1
+fi
+out=$(docker run --rm --entrypoint sh --cap-add NET_ADMIN \
+  -e AIRVPN_USERNAME= -e AIRVPN_PASSWORD= -e SUPERVISE_INTERVAL=2 "$IMAGE" -c '
+    { /entrypoint.sh; echo "ENTRYPOINT_EXIT=$?"; } &
+    sleep 12
+    kill -9 "$(cat /etc/airvpn/bluetit.lock)"
+    sleep 8' 2>&1)
+if ! echo "$out" | grep -q "ENTRYPOINT_EXIT=1"; then
+  echo "FAIL: bluetit died and the supervisor did not fail the container with it"
+  echo "$out"; exit 1
+fi
+echo "ok"
+
 echo "ALL CHECKS PASSED"
