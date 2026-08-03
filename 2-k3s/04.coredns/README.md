@@ -7,6 +7,54 @@ This directory contains the CoreDNS custom configuration for the K3s cluster.
 - **External Domain Resolution** (`coredns-epaflix-domains.yaml`) — `coredns-custom` ConfigMap with an `epaflix.com:53` server block so pods can resolve `https://<svc>.epaflix.com` (e.g. `https://sonarr.epaflix.com`).
 - **GitOps**: managed by the ArgoCD `coredns` Application (`2-k3s/11.argocd/apps/app-coredns.yaml`, scope: `coredns-custom` ConfigMap only). The k3s-addon-owned main `coredns` ConfigMap is **not** under ArgoCD — k3s's helm/addon controller owns it.
 - **One-shot bootstrap** (`configure-dns.sh`) — systemd-resolved listener config on each node; runs once per new node, not GitOps-managed.
+- **Disruption budget** (`coredns-pdb.yaml`) — `minAvailable: 1` so a node drain can never take DNS to zero. GitOps-managed; new object, no addon conflict.
+
+## Replica count (HA)
+
+CoreDNS runs **2 replicas**. One is not enough: the `k3s-server` / `k3s-agent`
+system-upgrade Plans drain every node in the fleet, and a single CoreDNS pod
+means cluster-wide DNS goes dark for as long as it takes to reschedule.
+
+**The replica count is set live, not in git. That is deliberate.**
+
+- `spec.replicas` is **not** in k3s's bundled `/var/lib/rancher/k3s/server/manifests/coredns.yaml`. The file has no `replicas:` key at all - Kubernetes just defaults it to 1 on create.
+- The k3s deploy controller applies that manifest through a wrangler three-way merge. A field that appears in neither the desired manifest nor the recorded `objectset.rio.cattle.io/applied` annotation is **left alone**. So a live `replicas: 2` survives an addon re-apply, a `systemctl restart k3s`, and a k3s version upgrade.
+- Verified on 2026-08-03: forcing a full addon re-apply (change the manifest checksum, watch `addon/coredns` `spec.checksum` update) left `spec.replicas=2` and `readyReplicas=2` untouched.
+- It is **not** an ArgoCD-managed field because `spec.replicas` is already owned by the `deploy@k3s-master-51` and `k3s` field managers. An ArgoCD server-side apply hits a hard conflict:
+
+  ```
+  error: Apply failed with 1 conflict: conflict with "deploy@k3s-master-51" using apps/v1: .spec.replicas
+  ```
+
+  Forcing that conflict would put the whole `coredns` Application - including the critical `coredns-custom` ConfigMap - into a permanent fight with the k3s addon controller. Not worth it for an integer.
+
+**Anti-affinity is already handled by k3s.** The bundled Deployment carries:
+
+```yaml
+topologySpreadConstraints:
+  - topologyKey: kubernetes.io/hostname
+    maxSkew: 1
+    whenUnsatisfiable: DoNotSchedule
+    labelSelector: {matchLabels: {k8s-app: kube-dns}}
+```
+
+`maxSkew: 1` + `DoNotSchedule` on `kubernetes.io/hostname` is a hard guarantee
+that two CoreDNS pods cannot land on the same node. Nothing to add.
+
+**To re-assert after a cluster rebuild** (the only case where this is lost):
+
+```bash
+kubectl scale deployment/coredns -n kube-system --replicas=2
+kubectl -n kube-system get pods -l k8s-app=kube-dns -o wide   # expect 2, different nodes
+```
+
+**Known gap:** the second `topologySpreadConstraint` spreads on
+`topology.kubernetes.io/zone`, but no node carries that label, so it is a no-op.
+Labelling nodes by Proxmox host (`takaros` / `evanthoulaki`) would activate
+host-level spreading for free - it is `whenUnsatisfiable: ScheduleAnyway`, so a
+soft preference. Not done here: it changes scheduling inputs for every workload
+with a zone constraint, which is too wide a blast radius to land next to a fleet
+upgrade.
 
 ## DNS Configuration Fix (Required)
 
