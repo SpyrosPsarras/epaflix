@@ -1163,8 +1163,49 @@ that torrent is *protected* by this module, not reaped by it.
 
 **What is meant to cover the gap:** `2-k3s/maintenance/orphan-census-cronjob.yaml`
 (#483), which ships **disarmed**. Until it is armed, incomplete + queue-less
-torrents are covered by **nothing** and have to be found by hand - see the #142
-manual operator runbook below.
+torrents are **detected and alerted on** but not removed - removal is the owner
+gate in #618, and the manual fallback is the #142 operator runbook below.
+
+### The census orphan signal is NO PROGRESS, not queue absence (#631/#632)
+
+**Queue absence on its own is not evidence of an orphan.** An *arr queue is a
+pure in-memory projection of the last successful download-client poll
+(`QueueService._queue`, a `static List<Queue>` rebuilt from
+`TrackedDownloadRefreshedEvent`), so it reads empty for at least two reasons that
+have nothing to do with the torrent:
+
+- **any client outage or backoff** - the queue drops to zero instantly and comes
+  back on the next good poll;
+- **the Sonarr `TrackedDownloadService` cache bug (#631)** - a re-grabbed
+  infohash that this Sonarr process already imported is pinned at `Imported` in
+  an untimed in-memory cache, short-circuits `TrackDownload()`, and can therefore
+  **never** enter the queue again. Permanent, with a healthy client and clean
+  health checks - no external signal at all. Nine actively-downloading Sonarr
+  grabs were queue-less this way on 2026-08-02.
+
+So the census requires, on top of incomplete + no queue row + older than
+`MIN_AGE_HOURS`, that the torrent has **moved zero bytes for `NO_PROGRESS_HOURS`
+(default 24)** - `dlspeed`/`upspeed` both 0 and qBittorrent's own
+`last_activity` older than the window (falling back to `added_on` when the
+client reports it as never active). Progress comes from the download client, so
+no *arr fault can fake it. The separation is wide, not marginal: on 2026-08-03
+the five real orphans were idle 38h / 48h / 160h / 645h / 645h while the four
+healthy incomplete downloads were idle 0.0-0.6h.
+
+**Per-*arr attribution (#632).** The census maps qBittorrent category -> *arr
+(`CATEGORY_ARR_MAP`, default `tv-sonarr=sonarr,animes=sonarr2,radarr=radarr`),
+prints orphan counts per owning *arr, and exits 2 if an *arr reports **0 queue
+rows while orphan-shaped torrents sit in the categories it owns**. That replaces
+the fleet-wide "all three *arrs at 0" gate, which stays quiet exactly when one
+*arr is blind and its siblings happen to be busy - the live 2026-08-02 state was
+`sonarr=0 sonarr2=1 radarr=0`, so the all-zero gate never fired while Sonarr was
+the broken one. Categories no *arr owns (`avistaz-reseed`, `manual-import`,
+uncategorized) keep the old fleet-wide rule, since nothing else can speak for
+them.
+
+The classifier and both guards are covered by `python3 census.py --selftest`
+(assert-based, no network) - extract the script from the ConfigMap or run it
+straight from a checkout.
 
 See the "#196" authoritative values table + restore runbook for the exact live
 config and how to rebuild it on a fresh PVC.
