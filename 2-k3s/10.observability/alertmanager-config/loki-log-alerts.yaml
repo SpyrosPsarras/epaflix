@@ -35,7 +35,11 @@
 # vpn_agent_consecutive_bad_windows / vpn_agent_current_loss_pct /
 # vpn_agent_switches_total via the qbittorrent-vpn-agent ServiceMonitor. A
 # metric-based PrometheusRule on those is the better home for this signal than
-# a log match - not rebuilt here, tracked in #689.
+# a log match, and that is now BUILT - see the `servarr-vpn-picker` group in
+# custom-alerts.yaml (#689, #622, #555). Note it does NOT alert on loss or on
+# consecutive_bad_windows: loss reads 10-20% on a healthy loaded tunnel (#732)
+# and the bad-windows gauge is pinned at 0 by the #733 disarm. Read that group's
+# header before adding anything vpn-related here.
 #
 # DO NOT re-add a rule matching "reconnect triggered" - that string is gone
 # from the image and cannot come back without reverting #611/#627.
