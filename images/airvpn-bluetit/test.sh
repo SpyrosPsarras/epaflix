@@ -83,11 +83,23 @@ for _ in $(seq 1 30); do
   echo "$metrics" | grep -q "^vpn_agent_dry_run " && break
   sleep 1
 done
-for m in vpn_agent_dry_run vpn_agent_switches_total vpn_agent_consecutive_bad_windows; do
+for m in vpn_agent_dry_run vpn_agent_switches_total vpn_agent_consecutive_bad_windows \
+         vpn_agent_tunnel_device_ok vpn_agent_switch_in_progress; do
   if ! echo "${metrics:-}" | grep -q "$m"; then
     echo "FAIL: missing metric $m"; echo "${metrics:-none}"; docker logs "$cid"; exit 1
   fi
 done
+# There is no tunnel in this container and no switch has run, so the honest
+# answer is 0 - and this is the #690 defect end to end: the metric used to be a
+# field initialised True and written only on the switch path, so it printed 1
+# here, on a container that has never had a tun0 at all.
+if ! echo "$metrics" | grep -q "^vpn_agent_tunnel_device_ok 0$"; then
+  echo "FAIL: no tunnel device exists in this container and the metric does not say so"
+  echo "$metrics" | grep tunnel_device; exit 1
+fi
+if ! echo "$metrics" | grep -q "^vpn_agent_switch_in_progress 0$"; then
+  echo "FAIL: switch_in_progress is set with no switch running"; echo "$metrics"; exit 1
+fi
 # DRY_RUN defaults OFF - the agent acts. The flag only exists because the spec's
 # rollback is "flip back to dry-run".
 if ! echo "$metrics" | grep -q "^vpn_agent_dry_run 0$"; then

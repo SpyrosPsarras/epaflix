@@ -12,6 +12,7 @@ The ranking fixture is the real 2026-08-02 document the live scorer published.
 """
 
 import json
+import logging
 import os
 import shutil
 import stat
@@ -258,6 +259,180 @@ def test_ranking_age_is_measured_at_scrape_time(tmp):
     print("ok  ranking age: measured at scrape time, absent when the file is not usable")
 
 
+class CaptureLog(logging.Handler):
+    """The agent's own log records, so "must not log" can be asserted on."""
+
+    def __init__(self):
+        logging.Handler.__init__(self)
+        self.records = []
+
+    def emit(self, record):
+        self.records.append(record)
+
+    def __enter__(self):
+        ag.log.addHandler(self)
+        return self
+
+    def __exit__(self, *exc):
+        ag.log.removeHandler(self)
+        return False
+
+    def messages(self):
+        return [r.getMessage() for r in self.records]
+
+
+@with_tmp
+def test_tunnel_device_is_measured_at_scrape_time(tmp):
+    """#690: a `1` nothing ever measured is worse than a stale measurement.
+
+    `vpn_agent_tunnel_device_ok` was a field initialised True and written only on
+    the switch path, so a pod that never switched published a green it had never
+    looked at. Here the device goes away with NO switch, NO probe and NO trip -
+    exactly the steady state that hid it - and the metric has to notice.
+    """
+    agent, _, _ = build(tmp)                  # build() points tun_device at `lo`
+    assert metric(agent, "vpn_agent_tunnel_device_ok") == 1.0, \
+        "`lo` exists, so a real read must pass"
+
+    agent.cfg.tun_device = "tun-nope-0"
+    got = metric(agent, "vpn_agent_tunnel_device_ok")
+    assert got == 0.0, (
+        "the tunnel device is gone and the metric says %s - it is publishing a "
+        "value nothing measured. qBittorrent would be bound to a device that "
+        "does not exist with every signal green (#690)" % got)
+
+    # No field left for the metric to be wired back to. An unread cache is what
+    # invites exactly that, which is why #686 deleted its one too.
+    assert not hasattr(agent, "tun_device_ok"), \
+        "self.tun_device_ok is back - a cached device verdict is what #690 removed"
+
+    # Scraping must be SILENT. /metrics is scraped every 60 s and tun_ok()'s log
+    # line is four lines of recovery instructions, so the loud version in here
+    # would bury the one occurrence that matters under a thousand copies.
+    with CaptureLog() as caught:
+        for _ in range(5):
+            ag.render_metrics(agent)
+        assert caught.records == [], (
+            "%d log records from scraping a missing device - at 60 s scrapes that "
+            "is a flood: %s" % (len(caught.records), caught.messages()))
+
+        # The switch path stays loud, or a genuinely taken tun0 slot goes unsaid.
+        assert agent.bluetit.tun_ok() is False
+        assert any("MISSING" in m for m in caught.messages()), \
+            "tun_ok() stopped saying the device is missing: %s" % caught.messages()
+    print("ok  tun device: measured at scrape time, silent there, still loud on a switch")
+
+
+@with_tmp
+def test_switch_in_progress_marks_the_device_rebuild(tmp):
+    """The mid-switch transient, made readable instead of fudged.
+
+    WireGuardClient::stop() calls wg_del_device() on every disconnect, so a
+    scrape landing inside a switch honestly sees no tunnel device. Without a
+    second series a reader cannot tell that true 0 from a taken tun0 slot - which
+    is the silent failure vpn_agent_tunnel_device_ok exists to catch. Suppressing
+    the device metric during a switch was the alternative and is worse: absent is
+    the one state that cannot be told apart from "the agent stopped answering".
+    """
+    agent, _, _ = build(tmp, server="Aspidiske")
+    inner = agent.probe
+    during = []
+
+    def probe(count=None):
+        if count is not None:      # the post-connect verification, mid-switch
+            during.append(metric(agent, "vpn_agent_switch_in_progress"))
+        return inner(count)
+
+    agent.probe = probe
+
+    idle = metric(agent, "vpn_agent_switch_in_progress")
+    assert idle == 0.0, (
+        "vpn_agent_switch_in_progress reads %s on an idle agent - with no such "
+        "series a 0 on vpn_agent_tunnel_device_ok cannot be told apart from the "
+        "device rebuild every switch performs (#690)" % idle)
+    agent.boot_check()
+    assert during == [1.0], (
+        "a scrape inside the switch reported switch_in_progress=%s, so a 0 on "
+        "vpn_agent_tunnel_device_ok cannot be told apart from a taken tun0 slot"
+        % during)
+    assert metric(agent, "vpn_agent_switch_in_progress") == 0.0, \
+        "the flag never cleared - a stuck 1 excuses every later device failure"
+
+    # And it clears through a crash. run() wraps watch_once() in a bare `except`
+    # to keep the container up, so a flag left set would stay set for the life of
+    # the pod - the same permanently-wrong signal this change removes.
+    boom = RuntimeError("connect blew up")
+
+    def explode(*args, **kwargs):
+        raise boom
+
+    agent.bluetit.disconnect = explode
+    try:
+        agent.switch(["Dalim"], "degradation", mandatory=True)
+    except RuntimeError as exc:
+        assert exc is boom, exc
+    else:
+        raise AssertionError("the fixture did not raise")
+    assert metric(agent, "vpn_agent_switch_in_progress") == 0.0, \
+        "a crash inside the switch left switch_in_progress stuck at 1"
+    print("ok  switch window: flagged while the device is rebuilt, cleared even on a crash")
+
+
+@with_tmp
+def test_current_server_is_refreshed_every_window(tmp):
+    """#690: the label must not stay on whatever boot found.
+
+    `--bluetit-status` used to be called only AFTER the loss threshold tripped,
+    below the clean-window early return, so a healthy pod refreshed it exactly
+    never. The tunnel does move under the agent: the `airvpn` sidecar restarts on
+    its own liveness probe and `airconnectatboot quick` picks again, while this
+    process keeps running - so the metric names a server we are not on.
+
+    The window below is entirely clean: no loss, no trip, no switch.
+    """
+    agent, fake, _ = build(tmp, server="Menkent")     # in band, so boot stays put
+    agent.probe = scripted_probe(0.0)
+
+    agent.boot_check()
+    assert agent.current_server == "Menkent", agent.current_server
+
+    fake.server = "Ashlesha"                          # the sidecar picked again
+    agent.watch_once()
+
+    assert agent.current_server == "Ashlesha", (
+        "the agent still reports %s after the tunnel moved under it - the label "
+        "is whatever boot found, for the life of the pod (#690)"
+        % agent.current_server)
+    assert b'vpn_agent_current_server{server="Ashlesha"} 1' in ag.render_metrics(agent)
+
+    # Exactly one status call per window. This is the cost the fix pays, so it is
+    # asserted: not one per scrape, and not several per window either.
+    def status_calls():
+        return sum(1 for c in fake.calls if c[0] == "--bluetit-status")
+
+    before = status_calls()
+    for _ in range(3):
+        agent.watch_once()
+    assert status_calls() - before == 3, \
+        "3 clean windows made %d status calls, expected 3" % (status_calls() - before)
+
+    # And a scrape makes NONE. render_metrics() runs in the HTTP handler thread
+    # and a goldcrest call can take 25 s, which would blow the Prometheus scrape
+    # timeout and take the target down - losing every metric, honest ones too.
+    before = status_calls()
+    for _ in range(5):
+        ag.render_metrics(agent)
+    assert status_calls() == before, "a /metrics scrape called goldcrest"
+
+    # Bluetit going down is an honest absent, never a stale name.
+    fake.server = None
+    agent.watch_once()
+    assert agent.current_server is None, agent.current_server
+    assert b"vpn_agent_current_server" not in ag.render_metrics(agent), \
+        "kept naming a server while Bluetit reports not connected"
+    print("ok  current server: re-read every window, one call each, none per scrape")
+
+
 @with_tmp
 def test_boot_in_band_stays_put(tmp):
     """Inside the band, do nothing. Ordinary pod restarts must not churn."""
@@ -457,11 +632,12 @@ def test_wrong_tunnel_device_fails_the_switch(tmp):
     agent.boot_check()
 
     assert fake.connects() == ["Dalim"], "kept walking after a device failure"
-    assert agent.tun_device_ok is False, "a missing tunnel device was not noticed"
     assert agent.switches["boot_upgrade"] == 0, \
         "a switch that left qBittorrent with no listen socket was counted as a success"
     assert b"vpn_agent_tunnel_device_ok 0" in ag.render_metrics(agent), \
         "the missing device is invisible in metrics"
+    # The switch is over, so the 0 above is the real thing and not the teardown.
+    assert b"vpn_agent_switch_in_progress 0" in ag.render_metrics(agent)
     print("ok  tun device: not tun0 means the switch failed, and it says so in metrics")
 
 
@@ -748,6 +924,9 @@ if __name__ == "__main__":
     test_goldcrest_is_bounded_by_bytes()
     test_stale_ranking_is_absent()
     test_ranking_age_is_measured_at_scrape_time()
+    test_tunnel_device_is_measured_at_scrape_time()
+    test_switch_in_progress_marks_the_device_rebuild()
+    test_current_server_is_refreshed_every_window()
     test_boot_in_band_stays_put()
     test_boot_out_of_band_upgrades()
     test_boot_without_a_ranking_stays_on_quick()
