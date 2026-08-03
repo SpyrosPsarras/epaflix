@@ -1,0 +1,7 @@
+{
+  "paramName": "max_slot_wal_keep_size",
+  "paramValue": "8GB",
+  "issue": "304",
+  "repo": "SpyrosPsarras/epaflix",
+  "branch": "postgres-slot-wal-ceiling-304"
+}

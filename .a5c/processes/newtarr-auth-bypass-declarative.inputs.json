@@ -1,0 +1,7 @@
+{
+  "repoRoot": "/home/spy/Documents/Epaflix/k3s-swarm-proxmox",
+  "repo": "SpyrosPsarras/epaflix",
+  "namespace": "servarr",
+  "issue": 174,
+  "branch": "issue-174-newtarr-auth-bypass-declarative"
+}

@@ -1,0 +1,13 @@
+{
+  "repoRoot": "/home/spy/Documents/Epaflix/k3s-swarm-proxmox",
+  "repo": "SpyrosPsarras/epaflix",
+  "issue": "135",
+  "ns": "servarr",
+  "newtarrApp": "newtarr",
+  "sonarr2": "sonarr2",
+  "migrationDate": "2026-05-31",
+  "claimedOldMode": "seasons_packs",
+  "claimedOldSleep": 3600,
+  "claimedNewMode": "episodes",
+  "claimedNewSleep": 900
+}

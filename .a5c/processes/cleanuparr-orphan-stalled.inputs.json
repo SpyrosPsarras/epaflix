@@ -1,0 +1,8 @@
+{
+  "repoRoot": "/home/spy/Documents/Epaflix/k3s-swarm-proxmox",
+  "namespace": "servarr",
+  "seriesHint": "Genius",
+  "cleanuparrUrl": "https://cleanuparr.epaflix.com",
+  "sonarrUrl": "https://sonarr.epaflix.com",
+  "repo": "SpyrosPsarras/epaflix"
+}

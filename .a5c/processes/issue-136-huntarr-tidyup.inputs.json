@@ -1,0 +1,10 @@
+{
+  "repoRoot": "/home/spy/Documents/Epaflix/k3s-swarm-proxmox",
+  "repo": "SpyrosPsarras/epaflix",
+  "namespace": "servarr",
+  "issueNumber": 136,
+  "worker61": "192.168.10.61",
+  "worker65": "192.168.10.65",
+  "storagePath": "/var/lib/rancher/k3s/storage/",
+  "tarballName": "huntarr-config-backup-20260531-pre-delete.tgz"
+}

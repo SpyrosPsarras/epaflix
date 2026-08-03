@@ -1,0 +1,16 @@
+{
+  "repoRoot": "/home/spy/Documents/Epaflix/k3s-swarm-proxmox",
+  "configPath": ".github/instructions/sops.instructions.md",
+  "truenasHost": "192.168.10.200",
+  "pool": "pool1",
+  "datasetName": "pool1/encrypted-backups",
+  "datasetPath": "/mnt/pool1/encrypted-backups",
+  "oldBackupPath": "/mnt/pool1/dataset01/sops-age-backup",
+  "keyFile": "k3s-cluster.txt",
+  "workstationKey": "/home/spy/.config/sops/age/k3s-cluster.txt",
+  "secretsFile": ".github/instructions/secrets.yml",
+  "secretKey": "truenas_zfs_encrypted_backups_passphrase",
+  "branch": "truenas/encrypted-sops-backups-dataset",
+  "currentBranch": "main",
+  "repo": "SpyrosPsarras/epaflix"
+}
