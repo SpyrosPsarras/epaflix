@@ -513,6 +513,14 @@ spec:
     # noise - the credential really did leave the app in clear. Do not silence it;
     # the fix is for those apps to stop logging connection strings.
     #
+    # FALSE-POSITIVE HISTORY: the first version of promtail's redaction regex used
+    # a negated charset for the value, which matched regex PATTERN TEXT as well as
+    # secrets. Loki logs the LogQL of every delete request, so the #751 purge for
+    # `apikey=[A-Za-z0-9]{16,}` made this alert fire on our own tooling - 6
+    # increments, all container=loki. Fixed by excluding regex metacharacters and
+    # requiring 8+ chars. If this alert fires with namespace="observability" and
+    # container=loki, check that before assuming an app leaked something.
+    #
     # `increase() > 0` over 15m rather than a rate threshold: one leaked line is
     # already the event, and restarts are infrequent enough that this is not
     # chatty. Redaction means the secret did not reach Loki, so severity is
