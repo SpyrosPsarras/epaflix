@@ -179,6 +179,78 @@ data:
                 Grafana → Explore → Loki:
                 {namespace="app-authentik"} |~ `login_failed`
 
+      # F — credentials leaking into logs (#702 box 4). This is a REGRESSION
+      #     detector, not a spike detector, so the threshold is > 0 rather than
+      #     a tuned number.
+      #
+      #     History: Traefik's access log records the full request URI, and the
+      #     *arr integrations used to authenticate with `?apikey=` in the query
+      #     string. That put live API keys into Loki at 20,984 lines/24h for
+      #     months of retention (#702, #730 - which forced a rotation of every
+      #     key involved). #561/PR #744 fixed the cause by moving the in-cluster
+      #     callers to internal Service DNS so those calls never reach Traefik.
+      #
+      #     Steady state after that fix is a MEASURED ZERO - verified on a 90s
+      #     live Traefik tail and via Loki over 2m/5m/10m windows, with
+      #     servarr-*-api route traffic also at 0. That is why `> 0` is the right
+      #     threshold and needs no tuning: there is no baseline noise to sit
+      #     above. Any hit means a caller was repointed back at a public
+      #     hostname, or a new integration was configured the old way.
+      #
+      #     Deliberately NOT restricted to namespace="traefik-system": the point
+      #     is to catch a credential in ANY log stream, including an app that
+      #     starts logging its own request URLs (the #634 shape, where Sonarr
+      #     logged its Postgres password at Info level).
+      #
+      #     The regex matches the key NAME plus a value, never a specific key, so
+      #     it keeps working across rotations. `for: 0m` because a single
+      #     occurrence is already the incident - waiting to confirm just means
+      #     more copies land in storage.
+      #
+      #     VALIDATED against live Loki before merge, both directions:
+      #       last 10m : 0       - silent at steady state, no false positives
+      #       last 24h : 21130   - would have caught the leak
+      #     Breakdown over that 24h:
+      #       traefik-system/traefik  20749   the ?apikey= URLs, fixed by #561
+      #       servarr/sonarr            359   <-- NOT Traefik. This is #634.
+      #       servarr/sonarr2            10
+      #
+      #     READ THIS BEFORE TRIAGING THE FIRST FIRING. The sonarr hits are
+      #     #634: Sonarr logs its Postgres password in plaintext at Info level on
+      #     every start. That is a TRUE positive, not noise - so the first time
+      #     this alert fires it will most likely be a sonarr/sonarr2 restart, not
+      #     a #561 regression. Check `container` first: traefik means a caller
+      #     went back to a public hostname; sonarr/sonarr2 means #634 is still
+      #     open. Do not silence or narrow this rule to make the sonarr firing go
+      #     away - fix #634 instead. Narrowing it to traefik-system was
+      #     considered and rejected for exactly this reason: it would have hidden
+      #     359 real credential lines a day.
+      - name: credential-leak
+        rules:
+          - alert: CredentialInLogs
+            expr: |
+              sum by (namespace, container) (
+                count_over_time({namespace=~".+"} |~ `(?i)(apikey|api_key|api-key|x-api-key|passwd|password|client_secret)=[A-Za-z0-9._~+/-]{8,}` [5m])
+              ) > 0
+            for: 0m
+            labels:
+              severity: critical
+              component: security
+            annotations:
+              summary: "Credential appearing in logs: {{ $labels.namespace }}/{{ $labels.container }}"
+              description: >-
+                {{ $value }} log line(s) in the last 5m contain what looks like a
+                credential in a URL or key=value form, from
+                {{ $labels.namespace }}/{{ $labels.container }}. Steady state is
+                zero (#702, #561), so this is a regression: a caller was likely
+                repointed at a public hostname instead of internal Service DNS,
+                or a new integration was configured with ?apikey= in the URL.
+                Find the caller, move it to internal DNS, then treat the exposed
+                credential as compromised and rotate it (#730 is the precedent).
+                Do NOT grep Loki for the literal value - that writes it into a
+                query and widens the exposure. Locate by route/container:
+                {namespace="{{ $labels.namespace }}"} |~ `apikey=`
+
       # Group E (airvpn-bluetit / AirVPNBluetitReconnecting) removed here -
       # see the file header comment for why. Do not re-add a rule matching
       # "reconnect triggered": that log line no longer exists in the image.
