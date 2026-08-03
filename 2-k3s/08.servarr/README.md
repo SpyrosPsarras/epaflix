@@ -248,6 +248,54 @@ ls -i /mnt/pool1/dataset01/tvshows/Show/Season\ 01/show.mkv
 # Inode numbers should match = hardlink successful
 ```
 
+## Rotating the radarr / sonarr / sonarr2 API keys (#712)
+
+Each *arr's API key is consumed by **seven** other things, and five of them keep
+their copy **PVC-only or in the app's own DB** - so a rotation that only touches
+git leaves those five authenticating with a dead key. Values live in the
+git-ignored `secrets.yml` as `radarr_api_key`, `sonarr_api_key`,
+`sonarr2_api_key`. Never print a key: pass it via stdin/env/file, compare with
+`sha256`, print lengths not values (see `.github/instructions/general.instructions.md`).
+
+**1. Change the key in the app itself.** `PUT /api/v3/config/host` **silently
+ignores** an `apiKey` change (returns `202`, config.xml unchanged - verified on
+Radarr 6.3 / Sonarr 4.0). The only working route is the file:
+
+```bash
+# NEW is read from stdin so the value never lands in argv
+kubectl -n servarr exec -i deploy/radarr -c radarr -- sh -c '
+  NEW=$(cat); export NEW
+  cp -p /config/config.xml /config/config.xml.bak-rotate
+  awk "{gsub(/<ApiKey>[^<]*<\/ApiKey>/, \"<ApiKey>\" ENVIRON[\"NEW\"] \"</ApiKey>\"); print}" \
+     /config/config.xml > /tmp/c && cat /tmp/c > /config/config.xml && rm -f /tmp/c
+  sed -n "s:.*<ApiKey>\([^<]*\)</ApiKey>.*:\1:p" /config/config.xml | tr -d "\n" | sha256sum' < /path/to/newkey
+kubectl -n servarr rollout restart deploy/radarr    # the file is only read at start
+```
+
+Proof it took: `GET /api/v3/system/status` returns `200` with the new key and
+`401` with the old one.
+
+**2. Then every consumer, in one pass.** Git-side (this repo) is ArgoCD-managed;
+the rest is live-only.
+
+| Consumer | Where the copy lives | How to update |
+|---|---|---|
+| unpackerr (`UN_RADARR_0_API_KEY`, `UN_SONARR_0_API_KEY`, `UN_SONARR_1_API_KEY`) | `_shared/secrets/unpackerr-secret.enc.yaml` (git, SOPS) | edit + `sops -e -i`, merge; `reloader` rolls the Deployment |
+| `orphan-census` CronJob | same Secret via `secretKeyRef` | nothing - fresh pod per run |
+| newtarr | `_shared/secrets/newtarr-config-seed.enc.yaml` (git) **and** live `/config/sonarr.json`, `/config/radarr.json` **and** `huntarr.db` rows `app_configs` (`radarr`, `sonarr`) | patch seed + both live JSONs + both DB rows identically, then restart (the seed initContainer is non-clobber, and `newtarr-config-drift` compares seed vs live JSON - they must match byte-for-byte) |
+| seerr | `_shared/secrets/seerr-config-seed.enc.yaml` (git) **and** live `/app/config/settings.json` | seed edit + `PUT /api/v1/settings/radarr/0`, `/sonarr/0`, `/sonarr/1` (drop `id` from the body - it is read-only); verify with `POST /api/v1/settings/{radarr,sonarr}/test` |
+| prowlarr Applications | `prowlarr-main` Postgres, `"Applications"` rows (id 3 Radarr, 1 Sonarr, 2 Sonarr2) | `GET`/`PUT /api/v1/applications/{id}` with the new `apiKey` field. The API **masks** secret fields as `********` on read, so a read-back proves nothing - verify with `POST /api/v1/applications/testall` (`isValid: true`) |
+| bazarr | live `/config/config/config.yaml` → `sonarr.apikey`, `radarr.apikey` (PVC-only, #465) | patch the file + `rollout restart`; verify `GET /api/system/health` is `[]` after triggering `update_series` / `update_movies`. Bazarr's **own** API key is `auth.apikey` in that same file |
+| cleanuparr | live `/config/cleanuparr.db` → `arr_instances.api_key` (PVC-only, #196; config API is JWT-gated) | `UPDATE arr_instances SET api_key=?` + `rollout restart`; verify the log line `Arr instance <id> (Sonarr) health changed: Healthy` for all three |
+| lingarr | `lingarr-main` Postgres, `settings.radarr_api_key` / `sonarr_api_key`, stored **encrypted** (~176 chars) | `POST /api/setting/encrypted` `{"Key":...,"Value":...}` (port-forward :9876 - lingarr has no API-key auth, only Authentik). **A plaintext grep will not find these** - that is why a value-scan alone is not a complete consumer hunt; read back with `POST /api/setting/multiple/encrypted/get` |
+
+Ruled out on 2026-08-03 (evidence, not assumption): homarr (`integration` and
+`integrationSecret` tables are **empty** - 0 integrations), bazarr-autotranslate,
+byparr, qbittorrent, vpn-picker, jellyfin, wizarr (not deployed), plus a
+cluster-wide value scan of **all 97 Secrets and 86 ConfigMaps** and all 26
+repo `*.enc.yaml` files, and a `pg_dump` value scan of all 10 non-template
+databases.
+
 ## Access URLs
 
 ### Internet (via Cloudflare + Traefik 192.168.10.101)

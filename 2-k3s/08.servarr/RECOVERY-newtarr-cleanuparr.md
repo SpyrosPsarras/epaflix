@@ -426,6 +426,13 @@ Cross-links: #176, #296, #287, #468.
 > (Selects only the URL columns on purpose - `arr_instances` also holds
 > `api_key`, so never `SELECT *` here.)
 >
+> **`arr_instances.api_key` makes Cleanuparr a consumer of every radarr /
+> sonarr / sonarr2 API-key rotation** - PVC-only, so a git-side rotation does
+> not reach it and Cleanuparr goes silently blind exactly like the #468
+> forward-auth incident above. Rotation steps for all consumers:
+> `2-k3s/08.servarr/README.md` → "Rotating the radarr / sonarr / sonarr2 API
+> keys (#712)".
+>
 > The **console log** renders neither. It carries no *arr hostname at all, only
 > the `[Sonarr]` / `[Radarr]` type tag, so the console cannot answer this
 > question either.
