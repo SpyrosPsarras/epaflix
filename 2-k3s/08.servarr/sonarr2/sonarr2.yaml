@@ -47,9 +47,33 @@ spec:
               mountPath: /config
             - name: media
               mountPath: /media
-            # subPath is safe here (unlike #195's media mounts) - backup writes are never hardlinked
+            # Off-PVC backups (#282). subPath is safe here (unlike #195's media
+            # mounts) - backup writes are never hardlinked.
+            #
+            # Two mount paths, one directory - deliberate (#538):
+            #  - /backups        matches the live `backupFolder=/backups` row that
+            #                    #282 set through the API. That row lives in the
+            #                    Config table of sonarr.db on the local-path config
+            #                    PVC - it is app state, NOT git, and a from-scratch
+            #                    PVC rebuild loses it.
+            #  - /config/Backups is Sonarr's DEFAULT backup folder (ConfigService
+            #                    falls back to the relative path "Backups" under
+            #                    the AppData dir, i.e. /config/Backups). A rebuilt
+            #                    PVC with no Config row therefore still writes off
+            #                    the PVC, onto this same NFS directory.
+            #
+            # Net effect: the backup lands here whether or not the app-side setting
+            # survives, so #538's silent revert-to-on-PVC cannot happen. The
+            # /backups entry becomes redundant if the Config row is ever cleared;
+            # it is kept so no live API step is needed to make this safe.
+            #
+            # Ordering matters: /config must be mounted before /config/Backups, so
+            # the `config` volumeMount has to stay above this block.
             - name: backups
               mountPath: /backups
+              subPath: backups/sonarr2
+            - name: backups
+              mountPath: /config/Backups
               subPath: backups/sonarr2
           livenessProbe:
             httpGet:
