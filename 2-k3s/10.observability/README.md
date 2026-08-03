@@ -241,7 +241,29 @@ See [PERFORMANCE-METRICS.md](PERFORMANCE-METRICS.md) for detailed before/after c
 
 ### Email Configuration
 
-Alerts are sent to `admin@epaflix.com` via `mail.epaflix.com:587`.
+The single `email` receiver carries two legs - `email_configs` (SMTP) and
+`webhook_configs` (ntfy topic `k8s-alertmanager`, added by #568/PR #574).
+
+SMTP relays through `vh4c.ezhellas.com:587` (STARTTLS + AUTH), **not**
+`mail.epaflix.com`. `mail.epaflix.com` is caught by the proxied
+`*.epaflix.com` Cloudflare wildcard, so it answers on 443 but carries no
+SMTP and every send timed out for months (#461). `vh4c.ezhellas.com` is the
+real hosting node behind the domain's MX record
+(`_dc-mx.a4bc4ec9e03b.epaflix.com` → `188.40.204.212`) and its TLS cert CN
+matches, so `smtp_require_tls: true` verifies.
+
+Recipient is the provisioned `alert@epaflix.com` mailbox. The previous
+`admin@epaflix.com` does not exist on the relay - it answers
+`550 5.1.1 ... User unknown in virtual alias table`.
+
+Credentials live in the SOPS-encrypted
+`secrets/alertmanager-config-secret.enc.yaml`; the plaintext source is the
+git-ignored `secrets.yml` under the `alert_email_*` keys. The Prometheus
+Operator regenerates
+`alertmanager-kube-prometheus-stack-alertmanager-generated` when that Secret
+changes and the `config-reloader` sidecar POSTs `/-/reload`, so rotating the
+password needs no pod restart (the #299 `secretKeyRef` gap does not apply -
+this is a mounted volume, not an env var).
 
 ### Default Alerts
 
