@@ -28,10 +28,10 @@ Internal DNS (Pi-hole) → `<user>.vm.epaflix.com` → `192.168.10.4X` (LAN-only
 | nick  | 1041 | 192.168.10.41  | nick.vm.epaflix.com    |
 | vidar | 1042 | 192.168.10.42  | vidar.vm.epaflix.com   |
 
-> **nick** also runs its own qBittorrent + AirVPN Bluetit stack (migrated in
-> #493), not managed by anything jumpbox-related above. Codified in
-> `nick/` (compose file, Bluetit config, `.env.example`, deploy notes) - see
-> `nick/README.md`.
+> **nick** also runs its own qBittorrent + AirVPN stack (migrated in #493), not
+> managed by anything jumpbox-related above. It is deliberately not tracked in
+> this repo - user-VM application stacks are out of scope here - and is
+> managed directly on the box.
 
 > **odysseus-bastion** (VMID 1043 / 192.168.10.43, `bastion.epaflix.com`) also
 > lives on `evanthoulaki` but is **not** a jumpbox-gated user VM — it is the
