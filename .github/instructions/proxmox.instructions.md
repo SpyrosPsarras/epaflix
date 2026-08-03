@@ -495,9 +495,28 @@ Both Proxmox hosts are identical Intel Xeon E5-2623 v4 (Broadwell-EP), so `host`
   ssh root@<pvehost> 'qm set <template-vmid> --cpu host'
   ```
 
-**Current state (2026-06-14):**
+**Current state (2026-08-03):**
 - Workers **1061 / 1062 / 1063 / 1065** — already `host`.
-- Masters **1051 / 1052 / 1053** and swarm **1071 / 1072 / 1073** — still `kvm64`; apply pending (tracked in the #216 follow-up issue).
+- Master **1052** — `host` since 2026-08-03 (first VM of the #329 apply).
+- Masters **1051 / 1053** and swarm **1071 / 1072 / 1073** — still `kvm64`; apply pending in #329.
+
+The #329 apply stopped after `1052` - power-cycling it knocked the `qbittorrent` `airvpn` VPN sidecar
+off its tunnel for ~2-3 min, even though that pod sits on an untouched worker (`k3s-worker-61`). It
+self-recovered, but the coupling is not understood. Suspicion is host-level: `1052` and `1061` are
+both on `takaros`. **`1051` is on `takaros` too** - so expect the same hit there, and note `1051`
+also carries the single `coredns` replica. `1053` is on `evanthoulaki` and is the cleaner next step.
+Details in #329.
+
+Measured on `1052`: graceful `qm shutdown --timeout 180` took 9 s (no forced `qm stop` needed),
+36 s VM downtime, ~1 m 46 s node-NotReady.
+
+Swarm VMs **1072 / 1073** have **no qemu guest agent** and are not SSH-reachable (host-key mismatch
+from the workstation, publickey denied from `ds-master`). `qm shutdown` on them is ACPI-only and
+guest-side `lscpu` cannot be checked - verify those hypervisor-side instead, via the live qemu
+`-cpu` flag and the swarm rejoin:
+```bash
+ssh root@<pvehost> 'tr "\0" "\n" < /proc/$(cat /var/run/qemu-server/<vmid>.pid)/cmdline | grep -A1 "^-cpu" | tail -1'
+```
 
 ## Security Notes
 
