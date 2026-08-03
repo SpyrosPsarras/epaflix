@@ -93,3 +93,9 @@ artifacts/
 # Found while taking a pre-decommission copy of filebrowser's database, which
 # contains OIDC client secrets and password hashes.
 /backups/
+
+# jellyseerr/seerr config backups. These carried 8 LIVE secrets (an Authentik
+# OIDC client secret, seerr api key, vapid private key, 3 *arr api keys) into
+# git history for ~6 months (#730). Untracking stops further copies; it does
+# NOT remove them from history - rotation is the remedy.
+2-k3s/08.servarr/jellyseerr/backups/
