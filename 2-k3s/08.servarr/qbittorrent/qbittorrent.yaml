@@ -42,9 +42,20 @@ spec:
         app: qbittorrent
     spec:
       dnsPolicy: None
+      # Exactly ONE nameserver, and it is public on purpose (#517).
+      # The LAN Pi-hole 192.168.10.30 used to be first here and was dead the
+      # whole time: Bluetit's blunt `0.0.0.0/1` + `128.0.0.0/1` routes swallow
+      # RFC1918 into tun0 and the AirVPN exit discards it, so every lookup to
+      # .30 timed out (~6s, measured) - full routing story in bluetit-config.yaml.
+      # It cost nothing only because this image is Alpine/musl, which queries
+      # all nameservers in PARALLEL; a glibc image would have stalled ~5s per
+      # lookup with every probe still green.
+      # Do NOT swap 1.1.1.1 for the tunnel-pushed 10.128.0.1: it only exists
+      # after connect, so Bluetit could never resolve AirVPN's bootstrap hosts
+      # to bring the tunnel up. Adding it alongside buys no privacy either -
+      # musl asks every resolver, so Cloudflare sees the query regardless.
       dnsConfig:
         nameservers:
-          - 192.168.10.30
           - 1.1.1.1
       initContainers:
         - name: init-sysctls
