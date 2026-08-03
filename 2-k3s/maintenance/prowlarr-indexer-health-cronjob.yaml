@@ -1,0 +1,215 @@
+---
+# Hourly Prowlarr indexer-backoff health check (Issue #607).
+#
+# Prowlarr already tracks indexer failures itself and raises a health warning
+# once an indexer has been failing for more than 6 hours
+# (`IndexerLongTermStatusCheck`, verified live 2026-08-03 — see below). Nothing
+# was watching that endpoint, so a broken indexer (AvistaZ, 1337x — #471) sat
+# silently excluded from every search for days with zero signal to anyone.
+#
+# This job does NOT reimplement Prowlarr's backoff/threshold logic — it just
+# polls the health endpoint Prowlarr already computes and surfaces
+# `IndexerLongTermStatusCheck` specifically (not every health entry — e.g.
+# `IndexerNoDefinitionCheck` is a different, unrelated problem and stays out
+# of scope here).
+#
+# Verified LIVE response shape (2026-08-03, `GET /api/v1/health` with
+# `X-Api-Key`, from the real prowlarr pod — this is a real firing case, not a
+# synthetic one):
+#   [
+#     {"source": "IndexerNoDefinitionCheck", "type": "error", "message": "...", "wikiUrl": "..."},
+#     {"source": "IndexerLongTermStatusCheck", "type": "warning",
+#      "message": "Indexers unavailable due to failures for more than 6 hours: 1337x, AvistaZ",
+#      "wikiUrl": "..."}
+#   ]
+#
+# Exit-code contract, same as the sibling detectors in this directory
+# (cleanuparr-blocklist-drift, newtarr-config-drift, orphan-census): NON-ZERO
+# on a finding OR any fetch failure (fail LOUD, never a silent pass), so the
+# chart's default KubeJobFailed rule + the scoped
+# ProwlarrIndexerBackoffCheckFailed PrometheusRule
+# (2-k3s/10.observability/alertmanager-config/custom-alerts.yaml) fire and
+# route through the working ntfy receiver (#568/#574).
+#
+# Stdlib-only Python (matches orphan-census's #483 rationale — this is also
+# the classifier logic, keep it in real code, not a dense jq filter).
+#
+# Credentials: prowlarr-api-key Secret, lives in the SERVARR overlay
+# (2-k3s/08.servarr/_shared/secrets/prowlarr-api-key.enc.yaml) — NOT here —
+# because CI's "Kustomize build (sops-free dirs)" step builds
+# `2-k3s/maintenance` without the age key; a ksops generator in this overlay
+# would drop the whole directory out of that gate. Cross-App Secret
+# reference is the existing precedent (qbittorrent-webui-credentials,
+# newtarr-config-seed).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prowlarr-indexer-health-script
+  namespace: servarr
+data:
+  check.py: |
+    #!/usr/bin/env python3
+    """Prowlarr indexer-backoff health check (#607). Python stdlib only.
+
+    Run with --selftest to exercise the classifier against synthetic health
+    payloads without touching the network.
+    """
+    import json
+    import os
+    import sys
+    import urllib.error
+    import urllib.request
+
+    TIMEOUT = 15
+    WATCHED_SOURCE = "IndexerLongTermStatusCheck"
+
+    PROWLARR_URL = os.environ.get(
+        "PROWLARR_URL", "http://prowlarr.servarr.svc.cluster.local:9696"
+    )
+    API_KEY = os.environ.get("PROWLARR_API_KEY", "")
+
+
+    def classify(health_items):
+        """Return (ok, messages). ok=False means at least one indexer has been
+        in backoff long enough for Prowlarr itself to raise
+        IndexerLongTermStatusCheck. Defensive against missing/odd keys —
+        malformed entries never crash the check, but they also never silently
+        pass if they can't be evaluated (checked in selftest below)."""
+        hits = []
+        for item in health_items:
+            if not isinstance(item, dict):
+                continue
+            if item.get("source") == WATCHED_SOURCE:
+                hits.append(item.get("message", "(no message)"))
+        return (len(hits) == 0, hits)
+
+
+    def fetch_health():
+        req = urllib.request.Request(
+            f"{PROWLARR_URL}/api/v1/health",
+            headers={"X-Api-Key": API_KEY},
+        )
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+            return json.loads(resp.read().decode())
+
+
+    def selftest():
+        # No backoff at all.
+        ok, hits = classify([])
+        assert ok and hits == [], "empty health list must be OK"
+
+        # A different, unrelated health warning must NOT trip this check.
+        ok, hits = classify(
+            [{"source": "IndexerNoDefinitionCheck", "type": "error", "message": "x"}]
+        )
+        assert ok and hits == [], "unrelated health source must not fail the check"
+
+        # The real live shape captured 2026-08-03.
+        ok, hits = classify(
+            [
+                {"source": "IndexerNoDefinitionCheck", "type": "error", "message": "x"},
+                {
+                    "source": "IndexerLongTermStatusCheck",
+                    "type": "warning",
+                    "message": "Indexers unavailable due to failures for more than 6 hours: 1337x, AvistaZ",
+                },
+            ]
+        )
+        assert not ok, "IndexerLongTermStatusCheck must fail the check"
+        assert hits == [
+            "Indexers unavailable due to failures for more than 6 hours: 1337x, AvistaZ"
+        ]
+
+        # Malformed entries (missing keys, wrong types) must not crash and
+        # must not accidentally count as a hit.
+        ok, hits = classify([{}, {"source": None}, "not-a-dict", 42])
+        assert ok and hits == [], "malformed entries must not crash or false-positive"
+
+        print("selftest OK")
+        return 0
+
+
+    def main():
+        if "--selftest" in sys.argv:
+            return selftest()
+
+        if not API_KEY:
+            print("ERROR: PROWLARR_API_KEY is empty", file=sys.stderr)
+            return 1
+
+        try:
+            health_items = fetch_health()
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as exc:
+            print(f"ERROR: could not reach {PROWLARR_URL}/api/v1/health: {exc}", file=sys.stderr)
+            return 1
+        except (json.JSONDecodeError, ValueError) as exc:
+            print(f"ERROR: unparseable response from Prowlarr health endpoint: {exc}", file=sys.stderr)
+            return 1
+
+        ok, hits = classify(health_items)
+        if ok:
+            print(f"OK: no {WATCHED_SOURCE} warning (checked {len(health_items)} health entries).")
+            return 0
+
+        print(f"FAIL: Prowlarr raised {WATCHED_SOURCE}:")
+        for msg in hits:
+            print(f"  - {msg}")
+        print("ACTION: check indexer credentials/rate-limits in the Prowlarr UI; see #471/#477.")
+        return 1
+
+
+    if __name__ == "__main__":
+        sys.exit(main())
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: prowlarr-indexer-health
+  namespace: servarr
+  labels:
+    app: prowlarr-indexer-health
+spec:
+  # Hourly — Prowlarr itself already gates IndexerLongTermStatusCheck behind a
+  # 6h failure window, so checking hourly adds negligible load while catching
+  # a new backoff within an hour of Prowlarr raising it.
+  schedule: "10 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 6
+  failedJobsHistoryLimit: 6
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 2592000  # keep 30 days
+      template:
+        metadata:
+          labels:
+            app: prowlarr-indexer-health
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: health-check
+              image: python:3.13-alpine
+              imagePullPolicy: IfNotPresent
+              command: ["python3", "/script/check.py"]
+              env:
+                - name: PROWLARR_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: prowlarr-api-key
+                      key: apiKey
+              volumeMounts:
+                - name: script
+                  mountPath: /script
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "250m"
+                  memory: "128Mi"
+          volumes:
+            - name: script
+              configMap:
+                name: prowlarr-indexer-health-script
+                defaultMode: 0555
