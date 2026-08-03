@@ -7,6 +7,12 @@ metadata:
   namespace: servarr
   labels:
     app: bazarr-autotranslate
+  annotations:
+    # Reloader (#299): env-var secretKeyRef consumers don't auto-roll on
+    # Secret rotation otherwise. Kept scoped to the exact Secret, not
+    # reloader.stakater.com/auto, to avoid surprise reloads from unrelated
+    # namespace Secret edits.
+    secret.reloader.stakater.com/reload: "bazarr-autotranslate-secret"
 spec:
   replicas: 1
   selector:
