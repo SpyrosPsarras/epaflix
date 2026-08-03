@@ -6,6 +6,26 @@
 # backend hop is HTTPS-with-skipverify, same pattern as truenas-proxy.yaml.
 # DNS for pegaprox.epaflix.com is internal-only (Pi-hole address= → 192.168.10.101).
 # DNS-01 ACME via Cloudflare proves domain ownership — no public A record needed.
+#
+# Gated by Authentik forward-auth (issue #548) — PegaProx holds a
+# `root@pam!pegaprox` token against BOTH Proxmox hosts, so a compromise is full
+# hypervisor control over every k3s VM. It keeps its own login + TOTP; this is a
+# second, outer layer, same 3-part shape as odysseus-proxy.yaml:
+#   - app route (priority 10): security-headers FIRST, then authentik-forwardauth
+#     (order matters — headers must still apply to the auth-deny 302, PR #694)
+#   - outpost route (priority 15): /outpost.goauthentik.io/ callbacks, MUST
+#     out-prioritise the app route or the callback loops
+# No /api bypass on purpose: #548 wants anonymous `GET /api/status` (which leaks
+# build/version/totp_available) to stop returning 200. Nothing calls PegaProx
+# inbound — it is a client of the Proxmox API, not a server for automation.
+# Recovery if Authentik is down: the LXC is directly reachable at
+# https://192.168.10.21:5000, and Proxmox's own UI at :8006 is the real fallback.
+#
+# SSO objects live in 07.authentik-deployment/authentik-iac-blueprint.enc.yaml:
+# proxy provider + application `pegaprox-forwardauth` (distinct from the existing
+# OAuth2 provider/app `pegaprox` that backs PegaProx's own OIDC login — an
+# Authentik application can carry only ONE provider), bound to group
+# `PegaProx Admins`, and added to the embedded outpost's providers list.
 
 apiVersion: v1
 kind: Endpoints
@@ -77,14 +97,44 @@ spec:
   routes:
     - match: Host(`pegaprox.epaflix.com`)
       kind: Rule
+      priority: 10
       middlewares:
         - name: security-headers
+          namespace: traefik-system
+        - name: authentik-forwardauth
           namespace: traefik-system
       services:
         - name: pegaprox-ui
           port: 5000
           scheme: https
           serversTransport: pegaprox-insecure
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
+
+---
+# Outpost route - handles the auth callback on pegaprox.epaflix.com.
+# priority 15 > the app route's 10, else the callback is swallowed by the
+# forward-auth-gated route and login loops forever.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: pegaprox-outpost-https
+  namespace: traefik-system
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`pegaprox.epaflix.com`) && PathPrefix(`/outpost.goauthentik.io/`)
+      kind: Rule
+      priority: 15
+      services:
+        - name: authentik-server
+          namespace: app-authentik
+          port: 80
   tls:
     certResolver: cloudflare
     domains:

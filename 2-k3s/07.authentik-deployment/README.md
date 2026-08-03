@@ -326,6 +326,30 @@ For applications that don't support OIDC, use Authentik's Forward Auth (Proxy Pr
 - **Servarr UIs** (group `Servarr users`; rolled out in #176 — providers pk 126-135, Stage A blueprint PR #289 / Stage B IngressRoutes PR #291):
   - `sonarr.epaflix.com`, `sonarr2.epaflix.com`, `radarr.epaflix.com`, `prowlarr.epaflix.com`, `qbittorrent.epaflix.com`, `bazarr.epaflix.com` — UI gated, with a **priority-20 `/api` bypass** (no middleware) so API-key / inter-app traffic continues unchanged
   - `cleanuparr.epaflix.com`, `homarr.epaflix.com`, `lingarr.epaflix.com`, `wizarr.epaflix.com` — fully gated (no `/api` bypass)
+- **Admin UIs** (rolled out in #548 + #552; providers/applications named `<host>-forwardauth`, all fully gated with no `/api` bypass):
+
+  | Host | Provider + application | Group | Why the gate is safe |
+  |---|---|---|---|
+  | `pegaprox.epaflix.com` | `pegaprox-forwardauth` | `PegaProx Admins` | Nothing calls PegaProx inbound; it is a *client* of the Proxmox API |
+  | `truenas.epaflix.com` | `truenas-forwardauth` | `authentik Admins` | All TrueNAS automation is `ssh` + `midclt`, never the HTTP API via Traefik |
+  | `minio-console.epaflix.com` | `minio-console-forwardauth` | `authentik Admins` | Console only — the S3 API on `minio.epaflix.com` is a **separate host** and stays ungated for CNPG/Barman SigV4 |
+  | `grafana.epaflix.com` | `grafana-forwardauth` | `Grafana Admins` | Browser-only inbound; Prometheus scrapes `/metrics` via the in-cluster Service |
+  | `filebrowser.epaflix.com` | `filebrowser-forwardauth` | `Grafana Admins` | Browser-only; matches the group its existing OIDC app already binds |
+
+  These providers set **`intercept_header_auth: false`** (the servarr ones set it
+  `true`). They are browser UIs that carry their own bearer/API-key headers after
+  login — letting Authentik intercept `Authorization` risks it rejecting the
+  app's own header and 401-ing a logged-in user.
+
+  Each host needs a **distinct** provider + application because an Authentik
+  application can carry only **one** provider, and `pegaprox`, `grafana-monitor`
+  and `filebrowser` already have applications bound to their **OAuth2** providers
+  for their own native OIDC login. Those are untouched.
+
+  **`argocd.epaflix.com` is deliberately excluded** — the `argocd` CLI talks
+  gRPC-web to that host and cannot do browser SSO, and ArgoCD is what deploys
+  everything else. Rationale is recorded in
+  [11.argocd/ingress.yaml](../../11.argocd/ingress.yaml).
 
 #### Embedded outpost provider membership — now blueprint-declared (#293)
 
@@ -350,6 +374,15 @@ Cross-references: **#176/#289** (rollout that introduced the imperative
 PATCH this replaces); **#404** (tracks removing the orphaned `syncthing`
 provider from this list once its app/provider are torn down — it is
 currently included because it is still live on the outpost).
+
+**This failure mode already bit once.** The `Traefik Forward Auth` provider
+(pk 6, `traefik.epaflix.com`) was never added to the declared list, so the
+authoritative-replace dropped it from the outpost and
+`https://traefik.epaflix.com/` served the outpost's **404** instead of a login
+redirect — a documented forward-auth app that was quietly down. #548/#552
+re-added it. Treat a 404 (not a 302) from a supposedly gated host as "this
+provider is missing from the outpost", and always diff the declared names
+against `GET /api/v3/outposts/instances/` after editing this list.
 
 ### Granting Service Access
 
