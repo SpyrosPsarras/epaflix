@@ -63,6 +63,9 @@ spec:
   routes:
     - match: Host(`jellyfin.epaflix.com`)
       kind: Rule
+      middlewares:
+        - name: security-headers
+          namespace: traefik-system
       services:
         - name: jellyfin-truenas
           port: 30013
