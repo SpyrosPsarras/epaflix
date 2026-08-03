@@ -1,6 +1,26 @@
 ---
 # Grafana HTTPS IngressRoute
 # https://grafana.epaflix.com
+#
+# Gated by Authentik forward-auth (issue #552) — 3-part shape, same as
+# odysseus-proxy.yaml: app route priority 10 with security-headers FIRST then
+# authentik-forwardauth (order per PR #694 — headers must still apply to the
+# auth-deny 302), outpost route priority 15 for /outpost.goauthentik.io/.
+#
+# No /api bypass, deliberately. Grafana's inbound traffic here is browser-only:
+# it is a CONSUMER of datasources (it calls out to Prometheus/Loki), and
+# Prometheus scrapes Grafana's /metrics via the in-cluster Service, never via
+# this hostname. Grafana's own OAuth round-trip
+# (/login/generic_oauth -> auth.epaflix.com) is a browser redirect and passes
+# with the outpost cookie, so the two layers stack silently on one Authentik
+# session rather than asking for a second login.
+#
+# SSO objects live in 07.authentik-deployment/authentik-iac-blueprint.enc.yaml:
+# proxy provider + application `grafana-forwardauth`, bound to group
+# `Grafana Admins` — the SAME group as Grafana's existing `grafana-monitor`
+# OAuth2 application, so the edge gate admits exactly the population that could
+# already log in. A distinct provider/app is required because an Authentik
+# application can carry only ONE provider.
 
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
@@ -13,11 +33,35 @@ spec:
   routes:
     - kind: Rule
       match: Host(`grafana.epaflix.com`)
+      priority: 10
       middlewares:
         - name: security-headers
           namespace: traefik-system
+        - name: authentik-forwardauth
+          namespace: traefik-system
       services:
         - name: kube-prometheus-stack-grafana
+          port: 80
+  tls:
+    certResolver: cloudflare
+---
+# Outpost route - handles the auth callback on grafana.epaflix.com.
+# priority 15 > the app route's 10, else the callback loops.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: grafana-outpost-https
+  namespace: observability
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - kind: Rule
+      match: Host(`grafana.epaflix.com`) && PathPrefix(`/outpost.goauthentik.io/`)
+      priority: 15
+      services:
+        - name: authentik-server
+          namespace: app-authentik
           port: 80
   tls:
     certResolver: cloudflare

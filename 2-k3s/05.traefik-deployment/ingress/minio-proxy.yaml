@@ -8,6 +8,13 @@
 #
 # Used by cnpg backup pipeline (postgres-cluster.spec.backup.barmanObjectStore)
 # and humans for the MinIO web console.
+#
+# IMPORTANT split: the S3 API on minio.epaflix.com is DELIBERATELY NOT behind
+# Authentik forward-auth. CNPG / the Barman Cloud Plugin talk S3 (SigV4) to it
+# with an access key/secret — a 302 to auth.epaflix.com would break every
+# Postgres backup and WAL archive. Only the browser console on the separate
+# minio-console.epaflix.com host is gated (issue #552). That host split is
+# exactly why this is safe to do host-by-host.
 
 apiVersion: v1
 kind: Endpoints
@@ -90,6 +97,8 @@ spec:
 
 ---
 # Web console on a separate hostname so the S3 API and the UI are decoupled.
+# That decoupling is what lets the console sit behind Authentik forward-auth
+# (#552) while the S3 API above stays reachable for CNPG's SigV4 clients.
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -120,12 +129,41 @@ spec:
   routes:
     - match: Host(`minio-console.epaflix.com`)
       kind: Rule
+      priority: 10
       middlewares:
         - name: security-headers
+          namespace: traefik-system
+        - name: authentik-forwardauth
           namespace: traefik-system
       services:
         - name: minio-external
           port: 9001
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
+
+---
+# Outpost route - handles the auth callback on minio-console.epaflix.com.
+# priority 15 > the app route's 10, else the callback loops.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: minio-console-outpost-https
+  namespace: traefik-system
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`minio-console.epaflix.com`) && PathPrefix(`/outpost.goauthentik.io/`)
+      kind: Rule
+      priority: 15
+      services:
+        - name: authentik-server
+          namespace: app-authentik
+          port: 80
   tls:
     certResolver: cloudflare
     domains:
