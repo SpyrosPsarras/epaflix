@@ -453,8 +453,29 @@ class Bluetit:
                 return None
             self.sleep(self.cfg.verify_interval)
 
+    def tun_present(self):
+        """Does the tunnel device exist RIGHT NOW? Silent, no subprocess.
+
+        Split out of `tun_ok()` so `/metrics` can measure the real device tree
+        on every scrape (#690). The metric used to be a field written only on
+        the switch path, so a pod that never switched reported `1` for its whole
+        life without ever having looked - green by default, not by measurement.
+
+        Silence is the whole point of the split: `/metrics` is scraped every 60 s
+        and `tun_ok()`'s log line is four lines of recovery instructions, so
+        scraping the loud version on a genuinely broken pod would bury the one
+        occurrence that matters under a thousand copies.
+
+        A `/sys` read that fails is not a present device, so it reads False -
+        `tun_ok()` is the caller that says so out loud.
+        """
+        try:
+            return self.cfg.tun_device in os.listdir("/sys/class/net")
+        except OSError:
+            return False
+
     def tun_ok(self):
-        """Is the tunnel device still named tun0?
+        """Is the tunnel device still named tun0? The LOUD switch-path verdict.
 
         `tunpersist` is inert under WireGuard - wireguardclient.cpp never reads
         it, and WireGuardClient::stop() calls wg_del_device() on every
@@ -463,14 +484,18 @@ class Bluetit:
         disconnect ever fails to delete it, the next connect lands on tun1 and
         qBittorrent - bound to tun0 in its config - opens no listen socket at
         all while the WebUI, both probes and ArgoCD stay green.
+
+        Call this where a missing device has to change what the agent does and
+        be shouted about once. Anything that only wants to REPORT the state -
+        the metric - uses `tun_present()`.
         """
+        if self.tun_present():
+            return True
         try:
             devices = sorted(os.listdir("/sys/class/net"))
         except OSError as exc:
             log.error("cannot read /sys/class/net: %s", exc)
             return False
-        if self.cfg.tun_device in devices:
-            return True
         log.error(
             "device %s is MISSING after a connect, tun devices present: %s - "
             "qBittorrent is bound to %s and has no listen socket. Recover by "
@@ -504,7 +529,20 @@ class Agent:
         self.current_server = None
         self.current_loss_pct = None
         self.consecutive_bad = 0
-        self.tun_device_ok = True
+        # There is deliberately NO self.tun_device_ok. It existed, was
+        # initialised True and written only on the switch path, so a pod that
+        # never switched published `1` without ever having looked (#690). The
+        # metric reads /sys/class/net at scrape time instead - see
+        # render_metrics(). Do not re-add a field for it.
+        #
+        # `switching` is what makes that scrape-time read usable: True from the
+        # disconnect until the switch resolves, published as
+        # vpn_agent_switch_in_progress. The device is DELETED and rebuilt inside
+        # that window (wg_del_device on every disconnect), so a scrape landing
+        # mid-switch honestly sees no device. That is the teardown, not a taken
+        # slot, and this flag is how a reader tells the two apart without the
+        # device metric having to lie about what it sees.
+        self.switching = False
         self.switches = {"degradation": 0, "boot_upgrade": 0, "fallback": 0}
         self.cached = []
 
@@ -630,53 +668,67 @@ class Agent:
         hard_deadline = started + self.cfg.recovery_budget
         walk_deadline = hard_deadline - self.cfg.quick_reserve
 
-        self.bluetit.disconnect()
+        # Everything from here to the end of the walk runs with no tunnel device
+        # for part of the time, so say so for the whole of it. try/finally, not a
+        # clear-on-the-way-out: `watch_once()` is wrapped in a bare `except` by
+        # run(), so a crash anywhere below would otherwise leave the flag stuck
+        # at 1 forever - which is the same class of permanently-wrong signal this
+        # change exists to remove.
+        with self.lock:
+            self.switching = True
+        try:
+            self.bluetit.disconnect()
 
-        for name in names:
-            for attempt in range(1, self.cfg.attempts_per_candidate + 1):
-                if self.clock() >= walk_deadline:
-                    log.warning("recovery budget spent on the candidate walk, "
-                                "falling back to quick")
-                    return self._fall_back(hard_deadline, reason)
-                connected = self.bluetit.connect(name, deadline=walk_deadline)
-                if connected:
-                    self.tun_device_ok = self.bluetit.tun_ok()
-                    if not self.tun_device_ok:
-                        # Connected, wrong device. The switch is NOT successful -
-                        # qBittorrent is bound to tun0 and has no listen socket, so
-                        # counting this as a win would hide a client that is dead
-                        # while the WebUI, both probes and ArgoCD stay green.
-                        # Reconnecting cannot free the taken slot either, so stop
-                        # rather than walk the pool creating tun2, tun3, ...
-                        # The FULL cooldown is right here, unlike a verification
-                        # failure below: another switch cannot fix a taken slot,
-                        # it can only take one more.
-                        log.error("connected to %s but the tunnel device is wrong - "
-                                  "the switch FAILED", connected)
-                        return self._finish(connected, reason, None)
-                    if self.verify_tunnel(connected):
-                        log.info("connected server=%s reason=%s attempt=%d elapsed=%.1fs",
-                                 connected, reason, attempt, self.clock() - started)
-                        return self._finish(connected, reason, reason)
-                    # The name matched and no packet came back (#627 fix 3).
-                    # Drop the candidate rather than re-dial it: re-dialling the
-                    # same dead peer is exactly what Bluetit's internal reconnect
-                    # already does, and that was measured doing it four times
-                    # over a clean path with zero handshakes. The disconnect is
-                    # not optional - Bluetit refuses a connect while it believes
-                    # it is connected, and only a fresh connect re-logs in to
-                    # AirVPN (#627 fix 4).
-                    log.warning("dropping candidate %s - it reported connected but "
-                                "passed no traffic, walking to the next one", name)
-                    self.bluetit.disconnect()
-                    break
-                if attempt < self.cfg.attempts_per_candidate:
-                    self.sleep(random.uniform(0.5, 1.5) * self.cfg.retry_backoff)
-            else:
-                log.warning("candidate %s failed %d attempts, moving on",
-                            name, self.cfg.attempts_per_candidate)
+            for name in names:
+                for attempt in range(1, self.cfg.attempts_per_candidate + 1):
+                    if self.clock() >= walk_deadline:
+                        log.warning("recovery budget spent on the candidate walk, "
+                                    "falling back to quick")
+                        return self._fall_back(hard_deadline, reason)
+                    connected = self.bluetit.connect(name, deadline=walk_deadline)
+                    if connected:
+                        # A local, not a field. `tun_ok()` is the loud verdict
+                        # that fails this switch; what the METRIC reports is a
+                        # fresh read at scrape time (#690).
+                        if not self.bluetit.tun_ok():
+                            # Connected, wrong device. The switch is NOT successful -
+                            # qBittorrent is bound to tun0 and has no listen socket, so
+                            # counting this as a win would hide a client that is dead
+                            # while the WebUI, both probes and ArgoCD stay green.
+                            # Reconnecting cannot free the taken slot either, so stop
+                            # rather than walk the pool creating tun2, tun3, ...
+                            # The FULL cooldown is right here, unlike a verification
+                            # failure below: another switch cannot fix a taken slot,
+                            # it can only take one more.
+                            log.error("connected to %s but the tunnel device is wrong - "
+                                      "the switch FAILED", connected)
+                            return self._finish(connected, reason, None)
+                        if self.verify_tunnel(connected):
+                            log.info("connected server=%s reason=%s attempt=%d elapsed=%.1fs",
+                                     connected, reason, attempt, self.clock() - started)
+                            return self._finish(connected, reason, reason)
+                        # The name matched and no packet came back (#627 fix 3).
+                        # Drop the candidate rather than re-dial it: re-dialling the
+                        # same dead peer is exactly what Bluetit's internal reconnect
+                        # already does, and that was measured doing it four times
+                        # over a clean path with zero handshakes. The disconnect is
+                        # not optional - Bluetit refuses a connect while it believes
+                        # it is connected, and only a fresh connect re-logs in to
+                        # AirVPN (#627 fix 4).
+                        log.warning("dropping candidate %s - it reported connected but "
+                                    "passed no traffic, walking to the next one", name)
+                        self.bluetit.disconnect()
+                        break
+                    if attempt < self.cfg.attempts_per_candidate:
+                        self.sleep(random.uniform(0.5, 1.5) * self.cfg.retry_backoff)
+                else:
+                    log.warning("candidate %s failed %d attempts, moving on",
+                                name, self.cfg.attempts_per_candidate)
 
-        return self._fall_back(hard_deadline, reason)
+            return self._fall_back(hard_deadline, reason)
+        finally:
+            with self.lock:
+                self.switching = False
 
     def _quick(self, deadline):
         """Terminal fallback. Connected to a mediocre server beats tunnel-less.
@@ -687,7 +739,11 @@ class Agent:
         log.warning("falling back to quick")
         connected = self.bluetit.connect(None, deadline=deadline)
         if connected:
-            self.tun_device_ok = self.bluetit.tun_ok()
+            # For the log line only, and the return value is deliberately
+            # dropped: `quick` is the last thing between the pod and no tunnel at
+            # all, so a wrong device here is not a reason to refuse it - but it
+            # has to be SAID. The metric reads the device itself (#690).
+            self.bluetit.tun_ok()
         return connected
 
     def _fall_back(self, hard_deadline, reason):
@@ -836,10 +892,30 @@ class Agent:
     def watch_once(self):
         """One degradation window. Returns True if it triggered a switch."""
         loss = self.probe()
+        # ONE `--bluetit-status` per window, unconditionally, and above every
+        # early return below (#690). It used to sit under the clean-window return
+        # and under the loss threshold, so on a healthy pod `current_server` was
+        # whatever boot found for the life of the pod - and the tunnel CAN move
+        # under the agent: the `airvpn` sidecar restarts on its own liveness
+        # probe and `airconnectatboot quick` picks again, while this process
+        # keeps running, so the metric would then name a server we are not on.
+        #
+        # In the loop and not in render_metrics() on purpose. A goldcrest call
+        # can take goldcrest_timeout (25 s) and its subprocess wrapper 15 s more;
+        # render_metrics() runs in the HTTP handler thread, so a slow D-Bus call
+        # there would blow the Prometheus scrape timeout and take the target
+        # down - losing every metric, including the honest ones. Here it costs
+        # exactly one call per probe_interval (60 s), the same rate the
+        # ServiceMonitor scrapes at and 30x below the one-every-2s polling
+        # connect() already sustains for 30 s at a time. Read AFTER the probe so
+        # it names the state as of the moment the loss is known.
+        current = self.bluetit.status()
+        with self.lock:
+            self.current_server = current
+            if loss is not None:
+                self.current_loss_pct = loss
         if loss is None:
             return False
-        with self.lock:
-            self.current_loss_pct = loss
 
         if loss < self.cfg.bad_loss_pct:
             with self.lock:
@@ -848,9 +924,6 @@ class Agent:
 
         # A fully dead tunnel is EXEMPT. The liveness probe plus `quick` already
         # own that path, and a switch cannot fix a Bluetit that is not connected.
-        current = self.bluetit.status()
-        with self.lock:
-            self.current_server = current
         if not current:
             log.warning("loss=%.2f%% but Bluetit is not connected - the liveness probe "
                         "owns this, not the agent", loss)
@@ -902,14 +975,22 @@ def render_metrics(agent):
         server = agent.current_server
         loss = agent.current_loss_pct
         bad = agent.consecutive_bad
-        device_ok = agent.tun_device_ok
+        switching = agent.switching
         switches = dict(agent.switches)
-    # Read from disk HERE, outside the lock, not taken off a field on the agent.
-    # A cached age is only ever as fresh as its last writer, and the only writer
-    # was the switch-decision path - which a healthy pod never enters, so the
-    # number froze at its boot value for the pod's lifetime (#686). Do NOT
-    # "simplify" this back to an attribute lookup.
+    # Both of these are MEASURED HERE, outside the lock, not taken off a field on
+    # the agent. A cached value is only ever as fresh as its last writer, and in
+    # both cases the only writer was the switch path - which a healthy pod never
+    # enters, so the age froze at its boot value (#686) and the device flag
+    # published the `True` it was initialised with, without ever having looked
+    # (#690). Do NOT "simplify" either of these back to an attribute lookup.
+    #
+    # Both are cheap enough to sit in the HTTP handler thread: one small local
+    # file read and one os.listdir, no subprocess. That is the line - anything
+    # needing a goldcrest call is refreshed in watch_once() instead, because a
+    # 25 s D-Bus call in here would blow the scrape timeout and take the whole
+    # target down.
     age = agent.ranking_age_now()
+    device_ok = agent.bluetit.tun_present()
     lines = [
         "# HELP vpn_agent_dry_run Whether the agent is logging switches instead of applying them.",
         "# TYPE vpn_agent_dry_run gauge",
@@ -924,13 +1005,24 @@ def render_metrics(agent):
         "# HELP vpn_agent_consecutive_bad_windows Consecutive probe windows over the loss threshold.",
         "# TYPE vpn_agent_consecutive_bad_windows gauge",
         "vpn_agent_consecutive_bad_windows %d" % bad,
-        "# HELP vpn_agent_tunnel_device_ok Whether the tunnel came back as the device qBittorrent is bound to.",
+        "# HELP vpn_agent_tunnel_device_ok Whether the device qBittorrent is bound to exists, read from /sys/class/net at scrape time. Read it together with vpn_agent_switch_in_progress: 0 during a switch is the normal teardown, not a failure.",
         "# TYPE vpn_agent_tunnel_device_ok gauge",
         "vpn_agent_tunnel_device_ok %d" % (1 if device_ok else 0),
+        # The companion the scrape-time read needs, rather than fudging the read
+        # itself. The device is deleted and rebuilt on every switch, so a scrape
+        # inside that window honestly sees no device - suppressing the metric
+        # there would trade a true 0 for an absent series, and absent is the one
+        # state that cannot be told apart from "the agent stopped answering".
+        # Emitting both lets a reader (or an alert) say `device_ok == 0 unless
+        # switch_in_progress` and be exactly right. The window is bounded by
+        # recovery_budget (120 s) and capped at 3 switches a day.
+        "# HELP vpn_agent_switch_in_progress Whether a switch is between its disconnect and its outcome, the window in which the tunnel device is torn down and rebuilt.",
+        "# TYPE vpn_agent_switch_in_progress gauge",
+        "vpn_agent_switch_in_progress %d" % (1 if switching else 0),
     ]
     if server:
         lines += [
-            "# HELP vpn_agent_current_server The AirVPN server the tunnel is on.",
+            "# HELP vpn_agent_current_server The AirVPN server the tunnel is on, re-read from Bluetit once per probe window. Absent when Bluetit reports not connected.",
             "# TYPE vpn_agent_current_server gauge",
             'vpn_agent_current_server{server="%s"} 1' % server,
         ]
