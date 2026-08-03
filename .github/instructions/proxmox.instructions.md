@@ -497,22 +497,29 @@ Both Proxmox hosts are identical Intel Xeon E5-2623 v4 (Broadwell-EP), so `host`
 
 **Current state (2026-08-03):**
 - Workers **1061 / 1062 / 1063 / 1065** — already `host`.
-- Master **1052** — `host` since 2026-08-03 (first VM of the #329 apply).
-- Masters **1051 / 1053** and swarm **1071 / 1072 / 1073** — still `kvm64`; apply pending in #329.
+- Masters **1052 / 1053** — `host` since 2026-08-03 (#329 apply, phases 1 and 2).
+- Swarm **1071 / 1072 / 1073** — `host` since 2026-08-03 (#329 phase 2).
+- Master **1051** — still `kvm64`. **The only one left.** Deliberately deferred to an attended
+  window: it is the founding etcd member, it carries the single `coredns` replica, and it sits on
+  `takaros` next to the `qbittorrent` worker (see below). Tracked in #329.
 
-The #329 apply stopped after `1052` - power-cycling it knocked the `qbittorrent` `airvpn` VPN sidecar
-off its tunnel for ~2-3 min, even though that pod sits on an untouched worker (`k3s-worker-61`). It
-self-recovered, but the coupling is not understood. Suspicion is host-level: `1052` and `1061` are
-both on `takaros`. **`1051` is on `takaros` too** - so expect the same hit there, and note `1051`
-also carries the single `coredns` replica. `1053` is on `evanthoulaki` and is the cleaner next step.
-Details in #329.
+Why `1051` is held back: power-cycling `1052` knocked the `qbittorrent` `airvpn` VPN sidecar off its
+tunnel for ~2-3 min, even though that pod sits on an untouched worker (`k3s-worker-61`). It
+self-recovered with no leak, but the coupling was not understood. Suspicion was host-level: `1052`
+and `1061` are both on `takaros`. Phase 2 tested that - cycling `1053` (on `evanthoulaki`) produced
+**zero** sidecar restarts over a 6 m 49 s watch, which is consistent with the host-local theory but
+does not prove it, because the sidecar image was re-pinned between the two runs (#666/#667). Either
+way `1051` is on `takaros`, so plan for the hit. Details in #329.
 
-Measured on `1052`: graceful `qm shutdown --timeout 180` took 9 s (no forced `qm stop` needed),
-36 s VM downtime, ~1 m 46 s node-NotReady.
+Measured: graceful `qm shutdown` never needed a forced `qm stop` fallback on any of the 5 VMs done
+so far. `1052` 9 s to power off / 36 s VM downtime / ~1 m 46 s node-NotReady; `1053` 9 s / 51 s /
+<= 1 m 33 s. Swarm VMs ~12-13 s to power off, ~46-49 s downtime, back in the swarm ~70-80 s.
 
-Swarm VMs **1072 / 1073** have **no qemu guest agent** and are not SSH-reachable (host-key mismatch
-from the workstation, publickey denied from `ds-master`). `qm shutdown` on them is ACPI-only and
-guest-side `lscpu` cannot be checked - verify those hypervisor-side instead, via the live qemu
+**None of the three swarm VMs has a working qemu guest agent** - `qm agent <vmid> ping` fails on
+`1071`, `1072` and `1073` alike, so `qm shutdown` is ACPI-only for all of them (it works, and exits
+0, it just prints a `guest-ping failed` warning first). `1072` / `1073` are additionally not
+SSH-reachable (host-key mismatch from the workstation, publickey denied from `ds-master`), so
+guest-side `lscpu` cannot be checked there - verify those hypervisor-side instead, via the live qemu
 `-cpu` flag and the swarm rejoin:
 ```bash
 ssh root@<pvehost> 'tr "\0" "\n" < /proc/$(cat /var/run/qemu-server/<vmid>.pid)/cmdline | grep -A1 "^-cpu" | tail -1'
