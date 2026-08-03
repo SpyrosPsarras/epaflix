@@ -46,6 +46,14 @@
 #                                       (issue #284 — homarr-labs SECRET_ENCRYPTION_KEY,
 #                                       required by the maintained image, ajnart fork
 #                                       had no such requirement)
+#   - prowlarr-api-key                 from _shared/secrets/prowlarr-api-key.enc.yaml
+#                                       (issue #607 — consumed by the maintenance App's
+#                                       prowlarr-indexer-health CronJob, not any servarr
+#                                       workload; same cross-App pattern as
+#                                       qbittorrent-webui-credentials below)
+#   - cleanuparr-api-key               from _shared/secrets/cleanuparr-api-key.enc.yaml
+#                                       (issue #606 — consumed by the maintenance App's
+#                                       cleanuparr-queuecleaner-health CronJob)
 #
 # Re-add a Job here only if you intend Argo to re-run it on every sync.
 apiVersion: kustomize.config.k8s.io/v1beta1
