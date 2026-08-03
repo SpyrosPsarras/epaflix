@@ -53,6 +53,19 @@ config:
                   type: Counter
                   description: "Log lines containing a credential-shaped key=value that promtail redacted before pushing to Loki (#634)."
                   config:
+                    # match_all is REQUIRED here and its absence is silent. With
+                    # no `source`, the metrics stage otherwise looks for an
+                    # EXTRACTED FIELD named after the metric, never finds one, and
+                    # never increments - the counter is not even registered, so
+                    # /metrics has no such series and any alert on it sits at "no
+                    # data" forever. Verified the failure and the fix on the live
+                    # DaemonSet: before, 0 of 7 promtail pods exposed the counter
+                    # (including the one on radarr's node, while that same pod
+                    # served 113 other promtail_* series, so metrics themselves
+                    # were healthy). The `match` stage above already does the
+                    # selecting; match_all just means "count every entry that
+                    # reaches this stage".
+                    match_all: true
                     action: inc
         - replace:
             # Only the capture group - the VALUE - is replaced, so the key name
