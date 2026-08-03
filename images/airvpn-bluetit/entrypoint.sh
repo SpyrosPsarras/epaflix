@@ -2,18 +2,32 @@
 # AirVPN Bluetit sidecar entrypoint.
 #
 # Bluetit forks and returns 0, so this script has to hold the foreground and
-# watch the daemon. It also runs the degradation probe: a server that stays up
-# but drops packets is invisible to both the network lock and a restart, and
-# that is exactly the failure that caused this work (9% loss on the entry IP,
-# 60% inside the tunnel, upload down to 0.03 MB/s).
+# watch the daemon. Watching the daemon is now ALL it does.
+#
+# It used to also run a degradation probe that recovered with `kill -USR2`.
+# REMOVED (#611, root-caused in #627). Two reasons, either one sufficient:
+#
+# 1. SIGUSR2 runs Bluetit's own internal reconnect, which rebuilds tun0 from the
+#    CACHED PROFILE without re-logging in to AirVPN. Once the peer is gone
+#    server-side that path retries the same dead endpoint forever - measured
+#    2026-08-02, four reconnect cycles over a network path verified clean, zero
+#    handshakes, five minutes after the fault had been removed. It is not a
+#    weak recovery, it is one that structurally cannot recover a lost handshake.
+#    Only a fresh `goldcrest --disconnect` + `--air-connect` re-authenticates,
+#    and that recovered the same tunnel in under one second.
+# 2. With the vpn-picker agent (#608) in the pod this was a SECOND watcher on
+#    the same signal with the same 3-strike/5% bar, so both trip inside the same
+#    ~3 minutes and the USR2 can land in the middle of the agent's
+#    disconnect/connect pair.
+#
+# Degradation response now belongs to the agent (#627 fix 4), with the
+# traffic-based kubelet liveness probe (#629) as the backstop under it.
 set -eu
 
-PROBE_TARGET=${PROBE_TARGET:-10.128.0.1}
-PROBE_INTERVAL=${PROBE_INTERVAL:-60}
-PROBE_COUNT=${PROBE_COUNT:-20}
-PROBE_LOSS_THRESHOLD=${PROBE_LOSS_THRESHOLD:-5}
-PROBE_STRIKES=${PROBE_STRIKES:-3}
-PROBE_COOLDOWN=${PROBE_COOLDOWN:-900}
+# Only how often the kill -0 check below runs. The probe knobs that used to sit
+# here (PROBE_TARGET/COUNT/LOSS_THRESHOLD/STRIKES/COOLDOWN) are gone with the
+# watcher - setting them now does nothing.
+SUPERVISE_INTERVAL=${SUPERVISE_INTERVAL:-60}
 
 log() { echo "airvpn-bluetit: $*"; }
 
@@ -90,42 +104,16 @@ done
 BLUETIT_PID=$(cat /etc/airvpn/bluetit.lock)
 log "bluetit running pid=${BLUETIT_PID}"
 
-# ponytail: monotonic clock via /proc/uptime instead of pulling in date maths.
-now_secs() { cut -d. -f1 /proc/uptime; }
-
-strikes=0
-last_reconnect=0
-
-# Known bound, not a surprise: kill -0 is only re-checked at the top of each
-# iteration, and each iteration starts with `sleep "$PROBE_INTERVAL"` before
-# the next check runs - so a Bluetit death right after a check is noticed up
-# to PROBE_INTERVAL (default 60s) later, not immediately.
+# `kill -0` sends no signal - it only asks whether the process is still there.
+# It is the one `kill` this script is allowed to make, and the reason the whole
+# file can be grepped for `USR2` as a regression check.
+#
+# Known bound, not a surprise: the check only runs at the top of each iteration,
+# and each iteration starts with `sleep "$SUPERVISE_INTERVAL"` before the next
+# one - so a Bluetit death right after a check is noticed up to
+# SUPERVISE_INTERVAL (default 60s) later, not immediately.
 while kill -0 "$BLUETIT_PID" 2>/dev/null; do
-  sleep "$PROBE_INTERVAL"
-
-  loss=$(ping -c "$PROBE_COUNT" -i 0.2 -W 2 "$PROBE_TARGET" 2>/dev/null \
-         | sed -n 's/.*[^0-9]\([0-9][0-9]*\)% packet loss.*/\1/p' | tail -1)
-  [ -n "${loss:-}" ] || loss=100
-
-  if [ "$loss" -gt "$PROBE_LOSS_THRESHOLD" ]; then
-    strikes=$((strikes + 1))
-    log "probe loss=${loss}% strike=${strikes}/${PROBE_STRIKES}"
-  else
-    strikes=0
-  fi
-
-  if [ "$strikes" -ge "$PROBE_STRIKES" ]; then
-    now=$(now_secs)
-    if [ $((now - last_reconnect)) -ge "$PROBE_COOLDOWN" ]; then
-      # This exact string is what the Loki alert matches - keep them in step.
-      log "reconnect triggered, loss=${loss}%"
-      kill -USR2 "$BLUETIT_PID"
-      last_reconnect=$now
-    else
-      log "reconnect suppressed by cooldown, loss=${loss}%"
-    fi
-    strikes=0
-  fi
+  sleep "$SUPERVISE_INTERVAL"
 done
 
 log "bluetit exited - failing so the container restarts"
