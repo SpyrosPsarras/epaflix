@@ -11,9 +11,14 @@ Infrastructure-as-code and documentation for a K3s Kubernetes cluster + Docker S
 - Log significant commands and outputs to `.history/` for future reference.
 - Repo path is `/home/spy/Documents/Epaflix/k3s-swarm-proxmox` — not `k3s-proxmox`.
 - **Open a GitHub issue for every follow-up.** Any time work surfaces a step that has to happen later — soak-window flip, deferred cleanup, scope-cut spinoff, future migration, "out of scope of this PR" item — open a `gh issue` on `SpyrosPsarras/epaflix` for it before closing the thread. Don't park follow-ups in chat history, PR descriptions only, or local memory; the issue list is the durable shared queue. Use the existing enhancement-issue shape (`## Finding` / `## Current state` / `## Desired outcome` / `## Notes`) and cross-link related issues.
-- **Execute PR test plans.** If a PR description contains a test plan / checklist (typically under `## Test plan` or `## Verification`), every unchecked box must be run, and the outcome recorded by editing the PR description itself (tick boxes, append result inline) — NEVER add a new PR comment. Applies to both open PRs (run before merge) and merged PRs where boxes were left unticked (run retroactively against live state). If a step is no longer applicable (e.g. soak window already elapsed, environment changed), strike it through and note why in the same description.
-- **Check open issues before destroying a named snapshot.** Disk-reclaim work frees space by destroying ZFS snapshots, but a *named* snapshot is often some other open issue's stated rollback. Before `zfs destroy`, grep open issues for the snapshot name and confirm the referencing issue's own gates (soak window, migration, teardown) are already met - or get sign-off. Recipe in `.github/instructions/truenas.instructions.md`. (#515: #444 destroyed `pool1/dataset01@pre-unify-issue195` while open teardown #247 still named it as its rollback - it was safe, but by luck, not by check.)
+- **Execute PR test plans.** If a PR description contains a test plan / checklist (typically under `## Test plan` or `## Verification`), every unchecked box must be run, and the outcome recorded by editing the PR description itself (tick boxes, append result inline) — NEVER add a new PR comment. Applies to both open PRs (run before merge) and merged PRs where boxes were left unticked (run retroactively against live state). If a step is no longer applicable (e.g. soak window already elapsed, environment changed), strike it through and note why in the same description. Post-merge boxes (soak windows, next-reboot checks) must not stay unchecked forever: at merge time either run them or tick them with "tracked in #NNN" and open that issue — an unchecked box with no issue is a lost follow-up (24 merged PRs accumulated exactly this).
 - **Encrypted Secret files use `.enc.yaml` suffix.** All Secrets that ArgoCD must reconcile live as `*.enc.yaml` next to their kustomization, encrypted with SOPS+age (single cluster recipient). Pre-commit hook (`.github/hooks/check-sops-encrypted.sh`) refuses any plaintext `kind: Secret` YAML. New clones must run `./.github/hooks/install-hooks.sh` once. Encrypt/rotate recipes: `.github/instructions/sops.instructions.md`.
+- **Merge policy: merge-commit + mandatory rebase (semi-linear).** Every commit on main arrives via a branch+PR as a `Merge pull request #N` marker. Before merging: rebase the branch onto `origin/main` and `push --force-with-lease` (the required `validate` check + strict up-to-date block stale branches), wait for `validate`, then `gh pr merge <n> --merge`.
+- **ArgoCD adoption order: push aligned git BEFORE creating an Application.** Otherwise automated sync reverts live to pre-adoption main.
+- **A live-only fix is not a fix.** Any config value fixed live on a PVC or an app's own DB must be codified the same day — SOPS-seed Secret + non-clobber initContainer (the #137/#138 pattern), or at minimum documented as required values in the app's directory. Otherwise the next rebuild silently reverts it (#465, #299, #518, #538).
+- **Close soak/flip issues only with the live value pasted.** Never close a "flip prune/selfHeal after soak" (or any config-flip) issue on "soak elapsed" — paste the literal current value (`grep` the manifest AND `kubectl get application ... -o jsonpath`). #50 was closed as done while `app-servarr.yaml` still said `prune: false` (#551). Same discipline for runbooks: verify against source code or live state before writing "X handles Y" (#614).
+- **Never extract a secret with a pattern that can echo the value.** No `grep 'key:'` against `secrets.yml` or decrypted SOPS output — the matched line lands in the retained transcript (#602 forced a token rotation). Extract the single value into a shell variable with `yq '.key'` and never print it.
+- **Before destroying a snapshot/PVC/dataset, grep open issues for its name.** Confirm any referencing issue's stated gates are met first — #515 destroyed a rollback target that an open issue still named; root-cause anomalies (e.g. a path-match gap) before bulk deletes (#609).
 
 ## Cluster Inventory
 
@@ -40,6 +45,8 @@ Infrastructure-as-code and documentation for a K3s Kubernetes cluster + Docker S
 | Manager | ds-master   | 1071 | 192.168.10.71 |
 | Worker  | ds-worker-1 | 1072 | 192.168.10.72 |
 | Worker  | ds-worker-2 | 1073 | 192.168.10.73 |
+
+**Status: the Swarm has been down since ~2026-06** — VMs stopped, `registry`/`swarm-api`/`traefik` services stuck Pending (#583). Treat all swarm docs as dormant until that issue resolves; do not assume a live second cluster.
 
 ### Key IPs
 | Service              | IP             |
@@ -83,11 +90,15 @@ TrueNAS: `ssh truenas_admin@192.168.10.200`.
 ```
 0-truenas/          # TrueNAS iSCSI + NFS setup
 1-proxmox/          # Proxmox host config, VM creation, user VMs
-2-k3s/              # K3s cluster — numbered subdirs (01-10) in deploy order
-3-docker-swarm/     # Docker Swarm cluster + stack definitions
-.github/instructions/  # Domain-specific AI instruction files + secrets.yml
-.history/           # Command logs - local only; 7 named files tracked (#591)
+2-k3s/              # K3s cluster — numbered subdirs (01-15) in deploy order + maintenance/
+3-docker-swarm/     # Docker Swarm cluster + stacks (dormant, see #583)
+docs/               # Design docs — docs/superpowers/{plans,specs} hold spec-driven feature designs
+artifacts/          # Per-issue triage / feature working notes (untracked limbo — #662)
+backups/            # Local backups (git-ignored)
+images/             # Documentation images
 raid-migration/     # Proxmox RAID migration guides
+.github/instructions/  # Domain-specific AI instruction files + secrets.yml (git-ignored)
+.history/           # Command logs (git-ignored content, tracked .md/.sh)
 ```
 
 ## Conventions
@@ -98,54 +109,19 @@ raid-migration/     # Proxmox RAID migration guides
 - Stack compose files: `3-docker-swarm/stacks/<name>/docker-compose.yml`
 - Placeholders for secrets: `<POSTGRES_PASSWORD>`, `<AUTHENTIK_DB_PASSWORD>`, `<CLOUDFLARE_API_TOKEN>`, `<SMTP_PASSWORD>`, `<TRUENAS_PASSWORD>`
 - VM CPU type: standardize on `cpu: host` — see proxmox.instructions.md (#216)
+- PR/commit titles: plain conventional-commit style, NO `(#issue)` embedded in the title — GitHub appends `(#PR)` at merge and produces confusing `(#X) (#Y)` doubles in git log. Put `Closes #NNN` in the PR body instead.
 
 ## Detailed Instructions
 
 Domain-specific guidance lives in `.github/instructions/`:
 - `proxmox.instructions.md` — VM management, iSCSI, cloud-init, console access
-- `k3s.instructions.md` — k3sup commands, etcd config, add-on install order, netplan
+- `k3s.instructions.md` — k3sup commands, etcd/config.yaml invariants, netplan, per-subsystem map
 - `docker-swarm.instructions.md` — VM provisioning, swarm ops, stack patterns
 - `truenas.instructions.md` — SSH access, midclt commands, NFS/iSCSI management
 - `pihole.instructions.md` — DNS architecture, record management, Unbound config
 - `general.instructions.md` — Security rules, history logging format
+- `babysitter.instructions.md` — methodology, recommended processes, CI/CD setup
 
 ## Babysitter
 
-Babysitter orchestrates complex multi-step workflows; project profile lives at `.a5c/project-profile.json` (git-ignored, version 1, semi-autonomous / low breakpoint tolerance — break only on destructive / deploy / architecture / secrets-rotation steps).
-
-### Commands
-
-- `/babysitter:call` — orchestrate a run
-- `/babysitter:plan` — plan only, no execution
-- `/babysitter:yolo` — non-interactive run (no breakpoints)
-- `/babysitter:resume` — resume an interrupted run
-- `/babysitter:project-install` — re-run project onboarding
-- Runs live under `.a5c/runs/` (git-ignored).
-
-### Recommended Methodology
-
-Evolutionary — mature IaC repo with no unit tests, so favor small reversible increments (adopt → soak → selfHeal-flip). Complemented by self-assessment + spec-driven processes for change gating.
-
-### Recommended Processes
-
-| Process path | When to use |
-|--------------|-------------|
-| `methodologies/gsd/map-codebase` | Onboard to the numbered `2-k3s` deploy-order + app-of-apps layout |
-| `methodologies/gsd/plan-phase` + `execute-phase` + `verify-work` | Gated change workflow — verify = ArgoCD Synced/Healthy, zero live drift (compensates for no unit tests) |
-| `methodologies/gsd/iterative-convergence` + `audit-milestone` | Model adopt → soak → selfHeal-flip pairs and periodic drift audits |
-| `specializations/devops-sre-platform/iac-implementation` | Author/change Kustomize + Helm + ArgoCD manifests with GitOps guardrails |
-| `specializations/devops-sre-platform/secrets-management` | Drives issue #29; preserve SOPS+age `*.enc.yaml` + pre-commit guard |
-| `specializations/devops-sre-platform/incident-response` | Runbooks for recurring firefighting (Postgres sequence drift, servarr import races, qbittorrent VPN flap) |
-| `specializations/devops-sre-platform/security-scanning` + `iac-testing` | Gate image-updater promotions; `kustomize build` / `helm template` validation |
-
-### Project Guardrails for Babysitter
-
-- Respect the **merge-commit + mandatory-rebase (semi-linear) + PR policy** (see Critical Rules / Epaflix merge policy). Every commit on main arrives via a branch+PR as a `Merge pull request #N` marker. Before merging: rebase the branch onto `origin/main` and `push --force-with-lease` (the required `validate` check + strict up-to-date block stale branches). Merge with `gh pr merge <n> --merge`.
-- **Open a `gh issue` on `SpyrosPsarras/epaflix` for every follow-up** before closing the thread (see Critical Rules).
-- **Never commit secrets** or plaintext `*.enc.yaml` — pre-commit hook refuses plaintext `kind: Secret` (see Critical Rules).
-- **ArgoCD adoption order**: push aligned git BEFORE creating an Application, otherwise automated sync reverts live to pre-adoption main.
-
-### CI/CD
-
-- Babysitter CI integration is **not configured** — no `ANTHROPIC_API_KEY` is available.
-- To enable later: add an `ANTHROPIC_API_KEY` (or wire `CLAUDE_CODE_OAUTH_TOKEN` from a Claude subscription) and re-run `/babysitter:project-install`, or add a fork-guarded workflow that does NOT touch the existing secret-free `validate` gate.
+Babysitter orchestrates complex multi-step workflows; project profile lives at `.a5c/project-profile.json` and runs under `.a5c/runs/` (both git-ignored; profile is version 1, semi-autonomous / low breakpoint tolerance — break only on destructive / deploy / architecture / secrets-rotation steps). Guardrails are in `## Critical Rules` above; methodology and process selection are in `.github/instructions/babysitter.instructions.md`.
