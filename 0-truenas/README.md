@@ -44,10 +44,16 @@ unified `/media` mount and the soak elapsed (issue #247, PR #514). Export id
 32 is the only export for `pool1/dataset01`.
 
 The rest of the NFS targets are proxmox targets and should not be used by the k3s.
-- /mnt/apps/code-server
-- /mnt/pool1/dataset01/ISOs
-- /mnt/apps/k3s-containers
-- /mnt/pool1/k3s-containers-backup (deprecated)
+Every one of them is host-restricted since #680 - none is world-exported any more.
+The authoritative allow-list table (per share: allowed hosts, squash uid, real
+consumer) lives in `.github/instructions/truenas.instructions.md` under
+"NFS export allow-lists". Update it whenever an export changes.
+
+- /mnt/pool1/dataset01/VMs (id 25) — Proxmox `.10 .11`
+- /mnt/pool1/dataset01/ISOs (id 26) — Proxmox `.10 .11`, storage currently disabled
+- /mnt/apps/code-server (id 27) — VM 1025 `vscode-tunnel` (`.25`) only
+- /mnt/apps/k3s-containers (id 31) — `k3s-master-51` fstab mount only
+- /mnt/pool1/k3s-containers-backup (id 29) — deprecated, no consumer, squashed to `nobody` (#699)
 
 ## Network
 
