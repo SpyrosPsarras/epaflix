@@ -94,3 +94,26 @@ When asking for help or working with LLMs:
 - Reference specific history log files for context
 - LLMs can read these files to understand what has been done
 - Include the log file path in your questions: "Check `.history/2026-02-14-setup.log` for context"
+
+## Triage Scratch Space (`artifacts/`)
+
+`artifacts/` is a scratch working space for per-issue triage notes and before/after
+state captures written while investigating a GitHub issue: `triage-issue-<N>.md`,
+`issue-<N>-<topic>.{txt,json,md}`, and topic subdirs (e.g. `vpn-picker/`) for
+multi-file feature investigations. It is git-ignored (#662) - nothing under it is
+committed, not even selectively.
+
+### Why not tracked
+
+- The durable record is the GitHub issue/PR the notes feed, not the scratch file
+  (see "Open a GitHub issue for every follow-up" above) - once the issue closes,
+  the file has no further job.
+- Raw API/baseline dumps captured here can carry exactly what this repo bans from
+  committed git: a Sonarr baseline snapshot in this directory already contained a
+  full show title and overview text. Ignoring the whole directory avoids having to
+  re-audit every new file for secrets or media names before it could be committed.
+- Same shape as `.history/` (local-only, safe to include real IPs/hostnames/output),
+  but with zero tracked exceptions - if a note earns permanent status, promote its
+  content into `docs/` or a GitHub issue/PR comment instead of tracking the raw file.
+
+Delete freely once its issue/PR is closed - nothing here is required for a fresh clone.
