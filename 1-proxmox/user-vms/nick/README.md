@@ -73,13 +73,46 @@ from this directory and fill in real values sourced from
   session per device key - sharing a key between the cluster and Nick's box
   would knock both offline in turn. Never change this to `Default`.
 
+The `airvpn` image digest is **not** per-box and must match
+`2-k3s/08.servarr/kustomization.yaml`. ArgoCD bumps the cluster automatically;
+this box has no reconciler, so a cluster bump leaves it behind until someone
+copies the digest here and reapplies by hand. That drift is exactly what #669
+was: three days on the first-ever build, missing both the #524 and #652
+start-time cleanups the cluster already had.
+
 Everything else (server whitelist/blacklist, `networklockpersist`,
 `allowprivatenetwork`, `allowping`, `ignorednspush`, `tunpersist`, `airipv6`)
 is copied deliberately and should be changed on both sides together, or not
 at all - see the WHY comments in each file for why each directive exists.
-The compose file's `PROBE_TARGET` (`10.128.0.1`, the in-tunnel gateway) and
-`QBT_TORRENTING_PORT` (`49135`, Nick's own AirVPN-forwarded port - **not**
-the cluster's `39998`) are legitimately per-box and are not expected to match.
+The compose file's `QBT_TORRENTING_PORT` (`49135`, Nick's own AirVPN-forwarded
+port - **not** the cluster's `39998`) is legitimately per-box and is not
+expected to match.
+
+`PROBE_TARGET` used to be listed here as a second per-box value. It is gone:
+the image's own ping watcher that read it was deleted in #611, so the variable
+was set and read by nothing. The in-tunnel gateway `10.128.0.1` still matters,
+just in the healthcheck instead.
+
+### Tunnel health
+
+The `airvpn` healthcheck greps `goldcrest --bluetit-status` **and** pings
+`10.128.0.1`, the same pair the cluster's kubelet probes use since #629. The
+status string on its own is proven to lie - it reports `Connected to AirVPN
+server <name>` for a WireGuard interface that never handshook, and this box
+showed `healthy` in `docker ps` right through a total outage on 2026-08-03 (0
+bytes moved, 100% ICMP loss, no AirVPN session for key `nick`).
+
+**Nothing acts on the unhealthy state yet.** Docker only applies
+`restart: unless-stopped` when a container *exits*; a failing healthcheck just
+relabels it. Recovery on this box is still a manual
+`sudo -n docker compose up -d --force-recreate airvpn` (a fresh container
+re-runs the boot connect, which does re-authenticate with AirVPN, unlike
+Bluetit's internal reconnect). Picking an automatic responder is #669.
+
+The image's entrypoint does still exit on its own when `bluetit` **dies**
+(`kill -0` supervisor, checked every `SUPERVISE_INTERVAL`, default 60s), and
+`restart: unless-stopped` catches that. The uncovered case is the one that
+actually happens: daemon alive, tunnel dead.
 
 ## Known gaps
 

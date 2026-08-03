@@ -16,7 +16,16 @@ services:
   # Holds the network namespace. qbittorrent-app joins it, so the tunnel and
   # the iptables lock apply to qBittorrent without it having any privileges.
   airvpn:
-    image: ghcr.io/spyrospsarras/airvpn-bluetit@sha256:c5597e020c03316e7d1cf97f84a0e86d85a602aa61aa904fb138a96517f3fcda
+    # Same digest the cluster pins in 2-k3s/08.servarr/kustomization.yaml. This
+    # box sat on the FIRST build (c5597e02) for three days, so it was missing
+    # both start-time cleanups that the cluster had already been given:
+    #   - #524: stale /run/dbus/pid, which blocks dbus-daemon under set -eu.
+    #   - #652: a stale WireGuard tun<N> from the previous run, which makes
+    #     Bluetit refuse to arm the lock while STAYING ALIVE with no tunnel.
+    #     That one took the cluster's download path down four times in one day.
+    # It also drops the entrypoint's kill -USR2 watcher (#611) - see the
+    # healthcheck below, which is what replaces it here.
+    image: ghcr.io/spyrospsarras/airvpn-bluetit@sha256:38021e427aca394f08cc966de63274cc9eafb77e6d4a6039913102789487259e
     container_name: airvpn
     cap_add:
       # SYS_MODULE is REQUIRED, not defensive. Bluetit loads iptable_* and
@@ -33,17 +42,51 @@ services:
     environment:
       AIRVPN_USERNAME: ${AIRVPN_USERNAME:?set in .env}
       AIRVPN_PASSWORD: ${AIRVPN_PASSWORD:?set in .env}
-      # Nick's forwarded port, not the cluster's 39998.
-      PROBE_TARGET: 10.128.0.1
+      # No PROBE_* knobs here on purpose. This used to set PROBE_TARGET, which
+      # fed the entrypoint's own ping watcher. #611 deleted that watcher: it
+      # recovered with kill -USR2, and SIGUSR2 runs Bluetit's INTERNAL reconnect,
+      # which rebuilds tun0 from the cached profile without re-logging in to
+      # AirVPN - so it retries the same dead peer forever. Measured 2026-08-02:
+      # four reconnect cycles over a network path already proven clean, zero
+      # handshakes. PROBE_TARGET stayed here afterwards, read by nothing.
     volumes:
       - './bluetit.conf:/config/bluetit.conf:ro'
       # REQUIRED alongside SYS_MODULE - Bluetit checks modules.builtin.
       - '/lib/modules:/lib/modules:ro'
     healthcheck:
-      # The connected output contains "Connected to AirVPN server <name>". It
-      # never says "Bluetit is connected"; the disconnected form IS "Bluetit is
-      # not connected", so an unanchored grep would false-pass.
-      test: ["CMD-SHELL", "goldcrest --bluetit-status | grep -q 'Connected to AirVPN server'"]
+      # Keep the grep: a dead daemon must still fail, and the connected output
+      # contains "Connected to AirVPN server <name>" - it never says "Bluetit is
+      # connected", while the disconnected form IS "Bluetit is not connected",
+      # so an unanchored grep would false-pass.
+      #
+      # But the string ALONE LIES, so it can no longer be the whole check.
+      # goldcrest prints "Connected to AirVPN server <name>" for a WireGuard
+      # interface that never completed a handshake, because Bluetit's internal
+      # "handshake failed to resume -> Reconnecting" loop rebuilds tun0 from the
+      # cached profile and the string never changes (#627). The cluster pod sat
+      # 13 minutes green on 0 bytes transferred, 100% ICMP loss and no AirVPN
+      # session at all. THIS box did the same on 2026-08-03: docker ps said
+      # healthy through a total outage.
+      #
+      # So AND it with real traffic to the in-tunnel gateway, the same command
+      # the cluster's kubelet probes run since #629. 10.128.0.1 answers only
+      # because bluetit.conf sets `allowping yes`.
+      #
+      # Timings deliberately unchanged. interval 10s x retries 18 = 180s of
+      # continuous failure before unhealthy, the same window as the cluster's
+      # liveness (periodSeconds 60 x failureThreshold 3), so this is no more
+      # flap-prone than the cluster. The 10s interval also has a second job
+      # Docker gives no separate startupProbe for: it is the boot gate for
+      # bind-interface's `condition: service_healthy` below, which is why it
+      # stays faster than the cluster's 60s. `ping -c 2 -W 2` costs ~1s on
+      # success and at most ~4s on total loss, well inside timeout: 15s.
+      #
+      # KNOWN GAP, not an oversight: Docker does NOT restart a container for
+      # failing its healthcheck - `restart: unless-stopped` acts on exit only.
+      # This check now tells the truth and nothing acts on it, so `docker ps`
+      # reads unhealthy instead of falsely healthy. Choosing the responder is
+      # still open in #669.
+      test: ["CMD-SHELL", "goldcrest --bluetit-status | grep -q 'Connected to AirVPN server' && ping -c 2 -W 2 10.128.0.1 >/dev/null 2>&1"]
       interval: 10s
       timeout: 15s
       retries: 18
