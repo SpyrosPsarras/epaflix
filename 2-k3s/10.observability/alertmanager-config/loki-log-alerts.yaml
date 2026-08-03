@@ -215,16 +215,34 @@ data:
       #       servarr/sonarr            359   <-- NOT Traefik. This is #634.
       #       servarr/sonarr2            10
       #
-      #     READ THIS BEFORE TRIAGING THE FIRST FIRING. The sonarr hits are
-      #     #634: Sonarr logs its Postgres password in plaintext at Info level on
-      #     every start. That is a TRUE positive, not noise - so the first time
-      #     this alert fires it will most likely be a sonarr/sonarr2 restart, not
-      #     a #561 regression. Check `container` first: traefik means a caller
-      #     went back to a public hostname; sonarr/sonarr2 means #634 is still
-      #     open. Do not silence or narrow this rule to make the sonarr firing go
-      #     away - fix #634 instead. Narrowing it to traefik-system was
-      #     considered and rejected for exactly this reason: it would have hidden
-      #     359 real credential lines a day.
+      #     STALE AS OF #755 - READ BEFORE TRIAGING THE FIRST FIRING. The
+      #     paragraph above describes this rule's behavior at merge time (#748),
+      #     BEFORE #749/#750/#753 shipped promtail-side redaction. Those PRs
+      #     replace the credential VALUE with `<REDACTED>` before the line ever
+      #     reaches Loki, so the regex below (which requires the value itself,
+      #     `[A-Za-z0-9._~+/-]{8,}`, right after the key) structurally cannot
+      #     match `password=<REDACTED>` anymore. Verified live 2026-08-03:
+      #     restarting sonarr reproduced the #634 plaintext password in the raw
+      #     pod log and incremented promtail_custom_credential_lines_redacted_total,
+      #     but CredentialInLogs stayed `inactive` the whole time - it no longer
+      #     fires for the sonarr/radarr/prowlarr Postgres-connection-string shape.
+      #     That shape is now caught by the counter-based CredentialRedactedFromLogs
+      #     in custom-alerts.yaml instead (group credential-redaction) - read that
+      #     rule's header too, it explains the pairing.
+      #
+      #     This rule's remaining job is narrower than it was at merge: it is now
+      #     a catch-all for credential SHAPES the promtail redaction regex does
+      #     NOT recognise (a key name it doesn't match, or a value shorter/odder
+      #     than its charset) - i.e. a gap in the redaction regex - plus any
+      #     stream promtail doesn't scrape. If this fires with container=traefik,
+      #     it still means a caller went back to a public hostname (#561-class
+      #     regression) or a new ?apikey= integration. If it fires with
+      #     container=sonarr/sonarr2/radarr/prowlarr, do NOT assume "#634 again,
+      #     expected" as the pre-#755 guidance said - that path is now blocked by
+      #     redaction, so a firing there means the redaction regex has a gap for
+      #     whatever key/value shape appeared. Compare against promtail's regex
+      #     in 2-k3s/10.observability/promtail-values.yaml and widen it, don't
+      #     just silence this rule.
       - name: credential-leak
         rules:
           - alert: CredentialInLogs
@@ -242,10 +260,14 @@ data:
                 {{ $value }} log line(s) in the last 5m contain what looks like a
                 credential in a URL or key=value form, from
                 {{ $labels.namespace }}/{{ $labels.container }}. Steady state is
-                zero (#702, #561), so this is a regression: a caller was likely
-                repointed at a public hostname instead of internal Service DNS,
-                or a new integration was configured with ?apikey= in the URL.
-                Find the caller, move it to internal DNS, then treat the exposed
+                zero (#702, #561), so this is a regression - BUT since #749/#750
+                promtail redacts credential-shaped values before Loki, this can
+                no longer be the sonarr/radarr/prowlarr Postgres-password shape
+                (#634, see the group header, #755); it means either a caller went
+                back to a public hostname / a new ?apikey= integration (check
+                container=traefik), or the redaction regex has a gap for whatever
+                key/value shape this is (any other container). Find the caller or
+                the regex gap, fix it, then treat the exposed
                 credential as compromised and rotate it (#730 is the precedent).
                 Do NOT grep Loki for the literal value - that writes it into a
                 query and widens the exposure. Locate by route/container:
