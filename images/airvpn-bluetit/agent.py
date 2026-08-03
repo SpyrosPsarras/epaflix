@@ -504,7 +504,6 @@ class Agent:
         self.current_server = None
         self.current_loss_pct = None
         self.consecutive_bad = 0
-        self.ranking_age = None
         self.tun_device_ok = True
         self.switches = {"degradation": 0, "boot_upgrade": 0, "fallback": 0}
         self.cached = []
@@ -523,23 +522,47 @@ class Agent:
             servers, age = parse_ranking(payload, self.wallclock())
         except FileNotFoundError:
             log.warning("no ranking at %s", self.cfg.ranking_path)
-            with self.lock:
-                self.ranking_age = None
             return []
         except Exception as exc:
             log.warning("ranking at %s is unusable: %s", self.cfg.ranking_path, exc)
-            with self.lock:
-                self.ranking_age = None
             return []
 
-        with self.lock:
-            self.ranking_age = age
         if not servers:
             log.warning("ranking is %.0fs old, past its TTL - treating it as absent", age)
             return []
         self.cached = servers
         self._write_cache(payload)
         return servers
+
+    def ranking_age_now(self):
+        """Age of the published ranking AS OF THIS CALL, read from the file.
+
+        Deliberately not a field the decision path keeps up to date. It used to
+        be one (`self.ranking_age`, written only inside `read_ranking()`), and
+        `read_ranking()` has exactly two callers: `boot_check()` and
+        `candidates()` - boot, and the moment a switch is being decided. The
+        60 s `watch_once()` loop never calls it, so on a healthy pod that never
+        trips, the age was measured once and never again: 18 samples 60 s apart
+        all read `266`, and the same pod still read `266` three hours later
+        (#686). The one metric #670 named to answer "is the scorer publishing
+        reliably" could not answer it.
+
+        Read at scrape time it cannot go stale by construction - there is no
+        cached age left to forget to refresh. Cost is one read of a small local
+        file per scrape.
+
+        Returns None when the ranking is missing, truncated or otherwise
+        unusable. Honest absent, never a stale number, and never an exception
+        out of the /metrics handler. Silent on purpose: /metrics is scraped every
+        30 s and `read_ranking()` already logs the same condition on the path
+        where it changes a decision.
+        """
+        try:
+            with open(self.cfg.ranking_path, "rb") as fh:
+                payload = fh.read()
+            return parse_ranking(payload, self.wallclock())[1]
+        except Exception:
+            return None
 
     def _write_cache(self, payload):
         path = self.cfg.cache_path
@@ -879,9 +902,14 @@ def render_metrics(agent):
         server = agent.current_server
         loss = agent.current_loss_pct
         bad = agent.consecutive_bad
-        age = agent.ranking_age
         device_ok = agent.tun_device_ok
         switches = dict(agent.switches)
+    # Read from disk HERE, outside the lock, not taken off a field on the agent.
+    # A cached age is only ever as fresh as its last writer, and the only writer
+    # was the switch-decision path - which a healthy pod never enters, so the
+    # number froze at its boot value for the pod's lifetime (#686). Do NOT
+    # "simplify" this back to an attribute lookup.
+    age = agent.ranking_age_now()
     lines = [
         "# HELP vpn_agent_dry_run Whether the agent is logging switches instead of applying them.",
         "# TYPE vpn_agent_dry_run gauge",
@@ -914,7 +942,7 @@ def render_metrics(agent):
         ]
     if age is not None:
         lines += [
-            "# HELP vpn_agent_ranking_age_seconds Age of the published ranking the agent read.",
+            "# HELP vpn_agent_ranking_age_seconds Age of the published ranking, measured at scrape time. Absent when there is no usable ranking file.",
             "# TYPE vpn_agent_ranking_age_seconds gauge",
             "vpn_agent_ranking_age_seconds %.0f" % age,
         ]

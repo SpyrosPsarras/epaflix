@@ -209,6 +209,55 @@ def test_stale_ranking_is_absent(tmp):
     print("ok  stale ranking: absent past TTL, good at the TTL, never cached")
 
 
+def metric(agent, name):
+    """One metric value out of a real /metrics render, or None when absent."""
+    for line in ag.render_metrics(agent).decode().splitlines():
+        if line.startswith(name + " "):
+            return float(line.split()[1])
+    return None
+
+
+@with_tmp
+def test_ranking_age_is_measured_at_scrape_time(tmp):
+    """#686: the age must not be pinned to whatever some earlier read left.
+
+    `read_ranking()` runs at boot and when a switch is being decided. A healthy
+    pod does neither again, so an age cached by that path never moves - the live
+    pod reported 266 s for its entire life while the real ranking aged past
+    11 minutes. Read the ranking once, then move ONLY the wall clock: no probe,
+    no trip, no switch, which is exactly the steady state that froze it. The
+    number has to follow.
+    """
+    agent, _, clock = build(tmp)
+
+    assert len(agent.read_ranking()) == 4      # the one read the old code had
+    assert metric(agent, "vpn_agent_ranking_age_seconds") == 60.0, "build() starts it 60 s old"
+
+    clock.sleep(600)
+    aged = metric(agent, "vpn_agent_ranking_age_seconds")
+    assert aged == 660.0, (
+        "the ranking aged 600 s and the metric says %s - it is reporting a value "
+        "written by some earlier code path instead of measuring (#686)" % aged)
+
+    # Past the 2100 s TTL the ranking is absent for DECISIONS, but the metric
+    # exists to say how far gone it is, so it must keep counting.
+    clock.sleep(2000)
+    assert metric(agent, "vpn_agent_ranking_age_seconds") == 2660.0
+
+    # A truncated or missing file is an honest absent - never a stale number,
+    # and never an exception out of the /metrics handler.
+    with open(agent.cfg.ranking_path, "w") as fh:
+        fh.write('{"schema": 1, "generated_a')
+    assert metric(agent, "vpn_agent_ranking_age_seconds") is None, \
+        "a truncated ranking must not report an age"
+    os.unlink(agent.cfg.ranking_path)
+    assert metric(agent, "vpn_agent_ranking_age_seconds") is None, \
+        "a missing ranking must not report an age"
+    # And the rest of the render still works with no ranking at all.
+    assert metric(agent, "vpn_agent_dry_run") == 0.0
+    print("ok  ranking age: measured at scrape time, absent when the file is not usable")
+
+
 @with_tmp
 def test_boot_in_band_stays_put(tmp):
     """Inside the band, do nothing. Ordinary pod restarts must not churn."""
@@ -698,6 +747,7 @@ if __name__ == "__main__":
     test_parse_ping()
     test_goldcrest_is_bounded_by_bytes()
     test_stale_ranking_is_absent()
+    test_ranking_age_is_measured_at_scrape_time()
     test_boot_in_band_stays_put()
     test_boot_out_of_band_upgrades()
     test_boot_without_a_ranking_stays_on_quick()
