@@ -77,7 +77,17 @@ metadata:
   labels:
     app: ntfy
 spec:
-  type: ClusterIP
+  # LAN-only LoadBalancer (kube-vip), pinned to 192.168.10.112 from
+  # range-global. RFC1918, not internet-routable, so ntfy stays off the
+  # Cloudflare-proxied *.epaflix.com wildcard (an IngressRoute would have
+  # published an unauthenticated publish/subscribe endpoint to the internet).
+  # Needed so the Proxmox VE hosts — which are not on the pod network — can
+  # POST vzdump job failures to topic `pve-backups` (#597). In-cluster
+  # consumers are unaffected: ntfy:8091 still resolves for the
+  # Alertmanager -> ntfy leg (topic k8s-alertmanager, #568) and for
+  # NTFY_BASE_URL in odysseus-config.
+  type: LoadBalancer
+  loadBalancerIP: 192.168.10.112
   selector:
     app: ntfy
   ports:
