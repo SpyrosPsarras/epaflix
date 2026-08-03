@@ -72,7 +72,27 @@ config:
             # survives and stays greppable/alertable. Value charset stops at the
             # delimiters that actually terminate these: `;` in a connection
             # string, `&` in a URL query, quotes and whitespace.
-            expression: '(?i)(?:password|passwd|apikey|api_key|api-key|client_secret)=([^;&"''\s]+)'
+            #
+            # It ALSO excludes regex metacharacters ([ ] { } ^ $ * ( ) | \ < >)
+            # and requires 8+ characters. That is not cosmetic - without it the
+            # first version of this matched PATTERN TEXT, not just secrets. Loki
+            # logs the LogQL of every delete request it accepts, so submitting a
+            # purge for `apikey=[A-Za-z0-9]{16,}` (#751) produced a log line
+            # containing that string, promtail matched `[A-Za-z0-9]{16,}` as if it
+            # were a value, and CredentialRedactedFromLogs fired on our own
+            # tooling. Observed live: 6 increments, all container=loki, all from
+            # delete-request and query logs.
+            #
+            # A real credential does not contain regex syntax, so excluding those
+            # characters removes that whole false-positive class while still
+            # catching `Password=SuperS3cret!x` (symbols like ! @ # are still
+            # allowed on purpose - real passwords have them).
+            #
+            # Deliberately NOT excluding container="loki" instead: if somebody
+            # ever queries Loki for a LITERAL credential value, Loki will log it
+            # and that SHOULD match. That is a true positive worth paging on, and
+            # it is exactly what the alert description warns against doing.
+            expression: '(?i)(?:password|passwd|apikey|api_key|api-key|client_secret)=([^;&"''\s\[\]{}^$*()|\\<>]{8,})'
             replace: '<REDACTED>'
         kubernetes_sd_configs:
         - role: pod
