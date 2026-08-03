@@ -1,5 +1,14 @@
 ---
 # Bazarr Auto-Translate - Automatic subtitle translation
+#
+# BAZARR_BASE_URL uses internal Service DNS (#752), not the public
+# bazarr.epaflix.com hostname. This pod runs on worker-61 and hit the public
+# hostname for its hourly wanted-subtitles scan (`/api/movies/wanted`,
+# `/api/episodes/wanted`, `/api/movies?radarrid[]=...`) - the one in-cluster
+# caller #561 missed, because that fix was scoped from the `?apikey=` log
+# sample and this caller authenticates with a header, not a query string.
+# Same pattern as #468/#561: internal DNS for the API call, public hostname
+# only where a UI needs it (this app has no UI, so no external_url field).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -28,7 +37,7 @@ spec:
           image: ghcr.io/zelak312/bazarr_autotranslate:latest
           env:
             - name: BAZARR_BASE_URL
-              value: "https://bazarr.epaflix.com"
+              value: "http://bazarr.servarr.svc.cluster.local:6767"
             - name: BAZARR_API_KEY
               valueFrom:
                 secretKeyRef:
