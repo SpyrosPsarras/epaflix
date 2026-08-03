@@ -77,6 +77,9 @@ spec:
   routes:
     - match: Host(`pegaprox.epaflix.com`)
       kind: Rule
+      middlewares:
+        - name: security-headers
+          namespace: traefik-system
       services:
         - name: pegaprox-ui
           port: 5000
