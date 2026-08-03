@@ -217,4 +217,20 @@ images:
   # (#613: agent container CrashLoopBackOff, stat /agent-entrypoint.sh: no
   # such file or directory).
   - name: ghcr.io/spyrospsarras/airvpn-bluetit
-    digest: sha256:38021e427aca394f08cc966de63274cc9eafb77e6d4a6039913102789487259e
+    digest: sha256:188c27cba6ce903bca596fdabfba34bc5359af223d4860923834e700c8acd960
+  # Our own image too - see images/vpn-picker/. Same rule as the entry above,
+  # and the same reason it is here at all: the Deployment carries a bare
+  # `:latest`, and a moving tag tells you nothing about which build is live
+  # (#599). It is also how Renovate SEES it - the servarr digest rule matches on
+  # this file only, so an image absent from this block cannot be re-rolled.
+  #
+  # A bare `digest:` is correct here, unlike lingarr and newtarr above: the
+  # Deployment really does run `:latest`, which is what Renovate's docker
+  # datasource falls back to for a tagless entry (#530, #587).
+  #
+  # Lower stakes than airvpn-bluetit - the scorer only publishes
+  # /media/.vpn-picker/ranking.json, so a bad pin stops the ranking going stale
+  # rather than dropping the tunnel. The agent already treats a past-TTL ranking
+  # as absent and stays on the server it is on.
+  - name: ghcr.io/spyrospsarras/vpn-picker
+    digest: sha256:68d44a9d768e9738fbdf0634cc1b728a9a71cd94ed27a125c4366ca57daecdba
