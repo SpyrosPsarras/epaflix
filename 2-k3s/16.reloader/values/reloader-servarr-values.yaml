@@ -1,0 +1,19 @@
+# stakater/reloader v1.4.19 (chart 2.2.14) — instance scoped to the servarr
+# namespace only (issue #299). See kustomization.yaml for why this is a
+# separate release per watched namespace rather than one shared instance.
+#
+# `watchGlobally: false` ties pod + ServiceAccount + Role + RoleBinding to
+# this release's own namespace (servarr) — a plain namespaced Role, not a
+# ClusterRole. Reloader here can only read Secrets/ConfigMaps inside servarr.
+reloader:
+  watchGlobally: false
+  ignoreCronJobs: true
+  ignoreJobs: true
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 32Mi
+  limits:
+    cpu: 100m
+    memory: 128Mi
