@@ -1,0 +1,22 @@
+{
+  "repoRoot": "/home/spy/Documents/Epaflix/k3s-swarm-proxmox",
+  "repo": "SpyrosPsarras/epaflix",
+  "odysseusRepo": "https://github.com/pewdiepie-archdaemon/odysseus",
+  "truenasSsh": "ssh truenas_admin@192.168.10.200",
+  "masterSsh": "ssh ubuntu@192.168.10.51",
+  "truenasIp": "192.168.10.200",
+  "traefikLbIp": "192.168.10.101",
+  "gpuName": "NVIDIA GeForce RTX 2070 SUPER",
+  "vram": "8 GB VRAM",
+  "appPort": "7000",
+  "host": "odysseus.epaflix.com",
+  "slug": "odysseus",
+  "authentikBase": "https://auth.epaflix.com",
+  "authentikNs": "app-authentik",
+  "embeddedOutpostPk": "209f71f9-95f8-4264-91c2-4b065bbd6b07",
+  "authFlowPk": "847dc682-757c-4bf8-925f-c8c066a0be4f",
+  "invalidationFlowPk": "436f6b06-d1a1-42db-af49-0eaac2bce88a",
+  "middlewareName": "authentik-forwardauth",
+  "middlewareNs": "traefik-system",
+  "branch": "odysseus-truenas-gpu-deploy"
+}

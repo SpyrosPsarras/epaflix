@@ -1,0 +1,16 @@
+{
+  "repoRoot": "/home/spy/Documents/Epaflix/k3s-swarm-proxmox",
+  "masters": [
+    { "host": "k3s-master-51", "ssh": "ssh ubuntu@192.168.10.51", "internalIp": "10.0.0.51" },
+    { "host": "k3s-master-52", "ssh": "ssh ubuntu@192.168.10.52", "internalIp": "10.0.0.52" },
+    { "host": "k3s-master-53", "ssh": "ssh ubuntu@192.168.10.53", "internalIp": "10.0.0.53" }
+  ],
+  "masterSsh": "ssh ubuntu@192.168.10.51",
+  "ns": "kube-system",
+  "appName": "observability",
+  "k3sInstructions": ".github/instructions/k3s.instructions.md",
+  "issue": "148",
+  "repo": "SpyrosPsarras/epaflix",
+  "branch": "issue-148-k3s-master-config-yaml-standardize",
+  "relatedIssues": ["121", "44"]
+}

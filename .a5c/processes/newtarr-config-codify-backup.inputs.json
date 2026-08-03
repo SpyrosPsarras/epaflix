@@ -1,0 +1,13 @@
+{
+  "repoRoot": "/home/spy/Documents/Epaflix/k3s-swarm-proxmox",
+  "appName": "servarr",
+  "appManifest": "2-k3s/11.argocd/apps/app-servarr.yaml",
+  "appPath": "2-k3s/08.servarr",
+  "ns": "servarr",
+  "deployment": "newtarr",
+  "pvc": "newtarr-config",
+  "masterSsh": "ssh ubuntu@192.168.10.51",
+  "issue": "137",
+  "repo": "SpyrosPsarras/epaflix",
+  "branch": "newtarr-config-codify-backup-137"
+}

@@ -1,0 +1,20 @@
+{
+  "repoRoot": "/home/spy/Documents/Epaflix/k3s-swarm-proxmox",
+  "repo": "SpyrosPsarras/epaflix",
+  "masterSsh": "ssh ubuntu@192.168.10.51",
+  "truenasSsh": "ssh truenas_admin@192.168.10.200",
+  "truenasIp": "192.168.10.200",
+  "ollamaUrl": "http://192.168.10.200:30068/v1",
+  "ghcrImage": "ghcr.io/SpyrosPsarras/odysseus:73673258",
+  "pinnedSha": "73673258",
+  "dataPath": "/mnt/pool1/odysseus/data",
+  "host": "odysseus.epaflix.com",
+  "slug": "odysseus",
+  "authentikBase": "https://auth.epaflix.com",
+  "embeddedOutpostPk": "209f71f9-95f8-4264-91c2-4b065bbd6b07",
+  "middlewareName": "authentik-forwardauth",
+  "middlewareNs": "traefik-system",
+  "ns": "odysseus",
+  "ingressFile": "2-k3s/05.traefik-deployment/ingress/odysseus-proxy.yaml",
+  "branch": "odysseus-k3s-migration"
+}

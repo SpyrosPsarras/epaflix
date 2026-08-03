@@ -1,0 +1,11 @@
+{
+  "repoRoot": "/home/spy/Documents/Epaflix/k3s-swarm-proxmox",
+  "ns": "kube-system",
+  "appName": "observability",
+  "appPath": "2-k3s/10.observability",
+  "valuesFile": "2-k3s/10.observability/prometheus-values.yaml",
+  "k3sInstructions": ".github/instructions/k3s.instructions.md",
+  "issue": "121",
+  "repo": "SpyrosPsarras/epaflix",
+  "branch": "observability-controlplane-metrics-121"
+}

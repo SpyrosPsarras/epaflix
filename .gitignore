@@ -53,23 +53,16 @@ charts/
 # SOPS plaintext drafts — never commit. Always encrypt to *.enc.yaml first.
 *-plaintext.yaml
 *.plaintext.yaml
-# Glob form, not `.a5c/processes/`: same trap as .history above - a
-# directory-level ignore prunes the subtree before negations are evaluated,
-# so a negation can't re-include a file whose parent dir is excluded. The 11
-# already-tracked process definitions below need explicit per-file negations
-# to stay reachable; new scratch files under this directory stay ignored.
-.a5c/processes/*
-!.a5c/processes/argocd-selfmanage-reconcile.inputs.json
-!.a5c/processes/argocd-selfmanage-reconcile.js
-!.a5c/processes/argocd-selfmanage-reconcile.mermaid.md
-!.a5c/processes/filebrowser-prune-flip.inputs.json
-!.a5c/processes/filebrowser-prune-flip.js
-!.a5c/processes/filebrowser-prune-flip.mermaid.md
-!.a5c/processes/renovate-self-update-triage.inputs.json
-!.a5c/processes/renovate-self-update-triage.js
-!.a5c/processes/traefik-prune-flip.inputs.json
-!.a5c/processes/traefik-prune-flip.js
-!.a5c/processes/traefik-prune-flip.mermaid.md
+# #659: the per-file negation block that used to live here (`.a5c/processes/*`
+# + 11 `!` negations) regrew the exact opt-in trap it copied from .history -
+# only the files someone remembered to negate stayed tracked, so 143 of 154
+# real process definitions went untracked and invisible to git (PR #110/#111
+# swept it once, it fully regrew). Unlike .history, these files hold no real
+# IPs/secrets (checked before dropping the ignore), so there is no reason to
+# opt in per file. Track everything under .a5c/processes/ by default, same as
+# the top-of-block comment always intended. Drift is now caught by the
+# pre-commit guard (.github/hooks/check-processes-tracked.sh) instead of by
+# a gitignore negation list nobody updates.
 
 # Superpowers subagent-driven-development scratch (ledger, briefs, review packages).
 # Per-plan workspaces under .superpowers/sdd/<plan>/ — the git history is the record.
