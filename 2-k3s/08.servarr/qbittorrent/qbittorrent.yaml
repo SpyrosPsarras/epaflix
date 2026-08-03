@@ -516,6 +516,19 @@ spec:
 # visible and vpn_agent_tunnel_device_ok for the silent failure where the tunnel
 # comes back as tun1 and qBittorrent opens no listen socket.
 #
+# Read vpn_agent_tunnel_device_ok TOGETHER WITH vpn_agent_switch_in_progress
+# (#690). The device metric is a real /sys/class/net read on every scrape, and
+# WireGuardClient::stop() deletes the device on every disconnect, so a scrape
+# landing inside a switch honestly reports 0. `tunnel_device_ok == 0 unless
+# switch_in_progress` is the condition that means a taken tun0 slot. The window
+# is bounded by VPN_AGENT_RECOVERY_BUDGET_SECONDS (120 s) and capped at 3
+# switches a day.
+#
+# vpn_agent_current_server is re-read from Bluetit once per probe window (60 s),
+# not per scrape: a goldcrest call can take 25 s and the metric render runs in
+# the HTTP handler thread, where that would blow this ServiceMonitor's scrape
+# timeout and take the whole target down (#690).
+#
 # The cluster Prometheus selects all ServiceMonitors (serviceMonitorSelector:
 # {}), so no `release: kube-prometheus-stack` label is needed. Same pattern as
 # 2-k3s/08.servarr/vpn-picker/servicemonitor.yaml.
