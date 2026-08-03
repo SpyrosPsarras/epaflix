@@ -334,7 +334,6 @@ For applications that don't support OIDC, use Authentik's Forward Auth (Proxy Pr
   | `truenas.epaflix.com` | `truenas-forwardauth` | `authentik Admins` | All TrueNAS automation is `ssh` + `midclt`, never the HTTP API via Traefik |
   | `minio-console.epaflix.com` | `minio-console-forwardauth` | `authentik Admins` | Console only — the S3 API on `minio.epaflix.com` is a **separate host** and stays ungated for CNPG/Barman SigV4 |
   | `grafana.epaflix.com` | `grafana-forwardauth` | `Grafana Admins` | Browser-only inbound; Prometheus scrapes `/metrics` via the in-cluster Service |
-  | `filebrowser.epaflix.com` | `filebrowser-forwardauth` | `Grafana Admins` | Browser-only; matches the group its existing OIDC app already binds |
 
   These providers set **`intercept_header_auth: false`** (the servarr ones set it
   `true`). They are browser UIs that carry their own bearer/API-key headers after
@@ -343,7 +342,7 @@ For applications that don't support OIDC, use Authentik's Forward Auth (Proxy Pr
 
   Each host needs a **distinct** provider + application because an Authentik
   application can carry only **one** provider, and `pegaprox`, `grafana-monitor`
-  and `filebrowser` already have applications bound to their **OAuth2** providers
+  already have applications bound to their **OAuth2** providers
   for their own native OIDC login. Those are untouched.
 
   **`argocd.epaflix.com` is deliberately excluded** — the `argocd` CLI talks

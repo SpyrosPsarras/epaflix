@@ -6,7 +6,9 @@ maintainer workstation, which calls the JSON API for its `web_search` tool.
 ## Design
 - ArgoCD-managed (app-of-apps `app-searxng`), kustomize + ksops.
 - `secret_key` injected from SOPS Secret `searxng-secret` via a render
-  initContainer into `/etc/searxng/settings.yml` (filebrowser pattern).
+  initContainer into `/etc/searxng/settings.yml` (the SOPS-seed +
+  render-initContainer pattern; filebrowser was the original example, since
+  decommissioned).
 - `limiter: false`, `public_instance: false` → no Valkey/Redis, stateless,
   single replica. JSON API enabled via `search.formats: [html, json]`.
 - Exposed at `https://searxng.epaflix.com` (Traefik websecure, wildcard
