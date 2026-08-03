@@ -399,6 +399,58 @@ used to sit here is out of date. Verified live 2026-08-02:
 
 Cross-links: #176, #296, #287, #468.
 
+### #561 — the last two callers on public hostnames (fixed 2026-08-03)
+
+#468 covered Cleanuparr only. Two more in-cluster callers were still reaching
+`*arr` APIs over the public hostnames, which is what kept `?apikey=` query
+strings flowing through Traefik and into Loki (#702, #730). Both are now on
+internal Service DNS. Verified live 2026-08-03.
+
+**Seerr's `*arr` integrations** — Seerr has a per-instance `externalUrl`, which
+is the same split Cleanuparr uses: `hostname`/`port` is called, `externalUrl` is
+only rendered in the UI, so deep-links still work.
+
+| instance | called | `externalUrl` - display only |
+|---|---|---|
+| Radarr | `http://radarr:7878` | `https://radarr.epaflix.com` |
+| Sonarr | `http://sonarr:8989` | `https://sonarr.epaflix.com` |
+| Sonarr2 | `http://sonarr2:8989` | `https://sonarr2.epaflix.com` |
+
+**Each `*arr`'s own qBittorrent download client** — this was the largest single
+source of logged API keys (222 lines in an 800-line Traefik log sample, versus
+47/46/46 for the Seerr calls).
+
+| app | download client `host` | port | `useSsl` |
+|---|---|---|---|
+| Sonarr | `qbittorrent` | `8080` | `false` |
+| Sonarr2 | `qbittorrent` | `8080` | `false` |
+| Radarr | `qbittorrent` | `8080` | `false` |
+
+**Both are config-only, not in git** — Seerr's lives in `settings.json` on its
+PVC (seeded by `seerr-config-seed.enc.yaml`, which is kept in step), and the
+download-client entries live in each `*arr`'s Postgres DB. If an `*arr` DB is
+ever restored from before 2026-08-03, re-apply the download-client table above
+or the keys start leaking into Loki again.
+
+**Apply them through the app's own API, not by editing files.** Each `*arr` has
+`POST /api/v3/downloadclient/test` and Seerr has
+`POST /api/v1/settings/{radarr,sonarr}/test` — test returns 200 before you save,
+so a bad host is caught before it is persisted. Two traps found doing this:
+
+- Editing an `*arr` `config.xml` by hand while the app is running does **not**
+  reliably take. Radarr ended up on a value nobody chose. Use the API.
+- Seerr's `PUT /api/v1/settings/sonarr/{id}` rejects a body containing `id`
+  (`request.body.id is read-only`). Strip it from the object you GET first.
+
+Effect, measured: `apikey=` lines in the Traefik log went from **20,984 per 24h**
+(4,490 in the last hour before the change) to **0** — confirmed both on a 90s
+live log tail and via Loki over 2m and 5m windows afterwards.
+
+This does not remove the ~6 months of historical `?apikey=` lines already in
+Loki; those are neutralised by the #730 rotation, not by this change.
+
+Cross-links: #561, #466, #468, #702, #730.
+
 > **⚠️ TRAP (#615) - the hostname Cleanuparr SHOWS you is not the one it CALLS.**
 >
 > Every instance carries both a `url` and an `external_url`. Cleanuparr **calls**
