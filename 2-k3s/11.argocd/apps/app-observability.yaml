@@ -7,8 +7,8 @@
 #               chart repos using the *-values.yaml in the same directory).
 # Destination:  in-cluster `observability` namespace.
 # Sync:         automated self-heal after clean manual adoption on 2026-05-24,
-#               prune enabled 2026-05-31 after soak (#53). Mirrors Traefik /
-#               Authentik / filebrowser convention. Image-updater not enabled —
+#               prune enabled 2026-05-31 after soak (#53). Mirrors the Traefik /
+#               Authentik convention. Image-updater not enabled —
 #               chart bumps are coordinated CRD migrations handled manually via
 #               PRs editing helmCharts[*].version.
 # Secrets:      grafana-db-secret, grafana-oauth-secret, grafana-admin-secret,

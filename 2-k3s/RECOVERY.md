@@ -403,19 +403,7 @@ scp truenas_admin@192.168.10.200:/home/truenas_admin/backup/k3s-containers/conta
 
 ---
 
-### Stage 8: FileBrowser
-**Directory:** `09.filebrowser/`
-
-```bash
-cd ../09.filebrowser
-kubectl apply -f .
-```
-
-**Documentation:** See `09.filebrowser/README.md`
-
----
-
-### Stage 9: Observability (Prometheus, Loki, Grafana)
+### Stage 8: Observability (Prometheus, Loki, Grafana)
 **Directory:** `10.observability/`
 
 ```bash

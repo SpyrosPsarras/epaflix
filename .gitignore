@@ -88,3 +88,8 @@ __pycache__/
 # per this repo's rule on media names in committed git). Convention documented
 # in general.instructions.md.
 artifacts/
+
+# Local backups. CLAUDE.md has always described this as git-ignored; it was not.
+# Found while taking a pre-decommission copy of filebrowser's database, which
+# contains OIDC client secrets and password hashes.
+/backups/

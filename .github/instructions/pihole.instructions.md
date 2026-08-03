@@ -92,7 +92,6 @@ As services migrate to Docker Swarm, individual records will be updated to `192.
 | `newtarr.epaflix.com` | 192.168.10.101 | ✅ 200 | Newtarr |
 | `cleanuparr.epaflix.com` | 192.168.10.101 | ✅ 200 | Cleanuparr |
 | `auth.epaflix.com` | 192.168.10.101 | ✅ 200 | Authentik |
-| `filebrowser.epaflix.com` | 192.168.10.101 | ✅ 200 | FileBrowser Quantum |
 | `grafana.epaflix.com` | 192.168.10.101 | ✅ 200 | Grafana |
 | `traefik.epaflix.com` | 192.168.10.101 | ✅ 200 | Traefik dashboard (behind Authentik SSO) |
 | `truenas.epaflix.com` | 192.168.10.101 | ✅ 200 | TrueNAS SCALE web UI — proxied via Traefik to `192.168.10.200:443`, real `*.epaflix.com` cert |

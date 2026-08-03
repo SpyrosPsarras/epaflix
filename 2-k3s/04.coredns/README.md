@@ -145,7 +145,6 @@ All the following domains now work from inside pods:
 - auth.epaflix.com
 - traefik.epaflix.com
 - grafana.epaflix.com
-- filebrowser.epaflix.com
 
 Check Pi-hole's `/etc/dnsmasq.d/10-epaflix.conf` for the authoritative list.
 
