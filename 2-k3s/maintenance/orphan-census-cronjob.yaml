@@ -1,9 +1,23 @@
 ---
 # Daily orphan census for qBittorrent (Issue #483). SHIPS DISARMED.
 #
-# An ORPHAN here = a torrent that is present in qBittorrent, has NO row in any
-# *arr queue, and is INCOMPLETE (`progress < 1.0`). A completed torrent with no
-# queue row is a normal finished seed and is NOT an orphan.
+# An ORPHAN here = a torrent that is present in qBittorrent, is INCOMPLETE
+# (`progress < 1.0`), has MADE NO PROGRESS for NO_PROGRESS_HOURS, and has NO row
+# in any *arr queue. A completed torrent with no queue row is a normal finished
+# seed and is NOT an orphan.
+#
+# The no-progress leg is load-bearing, not belt-and-braces (#631). Queue absence
+# alone is NOT evidence of an orphan: the *arr queue is an in-memory projection
+# of the last successful download-client poll, and it can read empty while the
+# torrent is perfectly healthy - a client outage drops it to zero instantly, and
+# the Sonarr `TrackedDownloadService` cache bug in #631 drops a re-grabbed
+# infohash from the queue permanently, with a clean client and clean health
+# checks. Nine actively-downloading Sonarr grabs were queue-less on 2026-08-02
+# for exactly that reason. Progress, on the other hand, is reported by the
+# download client itself, so no *arr fault can fake it: a torrent that has moved
+# zero bytes for a day is dead whatever any queue says. Ordering the two tests
+# this way means every *arr in the fleet could go blind at once and the census
+# still would not manufacture a single false orphan.
 #
 # Why this job has to exist at all - Cleanuparr cannot see these (verified in
 # the v2.10.2 source, not inferred):
@@ -32,10 +46,14 @@
 # OrphanCensusFailed PrometheusRule (2-k3s/10.observability/alertmanager-config/
 # custom-alerts.yaml) fire and route to ntfy. Exit 1 = orphans found, exit 2 =
 # the census could not be completed safely (fail LOUD, never a silent pass).
-# #631 added one more exit-2 case: every *arr queue reading 0 rows while
-# orphan-shaped torrents sit in the client. That is a broken queue read path
-# wearing an orphan costume, not a finding - see queue_read_path_broken()
-# in the script below.
+# #631/#632 add one more exit-2 case: an *arr reading 0 queue rows while
+# orphan-shaped torrents sit in the categories that *arr owns. That is a broken
+# queue read path wearing an orphan costume, not a finding - see
+# queue_read_path_suspect() in the script below. It is per-*arr (#632) because
+# the original fleet-wide "all three at 0" gate stays quiet whenever one *arr is
+# blind and its siblings happen to be busy - live on 2026-08-02, Sonarr was the
+# broken one and sonarr2's single unrelated queue row was enough to silence the
+# gate.
 #
 # Credentials, no new machinery:
 #   - the three *arr API keys are read from the EXISTING `unpackerr-secret`
@@ -96,6 +114,32 @@ data:
     # transiently empty during a restart, and a just-grabbed torrent races its
     # own queue row. Every real orphan seen so far was 118h+ old.
     MIN_AGE_HOURS = float(os.environ.get("MIN_AGE_HOURS", "24"))
+
+    # The real orphan signal (#631). A torrent that moved bytes inside this
+    # window is alive, and is never an orphan no matter what the *arr queues say.
+    # Measured from qBittorrent's own `last_activity` (the client's timestamp of
+    # the last chunk transferred, up or down), so no state has to be carried
+    # between runs. `last_activity <= 0` means "never transferred anything" and
+    # is read as idle since `added_on`.
+    # 24h matches the #483 ask ("alert on any incomplete torrent with zero
+    # progress older than ~24h") and clears the live set with room to spare: the
+    # five real orphans on 2026-08-03 were idle 38h, 48h, 160h, 645h, 645h while
+    # the four healthy downloads were idle 0.0-0.6h. Nothing sits near the line.
+    NO_PROGRESS_HOURS = float(os.environ.get("NO_PROGRESS_HOURS", "24"))
+
+    # Which *arr owns which qBittorrent category (#632). Categories are an
+    # operator convention, not an API contract, hence env-configurable. Used
+    # ONLY to attribute an orphan to the *arr that should have had a queue row
+    # for it, so one blind *arr cannot hide behind busy siblings. A category
+    # that is absent from this map (`avistaz-reseed`, `manual-import`,
+    # uncategorized) is owned by no *arr and is reported as `unmapped`.
+    CATEGORY_ARR = dict(
+        pair.split("=", 1)
+        for pair in os.environ.get(
+            "CATEGORY_ARR_MAP",
+            "tv-sonarr=sonarr,animes=sonarr2,radarr=radarr").split(",")
+        if "=" in pair
+    )
 
     # Categories that are NEVER reported and NEVER reaped.
     #   avistaz-reseed - the two torrents held stopped on purpose at 83.5% and
@@ -227,23 +271,57 @@ data:
         return ids, len(records)
 
 
-    def queue_read_path_broken(arr_ns, orphans):
-        """True iff EVERY configured *arr reports 0 queue rows while at least
-        one torrent would be classified as an orphan under that (all-empty,
-        surely-wrong) queue set (#631, live 2026-08-02: 3/3 *arrs at 0 rows,
-        208 torrents in the client, 9 of them actively downloading their own
-        grabs).
+    def orphans_by_arr(orphans):
+        """{*arr name or None: count} for a list of torrents, by category (#632).
 
-        A single *arr legitimately has nothing queued on plenty of days - a
-        quiet Radarr while Sonarr is busy is normal, so a per-arr zero is not
-        checked here. All three independent apps hitting 0 at once, while the
-        client still holds torrents old enough and unheld enough to be
-        reaped, is not a plausible healthy reading - it means the queue read
-        path is broken, not that every incomplete torrent just became an
-        orphan. A genuinely idle cluster (all zero, and nothing orphan-shaped
-        to reap either) is legitimate and must stay quiet.
+        None is the bucket for categories no *arr owns - no per-*arr guard can
+        speak for those.
         """
-        return bool(arr_ns) and all(n == 0 for n in arr_ns) and bool(orphans)
+        out = {}
+        for t in orphans:
+            arr = CATEGORY_ARR.get(str(t.get("category", "")))
+            out[arr] = out.get(arr, 0) + 1
+        return out
+
+
+    def queue_read_path_suspect(arr_rows, orphans):
+        """Names of *arrs whose empty queue looks BROKEN rather than idle.
+
+        Per-*arr (#632): *arr X reports 0 queue rows AND at least one
+        orphan-shaped torrent sits in a category X owns. X alone reading 0 is
+        normal on a quiet day - reading 0 while its OWN categories hold
+        torrents that are incomplete, unheld, stale and old enough to be
+        reaped is not. This replaces the fleet-wide "all *arrs at 0" gate that
+        shipped for #631: that gate is just the case where every *arr trips
+        this one, and it stayed quiet on the night it was written because
+        sonarr2 had a single unrelated queue row while Sonarr was the blind one.
+
+        Orphans in categories no *arr owns can only be judged fleet-wide, so
+        they keep the original all-zero rule.
+
+        A genuinely idle cluster (queues at 0, nothing orphan-shaped to reap)
+        is legitimate and must stay quiet.
+        """
+        by_arr = orphans_by_arr(orphans)
+        suspect = [name for name, n in sorted(arr_rows.items())
+                   if n == 0 and by_arr.get(name, 0) > 0]
+        if by_arr.get(None) and arr_rows and all(
+                n == 0 for n in arr_rows.values()):
+            suspect.append("unmapped-categories")
+        return suspect
+
+
+    def idle_hours(torrent, now):
+        """Hours since qBittorrent last moved a byte for this torrent (#631).
+
+        Falls back to age when `last_activity` is missing or <= 0 (never
+        transferred anything). A future timestamp (clock skew) yields a
+        negative value, which reads as 'active' - the fail-safe direction.
+        """
+        last = float(torrent.get("last_activity", 0) or 0)
+        if last <= 0:
+            last = float(torrent.get("added_on", now))
+        return (now - last) / 3600.0
 
 
     def classify(torrent, queued, now):
@@ -271,6 +349,15 @@ data:
         age_h = (now - float(torrent.get("added_on", now))) / 3600.0
         if age_h < MIN_AGE_HOURS:
             return "ok", "too-young"
+        # THE orphan signal (#631). Anything still moving bytes is alive, and a
+        # missing queue row for it means the queue is wrong, not the torrent.
+        # Checked against the client's own numbers only - deliberately
+        # independent of every *arr.
+        if int(torrent.get("dlspeed", 0)) > 0 or int(
+                torrent.get("upspeed", 0)) > 0:
+            return "ok", "transferring"
+        if idle_hours(torrent, now) < NO_PROGRESS_HOURS:
+            return "ok", "recent-progress"
         # Orphan-shaped from here down. Everything below is an exclusion.
         if any(i.startswith(KEEP_HASH_PREFIXES) for i in ids):
             return "held", "keep-hash"
@@ -285,10 +372,19 @@ data:
 
 
     def selftest():
+        # Pin the tunables so the asserts below test the LOGIC and not whatever
+        # the CronJob env happens to say today.
+        global MIN_AGE_HOURS, NO_PROGRESS_HOURS, CATEGORY_ARR
+        MIN_AGE_HOURS = 24.0
+        NO_PROGRESS_HOURS = 24.0
+        CATEGORY_ARR = {"tv-sonarr": "sonarr", "animes": "sonarr2",
+                        "radarr": "radarr"}
+
         now = 1000000.0
         old = now - 200 * 3600
         base = {"hash": "a" * 40, "progress": 0.4, "amount_left": 10,
-                "added_on": old, "category": "tv-sonarr", "uploaded": 0}
+                "added_on": old, "category": "tv-sonarr", "uploaded": 0,
+                "last_activity": old, "dlspeed": 0, "upspeed": 0}
 
         def verdict(**over):
             t = dict(base)
@@ -312,15 +408,61 @@ data:
         assert verdict(hash="bf83bdcb" + "0" * 32, category="tv-sonarr") == "held"
         assert verdict(uploaded=1) == "held"
 
-        # #631: all *arr queues empty is only suspicious if something would
-        # actually be reaped under that (surely-wrong) reading.
-        assert queue_read_path_broken([0, 0, 0], [{"hash": "x"}]) is True
-        # genuinely idle cluster: all zero, and nothing orphan-shaped either -
-        # must stay quiet.
-        assert queue_read_path_broken([0, 0, 0], []) is False
-        # one *arr legitimately idle while the others carry a real queue -
-        # a per-arr zero alone is never suspicious.
-        assert queue_read_path_broken([0, 5, 2], [{"hash": "x"}]) is False
+        # === #631: no progress is the orphan signal, queue absence is not ===
+        # actively transferring -> alive, whatever the *arr queue says. This is
+        # the shape of the 9 queue-less Sonarr grabs that must never be reaped.
+        assert verdict(dlspeed=1465643) == "ok"
+        assert verdict(upspeed=1) == "ok"
+        # moved bytes recently -> alive even at dlspeed 0 (between chunks).
+        assert verdict(last_activity=now - 3600) == "ok"
+        # right at the line, and just past it.
+        assert verdict(last_activity=now - 23.9 * 3600) == "ok"
+        assert verdict(last_activity=now - 24.1 * 3600) == "orphan"
+        # never transferred anything: qBittorrent reports 0 (some builds omit
+        # the field) -> idle since added_on, so an old one is still an orphan.
+        assert verdict(last_activity=0) == "orphan"
+        assert classify({k: v for k, v in base.items()
+                         if k != "last_activity"}, set(), now)[0] == "orphan"
+        # clock skew / future timestamp reads as active, never as an orphan.
+        assert verdict(last_activity=now + 3600) == "ok"
+        # the 'ok' tests still run before the exclusions, so 'held' only ever
+        # lists things that would otherwise have been reported.
+        assert verdict(category="avistaz-reseed", dlspeed=1) == "ok"
+        # idle_hours: field missing, zeroed, and populated.
+        assert idle_hours({"added_on": now - 7200}, now) == 2.0
+        assert idle_hours({"added_on": now - 7200, "last_activity": 0},
+                          now) == 2.0
+        assert idle_hours({"added_on": old, "last_activity": now - 3600},
+                          now) == 1.0
+
+        # === #632: per-*arr attribution of orphan-shaped torrents ===
+        assert orphans_by_arr([{"category": "tv-sonarr"},
+                               {"category": "animes"},
+                               {"category": "tv-sonarr"},
+                               {"category": "nobody-owns-this"}]) == {
+            "sonarr": 2, "sonarr2": 1, None: 1}
+
+        rows = {"sonarr": 0, "sonarr2": 1, "radarr": 3}
+        # THE #632 case: sonarr at 0 rows with an orphan in its own category,
+        # while its siblings are busy. The old all-zero gate stayed quiet here.
+        assert queue_read_path_suspect(
+            rows, [{"category": "tv-sonarr"}]) == ["sonarr"]
+        # sonarr at 0 rows but the orphan belongs to a busy *arr - not sonarr's
+        # problem, and 0 rows on its own is a normal quiet day.
+        assert queue_read_path_suspect(rows, [{"category": "radarr"}]) == []
+        # genuinely idle cluster, nothing orphan-shaped -> stay quiet.
+        assert queue_read_path_suspect({"sonarr": 0, "radarr": 0}, []) == []
+        # the fleet-wide #631 gate survives for unowned categories.
+        assert queue_read_path_suspect(
+            {"sonarr": 0, "radarr": 0},
+            [{"category": "manual-import"}]) == ["unmapped-categories"]
+        assert queue_read_path_suspect(
+            rows, [{"category": "manual-import"}]) == []
+        # every *arr blind at once still trips, per *arr, sorted.
+        assert queue_read_path_suspect(
+            {"sonarr": 0, "sonarr2": 0, "radarr": 0},
+            [{"category": "tv-sonarr"}, {"category": "radarr"},
+             {"category": "animes"}]) == ["radarr", "sonarr", "sonarr2"]
 
         print("selftest OK")
         return 0
@@ -333,24 +475,28 @@ data:
         now = time.time()
         print("=== qbittorrent orphan census @ %s ==="
               % time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)))
-        print("mode: %s | min age: %.0fh | keep-categories: %s | keep-hashes: %s"
+        print("mode: %s | min age: %.0fh | no progress for: %.0fh | "
+              "keep-categories: %s | keep-hashes: %s"
               % ("ARMED (WILL DELETE)" if ARMED else "DISARMED (report only)",
-                 MIN_AGE_HOURS, ",".join(sorted(KEEP_CATEGORIES)) or "-",
+                 MIN_AGE_HOURS, NO_PROGRESS_HOURS,
+                 ",".join(sorted(KEEP_CATEGORIES)) or "-",
                  ",".join(KEEP_HASH_PREFIXES)))
+        print("category -> *arr: %s"
+              % (" ".join("%s=%s" % kv for kv in sorted(CATEGORY_ARR.items()))
+                 or "-"))
 
         opener = qbt_login()
         torrents = qbt_torrents(opener)
 
         queued = set()
-        counts = []
-        arr_ns = []
+        arr_rows = {}
         for name, url, key in ARRS:
             ids, n = arr_download_ids(name, url, key)
             queued |= ids
-            counts.append("%s=%d" % (name, n))
-            arr_ns.append(n)
+            arr_rows[name] = n
+        counts = " ".join("%s=%d" % (n, arr_rows[n]) for n, _, _ in ARRS)
         print("qbittorrent: %d torrents | arr queue rows: %s | %d distinct "
-              "downloadIds" % (len(torrents), " ".join(counts), len(queued)))
+              "downloadIds" % (len(torrents), counts, len(queued)))
 
         orphans, held = [], []
         for t in torrents:
@@ -360,20 +506,32 @@ data:
             elif verdict == "held":
                 held.append((str(t.get("hash", ""))[:8], reason))
 
-        # #631: a queue-less torrent is only trustworthy evidence of an
-        # orphan if the queue read actually worked. All three *arrs at 0 rows
-        # at once is not a plausible healthy state - fail LOUD (exit 2, same
-        # as every other broken-read-path case above) before ARMED is even
+        # Per-*arr attribution of the findings (#632). Printed unconditionally,
+        # including the zeros - "which *arr should have owned this" is the first
+        # question anyone asks about an orphan report, and it is what makes a
+        # single blind *arr visible instead of averaged away.
+        by_arr = orphans_by_arr(orphans)
+        print("orphans by owning *arr: %s unmapped=%d"
+              % (" ".join("%s=%d" % (n, by_arr.get(n, 0)) for n, _, _ in ARRS),
+                 by_arr.get(None, 0)))
+
+        # #631/#632: a queue-less torrent is only trustworthy evidence of an
+        # orphan if that *arr's queue read actually worked. Fail LOUD (exit 2,
+        # same as every other broken-read-path case above) before ARMED is even
         # consulted. That way a disarmed run reporting "N orphans" can never
         # train anyone to trust a broken reading, and an armed run can never
         # delete against one.
-        if queue_read_path_broken(arr_ns, orphans):
-            fail("all %d configured *arr queues report 0 rows (%s) while "
-                 "qBittorrent has %d torrent(s) that are incomplete, unheld "
-                 "and older than %.0fh - that looks like a broken *arr queue "
-                 "read path, not an idle cluster (#631). Refusing to treat "
-                 "every queue-less torrent as an orphan."
-                 % (len(ARRS), " ".join(counts), len(orphans), MIN_AGE_HOURS))
+        suspect = queue_read_path_suspect(arr_rows, orphans)
+        if suspect:
+            fail("%s report(s) 0 queue rows (all: %s) while qBittorrent holds "
+                 "torrents in their OWN categories that are incomplete, "
+                 "unheld, stale for %.0fh+ and older than %.0fh (see the "
+                 "attribution line above; %d orphan-shaped in total) - that "
+                 "looks like a broken *arr queue read path, not an idle *arr "
+                 "(#631/#632). Refusing to treat those queue-less torrents as "
+                 "orphans."
+                 % (", ".join(suspect), counts, NO_PROGRESS_HOURS,
+                    MIN_AGE_HOURS, len(orphans)))
 
         # Held items are listed by hash prefix + reason ONLY. They are never
         # counted as orphans and never affect the exit code - but printing the
@@ -385,8 +543,9 @@ data:
             print("    %-8s  %s" % (digest, reason))
 
         if not orphans:
-            print("\nOK: 0 orphans (incomplete + no *arr queue row + older than "
-                  "%.0fh)." % MIN_AGE_HOURS)
+            print("\nOK: 0 orphans (incomplete + no progress for %.0fh + no "
+                  "*arr queue row + older than %.0fh)."
+                  % (NO_PROGRESS_HOURS, MIN_AGE_HOURS))
             return 0
 
         size = sum(int(t.get("size", 0)) for t in orphans)
@@ -395,19 +554,23 @@ data:
               % (len(orphans), size / GB, on_disk / GB))
         # Hash prefixes only. No release names, no series titles - these logs are
         # readable by anyone with cluster access and end up pasted into issues.
-        print("    %-8s  %-14s  %-12s  %7s  %8s  %-5s  %9s"
-              % ("hash8", "category", "state", "prog%", "age_h", "priv", "up_MB"))
+        print("    %-8s  %-14s  %-12s  %-8s  %7s  %8s  %8s  %-5s  %9s"
+              % ("hash8", "category", "state", "arr", "prog%", "age_h",
+                 "idle_h", "priv", "up_MB"))
         for t in sorted(orphans, key=lambda x: x.get("added_on", 0)):
             private = t.get("private", t.get("is_private"))
-            print("    %-8s  %-14s  %-12s  %7.2f  %8.1f  %-5s  %9.1f" % (
-                str(t.get("hash", ""))[:8],
-                str(t.get("category", ""))[:14] or "-",
-                str(t.get("state", ""))[:12],
-                float(t.get("progress", 0.0)) * 100.0,
-                (now - float(t.get("added_on", now))) / 3600.0,
-                {True: "yes", False: "no"}.get(private, "?"),
-                int(t.get("uploaded", 0)) / (1024.0 * 1024.0),
-            ))
+            print("    %-8s  %-14s  %-12s  %-8s  %7.2f  %8.1f  %8.1f  %-5s  "
+                  "%9.1f" % (
+                      str(t.get("hash", ""))[:8],
+                      str(t.get("category", ""))[:14] or "-",
+                      str(t.get("state", ""))[:12],
+                      CATEGORY_ARR.get(str(t.get("category", "")), "unmapped"),
+                      float(t.get("progress", 0.0)) * 100.0,
+                      (now - float(t.get("added_on", now))) / 3600.0,
+                      idle_hours(t, now),
+                      {True: "yes", False: "no"}.get(private, "?"),
+                      int(t.get("uploaded", 0)) / (1024.0 * 1024.0),
+                  ))
 
         if not ARMED:
             print("\nDISARMED - nothing was changed. To reap these, set ARMED="
@@ -486,6 +649,20 @@ spec:
                 - name: ARMED
                   value: "false"
                 # ======================================================
+                # The orphan signal (#631): a torrent must have moved ZERO
+                # bytes for this long before it can be called an orphan, so a
+                # blind *arr queue can never manufacture one. Live spread on
+                # 2026-08-03: real orphans idle 38-645h, healthy downloads
+                # idle 0.0-0.6h.
+                - name: NO_PROGRESS_HOURS
+                  value: "24"
+                # Which *arr owns which qBittorrent category (#632), for
+                # per-*arr orphan attribution and the per-*arr queue-read
+                # guard. Operator convention, so it lives here and not only in
+                # the script default. Categories left out (avistaz-reseed,
+                # manual-import, uncategorized) are owned by no *arr.
+                - name: CATEGORY_ARR_MAP
+                  value: "tv-sonarr=sonarr,animes=sonarr2,radarr=radarr"
                 - name: QBT_USERNAME
                   valueFrom:
                     secretKeyRef:
