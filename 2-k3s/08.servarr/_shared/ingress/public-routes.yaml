@@ -7,6 +7,11 @@
 # an Endpoints/Service named `jellyfin-truenas`. Defining them in both files
 # breaks kustomize accumulation under ArgoCD.
 #
+# A `Middleware jellyfin-to-seerr-redirect` (servarr, redirectRegex -> seerr.
+# epaflix.com) existed hand-applied and untracked, referenced by no live
+# IngressRoute - dead config, likely predating the TrueNAS redirect above.
+# Deleted live 2026-08-03 (#551).
+#
 # Seerr - Media Requests. seerr.epaflix.com is the canonical host and targets
 # the consolidated `seerr` Service. The legacy jellyseerr.epaflix.com host
 # 301-redirects to seerr.epaflix.com (see jellyseerr-to-seerr Middleware below)
