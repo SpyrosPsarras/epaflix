@@ -1,5 +1,12 @@
 ---
 # Lingarr — AI subtitle translator (forked image with zombie/concurrency fix, upstream PR #377)
+#
+# Lingarr keeps its Sonarr/Radarr API keys in its OWN Postgres (`lingarr-main`,
+# `settings.sonarr_api_key` / `radarr_api_key`) and stores them ENCRYPTED
+# (~176 chars), so a plaintext value scan does NOT find them - lingarr is an
+# easy-to-miss consumer of every *arr API-key rotation. Write them only through
+# `POST /api/setting/encrypted`; see the rotation runbook in
+# 2-k3s/08.servarr/README.md (#712).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
