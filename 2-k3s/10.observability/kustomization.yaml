@@ -16,7 +16,12 @@
 #   - grafana-db-secret           (Grafana → Postgres password)
 #   - grafana-oauth-secret        (Grafana → Authentik client_secret)
 #   - grafana-admin-secret        (Grafana admin user/password)
-#   - alertmanager-config-secret  (full alertmanager.yaml incl. SMTP creds)
+#   - alertmanager-config-secret  (full alertmanager.yaml incl. SMTP creds).
+#                                  Smarthost is vh4c.ezhellas.com:587, NOT
+#                                  mail.epaflix.com — the proxied
+#                                  *.epaflix.com Cloudflare wildcard answers
+#                                  for mail.epaflix.com but carries no SMTP
+#                                  (#461). See README.md "Email Configuration".
 #   - pve-exporter-secrets        (Proxmox API token; carries pve.yml as a
 #                                  stringData key, mounted at /etc/prometheus
 #                                  by the pve-exporter Deployment — replaces
