@@ -152,6 +152,57 @@ but these are real and were found while investigating:
    `notifications.cfg` in this directory.
 
 ## Notifications
+### Applying `notifications.cfg`
+
+```
+scp 1-proxmox/pbs/notifications.cfg root@192.168.10.10:/etc/pve/notifications.cfg
+ssh root@192.168.10.10 'pvesh get /cluster/notifications/targets'
+ssh root@192.168.10.10 'pvesh create /cluster/notifications/targets/ntfy-pve/test'
+```
+
+`/etc/pve` is pmxcfs, so one copy covers both takaros and evanthoulaki.
+
+**The file must contain no comments.** PVE's section-config parser rejects any
+line before the first section header - a leading `#` block makes the whole file
+unreadable and `pvesh get /cluster/notifications/targets` fails with:
+
+```
+could not deserialize configuration: parsing "notifications.cfg" failed: line 1 - syntax error (expected header)
+```
+
+which silently disables **all** notification routing, including the mail path.
+Keep `notifications.cfg` byte-identical to what PVE itself writes, and put
+explanation here instead. Regenerate it with:
+
+```
+ssh root@192.168.10.10 'cat /etc/pve/notifications.cfg' > 1-proxmox/pbs/notifications.cfg
+```
+
+What the stanzas do:
+
+- `mail-to-root` / `default-matcher` - PVE builtins, kept so info-level
+  behaviour is unchanged. Local mail delivery is dead on both nodes (postfix has
+  no `/etc/aliases.db`, every notification sits deferred forever), which is why
+  weeks of nightly backup failures went unnoticed. Tracked in #720.
+- `ntfy-pve` - webhook to `http://192.168.10.112:8091/pve-backups`, the LAN-only
+  kube-vip LoadBalancer on the in-cluster ntfy Service
+  (`2-k3s/13.odysseus/ntfy.yaml`). Header and body values are base64 per the API
+  schema: `Title = {{ title }}`, `Tags = warning`, `Priority = 4`,
+  body = `{{ title }}\n\n{{ message }}`.
+- `ntfy-failures` - routes `warning,error` only, so a successful nightly job
+  stays silent and a failed one pushes.
+
+Prefer creating changes through the API rather than editing the file, since PVE
+then writes canonical syntax for you:
+
+```
+pvesh create /cluster/notifications/endpoints/webhook --name ntfy-pve --method post \
+  --url "http://192.168.10.112:8091/pve-backups" \
+  --header "name=Title,value=e3sgdGl0bGUgfX0=" ... 
+pvesh create /cluster/notifications/matchers --name ntfy-failures --mode all \
+  --match-severity "warning,error" --target ntfy-pve
+```
+
 
 Job failures now route to ntfy instead of unread local root mail — see
 [`notifications.cfg`](notifications.cfg) in this directory, and
