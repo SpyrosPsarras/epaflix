@@ -35,7 +35,7 @@
 # vpn_agent_consecutive_bad_windows / vpn_agent_current_loss_pct /
 # vpn_agent_switches_total via the qbittorrent-vpn-agent ServiceMonitor. A
 # metric-based PrometheusRule on those is the better home for this signal than
-# a log match - not rebuilt here, tracked as a follow-up.
+# a log match - not rebuilt here, tracked in #689.
 #
 # DO NOT re-add a rule matching "reconnect triggered" - that string is gone
 # from the image and cannot come back without reverting #611/#627.
