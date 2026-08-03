@@ -84,13 +84,13 @@
       "automerge": false
     },
     {
-      "description": "Pin the CI validate-gate helm to 3.x: helm v4 has shipped (v4.2.1) but its pull/OCI semantics are unsoaked for this gate; bump this cap when adopting v4 deliberately. #221/#164.",
+      "description": "Pin the CI validate-gate helm to 3.x. The reason is NOT that helm v4 is unproven in general — it is GA (v4.2.3). It is that this gate's only job is to predict whether ArgoCD's repo-server can render this repo, and that repo-server bundles helm 3.19.4 (argo-cd chart 9.7.0 / ArgoCD v3.4.4, observed 2026-08-03). A gate rendering with a newer helm MAJOR than the thing that actually deploys is a false green: it passes on templating/OCI semantics ArgoCD then rejects. #384/#386 are exactly that failure, already survived once, with a chart major instead of a helm major. So the unblock condition is mechanical, not a soak: when the ArgoCD repo-server image ships helm 4.x, raise this cap to <5 in the same PR as the argo-cd chart bump. Check with `helm version --short` inside the running repo-server pod. Within-major drift the other way is fine and expected (gate 3.21.0 vs repo-server 3.19.4) — only the major has to match. #221/#164/#331.",
       "matchDatasources": ["github-releases"],
       "matchPackageNames": ["helm/helm"],
       "allowedVersions": "<4"
     },
     {
-      "description": "Pin the CI validate-gate kustomize to 5.x for the same reason (no v6 exists yet; deliberate major adoption only). #221/#164.",
+      "description": "Pin the CI validate-gate kustomize to 5.x by the same rule as helm above: the repo-server bundles kustomize 5.3.0 (+ksops v4.3.3, observed 2026-08-03), so the gate must stay on kustomize 5.x. This cap suppresses nothing today — upstream has no v6, latest is kustomize/v5.8.1. Raise to <7 when the repo-server ships kustomize 6.x. #221/#164/#331.",
       "matchDatasources": ["github-releases"],
       "matchPackageNames": ["kubernetes-sigs/kustomize"],
       "allowedVersions": "<6"
