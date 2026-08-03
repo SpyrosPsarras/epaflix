@@ -1,0 +1,15 @@
+{
+  "repoRoot": "/home/spy/Documents/Epaflix/k3s-swarm-proxmox",
+  "repo": "SpyrosPsarras/epaflix",
+  "issue": "74",
+  "masterSsh": "ssh ubuntu@192.168.10.51",
+  "branch": "system-upgrade-plans-onboard",
+  "controllerApp": "system-upgrade-controller",
+  "plansApp": "system-upgrade-plans",
+  "ns": "system-upgrade",
+  "plansPath": "2-k3s/maintenance/system-upgrade/plans",
+  "plansAppManifest": "2-k3s/11.argocd/apps/app-system-upgrade-plans.yaml",
+  "appsKustomization": "2-k3s/11.argocd/apps/kustomization.yaml",
+  "parkedPlansFile": "2-k3s/maintenance/system-upgrade/system-upgrade-plans.yaml",
+  "channel": "https://update.k3s.io/v1-release/channels/stable"
+}

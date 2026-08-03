@@ -1,0 +1,10 @@
+{
+  "repoRoot": "/home/spy/Documents/Epaflix/k3s-swarm-proxmox",
+  "ciWorkflow": ".github/workflows/ci.yml",
+  "renovateJson": ".github/renovate.json",
+  "workflowsReadme": ".github/workflows/README.md",
+  "issue": "164",
+  "repo": "SpyrosPsarras/epaflix",
+  "branch": "issue-164-ci-pin-kustomize-helm",
+  "relatedIssues": ["163"]
+}

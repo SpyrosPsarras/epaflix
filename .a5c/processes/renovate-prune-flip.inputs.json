@@ -1,0 +1,12 @@
+{
+  "repoRoot": "/home/spy/Documents/Epaflix/k3s-swarm-proxmox",
+  "appName": "renovate",
+  "appManifest": "2-k3s/11.argocd/apps/app-renovate.yaml",
+  "appPath": "2-k3s/12.renovate",
+  "ns": "renovate",
+  "patSecret": "renovate-secrets",
+  "masterSsh": "ssh ubuntu@192.168.10.51",
+  "issue": "54",
+  "repo": "SpyrosPsarras/epaflix",
+  "branch": "renovate-prune-flip"
+}

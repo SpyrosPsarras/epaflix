@@ -45,6 +45,24 @@ jobs:
           fi
           echo "No tracked file matches .gitignore."
 
+      - name: No blanket-ignore reintroduced for .a5c/processes/
+        run: |
+          set -euo pipefail
+          # #659: a `.a5c/processes/*` glob-ignore + per-file `!` negations
+          # is exactly the pattern that let 143 of 154 real process
+          # definitions go untracked (fixed by dropping the ignore - see
+          # .gitignore). The pre-commit hook (check-processes-tracked.sh)
+          # guards against untracked drift locally; this is the server-side
+          # complement that fails the build if the trap pattern itself is
+          # ever reintroduced (e.g. via `git commit --no-verify`, or a clone
+          # without hooks installed).
+          if grep -qE '^\.a5c/processes/\*?$' .gitignore; then
+            echo "ERROR: .gitignore re-ignores .a5c/processes/ - this is the pattern #659 fixed." >&2
+            echo "       Process definitions must stay tracked by default." >&2
+            exit 1
+          fi
+          echo "No blanket-ignore for .a5c/processes/."
+
       - name: Install tools
         run: |
           set -euo pipefail
