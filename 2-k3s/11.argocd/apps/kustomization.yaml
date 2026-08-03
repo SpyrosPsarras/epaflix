@@ -25,6 +25,7 @@ resources:
   - app-observability.yaml
   - app-odysseus.yaml
   - app-postgres.yaml
+  - app-reloader.yaml
   - app-renovate.yaml
   - app-searxng.yaml
   - app-servarr.yaml

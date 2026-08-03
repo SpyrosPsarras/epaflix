@@ -20,6 +20,11 @@ metadata:
   namespace: odysseus
   labels:
     app: odysseus
+  annotations:
+    # Reloader (#299): env-var secretKeyRef consumer (odysseus-secrets,
+    # claude-oauth-token), doesn't auto-roll otherwise. Scoped to the exact
+    # Secrets, not reloader.stakater.com/auto.
+    secret.reloader.stakater.com/reload: "odysseus-secrets,claude-oauth-token"
 spec:
   replicas: 1
   selector:

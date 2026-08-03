@@ -105,6 +105,13 @@ persistence:
 # Deployment configuration
 deployment:
   replicas: 1 # ACME requires single replica for certificate management
+  # Reloader (#299): CF_DNS_API_TOKEN is a env-var secretKeyRef, so it
+  # doesn't auto-roll when cloudflare-api-token rotates — Traefik's own ACME
+  # client needed a manual `kubectl rollout restart` once already (cert-manager
+  # reads the same Secret live via the API, unaffected). Scoped to the exact
+  # Secret, not reloader.stakater.com/auto.
+  annotations:
+    secret.reloader.stakater.com/reload: "cloudflare-api-token"
   # Init container to fix acme.json permissions (must be 600 for Traefik)
   # This ensures permissions are correct even after node reboots or pod restarts
   initContainers:

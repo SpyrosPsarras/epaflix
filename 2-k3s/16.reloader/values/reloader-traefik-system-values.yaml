@@ -1,0 +1,17 @@
+# stakater/reloader v1.4.19 (chart 2.2.14) — instance scoped to the
+# traefik-system namespace only (issue #299), so a cloudflare-api-token
+# rotation rolls Traefik's own Deployment automatically. See
+# kustomization.yaml for why this is a separate release per watched
+# namespace rather than one shared instance.
+reloader:
+  watchGlobally: false
+  ignoreCronJobs: true
+  ignoreJobs: true
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 32Mi
+  limits:
+    cpu: 100m
+    memory: 128Mi
