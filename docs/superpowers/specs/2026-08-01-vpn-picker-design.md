@@ -283,6 +283,17 @@ tunnel comes down - so the agent as originally specced would leave the pod tunne
 switch. `head -c` does not save it, goldcrest survives SIGPIPE. With `--async`, goldcrest returns
 in ~1.9 s, the tunnel survives, and no goldcrest processes are left behind.
 
+**`--air-connect` must pass `--air-key` explicitly.** Bluetit does not re-read the `airkey`
+directive on the connect path - proven during the #613 scratch-pod work: a credentialed
+`goldcrest` call pushes a fresh option set into Bluetit, and the device key in that set is the
+built-in `Default`. The country white/black lists ARE re-applied on the same call; the key
+specifically is not. On a pod configured `airkey test`, the first run logged
+`Selected user key: Default`. So every `--air-connect` the agent issues must carry `--air-key`
+explicitly, never rely on the config directive alone. Consequence of skipping it: a switch on a
+consumer using a non-default device key silently moves onto `Default`, and two sessions on one key
+fight each other - the same failure mode Component 9 already warns about for scratch work. The
+agent already does this correctly; this is a documentation gap only, no code change (#687).
+
 **Timings, measured on a real switch** (scratch pod, device key `test`, live tunnel verified
 monotonic throughout):
 
@@ -375,6 +386,10 @@ publishes.
 ## Component 8 - Nick's VM
 
 Same contract, different transport, and it is designed for from day one rather than bolted on.
+
+Repo-scope note added after this spec was written: Nick's box is managed directly on the machine
+and is not tracked in this repo. The rest of this section stays as the point-in-time design record
+it was.
 
 - Same `ghcr.io/spyrospsarras/airvpn-bluetit` image already (#493, 2026-07-31), config
   bind-mounted from `/home/nick/work/bluetit.conf`, `airkey nick`.

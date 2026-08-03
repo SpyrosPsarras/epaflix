@@ -10,22 +10,39 @@
 # Alertmanager (alertmanager_url set in loki-values.yaml rulerConfig), which
 # routes by severity/namespace and emails admin@epaflix.com.
 #
-# Scope: groups A (servarr error spikes), D (cluster-wide panic/fatal) and E
-# (AirVPN Bluetit sidecar reconnects) plus the app-specific log rules authored
-# against real log strings read from the live cluster (#352):
+# Scope: groups A (servarr error spikes), D (cluster-wide panic/fatal) plus the
+# app-specific log rules authored against real log strings read from the live
+# cluster (#352):
 #   B — Postgres FATAL/PANIC/deadlock (CloudNativePG JSON: record.error_severity)
 #   C — Authentik failed logins (audit action login_failed)
-#   E — AirVPN Bluetit forced-reconnect log line (container="airvpn")
 # One item is NOT a log rule and lives elsewhere:
 #   - Traefik 5xx → needs Traefik Prometheus metrics + ServiceMonitor enabled
 #     first (still open in #352); 5xx is a metric, not a log line.
-# qBittorrent VPN flap is NOT purely covered by the restart-count PrometheusRule
-# in custom-alerts.yaml any more, and it is no longer true that zero error lines
-# exist in-container: since the Bluetit sidecar took over the tunnel, the
-# `airvpn` container is precisely the one that emits log lines, and group E
-# above alerts directly on them. The restart-count rule was also fixed to match
-# `container=~"qbittorrent|airvpn"`, since a flap now restarts `airvpn`, not
-# `qbittorrent`.
+#
+# Group E (AirVPN Bluetit forced-reconnect, container="airvpn") REMOVED (#668).
+# It matched the log line `reconnect triggered`, written by the entrypoint's
+# own degradation probe. #611/#627 removed that probe - the kill -USR2 recovery
+# it drove could not recover a lost handshake, it only rebuilt tun0 from a
+# cached profile without re-logging in to AirVPN. The string has not been
+# emitted since (images/airvpn-bluetit/entrypoint.sh, #611/PR #666, live from
+# digest sha256:38021e42 / PR #667). This rule could never fire again, so it
+# was deleted rather than left as a rule that reads as coverage and is not.
+#
+# Degradation detection now belongs to the vpn-picker agent sidecar
+# (container="agent", images/airvpn-bluetit/agent.py), which logs
+# `degradation switch suppressed`, `dropping candidate ... passed no traffic`
+# and `switch reason=... ended with NO tunnel`, and already exports
+# vpn_agent_consecutive_bad_windows / vpn_agent_current_loss_pct /
+# vpn_agent_switches_total via the qbittorrent-vpn-agent ServiceMonitor. A
+# metric-based PrometheusRule on those is the better home for this signal than
+# a log match - not rebuilt here, tracked in #689.
+#
+# DO NOT re-add a rule matching "reconnect triggered" - that string is gone
+# from the image and cannot come back without reverting #611/#627.
+#
+# qBittorrent VPN flap IS covered by the restart-count PrometheusRule in
+# custom-alerts.yaml, matching `container=~"qbittorrent|airvpn|agent"` (#622) -
+# a flap can restart `airvpn` or, since the vpn-picker agent shipped, `agent`.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -158,37 +175,6 @@ data:
                 Grafana → Explore → Loki:
                 {namespace="app-authentik"} |~ `login_failed`
 
-      # E — AirVPN Bluetit sidecar (servarr namespace). The degradation probe
-      #     forces a reconnect when the in-tunnel gateway sustains packet loss;
-      #     match the entrypoint's log line exactly or this alert never fires.
-      #     Threshold is `> 0`, not `> 2`: entrypoint.sh's PROBE_COOLDOWN=900s
-      #     means 3 reconnects span at least 1800s, which cannot fit strictly
-      #     inside a [30m]=1800s count_over_time window - any threshold above
-      #     `> 1` here is mathematically unreachable and would silently never
-      #     fire. One forced reconnect already means 3 consecutive loss strikes
-      #     against the gateway. This will not spam: the rule is level-triggered,
-      #     so sustained degradation holds one continuous firing state rather than
-      #     alerting per reconnect (900s spacing is well inside the 30m window).
-      - name: airvpn-bluetit
-        rules:
-          - alert: AirVPNBluetitReconnecting
-            expr: |
-              sum (
-                count_over_time({namespace="servarr", container="airvpn"} |= "reconnect triggered" [30m])
-              ) > 0
-            for: 5m
-            labels:
-              severity: warning
-              component: servarr
-            annotations:
-              summary: "AirVPN server degrading - Bluetit forced a reconnect"
-              description: >-
-                The Bluetit sidecar forced a reconnect because the probe saw
-                sustained packet loss to the in-tunnel gateway (3 consecutive
-                strikes above the loss threshold). quick-mode should have
-                moved to another recommended server; if this keeps firing the
-                whitelisted pool (nl,de,se) is bad, not one server. Measure the
-                candidate entry-3 IPs from the node before editing
-                airblackserverlist - AirVPN's status API reported health=ok for
-                all three servers that caused this. Recipe:
-                docs/superpowers/specs/2026-07-30-airvpn-bluetit-vpn-layer-design.md
+      # Group E (airvpn-bluetit / AirVPNBluetitReconnecting) removed here -
+      # see the file header comment for why. Do not re-add a rule matching
+      # "reconnect triggered": that log line no longer exists in the image.
