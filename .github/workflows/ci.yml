@@ -161,6 +161,12 @@ jobs:
               return r
 
           fail = []
+          pulled = set()  # (name, repo, ver) already untarred into /tmp/charts/<name> —
+                           # multiple helmCharts entries can share one chart (e.g. issue
+                           # #299's 3 per-namespace Reloader releases); re-running `helm
+                           # pull --untar` for the same chart dir fails with "already
+                           # exists", so pull once and reuse for every occurrence's
+                           # values-schema check below.
           for f in glob.glob("2-k3s/**/kustomization.yaml", recursive=True):
               doc = yaml.safe_load(open(f)) or {}
               for c in doc.get("helmCharts", []):
@@ -168,14 +174,17 @@ jobs:
                   if not (name and repo and ver):
                       continue
                   print(f"[{f}] {name} {ver} <- {repo}")
-                  if repo.startswith("oci://"):
-                      cmd = ["helm", "pull", f"{repo}/{name}", "--version", ver, "-d", "/tmp/charts", "--untar"]
-                  else:
-                      cmd = ["helm", "pull", name, "--repo", repo, "--version", ver, "-d", "/tmp/charts", "--untar"]
-                  r = helm_pull(cmd)
-                  if r.returncode != 0:
-                      fail.append(f"{name} {ver} ({repo}): {r.stderr.strip()}")
-                      continue
+                  key = (name, repo, ver)
+                  if key not in pulled:
+                      if repo.startswith("oci://"):
+                          cmd = ["helm", "pull", f"{repo}/{name}", "--version", ver, "-d", "/tmp/charts", "--untar"]
+                      else:
+                          cmd = ["helm", "pull", name, "--repo", repo, "--version", ver, "-d", "/tmp/charts", "--untar"]
+                      r = helm_pull(cmd)
+                      if r.returncode != 0:
+                          fail.append(f"{name} {ver} ({repo}): {r.stderr.strip()}")
+                          continue
+                      pulled.add(key)
                   # Validate the values file against the chart's values.schema.json.
                   # ArgoCD's repo-server enforces it at inflation; plain `helm pull`
                   # does NOT — the gap that let traefik v41's stale `logs:` key pass
