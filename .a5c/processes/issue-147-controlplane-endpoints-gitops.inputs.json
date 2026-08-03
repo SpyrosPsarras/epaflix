@@ -1,0 +1,13 @@
+{
+  "repoRoot": "/home/spy/Documents/Epaflix/k3s-swarm-proxmox",
+  "repo": "SpyrosPsarras/epaflix",
+  "appName": "observability",
+  "appPath": "2-k3s/10.observability",
+  "appManifest": "2-k3s/11.argocd/apps/app-observability.yaml",
+  "argocdValues": "2-k3s/11.argocd/helm-values.yaml",
+  "valuesFile": "2-k3s/10.observability/prometheus-values.yaml",
+  "kustomization": "2-k3s/10.observability/kustomization.yaml",
+  "readme": "2-k3s/10.observability/README.md",
+  "issue": "147",
+  "branch": "issue-147-controlplane-endpoints-gitops"
+}

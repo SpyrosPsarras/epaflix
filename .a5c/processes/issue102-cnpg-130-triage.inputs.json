@@ -1,0 +1,10 @@
+{
+  "repoRoot": "/home/spy/Documents/Epaflix/k3s-swarm-proxmox",
+  "repo": "SpyrosPsarras/epaflix",
+  "issue": 102,
+  "supersededBy": 128,
+  "prereqFlip": 127,
+  "pluginIssue": 10,
+  "adoptionIssue": 93,
+  "operatorManifest": "2-k3s/06.postgres/operator-kustomization/cnpg-operator.yaml"
+}
