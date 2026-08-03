@@ -204,7 +204,7 @@ images:
   # currentValue to look up. Do NOT set `newTag:` and `digest:` together - that is
   # skipReason: invalid-dependency-specification and silently disables tracking.
   - name: ghcr.io/elfhosted/newtarr
-    newTag: rolling@sha256:6abafe8ee23c96e3c9e298b5f9ef8313f1d231546b794900d4da36caa22912f0
+    newTag: rolling@sha256:b0e617e2c74a2a175d5bb87eada50edc4fd7fa2d72008a62c1913e33d1e46398
   # Official qBittorrent. Replaced tenseiken/qbittorrent-wireguard, which cannot
   # run without a VPN of its own (2026-07-30 Bluetit sidecar migration).
   - name: qbittorrentofficial/qbittorrent-nox
