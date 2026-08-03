@@ -39,8 +39,7 @@ without ever needing the SOPS age key. Three steps:
 
 Most chart dirs (`02.cert-manager`, `05.traefik-deployment`,
 `07.authentik-deployment`, `10.observability`, `11.argocd`,
-`11.argocd/image-updater`, plus `06.postgres`, `08.servarr`,
-`09.filebrowser`) decrypt secrets via a ksops/sops generator. A full
+`11.argocd/image-updater`, plus `06.postgres` and `08.servarr`) decrypt secrets via a ksops/sops generator. A full
 `kustomize build` of those needs the **age private key**, which is
 deliberately **withheld from CI** — putting the key that decrypts every
 cluster secret onto a GitHub runner is not acceptable. Those dirs are covered

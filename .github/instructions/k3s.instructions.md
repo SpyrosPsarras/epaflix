@@ -301,7 +301,6 @@ current setup — read that before touching the app. Deploy order:
 | `06.postgres/` | CNPG shared PostgreSQL | backups via barman cloud plugin; never force-manage pg pods |
 | `07.authentik-deployment/` | SSO + forward-auth | in-cluster clients must use internal DNS, never the public forward-auth-gated hostname (see servarr docs, #466) |
 | `08.servarr/` | Media stack — largest, most-incident-prone subsystem | read its README + `RECOVERY-*.md` runbooks first |
-| `09.filebrowser/` | FileBrowser Quantum | |
 | `10.observability/` | kube-prometheus-stack, Loki, Grafana | control-plane metrics depend on the #121/#148 binds above |
 | `11.argocd/` | GitOps app-of-apps + Image Updater | adoption-order rule in CLAUDE.md; most Apps `selfHeal: true, prune: false`; ArgoCD self-management selfHeal stays OFF |
 | `12.renovate/` | In-cluster Renovate | owns image digest pinning (#235) |

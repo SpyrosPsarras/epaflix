@@ -10,7 +10,7 @@
 # Pattern mirrors 2-k3s/08.servarr/_shared/ingress/public-routes.yaml.
 #
 # DELIBERATELY NOT behind Authentik forward-auth. #552 asked for it; the rest of
-# that issue shipped (truenas, minio-console, grafana, filebrowser, plus pegaprox
+# that issue shipped (truenas, minio-console, grafana, plus pegaprox
 # from #548) and this host was carved out on purpose. Do not "finish the job"
 # without dealing with all three of these:
 #

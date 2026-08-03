@@ -189,7 +189,7 @@ kubectl -n argocd rollout restart deploy/argocd-repo-server
 kubectl -n argocd rollout status deploy/argocd-repo-server
 
 # 6. Sanity: trigger ArgoCD App sync.
-argocd app sync filebrowser
+argocd app sync servarr
 # Confirm Synced + Healthy.
 
 # 7. Drop OLD recipient from .sops.yaml ; re-wrap ; commit.
