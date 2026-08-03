@@ -5,6 +5,12 @@ description: "Instructions for Docker Swarm cluster setup and management on Prox
 
 # Docker Swarm-Specific Instructions
 
+> **STATUS: DORMANT.** The three swarm VMs are stopped and the stack
+> (`registry`/`swarm-api`/`traefik`) has been down since ~2026-06 — see
+> issue #583 (fix-or-decommission decision pending). Everything below
+> describes how the cluster is *built and operated when it runs*; do not
+> assume any of it is currently live.
+
 When working with files in the `3-docker-swarm/` directory, follow these Docker Swarm-specific guidelines.
 
 **Credential Placeholders:**

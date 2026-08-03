@@ -10,9 +10,15 @@ issue #29. Design spec:
   kustomization that references them.
 - `.sops.yaml` at repo root is the only creation rule — single
   cluster-wide age recipient.
-- The private age key lives at `~/.config/sops/age/k3s-cluster.txt` on
-  the maintainer workstation, mirrored to TrueNAS on the ZFS-encrypted
-  dataset at `/mnt/apps/encrypted-backups/sops-age-backup/k3s-cluster.txt`
+- The private age key is *supposed* to live at
+  `~/.config/sops/age/k3s-cluster.txt` on the maintainer workstation —
+  but as of 2026-08 that copy does NOT exist (directory empty, `age` CLI
+  not installed), see #580. Until #580 is closed, the only reachable
+  copies are the in-cluster Secret `argocd/sops-age` and the TrueNAS
+  mirror below. Do not assume the workstation key is there; recovery-path
+  claims must be re-verified live, not trusted from docs. TrueNAS mirror:
+  the ZFS-encrypted dataset at
+  `/mnt/apps/encrypted-backups/sops-age-backup/k3s-cluster.txt`
   (ZFS native encryption, passphrase unlock; the passphrase is recorded in
   the git-ignored `.github/instructions/secrets.yml` under
   `truenas_zfs_encrypted_backups_passphrase`). The dataset must be manually
