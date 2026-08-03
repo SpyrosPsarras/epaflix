@@ -87,3 +87,11 @@ charts/
 # Python bytecode. images/vpn-picker/ is the repo's only Python source; running
 # its selftest locally drops a __pycache__ next to it.
 __pycache__/
+
+# Scratch triage notes (#662) - per-issue investigation notes and baseline/
+# before-state captures written while working an issue. Unlike .history/,
+# NO tracked exceptions: the GitHub issue/PR they feed is the durable record,
+# and at least one baseline capture already carried a raw show title (banned
+# per this repo's rule on media names in committed git). Convention documented
+# in general.instructions.md.
+artifacts/
