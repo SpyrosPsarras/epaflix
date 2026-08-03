@@ -26,6 +26,14 @@
 # + the scoped NewtarrConfigDriftCheckFailed PrometheusRule fire. The actual
 # re-snapshot/re-encrypt stays the MANUAL #137 runbook in
 # 2-k3s/08.servarr/RECOVERY-newtarr-cleanuparr.md (#179 section).
+#
+# #742: sonarr.json/radarr.json carry `instances[].api_key`, so a raw diff body
+# printed on drift would leak both the old and new *arr key into the job log.
+# The DETECTION diff still runs on the full unredacted normalized JSON (same
+# drift/no-drift verdict, same exit code, same alert), but what gets PRINTED is
+# piped through redact_diff() first, which blanks only the api_key value on
+# each side. Run `sh check.sh --selftest` to exercise redact_diff() against a
+# synthetic diff with no cluster access.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -34,6 +42,63 @@ metadata:
 data:
   check.sh: |
     set -eu
+
+    # Strip api_key VALUES from a unified diff before it is ever printed
+    # (#742). Only the value is replaced — the key name and +/- markers stay,
+    # so a human can still see THAT api_key changed, just not to what.
+    redact_diff() {
+      sed 's/^\([+-][[:space:]]*"api_key"[[:space:]]*:[[:space:]]*\)"[^"]*"/\1"REDACTED"/'
+    }
+
+    selftest() {
+      echo "=== newtarr-config-drift selftest (no cluster access) ==="
+
+      cat > /tmp/st.diff <<'EOF'
+    --- seed
+    +++ live
+    @@ -1,4 +1,4 @@
+       "hourly_cap": 200,
+    -  "api_key": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    +  "api_key": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    -  "name": "sonarr-main"
+    +  "name": "sonarr-renamed"
+    EOF
+
+      out=$(redact_diff < /tmp/st.diff)
+
+      case "$out" in
+        *aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa*|*bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb*)
+          echo "FAIL: a raw api_key value survived redact_diff" >&2
+          exit 1
+          ;;
+      esac
+
+      case "$out" in
+        *'"api_key": "REDACTED"'*) ;;
+        *)
+          echo "FAIL: expected a redacted api_key line, found none" >&2
+          echo "$out" >&2
+          exit 1
+          ;;
+      esac
+
+      case "$out" in
+        *'sonarr-renamed'*) ;;
+        *)
+          echo "FAIL: unrelated structural drift line was dropped too - detection changed" >&2
+          echo "$out" >&2
+          exit 1
+          ;;
+      esac
+
+      echo "PASS: redact_diff blanks api_key values and keeps other drift lines intact."
+    }
+
+    if [ "${1:-}" = "--selftest" ]; then
+      selftest
+      exit 0
+    fi
+
     echo "=== newtarr config-seed drift check @ $(date -u +%FT%TZ) ==="
 
     # Declarative keys to compare. Format: "<seed-key>:<live-path>". The seed
@@ -104,7 +169,7 @@ data:
         echo "OK: $key matches live $live (0 drift)."
       else
         echo "DRIFT DETECTED for $key (seed vs live $live):"
-        sed 's/^/    /' /tmp/diff.txt
+        redact_diff < /tmp/diff.txt | sed 's/^/    /'
         drift=1
       fi
     done
