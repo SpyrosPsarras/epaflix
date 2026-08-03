@@ -85,17 +85,26 @@ Verify what you are about to remove first (`zfs list -t snapshot -o name,used,cr
 
 Background: #444 (pool1 reclaim) destroyed `pool1/dataset01@pre-unify-issue195` while open teardown #247 still named that exact snapshot as its rollback. Both of #247's retention gates happened to be met already, so nothing broke - but that was a coincidence, not a checked precondition (#515).
 
-### NFS export allow-lists (live-only state)
+### NFS export allow-lists (authoritative record)
 
-NFS shares are **not codified anywhere in this repo** - they exist only in the TrueNAS config DB. Treat the list below as the record of what the allow-lists are supposed to be, and re-check it with `midclt call sharing.nfs.query` before assuming.
+The live allow-lists live only in the TrueNAS config DB - **this table is the repo's record of what they are supposed to be**. Re-check with `midclt call sharing.nfs.query` (and `sudo cat /etc/exports` for the generated squash flags) before assuming. **No export may have an empty `hosts` list** - empty means world, any host on `192.168.10.0/24`.
 
-| id | path | allowed hosts |
-|----|------|---------------|
-| 32 | `/mnt/pool1/dataset01` | the 7 k3s nodes: `.51 .52 .53 .61 .62 .63 .65` |
-| 33 | `/mnt/apps/odysseus-bastion` | `.61 .62 .63 .65 .43` |
-| 25, 26, 27, 29, 31 | VMs, ISOs, code-server, k3s-containers-backup, k3s-containers | **unrestricted** - any LAN host |
+| id | path | allowed hosts | squash (anonuid) | real consumer |
+|----|------|---------------|------------------|---------------|
+| 25 | `/mnt/pool1/dataset01/VMs` | `.10 .11` | `all_squash` → **root (0)** | PVE storage `VMs` on both Proxmox hosts, mounted at `/mnt/pve/VMs`. Dir is `root:root drwxrwx---`, so mapall root is load-bearing |
+| 26 | `/mnt/pool1/dataset01/ISOs` | `.10 .11` | `all_squash` → `libvirt-qemu` (986) | PVE storage `ISOs`, defined on both hosts but currently `disable`d. No live mount |
+| 27 | `/mnt/apps/code-server` | `.25` | `all_squash` → `libvirt-qemu` (986) | VM 1025 `vscode-tunnel` only. No live mount (VM unreachable). Holds a home dir incl. `.ssh` |
+| 29 | `/mnt/pool1/k3s-containers-backup` | `.10 .11` | `all_squash` → `nobody` (65534) | **none - deprecated, empty** (#699 tracks removing it). Squashed to `nobody` against a `libvirt-qemu drwxrwx---` dir ⇒ effectively no access |
+| 31 | `/mnt/apps/k3s-containers` | `.51` | `all_squash` → `apps` (568) | `k3s-master-51` fstab mount at `/mnt/k3s-containers`. A Proxmox target, **not** for k3s use - no PV, no pod hostPath |
+| 32 | `/mnt/pool1/dataset01` | the 7 k3s nodes: `.51 .52 .53 .61 .62 .63 .65` | `all_squash` → `apps` (568) | all media pods |
+| 33 | `/mnt/apps/odysseus-bastion` | `.61 .62 .63 .65 .43` | `all_squash` → `apps` (568) | odysseus pod + bastion VM |
 
 Share 32 was unrestricted until #537. It carries all media plus `backups/sonarr2`, whose zip contains `config.xml` (API key) and `sonarr.db` (indexer credentials, download-client passwords), so any host on `192.168.10.0/24` could mount and read it.
+
+Shares 25, 26, 27, 29 and 31 were unrestricted until #680. Two notes from that sweep:
+
+- **`all_squash` with `anonuid=0` is worse than no squash at all.** Share 25 squashed *every* client identity to **root** - so while it was world-exported, any LAN host had unconditional root write to the Proxmox VM/backup dir. Share 29, which #680 called out as the root-write one, actually had **no** squash options ⇒ the kernel default `root_squash` applied and root was already mapped to `nobody`. When judging exposure, read `/etc/exports`, not the `maproot`/`mapall` fields alone.
+- **Squash is not a substitute for an allow-list, and an allow-list is not a substitute for squash.** Fix both.
 
 Both masters and workers need share 32: workers mount the dataset root at `/mnt/k3s-media`, masters mount the per-directory paths (`/mnt/k3s-movies`, `/mnt/k3s-tvshows`, `/mnt/k3s-animes`, `/mnt/k3s-downloads`). **Adding a new k3s node means adding its IP here**, or its media mounts fail.
 
@@ -103,15 +112,22 @@ Both masters and workers need share 32: workers mount the dataset root at `/mnt/
 ssh <TRUENAS_USER>@<TRUENAS_IP> "midclt call sharing.nfs.update 32 '{\"hosts\": [\"192.168.10.51\", ...]}'"
 ```
 
-**Verification gotcha - a successful `mount` does NOT mean the restriction failed.** Under NFSv4, any child path that is still world-exported (here `/VMs` and `/ISOs`, shares 25/26) forces the server to publish the parent in the v4 **pseudo-filesystem**. A denied client can still `mount` `/mnt/pool1/dataset01` and get a pseudo-fs node - it just cannot see anything except the child exports it is allowed. Checking `mountpoint -q` alone gives a false pass.
+**Verification gotcha - a successful `mount` does NOT mean the restriction failed.** Under NFSv4 the server publishes parents of any export in the v4 **pseudo-filesystem**. A denied client can still `mount` such a path and get a pseudo-fs node - it just cannot list anything it is not allowed. Checking `mountpoint -q` alone gives a false pass. Two shapes of denial, both correct:
 
-Always verify by **listing and reading**, from a host that is not on the allow-list:
+- `mount` returns **0** and `ls` returns `Permission denied` - path sits under a pseudo-fs parent (`/mnt/pool1/dataset01`, `/mnt/pool1/dataset01/VMs`).
+- `mount` fails with `reason given by server: No such file or directory` - no pseudo-fs path leads there (`/mnt/apps/*`).
+
+Always verify by **listing**, never by mount status, and test both directions - an allowed host must still list:
 
 ```bash
-ssh root@192.168.10.10 "mount -t nfs4 -o ro,soft 192.168.10.200:/mnt/pool1/dataset01 /tmp/t
-  ls /tmp/t          # expect ONLY the still-world-exported children (ISOs, VMs)
-  ls /tmp/t/backups  # expect: No such file or directory
-  umount -f /tmp/t"
+# NEGATIVE - from a host NOT on that share's allow-list (pick one per share; .177 workstation works for all)
+ssh ubuntu@<denied-host> "sudo mount -t nfs4 -o ro,soft,timeo=50,retrans=1 192.168.10.200:<export> /tmp/t
+  sudo ls /tmp/t   # expect: Permission denied  (or the mount itself fails)
+  sudo umount -f /tmp/t"
+
+# POSITIVE - from an allowed consumer, against its real mountpoint
+ssh root@192.168.10.10 "ls /mnt/pve/VMs && pvesm status --storage VMs"
+ssh ubuntu@192.168.10.51 "ls /mnt/k3s-containers"
 ```
 
 Tightening an export is safe for clients that stay on the list - existing NFSv4 mounts are not dropped. Enumerate the real client set first, or you will cut off a mount you did not know about:
