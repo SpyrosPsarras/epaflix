@@ -75,6 +75,9 @@ spec:
   routes:
     - match: Host(`minio.epaflix.com`)
       kind: Rule
+      middlewares:
+        - name: security-headers
+          namespace: traefik-system
       services:
         - name: minio-external
           port: 9000
@@ -117,6 +120,9 @@ spec:
   routes:
     - match: Host(`minio-console.epaflix.com`)
       kind: Rule
+      middlewares:
+        - name: security-headers
+          namespace: traefik-system
       services:
         - name: minio-external
           port: 9001
