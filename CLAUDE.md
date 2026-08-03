@@ -93,7 +93,7 @@ TrueNAS: `ssh truenas_admin@192.168.10.200`.
 2-k3s/              # K3s cluster — numbered subdirs (01-15) in deploy order + maintenance/
 3-docker-swarm/     # Docker Swarm cluster + stacks (dormant, see #583)
 docs/               # Design docs — docs/superpowers/{plans,specs} hold spec-driven feature designs
-artifacts/          # Per-issue triage / feature working notes (untracked limbo — #662)
+artifacts/          # Per-issue triage / feature working notes (git-ignored scratch, see general.instructions.md, #662)
 backups/            # Local backups (git-ignored)
 images/             # Documentation images
 raid-migration/     # Proxmox RAID migration guides
