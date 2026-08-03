@@ -45,6 +45,16 @@ resources:
   # generator here would drop this whole directory out of CI's sops-free
   # kustomize gate.
   - orphan-census-cronjob.yaml
+  # Issue #607: hourly Prowlarr indexer-backoff health check (servarr ns).
+  # Carries its own check-script ConfigMap + CronJob; no RBAC (HTTP only). The
+  # prowlarr-api-key Secret is rendered by the SERVARR App's ksops generator,
+  # same cross-App reason as qbittorrent-webui-credentials above.
+  - prowlarr-indexer-health-cronjob.yaml
+  # Issue #606: hourly cleanuparr QueueCleaner health check (servarr ns).
+  # Carries its own check-script ConfigMap + CronJob; no RBAC (HTTP only). The
+  # cleanuparr-api-key Secret is rendered by the SERVARR App's ksops generator,
+  # same cross-App reason as above.
+  - cleanuparr-queuecleaner-health-cronjob.yaml
 
 # Issue #182: diff baseline for the cleanuparr-blocklist-drift CronJob. Single
 # on-disk source of truth = files/cleanuparr-blocklist-expected.txt (verbatim
