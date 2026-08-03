@@ -1317,3 +1317,57 @@ deliverable), #195 (single-`/media` unification that removed EXDEV), #240 / #242
 tracker, now closed by this Path D decision), #196 (Cleanuparr safe-reaper DB
 values + restore runbook), `feedback_private_trackers` (never delete private
 torrents).
+
+## #739 — dead-key cleanup sweep on pod-side `.bak-*` copies (2026-08-04)
+
+Follow-up to the #712/#737 and #740/#741 `radarr`/`sonarr`/`sonarr2` API-key
+rotations: every `.bak-*` file below held a **pre-rotation** copy of one of
+those keys. Verified dead by comparing `sha256(value)` against the current
+live key on each *arr `config.xml` before deleting anything — never by
+printing the value itself.
+
+**Deleted** (confirmed via hash: value ≠ current live key, and not named by
+any open issue as a rollback target):
+
+- `radarr` / `sonarr` / `sonarr2` pods: `/config/config.xml.bak-712`,
+  `/config/config.xml.bak-rotate740`
+- `newtarr` pod: `/config/sonarr.json.bak-hourlycap-202607281332`,
+  `/config/sonarr.json.bak-issue135-202606061706`, and the `huntarr.db` file
+  (only) inside each of the three `/config/backups/huntarr_backup_v9.4.3_*`
+  directories — `backup_info.json`/`logs.db` in those directories hold no
+  credential and were left in place
+- `seerr` pod: `/app/config/settings.json.bak-issue250`,
+  `/app/config/settings.old.json`
+- `bazarr` pod: `/config/config/config.yaml.bak-preinternal` — this file also
+  carried still-current `jellyfin`/`plex`/own-`auth` keys (never rotated, out
+  of this sweep's scope); deleting the whole stale pre-migration backup was
+  judged lower-risk than leaving a partial file behind
+- `cleanuparr` pod: `/config/cleanuparr.db.bak-20260531-135309`,
+  `/config/cleanuparr.db.bak-20260531-160146`,
+  `/config/cleanuparr.db.bak-20260710-patterns` (+ its `-shm`/`-wal` siblings)
+
+**Left in place on purpose** — same dead-key content, but each is a named
+rollback point:
+
+- `cleanuparr.db.bak-20260802-pre618` / `-pre618-split` (+ siblings): tied to
+  open issue #618 (reaper arming), not yet actioned
+- `cleanuparr.db.bak195` (+ siblings): named after #195, which is now closed;
+  left alone anyway pending an explicit retention decision (#739 outcome
+  item 1) rather than pruning it on this pass
+- `cleanuparr.db.bak-qbtpw-20260803-225508`: qBittorrent-password rotation
+  artifact, out of scope for this sweep (owned by the AirVPN/qbittorrent
+  work)
+- `.a5c/processes/sonarr-import-series-290.{js,inputs.json}`: checked —
+  these only ever held the `<SONARR_API_KEY>` placeholder, never a real
+  value, so there was nothing to clean
+
+**Not reachable from this pass:** the two workstation-only files named in
+#739 (`2-k3s/08.servarr/research/app-configs.xml`,
+`2-k3s/08.servarr/_backups/postgres-dumps/prowlarr-main-backup-20260124-191947.sql`)
+are git-ignored and were not present in the isolated worktree this cleanup
+ran from — still need checking/deleting directly on the primary checkout.
+
+If any `.bak-*` copy above is ever used as an actual restore target, its
+`api_key`/`ApiKey` values are stale and must be re-pointed to the current
+live key afterward — see the #137/#182 refresh recipes elsewhere in this
+file for the pattern.
