@@ -8,6 +8,13 @@
 #   kubectl apply -f tls-options.yaml
 #
 # Reference: https://doc.traefik.io/traefik/https/tls/#tls-options
+#
+# A TLSOption named `default` in ANY namespace is applied by Traefik as that
+# namespace's default (https://doc.traefik.io/traefik/routing/providers/kubernetes-crd/#tlsoption).
+# A duplicate `servarr/default` existed hand-applied and untracked (created
+# 2026-03-05, spec byte-identical to this one) - Traefik logged
+# "Default TLS Options defined in multiple namespaces" every ~5s. Deleted live
+# 2026-08-03 (#551); this is the only `default` TLSOption in the cluster.
 
 apiVersion: traefik.io/v1alpha1
 kind: TLSOption
