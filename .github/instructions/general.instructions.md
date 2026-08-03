@@ -55,6 +55,33 @@ Rules:
   (`sha256sum`, or `hashlib.sha256(v).hexdigest()[:16]`), and print lengths
   rather than contents.
 
+## Hash in the query, never in a parser (#740)
+
+"I intended to hash it" is not a control. #740 leaked all three freshly-rotated
+*arr keys **from the parser that was supposed to hash them**: prowlarr's
+`"Settings"` column is pretty-printed JSON, `psql -tA` emitted one row across
+~20 lines, every line failed `json.loads`, and the `except` branch printed each
+raw line - including `"apiKey": "..."`. The hashing code never ran.
+
+Rules:
+
+- **Compute the hash where the value is produced, not downstream.** In SQL:
+  `SELECT "Name", md5("Settings"::jsonb->>'apiKey') FROM "Applications";`. In
+  k8s: `kubectl ... -o jsonpath='{.data.<key>}' | base64 -d | sha256sum`. If a
+  hash reaches your shell instead of a value, no later bug can leak anything.
+- **No error path in a secret pipeline may echo its input.** Any `except` /
+  `else` / fallback in secret-handling code prints a **fixed string**
+  (`"unparseable"`, `"updated: no"`) - never a variable derived from the data,
+  and never the raw line. Assume every parser you write will hit its error
+  branch on the one row that holds the secret.
+- **Prefer behaviour over reading the stored value at all.** A rotation is
+  proved by `200` with the new key plus `401` with the old one - or the app's own
+  test endpoint (`POST /api/v1/applications/testall` → `isValid: true`). Read a
+  stored value only where behaviour cannot be observed (prowlarr masks the field
+  as `********`, lingarr stores it encrypted), and there hash it in-query. In
+  #740 the behavioural check had already passed; the stored-value read added
+  nothing and cost a second rotation.
+
 ## Command History Documentation
 
 IMPORTANT: Document all significant commands and their outputs in the `.history/` directory for future LLM reference and troubleshooting.

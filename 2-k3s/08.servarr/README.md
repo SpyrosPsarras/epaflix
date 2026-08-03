@@ -250,6 +250,10 @@ ls -i /mnt/pool1/dataset01/tvshows/Show/Season\ 01/show.mkv
 
 ## Rotating the radarr / sonarr / sonarr2 API keys (#712)
 
+Run twice as written (#712, then #740 hours later after the first rotation's
+values leaked). The second pass needed no changes to the steps below, so treat
+them as known-good.
+
 Each *arr's API key is consumed by **seven** other things, and five of them keep
 their copy **PVC-only or in the app's own DB** - so a rotation that only touches
 git leaves those five authenticating with a dead key. Values live in the
