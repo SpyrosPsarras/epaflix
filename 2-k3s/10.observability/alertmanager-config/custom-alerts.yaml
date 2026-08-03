@@ -495,3 +495,48 @@ spec:
           annotations:
             summary: "postgres-cluster backup-age metric missing"
             description: "barman_cloud_cloudnative_pg_io_last_available_backup_timestamp has been absent for 30m - the postgres-system scrape target is down or gone, so the backup-age alerts above cannot fire even if backups are broken. Check that postgres-cluster pods are Running and the PodMonitor is picking them up."
+
+    # Credential redaction counter (#634, #702). Pairs with the log-content rule
+    # CredentialInLogs in loki-log-alerts.yaml - read both before changing either.
+    #
+    # promtail now redacts credential-shaped values before pushing to Loki, so the
+    # stored line reads `Password=<REDACTED>` and the log-content rule can no
+    # longer see it. That is deliberate, and it is why this metric exists: the
+    # promtail pipeline COUNTS each line while the secret is still visible, then
+    # redacts. This counter is the durable signal; the log-content rule stays as a
+    # catch-all for credential shapes the redaction regex does not recognise.
+    #
+    # Known non-zero contributors when this shipped: sonarr, radarr and prowlarr
+    # each log their full Postgres connection string including the plaintext
+    # password at Info level on EVERY start (#634, upstream behaviour). So this
+    # WILL increment on any of those restarting. That is a true positive, not
+    # noise - the credential really did leave the app in clear. Do not silence it;
+    # the fix is for those apps to stop logging connection strings.
+    #
+    # `increase() > 0` over 15m rather than a rate threshold: one leaked line is
+    # already the event, and restarts are infrequent enough that this is not
+    # chatty. Redaction means the secret did not reach Loki, so severity is
+    # warning rather than critical - the exposure is bounded to the pod's own
+    # stdout (`kubectl logs`), which promtail cannot clean.
+    - name: credential-redaction
+      rules:
+        - alert: CredentialRedactedFromLogs
+          expr: |
+            sum by (namespace) (
+              increase(promtail_custom_credential_lines_redacted_total[15m])
+            ) > 0
+          for: 0m
+          labels:
+            severity: warning
+            component: security
+          annotations:
+            summary: "An app logged a credential in {{ $labels.namespace }} (redacted before Loki)"
+            description: >-
+              {{ $value }} log line(s) in namespace {{ $labels.namespace }}
+              contained a credential-shaped key=value in the last 15m. promtail
+              redacted the value before pushing, so it is NOT in Loki - but it IS
+              in the pod's own stdout and visible via `kubectl logs`. Most likely
+              cause is sonarr/radarr/prowlarr restarting and logging their Postgres
+              connection string (#634). Identify the pod, and if it is a new
+              offender treat that credential as exposed and rotate it. Do NOT grep
+              Loki for the literal value.

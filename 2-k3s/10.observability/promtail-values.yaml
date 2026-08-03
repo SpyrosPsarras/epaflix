@@ -20,6 +20,47 @@ config:
         - multiline:
             firstline: '^\d{4}-\d{2}-\d{2}|^[A-Z]{1}\d{4}'
             max_wait_time: 3s
+        # --- credential redaction (#634, #702) ---------------------------------
+        # Some apps print secrets into their own stdout. Sonarr, Radarr and
+        # Prowlarr each log the full Postgres connection string INCLUDING the
+        # plaintext password at Info level on every start:
+        #   [Info] MigrationController: *** Migrating Database=...;Password=...;
+        # That is upstream behaviour, not our config - but the consequence is
+        # ours, because promtail then ships it to Loki where it is searchable in
+        # Grafana for the whole 31-day retention window.
+        #
+        # TWO STAGES, in this order, and the order matters:
+        #   1. `match` + `metrics` COUNTS the line while the secret is still
+        #      visible, exporting promtail_custom_credential_lines_redacted_total.
+        #   2. `replace` then REDACTS the value before the line is pushed.
+        #
+        # Counting first is what keeps this detectable. If we only redacted, the
+        # stored line would read `Password=<REDACTED>`, the log-content alert
+        # CredentialInLogs could never match it again, and a leaking app would
+        # become invisible - we would have hidden the symptom and lost the
+        # signal. The counter is the durable signal; the log-content rule stays
+        # as a catch-all for any credential SHAPE this regex does not recognise.
+        #
+        # Redaction happens in promtail, so it protects Loki and Grafana. It does
+        # NOT clean `kubectl logs` on the pod itself - the app still prints it to
+        # its own stdout. Fixing that needs an upstream change or for the apps to
+        # stop logging connection strings.
+        - match:
+            selector: '{namespace=~".+"} |~ "(?i)(password|passwd|apikey|api_key|api-key|client_secret)="'
+            stages:
+            - metrics:
+                credential_lines_redacted_total:
+                  type: Counter
+                  description: "Log lines containing a credential-shaped key=value that promtail redacted before pushing to Loki (#634)."
+                  config:
+                    action: inc
+        - replace:
+            # Only the capture group - the VALUE - is replaced, so the key name
+            # survives and stays greppable/alertable. Value charset stops at the
+            # delimiters that actually terminate these: `;` in a connection
+            # string, `&` in a URL query, quotes and whitespace.
+            expression: '(?i)(?:password|passwd|apikey|api_key|api-key|client_secret)=([^;&"''\s]+)'
+            replace: '<REDACTED>'
         kubernetes_sd_configs:
         - role: pod
         relabel_configs:
