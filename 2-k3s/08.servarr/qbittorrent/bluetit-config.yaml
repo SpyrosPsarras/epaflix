@@ -118,19 +118,21 @@ data:
     # 10.43.0.1 is unreachable.
     #
     # DNS survives this, but barely (see #517, correcting #512/#513).
-    # `resolv.conf` lists TWO resolvers: `192.168.10.30` (Pi-hole, RFC1918,
-    # blackholed exactly like above - times out every time) and `1.1.1.1`
-    # (reachable, inside the tunnel). The tunnel-pushed `10.128.0.1` also
-    # answers. End-to-end lookups succeed in well under 100ms (measured
-    # 30-76ms across repeated checks). This only works because the image is
-    # Alpine/musl: musl queries every configured nameserver in PARALLEL and
-    # takes whichever answers first, so the dead `192.168.10.30` never gets
-    # in the way. A glibc image queries resolvers sequentially - it would
-    # burn ~5s timing out on `192.168.10.30` on EVERY lookup, while every
-    # health probe still reads green. Same silent-failure class as the
-    # restart-window leak `networklockpersist` guards against above. If this
-    # image ever moves off musl, DNS resolution silently stalls; the second
-    # resolver alone will not save it.
+    # `resolv.conf` now lists ONE resolver, `1.1.1.1` (reachable, inside the
+    # tunnel). `192.168.10.30` (Pi-hole, RFC1918) used to be first and was
+    # blackholed exactly like above - it timed out on every lookup and was
+    # dropped in #517. The tunnel-pushed `10.128.0.1` also answers, but it
+    # only exists after connect so it cannot be the pod's only resolver.
+    # End-to-end lookups succeed in well under 100ms (measured
+    # 30-76ms across repeated checks). Before #517 that speed depended on the
+    # image being Alpine/musl: musl queries every configured nameserver in
+    # PARALLEL and takes whichever answers first, so the dead `192.168.10.30`
+    # never got in the way. A glibc image queries resolvers sequentially and
+    # would have burned ~5s timing out on it on EVERY lookup while every
+    # health probe still read green - same silent-failure class as the
+    # restart-window leak `networklockpersist` guards against above. Dropping
+    # .30 removed that dependency, so do NOT add an RFC1918 resolver back
+    # here: it would time out, and on a non-musl image it would stall.
     #
     # INBOUND private traffic (WebUI, probes, Service traffic reaching the
     # pod) still works, which is why nobody noticed. allowping IS genuinely
