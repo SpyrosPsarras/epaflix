@@ -247,6 +247,193 @@ spec:
             summary: "qBittorrent container restarting repeatedly (VPN flap?)"
             description: "qBittorrent ({{ $labels.pod }}) restarted {{ $value }} times in 15m. The Bluetit sidecar's network lock drops traffic on tunnel loss and the pod re-inits — likely an AirVPN flap. Check the airvpn container logs (Grafana → Explore → Loki: {namespace=\"servarr\", container=\"airvpn\"}) and the forwarded port (#qbittorrent-vpn)."
 
+    - name: servarr-vpn-picker
+      interval: 60s
+      rules:
+        # vpn-picker alerting (#622, #689, #555). Replaces the deleted Loki rule
+        # E (AirVPNBluetitReconnecting, #668) - that matched a log string the
+        # image no longer emits, and the signal it was reaching for now lives in
+        # the agent's own metrics.
+        #
+        # WHAT IS DELIBERATELY NOT ALERTED ON, and why - read this before adding
+        # anything to this group:
+        #
+        #   vpn_agent_current_loss_pct - the ICMP probe to the in-tunnel gateway
+        #   reads 10-20% in NORMAL loaded steady state, because ICMP is the first
+        #   thing a saturated upload queue drops (#732). Measured 2026-08-03 on a
+        #   healthy tunnel pulling 3.8 MiB/s: `vpn_agent_current_loss_pct 12` with
+        #   `ping -c 2` clean and 208 MB transferred in 3 minutes. Any loss
+        #   threshold low enough to catch a real fault pages constantly.
+        #
+        #   vpn_agent_consecutive_bad_windows - PR #733 set
+        #   VPN_AGENT_BAD_LOSS_PCT=101 (unreachable, loss is a percentage), so
+        #   watch_once() resets the counter on every window. Confirmed live on the
+        #   #733 pod: env `VPN_AGENT_BAD_LOSS_PCT=101`,
+        #   `vpn_agent_consecutive_bad_windows 0` while `current_loss_pct 12`. This
+        #   gauge now reads 0 permanently - an alert on it could never fire, which
+        #   is exactly the "reads as coverage and is not" failure #668 deleted rule
+        #   E for.
+        #
+        #   vpn_agent_switches_total{reason="degradation"} - same disarm, the
+        #   counter cannot increment. Re-add a rule here only together with a probe
+        #   that survives load (#732 tracks the options).
+        #
+        # So this group alerts only on states that are unambiguous with the probe
+        # as it stands: the agent not answering, the tunnel device gone outside a
+        # switch window, the ranking stale past its own TTL, the ranked pool having
+        # failed, dry-run left parked, and the scorer finding nothing.
+
+        # #622: the one alert written for this pod (QbittorrentVpnFlap above) is a
+        # restart-count rule, and #620 made the agent container fall through to
+        # `exec sleep infinity` instead of crash-looping. That was the right trade -
+        # a crash-looping sidecar used to take qBittorrent's WebUI and every *arr
+        # download client down with it - but it means a dead agent leaves the pod
+        # 3/3 Ready with a flat restart count, so KubePodCrashLooping,
+        # KubePodNotReady and QbittorrentVpnFlap all go quiet.
+        #
+        # agent.py binds ThreadingHTTPServer(("", 8081)) and is the only thing in
+        # the image binding that port, so `sleep infinity` means no listener means
+        # `up == 0` while the pod stays Ready. Verified live 2026-08-03:
+        # `up{namespace="servarr",job="qbittorrent",endpoint="agent-metrics"}` is a
+        # single real series reading 1.
+        #
+        # The `or absent(...)` clause covers the other half - a deleted
+        # ServiceMonitor or a changed Service selector makes the target vanish
+        # rather than fail, and a missing series cannot compare to 0. Verified that
+        # absent() re-attaches the equality matchers: the same expression with a
+        # deliberately wrong endpoint returned
+        # `{endpoint="nope", job="qbittorrent", namespace="servarr"} 1`.
+        #
+        # for: 15m rides out a normal Deployment roll (~2-3 min) without paging.
+        - alert: VpnAgentDown
+          expr: |
+            up{namespace="servarr", job="qbittorrent", endpoint="agent-metrics"} == 0
+            or
+            absent(up{namespace="servarr", job="qbittorrent", endpoint="agent-metrics"})
+          for: 15m
+          labels:
+            severity: warning
+            component: servarr
+          annotations:
+            summary: "vpn-picker agent is not serving metrics"
+            description: "The vpn-picker agent sidecar in {{ $labels.namespace }} has not answered a scrape on :8081 for 15m. The pod is probably still 3/3 Ready - since #620 the agent container falls through to `exec sleep infinity` when /agent-entrypoint.sh is missing or fails, so a broken agent looks healthy and stops protecting the tunnel silently. Check that the `agent` container is running the entrypoint and not sleeping (Grafana → Explore → Loki: {namespace=\"servarr\", container=\"agent\"}), NOT a network problem (#622, #620, #617)."
+
+        # #689: the honest replacement for the degradation signal. Alerts on the
+        # tunnel device qBittorrent is bound to being gone, which is unambiguous -
+        # no egress at all - as opposed to the loss percentage, which is not.
+        #
+        # vpn_agent_tunnel_device_ok is read from /sys/class/net at scrape time
+        # (#690), so it is a live reading rather than the cached True the metric
+        # used to publish without ever looking. The device is deleted and rebuilt
+        # on every switch, so a scrape inside that window honestly sees no device -
+        # `and vpn_agent_switch_in_progress == 0` is the companion the agent
+        # exports for exactly this, and both series carry identical labels so the
+        # `and` matches 1:1. Verified live 2026-08-03: the inverted form
+        # (`tunnel_device_ok == 1 and switch_in_progress == 0`) returns the real
+        # series, the alerting form returns empty.
+        #
+        # for: 5m is well clear of the switch window, which is bounded by
+        # VPN_AGENT_RECOVERY_BUDGET_SECONDS (120 s) and capped at 3 switches a day.
+        - alert: VpnAgentTunnelDeviceMissing
+          expr: |
+            vpn_agent_tunnel_device_ok{namespace="servarr"} == 0
+            and
+            vpn_agent_switch_in_progress{namespace="servarr"} == 0
+          for: 5m
+          labels:
+            severity: critical
+            component: servarr
+          annotations:
+            summary: "qBittorrent's VPN tunnel device is gone and no switch is running"
+            description: "vpn_agent_tunnel_device_ok is 0 on {{ $labels.pod }} with vpn_agent_switch_in_progress 0, so this is not the normal teardown inside a switch - the device qBittorrent binds to does not exist. The Bluetit network lock is still armed so nothing leaks, but qBittorrent has no egress at all. Check the airvpn and agent container logs (Grafana → Explore → Loki: {namespace=\"servarr\", container=\"airvpn\"}) - the 2026-08-02 incident was a boot upgrade to a tunnel that never handshook (#627, #689)."
+
+        # #555 ("ranking stale beyond TTL for over 2 h"). vpn-picker publishes
+        # ranking.json every 15 min with ttl_seconds: 2100 (35 min = two missed
+        # cycles plus slack, images/vpn-picker/vpn_picker.py:62). Past the TTL the
+        # agent treats the ranking as ABSENT and falls back to its cached last-good
+        # list, then to `quick` - so this degrades quietly, it does not break
+        # anything immediately. Hence warning, not critical.
+        #
+        # 2100 is the TTL itself and `for: 2h` is the "for over 2 h" from #555, so
+        # this needs the ranking to be roughly 2 h 35 m old before it pages. The
+        # metric is measured at scrape time from the file (#686 fixed it being read
+        # once at boot and frozen), so it really does climb. Verified live
+        # 2026-08-03: `vpn_agent_ranking_age_seconds` = 768, the alerting form
+        # (`> 2100`) returns empty.
+        - alert: VpnAgentRankingStale
+          expr: vpn_agent_ranking_age_seconds{namespace="servarr"} > 2100
+          for: 2h
+          labels:
+            severity: warning
+            component: servarr
+          annotations:
+            summary: "vpn-picker ranking is stale past its TTL"
+            description: "The ranking the agent reads is {{ $value | humanizeDuration }} old on {{ $labels.pod }}, past its 2100 s TTL, and has been for over 2 h. The agent is running on its cached last-good list or on `quick`, so server selection is no longer measured. Check the vpn-picker Deployment in servarr and that it can still write /media/.vpn-picker/ranking.json (#555, #498)."
+
+        # #555 ("zero candidates passing the probe gate"). The scorer's own view:
+        # nothing in the pool passed its probe gate, so even a working agent has
+        # nothing better to switch to. Cannot be inferred from any agent metric.
+        # Verified live 2026-08-03: vpn_picker_candidates_passing_gate = 4.
+        #
+        # for: 1h = four scoring cycles, so one bad round trip to the AirVPN API
+        # does not page.
+        - alert: VpnPickerNoCandidates
+          expr: vpn_picker_candidates_passing_gate{namespace="servarr"} == 0
+          for: 1h
+          labels:
+            severity: warning
+            component: servarr
+          annotations:
+            summary: "vpn-picker has no server passing the probe gate"
+            description: "vpn_picker_candidates_passing_gate has been 0 for an hour on {{ $labels.pod }} - every scored AirVPN server failed the gate, so the agent has no ranked candidate to move to and a switch would land on `quick`. Check the vpn-picker logs and whether the AirVPN API is answering (Grafana → Explore → Loki: {namespace=\"servarr\", container=\"vpn-picker\"}) (#555, #498)."
+
+        # A switch that ends on `quick` instead of a ranked candidate is counted as
+        # `fallback` and treated as failed by the agent itself
+        # (agent.py:_finish - "ended on quick ... treating it as failed and holding
+        # the full cooldown"). It means every ranked candidate failed, and the pod
+        # stays on a mediocre server until something changes.
+        #
+        # This is the absolute counter value, deliberately NOT
+        # increase(...[window]). The counter is per-pod and starts at 0 on every
+        # pod, and the boot switch can complete before the first 60 s scrape - a
+        # series whose first sample is already 1 gives increase() nothing to see,
+        # so an event-shaped rule would silently miss the boot case, which is the
+        # one that actually happened on 2026-08-02. Read as state instead: "this
+        # pod is on a fallback server". It therefore stays firing for the life of
+        # the pod, which is correct - the condition really does persist - and
+        # resolves when the pod rolls. Verified live 2026-08-03:
+        # `vpn_agent_switches_total{reason="fallback"}` = 0, alerting form empty.
+        #
+        # reason="boot_upgrade" is deliberately not covered: it increments on every
+        # normal pod start. reason="degradation" cannot increment at all while
+        # VPN_AGENT_BAD_LOSS_PCT is 101 (see the group header).
+        - alert: VpnAgentFallbackServer
+          expr: vpn_agent_switches_total{namespace="servarr", reason="fallback"} > 0
+          for: 5m
+          labels:
+            severity: warning
+            component: servarr
+          annotations:
+            summary: "vpn-picker agent fell back to `quick`, the ranked pool failed"
+            description: "{{ $labels.pod }} has recorded {{ $value }} fallback switch(es) - every ranked candidate failed to come up, so the agent connected via `airconnect quick` and is on an unmeasured server. Each switch also drops every peer and re-announces to private trackers, and the agent is capped at VPN_AGENT_MAX_SWITCHES_PER_DAY (3), so once the cap is hit it will not try again today. Check the agent logs for `ended on quick` / `passed no traffic` (Grafana → Explore → Loki: {namespace=\"servarr\", container=\"agent\"}) (#555, #505)."
+
+        # Spyros on #622: dry-run is the rollback state, so if it is still set days
+        # later somebody parked it and forgot - the agent is logging switches it
+        # would make instead of making them. It was parked after the 2026-08-02
+        # dead-tunnel incident and has since been put back: verified live
+        # 2026-08-03, `vpn_agent_dry_run` = 0.
+        #
+        # for: 24h so a deliberate day of observation is not a page.
+        - alert: VpnAgentDryRunStuck
+          expr: vpn_agent_dry_run{namespace="servarr"} == 1
+          for: 24h
+          labels:
+            severity: warning
+            component: servarr
+          annotations:
+            summary: "vpn-picker agent has been in dry-run for a day"
+            description: "VPN_AGENT_DRY_RUN has been true on {{ $labels.pod }} for over 24 h. The agent is logging the switches it would make and applying none of them, so the tunnel is unprotected against server degradation. If the observation window is over, set VPN_AGENT_DRY_RUN back to \"false\" in 2-k3s/08.servarr/qbittorrent/qbittorrent.yaml (#622)."
+
     - name: postgres-backup
       interval: 60s
       rules:
