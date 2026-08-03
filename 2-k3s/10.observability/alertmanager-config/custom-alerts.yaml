@@ -205,8 +205,14 @@ spec:
         # the app container's own probes only touch the local WebUI and its
         # restart count stays flat through a VPN flap. Match both containers
         # or the alert cannot fire for the thing it is named after.
+        #
+        # `agent` added (#622): the vpn-picker agent sidecar (#608) is a third
+        # container in this pod and was missing from the regex entirely, so a
+        # crash-looping agent produced zero series here. Confirmed against the
+        # #617 outage - three generic alerts fired (TargetDown, KubePodCrashLooping,
+        # KubePodNotReady) but this pod-specific rule stayed silent throughout.
         - alert: QbittorrentVpnFlap
-          expr: increase(kube_pod_container_status_restarts_total{namespace="servarr", pod=~"qbittorrent.*", container=~"qbittorrent|airvpn"}[15m]) > 2
+          expr: increase(kube_pod_container_status_restarts_total{namespace="servarr", pod=~"qbittorrent.*", container=~"qbittorrent|airvpn|agent"}[15m]) > 2
           for: 5m
           labels:
             severity: warning
