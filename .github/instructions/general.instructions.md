@@ -24,6 +24,37 @@ Sanity-check with `${#TOKEN}` (a length is safe to print, the value is not). A 6
 
 This trap cost real time: #293 read the `ak-iac` Authentik token with the quotes on, got `403`, and concluded the mirror was stale. It was not - #545 proved the mirror byte-matches the blueprint and returns `200` once the quotes are stripped.
 
+## Never fetch a whole Secret to check one key
+
+A value-echo leak is not only a `grep` problem. **Fetching an entire multi-key
+Secret echoes every value in it**, base64 or not - and base64 is not a control,
+#602 already set the bar at "value present in a retained transcript in any
+encoding". #712 was caused exactly this way: an `mcp__kubernetes__resources_get`
+on `servarr/unpackerr-secret` and `servarr/newtarr-config-seed`, run only to
+check whether either already held a `prowlarr_api_key`, printed their full
+`data` blocks and forced a 3-key rotation.
+
+Rules:
+
+- **Never** `resources_get` / `kubectl get secret -o yaml|json` a Secret. The
+  MCP `resources_get` has no field selection, so there is no safe way to use it
+  on a Secret at all.
+- Fetch the **single key** you need, straight into a variable or a file:
+  ```bash
+  # into a variable - never printed
+  VAL=$(kubectl -n <ns> get secret <name> -o jsonpath='{.data.<key>}' | base64 -d)
+  # or straight to a 0600 file for a tool to read
+  kubectl -n <ns> get secret <name> -o jsonpath='{.data.<key>}' | base64 -d > /tmp/k && chmod 600 /tmp/k
+  ```
+- To answer only "**does this key exist here?**", read key **names** and never
+  values: `kubectl -n <ns> get secret <name> -o jsonpath='{.data}' | ...` still
+  carries values, so use
+  `kubectl -n <ns> get secret <name> --template '{{range $k,$v := .data}}{{$k}}{{"\n"}}{{end}}'`,
+  or for a SOPS file `python3 -c` + `yaml.safe_load` printing `.keys()` only.
+- Same rule for comparisons: compare **hashes**, not values
+  (`sha256sum`, or `hashlib.sha256(v).hexdigest()[:16]`), and print lengths
+  rather than contents.
+
 ## Command History Documentation
 
 IMPORTANT: Document all significant commands and their outputs in the `.history/` directory for future LLM reference and troubleshooting.
