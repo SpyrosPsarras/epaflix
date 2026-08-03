@@ -80,6 +80,9 @@ spec:
   routes:
     - match: Host(`truenas.epaflix.com`)
       kind: Rule
+      middlewares:
+        - name: security-headers
+          namespace: traefik-system
       services:
         - name: truenas-ui
           port: 8443

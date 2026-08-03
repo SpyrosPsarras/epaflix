@@ -11,6 +11,9 @@ spec:
   routes:
     - match: Host(`filebrowser.epaflix.com`)
       kind: Rule
+      middlewares:
+        - name: security-headers
+          namespace: traefik-system
       services:
         - name: filebrowser
           port: 80

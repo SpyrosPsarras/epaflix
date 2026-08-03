@@ -23,6 +23,9 @@ spec:
   routes:
     - match: Host(`seerr.epaflix.com`)
       kind: Rule
+      middlewares:
+        - name: security-headers
+          namespace: traefik-system
       services:
         - name: seerr
           port: 5055
@@ -84,6 +87,8 @@ spec:
     - match: Host(`jellyseerr.epaflix.com`)
       kind: Rule
       middlewares:
+        - name: security-headers
+          namespace: traefik-system
         - name: jellyseerr-to-seerr
           namespace: servarr
       services:

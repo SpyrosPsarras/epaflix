@@ -19,6 +19,9 @@ spec:
   routes:
     - match: Host(`argocd.epaflix.com`)
       kind: Rule
+      middlewares:
+        - name: security-headers
+          namespace: traefik-system
       services:
         - name: argocd-server
           port: 80

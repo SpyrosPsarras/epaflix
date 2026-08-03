@@ -240,6 +240,9 @@ additionalObjects:
       routes:
         - match: Host(`auth.epaflix.com`)
           kind: Rule
+          middlewares:
+            - name: security-headers
+              namespace: traefik-system
           services:
             - name: authentik-server
               port: 80

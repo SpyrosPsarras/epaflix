@@ -13,6 +13,9 @@ spec:
   routes:
     - kind: Rule
       match: Host(`grafana.epaflix.com`)
+      middlewares:
+        - name: security-headers
+          namespace: traefik-system
       services:
         - name: kube-prometheus-stack-grafana
           port: 80
