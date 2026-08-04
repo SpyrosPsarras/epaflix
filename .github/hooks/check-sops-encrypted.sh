@@ -12,6 +12,7 @@ set -euo pipefail
 ALLOWLIST=(
   "2-k3s/11.argocd/oidc-secret.yaml"
   "2-k3s/06.postgres/operator-kustomization/barman-manifest.yaml"
+  "2-k3s/12.renovate/secret-app.yaml"
 )
 
 fail=0
