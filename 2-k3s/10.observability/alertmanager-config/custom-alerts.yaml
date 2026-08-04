@@ -258,34 +258,43 @@ spec:
         # WHAT IS DELIBERATELY NOT ALERTED ON, and why - read this before adding
         # anything to this group:
         #
-        #   vpn_agent_current_loss_pct - the ICMP probe to the in-tunnel gateway
-        #   reads 10-20% in NORMAL loaded steady state, because ICMP is the first
-        #   thing a saturated upload queue drops (#732). Measured 2026-08-03 on a
-        #   healthy tunnel pulling 3.8 MiB/s: `vpn_agent_current_loss_pct 12` with
-        #   `ping -c 2` clean and 208 MB transferred in 3 minutes. Any loss
-        #   threshold low enough to catch a real fault pages constantly.
+        #   vpn_agent_current_loss_pct - not alerted on because the agent already
+        #   ACTS on it: over VPN_AGENT_BAD_LOSS_PCT (5) three windows running it
+        #   switches server, and vpn_agent_switches_total is where that shows up.
+        #   A page on the raw reading would fire on windows the agent handles.
         #
-        #   vpn_agent_consecutive_bad_windows - can move again as of #732: the
-        #   throughput gate landed and VPN_AGENT_BAD_LOSS_PCT went back to 5, so
-        #   this now counts windows that are over the loss threshold AND below
-        #   VPN_AGENT_HEALTHY_THROUGHPUT_BYTES_PER_SEC. It is still not alerted on
-        #   here, because it resets on every good window by design and the switch
-        #   it leads to is the thing worth paging about, not the counting. Before
-        #   #732 it read 0 permanently (PR #733's disarm at 101) - an alert on it
-        #   then could never have fired, the "reads as coverage and is not" failure
-        #   #668 deleted rule E for.
+        #   NOTE, this block used to say the probe "reads 10-20% in normal loaded
+        #   steady state because ICMP is the first thing a saturated upload queue
+        #   drops". That is NOT supported (#771). Same probe, same code: Dalim read
+        #   15% at ~4.2 MB/s on 2026-08-03, while Dedalus read 0.0% at 13.66, 4.40
+        #   and 3.49 MB/s on 2026-08-04. Load is not the variable. Whether Dalim
+        #   itself was lossy fits better but is unproven - the discriminating test
+        #   (comparable load on Dalim, re-measure) has not been run.
         #
-        #   vpn_agent_switches_total{reason="degradation"} - reachable again since
-        #   #732. The flapping / daily-cap rule for it is #736; build it there,
-        #   against real scraped values, not from this comment.
+        #   vpn_agent_consecutive_bad_windows - genuinely reachable as of #771,
+        #   which removed the throughput gate: it counts windows at or over
+        #   VPN_AGENT_BAD_LOSS_PCT, full stop. Under the gate (PR #764/#766) it
+        #   could barely move at all, because the loss path was only consulted
+        #   below 64 KiB/s and this pod seeds. Still not alerted on here: it resets
+        #   on every good window by design, and the switch it leads to is the thing
+        #   worth paging about, not the counting.
         #
-        #   vpn_agent_tunnel_throughput_bytes_per_sec - the gate's own input, and
-        #   deliberately NOT an alert. A quiet tunnel is the normal state whenever
-        #   nothing is downloading, so low throughput on its own says nothing. It
-        #   is a diagnostic to read next to vpn_agent_current_loss_pct: high loss
-        #   with the tunnel busy is loaded-and-fine, high loss with it idle is the
-        #   fault. vpn_agent_tunnel_bytes_total is the raw counter behind it if you
-        #   want your own rate() window.
+        #   vpn_agent_switches_total{reason="degradation"} - reachable, and for the
+        #   first time actually so (#771). The flapping / daily-cap rule for it is
+        #   #736; build it there, against real scraped values, not from this
+        #   comment.
+        #
+        #   vpn_agent_tunnel_throughput_bytes_per_sec - diagnostic only, it decides
+        #   nothing (#771), and deliberately NOT an alert: a quiet tunnel is the
+        #   normal state whenever nothing is downloading, so low throughput on its
+        #   own says nothing. Read it next to vpn_agent_current_loss_pct as
+        #   context, NOT as an excuse - a busy tunnel at high loss is not known to
+        #   be fine, which is the whole of #771.
+        #   vpn_agent_tunnel_bytes_total is the raw counter behind it if you want
+        #   your own rate() window.
+        #
+        #   vpn_agent_healthy_by_throughput_windows_total - GONE, deleted with the
+        #   gate in #771. Do not write a rule against it.
         #
         # So this group alerts only on states that are unambiguous with the probe
         # as it stands: the agent not answering, the tunnel device gone outside a
