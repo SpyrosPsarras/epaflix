@@ -829,10 +829,17 @@ def test_every_candidate_fails_ends_on_quick(tmp):
     assert clock() - started <= agent.cfg.recovery_budget, \
         "recovery ran past the budget - the liveness restart would beat us to it"
 
-    # The circuit breaker: ending on quick arms the full cooldown.
+    # The circuit breaker: ending on quick still arms a cooldown and still costs
+    # a daily slot. Its LENGTH is the short one here, because the reason was a
+    # boot_upgrade - an unverified placement (#789) - and quick's own pick is the
+    # least considered destination of the lot.
     allowed, why = agent.budget.allowed()
     assert allowed is False, "a failed recovery did not arm the cooldown"
     assert "cooldown" in why, why
+    assert agent.budget.history[-1][1] == agent.cfg.failed_cooldown_seconds, \
+        "a boot_upgrade that ended on quick armed %ds - quick's pick is the least " \
+        "considered destination there is, and 6 h of it blocks the degradation " \
+        "watch (#789)" % agent.budget.history[-1][1]
     print("ok  total failure: ends on quick inside the budget, then holds the cooldown")
 
 
@@ -901,9 +908,14 @@ def test_verification_rejects_a_lying_status_string(tmp):
     assert agent.switches["boot_upgrade"] == 1, agent.switches
     assert agent.switches["fallback"] == 0, "a verified candidate is not a fallback"
 
-    # And the verified switch arms the FULL cooldown, unchanged.
+    # And the verified switch arms a cooldown - the short one, since a
+    # boot_upgrade is a placement and not a measured correction (#789).
     allowed, why = agent.budget.allowed()
     assert allowed is False and "cooldown" in why, why
+    assert agent.budget.history[-1][1] == agent.cfg.failed_cooldown_seconds, \
+        "a boot_upgrade armed %ds after walking onto a server it knows nothing " \
+        "about - see test_a_boot_upgrade_does_not_lock_out_the_degradation_watch " \
+        "(#789)" % agent.budget.history[-1][1]
     print("ok  verification: a connected-but-silent tunnel fails the switch")
 
 
@@ -1024,6 +1036,92 @@ def test_a_failed_switch_does_not_arm_the_full_cooldown(tmp):
     # breaker is untouched, and that is checked by
     # test_every_candidate_fails_ends_on_quick and test_cooldown_and_daily_cap.
     print("ok  cooldown: a failed switch arms the short one, still costs a daily slot")
+
+
+@with_tmp
+def test_a_boot_upgrade_does_not_lock_out_the_degradation_watch(tmp):
+    """#789. The 2026-08-04 lockout - #627's principle, one costume over.
+
+    #627 fix 2 only carved out the switch that produced NO tunnel. A boot_upgrade
+    that lands on a working but LOSSY server still armed the full 21600 s, and
+    then blocked the only instrument that can see the fault. Measured live: the
+    PR #786 recreate ran boot_upgrade onto Dalim, verified it at loss=0.0%, and
+    nine minutes later the degradation watch counted 3/3 at 6-8% loss and was
+    refused with `degradation switch suppressed: cooldown, 21034s left`. Dalim
+    read 6.0% at 1.39 MB/s where Dedalus read 0.0% at 3.49 MB/s, so load is ruled
+    out and the detector was right (#775).
+
+    The scorer cannot arbitrate this: it probes each server's ENTRY IP from a LAN
+    node and read Dalim clean the same day, which is why #767 was closed as
+    disproved. In-tunnel monitoring is the only instrument that sees it, so it
+    must not be the thing that gets suppressed.
+
+    Asserts on the cooldown ACTUALLY armed (the budget entry the switch wrote)
+    and on a real trip afterwards, never on a log string. The clock is advanced
+    by hand between windows because the fake one does not move during a scripted
+    probe (#768) - which is also what makes the timing arithmetic real here.
+    """
+    agent, fake, clock = build(tmp, server="Aspidiske")
+    agent.probe = scripted_probe(0.0)         # a clean boot pick, like Dalim's
+    agent.boot_check()
+
+    assert fake.connects() == ["Dalim"], fake.connects()
+    assert agent.switches["boot_upgrade"] == 1, agent.switches
+    armed_at, armed = agent.budget.history[-1]
+    assert armed == agent.cfg.failed_cooldown_seconds, (
+        "a boot_upgrade armed a %ds cooldown. It is an unverified PLACEMENT - "
+        "nothing was measured about the server it left, and the ranking that "
+        "chose the new one cannot see in-tunnel loss - so it has not earned more "
+        "than the short %ds one, and 6 h of it blocks the degradation watch that "
+        "is the only thing able to correct it (#789)"
+        % (armed, agent.cfg.failed_cooldown_seconds))
+
+    # Now the live sequence: the server it picked turns out to be lossy.
+    agent.probe = scripted_probe(8.0, verify=0.0)
+    window = agent.cfg.probe_interval + 10    # 60 s of sleep + ~10 s of probing
+    windows = 0
+    switched = False
+    while windows < 12 and not switched:      # 12 windows is ~14 min, not 6 h
+        clock.sleep(window)
+        windows += 1
+        switched = agent.watch_once()
+    assert switched, (
+        "12 bad windows at 8%% loss (~%d s) after a verified boot_upgrade "
+        "produced NO degradation switch - the boot pick armed the full %ds "
+        "cooldown and locked out the only mechanism that can correct it (#789)"
+        % (12 * window, agent.cfg.cooldown_seconds))
+    assert agent.switches["degradation"] == 1, agent.switches
+    assert fake.server == "Piautos", \
+        "corrected onto %s - the lossy server must be excluded" % fake.server
+
+    # The arithmetic, pinned rather than left to luck. The earliest trip is
+    # bad_windows x window = 3 x 70 s = 210 s, which is INSIDE the 300 s cooldown,
+    # so that trip is refused - deliberately, it is what stops a flapping pool
+    # chaining switches back to back. The bad-window counter resets, three more
+    # windows run, and the second trip goes through at ~420 s.
+    assert windows == 2 * agent.cfg.bad_windows, (
+        "the correction took %d windows, expected exactly %d: one trip refused "
+        "inside the %ds cooldown, the next one through"
+        % (windows, 2 * agent.cfg.bad_windows, agent.cfg.failed_cooldown_seconds))
+    elapsed = agent.budget.clock() - armed_at
+    assert agent.cfg.failed_cooldown_seconds < elapsed < 600, (
+        "corrected %.0fs after the boot pick - expected between the %ds cooldown "
+        "and ~10 min" % (elapsed, agent.cfg.failed_cooldown_seconds))
+
+    # And the daily cap still bounds it. Worst case is this boot placement plus
+    # two degradation corrections, and then nothing for the rest of the day.
+    clock.sleep(agent.cfg.cooldown_seconds + 1)
+    while not agent.watch_once():
+        clock.sleep(window)
+    assert agent.switches["degradation"] == 2, agent.switches
+    clock.sleep(agent.cfg.cooldown_seconds + 1)
+    for _ in range(agent.cfg.bad_windows):
+        assert agent.watch_once() is False, "went over the %d-a-day cap" \
+            % agent.cfg.max_switches_per_day
+    allowed, why = agent.budget.allowed()
+    assert allowed is False and "daily cap" in why, why
+    print("ok  #789: a boot_upgrade arms the short cooldown (corrected in %.0fs, "
+          "%d windows), cap still 1 placement + 2 corrections" % (elapsed, windows))
 
 
 @with_tmp
@@ -1182,6 +1280,7 @@ if __name__ == "__main__":
     test_recovery_is_disconnect_plus_connect_never_a_signal()
     test_no_signal_path_survives_in_the_source()
     test_a_failed_switch_does_not_arm_the_full_cooldown()
+    test_a_boot_upgrade_does_not_lock_out_the_degradation_watch()
     test_cache_is_the_fallback_when_the_file_goes_away()
     test_budget_survives_a_restart()
     test_dry_run_takes_no_action()
