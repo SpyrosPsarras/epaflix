@@ -1178,6 +1178,121 @@ def test_budget_survives_a_restart(tmp):
 
 
 @with_tmp
+def test_switch_budget_is_exported_at_scrape_time(tmp):
+    """#783. The alert has to read the number the agent ENFORCES.
+
+    vpn_agent_switches_total cannot express the cap: _finish() calls
+    budget.record() unconditionally but increments switches[] only `if connected
+    and counted_as`, and the counter has no window while the budget prunes on a
+    rolling 24 h. So the two cases here are the two the counter gets wrong - a
+    switch that ends with NO tunnel, and entries ageing out - plus the cooldown,
+    which is the other half of allowed() and the thing that made the 2026-08-02
+    and 2026-08-04 lockouts invisible (#627, #789).
+
+    Every number below comes out of a real ag.render_metrics() call against the
+    real SwitchBudget - build() stubs probe() and throughput_since() only - and is
+    cross-checked against allowed() and against the on-disk switches.json, which
+    is the same cross-check the live verification does.
+    """
+    # Every ranked candidate is refused and `quick` is accepted but never lands,
+    # so this switch ends with no tunnel at all: connected is None, counted_as is
+    # "fallback", and _finish() records the slot and increments nothing.
+    agent, fake, clock = build(tmp, server="Aspidiske",
+                               refused=("Dalim", "Piautos", "Menkent", "Ashlesha"),
+                               silent=("QuickPick",))
+    for name in ("vpn_agent_switch_budget_used",
+                 "vpn_agent_switch_budget_exhausted",
+                 "vpn_agent_switch_cooldown_seconds_left"):
+        assert metric(agent, name) == 0, (
+            "%s reads %s on a fresh budget with no switch behind it. The cap the "
+            "agent ENFORCES is len(SwitchBudget.history) >= max_per_day, and "
+            "nothing exports it, so the daily-cap alert can only approximate the "
+            "number and cannot tell 'capped' from 'one switch short' (#783)"
+            % (name, metric(agent, name)))
+
+    agent.boot_check()
+    assert fake.server is None, "this case needs a switch that ends with NO tunnel"
+    assert sum(agent.switches.values()) == 0, \
+        "a switch with no tunnel counted somewhere: %s" % agent.switches
+    assert len(agent.budget.history) == 1, agent.budget.history
+    assert metric(agent, "vpn_agent_switch_budget_used") == 1, (
+        "a switch that ended with NO tunnel spent a slot the agent enforces - "
+        "allowed() sees it and so does switches.json - and the exported budget "
+        "read %s. That is the blind spot vpn_agent_switches_total has, because "
+        "_finish() records unconditionally and counts only `if connected and "
+        "counted_as` (#783)" % metric(agent, "vpn_agent_switch_budget_used"))
+    with open(agent.cfg.budget_path) as fh:
+        assert metric(agent, "vpn_agent_switch_budget_used") == len(json.load(fh)), \
+            "the exported count disagrees with the budget file the agent enforces"
+
+    # The cooldown is MEASURED, not the value armed: it counts down as the clock
+    # moves, with no switch and no writer in between (#686/#690/#771).
+    first = metric(agent, "vpn_agent_switch_cooldown_seconds_left")
+    assert first == agent.cfg.failed_cooldown_seconds, (first, agent.budget.history)
+    clock.sleep(100)
+    second = metric(agent, "vpn_agent_switch_cooldown_seconds_left")
+    assert second == first - 100, (
+        "vpn_agent_switch_cooldown_seconds_left read %s and then %s after 100 s - "
+        "a cooldown that does not count down is a value written once that reads as "
+        "measured (#686/#690/#771)" % (first, second))
+    clock.sleep(agent.cfg.failed_cooldown_seconds)
+    assert metric(agent, "vpn_agent_switch_cooldown_seconds_left") == 0, \
+        "an expired cooldown must read 0, not a negative number"
+    assert agent.budget.allowed()[0] is True, "the short cooldown never expired"
+
+    # Spend the rest of the day's slots and the exported flag must flip in step
+    # with allowed(), not one switch early and not one late. Bluetit is back on a
+    # server first - `quick` reconnects on its own and the liveness probe owns the
+    # tunnel-less case, so watch_once() deliberately refuses to switch without one.
+    fake.server, fake.refused, fake.silent = "Aspidiske", set(), set()
+    agent.probe = scripted_probe(9.0)
+    for _ in range(agent.cfg.max_switches_per_day + 1):
+        if agent.budget.snapshot()[1]:
+            break
+        clock.sleep(agent.cfg.cooldown_seconds + 1)
+        for _ in range(agent.cfg.bad_windows):
+            agent.watch_once()
+        used = metric(agent, "vpn_agent_switch_budget_used")
+        exhausted = metric(agent, "vpn_agent_switch_budget_exhausted")
+        allowed = agent.budget.allowed()[0]
+        assert used == len(agent.budget.history), (used, agent.budget.history)
+        assert exhausted == (1 if used >= agent.cfg.max_switches_per_day else 0), \
+            "exhausted read %s at %s/%s slots used - it must be the same " \
+            "len(history) >= max_per_day test allowed() uses, or the alert and " \
+            "the enforcement drift (#783)" \
+            % (exhausted, used, agent.cfg.max_switches_per_day)
+    assert metric(agent, "vpn_agent_switch_budget_used") == agent.cfg.max_switches_per_day
+    clock.sleep(agent.cfg.cooldown_seconds + 1)          # past the cooldown, so
+    allowed, why = agent.budget.allowed()                # only the cap can refuse
+    assert allowed is False and "daily cap" in why, why
+    assert metric(agent, "vpn_agent_switch_budget_exhausted") == 1, \
+        "allowed() refuses with %r and the exported flag says not exhausted" % why
+
+    # And the window rolls. The counter cannot do this - it is monotonic for the
+    # life of the process - so a pod alive for days would keep reading 3 while the
+    # agent had pruned back to an empty budget and was switching happily.
+    clock.sleep(86401)
+    assert metric(agent, "vpn_agent_switch_budget_used") == 0, (
+        "%s slots still counted a day after the last switch - the exported budget "
+        "must prune on the same rolling 86400 s allowed() prunes on, or the alert "
+        "latches on forever (#783)"
+        % metric(agent, "vpn_agent_switch_budget_used"))
+    assert metric(agent, "vpn_agent_switch_budget_exhausted") == 0
+    # Those scrapes pruned READ-ONLY. record() appends to the list _prune()
+    # rebinds, so a scrape thread that pruned could drop a switch the agent thread
+    # was recording - a slot that never counted against the cap. Checked before
+    # anything on the agent's own path runs, because allowed() legitimately prunes.
+    assert len(agent.budget.history) == agent.cfg.max_switches_per_day, \
+        "render_metrics() mutated the budget - snapshot() must be read-only, it " \
+        "runs in the HTTP handler thread with no lock (#783)"
+    allowed, why = agent.budget.allowed()
+    assert allowed is True, "the daily cap never rolls off: %s" % why
+    assert agent.budget.history == [], "allowed() is the path that prunes"
+    print("ok  #783: the budget is exported at scrape time - a no-tunnel switch "
+          "counts, the cooldown counts down, exhausted tracks allowed()")
+
+
+@with_tmp
 def test_dry_run_takes_no_action(tmp):
     agent, fake, _ = build(tmp, server="Aspidiske", dry_run=True)
     agent.boot_check()
@@ -1283,5 +1398,6 @@ if __name__ == "__main__":
     test_a_boot_upgrade_does_not_lock_out_the_degradation_watch()
     test_cache_is_the_fallback_when_the_file_goes_away()
     test_budget_survives_a_restart()
+    test_switch_budget_is_exported_at_scrape_time()
     test_dry_run_takes_no_action()
     print("ALL AGENT SELF-CHECKS PASSED")
