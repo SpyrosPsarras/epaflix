@@ -627,11 +627,85 @@ def test_throughput_is_measured_not_assumed(tmp):
         "a negative delta produced a number - tun0 is rebuilt on every switch, " \
         "so this is the normal post-switch window, and reading it as 0 bytes/s " \
         "would count the window as bad on loss alone"
-    # Nothing to divide by is no number either.
+    # Nothing to divide by is no number either - and neither is anything under
+    # MIN_THROUGHPUT_INTERVAL_SECONDS, which
+    # test_a_window_too_short_to_measure_is_no_measurement() owns (#768).
     assert agent.throughput_since(0, clock()) is None
     # A plain positive delta is the ordinary case, and the arithmetic is bytes/sec.
     assert agent.throughput_since(4096, clock() - 10) == 2048.0
     print("ok  throughput: real /sys read, silent, resets and gaps are no-number not zero")
+
+
+@with_tmp
+def test_a_window_too_short_to_measure_is_no_measurement(tmp):
+    """#768: a millisecond interval is not a rate, in either direction.
+
+    Drives the REAL `throughput_since()`, stub deleted. Every other test that
+    drives a window goes through build()'s stub - the fake clock does not advance
+    during a scripted probe - so the arithmetic's resolution was masked everywhere.
+
+    Measured on the live pod 2026-08-04 with the probe stubbed to return
+    instantly: the same tunnel, in the same second, moving several MB/s, read
+    `0.0 B/s` in two windows and `11.5 MB/s` in a third. `0.0 B/s` is the worse of
+    the two - it reads as a measured idle tunnel and it never measured one
+    (#686/#690).
+    """
+    agent, fake, clock = build(tmp)
+    del agent.throughput_since                  # drop the stub, use the real method
+    agent.bluetit.tun_bytes = lambda: 1500000
+
+    # One MTU-sized packet over a millisecond. 1.5 MB/s if you divide it.
+    assert agent.throughput_since(1500000 - 1500, clock() - 0.001) is None, \
+        "a 1 ms interval produced %r - one 1500-byte packet divided by a " \
+        "millisecond is 1.5 MB/s, which is the #768 defect" \
+        % (agent.throughput_since(1500000 - 1500, clock() - 0.001),)
+    # Zero bytes over a millisecond. This is the unsafe direction: 0.0 B/s reads
+    # as a measured idle tunnel.
+    assert agent.throughput_since(1500000, clock() - 0.001) is None, \
+        "a 1 ms interval with no bytes produced %r - that publishes an idle " \
+        "tunnel nobody measured (#768)" \
+        % (agent.throughput_since(1500000, clock() - 0.001),)
+    # Just under and just over the floor, so the boundary is pinned.
+    assert agent.throughput_since(1500000 - 1500, clock() - 0.999) is None
+    assert agent.throughput_since(1500000 - 1500, clock() - 1.0) == 1500.0
+    # A realistic ~10 s window is unaffected - the floor must never eat the metric
+    # in production.
+    assert agent.throughput_since(500000, clock() - 10.0) == 100000.0
+
+    # End to end through the real window path, which is how it was measured: a
+    # probe that returns almost instantly, one packet landing between the two
+    # counter reads. The rate must be ABSENT from /metrics, and the raw counter
+    # must still be there - it is read at scrape time and is what a reader
+    # rate()s instead.
+    reads = iter([1500000, 1500000 + 1500])
+    agent.bluetit.tun_bytes = lambda: next(reads, 1500000 + 1500)
+    agent.probe = lambda count=None: (clock.sleep(0.001), 0.0)[1]
+    agent.watch_once()
+    assert agent.throughput_bps is None, \
+        "a window whose probe returned in 1 ms published throughput_bps=%r " \
+        "(#768)" % (agent.throughput_bps,)
+    assert metric(agent, "vpn_agent_tunnel_throughput_bytes_per_sec") is None, \
+        "vpn_agent_tunnel_throughput_bytes_per_sec is published as %r off a 1 ms " \
+        "window - a number that reads as measured and is not (#768)" \
+        % (metric(agent, "vpn_agent_tunnel_throughput_bytes_per_sec"),)
+    assert metric(agent, "vpn_agent_tunnel_bytes_total") == 1501500.0, \
+        "the raw counter went missing with the rate - it is measured at scrape " \
+        "time and stays publishable when the rate is not"
+
+    # The floor is a named constant, and it is bounded on BOTH sides. Asserted
+    # last on purpose, so an unfixed agent.py fails on the arithmetic above with a
+    # message about the defect rather than on an AttributeError here.
+    assert ag.MIN_THROUGHPUT_INTERVAL_SECONDS >= 1.0, \
+        "the floor is %r - under a second one 1500-byte packet still swings the " \
+        "quotient by MB/s" % (ag.MIN_THROUGHPUT_INTERVAL_SECONDS,)
+    # It must not be able to suppress a real window: production is 50 packets at
+    # 5/s, so ~10 s. A floor anywhere near that would delete the metric in normal
+    # operation, which is a regression, not a fix.
+    assert ag.MIN_THROUGHPUT_INTERVAL_SECONDS < 10.0, \
+        "the floor is %r, which a real ~10 s probe window cannot reliably clear - " \
+        "that would delete the metric in normal operation" \
+        % (ag.MIN_THROUGHPUT_INTERVAL_SECONDS,)
+    print("ok  #768: a window too short to measure publishes no rate, not a zero")
 
 
 @with_tmp
@@ -1095,6 +1169,7 @@ if __name__ == "__main__":
     test_degradation_counting()
     test_high_loss_counts_on_a_busy_tunnel_too()
     test_throughput_is_measured_not_assumed()
+    test_a_window_too_short_to_measure_is_no_measurement()
     test_throughput_metrics_are_measurements()
     test_dead_tunnel_is_the_liveness_probes_job()
     test_cooldown_and_daily_cap()
