@@ -216,10 +216,29 @@ the refresh is a deliberate manual flow. Resolves **#211**.
 
 ### GHCR PAT caveat
 
-`ghcr_write_packages_pat` (in `.github/instructions/secrets.yml`) has only the
-`write:packages` scope, **not** `admin:packages` — so package **visibility**
-toggles (public/private) must be done in the **GitHub web UI**, not via the API
-or CLI. The token is sufficient to `docker push` the new tag, but not to flip
+> **RETIRED 2026-08-04 (#344).** `ghcr_write_packages_pat` no longer exists in
+> `.github/instructions/secrets.yml`. It held the same value as
+> `argocd_image_updater_github_pat` and `RENOVATE_GITHUB_PAT` — one shared
+> classic PAT (`ghp_`, scopes `repo, write:packages`, no expiry) — which was
+> retired because it was orphaned by the Image Updater decommission (#266) and
+> re-exposed twice in agent transcripts (#712, #761).
+>
+> **Consequence for this runbook:** there is currently NO token in `secrets.yml`
+> for a manual `docker push` to GHCR. CI does not need one — both
+> `build-airvpn-bluetit.yml` and `build-vpn-picker.yml` authenticate with
+> `${{ secrets.GITHUB_TOKEN }}` and declare `packages: write`, so automated
+> builds are unaffected. Only a **manual** push from a workstation is blocked.
+>
+> If you need one again, mint a fine-grained PAT with **Packages: read+write**
+> on this repo rather than reviving a classic `write:packages` token. Better
+> still, add a workflow for this image so the push uses `GITHUB_TOKEN` like the
+> other two and no long-lived credential is needed at all.
+
+Historical note on the retired token's limits, kept because the same caveat
+applies to any replacement: it had only the `write:packages` scope, **not**
+`admin:packages` — so package **visibility** toggles (public/private) must be
+done in the **GitHub web UI**, not via the API or CLI. Such a token is
+sufficient to `docker push` the new tag, but not to flip
 visibility.
 
 ## Follow-ups
