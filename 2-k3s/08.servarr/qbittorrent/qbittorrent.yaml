@@ -360,10 +360,18 @@ spec:
             #      10.128.0.1, <=50% loss), not by the status string, and a
             #      candidate that fails verification is dropped, never
             #      re-dialled.
-            #   2. A switch that produced no working tunnel arms
-            #      VPN_AGENT_FAILED_COOLDOWN_SECONDS (300 s), not the full
-            #      21600 s. The 6 h cooldown its own boot upgrade armed is what
-            #      locked the agent out of rescuing itself for six hours.
+            #   2. A switch that has not earned the full cooldown arms
+            #      VPN_AGENT_FAILED_COOLDOWN_SECONDS (300 s) instead of 21600 s.
+            #      Two kinds qualify: one that produced no working tunnel
+            #      (#627 fix 2), and one whose reason is only a placement rather
+            #      than a measured correction - `boot_upgrade` and its `quick`
+            #      fallback (#789). Only a `degradation` switch earns the 6 h.
+            #      The 6 h cooldown its own boot upgrade armed is what locked the
+            #      agent out of rescuing itself, on 2026-08-02 over a tunnel that
+            #      never handshook and again on 2026-08-04 over one that was
+            #      merely lossy. VPN_AGENT_MAX_SWITCHES_PER_DAY still bounds
+            #      churn: worst case is one boot placement plus two degradation
+            #      corrections 6 h apart, then nothing for the rest of the day.
             #
             # ROLLBACK: flip this back to "true". One env var, never a manifest
             # revert - the agent then probes, reads the ranking, logs
