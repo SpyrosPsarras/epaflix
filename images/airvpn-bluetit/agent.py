@@ -378,8 +378,40 @@ class SwitchBudget:
         except OSError as exc:
             log.warning("cannot persist the switch history: %s", exc)
 
+    def _fresh(self, now):
+        """The entries still inside the rolling 24 h. Pure - see snapshot()."""
+        return [e for e in self.history if now - e[0] < 86400]
+
     def _prune(self, now):
-        self.history = [e for e in self.history if now - e[0] < 86400]
+        self.history = self._fresh(now)
+
+    def snapshot(self):
+        """(used, exhausted, cooldown_left) for the metrics. Read-only, no lock.
+
+        This is called from the HTTP handler thread, so it MUST NOT mutate.
+        _prune() rebinds self.history and record() appends to the list it just
+        pruned, so a scrape that pruned concurrently would drop the switch the
+        agent thread was in the middle of recording - a slot that never counted
+        against the cap. Nothing protects the budget today: agent.lock does not
+        cover it (_finish() releases the lock before budget.record()), and adding
+        a lock the scrape path has to take would let a scrape block the switch
+        path. Reading the list reference is atomic under the GIL and _fresh()
+        copies it - at most a handful of entries - so this needs no lock at all
+        and cannot block anything.
+
+        The same two predicates allowed() enforces, through the same _fresh(), so
+        the metric and the enforcement cannot drift apart. Measured here, at
+        scrape time, off the in-memory history, which IS the authority: _load()
+        reads the file once at construction and allowed() never re-reads it, so
+        there is no file I/O in the scrape path either (#686/#690/#771/#783).
+        """
+        now = self.clock()
+        history = self._fresh(now)
+        left = 0.0
+        if history:
+            when, cooldown = history[-1]
+            left = max(0.0, cooldown - (now - when))
+        return len(history), len(history) >= self.max_per_day, left
 
     def allowed(self):
         """Return (allowed, reason). The reason is for the log line."""
@@ -1203,6 +1235,12 @@ def render_metrics(agent):
     # thing - last probe window's average - and it is absent, not stale, when a
     # window could not produce one.
     tun_bytes = agent.bluetit.tun_bytes()
+    # Same rule once more, and this one is the ENFORCEMENT's own state rather than
+    # a count of what the switch path happened to increment. snapshot() is
+    # read-only and lock-free on purpose - see its docstring - and costs one
+    # clock() call plus a filter of at most max_switches_per_day entries, no file
+    # I/O and no subprocess, so it belongs in the handler thread (#783).
+    budget_used, budget_exhausted, cooldown_left = agent.budget.snapshot()
     lines = [
         "# HELP vpn_agent_dry_run Whether the agent is logging switches instead of applying them.",
         "# TYPE vpn_agent_dry_run gauge",
@@ -1214,6 +1252,23 @@ def render_metrics(agent):
         lines.append('vpn_agent_switches_total{reason="%s"} %d'
                      % (reason, switches.get(reason, 0)))
     lines += [
+        # What vpn_agent_switches_total above cannot say, per reason it cannot:
+        # _finish() calls budget.record() unconditionally but increments
+        # switches[] only `if connected and counted_as`, so a switch that ends
+        # with no tunnel (and a dry-run switch) spends a slot and moves no
+        # counter; Agent.switches is in-memory while the history is on disk
+        # exactly so it outlives an agent.py restart; and the counter is
+        # monotonic with no window while the budget prunes on a rolling 24 h.
+        # These three read the budget itself, so there is nothing left to infer.
+        "# HELP vpn_agent_switch_budget_used Switch slots spent inside the enforced rolling 24 h window, counting every reason - len(SwitchBudget.history) after pruning, measured at scrape time. Counts switches vpn_agent_switches_total cannot see (no tunnel, dry run) and survives an agent.py restart.",
+        "# TYPE vpn_agent_switch_budget_used gauge",
+        "vpn_agent_switch_budget_used %d" % budget_used,
+        "# HELP vpn_agent_switch_budget_exhausted Whether the agent has stopped switching for the day: the same len(history) >= VPN_AGENT_MAX_SWITCHES_PER_DAY test allowed() enforces, so this cannot drift from the enforcement.",
+        "# TYPE vpn_agent_switch_budget_exhausted gauge",
+        "vpn_agent_switch_budget_exhausted %d" % (1 if budget_exhausted else 0),
+        "# HELP vpn_agent_switch_cooldown_seconds_left Seconds until the cooldown armed by the last switch expires - the other half of allowed(), and what made the 2026-08-02 and 2026-08-04 lockouts invisible. 0 when no cooldown is holding.",
+        "# TYPE vpn_agent_switch_cooldown_seconds_left gauge",
+        "vpn_agent_switch_cooldown_seconds_left %.0f" % cooldown_left,
         "# HELP vpn_agent_consecutive_bad_windows Consecutive probe windows with ICMP loss to the in-tunnel gateway at or over VPN_AGENT_BAD_LOSS_PCT. Resets on the first window under it.",
         "# TYPE vpn_agent_consecutive_bad_windows gauge",
         "vpn_agent_consecutive_bad_windows %d" % bad,
