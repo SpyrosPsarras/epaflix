@@ -397,40 +397,40 @@ spec:
             - { name: VPN_AGENT_PROBE_TARGET, value: "10.128.0.1" }
             - { name: VPN_AGENT_PROBE_COUNT, value: "50" }
             - { name: VPN_AGENT_PROBE_INTERVAL_SECONDS, value: "60" }
-            # DEGRADATION SWITCHING IS RE-ARMED (#732), back to the 2026-07-31
-            # outage profile of 6.7-9% sustained. Loss ALONE cannot decide this
-            # and never could - PR #733 had to disarm it with 101 because the
-            # loaded ICMP floor is 15-20% and fluctuates 4-20%, so the fault to
-            # catch is QUIETER than the noise it hides in. Measured 2026-08-03
-            # while the scorer read 0.0% on every candidate:
+            # DEGRADATION SWITCHING IS GENUINELY ARMED (#771), at the 2026-07-31
+            # outage profile of 6.7-9% sustained. Loss ALONE decides a window:
+            # over this number, three in a row, switch. There is no second
+            # condition, and #771 removed the one there was.
             #
-            #   200 packets transmitted, 170 received, 15% packet loss
-            #   rtt min/avg/max/mdev = 27.631/37.031/74.627/6.553 ms
-            #   tun0 same window: rx 3825 KiB/s, tx 292 KiB/s
+            # MEASURED, same pod, same 50-packet probe, same code:
             #
-            # 15% loss while pulling 3.8 MiB/s, RTT spread staying tight - that
-            # is ICMP being deprioritized under load, not the tunnel dropping
-            # data. What makes 5 usable again is the THROUGHPUT GATE below: a
-            # window only counts as bad if loss is over this number AND tun0 is
-            # moving less than VPN_AGENT_HEALTHY_THROUGHPUT_BYTES_PER_SEC. This
-            # number on its own is no longer a switch decision.
+            #   2026-08-03  Dalim     ~4.2 MB/s through tun0   15% loss
+            #   2026-08-04  Dedalus    13.66 MB/s              0.0%
+            #   2026-08-04  Dedalus     4.40 MB/s              0.0%
+            #   2026-08-04  Dedalus     3.49 MB/s              0.0%
             #
-            # Do NOT raise this back toward the loaded floor. The gate handles
-            # the loaded case; a higher threshold only makes the real fault
-            # (6.7-9% on an IDLE tunnel) invisible again.
+            # RULED OUT by that: the claim this block used to make, that loaded
+            # seeding puts a 15-20% ICMP floor under every window. Dedalus at
+            # 3.3x the Dalim load reads 0.0%, so load is not the variable.
+            #
+            # NOT ESTABLISHED: that the loss was Dalim's own fault. That fits
+            # better and is unproven. Never recorded: time of day, torrent set,
+            # peer mix, AirVPN-side load on Dalim. The discriminating test - put
+            # comparable load on Dalim and re-measure loss to 10.128.0.1 - has
+            # NOT been run, because it needs a deliberate switch onto a suspect
+            # server, costing a peer drop and a private-tracker re-announce
+            # (#498). Do not write a confident cause here until it is run; #517
+            # is what happens when a wrong comment is swapped for a differently
+            # wrong one that then gets trusted.
+            #
+            # Do NOT raise this, and do NOT re-add a throughput gate
+            # (VPN_AGENT_HEALTHY_THROUGHPUT_BYTES_PER_SEC, PR #764/#766). It
+            # returned "healthy" on a lossy-but-still-delivering server, and
+            # because a seeding box is almost never under 64 KiB/s the loss path
+            # was hardly ever consulted - the detector read as armed while being
+            # unreachable. vpn_agent_healthy_by_throughput_windows_total sat at 0
+            # for its whole life and is deleted with the gate.
             - { name: VPN_AGENT_BAD_LOSS_PCT, value: "5" }
-            # The gate that makes the line above safe (#732). A tunnel moving
-            # meaningful data is healthy by definition - a broken tunnel cannot
-            # move data, so this is a signal congestion cannot fake. 64 KiB/s
-            # over the ~10 s probe window, BIASED LOW: too high and a fine but
-            # quiet tunnel falls back to the noisy loss path, which is the
-            # false-positive storm #733 stopped; too low and a limping tunnel
-            # reads healthy, which only costs a switch we would have made - and
-            # every switch changes the exit IP, drops every peer and
-            # re-announces to private trackers with H&R rules (#498). The floor
-            # it has to clear is the agent's OWN probe traffic, under 1 KiB/s
-            # through tun0, so this sits ~75x above the gate certifying itself.
-            - { name: VPN_AGENT_HEALTHY_THROUGHPUT_BYTES_PER_SEC, value: "65536" }
             - { name: VPN_AGENT_BAD_WINDOWS, value: "3" }
             # 6 h. A switch changes the exit IP, which drops every peer and
             # re-announces to private trackers that have hit-and-run rules. We
