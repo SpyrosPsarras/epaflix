@@ -224,7 +224,7 @@ images:
   # (#613: agent container CrashLoopBackOff, stat /agent-entrypoint.sh: no
   # such file or directory).
   - name: ghcr.io/spyrospsarras/airvpn-bluetit
-    digest: sha256:488cdd0523bd09e31e414bf335c2b0e7c10c1bb5a3234bd19b8cf3334cf7ef5a
+    digest: sha256:75ef739b8f2a10f2b909affc96bb2e94c0aaf91ec8e305bb703a05e26a8b1b77
   # Our own image too - see images/vpn-picker/. Same rule as the entry above,
   # and the same reason it is here at all: the Deployment carries a bare
   # `:latest`, and a moving tag tells you nothing about which build is live
