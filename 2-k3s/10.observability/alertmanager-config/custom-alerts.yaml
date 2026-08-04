@@ -265,18 +265,27 @@ spec:
         #   `ping -c 2` clean and 208 MB transferred in 3 minutes. Any loss
         #   threshold low enough to catch a real fault pages constantly.
         #
-        #   vpn_agent_consecutive_bad_windows - PR #733 set
-        #   VPN_AGENT_BAD_LOSS_PCT=101 (unreachable, loss is a percentage), so
-        #   watch_once() resets the counter on every window. Confirmed live on the
-        #   #733 pod: env `VPN_AGENT_BAD_LOSS_PCT=101`,
-        #   `vpn_agent_consecutive_bad_windows 0` while `current_loss_pct 12`. This
-        #   gauge now reads 0 permanently - an alert on it could never fire, which
-        #   is exactly the "reads as coverage and is not" failure #668 deleted rule
-        #   E for.
+        #   vpn_agent_consecutive_bad_windows - can move again as of #732: the
+        #   throughput gate landed and VPN_AGENT_BAD_LOSS_PCT went back to 5, so
+        #   this now counts windows that are over the loss threshold AND below
+        #   VPN_AGENT_HEALTHY_THROUGHPUT_BYTES_PER_SEC. It is still not alerted on
+        #   here, because it resets on every good window by design and the switch
+        #   it leads to is the thing worth paging about, not the counting. Before
+        #   #732 it read 0 permanently (PR #733's disarm at 101) - an alert on it
+        #   then could never have fired, the "reads as coverage and is not" failure
+        #   #668 deleted rule E for.
         #
-        #   vpn_agent_switches_total{reason="degradation"} - same disarm, the
-        #   counter cannot increment. Re-add a rule here only together with a probe
-        #   that survives load (#732 tracks the options).
+        #   vpn_agent_switches_total{reason="degradation"} - reachable again since
+        #   #732. The flapping / daily-cap rule for it is #736; build it there,
+        #   against real scraped values, not from this comment.
+        #
+        #   vpn_agent_tunnel_throughput_bytes_per_sec - the gate's own input, and
+        #   deliberately NOT an alert. A quiet tunnel is the normal state whenever
+        #   nothing is downloading, so low throughput on its own says nothing. It
+        #   is a diagnostic to read next to vpn_agent_current_loss_pct: high loss
+        #   with the tunnel busy is loaded-and-fine, high loss with it idle is the
+        #   fault. vpn_agent_tunnel_bytes_total is the raw counter behind it if you
+        #   want your own rate() window.
         #
         # So this group alerts only on states that are unambiguous with the probe
         # as it stands: the agent not answering, the tunnel device gone outside a
