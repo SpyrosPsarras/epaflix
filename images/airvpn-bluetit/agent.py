@@ -81,31 +81,37 @@ class Config:
         self.probe_count = _env_int("VPN_AGENT_PROBE_COUNT", 50)
         self.probe_rate = _env_float("VPN_AGENT_PROBE_RATE", 5.0)
         self.probe_interval = _env_int("VPN_AGENT_PROBE_INTERVAL_SECONDS", 60)
-        # The 2026-07-31 outage profile was 6.7-9% sustained.
-        self.bad_loss_pct = _env_float("VPN_AGENT_BAD_LOSS_PCT", 5.0)
-        # The throughput gate (#732). Loss alone cannot decide this: measured
-        # 2026-08-03, the tunnel showed 15% ICMP loss to the in-tunnel gateway
-        # while pulling 3.8 MiB/s, with the RTT spread staying tight (27.6 ms
-        # min, 6.5 ms mdev) - ICMP being deprioritized under load, not the
-        # tunnel dropping data. The loaded floor is 15-20% and it fluctuates
-        # 4-20%, so the fault we hunt (6.7-9% sustained) is QUIETER than the
-        # noise, and no threshold separates them. A broken tunnel, though,
-        # cannot move data - so throughput is a signal congestion cannot fake,
-        # while loss under load measures ICMP's queue priority.
+        # The 2026-07-31 outage profile was 6.7-9% sustained. Loss decides a
+        # window on its own, which is what #771 restored.
         #
-        # 64 KiB/s over the ~10 s probe window (about 640 KiB moved). Biased
-        # LOW on purpose. Too high and a genuinely fine but quiet tunnel falls
-        # through to the loss path, which is exactly the #732 false-positive
-        # storm coming back; too low and a barely-limping tunnel reads healthy,
-        # which costs us a switch we would have made - and a switch drops every
-        # peer and re-announces to private trackers with H&R rules (#498). The
-        # asymmetry says bias low. The floor it must clear is the agent's OWN
-        # probe traffic: 50 packets each way at ~84 bytes over 10 s is under
-        # 1 KiB/s through tun0, so 64 KiB/s is ~75x above the gate certifying
-        # itself, and ~1.6% of the healthy rate measured above.
-        self.healthy_throughput_bps = _env_float(
-            "VPN_AGENT_HEALTHY_THROUGHPUT_BYTES_PER_SEC", 65536.0
-        )
+        # What is MEASURED - same pod, same 50-packet probe, same code, and the
+        # load comparable across rows:
+        #
+        #   2026-08-03  Dalim     ~4.2 MB/s through tun0   15% loss
+        #   2026-08-04  Dedalus    13.66 MB/s              0.0%
+        #   2026-08-04  Dedalus     4.40 MB/s              0.0%
+        #   2026-08-04  Dedalus     3.49 MB/s              0.0%
+        #
+        # What that RULES OUT: the earlier claim that loaded seeding puts a
+        # 15-20% ICMP floor under every window. Dedalus at 3.3x the Dalim load
+        # reads 0.0%, so load is not the variable.
+        #
+        # What it does NOT establish: that the loss was Dalim's fault. That
+        # explanation fits better and is unproven. Confounders never recorded:
+        # time of day, torrent set, peer mix, AirVPN-side load on Dalim. The
+        # discriminating test - put comparable load on Dalim and re-measure loss
+        # to the in-tunnel gateway - has NOT been run, because it needs a
+        # deliberate switch onto a suspect server and that costs a peer drop and
+        # a private-tracker re-announce (#498). Do not write down a confident
+        # cause here until someone runs it (#517 is what happens if you do).
+        #
+        # Do NOT re-add a throughput gate (PR #764/#766, removed in #771). Two
+        # faults: on a lossy-but-still-delivering server it returns "healthy" and
+        # suppresses a correct detection; and because a seeding box is almost
+        # never under 64 KiB/s it made the detector LOOK armed while being
+        # effectively unreachable - vpn_agent_healthy_by_throughput_windows_total
+        # read 0 for its entire life. Same shape as #629, #686 and #690.
+        self.bad_loss_pct = _env_float("VPN_AGENT_BAD_LOSS_PCT", 5.0)
         # Same semantics as a probe's failureThreshold: 3.
         self.bad_windows = _env_int("VPN_AGENT_BAD_WINDOWS", 3)
         # Long on purpose. A switch changes the exit IP, which drops every peer
@@ -582,10 +588,11 @@ class Agent:
         # readable here because render_metrics() also publishes the raw byte
         # counter read at scrape time, which a reader can rate() itself.
         self.throughput_bps = None
-        # Windows that WOULD have counted as bad on loss alone and were cleared
-        # by throughput instead. The size of the false-positive storm #732
-        # measured, published so #736 can alert on it.
-        self.healthy_by_throughput = 0
+        # There is deliberately NO self.healthy_by_throughput. It counted windows
+        # the throughput gate cleared, and #771 removed the gate - so nothing
+        # could ever have incremented it again. A counter parked at 0 that no code
+        # path writes is the #629/#686/#690 shape, so the field went with the gate
+        # rather than being left to read as coverage. Do not re-add it.
         self.consecutive_bad = 0
         # There is deliberately NO self.tun_device_ok. It existed, was
         # initialised True and written only on the switch path, so a pod that
@@ -950,10 +957,10 @@ class Agent:
     def throughput_since(self, before, started):
         """tun0 bytes/sec since (before, started), or None when there is no number.
 
-        None is NOT zero, and the difference decides whether a switch can happen:
-        zero throughput hands the verdict to the loss threshold, so reading an
-        unmeasurable window as idle would re-arm exactly the false positives #732
-        is about. Three ways there is no number:
+        Feeds vpn_agent_tunnel_throughput_bytes_per_sec and NOTHING else - the
+        gate that used to decide on it is gone (#771). None is still not zero,
+        because the metric has to be absent rather than claim an idle tunnel it
+        never measured (#686/#690). Three ways there is no number:
 
         - the device is missing or its counters are unreadable (`tun_bytes()` None);
         - the delta is negative, which is the counter RESET - tun0 is deleted and
@@ -1012,42 +1019,14 @@ class Agent:
                 self.consecutive_bad = 0
             return False
 
-        # THE THROUGHPUT GATE (#732). A tunnel moving meaningful data is healthy
-        # by definition: a broken tunnel cannot move data, so this is a signal
-        # congestion cannot fake - whereas ICMP loss under load measures ICMP's
-        # queue priority, not tunnel health. Third time in this subsystem that a
-        # signal did not measure what it claimed: #629's status string said
-        # connected on a dead tunnel, #686's ranking age never moved, and this one
-        # called a healthy tunnel degraded.
+        # NOTHING about `throughput` may appear between here and the verdict.
+        # PR #764 put a gate here that returned "healthy" whenever tun0 was busy,
+        # and #771 removed it: a lossy-but-still-delivering server was declared
+        # healthy, and since a seeding box is almost never under the floor the
+        # detector was unreachable in practice while looking armed. `throughput`
+        # is measured above for the METRICS only - it is not an input to this
+        # decision, and an unmeasurable window is a missing metric, not a veto.
         #
-        # Deliberately BELOW the loss check, though the design reads "moving data
-        # => healthy regardless of loss". The outcome is identical - a clean window
-        # resets and returns either way - and putting it here keeps
-        # healthy_by_throughput counting only the windows the gate actually SAVED,
-        # instead of every busy window, which is the number worth alerting on.
-        if throughput is None:
-            # No number, so no verdict. Falling through here would read
-            # "unmeasurable" as "idle" and hand the decision straight back to the
-            # loss threshold - the thing this gate exists to stop. The commonest
-            # cause is the counter reset from tun0 being rebuilt, i.e. we JUST
-            # switched, which is the worst possible moment to count a bad window.
-            # `consecutive_bad` is deliberately left alone rather than reset: a
-            # single unmeasurable window in the middle of a real degradation must
-            # not wipe the evidence either.
-            log.warning("loss=%.2f%% and tun0 throughput is unmeasurable (device gone, "
-                        "or the counters reset because tun0 was rebuilt) - no verdict "
-                        "this window (#732)", loss)
-            return False
-
-        if throughput >= self.cfg.healthy_throughput_bps:
-            with self.lock:
-                self.consecutive_bad = 0
-                self.healthy_by_throughput += 1
-            log.info("loss=%.2f%% but tun0 moved %.0f KiB/s - healthy, that is ICMP "
-                     "deprioritized under load, not the tunnel dropping data (#732)",
-                     loss, throughput / 1024.0)
-            return False
-
         # A fully dead tunnel is EXEMPT. The liveness probe plus `quick` already
         # own that path, and a switch cannot fix a Bluetit that is not connected.
         if not current:
@@ -1104,7 +1083,6 @@ def render_metrics(agent):
         switching = agent.switching
         switches = dict(agent.switches)
         throughput = agent.throughput_bps
-        healthy_by_throughput = agent.healthy_by_throughput
     # Both of these are MEASURED HERE, outside the lock, not taken off a field on
     # the agent. A cached value is only ever as fresh as its last writer, and in
     # both cases the only writer was the switch path - which a healthy pod never
@@ -1122,8 +1100,8 @@ def render_metrics(agent):
     # Same rule, same reason: MEASURED here, at scrape time, two /sys reads. This
     # is the raw counter, so a reader (or #736's alert) can rate() it without
     # trusting anything the agent cached. The windowed rate below is a different
-    # thing - the number the gate actually decided on - and it is absent, not
-    # stale, when a window could not produce one.
+    # thing - last probe window's average - and it is absent, not stale, when a
+    # window could not produce one.
     tun_bytes = agent.bluetit.tun_bytes()
     lines = [
         "# HELP vpn_agent_dry_run Whether the agent is logging switches instead of applying them.",
@@ -1136,12 +1114,9 @@ def render_metrics(agent):
         lines.append('vpn_agent_switches_total{reason="%s"} %d'
                      % (reason, switches.get(reason, 0)))
     lines += [
-        "# HELP vpn_agent_consecutive_bad_windows Consecutive probe windows over the loss threshold AND below the healthy-throughput gate.",
+        "# HELP vpn_agent_consecutive_bad_windows Consecutive probe windows with ICMP loss to the in-tunnel gateway at or over VPN_AGENT_BAD_LOSS_PCT. Resets on the first window under it.",
         "# TYPE vpn_agent_consecutive_bad_windows gauge",
         "vpn_agent_consecutive_bad_windows %d" % bad,
-        "# HELP vpn_agent_healthy_by_throughput_windows_total Windows over the loss threshold that the throughput gate cleared as healthy - the false positives loss alone would have counted (#732).",
-        "# TYPE vpn_agent_healthy_by_throughput_windows_total counter",
-        "vpn_agent_healthy_by_throughput_windows_total %d" % healthy_by_throughput,
         "# HELP vpn_agent_tunnel_device_ok Whether the device qBittorrent is bound to exists, read from /sys/class/net at scrape time. Read it together with vpn_agent_switch_in_progress: 0 during a switch is the normal teardown, not a failure.",
         "# TYPE vpn_agent_tunnel_device_ok gauge",
         "vpn_agent_tunnel_device_ok %d" % (1 if device_ok else 0),
@@ -1171,17 +1146,17 @@ def render_metrics(agent):
         ]
     if throughput is not None:
         lines += [
-            "# HELP vpn_agent_tunnel_throughput_bytes_per_sec rx+tx bytes/sec over the last probe window - the value the throughput gate decided on. Absent when the window produced no honest number (device gone, or tun0 rebuilt mid-window so the counters reset).",
+            "# HELP vpn_agent_tunnel_throughput_bytes_per_sec rx+tx bytes/sec over the last probe window, i.e. the same interval vpn_agent_current_loss_pct describes. Diagnostic only - it decides nothing (#771). Absent when the window produced no honest number (device gone, or tun0 rebuilt mid-window so the counters reset).",
             "# TYPE vpn_agent_tunnel_throughput_bytes_per_sec gauge",
             "vpn_agent_tunnel_throughput_bytes_per_sec %.0f" % throughput,
         ]
     if loss is not None:
         lines += [
-            # Still published, and still informative - it is just no longer the
-            # whole decision. Read it next to
-            # vpn_agent_tunnel_throughput_bytes_per_sec: high loss with the tunnel
-            # busy is the normal loaded state (#732), high loss with it idle is the
-            # fault.
+            # This is the whole degradation decision again (#771). Read it next to
+            # vpn_agent_tunnel_throughput_bytes_per_sec, but read that as context
+            # and not as an excuse: a busy tunnel at high loss is NOT known to be
+            # fine - measured 2026-08-04, 13.66 MB/s came with 0.0% loss, so
+            # throughput does not explain loss away. See Config.bad_loss_pct.
             "# HELP vpn_agent_current_loss_pct Last measured ICMP loss to the in-tunnel gateway.",
             "# TYPE vpn_agent_current_loss_pct gauge",
             "vpn_agent_current_loss_pct %s" % loss,
