@@ -397,38 +397,40 @@ spec:
             - { name: VPN_AGENT_PROBE_TARGET, value: "10.128.0.1" }
             - { name: VPN_AGENT_PROBE_COUNT, value: "50" }
             - { name: VPN_AGENT_PROBE_INTERVAL_SECONDS, value: "60" }
-            # DEGRADATION SWITCHING IS DISARMED (#732). 101 is unreachable -
-            # loss is a percentage - so watch_once() resets on every window and
-            # never switches. Boot-time selection is untouched, and that is
-            # where the measured value is (#498).
-            #
-            # NO threshold works here, which is why this is disarmed and not
-            # retuned. 5 came from the 2026-07-31 outage at 6.7-9% sustained,
-            # measured on an UNLOADED tunnel. Under seeding load ICMP to the
-            # in-tunnel gateway is deprioritized and the floor is 15-20%, so
-            # the fault to detect is QUIETER than the noise it hides in.
-            # Measured 2026-08-03 while the scorer read 0.0% on every candidate:
+            # DEGRADATION SWITCHING IS RE-ARMED (#732), back to the 2026-07-31
+            # outage profile of 6.7-9% sustained. Loss ALONE cannot decide this
+            # and never could - PR #733 had to disarm it with 101 because the
+            # loaded ICMP floor is 15-20% and fluctuates 4-20%, so the fault to
+            # catch is QUIETER than the noise it hides in. Measured 2026-08-03
+            # while the scorer read 0.0% on every candidate:
             #
             #   200 packets transmitted, 170 received, 15% packet loss
             #   rtt min/avg/max/mdev = 27.631/37.031/74.627/6.553 ms
             #   tun0 same window: rx 3825 KiB/s, tx 292 KiB/s
             #
-            # 15% loss while pulling 3.8 MiB/s, RTT spread staying tight - a
-            # genuinely lossy path smears that. And it was already firing,
-            # stopped only by a leftover cooldown:
+            # 15% loss while pulling 3.8 MiB/s, RTT spread staying tight - that
+            # is ICMP being deprioritized under load, not the tunnel dropping
+            # data. What makes 5 usable again is the THROUGHPUT GATE below: a
+            # window only counts as bad if loss is over this number AND tun0 is
+            # moving less than VPN_AGENT_HEALTHY_THROUGHPUT_BYTES_PER_SEC. This
+            # number on its own is no longer a switch decision.
             #
-            #   20:39:26 bad window loss=14.00% server=Dalim 3/3
-            #   20:39:26 degradation switch suppressed: cooldown, 19903s left
-            #   20:45:20 bad window loss=10.00% server=Dalim 3/3
-            #   20:45:20 degradation switch suppressed: cooldown, 19550s left
-            #
-            # That cooldown is armed by the boot_upgrade switch, so it lapses
-            # ~6 h after every pod start - then this fires for real and keeps
-            # firing to the 3/day cap, each one changing the exit IP, dropping
-            # every peer and re-announcing to private trackers with H&R rules.
-            # Re-arm only with a probe that survives load - a throughput gate,
-            # or TCP instead of ICMP. Options in #732.
-            - { name: VPN_AGENT_BAD_LOSS_PCT, value: "101" }
+            # Do NOT raise this back toward the loaded floor. The gate handles
+            # the loaded case; a higher threshold only makes the real fault
+            # (6.7-9% on an IDLE tunnel) invisible again.
+            - { name: VPN_AGENT_BAD_LOSS_PCT, value: "5" }
+            # The gate that makes the line above safe (#732). A tunnel moving
+            # meaningful data is healthy by definition - a broken tunnel cannot
+            # move data, so this is a signal congestion cannot fake. 64 KiB/s
+            # over the ~10 s probe window, BIASED LOW: too high and a fine but
+            # quiet tunnel falls back to the noisy loss path, which is the
+            # false-positive storm #733 stopped; too low and a limping tunnel
+            # reads healthy, which only costs a switch we would have made - and
+            # every switch changes the exit IP, drops every peer and
+            # re-announces to private trackers with H&R rules (#498). The floor
+            # it has to clear is the agent's OWN probe traffic, under 1 KiB/s
+            # through tun0, so this sits ~75x above the gate certifying itself.
+            - { name: VPN_AGENT_HEALTHY_THROUGHPUT_BYTES_PER_SEC, value: "65536" }
             - { name: VPN_AGENT_BAD_WINDOWS, value: "3" }
             # 6 h. A switch changes the exit IP, which drops every peer and
             # re-announces to private trackers that have hit-and-run rules. We
