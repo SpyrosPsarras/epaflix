@@ -6,7 +6,7 @@
 #
 # Deliberately NOT the airvpn-bluetit image: the scorer never talks to Bluetit
 # and needs no Suite binaries.
-FROM python:3.13-alpine
+FROM python:3.14-alpine
 
 # Without this label GitHub does not auto-link the published package to this
 # repo. The package then gets created unlinked on first publish, and
