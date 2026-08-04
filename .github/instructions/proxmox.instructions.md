@@ -565,3 +565,46 @@ qm stop <VMID>
 # Create a backup (this will create a backup file in the NFS storage location)
 vzdump <VMID> --storage local --mode snapshot --compress lzo --dumpdir /mnt/pool1/dataset01/VMs/backup
 ```
+
+## SSH: password authentication is DISABLED (#745)
+
+Both hosts run `PasswordAuthentication no` + `KbdInteractiveAuthentication no`
+via the drop-in `/etc/ssh/sshd_config.d/99-no-password-auth.conf`, kept in this
+repo at [`1-proxmox/ssh/99-no-password-auth.conf`](../../1-proxmox/ssh/99-no-password-auth.conf).
+
+**Why:** one 12-character password was the value of **20** credentials in
+`secrets.yml` — including root on both Proxmox hosts, TrueNAS admin, all 7 k3s
+node passwords, the Postgres superuser and the router (#745). Rotating all
+twenty was rejected as expensive and risky; making the password unusable
+remotely is cheaper and stronger. Key auth was already the only method in
+actual use — every session logged `Accepted publickey for root`.
+
+**Apply on a rebuilt host:**
+
+```bash
+scp 1-proxmox/ssh/99-no-password-auth.conf root@<host>:/etc/ssh/sshd_config.d/
+ssh root@<host> 'sshd -t && systemctl reload ssh'
+ssh root@<host> "sshd -T | grep -iE '^(passwordauthentication|pubkeyauthentication)'"
+```
+
+Use `reload`, not `restart` — reload keeps existing sessions alive, so a mistake
+does not disconnect you mid-change. Always `sshd -t` first.
+
+**Verify both directions**, not just one:
+
+```bash
+ssh -o BatchMode=yes root@<host> 'echo ok'                       # key auth still works
+ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password \
+    -o NumberOfPasswordPrompts=0 root@<host> true                # must fail: Permission denied (publickey)
+```
+
+**This does NOT cover the Proxmox web UI.** `root@pam` still authenticates with
+that password at `https://<host>:8006`. Closing that vector needs TOTP on
+`root@pam` or restricting the UI to the LAN — still open in #745.
+
+**Recovery:** the web UI console (noVNC / xterm.js) and physical/IPMI access
+both bypass `sshd`, so this cannot lock you out of a host — only out of SSH.
+Revert with `rm /etc/ssh/sshd_config.d/99-no-password-auth.conf && systemctl reload ssh`.
+
+**The k3s VMs already had this** (`PasswordAuthentication no`, `sudo` NOPASSWD),
+so their 7 passwords are console-only and were deliberately left unrotated.
