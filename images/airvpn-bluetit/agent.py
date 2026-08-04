@@ -58,6 +58,28 @@ SCHEMA = 1
 # orders of magnitude above this floor.
 MIN_THROUGHPUT_INTERVAL_SECONDS = 1.0
 
+# Which switch reasons have EARNED the full cooldown, and it is only the one that
+# corrected something MEASURED. A `degradation` switch left a server the agent
+# had just watched fail bad_windows consecutive loss windows, so spacing the next
+# one 6 h out is the flap damper working as designed.
+#
+# `boot_upgrade` measured nothing: quick's pick was merely outside the ranking's
+# top band, and the ranking is scored from a LAN node against each server's ENTRY
+# IP, which cannot see an in-tunnel fault (#775, #767). So it is an unverified
+# PLACEMENT, and arming 6 h on it blocks the only instrument that CAN see the
+# fault. Measured live 2026-08-04: a boot_upgrade landed on Dalim, verified it at
+# loss=0.0%, and nine minutes later the degradation watch reached 3/3 at 6-8%
+# loss and was refused with "cooldown, 21034s left" (#789). Same principle as
+# #627 fix 2 - a switch must never lock out recovery from itself - for a switch
+# that produced a working but LOSSY tunnel rather than no tunnel at all.
+#
+# `fallback` is not here either: it ends on whatever Bluetit's own quick-connect
+# picked after every ranked candidate failed, which is the least considered
+# destination of the three. A degradation switch that ends on `quick` still gets
+# the full cooldown, because the reason is what is scored here, not the
+# destination - it did correct a measured fault.
+FULL_COOLDOWN_REASONS = ("degradation",)
+
 
 def _env_int(name, default):
     return int(os.environ.get(name, default))
@@ -158,12 +180,17 @@ class Config:
         # between "traffic moves" and "traffic moves well" is the degradation
         # watch's job, not this one's.
         self.verify_max_loss_pct = _env_float("VPN_AGENT_VERIFY_MAX_LOSS_PCT", 50.0)
-        # What a switch that produced NO working tunnel arms, instead of the
-        # full cooldown (#627 fix 2). Short because the agent must be able to
-        # recover from its own bad switch; longer than one degradation trip
-        # (3 x 60 s windows) so a failure cannot immediately chain into the
-        # next attempt. The daily cap is what actually bounds thrash - a failed
-        # switch counts against it exactly like a successful one.
+        # The SHORT cooldown - what an attempt that has not earned the full one
+        # arms. Two kinds of attempt use it: one that produced NO working tunnel
+        # (#627 fix 2) and one that is an unverified placement rather than a
+        # measured correction, i.e. any reason outside FULL_COOLDOWN_REASONS
+        # (#789). Short because the agent must be able to recover from its own
+        # bad switch; longer than one degradation trip (3 x ~70 s windows) so a
+        # failure cannot immediately chain into the next attempt - which means
+        # the earliest trip after a boot_upgrade is refused once and the next one
+        # (~7 min in) goes through. That is deliberate, see _earned_cooldown().
+        # The daily cap is what actually bounds thrash - both count against it
+        # exactly like a successful degradation switch.
         self.failed_cooldown_seconds = _env_int("VPN_AGENT_FAILED_COOLDOWN_SECONDS", 300)
         self.attempts_per_candidate = _env_int("VPN_AGENT_ATTEMPTS", 2)
         self.retry_backoff = _env_float("VPN_AGENT_RETRY_BACKOFF", 5.0)
@@ -302,11 +329,12 @@ class SwitchBudget:
     time - a crash loop would then switch every restart and walk straight
     through the 6 h cooldown this exists to enforce.
 
-    Each entry is `[when, cooldown]`, not a bare timestamp, because the two
-    outcomes have to cost different amounts of time (#627 fix 2). A switch that
-    produced a working tunnel arms the full cooldown; one that produced nothing
-    arms a short retry window, so the agent can still recover from its own bad
-    switch. Both count against the daily cap.
+    Each entry is `[when, cooldown]`, not a bare timestamp, because the outcomes
+    have to cost different amounts of time (#627 fix 2, #789). A switch that
+    corrected a measured fault arms the full cooldown; one that produced nothing,
+    and one that is only an unverified placement, arm a short retry window so the
+    agent can still recover from its own bad switch. See FULL_COOLDOWN_REASONS
+    and Agent._earned_cooldown(). All of them count against the daily cap.
 
     The old bare-timestamp file cannot be read by this code and does not need to
     be: the budget lives on an emptyDir that only survives inside one pod, and
@@ -741,8 +769,9 @@ class Agent:
             log.info("DRY RUN reason=%s would switch from=%s to=%s",
                      reason, self.current_server, names[0] if names else "quick")
             # Recorded anyway, so a dry-run soak shows the real switch rate
-            # instead of one trip every three minutes forever.
-            self.budget.record()
+            # instead of one trip every three minutes forever. Same cooldown the
+            # real path would arm, or the soak measures a rate nothing produces.
+            self.budget.record(self._earned_cooldown(reason))
             return None
 
         # Jitter before we touch anything. Both instances read the same file and
@@ -787,10 +816,13 @@ class Agent:
                             # rather than walk the pool creating tun2, tun3, ...
                             # The FULL cooldown is right here, unlike a verification
                             # failure below: another switch cannot fix a taken slot,
-                            # it can only take one more.
+                            # it can only take one more. Passed by VALUE, because
+                            # `None` means "whatever this reason earned" and this is
+                            # the one case that wants the full one regardless (#789).
                             log.error("connected to %s but the tunnel device is wrong - "
                                       "the switch FAILED", connected)
-                            return self._finish(connected, reason, None)
+                            return self._finish(connected, reason, None,
+                                                cooldown=self.cfg.cooldown_seconds)
                         if self.verify_tunnel(connected):
                             log.info("connected server=%s reason=%s attempt=%d elapsed=%.1fs",
                                      connected, reason, attempt, self.clock() - started)
@@ -874,10 +906,38 @@ class Agent:
         log.info("verified %s by traffic, loss=%.1f%%", name, loss)
         return True
 
+    def _earned_cooldown(self, reason):
+        """How long `reason` gets to protect the server it just put us on.
+
+        The full cooldown only for a reason that corrected something measured;
+        the short one for an unverified placement. FULL_COOLDOWN_REASONS carries
+        the why, and the timing is the point, so here is the arithmetic for the
+        short one at its default 300 s:
+
+        - a degradation trip needs bad_windows (3) consecutive windows, and one
+          window is probe_interval (60 s) plus the ~10 s the 50-packet probe
+          takes, so the earliest trip is ~210 s after the agent starts watching;
+        - 210 s < 300 s, so the FIRST trip after a boot_upgrade is refused. The
+          bad-window counter resets, three more windows run, and the second trip
+          lands at ~420 s and goes through. So a bad boot pick is corrected about
+          7 minutes in - not 6 hours (#789), and not instantly either, which is
+          what keeps a flapping pool from chaining switches back to back;
+        - the observed 2026-08-04 sequence was slower than that floor (boot
+          verified 13:43:17, 3/3 at 13:52:42 = 565 s) and would have switched on
+          its FIRST trip with no refusal at all.
+
+        The daily cap is untouched and still bounds churn: worst case is one boot
+        placement plus two degradation corrections (the second 6 h after the
+        first), then max_switches_per_day (3) stops the agent for the day.
+        """
+        return (self.cfg.cooldown_seconds if reason in FULL_COOLDOWN_REASONS
+                else self.cfg.failed_cooldown_seconds)
+
     def _finish(self, connected, reason, counted_as, cooldown=None):
         """counted_as is None when the switch is not to be called a success.
 
-        `cooldown` is what this attempt arms; None means the full one.
+        `cooldown` is what this attempt arms; None means "whatever `reason` has
+        earned" - see _earned_cooldown().
         """
         with self.lock:
             self.current_server = connected
@@ -889,22 +949,35 @@ class Agent:
         # a bad pool must not cause thrash, and every switch costs peer
         # connections and a private-tracker re-announce.
         #
-        # But a switch that produced no working tunnel arms the SHORT one
-        # (#627 fix 2). This used to be unconditional: the 2026-08-02 boot
-        # upgrade to a tunnel that never handshook armed the full 21600 s, and
-        # three minutes later the agent's own degradation watch reached
-        # bad_windows=3, asked budget.allowed(), was told "cooldown, ~21400s
-        # left", logged `degradation switch suppressed` and did nothing for six
-        # hours. A switch must never lock out recovery from itself. The daily
-        # cap still counts it, so a broken pool cannot thrash instead.
-        self.budget.record(cooldown)
+        # But an attempt that has not earned the full cooldown arms the SHORT one,
+        # and there are two of those. A switch that produced no working tunnel
+        # (#627 fix 2, passed in explicitly): the 2026-08-02 boot upgrade onto a
+        # tunnel that never handshook armed the full 21600 s, and three minutes
+        # later the degradation watch reached bad_windows=3, asked
+        # budget.allowed(), was told "cooldown, ~21400s left", logged
+        # `degradation switch suppressed` and did nothing for six hours. And a
+        # switch whose REASON is only a placement rather than a measured
+        # correction (#789, derived from `reason` when no cooldown is passed):
+        # 2026-08-04 that same lockout happened again with a tunnel that DID
+        # handshake and was merely lossy, so the verification carve-out alone was
+        # not enough. A switch must never lock out recovery from itself, whichever
+        # way it went wrong. The daily cap still counts every one of them, so a
+        # broken pool cannot thrash instead.
+        armed = self._earned_cooldown(reason) if cooldown is None else cooldown
+        self.budget.record(armed)
+        # Say which one was armed. The budget lives on an emptyDir, so after the
+        # pod is gone this log line is the only record of whether a boot pick
+        # locked the degradation watch out (#789), and "which cooldown did it
+        # arm" was exactly the question that could not be answered live.
+        log.info("armed a %ds cooldown for reason=%s, %d/%d switches used today",
+                 armed, reason, len(self.budget.history), self.cfg.max_switches_per_day)
         if not connected:
             log.error("switch reason=%s ended with NO tunnel - the network lock is "
                       "still armed, so nothing leaks, but qBittorrent has no egress",
                       reason)
         elif counted_as == "fallback":
-            log.warning("switch reason=%s ended on quick (%s) - treating it as failed "
-                        "and holding the full cooldown", reason, connected)
+            log.warning("switch reason=%s ended on quick (%s) - not counted as a "
+                        "successful %s", reason, connected, reason)
         return connected
 
     # -- boot -------------------------------------------------------------
