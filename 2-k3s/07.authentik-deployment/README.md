@@ -927,13 +927,46 @@ Password: <AUTHENTIK_DB_PASSWORD>
 
 ### SMTP Configuration
 
+Transport settings live in [helm-values.yaml](helm-values.yaml) (`authentik.email`):
+port `587`, `use_tls: true` (STARTTLS), `use_ssl: false`, `timeout: 30`.
+
+Host, username, from and password are **not in git** — the repo is public, so
+they are only in the SOPS-encrypted `authentik-app-secrets`
+([authentik-app-secrets.enc.yaml](authentik-app-secrets.enc.yaml)) as
+`AUTHENTIK_EMAIL__HOST` / `__USERNAME` / `__FROM` / `__PASSWORD`, mirrored in
+the git-ignored `secrets.yml` under the `auth_email_*` keys. Env vars override
+the chart's own config, which is what makes the split work.
+
+`from` is set to the **same mailbox as `username`**: the relay rejects a sender
+that is not the authenticated mailbox, which is why the old
+`noreply@epaflix.com` could never have worked even with a reachable host.
+
+> **Do not put `mail.epaflix.com` back (#461).** That name has no record of its
+> own, so the proxied `*.epaflix.com` Cloudflare wildcard answers for it with
+> `104.21.59.155` / `172.67.179.219` — hosts that serve 443 and carry no SMTP.
+> Port 587 times out. Measured from a pod in `app-authentik`, 2026-08-04. The
+> real relay node is the one the domain's own MX and SPF records already name —
+> the DirectAdmin DNS-only carve-out from the wildcard — and its TLS cert
+> matches that hostname, so STARTTLS verifies with no skip-verify. Alertmanager
+> had the identical pair of breaks; PR #684 fixed that half, and
+> `alertmanager-config-secret.enc.yaml` holds the same smarthost value.
+
+Rotation: the Secret is consumed as **env vars** via `global.envFrom`, so a
+changed value does **not** roll the pods (#299). Reloader is not deployed in
+`app-authentik` (only `servarr`, `traefik-system`, `odysseus` — see
+[16.reloader](../16.reloader/kustomization.yaml)), so after any change:
+
 ```bash
-Host: mail.epaflix.com
-Port: 587
-From: noreply@epaflix.com
-Username: truenas_admin
-Password: <SMTP_PASSWORD>
-TLS: Enabled
+kubectl rollout restart deploy/authentik-server deploy/authentik-worker -n app-authentik
+```
+
+This briefly interrupts SSO — including forward-auth for the 10 servarr UIs (#176).
+
+Verify a real send (not just config):
+
+```bash
+kubectl exec deploy/authentik-worker -n app-authentik -- \
+  sh -c 'ak test_email "$AUTHENTIK_EMAIL__USERNAME"'   # self-send, no address in argv
 ```
 
 ### Admin Credentials
