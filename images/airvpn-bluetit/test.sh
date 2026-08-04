@@ -84,7 +84,9 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 for m in vpn_agent_dry_run vpn_agent_switches_total vpn_agent_consecutive_bad_windows \
-         vpn_agent_tunnel_device_ok vpn_agent_switch_in_progress; do
+         vpn_agent_tunnel_device_ok vpn_agent_switch_in_progress \
+         vpn_agent_switch_budget_used vpn_agent_switch_budget_exhausted \
+         vpn_agent_switch_cooldown_seconds_left; do
   if ! echo "${metrics:-}" | grep -q "$m"; then
     echo "FAIL: missing metric $m"; echo "${metrics:-none}"; docker logs "$cid"; exit 1
   fi
