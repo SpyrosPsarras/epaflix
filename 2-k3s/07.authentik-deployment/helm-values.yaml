@@ -14,21 +14,28 @@ global:
       maxSurge: 1
       maxUnavailable: 0
 
-  # Runtime secrets live in the `authentik-app-secrets` Secret (applied
-  # imperatively — see secret-app.yaml). Appended AFTER the chart-managed
-  # `authentik` Secret so its keys win on the merged envFrom.
+  # Runtime secrets live in the `authentik-app-secrets` Secret, reconciled by
+  # ArgoCD from authentik-app-secrets.enc.yaml (SOPS+age) — secret-app.yaml is
+  # only a placeholder-shaped imperative fallback. Appended AFTER the
+  # chart-managed `authentik` Secret so its keys win on the merged envFrom.
   # Keys:
-  #   AUTHENTIK_SECRET_KEY  AUTHENTIK_POSTGRESQL__PASSWORD  AUTHENTIK_EMAIL__PASSWORD
+  #   AUTHENTIK_SECRET_KEY  AUTHENTIK_POSTGRESQL__PASSWORD
+  #   AUTHENTIK_EMAIL__PASSWORD  AUTHENTIK_EMAIL__HOST
+  #   AUTHENTIK_EMAIL__USERNAME  AUTHENTIK_EMAIL__FROM
+  # The email ones are here and not in `authentik.email` below because the repo
+  # is public — see the comment on that block.
   envFrom:
     - secretRef:
         name: authentik-app-secrets
 
 # Authentik core configuration
 authentik:
-  # Sensitive values (secret_key, postgresql.password, email.password) are
-  # supplied via global.envFrom → authentik-app-secrets above. Empty strings
-  # here keep them OUT of the chart-managed `authentik` Secret so ArgoCD can
-  # safely render this file from git.
+  # Sensitive values (secret_key, postgresql.password, and the whole email
+  # host/username/from/password set) are supplied via global.envFrom →
+  # authentik-app-secrets above. An empty string — or omitting the key
+  # entirely, as the email block now does — keeps them OUT of the
+  # chart-managed `authentik` Secret so ArgoCD can safely render this file
+  # from git.
   secret_key: ""
 
   # Logging
@@ -47,15 +54,33 @@ authentik:
     password: ""
 
   # SMTP/Email configuration
+  #
+  # host / username / from / password are NOT here on purpose. They come from
+  # the SOPS-encrypted `authentik-app-secrets` Secret via `global.envFrom`
+  # above (AUTHENTIK_EMAIL__HOST / __USERNAME / __FROM / __PASSWORD), because
+  # THIS REPO IS PUBLIC — a mail hostname plus a real mailbox address is a
+  # ready-made credential-stuffing target, so neither is committed in
+  # plaintext. Env vars override the chart's config, which is what makes the
+  # split work.
+  #
+  # What used to be here was dead and broke every send (#461): host was
+  # `mail.epaflix.com`, which has no record of its own, so the proxied
+  # `*.epaflix.com` Cloudflare wildcard answered for it with 104.21.59.155 /
+  # 172.67.179.219 — hosts that serve 443 and no SMTP. Measured from a pod in
+  # app-authentik: `mail.epaflix.com:587` times out, the real relay node
+  # answers, does STARTTLS and accepts AUTH. username was `truenas_admin`,
+  # never a mailbox on that relay. Same two breaks Alertmanager had (PR #684).
+  #
+  # Only the non-sensitive transport settings stay in git:
+  #   port 587 + use_tls (STARTTLS) / use_ssl false — matches the mailbox
+  #   settings the owner provisioned (`auth_email_SMTP_port` 587,
+  #   `auth_email_SMTP_SSL_encryption` STARTTLS). 465 + use_ssl would be the
+  #   implicit-TLS alternative; the relay listens on both, we use STARTTLS.
   email:
-    host: "mail.epaflix.com"
     port: 587
-    username: "truenas_admin"
-    password: ""
     use_tls: true
     use_ssl: false
     timeout: 30
-    from: "noreply@epaflix.com"
 
 # Server configuration
 server:
