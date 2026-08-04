@@ -84,7 +84,8 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 for m in vpn_agent_dry_run vpn_agent_switches_total vpn_agent_consecutive_bad_windows \
-         vpn_agent_tunnel_device_ok vpn_agent_switch_in_progress; do
+         vpn_agent_tunnel_device_ok vpn_agent_switch_in_progress \
+         vpn_agent_healthy_by_throughput_windows_total; do
   if ! echo "${metrics:-}" | grep -q "$m"; then
     echo "FAIL: missing metric $m"; echo "${metrics:-none}"; docker logs "$cid"; exit 1
   fi
@@ -99,6 +100,14 @@ if ! echo "$metrics" | grep -q "^vpn_agent_tunnel_device_ok 0$"; then
 fi
 if ! echo "$metrics" | grep -q "^vpn_agent_switch_in_progress 0$"; then
   echo "FAIL: switch_in_progress is set with no switch running"; echo "$metrics"; exit 1
+fi
+# Same rule for the throughput series (#732): there is no tun0 in this container,
+# so the honest answer is NO SERIES, not a zero. A zero would read as "the tunnel
+# is idle", which is what hands the degradation verdict back to the ICMP loss
+# threshold - the exact false positive the throughput gate exists to stop.
+if echo "$metrics" | grep -qE "^vpn_agent_tunnel_(bytes_total|throughput_bytes_per_sec) "; then
+  echo "FAIL: a throughput series is published with no tunnel device present"
+  echo "$metrics" | grep vpn_agent_tunnel; exit 1
 fi
 # DRY_RUN defaults OFF - the agent acts. The flag only exists because the spec's
 # rollback is "flip back to dry-run".
