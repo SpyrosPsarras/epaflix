@@ -13,6 +13,11 @@ ALLOWLIST=(
   "2-k3s/11.argocd/oidc-secret.yaml"
   "2-k3s/06.postgres/operator-kustomization/barman-manifest.yaml"
   "2-k3s/12.renovate/secret-app.yaml"
+  # Same shape as the renovate one: placeholder-only, never in any
+  # kustomization `resources:`, so ArgoCD never applies it. It only tripped
+  # the hook once #461 touched it — it had not been staged since the hook
+  # landed.
+  "2-k3s/07.authentik-deployment/secret-app.yaml"
 )
 
 fail=0
