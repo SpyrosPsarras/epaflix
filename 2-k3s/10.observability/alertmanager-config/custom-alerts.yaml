@@ -280,9 +280,9 @@ spec:
         #   worth paging about, not the counting.
         #
         #   vpn_agent_switches_total{reason="degradation"} - reachable, and for the
-        #   first time actually so (#771). The flapping / daily-cap rule for it is
-        #   #736; build it there, against real scraped values, not from this
-        #   comment.
+        #   first time actually so (#771). Alerted on by VpnAgentSwitchingRepeatedly
+        #   below (#736), which is a repeat/cap rule and NOT a "a switch happened"
+        #   rule - one degradation switch is the agent doing its job.
         #
         #   vpn_agent_tunnel_throughput_bytes_per_sec - diagnostic only, it decides
         #   nothing (#771), and deliberately NOT an alert: a quiet tunnel is the
@@ -422,9 +422,12 @@ spec:
         # resolves when the pod rolls. Verified live 2026-08-03:
         # `vpn_agent_switches_total{reason="fallback"}` = 0, alerting form empty.
         #
-        # reason="boot_upgrade" is deliberately not covered: it increments on every
-        # normal pod start. reason="degradation" cannot increment at all while
-        # VPN_AGENT_BAD_LOSS_PCT is 101 (see the group header).
+        # reason="boot_upgrade" is deliberately not covered here: it increments on
+        # a normal pod start whenever `quick` lands outside the top-N band.
+        # reason="degradation" is covered by VpnAgentSwitchingRepeatedly below -
+        # it is genuinely reachable as of #771/#774 (VPN_AGENT_BAD_LOSS_PCT is 5
+        # and the throughput gate that made it near-unreachable is gone; this
+        # comment previously said 101, which was PR #733's disarm and is stale).
         - alert: VpnAgentFallbackServer
           expr: vpn_agent_switches_total{namespace="servarr", reason="fallback"} > 0
           for: 5m
@@ -434,6 +437,105 @@ spec:
           annotations:
             summary: "vpn-picker agent fell back to `quick`, the ranked pool failed"
             description: "{{ $labels.pod }} has recorded {{ $value }} fallback switch(es) - every ranked candidate failed to come up, so the agent connected via `airconnect quick` and is on an unmeasured server. Each switch also drops every peer and re-announces to private trackers, and the agent is capped at VPN_AGENT_MAX_SWITCHES_PER_DAY (3), so once the cap is hit it will not try again today. Check the agent logs for `ended on quick` / `passed no traffic` (Grafana → Explore → Loki: {namespace=\"servarr\", container=\"agent\"}) (#555, #505)."
+
+        # #736 / #555 ("switch flapping, daily cap hit"), from #505's list. Held
+        # back by PR #734 because degradation switching was disarmed - PR #733 had
+        # VPN_AGENT_BAD_LOSS_PCT at 101, then PR #766's throughput gate made the
+        # loss path near-unreachable on a seeding box. PR #773/#774 removed the
+        # gate and left the bar at 5, so reason="degradation" can finally move.
+        #
+        # WHERE THE CAP ACTUALLY LIVES, because it decides the expression. The
+        # enforced cap is SwitchBudget in images/airvpn-bluetit/agent.py: a history
+        # of [when, cooldown] entries on /var/cache/vpn-agent/switches.json,
+        # pruned to the last 86400 s on wall clock, and allowed() refuses when
+        # len(history) >= VPN_AGENT_MAX_SWITCHES_PER_DAY (3). Read live off
+        # qbittorrent-7dffdc9cb-sn99z on 2026-08-04:
+        #
+        #   switches.json                 [[1785831245.8235333, 21600]]
+        #   findmnt /var/cache/vpn-agent  ext4 ... kubernetes.io~empty-dir/agent-cache
+        #
+        # So the budget is on an emptyDir - pod-scoped, and one slot of three was
+        # already spent by this pod's boot_upgrade. Two consequences:
+        #
+        #   1. A rolling 24 h window is what the agent enforces, NOT a lifetime
+        #      count. So this rule uses increase(), the opposite call from
+        #      VpnAgentFallbackServer above - deliberately, and here is the
+        #      difference. Fallback is a STATE ("this pod is on an unmeasured
+        #      server") that persists until the pod rolls, so the absolute counter
+        #      is right there. A cap hit is an EVENT COUNT inside a window that
+        #      the agent itself forgets after 24 h. The absolute counter has no
+        #      window, so on a pod alive for days it would latch on forever after
+        #      the third switch while the agent had long pruned back to one slot
+        #      used and was switching happily - an alert stuck on, describing a
+        #      state that ended. That is the "reads as coverage and is not"
+        #      failure this group's header exists to prevent.
+        #
+        #   2. The metric and the budget can disagree by one in either direction,
+        #      so this cannot be an exact cap rule. #783 tracks exporting
+        #      len(history) as vpn_agent_switch_budget_used / _exhausted, which
+        #      would make it exact. Until then: _finish() calls budget.record()
+        #      unconditionally but increments switches[] only `if connected and
+        #      counted_as`, so a switch ending with no tunnel spends a slot
+        #      silently; and Agent.switches is in-memory while the history is on
+        #      disk precisely to survive an agent.py restart, so after a restart
+        #      the metric reads low.
+        #
+        # WHY increase() IS SAFE FOR degradation AND NOT FOR THE OTHER REASONS.
+        # PR #734's trap is real and was re-measured today, not taken on trust -
+        # the live pod's boot_upgrade counter reads 1 absolute but
+        # increase(...[24h]) reads 0, because the boot switch completed before the
+        # first 60 s scrape and a series whose first sample is already 1 gives
+        # increase() nothing to see. degradation structurally cannot do that:
+        # main() calls serve() before agent.run(), run() sleeps one
+        # probe_interval before the first watch_once(), and a trip needs
+        # bad_windows (3) consecutive bad windows - so the earliest possible
+        # degradation switch is 4 x 60 s = ~240 s after the agent starts, against
+        # a 60 s ServiceMonitor interval. The series is always scraped at 0
+        # several times before it can move. That margin is 4x and depends on
+        # VPN_AGENT_PROBE_INTERVAL_SECONDS x (VPN_AGENT_BAD_WINDOWS + 1) staying
+        # well over the scrape interval - if either is ever retuned, recheck this.
+        #
+        # WHY THE THRESHOLD IS 2 AND NOT THE CAP OF 3. The cap counts all reasons
+        # together, and boot_check() spends a slot on boot whenever `quick` lands
+        # outside the top-N band (it returns early and spends nothing when the
+        # pick is already in band). Both happen:
+        #
+        #   boot upgraded  -> 1 slot gone, degradation can reach 2 and NEVER 3
+        #                     inside 24 h. This is the live pod, measured above.
+        #   boot in band   -> all 3 slots free, degradation can reach 3.
+        #
+        # So `>= 3` on degradation is unfirable on any pod that boot-upgraded,
+        # which is the pod running right now. 2 is the only threshold that fires
+        # in both shapes, and in the measured shape it lands exactly on the cap
+        # hit. Read the alert as "capped, or one switch from it" - the metric
+        # cannot distinguish those two, per #783.
+        #
+        # Extrapolation checked rather than assumed: increase() over a window the
+        # series only partly covers inflates by about half a scrape interval per
+        # end, not to the full window. Measured on the two pods that do show a
+        # scraped boot switch - 1.0025 and 1.0033 for one real switch, ~0.3%. So
+        # one real switch cannot cross 2.
+        #
+        # sum by (namespace, pod) drops instance/job/endpoint/container/service
+        # and keeps pods apart: the same query at >= 0 returns 8 separate pod
+        # series for one 24 h window, which is the multi-series problem #736
+        # warned about, handled.
+        #
+        # for: 15m matches the group and rides out a scrape gap; the value moves
+        # slowly, and it self-resolves 24 h after the last switch, tracking the
+        # budget's own prune.
+        - alert: VpnAgentSwitchingRepeatedly
+          expr: |
+            sum by (namespace, pod) (
+              increase(vpn_agent_switches_total{namespace="servarr", reason="degradation"}[24h])
+            ) >= 2
+          for: 15m
+          labels:
+            severity: warning
+            component: servarr
+          annotations:
+            summary: "vpn-picker agent is switching server repeatedly, at or near its daily cap"
+            description: "{{ $labels.pod }} has made {{ $value }} degradation switches in the last 24 h. The agent is capped at VPN_AGENT_MAX_SWITCHES_PER_DAY (3) counting every reason, and a boot upgrade usually spends one of those, so this pod is at the cap or one switch from it - once the cap is reached it stops trying until the window rolls, and a genuinely bad server is then kept. Every switch also drops every peer and re-announces to private trackers (#498). Look at whether one server keeps being picked and keeps degrading, or whether the probe is misreading: vpn_agent_current_server, vpn_agent_current_loss_pct and the `bad window` / `degradation trip` lines (Grafana → Explore → Loki: {namespace=\"servarr\", container=\"agent\"}). The exact enforced count is not exported yet (#783) (#736, #555, #505, #771)."
 
         # Spyros on #622: dry-run is the rollback state, so if it is still set days
         # later somebody parked it and forgot - the agent is logging switches it
