@@ -35,6 +35,29 @@ log = logging.getLogger("vpn-agent")
 # filename (ranking.v2.json), so anything else here is a document we cannot read.
 SCHEMA = 1
 
+# Shortest interval throughput_since() will divide by. Below this the quotient is
+# an artefact of packet arrival timing, not a rate, so there is NO measurement -
+# not a zero (#768).
+#
+# The arithmetic, at the tun0 MTU of 1500 bytes:
+#   1 ms  -> one packet reads as 1.5 MB/s, and zero packets reads as 0.0 B/s
+#   10 ms -> one packet reads as 150 KB/s
+#   1 s   -> one packet reads as 1.5 KB/s, and 1 MB/s needs ~700 packets
+# One second is where a single packet stops being able to move the number by more
+# than its own share of it, i.e. where the quotient starts describing the traffic
+# instead of the sampling. Measured on the live pod 2026-08-04: the same tunnel,
+# in the same second, moving several MB/s, read 0.0 B/s in two windows and
+# 11.5 MB/s in a third, because the probe was stubbed and returned instantly.
+#
+# Deliberately NOT justified by the old 64 KiB/s throughput gate (PR #764/#766) -
+# that gate is gone (#771) and this number must not depend on it coming back. The
+# only reason is metric resolution.
+#
+# It cannot suppress the real metric: a production window is one `ping` of
+# probe_count (50) packets at probe_rate (5/s), so ~10 s of wall time - four
+# orders of magnitude above this floor.
+MIN_THROUGHPUT_INTERVAL_SECONDS = 1.0
+
 
 def _env_int(name, default):
     return int(os.environ.get(name, default))
@@ -967,11 +990,15 @@ class Agent:
           rebuilt on every switch (wg_del_device) and the `airvpn` sidecar can
           reconnect under us on its own liveness probe, so this is a normal event,
           not a corrupt read;
-        - no time passed, so there is nothing to divide by.
+        - the interval is shorter than MIN_THROUGHPUT_INTERVAL_SECONDS, so the
+          quotient would describe packet arrival timing rather than the traffic
+          (#768). NOT `elapsed > 0`: at 1 ms a single MTU-sized packet reads as
+          1.5 MB/s and an empty millisecond reads as 0.0 B/s, and 0.0 B/s is the
+          worse one - it looks like a measured idle tunnel (#686/#690).
         """
         after = self.bluetit.tun_bytes()
         elapsed = self.clock() - started
-        if before is None or after is None or elapsed <= 0:
+        if before is None or after is None or elapsed < MIN_THROUGHPUT_INTERVAL_SECONDS:
             return None
         delta = after - before
         if delta < 0:
@@ -1144,9 +1171,14 @@ def render_metrics(agent):
             "# TYPE vpn_agent_tunnel_bytes_total counter",
             "vpn_agent_tunnel_bytes_total %d" % tun_bytes,
         ]
+    # Absent, never 0, when the window produced no number. `vpn_agent_tunnel_bytes_total`
+    # above is published independently and is measured at scrape time, so a reader
+    # keeps the raw counter and can rate() it over its own window even when this
+    # series is gone - which is what makes omitting this one cheap. A placeholder
+    # here would be a value that reads as measured and is not (#686/#690/#771).
     if throughput is not None:
         lines += [
-            "# HELP vpn_agent_tunnel_throughput_bytes_per_sec rx+tx bytes/sec over the last probe window, i.e. the same interval vpn_agent_current_loss_pct describes. Diagnostic only - it decides nothing (#771). Absent when the window produced no honest number (device gone, or tun0 rebuilt mid-window so the counters reset).",
+            "# HELP vpn_agent_tunnel_throughput_bytes_per_sec rx+tx bytes/sec over the last probe window, i.e. the same interval vpn_agent_current_loss_pct describes. Diagnostic only - it decides nothing (#771). Absent when the window produced no honest number (device gone, tun0 rebuilt mid-window so the counters reset, or the window was shorter than MIN_THROUGHPUT_INTERVAL_SECONDS and too short to measure - #768).",
             "# TYPE vpn_agent_tunnel_throughput_bytes_per_sec gauge",
             "vpn_agent_tunnel_throughput_bytes_per_sec %.0f" % throughput,
         ]
