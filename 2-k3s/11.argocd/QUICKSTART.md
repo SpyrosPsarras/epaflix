@@ -82,8 +82,9 @@ Do **not** apply `oidc-secret.yaml` — the chart manages `argocd-secret`.
 Merge-patch the OIDC keys instead:
 
 ```
-CID=$(yq '.argocd.oidc.client_id'     .github/instructions/secrets.yml)
-CSEC=$(yq '.argocd.oidc.client_secret' .github/instructions/secrets.yml)
+S=.github/instructions/secrets.enc.yaml
+CID=$(sops -d --extract '["argocd_oidc_client_id"]' "$S")
+CSEC=$(sops -d --extract '["argocd_oidc_client_secret"]' "$S")
 kubectl -n argocd patch secret argocd-secret --type=merge \
   -p "{\"stringData\":{\"oidc.authentik.clientId\":\"$CID\",\"oidc.authentik.clientSecret\":\"$CSEC\"}}"
 kubectl -n argocd rollout restart deploy/argocd-server

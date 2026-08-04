@@ -3,7 +3,7 @@
 #
 # Order:
 #   1. namespace.yaml
-#   2. oidc-secret.yaml (placeholder — real values from secrets.yml)
+#   2. oidc-secret.yaml (placeholder — real values from secrets.enc.yaml)
 #   3. helm upgrade --install argocd … helm-values.yaml
 #   4. ingress.yaml (after Service exists)
 #   5. image-updater install (separate script)
@@ -40,7 +40,7 @@ cat <<EOF
     2-k3s/05.traefik-deployment/examples/app-with-native-oidc-authentik.md
   • Merge-patch OIDC client-id/secret into argocd-secret (do NOT apply
     oidc-secret.yaml — that would clobber the helm-managed server.secretkey).
-    Replace VALUES below with real ones from .github/instructions/secrets.yml:
+    Replace VALUES below with real ones from .github/instructions/secrets.enc.yaml:
         kubectl -n argocd patch secret argocd-secret --type=merge \\
           -p '{"stringData":{"oidc.authentik.clientId":"<CID>","oidc.authentik.clientSecret":"<CSEC>"}}'
         kubectl -n argocd rollout restart deploy/argocd-server

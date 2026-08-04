@@ -25,7 +25,7 @@ version: "3.8"
 #   2. Create the Cloudflare API token secret:
 #        ssh ubuntu@192.168.10.71 \
 #          "echo '<CF_API_TOKEN>' | docker secret create cloudflare_api_token -"
-#        (token value is in .github/instructions/secrets.yml)
+#        (token value is in .github/instructions/secrets.enc.yaml)
 #
 #   3. Prepare acme.json on ds-master:
 #        ssh ubuntu@192.168.10.71 "
