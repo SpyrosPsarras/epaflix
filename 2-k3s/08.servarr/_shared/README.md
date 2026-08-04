@@ -11,7 +11,7 @@ Traefik IngressRoute configurations:
 
 ### middleware/
 Traefik middleware configurations:
-- `arr-headers.yaml` - Security headers for *arr apps
+- `arr-headers (DELETED 2026-08-04, #692).yaml` - Security headers for *arr apps
 
 ### scripts/
 Management scripts:
