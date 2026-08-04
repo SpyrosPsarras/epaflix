@@ -117,7 +117,7 @@ class FakeBluetit:
 
 
 def build(tmp, ranking=RANKING, server="Aspidiske", refused=(), silent=(), dead=(),
-          **overrides):
+          throughput=0.0, **overrides):
     """An Agent wired to a fake daemon, a fake clock and a real ranking file.
 
     `dead` names servers with the 2026-08-02 shape: they connect, they answer
@@ -155,6 +155,13 @@ def build(tmp, ranking=RANKING, server="Aspidiske", refused=(), silent=(), dead=
     agent.probe = lambda count=None: (
         100.0 if (fake.server or "").lower() in dead_names else 0.0
     )
+    # The throughput gate's input, modelled for the same reason the probe is: the
+    # fixture has no tun0, and the fake clock does not move during a scripted
+    # probe, so the real /sys read would divide by a zero interval. `0.0` - an
+    # IDLE tunnel - is the default, so every degradation test still decides on
+    # loss exactly as it did before the gate existed. The real read and the real
+    # delta arithmetic are covered by test_throughput_is_measured_not_assumed().
+    agent.throughput_since = lambda before, started: throughput
     return agent, fake, clock
 
 
@@ -506,6 +513,158 @@ def test_degradation_counting(tmp):
     assert agent2.consecutive_bad == 0, "counted a window under the threshold"
     assert fake2.connects() == []
     print("ok  degradation: 3 consecutive trips, a good window resets, 4.99% is clean")
+
+
+@with_tmp
+def test_a_busy_tunnel_is_healthy_whatever_icmp_says(tmp):
+    """#732: the fault we hunt is quieter than the noise, so ask a different question.
+
+    Measured 2026-08-03 on the live pod: 15% ICMP loss to the in-tunnel gateway
+    while tun0 pulled 3.8 MiB/s, RTT spread staying tight. The loaded floor is
+    15-20% and fluctuates 4-20%, and the 2026-07-31 outage was 6.7-9% sustained -
+    below the noise. On loss alone the agent hit 3/3 twice in seven minutes on a
+    healthy tunnel and was stopped only by a leftover cooldown, which is why
+    PR #733 disarmed it with BAD_LOSS_PCT=101.
+
+    Both halves are asserted here, because a gate that says "healthy" to
+    everything is not a fix - it is the disarm again with more code.
+    """
+    # 15% loss, the real number, with the real 3.8 MiB/s + 292 KiB/s behind it.
+    busy, _, _ = build(tmp, server="Aspidiske", throughput=(3825 + 292) * 1024.0)
+    busy.probe = scripted_probe(15.0)
+    windows = busy.cfg.bad_windows + 3
+    trips = [busy.watch_once() for _ in range(windows)]
+    assert trips == [False] * windows, (
+        "%d of %d windows tripped a switch on a tunnel moving 4 MiB/s at 15%% "
+        "ICMP loss - the decision is resting on loss again, which is the #732 "
+        "false-positive storm" % (trips.count(True), windows))
+    assert (busy.consecutive_bad, busy.switches["degradation"]) == (0, 0), \
+        (busy.consecutive_bad, busy.switches)
+    assert busy.healthy_by_throughput == busy.cfg.bad_windows + 3, \
+        busy.healthy_by_throughput
+
+    # Same loss, same threshold, nothing moving: still a real degradation.
+    idle, fake, _ = build(tmp, server="Aspidiske", throughput=0.0)
+    idle.probe = scripted_probe(15.0)
+    for _ in range(idle.cfg.bad_windows - 1):
+        assert idle.watch_once() is False, "tripped too early"
+    assert idle.watch_once() is True, \
+        "15% loss on an IDLE tunnel did not trip - the gate has disarmed " \
+        "degradation switching instead of sharpening it"
+    assert fake.connects() == ["Dalim"], fake.connects()
+    assert idle.healthy_by_throughput == 0, idle.healthy_by_throughput
+
+    # And the gate is a floor, not "any traffic at all". The agent's own probe
+    # pushes ~1 KiB/s through tun0, so a gate that low would certify itself.
+    creeping, _, _ = build(tmp, server="Aspidiske", throughput=2048.0)
+    creeping.probe = scripted_probe(15.0)
+    for _ in range(2):
+        creeping.watch_once()
+    assert (creeping.consecutive_bad, creeping.healthy_by_throughput) == (2, 0), \
+        "2 KiB/s cleared the gate - the agent's own ICMP traffic is about 1 KiB/s " \
+        "through tun0, so a floor that low lets the gate certify itself"
+    print("ok  #732: traffic beats loss, an idle tunnel still trips, the floor is real")
+
+
+@with_tmp
+def test_throughput_is_measured_not_assumed(tmp):
+    """The real /sys read and the real delta arithmetic, no fixture in the way.
+
+    build() models `throughput_since()`, so without this test the gate would be
+    tested against a stub of its own input. Here the counters are real files
+    (`lo`, which always exists) and a fake device, and the arithmetic runs for
+    real - including the reset case, which is NOT an edge: tun0 is deleted and
+    rebuilt on every switch (wg_del_device) so its counters restart at 0.
+    """
+    agent, fake, clock = build(tmp)             # build() points tun_device at `lo`
+    del agent.throughput_since                  # drop the stub, use the real method
+
+    live = agent.bluetit.tun_bytes()
+    assert isinstance(live, int) and live >= 0, \
+        "the real rx+tx read of `lo` returned %r" % (live,)
+
+    # A missing device is None - never 0. Zero would mean "idle tunnel", which
+    # hands the verdict straight back to the loss threshold (#732).
+    agent.cfg.tun_device = "tun-nope-0"
+    assert agent.bluetit.tun_bytes() is None, \
+        "an unreadable counter read as a number - a missing device is not an idle one"
+    assert agent.throughput_since(0, clock() - 10) is None
+    agent.cfg.tun_device = "lo"
+
+    # And it is SILENT, on both paths. This runs once per window AND once per
+    # scrape, so a log line here is 2 lines a minute forever (#690's flood).
+    with CaptureLog() as caught:
+        agent.cfg.tun_device = "tun-nope-0"
+        for _ in range(5):
+            agent.bluetit.tun_bytes()
+            ag.render_metrics(agent)
+        assert caught.records == [], \
+            "%d log records from reading a missing counter: %s" % (
+                len(caught.records), caught.messages())
+    agent.cfg.tun_device = "lo"
+
+    # The counter reset. `before` is the old device's total, the read after it is
+    # the new device starting from ~0, so the delta is negative.
+    agent.bluetit.tun_bytes = lambda: 24576
+    assert agent.throughput_since(50 * 1024 * 1024, clock() - 10) is None, \
+        "a negative delta produced a number - tun0 is rebuilt on every switch, " \
+        "so this is the normal post-switch window, and reading it as 0 bytes/s " \
+        "would count the window as bad on loss alone"
+    # Nothing to divide by is no number either.
+    assert agent.throughput_since(0, clock()) is None
+    # A plain positive delta is the ordinary case, and the arithmetic is bytes/sec.
+    assert agent.throughput_since(4096, clock() - 10) == 2048.0
+
+    # End to end: an unmeasurable window must not count as bad, and must not wipe
+    # a real degradation's evidence either.
+    agent.probe = scripted_probe(100.0)
+    agent.consecutive_bad = 2
+    with CaptureLog() as caught:
+        assert agent.watch_once() is False
+        assert any("no verdict" in m for m in caught.messages()), caught.messages()
+    assert agent.consecutive_bad == 2, (
+        "an unmeasurable window moved consecutive_bad to %d - it must neither "
+        "count as bad nor reset a real run" % agent.consecutive_bad)
+    assert fake.connects() == [], "switched on a window it could not measure"
+    print("ok  throughput: real /sys read, silent, resets and gaps are no-number not zero")
+
+
+@with_tmp
+def test_throughput_metrics_are_measurements(tmp):
+    """#686/#690 again: nothing published that nothing refreshes.
+
+    `vpn_agent_tunnel_bytes_total` is read from /sys at scrape time, so it has to
+    disappear when the device does. `vpn_agent_tunnel_throughput_bytes_per_sec` is
+    last window's number, so it has to disappear when a window cannot produce one -
+    stale here would be the exact #686 defect.
+    """
+    agent, _, _ = build(tmp, throughput=1024.0 * 1024.0)
+    agent.probe = scripted_probe(15.0)
+
+    assert metric(agent, "vpn_agent_tunnel_bytes_total") is not None, \
+        "`lo` exists, so the scrape-time counter read must produce a value"
+    assert metric(agent, "vpn_agent_tunnel_throughput_bytes_per_sec") is None, \
+        "a rate was published before any window measured one"
+    assert metric(agent, "vpn_agent_healthy_by_throughput_windows_total") == 0.0
+
+    agent.watch_once()
+    assert metric(agent, "vpn_agent_tunnel_throughput_bytes_per_sec") == 1048576.0
+    assert metric(agent, "vpn_agent_healthy_by_throughput_windows_total") == 1.0
+    # Loss is still published - the decision no longer rests on it alone, but it
+    # is what tells "loaded and fine" apart from "idle and broken".
+    assert metric(agent, "vpn_agent_current_loss_pct") == 15.0
+
+    agent.throughput_since = lambda before, started: None
+    agent.watch_once()
+    assert metric(agent, "vpn_agent_tunnel_throughput_bytes_per_sec") is None, \
+        "the rate survived a window that produced no measurement - a stale rate " \
+        "is what #686 was"
+
+    agent.cfg.tun_device = "tun-nope-0"
+    assert metric(agent, "vpn_agent_tunnel_bytes_total") is None, \
+        "the byte counter kept publishing with no device - it is not being read " \
+        "at scrape time (#690)"
+    print("ok  throughput metrics: measured at scrape time, absent instead of stale")
 
 
 @with_tmp
@@ -931,6 +1090,9 @@ if __name__ == "__main__":
     test_boot_out_of_band_upgrades()
     test_boot_without_a_ranking_stays_on_quick()
     test_degradation_counting()
+    test_a_busy_tunnel_is_healthy_whatever_icmp_says()
+    test_throughput_is_measured_not_assumed()
+    test_throughput_metrics_are_measurements()
     test_dead_tunnel_is_the_liveness_probes_job()
     test_cooldown_and_daily_cap()
     test_failed_connect_walks_the_pool()
