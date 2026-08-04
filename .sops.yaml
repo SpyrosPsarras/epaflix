@@ -24,7 +24,18 @@
 # `encrypted_regex` keeps apiVersion, kind, metadata in cleartext —
 # diffs in PR review stay meaningful, only the actual secret data is
 # ciphertext.
+# Rules are matched top-down, FIRST match wins. The credential store rule
+# must stay above the generic `.enc.yaml` rule: the store is a flat
+# key/value file with no `data:`/`stringData:` key, so the generic
+# `encrypted_regex` would match nothing and write it back in cleartext.
 creation_rules:
+  # The credential store, read by humans and agents (it replaced the old
+  # plaintext git-ignored secrets.yml). No `encrypted_regex` on purpose:
+  # every value is encrypted, key NAMES stay readable so the file doubles
+  # as a committed index of "which credentials exist" without decrypting.
+  - path_regex: ^\.github/instructions/secrets\.enc\.yaml$
+    age: age1586thf5vkcdf5lcn3zwjpu8ltkwyq8efrhj8lr0vdrrt9k5f3qgsxeg7gx
+
   - path_regex: \.enc\.yaml$
     encrypted_regex: ^(data|stringData)$
     age: age1586thf5vkcdf5lcn3zwjpu8ltkwyq8efrhj8lr0vdrrt9k5f3qgsxeg7gx

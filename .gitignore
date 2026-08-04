@@ -1,3 +1,7 @@
+# The plaintext credential store is GONE — replaced by the SOPS-encrypted,
+# committed .github/instructions/secrets.enc.yaml. This line stays as a guard so
+# a plaintext secrets.yml can never be committed if one is ever recreated (e.g.
+# by an old runbook or a `sops -d` redirect). It does NOT match secrets.enc.yaml.
 secrets.yml
 # Glob form, not `.history/`: a directory-level ignore prunes the whole
 # subtree before git ever evaluates the negations below, so `!.history/*.md`

@@ -69,7 +69,7 @@ case $OPTION in
         echo ""
         echo "Steps:"
         echo "1. In TrueNAS (192.168.10.200):"
-        echo "   - Login with credentials from .github/instructions/secrets.yml"
+        echo "   - Login with credentials from .github/instructions/secrets.enc.yaml"
         echo "   - Go to: Shares > Block (iSCSI) > Extents"
         echo "   - Find: iscsi-worker-61 extent"
         echo "   - Edit: Change size from 20GB to 40GB"
