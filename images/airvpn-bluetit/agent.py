@@ -5,7 +5,8 @@ Spec: docs/superpowers/specs/2026-08-01-vpn-picker-design.md (#608, map #498)
 
 Runs as a second container in the `qbittorrent` pod, next to `airvpn`, sharing
 `/run/dbus`. It reads the ranking the scorer publishes, watches the current
-tunnel, and drives Bluetit over D-Bus when it has to switch.
+tunnel, publishes its sustained in-tunnel bad-server verdicts on the shared
+/media channel, and drives Bluetit over D-Bus when it has to switch.
 
 Second entrypoint of the airvpn-bluetit image rather than an image of its own:
 `goldcrest` and the D-Bus client libraries are already here, and a second image
@@ -15,8 +16,10 @@ Stdlib only, same as the scorer. The whole job is a JSON file, some `ping` runs
 and a handful of `goldcrest` calls.
 """
 
+import hashlib
 import json
 import logging
+import math
 import os
 import random
 import re
@@ -34,6 +37,15 @@ log = logging.getLogger("vpn-agent")
 # Contract version the scorer publishes. A breaking change ships as a new
 # filename (ranking.v2.json), so anything else here is a document we cannot read.
 SCHEMA = 1
+
+# Separate contract for the agent's in-tunnel bad-server verdict. The scorer's
+# ranking schema stays at 1 and carries no producer state; verdicts are separate
+# files so two qBittorrent instances sharing /media can merge without either
+# writer replacing the other's evidence (#792).
+VERDICT_SCHEMA = 1
+VERDICT_SOURCE = "vpn-agent"
+VERDICT_TTL_SECONDS = 21600
+_VERDICT_IDENTITY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}$")
 
 # Shortest interval throughput_since() will divide by. Below this the quotient is
 # an artefact of packet arrival timing, not a rate, so there is NO measurement -
@@ -221,6 +233,28 @@ class Config:
         # same call; the key is the one thing that is not.
         self.air_key = os.environ.get("VPN_AGENT_AIR_KEY", "Default")
         self.tun_device = os.environ.get("VPN_AGENT_TUN_DEVICE", "tun0")
+
+        # Shared, durable verdict channel for #792. Default next to ranking.json
+        # so the existing /media transport carries both. A later deployment PR
+        # makes the agent's mount writable; this image-only PR changes no pod.
+        #
+        # The device key is the default producer identity because it is stable
+        # across pod/container recreation and unique for the two AirVPN sessions
+        # (`Default` and `nick`). VPN_AGENT_PRODUCER_ID is the explicit override.
+        # Files are per producer+server, not one mutable producer document: one
+        # writer observing a second bad server must not erase its first verdict,
+        # and neither qBittorrent instance may erase the other's evidence.
+        ranking_dir = os.path.dirname(self.ranking_path) or "."
+        self.verdict_dir = os.environ.get(
+            "VPN_AGENT_VERDICT_DIR", os.path.join(ranking_dir, "verdicts")
+        )
+        self.verdict_producer_id = (
+            os.environ.get("VPN_AGENT_PRODUCER_ID", self.air_key).strip()
+        )
+        self.verdict_ttl_seconds = _env_int(
+            "VPN_AGENT_VERDICT_TTL_SECONDS", VERDICT_TTL_SECONDS
+        )
+
         self.listen_port = _env_int("VPN_AGENT_LISTEN_PORT", 8081)
         # DEFAULT OFF - the agent acts. The flag exists because the spec's
         # rollback is "flip the agent back to dry-run", one env var, never a
@@ -586,6 +620,27 @@ class Bluetit:
         except OSError:
             return False
 
+    def tun_generation(self):
+        """Current tunnel netdevice ifindex, or None when it cannot be read.
+
+        The interface NAME is not a session identity. WireGuard reconnects
+        delete and recreate tun0, and Bluetit may return to the same AirVPN
+        server (or move A -> B -> A) during one ping window. Pre/post server
+        names then match even though teardown loss crossed sessions. Linux gives
+        each recreated netdevice a new ifindex, so bracketing the probe with this
+        cheap /sys read closes that ABA race (#792 second review).
+
+        None is deliberately not a wildcard match. If generation cannot be
+        measured, the loss window is unattributable and must not authorize a
+        shared six-hour verdict.
+        """
+        try:
+            with open("/sys/class/net/%s/ifindex" % self.cfg.tun_device) as fh:
+                value = int(fh.read())
+            return value if value > 0 else None
+        except (OSError, ValueError):
+            return None
+
     def tun_bytes(self):
         """rx+tx bytes carried by the tunnel device, or None when unreadable.
 
@@ -677,6 +732,16 @@ class Agent:
         # path writes is the #629/#686/#690 shape, so the field went with the gate
         # rather than being left to read as coverage. Do not re-add it.
         self.consecutive_bad = 0
+        # The counter belongs to one server AND one tun0 generation, not merely
+        # to this process. The airvpn sidecar can reconnect independently while
+        # the agent stays up. Server identity prevents two windows on Dalim plus
+        # one on Dedalus becoming a false 3/3 verdict (#792 first review).
+        # Generation identity also covers a same-server reconnect that completes
+        # BETWEEN windows: both brackets around the next probe then see Dalim and
+        # the new ifindex, so only carrying the server name would let ifindex 41's
+        # two windows become ifindex 42's third (#792 fourth refinement).
+        self.consecutive_bad_server = None
+        self.consecutive_bad_generation = None
         # There is deliberately NO self.tun_device_ok. It existed, was
         # initialised True and written only on the switch path, so a pod that
         # never switched published `1` without ever having looked (#690). The
@@ -693,8 +758,96 @@ class Agent:
         self.switching = False
         self.switches = {"degradation": 0, "boot_upgrade": 0, "fallback": 0}
         self.cached = []
+        # The full bytes retain generated_at + ttl_seconds. A cached server list
+        # alone has no finite lease and can preserve an already-ejected ranking
+        # forever while the scorer is down (#792 second review).
+        self.cached_payload = None
 
-    # -- ranking ----------------------------------------------------------
+    # -- ranking + shared verdicts ----------------------------------------
+
+    def verdict_path(self, server):
+        """Stable file for one producer+server, safe for arbitrary identities.
+
+        The identity remains inside the validated JSON; only its SHA-256 digest
+        enters the pathname. This prevents slashes or traversal in a producer
+        supplied by an environment variable, and keeps filenames bounded.
+        """
+        identity = "%s\0%s" % (self.cfg.verdict_producer_id, str(server).lower())
+        name = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24] + ".json"
+        return os.path.join(self.cfg.verdict_dir, name)
+
+    def publish_bad_server(self, server, loss_pct):
+        """Atomically publish this agent's authoritative in-tunnel verdict.
+
+        Fail open: an unwritable shared directory is logged but never blocks the
+        degradation switch. The scorer likewise ignores absent/malformed/stale
+        verdicts. Persistence is still the point: on success this file is on
+        /media, outside both the agent-cache emptyDir and the pod lifetime.
+        """
+        producer = self.cfg.verdict_producer_id
+        server = str(server or "")
+        if not isinstance(producer, str) or not _VERDICT_IDENTITY.fullmatch(producer):
+            log.error("cannot publish bad-server verdict: invalid producer identity")
+            return False
+        if not _VERDICT_IDENTITY.fullmatch(server):
+            log.error("cannot publish bad-server verdict: invalid server name")
+            return False
+        if not 1 <= self.cfg.verdict_ttl_seconds <= VERDICT_TTL_SECONDS:
+            log.error("cannot publish bad-server verdict: ttl must be in 1..%d",
+                      VERDICT_TTL_SECONDS)
+            return False
+        try:
+            loss_pct = float(loss_pct)
+        except (TypeError, ValueError):
+            log.error("cannot publish bad-server verdict: loss is not numeric")
+            return False
+        if not math.isfinite(loss_pct) or not 0.0 <= loss_pct <= 100.0:
+            log.error("cannot publish bad-server verdict: loss is outside 0..100")
+            return False
+
+        observed_at = datetime.fromtimestamp(
+            self.wallclock(), timezone.utc
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        doc = {
+            "schema": VERDICT_SCHEMA,
+            "source": VERDICT_SOURCE,
+            "producer": producer,
+            "server": server,
+            "observed_at": observed_at,
+            "ttl_seconds": self.cfg.verdict_ttl_seconds,
+            "loss_pct": float(loss_pct),
+            "bad_windows": self.cfg.bad_windows,
+        }
+        payload = json.dumps(doc, indent=2, sort_keys=True).encode() + b"\n"
+        path = self.verdict_path(server)
+        directory = os.path.dirname(path) or "."
+        tmp = os.path.join(
+            directory,
+            ".%s.tmp.%d.%d" % (
+                os.path.basename(path), os.getpid(), threading.get_ident()
+            ),
+        )
+        try:
+            os.makedirs(directory, exist_ok=True)
+            with open(tmp, "wb") as fh:
+                fh.write(payload)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp, path)
+        except Exception as exc:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            log.error("cannot publish bad-server verdict for %s: %s", server, exc)
+            return False
+
+        log.warning(
+            "published in-tunnel bad-server verdict server=%s loss=%.2f%% "
+            "producer=%s ttl=%ds",
+            server, loss_pct, producer, self.cfg.verdict_ttl_seconds,
+        )
+        return True
 
     def read_ranking(self):
         """Fresh ranking from the shared file, or [] when there is not one.
@@ -717,6 +870,7 @@ class Agent:
             log.warning("ranking is %.0fs old, past its TTL - treating it as absent", age)
             return []
         self.cached = servers
+        self.cached_payload = payload
         self._write_cache(payload)
         return servers
 
@@ -761,26 +915,80 @@ class Agent:
         except OSError as exc:
             log.warning("cannot cache the ranking at %s: %s", path, exc)
 
+    def _discard_cache(self):
+        self.cached = []
+        self.cached_payload = None
+        try:
+            os.unlink(self.cfg.cache_path)
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            log.warning("cannot remove unusable ranking cache at %s: %s",
+                        self.cfg.cache_path, exc)
+
     def load_cache(self):
-        """Adopt a cache left by a previous run of this process in this pod."""
+        """Adopt a still-fresh cache left by an earlier agent process.
+
+        The cache is the original ranking document, not a new lease. Revalidate
+        generated_at and ttl_seconds against the current wall clock every time
+        it becomes the fallback. This matters when the scorer is down: the cache
+        may already be verdict-filtered, and using its bare server list forever
+        turns temporary ejection into a permanent ban. Once it expires, the only
+        honest fail-open is no ranking (`quick`); hidden rows cannot be invented.
+        """
         try:
             with open(self.cfg.cache_path, "rb") as fh:
-                doc = json.loads(fh.read())
+                payload = fh.read()
+            servers, age = parse_ranking(payload, self.wallclock())
         except FileNotFoundError:
-            return
+            self.cached = []
+            self.cached_payload = None
+            return []
         except Exception as exc:
             log.warning("cached ranking is unusable: %s", exc)
-            return
-        self.cached = list(doc.get("servers", []))
+            self._discard_cache()
+            return []
+        if not servers:
+            log.warning(
+                "cached ranking is %.0fs old, past its original TTL - failing "
+                "open to `quick` because no measured base can restore hidden rows",
+                age,
+            )
+            self._discard_cache()
+            return []
+        self.cached = servers
+        self.cached_payload = payload
         log.info("adopted cached ranking servers=%s",
                  [s.get("name") for s in self.cached])
+        return servers
+
+    def cached_ranking(self):
+        """Return the cache only while its original ranking lease is valid."""
+        if self.cached_payload is None:
+            return self.load_cache()
+        try:
+            servers, age = parse_ranking(self.cached_payload, self.wallclock())
+        except Exception as exc:
+            log.warning("in-memory ranking cache is unusable: %s", exc)
+            self._discard_cache()
+            return []
+        if not servers:
+            log.warning(
+                "cached ranking is %.0fs old, past its original TTL - failing "
+                "open to `quick` because no measured base can restore hidden rows",
+                age,
+            )
+            self._discard_cache()
+            return []
+        self.cached = servers
+        return servers
 
     def candidates(self, exclude=None):
-        """fresh ranking > cached last-good > nothing (which means `quick`)."""
+        """Fresh ranking > still-fresh cache > nothing (which means `quick`)."""
         servers = self.read_ranking()
         source = "fresh"
         if not servers:
-            servers = self.cached
+            servers = self.cached_ranking()
             source = "cache"
         if not servers:
             log.warning("no ranking and no cache - only `quick` is left")
@@ -974,6 +1182,8 @@ class Agent:
         with self.lock:
             self.current_server = connected
             self.consecutive_bad = 0
+            self.consecutive_bad_server = None
+            self.consecutive_bad_generation = None
             if connected and counted_as:
                 self.switches[counted_as] = self.switches.get(counted_as, 0) + 1
         # Every attempt arms a cooldown, successful or not. Ending on `quick`
@@ -1112,43 +1322,70 @@ class Agent:
 
     def watch_once(self):
         """One degradation window. Returns True if it triggered a switch."""
-        # Bracket the probe, so the throughput covers the SAME interval the loss
-        # figure describes. Not the whole 60 s window and not the status call
-        # after it - a goldcrest call can take 25 s, and averaging the traffic
-        # over that would describe a different interval than the loss does.
+        # A loss window is evidence about ONE unchanged tunnel SESSION. The
+        # airvpn sidecar can reconnect independently while this process stays up.
+        # Server names catch Dalim -> Dedalus, but not a same-server reconnect or
+        # A -> B -> A during ping: both names read A while teardown loss crosses
+        # sessions. Bracket both the server and tun0's ifindex generation. Any
+        # changed/disconnected/unmeasurable endpoint discards the whole window.
+        server_before = self.bluetit.status()
+        generation_before = self.bluetit.tun_generation()
+
+        # Bracket the probe's byte counters too, so throughput covers the SAME
+        # interval the loss figure describes. Not the whole 60 s window and not
+        # either status call - a goldcrest call can take 25 s, and averaging the
+        # traffic over that would describe a different interval than the loss.
         before, started = self.bluetit.tun_bytes(), self.clock()
         loss = self.probe()
         throughput = self.throughput_since(before, started)
-        with self.lock:
-            self.throughput_bps = throughput
-        # ONE `--bluetit-status` per window, unconditionally, and above every
-        # early return below (#690). It used to sit under the clean-window return
-        # and under the loss threshold, so on a healthy pod `current_server` was
-        # whatever boot found for the life of the pod - and the tunnel CAN move
-        # under the agent: the `airvpn` sidecar restarts on its own liveness
-        # probe and `airconnectatboot quick` picks again, while this process
-        # keeps running, so the metric would then name a server we are not on.
-        #
-        # In the loop and not in render_metrics() on purpose. A goldcrest call
-        # can take goldcrest_timeout (25 s) and its subprocess wrapper 15 s more;
-        # render_metrics() runs in the HTTP handler thread, so a slow D-Bus call
-        # there would blow the Prometheus scrape timeout and take the target
-        # down - losing every metric, including the honest ones. Here it costs
-        # exactly one call per probe_interval (60 s), the same rate the
-        # ServiceMonitor scrapes at and 30x below the one-every-2s polling
-        # connect() already sustains for 30 s at a time. Read AFTER the probe so
-        # it names the state as of the moment the loss is known.
         current = self.bluetit.status()
+        generation_after = self.bluetit.tun_generation()
+        same_server = bool(
+            server_before and current
+            and server_before.lower() == current.lower()
+        )
+        same_session = bool(
+            same_server
+            and generation_before is not None
+            and generation_before == generation_after
+        )
+
         with self.lock:
             self.current_server = current
-            if loss is not None:
-                self.current_loss_pct = loss
+            # A reconnect-spanning rate/loss is not attributable to the current
+            # server. Clear it instead of leaving a stale value next to the new
+            # current_server label (#686/#690).
+            self.throughput_bps = throughput if same_session else None
+            self.current_loss_pct = loss if same_session and loss is not None else None
+            if not same_session:
+                self.consecutive_bad = 0
+                self.consecutive_bad_server = None
+                self.consecutive_bad_generation = None
+
+        # TWO `--bluetit-status` calls and two cheap ifindex reads per window,
+        # before and after the probe, and none per scrape. One status call fixed
+        # the stale current_server metric in #690; the second plus the ifindex
+        # generation bind this safety-critical verdict to one unchanged session.
+        # Status stays in the loop, not render_metrics(): a call can take 25 s
+        # plus a 15 s subprocess backstop, which would blow the Prometheus scrape
+        # timeout and lose every metric.
+        if not same_session:
+            log.info(
+                "discarding probe window because tunnel session changed during "
+                "it: server=%s -> %s ifindex=%s -> %s",
+                server_before or "disconnected", current or "disconnected",
+                generation_before if generation_before is not None else "unreadable",
+                generation_after if generation_after is not None else "unreadable",
+            )
+            return False
         if loss is None:
             return False
 
         if loss < self.cfg.bad_loss_pct:
             with self.lock:
                 self.consecutive_bad = 0
+                self.consecutive_bad_server = None
+                self.consecutive_bad_generation = None
             return False
 
         # NOTHING about `throughput` may appear between here and the verdict.
@@ -1167,6 +1404,15 @@ class Agent:
             return False
 
         with self.lock:
+            server_key = current.lower()
+            # same_session proves this ONE window did not cross a reconnect.
+            # Carry the ifindex too so a reconnect completed BETWEEN windows
+            # starts a new run even when it returns to the same server name.
+            if (self.consecutive_bad_server != server_key
+                    or self.consecutive_bad_generation != generation_after):
+                self.consecutive_bad = 0
+                self.consecutive_bad_server = server_key
+                self.consecutive_bad_generation = generation_after
             self.consecutive_bad += 1
             bad = self.consecutive_bad
         log.warning("bad window loss=%.2f%% server=%s %d/%d",
@@ -1176,6 +1422,24 @@ class Agent:
 
         with self.lock:
             self.consecutive_bad = 0
+            self.consecutive_bad_server = None
+            self.consecutive_bad_generation = None
+
+        # Publish the MEASUREMENT before asking whether a switch is allowed.
+        # Cooldown and the daily cap govern peer-disrupting actions; they do not
+        # make three sustained in-tunnel loss windows untrue. Persisting here is
+        # what prevents a pod recreation from forgetting the fault and taking a
+        # scorer-clean-but-tunnel-lossy server again (#792). Dry-run is the one
+        # exception: changing the shared ranking would be an action, so rollback
+        # to dry-run remains behaviorally inert.
+        if self.cfg.dry_run:
+            log.info(
+                "DRY RUN would publish in-tunnel bad-server verdict "
+                "server=%s loss=%.2f%%", current, loss,
+            )
+        else:
+            self.publish_bad_server(current, loss)
+
         allowed, why = self.budget.allowed()
         if not allowed:
             log.warning("degradation switch suppressed: %s", why)
