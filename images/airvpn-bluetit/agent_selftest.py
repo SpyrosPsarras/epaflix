@@ -11,12 +11,14 @@ The fake Bluetit below is the real seam: `Agent` drives it through the same
 The ranking fixture is the real 2026-08-02 document the live scorer published.
 """
 
+import glob
 import json
 import logging
 import os
 import shutil
 import stat
 import tempfile
+import threading
 import time
 
 import agent as ag
@@ -413,16 +415,17 @@ def test_current_server_is_refreshed_every_window(tmp):
         % agent.current_server)
     assert b'vpn_agent_current_server{server="Ashlesha"} 1' in ag.render_metrics(agent)
 
-    # Exactly one status call per window. This is the cost the fix pays, so it is
-    # asserted: not one per scrape, and not several per window either.
+    # Exactly two status calls per window. One before and one after the probe
+    # bind its loss to an unchanged server (#792); none may happen per scrape.
     def status_calls():
         return sum(1 for c in fake.calls if c[0] == "--bluetit-status")
 
     before = status_calls()
     for _ in range(3):
         agent.watch_once()
-    assert status_calls() - before == 3, \
-        "3 clean windows made %d status calls, expected 3" % (status_calls() - before)
+    assert status_calls() - before == 6, \
+        "3 clean windows made %d status calls, expected 6 (before+after each probe)" \
+        % (status_calls() - before)
 
     # And a scrape makes NONE. render_metrics() runs in the HTTP handler thread
     # and a goldcrest call can take 25 s, which would blow the Prometheus scrape
@@ -438,7 +441,7 @@ def test_current_server_is_refreshed_every_window(tmp):
     assert agent.current_server is None, agent.current_server
     assert b"vpn_agent_current_server" not in ag.render_metrics(agent), \
         "kept naming a server while Bluetit reports not connected"
-    print("ok  current server: re-read every window, one call each, none per scrape")
+    print("ok  current server: bracketed around every window, none per scrape")
 
 
 @with_tmp
@@ -758,7 +761,13 @@ def test_dead_tunnel_is_the_liveness_probes_job(tmp):
 
 @with_tmp
 def test_cooldown_and_daily_cap(tmp):
-    agent, fake, clock = build(tmp, server="Aspidiske")
+    # This test advances almost two days while isolating SwitchBudget. In live
+    # operation the scorer republishes every 15 minutes; give the fixture a
+    # ranking lease long enough that the new finite-cache fail-open does not
+    # turn an unrelated budget test into `quick` after 35 minutes.
+    ranking = dict(RANKING)
+    ranking["ttl_seconds"] = 7 * 86400
+    agent, fake, clock = build(tmp, ranking=ranking, server="Aspidiske")
     agent.probe = scripted_probe(9.0)
 
     def trip():
@@ -1061,7 +1070,13 @@ def test_a_boot_upgrade_does_not_lock_out_the_degradation_watch(tmp):
     by hand between windows because the fake one does not move during a scripted
     probe (#768) - which is also what makes the timing arithmetic real here.
     """
-    agent, fake, clock = build(tmp, server="Aspidiske")
+    # The test advances two full cooldowns while isolating cooldown/cap logic.
+    # A healthy live scorer republishes every 15 minutes, so keep this fixture's
+    # ranking fresh long enough that finite cache expiry does not replace the
+    # ranked correction with unrelated `quick` fallback behavior.
+    ranking = dict(RANKING)
+    ranking["ttl_seconds"] = 86400
+    agent, fake, clock = build(tmp, ranking=ranking, server="Aspidiske")
     agent.probe = scripted_probe(0.0)         # a clean boot pick, like Dalim's
     agent.boot_check()
 
@@ -1125,9 +1140,269 @@ def test_a_boot_upgrade_does_not_lock_out_the_degradation_watch(tmp):
 
 
 @with_tmp
+def test_degradation_publishes_a_durable_shared_verdict(tmp):
+    """#792: the in-tunnel verdict must outlive this pod and this producer.
+
+    The scorer's entry-IP probe read Dalim clean while this exact path measured
+    6-24% loss through the tunnel. The agent is therefore the authority for the
+    verdict. Publish it as soon as bad_windows is reached, even when the switch
+    budget refuses the switch: a recreate must not erase the only measurement
+    that can stop the ranking putting us straight back on the server.
+    """
+    verdict_dir = os.path.join(tmp, "shared", "verdicts")
+    agent, fake, _ = build(
+        tmp, server="Aspidiske", verdict_dir=verdict_dir,
+        verdict_producer_id="cluster-default", verdict_ttl_seconds=21600)
+    agent.probe = scripted_probe(9.0)
+
+    # The placement's short cooldown is still holding. The third window is a
+    # real verdict even though the switch itself is (correctly) refused.
+    agent.budget.record(agent.cfg.failed_cooldown_seconds)
+    for window in range(agent.cfg.bad_windows - 1):
+        assert agent.watch_once() is False
+        assert glob.glob(os.path.join(verdict_dir, "*.json")) == [], \
+            "published before bad_windows was reached on window %d" % (window + 1)
+    assert agent.watch_once() is False, "the fixture cooldown should suppress the switch"
+    assert fake.connects() == [], "the fixture unexpectedly switched"
+
+    files = glob.glob(os.path.join(verdict_dir, "*.json"))
+    assert len(files) == 1, (
+        "bad_windows reached on Aspidiske at 9%% in-tunnel loss but the agent "
+        "published %d verdict files - the scorer will keep ranking a server the "
+        "only authoritative probe measured as lossy, and a pod recreate forgets "
+        "the fault (#792)" % len(files))
+    with open(files[0]) as fh:
+        doc = json.load(fh)
+    assert doc == {
+        "schema": 1,
+        "source": "vpn-agent",
+        "producer": "cluster-default",
+        "server": "Aspidiske",
+        "observed_at": "2026-08-02T09:31:59Z",
+        "ttl_seconds": 21600,
+        "loss_pct": 9.0,
+        "bad_windows": agent.cfg.bad_windows,
+    }, doc
+
+    # Same producer, another bad server: one verdict must not erase the first.
+    # Different producer: it must not erase either. A file per producer+server
+    # is the merge contract for the two qBittorrent instances sharing /media.
+    assert agent.publish_bad_server("Dalim", 8.0) is True
+    nick_tmp = os.path.join(tmp, "nick")
+    os.makedirs(nick_tmp)
+    other, _, _ = build(
+        nick_tmp, server="Piautos", verdict_dir=verdict_dir,
+        verdict_producer_id="nick", verdict_ttl_seconds=21600)
+    assert other.publish_bad_server("Piautos", 7.0) is True
+    files = glob.glob(os.path.join(verdict_dir, "*.json"))
+    assert len(files) == 3, "one producer erased another verdict: %s" % files
+
+    # Replacing one producer+server verdict is atomic under a live reader. A
+    # partial JSON document is fail-open in the scorer, so an in-place write can
+    # silently put a bad server back into ranking.json.
+    path = agent.verdict_path("Dalim")
+    partial = []
+    stop = threading.Event()
+
+    def reader():
+        while not stop.is_set():
+            try:
+                with open(path) as fh:
+                    json.load(fh)
+            except Exception as exc:
+                partial.append(type(exc).__name__)
+
+    thread = threading.Thread(target=reader)
+    thread.start()
+    try:
+        # publish_bad_server logs each real verdict at WARNING. Capture those
+        # records so the atomicity stress does not bury the suite's output.
+        with CaptureLog():
+            for loss in range(200):
+                assert agent.publish_bad_server("Dalim", float(loss % 101)) is True
+    finally:
+        stop.set()
+        thread.join()
+    assert partial == [], "a reader saw partial verdict JSON: %s" % partial[:3]
+    assert not glob.glob(os.path.join(verdict_dir, ".*.tmp.*")), \
+        "atomic verdict writer left temp files behind"
+
+    # Shared storage failure is fail-open for switching. Ejection is a safety
+    # improvement, never a new way to strand the tunnel on a measured bad box.
+    failure_tmp = os.path.join(tmp, "write-failure")
+    os.makedirs(failure_tmp)
+    blocked = os.path.join(failure_tmp, "not-a-directory")
+    with open(blocked, "w") as fh:
+        fh.write("fixture")
+    failing, failing_fake, _ = build(
+        failure_tmp, server="Aspidiske", verdict_dir=blocked,
+        verdict_producer_id="cluster-default", verdict_ttl_seconds=21600)
+    failing.probe = scripted_probe(9.0)
+    for _ in range(failing.cfg.bad_windows - 1):
+        assert failing.watch_once() is False
+    assert failing.watch_once() is True, \
+        "an unwritable verdict directory blocked the degradation switch"
+    assert failing_fake.connects() == ["Dalim"], failing_fake.connects()
+
+    # A new Agent has no relation to the first one's emptyDir, but the shared
+    # verdict remains. This is the half of #792 the old switch budget cannot do.
+    recreated_tmp = os.path.join(tmp, "recreated")
+    os.makedirs(recreated_tmp)
+    recreated, _, _ = build(
+        recreated_tmp, server="Menkent", verdict_dir=verdict_dir,
+        verdict_producer_id="cluster-default", verdict_ttl_seconds=21600)
+    assert os.path.exists(recreated.verdict_path("Aspidiske")), \
+        "a pod recreation forgot the lossy-server verdict"
+    print("ok  #792: degradation publishes atomic per-producer/server verdicts on shared storage")
+
+
+@with_tmp
+def test_bad_windows_are_bound_to_one_unchanged_session(tmp):
+    """#792 reviews: never carry loss evidence across a tunnel session.
+
+    The AirVPN sidecar can reconnect independently while this process stays up.
+    Two bad Dalim windows followed by one Dedalus window must not become a 3/3
+    verdict against Dedalus, and a reconnect during the probe makes that whole
+    window unattributable. A six-hour shared ejection needs three windows from
+    one unchanged server, not three windows from whatever names were observed
+    after each probe.
+    """
+    def sub(name):
+        path = os.path.join(tmp, name)
+        os.makedirs(path)
+        return path
+
+    # The sharp race: Dalim owns two bad windows, then the sidecar reconnects to
+    # Dedalus while the third probe is running. Reading status only after the
+    # probe falsely attributes all three windows to Dedalus and publishes a
+    # durable verdict against a good server for both consumers.
+    during = sub("during-probe")
+    verdict_dir = os.path.join(during, "shared", "verdicts")
+    agent, fake, _ = build(
+        during, server="Dalim", verdict_dir=verdict_dir,
+        verdict_producer_id="cluster-default")
+    agent.probe = scripted_probe([9.0, 9.0])
+    assert agent.watch_once() is False
+    assert agent.watch_once() is False
+    assert agent.consecutive_bad == 2
+
+    def reconnecting_probe(count=None):
+        if count is None:
+            fake.server = "Dedalus"
+            return 9.0
+        return 0.0
+
+    agent.probe = reconnecting_probe
+    assert agent.watch_once() is False, (
+        "a reconnect during the probe completed a 3/3 degradation trip - the "
+        "window was attributed from the post-probe server name instead of "
+        "being discarded (#792 review)")
+    assert agent.current_server == "Dedalus", agent.current_server
+    assert agent.consecutive_bad == 0, (
+        "Dalim's two bad windows survived a reconnect to Dedalus: %s" %
+        agent.consecutive_bad)
+    assert glob.glob(os.path.join(verdict_dir, "*.json")) == [], (
+        "a reconnect during the third window published a false verdict against "
+        "Dedalus for both ranking consumers")
+
+    # An unchanged NAME is not an unchanged tunnel session. Bluetit may replace
+    # tun0 and reconnect to the same server, or move A -> B -> A, while ping is
+    # running. Both endpoint names then read Dalim even though teardown loss
+    # belongs to no stable session. The netdevice ifindex is the generation
+    # bracket: a replacement gets a new one even when the name comes back.
+    same_name = sub("same-name-session-replacement")
+    verdict_dir = os.path.join(same_name, "shared", "verdicts")
+    agent, fake, _ = build(
+        same_name, server="Dalim", verdict_dir=verdict_dir,
+        verdict_producer_id="cluster-default")
+    generation = [41]
+    agent.bluetit.tun_generation = lambda: generation[0]
+    agent.probe = scripted_probe([9.0, 9.0])
+    agent.watch_once()
+    agent.watch_once()
+    assert agent.consecutive_bad == 2
+
+    def same_name_replacement(count=None):
+        if count is None:
+            # Same reported server after a same-server reconnect (and the same
+            # final state as A -> B -> A), but a different tun0 incarnation.
+            fake.server = "Dalim"
+            generation[0] += 1
+            return 9.0
+        return 0.0
+
+    agent.probe = same_name_replacement
+    assert agent.watch_once() is False, (
+        "a same-name tunnel replacement during the probe completed a 3/3 trip; "
+        "matching pre/post server names are an ABA race and cannot authorize a "
+        "six-hour shared verdict (#792 second review)")
+    assert agent.consecutive_bad == 0, agent.consecutive_bad
+    assert agent.current_loss_pct is None, agent.current_loss_pct
+    assert glob.glob(os.path.join(verdict_dir, "*.json")) == [], (
+        "teardown loss during a same-name reconnect published a verdict against "
+        "a healthy Dalim session (#792 second review)")
+
+    # The same race also exists BETWEEN probe windows. A reconnect may complete
+    # after one window and before the next, leaving both brackets in the third
+    # window stable on the same server name and the same NEW ifindex. The old
+    # two-window count belongs to ifindex 41, not the recovered session at 42.
+    # Tracking only consecutive_bad_server falsely completes 3/3 here.
+    between_sessions = sub("same-server-replacement-between-windows")
+    verdict_dir = os.path.join(between_sessions, "shared", "verdicts")
+    agent, fake, _ = build(
+        between_sessions, server="Dalim", verdict_dir=verdict_dir,
+        verdict_producer_id="cluster-default")
+    generation = [41]
+    agent.bluetit.tun_generation = lambda: generation[0]
+    agent.probe = scripted_probe([9.0, 9.0])
+    agent.watch_once()
+    agent.watch_once()
+    assert agent.consecutive_bad == 2
+
+    generation[0] = 42  # same-server reconnect completed between windows
+    agent.probe = scripted_probe(9.0)
+    assert agent.watch_once() is False, (
+        "two 9% Dalim windows on ifindex 41 plus one on replacement ifindex 42 "
+        "completed a 3/3 trip and durable six-hour verdict - the generation "
+        "was not carried across probe windows (#792 fourth refinement)")
+    assert agent.consecutive_bad == 1, agent.consecutive_bad
+    assert agent.consecutive_bad_server == "dalim", agent.consecutive_bad_server
+    assert agent.consecutive_bad_generation == 42, agent.consecutive_bad_generation
+    assert glob.glob(os.path.join(verdict_dir, "*.json")) == [], (
+        "a recovered same-server session inherited the old session's bad "
+        "windows and published a shared Dalim verdict (#792 fourth refinement)")
+
+    # A server change BETWEEN windows is measurable, but starts a new run. One
+    # stable bad Dedalus window is 1/3, never Dalim's third.
+    between = sub("between-windows")
+    verdict_dir = os.path.join(between, "shared", "verdicts")
+    agent, fake, _ = build(
+        between, server="Dalim", verdict_dir=verdict_dir,
+        verdict_producer_id="cluster-default")
+    agent.probe = scripted_probe([9.0, 9.0])
+    agent.watch_once()
+    agent.watch_once()
+    fake.server = "Dedalus"
+    agent.probe = scripted_probe(9.0)
+    assert agent.watch_once() is False, (
+        "one stable Dedalus window inherited Dalim's two-window counter and "
+        "tripped a false ejection (#792 review)")
+    assert agent.consecutive_bad == 1, agent.consecutive_bad
+    assert glob.glob(os.path.join(verdict_dir, "*.json")) == []
+    print("ok  #792 race: bad windows belong to one unchanged tunnel session; reconnects discard or reset attribution")
+
+
+@with_tmp
 def test_cache_is_the_fallback_when_the_file_goes_away(tmp):
-    """fresh ranking > cached last-good > quick."""
-    agent, fake, _ = build(tmp, server="Aspidiske")
+    """Fresh ranking > still-fresh cache > quick after the original TTL.
+
+    The cache carries the same measured generation as ranking.json; it is not a
+    new lease. If the scorer stays down after publishing an ejected ranking,
+    keeping that filtered list forever makes a six-hour verdict permanent. Once
+    restoration information is unavailable and the original ranking expires,
+    fail open to `quick` instead of inventing a hidden pre-ejection base.
+    """
+    agent, fake, clock = build(tmp, server="Aspidiske")
     assert agent.read_ranking(), "the fresh read failed"
     assert os.path.exists(agent.cfg.cache_path)
 
@@ -1143,11 +1418,24 @@ def test_cache_is_the_fallback_when_the_file_goes_away(tmp):
     names, _ = agent.candidates(exclude="Dalim")
     assert "Dalim" not in names, names
 
+    # The scorer now stays down past ranking.json's own finite lease. No scorer
+    # refresh is invoked: this is the outage the restart test did not cover.
+    # The cached list may already be verdict-filtered and cannot restore hidden
+    # rows, so it must expire with the original generated_at and release the
+    # consumer to unfiltered `quick` selection.
+    clock.sleep(agent.cfg.verdict_ttl_seconds + 1)
+    names, source = agent.candidates()
+    assert (names, source) == ([], "none"), (
+        "a stale cached, verdict-filtered ranking survived the scorer outage "
+        "indefinitely; temporary ejection became a permanent ban (#792 second "
+        "review): %s" % ((names, source),))
+
     shutil.rmtree(os.path.dirname(agent.cfg.cache_path))
     agent.cached = []
+    agent.cached_payload = None
     names, source = agent.candidates()
     assert (names, source) == ([], "none"), (names, source)
-    print("ok  fallback chain: fresh > cache > quick, current server excluded")
+    print("ok  #792 fail-open cache: fresh > finite cache > quick after scorer outage")
 
 
 @with_tmp
@@ -1299,7 +1587,15 @@ def test_dry_run_takes_no_action(tmp):
     assert fake.calls and all(c[0] == "--bluetit-status" for c in fake.calls), fake.calls
     assert fake.server == "Aspidiske"
     assert agent.switches["boot_upgrade"] == 0
-    print("ok  dry run: logs the switch, touches nothing")
+
+    # A verdict changes the shared ranking for both consumers, so it is an
+    # action too. Dry-run must not publish one even after a real 3/3 trip.
+    agent.probe = scripted_probe(9.0)
+    for _ in range(agent.cfg.bad_windows):
+        agent.watch_once()
+    assert glob.glob(os.path.join(agent.cfg.verdict_dir, "*.json")) == [], \
+        "dry-run published a verdict and changed the shared ranking"
+    print("ok  dry run: logs the switch and verdict, touches nothing")
 
 
 def test_goldcrest_is_bounded_by_bytes():
@@ -1396,6 +1692,8 @@ if __name__ == "__main__":
     test_no_signal_path_survives_in_the_source()
     test_a_failed_switch_does_not_arm_the_full_cooldown()
     test_a_boot_upgrade_does_not_lock_out_the_degradation_watch()
+    test_degradation_publishes_a_durable_shared_verdict()
+    test_bad_windows_are_bound_to_one_unchanged_session()
     test_cache_is_the_fallback_when_the_file_goes_away()
     test_budget_survives_a_restart()
     test_switch_budget_is_exported_at_scrape_time()

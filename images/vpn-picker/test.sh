@@ -79,7 +79,8 @@ metrics=$(curl -s http://127.0.0.1:18080/metrics)
 if ! echo "$metrics" | grep -q "^vpn_picker_scrape_success 0$"; then
   echo "FAIL: scrape_success does not report the failed cycle"; echo "$metrics"; exit 1
 fi
-for m in vpn_picker_ranking_generated_timestamp_seconds vpn_picker_candidates_passing_gate; do
+for m in vpn_picker_ranking_generated_timestamp_seconds vpn_picker_candidates_passing_gate \
+         vpn_picker_active_agent_verdicts vpn_picker_servers_ejected; do
   if ! echo "$metrics" | grep -q "^$m "; then
     echo "FAIL: missing metric $m"; echo "$metrics"; exit 1
   fi
