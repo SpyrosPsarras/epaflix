@@ -11,6 +11,7 @@ The fake Bluetit below is the real seam: `Agent` drives it through the same
 The ranking fixture is the real 2026-08-02 document the live scorer published.
 """
 
+import builtins
 import glob
 import json
 import logging
@@ -42,6 +43,10 @@ RANKING = {
     ],
 }
 GENERATED_EPOCH = 1785663059.0  # 2026-08-02T09:30:59Z
+
+# Agents built by the current @with_tmp test. Async verdict writers must drain
+# before that test removes its temporary directory; production never waits.
+_TEST_AGENTS = []
 
 
 class FakeClock:
@@ -146,6 +151,7 @@ def build(tmp, ranking=RANKING, server="Aspidiske", refused=(), silent=(), dead=
     # old. The switch budget is on wall time because it is persisted.
     agent = ag.Agent(cfg, bluetit=bluetit, sleep=clock.sleep, clock=clock,
                      wallclock=lambda: GENERATED_EPOCH + 60 + (clock() - 1000.0))
+    _TEST_AGENTS.append(agent)
 
     # The probe is the agent's only view of real traffic, so model it off the
     # fake daemon's CURRENT server: a `dead` one reads as 100% loss exactly the
@@ -182,9 +188,19 @@ def scripted_probe(watch, verify=0.0):
 def with_tmp(fn):
     def wrapper():
         tmp = tempfile.mkdtemp()
+        first_agent = len(_TEST_AGENTS)
         try:
             fn(tmp)
         finally:
+            agents = _TEST_AGENTS[first_agent:]
+            for agent in agents:
+                publisher = getattr(agent, "verdict_publisher", None)
+                if publisher is not None:
+                    publisher.wait_idle(2.0)
+                close = getattr(agent, "close", None)
+                if close is not None:
+                    close()
+            del _TEST_AGENTS[first_agent:]
             shutil.rmtree(tmp)
     wrapper.__name__ = fn.__name__
     return wrapper
@@ -1140,6 +1156,421 @@ def test_a_boot_upgrade_does_not_lock_out_the_degradation_watch(tmp):
 
 
 @with_tmp
+def test_a_blocked_verdict_writer_cannot_delay_switching(tmp):
+    """#792 hardening: a hard-mounted NFS write may never return.
+
+    The live servarr-media PVC is NFSv4.2 mounted `hard`. mkdir/open/write/fsync/
+    replace therefore need not raise when storage disappears; any one of them can
+    sleep in the kernel indefinitely. The third bad window must still reach the
+    independently budgeted switch decision promptly, with exactly one daemon
+    writer and one latest-useful pending publication behind a wedged write.
+    """
+    verdict_dir = os.path.join(tmp, "hard-nfs", "verdicts")
+    agent, fake, clock = build(
+        tmp, server="Aspidiske", verdict_dir=verdict_dir,
+        verdict_producer_id="cluster-default", verdict_ttl_seconds=21600)
+    agent.probe = scripted_probe(9.0)
+    for _ in range(agent.cfg.bad_windows - 1):
+        assert agent.watch_once() is False
+
+    real_open = builtins.open
+    writer_entered = threading.Event()
+    release_writer = threading.Event()
+    call_done = threading.Event()
+    outcome = {}
+    publisher = None
+
+    def blocked_open(path, mode="r", *args, **kwargs):
+        try:
+            candidate = os.path.abspath(os.fspath(path))
+        except TypeError:
+            candidate = ""
+        if (candidate.startswith(os.path.abspath(verdict_dir) + os.sep)
+                and any(flag in mode for flag in ("w", "a", "x"))):
+            writer_entered.set()
+            release_writer.wait()
+        return real_open(path, mode, *args, **kwargs)
+
+    def third_window():
+        started = time.monotonic()
+        try:
+            outcome["result"] = agent.watch_once()
+        except BaseException as exc:  # fixed-string reporting below; never hide it
+            outcome["error"] = exc
+        finally:
+            outcome["elapsed"] = time.monotonic() - started
+            call_done.set()
+
+    builtins.open = blocked_open
+    caller = threading.Thread(target=third_window, name="blocked-nfs-watch-once")
+    caller.start()
+    try:
+        assert call_done.wait(0.25), (
+            "watch_once() was still blocked after 250 ms by the verdict writer. "
+            "On the live hard-mounted NFS PVC that wait has no upper bound, so "
+            "SwitchBudget.allowed() and switch() are never reached (#792 review)")
+        assert "error" not in outcome, "watch_once raised while publication was blocked"
+        assert outcome["result"] is True, outcome
+        assert outcome["elapsed"] < 0.25, outcome["elapsed"]
+        assert fake.connects() == ["Dalim"], (
+            "the degradation switch did not proceed independently of publication: %s"
+            % fake.connects())
+        assert writer_entered.wait(1.0), "the asynchronous writer never attempted the verdict"
+
+        publisher = agent.verdict_publisher
+        worker = publisher._thread
+        assert worker is not None and worker.daemon and worker.is_alive(), \
+            "the one NFS worker must be a live daemon so it cannot hold process exit"
+
+        # Cooldown still governs the next trip even while publication is wedged.
+        # A blocked writer is not permission to bypass either flap damper.
+        agent.probe = scripted_probe(9.0)
+        for _ in range(agent.cfg.bad_windows):
+            assert agent.watch_once() is False
+        assert fake.connects() == ["Dalim"], "switched again inside the cooldown"
+        allowed, why = agent.budget.allowed()
+        assert allowed is False and "cooldown" in why, why
+
+        # Move past cooldown, fill the remaining two daily slots without a
+        # switch, and prove the daily cap remains independent too.
+        clock.sleep(agent.cfg.cooldown_seconds + 1)
+        agent.budget.record(0)
+        agent.budget.record(0)
+        allowed, why = agent.budget.allowed()
+        assert allowed is False and "daily cap" in why, why
+        for _ in range(agent.cfg.bad_windows):
+            assert agent.watch_once() is False
+        assert fake.connects() == ["Dalim"], "went over the daily cap"
+
+        # Repeated evidence while the first write is stuck does not start a
+        # worker per verdict or grow without bound. Latest-useful coalescing is
+        # PER DESTINATION: a newer Dalim observation may replace pending Dalim,
+        # but observing Piautos or Menkent must not erase either server. These
+        # files are the durable contract that keeps every measured-bad server
+        # out of the shared ranking after NFS recovers.
+        submitted = time.monotonic()
+        for server, loss in (("Dalim", 7.0), ("Piautos", 8.0), ("Menkent", 9.0),
+                             ("Dalim", 10.0)):
+            assert agent.publish_bad_server(server, loss) is True
+        assert time.monotonic() - submitted < 0.25, \
+            "submitting repeated verdicts waited on the blocked writer"
+        assert publisher._thread is worker, "a blocked write spawned another worker"
+        assert sum(1 for t in threading.enumerate() if t.name == worker.name) == 1, \
+            "more than one verdict worker exists"
+
+        release_writer.set()
+        assert publisher.wait_idle(2.0), "the writer did not drain after storage recovered"
+        docs = []
+        for path in glob.glob(os.path.join(verdict_dir, "*.json")):
+            with real_open(path) as fh:
+                docs.append(json.load(fh))
+        by_server = {d["server"]: d for d in docs}
+        assert sorted(by_server) == ["Aspidiske", "Dalim", "Menkent", "Piautos"], (
+            "the blocked publisher erased distinct per-server evidence; after "
+            "recovery every observed server must be durable, got %s (#792 review)"
+            % sorted(by_server))
+        assert by_server["Dalim"]["loss_pct"] == 10.0, \
+            "same-server coalescing did not retain Dalim's latest observation"
+    finally:
+        release_writer.set()
+        caller.join(2.0)
+        if publisher is not None:
+            publisher.wait_idle(2.0)
+        close = getattr(agent, "close", None)
+        if close is not None:
+            close()
+        builtins.open = real_open
+    print("ok  #792 NFS: blocked writer is bounded, per-server evidence preserved, switch budget independent")
+
+
+@with_tmp
+def test_verdict_pending_set_has_a_hard_bound(tmp):
+    """A wedged worker retains per-server evidence without unbounded growth."""
+    writer_entered = threading.Event()
+    release_writer = threading.Event()
+    written = []
+
+    def writer(publication):
+        if not writer_entered.is_set():
+            writer_entered.set()
+            release_writer.wait()
+        written.append((publication.server, publication.loss_pct))
+
+    publisher = ag.VerdictPublisher(writer, max_pending=2)
+
+    def publication(server, loss):
+        return ag.VerdictPublication(
+            path=os.path.join(tmp, server + ".json"), payload=b"{}\n",
+            server=server, loss_pct=loss, producer="cluster-default",
+            ttl_seconds=21600,
+        )
+
+    worker = None
+    try:
+        with CaptureLog():
+            assert publisher.submit(publication("Aspidiske", 9.0)) is True
+            assert writer_entered.wait(1.0), "the bounded-set worker did not start"
+            assert publisher.submit(publication("Dalim", 7.0)) is True
+            assert publisher.submit(publication("Piautos", 8.0)) is True
+            # Refreshing an existing destination is always useful and does not
+            # consume another slot. A new destination at the hard bound is
+            # rejected, never substituted for evidence already accepted.
+            assert publisher.submit(publication("Dalim", 10.0)) is True
+            assert publisher.submit(publication("Menkent", 9.0)) is False
+            with publisher._condition:
+                assert len(publisher._pending) == 2, publisher._pending
+                assert sorted(p.server for p in publisher._pending.values()) == \
+                    ["Dalim", "Piautos"]
+            release_writer.set()
+            assert publisher.wait_idle(2.0), "the bounded pending set did not drain"
+        assert written == [
+            ("Aspidiske", 9.0), ("Dalim", 10.0), ("Piautos", 8.0)
+        ], written
+        worker = publisher._thread
+    finally:
+        release_writer.set()
+        publisher.shutdown()
+    if worker is not None:
+        worker.join(2.0)
+        assert not worker.is_alive(), "the bounded-set worker did not stop"
+    print("ok  #792 queue bound: reject a new destination, never erase accepted evidence")
+
+
+@with_tmp
+def test_a_wedged_verdict_worker_cannot_hold_process_shutdown(tmp):
+    """A kernel-wedged NFS thread is abandoned safely when the agent exits."""
+    verdict_dir = os.path.join(tmp, "shutdown", "verdicts")
+    agent, _, _ = build(
+        tmp, verdict_dir=verdict_dir, verdict_producer_id="cluster-default")
+    real_open = builtins.open
+    writer_entered = threading.Event()
+    release_writer = threading.Event()
+
+    def blocked_open(path, mode="r", *args, **kwargs):
+        try:
+            candidate = os.path.abspath(os.fspath(path))
+        except TypeError:
+            candidate = ""
+        if (candidate.startswith(os.path.abspath(verdict_dir) + os.sep)
+                and any(flag in mode for flag in ("w", "a", "x"))):
+            writer_entered.set()
+            release_writer.wait()
+        return real_open(path, mode, *args, **kwargs)
+
+    builtins.open = blocked_open
+    try:
+        started = time.monotonic()
+        assert agent.publish_bad_server("Dalim", 9.0) is True
+        assert time.monotonic() - started < 0.25
+        assert writer_entered.wait(1.0), "the worker never entered the blocked write"
+        worker = agent.verdict_publisher._thread
+        assert worker.daemon, "a wedged non-daemon worker would keep Python alive"
+        assert agent.publish_bad_server("Piautos", 8.0) is True
+
+        started = time.monotonic()
+        agent.close()
+        assert time.monotonic() - started < 0.1, \
+            "shutdown joined a writer that hard NFS may never wake"
+        assert worker.is_alive(), \
+            "the fixture did not leave the daemon wedged for the shutdown assertion"
+        with agent.verdict_publisher._condition:
+            assert not agent.verdict_publisher._pending, \
+                "shutdown kept queued work that can no longer be completed"
+    finally:
+        release_writer.set()
+        builtins.open = real_open
+    worker.join(2.0)
+    assert not worker.is_alive(), "the released daemon did not observe shutdown"
+    assert not os.path.exists(agent.verdict_path("Piautos")), \
+        "shutdown processed a pending verdict after it was told to stop"
+    print("ok  #792 shutdown: a wedged daemon is never joined and queued work is discarded")
+
+
+@with_tmp
+def test_shutdown_claims_stop_before_waiting_for_completion_log(tmp):
+    """Shutdown must discard queued storage work before waiting on a log.
+
+    A completion log is allowed to finish so shutdown cannot return while the
+    daemon still touches stdout. But `_logging` is outside the Condition while
+    the handler runs. If shutdown waits for it BEFORE setting `_stopping` and
+    clearing `_pending`, the worker can finish the log, reacquire the Condition
+    first, pop a second destination, and enter a new hard-NFS syscall while
+    teardown is trying to stop it. The race reproduced 200/200 times in review.
+
+    Block the first completion log, queue a second destination behind it, and
+    instrument shutdown's Condition.wait(). At the instant shutdown starts
+    waiting, acceptance must already be stopped and pending storage work gone.
+    """
+    written = []
+    second_write_started = threading.Event()
+
+    def writer(publication):
+        written.append(publication.server)
+        if publication.server == "Piautos":
+            second_write_started.set()
+
+    publisher = ag.VerdictPublisher(writer)
+
+    def publication(server):
+        return ag.VerdictPublication(
+            path=os.path.join(tmp, server + ".json"), payload=b"{}\n",
+            server=server, loss_pct=9.0, producer="cluster-default",
+            ttl_seconds=21600,
+        )
+
+    log_entered = threading.Event()
+    release_log = threading.Event()
+    shutdown_waiting = threading.Event()
+    shutdown_done = threading.Event()
+    stopping_seen_by_log = []
+
+    class BlockingCompletionLog(logging.Handler):
+        def emit(self, record):
+            if "published in-tunnel bad-server verdict" not in record.getMessage():
+                return
+            log_entered.set()
+            release_log.wait()
+            stopping_seen_by_log.append(publisher._stopping)
+
+    handler = BlockingCompletionLog()
+    ag.log.addHandler(handler)
+    original_wait = publisher._condition.wait
+    shutdown_thread = None
+
+    def observed_wait(timeout=None):
+        if threading.current_thread() is shutdown_thread:
+            shutdown_waiting.set()
+        return original_wait(timeout)
+
+    publisher._condition.wait = observed_wait
+    stop_claimed_before_wait = False
+    pending_cleared_before_wait = False
+    shutdown_returned_during_log = None
+    try:
+        assert publisher.submit(publication("Dalim")) is True
+        assert log_entered.wait(1.0), "the first completion log was never reached"
+        assert publisher.submit(publication("Piautos")) is True
+        with publisher._condition:
+            assert [p.server for p in publisher._pending.values()] == ["Piautos"], \
+                "the second destination was not pending behind completion logging"
+
+        def stop():
+            publisher.shutdown()
+            shutdown_done.set()
+
+        shutdown_thread = threading.Thread(
+            target=stop, name="verdict-shutdown-order-race")
+        shutdown_thread.start()
+        assert shutdown_waiting.wait(1.0), \
+            "shutdown never reached its wait for the blocked completion log"
+        shutdown_returned_during_log = shutdown_done.is_set()
+        with publisher._condition:
+            stop_claimed_before_wait = publisher._stopping
+            pending_cleared_before_wait = not publisher._pending
+    finally:
+        release_log.set()
+        if shutdown_thread is not None:
+            shutdown_thread.join(2.0)
+        publisher._condition.wait = original_wait
+        ag.log.removeHandler(handler)
+        publisher.shutdown()
+
+    worker = publisher._thread
+    if worker is not None:
+        worker.join(2.0)
+        assert not worker.is_alive(), "the shutdown-order worker did not stop"
+    assert shutdown_returned_during_log is False, \
+        "shutdown returned while the already-started completion log was blocked"
+    assert stop_claimed_before_wait is True, (
+        "shutdown waited for completion logging before setting _stopping. The "
+        "worker can win the Condition after the log and start another hard-NFS "
+        "write during teardown (#792 final review)")
+    assert pending_cleared_before_wait is True, (
+        "shutdown waited for completion logging before clearing the second "
+        "destination; teardown can initiate a new blocking NFS syscall (#792 "
+        "final review)")
+    assert stopping_seen_by_log == [True], (
+        "the already-started completion log did not observe shutdown's stop "
+        "claim: %s" % stopping_seen_by_log)
+    assert second_write_started.is_set() is False and written == ["Dalim"], (
+        "shutdown let the queued destination enter storage after teardown "
+        "started: %s" % written)
+    print("ok  #792 shutdown order: stop and discard pending before waiting for completion log")
+
+
+@with_tmp
+def test_verdict_completion_and_shutdown_cannot_race_logging(tmp):
+    """A completed write cannot log after shutdown starts finalization.
+
+    The worker used to mark itself idle and snapshot `_stopping` before the log
+    call. shutdown() could then set `_stopping=True` and return while the daemon
+    was about to touch stdout. This fixture blocks inside the completion handler
+    to make that completion-versus-shutdown interleaving deterministic. Shutdown
+    now claims stopping before it waits, but still must not return until this
+    already-started non-storage phase finishes.
+    """
+    verdict_dir = os.path.join(tmp, "completion-race", "verdicts")
+    agent, _, _ = build(
+        tmp, verdict_dir=verdict_dir, verdict_producer_id="cluster-default")
+    publisher = agent.verdict_publisher
+    log_entered = threading.Event()
+    release_log = threading.Event()
+    shutdown_started = threading.Event()
+    shutdown_done = threading.Event()
+    stopping_seen_by_log = []
+
+    class BlockingCompletionLog(logging.Handler):
+        def emit(self, record):
+            if "published in-tunnel bad-server verdict" not in record.getMessage():
+                return
+            log_entered.set()
+            release_log.wait()
+            stopping_seen_by_log.append(publisher._stopping)
+
+    handler = BlockingCompletionLog()
+    ag.log.addHandler(handler)
+    shutdown_thread = None
+    try:
+        assert agent.publish_bad_server("Dalim", 9.0) is True
+        assert log_entered.wait(1.0), "the completion log was never reached"
+
+        # Completion logging is part of the publication lifecycle. Reporting
+        # idle before it finishes lets teardown remove handlers/streams under a
+        # daemon that still intends to use them.
+        idle_before_log_finished = publisher.wait_idle(0.05)
+
+        def stop():
+            shutdown_started.set()
+            agent.close()
+            shutdown_done.set()
+
+        shutdown_thread = threading.Thread(target=stop, name="verdict-shutdown-race")
+        shutdown_thread.start()
+        assert shutdown_started.wait(1.0), "the shutdown contender never ran"
+        shutdown_returned_during_log = shutdown_done.wait(0.05)
+    finally:
+        release_log.set()
+        if shutdown_thread is not None:
+            shutdown_thread.join(2.0)
+        ag.log.removeHandler(handler)
+
+    assert shutdown_done.is_set(), "shutdown did not finish after completion logging"
+    assert idle_before_log_finished is False, (
+        "wait_idle() returned before verdict completion logging finished - test "
+        "teardown can remove stdout while the daemon still uses it (#792 review)")
+    assert shutdown_returned_during_log is False, (
+        "shutdown returned while the verdict daemon was still logging - interpreter "
+        "finalization can race that stdout write (#792 review)")
+    assert stopping_seen_by_log == [True], (
+        "shutdown did not claim stopping before waiting for the completion "
+        "warning: %s (#792 final review)" % stopping_seen_by_log)
+    worker = publisher._thread
+    worker.join(2.0)
+    assert not worker.is_alive(), "the completion-race worker did not stop cleanly"
+    print("ok  #792 completion/shutdown: logging finishes before idle or shutdown returns")
+
+
+@with_tmp
 def test_degradation_publishes_a_durable_shared_verdict(tmp):
     """#792: the in-tunnel verdict must outlive this pod and this producer.
 
@@ -1164,6 +1595,8 @@ def test_degradation_publishes_a_durable_shared_verdict(tmp):
             "published before bad_windows was reached on window %d" % (window + 1)
     assert agent.watch_once() is False, "the fixture cooldown should suppress the switch"
     assert fake.connects() == [], "the fixture unexpectedly switched"
+    assert agent.verdict_publisher.wait_idle(2.0), \
+        "healthy local verdict publication did not complete"
 
     files = glob.glob(os.path.join(verdict_dir, "*.json"))
     assert len(files) == 1, (
@@ -1188,12 +1621,14 @@ def test_degradation_publishes_a_durable_shared_verdict(tmp):
     # Different producer: it must not erase either. A file per producer+server
     # is the merge contract for the two qBittorrent instances sharing /media.
     assert agent.publish_bad_server("Dalim", 8.0) is True
+    assert agent.verdict_publisher.wait_idle(2.0)
     nick_tmp = os.path.join(tmp, "nick")
     os.makedirs(nick_tmp)
     other, _, _ = build(
         nick_tmp, server="Piautos", verdict_dir=verdict_dir,
         verdict_producer_id="nick", verdict_ttl_seconds=21600)
     assert other.publish_bad_server("Piautos", 7.0) is True
+    assert other.verdict_publisher.wait_idle(2.0)
     files = glob.glob(os.path.join(verdict_dir, "*.json"))
     assert len(files) == 3, "one producer erased another verdict: %s" % files
 
@@ -1220,6 +1655,8 @@ def test_degradation_publishes_a_durable_shared_verdict(tmp):
         with CaptureLog():
             for loss in range(200):
                 assert agent.publish_bad_server("Dalim", float(loss % 101)) is True
+                assert agent.verdict_publisher.wait_idle(2.0), \
+                    "healthy atomic verdict write did not drain"
     finally:
         stop.set()
         thread.join()
@@ -1243,6 +1680,8 @@ def test_degradation_publishes_a_durable_shared_verdict(tmp):
     assert failing.watch_once() is True, \
         "an unwritable verdict directory blocked the degradation switch"
     assert failing_fake.connects() == ["Dalim"], failing_fake.connects()
+    assert failing.verdict_publisher.wait_idle(2.0), \
+        "an immediate write error left the publisher active"
 
     # A new Agent has no relation to the first one's emptyDir, but the shared
     # verdict remains. This is the half of #792 the old switch budget cannot do.
@@ -1595,7 +2034,9 @@ def test_dry_run_takes_no_action(tmp):
         agent.watch_once()
     assert glob.glob(os.path.join(agent.cfg.verdict_dir, "*.json")) == [], \
         "dry-run published a verdict and changed the shared ranking"
-    print("ok  dry run: logs the switch and verdict, touches nothing")
+    assert agent.verdict_publisher._thread is None, \
+        "dry-run started a verdict writer even though it must publish nothing"
+    print("ok  dry run: logs the switch and verdict, starts no writer, touches nothing")
 
 
 def test_goldcrest_is_bounded_by_bytes():
@@ -1692,6 +2133,11 @@ if __name__ == "__main__":
     test_no_signal_path_survives_in_the_source()
     test_a_failed_switch_does_not_arm_the_full_cooldown()
     test_a_boot_upgrade_does_not_lock_out_the_degradation_watch()
+    test_a_blocked_verdict_writer_cannot_delay_switching()
+    test_verdict_pending_set_has_a_hard_bound()
+    test_a_wedged_verdict_worker_cannot_hold_process_shutdown()
+    test_shutdown_claims_stop_before_waiting_for_completion_log()
+    test_verdict_completion_and_shutdown_cannot_race_logging()
     test_degradation_publishes_a_durable_shared_verdict()
     test_bad_windows_are_bound_to_one_unchanged_session()
     test_cache_is_the_fallback_when_the_file_goes_away()
