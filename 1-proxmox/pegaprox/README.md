@@ -52,6 +52,23 @@ systemctl restart pegaprox
 journalctl -u pegaprox -n 20 --no-pager   # confirm: "SSL certificates found - starting with HTTPS"
 ```
 
+## Pre-upgrade snapshot lifecycle
+
+Take a full container snapshot before every PegaProx upgrade. `update.sh`'s own
+code backup does not include the live config/database state.
+
+```bash
+SNAPSHOT="preupgrade_$(date +%Y%m%d_%H%M%S)"
+pct snapshot 1021 "$SNAPSHOT" --description "Before PegaProx upgrade"
+pct listsnapshot 1021 | grep -F "$SNAPSHOT"  # must exist before continuing
+pct exec 1021 -- bash -lc 'cd /opt/PegaProx && ./update.sh'
+```
+
+After the upgrade, run the checklist below and keep the snapshot through the
+planned soak window. Retire it only after a deliberate issue-backed review.
+Before deleting it, search open issues for the snapshot name and confirm every
+referenced rollback gate is met.
+
 ## Post-`update.sh` checklist
 
 1. Confirm the log line `SSL certificates found - starting with HTTPS` after
@@ -103,17 +120,14 @@ mode stayed `644`/`755`, world-readable, the app only ever serves those files.
 | 2026-07-29 | 0.9.10.3 → 0.9.15 | Root-import trap first hit outage-shaped (issue #484). |
 | 2026-08-01 | 0.9.15 → 1.0      | Ships the fail-closed SSL fix (#633 / our PR #637) and the netin/netout live-rate fix (#631 / #632) natively. Local `manager.py` patch dropped. |
 
-Rollback points kept from the 0.9.15 upgrade (as of 2026-08-02, now one
-release behind live — reassess once 1.0 has soaked):
+The 0.9.15 rollback set was retired on 2026-08-05 after version 1.0 soaked
+successfully (issue #623). It was two releases behind and restoring it would
+have discarded current config/database state and the 1.0 security fixes.
 
-- Container snapshot `preupgrade_20260729_134452` (LXC 1021, `local-raid` lvmthin)
-- `/root/pegaprox-config-20260729_134452.tar.gz` (config/db/keys)
-- `/opt/PegaProx/backups/backup_0.9.10.3_20260729_114556/` (`update.sh`'s own code backup)
-- `/root/manager.py.bak-0.9.15-vanilla`
-
-No container snapshot exists for the 0.9.15 → 1.0 jump — only `update.sh`'s
-own `backups/backup_0.9.15_20260801_195658/` (code + `version.json`, not a
-full rollback point).
+No container snapshot was taken for the 0.9.15 → 1.0 jump. The remaining
+`backups/backup_0.9.15_20260801_195658/` is `update.sh`'s code backup plus
+`version.json`, not a full container/config rollback point. Future upgrades
+must follow the pre-upgrade snapshot lifecycle above.
 
 ## Related
 
