@@ -5,7 +5,7 @@
 # after any config PVC rebuild (they come back empty/default otherwise):
 #   sonarr: ip=sonarr.servarr.svc.cluster.local port=8989 ssl=false
 #   radarr: ip=radarr.servarr.svc.cluster.local port=7878 ssl=false
-#   sonarr.apikey / radarr.apikey = secrets.yml `sonarr_api_key` /
+#   sonarr.apikey / radarr.apikey = secrets.enc.yaml `sonarr_api_key` /
 #     `radarr_api_key` - so bazarr is a consumer on every *arr key rotation
 #     (#712, see the rotation runbook in 2-k3s/08.servarr/README.md).
 # Live in /config/config/config.yaml on the bazarr pod, under `sonarr:`/`radarr:`.

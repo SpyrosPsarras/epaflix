@@ -15,7 +15,7 @@
 # the network itself.
 #
 # AirVPN credentials live in Secret `airvpn-credentials` (NOT in this repo —
-# see secrets.yml + `_shared/secrets/airvpn-credentials.enc.yaml`).
+# see secrets.enc.yaml + `_shared/secrets/airvpn-credentials.enc.yaml`).
 #
 # BT listen port: 39998, forwarded by AirVPN account-wide — it follows
 # whichever server Bluetit picks, unlike a per-server forward. Declared via

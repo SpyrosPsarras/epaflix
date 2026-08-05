@@ -81,19 +81,23 @@ echo ""
 
 # Step 7: Deploy Proxmox VE Exporter
 echo -e "${YELLOW}Step 7: Deploying Proxmox VE Exporter...${NC}"
-# Real token comes from .github/instructions/secrets.yml (git-ignored). The
-# Secret in git carries `<PROXMOX_API_TOKEN_VALUE>` as a placeholder — sed
-# substitutes it in-flight before kubectl apply so the real value never lands
-# on disk in the repo path.
-SECRETS_YML="${SECRETS_YML:-../../.github/instructions/secrets.yml}"
-if [[ ! -f "$SECRETS_YML" ]]; then
-  echo -e "${RED}secrets.yml not found at $SECRETS_YML — skipping pve-exporter${NC}"
+# Real token comes from the SOPS-encrypted credential store
+# .github/instructions/secrets.enc.yaml. The Secret in git carries
+# `<PROXMOX_API_TOKEN_VALUE>` as a placeholder — sed substitutes it in-flight
+# before kubectl apply so the real value never lands on disk in the repo path.
+# `sops -d --extract` returns the YAML-parsed value, so no quote-stripping is
+# needed (that was the #293 trap with the old plaintext grep read).
+SECRETS_ENC="${SECRETS_ENC:-../../.github/instructions/secrets.enc.yaml}"
+if [[ ! -f "$SECRETS_ENC" ]]; then
+  echo -e "${RED}secrets.enc.yaml not found at $SECRETS_ENC — skipping pve-exporter${NC}"
 else
-  PROXMOX_API_TOKEN_VALUE=$(grep '^proxmox_grafana_api_token:' "$SECRETS_YML" \
-    | sed -E 's/^[^:]+:\s*"?([^"]*)"?$/\1/' \
+  # The token is stored as `root@pam!grafana=<uuid>`; pve-exporter wants only
+  # the secret half, hence the trailing `=`-strip.
+  PROXMOX_API_TOKEN_VALUE=$(sops -d --extract '["proxmox_grafana_api_token"]' "$SECRETS_ENC" \
     | sed -E 's/^.*=//')
   if [[ -z "$PROXMOX_API_TOKEN_VALUE" ]]; then
-    echo -e "${RED}Could not extract proxmox_grafana_api_token from $SECRETS_YML${NC}"
+    echo -e "${RED}Could not decrypt proxmox_grafana_api_token from $SECRETS_ENC${NC}"
+    echo -e "${RED}  Is the age key present at ~/.config/sops/age/keys.txt?${NC}"
     exit 1
   fi
   sed "s|<PROXMOX_API_TOKEN_VALUE>|$PROXMOX_API_TOKEN_VALUE|g" pve-exporter/secret.yaml \

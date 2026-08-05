@@ -88,7 +88,7 @@ grafana:
 
   # Admin credentials — sourced from imperative Secret grafana-admin-secret
   # (placeholder manifest at grafana-admin-secret.yaml). Real values live in
-  # .github/instructions/secrets.yml and are applied imperatively before sync.
+  # .github/instructions/secrets.enc.yaml and are applied imperatively before sync.
   admin:
     existingSecret: grafana-admin-secret
     userKey: admin-user
@@ -137,7 +137,7 @@ grafana:
       # client_id is a non-secret OIDC client identifier — committed verbatim.
       # client_secret stays file-mounted from grafana-oauth-secret (placeholder
       # at grafana-config/oauth-secret.yaml; real value from
-      # .github/instructions/secrets.yml).
+      # .github/instructions/secrets.enc.yaml).
       client_id: m4oQzhxf8oVyJY7EOrL7lCM81BUQ42Uc3w9OXDAs
       client_secret: $__file{/etc/secrets/grafana-oauth/client_secret}
       scopes: openid email profile

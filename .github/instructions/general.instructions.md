@@ -5,24 +5,41 @@ description: "General Instructions for all setups"
 
 # CRITICAL General instructions
 
-CRITICAL: Never save username, hostnames and passwords on any documentation, script, yaml or anywhere other than secrets.yml.
-CRITICAL: If we need to reference it, use the `.github/instructions/secrets.yml` file.
+CRITICAL: Never save username, hostnames and passwords on any documentation, script, yaml or anywhere other than the credential store.
+CRITICAL: The credential store is `.github/instructions/secrets.enc.yaml` — SOPS+age encrypted and **committed**. If we need to reference a credential, reference a key name in that file.
 
-## Reading a value out of secrets.yml
+There is no plaintext `secrets.yml` any more. It was the only unencrypted secret file left in the repo path, it drifted between machines (the June 2026 homePC merge), and being git-ignored it could not be reviewed or backed up with the repo. Anything that still says "see secrets.yml" in an older doc means this file.
 
-Almost every value in `secrets.yml` is **double-quoted** (64 of 73 top-level keys). A naive `grep`/`awk -F': '` read hands you the value **with its quotes still attached**, and a quoted secret fails in a way that looks like a wrong secret: an API answers `403`, a login just fails. Nothing says "you sent quotes".
+## Reading a value out of the credential store
 
-Strip them at extraction, and never echo the value:
+`sops -d --extract` returns the **YAML-parsed** value, so quotes and escaping are handled for you. Never decrypt the whole file to get one key, and never echo the value:
+
 ```bash
-# sed form - no extra tooling needed (yq is not installed on this workstation)
-TOKEN=$(sed -n 's/^<key_name>:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p' .github/instructions/secrets.yml)
+# one key
+TOKEN=$(sops -d --extract '["<key_name>"]' .github/instructions/secrets.enc.yaml)
 
-# or python3 + PyYAML, if the value has awkward characters
-TOKEN=$(python3 -c 'import sys,yaml;print(yaml.safe_load(open(sys.argv[1]))["<key_name>"])' .github/instructions/secrets.yml)
+# nested key (e.g. the epaflix_bot block)
+TOKEN=$(sops -d --extract '["epaflix_bot"]["proxmox_token"]' .github/instructions/secrets.enc.yaml)
 ```
-Sanity-check with `${#TOKEN}` (a length is safe to print, the value is not). A 64-char hex secret reading as 66 means you captured the quotes.
 
-This trap cost real time: #293 read the `ak-iac` Authentik token with the quotes on, got `403`, and concluded the mirror was stale. It was not - #545 proved the mirror byte-matches the blueprint and returns `200` once the quotes are stripped.
+Sanity-check with `${#TOKEN}` (a length is safe to print, the value is not).
+
+Two things this fixed for good:
+
+- **The quote trap.** With the old plaintext file, a naive `grep`/`awk -F': '` read handed back the value **with its double quotes attached**, and a quoted secret fails in a way that looks like a wrong secret - an API answers `403`, a login just fails, nothing says "you sent quotes". This cost real time: #293 read the `ak-iac` Authentik token with the quotes on, got `403`, and wrongly concluded the mirror was stale - #545 proved the mirror byte-matches the blueprint and returns `200` once the quotes are stripped. `--extract` cannot reproduce this.
+- **The grep-echo leak.** The project rule "never extract a secret with a pattern that can echo the value" (#602 forced a token rotation) is now structurally enforced: there is no plaintext line for a `grep 'key:'` to match and print.
+
+### Key names are readable without decrypting
+
+The store encrypts values only - key **names** stay in cleartext. So `grep -c '^airvpn' .github/instructions/secrets.enc.yaml` answers "does this credential exist" with no key and no decryption, and PR diffs show *which* credential changed without showing the value.
+
+### Requirements
+
+The age private key must be at `~/.config/sops/age/keys.txt` (the default sops
+lookup path). On this workstation that is a symlink to the real
+`~/.config/sops/age/k3s-cluster.txt`. Without it every read fails with
+`Failed to get the data key required to decrypt the SOPS file`. Recovery copies
+and the post-reboot unlock are in `sops.instructions.md`.
 
 ## Never fetch a whole Secret to check one key
 
