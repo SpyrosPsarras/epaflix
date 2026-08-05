@@ -45,6 +45,11 @@ SCHEMA = 1
 VERDICT_SCHEMA = 1
 VERDICT_SOURCE = "vpn-agent"
 VERDICT_TTL_SECONDS = 21600
+# Hard memory bound for evidence waiting behind one kernel-wedged NFS write.
+# Coalescing happens per destination, so observations for different servers do
+# not erase each other. If every slot is occupied, a new destination is rejected
+# rather than destroying earlier evidence; same-destination refreshes still fit.
+MAX_PENDING_VERDICT_DESTINATIONS = 128
 _VERDICT_IDENTITY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}$")
 
 # Shortest interval throughput_since() will divide by. Below this the quotient is
@@ -350,6 +355,176 @@ def candidate_names(servers, band, exclude=None):
         for s in servers[:band]
         if str(s.get("name", "")).lower() != skip
     ]
+
+
+class VerdictPublication:
+    """One immutable-enough write request prepared before touching storage."""
+
+    __slots__ = ("path", "payload", "server", "loss_pct", "producer", "ttl_seconds")
+
+    def __init__(self, path, payload, server, loss_pct, producer, ttl_seconds):
+        self.path = path
+        self.payload = payload
+        self.server = server
+        self.loss_pct = loss_pct
+        self.producer = producer
+        self.ttl_seconds = ttl_seconds
+
+
+class VerdictPublisher:
+    """One daemon writer plus a bounded per-destination pending set.
+
+    `/media` is a hard-mounted NFSv4.2 PVC. A storage outage can leave a thread
+    asleep forever inside mkdir/open/write/fsync/replace; try/except cannot put a
+    time bound on that. The control loop therefore never performs those calls.
+    submit() only updates bounded in-memory state under a Condition and returns.
+
+    There is exactly one worker for the lifetime of this publisher. Behind its
+    in-flight write, one latest observation is retained PER destination path.
+    Another observation of the same producer/server replaces only that entry;
+    evidence for a different server remains queued. The number of distinct
+    destinations is capped. At the cap, a new destination is rejected instead
+    of erasing existing evidence, while a refresh of an existing one is still
+    accepted. This gives latest-useful-work semantics without an unbounded queue
+    or a worker per verdict.
+
+    The worker is a daemon and shutdown() never joins or waits for NFS. Pending
+    work is discarded at shutdown; the active storage call is abandoned with
+    the process. A completion log is different: shutdown serializes with that
+    short non-storage step so it cannot return and let interpreter finalization
+    remove stdout while the daemon is still using it.
+    """
+
+    def __init__(self, writer, max_pending=MAX_PENDING_VERDICT_DESTINATIONS):
+        if max_pending < 1:
+            raise ValueError("max_pending must be positive")
+        self._writer = writer
+        self._max_pending = max_pending
+        self._condition = threading.Condition()
+        # Plain dict insertion order is the drain order. Assigning an existing
+        # path refreshes its payload without moving it behind noisier servers.
+        self._pending = {}
+        self._active = False
+        self._logging = False
+        self._stopping = False
+        self._thread = None
+
+    def submit(self, publication):
+        """Accept bounded work without waiting for storage.
+
+        Latest pending work wins for this destination only. False means either
+        shutdown has started or the distinct-destination bound is full.
+        """
+        with self._condition:
+            if self._stopping:
+                return False
+            path = publication.path
+            if path not in self._pending and len(self._pending) >= self._max_pending:
+                return False
+            if self._thread is None:
+                self._thread = threading.Thread(
+                    target=self._run,
+                    name="vpn-verdict-writer-%x" % id(self),
+                    daemon=True,
+                )
+                try:
+                    self._thread.start()
+                except RuntimeError as exc:
+                    self._thread = None
+                    log.error("cannot start bad-server verdict writer: %s", exc)
+                    return False
+            self._pending[path] = publication
+            self._condition.notify()
+        return True
+
+    def _run(self):
+        while True:
+            with self._condition:
+                while not self._pending and not self._stopping:
+                    self._condition.wait()
+                if self._stopping:
+                    self._pending.clear()
+                    self._active = False
+                    self._condition.notify_all()
+                    return
+                path = next(iter(self._pending))
+                publication = self._pending.pop(path)
+                self._active = True
+
+            error = None
+            try:
+                self._writer(publication)
+            except Exception as exc:
+                # Storage exceptions are expected here. The important property
+                # is that they are confined to this daemon and never re-enter
+                # the switch path.
+                error = exc
+
+            # Claim the completion-log phase while holding the same Condition
+            # shutdown() uses. There are only two possible orderings:
+            # shutdown wins and this daemon never logs, or completion wins and
+            # shutdown marks stopping + discards pending work before waiting for
+            # that already-started log. Claiming the stop FIRST is load-bearing:
+            # after the log this worker must not pop another destination and
+            # enter a new hard-NFS syscall while teardown is waiting (#792).
+            with self._condition:
+                if self._stopping:
+                    self._active = False
+                    self._condition.notify_all()
+                    return
+                self._logging = True
+
+            try:
+                if error is not None:
+                    log.error(
+                        "cannot publish bad-server verdict for %s: %s",
+                        publication.server, error,
+                    )
+                else:
+                    log.warning(
+                        "published in-tunnel bad-server verdict server=%s "
+                        "loss=%.2f%% producer=%s ttl=%ds",
+                        publication.server, publication.loss_pct,
+                        publication.producer, publication.ttl_seconds,
+                    )
+            finally:
+                # Completion includes logging. wait_idle() and shutdown() must
+                # not report it finished while the daemon still touches stdout.
+                with self._condition:
+                    self._logging = False
+                    self._active = False
+                    self._condition.notify_all()
+
+    def wait_idle(self, timeout):
+        """Test/diagnostic helper. Production switching never calls this."""
+        deadline = time.monotonic() + timeout
+        with self._condition:
+            while self._active or self._logging or self._pending:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    return False
+                self._condition.wait(left)
+            return True
+
+    def shutdown(self):
+        """Stop acceptance without waiting for a possibly wedged NFS call.
+
+        Claim stopping and discard pending storage work BEFORE waiting for an
+        already-started completion log. Otherwise that log can finish, the
+        worker can win the Condition, pop another destination, and begin a new
+        blocking NFS syscall before shutdown marks stopping (#792 final review).
+
+        Waiting for `_logging` is safe because that phase starts only after its
+        storage call returned. This is not a worker join: an active mkdir/open/
+        write/fsync/replace has `_logging == False`, so hard NFS still cannot
+        delay shutdown.
+        """
+        with self._condition:
+            self._stopping = True
+            self._pending.clear()
+            self._condition.notify_all()
+            while self._logging:
+                self._condition.wait()
 
 
 class SwitchBudget:
@@ -718,6 +893,10 @@ class Agent:
         self.budget = SwitchBudget(cfg.cooldown_seconds, cfg.max_switches_per_day,
                                    clock=wallclock, path=cfg.budget_path)
         self.lock = threading.Lock()
+        # Lazy: no thread exists until the first authoritative verdict. Once
+        # started, this is the only code allowed to touch the hard NFS verdict
+        # path. One wedged call cannot freeze watch_once() or create more workers.
+        self.verdict_publisher = VerdictPublisher(self._write_bad_server)
         self.current_server = None
         self.current_loss_pct = None
         # Last window's tunnel throughput, or None when the window produced no
@@ -777,12 +956,16 @@ class Agent:
         return os.path.join(self.cfg.verdict_dir, name)
 
     def publish_bad_server(self, server, loss_pct):
-        """Atomically publish this agent's authoritative in-tunnel verdict.
+        """Queue this agent's authoritative verdict without touching storage.
 
-        Fail open: an unwritable shared directory is logged but never blocks the
-        degradation switch. The scorer likewise ignores absent/malformed/stale
-        verdicts. Persistence is still the point: on success this file is on
-        /media, outside both the agent-cache emptyDir and the pod lifetime.
+        Validation and JSON construction are bounded in-memory work. The
+        observed_at timestamp is captured here, when the evidence was observed,
+        rather than whenever a delayed worker happens to wake. All hard-NFS I/O
+        lives in the one daemon VerdictPublisher worker.
+
+        True means accepted for best-effort publication, not durably written.
+        A later write failure is logged by the worker and cannot suppress or
+        delay the independently budgeted degradation switch.
         """
         producer = self.cfg.verdict_producer_id
         server = str(server or "")
@@ -815,11 +998,28 @@ class Agent:
             "server": server,
             "observed_at": observed_at,
             "ttl_seconds": self.cfg.verdict_ttl_seconds,
-            "loss_pct": float(loss_pct),
+            "loss_pct": loss_pct,
             "bad_windows": self.cfg.bad_windows,
         }
-        payload = json.dumps(doc, indent=2, sort_keys=True).encode() + b"\n"
-        path = self.verdict_path(server)
+        publication = VerdictPublication(
+            path=self.verdict_path(server),
+            payload=json.dumps(doc, indent=2, sort_keys=True).encode() + b"\n",
+            server=server,
+            loss_pct=loss_pct,
+            producer=producer,
+            ttl_seconds=self.cfg.verdict_ttl_seconds,
+        )
+        if not self.verdict_publisher.submit(publication):
+            log.error(
+                "cannot queue bad-server verdict for %s: publisher is stopping "
+                "or its bounded destination set is full", server,
+            )
+            return False
+        return True
+
+    def _write_bad_server(self, publication):
+        """Atomic storage half of publish_bad_server(), daemon-worker only."""
+        path = publication.path
         directory = os.path.dirname(path) or "."
         tmp = os.path.join(
             directory,
@@ -830,24 +1030,17 @@ class Agent:
         try:
             os.makedirs(directory, exist_ok=True)
             with open(tmp, "wb") as fh:
-                fh.write(payload)
+                fh.write(publication.payload)
                 fh.flush()
                 os.fsync(fh.fileno())
             os.replace(tmp, path)
-        except Exception as exc:
+        except Exception:
             try:
                 os.unlink(tmp)
             except OSError:
                 pass
-            log.error("cannot publish bad-server verdict for %s: %s", server, exc)
-            return False
+            raise
 
-        log.warning(
-            "published in-tunnel bad-server verdict server=%s loss=%.2f%% "
-            "producer=%s ttl=%ds",
-            server, loss_pct, producer, self.cfg.verdict_ttl_seconds,
-        )
-        return True
 
     def read_ranking(self):
         """Fresh ranking from the shared file, or [] when there is not one.
@@ -1425,13 +1618,13 @@ class Agent:
             self.consecutive_bad_server = None
             self.consecutive_bad_generation = None
 
-        # Publish the MEASUREMENT before asking whether a switch is allowed.
+        # Submit the MEASUREMENT before asking whether a switch is allowed.
         # Cooldown and the daily cap govern peer-disrupting actions; they do not
-        # make three sustained in-tunnel loss windows untrue. Persisting here is
-        # what prevents a pod recreation from forgetting the fault and taking a
-        # scorer-clean-but-tunnel-lossy server again (#792). Dry-run is the one
-        # exception: changing the shared ranking would be an action, so rollback
-        # to dry-run remains behaviorally inert.
+        # make three sustained in-tunnel loss windows untrue. The one daemon
+        # writer persists it when storage is available, but hard NFS can never
+        # hold this control loop before allowed()/switch() (#792 hardening).
+        # Dry-run is the one exception: changing the shared ranking would be an
+        # action, so rollback to dry-run remains behaviorally inert.
         if self.cfg.dry_run:
             log.info(
                 "DRY RUN would publish in-tunnel bad-server verdict "
@@ -1464,6 +1657,10 @@ class Agent:
                 # qBittorrent out of its Service endpoints and takes the WebUI
                 # and every *arr download client down with it.
                 log.exception("watch cycle crashed, staying up for the next one")
+
+    def close(self):
+        """Signal the verdict daemon without ever waiting on hard NFS."""
+        self.verdict_publisher.shutdown()
 
 
 # --------------------------------------------------------------------------
@@ -1643,7 +1840,13 @@ def main():
     )
     agent = Agent(cfg)
     serve(agent)
-    agent.run()
+    try:
+        agent.run()
+    finally:
+        # The publisher is a daemon by design, and close() never joins it. A
+        # thread asleep forever inside a hard-NFS syscall cannot delay process
+        # or container shutdown.
+        agent.close()
     return 0
 
 
