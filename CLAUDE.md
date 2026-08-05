@@ -6,8 +6,8 @@ Infrastructure-as-code and documentation for a K3s Kubernetes cluster + Docker S
 
 ## Critical Rules
 
-- **NEVER** hardcode passwords, tokens, or secrets in any file. Use placeholders (`<POSTGRES_PASSWORD>`, `<CLOUDFLARE_API_TOKEN>`, etc.) and reference `.github/instructions/secrets.yml` (git-ignored).
-- **NEVER** commit `secrets.yml`. It is git-ignored and must stay that way.
+- **NEVER** hardcode passwords, tokens, or secrets in any file. Use placeholders (`<POSTGRES_PASSWORD>`, `<CLOUDFLARE_API_TOKEN>`, etc.) and reference a key name in `.github/instructions/secrets.enc.yaml` (SOPS+age encrypted, committed).
+- **The credential store is `.github/instructions/secrets.enc.yaml`.** The plaintext `secrets.yml` is GONE — `secrets.yml` stays in `.gitignore` as a guard so it can never come back. Read one key with `sops -d --extract '["key"]' .github/instructions/secrets.enc.yaml`, never decrypt the whole file for one value, never echo the value. Recipes: `.github/instructions/sops.instructions.md` → "The credential store".
 - Log significant commands and outputs to `.history/` for future reference.
 - Repo path is `/home/spy/Documents/Epaflix/k3s-swarm-proxmox` — not `k3s-proxmox`.
 - **Open a GitHub issue for every follow-up.** Any time work surfaces a step that has to happen later — soak-window flip, deferred cleanup, scope-cut spinoff, future migration, "out of scope of this PR" item — open a `gh issue` on `SpyrosPsarras/epaflix` for it before closing the thread. Don't park follow-ups in chat history, PR descriptions only, or local memory; the issue list is the durable shared queue. Use the existing enhancement-issue shape (`## Finding` / `## Current state` / `## Desired outcome` / `## Notes`) and cross-link related issues.
@@ -17,7 +17,7 @@ Infrastructure-as-code and documentation for a K3s Kubernetes cluster + Docker S
 - **ArgoCD adoption order: push aligned git BEFORE creating an Application.** Otherwise automated sync reverts live to pre-adoption main.
 - **A live-only fix is not a fix.** Any config value fixed live on a PVC or an app's own DB must be codified the same day — SOPS-seed Secret + non-clobber initContainer (the #137/#138 pattern), or at minimum documented as required values in the app's directory. Otherwise the next rebuild silently reverts it (#465, #299, #518, #538).
 - **Close soak/flip issues only with the live value pasted.** Never close a "flip prune/selfHeal after soak" (or any config-flip) issue on "soak elapsed" — paste the literal current value (`grep` the manifest AND `kubectl get application ... -o jsonpath`). #50 was closed as done while `app-servarr.yaml` still said `prune: false` (#551). Same discipline for runbooks: verify against source code or live state before writing "X handles Y" (#614).
-- **Never extract a secret with a pattern that can echo the value.** No `grep 'key:'` against `secrets.yml` or decrypted SOPS output — the matched line lands in the retained transcript (#602 forced a token rotation). Extract the single value into a shell variable with `yq '.key'` and never print it.
+- **Never extract a secret with a pattern that can echo the value.** No `grep 'key:'` against decrypted SOPS output, and never `cat`/`head` a diff or file that contains plaintext secrets — the matched line lands in the retained transcript (#602 forced a token rotation). Extract the single value into a shell variable with `sops -d --extract '["key"]'` and never print it; print `${#VAR}` if you need to check it.
 - **Before destroying a snapshot/PVC/dataset, grep open issues for its name.** Confirm any referencing issue's stated gates are met first — #515 destroyed a rollback target that an open issue still named; root-cause anomalies (e.g. a path-match gap) before bulk deletes (#609).
 
 ## Cluster Inventory
@@ -97,7 +97,7 @@ artifacts/          # Per-issue triage / feature working notes (git-ignored scra
 backups/            # Local backups (git-ignored)
 images/             # Documentation images
 raid-migration/     # Proxmox RAID migration guides
-.github/instructions/  # Domain-specific AI instruction files + secrets.yml (git-ignored)
+.github/instructions/  # Domain-specific AI instruction files + secrets.enc.yaml (SOPS-encrypted credential store)
 .history/           # Command logs (git-ignored content, tracked .md/.sh)
 ```
 

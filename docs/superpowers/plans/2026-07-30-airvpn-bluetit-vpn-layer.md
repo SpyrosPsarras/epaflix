@@ -33,7 +33,7 @@ qBittorrent session off the tunnel, and the `nick` key would kick Nick's VM. So:
 creating keys — the generator API only references existing ones. Confirm afterwards with:
 
 ```bash
-KEY=$(grep '^airvpn_api_key:' .github/instructions/secrets.yml | cut -d'"' -f2)
+KEY=$(sops -d --extract '["airvpn_api_key"]' .github/instructions/secrets.enc.yaml)
 curl -sG https://airvpn.org/api/ --data-urlencode "key=$KEY" -d service=devices \
   | python3 -m json.tool | grep -iE '"name"|wireguard_ipv4'
 ```
@@ -548,8 +548,9 @@ Write the plaintext **outside the repo** so the pre-commit hook never sees it, a
 ```bash
 mkdir -p /tmp/airvpn-secret && cd /tmp/airvpn-secret
 REPO=/home/spy/Documents/Epaflix/k3s-swarm-proxmox-vpn
-U=$(grep '^airvpn_user:' $REPO/../k3s-swarm-proxmox/.github/instructions/secrets.yml | cut -d'"' -f2)
-P=$(grep '^airvpn_password:' $REPO/../k3s-swarm-proxmox/.github/instructions/secrets.yml | cut -d'"' -f2)
+S=$REPO/../k3s-swarm-proxmox/.github/instructions/secrets.enc.yaml
+U=$(sops -d --extract '["airvpn_user"]' "$S")
+P=$(sops -d --extract '["airvpn_password"]' "$S")
 cat > airvpn-credentials.enc.yaml <<YAML
 apiVersion: v1
 kind: Secret
