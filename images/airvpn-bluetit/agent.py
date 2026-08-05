@@ -17,6 +17,7 @@ and a handful of `goldcrest` calls.
 """
 
 import hashlib
+import ipaddress
 import json
 import logging
 import math
@@ -50,7 +51,28 @@ VERDICT_TTL_SECONDS = 21600
 # not erase each other. If every slot is occupied, a new destination is rejected
 # rather than destroying earlier evidence; same-destination refreshes still fit.
 MAX_PENDING_VERDICT_DESTINATIONS = 128
-_VERDICT_IDENTITY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}$")
+# A ranking is normally a few KiB. Bound the one daemon reader's allocation so
+# a corrupt replacement cannot turn the storage-isolation worker into an
+# unbounded memory consumer. This does not change the schema contract; an
+# oversized document is simply unusable like malformed JSON.
+MAX_RANKING_BYTES = 1024 * 1024
+# Schema-1's published lease is 2100 seconds: one 15-minute scorer cycle plus
+# room for a failed cycle. Treat that contract value as the upper bound, not a
+# caller-controlled extension. This matters when ranking.json is already
+# verdict-filtered: an excessive lease would turn a temporary server ejection
+# into an effectively permanent ban while the scorer is unavailable (#792).
+MAX_RANKING_TTL_SECONDS = 2100
+# Clocks can differ slightly across the scorer, NFS clients and the two agents,
+# but a future timestamp must not extend the lease without bound. Match the
+# verdict channel's five-minute allowance.
+RANKING_FUTURE_SKEW_SECONDS = 300
+RANKING_DOCUMENT_KEYS = frozenset((
+    "schema", "generated_at", "ttl_seconds", "servers",
+))
+RANKING_SERVER_KEYS = frozenset((
+    "name", "entry_ip", "loss_pct", "rtt_ms", "load", "bw_max", "headroom",
+))
+_IDENTITY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}$")
 
 # Shortest interval throughput_since() will divide by. Below this the quotient is
 # an artefact of packet arrival timing, not a rate, so there is NO measurement -
@@ -121,6 +143,21 @@ class Config:
         # times out from inside this netns.
         self.ranking_path = os.environ.get(
             "VPN_AGENT_RANKING_PATH", "/media/.vpn-picker/ranking.json"
+        )
+        # The ranking lives on a hard NFS mount. Exactly one daemon owns every
+        # open/read against it and polls atomic replacements without stat(). A
+        # five-second poll matches the scorer's verdict reconciliation cadence
+        # and is tiny beside the 15-minute score cycle without busy-looping.
+        self.ranking_poll_seconds = _env_float(
+            "VPN_AGENT_RANKING_POLL_SECONDS", 5.0
+        )
+        # Boot may wait briefly for the daemon's FIRST attempt so a healthy NFS
+        # ranking still drives the existing top-band upgrade. This is a bounded
+        # Condition wait, never an NFS call: a kernel-wedged reader releases boot
+        # after one second and the local emptyDir cache (if still within the
+        # document TTL) is the only fallback.
+        self.ranking_initial_wait_seconds = _env_float(
+            "VPN_AGENT_RANKING_INITIAL_WAIT_SECONDS", 1.0
         )
         # emptyDir is enough. Boot always starts on `quick`, so the cache only
         # has to survive within one pod lifetime.
@@ -310,24 +347,98 @@ def parse_status(text):
     return m.group(1) if m else None
 
 
-def parse_ranking(payload, now_epoch):
-    """Return (servers, age_seconds) from a published ranking document.
+def _ranking_number(value, field, minimum=None, maximum=None):
+    """A finite JSON number in the schema's range; bool is not numeric here."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("ranking %s is not numeric" % field)
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError("ranking %s is not finite" % field)
+    if minimum is not None and number < minimum:
+        raise ValueError("ranking %s is below %s" % (field, minimum))
+    if maximum is not None and number > maximum:
+        raise ValueError("ranking %s is above %s" % (field, maximum))
+    return number
 
-    Past its TTL the ranking is ABSENT, not merely old - one rule, no second
-    staleness state. The age is still returned so the metric can show how far
-    gone it is.
+
+def _validate_ranking_row(row):
+    """Validate one complete scorer schema-1 row without normalizing it.
+
+    The scorer can republish an already verdict-filtered document. Accepting a
+    partial row is therefore not merely a display problem: boot's in_band() or
+    degradation's candidate_names() will raise in the control path, after the
+    last-good cache has already been replaced. Keep this contract byte-for-
+    schema with vpn-picker's restart validator (#792 review).
+    """
+    if not isinstance(row, dict) or set(row) != RANKING_SERVER_KEYS:
+        raise ValueError("ranking server row has wrong fields")
+    name = row["name"]
+    if not isinstance(name, str) or not _IDENTITY.fullmatch(name):
+        raise ValueError("ranking server name is invalid")
+    entry_ip = row["entry_ip"]
+    if not isinstance(entry_ip, str):
+        raise ValueError("ranking entry_ip is not a string")
+    try:
+        if ipaddress.ip_address(entry_ip).version != 4:
+            raise ValueError("ranking entry_ip is not IPv4")
+    except ValueError as exc:
+        raise ValueError("ranking entry_ip is invalid") from exc
+    _ranking_number(row["loss_pct"], "loss_pct", 0.0, 100.0)
+    _ranking_number(row["rtt_ms"], "rtt_ms", 0.0)
+    if type(row["load"]) is not int or not 0 <= row["load"] <= 100:
+        raise ValueError("ranking load is not an integer percent")
+    if type(row["bw_max"]) is not int or row["bw_max"] <= 0:
+        raise ValueError("ranking bw_max is not a positive integer")
+    if (type(row["headroom"]) is not int or row["headroom"] < 0
+            or row["headroom"] > row["bw_max"]):
+        raise ValueError("ranking headroom is outside 0..bw_max")
+
+
+def _validate_ranking_rows(servers):
+    if not isinstance(servers, list) or not servers:
+        raise ValueError("ranking has no servers")
+    seen = set()
+    for row in servers:
+        _validate_ranking_row(row)
+        key = row["name"].lower()
+        if key in seen:
+            raise ValueError("ranking contains duplicate server %s" % row["name"])
+        seen.add(key)
+    return list(servers)
+
+
+def parse_ranking(payload, now_epoch):
+    """Return (servers, age_seconds) from a strict schema-1 ranking.
+
+    Every caller - daemon snapshot publication and both local-cache paths -
+    comes through here before adopting bytes. Past its TTL the ranking is
+    ABSENT, not merely old; the age is still returned so a valid stale snapshot
+    can report how far gone it is. Invalid schema/time fails open instead.
     """
     doc = json.loads(payload)
-    if doc.get("schema") != SCHEMA:
-        raise ValueError("unknown schema %r" % (doc.get("schema"),))
-    stamp = datetime.strptime(doc["generated_at"], "%Y-%m-%dT%H:%M:%SZ").replace(
+    if not isinstance(doc, dict) or set(doc) != RANKING_DOCUMENT_KEYS:
+        raise ValueError("ranking document has wrong fields")
+    if type(doc.get("schema")) is not int or doc["schema"] != SCHEMA:
+        raise ValueError("unknown ranking schema %r" % (doc.get("schema"),))
+
+    generated_at = doc.get("generated_at")
+    if not isinstance(generated_at, str):
+        raise ValueError("ranking generated_at is not a string")
+    stamp = datetime.strptime(generated_at, "%Y-%m-%dT%H:%M:%SZ").replace(
         tzinfo=timezone.utc
     )
     age = now_epoch - stamp.timestamp()
-    ttl = int(doc.get("ttl_seconds", 0))
+    if age < -RANKING_FUTURE_SKEW_SECONDS:
+        raise ValueError("ranking timestamp is %.0fs in the future" % -age)
+
+    ttl = doc.get("ttl_seconds")
+    if (type(ttl) is not int or ttl <= 0
+            or ttl > MAX_RANKING_TTL_SECONDS):
+        raise ValueError("invalid ranking ttl %r" % (ttl,))
+    servers = _validate_ranking_rows(doc.get("servers"))
     if age > ttl:
         return [], age
-    return list(doc.get("servers", [])), age
+    return servers, age
 
 
 def in_band(current, servers, band):
@@ -355,6 +466,163 @@ def candidate_names(servers, band, exclude=None):
         for s in servers[:band]
         if str(s.get("name", "")).lower() != skip
     ]
+
+
+class RankingSnapshot:
+    """Immutable in-memory result of one valid ranking-file read."""
+
+    __slots__ = ("payload",)
+
+    def __init__(self, payload):
+        object.__setattr__(self, "payload", bytes(payload))
+
+    def __setattr__(self, name, value):
+        raise AttributeError("RankingSnapshot is immutable")
+
+
+class RankingReader:
+    """Exactly one daemon owns all access to the hard-NFS ranking path.
+
+    An NFS `open()` or `read()` may sleep in the kernel forever. No timeout or
+    try/except can bound that syscall, so control and HTTP-handler threads only
+    read the immutable snapshot assigned here. The worker polls by opening the
+    atomic publication path directly (no synchronous stat), then sleeps on a
+    Condition. There is no work queue, no thread per read, and a blocked worker
+    is never replaced.
+
+    A valid fresh document is copied to the local emptyDir cache before it is
+    published as the current snapshot. Missing/malformed input publishes an
+    absent snapshot and leaves the last good cache alone. A valid stale document
+    remains a snapshot so the age metric can report it, but never refreshes the
+    cache. Consumers re-run generated_at/TTL validation against their current
+    wall clock, so a worker wedged after one good read cannot preserve that
+    ranking past its original lease.
+    """
+
+    def __init__(self, path, wallclock, on_fresh, poll_seconds,
+                 max_bytes=MAX_RANKING_BYTES):
+        if poll_seconds <= 0:
+            raise ValueError("ranking poll interval must be positive")
+        if max_bytes < 1:
+            raise ValueError("ranking max_bytes must be positive")
+        self.path = path
+        self.wallclock = wallclock
+        self.on_fresh = on_fresh
+        self.poll_seconds = poll_seconds
+        self.max_bytes = max_bytes
+        self._condition = threading.Condition()
+        self._snapshot = None
+        self._attempted = False
+        self._attempts = 0
+        self._stopping = False
+        self._thread = None
+        self._last_problem = None
+
+    def start(self):
+        """Start once. A wedged or unexpectedly dead worker is never replaced."""
+        with self._condition:
+            if self._thread is not None or self._stopping:
+                return self._thread
+            self._thread = threading.Thread(
+                target=self._run,
+                name="vpn-ranking-reader-%x" % id(self),
+                daemon=True,
+            )
+            try:
+                self._thread.start()
+            except RuntimeError as exc:
+                self._thread = None
+                self._attempted = True
+                self._condition.notify_all()
+                log.error("cannot start ranking reader: %s", exc)
+            return self._thread
+
+    def snapshot(self):
+        """Current immutable snapshot, or None. Never waits for NFS."""
+        self.start()
+        with self._condition:
+            return self._snapshot
+
+    def wait_initial(self, timeout):
+        """Bounded boot-only wait for the first attempt, never for completion."""
+        self.start()
+        deadline = time.monotonic() + max(0.0, timeout)
+        with self._condition:
+            while not self._attempted and not self._stopping:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    return False
+                self._condition.wait(left)
+            return self._attempted
+
+    def _problem(self, key, message, *args):
+        # A missing/malformed file checked every five seconds must not flood the
+        # log. Say each state transition once; a successful read clears it.
+        if key != self._last_problem:
+            log.warning(message, *args)
+        self._last_problem = key
+
+    def _run(self):
+        while True:
+            snapshot = None
+            servers = []
+            valid = False
+            try:
+                with open(self.path, "rb") as fh:
+                    payload = fh.read(self.max_bytes + 1)
+                if len(payload) > self.max_bytes:
+                    raise ValueError("ranking exceeds %d bytes" % self.max_bytes)
+                servers, age = parse_ranking(payload, self.wallclock())
+                snapshot = RankingSnapshot(payload)
+                valid = True
+            except FileNotFoundError:
+                self._problem("missing", "no ranking at %s", self.path)
+            except Exception as exc:
+                self._problem(
+                    ("unusable", type(exc).__name__, str(exc)),
+                    "ranking at %s is unusable: %s", self.path, exc,
+                )
+            else:
+                if servers:
+                    self._last_problem = None
+                else:
+                    self._problem(
+                        "stale",
+                        "ranking is %.0fs old, past its TTL - treating it as absent",
+                        age,
+                    )
+
+            # Fresh ranking adoption writes only the local emptyDir. Do it before
+            # exposing the snapshot so a process crash cannot make a ranking
+            # usable in memory without first attempting to preserve its exact
+            # generated_at/TTL document for the fallback path.
+            if valid and servers:
+                with self._condition:
+                    if self._stopping:
+                        return
+                try:
+                    self.on_fresh(snapshot.payload, servers)
+                except Exception as exc:
+                    # The local cache is an optimization, never permission to
+                    # discard a valid in-memory ranking.
+                    log.warning("cannot adopt fresh ranking into local cache: %s", exc)
+
+            with self._condition:
+                if self._stopping:
+                    return
+                self._snapshot = snapshot
+                self._attempted = True
+                self._attempts += 1
+                self._condition.notify_all()
+                self._condition.wait(self.poll_seconds)
+                if self._stopping:
+                    return
+
+    def shutdown(self):
+        """Stop and wake a healthy reader; never join a kernel-wedged one."""
+        with self._condition:
+            self._stopping = True
+            self._condition.notify_all()
 
 
 class VerdictPublication:
@@ -893,6 +1161,15 @@ class Agent:
         self.budget = SwitchBudget(cfg.cooldown_seconds, cfg.max_switches_per_day,
                                    clock=wallclock, path=cfg.budget_path)
         self.lock = threading.Lock()
+        # RankingReader adopts fresh bytes concurrently with control/metrics
+        # consumers expiring the finite local cache. One separate transaction
+        # lock covers BOTH in-memory fields and the emptyDir file: otherwise a
+        # consumer can parse an old expired payload, the reader can install a
+        # fresh replacement, and the consumer can resume by clearing/unlinking
+        # that replacement (#792 reader review). Keep this separate from the
+        # metrics/switch lock above; local cache I/O must not stall unrelated
+        # state reads.
+        self.cache_lock = threading.Lock()
         # Lazy: no thread exists until the first authoritative verdict. Once
         # started, this is the only code allowed to touch the hard NFS verdict
         # path. One wedged call cannot freeze watch_once() or create more workers.
@@ -941,6 +1218,14 @@ class Agent:
         # alone has no finite lease and can preserve an already-ejected ranking
         # forever while the scorer is down (#792 second review).
         self.cached_payload = None
+        # Constructed once and never replaced. All hard-NFS ranking access lives
+        # in this one daemon; control and metrics paths see immutable bytes only.
+        self.ranking_reader = RankingReader(
+            cfg.ranking_path,
+            wallclock=self.wallclock,
+            on_fresh=self._adopt_fresh_ranking,
+            poll_seconds=cfg.ranking_poll_seconds,
+        )
 
     # -- ranking + shared verdicts ----------------------------------------
 
@@ -969,10 +1254,10 @@ class Agent:
         """
         producer = self.cfg.verdict_producer_id
         server = str(server or "")
-        if not isinstance(producer, str) or not _VERDICT_IDENTITY.fullmatch(producer):
+        if not isinstance(producer, str) or not _IDENTITY.fullmatch(producer):
             log.error("cannot publish bad-server verdict: invalid producer identity")
             return False
-        if not _VERDICT_IDENTITY.fullmatch(server):
+        if not _IDENTITY.fullmatch(server):
             log.error("cannot publish bad-server verdict: invalid server name")
             return False
         if not 1 <= self.cfg.verdict_ttl_seconds <= VERDICT_TTL_SECONDS:
@@ -1042,62 +1327,64 @@ class Agent:
             raise
 
 
+    def _adopt_fresh_ranking(self, payload, servers):
+        """RankingReader callback: atomically adopt memory + local emptyDir."""
+        payload = bytes(payload)
+        # The disk write, cached_payload and diagnostic tuple are one cache
+        # transaction. A stale consumer must finish discarding the OLD document
+        # before this starts, or finish validating the NEW one after this ends;
+        # it may never unlink/clear this adoption halfway through (#792).
+        with self.cache_lock:
+            self._write_cache_locked(payload)
+            # Immutable bytes are the authority. `cached` remains for
+            # diagnostics and old tests only; every decision reparses
+            # cached_payload against the current wall clock so generated_at/TTL
+            # can never become a new lease.
+            self.cached_payload = payload
+            self.cached = tuple(servers)
+
     def read_ranking(self):
-        """Fresh ranking from the shared file, or [] when there is not one.
+        """Fresh servers from the daemon's immutable snapshot, never from NFS.
 
-        Only a fresh read updates the cache. The cache is "the last good ranking
-        the agent fetched", so a stale file must not refresh it.
+        The reader validates before publishing a snapshot. Revalidate here with
+        the CURRENT wall clock because a worker may be asleep forever in the
+        next hard-NFS open: its last good bytes are usable only through their
+        original generated_at/TTL.
         """
+        snapshot = self.ranking_reader.snapshot()
+        if snapshot is None:
+            return []
         try:
-            with open(self.cfg.ranking_path, "rb") as fh:
-                payload = fh.read()
-            servers, age = parse_ranking(payload, self.wallclock())
-        except FileNotFoundError:
-            log.warning("no ranking at %s", self.cfg.ranking_path)
+            servers, age = parse_ranking(snapshot.payload, self.wallclock())
+        except Exception:
             return []
-        except Exception as exc:
-            log.warning("ranking at %s is unusable: %s", self.cfg.ranking_path, exc)
-            return []
-
         if not servers:
-            log.warning("ranking is %.0fs old, past its TTL - treating it as absent", age)
+            # RankingReader already logs the observed stale transition. This
+            # path may reach the TTL while that daemon is blocked on its NEXT
+            # open, so stay silent and fail through the finite cache to quick.
             return []
-        self.cached = servers
-        self.cached_payload = payload
-        self._write_cache(payload)
         return servers
 
     def ranking_age_now(self):
-        """Age of the published ranking AS OF THIS CALL, read from the file.
+        """Age of the published ranking snapshot AS OF THIS CALL, with no I/O.
 
-        Deliberately not a field the decision path keeps up to date. It used to
-        be one (`self.ranking_age`, written only inside `read_ranking()`), and
-        `read_ranking()` has exactly two callers: `boot_check()` and
-        `candidates()` - boot, and the moment a switch is being decided. The
-        60 s `watch_once()` loop never calls it, so on a healthy pod that never
-        trips, the age was measured once and never again: 18 samples 60 s apart
-        all read `266`, and the same pod still read `266` three hours later
-        (#686). The one metric #670 named to answer "is the scorer publishing
-        reliably" could not answer it.
-
-        Read at scrape time it cannot go stale by construction - there is no
-        cached age left to forget to refresh. Cost is one read of a small local
-        file per scrape.
-
-        Returns None when the ranking is missing, truncated or otherwise
-        unusable. Honest absent, never a stale number, and never an exception
-        out of the /metrics handler. Silent on purpose: /metrics is scraped every
-        30 s and `read_ranking()` already logs the same condition on the path
-        where it changes a decision.
+        #686 removed the write-once age field and made the metric follow wall
+        time. The follow-up keeps that property without opening hard NFS in the
+        HTTP handler: the daemon supplies immutable bytes, and each scrape parses
+        their original generated_at against the current clock. If the daemon is
+        wedged after a good read, age continues increasing; malformed/missing
+        input observed by a healthy reader is an honest absent.
         """
+        snapshot = self.ranking_reader.snapshot()
+        if snapshot is None:
+            return None
         try:
-            with open(self.cfg.ranking_path, "rb") as fh:
-                payload = fh.read()
-            return parse_ranking(payload, self.wallclock())[1]
+            return parse_ranking(snapshot.payload, self.wallclock())[1]
         except Exception:
             return None
 
-    def _write_cache(self, payload):
+    def _write_cache_locked(self, payload):
+        """Write exact cache bytes while cache_lock owns the transaction."""
         path = self.cfg.cache_path
         try:
             os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
@@ -1108,7 +1395,13 @@ class Agent:
         except OSError as exc:
             log.warning("cannot cache the ranking at %s: %s", path, exc)
 
-    def _discard_cache(self):
+    def _write_cache(self, payload):
+        """Test/setup helper; production adoption uses the same cache lock."""
+        with self.cache_lock:
+            self._write_cache_locked(payload)
+
+    def _discard_cache_locked(self):
+        """Discard memory + disk while cache_lock owns the transaction."""
         self.cached = []
         self.cached_payload = None
         try:
@@ -1119,16 +1412,12 @@ class Agent:
             log.warning("cannot remove unusable ranking cache at %s: %s",
                         self.cfg.cache_path, exc)
 
-    def load_cache(self):
-        """Adopt a still-fresh cache left by an earlier agent process.
+    def _discard_cache(self):
+        with self.cache_lock:
+            self._discard_cache_locked()
 
-        The cache is the original ranking document, not a new lease. Revalidate
-        generated_at and ttl_seconds against the current wall clock every time
-        it becomes the fallback. This matters when the scorer is down: the cache
-        may already be verdict-filtered, and using its bare server list forever
-        turns temporary ejection into a permanent ban. Once it expires, the only
-        honest fail-open is no ranking (`quick`); hidden rows cannot be invented.
-        """
+    def _load_cache_locked(self):
+        """Load and validate disk while cache_lock owns the transaction."""
         try:
             with open(self.cfg.cache_path, "rb") as fh:
                 payload = fh.read()
@@ -1139,7 +1428,7 @@ class Agent:
             return []
         except Exception as exc:
             log.warning("cached ranking is unusable: %s", exc)
-            self._discard_cache()
+            self._discard_cache_locked()
             return []
         if not servers:
             log.warning(
@@ -1147,37 +1436,57 @@ class Agent:
                 "open to `quick` because no measured base can restore hidden rows",
                 age,
             )
-            self._discard_cache()
+            self._discard_cache_locked()
             return []
-        self.cached = servers
-        self.cached_payload = payload
+        self.cached = tuple(servers)
+        self.cached_payload = bytes(payload)
         log.info("adopted cached ranking servers=%s",
                  [s.get("name") for s in self.cached])
         return servers
 
+    def load_cache(self):
+        """Adopt a still-fresh cache left by an earlier agent process.
+
+        The cache is the original ranking document, not a new lease. Revalidate
+        generated_at and ttl_seconds against the current wall clock every time
+        it becomes the fallback. This matters when the scorer is down: the cache
+        may already be verdict-filtered, and using its bare server list forever
+        turns temporary ejection into a permanent ban. Once it expires, the only
+        honest fail-open is no ranking (`quick`); hidden rows cannot be invented.
+
+        The complete read/parse/adopt-or-discard sequence is serialized with the
+        reader callback. Atomic file replacement alone cannot prevent an old
+        parser result from clearing a newer in-memory and on-disk adoption.
+        """
+        with self.cache_lock:
+            return self._load_cache_locked()
+
     def cached_ranking(self):
         """Return the cache only while its original ranking lease is valid."""
-        if self.cached_payload is None:
-            return self.load_cache()
-        try:
-            servers, age = parse_ranking(self.cached_payload, self.wallclock())
-        except Exception as exc:
-            log.warning("in-memory ranking cache is unusable: %s", exc)
-            self._discard_cache()
-            return []
-        if not servers:
-            log.warning(
-                "cached ranking is %.0fs old, past its original TTL - failing "
-                "open to `quick` because no measured base can restore hidden rows",
-                age,
-            )
-            self._discard_cache()
-            return []
-        self.cached = servers
-        return servers
+        with self.cache_lock:
+            if self.cached_payload is None:
+                return self._load_cache_locked()
+            try:
+                servers, age = parse_ranking(
+                    self.cached_payload, self.wallclock()
+                )
+            except Exception as exc:
+                log.warning("in-memory ranking cache is unusable: %s", exc)
+                self._discard_cache_locked()
+                return []
+            if not servers:
+                log.warning(
+                    "cached ranking is %.0fs old, past its original TTL - failing "
+                    "open to `quick` because no measured base can restore hidden rows",
+                    age,
+                )
+                self._discard_cache_locked()
+                return []
+            self.cached = tuple(servers)
+            return servers
 
     def candidates(self, exclude=None):
-        """Fresh ranking > still-fresh cache > nothing (which means `quick`)."""
+        """Fresh snapshot > finite local cache > nothing (`quick`), with no NFS."""
         servers = self.read_ranking()
         source = "fresh"
         if not servers:
@@ -1440,22 +1749,33 @@ class Agent:
             self.sleep(5)
 
     def boot_check(self):
-        """Post-boot upgrade - the sticky top-N band test."""
+        """Post-boot upgrade - bounded snapshot, then finite cache, never NFS."""
+        # Start before the D-Bus wait so a healthy reader overlaps it. The only
+        # explicit wait is bounded and observes a Condition, not storage. A hard
+        # NFS syscall therefore adds at most ranking_initial_wait_seconds to boot
+        # and can never strand the agent process.
+        self.ranking_reader.start()
         current = self.wait_for_tunnel()
         if not current:
             return
+        self.ranking_reader.wait_initial(self.cfg.ranking_initial_wait_seconds)
         servers = self.read_ranking()
+        source = "fresh"
         if not servers:
-            log.info("no fresh ranking at boot - staying on quick's pick %s", current)
+            servers = self.cached_ranking()
+            source = "cache"
+        if not servers:
+            log.info("no fresh ranking or valid cache at boot - staying on quick's pick %s",
+                     current)
             return
         if in_band(current, servers, self.cfg.band):
             log.info("quick picked %s, already inside the top %d - staying put",
                      current, self.cfg.band)
             return
         names = candidate_names(servers, self.cfg.band, exclude=current)
-        log.info("quick picked %s, outside the top %d %s - upgrading",
+        log.info("quick picked %s, outside the top %d %s from %s - upgrading",
                  current, self.cfg.band,
-                 [s.get("name") for s in servers[: self.cfg.band]])
+                 [s.get("name") for s in servers[: self.cfg.band]], source)
         self.switch(names, "boot_upgrade", mandatory=False)
 
     # -- degradation ------------------------------------------------------
@@ -1645,7 +1965,11 @@ class Agent:
         return True
 
     def run(self):
+        # Local emptyDir first. If the one ranking daemon wedges on its initial
+        # hard-NFS open, boot_check() can still use this document only through
+        # its original generated_at/TTL, then fail open to quick.
         self.load_cache()
+        self.ranking_reader.start()
         self.boot_check()
         while True:
             self.sleep(self.cfg.probe_interval)
@@ -1659,7 +1983,8 @@ class Agent:
                 log.exception("watch cycle crashed, staying up for the next one")
 
     def close(self):
-        """Signal the verdict daemon without ever waiting on hard NFS."""
+        """Signal both storage daemons without ever waiting on hard NFS."""
+        self.ranking_reader.shutdown()
         self.verdict_publisher.shutdown()
 
 
@@ -1683,11 +2008,12 @@ def render_metrics(agent):
     # published the `True` it was initialised with, without ever having looked
     # (#690). Do NOT "simplify" either of these back to an attribute lookup.
     #
-    # Both are cheap enough to sit in the HTTP handler thread: one small local
-    # file read and one os.listdir, no subprocess. That is the line - anything
-    # needing a goldcrest call is refreshed in watch_once() instead, because a
-    # 25 s D-Bus call in here would blow the scrape timeout and take the whole
-    # target down.
+    # Both are cheap enough to sit in the HTTP handler thread: ranking age parses
+    # immutable bytes supplied by the one daemon reader, and device state is one
+    # os.listdir. There is NO ranking stat/open/read here: hard NFS must never
+    # own a Prometheus handler. Anything needing a goldcrest call is refreshed in
+    # watch_once() instead, because a 25 s D-Bus call would blow the scrape
+    # timeout and take the whole target down.
     age = agent.ranking_age_now()
     device_ok = agent.bluetit.tun_present()
     # Same rule, same reason: MEASURED here, at scrape time, two /sys reads. This
@@ -1784,7 +2110,7 @@ def render_metrics(agent):
         ]
     if age is not None:
         lines += [
-            "# HELP vpn_agent_ranking_age_seconds Age of the published ranking, measured at scrape time. Absent when there is no usable ranking file.",
+            "# HELP vpn_agent_ranking_age_seconds Age of the daemon reader's latest usable ranking snapshot, measured against wall time at scrape time. Absent when no usable snapshot has been observed.",
             "# TYPE vpn_agent_ranking_age_seconds gauge",
             "vpn_agent_ranking_age_seconds %.0f" % age,
         ]
@@ -1843,8 +2169,8 @@ def main():
     try:
         agent.run()
     finally:
-        # The publisher is a daemon by design, and close() never joins it. A
-        # thread asleep forever inside a hard-NFS syscall cannot delay process
+        # Both NFS workers are daemons by design, and close() never joins either.
+        # A thread asleep forever inside a hard-NFS syscall cannot delay process
         # or container shutdown.
         agent.close()
     return 0
