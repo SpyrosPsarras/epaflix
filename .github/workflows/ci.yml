@@ -71,7 +71,7 @@ jobs:
           # issue #164) and NO curl|bash from a moving branch. Renovate keeps
           # the two pins below fresh via a customManager regex.
           KUSTOMIZE_VERSION=5.8.1  # renovate: datasource=github-releases depName=kubernetes-sigs/kustomize
-          HELM_VERSION=3.21.0      # renovate: datasource=github-releases depName=helm/helm
+          HELM_VERSION=3.21.3      # renovate: datasource=github-releases depName=helm/helm
 
           # Bounded retry: 3 attempts, 5s then 10s backoff, so a transient
           # CDN blip self-heals instead of red-flagging the required check.
