@@ -18,6 +18,7 @@ import logging
 import os
 import shutil
 import stat
+import sys
 import tempfile
 import threading
 import time
@@ -124,7 +125,7 @@ class FakeBluetit:
 
 
 def build(tmp, ranking=RANKING, server="Aspidiske", refused=(), silent=(), dead=(),
-          throughput=0.0, **overrides):
+          throughput=0.0, start_ranking_reader=True, **overrides):
     """An Agent wired to a fake daemon, a fake clock and a real ranking file.
 
     `dead` names servers with the 2026-08-02 shape: they connect, they answer
@@ -135,6 +136,11 @@ def build(tmp, ranking=RANKING, server="Aspidiske", refused=(), silent=(), dead=
     os.environ["VPN_AGENT_BUDGET_PATH"] = os.path.join(tmp, "cache", "switches.json")
     cfg = ag.Config()
     cfg.jitter_seconds = 0.0
+    # Production polls every five seconds and waits at most one second for the
+    # first boot attempt. Keep the same behavior but compress wall time in this
+    # suite; replacement tests still prove the reader sleeps between attempts.
+    cfg.ranking_poll_seconds = 0.02
+    cfg.ranking_initial_wait_seconds = 0.05
     # `lo` always exists, so tun_ok() runs its real /sys/class/net read and
     # passes. Point it at a device that does not exist to test the failure.
     cfg.tun_device = "lo"
@@ -171,7 +177,28 @@ def build(tmp, ranking=RANKING, server="Aspidiske", refused=(), silent=(), dead=
     # read and the real delta arithmetic are covered by
     # test_throughput_is_measured_not_assumed().
     agent.throughput_since = lambda before, started: throughput
+    if start_ranking_reader:
+        agent.ranking_reader.start()
+        assert agent.ranking_reader.wait_initial(1.0), \
+            "the healthy ranking reader did not complete its first attempt"
     return agent, fake, clock
+
+
+def reader_attempts(agent):
+    with agent.ranking_reader._condition:
+        return agent.ranking_reader._attempts
+
+
+def wait_for_reader_attempt(agent, after, timeout=1.0):
+    """Wait for a NEW completed poll; test-only, never a production dependency."""
+    deadline = time.monotonic() + timeout
+    with agent.ranking_reader._condition:
+        while agent.ranking_reader._attempts <= after:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return False
+            agent.ranking_reader._condition.wait(left)
+    return True
 
 
 def scripted_probe(watch, verify=0.0):
@@ -200,6 +227,13 @@ def with_tmp(fn):
                 close = getattr(agent, "close", None)
                 if close is not None:
                     close()
+                # Production deliberately never joins a hard-NFS reader. Tests
+                # release every simulated wedge before teardown, so joining the
+                # now-healthy daemon only prevents cross-test thread buildup.
+                reader = getattr(agent, "ranking_reader", None)
+                worker = getattr(reader, "_thread", None)
+                if worker is not None and worker is not threading.current_thread():
+                    worker.join(2.0)
             del _TEST_AGENTS[first_agent:]
             shutil.rmtree(tmp)
     wrapper.__name__ = fn.__name__
@@ -228,12 +262,170 @@ def test_stale_ranking_is_absent(tmp):
 
     # A stale file must not refresh the cache, or the fallback chain silently
     # promotes an expired ranking to "last good".
-    agent, _, _ = build(tmp)
+    agent, _, _ = build(tmp, start_ranking_reader=False)
     agent.wallclock = lambda: GENERATED_EPOCH + 9999
+    agent.ranking_reader.wallclock = agent.wallclock
+    agent.ranking_reader.start()
+    assert agent.ranking_reader.wait_initial(1.0)
     assert agent.read_ranking() == []
     assert agent.cached == [], "a stale read updated the cache"
     assert not os.path.exists(agent.cfg.cache_path), "a stale read wrote the cache file"
     print("ok  stale ranking: absent past TTL, good at the TTL, never cached")
+
+
+def _ranking_schema_rejections(now_epoch):
+    """Valid JSON documents that are not valid schema-1 rankings.
+
+    Keep the fixtures centralized: the parser, daemon snapshot path and finite
+    emptyDir cache must reject the same bytes. A shape accepted by only one path
+    can still crash boot/candidate selection or preserve an ejected ranking
+    beyond its lease (#792 reader review).
+    """
+    row = dict(RANKING["servers"][0])
+
+    def document(**changes):
+        value = dict(RANKING)
+        value.update(changes)
+        return value
+
+    def with_row(changes=None, remove=(), extra=None):
+        value = dict(row)
+        for key in remove:
+            value.pop(key, None)
+        if changes:
+            value.update(changes)
+        if extra:
+            value.update(extra)
+        return document(servers=[value])
+
+    just_beyond_skew = time.strftime(
+        "%Y-%m-%dT%H:%M:%SZ", time.gmtime(now_epoch + 301)
+    )
+    far_future = time.strftime(
+        "%Y-%m-%dT%H:%M:%SZ", time.gmtime(now_epoch + 10 * 365 * 86400)
+    )
+    return [
+        ("servers is not a list", document(servers={"name": "Dalim"})),
+        ("servers is empty", document(servers=[])),
+        ("servers is a string row", document(servers=["Dalim"])),
+        ("servers is a null row", document(servers=[None])),
+        ("server row is missing name", with_row(remove=("name",))),
+        ("server row has an extra field", with_row(extra={"score": 1})),
+        ("server name is not a string", with_row({"name": 7})),
+        ("server name is not a safe identity", with_row({"name": "../Dalim"})),
+        ("entry_ip has the wrong type", with_row({"entry_ip": 7})),
+        ("entry_ip is not IPv4", with_row({"entry_ip": "2001:db8::1"})),
+        ("loss_pct has the wrong type", with_row({"loss_pct": "0.0"})),
+        ("loss_pct is outside 0..100", with_row({"loss_pct": 101.0})),
+        ("rtt_ms is negative", with_row({"rtt_ms": -0.1})),
+        ("load is not an integer percent", with_row({"load": 20.5})),
+        ("bw_max is not positive", with_row({"bw_max": 0})),
+        ("headroom exceeds bw_max", with_row({"headroom": row["bw_max"] + 1})),
+        ("server names are duplicated", document(servers=[row, dict(row)])),
+        ("document has an extra field", dict(document(), score_version=1)),
+        ("ttl_seconds is a string", document(ttl_seconds="2100")),
+        ("ttl_seconds is zero", document(ttl_seconds=0)),
+        ("ttl_seconds is negative", document(ttl_seconds=-1)),
+        ("ttl_seconds exceeds the contract", document(ttl_seconds=2101)),
+        ("ttl_seconds is huge", document(ttl_seconds=10 * 365 * 86400)),
+        ("generated_at exceeds allowed skew",
+         document(generated_at=just_beyond_skew)),
+        ("generated_at is ten years in the future",
+         document(generated_at=far_future, ttl_seconds=1)),
+    ]
+
+
+def test_ranking_schema_and_time_bounds():
+    """Only a complete, finite schema-1 document can become a ranking.
+
+    These are syntactically valid JSON. Before the review fix, string/null/name-
+    less rows survived parse_ranking() and raised later in in_band() or
+    candidate_names(); ttl_seconds was coerced with int(); and a timestamp ten
+    years ahead made a one-second lease usable for roughly ten years. Reject at
+    the one parser every snapshot/cache path shares instead.
+    """
+    now = GENERATED_EPOCH + 60
+    payload = json.dumps(RANKING).encode()
+    servers, age = ag.parse_ranking(payload, now)
+    assert servers and age == 60
+
+    for label, document in _ranking_schema_rejections(now):
+        try:
+            ag.parse_ranking(json.dumps(document).encode(), now)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(
+                "%s was accepted as a ranking; malformed schema/time can crash "
+                "boot or preserve a verdict-filtered ranking indefinitely (#792)"
+                % label
+            )
+
+    # The live contract's 2100-second lease is the maximum, not merely today's
+    # default. Small clock skew is tolerated, but it has a hard 300-second cap.
+    assert ag.MAX_RANKING_TTL_SECONDS == 2100
+    assert ag.RANKING_FUTURE_SKEW_SECONDS == 300
+    near_future = dict(RANKING)
+    near_future["generated_at"] = time.strftime(
+        "%Y-%m-%dT%H:%M:%SZ", time.gmtime(now + 300)
+    )
+    accepted, future_age = ag.parse_ranking(json.dumps(near_future).encode(), now)
+    assert accepted and future_age == -300, future_age
+    print("ok  #792 ranking validation: complete rows, bounded TTL and future skew")
+
+
+@with_tmp
+def test_invalid_shared_and_cached_rankings_fail_open(tmp):
+    """Every invalid-but-JSON document is absent before snapshot/cache adoption.
+
+    Shared storage must leave the last good finite cache untouched. The same
+    bytes found in the local cache must be discarded and fall open to `quick`.
+    This pins the two independently dangerous paths from review rather than only
+    unit-testing parse_ranking().
+    """
+    shared = os.path.join(tmp, "shared")
+    cache_only = os.path.join(tmp, "cache-only")
+    os.makedirs(shared)
+    os.makedirs(cache_only)
+
+    agent, _, _ = build(shared, server="Aspidiske")
+    with open(agent.cfg.cache_path, "rb") as fh:
+        last_good_cache = fh.read()
+    assert last_good_cache
+
+    for label, document in _ranking_schema_rejections(agent.wallclock()):
+        payload = json.dumps(document, sort_keys=True).encode()
+        replacement = agent.cfg.ranking_path + ".replacement"
+        with open(replacement, "wb") as fh:
+            fh.write(payload)
+        before = reader_attempts(agent)
+        os.replace(replacement, agent.cfg.ranking_path)
+        assert wait_for_reader_attempt(agent, before), \
+            "reader did not inspect invalid shared ranking: %s" % label
+        assert agent.ranking_reader.snapshot() is None, \
+            "invalid shared ranking became a snapshot: %s" % label
+        names, source = agent.candidates(exclude="Aspidiske")
+        assert source == "cache" and names[0] == "Dalim", (label, source, names)
+        with open(agent.cfg.cache_path, "rb") as fh:
+            assert fh.read() == last_good_cache, \
+                "invalid shared ranking replaced the last good cache: %s" % label
+
+    cached, _, _ = build(
+        cache_only, ranking=None, server="Aspidiske", start_ranking_reader=False
+    )
+    for label, document in _ranking_schema_rejections(cached.wallclock()):
+        payload = json.dumps(document, sort_keys=True).encode()
+        cached._write_cache(payload)
+        with cached.cache_lock:
+            cached.cached = []
+            cached.cached_payload = None
+        assert cached.load_cache() == [], \
+            "invalid local ranking cache was adopted: %s" % label
+        assert not os.path.exists(cached.cfg.cache_path), \
+            "invalid local ranking cache was retained: %s" % label
+    assert cached.candidates() == ([], "none"), \
+        "invalid cache did not fail open to quick"
+    print("ok  #792 ranking validation: invalid shared/cache documents fail open")
 
 
 def metric(agent, name):
@@ -273,11 +465,17 @@ def test_ranking_age_is_measured_at_scrape_time(tmp):
 
     # A truncated or missing file is an honest absent - never a stale number,
     # and never an exception out of the /metrics handler.
+    attempt = reader_attempts(agent)
     with open(agent.cfg.ranking_path, "w") as fh:
         fh.write('{"schema": 1, "generated_a')
+    assert wait_for_reader_attempt(agent, attempt), \
+        "the reader did not observe the truncated atomic replacement"
     assert metric(agent, "vpn_agent_ranking_age_seconds") is None, \
         "a truncated ranking must not report an age"
+    attempt = reader_attempts(agent)
     os.unlink(agent.cfg.ranking_path)
+    assert wait_for_reader_attempt(agent, attempt), \
+        "the reader did not observe the missing ranking"
     assert metric(agent, "vpn_agent_ranking_age_seconds") is None, \
         "a missing ranking must not report an age"
     # And the rest of the render still works with no ranking at all.
@@ -778,13 +976,14 @@ def test_dead_tunnel_is_the_liveness_probes_job(tmp):
 @with_tmp
 def test_cooldown_and_daily_cap(tmp):
     # This test advances almost two days while isolating SwitchBudget. In live
-    # operation the scorer republishes every 15 minutes; give the fixture a
-    # ranking lease long enough that the new finite-cache fail-open does not
-    # turn an unrelated budget test into `quick` after 35 minutes.
-    ranking = dict(RANKING)
-    ranking["ttl_seconds"] = 7 * 86400
-    agent, fake, clock = build(tmp, ranking=ranking, server="Aspidiske")
+    # operation the scorer republishes every 15 minutes; keep candidate selection
+    # independent of the intentionally finite 2100 s lease instead of minting an
+    # invalid multi-day ranking fixture or falling through to `quick`.
+    agent, fake, clock = build(tmp, server="Aspidiske")
     agent.probe = scripted_probe(9.0)
+    agent.candidates = lambda exclude=None: (
+        ag.candidate_names(RANKING["servers"], agent.cfg.band, exclude), "fixture"
+    )
 
     def trip():
         for _ in range(agent.cfg.bad_windows):
@@ -876,8 +1075,12 @@ def test_recovery_never_spends_the_quick_reserve(tmp):
     SIGTERM drops the network lock, so the supervisor must never become the
     recovery path.
     """
-    ranking = dict(RANKING, servers=[{"name": "S%d" % i, "loss_pct": 0.0}
-                                     for i in range(5)])
+    ranking = dict(RANKING, servers=[
+        {"name": "S%d" % i, "entry_ip": "198.51.100.%d" % (i + 1),
+         "loss_pct": 0.0, "rtt_ms": 20.0 + i, "load": 20,
+         "bw_max": 20000, "headroom": 16000}
+        for i in range(5)
+    ])
     agent, fake, clock = build(tmp, ranking=ranking, server="Aspidiske",
                                silent=["S%d" % i for i in range(5)],
                                recovery_budget=60, quick_reserve=35)
@@ -1086,15 +1289,16 @@ def test_a_boot_upgrade_does_not_lock_out_the_degradation_watch(tmp):
     by hand between windows because the fake one does not move during a scripted
     probe (#768) - which is also what makes the timing arithmetic real here.
     """
-    # The test advances two full cooldowns while isolating cooldown/cap logic.
-    # A healthy live scorer republishes every 15 minutes, so keep this fixture's
-    # ranking fresh long enough that finite cache expiry does not replace the
-    # ranked correction with unrelated `quick` fallback behavior.
-    ranking = dict(RANKING)
-    ranking["ttl_seconds"] = 86400
-    agent, fake, clock = build(tmp, ranking=ranking, server="Aspidiske")
+    # This test advances two full cooldowns while isolating cooldown/cap logic.
+    # Consume the real ranking at boot, then hold candidate selection at its
+    # fixture value: a healthy scorer would republish every 15 minutes, but this
+    # fake must not weaken the 2100 s contract with an invalid one-day lease.
+    agent, fake, clock = build(tmp, server="Aspidiske")
     agent.probe = scripted_probe(0.0)         # a clean boot pick, like Dalim's
     agent.boot_check()
+    agent.candidates = lambda exclude=None: (
+        ag.candidate_names(RANKING["servers"], agent.cfg.band, exclude), "fixture"
+    )
 
     assert fake.connects() == ["Dalim"], fake.connects()
     assert agent.switches["boot_upgrade"] == 1, agent.switches
@@ -1153,6 +1357,397 @@ def test_a_boot_upgrade_does_not_lock_out_the_degradation_watch(tmp):
     assert allowed is False and "daily cap" in why, why
     print("ok  #789: a boot_upgrade arms the short cooldown (corrected in %.0fs, "
           "%d windows), cap still 1 placement + 2 corrections" % (elapsed, windows))
+
+
+@with_tmp
+def test_a_blocked_ranking_open_cannot_delay_live_degradation_switch(tmp):
+    """#792 follow-up: the candidate read is not allowed back onto hard NFS.
+
+    PR #810 moved verdict writes off the watch loop, but after the third bad
+    window watch_once() still called candidates() -> read_ranking() -> open() on
+    the same hard-mounted NFS volume. A wedged read therefore stopped the
+    independently budgeted switch before the local cache fallback could run.
+
+    Seed only the local emptyDir cache, wedge the ranking open, then drive the
+    exact 3/3 degradation path. The switch must finish inside a small wall-clock
+    bound while the one ranking reader remains asleep in the simulated kernel.
+    """
+    agent, fake, _ = build(tmp, server="Aspidiske", start_ranking_reader=False)
+    with open(agent.cfg.ranking_path, "rb") as fh:
+        payload = fh.read()
+    agent._write_cache(payload)
+    agent.load_cache()
+    agent.probe = scripted_probe(9.0)
+    for _ in range(agent.cfg.bad_windows - 1):
+        assert agent.watch_once() is False
+
+    real_open = builtins.open
+    reader_entered = threading.Event()
+    release_reader = threading.Event()
+    call_done = threading.Event()
+    outcome = {}
+
+    def blocked_open(path, mode="r", *args, **kwargs):
+        try:
+            candidate = os.path.abspath(os.fspath(path))
+        except TypeError:
+            candidate = ""
+        if (candidate == os.path.abspath(agent.cfg.ranking_path)
+                and "r" in mode and not any(flag in mode for flag in ("w", "a", "x"))):
+            reader_entered.set()
+            release_reader.wait()
+        return real_open(path, mode, *args, **kwargs)
+
+    def third_window():
+        started = time.monotonic()
+        try:
+            outcome["result"] = agent.watch_once()
+        except BaseException as exc:
+            outcome["error"] = exc
+        finally:
+            outcome["elapsed"] = time.monotonic() - started
+            call_done.set()
+
+    builtins.open = blocked_open
+    caller = threading.Thread(target=third_window, name="blocked-ranking-watch-once")
+    try:
+        # Compatibility is intentional: this same changed test can be copied
+        # next to origin/main's unchanged agent.py and invoked with
+        # --ranking-open-regression-only. The unfixed Agent has no
+        # ranking_reader, so its CONTROL thread enters the blocked open. The
+        # fixed Agent starts its sole daemon first, and the control thread must
+        # remain independent of that already-wedged worker. Do not access the
+        # new API unconditionally before the original assertion can run.
+        ranking_reader = getattr(agent, "ranking_reader", None)
+        if ranking_reader is not None:
+            ranking_reader.start()
+            assert reader_entered.wait(1.0), \
+                "the daemon reader never entered ranking open"
+        caller.start()
+        assert reader_entered.wait(1.0), "the ranking open was never attempted"
+        assert call_done.wait(0.25), (
+            "watch_once() was still blocked after 250 ms by candidates() opening "
+            "ranking.json. On the live hard-mounted NFS PVC that syscall has no "
+            "upper bound, so switch() is never reached (#792 follow-up)")
+        assert "error" not in outcome, "watch_once raised while the ranking reader was wedged"
+        assert outcome["result"] is True, outcome
+        assert outcome["elapsed"] < 0.25, outcome["elapsed"]
+        assert fake.connects() == ["Dalim"], (
+            "the fresh snapshot/cache fallback did not feed the independently "
+            "budgeted switch: %s" % fake.connects())
+        if ranking_reader is not None:
+            worker = ranking_reader._thread
+            assert worker is not None and worker.daemon and worker.is_alive(), \
+                "hard NFS must be confined to one live daemon reader"
+    finally:
+        release_reader.set()
+        if caller.is_alive():
+            caller.join(2.0)
+        builtins.open = real_open
+    print("ok  #792 ranking NFS: a wedged open cannot delay the 3/3 degradation switch")
+
+
+@with_tmp
+def test_boot_metrics_and_shutdown_do_not_wait_for_blocked_ranking_nfs(tmp):
+    """Every non-reader path remains finite when the first NFS open wedges.
+
+    Boot is the only consumer allowed a wait at all, and that wait is a bounded
+    Condition wait so a healthy first read preserves the existing workflow. A
+    valid local emptyDir cache must still drive the band upgrade while the NFS
+    worker sleeps. Metrics/candidates start no replacement readers, and close()
+    never joins the wedged daemon.
+    """
+    agent, fake, _ = build(
+        tmp, server="Aspidiske", start_ranking_reader=False,
+        ranking_initial_wait_seconds=0.05)
+    with open(agent.cfg.ranking_path, "rb") as fh:
+        payload = fh.read()
+    agent._write_cache(payload)
+    agent.load_cache()
+
+    real_open = builtins.open
+    reader_entered = threading.Event()
+    release_reader = threading.Event()
+
+    def blocked_open(path, mode="r", *args, **kwargs):
+        try:
+            candidate = os.path.abspath(os.fspath(path))
+        except TypeError:
+            candidate = ""
+        if (candidate == os.path.abspath(agent.cfg.ranking_path)
+                and "r" in mode and not any(flag in mode for flag in ("w", "a", "x"))):
+            reader_entered.set()
+            release_reader.wait()
+        return real_open(path, mode, *args, **kwargs)
+
+    builtins.open = blocked_open
+    worker = None
+    try:
+        started = time.monotonic()
+        agent.boot_check()
+        elapsed = time.monotonic() - started
+        assert reader_entered.is_set(), "boot never started the ranking daemon"
+        assert elapsed < 0.25, (
+            "boot waited %.3fs for hard NFS instead of its bounded snapshot wait"
+            % elapsed)
+        assert fake.connects() == ["Dalim"], (
+            "boot did not fail open to the still-fresh local cache: %s"
+            % fake.connects())
+
+        worker = agent.ranking_reader._thread
+        assert worker is not None and worker.daemon and worker.is_alive()
+        # Exercise every former synchronous reader while the syscall remains
+        # wedged. No call may start a helper/replacement thread.
+        started = time.monotonic()
+        assert agent.read_ranking() == []
+        names, source = agent.candidates(exclude="Aspidiske")
+        assert source == "cache" and names[0] == "Dalim", (source, names)
+        assert metric(agent, "vpn_agent_ranking_age_seconds") is None
+        assert metric(agent, "vpn_agent_dry_run") == 0
+        assert time.monotonic() - started < 0.1, \
+            "a control/metrics path waited for the ranking reader"
+        for _ in range(20):
+            agent.ranking_reader.start()
+            agent.read_ranking()
+            ag.render_metrics(agent)
+        assert agent.ranking_reader._thread is worker
+        assert sum(1 for t in threading.enumerate() if t.name == worker.name) == 1, \
+            "a wedged ranking read spawned a replacement worker"
+
+        started = time.monotonic()
+        agent.close()
+        assert time.monotonic() - started < 0.1, \
+            "shutdown joined the daemon blocked in hard NFS"
+        assert worker.is_alive(), "the fixture did not leave the reader wedged"
+    finally:
+        release_reader.set()
+        builtins.open = real_open
+    if worker is not None:
+        worker.join(2.0)
+        assert not worker.is_alive(), "the released reader ignored shutdown"
+    print("ok  #792 ranking boot: cache fail-open, metrics and shutdown stay non-blocking, one daemon")
+
+
+@with_tmp
+def test_ranking_reader_refreshes_atomic_replacements_without_busy_looping(tmp):
+    """A healthy daemon notices scorer os.replace() promptly and stays bounded."""
+    agent, _, _ = build(tmp, server="Aspidiske", ranking_poll_seconds=0.02)
+    reader = agent.ranking_reader
+    worker = reader._thread
+    original = reader.snapshot()
+    assert original is not None and agent.read_ranking()[0]["name"] == "Dalim"
+    try:
+        original.payload = b"changed"
+        raise AssertionError("RankingSnapshot allowed mutation")
+    except AttributeError:
+        pass
+
+    replacement = dict(RANKING)
+    replacement["servers"] = [
+        RANKING["servers"][2], RANKING["servers"][0],
+        RANKING["servers"][1], RANKING["servers"][3],
+    ]
+    payload = json.dumps(replacement, sort_keys=True).encode()
+    tmp_path = agent.cfg.ranking_path + ".replacement"
+    with open(tmp_path, "wb") as fh:
+        fh.write(payload)
+    before = reader_attempts(agent)
+    started = time.monotonic()
+    os.replace(tmp_path, agent.cfg.ranking_path)
+    assert wait_for_reader_attempt(agent, before), \
+        "the daemon did not notice an atomic ranking replacement"
+    assert time.monotonic() - started < 0.5, \
+        "the 5 s production poll cannot support prompt verdict reconciliation"
+    assert agent.read_ranking()[0]["name"] == "Menkent"
+    with open(agent.cfg.cache_path, "rb") as fh:
+        assert fh.read() == payload, "the local cache did not receive exact replacement bytes"
+
+    # Polling is periodic, not a busy loop. With a 20 ms test interval, 120 ms
+    # should produce a handful of attempts, never hundreds.
+    before = reader_attempts(agent)
+    time.sleep(0.12)
+    attempts = reader_attempts(agent) - before
+    assert 2 <= attempts <= 10, \
+        "ranking reader polling is stalled or busy-looping: %d attempts/120ms" % attempts
+    for _ in range(50):
+        reader.start()
+        agent.candidates()
+    assert reader._thread is worker
+    assert sum(1 for t in threading.enumerate() if t.name == worker.name) == 1
+    print("ok  #792 ranking refresh: atomic replacement observed promptly by one sleeping daemon")
+
+
+@with_tmp
+def test_fresh_cache_adoption_cannot_be_erased_by_stale_discard(tmp):
+    """A stale consumer cannot unlink a concurrently adopted fresh cache.
+
+    Reproduce the exact lost-update interleaving from review: cached_ranking()
+    parses the old payload as expired and pauses before _discard_cache(); the
+    reader callback then tries to adopt a fresh replacement. Without one cache
+    critical section, adoption completes first and the resumed stale consumer
+    clears the fresh in-memory bytes and unlinks the newly written file.
+    """
+    agent, _, _ = build(tmp, start_ranking_reader=False)
+    old_doc = dict(RANKING)
+    old_doc["ttl_seconds"] = 1
+    old_payload = json.dumps(old_doc, sort_keys=True).encode()
+    fresh_payload = json.dumps(RANKING, sort_keys=True).encode()
+    fresh_servers, _ = ag.parse_ranking(fresh_payload, agent.wallclock())
+    assert fresh_servers and old_payload != fresh_payload
+
+    # Seed both representations with the old document before concurrency.
+    agent._write_cache(old_payload)
+    agent.cached_payload = old_payload
+    agent.cached = tuple(old_doc["servers"])
+
+    real_parse = ag.parse_ranking
+    stale_parsed = threading.Event()
+    allow_stale_discard = threading.Event()
+    adoption_started = threading.Event()
+    adoption_done = threading.Event()
+    stale_done = threading.Event()
+    errors = []
+    stale_result = []
+
+    def paused_parse(payload, now_epoch):
+        result = real_parse(payload, now_epoch)
+        if bytes(payload) == old_payload:
+            assert result[0] == [], "the one-second old lease was not expired"
+            stale_parsed.set()
+            if not allow_stale_discard.wait(2.0):
+                raise AssertionError("test never released the stale cache discard")
+        return result
+
+    def consume_stale():
+        try:
+            stale_result.append(agent.cached_ranking())
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            stale_done.set()
+
+    def adopt_fresh():
+        adoption_started.set()
+        try:
+            agent._adopt_fresh_ranking(fresh_payload, fresh_servers)
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            adoption_done.set()
+
+    ag.parse_ranking = paused_parse
+    consumer = threading.Thread(target=consume_stale, name="stale-cache-consumer")
+    adopter = threading.Thread(target=adopt_fresh, name="fresh-cache-adopter")
+    try:
+        consumer.start()
+        assert stale_parsed.wait(1.0), \
+            "cached_ranking did not pause after parsing the old expired lease"
+        adopter.start()
+        assert adoption_started.wait(1.0)
+        # With the fix, the callback cannot finish while the stale consumer owns
+        # the cache transaction. Before the fix it deterministically writes the
+        # fresh file here, which the resumed stale path then unlinks.
+        adoption_finished_before_discard = adoption_done.wait(0.1)
+        allow_stale_discard.set()
+        assert stale_done.wait(1.0), "stale cache consumer did not finish"
+        assert adoption_done.wait(1.0), "fresh cache adoption did not finish"
+    finally:
+        allow_stale_discard.set()
+        consumer.join(2.0)
+        adopter.join(2.0)
+        ag.parse_ranking = real_parse
+
+    assert not errors, errors
+    assert stale_result == [[]], stale_result
+    assert not adoption_finished_before_discard, (
+        "fresh adoption completed inside an expired cache's parse/discard "
+        "transaction - the lost-update interleaving is still possible")
+    assert agent.cached_payload == fresh_payload, \
+        "the resumed stale consumer cleared the fresh in-memory payload"
+    assert tuple(fresh_servers) == agent.cached
+    with open(agent.cfg.cache_path, "rb") as fh:
+        assert fh.read() == fresh_payload, \
+            "the resumed stale consumer unlinked or replaced the fresh disk cache"
+
+    # Model a process restart: erase only memory under the cache lock, then
+    # prove the exact fresh document remains adoptable from emptyDir.
+    with agent.cache_lock:
+        agent.cached_payload = None
+        agent.cached = ()
+    assert agent.load_cache()[0]["name"] == "Dalim"
+    assert agent.cached_payload == fresh_payload
+    print("ok  #792 cache race: stale discard cannot erase a fresh reader adoption")
+
+
+@with_tmp
+def test_malformed_snapshot_fails_open_to_cache_then_quick(tmp):
+    """Malformed NFS input never replaces the last good finite local cache."""
+    agent, _, clock = build(tmp, server="Aspidiske")
+    assert agent.read_ranking() and os.path.exists(agent.cfg.cache_path)
+
+    replacement = agent.cfg.ranking_path + ".replacement"
+    with open(replacement, "wb") as fh:
+        fh.write(b'{"schema": 1, "generated_at":')
+    before = reader_attempts(agent)
+    os.replace(replacement, agent.cfg.ranking_path)
+    assert wait_for_reader_attempt(agent, before), \
+        "the daemon did not observe malformed ranking bytes"
+    assert agent.ranking_reader.snapshot() is None, \
+        "malformed input remained a usable in-memory snapshot"
+    assert metric(agent, "vpn_agent_ranking_age_seconds") is None
+    names, source = agent.candidates(exclude="Aspidiske")
+    assert source == "cache" and names[0] == "Dalim", (source, names)
+
+    # The cache is the original document, not a new lease. Once its own TTL is
+    # gone malformed NFS cannot keep it alive and the only honest answer is quick.
+    clock.sleep(RANKING["ttl_seconds"] + 1)
+    names, source = agent.candidates()
+    assert (names, source) == ([], "none"), (names, source)
+    assert not os.path.exists(agent.cfg.cache_path), \
+        "expired cache survived malformed shared storage"
+    print("ok  #792 malformed ranking: finite cache fallback, then quick at document TTL")
+
+
+@with_tmp
+def test_wedged_reader_snapshot_and_cache_expire_on_original_ttl(tmp):
+    """A daemon blocked after one good read cannot make that lease permanent."""
+    agent, _, clock = build(tmp, server="Aspidiske")
+    assert agent.read_ranking() and os.path.exists(agent.cfg.cache_path)
+
+    real_open = builtins.open
+    reader_entered = threading.Event()
+    release_reader = threading.Event()
+
+    def blocked_open(path, mode="r", *args, **kwargs):
+        try:
+            candidate = os.path.abspath(os.fspath(path))
+        except TypeError:
+            candidate = ""
+        if (candidate == os.path.abspath(agent.cfg.ranking_path)
+                and "r" in mode and not any(flag in mode for flag in ("w", "a", "x"))):
+            reader_entered.set()
+            release_reader.wait()
+        return real_open(path, mode, *args, **kwargs)
+
+    builtins.open = blocked_open
+    try:
+        assert reader_entered.wait(1.0), "reader did not enter its next poll"
+        clock.sleep(RANKING["ttl_seconds"] + 1)
+        started = time.monotonic()
+        names, source = agent.candidates()
+        assert time.monotonic() - started < 0.1
+        assert (names, source) == ([], "none"), (
+            "a stale in-memory snapshot/cache survived its original ranking TTL: %s"
+            % ((names, source),))
+        # Age still moves from immutable generated_at bytes even though the NFS
+        # worker cannot complete another read. Stale for decisions is not absent
+        # telemetry when the last observed document itself was valid.
+        assert metric(agent, "vpn_agent_ranking_age_seconds") == 2161.0
+        assert not os.path.exists(agent.cfg.cache_path)
+    finally:
+        release_reader.set()
+        builtins.open = real_open
+    print("ok  #792 ranking lease: wedged snapshot and cache expire to quick on original TTL")
 
 
 @with_tmp
@@ -1845,7 +2440,10 @@ def test_cache_is_the_fallback_when_the_file_goes_away(tmp):
     assert agent.read_ranking(), "the fresh read failed"
     assert os.path.exists(agent.cfg.cache_path)
 
+    attempt = reader_attempts(agent)
     os.unlink(agent.cfg.ranking_path)
+    assert wait_for_reader_attempt(agent, attempt), \
+        "the daemon did not observe ranking.json disappearing"
     agent.cached = []
     agent.load_cache()
     names, source = agent.candidates(exclude="Aspidiske")
@@ -2105,10 +2703,22 @@ rtt min/avg/max/mdev = 26.0/27.0/28.0/1.0 ms
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--ranking-open-regression-only"]:
+        # Compatibility harness for TDD proof. Copy this changed selftest next
+        # to origin/main's unchanged agent.py: it reaches the original blocked
+        # candidates()->read_ranking()->open() assertion instead of touching a
+        # RankingReader attribute that old code cannot have.
+        test_a_blocked_ranking_open_cannot_delay_live_degradation_switch()
+        raise SystemExit(0)
+    if sys.argv[1:]:
+        raise SystemExit("unknown arguments: %s" % " ".join(sys.argv[1:]))
+
     test_parse_status()
     test_parse_ping()
     test_goldcrest_is_bounded_by_bytes()
     test_stale_ranking_is_absent()
+    test_ranking_schema_and_time_bounds()
+    test_invalid_shared_and_cached_rankings_fail_open()
     test_ranking_age_is_measured_at_scrape_time()
     test_tunnel_device_is_measured_at_scrape_time()
     test_switch_in_progress_marks_the_device_rebuild()
@@ -2133,6 +2743,12 @@ if __name__ == "__main__":
     test_no_signal_path_survives_in_the_source()
     test_a_failed_switch_does_not_arm_the_full_cooldown()
     test_a_boot_upgrade_does_not_lock_out_the_degradation_watch()
+    test_a_blocked_ranking_open_cannot_delay_live_degradation_switch()
+    test_boot_metrics_and_shutdown_do_not_wait_for_blocked_ranking_nfs()
+    test_ranking_reader_refreshes_atomic_replacements_without_busy_looping()
+    test_fresh_cache_adoption_cannot_be_erased_by_stale_discard()
+    test_malformed_snapshot_fails_open_to_cache_then_quick()
+    test_wedged_reader_snapshot_and_cache_expire_on_original_ttl()
     test_a_blocked_verdict_writer_cannot_delay_switching()
     test_verdict_pending_set_has_a_hard_bound()
     test_a_wedged_verdict_worker_cannot_hold_process_shutdown()
