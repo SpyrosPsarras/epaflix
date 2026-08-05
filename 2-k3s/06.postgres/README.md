@@ -44,7 +44,7 @@ All services exposed via kube-vip LoadBalancer:
 ├── operator-kustomization/             # ArgoCD "cnpg-operator" App render dir (issue #93)
 │   ├── kustomization.yaml             # bundles the two vendored operator manifests
 │   ├── cnpg-operator.yaml             # CNPG operator v1.30.0 manifest
-│   └── barman-manifest.yaml           # Barman Cloud Plugin v0.12.0 manifest
+│   └── barman-manifest.yaml           # Barman Cloud Plugin v0.14.0 manifest
 ├── cluster/
 │   ├── postgres-secret.yaml           # Superuser and app user credentials
 │   ├── postgres-cluster.yaml          # PostgreSQL cluster definition
