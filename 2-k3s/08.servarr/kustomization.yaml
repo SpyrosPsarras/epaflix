@@ -240,4 +240,4 @@ images:
   # rather than dropping the tunnel. The agent already treats a past-TTL ranking
   # as absent and stays on the server it is on.
   - name: ghcr.io/spyrospsarras/vpn-picker
-    digest: sha256:bb55e954cdff20c99350ffca76315e160722001d16a7de57ad49cce05df9d08e
+    digest: sha256:99d58f70c7d7e0294e0ce2ee41135d2969ff65efea88febcb2ad97b7bb55e28c
