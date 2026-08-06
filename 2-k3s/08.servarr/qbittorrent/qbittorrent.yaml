@@ -68,6 +68,34 @@ spec:
               sysctl -w net.ipv4.conf.all.src_valid_mark=1
           securityContext:
             privileged: true
+        # Kubernetes requires every volumeMount subPath to exist before the app
+        # container is created. Create both the shared dot-directory and its
+        # dedicated verdict child before the native sidecar and ordinary init
+        # containers start, so a clean PVC and a simultaneous vpn-picker/
+        # qBittorrent rollout are both safe. mkdir -p is idempotent when the
+        # scorer wins the same race. This short-lived init container is the only
+        # agent-side process that sees the whole media PVC writable; the
+        # long-running agent is scoped below to only the .vpn-picker/verdicts
+        # subPath.
+        - name: init-vpn-picker-shared
+          image: busybox:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              mkdir -p /media-root/.vpn-picker
+              mkdir -p /media-root/.vpn-picker/verdicts
+              test -d /media-root/.vpn-picker
+              test -d /media-root/.vpn-picker/verdicts
+          volumeMounts:
+            - name: media
+              mountPath: /media-root
+          securityContext:
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
         # Native sidecar (restartPolicy: Always) - starts before the app container
         # and keeps running. Replaces wg-quick inside the old qbittorrent image:
         # Bluetit takes a server whitelist/blacklist and picks an AirVPN-recommended
@@ -387,6 +415,11 @@ spec:
             # them into tun0. Measured: LAN, ClusterIP and the kube API all time
             # out from in here.
             - { name: VPN_AGENT_RANKING_PATH, value: "/media/.vpn-picker/ranking.json" }
+            # /media stays read-only. Only the pre-created
+            # .vpn-picker/verdicts subPath is writable, and the variable points
+            # directly at that mount. Scorer-owned ranking.json and
+            # ranking-base.json remain accessible only through read-only /media.
+            - { name: VPN_AGENT_VERDICT_DIR, value: "/vpn-picker-verdicts" }
             - { name: VPN_AGENT_CACHE_PATH, value: "/var/cache/vpn-agent/ranking.json" }
             # MUST match `airkey` in bluetit-config.yaml, and it has to be here
             # rather than left to the daemon. A credentialed goldcrest call
@@ -461,10 +494,18 @@ spec:
             # container's copy of this mount.
             - name: dbus
               mountPath: /run/dbus
-            # Read-only: the agent only ever reads ranking.json from here.
+            # Read the scorer's ranking through the full media tree, but never
+            # give the long-running UID-0 agent write access to that tree.
             - name: media
               mountPath: /media
               readOnly: true
+            # The only writable shared path. init-vpn-picker-shared creates the
+            # exact verdict subPath before container creation; mounting only
+            # that child keeps scorer-owned ranking.json/ranking-base.json and
+            # all media outside the agent's write scope (#792 review).
+            - name: media
+              mountPath: /vpn-picker-verdicts
+              subPath: .vpn-picker/verdicts
             - name: agent-cache
               mountPath: /var/cache/vpn-agent
           resources:
