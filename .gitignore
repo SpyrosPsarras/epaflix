@@ -32,6 +32,7 @@ raid-migration
 # ignore only noisy/large/sensitive artifacts. Cannot use a blanket `.a5c/`
 # because git can't re-include children of a wholly-excluded directory.
 .a5c/node_modules/
+.a5c/processes/node_modules/
 .a5c/runs/
 .a5c/logs/
 .a5c/cache/
