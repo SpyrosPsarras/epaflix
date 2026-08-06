@@ -179,6 +179,9 @@ kubectl exec -n servarr -it deployment/qbittorrent -- curl ifconfig.me
 Update each app (Sonarr, Sonarr2, Radarr) to use:
 - Host: `qbittorrent`
 - Port: `8080`
+- API Key: the `qbittorrent_webapi_key` value from the encrypted credential store
+- Username: empty
+- Password: empty
 - Category: `tv` / `anime` / `movies` respectively
 
 > **In-cluster clients MUST use the internal Service URL (`qbittorrent:8080`),
@@ -200,6 +203,52 @@ Update each app (Sonarr, Sonarr2, Radarr) to use:
 > `radarr.servarr.svc.cluster.local:7878` with `ssl: false` (#465, #466).
 > **When a client looks forward-auth-broken, check which path it calls first —
 > `/api/*` works, everything else on a gated host does not.**
+
+#### qBittorrent WebAPI-key state and recovery (#723)
+
+qBittorrent 5.2.3 and the deployed Sonarr 4.0.19 / Radarr 6.3.0 clients
+support bearer API-key authentication. This is required for the three *arr
+qBittorrent download clients because username/password authentication produced
+532 `WebAPI login success` lines in a 50-minute baseline. Cleanuparr is
+intentionally unchanged: its approximately 20 logins per 50 minutes are one
+login per operation and remain useful signal.
+
+The credential has two encrypted copies with different purposes:
+
+- Human credential index: key `qbittorrent_webapi_key` in
+  `.github/instructions/secrets.enc.yaml`.
+- Cluster Secret: `servarr/qbittorrent-webapi-key`, key `QBT_WEBAPI_KEY`, from
+  `_shared/secrets/qbittorrent-webapi-key.enc.yaml`.
+
+For a new credential, generate it in qBittorrent's Web UI under **Settings ->
+Web UI -> API Key**. Never put it on a command line or in chat. Add the same
+value to both encrypted files with their interactive `sops <file>` editors. A
+new Secret draft contains `<QBITTORRENT_WEBAPI_KEY>` only as a placeholder;
+replace that encrypted placeholder before merge or rollout. The
+`seed-webapi-key` initContainer validates the upstream `qbt_`/32-byte format and
+fails closed if the placeholder is still present.
+
+The qBittorrent side is Git-codified. The initContainer mounts the Secret only
+at init time and sets `WebUI\APIKey` in
+`/config/qBittorrent/config/qBittorrent.conf` only when the setting is absent.
+It creates a minimal `[Preferences]` file on a fresh PVC, surgically inserts the
+missing setting on an existing PVC, and never reads, prints, rotates or
+overwrites an existing key. It does not change `WebUI\AuthSubnetWhitelist`,
+`WebUI\HostHeaderValidation`, `WebUI\LocalHostAuth` or CSRF protection.
+
+The client side is **app-database state and cannot be reconciled by this
+kustomization**. After the qBittorrent key is active, edit the qBittorrent
+download-client row in Sonarr, Sonarr2 and Radarr: keep the internal
+`qbittorrent:8080` target, set **API Key** to the same value, clear both
+**Username** and **Password**, then run each client's Test action before saving.
+Repeat this step after restoring or rebuilding any of those app databases.
+Do not change Cleanuparr.
+
+Post-rollout, remeasure the active qBittorrent file log for at least 50 minutes.
+The three *arr source IPs should produce zero login-success lines, leaving
+roughly the Cleanuparr-only rate (about 20 per 50 minutes); the active log must
+stop rotating about every 20 minutes and still contain ordinary non-login
+startup/tracker signal.
 
 ### DNS policy (decided, #466)
 
