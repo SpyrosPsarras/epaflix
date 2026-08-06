@@ -1,51 +1,30 @@
 #!/usr/bin/env bash
-# Pre-commit hook: refuse to commit any staged YAML that declares
-# `kind: Secret` unless it has been sops-encrypted (contains a `sops:`
-# block) OR is explicitly in the project's "imperative Secret" allowlist.
+# Secret guard entry point.
+#
+# Default mode validates staged YAML blobs from Git's index.  --full-tree
+# validates every tracked YAML blob for CI.  The structured checker accepts
+# plaintext Secret templates only when sensitive keys contain exact approved
+# placeholders and no scalar has a credential-like shape.  It validates each
+# SOPS document's canonical AES-GCM envelopes and age metadata, so a stub
+# `sops:` mapping cannot bless plaintext or another document.
+#
+# This is not a general secret scanner.  Entropy detection covers internal
+# whitespace and printable Unicode but still has false negatives: a short
+# low-entropy credential under a non-sensitive key can pass.  Sensitive scalar
+# keys remain hard-gated even when their names end in name/ref/reference/id;
+# only constrained structural references (including pve.yml's paired token
+# identifier/value fields) are semantic identifiers. Keep templates
+# content-classified and freely editable; do not replace this with
+# per-file key allowlists.
 #
 # Wire up via .github/hooks/install-hooks.sh (one-shot).
 set -euo pipefail
 
-# Files allowed to remain unencrypted Secret YAML — placeholder manifests
-# that ArgoCD already excludes from sync by kustomization comments.
-# Each entry is a relative path from repo root.
-ALLOWLIST=(
-  "2-k3s/11.argocd/oidc-secret.yaml"
-  "2-k3s/06.postgres/operator-kustomization/barman-manifest.yaml"
-  "2-k3s/12.renovate/secret-app.yaml"
-  # Same shape as the renovate one: placeholder-only, never in any
-  # kustomization `resources:`, so ArgoCD never applies it. It only tripped
-  # the hook once #461 touched it — it had not been staged since the hook
-  # landed.
-  "2-k3s/07.authentik-deployment/secret-app.yaml"
-)
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-fail=0
-while IFS= read -r f; do
-  [ -z "$f" ] && continue
-  case "$f" in
-    *.yaml|*.yml) ;;
-    *) continue ;;
-  esac
-  # Skip deleted files
-  [ -e "$f" ] || continue
+if ! command -v python3 >/dev/null 2>&1 || ! python3 -c 'import yaml' >/dev/null 2>&1; then
+  echo "ERROR: check-sops-encrypted requires python3 and PyYAML" >&2
+  exit 1
+fi
 
-  # Is the staged version a Secret?
-  if git show ":$f" 2>/dev/null | grep -qE '^kind:[[:space:]]+Secret[[:space:]]*$'; then
-    # Allowlisted?
-    skip=0
-    for a in "${ALLOWLIST[@]}"; do
-      [ "$f" = "$a" ] && skip=1
-    done
-    [ $skip -eq 1 ] && continue
-
-    # Encrypted?
-    if git show ":$f" 2>/dev/null | grep -q '^sops:'; then
-      continue
-    fi
-    echo "ERROR: $f is a plaintext k8s Secret. Encrypt with: sops -e -i $f && mv $f ${f%.yaml}.enc.yaml" >&2
-    fail=1
-  fi
-done < <(git diff --cached --name-only --diff-filter=ACMR)
-
-exit $fail
+exec python3 "$here/check_sops_encrypted.py" "$@"
