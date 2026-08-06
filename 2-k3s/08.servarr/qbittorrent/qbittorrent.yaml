@@ -96,6 +96,120 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
+        # Seed qBittorrent's WebAPI key into its PVC-only qBittorrent.conf
+        # (issue #723). The key comes from a SOPS-encrypted Secret and is used
+        # by Sonarr, Sonarr2 and Radarr instead of username/password sessions.
+        #
+        # IDEMPOTENT + NON-CLOBBERING: a missing config gets the smallest valid
+        # [Preferences] seed. A populated config gets WebUI\APIKey only when
+        # that key is absent; an existing value is never read, printed, rotated
+        # or overwritten. The insertion preserves every unrelated setting and
+        # the existing file's mode/owner. qBittorrent is not running yet, so it
+        # cannot rewrite the file underneath this operation.
+        #
+        # Fail closed on the committed placeholder or malformed input. Upstream
+        # qBittorrent 5.2.x accepts API keys only as 32-byte strings beginning
+        # with `qbt_`; starting without a usable key would leave the documented
+        # *arr database settings unable to authenticate.
+        - name: seed-webapi-key
+          image: busybox:1.36
+          # Root is required for both a fresh root-owned local-path PVC and an
+          # existing UID-568-owned config directory. Keep it narrowly scoped:
+          # CHOWN sets the fresh file's final owner, DAC_OVERRIDE permits the
+          # surgical temp-file update in the existing directory, and FOWNER
+          # lets `cp -p` preserve the existing file's mode/owner/timestamps.
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              add:
+                - CHOWN
+                - DAC_OVERRIDE
+                - FOWNER
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              conf=/config/qBittorrent/config/qBittorrent.conf
+              key_file=/seed/QBT_WEBAPI_KEY
+
+              [ -f "$key_file" ] || { echo "WebAPI key seed is missing" >&2; exit 1; }
+              key_size=$(wc -c < "$key_file" | tr -d '[:space:]')
+              [ "$key_size" = 32 ] || { echo "WebAPI key seed has invalid length" >&2; exit 1; }
+              [ "$(dd if="$key_file" bs=1 count=4 2>/dev/null)" = "qbt_" ] \
+                || { echo "WebAPI key seed has invalid prefix" >&2; exit 1; }
+
+              if [ -e "$conf" ] && grep -q '^WebUI\\APIKey=' "$conf"; then
+                echo "skip (exists): WebUI\\APIKey"
+                exit 0
+              fi
+
+              mkdir -p "$(dirname "$conf")"
+              if [ ! -e "$conf" ]; then
+                umask 077
+                {
+                  printf '[Preferences]\n'
+                  printf 'WebUI\\APIKey='
+                  cat "$key_file"
+                  printf '\n'
+                } > "$conf"
+                chown 568:568 "$conf"
+                echo "seeded: WebUI\\APIKey in new qBittorrent.conf"
+                exit 0
+              fi
+
+              tmp="${conf}.api-key-tmp"
+              trap 'rm -f "$tmp"' EXIT
+              cp -p "$conf" "$tmp"
+              in_preferences=0
+              inserted=0
+              {
+                while IFS= read -r line || [ -n "$line" ]; do
+                  if [ "$line" = '[Preferences]' ]; then
+                    in_preferences=1
+                    printf '%s\n' "$line"
+                    continue
+                  fi
+                  case "$line" in
+                    \[*\])
+                      if [ "$in_preferences" = 1 ] && [ "$inserted" = 0 ]; then
+                        printf 'WebUI\\APIKey='
+                        cat "$key_file"
+                        printf '\n'
+                        inserted=1
+                      fi
+                      in_preferences=0
+                      ;;
+                  esac
+                  printf '%s\n' "$line"
+                done < "$conf"
+
+                if [ "$in_preferences" = 1 ] && [ "$inserted" = 0 ]; then
+                  printf 'WebUI\\APIKey='
+                  cat "$key_file"
+                  printf '\n'
+                  inserted=1
+                elif [ "$inserted" = 0 ]; then
+                  printf '\n[Preferences]\nWebUI\\APIKey='
+                  cat "$key_file"
+                  printf '\n'
+                  inserted=1
+                fi
+              } > "$tmp"
+              [ "$inserted" = 1 ] || { echo "failed to seed WebAPI key" >&2; exit 1; }
+              mv "$tmp" "$conf"
+              trap - EXIT
+              echo "seeded: missing WebUI\\APIKey in existing qBittorrent.conf"
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: webapi-key-seed
+              mountPath: /seed
+              readOnly: true
+
         # Native sidecar (restartPolicy: Always) - starts before the app container
         # and keeps running. Replaces wg-quick inside the old qbittorrent image:
         # Bluetit takes a server whitelist/blacklist and picks an AirVPN-recommended
@@ -526,6 +640,14 @@ spec:
         - name: config
           persistentVolumeClaim:
             claimName: qbittorrent-config
+        # SOPS-encrypted qBittorrent WebAPI key (issue #723), consumed only by
+        # seed-webapi-key. It is not exposed to any long-running container.
+        - name: webapi-key-seed
+          secret:
+            secretName: qbittorrent-webapi-key
+            items:
+              - key: QBT_WEBAPI_KEY
+                path: QBT_WEBAPI_KEY
         - name: media
           persistentVolumeClaim:
             claimName: servarr-media
