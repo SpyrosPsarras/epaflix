@@ -166,7 +166,6 @@ kubectl describe node <gpu-node>
 - **qBittorrent**: http://qbittorrent.epaflix.com
 - **Tdarr**: http://tdarr.epaflix.com
 - **Homarr**: http://homarr.epaflix.com
-- **Wizarr**: http://wizarr.epaflix.com
 
 ## Next Steps
 
@@ -182,7 +181,7 @@ kubectl describe node <gpu-node>
 4. **Customize Homarr dashboard**
    - Add all app tiles and widgets
 
-5. **Setup Wizarr invitations**
+5. ~~Setup Wizarr invitations~~ — wizarr was decommissioned, never used (#295)
    - Configure Jellyfin integration
 
 ## Support
