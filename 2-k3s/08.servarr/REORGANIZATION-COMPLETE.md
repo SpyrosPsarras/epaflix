@@ -90,7 +90,7 @@ Created individual directories for each application:
 - jellyfin/
 - jellyseerr/
 - homarr/
-- wizarr/
+- wizarr/  (decommissioned later, #295 — never used)
 - tdarr/
 - flaresolverr/
 
