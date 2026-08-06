@@ -63,6 +63,17 @@ jobs:
           fi
           echo "No blanket-ignore for .a5c/processes/."
 
+      - name: Plaintext Secret guard
+        run: |
+          set -euo pipefail
+          # Local hooks are optional, so run both the real staged-index fixture
+          # suite and the full tracked-tree mode server-side. The job-level fork
+          # guard above remains the boundary for executing repository code.
+          python3 -m pip install --disable-pip-version-check \
+            -r .github/hooks/requirements.txt
+          ./.github/hooks/test-check-sops-encrypted.sh
+          ./.github/hooks/check-sops-encrypted.sh --full-tree
+
       - name: Install tools
         run: |
           set -euo pipefail

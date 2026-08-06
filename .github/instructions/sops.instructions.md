@@ -37,6 +37,60 @@ issue #29. Design spec:
 - `ksops` runs on `argocd-repo-server` (initContainer that copies the
   binary into a shared volume) and decrypts at sync render time.
 
+## Plaintext placeholder templates and the Secret guard
+
+Readable `kind: Secret` templates may remain plaintext only when the generic
+content classifier accepts them. There is no per-file template allowlist and
+no fixed key schema: adding or removing a legitimate field must not require a
+policy update.
+
+For each plaintext Secret document, the guard requires both of these:
+
+1. A value under a key matching `pass|password|secret|token|key|crt|cert|credential|auth`
+   (case-insensitive) must be exactly one approved placeholder form:
+   `<UPPER_SNAKE_CASE>`, `REPLACE_WITH_UPPER_SNAKE_CASE`, or `CHANGEME`.
+   The only lowercase angle-bracket forms are the three exact legacy values
+   already used by the origin-certificate and Renovate templates; arbitrary
+   angle-bracket text such as a passphrase is not a placeholder. A value that
+   only contains a placeholder does not pass. Sensitive scalar keys remain
+   hard-gated when their names end in `name`, `ref`, `reference`, or `id`.
+   Only constrained mapping-shaped reference objects, plus pve.yml's exact
+   `token_name` identifier paired with an approved `token_value` placeholder,
+   are treated as non-secret references.
+2. No scalar anywhere in the document, including parsed YAML/JSON embedded in
+   a block scalar, may match the guard's credential heuristics: known token
+   prefixes, private material, JWTs, long base64/hex runs, or high entropy
+   across printable Unicode and internal whitespace (including
+   punctuation-heavy values).
+
+Kubernetes `kind: List` and `kind: SecretList` documents are rejected instead
+of allowing Secret objects nested below `items` to bypass these checks.
+
+The only concrete plaintext Secret exception is
+`2-k3s/06.postgres/operator-kustomization/barman-manifest.yaml`. Its payload is
+restricted to the generated barman sidecar image field and the decoded value
+must be an OCI image reference. This is not a blanket path exemption. Paths
+under `charts/` are not skipped.
+
+SOPS validation is document-local. Every Secret document with SOPS metadata
+must use `.enc.yaml`; have the expected SOPS+age metadata fields; and use a
+canonical `ENC[AES256_GCM,data:...,iv:...,tag:...,type:...]` envelope with
+valid base64 fields and SOPS-sized IV/tag fields for every non-empty
+`data`/`stringData` leaf. A bare `ENC[...]` marker or stub `sops:` mapping does
+not pass, and one document's metadata cannot bless a second document. The guard
+reads staged blobs from Git's index by default; CI also checks the complete
+tracked tree:
+
+```bash
+./.github/hooks/test-check-sops-encrypted.sh
+./.github/hooks/check-sops-encrypted.sh --full-tree
+```
+
+This is not a general secret scanner. Entropy detection has accepted false
+negatives: a short low-entropy credential under a non-sensitive key can pass.
+Sensitive key names remain hard-gated, and review plus required CI remain part
+of the trust boundary.
+
 ## The credential store (`.github/instructions/secrets.enc.yaml`)
 
 Everything above is about Secrets the **cluster** consumes. This one is the

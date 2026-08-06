@@ -21,15 +21,21 @@ Flow: open PR → Actions validates → you merge → ArgoCD deploys.
 
 ## `ci.yml` — the `validate` check
 
-A **secret-free** gate that validates exactly Renovate's change surface
-without ever needing the SOPS age key. Three steps:
+A **secret-free** gate that validates repository policy and Renovate's change
+surface without ever needing the SOPS age key. Its validation groups are:
 
-1. **YAML parse check** — every `*.yaml`/`*.yml` must parse. Syntax only, no
-   style rules (so it never false-fails on existing formatting).
-2. **Helm chart pins resolve** — for every `helmCharts:` entry in any
+1. **Tracked-file policy** — rejects tracked paths matched by `.gitignore` and
+   prevents the `.a5c/processes/` blanket-ignore pattern from returning.
+2. **Plaintext Secret guard** — runs the committed throwaway-repository fixture
+   suite, then parses every tracked YAML blob in full-tree mode. Placeholder
+   Secret templates are content-classified; SOPS protection is checked per
+   document. This is the server-side complement to the optional local hook.
+3. **YAML parse check** — every non-chart `*.yaml`/`*.yml` must parse. Syntax
+   only, no style rules (so it never false-fails on existing formatting).
+4. **Helm chart pins resolve** — for every `helmCharts:` entry in any
    `2-k3s/**/kustomization.yaml`, `helm pull <chart>@<version>` must succeed.
    This is what catches a Renovate chart bump to a version that does not exist.
-3. **kustomize build (sops-free dirs)** — full offline render of the overlays
+5. **kustomize build (sops-free dirs)** — full offline render of the overlays
    that use neither Helm nor sops/ksops:
    `01.kube-vip`, `03.kube-vip-cloud-provider`, `04.coredns`,
    `11.argocd/apps`, `12.renovate`, `maintenance`,
@@ -43,7 +49,8 @@ Most chart dirs (`02.cert-manager`, `05.traefik-deployment`,
 `kustomize build` of those needs the **age private key**, which is
 deliberately **withheld from CI** — putting the key that decrypts every
 cluster secret onto a GitHub runner is not acceptable. Those dirs are covered
-indirectly: chart bumps by step 2, structure by step 1.
+indirectly by chart-pin validation, YAML parsing, and full-tree Secret
+validation.
 
 ## Security model (public repo)
 
@@ -91,6 +98,10 @@ too.
 Reproduce the check before pushing:
 
 ```bash
+# Secret fixtures plus all tracked YAML blobs (needs Python + PyYAML)
+./.github/hooks/test-check-sops-encrypted.sh
+./.github/hooks/check-sops-encrypted.sh --full-tree
+
 # YAML parses
 python3 -c 'import glob,yaml,sys; [list(yaml.safe_load_all(open(f))) for f in glob.glob("**/*.y*ml",recursive=True)]'
 
