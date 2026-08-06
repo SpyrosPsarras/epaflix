@@ -46,6 +46,10 @@
 #                                       (issue #284 — homarr-labs SECRET_ENCRYPTION_KEY,
 #                                       required by the maintained image, ajnart fork
 #                                       had no such requirement)
+#   - qbittorrent-webapi-key          from _shared/secrets/qbittorrent-webapi-key.enc.yaml
+#                                       (issue #723 — qBittorrent 5.2 WebAPI key,
+#                                       consumed only by the non-clobber config seed;
+#                                       Sonarr/Sonarr2/Radarr keep their copy in app DBs)
 #   - prowlarr-api-key                 from _shared/secrets/prowlarr-api-key.enc.yaml
 #                                       (issue #607 — consumed by the maintenance App's
 #                                       prowlarr-indexer-health CronJob, not any servarr
