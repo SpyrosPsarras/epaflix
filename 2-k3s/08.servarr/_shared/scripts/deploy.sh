@@ -170,10 +170,9 @@ echo ""
 # Step 8: Deploy utility apps
 echo "Step 8: Deploying utility applications..."
 kubectl apply -f "$BASE_DIR/homarr/"
-kubectl apply -f "$BASE_DIR/wizarr/"
-info "Homarr and Wizarr deployed"
+info "Homarr deployed"
 
-wait_for_pods servarr "app in (homarr,wizarr)" 300
+wait_for_pods servarr "app in (homarr)" 300
 echo ""
 
 # Step 9: Deploy ingress routes
@@ -206,7 +205,6 @@ echo "  Bazarr:      http://bazarr.epaflix.com"
 echo "  qBittorrent: http://qbittorrent.epaflix.com"
 echo "  Tdarr:       http://tdarr.epaflix.com"
 echo "  Homarr:      http://homarr.epaflix.com"
-echo "  Wizarr:      http://wizarr.epaflix.com"
 echo ""
 echo "Next steps:"
 echo "1. Configure download clients in *arr apps"

@@ -325,7 +325,8 @@ For applications that don't support OIDC, use Authentik's Forward Auth (Proxy Pr
 - **Newtarr**: `newtarr.epaflix.com` (group `Servarr users`; in-app login disabled — see issue #134 and [08.servarr/newtarr/ingressroute.yaml](../../08.servarr/newtarr/ingressroute.yaml))
 - **Servarr UIs** (group `Servarr users`; rolled out in #176 — providers pk 126-135, Stage A blueprint PR #289 / Stage B IngressRoutes PR #291):
   - `sonarr.epaflix.com`, `sonarr2.epaflix.com`, `radarr.epaflix.com`, `prowlarr.epaflix.com`, `qbittorrent.epaflix.com`, `bazarr.epaflix.com` — UI gated, with a **priority-20 `/api` bypass** (no middleware) so API-key / inter-app traffic continues unchanged
-  - `cleanuparr.epaflix.com`, `homarr.epaflix.com`, `lingarr.epaflix.com`, `wizarr.epaflix.com` — fully gated (no `/api` bypass)
+  - `cleanuparr.epaflix.com`, `homarr.epaflix.com`, `lingarr.epaflix.com` — fully gated (no `/api` bypass)
+  - `wizarr.epaflix.com` was in this set until wizarr was decommissioned (#295); its provider and routes are gone.
 - **Admin UIs** (rolled out in #548 + #552; providers/applications named `<host>-forwardauth`, all fully gated with no `/api` bypass):
 
   | Host | Provider + application | Group | Why the gate is safe |
