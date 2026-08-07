@@ -356,11 +356,21 @@ spec:
   # grace window, comfortably inside the 55-minute gap to the next schedule.
   schedule: "55 * * * *"
   concurrencyPolicy: Forbid
+  # Forbid plus a job that deliberately SLEEPS is a combination the sibling
+  # checks do not have: they finish in seconds, this one can hold a slot for
+  # GRACE_MINUTES while it confirms the window. Without a deadline, one wedged
+  # run would block every later run indefinitely and the detector would stop
+  # silently - the exact failure class it was built to catch (#834, #835).
+  # 1500s = GRACE_MINUTES(15m) + the 30s HTTP timeouts + generous headroom, so
+  # a hang fails LOUD as a failed Job (which KubeJobFailed already alerts on)
+  # instead of wedging the schedule.
+  startingDeadlineSeconds: 300
   successfulJobsHistoryLimit: 6
   failedJobsHistoryLimit: 6
   jobTemplate:
     spec:
       backoffLimit: 0
+      activeDeadlineSeconds: 1500
       ttlSecondsAfterFinished: 2592000  # keep 30 days
       template:
         metadata:
