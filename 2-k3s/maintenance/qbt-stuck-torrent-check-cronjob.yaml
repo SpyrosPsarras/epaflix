@@ -1,0 +1,407 @@
+---
+# Hourly qBittorrent stuck-torrent detector (Issue #839).
+#
+# THE FINDING (#610): a 33.74 GB torrent sat in `missingFiles` indefinitely
+# and only surfaced because a human happened to census the client during
+# unrelated work on #479. It has since disappeared entirely with no record
+# of what removed it - the same blindness from the other direction. Right
+# now the client is clean: 0 torrents in `missingFiles` or `error` across
+# 223 torrents (210 stalledUP, 8 uploading, 5 stalledDL, per #839). This job
+# is a detector for a state that is currently ABSENT, not a live incident.
+#
+# Cleanuparr does not cover this (#482): the `error` state matches no
+# QueueCleaner or DownloadCleaner rule, and a torrent reached 29 strikes
+# without removal. The orphan census (orphan-census-cronjob.yaml, this same
+# directory) only classifies an INCOMPLETE torrent with NO *arr queue row;
+# a `missingFiles` torrent that still has a live queue row is invisible to
+# it, so this is a separate, narrower signal read straight off qBittorrent's
+# own `state` field.
+#
+# REPORT ONLY - hard constraint, not a default that could later be armed.
+# `max_ratio_act` is 0 in this client precisely so private torrents are
+# never auto-removed (#483's orphan-census carries an ARMED switch for its
+# own narrow, audited reap; this job has no such switch and no delete/pause/
+# recheck code path at all - it only ever calls GET /api/v2/torrents/info).
+#
+# THE GRACE WINDOW - and why it is NOT a timestamp comparison like #835's
+# GRACE_MINUTES. #835 and orphan-census both measure a real event timestamp
+# the source system already hands back (a history `date`, or qBittorrent's
+# own `last_activity`). qBittorrent's torrents/info has no equivalent field
+# for "how long has this torrent been in its CURRENT state" - `state` has no
+# transition timestamp. So a torrent that flips to `error` for the seconds-
+# to-few-minutes a recheck takes (e.g. a brief NFS blip re-verifying pieces)
+# cannot be told apart from a truly stuck one by looking at a single API
+# response. Building that timestamp ourselves would mean persisting a
+# per-hash "first seen bad" map across runs (a ConfigMap, plus RBAC to
+# read/write it) - real machinery this job would otherwise have zero need
+# for (it is HTTP-only, like every sibling in this directory).
+#
+# Instead the job confirms the grace window LIVE, in one run: it snapshots
+# the bad set, sleeps GRACE_MINUTES, then snapshots again, and only reports
+# hashes bad at BOTH ends. A hash bad only at the start settled before the
+# window closed (the recheck finished) and is never reported; a hash bad
+# only at the end appeared partway through and has not yet been observed to
+# persist for the full window, so it is deferred to next run rather than
+# reported early - same fail-safe direction as every exclusion in this
+# directory's other detectors. This only costs wall-clock time on a run that
+# actually finds something (the common case - 0 bad torrents today - returns
+# in under a second); GRACE_MINUTES=15 matches #835's own value for the same
+# class of transient-state race, and 15 minutes is comfortably longer than a
+# recheck of even the largest known torrent in this client (#610's 33.74 GB)
+# takes on this hardware.
+#
+# Exit-code contract, same as every sibling detector in this directory
+# (orphan-census, blind-queue-check, prowlarr-indexer-health,
+# cleanuparr-queuecleaner-health): NON-ZERO on a finding OR any login/fetch
+# failure (fail LOUD, never a silent pass), so the chart's default
+# KubeJobFailed rule + the scoped QbtStuckTorrentCheckFailed PrometheusRule
+# (2-k3s/10.observability/alertmanager-config/custom-alerts.yaml) fire and
+# route through the working ntfy receiver. A failure of the SECOND (post-
+# grace) fetch is treated exactly like a failure of the first - it aborts
+# loudly rather than silently reporting "recovered".
+#
+# Never prints a torrent name or a release title (repo-wide rule, #196/#610)
+# and never scrapes qBittorrent/Traefik logs (#702, #634 - API keys and
+# session tokens live there in plaintext). Every line this job prints is a
+# hash prefix (8 chars), state, category, size or age - nothing else.
+#
+# Credentials: reuses the EXISTING `qbittorrent-webui-credentials` Secret
+# (2-k3s/08.servarr/_shared/secrets/qbittorrent-webui-credentials.enc.yaml),
+# already read by orphan-census-cronjob.yaml in this same directory. Same
+# precedent for why the Secret is not defined here: a ksops generator in
+# this overlay would drop this whole directory out of CI's sops-free
+# kustomize gate.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: qbt-stuck-torrent-check-script
+  namespace: servarr
+data:
+  check.py: |
+    #!/usr/bin/env python3
+    """qBittorrent missingFiles/error detector (#839). Python stdlib only.
+
+    Run with --selftest to exercise the classifier against synthetic
+    before/after snapshots without touching the network or sleeping.
+
+    REPORT ONLY. This script never calls a modifying qBittorrent endpoint -
+    the only requests it ever makes are POST /api/v2/auth/login and GET
+    /api/v2/torrents/info.
+    """
+    import http.cookiejar
+    import json
+    import os
+    import sys
+    import time
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    TIMEOUT = 30
+
+    # A torrent in EITHER of these `state` values is the #839 signal. Both
+    # mean qBittorrent itself has given up tracking the data as healthy -
+    # `missingFiles` is #610's exact case (files gone from disk under a
+    # torrent qBittorrent still lists), `error` is #482's (Cleanuparr has no
+    # rule that matches it).
+    BAD_STATES = {"missingFiles", "error"}
+
+    # How long a bad state must persist, confirmed live (see the long
+    # comment on the CronJob below for why this is a two-snapshot check
+    # rather than a persisted timestamp). Matches #835's GRACE_MINUTES value
+    # for the same class of transient-state race.
+    GRACE_MINUTES = float(os.environ.get("GRACE_MINUTES", "15"))
+
+    QBT_URL = os.environ.get("QBT_URL", "http://qbittorrent:8080").rstrip("/")
+
+    GB = 1024.0 ** 3
+
+
+    def fail(msg):
+        """Abort LOUD. Never let a failed read look like 'nothing stuck'."""
+        print("ERROR: " + msg, file=sys.stderr)
+        sys.exit(2)
+
+
+    def http_status(exc):
+        """Status code only - never echo a response body, it can carry a key."""
+        return str(exc.code) if isinstance(exc, urllib.error.HTTPError) else "-"
+
+
+    def qbt_login():
+        cj = http.cookiejar.CookieJar()
+        opener = urllib.request.build_opener(
+            urllib.request.HTTPCookieProcessor(cj))
+        body = urllib.parse.urlencode({
+            "username": os.environ.get("QBT_USERNAME", ""),
+            "password": os.environ.get("QBT_PASSWORD", ""),
+        }).encode()
+        # Referer satisfies qBittorrent's CSRF check on POST.
+        req = urllib.request.Request(
+            QBT_URL + "/api/v2/auth/login", data=body,
+            headers={"Referer": QBT_URL})
+        try:
+            answer = opener.open(req, timeout=TIMEOUT).read().decode().strip()
+        except Exception as exc:  # noqa: BLE001 - any failure is fatal here
+            fail("qBittorrent login request failed (%s, http=%s)"
+                 % (type(exc).__name__, http_status(exc)))
+        # Version-dependent success shape, same as orphan-census-cronjob.yaml:
+        # qBittorrent 4.x answers 200 "Ok." (and 200 "Fails." on bad
+        # credentials - NOT a 4xx), 5.x answers 204 with an empty body.
+        if answer and answer != "Ok.":
+            fail("qBittorrent login rejected")
+        return opener
+
+
+    def qbt_torrents(opener):
+        try:
+            with opener.open(QBT_URL + "/api/v2/torrents/info",
+                             timeout=TIMEOUT) as resp:
+                torrents = json.load(resp)
+        except urllib.error.HTTPError as exc:
+            if exc.code == 403:
+                fail("qBittorrent rejected the session (http=403) - the WebUI "
+                     "credential in Secret qbittorrent-webui-credentials is "
+                     "wrong or the client IP is banned")
+            fail("qBittorrent torrent list failed (HTTPError, http=%d)"
+                 % exc.code)
+        except Exception as exc:  # noqa: BLE001
+            fail("qBittorrent torrent list failed (%s, http=%s)"
+                 % (type(exc).__name__, http_status(exc)))
+        if not isinstance(torrents, list):
+            fail("qBittorrent torrent list was not a JSON array")
+        return torrents
+
+
+    def snapshot(torrents):
+        """{hash (lowercased): torrent} for every torrent currently BAD.
+
+        A healthy torrent (stalledUP, uploading, stalledDL, ...) never
+        enters this dict at all - it is not "held", it simply never
+        qualifies, same as orphan-census's classify() running its "ok"
+        checks first.
+        """
+        out = {}
+        for t in torrents:
+            if str(t.get("state", "")) not in BAD_STATES:
+                continue
+            h = str(t.get("hash", "")).strip().lower()
+            if not h:
+                continue
+            out[h] = t
+        return out
+
+
+    def confirmed_bad(first, second):
+        """Hashes bad at the START of the grace window AND still bad at the
+        END of it - see the CronJob comment for why this replaces a
+        persisted per-hash timestamp.
+
+        A hash bad only in `first` recovered before the window closed (a
+        recheck settling) and is never reported. A hash bad only in
+        `second` appeared partway through the window - it has not yet been
+        observed to persist for the full grace period, so it is deferred to
+        the next run rather than reported early, the same fail-safe
+        direction as every other exclusion in this job family.
+        """
+        return {h: second[h] for h in first if h in second}
+
+
+    def selftest():
+        def torrent(h, state, category="tv-sonarr", size=1_000_000_000,
+                    added_on=0):
+            return {"hash": h, "state": state, "category": category,
+                    "size": size, "added_on": added_on}
+
+        # 1. missingFiles past the grace window: bad at both ends -> reported.
+        first = snapshot([torrent("a" * 40, "missingFiles")])
+        second = snapshot([torrent("a" * 40, "missingFiles")])
+        confirmed = confirmed_bad(first, second)
+        assert set(confirmed) == {"a" * 40}, confirmed
+
+        # 2. error INSIDE the grace window: bad at the start, settled
+        # (recheck completed) by the time the window closes -> never
+        # reported. This is the #839 "briefly in error during a recheck"
+        # case explicitly called out in the issue.
+        first = snapshot([torrent("b" * 40, "error")])
+        second = snapshot([torrent("b" * 40, "stalledUP")])
+        assert confirmed_bad(first, second) == {}
+
+        # 3. healthy stalledUP/uploading torrents never enter a snapshot,
+        # so they can never be reported at any point in this pipeline.
+        healthy = snapshot([torrent("c" * 40, "stalledUP"),
+                            torrent("d" * 40, "uploading")])
+        assert healthy == {}
+
+        # 4. appeared only at the END of the window (not yet observed for
+        # the full grace period) -> not reported this run, deferred to the
+        # next one rather than reported early.
+        first = snapshot([])
+        second = snapshot([torrent("e" * 40, "error")])
+        assert confirmed_bad(first, second) == {}
+
+        # 5. case-insensitive hash matching - qBittorrent's own hash field
+        # is lowercase hex in practice, but guard the comparison anyway,
+        # same discipline as orphan-census and blind-queue-check.
+        first = snapshot([torrent("F" * 40, "missingFiles")])
+        second = snapshot([torrent("f" * 40, "missingFiles")])
+        assert set(confirmed_bad(first, second)) == {"f" * 40}
+
+        # 6. a torrent that recovers to a DIFFERENT bad state (error ->
+        # missingFiles) is still confirmed bad - the grace window is about
+        # whether the torrent is healthy, not which bad state it is in.
+        first = snapshot([torrent("g" * 40, "error")])
+        second = snapshot([torrent("g" * 40, "missingFiles")])
+        assert set(confirmed_bad(first, second)) == {"g" * 40}
+
+        print("selftest OK")
+        return 0
+
+
+    def report_line(h, t, now):
+        age_h = (now - float(t.get("added_on", now))) / 3600.0
+        # Hash prefix, state, category, size, age ONLY - never a name.
+        return "    %-8s  %-12s  %-14s  %8.2f GB  %8.1fh" % (
+            h[:8], str(t.get("state", ""))[:12],
+            str(t.get("category", ""))[:14] or "-",
+            float(t.get("size", 0)) / GB, age_h)
+
+
+    def main():
+        if "--selftest" in sys.argv:
+            return selftest()
+
+        now = time.time()
+        print("=== qbittorrent stuck-torrent check @ %s ==="
+              % time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)))
+        print("bad states: %s | grace: %.0fm"
+              % (",".join(sorted(BAD_STATES)), GRACE_MINUTES))
+
+        opener = qbt_login()
+        torrents = qbt_torrents(opener)
+        first = snapshot(torrents)
+
+        print("qbittorrent: %d torrents | %d in missingFiles/error right now"
+              % (len(torrents), len(first)))
+
+        if not first:
+            print("\nOK: 0 torrents in missingFiles or error.")
+            return 0
+
+        for h, t in sorted(first.items()):
+            print(report_line(h, t, now))
+
+        print("\nwaiting %.0f minute(s) (GRACE_MINUTES) before reporting, to "
+              "rule out a recheck settling before the window closes ..."
+              % GRACE_MINUTES)
+        time.sleep(GRACE_MINUTES * 60.0)
+
+        # Fresh login for the second read - do not assume a 15-minute-old
+        # session cookie is still valid. A failure here is treated exactly
+        # like a failure of the FIRST read: fail loud, never let it look
+        # like "everything recovered".
+        opener2 = qbt_login()
+        torrents2 = qbt_torrents(opener2)
+        second = snapshot(torrents2)
+        now2 = time.time()
+
+        confirmed = confirmed_bad(first, second)
+        recovered = set(first) - set(confirmed)
+
+        if recovered:
+            print("\nrecovered during the grace window (excluded, never "
+                  "reported): %d" % len(recovered))
+            for h in sorted(recovered):
+                print("    %-8s  (was %s)"
+                      % (h[:8], str(first[h].get("state", ""))))
+
+        if not confirmed:
+            print("\nOK: every torrent that was in missingFiles/error at the "
+                  "start of the grace window recovered before it closed "
+                  "(likely a recheck completing).")
+            return 0
+
+        print("\nSTUCK: %d torrent(s) still in missingFiles/error after the "
+              "%.0f-minute grace window:" % (len(confirmed), GRACE_MINUTES))
+        for h, t in sorted(confirmed.items()):
+            print(report_line(h, t, now2))
+
+        print("\nFAIL: at least one torrent has been in missingFiles or "
+              "error for at least %.0f minutes (#839). REPORT ONLY - this "
+              "job never deletes, pauses or rechecks a torrent, and never "
+              "will (max_ratio_act=0 exists so private torrents are never "
+              "auto-removed). Inspect the torrent(s) above in the "
+              "qBittorrent WebUI by hash prefix; missingFiles usually means "
+              "the underlying files were moved/deleted on the NFS media "
+              "mount outside qBittorrent." % GRACE_MINUTES)
+        return 1
+
+
+    if __name__ == "__main__":
+        sys.exit(main())
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: qbt-stuck-torrent-check
+  namespace: servarr
+  labels:
+    app: qbt-stuck-torrent-check
+spec:
+  # Hourly, offset from the sibling servarr health checks in this namespace
+  # (prowlarr-indexer-health :10, cleanuparr-queuecleaner-health :25,
+  # blind-queue-check :40) to spread qBittorrent/API load. A run that finds
+  # nothing (today's live state) returns in under a second; a run that finds
+  # something can take up to ~GRACE_MINUTES longer while it confirms the
+  # grace window, comfortably inside the 55-minute gap to the next schedule.
+  schedule: "55 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 6
+  failedJobsHistoryLimit: 6
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 2592000  # keep 30 days
+      template:
+        metadata:
+          labels:
+            app: qbt-stuck-torrent-check
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: qbt-stuck-torrent-check
+              image: python:3.13-alpine
+              imagePullPolicy: IfNotPresent
+              command: ["python3", "/script/check.py"]
+              env:
+                - name: GRACE_MINUTES
+                  value: "15"
+                # Reuse the existing qBittorrent WebUI credential - same
+                # Secret orphan-census-cronjob.yaml already reads in this
+                # directory. No second copy of a credential in git.
+                - name: QBT_USERNAME
+                  valueFrom:
+                    secretKeyRef:
+                      name: qbittorrent-webui-credentials
+                      key: QBT_USERNAME
+                - name: QBT_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: qbittorrent-webui-credentials
+                      key: QBT_PASSWORD
+              volumeMounts:
+                - name: script
+                  mountPath: /script
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "250m"
+                  memory: "128Mi"
+          volumes:
+            - name: script
+              configMap:
+                name: qbt-stuck-torrent-check-script
+                defaultMode: 0555
