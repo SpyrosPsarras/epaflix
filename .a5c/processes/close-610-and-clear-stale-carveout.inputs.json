@@ -1,0 +1,7 @@
+{
+  "repo": "SpyrosPsarras/epaflix",
+  "repoRoot": "/home/spy/Documents/Epaflix/k3s-swarm-proxmox-triage",
+  "issue": 610,
+  "staleHash": "bf83bdcb",
+  "branch": "chore-retire-stale-keep-hash-610"
+}
