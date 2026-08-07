@@ -5,6 +5,15 @@ service:
   spec:
     loadBalancerIP: 192.168.10.101
   annotations: {}
+  # Dedicated internal-only frontend for the Remote Pi native client. This is
+  # additive: the default public Service on 192.168.10.101 remains unchanged.
+  additionalServices:
+    internal:
+      spec:
+        type: LoadBalancer
+        loadBalancerIP: 192.168.10.102
+        # Prevent an alternate path through a NodePort on every K3s node.
+        allocateLoadBalancerNodePorts: false
 
 # NOTE: deployment.replicas is set below with initContainers
 
@@ -30,6 +39,12 @@ ports:
   websecure:
     port: 443
     exposedPort: 443
+  # Remote Pi HTTPS/WSS. Listen on 8443 in the shared Traefik pod, but expose
+  # it as 443 only on the dedicated traefik-internal Service (192.168.10.102).
+  internal:
+    port: 8443
+    exposedPort: 443
+    expose: {default: false, internal: true}
   # Syncthing sync protocol (BEP). Dedicated TCP entrypoint so the sync port
   # rides the existing Traefik LB (192.168.10.101) instead of a new LB IP.
   # Routed by 2-k3s/15.syncthing/ingressroute-tcp.yaml (HostSNI(`*`), passthrough).
