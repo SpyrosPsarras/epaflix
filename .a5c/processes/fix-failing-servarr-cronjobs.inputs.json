@@ -1,0 +1,7 @@
+{
+  "repo": "SpyrosPsarras/epaflix",
+  "repoRoot": "/home/spy/Documents/Epaflix/k3s-swarm-proxmox-triage",
+  "namespace": "servarr",
+  "cronjobs": ["orphan-census", "prowlarr-indexer-health"],
+  "branch": "fix-failing-health-cronjobs"
+}
