@@ -328,9 +328,21 @@ data:
         This is the positive health signal the guard needs: proof that work is
         in flight for that *arr right now. Absence of it is NOT proof of
         breakage, which is why an idle *arr is allowed to report orphans.
+
+        Completeness is not optional here. `last_activity` counts UPLOAD too,
+        so a finished torrent that is seeding looks "recently active" forever
+        while legitimately having no queue row - the *arr imported it and
+        dropped it long ago. Counting seeders made the first version of this
+        guard abort with "sonarr reads 0 rows while 27 of its torrents are
+        active", against a client holding 208 mostly-seeding torrents. Only an
+        INCOMPLETE torrent that is still moving is work an *arr queue must
+        know about.
         """
         out = {}
         for t in torrents:
+            if float(t.get("progress", 0.0)) >= 1.0 or int(
+                    t.get("amount_left", 0) or 0) <= 0:
+                continue
             if idle_hours(t, now) >= ACTIVE_WITHIN_HOURS:
                 continue
             arr = CATEGORY_ARR.get(str(t.get("category", "")))
@@ -497,10 +509,19 @@ data:
         # and the activity classifier itself: only what moved recently counts.
         now_t = 1000000.0
         assert recently_active_by_arr(
-            [{"category": "tv-sonarr", "last_activity": now_t - 3600},
-             {"category": "tv-sonarr", "last_activity": now_t - 400000},
-             {"category": "radarr", "last_activity": now_t - 60}],
+            [{"category": "tv-sonarr", "progress": 0.4, "amount_left": 10,
+              "last_activity": now_t - 3600},
+             {"category": "tv-sonarr", "progress": 0.4, "amount_left": 10,
+              "last_activity": now_t - 400000},
+             {"category": "radarr", "progress": 0.1, "amount_left": 99,
+              "last_activity": now_t - 60}],
             now_t) == {"sonarr": 1, "radarr": 1}
+        # A COMPLETED torrent seeding right now is not work in flight. This is
+        # the case that made the live run abort: last_activity counts upload,
+        # so seeders never look idle.
+        assert recently_active_by_arr(
+            [{"category": "tv-sonarr", "progress": 1.0, "amount_left": 0,
+              "last_activity": now_t - 60}] * 27, now_t) == {}
 
         print("selftest OK")
         return 0
