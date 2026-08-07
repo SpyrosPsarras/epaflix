@@ -1,0 +1,18 @@
+# Owned by the ArgoCD app-of-apps Application.
+# Rationale: register the Remote Pi relay for an explicit, human-approved first sync.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: remote-pi
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/SpyrosPsarras/epaflix.git
+    targetRevision: main
+    path: 2-k3s/17.remote-pi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: remote-pi
+  syncPolicy: {}
