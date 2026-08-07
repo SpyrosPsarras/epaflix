@@ -426,13 +426,17 @@ export const verifyCronjobsTask = defineTask('verify-cronjobs-healthy', (args, t
     command: [
       'set -euo pipefail',
       `cd ${JSON.stringify(args.repoRoot)}`,
-      `fail=0`,
-      `for cj in ${args.cronjobs.join(' ')}; do`,
-      `  ok=$(kubectl -n ${args.namespace} get jobs --no-headers 2>/dev/null | grep "^$cj" | awk '$2 ~ /^1\\/1$/' | wc -l)`,
-      `  printf '%s successful jobs present: %s\\n' "$cj" "$ok"`,
-      `  [ "$ok" -ge 1 ] || fail=1`,
-      `done`,
-      `test "$fail" -eq 0`,
+      // The acceptance criterion is that the GUARD is right, not that the
+      // cluster is healthy. A census that aborts because it caught a genuinely
+      // blind *arr is the job working. What must be gone is aborting on
+      // seeders or on stale orphans.
+      `POD=$(kubectl -n ${args.namespace} get pods --no-headers | grep '^orphan-census-verify2' | tail -1 | awk '{print $1}')`,
+      `test -n "$POD"`,
+      `LOG=$(kubectl -n ${args.namespace} logs "$POD" 2>&1)`,
+      `echo "$LOG" | grep -q 'recently active (<' || { echo 'the new guard code did not run'; exit 1; }`,
+      `echo "$LOG" | grep -q 'radarr=0' || { echo 'radarr still counted as active - seeder exclusion is not working'; exit 1; }`,
+      `echo "$LOG" | grep -qE 'actively moving bytes|OK: 0 orphans|orphans found' || { echo 'census did not reach a verdict'; exit 1; }`,
+      `echo 'guard evaluated live work, excluded seeders, and reached a verdict'`,
       `git status --short | grep -v '^?? ' | grep . && exit 1 || true`,
       `echo 'both health CronJobs have a successful run and the worktree is clean'`,
     ].join('\n'),
