@@ -1,0 +1,8 @@
+{
+  "repo": "SpyrosPsarras/epaflix",
+  "repoRoot": "/home/spy/Documents/Epaflix/k3s-swarm-proxmox-triage",
+  "soakIssue": 618,
+  "detectorIssue": 839,
+  "soakUntil": "2026-08-11",
+  "branch": "feat-missing-files-detector-839"
+}
