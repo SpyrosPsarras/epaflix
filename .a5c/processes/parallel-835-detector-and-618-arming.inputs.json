@@ -1,0 +1,7 @@
+{
+  "repo": "SpyrosPsarras/epaflix",
+  "repoRoot": "/home/spy/Documents/Epaflix/k3s-swarm-proxmox-triage",
+  "detectorIssue": 835,
+  "armingIssue": 618,
+  "offLimits": [723, 792, 800]
+}
