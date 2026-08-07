@@ -55,6 +55,11 @@ resources:
   # cleanuparr-api-key Secret is rendered by the SERVARR App's ksops generator,
   # same cross-App reason as above.
   - cleanuparr-queuecleaner-health-cronjob.yaml
+  # Issue #835: hourly blind-*arr-queue detector (servarr ns, sonarr/sonarr2/
+  # radarr). Carries its own check-script ConfigMap + CronJob; no RBAC (HTTP
+  # only). Reuses the existing unpackerr-secret *arr API keys - no new Secret,
+  # so this needed no ksops generator here.
+  - blind-queue-check-cronjob.yaml
 
 # Issue #182: diff baseline for the cleanuparr-blocklist-drift CronJob. Single
 # on-disk source of truth = files/cleanuparr-blocklist-expected.txt (verbatim
