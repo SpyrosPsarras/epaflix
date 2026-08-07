@@ -157,9 +157,18 @@ data:
         if c.strip()
     }
 
-    # Belt and braces on top of KEEP_CATEGORIES and the uploaded>0 rule: #610's
-    # torrent stays out even if someone re-categorises it.
-    KEEP_HASH_PREFIXES = ("bf83bdcb",)
+    # Belt and braces on top of KEEP_CATEGORIES and the uploaded>0 rule: a
+    # hash listed here is never reported and never reaped, even if someone
+    # re-categorises it.
+    #
+    # Empty since 2026-08-07. It held "bf83bdcb" to protect #610's torrent,
+    # and that torrent is no longer in qBittorrent at all - checked against
+    # the live client, which also holds zero torrents in missingFiles or
+    # error state. A carve-out for something that does not exist reads as
+    # protection while protecting nothing, which is worse than no entry.
+    # The manual-import category it lived in is still covered by
+    # KEEP_CATEGORIES, so nothing lost cover here (#610).
+    KEEP_HASH_PREFIXES = ()
 
     # A torrent that moved bytes inside this window is live work, so the *arr
     # that owns it MUST have a queue row for it. Only live traffic proves a
@@ -414,10 +423,15 @@ data:
         # Pin the tunables so the asserts below test the LOGIC and not whatever
         # the CronJob env happens to say today.
         global MIN_AGE_HOURS, NO_PROGRESS_HOURS, CATEGORY_ARR
-        global ACTIVE_WITHIN_HOURS
+        global ACTIVE_WITHIN_HOURS, KEEP_HASH_PREFIXES
         MIN_AGE_HOURS = 24.0
         NO_PROGRESS_HOURS = 24.0
         ACTIVE_WITHIN_HOURS = 6.0
+        # Pinned to a synthetic prefix so this tests the carve-out MECHANISM
+        # rather than whatever the live tuple happens to hold. The tuple is
+        # empty today (#610), and an assert against a real hash would have to
+        # be rewritten every time one is added or retired.
+        KEEP_HASH_PREFIXES = ("deadbeef",)
         CATEGORY_ARR = {"tv-sonarr": "sonarr", "animes": "sonarr2",
                         "radarr": "radarr"}
 
@@ -444,10 +458,12 @@ data:
         assert verdict(added_on=now - 3600) == "ok"
         # the #479 held torrents
         assert verdict(category="avistaz-reseed", progress=0.835) == "held"
-        # #610's torrent - by category, by hash prefix, and by uploaded>0
+        # the three independent carve-outs: category, hash prefix, uploaded>0
         assert verdict(category="manual-import") == "held"
-        assert verdict(hash="bf83bdcb" + "0" * 32, category="tv-sonarr") == "held"
+        assert verdict(hash="deadbeef" + "0" * 32, category="tv-sonarr") == "held"
         assert verdict(uploaded=1) == "held"
+        # and a hash NOT in the tuple is not held by this rule
+        assert verdict(hash="feedface" + "0" * 32, category="tv-sonarr") == "orphan"
 
         # === #631: no progress is the orphan signal, queue absence is not ===
         # actively transferring -> alive, whatever the *arr queue says. This is
