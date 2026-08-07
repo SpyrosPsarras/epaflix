@@ -94,13 +94,24 @@ data:
     GRACE_MINUTES = float(os.environ.get("GRACE_MINUTES", "15"))
 
     # History event types that mean "this download was handled" - the grab
-    # reached a terminal, tracked outcome, so a missing queue row afterwards
-    # is completion, not blindness. Verified terminology:
+    # reached a terminal, TRACKED outcome, so a missing queue row afterwards
+    # is that outcome, not blindness. Verified terminology:
     # 2-k3s/08.servarr/RECOVERY-newtarr-cleanuparr.md uses
     # "downloadFolderImported" for Sonarr; Radarr's Servarr-common history API
     # uses the same event name for a movie folder import. downloadImported is
     # kept as a defensive alias for older/renamed builds.
-    RESOLVED_EVENT_TYPES = {"downloadFolderImported", "downloadImported"}
+    #
+    # A failed or ignored grab counts as resolved too, and leaving it out was a
+    # real false-positive source rather than a theoretical one: sonarr's own
+    # history carries 7 `downloadFailed` events in the last 7 days against 190
+    # grabs. Each one has no queue row and no import BY DEFINITION, so an
+    # imports-only rule would have reported a blind queue about once a day and
+    # trained everyone to ignore this alert. Blindness is a grab with NO
+    # recorded outcome at all - that is the distinction being drawn here.
+    RESOLVED_EVENT_TYPES = {
+        "downloadFolderImported", "downloadImported",
+        "downloadFailed", "downloadIgnored",
+    }
 
     ARRS = [
         ("sonarr", os.environ.get("SONARR_URL", "http://sonarr:8989"),
@@ -203,12 +214,12 @@ data:
         """Return [(downloadId, age_minutes)] for grabs that are blind.
 
         Blind = a 'grabbed' event with a downloadId, inside the window, older
-        than grace_minutes, with NEITHER a live queue row NOR a resolved
-        (imported) history event for that same downloadId. Order of the ok
+        than grace_minutes, with NEITHER a live queue row NOR any resolved
+        history event (imported, failed or ignored) for that same downloadId. Order of the ok
         checks mirrors orphan-census's classify(): every exclusion below is a
         real reason a grab is fine, checked before it can ever be reported.
         """
-        imported_ids = {
+        resolved_ids = {
             str(r.get("downloadId", "")).strip().lower()
             for r in history
             if r.get("eventType") in RESOLVED_EVENT_TYPES
@@ -234,8 +245,9 @@ data:
             seen.add(did)
             if did in queue_ids:
                 continue  # tracked normally
-            if did in imported_ids:
-                continue  # already completed - queue row is gone on purpose
+            if did in resolved_ids:
+                continue  # imported, failed or ignored - a recorded outcome,
+                          # so the missing queue row is that outcome
             blind.append((did, age_min))
         return blind
 
@@ -245,6 +257,10 @@ data:
 
         def grabbed(did, minutes_ago):
             return {"eventType": "grabbed", "downloadId": did,
+                    "date": _iso(now - minutes_ago * 60)}
+
+        def failed(did, minutes_ago):
+            return {"eventType": "downloadFailed", "downloadId": did,
                     "date": _iso(now - minutes_ago * 60)}
 
         def imported(did, minutes_ago):
@@ -284,6 +300,16 @@ data:
         blind = find_blind(
             [grabbed("gggg", 60), grabbed("gggg", 55)], set(), now, 6.0, 15.0)
         assert [d for d, _ in blind] == ["gggg"], blind
+
+        # REGRESSION (#835 review): a grab that FAILED has no queue row and no
+        # import by definition. Counting only imports as "resolved" made this
+        # look identical to a blind queue. sonarr's own history carries 7 of
+        # these in 7 days against 190 grabs, so it would have misfired daily.
+        assert find_blind(
+            [grabbed("f1", 60), failed("f1", 30)], set(), now, 6.0, 15.0) == []
+        # ...and one with NO recorded outcome at all is still caught.
+        assert [d for d, _ in find_blind(
+            [grabbed("f2", 60)], set(), now, 6.0, 15.0)] == ["f2"]
 
         print("selftest OK")
         return 0
