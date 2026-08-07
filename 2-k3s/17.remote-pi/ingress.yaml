@@ -1,0 +1,26 @@
+# Owned by ArgoCD Application "remote-pi".
+# Rationale: terminate HTTPS only on Traefik's dedicated internal LoadBalancer entry point.
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: remote-pi-https
+  namespace: remote-pi
+  labels:
+    app.kubernetes.io/name: remote-pi-relay
+    app.kubernetes.io/component: ingress
+spec:
+  entryPoints:
+    - internal
+  routes:
+    - match: Host(`remote-pi.epaflix.com`)
+      kind: Rule
+      services:
+        - name: remote-pi-relay
+          port: 3000
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
