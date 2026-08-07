@@ -199,6 +199,19 @@ spec:
             summary: "cleanuparr QueueCleaner stalled, failing, or the health check itself failed"
             description: "The hourly cleanuparr-queuecleaner-health Job ({{ $labels.job_name }}) failed — either cleanuparr's own /api/stats reports QueueCleaner failed>0 or a stale lastRunAt (>3h), or the /api/stats fetch itself failed. Inspect the Job logs for the reason, then the cleanuparr pod logs (Grafana → Explore → Loki: {namespace=\"servarr\", container=\"cleanuparr\"}). Does NOT catch a succeeded-but-wrong run (the #467 class) — only failed/stale job counters (#606)."
 
+    - name: blind-queue-check
+      interval: 60s
+      rules:
+        - alert: BlindQueueCheckFailed
+          expr: kube_job_failed{namespace="servarr", job_name=~"blind-queue-check.*"} > 0
+          for: 5m
+          labels:
+            severity: warning
+            component: servarr
+          annotations:
+            summary: "sonarr/sonarr2/radarr grabbed a release with no queue row and no import (or the check failed)"
+            description: "The hourly blind-queue-check Job ({{ $labels.job_name }}) failed — either at least one *arr (sonarr/sonarr2/radarr) has a grab (event `grabbed`, has a downloadId) inside the WINDOW_HOURS (6h) window, older than GRACE_MINUTES (15m), with NEITHER a live /api/v3/queue row NOR a downloadFolderImported history event for that downloadId, or the queue/history fetch itself failed. This is the #834 blind-queue signature — a stale upstream TrackedDownloadService cache (#705) silently stops tracking a grab while queue/status still reports errors=false. Read the Job log for the affected *arr and downloadId(s), confirm no import is currently in flight, then `kubectl rollout restart deployment/<sonarr|sonarr2|radarr> -n servarr` (released 21 stuck imports in ~90s last time). An idle library (no recent grabs, or every grab already tracked/imported) never trips this — see the CronJob's own comments in 2-k3s/maintenance/blind-queue-check-cronjob.yaml (#835)."
+
     - name: traefik
       interval: 60s
       rules:
