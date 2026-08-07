@@ -60,6 +60,12 @@ resources:
   # only). Reuses the existing unpackerr-secret *arr API keys - no new Secret,
   # so this needed no ksops generator here.
   - blind-queue-check-cronjob.yaml
+  # Issue #839: hourly qBittorrent missingFiles/error detector (servarr ns).
+  # Carries its own check-script ConfigMap + CronJob; no RBAC (HTTP only,
+  # REPORT ONLY - never deletes/pauses/rechecks a torrent). Reuses the
+  # existing qbittorrent-webui-credentials Secret, same cross-App reason as
+  # orphan-census-cronjob.yaml above.
+  - qbt-stuck-torrent-check-cronjob.yaml
 
 # Issue #182: diff baseline for the cleanuparr-blocklist-drift CronJob. Single
 # on-disk source of truth = files/cleanuparr-blocklist-expected.txt (verbatim
