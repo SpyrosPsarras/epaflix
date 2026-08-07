@@ -26,7 +26,6 @@ This directory contains the Kubernetes manifests for deploying the complete Serv
 ├── jellyfin/             # Media server
 ├── seerr/                # Media request system (canonical; legacy jellyseerr/ retired)
 ├── homarr/               # Dashboard
-├── wizarr/               # User invitation system
 ├── tdarr/                # Media transcoding
 └── byparr/               # Cloudflare bypass for indexers (replaced FlareSolverr, #275)
 ```
@@ -61,7 +60,6 @@ This directory contains the Kubernetes manifests for deploying the complete Serv
 ### Utilities
 - **Tdarr**: Media transcoding with DoVi node (ports 8265, 8266, NVIDIA GPU)
 - **Homarr**: Dashboard
-- **Wizarr**: User invitation system
 
 ## Storage Layout
 
@@ -70,7 +68,7 @@ Each app gets a `local-path` PVC for its config directory (auto-provisioned on d
 - `sonarr-config`, `sonarr2-config`, `radarr-config`, `prowlarr-config`
 - `bazarr-config`, `jellyseerr-config` (legacy name, used by the `seerr` deployment), `qbittorrent-config`
 - `jellyfin-config`, `jellyfin-cache`, `jellyfin-transcodes`
-- `homarr-config`, `newtarr-config`, `cleanuparr-config`, `wizarr-config`
+- `homarr-config`, `newtarr-config`, `cleanuparr-config`
 
 ### NFS Media Storage (TrueNAS 192.168.10.200)
 Mounted on K3s worker nodes via fstab, exposed as hostPath PVs:
@@ -344,7 +342,7 @@ the rest is live-only.
 
 Ruled out on 2026-08-03 (evidence, not assumption): homarr (`integration` and
 `integrationSecret` tables are **empty** - 0 integrations), bazarr-autotranslate,
-byparr, qbittorrent, vpn-picker, jellyfin, wizarr (not deployed), plus a
+byparr, qbittorrent, vpn-picker, jellyfin, plus a
 cluster-wide value scan of **all 97 Secrets and 86 ConfigMaps** and all 26
 repo `*.enc.yaml` files, and a `pg_dump` value scan of all 10 non-template
 databases.
@@ -364,7 +362,6 @@ databases.
 - qBittorrent: http://qbittorrent.epaflix.com
 - Tdarr: http://tdarr.epaflix.com
 - Homarr: http://homarr.epaflix.com
-- Wizarr: http://wizarr.epaflix.com
 
 ## Migration from TrueNAS
 

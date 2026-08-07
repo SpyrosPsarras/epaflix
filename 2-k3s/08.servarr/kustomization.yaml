@@ -134,8 +134,6 @@ resources:
   - homarr/homarr.yaml
   - homarr/pdb.yaml
   - homarr/ingressroute.yaml
-  - wizarr/wizarr.yaml
-  - wizarr/ingressroute.yaml
 generators:
   - _shared/secrets/ksops-generator.yaml
 # `images:` is digest-pinned on moving tags (:latest, :development, …) and is
