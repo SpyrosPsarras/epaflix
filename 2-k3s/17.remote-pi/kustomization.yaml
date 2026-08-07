@@ -1,0 +1,11 @@
+# Owned by ArgoCD Application "remote-pi".
+# Rationale: render the complete relay namespace, workload, storage, and internal route.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - storage.yaml
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml

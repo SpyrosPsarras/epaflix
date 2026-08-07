@@ -1,0 +1,9 @@
+# Owned by ArgoCD Application "remote-pi".
+# Rationale: isolate the relay and its node-local membership database.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: remote-pi
+  labels:
+    app.kubernetes.io/name: remote-pi

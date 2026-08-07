@@ -1,0 +1,18 @@
+# Owned by ArgoCD Application "remote-pi".
+# Rationale: persist the relay's small SQLite membership database across pod replacement.
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: remote-pi-data
+  namespace: remote-pi
+  labels:
+    app.kubernetes.io/name: remote-pi-relay
+    app.kubernetes.io/component: storage
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 1Gi
