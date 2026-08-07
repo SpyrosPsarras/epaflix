@@ -62,6 +62,49 @@ spec:
             - name: seed
               mountPath: /seed
               readOnly: true
+
+        # Keep the Download Cleaner OFF private-tracker torrents.
+        #
+        # Cleanuparr removes a download when (max_ratio AND min_seed_time) are
+        # reached, OR when max_seed_time is reached REGARDLESS of ratio. A rule
+        # left at privacy_type='both' therefore applies those thresholds to
+        # private trackers too - and with max_ratio=1.0 that can never produce an
+        # account ratio >= 1.0: torrents that would earn a surplus are cut dead
+        # exactly at break-even, and torrents that never get there are cut at
+        # max_seed_time at whatever ratio they had. The average can only fall.
+        #
+        # That is exactly what happened. All 3 rules shipped at 'both' /
+        # max_ratio=1.0 / max_seed_time=400h, TorrentDay fell to ratio 0.218 and
+        # SUSPENDED our download privileges (every .torrent fetch returned an HTML
+        # "ratio critically low" page, which Prowlarr surfaced only as the useless
+        # `Invalid torrent file contents`). 0 TorrentDay torrents were left seeding,
+        # and in one 3.7-day window 49 of 83 removals fired on MAX_SEED_TIME with an
+        # unfinished ratio. The pre-existing `avistaz-reseed` category is an earlier
+        # hand-rolled dodge of this same rule (#477) - the rule itself was never fixed.
+        #
+        # Rules live ONLY in cleanuparr.db (SQLite on the PVC), so there is nothing
+        # declarative to reconcile - hence enforcement here, on every boot, including
+        # onto a restored PVC. Idempotent: it repairs a 'both' rule, creates a private
+        # counterpart only when one does not already exist for those categories, and
+        # never clobbers an operator-tuned private rule.
+        - name: enforce-private-seeding
+          image: python:3.13-alpine
+          securityContext:
+            runAsUser: 0
+          command: ["python3", "/scripts/enforce-private-seeding.py"]
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: seeding-guard
+              mountPath: /scripts
+              readOnly: true
+          resources:
+            requests:
+              memory: "32Mi"
+              cpu: "10m"
+            limits:
+              memory: "128Mi"
+              cpu: "200m"
       containers:
         - name: cleanuparr
           image: ghcr.io/cleanuparr/cleanuparr:latest
@@ -125,6 +168,10 @@ spec:
         - name: seed
           secret:
             secretName: cleanuparr-blocklist-seed
+        # Consumed only by the enforce-private-seeding initContainer.
+        - name: seeding-guard
+          configMap:
+            name: cleanuparr-seeding-guard
 ---
 apiVersion: v1
 kind: Service
