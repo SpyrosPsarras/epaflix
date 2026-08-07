@@ -136,6 +136,13 @@ resources:
   - homarr/ingressroute.yaml
 generators:
   - _shared/secrets/ksops-generator.yaml
+# Script for the cleanuparr enforce-private-seeding initContainer. Generated (not
+# a static ConfigMap) so the name-suffix hash rolls the Deployment whenever the
+# guard changes. Public logic, no credentials -> ConfigMap, not a Secret.
+configMapGenerator:
+  - name: cleanuparr-seeding-guard
+    files:
+      - enforce-private-seeding.py=cleanuparr/files/enforce-private-seeding.py
 # `images:` is digest-pinned on moving tags (:latest, :development, …) and is
 # the bump-target for Renovate (Image Updater retired — #192/#265). Renovate's
 # servarr-scoped digest rule (.github/renovate.json,
