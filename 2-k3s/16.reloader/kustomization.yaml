@@ -25,19 +25,19 @@ kind: Kustomization
 helmCharts:
   - name: reloader
     repo: https://stakater.github.io/stakater-charts
-    version: "2.2.14"
+    version: "2.2.15"
     releaseName: reloader-servarr
     namespace: servarr
     valuesFile: values/reloader-servarr-values.yaml
   - name: reloader
     repo: https://stakater.github.io/stakater-charts
-    version: "2.2.14"
+    version: "2.2.15"
     releaseName: reloader-traefik-system
     namespace: traefik-system
     valuesFile: values/reloader-traefik-system-values.yaml
   - name: reloader
     repo: https://stakater.github.io/stakater-charts
-    version: "2.2.14"
+    version: "2.2.15"
     releaseName: reloader-odysseus
     namespace: odysseus
     valuesFile: values/reloader-odysseus-values.yaml
