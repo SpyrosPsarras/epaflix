@@ -273,6 +273,28 @@ In that session, do three things:
    between a caller on the LAN and your provider accounts. There is no env var
    for it - it lives in `config.yaml`, which means in Postgres after first sync.
 
+The seeded config ships three example keys. Until you replace them the proxy
+logs `unsafe example API key configured; proxy API endpoints disabled until
+api-keys is updated` and every `/v1/*` call returns `403`, even with a correct
+key. Replacing them:
+
+```bash
+kubectl --context epaflix -n remote-pi port-forward deploy/cliproxy 8317:8317
+# the endpoint takes a BARE JSON ARRAY - this is easy to get wrong
+curl -X PUT http://127.0.0.1:8317/v0/management/api-keys \
+  -H "Authorization: Bearer <management key>" \
+  -H 'Content-Type: application/json' \
+  --data '["<client key>"]'
+```
+
+`{"api-keys":[...]}` and `{"keys":[...]}` both return `400 invalid body`, and
+`PATCH` returns `400 missing fields`. Only a bare array works on `v7.2.123`.
+
+The current key is kept in `cliproxy-secrets.enc.yaml` under `omp-api-key` so a
+rebuild does not lose it. Nothing consumes that value automatically yet - it is
+still typed in through the management API by hand. See #861 for seeding it
+properly.
+
 ### Known limitation - provider OAuth needs a port-forward every time
 
 The web UI's provider login flow only completes against `localhost` /
