@@ -80,8 +80,8 @@ This will:
 
 Verify operator installation:
 ```bash
-kubectl get pods -n cnpg-system
-kubectl get crd | grep postgresql
+kubectl --context epaflix get pods -n cnpg-system
+kubectl --context epaflix get crd | grep postgresql
 ```
 
 ### Step 2: Deploy PostgreSQL Cluster
@@ -103,8 +103,8 @@ The script will wait for the cluster and pooler to be ready (may take 3-5 minute
 
 Check cluster status:
 ```bash
-kubectl get cluster -n postgres-system
-kubectl get pods -n postgres-system -o wide
+kubectl --context epaflix get cluster -n postgres-system
+kubectl --context epaflix get pods -n postgres-system -o wide
 ```
 
 Expected output:
@@ -115,7 +115,7 @@ postgres-cluster   2m    3           3       Cluster in healthy state   postgres
 
 Check services:
 ```bash
-kubectl get svc -n postgres-system
+kubectl --context epaflix get svc -n postgres-system
 ```
 
 All LoadBalancer services should have EXTERNAL-IP assigned.
@@ -167,7 +167,7 @@ postgresql://postgres:<POSTGRES_PASSWORD>@192.168.10.105:5432/authentik
 ### From within the cluster
 
 ```bash
-kubectl run -it --rm psql-client --image=postgres:16 --restart=Never -n postgres-system -- \
+kubectl --context epaflix run -it --rm psql-client --image=postgres:16 --restart=Never -n postgres-system -- \
   psql -h postgres-pooler-rw -U authentik -d authentik
 ```
 
@@ -213,12 +213,12 @@ Under the Barman Cloud Plugin the `Cluster` object's backup timestamps are **fro
 - `Cluster/postgres-cluster.status.lastSuccessfulBackup`
 - `Cluster/postgres-cluster.status.firstRecoverabilityPoint`
 - both matching `...ByMethod` maps
-- `kubectl cnpg status`, which reads the same stale fields and so under-reports continuous backup
+- `kubectl --context epaflix cnpg status`, which reads the same stale fields and so under-reports continuous backup
 
 **Authoritative - read this instead:**
 
 ```bash
-kubectl get objectstore postgres-minio-store -n postgres-system \
+kubectl --context epaflix get objectstore postgres-minio-store -n postgres-system \
   -o jsonpath='{.status.serverRecoveryWindow.postgres-cluster.lastSuccessfulBackupTime}{"\n"}'
 ```
 
@@ -227,7 +227,7 @@ Worked example (2026-08-02): the `ObjectStore` field above returned `2026-08-02T
 The `Backup` objects are a second, equally current check:
 
 ```bash
-kubectl get backup -n postgres-system --sort-by=.metadata.creationTimestamp \
+kubectl --context epaflix get backup -n postgres-system --sort-by=.metadata.creationTimestamp \
   -o custom-columns='NAME:.metadata.name,METHOD:.spec.method,PHASE:.status.phase,STOPPED:.status.stoppedAt' | tail -5
 ```
 
@@ -239,24 +239,24 @@ Upstream reporting gap, not fixable on our side: `cloudnative-pg/cloudnative-pg#
 
 Check scheduled backup:
 ```bash
-kubectl get scheduledbackup -n postgres-system
+kubectl --context epaflix get scheduledbackup -n postgres-system
 ```
 
 Check backup status:
 ```bash
-kubectl get backup -n postgres-system
+kubectl --context epaflix get backup -n postgres-system
 ```
 
 View backup details:
 ```bash
-kubectl describe backup <backup-name> -n postgres-system
+kubectl --context epaflix describe backup <backup-name> -n postgres-system
 ```
 
 ### Manual Backup
 
 Trigger an immediate backup:
 ```bash
-kubectl cnpg backup postgres-cluster -n postgres-system
+kubectl --context epaflix cnpg backup postgres-cluster -n postgres-system
 ```
 
 Or create a manual backup manifest:
@@ -280,12 +280,12 @@ spec:
 
 Backups live in the object store, not on a PVC. List them through the `Backup` objects:
 ```bash
-kubectl get backup -n postgres-system --sort-by=.metadata.creationTimestamp
+kubectl --context epaflix get backup -n postgres-system --sort-by=.metadata.creationTimestamp
 ```
 
 Retention (`10d`) and the current recovery window are on the `ObjectStore`:
 ```bash
-kubectl get objectstore postgres-minio-store -n postgres-system \
+kubectl --context epaflix get objectstore postgres-minio-store -n postgres-system \
   -o jsonpath='{.spec.retentionPolicy}{"  "}{.status.serverRecoveryWindow.postgres-cluster}{"\n"}'
 ```
 
@@ -335,29 +335,31 @@ the validation queries and the teardown checks.
 
 ```bash
 # Cluster overview
-kubectl cnpg status postgres-cluster -n postgres-system
+kubectl --context epaflix cnpg status postgres-cluster -n postgres-system
 
 # Detailed cluster info
-kubectl describe cluster postgres-cluster -n postgres-system
+kubectl --context epaflix describe cluster postgres-cluster -n postgres-system
 
 # Replication status
-kubectl cnpg status postgres-cluster -n postgres-system --verbose
+kubectl --context epaflix cnpg status postgres-cluster -n postgres-system --verbose
 ```
 
 ### Pod Logs
 
 ```bash
 # Primary pod logs
-kubectl logs -n postgres-system postgres-cluster-1 -f
+PRIMARY=$(kubectl --context epaflix get cluster postgres-cluster -n postgres-system \
+  -o jsonpath='{.status.currentPrimary}')
+kubectl --context epaflix logs -n postgres-system "$PRIMARY" -f
 
 # Pooler logs
-kubectl logs -n postgres-system -l cnpg.io/poolerName=postgres-pooler -f
+kubectl --context epaflix logs -n postgres-system -l cnpg.io/poolerName=postgres-pooler -f
 ```
 
 ### Resource Usage
 
 ```bash
-kubectl top pods -n postgres-system
+kubectl --context epaflix top pods -n postgres-system
 ```
 
 ### Prometheus Metrics (if Prometheus is installed)
@@ -401,19 +403,21 @@ Delete the primary pod to simulate a failure:
 
 ```bash
 # Identify the primary
-kubectl get pods -n postgres-system -l cnpg.io/cluster=postgres-cluster -L role
+kubectl --context epaflix get pods -n postgres-system -l cnpg.io/cluster=postgres-cluster -L role
 
 # Delete the primary pod
-kubectl delete pod postgres-cluster-1 -n postgres-system
+PRIMARY=$(kubectl --context epaflix get cluster postgres-cluster -n postgres-system \
+  -o jsonpath='{.status.currentPrimary}')
+kubectl --context epaflix delete pod "$PRIMARY" -n postgres-system
 
 # Watch the failover process
-kubectl get pods -n postgres-system -w
+kubectl --context epaflix get pods -n postgres-system -w
 ```
 
 The operator should promote a replica within seconds. You can verify:
 
 ```bash
-kubectl cnpg status postgres-cluster -n postgres-system
+kubectl --context epaflix cnpg status postgres-cluster -n postgres-system
 ```
 
 ### Manual Switchover
@@ -421,7 +425,7 @@ kubectl cnpg status postgres-cluster -n postgres-system
 To perform a planned switchover (zero downtime):
 
 ```bash
-kubectl cnpg promote postgres-cluster-2 -n postgres-system
+kubectl --context epaflix cnpg promote postgres-cluster-2 -n postgres-system
 ```
 
 ## Scaling
@@ -431,12 +435,12 @@ kubectl cnpg promote postgres-cluster-2 -n postgres-system
 To add or remove replicas:
 
 ```bash
-kubectl cnpg scale postgres-cluster 5 -n postgres-system  # Scale to 5 instances
+kubectl --context epaflix cnpg scale postgres-cluster 5 -n postgres-system  # Scale to 5 instances
 ```
 
 Or edit the cluster manifest:
 ```bash
-kubectl edit cluster postgres-cluster -n postgres-system
+kubectl --context epaflix edit cluster postgres-cluster -n postgres-system
 # Change spec.instances: 5
 ```
 
@@ -444,7 +448,7 @@ kubectl edit cluster postgres-cluster -n postgres-system
 
 Edit the pooler manifest:
 ```bash
-kubectl edit pooler postgres-pooler -n postgres-system
+kubectl --context epaflix edit pooler postgres-pooler -n postgres-system
 # Change spec.instances: 5
 ```
 
@@ -455,7 +459,7 @@ kubectl edit pooler postgres-pooler -n postgres-system
 CloudNativePG supports rolling upgrades. Edit the cluster manifest:
 
 ```bash
-kubectl edit cluster postgres-cluster -n postgres-system
+kubectl --context epaflix edit cluster postgres-cluster -n postgres-system
 ```
 
 Change `spec.imageName` to the desired PostgreSQL version:
@@ -470,7 +474,7 @@ The operator will perform a rolling upgrade with minimal downtime.
 
 Edit PostgreSQL parameters:
 ```bash
-kubectl edit cluster postgres-cluster -n postgres-system
+kubectl --context epaflix edit cluster postgres-cluster -n postgres-system
 ```
 
 Modify `spec.postgresql.parameters`:
@@ -487,7 +491,7 @@ CloudNativePG will apply the changes with a rolling restart.
 ### Restart Cluster
 
 ```bash
-kubectl cnpg restart postgres-cluster -n postgres-system
+kubectl --context epaflix cnpg restart postgres-cluster -n postgres-system
 ```
 
 This performs a rolling restart to minimize downtime.
@@ -498,37 +502,39 @@ This performs a rolling restart to minimize downtime.
 
 Check cluster events:
 ```bash
-kubectl describe cluster postgres-cluster -n postgres-system
+kubectl --context epaflix describe cluster postgres-cluster -n postgres-system
 ```
 
 Check pod events:
 ```bash
-kubectl describe pods -n postgres-system
+kubectl --context epaflix describe pods -n postgres-system
 ```
 
 View operator logs:
 ```bash
-kubectl logs -n cnpg-system deployment/cnpg-controller-manager
+kubectl --context epaflix logs -n cnpg-system deployment/cnpg-controller-manager
 ```
 
 ### Replication Issues
 
 Check replication lag:
 ```bash
-kubectl cnpg status postgres-cluster -n postgres-system --verbose
+kubectl --context epaflix cnpg status postgres-cluster -n postgres-system --verbose
 ```
 
 Connect to primary and check replication:
 ```bash
-kubectl exec -it postgres-cluster-1 -n postgres-system -- psql -U postgres -c "SELECT * FROM pg_stat_replication;"
+PRIMARY=$(kubectl --context epaflix get cluster postgres-cluster -n postgres-system \
+  -o jsonpath='{.status.currentPrimary}')
+kubectl --context epaflix exec -it "$PRIMARY" -n postgres-system -- psql -U postgres -c "SELECT * FROM pg_stat_replication;"
 ```
 
 ### Backup Failures
 
 Check backup status:
 ```bash
-kubectl get backup -n postgres-system
-kubectl describe backup <backup-name> -n postgres-system
+kubectl --context epaflix get backup -n postgres-system
+kubectl --context epaflix describe backup <backup-name> -n postgres-system
 ```
 
 Backups are **not** on a filesystem. Since #10 they live in the object store, so
@@ -548,18 +554,18 @@ kubectl --context epaflix get cluster postgres-cluster -n postgres-system \
 
 Test from within cluster:
 ```bash
-kubectl run -it --rm test-psql --image=postgres:16 --restart=Never -n postgres-system -- \
+kubectl --context epaflix run -it --rm test-psql --image=postgres:16 --restart=Never -n postgres-system -- \
   psql -h postgres-pooler-rw -U authentik -d authentik -c "SELECT version();"
 ```
 
 Check LoadBalancer IPs:
 ```bash
-kubectl get svc -n postgres-system
+kubectl --context epaflix get svc -n postgres-system
 ```
 
 Verify kube-vip cloud provider is running:
 ```bash
-kubectl get pods -n kube-system -l app=kube-vip-cloud-provider
+kubectl --context epaflix get pods -n kube-system -l app=kube-vip-cloud-provider
 ```
 
 ### Pod Anti-Affinity Issues
@@ -567,8 +573,8 @@ kubectl get pods -n kube-system -l app=kube-vip-cloud-provider
 If pods are stuck in Pending due to anti-affinity rules (not enough nodes):
 
 ```bash
-kubectl get pods -n postgres-system -o wide
-kubectl describe pod postgres-cluster-3 -n postgres-system
+kubectl --context epaflix get pods -n postgres-system -o wide
+kubectl --context epaflix describe pod postgres-cluster-3 -n postgres-system
 ```
 
 You may need to reduce the number of instances or adjust anti-affinity rules.
@@ -579,22 +585,22 @@ You may need to reduce the number of instances or adjust anti-affinity rules.
 
 ```bash
 # Delete scheduled backup
-kubectl delete scheduledbackup postgres-daily-backup -n postgres-system
+kubectl --context epaflix delete scheduledbackup postgres-daily-backup -n postgres-system
 
 # Delete services
-kubectl delete -f services/
+kubectl --context epaflix delete -f services/
 
 # Delete pooler
-kubectl delete pooler postgres-pooler -n postgres-system
+kubectl --context epaflix delete pooler postgres-pooler -n postgres-system
 
 # Delete cluster (WARNING: This will delete all data!)
-kubectl delete cluster postgres-cluster -n postgres-system
+kubectl --context epaflix delete cluster postgres-cluster -n postgres-system
 
 # Delete secrets
-kubectl delete secret postgres-superuser postgres-app-user -n postgres-system
+kubectl --context epaflix delete secret postgres-superuser postgres-app-user -n postgres-system
 
 # Delete namespace
-kubectl delete namespace postgres-system
+kubectl --context epaflix delete namespace postgres-system
 ```
 
 ### Remove Operator
@@ -602,9 +608,9 @@ kubectl delete namespace postgres-system
 ```bash
 # Operator + Barman plugin are ArgoCD-managed (App "cnpg-operator"). Detach
 # WITHOUT pruning live CRs first: argocd app delete cnpg-operator --cascade=false
-kubectl delete -f operator-kustomization/cnpg-operator.yaml
-kubectl delete -f operator-kustomization/barman-manifest.yaml
-kubectl delete namespace cnpg-system
+kubectl --context epaflix delete -f operator-kustomization/cnpg-operator.yaml
+kubectl --context epaflix delete -f operator-kustomization/barman-manifest.yaml
+kubectl --context epaflix delete namespace cnpg-system
 ```
 
 ## Additional Resources
@@ -618,6 +624,6 @@ kubectl delete namespace cnpg-system
 For issues specific to this deployment, check:
 1. CloudNativePG operator logs
 2. PostgreSQL pod logs
-3. Cluster status via `kubectl cnpg status`
+3. Cluster status via `kubectl --context epaflix cnpg status`
 
 For k3s cluster issues, refer to [../README.md](../README.md).
