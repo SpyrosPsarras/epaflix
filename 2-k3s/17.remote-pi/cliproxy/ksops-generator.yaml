@@ -1,0 +1,21 @@
+# ksops generator — decrypts encrypted Secret files at render time.
+# Decryption performed inside argocd-repo-server via the ksops binary
+# (see 2-k3s/11.argocd/helm-values.yaml).
+#
+# Scope: the two CLIProxyAPI Secrets only. Both live in the one file because
+# they carry the same Postgres password - see cliproxy-secrets.enc.yaml.
+#
+# The path below is relative to the KUSTOMIZATION ROOT (2-k3s/17.remote-pi/),
+# not to this file's directory - same as the servarr generator in
+# _shared/secrets/. Write it as a bare `cliproxy-secrets.enc.yaml` and ksops
+# fails with "no such file or directory".
+apiVersion: viaduct.ai/v1
+kind: ksops
+metadata:
+  name: cliproxy-secrets
+  annotations:
+    config.kubernetes.io/function: |
+      exec:
+        path: ksops
+files:
+  - cliproxy/cliproxy-secrets.enc.yaml
