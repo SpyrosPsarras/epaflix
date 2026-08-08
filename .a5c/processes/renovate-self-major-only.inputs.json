@@ -1,9 +1,0 @@
-{
-  "repoRoot": "/home/spy/Documents/Epaflix/k3s-swarm-proxmox",
-  "configPath": ".github/renovate.json",
-  "imageName": "ghcr.io/renovatebot/renovate",
-  "manager": "kustomize",
-  "branch": "renovate-self-major-only",
-  "currentBranch": "main",
-  "repo": "SpyrosPsarras/epaflix"
-}

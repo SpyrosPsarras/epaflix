@@ -24,8 +24,7 @@ Flow: open PR → Actions validates → you merge → ArgoCD deploys.
 A **secret-free** gate that validates repository policy and Renovate's change
 surface without ever needing the SOPS age key. Its validation groups are:
 
-1. **Tracked-file policy** — rejects tracked paths matched by `.gitignore` and
-   prevents the `.a5c/processes/` blanket-ignore pattern from returning.
+1. **Tracked-file policy** — rejects tracked paths matched by `.gitignore`.
 2. **Plaintext Secret guard** — runs the committed throwaway-repository fixture
    suite, then parses every tracked YAML blob in full-tree mode. Placeholder
    Secret templates are content-classified; SOPS protection is checked per

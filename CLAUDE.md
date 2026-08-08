@@ -124,4 +124,4 @@ Domain-specific guidance lives in `.github/instructions/`:
 
 ## Babysitter
 
-Babysitter orchestrates complex multi-step workflows; project profile lives at `.a5c/project-profile.json` and runs under `.a5c/runs/` (both git-ignored; profile is version 1, semi-autonomous / low breakpoint tolerance — break only on destructive / deploy / architecture / secrets-rotation steps). Guardrails are in `## Critical Rules` above; methodology and process selection are in `.github/instructions/babysitter.instructions.md`.
+Babysitter orchestrates complex multi-step workflows; project profile lives at `.a5c/project-profile.json`, process definitions under `.a5c/processes/`, runs under `.a5c/runs/`. **The whole `.a5c/` tree is git-ignored** — it is local scaffolding, never committed, so nothing under it survives a fresh clone. Anything worth keeping goes to `docs/` or `.github/instructions/`. Profile is version 1, semi-autonomous / low breakpoint tolerance — break only on destructive / deploy / architecture / secrets-rotation steps. Guardrails are in `## Critical Rules` above; methodology and process selection are in `.github/instructions/babysitter.instructions.md`.
