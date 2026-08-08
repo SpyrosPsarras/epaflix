@@ -42,6 +42,70 @@ spec:
         runAsUser: 568
         runAsGroup: 568
         fsGroup: 568
+      initContainers:
+        # `request_timeout` has NO environment-variable binding upstream
+        # (StartupService.ApplySettingsFromEnvironment covers URLs/keys/models only),
+        # so it can only be set in the DB — classic live-only drift, same class as #317.
+        #
+        # Why it matters: the shipped default of 5s is shorter than a cold-start on the
+        # Ollama endpoint (~30s) and shorter than a context-heavy warm call
+        # (ai_context_before/after=8). On timeout Lingarr burns max_retries and then writes
+        # the SOURCE line to the output file, so a translation "succeeds" with a correct
+        # .<lang>.srt name and a Lingarr header but untranslated text inside. That silently
+        # produced 152 English-content .el.srt files across 16 titles before it was caught.
+        #
+        # Raise-only (never lowers a deliberately higher value) and tolerates the table not
+        # existing yet on a first-ever install, before the app runs its migrations.
+        - name: enforce-request-timeout
+          image: postgres:16
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              psql -v ON_ERROR_STOP=1 -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USERNAME" -d "$DB_DATABASE" -c "
+                DO \$\$
+                BEGIN
+                  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'settings') THEN
+                    UPDATE settings SET value = '60'
+                     WHERE key = 'request_timeout'
+                       AND (value ~ '^[0-9]+\$' AND value::int < 60);
+                  END IF;
+                END
+                \$\$;"
+          env:
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: lingarr-host
+            - name: DB_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: lingarr-port
+            - name: DB_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: lingarr-database
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: lingarr-user
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: lingarr-password
+          resources:
+            requests:
+              memory: "32Mi"
+              cpu: "10m"
+            limits:
+              memory: "128Mi"
+              cpu: "200m"
       containers:
         - name: lingarr
           # Upstream Lingarr (off the retired SpyrosPsarras fork). Effective image is
@@ -53,6 +117,17 @@ spec:
           env:
             - name: ASPNETCORE_URLS
               value: "http://+:9876"
+            # Integration URLs MUST stay on in-cluster Service names. The public
+            # hostnames sit behind Authentik forward-auth (#176), which answers 401 to
+            # Lingarr's API calls — the nightly Sonarr/Radarr sync had been failing with
+            # `Integration request failed: Unauthorized` and Lingarr was blind to new
+            # media. Same failure shape as the Cleanuparr blind window.
+            # StartupService.ApplySettingsFromEnvironment re-applies these on every boot,
+            # so env is the source of truth and a UI edit cannot silently win.
+            - name: SONARR_URL
+              value: "http://sonarr:8989"
+            - name: RADARR_URL
+              value: "http://radarr:7878"
             # Postgres (managed by CloudNativePG in postgres-system ns)
             - name: DB_CONNECTION
               value: "postgres"
