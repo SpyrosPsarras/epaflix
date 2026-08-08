@@ -39,3 +39,31 @@ spec:
       services:
         - name: searxng
           port: 8080
+---
+# SearXNG on the INTERNAL entry point (192.168.10.102), deliberately with no
+# forward-auth. #547: the public route is gated through Authentik, but LAN
+# clients and the owner's own SearXNG API queries need an unauthenticated
+# path, and an IP-based bypass is impossible because Traefik cannot see
+# client IPs while the LoadBalancers run externalTrafficPolicy: Cluster
+# (#560). Same pattern as cliproxy and remote-pi.
+# Pi-hole resolves searxng.epaflix.com to 192.168.10.102 so LAN lands here.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: searxng-internal
+  namespace: searxng
+spec:
+  entryPoints:
+    - internal
+  routes:
+    - match: Host(`searxng.epaflix.com`)
+      kind: Rule
+      services:
+        - name: searxng
+          port: 8080
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
