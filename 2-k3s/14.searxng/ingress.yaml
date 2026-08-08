@@ -11,6 +11,13 @@ spec:
   routes:
     - match: Host(`searxng.epaflix.com`)
       kind: Rule
+      # #547: this is the entry point the whole internet reaches, including
+      # anyone resolving straight to the origin IP around Cloudflare.
+      # Traefik enforces this, so the bypass path is gated too.
+      # LAN keeps an unauthenticated path via searxng-internal on 102.
+      middlewares:
+        - name: authentik-forwardauth
+          namespace: traefik-system
       services:
         - name: searxng
           port: 8080
