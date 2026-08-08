@@ -109,3 +109,40 @@ spec:
       services:
         - name: qbittorrent
           port: 8080
+---
+# qBittorrent on the INTERNAL entry point (192.168.10.102), deliberately
+# WITHOUT forward-auth. Owner decision 2026-08-08: the Web UI should not ask
+# for an Authentik login on the LAN, but must stay gated from the internet.
+#
+# Pi-hole resolves qbittorrent.epaflix.com to 192.168.10.102, so LAN clients
+# land here. Public DNS goes through Cloudflare to the origin, which is the
+# gated websecure route above - and that route also covers anyone reaching
+# the origin IP directly around Cloudflare, since Traefik enforces it (#547).
+#
+# An IP allow-list on the public route is not an option: Traefik records
+# 10.42.0.0 as the source of every request while the LoadBalancers run
+# externalTrafficPolicy: Cluster (#560). A separate entry point is the only
+# way to tell LAN from internet today. Same pattern as searxng-internal.
+#
+# No /api or outpost carve-outs needed here: nothing on this entry point is
+# authenticated, so there is nothing to bypass.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: qbittorrent-internal
+  namespace: servarr
+spec:
+  entryPoints:
+    - internal
+  routes:
+    - match: Host(`qbittorrent.epaflix.com`)
+      kind: Rule
+      services:
+        - name: qbittorrent
+          port: 8080
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
