@@ -17,6 +17,11 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: vpn-picker
+  annotations:
+    # Reloader (#299/#715): roll this Deployment when airvpn-api-key
+    # rotates. the AirVPN API key is read from env at start.
+    # PR #714 wired the servarr Reloader but missed this workload.
+    secret.reloader.stakater.com/reload: "airvpn-api-key"
   namespace: servarr
   labels:
     app: vpn-picker
