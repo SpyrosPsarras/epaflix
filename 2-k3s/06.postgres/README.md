@@ -195,7 +195,14 @@ SELECT current_user, current_database();
 
 ## Backup and Recovery
 
-**Important:** Backups run through the **Barman Cloud Plugin** (`barman-cloud.cloudnative-pg.io`, v0.12.0) - the migration off native `barmanObjectStore` landed in #10. Destination is MinIO/S3 (`s3://postgres-backups/`) with WAL archiving and a `10d` retention policy, both configured on the `ObjectStore/postgres-minio-store` resource, not on the `Cluster`. See the [Barman Cloud Plugin docs](https://cloudnative-pg.io/plugin-barman-cloud/docs/).
+**Important:** Backups run through the **Barman Cloud Plugin** (`barman-cloud.cloudnative-pg.io`) - the migration off native `barmanObjectStore` landed in #10. The version is deliberately not written here, because a number in prose goes stale the next time it is bumped (#854). Read it from the cluster:
+
+```bash
+kubectl --context epaflix get cluster postgres-cluster -n postgres-system \
+  -o jsonpath='{.status.pluginStatus[*].version}{"\n"}'
+```
+
+The vendored manifest under `operator-kustomization/` is the one place a version is pinned in git. Destination is MinIO/S3 (`s3://postgres-backups/`) with WAL archiving and a `10d` retention policy, both configured on the `ObjectStore/postgres-minio-store` resource, not on the `Cluster`. See the [Barman Cloud Plugin docs](https://cloudnative-pg.io/plugin-barman-cloud/docs/).
 
 ### Which backup field is authoritative - READ THIS FIRST (#571)
 
@@ -303,14 +310,24 @@ spec:
 
   externalClusters:
     - name: postgres-cluster
-      barmanObjectStore:
-        destinationPath: /var/lib/postgresql/backup
-        serverName: postgres-cluster
-        wal:
-          compression: gzip
+      plugin:
+        name: barman-cloud.cloudnative-pg.io
+        parameters:
+          barmanObjectName: postgres-minio-store
+          serverName: postgres-cluster
 ```
 
-Apply and wait for recovery to complete.
+> **Do not give the restored cluster its own `plugins:` stanza.** A recovering
+> cluster that declares `plugins` with `isWALArchiver: true` archives into
+> `s3://postgres-backups/postgres-cluster/` - the live catalog - and corrupts the
+> backups it is restoring from. `bootstrap.recovery` plus `externalClusters`
+> reads the catalog without writing to it. The only visible symptom if you get
+> this wrong is a second `serverName` appearing in
+> `ObjectStore.status.serverRecoveryWindow`.
+
+Apply and wait for recovery to complete. This exact shape was proven end to end
+on 2026-08-08 - see [`RESTORE-TEST.md`](RESTORE-TEST.md) for the measured run,
+the validation queries and the teardown checks.
 
 ## Monitoring
 
@@ -514,9 +531,17 @@ kubectl get backup -n postgres-system
 kubectl describe backup <backup-name> -n postgres-system
 ```
 
-Verify NFS mount:
+Backups are **not** on a filesystem. Since #10 they live in the object store, so
+there is nothing to `ls` inside the pod. Check the catalog instead:
+
 ```bash
-kubectl exec -it postgres-cluster-1 -n postgres-system -- ls -lah /var/lib/postgresql/backup/
+# what the object store holds, and how far back it goes
+kubectl --context epaflix get objectstore postgres-minio-store -n postgres-system \
+  -o jsonpath='{.status.serverRecoveryWindow}{"\n"}'
+
+# whether WAL is still being shipped right now
+kubectl --context epaflix get cluster postgres-cluster -n postgres-system \
+  -o jsonpath='{range .status.conditions[?(@.type=="ContinuousArchiving")]}{.status}{" - "}{.message}{"\n"}{end}'
 ```
 
 ### Connection Issues
