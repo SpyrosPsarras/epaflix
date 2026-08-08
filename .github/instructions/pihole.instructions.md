@@ -30,8 +30,11 @@ Pi-hole FTL / dnsmasq (192.168.10.30)
     │
     ├── 1. dnsmasq address= directives  ← /etc/dnsmasq.d/10-epaflix.conf          ← WINS (public A records)
     ├── 2. dnsmasq address= directives  ← /etc/dnsmasq.d/10-vm-epaflix.conf       ← WINS (user-VM A records)
-    ├── 3. filter-rr=HTTPS              ← /etc/dnsmasq.d/20-filter-https-records.conf ← NODATA for HTTPS type queries
-    └── 4. Upstream: Unbound            ← 127.0.0.1:5335                          ← all other queries
+    ├── 3. dnsmasq address= directives  ← /etc/dnsmasq.d/15-proxmox-hosts.conf    ← WINS (Proxmox host A records)
+    ├── 4. filter-rr=HTTPS              ← /etc/dnsmasq.d/20-filter-https-records.conf ← NODATA for HTTPS type queries
+    ├── 5. dnsmasq address= directives  ← /etc/dnsmasq.d/30-epaflix-lan.conf      ← WINS (*.epaflix.lan, LAN-only)
+    ├── 6. edns-packet-max=1232         ← /etc/dnsmasq.d/99-edns.conf             ← UDP payload cap, no records
+    └── 7. Upstream: Unbound            ← 127.0.0.1:5335                          ← all other queries
                 │
                 └── DNS-over-TLS → Google 8.8.8.8:853 / 8.8.4.4:853
 ```
@@ -60,7 +63,10 @@ leaking to public DNS.
 |---|---|
 | `/etc/dnsmasq.d/10-epaflix.conf` | **Active** — all `*.epaflix.com` public subdomain A records |
 | `/etc/dnsmasq.d/10-vm-epaflix.conf` | **Active** — `*.vm.epaflix.com` user-VM A records (LAN-only) |
+| `/etc/dnsmasq.d/15-proxmox-hosts.conf` | **Active** - Proxmox host A records: `takaros` and `evanthoulaki`, each as a `*.epaflix.com` name and as a bare hostname |
 | `/etc/dnsmasq.d/20-filter-https-records.conf` | **Active** — `filter-rr=HTTPS` blocks HTTPS type queries from reaching public DNS |
+| `/etc/dnsmasq.d/30-epaflix-lan.conf` | **Active** - all `*.epaflix.lan` records: direct LAN IPs for SSH and admin access, never public |
+| `/etc/dnsmasq.d/99-edns.conf` | **Active** - `edns-packet-max=1232` only, no records |
 | `/etc/pihole/custom.list` | **Empty** — intentionally cleared, do not repopulate |
 | `/etc/unbound/unbound.conf.d/pi-hole.conf` | Unbound core: port 5335, cache, DoT upstream |
 | `/etc/unbound/unbound.conf.d/vm-epaflix.conf` | `local-zone: static` security directive only — no data entries |
@@ -74,39 +80,44 @@ leaking to public DNS.
 
 ### `/etc/dnsmasq.d/10-epaflix.conf` — public subdomains
 
-All point to `192.168.10.101` (K3s Traefik LoadBalancer).
-As services migrate to Docker Swarm, individual records will be updated to `192.168.10.71`.
+Most point to `192.168.10.101` (K3s Traefik LoadBalancer). Several do not - check the
+IP column, do not assume. Rows are in live-file order, so a `diff` against the box lines up.
 
-| Domain | IP | HTTP (verified 2026-03-22) | App |
-|---|---|---|---|
-| `sonarr.epaflix.com` | 192.168.10.101 | ✅ 200 | Sonarr |
-| `sonarr2.epaflix.com` | 192.168.10.101 | ✅ 200 | Sonarr (second instance) |
-| `radarr.epaflix.com` | 192.168.10.101 | ✅ 200 | Radarr |
-| `prowlarr.epaflix.com` | 192.168.10.101 | ✅ 200 | Prowlarr |
-| `bazarr.epaflix.com` | 192.168.10.101 | ✅ 200 | Bazarr |
-| `seerr.epaflix.com` | 192.168.10.101 | ✅ 200 | Seerr |
-| `jellyseerr.epaflix.com` | 192.168.10.101 | ✅ 200 | Jellyseerr |
-| `jellyfin.epaflix.com` | 192.168.10.101 | ✅ 200 | Jellyfin |
-| `qbittorrent.epaflix.com` | 192.168.10.101 | ✅ 200 | qBittorrent WebUI |
-| `homarr.epaflix.com` | 192.168.10.101 | ✅ 200 | Homarr |
-| `newtarr.epaflix.com` | 192.168.10.101 | ✅ 200 | Newtarr |
-| `cleanuparr.epaflix.com` | 192.168.10.101 | ✅ 200 | Cleanuparr |
-| `auth.epaflix.com` | 192.168.10.101 | ✅ 200 | Authentik |
-| `grafana.epaflix.com` | 192.168.10.101 | ✅ 200 | Grafana |
-| `traefik.epaflix.com` | 192.168.10.101 | ✅ 200 | Traefik dashboard (behind Authentik SSO) |
-| `truenas.epaflix.com` | 192.168.10.101 | ✅ 200 | TrueNAS SCALE web UI — proxied via Traefik to `192.168.10.200:443`, real `*.epaflix.com` cert |
-| `cliproxy.epaflix.com` | 192.168.10.102 | - | CLIProxyAPI - Traefik `internal` entry point, not the public LB (#858) |
+| Domain | IP | Serves |
+|---|---|---|
+| `sonarr.epaflix.com` | 192.168.10.101 | Sonarr |
+| `sonarr2.epaflix.com` | 192.168.10.101 | Sonarr, second instance |
+| `radarr.epaflix.com` | 192.168.10.101 | Radarr |
+| `prowlarr.epaflix.com` | 192.168.10.101 | Prowlarr |
+| `bazarr.epaflix.com` | 192.168.10.101 | Bazarr |
+| `seerr.epaflix.com` | 192.168.10.101 | Seerr |
+| `jellyseerr.epaflix.com` | 192.168.10.101 | Jellyseerr |
+| `jellyfin.epaflix.com` | 192.168.10.101 | Jellyfin |
+| `qbittorrent.epaflix.com` | 192.168.10.101 | qBittorrent WebUI |
+| `homarr.epaflix.com` | 192.168.10.101 | Homarr |
+| `cleanuparr.epaflix.com` | 192.168.10.101 | Cleanuparr |
+| `auth.epaflix.com` | 192.168.10.101 | Authentik |
+| `grafana.epaflix.com` | 192.168.10.101 | Grafana |
+| `traefik.epaflix.com` | 192.168.10.101 | Traefik dashboard, behind Authentik SSO |
+| `truenas.epaflix.com` | 192.168.10.101 | TrueNAS SCALE web UI - Traefik proxies to `192.168.10.200:443`, real `*.epaflix.com` cert |
+| `lingarr.epaflix.com` | 192.168.10.101 | Lingarr |
+| `wg-hop.epaflix.com` | **192.168.10.45** | wg-easy on LXC 1045 - straight to the LXC, no Traefik |
+| `argocd.epaflix.com` | 192.168.10.101 | ArgoCD |
+| `pegaprox.epaflix.com` | 192.168.10.101 | PegaProx UI - Traefik proxies to `192.168.10.21:5000` |
+| `minio.epaflix.com` | 192.168.10.101 | MinIO S3 API on TrueNAS, fronted by Traefik (added 2026-05-22) |
+| `minio-console.epaflix.com` | 192.168.10.101 | MinIO console, same backend |
+| `newtarr.epaflix.com` | 192.168.10.101 | Newtarr |
+| `bastion.epaflix.com` | **192.168.10.43** | Odysseus bastion VM - straight to the VM, no Traefik |
+| `searxng.epaflix.com` | 192.168.10.101 | SearXNG |
+| `syncthing.epaflix.com` | **192.168.10.110** | Syncthing GUI - its own kube-vip LoadBalancer (`syncthing-gui`), no Traefik |
+| `api.epaflix.com` | **192.168.1.50** | **KNOWN BAD** - off-subnet (our LAN is `192.168.10.0/24`), unreachable, and the identical `address=` line appears twice in the conf. Removal is a live change, tracked in #877. Do not copy this row as a pattern |
+| `remote-pi.epaflix.com` | **192.168.10.102** | Remote Pi relay - Traefik `internal` entry point, not the public LB |
+| `cliproxy.epaflix.com` | **192.168.10.102** | CLIProxyAPI - Traefik `internal` entry point, not the public LB (#858) |
 
 > **Not every record is 192.168.10.101.** Services on Traefik's `internal` entry
 > point resolve to the dedicated `traefik-internal` LoadBalancer at
 > `192.168.10.102`, which the router forwards nothing to. `cliproxy.epaflix.com`
-> is one of those.
->
-> **Missing from this table:** `remote-pi.epaflix.com` → `192.168.10.102`. It is
-> the other `internal`-entry-point service and it was never added here when the
-> relay landed. Add it the next time you touch
-> `/etc/dnsmasq.d/10-epaflix.conf`, and check the live file rather than trusting
-> this table on its own.
+> and `remote-pi.epaflix.com` are the two of those.
 
 > **No wildcard**: any unlisted `*.epaflix.com` subdomain falls through to public DNS
 > and resolves to the real Cloudflare IPs (`172.67.179.219` / `104.21.59.155`).
@@ -130,15 +141,76 @@ to public DNS. The zone was renamed from `internal.epaflix.com` on 2026-04-18.
 > pick up new `address=` entries for the `*.vm.epaflix.com` zone. Always use
 > `systemctl restart pihole-FTL` after adding a new entry here.
 
+### `/etc/dnsmasq.d/15-proxmox-hosts.conf` - Proxmox hosts
+
+Direct LAN IPs for the two Proxmox VE hosts. Each host gets two names: the
+`*.epaflix.com` form, which overrides the public Cloudflare answer, and the bare
+hostname, which is what short SSH targets and Proxmox's own cluster tooling use.
+These are **not** Traefik-fronted - they go straight to the Proxmox web UI on `:8006`.
+
+| Domain | IP | Serves |
+|---|---|---|
+| `takaros.epaflix.com` | 192.168.10.10 | Proxmox host `takaros` |
+| `evanthoulaki.epaflix.com` | 192.168.10.11 | Proxmox host `evanthoulaki` |
+| `takaros` | 192.168.10.10 | Same host, bare hostname |
+| `evanthoulaki` | 192.168.10.11 | Same host, bare hostname |
+
+### `/etc/dnsmasq.d/30-epaflix-lan.conf` - the `epaflix.lan` zone
+
+Direct LAN IPs for SSH and admin straight to the box. These bypass Traefik
+completely - no ingress, no TLS termination, no Authentik. `epaflix.lan` is not a
+real public TLD, so it never resolves outside the LAN and can never leak to
+Cloudflare. That is the point: `truenas.epaflix.com` gives you the Traefik-proxied
+web UI, `truenas.epaflix.lan` gives you the box itself.
+
+| Domain | IP | Serves |
+|---|---|---|
+| `jumpbox.epaflix.lan` | 192.168.10.40 | Jump-box LXC 1040 (Alpine) |
+| `takaros.epaflix.lan` | 192.168.10.10 | Proxmox host `takaros` |
+| `evanthoulaki.epaflix.lan` | 192.168.10.11 | Proxmox host `evanthoulaki` |
+| `k3s-master-51.epaflix.lan` | 192.168.10.51 | K3s master, VMID 1051 |
+| `k3s-master-52.epaflix.lan` | 192.168.10.52 | K3s master, VMID 1052 |
+| `k3s-master-53.epaflix.lan` | 192.168.10.53 | K3s master, VMID 1053 |
+| `k3s-worker-61.epaflix.lan` | 192.168.10.61 | K3s worker, VMID 1061 |
+| `k3s-worker-62.epaflix.lan` | 192.168.10.62 | K3s worker, VMID 1062 |
+| `k3s-worker-63.epaflix.lan` | 192.168.10.63 | K3s worker, VMID 1063 |
+| `k3s-worker-65.epaflix.lan` | 192.168.10.65 | K3s worker, VMID 1065 |
+| `truenas.epaflix.lan` | 192.168.10.200 | TrueNAS box directly, not the Traefik proxy |
+| `pegaprox.epaflix.lan` | 192.168.10.21 | PegaProx LXC 1021 directly, not the Traefik proxy |
+
+### `/etc/dnsmasq.d/99-edns.conf` - EDNS payload cap
+
+One line, `edns-packet-max=1232`, and no records. It caps the advertised UDP
+payload size so large answers fall back to TCP instead of fragmenting.
+
 ---
 
 ## How to Manage DNS Records
 
 ### The Golden Rule
 
-**Edit only `/etc/dnsmasq.d/10-epaflix.conf`** for public services, or
-**`/etc/dnsmasq.d/10-vm-epaflix.conf`** for user-VM entries.
+Pick the file by what the name is for:
+
+- `*.epaflix.com` service → `/etc/dnsmasq.d/10-epaflix.conf`
+- `*.vm.epaflix.com` user VM → `/etc/dnsmasq.d/10-vm-epaflix.conf`
+- Proxmox host name → `/etc/dnsmasq.d/15-proxmox-hosts.conf`
+- `*.epaflix.lan` SSH/admin name → `/etc/dnsmasq.d/30-epaflix-lan.conf`
+
 Do not touch `custom.list`, Unbound data entries, or `pihole.toml` hosts for this purpose.
+
+### Check the doc against live
+
+The tables above are the only durable record of what should be in `/etc/dnsmasq.d/`.
+A rebuild of the Pi-hole restores from them, so a missing row is a silently lost record.
+Diff them against the box:
+
+```bash
+ssh root@192.168.10.30 "grep -h '^address=' /etc/dnsmasq.d/*.conf | sort"
+ssh root@192.168.10.30 "ls -1 /etc/dnsmasq.d/"
+```
+
+Check both ways - every live record needs a row, and every row needs a live record.
+Add or remove the table row in the **same change** as the record itself, not later.
 
 ### Adding a new record
 
@@ -203,6 +275,9 @@ dig ${SERVICE} @192.168.10.30 +short
 
 ### Migrating ALL traffic to Docker Swarm (bulk update)
 
+> Tracked in #878. The Swarm has been dormant since ~2026-06 (#583), so this
+> runbook has no live use right now - whether it gets deleted or gated is decided there.
+
 ```bash
 ssh root@192.168.10.30
 
@@ -230,7 +305,7 @@ done
 |---|---|
 | `/etc/unbound/unbound.conf` | Entry point — includes all `unbound.conf.d/*.conf` |
 | `/etc/unbound/unbound.conf.d/pi-hole.conf` | Core: listen on `127.0.0.1:5335`, cache, DoT upstream |
-| `/etc/unbound/unbound.conf.d/internal-epaflix.conf` | `local-zone: static` — security only, no data entries |
+| `/etc/unbound/unbound.conf.d/vm-epaflix.conf` | `local-zone: static` - security only, no data entries |
 | `/etc/unbound/unbound.conf.d/remote-control.conf` | Enables `unbound-control` via `/run/unbound.ctl` |
 | `/etc/unbound/unbound.conf.d/disable-ipv6.conf` | Placeholder (`server:` stanza only, no directives) |
 
@@ -382,10 +457,14 @@ Custom DNS entries belong in `/etc/dnsmasq.d/`.
 
 ### `epaflix.com` — public subdomains
 
-Answered by `address=` directives in `/etc/dnsmasq.d/10-epaflix.conf`.
+Answered by `address=` directives in `/etc/dnsmasq.d/10-epaflix.conf`, plus the two
+Proxmox host names in `/etc/dnsmasq.d/15-proxmox-hosts.conf`.
 - No wildcard — each subdomain listed explicitly
-- Currently all → `192.168.10.101` (K3s Traefik)
-- Will be selectively updated to `192.168.10.71` (Docker Swarm Traefik) as services migrate
+- These names **do** exist publicly. `epaflix.com` is a real Cloudflare-hosted zone,
+  so an unlisted subdomain falls through and resolves to the Cloudflare IPs. A dropped
+  row is not a NXDOMAIN, it is a silent redirect off-LAN
+- Most → `192.168.10.101` (K3s Traefik). The rest go straight to a box or to the
+  `internal` Traefik LB at `192.168.10.102` - see the record table
 
 ### `vm.epaflix.com` — user-VM subdomains
 
@@ -403,10 +482,27 @@ This is a security directive — keep it even if no `local-data` entries exist.
 
 > Renamed from `internal.epaflix.com` on 2026-04-18.
 
+### `epaflix.lan` - LAN-only admin and SSH names
+
+Answered by `address=` directives in `/etc/dnsmasq.d/30-epaflix-lan.conf`. Twelve
+entries: the jump-box, both Proxmox hosts, all seven K3s nodes, TrueNAS and PegaProx.
+- Direct LAN IPs. No Traefik, no ingress, no TLS termination, no Authentik
+- `epaflix.lan` is not a real public TLD, so it never resolves publicly. Unlike
+  `*.epaflix.com`, a missing row here cannot leak to Cloudflare - it just fails
+- Use it for SSH and for admin UIs on the box's own port. Use `*.epaflix.com` for
+  anything that should go through Traefik
+
+> **Not the same thing as the `lan` DHCP domain below.** `epaflix.lan` is a set of
+> explicit `address=` records in a dnsmasq.d file. The `lan` entry below is a DHCP
+> hostname suffix set in `pihole.toml`. Different mechanism, different file, and
+> neither one creates the other.
+
 ### `lan` — DHCP domain
 
 `dns.domain.name = "lan"` in `pihole.toml`. DHCP hostnames get a `.lan` suffix.
-Queries for `.lan` never forward upstream.
+Queries for `.lan` never forward upstream. This is dnsmasq appending a suffix to
+DHCP-learned names - it is **not** the `epaflix.lan` zone above, which is explicit
+`address=` records.
 
 ### `nick.vm.epaflix.com` and `vidar.vm.epaflix.com`
 
