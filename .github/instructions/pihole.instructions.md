@@ -108,7 +108,7 @@ IP column, do not assume. Rows are in live-file order, so a `diff` against the b
 | `minio-console.epaflix.com` | 192.168.10.101 | MinIO console, same backend |
 | `newtarr.epaflix.com` | 192.168.10.101 | Newtarr |
 | `bastion.epaflix.com` | **192.168.10.43** | Odysseus bastion VM - straight to the VM, no Traefik |
-| `searxng.epaflix.com` | 192.168.10.101 | SearXNG |
+| `searxng.epaflix.com` | 192.168.10.102 | SearXNG - **internal entry point on purpose** (#547). The public route on `.101` requires Authentik; LAN and API clients use this unauthenticated internal route. Do not move it back to `.101`. |
 | `syncthing.epaflix.com` | **192.168.10.110** | Syncthing GUI - its own kube-vip LoadBalancer (`syncthing-gui`), no Traefik |
 | `api.epaflix.com` | **192.168.1.50** | **KNOWN BAD** - off-subnet (our LAN is `192.168.10.0/24`), unreachable, and the identical `address=` line appears twice in the conf. Removal is a live change, tracked in #877. Do not copy this row as a pattern |
 | `remote-pi.epaflix.com` | **192.168.10.102** | Remote Pi relay - Traefik `internal` entry point, not the public LB |
