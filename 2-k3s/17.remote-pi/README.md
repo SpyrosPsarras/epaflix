@@ -256,6 +256,28 @@ and an `ephemeral-storage` limit of 2Gi that caps the writable container layer.
 The `/var/lib/cliproxy` emptyDir (512Mi) holds the Postgres spool and the
 downloaded management SPA so neither grows that layer.
 
+The spool path is set with `PGSTORE_LOCAL_PATH`. Some upstream docs call it
+`PGSTORE_SPOOL_DIR`, which this build ignores - that was #867, and it meant the
+spool sat in the image WORKDIR for the first day. The name was checked against
+the binary rather than the docs:
+
+```bash
+POD=$(kubectl --context epaflix -n remote-pi get po \
+  -l app.kubernetes.io/name=cliproxy -o jsonpath='{.items[0].metadata.name}')
+kubectl --context epaflix -n remote-pi exec "$POD" -- \
+  sh -c "grep -oa 'PGSTORE_[A-Z_]*' /CLIProxyAPI/CLIProxyAPI | sort -u"
+```
+
+On `v7.2.123` that returns exactly `PGSTORE_DSN`, `PGSTORE_LOCAL_PATH` and
+`PGSTORE_SCHEMA`. A wrong name fails silently - there is no error, the spool just
+lands in the WORKDIR. After any image bump, check the startup log line:
+
+```bash
+kubectl --context epaflix -n remote-pi logs deploy/cliproxy | grep 'workspace path'
+```
+
+It must say `/var/lib/cliproxy/pgstore`.
+
 Probes are `tcpSocket` on 8317 on purpose. `/v1/*` needs a client API key, and
 `/management.html` can legitimately 404 before the SPA download finishes, so
 neither is an honest health signal.
