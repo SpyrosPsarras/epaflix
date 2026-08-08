@@ -1,6 +1,8 @@
 # Babysitter instructions
 
-Babysitter orchestrates complex multi-step workflows in this repo. The project profile lives at `.a5c/project-profile.json` (git-ignored, version 1, semi-autonomous / low breakpoint tolerance - break only on destructive / deploy / architecture / secrets-rotation steps). Runs live under `.a5c/runs/` (git-ignored).
+Babysitter orchestrates complex multi-step workflows in this repo. The project profile lives at `.a5c/project-profile.json` (version 1, semi-autonomous / low breakpoint tolerance - break only on destructive / deploy / architecture / secrets-rotation steps). Process definitions live under `.a5c/processes/`, runs under `.a5c/runs/`.
+
+The **entire `.a5c/` tree is git-ignored** - it is local scaffolding, not repo content. Do not try to commit any of it, and do not treat a process definition as a durable record: a fresh clone has none of them. If a run produces something worth keeping (a runbook, a decision, a recipe), write it to `docs/` or `.github/instructions/` as part of the same PR.
 
 Guardrails are in the root `CLAUDE.md` under `## Critical Rules` - merge policy, follow-up issues, no plaintext Secrets, ArgoCD adoption order. This file covers methodology and process selection only.
 

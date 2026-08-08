@@ -15,8 +15,8 @@ secrets.yml
 # hostnames, full command output, written under a "git-ignored so it's safe"
 # assumption (.history/README.md) - and this repo is public. A glob negation
 # means a plain `git add -A` stages every new log; there were 21 untracked
-# ones when #591 was swept. Same shape as the .a5c/processes block below:
-# tracking is opt-in per file, anything new stays local. A write-up that
+# ones when #591 was swept. Tracking here is opt-in per file, so anything
+# new stays local unless someone negates it by name. A write-up that
 # really belongs in git goes to docs/ or .github/instructions/, not here.
 !.history/README.md
 !.history/USAGE.md
@@ -27,19 +27,13 @@ secrets.yml
 !.history/2026-05-17-wg-hop-public-exposure.md
 raid-migration
 .claude/
-# Babysitter (.a5c) — best-practice (BEST-PRACTICES.md): track institutional
-# knowledge (.a5c/processes/, .a5c/project-profile.json/.md) by NOT ignoring it;
-# ignore only noisy/large/sensitive artifacts. Cannot use a blanket `.a5c/`
-# because git can't re-include children of a wholly-excluded directory.
-.a5c/node_modules/
-.a5c/processes/node_modules/
-.a5c/runs/
-.a5c/logs/
-.a5c/cache/
-.a5c/inputs/
-.a5c/package-lock.json
-.a5c/creds.env
-.a5c/creds.env.tmp.*
+# Babysitter (.a5c) — entirely local scaffolding, nothing under it belongs in
+# git. Supersedes the earlier "track process definitions as institutional
+# knowledge" approach (#659 and its per-file negation predecessor): the 176
+# tracked files were untracked and the whole tree blanket-ignored, so a run's
+# scratch never has to be curated into or out of history again. Deliverables
+# that matter go to docs/ or .github/instructions/, not here.
+.a5c/
 
 # Sensitive data - database dumps, backups, research extracts with credentials
 2-k3s/08.servarr/_backups/postgres-dumps/
@@ -58,16 +52,6 @@ charts/
 # SOPS plaintext drafts — never commit. Always encrypt to *.enc.yaml first.
 *-plaintext.yaml
 *.plaintext.yaml
-# #659: the per-file negation block that used to live here (`.a5c/processes/*`
-# + 11 `!` negations) regrew the exact opt-in trap it copied from .history -
-# only the files someone remembered to negate stayed tracked, so 143 of 154
-# real process definitions went untracked and invisible to git (PR #110/#111
-# swept it once, it fully regrew). Unlike .history, these files hold no real
-# IPs/secrets (checked before dropping the ignore), so there is no reason to
-# opt in per file. Track everything under .a5c/processes/ by default, same as
-# the top-of-block comment always intended. Drift is now caught by the
-# pre-commit guard (.github/hooks/check-processes-tracked.sh) instead of by
-# a gitignore negation list nobody updates.
 
 # Superpowers subagent-driven-development scratch (ledger, briefs, review packages).
 # Per-plan workspaces under .superpowers/sdd/<plan>/ — the git history is the record.

@@ -1,8 +1,0 @@
-{
-  "repo": "SpyrosPsarras/epaflix",
-  "repoRoot": "/home/spy/Documents/Epaflix/k3s-swarm-proxmox",
-  "dashboardIssue": 31,
-  "ruleset": "16805247",
-  "maxIssues": 40,
-  "startFrom": null
-}

@@ -1,8 +1,0 @@
-{
-  "repoRoot": "/home/spy/Documents/Epaflix/k3s-swarm-proxmox",
-  "truenasHost": "192.168.10.200",
-  "pool": "pool1",
-  "issueNumber": 124,
-  "issueUrl": "https://github.com/SpyrosPsarras/epaflix/issues/124",
-  "repo": "SpyrosPsarras/epaflix"
-}

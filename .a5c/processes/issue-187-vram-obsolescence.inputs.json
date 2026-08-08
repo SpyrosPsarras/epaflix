@@ -1,5 +1,0 @@
-{
-  "issueNumber": 187,
-  "repo": "SpyrosPsarras/epaflix",
-  "ownerContext": "Odysseus was migrated into k3s (2026-06-07, resolving #184). k3s workers have no GPU. Odysseus now uses the remote Ollama on TrueNAS (http://192.168.10.200:30068/v1) only for all LLM/embedding serving; the GPU reservation was dropped and NVIDIA_* keys removed. There is no in-process Cookbook model serving on a shared GPU anymore, so the VRAM-contention premise of #187 cannot occur. Likely close as obsolete."
-}

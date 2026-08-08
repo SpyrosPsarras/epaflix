@@ -1,7 +1,0 @@
-{
-  "repo": "SpyrosPsarras/epaflix",
-  "repoRoot": "/home/spy/Documents/Epaflix/k3s-swarm-proxmox-triage",
-  "issue": 295,
-  "branch": "issue-295-decommission-wizarr",
-  "ownerDecision": "Decommission wizarr completely. It was never used and is not needed."
-}

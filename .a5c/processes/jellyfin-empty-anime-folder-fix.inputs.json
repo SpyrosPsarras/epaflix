@@ -1,9 +1,0 @@
-{
-  "repoRoot": "/home/spy/Documents/Epaflix/k3s-swarm-proxmox",
-  "repo": "SpyrosPsarras/epaflix",
-  "namespace": "servarr",
-  "sonarr2Deploy": "sonarr2",
-  "seriesId": 2,
-  "tvdbId": 348545,
-  "monitoredSeasons": [3, 4, 5]
-}
