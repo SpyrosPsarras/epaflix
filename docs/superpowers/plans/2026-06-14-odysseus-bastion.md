@@ -251,7 +251,7 @@ Expected: `.gitignore:... secrets.yml` (ignored — safe).
 
 - [ ] **Step 1: Build a homelab-only SSH config + copy the referenced keys**
 
-Homelab hosts only (exclude work: `davidhorn`, `ft4`, `dh-demo`, `gc1`, `ezhellas`, `alex-tv`, `webos-tv`, `nick`). Create a trimmed config locally and push it with just the keys it references (`id_ed25519`, `id_rsa`, and any host-specific homelab keys).
+Homelab hosts only (exclude every work host alias, plus `gc1`, `ezhellas`, `alex-tv`, `webos-tv`, `nick`). Create a trimmed config locally and push it with just the keys it references (`id_ed25519`, `id_rsa`, and any host-specific homelab keys).
 ```bash
 # Build trimmed config: keep takaros, evanthoulaki, k3s-master/worker-*, epaflix-jumpbox, and add explicit truenas/pihole/proxmox entries.
 awk '/^Host (takaros|evanthoulaki|k3s-|epaflix-jumpbox|192\.168\.10\.(2|3))/{p=1} /^Host /{if($0!~/takaros|evanthoulaki|k3s-|epaflix-jumpbox|192\.168\.10\.(2|3)/)p=0} p' ~/.ssh/config > /tmp/homelab-ssh-config
