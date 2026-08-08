@@ -326,19 +326,47 @@ primary, and worth doing only after confirming nothing else needs the data.
 
 ## `omp` client config
 
-Point the client at the internal hostname and one of the keys from the
-`api-keys:` list. The OpenAI-compatible surface is under `/v1`:
+`omp` takes custom providers as a named block in `~/.omp/agent/models.yml`, not
+as environment variables. Register the proxy as its own provider so it sits
+beside any other provider instead of replacing the built-in `openai` one. The
+OpenAI-compatible surface is under `/v1`:
 
-```bash
-export OPENAI_BASE_URL=https://cliproxy.epaflix.com/v1
-export OPENAI_API_KEY=<one of the api-keys entries>
-omp models
+```yaml
+# ~/.omp/agent/models.yml
+providers:
+  cliproxy:
+    baseUrl: https://cliproxy.epaflix.com/v1
+    api: openai-completions
+    apiKey: <one of the api-keys entries>
+    models:
+      - id: <model id the proxy advertises>
+        name: <display name>
+        contextWindow: <int>
+        maxTokens: <int>
 ```
 
-`omp models` listing the proxied provider models is the check that the whole
+Fill `models:` from what the proxy actually advertises, never from a guess:
+
+```bash
+curl -H 'Authorization: Bearer <api key>' https://cliproxy.epaflix.com/v1/models
+omp models cliproxy
+```
+
+`omp models cliproxy` listing the proxied models is the check that the whole
 chain works - DNS, Traefik internal entry point, the client API key, and at
 least one authorised provider account behind it. An empty list with a 200 means
-the key is fine but no provider account is authorised yet.
+the key is fine but no provider account is authorised yet, so `models:` stays
+empty until an account is added.
+
+To make it the default without the interactive picker, add to
+`~/.omp/agent/config.yml`:
+
+```yaml
+modelRoles:
+  default: cliproxy/<model id>
+```
+
+Do not set `modelRoles.default` while the proxy advertises no models.
 
 Requires the Pi-hole record for `cliproxy.epaflix.com` (see
 `.github/instructions/pihole.instructions.md`) and the Cloudflare DNS-only
