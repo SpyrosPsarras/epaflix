@@ -79,7 +79,17 @@ spec:
             # Both of these default to paths relative to the WORKDIR. Point
             # them at the emptyDir so the spool and the downloaded management
             # SPA do not grow the container layer.
-            - name: PGSTORE_SPOOL_DIR
+            #
+            # PGSTORE_LOCAL_PATH, not PGSTORE_SPOOL_DIR. Some upstream docs name
+            # the latter but this build does not read it - #867. The name was
+            # verified against the running binary, not the docs:
+            #   grep -oa 'PGSTORE_[A-Z_]*' /CLIProxyAPI/CLIProxyAPI | sort -u
+            # on v7.2.123 returns exactly PGSTORE_DSN, PGSTORE_LOCAL_PATH and
+            # PGSTORE_SCHEMA. With the wrong name the spool silently falls back
+            # to the WORKDIR and grows the container layer instead - there is no
+            # error, so check the startup log line `workspace path:` after any
+            # image bump.
+            - name: PGSTORE_LOCAL_PATH
               value: /var/lib/cliproxy/pgstore
             - name: MANAGEMENT_STATIC_PATH
               value: /var/lib/cliproxy/static
