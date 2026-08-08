@@ -7,6 +7,20 @@ description: "Instructions for K3s Kubernetes cluster setup"
 
 When working with files in the `2-k3s/` directory, follow these K3s and Kubernetes-specific guidelines.
 
+## Always name the context
+
+`~/.kube/config` is Syncthing-synced and carries work AKS contexts, including production ones, next to `epaflix`. Another machine can change the active context while a session is running, so every command below - and every command in any runbook in this repo - should name the target:
+
+```bash
+kubectl --context epaflix get nodes -o wide
+helm --kube-context epaflix list -A
+
+# preflight before anything destructive
+kubectl config current-context   # must print: epaflix
+```
+
+`kubectl config use-context epaflix` is not a guard. It sets a value that a sync can overwrite a minute later.
+
 ## K3s Architecture
 
 - **Server (Master)**: Runs control plane components (API server, scheduler, controller)
