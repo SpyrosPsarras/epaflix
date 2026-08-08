@@ -26,7 +26,7 @@ Odysseus must also "know about our setup": the entire contents of this project
 |---|----------|--------|
 | 1 | Execution model | **B** — Odysseus SSHes from its pod into the bastion and runs commands there (real sandbox) |
 | 2 | Repo/secrets scope | **B** — full committed repo always available; `secrets.yml` + homelab SSH keys present, but on the bastion+NFS only (detachable, not in the pod baseline) |
-| 3 | SSH keys bundled | **Homelab-relevant only** (k3s nodes, takaros/evanthoulaki, truenas, pihole, jumpbox) — NOT work keys (`davidhorn`, `ft4`, `dh-demo`) |
+| 3 | SSH keys bundled | **Homelab-relevant only** (k3s nodes, takaros/evanthoulaki, truenas, pihole, jumpbox) — NOT work keys (any work host alias) |
 | 4 | Bastion VM | name `odysseus-bastion`, **VMID 1043 → 192.168.10.43**, host `evanthoulaki`, Ubuntu 24.04, 4 vCPU / 8 GB / 60 GB |
 | 5 | IP / subnet | Flat `192.168.10.0/24` (reachable by whole LAN with zero router/VLAN work; `.20.x` rejected — new unrouted subnet, TP-Link Archer can't route a second LAN) |
 | 6 | Storage pool | TrueNAS **`apps`** (redundant RAIDZ1) |
