@@ -67,7 +67,7 @@ Infrastructure-as-code and documentation for a K3s Kubernetes cluster + Docker S
 ## DNS
 
 Pi-hole at 192.168.10.30 is the sole DNS authority for `*.epaflix.com`.
-- K3s services: `/etc/dnsmasq.d/10-epaflix.conf` — all `*.epaflix.com` → 192.168.10.101 (except `truenas` → 192.168.10.101 via Traefik proxy)
+- K3s services: `/etc/dnsmasq.d/10-epaflix.conf` — one per-host `address=` record each, NO wildcard; most point to 192.168.10.101, the `internal`-entry-point ones to 192.168.10.102. An unlisted subdomain falls through to public DNS. See `.github/instructions/pihole.instructions.md` for the record table.
 - User VMs: `/etc/dnsmasq.d/10-vm-epaflix.conf` — `*.vm.epaflix.com` for jumpbox access only (not K3s services)
 - NXDOMAIN guard for `vm.epaflix.com.` in Unbound prevents accidental leak to public DNS
 - **Golden rule**: edit dnsmasq.d files only, never Pi-hole web UI or custom.list

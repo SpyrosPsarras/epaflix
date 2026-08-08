@@ -95,6 +95,18 @@ As services migrate to Docker Swarm, individual records will be updated to `192.
 | `grafana.epaflix.com` | 192.168.10.101 | ✅ 200 | Grafana |
 | `traefik.epaflix.com` | 192.168.10.101 | ✅ 200 | Traefik dashboard (behind Authentik SSO) |
 | `truenas.epaflix.com` | 192.168.10.101 | ✅ 200 | TrueNAS SCALE web UI — proxied via Traefik to `192.168.10.200:443`, real `*.epaflix.com` cert |
+| `cliproxy.epaflix.com` | 192.168.10.102 | - | CLIProxyAPI - Traefik `internal` entry point, not the public LB (#858) |
+
+> **Not every record is 192.168.10.101.** Services on Traefik's `internal` entry
+> point resolve to the dedicated `traefik-internal` LoadBalancer at
+> `192.168.10.102`, which the router forwards nothing to. `cliproxy.epaflix.com`
+> is one of those.
+>
+> **Missing from this table:** `remote-pi.epaflix.com` → `192.168.10.102`. It is
+> the other `internal`-entry-point service and it was never added here when the
+> relay landed. Add it the next time you touch
+> `/etc/dnsmasq.d/10-epaflix.conf`, and check the live file rather than trusting
+> this table on its own.
 
 > **No wildcard**: any unlisted `*.epaflix.com` subdomain falls through to public DNS
 > and resolves to the real Cloudflare IPs (`172.67.179.219` / `104.21.59.155`).

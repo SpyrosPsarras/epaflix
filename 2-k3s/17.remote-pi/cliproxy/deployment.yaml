@@ -1,0 +1,121 @@
+# Owned by ArgoCD Application "remote-pi".
+# Rationale: run exactly one CLIProxyAPI writer against the shared CNPG Postgres
+# store, so provider tokens and config survive pod replacement without a PVC.
+#
+# SECURITY DEVIATION from the relay pod in this same namespace - deliberate,
+# not an oversight:
+#   - `readOnlyRootFilesystem: false`. The process rewrites
+#     `/CLIProxyAPI/config.yaml` in place, next to its own binary, inside its
+#     WORKDIR. That is how it turns a plaintext `remote-management.secret-key`
+#     into a bcrypt hash on first start, and how the management UI persists
+#     settings. A read-only root filesystem makes the container fail that write.
+#   - Runs as the image default (root). The auth directory is
+#     `/root/.cli-proxy-api` and the only way to move it is the `auth-dir` key
+#     in `config.yaml`, which the process does not read until after it has
+#     already booted and written the file. So there is no chicken-and-egg-free
+#     way to relocate it to a non-root home before first start.
+# The blast radius stays bounded: no service account token, no host mounts,
+# all capabilities dropped, no privilege escalation, and the writable container
+# layer is capped by the `ephemeral-storage` limit below.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cliproxy
+  namespace: remote-pi
+  labels:
+    app.kubernetes.io/name: cliproxy
+    app.kubernetes.io/component: proxy
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cliproxy
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cliproxy
+        app.kubernetes.io/component: proxy
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: cliproxy
+          image: docker.io/eceasy/cli-proxy-api:v7.2.123
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+                - ALL
+          env:
+            # PG_PASSWORD MUST stay above PGSTORE_DSN. The DSN below uses
+            # kubelet dependent-env-var expansion, and kubelet only substitutes
+            # `$(VAR)` from variables already declared earlier in this list.
+            # Move it down and the pod gets a literal `$(PG_PASSWORD)` in its
+            # connection string.
+            - name: PG_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cliproxy-secrets
+                  key: pg-password
+            - name: MANAGEMENT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cliproxy-secrets
+                  key: management-password
+            # Storage backend is picked by env-var presence at startup:
+            # PGSTORE_DSN > OBJECTSTORE_ENDPOINT > GITSTORE_GIT_URL > local
+            # files. Setting this is what selects Postgres.
+            - name: PGSTORE_DSN
+              value: postgresql://cliproxy:$(PG_PASSWORD)@postgres-rw.postgres-system.svc.cluster.local:5432/cliproxy?sslmode=require
+            # Both of these default to paths relative to the WORKDIR. Point
+            # them at the emptyDir so the spool and the downloaded management
+            # SPA do not grow the container layer.
+            - name: PGSTORE_SPOOL_DIR
+              value: /var/lib/cliproxy/pgstore
+            - name: MANAGEMENT_STATIC_PATH
+              value: /var/lib/cliproxy/static
+          ports:
+            - name: http
+              containerPort: 8317
+              protocol: TCP
+          volumeMounts:
+            - name: work
+              mountPath: /var/lib/cliproxy
+          # tcpSocket, not httpGet. `/v1/*` requires a client API key, and
+          # `/management.html` can legitimately 404 until the SPA download from
+          # GitHub finishes. A listening socket is the only honest signal here.
+          readinessProbe:
+            tcpSocket:
+              port: 8317
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: 8317
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "25m"
+              memory: "128Mi"
+            limits:
+              memory: "512Mi"
+              ephemeral-storage: "2Gi"
+      terminationGracePeriodSeconds: 30
+      volumes:
+        - name: work
+          emptyDir:
+            sizeLimit: 512Mi

@@ -1,0 +1,55 @@
+# Owned by ArgoCD Application "remote-pi".
+# Rationale: CLIProxyAPI keeps its durable state in the shared CNPG cluster, not
+# a PVC, so the role and the database are declared here rather than created by
+# hand on whichever instance happens to be primary.
+#
+# Both objects live in namespace `postgres-system` - that is where the CNPG
+# `Cluster` is. The parent kustomization deliberately has no top-level
+# `namespace:` transformer, so these keep their own namespace.
+#
+# Never name a CNPG instance ordinal anywhere. CNPG renumbers instances on
+# failover; the primary is currently `postgres-cluster-10`. The operator
+# resolves the primary itself from `spec.cluster.name`.
+#
+# Reclaim policies are set to `retain` on purpose. Deleting these CRs, or
+# pruning them out of git, must not drop the database or the role.
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: DatabaseRole
+metadata:
+  name: cliproxy
+  namespace: postgres-system
+  labels:
+    app.kubernetes.io/name: cliproxy
+    app.kubernetes.io/component: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  cluster:
+    name: postgres-cluster
+  name: cliproxy
+  ensure: present
+  login: true
+  # kubernetes.io/basic-auth Secret with `username` and `password`, seeded from
+  # cliproxy-secrets.enc.yaml via the ksops generator in this directory.
+  passwordSecret:
+    name: cliproxy-db-role
+  databaseRoleReclaimPolicy: retain
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: cliproxy
+  namespace: postgres-system
+  labels:
+    app.kubernetes.io/name: cliproxy
+    app.kubernetes.io/component: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  cluster:
+    name: postgres-cluster
+  name: cliproxy
+  owner: cliproxy
+  ensure: present
+  databaseReclaimPolicy: retain
