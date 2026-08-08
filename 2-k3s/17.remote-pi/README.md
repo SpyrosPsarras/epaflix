@@ -62,6 +62,17 @@ Before the first manual Remote Pi ArgoCD sync, a human must:
    exact DNS-only shadow record pointing to `192.168.10.102`.
 3. Confirm the router has no port forward to `192.168.10.102`.
 
+> **Step 2 was not applied when the relay landed.** Step 1 was done, step 2 was
+> skipped. Without it the Cloudflare-proxied `*.epaflix.com` wildcard still
+> covers this name, so `dig AAAA remote-pi.epaflix.com @192.168.10.30` answers
+> with Cloudflare IPv6 addresses instead of nothing - the A record is
+> overridden locally, the AAAA is not. It is being applied now under #868.
+> The LAN is IPv4-only today, so no traffic was actually sent to Cloudflare;
+> enabling IPv6 anywhere would have made it live. Publishing `192.168.10.102`
+> adds no disclosure - `cliproxy.epaflix.com` already publishes it. Mechanism
+> and verification: `.github/instructions/pihole.instructions.md` → "AAAA and
+> the Cloudflare wildcard".
+
 After sync, verify `/health` from LAN and WireGuard. From a genuinely external
 network, test both normal DNS and a forced SNI/Host request to the router's
 public origin. The normal path must be unreachable; the forced-origin path may
