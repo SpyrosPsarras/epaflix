@@ -390,10 +390,18 @@ spec:
   # :10, cleanuparr-queuecleaner-health at :25) to spread API load.
   schedule: "40 * * * *"
   concurrencyPolicy: Forbid
+  # #841: a schedule missed during a control-plane blip is stale by the
+  # time it could be retried, so skip it rather than run it late.
+  startingDeadlineSeconds: 300
   successfulJobsHistoryLimit: 6
   failedJobsHistoryLimit: 6
   jobTemplate:
     spec:
+      # #841: under Forbid, a run that hangs blocks every later run and
+      # leaves no failed Job to alert on - the check goes quiet and quiet
+      # reads as healthy. Observed runtime 17-20s; this deadline is
+      # HTTP checks against three *arr instances.
+      activeDeadlineSeconds: 300
       backoffLimit: 0
       ttlSecondsAfterFinished: 2592000  # keep 30 days
       template:
