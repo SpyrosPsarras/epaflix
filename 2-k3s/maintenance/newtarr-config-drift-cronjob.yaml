@@ -243,10 +243,18 @@ spec:
   # to a slowly-drifting point-in-time seed.
   schedule: "45 6 * * 1"
   concurrencyPolicy: Forbid
+  # #841: a schedule missed during a control-plane blip is stale by the
+  # time it could be retried, so skip it rather than run it late.
+  startingDeadlineSeconds: 300
   successfulJobsHistoryLimit: 6
   failedJobsHistoryLimit: 6
   jobTemplate:
     spec:
+      # #841: under Forbid, a run that hangs blocks every later run and
+      # leaves no failed Job to alert on - the check goes quiet and quiet
+      # reads as healthy. Observed runtime 18-19s; this deadline is
+      # config comparison against a mounted Secret.
+      activeDeadlineSeconds: 300
       backoffLimit: 0
       ttlSecondsAfterFinished: 2592000  # keep 30 days
       template:

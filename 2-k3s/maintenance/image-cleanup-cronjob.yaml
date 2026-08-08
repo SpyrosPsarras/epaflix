@@ -13,8 +13,16 @@ spec:
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
   concurrencyPolicy: Forbid
+  # #841: a schedule missed during a control-plane blip is stale by the
+  # time it could be retried, so skip it rather than run it late.
+  startingDeadlineSeconds: 300
   jobTemplate:
     spec:
+      # #841: under Forbid, a run that hangs blocks every later run and
+      # leaves no failed Job to alert on - the check goes quiet and quiet
+      # reads as healthy. Observed runtime 11-12s; this deadline is
+      # prunes container images - I/O bound, duration depends on the backlog.
+      activeDeadlineSeconds: 1800
       template:
         metadata:
           labels:
