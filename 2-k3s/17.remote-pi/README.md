@@ -162,3 +162,184 @@ For full removal, use this explicit sequence:
    from the Traefik values. Automated ArgoCD sync performs this Traefik rollback;
    verify the internal Service and entry point are gone without treating it as
    removal of the manually managed relay child.
+
+---
+
+# CLIProxyAPI
+
+A second, unrelated workload in this same namespace and this same ArgoCD
+Application. It is not part of the relay and shares no data with it.
+
+CLIProxyAPI (`https://help.router-for.me`) signs in to Gemini, Codex and Claude
+accounts and re-exposes them behind OpenAI-, Anthropic- and Gemini-compatible
+HTTP APIs, so a local client such as `omp` can point at one endpoint instead of
+juggling provider SDKs. Tracking issue #858.
+
+## Why it shares the namespace and the Application
+
+Two reasons, both about the gate rather than about the software:
+
+- The `remote-pi` child Application has `syncPolicy: {}`. Every change here
+  waits for a human to press sync. That is the property we want for a proxy
+  holding provider credentials, and it already exists - a new Application would
+  mean a new app-of-apps entry and a second thing to keep on manual sync.
+- Both workloads are internal-only and reachable through the same
+  `traefik-internal` entry point on `192.168.10.102`. The network boundary
+  documented above for the relay applies unchanged.
+
+The cost is that a sync touches both workloads. With one replica each, `Recreate`
+on both, and no shared storage, that is acceptable.
+
+Layout is `2-k3s/17.remote-pi/cliproxy/`. The parent kustomization deliberately
+has NO top-level `namespace:` transformer: two of the objects under `cliproxy/`
+belong to `postgres-system`, not `remote-pi`.
+
+## Postgres dependency
+
+Durable state lives in the existing CNPG cluster, not on a PVC. The proxy picks
+its storage backend from which env vars are present at startup, in this
+precedence order:
+
+`PGSTORE_DSN` > `OBJECTSTORE_ENDPOINT` > `GITSTORE_GIT_URL` > local files.
+
+Only `PGSTORE_DSN` is set, so Postgres wins.
+
+- Database `cliproxy`, role `cliproxy`, both declared as CNPG `Database` and
+  `DatabaseRole` CRs in `cliproxy/database.yaml`, namespace `postgres-system`.
+- The connection target is the service name
+  `postgres-rw.postgres-system.svc.cluster.local:5432` with `sslmode=require`.
+  Never a pod name: CNPG renumbers instances on failover and the primary is
+  currently `postgres-cluster-10`, not `postgres-cluster-1`.
+- The proxy creates its own tables on first start - `config_store` and
+  `auth_store` - and seeds the config row from its bundled
+  `config.example.yaml`. There is no migration step to run.
+- After that it syncs both ways between Postgres and its local copy on disk, so
+  an edit made through the management UI lands in Postgres and survives the pod.
+- The password is one value in two places: the `kubernetes.io/basic-auth` Secret
+  `cliproxy-db-role` that CNPG applies to the role, and `pg-password` in
+  `cliproxy-secrets` that the pod interpolates into the DSN. Both are documents
+  in `cliproxy/cliproxy-secrets.enc.yaml`, so a rotation is one edit. Let them
+  drift and the pod cannot log in.
+- `PGSTORE_SCHEMA` is left at its default `public`.
+
+## Security posture - how this differs from the relay, and why
+
+The relay pod next door runs as UID 1000 with `readOnlyRootFilesystem: true`.
+The proxy pod does neither. This is deliberate and recorded, not an oversight:
+
+- `readOnlyRootFilesystem: false`. The process rewrites
+  `/CLIProxyAPI/config.yaml` in place, inside its own WORKDIR next to the
+  binary. That is how it converts a plaintext `remote-management.secret-key`
+  into a bcrypt hash on first start, and how management-UI changes persist. On
+  a read-only root filesystem that write fails.
+- Runs as the image default, which is root. The auth directory is
+  `/root/.cli-proxy-api`. The only way to move it is the `auth-dir` key in
+  `config.yaml` - which the process does not read until after it has booted and
+  written that file. There is no ordering that lets us relocate it to a non-root
+  home before first start.
+
+What still holds the blast radius down: no service account token
+(`automountServiceAccountToken: false`), no host mounts, all capabilities
+dropped, `allowPrivilegeEscalation: false`, `seccompProfile: RuntimeDefault`,
+and an `ephemeral-storage` limit of 2Gi that caps the writable container layer.
+The `/var/lib/cliproxy` emptyDir (512Mi) holds the Postgres spool and the
+downloaded management SPA so neither grows that layer.
+
+Probes are `tcpSocket` on 8317 on purpose. `/v1/*` needs a client API key, and
+`/management.html` can legitimately 404 before the SPA download finishes, so
+neither is an honest health signal.
+
+## First boot - bootstrap over port-forward
+
+Out of the box `remote-management.allow-remote` is `false`, which gates every
+non-localhost caller. So the first configuration pass has to happen through a
+port-forward, not through `cliproxy.epaflix.com`:
+
+```bash
+kubectl -n remote-pi port-forward deploy/cliproxy 8317:8317
+# then open http://127.0.0.1:8317/management.html
+```
+
+In that session, do three things:
+
+1. Set `remote-management.allow-remote` to `true`, otherwise the internal
+   hostname stays useless.
+2. Confirm the management key. `MANAGEMENT_PASSWORD` comes from the
+   `management-password` key of `cliproxy-secrets`. If a plaintext
+   `remote-management.secret-key` is present in `config.yaml`, the process
+   rewrites it in place as a bcrypt hash on first start - so a later `grep` of
+   that file showing a hash is normal, not corruption.
+3. Add the client-facing `api-keys:` list. That list is the only thing standing
+   between a caller on the LAN and your provider accounts. There is no env var
+   for it - it lives in `config.yaml`, which means in Postgres after first sync.
+
+### Known limitation - provider OAuth needs a port-forward every time
+
+The web UI's provider login flow only completes against `localhost` /
+`127.0.0.1`. The redirect it hands the provider is a loopback URL, and the
+provider will not accept `cliproxy.epaflix.com` in its place. So this is not a
+one-off bootstrap quirk:
+
+**Every time an account is added or re-authorised, you have to run the
+port-forward above and drive the flow from `127.0.0.1`.** Normal day-to-day use
+over the internal hostname is unaffected.
+
+### `management.html` 404 is not automatically a broken deployment
+
+The management SPA is not baked into the image. It is downloaded from GitHub
+releases at startup into `MANAGEMENT_STATIC_PATH`
+(`/var/lib/cliproxy/static`). Two consequences:
+
+- The pod needs egress to GitHub at start. No egress, no UI - while the proxy
+  API itself still works.
+- Right after a restart, `/management.html` can 404 for a few seconds until the
+  download lands. Check the pod log before concluding anything is wrong.
+
+## Backup and restore
+
+There is no separate backup job for this workload. Its state is rows in the
+`cliproxy` database, so it rides the existing CNPG `ScheduledBackup` for
+`postgres-cluster` together with every other database in that cluster.
+
+Restoring means restoring the CNPG cluster, not this Deployment. Note one thing
+before relying on that: `auth_store` holds provider tokens, and providers expire
+and rotate them independently of our backup schedule. A restore that is more
+than a little stale will bring back tokens the provider has already invalidated,
+and those accounts need re-authorising through the port-forward flow above. Plan
+for re-auth as the normal outcome of a restore, not as a failure.
+
+## Rollback
+
+Image rollback: revert the `newTag: vX.Y.Z@sha256:...` entry in
+`kustomization.yaml` to the previously approved pin, merge, and manually sync
+the Application. `Recreate` stops the current pod before the previous image
+starts. Never roll back by moving a mutable tag.
+
+Config rollback: config lives in Postgres, not in git, so reverting a commit
+does not undo a management-UI change. Fix it in the UI, or restore the database.
+
+Full removal: `databaseReclaimPolicy` and `databaseRoleReclaimPolicy` are both
+`retain`. Deleting the CRs, or pruning them out of git, leaves the `cliproxy`
+database and role in place - by design, so an accidental prune cannot drop
+provider tokens. Dropping them for real is a deliberate manual step against the
+primary, and worth doing only after confirming nothing else needs the data.
+
+## `omp` client config
+
+Point the client at the internal hostname and one of the keys from the
+`api-keys:` list. The OpenAI-compatible surface is under `/v1`:
+
+```bash
+export OPENAI_BASE_URL=https://cliproxy.epaflix.com/v1
+export OPENAI_API_KEY=<one of the api-keys entries>
+omp models
+```
+
+`omp models` listing the proxied provider models is the check that the whole
+chain works - DNS, Traefik internal entry point, the client API key, and at
+least one authorised provider account behind it. An empty list with a 200 means
+the key is fine but no provider account is authorised yet.
+
+Requires the Pi-hole record for `cliproxy.epaflix.com` (see
+`.github/instructions/pihole.instructions.md`) and the Cloudflare DNS-only
+shadow record, same two prerequisites as `remote-pi.epaflix.com`.
