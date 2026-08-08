@@ -24,6 +24,11 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: qbittorrent
+  annotations:
+    # Reloader (#299/#715): roll this Deployment when airvpn-credentials
+    # rotates. the AirVPN Bluetit sidecar reads these at start; a rotation without a roll leaves the tunnel on the old credentials.
+    # PR #714 wired the servarr Reloader but missed this workload.
+    secret.reloader.stakater.com/reload: "airvpn-credentials"
   namespace: servarr
   labels:
     app: qbittorrent
