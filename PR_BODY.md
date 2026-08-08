@@ -88,8 +88,9 @@ kustomize manager with no `currentValue` (#530, #587).
       emptyDir is gone, the Postgres rows are not
 - [ ] `cliproxy.epaflix.com` unreachable from a genuinely external network, both
       normal DNS and a forced SNI/Host request to the public origin
-- [ ] `omp models` against `https://cliproxy.epaflix.com/v1` with a key from the
-      `api-keys:` list lists the proxied models
+- [ ] `omp models cliproxy` discovers the provider registered in
+      `~/.omp/agent/models.yml` against `https://cliproxy.epaflix.com/v1`, using a
+      key from the `api-keys:` list
 
 ## Post-merge
 
