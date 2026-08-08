@@ -1,7 +1,0 @@
-{
-  "issueNumber": 188,
-  "repo": "SpyrosPsarras/epaflix",
-  "readmePath": "0-truenas/custom-apps/odysseus/README.md",
-  "imageId": "44a5ac0a2364",
-  "ownerContext": "Issue asks to reconcile the Odysseus TrueNAS Custom App build runbook: it presents 'docker save | docker load' as the build/transfer path, but the image was built ON the TrueNAS docker engine, and the pinned image id placeholder (<RECORD_IMAGE_ID_HERE_AFTER_LOAD>) was never filled. Actual image id is 44a5ac0a2364 (odysseus:73673258). NOTE: the TrueNAS Odysseus Custom App is now DECOMMISSIONED — Odysseus runs on k3s (2-k3s/13.odysseus) pulling from GHCR (ghcr.io/spyrospsarras/odysseus:73673258) per the #184 migration. This is NOT structurally obsolete like #187; it is a real but small doc-reconciliation task. Prefer fixing the doc (and consider a short 'superseded by k3s deployment' banner) over closing it. Doc changes go through the repo's branch+PR+rebase+wait-validate+merge policy."
-}
