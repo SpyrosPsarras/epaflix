@@ -58,3 +58,105 @@ consumer) lives in `.github/instructions/truenas.instructions.md` under
 ## Network
 
 Truenas is using IP 192.168.10.200 and is using a 1GiB ethernet cable. To access the truenas via ssh, if the user logged in the hostOS is spy, then the keys are located in ssh folder and with ssh truenas_admin@192.168.10.200 you can access passwordless. The password for sudo operations is not going to be provided in public files.
+
+## GPU (RTX 2070 SUPER)
+
+One NVIDIA RTX 2070 SUPER at PCI `01:00.0`, driver `570.172.08`, 8 GiB VRAM. It is
+**not** isolated for VM passthrough (`isolated_gpu_pci_ids` is empty), so it is shared
+by the TrueNAS apps that ask for it.
+
+| App | Uses it for |
+|---|---|
+| `ix-ollama` | LLM inference, port `30068` |
+| `ix-jellyfin` | hardware transcode |
+
+### The 2026-08-08 failure - why the guards below exist
+
+The card wedged itself and **nothing said so for ~23 hours** (2026-08-08 13:23 ->
+2026-08-09 12:29). ARC had grown to fill a 31 GB box, the driver hit
+`NV_ERR_NO_MEMORY` part-way through initialising the GSP firmware, and the
+half-written WPR2 region left the card unusable:
+
+```
+NVRM: ... Check failed: Out of memory [NV_ERR_NO_MEMORY]
+NVRM: _kgspBootGspRm: unexpected WPR2 already up, cannot proceed with booting GSP
+NVRM: GPU 0000:01:00.0: RmInitAdapter failed!
+```
+
+That pair of lines is the recurrence signature. Once WPR2 is stuck, only a reset
+clears it - a warm reboot may not.
+
+The outage was silent because **everything kept answering**. `nvidia-smi` inside the
+container said "No devices were found", but ollama still served requests at 2.97 tok/s
+on CPU instead of 67.8 tok/s on the GPU, Jellyfin transcoded on CPU, and netdata
+reported nothing. A human noticing slow chat replies is what found it.
+
+### Recovery (no reboot needed)
+
+A PCIe function-level reset cleared WPR2 with the NAS staying up. A cold power cycle
+is the fallback.
+
+```bash
+# 1. release the device - nothing may hold /dev/nvidia* during the reset
+sudo midclt call app.stop ollama
+sudo docker stop ix-jellyfin-jellyfin-1
+sudo fuser -v /dev/nvidia*          # must print nothing
+
+# 2. unload the driver stack, innermost last
+sudo rmmod nvidia_uvm nvidia_drm nvidia_modeset nvidia
+lsmod | grep -c nvidia              # expect 0
+
+# 3. function-level reset, then reload
+echo 1 | sudo tee /sys/bus/pci/devices/0000:01:00.0/reset
+sudo modprobe nvidia
+nvidia-smi                          # expect the GPU line, 0 MiB used
+
+# 4. bring the consumers back
+sudo docker start ix-jellyfin-jellyfin-1
+sudo midclt call app.start ollama
+```
+
+Proof it worked, rather than "no errors": ollama went back to **74.9 tok/s** with
+`size_vram = 6241480867` (model fully in VRAM, it was `0` while broken), and zero new
+`NVRM` lines appeared after the reset.
+
+### The three guards
+
+The reset fixed the symptom. The cause was no memory headroom at driver-init time, so
+all three of these are in place:
+
+| Guard | Mechanism | Check it |
+|---|---|---|
+| ARC capped to 12 GiB | ZFS tunable + `/etc/modprobe.d/zfs.conf` for boot | `awk '/^c_max/ {print $3}' /proc/spl/kstat/zfs/arcstats` -> `12884901888` |
+| Driver stays initialised | `nvidia-persistenced`, started at POSTINIT by an init/shutdown script running `scripts/gpu-persistenced.sh` | `nvidia-smi --query-gpu=persistence_mode --format=csv,noheader` -> `Enabled` |
+| Loss is alerted | `scripts/gpu-health-check.sh`, cron every 15 min -> ntfy `192.168.10.112:8091` topic `truenas-alerts` | `sudo midclt call cronjob.query \| jq '[.[]\|select(.command\|contains("gpu"))]'` |
+
+Persistence mode is the actual fix for the failure mode: it keeps the driver loaded and
+initialised even when no client holds the device, so the driver never has to re-init
+under memory pressure - which is exactly when it died. `OLLAMA_KEEP_ALIVE` is
+deliberately left at its 5 min default; persistence makes it irrelevant.
+
+### Deploying the scripts
+
+Both live in `scripts/` here and are deployed to `/root/` on the host. They are
+idempotent - re-running either is safe.
+
+```bash
+scp 0-truenas/scripts/gpu-*.sh truenas_admin@192.168.10.200:/tmp/
+ssh truenas_admin@192.168.10.200 \
+  'sudo install -m 0750 -o root -g root /tmp/gpu-persistenced.sh  /root/ && \
+   sudo install -m 0750 -o root -g root /tmp/gpu-health-check.sh  /root/ && \
+   sudo rm -f /tmp/gpu-*.sh'
+```
+
+There is no `nvidia-persistenced.service` on TrueNAS SCALE, which is why the POSTINIT
+init/shutdown script exists instead of a systemd unit. Both registrations live in
+middleware config (`initshutdownscript` + `cronjob`), not in a file on disk, so they
+survive an update but are **not** in this repo - re-register them with
+`midclt call initshutdownscript.create` / `cronjob.create` after a fresh install.
+
+> **Subscribe to `truenas-alerts` or these alerts go nowhere.** ntfy runs with login
+> disabled, so there is no server-side subscription list and nothing to register -
+> subscribing is per client. Point the phone app or a browser at
+> `http://192.168.10.112:8091/truenas-alerts`. Alertmanager uses the same ntfy on topic
+> `k8s-alertmanager`; host alerts are kept separate on purpose.
