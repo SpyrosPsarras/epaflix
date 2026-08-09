@@ -55,25 +55,26 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       initContainers:
-        # Reconciles the config row in Postgres before the proxy starts. A few
-        # values have no env var and would otherwise be live-only database
-        # state that a rebuild loses - #861. Enforces allow-remote and auth-dir
-        # every start; seeds api-keys only if absent or still the upstream
-        # example, so a key rotated through the UI is never clobbered.
+        # Reconciles the two config values git must own, before the proxy starts.
+        # Neither has an environment variable, so without this they are live-only
+        # database state that a rebuild loses - #861.
+        #
+        # Plain psql on purpose. The first attempt pip-installed psycopg2 and
+        # pyyaml at pod start and failed twice over: no writable HOME under the
+        # non-root securityContext from #862, and psycopg2-binary ships no musl
+        # wheels. This needs no network, no interpreter and no packages.
         - name: reconcile-config
-          image: docker.io/library/python:3.13-alpine
-          command: ["/bin/sh", "-c"]
+          image: docker.io/library/postgres:16
+          command:
+            - psql
           args:
-            - |
-              set -e
-              pip install --quiet --no-cache-dir psycopg2-binary pyyaml
-              # Self-test first. A broken transform fails here, before it can
-              # touch the live config row.
-              python /scripts/reconcile-config.py --self-test
-              python /scripts/reconcile-config.py
+            - --no-psqlrc
+            - --set=ON_ERROR_STOP=1
+            - --set=want_auth_dir=/var/lib/cliproxy/pgstore/auths
+            - --file=/scripts/reconcile-config.psql
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop:
                 - ALL
@@ -83,24 +84,29 @@ spec:
                 secretKeyRef:
                   name: cliproxy-secrets
                   key: pg-password
-            - name: RECONCILE_DSN
-              value: postgresql://cliproxy:$(PG_PASSWORD)@postgres-rw.postgres-system.svc.cluster.local:5432/cliproxy?sslmode=require
-            - name: WANT_AUTH_DIR
-              value: /var/lib/cliproxy/pgstore/auths
-            - name: WANT_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: cliproxy-secrets
-                  key: omp-api-key
+            - name: PGPASSWORD
+              value: $(PG_PASSWORD)
+            - name: PGHOST
+              value: postgres-rw.postgres-system.svc.cluster.local
+            - name: PGPORT
+              value: "5432"
+            - name: PGUSER
+              value: cliproxy
+            - name: PGDATABASE
+              value: cliproxy
+            - name: PGSSLMODE
+              value: require
           volumeMounts:
             - name: scripts
               mountPath: /scripts
+            - name: tmp
+              mountPath: /tmp
           resources:
             requests:
               cpu: "10m"
-              memory: "64Mi"
+              memory: "32Mi"
             limits:
-              memory: "256Mi"
+              memory: "128Mi"
       containers:
         - name: cliproxy
           image: docker.io/eceasy/cli-proxy-api:v7.2.123

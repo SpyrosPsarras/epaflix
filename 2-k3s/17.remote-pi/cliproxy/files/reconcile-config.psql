@@ -1,0 +1,75 @@
+-- Reconcile the two CLIProxyAPI config values that git must own. See #861.
+--
+-- CLIProxyAPI keeps its whole config.yaml as one text row in config_store, and
+-- these two have no environment variable, so without this they are live-only
+-- database state that a rebuild loses.
+--
+-- Both are single-line, single-occurrence YAML keys, verified against the live
+-- row before this was written, so an anchored regexp_replace is safe and needs
+-- no YAML parser - which is the point. The first version of this shelled out to
+-- pip at pod start and failed twice over: no writable HOME under the non-root
+-- securityContext from #862, and psycopg2-binary publishes no musl wheels.
+--
+-- Idempotent: re-running changes nothing once the values match.
+--
+--   allow-remote  the internal hostname is useless without it. Every
+--                 non-localhost caller is refused regardless of key.
+--   auth-dir      must sit on the mounted emptyDir. It pointed at the pre-#867
+--                 spool inside the image WORKDIR, which #862 then made
+--                 read-only, so writing a provider token there would fail.
+--
+-- api-keys is deliberately NOT handled here. It is a list, not a line, and the
+-- owner may rotate it through the management UI. It is git-durable as
+-- `omp-api-key` in cliproxy-secrets.enc.yaml and named in the README as a
+-- required value - the documented-exception route #861 allows.
+
+\set ON_ERROR_STOP on
+
+DO $$
+DECLARE
+  n integer;
+BEGIN
+  IF to_regclass('public.config_store') IS NULL THEN
+    RAISE NOTICE 'config_store does not exist yet - first boot, the proxy seeds it';
+    RETURN;
+  END IF;
+
+  SELECT count(*) INTO n FROM public.config_store WHERE id = 'config';
+  IF n = 0 THEN
+    RAISE NOTICE 'no config row yet - first boot, the proxy seeds it';
+    RETURN;
+  END IF;
+
+  UPDATE public.config_store
+     SET content = regexp_replace(
+                     regexp_replace(
+                       content,
+                       '^(\s*)allow-remote:[ \t]*false[ \t]*$',
+                       '\1allow-remote: true',
+                       'n'),
+                     '^auth-dir:[ \t]*.*$',
+                     'auth-dir: "' || :'want_auth_dir' || '"',
+                     'n'),
+         updated_at = now()
+   WHERE id = 'config';
+
+  RAISE NOTICE 'reconciled';
+END $$;
+
+-- Prove it, and fail the initContainer if either value is not what git wants.
+DO $$
+DECLARE
+  c text;
+BEGIN
+  SELECT content INTO c FROM public.config_store WHERE id = 'config';
+  IF c IS NULL THEN RETURN; END IF;
+
+  IF c !~ '^\s*allow-remote:[ \t]*true[ \t]*$' THEN
+    RAISE EXCEPTION 'allow-remote is still not true after reconcile';
+  END IF;
+  IF c !~ ('^auth-dir:[ \t]*"' || :'want_auth_dir' || '"[ \t]*$') THEN
+    RAISE EXCEPTION 'auth-dir is not %', :'want_auth_dir';
+  END IF;
+
+  RAISE NOTICE 'verified: allow-remote true, auth-dir %', :'want_auth_dir';
+END $$;
