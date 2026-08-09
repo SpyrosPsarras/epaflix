@@ -82,6 +82,15 @@ jobs:
             # the trigger.
             probe: "kps-control-plane-endpointslice"
             whatToDoWhenItMoves: "Upstream now offers native EndpointSlice for the control-plane exporters, so `2-k3s/10.observability/control-plane-endpointslices.yaml` (the 3 static `discovery.k8s.io/v1` slices from #147) can be retired. Turn the new chart toggle on in `2-k3s/10.observability/prometheus-values.yaml`, then delete `control-plane-endpointslices.yaml` and its entry in `2-k3s/10.observability/kustomization.yaml`. Check FIRST that the chart-rendered slice carries the same master IPs and the `http-metrics` port name, and confirm all 9 control-plane targets are still UP in Prometheus before deleting anything - this is a live observability change, so give it its own PR and watch the targets. ArgoCD's cluster-global `core/v1 Endpoints` exclusion stays either way (#199 Option A rejected - not scopable)."
+          # Second row for the same upstream repo as #270, and that is intended:
+          # the workflow keys on the tracking issue, and the two rows ask
+          # different questions of the same release. #270 asks "does it carry the
+          # UTC fix so we can leave `:main`?"; this row asks "is the duplicate
+          # job-queue defect fixed so we can delete the boot guard?".
+          - issue: "870"
+            upstreamRepo: "lingarr-translate/lingarr"
+            pinnedVersion: "1.2.4"
+            whatToDoWhenItMoves: "Check whether the release notes (or its git log) show `TranslationRequestService.ResumeTranslationRequests()` no longer re-enqueues Pending/InProgress requests unconditionally, or that `TranslationJob` gained `[DisableConcurrentExecution]`. Either one retires the boot-time guard. If so, delete `2-k3s/08.servarr/lingarr/files/reconcile-job-queue.sql`, its `lingarr-jobqueue-guard` entry in the `configMapGenerator:` block of `2-k3s/08.servarr/kustomization.yaml`, and in `2-k3s/08.servarr/lingarr/lingarr.yaml` the `psql -f /sql/reconcile-job-queue.sql` line, the `jobqueue-guard` volumeMount and the `jobqueue-guard` volume. Keep the `enforce-db-invariants` initContainer itself - it still enforces `request_timeout` (#844). If neither is fixed, leave everything as it is and close this issue again."
 
     name: "#${{ matrix.issue }} ${{ matrix.upstreamRepo }}"
 

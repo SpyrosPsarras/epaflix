@@ -56,7 +56,22 @@ spec:
         #
         # Raise-only (never lowers a deliberately higher value) and tolerates the table not
         # existing yet on a first-ever install, before the app runs its migrations.
-        - name: enforce-request-timeout
+        #
+        # Second statement, #870: clear stale Hangfire TranslationJob work before the
+        # app boots. On startup Lingarr re-enqueues every Pending/InProgress request
+        # unconditionally (TranslationRequestService.cs:471, reached via
+        # ScheduleService.cs:107) and repoints `job_id` at the new job without deleting
+        # the old one, leaving a fetchable duplicate that cancel cannot reach.
+        #
+        # The guard is PRE-BOOT only and depends on `replicas: 1` + `strategy: Recreate`
+        # above: no Lingarr process is alive while an initContainer runs, and that
+        # single-writer window is what makes the delete safe. It must NEVER write to
+        # `translation_requests` - see the safety contract in the SQL file.
+        #
+        # The `request_timeout` statement above is FATAL under `set -e` (a correctness
+        # floor for translation quality, #844). The guard below is ADVISORY - a DB
+        # hiccup must degrade to today's behaviour, not block lingarr from starting.
+        - name: enforce-db-invariants
           image: postgres:16
           command:
             - sh
@@ -73,6 +88,9 @@ spec:
                   END IF;
                 END
                 \$\$;"
+              psql -v ON_ERROR_STOP=1 -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USERNAME" -d "$DB_DATABASE" \
+                -f /sql/reconcile-job-queue.sql \
+                || echo "WARN: reconcile-job-queue failed, continuing to boot (#870)"
           env:
             - name: DB_HOST
               valueFrom:
@@ -99,6 +117,10 @@ spec:
                 secretKeyRef:
                   name: servarr-postgres
                   key: lingarr-password
+          volumeMounts:
+            - name: jobqueue-guard
+              mountPath: /sql
+              readOnly: true
           resources:
             requests:
               memory: "32Mi"
@@ -192,6 +214,10 @@ spec:
         - name: media
           persistentVolumeClaim:
             claimName: servarr-media
+        # Consumed only by the enforce-db-invariants initContainer.
+        - name: jobqueue-guard
+          configMap:
+            name: lingarr-jobqueue-guard
 ---
 apiVersion: v1
 kind: Service

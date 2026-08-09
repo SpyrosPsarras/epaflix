@@ -87,6 +87,90 @@ kubectl -n servarr exec <lingarr-pod> -- sh -c 'cd /app/config && tar -xzf /tmp/
 kubectl -n servarr rollout restart deploy/lingarr
 ```
 
+## Boot-time job-queue reconcile (#870)
+
+A restart used to duplicate queued translation work and leave jobs that cancel
+could not reach. The `enforce-db-invariants` initContainer now clears that state
+before the app starts, using `files/reconcile-job-queue.sql`.
+
+### What upstream does
+
+- `ScheduleInitializationService` runs on application start and calls
+  `ScheduleService.Initialize()` (`ScheduleService.cs:107`), which calls
+  `TranslationRequestService.ResumeTranslationRequests()`
+  (`TranslationRequestService.cs:453-476`).
+- That method re-enqueues EVERY `Pending`/`InProgress` request unconditionally
+  (line 471) and repoints `translation_requests.job_id` at the new job. It never
+  deletes the job the request pointed at before, so the old `hangfire.job` row
+  stays `Enqueued` and its `hangfire.jobqueue` row stays fetchable - now
+  referenced by nothing.
+- Cancel deletes only the job named by `job_id` (`TranslationRequestService.cs:341-344`),
+  which is why the orphan survives a cancel and the title gets translated anyway.
+- `TranslationJob` carries no `[DisableConcurrentExecution]`, so the duplicate is
+  free to actually run.
+- Upstream's own startup cleanup covers `Processing` orphans only. The 2026-08-08
+  boot log shows `Cleaned up orphaned processing job 894` with no `Enqueued`
+  equivalent.
+
+### Safety contract
+
+**Pre-boot only. Never a CronJob. Never write to `translation_requests`.**
+
+- The guard is safe because the Deployment is `replicas: 1` with
+  `strategy: Recreate`, so no Lingarr process is alive while an initContainer
+  runs. That single-writer window is the whole guarantee.
+- Nulling `job_id` would send `ResumeTranslationRequests` down its
+  `JobId == null` branch (`TranslationRequestService.cs:462-469`), which silently
+  marks every pending request `Interrupted` - permanent, user-visible work loss.
+- Honest limit on the "no work is lost" claim. `OnApplicationStarted` is
+  `async void` and the resume loop inside `Initialize()` is not transactional.
+  If it throws part way through, the exception is swallowed and boot continues:
+  the requests it already reached are re-enqueued, and the ones after the throw
+  are left with their old queue row already deleted by the guard and no new job.
+  They sit idle until the NEXT successful boot. That is delay, not permanent
+  loss - `translation_requests.job_id` and `status` are durable, so the next
+  resume picks the same rows up again. Permanent loss would need `job_id`
+  nulled, which the guard never does.
+- The statement is advisory (`|| echo WARN`), unlike the `request_timeout`
+  statement above it in the same container, which stays fatal (#844).
+
+### This is a workaround
+
+It stays until upstream fixes the defect. The re-check is automated, not left to
+memory: `.github/workflows/upstream-release-watch.yml` carries a row keyed on
+issue #870 and reopens that issue when `lingarr-translate/lingarr` cuts a release
+past `1.2.4`. Upstream #315 fixed the `Processing` case only; the `Enqueued`
+sibling is still unfixed.
+
+Retire condition: a release whose notes or git log show `ResumeTranslationRequests`
+no longer re-enqueues unconditionally, or `TranslationJob` gaining
+`[DisableConcurrentExecution]`. Then delete `files/reconcile-job-queue.sql`, its
+`lingarr-jobqueue-guard` entry in the `configMapGenerator:` block of
+`../kustomization.yaml`, and the `psql -f` line plus the `jobqueue-guard`
+volume/volumeMount in `lingarr.yaml`. Keep the initContainer itself - it still
+enforces `request_timeout`.
+
+### Running it by hand
+
+Only if you need it out of band. Scale to 0 FIRST - the SQL is not safe against a
+live pod:
+
+```bash
+kubectl --context epaflix -n servarr scale deploy/lingarr --replicas=0
+kubectl --context epaflix -n servarr rollout status deploy/lingarr --timeout=120s
+PG=$(kubectl --context epaflix -n postgres-system get pod \
+  -l cnpg.io/instanceRole=primary -o jsonpath='{.items[0].metadata.name}')
+kubectl --context epaflix -n postgres-system exec -i "$PG" -c postgres -- \
+  psql -d lingarr-main -f - < 2-k3s/08.servarr/lingarr/files/reconcile-job-queue.sql
+kubectl --context epaflix -n servarr scale deploy/lingarr --replicas=1
+```
+
+On its first boot after this change lands the guard also performs a one-off
+cleanup of the unreachable `Enqueued` `TranslationJob` rows left over from the
+2026-08-08 burst. Count the rows before the roll and expect `0` after it - the
+absolute number drifts with normal use, so do not treat any fixed figure as the
+pass condition. It was 240 when this was measured on 2026-08-09.
+
 ## Files
 
 | File | Purpose |
@@ -94,6 +178,7 @@ kubectl -n servarr rollout restart deploy/lingarr
 | `lingarr.yaml` | Deployment + ClusterIP Service |
 | `pdb.yaml` | PodDisruptionBudget |
 | `ingress.yaml` | Traefik IngressRoute for `lingarr.epaflix.com` (internal per project convention — see below) |
+| `files/reconcile-job-queue.sql` | Boot-time Hangfire job-queue guard (#870), mounted from the `lingarr-jobqueue-guard` ConfigMap |
 | `docs/fix-identities.sql` | Post-pgloader IDENTITY reset |
 | `docs/pgloader.load` | pgloader command template |
 
