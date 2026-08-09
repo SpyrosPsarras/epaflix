@@ -34,6 +34,28 @@
 # Service so the matching ServiceMonitor target resolves to the master IPs.
 # Port name `http-metrics` matches the chart Service port name.
 #
+# WHEN THIS FILE CAN BE DELETED (issue #290)
+# ------------------------------------------
+# The day kube-prometheus-stack renders EndpointSlices for these exporters
+# itself. Verified against chart 88.2.0 on 2026-08-09: it does not yet -
+# `templates/exporters/{kube-controller-manager,kube-scheduler,kube-etcd,kube-proxy}`
+# each ship only `endpoints.yaml` / `service.yaml` / `servicemonitor.yaml`, and
+# a real render emits 4 `kind: Endpoints` and 0 `kind: EndpointSlice`:
+#
+#   helm template kps prometheus-community/kube-prometheus-stack --version 88.2.0 \
+#     --set kubeControllerManager.endpoints={10.0.0.1} \
+#     --set kubeScheduler.endpoints={10.0.0.1} \
+#     --set kubeEtcd.endpoints={10.0.0.1} | grep -E '^kind: (Endpoints|EndpointSlice)$'
+#
+# Nobody has to remember to re-run that. The `#290` row in
+# `.github/workflows/upstream-release-watch.yml` runs the same render weekly
+# (plus a values.yaml check for a per-exporter `*EndpointSlice*` key, because
+# the kubelet toggle upstream already shipped defaults to `false` and so would
+# not change a default render) and reopens #290 when it flips. Do not delete
+# this file before that fires: check the chart slice carries the same master
+# IPs and the `http-metrics` port name, and that all 9 control-plane targets
+# stay UP.
+#
 # DR / verify runbook: see 2-k3s/10.observability/README.md
 # ("Control-plane exporter Endpoints").
 ---
