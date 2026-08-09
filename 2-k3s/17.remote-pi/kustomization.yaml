@@ -45,6 +45,6 @@ images:
 configMapGenerator:
   - name: cliproxy-scripts
     files:
-      - cliproxy/files/reconcile-config.py
+      - cliproxy/files/reconcile-config.psql
     options:
       disableNameSuffixHash: true
