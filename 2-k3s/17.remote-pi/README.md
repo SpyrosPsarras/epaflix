@@ -278,6 +278,11 @@ kubectl --context epaflix -n remote-pi logs deploy/cliproxy | grep 'workspace pa
 
 It must say `/var/lib/cliproxy/pgstore`.
 
+`PGSTORE_LOCAL_PATH` is a base directory - the binary appends `pgstore/` to
+whatever it is given. So the value is `/var/lib/cliproxy` and the spool lands at
+`/var/lib/cliproxy/pgstore`. Setting the full path gave
+`/var/lib/cliproxy/pgstore/pgstore`, which worked but read wrong.
+
 Probes are `tcpSocket` on 8317 on purpose. `/v1/*` needs a client API key, and
 `/management.html` can legitimately 404 before the SPA download finishes, so
 neither is an honest health signal.

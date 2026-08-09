@@ -89,8 +89,11 @@ spec:
             # to the WORKDIR and grows the container layer instead - there is no
             # error, so check the startup log line `workspace path:` after any
             # image bump.
+            # LOCAL_PATH is a BASE directory - the binary appends `pgstore/`
+            # to it itself. Setting it to /var/lib/cliproxy/pgstore produced
+            # /var/lib/cliproxy/pgstore/pgstore, which worked but read wrong.
             - name: PGSTORE_LOCAL_PATH
-              value: /var/lib/cliproxy/pgstore
+              value: /var/lib/cliproxy
             - name: MANAGEMENT_STATIC_PATH
               value: /var/lib/cliproxy/static
           ports:
