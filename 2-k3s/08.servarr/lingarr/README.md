@@ -4,9 +4,29 @@ AI subtitle translator. Calls Ollama (OpenAI-compatible endpoint) on TrueNAS. Pa
 
 ## Image
 
-Custom fork `ghcr.io/spyrospsarras/lingarr:fix-zombie-concurrency-exec-update` — upstream PR: https://github.com/lingarr-translate/lingarr/pull/377 (refs #339). Fix replaces tracked-entity `SaveChangesAsync` in `TranslateContentAsync` catch blocks + `HandleAsyncTranslationCompletion` with `ExecuteUpdateAsync` to survive EF `DbUpdateConcurrencyException`, and adds a dedupe guard on the content path.
+Upstream `ghcr.io/lingarr-translate/lingarr:main`, digest-pinned by the
+`images:` block in `../kustomization.yaml` (`newTag: main@sha256:...`). The
+`:main` dev branch is deliberate: it is the only ref that carries upstream
+#432 `6f9d879d` "fix: on npgsql convert DateTime to utc" (2026-05-19), which
+fixes the Bazarr->Lingarr 500 `Cannot write DateTime with Kind=Local to
+timestamptz`. Latest upstream release `1.2.4` (2026-05-15) predates that
+commit, and `:latest` is byte-identical to `1.2.4`, so neither is usable.
 
-When upstream merges #377, flip `image:` in `lingarr.yaml` to `lingarr/lingarr:latest` (≥ the merging release).
+The old fork `ghcr.io/spyrospsarras/lingarr:fix-zombie-concurrency-exec-update`
+is **retired**, not running anywhere: its upstream PR #377 (refs #339) merged
+2026-04-23 and shipped in `1.2.4`.
+
+**Unpin condition (#270).** When upstream publishes a release newer than
+`1.2.4`, confirm it contains `6f9d879d`, then swap the `images:` entry to that
+plain release tag and drop the lingarr `automerge: false` rule in
+`.github/renovate.json` (it exists only because `:main` is a dev branch).
+
+Nobody has to remember this. `.github/workflows/upstream-release-watch.yml`
+checks weekly and reopens #270 the moment the release appears:
+
+```shell
+gh api repos/lingarr-translate/lingarr/releases --jq '.[0].tag_name'   # != 1.2.4 -> act
+```
 
 ## Database
 
