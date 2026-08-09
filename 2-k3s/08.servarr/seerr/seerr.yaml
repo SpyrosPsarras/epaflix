@@ -80,7 +80,18 @@ spec:
               readOnly: true
       containers:
         - name: seerr
-          # Using Jellyseerr OIDC preview image for OIDC support
+          # Fork image, pinned for OIDC only (#218). Nothing bumps this line:
+          # Renovate sets no kubernetes-manager file pattern, and image-updater
+          # was retired (#192/#265). The tag itself is mutable and the pull
+          # policy is Always, so the fork still moves under us on every restart.
+          # Unpin condition - a stable seerr tag whose git tree carries OIDC:
+          #   STABLE=$(gh api repos/seerr-team/seerr/releases \
+          #     --jq '[.[]|select(.draft==false and .prerelease==false)][0].tag_name')
+          #   gh api "repos/seerr-team/seerr/git/trees/$STABLE?recursive=1" \
+          #     --jq '[.tree[].path|select(test("oidc|openid";"i"))]'
+          # Non-empty -> migrate to ghcr.io/seerr-team/seerr:$STABLE (destructive,
+          # owner-gated: see #218). Checked weekly by
+          # .github/workflows/seerr-oidc-watch.yml, which reopens #218 on change.
           image: fallenbagel/jellyseerr:preview-OIDC
           imagePullPolicy: Always
           env:

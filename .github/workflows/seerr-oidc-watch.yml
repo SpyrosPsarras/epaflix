@@ -1,0 +1,180 @@
+name: seerr-oidc-watch
+
+# Watch for #218. The cluster pins `fallenbagel/jellyseerr:preview-OIDC`
+# (2-k3s/08.servarr/seerr/seerr.yaml) only because no stable seerr release
+# ships native OIDC. Upstream PR seerr-team/seerr#2715 has been open since
+# 2026-03-17 with no landing date, so a human re-checking it by hand every few
+# weeks is pure waste - three identical "still blocked" comments already sit on
+# #218. This job does the re-check instead and reopens #218 the moment the
+# answer changes.
+#
+# Renovate cannot express this condition: the target image tag does not exist
+# yet, and the trigger is "a foreign repo's PR landed / a foreign tag now
+# contains OIDC code", not "a newer tag of a pinned image exists". A scheduled
+# API check is the only mechanism that can see it.
+#
+# Notify conditions (any one reopens #218):
+#   A. latest stable release tag actually contains OIDC source paths - the real
+#      goal, and it also catches OIDC arriving via some other PR than #2715
+#   B. PR #2715 is merged - migration planning can start even pre-release
+#   C. PR #2715 is closed unmerged - the tracked lineage died, needs re-triage
+#
+# Same shape as k3s-stable-drift.yml: CI-side reminder, no cluster surface, no
+# secrets, single issue updated in place. Reads a public repo with the default
+# GITHUB_TOKEN.
+
+on:
+  schedule:
+    - cron: "20 8 * * 1" # Mondays 08:20 UTC (k3s-stable-drift runs at 08:00)
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      UPSTREAM: seerr-team/seerr
+      UPSTREAM_PR: "2715"
+      TRACKING_ISSUE: "218"
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Resolve upstream OIDC state
+        id: resolve
+        run: |
+          set -euo pipefail
+
+          # --- upstream PR #2715 ---
+          PR=$(gh api "repos/$UPSTREAM/pulls/$UPSTREAM_PR" \
+            --jq '{state,merged,base:.base.ref,updated_at}' || true)
+          if [ -z "$PR" ]; then
+            echo "signal=error" >> "$GITHUB_OUTPUT"
+            echo "detail=could not read repos/$UPSTREAM/pulls/$UPSTREAM_PR" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          PR_STATE=$(printf '%s' "$PR" | jq -r '.state')
+          PR_MERGED=$(printf '%s' "$PR" | jq -r '.merged')
+          PR_BASE=$(printf '%s' "$PR" | jq -r '.base')
+          PR_UPDATED=$(printf '%s' "$PR" | jq -r '.updated_at')
+
+          # --- latest stable (non-draft, non-prerelease) release ---
+          # No --paginate: with --jq, gh applies the filter per page, so a
+          # `[...][0]` would emit one line per page. Page 1 (30 releases,
+          # newest first) is more than enough.
+          STABLE=$(gh api "repos/$UPSTREAM/releases" \
+            --jq '[.[] | select(.draft == false and .prerelease == false)][0].tag_name' || true)
+          if [ -z "$STABLE" ] || [ "$STABLE" = "null" ]; then
+            echo "signal=error" >> "$GITHUB_OUTPUT"
+            echo "detail=could not resolve latest stable release tag for $UPSTREAM" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # --- does that tag actually carry OIDC code? ---
+          # Release notes lie by omission, so walk the tag's git tree instead.
+          # `oauth` is deliberately NOT matched: Plex OAuth already exists and
+          # would false-positive forever.
+          OIDC_HITS=$(gh api "repos/$UPSTREAM/git/trees/$STABLE?recursive=1" \
+            --jq '[.tree[].path | select(test("oidc|openid";"i"))] | length' || echo "err")
+          if [ "$OIDC_HITS" = "err" ]; then
+            echo "signal=error" >> "$GITHUB_OUTPUT"
+            echo "detail=could not walk git tree for tag $STABLE" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          {
+            echo "pr_state=$PR_STATE"
+            echo "pr_merged=$PR_MERGED"
+            echo "pr_base=$PR_BASE"
+            echo "pr_updated=$PR_UPDATED"
+            echo "stable=$STABLE"
+            echo "oidc_hits=$OIDC_HITS"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "PR #$UPSTREAM_PR: state=$PR_STATE merged=$PR_MERGED base=$PR_BASE updated=$PR_UPDATED"
+          echo "Latest stable: $STABLE | OIDC paths in that tag: $OIDC_HITS"
+
+          if [ "$OIDC_HITS" -gt 0 ]; then
+            echo "signal=shipped" >> "$GITHUB_OUTPUT"
+          elif [ "$PR_MERGED" = "true" ]; then
+            echo "signal=merged" >> "$GITHUB_OUTPUT"
+          elif [ "$PR_STATE" = "closed" ]; then
+            echo "signal=abandoned" >> "$GITHUB_OUTPUT"
+          else
+            echo "signal=blocked" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Reopen the tracking issue when upstream moved
+        if: contains(fromJSON('["shipped","merged","abandoned"]'), steps.resolve.outputs.signal)
+        env:
+          SIGNAL: ${{ steps.resolve.outputs.signal }}
+          PR_STATE: ${{ steps.resolve.outputs.pr_state }}
+          PR_MERGED: ${{ steps.resolve.outputs.pr_merged }}
+          PR_BASE: ${{ steps.resolve.outputs.pr_base }}
+          STABLE: ${{ steps.resolve.outputs.stable }}
+          OIDC_HITS: ${{ steps.resolve.outputs.oidc_hits }}
+        run: |
+          set -euo pipefail
+
+          case "$SIGNAL" in
+            shipped)
+              HEAD="Stable release \`$STABLE\` now contains OIDC source code ($OIDC_HITS matching path(s))."
+              NEXT="Do the migration. It is destructive and owner-gated: back up the Postgres \`jellyseerr\` DB and the \`jellyseerr-config\` PVC first, then swap \`2-k3s/08.servarr/seerr/seerr.yaml\` to \`ghcr.io/seerr-team/seerr:$STABLE\`, chown UID 568 -> 1000, remap the \`settings.json\` OIDC keys, and handle the one-way v3.0.0 data migration. Add a Renovate rule for the new tag so it is tracked instead of being an untracked mutable pin. Smoke test with #253."
+              ;;
+            merged)
+              HEAD="Upstream PR #$UPSTREAM_PR is **merged** into \`$PR_BASE\`. Latest stable \`$STABLE\` does not carry the code yet."
+              NEXT="Half the condition is met. Start planning the migration, and wait for the first stable tag cut from \`$PR_BASE\` that contains OIDC before touching the cluster."
+              ;;
+            abandoned)
+              HEAD="Upstream PR #$UPSTREAM_PR is **closed without being merged**. The lineage this issue tracks is dead."
+              NEXT="Re-triage. Find whether native OIDC moved to another PR or discussion upstream, repoint this issue at it, and update the watch condition in \`.github/workflows/seerr-oidc-watch.yml\`. If upstream dropped OIDC for good, decide whether we stay on the fork image permanently and close this."
+              ;;
+          esac
+
+          BODY=$(cat <<EOF
+          ## Upstream state changed - reopened automatically
+
+          $HEAD
+
+          Observed by \`.github/workflows/seerr-oidc-watch.yml\` on $(date -u +%Y-%m-%d):
+
+          - PR \`$UPSTREAM#$UPSTREAM_PR\`: state \`$PR_STATE\`, merged \`$PR_MERGED\`, base \`$PR_BASE\`
+          - latest stable release: \`$STABLE\`
+          - OIDC source paths in the \`$STABLE\` git tree: \`$OIDC_HITS\`
+
+          ## Next step
+
+          $NEXT
+
+          ## Verify by hand
+
+          \`\`\`shell
+          gh api repos/$UPSTREAM/pulls/$UPSTREAM_PR --jq '{state,merged,base:.base.ref}'
+          STABLE=\$(gh api repos/$UPSTREAM/releases --jq '[.[]|select(.draft==false and .prerelease==false)][0].tag_name')
+          gh api "repos/$UPSTREAM/git/trees/\$STABLE?recursive=1" --jq '[.tree[].path|select(test("oidc|openid";"i"))]'
+          \`\`\`
+
+          Watch page: https://github.com/$UPSTREAM/pull/$UPSTREAM_PR
+          EOF
+          )
+
+          STATE=$(gh issue view "$TRACKING_ISSUE" --json state --jq '.state')
+          if [ "$STATE" = "CLOSED" ]; then
+            gh issue reopen "$TRACKING_ISSUE" --comment "$BODY"
+            echo "Reopened #$TRACKING_ISSUE (signal=$SIGNAL)"
+          else
+            echo "#$TRACKING_ISSUE is already open - not commenting again (signal=$SIGNAL)"
+          fi
+
+      - name: Still blocked - nothing to do
+        if: steps.resolve.outputs.signal == 'blocked'
+        run: |
+          echo "PR #$UPSTREAM_PR still open and unmerged, and stable ${{ steps.resolve.outputs.stable }} has no OIDC code."
+          echo "Condition unmet. Leaving #$TRACKING_ISSUE as is."
+
+      - name: Fail loudly if upstream state could not be resolved
+        if: steps.resolve.outputs.signal == 'error'
+        run: |
+          echo "::error::seerr OIDC watch could not read upstream state: ${{ steps.resolve.outputs.detail }}"
+          exit 1
