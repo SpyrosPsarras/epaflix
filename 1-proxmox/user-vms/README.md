@@ -52,16 +52,16 @@ For the second hop to work, the bastion's `id_ed25519.pub` must be in the
 Bastion public key (`ubuntu@bastion:~/.ssh/id_ed25519.pub`):
 
 ```
-ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILE5gxfynqrw8z5EVEYlPpriGzAGk6lUxQdXxiyy/2xU spypsarras@gmail.com
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILE5gxfynqrw8z5EVEYlPpriGzAGk6lUxQdXxiyy/2xU ubuntu@bastion
 ```
 
 Apply / re-apply (e.g. after a node rebuild), from a host that can reach the nodes:
 
 ```bash
-PUBKEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILE5gxfynqrw8z5EVEYlPpriGzAGk6lUxQdXxiyy/2xU spypsarras@gmail.com'
+PUBKEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILE5gxfynqrw8z5EVEYlPpriGzAGk6lUxQdXxiyy/2xU ubuntu@bastion'
 for ip in 51 52 53 61 62 63 65; do
   ssh ubuntu@192.168.10.$ip "umask 077; mkdir -p ~/.ssh; \
-    grep -qF 'spypsarras@gmail.com' ~/.ssh/authorized_keys 2>/dev/null \
+    grep -qF 'ILE5gxfynqrw8z5EVEYlPpriGzAGk6lUxQdXxiyy/2xU' ~/.ssh/authorized_keys 2>/dev/null \
     || echo \"$PUBKEY\" >> ~/.ssh/authorized_keys"
 done
 ```
