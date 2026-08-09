@@ -3,8 +3,19 @@
 #
 # The compose published host 8091 -> ntfy default 80. Here ntfy is told to
 # listen on :8091 directly (NTFY_LISTEN_HTTP) so the in-cluster Service and
-# NTFY_BASE_URL=http://ntfy:8091 line up. The ntfy cache is non-critical so an
-# emptyDir is fine.
+# NTFY_BASE_URL=http://ntfy:8091 line up.
+#
+# The cache is on a PVC, not an emptyDir. It holds the ONLY copy of every
+# delivered message: subscribing is per client and there are no accounts (see
+# the Service comment below), so a client that was offline catches up purely
+# from this cache. An emptyDir meant every pod replacement silently discarded
+# it, and the alerts on these topics are edge-triggered - one message per
+# event - so a wipe loses the event itself, not a duplicate of it.
+#
+# This does NOT lengthen history: ntfy still prunes at its 12 h
+# NTFY_CACHE_DURATION default. The PVC only stops restarts from wiping it.
+# Sizing: cache.db was 94 KB after 12 h across three topics, so 1Gi is the
+# repo's minimum PVC size rather than a real estimate.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -14,6 +25,12 @@ metadata:
     app: ntfy
 spec:
   replicas: 1
+  # Recreate, not RollingUpdate: one writer against a SQLite file on an RWO
+  # volume. The default maxSurge would bring up a second pod sharing cache.db
+  # (corruption risk), or wedge the rollout waiting on an RWO volume pinned to
+  # another node. Same reason as homarr/syncthing/cliproxy in this repo.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: ntfy
@@ -67,7 +84,8 @@ spec:
             timeoutSeconds: 10
       volumes:
         - name: cache
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: ntfy-cache
 ---
 apiVersion: v1
 kind: Service
@@ -81,11 +99,18 @@ spec:
   # range-global. RFC1918, not internet-routable, so ntfy stays off the
   # Cloudflare-proxied *.epaflix.com wildcard (an IngressRoute would have
   # published an unauthenticated publish/subscribe endpoint to the internet).
-  # Needed so the Proxmox VE hosts — which are not on the pod network — can
-  # POST vzdump job failures to topic `pve-backups` (#597). In-cluster
-  # consumers are unaffected: ntfy:8091 still resolves for the
+  # Off-cluster publishers need this LB because they are not on the pod network:
+  #   - Proxmox VE hosts       -> topic `pve-backups`     vzdump job failures (#597)
+  #   - TrueNAS 192.168.10.200 -> topic `truenas-alerts`  GPU health, cron */15
+  #     (`/root/gpu-health-check.sh` on the host - GPU lost/recovered, persistenced died)
+  # In-cluster consumers are unaffected: ntfy:8091 still resolves for the
   # Alertmanager -> ntfy leg (topic k8s-alertmanager, #568) and for
   # NTFY_BASE_URL in odysseus-config.
+  #
+  # There is no such thing as registering a topic server-side here: login is
+  # disabled, so ntfy has no accounts, no reservations and no subscription sync.
+  # A topic exists as soon as something publishes to it, and SUBSCRIBING IS PER
+  # CLIENT - the phone app or a browser pointed at http://192.168.10.112:8091.
   type: LoadBalancer
   loadBalancerIP: 192.168.10.112
   selector:
@@ -95,3 +120,24 @@ spec:
     - name: http
       port: 8091
       targetPort: http
+---
+# ntfy message cache - replaces the original emptyDir (see Deployment comment).
+# local-path is node-local: the PV lands on whichever node the pod first
+# schedules onto and the pod is pinned there afterwards. That is the same
+# tradeoff every stateful app here already takes (syncthing, homarr,
+# remote-pi), and it is acceptable for a cache. Modelled on odysseus-data,
+# which is the same shape and needs no ArgoCD ignoreDifferences entry.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ntfy-cache
+  namespace: odysseus
+  labels:
+    app: ntfy
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 1Gi
