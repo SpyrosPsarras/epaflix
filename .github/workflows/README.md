@@ -19,7 +19,7 @@ Flow: open PR → Actions validates → you merge → ArgoCD deploys.
 | `build-airvpn-bluetit.yml` | PR/push touching `images/airvpn-bluetit/**` | build the AirVPN Bluetit sidecar image; same PR-safe pattern |
 | `k3s-stable-drift.yml` | schedule (Mon 08:00 UTC) | compares pinned k3s version against upstream stable and opens/updates a drift issue |
 | `seerr-oidc-watch.yml` | schedule (Mon 08:20 UTC) | watches upstream `seerr-team/seerr` for native OIDC and reopens #218 when it lands |
-| `upstream-release-watch.yml` | schedule (Mon 08:40 UTC) | data-driven matrix watch: per row, reopens a closed `blocked-external` issue once upstream cuts a release past the pinned version. Adding an issue is one matrix row (#270 = lingarr) |
+| `upstream-release-watch.yml` | schedule (Mon 08:40 UTC) | data-driven matrix watch over closed `blocked-external` issues. Default row: reopen once upstream cuts a release past the pinned version (#270 = lingarr). A row may instead carry an optional `probe` - a named shape check that replaces the version comparison, for blockers where "a newer release exists" is not the event (#290 = kube-prometheus-stack rendering `EndpointSlice` instead of `v1 Endpoints` for the control-plane exporters). Adding an issue is still one matrix row |
 
 ## `ci.yml` — the `validate` check
 

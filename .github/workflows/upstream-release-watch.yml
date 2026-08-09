@@ -17,10 +17,17 @@ name: upstream-release-watch
 #   - upstream state unreadable -> FAIL the job. A watch that silently stops
 #     watching is worse than no watch at all.
 #
+# Some blockers are NOT "is there a newer release?". The thing we wait for is a
+# change in what upstream *renders*, while the version bumps constantly without
+# it. Those rows carry an optional `probe` (documented on the matrix below): a
+# named shape check that replaces the version comparison for that row only.
+# Rows without a `probe` are decided by the version comparison exactly as
+# before.
+#
 # Sibling: `seerr-oidc-watch.yml` stays a bespoke file on purpose - its trigger
-# is "a stable release whose git tree contains OIDC source paths", which this
-# table cannot express. Anything that IS just "is there a newer release?"
-# belongs here.
+# is "a stable release whose git tree contains OIDC source paths", which needs
+# a git-tree walk per candidate release. Anything expressible as "is there a
+# newer release?", or as one of the named probes below, belongs here.
 
 on:
   schedule:
@@ -39,7 +46,19 @@ jobs:
       # block below - no new file, no new job, no new workflow. Fields:
       #   issue                - the issue in THIS repo that tracks the blocker
       #   upstreamRepo         - owner/name of the upstream GitHub repo
-      #   pinnedVersion        - the release tag we are stuck at / behind
+      #   pinnedVersion        - the release tag we are stuck at / behind.
+      #                          Required on a row WITHOUT `probe`. Omit it on a
+      #                          probe row, where it would gate on the wrong
+      #                          event.
+      #   probe                - OPTIONAL. Name of a shape probe implemented in
+      #                          the "Probe the rendered shape upstream" step.
+      #                          No `probe` -> the row is decided by the version
+      #                          comparison alone, behaviour unchanged. With a
+      #                          `probe` -> the version comparison is SKIPPED
+      #                          and the probe alone decides. Use it when "a
+      #                          newer release exists" is not the event you care
+      #                          about. A new probe is one new branch in that
+      #                          step, not a new file.
       #   whatToDoWhenItMoves  - the concrete next action, pasted into the
       #                          reopen comment. Write it for a stranger: name
       #                          the file to edit and what to verify.
@@ -50,6 +69,19 @@ jobs:
             upstreamRepo: "lingarr-translate/lingarr"
             pinnedVersion: "1.2.4"
             whatToDoWhenItMoves: "Confirm the release notes (or its git log) contain upstream #432 `6f9d879d` \"fix: on npgsql convert DateTime to utc\" - without it the Bazarr->Lingarr 500 comes back. Then replace the `newTag: main@sha256:...` entry for `ghcr.io/lingarr-translate/lingarr` in `2-k3s/08.servarr/kustomization.yaml` with a plain release tag, drop the `:main` reference in `2-k3s/08.servarr/lingarr/lingarr.yaml`, and delete the now-pointless lingarr `automerge: false` rule in `.github/renovate.json` (it exists only because `:main` is a dev branch). Restarting lingarr rolls the pod - check the open soak/timeout issues first."
+          - issue: "290"
+            upstreamRepo: "prometheus-community/helm-charts"
+            # No `pinnedVersion` on purpose. kube-prometheus-stack cuts a
+            # release most weeks (this repo is pinned at 87.21.0, upstream was
+            # already at 88.2.0 on 2026-08-09), and Renovate's kustomize
+            # manager already bumps that `helmCharts:` pin in
+            # `2-k3s/10.observability/kustomization.yaml`. Gating on the
+            # version would reopen this issue on every bump for nothing: a
+            # chart-version bump is not the event we wait for, the rendered
+            # shape of the control-plane exporters is. So the probe alone is
+            # the trigger.
+            probe: "kps-control-plane-endpointslice"
+            whatToDoWhenItMoves: "Upstream now offers native EndpointSlice for the control-plane exporters, so `2-k3s/10.observability/control-plane-endpointslices.yaml` (the 3 static `discovery.k8s.io/v1` slices from #147) can be retired. Turn the new chart toggle on in `2-k3s/10.observability/prometheus-values.yaml`, then delete `control-plane-endpointslices.yaml` and its entry in `2-k3s/10.observability/kustomization.yaml`. Check FIRST that the chart-rendered slice carries the same master IPs and the `http-metrics` port name, and confirm all 9 control-plane targets are still UP in Prometheus before deleting anything - this is a live observability change, so give it its own PR and watch the targets. ArgoCD's cluster-global `core/v1 Endpoints` exclusion stays either way (#199 Option A rejected - not scopable)."
 
     name: "#${{ matrix.issue }} ${{ matrix.upstreamRepo }}"
 
@@ -63,6 +95,7 @@ jobs:
     steps:
       - name: Resolve latest upstream stable release
         id: resolve
+        if: ${{ !matrix.probe }}
         run: |
           set -euo pipefail
 
@@ -102,11 +135,11 @@ jobs:
           fi
 
           echo "latest=$LATEST" >> "$GITHUB_OUTPUT"
-          echo "published=$PUBLISHED" >> "$GITHUB_OUTPUT"
           echo "$UPSTREAM: latest stable=$LATEST (published $PUBLISHED), pinned baseline=$PINNED"
 
           if [ "$LATEST" = "$PINNED" ]; then
             echo "signal=unchanged" >> "$GITHUB_OUTPUT"
+            echo "observed=latest stable is still $PINNED." >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -114,31 +147,208 @@ jobs:
           # upstream deleted or re-cut releases; that is not "shipped", it is a
           # state we refuse to interpret.
           NEWEST=$(printf '%s\n%s\n' "$PINNED" "$LATEST" | sort -V | tail -n 1)
-          if [ "$NEWEST" = "$LATEST" ]; then
-            echo "signal=moved" >> "$GITHUB_OUTPUT"
-          else
+          if [ "$NEWEST" != "$LATEST" ]; then
             echo "signal=error" >> "$GITHUB_OUTPUT"
             echo "detail=latest stable $LATEST sorts OLDER than pinned baseline $PINNED in $UPSTREAM" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
-      - name: Reopen the tracking issue when upstream moved
-        if: steps.resolve.outputs.signal == 'moved'
+          # `signal` plus `headline` / `verify` / `linkLine` / `observed` is the
+          # contract EVERY detector in this job fills in, so the reopen and
+          # report steps below stay generic no matter which one ran.
+          echo "signal=moved" >> "$GITHUB_OUTPUT"
+          {
+            echo 'headline<<DETECTOR_EOF'
+            echo "\`$UPSTREAM\` now has a stable release **\`$LATEST\`** (published $PUBLISHED). We were waiting on anything past \`$PINNED\`, so the blocker is gone."
+            echo 'DETECTOR_EOF'
+            echo 'verify<<DETECTOR_EOF'
+            echo "gh api repos/$UPSTREAM/releases --jq '[.[]|select(.draft==false and .prerelease==false)][0].tag_name'"
+            echo 'DETECTOR_EOF'
+            echo "linkLine=Release page: https://github.com/$UPSTREAM/releases"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Install pinned helm (probe rows only)
+        if: ${{ matrix.probe }}
+        run: |
+          set -euo pipefail
+          # Same pin mechanism as the `Install tools` step in
+          # `.github/workflows/ci.yml`: an inline `# renovate:` marker on the
+          # assignment, kept fresh by the HELM_VERSION customManager in
+          # `.github/renovate.json` (its managerFilePatterns lists this file
+          # too). NOT the runner's preinstalled helm and NOT a setup action:
+          # both drift, and a probe whose renderer drifts cannot tell "upstream
+          # changed shape" from "my helm changed".
+          HELM_VERSION=3.21.3  # renovate: datasource=github-releases depName=helm/helm
+
+          tmp=$(mktemp -d)
+          helm_tgz="helm-v${HELM_VERSION}-linux-amd64.tar.gz"
+          for asset in "$helm_tgz" "${helm_tgz}.sha256sum"; do
+            n=0
+            until curl -fsSL -o "$tmp/$asset" "https://get.helm.sh/$asset"; do
+              n=$((n+1))
+              if [ "$n" -ge 3 ]; then
+                echo "::error::download failed after 3 attempts: $asset"
+                exit 1
+              fi
+              sleep $((n*5))
+            done
+          done
+          ( cd "$tmp" && sha256sum -c "${helm_tgz}.sha256sum" )
+          tar -xzf "$tmp/$helm_tgz" -C "$tmp"
+          sudo mv "$tmp/linux-amd64/helm" /usr/local/bin/helm
+          rm -rf "$tmp"
+          helm version --short
+
+      - name: Probe the rendered shape upstream
+        id: probe
+        if: ${{ matrix.probe }}
         env:
-          LATEST: ${{ steps.resolve.outputs.latest }}
-          PUBLISHED: ${{ steps.resolve.outputs.published }}
+          PROBE: ${{ matrix.probe }}
+        run: |
+          set -euo pipefail
+
+          if [ "$PROBE" != "kps-control-plane-endpointslice" ]; then
+            echo "signal=error" >> "$GITHUB_OUTPUT"
+            echo "detail=row #$TRACKING_ISSUE names probe '$PROBE', which this step does not implement" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # PROBE kps-control-plane-endpointslice - issue #290
+          # -------------------------------------------------
+          # Question: does kube-prometheus-stack still back its control-plane
+          # exporters with hardcoded `v1 Endpoints`? While it does, the three
+          # static slices in `2-k3s/10.observability/control-plane-endpointslices.yaml`
+          # cannot be retired.
+          #
+          # Scope is the THREE exporters that actually have a static slice here:
+          # kube-controller-manager, kube-scheduler, kube-etcd. The issue body
+          # also names kube-proxy, but this cluster sets
+          # `kubeProxy.enabled: false` (Cilium) and carries no slice for it, so
+          # a kube-proxy-only change is not our event.
+          #
+          # Evidence is a `helm template` RENDER, not a directory listing: a
+          # file named `endpointslice.yaml` can sit dead behind a guard, while
+          # the render is exactly what ArgoCD's repo-server would apply. The
+          # values.yaml check further down covers the one case a default render
+          # cannot see.
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts >/dev/null
+          helm repo update prometheus-community >/dev/null
+
+          # Newest published chart version from the Helm repo index, NOT the
+          # releases API: prometheus-community publishes releases for ~100
+          # charts, so page 1 of /releases is not guaranteed to contain a
+          # kube-prometheus-stack entry at all.
+          CHART=$(helm search repo prometheus-community/kube-prometheus-stack --output json \
+                    | jq -r '[.[] | select(.name == "prometheus-community/kube-prometheus-stack")][0].version // ""')
+          if [ -z "$CHART" ]; then
+            echo "signal=error" >> "$GITHUB_OUTPUT"
+            echo "detail=could not read the newest kube-prometheus-stack version from the prometheus-community Helm repo index" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          TAG="kube-prometheus-stack-$CHART"
+          echo "newest published chart: $CHART (release tag $TAG)"
+
+          # Every exporter's endpoints template is guarded by
+          # `if .Values.<exporter>.endpoints`, so a DEFAULT render emits nothing
+          # for them and would read as "the Endpoints are gone". Feed each one a
+          # dummy address, the way prometheus-values.yaml feeds the real master
+          # IPs.
+          helm template kps prometheus-community/kube-prometheus-stack --version "$CHART" \
+            --set kubeControllerManager.endpoints={10.0.0.1} \
+            --set kubeScheduler.endpoints={10.0.0.1} \
+            --set kubeEtcd.endpoints={10.0.0.1} > rendered.yaml
+
+          # Count kinds ONLY inside the three exporter template dirs. Scoping
+          # matters: the chart already ships an unrelated kubelet EndpointSlice
+          # toggle, so a bare `grep 'kind: EndpointSlice'` would reopen this
+          # issue for any future EndpointSlice anywhere in the chart.
+          awk '/^# Source:/ { src = $3 }
+               /^kind: (Endpoints|EndpointSlice)$/ &&
+               src ~ /\/templates\/exporters\/(kube-controller-manager|kube-scheduler|kube-etcd)\// { print $2 }' \
+            rendered.yaml | sort | uniq -c | tee kinds.txt
+          ES=$(awk '$2 == "EndpointSlice" { print $1 }' kinds.txt)
+          EP=$(awk '$2 == "Endpoints" { print $1 }' kinds.txt)
+          ES=${ES:-0}
+          EP=${EP:-0}
+
+          # Second trigger, taken from the issue itself: a per-exporter
+          # `*EndpointSlice*` values key. The kubelet toggle upstream already
+          # shipped (`prometheusOperator.kubeletEndpointSliceEnabled`) defaults
+          # to false, so the same toggle for our three could land WITHOUT
+          # changing a default render. Parse the values as YAML instead of
+          # grepping, so indentation cannot fool it.
+          helm show values prometheus-community/kube-prometheus-stack --version "$CHART" > values.yaml
+          KEYS=$(python3 - <<'PY'
+          import yaml
+
+          values = yaml.safe_load(open("values.yaml")) or {}
+          hits = []
+          for block in ("kubeControllerManager", "kubeScheduler", "kubeEtcd"):
+              node = values.get(block)
+              if isinstance(node, dict):
+                  hits += ["%s.%s" % (block, key) for key in node if "endpointslice" in key.lower()]
+          print(" ".join(sorted(hits)))
+          PY
+          )
+          echo "control-plane EndpointSlice values keys: ${KEYS:-none}"
+
+          if [ "$ES" -eq 0 ] && [ "$EP" -eq 3 ] && [ -z "$KEYS" ]; then
+            echo "signal=unchanged" >> "$GITHUB_OUTPUT"
+            echo "observed=chart $CHART still renders kind: Endpoints for all 3 control-plane exporters, and values.yaml still has no EndpointSlice key for them." >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "$ES" -eq 0 ] && [ -z "$KEYS" ]; then
+            # Neither shape found where one must be: the probe's own
+            # assumptions broke (a values key renamed, an exporter dropped).
+            # Fail loudly rather than report "unchanged" from a render we no
+            # longer understand.
+            echo "signal=error" >> "$GITHUB_OUTPUT"
+            echo "detail=chart $CHART rendered $EP kind: Endpoints and $ES kind: EndpointSlice under templates/exporters for the 3 control-plane exporters - expected exactly 3 Endpoints, so this probe needs re-basing" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "signal=moved" >> "$GITHUB_OUTPUT"
+          echo "latest=$CHART" >> "$GITHUB_OUTPUT"
+          {
+            echo 'headline<<DETECTOR_EOF'
+            echo "kube-prometheus-stack **\`$CHART\`** no longer backs the control-plane exporters with hardcoded \`v1 Endpoints\` only:"
+            echo ""
+            echo "- rendered under \`templates/exporters/{kube-controller-manager,kube-scheduler,kube-etcd}\`: **$ES** \`kind: EndpointSlice\`, **$EP** \`kind: Endpoints\`"
+            echo "- control-plane EndpointSlice keys in \`values.yaml\`: ${KEYS:-none}"
+            echo ""
+            echo "That is the exact condition #290 was closed on, so the static slices can be retired now."
+            echo 'DETECTOR_EOF'
+            echo 'verify<<DETECTOR_EOF'
+            echo "helm repo add prometheus-community https://prometheus-community.github.io/helm-charts"
+            echo "helm template kps prometheus-community/kube-prometheus-stack --version $CHART \\"
+            echo "  --set kubeControllerManager.endpoints={10.0.0.1} \\"
+            echo "  --set kubeScheduler.endpoints={10.0.0.1} \\"
+            echo "  --set kubeEtcd.endpoints={10.0.0.1} | grep -E '^kind: (Endpoints|EndpointSlice)\$'"
+            echo 'DETECTOR_EOF'
+            echo "linkLine=Chart templates: https://github.com/prometheus-community/helm-charts/tree/$TAG/charts/kube-prometheus-stack/templates/exporters"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Reopen the tracking issue when upstream moved
+        if: ${{ (steps.resolve.outputs.signal || steps.probe.outputs.signal) == 'moved' }}
+        env:
+          LATEST: ${{ steps.resolve.outputs.latest || steps.probe.outputs.latest }}
+          HEADLINE: ${{ steps.resolve.outputs.headline || steps.probe.outputs.headline }}
+          VERIFY: ${{ steps.resolve.outputs.verify || steps.probe.outputs.verify }}
+          LINK_LINE: ${{ steps.resolve.outputs.linkLine || steps.probe.outputs.linkLine }}
         run: |
           set -euo pipefail
 
           STATE=$(gh issue view "$TRACKING_ISSUE" --json state --jq '.state')
           if [ "$STATE" != "CLOSED" ]; then
-            echo "#$TRACKING_ISSUE is already $STATE - not commenting again (latest=$LATEST)."
+            echo "#$TRACKING_ISSUE is already $STATE - not commenting again (upstream now at $LATEST)."
             exit 0
           fi
 
           BODY=$(cat <<EOF
           ## Upstream moved - reopened automatically
 
-          \`$UPSTREAM\` now has a stable release **\`$LATEST\`** (published $PUBLISHED). We were waiting on anything past \`$PINNED\`, so the blocker is gone.
+          $HEADLINE
 
           Observed by \`.github/workflows/upstream-release-watch.yml\` on $(date -u +%Y-%m-%d).
 
@@ -149,23 +359,27 @@ jobs:
           ## Verify by hand
 
           \`\`\`shell
-          gh api repos/$UPSTREAM/releases --jq '[.[]|select(.draft==false and .prerelease==false)][0].tag_name'
+          $VERIFY
           \`\`\`
 
-          Release page: https://github.com/$UPSTREAM/releases
+          $LINK_LINE
           EOF
           )
 
           gh issue reopen "$TRACKING_ISSUE" --comment "$BODY"
-          echo "Reopened #$TRACKING_ISSUE - $UPSTREAM shipped $LATEST."
+          echo "Reopened #$TRACKING_ISSUE - upstream moved to $LATEST."
 
       - name: Unchanged - nothing to do
-        if: steps.resolve.outputs.signal == 'unchanged'
+        if: ${{ (steps.resolve.outputs.signal || steps.probe.outputs.signal) == 'unchanged' }}
+        env:
+          OBSERVED: ${{ steps.resolve.outputs.observed || steps.probe.outputs.observed }}
         run: |
-          echo "$UPSTREAM latest stable is still $PINNED. Condition unmet, leaving #$TRACKING_ISSUE as is."
+          echo "$UPSTREAM: $OBSERVED Condition unmet, leaving #$TRACKING_ISSUE as is."
 
       - name: Fail loudly if upstream state could not be resolved
-        if: steps.resolve.outputs.signal == 'error'
+        if: ${{ (steps.resolve.outputs.signal || steps.probe.outputs.signal) == 'error' }}
+        env:
+          DETAIL: ${{ steps.resolve.outputs.detail || steps.probe.outputs.detail }}
         run: |
-          echo "::error::upstream-release-watch could not read upstream state for #$TRACKING_ISSUE: ${{ steps.resolve.outputs.detail }}"
+          echo "::error::upstream-release-watch could not read upstream state for #$TRACKING_ISSUE: $DETAIL"
           exit 1
