@@ -642,3 +642,51 @@ target that delivers and one that swallows.
 
 Still open in #720: whether PVE/PBS mail should go through the real relay so
 it reaches a human inbox, the way Alertmanager does after #461.
+
+### Notification mail must go through the relay (#720)
+
+Building `/etc/aliases.db` stops mail deferring, but it does not make it
+arrive. PVE addresses notifications to the address configured for
+`root@pam`, so postfix sends outward. With no `relayhost` it delivers
+direct-to-MX from the home IP and the recipient refuses it:
+
+    550-5.7.26 ... DKIM = did not pass ... SPF ... = did not pass
+
+Route through the same authenticated relay Alertmanager uses (#461). The
+host, port and credentials are already in the credential store as
+`alert_email_hostname`, `alert_email_SMTP_port`, `alert_email_username`
+and `alert_email_password`.
+
+Per node, with the credential arriving on stdin so it never reaches argv
+or the process list:
+
+    printf '[%s]:%s %s:%s\n' "$HOST" "$PORT" "$USER" "$PASS" \
+      | ssh root@<node> 'umask 077; cat > /etc/postfix/sasl_passwd; \
+          chmod 600 /etc/postfix/sasl_passwd; postmap /etc/postfix/sasl_passwd; \
+          shred -u /etc/postfix/sasl_passwd'
+
+    # libsasl2-modules is REQUIRED and is not installed by default on a PVE
+    # node. Without it postfix has only libsasldb.so, offers no PLAIN/LOGIN,
+    # and every send fails with:
+    #     SASL authentication failure: No worthy mechs found
+    # It defers rather than bounces, so nothing is lost - but nothing is
+    # delivered either, and the cause is not obvious from the postfix config.
+    apt-get install -y libsasl2-modules
+
+    postconf -e 'relayhost = [<host>]:587'
+    postconf -e 'smtp_sasl_auth_enable = yes'
+    postconf -e 'smtp_sasl_password_maps = hash:/etc/postfix/sasl_passwd'
+    postconf -e 'smtp_sasl_security_options = noanonymous'
+    postconf -e 'smtp_tls_security_level = encrypt'
+    postconf -e 'sender_canonical_classes = envelope_sender, header_sender'
+    postconf -e 'sender_canonical_maps = static:<relay account>'
+    postfix reload
+
+The sender rewrite is not optional. SPF checks the envelope sender and
+DMARC wants the header sender aligned too; without both the mail still
+claims to be `root@<node>.epaflix.com` and is refused for exactly the
+reason this exists to fix. The plaintext map is shredded after `postmap`
+because postfix reads the `.db`.
+
+ntfy remains the channel that is actually watched, via the `ntfy-pve`
+webhook target from PR #716. Mail is the second copy, not the primary.
