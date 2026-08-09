@@ -18,6 +18,7 @@ Flow: open PR → Actions validates → you merge → ArgoCD deploys.
 | `build-vpn-picker.yml` | PR/push touching `images/vpn-picker/**` | build + test the vpn-picker image; push to GHCR only on main, PR runs never push |
 | `build-airvpn-bluetit.yml` | PR/push touching `images/airvpn-bluetit/**` | build the AirVPN Bluetit sidecar image; same PR-safe pattern |
 | `k3s-stable-drift.yml` | schedule (Mon 08:00 UTC) | compares pinned k3s version against upstream stable and opens/updates a drift issue |
+| `seerr-oidc-watch.yml` | schedule (Mon 08:20 UTC) | watches upstream `seerr-team/seerr` for native OIDC and reopens #218 when it lands |
 
 ## `ci.yml` — the `validate` check
 
