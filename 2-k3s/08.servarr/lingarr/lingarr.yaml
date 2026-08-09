@@ -48,11 +48,30 @@ spec:
         # so it can only be set in the DB — classic live-only drift, same class as #317.
         #
         # Why it matters: the shipped default of 5s is shorter than a cold-start on the
-        # Ollama endpoint (~30s) and shorter than a context-heavy warm call
+        # Ollama endpoint and shorter than a context-heavy warm call
         # (ai_context_before/after=8). On timeout Lingarr burns max_retries and then writes
         # the SOURCE line to the output file, so a translation "succeeds" with a correct
-        # .<lang>.srt name and a Lingarr header but untranslated text inside. That silently
-        # produced 152 English-content .el.srt files across 16 titles before it was caught.
+        # .<lang>.srt name and a Lingarr header but untranslated text inside.
+        #
+        # Measured on 2026-08-09 against the live endpoint, so the numbers here are not
+        # guesses: a cold call (model not resident, /api/ps empty) took 10.6s for 4 tokens
+        # including the model load, and warm calls run at 56 tok/s. An earlier version of
+        # this comment said the cold start was ~30s; that was never measured. 5s is still
+        # far too short - it cannot even cover the model load - so 60 stands.
+        #
+        # The damage this caused, re-counted from the quarantine archive that holds exactly
+        # those files (/media/backups/fake-greek-el-2026-08-07): 152 .el.srt across 16
+        # titles were archived, of which 100 across 14 titles are English content by the
+        # project's <10%-non-ASCII rule. The other 52 measure 44-53% non-ASCII, the same
+        # band as healthy Greek on this tree, so they were swept in by mistake. An earlier
+        # version of this comment called all 152 "English-content", which over-counts the
+        # real damage by 52 files.
+        #
+        # Note for anyone re-running that scan: healthy Greek here measures 50-59%
+        # non-ASCII (1716 of 2065 live files), NOT the 63-67% older issues quote, and the
+        # 10% line is closer than it looks - one legitimate dialogue-sparse film measures
+        # 11%, because timestamps dominate its bytes. Scan /media/tvshows /media/movies
+        # /media/animes, never /media, or the count includes the backups above.
         #
         # Raise-only (never lowers a deliberately higher value) and tolerates the table not
         # existing yet on a first-ever install, before the app runs its migrations.
