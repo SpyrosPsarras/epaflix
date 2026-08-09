@@ -608,3 +608,37 @@ Revert with `rm /etc/ssh/sshd_config.d/99-no-password-auth.conf && systemctl rel
 
 **The k3s VMs already had this** (`PasswordAuthentication no`, `sudo` NOPASSWD),
 so their 7 passwords are console-only and were deliberately left unrotated.
+
+## Postfix aliases database (#720)
+
+Every PVE node must have `/etc/aliases.db`. Debian ships `/etc/aliases` but
+not the compiled database, and postfix cannot resolve `root` without it:
+
+```
+postfix/local: error: open database /etc/aliases.db: No such file or directory
+postfix/local: warning: hash:/etc/aliases: lookup of 'root' failed
+status=deferred (alias database unavailable)
+```
+
+The PVE builtin `default-matcher` routes **every** notification to the
+`mail-to-root` sendmail target, so without this file every backup report,
+every job failure and every health warning defers forever instead of being
+delivered. Both nodes had **246 deferred messages** when this was found. It
+is the mechanism behind #597 going unnoticed for three weeks.
+
+Fix, and part of building any new node:
+
+```bash
+newaliases                 # builds /etc/aliases.db from /etc/aliases
+postqueue -f               # flush what has been deferring
+test -f /etc/aliases.db    # must succeed
+```
+
+There is deliberately no `root:` alias, so mail lands in `/var/mail/root`.
+That is not the channel anyone watches - **ntfy is**, via the `ntfy-pve`
+webhook target added in PR #716. The local mailbox exists as a greppable
+on-disk record for incident forensics, which is the difference between a
+target that delivers and one that swallows.
+
+Still open in #720: whether PVE/PBS mail should go through the real relay so
+it reaches a human inbox, the way Alertmanager does after #461.
