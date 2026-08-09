@@ -60,6 +60,59 @@ BEGIN
   RAISE NOTICE 'reconciled';
 END $$;
 
+-- Register the LAN Ollama on TrueNAS as an openai-compatibility upstream, so one
+-- endpoint serves both the Claude account and the local models. Append-only and
+-- idempotent: openai-compatibility is a top-level key that the seeded config does
+-- not define, and YAML does not care about top-level key order, so appending is
+-- safe and needs no YAML parser.
+--
+-- The api-key is a placeholder. Ollama does not authenticate, and the field is
+-- required by the schema, so this is deliberately not a secret and belongs in git.
+--
+-- Model names carry a colon (qwen3.5:9b), which is awkward in a client model
+-- string, so each gets a colon-free alias.
+DO $$
+DECLARE
+  c text;
+BEGIN
+  SELECT content INTO c FROM public.config_store WHERE id = 'config';
+  IF c IS NULL THEN RETURN; END IF;
+
+  IF EXISTS (SELECT 1 FROM regexp_matches(c, '^openai-compatibility:', 'n')) THEN
+    RAISE NOTICE 'openai-compatibility already present - leaving it alone';
+    RETURN;
+  END IF;
+
+  UPDATE public.config_store
+     SET content = rtrim(c, E' \n') || E'\n' || $ollama$
+openai-compatibility:
+  - name: "ollama"
+    base-url: "http://192.168.10.200:30068/v1"
+    api-key-entries:
+      - api-key: "ollama-no-auth-required"
+    models:
+      - name: "qwen3.5:9b"
+        alias: "ollama-qwen3.5-9b"
+        display-name: "Qwen 3.5 9B (Ollama)"
+      - name: "gemma4:12b-it-qat"
+        alias: "ollama-gemma4-12b"
+        display-name: "Gemma 4 12B IT QAT (Ollama)"
+      - name: "gemma4:e4b"
+        alias: "ollama-gemma4-e4b"
+        display-name: "Gemma 4 E4B (Ollama)"
+      - name: "lfm2.5:8b"
+        alias: "ollama-lfm2.5-8b"
+        display-name: "LFM 2.5 8B (Ollama)"
+      - name: "aya-expanse:8b"
+        alias: "ollama-aya-expanse-8b"
+        display-name: "Aya Expanse 8B (Ollama)"
+$ollama$,
+         updated_at = now()
+   WHERE id = 'config';
+
+  RAISE NOTICE 'openai-compatibility: ollama appended';
+END $$;
+
 -- Prove it, and fail the initContainer if either value is not what git wants.
 DO $$
 DECLARE
