@@ -70,7 +70,6 @@ spec:
           args:
             - --no-psqlrc
             - --set=ON_ERROR_STOP=1
-            - --set=want_auth_dir=/var/lib/cliproxy/pgstore/auths
             - --file=/scripts/reconcile-config.psql
           securityContext:
             allowPrivilegeEscalation: false
