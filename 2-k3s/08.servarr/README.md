@@ -47,7 +47,7 @@ This directory contains the Kubernetes manifests for deploying the complete Serv
 - **Prowlarr**: Indexer manager (port 9696)
 - **Bazarr**: Subtitle management (port 6767, development branch) — configured with `translator_type: lingarr`
 - **bazarr-autotranslate**: Hourly scanner that asks Bazarr to translate subs in BASE_LANGUAGES (en, ko) → TO_LANGUAGES (el)
-- **Lingarr**: AI subtitle translator (port 9876) — backend for Bazarr's translation. Postgres-backed (`lingarr-main` DB). Uses custom fork image with zombie/concurrency fix pending upstream (PR #377).
+- **Lingarr**: AI subtitle translator (port 9876) — backend for Bazarr's translation. Postgres-backed (`lingarr-main` DB). Runs upstream `ghcr.io/lingarr-translate/lingarr:main` (digest-pinned) because the DateTime->UTC fix is not in a release yet — see `lingarr/README.md` and #270.
 
 ### Media & Downloads
 - **Jellyfin**: Media server (port 8096) with NVIDIA GPU transcoding
