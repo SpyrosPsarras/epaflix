@@ -143,6 +143,12 @@ configMapGenerator:
   - name: cleanuparr-seeding-guard
     files:
       - enforce-private-seeding.py=cleanuparr/files/enforce-private-seeding.py
+  # SQL for the lingarr enforce-db-invariants initContainer (#870). Same reason it is
+  # generated: the name-suffix hash rolls the lingarr Deployment whenever the guard
+  # changes. Public SQL, no credentials -> ConfigMap, not a Secret.
+  - name: lingarr-jobqueue-guard
+    files:
+      - reconcile-job-queue.sql=lingarr/files/reconcile-job-queue.sql
 # `images:` is digest-pinned on moving tags (:latest, :development, …) and is
 # the bump-target for Renovate (Image Updater retired — #192/#265). Renovate's
 # servarr-scoped digest rule (.github/renovate.json,
