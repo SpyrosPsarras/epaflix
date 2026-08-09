@@ -1,0 +1,32 @@
+schema: spec-driven
+
+# Shown to AI when creating artifacts. Deliberately short - CLAUDE.md is the
+# authority for this repo and this file does not restate it (#818).
+context: |
+  Public homelab infrastructure repo: K3s (3 masters / 4 workers) plus a dormant
+  Docker Swarm cluster on two Proxmox VE hosts, TrueNAS for iSCSI and NFS.
+  Documentation-heavy - shell scripts, Kubernetes YAML, markdown runbooks. There is
+  no build and no test suite; CI runs YAML-parse, gitignore and SOPS-encryption guards.
+
+  ArgoCD app-of-apps reconciles 2-k3s/. Git is the source of truth: live edits get
+  reverted, and aligned git must be pushed before an Application is created.
+
+  Secrets are SOPS+age. The committed store is .github/instructions/secrets.enc.yaml;
+  cluster Secrets live as *.enc.yaml next to their kustomization. Never put a
+  credential value, a username/password, or the employer's name in an artifact -
+  reference a key name instead.
+
+  Read CLAUDE.md before writing any artifact. It carries the critical rules, cluster
+  inventory, conventions and the merge policy.
+
+rules:
+  proposal:
+    - List every path the change touches, and flag the ones under 2-k3s/ that ArgoCD reconciles
+    - Reference credentials by key name in the SOPS store, never by value
+  tasks:
+    - Every task that changes live cluster state names the command that verifies it
+
+operations:
+  apply:
+    guidance:
+      - A live-only fix is not a fix - codify it in git the same day or the next rebuild reverts it

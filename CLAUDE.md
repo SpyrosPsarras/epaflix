@@ -97,7 +97,8 @@ TrueNAS: `ssh truenas_admin@192.168.10.200`.
 1-proxmox/          # Proxmox host config, VM creation, user VMs
 2-k3s/              # K3s cluster — numbered subdirs (01-15) in deploy order + maintenance/
 3-docker-swarm/     # Docker Swarm cluster + stacks (dormant, see #583)
-docs/               # Design docs — docs/superpowers/{plans,specs} hold spec-driven feature designs
+docs/               # Design docs — docs/superpowers/{plans,specs} is frozen history (see ## Spec-Driven Work)
+openspec/           # OpenSpec — config.yaml (tracked) + changes/ and specs/ artifacts
 artifacts/          # Per-issue triage / feature working notes (git-ignored scratch, see general.instructions.md, #662)
 backups/            # Local backups (git-ignored)
 images/             # Documentation images
@@ -126,6 +127,12 @@ Domain-specific guidance lives in `.github/instructions/`:
 - `pihole.instructions.md` — DNS architecture, record management, Unbound config
 - `general.instructions.md` — Security rules, history logging format
 - `babysitter.instructions.md` — methodology, recommended processes, CI/CD setup
+
+## Spec-Driven Work
+
+**OpenSpec is the default for new spec-driven work.** Non-trivial features and migrations go through `openspec/`: propose → apply → archive, driven by the `/opsx-*` commands. `openspec/config.yaml` is tracked and carries the repo context an agent needs; the commands and skills it generates live under `.claude/` and are git-ignored — run `openspec update` after an `openspec` CLI upgrade to regenerate them.
+
+`docs/superpowers/{plans,specs}` is **frozen history**, not a live system. The 15 files there stay as the record of how the pre-OpenSpec features were designed — read them for context, never add to them. The git-ignored `.superpowers/` scratch tree is local leftovers and survives nothing.
 
 ## Babysitter
 
