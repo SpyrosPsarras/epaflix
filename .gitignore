@@ -45,6 +45,13 @@ raid-migration
 *.sql
 *.sql.gz
 *.zip
+# ...but the lingarr boot guard is SOURCE, not a dump: public SQL with no
+# credentials, mounted as a ConfigMap by `2-k3s/08.servarr/kustomization.yaml`
+# (#870). Without this negation the `*.sql` rule above silently drops it, the
+# `configMapGenerator` has no file to read, and ArgoCD fails to render the
+# servarr Application. Scoped to that one directory on purpose - database dumps
+# stay ignored everywhere else.
+!2-k3s/08.servarr/lingarr/files/*.sql
 
 # Local cache from kustomize+helm pull (per-Application 2-k3s/0X.*/charts/)
 charts/
