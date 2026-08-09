@@ -4,6 +4,10 @@
 -- these two have no environment variable, so without this they are live-only
 -- database state that a rebuild loses.
 --
+-- The wanted auth-dir is inlined, not a psql variable: psql does NOT
+-- interpolate :'var' inside a dollar-quoted DO block. It is a constant and not
+-- a secret.
+--
 -- Both are single-line, single-occurrence YAML keys, verified against the live
 -- row before this was written, so an anchored regexp_replace is safe and needs
 -- no YAML parser - which is the point. The first version of this shelled out to
@@ -48,7 +52,7 @@ BEGIN
                        '\1allow-remote: true',
                        'n'),
                      '^auth-dir:[ \t]*.*$',
-                     'auth-dir: "' || :'want_auth_dir' || '"',
+                     'auth-dir: "/var/lib/cliproxy/pgstore/auths"',
                      'n'),
          updated_at = now()
    WHERE id = 'config';
@@ -64,12 +68,15 @@ BEGIN
   SELECT content INTO c FROM public.config_store WHERE id = 'config';
   IF c IS NULL THEN RETURN; END IF;
 
-  IF c !~ '^\s*allow-remote:[ \t]*true[ \t]*$' THEN
+  -- The 'n' flag is load-bearing. The bare ~ operator anchors ^ and $ to the
+  -- whole string, not to line boundaries, so without it this can never match a
+  -- middle line and the check fails on a config that was just corrected.
+  IF NOT EXISTS (SELECT 1 FROM regexp_matches(c, '^\s*allow-remote:[ \t]*true[ \t]*$', 'n')) THEN
     RAISE EXCEPTION 'allow-remote is still not true after reconcile';
   END IF;
-  IF c !~ ('^auth-dir:[ \t]*"' || :'want_auth_dir' || '"[ \t]*$') THEN
-    RAISE EXCEPTION 'auth-dir is not %', :'want_auth_dir';
+  IF NOT EXISTS (SELECT 1 FROM regexp_matches(c, '^auth-dir:[ \t]*"/var/lib/cliproxy/pgstore/auths"[ \t]*$', 'n')) THEN
+    RAISE EXCEPTION 'auth-dir is not /var/lib/cliproxy/pgstore/auths';
   END IF;
 
-  RAISE NOTICE 'verified: allow-remote true, auth-dir %', :'want_auth_dir';
+  RAISE NOTICE 'verified: allow-remote true, auth-dir /var/lib/cliproxy/pgstore/auths';
 END $$;
