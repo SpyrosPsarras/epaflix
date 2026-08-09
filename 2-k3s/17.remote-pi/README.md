@@ -238,16 +238,18 @@ Only `PGSTORE_DSN` is set, so Postgres wins.
 The relay pod next door runs as UID 1000 with `readOnlyRootFilesystem: true`.
 The proxy pod does neither. This is deliberate and recorded, not an oversight:
 
-- `readOnlyRootFilesystem: false`. The process rewrites
-  `/CLIProxyAPI/config.yaml` in place, inside its own WORKDIR next to the
-  binary. That is how it converts a plaintext `remote-management.secret-key`
-  into a bcrypt hash on first start, and how management-UI changes persist. On
-  a read-only root filesystem that write fails.
-- Runs as the image default, which is root. The auth directory is
-  `/root/.cli-proxy-api`. The only way to move it is the `auth-dir` key in
-  `config.yaml` - which the process does not read until after it has booted and
-  written that file. There is no ordering that lets us relocate it to a non-root
-  home before first start.
+The proxy is hardened to match the relay pod: `runAsNonRoot: true` as uid 1000, `readOnlyRootFilesystem: true`, every capability dropped, no privilege escalation, `seccompProfile: RuntimeDefault`, and no service account token.
+
+It was not always. It first shipped as root with a writable root filesystem, on the assumption that the process rewrites `/CLIProxyAPI/config.yaml` in place and needs `/root/.cli-proxy-api`. That assumption was wrong for this deployment. With the Postgres backend it writes neither - both paths were absent on the running pod. Config and auth live in Postgres and are mirrored to `PGSTORE_LOCAL_PATH`, which is the mounted emptyDir.
+
+Two things the hardening needs, and why:
+
+- `HOME` is redirected to `/var/lib/cliproxy/home`. The image default is `/root`, mode 700 and owned by root, which uid 1000 cannot write.
+- `/tmp` is its own emptyDir. With a read-only root filesystem anything writing a temp file fails without it.
+
+This was proven before it was changed, not after. A throwaway probe Deployment ran the same image under the hardened settings with an isolated `PGSTORE_SCHEMA`, so it could not touch the live tables. It reached 1/1, logged `postgres-backed token store enabled`, downloaded the management SPA, and served `/management.html` with HTTP 200 as uid 1000 with a read-only rootfs. The probe and its schema were then deleted.
+
+If a future image bump reintroduces a write outside the emptyDirs, the pod will CrashLoop rather than fail quietly. Check the logs for a permission error before assuming the image is broken.
 
 What still holds the blast radius down: no service account token
 (`automountServiceAccountToken: false`), no host mounts, all capabilities
