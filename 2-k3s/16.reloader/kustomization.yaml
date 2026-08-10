@@ -1,15 +1,15 @@
-# ArgoCD-managed kustomization for stakater/Reloader (issue #299).
+# ArgoCD-managed kustomization for stakater/Reloader (issues #299, #780).
 #
 # Owned by ArgoCD Application "reloader" (2-k3s/11.argocd/apps/app-reloader.yaml).
 #
-# THREE separate Reloader releases, one per watched namespace, NOT one shared
+# FOUR separate Reloader releases, one per watched namespace, NOT one shared
 # instance with a namespace list. Verified against the pulled chart
 # (v1.4.19 / 2.2.14) templates: `reloader.namespaces` is not a real key in
 # this version, and `watchGlobally: false` ties the pod + ServiceAccount +
 # Role + RoleBinding all to a single namespace (`.Values.namespace` or the
 # release namespace) — there is no way to grant real namespace-scoped Role
 # RBAC (as opposed to a cluster-wide ClusterRole) for more than one
-# namespace per release. Three tiny instances (10m CPU / 32Mi mem each) is
+# namespace per release. Four tiny instances (10m CPU / 32Mi mem each) is
 # the price of keeping RBAC scoped instead of reaching for
 # `watchGlobally: true`, which would need a ClusterRole able to read every
 # Secret in the cluster just to ignore most of them via `ignoreNamespaces`.
@@ -41,3 +41,9 @@ helmCharts:
     releaseName: reloader-odysseus
     namespace: odysseus
     valuesFile: values/reloader-odysseus-values.yaml
+  - name: reloader
+    repo: https://stakater.github.io/stakater-charts
+    version: "2.2.15"
+    releaseName: reloader-app-authentik
+    namespace: app-authentik
+    valuesFile: values/reloader-app-authentik-values.yaml

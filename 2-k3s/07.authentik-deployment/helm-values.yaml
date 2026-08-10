@@ -28,6 +28,33 @@ global:
     - secretRef:
         name: authentik-app-secrets
 
+  # Reloader opt-in (#780). `authentik-app-secrets` is consumed as env vars via
+  # the envFrom above, and env values are resolved once at pod start, so a
+  # rotated key stays pinned until the pods restart (#299). This annotation
+  # hands that restart to the `reloader-app-authentik` instance
+  # (2-k3s/16.reloader) instead of a human remembering
+  # `kubectl rollout restart`.
+  #
+  # Convention: the scoped `secret.reloader.stakater.com/reload: "<name>"`
+  # form every other workload in this repo uses, never
+  # `reloader.stakater.com/auto: "true"` — an unrelated Secret edit in
+  # app-authentik must not bounce SSO.
+  #
+  # `global.deploymentAnnotations` is the chart's path onto BOTH Deployments:
+  # server/deployment.yaml and worker/deployment.yaml both render
+  # `mergeOverwrite (deepCopy .Values.global.deploymentAnnotations)
+  # .Values.<component>.deploymentAnnotations` into `metadata.annotations`,
+  # which is where Reloader looks. Not `podAnnotations` — that lands on the
+  # pod template, which Reloader does not read.
+  #
+  # Only `authentik-app-secrets` is listed. The chart-managed `authentik`
+  # Secret already rolls the pods on its own via the chart's
+  # `checksum/secret` pod annotation, and `authentik-iac-blueprint` is a
+  # mounted volume the worker re-reads on blueprint discovery, so neither
+  # needs Reloader.
+  deploymentAnnotations:
+    secret.reloader.stakater.com/reload: "authentik-app-secrets"
+
 # Authentik core configuration
 authentik:
   # Sensitive values (secret_key, postgresql.password, and the whole email
