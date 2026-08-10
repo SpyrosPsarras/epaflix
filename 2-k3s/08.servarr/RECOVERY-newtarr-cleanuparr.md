@@ -393,12 +393,14 @@ other paths (legacy qbt API, health endpoints) got the login page. Since #296
 returns the Authentik redirect and a caller left there fails outright rather
 than half-working. `qbittorrent.epaflix.com` is the exception and fails a
 different way: it resolves to `192.168.10.102` (`traefik-internal`) where the
-route carries no middleware, so it answers `200` on root and `403` from
-qBittorrent's own auth on the legacy probe - never an Authentik redirect. The
-internal Service URL is still the only correct value for both cases.
-**All three *arr instances were repointed to
-internal Service URLs by #468** - the "still the public hostnames" note that
-used to sit here is out of date. Verified live 2026-08-02:
+route carries no middleware, so qBittorrent itself answers: `200` on root,
+`404` on the legacy `/version/api` probe and `403` from its own auth on
+`/api/v2/*` - never an Authentik redirect. The internal Service URL is still
+the only correct value for both cases.
+
+**All three *arr instances were repointed to internal Service URLs by #468** -
+the "still the public hostnames" note that used to sit here is out of date.
+Verified live 2026-08-02:
 
 | instance | `url` - actually called | `external_url` - display only |
 |---|---|---|

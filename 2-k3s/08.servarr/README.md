@@ -183,12 +183,15 @@ Update each app (Sonarr, Sonarr2, Radarr) to use:
 - Category: `tv` / `anime` / `movies` respectively
 
 > **In-cluster clients MUST use the internal Service URL (`qbittorrent:8080`),
-> never the public `qbittorrent.epaflix.com`.** The public hostname sits behind
-> Authentik forward-auth (#176) on every path. A client that probes it gets the
-> Authentik login HTML instead of a JSON response. This silently broke Cleanuparr
-> for 27 days (its qBittorrent client probes the legacy `/version/api` endpoint),
-> see the "Cleanuparr blind for 27 days behind forward-auth" incident in
-> `RECOVERY-newtarr-cleanuparr.md`. The same rule applies to every
+> never the public `qbittorrent.epaflix.com`.** In 2026-07 that public hostname
+> sat behind Authentik forward-auth (#176) on every path except `/api`, so a
+> client probing the legacy `/version/api` endpoint got the Authentik login HTML
+> instead of a JSON response. That is what silently broke Cleanuparr for 27 days
+> - see the "Cleanuparr blind for 27 days behind forward-auth" incident in
+> `RECOVERY-newtarr-cleanuparr.md`. The hostname is **no longer gated at all**
+> today (it resolves to `192.168.10.102`, see the exception below), so the same
+> call now fails differently rather than not at all - which is worse to debug,
+> not better. The rule is unchanged. The same rule applies to every
 > service-to-service call (`http://sonarr:8989`, etc.); the `.epaflix.com` URLs
 > under *Access URLs* below are browser-only.
 >
