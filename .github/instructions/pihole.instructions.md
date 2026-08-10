@@ -95,7 +95,7 @@ IP column, do not assume. Rows are in live-file order, so a `diff` against the b
 | `seerr.epaflix.com` | 192.168.10.101 | Seerr |
 | `jellyseerr.epaflix.com` | 192.168.10.101 | Jellyseerr |
 | `jellyfin.epaflix.com` | 192.168.10.101 | Jellyfin |
-| `qbittorrent.epaflix.com` | 192.168.10.101 | qBittorrent WebUI |
+| `qbittorrent.epaflix.com` | **192.168.10.102** | qBittorrent WebUI - Traefik `internal` entry point, not the public LB. The `qbittorrent-internal` IngressRoute carries **no Authentik middleware**, so this name is un-gated: root answers `200` and `/api/*` answers `403` from qBittorrent's own login. The gated `websecure` route on `.101` still exists but nothing resolves to it (verified 2026-08-10, #296/#937) |
 | `homarr.epaflix.com` | 192.168.10.101 | Homarr |
 | `cleanuparr.epaflix.com` | 192.168.10.101 | Cleanuparr |
 | `auth.epaflix.com` | 192.168.10.101 | Authentik |
@@ -118,8 +118,10 @@ IP column, do not assume. Rows are in live-file order, so a `diff` against the b
 
 > **Not every record is 192.168.10.101.** Services on Traefik's `internal` entry
 > point resolve to the dedicated `traefik-internal` LoadBalancer at
-> `192.168.10.102`, which the router forwards nothing to. `cliproxy.epaflix.com`
-> and `remote-pi.epaflix.com` are the two of those.
+> `192.168.10.102`, which the router forwards nothing to. Four names are on it:
+> `searxng`, `qbittorrent`, `remote-pi` and `cliproxy`. Of those, only `searxng`
+> and `qbittorrent` also have a gated public route on `.101` that DNS never
+> reaches - so "it is behind Authentik" is false for both by name.
 
 > **No wildcard**: any unlisted `*.epaflix.com` subdomain falls through to public DNS
 > and resolves to the real Cloudflare IPs (`172.67.179.219` / `104.21.59.155`).
