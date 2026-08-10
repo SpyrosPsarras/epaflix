@@ -29,12 +29,24 @@ spec:
             - name: config
               mountPath: /etc/prometheus
               readOnly: true
+          # CPU limit raised 200m -> 1000m (#912). Measured over 24h to
+          # 2026-08-10: 21.6m average, 26.0m p95, 43.1m peak - well inside the
+          # old 200m limit - yet throttled 43.2% of runnable periods, firing
+          # CPUThrottlingHigh. The burst, not the average, was hitting the wall:
+          # every scrape opens HTTPS sessions to both Proxmox hosts and parses
+          # the responses in one go, and that does not fit a 20ms CFS slice.
+          #
+          # 1000m matches the measured throttle knee for this cluster (see the
+          # same change on prometheus-node-exporter in prometheus-values.yaml):
+          # 500m is not enough, two containers still throttle 40-46% there.
+          # Limits are ceilings, not reservations, so the 100m request is
+          # unchanged and no schedulable capacity is consumed.
           resources:
             requests:
               cpu: 100m
               memory: 128Mi
             limits:
-              cpu: 200m
+              cpu: 1000m
               memory: 256Mi
 
           livenessProbe:

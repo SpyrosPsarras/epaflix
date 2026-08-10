@@ -32,7 +32,7 @@ Complete monitoring, logging, and service mesh observability for the K3s cluster
 ## Stack Components
 
 ### Currently Deployed ✅
-- **Prometheus** (1 replica): Time-series metrics database with 15d retention
+- **Prometheus** (1 replica): Time-series metrics database with **8d** retention (see `### Prometheus Storage` - the 20GiB size cap is the real bound, #913)
 - **Grafana** (2 replicas): Unified dashboards with folder organization, OAuth via Authentik
 - **AlertManager** (3 replicas): Email alerting to admin@epaflix.com
 - **node-exporter** (DaemonSet): Node-level CPU, memory, disk, network metrics
@@ -276,6 +276,30 @@ this is a mounted volume, not an env var).
 - **Cilium**: Agent down, high packet drop rate
 - **Istio**: Sidecar crash loops
 
+#### What is deliberately NOT emailed (#908)
+
+Two alerts are routed to a `null` receiver and reach nobody:
+
+| Alert | Why |
+|---|---|
+| `Watchdog` | kube-prometheus-stack's deadman switch. Its expr is `vector(1)`, so it fires forever by design. An email about it carries no information. Nothing consumes the deadman signal yet - that is #970. |
+| `InfoInhibitor` | Exists only to suppress other `severity: info` alerts. Carries `severity: none`. |
+
+The `null` route is the **first** child route and has no `continue: true`, so those two
+stop there and everything else falls through to `email`. Check it without deploying:
+
+```bash
+amtool config routes test --config.file=<decrypted alertmanager.yaml> alertname=Watchdog severity=none
+#   -> null
+amtool config routes test --config.file=<decrypted alertmanager.yaml> alertname=KubeJobFailed severity=warning
+#   -> email
+```
+
+The email leg also sets `send_resolved: true`. Alertmanager defaults that to **false**
+for `email_configs`, and it was simply absent, so the mailbox only ever received
+`[FIRING` and a fault that fixed itself was never retracted. Adding a new receiver
+means setting it explicitly - the default is the wrong one.
+
 ### Testing Email Alerts
 
 ```bash
@@ -315,12 +339,42 @@ For production environments requiring HA, consider:
 
 ### Prometheus Storage
 
-- **Size**: 25Gi PVC using local-path StorageClass
-- **Retention**: 15 days
+- **Size**: 25Gi PVC using local-path StorageClass - **advisory only**, see the note below
+- **Retention**: **8 days** (`prometheus.prometheusSpec.retention: 8d`)
+- **Size cap**: 20GiB (`retentionSize: "20GB"` - Prometheus parses `GB` as base-2)
 - **StorageClass**: local-path (provisioned from node's `/var/lib/rancher/k3s/storage/`, which resides on VM disk backed by TrueNAS iSCSI)
 - **Access Mode**: ReadWriteOnce
-- **Expected usage**: ~20GB
-- **Note**: Worker nodes have 40GB total disk space from iSCSI targets
+- **Measured usage** (2026-08-10): 16.6GiB of blocks plus 0.5GiB WAL = 86% of the cap, at 618k head series and ~1.95GiB/day
+
+> **Retention is 8d, not 15d, and that is deliberate (#913).** It used to say `15d`
+> while the 20GiB size cap evicted blocks at about 8.5 days, so documented retention
+> was 43% longer than real retention and nothing reported the disagreement. Two
+> settings that disagree silently are worse than the smaller number, because an
+> investigation that assumes 15 days of history quietly gets wrong answers - that
+> is exactly what happened while triaging #908/#909.
+>
+> **The volume was not grown instead, because it does not fit.** 15 days needs about
+> 29GiB of blocks, roughly 12GiB more than today. `local-path` is a bind mount with
+> **no quota**, so the 25Gi claim is advisory and the real bound is the node root
+> disk: `k3s-worker-62` measured 11.7GiB free of 47.4GiB (75% used). #463 already
+> showed the failure mode - at `45GB` Prometheus grew to 30G, pushed a worker to 85%
+> and broke kubelet image GC.
+>
+> To get more history, cut cardinality (618k head series is the lever) or move
+> Prometheus to a bigger disk. Do **not** raise `retentionSize` above the claim, and
+> do not raise `retention` without re-measuring both.
+
+To re-check that the two settings still agree:
+
+```bash
+kubectl --context epaflix -n observability port-forward svc/kube-prometheus-stack-prometheus 19090:9090 &
+# real retention in days - must stay at or below the configured retention
+curl -sG http://127.0.0.1:19090/api/v1/query \
+  --data-urlencode 'query=(time() - prometheus_tsdb_lowest_timestamp_seconds)/86400'
+# blocks+WAL against the 20GiB cap
+curl -sG http://127.0.0.1:19090/api/v1/query \
+  --data-urlencode 'query=prometheus_tsdb_storage_blocks_bytes + prometheus_tsdb_wal_storage_size_bytes'
+```
 
 ### Loki Storage
 
@@ -343,14 +397,22 @@ kubectl get pvc -n observability
 
 ### Cleanup Old Data
 
-```bash
-# Reduce Loki retention to 14 days
-helm upgrade loki grafana/loki -n observability \
-  --set loki.limits_config.retention_period=336h
+**Do not run `helm upgrade --set` against this stack.** This whole directory is an
+ArgoCD Application, so a direct `helm upgrade` leaves live state diverged from git
+and the next sync silently reverts it. Retention is changed by editing
+`prometheus-values.yaml` (Prometheus) or `loki-values.yaml` (Loki) and merging, then
+letting ArgoCD sync. Read the retention note under `### Prometheus Storage` first -
+lowering `retention` without checking `retentionSize` is how the 15d-versus-8d
+disagreement in #913 happened.
 
-# Reduce Prometheus retention to 7 days
-helm upgrade kube-prometheus-stack prometheus-community/kube-prometheus-stack -n observability \
-  --set prometheus.prometheusSpec.retention=7d
+```bash
+# Confirm which retention Prometheus is actually enforcing, not which one is written
+kubectl --context epaflix -n observability get prometheus \
+  kube-prometheus-stack-prometheus -o jsonpath='{.spec.retention}{"  size="}{.spec.retentionSize}{"\n"}'
+
+# Force a sync after merging a values change
+kubectl --context epaflix -n argocd patch application observability \
+  --type merge -p '{"operation":{"sync":{"revision":"HEAD"}}}'
 ```
 
 ## Troubleshooting

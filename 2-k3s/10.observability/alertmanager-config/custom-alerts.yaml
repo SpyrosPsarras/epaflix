@@ -134,11 +134,59 @@ spec:
             summary: "K3s nodes running mixed kubelet versions (roll in progress)"
             description: "K3s nodes are on {{ $value }} distinct kubelet versions — likely a rolling upgrade in progress. Confirm this was an intended, reviewed version bump (pinned spec.version, issue #130). See the Future-Upgrade SOP: 2-k3s/maintenance/system-upgrade/README.md."
 
+    # ===================================================================
+    # JOB-FAILURE RULES - read this before editing any `kube_job_failed`
+    # expr below, or the #909 amplification comes straight back.
+    #
+    # Measured 2026-08-10: 74 firing job-failure alert series for 5 distinct
+    # failing CronJobs. Three multipliers stacked, and each has a fix that is
+    # now baked into every expr in this block:
+    #
+    # 1. PER-REPLICA DOUBLING. kube-state-metrics runs `replicas: 2`
+    #    (prometheus-values.yaml) and both are scraped, so every job exports
+    #    the same `kube_job_failed` series twice, once per `instance`.
+    #    Measured: 34 raw series -> 17 after dedup, an exact 2x.
+    #    FIX: every expr wraps the selector in `max by (namespace, job_name)`.
+    #    Do NOT instead drop kube-state-metrics to 1 replica - that trades
+    #    away HA to work around a rule that forgot to aggregate.
+    #
+    # 2. TWO OWNERS PER CONDITION. The chart's own `KubeJobFailed` is
+    #    `kube_job_failed{job="kube-state-metrics"} > 0` over ALL namespaces,
+    #    so it covered the identical series as every scoped rule here and
+    #    emailed a second copy. The scoped rules are kept, because their
+    #    annotations carry the per-job runbook the generic rule cannot.
+    #    FIX: the chart rule is disabled via `defaultRules.disabled` in
+    #    prometheus-values.yaml and replaced by the `kube-job-failed-recent`
+    #    group at the end of this block, which `unless`-excludes exactly the
+    #    `job_name` prefixes owned here. ADDING A SCOPED RULE BELOW MEANS
+    #    ADDING ITS PREFIX TO THAT EXCLUSION LIST, or you get two emails again.
+    #
+    # 3. RETENTION DRIVING ALERTING. `kube_job_failed` stays 1 for as long as
+    #    the failed Job object exists, which is `failedJobsHistoryLimit` (6)
+    #    for a CronJob that fails every run, and `ttlSecondsAfterFinished`
+    #    for one that has recovered. Either way the alert outlived the fault:
+    #    a recovered CronJob kept alerting for its full TTL, and with
+    #    `send_resolved` off on the email leg (#908) no mail ever retracted it.
+    #    FIX: every expr is gated on `kube_job_status_start_time` being inside
+    #    the last 24h, so Job retention and the alert window stop being the
+    #    same knob. The 30-day TTL is fine for forensics; it was only a bug
+    #    while it also drove alerting (#464 kept, re-scoped).
+    #
+    # Net measured effect of 1+3 on the scoped rules: 34 -> 17 -> 14 series.
+    # ===================================================================
+
     - name: cleanuparr-blocklist
       interval: 60s
       rules:
         - alert: CleanuparrBlocklistDriftCheckFailed
-          expr: kube_job_failed{namespace="servarr", job_name=~"cleanuparr-blocklist-drift.*"} > 0
+          expr: |
+            max by (namespace, job_name) (
+              kube_job_failed{namespace="servarr", job_name=~"cleanuparr-blocklist-drift.*"}
+            ) > 0
+              and on (namespace, job_name)
+            max by (namespace, job_name) (
+              kube_job_status_start_time{namespace="servarr", job_name=~"cleanuparr-blocklist-drift.*"}
+            ) > time() - 86400
           for: 5m
           labels:
             severity: warning
@@ -151,7 +199,14 @@ spec:
       interval: 60s
       rules:
         - alert: NewtarrConfigDriftCheckFailed
-          expr: kube_job_failed{namespace="servarr", job_name=~"newtarr-config-drift.*"} > 0
+          expr: |
+            max by (namespace, job_name) (
+              kube_job_failed{namespace="servarr", job_name=~"newtarr-config-drift.*"}
+            ) > 0
+              and on (namespace, job_name)
+            max by (namespace, job_name) (
+              kube_job_status_start_time{namespace="servarr", job_name=~"newtarr-config-drift.*"}
+            ) > time() - 86400
           for: 5m
           labels:
             severity: warning
@@ -164,7 +219,14 @@ spec:
       interval: 60s
       rules:
         - alert: OrphanCensusFailed
-          expr: kube_job_failed{namespace="servarr", job_name=~"orphan-census.*"} > 0
+          expr: |
+            max by (namespace, job_name) (
+              kube_job_failed{namespace="servarr", job_name=~"orphan-census.*"}
+            ) > 0
+              and on (namespace, job_name)
+            max by (namespace, job_name) (
+              kube_job_status_start_time{namespace="servarr", job_name=~"orphan-census.*"}
+            ) > time() - 86400
           for: 5m
           labels:
             severity: warning
@@ -177,7 +239,14 @@ spec:
       interval: 60s
       rules:
         - alert: ProwlarrIndexerBackoffCheckFailed
-          expr: kube_job_failed{namespace="servarr", job_name=~"prowlarr-indexer-health.*"} > 0
+          expr: |
+            max by (namespace, job_name) (
+              kube_job_failed{namespace="servarr", job_name=~"prowlarr-indexer-health.*"}
+            ) > 0
+              and on (namespace, job_name)
+            max by (namespace, job_name) (
+              kube_job_status_start_time{namespace="servarr", job_name=~"prowlarr-indexer-health.*"}
+            ) > time() - 86400
           for: 5m
           labels:
             severity: warning
@@ -190,7 +259,14 @@ spec:
       interval: 60s
       rules:
         - alert: CleanuparrQueueCleanerHealthCheckFailed
-          expr: kube_job_failed{namespace="servarr", job_name=~"cleanuparr-queuecleaner-health.*"} > 0
+          expr: |
+            max by (namespace, job_name) (
+              kube_job_failed{namespace="servarr", job_name=~"cleanuparr-queuecleaner-health.*"}
+            ) > 0
+              and on (namespace, job_name)
+            max by (namespace, job_name) (
+              kube_job_status_start_time{namespace="servarr", job_name=~"cleanuparr-queuecleaner-health.*"}
+            ) > time() - 86400
           for: 5m
           labels:
             severity: warning
@@ -203,7 +279,14 @@ spec:
       interval: 60s
       rules:
         - alert: BlindQueueCheckFailed
-          expr: kube_job_failed{namespace="servarr", job_name=~"blind-queue-check.*"} > 0
+          expr: |
+            max by (namespace, job_name) (
+              kube_job_failed{namespace="servarr", job_name=~"blind-queue-check.*"}
+            ) > 0
+              and on (namespace, job_name)
+            max by (namespace, job_name) (
+              kube_job_status_start_time{namespace="servarr", job_name=~"blind-queue-check.*"}
+            ) > time() - 86400
           for: 5m
           labels:
             severity: warning
@@ -216,7 +299,14 @@ spec:
       interval: 60s
       rules:
         - alert: QbtStuckTorrentCheckFailed
-          expr: kube_job_failed{namespace="servarr", job_name=~"qbt-stuck-torrent-check.*"} > 0
+          expr: |
+            max by (namespace, job_name) (
+              kube_job_failed{namespace="servarr", job_name=~"qbt-stuck-torrent-check.*"}
+            ) > 0
+              and on (namespace, job_name)
+            max by (namespace, job_name) (
+              kube_job_status_start_time{namespace="servarr", job_name=~"qbt-stuck-torrent-check.*"}
+            ) > time() - 86400
           for: 5m
           labels:
             severity: warning
@@ -224,6 +314,37 @@ spec:
           annotations:
             summary: "qBittorrent torrent(s) stuck in missingFiles/error (or the check failed)"
             description: "The hourly qbt-stuck-torrent-check Job ({{ $labels.job_name }}) failed — either at least one torrent has been in qBittorrent `state` missingFiles or error for at least GRACE_MINUTES (15m), confirmed via two live snapshots taken GRACE_MINUTES apart (a torrent that recovers before the second snapshot, e.g. a recheck completing, is never reported), or the qBittorrent login/torrent-list fetch itself failed. This is the #610/#839 signature — a torrent can sit broken indefinitely with no *arr rule covering it (#482: `error` matches no Cleanuparr rule). Read the Job log for the affected hash prefix(es), state, category, size and age (never a torrent name), then inspect by hash in the qBittorrent WebUI. REPORT ONLY — this job never deletes, pauses or rechecks a torrent (`max_ratio_act=0` exists so private torrents are never auto-removed); any action is a human decision (#839)."
+
+    # LOCAL REPLACEMENT for the kube-prometheus-stack `KubeJobFailed`, which is
+    # switched off in prometheus-values.yaml (`defaultRules.disabled`). Same
+    # name on purpose, so existing silences, dashboards and muscle memory keep
+    # working - see multiplier 2 in the JOB-FAILURE header above.
+    #
+    # Differences from the chart rule, all three deliberate:
+    #   - `max by (namespace, job_name)` collapses the 2 kube-state-metrics
+    #     replicas into one series.
+    #   - `unless` drops the `job_name` prefixes that have their own scoped
+    #     rule in this file. KEEP THIS LIST IN SYNC when adding a scoped rule.
+    #   - the 24h `kube_job_status_start_time` gate stops a long Job TTL from
+    #     holding the alert open after the fault is gone.
+    # Measured 2026-08-10: chart rule 40 firing series -> 3 here.
+    - name: kube-job-failed-recent
+      interval: 60s
+      rules:
+        - alert: KubeJobFailed
+          expr: |
+            max by (namespace, job_name) (kube_job_failed{job="kube-state-metrics"}) > 0
+              unless on (namespace, job_name)
+            max by (namespace, job_name) (kube_job_failed{job="kube-state-metrics", namespace="servarr", job_name=~"(orphan-census|prowlarr-indexer-health|cleanuparr-blocklist-drift|newtarr-config-drift|cleanuparr-queuecleaner-health|blind-queue-check|qbt-stuck-torrent-check).*"})
+              and on (namespace, job_name)
+            max by (namespace, job_name) (kube_job_status_start_time{job="kube-state-metrics"}) > time() - 86400
+          for: 15m
+          labels:
+            severity: warning
+            component: kubernetes
+          annotations:
+            summary: "Job {{ $labels.namespace }}/{{ $labels.job_name }} failed in the last 24h"
+            description: "Job {{ $labels.namespace }}/{{ $labels.job_name }} started within the last 24h and reports failed > 0. Inspect with `kubectl --context epaflix -n {{ $labels.namespace }} logs job/{{ $labels.job_name }}`. Jobs older than 24h are deliberately NOT alerted on - retained failed Jobs are forensic history, not a live fault (#909). Jobs covered by a scoped rule in this file (orphan-census, prowlarr-indexer-health, cleanuparr-blocklist-drift, newtarr-config-drift, cleanuparr-queuecleaner-health, blind-queue-check, qbt-stuck-torrent-check) are excluded here and alert through their own rule, which carries the per-job runbook."
 
     - name: traefik
       interval: 60s
