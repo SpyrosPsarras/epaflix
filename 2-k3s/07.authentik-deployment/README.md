@@ -439,7 +439,10 @@ shipped inside a SOPS-encrypted Secret:
 - **What the blueprint creates**:
   - `ak-iac` — service account (`authentik_core.user`, `type: service_account`,
     path `users/service-accounts`).
-  - membership in the built-in **`authentik Admins`** superuser group.
+  - the scoped **`authentik_rbac.role`** `ak-iac`, the non-superuser
+    **`ak-iac IaC`** group bound to it, and the user's membership in that group
+    only. The built-in **`authentik Admins`** membership this used to grant was
+    removed in #339.
   - `ak-iac-token` — a **non-expiring** `intent: api` token whose `key` lives
     only in the SOPS Secret and (mirrored, for break-glass) in the git-ignored
     `.github/instructions/secrets.yml` as `authentik_iac_service_account_token`.
@@ -671,9 +674,9 @@ The minted token's `key` is retrievable **only** through
 object never includes it.
 
 **Least-privilege option**: pass an explicit `"user": <pk>` in the mint body to
-issue the token against a dedicated **non-superuser** service account scoped to
-exactly the objects the task touches, instead of inheriting the `ak-iac`
-superuser identity.
+issue the token against a service account scoped to exactly the objects the task
+touches, instead of inheriting `ak-iac`'s own scoped role. Since #339, `ak-iac`
+is not a superuser, so this is no longer a demotion, only a narrowing.
 
 > Validated end-to-end 2026-06-14 against live Authentik: mint `201` → retrieve
 > key via `view_key/` → admin read (`GET /api/v3/admin/version/`) `200` → revoke
