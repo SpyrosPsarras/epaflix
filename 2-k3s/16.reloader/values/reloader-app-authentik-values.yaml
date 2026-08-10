@@ -1,0 +1,28 @@
+# stakater/reloader v1.4.19 (chart 2.2.15) — instance scoped to the
+# app-authentik namespace only (issue #780), so an `authentik-app-secrets`
+# rotation rolls `authentik-server` + `authentik-worker` automatically instead
+# of needing a manual `kubectl rollout restart`. See kustomization.yaml for why
+# this is a separate release per watched namespace rather than one shared
+# instance.
+#
+# Blast radius, since a restart here briefly drops ALL SSO (the login flow,
+# ArgoCD and Grafana OAuth, forward-auth for the 10 servarr UIs — #176):
+# Reloader is content-hash driven, not sync driven. It injects a
+# `STAKATER_<NAME>_SECRET=<sha1 of the Secret data>` env var into the pod
+# template and only rolls when that hash changes (verified live on
+# `servarr/unpackerr`: `STAKATER_UNPACKERR_SECRET_SECRET=dd8e39b4…`). A routine
+# ArgoCD sync that re-applies the same Secret bytes changes no hash and rolls
+# nothing — the restart happens only at the moment a value actually changes,
+# which is exactly when the old pods are serving a stale credential anyway.
+reloader:
+  watchGlobally: false
+  ignoreCronJobs: true
+  ignoreJobs: true
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 32Mi
+  limits:
+    cpu: 100m
+    memory: 128Mi
