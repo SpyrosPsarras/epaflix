@@ -71,7 +71,7 @@ domains — its only role is upstream resolution for everything not in dnsmasq.d
 | `/etc/pihole/custom.list` | **Empty** — intentionally cleared, do not repopulate |
 | `/etc/unbound/unbound.conf.d/pi-hole.conf` | Unbound core: port 5335, cache, DoT upstream |
 | `/etc/unbound/unbound.conf.d/vm-epaflix.conf` | `local-zone: static` security directive only — no data entries |
-| `/etc/unbound/unbound.conf.d/no-aaaa-leak.conf` | **Active** - four per-name `local-zone: static` entries that stop AAAA leaking to the Cloudflare wildcard (#868). Tracked in git at `1-proxmox/pihole/unbound-no-aaaa-leak.conf` |
+| `/etc/unbound/unbound.conf.d/no-aaaa-leak.conf` | **Active** - seven per-name `local-zone: static` entries that stop AAAA leaking to the Cloudflare wildcard (#868). Tracked in git at `1-proxmox/pihole/unbound-no-aaaa-leak.conf`; `1-proxmox/pihole/aaaa-tripwire.sh` checks it against the live records (#882) |
 | `/etc/unbound/unbound.conf.d/remote-control.conf` | Enables `unbound-control` via `/run/unbound.ctl` |
 | `/etc/unbound/unbound.conf.d/disable-ipv6.conf` | Placeholder (`server:` stanza only, no directives) |
 | `/etc/pihole/pihole.toml` | Pi-hole v6 config — managed by FTL, do not edit directly |
@@ -112,7 +112,6 @@ IP column, do not assume. Rows are in live-file order, so a `diff` against the b
 | `bastion.epaflix.com` | **192.168.10.43** | Odysseus bastion VM - straight to the VM, no Traefik |
 | `searxng.epaflix.com` | 192.168.10.102 | SearXNG - **internal entry point on purpose** (#547). The public route on `.101` requires Authentik; LAN and API clients use this unauthenticated internal route. Do not move it back to `.101`. |
 | `syncthing.epaflix.com` | **192.168.10.110** | Syncthing GUI - its own kube-vip LoadBalancer (`syncthing-gui`), no Traefik |
-| `api.epaflix.com` | **192.168.1.50** | **KNOWN BAD** - off-subnet (our LAN is `192.168.10.0/24`), unreachable, and the identical `address=` line appears twice in the conf. Removal is a live change, tracked in #877. Do not copy this row as a pattern |
 | `remote-pi.epaflix.com` | **192.168.10.102** | Remote Pi relay - Traefik `internal` entry point, not the public LB |
 | `cliproxy.epaflix.com` | **192.168.10.102** | CLIProxyAPI - Traefik `internal` entry point, not the public LB (#858) |
 
@@ -128,18 +127,37 @@ IP column, do not assume. Rows are in live-file order, so a `diff` against the b
 
 ### `/etc/dnsmasq.d/10-vm-epaflix.conf` — user-VM subdomains
 
-LAN-only names for individual user VMs. No public DNS records exist for this zone —
-Unbound's static zone directive ensures unlisted names NXDOMAIN instead of leaking
-to public DNS. The zone was renamed from `internal.epaflix.com` on 2026-04-18.
+LAN-only **answers**, not a private name space. The `address=` lines here are what LAN
+clients get, and Unbound's static zone directive makes unlisted names NXDOMAIN for LAN
+clients. It does **not** make the zone private - `epaflix.com` is a real Cloudflare zone
+and every name under it answers publicly at any depth, `*.vm.epaflix.com` included (#830).
+The zone was renamed from `internal.epaflix.com` on 2026-04-18.
 
 | Domain | IP | Notes |
 |---|---|---|
 | `nick.vm.epaflix.com` | 192.168.10.41 | Individual user VM |
 | `vidar.vm.epaflix.com` | 192.168.10.42 | Individual user VM |
 
-> **NXDOMAIN protection**: Unbound's `local-zone: "vm.epaflix.com." static` ensures
-> any unlisted `*.vm.epaflix.com` name returns NXDOMAIN and never leaks to public DNS.
-> Verified: `random999.vm.epaflix.com` → NXDOMAIN.
+> **NXDOMAIN protection is LAN-side only.** Unbound's `local-zone: "vm.epaflix.com." static`
+> makes any unlisted `*.vm.epaflix.com` name NXDOMAIN **for clients using Pi-hole**.
+> Measured 2026-08-10: `dig +short A random999.vm.epaflix.com @192.168.10.30` → NXDOMAIN,
+> empty answer. It does **not** stop the name resolving on public DNS.
+
+> ⚠️ **This zone answers on public DNS - the docs used to claim it did not (#830).**
+> Measured 2026-08-10 against `1.1.1.1`: `nick.vm.epaflix.com`, `random999.vm.epaflix.com`
+> and `a.b.vm.epaflix.com` all return the Cloudflare proxy addresses
+> `172.67.179.219` / `104.21.59.155` for A and
+> `2606:4700:3033::ac43:b3db` / `2606:4700:3035::6815:3b9b` for AAAA. The same is true of
+> any depth under `epaflix.com` - `zzz.notvm.epaflix.com` answers the same pair - so this
+> is the Cloudflare zone catching everything, not a `vm`-specific record.
+> A `*.vm.epaflix.com` name hides nothing from anyone not using Pi-hole. Do not pick one
+> because you believe the name alone is private.
+
+> ⚠️ **The wildcard certificate does not cover this zone.** `*.epaflix.com` does not match
+> a two-label name. Measured 2026-08-10 against `192.168.10.101:443`:
+> `-servername searxng.epaflix.com` → `CN=epaflix.com`, SAN `DNS:*.epaflix.com, DNS:epaflix.com`;
+> `-servername nick.vm.epaflix.com` → `CN=TRAEFIK DEFAULT CERT`. Serving a `vm.epaflix.com`
+> host through Traefik fails TLS for real clients until a SAN is added (#830).
 
 > ⚠️ **FTL restart required for new entries**: `pihole reloaddns` (SIGHUP) does **not** always
 > pick up new `address=` entries for the `*.vm.epaflix.com` zone. Always use
@@ -215,11 +233,15 @@ dig +short AAAA bastion.epaflix.com @1.1.1.1 # Cloudflare IPv6 - no exact record
 DNS-only Cloudflare record, and they are the only two that do not answer AAAA.
 
 > **The LAN is IPv4-only today**, so this whole class is **latent, not
-> exploitable**. No global IPv6 address and no IPv6 default route on the
-> workstation, `takaros`, `k3s-master-51` or the Pi-hole, and Unbound runs
-> `do-ip6: no`. The day IPv6 is enabled anywhere, Happy Eyeballs prefers v6 and
-> every unguarded name goes to Cloudflare **first**, not as a fallback. Tracked
-> as an IPv6 tripwire in #882.
+> exploitable**. Measured 2026-08-10: zero global IPv6 addresses and zero IPv6
+> default routes on the workstation, `takaros`, `evanthoulaki` and the Pi-hole,
+> and Unbound runs `do-ip6: no`. The day IPv6 is enabled anywhere, Happy Eyeballs
+> prefers v6 and every unguarded name goes to Cloudflare **first**, not as a
+> fallback.
+>
+> Do not rely on remembering that. `1-proxmox/pihole/aaaa-tripwire.sh` is the
+> mechanical check - it fails the moment IPv6 appears on the LAN or a guarded
+> name starts answering AAAA. See "The IPv6 tripwire" below (#882).
 
 ### The rule
 
@@ -238,20 +260,33 @@ alone. Everything else points straight at a box on the LAN and needs one of:
 
 ### The non-`192.168.10.101` names
 
+Nine names, one per non-`192.168.10.101` `*.epaflix.com` `address=` line on the box.
+Every row was measured on 2026-08-10: A from `@192.168.10.30`, AAAA from both
+`@192.168.10.30` and `@1.1.1.1`.
+
 | Domain | IP | AAAA protection |
 |---|---|---|
 | `bastion.epaflix.com` | 192.168.10.43 | Unbound `local-zone` (#868) |
 | `takaros.epaflix.com` | 192.168.10.10 | Unbound `local-zone` (#868) |
 | `evanthoulaki.epaflix.com` | 192.168.10.11 | Unbound `local-zone` (#868) |
 | `syncthing.epaflix.com` | 192.168.10.110 | Unbound `local-zone` (#868) |
-| `remote-pi.epaflix.com` | 192.168.10.102 | Exact DNS-only Cloudflare A record (#868). `.102` is already public via the `cliproxy` record, so this adds no new disclosure. Required since the relay landed - see `2-k3s/17.remote-pi/README.md` |
+| `searxng.epaflix.com` | 192.168.10.102 | Unbound `local-zone`, added 2026-08-08. `.102` is the **internal** entry point, which serves SearXNG without Authentik (#547). A Cloudflare AAAA would send an IPv6 LAN client to the **public** gated route on `.101` instead, defeating the internal route |
+| `qbittorrent.epaflix.com` | 192.168.10.102 | Unbound `local-zone`, added 2026-08-08. Same case as `searxng` - the `qbittorrent-internal` IngressRoute on `.102` carries no Authentik middleware (#296/#937) |
+| `remote-pi.epaflix.com` | 192.168.10.102 | Unbound `local-zone`, added 2026-08-09. #868 queued an exact Cloudflare record for this name and it was **not** taken - `dig +short A remote-pi.epaflix.com @1.1.1.1` answers the Cloudflare proxy pair, not `192.168.10.102`. A `local-zone` was chosen instead so `.102` is not published a third time. See `2-k3s/17.remote-pi/README.md` |
 | `cliproxy.epaflix.com` | 192.168.10.102 | Exact DNS-only Cloudflare A record, already in place (#858). Clean |
 | `wg-hop.epaflix.com` | 192.168.10.45 | Exact DNS-only Cloudflare A record, already in place. Clean |
-| `api.epaflix.com` | 192.168.1.50 | **None, and none needed** - the record is off-subnet and unreachable, removal is tracked in #877. Removing it fixes A and AAAA together |
 
-The four `local-zone` names deliberately get **no** Cloudflare record. One would
-publish `192.168.10.43`, `.10`, `.11` and `.110` in public DNS, which is worse
-than the leak it fixes.
+Seven of the nine are `local-zone`, and they deliberately get **no** Cloudflare
+record. For `bastion`, `takaros`, `evanthoulaki` and `syncthing` one would publish
+`192.168.10.43`, `.10`, `.11` and `.110` in public DNS, which is worse than the leak it
+fixes. For `searxng`, `qbittorrent` and `remote-pi` it would publish `192.168.10.102`
+for no benefit and still point IPv6 clients at the gated public route.
+
+> **The live list is the file, not a count in this doc.** Read it with
+> `ssh root@192.168.10.30 "grep local-zone /etc/unbound/unbound.conf.d/no-aaaa-leak.conf"`.
+> Source of truth in git is `1-proxmox/pihole/unbound-no-aaaa-leak.conf`, and
+> `1-proxmox/pihole/aaaa-tripwire.sh` checks the two lists against each other so a
+> stale count here cannot pass silently.
 
 The bare hostnames `takaros` and `evanthoulaki` in
 `/etc/dnsmasq.d/15-proxmox-hosts.conf` need nothing. They have no TLD, so they
@@ -260,13 +295,6 @@ never resolve publicly - verified, AAAA is empty for both.
 > **Keep this table current.** It is derived from the record tables above. Any
 > new row there with an IP other than `192.168.10.101`, or any existing row that
 > is moved off `192.168.10.101`, needs a row here in the **same change**.
-
-> **Open drift, 2026-08-08:** the live box answers
-> `searxng.epaflix.com` → `192.168.10.102`, while the record table above still
-> says `192.168.10.101` and nothing in git moved it. That makes it a ninth
-> non-`.101` name with no AAAA protection. It is not fixed here because the
-> change that moved it has not landed - whoever lands it owns both the table row
-> and the protection row.
 
 ### Rejected options - do not re-litigate
 
@@ -303,6 +331,18 @@ ssh root@192.168.10.30 "ls -1 /etc/dnsmasq.d/"
 
 Check both ways - every live record needs a row, and every row needs a live record.
 Add or remove the table row in the **same change** as the record itself, not later.
+Verified 2026-08-10: 45 live `address=` lines, 45 table rows, zero difference in either
+direction.
+
+> **`ls` will show `.bak` files. They are not read.** FTL's generated
+> `/etc/pihole/dnsmasq.conf` sets `conf-dir=/etc/dnsmasq.d,*.conf`, so only names ending
+> in `.conf` are loaded. `10-epaflix.conf.bak.pre-cliproxy-20260808-123129` and friends
+> still contain the deleted `api.epaflix.com` lines and are inert. Do not add a row for
+> anything you only found in a `.bak`, and do not rename one to `.conf`.
+>
+> The Debian `/etc/dnsmasq.d/README` on the box says every file in the directory is read.
+> That is the stock dnsmasq default and it is wrong here - Pi-hole overrides it with the
+> `conf-dir` line above.
 
 ### Adding a new record
 
@@ -310,7 +350,7 @@ Add or remove the table row in the **same change** as the record itself, not lat
 ssh root@192.168.10.30
 
 # Public service (*.epaflix.com)
-echo "address=/newapp.epaflix.com/192.168.10.71" >> /etc/dnsmasq.d/10-epaflix.conf
+echo "address=/newapp.epaflix.com/192.168.10.101" >> /etc/dnsmasq.d/10-epaflix.conf
 
 # User VM (*.vm.epaflix.com)
 echo "address=/newvm.vm.epaflix.com/192.168.10.50" >> /etc/dnsmasq.d/10-vm-epaflix.conf
@@ -320,17 +360,17 @@ pihole reloaddns
 
 # Verify
 dig newapp.epaflix.com @192.168.10.30 +short
-# Expected: 192.168.10.71
+# Expected: 192.168.10.101
 ```
 
-### Changing an existing record (e.g. migrating from K3s to Docker Swarm)
+### Changing an existing record
 
 ```bash
 ssh root@192.168.10.30
 
 SERVICE="sonarr.epaflix.com"
 OLD_IP="192.168.10.101"
-NEW_IP="192.168.10.71"
+NEW_IP="192.168.10.102"
 
 sed -i "s|address=/${SERVICE}/${OLD_IP}|address=/${SERVICE}/${NEW_IP}|" \
     /etc/dnsmasq.d/10-epaflix.conf
@@ -340,8 +380,14 @@ pihole reloaddns
 
 # Verify
 dig ${SERVICE} @192.168.10.30 +short
-# Expected: 192.168.10.71
+# Expected: 192.168.10.102
 ```
+
+> **Moving a name off `192.168.10.101` has two side effects.** The router port forward
+> sends `80/443` to `192.168.10.101`, so a name moved elsewhere stops being reachable from
+> outside the LAN unless the forward is changed with it. And a non-`.101` name needs an
+> AAAA protection row - see "The non-`192.168.10.101` names" above, and add it in the
+> **same change**.
 
 ### Removing a record
 
@@ -365,27 +411,30 @@ dig ${SERVICE} @192.168.10.30 +short
 > **Always use `systemctl restart pihole-FTL` after a removal** to take effect immediately.
 > For additions and changes (not removals), `pihole reloaddns` is sufficient.
 
-### Migrating ALL traffic to Docker Swarm (bulk update)
+### There is no bulk-migration runbook, on purpose
 
-> Tracked in #878. The Swarm has been dormant since ~2026-06 (#583), so this
-> runbook has no live use right now - whether it gets deleted or gated is decided there.
+This file used to carry a "Migrating ALL traffic to Docker Swarm (bulk update)"
+section built around a single in-place `sed` that rewrote every `/192.168.10.101`
+suffix in `/etc/dnsmasq.d/10-epaflix.conf` to `/192.168.10.71`. That is 20 records
+today - measured 2026-08-10 - repointed at the Swarm Traefik in one keystroke. The
+Swarm has been down since about 2026-06 (#583) and #583's open decision is
+fix-or-decommission, so the command took the whole `*.epaflix.com` zone offline and
+pointed it at nothing.
 
-```bash
-ssh root@192.168.10.30
+The literal command is deliberately not reproduced here, so there is nothing on this
+page to copy.
 
-sed -i 's|/192.168.10.101$|/192.168.10.71|g' /etc/dnsmasq.d/10-epaflix.conf
+It was **deleted**, not warned about, in #878. A warning above a working command is
+still a working command, and #860 already tried that: it added a "the Swarm is
+dormant" marker and the `sed` stayed copy-pasteable. Deleting the command is the
+only version that cannot be run by accident. The example IP in "Changing an
+existing record" above was moved off `192.168.10.71` for the same reason.
 
-pihole reloaddns
-
-# Spot check
-for domain in sonarr radarr prowlarr auth traefik; do
-    echo -n "${domain}.epaflix.com → "
-    dig ${domain}.epaflix.com @192.168.10.30 +short
-done
-```
-
-> **Also update** the router port forward: `80/443 → 192.168.10.101` → `80/443 → 192.168.10.71`
-> before or at the same time, otherwise external traffic will break.
+If the Swarm ever comes back, do not resurrect the one-liner. Change records one at
+a time with the "Changing an existing record" recipe above, because each one needs
+its own AAAA protection decision and the router `80/443` forward has to move in the
+same change. The deleted text is in git history if you want to read it:
+`git log -S 'Migrating ALL traffic to Docker Swarm' -- .github/instructions/pihole.instructions.md`.
 
 ---
 
@@ -398,7 +447,7 @@ done
 | `/etc/unbound/unbound.conf` | Entry point — includes all `unbound.conf.d/*.conf` |
 | `/etc/unbound/unbound.conf.d/pi-hole.conf` | Core: listen on `127.0.0.1:5335`, cache, DoT upstream |
 | `/etc/unbound/unbound.conf.d/vm-epaflix.conf` | `local-zone: static` - security only, no data entries |
-| `/etc/unbound/unbound.conf.d/no-aaaa-leak.conf` | Four per-name `local-zone: static` entries - AAAA leak guard, no data entries. Source of truth is `1-proxmox/pihole/unbound-no-aaaa-leak.conf` in git |
+| `/etc/unbound/unbound.conf.d/no-aaaa-leak.conf` | Seven per-name `local-zone: static` entries - AAAA leak guard, no data entries. Source of truth is `1-proxmox/pihole/unbound-no-aaaa-leak.conf` in git |
 | `/etc/unbound/unbound.conf.d/remote-control.conf` | Enables `unbound-control` via `/run/unbound.ctl` |
 | `/etc/unbound/unbound.conf.d/disable-ipv6.conf` | Placeholder (`server:` stanza only, no directives) |
 
@@ -523,13 +572,68 @@ dig seerr.epaflix.com A @192.168.10.30 +short
 > and run `systemctl restart pihole-FTL`. Be aware this re-exposes the Cloudflare ECH
 > bypass for all `*.epaflix.com` domains.
 
-### Verify AAAA is not leaking
+### The IPv6 tripwire - `1-proxmox/pihole/aaaa-tripwire.sh`
+
+This is the check for #882, and it is the only one you have to remember. Run it
+from the repo root on the workstation. It needs passwordless
+`ssh root@192.168.10.30` and `dig`, and it is read-only apart from one
+`unbound-control flush_zone epaflix.com`.
+
+```bash
+./1-proxmox/pihole/aaaa-tripwire.sh        # full output, exit 0 pass / 1 fail
+./1-proxmox/pihole/aaaa-tripwire.sh -q     # the summary line only
+```
+
+Last line is the verdict:
+
+```
+TRIPWIRE PASS - 17 checks passed, 0 skipped, 0 failed
+```
+
+It fails on any of three things:
+
+1. **IPv6 appeared on the LAN.** A global IPv6 address, an IPv6 default route, or a
+   router-advertised on-link IPv6 prefix on the workstation, the Pi-hole, `takaros`
+   or `evanthoulaki`, or `do-ip6: yes` in Unbound. The on-link prefix catches a
+   router that has started advertising before any host has taken an address, which
+   is the earliest visible moment.
+2. **A guarded name stopped answering an empty AAAA.** Checked at both layers - via
+   Pi-hole on port 53 and via Unbound directly on `127.0.0.1:5335` - so an FTL stale
+   answer cannot hide an Unbound-side change or the reverse.
+3. **A record exists with no guard at all.** The name list is derived from the live
+   `address=` lines every run, so a new non-`192.168.10.101` record joins the check
+   automatically instead of quietly joining the leak. This is the point of the
+   script: the failure mode #882 describes is somebody adding a record and nobody
+   noticing it needs a protection row.
+
+A guard is either a covering Unbound `local-zone` anywhere in
+`/etc/unbound/unbound.conf.d/` - including the zone-wide `vm.epaflix.com.` one, which
+covers both user VMs - or an exact DNS-only Cloudflare record. The Cloudflare side is
+tested by asking `1.1.1.1` for **AAAA**, not A: an empty public AAAA means the
+`*.epaflix.com` wildcard no longer covers the name, which is the actual mechanism.
+Comparing the public A to the local IP does not work, because `wg-hop`'s exact record
+points at the router public address while its `address=` line points at
+`192.168.10.45`.
+
+**Run it before enabling IPv6 anywhere on the LAN** - any router IPv6 prefix, any
+`do-ip6: yes`, any IPv6 address on a node or a Proxmox host. Also run it after adding
+or moving any `*.epaflix.com` record, and after editing `no-aaaa-leak.conf`. A red run
+means: give every failing name a `local-zone` or an exact DNS-only Cloudflare record,
+then re-run, then enable IPv6.
+
+> **What it does not see.** A global IPv6 address configured by hand on a host it
+> cannot `ssh` to as root - the K3s nodes, for example - is invisible to check 1. The
+> AAAA half still fires on any real leak, and a router-advertised prefix is visible on
+> the Pi-hole because the Pi-hole sits on the same segment. A hand-set static address
+> on one unreachable node is the residual gap.
+
+### Verify AAAA is not leaking, by hand
 
 > ⚠️ **Flush both caches first, or this gives a false green.** Unbound runs
 > `cache-max-ttl: 14400` with `serve-expired: yes`, and FTL's generated
 > `dnsmasq.conf` sets `use-stale-cache=3600`. A name that answered AAAA before
 > the fix keeps answering AAAA from cache for hours. Same trap in reverse after
-> a rollback.
+> a rollback. The script above does the Unbound flush for you.
 
 ```bash
 # 1. Flush both caches
@@ -539,7 +643,7 @@ ssh root@192.168.10.30 "unbound-control flush_zone epaflix.com && systemctl rest
 sudo resolvectl flush-caches
 
 # 3. Every name below must show its LAN IPv4 and an EMPTY AAAA
-for n in bastion takaros evanthoulaki syncthing remote-pi cliproxy wg-hop; do
+for n in bastion takaros evanthoulaki syncthing searxng qbittorrent remote-pi cliproxy wg-hop; do
     printf '%-14s A=[%s] AAAA=[%s]\n' "$n" \
       "$(dig +short A    $n.epaflix.com @192.168.10.30 | tr '\n' ' ')" \
       "$(dig +short AAAA $n.epaflix.com @192.168.10.30 | tr '\n' ' ')"
@@ -550,6 +654,9 @@ Expected: `AAAA=[]` on every row, and the A column matching the record table.
 A Cloudflare address (`2606:4700:...`) in the AAAA column means that name is
 unprotected - find it in the non-`192.168.10.101` table above and give it a
 `local-zone` or an exact DNS-only Cloudflare record.
+
+> This loop hardcodes its nine names, so it goes stale the moment a tenth record
+> lands. Prefer the script, which derives the list from the box.
 
 ```bash
 # The Unbound layer on its own, if you want to isolate it
@@ -599,13 +706,28 @@ Two active entries in `/etc/dnsmasq.d/10-vm-epaflix.conf`:
 - `nick.vm.epaflix.com` → `192.168.10.41`
 - `vidar.vm.epaflix.com` → `192.168.10.42`
 
-No public DNS records exist for this zone — it is LAN-only and only traversed
-after a jumpbox hop (see `1-proxmox/user-vms/README.md`). K3s has zero
-IngressRoutes for `vm.epaflix.com`.
+This zone is **LAN-routed, not private**. The `address=` entries decide what a LAN client
+gets, and K3s has zero IngressRoutes for `vm.epaflix.com`, so nothing here is served
+through Traefik. Reaching a VM still needs the jumpbox hop
+(see `1-proxmox/user-vms/README.md`).
 
-Unbound's `local-zone: "vm.epaflix.com." static` (in `vm-epaflix.conf`)
-ensures any unlisted name in this zone returns NXDOMAIN instead of leaking to public DNS.
-This is a security directive — keep it even if no `local-data` entries exist.
+Unbound's `local-zone: "vm.epaflix.com." static` (in `vm-epaflix.conf`) makes any unlisted
+name in this zone NXDOMAIN **for clients using Pi-hole**. That is a real security directive
+- keep it even with no `local-data` entries - but it only binds our own resolver.
+
+Public DNS answers this zone anyway. Measured 2026-08-10, `nick.vm.epaflix.com` and
+`random999.vm.epaflix.com` both return `172.67.179.219` / `104.21.59.155` from `1.1.1.1`,
+A and AAAA. So does `a.b.vm.epaflix.com`, and so does `zzz.notvm.epaflix.com` - the whole
+`epaflix.com` Cloudflare zone answers at every depth. #830 fixed **the doc, not the
+leak**, for two reasons. No Pi-hole or Unbound change can reach it - neither box is
+authoritative for what a public resolver returns. And narrowing the Cloudflare wildcard
+would break the fall-through this file documents two sections up as deliberate: an
+unlisted `*.epaflix.com` name is meant to resolve to Cloudflare, not NXDOMAIN. Whether
+the wildcard should exist at all is a Cloudflare-dashboard decision, tracked separately.
+
+The wildcard certificate covers `*.epaflix.com` and `epaflix.com` only, so a
+`vm.epaflix.com` host put behind Traefik gets `CN=TRAEFIK DEFAULT CERT` and fails TLS.
+Add a SAN before planning one (#830).
 
 > Renamed from `internal.epaflix.com` on 2026-04-18.
 
@@ -741,8 +863,8 @@ dig google.com @127.0.0.1 -p 5335 +short
 - `qname-minimisation` reduces data sent to upstream resolvers
 - `private-address` rules block RFC1918 responses from upstream (DNS rebinding protection)
 - `harden-glue` and `harden-dnssec-stripped` protect against DNS spoofing attacks
-- `local-zone: "vm.epaflix.com." static` — unknown user-VM names never reach public DNS
-- Four per-name `local-zone: static` entries in `no-aaaa-leak.conf` - internal-only `*.epaflix.com` names return an empty AAAA instead of the Cloudflare wildcard's synthesized IPv6 (#868). Latent today because the LAN is IPv4-only; live the moment IPv6 is enabled anywhere (#882)
+- `local-zone: "vm.epaflix.com." static` - unlisted user-VM names are NXDOMAIN for clients using Pi-hole. This does **not** make the zone private: it answers on public DNS at every depth (#830)
+- Per-name `local-zone: static` entries in `no-aaaa-leak.conf` - internal-only `*.epaflix.com` names return an empty AAAA instead of the Cloudflare wildcard's synthesized IPv6 (#868). Latent today because the LAN is IPv4-only; live the moment IPv6 is enabled anywhere (#882). `1-proxmox/pihole/aaaa-tripwire.sh` is the mechanical check that this stays true
 - `filter-rr=HTTPS` — blocks DNS type 65 (HTTPS record) queries from reaching public DNS, preventing browsers from receiving Cloudflare ECH/ipv4hint overrides that would bypass local A record resolution
 - DNSSEC: **disabled** (`dnssec = false` in `pihole.toml`) — can be enabled if needed
 
