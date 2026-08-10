@@ -74,29 +74,15 @@ spec:
         sans:
           - "*.epaflix.com"
 ---
-# API route - /api is exempt from forward-auth (machine/API-key clients,
-# newtarr integration, deep-links). priority 20 beats the UI route's 10.
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
-metadata:
-  name: prowlarr-api
-  namespace: servarr
-spec:
-  entryPoints:
-    - websecure
-  routes:
-    - match: Host(`prowlarr.epaflix.com`) && PathPrefix(`/api`)
-      kind: Rule
-      priority: 20
-      services:
-        - name: prowlarr
-          port: 9696
-  tls:
-    certResolver: cloudflare
-    domains:
-      - main: epaflix.com
-        sans:
-          - "*.epaflix.com"
+# NO /api exemption route here, deliberately (#296, removed 2026-08-10).
+# A priority-20 `Host(`prowlarr.epaflix.com`) && PathPrefix(`/api`)` route with no
+# middleware used to sit here, so API-key callers could bypass forward-auth over
+# the public host. It also made the API internet-reachable with the API key as
+# the only control. Each *arr reaches prowlarr at `http://prowlarr:9696/<id>/`
+# and prowlarr's own app sync uses `http://sonarr:8989` / `http://radarr:7878`
+# - all verified live. 30d of access logs showed no headless external caller.
+# /api now matches `prowlarr-https` (priority 10) and is forward-auth'd.
+# Re-adding this re-publishes the API to the internet. Don't.
 ---
 # HTTP to HTTPS redirect for Prowlarr
 apiVersion: traefik.io/v1alpha1
