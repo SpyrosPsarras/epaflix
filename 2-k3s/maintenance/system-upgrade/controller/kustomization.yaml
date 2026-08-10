@@ -1,7 +1,14 @@
 # system-upgrade-controller install — vendored from upstream.
 #
-# Pinned to v0.19.2 (https://github.com/rancher/system-upgrade-controller/
-# releases/tag/v0.19.2). The controller is benign when running without any
+# Pinned to v0.20.1 (https://github.com/rancher/system-upgrade-controller/
+# releases/tag/v0.20.1). Bumped from v0.19.2 for #413: v0.20.1 is the first
+# GA release built against the Kubernetes 1.36 client libraries (upstream PR
+# #404, k8s.io/client-go 0.35.1 -> 0.36.0), which the cluster needs before the
+# k3s v1.35 -> v1.36 roll. The upgrade is a one-line image-tag change plus two
+# cosmetic CRD description lines: RBAC, args, env, securityContext, namespace,
+# ServiceAccount and the whole Plan schema are byte-identical between the two
+# tags, so existing Plan objects need no edits. The controller is benign when
+# running without any
 # `Plan` CRs in the cluster — it simply watches for Plans and does nothing
 # until one appears. This kustomization is therefore safe to enable as a
 # standalone Application; the actual upgrade Plans
