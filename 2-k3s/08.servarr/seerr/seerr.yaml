@@ -149,13 +149,26 @@ spec:
             initialDelaySeconds: 120
             timeoutSeconds: 10
             periodSeconds: 10
+          # CPU limit raised 500m -> 1000m (#912). #912 asked whether seerr was a
+          # real workload problem or a limit that is too tight. Measured over 24h
+          # to 2026-08-10 it is the limit: 43.6m average, 50.1m p95, 121.4m peak
+          # - 9% of the old 500m limit - while throttled 46.4% of runnable
+          # periods, firing CPUThrottlingHigh. Same burst-clipping shape as the
+          # two exporters in 2-k3s/10.observability, not a runaway workload.
+          #
+          # 1000m is the measured throttle knee for this cluster: at 500m two
+          # containers still throttle 40-46%, while at 1000m the closest
+          # comparators by average usage - servarr/cleanuparr 46.6m -> 1.8%,
+          # servarr/sonarr2 25.2m -> 1.7% - sit far below the 25% alert
+          # threshold. Request stays 100m; a limit is a ceiling, not a
+          # reservation. Memory untouched, it was never throttled.
           resources:
             requests:
               memory: "256Mi"
               cpu: "100m"
             limits:
               memory: "2Gi"
-              cpu: "500m"
+              cpu: "1000m"
       volumes:
         - name: config
           persistentVolumeClaim:

@@ -5,13 +5,35 @@
 prometheus:
   prometheusSpec:
     replicas: 1 # Single replica due to PV limitations
-    retention: 15d
-    # Must stay BELOW the PVC claim below (25Gi). local-path is a bind mount with
-    # no quota, so the claim is advisory — retentionSize is the only real bound,
-    # and the node root disk is only 48G. At "45GB" Prometheus grew to 30G and
-    # pushed k3s-worker-62 to 85%, which broke kubelet image GC (#463).
-    # If 15d of history matters more than node headroom, grow the PVC — do not
-    # raise this back above the claim.
+    # RETENTION - these two knobs MUST agree, and the honest number is 8d, not
+    # 15d (#913). Measured on the live TSDB 2026-08-10:
+    #   prometheus_tsdb_retention_limit_bytes  21474836480  20 GiB - Prometheus
+    #                                          parses "20GB" as base-2
+    #   prometheus_tsdb_storage_blocks_bytes   17863917735  16.6 GiB, 86% of cap
+    #   prometheus_tsdb_wal_storage_size_bytes   555898276   0.5 GiB
+    #   oldest block age                              8.55 days
+    #   prometheus_tsdb_head_series                 618462
+    # The size cap binds first, so the old `retention: 15d` never applied once -
+    # documented retention was 43% longer than real retention, and nothing
+    # reported the disagreement. That cost an investigation: #908/#909 could not
+    # establish when any alert actually started firing, because the ALERTS series
+    # does not exist that far back.
+    #
+    # WHY THE TIME CAME DOWN INSTEAD OF THE VOLUME GOING UP: the volume does not
+    # fit. Ingest is 16.6 GiB / 8.55 d = 1.95 GiB/day, so 15 days needs ~29 GiB
+    # of blocks, roughly 12 GiB more than today. local-path is a bind mount with
+    # NO quota, so the 25Gi claim below is advisory and the real bound is the
+    # node root disk - k3s-worker-62 measured 11.7 GiB free of 47.4 GiB (75%
+    # used) on 2026-08-10. The headroom is not there, and #463 already showed
+    # the failure mode: at "45GB" Prometheus grew to 30G, pushed the node to 85%
+    # and broke kubelet image GC.
+    #
+    # 8d makes time the binding constraint with room to spare: 8 x 1.95 =
+    # 15.6 GiB against a 20 GiB cap. retentionSize stays as the backstop, not
+    # the primary bound. Want more history? Cut cardinality (618k head series is
+    # the lever) or move Prometheus to a bigger disk. Do NOT raise retentionSize
+    # above the claim, and do NOT raise retention without re-measuring both.
+    retention: 8d
     retentionSize: "20GB"
 
     # Resource limits
@@ -298,12 +320,29 @@ prometheus-node-exporter:
       operator: Exists
       effect: NoSchedule
 
+  # CPU limit raised 200m -> 1000m (#912). node-exporter is a low-average,
+  # high-burst scrape workload, which is exactly the shape CFS quota punishes
+  # hardest. Measured over 24h to 2026-08-10: the 7 pods averaged 3.1-7.8m CPU,
+  # i.e. 2-4% of the old 200m limit, and were STILL throttled 24-44% of their
+  # runnable periods - enough to fire CPUThrottlingHigh on 5 of them. Average
+  # usage was never the problem; the per-scrape burst did not fit in a 20ms
+  # slice.
+  #
+  # 1000m is measured, not picked. Across every limited container in this
+  # cluster the throttle knee sits at 1000m: at 200m the median is 1.7% but
+  # bursty low-average containers hit 24-44%, at 500m two containers still
+  # throttle 40-46%, and at 1000m the median is 1.1% with the closest
+  # comparators - servarr/unpackerr (4.0m avg), servarr/newtarr (4.7m avg),
+  # odysseus/chromadb (0.6m avg) - sitting at exactly 0.0%.
+  #
+  # A limit is a ceiling, not a reservation, so the request stays 100m and this
+  # costs no schedulable capacity. Memory is untouched - it was never throttled.
   resources:
     requests:
       cpu: 100m
       memory: 100Mi
     limits:
-      cpu: 200m
+      cpu: 1000m
       memory: 200Mi
 
 # kube-state-metrics configuration
@@ -330,6 +369,16 @@ kube-state-metrics:
 # Default ServiceMonitors
 defaultRules:
   create: true
+  # KubeJobFailed is switched off here and REPLACED by the `kube-job-failed-recent`
+  # group in alertmanager-config/custom-alerts.yaml (#909). The chart rule is
+  # `kube_job_failed{job="kube-state-metrics"} > 0` with no aggregation and no
+  # recency gate, so it (a) fired once per kube-state-metrics replica and (b)
+  # duplicated every scoped servarr rule in that file, giving 40 firing series
+  # for 5 distinct failing CronJobs. The replacement keeps cluster-wide coverage
+  # under the SAME alert name - do not simply re-enable this without deleting
+  # the replacement, or the double-owner bug returns.
+  disabled:
+    KubeJobFailed: true
   rules:
     alertmanager: true
     etcd: true

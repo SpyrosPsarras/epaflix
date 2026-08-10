@@ -44,6 +44,51 @@
 # DO NOT re-add a rule matching "reconnect triggered" - that string is gone
 # from the image and cannot come back without reverting #611/#627.
 #
+# ===================================================================
+# LOKI LOGS EVERY QUERY IT RUNS. READ THIS BEFORE ADDING A RULE HERE.
+#
+# The ruler, querier, query-frontend and the loki-gateway nginx access log all
+# write the full query text of every evaluation at level=info, and promtail
+# ships those lines straight back into Loki. So any rule whose pattern is a
+# literal string, evaluated against a stream selector that can reach
+# namespace="observability", WILL match its own query echo and become
+# permanently true. It cannot resolve, because the thing keeping it firing is
+# the act of evaluating it.
+#
+# That is exactly what happened to PodPanicOrFatal for ~8 weeks (#910, landed
+# in 7613e8b 2026-06-15). Measured on the live cluster 2026-08-10, 1h window:
+# 180 matching lines, 100% of them from observability/loki-0/loki, 0 real
+# errors, against a threshold of 5 per 5m.
+#
+# The guard is the `!= `query=`` line filter, used on every rule below whose
+# selector is not pinned to a single non-observability namespace. It drops the
+# echo lines by CONTENT, not by pod, so a genuine panic inside Loki itself is
+# still caught - `pod!~"loki-.*"` would have blinded the rule to real Loki
+# crashes, which is why it was not used.
+#
+# Accepted blind spot: a real log line that both matches the pattern AND
+# contains the literal `query=` is dropped. The realistic case is a database
+# engine logging a failing statement, and Postgres already has its own
+# namespace-pinned rules below (PostgresPanic / PostgresFatalSpike), so that
+# coverage is not lost.
+#
+# Audited 2026-08-10, all six other rules in this file, live: only
+# PodPanicOrFatal self-matched. The namespace-pinned rules structurally cannot
+# see the ruler's stream, and CredentialInLogs - the other `namespace=~".+"`
+# rule - does not match its own echo because its regex needs `key=<value>` and
+# the echoed regex text reads `client_secret)=[A-Za-z0-9._~+/-]{8,}`, with a
+# `)` between the key name and the `=`. Measured, not assumed: 0 matches in
+# namespace observability over a clean 5m window.
+#
+# CredentialInLogs deliberately does NOT get the `!= `query=`` filter. It is a
+# security regression detector, and a dropped line there is a missed credential
+# leak - a real one could plausibly contain `query=` (a database engine logging
+# a failing statement alongside a connection string). It stays unfiltered and
+# relies on the structural reason above. If its regex is ever widened, re-run
+# the audit: `sum by (namespace) (count_over_time(<the rule expr>))` must stay
+# 0 for namespace="observability".
+# ===================================================================
+#
 # qBittorrent VPN flap IS covered by the restart-count PrometheusRule in
 # custom-alerts.yaml, matching `container=~"qbittorrent|airvpn|agent"` (#622) -
 # a flap can restart `airvpn` or, since the vpn-picker agent shipped, `agent`.
@@ -86,12 +131,24 @@ data:
 
       # D — cluster-wide safety net for hard failures in any namespace.
       #     Specific tokens (not bare "error") to stay low-noise.
+      #
+      #     `!= `query=`` is LOAD-BEARING, not tidying: without it this rule
+      #     counts Loki's own logging of this very query and can never resolve
+      #     (#910). See the LOKI LOGS EVERY QUERY block in the file header.
+      #     Measured 2026-08-10 at a window clean of ad-hoc queries:
+      #       without the filter: 180 lines/1h, 4322/24h, all from loki-0
+      #       with    the filter:   0 lines/1h,    0/24h
+      #     and a throwaway pod logging 8 real `panic: runtime error:` lines
+      #     was still counted (8 > threshold 5), so the filter does not blind
+      #     the rule. Both directions verified before merge.
       - name: cluster-fatal
         rules:
           - alert: PodPanicOrFatal
             expr: |
               sum by (namespace) (
-                count_over_time({namespace=~".+"} |~ `(?i)(panic:|fatal error|out of memory|segfault|runtime error)` [5m])
+                count_over_time({namespace=~".+"}
+                  |~ `(?i)(panic:|fatal error|out of memory|segfault|runtime error)`
+                  != `query=` [5m])
               ) > 5
             for: 5m
             labels:
