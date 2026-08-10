@@ -44,7 +44,7 @@ content classifier accepts them. There is no per-file template allowlist and
 no fixed key schema: adding or removing a legitimate field must not require a
 policy update.
 
-For each plaintext Secret document, the guard requires both of these:
+For each plaintext Secret document, the guard requires all four of these:
 
 1. A value under a key matching `pass|password|secret|token|key|crt|cert|credential|auth`
    (case-insensitive) must be exactly one approved placeholder form:
@@ -62,6 +62,23 @@ For each plaintext Secret document, the guard requires both of these:
    prefixes, private material, JWTs, long base64/hex runs, or high entropy
    across printable Unicode and internal whitespace (including
    punctuation-heavy values).
+3. A scalar of 8 to 15 characters, below the entropy band's 16-character floor,
+   is rejected when it is one unbroken alphanumeric token that mixes at least
+   two of lowercase, uppercase and digits, has at least 6 distinct characters,
+   and reaches 2.5 bits of Shannon entropy per character. Template identifiers
+   here are DNS-1123 lowercase words joined by `-`, `.` or `/`, so each
+   unbroken token carries a single character class, while a short credential is
+   one unbroken run that mixes letter case, digits, or both. Measured against
+   every scalar of the 14 tracked plaintext Secret documents this band rejects
+   nothing, so values like `jellyseerr`, `prowlarr` and `sonarr2-database` stay
+   editable with no per-file key allowlist.
+4. An opaque scalar longer than 2048 characters is rejected outright instead of
+   being analysed. Entropy analysis has to be bounded somewhere, and any bound
+   is a padding bypass, so oversized opaque values fail closed. The longest
+   opaque scalar in the tracked plaintext Secrets is 82 characters, so the limit
+   constrains no real template. A scalar that parses as embedded YAML or JSON is
+   decomposed rather than measured, and every leaf it yields is held to the same
+   2048-character limit, so padding an embedded document buys nothing either.
 
 Kubernetes `kind: List` and `kind: SecretList` documents are rejected instead
 of allowing Secret objects nested below `items` to bypass these checks.
@@ -86,8 +103,27 @@ tracked tree:
 ./.github/hooks/check-sops-encrypted.sh --full-tree
 ```
 
-This is not a general secret scanner. Entropy detection has accepted false
-negatives: a short low-entropy credential under a non-sensitive key can pass.
+This is not a general secret scanner, but no scalar size is a free pass. Both
+new rules fail closed in the required `validate` job: the guard exits non-zero
+and prints a fixed reason string plus the file, document number and key path.
+It never prints the offending value, in any encoding (#740).
+
+The residual limitations are:
+
+- A value shorter than 8 characters is not classified. It cannot carry usable
+  credential entropy and it is indistinguishable from ordinary short template
+  values such as `admin`, `5432` or `v1`.
+- Rule 3 counts character classes, not meaning. A short credential built from a
+  single character class, such as an all-lowercase dictionary word, still
+  passes.
+- Rule 3 has a cost in the other direction: a short all-lowercase identifier
+  that gains a digit inside the same unbroken token, such as `sonarr2user`, is
+  rejected. Give it a separator (`sonarr2-user`) or a placeholder. That is the
+  deliberate price of catching `admin123`-shaped credentials without a per-file
+  key allowlist.
+- A CamelCase enum value such as `ClusterIP` would also be rejected by rule 3
+  if it ever appeared inside a Secret document. No tracked Secret contains one.
+
 Sensitive key names remain hard-gated, and review plus required CI remain part
 of the trust boundary.
 
