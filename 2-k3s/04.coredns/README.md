@@ -44,8 +44,8 @@ that two CoreDNS pods cannot land on the same node. Nothing to add.
 **To re-assert after a cluster rebuild** (the only case where this is lost):
 
 ```bash
-kubectl scale deployment/coredns -n kube-system --replicas=2
-kubectl -n kube-system get pods -l k8s-app=kube-dns -o wide   # expect 2, different nodes
+kubectl --context epaflix scale deployment/coredns -n kube-system --replicas=2
+kubectl --context epaflix -n kube-system get pods -l k8s-app=kube-dns -o wide   # expect 2, different nodes
 ```
 
 **Known gap:** the second `topologySpreadConstraint` spreads on
@@ -105,22 +105,22 @@ curl https://auth.epaflix.com
 Managed by the `coredns` ArgoCD Application — `2-k3s/11.argocd/apps/app-coredns.yaml`. Bootstrap once per cluster:
 
 ```bash
-kubectl apply -f 2-k3s/11.argocd/apps/app-coredns.yaml
+kubectl --context epaflix apply -f 2-k3s/11.argocd/apps/app-coredns.yaml
 argocd app sync coredns --core --prune=false
 ```
 
-After the first sync, edits to `coredns-epaflix-domains.yaml` reconcile via Argo. CoreDNS hot-reloads the `coredns-custom` ConfigMap from `/etc/coredns/custom/`; no Deployment rollout is required (a `kubectl rollout restart deployment/coredns -n kube-system` is only needed if a reload misfires).
+After the first sync, edits to `coredns-epaflix-domains.yaml` reconcile via Argo. CoreDNS hot-reloads the `coredns-custom` ConfigMap from `/etc/coredns/custom/`; no Deployment rollout is required (a `kubectl --context epaflix rollout restart deployment/coredns -n kube-system` is only needed if a reload misfires).
 
 ### Verification
 
 ```bash
 # Test DNS resolution
-kubectl run test-dns --image=busybox:latest --restart=Never --rm -it -- \
+kubectl --context epaflix run test-dns --image=busybox:latest --restart=Never --rm -it -- \
   nslookup sonarr.epaflix.com
 # Should return: 192.168.10.101
 
 # Test HTTPS connectivity
-kubectl run test-curl --image=curlimages/curl:latest --restart=Never --rm -it -- \
+kubectl --context epaflix run test-curl --image=curlimages/curl:latest --restart=Never --rm -it -- \
   curl -I https://sonarr.epaflix.com
 # Should return HTTP 200/401 (depending on auth requirements)
 ```
@@ -179,18 +179,18 @@ ssh ubuntu@192.168.10.51 "sudo ss -tulpn | grep 53"
 Update CoreDNS to forward queries to node IPs instead of directly to DNS server:
 
 ```bash
-kubectl patch configmap coredns -n kube-system --type=json -p='[{"op":"replace","path":"/data/Corefile","value":".:53 {\n    errors\n    health\n    ready\n    kubernetes cluster.local in-addr.arpa ip6.arpa {\n      pods insecure\n      fallthrough in-addr.arpa ip6.arpa\n    }\n    hosts /etc/coredns/NodeHosts {\n      ttl 60\n      reload 15s\n      fallthrough\n    }\n    prometheus :9153\n    cache 30\n    loop\n    reload\n    loadbalance\n    import /etc/coredns/custom/*.override\n    forward . 192.168.10.51 192.168.10.52 192.168.10.53\n}\nimport /etc/coredns/custom/*.server\n"}]'
+kubectl --context epaflix patch configmap coredns -n kube-system --type=json -p='[{"op":"replace","path":"/data/Corefile","value":".:53 {\n    errors\n    health\n    ready\n    kubernetes cluster.local in-addr.arpa ip6.arpa {\n      pods insecure\n      fallthrough in-addr.arpa ip6.arpa\n    }\n    hosts /etc/coredns/NodeHosts {\n      ttl 60\n      reload 15s\n      fallthrough\n    }\n    prometheus :9153\n    cache 30\n    loop\n    reload\n    loadbalance\n    import /etc/coredns/custom/*.override\n    forward . 192.168.10.51 192.168.10.52 192.168.10.53\n}\nimport /etc/coredns/custom/*.server\n"}]'
 ```
 
 ### 3. Update Custom epaflix Domains Configuration
 
-`coredns-custom` is managed by the ArgoCD `coredns` Application — edit `coredns-epaflix-domains.yaml`, commit, and let Argo reconcile (or `argocd app sync coredns --core`). Avoid `kubectl patch configmap coredns-custom` directly; the next Argo sync would revert it.
+`coredns-custom` is managed by the ArgoCD `coredns` Application — edit `coredns-epaflix-domains.yaml`, commit, and let Argo reconcile (or `argocd app sync coredns --core`). Avoid `kubectl --context epaflix patch configmap coredns-custom` directly; the next Argo sync would revert it.
 
 ### 4. Restart CoreDNS
 
 ```bash
-kubectl rollout restart deployment/coredns -n kube-system
-kubectl rollout status deployment/coredns -n kube-system
+kubectl --context epaflix rollout restart deployment/coredns -n kube-system
+kubectl --context epaflix rollout status deployment/coredns -n kube-system
 ```
 
 ### 5. Verification
@@ -198,12 +198,12 @@ kubectl rollout status deployment/coredns -n kube-system
 Test DNS resolution from pods:
 ```bash
 # Test public domain
-kubectl run test-dns --image=busybox --restart=Never --rm -it -- \
+kubectl --context epaflix run test-dns --image=busybox --restart=Never --rm -it -- \
   nslookup auth.epaflix.com
 # Should return: 192.168.10.101
 
 # Test another domain
-kubectl run test-dns2 --image=busybox --restart=Never --rm -it -- \
+kubectl --context epaflix run test-dns2 --image=busybox --restart=Never --rm -it -- \
   nslookup sonarr.epaflix.com
 # Should return: 192.168.10.101
 ```
@@ -235,19 +235,19 @@ The ConfigMap is automatically loaded by k3s CoreDNS from `/etc/coredns/custom/`
 
 ```bash
 # Check CoreDNS logs
-kubectl logs -n kube-system -l k8s-app=kube-dns --tail=50
+kubectl --context epaflix logs -n kube-system -l k8s-app=kube-dns --tail=50
 
 # Verify custom config is loaded
-kubectl get configmap coredns-custom -n kube-system -o yaml
+kubectl --context epaflix get configmap coredns-custom -n kube-system -o yaml
 
 # Check main CoreDNS config
-kubectl get configmap coredns -n kube-system -o yaml | grep -A 20 "Corefile:"
+kubectl --context epaflix get configmap coredns -n kube-system -o yaml | grep -A 20 "Corefile:"
 
 # Verify systemd-resolved is listening on node IPs
 ssh ubuntu@192.168.10.51 "sudo ss -tulpn | grep 53"
 
 # Test from a specific namespace
-kubectl run test-dns -n servarr --image=busybox:latest --restart=Never --rm -it -- \
+kubectl --context epaflix run test-dns -n servarr --image=busybox:latest --restart=Never --rm -it -- \
   nslookup sonarr.epaflix.com
 ```
 
@@ -261,11 +261,11 @@ This happens when the DNS server (192.168.10.30) refuses queries from the pod ne
 
 ```bash
 # Check if Traefik is running
-kubectl get svc -n traefik-system traefik
+kubectl --context epaflix get svc -n traefik-system traefik
 
 # Verify ingress routes
-kubectl get ingressroute -A
+kubectl --context epaflix get ingressroute -A
 
 # Check certificates
-kubectl get certificate -A
+kubectl --context epaflix get certificate -A
 ```

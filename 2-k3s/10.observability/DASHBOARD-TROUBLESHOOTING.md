@@ -18,28 +18,28 @@ The dashboard was imported incorrectly or is corrupted, resulting in a dashboard
 1. **Check if Prometheus is collecting data:**
 ```bash
 # Port forward to Prometheus
-kubectl port-forward -n observability svc/kube-prometheus-stack-prometheus 9090:9090
+kubectl --context epaflix port-forward -n observability svc/kube-prometheus-stack-prometheus 9090:9090
 
 # Open http://localhost:9090/targets and verify targets are UP
 # Or query from command line:
-kubectl exec -n observability prometheus-kube-prometheus-stack-prometheus-0 -c prometheus -- \
+kubectl --context epaflix exec -n observability prometheus-kube-prometheus-stack-prometheus-0 -c prometheus -- \
   wget -qO- 'http://localhost:9090/api/v1/query?query=up' | python3 -m json.tool
 ```
 
 2. **Check Grafana datasource configuration:**
 ```bash
-kubectl exec -n observability deployment/kube-prometheus-stack-grafana -c grafana -- \
+kubectl --context epaflix exec -n observability deployment/kube-prometheus-stack-grafana -c grafana -- \
   curl -s -u admin:'<POSTGRES_PASSWORD>' http://localhost:3000/api/datasources | python3 -m json.tool
 ```
 
 3. **List all dashboards and check panel counts:**
 ```bash
 # List all dashboards
-kubectl exec -n observability deployment/kube-prometheus-stack-grafana -c grafana -- \
+kubectl --context epaflix exec -n observability deployment/kube-prometheus-stack-grafana -c grafana -- \
   curl -s -u admin:'<POSTGRES_PASSWORD>' 'http://localhost:3000/api/search?type=dash-db'
 
 # Check specific dashboard panel count
-kubectl exec -n observability deployment/kube-prometheus-stack-grafana -c grafana -- \
+kubectl --context epaflix exec -n observability deployment/kube-prometheus-stack-grafana -c grafana -- \
   curl -s -u admin:'<POSTGRES_PASSWORD>' 'http://localhost:3000/api/dashboards/uid/<DASHBOARD_UID>' | \
   python3 -c "import sys, json; data=json.load(sys.stdin); print('Panels:', len(data['dashboard'].get('panels', [])))"
 ```
@@ -88,7 +88,7 @@ The kube-prometheus-stack Helm chart includes excellent pre-configured dashboard
 
 ```bash
 # Get all built-in dashboards with UIDs
-kubectl exec -n observability deployment/kube-prometheus-stack-grafana -c grafana -- \
+kubectl --context epaflix exec -n observability deployment/kube-prometheus-stack-grafana -c grafana -- \
   curl -s -u admin:'<POSTGRES_PASSWORD>' 'http://localhost:3000/api/search?type=dash-db' | \
   python3 -c "import sys, json; data=json.load(sys.stdin); [print(f\"{d['title']}\n  URL: https://grafana.epaflix.com{d['url']}\n\") for d in sorted(data, key=lambda x: x['title'])]"
 ```
@@ -99,7 +99,7 @@ If you have a corrupted/empty dashboard, delete it:
 
 ```bash
 # Delete by UID (replace with actual UID from dashboard URL)
-kubectl exec -n observability deployment/kube-prometheus-stack-grafana -c grafana -- \
+kubectl --context epaflix exec -n observability deployment/kube-prometheus-stack-grafana -c grafana -- \
   curl -s -X DELETE -u admin:'<POSTGRES_PASSWORD>' \
   'http://localhost:3000/api/dashboards/uid/<DASHBOARD_UID>'
 ```
@@ -150,7 +150,7 @@ For external dashboards from grafana.com, use the Grafana UI:
 
 ```bash
 # Export dashboard to file
-kubectl exec -n observability deployment/kube-prometheus-stack-grafana -c grafana -- \
+kubectl --context epaflix exec -n observability deployment/kube-prometheus-stack-grafana -c grafana -- \
   curl -s -u admin:'<POSTGRES_PASSWORD>' \
   'http://localhost:3000/api/dashboards/uid/<DASHBOARD_UID>' | \
   python3 -m json.tool > dashboard-backup.json
@@ -212,7 +212,7 @@ Example: `https://grafana.epaflix.com/d/efa86fd1d0c121a26444b636a3f509a8/kuberne
 # Password: <POSTGRES_PASSWORD> (from prometheus-values.yaml)
 
 # Test authentication
-kubectl exec -n observability deployment/kube-prometheus-stack-grafana -c grafana -- \
+kubectl --context epaflix exec -n observability deployment/kube-prometheus-stack-grafana -c grafana -- \
   curl -s -u admin:'<POSTGRES_PASSWORD>' http://localhost:3000/api/org
 ```
 
@@ -243,7 +243,7 @@ DELETE /api/dashboards/uid/<UID>
 ## Support
 
 If issues persist:
-1. Check Grafana logs: `kubectl logs -n observability -l app.kubernetes.io/name=grafana -f`
-2. Check Prometheus logs: `kubectl logs -n observability prometheus-kube-prometheus-stack-prometheus-0 -c prometheus`
+1. Check Grafana logs: `kubectl --context epaflix logs -n observability -l app.kubernetes.io/name=grafana -f`
+2. Check Prometheus logs: `kubectl --context epaflix logs -n observability prometheus-kube-prometheus-stack-prometheus-0 -c prometheus`
 3. Verify network connectivity between Grafana and Prometheus pods
-4. Ensure ServiceMonitors are being discovered: `kubectl get servicemonitors -A`
+4. Ensure ServiceMonitors are being discovered: `kubectl --context epaflix get servicemonitors -A`

@@ -174,10 +174,10 @@ spec:
 - Full ArgoCD uninstall:
   ```
   helm uninstall argocd -n argocd
-  kubectl delete ns argocd
+  kubectl --context epaflix delete ns argocd
   ```
   Workloads stay running; each tier's `kustomization.yaml` is still in repo
-  and applies with `kubectl apply -k 2-k3s/08.servarr/` if needed.
+  and applies with `kubectl --context epaflix apply -k 2-k3s/08.servarr/` if needed.
 
 ## Traefik onboarding (safe adoption)
 
@@ -187,16 +187,16 @@ enable prune during initial adoption.
 
 1. **Confirm runtime-only state exists**. These are not committed to git:
   ```
-  kubectl -n traefik-system get secret cloudflare-api-token
-  kubectl -n traefik-system get pvc
-  kubectl -n traefik-system get svc traefik -o wide
+  kubectl --context epaflix -n traefik-system get secret cloudflare-api-token
+  kubectl --context epaflix -n traefik-system get pvc
+  kubectl --context epaflix -n traefik-system get svc traefik -o wide
   ```
   The Service must still show `192.168.10.101`, and the ACME PVC must be the
   same one currently mounted by Traefik.
 
 2. **Render the git source before ArgoCD syncs it**:
   ```
-  kubectl kustomize --enable-helm 2-k3s/05.traefik-deployment >/tmp/traefik-rendered.yaml
+  kubectl --context epaflix kustomize --enable-helm 2-k3s/05.traefik-deployment >/tmp/traefik-rendered.yaml
   ```
   Check that the rendered Traefik values still reference
   `cloudflare-api-token`, mount ACME storage at `/data/acme.json`, keep
@@ -204,7 +204,7 @@ enable prune during initial adoption.
 
 3. **Create the Application**:
   ```
-  kubectl apply -f 2-k3s/11.argocd/apps/app-traefik.yaml
+  kubectl --context epaflix apply -f 2-k3s/11.argocd/apps/app-traefik.yaml
   ```
 
 4. **Review the first diff, then sync manually only if safe**:
@@ -215,8 +215,8 @@ enable prune during initial adoption.
 
 5. **Verify ingress after sync**:
   ```
-  kubectl -n traefik-system rollout status deploy/traefik
-  kubectl -n traefik-system get svc traefik -o wide
+  kubectl --context epaflix -n traefik-system rollout status deploy/traefik
+  kubectl --context epaflix -n traefik-system get svc traefik -o wide
   curl -Ik https://traefik.epaflix.com/dashboard/
   ```
 
@@ -233,17 +233,17 @@ without breaking sessions:
    `2-k3s/11.argocd/helm-values.yaml` as `configs.cm.kustomize.buildOptions: --enable-helm`).
    If the cluster predates this change: `helm upgrade argocd argo/argo-cd
    --version 9.5.20 -n argocd -f helm-values.yaml --wait` then
-   `kubectl -n argocd rollout restart deploy/argocd-repo-server`.
+   `kubectl --context epaflix -n argocd rollout restart deploy/argocd-repo-server`.
 
 2. **Apply the runtime-secrets Secret** (substitute real values from
    `.github/instructions/secrets.yml` first — never commit the rendered file):
    ```
-   kubectl apply -f 2-k3s/07.authentik-deployment/secret-app.yaml
+   kubectl --context epaflix apply -f 2-k3s/07.authentik-deployment/secret-app.yaml
    ```
    Keys: `AUTHENTIK_SECRET_KEY`, `AUTHENTIK_POSTGRESQL__PASSWORD`,
    `AUTHENTIK_EMAIL__PASSWORD`. `AUTHENTIK_SECRET_KEY` MUST match the value
    currently live in the chart-managed `authentik` Secret —
-   `kubectl -n app-authentik get secret authentik -o jsonpath='{.data.AUTHENTIK_SECRET_KEY}' | base64 -d`.
+   `kubectl --context epaflix -n app-authentik get secret authentik -o jsonpath='{.data.AUTHENTIK_SECRET_KEY}' | base64 -d`.
    Mismatch invalidates every session/cookie/token.
 
 3. **Re-render the chart locally** so the cluster matches the new
@@ -257,7 +257,7 @@ without breaking sessions:
 
 4. **Create the Application** (still manual sync):
    ```
-   kubectl apply -f 2-k3s/11.argocd/apps/app-authentik.yaml
+   kubectl --context epaflix apply -f 2-k3s/11.argocd/apps/app-authentik.yaml
    ```
    In the UI: should be Healthy + (near-)Synced after the first refresh.
    Reconcile any drift, then flip `syncPolicy` to:
@@ -293,7 +293,7 @@ cleanly.
    - Patch `grafana-oauth-secret` to add a `client_id` key alongside the
      existing `client_secret`:
      ```
-     kubectl -n observability patch secret grafana-oauth-secret \
+     kubectl --context epaflix -n observability patch secret grafana-oauth-secret \
        --type=merge -p '{"stringData":{"client_id":"<id-from-secrets.yml>"}}'
      ```
    - Verify pre-existing `grafana-db-secret`, `grafana-oauth-secret`,
@@ -316,14 +316,14 @@ cleanly.
 3. **Render-then-diff** against the live cluster (the step omitted on the
    filebrowser adoption that lost its OIDC Secret — non-negotiable):
    ```
-   kubectl diff -f <(kubectl kustomize --enable-helm 2-k3s/10.observability)
+   kubectl --context epaflix diff -f <(kubectl --context epaflix kustomize --enable-helm 2-k3s/10.observability)
    ```
    The diff MUST be empty modulo `ignoreDifferences`-covered fields. If
    anything else shows, fix git — do not proceed.
 
 4. **Create the Application** (still manual sync):
    ```
-   kubectl apply -f 2-k3s/11.argocd/apps/app-observability.yaml
+   kubectl --context epaflix apply -f 2-k3s/11.argocd/apps/app-observability.yaml
    argocd app diff observability   # must be empty
    argocd app sync observability
    argocd app get observability    # Healthy + Synced
@@ -355,7 +355,7 @@ it, and nothing goes red. Surfaced in #461 / PR #777.
 
 ### 1. The sweep needs `--show-managed-fields` or it lies
 
-Read this before anything else. `kubectl get ... -o json` **strips
+Read this before anything else. `kubectl --context epaflix get ... -o json` **strips
 `managedFields` by default** (kubectl >= 1.21). A sweep without
 `--show-managed-fields` returns **zero** hits and looks like a clean bill of
 health. That is a false negative, not a clean cluster.
@@ -473,14 +473,14 @@ managed (chicken-egg).
 
 ```bash
 # From the maintainer workstation:
-kubectl create secret generic sops-age \
+kubectl --context epaflix create secret generic sops-age \
   -n argocd \
   --from-file=keys.txt=$HOME/.config/sops/age/k3s-cluster.txt
 
 # Verify the repo-server picked it up:
-kubectl -n argocd rollout restart deploy/argocd-repo-server
-kubectl -n argocd rollout status deploy/argocd-repo-server
-kubectl -n argocd logs deploy/argocd-repo-server -c install-ksops | tail
+kubectl --context epaflix -n argocd rollout restart deploy/argocd-repo-server
+kubectl --context epaflix -n argocd rollout status deploy/argocd-repo-server
+kubectl --context epaflix -n argocd logs deploy/argocd-repo-server -c install-ksops | tail
 # Expected: "Done."
 ```
 

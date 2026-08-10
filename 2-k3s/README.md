@@ -81,8 +81,8 @@ See [maintenance/README.md](maintenance/README.md) for details.
 
 ```bash
 # Check cluster
-kubectl get nodes -o wide
-kubectl get pods -A
+kubectl --context epaflix get nodes -o wide
+kubectl --context epaflix get pods -A
 
 # SSH to nodes
 ssh ubuntu@192.168.10.51   # master-51

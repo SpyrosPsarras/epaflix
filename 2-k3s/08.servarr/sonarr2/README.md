@@ -20,18 +20,18 @@ If the health check finds problems, apply the appropriate fix:
 
 ```bash
 # Fix duplicate Series IDs
-kubectl apply -f fix-duplicate-series.yaml
+kubectl --context epaflix apply -f fix-duplicate-series.yaml
 
 # Fix duplicate Episode IDs
-kubectl apply -f fix-duplicate-episodes.yaml
+kubectl --context epaflix apply -f fix-duplicate-episodes.yaml
 
 # Fix duplicate EpisodeFile IDs
-kubectl apply -f fix-duplicate-episodefiles.yaml
+kubectl --context epaflix apply -f fix-duplicate-episodefiles.yaml
 ```
 
 **After any fix, restart Sonarr2:**
 ```bash
-kubectl rollout restart deployment/sonarr2 -n servarr
+kubectl --context epaflix rollout restart deployment/sonarr2 -n servarr
 ```
 
 ## Available Tools
@@ -80,8 +80,8 @@ Fixes duplicate Series IDs in the database.
 
 **Apply**:
 ```bash
-kubectl apply -f fix-duplicate-series.yaml
-kubectl logs -n servarr job/fix-sonarr2-duplicate-series -f
+kubectl --context epaflix apply -f fix-duplicate-series.yaml
+kubectl --context epaflix logs -n servarr job/fix-sonarr2-duplicate-series -f
 ```
 
 #### fix-duplicate-episodes.yaml
@@ -96,8 +96,8 @@ Fixes duplicate Episode IDs in the database.
 
 **Apply**:
 ```bash
-kubectl apply -f fix-duplicate-episodes.yaml
-kubectl logs -n servarr job/fix-sonarr2-duplicate-episodes -f
+kubectl --context epaflix apply -f fix-duplicate-episodes.yaml
+kubectl --context epaflix logs -n servarr job/fix-sonarr2-duplicate-episodes -f
 ```
 
 #### fix-duplicate-episodefiles.yaml
@@ -112,8 +112,8 @@ Fixes duplicate EpisodeFile IDs in the database.
 
 **Apply**:
 ```bash
-kubectl apply -f fix-duplicate-episodefiles.yaml
-kubectl logs -n servarr job/fix-sonarr2-duplicate-episodefiles -f
+kubectl --context epaflix apply -f fix-duplicate-episodefiles.yaml
+kubectl --context epaflix logs -n servarr job/fix-sonarr2-duplicate-episodefiles -f
 ```
 
 ## Common Issues
@@ -128,8 +128,8 @@ NzbDrone.Core.Tv.MultipleSeriesFoundException: Expected one series, but found 2
 
 **Fix**: 
 ```bash
-kubectl apply -f fix-duplicate-series.yaml
-kubectl rollout restart deployment/sonarr2 -n servarr
+kubectl --context epaflix apply -f fix-duplicate-series.yaml
+kubectl --context epaflix rollout restart deployment/sonarr2 -n servarr
 ```
 
 ### Expected query to return X rows but returned Y
@@ -142,8 +142,8 @@ System.ApplicationException: Expected query to return 11 rows but returned 13
 
 **Fix**:
 ```bash
-kubectl apply -f fix-duplicate-episodes.yaml
-kubectl rollout restart deployment/sonarr2 -n servarr
+kubectl --context epaflix apply -f fix-duplicate-episodes.yaml
+kubectl --context epaflix rollout restart deployment/sonarr2 -n servarr
 ```
 
 ### Sequence contains more than one element
@@ -156,8 +156,8 @@ System.InvalidOperationException: Sequence contains more than one element
 
 **Fix**:
 ```bash
-kubectl apply -f fix-duplicate-episodefiles.yaml
-kubectl rollout restart deployment/sonarr2 -n servarr
+kubectl --context epaflix apply -f fix-duplicate-episodefiles.yaml
+kubectl --context epaflix rollout restart deployment/sonarr2 -n servarr
 ```
 
 ## When to Use These Tools
@@ -168,12 +168,12 @@ Always check and fix sequences after restoring from backup:
 ./check-database-health.sh
 
 # If issues found, apply fixes
-kubectl apply -f fix-duplicate-series.yaml
-kubectl apply -f fix-duplicate-episodes.yaml
-kubectl apply -f fix-duplicate-episodefiles.yaml
+kubectl --context epaflix apply -f fix-duplicate-series.yaml
+kubectl --context epaflix apply -f fix-duplicate-episodes.yaml
+kubectl --context epaflix apply -f fix-duplicate-episodefiles.yaml
 
 # Restart Sonarr2
-kubectl rollout restart deployment/sonarr2 -n servarr
+kubectl --context epaflix rollout restart deployment/sonarr2 -n servarr
 ```
 
 ### Regular Maintenance
@@ -220,7 +220,7 @@ All fix jobs follow the same pattern:
 
 The tools automatically retrieve credentials from Kubernetes secrets:
 ```bash
-SONARR2_PW=$(kubectl get secret servarr-postgres -n servarr \
+SONARR2_PW=$(kubectl --context epaflix get secret servarr-postgres -n servarr \
   -o jsonpath='{.data.sonarr2-password}' | base64 -d)
 ```
 
@@ -235,7 +235,7 @@ SONARR2_PW=$(kubectl get secret servarr-postgres -n servarr \
 
 If you need to access the database directly:
 ```bash
-SONARR2_PW=$(kubectl get secret servarr-postgres -n servarr \
+SONARR2_PW=$(kubectl --context epaflix get secret servarr-postgres -n servarr \
   -o jsonpath='{.data.sonarr2-password}' | base64 -d)
 
 PGPASSWORD="${SONARR2_PW}" psql -h 192.168.10.105 -U sonarr2 -d sonarr2-main
@@ -281,19 +281,19 @@ FROM "EpisodeFiles";
 ### Job Won't Start
 ```bash
 # Check if previous job exists
-kubectl get jobs -n servarr | grep fix-sonarr2
+kubectl --context epaflix get jobs -n servarr | grep fix-sonarr2
 
 # Delete old job
-kubectl delete job fix-sonarr2-duplicate-series -n servarr
+kubectl --context epaflix delete job fix-sonarr2-duplicate-series -n servarr
 ```
 
 ### Can't Connect to Database
 ```bash
 # Verify postgres is running
-kubectl get pods -n postgres
+kubectl --context epaflix get pods -n postgres
 
 # Test connection
-SONARR2_PW=$(kubectl get secret servarr-postgres -n servarr \
+SONARR2_PW=$(kubectl --context epaflix get secret servarr-postgres -n servarr \
   -o jsonpath='{.data.sonarr2-password}' | base64 -d)
 PGPASSWORD="${SONARR2_PW}" psql -h 192.168.10.105 -U sonarr2 -d sonarr2-main -c "SELECT 1;"
 ```
@@ -303,7 +303,7 @@ PGPASSWORD="${SONARR2_PW}" psql -h 192.168.10.105 -U sonarr2 -d sonarr2-main -c 
 2. Check database has no remaining duplicates
 3. Restart Sonarr2 to clear caches:
    ```bash
-   kubectl rollout restart deployment/sonarr2 -n servarr
+   kubectl --context epaflix rollout restart deployment/sonarr2 -n servarr
    ```
 4. Wait 30 seconds for pod to be ready
 5. Check logs for new errors
@@ -335,7 +335,7 @@ Sonarr2 is a separate instance dedicated to anime series:
 
 If you encounter issues not covered here:
 1. Run health check: `./check-database-health.sh`
-2. Check Sonarr2 logs: `kubectl logs -n servarr deployment/sonarr2 --tail=100`
+2. Check Sonarr2 logs: `kubectl --context epaflix logs -n servarr deployment/sonarr2 --tail=100`
 3. Review troubleshooting docs in parent directory
 4. Check main Sonarr documentation (same principles apply)
 5. Check `.history/` directory for similar past issues

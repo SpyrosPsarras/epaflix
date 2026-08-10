@@ -198,10 +198,10 @@ GRANT ALL PRIVILEGES ON DATABASE "jellyseerr" TO jellyseerr;
 
 ### 3. NVIDIA Device Plugin
 ```bash
-kubectl apply -f https://raw.githubusercontent.com/NVIDIA/k8s-device-plugin/v0.14.0/nvidia-device-plugin.yml
+kubectl --context epaflix apply -f https://raw.githubusercontent.com/NVIDIA/k8s-device-plugin/v0.14.0/nvidia-device-plugin.yml
 
 # Verify GPU is available
-kubectl get nodes -o yaml | grep nvidia.com/gpu
+kubectl --context epaflix get nodes -o yaml | grep nvidia.com/gpu
 ```
 
 ### 4. WireGuard Config
@@ -211,43 +211,43 @@ WireGuard config is stored in `secrets.yml`. Create the K8s secret from `_shared
 
 1. **Namespace and Secrets**
    ```bash
-   kubectl apply -f namespace.yaml
-   kubectl apply -f secrets/
+   kubectl --context epaflix apply -f namespace.yaml
+   kubectl --context epaflix apply -f secrets/
    ```
 
 2. **Storage (PV/PVC)**
    ```bash
-   kubectl apply -f storage/
-   kubectl get pvc -n servarr  # Wait for all to be Bound
+   kubectl --context epaflix apply -f storage/
+   kubectl --context epaflix get pvc -n servarr  # Wait for all to be Bound
    ```
 
 3. **Applications**
    ```bash
    # Deploy in order (some apps depend on others)
-   kubectl apply -f prowlarr/
-   kubectl apply -f byparr/
-   kubectl apply -f qbittorrent/
+   kubectl --context epaflix apply -f prowlarr/
+   kubectl --context epaflix apply -f byparr/
+   kubectl --context epaflix apply -f qbittorrent/
 
    # Wait for download client to be ready
-   kubectl wait --for=condition=ready pod -l app=qbittorrent -n servarr --timeout=300s
+   kubectl --context epaflix wait --for=condition=ready pod -l app=qbittorrent -n servarr --timeout=300s
 
    # Deploy *arr apps
-   kubectl apply -f sonarr/
-   kubectl apply -f sonarr2/
-   kubectl apply -f radarr/
-   kubectl apply -f bazarr/
+   kubectl --context epaflix apply -f sonarr/
+   kubectl --context epaflix apply -f sonarr2/
+   kubectl --context epaflix apply -f radarr/
+   kubectl --context epaflix apply -f bazarr/
 
    # Deploy media apps
-   kubectl apply -f jellyfin/
-   kubectl apply -f seerr/
+   kubectl --context epaflix apply -f jellyfin/
+   kubectl --context epaflix apply -f seerr/
 
    # Deploy utilities
-   kubectl apply -f homarr/
+   kubectl --context epaflix apply -f homarr/
    ```
 
 4. **Ingress Routes**
    ```bash
-   kubectl apply -f ingress/
+   kubectl --context epaflix apply -f ingress/
    ```
 
 ## Post-Deployment Configuration
@@ -255,7 +255,7 @@ WireGuard config is stored in `secrets.yml`. Create the K8s secret from `_shared
 ### 1. Verify qBittorrent VPN
 ```bash
 # Check VPN connection
-kubectl exec -n servarr -it deployment/qbittorrent -- curl ifconfig.me
+kubectl --context epaflix exec -n servarr -it deployment/qbittorrent -- curl ifconfig.me
 # Should show VPN IP, NOT 192.168.x.x
 ```
 
@@ -428,13 +428,13 @@ Radarr 6.3 / Sonarr 4.0). The only working route is the file:
 
 ```bash
 # NEW is read from stdin so the value never lands in argv
-kubectl -n servarr exec -i deploy/radarr -c radarr -- sh -c '
+kubectl --context epaflix -n servarr exec -i deploy/radarr -c radarr -- sh -c '
   NEW=$(cat); export NEW
   cp -p /config/config.xml /config/config.xml.bak-rotate
   awk "{gsub(/<ApiKey>[^<]*<\/ApiKey>/, \"<ApiKey>\" ENVIRON[\"NEW\"] \"</ApiKey>\"); print}" \
      /config/config.xml > /tmp/c && cat /tmp/c > /config/config.xml && rm -f /tmp/c
   sed -n "s:.*<ApiKey>\([^<]*\)</ApiKey>.*:\1:p" /config/config.xml | tr -d "\n" | sha256sum' < /path/to/newkey
-kubectl -n servarr rollout restart deploy/radarr    # the file is only read at start
+kubectl --context epaflix -n servarr rollout restart deploy/radarr    # the file is only read at start
 ```
 
 Proof it took: `GET /api/v3/system/status` returns `200` with the new key and
@@ -485,20 +485,20 @@ databases.
 
 ### Pods in CrashLoopBackOff
 ```bash
-kubectl logs -n servarr <pod-name>
-kubectl describe pod -n servarr <pod-name>
+kubectl --context epaflix logs -n servarr <pod-name>
+kubectl --context epaflix describe pod -n servarr <pod-name>
 ```
 
 ### PVC not binding
 ```bash
-kubectl get pv,pvc -n servarr
-kubectl describe pvc -n servarr <pvc-name>
+kubectl --context epaflix get pv,pvc -n servarr
+kubectl --context epaflix describe pvc -n servarr <pvc-name>
 # Check NFS mount on TrueNAS is accessible
 ```
 
 ### VPN not working
 ```bash
-kubectl exec -n servarr -it deployment/qbittorrent -- bash
+kubectl --context epaflix exec -n servarr -it deployment/qbittorrent -- bash
 # Inside pod:
 ip addr  # Check wg0 interface exists
 curl ifconfig.me  # Should show VPN IP
@@ -507,9 +507,9 @@ ping 8.8.8.8  # Test connectivity
 
 ### GPU not detected
 ```bash
-kubectl get nodes -o yaml | grep -A10 allocatable
+kubectl --context epaflix get nodes -o yaml | grep -A10 allocatable
 # Look for nvidia.com/gpu
-kubectl describe node <gpu-node>
+kubectl --context epaflix describe node <gpu-node>
 ```
 
 ### ArgoCD SyncFailed on a volumeMounts list-restructure (SSA list-merge)
@@ -518,7 +518,7 @@ kubectl describe node <gpu-node>
 
 **Standard remediation** (out-of-band, one-time per restructure): replace the *whole* `volumeMounts` array to match git via a JSON patch, then let ArgoCD reconverge. Pull the exact `value` array from the Deployment manifest in git (currently `config` → `/config` and `media` → `/media`):
 ```bash
-kubectl -n servarr patch deployment sonarr --type=json \
+kubectl --context epaflix -n servarr patch deployment sonarr --type=json \
   -p='[{"op":"replace","path":"/spec/template/spec/containers/0/volumeMounts","value":[
         {"name":"config","mountPath":"/config"},
         {"name":"media","mountPath":"/media"}
@@ -537,7 +537,7 @@ Cross-links: #243, #147 (same SSA list-merge class, fixed git-durably in PR #198
 
 **Detection** - one command over every servarr Deployment. Git-independent: any declared volume that no container mounts is an orphan.
 ```bash
-kubectl -n servarr get deploy -o json | jq -r '
+kubectl --context epaflix -n servarr get deploy -o json | jq -r '
   .items[]
   | ([.spec.template.spec.containers[].volumeMounts[]?.name]
      + [.spec.template.spec.initContainers[]?.volumeMounts[]?.name]) as $mounted
@@ -549,7 +549,7 @@ No output = clean. (Run 2026-08-03: clean across all 17 servarr Deployments - #2
 
 **Remediation** - same shape as the `volumeMounts` recipe above: replace the whole list with git's. Copy the exact array out of the Deployment manifest in git (`sonarr/sonarr.yaml` and friends), do not hand-write it:
 ```bash
-kubectl -n servarr patch deployment sonarr --type=json \
+kubectl --context epaflix -n servarr patch deployment sonarr --type=json \
   -p='[{"op":"replace","path":"/spec/template/spec/volumes","value":[
         {"name":"config","persistentVolumeClaim":{"claimName":"sonarr-config"}},
         {"name":"media","persistentVolumeClaim":{"claimName":"servarr-media"}}

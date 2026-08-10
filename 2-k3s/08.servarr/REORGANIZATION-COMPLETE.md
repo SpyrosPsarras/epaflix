@@ -135,8 +135,8 @@ cd /workspaces/01-manual\ installation/manifests/08.servarr
 ### Individual App Deployment
 ```bash
 # Deploy just one app
-kubectl apply -f prowlarr/prowlarr.yaml
-kubectl apply -f radarr/radarr.yaml
+kubectl --context epaflix apply -f prowlarr/prowlarr.yaml
+kubectl --context epaflix apply -f radarr/radarr.yaml
 # etc.
 ```
 
@@ -162,6 +162,6 @@ All existing functionality preserved:
 
 You can now:
 1. Continue with Bazarr data migration: `./_shared/scripts/migrate-sqlite-to-postgres.sh bazarr _backups/sqlite-zips/bazarr_backup_*.zip`
-2. Deploy individual apps: `kubectl apply -f <app-name>/<app-name>.yaml`
+2. Deploy individual apps: `kubectl --context epaflix apply -f <app-name>/<app-name>.yaml`
 3. Run full deployment: `./_shared/scripts/deploy.sh`
 4. Add app-specific resources in their respective folders as needed

@@ -239,7 +239,7 @@ k3sup join \
 
 **Do NOT include `search: epaflix.com`** in node netplan configs. This causes DNS issues where external domains like `code.visualstudio.com` get resolved as `code.visualstudio.com.epaflix.com` and hit the Pi-hole wildcard catchall.
 
-> **Pod-side DNS (separate from netplan):** Every k3s node also carries `/etc/k3s-resolv.conf`, pinned to `nameserver 192.168.10.30` and wired to kubelet via `kubelet-arg: resolv-conf=/etc/k3s-resolv.conf` in `/etc/rancher/k3s/config.yaml`. This is what pods with `dnsPolicy: Default` (including CoreDNS itself) see as their `/etc/resolv.conf` — it is independent of the host's netplan/systemd-resolved chain. To change pod-side upstream DNS, edit this file on *every* node (masters and workers) and `kubectl rollout restart -n kube-system deployment/coredns`. Setup procedure in `2-k3s/05.traefik-deployment/README.md` step 0.
+> **Pod-side DNS (separate from netplan):** Every k3s node also carries `/etc/k3s-resolv.conf`, pinned to `nameserver 192.168.10.30` and wired to kubelet via `kubelet-arg: resolv-conf=/etc/k3s-resolv.conf` in `/etc/rancher/k3s/config.yaml`. This is what pods with `dnsPolicy: Default` (including CoreDNS itself) see as their `/etc/resolv.conf` — it is independent of the host's netplan/systemd-resolved chain. To change pod-side upstream DNS, edit this file on *every* node (masters and workers) and `kubectl --context epaflix rollout restart -n kube-system deployment/coredns`. Setup procedure in `2-k3s/05.traefik-deployment/README.md` step 0.
 
 Example correct netplan (`/etc/netplan/50-cloud-init.yaml`):
 ```yaml
@@ -328,41 +328,41 @@ current setup — read that before touching the app. Deploy order:
 ### Cluster Health
 ```bash
 # Check nodes
-kubectl get nodes -o wide
+kubectl --context epaflix get nodes -o wide
 
 # Check system pods
-kubectl get pods -A
+kubectl --context epaflix get pods -A
 
 # Check cluster info
-kubectl cluster-info
+kubectl --context epaflix cluster-info
 
 # Check component status
-kubectl get --raw='/readyz?verbose'
+kubectl --context epaflix get --raw='/readyz?verbose'
 ```
 
 ### Debugging Pods
 ```bash
 # Get pod details
-kubectl describe pod <pod-name> -n <namespace>
+kubectl --context epaflix describe pod <pod-name> -n <namespace>
 
 # Get logs
-kubectl logs <pod-name> -n <namespace>
-kubectl logs <pod-name> -n <namespace> -f  # Follow logs
+kubectl --context epaflix logs <pod-name> -n <namespace>
+kubectl --context epaflix logs <pod-name> -n <namespace> -f  # Follow logs
 
 # Get previous logs (if pod crashed)
-kubectl logs <pod-name> -n <namespace> --previous
+kubectl --context epaflix logs <pod-name> -n <namespace> --previous
 
 # Execute command in pod
-kubectl exec -it <pod-name> -n <namespace> -- /bin/bash
+kubectl --context epaflix exec -it <pod-name> -n <namespace> -- /bin/bash
 ```
 
 ### Resource Usage
 ```bash
 # Node resources
-kubectl top nodes
+kubectl --context epaflix top nodes
 
 # Pod resources
-kubectl top pods -A
+kubectl --context epaflix top pods -A
 ```
 
 ## Troubleshooting K3s Issues
@@ -370,7 +370,7 @@ kubectl top pods -A
 ### Nodes Not Ready
 ```bash
 # Check node status
-kubectl describe node <node-name>
+kubectl --context epaflix describe node <node-name>
 
 # Check K3s service
 sudo systemctl status k3s
@@ -385,7 +385,7 @@ sudo journalctl -u k3s -n 50
 ### Pods in Pending State
 ```bash
 # Check pod events
-kubectl describe pod <pod-name> -n <namespace>
+kubectl --context epaflix describe pod <pod-name> -n <namespace>
 
 # Common causes:
 # - Insufficient resources (CPU/memory)
@@ -397,17 +397,17 @@ kubectl describe pod <pod-name> -n <namespace>
 ### Service Not Accessible
 ```bash
 # Check service
-kubectl get svc -n <namespace>
+kubectl --context epaflix get svc -n <namespace>
 
 # Check endpoints
-kubectl get endpoints -n <namespace>
+kubectl --context epaflix get endpoints -n <namespace>
 
 # Check LoadBalancer status
-kubectl get svc <service-name> -n <namespace> -o yaml
+kubectl --context epaflix get svc <service-name> -n <namespace> -o yaml
 
 # If EXTERNAL-IP is pending, check MetalLB
-kubectl get pods -n metallb-system
-kubectl logs -n metallb-system deployment/controller
+kubectl --context epaflix get pods -n metallb-system
+kubectl --context epaflix logs -n metallb-system deployment/controller
 ```
 
 ## Uninstalling K3s

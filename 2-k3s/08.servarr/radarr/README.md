@@ -20,15 +20,15 @@ If the health check finds problems, apply the appropriate fix:
 
 ```bash
 # Fix duplicate Movie IDs
-kubectl apply -f fix-duplicate-movies.yaml
+kubectl --context epaflix apply -f fix-duplicate-movies.yaml
 
 # Fix duplicate MovieFile IDs
-kubectl apply -f fix-duplicate-moviefiles.yaml
+kubectl --context epaflix apply -f fix-duplicate-moviefiles.yaml
 ```
 
 **After any fix, restart Radarr:**
 ```bash
-kubectl rollout restart deployment/radarr -n servarr
+kubectl --context epaflix rollout restart deployment/radarr -n servarr
 ```
 
 ## Available Tools
@@ -74,8 +74,8 @@ Fixes duplicate Movie IDs in the database.
 
 **Apply**:
 ```bash
-kubectl apply -f fix-duplicate-movies.yaml
-kubectl logs -n servarr job/fix-radarr-duplicate-movies -f
+kubectl --context epaflix apply -f fix-duplicate-movies.yaml
+kubectl --context epaflix logs -n servarr job/fix-radarr-duplicate-movies -f
 ```
 
 #### fix-duplicate-moviefiles.yaml
@@ -90,8 +90,8 @@ Fixes duplicate MovieFile IDs in the database.
 
 **Apply**:
 ```bash
-kubectl apply -f fix-duplicate-moviefiles.yaml
-kubectl logs -n servarr job/fix-radarr-duplicate-moviefiles -f
+kubectl --context epaflix apply -f fix-duplicate-moviefiles.yaml
+kubectl --context epaflix logs -n servarr job/fix-radarr-duplicate-moviefiles -f
 ```
 
 ## Common Issues
@@ -106,8 +106,8 @@ NzbDrone.Core.Movies.MultipleMoviesFoundException: Expected one movie, but found
 
 **Fix**: 
 ```bash
-kubectl apply -f fix-duplicate-movies.yaml
-kubectl rollout restart deployment/radarr -n servarr
+kubectl --context epaflix apply -f fix-duplicate-movies.yaml
+kubectl --context epaflix rollout restart deployment/radarr -n servarr
 ```
 
 ### Sequence contains more than one element
@@ -120,8 +120,8 @@ System.InvalidOperationException: Sequence contains more than one element
 
 **Fix**:
 ```bash
-kubectl apply -f fix-duplicate-moviefiles.yaml
-kubectl rollout restart deployment/radarr -n servarr
+kubectl --context epaflix apply -f fix-duplicate-moviefiles.yaml
+kubectl --context epaflix rollout restart deployment/radarr -n servarr
 ```
 
 ### Import fails with "movie already exists"
@@ -136,7 +136,7 @@ Import failed: Movie already exists in database
 ```bash
 ./check-database-health.sh
 # Apply suggested fixes
-kubectl rollout restart deployment/radarr -n servarr
+kubectl --context epaflix rollout restart deployment/radarr -n servarr
 ```
 
 ## When to Use These Tools
@@ -147,11 +147,11 @@ Always check and fix sequences after restoring from backup:
 ./check-database-health.sh
 
 # If issues found, apply fixes
-kubectl apply -f fix-duplicate-movies.yaml
-kubectl apply -f fix-duplicate-moviefiles.yaml
+kubectl --context epaflix apply -f fix-duplicate-movies.yaml
+kubectl --context epaflix apply -f fix-duplicate-moviefiles.yaml
 
 # Restart Radarr
-kubectl rollout restart deployment/radarr -n servarr
+kubectl --context epaflix rollout restart deployment/radarr -n servarr
 ```
 
 ### Regular Maintenance
@@ -198,7 +198,7 @@ All fix jobs follow the same pattern:
 
 The tools automatically retrieve credentials from Kubernetes secrets:
 ```bash
-RADARR_PW=$(kubectl get secret servarr-postgres -n servarr \
+RADARR_PW=$(kubectl --context epaflix get secret servarr-postgres -n servarr \
   -o jsonpath='{.data.radarr-password}' | base64 -d)
 ```
 
@@ -213,7 +213,7 @@ RADARR_PW=$(kubectl get secret servarr-postgres -n servarr \
 
 If you need to access the database directly:
 ```bash
-RADARR_PW=$(kubectl get secret servarr-postgres -n servarr \
+RADARR_PW=$(kubectl --context epaflix get secret servarr-postgres -n servarr \
   -o jsonpath='{.data.radarr-password}' | base64 -d)
 
 PGPASSWORD="${RADARR_PW}" psql -h 192.168.10.105 -U radarr -d radarr-main
@@ -264,19 +264,19 @@ WHERE m."Id" = 1;
 ### Job Won't Start
 ```bash
 # Check if previous job exists
-kubectl get jobs -n servarr | grep fix-radarr
+kubectl --context epaflix get jobs -n servarr | grep fix-radarr
 
 # Delete old job
-kubectl delete job fix-radarr-duplicate-movies -n servarr
+kubectl --context epaflix delete job fix-radarr-duplicate-movies -n servarr
 ```
 
 ### Can't Connect to Database
 ```bash
 # Verify postgres is running
-kubectl get pods -n postgres
+kubectl --context epaflix get pods -n postgres
 
 # Test connection
-RADARR_PW=$(kubectl get secret servarr-postgres -n servarr \
+RADARR_PW=$(kubectl --context epaflix get secret servarr-postgres -n servarr \
   -o jsonpath='{.data.radarr-password}' | base64 -d)
 PGPASSWORD="${RADARR_PW}" psql -h 192.168.10.105 -U radarr -d radarr-main -c "SELECT 1;"
 ```
@@ -286,12 +286,12 @@ PGPASSWORD="${RADARR_PW}" psql -h 192.168.10.105 -U radarr -d radarr-main -c "SE
 2. Check database has no remaining duplicates
 3. Restart Radarr to clear caches:
    ```bash
-   kubectl rollout restart deployment/radarr -n servarr
+   kubectl --context epaflix rollout restart deployment/radarr -n servarr
    ```
 4. Wait 30 seconds for pod to be ready
 5. Check logs for new errors:
    ```bash
-   kubectl logs -n servarr deployment/radarr --tail=100
+   kubectl --context epaflix logs -n servarr deployment/radarr --tail=100
    ```
 
 ## Related Documentation
@@ -321,7 +321,7 @@ Radarr is for movies, so the database structure differs:
 
 If you encounter issues not covered here:
 1. Run health check: `./check-database-health.sh`
-2. Check Radarr logs: `kubectl logs -n servarr deployment/radarr --tail=100`
+2. Check Radarr logs: `kubectl --context epaflix logs -n servarr deployment/radarr --tail=100`
 3. Review troubleshooting docs in parent directory
 4. Check Sonarr documentation (same principles apply)
 5. Check `.history/` directory for similar past issues
@@ -363,7 +363,7 @@ After migrating Radarr to new hardware or restoring:
 ```bash
 # Always check and fix
 ./check-database-health.sh
-kubectl apply -f fix-duplicate-movies.yaml
-kubectl apply -f fix-duplicate-moviefiles.yaml
-kubectl rollout restart deployment/radarr -n servarr
+kubectl --context epaflix apply -f fix-duplicate-movies.yaml
+kubectl --context epaflix apply -f fix-duplicate-moviefiles.yaml
+kubectl --context epaflix rollout restart deployment/radarr -n servarr
 ```

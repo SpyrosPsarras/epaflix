@@ -81,9 +81,9 @@ backup-manifest.txt
 
 ### Verify Cluster Is Ready
 ```bash
-kubectl get nodes
-kubectl get ns
-kubectl version --short
+kubectl --context epaflix get nodes
+kubectl --context epaflix get ns
+kubectl --context epaflix version --short
 ```
 
 ### Install Required Tools
@@ -106,13 +106,13 @@ Follow these steps **in order**. Each numbered folder corresponds to a deploymen
 cd /home/spy/Documents/Epaflix/k3s-swarm-proxmox/2-k3s
 
 # Create all required namespaces
-kubectl apply -f 03.kube-vip-cloud-provider/namespace.yaml  # if exists
-kubectl apply -f 05.traefik-deployment/namespace.yaml
-kubectl apply -f 06.postgres/namespace.yaml
-kubectl apply -f 07.authentik-deployment/namespace.yaml
-kubectl apply -f 08.servarr/namespace.yaml
-kubectl apply -f 09.metrics/namespace.yaml
-kubectl apply -f 10.observability/namespace.yaml
+kubectl --context epaflix apply -f 03.kube-vip-cloud-provider/namespace.yaml  # if exists
+kubectl --context epaflix apply -f 05.traefik-deployment/namespace.yaml
+kubectl --context epaflix apply -f 06.postgres/namespace.yaml
+kubectl --context epaflix apply -f 07.authentik-deployment/namespace.yaml
+kubectl --context epaflix apply -f 08.servarr/namespace.yaml
+kubectl --context epaflix apply -f 09.metrics/namespace.yaml
+kubectl --context epaflix apply -f 10.observability/namespace.yaml
 ```
 
 ---
@@ -122,10 +122,10 @@ kubectl apply -f 10.observability/namespace.yaml
 
 ```bash
 cd 01.kube-vip
-kubectl apply -f kube-vip-daemonset.yaml
+kubectl --context epaflix apply -f kube-vip-daemonset.yaml
 
 # Verify
-kubectl get pods -n kube-system | grep kube-vip
+kubectl --context epaflix get pods -n kube-system | grep kube-vip
 ```
 
 **Documentation:** See `01.kube-vip/README.md`
@@ -142,11 +142,11 @@ cd ../03.kube-vip-cloud-provider
 ./install.sh
 
 # Apply IP pool configuration
-kubectl apply -f ip-pool-configmap.yaml
+kubectl --context epaflix apply -f ip-pool-configmap.yaml
 
 # Verify
-kubectl get cm -n kube-system | grep kubevip
-kubectl logs -n kube-system -l app=kube-vip-cloud-provider
+kubectl --context epaflix get cm -n kube-system | grep kubevip
+kubectl --context epaflix logs -n kube-system -l app=kube-vip-cloud-provider
 ```
 
 **Documentation:** See `03.kube-vip-cloud-provider/README.md`
@@ -160,10 +160,10 @@ kubectl logs -n kube-system -l app=kube-vip-cloud-provider
 cd ../04.coredns
 
 # Apply custom CoreDNS config (if needed)
-kubectl apply -f coredns-custom.yaml
+kubectl --context epaflix apply -f coredns-custom.yaml
 
 # Verify
-kubectl get cm -n kube-system coredns -o yaml
+kubectl --context epaflix get cm -n kube-system coredns -o yaml
 ```
 
 ---
@@ -181,11 +181,11 @@ cd ../05.traefik-deployment
 ./01.deploy.sh
 
 # Verify deployment
-kubectl get pods -n traefik-system
-kubectl get svc -n traefik-system
+kubectl --context epaflix get pods -n traefik-system
+kubectl --context epaflix get svc -n traefik-system
 
 # Check Traefik dashboard
-kubectl get ingress -n traefik-system
+kubectl --context epaflix get ingress -n traefik-system
 ```
 
 #### Restore Traefik SSL Certificates
@@ -194,13 +194,13 @@ kubectl get ingress -n traefik-system
 scp truenas_admin@192.168.10.200:/home/truenas_admin/backup/k3s-containers/containers/traefik/acme.json ./acme.json
 
 # Create secret from acme.json
-kubectl create secret generic traefik-acme \
+kubectl --context epaflix create secret generic traefik-acme \
   --from-file=acme.json=./acme.json \
   -n traefik-system \
-  --dry-run=client -o yaml | kubectl apply -f -
+  --dry-run=client -o yaml | kubectl --context epaflix apply -f -
 
 # Restart Traefik to pick up certificates
-kubectl rollout restart deployment traefik -n traefik-system
+kubectl --context epaflix rollout restart deployment traefik -n traefik-system
 ```
 
 **Documentation:** See `05.traefik-deployment/README.md`
@@ -217,16 +217,16 @@ cd ../06.postgres
 ./01.install-operator.sh
 
 # Verify operator is running
-kubectl get pods -n cnpg-system
+kubectl --context epaflix get pods -n cnpg-system
 
 # Deploy PostgreSQL cluster
 ./02.deploy-cluster.sh
 
 # Wait for cluster to be ready (this may take 5-10 minutes)
-kubectl get cluster -n postgres -w
+kubectl --context epaflix get cluster -n postgres -w
 
 # Verify all pods are running
-kubectl get pods -n postgres
+kubectl --context epaflix get pods -n postgres
 ```
 
 #### Restore PostgreSQL Databases
@@ -248,19 +248,19 @@ cd backup
 scp truenas_admin@192.168.10.200:/mnt/pool1/dataset01/VMs/backup/postgres-20260205-154025/*.sql ./
 
 # Get postgres pod name
-POSTGRES_POD=$(kubectl get pod -n postgres -l role=primary -o jsonpath='{.items[0].metadata.name}')
+POSTGRES_POD=$(kubectl --context epaflix get pod -n postgres -l role=primary -o jsonpath='{.items[0].metadata.name}')
 
 # Restore each database
 for db in authentik sonarr-main sonarr2-main radarr-main prowlarr-main jellyseerr observability; do
   echo "Restoring $db..."
-  kubectl exec -n postgres -i $POSTGRES_POD -- psql -U postgres -d $db < ${db}-20260205-154025.sql
+  kubectl --context epaflix exec -n postgres -i $POSTGRES_POD -- psql -U postgres -d $db < ${db}-20260205-154025.sql
 done
 ```
 
 **Verification:**
 ```bash
 # Connect to postgres and verify databases
-kubectl exec -n postgres -it $POSTGRES_POD -- psql -U postgres
+kubectl --context epaflix exec -n postgres -it $POSTGRES_POD -- psql -U postgres
 
 # In psql:
 \l
@@ -283,10 +283,10 @@ cd ../07.authentik-deployment
 ./deploy.sh
 
 # Wait for pods to be ready
-kubectl get pods -n authentik -w
+kubectl --context epaflix get pods -n authentik -w
 
 # Verify ingress
-kubectl get ingress -n authentik
+kubectl --context epaflix get ingress -n authentik
 ```
 
 #### Restore Authentik Media/Icons
@@ -295,8 +295,8 @@ kubectl get ingress -n authentik
 scp -r truenas_admin@192.168.10.200:/home/truenas_admin/backup/k3s-containers/containers/authentik/public ./authentik-media
 
 # Copy to authentik pod (adjust pod name)
-AUTHENTIK_POD=$(kubectl get pod -n authentik -l app.kubernetes.io/name=authentik -o jsonpath='{.items[0].metadata.name}')
-kubectl cp ./authentik-media/public $AUTHENTIK_POD:/media -n authentik
+AUTHENTIK_POD=$(kubectl --context epaflix get pod -n authentik -l app.kubernetes.io/name=authentik -o jsonpath='{.items[0].metadata.name}')
+kubectl --context epaflix cp ./authentik-media/public $AUTHENTIK_POD:/media -n authentik
 ```
 
 **Verification:**
@@ -305,7 +305,7 @@ kubectl cp ./authentik-media/public $AUTHENTIK_POD:/media -n authentik
 curl -k https://authentik.epaflix.com
 
 # Check database connection
-kubectl logs -n authentik -l app.kubernetes.io/name=authentik | grep -i "database"
+kubectl --context epaflix logs -n authentik -l app.kubernetes.io/name=authentik | grep -i "database"
 ```
 
 **Documentation:** See `07.authentik-deployment/README.md`
@@ -319,70 +319,70 @@ kubectl logs -n authentik -l app.kubernetes.io/name=authentik | grep -i "databas
 cd ../08.servarr
 
 # Apply namespace
-kubectl apply -f namespace.yaml
+kubectl --context epaflix apply -f namespace.yaml
 
 # Setup PostgreSQL databases for Servarr apps
-kubectl apply -f postgres-setup-job.yaml
-kubectl wait --for=condition=complete job/postgres-setup -n servarr --timeout=300s
+kubectl --context epaflix apply -f postgres-setup-job.yaml
+kubectl --context epaflix wait --for=condition=complete job/postgres-setup -n servarr --timeout=300s
 
 # Deploy each application in order:
 
 # 1. Prowlarr (Indexer Manager)
 cd prowlarr
-kubectl apply -f .
-kubectl wait --for=condition=ready pod -l app=prowlarr -n servarr --timeout=300s
+kubectl --context epaflix apply -f .
+kubectl --context epaflix wait --for=condition=ready pod -l app=prowlarr -n servarr --timeout=300s
 cd ..
 
 # 2. Radarr (Movies)
 cd radarr
-kubectl apply -f .
-kubectl wait --for=condition=ready pod -l app=radarr -n servarr --timeout=300s
+kubectl --context epaflix apply -f .
+kubectl --context epaflix wait --for=condition=ready pod -l app=radarr -n servarr --timeout=300s
 cd ..
 
 # 3. Sonarr (TV Shows)
 cd sonarr
-kubectl apply -f .
-kubectl wait --for=condition=ready pod -l app=sonarr -n servarr --timeout=300s
+kubectl --context epaflix apply -f .
+kubectl --context epaflix wait --for=condition=ready pod -l app=sonarr -n servarr --timeout=300s
 cd ..
 
 # 4. Sonarr2 (Second instance)
 cd sonarr2
-kubectl apply -f .
+kubectl --context epaflix apply -f .
 cd ..
 
 # 5. Bazarr (Subtitles)
 cd bazarr
-kubectl apply -f .
+kubectl --context epaflix apply -f .
 cd ..
 
 # 6. QBittorrent (Downloads)
 cd qbittorrent
-kubectl apply -f .
+kubectl --context epaflix apply -f .
 cd ..
 
 # 7. Jellyfin (Media Server)
 cd jellyfin
-kubectl apply -f .
+kubectl --context epaflix apply -f .
 cd ..
 
 # 8. Jellyseerr (Requests)
 cd jellyseerr
-kubectl apply -f .
+kubectl --context epaflix apply -f .
 cd ..
 
 # 9. Byparr (Cloudflare Bypass — replaced FlareSolverr, #275)
 cd byparr
-kubectl apply -f .
+kubectl --context epaflix apply -f .
 cd ..
 
 # 10. Homarr (Dashboard)
 cd homarr
-kubectl apply -f .
+kubectl --context epaflix apply -f .
 cd ..
 
 # Verify all pods
-kubectl get pods -n servarr
-kubectl get ingress -n servarr
+kubectl --context epaflix get pods -n servarr
+kubectl --context epaflix get ingress -n servarr
 ```
 
 #### Restore Servarr Configurations
@@ -410,24 +410,24 @@ scp truenas_admin@192.168.10.200:/home/truenas_admin/backup/k3s-containers/conta
 cd ../10.observability
 
 # Apply namespace
-kubectl apply -f namespace.yaml
+kubectl --context epaflix apply -f namespace.yaml
 
 # Setup storage
-kubectl apply -f storage/
+kubectl --context epaflix apply -f storage/
 
 # Setup PostgreSQL for Grafana
-kubectl apply -f postgres-setup-job.yaml
-kubectl wait --for=condition=complete job/grafana-postgres-setup -n observability --timeout=300s
+kubectl --context epaflix apply -f postgres-setup-job.yaml
+kubectl --context epaflix wait --for=condition=complete job/grafana-postgres-setup -n observability --timeout=300s
 
 # Apply secrets
-kubectl apply -f grafana-db-secret.yaml
+kubectl --context epaflix apply -f grafana-db-secret.yaml
 
 # Deploy using Helm
 ./deploy.sh
 
 # Verify all components
-kubectl get pods -n observability
-kubectl get ingress -n observability
+kubectl --context epaflix get pods -n observability
+kubectl --context epaflix get ingress -n observability
 ```
 
 #### Restore Loki Data (Optional - Historical Logs)
@@ -454,39 +454,39 @@ rsync -avz --progress \
 ### Cluster Health
 ```bash
 # Check all nodes
-kubectl get nodes -o wide
+kubectl --context epaflix get nodes -o wide
 
 # Check all namespaces
-kubectl get ns
+kubectl --context epaflix get ns
 
 # Check all pods
-kubectl get pods -A
+kubectl --context epaflix get pods -A
 
 # Check ingresses
-kubectl get ingress -A
+kubectl --context epaflix get ingress -A
 
 # Check services with LoadBalancer IPs
-kubectl get svc -A | grep LoadBalancer
+kubectl --context epaflix get svc -A | grep LoadBalancer
 ```
 
 ### Application Health Checks
 
 #### Traefik
 ```bash
-kubectl get pods -n traefik-system
+kubectl --context epaflix get pods -n traefik-system
 curl -I https://traefik.epaflix.com
 ```
 
 #### Authentik
 ```bash
-kubectl get pods -n authentik
+kubectl --context epaflix get pods -n authentik
 curl -I https://auth.epaflix.com
 ```
 
 #### PostgreSQL
 ```bash
-kubectl get cluster -n postgres
-kubectl exec -n postgres -it postgres-cluster-1 -- psql -U postgres -c "\l"
+kubectl --context epaflix get cluster -n postgres
+kubectl --context epaflix exec -n postgres -it postgres-cluster-1 -- psql -U postgres -c "\l"
 ```
 
 #### Servarr Stack
@@ -494,16 +494,16 @@ kubectl exec -n postgres -it postgres-cluster-1 -- psql -U postgres -c "\l"
 # Check each application
 for app in prowlarr radarr sonarr sonarr2 bazarr qbittorrent jellyfin jellyseerr; do
   echo "=== $app ==="
-  kubectl get pods -n servarr -l app=$app
+  kubectl --context epaflix get pods -n servarr -l app=$app
 done
 
 # Check ingresses
-kubectl get ingress -n servarr
+kubectl --context epaflix get ingress -n servarr
 ```
 
 #### Observability
 ```bash
-kubectl get pods -n observability
+kubectl --context epaflix get pods -n observability
 # Check Grafana
 curl -I https://grafana.epaflix.com
 # Check Prometheus
@@ -523,35 +523,35 @@ curl -I https://prometheus.epaflix.com
 #### 1. Pods Stuck in Pending
 ```bash
 # Check node resources
-kubectl describe nodes
+kubectl --context epaflix describe nodes
 
 # Check PVC status
-kubectl get pvc -A
+kubectl --context epaflix get pvc -A
 
 # Check events
-kubectl get events -A --sort-by='.lastTimestamp'
+kubectl --context epaflix get events -A --sort-by='.lastTimestamp'
 ```
 
 #### 2. Database Connection Failures
 ```bash
 # Check PostgreSQL cluster status
-kubectl get cluster -n postgres
+kubectl --context epaflix get cluster -n postgres
 
 # Check database logs
-kubectl logs -n postgres postgres-cluster-1
+kubectl --context epaflix logs -n postgres postgres-cluster-1
 
 # Verify network connectivity
-kubectl exec -n postgres -it postgres-cluster-1 -- pg_isready
+kubectl --context epaflix exec -n postgres -it postgres-cluster-1 -- pg_isready
 ```
 
 #### 3. Ingress Not Working
 ```bash
 # Check Traefik status
-kubectl get pods -n traefik-system
-kubectl logs -n traefik-system -l app.kubernetes.io/name=traefik
+kubectl --context epaflix get pods -n traefik-system
+kubectl --context epaflix logs -n traefik-system -l app.kubernetes.io/name=traefik
 
 # Check IngressRoute
-kubectl get ingressroute -A
+kubectl --context epaflix get ingressroute -A
 
 # Verify DNS resolution
 nslookup epaflix.com
@@ -560,13 +560,13 @@ nslookup epaflix.com
 #### 4. SSL Certificate Issues
 ```bash
 # Check cert-manager (if used)
-kubectl get certificates -A
+kubectl --context epaflix get certificates -A
 
 # Check Traefik ACME storage
-kubectl get secret traefik-acme -n traefik-system
+kubectl --context epaflix get secret traefik-acme -n traefik-system
 
 # Force cert renewal
-kubectl delete certificate <cert-name> -n <namespace>
+kubectl --context epaflix delete certificate <cert-name> -n <namespace>
 ```
 
 ---
@@ -590,7 +590,7 @@ After recovery is complete, set up automated backups:
 ### PostgreSQL Backup Cron
 ```bash
 # Edit 06.postgres/backup/backup-cronjob.yaml
-kubectl apply -f 06.postgres/backup/backup-cronjob.yaml
+kubectl --context epaflix apply -f 06.postgres/backup/backup-cronjob.yaml
 ```
 
 ### Configuration Backup

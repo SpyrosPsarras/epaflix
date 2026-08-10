@@ -2,7 +2,7 @@
 
 Automated rolling upgrades for all K3s masters and workers using the official [system-upgrade-controller](https://github.com/rancher/system-upgrade-controller) by Rancher.
 
-> **GitOps-managed.** Both the controller (`controller/`) and the upgrade Plans (`plans/`) are reconciled by automated ArgoCD Applications — `system-upgrade-controller` and `system-upgrade-plans` (Issue #74) — under the app-of-apps. There is no manual `kubectl apply -f` step; merging to `main` applies them via selfHeal. The `kubectl` recipes below are for monitoring, manual pause/pin, and uninstall only.
+> **GitOps-managed.** Both the controller (`controller/`) and the upgrade Plans (`plans/`) are reconciled by automated ArgoCD Applications — `system-upgrade-controller` and `system-upgrade-plans` (Issue #74) — under the app-of-apps. There is no manual `kubectl --context epaflix apply -f` step; merging to `main` applies them via selfHeal. The `kubectl` recipes below are for monitoring, manual pause/pin, and uninstall only.
 
 ---
 
@@ -43,13 +43,13 @@ Upgrade order:
 ## Prerequisites
 
 - `kubectl` configured and pointing at the cluster
-- All nodes `Ready` before starting (`kubectl get nodes`)
+- All nodes `Ready` before starting (`kubectl --context epaflix get nodes`)
 
 ---
 
 ## Installation (GitOps-Managed)
 
-This stack is **not** installed with `kubectl apply -f`. It is reconciled by two automated ArgoCD Applications under the app-of-apps:
+This stack is **not** installed with `kubectl --context epaflix apply -f`. It is reconciled by two automated ArgoCD Applications under the app-of-apps:
 
 | Application                  | Path                                         | What it manages                                  |
 |------------------------------|----------------------------------------------|--------------------------------------------------|
@@ -61,14 +61,14 @@ Both Applications run `automated` with `selfHeal: true, prune: false` and `Serve
 Verify the controller is running:
 
 ```bash
-kubectl -n system-upgrade rollout status deployment system-upgrade-controller
-kubectl -n system-upgrade get pods
+kubectl --context epaflix -n system-upgrade rollout status deployment system-upgrade-controller
+kubectl --context epaflix -n system-upgrade get pods
 ```
 
 Verify the plans were accepted:
 
 ```bash
-kubectl -n system-upgrade get plans
+kubectl --context epaflix -n system-upgrade get plans
 # Expected output (VERSION column carries the pinned tag, CHANNEL is empty):
 # NAME          IMAGE                    CHANNEL   VERSION          LATEST
 # k3s-agent     rancher/k3s-upgrade                v1.35.5+k3s1     v1.35.5+k3s1
@@ -85,34 +85,34 @@ Once the Plans are applied, the controller compares the pinned `spec.version` to
 
 ```bash
 # Watch all upgrade jobs across master and worker plans
-kubectl -n system-upgrade get jobs -w
+kubectl --context epaflix -n system-upgrade get jobs -w
 
 # View all upgrade-related pods
-kubectl -n system-upgrade get pods -o wide
+kubectl --context epaflix -n system-upgrade get pods -o wide
 ```
 
 ### Check which nodes have been upgraded
 
 ```bash
 # Shows current K3s version per node
-kubectl get nodes -o wide
+kubectl --context epaflix get nodes -o wide
 
 # Show only version column
-kubectl get nodes -o custom-columns='NAME:.metadata.name,VERSION:.status.nodeInfo.kubeletVersion,STATUS:.status.conditions[-1].type'
+kubectl --context epaflix get nodes -o custom-columns='NAME:.metadata.name,VERSION:.status.nodeInfo.kubeletVersion,STATUS:.status.conditions[-1].type'
 ```
 
 ### Stream logs from an active upgrade job
 
 ```bash
-# Replace <job-name> with the job name shown in `kubectl -n system-upgrade get jobs`
-kubectl -n system-upgrade logs -f job/<job-name>
+# Replace <job-name> with the job name shown in `kubectl --context epaflix -n system-upgrade get jobs`
+kubectl --context epaflix -n system-upgrade logs -f job/<job-name>
 ```
 
 ### Check plan status
 
 ```bash
-kubectl -n system-upgrade describe plan k3s-server
-kubectl -n system-upgrade describe plan k3s-agent
+kubectl --context epaflix -n system-upgrade describe plan k3s-server
+kubectl --context epaflix -n system-upgrade describe plan k3s-agent
 ```
 
 ---
@@ -147,7 +147,7 @@ live cluster. The canonical bump is a reviewed PR (see the
 3. Open a PR, soak. On merge, ArgoCD selfHeal applies the committed version and
    the controller rolls masters then workers.
 
-A live `kubectl -n system-upgrade edit plan ...` is a stop-gap only — `selfHeal`
+A live `kubectl --context epaflix -n system-upgrade edit plan ...` is a stop-gap only — `selfHeal`
 will revert it to the in-git version within minutes.
 
 ### Pause upgrades temporarily
@@ -160,8 +160,8 @@ will revert it to the in-git version within minutes.
 
 ```bash
 # Suspend both plans to stop the controller from triggering new upgrades
-kubectl -n system-upgrade patch plan k3s-server --type=merge -p '{"spec":{"concurrency":0}}'
-kubectl -n system-upgrade patch plan k3s-agent  --type=merge -p '{"spec":{"concurrency":0}}'
+kubectl --context epaflix -n system-upgrade patch plan k3s-server --type=merge -p '{"spec":{"concurrency":0}}'
+kubectl --context epaflix -n system-upgrade patch plan k3s-agent  --type=merge -p '{"spec":{"concurrency":0}}'
 
 # Resume — let ArgoCD selfHeal restore the in-git concurrency, or force a sync:
 argocd app sync system-upgrade-plans
@@ -171,7 +171,7 @@ argocd app sync system-upgrade-plans
 
 ```bash
 # Restart the controller — it will re-evaluate both plans immediately
-kubectl -n system-upgrade rollout restart deployment system-upgrade-controller
+kubectl --context epaflix -n system-upgrade rollout restart deployment system-upgrade-controller
 ```
 
 ### Check the latest stable K3s tag (to discover the next pin)
@@ -196,13 +196,13 @@ workflow above and the [Future-Upgrade SOP](#future-upgrade-sop)).
 
 ```bash
 # 1. Confirm all nodes are Ready and on the new version
-kubectl get nodes -o wide
+kubectl --context epaflix get nodes -o wide
 
 # 2. Confirm all system pods are healthy
-kubectl get pods -A | grep -v Running | grep -v Completed
+kubectl --context epaflix get pods -A | grep -v Running | grep -v Completed
 
 # 3. Check that servarr workloads recovered
-kubectl get pods -n servarr
+kubectl --context epaflix get pods -n servarr
 
 # 4. Verify K3s service is active on each node
 for ip in 51 52 53; do
@@ -267,13 +267,13 @@ Then assert **cluster-wide** health (etcd quorum + #121 metrics), once, from you
 
 ```bash
 # 5a. etcd quorum 3/3 — all 3 masters Ready with control-plane,etcd roles
-kubectl get nodes -o wide   # real ROLES (control-plane,etcd,master) + internal IPs; confirm 3 masters Ready
-kubectl get --raw='/healthz/etcd'   # Expected: ok
+kubectl --context epaflix get nodes -o wide   # real ROLES (control-plane,etcd,master) + internal IPs; confirm 3 masters Ready
+kubectl --context epaflix get --raw='/healthz/etcd'   # Expected: ok
 
 # 5b. #121 control-plane metrics up=1 for all 3 components.
 #     Via Prometheus/promtool (point at the in-cluster Prometheus, or run inside the pod):
 #     Expect up == 1 for every target of each job.
-kubectl -n observability exec prometheus-kube-prometheus-stack-prometheus-0 -c prometheus -- \
+kubectl --context epaflix -n observability exec prometheus-kube-prometheus-stack-prometheus-0 -c prometheus -- \
   promtool query instant http://localhost:9090 \
   'up{job=~"kube-controller-manager|kube-scheduler|kube-etcd"}'
 # Or from any host with promtool + Prometheus reachable:
@@ -315,8 +315,8 @@ ssh ubuntu@192.168.10.$ip 'sudo systemctl daemon-reload && sudo systemctl restar
 
 # D. HEALTH GATE — wait for this master to be Ready and etcd quorum 3/3 BEFORE the next:
 ssh ubuntu@192.168.10.$ip 'systemctl is-active k3s'
-kubectl get nodes        # all 3 masters Ready
-kubectl get --raw='/healthz/etcd'   # Expected: ok
+kubectl --context epaflix get nodes        # all 3 masters Ready
+kubectl --context epaflix get --raw='/healthz/etcd'   # Expected: ok
 # Only once etcd is ok and all masters are Ready, proceed to the next ip.
 ```
 
@@ -332,24 +332,24 @@ to confirm green, then re-confirm #121 metrics `up=1`.
 
 ```bash
 # Describe the upgrade plan to see controller events
-kubectl -n system-upgrade describe plan k3s-server
+kubectl --context epaflix -n system-upgrade describe plan k3s-server
 
 # Check for failed jobs
-kubectl -n system-upgrade get jobs
-kubectl -n system-upgrade describe job <job-name>
+kubectl --context epaflix -n system-upgrade get jobs
+kubectl --context epaflix -n system-upgrade describe job <job-name>
 
 # Check controller logs for errors
-kubectl -n system-upgrade logs deployment/system-upgrade-controller
+kubectl --context epaflix -n system-upgrade logs deployment/system-upgrade-controller
 ```
 
 ### Node is stuck cordoned after a failed upgrade
 
 ```bash
 # Manually uncordon the node
-kubectl uncordon <node-name>
+kubectl --context epaflix uncordon <node-name>
 
 # Example:
-kubectl uncordon k3s-master-51
+kubectl --context epaflix uncordon k3s-master-51
 ```
 
 ### A drain blew its timeout and the node is still cordoned
@@ -357,7 +357,7 @@ kubectl uncordon k3s-master-51
 Both Plans set `drain.timeout: 300s` (issue #413). Read what that actually
 buys before relying on it:
 
-- The value is passed straight through as `kubectl drain --timeout`. There is
+- The value is passed straight through as `kubectl --context epaflix drain --timeout`. There is
   **no controller-side timer** and no alert of its own.
 - On expiry the drain container exits non-zero. `RestartPolicy` is `Never` and
   `BackoffLimit` is `2`, so the Job tries **3 times total** and then goes
@@ -411,7 +411,7 @@ This should not happen due to the `prepare` step in the agent plan. If it does, 
 
 ```bash
 # Verify the prepare step references the correct plan name
-kubectl -n system-upgrade get plan k3s-agent -o yaml | grep -A5 prepare
+kubectl --context epaflix -n system-upgrade get plan k3s-agent -o yaml | grep -A5 prepare
 # Should show: args: [prepare, k3s-server]
 # Canonical source: 2-k3s/maintenance/system-upgrade/plans/system-upgrade-plans.yaml
 ```
@@ -424,7 +424,7 @@ ssh ubuntu@192.168.10.51
 sudo k3s etcd-snapshot ls  # Verify etcd is responsive
 
 # From kubectl
-kubectl get --raw='/healthz/etcd'
+kubectl --context epaflix get --raw='/healthz/etcd'
 # Expected: ok
 ```
 
@@ -438,10 +438,10 @@ To stop auto-upgrades entirely (GitOps-managed — delete in git, not the cluste
 # 1. Remove the `system-upgrade-plans` App from
 #    2-k3s/11.argocd/apps/kustomization.yaml (and delete its app file).
 #    With prune: false, the live Plans persist, so also delete them:
-kubectl -n system-upgrade delete plan k3s-server k3s-agent
+kubectl --context epaflix -n system-upgrade delete plan k3s-server k3s-agent
 
 # 2. (Optional) Remove the `system-upgrade-controller` App the same way, then:
-kubectl -n system-upgrade delete deployment system-upgrade-controller
+kubectl --context epaflix -n system-upgrade delete deployment system-upgrade-controller
 ```
 
 Because both Apps run `selfHeal: true`, deleting live objects without first
@@ -499,10 +499,10 @@ To upgrade:
 
 ```bash
 # Canonical status check — Plans (LATEST/applied version) + any in-flight Jobs
-kubectl -n system-upgrade get plans,jobs -o wide
+kubectl --context epaflix -n system-upgrade get plans,jobs -o wide
 
 # Per-node running K3s/kubelet version
-kubectl get nodes -o wide
+kubectl --context epaflix get nodes -o wide
 ```
 
 ### Pre-upgrade etcd snapshot
@@ -534,8 +534,8 @@ the roll, CNPG performs an **automatic switchover** (brief connection blip). Thi
 is expected. Confirm a healthy new primary before letting the roll continue:
 
 ```bash
-kubectl get cluster -A
-kubectl cnpg status <cluster> -n <ns>
+kubectl --context epaflix get cluster -A
+kubectl --context epaflix cnpg status <cluster> -n <ns>
 ```
 
 **NEVER force-manage or delete postgres pods during the roll** — let CNPG fail

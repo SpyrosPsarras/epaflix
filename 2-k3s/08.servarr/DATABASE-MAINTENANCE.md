@@ -33,45 +33,45 @@ cd /home/spy/Documents/Epaflix/k3s-swarm-proxmox/2-k3s/08.servarr/radarr
 
 ```bash
 # Fix duplicate Series
-kubectl apply -f /home/spy/Documents/Epaflix/k3s-swarm-proxmox/2-k3s/08.servarr/sonarr/fix-duplicate-series.yaml
+kubectl --context epaflix apply -f /home/spy/Documents/Epaflix/k3s-swarm-proxmox/2-k3s/08.servarr/sonarr/fix-duplicate-series.yaml
 
 # Fix duplicate Episodes
-kubectl apply -f /home/spy/Documents/Epaflix/k3s-swarm-proxmox/2-k3s/08.servarr/sonarr/fix-duplicate-episodes.yaml
+kubectl --context epaflix apply -f /home/spy/Documents/Epaflix/k3s-swarm-proxmox/2-k3s/08.servarr/sonarr/fix-duplicate-episodes.yaml
 
 # Fix duplicate EpisodeFiles
-kubectl apply -f /home/spy/Documents/Epaflix/k3s-swarm-proxmox/2-k3s/08.servarr/sonarr/fix-duplicate-episodefiles.yaml
+kubectl --context epaflix apply -f /home/spy/Documents/Epaflix/k3s-swarm-proxmox/2-k3s/08.servarr/sonarr/fix-duplicate-episodefiles.yaml
 
 # Restart after fixes
-kubectl rollout restart deployment/sonarr -n servarr
+kubectl --context epaflix rollout restart deployment/sonarr -n servarr
 ```
 
 ### Sonarr2 (Anime)
 
 ```bash
 # Fix duplicate Series
-kubectl apply -f /home/spy/Documents/Epaflix/k3s-swarm-proxmox/2-k3s/08.servarr/sonarr2/fix-duplicate-series.yaml
+kubectl --context epaflix apply -f /home/spy/Documents/Epaflix/k3s-swarm-proxmox/2-k3s/08.servarr/sonarr2/fix-duplicate-series.yaml
 
 # Fix duplicate Episodes
-kubectl apply -f /home/spy/Documents/Epaflix/k3s-swarm-proxmox/2-k3s/08.servarr/sonarr2/fix-duplicate-episodes.yaml
+kubectl --context epaflix apply -f /home/spy/Documents/Epaflix/k3s-swarm-proxmox/2-k3s/08.servarr/sonarr2/fix-duplicate-episodes.yaml
 
 # Fix duplicate EpisodeFiles
-kubectl apply -f /home/spy/Documents/Epaflix/k3s-swarm-proxmox/2-k3s/08.servarr/sonarr2/fix-duplicate-episodefiles.yaml
+kubectl --context epaflix apply -f /home/spy/Documents/Epaflix/k3s-swarm-proxmox/2-k3s/08.servarr/sonarr2/fix-duplicate-episodefiles.yaml
 
 # Restart after fixes
-kubectl rollout restart deployment/sonarr2 -n servarr
+kubectl --context epaflix rollout restart deployment/sonarr2 -n servarr
 ```
 
 ### Radarr (Movies)
 
 ```bash
 # Fix duplicate Movies
-kubectl apply -f /home/spy/Documents/Epaflix/k3s-swarm-proxmox/2-k3s/08.servarr/radarr/fix-duplicate-movies.yaml
+kubectl --context epaflix apply -f /home/spy/Documents/Epaflix/k3s-swarm-proxmox/2-k3s/08.servarr/radarr/fix-duplicate-movies.yaml
 
 # Fix duplicate MovieFiles
-kubectl apply -f /home/spy/Documents/Epaflix/k3s-swarm-proxmox/2-k3s/08.servarr/radarr/fix-duplicate-moviefiles.yaml
+kubectl --context epaflix apply -f /home/spy/Documents/Epaflix/k3s-swarm-proxmox/2-k3s/08.servarr/radarr/fix-duplicate-moviefiles.yaml
 
 # Restart after fixes
-kubectl rollout restart deployment/radarr -n servarr
+kubectl --context epaflix rollout restart deployment/radarr -n servarr
 ```
 
 ## Common Scenarios
@@ -88,9 +88,9 @@ kubectl rollout restart deployment/radarr -n servarr
 # (The health check will tell you which fixes to apply)
 
 # Restart affected services
-kubectl rollout restart deployment/sonarr -n servarr
-kubectl rollout restart deployment/sonarr2 -n servarr
-kubectl rollout restart deployment/radarr -n servarr
+kubectl --context epaflix rollout restart deployment/sonarr -n servarr
+kubectl --context epaflix rollout restart deployment/sonarr2 -n servarr
+kubectl --context epaflix rollout restart deployment/radarr -n servarr
 ```
 
 ### Regular Maintenance
@@ -154,15 +154,15 @@ Credentials stored in Kubernetes secret: `servarr-postgres` (namespace: `servarr
 
 ```bash
 # Sonarr
-SONARR_PW=$(kubectl get secret servarr-postgres -n servarr -o jsonpath='{.data.sonarr-password}' | base64 -d)
+SONARR_PW=$(kubectl --context epaflix get secret servarr-postgres -n servarr -o jsonpath='{.data.sonarr-password}' | base64 -d)
 PGPASSWORD="${SONARR_PW}" psql -h 192.168.10.105 -U sonarr -d sonarr-main
 
 # Sonarr2
-SONARR2_PW=$(kubectl get secret servarr-postgres -n servarr -o jsonpath='{.data.sonarr2-password}' | base64 -d)
+SONARR2_PW=$(kubectl --context epaflix get secret servarr-postgres -n servarr -o jsonpath='{.data.sonarr2-password}' | base64 -d)
 PGPASSWORD="${SONARR2_PW}" psql -h 192.168.10.105 -U sonarr2 -d sonarr2-main
 
 # Radarr
-RADARR_PW=$(kubectl get secret servarr-postgres -n servarr -o jsonpath='{.data.radarr-password}' | base64 -d)
+RADARR_PW=$(kubectl --context epaflix get secret servarr-postgres -n servarr -o jsonpath='{.data.radarr-password}' | base64 -d)
 PGPASSWORD="${RADARR_PW}" psql -h 192.168.10.105 -U radarr -d radarr-main
 ```
 
@@ -201,15 +201,15 @@ SELECT MAX("Id") as max_id, (SELECT last_value FROM "MovieFiles_Id_seq") as sequ
 
 ```bash
 # Watch job logs in real-time
-kubectl logs -n servarr job/fix-sonarr-duplicate-series -f
-kubectl logs -n servarr job/fix-sonarr2-duplicate-episodes -f
-kubectl logs -n servarr job/fix-radarr-duplicate-movies -f
+kubectl --context epaflix logs -n servarr job/fix-sonarr-duplicate-series -f
+kubectl --context epaflix logs -n servarr job/fix-sonarr2-duplicate-episodes -f
+kubectl --context epaflix logs -n servarr job/fix-radarr-duplicate-movies -f
 
 # Check job status
-kubectl get jobs -n servarr | grep fix-
+kubectl --context epaflix get jobs -n servarr | grep fix-
 
 # Delete completed job (if needed)
-kubectl delete job fix-sonarr-duplicate-series -n servarr
+kubectl --context epaflix delete job fix-sonarr-duplicate-series -n servarr
 ```
 
 ## Safety Features
@@ -249,17 +249,17 @@ All fix jobs include:
 
 2. **Apply Fixes** (if issues found)
    ```bash
-   kubectl apply -f <service>/fix-duplicate-<table>.yaml
+   kubectl --context epaflix apply -f <service>/fix-duplicate-<table>.yaml
    ```
 
 3. **Monitor Progress**
    ```bash
-   kubectl logs -n servarr job/fix-<service>-duplicate-<table> -f
+   kubectl --context epaflix logs -n servarr job/fix-<service>-duplicate-<table> -f
    ```
 
 4. **Restart Service**
    ```bash
-   kubectl rollout restart deployment/<service> -n servarr
+   kubectl --context epaflix rollout restart deployment/<service> -n servarr
    ```
 
 5. **Verify Fix**
@@ -273,7 +273,7 @@ For issues not covered here:
 1. Check service-specific README in `sonarr/`, `sonarr2/`, or `radarr/`
 2. Review troubleshooting guides in this directory
 3. Check `.history/` for similar past issues
-4. Check service logs: `kubectl logs -n servarr deployment/<service>`
+4. Check service logs: `kubectl --context epaflix logs -n servarr deployment/<service>`
 
 ## Version History
 

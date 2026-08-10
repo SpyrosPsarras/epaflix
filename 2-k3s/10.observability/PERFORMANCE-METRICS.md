@@ -23,7 +23,7 @@ All tests performed using `cilium connectivity test --perf` which measures:
 
 ```bash
 # Test command
-kubectl apply -f manifests/03.kube-vip-cloud-provider/test-network-speed.yaml
+kubectl --context epaflix apply -f manifests/03.kube-vip-cloud-provider/test-network-speed.yaml
 # iperf3 results between pods
 ```
 
@@ -232,7 +232,7 @@ curl -w "@curl-format.txt" https://auth.epaflix.com
 
 ```bash
 # Apply sample NetworkPolicy
-kubectl apply -f - <<EOF
+kubectl --context epaflix apply -f - <<EOF
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -322,8 +322,8 @@ cilium_bpf_map_pressure
 
 ```bash
 # Baseline iperf3 test
-kubectl run iperf3-server --image=networkstatic/iperf3 -- -s
-kubectl run iperf3-client --image=networkstatic/iperf3 -- -c iperf3-server -t 60 -P 8
+kubectl --context epaflix run iperf3-server --image=networkstatic/iperf3 -- -s
+kubectl --context epaflix run iperf3-client --image=networkstatic/iperf3 -- -c iperf3-server -t 60 -P 8
 
 # Cilium connectivity test
 cilium connectivity test --perf --json > results.json
@@ -332,10 +332,10 @@ cilium connectivity test --perf --json > results.json
 cat results.json | jq '.tests[] | select(.name=="pod-to-pod") | .metrics'
 
 # Monitor during test
-watch -n 1 'kubectl top nodes && kubectl top pods -A | head -20'
+watch -n 1 'kubectl --context epaflix top nodes && kubectl --context epaflix top pods -A | head -20'
 
 # Check packet drops
-kubectl exec -n kube-system ds/cilium -- cilium metrics list | grep drop
+kubectl --context epaflix exec -n kube-system ds/cilium -- cilium metrics list | grep drop
 
 # Hubble flow monitoring during test
 hubble observe --follow --protocol tcp -o compact

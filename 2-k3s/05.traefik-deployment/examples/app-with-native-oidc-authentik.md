@@ -114,21 +114,21 @@ Create a Kubernetes secret with the OIDC credentials from Step 2:
 
 ```bash
 # Replace placeholders with actual values
-kubectl create secret generic <app-name>-oidc-secret -n <namespace> \
+kubectl --context epaflix create secret generic <app-name>-oidc-secret -n <namespace> \
   --from-literal=client-id='<CLIENT_ID_FROM_STEP2>' \
   --from-literal=client-secret='<CLIENT_SECRET_FROM_STEP2>'
 ```
 
 **Example:**
 ```bash
-kubectl create secret generic jellyseerr-oidc-secret -n servarr \
+kubectl --context epaflix create secret generic jellyseerr-oidc-secret -n servarr \
   --from-literal=client-id='<GRAFANA_OAUTH_CLIENT_ID>' \
   --from-literal=client-secret='eJw0j45GGpRa...long-secret...xyz=='
 ```
 
 **Verify:**
 ```bash
-kubectl get secret <app-name>-oidc-secret -n <namespace>
+kubectl --context epaflix get secret <app-name>-oidc-secret -n <namespace>
 ```
 
 ### Step 5: Configure Application OIDC
@@ -254,7 +254,7 @@ Add multiple users at once:
 **Cause**: Incorrect Client ID or Client Secret.
 
 **Solution**:
-- Verify Kubernetes secret: `kubectl get secret <app-name>-oidc-secret -n <namespace> -o yaml`
+- Verify Kubernetes secret: `kubectl --context epaflix get secret <app-name>-oidc-secret -n <namespace> -o yaml`
 - Check application configuration has matching Client ID
 - Regenerate credentials in Authentik if needed
 

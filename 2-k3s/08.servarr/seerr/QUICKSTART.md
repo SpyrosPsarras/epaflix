@@ -22,14 +22,14 @@ Edit the manifests in git and let ArgoCD reconcile (selfHeal is on — manual
 
 ```bash
 # Pod status
-kubectl get pods -n servarr -l app=seerr
+kubectl --context epaflix get pods -n servarr -l app=seerr
 
 # Service + endpoints
-kubectl get svc seerr -n servarr
-kubectl get endpoints seerr -n servarr
+kubectl --context epaflix get svc seerr -n servarr
+kubectl --context epaflix get endpoints seerr -n servarr
 
 # Logs
-kubectl logs -n servarr -l app=seerr -f
+kubectl --context epaflix logs -n servarr -l app=seerr -f
 ```
 
 ## Access
@@ -55,15 +55,15 @@ cd ../jellyseerr
 
 ```bash
 # Pod not starting?
-kubectl describe pod -n servarr -l app=seerr
-kubectl logs -n servarr -l app=seerr --tail=100
+kubectl --context epaflix describe pod -n servarr -l app=seerr
+kubectl --context epaflix logs -n servarr -l app=seerr --tail=100
 
 # Config permission issues (pod runs as UID 568)?
-kubectl get pvc jellyseerr-config -n servarr
-kubectl describe pvc jellyseerr-config -n servarr
+kubectl --context epaflix get pvc jellyseerr-config -n servarr
+kubectl --context epaflix describe pvc jellyseerr-config -n servarr
 
 # Database connection issues?
-kubectl get secret servarr-postgres -n servarr -o jsonpath='{.data.jellyseerr-host}' | base64 -d
+kubectl --context epaflix get secret servarr-postgres -n servarr -o jsonpath='{.data.jellyseerr-host}' | base64 -d
 ```
 
 ## See also

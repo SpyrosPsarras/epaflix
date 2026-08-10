@@ -241,7 +241,7 @@ Set these as pinned/starred dashboards for quick access:
 2. Verify datasource is selected (edit panel)
 3. Check if Prometheus has metrics:
    ```bash
-   kubectl port-forward -n observability svc/kube-prometheus-stack-prometheus 9090:9090
+   kubectl --context epaflix port-forward -n observability svc/kube-prometheus-stack-prometheus 9090:9090
    # Visit http://localhost:9090/targets
    ```
 
@@ -249,13 +249,13 @@ Set these as pinned/starred dashboards for quick access:
 
 - Wait a few minutes for initial metric collection
 - Some panels require specific labels (check panel query)
-- Verify ServiceMonitors exist: `kubectl get servicemonitors -A`
+- Verify ServiceMonitors exist: `kubectl --context epaflix get servicemonitors -A`
 
 ### Cannot find a dashboard
 
 ```bash
 # List all dashboards via CLI
-kubectl exec -n observability deployment/kube-prometheus-stack-grafana -c grafana -- \
+kubectl --context epaflix exec -n observability deployment/kube-prometheus-stack-grafana -c grafana -- \
   curl -s -u admin:'<POSTGRES_PASSWORD>' 'http://localhost:3000/api/search?type=dash-db' | \
   python3 -m json.tool
 ```
