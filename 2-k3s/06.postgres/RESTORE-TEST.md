@@ -25,7 +25,7 @@ the catalog still holds exactly one server.
 
 Second guard: the scratch cluster runs in its own namespace `pg-restore-test`, not inside
 `postgres-system`. Reason is teardown. With a dedicated namespace the riskiest step is a single
-`kubectl delete ns pg-restore-test` - one object name, and a typo cannot land on a live object. If
+`kubectl --context epaflix delete ns pg-restore-test` - one object name, and a typo cannot land on a live object. If
 the scratch cluster lived next to the real one, teardown would be a list of `delete cluster` /
 `delete pvc` commands typed by hand right next to `postgres-cluster`, and one wrong name deletes
 production.
@@ -37,11 +37,11 @@ This is a gated, live-cluster action. Do not run it unattended.
 Check the live cluster is healthy and the catalog is where you think it is, before you start:
 
 ```bash
-kubectl get cluster postgres-cluster -n postgres-system \
+kubectl --context epaflix get cluster postgres-cluster -n postgres-system \
   -o jsonpath='{.status.readyInstances}/{.spec.instances} {.status.currentPrimary} {.status.timelineID} {.status.phase}{"\n"}'
-kubectl get objectstore postgres-minio-store -n postgres-system \
+kubectl --context epaflix get objectstore postgres-minio-store -n postgres-system \
   -o jsonpath='{.spec.configuration.destinationPath} {.spec.configuration.endpointURL}{"\n"}'
-kubectl get objectstore postgres-minio-store -n postgres-system \
+kubectl --context epaflix get objectstore postgres-minio-store -n postgres-system \
   -o jsonpath='{.status.serverRecoveryWindow}{"\n"}'
 ```
 
@@ -74,13 +74,13 @@ Keep the credential copy as a **pipe**. Never dump the Secret to a file or to th
 value ends up in the shell history and in the agent transcript.
 
 ```bash
-kubectl create ns pg-restore-test
-kubectl get secret minio-backup-credentials -n postgres-system -o json \
+kubectl --context epaflix create ns pg-restore-test
+kubectl --context epaflix get secret minio-backup-credentials -n postgres-system -o json \
   | python3 -c "import sys,json;d=json.load(sys.stdin);d['metadata']={'name':d['metadata']['name'],'namespace':'pg-restore-test'};print(json.dumps(d))" \
-  | kubectl apply -f -
-kubectl get objectstore postgres-minio-store -n postgres-system -o json \
+  | kubectl --context epaflix apply -f -
+kubectl --context epaflix get objectstore postgres-minio-store -n postgres-system -o json \
   | python3 -c "import sys,json;d=json.load(sys.stdin);d['metadata']={'name':d['metadata']['name'],'namespace':'pg-restore-test'};d.pop('status',None);print(json.dumps(d))" \
-  | kubectl apply -f -
+  | kubectl --context epaflix apply -f -
 ```
 
 The `d.pop('status',None)` on the `ObjectStore` matters: the status carries the live recovery
@@ -206,11 +206,11 @@ archiving works.
 ## Teardown
 
 ```bash
-kubectl delete ns pg-restore-test --wait=true --timeout=300s
+kubectl --context epaflix delete ns pg-restore-test --wait=true --timeout=300s
 # assert 1: the catalog must still hold exactly ONE serverName
-kubectl get objectstore postgres-minio-store -n postgres-system -o jsonpath='{.status.serverRecoveryWindow}'
+kubectl --context epaflix get objectstore postgres-minio-store -n postgres-system -o jsonpath='{.status.serverRecoveryWindow}'
 # assert 2: live must still be 3/3
-kubectl get cluster postgres-cluster -n postgres-system -o jsonpath='{.status.readyInstances}'
+kubectl --context epaflix get cluster postgres-cluster -n postgres-system -o jsonpath='{.status.readyInstances}'
 ```
 
 Assert 1 is the footgun check. If a second `serverName` shows up next to `postgres-cluster`, the
@@ -241,7 +241,7 @@ Correction while we are here: issue #570 and `README.md` say Barman Cloud Plugin
 is stale. The live plugin reports **0.14.0** in `Cluster.status.pluginStatus`:
 
 ```bash
-kubectl get cluster postgres-cluster -n postgres-system \
+kubectl --context epaflix get cluster postgres-cluster -n postgres-system \
   -o jsonpath='{.status.pluginStatus[*].version}{"\n"}'
 ```
 

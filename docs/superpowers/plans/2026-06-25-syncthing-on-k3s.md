@@ -817,7 +817,7 @@ Expected: includes `22000`.
 - Consumes: the live deployment.
 - Produces: a hardened, verified Syncthing node + follow-up issues.
 
-- [ ] **Step 1: One-time GUI hardening** (kubectl exec is blocked — do this in the GUI at `https://syncthing.epaflix.com`, after Authentik login):
+- [ ] **Step 1: One-time GUI hardening** (kubectl --context epaflix exec is blocked — do this in the GUI at `https://syncthing.epaflix.com`, after Authentik login):
   - Settings → Connections: **uncheck** Global Discovery, Enable Relaying, Enable NAT traversal. Leave Local Discovery on. Confirm Sync Protocol Listen Address `tcp://0.0.0.0:22000`.
   - Settings → General: Usage reporting → **No**.
   - Settings → GUI: set a GUI user + password (defense-in-depth behind Authentik).

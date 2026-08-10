@@ -83,8 +83,8 @@ The standing weekly audit (`2-k3s/maintenance/postgres-sequence-audit-cronjob.ya
 
 Trigger one immediately:
 ```bash
-kubectl create job -n servarr sequence-audit-now --from=cronjob/postgres-sequence-audit
-kubectl logs  -n servarr -f       job/sequence-audit-now
+kubectl --context epaflix create job -n servarr sequence-audit-now --from=cronjob/postgres-sequence-audit
+kubectl --context epaflix logs  -n servarr -f       job/sequence-audit-now
 ```
 
 ## Performance

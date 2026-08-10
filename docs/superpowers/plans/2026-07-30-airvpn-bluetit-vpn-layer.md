@@ -572,7 +572,7 @@ shred -u airvpn-credentials.enc.yaml
 ```bash
 cd /home/spy/Documents/Epaflix/k3s-swarm-proxmox-vpn
 grep -c "airusername: [^E]" 2-k3s/08.servarr/_shared/secrets/airvpn-credentials.enc.yaml
-AGEKEY=$(kubectl get secret sops-age -n argocd -o jsonpath='{.data}' \
+AGEKEY=$(kubectl --context epaflix get secret sops-age -n argocd -o jsonpath='{.data}' \
   | python3 -c "import sys,json,base64;[print(base64.b64decode(v).decode(),end='') for v in json.load(sys.stdin).values()]")
 SOPS_AGE_KEY="$AGEKEY" sops -d 2-k3s/08.servarr/_shared/secrets/airvpn-credentials.enc.yaml \
   | sed -E 's/(airusername|airpassword): .*/\1: <redacted>/'
@@ -606,7 +606,7 @@ and add the matching comment line to the `# Reconciled via the ksops generator` 
 ```bash
 cd /home/spy/Documents/Epaflix/k3s-swarm-proxmox-vpn
 export PATH="$HOME/.local/bin:$PATH"
-export SOPS_AGE_KEY=$(kubectl get secret sops-age -n argocd -o jsonpath='{.data}' \
+export SOPS_AGE_KEY=$(kubectl --context epaflix get secret sops-age -n argocd -o jsonpath='{.data}' \
   | python3 -c "import sys,json,base64;[print(base64.b64decode(v).decode(),end='') for v in json.load(sys.stdin).values()]")
 kustomize build --enable-alpha-plugins --enable-exec 2-k3s/08.servarr >/dev/null && echo "render ok"
 unset SOPS_AGE_KEY
@@ -655,8 +655,8 @@ The spec calls both of these out as unverified. **Do not skip this task and do n
 - [ ] **Step 1: Confirm the live pod is untouched by what follows**
 
 ```bash
-kubectl get pod -n servarr -l app=qbittorrent -o wide
-kubectl exec -n servarr deploy/qbittorrent -c qbittorrent -- wg show | grep -E "endpoint|handshake"
+kubectl --context epaflix get pod -n servarr -l app=qbittorrent -o wide
+kubectl --context epaflix exec -n servarr deploy/qbittorrent -c qbittorrent -- wg show | grep -E "endpoint|handshake"
 ```
 
 Record the endpoint and restart count so a regression is provable later.
@@ -664,13 +664,13 @@ Record the endpoint and restart count so a regression is provable later.
 - [ ] **Step 2: Create the scratch namespace and a test ConfigMap using the test key**
 
 ```bash
-kubectl create namespace airvpn-test --dry-run=client -o yaml | kubectl apply -f -
-kubectl -n servarr get cm airvpn-bluetit-config -o yaml \
+kubectl --context epaflix create namespace airvpn-test --dry-run=client -o yaml | kubectl --context epaflix apply -f -
+kubectl --context epaflix -n servarr get cm airvpn-bluetit-config -o yaml \
   | sed 's/namespace: servarr/namespace: airvpn-test/; s/^\(\s*\)airkey  *Default/\1airkey                      k3s-test/' \
-  | kubectl apply -f -
-kubectl -n servarr get secret airvpn-credentials -o yaml \
+  | kubectl --context epaflix apply -f -
+kubectl --context epaflix -n servarr get secret airvpn-credentials -o yaml \
   | sed 's/namespace: servarr/namespace: airvpn-test/' \
-  | grep -v "annotations\|argocd" | kubectl apply -f -
+  | grep -v "annotations\|argocd" | kubectl --context epaflix apply -f -
 ```
 
 Using `k3s-test` is what keeps the live tunnel and Nick's VM connected.
@@ -678,7 +678,7 @@ Using `k3s-test` is what keeps the live tunnel and Nick's VM connected.
 - [ ] **Step 3: Run the scratch pod**
 
 ```bash
-cat <<'YAML' | kubectl apply -f -
+cat <<'YAML' | kubectl --context epaflix apply -f -
 apiVersion: v1
 kind: Pod
 metadata:
@@ -727,8 +727,8 @@ YAML
 - [ ] **Step 4: Check assumption (a) - `VPN_ENABLED=no` leaves iptables alone**
 
 ```bash
-kubectl -n airvpn-test logs airvpn-scratch -c qbittorrent | head -40
-kubectl -n airvpn-test exec airvpn-scratch -c airvpn -- iptables -S | head -30
+kubectl --context epaflix -n airvpn-test logs airvpn-scratch -c qbittorrent | head -40
+kubectl --context epaflix -n airvpn-test exec airvpn-scratch -c airvpn -- iptables -S | head -30
 ```
 
 Expected: the qBittorrent container does not install a DROP policy of its own, and the only rules present are Bluetit's network lock. If qBittorrent still writes iptables rules, **stop** — the fallback is a stock qBittorrent image plus a `/config` migration, which is separate work and needs Spyros's decision.
@@ -736,9 +736,9 @@ Expected: the qBittorrent container does not install a DROP policy of its own, a
 - [ ] **Step 5: Check assumption (b) and capture the connected string**
 
 ```bash
-kubectl -n airvpn-test exec airvpn-scratch -c airvpn -- goldcrest --bluetit-status
-kubectl -n airvpn-test exec airvpn-scratch -c airvpn -- wg show 2>/dev/null | grep -E "endpoint|handshake"
-kubectl -n airvpn-test logs airvpn-scratch -c airvpn | grep -iE "connected|network filter|lock" | tail -20
+kubectl --context epaflix -n airvpn-test exec airvpn-scratch -c airvpn -- goldcrest --bluetit-status
+kubectl --context epaflix -n airvpn-test exec airvpn-scratch -c airvpn -- wg show 2>/dev/null | grep -E "endpoint|handshake"
+kubectl --context epaflix -n airvpn-test logs airvpn-scratch -c airvpn | grep -iE "connected|network filter|lock" | tail -20
 ```
 
 Expected: it connects with **no** `/dev/net/tun` mount. Record the exact connected wording — the disconnected form is `Bluetit is not connected`, so any grep must be anchored to avoid matching it. If it fails to connect without the device, add `/dev/net/tun` back to the Deployment in Task 5 and correct the spec.
@@ -746,12 +746,12 @@ Expected: it connects with **no** `/dev/net/tun` mount. Record the exact connect
 - [ ] **Step 6: Confirm the chosen server honours the blacklist, and measure**
 
 ```bash
-kubectl -n airvpn-test exec airvpn-scratch -c airvpn -- goldcrest --bluetit-status | grep -i server
-kubectl -n airvpn-test exec airvpn-scratch -c airvpn -- sh -c 'curl -s --max-time 10 https://ipinfo.io/json'
-kubectl -n airvpn-test exec airvpn-scratch -c airvpn -- ping -c100 -i0.2 -W2 10.128.0.1 | tail -3
-kubectl -n airvpn-test exec airvpn-scratch -c airvpn -- sh -c \
+kubectl --context epaflix -n airvpn-test exec airvpn-scratch -c airvpn -- goldcrest --bluetit-status | grep -i server
+kubectl --context epaflix -n airvpn-test exec airvpn-scratch -c airvpn -- sh -c 'curl -s --max-time 10 https://ipinfo.io/json'
+kubectl --context epaflix -n airvpn-test exec airvpn-scratch -c airvpn -- ping -c100 -i0.2 -W2 10.128.0.1 | tail -3
+kubectl --context epaflix -n airvpn-test exec airvpn-scratch -c airvpn -- sh -c \
   "curl -s -o /dev/null --max-time 45 -w 'down bytes=%{size_download} speed=%{speed_download} B/s\n' 'https://speed.cloudflare.com/__down?bytes=50000000'"
-kubectl -n airvpn-test exec airvpn-scratch -c airvpn -- sh -c \
+kubectl --context epaflix -n airvpn-test exec airvpn-scratch -c airvpn -- sh -c \
   "head -c 10000000 /dev/zero | curl -s -o /dev/null --max-time 45 -X POST --data-binary @- -H 'Expect:' -w 'up bytes=%{size_upload} speed=%{speed_upload} B/s\n' https://speed.cloudflare.com/__up"
 ```
 
@@ -760,11 +760,11 @@ Expected: the server is **not** Cygnus, Hassaleh or Kajam; loss near 0%; and thr
 - [ ] **Step 7: Exercise the SIGUSR2 path deliberately**
 
 ```bash
-PID=$(kubectl -n airvpn-test exec airvpn-scratch -c airvpn -- cat /etc/airvpn/bluetit.lock)
-kubectl -n airvpn-test exec airvpn-scratch -c airvpn -- goldcrest --bluetit-status | grep -i server
-kubectl -n airvpn-test exec airvpn-scratch -c airvpn -- kill -USR2 "$PID"
+PID=$(kubectl --context epaflix -n airvpn-test exec airvpn-scratch -c airvpn -- cat /etc/airvpn/bluetit.lock)
+kubectl --context epaflix -n airvpn-test exec airvpn-scratch -c airvpn -- goldcrest --bluetit-status | grep -i server
+kubectl --context epaflix -n airvpn-test exec airvpn-scratch -c airvpn -- kill -USR2 "$PID"
 sleep 25
-kubectl -n airvpn-test exec airvpn-scratch -c airvpn -- goldcrest --bluetit-status | grep -i server
+kubectl --context epaflix -n airvpn-test exec airvpn-scratch -c airvpn -- goldcrest --bluetit-status | grep -i server
 ```
 
 Expected: it reconnects and reports a connected server again (possibly the same one — quick-mode may re-pick the same recommendation; what matters is that it reconnects rather than dying).
@@ -772,7 +772,7 @@ Expected: it reconnects and reports a connected server again (possibly the same 
 - [ ] **Step 8: Tear down and record results**
 
 ```bash
-kubectl delete namespace airvpn-test
+kubectl --context epaflix delete namespace airvpn-test
 ```
 
 Write the measured numbers into the PR description in Task 7. If anything in Steps 4-7 failed, correct the spec and this plan before continuing.
@@ -975,7 +975,7 @@ docker buildx imagetools inspect qbittorrentofficial/qbittorrent-nox:latest --fo
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
-export SOPS_AGE_KEY=$(kubectl get secret sops-age -n argocd -o jsonpath='{.data}' \
+export SOPS_AGE_KEY=$(kubectl --context epaflix get secret sops-age -n argocd -o jsonpath='{.data}' \
   | python3 -c "import sys,json,base64;[print(base64.b64decode(v).decode(),end='') for v in json.load(sys.stdin).values()]")
 kustomize build --enable-alpha-plugins --enable-exec 2-k3s/08.servarr | python3 -c "
 import sys,yaml
@@ -1139,8 +1139,8 @@ Draft the body, **show it to Spyros, and only post after he confirms.** It must 
 Wait for `validate` to pass, then **ask Spyros to approve the merge**. After merge:
 
 ```bash
-kubectl -n argocd get app servarr -o jsonpath='{.status.sync.status} {.status.health.status}{"\n"}'
-kubectl -n servarr rollout status deploy/qbittorrent --timeout=300s
+kubectl --context epaflix -n argocd get app servarr -o jsonpath='{.status.sync.status} {.status.health.status}{"\n"}'
+kubectl --context epaflix -n servarr rollout status deploy/qbittorrent --timeout=300s
 ```
 
 The Deployment uses `Recreate`, so the old pod goes away before the new one starts — expect a short outage, which is correct given one VPN session at a time.
@@ -1176,13 +1176,13 @@ per the repo rule rather than doing it inside this task.
 - [ ] **Step 5: Run the verification list**
 
 ```bash
-POD=$(kubectl -n servarr get pod -l app=qbittorrent -o name | head -1)
-kubectl -n servarr exec $POD -c airvpn -- goldcrest --bluetit-status
-kubectl -n servarr exec $POD -c airvpn -- sh -c 'curl -s --max-time 10 https://ipinfo.io/json'
-kubectl -n servarr exec $POD -c airvpn -- ping -c100 -i0.2 -W2 10.128.0.1 | tail -3
-kubectl -n servarr exec $POD -c airvpn -- sh -c "curl -s -o /dev/null --max-time 45 -w 'down speed=%{speed_download} B/s\n' 'https://speed.cloudflare.com/__down?bytes=50000000'"
-kubectl -n servarr exec $POD -c airvpn -- sh -c "head -c 10000000 /dev/zero | curl -s -o /dev/null --max-time 45 -X POST --data-binary @- -H 'Expect:' -w 'up speed=%{speed_upload} B/s\n' https://speed.cloudflare.com/__up"
-kubectl -n servarr exec $POD -c qbittorrent -- nslookup sonarr.servarr.svc.cluster.local 192.168.10.30
+POD=$(kubectl --context epaflix -n servarr get pod -l app=qbittorrent -o name | head -1)
+kubectl --context epaflix -n servarr exec $POD -c airvpn -- goldcrest --bluetit-status
+kubectl --context epaflix -n servarr exec $POD -c airvpn -- sh -c 'curl -s --max-time 10 https://ipinfo.io/json'
+kubectl --context epaflix -n servarr exec $POD -c airvpn -- ping -c100 -i0.2 -W2 10.128.0.1 | tail -3
+kubectl --context epaflix -n servarr exec $POD -c airvpn -- sh -c "curl -s -o /dev/null --max-time 45 -w 'down speed=%{speed_download} B/s\n' 'https://speed.cloudflare.com/__down?bytes=50000000'"
+kubectl --context epaflix -n servarr exec $POD -c airvpn -- sh -c "head -c 10000000 /dev/zero | curl -s -o /dev/null --max-time 45 -X POST --data-binary @- -H 'Expect:' -w 'up speed=%{speed_upload} B/s\n' https://speed.cloudflare.com/__up"
+kubectl --context epaflix -n servarr exec $POD -c qbittorrent -- nslookup sonarr.servarr.svc.cluster.local 192.168.10.30
 curl -s -o /dev/null -w "webui http=%{http_code}\n" http://qbittorrent.epaflix.com/
 
 # --- The two checks below are the ones that actually catch the wg0/tun0 bug.
@@ -1193,13 +1193,13 @@ curl -s -o /dev/null -w "webui http=%{http_code}\n" http://qbittorrent.epaflix.c
 # 1. qBittorrent's own log must show a successful listen on tun0, not the
 #    "configured network interface is invalid" error. Check via the WebUI's
 #    own Log viewer (Execution Log, filter Normal+Info), or if shelling in:
-kubectl -n servarr exec $POD -c qbittorrent -- sh -c \
+kubectl --context epaflix -n servarr exec $POD -c qbittorrent -- sh -c \
   'grep -i "network interface" /config/qBittorrent/data/logs/*.log 2>/dev/null | tail -5 || echo "check the WebUI Log viewer instead"'
 
 # 2. Torrents must genuinely transfer data - not just answer HTTP. Confirm
 #    dl_info_data/up_info_data actually climb across a wait, with an active
 #    torrent present (a flat counter is exactly the wg0-bug symptom):
-kubectl -n servarr exec $POD -c qbittorrent -- sh -c 'curl -s http://localhost:8080/api/v2/transfer/info'
+kubectl --context epaflix -n servarr exec $POD -c qbittorrent -- sh -c 'curl -s http://localhost:8080/api/v2/transfer/info'
 # ... wait 5-10 minutes with a torrent downloading/seeding, then re-run and
 # diff the two outputs. Also confirm connection status is "Connected"/"Firewalled"
 # and NOT "Disconnected" in the WebUI status bar.
@@ -1220,8 +1220,8 @@ rather than assume.
 - [ ] **Step 7: Soak 24h, then record**
 
 ```bash
-kubectl -n servarr get pod -l app=qbittorrent -o jsonpath='{.items[0].status.containerStatuses[*].restartCount} {.items[0].status.initContainerStatuses[*].restartCount}{"\n"}'
-kubectl -n servarr logs $POD -c airvpn --since=24h | grep -cE "reconnect triggered|strike"
+kubectl --context epaflix -n servarr get pod -l app=qbittorrent -o jsonpath='{.items[0].status.containerStatuses[*].restartCount} {.items[0].status.initContainerStatuses[*].restartCount}{"\n"}'
+kubectl --context epaflix -n servarr logs $POD -c airvpn --since=24h | grep -cE "reconnect triggered|strike"
 ```
 
 Expected: restart counts flat (the baseline being 59 restarts in 12 days), and few or no reconnects. Tick the PR test-plan boxes by editing the description.

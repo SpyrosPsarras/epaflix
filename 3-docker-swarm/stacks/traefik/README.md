@@ -59,7 +59,7 @@ after deploy without waiting for a new DNS-01 challenge (~2 minutes).
 
 ```bash
 # Extract acme.json from the running K3s Traefik pod
-kubectl exec -n traefik-system deploy/traefik -- cat /data/acme.json > /tmp/acme.json
+kubectl --context epaflix exec -n traefik-system deploy/traefik -- cat /data/acme.json > /tmp/acme.json
 
 # Verify it contains the wildcard cert and key material
 python3 -c "

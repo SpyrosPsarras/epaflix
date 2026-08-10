@@ -32,7 +32,7 @@ All `*.epaflix.com` services use **Let's Encrypt** via Cloudflare DNS-01 challen
 ## Deployed Resources
 
 ```bash
-$ kubectl get clusterissuer
+$ kubectl --context epaflix get clusterissuer
 NAME                READY
 letsencrypt-dns     True     # Let's Encrypt via Cloudflare DNS-01
 selfsigned-issuer   True     # Bootstrap self-signed (available, rarely used)
@@ -49,9 +49,9 @@ This installs cert-manager via Helm and creates the `letsencrypt-dns` and `selfs
 ### Verify
 
 ```bash
-kubectl get pods -n cert-manager
-kubectl get clusterissuer
-kubectl get certificate -A
+kubectl --context epaflix get pods -n cert-manager
+kubectl --context epaflix get clusterissuer
+kubectl --context epaflix get certificate -A
 ```
 
 ## How TLS Works for Services
@@ -119,16 +119,16 @@ ports:
 ### Check cert-manager health
 
 ```bash
-kubectl get pods -n cert-manager
-kubectl logs -n cert-manager -l app=cert-manager -f
+kubectl --context epaflix get pods -n cert-manager
+kubectl --context epaflix logs -n cert-manager -l app=cert-manager -f
 ```
 
 ### Certificate not issuing
 
 ```bash
-kubectl get certificate -A
-kubectl describe certificate <name> -n <namespace>
-kubectl get certificaterequest -A
+kubectl --context epaflix get certificate -A
+kubectl --context epaflix describe certificate <name> -n <namespace>
+kubectl --context epaflix get certificaterequest -A
 ```
 
 ### Verify a live TLS cert

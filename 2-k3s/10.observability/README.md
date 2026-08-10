@@ -73,7 +73,7 @@ Complete monitoring, logging, and service mesh observability for the K3s cluster
    - pve-exporter deployed and running
    ```bash
    # Backup etcd
-   kubectl exec -n kube-system $(kubectl get pod -n kube-system -l component=etcd -o jsonpath='{.items[0].metadata.name}') -- \
+   kubectl --context epaflix exec -n kube-system $(kubectl --context epaflix get pod -n kube-system -l component=etcd -o jsonpath='{.items[0].metadata.name}') -- \
      etcdctl --cacert=/var/lib/rancher/k3s/server/tls/etcd/server-ca.crt \
      --cert=/var/lib/rancher/k3s/server/tls/etcd/server-client.crt \
      --key=/var/lib/rancher/k3s/server/tls/etcd/server-client.key \
@@ -98,15 +98,15 @@ Complete monitoring, logging, and service mesh observability for the K3s cluster
      --set operator.prometheus.enabled=true
 
    # Restart all pods
-   kubectl get pods -A -o custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name --no-headers | \
-     while read ns pod; do kubectl delete pod -n $ns $pod --wait=false; done
+   kubectl --context epaflix get pods -A -o custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name --no-headers | \
+     while read ns pod; do kubectl --context epaflix delete pod -n $ns $pod --wait=false; done
 
    # Verify
    cilium status --wait
    cilium connectivity test
 
    # Remove Flannel
-   kubectl -n kube-system delete ds kube-flannel-ds || true
+   kubectl --context epaflix -n kube-system delete ds kube-flannel-ds || true
 
    # Test for 48 hours, then enable kube-proxy replacement:
    cilium upgrade --set kubeProxyReplacement=true --set bpf.masquerade=true
@@ -280,15 +280,15 @@ this is a mounted volume, not an env var).
 
 ```bash
 # Trigger test alert
-kubectl exec -n observability alertmanager-kube-prometheus-stack-alertmanager-0 -- \
+kubectl --context epaflix exec -n observability alertmanager-kube-prometheus-stack-alertmanager-0 -- \
   amtool alert add test_alert alertname=TestEmailAlert
 
 # Check AlertManager status
-kubectl port-forward -n observability svc/kube-prometheus-stack-alertmanager 9093:9093
+kubectl --context epaflix port-forward -n observability svc/kube-prometheus-stack-alertmanager 9093:9093
 # Open http://localhost:9093
 
 # Silence alert
-kubectl exec -n observability alertmanager-kube-prometheus-stack-alertmanager-0 -- \
+kubectl --context epaflix exec -n observability alertmanager-kube-prometheus-stack-alertmanager-0 -- \
   amtool silence add alertname=TestEmailAlert
 ```
 
@@ -335,7 +335,7 @@ For production environments requiring HA, consider:
 
 ```bash
 # Check PVC usage
-kubectl get pvc -n observability
+kubectl --context epaflix get pvc -n observability
 
 # Detailed storage metrics in Grafana
 # Dashboard: "Kubernetes / Persistent Volumes"
@@ -359,13 +359,13 @@ helm upgrade kube-prometheus-stack prometheus-community/kube-prometheus-stack -n
 
 ```bash
 # Check pods
-kubectl get pods -n observability -l app.kubernetes.io/name=grafana
+kubectl --context epaflix get pods -n observability -l app.kubernetes.io/name=grafana
 
 # Check logs
-kubectl logs -n observability -l app.kubernetes.io/name=grafana -f
+kubectl --context epaflix logs -n observability -l app.kubernetes.io/name=grafana -f
 
 # Check database connection
-kubectl exec -n observability deployment/kube-prometheus-stack-grafana -- \
+kubectl --context epaflix exec -n observability deployment/kube-prometheus-stack-grafana -- \
   psql -h postgres-pooler.postgres-system.svc.cluster.local -U observability -d observability -c "SELECT 1;"
 ```
 
@@ -373,14 +373,14 @@ kubectl exec -n observability deployment/kube-prometheus-stack-grafana -- \
 
 ```bash
 # Port forward to Prometheus UI
-kubectl port-forward -n observability svc/kube-prometheus-stack-prometheus 9090:9090
+kubectl --context epaflix port-forward -n observability svc/kube-prometheus-stack-prometheus 9090:9090
 
 # Open http://localhost:9090/targets
 # Check for targets in "DOWN" state
 
 # Check ServiceMonitor
-kubectl get servicemonitor -n observability
-kubectl describe servicemonitor -n observability <name>
+kubectl --context epaflix get servicemonitor -n observability
+kubectl --context epaflix describe servicemonitor -n observability <name>
 ```
 
 ### Control-plane exporter Endpoints (issue #147)
@@ -424,15 +424,15 @@ Service so the matching ServiceMonitor target resolves to the master IPs.
 argocd app sync observability
 
 # Confirm the 3 static slices exist with the three master IPs:
-kubectl -n kube-system get endpointslice | grep -Ei "controller-manager|scheduler|etcd"
-kubectl -n kube-system get endpointslice \
+kubectl --context epaflix -n kube-system get endpointslice | grep -Ei "controller-manager|scheduler|etcd"
+kubectl --context epaflix -n kube-system get endpointslice \
   kube-prometheus-stack-kube-controller-manager-static \
   kube-prometheus-stack-kube-scheduler-static \
   kube-prometheus-stack-kube-etcd-static \
   -o custom-columns=NAME:.metadata.name,IPS:.endpoints[*].addresses,PORT:.ports[*].port
 
 # Confirm Prometheus targets are UP for all three control-plane jobs:
-kubectl port-forward -n observability svc/kube-prometheus-stack-prometheus 9090:9090
+kubectl --context epaflix port-forward -n observability svc/kube-prometheus-stack-prometheus 9090:9090
 # Open http://localhost:9090/targets and check that
 #   serviceMonitor/observability/kube-prometheus-stack-kube-controller-manager
 #   serviceMonitor/observability/kube-prometheus-stack-kube-scheduler
@@ -444,13 +444,13 @@ kubectl port-forward -n observability svc/kube-prometheus-stack-prometheus 9090:
 
 ```bash
 # Check Promtail pods
-kubectl get pods -n observability -l app.kubernetes.io/name=promtail
+kubectl --context epaflix get pods -n observability -l app.kubernetes.io/name=promtail
 
 # Check Promtail logs
-kubectl logs -n observability -l app.kubernetes.io/name=promtail --tail=100
+kubectl --context epaflix logs -n observability -l app.kubernetes.io/name=promtail --tail=100
 
 # Test Loki query
-kubectl port-forward -n observability svc/loki-gateway 3100:80
+kubectl --context epaflix port-forward -n observability svc/loki-gateway 3100:80
 curl http://localhost:3100/ready
 ```
 
@@ -461,10 +461,10 @@ curl http://localhost:3100/ready
 cilium status
 
 # Check agent logs
-kubectl logs -n kube-system ds/cilium -c cilium-agent --tail=100
+kubectl --context epaflix logs -n kube-system ds/cilium -c cilium-agent --tail=100
 
 # Restart Cilium agents
-kubectl rollout restart ds/cilium -n kube-system
+kubectl --context epaflix rollout restart ds/cilium -n kube-system
 
 # Check connectivity
 cilium connectivity test
@@ -474,13 +474,13 @@ cilium connectivity test
 
 ```bash
 # Verify namespace label
-kubectl get namespace app-authentik --show-labels
+kubectl --context epaflix get namespace app-authentik --show-labels
 
 # Check webhook
-kubectl get mutatingwebhookconfiguration istio-sidecar-injector -o yaml
+kubectl --context epaflix get mutatingwebhookconfiguration istio-sidecar-injector -o yaml
 
 # Manual injection (if automatic fails)
-kubectl get deployment -n app-authentik authentik-server -o yaml | istioctl kube-inject -f - | kubectl apply -f -
+kubectl --context epaflix get deployment -n app-authentik authentik-server -o yaml | istioctl kube-inject -f - | kubectl --context epaflix apply -f -
 ```
 
 ## Maintenance
@@ -507,14 +507,14 @@ istioctl upgrade
 
 ```bash
 # Backup Prometheus data
-kubectl exec -n observability prometheus-kube-prometheus-stack-prometheus-0 -c prometheus -- \
+kubectl --context epaflix exec -n observability prometheus-kube-prometheus-stack-prometheus-0 -c prometheus -- \
   tar czf /prometheus/backup-$(date +%Y%m%d).tar.gz /prometheus/data
 
 # Backup Grafana dashboards (stored in PostgreSQL)
 PGPASSWORD='<POSTGRES_PASSWORD>' pg_dump -h 192.168.10.105 -U observability observability > grafana-backup.sql
 
 # Backup Loki data
-kubectl exec -n observability loki-backend-0 -- tar czf /tmp/loki-backup.tar.gz /var/loki
+kubectl --context epaflix exec -n observability loki-backend-0 -- tar czf /tmp/loki-backup.tar.gz /var/loki
 ```
 
 ## Resource Usage
@@ -549,7 +549,7 @@ Worker-65 is available for GPU workloads (currently 22GB RAM, same as other work
 # 3. Add PCIe device: qm set 1065 --hostpci0 <GPU_PCI_ID>,pcie=1
 # 4. Boot VM
 # 5. Install NVIDIA drivers
-# 6. Label node: kubectl label node k3s-worker-65 nvidia.com/gpu=present
+# 6. Label node: kubectl --context epaflix label node k3s-worker-65 nvidia.com/gpu=present
 # 7. Update Jellyfin/Tdarr with GPU resource requests
 ```
 
@@ -563,8 +563,8 @@ Worker-65 is available for GPU workloads (currently 22GB RAM, same as other work
 ## Support
 
 For issues or questions:
-- Check logs: `kubectl logs -n observability <pod-name>`
-- View events: `kubectl get events -n observability --sort-by='.lastTimestamp'`
+- Check logs: `kubectl --context epaflix logs -n observability <pod-name>`
+- View events: `kubectl --context epaflix get events -n observability --sort-by='.lastTimestamp'`
 - Grafana forums: https://community.grafana.com/
 - Cilium Slack: https://cilium.io/slack
 - Istio discuss: https://discuss.istio.io/

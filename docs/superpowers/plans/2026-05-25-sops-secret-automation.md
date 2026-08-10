@@ -473,14 +473,14 @@ git commit -m "chore(sops): re-wrap secrets to new+old age recipient"
 git push
 
 # 4. Push new key into the cluster (replaces old keys.txt content).
-kubectl create secret generic sops-age \
+kubectl --context epaflix create secret generic sops-age \
   -n argocd \
   --from-file=keys.txt=$HOME/.config/sops/age/k3s-cluster-new.txt \
-  --dry-run=client -o yaml | kubectl apply -f -
+  --dry-run=client -o yaml | kubectl --context epaflix apply -f -
 
 # 5. Force repo-server to pick up new Secret.
-kubectl -n argocd rollout restart deploy/argocd-repo-server
-kubectl -n argocd rollout status deploy/argocd-repo-server
+kubectl --context epaflix -n argocd rollout restart deploy/argocd-repo-server
+kubectl --context epaflix -n argocd rollout status deploy/argocd-repo-server
 
 # 6. Sanity: trigger ArgoCD App sync.
 argocd app sync filebrowser
@@ -503,8 +503,8 @@ scp ~/.config/sops/age/k3s-cluster.txt truenas_admin@192.168.10.200:/mnt/apps/en
 
 ```bash
 # Run ONCE before installing/syncing ArgoCD self-management.
-kubectl create namespace argocd
-kubectl create secret generic sops-age \
+kubectl --context epaflix create namespace argocd
+kubectl --context epaflix create secret generic sops-age \
   -n argocd \
   --from-file=keys.txt=$HOME/.config/sops/age/k3s-cluster.txt
 ```
@@ -513,7 +513,7 @@ kubectl create secret generic sops-age \
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `sops: cannot find age private key` in repo-server logs | `argocd/sops-age` Secret missing | Re-run bootstrap kubectl create secret |
+| `sops: cannot find age private key` in repo-server logs | `argocd/sops-age` Secret missing | Re-run bootstrap kubectl --context epaflix create secret |
 | `no key could decrypt the data` | Key was rotated but Secret in cluster still old | Re-apply key Secret + restart repo-server |
 | `kustomize build` errors `unknown plugin kind ksops` | `--enable-alpha-plugins` missing | Confirm `configs.cm.kustomize.buildOptions: --enable-alpha-plugins --enable-exec` in argocd helm-values.yaml |
 | Pre-commit hook rejects encrypted file | hook checks failed (no `sops:` block) | Re-run `sops -e -i <file>` |
@@ -660,7 +660,7 @@ git add 2-k3s/11.argocd/helm-values.yaml
 git commit -m "feat(argocd): add ksops CMP sidecar to repo-server
 
 ksops decrypts *.enc.yaml at render time via age key mounted from
-Secret argocd/sops-age. Requires bootstrap: kubectl create secret
+Secret argocd/sops-age. Requires bootstrap: kubectl --context epaflix create secret
 generic sops-age -n argocd --from-file=keys.txt=... before next sync.
 
 Refs #29"
@@ -725,14 +725,14 @@ managed (chicken-egg).
 
 ```bash
 # From the maintainer workstation:
-kubectl create secret generic sops-age \
+kubectl --context epaflix create secret generic sops-age \
   -n argocd \
   --from-file=keys.txt=$HOME/.config/sops/age/k3s-cluster.txt
 
 # Verify the ksops sidecar can read it:
-kubectl -n argocd rollout restart deploy/argocd-repo-server
-kubectl -n argocd rollout status deploy/argocd-repo-server
-kubectl -n argocd logs deploy/argocd-repo-server -c ksops | tail
+kubectl --context epaflix -n argocd rollout restart deploy/argocd-repo-server
+kubectl --context epaflix -n argocd rollout status deploy/argocd-repo-server
+kubectl --context epaflix -n argocd logs deploy/argocd-repo-server -c ksops | tail
 # Expected: "ksops ready"
 ```
 
@@ -758,7 +758,7 @@ Refs #29"
 - [ ] **Step 1: Confirm argocd namespace exists**
 
 ```bash
-kubectl get ns argocd
+kubectl --context epaflix get ns argocd
 ```
 
 Expected: exists, Active.
@@ -766,19 +766,19 @@ Expected: exists, Active.
 - [ ] **Step 2: Confirm no existing `sops-age` Secret**
 
 ```bash
-kubectl -n argocd get secret sops-age 2>&1
+kubectl --context epaflix -n argocd get secret sops-age 2>&1
 ```
 
 Expected: `Error from server (NotFound)`. If it already exists from a previous attempt, delete first:
 
 ```bash
-kubectl -n argocd delete secret sops-age
+kubectl --context epaflix -n argocd delete secret sops-age
 ```
 
 - [ ] **Step 3: Create the Secret**
 
 ```bash
-kubectl create secret generic sops-age \
+kubectl --context epaflix create secret generic sops-age \
   -n argocd \
   --from-file=keys.txt=$HOME/.config/sops/age/k3s-cluster.txt
 ```
@@ -788,7 +788,7 @@ Expected: `secret/sops-age created`.
 - [ ] **Step 4: Verify**
 
 ```bash
-kubectl -n argocd get secret sops-age -o jsonpath='{.data.keys\.txt}' | base64 -d | head -2
+kubectl --context epaflix -n argocd get secret sops-age -o jsonpath='{.data.keys\.txt}' | base64 -d | head -2
 ```
 
 Expected: matches `# created: ...` / `# public key: age1...` lines from your local file.
@@ -805,13 +805,13 @@ One-shot creation of `argocd/sops-age` Secret. Documented in
 `2-k3s/11.argocd/README.md`.
 
 ```bash
-kubectl create secret generic sops-age -n argocd \
+kubectl --context epaflix create secret generic sops-age -n argocd \
   --from-file=keys.txt=$HOME/.config/sops/age/k3s-cluster.txt
 ```
 
 Verification:
 ```bash
-$ kubectl -n argocd get secret sops-age -o jsonpath='{.data.keys\.txt}' | base64 -d | head -2
+$ kubectl --context epaflix -n argocd get secret sops-age -o jsonpath='{.data.keys\.txt}' | base64 -d | head -2
 # created: 2026-05-25T...
 # public key: age1...
 ```
@@ -842,7 +842,7 @@ The self-management Application is on auto-sync; pushing the branch alone won't 
 
 ```bash
 # Patch the App to point at the branch:
-kubectl -n argocd patch app argocd \
+kubectl --context epaflix -n argocd patch app argocd \
   --type merge \
   -p '{"spec":{"source":{"targetRevision":"sops-secret-automation-design"}}}'
 
@@ -855,7 +855,7 @@ argocd app wait argocd --timeout 300
 - [ ] **Step 3: Verify init container ran**
 
 ```bash
-kubectl -n argocd get pod -l app.kubernetes.io/component=repo-server -o jsonpath='{.items[0].spec.initContainers[*].name}'
+kubectl --context epaflix -n argocd get pod -l app.kubernetes.io/component=repo-server -o jsonpath='{.items[0].spec.initContainers[*].name}'
 ```
 
 Expected: `install-ksops`.
@@ -863,7 +863,7 @@ Expected: `install-ksops`.
 - [ ] **Step 4: Verify init logs**
 
 ```bash
-kubectl -n argocd logs deploy/argocd-repo-server -c install-ksops | tail
+kubectl --context epaflix -n argocd logs deploy/argocd-repo-server -c install-ksops | tail
 ```
 
 Expected: `Copying ksops + kustomize into shared volume...` followed by `Done.`.
@@ -871,8 +871,8 @@ Expected: `Copying ksops + kustomize into shared volume...` followed by `Done.`.
 - [ ] **Step 5: Verify age key mount on main repo-server**
 
 ```bash
-kubectl -n argocd exec deploy/argocd-repo-server -c argocd-repo-server -- ls -la /var/sops/keys.txt
-kubectl -n argocd exec deploy/argocd-repo-server -c argocd-repo-server -- sh -c 'head -2 /var/sops/keys.txt'
+kubectl --context epaflix -n argocd exec deploy/argocd-repo-server -c argocd-repo-server -- ls -la /var/sops/keys.txt
+kubectl --context epaflix -n argocd exec deploy/argocd-repo-server -c argocd-repo-server -- sh -c 'head -2 /var/sops/keys.txt'
 ```
 
 Expected: file present, 0400 mode, content shows `# public key: age1...`.
@@ -880,8 +880,8 @@ Expected: file present, 0400 mode, content shows `# public key: age1...`.
 - [ ] **Step 6: Smoke test ksops binary in shared volume**
 
 ```bash
-kubectl -n argocd exec deploy/argocd-repo-server -c argocd-repo-server -- /custom-tools/ksops --version
-kubectl -n argocd exec deploy/argocd-repo-server -c argocd-repo-server -- /custom-tools/kustomize version
+kubectl --context epaflix -n argocd exec deploy/argocd-repo-server -c argocd-repo-server -- /custom-tools/ksops --version
+kubectl --context epaflix -n argocd exec deploy/argocd-repo-server -c argocd-repo-server -- /custom-tools/kustomize version
 ```
 
 Expected: prints version strings.
@@ -897,8 +897,8 @@ If any step fails: rollback the `argocd` App targetRevision back to `main`, fix 
 - [ ] **Step 1: Fetch the live Secret values from the cluster**
 
 ```bash
-CLIENT_ID=$(kubectl -n filebrowser get secret filebrowser-oidc -o jsonpath='{.data.client-id}' | base64 -d)
-CLIENT_SECRET=$(kubectl -n filebrowser get secret filebrowser-oidc -o jsonpath='{.data.client-secret}' | base64 -d)
+CLIENT_ID=$(kubectl --context epaflix -n filebrowser get secret filebrowser-oidc -o jsonpath='{.data.client-id}' | base64 -d)
+CLIENT_SECRET=$(kubectl --context epaflix -n filebrowser get secret filebrowser-oidc -o jsonpath='{.data.client-secret}' | base64 -d)
 echo "CLIENT_ID=$CLIENT_ID"
 echo "CLIENT_SECRET=(${#CLIENT_SECRET} chars)"
 ```
@@ -1060,12 +1060,12 @@ Expected: Namespace, ConfigMap, Deployment, Service, Ingress (or IngressRoute), 
 
 ```bash
 # Render and apply --dry-run server-side to compare against live state:
-KSOPS_BIN=$(which ksops) kustomize build --enable-alpha-plugins --enable-exec . | kubectl diff -f - 2>&1 | head -60
+KSOPS_BIN=$(which ksops) kustomize build --enable-alpha-plugins --enable-exec . | kubectl --context epaflix diff -f - 2>&1 | head -60
 ```
 
 Expected: **no diff** on filebrowser-oidc Secret data, no diff on Deployment / Service / Ingress / ConfigMap.
 
-If there IS a diff on the Secret: check that the plaintext you encrypted matches `kubectl -n filebrowser get secret filebrowser-oidc` exactly. Re-run Task 13 with the correct values.
+If there IS a diff on the Secret: check that the plaintext you encrypted matches `kubectl --context epaflix -n filebrowser get secret filebrowser-oidc` exactly. Re-run Task 13 with the correct values.
 
 If there is a diff on other resources (Deployment, etc.): kustomize is normalizing fields that ArgoCD wasn't normalizing under `directory.recurse`. Add `ignoreDifferences` entries to the App (Task 15) OR live with one-time benign drift.
 
@@ -1153,7 +1153,7 @@ git push
 - [ ] **Step 2: Retarget filebrowser App to branch for canary sync**
 
 ```bash
-kubectl -n argocd patch app filebrowser \
+kubectl --context epaflix -n argocd patch app filebrowser \
   --type merge \
   -p '{"spec":{"source":{"targetRevision":"sops-secret-automation-design"}}}'
 ```
@@ -1170,8 +1170,8 @@ Expected: Synced + Healthy.
 - [ ] **Step 4: Verify Secret unchanged in-cluster**
 
 ```bash
-kubectl -n filebrowser get secret filebrowser-oidc -o jsonpath='{.data.client-id}' | base64 -d
-kubectl -n filebrowser get secret filebrowser-oidc -o jsonpath='{.data.client-secret}' | base64 -d | wc -c
+kubectl --context epaflix -n filebrowser get secret filebrowser-oidc -o jsonpath='{.data.client-id}' | base64 -d
+kubectl --context epaflix -n filebrowser get secret filebrowser-oidc -o jsonpath='{.data.client-secret}' | base64 -d | wc -c
 ```
 
 Expected: client-id is `filebrowser`; client-secret byte count matches secrets.yml entry.
@@ -1179,8 +1179,8 @@ Expected: client-id is `filebrowser`; client-secret byte count matches secrets.y
 - [ ] **Step 5: Verify Pod still Ready**
 
 ```bash
-kubectl -n filebrowser get pod -l app=filebrowser
-kubectl -n filebrowser rollout status deploy/filebrowser
+kubectl --context epaflix -n filebrowser get pod -l app=filebrowser
+kubectl --context epaflix -n filebrowser rollout status deploy/filebrowser
 ```
 
 Expected: 1/1 Ready, no recent restarts.
@@ -1222,7 +1222,7 @@ Closes #29 (the design landing). Per-App migration follow-ups will be filed as s
 - [x] T4 argocd-repo-server pod 1/1 Ready; initContainer install-ksops Completed
 - [x] T5 pre-commit hook blocks plaintext Secret YAML
 - [x] T6 filebrowser App Synced + Healthy after manual sync
-- [x] T7 kubectl get secret filebrowser-oidc data unchanged
+- [x] T7 kubectl --context epaflix get secret filebrowser-oidc data unchanged
 - [x] T8 https://filebrowser.epaflix.com OIDC login round-trip OK
 - [ ] T9 drop exclusion comment + re-sync (no OutOfSync) — performed after merge
 - [ ] T10 48h soak with selfHeal ON — flip after merge
@@ -1241,10 +1241,10 @@ gh pr merge --admin --merge
 - [ ] **Step 3: Retarget both Apps back to `main`**
 
 ```bash
-kubectl -n argocd patch app argocd \
+kubectl --context epaflix -n argocd patch app argocd \
   --type merge \
   -p '{"spec":{"source":{"targetRevision":"main"}}}'
-kubectl -n argocd patch app filebrowser \
+kubectl --context epaflix -n argocd patch app filebrowser \
   --type merge \
   -p '{"spec":{"source":{"targetRevision":"main"}}}'
 ```
@@ -1268,10 +1268,10 @@ Expected: both Synced + Healthy, targetRevision `main`.
 
 ```bash
 argocd app set filebrowser --self-heal=true   # already on, this is a no-op confirm
-kubectl -n filebrowser delete secret filebrowser-oidc   # destructive test
+kubectl --context epaflix -n filebrowser delete secret filebrowser-oidc   # destructive test
 # Wait ~30s for selfHeal to recreate it:
 sleep 30
-kubectl -n filebrowser get secret filebrowser-oidc -o jsonpath='{.data.client-id}' | base64 -d
+kubectl --context epaflix -n filebrowser get secret filebrowser-oidc -o jsonpath='{.data.client-id}' | base64 -d
 ```
 
 Expected: Secret recreated by ArgoCD with identical content (matches Task 16 Step 4).
@@ -1289,7 +1289,7 @@ gh pr edit <PR#> --body "$(updated body with [x] in T9 line)"
 Wait 48 h. Periodically check:
 
 ```bash
-kubectl -n filebrowser get pod -l app=filebrowser --no-headers
+kubectl --context epaflix -n filebrowser get pod -l app=filebrowser --no-headers
 argocd app history filebrowser | head
 ```
 
@@ -1351,7 +1351,7 @@ See $app kustomization "# excluded by design" comment for the Secret list.
 - sops-encrypt each Secret to *.enc.yaml.
 - Reference via ksops generator (see 2-k3s/09.filebrowser/ksops-generator.yaml).
 - Drop kustomization exclusion comment.
-- Test plan: kubectl diff = clean ; manual sync first ; functional round-trip ; 48h soak with selfHeal ON.
+- Test plan: kubectl --context epaflix diff = clean ; manual sync first ; functional round-trip ; 48h soak with selfHeal ON.
 
 ## Notes
 Per-App recipe lives in .github/instructions/sops.instructions.md.

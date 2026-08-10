@@ -155,7 +155,7 @@ zfs list -o name,used,avail Pool1
 
 ```bash
 # Export Kubernetes configs
-kubectl get all -A -o yaml > k8s-backup-$(date +%F).yaml
+kubectl --context epaflix get all -A -o yaml > k8s-backup-$(date +%F).yaml
 
 # Backup PostgreSQL databases (if using)
 cd 2-k3s/06.postgres/backup
@@ -335,8 +335,8 @@ iostat -x 5 3
 **Kubernetes health:**
 
 ```bash
-kubectl get nodes
-kubectl get pods -A | grep -v Running
+kubectl --context epaflix get nodes
+kubectl --context epaflix get pods -A | grep -v Running
 ```
 
 ### Phase 2: Migrate Remaining Masters (master-52, master-53)
@@ -357,10 +357,10 @@ Repeat Phase 1 steps for each worker node:
 
 ```bash
 # Drain worker before shutdown
-kubectl drain worker-61 --ignore-daemonsets --delete-emptydir-data
+kubectl --context epaflix drain worker-61 --ignore-daemonsets --delete-emptydir-data
 
 # After migration, uncordon
-kubectl uncordon worker-61
+kubectl --context epaflix uncordon worker-61
 ```
 
 ### Phase 4: Cleanup
@@ -452,8 +452,8 @@ pvesm status | grep backup-nfs
 
 ```bash
 # Kubernetes resources
-kubectl get all -A -o yaml > k8s-backup-$(date +%F).yaml
-kubectl get pv,pvc -A -o yaml > k8s-storage-$(date +%F).yaml
+kubectl --context epaflix get all -A -o yaml > k8s-backup-$(date +%F).yaml
+kubectl --context epaflix get pv,pvc -A -o yaml > k8s-storage-$(date +%F).yaml
 
 # PostgreSQL databases (if using)
 cd 2-k3s/06.postgres/backup
@@ -464,8 +464,8 @@ cd 2-k3s/07.authentik-deployment
 ./backup.sh
 
 # Document cluster state
-kubectl get nodes -o wide > nodes-backup.txt
-kubectl get svc,ing -A > services-backup.txt
+kubectl --context epaflix get nodes -o wide > nodes-backup.txt
+kubectl --context epaflix get svc,ing -A > services-backup.txt
 ```
 
 #### 3. Backup VMs to NFS (Optional)
@@ -666,7 +666,7 @@ fio --name=randread --ioengine=libaio --iodepth=16 --rw=randread \
 
 ```bash
 # Before migration
-time kubectl delete pod <pod-name> -n <namespace>
+time kubectl --context epaflix delete pod <pod-name> -n <namespace>
 # Measure time until Running status
 
 # After migration
@@ -677,7 +677,7 @@ time kubectl delete pod <pod-name> -n <namespace>
 
 ```bash
 # PostgreSQL query latency
-kubectl exec -it -n database-postgres postgres-cluster-1 -- \
+kubectl --context epaflix exec -it -n database-postgres postgres-cluster-1 -- \
   psql -U postgres -c "EXPLAIN ANALYZE SELECT * FROM large_table LIMIT 100;"
 
 # Check for reduced IO wait times

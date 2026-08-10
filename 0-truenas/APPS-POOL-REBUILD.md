@@ -500,8 +500,8 @@ done
 
 # 7. Check K3s cluster health
 ssh <K3S_USER>@<MASTER_IP>
-kubectl get nodes
-kubectl get pods -A
+kubectl --context epaflix get nodes
+kubectl --context epaflix get pods -A
 ```
 
 ---
@@ -521,8 +521,8 @@ sudo docker ps
 
 # Test K3s cluster (if applicable)
 ssh <K3S_USER>@<MASTER_IP>
-kubectl cluster-info
-kubectl get all -A
+kubectl --context epaflix cluster-info
+kubectl --context epaflix get all -A
 ```
 
 ### Step 2: Monitor Performance

@@ -64,12 +64,12 @@ Both hosts resolve to the `seerr` Service (see
 
 ```bash
 # Status / logs
-kubectl get pods -n servarr -l app=seerr
-kubectl logs -n servarr -l app=seerr -f
+kubectl --context epaflix get pods -n servarr -l app=seerr
+kubectl --context epaflix logs -n servarr -l app=seerr -f
 
 # Internal reachability
-kubectl get svc seerr -n servarr
-kubectl get endpoints seerr -n servarr
+kubectl --context epaflix get svc seerr -n servarr
+kubectl --context epaflix get endpoints seerr -n servarr
 ```
 
 ArgoCD owns these manifests — do not `kubectl apply` or `kubectl edit` against
@@ -97,13 +97,13 @@ re-sync. If you ever need to restore the database from a backup:
 cd ../jellyseerr/backups
 gunzip jellyseerr-db-backup-<timestamp>.sql.gz
 
-DB_HOST=$(kubectl get secret -n servarr servarr-postgres -o jsonpath='{.data.jellyseerr-host}' | base64 -d)
-DB_PORT=$(kubectl get secret -n servarr servarr-postgres -o jsonpath='{.data.jellyseerr-port}' | base64 -d)
-DB_USER=$(kubectl get secret -n servarr servarr-postgres -o jsonpath='{.data.jellyseerr-user}' | base64 -d)
-DB_PASS=$(kubectl get secret -n servarr servarr-postgres -o jsonpath='{.data.jellyseerr-password}' | base64 -d)
-DB_NAME=$(kubectl get secret -n servarr servarr-postgres -o jsonpath='{.data.jellyseerr-database}' | base64 -d)
+DB_HOST=$(kubectl --context epaflix get secret -n servarr servarr-postgres -o jsonpath='{.data.jellyseerr-host}' | base64 -d)
+DB_PORT=$(kubectl --context epaflix get secret -n servarr servarr-postgres -o jsonpath='{.data.jellyseerr-port}' | base64 -d)
+DB_USER=$(kubectl --context epaflix get secret -n servarr servarr-postgres -o jsonpath='{.data.jellyseerr-user}' | base64 -d)
+DB_PASS=$(kubectl --context epaflix get secret -n servarr servarr-postgres -o jsonpath='{.data.jellyseerr-password}' | base64 -d)
+DB_NAME=$(kubectl --context epaflix get secret -n servarr servarr-postgres -o jsonpath='{.data.jellyseerr-database}' | base64 -d)
 
-kubectl run jellyseerr-restore-pod \
+kubectl --context epaflix run jellyseerr-restore-pod \
   --namespace=servarr --image=postgres:16-alpine --restart=Never --rm --attach \
   --env="PGPASSWORD=${DB_PASS}" \
   --command -- psql -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_USER}" -d "${DB_NAME}" \
@@ -115,7 +115,7 @@ kubectl run jellyseerr-restore-pod \
 ### Pod stuck in CrashLoopBackOff
 
 ```bash
-kubectl logs -n servarr -l app=seerr --tail=100
+kubectl --context epaflix logs -n servarr -l app=seerr --tail=100
 ```
 
 Common causes: permission issues on `/app/config` (the pod runs as UID 568 —
@@ -125,8 +125,8 @@ connection failure (check the `servarr-postgres` Secret keys and connectivity).
 ### Cannot access via ingress
 
 ```bash
-kubectl get ingressroute -n servarr | grep -E 'seerr'
-kubectl get endpoints seerr -n servarr
+kubectl --context epaflix get ingressroute -n servarr | grep -E 'seerr'
+kubectl --context epaflix get endpoints seerr -n servarr
 ```
 
 All four IngressRoutes (`seerr-https`, `seerr-http`, `jellyseerr-https`,
@@ -162,7 +162,7 @@ access control.
 2. **Create Kubernetes secret** with OIDC credentials:
    ```bash
    # Get Client ID and Secret from Authentik provider
-   kubectl create secret generic seerr-oidc-secret -n servarr \
+   kubectl --context epaflix create secret generic seerr-oidc-secret -n servarr \
      --from-literal=client-id='<AUTHENTIK_CLIENT_ID>' \
      --from-literal=client-secret='<AUTHENTIK_CLIENT_SECRET>'
    ```
