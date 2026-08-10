@@ -12,9 +12,9 @@ Installs cert-manager via Helm and creates the `letsencrypt-dns` and `selfsigned
 ## Verify
 
 ```bash
-kubectl get pods -n cert-manager
-kubectl get clusterissuer
-kubectl get certificate -A
+kubectl --context epaflix get pods -n cert-manager
+kubectl --context epaflix get clusterissuer
+kubectl --context epaflix get certificate -A
 ```
 
 ## How TLS Works
@@ -25,7 +25,7 @@ For services that need a cert-manager-managed Certificate:
 
 ```bash
 # Check issued certificates
-kubectl get certificate -A
+kubectl --context epaflix get certificate -A
 
 # Verify live TLS
 curl -I https://sonarr.epaflix.com
@@ -35,11 +35,11 @@ curl -I https://sonarr.epaflix.com
 
 ```bash
 # cert-manager logs
-kubectl logs -n cert-manager -l app=cert-manager
+kubectl --context epaflix logs -n cert-manager -l app=cert-manager
 
 # Certificate not issuing
-kubectl describe certificate <name> -n <namespace>
-kubectl get certificaterequest -A
+kubectl --context epaflix describe certificate <name> -n <namespace>
+kubectl --context epaflix get certificaterequest -A
 
 # Verify cert issuer on a live service
 echo | openssl s_client -connect 192.168.10.101:443 -servername sonarr.epaflix.com 2>/dev/null | \

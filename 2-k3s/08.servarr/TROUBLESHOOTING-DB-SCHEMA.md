@@ -46,13 +46,13 @@ This script:
 
 For Sonarr only:
 ```bash
-kubectl apply -f /home/spy/Documents/Epaflix/k3s-swarm-proxmox/2-k3s/08.servarr/sonarr/fix-history-schema.yaml
+kubectl --context epaflix apply -f /home/spy/Documents/Epaflix/k3s-swarm-proxmox/2-k3s/08.servarr/sonarr/fix-history-schema.yaml
 ```
 
 For manual PostgreSQL fix:
 ```bash
 # Get credentials
-SONARR_PW=$(kubectl get secret servarr-postgres -n servarr -o jsonpath='{.data.sonarr-password}' | base64 -d)
+SONARR_PW=$(kubectl --context epaflix get secret servarr-postgres -n servarr -o jsonpath='{.data.sonarr-password}' | base64 -d)
 
 # Connect and fix
 PGPASSWORD="${SONARR_PW}" psql -h 192.168.10.105 -U sonarr -d sonarr-main << EOF
@@ -66,7 +66,7 @@ EOF
 Check the current schema:
 ```bash
 # For Sonarr
-SONARR_PW=$(kubectl get secret servarr-postgres -n servarr -o jsonpath='{.data.sonarr-password}' | base64 -d)
+SONARR_PW=$(kubectl --context epaflix get secret servarr-postgres -n servarr -o jsonpath='{.data.sonarr-password}' | base64 -d)
 PGPASSWORD="${SONARR_PW}" psql -h 192.168.10.105 -U sonarr -d sonarr-main \
   -c "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'History' ORDER BY ordinal_position;"
 ```
@@ -81,7 +81,7 @@ Expected output should show:
 2. **Test the failing operation** - Retry queue removal, manual import, etc.
 3. **Check logs** - Verify no more schema errors:
    ```bash
-   kubectl logs -n servarr deployment/sonarr -f | grep -i "does not exist"
+   kubectl --context epaflix logs -n servarr deployment/sonarr -f | grep -i "does not exist"
    ```
 
 ### Prevention
@@ -136,13 +136,13 @@ Apply the Kubernetes Job (idempotent — safe to re-run):
 
 ```bash
 # Sonarr
-kubectl apply -f 2-k3s/08.servarr/sonarr/fix-scene-mappings-schema.yaml
+kubectl --context epaflix apply -f 2-k3s/08.servarr/sonarr/fix-scene-mappings-schema.yaml
 
 # Sonarr2 (apply proactively to keep both in sync)
-kubectl apply -f 2-k3s/08.servarr/sonarr2/fix-scene-mappings-schema.yaml
+kubectl --context epaflix apply -f 2-k3s/08.servarr/sonarr2/fix-scene-mappings-schema.yaml
 
 # Wait for completion
-kubectl wait --for=condition=complete --timeout=60s \
+kubectl --context epaflix wait --for=condition=complete --timeout=60s \
   job/sonarr-fix-scene-mappings-schema \
   job/sonarr2-fix-scene-mappings-schema \
   -n servarr
@@ -152,7 +152,7 @@ kubectl wait --for=condition=complete --timeout=60s \
 
 ```bash
 # Get credentials
-SONARR_PW=$(kubectl get secret servarr-postgres -n servarr -o jsonpath='{.data.sonarr-password}' | base64 -d)
+SONARR_PW=$(kubectl --context epaflix get secret servarr-postgres -n servarr -o jsonpath='{.data.sonarr-password}' | base64 -d)
 
 # Connect and fix
 PGPASSWORD="${SONARR_PW}" psql -h 192.168.10.105 -U sonarr -d sonarr-main << 'EOF'
@@ -170,7 +170,7 @@ EOF
 ### Verification
 
 ```bash
-SONARR_PW=$(kubectl get secret servarr-postgres -n servarr -o jsonpath='{.data.sonarr-password}' | base64 -d)
+SONARR_PW=$(kubectl --context epaflix get secret servarr-postgres -n servarr -o jsonpath='{.data.sonarr-password}' | base64 -d)
 PGPASSWORD="${SONARR_PW}" psql -h 192.168.10.105 -U sonarr -d sonarr-main \
   -c "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'SceneMappings' ORDER BY ordinal_position;"
 ```
@@ -183,7 +183,7 @@ Expected: **12 columns** including `Type`, `SceneOrigin`, `SearchMode`, `Comment
 2. **Retry the failing import** — the `SceneMappingService` will re-run on next trigger
 3. **Verify logs are clean**:
    ```bash
-   kubectl logs -n servarr deployment/sonarr --since=2m | grep -i "does not exist"
+   kubectl --context epaflix logs -n servarr deployment/sonarr --since=2m | grep -i "does not exist"
    ```
 
 ### History

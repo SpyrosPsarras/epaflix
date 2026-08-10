@@ -137,7 +137,7 @@ After each major configuration step, provide verification commands:
 qm status <VMID>
 
 # Check K3s node status
-kubectl get nodes -o wide
+kubectl --context epaflix get nodes -o wide
 
 # Verify service is running
 systemctl status k3s

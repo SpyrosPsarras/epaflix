@@ -471,13 +471,13 @@ Both Proxmox hosts are identical Intel Xeon E5-2623 v4 (Broadwell-EP), so `host`
 
 - **K3s nodes:**
   ```bash
-  kubectl cordon <node>
-  kubectl drain <node> --ignore-daemonsets --delete-emptydir-data   # respect CNPG/etcd PodDisruptionBudgets
+  kubectl --context epaflix cordon <node>
+  kubectl --context epaflix drain <node> --ignore-daemonsets --delete-emptydir-data   # respect CNPG/etcd PodDisruptionBudgets
   ssh root@<pvehost> 'qm stop <vmid>; qm set <vmid> --cpu host; qm start <vmid>'
   # wait for the node to report Ready
   # for MASTERS also verify: etcd 3/3 with has_leader, the #121 control-plane metrics
   #   (cm/scheduler/etcd up=1), and the /etc/k3s-resolv.conf pin
-  kubectl uncordon <node>
+  kubectl --context epaflix uncordon <node>
   # only then proceed to the next node
   ```
   Master order: **1052 → 1053 → 1051** (1051 is the founding etcd member, do it last — per #148).

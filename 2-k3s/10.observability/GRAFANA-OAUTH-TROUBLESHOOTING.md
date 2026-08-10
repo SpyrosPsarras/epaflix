@@ -56,10 +56,10 @@ helm upgrade kube-prometheus-stack prometheus-community/kube-prometheus-stack \
   --wait --timeout=5m
 
 # Force pod restart to reload configuration
-kubectl delete pods -n observability -l app.kubernetes.io/name=grafana
+kubectl --context epaflix delete pods -n observability -l app.kubernetes.io/name=grafana
 
 # Wait for pods to be ready
-kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=grafana -n observability --timeout=120s
+kubectl --context epaflix wait --for=condition=ready pod -l app.kubernetes.io/name=grafana -n observability --timeout=120s
 ```
 
 ### 3. Verify Database Connection
@@ -67,17 +67,17 @@ kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=grafana -n obse
 Check that Grafana is using PostgreSQL:
 ```bash
 # Check logs for database type
-kubectl logs -n observability -l app.kubernetes.io/name=grafana -c grafana | grep "Connecting to DB"
+kubectl --context epaflix logs -n observability -l app.kubernetes.io/name=grafana -c grafana | grep "Connecting to DB"
 
 # Expected output:
 # logger=sqlstore level=info msg="Connecting to DB" dbtype=postgres
 
 # Check database secret is mounted
-kubectl exec -n observability deployment/kube-prometheus-stack-grafana -c grafana -- cat /etc/secrets/grafana-db/password
+kubectl --context epaflix exec -n observability deployment/kube-prometheus-stack-grafana -c grafana -- cat /etc/secrets/grafana-db/password
 # Should output: <POSTGRES_PASSWORD>
 
 # Test PostgreSQL connectivity
-kubectl exec -n observability deployment/kube-prometheus-stack-grafana -c grafana -- \
+kubectl --context epaflix exec -n observability deployment/kube-prometheus-stack-grafana -c grafana -- \
   nc -zv postgres-rw.postgres-system.svc.cluster.local 5432
 # Expected: postgres-rw.postgres-system.svc.cluster.local (IP:5432) open
 ```
@@ -121,17 +121,17 @@ helm upgrade kube-prometheus-stack prometheus-community/kube-prometheus-stack \
   --wait --timeout=5m
 
 # Force restart pods (REQUIRED for config to take effect)
-kubectl delete pods -n observability -l app.kubernetes.io/name=grafana
+kubectl --context epaflix delete pods -n observability -l app.kubernetes.io/name=grafana
 
 # Wait for restart
-kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=grafana -n observability --timeout=120s
+kubectl --context epaflix wait --for=condition=ready pod -l app.kubernetes.io/name=grafana -n observability --timeout=120s
 ```
 
 ### Step 3: Verify Configuration
 
 ```bash
 # Check OAuth settings are applied
-kubectl get configmap -n observability kube-prometheus-stack-grafana -o yaml | grep -A 15 "auth.generic_oauth"
+kubectl --context epaflix get configmap -n observability kube-prometheus-stack-grafana -o yaml | grep -A 15 "auth.generic_oauth"
 
 # Verify allow_sign_up is true
 # Expected:
@@ -140,7 +140,7 @@ kubectl get configmap -n observability kube-prometheus-stack-grafana -o yaml | g
 # ...
 
 # Check database type in logs
-kubectl logs -n observability -l app.kubernetes.io/name=grafana -c grafana --tail=50 | grep "Connecting to DB"
+kubectl --context epaflix logs -n observability -l app.kubernetes.io/name=grafana -c grafana --tail=50 | grep "Connecting to DB"
 
 # Should show: dbtype=postgres (NOT sqlite3)
 ```
@@ -211,7 +211,7 @@ Navigate to **Directory → Users** → select user → **Groups** tab → **Add
 **Check**:
 ```bash
 # Verify allow_sign_up is enabled
-kubectl exec -n observability deployment/kube-prometheus-stack-grafana -c grafana -- \
+kubectl --context epaflix exec -n observability deployment/kube-prometheus-stack-grafana -c grafana -- \
   cat /etc/grafana/grafana.ini | grep -A 5 "auth.generic_oauth"
 ```
 
@@ -230,17 +230,17 @@ kubectl exec -n observability deployment/kube-prometheus-stack-grafana -c grafan
 **Check**:
 ```bash
 # Verify client secret
-kubectl get secret grafana-oauth-secret -n observability -o jsonpath='{.data.client_secret}' | base64 -d
+kubectl --context epaflix get secret grafana-oauth-secret -n observability -o jsonpath='{.data.client_secret}' | base64 -d
 ```
 
 **Solution**: Regenerate credentials in Authentik and update Kubernetes secret:
 ```bash
-kubectl create secret generic grafana-oauth-secret -n observability \
+kubectl --context epaflix create secret generic grafana-oauth-secret -n observability \
   --from-literal=client_secret='NEW_CLIENT_SECRET_FROM_AUTHENTIK' \
-  --dry-run=client -o yaml | kubectl apply -f -
+  --dry-run=client -o yaml | kubectl --context epaflix apply -f -
 
 # Restart pods to use new secret
-kubectl delete pods -n observability -l app.kubernetes.io/name=grafana
+kubectl --context epaflix delete pods -n observability -l app.kubernetes.io/name=grafana
 ```
 
 ### User has wrong role (Viewer instead of Admin)
@@ -274,14 +274,14 @@ Applications → Applications → Grafana → Policy / Group / User Bindings
 
 ```bash
 # Follow Grafana logs for OAuth events
-kubectl logs -n observability -l app.kubernetes.io/name=grafana -c grafana -f | grep -i oauth
+kubectl --context epaflix logs -n observability -l app.kubernetes.io/name=grafana -c grafana -f | grep -i oauth
 ```
 
 ### Check successful logins
 
 ```bash
 # Look for successful user creation
-kubectl logs -n observability -l app.kubernetes.io/name=grafana -c grafana | grep "user.sync"
+kubectl --context epaflix logs -n observability -l app.kubernetes.io/name=grafana -c grafana | grep "user.sync"
 ```
 
 ### Expected successful login flow in logs
@@ -296,7 +296,7 @@ logger=user.sync level=info msg="User synchronized" auth_module=oauth_generic_oa
 ### Reset admin password (if locked out)
 
 ```bash
-kubectl exec -n observability deployment/kube-prometheus-stack-grafana -c grafana -- \
+kubectl --context epaflix exec -n observability deployment/kube-prometheus-stack-grafana -c grafana -- \
   grafana cli admin reset-admin-password "<POSTGRES_PASSWORD>"
 ```
 
@@ -310,7 +310,7 @@ helm upgrade kube-prometheus-stack prometheus-community/kube-prometheus-stack \
   -f prometheus-values.yaml
 
 # Restart pods
-kubectl delete pods -n observability -l app.kubernetes.io/name=grafana
+kubectl --context epaflix delete pods -n observability -l app.kubernetes.io/name=grafana
 ```
 
 ## Important Notes

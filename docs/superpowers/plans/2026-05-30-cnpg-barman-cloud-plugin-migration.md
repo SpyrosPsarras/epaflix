@@ -81,17 +81,17 @@ echo "======================================"
 # Requires: CNPG operator >= 1.26 (we run 1.28.0) and cert-manager
 # (plugin uses a cert-manager Issuer/Certificate for its CNPG-i gRPC TLS).
 echo "Applying vendored plugin manifest into cnpg-system..."
-kubectl apply --server-side --force-conflicts \
+kubectl --context epaflix apply --server-side --force-conflicts \
   -f barman-cloud-plugin/manifest.yaml
 
 echo "Waiting for plugin deployment to be ready..."
-kubectl wait --for=condition=available --timeout=300s \
+kubectl --context epaflix wait --for=condition=available --timeout=300s \
   deployment/barman-cloud -n cnpg-system
 
 echo ""
 echo "Verify:"
-echo "  kubectl get pods -n cnpg-system | grep barman"
-echo "  kubectl get crd | grep barmancloud"
+echo "  kubectl --context epaflix get pods -n cnpg-system | grep barman"
+echo "  kubectl --context epaflix get crd | grep barmancloud"
 ```
 
 Make it executable:
@@ -138,8 +138,8 @@ Expected: deployment becomes available; script prints verify hints.
 
 Run:
 ```bash
-kubectl get pods -n cnpg-system | grep barman
-kubectl get crd | grep barmancloud
+kubectl --context epaflix get pods -n cnpg-system | grep barman
+kubectl --context epaflix get crd | grep barmancloud
 ```
 Expected: a `barman-cloud-...` pod `Running` 1/1 (or 2/2 with sidecar); CRD `objectstores.barmancloud.cnpg.io` listed.
 
@@ -149,7 +149,7 @@ If the pod crashloops citing an incompatible CNPG/API version on 1.28, re-vendor
 
 Run:
 ```bash
-kubectl explain objectstore.spec --recursive | grep -iE 'retention|configuration' | head
+kubectl --context epaflix explain objectstore.spec --recursive | grep -iE 'retention|configuration' | head
 ```
 Expected: confirms whether retention is `objectstore.spec.retentionPolicy` (string) — note the exact path for Task 2. (Docs state retention moves to the `ObjectStore`; this verifies the field name for this release.)
 
@@ -218,15 +218,15 @@ Modify `2-k3s/06.postgres/kustomization.yaml` — add to `resources`, right befo
 
 Run:
 ```bash
-kubectl apply --server-side --dry-run=server -f 2-k3s/06.postgres/cluster/postgres-object-store.yaml
+kubectl --context epaflix apply --server-side --dry-run=server -f 2-k3s/06.postgres/cluster/postgres-object-store.yaml
 ```
-Expected: `objectstore.barmancloud.cnpg.io/postgres-minio-store serverside-applied (dry run)`, no schema errors. If a field (e.g. `retentionPolicy`) is rejected, correct against `kubectl explain objectstore.spec` and re-run.
+Expected: `objectstore.barmancloud.cnpg.io/postgres-minio-store serverside-applied (dry run)`, no schema errors. If a field (e.g. `retentionPolicy`) is rejected, correct against `kubectl --context epaflix explain objectstore.spec` and re-run.
 
 - [ ] **Step 4: Apply the CR to the live cluster (ahead of the Cluster edit)**
 
 Run:
 ```bash
-kubectl apply --server-side --force-conflicts -f 2-k3s/06.postgres/cluster/postgres-object-store.yaml
+kubectl --context epaflix apply --server-side --force-conflicts -f 2-k3s/06.postgres/cluster/postgres-object-store.yaml
 ```
 Expected: `serverside-applied`. (selfHeal `prune:false` means this branch-only resource is safe to pre-apply; ArgoCD will not delete it.)
 
@@ -234,9 +234,9 @@ Expected: `serverside-applied`. (selfHeal `prune:false` means this branch-only r
 
 Run:
 ```bash
-kubectl get objectstore postgres-minio-store -n postgres-system -o yaml | grep -A20 'status:'
+kubectl --context epaflix get objectstore postgres-minio-store -n postgres-system -o yaml | grep -A20 'status:'
 ```
-Expected: a `status` with no error conditions (the CR validates credentials lazily; an empty/ready-ish status is acceptable). The `minio-backup-credentials` Secret already exists in `postgres-system` (verify: `kubectl get secret minio-backup-credentials -n postgres-system`).
+Expected: a `status` with no error conditions (the CR validates credentials lazily; an empty/ready-ish status is acceptable). The `minio-backup-credentials` Secret already exists in `postgres-system` (verify: `kubectl --context epaflix get secret minio-backup-credentials -n postgres-system`).
 
 - [ ] **Step 6: Commit**
 
@@ -305,7 +305,7 @@ Update the leading `# Sync:` comment to note the flip is done (no longer "manual
 
 Run:
 ```bash
-kubectl kustomize 2-k3s/06.postgres | kubectl apply --server-side --dry-run=server -f -
+kubectl --context epaflix kustomize 2-k3s/06.postgres | kubectl --context epaflix apply --server-side --dry-run=server -f -
 ```
 Expected: all resources `serverside-applied (dry run)`; **no** deprecation warning about `spec.backup.barmanObjectStore` (it's gone); no schema errors on `spec.plugins` or the ScheduledBackup.
 
@@ -368,8 +368,8 @@ Expected: merged to `main`.
 
 Run:
 ```bash
-kubectl -n argocd annotate application postgres argocd.argoproj.io/refresh=hard --overwrite
-kubectl -n argocd get application postgres -o jsonpath='{.status.sync.status} {.status.health.status}{"\n"}'
+kubectl --context epaflix -n argocd annotate application postgres argocd.argoproj.io/refresh=hard --overwrite
+kubectl --context epaflix -n argocd get application postgres -o jsonpath='{.status.sync.status} {.status.health.status}{"\n"}'
 ```
 Expected: progresses to `Synced Healthy`. (`ObjectStore` wave -1 applies before the `Cluster`.)
 
@@ -377,7 +377,7 @@ Expected: progresses to `Synced Healthy`. (`ObjectStore` wave -1 applies before 
 
 Run:
 ```bash
-kubectl get cluster postgres-cluster -n postgres-system -w
+kubectl --context epaflix get cluster postgres-cluster -n postgres-system -w
 ```
 Expected: transitions through `Upgrading cluster`/switchover back to `Cluster in healthy state`, `3/3` ready. Ctrl-C when healthy.
 
@@ -385,9 +385,9 @@ Expected: transitions through `Upgrading cluster`/switchover back to `Cluster in
 
 Run:
 ```bash
-kubectl get cluster postgres-cluster -n postgres-system -o jsonpath='{.spec.plugins}{"\n"}'
-kubectl get cluster postgres-cluster -n postgres-system -o jsonpath='{.status.conditions[?(@.type=="ContinuousArchiving")].status}{"\n"}'
-kubectl get pod -n postgres-system postgres-cluster-1 -o jsonpath='{.spec.containers[*].name}{"\n"}'
+kubectl --context epaflix get cluster postgres-cluster -n postgres-system -o jsonpath='{.spec.plugins}{"\n"}'
+kubectl --context epaflix get cluster postgres-cluster -n postgres-system -o jsonpath='{.status.conditions[?(@.type=="ContinuousArchiving")].status}{"\n"}'
+kubectl --context epaflix get pod -n postgres-system postgres-cluster-1 -o jsonpath='{.spec.containers[*].name}{"\n"}'
 ```
 Expected: plugins list shows `barman-cloud.cloudnative-pg.io`; `ContinuousArchiving` = `True`; container list includes a barman/plugin sidecar alongside `postgres`.
 
@@ -414,14 +414,14 @@ spec:
   pluginConfiguration:
     name: barman-cloud.cloudnative-pg.io
 EOF
-kubectl apply -f /tmp/postgres-plugin-backup-test.yaml
+kubectl --context epaflix apply -f /tmp/postgres-plugin-backup-test.yaml
 ```
 
 - [ ] **Step 2: Verify the backup completes**
 
 Run:
 ```bash
-kubectl get backup plugin-migration-verify -n postgres-system -o jsonpath='{.status.phase}{"\n"}'
+kubectl --context epaflix get backup plugin-migration-verify -n postgres-system -o jsonpath='{.status.phase}{"\n"}'
 ```
 Expected: reaches `completed` (poll until it does; failures show `failed` with a `.status.error`).
 
@@ -471,7 +471,7 @@ spec:
           barmanObjectName: postgres-minio-store
           serverName: postgres-cluster
 EOF
-kubectl apply -f /tmp/postgres-restore-test.yaml
+kubectl --context epaflix apply -f /tmp/postgres-restore-test.yaml
 ```
 Note: `serverName: postgres-cluster` points the recovery at the source cluster's path in the bucket. Confirm the source server name from `mc ls tn/postgres-backups/` if the top-level prefix differs.
 
@@ -479,15 +479,15 @@ Note: `serverName: postgres-cluster` points the recovery at the source cluster's
 
 Run:
 ```bash
-kubectl get cluster postgres-restore-test -n postgres-system -w
+kubectl --context epaflix get cluster postgres-restore-test -n postgres-system -w
 ```
-Expected: reaches `Cluster in healthy state`, `1/1`. Ctrl-C when healthy. (If it errors, read `kubectl describe cluster postgres-restore-test -n postgres-system` and the restore job logs.)
+Expected: reaches `Cluster in healthy state`, `1/1`. Ctrl-C when healthy. (If it errors, read `kubectl --context epaflix describe cluster postgres-restore-test -n postgres-system` and the restore job logs.)
 
 - [ ] **Step 3: Verify data is present**
 
 Run:
 ```bash
-kubectl exec -n postgres-system postgres-restore-test-1 -- \
+kubectl --context epaflix exec -n postgres-system postgres-restore-test-1 -- \
   psql -U postgres -c "\l" -c "SELECT count(*) FROM pg_database;"
 ```
 Expected: the migrated databases (`authentik`, `jellyseerr`, the `*arr` DBs, `observability`) are listed — proving the plugin backup is restorable.
@@ -495,10 +495,10 @@ Expected: the migrated databases (`authentik`, `jellyseerr`, the `*arr` DBs, `ob
 - [ ] **Step 4: Tear down the throwaway cluster**
 
 ```bash
-kubectl delete -f /tmp/postgres-restore-test.yaml
+kubectl --context epaflix delete -f /tmp/postgres-restore-test.yaml
 rm -f /tmp/postgres-restore-test.yaml /tmp/postgres-plugin-backup-test.yaml
 ```
-Expected: cluster + its PVCs removed. Verify: `kubectl get cluster -n postgres-system` shows only `postgres-cluster`.
+Expected: cluster + its PVCs removed. Verify: `kubectl --context epaflix get cluster -n postgres-system` shows only `postgres-cluster`.
 
 ---
 
@@ -527,9 +527,9 @@ Expected: `CLOSED` after merge. If still open, close it with a comment summarisi
 
 Run:
 ```bash
-kubectl get cluster postgres-cluster -n postgres-system
-kubectl get scheduledbackup -n postgres-system
-kubectl -n argocd get application postgres -o jsonpath='{.status.sync.status} {.status.health.status}{"\n"}'
+kubectl --context epaflix get cluster postgres-cluster -n postgres-system
+kubectl --context epaflix get scheduledbackup -n postgres-system
+kubectl --context epaflix -n argocd get application postgres -o jsonpath='{.status.sync.status} {.status.health.status}{"\n"}'
 ```
 Expected: cluster healthy 3/3; ScheduledBackup present with `method: plugin`; ArgoCD `Synced Healthy`. No new GitHub issues created (migration self-contained).
 

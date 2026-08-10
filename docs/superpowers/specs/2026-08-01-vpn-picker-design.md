@@ -68,7 +68,7 @@ Two pieces, and the split is forced, not a preference.
 network lock. Measured live:
 
 ```
-$ kubectl -n servarr exec deploy/qbittorrent -c airvpn -- ip route get 213.152.161.87
+$ kubectl --context epaflix -n servarr exec deploy/qbittorrent -c airvpn -- ip route get 213.152.161.87
 213.152.161.87 dev tun0 src 10.135.227.175 uid 0
 $ ... -- iptables-legacy -S | head -5
 -P OUTPUT DROP

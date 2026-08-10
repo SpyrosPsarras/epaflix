@@ -124,7 +124,7 @@ Create a Kubernetes secret with the OIDC credentials:
 
 ```bash
 # Replace <CLIENT_ID> and <CLIENT_SECRET> with values from Step 2
-kubectl create secret generic seerr-oidc-secret -n servarr \
+kubectl --context epaflix create secret generic seerr-oidc-secret -n servarr \
   --from-literal=client-id='<CLIENT_ID>' \
   --from-literal=client-secret='<CLIENT_SECRET>'
 ```
@@ -230,7 +230,7 @@ To add multiple users to the group:
 **Cause**: Client ID or Client Secret is incorrect.
 
 **Solution**:
-- Verify Kubernetes secret has correct values: `kubectl get secret seerr-oidc-secret -n servarr -o yaml`
+- Verify Kubernetes secret has correct values: `kubectl --context epaflix get secret seerr-oidc-secret -n servarr -o yaml`
 - Check Jellyseerr OIDC configuration has correct client ID
 - Regenerate client secret in Authentik if needed
 

@@ -174,13 +174,13 @@ EOF
 
 ```bash
 # Wait for the daemonset to be ready
-kubectl rollout status daemonset/kube-vip-ds -n kube-system --timeout=120s
+kubectl --context epaflix rollout status daemonset/kube-vip-ds -n kube-system --timeout=120s
 
 # Check pod status
-kubectl get pods -n kube-system -l name=kube-vip-ds
+kubectl --context epaflix get pods -n kube-system -l name=kube-vip-ds
 
 # View logs (should show success messages)
-kubectl logs -n kube-system -l name=kube-vip-ds --tail=50
+kubectl --context epaflix logs -n kube-system -l name=kube-vip-ds --tail=50
 ```
 ```
 k3sup install \
@@ -215,7 +215,7 @@ curl -k https://192.168.10.100:6443/livez
 # Should return: ok
 
 # Check which node holds the VIP lease
-kubectl get lease -n kube-system plndr-cp-lock -o yaml
+kubectl --context epaflix get lease -n kube-system plndr-cp-lock -o yaml
 ```
 
 ## Step 6: Update Kubeconfig (on local machine)
@@ -225,7 +225,7 @@ kubectl get lease -n kube-system plndr-cp-lock -o yaml
 sed -i 's|https://192.168.10.51:6443|https://192.168.10.100:6443|' ~/.kube/config
 
 # Test connection
-kubectl get nodes
+kubectl --context epaflix get nodes
 ```
 
 ## Step 7: Fix CoreDNS to Forward Directly to Pi-hole
@@ -234,14 +234,14 @@ kubectl get nodes
 
 ```bash
 # Patch CoreDNS to forward directly to Pi-hole
-kubectl patch configmap coredns -n kube-system --type=json \
+kubectl --context epaflix patch configmap coredns -n kube-system --type=json \
   -p='[{"op":"replace","path":"/data/Corefile","value":".:53 {\n    errors\n    health\n    ready\n    kubernetes cluster.local in-addr.arpa ip6.arpa {\n      pods insecure\n      fallthrough in-addr.arpa ip6.arpa\n    }\n    hosts /etc/coredns/NodeHosts {\n      ttl 60\n      reload 15s\n      fallthrough\n    }\n    prometheus :9153\n    cache 30\n    loop\n    reload\n    loadbalance\n    import /etc/coredns/custom/*.override\n    forward . 192.168.10.30\n}\nimport /etc/coredns/custom/*.server\n"}]'
 
 # Restart CoreDNS
-kubectl rollout restart deployment/coredns -n kube-system
+kubectl --context epaflix rollout restart deployment/coredns -n kube-system
 
 # Verify pods can access external HTTPS
-kubectl run test-dns --image=busybox:latest --restart=Never --rm -it -- wget -q --spider https://google.com && echo "DNS OK"
+kubectl --context epaflix run test-dns --image=busybox:latest --restart=Never --rm -it -- wget -q --spider https://google.com && echo "DNS OK"
 ```
 
 ## Troubleshooting
@@ -256,7 +256,7 @@ ERROR invalid CIDR: "192.168.10.100/"
 
 ```bash
 # Check detailed logs
-kubectl logs -n kube-system -l name=kube-vip-ds --tail=100
+kubectl --context epaflix logs -n kube-system -l name=kube-vip-ds --tail=100
 
 # Common issues:
 # 1. Wrong interface name - verify with: ip link show
@@ -268,13 +268,13 @@ kubectl logs -n kube-system -l name=kube-vip-ds --tail=100
 
 ```bash
 # Verify pod is running
-kubectl get pods -n kube-system -l name=kube-vip-ds -o wide
+kubectl --context epaflix get pods -n kube-system -l name=kube-vip-ds -o wide
 
 # Check if VIP is on the interface
 ssh ubuntu@192.168.10.51 'ip addr show eth0 | grep 192.168.10.100'
 
 # Check lease holder
-kubectl get lease -n kube-system plndr-cp-lock -o jsonpath='{.spec.holderIdentity}'
+kubectl --context epaflix get lease -n kube-system plndr-cp-lock -o jsonpath='{.spec.holderIdentity}'
 
 # Check ARP cache from another machine
 arping -c 3 192.168.10.100
@@ -284,13 +284,13 @@ arping -c 3 192.168.10.100
 
 ```bash
 # Identify current leader
-kubectl get lease -n kube-system plndr-cp-lock -o jsonpath='{.spec.holderIdentity}'
+kubectl --context epaflix get lease -n kube-system plndr-cp-lock -o jsonpath='{.spec.holderIdentity}'
 
 # Stop K3s on leader node to trigger failover
 ssh ubuntu@<leader-ip> 'sudo systemctl stop k3s'
 
 # VIP should move to another master (check in ~15 seconds)
-kubectl get lease -n kube-system plndr-cp-lock -o jsonpath='{.spec.holderIdentity}'
+kubectl --context epaflix get lease -n kube-system plndr-cp-lock -o jsonpath='{.spec.holderIdentity}'
 
 # Verify VIP is still accessible
 curl -k https://192.168.10.100:6443/livez

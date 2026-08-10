@@ -93,38 +93,38 @@ Automated cleanup for worker nodes to prevent disk space issues.
 ### Trigger Cleanup Manually
 ```bash
 # Create one-time job from CronJob
-kubectl create job --from=cronjob/containerd-cleanup cleanup-manual -n kube-system
+kubectl --context epaflix create job --from=cronjob/containerd-cleanup cleanup-manual -n kube-system
 
 # Watch progress
-kubectl -n kube-system logs -f job/cleanup-manual
+kubectl --context epaflix -n kube-system logs -f job/cleanup-manual
 ```
 
 ### Trigger Image Pre-pull Manually
 ```bash
 # Create one-time job
-kubectl create job --from=cronjob/image-prepull-weekly prepull-manual -n kube-system
+kubectl --context epaflix create job --from=cronjob/image-prepull-weekly prepull-manual -n kube-system
 
 # Watch progress
-kubectl -n kube-system logs -f job/prepull-manual
+kubectl --context epaflix -n kube-system logs -f job/prepull-manual
 ```
 
 ## 📊 Monitoring
 
 ### Check CronJob Status
 ```bash
-kubectl -n kube-system get cronjobs
+kubectl --context epaflix -n kube-system get cronjobs
 ```
 
 ### View Last Execution
 ```bash
 # List recent jobs
-kubectl -n kube-system get jobs --sort-by=.status.startTime
+kubectl --context epaflix -n kube-system get jobs --sort-by=.status.startTime
 
 # View logs from last cleanup
-kubectl -n kube-system logs job/containerd-cleanup-<timestamp>
+kubectl --context epaflix -n kube-system logs job/containerd-cleanup-<timestamp>
 
 # View logs from last pre-pull
-kubectl -n kube-system logs job/image-prepull-weekly-<timestamp>
+kubectl --context epaflix -n kube-system logs job/image-prepull-weekly-<timestamp>
 ```
 
 ### Check Worker Disk Usage
@@ -148,7 +148,7 @@ done
 
 ### Modify Cleanup Schedule
 ```bash
-kubectl -n kube-system edit cronjob containerd-cleanup
+kubectl --context epaflix -n kube-system edit cronjob containerd-cleanup
 
 # Change schedule field (cron format):
 # 0 2 * * 0  = 2 AM Sunday
@@ -167,7 +167,7 @@ IMAGES="
 
 Then apply:
 ```bash
-kubectl apply -f image-prepull-cronjob.yaml
+kubectl --context epaflix apply -f image-prepull-cronjob.yaml
 ```
 
 ## 🎯 Expected Results
@@ -207,23 +207,23 @@ Automated rolling upgrades for all cluster nodes using the [system-upgrade-contr
 
 ```bash
 # 1. Install the controller
-kubectl apply -f https://github.com/rancher/system-upgrade-controller/releases/latest/download/system-upgrade-controller.yaml
+kubectl --context epaflix apply -f https://github.com/rancher/system-upgrade-controller/releases/latest/download/system-upgrade-controller.yaml
 
 # 2. Apply the upgrade plans
-kubectl apply -f system-upgrade/system-upgrade-plans.yaml
+kubectl --context epaflix apply -f system-upgrade/system-upgrade-plans.yaml
 
 # 3. Verify plans are active
-kubectl -n system-upgrade get plans
+kubectl --context epaflix -n system-upgrade get plans
 ```
 
 ### Monitor an upgrade
 
 ```bash
 # Watch upgrade jobs run in real time
-kubectl -n system-upgrade get jobs -w
+kubectl --context epaflix -n system-upgrade get jobs -w
 
 # Check current K3s version per node
-kubectl get nodes -o wide
+kubectl --context epaflix get nodes -o wide
 ```
 
 See [system-upgrade/README.md](system-upgrade/README.md) for full documentation.
@@ -257,32 +257,32 @@ The current master node skips cordon/drain and simply reboots as the final step 
 ### Setup (one-time)
 
 ```bash
-kubectl apply -f node-os-updater-cronjob.yaml
+kubectl --context epaflix apply -f node-os-updater-cronjob.yaml
 
 # Verify ServiceAccount, ClusterRole, ClusterRoleBinding, and CronJob
-kubectl -n kube-system get cronjob node-os-updater
-kubectl get clusterrolebinding node-os-updater
+kubectl --context epaflix -n kube-system get cronjob node-os-updater
+kubectl --context epaflix get clusterrolebinding node-os-updater
 ```
 
 ### Trigger manually
 
 ```bash
-kubectl create job --from=cronjob/node-os-updater node-os-update-manual -n kube-system
-kubectl -n kube-system logs -f job/node-os-update-manual
+kubectl --context epaflix create job --from=cronjob/node-os-updater node-os-update-manual -n kube-system
+kubectl --context epaflix -n kube-system logs -f job/node-os-update-manual
 ```
 
 ### Monitor a running job
 
 ```bash
 # Watch the job pod's logs live
-kubectl -n kube-system get pods -l app=node-os-updater -w
+kubectl --context epaflix -n kube-system get pods -l app=node-os-updater -w
 
 # Check node cordon status during the run
-kubectl get nodes
+kubectl --context epaflix get nodes
 
 # View logs from last completed run
-kubectl -n kube-system get jobs --sort-by=.status.startTime | grep node-os-updater
-kubectl -n kube-system logs job/<node-os-updater-timestamp>
+kubectl --context epaflix -n kube-system get jobs --sort-by=.status.startTime | grep node-os-updater
+kubectl --context epaflix -n kube-system logs job/<node-os-updater-timestamp>
 ```
 
 ### Verify nodes are up to date after the run
@@ -337,28 +337,28 @@ Images tagged `:latest` already default to `imagePullPolicy: Always`. The follow
 ### Setup (one-time)
 
 ```bash
-kubectl apply -f servarr-image-updater-cronjob.yaml
+kubectl --context epaflix apply -f servarr-image-updater-cronjob.yaml
 
 # Verify ServiceAccount, Role, RoleBinding, and CronJob were created
-kubectl -n kube-system get cronjob servarr-image-updater
-kubectl -n servarr get rolebinding servarr-image-updater
+kubectl --context epaflix -n kube-system get cronjob servarr-image-updater
+kubectl --context epaflix -n servarr get rolebinding servarr-image-updater
 ```
 
 ### Trigger manually
 
 ```bash
-kubectl create job --from=cronjob/servarr-image-updater servarr-update-manual -n kube-system
-kubectl -n kube-system logs -f job/servarr-update-manual
+kubectl --context epaflix create job --from=cronjob/servarr-image-updater servarr-update-manual -n kube-system
+kubectl --context epaflix -n kube-system logs -f job/servarr-update-manual
 ```
 
 ### Check last run
 
 ```bash
 # List recent update jobs
-kubectl -n kube-system get jobs --sort-by=.status.startTime | grep servarr
+kubectl --context epaflix -n kube-system get jobs --sort-by=.status.startTime | grep servarr
 
 # View logs from last run
-kubectl -n kube-system logs job/<servarr-image-updater-timestamp>
+kubectl --context epaflix -n kube-system logs job/<servarr-image-updater-timestamp>
 ```
 
 ---
@@ -368,22 +368,22 @@ kubectl -n kube-system logs job/<servarr-image-updater-timestamp>
 ### CronJob Not Running
 ```bash
 # Check if CronJob is suspended
-kubectl -n kube-system get cronjob containerd-cleanup -o yaml | grep suspend
+kubectl --context epaflix -n kube-system get cronjob containerd-cleanup -o yaml | grep suspend
 
 # Check recent jobs
-kubectl -n kube-system get jobs
+kubectl --context epaflix -n kube-system get jobs
 
 # Check for errors in CronJob
-kubectl -n kube-system describe cronjob containerd-cleanup
+kubectl --context epaflix -n kube-system describe cronjob containerd-cleanup
 ```
 
 ### Cleanup Job Failed
 ```bash
 # View job logs
-kubectl -n kube-system logs job/<job-name>
+kubectl --context epaflix -n kube-system logs job/<job-name>
 
 # Check if SSH access from master to workers is working
-kubectl -n kube-system get pods -l job-name=<job-name> -o wide
+kubectl --context epaflix -n kube-system get pods -l job-name=<job-name> -o wide
 ```
 
 ### Worker Still Full After Cleanup

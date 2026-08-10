@@ -113,7 +113,7 @@ python3 -c 'import glob,yaml,sys; [list(yaml.safe_load_all(open(f))) for f in gl
 for d in 2-k3s/01.kube-vip 2-k3s/03.kube-vip-cloud-provider 2-k3s/04.coredns \
          2-k3s/11.argocd/apps 2-k3s/12.renovate 2-k3s/maintenance \
          2-k3s/maintenance/system-upgrade/controller; do
-  kubectl kustomize "$d" >/dev/null && echo "OK $d"
+  kubectl --context epaflix kustomize "$d" >/dev/null && echo "OK $d"
 done
 ```
 

@@ -52,7 +52,7 @@ ALTER SCHEMA public OWNER TO lingarr;
 
 Then:
 ```bash
-kubectl -n servarr patch secret servarr-postgres --type=merge -p \
+kubectl --context epaflix -n servarr patch secret servarr-postgres --type=merge -p \
   '{"stringData":{"lingarr-host":"192.168.10.105","lingarr-port":"5432","lingarr-database":"lingarr-main","lingarr-user":"lingarr","lingarr-password":"<PW>"}}'
 ```
 
@@ -62,7 +62,7 @@ Required once, when moving the existing TrueNAS Lingarr install to Postgres. Use
 
 1. Stop source: `midclt call app.stop lingarr` on TrueNAS.
 2. Copy SQLite: `scp truenas_admin@192.168.10.200:/mnt/apps/lingarr/local.db /tmp/`.
-3. Upload into a temp pod: `kubectl -n servarr run pgloader --image=dimitri/pgloader:latest --restart=Never --command -- sleep 300 && kubectl cp /tmp/local.db servarr/pgloader:/tmp/lingarr.db`.
+3. Upload into a temp pod: `kubectl --context epaflix -n servarr run pgloader --image=dimitri/pgloader:latest --restart=Never --command -- sleep 300 && kubectl --context epaflix cp /tmp/local.db servarr/pgloader:/tmp/lingarr.db`.
 4. Exec pgloader with a command file:
    ```
    LOAD DATABASE
@@ -72,7 +72,7 @@ Required once, when moving the existing TrueNAS Lingarr install to Postgres. Use
      EXCLUDING TABLE NAMES LIKE 'sqlite_%', '__EFMigrationsLock', 'version_info';
    ```
 5. Bump IDENTITY sequences past `max(id)` per table (pgloader's `reset sequences` doesn't touch EF IDENTITY columns). Use the anonymous `DO $$ ... $$` block in `docs/fix-identities.sql` (committed in this repo).
-6. Delete pod: `kubectl -n servarr delete pod pgloader`.
+6. Delete pod: `kubectl --context epaflix -n servarr delete pod pgloader`.
 7. Start Lingarr on Postgres.
 
 ## ASP.NET Data Protection keys
@@ -82,9 +82,9 @@ Encrypted settings (Sonarr/Radarr/Anthropic/OpenAI API keys stored as `CfDJ8...`
 ```bash
 ssh truenas_admin@192.168.10.200 "tar -czf /tmp/lingarr-keys.tar.gz -C /mnt/apps/lingarr keys"
 scp truenas_admin@192.168.10.200:/tmp/lingarr-keys.tar.gz /tmp/
-kubectl -n servarr cp /tmp/lingarr-keys.tar.gz <lingarr-pod>:/tmp/keys.tgz
-kubectl -n servarr exec <lingarr-pod> -- sh -c 'cd /app/config && tar -xzf /tmp/keys.tgz && chown -R 568:568 /app/config/keys'
-kubectl -n servarr rollout restart deploy/lingarr
+kubectl --context epaflix -n servarr cp /tmp/lingarr-keys.tar.gz <lingarr-pod>:/tmp/keys.tgz
+kubectl --context epaflix -n servarr exec <lingarr-pod> -- sh -c 'cd /app/config && tar -xzf /tmp/keys.tgz && chown -R 568:568 /app/config/keys'
+kubectl --context epaflix -n servarr rollout restart deploy/lingarr
 ```
 
 ## Boot-time job-queue reconcile (#870)
@@ -221,10 +221,10 @@ pass condition. It was 240 when this was measured on 2026-08-09.
 ## Apply
 
 ```bash
-kubectl apply -f ../_shared/storage/arr-configs.yaml   # if PVC not already created
-kubectl apply -f lingarr.yaml
-kubectl apply -f pdb.yaml
-kubectl apply -f ingress.yaml
+kubectl --context epaflix apply -f ../_shared/storage/arr-configs.yaml   # if PVC not already created
+kubectl --context epaflix apply -f lingarr.yaml
+kubectl --context epaflix apply -f pdb.yaml
+kubectl --context epaflix apply -f ingress.yaml
 ```
 
 ## Internal-only access
@@ -246,7 +246,7 @@ Steps:
 
 SQLite `/mnt/apps/lingarr/local.db.backup-pre-pg-<stamp>` is intact on TrueNAS. To revert:
 
-1. `kubectl -n servarr scale deploy lingarr --replicas=0`
+1. `kubectl --context epaflix -n servarr scale deploy lingarr --replicas=0`
 2. On TrueNAS: swap Lingarr compose back to `DB_CONNECTION` unset (default sqlite), `midclt call app.start lingarr`.
 
 Postgres DB `lingarr-main` can stay — dropping requires `DROP DATABASE "lingarr-main"` as `postgres` superuser.

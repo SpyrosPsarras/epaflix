@@ -7,8 +7,8 @@
    `/etc/dnsmasq.d/10-epaflix.conf`, reload FTL.
 
 ## Check
-    kubectl -n argocd get application searxng
-    kubectl -n searxng get pods
+    kubectl --context epaflix -n argocd get application searxng
+    kubectl --context epaflix -n searxng get pods
     curl --resolve searxng.epaflix.com:443:192.168.10.101 \
       'https://searxng.epaflix.com/search?q=test&format=json' | jq '.results | length'
 

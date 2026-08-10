@@ -102,7 +102,7 @@ curl -fsSLO "https://dl.k8s.io/release/$VER/bin/linux/amd64/kubectl"
 curl -fsSLO "https://dl.k8s.io/release/$VER/bin/linux/amd64/kubectl.sha256"
 echo "$(cat kubectl.sha256)  kubectl" | sha256sum --check
 sudo install -m 0755 -o root -g root kubectl /usr/local/bin/kubectl
-kubectl get nodes   # sanity — should list all 7 nodes Ready
+kubectl --context epaflix get nodes   # sanity — should list all 7 nodes Ready
 ```
 
 > The kubeconfig is provisioned separately, so on a bastion rebuild re-run only
