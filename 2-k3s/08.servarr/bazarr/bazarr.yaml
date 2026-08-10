@@ -13,9 +13,12 @@
 # SignalR client has no Authentik session, so /signalr/negotiate on the public
 # host returns a 302 (Authentik login) that bazarr can't parse as JSON -> the
 # SignalR feed dies in a loop (20 restarts/4d10h, confirmed 2026-07-26, #466).
-# /api/v3 calls kept working the whole time (Authentik's /api bypass), which is
-# why it looked half-healthy. See 2-k3s/08.servarr/README.md for the general
-# in-cluster-DNS policy this follows (#465, #466, #468).
+# /api/v3 calls kept working the whole time, because back then a priority-20
+# `/api` bypass still existed on the public host, which is why it looked
+# half-healthy. That bypass is gone since #296 (2026-08-10), so today the
+# public host would fail bazarr on every path instead of only /signalr - the
+# same conclusion, reached faster. See 2-k3s/08.servarr/README.md for the
+# general in-cluster-DNS policy this follows (#465, #466, #468).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
