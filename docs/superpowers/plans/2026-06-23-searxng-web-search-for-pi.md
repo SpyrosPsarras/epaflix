@@ -113,7 +113,7 @@ spec:
 
 Run:
 ```bash
-kubectl create --dry-run=client -o name -f 2-k3s/14.searxng/namespace.yaml -f 2-k3s/14.searxng/configmap.yaml -f 2-k3s/14.searxng/service.yaml
+kubectl --context epaflix create --dry-run=client -o name -f 2-k3s/14.searxng/namespace.yaml -f 2-k3s/14.searxng/configmap.yaml -f 2-k3s/14.searxng/service.yaml
 ```
 Expected: prints `namespace/searxng`, `configmap/searxng-settings`, `service/searxng` with no error.
 
@@ -284,10 +284,10 @@ spec:
 Run (server dry-run validates the Traefik CRD; requires the epaflix kubeconfig context):
 ```bash
 kubectl config current-context   # confirm it targets the epaflix cluster
-kubectl apply --dry-run=server -f 2-k3s/14.searxng/deployment.yaml -f 2-k3s/14.searxng/ingress.yaml
+kubectl --context epaflix apply --dry-run=server -f 2-k3s/14.searxng/deployment.yaml -f 2-k3s/14.searxng/ingress.yaml
 ```
 Expected: `deployment.apps/searxng created (server dry run)` and both IngressRoutes `created (server dry run)`, no schema errors. (The Deployment will reference Secret `searxng-secret`, not yet present — dry-run does not check that.)
-Fallback if no cluster context: `kubectl create --dry-run=client -o name -f 2-k3s/14.searxng/deployment.yaml` for the Deployment, and lint the IngressRoute YAML with `python3 -c "import yaml,sys; list(yaml.safe_load_all(open('2-k3s/14.searxng/ingress.yaml')))"` (expected: no output = valid YAML).
+Fallback if no cluster context: `kubectl --context epaflix create --dry-run=client -o name -f 2-k3s/14.searxng/deployment.yaml` for the Deployment, and lint the IngressRoute YAML with `python3 -c "import yaml,sys; list(yaml.safe_load_all(open('2-k3s/14.searxng/ingress.yaml')))"` (expected: no output = valid YAML).
 
 - [ ] **Step 4: Commit**
 
@@ -387,7 +387,7 @@ generators:
 Only if `kustomize` and `ksops` are installed locally (both currently MISSING — install: `kustomize` via `pacman -S kustomize` or the official release; `ksops` from `https://github.com/viaduct-ai/kustomize-sops/releases`). Then:
 ```bash
 SOPS_AGE_KEY_FILE=~/.config/sops/age/k3s-cluster.txt \
-KSOPS_BIN=$(which ksops) kustomize build --enable-alpha-plugins --enable-exec 2-k3s/14.searxng | kubectl apply --dry-run=client -f -
+KSOPS_BIN=$(which ksops) kustomize build --enable-alpha-plugins --enable-exec 2-k3s/14.searxng | kubectl --context epaflix apply --dry-run=client -f -
 ```
 Expected: all resources incl. `secret/searxng-secret` print as `(dry run)`. If tools are not installed, skip — the authoritative render happens in-cluster via ArgoCD at Task 9.
 
@@ -497,11 +497,11 @@ Modify the `resources:` list to include `app-searxng.yaml` in alphabetical posit
 
 Run:
 ```bash
-kubectl kustomize 2-k3s/11.argocd/apps >/dev/null && echo "APPS-KUSTOMIZE-OK"
+kubectl --context epaflix kustomize 2-k3s/11.argocd/apps >/dev/null && echo "APPS-KUSTOMIZE-OK"
 ```
 Expected: `APPS-KUSTOMIZE-OK` (this set has no ksops generator, so plain `kubectl kustomize` works). Confirm the new Application appears:
 ```bash
-kubectl kustomize 2-k3s/11.argocd/apps | grep -A1 'name: searxng'
+kubectl --context epaflix kustomize 2-k3s/11.argocd/apps | grep -A1 'name: searxng'
 ```
 Expected: shows the `searxng` Application metadata.
 
@@ -559,8 +559,8 @@ soak-window prune flip, or delete the Application + namespace manually.
    `/etc/dnsmasq.d/10-epaflix.conf`, reload FTL.
 
 ## Check
-    kubectl -n argocd get application searxng
-    kubectl -n searxng get pods
+    kubectl --context epaflix -n argocd get application searxng
+    kubectl --context epaflix -n searxng get pods
     curl --resolve searxng.epaflix.com:443:192.168.10.101 \
       'https://searxng.epaflix.com/search?q=test&format=json' | jq '.results | length'
 
@@ -655,14 +655,14 @@ gh pr merge <N> --repo SpyrosPsarras/epaflix --merge
 - [ ] **Step 3: Watch ArgoCD create + sync the app**
 
 ```bash
-kubectl -n argocd get application searxng -w
+kubectl --context epaflix -n argocd get application searxng -w
 ```
 Expected: `SYNC STATUS = Synced`, `HEALTH STATUS = Healthy`. (Ctrl-C when reached.)
 
 - [ ] **Step 4: Verify the pod and JSON API**
 
 ```bash
-kubectl -n searxng get pods
+kubectl --context epaflix -n searxng get pods
 curl --resolve searxng.epaflix.com:443:192.168.10.101 \
   'https://searxng.epaflix.com/search?q=test&format=json' | jq '.results | length'
 ```

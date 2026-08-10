@@ -326,14 +326,14 @@ git commit -m "chore(sops): re-wrap secrets to new+old age recipient"
 git push
 
 # 4. Push new key into the cluster (replaces old keys.txt content).
-kubectl create secret generic sops-age \
+kubectl --context epaflix create secret generic sops-age \
   -n argocd \
   --from-file=keys.txt=$HOME/.config/sops/age/k3s-cluster-new.txt \
-  --dry-run=client -o yaml | kubectl apply -f -
+  --dry-run=client -o yaml | kubectl --context epaflix apply -f -
 
 # 5. Force repo-server to pick up new Secret.
-kubectl -n argocd rollout restart deploy/argocd-repo-server
-kubectl -n argocd rollout status deploy/argocd-repo-server
+kubectl --context epaflix -n argocd rollout restart deploy/argocd-repo-server
+kubectl --context epaflix -n argocd rollout status deploy/argocd-repo-server
 
 # 6. Sanity: trigger ArgoCD App sync.
 argocd app sync servarr
@@ -356,8 +356,8 @@ scp ~/.config/sops/age/k3s-cluster.txt truenas_admin@192.168.10.200:/mnt/apps/en
 
 ```bash
 # Run ONCE before installing/syncing ArgoCD self-management.
-kubectl create namespace argocd
-kubectl create secret generic sops-age \
+kubectl --context epaflix create namespace argocd
+kubectl --context epaflix create secret generic sops-age \
   -n argocd \
   --from-file=keys.txt=$HOME/.config/sops/age/k3s-cluster.txt
 ```
@@ -366,7 +366,7 @@ kubectl create secret generic sops-age \
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `sops: cannot find age private key` in repo-server logs | `argocd/sops-age` Secret missing | Re-run bootstrap kubectl create secret |
+| `sops: cannot find age private key` in repo-server logs | `argocd/sops-age` Secret missing | Re-run bootstrap kubectl --context epaflix create secret |
 | `no key could decrypt the data` | Key was rotated but Secret in cluster still old | Re-apply key Secret + restart repo-server |
 | `kustomize build` errors `unknown plugin kind ksops` | `--enable-alpha-plugins` missing | Confirm `configs.cm.kustomize.buildOptions: --enable-alpha-plugins --enable-exec` in argocd helm-values.yaml |
 | Pre-commit hook rejects encrypted file | hook checks failed (no `sops:` block) | Re-run `sops -e -i <file>` |

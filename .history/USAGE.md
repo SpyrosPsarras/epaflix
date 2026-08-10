@@ -48,10 +48,10 @@ Then use functions:
 llm-log-to "2026-02-14-my-work"
 
 # Log a command
-llm-log "Check node status" "kubectl get nodes"
+llm-log "Check node status" "kubectl --context epaflix get nodes"
 
 # Log the last command you just ran
-kubectl get pods
+kubectl --context epaflix get pods
 llm-log-last "List all pods"
 
 # Show current log file
@@ -72,12 +72,12 @@ When I execute commands via `run_in_terminal`, I can now wrap them:
 
 **Instead of**:
 ```bash
-kubectl get nodes
+kubectl --context epaflix get nodes
 ```
 
 **I'll use**:
 ```bash
-./.history/log-cmd.sh "Verify K3s cluster nodes" "kubectl get nodes"
+./.history/log-cmd.sh "Verify K3s cluster nodes" "kubectl --context epaflix get nodes"
 ```
 
 This ensures everything is logged for future reference.
@@ -88,7 +88,7 @@ This ensures everything is logged for future reference.
 
 Log complex operations:
 ```bash
-./.history/log-cmd.sh "Deploy application" "kubectl apply -f app.yaml && kubectl rollout status deployment/myapp"
+./.history/log-cmd.sh "Deploy application" "kubectl --context epaflix apply -f app.yaml && kubectl --context epaflix rollout status deployment/myapp"
 ```
 
 ### Remote Commands
@@ -106,8 +106,8 @@ Create scripts that use the logger:
 LOG_FILE=".history/$(date +%Y-%m-%d)-deployment.log"
 
 ./.history/log-cmd.sh "Pull latest images" "docker pull myimage:latest" "${LOG_FILE}"
-./.history/log-cmd.sh "Deploy to k3s" "kubectl apply -f deploy.yaml" "${LOG_FILE}"
-./.history/log-cmd.sh "Wait for rollout" "kubectl rollout status deployment/myapp" "${LOG_FILE}"
+./.history/log-cmd.sh "Deploy to k3s" "kubectl --context epaflix apply -f deploy.yaml" "${LOG_FILE}"
+./.history/log-cmd.sh "Wait for rollout" "kubectl --context epaflix rollout status deployment/myapp" "${LOG_FILE}"
 ```
 
 ## Environment Variables
@@ -143,7 +143,7 @@ exit
 
 # Option C: Use shell functions
 llm-log-to "2026-02-14-my-work"
-llm-log "Check status" "kubectl get all"
+llm-log "Check status" "kubectl --context epaflix get all"
 ```
 
 ## Viewing Logs

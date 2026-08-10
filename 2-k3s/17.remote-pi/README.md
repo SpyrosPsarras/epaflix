@@ -127,12 +127,12 @@ Test restoration before relying on a backup.
 After the approved first sync:
 
 ```bash
-kubectl -n remote-pi get deploy,pod,service,pvc
-kubectl -n remote-pi port-forward service/remote-pi-relay 3000:3000
+kubectl --context epaflix -n remote-pi get deploy,pod,service,pvc
+kubectl --context epaflix -n remote-pi port-forward service/remote-pi-relay 3000:3000
 curl --fail http://127.0.0.1:3000/health
-kubectl -n traefik-system get service traefik-internal \
+kubectl --context epaflix -n traefik-system get service traefik-internal \
   -o jsonpath='{.spec.allocateLoadBalancerNodePorts}{"\n"}'
-kubectl -n traefik-system get service traefik-internal \
+kubectl --context epaflix -n traefik-system get service traefik-internal \
   -o go-template='{{range .spec.ports}}{{if .nodePort}}{{.nodePort}}{{"\n"}}{{end}}{{end}}'
 ```
 
@@ -296,7 +296,7 @@ non-localhost caller. So the first configuration pass has to happen through a
 port-forward, not through `cliproxy.epaflix.com`:
 
 ```bash
-kubectl -n remote-pi port-forward deploy/cliproxy 8317:8317
+kubectl --context epaflix -n remote-pi port-forward deploy/cliproxy 8317:8317
 # then open http://127.0.0.1:8317/management.html
 ```
 

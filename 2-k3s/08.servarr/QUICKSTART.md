@@ -38,7 +38,7 @@ This will:
 
 ```bash
 # Fill in actual keys from secrets.yml, then apply
-kubectl apply -f _shared/secrets/wireguard-secret.yaml
+kubectl --context epaflix apply -f _shared/secrets/wireguard-secret.yaml
 ```
 
 ### 4. Deploy Everything
@@ -100,13 +100,13 @@ In each app (Sonarr, Sonarr2, Radarr):
 
 ### Check VPN is Working
 ```bash
-kubectl exec -n servarr deployment/qbittorrent -- curl ifconfig.me
+kubectl --context epaflix exec -n servarr deployment/qbittorrent -- curl ifconfig.me
 # Should show VPN IP, NOT 192.168.x.x
 ```
 
 ### Check GPU is Available
 ```bash
-kubectl get nodes -o yaml | grep nvidia.com/gpu
+kubectl --context epaflix get nodes -o yaml | grep nvidia.com/gpu
 # Should show: nvidia.com/gpu: "1" under allocatable
 ```
 
@@ -120,7 +120,7 @@ ls -i /mnt/pool1/dataset01/tvshows/Show/Season\ 01/show.mkv
 
 ### Check All Pods Running
 ```bash
-kubectl get pods -n servarr
+kubectl --context epaflix get pods -n servarr
 # All should be Running
 ```
 
@@ -128,25 +128,25 @@ kubectl get pods -n servarr
 
 ### Pods Stuck in Pending
 ```bash
-kubectl describe pod -n servarr <pod-name>
+kubectl --context epaflix describe pod -n servarr <pod-name>
 # Check events for PVC binding or resource issues
 ```
 
 ### PVC Not Binding
 ```bash
-kubectl get pv,pvc -n servarr
+kubectl --context epaflix get pv,pvc -n servarr
 # Verify NFS paths exist on TrueNAS
 ```
 
 ### VPN Not Working
 ```bash
-kubectl logs -n servarr deployment/qbittorrent
+kubectl --context epaflix logs -n servarr deployment/qbittorrent
 # Check for WireGuard initialization errors
 ```
 
 ### GPU Not Available
 ```bash
-kubectl describe node <gpu-node>
+kubectl --context epaflix describe node <gpu-node>
 # Check if nvidia.com/gpu is listed in allocatable resources
 # May need to install NVIDIA device plugin
 ```
@@ -188,5 +188,5 @@ kubectl describe node <gpu-node>
 
 For issues, check:
 - README.md for detailed documentation
-- Pod logs: `kubectl logs -n servarr <pod-name>`
-- Events: `kubectl get events -n servarr --sort-by='.lastTimestamp'`
+- Pod logs: `kubectl --context epaflix logs -n servarr <pod-name>`
+- Events: `kubectl --context epaflix get events -n servarr --sort-by='.lastTimestamp'`

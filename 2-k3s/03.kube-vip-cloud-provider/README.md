@@ -36,13 +36,13 @@ Since 2026-05-25 (Issue #16) this stack is GitOps-managed by ArgoCD. The cloud-c
 ```bash
 ./install.sh
 # or directly:
-kubectl apply -k .
+kubectl --context epaflix apply -k .
 ```
 
 ### Adopting under ArgoCD
 
 ```bash
-kubectl apply -f ../11.argocd/apps/app-kube-vip-cloud-provider.yaml
+kubectl --context epaflix apply -f ../11.argocd/apps/app-kube-vip-cloud-provider.yaml
 argocd app sync kube-vip-cloud-provider
 ```
 
@@ -51,7 +51,7 @@ The first sync only adds the `argocd.argoproj.io/tracking-id` annotation — no 
 ### Bumping kube-vip-cloud-provider
 
 1. Replace `cloud-controller.yaml` with the upstream file at the target tag and update the version reference in the header comment.
-2. `kubectl diff -k .` against the live cluster to inspect changes.
+2. `kubectl --context epaflix diff -k .` against the live cluster to inspect changes.
 3. Commit; ArgoCD reconciles.
 
 ### Current IP-pool configuration
@@ -66,7 +66,7 @@ Reserved: `192.168.10.100` for the control-plane VIP (kube-vip itself).
 Verify the ConfigMap:
 
 ```bash
-kubectl get configmap -n kube-system kubevip -o yaml
+kubectl --context epaflix get configmap -n kube-system kubevip -o yaml
 ```
 
 ## Usage Examples
@@ -77,16 +77,16 @@ Create a deployment and expose it as LoadBalancer:
 
 ```bash
 # Create nginx deployment
-kubectl create deployment nginx --image=nginx
+kubectl --context epaflix create deployment nginx --image=nginx
 
 # Expose as LoadBalancer (gets IP from pool automatically)
-kubectl expose deployment nginx --port=80 --type=LoadBalancer --name=nginx-lb
+kubectl --context epaflix expose deployment nginx --port=80 --type=LoadBalancer --name=nginx-lb
 ```
 
 Check the assigned IP:
 
 ```bash
-kubectl get svc nginx-lb
+kubectl --context epaflix get svc nginx-lb
 ```
 
 ### Example 2: LoadBalancer Service with YAML
@@ -112,7 +112,7 @@ spec:
 Apply it:
 
 ```bash
-kubectl apply -f nginx-service.yaml
+kubectl --context epaflix apply -f nginx-service.yaml
 ```
 
 ### Example 3: Service with Specific IP Address
@@ -120,7 +120,7 @@ kubectl apply -f nginx-service.yaml
 Request a specific IP (must be within configured range or outside it):
 
 ```bash
-kubectl expose deployment nginx --port=80 --type=LoadBalancer \
+kubectl --context epaflix expose deployment nginx --port=80 --type=LoadBalancer \
   --name=nginx-custom-ip --load-balancer-ip=192.168.10.150
 ```
 
@@ -193,20 +193,20 @@ spec:
 Apply it:
 
 ```bash
-kubectl apply -f webapp-stack.yaml
+kubectl --context epaflix apply -f webapp-stack.yaml
 ```
 
 Wait for IP assignment:
 
 ```bash
-kubectl get svc webapp-lb -w
+kubectl --context epaflix get svc webapp-lb -w
 ```
 
 Test the service:
 
 ```bash
 # Get the LoadBalancer IP
-LB_IP=$(kubectl get svc webapp-lb -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+LB_IP=$(kubectl --context epaflix get svc webapp-lb -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
 
 # Test HTTP access
 curl http://$LB_IP
@@ -217,25 +217,25 @@ curl http://$LB_IP
 ### Check all LoadBalancer services:
 
 ```bash
-kubectl get svc --all-namespaces -o wide | grep LoadBalancer
+kubectl --context epaflix get svc --all-namespaces -o wide | grep LoadBalancer
 ```
 
 ### Check cloud provider logs:
 
 ```bash
-kubectl logs -n kube-system -l app=kube-vip-cloud-provider
+kubectl --context epaflix logs -n kube-system -l app=kube-vip-cloud-provider
 ```
 
 ### Check kube-vip pods:
 
 ```bash
-kubectl get pods -n kube-system -l app.kubernetes.io/name=kube-vip
+kubectl --context epaflix get pods -n kube-system -l app.kubernetes.io/name=kube-vip
 ```
 
 ### View IP allocation:
 
 ```bash
-kubectl get configmap -n kube-system kubevip -o yaml
+kubectl --context epaflix get configmap -n kube-system kubevip -o yaml
 ```
 
 ## Troubleshooting
@@ -244,34 +244,34 @@ kubectl get configmap -n kube-system kubevip -o yaml
 
 1. Check if cloud provider is running:
 ```bash
-kubectl get pods -n kube-system | grep cloud-provider
+kubectl --context epaflix get pods -n kube-system | grep cloud-provider
 ```
 
 2. Check cloud provider logs:
 ```bash
-kubectl logs -n kube-system -l app=kube-vip-cloud-provider
+kubectl --context epaflix logs -n kube-system -l app=kube-vip-cloud-provider
 ```
 
 3. Verify ConfigMap exists:
 ```bash
-kubectl get configmap -n kube-system kubevip
+kubectl --context epaflix get configmap -n kube-system kubevip
 ```
 
 4. Check if IP pool has available addresses:
 ```bash
-kubectl get svc --all-namespaces | grep LoadBalancer
+kubectl --context epaflix get svc --all-namespaces | grep LoadBalancer
 ```
 
 ### LoadBalancer IP not accessible
 
 1. Verify kube-vip is running:
 ```bash
-kubectl get pods -n kube-system -l app.kubernetes.io/name=kube-vip
+kubectl --context epaflix get pods -n kube-system -l app.kubernetes.io/name=kube-vip
 ```
 
 2. Check kube-vip logs:
 ```bash
-kubectl logs -n kube-system -l app.kubernetes.io/name=kube-vip
+kubectl --context epaflix logs -n kube-system -l app.kubernetes.io/name=kube-vip
 ```
 
 3. Verify ARP is working (if using ARP mode):

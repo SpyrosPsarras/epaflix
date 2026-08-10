@@ -43,7 +43,7 @@ Reviewed 2026-08-03 against the v2.0.0 release notes and the v2.1.2 source. What
 **Rollback window is 14 days.** The migration renames the old LevelDB directory to `index-v0.14.0.db-migrated` and keeps it; `cleanConfigDirectory()` in `cmd/syncthing/main.go` deletes it after 14 days (`config.xml.v<n>` backups are kept 30). So reverting to `1.30.0` inside 14 days means: scale to 0, rename the directory back, revert the tag. After that there is no automatic way back.
 
 Doing the bump:
-1. `kubectl -n syncthing scale deploy/syncthing --replicas=0`, then `cp -a` the 139 MB `config/` directory on `k3s-worker-63` - cheap insurance on top of the `-migrated` directory.
+1. `kubectl --context epaflix -n syncthing scale deploy/syncthing --replicas=0`, then `cp -a` the 139 MB `config/` directory on `k3s-worker-63` - cheap insurance on top of the `-migrated` directory.
 2. Merge the PR and let ArgoCD roll it. `strategy: Recreate`, one replica, RWO local PV - a short outage, never two writers.
 3. Watch the first start for the migration, then confirm every folder is back to "Up to Date" in the GUI before calling it done.
 

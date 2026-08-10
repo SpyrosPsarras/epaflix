@@ -56,7 +56,7 @@ ExecStart=/usr/local/bin/k3s \
 Confirmed Spegel is running:
 ```bash
 # Check P2P annotations on nodes
-kubectl get node k3s-master-51 -o jsonpath='{.metadata.annotations.p2p\.k3s\.cattle\.io/node-address}'
+kubectl --context epaflix get node k3s-master-51 -o jsonpath='{.metadata.annotations.p2p\.k3s\.cattle\.io/node-address}'
 # Output: /ip4/10.0.0.51/tcp/5001/p2p/QmREESKcjLdxG2egB8GUKAry4hdBdEG1xwoVVz4Rxaec2k
 
 # Check logs for Spegel startup
@@ -171,7 +171,7 @@ ssh ubuntu@192.168.10.62 'sudo journalctl -u k3s-agent --since "1 minute ago" | 
 ### Check Spegel Status
 ```bash
 # View P2P addresses on all nodes
-kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata.annotations.p2p\.k3s\.cattle\.io/node-address}{"\n"}{end}'
+kubectl --context epaflix get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata.annotations.p2p\.k3s\.cattle\.io/node-address}{"\n"}{end}'
 
 # Check Spegel logs on master
 ssh ubuntu@192.168.10.51 'sudo journalctl -u k3s | grep spegel | tail -20'
@@ -195,7 +195,7 @@ done
 
 ### Images Not Shared Between Nodes
 - Verify P2P port 5001 is reachable: `nc -zv 10.0.0.51 5001`
-- Check node annotations: `kubectl get node <node> -o yaml | grep p2p`
+- Check node annotations: `kubectl --context epaflix get node <node> -o yaml | grep p2p`
 - Ensure registry is in mirrors list (wildcard `"*"` covers all)
 
 ### Performance Issues

@@ -42,12 +42,12 @@ dig +short argocd.epaflix.com @192.168.10.30
 
 Wait for pods:
 ```
-kubectl -n argocd get pods -w
+kubectl --context epaflix -n argocd get pods -w
 ```
 
 Initial admin password (only until OIDC is wired; use SSO afterwards):
 ```
-kubectl -n argocd get secret argocd-initial-admin-secret \
+kubectl --context epaflix -n argocd get secret argocd-initial-admin-secret \
   -o jsonpath='{.data.password}' | base64 -d ; echo
 ```
 
@@ -85,9 +85,9 @@ Merge-patch the OIDC keys instead:
 S=.github/instructions/secrets.enc.yaml
 CID=$(sops -d --extract '["argocd_oidc_client_id"]' "$S")
 CSEC=$(sops -d --extract '["argocd_oidc_client_secret"]' "$S")
-kubectl -n argocd patch secret argocd-secret --type=merge \
+kubectl --context epaflix -n argocd patch secret argocd-secret --type=merge \
   -p "{\"stringData\":{\"oidc.authentik.clientId\":\"$CID\",\"oidc.authentik.clientSecret\":\"$CSEC\"}}"
-kubectl -n argocd rollout restart deploy/argocd-server
+kubectl --context epaflix -n argocd rollout restart deploy/argocd-server
 ```
 
 Verify:
@@ -104,7 +104,7 @@ argocd login argocd.epaflix.com --sso
 ```
 
 > No CLI? The `argocd` self-management app can be synced via
-> `kubectl patch application argocd … operation …` — see the README's
+> `kubectl --context epaflix patch application argocd … operation …` — see the README's
 > **Sync policy** section.
 
 ## 6. Create the Traefik Application
@@ -113,7 +113,7 @@ Traefik owns the active ingress endpoint (`192.168.10.101`) and ACME
 certificate storage, so the first sync is manual.
 
 ```
-kubectl apply -f 2-k3s/11.argocd/apps/app-traefik.yaml
+kubectl --context epaflix apply -f 2-k3s/11.argocd/apps/app-traefik.yaml
 argocd app diff traefik     # review before first sync
 argocd app sync traefik     # apply only once the diff is safe
 ```
@@ -124,7 +124,7 @@ the manual sync is confirmed clean.
 ## 7. Create the servarr Application
 
 ```
-kubectl apply -f 2-k3s/11.argocd/apps/app-servarr.yaml
+kubectl --context epaflix apply -f 2-k3s/11.argocd/apps/app-servarr.yaml
 ```
 
 The Application starts in **manual sync** (`syncPolicy: {}`). ArgoCD will
@@ -160,7 +160,7 @@ pipeline is live:
    update type `digest`) auto-merges once the `validate` check is green.
 3. After merge, ArgoCD syncs the servarr Application and rolls the Deployment:
    ```
-   kubectl -n servarr rollout status deploy/<app>
+   kubectl --context epaflix -n servarr rollout status deploy/<app>
    git log -- 2-k3s/08.servarr/kustomization.yaml   # audit trail
    ```
 

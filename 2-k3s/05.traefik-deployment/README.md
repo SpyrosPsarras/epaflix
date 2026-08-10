@@ -198,11 +198,11 @@ Keep runtime secrets and certificate state outside git:
 
 Safe adoption flow:
 ```bash
-kubectl kustomize --enable-helm 2-k3s/05.traefik-deployment >/tmp/traefik-rendered.yaml
-kubectl -n traefik-system get secret cloudflare-api-token
-kubectl -n traefik-system get pvc
-kubectl -n traefik-system get svc traefik -o wide
-kubectl apply -f 2-k3s/11.argocd/apps/app-traefik.yaml
+kubectl --context epaflix kustomize --enable-helm 2-k3s/05.traefik-deployment >/tmp/traefik-rendered.yaml
+kubectl --context epaflix -n traefik-system get secret cloudflare-api-token
+kubectl --context epaflix -n traefik-system get pvc
+kubectl --context epaflix -n traefik-system get svc traefik -o wide
+kubectl --context epaflix apply -f 2-k3s/11.argocd/apps/app-traefik.yaml
 argocd app diff traefik
 argocd app sync traefik
 ```
@@ -242,12 +242,12 @@ done
 
 Wait for cluster to stabilize:
 ```bash
-kubectl get nodes
+kubectl --context epaflix get nodes
 ```
 
 If you only need to update an already-deployed cluster (without restarting k3s), edit `/etc/k3s-resolv.conf` on every node then bounce CoreDNS so new pod sandboxes pick up the change:
 ```bash
-kubectl rollout restart -n kube-system deployment/coredns
+kubectl --context epaflix rollout restart -n kube-system deployment/coredns
 ```
 
 Verify the new CoreDNS sandbox `/etc/resolv.conf` only lists `192.168.10.30`:
@@ -258,7 +258,7 @@ ssh ubuntu@<node-running-coredns> \
 
 ### 1. Create namespace
 ```bash
-kubectl apply -f namespace.yaml
+kubectl --context epaflix apply -f namespace.yaml
 ```
 
 ### 2. Bootstrap/manual deployment script
@@ -280,7 +280,7 @@ manual recovery. Do not run `helm uninstall traefik` during ArgoCD adoption.
 
 ### 3. Create Cloudflare API token secret
 ```bash
-kubectl create secret generic cloudflare-api-token \
+kubectl --context epaflix create secret generic cloudflare-api-token \
   --namespace=traefik-system \
   --from-literal=api-token=<CLOUDFLARE_API_TOKEN>
 ```
@@ -296,33 +296,33 @@ helm install traefik traefik/traefik \
 
 ### 5. Verify LoadBalancer IP
 ```bash
-kubectl -n traefik-system get svc traefik
+kubectl --context epaflix -n traefik-system get svc traefik
 # Should show EXTERNAL-IP: 192.168.10.101
 ```
 
 ### 6. Verify NFS storage
 ```bash
-kubectl -n traefik-system get pv,pvc
+kubectl --context epaflix -n traefik-system get pv,pvc
 # Should show traefik-nfs-pv and traefik-acme-storage as Bound
 ```
 
 ### 7. Apply middleware
 ```bash
-kubectl apply -f middleware/
+kubectl --context epaflix apply -f middleware/
 ```
 
 ### 8. Deploy test application (whoami)
 ```bash
-kubectl apply -f examples/whoami-demo.yaml
+kubectl --context epaflix apply -f examples/whoami-demo.yaml
 ```
 
 ### 9. Wait for certificate issuance (~2 minutes)
 ```bash
 # Check Traefik logs
-kubectl -n traefik-system logs -l app.kubernetes.io/name=traefik -f
+kubectl --context epaflix -n traefik-system logs -l app.kubernetes.io/name=traefik -f
 
 # Verify both replicas are running
-kubectl -n traefik-system get pods -o wide
+kubectl --context epaflix -n traefik-system get pods -o wide
 ```
 
 ## Testing
@@ -381,17 +381,17 @@ spec:
 ### Certificate not issued
 ```bash
 # Check Traefik logs
-kubectl -n traefik-system logs -l app.kubernetes.io/name=traefik | grep -i acme
+kubectl --context epaflix -n traefik-system logs -l app.kubernetes.io/name=traefik | grep -i acme
 
 # Verify Cloudflare token
-kubectl -n traefik-system get secret cloudflare-api-token -o yaml
+kubectl --context epaflix -n traefik-system get secret cloudflare-api-token -o yaml
 ```
 
 ### LoadBalancer pending
 ```bash
 # Check kube-vip cloud provider
-kubectl -n kube-system get configmap kubevip -o yaml
-kubectl -n kube-system logs -l app=kube-vip-cloud-provider
+kubectl --context epaflix -n kube-system get configmap kubevip -o yaml
+kubectl --context epaflix -n kube-system logs -l app=kube-vip-cloud-provider
 ```
 
 ### DNS not resolving

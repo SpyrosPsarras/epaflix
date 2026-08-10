@@ -84,12 +84,12 @@ From your terminal:
 cd /home/spy/Documents/Epaflix/k3s-swarm-proxmox/2-k3s/08.servarr/seerr
 
 # Create secret with values from Phase 1, Step 2
-kubectl create secret generic seerr-oidc-secret -n servarr \
+kubectl --context epaflix create secret generic seerr-oidc-secret -n servarr \
   --from-literal=client-id='<PASTE_CLIENT_ID_HERE>' \
   --from-literal=client-secret='<PASTE_CLIENT_SECRET_HERE>'
 
 # Verify secret was created
-kubectl get secret seerr-oidc-secret -n servarr
+kubectl --context epaflix get secret seerr-oidc-secret -n servarr
 ```
 
 **✅ Kubernetes Secret Created!**
@@ -214,13 +214,13 @@ Check deployment status:
 
 ```bash
 # Verify secret exists
-kubectl get secret seerr-oidc-secret -n servarr
+kubectl --context epaflix get secret seerr-oidc-secret -n servarr
 
 # Check Seerr is running with OIDC image
-kubectl describe deployment seerr -n servarr | grep -i image
+kubectl --context epaflix describe deployment seerr -n servarr | grep -i image
 
 # View Seerr logs (look for OIDC initialization)
-kubectl logs -n servarr -l app=seerr --tail=50
+kubectl --context epaflix logs -n servarr -l app=seerr --tail=50
 ```
 
 ## What This Achieves
@@ -272,6 +272,6 @@ For detailed information, see:
 
 ## Need Help?
 
-- Check logs: `kubectl logs -n servarr -l app=seerr --tail=100`
+- Check logs: `kubectl --context epaflix logs -n servarr -l app=seerr --tail=100`
 - Check Authentik events: Authentik UI → **Events → Logs**
 - Review detailed guides in documentation references above

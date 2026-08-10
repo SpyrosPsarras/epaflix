@@ -150,7 +150,7 @@ remain meaningful in PR review.
 - Created imperatively, **once**, by the maintainer:
 
 ```bash
-kubectl create secret generic sops-age \
+kubectl --context epaflix create secret generic sops-age \
   -n argocd \
   --from-file=keys.txt=$HOME/.config/sops/age/keys.txt
 ```
@@ -209,11 +209,11 @@ ArgoCD repo-server clones repo
 2. Add new public key to .sops.yaml as additional recipient (do not remove old yet)
 3. sops updatekeys path/**/*.enc.yaml   # re-wraps DEK to both recipients
 4. git commit re-wrapped files ; push ; ArgoCD sync (still decryptable with old)
-5. kubectl create secret generic sops-age \
+5. kubectl --context epaflix create secret generic sops-age \
      -n argocd \
      --from-file=keys.txt=new-keys.txt \
-     --dry-run=client -o yaml | kubectl apply -f -
-6. kubectl rollout restart deploy/argocd-repo-server -n argocd
+     --dry-run=client -o yaml | kubectl --context epaflix apply -f -
+6. kubectl --context epaflix rollout restart deploy/argocd-repo-server -n argocd
 7. Drop old recipient from .sops.yaml ; sops updatekeys again ; commit
 8. Securely destroy old keys.txt on TrueNAS backup
 ```
@@ -222,7 +222,7 @@ ArgoCD repo-server clones repo
 
 | Failure | Symptom | Response |
 |---------|---------|----------|
-| age Secret missing in argocd ns | repo-server CrashLoop or `sops: cannot find age private key` in render | Run bootstrap `kubectl create secret`; documented in 11.argocd/README |
+| age Secret missing in argocd ns | repo-server CrashLoop or `sops: cannot find age private key` in render | Run bootstrap `kubectl --context epaflix create secret`; documented in 11.argocd/README |
 | Wrong age key (rotation mismatch) | `kustomize build` errors: `no key could decrypt the data` | Re-run `sops updatekeys`, redeploy Secret |
 | Plaintext leaked to git | pre-commit grep catches placeholder pattern `<[A-Z_]+>` or missing `sops:` block | Pre-commit hook rejects commit; rotate any leaked credential |
 | ksops sidecar image unavailable | repo-server pod NotReady | image-updater pin to known-good digest; Renovate alerts on new tag |
@@ -247,7 +247,7 @@ T3. ArgoCD diff pre-sync
     → no destructive diff; Secret filebrowser-oidc identical to current live
 
 T4. Repo-server pod healthy after Helm/values bump
-    kubectl -n argocd get pods -l app.kubernetes.io/component=repo-server
+    kubectl --context epaflix -n argocd get pods -l app.kubernetes.io/component=repo-server
     → 1/1 Ready; describe shows initContainer "install-ksops" Completed
 
 T5. Pre-commit safety
@@ -262,7 +262,7 @@ T6. ArgoCD sync filebrowser App (manual first)
     → Synced + Healthy
 
 T7. Secret unchanged in-cluster
-    kubectl -n filebrowser get secret filebrowser-oidc -o yaml | yq '.data'
+    kubectl --context epaflix -n filebrowser get secret filebrowser-oidc -o yaml | yq '.data'
     → matches pre-migration values
 
 T8. Filebrowser pod still serves OIDC login

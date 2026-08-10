@@ -31,7 +31,7 @@ When Sonarr tried to load the episode file, it got 2 results instead of 1 → "S
 
 ### 1. Identify the problematic series/episode from logs
 ```bash
-kubectl logs -n servarr deployment/sonarr --tail=100 | grep "InvalidOperationException"
+kubectl --context epaflix logs -n servarr deployment/sonarr --tail=100 | grep "InvalidOperationException"
 # Look for the file path or series name
 ```
 
@@ -80,7 +80,7 @@ EOF
 #!/bin/bash
 # Fix all duplicate EpisodeFile IDs in Sonarr database
 
-PGPASSWORD=$(kubectl get secret servarr-postgres -n servarr -o jsonpath='{.data.sonarr-password}' | base64 -d)
+PGPASSWORD=$(kubectl --context epaflix get secret servarr-postgres -n servarr -o jsonpath='{.data.sonarr-password}' | base64 -d)
 DB_HOST="192.168.10.105"
 
 echo "🔍 Checking for duplicate EpisodeFile IDs..."
@@ -213,7 +213,7 @@ EOF
 
 ### 3. Monitor Sonarr logs
 ```bash
-kubectl logs -n servarr deployment/sonarr -f | grep -i "InvalidOperationException\|Sequence contains"
+kubectl --context epaflix logs -n servarr deployment/sonarr -f | grep -i "InvalidOperationException\|Sequence contains"
 # Should see no more errors
 ```
 

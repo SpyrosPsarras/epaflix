@@ -20,11 +20,11 @@ For an already-running cluster with ArgoCD installed, use the Traefik
 Application instead of re-running `./01.deploy.sh`:
 
 ```bash
-kubectl kustomize --enable-helm 2-k3s/05.traefik-deployment >/tmp/traefik-rendered.yaml
-kubectl -n traefik-system get secret cloudflare-api-token
-kubectl -n traefik-system get pvc
-kubectl -n traefik-system get svc traefik -o wide
-kubectl apply -f 2-k3s/11.argocd/apps/app-traefik.yaml
+kubectl --context epaflix kustomize --enable-helm 2-k3s/05.traefik-deployment >/tmp/traefik-rendered.yaml
+kubectl --context epaflix -n traefik-system get secret cloudflare-api-token
+kubectl --context epaflix -n traefik-system get pvc
+kubectl --context epaflix -n traefik-system get svc traefik -o wide
+kubectl --context epaflix apply -f 2-k3s/11.argocd/apps/app-traefik.yaml
 argocd app diff traefik
 argocd app sync traefik
 ```
@@ -37,7 +37,7 @@ Traefik replica, existing ACME storage at `/data/acme.json`, and the
 
 ```bash
 # 1. Create namespace
-kubectl apply -f namespace.yaml
+kubectl --context epaflix apply -f namespace.yaml
 
 # 2. Create Cloudflare secret
 ./certificates/create-cloudflare-secret.sh
@@ -51,29 +51,29 @@ helm upgrade --install traefik traefik/traefik \
   --wait
 
 # 4. Apply middleware
-kubectl apply -f middleware/
+kubectl --context epaflix apply -f middleware/
 
 # 5. Deploy test app
-kubectl apply -f examples/whoami-demo.yaml
+kubectl --context epaflix apply -f examples/whoami-demo.yaml
 ```
 
 ## Verification Commands
 
 ```bash
 # Check Traefik pods
-kubectl -n traefik-system get pods
+kubectl --context epaflix -n traefik-system get pods
 
 # Check LoadBalancer IP
-kubectl -n traefik-system get svc traefik
+kubectl --context epaflix -n traefik-system get svc traefik
 
 # Check certificate generation logs
-kubectl -n traefik-system logs -l app.kubernetes.io/name=traefik | grep -i acme
+kubectl --context epaflix -n traefik-system logs -l app.kubernetes.io/name=traefik | grep -i acme
 
 # Test whoami service
-kubectl -n whoami-test get pods,svc,ingressroute
+kubectl --context epaflix -n whoami-test get pods,svc,ingressroute
 
 # View certificates
-kubectl -n traefik-system exec -it deployment/traefik -- cat /data/acme.json
+kubectl --context epaflix -n traefik-system exec -it deployment/traefik -- cat /data/acme.json
 ```
 
 ## Testing Access
@@ -106,17 +106,17 @@ Local Record:
 ### Certificate not issued after 5 minutes
 ```bash
 # Check Traefik logs for errors
-kubectl -n traefik-system logs -l app.kubernetes.io/name=traefik --tail=100
+kubectl --context epaflix -n traefik-system logs -l app.kubernetes.io/name=traefik --tail=100
 
 # Verify Cloudflare token
-kubectl -n traefik-system get secret cloudflare-api-token -o jsonpath='{.data.api-token}' | base64 -d
+kubectl --context epaflix -n traefik-system get secret cloudflare-api-token -o jsonpath='{.data.api-token}' | base64 -d
 ```
 
 ### LoadBalancer stuck in Pending
 ```bash
 # Check kube-vip cloud provider
-kubectl -n kube-system get configmap kubevip -o yaml
-kubectl -n kube-system logs -l component=kube-vip-cloud-provider
+kubectl --context epaflix -n kube-system get configmap kubevip -o yaml
+kubectl --context epaflix -n kube-system logs -l component=kube-vip-cloud-provider
 ```
 
 ### DNS not resolving
@@ -133,19 +133,19 @@ ssh <pihole-ip> "dig whoami.epaflix.com"
 
 ```bash
 # Remove test app
-kubectl delete -f examples/whoami-demo.yaml
+kubectl --context epaflix delete -f examples/whoami-demo.yaml
 
 # Remove Traefik
 helm -n traefik-system uninstall traefik
 
 # Remove middleware
-kubectl delete -f middleware/
+kubectl --context epaflix delete -f middleware/
 
 # Remove secret
-kubectl -n traefik-system delete secret cloudflare-api-token
+kubectl --context epaflix -n traefik-system delete secret cloudflare-api-token
 
 # Remove namespace
-kubectl delete namespace traefik-system
+kubectl --context epaflix delete namespace traefik-system
 ```
 
 ## Configuration Files Summary

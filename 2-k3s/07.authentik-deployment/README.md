@@ -47,7 +47,7 @@ Media storage is provisioned automatically via `local-path` StorageClass.
 
 ```bash
 # Create namespace
-kubectl apply -f namespace.yaml
+kubectl --context epaflix apply -f namespace.yaml
 
 # Add Helm repository and install
 helm repo add authentik https://charts.goauthentik.io
@@ -93,8 +93,8 @@ PGPASSWORD='<AUTHENTIK_DB_PASSWORD>' pg_dump \
   > authentik-db-$(date +%Y%m%d).sql
 
 # Backup media files (from local-path PVC on the worker node)
-MEDIA_POD=$(kubectl get pod -n app-authentik -l app.kubernetes.io/name=authentik -o jsonpath='{.items[0].metadata.name}')
-kubectl exec -n app-authentik $MEDIA_POD -- tar czf - /media > authentik-media-$(date +%Y%m%d).tar.gz
+MEDIA_POD=$(kubectl --context epaflix get pod -n app-authentik -l app.kubernetes.io/name=authentik -o jsonpath='{.items[0].metadata.name}')
+kubectl --context epaflix exec -n app-authentik $MEDIA_POD -- tar czf - /media > authentik-media-$(date +%Y%m%d).tar.gz
 ```
 
 ## Restore
@@ -127,8 +127,8 @@ The script will:
 ./deploy.sh
 
 # 2. Scale down pods
-kubectl -n app-authentik scale deployment/authentik-server --replicas=0
-kubectl -n app-authentik scale deployment/authentik-worker --replicas=0
+kubectl --context epaflix -n app-authentik scale deployment/authentik-server --replicas=0
+kubectl --context epaflix -n app-authentik scale deployment/authentik-worker --replicas=0
 
 # 3. Restore database
 PGPASSWORD='<AUTHENTIK_DB_PASSWORD>' psql \
@@ -149,8 +149,8 @@ cat authentik-media-20260120.tar.gz | \
   "sudo tar xzf - -C /"
 
 # 5. Scale up pods
-kubectl -n app-authentik scale deployment/authentik-server --replicas=2
-kubectl -n app-authentik scale deployment/authentik-worker --replicas=1
+kubectl --context epaflix -n app-authentik scale deployment/authentik-server --replicas=2
+kubectl --context epaflix -n app-authentik scale deployment/authentik-worker --replicas=1
 ```
 
 ## Upgrading
@@ -246,8 +246,8 @@ All configuration is managed via [helm-values.yaml](helm-values.yaml):
    ```
 3. Wait for rollout:
    ```bash
-   kubectl rollout status deployment/authentik-server -n app-authentik
-   kubectl rollout status deployment/authentik-worker -n app-authentik
+   kubectl --context epaflix rollout status deployment/authentik-server -n app-authentik
+   kubectl --context epaflix rollout status deployment/authentik-worker -n app-authentik
    ```
 
 **Warning**: Do NOT change `authentik.secret_key` after initial deployment - this will break sessions and user authentication.
@@ -463,7 +463,7 @@ shipped inside a SOPS-encrypted Secret:
 > Same check straight from the cluster, no age key needed - this is the real
 > break-glass path, since the token is only useful while the API is up anyway:
 > ```bash
-> BP=$(kubectl -n app-authentik get secret authentik-iac-blueprint -o jsonpath='{.data.*}' \
+> BP=$(kubectl --context epaflix -n app-authentik get secret authentik-iac-blueprint -o jsonpath='{.data.*}' \
 >      | base64 -d | awk '/identifiers:/,0' | awk -F': *' '/^[[:space:]]*key:/{print $2; exit}')
 > ```
 
@@ -737,36 +737,36 @@ helm list -n app-authentik
 helm status authentik -n app-authentik
 
 # Check all resources
-kubectl -n app-authentik get all
+kubectl --context epaflix -n app-authentik get all
 
 # Check pods
-kubectl -n app-authentik get pods -o wide
+kubectl --context epaflix -n app-authentik get pods -o wide
 
 # Check PVC binding
-kubectl -n app-authentik get pvc
+kubectl --context epaflix -n app-authentik get pvc
 
 # Check IngressRoute
-kubectl -n app-authentik get ingressroute
+kubectl --context epaflix -n app-authentik get ingressroute
 ```
 
 ### Check Logs
 
 ```bash
 # Server logs
-kubectl -n app-authentik logs -l app.kubernetes.io/name=authentik,app.kubernetes.io/component=server -f
+kubectl --context epaflix -n app-authentik logs -l app.kubernetes.io/name=authentik,app.kubernetes.io/component=server -f
 
 # Worker logs
-kubectl -n app-authentik logs -l app.kubernetes.io/name=authentik,app.kubernetes.io/component=worker -f
+kubectl --context epaflix -n app-authentik logs -l app.kubernetes.io/name=authentik,app.kubernetes.io/component=worker -f
 
 # All Authentik logs
-kubectl -n app-authentik logs -l app.kubernetes.io/name=authentik -f --max-log-requests=10
+kubectl --context epaflix -n app-authentik logs -l app.kubernetes.io/name=authentik -f --max-log-requests=10
 ```
 
 ### Verify Certificate
 
 ```bash
 # Check Traefik logs for ACME/Let's Encrypt
-kubectl -n traefik-system logs -l app.kubernetes.io/name=traefik | grep -i acme
+kubectl --context epaflix -n traefik-system logs -l app.kubernetes.io/name=traefik | grep -i acme
 
 # Test HTTPS
 curl -I https://auth.epaflix.com
@@ -784,7 +784,7 @@ helm upgrade authentik authentik/authentik \
   --values helm-values.yaml
 
 # Or use kubectl (temporary, will revert on next Helm upgrade):
-kubectl -n app-authentik scale deployment/authentik-server --replicas=3
+kubectl --context epaflix -n app-authentik scale deployment/authentik-server --replicas=3
 ```
 
 ### Scale Worker Replicas
@@ -797,7 +797,7 @@ helm upgrade authentik authentik/authentik \
   --values helm-values.yaml
 
 # Or use kubectl (temporary):
-kubectl -n app-authentik scale deployment/authentik-worker --replicas=2
+kubectl --context epaflix -n app-authentik scale deployment/authentik-worker --replicas=2
 ```
 
 **Note:** Media PVC uses `local-path` (ReadWriteOnce). Multi-replica access shares via the pod's mounted PVC.
@@ -808,10 +808,10 @@ kubectl -n app-authentik scale deployment/authentik-worker --replicas=2
 
 ```bash
 # Check pod events
-kubectl -n app-authentik describe pods
+kubectl --context epaflix -n app-authentik describe pods
 
 # Check logs
-kubectl -n app-authentik logs -l app.kubernetes.io/name=authentik --tail=100
+kubectl --context epaflix -n app-authentik logs -l app.kubernetes.io/name=authentik --tail=100
 
 # Common issues:
 # - PVC not bound: Check local-path provisioner is running
@@ -823,7 +823,7 @@ kubectl -n app-authentik logs -l app.kubernetes.io/name=authentik --tail=100
 
 ```bash
 # Check Traefik logs
-kubectl -n traefik-system logs -l app.kubernetes.io/name=traefik | grep -i acme
+kubectl --context epaflix -n traefik-system logs -l app.kubernetes.io/name=traefik | grep -i acme
 
 # Common issues:
 # - Cloudflare API token invalid
@@ -835,26 +835,26 @@ kubectl -n traefik-system logs -l app.kubernetes.io/name=traefik | grep -i acme
 
 ```bash
 # Test database connection from within cluster
-kubectl run -it --rm psql-test --image=postgres:16 --restart=Never -- \
+kubectl --context epaflix run -it --rm psql-test --image=postgres:16 --restart=Never -- \
   psql "postgresql://authentik:<AUTHENTIK_DB_PASSWORD>@192.168.10.105:5432/authentik" -c "SELECT version();"
 
 # Check CloudNativePG cluster status
-kubectl -n postgres-system get cluster
-kubectl -n postgres-system get pods
+kubectl --context epaflix -n postgres-system get cluster
+kubectl --context epaflix -n postgres-system get pods
 ```
 
 ### Cannot Access https://auth.epaflix.com
 
 ```bash
 # Check IngressRoute
-kubectl -n app-authentik get ingressroute
-kubectl -n app-authentik describe ingressroute authentik-https
+kubectl --context epaflix -n app-authentik get ingressroute
+kubectl --context epaflix -n app-authentik describe ingressroute authentik-https
 
 # Check service
-kubectl -n app-authentik get svc
+kubectl --context epaflix -n app-authentik get svc
 
 # Check Traefik is running
-kubectl -n traefik-system get pods,svc
+kubectl --context epaflix -n traefik-system get pods,svc
 
 # Check DNS (from local machine)
 nslookup auth.epaflix.com
@@ -866,10 +866,10 @@ nslookup auth.epaflix.com
 
 ```bash
 # Test SMTP from within a pod
-kubectl -n app-authentik exec -it deployment/authentik-server -- ak test_email admin@example.com
+kubectl --context epaflix -n app-authentik exec -it deployment/authentik-server -- ak test_email admin@example.com
 
 # Check logs for SMTP errors
-kubectl -n app-authentik logs -l app.kubernetes.io/name=authentik,app.kubernetes.io/component=server | grep -i smtp
+kubectl --context epaflix -n app-authentik logs -l app.kubernetes.io/name=authentik,app.kubernetes.io/component=server | grep -i smtp
 ```
 
 ## Uninstall
@@ -879,11 +879,11 @@ kubectl -n app-authentik logs -l app.kubernetes.io/name=authentik,app.kubernetes
 helm uninstall authentik -n app-authentik
 
 # Delete namespace and storage (optional)
-kubectl delete -f storage/pv-pvc.yaml
-kubectl delete -f namespace.yaml
+kubectl --context epaflix delete -f storage/pv-pvc.yaml
+kubectl --context epaflix delete -f namespace.yaml
 
 # Clean media PVC (optional — will be recreated on next deploy)
-kubectl delete pvc authentik-media-pvc -n app-authentik
+kubectl --context epaflix delete pvc authentik-media-pvc -n app-authentik
 ```
 
 **Note:** This does NOT delete the PostgreSQL database. To clean the database:
@@ -990,13 +990,13 @@ the 10 servarr UIs (#176) - so rotate when you can watch it.
 Manual fallback, if Reloader is down or you need the restart now:
 
 ```bash
-kubectl rollout restart deploy/authentik-server deploy/authentik-worker -n app-authentik
+kubectl --context epaflix rollout restart deploy/authentik-server deploy/authentik-worker -n app-authentik
 ```
 
 Verify a real send (not just config):
 
 ```bash
-kubectl exec deploy/authentik-worker -n app-authentik -- \
+kubectl --context epaflix exec deploy/authentik-worker -n app-authentik -- \
   sh -c 'ak test_email "$AUTHENTIK_EMAIL__USERNAME"'   # self-send, no address in argv
 ```
 
@@ -1019,8 +1019,8 @@ Password: (Set during initial-setup)
 ## Support
 
 For issues specific to this deployment:
-1. Check logs: `kubectl -n app-authentik logs -l app.kubernetes.io/name=authentik`
-2. Check pod status: `kubectl -n app-authentik get pods`
+1. Check logs: `kubectl --context epaflix -n app-authentik logs -l app.kubernetes.io/name=authentik`
+2. Check pod status: `kubectl --context epaflix -n app-authentik get pods`
 3. Review troubleshooting section above
 4. Check Helm release: `helm status authentik -n app-authentik`
 5. Check Authentik documentation for application-specific issues

@@ -28,7 +28,7 @@ When the sequence is incorrect, new series get assigned IDs that already exist, 
 
 ### 1. Check for duplicate series IDs
 ```bash
-SONARR_PW=$(kubectl get secret servarr-postgres -n servarr -o jsonpath='{.data.sonarr-password}' | base64 -d)
+SONARR_PW=$(kubectl --context epaflix get secret servarr-postgres -n servarr -o jsonpath='{.data.sonarr-password}' | base64 -d)
 
 PGPASSWORD="${SONARR_PW}" psql -h 192.168.10.105 -U sonarr -d sonarr-main << 'EOF'
 -- Find all duplicate series IDs
@@ -75,12 +75,12 @@ EOF
 
 ### Quick Fix (Recommended)
 ```bash
-kubectl apply -f /home/spy/Documents/Epaflix/k3s-swarm-proxmox/2-k3s/08.servarr/sonarr/fix-duplicate-series.yaml
+kubectl --context epaflix apply -f /home/spy/Documents/Epaflix/k3s-swarm-proxmox/2-k3s/08.servarr/sonarr/fix-duplicate-series.yaml
 ```
 
 Wait for job completion and check logs:
 ```bash
-kubectl logs -n servarr job/fix-sonarr-duplicate-series -f
+kubectl --context epaflix logs -n servarr job/fix-sonarr-duplicate-series -f
 ```
 
 The job will:
@@ -93,16 +93,16 @@ The job will:
 ### Restart Sonarr After Fix
 ```bash
 # Restart to clear any cached series data
-kubectl rollout restart deployment/sonarr -n servarr
+kubectl --context epaflix rollout restart deployment/sonarr -n servarr
 
 # Wait for pod to be ready
-kubectl get pods -n servarr -l app=sonarr -w
+kubectl --context epaflix get pods -n servarr -l app=sonarr -w
 ```
 
 ### Manual Fix (If needed)
 
 ```bash
-SONARR_PW=$(kubectl get secret servarr-postgres -n servarr -o jsonpath='{.data.sonarr-password}' | base64 -d)
+SONARR_PW=$(kubectl --context epaflix get secret servarr-postgres -n servarr -o jsonpath='{.data.sonarr-password}' | base64 -d)
 
 PGPASSWORD="${SONARR_PW}" psql -h 192.168.10.105 -U sonarr -d sonarr-main << 'EOF'
 BEGIN;
@@ -159,7 +159,7 @@ EOF
 
 ### 3. Check Sonarr logs
 ```bash
-kubectl logs -n servarr deployment/sonarr --tail=50
+kubectl --context epaflix logs -n servarr deployment/sonarr --tail=50
 ```
 **Expected**: No more "MultipleSeriesFoundException" errors
 
@@ -182,14 +182,14 @@ PGPASSWORD="${SONARR_PW}" psql -h 192.168.10.105 -U sonarr -d sonarr-main \
 Always run after restoring from backup:
 ```bash
 # Check and fix ALL sequences
-kubectl apply -f /home/spy/Documents/Epaflix/k3s-swarm-proxmox/2-k3s/08.servarr/sonarr/fix-duplicate-series.yaml
+kubectl --context epaflix apply -f /home/spy/Documents/Epaflix/k3s-swarm-proxmox/2-k3s/08.servarr/sonarr/fix-duplicate-series.yaml
 ```
 
 ### Regular Health Checks
 Add to maintenance scripts:
 ```bash
 #!/bin/bash
-SONARR_PW=$(kubectl get secret servarr-postgres -n servarr -o jsonpath='{.data.sonarr-password}' | base64 -d)
+SONARR_PW=$(kubectl --context epaflix get secret servarr-postgres -n servarr -o jsonpath='{.data.sonarr-password}' | base64 -d)
 
 echo "Checking Sonarr database health..."
 
@@ -290,5 +290,5 @@ EOF
 
 ### If imports still fail:
 - Check episode data isn't also duplicated
-- Run episode duplicate fix: `kubectl apply -f fix-duplicate-episodes.yaml`
+- Run episode duplicate fix: `kubectl --context epaflix apply -f fix-duplicate-episodes.yaml`
 - Check EpisodeFiles aren't duplicated: See TROUBLESHOOTING-DUPLICATE-FILE-IDS.md

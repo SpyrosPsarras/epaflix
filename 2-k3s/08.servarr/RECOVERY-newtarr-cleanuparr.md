@@ -47,8 +47,8 @@ Found on worker-62:
 
 ### 1. Scale Down Apps
 ```bash
-kubectl -n servarr scale deployment huntarr --replicas=0
-kubectl -n servarr scale deployment cleanuparr --replicas=0
+kubectl --context epaflix -n servarr scale deployment huntarr --replicas=0
+kubectl --context epaflix -n servarr scale deployment cleanuparr --replicas=0
 ```
 
 ### 2. Copy Old Databases from Worker-62
@@ -82,15 +82,15 @@ ssh ubuntu@192.168.10.65 'sudo chown 568:568 /var/lib/rancher/k3s/storage/pvc-52
 
 ### 4. Scale Up Apps
 ```bash
-kubectl -n servarr scale deployment huntarr --replicas=1
-kubectl -n servarr scale deployment cleanuparr --replicas=1
+kubectl --context epaflix -n servarr scale deployment huntarr --replicas=1
+kubectl --context epaflix -n servarr scale deployment cleanuparr --replicas=1
 ```
 
 ## Verification
 
 ### Huntarr Status
 ```bash
-kubectl -n servarr logs huntarr-847bd4b69f-j9klj --tail=50
+kubectl --context epaflix -n servarr logs huntarr-847bd4b69f-j9klj --tail=50
 ```
 
 **Results:**
@@ -102,7 +102,7 @@ kubectl -n servarr logs huntarr-847bd4b69f-j9klj --tail=50
 
 ### Cleanuparr Status
 ```bash
-kubectl -n servarr logs cleanuparr-c8c65cb64-lx75l --tail=30
+kubectl --context epaflix -n servarr logs cleanuparr-c8c65cb64-lx75l --tail=30
 ```
 
 **Results:**
@@ -482,7 +482,7 @@ Cross-links: #561, #466, #468, #702, #730.
 > see what is actually being called, read the `url` column - never the UI:
 >
 > ```bash
-> kubectl exec -n servarr deploy/cleanuparr -- python3 -c "import sqlite3
+> kubectl --context epaflix exec -n servarr deploy/cleanuparr -- python3 -c "import sqlite3
 > c=sqlite3.connect('file:/config/cleanuparr.db?mode=ro',uri=True)
 > for r in c.execute('SELECT name,url,external_url FROM arr_instances ORDER BY name'): print(r)"
 > ```
@@ -557,7 +557,7 @@ file seed first so the blocklist pointer has a target, then the reaping rules.
 1. **Confirm the #138 blocklist file is present.** On a fresh PVC the
    `seed-config` initContainer restores `/config/custom-blocklist-sonarr.txt`
    automatically (non-clobber; see the "#138" section). Verify:
-   `kubectl -n servarr exec deploy/cleanuparr -- ls -l /config/custom-blocklist-sonarr.txt`.
+   `kubectl --context epaflix -n servarr exec deploy/cleanuparr -- ls -l /config/custom-blocklist-sonarr.txt`.
 2. **Re-point the Sonarr content-blocker (manual, SQLite-resident).** UI →
    **Content Blocker → Sonarr**: set blocklist path =
    `/config/custom-blocklist-sonarr.txt`, confirm Sonarr content-blocker
@@ -599,7 +599,7 @@ file seed first so the blocklist pointer has a target, then the reaping rules.
 7. **Confirm Dry Run is OFF.** UI → **General settings**: verify Dry Run is
    **disabled** (`general_configs.dry_run=0`). If Dry Run is ON the reaper
    silently no-ops — every rule above evaluates but deletes nothing.
-8. **Restart + verify.** `kubectl -n servarr rollout restart deploy/cleanuparr`;
+8. **Restart + verify.** `kubectl --context epaflix -n servarr rollout restart deploy/cleanuparr`;
    confirm the pod is healthy and the Download Cleaner / Queue Cleaner schedules
    show in the logs. Re-confirm against live with a read-only DB copy if in doubt
    (same `cp … /tmp/cu-ro.db` + `sqlite3` recipe used to source this table —
@@ -682,8 +682,8 @@ credential is copied to a workstation.
    `cleanuparr.db-wal`.
 
    ```bash
-   POD=$(kubectl -n servarr get pod -l app=cleanuparr -o jsonpath='{.items[0].metadata.name}')
-   kubectl -n servarr exec "$POD" -- python3 -c "
+   POD=$(kubectl --context epaflix -n servarr get pod -l app=cleanuparr -o jsonpath='{.items[0].metadata.name}')
+   kubectl --context epaflix -n servarr exec "$POD" -- python3 -c "
    import sqlite3
    src=sqlite3.connect('file:/config/cleanuparr.db?mode=ro',uri=True)
    dst=sqlite3.connect('/config/cleanuparr.db.bak-PRE-CHANGE')
@@ -811,11 +811,11 @@ mkdir -p /tmp/newtarr-seed
 for f in sonarr.json radarr.json lidarr.json readarr.json whisparr.json \
          eros.json swaparr.json general.json; do
   ssh ubuntu@192.168.10.51 \
-    "kubectl -n servarr exec deploy/newtarr -- sh -c 'cat /config/$f'" \
+    "kubectl --context epaflix -n servarr exec deploy/newtarr -- sh -c 'cat /config/$f'" \
     > /tmp/newtarr-seed/$f
 done
 ssh ubuntu@192.168.10.51 \
-  "kubectl -n servarr exec deploy/newtarr -- sh -c 'cat /config/scheduling/list.json'" \
+  "kubectl --context epaflix -n servarr exec deploy/newtarr -- sh -c 'cat /config/scheduling/list.json'" \
   > /tmp/newtarr-seed/scheduling-list.json
 
 # 2. Rebuild a PLAINTEXT manifest (kind: Secret, name newtarr-config-seed,
@@ -930,7 +930,7 @@ CronJob** `newtarr-config-drift`
 To inspect a failed run's per-file diff:
 
 ```sh
-kubectl -n servarr logs job/$(kubectl -n servarr get jobs \
+kubectl --context epaflix -n servarr logs job/$(kubectl --context epaflix -n servarr get jobs \
   -l app=newtarr-config-drift --sort-by=.metadata.creationTimestamp \
   -o name | tail -1 | cut -d/ -f2)
 ```
@@ -997,7 +997,7 @@ fires, upstream has changed (or the fetch failed). First check the failed Job's
 logs for the printed diff:
 
 ```sh
-kubectl -n servarr logs job/$(kubectl -n servarr get jobs \
+kubectl --context epaflix -n servarr logs job/$(kubectl --context epaflix -n servarr get jobs \
   -l app=cleanuparr-blocklist-drift --sort-by=.metadata.creationTimestamp \
   -o name | tail -1 | cut -d/ -f2)
 ```
@@ -1050,9 +1050,9 @@ shred -u /tmp/seed-plain.yaml
 # 5. Live-apply the merged file. The non-clobber seed-config initContainer will
 #    NOT overwrite a populated PVC, so push the file into the running pod once
 #    (the sonarr_blocklist_path pointer is unchanged, still SQLite-resident):
-kubectl -n servarr cp /tmp/custom-blocklist-sonarr.txt \
-  "$(kubectl -n servarr get pod -l app=cleanuparr -o name | head -1 | cut -d/ -f2)":/config/custom-blocklist-sonarr.txt
-kubectl -n servarr rollout restart deploy/cleanuparr   # reload patterns
+kubectl --context epaflix -n servarr cp /tmp/custom-blocklist-sonarr.txt \
+  "$(kubectl --context epaflix -n servarr get pod -l app=cleanuparr -o name | head -1 | cut -d/ -f2)":/config/custom-blocklist-sonarr.txt
+kubectl --context epaflix -n servarr rollout restart deploy/cleanuparr   # reload patterns
 
 # 6. Commit the refreshed seed + baseline via a branch+PR (rebase onto origin/main,
 #    push --force-with-lease, wait for `validate`, gh pr merge --merge). The drift
@@ -1110,7 +1110,7 @@ element (also mirrored in `secrets.yml`); substitute it for `<APIKEY>` below —
 
 ```sh
 # Per arr — example uses sonarr (svc sonarr:8989). Repeat for sonarr2:8989 and radarr:7878.
-# Run from a pod/host with in-cluster network reach (e.g. kubectl exec into the arr pod,
+# Run from a pod/host with in-cluster network reach (e.g. kubectl --context epaflix exec into the arr pod,
 # or a debug pod in namespace servarr).
 
 # 1. GET the current mediamanagement config (read).
@@ -1142,7 +1142,7 @@ Management → enable "Use Hardlinks instead of Copy" → Save.**
    and confirm it shares an inode (`nlink>=2`, same device) across
    `downloads/` and the library (e.g. `tvshows/`):
    ```sh
-   kubectl -n servarr exec deploy/sonarr -- \
+   kubectl --context epaflix -n servarr exec deploy/sonarr -- \
      stat -c '%i %h %n' /media/downloads/<file> /media/tvshows/<path>/<file>
    ```
    Same inode number + link-count `2` = the import hardlinked (not copied).
