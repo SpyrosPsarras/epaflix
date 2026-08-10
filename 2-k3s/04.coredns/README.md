@@ -129,13 +129,14 @@ kubectl run test-curl --image=curlimages/curl:latest --restart=Never --rm -it --
 
 All the following domains now work from inside pods:
 
-**Public Services** (*.epaflix.com — all resolve to 192.168.10.101 via Pi-hole):
+**Public Services** (`*.epaflix.com`, resolved by Pi-hole - almost all to
+`192.168.10.101`, the exceptions are noted inline):
 - sonarr.epaflix.com
 - sonarr2.epaflix.com
 - radarr.epaflix.com
 - prowlarr.epaflix.com
 - bazarr.epaflix.com
-- qbittorrent.epaflix.com
+- qbittorrent.epaflix.com (`192.168.10.102`, Traefik `internal` entry point)
 - homarr.epaflix.com
 - newtarr.epaflix.com
 - cleanuparr.epaflix.com
