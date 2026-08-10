@@ -213,6 +213,75 @@ YAML
 git -C "$tmp" add fixtures/short-high-entropy.yaml
 expect_fail "18-character high-entropy value under a non-sensitive key fails"
 
+# #822: an unbroken short token that mixes letter case and digits under a
+# non-sensitive key. Synthetic constructed classifier input, not a credential.
+reset_repo
+cat >"$tmp/fixtures/short-mixed-class.yaml" <<'YAML'
+# Synthetic only: this value is deliberately not a real credential.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: short-mixed-class-fixture
+type: Opaque
+stringData:
+  bootstrap-code: "Passw0rdX7"
+YAML
+git -C "$tmp" add fixtures/short-mixed-class.yaml
+expect_fail "short mixed-class value under a non-sensitive key fails"
+
+# #822 negative: lowercase template identifiers in the same length band stay
+# editable. Separated and single-class values are not credential-shaped.
+reset_repo
+servarr="2-k3s/08.servarr/_shared/secrets/postgres-secret.yaml"
+printf '  optional-database: "jellyseerr"\n  optional-user: "prowlarr"\n  optional-instance: "sonarr2-database"\n' >>"$tmp/$servarr"
+git -C "$tmp" add "$servarr"
+expect_pass "short lowercase template identifiers still pass the new band"
+
+# #823: an opaque scalar above the analysed length limit is rejected instead of
+# skipped. The padding repeats 12 synthetic characters, so it has no base64 or
+# hex run and far too little variety for the entropy band to reach.
+reset_repo
+python3 - "$tmp/fixtures/oversized-scalar.yaml" 2400 <<'PY'
+import sys
+from pathlib import Path
+
+padding = "a1-b2_c3.d4/" * (int(sys.argv[2]) // 12)
+Path(sys.argv[1]).write_text(
+    "# Synthetic only: this padding is deliberately not a real credential.\n"
+    "apiVersion: v1\n"
+    "kind: Secret\n"
+    "metadata:\n"
+    "  name: oversized-scalar-fixture\n"
+    "type: Opaque\n"
+    "stringData:\n"
+    f'  bootstrap-blob: "{padding}"\n'
+)
+PY
+git -C "$tmp" add fixtures/oversized-scalar.yaml
+expect_fail "opaque plaintext scalar above the length limit fails"
+
+# #823 boundary: the same padding shape at 2040 characters is still analysed and
+# still passes, so the limit is what rejects the oversized fixture above.
+reset_repo
+python3 - "$tmp/fixtures/bounded-scalar.yaml" 2040 <<'PY'
+import sys
+from pathlib import Path
+
+padding = "a1-b2_c3.d4/" * (int(sys.argv[2]) // 12)
+Path(sys.argv[1]).write_text(
+    "# Synthetic only: this padding is deliberately not a real credential.\n"
+    "apiVersion: v1\n"
+    "kind: Secret\n"
+    "metadata:\n"
+    "  name: bounded-scalar-fixture\n"
+    "type: Opaque\n"
+    "stringData:\n"
+    f'  bootstrap-blob: "{padding}"\n'
+)
+PY
+git -C "$tmp" add fixtures/bounded-scalar.yaml
+expect_pass "opaque plaintext scalar at the length limit is analysed and passes"
+
 # Internal whitespace and printable Unicode must not disable entropy analysis.
 # Both values are constructed synthetic character sets, not usable credentials.
 reset_repo
