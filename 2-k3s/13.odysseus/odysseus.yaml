@@ -22,9 +22,9 @@ metadata:
     app: odysseus
   annotations:
     # Reloader (#299): env-var secretKeyRef consumer (odysseus-secrets,
-    # claude-oauth-token), doesn't auto-roll otherwise. Scoped to the exact
+    # cliproxy-client-key), doesn't auto-roll otherwise. Scoped to the exact
     # Secrets, not reloader.stakater.com/auto.
-    secret.reloader.stakater.com/reload: "odysseus-secrets,claude-oauth-token"
+    secret.reloader.stakater.com/reload: "odysseus-secrets,cliproxy-client-key"
 spec:
   replicas: 1
   selector:
@@ -209,13 +209,25 @@ spec:
                 secretKeyRef:
                   name: odysseus-secrets
                   key: HF_TOKEN
-            # Claude subscription heartbeat (run_local Task). Long-lived OAuth
-            # token from `claude setup-token`; keeps the subscription warm.
-            - name: CLAUDE_CODE_OAUTH_TOKEN
+            # Claude Code heartbeat (run_local Task). Routed through the
+            # in-cluster CLIProxyAPI (2-k3s/17.remote-pi) instead of straight
+            # to api.anthropic.com, so the cluster holds ONE set of Claude
+            # subscription credentials - the provider accounts already
+            # authorised in cliproxy's Postgres auth store. The old
+            # CLAUDE_CODE_OAUTH_TOKEN / `claude-oauth-token` Secret is gone;
+            # it MUST stay gone, an OAuth token present here outranks
+            # ANTHROPIC_AUTH_TOKEN and would bypass the proxy.
+            #
+            # Service DNS, not cliproxy.epaflix.com: that name resolves only
+            # on the LAN via Pi-hole and would leave the cluster for the
+            # Traefik internal LB and back. Plain http is fine in-cluster.
+            - name: ANTHROPIC_BASE_URL
+              value: "http://cliproxy.remote-pi.svc.cluster.local:8317"
+            - name: ANTHROPIC_AUTH_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: claude-oauth-token
-                  key: CLAUDE_CODE_OAUTH_TOKEN
+                  name: cliproxy-client-key
+                  key: ANTHROPIC_AUTH_TOKEN
             # NOTE: do NOT set a container-wide PATH env here — overriding the
             # image default drops /usr/sbin (groupadd/gosu/useradd) and breaks
             # the entrypoint. The run_local heartbeat Task prepends the CLI dir

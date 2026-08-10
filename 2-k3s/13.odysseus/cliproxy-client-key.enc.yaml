@@ -1,0 +1,46 @@
+# CLIProxyAPI client API key for the Claude Code heartbeat Task (#184, #858).
+#
+# The Odysseus `run_local` cron Task runs `claude -p "just reply pong"` a few
+# times a day. It used to authenticate straight to api.anthropic.com with a
+# long-lived `sk-ant-oat` subscription token (Secret `claude-oauth-token`).
+# It now goes through the in-cluster CLIProxyAPI instead
+# (http://cliproxy.remote-pi.svc.cluster.local:8317), so this cluster keeps
+# exactly ONE set of Claude subscription credentials - the provider accounts
+# already authorised inside cliproxy's Postgres-backed auth store.
+#
+# THIS VALUE MUST EQUAL `omp-api-key` IN
+# 2-k3s/17.remote-pi/cliproxy/cliproxy-secrets.enc.yaml.
+# It is the same client key, duplicated only because a `secretKeyRef` cannot
+# cross namespaces (cliproxy lives in `remote-pi`, odysseus in `odysseus`).
+# That key is also typed into cliproxy's own `config.yaml` `api-keys:` by hand
+# through the management API (see 2-k3s/17.remote-pi/README.md and #861), so a
+# rotation is three edits: the management PUT, cliproxy-secrets.enc.yaml, and
+# this file. Let them drift and the heartbeat gets 403 from /v1/messages.
+#
+# Encrypted in place with SOPS+age - see .github/instructions/sops.instructions.md.
+apiVersion: v1
+kind: Secret
+metadata:
+    name: cliproxy-client-key
+    namespace: odysseus
+    labels:
+        app.kubernetes.io/name: cliproxy
+        app.kubernetes.io/component: client-key
+type: Opaque
+stringData:
+    ANTHROPIC_AUTH_TOKEN: ENC[AES256_GCM,data:vp4iSBGNuI2OWSYFqsFfCHfBN5OXEgPqeKV9zic2aY6X5R70dzZfIi/s4U6UBgXOS5RlPw==,iv:50An6N3u8Ff41MdREhrrmp7c9a7QG+kZ9TxcajJJYUQ=,tag:d7Zj/67NxdbdOevIRg+70g==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBlSStFN3dvQTgveVFCWWZP
+            cWZKU25naCtjdnRPKy9hQi9GTCtOZG8vSVU0CmlFK282djh0RU0xS01FZnlZUUpE
+            Qnp4UmpLckFJMnM2OE11Y1FWcWdQdEUKLS0tIFhZTFJQcDRHNlU5bEwxd0IvTThJ
+            UVhoNGorSDExSm1YMCtiV0FJZzdKeEUKdtn55CAkNGiAyuS7FluY6aNR/PVhUrJA
+            kEKw9fSzaGnT6N/xDisJCRwopKsXrxsZJvs5MhN2HF4J+wB6zod/Cg==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1586thf5vkcdf5lcn3zwjpu8ltkwyq8efrhj8lr0vdrrt9k5f3qgsxeg7gx
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-08-10T16:58:23Z"
+    mac: ENC[AES256_GCM,data:J2L2dR8KCGI1ePJthlyTCfecqlFRtjuIjaV7Bs0ccJwaoNEaWHqJtGUjvTnrxpL1m8DbajESI8QdGLmhRINBeMHdnrplV7jpazt4FE4RLs1hteyQft+/rU4Ehj9gXuFc1iFb2YG8geqqQKMne0yWOJE+8FbrHWIf6DAYBadbr98=,iv:JyfkwQRKOd5/K5Mk7mjXYFFmJVRzKMOCa27O9/2vYDU=,tag:n9Jt/+Xsag1/RD2CUkcFLQ==,type:str]
+    version: 3.13.3
