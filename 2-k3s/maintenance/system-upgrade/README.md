@@ -12,9 +12,9 @@ The system-upgrade-controller applies an explicitly **pinned** K3s version (`spe
 
 1. **Masters are upgraded first**, one at a time (`concurrency: 1`), to preserve etcd quorum
 2. **Workers wait** until every master has completed its upgrade (`prepare: k3s-server`)
-3. **Workers are upgraded two at a time** (`concurrency: 2`), keeping at least 2 workers running for workloads
+3. **Workers are upgraded one at a time** (`concurrency: 1`), keeping 3 of the 4 workers running for workloads
 
-Before each node is upgraded, it is **cordoned** (no new pods scheduled) and **drained** (existing pods evicted gracefully). After the upgrade, the node is automatically uncordoned.
+Before each node is upgraded, it is **cordoned** (no new pods scheduled) and **drained** (existing pods evicted gracefully). On success the node is automatically uncordoned. On a **failed** drain it is not - see [Drain timeout](#a-drain-blew-its-timeout-and-the-node-is-still-cordoned).
 
 ```
 Upgrade order:
@@ -26,10 +26,16 @@ Upgrade order:
                                                                        │
                                                    ┌───────────────────┘
                                                    ▼
-                            [Worker] k3s-worker-61 + k3s-worker-62  (in parallel)
+                                     [Worker] k3s-worker-61
                                                    │
                                                    ▼
-                            [Worker] k3s-worker-63 + k3s-worker-65  (in parallel)
+                                     [Worker] k3s-worker-62
+                                                   │
+                                                   ▼
+                                     [Worker] k3s-worker-63
+                                                   │
+                                                   ▼
+                                     [Worker] k3s-worker-65
 ```
 
 ---
@@ -47,7 +53,7 @@ This stack is **not** installed with `kubectl apply -f`. It is reconciled by two
 
 | Application                  | Path                                         | What it manages                                  |
 |------------------------------|----------------------------------------------|--------------------------------------------------|
-| `system-upgrade-controller`  | `2-k3s/maintenance/system-upgrade/controller`| Vendored upstream CRD + controller Deployment + RBAC (v0.19.2) |
+| `system-upgrade-controller`  | `2-k3s/maintenance/system-upgrade/controller`| Vendored upstream CRD + controller Deployment + RBAC (v0.20.1) |
 | `system-upgrade-plans`       | `2-k3s/maintenance/system-upgrade/plans`     | The `k3s-server` + `k3s-agent` upgrade Plans (pinned `spec.version`) |
 
 Both Applications run `automated` with `selfHeal: true, prune: false` and `ServerSideApply=true`. Merging changes to `main` is the install/update mechanism — ArgoCD applies them automatically. The controller creates the `system-upgrade` namespace and its RBAC; the Plans App then populates the Plans.
@@ -346,6 +352,49 @@ kubectl uncordon <node-name>
 kubectl uncordon k3s-master-51
 ```
 
+### A drain blew its timeout and the node is still cordoned
+
+Both Plans set `drain.timeout: 300s` (issue #413). Read what that actually
+buys before relying on it:
+
+- The value is passed straight through as `kubectl drain --timeout`. There is
+  **no controller-side timer** and no alert of its own.
+- On expiry the drain container exits non-zero. `RestartPolicy` is `Never` and
+  `BackoffLimit` is `2`, so the Job tries **3 times total** and then goes
+  `Failed`.
+- Upstream does **not** un-cordon on failure. The node is left cordoned and
+  the roll does not continue past it.
+
+So the timeout converts "hangs forever while cordoned" into "gives up after 3
+attempts while cordoned". It bounds the stall; it does not self-heal.
+
+Find it and recover:
+
+```bash
+# Which node is cordoned, and did its drain Job fail?
+kubectl --context epaflix get nodes | grep SchedulingDisabled
+kubectl --context epaflix -n system-upgrade get jobs \
+  -o custom-columns=NAME:.metadata.name,FAILED:.status.failed,SUCCEEDED:.status.succeeded
+
+# The reason the eviction was refused (PDB, RWO volume, unmanaged pod)
+kubectl --context epaflix -n system-upgrade logs job/<job-name> -c drain
+```
+
+Fix the blocker first (that is the real bug - a PDB that can never be
+satisfied, or a volume that will not detach), then un-cordon:
+
+```bash
+kubectl --context epaflix uncordon <node-name>
+```
+
+`K3sNodeVersionSkew` is what catches this from the outside: the roll stops
+with the fleet on mixed kubelet versions, and that alert fires.
+
+> Keep `drain.timeout` under the Job's `ActiveDeadlineSeconds` (default
+> `600s`, settable via the `default-controller-env` ConfigMap). A larger value
+> is cut short by the active deadline anyway - upstream only logs
+> `drain timeout exceeds active deadline seconds` and carries on.
+
 ### Upgrade job fails with "node not found" or permission errors
 
 ```bash
@@ -443,7 +492,8 @@ To upgrade:
 2. **Edit both Plans** to the new tag — `spec.version` on `k3s-server` AND `k3s-agent`.
 3. **Open a PR and soak.** On merge, ArgoCD selfHeal applies the committed
    version automatically and the controller rolls masters (one at a time) then
-   workers (two at a time).
+   workers (one at a time) - 7 sequential drains, so budget the window for the
+   whole fleet, not for two batches.
 
 ### At-a-glance status
 
@@ -495,13 +545,35 @@ over on its own. (Cross-ref issue #74.)
 
 To **halt an in-flight unintended roll**:
 
-1. **Stop the controller first** so it does not re-trigger:
+1. **Suspend the ArgoCD App first - this is the only step that holds.**
    ```bash
-   kubectl -n system-upgrade scale deployment system-upgrade-controller --replicas=0
+   kubectl --context epaflix -n argocd patch application system-upgrade-controller \
+     --type merge -p '{"spec":{"syncPolicy":{"automated":null}}}'
+   kubectl --context epaflix -n argocd patch application system-upgrade-plans \
+     --type merge -p '{"spec":{"syncPolicy":{"automated":null}}}'
    ```
-2. Pin both Plans back to the **last-good version** in git (and/or set
-   `concurrency: 0` on both Plans), and/or **suspend the `system-upgrade-plans`
-   App** in ArgoCD so `selfHeal` does not fight you.
+   Both Apps run `selfHeal: true`
+   (`2-k3s/11.argocd/apps/app-system-upgrade-controller.yaml`,
+   `app-system-upgrade-plans.yaml`). Until automated sync is off, every cluster-side
+   change below is reverted by ArgoCD within minutes.
+2. **Then stop the controller** so it does not re-trigger:
+   ```bash
+   kubectl --context epaflix -n system-upgrade scale deployment \
+     system-upgrade-controller --replicas=0
+   ```
+   Ordering matters: run bare, before step 1, this scale is undone by `selfHeal`
+   and reads as "the stop lever does not work" (found by #413's readiness review).
+3. Pin both Plans back to the **last-good version** in git (and/or set
+   `concurrency: 0` on both Plans) so the state is correct once the Apps are
+   un-suspended.
+
+> **Prepare the lever before the window, not during it.** The roll drains every
+> worker, and Traefik is a single replica pinned to `k3s-worker-62` by an RWO
+> `local-path` PVC holding live ACME state, with no PDB. While 62 drains, every
+> `*.epaflix.com` route is down - **including the ArgoCD UI you would use to
+> suspend the App**. Suspend the Apps (or have a `kubectl` shell already open
+> against `192.168.10.100:6443`, which does not traverse Traefik) *before*
+> starting the roll.
 
 Note that **K3s binary downgrade is unsupported**. A true rollback to an earlier
 version is: restore the **pre-upgrade etcd snapshot** (above) + reinstall the
