@@ -5,16 +5,19 @@
 # unpackerr, homarr, the 5 servarr-postgres apps, odysseus, traefik's
 # Cloudflare token) don't auto-roll on Secret rotation. Reloader watches the
 # Secrets they reference and rolls the Deployment when one changes.
+# Extended by #780 to app-authentik (`authentik-app-secrets`, consumed as env
+# vars by authentik-server + authentik-worker via the chart's global.envFrom).
 #
 # Source:       this repo, path 2-k3s/16.reloader (kustomization.yaml with
-#               THREE `helmCharts:` entries — one stakater/reloader v2.2.14
+#               FOUR `helmCharts:` entries — one stakater/reloader v2.2.14
 #               release per watched namespace, see that file for why).
-# Destination:  resources land in the existing `servarr`, `traefik-system`
-#               and `odysseus` namespaces (no new namespace is created).
+# Destination:  resources land in the existing `servarr`, `traefik-system`,
+#               `odysseus` and `app-authentik` namespaces (no new namespace
+#               is created).
 # Sync:         MANUAL on first install (syncPolicy: {}) — the usual adoption
 #               order (push aligned git BEFORE creating the Application).
 #               After a clean manual `argocd app sync reloader` and confirming
-#               the 11 annotated Deployments actually roll on a live rotation
+#               the 13 annotated Deployments actually roll on a live rotation
 #               (see PR test plan), AND a 48h soak, flip to:
 #                 syncPolicy:
 #                   automated: { selfHeal: true, prune: false }
@@ -22,20 +25,22 @@
 #               `prune` flips to true only after a further week of clean
 #               operation, same as every other adoption in this repo.
 #
-# RBAC: namespace-scoped, not cluster-wide. Each of the 3 releases runs
+# RBAC: namespace-scoped, not cluster-wide. Each of the 4 releases runs
 # `reloader.watchGlobally: false`, which ties that release's pod +
 # ServiceAccount + Role + RoleBinding to its own namespace only (verified
 # against the pulled chart's templates, not assumed) — a plain Role, never a
 # ClusterRole. Reloader in servarr can only read Secrets/ConfigMaps in
-# servarr, and likewise for traefik-system and odysseus.
+# servarr, and likewise for traefik-system, odysseus and app-authentik.
 #
-# Deliberately OUT OF SCOPE for this Application (see issue #299 for why):
+# Deliberately OUT OF SCOPE for this Application (see issue #715 for why):
 #   - argocd-redis (argocd-server/repo-server/application-controller) and
 #     kube-prometheus-stack-grafana — chart-rendered Deployments where the
 #     Secret-consuming container is baked into an upstream chart we don't
 #     directly template; adding annotations means a values-contract change
 #     on argocd's own self-managed Application (selfHeal permanently off)
-#     or the observability stack. Tracked as a follow-up, not blocking this.
+#     or the observability stack. #780 proved the recipe for a chart-rendered
+#     consumer (per-namespace release + the chart's own deploymentAnnotations
+#     key), so #715 is now mechanical rather than unknown — still its own PR.
 #   - plugin-barman-cloud-* SIDECAR_IMAGE — CNPG operator/plugin-generated
 #     Secret+Deployment, not a static manifest in git; also not really a
 #     rotating credential (an image ref), low priority.

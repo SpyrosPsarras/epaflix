@@ -970,16 +970,28 @@ that is not the authenticated mailbox, which is why the old
 > had the identical pair of breaks; PR #684 fixed that half, and
 > `alertmanager-config-secret.enc.yaml` holds the same smarthost value.
 
-Rotation: the Secret is consumed as **env vars** via `global.envFrom`, so a
-changed value does **not** roll the pods (#299). Reloader is not deployed in
-`app-authentik` (only `servarr`, `traefik-system`, `odysseus` — see
-[16.reloader](../16.reloader/kustomization.yaml)), so after any change:
+Rotation: the Secret is consumed as **env vars** via `global.envFrom`, and env
+values are resolved once at pod start, so a changed value does not reach a
+running pod on its own (#299). Since #780 that restart is automatic - both
+Deployments carry
+`secret.reloader.stakater.com/reload: "authentik-app-secrets"` (set through
+`global.deploymentAnnotations` in [helm-values.yaml](helm-values.yaml)) and the
+`reloader-app-authentik` instance in
+[16.reloader](../16.reloader/kustomization.yaml) rolls
+`authentik-server` + `authentik-worker` when the Secret data changes.
+
+Reloader is content-hash driven, not sync driven: it injects a
+`STAKATER_AUTHENTIK_APP_SECRETS_SECRET=<hash>` env var into the pod template
+and only rolls when that hash moves. A routine ArgoCD sync re-applying the same
+bytes rolls nothing, so the restart happens only at the moment a value actually
+changes. That restart still briefly interrupts SSO - including forward-auth for
+the 10 servarr UIs (#176) - so rotate when you can watch it.
+
+Manual fallback, if Reloader is down or you need the restart now:
 
 ```bash
 kubectl rollout restart deploy/authentik-server deploy/authentik-worker -n app-authentik
 ```
-
-This briefly interrupts SSO — including forward-auth for the 10 servarr UIs (#176).
 
 Verify a real send (not just config):
 
