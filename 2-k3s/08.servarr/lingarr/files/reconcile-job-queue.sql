@@ -44,6 +44,12 @@
 --     ON DELETE CASCADE against hangfire.job (state_jobid_fkey,
 --     jobparameter_jobid_fkey). Lingarr's own audit trail lives in
 --     public.translation_request_events and is untouched.
+--   * FAIL-CLOSED (#925). The caller - the enforce-db-invariants initContainer in
+--     lingarr.yaml - treats a non-zero psql exit as fatal and does not start
+--     lingarr. Do NOT put `|| true` / `|| echo` back around that psql, and do not
+--     swallow errors in here with an EXCEPTION handler: a failed guard must not
+--     look like a successful one. "Nothing to reconcile" is already a success -
+--     the deletes match nothing, this reports 0/0, and psql exits 0.
 --
 -- This is a WORKAROUND pending an upstream fix. See lingarr/README.md for the
 -- retire condition.
