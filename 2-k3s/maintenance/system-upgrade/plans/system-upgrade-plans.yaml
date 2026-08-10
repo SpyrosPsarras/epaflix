@@ -18,12 +18,15 @@
 #      The version is PR-gated in git (issue #130) — not auto-tracked from a
 #      release channel — so every bump is an explicit, reviewed change.
 #   2. It upgrades server (master) nodes first, one at a time
-#   3. Once ALL masters are upgraded, it upgrades worker (agent) nodes, two at a time
+#   3. Once ALL masters are upgraded, it upgrades worker (agent) nodes, one at a
+#      time (see the `concurrency` note on the k3s-agent Plan for why not 2)
 #   4. Each node is cordoned and drained before upgrading, then uncordoned after
+#      a SUCCESSFUL upgrade - a drain that blows `drain.timeout` leaves the node
+#      cordoned for a human to clear
 #
 # Upgrade order for this cluster:
 #   Masters (one at a time): k3s-master-51 → k3s-master-52 → k3s-master-53
-#   Workers (two at a time): k3s-worker-61+62 → k3s-worker-63+65
+#   Workers (one at a time): k3s-worker-61 → 62 → 63 → 65
 
 ---
 # Server (Master Node) Upgrade Plan
@@ -51,6 +54,24 @@ spec:
   drain:
     force: true
     skipWaitForDeleteTimeout: 60  # Skip pods that don't terminate within 60s
+    # Bound the drain instead of letting it hang (#413). Without this, a pod
+    # that cannot be evicted - a PDB that can never be satisfied, an RWO volume
+    # that will not detach - keeps `kubectl drain` blocking forever with the
+    # node already cordoned, and the roll stalls with no timeout and no alert.
+    #
+    # Read this before changing the value:
+    #  - It is passed straight through as `kubectl drain --timeout`; there is
+    #    no controller-side timer.
+    #  - On expiry the drain container exits non-zero. RestartPolicy is Never
+    #    and BackoffLimit is 2, so the Job retries twice and then goes Failed.
+    #  - Upstream does NOT un-cordon on failure. A blown timeout leaves the
+    #    node cordoned and needs a manual `kubectl uncordon <node>` (see the
+    #    README "Drain timeout" section). This bounds the hang, it does not
+    #    self-heal.
+    #  - Keep it under the Job's ActiveDeadlineSeconds (default 600s, set via
+    #    the `default-controller-env` ConfigMap). A larger value here is cut
+    #    short by the active deadline anyway; upstream only logs a warning.
+    timeout: 300s
 
   # Only target master (control-plane) nodes
   nodeSelector:
@@ -93,9 +114,17 @@ spec:
   # Must match the same pinned version as the server plan
   version: v1.35.5+k3s1
 
-  # Upgrade 2 workers at a time — we have 4 workers (61, 62, 63, 65)
-  # This keeps at least 2 workers running for active workloads
-  concurrency: 2
+  # One worker at a time. This was `2` until #413's readiness review measured
+  # what a pair actually drains: the three CNPG postgres instances live on
+  # workers 61 (primary), 62 and 63, all on RWO `local-path` PVCs, and worker
+  # 65 hosts none. With 4 workers and pairs of 2, EVERY possible pairing puts
+  # two of {61,62,63} in the same batch, and the `postgres-cluster-primary`
+  # PDB allows 0 disruptions - so the second eviction is refused and the Plan
+  # stalls. The `drain.timeout` below now bounds that stall instead of letting
+  # it hang forever, but the node is still left cordoned when it blows, so
+  # avoiding the pairing is the actual fix. `concurrency: 1` makes it
+  # impossible. Cost: the worker leg takes 4 sequential drains, not 2 batches.
+  concurrency: 1
 
   # Cordon the node so no new pods are scheduled during upgrade
   cordon: true
@@ -104,6 +133,10 @@ spec:
   drain:
     force: true
     skipWaitForDeleteTimeout: 60  # Skip pods that don't terminate within 60s
+    # Same bounded drain as the server Plan above (#413) - see that block for
+    # the full behaviour notes: no controller-side timer, 3 attempts total,
+    # and the node is left cordoned on expiry (manual `kubectl uncordon`).
+    timeout: 300s
 
   # Only target worker (non-control-plane) nodes
   nodeSelector:
