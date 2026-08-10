@@ -6,16 +6,17 @@
 # embedded outpost, provider + app slug `radarr`), authorized by the
 # "Servarr users" group, for BOTH local and internet traffic.
 #
-# /api is EXEMPT from forward-auth (radarr-api, priority 20): Radarr is an
-# INTEGRATION TARGET called machine-to-machine by seerr, bazarr, cleanuparr and
-# newtarr, which authenticate with an X-Api-Key header rather than an SSO
-# session. The API surface is already key-protected by Radarr itself, so leaving
-# it un-gated is safe and also keeps deep-links to /api working.
+# /api is NOT exempt. Radarr is an INTEGRATION TARGET called machine-to-machine
+# by seerr, bazarr, cleanuparr and newtarr, but every one of them reaches it
+# over in-cluster Service DNS (http://radarr:7878) - verified against their own
+# stored config in #296. The priority-20 `radarr-api` exemption this file used
+# to carry was removed in #296 (2026-08-10) because it published the whole
+# Radarr API to the internet for no consumer. Do not re-add it - see the
+# "NO /api exemption route here" note further down this file.
 #
 # Pattern mirrors 08.servarr/newtarr/ingressroute.yaml:
 #   - app route priority:10 + authentik-forwardauth middleware
 #   - outpost route priority:15 matching PathPrefix(/outpost.goauthentik.io/)
-#   - api route priority:20 (most specific) with NO middleware
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
