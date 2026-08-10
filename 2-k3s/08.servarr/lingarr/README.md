@@ -131,8 +131,42 @@ before the app starts, using `files/reconcile-job-queue.sql`.
   loss - `translation_requests.job_id` and `status` are durable, so the next
   resume picks the same rows up again. Permanent loss would need `job_id`
   nulled, which the guard never does.
-- The statement is advisory (`|| echo WARN`), unlike the `request_timeout`
-  statement above it in the same container, which stays fatal (#844).
+
+### Failure policy: fail-closed (#925)
+
+A failed reconcile is fatal. The `psql -f` runs under `if ! ...; then echo FATAL;
+exit 1; fi`, so a non-zero psql exit fails the `enforce-db-invariants`
+initContainer and lingarr does not start. Same policy as the `request_timeout`
+statement above it (#844) - the two invariants in one container no longer have
+two different failure policies.
+
+It used to run with `|| echo "WARN: ..."`. `set -e` does not fire on the left of
+`||`, so a failed reconcile exited `0`, the initContainer reported `Completed`,
+and lingarr booted on the duplicated queue with one unread `WARN` line as the
+only trace. #870 could come back and the pod would still look healthy.
+
+What is and is not a failure:
+
+| Outcome | psql exit | Boot |
+|---|---|---|
+| Rows cleared (`cleared N ... reaped M`) | `0` | proceeds |
+| Nothing to reconcile (`cleared 0 ... reaped 0`) | `0` | proceeds |
+| First-ever install, no hangfire schema (`NOTICE ... skipped`) | `0` | proceeds |
+| Reconcile attempted and failed (SQL error, revoked grant, lock timeout) | non-zero | **blocked**, `FATAL:` in the initContainer log |
+
+The availability cost is smaller than it looks. The `request_timeout` psql hits
+the same database first and is already fatal, so every connection-level failure
+(postgres down, wrong host, bad credentials) already blocked boot. The only
+newly-fatal class is a reconcile-specific failure, which is exactly the class
+that used to be invisible.
+
+If a reconcile failure ever blocks a boot, fix the database cause - do not re-add
+a `||` fallback. Read the psql error above the `FATAL:` line in
+`kubectl --context epaflix -n servarr logs deploy/lingarr -c enforce-db-invariants`,
+then reproduce it interactively with the by-hand run below. There is no live
+escape hatch worth documenting: `servarr` is an automated self-healing ArgoCD App,
+so a `kubectl patch` that drops the guard is reverted on the next sync. A genuine
+emergency goes through a merged PR like any other change.
 
 ### This is a workaround
 
