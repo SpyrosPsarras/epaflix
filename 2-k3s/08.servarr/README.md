@@ -80,6 +80,92 @@ Mounted on K3s worker nodes via fstab, exposed as hostPath PVs:
 | `/mnt/pool1/dataset01/movies` | `/mnt/k3s-movies` | Radarr, Jellyfin |
 | `/mnt/pool1/dataset01/downloads` | `/mnt/k3s-downloads` | qBittorrent, all *arr apps |
 
+### Measuring the qBittorrent temp directory (#842)
+
+**Never use `du` to decide how much `/mnt/pool1/dataset01/downloads/temp` costs.**
+Most of that directory is a second name for files the library already holds, so
+`du` answers a question nobody is asking.
+
+qBittorrent runs `temp_path_enabled=true` with
+`temp_path=/media/downloads/temp`, and the move out of temp fires when the
+**whole torrent** completes, not per file. Sonarr and Radarr import per file, by
+hardlink, and are happy to import a completed file that still sits under `temp`.
+So a torrent that never reaches 100% - stalled, abandoned, or removed from the
+client - never triggers the move, and the file keeps a name under `temp` forever
+while the library holds the other name for the same inode.
+
+The right command counts each inode once and splits it by link count:
+
+```bash
+ssh truenas_admin@192.168.10.200
+sudo find /mnt/pool1/dataset01/downloads/temp -type f -printf '%i\t%n\t%b\n' \
+  | awk -F'\t' '!seen[$1]++ { b = $3 * 512; if ($2 > 1) { h += b; hn++ } else { e += b; en++ } }
+                END { printf "hardlinked into the library %8.1f G  %d inodes\n", h/2^30, hn
+                      printf "exclusive to temp           %8.1f G  %d inodes\n", e/2^30, en }'
+```
+
+Real output, 2026-08-10:
+
+```
+hardlinked into the library    699.7 G  76 inodes
+exclusive to temp                2.4 G  10 inodes
+```
+
+What temp actually holds, same run: 76 completed files whose blocks are shared
+with `tvshows/` and `movies/` (699.7 G), 2 genuine `.!qB` partials (2.35 G), and
+8 tiny completed leftovers (0.07 G). Every one of the 76 was resolved to a
+second name outside temp - 76 of 76, none unaccounted for.
+
+What `du` reported on the same directory in the same minute:
+
+```
+$ sudo du -sh /mnt/pool1/dataset01/downloads/temp
+703G    /mnt/pool1/dataset01/downloads/temp
+$ sudo du -sh --count-links /mnt/pool1/dataset01/downloads/temp
+880G    /mnt/pool1/dataset01/downloads/temp
+```
+
+Both are wrong about reclaimable space, in different ways:
+
+- `du -sh` counts each inode once per traversal, so it reports 703 G - the size
+  of every inode reachable under temp. It cannot see that 699.7 G of those
+  inodes are also named from the library, so **emptying temp frees 2.4 G, not
+  703 G**. That is a 293x overstatement.
+- `du -sh --count-links` counts every name, so it reports 880 G. The extra
+  177 G is not extra data: 10 inodes carry two names inside temp itself
+  (86 distinct inodes across 96 directory entries). This is where the 879.8 G
+  figure in #609 and #842 came from.
+- `df` and `zfs list` are right but answer a different question - they report
+  the dataset, not the path. For the dataset, trust `zfs list` AVAIL, not
+  `zpool` CAP (#444).
+
+Cross-check that the intra-temp double-naming is what it looks like:
+
+```bash
+sudo find /mnt/pool1/dataset01/downloads/temp -type f -printf '%i\n' \
+  | sort | uniq -d | wc -l    # -> 10 inodes named twice inside temp
+```
+
+**Decision: the layout is accepted, not renamed.** The move-out-of-temp
+behaviour is working for live torrents - measured 2026-08-10, all 5 torrents
+with a `content_path` under temp were `stalledDL` below 41% progress, and no
+completed file newer than 90 days has landed there. The 699.7 G is historical
+residue from torrents that no longer exist in the client, all mtimes 90-365
+days old. Renaming `temp` would mean rewriting the qBittorrent path config and
+every torrent's save path for a directory that will keep collecting the same
+residue, so the durable fix is this measurement note, not a rename.
+
+Nothing here is at risk. A hardlink keeps the blocks alive no matter which name
+is removed, and removing the temp names frees nothing. The hazard is purely
+human: a cleanup that reasons "temp is scratch, empty it" looks correct, appears
+to reclaim ~700 G, and reclaims 2.4 G.
+
+Related: #609 (where this surfaced), #195 (why downloads cannot be split into
+their own dataset), #444 (AVAIL not CAP), and
+[`0-truenas/README.md` → Periodic snapshots](../../0-truenas/README.md#periodic-snapshots-and-why-a-manual-run-now-leaks-forever-843)
+for the sibling trap on the same dataset: deleted blocks stay pinned until the
+snapshot holding them expires (#843).
+
 ## Prerequisites
 
 ### 1. PostgreSQL Databases
@@ -318,6 +404,10 @@ ls -i /mnt/pool1/dataset01/downloads/completed/show.mkv
 ls -i /mnt/pool1/dataset01/tvshows/Show/Season\ 01/show.mkv
 # Inode numbers should match = hardlink successful
 ```
+
+Because imports hardlink, `du` on any download path measures inodes rather than
+reclaimable space. See "Measuring the qBittorrent temp directory (#842)" under
+Storage Layout before quoting a number from `du`.
 
 ## Rotating the radarr / sonarr / sonarr2 API keys (#712)
 
