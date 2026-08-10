@@ -40,9 +40,59 @@ Backend-only migration of the **Odysseus** AI workspace
 | `configmap.yaml` | `odysseus-config` (non-secret env) + `searxng-settings` (settings.yml) |
 | `odysseus-secrets.enc.yaml` | SOPS Secret: `ODYSSEUS_ADMIN_PASSWORD`, `SEARXNG_SECRET`, `OPENAI_API_KEY`, `HF_TOKEN` |
 | `odysseus-data-seed.enc.yaml` | SOPS Secret seeding small irreplaceable state into the data PVC |
-| `ksops-generator.yaml` | ksops generator listing the two `*.enc.yaml` files |
+| `cliproxy-client-key.enc.yaml` | SOPS Secret: `ANTHROPIC_AUTH_TOKEN` — the CLIProxyAPI client key the Claude Code heartbeat authenticates with |
+| `ksops-generator.yaml` | ksops generator listing the three `*.enc.yaml` files |
 | `pdb.yaml` | PodDisruptionBudget |
 | `kustomization.yaml` | Tier kustomization |
+
+## Claude Code heartbeat
+
+A `run_local` Task inside Odysseus (cron, created in the Tasks UI — System
+actions are admin-only and not on the `/api/codex` token, so the schedule is
+**not** in git) runs `claude -p "just reply pong"` a few times a day. The git
+half is the `install-claude` initContainer, which reinstalls the CLI into the
+shared `claude-bin` emptyDir on every pod start, plus the auth env below.
+
+The CLI authenticates through the **in-cluster CLIProxyAPI**
+(`2-k3s/17.remote-pi`), not directly to `api.anthropic.com`:
+
+| Env | Value |
+|---|---|
+| `ANTHROPIC_BASE_URL` | `http://cliproxy.remote-pi.svc.cluster.local:8317` |
+| `ANTHROPIC_AUTH_TOKEN` | `ANTHROPIC_AUTH_TOKEN` key of Secret `cliproxy-client-key` |
+| `CLAUDE_CONFIG_DIR` | `/app/data/.claude` (the writable PVC — `/app` is root-owned) |
+
+Why the Service name and not `cliproxy.epaflix.com`: that name only resolves
+through Pi-hole on the LAN, and it would send the request out of the cluster to
+the Traefik `internal` LoadBalancer and back. Plain `http` is correct here — the
+hop never leaves the pod network.
+
+This replaced a long-lived `sk-ant-oat` subscription token
+(`CLAUDE_CODE_OAUTH_TOKEN`, Secret `claude-oauth-token`) that talked to
+Anthropic directly. Two reasons: the cluster now holds **one** set of Claude
+subscription credentials — the provider accounts already authorised in
+cliproxy's Postgres auth store — and a second long-lived token is no longer
+committed. **Do not add `CLAUDE_CODE_OAUTH_TOKEN` back**: Claude Code prefers it
+over `ANTHROPIC_AUTH_TOKEN`, so its mere presence silently bypasses the proxy.
+
+`ANTHROPIC_AUTH_TOKEN` here is a **copy** of `omp-api-key` in
+`2-k3s/17.remote-pi/cliproxy/cliproxy-secrets.enc.yaml` — a `secretKeyRef`
+cannot cross namespaces. Rotating the cliproxy client key is three edits: the
+`PUT /v0/management/api-keys` call, `cliproxy-secrets.enc.yaml`, and
+`cliproxy-client-key.enc.yaml`. Drift gives the heartbeat a `403` on
+`/v1/messages`.
+
+Check it end to end from the running pod:
+
+```bash
+POD=$(kubectl --context epaflix -n odysseus get po -l app=odysseus \
+  -o jsonpath='{.items[0].metadata.name}')
+kubectl --context epaflix -n odysseus exec "$POD" -c odysseus -- \
+  sh -c 'export PATH=/opt/claude/.local/bin:$PATH; claude -p "just reply pong"'
+```
+
+Expected: `pong`. A `403` means the key drifted; a connection error means
+cliproxy is down or the Service name is wrong.
 
 ## Data migration order (CRITICAL)
 

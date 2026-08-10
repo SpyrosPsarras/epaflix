@@ -12,10 +12,12 @@
 #                          settings.json — consumed by the seed-data
 #                          initContainer; see README for the tar-staging of
 #                          app.db + the dir trees)
-#   - claude-oauth-token  from claude-oauth-token.enc.yaml
-#                         (CLAUDE_CODE_OAUTH_TOKEN — the Claude subscription
-#                          token for the run_local heartbeat Task; injected
-#                          as env on the odysseus container)
+#   - cliproxy-client-key from cliproxy-client-key.enc.yaml
+#                         (ANTHROPIC_AUTH_TOKEN — the CLIProxyAPI client key
+#                          the run_local heartbeat Task authenticates with;
+#                          injected as env on the odysseus container. Replaced
+#                          the old claude-oauth-token / CLAUDE_CODE_OAUTH_TOKEN
+#                          direct-to-Anthropic Secret)
 #
 # No `images:` block — the odysseus image is pinned to the immutable numeric
 # tag 73673258 in odysseus.yaml, so digest tracking is not needed initially.
