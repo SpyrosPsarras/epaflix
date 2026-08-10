@@ -66,30 +66,16 @@ spec:
         sans:
           - "*.epaflix.com"
 ---
-# API route - EXEMPT from SSO so the *arr download clients, cleanuparr and
-# newtarr keep working over the public host. PathPrefix(/api) covers qBit's
-# /api/v2 endpoints; protected by qBittorrent's own credentials.
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
-metadata:
-  name: qbittorrent-api
-  namespace: servarr
-spec:
-  entryPoints:
-    - websecure
-  routes:
-    - match: Host(`qbittorrent.epaflix.com`) && PathPrefix(`/api`)
-      kind: Rule
-      priority: 20
-      services:
-        - name: qbittorrent
-          port: 8080
-  tls:
-    certResolver: cloudflare
-    domains:
-      - main: epaflix.com
-        sans:
-          - "*.epaflix.com"
+# NO /api exemption route here, deliberately (#296, removed 2026-08-10).
+# A priority-20 `Host(`qbittorrent.epaflix.com`) && PathPrefix(`/api`)` route with
+# no middleware used to sit here for the *arr download clients, cleanuparr and
+# newtarr. All of them were verified live to use `http://qbittorrent:8080`
+# instead - which is already this repo's rule, see the 2026-07-10 incident in
+# `RECOVERY-newtarr-cleanuparr.md`. The WebUI moved to the `internal` entry point
+# in a92f5d2, and this route's traffic fell from 19456 hits/7d to 22/24h.
+# qBittorrent keeps its OWN login enabled on purpose (`bypass_local_auth=false`):
+# `qbittorrent-internal` on 192.168.10.102 has no forward-auth, so that login is
+# the only control there. Do not "fix the double login" by bypassing it.
 ---
 # HTTP to HTTPS redirect for qBittorrent
 apiVersion: traefik.io/v1alpha1
