@@ -12,6 +12,165 @@ This deployment configures Traefik as a reverse proxy with automatic TLS certifi
 - **Router**: Forward ports 80/443 → `192.168.10.101`
 - **DNS**: Pi-hole points `*.epaflix.com` → router public IP or `192.168.10.101` for LAN
 
+## Client source IPs and `externalTrafficPolicy` (#560)
+
+Traefik logs `10.42.0.0` as the client for every request that comes from outside the
+cluster. That is a recorded constraint, not an open bug. `#560` is closed as not planned
+on the measurements below, all taken 2026-08-10 against the live cluster.
+
+### What Traefik actually logs, both paths
+
+Two probes, same second, same origin workstation `192.168.10.177` (public IP
+`81.167.233.67`), against `sonarr.epaflix.com`:
+
+```
+10.42.0.0 - - [10/Aug/2026:13:05:43 +0000] "GET /probe560-lan-1786367143 HTTP/2.0" 302 ...
+10.42.0.0 - - [10/Aug/2026:13:05:44 +0000] "GET /probe560-cf-1786367143 HTTP/2.0"  302 ...
+```
+
+- **LAN path** - Pi-hole answers `sonarr.epaflix.com` with `192.168.10.101`, so the client
+  hits the kube-vip VIP directly. Logged client: `10.42.0.0`. **Mechanism: kube-proxy SNAT
+  on a cross-node LoadBalancer hop.** `svc/traefik` runs `externalTrafficPolicy: Cluster`,
+  the VIP is on `k3s-master-51` and the only Traefik pod is on `k3s-worker-62`, so
+  kube-proxy rewrites the source before the packet leaves master-51.
+- **Cloudflare path** - forced with `curl --resolve sonarr.epaflix.com:443:104.21.59.155`,
+  so the request goes out to a Cloudflare edge and back in through the router port forward.
+  Logged client: `10.42.0.0`, the same value. **Mechanism: two rewrites stacked.** Cloudflare
+  terminates and re-originates the connection from its own edge IP, the router DNATs that to
+  `192.168.10.101`, then the same kube-proxy SNAT applies. The client IP is gone twice over.
+
+`10.42.0.0` is not a guess and not ambiguous. It is `k3s-master-51`'s flannel VXLAN
+address, read on the node itself:
+
+```
+4: flannel.1    inet 10.42.0.0/32 scope global flannel.1
+5: cni0         inet 10.42.0.1/24 brd 10.42.0.255 scope global cni0
+```
+
+`cni0` holds `10.42.0.1` as the pod gateway, so host-local IPAM hands out `10.42.0.2` and
+up. **No pod can ever have `10.42.0.0`** - live count of pods cluster-wide with that IP is
+`0`, and the two non-hostNetwork pods on master-51 today are `10.42.0.104` and
+`10.42.0.105`. So a logged `10.42.0.0` means exactly one thing: SNAT'd through master-51,
+which is the VIP path. It does **not** mean "or a pod on master-51". Earlier `#296` and
+`#560` notes claimed that ambiguity. It is not real, and no out-of-band premise is needed
+to read the log.
+
+### Cloudflare already gives the real client IP on the public path
+
+This is the part that shrinks the issue. Traefik forwards `CF-Connecting-IP` untouched.
+Measured with a throwaway `traefik/whoami` route on both paths, headers as received by the
+backend:
+
+```
+LAN path:
+  X-Forwarded-For: 10.42.0.0
+  X-Real-Ip: 10.42.0.0
+  (no header carries the client IP)
+
+Cloudflare path:
+  X-Forwarded-For: 10.42.0.0
+  X-Real-Ip: 10.42.0.0
+  Cf-Connecting-Ip: 81.167.233.67      <- the real client IP
+  Cf-Ipcountry: NO
+  Cf-Ray: a28f389d9f74b51d-OSL
+```
+
+So the gap is **half the size the issue describes**:
+
+- **Public / internet traffic: not a gap.** The real client IP arrives in
+  `CF-Connecting-IP`, plus country in `CF-IPCountry`. Anything that needs to identify an
+  external caller can read that header today. `X-Forwarded-For` is useless because Traefik
+  overwrites it with the SNAT peer - `forwardedHeaders.trustedIPs` is unset, which is
+  correct, since trusting an untrusted peer would let any LAN host spoof the header.
+- **LAN traffic: a real gap.** A request that hits `192.168.10.101` directly never touches
+  Cloudflare, so there is no `CF-Connecting-IP` and nothing else carries
+  `192.168.10.177`. LAN clients are indistinguishable from each other at Traefik.
+
+### What `externalTrafficPolicy: Local` would cost
+
+It would not degrade availability. It would take the ingress down completely.
+
+- **VIP-capable nodes and Traefik-capable nodes are disjoint sets.** `ds/kube-vip` carries
+  `nodeSelector: node-role.kubernetes.io/control-plane: "true"`
+  (`2-k3s/01.kube-vip/kube-vip-daemonset.yaml:59-60`), desired 3, ready 3, running only on
+  `k3s-master-51/52/53`. All three masters carry
+  `node-role.kubernetes.io/control-plane:NoSchedule`, and `deploy/traefik` has empty
+  `tolerations`, empty `nodeSelector` and empty `affinity`, so Traefik can only land on a
+  worker. The VIP can only live where Traefik cannot run.
+- **So under `Local` the VIP node has no local endpoint, on every possible node.** That is a
+  permanent 100% black hole across the **20** Pi-hole names that resolve to
+  `192.168.10.101`, not a partial outage.
+- **kube-vip service election does not rescue it.** Election can only move a service VIP to a
+  node that has an endpoint; the only endpoint is `10.42.5.105` on `k3s-worker-62`; kube-vip
+  does not run on workers. There is no eligible node to move to. For the record election is
+  off anyway: `svc_election` and `enableServicesElection` are unset in the DaemonSet env,
+  only the cluster-wide `vip_leaderelection=true` is set, and there is no per-service
+  `kubevip-*` lease - just one global `plndr-svcs-lock` held by `k3s-master-51`. All four
+  VIPs sit on that one node, confirmed by reading `eth0` on each master:
+  `192.168.10.100`, `.101`, `.102` and `.110` are all secondaries on `k3s-master-51`;
+  `k3s-master-52` and `k3s-master-53` hold none.
+- **More Traefik replicas is blocked separately.**
+  `values/traefik-values.yaml:122` pins `replicas: 1` with the reason inline (`ACME requires
+  single replica for certificate management`), and `values/traefik-values.yaml:114-118` keeps
+  the ACME store on a `local-path` PVC with `accessMode: ReadWriteOnce`. A second replica on
+  another node cannot mount it. So "add replicas until every node has an endpoint" is not a
+  small change either.
+
+### Nothing consumes the client IP today
+
+There are 4 middlewares cluster-wide - `servarr/jellyseerr-to-seerr` (`redirectRegex`),
+`traefik-system/authentik-forwardauth` (`forwardAuth`), `traefik-system/redirect-https`
+(`redirectScheme`) and `traefik-system/security-headers` (`headers`). Count using
+`ipAllowList` or `ipWhiteList`: **0**. The LAN-versus-internet split that would otherwise
+want an IP check is done with a separate entry point instead - `traefik-internal` on
+`192.168.10.102`, used by `searxng`, `qbittorrent`, `remote-pi` and `cliproxy`.
+
+### The condition that reopens this
+
+Reopen `#560` when **a LAN client needs to be identified by IP at Traefik**. Concretely, the
+first time any of these is true:
+
+- an `ipAllowList` or `ipWhiteList` middleware is wanted on a route reachable from the LAN,
+  or
+- a LAN-origin request has to be attributed to a specific host in the access log, or
+- the entry-point split (`traefik-internal` on `192.168.10.102`) stops being enough to
+  separate LAN from internet.
+
+Do **not** reopen it for public traffic - use `CF-Connecting-IP`. And do not write an
+`ipAllowList` before this is fixed: it would silently match `10.42.0.0` and look like it
+works.
+
+Fixing it then is an owner-level ingress topology change, all three parts together:
+
+1. Make the VIP-capable and Traefik-capable node sets overlap - either run kube-vip on
+   workers, or give Traefik a control-plane toleration.
+2. Move ACME state off the `ReadWriteOnce` `local-path` PVC onto something a multi-replica
+   Traefik can share, or take cert issuance out of the proxy entirely.
+3. Only then flip `externalTrafficPolicy` to `Local` and retest all 20 hostnames.
+
+A cheaper route worth pricing at that point is PROXY protocol from kube-vip, which delivers
+the real IP without moving any pods. It was not priced here because nothing needs it yet.
+
+### Re-check all of it, read-only
+
+```bash
+kubectl --context epaflix -n traefik-system get svc traefik traefik-internal \
+  -o custom-columns='NAME:.metadata.name,ETP:.spec.externalTrafficPolicy,LBIP:.status.loadBalancer.ingress[0].ip'
+kubectl --context epaflix get nodes \
+  -o custom-columns='NODE:.metadata.name,TAINTS:.spec.taints[*].key,PODCIDR:.spec.podCIDR'
+kubectl --context epaflix -n traefik-system get deploy traefik \
+  -o jsonpath='replicas={.spec.replicas} tolerations={.spec.template.spec.tolerations} nodeSelector={.spec.template.spec.nodeSelector} affinity={.spec.template.spec.affinity}{"\n"}'
+kubectl --context epaflix -n kube-system get ds kube-vip \
+  -o jsonpath='{.spec.template.spec.nodeSelector}{"\n"}'
+kubectl --context epaflix -n kube-system get leases | grep plndr
+kubectl --context epaflix get middleware -A -o json \
+  | jq -r '.items[] | "\(.metadata.namespace)/\(.metadata.name) keys=\(.spec|keys|join(","))"'
+
+# What Traefik logs for a LAN request. Expect 10.42.0.0.
+curl -sk -o /dev/null "https://sonarr.epaflix.com/probe560-$(date +%s)"
+kubectl --context epaflix -n traefik-system logs deploy/traefik --since=60s | grep probe560
+```
+
 ## Prerequisites
 
 1. Cloudflare API token with DNS edit permissions for `epaflix.com`
