@@ -87,9 +87,23 @@ spec:
         # single-writer window is what makes the delete safe. It must NEVER write to
         # `translation_requests` - see the safety contract in the SQL file.
         #
-        # The `request_timeout` statement above is FATAL under `set -e` (a correctness
-        # floor for translation quality, #844). The guard below is ADVISORY - a DB
-        # hiccup must degrade to today's behaviour, not block lingarr from starting.
+        # BOTH statements are FATAL under `set -e`. `request_timeout` is a correctness
+        # floor for translation quality (#844). The reconcile below is fail-CLOSED as of
+        # #925 - it used to run with `|| echo WARN`, which made a failed guard exit 0:
+        # the initContainer reported `Completed`, lingarr booted anyway, and the
+        # duplicated queue that #870 exists to prevent was back with nothing but one
+        # unread WARN line to say so. A broken guard must not look like a healthy boot.
+        #
+        # This costs less availability than it reads. The `request_timeout` psql above
+        # hits the SAME database first and is already fatal, so every connection-level
+        # failure (postgres down, wrong host, bad credentials) already blocked boot
+        # before this change. The only newly-fatal class is a reconcile-SPECIFIC failure
+        # - a SQL error, a revoked grant, a lock timeout - which is exactly the class
+        # that used to be invisible.
+        #
+        # "Nothing to reconcile" is NOT a failure: the SQL reports `cleared 0 ... reaped
+        # 0` and exits 0, and a missing hangfire schema on a first-ever install raises a
+        # NOTICE and returns cleanly. Only an attempted-and-failed reconcile is fatal.
         - name: enforce-db-invariants
           image: postgres:16
           command:
@@ -107,9 +121,11 @@ spec:
                   END IF;
                 END
                 \$\$;"
-              psql -v ON_ERROR_STOP=1 -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USERNAME" -d "$DB_DATABASE" \
-                -f /sql/reconcile-job-queue.sql \
-                || echo "WARN: reconcile-job-queue failed, continuing to boot (#870)"
+              if ! psql -v ON_ERROR_STOP=1 -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USERNAME" -d "$DB_DATABASE" \
+                     -f /sql/reconcile-job-queue.sql; then
+                echo "FATAL: reconcile-job-queue failed, refusing to boot on an unreconciled job queue (#925)" >&2
+                exit 1
+              fi
           env:
             - name: DB_HOST
               valueFrom:
