@@ -132,6 +132,56 @@ Rules:
 - Same bar as #602: once a value is in a transcript it is burned, in any
   encoding. Rotate it, do not argue about whether anyone read it.
 
+## Select the leaf, never the parent (#932)
+
+Selecting a parent node hands you every leaf under it. You asked for one field,
+the serializer gave you the whole object with the credential inside. #932 was a
+probe for #296 running `curl -s .../api/system/settings | jq -r '.auth'` against
+bazarr, expecting `.auth` to be a string. It is an object, so `jq -r` printed
+the block and the live bazarr API key with it. Nothing errored and no rule as
+written was broken: #712 covers Kubernetes Secrets, #740 covers a parser that
+was meant to hash. Neither covers "I selected one level too high". The same
+probe then hit the mirror case - `grep -n '^auth:' -A6 config.yaml` with a `sed`
+redacting `apikey` and `password` by name, and the `-A6` window ran straight
+past both into an unrelated `cf_clearance` cookie.
+
+Rules:
+
+- **Name the leaf in the selector.** `jq -r '.auth.type'`, never
+  `jq -r '.auth'`. If you do not know the shape, print **key names** first
+  (`jq -r '.auth | keys[]'`), then select the one you want. A `jq -r` on a
+  parent is a full dump of that parent.
+- **Never `-o json` / `-o yaml` an object that may embed a credential.** Ask for
+  the leaf by path:
+  ```bash
+  kubectl --context epaflix -n <ns> get <kind> <name> -o jsonpath='{.spec.<leaf>}'
+  ```
+  The whole-object form is not the cheap option, it is the leak. Same for
+  Proxmox, TrueNAS and every app API.
+- **An application's own API is a credential source.** A `/settings` or
+  `/config` response carries keys inline as ordinary fields - bazarr's
+  `GET /api/system/settings` and the `*arr` `GET /api/v3/config/host` both do.
+  See the `#520` rule in this file for the settings response that burned a live
+  key. Treat every one of them as secret-bearing.
+- **If you must move a whole object, `del()` the credential keys before anything
+  reaches the transcript.** Strip at the source, not with a redacting `sed`
+  downstream:
+  ```bash
+  curl -s -H "X-Api-Key: $KEY" http://<host>:5055/api/v1/settings/sonarr \
+    | jq 'map(del(.apiKey))'
+  ```
+  A single object is `jq 'del(.apiKey, .password, .token)'`. Add the key the
+  moment a new one appears in the response.
+- **Anchor the match, never a context window.** No `-A` / `-B` / `-C` on a file
+  that holds credentials - that is #943's line-range leak in `grep` clothing.
+  `grep -n` the identifier, then read only the lines you named.
+- **Prefer proving behaviour to reading state.** #740 makes this point for
+  rotations; it holds for probes too. #932's rotation was proved with four HTTP
+  codes and never needed a value. Where a value must be handled, #822 and #823
+  track detecting it after the fact - detection is not a substitute for not
+  printing it. Same bar as #602: once it is in a transcript it is burned, so
+  rotate.
+
 ## Command History Documentation
 
 IMPORTANT: Document all significant commands and their outputs in the `.history/` directory for future LLM reference and troubleshooting.
