@@ -3,19 +3,20 @@
 # fronted by Authentik forward-auth SSO (issue #176, servarr forward-auth
 # rollout).
 #
-# Sonarr is an INTEGRATION TARGET: it is called over the public host
-# (sonarr.epaflix.com) on /api by seerr, bazarr, cleanuparr and newtarr.
+# Sonarr is an INTEGRATION TARGET, but every caller reaches it over in-cluster
+# Service DNS (http://sonarr:8989) - seerr, bazarr, cleanuparr, newtarr and
+# unpackerr were all verified against their own stored config in #296. Nothing
+# calls it on the public host.
 #
 # Routing model:
 #   - Route A (sonarr-https, priority 10) gates the HUMAN UI via the
 #     authentik-forwardauth middleware (Authentik embedded outpost,
-#     "Servarr users" group). This is the only newly-gated surface.
-#   - Route C (sonarr-api, priority 20) matches PathPrefix(/api) with a
-#     HIGHER priority than Route A (20 > 10) and carries NO middleware, so
-#     API-key machine traffic and API deep-links keep working over the
-#     public host unchanged. The Sonarr API is already API-key protected,
-#     so exempting it from forward-auth does not weaken access control --
-#     only the browser UI is newly gated behind SSO.
+#     "Servarr users" group).
+#   - There is NO /api route. The priority-20 PathPrefix(/api) exemption this
+#     file used to carry was removed in #296 (2026-08-10) because it published
+#     the whole Sonarr API to the internet for no consumer. /api is now gated
+#     by Route A like every other path. Do not re-add it - see the
+#     "NO /api exemption route here" note further down this file.
 #
 # Pattern mirrors newtarr/ingressroute.yaml and
 # 05.traefik-deployment/ingress/traefik-dashboard-sso.yaml:

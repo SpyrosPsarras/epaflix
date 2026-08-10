@@ -184,13 +184,13 @@ Update each app (Sonarr, Sonarr2, Radarr) to use:
 
 > **In-cluster clients MUST use the internal Service URL (`qbittorrent:8080`),
 > never the public `qbittorrent.epaflix.com`.** The public hostname sits behind
-> Authentik forward-auth (#176) with only a priority-20 `/api` bypass. A client
-> that probes any other path gets the Authentik login HTML instead of a JSON
-> response. This silently broke Cleanuparr for 27 days (its qBittorrent client
-> probes the legacy `/version/api` endpoint) — see the "Cleanuparr blind for 27
-> days behind forward-auth" incident in `RECOVERY-newtarr-cleanuparr.md`. The
-> same rule applies to every service-to-service call (`http://sonarr:8989`,
-> etc.); the `.epaflix.com` URLs under *Access URLs* below are browser-only.
+> Authentik forward-auth (#176) on every path. A client that probes it gets the
+> Authentik login HTML instead of a JSON response. This silently broke Cleanuparr
+> for 27 days (its qBittorrent client probes the legacy `/version/api` endpoint),
+> see the "Cleanuparr blind for 27 days behind forward-auth" incident in
+> `RECOVERY-newtarr-cleanuparr.md`. The same rule applies to every
+> service-to-service call (`http://sonarr:8989`, etc.); the `.epaflix.com` URLs
+> under *Access URLs* below are browser-only.
 >
 > Confirmed a second time on 2026-07-26: bazarr pointed at
 > `sonarr.epaflix.com:443` / `radarr.epaflix.com:443` and its SignalR event feed
@@ -199,8 +199,14 @@ Update each app (Sonarr, Sonarr2, Radarr) to use:
 > `/api/v3` calls worked the whole time, which is why it looked half-healthy.
 > Fixed by repointing to `sonarr.servarr.svc.cluster.local:8989` and
 > `radarr.servarr.svc.cluster.local:7878` with `ssl: false` (#465, #466).
-> **When a client looks forward-auth-broken, check which path it calls first —
-> `/api/*` works, everything else on a gated host does not.**
+>
+> **Until 2026-08-10 there was a priority-20 `/api` bypass on all six gated
+> hosts, so `/api/*` was the one path that still worked from outside.** #296
+> deleted it: nothing was using it, and it published six full APIs to the
+> internet. The old debugging rule "check which path it calls first, `/api/*`
+> works and everything else does not" no longer holds. On a gated host today,
+> **no path works without an Authentik session** - a client that looks
+> forward-auth-broken is calling the public hostname at all, which is the bug.
 
 #### qBittorrent WebAPI-key state and recovery (#723)
 
@@ -264,13 +270,16 @@ Service DNS, `external_url` = the public hostname), which already has the
 column - it was just unset.
 
 The alternative - widening the Authentik forward-auth `/api` bypass to cover
-`/signalr` or other non-`/api` paths - is deliberately **not** being done.
-It would expose an unauthenticated endpoint publicly, and it's the same
+`/signalr` or other non-`/api` paths - was deliberately **not** done, and as of
+#296 (2026-08-10) there is no `/api` bypass left to widen: all six were deleted
+once every caller was confirmed to be on internal DNS. Widening would have
+exposed an unauthenticated endpoint publicly, and it was the same
 one-bypass-per-symptom pattern that caused this three times already
 (qBittorrent `/version/api`, bazarr `/signalr`, and any future integration
 that isn't `/api`-only). Moving callers to internal DNS instead is lower
 risk: it's plain app config, fails loudly on a typo (connection refused, not
-a silent auth gap), and is reversible in seconds.
+a silent auth gap), and is reversible in seconds. That migration being
+complete is what made the bypasses safe to delete outright.
 
 ### 3. Configure Prowlarr Sync
 Add applications in Prowlarr:
