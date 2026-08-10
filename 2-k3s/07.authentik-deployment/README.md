@@ -473,18 +473,18 @@ during the Odysseus SSO bring-up #183).
 > goauthentik schema — see
 > [Re-validate the IaC blueprint on each chart MINOR bump (#232)](#re-validate-the-iac-blueprint-on-each-chart-minor-bump-232).
 
-##### Scoped RBAC role — `ak-iac IaC` (#230 phase 1, #339 phase 2/3 - flip landed)
+##### Scoped RBAC role - `ak-iac IaC` (#230 phase 1, #339 phase 2/3, flip landed)
 
 `ak-iac` is **not a superuser**. Its only privilege comes from the `ak-iac IaC`
 group and the scoped `ak-iac` role that the same blueprint provisions:
 
-- `authentik_rbac.role` **`ak-iac`** — `attrs.permissions` lists only the
+- `authentik_rbac.role` **`ak-iac`** - `attrs.permissions` lists only the
   **global** permissions the IaC and the token's own calls exercise:
   view/add/change/**delete** proxy providers, view/add/change OAuth2 providers,
   view/change outposts, view/add/change/**delete** applications,
   view/add/change groups, view/add/**delete** policy bindings, view/add users,
   view flows.
-- `authentik_core.group` **`ak-iac IaC`** — non-superuser group bound to that
+- `authentik_core.group` **`ak-iac IaC`** - non-superuser group bound to that
   role via the group `roles` relation.
 - The `ak-iac` user is a member of **that group only**. Its built-in
   **`authentik Admins`** membership was removed in #339.
@@ -492,7 +492,7 @@ group and the scoped `ak-iac` role that the same blueprint provisions:
 Because the role is now the *only* grant, a missing codename surfaces as a
 **403** instead of being masked by superuser. That is the point of the flip.
 
-> **The `authentik Admins` group itself is untouched** — it keeps
+> **The `authentik Admins` group itself is untouched** - it keeps
 > `is_superuser: true` and its human members. Nothing else depended on
 > `ak-iac`: **Grafana** authorizes off `Grafana Admins` / `Grafana Editors`, and
 > **Jellyfin / servarr** off their own groups (e.g. `Servarr users`).
@@ -529,7 +529,7 @@ Negative controls confirm the demotion is real and not cosmetic:
 
 > `GET /providers/all/` also returns 403, and that is expected. It is the
 > polymorphic base-`Provider` endpoint, called only from git-ignored
-> `artifacts/` scratch scripts and never from tracked IaC — the base model has
+> `artifacts/` scratch scripts and never from tracked IaC - the base model has
 > no `view_provider` codename to grant in the first place.
 
 **Use it** (read the value from the SOPS credential store; never paste a literal
