@@ -6,11 +6,13 @@ all tracked YAML blobs from the index for CI.  Plaintext Secret templates are
 classified by content, not path: sensitive-looking keys require an exact
 placeholder and every scalar is checked for credential-like shapes.
 
-This is deliberately a guard, not a complete secret scanner.  Entropy checks
-have false negatives; in particular, a short low-entropy credential under a
-non-sensitive key can pass.  Sensitive key names remain hard-gated.  Do not
-replace that accepted trade-off with per-file key policies: templates must stay
-editable without a second policy update.
+This is deliberately a guard, not a complete secret scanner, but no scalar in a
+plaintext Secret escapes analysis by being awkwardly sized.  Values from
+MIN_SHORT_CREDENTIAL_LENGTH up are classified, and an opaque scalar longer than
+MAX_PLAINTEXT_SCALAR_LENGTH is rejected instead of skipped, so padding cannot
+buy an exemption.  Sensitive key names remain hard-gated.  Do not replace that
+accepted trade-off with per-file key policies: templates must stay editable
+without a second policy update.
 """
 
 from __future__ import annotations
@@ -68,13 +70,31 @@ BASE64_RUN_RE = re.compile(
     r"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{32,}={0,2}(?![A-Za-z0-9+/=])"
 )
 # Entropy checks cover printable Unicode plus internal whitespace, not only a
-# whitespace-free ASCII alphabet.  Entropy density catches short generated
-# values while ordinary words, hostnames, ports, usernames, and image tags stay
-# below the threshold. Short low-entropy values under non-sensitive keys remain
-# the accepted gap.
+# whitespace-free ASCII alphabet.  Entropy density catches generated values of
+# MIN_ENTROPY_LENGTH characters and up, while ordinary words, hostnames, ports,
+# usernames, and image tags stay below the threshold.
 MIN_ENTROPY_LENGTH = 16
 MIN_ENTROPY_DENSITY = 4.0
 MIN_UNIQUE_CHARACTER_RATIO = 0.75
+# Below MIN_ENTROPY_LENGTH the density band above cannot separate a generated
+# credential from an ordinary identifier, so a second bounded band uses
+# character-class mixing instead (#822).  Template identifiers in these
+# manifests are DNS-1123 lowercase words joined by "-", "." or "/", so each
+# unbroken token carries a single character class, while a short credential is
+# one unbroken run that mixes letter case, digits, or both.  Measured against
+# every scalar of the 14 tracked plaintext Secret documents this band has no
+# false positives.
+MIN_SHORT_CREDENTIAL_LENGTH = 8
+MIN_SHORT_CREDENTIAL_CLASSES = 2
+MIN_SHORT_CREDENTIAL_UNIQUE = 6
+MIN_SHORT_CREDENTIAL_DENSITY = 2.5
+# An opaque plaintext scalar longer than this is rejected rather than analysed
+# (#823).  Entropy analysis has to be bounded somewhere, and any bound is a
+# padding bypass, so oversized opaque values fail closed instead.  The longest
+# opaque scalar in the tracked plaintext Secrets is 82 characters, so the limit
+# constrains no real template.  A scalar that parses as embedded YAML or JSON is
+# decomposed instead, and every leaf it yields is held to the same limit.
+MAX_PLAINTEXT_SCALAR_LENGTH = 2048
 SOPS_ENVELOPE_RE = re.compile(
     r"^ENC\[AES256_GCM,"
     r"data:([A-Za-z0-9+/]+={0,2}),"
@@ -184,6 +204,41 @@ def shannon_entropy_density(value: str) -> float:
     )
 
 
+def letter_digit_classes(value: str) -> int:
+    """Count how many of lowercase, uppercase, and digit appear in the value."""
+    return sum(
+        (
+            any(char.islower() for char in value),
+            any(char.isupper() for char in value),
+            any(char.isdigit() for char in value),
+        )
+    )
+
+
+def short_mixed_class_credential(value: Any) -> bool:
+    """Classify a short unbroken token that mixes character classes (#822).
+
+    Deliberately narrow: a value containing a separator is a template
+    identifier, a single character class is an ordinary word, and fewer than
+    MIN_SHORT_CREDENTIAL_UNIQUE distinct characters is not usable credential
+    material.  The documented residual is a short all-lowercase identifier that
+    gains a digit inside the same unbroken token, such as an unseparated
+    per-instance database user; give that a separator or a placeholder.
+    """
+    if not isinstance(value, str) or approved_placeholder(value):
+        return False
+    candidate = value.strip()
+    if not MIN_SHORT_CREDENTIAL_LENGTH <= len(candidate) < MIN_ENTROPY_LENGTH:
+        return False
+    if not candidate.isalnum():
+        return False
+    return (
+        letter_digit_classes(candidate) >= MIN_SHORT_CREDENTIAL_CLASSES
+        and len(set(candidate)) >= MIN_SHORT_CREDENTIAL_UNIQUE
+        and shannon_entropy_density(candidate) >= MIN_SHORT_CREDENTIAL_DENSITY
+    )
+
+
 def looks_like_credential(value: Any) -> bool:
     if not isinstance(value, str) or approved_placeholder(value):
         return False
@@ -196,12 +251,11 @@ def looks_like_credential(value: Any) -> bool:
         return True
     if HEX_RUN_RE.search(candidate) or BASE64_RUN_RE.search(candidate):
         return True
-    # Accepted limitation: entropy is heuristic.  Density catches short
-    # generated values without classifying ordinary short words, but a short
-    # low-entropy value under a non-sensitive key may pass. Sensitive keys are
-    # still rejected unless they are placeholders.
+    # Values shorter than MIN_ENTROPY_LENGTH are handled by the separate
+    # character-class band, and values longer than the analysis limit are
+    # rejected before this classifier is consulted.
     if (
-        MIN_ENTROPY_LENGTH <= len(candidate) <= 2048
+        MIN_ENTROPY_LENGTH <= len(candidate) <= MAX_PLAINTEXT_SCALAR_LENGTH
         and all(char.isprintable() or char.isspace() for char in candidate)
         and len(set(candidate)) >= 10
         and len(set(candidate)) / len(candidate) >= MIN_UNIQUE_CHARACTER_RATIO
@@ -445,8 +499,14 @@ def validate_plaintext(
                 exempt_value_paths=exempt_value_paths,
             ):
                 ok = False
+        elif len(value) > MAX_PLAINTEXT_SCALAR_LENGTH:
+            report(path, document, key_path, "plaintext scalar exceeds the analysed length limit")
+            ok = False
         elif looks_like_credential(value):
             report(path, document, key_path, "plaintext value has a credential-like shape")
+            ok = False
+        elif short_mixed_class_credential(value):
+            report(path, document, key_path, "plaintext value has a short credential-like shape")
             ok = False
     return ok
 
