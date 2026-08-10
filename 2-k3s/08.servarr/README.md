@@ -204,9 +204,21 @@ Update each app (Sonarr, Sonarr2, Radarr) to use:
 > hosts, so `/api/*` was the one path that still worked from outside.** #296
 > deleted it: nothing was using it, and it published six full APIs to the
 > internet. The old debugging rule "check which path it calls first, `/api/*`
-> works and everything else does not" no longer holds. On a gated host today,
-> **no path works without an Authentik session** - a client that looks
-> forward-auth-broken is calling the public hostname at all, which is the bug.
+> works and everything else does not" no longer holds.
+>
+> The rule today, and the one exception that matters when debugging:
+>
+> - `sonarr`, `sonarr2`, `radarr`, `prowlarr`, `bazarr` resolve to the public
+>   LB `192.168.10.101` and **no path works without an Authentik session**. A
+>   client that looks forward-auth-broken is calling the public hostname at
+>   all, which is the bug.
+> - `qbittorrent.epaflix.com` is **not gated on any path**. It resolves to
+>   `192.168.10.102` (`traefik-internal`), where `qbittorrent-internal` serves
+>   it with no middleware. Measured 2026-08-10 from the LAN and from a servarr
+>   pod: root `200`, `/api/v2/app/version` `403` from qBittorrent's own auth.
+>   So a *working* qBittorrent call over the public name proves nothing about
+>   forward-auth, and a `403` there is qBittorrent rejecting the credential,
+>   not Authentik. Use `http://qbittorrent:8080` regardless (#723).
 
 #### qBittorrent WebAPI-key state and recovery (#723)
 
