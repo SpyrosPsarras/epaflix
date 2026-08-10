@@ -214,9 +214,10 @@ worker:
 # The chart iterates `range $name := .Values.blueprints.secrets` (a plain
 # string list) and mounts each Secret at /blueprints/mounted/secret-<name>;
 # the worker auto-discovers any `*.yaml` key in the Secret and applies it.
-#   - authentik-iac-blueprint: ships the durable `ak-iac` service account,
-#     its "authentik Admins" membership, and a non-expiring API token for
-#     IaC/automation (issue #185). Decrypted by ksops on argocd-repo-server
+#   - authentik-iac-blueprint: ships the durable `ak-iac` service account, the
+#     scoped `ak-iac` role, its non-superuser `ak-iac IaC` group membership,
+#     and a non-expiring API token for IaC/automation (issues #185, #230,
+#     #339). Decrypted by ksops on argocd-repo-server
 #     from authentik-iac-blueprint.enc.yaml.
 blueprints:
   secrets:

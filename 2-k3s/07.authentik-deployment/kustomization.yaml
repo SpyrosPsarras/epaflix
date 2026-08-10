@@ -27,9 +27,10 @@
 #     reconciled via the same ksops generator from
 #     authentik-iac-blueprint.enc.yaml. It is NOT an app runtime secret:
 #     it is mounted via the chart's `blueprints.secrets` and applied by the
-#     worker to declaratively create the `ak-iac` service account + its
-#     "authentik Admins" membership + a non-expiring API token for IaC
-#     automation (Issue #185; supersedes the retired personal token #175).
+#     worker to declaratively create the `ak-iac` service account + the scoped
+#     `ak-iac` role + its non-superuser `ak-iac IaC` group membership + a
+#     non-expiring API token for IaC automation (issues #185, #230, #339;
+#     supersedes the retired personal token #175).
 #   - The chart-generated `authentik` Secret (20 non-sensitive config
 #     keys) stays operator-managed.
 apiVersion: kustomize.config.k8s.io/v1beta1
