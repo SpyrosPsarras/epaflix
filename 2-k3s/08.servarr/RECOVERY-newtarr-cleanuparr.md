@@ -388,9 +388,15 @@ Service URL (`http://qbittorrent:8080`, `http://sonarr:8989`, ...), never the
 public `*.epaflix.com` hostname. When this incident happened the public route
 still bypassed Authentik under `/api`, so `/api` callers survived and only
 other paths (legacy qbt API, health endpoints) got the login page. Since #296
-(2026-08-10) there is no bypass at all: **every** path on a gated public host
-returns the Authentik redirect, so a caller left on a public hostname fails
-outright rather than half-working. **All three *arr instances were repointed to
+(2026-08-10) that bypass is gone on all six hosts, so for `sonarr`, `sonarr2`,
+`radarr`, `prowlarr` and `bazarr` **every** path on the public hostname now
+returns the Authentik redirect and a caller left there fails outright rather
+than half-working. `qbittorrent.epaflix.com` is the exception and fails a
+different way: it resolves to `192.168.10.102` (`traefik-internal`) where the
+route carries no middleware, so it answers `200` on root and `403` from
+qBittorrent's own auth on the legacy probe - never an Authentik redirect. The
+internal Service URL is still the only correct value for both cases.
+**All three *arr instances were repointed to
 internal Service URLs by #468** - the "still the public hostnames" note that
 used to sit here is out of date. Verified live 2026-08-02:
 
@@ -518,7 +524,7 @@ All values below are live unless the source column says otherwise.
 
 | Setting | Value | Where it lives (`cleanuparr.db` table) | Source |
 |---|---|---|---|
-| Download client (qBittorrent) host | `http://qbittorrent:8080` - INTERNAL Service URL, NEVER `https://qbittorrent.epaflix.com` (2026-07-10 incident: the public route bypassed Authentik only under `/api` at the time, and the qbt client probes legacy `/version/api`; since #296 there is no bypass at all, so the public host fails on every path) | `download_clients.host` | live |
+| Download client (qBittorrent) host | `http://qbittorrent:8080` - INTERNAL Service URL, NEVER `https://qbittorrent.epaflix.com` (2026-07-10 incident: the public route bypassed Authentik only under `/api` at the time, and the qbt client probes legacy `/version/api`, which got the login page. #296 deleted that bypass, but the public name still must not be used: it resolves to `192.168.10.102` (`traefik-internal`), an un-gated route, so it answers `200`/`403` from qBittorrent itself and hides whether the credential or the gate is at fault) | `download_clients.host` | live |
 | Download Cleaner enabled | `1` (ON), cron `0 0 0/1 ? * * *` (hourly) | `download_cleaner_configs.enabled` | live |
 | qBit seeding rule — `radarr` | `max_ratio=1.0`, `min_seed_time=0`, `max_seed_time=400h`, `delete_source_files=1`, categories `["radarr"]` | `q_bit_seeding_rules` | live |
 | qBit seeding rule — `tv-sonarr` | `max_ratio=1.0`, `min_seed_time=0`, `max_seed_time=400h`, `delete_source_files=1`, categories `["tv-sonarr"]` | `q_bit_seeding_rules` | live |
