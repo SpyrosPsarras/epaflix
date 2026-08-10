@@ -64,29 +64,15 @@ spec:
         sans:
           - "*.epaflix.com"
 ---
-# API route - EXEMPT from forward-auth (priority 20, no middleware) so
-# API-key callers (sonarr/radarr/lingarr) and deep-links keep working.
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
-metadata:
-  name: bazarr-api
-  namespace: servarr
-spec:
-  entryPoints:
-    - websecure
-  routes:
-    - match: Host(`bazarr.epaflix.com`) && PathPrefix(`/api`)
-      kind: Rule
-      priority: 20
-      services:
-        - name: bazarr
-          port: 6767
-  tls:
-    certResolver: cloudflare
-    domains:
-      - main: epaflix.com
-        sans:
-          - "*.epaflix.com"
+# NO /api exemption route here, deliberately (#296, removed 2026-08-10).
+# A priority-20 `Host(`bazarr.epaflix.com`) && PathPrefix(`/api`)` route with no
+# middleware used to sit here, so API-key callers could bypass forward-auth over
+# the public host. It also published `/api/` - bazarr's Swagger UI - to the
+# internet, and made the API key the only control. The one real caller was
+# bazarr-autotranslate; commit 67ae39e (2026-08-04) repointed it to
+# `http://bazarr.servarr.svc.cluster.local:6767`, which is what made removal
+# safe. /api now matches `bazarr-https` (priority 10) and is forward-auth'd.
+# Re-adding this re-publishes the API and the Swagger UI. Don't.
 ---
 # HTTP to HTTPS redirect for Bazarr
 apiVersion: traefik.io/v1alpha1
