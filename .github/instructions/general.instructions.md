@@ -132,6 +132,46 @@ Rules:
 - Same bar as #602: once a value is in a transcript it is burned, in any
   encoding. Rotate it, do not argue about whether anyone read it.
 
+## An app's own API can hand you a credential you did not ask for (#520)
+
+The three rules above all assume the credential sits somewhere you already know
+is secret - a Secret, a decrypted SOPS file, a database column. This shape is
+different: the value arrived in the body of an ordinary application read.
+Verifying #520 on 2026-08-10 meant checking Seerr's Sonarr routing, so an agent
+called `GET /api/v1/settings/sonarr`. That response embeds each server's
+`apiKey`. No Secret was fetched, no SOPS file was opened, no rule as written was
+broken - and the live `sonarr` API key landed in a retained transcript and had
+to be rotated across seven consumers.
+
+An API that returns configuration returns credentials with it. Assume every
+`GET .../settings/...` is secret-bearing until you have read its schema.
+
+Rules:
+
+- **Ask for the fields you came for.** Piping the body through `jq` at display
+  time is too late only if you print it first, so never print it first: project
+  in the same command that fetches.
+  ```bash
+  curl -s -H "X-Api-Key: $K" .../api/v1/settings/sonarr \
+    | jq -c '[.[] | {id, name, hostname, is4k, activeProfileName}]'
+  ```
+  Never `curl ... | jq '.'` on a settings endpoint, and never park the raw body
+  in a file you later page - `artifacts/` is git-ignored, transcripts are not.
+- **Redact by key name, not by inspection.** Drop the credential-shaped fields
+  before anything is displayed, so an unfamiliar schema cannot surprise you:
+  ```bash
+  jq 'walk(if type == "object" then with_entries(select(.key | test("apikey|token|password|secret"; "i") | not)) else . end)'
+  ```
+- **Treat a settings endpoint like a Secret.** The "never fetch a whole Secret"
+  rule (#712) exists because a multi-key object echoes every value it holds. A
+  settings response is that same object with a friendlier URL.
+- Same bar as #602: burned is burned. Rotate, and rotate by the app's own
+  runbook - each *arr key has **seven** consumers and five keep their copy
+  PVC-only or in the app's own database, so a git-only rotation leaves those
+  five authenticating with a dead key
+  (`2-k3s/08.servarr/README.md`, "Rotating the radarr / sonarr / sonarr2 API
+  keys").
+
 ## Select the leaf, never the parent (#932)
 
 Selecting a parent node hands you every leaf under it. You asked for one field,
