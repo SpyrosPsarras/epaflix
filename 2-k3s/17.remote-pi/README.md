@@ -331,9 +331,19 @@ curl -X PUT http://127.0.0.1:8317/v0/management/api-keys \
 `PATCH` returns `400 missing fields`. Only a bare array works on `v7.2.123`.
 
 The current key is kept in `cliproxy-secrets.enc.yaml` under `omp-api-key` so a
-rebuild does not lose it. Nothing consumes that value automatically yet - it is
-still typed in through the management API by hand. See #861 for seeding it
-properly.
+rebuild does not lose it. Nothing in this tier consumes that value
+automatically - it is still typed into `config.yaml` through the management API
+by hand. See #861 for seeding it properly.
+
+**One in-cluster consumer keeps its own copy.** The Odysseus Claude Code
+heartbeat authenticates with the same client key as
+`ANTHROPIC_AUTH_TOKEN` in `2-k3s/13.odysseus/cliproxy-client-key.enc.yaml`, and
+reaches this proxy at `http://cliproxy.remote-pi.svc.cluster.local:8317`. A
+`secretKeyRef` cannot cross namespaces, so the value is duplicated on purpose.
+Rotating the key is therefore **three** edits, not two: the management `PUT`,
+`cliproxy-secrets.enc.yaml`, and `cliproxy-client-key.enc.yaml`. Miss the third
+and the heartbeat starts getting `403` from `/v1/messages`. Details:
+`2-k3s/13.odysseus/README.md` -> "Claude Code heartbeat".
 
 ### Known limitation - provider OAuth needs a port-forward every time
 

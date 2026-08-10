@@ -12,4 +12,4 @@ metadata:
 files:
   - odysseus-secrets.enc.yaml
   - odysseus-data-seed.enc.yaml
-  - claude-oauth-token.enc.yaml
+  - cliproxy-client-key.enc.yaml
