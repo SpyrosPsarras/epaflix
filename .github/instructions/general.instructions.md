@@ -99,6 +99,39 @@ Rules:
   #740 the behavioural check had already passed; the stored-value read added
   nothing and cost a second rotation.
 
+## Never page a decrypted file by line number (#943)
+
+The two rules above both assume you were **after** a secret. The third shape is
+the one that actually bit: you are after something else entirely, and a
+credential is collateral. #943 leaked the live `ak-iac` Authentik token by
+printing "lines 29-62 and 66-99" of the decrypted IaC blueprint while looking
+for two unrelated blueprint entries. Nothing was misconfigured - the blueprint
+*must* declare that key - and no rule was broken as written, because no rule
+covered "I printed a range of a file that happens to contain a secret".
+
+Any file that needs `sops -d` to read must be assumed to hold a credential
+**somewhere you are not looking**.
+
+Rules:
+
+- **Address the entry, not the line range.** Parse the decrypted body and print
+  the node you want. For the blueprint that is
+  `yaml.safe_load(...)['stringData'][<key>]` then a search for the entry `id`,
+  not `sed -n '29,62p'`. Line windows drift with every edit, so today's safe
+  range is tomorrow's leak.
+- **If you genuinely need raw context, redact on the way out.** Filter known
+  secret-bearing keys before anything reaches the transcript:
+  ```bash
+  sops -d <file> | sed -E 's/^([[:space:]]*(key|token|password|secret|apiKey):).*/\1 <redacted>/'
+  ```
+  Add the key name to that list the moment a new one appears in the file.
+- **Never widen a read "to get my bearings".** Locate the line numbers you need
+  with a `grep` for the identifier first, then read only those. In #943 the two
+  entries were 4 and 3 lines long; the windows printed were 34 lines each, and
+  the whole leak lived in the 30 lines that were not needed.
+- Same bar as #602: once a value is in a transcript it is burned, in any
+  encoding. Rotate it, do not argue about whether anyone read it.
+
 ## Command History Documentation
 
 IMPORTANT: Document all significant commands and their outputs in the `.history/` directory for future LLM reference and troubleshooting.
