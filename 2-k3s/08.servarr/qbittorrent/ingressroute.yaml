@@ -2,19 +2,24 @@
 # qBittorrent - Public Internet-facing IngressRoutes with Let's Encrypt TLS,
 # fronted by Authentik forward-auth SSO (issue #176, servarr forward-auth rollout).
 #
-# qBittorrent is an INTEGRATION TARGET (apiBypass=true): it is called by the
-# sonarr / sonarr2 / radarr download-client integrations plus cleanuparr and
-# newtarr. Only the WEB UI is newly SSO-gated via the authentik-forwardauth
-# middleware (authorized by the "Servarr users" group). The /api PathPrefix
-# (which covers qBittorrent's /api/v2 endpoints) is EXEMPT at priority 20 with
-# NO middleware, so those download clients + cleanuparr + newtarr keep working
-# over the public host. The qBittorrent API stays protected by its own
-# credentials.
+# qBittorrent is an INTEGRATION TARGET, but every caller reaches it over
+# in-cluster Service DNS (http://qbittorrent:8080) - the sonarr / sonarr2 /
+# radarr download-client integrations, cleanuparr and newtarr were all verified
+# against their own stored config in #296. The WEB UI is SSO-gated via the
+# authentik-forwardauth middleware (authorized by the "Servarr users" group),
+# and so is /api: the priority-20 PathPrefix(/api) exemption this file used to
+# carry, which covered the /api/v2 endpoints, was removed in #296 (2026-08-10)
+# because it published them to the internet for no consumer. Do not re-add it - see the
+# "NO /api exemption route here" note further down this file.
+#
+# NOTE: `qbittorrent-internal` further down is a SEPARATE route on the
+# `internal` entry point (LB 192.168.10.102, no router port-forward) and is
+# deliberately un-gated. qBittorrent runs with bypass_local_auth=false, so its
+# own login is the only control there. That route was NOT one of #296's six.
 #
 # Pattern mirrors 08.servarr/newtarr/ingressroute.yaml:
 #   - app route priority:10 + authentik-forwardauth middleware
 #   - outpost route priority:15 matching PathPrefix(/outpost.goauthentik.io/)
-#   - api route priority:20 PathPrefix(/api), no middleware
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:

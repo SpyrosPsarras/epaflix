@@ -356,15 +356,16 @@ plus 224 finished torrents left in qBittorrent `stoppedUP` (~1.85 TB of
 download-dir data) never reaped.
 
 **Root cause:** the #176 forward-auth rollout (2026-06-13) put
-`qbittorrent.epaflix.com` behind Authentik with a priority-20 `/api` PathPrefix
-bypass. Cleanuparr's .NET `QBittorrent.Client` probes the LEGACY endpoint
+`qbittorrent.epaflix.com` behind Authentik with a then-current priority-20 `/api`
+PathPrefix bypass (removed since, by #296 on 2026-08-10).
+Cleanuparr's .NET `QBittorrent.Client` probes the LEGACY endpoint
 `/version/api` first — not under `/api` — so it received the Authentik login
 HTML and threw `FormatException` in `QBitService.LoginAsync()`. With no
 download client initialized, QueueCleaner skipped EVERY item
 (`skip | torrent not found in any torrent client`,
 `failed_import_skip_if_not_found_in_client=1`) and Download Cleaner never
 reaped. Sonarr itself was unaffected (its qbt client only calls `/api/v2/*`,
-which the bypass covers); newtarr unaffected (already on internal URLs).
+which the bypass covered); newtarr unaffected (already on internal URLs).
 
 **Log signature:** `System.FormatException: The input string '...' was not in a
 correct format` from `GetLegacyApiVersionPrivateAsync`, ~2,500/day in
@@ -384,9 +385,12 @@ correct format` from `GetLegacyApiVersionPrivateAsync`, ~2,500/day in
 
 **Rule going forward:** an IN-CLUSTER consumer of another app uses the INTERNAL
 Service URL (`http://qbittorrent:8080`, `http://sonarr:8989`, ...), never the
-public `*.epaflix.com` hostname — the public route only bypasses Authentik
-under `/api`, and clients that probe any other path (legacy qbt API, health
-endpoints) get the login page. **All three *arr instances were repointed to
+public `*.epaflix.com` hostname. When this incident happened the public route
+still bypassed Authentik under `/api`, so `/api` callers survived and only
+other paths (legacy qbt API, health endpoints) got the login page. Since #296
+(2026-08-10) there is no bypass at all: **every** path on a gated public host
+returns the Authentik redirect, so a caller left on a public hostname fails
+outright rather than half-working. **All three *arr instances were repointed to
 internal Service URLs by #468** - the "still the public hostnames" note that
 used to sit here is out of date. Verified live 2026-08-02:
 
@@ -514,7 +518,7 @@ All values below are live unless the source column says otherwise.
 
 | Setting | Value | Where it lives (`cleanuparr.db` table) | Source |
 |---|---|---|---|
-| Download client (qBittorrent) host | `http://qbittorrent:8080` — INTERNAL Service URL, NEVER `https://qbittorrent.epaflix.com` (2026-07-10 incident: the public route only bypasses Authentik under `/api`, and the qbt client probes legacy `/version/api`) | `download_clients.host` | live |
+| Download client (qBittorrent) host | `http://qbittorrent:8080` - INTERNAL Service URL, NEVER `https://qbittorrent.epaflix.com` (2026-07-10 incident: the public route bypassed Authentik only under `/api` at the time, and the qbt client probes legacy `/version/api`; since #296 there is no bypass at all, so the public host fails on every path) | `download_clients.host` | live |
 | Download Cleaner enabled | `1` (ON), cron `0 0 0/1 ? * * *` (hourly) | `download_cleaner_configs.enabled` | live |
 | qBit seeding rule — `radarr` | `max_ratio=1.0`, `min_seed_time=0`, `max_seed_time=400h`, `delete_source_files=1`, categories `["radarr"]` | `q_bit_seeding_rules` | live |
 | qBit seeding rule — `tv-sonarr` | `max_ratio=1.0`, `min_seed_time=0`, `max_seed_time=400h`, `delete_source_files=1`, categories `["tv-sonarr"]` | `q_bit_seeding_rules` | live |

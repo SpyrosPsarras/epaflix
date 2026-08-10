@@ -2,17 +2,18 @@
 # Sonarr2 (anime) - Public Internet-facing IngressRoutes with Let's Encrypt TLS,
 # fronted by Authentik forward-auth SSO (issue #176, servarr forward-auth rollout).
 #
-# Sonarr2 is an INTEGRATION TARGET: it is called machine-to-machine by seerr,
-# cleanuparr, and newtarr. The browser UI is gated by the authentik-forwardauth
-# middleware (Authentik embedded outpost, "Servarr users" group), but the /api
-# path is EXEMPTED via a higher-priority route (priority:20, no middleware) so
-# machine/API-key callers and deep-link traffic are not blocked by SSO. The
-# Sonarr API is already protected by its own API key, so the carve-out is safe.
+# Sonarr2 is an INTEGRATION TARGET, but every caller reaches it over in-cluster
+# Service DNS (http://sonarr2:8989) - seerr, cleanuparr and newtarr were all
+# verified against their own stored config in #296. The browser UI is gated by
+# the authentik-forwardauth middleware (Authentik embedded outpost, "Servarr
+# users" group), and so is /api: the priority-20 PathPrefix(/api) exemption this
+# file used to carry was removed in #296 (2026-08-10) because it published the
+# whole API to the internet for no consumer. Do not re-add it - see the
+# "NO /api exemption route here" note further down this file.
 #
 # Pattern mirrors newtarr/ingressroute.yaml:
 #   - app route priority:10 + authentik-forwardauth middleware
 #   - outpost route priority:15 matching PathPrefix(/outpost.goauthentik.io/)
-#   - api route priority:20 PathPrefix(/api) with no middleware
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:

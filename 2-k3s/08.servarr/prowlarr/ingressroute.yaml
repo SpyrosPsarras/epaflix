@@ -6,17 +6,17 @@
 # embedded outpost, provider + app slug `prowlarr`) gates browser traffic,
 # authorized by the "Servarr users" group.
 #
-# /api is EXEMT from forward-auth (prowlarr-api, priority 20 > UI priority 10):
-# Prowlarr is an INTEGRATION TARGET. newtarr calls prowlarr.epaflix.com/api,
-# and machine/API-key clients + deep-links need an unauthenticated path. This
-# is safe because the /api surface is already protected by Prowlarr's own
-# API key. (Note: sonarr/radarr reach Prowlarr over INTERNAL cluster DNS, not
-# this public host, so they are unaffected either way.)
+# /api is NOT exempt. Prowlarr is an INTEGRATION TARGET, but every caller
+# reaches it over in-cluster Service DNS (http://prowlarr:9696) - newtarr,
+# sonarr, sonarr2 and radarr were all verified against their own stored config
+# in #296. The priority-20 `prowlarr-api` exemption this file used to carry was
+# removed in #296 (2026-08-10) because it published the whole Prowlarr API, and
+# its Swagger UI, to the internet for no consumer. Do not re-add it - see the
+# "NO /api exemption route here" note further down this file.
 #
 # Pattern mirrors 08.servarr/newtarr/ingressroute.yaml:
 #   - app route priority:10 + authentik-forwardauth middleware
 #   - outpost route priority:15 matching PathPrefix(/outpost.goauthentik.io/)
-#   - api route priority:20, no middleware, PathPrefix(/api)
 #
 # NOTE: the live cluster has a DUPLICATE legacy IngressRoute `prowlarr-external`
 # (imperative-only, NOT in git) serving the same Host. This canonical set

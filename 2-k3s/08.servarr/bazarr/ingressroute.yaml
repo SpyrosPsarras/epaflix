@@ -4,15 +4,16 @@
 # rollout).
 #
 # Bazarr is an INTEGRATION TARGET: it calls out to sonarr/radarr and may be
-# called by lingarr via its API. So only the UI is newly SSO-gated; the
-# /api path is left EXEMPT (priority 20, NO forward-auth middleware) so
-# API-key callers and deep-links keep working (Bazarr's /api is already
-# protected by its own API key). Only the UI is newly SSO-gated.
+# called by lingarr via its API. Both directions run over in-cluster Service
+# DNS (http://bazarr:6767) - verified against lingarr's stored config in #296.
+# /api is therefore NOT exempt: the priority-20 PathPrefix(/api) exemption this
+# file used to carry was removed in #296 (2026-08-10) because it published the
+# whole API, and Bazarr's Swagger UI, to the internet for no consumer. Do not re-add it - see the
+# "NO /api exemption route here" note further down this file.
 #
 # Pattern mirrors 08.servarr/newtarr/ingressroute.yaml:
 #   - app route priority:10 + authentik-forwardauth middleware
 #   - outpost route priority:15 matching PathPrefix(/outpost.goauthentik.io/)
-#   - api route priority:20 matching PathPrefix(/api), no middleware
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
