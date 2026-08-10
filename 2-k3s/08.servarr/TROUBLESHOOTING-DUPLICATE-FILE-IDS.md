@@ -221,9 +221,9 @@ kubectl logs -n servarr deployment/sonarr -f | grep -i "InvalidOperationExceptio
 ```bash
 # The public host is fully Authentik-gated since #296 (no /api bypass), so this
 # must run against internal Service DNS. Key read into a variable, never echoed.
-KEY=$(kubectl -n servarr get secret unpackerr-secret \
+KEY=$(kubectl --context epaflix -n servarr get secret unpackerr-secret \
   -o jsonpath='{.data.UN_SONARR_0_API_KEY}' | base64 -d)
-kubectl -n servarr exec deploy/sonarr -- \
+kubectl --context epaflix -n servarr exec deploy/sonarr -- \
   curl -s -H "X-Api-Key: $KEY" 'http://localhost:8989/api/v3/queue' \
   | jq '.records | length'
 # Failed imports should clear and not come back
