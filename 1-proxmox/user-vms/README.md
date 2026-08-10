@@ -17,7 +17,24 @@ This directory contains SSH config files for individual user VMs and documents t
 ```
 
 External DNS (Cloudflare) → `<user>.epaflix.com` → `81.167.233.67` (router) → port 10022 → jumpbox port 22
-Internal DNS (Pi-hole) → `<user>.vm.epaflix.com` → `192.168.10.4X` (LAN-only, no public record)
+Internal DNS (Pi-hole) → `<user>.vm.epaflix.com` → `192.168.10.4X` (LAN-routed, **not private** - see below)
+
+> ⚠️ **`*.vm.epaflix.com` is LAN-routed, not private.** The `address=` line decides what
+> a LAN client gets. It does not stop the name resolving on public DNS. Measured
+> 2026-08-10 against `1.1.1.1`: `nick.vm.epaflix.com`, `vidar.vm.epaflix.com`,
+> `random999.vm.epaflix.com` and `a.b.vm.epaflix.com` all answer the Cloudflare proxy
+> addresses `172.67.179.219` / `104.21.59.155` for A and
+> `2606:4700:3033::ac43:b3db` / `2606:4700:3035::6815:3b9b` for AAAA. So does
+> `zzz.notvm.epaflix.com`, which is the tell: it is the `epaflix.com` Cloudflare zone
+> answering at every depth, not a `vm`-specific record. Do not pick a `vm.epaflix.com`
+> name because you believe the name alone hides the service (#830).
+>
+> ⚠️ **The wildcard certificate does not cover this zone.** `*.epaflix.com` does not
+> match a two-label name. Measured 2026-08-10 against `192.168.10.101:443`:
+> `-servername searxng.epaflix.com` → `CN=epaflix.com`, SAN `DNS:*.epaflix.com, DNS:epaflix.com`;
+> `-servername nick.vm.epaflix.com` → `CN=TRAEFIK DEFAULT CERT`. Put a
+> `vm.epaflix.com` host behind Traefik and TLS fails for real clients until a SAN is
+> added (#830).
 
 ---
 
@@ -255,8 +272,13 @@ dig ${USER}.vm.epaflix.com @192.168.10.30 +short
 
 > ⚠️ **Use `systemctl restart pihole-FTL`**, not just `pihole reloaddns`, when adding new
 > `*.vm.epaflix.com` entries. A reload (SIGHUP) does not always pick up new dnsmasq
-> directives for this zone. Unbound's `local-zone: "vm.epaflix.com." static` directive
-> guarantees NXDOMAIN for any unlisted name in this zone — it never leaks to public DNS.
+> directives for this zone.
+>
+> Unbound's `local-zone: "vm.epaflix.com." static` makes any unlisted name in this zone
+> NXDOMAIN **for clients using Pi-hole**. Measured 2026-08-10:
+> `dig random999.vm.epaflix.com @192.168.10.30` → `status: NXDOMAIN`. That is the whole
+> extent of it - it does not stop the name resolving on public DNS, which it does. See the
+> warning under "Architecture" above (#830).
 
 ### 9. Add external DNS record (Cloudflare — manual)
 
