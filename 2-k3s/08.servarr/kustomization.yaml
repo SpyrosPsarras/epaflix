@@ -165,7 +165,7 @@ images:
     digest: sha256:31f93b0f8eff9fe87c5cb7779276905144bc297b1a67cd77887d8eb168b1af2a
   # Byparr — FlareSolverr replacement (#275); seleniumbase/Chromium solver.
   - name: ghcr.io/thephaseless/byparr
-    digest: sha256:ee50262bc83d21c364863948436a3e7444553331157a93444477e9f067de210e
+    digest: sha256:8295dcfe1476610720d43d925dd60d14cd032b43048d10ce4b7851f6c35afd03
   # Unpackerr — extracts archive-packed releases for Sonarr (#275 follow-up).
   - name: ghcr.io/hotio/unpackerr
     digest: sha256:22a97b6399f06a8a41a21c6789d472914f9cb812e4fdd81bd10397ba5322d7a9
