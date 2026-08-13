@@ -162,7 +162,7 @@ images:
   - name: lscr.io/linuxserver/prowlarr
     digest: sha256:1295cff29d10b486c0d8324d1559a552140a5932bf8b3d87e398654414f63f92
   - name: ghcr.io/cleanuparr/cleanuparr
-    digest: sha256:1a2f68bb83202a8589e99098635b1ecc154a773b97e3f389cfc14d4e364cfd13
+    digest: sha256:c7cd53ad559a67147637de3d825f66ef6e6a5498490b73f49c6e4d72f13bed76
   # Byparr — FlareSolverr replacement (#275); seleniumbase/Chromium solver.
   - name: ghcr.io/thephaseless/byparr
     digest: sha256:db931cd7b7880a454bf7d12640155dbb57386088629811ecf452f7626be49e3c
