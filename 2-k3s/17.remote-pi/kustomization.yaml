@@ -37,7 +37,7 @@ generators:
 # v7.2.123 and `latest` resolve to the same manifest index today.
 images:
   - name: docker.io/eceasy/cli-proxy-api
-    newTag: v7.2.128@sha256:3f7a734784f4cc2c86f6268929caff1b0c178fe600fdaa12cefe884dc4cae841
+    newTag: v7.2.130@sha256:7fca20b67690f919d88a868e3dcfcba8bbda5f42fef9e5169c0b95853ff6fb8c
 
 # Owned by ArgoCD Application "remote-pi".
 # The reconcile script the cliproxy initContainer runs. Generated rather than
