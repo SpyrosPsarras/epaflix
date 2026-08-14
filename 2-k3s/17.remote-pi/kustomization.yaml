@@ -37,14 +37,15 @@ generators:
 # v7.2.123 and `latest` resolve to the same manifest index today.
 images:
   - name: docker.io/eceasy/cli-proxy-api
-    newTag: v7.2.131@sha256:52282964dca47d4978aaffd7dd72d6ed5fb5e5b72acfcbcd1785cfb087d6bd8e
+    newTag: v7.2.127@sha256:7174a94f0223dbb1865ef56e1f1e6f387b65b1efae7fceb4f6dbdf6b548ac4fd
 
 # Owned by ArgoCD Application "remote-pi".
-# The reconcile script the cliproxy initContainer runs. Generated rather than
-# hand-written as a ConfigMap so the file stays reviewable as real Python.
+# The scripts the cliproxy initContainers run. Generated rather than
+# hand-written as a ConfigMap so each file stays reviewable in its own language.
 configMapGenerator:
   - name: cliproxy-scripts
     files:
       - cliproxy/files/reconcile-config.psql
+      - cliproxy/files/fetch-pi-bridge.sh
     options:
       disableNameSuffixHash: true

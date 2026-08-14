@@ -113,6 +113,65 @@ $ollama$,
   RAISE NOTICE 'openai-compatibility: ollama appended';
 END $$;
 
+-- Enable the pi-bridge plugin (#858). Three edits inside the seeded `plugins:`
+-- block, which ships disabled with `dir: "plugins"` and `configs: {}`.
+--
+-- Line-anchored replacements, same reasoning as allow-remote above: each of
+-- these keys occurs exactly ONCE at this indentation in the live config, which
+-- was checked before this was written. That is an assumption the management UI
+-- could break by re-serialising the file, so a duplicate count raises instead
+-- of mangling a config it no longer understands.
+--
+-- `dir` must point at the plugins emptyDir. The default is relative to the
+-- image WORKDIR, which #862 made read-only.
+--
+-- No `store.version` on purpose: the pinned version lives in exactly one place,
+-- fetch-pi-bridge.sh, and with a single .so present the host loads that one.
+-- `allow_all_api_keys` keeps quota readable by the same client key used for
+-- model calls - the plugin's whole point - and never exposes the management key.
+DO $$
+DECLARE
+  c text;
+  n integer;
+  plugin_cfg constant text := E'    pi-bridge:\n      enabled: true\n      priority: 3\n      allow_all_api_keys: true';
+BEGIN
+  SELECT content INTO c FROM public.config_store WHERE id = 'config';
+  IF c IS NULL THEN RETURN; END IF;
+
+  SELECT count(*) INTO n FROM regexp_matches(c, '^plugins:[ \t]*$', 'n');
+  IF n <> 1 THEN
+    RAISE EXCEPTION 'expected exactly one top-level plugins: key, found %', n;
+  END IF;
+
+  SELECT count(*) INTO n FROM regexp_matches(c, '^  (enabled|dir|configs):', 'n');
+  IF n > 3 THEN
+    RAISE EXCEPTION 'plugins block keys are no longer unique at this indentation (% matches) - reconcile by hand', n;
+  END IF;
+
+  c := regexp_replace(c, '^  enabled:[ \t]*false[ \t]*$', '  enabled: true', 'n');
+  c := regexp_replace(c, '^  dir:[ \t]*"plugins"[ \t]*$', '  dir: "/CLIProxyAPI/plugins"', 'n');
+
+  -- `configs:` is `{}` on a freshly seeded row and a mapping once anything has
+  -- been configured through the UI. Handle both; adding the entry first keeps
+  -- the replacement a single anchored line either way.
+  IF NOT EXISTS (SELECT 1 FROM regexp_matches(c, '^\s*pi-bridge:[ \t]*$', 'n')) THEN
+    IF EXISTS (SELECT 1 FROM regexp_matches(c, '^  configs:[ \t]*\{\}[ \t]*$', 'n')) THEN
+      c := regexp_replace(c, '^  configs:[ \t]*\{\}[ \t]*$', E'  configs:\n' || plugin_cfg, 'n');
+    ELSIF EXISTS (SELECT 1 FROM regexp_matches(c, '^  configs:[ \t]*$', 'n')) THEN
+      c := regexp_replace(c, '^  configs:[ \t]*$', E'  configs:\n' || plugin_cfg, 'n');
+    ELSE
+      RAISE EXCEPTION 'plugins.configs is neither {} nor a mapping - reconcile by hand';
+    END IF;
+  END IF;
+
+  UPDATE public.config_store
+     SET content = c,
+         updated_at = now()
+   WHERE id = 'config';
+
+  RAISE NOTICE 'plugins: pi-bridge reconciled';
+END $$;
+
 -- Prove it, and fail the initContainer if either value is not what git wants.
 DO $$
 DECLARE
@@ -131,5 +190,15 @@ BEGIN
     RAISE EXCEPTION 'auth-dir is not /var/lib/cliproxy/pgstore/auths';
   END IF;
 
-  RAISE NOTICE 'verified: allow-remote true, auth-dir /var/lib/cliproxy/pgstore/auths';
+  IF substring(c from 'plugins:\s*\n\s*enabled:[ \t]*(\w+)') <> 'true' THEN
+    RAISE EXCEPTION 'plugins.enabled is not true after reconcile';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM regexp_matches(c, '^  dir:[ \t]*"/CLIProxyAPI/plugins"[ \t]*$', 'n')) THEN
+    RAISE EXCEPTION 'plugins.dir is not /CLIProxyAPI/plugins';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM regexp_matches(c, '^\s*pi-bridge:[ \t]*$', 'n')) THEN
+    RAISE EXCEPTION 'plugins.configs.pi-bridge is missing';
+  END IF;
+
+  RAISE NOTICE 'verified: allow-remote true, auth-dir /var/lib/cliproxy/pgstore/auths, pi-bridge enabled';
 END $$;
