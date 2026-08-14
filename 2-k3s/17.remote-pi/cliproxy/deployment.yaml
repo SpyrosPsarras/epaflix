@@ -106,6 +106,34 @@ spec:
               memory: "32Mi"
             limits:
               memory: "128Mi"
+        # Places the pi-bridge plugin .so on the plugins emptyDir. Git owns the
+        # version because the read-only rootfs leaves the panel's store-install
+        # button nowhere durable to write. Fails closed on checksum mismatch,
+        # open on an unreachable GitHub - see the script and #858.
+        - name: fetch-pi-bridge
+          image: docker.io/library/alpine:3.21
+          command:
+            - sh
+            - /scripts/fetch-pi-bridge.sh
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+            - name: plugins
+              mountPath: /plugins
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "32Mi"
+            limits:
+              memory: "128Mi"
       containers:
         - name: cliproxy
           image: docker.io/eceasy/cli-proxy-api:v7.2.123
@@ -170,6 +198,10 @@ spec:
             # a temp file fails.
             - name: tmp
               mountPath: /tmp
+            # `plugins.dir` in config.yaml points here. A subdirectory of the
+            # image WORKDIR, so the rest of /CLIProxyAPI stays read-only.
+            - name: plugins
+              mountPath: /CLIProxyAPI/plugins
           # tcpSocket, not httpGet. `/v1/*` requires a client API key, and
           # `/management.html` can legitimately 404 until the SPA download from
           # GitHub finishes. A listening socket is the only honest signal here.
@@ -200,6 +232,10 @@ spec:
           emptyDir:
             sizeLimit: 512Mi
         - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        # The pi-bridge .so is ~10 MiB; the zip is deleted after unpacking.
+        - name: plugins
           emptyDir:
             sizeLimit: 64Mi
         - name: scripts

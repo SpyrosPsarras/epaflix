@@ -127,12 +127,12 @@ Test restoration before relying on a backup.
 After the approved first sync:
 
 ```bash
-kubectl --context epaflix -n remote-pi get deploy,pod,service,pvc
-kubectl --context epaflix -n remote-pi port-forward service/remote-pi-relay 3000:3000
+kubectl -n remote-pi get deploy,pod,service,pvc
+kubectl -n remote-pi port-forward service/remote-pi-relay 3000:3000
 curl --fail http://127.0.0.1:3000/health
-kubectl --context epaflix -n traefik-system get service traefik-internal \
+kubectl -n traefik-system get service traefik-internal \
   -o jsonpath='{.spec.allocateLoadBalancerNodePorts}{"\n"}'
-kubectl --context epaflix -n traefik-system get service traefik-internal \
+kubectl -n traefik-system get service traefik-internal \
   -o go-template='{{range .spec.ports}}{{if .nodePort}}{{.nodePort}}{{"\n"}}{{end}}{{end}}'
 ```
 
@@ -296,7 +296,7 @@ non-localhost caller. So the first configuration pass has to happen through a
 port-forward, not through `cliproxy.epaflix.com`:
 
 ```bash
-kubectl --context epaflix -n remote-pi port-forward deploy/cliproxy 8317:8317
+kubectl -n remote-pi port-forward deploy/cliproxy 8317:8317
 # then open http://127.0.0.1:8317/management.html
 ```
 
@@ -331,19 +331,9 @@ curl -X PUT http://127.0.0.1:8317/v0/management/api-keys \
 `PATCH` returns `400 missing fields`. Only a bare array works on `v7.2.123`.
 
 The current key is kept in `cliproxy-secrets.enc.yaml` under `omp-api-key` so a
-rebuild does not lose it. Nothing in this tier consumes that value
-automatically - it is still typed into `config.yaml` through the management API
-by hand. See #861 for seeding it properly.
-
-**One in-cluster consumer keeps its own copy.** The Odysseus Claude Code
-heartbeat authenticates with the same client key as
-`ANTHROPIC_AUTH_TOKEN` in `2-k3s/13.odysseus/cliproxy-client-key.enc.yaml`, and
-reaches this proxy at `http://cliproxy.remote-pi.svc.cluster.local:8317`. A
-`secretKeyRef` cannot cross namespaces, so the value is duplicated on purpose.
-Rotating the key is therefore **three** edits, not two: the management `PUT`,
-`cliproxy-secrets.enc.yaml`, and `cliproxy-client-key.enc.yaml`. Miss the third
-and the heartbeat starts getting `403` from `/v1/messages`. Details:
-`2-k3s/13.odysseus/README.md` -> "Claude Code heartbeat".
+rebuild does not lose it. Nothing consumes that value automatically yet - it is
+still typed in through the management API by hand. See #861 for seeding it
+properly.
 
 ### Known limitation - provider OAuth needs a port-forward every time
 
@@ -366,6 +356,86 @@ releases at startup into `MANAGEMENT_STATIC_PATH`
   API itself still works.
 - Right after a restart, `/management.html` can 404 for a few seconds until the
   download lands. Check the pod log before concluding anything is wrong.
+
+## pi-bridge plugin (quota for the Pi extension)
+
+[`pi-bridge`](https://github.com/abix5/pi-cliproxyapi-bridge) is a native
+CLIProxyAPI plugin that serves provider quota and the model catalogue to the
+`pi-cliproxyapi` Pi extension (0.4.0+) using **the same client API key already
+used for model calls**. It replaces the standalone `pi-cliproxyapi-wellknown`
+sidecar, which we never deployed, so there is nothing to decommission here.
+
+Routes, on the existing host-only IngressRoute, no reverse-proxy change:
+
+```
+GET https://cliproxy.epaflix.com/v0/resource/plugins/pi-bridge/capabilities
+GET https://cliproxy.epaflix.com/v0/resource/plugins/pi-bridge/well-known
+GET https://cliproxy.epaflix.com/v0/resource/plugins/pi-bridge/usage
+Authorization: Bearer <one of the api-keys entries>
+```
+
+They are **resource** routes, not management routes: they are not behind the
+management key, and the plugin authorizes callers against the same `api-keys`
+list the proxy already accepts. An unknown key fails closed with `401`. Handing
+Pi the management key instead would have given a model client full admin.
+
+### How it is installed here - and why not through the store button
+
+The panel's **Plugins → Store** install button writes a `.so` into `plugins.dir`
+and pins a version in `config.yaml`. Neither survives here: the root filesystem
+is read-only (#862) and there is no PVC. So git owns both halves:
+
+| Half | Where | Mechanism |
+| --- | --- | --- |
+| the artifact | `plugins` emptyDir at `/CLIProxyAPI/plugins` | `fetch-pi-bridge` initContainer |
+| the config | `plugins:` block of the config row in Postgres | `reconcile-config.psql` |
+
+The version is pinned in **exactly one place**, `VERSION` in
+`cliproxy/files/fetch-pi-bridge.sh`, together with the sha256 of the release zip
+from its own `checksums.txt`. The config block deliberately sets no
+`store.version`: with a single `.so` present the host loads that one, verified
+on v7.2.127. A bump is a one-line edit plus the new checksum.
+
+The initContainer **fails closed on a checksum mismatch and open on an
+unreachable GitHub**. A tampered artifact must never load; a GitHub outage must
+not take the proxy down for an optional quota endpoint. If it logs the warning,
+the proxy runs and the four routes 404 until the next pod start succeeds.
+
+Upstream builds the plugin against SDK `v7.2.93` while we run `v7.2.127`, and
+its README says the versions must match. They do not have to: the release `.so`
+was loaded and exercised against the exact `v7.2.127` digest pinned in
+`kustomization.yaml` - under `runAsNonRoot` + `readOnlyRootFilesystem`, the same
+posture as the pod - before any of this was committed. After an image bump,
+re-check the startup log for `pluginhost: plugin loaded plugin_id=pi-bridge`;
+a rejected plugin logs `pluginhost: failed to load plugin` and does not stop the
+proxy, so it will not announce itself any other way.
+
+### Verification
+
+```bash
+kubectl --context epaflix -n remote-pi logs deploy/cliproxy -c fetch-pi-bridge
+kubectl --context epaflix -n remote-pi logs deploy/cliproxy | grep pluginhost
+curl -sS -H "Authorization: Bearer <client api key>" \
+  https://cliproxy.epaflix.com/v0/resource/plugins/pi-bridge/capabilities
+```
+
+`capabilities` returning `"plugin":"pi-bridge"` with the running `cpaVersion` is
+the end-to-end check. `usage` with an empty `accounts` array means the plugin
+works but no provider account is authorised yet - same signal as an empty
+`/v1/models`.
+
+On the Pi side nothing needs configuring: `pi-cliproxyapi` finds the plugin on
+the endpoint it already has in `~/.pi/agent/pi-cliproxyapi/config.json`.
+
+### Rollback
+
+Revert the commit and let the next pod start drop it. The plugin is only loaded
+because `plugins.enabled` is `true` in the config row, so a reverted
+`reconcile-config.psql` does **not** disable it by itself - config lives in
+Postgres, and that script only moves values forward. To disable it live, set
+`plugins.configs.pi-bridge.enabled` to `false` in the management UI, or delete
+the `plugins:` edits there; the pod picks the change up by fsnotify without a
+restart.
 
 ## Backup and restore
 
