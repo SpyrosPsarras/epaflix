@@ -187,7 +187,7 @@ jobs:
           # too). NOT the runner's preinstalled helm and NOT a setup action:
           # both drift, and a probe whose renderer drifts cannot tell "upstream
           # changed shape" from "my helm changed".
-          HELM_VERSION=3.21.3  # renovate: datasource=github-releases depName=helm/helm
+          HELM_VERSION=3.21.4  # renovate: datasource=github-releases depName=helm/helm
 
           tmp=$(mktemp -d)
           helm_tgz="helm-v${HELM_VERSION}-linux-amd64.tar.gz"
