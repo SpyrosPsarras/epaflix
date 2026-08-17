@@ -64,6 +64,7 @@ backup-manifest.txt
 | **qbittorrent-config** | Torrent state | LOW |
 | **homarr-config** | Dashboard settings | LOW |
 | **byparr** | Cloudflare bypass (stateless — no PVC; replaced FlareSolverr #275) | LOW |
+| **remote-pi-relay** | **Not backed up, by decision (#831).** `mesh.db` is a relay-side cache of an Owner-signed membership document; it is re-published by the mobile app and holds no pairing state. See `17.remote-pi/README.md` → Storage and backup. | NONE |
 
 ### 3. Proxmox VM Backups
 **Location:** `truenas_admin@192.168.10.200:/mnt/pool1/dataset01/VMs/backup/20260204-090744/`
