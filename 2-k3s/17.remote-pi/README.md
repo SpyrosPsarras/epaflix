@@ -322,15 +322,73 @@ Only `PGSTORE_DSN` is set, so Postgres wins.
   drift and the pod cannot log in.
 - `PGSTORE_SCHEMA` is left at its default `public`.
 
-## Logs - two surfaces, and why only one of them is a file (#1007)
+## Logs - one pane, and how the messages get there (#1007, #1016)
 
-There are two entirely separate things called "logs" here, and they are answered
-in two different places. Getting this wrong wastes an afternoon, so:
+Everything is in Grafana. That took three tries to get right, so the shape is
+recorded here along with what was rejected:
 
-| Question | Where the answer is | Config |
+| Question | Where | How it gets there |
 |---|---|---|
-| Which calls happened, when, status, duration | Loki / Grafana, 31-day retention | none - stdout, shipped by promtail |
-| What was actually *sent and returned* | one file per request on the pod | `request-log: true` |
+| Which calls happened, when, status, duration | Loki / Grafana, 31 days | proxy stdout, promtail |
+| What was said - prompt, reply, tool calls | Loki / Grafana, same query | `transcripts` sidecar, one JSON line per request |
+| The complete raw payload of one call | the pod, last ~230 requests | `request-log: true`, read with `cliproxy/tools/cliproxy-payload.sh` |
+
+One query gets both halves of a single call:
+
+```
+{namespace="remote-pi"} | json | request_id = "f4b1dfdc"
+```
+
+And the transcripts alone, newest first:
+
+```
+{namespace="remote-pi", container="transcripts"} | json
+```
+
+Useful fields on the JSON line: `request_id`, `model`, `account`,
+`upstream_status`, `turn_role`, `turn`, `turn_tools`, `reply`, `reply_tools`,
+`message_count`, `prompt_chars`, `payload_file`, `payload_bytes`. The last two
+let you jump from a Grafana line to the full file on the pod;
+`message_count` / `prompt_chars` are context growth per call, which nothing else
+here exposes.
+
+### Why the sidecar emits a delta and not the file
+
+An agent replays the entire conversation on every call, so a payload file is
+~1.1MB and almost all of it is history Loki already has. At the observed rate -
+106 `/v1/messages` in one hour - shipping files whole would be **~2.8GB/day
+against a 15Gi Loki PVC**, dead inside a week. Only the last message is new, so
+the sidecar emits that plus the reply: **~1KB per request**, ~190MB per 31-day
+window. Measured, not estimated: a 2,081,868-byte payload produced a 900-byte
+line.
+
+Two implementation facts that are load-bearing:
+
+- **The emitted line starts with an ISO timestamp.** promtail's multiline stage
+  uses `firstline: '^\d{4}-\d{2}-\d{2}|^[A-Z]{1}\d{4}'`, so a bare `{...}` would
+  be glued onto the previous log entry and corrupt both.
+- **No promtail or Loki change was needed.** promtail scrapes every container in
+  a pod, which `loki-0` already proves by shipping both `loki` and
+  `loki-sc-rules` as separate `container` values.
+
+The sidecar is a native sidecar (`initContainer` + `restartPolicy: Always`, GA
+since 1.29; this cluster is v1.35.5+k3s1) so it is running before the proxy
+serves its first request, and it dies with the pod. It mounts the work volume
+**read-only** - it reports on payloads, it must not be able to damage them.
+
+### What is redacted, and what is not
+
+CLIProxyAPI truncates bearer values itself (`Bearer omp-...db27`), so a payload is
+not a credential leak on its own. The risk is the other direction: a prompt or a
+tool result that quotes a secret. Everything the sidecar emits passes through
+`payload_lib.redact()` first - `sk-ant-`, `sk-`, `ghp_`, `github_pat_`, `xox*-`,
+`AKIA`, `AIza`, `omp-`, `Password=`, `"token"/"secret"/"api_key":` and PEM private
+key blocks. Prefix-anchored on purpose: an entropy heuristic would silently eat
+legitimate output, and a transcript nobody can read is worthless.
+
+**This is a bound, not a guarantee.** A secret in an unusual format reaches a
+31-day searchable index. That trade was accepted deliberately in exchange for one
+pane; #602 is what the cost looks like when it goes wrong.
 
 ### Access lines: Grafana, not files
 
@@ -345,11 +403,12 @@ Grafana Explore, Loki datasource (uid `P8E80F9AEF21F6940`, tenant
 `X-Scope-OrgID: 1` - a manual `curl` without that header gets `no org id`):
 <https://grafana.epaflix.com/goto/afvfszfwash6oc?orgId=default>
 
-Each line carries the request ID in brackets, which is the join key to the next
-section:
+Each line carries the request ID in brackets. That ID is the join key to the
+transcript line and to the payload file - it is the same value in all three:
 
 ```
 [2026-08-17 17:33:00] [2ea6fa4f] [info ] [gin_logger.go:97] 200 | 5.575s | 10.42.0.0 | POST "/v1/messages"
+                       ^^^^^^^^
 ```
 
 ### Payloads: `request-log`, fetched by request ID
@@ -359,6 +418,10 @@ promtail or Loki change can ever surface them. `request-log: true` writes one
 file per call under `WRITABLE_PATH/logs` = `/var/lib/cliproxy/logs`, named
 `<path>-<timestamp>-<requestID>.log`, containing the request body, the response
 body, both header sets, and the upstream API request/response.
+
+For day-to-day use you want the transcript line in Grafana, not this. Reach for
+the raw file when you need what the delta drops: the full history, every header,
+the upstream request as sent, or a reply longer than the 4000-char cap.
 
 **Read them with `cliproxy/tools/cliproxy-payload.sh`** - a raw payload file is
 1-4 MB of JSON and SSE frames, so reading one by eye is not a workflow:
