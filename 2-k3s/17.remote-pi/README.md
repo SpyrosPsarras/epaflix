@@ -383,13 +383,22 @@ anything sets it to `true`.
 
 ### Bounds and caveats
 
-- `logs-max-total-size-mb: 64` is **mandatory**, not cosmetic. Files are
+- `logs-max-total-size-mb: 256` is **mandatory**, not cosmetic. Files are
   per-request, the `work` emptyDir is `sizeLimit: 512Mi` shared with the pgstore
   spool and the management SPA, and the container has
   `ephemeral-storage: 1Gi`. The cleaner
   (`internal/logging/log_dir_cleaner.go`) ticks every 60s and deletes the oldest
   `*.log` until the directory is back under the cap; it runs even with
   `logging-to-file` false. The shipped default is `0`, meaning unlimited.
+- **How much history 256MB actually buys, measured (#1011):** one
+  `/v1/messages` file is ~1.1MB, largest seen 2.9MB, because each carries the
+  whole system prompt plus the conversation history. So the cap is ~230 requests
+  - a few hours of active use, not days. The first attempt at `64` held ~55
+  requests, roughly 20-30 minutes, which is short enough to have already deleted
+  the evidence by the time you go looking. Re-measure with
+  `du -sm /var/lib/cliproxy/logs` before assuming the current number is right,
+  and if you raise it, raise the `work` emptyDir `sizeLimit` and the container's
+  `ephemeral-storage` limit with it.
 - Payload files are **ephemeral**. `strategy: Recreate` on an emptyDir means a
   pod replacement loses them. That is intentional - see the next point.
 - Payload files contain **full prompt text and upstream auth headers**. They stay
