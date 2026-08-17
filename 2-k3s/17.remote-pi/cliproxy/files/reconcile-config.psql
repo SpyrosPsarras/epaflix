@@ -212,6 +212,15 @@ END $$;
 -- .go: a 60s ticker that deletes the oldest *.log until the directory is back
 -- under the cap. It runs even with logging-to-file false, so it is what keeps
 -- per-request files from filling ephemeral storage. 0 disables it entirely.
+--
+-- 256, MEASURED not guessed (#1011). One /v1/messages file is ~1.1MB and the
+-- largest seen was 2.9MB, because each one carries the whole system prompt plus
+-- the conversation history - so the first attempt at 64 held only ~55 requests,
+-- about 20-30 minutes of an active session. 256MB is ~230 requests. It still
+-- fits the budget: 256 logs + ~10 management SPA + a small pgstore spool against
+-- the `work` emptyDir's 512Mi sizeLimit, and the container's 1Gi
+-- ephemeral-storage limit with tmp at 64Mi and plugins at ~10MB. Raising this
+-- further means raising both of those too, so check them first.
 DO $$
 DECLARE
   c       text;
@@ -228,7 +237,7 @@ BEGIN
   FOR want IN
     SELECT * FROM (VALUES
       ('request-log',            'true'),
-      ('logs-max-total-size-mb', '64')
+      ('logs-max-total-size-mb', '256')
     ) AS t(key, value)
   LOOP
     -- Both are top-level keys at column 0, so no leading \s* - that would also
@@ -245,7 +254,7 @@ BEGIN
      SET content = c, updated_at = now()
    WHERE id = 'config';
 
-  RAISE NOTICE 'request payload logging reconciled: request-log true, logs-max-total-size-mb 64';
+  RAISE NOTICE 'request payload logging reconciled: request-log true, logs-max-total-size-mb 256';
 END $$;
 
 -- Prove it, and fail the initContainer if either value is not what git wants.
@@ -283,8 +292,8 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM regexp_matches(c, '^request-log:[ \t]*true[ \t]*$', 'n')) THEN
     RAISE EXCEPTION 'request-log is not true after reconcile';
   END IF;
-  IF NOT EXISTS (SELECT 1 FROM regexp_matches(c, '^logs-max-total-size-mb:[ \t]*64[ \t]*$', 'n')) THEN
-    RAISE EXCEPTION 'logs-max-total-size-mb is not 64 after reconcile';
+  IF NOT EXISTS (SELECT 1 FROM regexp_matches(c, '^logs-max-total-size-mb:[ \t]*256[ \t]*$', 'n')) THEN
+    RAISE EXCEPTION 'logs-max-total-size-mb is not 256 after reconcile';
   END IF;
   -- Guard the pairing, not just the values: request-log with logging-to-file
   -- true would move the access lines off stdout and blind Loki (#1006 territory).
@@ -292,5 +301,5 @@ BEGIN
     RAISE EXCEPTION 'logging-to-file is true - that takes the access log off stdout and blinds Loki; see #1007';
   END IF;
 
-  RAISE NOTICE 'verified: allow-remote true, auth-dir /var/lib/cliproxy/pgstore/auths, pi-bridge enabled, request-log true capped at 64MB, logging-to-file false';
+  RAISE NOTICE 'verified: allow-remote true, auth-dir /var/lib/cliproxy/pgstore/auths, pi-bridge enabled, request-log true capped at 256MB, logging-to-file false';
 END $$;
