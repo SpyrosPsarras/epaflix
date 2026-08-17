@@ -47,5 +47,11 @@ configMapGenerator:
     files:
       - cliproxy/files/reconcile-config.psql
       - cliproxy/files/fetch-pi-bridge.sh
+      # The transcript sidecar and the parser it shares with
+      # cliproxy/tools/render-payload.py (#1016). payload_lib.py is imported, not
+      # executed - it must be a valid module name, so underscores, unlike every
+      # other file here.
+      - cliproxy/files/emit-transcripts.py
+      - cliproxy/files/payload_lib.py
     options:
       disableNameSuffixHash: true
