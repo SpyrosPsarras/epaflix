@@ -127,16 +127,67 @@ to a digest, confirm the extension half is published, then pin the digest.
 
 `local-path` is node-local and has a `Delete` reclaim policy. It is not a
 replicated or retained backup: loss of the selected worker, the backing VM
-disk, or the claim can lose the database. The database contains signed
-membership metadata only. Recovery after loss means restoring a backup or
-pairing again.
+disk, or the claim can lose the database.
 
-No automated application-consistent backup is created by these manifests.
-Before an image or schema change, either stop the single relay and copy
-`mesh.db` to an encrypted backup destination, or use SQLite backup semantics
-from a controlled one-shot utility that mounts the claim. Do not make an
-arbitrary live file copy because SQLite may have a transient rollback journal.
-Test restoration before relying on a backup.
+### What `mesh.db` actually holds
+
+One table, `mesh_versions`: per Owner, the latest **Owner-signed, monotonically
+versioned** membership document (canonical JSON `blob` + Ed25519 `sig`). It is
+~16 KiB. It is a relay-side **cache of a document the relay does not author**:
+
+- The pi extension only ever issues `GET /mesh/<owner_hash>`. There is no PUT or
+  POST anywhere in the extension - the document is published by the **Owner**
+  (the paired mobile app), which holds the signing key.
+- Phone-to-workstation pairing does **not** live here. Paired devices are in
+  `~/.pi/remote/peers.json` on each machine, plus the device's own record.
+  Wiping `mesh.db` does not unpair anything.
+- The only consumer is cross-PC sibling discovery. On a missing record the read
+  path is `if (!envelope) continue;` in `mesh/siblings.js` - a no-op yielding an
+  empty topology, not an error.
+
+### Policy: accept the loss (#831)
+
+No automated backup. The volume is deliberately **not** added to a backup path,
+because there is no PVC backup automation in this cluster to add it to - the
+only backup automation that exists is `2-k3s/maintenance/backup-all-databases.sh`,
+which is manual and PostgreSQL-only. The TrueNAS container-data snapshot in
+`RECOVERY.md` was a one-off, not a running job. Building bespoke PVC backup
+automation for the least critical stateful component in the cluster is not
+proportionate.
+
+This is a decision about a re-derivable cache, not about accepting data loss.
+Recovery, in order:
+
+1. **Do nothing.** With one PC in the mesh (`homePC`), an empty `mesh_versions`
+   costs nothing: cross-PC sibling discovery is the only consumer, and this
+   deployment is single-workstation by design (see the top of this README).
+2. **Let the Owner republish.** The mobile app re-publishes its signed
+   membership document on the next membership change (pair, revoke, rename).
+   The version counter is the Owner's, so it resumes above the lost value.
+3. **Re-pair** only if the Owner's own state is also gone.
+
+The impact recorded when #831 was raised - "every paired device relationship it
+knows disappears, so each phone and each machine has to pair again" - is
+overstated: pairing state is not in this database.
+
+### Residual risk accepted
+
+The relay enforces the monotonic version floor from this table. Wiping it resets
+that floor. A freshly started extension process sends no `since`, so until the
+Owner publishes a higher version, a wiped relay would serve whatever it is given
+- which means a captured older signed document could re-admit a revoked PC. The
+attacker needs both a captured blob and write access to the relay, and the relay
+is only reachable on the internal-only Traefik entry point. Accepted at this
+scale. Revoke from the app after any relay data loss to force a version bump.
+
+### Still required: cold copy before a change
+
+"Accept the loss" covers *unplanned* loss. A *planned* image or schema change
+still takes a cold copy first, because that is when a bad migration is most
+likely and a 16 KiB file is free to keep. Stop the single relay and copy
+`mesh.db`, or use SQLite backup semantics from a controlled one-shot utility
+that mounts the claim. Do not make an arbitrary live file copy because SQLite
+may have a transient rollback journal.
 
 Cold-copy procedure, as used before the v0.2.3 -> v0.3.1 bump:
 
@@ -152,10 +203,13 @@ kubectl -n remote-pi scale deploy/remote-pi-relay --replicas=1
 ```
 
 With the relay stopped, `/data` holds `mesh.db` alone - no `-wal`, `-shm`, or
-rollback journal - so the copy is the whole database. The schema is a single
-`mesh_versions` table (one signed, monotonically versioned membership blob per
-owner), which is why the file is ~16 KiB. Choosing a durable backup policy for
-it is still open in #831.
+rollback journal - so the copy is the whole database.
+
+Keep the copy under the git-ignored `backups/remote-pi-relay/<timestamp>-cold/`
+with its `sha256`. Restore is a straight file put-back into `/data` with the
+relay scaled to `0`; verify with `PRAGMA integrity_check` before scaling up.
+The v0.3.1 bump is the worked example: the post-upgrade file was byte-identical
+to the pre-upgrade copy, confirming v0.3.1 runs no migration on this schema.
 
 ## Verification
 
