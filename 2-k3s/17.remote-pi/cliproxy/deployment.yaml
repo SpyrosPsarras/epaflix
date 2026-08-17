@@ -187,6 +187,22 @@ spec:
               value: /var/lib/cliproxy
             - name: MANAGEMENT_STATIC_PATH
               value: /var/lib/cliproxy/static
+            # Where request-log payload files land (#1007). The ONLY env var the
+            # binary offers for the log directory - verified in
+            # internal/util/util.go WritablePath(), which reads WRITABLE_PATH or
+            # writable_path and nothing else. There is no *LOG* env var at all:
+            #   grep -oa 'CLIPROXY[A-Z_]*\|[A-Z_]*LOG[A-Z_]*' CLIProxyAPI
+            # returns no logging knob, which is why `request-log` itself has to
+            # be reconciled into the Postgres config row instead.
+            #
+            # Without this, ResolveLogDirectory() falls through: `./logs`
+            # relative to the WORKDIR is unwritable under #862's read-only
+            # rootfs, so it lands on `<auth-dir>/logs` =
+            # /var/lib/cliproxy/pgstore/auths/logs. That happens to work, but it
+            # buries request payloads inside the credential directory. Naming the
+            # base explicitly puts them in /var/lib/cliproxy/logs instead.
+            - name: WRITABLE_PATH
+              value: /var/lib/cliproxy
           ports:
             - name: http
               containerPort: 8317
