@@ -134,6 +134,67 @@ spec:
               memory: "32Mi"
             limits:
               memory: "128Mi"
+        # Tails the request-log directory and prints one JSON line per request, so
+        # the MESSAGES land in Loki next to the access lines and Grafana is the
+        # only place anyone has to look - #1016.
+        #
+        # A native sidecar (initContainer + restartPolicy: Always, GA since 1.29,
+        # this cluster runs v1.35.5+k3s1), NOT an ordinary container. Two reasons
+        # that matter here: it is guaranteed to be running before the proxy
+        # starts serving, so no request goes untailed, and it is terminated with
+        # the pod instead of keeping a Job-like pod alive.
+        #
+        # It emits a DELTA, not the file. A payload is ~1.1MB because an agent
+        # replays the whole conversation every call; at the observed 106
+        # `/v1/messages` per hour, shipping files whole would be ~2.8GB/day
+        # against a 15Gi Loki PVC. Last turn + reply is ~1KB. See the script.
+        #
+        # No promtail change is needed: promtail scrapes every container in the
+        # pod, proven by loki-0 shipping both `loki` and `loki-sc-rules` as
+        # separate `container` label values.
+        - name: transcripts
+          restartPolicy: Always
+          image: docker.io/library/python:3.13-alpine
+          command:
+            - python3
+            - /scripts/emit-transcripts.py
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          env:
+            # Python buffers stdout when it is a pipe, which would hold lines
+            # back from promtail for as long as the buffer takes to fill. The
+            # script also flushes explicitly; this covers the interpreter's own
+            # output, including a traceback.
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            # /scripts is a read-only ConfigMap mount. Python tolerates not being
+            # able to write __pycache__, but saying so avoids the attempt.
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+            # Nothing is written, but the default is /root and uid 1000 cannot
+            # write there if anything ever tries.
+            - name: HOME
+              value: /tmp
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+            # Read-only: this container must never be able to corrupt or delete
+            # the payloads it is reporting on, and it has no reason to write.
+            - name: work
+              mountPath: /var/lib/cliproxy
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "32Mi"
+            limits:
+              memory: "128Mi"
       containers:
         - name: cliproxy
           image: docker.io/eceasy/cli-proxy-api:v7.2.123
