@@ -1,7 +1,7 @@
--- Reconcile the two CLIProxyAPI config values that git must own. See #861.
+-- Reconcile the CLIProxyAPI config values that git must own. See #861.
 --
 -- CLIProxyAPI keeps its whole config.yaml as one text row in config_store, and
--- these two have no environment variable, so without this they are live-only
+-- none of these has an environment variable, so without this they are live-only
 -- database state that a rebuild loses.
 --
 -- The wanted auth-dir is inlined, not a psql variable: psql does NOT
@@ -21,6 +21,14 @@
 --   auth-dir      must sit on the mounted emptyDir. It pointed at the pre-#867
 --                 spool inside the image WORKDIR, which #862 then made
 --                 read-only, so writing a provider token there would fail.
+--   request-log   the ONLY source of request/response payloads. stdout carries
+--                 just the gin access line, so Loki can never answer "what was
+--                 actually sent" - #1007.
+--   logs-max-
+--   total-size-mb bounds those payload files. Mandatory, not cosmetic: one file
+--                 per request on a 512Mi emptyDir under a 1Gi
+--                 ephemeral-storage limit, and the shipped default is 0 =
+--                 unlimited.
 --
 -- api-keys is deliberately NOT handled here. It is a list, not a line, and the
 -- owner may rotate it through the management UI. It is git-durable as
@@ -75,6 +83,10 @@ DO $$
 DECLARE
   c text;
 BEGIN
+  -- First boot: the proxy has not seeded the table yet. Without this the block
+  -- raises undefined_table and CrashLoops the initContainer on an empty
+  -- Postgres - the guard in the first block only ever protected that block.
+  IF to_regclass('public.config_store') IS NULL THEN RETURN; END IF;
   SELECT content INTO c FROM public.config_store WHERE id = 'config';
   IF c IS NULL THEN RETURN; END IF;
 
@@ -135,6 +147,10 @@ DECLARE
   n integer;
   plugin_cfg constant text := E'    pi-bridge:\n      enabled: true\n      priority: 3\n      allow_all_api_keys: true';
 BEGIN
+  -- First boot: the proxy has not seeded the table yet. Without this the block
+  -- raises undefined_table and CrashLoops the initContainer on an empty
+  -- Postgres - the guard in the first block only ever protected that block.
+  IF to_regclass('public.config_store') IS NULL THEN RETURN; END IF;
   SELECT content INTO c FROM public.config_store WHERE id = 'config';
   IF c IS NULL THEN RETURN; END IF;
 
@@ -172,11 +188,75 @@ BEGIN
   RAISE NOTICE 'plugins: pi-bridge reconciled';
 END $$;
 
+-- Request payload logging (#1007). `request-log: true` makes the proxy write one
+-- file per call under WRITABLE_PATH/logs containing the request body, the
+-- response body, both header sets and the upstream API request/response - the
+-- only place that content exists. Fetch one by the request ID that the stdout
+-- access line already prints:
+--
+--   GET /v0/management/request-log-by-id/<id>
+--
+-- That endpoint is NOT gated on logging-to-file (internal/api/handlers/management
+-- /logs.go GetRequestLogByID checks only the log directory), which is why this
+-- deliberately leaves `logging-to-file` at false. Setting that would call
+-- log.SetOutput(logWriter) and take the access lines OFF stdout, so promtail and
+-- Loki would go dark and we would trade 31 days of searchable history for a
+-- 10Mi file on an emptyDir that dies with the pod.
+--
+-- UPSERT, not replace: unlike allow-remote and auth-dir, `request-log` is absent
+-- from the seeded config - not false, ABSENT - so a pure regexp_replace is a
+-- silent no-op. Appending a top-level key after the openai-compatibility block
+-- above is valid YAML, the dedent closes that block.
+--
+-- logs-max-total-size-mb drives the cleaner in internal/logging/log_dir_cleaner
+-- .go: a 60s ticker that deletes the oldest *.log until the directory is back
+-- under the cap. It runs even with logging-to-file false, so it is what keeps
+-- per-request files from filling ephemeral storage. 0 disables it entirely.
+DO $$
+DECLARE
+  c       text;
+  want    record;
+  pattern text;
+BEGIN
+  -- First boot: the proxy has not seeded the table yet. Without this the block
+  -- raises undefined_table and CrashLoops the initContainer on an empty
+  -- Postgres - the guard in the first block only ever protected that block.
+  IF to_regclass('public.config_store') IS NULL THEN RETURN; END IF;
+  SELECT content INTO c FROM public.config_store WHERE id = 'config';
+  IF c IS NULL THEN RETURN; END IF;
+
+  FOR want IN
+    SELECT * FROM (VALUES
+      ('request-log',            'true'),
+      ('logs-max-total-size-mb', '64')
+    ) AS t(key, value)
+  LOOP
+    -- Both are top-level keys at column 0, so no leading \s* - that would also
+    -- match a nested key of the same name and edit the wrong line.
+    pattern := '^' || want.key || ':[ \t]*.*$';
+    IF EXISTS (SELECT 1 FROM regexp_matches(c, pattern, 'n')) THEN
+      c := regexp_replace(c, pattern, want.key || ': ' || want.value, 'n');
+    ELSE
+      c := rtrim(c, E' \n') || E'\n' || want.key || ': ' || want.value || E'\n';
+    END IF;
+  END LOOP;
+
+  UPDATE public.config_store
+     SET content = c, updated_at = now()
+   WHERE id = 'config';
+
+  RAISE NOTICE 'request payload logging reconciled: request-log true, logs-max-total-size-mb 64';
+END $$;
+
 -- Prove it, and fail the initContainer if either value is not what git wants.
 DO $$
 DECLARE
   c text;
 BEGIN
+  -- First boot: the proxy has not seeded the table yet. Without this the block
+  -- raises undefined_table and CrashLoops the initContainer on an empty
+  -- Postgres - the guard in the first block only ever protected that block.
+  IF to_regclass('public.config_store') IS NULL THEN RETURN; END IF;
   SELECT content INTO c FROM public.config_store WHERE id = 'config';
   IF c IS NULL THEN RETURN; END IF;
 
@@ -200,5 +280,17 @@ BEGIN
     RAISE EXCEPTION 'plugins.configs.pi-bridge is missing';
   END IF;
 
-  RAISE NOTICE 'verified: allow-remote true, auth-dir /var/lib/cliproxy/pgstore/auths, pi-bridge enabled';
+  IF NOT EXISTS (SELECT 1 FROM regexp_matches(c, '^request-log:[ \t]*true[ \t]*$', 'n')) THEN
+    RAISE EXCEPTION 'request-log is not true after reconcile';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM regexp_matches(c, '^logs-max-total-size-mb:[ \t]*64[ \t]*$', 'n')) THEN
+    RAISE EXCEPTION 'logs-max-total-size-mb is not 64 after reconcile';
+  END IF;
+  -- Guard the pairing, not just the values: request-log with logging-to-file
+  -- true would move the access lines off stdout and blind Loki (#1006 territory).
+  IF EXISTS (SELECT 1 FROM regexp_matches(c, '^logging-to-file:[ \t]*true[ \t]*$', 'n')) THEN
+    RAISE EXCEPTION 'logging-to-file is true - that takes the access log off stdout and blinds Loki; see #1007';
+  END IF;
+
+  RAISE NOTICE 'verified: allow-remote true, auth-dir /var/lib/cliproxy/pgstore/auths, pi-bridge enabled, request-log true capped at 64MB, logging-to-file false';
 END $$;
