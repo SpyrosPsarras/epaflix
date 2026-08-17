@@ -322,6 +322,85 @@ Only `PGSTORE_DSN` is set, so Postgres wins.
   drift and the pod cannot log in.
 - `PGSTORE_SCHEMA` is left at its default `public`.
 
+## Logs - two surfaces, and why only one of them is a file (#1007)
+
+There are two entirely separate things called "logs" here, and they are answered
+in two different places. Getting this wrong wastes an afternoon, so:
+
+| Question | Where the answer is | Config |
+|---|---|---|
+| Which calls happened, when, status, duration | Loki / Grafana, 31-day retention | none - stdout, shipped by promtail |
+| What was actually *sent and returned* | one file per request on the pod | `request-log: true` |
+
+### Access lines: Grafana, not files
+
+The proxy writes a gin access line per call to stdout and promtail already ships
+it. Query it:
+
+```
+{namespace="remote-pi", container="cliproxy"}
+```
+
+Grafana Explore, Loki datasource (uid `P8E80F9AEF21F6940`, tenant
+`X-Scope-OrgID: 1` - a manual `curl` without that header gets `no org id`):
+<https://grafana.epaflix.com/goto/afvfszfwash6oc?orgId=default>
+
+Each line carries the request ID in brackets, which is the join key to the next
+section:
+
+```
+[2026-08-17 17:33:00] [2ea6fa4f] [info ] [gin_logger.go:97] 200 | 5.575s | 10.42.0.0 | POST "/v1/messages"
+```
+
+### Payloads: `request-log`, fetched by request ID
+
+The prompt and the completion are **never** on stdout, at any log level, so no
+promtail or Loki change can ever surface them. `request-log: true` writes one
+file per call under `WRITABLE_PATH/logs` = `/var/lib/cliproxy/logs`, named
+`<path>-<timestamp>-<requestID>.log`, containing the request body, the response
+body, both header sets, and the upstream API request/response. Pull one with the
+ID from the Grafana line:
+
+```bash
+kubectl --context epaflix -n remote-pi port-forward deploy/cliproxy 8317:8317
+curl -H "Authorization: Bearer <management key>" \
+  http://127.0.0.1:8317/v0/management/request-log-by-id/2ea6fa4f
+```
+
+`GetRequestLogByID` checks only the log directory, **not** `logging-to-file`,
+which is what makes the split above possible.
+
+### `logging-to-file` stays `false`, deliberately
+
+It does not add a sink, it *moves* one: `ConfigureLogOutput` calls
+`log.SetOutput(logWriter)` and gin's writers are the same logrus instance, so
+turning it on takes the access lines off stdout. `kubectl logs` and Loki both go
+dark, and 31 days of searchable history is traded for a 10Mi rotating file on an
+emptyDir that dies with the pod. Its only benefit is the management UI's own
+"Logs" tab, which returns `400 logging to file disabled` while this is `false`.
+That is an acceptable loss. The verify block in `reconcile-config.psql` raises if
+anything sets it to `true`.
+
+### Bounds and caveats
+
+- `logs-max-total-size-mb: 64` is **mandatory**, not cosmetic. Files are
+  per-request, the `work` emptyDir is `sizeLimit: 512Mi` shared with the pgstore
+  spool and the management SPA, and the container has
+  `ephemeral-storage: 1Gi`. The cleaner
+  (`internal/logging/log_dir_cleaner.go`) ticks every 60s and deletes the oldest
+  `*.log` until the directory is back under the cap; it runs even with
+  `logging-to-file` false. The shipped default is `0`, meaning unlimited.
+- Payload files are **ephemeral**. `strategy: Recreate` on an emptyDir means a
+  pod replacement loses them. That is intentional - see the next point.
+- Payload files contain **full prompt text and upstream auth headers**. They stay
+  on the pod on purpose and are not shipped to Loki, because this repo has
+  already had to purge credential-shaped lines out of a 31-day retention window
+  (#634, #702, #824, #911). Do not "improve" this by tailing them into promtail.
+- Neither `request-log` nor `logs-max-total-size-mb` has an environment variable
+  (there is no `*LOG*` env in the binary at all), so both are reconciled into the
+  Postgres config row by `reconcile-config.psql` - the #861 pattern. Toggling
+  them in the management UI instead is a live-only change the next rebuild eats.
+
 ## Security posture - how this differs from the relay, and why
 
 The relay pod next door runs as UID 1000 with `readOnlyRootFilesystem: true`.
