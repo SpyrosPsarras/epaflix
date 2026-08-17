@@ -99,9 +99,25 @@ never access SQLite together. It runs as a numeric non-root user with a
 read-only root filesystem and writes only to `/data`.
 
 The relay image is pinned to an immutable digest. Registry observations tie
-that digest to the `v0.2.3` and `latest` tags. There is no observed `v0.3.0`
-tag; `v1.0.0` and `v1.0.1` are older stale pushes. The deployment does not use
-a mutable tag and does not describe this artifact as relay 0.3.
+that digest to the `v0.3.1` and `latest` tags, pushed 2026-08-12. `v1.0.0` and
+`v1.0.1` remain older stale pushes from 2026-05-22, not a newer release. The
+deployment does not use a mutable tag.
+
+Upstream versions the relay and the pi extension as a matched pair and states
+the upgrade order explicitly: **relay first, extension second**. An old
+extension can consume the new relay's UUID error shape, so relay-first is the
+safe direction. This digest is the relay half; the other half is npm
+`remote-pi@0.7.0`, published 52 seconds after the image. There is no `0.6.x` on
+npm at all - the extension stream jumps `0.5.5` -> `0.7.0`, so 0.7.0 is the
+"extension 0.6" the upstream upgrade note refers to. Extension 0.7.0 carries a
+one-release legacy wire-label shim, so a mixed fleet interoperates only while
+every participant is upgraded in one window; do not leave it mixed.
+
+This image is deliberately absent from the `images:` block in
+`kustomization.yaml`, so Renovate does not track it. Upstream's tag stream has
+shipped stale `v1.0.x` pushes that sort above the real releases, which makes an
+unattended tag-driven bump unsafe. Bumps here are manual: resolve the new tag
+to a digest, confirm the extension half is published, then pin the digest.
 
 ## Storage and backup
 
@@ -121,6 +137,25 @@ Before an image or schema change, either stop the single relay and copy
 from a controlled one-shot utility that mounts the claim. Do not make an
 arbitrary live file copy because SQLite may have a transient rollback journal.
 Test restoration before relying on a backup.
+
+Cold-copy procedure, as used before the v0.2.3 -> v0.3.1 bump:
+
+```bash
+kubectl -n remote-pi scale deploy/remote-pi-relay --replicas=0
+kubectl -n remote-pi wait --for=delete pod \
+  -l app.kubernetes.io/name=remote-pi-relay --timeout=110s
+# one-shot pod mounting the same claim read-only, then:
+kubectl -n remote-pi cp remote-pi-backup:/data/mesh.db ./mesh.db
+sha256sum ./mesh.db && sqlite3 ./mesh.db 'PRAGMA integrity_check;'
+kubectl -n remote-pi delete pod remote-pi-backup
+kubectl -n remote-pi scale deploy/remote-pi-relay --replicas=1
+```
+
+With the relay stopped, `/data` holds `mesh.db` alone - no `-wal`, `-shm`, or
+rollback journal - so the copy is the whole database. The schema is a single
+`mesh_versions` table (one signed, monotonically versioned membership blob per
+owner), which is why the file is ~16 KiB. Choosing a durable backup policy for
+it is still open in #831.
 
 ## Verification
 

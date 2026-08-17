@@ -1,7 +1,14 @@
 # Owned by ArgoCD Application "remote-pi".
 # Rationale: run exactly one relay writer against the SQLite membership database.
-# The pinned digest below is published as v0.2.3 and latest; no v0.3.0 tag
-# exists, while v1.0.0 and v1.0.1 are older stale pushes.
+# The pinned digest below is published as v0.3.1 and latest (2026-08-12);
+# v1.0.0 and v1.0.1 remain older stale pushes from 2026-05-22, not a newer
+# release. Upstream ships the relay and the pi extension as a pair and requires
+# the relay to be upgraded FIRST: this digest is the v0.3.1 half of the pair
+# whose other half is npm remote-pi@0.7.0, pushed 52 seconds apart. There is no
+# published 0.6.x on npm - the extension stream jumps 0.5.5 -> 0.7.0. #832.
+# Not tracked by Renovate on purpose: this image is not in the kustomization's
+# images: block, because upstream's tag stream is not trustworthy enough to
+# bump unattended. Bumps are manual, by digest, verified against the extension.
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -36,7 +43,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: relay
-          image: docker.io/jacobmoura7/remote-pi-relay@sha256:65b35f753561f5cf9387fa04b3e73f4b19ac537bf02648c7a4696e56a96b375e
+          image: docker.io/jacobmoura7/remote-pi-relay@sha256:7255159041fe32b02a30ba2e09a671fa00783f24c217750cbdf74c5f8b77a7b6
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
