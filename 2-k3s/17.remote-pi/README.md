@@ -358,8 +358,31 @@ The prompt and the completion are **never** on stdout, at any log level, so no
 promtail or Loki change can ever surface them. `request-log: true` writes one
 file per call under `WRITABLE_PATH/logs` = `/var/lib/cliproxy/logs`, named
 `<path>-<timestamp>-<requestID>.log`, containing the request body, the response
-body, both header sets, and the upstream API request/response. Pull one with the
-ID from the Grafana line:
+body, both header sets, and the upstream API request/response.
+
+**Read them with `cliproxy/tools/cliproxy-payload.sh`** - a raw payload file is
+1-4 MB of JSON and SSE frames, so reading one by eye is not a workflow:
+
+```bash
+cd 2-k3s/17.remote-pi/cliproxy/tools
+./cliproxy-payload.sh list              # newest 10: request id, time, size
+./cliproxy-payload.sh show 2ea6fa4f     # readable transcript
+./cliproxy-payload.sh raw  2ea6fa4f /tmp/full.log
+```
+
+`show` prints the model, the upstream URL and which provider account served it,
+the system prompt's first 300 chars, every message turn with tool calls and tool
+results labelled, and the assistant's reply reassembled from the SSE deltas.
+That last part is why the renderer walks `content_block_start` / `_delta` events
+instead of regexing for `text_delta`: an agent turn is often only `thinking` plus
+`tool_use`, which a text-only match reports as "no response body", i.e. exactly
+wrong on the most common case.
+
+The script reads the files off the pod with `kubectl exec cat` (no `kubectl cp` -
+the image has no `tar`), so it needs no management key and no port-forward.
+Override the cluster with `CLIPROXY_CONTEXT` / `CLIPROXY_NAMESPACE`.
+
+The management API serves the same file over HTTP if you would rather not exec:
 
 ```bash
 kubectl --context epaflix -n remote-pi port-forward deploy/cliproxy 8317:8317
@@ -368,7 +391,12 @@ curl -H "Authorization: Bearer <management key>" \
 ```
 
 `GetRequestLogByID` checks only the log directory, **not** `logging-to-file`,
-which is what makes the split above possible.
+which is what makes the split above possible. There is no *list* endpoint - the
+API only fetches by ID - which is the other reason the script exists.
+
+Bearer tokens in the captured headers are already truncated by the logger
+(`Authorization: Bearer omp-...db27`, `sk-a...dgAA`), so a payload file does not
+leak a usable key. The prompt text is still the whole prompt.
 
 ### `logging-to-file` stays `false`, deliberately
 
@@ -401,10 +429,12 @@ anything sets it to `true`.
   `ephemeral-storage` limit with it.
 - Payload files are **ephemeral**. `strategy: Recreate` on an emptyDir means a
   pod replacement loses them. That is intentional - see the next point.
-- Payload files contain **full prompt text and upstream auth headers**. They stay
-  on the pod on purpose and are not shipped to Loki, because this repo has
-  already had to purge credential-shaped lines out of a 31-day retention window
-  (#634, #702, #824, #911). Do not "improve" this by tailing them into promtail.
+- Payload files contain **full prompt text**. Bearer values are truncated by the
+  logger, so they are not a credential leak, but they stay on the pod on purpose
+  and are not shipped to Loki - this repo has already had to purge
+  credential-shaped lines out of a 31-day retention window (#634, #702, #824,
+  #911), and a whole-prompt corpus is worse to have sitting in a searchable index
+  than a single line. Do not "improve" this by tailing them into promtail.
 - Neither `request-log` nor `logs-max-total-size-mb` has an environment variable
   (there is no `*LOG*` env in the binary at all), so both are reconciled into the
   Postgres config row by `reconcile-config.psql` - the #861 pattern. Toggling
