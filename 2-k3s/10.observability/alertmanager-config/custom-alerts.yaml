@@ -813,3 +813,63 @@ spec:
               connection string (#634). Identify the pod, and if it is a new
               offender treat that credential as exposed and rotate it. Do NOT grep
               Loki for the literal value.
+
+    # Replacement for the chart's KubeJobFailed, which is disabled in
+    # prometheus-values.yaml (defaultRules.disabled.KubeJobFailed).
+    #
+    # The upstream rule is `kube_job_failed > 0` with no recency bound, so it
+    # fires once per RETAINED failed Job object. Every servarr reporter CronJob
+    # keeps failed Jobs for 30 days (ttlSecondsAfterFinished: 2592000), so a
+    # single transient finding alerted for 30 days and kept alerting long after
+    # later runs went green. Measured before this change: 34 of 73 active alerts
+    # were this one rule, 12 of them for blind-queue-check runs from 2026-08-15
+    # and 08-18 whose every successor had succeeded. That saturation is why the
+    # #1021 stale-API-key failures sat unnoticed for six hours (#1025).
+    #
+    # This version alerts only when the failed Job is the NEWEST Job of its
+    # CronJob, joined via kube_job_owner, so it self-resolves as soon as a later
+    # run succeeds. The second branch keeps ownerless Jobs (hand-created, Argo
+    # hooks) alerting while they are failed, since nothing will ever supersede
+    # them. `max by (...)` on every operand dedupes the two kube-state-metrics
+    # replicas, which were double-firing every alert.
+    #
+    # Verified live before commit: 34 series -> 2, both genuine
+    # (orphan-census' current finding, and one ownerless synthetic Job).
+    - name: kube-job-failed-last-run
+      interval: 60s
+      rules:
+        - alert: KubeJobFailedLastRun
+          expr: |
+            (
+              (
+                max by (namespace, job_name) (kube_job_status_start_time)
+                * on (namespace, job_name) group_left(owner_name)
+                max by (namespace, job_name, owner_name) (kube_job_owner{owner_kind="CronJob"})
+              )
+              and on (namespace, job_name)
+              (max by (namespace, job_name) (kube_job_failed) > 0)
+            )
+            >= on (namespace, owner_name) group_left()
+            max by (namespace, owner_name) (
+              max by (namespace, job_name) (kube_job_status_start_time)
+              * on (namespace, job_name) group_left(owner_name)
+              max by (namespace, job_name, owner_name) (kube_job_owner{owner_kind="CronJob"})
+            )
+            or
+            (max by (namespace, job_name) (kube_job_failed) > 0)
+              unless on (namespace, job_name)
+              max by (namespace, job_name) (kube_job_owner{owner_kind="CronJob"})
+          for: 15m
+          labels:
+            severity: warning
+            component: kubernetes
+          annotations:
+            summary: "Job {{ $labels.namespace }}/{{ $labels.job_name }} failed and is the latest run"
+            description: >-
+              Job {{ $labels.namespace }}/{{ $labels.job_name }} failed and no
+              later run of its CronJob has succeeded, so this is the CURRENT
+              state rather than a retained old failure. For the servarr reporter
+              CronJobs a non-zero exit is a FINDING, not a crash - read the Job
+              log for the report before touching anything. This alert clears by
+              itself once a later scheduled run succeeds; deleting the failed Job
+              object is not required and is not a fix.
