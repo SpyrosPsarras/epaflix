@@ -213,6 +213,12 @@ spec:
             # The image's HOME is /root, which uid 1000 cannot write.
             - name: HOME
               value: /var/lib/cliproxy/home
+            # The image bakes ENV TZ=Asia/Shanghai. The management UI formats
+            # the live-traffic bucket labels server-side, so without this the
+            # x-axis reads 6h ahead of a CEST wall clock. tzdata is present in
+            # the image, so overriding TZ is enough.
+            - name: TZ
+              value: Europe/Oslo
             - name: PG_PASSWORD
               valueFrom:
                 secretKeyRef:
