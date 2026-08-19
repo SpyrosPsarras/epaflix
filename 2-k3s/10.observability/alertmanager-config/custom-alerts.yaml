@@ -138,20 +138,54 @@ spec:
       interval: 60s
       rules:
         - alert: CleanuparrBlocklistDriftCheckFailed
-          expr: kube_job_failed{namespace="servarr", job_name=~"cleanuparr-blocklist-drift.*"} > 0
+          # LAST-RUN-ONLY (2026-08-19). The bare `kube_job_failed > 0` this
+          # replaced fired for every retained failed Job, and these CronJobs keep
+          # failed Jobs for 30 days (ttlSecondsAfterFinished: 2592000). One
+          # transient finding therefore alerted for 30 days, and kept alerting
+          # after the next run passed - 73 active alerts, most of them stale, is
+          # how the #1021 stale-API-key failures went unnoticed for 6 hours.
+          # The `and on (job_name) ... >= scalar(max(...))` clause keeps only the
+          # NEWEST Job of the family, so the alert self-resolves as soon as a
+          # later run succeeds. `max by (job_name)` dedupes the two
+          # kube-state-metrics replicas, which were double-firing every alert.
+          expr: |
+            max by (job_name) (
+              kube_job_failed{namespace="servarr", job_name=~"cleanuparr-blocklist-drift.*"} > 0
+              and on (job_name) (
+                max by (job_name) (kube_job_status_start_time{namespace="servarr", job_name=~"cleanuparr-blocklist-drift.*"})
+                  >= scalar(max(kube_job_status_start_time{namespace="servarr", job_name=~"cleanuparr-blocklist-drift.*"}))
+              )
+            )
           for: 5m
           labels:
             severity: warning
             component: servarr
           annotations:
             summary: "Cleanuparr Sonarr blocklist drifted from upstream (or check failed)"
-            description: "The weekly cleanuparr-blocklist-drift Job ({{ $labels.job_name }}) failed — either upstream Cleanuparr/Cleanuparr 'blacklist' diverged from the committed snapshot, or the upstream fetch failed. Inspect the Job logs for the diff, then run the manual re-snapshot runbook in 2-k3s/08.servarr/RECOVERY-newtarr-cleanuparr.md (#182). Keeps the local seriesId 40 re-arm guard; resolves the #138 static-snapshot caveat (detect-and-alert, manual re-snapshot)."
+            description: "The weekly cleanuparr-blocklist-drift Job ({{ $labels.job_name }}) failed — either upstream Cleanuparr/Cleanuparr 'blacklist' diverged from the committed snapshot, or the upstream fetch failed. Inspect the Job logs for the diff, then refresh 2-k3s/maintenance/files/cleanuparr-blocklist-expected.txt from live upstream via branch+PR. BASELINE ONLY - do NOT re-merge upstream into the cleanuparr-blocklist-seed Secret: those patterns were removed 2026-06-13 because they block unpackerr's .rar/.rNN volumes, and the pre-2026-08-19 runbook wording would reintroduce that. See the #182 section of 2-k3s/08.servarr/RECOVERY-newtarr-cleanuparr.md."
 
     - name: newtarr-config-drift
       interval: 60s
       rules:
         - alert: NewtarrConfigDriftCheckFailed
-          expr: kube_job_failed{namespace="servarr", job_name=~"newtarr-config-drift.*"} > 0
+          # LAST-RUN-ONLY (2026-08-19). The bare `kube_job_failed > 0` this
+          # replaced fired for every retained failed Job, and these CronJobs keep
+          # failed Jobs for 30 days (ttlSecondsAfterFinished: 2592000). One
+          # transient finding therefore alerted for 30 days, and kept alerting
+          # after the next run passed - 73 active alerts, most of them stale, is
+          # how the #1021 stale-API-key failures went unnoticed for 6 hours.
+          # The `and on (job_name) ... >= scalar(max(...))` clause keeps only the
+          # NEWEST Job of the family, so the alert self-resolves as soon as a
+          # later run succeeds. `max by (job_name)` dedupes the two
+          # kube-state-metrics replicas, which were double-firing every alert.
+          expr: |
+            max by (job_name) (
+              kube_job_failed{namespace="servarr", job_name=~"newtarr-config-drift.*"} > 0
+              and on (job_name) (
+                max by (job_name) (kube_job_status_start_time{namespace="servarr", job_name=~"newtarr-config-drift.*"})
+                  >= scalar(max(kube_job_status_start_time{namespace="servarr", job_name=~"newtarr-config-drift.*"}))
+              )
+            )
           for: 5m
           labels:
             severity: warning
@@ -164,7 +198,24 @@ spec:
       interval: 60s
       rules:
         - alert: OrphanCensusFailed
-          expr: kube_job_failed{namespace="servarr", job_name=~"orphan-census.*"} > 0
+          # LAST-RUN-ONLY (2026-08-19). The bare `kube_job_failed > 0` this
+          # replaced fired for every retained failed Job, and these CronJobs keep
+          # failed Jobs for 30 days (ttlSecondsAfterFinished: 2592000). One
+          # transient finding therefore alerted for 30 days, and kept alerting
+          # after the next run passed - 73 active alerts, most of them stale, is
+          # how the #1021 stale-API-key failures went unnoticed for 6 hours.
+          # The `and on (job_name) ... >= scalar(max(...))` clause keeps only the
+          # NEWEST Job of the family, so the alert self-resolves as soon as a
+          # later run succeeds. `max by (job_name)` dedupes the two
+          # kube-state-metrics replicas, which were double-firing every alert.
+          expr: |
+            max by (job_name) (
+              kube_job_failed{namespace="servarr", job_name=~"orphan-census.*"} > 0
+              and on (job_name) (
+                max by (job_name) (kube_job_status_start_time{namespace="servarr", job_name=~"orphan-census.*"})
+                  >= scalar(max(kube_job_status_start_time{namespace="servarr", job_name=~"orphan-census.*"}))
+              )
+            )
           for: 5m
           labels:
             severity: warning
@@ -177,7 +228,24 @@ spec:
       interval: 60s
       rules:
         - alert: ProwlarrIndexerBackoffCheckFailed
-          expr: kube_job_failed{namespace="servarr", job_name=~"prowlarr-indexer-health.*"} > 0
+          # LAST-RUN-ONLY (2026-08-19). The bare `kube_job_failed > 0` this
+          # replaced fired for every retained failed Job, and these CronJobs keep
+          # failed Jobs for 30 days (ttlSecondsAfterFinished: 2592000). One
+          # transient finding therefore alerted for 30 days, and kept alerting
+          # after the next run passed - 73 active alerts, most of them stale, is
+          # how the #1021 stale-API-key failures went unnoticed for 6 hours.
+          # The `and on (job_name) ... >= scalar(max(...))` clause keeps only the
+          # NEWEST Job of the family, so the alert self-resolves as soon as a
+          # later run succeeds. `max by (job_name)` dedupes the two
+          # kube-state-metrics replicas, which were double-firing every alert.
+          expr: |
+            max by (job_name) (
+              kube_job_failed{namespace="servarr", job_name=~"prowlarr-indexer-health.*"} > 0
+              and on (job_name) (
+                max by (job_name) (kube_job_status_start_time{namespace="servarr", job_name=~"prowlarr-indexer-health.*"})
+                  >= scalar(max(kube_job_status_start_time{namespace="servarr", job_name=~"prowlarr-indexer-health.*"}))
+              )
+            )
           for: 5m
           labels:
             severity: warning
@@ -190,7 +258,24 @@ spec:
       interval: 60s
       rules:
         - alert: CleanuparrQueueCleanerHealthCheckFailed
-          expr: kube_job_failed{namespace="servarr", job_name=~"cleanuparr-queuecleaner-health.*"} > 0
+          # LAST-RUN-ONLY (2026-08-19). The bare `kube_job_failed > 0` this
+          # replaced fired for every retained failed Job, and these CronJobs keep
+          # failed Jobs for 30 days (ttlSecondsAfterFinished: 2592000). One
+          # transient finding therefore alerted for 30 days, and kept alerting
+          # after the next run passed - 73 active alerts, most of them stale, is
+          # how the #1021 stale-API-key failures went unnoticed for 6 hours.
+          # The `and on (job_name) ... >= scalar(max(...))` clause keeps only the
+          # NEWEST Job of the family, so the alert self-resolves as soon as a
+          # later run succeeds. `max by (job_name)` dedupes the two
+          # kube-state-metrics replicas, which were double-firing every alert.
+          expr: |
+            max by (job_name) (
+              kube_job_failed{namespace="servarr", job_name=~"cleanuparr-queuecleaner-health.*"} > 0
+              and on (job_name) (
+                max by (job_name) (kube_job_status_start_time{namespace="servarr", job_name=~"cleanuparr-queuecleaner-health.*"})
+                  >= scalar(max(kube_job_status_start_time{namespace="servarr", job_name=~"cleanuparr-queuecleaner-health.*"}))
+              )
+            )
           for: 5m
           labels:
             severity: warning
@@ -203,7 +288,24 @@ spec:
       interval: 60s
       rules:
         - alert: BlindQueueCheckFailed
-          expr: kube_job_failed{namespace="servarr", job_name=~"blind-queue-check.*"} > 0
+          # LAST-RUN-ONLY (2026-08-19). The bare `kube_job_failed > 0` this
+          # replaced fired for every retained failed Job, and these CronJobs keep
+          # failed Jobs for 30 days (ttlSecondsAfterFinished: 2592000). One
+          # transient finding therefore alerted for 30 days, and kept alerting
+          # after the next run passed - 73 active alerts, most of them stale, is
+          # how the #1021 stale-API-key failures went unnoticed for 6 hours.
+          # The `and on (job_name) ... >= scalar(max(...))` clause keeps only the
+          # NEWEST Job of the family, so the alert self-resolves as soon as a
+          # later run succeeds. `max by (job_name)` dedupes the two
+          # kube-state-metrics replicas, which were double-firing every alert.
+          expr: |
+            max by (job_name) (
+              kube_job_failed{namespace="servarr", job_name=~"blind-queue-check.*"} > 0
+              and on (job_name) (
+                max by (job_name) (kube_job_status_start_time{namespace="servarr", job_name=~"blind-queue-check.*"})
+                  >= scalar(max(kube_job_status_start_time{namespace="servarr", job_name=~"blind-queue-check.*"}))
+              )
+            )
           for: 5m
           labels:
             severity: warning
@@ -216,7 +318,24 @@ spec:
       interval: 60s
       rules:
         - alert: QbtStuckTorrentCheckFailed
-          expr: kube_job_failed{namespace="servarr", job_name=~"qbt-stuck-torrent-check.*"} > 0
+          # LAST-RUN-ONLY (2026-08-19). The bare `kube_job_failed > 0` this
+          # replaced fired for every retained failed Job, and these CronJobs keep
+          # failed Jobs for 30 days (ttlSecondsAfterFinished: 2592000). One
+          # transient finding therefore alerted for 30 days, and kept alerting
+          # after the next run passed - 73 active alerts, most of them stale, is
+          # how the #1021 stale-API-key failures went unnoticed for 6 hours.
+          # The `and on (job_name) ... >= scalar(max(...))` clause keeps only the
+          # NEWEST Job of the family, so the alert self-resolves as soon as a
+          # later run succeeds. `max by (job_name)` dedupes the two
+          # kube-state-metrics replicas, which were double-firing every alert.
+          expr: |
+            max by (job_name) (
+              kube_job_failed{namespace="servarr", job_name=~"qbt-stuck-torrent-check.*"} > 0
+              and on (job_name) (
+                max by (job_name) (kube_job_status_start_time{namespace="servarr", job_name=~"qbt-stuck-torrent-check.*"})
+                  >= scalar(max(kube_job_status_start_time{namespace="servarr", job_name=~"qbt-stuck-torrent-check.*"}))
+              )
+            )
           for: 5m
           labels:
             severity: warning
