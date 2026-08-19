@@ -6,6 +6,27 @@
 # perpetually disabled. Byparr (seleniumbase/Chromium) handles modern
 # Cloudflare. Uses Camoufox (Firefox) — CPU/RAM-heavy; /health runs a real
 # browser solve, so it needs real CPU headroom and a generous startupProbe.
+#
+# LIMIT — Byparr cannot rescue an IP-BANNED indexer, and 1337x is now one.
+# As of 2026-08-19 every 1337x mirror (1337x.to/.st, x1337x.ws/.eu/.cc)
+# answers the HOME egress with HTTP 403 and a 17-byte body `error code: 1006`
+# (Cloudflare IP ban), NOT a challenge page. Prowlarr's FlareSolverr proxy
+# only hands a request to the solver when
+# CloudFlareDetectionService.IsCloudflareProtected() is true, and that method
+# matches on an exact body list — `Just a moment...`, `Access denied`,
+# `Attention Required!`, exactly `error code: 1020`, DDOS-GUARD. `1006` is not
+# on it, so Byparr is never invoked (verified: zero Byparr traffic while a
+# 1337x indexer test failed). Even if it were invoked, a solver egressing from
+# the same banned IP gets the same 1006 — there is no challenge to solve.
+#
+# The same request from the AirVPN egress (qbittorrent's `agent` sidecar)
+# returns a 5467-byte `Just a moment...` page — i.e. solvable. So 1337x is
+# fixable only by moving Prowlarr's egress, which would also move the private
+# trackers (IPTorrents, TorrentDay, AvistaZ, Mpellas) onto a VPN IP and risks
+# those accounts. That call is the owner's, tracked in #1022; until then 1337x
+# is DISABLED in Prowlarr (public tracker, redundant with The Pirate Bay,
+# LimeTorrents and TorrentDownload) so it stops burning the 24h backoff cycle
+# and stops tripping IndexerLongTermStatusCheck.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
