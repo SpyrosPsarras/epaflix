@@ -1003,8 +1003,36 @@ kubectl --context epaflix -n servarr logs job/$(kubectl --context epaflix -n ser
 ```
 
 If it is a transient fetch failure, no action is needed (next weekly run clears
-it). If it is real drift, re-snapshot — refreshing BOTH the SOPS seed's upstream
-portion AND the diff baseline, **without ever retyping the seriesId 40 regex**:
+it).
+
+> ### ⚠️ 2026-08-19 — steps 1–2 and 3b–5 below are OBSOLETE. Do not run them.
+>
+> The seed **no longer contains the upstream blacklist at all.** It was removed
+> on **2026-06-13** by owner request because the upstream file patterns blocked
+> unpackerr: RAR-packed scene releases need their `.rar`/`.rNN` volumes to
+> download. The seed body is now 9 lines — header comments plus the Epaflix
+> release-title guard — and the MalwareBlocker is effectively inert. Re-merging
+> upstream into the seed, as the original steps instruct, **re-breaks unpackerr.**
+>
+> On drift, the whole remedy is a one-line baseline bump:
+>
+> ```sh
+> curl -fsSL https://raw.githubusercontent.com/Cleanuparr/Cleanuparr/refs/heads/main/blacklist \
+>   > 2-k3s/maintenance/files/cleanuparr-blocklist-expected.txt
+> # branch + PR, wait for `validate`, gh pr merge --merge
+> ```
+>
+> No SOPS, no seed edit, no `kubectl cp`, no cleanuparr restart. The detector
+> goes green on its next weekly run (or a manual `kubectl create job --from=`).
+>
+> This bit the 2026-08-17 drift (`+ *.m2ts`): the `maintenance` App sat
+> `Degraded` for two days, and following the steps below verbatim would have
+> reintroduced the unpackerr conflict fixed in June.
+
+The original both-sides re-snapshot is kept below for historical context only —
+it applies **only** if a future owner decision puts the upstream blacklist back
+into the seed. It refreshes BOTH the SOPS seed's upstream portion AND the diff
+baseline, **without ever retyping the seriesId 40 regex**:
 
 ```sh
 # 1. Pull the live upstream blacklist (single shared upstream file -- there is NO
