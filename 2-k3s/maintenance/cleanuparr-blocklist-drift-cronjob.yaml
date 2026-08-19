@@ -4,10 +4,19 @@
 # The Cleanuparr Sonarr content-blocker reads a LOCAL file
 # /config/custom-blocklist-sonarr.txt, codified in git as the SOPS seed
 # cleanuparr-blocklist-seed (2-k3s/08.servarr/_shared/secrets/) and restored on a
-# fresh PVC by the cleanuparr seed-config initContainer (#138). That file is the
-# upstream Cleanuparr/Cleanuparr `blacklist` PLUS a 2-line local overlay (the
-# seriesId 40 re-arm guard regex). Because it is a static snapshot it does NOT
-# auto-track upstream blocklist changes.
+# fresh PVC by the cleanuparr seed-config initContainer (#138).
+#
+# The seed NO LONGER CONTAINS THE UPSTREAM BLACKLIST. It was removed on
+# 2026-06-13 by owner request because it conflicted with unpackerr - RAR-packed
+# scene releases need their .rar/.rNN volumes to download, and the upstream file
+# patterns blocked exactly those. The seed now carries ONLY the Epaflix
+# release-title guard; the MalwareBlocker is effectively inert. So on drift,
+# refresh THE BASELINE BELOW ONLY. Re-merging upstream into the seed - which the
+# #182 runbook told you to do until 2026-08-19 - re-breaks unpackerr.
+#
+# What that leaves this detector doing: telling you upstream changed, for a file
+# this cluster deliberately does not consume. Informational, not actionable
+# beyond the baseline bump. Kept because it is ~1 change/year and cheap.
 #
 # This Job is a DETECTOR, not an auto-updater. Weekly it fetches the live upstream
 # `blacklist`, normalizes both sides identically (trim trailing whitespace, drop
@@ -54,13 +63,17 @@ data:
       exit 0
     fi
     echo "DRIFT DETECTED -- upstream Cleanuparr/Cleanuparr 'blacklist' has changed:"
-    echo "  added-upstream (need to merge into seed + baseline):"
+    echo "  added-upstream (baseline bump only -- do NOT merge into the seed):"
     grep '^+' /tmp/diff.txt | grep -v '^+++' | sed 's/^+/    + /'
     echo "  removed-upstream:"
     grep '^-' /tmp/diff.txt | grep -v '^---' | sed 's/^-/    - /'
     echo
-    echo "ACTION: run the manual re-snapshot runbook in"
-    echo "  2-k3s/08.servarr/RECOVERY-newtarr-cleanuparr.md (#182 section)."
+    echo "ACTION: refresh the BASELINE ONLY --"
+    echo "  2-k3s/maintenance/files/cleanuparr-blocklist-expected.txt <- live upstream,"
+    echo "  then branch+PR. Do NOT re-merge upstream into the cleanuparr-blocklist-seed"
+    echo "  Secret: the upstream patterns were removed 2026-06-13 because they block"
+    echo "  unpackerr's .rar/.rNN volumes. See the #182 section of"
+    echo "  2-k3s/08.servarr/RECOVERY-newtarr-cleanuparr.md."
     exit 1
 ---
 apiVersion: batch/v1
