@@ -89,7 +89,7 @@ helmCharts:
     includeCRDs: false
   - name: loki
     repo: https://grafana.github.io/helm-charts
-    version: "7.2.0"
+    version: "7.3.0"
     releaseName: loki
     namespace: observability
     valuesFile: loki-values.yaml
