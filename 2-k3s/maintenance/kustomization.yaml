@@ -66,6 +66,17 @@ resources:
   # existing qbittorrent-webui-credentials Secret, same cross-App reason as
   # orphan-census-cronjob.yaml above.
   - qbt-stuck-torrent-check-cronjob.yaml
+  # Issue #1024: daily Radarr missing-movie search (servarr ns). The ONLY ACTOR
+  # in this directory - every sibling is a detector that exits non-zero on a
+  # finding, this one exits 0 on success and non-zero only on an API failure,
+  # so it needs no scoped alert (KubeJobFailedLastRun covers it, #1027).
+  # Radarr has no missing-search task of its own and RSS Sync only sees newly
+  # posted releases, so catalogue titles were never retried - 21 monitored
+  # movies had zero history. Rate-limited to BATCH_SIZE=3 per run via a
+  # stateless id-sorted rotation, because a full missing sweep would 429
+  # AvistaZ off the air. Reuses the unpackerr-secret *arr API keys like
+  # blind-queue-check, so no ksops generator is needed here.
+  - radarr-missing-search-cronjob.yaml
 
 # Issue #182: diff baseline for the cleanuparr-blocklist-drift CronJob. Single
 # on-disk source of truth = files/cleanuparr-blocklist-expected.txt (verbatim
