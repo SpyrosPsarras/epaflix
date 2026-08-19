@@ -355,6 +355,19 @@ defaultRules:
     nodeExporterRecording: true
     prometheus: true
     prometheusOperator: true
+  # The chart's KubeJobFailed is `kube_job_failed > 0` with no recency bound, so
+  # it fires for every RETAINED failed Job. The servarr reporter CronJobs keep
+  # failed Jobs 30 days (ttlSecondsAfterFinished: 2592000), so one transient
+  # finding alerted for 30 days and kept alerting after later runs passed -
+  # 34 of 73 active alerts were this rule, most of them stale, and that
+  # saturation is why the #1021 stale-API-key failures went unseen for 6h.
+  # Replaced by KubeJobFailedLastRun in
+  # alertmanager-config/custom-alerts.yaml, which keeps only the newest Job of
+  # each CronJob (plus any failed ownerless Job) and dedupes the two
+  # kube-state-metrics replicas. Re-enable this and delete that rule if you
+  # ever want the raw upstream behaviour back.
+  disabled:
+    KubeJobFailed: true
 
 # Component scraping
 kubelet:
