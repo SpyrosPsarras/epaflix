@@ -224,6 +224,90 @@ After a clean manual adoption window, switch the Application to automated
 self-heal with `prune: false`. Leave prune disabled until deleting a manifest
 from git should intentionally delete the live resource.
 
+## Break-glass: restoring local admin login
+
+The local `admin` account is disabled (`configs.cm.admin.enabled: false` in
+`helm-values.yaml`, #1039). Authentik SSO via the `ArgoCD Admins` group is the
+only login path. If Authentik is down, its OIDC client secret is wrong, or the
+group mapping breaks, **nobody can log in to the tool that deploys Authentik.**
+
+This is recoverable and does not need a working ArgoCD UI, a working Authentik,
+or this repo. It needs `kubectl` and the age key.
+
+### Is this actually the problem?
+
+Before reaching for break-glass, confirm SSO is the failure. A read-only session
+is not the same as no session:
+
+```bash
+# What ArgoCD thinks the group mapping is
+kubectl --context epaflix -n argocd get cm argocd-rbac-cm -o jsonpath='{.data.policy\.csv}'; echo
+
+# Is Authentik answering at all?
+curl -4 -s -o /dev/null -w '%{http_code}\n' --max-time 10 \
+  --resolve auth.epaflix.com:443:192.168.10.101 \
+  https://auth.epaflix.com/application/o/argocd/.well-known/openid-configuration
+```
+
+A `200` from that endpoint means Authentik is serving the provider. If you get a
+`200` and still cannot log in, the fault is the group mapping or the client
+secret, not availability, and re-enabling local admin is the fastest way in
+while you fix it.
+
+> Do **not** diagnose this from `scopes_supported`. It lists scope mappings, not
+> deliverable claims. `groups` rides inside Authentik's default `profile`
+> mapping and does not appear as its own scope. Misreading that produced a false
+> alarm once already (#1040). The only reliable check is a real login.
+
+### Re-enable the account
+
+```bash
+kubectl --context epaflix -n argocd patch cm argocd-cm \
+  --type merge -p '{"data":{"admin.enabled":"true"}}'
+kubectl --context epaflix -n argocd rollout restart deploy/argocd-server
+kubectl --context epaflix -n argocd rollout status deploy/argocd-server --timeout=120s
+```
+
+This survives because the `argocd` Application is **manual-sync** - it has no
+`syncPolicy`, so nothing reverts the patch. On an Application with
+`selfHeal: true` this would be undone within minutes.
+
+### Get the password
+
+The chart generated `admin.password` as a bcrypt hash at install and preserves
+it across renders through Helm `lookup`. It is **not** in git, and it is not
+recoverable from the hash. If the original was never stored in the credential
+store, set a new one:
+
+```bash
+# bcrypt a new password without it reaching the shell history or a transcript
+read -rs NEWPW
+HASH=$(kubectl --context epaflix -n argocd exec deploy/argocd-server -- \
+         argocd account bcrypt --password "$NEWPW")
+kubectl --context epaflix -n argocd patch secret argocd-secret \
+  --type merge -p "{\"stringData\":{\"admin.password\":\"$HASH\",\"admin.passwordMtime\":\"$(date -u +%FT%TZ)\"}}"
+unset NEWPW HASH
+```
+
+### After recovery
+
+Re-disable the account once SSO works again, and do it in git rather than by a
+reverse patch, so the repo stays the source of truth:
+
+```bash
+kubectl --context epaflix -n argocd patch cm argocd-cm \
+  --type merge -p '{"data":{"admin.enabled":"false"}}'
+kubectl --context epaflix -n argocd rollout restart deploy/argocd-server
+```
+
+### What not to touch
+
+`admin.password`, `admin.passwordMtime` and `server.secretkey` in
+`argocd-secret` are chart-generated and absent from a local render **by design**
+(#779). Disabling the account is a ConfigMap change and nothing more. Do not
+prune those keys to "clean up" - removing `server.secretkey` invalidates every
+issued token and logs out every session, including yours.
+
 ## Authentik onboarding (one-time)
 
 Authentik was Helm-installed before ArgoCD existed. To put it under ArgoCD
