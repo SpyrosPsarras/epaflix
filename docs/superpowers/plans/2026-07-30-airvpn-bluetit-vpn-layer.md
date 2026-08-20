@@ -18,7 +18,7 @@
 - Encrypting needs only the public age recipient in `.sops.yaml`. The private key is **not** on this workstation; read it from cluster Secret `argocd/sops-age` if a decrypt is needed.
 - **Push aligned git BEFORE ArgoCD reconciles**, or automated sync reverts live to pre-change main.
 - Merge policy: rebase onto `origin/main`, `push --force-with-lease`, wait for the `validate` check, then `gh pr merge <n> --merge`. **Never merge without Spyros's explicit OK.**
-- Secrets live only in `.github/instructions/secrets.yml` (git-ignored). AirVPN account credentials are there as `airvpn_user` / `airvpn_password`, inside the existing `airvpn_*` block.
+- Secrets live only in the credential store `.github/instructions/secrets.enc.yaml` (SOPS+age, committed). AirVPN account credentials are there as `airvpn_user` / `airvpn_password` - top-level keys sharing the `airvpn_*` prefix, not a nested block. Read one with `sops -d --extract '["airvpn_user"]' .github/instructions/secrets.enc.yaml`, never the whole file, and never echo the value.
 - `bluetit.rc` directives are **whitespace-separated**, not `key = value`.
 - AirVPN Suite version pinned to `2.1.0`, sha512 `e17add5769b50683a4d2e480995fbe83d9f4b05b9738de58de9ce922ea80b13317b502ad4a49ee01bd23bcf10b8df96a3242fa3e5f9d20138665373c2445720d`.
 - Image name: `ghcr.io/spyrospsarras/airvpn-bluetit`.
@@ -1320,7 +1320,7 @@ it rewrites the file on exit), then start it again.
 
 - [ ] **Step 3: Write the README**
 
-Cover: `sudo -n docker` (the `ubuntu` user is not in the docker group), that the SSH host key is not in `known_hosts` so the first connection needs `-o StrictHostKeyChecking=accept-new`, that credentials come from a git-ignored `.env` sourced from `secrets.yml`, and that `airkey` must stay `nick` so his device key is never shared with the cluster.
+Cover: `sudo -n docker` (the `ubuntu` user is not in the docker group), that the SSH host key is not in `known_hosts` so the first connection needs `-o StrictHostKeyChecking=accept-new`, that credentials come from a git-ignored `.env` filled from the credential store (`.github/instructions/secrets.enc.yaml`, keys `airvpn_user` / `airvpn_password`), and that `airkey` must stay `nick` so his device key is never shared with the cluster.
 
 - [ ] **Step 4: Deploy and verify**
 

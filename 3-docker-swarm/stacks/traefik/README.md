@@ -33,8 +33,9 @@ ssh ubuntu@192.168.10.71 "docker network create --driver overlay --attachable tr
 ### 2. Create the Cloudflare API token secret
 
 ```bash
-# Token value is in .github/instructions/secrets.yml
-ssh ubuntu@192.168.10.71 "echo '<CF_API_TOKEN>' | docker secret create cloudflare_api_token -"
+# Read the token from the credential store and pipe it over stdin, never on argv.
+CF_API_TOKEN=$(sops -d --extract '["cloudflare-api-token"]' .github/instructions/secrets.enc.yaml)
+ssh ubuntu@192.168.10.71 "docker secret create cloudflare_api_token -" <<<"$CF_API_TOKEN"
 ```
 
 > The token needs DNS edit permissions for `epaflix.com` on Cloudflare.

@@ -7,10 +7,17 @@ description: "Instructions for Proxmox VE virtualization setup"
 When working with files in the `1-proxmox/` directory, follow these Proxmox VE-specific guidelines.
 
 **Credential Placeholders:**
-All commands use placeholders for sensitive information. Replace with values from `.github/instructions/secrets.yml`:
+All commands use placeholders for sensitive information. Replace them with values from the credential store `.github/instructions/secrets.enc.yaml`:
 - `<PROXMOX_HOST1_USER>` / `<PROXMOX_HOST1_IP>` → proxmox-takaros credentials
 - `<PROXMOX_HOST2_USER>` / `<PROXMOX_HOST2_IP>` → proxmox-evanthoulaki credentials
 - `<TRUENAS_IP>` → TrueNAS server IP address
+
+Read one key at a time. Never decrypt the whole file, never echo the value:
+
+```bash
+VALUE=$(sops -d --extract '["<key_name>"]' .github/instructions/secrets.enc.yaml)
+echo "${#VALUE}"   # a length is safe to print; the value is not
+```
 
 ## Quick Actions Reference
 
@@ -18,7 +25,7 @@ Common administrative tasks that should be executed quickly:
 
 ### Enable All iSCSI Targets (Both Hosts)
 ```bash
-# On first Proxmox host (credentials from secrets.yml: proxmox-takaros_username, proxmox-takaros_password)
+# On first Proxmox host (credentials from the credential store: proxmox-takaros_username, proxmox-takaros_password)
 ssh <PROXMOX_HOST1_USER>@<PROXMOX_HOST1_IP> "pvesm set iscsi-master-51 --disable 0 && \
 pvesm set iscsi-master-52 --disable 0 && \
 pvesm set iscsi-master-53 --disable 0 && \
@@ -27,7 +34,7 @@ pvesm set iscsi-worker-62 --disable 0 && \
 pvesm set iscsi-worker-63 --disable 0 && \
 pvesm set iscsi-worker-65 --disable 0"
 
-# On second Proxmox host (credentials from secrets.yml: proxmox-evanthoulaki_username, proxmox-evanthoulaki_password)
+# On second Proxmox host (credentials from the credential store: proxmox-evanthoulaki_username, proxmox-evanthoulaki_password)
 ssh <PROXMOX_HOST2_USER>@<PROXMOX_HOST2_IP> "pvesm set iscsi-master-51 --disable 0 && \
 pvesm set iscsi-master-52 --disable 0 && \
 pvesm set iscsi-master-53 --disable 0 && \
@@ -43,7 +50,7 @@ ssh <PROXMOX_HOST2_USER>@<PROXMOX_HOST2_IP> "pvesm status | grep iscsi"
 
 ### Check iSCSI Connection Status
 ```bash
-# Check all active iSCSI sessions (use credentials from secrets.yml)
+# Check all active iSCSI sessions (use credentials from the credential store)
 ssh <PROXMOX_HOST1_USER>@<PROXMOX_HOST1_IP> "iscsiadm -m session"
 ssh <PROXMOX_HOST2_USER>@<PROXMOX_HOST2_IP> "iscsiadm -m session"
 
@@ -65,7 +72,7 @@ ssh <PROXMOX_HOST2_USER>@<PROXMOX_HOST2_IP> "systemctl restart iscsid open-iscsi
 # Proxmox - Storage backend
 - VMs are stored on TrueNAS iSCSI targets. Each node has its own storage pool (e.g., iscsi-master-51 for master-51, iscsi-worker-61 for worker-61).
 - The storage pool in Proxmox is called iscsi-master-51, iscsi-master-52, iscsi-master-53 for the master nodes and iscsi-worker-61, iscsi-worker-62, iscsi-worker-63, iscsi-worker-65 for the worker nodes
-- The TrueNAS server (IP and credentials in secrets.yml) is already configured with NFS and iSCSI targets for each node. The NFS share is used for shared storage and the iSCSI targets are used for the local storage of each node. The local storage of each node is actually the TrueNAS iSCSI target but it is presented as local storage to k3s. This allows us to have a single storage pool that is shared across all nodes but it is still presented as local storage to k3s. This is a common pattern for k3s clusters running on Proxmox VE.
+- The TrueNAS server (IP and credentials in the credential store, keys `truenas_ip`, `truenas_admin_username`, `truenas_admin_password`) is already configured with NFS and iSCSI targets for each node. The NFS share is used for shared storage and the iSCSI targets are used for the local storage of each node. The local storage of each node is actually the TrueNAS iSCSI target but it is presented as local storage to k3s. This allows us to have a single storage pool that is shared across all nodes but it is still presented as local storage to k3s. This is a common pattern for k3s clusters running on Proxmox VE.
 
 ### Proxmox VM Management
 
@@ -86,7 +93,7 @@ ssh <PROXMOX_HOST2_USER>@<PROXMOX_HOST2_IP> "systemctl restart iscsid open-iscsi
 ## Core Concepts
 
 - **Storage**: VMs are stored on TrueNAS iSCSI targets. Each node has its own storage pool (e.g., iscsi-master-51 for master-51, iscsi-worker-61 for worker-61).
-- **Network Proxmox**: Two Proxmox servers (IPs and credentials in secrets.yml). SSH access is available via passwordless SSH keys.
+- **Network Proxmox**: Two Proxmox servers (IPs and credentials in the credential store, keys `proxmox-takaros_ip` / `proxmox-takaros_username` / `proxmox-takaros_password` and `proxmox-evanthoulaki_ip` / `proxmox-evanthoulaki_username` / `proxmox-evanthoulaki_password`). SSH access is available via passwordless SSH keys.
 - **Network Bridge**: VMs use two network devices. net0 is vmbr0 which has internet access with external IP range and net1 is vmbr1 which is an internal network for cluster communication with internal IP range. The internal network is used for cluster communication and the external network is used for internet access and accessing the cluster from outside. The nodes will have two IP addresses, one on each network. Prioritize inner communication via net1 for cluster operations and use net0 for external access, storage, iSCSI and internet connectivity.
 - **Cloud-init**: Automated VM configuration system.
 - **VM placement**: Two masters will be placed on one Proxmox node and the third master on another node for high availability. Two workers will be placed on separate nodes to ensure fault tolerance.
@@ -233,7 +240,7 @@ systemctl restart iscsid open-iscsi
 - TrueNAS IQN format: `iqn.2005-10.org.freenas.ctl:k3s-<node-name>`
 - Master nodes: `k3s-master-51`, `k3s-master-52`, `k3s-master-53`
 - Worker nodes: `k3s-worker-61`, `k3s-worker-62`, `k3s-worker-63`, `k3s-worker-65`
-- Portal: `<TRUENAS_IP>:3260` (from secrets.yml)
+- Portal: `<TRUENAS_IP>:3260` (`<TRUENAS_IP>` from the credential store key `truenas_ip`)
 
 **Complete iSCSI Verification Workflow:**
 
@@ -545,15 +552,24 @@ ssh root@<pvehost> 'tr "\0" "\n" < /proc/$(cat /var/run/qemu-server/<vmid>.pid)/
 
 - **OS**: Linux (Ubuntu 24.04) on VMs
 - **Networking**: Bridge networking, Kube-VIP, kube-vip-cloud-provider for load balancing, coredns for DNS, traefik for ingress
-- **Storage**: Nodes local storage for VM is iSCSI target on a TrueNAS server (IP in secrets.yml). k3s cluster will use local storage but in reality it is the TrueNAS iSCSI target. The storage pool in Proxmox is called iscsi-master-51 52 and 53 and iscsi-worker-61 62 63 65. The storage class in k3s will be called local-storage and it will use the local path provisioner to create PVs on the local storage of each node. The local storage of each node is actually the TrueNAS iSCSI target but it is presented as local storage to k3s. This allows us to have a single storage pool that is shared across all nodes but it is still presented as local storage to k3s. This is a common pattern for k3s clusters running on Proxmox VE.
+- **Storage**: Nodes local storage for VM is iSCSI target on a TrueNAS server (IP in the credential store under `truenas_ip`). k3s cluster will use local storage but in reality it is the TrueNAS iSCSI target. The storage pool in Proxmox is called iscsi-master-51 52 and 53 and iscsi-worker-61 62 63 65. The storage class in k3s will be called local-storage and it will use the local path provisioner to create PVs on the local storage of each node. The local storage of each node is actually the TrueNAS iSCSI target but it is presented as local storage to k3s. This allows us to have a single storage pool that is shared across all nodes but it is still presented as local storage to k3s. This is a common pattern for k3s clusters running on Proxmox VE.
 - **Network Storage**: VMs should have an NFS share mounted for shared storage (example downloads, movies, series, animes are located in TrueNAS storage server and available on NFS shares). This allows us to have a single storage pool that is shared across all nodes but it is still presented as local storage to k3s. This is a common pattern for k3s clusters running on Proxmox VE.
 
-The `secrets.yml` file has the following structure:
-```yaml
-proxmox-takaros_username: "<username>"
-proxmox-takaros_password: "<password>"
-proxmox-evanthoulaki_username: "<username>"
-proxmox-evanthoulaki_password: "<password>"
+The credential store `.github/instructions/secrets.enc.yaml` is a flat
+`key: value` file: values are encrypted, key names stay in cleartext, so the
+committed file doubles as an index of which credentials exist. The Proxmox host
+keys are:
+
+- `proxmox-takaros_username`
+- `proxmox-takaros_password`
+- `proxmox-evanthoulaki_username`
+- `proxmox-evanthoulaki_password`
+
+Read one key at a time. Never decrypt the whole file, never echo the value:
+
+```bash
+VALUE=$(sops -d --extract '["proxmox-takaros_password"]' .github/instructions/secrets.enc.yaml)
+echo "${#VALUE}"   # a length is safe to print; the value is not
 ```
 
 ## Backup and Recovery
@@ -572,8 +588,8 @@ Both hosts run `PasswordAuthentication no` + `KbdInteractiveAuthentication no`
 via the drop-in `/etc/ssh/sshd_config.d/99-no-password-auth.conf`, kept in this
 repo at [`1-proxmox/ssh/99-no-password-auth.conf`](../../1-proxmox/ssh/99-no-password-auth.conf).
 
-**Why:** one 12-character password was the value of **20** credentials in
-`secrets.yml` — including root on both Proxmox hosts, TrueNAS admin, all 7 k3s
+**Why:** one 12-character password was the value of **20** credentials in the
+credential store - including root on both Proxmox hosts, TrueNAS admin, all 7 k3s
 node passwords, the Postgres superuser and the router (#745). Rotating all
 twenty was rejected as expensive and risky; making the password unusable
 remotely is cheaper and stronger. Key auth was already the only method in

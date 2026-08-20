@@ -7,23 +7,30 @@ description: "Instructions for TrueNAS setup"
 When working with files in the `0-truenas/` directory, follow these TrueNAS-specific guidelines.
 
 **Credential Placeholders:**
-All commands use placeholders for sensitive information. Replace with values from `.github/instructions/secrets.yml`:
+All commands use placeholders for sensitive information. Replace them with values from the credential store `.github/instructions/secrets.enc.yaml`:
 - `<TRUENAS_USER>` → truenas_admin_username
 - `<TRUENAS_PASSWORD>` → truenas_admin_password
 - `<TRUENAS_IP>` → TrueNAS server IP address
+
+Read one key at a time. Never decrypt the whole file, never echo the value:
+
+```bash
+VALUE=$(sops -d --extract '["<key_name>"]' .github/instructions/secrets.enc.yaml)
+echo "${#VALUE}"   # a length is safe to print; the value is not
+```
 
 ## Quick Actions Reference
 
 ### Access TrueNAS via SSH
 ```bash
-# Connect using credentials from secrets.yml
+# Connect using credentials from the credential store
 # Username: truenas_admin_username
 # Password: truenas_admin_password (for sudo operations)
 # Host IP: Defined in TrueNAS configuration
 
 ssh <TRUENAS_USER>@<TRUENAS_IP>
 
-# For sudo commands, use password from secrets.yml:
+# For sudo commands, use the truenas_admin_password value from the credential store:
 echo '<TRUENAS_PASSWORD>' | sudo -S <command>
 ```
 
@@ -43,10 +50,10 @@ ssh <TRUENAS_USER>@<TRUENAS_IP> "echo '<TRUENAS_PASSWORD>' | sudo -S midclt call
 ```
 
 **Important:**
-- All credentials stored in `.github/instructions/secrets.yml`
+- All credentials live in the credential store `.github/instructions/secrets.enc.yaml`
 - Replace placeholders: `<TRUENAS_USER>`, `<TRUENAS_IP>`, `<TRUENAS_PASSWORD>`
 - Never commit actual credentials - always use placeholders in documentation
-- The secrets file is gitignored but exists in the repository locally
+- The credential store is committed, not gitignored: it is SOPS+age encrypted, so values are ciphertext and only key names stay readable
 
 ### midclt -j job methods (TrueNAS 25.10 caveat)
 On TrueNAS **25.10.0.1**, `midclt call -j <job-method>` (job-based methods such as `pool.dataset.create` / `pool.dataset.delete`) runs the job **successfully server-side**, but the midclt client then crashes while polling the already-finished job:
@@ -139,10 +146,19 @@ ssh <TRUENAS_USER>@<TRUENAS_IP> "sudo ls /proc/fs/nfsd/clients/ | while read c; 
 That lists client IPs but not which export each one uses, so confirm per host with `mount -t nfs,nfs4 | grep <TRUENAS_IP>`.
 
 # TrueNAS Hardware Overview
-- The TrueNAS server is an workstation with 32GB of RAM, 3 SSD disks on RAIDZ1 with a dataset apps and 2 HDD disks on device GUIDs making a stripe vdev with a dataset pool1. The media files are stored on the pool1 dataset and the VMs are stored on the apps dataset. The TrueNAS server is connected to the switch with 1 GiB ethernet. SSH access is available with passwordless authentication using SSH keys. The TrueNAS server is also connected to the Proxmox VE servers via iSCSI targets for VM storage and NFS shares for shared storage. All credentials are stored in `.github/instructions/secrets.yml`.
+- The TrueNAS server is an workstation with 32GB of RAM, 3 SSD disks on RAIDZ1 with a dataset apps and 2 HDD disks on device GUIDs making a stripe vdev with a dataset pool1. The media files are stored on the pool1 dataset and the VMs are stored on the apps dataset. The TrueNAS server is connected to the switch with 1 GiB ethernet. SSH access is available with passwordless authentication using SSH keys. The TrueNAS server is also connected to the Proxmox VE servers via iSCSI targets for VM storage and NFS shares for shared storage. All credentials are stored in the credential store `.github/instructions/secrets.enc.yaml`.
 
-The `secrets.yml` file has the following structure:
-```yaml
-truenas_admin_username: "<username>"
-truenas_admin_password: "<password>"
+The credential store `.github/instructions/secrets.enc.yaml` is a flat
+`key: value` file: values are encrypted, key names stay in cleartext, so the
+committed file doubles as an index of which credentials exist. The TrueNAS keys
+are:
+
+- `truenas_admin_username`
+- `truenas_admin_password`
+
+Read one key at a time. Never decrypt the whole file, never echo the value:
+
+```bash
+VALUE=$(sops -d --extract '["truenas_admin_password"]' .github/instructions/secrets.enc.yaml)
+echo "${#VALUE}"   # a length is safe to print; the value is not
 ```

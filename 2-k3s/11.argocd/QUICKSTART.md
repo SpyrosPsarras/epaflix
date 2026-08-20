@@ -66,14 +66,14 @@ Follow `2-k3s/05.traefik-deployment/examples/app-with-native-oidc-authentik.md` 
 - **Application**: `ArgoCD`, bound to the `ArgoCD Admins` group via Group
   Membership Policy.
 
-Copy the resulting **client-id** and **client-secret** into
-`.github/instructions/secrets.yml` (NOT into git-tracked files) under:
+Copy the resulting **client-id** and **client-secret** into the credential store
+`.github/instructions/secrets.enc.yaml` with `sops .github/instructions/secrets.enc.yaml`
+(never in cleartext into any other git-tracked file). The store is a flat
+key/value file - values are encrypted, key names stay in cleartext:
 
 ```yaml
-argocd:
-  oidc:
-    client_id: <fill-me-in>
-    client_secret: <fill-me-in>
+argocd_oidc_client_id: <fill-me-in>
+argocd_oidc_client_secret: <fill-me-in>
 ```
 
 ## 4. Wire OIDC into ArgoCD

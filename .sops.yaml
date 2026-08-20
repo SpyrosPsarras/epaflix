@@ -29,8 +29,8 @@
 # key/value file with no `data:`/`stringData:` key, so the generic
 # `encrypted_regex` would match nothing and write it back in cleartext.
 creation_rules:
-  # The credential store, read by humans and agents (it replaced the old
-  # plaintext git-ignored secrets.yml). No `encrypted_regex` on purpose:
+  # The credential store, read by humans and agents (it replaced the
+  # pre-SOPS plaintext credential file). No `encrypted_regex` on purpose:
   # every value is encrypted, key NAMES stay readable so the file doubles
   # as a committed index of "which credentials exist" without decrypting.
   - path_regex: ^\.github/instructions/secrets\.enc\.yaml$

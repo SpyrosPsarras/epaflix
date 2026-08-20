@@ -29,7 +29,7 @@
 - `pihole` docs — MODIFY — record `bastion.epaflix.com` in the documented dnsmasq config.
 
 **Out-of-band (operational; logged to `.history/`, NOT committed):**
-- VM creation on evanthoulaki, TrueNAS dataset/export creation, workspace seeding (git clone + `secrets.yml` + homelab keys), live Pi-hole record, bastion `authorized_keys`, Odysseus runtime memory/doc.
+- VM creation on evanthoulaki, TrueNAS dataset/export creation, workspace seeding (git clone + age private key + homelab keys), live Pi-hole record, bastion `authorized_keys`, Odysseus runtime memory/doc.
 
 ---
 
@@ -226,22 +226,31 @@ Expected: `workstation-ok`.
 ```bash
 ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 ubuntu@192.168.10.43 "git clone https://github.com/SpyrosPsarras/epaflix.git /workspace/repo 2>&1 | tail -2 && ls /workspace/repo | head"
 ```
-Expected: repo cloned; top-level dirs (`0-truenas`, `1-proxmox`, `2-k3s`, ...) listed. (HTTPS clone needs no creds for read; if private, use the GitHub PAT from `secrets.yml` once it's placed in Step 2 — re-run with the token URL.)
+Expected: repo cloned; top-level dirs (`0-truenas`, `1-proxmox`, `2-k3s`, ...) listed. (HTTPS clone needs no creds for read; if private, read the GitHub PAT from the credential store **on the workstation** - the store ships inside the repo, so a clone cannot supply its own clone credential - and re-run with the token URL.)
 
-- [ ] **Step 2: Copy `secrets.yml` from the workstation into its normal path**
+- [ ] **Step 2: Install the age private key so the committed credential store can be read**
 
-```bash
-scp -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 .github/instructions/secrets.yml ubuntu@192.168.10.43:/workspace/repo/.github/instructions/secrets.yml
-ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 ubuntu@192.168.10.43 "chmod 600 /workspace/repo/.github/instructions/secrets.yml && head -1 /workspace/repo/.github/instructions/secrets.yml"
-```
-Expected: first line of `secrets.yml` prints (file present, mode 600).
-
-- [ ] **Step 3: Verify `git status` ignores the secret (no accidental tracking)**
+Superseded: this step used to `scp` a plaintext credential file from the workstation and print its first line. That file is gone, and printing the first line of a credential file was never safe. The credential store `.github/instructions/secrets.enc.yaml` is committed, so Step 1's clone already carries it. What the bastion still needs is the age private key at the default sops lookup path `~/.config/sops/age/keys.txt`, or every read fails with `Failed to get the data key required to decrypt the SOPS file`. Do not re-add the old copy step. `sops` must be installed on the bastion; install it there first if missing.
 
 ```bash
-ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 ubuntu@192.168.10.43 "cd /workspace/repo && git check-ignore -v .github/instructions/secrets.yml"
+ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 ubuntu@192.168.10.43 "mkdir -p ~/.config/sops/age && chmod 700 ~/.config/sops/age"
+scp -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 ~/.config/sops/age/keys.txt ubuntu@192.168.10.43:~/.config/sops/age/keys.txt
+ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 ubuntu@192.168.10.43 "chmod 600 ~/.config/sops/age/keys.txt"
 ```
-Expected: `.gitignore:... secrets.yml` (ignored — safe).
+Expected: no output (key in place, mode 600). Then prove a decrypt works without printing a value - a byte count is safe to print, the value is not:
+```bash
+ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 ubuntu@192.168.10.43 "cd /workspace/repo && sops -d --extract '[\"airvpn_user\"]' .github/instructions/secrets.enc.yaml | wc -c"
+```
+Expected: a small non-zero byte count. `0`, or a `Failed to get the data key` error, means the age key is not readable at `~/.config/sops/age/keys.txt`.
+
+- [ ] **Step 3: Verify the workspace clone is clean (nothing plaintext dropped in)**
+
+Superseded: this step used to `git check-ignore` the plaintext credential file. The store is committed on purpose, so the check that matters now is that nobody left an untracked credential file in the workspace. The old plaintext filename stays banned by the `.gitignore` guard in the repo.
+
+```bash
+ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 ubuntu@192.168.10.43 "cd /workspace/repo && git status --porcelain"
+```
+Expected: no output (clean tree, nothing untracked or modified).
 
 - [ ] **Step 4: Log to `.history/`** (record WHAT was copied, never the values).
 
@@ -556,7 +565,7 @@ Expected: see which JSON files are seeded. Identify where a custom instruction/s
 - [ ] **Step 2: Patch `settings.json` with the bastion instruction**
 
 Decrypt, set the instruction text, re-encrypt. Instruction text:
-> "Execution environment: do NOT run build/serve tasks in your own container. For anything that runs code or starts a server, use the bastion over SSH: `ssh -i /app/.ssh/id_bastion -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new ubuntu@192.168.10.43 '<command>'` (or `ssh bastion '<command>'`). The shared workspace is `/workspace` (same path on pod and bastion). Put web output in `/workspace/work` and start servers there; they are reachable at http://bastion.epaflix.com:<port>. The full project, including secrets.yml, is at `/workspace/repo`."
+> "Execution environment: do NOT run build/serve tasks in your own container. For anything that runs code or starts a server, use the bastion over SSH: `ssh -i /app/.ssh/id_bastion -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new ubuntu@192.168.10.43 '<command>'` (or `ssh bastion '<command>'`). The shared workspace is `/workspace` (same path on pod and bastion). Put web output in `/workspace/work` and start servers there; they are reachable at http://bastion.epaflix.com:<port>. The full project is at `/workspace/repo`, including the committed credential store `.github/instructions/secrets.enc.yaml` - read a single key with `sops -d --extract`, never decrypt the whole file, and never echo a value."
 
 ```bash
 cd 2-k3s/13.odysseus
@@ -651,7 +660,7 @@ Expected: `curl` prints `<h1>bastion ok</h1>`.
 
 Add a memory + a workspace doc so the live PVC (not just a fresh seed) carries the instruction:
 ```bash
-python3 ~/.claude/skills/odysseus/scripts/odysseus_api.py POST /api/codex/memory '{"text":"For any build/run/serve task, do NOT execute locally — use the bastion: ssh bastion (ubuntu@192.168.10.43, key /app/.ssh/id_bastion). Shared workspace /workspace; web output in /workspace/work served at http://bastion.epaflix.com:<port>; full project incl secrets.yml at /workspace/repo.","category":"fact"}'
+python3 ~/.claude/skills/odysseus/scripts/odysseus_api.py POST /api/codex/memory '{"text":"For any build/run/serve task, do NOT execute locally — use the bastion: ssh bastion (ubuntu@192.168.10.43, key /app/.ssh/id_bastion). Shared workspace /workspace; web output in /workspace/work served at http://bastion.epaflix.com:<port>; full project at /workspace/repo, including the committed credential store .github/instructions/secrets.enc.yaml - read a single key with sops -d --extract, never decrypt the whole file, never echo a value.","category":"fact"}'
 ```
 Expected: JSON success. (Document the same via `POST /api/codex/documents` if a how-to doc is wanted.)
 
