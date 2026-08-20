@@ -41,6 +41,22 @@ configs:
 
   cm:
     url: https://argocd.epaflix.com
+    # Local `admin` account is OFF. Authentik SSO is the only login path.
+    #
+    # This is declared explicitly rather than left to the chart, whose default
+    # is `true` (charts/argo-cd-*/argo-cd/values.yaml). argocd.epaflix.com is
+    # reachable from the internet on a route that bypasses Cloudflare (#547),
+    # so an enabled local account puts a single password in front of a
+    # cluster-admin-equivalent UI with no edge control ahead of it (#1039).
+    # Forward-auth is deliberately NOT the answer here - see ingress.yaml and
+    # #703, it would break the argocd CLI's gRPC-web calls.
+    #
+    # BREAK-GLASS: if Authentik is down or the OIDC client secret is wrong,
+    # nobody can log in to the tool that deploys Authentik. Recovery does not
+    # need this repo - see 2-k3s/11.argocd/README.md, "Break-glass: restoring
+    # local admin login". It works because this Application is manual-sync,
+    # so a live patch is not reverted by selfHeal.
+    admin.enabled: false
     # Allow the dot in resource names + Application API extensions.
     application.resourceTrackingMethod: annotation
     # Kustomize-with-Helm inflation. The `authentik` Application's
@@ -83,6 +99,17 @@ configs:
   rbac:
     policy.default: role:readonly
     # Map Authentik group "ArgoCD Admins" → ArgoCD admin.
+    #
+    # This mapping is load-bearing now that admin.enabled is false: it is the
+    # only route to write access. Verified live 2026-08-20 - an SSO session
+    # reports groups [Grafana Admins, Servarr users, ArgoCD Admins,
+    # PegaProx Admins, authentik Admins] and lands on role:admin.
+    #
+    # The `groups` claim rides in Authentik's default `profile` scope mapping.
+    # Do not conclude it is missing because the discovery document's
+    # `scopes_supported` lists only openid/email/profile and no `groups` -
+    # scopes_supported enumerates scope mappings, not deliverable claims, and
+    # reading it the other way produced a false alarm (#1040).
     policy.csv: |
       g, ArgoCD Admins, role:admin
     scopes: "[groups]"
