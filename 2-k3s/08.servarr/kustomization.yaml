@@ -212,7 +212,7 @@ images:
   # instead of auto-merging (see the lingarr rule in .github/renovate.json).
   # Retire this whole shape for a plain release tag once >1.2.4 ships — #270.
   - name: ghcr.io/lingarr-translate/lingarr
-    newTag: main@sha256:7d6d40fb2a97418f76e86583b8916b3824db7ccb56c88145015dd3a4e3fa1c1f
+    newTag: main@sha256:d4dd4a1b8f35ce30eeb0ae8998b1f99a45b0ba1181399954a215808307a604ee
   # ElfHosted newtarr :rolling (fast-moving community fork, newtarr v1.0.0). Pinned to
   # the running digest so Renovate's servarr-digest rule (#192) tracks + auto-merges it
   # and there are no surprise mid-day re-rolls (#238). The Deployment keeps the bare
