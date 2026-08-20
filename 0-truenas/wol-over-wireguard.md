@@ -52,7 +52,7 @@ echo 1 > /proc/sys/net/ipv4/conf/wg0/bc_forwarding
 ### Persistent (survives reboot) - TrueNAS SYSCTL tunables
 
 ```bash
-# truenas_admin sudo password: <TRUENAS_PASSWORD> (see .github/instructions/secrets.yml)
+# truenas_admin sudo password: sops -d --extract '["truenas_admin_password"]' .github/instructions/secrets.enc.yaml
 for var in net.ipv4.conf.all.bc_forwarding \
            net.ipv4.conf.default.bc_forwarding \
            net.ipv4.conf.enp8s0.bc_forwarding; do
@@ -99,7 +99,7 @@ The wg-easy container (`ix-wg-easy-wg-easy-1`) runs `network_mode: host`, so `wg
 
 ## Gotchas
 
-- TrueNAS has only `truenas_admin` (no root SSH key). Elevate with `sudo` and the password from `secrets.yml`. Over SSH, feed it with `sudo -S` (stdin), since the password prompt needs a tty.
+- TrueNAS has only `truenas_admin` (no root SSH key). Elevate with `sudo` and the `truenas_admin_password` credential from the credential store: `PW=$(sops -d --extract '["truenas_admin_password"]' .github/instructions/secrets.enc.yaml)`. Over SSH, feed it with `sudo -S` (stdin), since the password prompt needs a tty - and because stdin keeps the value off `argv`, so it never lands in the process list or shell history.
 - `conf.all.bc_forwarding=1` alone does nothing - the ingress/egress interfaces need their own flag (confirmed by `tcpdump` on `enp8s0` showing 0 packets with only `all=1`).
 - The home PC's NIC + BIOS WoL must already be armed - see the homePC WoL notes (r8125 driver, ErP disabled, Resume By PCI-E enabled).
 

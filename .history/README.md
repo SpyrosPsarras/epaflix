@@ -29,7 +29,7 @@ This directory contains historical records of commands executed during the setup
 - Error messages with system details
 - VM IDs and infrastructure layout
 
-While passwords and tokens should still use placeholders (reference `.github/instructions/secrets.yml`), other sensitive but non-credential information can be safely documented here.
+While passwords and tokens should still use placeholders, reference the credential store `.github/instructions/secrets.enc.yaml` by key name instead of pasting a value. Read one key with `VALUE=$(sops -d --extract '["<key_name>"]' .github/instructions/secrets.enc.yaml)` - never decrypt the whole file, never echo the value, sanity-check with `${#VALUE}`. Other sensitive but non-credential information can be safely documented here.
 
 ## What is tracked in git (#591)
 

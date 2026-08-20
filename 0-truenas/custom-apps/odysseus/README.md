@@ -113,10 +113,10 @@ rest under `apps/ix-apps`):
 
 | Placeholder | Source of real value |
 |-------------|----------------------|
-| `<ODYSSEUS_ADMIN_PASSWORD>` | `openssl rand -base64 24`; store in `.github/instructions/secrets.yml` (git-ignored) under an `odysseus` block. Change in-app after first login + rotate the stored value. |
-| `<SEARXNG_SECRET>` | Leave unset to let the searxng entrypoint auto-generate (`token_urlsafe(48)`), OR an `openssl rand` value in secrets.yml. |
-| `<OPENAI_API_KEY>` | Only if cloud OpenAI fallback is wanted; else leave blank. secrets.yml if used. |
-| `<HF_TOKEN>` | Only if pulling gated HuggingFace models; else leave blank. secrets.yml if used. |
+| `<ODYSSEUS_ADMIN_PASSWORD>` | `openssl rand -base64 24`; store in the credential store `.github/instructions/secrets.enc.yaml` under an `odysseus` block. Change in-app after first login + rotate the stored value. |
+| `<SEARXNG_SECRET>` | Leave unset to let the searxng entrypoint auto-generate (`token_urlsafe(48)`), OR an `openssl rand` value kept in the credential store. |
+| `<OPENAI_API_KEY>` | Only if cloud OpenAI fallback is wanted; else leave blank. Credential store if used. |
+| `<HF_TOKEN>` | Only if pulling gated HuggingFace models; else leave blank. Credential store if used. |
 
 Start the app and confirm it reaches **RUNNING**.
 
@@ -196,7 +196,7 @@ tool allowlist exists, and record it here.
 **Step 0 — admin API access (durable service-account token, #185):** the old
 standing personal `authentik_admin_api_token` was **retired** (#175); there is no
 longer a personal admin token at rest. Automation that mutates Authentik objects
-now uses the durable **`ak-iac` service-account token** (`secrets.yml` key
+now uses the durable **`ak-iac` service-account token** (credential store key
 `authentik_iac_service_account_token`, created declaratively by the
 `authentik-iac-blueprint`). The Authentik steps below can also be done entirely in
 the UI. See the **Admin / Automation API tokens** runbook in

@@ -257,13 +257,58 @@ Recipient is the provisioned `alert@epaflix.com` mailbox. The previous
 `550 5.1.1 ... User unknown in virtual alias table`.
 
 Credentials live in the SOPS-encrypted
-`secrets/alertmanager-config-secret.enc.yaml`; the plaintext source is the
-git-ignored `secrets.yml` under the `alert_email_*` keys. The Prometheus
-Operator regenerates
+`secrets/alertmanager-config-secret.enc.yaml`, which is what the cluster
+actually consumes. The human-readable reference for the same relay is the
+credential store `.github/instructions/secrets.enc.yaml` under the
+`alert_email_*` keys. The Prometheus Operator regenerates
 `alertmanager-kube-prometheus-stack-alertmanager-generated` when that Secret
 changes and the `config-reloader` sidecar POSTs `/-/reload`, so rotating the
 password needs no pod restart (the #299 `secretKeyRef` gap does not apply -
 this is a mounted volume, not an env var).
+
+Read one key out of the store without decrypting the rest, and without ever
+echoing the value. Run from the repo root:
+
+```bash
+HOST=$(sops -d --extract '["alert_email_hostname"]' .github/instructions/secrets.enc.yaml)
+echo "${#HOST}"   # a length is safe to print, the value is not
+```
+
+#### Drift check: store versus deployed relay
+
+Two files describe one relay - the credential store and
+`alertmanager-config-secret.enc.yaml` - and neither is generated from the
+other. That is how #782 happened: PR #684 fixed the relay host in the
+Alertmanager Secret and the reference copy was left naming a host that cannot
+carry SMTP, so the two silently disagreed. Nothing catches this on its own,
+because the store is not rendered into the cluster.
+
+Compare them by **hash only**, never by value. Hash where the value is
+produced (#740), and keep the extract on the leaf key so no parent node with a
+password in it is ever printed. Run from the repo root:
+
+```bash
+# store copy
+sops -d --extract '["alert_email_hostname"]' .github/instructions/secrets.enc.yaml \
+  | tr -d '\n' | sha256sum | cut -c1-12
+
+# deployed copy - the host half of global.smtp_smarthost
+sops -d --extract '["stringData"]["alertmanager.yaml"]' \
+  2-k3s/10.observability/secrets/alertmanager-config-secret.enc.yaml \
+  | python3 -c 'import sys,yaml,hashlib; h=yaml.safe_load(sys.stdin)["global"]["smtp_smarthost"].rsplit(":",1)[0]; print(hashlib.sha256(h.encode()).hexdigest()[:12])'
+```
+
+Equal prefixes mean no drift. To reconcile the store to a deployed value
+without churning the file, pipe the deployed value into
+`sops set --idempotent --value-stdin` - it writes nothing when the key already
+holds that value, and when it does write it touches only that key plus the
+`mac`/`lastmodified` footer.
+
+Verified 2026-08-10 for #782: both `alert_email_hostname` and
+`auth_email_hostname` hash to the same 12-char prefix as their deployed
+counterparts (`global.smtp_smarthost` host half, and
+`app-authentik/authentik-app-secrets` `AUTHENTIK_EMAIL__HOST`), and an
+idempotent reconcile of both keys left the store byte-identical.
 
 ### Default Alerts
 

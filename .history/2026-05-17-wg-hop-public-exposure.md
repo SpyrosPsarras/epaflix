@@ -29,9 +29,9 @@ The router port-forward (UDP 51820 → 192.168.10.45:51820) is the user's job �
 ### Gotchas (worth knowing later)
 - **`/mnt/apps/ddns-updater/config.json` is not authoritative.** It is re-rendered each redeploy from the TrueNAS app schema; the container reads its config from the `CONFIG` env var injected by the app layer. Editing the file in-place wastes time. Always edit via `midclt app.update`.
 - **Two different Cloudflare tokens exist in this estate**:
-  - `secrets.yml:cloudflare-api-token` → returns `Authentication error` (10000) against `/zones/.../dns_records`. Likely the old / Traefik-scoped one, or revoked.
+  - The `cloudflare-api-token` credential in the credential store `.github/instructions/secrets.enc.yaml` → returns `Authentication error` (10000) against `/zones/.../dns_records`. Likely the old / Traefik-scoped one, or revoked.
   - The token inside the ddns app schema → works for record read+write.
-  Did **not** rotate `secrets.yml` because Traefik/cert-manager may use a different scope; left a TODO note in `1-proxmox/wg-hop/README.md`.
+  Did **not** rotate `cloudflare-api-token` because Traefik/cert-manager may use a different scope; left a TODO note in `1-proxmox/wg-hop/README.md`.
 - **ddns thinks current IP is `192.168.10.45`** when resolving the FQDN, because TrueNAS resolves through Pi-hole (LAN override). Harmless: each poll cycle sees the mismatch and pushes the public IP to Cloudflare again. To stop the noise, set the ddns `Public IP fetching` resolver to bypass Pi-hole, or just leave it.
 
 ### Still TODO at end of session

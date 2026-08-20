@@ -410,6 +410,8 @@ issue #29. Design spec:
 ```bash
 # 1. Draft plaintext (use a -plaintext suffix so .gitignore catches it).
 cd 2-k3s/<App>
+# Read the value straight from the credential store into a variable - never echo it.
+PASSWORD=$(sops -d --extract '["<key_name>"]' ../../.github/instructions/secrets.enc.yaml)
 cat > my-thing-plaintext.yaml <<EOF
 apiVersion: v1
 kind: Secret
@@ -417,7 +419,7 @@ metadata:
   name: my-thing
   namespace: <ns>
 stringData:
-  password: "actual-secret-value-from-secrets.yml"
+  password: "${PASSWORD}"
 EOF
 
 # 2. Encrypt to the canonical filename.
@@ -536,7 +538,7 @@ Refs #29"
 
 - [ ] **Step 1: Add bullet under Critical Rules**
 
-Add this bullet to the `## Critical Rules` list (place it after the existing "**NEVER** commit `secrets.yml`" bullet):
+Add this bullet to the `## Critical Rules` list (place it after the existing bullet that forbids committing a plaintext credential file - that ban is now enforced by the `.gitignore` guard):
 
 ```markdown
 - **Encrypted Secret files use `.enc.yaml` suffix.** All Secrets that ArgoCD must reconcile live as `*.enc.yaml` next to their kustomization, encrypted with SOPS+age (single cluster recipient). Pre-commit hook (`.github/hooks/check-sops-encrypted.sh`) refuses any plaintext `kind: Secret` YAML. New clones must run `./.github/hooks/install-hooks.sh` once. Encrypt/rotate recipes: `.github/instructions/sops.instructions.md`.
@@ -903,7 +905,11 @@ echo "CLIENT_ID=$CLIENT_ID"
 echo "CLIENT_SECRET=(${#CLIENT_SECRET} chars)"
 ```
 
-Expected: client-id is `filebrowser`, client-secret length matches `.github/instructions/secrets.yml` Authentik/filebrowser entry.
+Expected: client-id is `filebrowser`, client-secret length matches the `filebrowser_oidc_client_secret` entry in the credential store. Compare lengths only, never values (allow for the trailing newline `sops` adds):
+
+```bash
+sops -d --extract '["filebrowser_oidc_client_secret"]' .github/instructions/secrets.enc.yaml | wc -c
+```
 
 - [ ] **Step 2: Draft plaintext**
 
@@ -1174,7 +1180,7 @@ kubectl --context epaflix -n filebrowser get secret filebrowser-oidc -o jsonpath
 kubectl --context epaflix -n filebrowser get secret filebrowser-oidc -o jsonpath='{.data.client-secret}' | base64 -d | wc -c
 ```
 
-Expected: client-id is `filebrowser`; client-secret byte count matches secrets.yml entry.
+Expected: client-id is `filebrowser`; client-secret byte count matches the `filebrowser_oidc_client_secret` entry in the credential store (`sops -d --extract '["filebrowser_oidc_client_secret"]' .github/instructions/secrets.enc.yaml | wc -c`, allowing for the trailing newline `sops` adds).
 
 - [ ] **Step 5: Verify Pod still Ready**
 
@@ -1312,7 +1318,7 @@ For each App that still has imperative Secrets, file a separate issue using this
 
 ```markdown
 ## Finding
-After issue #29 landed, the SOPS+age pattern is available cluster-wide. `<App>` still creates the following Secrets imperatively from `.github/instructions/secrets.yml`:
+After issue #29 landed, the SOPS+age pattern is available cluster-wide. `<App>` still creates the following Secrets imperatively from the credential store `.github/instructions/secrets.enc.yaml`:
 
 - `<Secret 1>`
 - `<Secret 2>`

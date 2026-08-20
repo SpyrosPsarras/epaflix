@@ -267,13 +267,13 @@ the refresh is a deliberate manual flow. Resolves **#211**.
 ### GHCR PAT caveat
 
 > **RETIRED 2026-08-04 (#344).** `ghcr_write_packages_pat` no longer exists in
-> `.github/instructions/secrets.yml`. It held the same value as
+> the credential store `.github/instructions/secrets.enc.yaml`. It held the same value as
 > `argocd_image_updater_github_pat` and `RENOVATE_GITHUB_PAT` — one shared
 > classic PAT (`ghp_`, scopes `repo, write:packages`, no expiry) — which was
 > retired because it was orphaned by the Image Updater decommission (#266) and
 > re-exposed twice in agent transcripts (#712, #761).
 >
-> **Consequence for this runbook:** there is currently NO token in `secrets.yml`
+> **Consequence for this runbook:** there is currently NO token in the credential store
 > for a manual `docker push` to GHCR. CI does not need one — both
 > `build-airvpn-bluetit.yml` and `build-vpn-picker.yml` authenticate with
 > `${{ secrets.GITHUB_TOKEN }}` and declare `packages: write`, so automated

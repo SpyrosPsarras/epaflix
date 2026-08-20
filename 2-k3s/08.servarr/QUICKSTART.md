@@ -37,7 +37,9 @@ This will:
 ### 3. Create WireGuard Secret
 
 ```bash
-# Fill in actual keys from secrets.yml, then apply
+# Fill in the actual keys from the credential store, then apply. Read one key
+# at a time, never the whole store, and never echo the value:
+#   VALUE=$(sops -d --extract '["airvpn_wg_private_key"]' .github/instructions/secrets.enc.yaml)
 kubectl --context epaflix apply -f _shared/secrets/wireguard-secret.yaml
 ```
 

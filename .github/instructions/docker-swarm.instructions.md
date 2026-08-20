@@ -14,9 +14,16 @@ description: "Instructions for Docker Swarm cluster setup and management on Prox
 When working with files in the `3-docker-swarm/` directory, follow these Docker Swarm-specific guidelines.
 
 **Credential Placeholders:**
-All commands use placeholders for sensitive information. Replace with values from `.github/instructions/secrets.yml`:
+All commands use placeholders for sensitive information. Replace them with values from the credential store `.github/instructions/secrets.enc.yaml`:
 - `<PROXMOX_HOST1_USER>` / `<PROXMOX_HOST1_IP>` → proxmox-takaros credentials
 - `<PROXMOX_HOST2_USER>` / `<PROXMOX_HOST2_IP>` → proxmox-evanthoulaki credentials
+
+Read one key at a time. Never decrypt the whole file, never echo the value:
+
+```bash
+VALUE=$(sops -d --extract '["<key_name>"]' .github/instructions/secrets.enc.yaml)
+echo "${#VALUE}"   # a length is safe to print; the value is not
+```
 
 ## Cluster Overview
 

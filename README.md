@@ -68,7 +68,7 @@ See [3-docker-swarm/README.md](3-docker-swarm/README.md) for full setup instruct
 | takaros      | 192.168.10.10  | Hosts K3s masters 51/52, workers 61/62, template 9001 |
 | evanthoulaki | 192.168.10.11  | Hosts K3s master 53, workers 63/65, all Docker Swarm VMs |
 
-Credentials are stored in `.github/instructions/secrets.yml` (git-ignored).
+Credentials live in the credential store `.github/instructions/secrets.enc.yaml` (SOPS+age encrypted, committed). Read one key with `sops -d --extract '["<key_name>"]' .github/instructions/secrets.enc.yaml` - never decrypt the whole file, never echo the value.
 
 ---
 
