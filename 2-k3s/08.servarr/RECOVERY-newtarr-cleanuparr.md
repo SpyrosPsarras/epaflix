@@ -569,7 +569,8 @@ file seed first so the blocklist pointer has a target, then the reaping rules.
 3. **Re-create the download client with the INTERNAL URL.** UI → **Download
    Client**: qbittorrent, host `http://qbittorrent:8080` (NEVER the public
    `https://qbittorrent.epaflix.com` — see the 2026-07-10 incident section),
-   WebUI credentials from `secrets.yml`. Then **re-enable Download Cleaner +
+   WebUI credentials from the credential store (`qbittorrent_webui_username` /
+   `qbittorrent_webui_password`). Then **re-enable Download Cleaner +
    qBit seeding rules.** UI → **Download Cleaner**:
    set enabled, then add one qBit seeding rule per category exactly as the table
    above — `radarr`, `tv-sonarr`, `animes`, each `max_ratio=1.0` /
@@ -1133,7 +1134,8 @@ The ingress for each arr is **forward-auth gated** (#176), so call the in-cluste
 **ClusterIP Service** directly. Service names / ports (confirmed against the
 manifests, namespace `servarr`): `sonarr:8989`, `sonarr2:8989`, `radarr:7878`.
 The API key for each arr lives in that pod's `/config/config.xml` `<ApiKey>`
-element (also mirrored in `secrets.yml`); substitute it for `<APIKEY>` below —
+element (also mirrored in the credential store as `sonarr_api_key`,
+`sonarr2_api_key` and `radarr_api_key`); substitute it for `<APIKEY>` below -
 **never** print or commit the real key.
 
 ```sh

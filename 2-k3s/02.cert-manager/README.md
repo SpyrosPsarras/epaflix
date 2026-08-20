@@ -158,4 +158,4 @@ echo | openssl s_client -connect 192.168.10.101:443 -servername sonarr.epaflix.c
 ## Related
 
 - **Traefik deployment:** `../05.traefik-deployment/`
-- **Cloudflare API token:** `.github/instructions/secrets.yml`
+- **Cloudflare API token:** `cloudflare-api-token` in the credential store `.github/instructions/secrets.enc.yaml`

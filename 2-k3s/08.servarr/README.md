@@ -205,7 +205,7 @@ kubectl --context epaflix get nodes -o yaml | grep nvidia.com/gpu
 ```
 
 ### 4. WireGuard Config
-WireGuard config is stored in `secrets.yml`. Create the K8s secret from `_shared/secrets/wireguard-secret.yaml`.
+WireGuard config is stored in the credential store `.github/instructions/secrets.enc.yaml` under the `airvpn_wg_*` keys. Create the K8s secret from `_shared/secrets/wireguard-secret.yaml`.
 
 ## Deployment Order
 
@@ -418,9 +418,10 @@ them as known-good.
 Each *arr's API key is consumed by **seven** other things, and five of them keep
 their copy **PVC-only or in the app's own DB** - so a rotation that only touches
 git leaves those five authenticating with a dead key. Values live in the
-git-ignored `secrets.yml` as `radarr_api_key`, `sonarr_api_key`,
-`sonarr2_api_key`. Never print a key: pass it via stdin/env/file, compare with
-`sha256`, print lengths not values (see `.github/instructions/general.instructions.md`).
+credential store `.github/instructions/secrets.enc.yaml` as `radarr_api_key`,
+`sonarr_api_key`, `sonarr2_api_key`. Never print a key: pass it via
+stdin/env/file, compare with `sha256`, print lengths not values (see
+`.github/instructions/general.instructions.md`).
 
 **1. Change the key in the app itself.** `PUT /api/v3/config/host` **silently
 ignores** an `apiKey` change (returns `202`, config.xml unchanged - verified on

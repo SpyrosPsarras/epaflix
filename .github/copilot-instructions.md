@@ -22,7 +22,7 @@ k3s-swarm-proxmox/
 │       ├── proxmox.instructions.md       # Proxmox-specific guidance
 │       ├── truenas.instructions.md       # TrueNAS-specific guidance
 │       ├── docker-swarm.instructions.md  # Docker Swarm-specific guidance
-│       └── secrets.yml                   # Credentials reference (git-ignored)
+│       └── secrets.enc.yaml              # Credential store (SOPS+age, committed)
 ├── .history/                              # Command logs & outputs (git-ignored)
 │   ├── README.md                         # History documentation guide
 │   ├── example-session.log               # Template for session logs

@@ -21,8 +21,8 @@ issue #29. Design spec:
   Secret `argocd/sops-age` and the TrueNAS mirror below. TrueNAS mirror:
   the ZFS-encrypted dataset at
   `/mnt/apps/encrypted-backups/sops-age-backup/k3s-cluster.txt`
-  (ZFS native encryption, passphrase unlock; the passphrase is recorded in
-  the git-ignored `.github/instructions/secrets.yml` under
+  (ZFS native encryption, passphrase unlock; the passphrase is in the credential
+  store `.github/instructions/secrets.enc.yaml` under
   `truenas_zfs_encrypted_backups_passphrase`). The dataset must be manually
   unlocked after a TrueNAS reboot before this backup is readable — see
   [Post-reboot: unlock the TrueNAS encrypted backup dataset](#post-reboot-unlock-the-truenas-encrypted-backup-dataset).
@@ -130,8 +130,10 @@ of the trust boundary.
 ## The credential store (`.github/instructions/secrets.enc.yaml`)
 
 Everything above is about Secrets the **cluster** consumes. This one is the
-store **humans and agents** read from - the replacement for the old plaintext,
-git-ignored `.github/instructions/secrets.yml`, which is gone.
+store **humans and agents** read from - the replacement for the pre-SOPS
+plaintext credential file, which is gone and stays gone: `.gitignore` still
+blocks that filename permanently so it cannot come back. See
+`general.instructions.md` for the full history.
 
 It differs from every other `.enc.yaml` in the repo in one way: it has **no
 `encrypted_regex`**. It is a flat key/value file with no `data:`/`stringData:`
@@ -157,6 +159,36 @@ TOKEN=$(sops -d --extract '["<key_name>"]' .github/instructions/secrets.enc.yaml
 TOKEN=$(sops -d --extract '["epaflix_bot"]["proxmox_token"]' .github/instructions/secrets.enc.yaml)
 echo "${#TOKEN}"   # a length is safe to print; the value is not
 ```
+
+**Write one key** - `sops set` edits a single index in place, so you never open
+the whole store to change one value:
+
+```bash
+printf %s "$VALUE" | jq -Rs . \
+  | sops set --value-stdin .github/instructions/secrets.enc.yaml '["<key_name>"]'
+```
+
+Two traps in that one line, both of which fail loudly rather than silently, but
+both of which cost a round trip:
+
+- Argument order is `sops set [options] <file> <index>` - file first, index
+  second. Reversing them fails with `Invalid set index format`.
+- `--value-stdin` still expects **JSON**, not a bare string. Piping the raw value
+  fails with `Value for --set is not valid JSON` and leaves the stored value
+  untouched. `jq -Rs .` does the encoding: `-R` reads the input as raw text, `-s`
+  slurps it as one string. It also escapes quotes and backslashes correctly, so
+  the #545 quote trap cannot come back through the write path either.
+
+`--value-stdin` keeps the value out of `argv`, so it never lands in a process
+listing or a transcript (same reason as `--value-file`). `printf %s` adds no
+trailing newline, so what you read back is byte-for-byte what you wrote.
+
+Measured on the store: writing one key produced a **6-line diff** - the one key
+plus the `lastmodified` and `mac` footer lines. The other 141 values stayed
+byte-identical and the whole file still decrypted. `sops set --idempotent` does
+nothing when the index already holds that value - a 0-line diff and an unchanged
+file `sha256` - which makes it the right way to reconcile the store against a
+deployed value without churning the file.
 
 **Add or change a credential** - in-place edit, decrypt to `$EDITOR` and
 re-encrypt on save. The plaintext never touches the disk in the repo path:
@@ -191,14 +223,21 @@ TrueNAS reboot it comes up **locked**, and the age-key backup at
 until you load the key. Same passphrase and encryption params as before (#149,
 #57) — no rotation; only the dataset path changed.
 
-The passphrase is the git-ignored `secrets.yml` value
+The passphrase is the credential store value
 `truenas_zfs_encrypted_backups_passphrase` (NEVER inline it; paste it at the
 prompt / UI field).
+
+Read it without decrypting the whole file, and never echo it:
+
+```bash
+PASSPHRASE=$(sops -d --extract '["truenas_zfs_encrypted_backups_passphrase"]' .github/instructions/secrets.enc.yaml)
+echo "${#PASSPHRASE}"   # a length is safe to print; the value is not
+```
 
 `truenas_admin` can read ZFS props directly and **does have password-prompted
 `sudo`** (it has **no _passwordless_ sudo**, so non-interactive `sudo zfs ...`
 without a password will fail). Any of the following are valid ways to unlock —
-pick whichever fits the access you have. Paste the passphrase from `secrets.yml`
+pick whichever fits the access you have. Paste the passphrase from the credential store
 (`truenas_zfs_encrypted_backups_passphrase`) at the prompt / UI field in place of
 the placeholders below; **NEVER inline the real value**.
 
@@ -270,7 +309,7 @@ metadata:
   name: my-thing
   namespace: <ns>
 stringData:
-  password: "actual-secret-value-from-secrets.yml"
+  password: "<value-from-the-credential-store>"   # read it with sops -d --extract
 EOF
 
 # 2. Encrypt IN PLACE (the .enc.yaml path matches .sops.yaml's creation rule).

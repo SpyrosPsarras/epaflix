@@ -434,20 +434,22 @@ kubectl --context epaflix logs -n metallb-system deployment/controller
 
 Enabled (`embedded-registry: true` — Spegel P2P image sharing across all nodes via the 10.0.0.0/24 network).
 
-The `secrets.yml` file has the following structure:
-```yaml
-k3s-master-51_username: "<username>"
-k3s-master-51_password: "<password>"
-k3s-master-52_username: "<username>"
-k3s-master-52_password: "<password>"
-k3s-master-53_username: "<username>"
-k3s-master-53_password: "<password>"
-k3s-worker-61_username: "<username>"
-k3s-worker-61_password: "<password>"
-k3s-worker-62_username: "<username>"
-k3s-worker-62_password: "<password>"
-k3s-worker-63_username: "<username>"
-k3s-worker-63_password: "<password>"
-k3s-worker-65_username: "<username>"
-k3s-worker-65_password: "<password>"
+The credential store `.github/instructions/secrets.enc.yaml` is a flat
+`key: value` file: values are encrypted, key names stay in cleartext, so the
+committed file doubles as an index of which credentials exist. The k3s node keys
+are:
+
+- `k3s-master-51_username` / `k3s-master-51_password`
+- `k3s-master-52_username` / `k3s-master-52_password`
+- `k3s-master-53_username` / `k3s-master-53_password`
+- `k3s-worker-61_username` / `k3s-worker-61_password`
+- `k3s-worker-62_username` / `k3s-worker-62_password`
+- `k3s-worker-63_username` / `k3s-worker-63_password`
+- `k3s-worker-65_username` / `k3s-worker-65_password`
+
+Read one key at a time. Never decrypt the whole file, never echo the value:
+
+```bash
+VALUE=$(sops -d --extract '["k3s-master-51_password"]' .github/instructions/secrets.enc.yaml)
+echo "${#VALUE}"   # a length is safe to print; the value is not
 ```

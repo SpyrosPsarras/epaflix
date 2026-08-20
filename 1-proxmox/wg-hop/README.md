@@ -32,7 +32,7 @@ A privileged Debian-13 LXC on **takaros** that lets workstations connect via Wir
 | WG listen port  | UDP 51822                                   |
 | wg-easy UI      | http://wg-hop.epaflix.com:51821             |
 | Upstream VPN    | hcn.libero.fm (PPTP+MPPE-128)               |
-| Upstream creds  | see `secrets.yml` (`hcn_libero_username` / `hcn_libero_password`) |
+| Upstream creds  | credential store keys `hcn_libero_username` / `hcn_libero_password` |
 
 ## Why this design
 
@@ -200,7 +200,7 @@ cd /etc/wg-easy && docker compose up -d
 ```
 
 Then open `http://wg-hop.epaflix.com:51821/` and run the first-boot wizard:
-- Admin user / password — pick anything; record in `secrets.yml`.
+- Admin user / password — pick anything; record it in the credential store `.github/instructions/secrets.enc.yaml`, never in this doc.
 - Server settings: subnet `10.0.9.0/24`, port `51822`, host `wg-hop.epaflix.com` (or `192.168.10.45`).
 - Optional: DNS for clients = `1.1.1.1` if you want DNS over the tunnel, or `192.168.10.30` (Pi-hole) for LAN DNS.
 
@@ -273,7 +273,7 @@ Do **NOT** forward:
 ### Verification
 
 ```bash
-dig +short wg-hop.epaflix.com @1.1.1.1          # → home public IP (the value in secrets.yml / current DDNS)
+dig +short wg-hop.epaflix.com @1.1.1.1          # → home public IP, must match the current DDNS answer
 dig +short wg-hop.epaflix.com @192.168.10.30    # → 192.168.10.45 (split-DNS intact)
 # From a network outside the LAN (cellular hotspot, friend's wifi, VPS):
 nmcli con up epaflix-wg-hop-greece && curl ifconfig.me
@@ -284,9 +284,9 @@ nmcli con up epaflix-wg-hop-greece && curl ifconfig.me
 
 If `wg show wg0` on the LXC stays empty after an external client tries to connect, walk the router's Port Forwarding table and verify the **Device IP** field for the `wireguard-k3s` rule literally character-by-character against `192.168.10.45`. A single-digit typo (`.4` vs `.45`) reaches a non-existent host and gets dropped at the LAN switch — silent failure with no logs anywhere.
 
-### Gotcha — Cloudflare token in `secrets.yml` is stale
+### Gotcha — the stored `cloudflare-api-token` is stale (2026-05-17)
 
-`secrets.yml:cloudflare-api-token` did not authenticate against `/zones/.../dns_records` during the 2026-05-17 work; the **live working token** is the one inside the ddns-updater app config (`midclt call app.config ddns-updater | jq '.ddns.config[0].cloudflare_token'`). The stale token is still referenced by cert-manager and Traefik manifests — leaving it alone for now since DNS-01 ACME may use a different fine-grained token. If Traefik cert renewals fail, audit both and merge.
+The `cloudflare-api-token` credential in the credential store `.github/instructions/secrets.enc.yaml` did not authenticate against `/zones/.../dns_records` during the 2026-05-17 work. The **live working token** is the one inside the ddns-updater app config. Compare them by length, never by value - printing a token burns it into the transcript and forces a rotation (#602): `midclt call app.config ddns-updater | jq -r '.ddns.config[0].cloudflare_token | length'` against `${#VALUE}` from `VALUE=$(sops -d --extract '["cloudflare-api-token"]' .github/instructions/secrets.enc.yaml)`. The stale token is still referenced by cert-manager and Traefik manifests — leaving it alone for now since DNS-01 ACME may use a different fine-grained token. If Traefik cert renewals fail, audit both and merge.
 
 ## Troubleshooting
 
@@ -299,4 +299,4 @@ If `wg show wg0` on the LXC stays empty after an external client tries to connec
 ## Related
 
 - TrueNAS wg-easy app — same UI, different purpose (LAN access via WG; subnet `10.0.8.0/24`).
-- Upstream PPTP server — credentials and details in `secrets.yml` as `hcn_libero_*`.
+- Upstream PPTP server — credentials and details in the credential store as `hcn_libero_*`.
