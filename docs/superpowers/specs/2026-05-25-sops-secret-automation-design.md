@@ -9,8 +9,9 @@
 
 Every ArgoCD Application in this repo (`authentik`, `traefik`, `servarr`,
 `observability`, `filebrowser`, `postgres`, `cert-manager`, ...) currently
-creates its required Secrets **imperatively** from
-`.github/instructions/secrets.yml`. The Secret resources are deliberately
+creates its required Secrets **imperatively** from the maintainer's plaintext
+credential file, since decommissioned in favour of the credential store
+`.github/instructions/secrets.enc.yaml`. The Secret resources are deliberately
 excluded from each App's kustomization so that ArgoCD does not overwrite
 live credentials with the placeholder YAML committed to git.
 
@@ -18,8 +19,8 @@ Drawbacks of the imperative pattern:
 
 - No GitOps source-of-truth for Secrets — a freshly rebuilt cluster requires
   hand-running the imperative steps in each app's `README.md`.
-- `secrets.yml` is git-ignored and lives only on the maintainer's workstation
-  — single point of loss.
+- That plaintext credential file was git-ignored and lived only on the
+  maintainer's workstation - single point of loss.
 - Per-app exclusions are easy to forget when a new Secret is introduced
   (see PRs #24, #27).
 - Rotation is fully manual and undocumented per-app.
@@ -46,9 +47,11 @@ the cluster as one bootstrap Secret.
   canary App (`filebrowser`)**; remaining Apps each get a follow-up PR
   filed as gh issues against `SpyrosPsarras/epaflix`.
 - Per-app age recipients. One cluster-wide recipient is enough.
-- Removing the `secrets.yml` plaintext file. It becomes the
+- Removing the plaintext credential file. As of this design it stays as the
   source-of-truth that the developer encrypts FROM, plus a workstation
-  backup. Eventually decommissioned (out of scope).
+  backup, and decommissioning it is out of scope. **Since done:** the
+  plaintext file is gone and the credential store is the committed
+  `.github/instructions/secrets.enc.yaml`.
 - Securing ArgoCD bootstrap Secrets (admin password, OIDC client). The
   age key Secret IS the chicken-egg; remaining ArgoCD bootstrap Secrets
   continue to be created imperatively for now.
@@ -111,7 +114,7 @@ k3s-swarm-proxmox/
 │       ├── ksops-generator.yaml        # generator: [filebrowser-oidc.enc.yaml]
 │       └── filebrowser-oidc.enc.yaml   # ciphertext (committed)
 └── .github/instructions/
-    ├── secrets.yml                     # KEEP — workstation-local plaintext source
+    ├── secrets.enc.yaml                # Credential store (SOPS+age, committed)
     └── sops.instructions.md            # NEW: encrypt/rotate/decrypt recipes
 ```
 
@@ -284,8 +287,9 @@ R1. Worst case: ksops broken → revert PR; ArgoCD reverts repo-server to
     pre-sidecar state; Secret stays in cluster (already created, not
     pruned); filebrowser unaffected.
 
-R2. If Secret somehow deleted: re-create imperatively from secrets.yml
-    (the old recipe stays in README backup until canary soaked).
+R2. If Secret somehow deleted: re-create imperatively from the credential
+    store .github/instructions/secrets.enc.yaml (the old recipe stays in
+    README backup until canary soaked).
 ```
 
 ## Dependencies / sequencing
@@ -300,7 +304,9 @@ R2. If Secret somehow deleted: re-create imperatively from secrets.yml
 4. Follow-up gh issues filed per remaining App:
    `authentik`, `traefik`, `servarr`, `observability`, `postgres`,
    `cert-manager`. Each gets its own PR.
-5. Decommission `secrets.yml` as last step (separate issue).
+5. Decommission the plaintext credential file as last step (separate issue).
+   **Done:** it is gone, and the credential store is the committed
+   `.github/instructions/secrets.enc.yaml`.
 
 ## Coordination notes
 

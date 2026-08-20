@@ -17,20 +17,22 @@ file to a shared folder → starts a small webserver on the bastion → the page
 reachable at `http://bastion.epaflix.com:<port>`.
 
 Odysseus must also "know about our setup": the entire contents of this project
-(`SpyrosPsarras/epaflix`) — **including git-ignored files** such as
-`secrets.yml` — must be available to it.
+(`SpyrosPsarras/epaflix`) - **including readable credentials** - must be
+available to it. The credential store `.github/instructions/secrets.enc.yaml` is
+committed, so a clone already carries it; reading a key from it needs the age
+private key on the bastion at `~/.config/sops/age/keys.txt`.
 
 ## Decisions (locked during brainstorming)
 
 | # | Decision | Choice |
 |---|----------|--------|
 | 1 | Execution model | **B** — Odysseus SSHes from its pod into the bastion and runs commands there (real sandbox) |
-| 2 | Repo/secrets scope | **B** — full committed repo always available; `secrets.yml` + homelab SSH keys present, but on the bastion+NFS only (detachable, not in the pod baseline) |
+| 2 | Repo/secrets scope | **B** - full committed repo always available; the credential store comes with the clone and the age private key + homelab SSH keys are present, but on the bastion+NFS only (detachable, not in the pod baseline) |
 | 3 | SSH keys bundled | **Homelab-relevant only** (k3s nodes, takaros/evanthoulaki, truenas, pihole, jumpbox) — NOT work keys (any work host alias) |
 | 4 | Bastion VM | name `odysseus-bastion`, **VMID 1043 → 192.168.10.43**, host `evanthoulaki`, Ubuntu 24.04, 4 vCPU / 8 GB / 60 GB |
 | 5 | IP / subnet | Flat `192.168.10.0/24` (reachable by whole LAN with zero router/VLAN work; `.20.x` rejected — new unrouted subnet, TP-Link Archer can't route a second LAN) |
 | 6 | Storage pool | TrueNAS **`apps`** (redundant RAIDZ1) |
-| 7 | Share layout | **One NFS share** = a working copy of the project; `secrets.yml` sits in its normal path (`.github/instructions/secrets.yml`); output in `work/` |
+| 7 | Share layout | **One NFS share** = a working copy of the project; the credential store arrives with the clone at `.github/instructions/secrets.enc.yaml`; output in `work/` |
 | 8 | Web access | **Pi-hole `bastion.epaflix.com → 192.168.10.43`**; **no persistent server** on the bastion — Odysseus starts its own servers on demand |
 | 9 | Workstation access | spy's workstation can `ssh bastion` directly (pubkey in bastion `authorized_keys` + `~/.ssh/config` alias) |
 | 10 | Instruction durability | "Always work on the bastion" seeded into Odysseus persistent config (GitOps) + runtime memory/doc |
@@ -46,7 +48,7 @@ You ──http──> bastion.epaflix.com:<port>   (Pi-hole A → 192.168.10.43)
        │  both NFS-mount the same share
        ▼                          ▼
         TrueNAS  apps/odysseus-bastion   (/mnt/apps/odysseus-bastion)
-          repo/   clone of SpyrosPsarras/epaflix + git-ignored secrets.yml in place
+          repo/   clone of SpyrosPsarras/epaflix (credential store included - committed)
           work/   Odysseus's output — HTML, builds, served from here
 ```
 
@@ -78,8 +80,9 @@ root in the pod; consistent with the accepted-risk posture.)
   and bastion (`ubuntu`, 1000) agree on ownership.
 - Export access restricted to **k3s worker IPs + the bastion `.43`** — NOT the
   whole LAN.
-- Contents: `repo/` (git clone of the project + git-ignored `secrets.yml` placed
-  at `repo/.github/instructions/secrets.yml`), `work/` (Odysseus output).
+- Contents: `repo/` (git clone of the project; the credential store at
+  `repo/.github/instructions/secrets.enc.yaml` comes with the clone), `work/`
+  (Odysseus output).
 
 ### Odysseus pod changes (`2-k3s/13.odysseus/`)
 - NFS PV + PVC; mount the share at `/workspace`.
@@ -119,7 +122,7 @@ root in the pod; consistent with the accepted-risk posture.)
 ## Security / blast radius (explicit)
 
 - Anyone who can prompt Odysseus (Authentik-gated, trusted circle) can
-  `ssh bastion` and from there reach everything `secrets.yml` + the homelab keys
+  `ssh bastion` and from there reach everything the credential store + the homelab keys
   unlock — Proxmox root, TrueNAS, all nodes. This is the accepted consequence of
   scope B + bundling the SSH config.
 - Mitigations: secrets/keys live on bastion+NFS (not the pod baseline); NFS
@@ -139,7 +142,8 @@ root in the pod; consistent with the accepted-risk posture.)
 
 **Out-of-band (operational; log to `.history/`):**
 - Create VM (qm/cloud-init), TrueNAS dataset/export (`midclt`), seed workspace
-  (`git clone` + drop `secrets.yml` + install homelab keys into `ubuntu@.43`),
+  (`git clone` + install the age private key at `~/.config/sops/age/keys.txt`
+  + install homelab keys into `ubuntu@.43`),
   live Pi-hole record, pod pubkey into bastion `authorized_keys`, spy workstation
   pubkey into bastion `authorized_keys`.
 - Set Odysseus runtime memory/doc via the scoped API.

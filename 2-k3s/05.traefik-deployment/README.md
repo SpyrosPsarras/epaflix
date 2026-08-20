@@ -190,7 +190,8 @@ dashboard route, and external service proxy manifests.
 
 Keep runtime secrets and certificate state outside git:
 - `cloudflare-api-token` is created imperatively from
-  `.github/instructions/secrets.yml`.
+  the credential store `.github/instructions/secrets.enc.yaml` (key
+  `cloudflare-api-token`).
 - ACME state remains in the chart-managed persistence volume at
   `/data/acme.json`.
 - `certificates/cloudflare-origin-cert.yaml` is a placeholder/template and is

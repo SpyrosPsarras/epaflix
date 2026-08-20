@@ -236,7 +236,8 @@ without breaking sessions:
    `kubectl --context epaflix -n argocd rollout restart deploy/argocd-repo-server`.
 
 2. **Apply the runtime-secrets Secret** (substitute real values from
-   `.github/instructions/secrets.yml` first — never commit the rendered file):
+   the credential store `.github/instructions/secrets.enc.yaml` first - never
+   commit the rendered file):
    ```
    kubectl --context epaflix apply -f 2-k3s/07.authentik-deployment/secret-app.yaml
    ```
@@ -285,8 +286,8 @@ into separate Apps would force a sync-wave dance ArgoCD does not solve
 cleanly.
 
 1. **Apply the new imperative Secrets BEFORE touching Helm** (real values
-   substituted from `.github/instructions/secrets.yml`; never commit the
-   rendered Secrets):
+   substituted from the credential store `.github/instructions/secrets.enc.yaml`;
+   never commit the rendered Secrets):
    - `grafana-admin-secret` — keys `admin-user`, `admin-password`
    - `alertmanager-config-secret` — single key `alertmanager.yaml` carrying
      the full route/receivers/SMTP-globals block
@@ -294,7 +295,7 @@ cleanly.
      existing `client_secret`:
      ```
      kubectl --context epaflix -n observability patch secret grafana-oauth-secret \
-       --type=merge -p '{"stringData":{"client_id":"<id-from-secrets.yml>"}}'
+       --type=merge -p '{"stringData":{"client_id":"<client-id-from-credential-store>"}}'
      ```
    - Verify pre-existing `grafana-db-secret`, `grafana-oauth-secret`,
      `pve-exporter-secrets` are intact.

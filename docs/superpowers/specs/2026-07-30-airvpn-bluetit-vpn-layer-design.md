@@ -64,9 +64,12 @@ Bluetit takes server *lists* and picks from them:
 
 - **Credentials.** Bluetit's recommended-server selection needs the AirVPN **account username and
   password** in `bluetit.rc` in plaintext. There is no API-key or token mode. Owner accepted this
-  risk; they live in a SOPS Secret. In `secrets.yml` as `airvpn_user` / `airvpn_password`,
-  inside the existing `airvpn_*` block. (They were briefly added as `airVPN_user` /
-  `airVPN_password`; the owner renamed them to match the block on 2026-07-30, mid-implementation.)
+  risk; they live in a SOPS Secret. In the credential store
+  (`.github/instructions/secrets.enc.yaml`) as `airvpn_user` / `airvpn_password`. Those are
+  top-level keys sharing the `airvpn_*` prefix, not a nested block, so the read is
+  `sops -d --extract '["airvpn_user"]' .github/instructions/secrets.enc.yaml`. (They were
+  briefly added as `airVPN_user` / `airVPN_password`; the owner renamed them to match the other
+  `airvpn_*` keys on 2026-07-30, mid-implementation.)
 - **Image build.** New capability for this repo: Dockerfile + GitHub Actions workflow publishing
   to GHCR. This repo has no Dockerfiles today.
 - **Architecture.** Bluetit runs as a **native sidecar**. The app container moves to
