@@ -2,7 +2,13 @@
 #
 # All files matching the regex below are encrypted to the listed age
 # recipient(s). The matching private key is stored:
-#   - on the maintainer workstation: ~/.config/sops/age/k3s-cluster.txt
+#   - on the maintainer workstation: in KeePassXC, entry
+#     `sops-age-k3s-cluster`. NOT on the filesystem any more,
+#     ~/.config/sops/age/ was emptied on 2026-08-21. Plain `sops` works
+#     because ~/.pi/profiles/epaflix/bin/sops is a wrapper that reads that
+#     entry over the Secret Service D-Bus API and exports SOPS_AGE_KEY.
+#     A locked KeePassXC means no decryption. Details, break-glass and the
+#     rotation procedure: .github/instructions/sops.instructions.md
 #   - mirrored to TrueNAS at
 #     /mnt/apps/encrypted-backups/sops-age-backup/k3s-cluster.txt — a
 #     ZFS-encrypted (aes-256-gcm) dataset. #57 created it and #149 moved
