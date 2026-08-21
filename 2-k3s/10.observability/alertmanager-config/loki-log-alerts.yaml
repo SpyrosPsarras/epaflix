@@ -109,12 +109,17 @@ data:
           # access-log line for the query URL. Promtail ships all of them back,
           # and `{namespace=~".+"}` includes `observability`, so this rule
           # counted its own output, permanently true, with zero genuine matches.
-          # #910 measured 15 lines/5m against a threshold of 5. Re-measured
-          # 2026-08-21 by sending both exprs to the Loki query API
-          # (`/loki/api/v1/query`, header `X-Scope-OrgID: 1`): unguarded 25 lines
-          # in one namespace, guarded 0 series. The count drifts with evaluation
-          # interval and querier hops, so re-run the two exprs rather than
-          # trusting either number. `git log 7613e8b` dates
+          # The rule's threshold is 5. Sending both exprs to the Loki query API
+          # (`/loki/api/v1/query`, header `X-Scope-OrgID: 1`) on 2026-08-21
+          # returned counts between 15 and 25 lines/5m in the `observability`
+          # namespace for the unguarded expr, and 0 series for the guarded one.
+          # The count moves because each query adds its own echo lines to the
+          # window being counted: measuring it perturbs it. What is stable is
+          # the relationship - the unguarded expr sits far above 5 continuously
+          # while none of the matches are genuine, and the guarded expr returns
+          # no series at all. Expect a different number when you re-run it, and
+          # compare it against the threshold of 5, not against 15 or 25.
+          # `git log 7613e8b` dates
           # the rule to 2026-06-15, so it self-fired from then until #910.
           # The guard is `query=` and not a pod/component exclusion because the
           # echoes are not all `component=ruler`: compat.go:68 carries
