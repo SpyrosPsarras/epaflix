@@ -47,6 +47,20 @@
 # qBittorrent VPN flap IS covered by the restart-count PrometheusRule in
 # custom-alerts.yaml, matching `container=~"qbittorrent|airvpn|agent"` (#622) -
 # a flap can restart `airvpn` or, since the vpn-picker agent shipped, `agent`.
+#
+# LOKI LOGS EVERY QUERY IT RUNS, at level=info, including the query text (#910).
+# Any rule here whose selector is not namespace-scoped and whose pattern is a
+# literal string will eventually match its own echo. Same class as #751. Before
+# adding a rule with `{namespace=~".+"}`, add the `!= `query=`` guard or scope
+# the selector to a namespace the ruler does not run in.
+#
+# Audit done for #910: only PodPanicOrFatal (now guarded) and CredentialInLogs
+# use the unbounded `{namespace=~".+"}` selector. ServarrErrorSpike
+# (namespace="servarr"), PostgresPanic / PostgresFatalSpike / PostgresDeadlock
+# (namespace="postgres-system") and AuthentikLoginFailures
+# (namespace="app-authentik") are structurally immune: the ruler runs in
+# `observability` and those selectors cannot reach it. That is design, not luck -
+# it corrects #910's claim that AuthentikLoginFailures is safe only by luck.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -88,10 +102,28 @@ data:
       #     Specific tokens (not bare "error") to stay low-noise.
       - name: cluster-fatal
         rules:
+          # The `!= `query=`` line filter is load-bearing (#910). Loki logs the
+          # TEXT of every query it runs at level=info: three lines per rule
+          # evaluation (caller=compat.go:68, engine.go:274, metrics.go:237),
+          # plus a line per querier/frontend hop, plus loki-gateway's nginx
+          # access-log line for the query URL. Promtail ships all of them back,
+          # and `{namespace=~".+"}` includes `observability`, so this rule
+          # counted its own output: 15 lines/5m against a threshold of 5,
+          # permanently true, with zero genuine matches. Self-firing since
+          # 7613e8b (2026-06-15) until #910.
+          # The guard is `query=` and not a pod/component exclusion because the
+          # echoes are not all `component=ruler`: compat.go:68 carries
+          # `rule_name=` and no component label at all, and querier, frontend
+          # and the gateway each carry their own. `query=` is the one token
+          # every Loki query-log line has, so a single filter kills all of them
+          # and survives Loki version bumps and caller renames.
+          # Do NOT "fix" this with `pod!~"loki-.*"` instead: that also blinds
+          # the rule to a real Loki crash, which is exactly what it is for - a
+          # Go goroutine dump contains no `query=`.
           - alert: PodPanicOrFatal
             expr: |
               sum by (namespace) (
-                count_over_time({namespace=~".+"} |~ `(?i)(panic:|fatal error|out of memory|segfault|runtime error)` [5m])
+                count_over_time({namespace=~".+"} |~ `(?i)(panic:|fatal error|out of memory|segfault|runtime error)` != `query=` [5m])
               ) > 5
             for: 5m
             labels:
@@ -245,6 +277,17 @@ data:
       #     just silence this rule.
       - name: credential-leak
         rules:
+          # NO `!= `query=`` GUARD HERE, deliberately (#910). This rule has the
+          # same unbounded `{namespace=~".+"}` selector as PodPanicOrFatal, but
+          # it exists to catch `?apikey=` in Traefik access logs, and a request
+          # URI can legitimately contain `query=` - the guard would be a false
+          # negative on a severity: critical security rule. It is not needed:
+          # this rule's own echoed regex renders as
+          # `client_secret)=[A-Za-z0-9._~+/-]{8,}`, with a `)` before the `=`,
+          # so the alternation cannot match its own query log line. Live count
+          # over 24h on 2026-08-21: 0. That safety is positional, not
+          # structural: reordering the alternation so a key NAME ends the group
+          # would make this rule self-fire the way PodPanicOrFatal did.
           - alert: CredentialInLogs
             expr: |
               sum by (namespace, container) (
