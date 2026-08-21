@@ -5,13 +5,29 @@
 prometheus:
   prometheusSpec:
     replicas: 1 # Single replica due to PV limitations
-    retention: 15d
+    retention: 8d
     # Must stay BELOW the PVC claim below (25Gi). local-path is a bind mount with
     # no quota, so the claim is advisory — retentionSize is the only real bound,
     # and the node root disk is only 48G. At "45GB" Prometheus grew to 30G and
     # pushed k3s-worker-62 to 85%, which broke kubelet image GC (#463).
     # If 15d of history matters more than node headroom, grow the PVC — do not
     # raise this back above the claim.
+    #
+    # 8d, not 15d (#913). Point-in-time measurement, 2026-08-21. All three
+    # numbers drift with cardinality, so re-run the queries rather than trusting
+    # them:
+    #   prometheus_tsdb_storage_blocks_bytes                            -> 18.05 GiB
+    #   (time() - prometheus_tsdb_lowest_timestamp_seconds) / 86400     -> 8.25 days
+    #   prometheus_tsdb_head_series                                     -> 515,435
+    # 18.05 GiB against the 20GB (= 18.63 GiB) cap held 8.25 days, i.e.
+    # 2.19 GiB/day, so 15d needs ~33 GiB. The PVC cannot grow: this pod is on
+    # k3s-worker-62, where `ssh ubuntu@192.168.10.62 df -h /` reported 9.8G free
+    # of 48G that day, and #463 above is what happened last time Prometheus
+    # outgrew it. So 8d is the retention this cluster actually had at that
+    # measurement, and at 8d the time bound binds first (17.5 GiB), so the two
+    # settings stop disagreeing. PrometheusRetentionBelowConfigured in
+    # alertmanager-config/custom-alerts.yaml is the check that reports it if
+    # that stops being true.
     retentionSize: "20GB"
 
     # Resource limits
@@ -307,12 +323,26 @@ prometheus-node-exporter:
       operator: Exists
       effect: NoSchedule
 
+  # NO cpu limit, on purpose (#912). Point-in-time measurement, 2026-08-21,
+  # across 7 of 7 node-exporters. These numbers drift, so re-run the queries
+  # rather than trusting them:
+  #   sum by (pod) (rate(container_cpu_cfs_throttled_periods_total{container="node-exporter"}[24h]))
+  #     / sum by (pod) (rate(container_cpu_cfs_periods_total{container="node-exporter"}[24h]))
+  #     -> 0.24 to 0.40 per pod
+  #   quantile_over_time(0.99, sum by (pod) (rate(container_cpu_usage_seconds_total{container="node-exporter"}[5m]))[24h:5m])
+  #     -> 0.0095 cores
+  # 24-40% of CFS periods throttled while p99 CPU sat at 5% of the old 200m
+  # limit is CFS quota granularity on a bursty scrape handler (it reads dozens
+  # of /proc files in one go, blowing the 20ms-per-100ms-period budget every
+  # scrape), not an undersized limit, so RAISING the limit does not fix it. The
+  # memory limit stays: memory is incompressible, CPU is not, and the 100m
+  # request still provides the scheduling share. Verified no
+  # LimitRange/ResourceQuota exists to re-inject a default.
   resources:
     requests:
       cpu: 100m
       memory: 100Mi
     limits:
-      cpu: 200m
       memory: 200Mi
 
 # kube-state-metrics configuration
@@ -328,12 +358,19 @@ kube-state-metrics:
         matchLabels:
           app.kubernetes.io/name: kube-state-metrics
 
+  # NO cpu limit, same reasoning as node-exporter above (#912). Point-in-time
+  # measurement, 2026-08-21, from the same throttled-fraction query as above
+  # with container="kube-state-metrics": 0.017, i.e. only 1.7% of CFS periods
+  # throttled. Re-run it rather than trusting that number. On that reading this
+  # limit removal is preventative and consistent rather than urgent.
+  # replicas: 2 above stays: dropping to 1 would trade away HA to work around a
+  # rule bug, and the job-failure rules dedupe the two replicas with
+  # `max by (...)` anyway (#909).
   resources:
     requests:
       cpu: 100m
       memory: 256Mi
     limits:
-      cpu: 200m
       memory: 512Mi
 
 # Default ServiceMonitors

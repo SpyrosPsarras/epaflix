@@ -149,13 +149,23 @@ spec:
             initialDelaySeconds: 120
             timeoutSeconds: 10
             periodSeconds: 10
+          # NO cpu limit, on purpose (#912). #912 asked whether seerr was a real
+          # workload problem. Point-in-time measurement, 2026-08-21. These
+          # numbers drift, so re-run the queries rather than trusting them:
+          #   sum(rate(container_cpu_cfs_throttled_periods_total{container="seerr"}[24h]))
+          #     / sum(rate(container_cpu_cfs_periods_total{container="seerr"}[24h]))
+          #     -> 0.452
+          #   quantile_over_time(0.99, sum by (pod) (rate(container_cpu_usage_seconds_total{container="seerr"}[5m]))[24h:5m])
+          #     -> 0.0501 cores
+          # 45.2% of CFS periods throttled at 10% of the old 500m limit is not a
+          # workload problem. It is the same CFS-granularity shape as the
+          # observability exporters, so the same fix. The 2Gi memory limit stays.
           resources:
             requests:
               memory: "256Mi"
               cpu: "100m"
             limits:
               memory: "2Gi"
-              cpu: "500m"
       volumes:
         - name: config
           persistentVolumeClaim:

@@ -62,6 +62,37 @@ spec:
             summary: "Prometheus storage usage high"
             description: "Prometheus PVC {{ $labels.persistentvolumeclaim }} is {{ $value | humanizePercentage }} full (threshold 85%)."
 
+        # #913: retentionSize ("20GB") bound before retentionTime for months
+        # while prometheus-values.yaml claimed 15d, and nothing reported the
+        # gap. retention is now 8d, the measured truth, and this rule keeps the
+        # two settings from disagreeing silently again. The 7d floor under an 8d
+        # setting leaves one day of slack so normal block churn does not flap it.
+        # Point-in-time check, 2026-08-21, both exprs sent to the Prometheus
+        # HTTP API (`GET /api/v1/query`): this one returned empty at 8.26 days of
+        # history (correctly quiet), and the same expr with the threshold raised
+        # to `< 9` returned the series (so it is live-sensitive, not dead). Days
+        # of history moves every day. Re-run both if you need to know it still
+        # holds.
+        - alert: PrometheusRetentionBelowConfigured
+          expr: |
+            ((time() - prometheus_tsdb_lowest_timestamp_seconds) / 86400) < 7
+          for: 6h
+          labels:
+            severity: warning
+            component: prometheus
+          annotations:
+            summary: "Prometheus is holding less history than prometheus-values.yaml claims"
+            description: >-
+              Prometheus holds {{ $value | printf "%.1f" }} days of history,
+              below the 7d floor for the 8d configured in
+              2-k3s/10.observability/prometheus-values.yaml. retentionSize
+              ("20GB") is binding before retentionTime, which is the #913
+              failure mode: documented retention and real retention drift apart
+              with nothing reporting it. Either cardinality grew (check
+              prometheus_tsdb_head_series against the 515k baseline) or the
+              8d value needs lowering again. Do NOT raise retentionSize above
+              the 25Gi claim - see the #463 note in prometheus-values.yaml.
+
     - name: proxmox
       interval: 60s
       rules:
@@ -835,11 +866,33 @@ spec:
     #
     # Verified live before commit: 34 series -> 2, both genuine
     # (orphan-census' current finding, and one ownerless synthetic Job).
+    #
+    # ONE OWNER PER CONDITION (#909). The 7 servarr reporter CronJobs are owned
+    # by their own scoped rules in the groups above, which carry the per-job
+    # runbook text this generic rule cannot. They are excluded here by
+    # owner_name, so a reporter finding produces one alert and one email instead
+    # of two. Adding a new scoped reporter rule REQUIRES adding its CronJob name
+    # to that regex, or the failure will alert twice.
+    # Excluding by owner_name (the CronJob name) rather than by a job_name regex
+    # is deliberate: it is exact and namespace-scoped to servarr, so it cannot
+    # swallow a same-prefixed Job in another namespace.
+    # The OUTER PARENS around the existing expr are mandatory, not cosmetic:
+    # `unless` binds tighter than `or`, so without them `A or B unless C` parses
+    # as `A or (B unless C)` and the exclusion would apply only to the ownerless
+    # branch - no parse error, no visible symptom, duplicate alerts still firing.
+    # Point-in-time check, 2026-08-21, each expr sent to the Prometheus HTTP API
+    # (`GET /api/v1/query`): without the `unless` clause 1 series
+    # (namespace=servarr, orphan-census-29788260), with it 0, while
+    # ALERTS{alertname="OrphanCensusFailed"} still returned its 1 firing series.
+    # A control run with the outer parens stripped returned 1, which is the
+    # precedence trap described above. Job names and series counts change daily,
+    # so re-run the three queries rather than trusting these numbers.
     - name: kube-job-failed-last-run
       interval: 60s
       rules:
         - alert: KubeJobFailedLastRun
           expr: |
+            (
             (
               (
                 max by (namespace, job_name) (kube_job_status_start_time)
@@ -859,6 +912,11 @@ spec:
             (max by (namespace, job_name) (kube_job_failed) > 0)
               unless on (namespace, job_name)
               max by (namespace, job_name) (kube_job_owner{owner_kind="CronJob"})
+            )
+            unless on (namespace, job_name)
+            max by (namespace, job_name) (
+              kube_job_owner{namespace="servarr", owner_kind="CronJob", owner_name=~"cleanuparr-blocklist-drift|newtarr-config-drift|orphan-census|prowlarr-indexer-health|cleanuparr-queuecleaner-health|blind-queue-check|qbt-stuck-torrent-check"}
+            )
           for: 15m
           labels:
             severity: warning
