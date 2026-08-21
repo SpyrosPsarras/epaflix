@@ -1,5 +1,12 @@
 # SOPS + age secret automation — Implementation Plan
 
+> **Partly superseded 2026-08-21:** every step here that reads or writes
+> `~/.config/sops/age/k3s-cluster.txt` describes a file that no longer exists.
+> The age private key lives in KeePassXC (entry `sops-age-k3s-cluster`) and is
+> injected by `~/.pi/profiles/epaflix/bin/sops-kpx`. Current procedures:
+> `.github/instructions/sops.instructions.md`. This file stays as the record of
+> the original #29 rollout.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Adopt SOPS + age + ksops for GitOps-managed Secrets across ArgoCD Applications, starting with `filebrowser` as canary.

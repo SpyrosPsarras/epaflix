@@ -1,5 +1,12 @@
 # SOPS + age secret automation for ArgoCD-managed apps
 
+> **Partly superseded 2026-08-21:** the workstation key file this design places
+> at `~/.config/sops/age/keys.txt` was shredded. The key now lives in KeePassXC
+> (entry `sops-age-k3s-cluster`), read by a `sops` wrapper on PATH. The
+> in-cluster half of the design, `argocd/sops-age` mounted at
+> `/var/sops/keys.txt`, is unchanged. Current procedures:
+> `.github/instructions/sops.instructions.md`.
+
 - **Issue:** SpyrosPsarras/epaflix#29
 - **Date:** 2026-05-25
 - **Status:** Approved, awaiting implementation plan

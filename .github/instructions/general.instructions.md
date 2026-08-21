@@ -35,11 +35,29 @@ The store encrypts values only - key **names** stay in cleartext. So `grep -c '^
 
 ### Requirements
 
-The age private key must be at `~/.config/sops/age/keys.txt` (the default sops
-lookup path). On this workstation that is a symlink to the real
-`~/.config/sops/age/k3s-cluster.txt`. Without it every read fails with
-`Failed to get the data key required to decrypt the SOPS file`. Recovery copies
-and the post-reboot unlock are in `sops.instructions.md`.
+Reading any value needs the age private key. Since 2026-08-21 it is **not** on
+the filesystem: `~/.config/sops/age/` is empty, and the key lives in the
+maintainer's KeePassXC as entry `sops-age-k3s-cluster`. Plain `sops` still
+works inside the `epaflix` pi profile because
+`~/.pi/profiles/epaflix/bin/sops` wraps the real binary and injects the key
+from KeePassXC.
+
+So a decrypt now usually fails for one of these two reasons:
+- `sops-kpx: KeePassXC is locked or its Secret Service is unavailable`. Unlock
+  the KeePassXC window. An agent cannot unlock it; ask the user.
+- `Failed to get the data key required to decrypt the SOPS file`. You are
+  running a `sops` that is not the wrapper. Call
+  `~/.pi/profiles/epaflix/bin/sops-kpx` instead. A local `kustomize build` with
+  ksops hits this too, because ksops decrypts through the sops library and
+  never runs the wrapper: prefix it with
+  `SOPS_AGE_KEY=$(~/.pi/shared/skills/keepassxc-secrets/scripts/kpx.sh get sops-age-k3s-cluster)`.
+
+The wrapper also exits 3 (no such KeePassXC entry), 4 (duplicate entries) and
+127 (no real sops on PATH). Those messages all start with `sops-kpx:`, and the
+full table is in `sops.instructions.md` under "Common failures".
+
+Recovery copies, the post-reboot TrueNAS unlock and the rotation procedure are
+in `sops.instructions.md`.
 
 ## Never fetch a whole Secret to check one key
 

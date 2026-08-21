@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - Secrets live ONLY as SOPS `*.enc.yaml`; never commit a plaintext `kind: Secret` (pre-commit hook `check-sops-encrypted.sh` is a hard error). SOPS recipient: `age1586thf5vkcdf5lcn3zwjpu8ltkwyq8efrhj8lr0vdrrt9k5f3qgsxeg7gx`; `encrypted_regex: ^(data|stringData)$` (set by repo `.sops.yaml`, applied automatically by path `*.enc.yaml`).
-- Decrypt key file: `~/.config/sops/age/k3s-cluster.txt` (set `SOPS_AGE_KEY_FILE` to it for decrypt/verify).
+- Decrypt key: was the file `~/.config/sops/age/k3s-cluster.txt`. **Shredded 2026-08-21**. The key now lives in KeePassXC (entry `sops-age-k3s-cluster`). Plain `sops` picks it up through the wrapper on PATH; a `kustomize build` with ksops does not, and needs `SOPS_AGE_KEY=$(~/.pi/shared/skills/keepassxc-secrets/scripts/kpx.sh get sops-age-k3s-cluster)` in its environment. The `SOPS_AGE_KEY_FILE=` prefixes below are dead as written.
 - Image is PINNED to a release tag; Renovate (`12.renovate`) manages bumps. No `:latest`.
 - DNS: edit `/etc/dnsmasq.d/10-epaflix.conf` on Pi-hole `192.168.10.30` only — never the Pi-hole UI. The `*.epaflix.com` zone is per-host A records (NOT a wildcard).
 - ArgoCD adoption order: push aligned git to `main` FIRST, then the app-of-apps creates the Application; do not create the Application before manifests are on `main`.
