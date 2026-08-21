@@ -8,7 +8,12 @@
 #               (see .history/2026-05-17-argocd-adoption-drift.diff) and
 #               doing one explicit `argocd app sync servarr`, enable
 #               `syncPolicy.automated: { selfHeal: true, prune: false }`.
-#               Flip `prune: true` only after a week of clean operation.
+#               `prune: true` since 2026-08-21: the app has run Synced/Healthy
+#               since its 2026-05-17 adoption, far past the one-week bar, and
+#               the five live-only OutOfSync orphans that predated the flip were
+#               removed first (#1034), so the flip had nothing stale to delete.
+#               This is what #50 asked for; #50 was closed as done while this
+#               file still said `prune: false`.
 #
 # Image bumps:   Digest/patch updates for the servarr stack are now delivered
 #                by auto-merged Renovate PRs (see .github/renovate.json) that
@@ -34,13 +39,27 @@ spec:
   # Auto-sync ON 2026-05-17 after the live cluster was reconciled to match
   # repo (live = source of truth pull-up done earlier in the day). selfHeal
   # reverts any manual `kubectl edit` on managed resources. ServerSideApply
-  # avoids noisy `tracking-id` annotation diffs. prune is OFF for now —
-  # flip to `prune: true` after a week of clean operation so that
-  # accidentally removing a manifest file doesn't yet delete the resource.
+  # avoids noisy `tracking-id` annotation diffs.
+  #
+  # `prune: true` as of 2026-08-21 (#1034). The trade-off this comment used to
+  # warn about is now accepted deliberately: removing a manifest file DOES delete
+  # the live resource. That is the point - this app's configMapGenerator mints
+  # hash-suffixed names, so every content change orphaned the previous generation
+  # permanently while prune was off.
+  #
+  # Two things make it safe to turn on here and not elsewhere: OutOfSync was 0
+  # across every prune:false app when this landed, and #779's silent-deletion
+  # failure needs a stale `helm` field manager, which this app does not have (it
+  # is kustomize, never `helm install`ed - see 2-k3s/RECOVERY.md stage 7, and
+  # the #779 sweep in ../README.md which scopes that failure to authentik,
+  # observability and argocd only). Eight other Applications are deliberately
+  # left alone: seven say "`prune` NEVER turns on" verbatim (cert-manager,
+  # cnpg-operator, coredns, kube-vip, kube-vip-cloud-provider, of-apps,
+  # postgres) and app-maintenance says the same thing in its own words.
   syncPolicy:
     automated:
       selfHeal: true
-      prune: false
+      prune: true
     syncOptions:
       - ServerSideApply=true
   # ignoreDifferences keeps Argo quiet about fields that controllers mutate.
