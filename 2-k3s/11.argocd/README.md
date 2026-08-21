@@ -275,9 +275,31 @@ This survives because the `argocd` Application is **manual-sync** - it has no
 ### Get the password
 
 The chart generated `admin.password` as a bcrypt hash at install and preserves
-it across renders through Helm `lookup`. It is **not** in git, and it is not
-recoverable from the hash. If the original was never stored in the credential
-store, set a new one:
+it across renders through Helm `lookup`. It is **not** in git and the hash
+itself is not reversible - but that does not mean the password is lost.
+
+**The initial password is probably still live.** The chart wrote it to
+`argocd-initial-admin-secret` at install and it stays valid until someone
+rotates it. Check that first - it is a two-minute recovery instead of a
+password reset under pressure. Compare the two timestamps; if they match,
+nothing ever rotated the password and the one in that Secret is current:
+
+```bash
+kubectl --context epaflix -n argocd get secret argocd-initial-admin-secret \
+  -o jsonpath='{.metadata.creationTimestamp}'; echo
+kubectl --context epaflix -n argocd get secret argocd-secret \
+  -o jsonpath='{.data.admin\.passwordMtime}' | base64 -d; echo
+# Equal timestamps => never rotated. Read the password into a variable and
+# do NOT print it (#602); paste it straight into the login form.
+PW=$(kubectl --context epaflix -n argocd get secret argocd-initial-admin-secret \
+       -o jsonpath='{.data.password}' | base64 -d); echo "len=${#PW}"
+```
+
+Measured 2026-08-21: both read `2026-05-17T08:09:11Z` and the Secret still
+holds a 16-character password, so this path works today.
+
+Only if the timestamps differ, or `argocd-initial-admin-secret` is gone, set a
+new one:
 
 ```bash
 # bcrypt a new password without it reaching the shell history or a transcript
