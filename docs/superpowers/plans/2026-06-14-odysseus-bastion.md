@@ -230,13 +230,21 @@ Expected: repo cloned; top-level dirs (`0-truenas`, `1-proxmox`, `2-k3s`, ...) l
 
 - [ ] **Step 2: Install the age private key so the committed credential store can be read**
 
-Superseded: this step used to `scp` a plaintext credential file from the workstation and print its first line. That file is gone, and printing the first line of a credential file was never safe. The credential store `.github/instructions/secrets.enc.yaml` is committed, so Step 1's clone already carries it. What the bastion still needs is the age private key at the default sops lookup path `~/.config/sops/age/keys.txt`, or every read fails with `Failed to get the data key required to decrypt the SOPS file`. Do not re-add the old copy step. `sops` must be installed on the bastion; install it there first if missing.
+Superseded twice. It first used to `scp` a plaintext credential file from the workstation and print its first line; that file is gone, and printing the first line of a credential file was never safe. Then it copied `~/.config/sops/age/keys.txt` from the workstation, and **as of 2026-08-21 that file no longer exists either**: the age key lives in the maintainer's KeePassXC (entry `sops-age-k3s-cluster`), so there is nothing on the workstation filesystem left to `scp`. The credential store `.github/instructions/secrets.enc.yaml` is committed, so Step 1's clone already carries it. What the bastion still needs is the age private key at the default sops lookup path `~/.config/sops/age/keys.txt`, or every read fails with `Failed to get the data key required to decrypt the SOPS file`. `sops` must be installed on the bastion; install it there first if missing.
+
+Write the key over the SSH session instead of copying a file, so it never lands on the workstation disk again:
 
 ```bash
+KPX=~/.pi/shared/skills/keepassxc-secrets/scripts/kpx.sh
+KEY=$("$KPX" get sops-age-k3s-cluster)
+[ ${#KEY} -eq 74 ] || { echo 'no key from KeePassXC (locked?)'; return 1 2>/dev/null || exit 1; }
 ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 ubuntu@192.168.10.43 "mkdir -p ~/.config/sops/age && chmod 700 ~/.config/sops/age"
-scp -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 ~/.config/sops/age/keys.txt ubuntu@192.168.10.43:~/.config/sops/age/keys.txt
-ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 ubuntu@192.168.10.43 "chmod 600 ~/.config/sops/age/keys.txt"
+ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 ubuntu@192.168.10.43 "cat > ~/.config/sops/age/keys.txt && chmod 600 ~/.config/sops/age/keys.txt" <<<"$KEY"
+unset KEY
 ```
+
+Note what this step does: it puts a plaintext copy of the age key on the bastion disk, which is the thing the 2026-08-21 change removed from the workstation. Decide whether the bastion should hold it at all before running this.
+
 Expected: no output (key in place, mode 600). Then prove a decrypt works without printing a value - a byte count is safe to print, the value is not:
 ```bash
 ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 ubuntu@192.168.10.43 "cd /workspace/repo && sops -d --extract '[\"airvpn_user\"]' .github/instructions/secrets.enc.yaml | wc -c"

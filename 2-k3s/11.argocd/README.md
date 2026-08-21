@@ -503,8 +503,12 @@ never values:
 kubectl --context epaflix -n <ns> get <kind> <name> --template \
   '{{range $k,$v := .data}}{{$k}}{{"\n"}}{{end}}{{range $k,$v := .binaryData}}{{$k}}{{"\n"}}{{end}}'
 
-# what git actually renders
-kustomize build --enable-helm --enable-alpha-plugins --enable-exec 2-k3s/<tier>
+# what git actually renders. Key names only: an unfiltered render prints every
+# decrypted Secret value. ksops decrypts through the sops library, so the PATH
+# wrapper does not apply and the key has to be in this process's environment.
+SOPS_AGE_KEY=$(~/.pi/shared/skills/keepassxc-secrets/scripts/kpx.sh get sops-age-k3s-cluster) \
+  kustomize build --enable-helm --enable-alpha-plugins --enable-exec 2-k3s/<tier> \
+  | yq -N 'select(.kind == "Secret") | .metadata.name as $n | (.data // .stringData) | keys | .[] | $n + ": " + .'
 ```
 
 A key is dead only if it is live **and** absent from the render. Never use
@@ -607,11 +611,23 @@ Before ArgoCD can decrypt any `*.enc.yaml` Secret, the cluster needs the
 age private key. This is the one Secret that cannot itself be GitOps-
 managed (chicken-egg).
 
+There is no key file to point `--from-file` at any more: since 2026-08-21 the
+age private key lives only in the maintainer's KeePassXC (entry
+`sops-age-k3s-cluster`), so materialise it through stdin. This form has **not**
+been exercised against a real cluster yet. Canonical recipe, including the
+namespace creation, and the rotation procedure:
+`.github/instructions/sops.instructions.md`.
+
 ```bash
-# From the maintainer workstation:
+# From the maintainer workstation, with KeePassXC unlocked:
+KPX=~/.pi/shared/skills/keepassxc-secrets/scripts/kpx.sh
+KEY=$("$KPX" get sops-age-k3s-cluster)
+[ ${#KEY} -eq 74 ] \
+  || { echo 'no key from KeePassXC (locked?): refusing to create an empty Secret'; return 1 2>/dev/null || exit 1; }
 kubectl --context epaflix create secret generic sops-age \
   -n argocd \
-  --from-file=keys.txt=$HOME/.config/sops/age/k3s-cluster.txt
+  --from-file=keys.txt=/dev/stdin <<<"$KEY"
+unset KEY
 
 # Verify the repo-server picked it up:
 kubectl --context epaflix -n argocd rollout restart deploy/argocd-repo-server

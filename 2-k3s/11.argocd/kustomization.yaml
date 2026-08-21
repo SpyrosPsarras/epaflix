@@ -19,12 +19,11 @@
 #                            (see install.sh step 4). Out of scope until Issue #29.
 #   - sops-age Secret      — created imperatively (chicken-egg: the age key has
 #                            to exist before ArgoCD can decrypt anything,
-#                            including any GitOps version of itself). One-shot
-#                            bootstrap:
-#                              kubectl create secret generic sops-age \
-#                                -n argocd \
-#                                --from-file=keys.txt=$HOME/.config/sops/age/k3s-cluster.txt
-#                            Rotation recipe: .github/instructions/sops.instructions.md.
+#                            including any GitOps version of itself). The
+#                            one-shot bootstrap recipe (the age key lives in
+#                            KeePassXC, not on disk, so it is piped in through
+#                            stdin) and the rotation procedure are both in
+#                            .github/instructions/sops.instructions.md.
 #
 # Field-manager note: original install used field manager "helm". ArgoCD
 # applies under "argocd-controller" with ServerSideApply=true. The first sync
