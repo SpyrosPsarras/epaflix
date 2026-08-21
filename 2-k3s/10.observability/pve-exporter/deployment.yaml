@@ -29,12 +29,22 @@ spec:
             - name: config
               mountPath: /etc/prometheus
               readOnly: true
+          # NO cpu limit, on purpose (#912). Point-in-time measurement,
+          # 2026-08-21. These numbers drift, so re-run the queries rather than
+          # trusting them:
+          #   sum(rate(container_cpu_cfs_throttled_periods_total{container="pve-exporter"}[24h]))
+          #     / sum(rate(container_cpu_cfs_periods_total{container="pve-exporter"}[24h]))
+          #     -> 0.406
+          #   quantile_over_time(0.99, sum by (pod) (rate(container_cpu_usage_seconds_total{container="pve-exporter"}[5m]))[24h:5m])
+          #     -> 0.0291 cores
+          # 40.6% of CFS periods throttled at 15% of the old 200m limit is quota
+          # granularity on a bursty scrape handler, not an undersized limit. The
+          # memory limit and both requests stay.
           resources:
             requests:
               cpu: 100m
               memory: 128Mi
             limits:
-              cpu: 200m
               memory: 256Mi
 
           livenessProbe:

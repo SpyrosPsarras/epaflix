@@ -32,7 +32,7 @@ Complete monitoring, logging, and service mesh observability for the K3s cluster
 ## Stack Components
 
 ### Currently Deployed ✅
-- **Prometheus** (1 replica): Time-series metrics database with 15d retention
+- **Prometheus** (1 replica): Time-series metrics database, 8d retention (the 20GB size cap binds before any longer time window — see "Prometheus Storage")
 - **Grafana** (2 replicas): Unified dashboards with folder organization, OAuth via Authentik
 - **AlertManager** (3 replicas): Email alerting to admin@epaflix.com
 - **node-exporter** (DaemonSet): Node-level CPU, memory, disk, network metrics
@@ -361,11 +361,39 @@ For production environments requiring HA, consider:
 ### Prometheus Storage
 
 - **Size**: 25Gi PVC using local-path StorageClass
-- **Retention**: 15 days
+- **Retention**: 8 days (`retention: 8d`), bounded in practice by `retentionSize: "20GB"`
 - **StorageClass**: local-path (provisioned from node's `/var/lib/rancher/k3s/storage/`, which resides on VM disk backed by TrueNAS iSCSI)
 - **Access Mode**: ReadWriteOnce
-- **Expected usage**: ~20GB
+- **Measured usage**: 18.05 GiB of blocks on 2026-08-21, i.e. at the 20GB (= 18.63 GiB) cap
 - **Note**: Worker nodes have 40GB total disk space from iSCSI targets
+
+#### Why 8 days and not 15 (#913)
+
+15d was configured and never reached: `retentionSize: "20GB"` bound first, and nothing
+reported the gap, so the documented retention and the real retention drifted apart in
+silence for months.
+
+Measured 2026-08-21: 8.25 days of history, 18.05 GiB of blocks, 515,435 head series —
+2.19 GiB/day, so 15 days needs roughly 33 GiB. The PVC cannot grow to hold that:
+Prometheus runs on k3s-worker-62, whose 48G root disk has 9.8G free, and #463 records
+what happened last time Prometheus outgrew it (30G of blocks pushed that node to 85% and
+broke kubelet image GC). So `retention: 8d` is the retention this cluster actually has,
+and at 8d the time bound binds first (17.5 GiB, under the cap).
+
+Verify against live state:
+
+```promql
+(time() - prometheus_tsdb_lowest_timestamp_seconds) / 86400   # days of history, ~8.25 on 2026-08-21
+prometheus_tsdb_head_series                                    # cardinality, ~515k on 2026-08-21
+```
+
+`PrometheusRetentionBelowConfigured` (in `alertmanager-config/custom-alerts.yaml`, group
+`prometheus-storage`) fires if real retention drops below 7d, so the two settings cannot
+disagree silently again.
+
+Consequence for investigations: history older than ~8 days does not exist, the `ALERTS`
+series included. Questions about when an alert first started firing cannot be answered
+from Prometheus beyond that window.
 
 ### Loki Storage
 
