@@ -5,13 +5,22 @@
 prometheus:
   prometheusSpec:
     replicas: 1 # Single replica due to PV limitations
-    retention: 15d
+    retention: 8d
     # Must stay BELOW the PVC claim below (25Gi). local-path is a bind mount with
     # no quota, so the claim is advisory — retentionSize is the only real bound,
     # and the node root disk is only 48G. At "45GB" Prometheus grew to 30G and
     # pushed k3s-worker-62 to 85%, which broke kubelet image GC (#463).
     # If 15d of history matters more than node headroom, grow the PVC — do not
     # raise this back above the claim.
+    #
+    # 8d, not 15d (#913). Measured 2026-08-21: 18.05 GiB of blocks against the
+    # 20GB (= 18.63 GiB) cap held 8.25 days at 515,435 head series, i.e.
+    # 2.19 GiB/day. 15d needs ~33 GiB. The PVC cannot grow: this pod is on
+    # k3s-worker-62, whose 48G root disk has 9.8G free, and #463 above is what
+    # happened last time Prometheus outgrew it. So 8d is the retention this
+    # cluster actually has - at 8d the time bound binds first (17.5 GiB) and the
+    # two settings stop disagreeing. PrometheusRetentionBelowConfigured in
+    # alertmanager-config/custom-alerts.yaml alerts if that stops being true.
     retentionSize: "20GB"
 
     # Resource limits
@@ -307,12 +316,19 @@ prometheus-node-exporter:
       operator: Exists
       effect: NoSchedule
 
+  # NO cpu limit, on purpose (#912). 7 of 7 node-exporters ran at 24-40%
+  # CFS-throttled periods while p99 CPU over 24h was 0.0095 cores - 5% of the
+  # old 200m limit. That is CFS quota granularity on a bursty scrape handler (it
+  # reads dozens of /proc files in one go, blowing the 20ms-per-100ms-period
+  # budget every scrape), not an undersized limit, so RAISING the limit does not
+  # fix it. The memory limit stays: memory is incompressible, CPU is not, and
+  # the 100m request still provides the scheduling share. Verified no
+  # LimitRange/ResourceQuota exists to re-inject a default.
   resources:
     requests:
       cpu: 100m
       memory: 100Mi
     limits:
-      cpu: 200m
       memory: 200Mi
 
 # kube-state-metrics configuration
@@ -328,12 +344,16 @@ kube-state-metrics:
         matchLabels:
           app.kubernetes.io/name: kube-state-metrics
 
+  # NO cpu limit, same reasoning as node-exporter above (#912). This one
+  # measured only 1.7% throttled periods, so it is preventative and consistent
+  # rather than urgent. replicas: 2 above stays: dropping to 1 would trade away
+  # HA to work around a rule bug, and the job-failure rules dedupe the two
+  # replicas with `max by (...)` anyway (#909).
   resources:
     requests:
       cpu: 100m
       memory: 256Mi
     limits:
-      cpu: 200m
       memory: 512Mi
 
 # Default ServiceMonitors
