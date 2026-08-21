@@ -232,6 +232,63 @@ dig +short AAAA bastion.epaflix.com @1.1.1.1 # Cloudflare IPv6 - no exact record
 `cliproxy` and `wg-hop` are the only two `*.epaflix.com` names with an exact
 DNS-only Cloudflare record, and they are the only two that do not answer AAAA.
 
+### The record itself, finally read (2026-08-21)
+
+Every chain of reasoning above depended on "the wildcard", and until 2026-08-21
+nobody had opened the zone and named it (#966). Read via the Cloudflare API with
+the `cloudflare-api-token` from the credential store:
+
+```
+*.epaflix.com    A    proxied=true    ttl=auto    content=81.167.233.67
+```
+
+**That is the only wildcard in the zone.** 47 records total: `A 19, CAA 12, NS 8,
+CNAME 4, TXT 2, MX 1, PTR 1`, of which 17 are proxied. Two consequences worth
+having in writing:
+
+- **There is no `*.vm` record.** `nick.vm.epaflix.com` and `a.b.vm.epaflix.com`
+  resolve because a Cloudflare wildcard answers at every depth, not because a
+  second wildcard exists. Do not go looking for one.
+- **There are zero AAAA records in the whole zone**, wildcard or otherwise. So
+  "the wildcard synthesizes an AAAA" is right about the effect and loose about
+  the cause: the AAAA comes from Cloudflare's **proxy**, which answers with its
+  own anycast v4 and v6 for any proxied record. That is also why a grey-cloud
+  record fixes it - unproxied means no Cloudflare answer at all, not "no AAAA
+  record". There is no AAAA entry anywhere to delete.
+
+The three unproxied A records, which are the only ones that answer with a real
+address rather than Cloudflare's: `cliproxy` -> `192.168.10.102` (an RFC1918
+address in public DNS, #1079), `wg-hop` -> `81.167.233.67` (the origin IP, which
+is #547's leak), and `localhost` -> `127.0.0.1`.
+
+If the wildcard is ever narrowed (#966 is still the open decision), the names
+that would each need an explicit record already exist. The 19 A records break down
+without overlap as:
+
+| Count | Target | Notes |
+|---|---|---|
+| 11 | `81.167.233.67` | includes `*` itself and `wg-hop` (the one unproxied member) |
+| 5 | `188.40.204.212` | includes one of the two apex A records |
+| 1 | `51.174.23.23` | the second apex A record |
+| 1 | `192.168.10.102` | `cliproxy`, unproxied (#1079) |
+| 1 | `127.0.0.1` | `localhost`, unproxied |
+
+Plus 4 CNAMEs: `jellyseerr`->`seerr`, `nick`->`ssh`, `vidar`->`ssh`, `www`->apex.
+The wildcard's only job is the fall-through for names outside that list.
+
+> Verifying a Cloudflare token: `/user/tokens/verify` returns
+> `1000 Invalid API Token` for a perfectly valid **account-owned** token, because
+> that endpoint only accepts user-owned ones. Test against `/zones`, or against
+> whatever endpoint you actually intend to call. A working token was briefly
+> declared dead on exactly that.
+
+Also note the key name in the credential store is `cloudflare-api-token`, with
+**hyphens**. Two separate greps for it missed it by using a character class like
+`[a-z_]*`, which does not match a hyphen, and both concluded no Cloudflare
+credential existed when it had been committed since `c295c59`. Key names in that
+file are cleartext precisely so they can be found - grep the substring, not an
+assumed shape.
+
 > **The LAN is IPv4-only today**, so this whole class is **latent, not
 > exploitable**. Measured 2026-08-10: zero global IPv6 addresses and zero IPv6
 > default routes on the workstation, `takaros`, `evanthoulaki` and the Pi-hole,

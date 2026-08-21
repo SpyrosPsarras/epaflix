@@ -31,12 +31,22 @@ pbs: pbs-backup-local
 	username proxmox@pbs
 ```
 
-## Required sizing — do not shrink
+## Required sizing — cores are load-bearing, memory is headroom
 
 ```
 cores: 4
-memory: 4096
+memory: 8192
 ```
+
+> **Do not shrink `cores`.** One core was the measured cause of #597 and the
+> evidence for that is below.
+>
+> **`memory` is a different claim.** It was raised 1024 -> 4096 on 2026-08-03 and
+> 4096 -> 8192 on 2026-08-21 (#763). Only the first raise fixed a failure. At 4 GiB
+> nothing was being OOM-killed, and at 8 GiB nothing is either; the container simply
+> fills whatever it is given with page cache. So 8192 is deliberate headroom for
+> chunk IO rather than a proven floor. Do not shrink it casually, but do not read it
+> as a value that has been shown to be necessary. See "The 8 GiB raise" below.
 
 The community-scripts default was `cores: 1` / `memory: 1024`. **That is far too
 small** and was the root cause of #597. Evidence gathered 2026-08-03:
@@ -51,9 +61,68 @@ small** and was the root cause of #597. Evidence gathered 2026-08-03:
 Applied live with (no restart needed, cgroups take it immediately):
 
 ```bash
-ssh root@192.168.10.10 'pct set 1031 --cores 4 --memory 4096'
+ssh root@192.168.10.10 'pct set 1031 --cores 4 --memory 8192'
 ssh root@192.168.10.10 'cat /sys/fs/cgroup/lxc/1031/cpuset.cpus.effective'  # 1-4
 ```
+
+### The 8 GiB raise, and why it is not a fix (2026-08-21, #763)
+
+`memory: 4096` was raised to `8192`. What happened next is the useful part:
+
+```
+before:  memory.current ~3.91 GiB against a 3.97 GiB memory.high, high events 11,684,560
+after:   memory.current  7.07 GiB within seconds, high events 15,290,472 and climbing
+         memory.max 8589934592   memory.high 8522825728   oom 0   oom_kill 0
+```
+
+PBS took the entire new ceiling immediately, because most of `memory.current` is
+reclaimable page cache over a chunk store holding 285,876 chunks and 7.12 TB
+logical. It will fill 16 GiB the same way. So more memory buys more cache, which
+is a real benefit for chunk IO, but the ceiling was never the binding constraint
+and `oom_kill` was 0 at both sizes.
+
+**Read these numbers from the host, not from inside the container.** Inside, the
+namespaced cgroup reports `memory.max = max` and `memory.high = max` while
+`free -m` reports the configured size via lxcfs, so the container looks unlimited
+and the real limit is invisible. The enforced values live at
+`/sys/fs/cgroup/lxc/1031/` on takaros:
+
+```bash
+ssh root@192.168.10.10 'cat /sys/fs/cgroup/lxc/1031/memory.max /sys/fs/cgroup/lxc/1031/memory.high'
+```
+
+### What actually broke on 2026-08-21, which was not sizing (#1075)
+
+Separately from CPU or memory: the datastore filled to **100%, 0 bytes free**, and
+**eight guests had no restore point from 2026-08-10 to 2026-08-21**, including k3s
+master `vm-1053`. Nightly runs were failing 4-6 guests out of 11 with
+`No space left on device (os error 28)` and nobody was told, because PVE's
+`ntfy-pve` notification target returns HTTP 400 and the only other leg is dead
+mail (#461, #1076).
+
+The cause is not a broken prune or GC — both run. It is that there is no headroom
+for the garbage PBS is *required* to keep:
+
+```
+index-data-bytes   7,079,643,473,849   (7.08 TB logical, 8.5x dedup)
+disk-bytes           836,432,094,151   (836 GB live)
+pending-bytes        163,457,865,360   (163 GB unreferenced, held by the 24h+5m grace window)
+filesystem                      984 GB
+```
+
+840 GB live plus up to 163 GB of grace-held garbage does not fit in 984 GB. GC runs
+at 00:01 and the backup job at 01:00, so on any night the grace window has not
+expired for that garbage, the datastore is full an hour before backups start.
+Running GC by hand reclaimed 152 GB and deleted no snapshot.
+
+So the open sizing question for this container is the **datastore**, not its RAM:
+grow `mp0` beyond 1000G (the `pve-raid` thin pool `data` was at 56% so there is
+room), cut retention below the current `keep-daily 1, keep-weekly 1, keep-monthly 1`
+PBS-side prune job, or accept it and alert on datastore usage. Tracked in #1075.
+
+Reading the task history needs `/var/log/proxmox-backup/tasks/archive`. There is no
+`tasks/index` file; a read of that path returns nothing and looks like an idle
+server.
 
 ## #597 root cause — one cause, two symptoms
 
