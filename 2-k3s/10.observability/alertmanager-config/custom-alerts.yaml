@@ -67,9 +67,12 @@ spec:
         # gap. retention is now 8d, the measured truth, and this rule keeps the
         # two settings from disagreeing silently again. The 7d floor under an 8d
         # setting leaves one day of slack so normal block churn does not flap it.
-        # Verified live 2026-08-21: empty at 8.26 days of history (correctly
-        # quiet), and returns the series when the threshold is raised to `< 9`
-        # (so it is live-sensitive, not dead).
+        # Point-in-time check, 2026-08-21, both exprs sent to the Prometheus
+        # HTTP API (`GET /api/v1/query`): this one returned empty at 8.26 days of
+        # history (correctly quiet), and the same expr with the threshold raised
+        # to `< 9` returned the series (so it is live-sensitive, not dead). Days
+        # of history moves every day. Re-run both if you need to know it still
+        # holds.
         - alert: PrometheusRetentionBelowConfigured
           expr: |
             ((time() - prometheus_tsdb_lowest_timestamp_seconds) / 86400) < 7
@@ -877,9 +880,13 @@ spec:
     # `unless` binds tighter than `or`, so without them `A or B unless C` parses
     # as `A or (B unless C)` and the exclusion would apply only to the ownerless
     # branch - no parse error, no visible symptom, duplicate alerts still firing.
-    # Verified live 2026-08-21: the expr without the `unless` returns 1 series
+    # Point-in-time check, 2026-08-21, each expr sent to the Prometheus HTTP API
+    # (`GET /api/v1/query`): without the `unless` clause 1 series
     # (namespace=servarr, orphan-census-29788260), with it 0, while
-    # ALERTS{alertname="OrphanCensusFailed"} still returns its 1 firing series.
+    # ALERTS{alertname="OrphanCensusFailed"} still returned its 1 firing series.
+    # A control run with the outer parens stripped returned 1, which is the
+    # precedence trap described above. Job names and series counts change daily,
+    # so re-run the three queries rather than trusting these numbers.
     - name: kube-job-failed-last-run
       interval: 60s
       rules:
