@@ -22,8 +22,15 @@ global:
   #   AUTHENTIK_SECRET_KEY  AUTHENTIK_POSTGRESQL__PASSWORD
   #   AUTHENTIK_EMAIL__PASSWORD  AUTHENTIK_EMAIL__HOST
   #   AUTHENTIK_EMAIL__USERNAME  AUTHENTIK_EMAIL__FROM
+  #   AUTHENTIK_BOOTSTRAP_PASSWORD_HASH  AUTHENTIK_BOOTSTRAP_EMAIL
   # The email ones are here and not in `authentik.email` below because the repo
   # is public — see the comment on that block.
+  # The bootstrap pair seeds `akadmin` on a FRESH install only (#1064): the
+  # startup hook skips any tenant where `Setup.get(tenant)` is true, which it is
+  # here, so both are inert on this cluster. Plaintext of the hash is in the
+  # credential store under `authentik_bootstrap_password`; no
+  # AUTHENTIK_BOOTSTRAP_TOKEN, the `ak-iac` blueprint already makes the API
+  # token. See README → "Rebuilding the ArgoCD login path from scratch".
   envFrom:
     - secretRef:
         name: authentik-app-secrets

@@ -323,18 +323,40 @@ It works from nothing because every reference is a natural key rather than a cap
 scope-mapping `managed` keys, the certificate name — and because the client credentials travel inside the
 encrypted payload. All you need is the age key.
 
-**The two steps it still cannot do.** Named here so nobody has to rediscover them under pressure:
+**The akadmin password no longer needs the setup flow (#1064).** `authentik-app-secrets` carries
+`AUTHENTIK_BOOTSTRAP_PASSWORD_HASH` and `AUTHENTIK_BOOTSTRAP_EMAIL`, so a freshly built Authentik comes
+up with a usable `akadmin` login and the rebuild never visits `/if/flow/initial-setup/`.
 
-1. **Set the akadmin password** at `/if/flow/initial-setup/`. `authentik-app-secrets` carries no
-   `AUTHENTIK_BOOTSTRAP_PASSWORD`, `_EMAIL` or `_TOKEN`, so a freshly built Authentik has no usable
-   login at all until someone completes that flow interactively. Tracked in #1064.
-2. **Put an identity into `ArgoCD Admins`.** The blueprint creates the group but declares no members.
+- **The plaintext lives in the credential store** under `authentik_bootstrap_password` in
+  `.github/instructions/secrets.enc.yaml`. Read it with
+  `sops -d --extract '["authentik_bootstrap_password"]'` and never echo it. The Secret holds only the
+  pbkdf2 hash, so no usable password ever becomes a pod environment variable where `kubectl describe`
+  or any env dump would surface it; upstream supports the hash on its own
+  (`authentik/core/tests/test_setup.py:167`). A hash alone would leave nobody able to log in, which is
+  why the plaintext is stored too.
+- **Both variables are inert on an existing install.** `post_startup_setup_bootstrap`
+  (`authentik/core/setup/signals.py`) skips every tenant where `Setup.get(tenant)` is true and logs
+  "Tenant is already setup, skipping". Measured on this cluster: `tenant=public ready=True
+  Setup.get=True`, and `akadmin.has_usable_password()` is `False` and stays `False`. They fire on a
+  fresh install only. Adding them repairs nothing here and rotating them changes nothing here either.
+- **No `AUTHENTIK_BOOTSTRAP_TOKEN`, deliberately.** The IaC API token `ak-iac` is already created by
+  `authentik-iac-blueprint.enc.yaml`, so a bootstrap token would be a second standing superuser API
+  credential with no consumer. `/blueprints/system/bootstrap.yaml` gates its token entry on
+  `!If [!Context token]`, so omitting the variable skips that entry cleanly and no
+  `authentik-bootstrap-token` Token is ever created.
+- **Writing this Secret bounces SSO.** Both Deployments carry
+  `secret.reloader.stakater.com/reload: "authentik-app-secrets"`, so any change to it rolls
+  `authentik-server` and `authentik-worker` and new SSO logins fail for the length of the restart.
+
+**The one step it still cannot do.** Named here so nobody has to rediscover it under pressure:
+
+1. **Put an identity into `ArgoCD Admins`.** The blueprint creates the group but declares no members.
    Live membership is a single user that the blueprint does not declare, and declaring it means setting
    `attrs.groups` on that user, which is authoritative-replace across all five of its live groups — four
    of which the blueprint does not declare, so a `!Find` miss there rolls back the entire apply (#295).
    Tracked in #1065.
 
-Until both are done, a rebuilt cluster has a complete ArgoCD login *path* with nobody authorised to walk it.
+Until that is done, a rebuilt cluster has a complete ArgoCD login *path* with nobody authorised to walk it.
 
 **Verify after a rebuild.** Run the two mechanical checks, then the login — the login is the only one
 that settles anything:
@@ -1075,8 +1097,14 @@ kubectl --context epaflix exec deploy/authentik-worker -n app-authentik -- \
 
 ```bash
 Username: akadmin
-Password: (Set during initial-setup)
+Password: credential store key `authentik_bootstrap_password`
 ```
+
+That password is what a **fresh** install bootstraps into, via
+`AUTHENTIK_BOOTSTRAP_PASSWORD_HASH` in `authentik-app-secrets` (#1064). On this cluster `akadmin`
+predates that seeding and `has_usable_password()` is `False`, so it cannot log in at all; of the three
+`authentik Admins` members exactly one has a usable password, and that per-person account is the admin
+login here. See "Rebuilding the ArgoCD login path from scratch".
 
 ## Additional Resources
 
