@@ -77,6 +77,15 @@ grafana:
   enabled: true
   replicas: 2
 
+  # Roll on a `grafana-admin-secret` rotation (#715, recipe proven by #780).
+  # Scoped `secret.reloader.stakater.com/reload`, never the blanket
+  # `reloader.stakater.com/auto` (#299). This is `grafana.annotations`, which
+  # the subchart renders into the Deployment's own metadata.annotations — where
+  # Reloader looks. `grafana.podAnnotations` lands on the pod template instead
+  # and would be a silent no-op.
+  annotations:
+    secret.reloader.stakater.com/reload: "grafana-admin-secret"
+
   # Topology spread constraints for even distribution
   topologySpreadConstraints:
     - maxSkew: 1

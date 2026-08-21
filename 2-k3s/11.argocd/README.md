@@ -550,6 +550,35 @@ Co-ownership makes key **deletion** silent - ArgoCD reports Synced either way -
 so deletion has to be verified out of band, once, at adoption time. Additions
 show up normally; it is only removals that disappear.
 
+### 6. Never write `syncPolicy: {}` in an Application (#1033)
+
+Same lesson, different field. An empty map is not a stable way to say "manual
+ sync": whether it survives depends on whether a field manager takes ownership
+of `spec.syncPolicy` during apply. When one does, live stores `{}` and the
+child is Synced. When none does, live stays `null`, git says `{}`, and the
+child is `OutOfSync` forever over a purely cosmetic difference.
+
+The ownership is an accident, not a property of the file. `app-reloader.yaml`
+and `app-remote-pi.yaml` carried the identical `syncPolicy: {}` line and were
+measured on 2026-08-20 with *opposite* ownership - `reloader` owned by
+`argocd-controller` and Synced, `remote-pi` unowned and OutOfSync. Re-measured
+on 2026-08-21 with no manifest change in between, both were unowned and both
+were OutOfSync. A re-apply can flip it either way.
+
+It is invisible without `--show-managed-fields`, exactly as in section 1:
+
+```bash
+for a in reloader remote-pi; do
+  kubectl --context epaflix -n argocd get application "$a" --show-managed-fields -o json \
+    | jq -r --arg a "$a" '.metadata.managedFields[]?
+        | "\($a) manager=\(.manager) syncPolicy=\(.fieldsV1["f:spec"]["f:syncPolicy"] // "not-owned")"'
+done
+```
+
+**Rule:** to mean manual sync, *omit* the key and leave a comment saying so, as
+`app-argocd.yaml` does. Write a `syncPolicy:` block only when it has real
+content (`automated`, `syncOptions`). Never `{}`.
+
 ## SOPS age key bootstrap (run ONCE per fresh cluster)
 
 Before ArgoCD can decrypt any `*.enc.yaml` Secret, the cluster needs the

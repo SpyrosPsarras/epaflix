@@ -119,6 +119,12 @@ configs:
     create: false
 
 server:
+  # Roll on an `argocd-redis` rotation (#715, recipe proven by #780). Scoped
+  # `secret.reloader.stakater.com/reload`, never the blanket
+  # `reloader.stakater.com/auto` (#299). The chart renders this key into the
+  # Deployment's own metadata.annotations, which is where Reloader looks.
+  deploymentAnnotations:
+    secret.reloader.stakater.com/reload: "argocd-redis"
   # IngressRoute lives in ingress.yaml (Traefik IngressRoute, not k8s Ingress).
   ingress:
     enabled: false
@@ -133,6 +139,12 @@ server:
       memory: 512Mi
 
 controller:
+  # Same #715 coverage as server/repoServer/redis, but this component is a
+  # StatefulSet, so the chart reads `controller.statefulsetAnnotations`.
+  # `deploymentAnnotations` here would be a silent no-op (verified against the
+  # pinned argo-cd 10.4.0 templates).
+  statefulsetAnnotations:
+    secret.reloader.stakater.com/reload: "argocd-redis"
   resources:
     requests:
       cpu: 250m
@@ -141,6 +153,9 @@ controller:
       memory: 1Gi
 
 repoServer:
+  # #715 coverage — see the note under `server:`.
+  deploymentAnnotations:
+    secret.reloader.stakater.com/reload: "argocd-redis"
   resources:
     requests:
       cpu: 100m
@@ -214,6 +229,10 @@ redis-ha:
 
 redis:
   enabled: true
+  # #715 coverage — see the note under `server:`. redis-ha is disabled above, so
+  # it is this plain `redis` Deployment that consumes the argocd-redis Secret.
+  deploymentAnnotations:
+    secret.reloader.stakater.com/reload: "argocd-redis"
 
 # Disable the chart's pre-install/pre-upgrade redis-secret-init hook (Job + SA
 # + Role + RoleBinding). The `argocd-redis` Secret already exists in-cluster
