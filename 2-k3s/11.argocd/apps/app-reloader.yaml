@@ -7,40 +7,45 @@
 # Secrets they reference and rolls the Deployment when one changes.
 # Extended by #780 to app-authentik (`authentik-app-secrets`, consumed as env
 # vars by authentik-server + authentik-worker via the chart's global.envFrom).
+# Extended by #715 to the two chart-rendered consumers: `argocd-redis`
+# (argocd-server, argocd-repo-server, argocd-redis and the
+# argocd-application-controller StatefulSet) and `grafana-admin-secret`
+# (kube-prometheus-stack-grafana). Those are annotated through their own
+# charts' values keys rather than a manifest we template directly — see
+# 2-k3s/11.argocd/helm-values.yaml and
+# 2-k3s/10.observability/prometheus-values.yaml.
 #
 # Source:       this repo, path 2-k3s/16.reloader (kustomization.yaml with
-#               FOUR `helmCharts:` entries — one stakater/reloader v2.2.14
+#               SIX `helmCharts:` entries — one stakater/reloader v2.2.16
 #               release per watched namespace, see that file for why).
 # Destination:  resources land in the existing `servarr`, `traefik-system`,
-#               `odysseus` and `app-authentik` namespaces (no new namespace
-#               is created).
-# Sync:         MANUAL on first install (syncPolicy: {}) — the usual adoption
-#               order (push aligned git BEFORE creating the Application).
-#               After a clean manual `argocd app sync reloader` and confirming
-#               the 13 annotated Deployments actually roll on a live rotation
-#               (see PR test plan), AND a 48h soak, flip to:
-#                 syncPolicy:
-#                   automated: { selfHeal: true, prune: false }
-#                   syncOptions: [ServerSideApply=true]
-#               `prune` flips to true only after a further week of clean
-#               operation, same as every other adoption in this repo.
+#               `odysseus`, `app-authentik`, `argocd` and `observability`
+#               namespaces (no new namespace is created).
+# Sync:         AUTOMATED, `selfHeal: true, prune: false` (#726). Installed by
+#               manual sync first (the usual adoption order: push aligned git
+#               BEFORE creating the Application), then flipped here.
+#               `prune` stays false and flips to true only after a further
+#               week of clean operation, same as every other adoption in this
+#               repo — that flip is still open on #726.
+#               NOTE on the flip: #726's gate was "a clean 48h with no manual
+#               rollout restart". That gate was NOT met. At flip time the
+#               Application's last successful sync was 2026-08-03T15:52:34Z
+#               and it had been OutOfSync for 18 days, so the first automated
+#               reconcile applied a backlog (the app-authentik release, which
+#               was declared in git but absent live, and a v1.4.19 -> v1.4.21
+#               image bump) rather than being a no-op. The owner accepted that
+#               deliberately; recorded here so the next reader is not misled
+#               into thinking a soak was observed.
 #
-# RBAC: namespace-scoped, not cluster-wide. Each of the 4 releases runs
+# RBAC: namespace-scoped, not cluster-wide. Each of the 6 releases runs
 # `reloader.watchGlobally: false`, which ties that release's pod +
 # ServiceAccount + Role + RoleBinding to its own namespace only (verified
 # against the pulled chart's templates, not assumed) — a plain Role, never a
 # ClusterRole. Reloader in servarr can only read Secrets/ConfigMaps in
-# servarr, and likewise for traefik-system, odysseus and app-authentik.
+# servarr, and likewise for traefik-system, odysseus, app-authentik, argocd
+# and observability.
 #
 # Deliberately OUT OF SCOPE for this Application (see issue #715 for why):
-#   - argocd-redis (argocd-server/repo-server/application-controller) and
-#     kube-prometheus-stack-grafana — chart-rendered Deployments where the
-#     Secret-consuming container is baked into an upstream chart we don't
-#     directly template; adding annotations means a values-contract change
-#     on argocd's own self-managed Application (selfHeal permanently off)
-#     or the observability stack. #780 proved the recipe for a chart-rendered
-#     consumer (per-namespace release + the chart's own deploymentAnnotations
-#     key), so #715 is now mechanical rather than unknown — still its own PR.
 #   - plugin-barman-cloud-* SIDECAR_IMAGE — CNPG operator/plugin-generated
 #     Secret+Deployment, not a static manifest in git; also not really a
 #     rotating credential (an image ref), low priority.
@@ -72,4 +77,6 @@ spec:
     # namespace (servarr / traefik-system / odysseus), set per helmChart
     # entry in the kustomization. Nothing is created here.
     namespace: servarr
-  syncPolicy: {}
+  syncPolicy:
+    automated: { selfHeal: true, prune: false }
+    syncOptions: [ServerSideApply=true]

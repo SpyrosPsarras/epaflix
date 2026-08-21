@@ -15,4 +15,6 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: remote-pi
-  syncPolicy: {}
+  # Manual sync only — explicit, human-approved first sync (see above).
+  # (syncPolicy omitted = manual. Empty `{}` drifts against live `null` whenever no
+  # field manager owns spec.syncPolicy — needs `--show-managed-fields` to see. #1033.)

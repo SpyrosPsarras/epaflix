@@ -1,0 +1,36 @@
+# stakater/reloader v1.4.21 (chart 2.2.16) — instance scoped to the argocd
+# namespace only (issue #715), so an `argocd-redis` rotation rolls
+# argocd-server, argocd-repo-server, argocd-redis and the
+# argocd-application-controller StatefulSet automatically instead of needing a
+# manual `kubectl rollout restart`. See kustomization.yaml for why this is a
+# separate release per watched namespace rather than one shared instance.
+#
+# The annotations live in this repo's argo-cd chart values, not on a manifest
+# we template directly: `redis`/`server`/`repoServer.deploymentAnnotations` and
+# `controller.statefulsetAnnotations` in 2-k3s/11.argocd/helm-values.yaml. The
+# controller key differs because that component is a StatefulSet, and
+# `deploymentAnnotations` there would be a silent no-op (verified against the
+# pinned argo-cd 10.4.0 templates, not assumed).
+#
+# Blast radius: a restart here cycles the ArgoCD control plane, including the
+# component performing the restart, and #1039 disabled the local admin account
+# so the Authentik OAuth2 provider is the only route into the UI. Break-glass
+# is `2-k3s/11.argocd/README.md` -> "Break-glass: restoring local admin login",
+# which needs only kubectl. Reloader is content-hash driven, not sync driven:
+# it injects `STAKATER_<NAME>_SECRET=<sha1 of the Secret data>` into the pod
+# template and rolls only when that hash changes, so a routine ArgoCD sync that
+# re-applies the same Secret bytes rolls nothing. The restart happens only when
+# a value actually changes, which is when the old pods are serving a stale
+# credential anyway.
+reloader:
+  watchGlobally: false
+  ignoreCronJobs: true
+  ignoreJobs: true
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 32Mi
+  limits:
+    cpu: 100m
+    memory: 128Mi
