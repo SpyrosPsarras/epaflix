@@ -34,7 +34,7 @@ Complete monitoring, logging, and service mesh observability for the K3s cluster
 ### Currently Deployed ✅
 - **Prometheus** (1 replica): Time-series metrics database, 8d retention (the 20GB size cap binds before any longer time window — see "Prometheus Storage")
 - **Grafana** (2 replicas): Unified dashboards with folder organization, OAuth via Authentik
-- **AlertManager** (3 replicas): Email alerting to admin@epaflix.com
+- **AlertManager** (3 replicas): alerts delivered to ntfy on topic `k8s-alertmanager` (the SMTP leg was deleted, #921)
 - **node-exporter** (DaemonSet): Node-level CPU, memory, disk, network metrics
 - **kube-state-metrics** (2 replicas): Kubernetes cluster state metrics
 - **pve-exporter** (1 replica): Proxmox VE host and VM metrics from 192.168.10.10 and .11
@@ -55,7 +55,7 @@ Complete monitoring, logging, and service mesh observability for the K3s cluster
 | **Grafana** | https://grafana.epaflix.com | Authentik SSO (or admin / <POSTGRES_PASSWORD>) | ✅ Running |
 | **Prometheus** | Port-forward only | N/A | ✅ Running |
 | **AlertManager** | Port-forward only | N/A | ✅ Running |
-| **ntfy** | https://ntfy.epaflix.com (Traefik `internal`, 192.168.10.102) — plus the legacy plaintext http://192.168.10.112:8091, still live for PVE | None (un-gated on the LAN, by design) | ✅ Running. The hostname needs the deploy-gate DNS record below before it resolves |
+| **ntfy** | https://ntfy.epaflix.com (Traefik `internal`, 192.168.10.102) | None (un-gated on the LAN, by design) | ✅ Running. Sole entry point since the 192.168.10.112 LoadBalancer was retired (#920) |
 
 ## Installation
    # - k3s-master-51: 10GB (192.168.10.51, Proxmox takaros)
@@ -243,15 +243,14 @@ See [PERFORMANCE-METRICS.md](PERFORMANCE-METRICS.md) for detailed before/after c
 
 ### ntfy
 
-ntfy is **the leg that actually delivers**. SMTP has been dead since #461, so
-the Alertmanager `webhook_configs` leg on topic `k8s-alertmanager` (#568/PR
-#574) is what reaches a human. The owner's 2026-08-21 decision on #904/#914/#915
-made that official: ntfy is the load-bearing receiver, email drops to secondary
-or goes entirely (the email receiver's deletion is #921).
+ntfy is **the only leg**. SMTP was dead from #461 on, so the Alertmanager
+`webhook_configs` leg on topic `k8s-alertmanager` (#568/PR #574) was already the
+thing that reached a human; the owner's 2026-08-21 decision on #904/#914/#915
+made it official and #921 deleted the email leg on 2026-08-22.
 
 | Aspect | Value |
 |---|---|
-| Manifests | `ntfy.yaml` (Deployment + LoadBalancer Service), `ntfy-cache-pvc.yaml`, `ingress/ntfy-ingressroute.yaml` |
+| Manifests | `ntfy.yaml` (Deployment + ClusterIP Service), `ntfy-cache-pvc.yaml`, `ingress/ntfy-ingressroute.yaml` |
 | Namespace / owning app | `observability` / ArgoCD Application `observability` (moved from `odysseus`, #914) |
 | Entry point | `https://ntfy.epaflix.com` on Traefik's `internal` entry point at **192.168.10.102**, TLS from the `cloudflare` certResolver (#904). NOT the public `websecure` entry point on .101 — see the header of `ingress/ntfy-ingressroute.yaml` |
 | Auth | none. Publishers are machines (PVE, the TrueNAS GPU cron) posting with no interactive login, so a forward-auth middleware would break them. Same posture as `searxng-internal` and `qbittorrent-internal` |
@@ -260,24 +259,38 @@ or goes entirely (the email receiver's deletion is #921).
 | In-cluster address | `http://ntfy.observability.svc.cluster.local:8091` (Alertmanager's webhook url, and `NTFY_BASE_URL` in `odysseus-config`, which is Odysseus's dial address) |
 | ntfy's own `base-url` | `https://ntfy.epaflix.com`, set via the `NTFY_BASE_URL` env in `ntfy.yaml`. That is a *server-side* setting — the public-facing URL ntfy writes into attachment/click links and push payloads — not an address anything dials, so it follows the entry point and not the namespace |
 | Topics | `k8s-alertmanager` (Alertmanager), `pve-backups` (Proxmox VE), `truenas-alerts` (the TrueNAS GPU cron) |
+| Message size limit | **32k**, via `NTFY_MESSAGE_SIZE_LIMIT` on the Deployment. The default is 4096 bytes, and ntfy treats anything larger as an attachment upload; attachments are off, so the POST comes back `400` with body code `40014` "attachments not allowed". That is the whole of #1076: a real failed-vzdump body is 16311 bytes, so every genuine backup failure from 2026-08-10 on was rejected while every clean night looked healthy. Residual: a body over 32k 400s the same silent way, which the notification-target failure guard follow-up covers |
 
-**The LoadBalancer at 192.168.10.112 is still live and that is deliberate.**
-The Proxmox VE hosts POST vzdump failures to the hardcoded
-`http://192.168.10.112:8091/pve-backups` (#597,
-`1-proxmox/pbs/notifications.cfg`) and PVE's own native target is separately
-broken (#1076), so deleting the Service before the PVE cutover would leave PVE
-with no path at all and the symptom would be silence. The reroute and the
-retirement land together in #904 / #920.
+**The LoadBalancer at 192.168.10.112 is retired** (#904 / #920, deploy gate of
+this PR). It was the plaintext front door for two LAN publishers, the Proxmox
+VE hosts on topic `pve-backups` (#597, `1-proxmox/pbs/notifications.cfg`) and
+the TrueNAS GPU cron on `truenas-alerts`. Both now publish to
+`https://ntfy.epaflix.com`. Retirement is phase 4 of the gate sequence below,
+deliberately after the PVE leg is proven with a real error-severity event:
+retiring the address while PVE still dialled it would leave PVE with no path,
+and the symptom of that is silence (#1076).
 
-#### Two DNS changes happen on the Pi-hole box, not through ArgoCD
+Evidence to paste when the phase runs, per #50/#551:
 
-`ntfy.epaflix.com` needs a LAN-only record. Neither change is applied by a sync;
-both are hand-applied on the Pi-hole LXC (192.168.10.30) at this PR's deploy
-gate, and until then the hostname resolves to the Cloudflare wildcard and the
-IngressRoute is unreachable. `10-epaflix.conf` has no representation in this
-repo at all — exactly the live-only-fix trap `CLAUDE.md` warns about — so it is
-recorded here and in `.github/instructions/pihole.instructions.md`. The Unbound
-file does have a tracked copy and is updated in this PR.
+```bash
+kubectl --context epaflix -n observability get svc ntfy -o jsonpath='{.spec.type}{"\n"}'
+# want the literal: ClusterIP
+curl -m5 -s -o /dev/null -w '%{http_code}\n' http://192.168.10.112:8091/v1/health
+# want: connection failure, not 200 (the same probe returned 200 before the sync)
+curl -s -o /dev/null -w '%{http_code}\n' https://ntfy.epaflix.com/v1/health   # want: 200, same minute
+ssh ubuntu@192.168.10.53 'ip -4 -o addr show eth0' | grep 192.168.10.112       # want: no hit
+```
+
+#### Two DNS changes happened on the Pi-hole box, not through ArgoCD
+
+`ntfy.epaflix.com` needs a LAN-only record, and no sync applies it. Both changes
+were hand-applied on the Pi-hole LXC (192.168.10.30) at PR #1088's deploy gate;
+the LAN resolver now answers `192.168.10.102` for the name, which is the
+precondition every publisher in this PR depends on. `10-epaflix.conf` has no
+representation in this repo at all — exactly the live-only-fix trap `CLAUDE.md`
+warns about — so it is recorded here and in
+`.github/instructions/pihole.instructions.md`. The Unbound file does have a
+tracked copy. Both steps are kept below because they are the rebuild recipe:
 
 1. `/etc/dnsmasq.d/10-epaflix.conf` on 192.168.10.30 gets
    `address=/ntfy.epaflix.com/192.168.10.102` (back the file up first — the box
@@ -296,13 +309,17 @@ file does have a tracked copy and is updated in this PR.
 `unbound-checkconf` before the reload is not optional: a malformed file takes
 LAN DNS down entirely.
 
-#### Cutover: sync order, the prune, and the 192.168.10.112 handover
+#### Cutover: sync order, the prune, and the 192.168.10.112 handover (#914, done)
 
-The move crosses two ArgoCD Applications, so for a moment two Services in two
-namespaces ask for the same `loadBalancerIP` — and .112 is the only path PVE
-has, since its native target is broken (#1076). Order the two syncs by hand at
-the deploy gate rather than letting the 120s reconciliation timer
-(`argocd-cm` `timeout.reconciliation=120s`) pick an order for you:
+Completed history, kept because it is the only written record of how kube-vip
+behaves when two Services claim one address. This ran at PR #1088's deploy gate;
+.112 itself is gone as of #920, so nothing here is a live instruction any more.
+
+The move crossed two ArgoCD Applications, so for a moment two Services in two
+namespaces asked for the same `loadBalancerIP` — and .112 was the only path PVE
+had, since its native target was broken (#1076). The two syncs were ordered by
+hand at the deploy gate rather than letting the 120s reconciliation timer
+(`argocd-cm` `timeout.reconciliation=120s`) pick an order:
 
 ```bash
 argocd app sync observability   # FIRST: creates observability/ntfy, which claims .112
@@ -400,78 +417,130 @@ instances, `kubectl --context epaflix -n kube-system delete pod -l
 name=kube-vip --field-selector spec.nodeName=<that node>`. Do not "fix" it by
 editing the Service.
 
-### Email Configuration
+#### Deploy gate for #1076 / #920 / #921: fix, prove, repoint, retire, unwire mail
 
-The single `email` receiver carries two legs - `email_configs` (SMTP) and
-`webhook_configs` (ntfy topic `k8s-alertmanager`, added by #568/PR #574). The
-webhook url is `http://ntfy.observability.svc.cluster.local:8091` since the
-#914 namespace move; it read `ntfy.odysseus...` before.
+One PR, five phases, and the order is the owner's from #920/#921: "Do not delete
+the email receiver before the ntfy entry point exists and is proven." ArgoCD
+syncs a whole Application at once, so the phases are bought by turning automated
+sync off first and syncing single resources by hand. Run it in daylight, outside
+the ~01:00 vzdump window.
 
-SMTP relays through `vh4c.ezhellas.com:587` (STARTTLS + AUTH), **not**
-`mail.epaflix.com`. `mail.epaflix.com` is caught by the proxied
-`*.epaflix.com` Cloudflare wildcard, so it answers on 443 but carries no
-SMTP and every send timed out for months (#461). `vh4c.ezhellas.com` is the
-real hosting node behind the domain's MX record
-(`_dc-mx.a4bc4ec9e03b.epaflix.com` → `188.40.204.212`) and its TLS cert CN
-matches, so `smtp_require_tls: true` verifies.
+Preconditions, from both PVE hosts and from TrueNAS: `getent hosts
+ntfy.epaflix.com` answers `192.168.10.102` (control: `grafana.epaflix.com` must
+NOT, it is a .101 record), and `curl --fail https://ntfy.epaflix.com/v1/health`
+returns 200 with no `-k` (control: `curl https://192.168.10.102/v1/health` must
+fail certificate verification, which is what proves verification is on). Back up
+`/etc/pve/notifications.cfg` to `/root/notifications.cfg.bak-$(date +%F)` on
+BOTH hosts and the TrueNAS `gpu-health-check.sh` to a `.bak` beside it. If
+TrueNAS is unreachable, stop before phase 4: its cron still posts to .112.
 
-Recipient is the provisioned `alert@epaflix.com` mailbox. The previous
-`admin@epaflix.com` does not exist on the relay - it answers
-`550 5.1.1 ... User unknown in virtual alias table`.
-
-Credentials live in the SOPS-encrypted
-`secrets/alertmanager-config-secret.enc.yaml`, which is what the cluster
-actually consumes. The human-readable reference for the same relay is the
-credential store `.github/instructions/secrets.enc.yaml` under the
-`alert_email_*` keys. The Prometheus Operator regenerates
-`alertmanager-kube-prometheus-stack-alertmanager-generated` when that Secret
-changes and the `config-reloader` sidecar POSTs `/-/reload`, so rotating the
-password needs no pod restart (the #299 `secretKeyRef` gap does not apply -
-this is a mounted volume, not an env var).
-
-Read one key out of the store without decrypting the rest, and without ever
-echoing the value. Run from the repo root:
+Turn automated sync off in the only order that sticks — app-of-apps first, or it
+re-adds `syncPolicy.automated` to the child:
 
 ```bash
-HOST=$(sops -d --extract '["alert_email_hostname"]' .github/instructions/secrets.enc.yaml)
-echo "${#HOST}"   # a length is safe to print, the value is not
+kubectl --context epaflix -n argocd patch application app-of-apps \
+  --type json -p '[{"op":"remove","path":"/spec/syncPolicy/automated"}]'
+kubectl --context epaflix -n argocd patch application observability \
+  --type json -p '[{"op":"remove","path":"/spec/syncPolicy/automated"}]'
 ```
 
-#### Drift check: store versus deployed relay
+1. **Fix.** `argocd app sync observability --resource apps:Deployment:observability/ntfy`
+   (`strategy: Recreate`, so seconds of ntfy downtime), then `rollout status`.
+2. **Prove.** Replay the archived 16311-byte failed-vzdump body in PVE's exact
+   shape (base64 `Title`/`Tags`/`Priority` headers) against both the old .112
+   URL and `https://ntfy.epaflix.com/pve-backups` — both 200 now, and the same
+   POST before the sync must have returned 400 with body code `40014`. Then
+   force a REAL error-severity vzdump failure on evanthoulaki: the task log must
+   contain ``notified via target `ntfy-pve` `` and must NOT contain `could not
+   notify via target` (control: that grep against the archived 2026-08-20/21
+   task logs must hit).
+3. **Repoint.** `pvesh set /cluster/notifications/endpoints/webhook/ntfy-pve
+   --url 'https://ntfy.epaflix.com/pve-backups'` on one host, verify the `url`
+   line on both (pmxcfs is shared), then
+   `pvesh create /cluster/notifications/targets/ntfy-pve/test` from EACH host —
+   that is what proves PVE's own perl HTTP client does HTTPS, SNI and the LE
+   chain, which curl does not prove for it. Force a second real failure through
+   the new URL. Swap `NTFY_URL` in the TrueNAS `gpu-health-check.sh` to
+   `https://ntfy.epaflix.com/truenas-alerts` and watch one 15-minute cycle
+   deliver.
+4. **Retire .112.** `argocd app sync observability --resource :Service:observability/ntfy`,
+   then the four checks in the retirement block above.
+5. **Unwire mail, last.** `argocd app sync observability --resource :Secret:observability/alertmanager-config-secret`,
+   wait for `config-reloader` on ALL THREE alertmanager replicas (#1053 means a
+   single-replica check proves nothing), then parse the served config per
+   replica: `email_configs` 0, `webhook_configs` 1 pointing at
+   `ntfy.observability.svc.cluster.local:8091`, receiver `ntfy`,
+   `route.receiver` `ntfy`, the critical child still `continue: true` with no
+   siblings (control: the same parse before the sync must report
+   `email_configs` 1 and receiver `email` on all three). Fire one synthetic
+   `severity=critical` alert through a port-forward and count EXACTLY ONE
+   message on topic `k8s-alertmanager` (control: two manual publishes must make
+   the counter read 2). Only then
+   `pvesh set /cluster/notifications/matchers/default-matcher --disable 1`, and
+   diff the regenerated `/etc/pve/notifications.cfg` against the tracked
+   `1-proxmox/pbs/notifications.cfg` — empty (control: the diff against the
+   `/root` backup must be non-empty).
 
-Two files describe one relay - the credential store and
-`alertmanager-config-secret.enc.yaml` - and neither is generated from the
-other. That is how #782 happened: PR #684 fixed the relay host in the
-Alertmanager Secret and the reference copy was left naming a host that cannot
-carry SMTP, so the two silently disagreed. Nothing catches this on its own,
-because the store is not rendered into the cluster.
+Restore: `argocd app sync app-of-apps` (git still carries `automated`), then
+paste the literal
+`kubectl --context epaflix -n argocd get application observability -o jsonpath='{.spec.syncPolicy.automated}'`
+showing `selfHeal` and `prune` true, and a final full `argocd app sync
+observability` reporting Synced/Healthy with an empty diff.
 
-Compare them by **hash only**, never by value. Hash where the value is
-produced (#740), and keep the extract on the leaf key so no parent node with a
-password in it is ever printed. Run from the repo root:
+### Alertmanager routing (the email leg is gone)
+
+One receiver, one leg. `receivers[0]` is named **`ntfy`** and carries
+`webhook_configs` only, posting to
+`http://ntfy.observability.svc.cluster.local:8091` on topic `k8s-alertmanager`
+with `send_resolved: true` (#568/PR #574; the url read `ntfy.odysseus...`
+before the #914 namespace move). `route.receiver` is `ntfy`, the
+`severity: critical` child route points at `ntfy` and keeps `continue: true`.
+
+That `continue: true` is a live trap rather than a curiosity: it is a no-op
+only because the child has no sibling. Add one route beside it and every
+critical alert is delivered twice. This PR deliberately adds none — PVE backup
+outcomes stay on PVE's native target because zero metrics match
+`^pve_(backup|vzdump|task)` (#920), so there is nothing to route here.
+
+**The SMTP leg was deleted on 2026-08-22 (#921).** `email_configs` and all five
+`global.smtp_*` keys are gone; `global` holds `resolve_timeout` and nothing
+else. The owner's decision on #920/#921 is that ntfy is the load-bearing
+receiver and "the dead email receiver gets deleted, not fixed": the relay was
+unroutable for months (#461) while the config read as though two paths existed.
+The receiver's old name said `email` while the thing that delivered was ntfy,
+so the name went with the leg. What that costs, stated plainly: alerts now have
+a single delivery path, and it runs inside the very cluster whose problems it
+reports.
+
+The consequence for review: `secrets/alertmanager-config-secret.enc.yaml` now
+contains **no secret at all** — `smtp_auth_password` was the only one, and
+`smtp_auth_username` was `alert@epaflix.com`, already in tracked git. It stays
+SOPS-encrypted regardless, because the repo-wide rule is that every
+ArgoCD-reconciled Secret is a `*.enc.yaml` and because the next credential to
+appear in `alertmanager.yaml` lands in this same file. Reviewability is bought
+back by procedure instead: **every PR touching this file pastes the full
+decrypted after-state** in its description. Read it without decrypting anything
+you do not need:
 
 ```bash
-# store copy
-sops -d --extract '["alert_email_hostname"]' .github/instructions/secrets.enc.yaml \
-  | tr -d '\n' | sha256sum | cut -c1-12
-
-# deployed copy - the host half of global.smtp_smarthost
 sops -d --extract '["stringData"]["alertmanager.yaml"]' \
-  2-k3s/10.observability/secrets/alertmanager-config-secret.enc.yaml \
-  | python3 -c 'import sys,yaml,hashlib; h=yaml.safe_load(sys.stdin)["global"]["smtp_smarthost"].rsplit(":",1)[0]; print(hashlib.sha256(h.encode()).hexdigest()[:12])'
+  2-k3s/10.observability/secrets/alertmanager-config-secret.enc.yaml
 ```
 
-Equal prefixes mean no drift. To reconcile the store to a deployed value
-without churning the file, pipe the deployed value into
-`sops set --idempotent --value-stdin` - it writes nothing when the key already
-holds that value, and when it does write it touches only that key plus the
-`mac`/`lastmodified` footer.
+The drift check that used to live here compared `global.smtp_smarthost` against
+the credential store's `alert_email_hostname` by hash — the #782 "two files
+describe one relay" pair. That pair no longer exists, because the deployed half
+is gone. The store still holds the relay credentials and the relay account is
+still provisioned; whether to rotate or retire them is a tracked follow-up, not
+something this file answers.
 
-Verified 2026-08-10 for #782: both `alert_email_hostname` and
-`auth_email_hostname` hash to the same 12-char prefix as their deployed
-counterparts (`global.smtp_smarthost` host half, and
-`app-authentik/authentik-app-secrets` `AUTHENTIK_EMAIL__HOST`), and an
-idempotent reconcile of both keys left the store byte-identical.
+The Prometheus Operator regenerates
+`alertmanager-kube-prometheus-stack-alertmanager-generated` when the Secret
+changes and the `config-reloader` sidecar POSTs `/-/reload`, so a config change
+needs no pod restart (the #299 `secretKeyRef` gap does not apply — this is a
+mounted volume, not an env var). Verify it on **all three replicas**, never one:
+#1053 means Loki-sourced alerts reach only one of them, and a single-replica
+check cannot tell a rolled-out config from a stale one.
 
 ### Default Alerts
 
@@ -484,12 +553,16 @@ idempotent reconcile of both keys left the store byte-identical.
 - **Cilium**: Agent down, high packet drop rate
 - **Istio**: Sidecar crash loops
 
-### Testing Email Alerts
+### Testing alert delivery
+
+Delivery lands on ntfy topic `k8s-alertmanager`, not in a mailbox. Repeat the
+first command against replicas `-1` and `-2` as well — #1053 means an alert can
+reach one replica only.
 
 ```bash
 # Trigger test alert
 kubectl --context epaflix exec -n observability alertmanager-kube-prometheus-stack-alertmanager-0 -- \
-  amtool alert add test_alert alertname=TestEmailAlert
+  amtool alert add test_alert alertname=TestNtfyAlert
 
 # Check AlertManager status
 kubectl --context epaflix port-forward -n observability svc/kube-prometheus-stack-alertmanager 9093:9093
@@ -497,7 +570,7 @@ kubectl --context epaflix port-forward -n observability svc/kube-prometheus-stac
 
 # Silence alert
 kubectl --context epaflix exec -n observability alertmanager-kube-prometheus-stack-alertmanager-0 -- \
-  amtool silence add alertname=TestEmailAlert
+  amtool silence add alertname=TestNtfyAlert
 ```
 
 ## Storage Management
