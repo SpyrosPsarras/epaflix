@@ -1,0 +1,55 @@
+# Owned by ArgoCD Application "observability"
+# (2-k3s/11.argocd/apps/app-observability.yaml).
+#
+# The TLS entry point #904 decided on: "ntfy needs a real entry point.
+# Publish/subscribe is plaintext on 192.168.10.112:8091 today, and a
+# load-bearing receiver should not be."
+#
+# `internal` and NOT `websecure`. The public `websecure` entry point is the
+# traefik LoadBalancer at 192.168.10.101 — the address the router forwards 443
+# to and the one the Cloudflare-proxied *.epaflix.com wildcard answers for, so
+# a route there really would publish an unauthenticated publish/subscribe
+# endpoint to the internet. `internal` is the separate `traefik-internal`
+# LoadBalancer at 192.168.10.102, which the router forwards nothing to, and
+# ntfy.epaflix.com gets a LAN-only dnsmasq A record plus an Unbound
+# `local-zone` AAAA guard. Same shape as cliproxy, remote-pi, searxng and
+# qbittorrent — see 2-k3s/17.remote-pi/cliproxy/ingress.yaml, which this
+# copies.
+#
+# NO Authentik forward-auth middleware, on purpose. ntfy's publishers are
+# machines: the Proxmox VE hosts on topic `pve-backups` and the TrueNAS GPU
+# cron on `truenas-alerts` both POST with no interactive login, so a
+# forward-auth middleware would break them silently. searxng-internal and
+# qbittorrent-internal are un-gated on .102 for the same reason.
+#
+# The LoadBalancer Service at 192.168.10.112 in ../ntfy.yaml still exists
+# alongside this route: PVE's URL is hardcoded and its native target is
+# separately broken (#1076), so the reroute and the retirement land together
+# in #904 / #920.
+#
+# `namespace: observability` is explicit — the observability kustomization has
+# no top-level namespace transformer, by documented design.
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: ntfy-internal
+  namespace: observability
+  labels:
+    app: ntfy
+    app.kubernetes.io/component: ingress
+spec:
+  entryPoints:
+    - internal
+  routes:
+    - match: Host(`ntfy.epaflix.com`)
+      kind: Rule
+      services:
+        - name: ntfy
+          port: 8091
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"

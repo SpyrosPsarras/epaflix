@@ -38,6 +38,7 @@ Complete monitoring, logging, and service mesh observability for the K3s cluster
 - **node-exporter** (DaemonSet): Node-level CPU, memory, disk, network metrics
 - **kube-state-metrics** (2 replicas): Kubernetes cluster state metrics
 - **pve-exporter** (1 replica): Proxmox VE host and VM metrics from 192.168.10.10 and .11
+- **ntfy** (1 replica): the load-bearing notification receiver for the whole platform. Moved in from the `odysseus` namespace under the #914 decision. See "ntfy" under Alerting
 
 ### Optional Components (Not Installed)
 - **Cilium CNI**: eBPF-based networking (currently using Flannel)
@@ -54,6 +55,7 @@ Complete monitoring, logging, and service mesh observability for the K3s cluster
 | **Grafana** | https://grafana.epaflix.com | Authentik SSO (or admin / <POSTGRES_PASSWORD>) | ✅ Running |
 | **Prometheus** | Port-forward only | N/A | ✅ Running |
 | **AlertManager** | Port-forward only | N/A | ✅ Running |
+| **ntfy** | https://ntfy.epaflix.com (Traefik `internal`, 192.168.10.102) — plus the legacy plaintext http://192.168.10.112:8091, still live for PVE | None (un-gated on the LAN, by design) | ✅ Running. The hostname needs the deploy-gate DNS record below before it resolves |
 
 ## Installation
    # - k3s-master-51: 10GB (192.168.10.51, Proxmox takaros)
@@ -239,10 +241,66 @@ See [PERFORMANCE-METRICS.md](PERFORMANCE-METRICS.md) for detailed before/after c
 
 ## Alerting
 
+### ntfy
+
+ntfy is **the leg that actually delivers**. SMTP has been dead since #461, so
+the Alertmanager `webhook_configs` leg on topic `k8s-alertmanager` (#568/PR
+#574) is what reaches a human. The owner's 2026-08-21 decision on #904/#914/#915
+made that official: ntfy is the load-bearing receiver, email drops to secondary
+or goes entirely (the email receiver's deletion is #921).
+
+| Aspect | Value |
+|---|---|
+| Manifests | `ntfy.yaml` (Deployment + LoadBalancer Service), `ntfy-cache-pvc.yaml`, `ingress/ntfy-ingressroute.yaml` |
+| Namespace / owning app | `observability` / ArgoCD Application `observability` (moved from `odysseus`, #914) |
+| Entry point | `https://ntfy.epaflix.com` on Traefik's `internal` entry point at **192.168.10.102**, TLS from the `cloudflare` certResolver (#904). NOT the public `websecure` entry point on .101 — see the header of `ingress/ntfy-ingressroute.yaml` |
+| Auth | none. Publishers are machines (PVE, the TrueNAS GPU cron) posting with no interactive login, so a forward-auth middleware would break them. Same posture as `searxng-internal` and `qbittorrent-internal` |
+| Cache | `ntfy-cache` PVC, local-path, RWO, 1Gi (#915). Was an `emptyDir`. The Deployment is `strategy: Recreate` because local-path is RWO + WaitForFirstConsumer |
+| Retention | ntfy's built-in **12h** default — `NTFY_CACHE_DURATION` is set nowhere, so the PVC can never hold more than 12h of backlog |
+| In-cluster address | `http://ntfy.observability.svc.cluster.local:8091` (Alertmanager's webhook url, and `NTFY_BASE_URL` in `odysseus-config`) |
+| Topics | `k8s-alertmanager` (Alertmanager), `pve-backups` (Proxmox VE), `truenas-alerts` (the TrueNAS GPU cron) |
+
+**The LoadBalancer at 192.168.10.112 is still live and that is deliberate.**
+The Proxmox VE hosts POST vzdump failures to the hardcoded
+`http://192.168.10.112:8091/pve-backups` (#597,
+`1-proxmox/pbs/notifications.cfg`) and PVE's own native target is separately
+broken (#1076), so deleting the Service before the PVE cutover would leave PVE
+with no path at all and the symptom would be silence. The reroute and the
+retirement land together in #904 / #920.
+
+#### Two DNS changes happen on the Pi-hole box, not through ArgoCD
+
+`ntfy.epaflix.com` needs a LAN-only record. Neither change is applied by a sync;
+both are hand-applied on the Pi-hole LXC (192.168.10.30) at this PR's deploy
+gate, and until then the hostname resolves to the Cloudflare wildcard and the
+IngressRoute is unreachable. `10-epaflix.conf` has no representation in this
+repo at all — exactly the live-only-fix trap `CLAUDE.md` warns about — so it is
+recorded here and in `.github/instructions/pihole.instructions.md`. The Unbound
+file does have a tracked copy and is updated in this PR.
+
+1. `/etc/dnsmasq.d/10-epaflix.conf` on 192.168.10.30 gets
+   `address=/ntfy.epaflix.com/192.168.10.102` (back the file up first — the box
+   already carries dated `.bak` copies, which is the local convention), then
+   restart `pihole-FTL`. Without it the name resolves to the Cloudflare
+   wildcard and the IngressRoute is unreachable.
+2. `/etc/unbound/unbound.conf.d/no-aaaa-leak.conf` gets
+   `local-zone: "ntfy.epaflix.com." static` next to the existing
+   searxng / qbittorrent / remote-pi entries, then `unbound-checkconf` and
+   `unbound-control reload`. dnsmasq answers the A record authoritatively while
+   Unbound suppresses the AAAA, so an IPv6 LAN client is not sent to the gated
+   public route on .101. The git source of truth for that file is
+   `1-proxmox/pihole/unbound-no-aaaa-leak.conf` and it is updated in the same
+   PR; `1-proxmox/pihole/aaaa-tripwire.sh` is the mechanical check.
+
+`unbound-checkconf` before the reload is not optional: a malformed file takes
+LAN DNS down entirely.
+
 ### Email Configuration
 
 The single `email` receiver carries two legs - `email_configs` (SMTP) and
-`webhook_configs` (ntfy topic `k8s-alertmanager`, added by #568/PR #574).
+`webhook_configs` (ntfy topic `k8s-alertmanager`, added by #568/PR #574). The
+webhook url is `http://ntfy.observability.svc.cluster.local:8091` since the
+#914 namespace move; it read `ntfy.odysseus...` before.
 
 SMTP relays through `vh4c.ezhellas.com:587` (STARTTLS + AUTH), **not**
 `mail.epaflix.com`. `mail.epaflix.com` is caught by the proxied

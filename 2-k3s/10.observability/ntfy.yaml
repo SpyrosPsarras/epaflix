@@ -1,0 +1,154 @@
+---
+# ntfy — the load-bearing notification receiver for the whole platform.
+#
+# Moved here from 2-k3s/13.odysseus/ntfy.yaml under the owner decision on #914
+# (2026-08-21): "it moves to `observability` ... As alerting infrastructure it
+# belongs with the stack that produces the alerts, and the owning ArgoCD
+# Application changes with it." It used to be a convenience sidecar for
+# Odysseus; it is not one any more. SMTP has been dead since #461, so the
+# Alertmanager -> ntfy webhook (topic `k8s-alertmanager`, #568) is the leg that
+# actually delivers, and Alertmanager is ntfy's main publisher. Owning ArgoCD
+# Application is now "observability" (2-k3s/11.argocd/apps/app-observability.yaml),
+# not "odysseus".
+#
+# The namespace is written EXPLICITLY on both objects below and that is
+# mandatory: 2-k3s/10.observability/kustomization.yaml has NO top-level
+# `namespace:` transformer, by documented design — a blanket transformer would
+# rewrite kube-prometheus-stack's kube-system control-plane exporter Services
+# into endpoint-less shells.
+#
+# The compose published host 8091 -> ntfy default 80. Here ntfy is told to
+# listen on :8091 directly (NTFY_LISTEN_HTTP) so the in-cluster Service and
+# NTFY_BASE_URL line up. NTFY_BASE_URL carries the full cross-namespace FQDN
+# because every consumer is now outside this namespace.
+#
+# The cache is a PVC, not an emptyDir (#915, owner decision 2026-08-21: "Move
+# to a PVC, as #903 proposed"). The cache only ever matters for a subscriber
+# that was offline when a message was published. Alertmanager repeats every 12h
+# and the TrueNAS GPU cron every 15 minutes, so both self-heal; PVE is the one
+# event-driven publisher with no repeat behaviour, and its only other leg is
+# `mail-to-root`, which does not deliver (#461). So a `pve-backups` message
+# published while a subscriber was offline has to survive a restart.
+# Retention is ntfy's built-in 12h default because NTFY_CACHE_DURATION is set
+# nowhere, so the PVC preserves at most 12h of backlog — it is a
+# restart-survival buffer, not an archive.
+#
+# `strategy: Recreate` is REQUIRED by that PVC: local-path is RWO +
+# WaitForFirstConsumer, so a RollingUpdate would deadlock the new pod waiting
+# for a volume the old pod still holds.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ntfy
+  namespace: observability
+  labels:
+    app: ntfy
+spec:
+  replicas: 1
+  # RWO volume — see the header. Do not change this back to RollingUpdate.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: ntfy
+  template:
+    metadata:
+      labels:
+        app: ntfy
+    spec:
+      # Disable per-Service env-var injection for this pod (ntfy is told its
+      # listen addr explicitly via NTFY_* env, and observability is a busy
+      # namespace full of chart Services).
+      enableServiceLinks: false
+      containers:
+        - name: ntfy
+          image: binwiederhier/ntfy:latest
+          args:
+            - serve
+          env:
+            - name: NTFY_LISTEN_HTTP
+              value: ":8091"
+            - name: NTFY_CACHE_FILE
+              value: "/var/cache/ntfy/cache.db"
+            # Full FQDN, not the bare `ntfy` short name: every publisher now
+            # reads this from outside the observability namespace.
+            - name: NTFY_BASE_URL
+              value: "http://ntfy.observability.svc.cluster.local:8091"
+          ports:
+            - containerPort: 8091
+              name: http
+          volumeMounts:
+            - name: cache
+              mountPath: /var/cache/ntfy
+          resources:
+            requests:
+              memory: "32Mi"
+              cpu: "10m"
+            limits:
+              memory: "128Mi"
+              cpu: "250m"
+          readinessProbe:
+            httpGet:
+              path: /v1/health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /v1/health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 10
+      volumes:
+        - name: cache
+          persistentVolumeClaim:
+            claimName: ntfy-cache
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ntfy
+  namespace: observability
+  labels:
+    app: ntfy
+spec:
+  # Two front doors on purpose, for the length of one PR.
+  #
+  # The entry point chosen by #904 is Traefik's `internal` entry point at
+  # 192.168.10.102, via ingress/ntfy-ingressroute.yaml — NOT the public
+  # `websecure` entry point on 192.168.10.101. The earlier version of this
+  # comment argued against an IngressRoute on the grounds that it "would have
+  # published an unauthenticated publish/subscribe endpoint to the internet".
+  # That argument is correct and it is about `websecure`: .101 is the address
+  # the router forwards 443 to and the one the Cloudflare-proxied
+  # *.epaflix.com wildcard answers for. The `traefik-internal` LoadBalancer at
+  # .102 has no router port forward at all, and ntfy.epaflix.com gets a
+  # LAN-only dnsmasq A record plus an Unbound AAAA guard, exactly like
+  # searxng / qbittorrent / remote-pi / cliproxy. So the internal entry point
+  # gives publish/subscribe TLS without putting ntfy on the internet.
+  #
+  # This LoadBalancer is RETAINED DELIBERATELY in this PR. The Proxmox VE
+  # hosts POST vzdump failures to the hardcoded
+  # http://192.168.10.112:8091/pve-backups (#597,
+  # 1-proxmox/pbs/notifications.cfg), and PVE's own native target is
+  # separately broken (#1076). Deleting the LoadBalancer here would leave PVE
+  # with no working path at all, and the symptom would be silence. The owner's
+  # sequencing on #904 is "entry point and TLS, then move the namespace, then
+  # reroute PVE" — so retirement of this Service happens with the PVE reroute,
+  # in #904 / #920, not here.
+  #
+  # LAN-only LoadBalancer (kube-vip), pinned to 192.168.10.112 from
+  # range-global. RFC1918, not internet-routable.
+  type: LoadBalancer
+  loadBalancerIP: 192.168.10.112
+  selector:
+    app: ntfy
+  ports:
+    # In-cluster consumers reach this as
+    # ntfy.observability.svc.cluster.local:8091 — the Alertmanager -> ntfy leg
+    # (topic k8s-alertmanager, #568) and NTFY_BASE_URL in odysseus-config.
+    - name: http
+      port: 8091
+      targetPort: http

@@ -1,0 +1,111 @@
+# TrueNAS host observability and ntfy's home - design
+
+> Date: 2026-08-09 (dated for the decision set it records; ntfy component written 2026-08-22)
+> Status: **partial**. Only `## Component 1 - ntfy` is written. The TrueNAS host
+> observability half is #922's to author and is deliberately left as headings below.
+> Repo: `SpyrosPsarras/epaflix` (this repo)
+> Decisions recorded: #904 (entry point), #914 (owning namespace and ArgoCD Application),
+> #915 (message cache on a PVC). All three carry an owner decision comment dated 2026-08-21
+> and each of them requires "a line in the spec", which is why this file exists now.
+> Related, not written here: #920 (PVE reroute), #921 (delete the email receiver),
+> #922 (TrueNAS host observability), #1076 (PVE's own notification target is broken).
+
+## Purpose
+
+Say where the platform's notification receiver lives, how it is reached, and what
+survives a restart - and, separately, how the TrueNAS host gets into the same
+observability stack as everything else.
+
+Only the first half is settled and written. The second half is #922's.
+
+## What triggered this
+
+Two silences. The RTX 2070 SUPER was wedged for about 23 hours on 2026-08-09 and nothing
+told anyone; the owner found out from a chat UI. Backup failures went unnoticed for
+twelve days. SMTP has been dead since #461, so the only alert leg that actually delivers
+is the Alertmanager -> ntfy webhook - and that receiver was a convenience sidecar in a
+consumer's namespace, on a plaintext LoadBalancer, with an `emptyDir` cache.
+
+The owner's 2026-08-21 decision on #904 settles the frame: **ntfy becomes the
+load-bearing receiver** and email drops to secondary or goes entirely. Sequencing from
+the same comment: entry point and TLS, then move the namespace, then reroute PVE, then
+remove the email leg.
+
+## Architecture
+
+```
+Alertmanager (observability) ──┐
+                               │  http://ntfy.observability.svc.cluster.local:8091
+Odysseus (odysseus)  ──────────┤  topic k8s-alertmanager / app notices
+                               ▼
+Proxmox VE hosts ───────────► ntfy (observability) ──► subscribers
+  http://192.168.10.112:8091     │  cache: ntfy-cache PVC, 12h retention
+  topic pve-backups              │
+                                 └─ https://ntfy.epaflix.com
+TrueNAS GPU cron ──────────────►    Traefik `internal` entry point, 192.168.10.102
+  topic truenas-alerts
+```
+
+Three publishers, three topics. Two of them repeat on their own - Alertmanager every
+`12h`, the TrueNAS GPU cron every 15 minutes - so they self-heal. Proxmox VE is
+event-driven with no repeat, and its only other leg (`mail-to-root`) does not deliver.
+That asymmetry is what the cache decision turns on.
+
+## Component 1 - ntfy
+
+**Owning namespace and ArgoCD Application: `observability`** (#914). ntfy used to be a
+`pod/ntfy` plus a LoadBalancer Service in `odysseus`, which was right while it was a
+convenience app for Odysseus. As alerting infrastructure it belongs with the stack that
+produces the alerts, so an Odysseus sync, prune or rollback can no longer take out
+alerting for everything. Manifests are `2-k3s/10.observability/ntfy.yaml`,
+`ntfy-cache-pvc.yaml` and `ingress/ntfy-ingressroute.yaml`; each states
+`namespace: observability` explicitly because that kustomization has no namespace
+transformer, by design. Odysseus is now a cross-namespace consumer and its
+`NTFY_BASE_URL` carries the full FQDN.
+
+**Entry point: Traefik's `internal` entry point at 192.168.10.102**, hostname
+`ntfy.epaflix.com`, TLS from the `cloudflare` certResolver on the `*.epaflix.com`
+wildcard (#904). Not the public `websecure` entry point on 192.168.10.101: that is the
+address the router forwards 443 to and the one the Cloudflare-proxied wildcard answers
+for, and a route there would publish an unauthenticated publish/subscribe endpoint to
+the internet. `traefik-internal` on .102 has no router port forward, and the name gets a
+LAN-only dnsmasq A record plus an Unbound `local-zone` AAAA guard, same as `searxng`,
+`qbittorrent`, `remote-pi` and `cliproxy`. The IngressRoute carries **no Authentik
+forward-auth middleware** on purpose: the publishers are machines posting with no
+interactive login.
+
+**The LoadBalancer at 192.168.10.112 is still live.** Proxmox VE posts to the hardcoded
+`http://192.168.10.112:8091/pve-backups` (#597, `1-proxmox/pbs/notifications.cfg`) and
+PVE's own native target is separately broken (#1076), so retiring the Service before the
+PVE cutover would leave PVE with no path at all and the symptom would be silence. The
+owner's phrase on #904 is that the LoadBalancer "stops being the interface", not that it
+is deleted now. Retirement lands with the PVE reroute, in #904 / #920.
+
+**Cache: a PVC, not an `emptyDir`** (#915, owner: "Move to a PVC, as #903 proposed").
+`ntfy-cache`, `local-path`, `ReadWriteOnce`, 1Gi. The cache only ever matters to a
+subscriber that was offline when a message was published, and PVE is the one publisher
+with a single chance, so a `pve-backups` notice has to survive a restart. Two
+consequences carried deliberately:
+
+- local-path is RWO with `WaitForFirstConsumer`, so the claim **pins ntfy to one node**
+  and forces `strategy: Recreate` on the Deployment - a RollingUpdate would deadlock the
+  new pod on the old pod's volume.
+- Retention is ntfy's built-in **12h** default, because `NTFY_CACHE_DURATION` is set
+  nowhere. The volume can never hold more than 12h of backlog. Longer catch-up would be
+  a retention decision, explicitly out of scope of #915.
+
+ntfy is therefore no longer disposable: capacity, storage class and volume lifecycle are
+part of the alert path.
+
+## Component 2 - TrueNAS host observability
+
+**Not written here. #922 owns this.** The GPU health signal, `node_exporter` on
+192.168.10.200, and the ARC/memory metrics belong in this section and none of them are
+decided by #904, #914 or #915. Do not read this file as a finished spec.
+
+## Observability
+
+**Not written here. #922 owns this**, together with Component 2 - what alerts on ntfy
+itself being down, and what alerts on the TrueNAS host, are the same question and it has
+not been answered. Today nothing watches the watcher: if the ntfy pod is unschedulable
+because its RWO volume's node is drained, the failure mode is silence.
