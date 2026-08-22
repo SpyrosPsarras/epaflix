@@ -1,8 +1,29 @@
 #!/usr/bin/env python3
 """Validate an Authentik blueprint payload nested inside a Secret's stringData.
 
-Reads a DECRYPTED Secret document on stdin (``--path`` is diagnostics only) and
-checks every ``stringData`` key that ends ``.yaml``/``.yml``, in two layers:
+ONE COPY, TWO CONSUMERS.  This file is the single on-disk source of truth for
+the check.  ``2-k3s/07.authentik-deployment/kustomization.yaml`` builds it into
+the ``authentik-blueprint-check-script`` ConfigMap that the in-cluster CronJob
+mounts, and ``.github/hooks/test-check-authentik-blueprint.sh`` runs the same
+file against synthetic fixtures in CI.  Do not copy it anywhere.
+
+WHERE IT RUNS AND WHY (owner decision, 2026-08-22).  It runs in the cluster, on
+a schedule, NOT in the commit path.  A pre-commit version would have to decrypt
+``authentik-iac-blueprint.enc.yaml``, which means sops, which means the age key,
+which on this workstation lives behind KeePassXC - a personal password manager
+on the owner's own machines.  A repo-wide commit hook must not depend on it.
+The live Secret ``app-authentik/authentik-iac-blueprint`` is already decrypted
+in the cluster, so the CronJob needs no age key and no sops: only RBAC to *get*
+that one Secret.  The trade-off is real and is not hidden: the hook would have
+refused a broken blueprint BEFORE it reached main, the CronJob only detects it
+AFTER.  It is still far earlier than the status quo, where the sole signal is
+``failed to parse blueprint`` in a worker log nothing reads (#883, #876, #940).
+
+Reads a Secret document on stdin (``--path`` is diagnostics only) and checks
+every payload key that ends ``.yaml``/``.yml``, in two layers.  Both Secret
+shapes are accepted: ``stringData`` (plaintext, what the fixtures and the
+decrypted ``.enc.yaml`` look like) and ``data`` (base64, what
+``kubectl get secret -o json`` returns, which is the CronJob's input).
 
 Layer 1, syntax (#876).  The blueprint file is valid YAML; the thing that broke
 was a second YAML document nested inside ``stringData``, which nothing parsed.
@@ -34,6 +55,8 @@ indices.  Keep it that way.
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import sys
 from typing import Any
 
@@ -266,6 +289,34 @@ def check_payload(payload: str, where: str) -> tuple[list[str], str | None]:
     return [f"{where}: {v}" for v in check.violations], f"{where}: {check.summary()}"
 
 
+def secret_payloads(document: dict) -> list[tuple[str, str, str]]:
+    """Yield (field, key, payload) for every YAML-suffixed key of a Secret.
+
+    ``stringData`` is plaintext; ``data`` is base64, which is the only shape the
+    kube API ever returns, so the CronJob depends on this branch.  A ``data``
+    value that is not valid base64 or not UTF-8 is skipped here and surfaces as
+    the "no payload to validate" refusal below rather than as a traceback that
+    could print bytes.
+    """
+    found: list[tuple[str, str, str]] = []
+    string_data = document.get("stringData")
+    if isinstance(string_data, dict):
+        for key, payload in sorted(string_data.items()):
+            if key.endswith((".yaml", ".yml")) and isinstance(payload, str):
+                found.append(("stringData", key, payload))
+    data = document.get("data")
+    if isinstance(data, dict):
+        for key, encoded in sorted(data.items()):
+            if not key.endswith((".yaml", ".yml")) or not isinstance(encoded, str):
+                continue
+            try:
+                payload = base64.b64decode(encoded, validate=True).decode("utf-8")
+            except (binascii.Error, UnicodeDecodeError, ValueError):
+                continue
+            found.append(("data", key, payload))
+    return found
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -293,14 +344,9 @@ def main() -> int:
     for doc_index, document in enumerate(documents):
         if not isinstance(document, dict):
             continue
-        string_data = document.get("stringData")
-        if not isinstance(string_data, dict):
-            continue
-        for key, payload in sorted(string_data.items()):
-            if not key.endswith((".yaml", ".yml")) or not isinstance(payload, str):
-                continue
+        for field, key, payload in secret_payloads(document):
             payloads += 1
-            where = f"{args.path}[doc {doc_index}].stringData[{key}]"
+            where = f"{args.path}[doc {doc_index}].{field}[{key}]"
             found, summary = check_payload(payload, where)
             violations.extend(found)
             if summary:
@@ -308,8 +354,8 @@ def main() -> int:
 
     if payloads == 0:
         print(
-            f"ERROR: {args.path}: no stringData key ending .yaml/.yml, so there "
-            "is no blueprint payload to validate. The check would pass "
+            f"ERROR: {args.path}: no stringData/data key ending .yaml/.yml, so "
+            "there is no blueprint payload to validate. The check would pass "
             "vacuously; refusing instead.",
             file=sys.stderr,
         )

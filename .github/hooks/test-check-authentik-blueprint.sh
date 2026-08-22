@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
-# Fixture suite for check-authentik-blueprint.sh / check_authentik_blueprint.py
-# (#883, #876, #940).
+# Fixture suite for the Authentik blueprint checker (#883, #876, #940).
+#
+# THE CHECKER IS NOT A HOOK. It lives at
+# 2-k3s/07.authentik-deployment/files/check_authentik_blueprint.py, one copy,
+# built into the authentik-blueprint-check-script ConfigMap by that directory's
+# kustomization and run in-cluster by the authentik-blueprint-check CronJob.
+# This suite exercises the very same file - not a copy - which is why it can
+# stay here next to the other suites CI runs.
 #
 # Every fixture is a synthetic PLAINTEXT Secret document, so this suite needs no
 # age key and runs in CI - the same split ci.yml already uses for
-# test-check-sops-encrypted.sh. The real blueprint check cannot run in CI at all,
-# because the payload is SOPS-encrypted and CI has no key.
+# test-check-sops-encrypted.sh. Nothing here decrypts anything, and nothing here
+# talks to a cluster.
 #
 # Named test-*, not check-*, so the pre-commit dispatcher does NOT pick it up.
 #
@@ -16,8 +22,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-checker="$repo_root/.github/hooks/check_authentik_blueprint.py"
-hook="$repo_root/.github/hooks/check-authentik-blueprint.sh"
+checker="$repo_root/2-k3s/07.authentik-deployment/files/check_authentik_blueprint.py"
 tmp="$(mktemp -d)"
 output="$(mktemp)"
 trap 'rm -rf "$tmp"; rm -f "$output"' EXIT
@@ -316,59 +321,80 @@ else
   pass "leak control: YAML error path prints no payload content (canary absent)"
 fi
 
-# 11. Wrapper-level fail-closed: a staged *blueprint*.enc.yaml plus a sops that
-#     exits non-zero (a locked KeePassXC, a missing age key) must FAIL the
-#     check, not skip it. If this ever passes, the whole gate is theatre.
-stub="$tmp/stub-bin"
-mkdir -p "$stub"
-printf '#!/usr/bin/env bash\necho "sops: cannot decrypt (fixture stub)" >&2\nexit 1\n' \
-  >"$stub/sops"
-chmod +x "$stub/sops"
+# 11. THE CRONJOB'S ACTUAL INPUT SHAPE. `kubectl get secret -o json` never
+#     returns stringData - it returns base64 `data`. If the checker only
+#     understood stringData, the in-cluster job would find no payload and the
+#     check would be dead on arrival. Same clean payload as case 1, re-encoded.
+python3 - "$tmp/clean.yaml" "$tmp/api-shape.yaml" <<'PY'
+import base64, json, sys, yaml
+doc = yaml.safe_load(open(sys.argv[1]))
+payload = doc["stringData"]["fixture-blueprint.yaml"]
+api = {
+    "apiVersion": "v1",
+    "kind": "Secret",
+    "metadata": {"name": "fixture-blueprint", "namespace": "fixture-ns"},
+    "type": "Opaque",
+    "data": {
+        "fixture-blueprint.yaml": base64.b64encode(payload.encode()).decode(),
+    },
+}
+open(sys.argv[2], "w").write(json.dumps(api))
+PY
+expect_pass "kube-API Secret shape (base64 data, what the CronJob pipes in) is checked" api-shape.yaml
 
-repo="$tmp/repo"
-mkdir -p "$repo/2-k3s/07.authentik-deployment"
-git -C "$repo" init -q
-git -C "$repo" config user.name "Synthetic Fixture"
-git -C "$repo" config user.email "fixture.invalid@example.invalid"
-cp "$tmp/clean.yaml" "$repo/2-k3s/07.authentik-deployment/fixture-blueprint.enc.yaml"
-git -C "$repo" add -A
+# 12. Same API shape, broken payload: the base64 branch must REJECT, not just
+#     accept. Otherwise case 11 only proves the checker does not crash.
+python3 - "$tmp/940-replay.yaml" "$tmp/api-shape-broken.yaml" <<'PY'
+import base64, json, sys, yaml
+doc = yaml.safe_load(open(sys.argv[1]))
+payload = doc["stringData"]["fixture-blueprint.yaml"]
+api = {
+    "apiVersion": "v1",
+    "kind": "Secret",
+    "metadata": {"name": "fixture-blueprint", "namespace": "fixture-ns"},
+    "type": "Opaque",
+    "data": {
+        "fixture-blueprint.yaml": base64.b64encode(payload.encode()).decode(),
+    },
+}
+open(sys.argv[2], "w").write(json.dumps(api))
+PY
+expect_fail "kube-API Secret shape with the #940 replay inside is rejected" api-shape-broken.yaml
 
-: >"$output"
-if (cd "$repo" && PATH="$stub:$PATH" bash "$hook") >"$output" 2>&1; then
-  fail "wrapper fails closed when sops exits non-zero"
-else
-  pass "wrapper fails closed when sops exits non-zero"
-fi
+# 13. A Secret with no YAML-suffixed payload key must REFUSE, not pass
+#     vacuously. This is the in-cluster failure mode that matters: if the
+#     blueprint key is ever renamed, the CronJob has to go red rather than
+#     report a clean run over zero payloads.
+cat >"$tmp/no-payload.yaml" <<'YAML'
+apiVersion: v1
+kind: Secret
+metadata:
+  name: fixture-blueprint
+stringData:
+  not-a-blueprint.txt: |
+    version: 1
+YAML
+expect_fail "a Secret with no .yaml/.yml payload key is refused, not passed vacuously" no-payload.yaml
 
-# 12. Wrapper happy path with the same seam: a sops stub that emits the clean
-#     fixture. Proves the wrapper is not simply always-failing, and that it
-#     reads the STAGED blob rather than the worktree file.
-printf '#!/usr/bin/env bash\ncat\n' >"$stub/sops"
-chmod +x "$stub/sops"
-: >"$output"
-if (cd "$repo" && PATH="$stub:$PATH" bash "$hook") >"$output" 2>&1; then
-  pass "wrapper passes a clean staged blueprint payload"
-else
-  fail "wrapper passes a clean staged blueprint payload"
-fi
-
-# 13. Nothing staged that matches the convention: the wrapper is a no-op.
-git -C "$repo" commit -q --no-verify -m "fixture baseline"
-: >"$output"
-if (cd "$repo" && PATH="$stub:$PATH" bash "$hook") >"$output" 2>&1 && [ ! -s "$output" ]; then
-  pass "no staged *blueprint*.enc.yaml is a silent no-op"
-else
-  fail "no staged *blueprint*.enc.yaml is a silent no-op"
-fi
-
-# The dispatcher runs `check-*.sh` only, so a gate named anything else silently
-# never runs - and a fixture suite named check-* would run on every commit.
+# 14. The commit path must NOT depend on this check any more (owner decision,
+#     2026-08-22): the pre-commit dispatcher globs check-*.sh, and no blueprint
+#     check may appear there, because decrypting the blueprint would drag
+#     sops - and therefore KeePassXC - into every commit in the repo.
 discovered="$(cd "$repo_root/.github/hooks" && echo check-*.sh)"
-if printf '%s\n' "$discovered" | grep -qw 'check-authentik-blueprint.sh' \
-  && ! printf '%s\n' "$discovered" | grep -q 'test-'; then
-  pass "pre-commit dispatcher glob discovers this check and not this suite"
+if ! printf '%s\n' "$discovered" | grep -q 'blueprint'; then
+  pass "no blueprint check in the pre-commit dispatcher glob (commit path is KeePassXC-free)"
 else
-  fail "pre-commit dispatcher glob discovers this check and not this suite"
+  fail "no blueprint check in the pre-commit dispatcher glob (commit path is KeePassXC-free)"
+fi
+
+# 15. The checker is ONE file with two consumers. If the ConfigMap ever stops
+#     being built from the file this suite runs, the suite silently tests a
+#     copy nobody deploys.
+kustomization="$repo_root/2-k3s/07.authentik-deployment/kustomization.yaml"
+if grep -qF 'files/check_authentik_blueprint.py' "$kustomization"; then
+  pass "the CronJob ConfigMap is generated from the same file this suite runs"
+else
+  fail "the CronJob ConfigMap is generated from the same file this suite runs"
 fi
 
 printf '%s\n' "1..$((pass_count + fail_count))"

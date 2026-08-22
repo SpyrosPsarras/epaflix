@@ -54,11 +54,14 @@ jobs:
           #
           # What CI can and cannot do here: every fixture below is synthetic
           # plaintext, so no age key is needed. The REAL Authentik blueprint
-          # check cannot run in CI at all - the payload sits inside a
+          # payload cannot be read in CI at all - it sits inside a
           # SOPS-encrypted Secret and this job has no key (see the two steps
-          # further down that say so). That is exactly why
-          # check-authentik-blueprint.sh is a pre-commit hook, where the key
-          # exists, and CI gets only its fixture suite (#883).
+          # further down that say so). That check therefore runs in the
+          # cluster, where the Secret is already decrypted: the
+          # authentik-blueprint-check CronJob in
+          # 2-k3s/07.authentik-deployment. CI gets the fixture suite, which
+          # exercises the very same checker file the CronJob's ConfigMap is
+          # generated from - one copy, two consumers (#883).
           #
           # test-check-kube-context.sh self-skips its kubeconfig cases with a
           # loud SKIP line if the runner image has no kubectl (#856).
