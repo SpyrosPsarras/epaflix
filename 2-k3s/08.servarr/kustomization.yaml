@@ -156,7 +156,7 @@ configMapGenerator:
 # re-rolls through the PR + validate gate; ArgoCD then syncs the Deployments.
 images:
   - name: lscr.io/linuxserver/sonarr
-    digest: sha256:373159ba768e23a3a1c497d9f2b936addf8fd5b1fdce7dd6a14080ac928bfda0
+    digest: sha256:c19aa4ecdf03d73e1d5c901da33744cb7eb4d921f89bafed1ca264601d7fa224
   - name: lscr.io/linuxserver/radarr
     digest: sha256:a45b5ab0f850f39edb4cc9c95bbd967b52ddc3d4574a4dfb45561177db6c88f4
   - name: lscr.io/linuxserver/prowlarr
