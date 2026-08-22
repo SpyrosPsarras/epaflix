@@ -21,6 +21,25 @@ kubectl config current-context   # must print: epaflix
 
 `kubectl config use-context epaflix` is not a guard. It sets a value that a sync can overwrite a minute later.
 
+### The mechanical guard (#856)
+
+Run this once per clone to generate a kubeconfig that can see only `epaflix`:
+
+```bash
+./.github/hooks/install-kubeconfig-epaflix.sh   # writes .kube/epaflix.kubeconfig, mode 600, git-ignored
+```
+
+It verifies the product, not the command: exactly 1 context named `epaflix`, 1 cluster, 1 user, or it deletes the file and exits non-zero. The file embeds client credentials, hence git-ignored.
+
+Activate it one of two ways:
+
+- interactive shells: `.envrc` exports `KUBECONFIG` to it (needs direnv, which is *not* installed here by default)
+- non-interactive shells - where tool- and agent-emitted commands run, and where a direnv hook never fires: a prefix-match `KUBECONFIG` export in `~/.zshenv`, printed by the installer
+
+`.github/hooks/check-kube-context.sh` is the forcing function: it refuses any commit made from a shell whose resolved kubeconfig exposes anything other than the single `epaflix` context. It reports counts only and never echoes a context name - this repo is public and #856 withholds the other names on purpose.
+
+Residual gap, stated rather than hidden: a shell where neither activation ran still sees the full kubeconfig, so `--context epaflix` on the command itself stays mandatory.
+
 ## K3s Architecture
 
 - **Server (Master)**: Runs control plane components (API server, scheduler, controller)

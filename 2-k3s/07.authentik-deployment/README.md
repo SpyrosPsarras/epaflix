@@ -227,6 +227,45 @@ Cross-references: **#185** (the durable declarative token this guards); **#230**
 **#339** (the scoped-RBAC flip landed 2026-08-10, so the post-upgrade expectation
 is now the scoped `ak-iac IaC` role plus `is_superuser: false`, not superuser).
 
+#### Pre-commit blueprint gate (#883)
+
+`.github/hooks/check-authentik-blueprint.sh` runs on any staged file matching
+`*blueprint*.enc.yaml`, decrypts the staged blob in memory, and hands the payload to
+`check_authentik_blueprint.py`. Two classes are caught:
+
+1. **Payload YAML syntax** (#876). The Secret file is valid YAML; the blueprint nested
+   inside `stringData` is a second document that nothing parsed, so a misindented entry
+   merged green and stopped *all* entries from reconciling. The checker loads the payload
+   with the ten Authentik tags registered. A tag outside those ten also fails, on purpose:
+   a new Authentik tag has to be added to the checker deliberately.
+2. **`!KeyOf` / `!Find` resolution and absent-entry hygiene** (#940). The payload that
+   failed every apply for two days parsed *cleanly* - a `present` entry's `!KeyOf` pointed
+   at a `state: absent` entry, which `KeyOf.resolve` cannot resolve, so the importer
+   aborted the run. Layer 1 provably cannot see that. So every `!KeyOf` must name a
+   declared, non-absent entry; every `!Find` must be shaped `[model, [attr, value]]` and
+   must not resolve onto a sibling entry declared absent; and `state: absent` plus `attrs`
+   is a hard fail (attrs are ignored on a delete, and a tag inside them silently skips it).
+   `state: created` counts as resolvable, not absent - a skipped `created` entry still
+   populates `entry._state` (#1040).
+
+What it does **not** catch: every other semantic error - wrong model paths, bad attr
+names, permissions Authentik would reject at apply. Only Authentik's own importer knows
+those. The runtime signal (`failed to parse blueprint` in the `authentik-worker` log) is
+also out of scope here and tracked separately.
+
+Operational notes:
+
+- **It is a hook, not CI.** The payload is SOPS-encrypted and CI has no age key (`ci.yml`
+  says so twice), so CI structurally cannot read it. CI runs the key-free fixture suite
+  `.github/hooks/test-check-authentik-blueprint.sh` instead.
+- **Discovery is by filename.** A new blueprint Secret not named `*blueprint*.enc.yaml`
+  is invisible to this check.
+- **It fails closed.** A locked KeePassXC (no age key) makes the check exit non-zero and
+  refuse the commit rather than skip and look green.
+- **Baseline on `main` today**, so a future drop in coverage is visible:
+  `entries=56 ids=56 absent=4 !KeyOf refs checked=32 !Find refs checked=135
+  (sibling-matched=17)`.
+
 ## Configuration
 
 All configuration is managed via [helm-values.yaml](helm-values.yaml):
