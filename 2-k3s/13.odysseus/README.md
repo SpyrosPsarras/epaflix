@@ -17,9 +17,13 @@ Backend-only migration of the **Odysseus** AI workspace
   (`use_default_settings: true`, `server.limiter: false`,
   `search.formats: [html, json]`). `server.secret_key` is injected from the
   `SEARXNG_SECRET` env, so the committed ConfigMap stays secret-free.
-- **Sidecars** (`searxng`, `chromadb`, `ntfy`) run in the same `odysseus`
-  namespace and are reached by intra-namespace DNS: `searxng:8080`,
-  `chromadb:8000`, `ntfy:8091`.
+- **Sidecars.** Only `chromadb` still runs in the `odysseus` namespace and is
+  reached by intra-namespace DNS (`chromadb:8000`). `searxng` has its own
+  `searxng` namespace and ArgoCD Application
+  (`searxng.searxng.svc.cluster.local:8080`), and `ntfy` moved to the
+  `observability` namespace and Application under the #914 decision
+  (`ntfy.observability.svc.cluster.local:8091`). Both are cross-namespace
+  FQDNs in `odysseus-config`; the bare short names do not resolve from here.
 - **Authentik UNCHANGED.** Provider `pk83`, app slug `odysseus`, group
   "Odysseus users", `external_host https://odysseus.epaflix.com`, embedded
   outpost — all untouched. Odysseus keeps `AUTH_ENABLED=true`, so the
@@ -34,9 +38,9 @@ Backend-only migration of the **Odysseus** AI workspace
 |---|---|
 | `namespace.yaml` | `odysseus` namespace |
 | `odysseus.yaml` | App Deployment + ClusterIP Service `:7000` + local-path data PVC + non-clobber `seed-data` initContainer |
-| `searxng.yaml` | SearXNG Deployment + Service `:8080` (settings via ConfigMap) |
-| `chromadb.yaml` | ChromaDB Deployment + Service `:8000` + local-path PVC |
-| `ntfy.yaml` | ntfy Deployment + Service `:8091` |
+| ~~`searxng.yaml`~~ | **Gone from this directory.** SearXNG has its own `searxng` namespace and ArgoCD Application; Odysseus consumes it cross-namespace via `SEARXNG_INSTANCE` |
+| ~~`chromadb.yaml`~~ | **Gone from this directory.** ChromaDB now comes from the amikos-tech Helm chart declared in `kustomization.yaml` (#215) - same StatefulSet + Service name `chromadb` on `:8000` |
+| ~~`ntfy.yaml`~~ | **Moved out** (#914). ntfy is now `2-k3s/10.observability/ntfy.yaml`, owned by the `observability` namespace and ArgoCD Application. Odysseus consumes it cross-namespace via `NTFY_BASE_URL` |
 | `configmap.yaml` | `odysseus-config` (non-secret env) + `searxng-settings` (settings.yml) |
 | `odysseus-secrets.enc.yaml` | SOPS Secret: `ODYSSEUS_ADMIN_PASSWORD`, `SEARXNG_SECRET`, `OPENAI_API_KEY`, `HF_TOKEN` |
 | `odysseus-data-seed.enc.yaml` | SOPS Secret seeding small irreplaceable state into the data PVC |
@@ -136,8 +140,12 @@ means the owner logs in with their EXISTING password (no reset).
 
 **NOT migrated** (re-buildable): `data/huggingface`, `data/local`,
 `fastembed_cache` (~4.8 G HF/fastembed model caches — re-download on first
-run, CPU), ChromaDB vectors (cold start; RAG re-embeds on demand), `ntfy-cache`
-(non-critical, emptyDir), `searxng-data` (replaced by the ConfigMap). Optional
+run, CPU), ChromaDB vectors (cold start; RAG re-embeds on demand), the ntfy
+cache (an `emptyDir` at migration time), `searxng-data` (replaced by the
+ConfigMap). The ntfy cache is no longer non-critical and no longer an
+`emptyDir`: it is the `ntfy-cache` local-path PVC in `observability` (#915),
+because a `pve-backups` message published while a subscriber was offline has to
+survive a restart. Optional
 ChromaDB vector carry-over: `docker run --rm -v chromadb-data:/from -v /tmp:/to
 busybox tar -C /from -czf /to/chroma.tgz .` on TrueNAS, then seed into the
 `chromadb-data` PVC the same way.
@@ -166,7 +174,9 @@ exists):
 # After merge, app-of-apps (selfHeal:true) auto-CREATES the manual-sync
 # odysseus Application. Creation alone does NOT deploy — trigger the first sync:
 argocd app sync odysseus
-# Pods schedule (odysseus, searxng, chromadb, ntfy); seed-data populates the PVC.
+# Pods schedule (odysseus, chromadb); seed-data populates the PVC. searxng has its
+# own namespace and Application, and ntfy moved to observability (#914) - neither
+# schedules from an odysseus sync.
 # The public route still points at the in-cluster Service after the route PR
 # below merges — TrueNAS stays LIVE as fallback until then.
 ```

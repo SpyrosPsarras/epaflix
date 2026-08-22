@@ -67,6 +67,16 @@ resources:
   - pve-exporter/service.yaml
   - pve-exporter/deployment.yaml
   - pve-exporter/servicemonitor.yaml
+  # ntfy — arrived here from 2-k3s/13.odysseus/ under the #914 decision
+  # (2026-08-21): it is the load-bearing notification receiver, so it belongs
+  # with the stack that produces the alerts rather than with a consumer.
+  # Deployment + LoadBalancer Service, its message-cache PVC (#915), and the
+  # Traefik `internal` entry point (#904). Each of the three carries its own
+  # explicit `namespace: observability` — required, there is no namespace
+  # transformer above.
+  - ntfy.yaml
+  - ntfy-cache-pvc.yaml
+  - ingress/ntfy-ingressroute.yaml
   # Static EndpointSlices in kube-system that back the chart's selector-less
   # control-plane exporter Services (kube-controller-manager / kube-scheduler /
   # kube-etcd). Git-durable, selfHeal-recreatable replacement for the chart's
