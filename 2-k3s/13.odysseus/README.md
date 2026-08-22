@@ -174,7 +174,9 @@ exists):
 # After merge, app-of-apps (selfHeal:true) auto-CREATES the manual-sync
 # odysseus Application. Creation alone does NOT deploy — trigger the first sync:
 argocd app sync odysseus
-# Pods schedule (odysseus, searxng, chromadb, ntfy); seed-data populates the PVC.
+# Pods schedule (odysseus, chromadb); seed-data populates the PVC. searxng has its
+# own namespace and Application, and ntfy moved to observability (#914) - neither
+# schedules from an odysseus sync.
 # The public route still points at the in-cluster Service after the route PR
 # below merges — TrueNAS stays LIVE as fallback until then.
 ```

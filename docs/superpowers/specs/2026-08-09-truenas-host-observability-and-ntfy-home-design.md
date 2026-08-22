@@ -61,7 +61,13 @@ alerting for everything. Manifests are `2-k3s/10.observability/ntfy.yaml`,
 `ntfy-cache-pvc.yaml` and `ingress/ntfy-ingressroute.yaml`; each states
 `namespace: observability` explicitly because that kustomization has no namespace
 transformer, by design. Odysseus is now a cross-namespace consumer and its
-`NTFY_BASE_URL` carries the full FQDN.
+`NTFY_BASE_URL` carries the full FQDN. The old resources are pruned, not deleted by
+hand: the `odysseus` Application carries `prune: true` + `selfHeal: true`, so its next
+sync removes the tracking-ids `odysseus:apps/Deployment:odysseus/ntfy` and
+`odysseus:/Service:odysseus/ntfy`, and the post-sync check is that both are `NotFound`
+in `odysseus` while the observability copies carry
+`observability:apps/Deployment:observability/ntfy` (deploy gate:
+`2-k3s/10.observability/README.md`).
 
 **Entry point: Traefik's `internal` entry point at 192.168.10.102**, hostname
 `ntfy.epaflix.com`, TLS from the `cloudflare` certResolver on the `*.epaflix.com`
@@ -80,6 +86,13 @@ PVE's own native target is separately broken (#1076), so retiring the Service be
 PVE cutover would leave PVE with no path at all and the symptom would be silence. The
 owner's phrase on #904 is that the LoadBalancer "stops being the interface", not that it
 is deleted now. Retirement lands with the PVE reroute, in #904 / #920.
+
+Because the Service moves namespace while keeping the same explicit `loadBalancerIP`,
+the cutover has an order: **sync `observability` first, then `odysseus`**. kube-vip's
+`deleteService` keeps the address plumbed when another Service instance still holds it,
+and removes it when none does, so pruning first would take .112 down until the other
+sync caught up. The evidence and the post-cutover check that .112 answers again are in
+the deploy-gate section of `2-k3s/10.observability/README.md`.
 
 **Cache: a PVC, not an `emptyDir`** (#915, owner: "Move to a PVC, as #903 proposed").
 `ntfy-cache`, `local-path`, `ReadWriteOnce`, 1Gi. The cache only ever matters to a

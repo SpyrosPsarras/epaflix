@@ -18,9 +18,23 @@
 # into endpoint-less shells.
 #
 # The compose published host 8091 -> ntfy default 80. Here ntfy is told to
-# listen on :8091 directly (NTFY_LISTEN_HTTP) so the in-cluster Service and
-# NTFY_BASE_URL line up. NTFY_BASE_URL carries the full cross-namespace FQDN
-# because every consumer is now outside this namespace.
+# listen on :8091 directly (NTFY_LISTEN_HTTP) so the Service port and the
+# container port line up.
+#
+# NTFY_BASE_URL is ntfy's own server-side `base-url`, which is its PUBLIC-FACING
+# URL: the address it writes into attachment and click links, web-push and
+# e-mail payloads. It is NOT the address a publisher dials, so it does not
+# follow the namespace move - it follows the entry point #904 adds, and it is
+# therefore https://ntfy.epaflix.com (ingress/ntfy-ingressroute.yaml). Two
+# consequences, both accepted: those links only resolve once the deploy-gate
+# dnsmasq record for ntfy.epaflix.com exists (README.md in this directory), and
+# publishers that keep dialling http://192.168.10.112:8091 or
+# ntfy.observability.svc.cluster.local:8091 are unaffected, because ntfy does
+# not match incoming requests against base-url.
+#
+# Do not confuse it with NTFY_BASE_URL in 2-k3s/13.odysseus/configmap.yaml:
+# that key is Odysseus's own DIAL address for publishing, and it correctly
+# carries the in-cluster FQDN http://ntfy.observability.svc.cluster.local:8091.
 #
 # The cache is a PVC, not an emptyDir (#915, owner decision 2026-08-21: "Move
 # to a PVC, as #903 proposed"). The cache only ever matters for a subscriber
@@ -70,10 +84,10 @@ spec:
               value: ":8091"
             - name: NTFY_CACHE_FILE
               value: "/var/cache/ntfy/cache.db"
-            # Full FQDN, not the bare `ntfy` short name: every publisher now
-            # reads this from outside the observability namespace.
+            # ntfy's server-side base-url: the public-facing URL it puts in the
+            # links it generates, not an address anything dials. See the header.
             - name: NTFY_BASE_URL
-              value: "http://ntfy.observability.svc.cluster.local:8091"
+              value: "https://ntfy.epaflix.com"
           ports:
             - containerPort: 8091
               name: http
@@ -141,6 +155,13 @@ spec:
   #
   # LAN-only LoadBalancer (kube-vip), pinned to 192.168.10.112 from
   # range-global. RFC1918, not internet-routable.
+  #
+  # The same explicit IP is claimed by the odysseus copy of this Service until
+  # its Application prunes it, so the cutover has a required ORDER: sync
+  # observability first, then odysseus. kube-vip only removes the address from
+  # the leader's eth0 when no other Service instance holds it. Order, evidence
+  # and the post-cutover check that .112 answers again are in README.md in this
+  # directory, under "Cutover".
   type: LoadBalancer
   loadBalancerIP: 192.168.10.112
   selector:
