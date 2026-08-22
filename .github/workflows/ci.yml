@@ -45,15 +45,28 @@ jobs:
           fi
           echo "No tracked file matches .gitignore."
 
-      - name: Plaintext Secret guard
+      - name: Hook fixture suites + plaintext Secret guard
         run: |
           set -euo pipefail
           # Local hooks are optional, so run both the real staged-index fixture
           # suite and the full tracked-tree mode server-side. The job-level fork
           # guard above remains the boundary for executing repository code.
+          #
+          # What CI can and cannot do here: every fixture below is synthetic
+          # plaintext, so no age key is needed. The REAL Authentik blueprint
+          # check cannot run in CI at all - the payload sits inside a
+          # SOPS-encrypted Secret and this job has no key (see the two steps
+          # further down that say so). That is exactly why
+          # check-authentik-blueprint.sh is a pre-commit hook, where the key
+          # exists, and CI gets only its fixture suite (#883).
+          #
+          # test-check-kube-context.sh self-skips its kubeconfig cases with a
+          # loud SKIP line if the runner image has no kubectl (#856).
           python3 -m pip install --disable-pip-version-check \
             -r .github/hooks/requirements.txt
           ./.github/hooks/test-check-sops-encrypted.sh
+          ./.github/hooks/test-check-authentik-blueprint.sh
+          ./.github/hooks/test-check-kube-context.sh
           ./.github/hooks/check-sops-encrypted.sh --full-tree
 
       - name: Install tools
