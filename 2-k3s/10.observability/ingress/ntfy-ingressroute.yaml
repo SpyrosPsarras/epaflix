@@ -22,10 +22,14 @@
 # forward-auth middleware would break them silently. searxng-internal and
 # qbittorrent-internal are un-gated on .102 for the same reason.
 #
-# The LoadBalancer Service at 192.168.10.112 in ../ntfy.yaml still exists
-# alongside this route: PVE's URL is hardcoded and its native target is
-# separately broken (#1076), so the reroute and the retirement land together
-# in #904 / #920.
+# This route is now the ONLY front door for the LAN publishers. Proxmox VE
+# posts to https://ntfy.epaflix.com/pve-backups
+# (1-proxmox/pbs/notifications.cfg) and the TrueNAS GPU cron to
+# https://ntfy.epaflix.com/truenas-alerts; the plaintext 192.168.10.112
+# LoadBalancer they used to dial was retired in this PR (#904 / #920), and
+# ../ntfy.yaml is a ClusterIP Service. Break this route and both publishers go
+# silent, so treat it as load-bearing rather than as a convenience over the
+# LoadBalancer.
 #
 # `namespace: observability` is explicit — the observability kustomization has
 # no top-level namespace transformer, by documented design.

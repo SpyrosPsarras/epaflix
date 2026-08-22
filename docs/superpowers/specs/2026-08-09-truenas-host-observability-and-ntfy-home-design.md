@@ -1,14 +1,16 @@
 # TrueNAS host observability and ntfy's home - design
 
 > Date: 2026-08-09 (dated for the decision set it records; ntfy component written 2026-08-22)
-> Status: **partial**. Only `## Component 1 - ntfy` is written. The TrueNAS host
-> observability half is #922's to author and is deliberately left as headings below.
+> Status: **partial**. `## Component 1 - ntfy` and `## Component 3 - what PVE notifies
+> natively` are written. The TrueNAS host observability half is #922's to author and is
+> deliberately left as headings below.
 > Repo: `SpyrosPsarras/epaflix` (this repo)
 > Decisions recorded: #904 (entry point), #914 (owning namespace and ArgoCD Application),
 > #915 (message cache on a PVC). All three carry an owner decision comment dated 2026-08-21
 > and each of them requires "a line in the spec", which is why this file exists now.
-> Related, not written here: #920 (PVE reroute), #921 (delete the email receiver),
-> #922 (TrueNAS host observability), #1076 (PVE's own notification target is broken).
+> Related: #922 (TrueNAS host observability) is not written here. #920 (PVE reroute),
+> #921 (delete the email receiver) and #1076 (PVE's notification target returned 400)
+> landed 2026-08-22 and are recorded in `## Component 3` below.
 
 ## Purpose
 
@@ -16,7 +18,8 @@ Say where the platform's notification receiver lives, how it is reached, and wha
 survives a restart - and, separately, how the TrueNAS host gets into the same
 observability stack as everything else.
 
-Only the first half is settled and written. The second half is #922's.
+The ntfy half and the PVE notification split are settled and written. TrueNAS host
+observability is #922's.
 
 ## What triggered this
 
@@ -39,10 +42,11 @@ Alertmanager (observability) ──┐
 Odysseus (odysseus)  ──────────┤  topic k8s-alertmanager / app notices
                                ▼
 Proxmox VE hosts ───────────► ntfy (observability) ──► subscribers
-  http://192.168.10.112:8091     │  cache: ntfy-cache PVC, 12h retention
+  https://ntfy.epaflix.com       │  cache: ntfy-cache PVC, 12h retention
   topic pve-backups              │
                                  └─ https://ntfy.epaflix.com
 TrueNAS GPU cron ──────────────►    Traefik `internal` entry point, 192.168.10.102
+  https://ntfy.epaflix.com
   topic truenas-alerts
 ```
 
@@ -80,12 +84,14 @@ LAN-only dnsmasq A record plus an Unbound `local-zone` AAAA guard, same as `sear
 forward-auth middleware** on purpose: the publishers are machines posting with no
 interactive login.
 
-**The LoadBalancer at 192.168.10.112 is still live.** Proxmox VE posts to the hardcoded
-`http://192.168.10.112:8091/pve-backups` (#597, `1-proxmox/pbs/notifications.cfg`) and
-PVE's own native target is separately broken (#1076), so retiring the Service before the
-PVE cutover would leave PVE with no path at all and the symptom would be silence. The
-owner's phrase on #904 is that the LoadBalancer "stops being the interface", not that it
-is deleted now. Retirement lands with the PVE reroute, in #904 / #920.
+**The LoadBalancer at 192.168.10.112 is retired** (#904 / #920, 2026-08-22). Proxmox VE
+posted to the hardcoded `http://192.168.10.112:8091/pve-backups` (#597,
+`1-proxmox/pbs/notifications.cfg`) and the TrueNAS GPU cron did the same for
+`truenas-alerts`, so the Service outlived the entry point by one PR: retiring it before
+those two publishers moved would have left PVE with no path at all and the symptom would
+have been silence. Both now publish to `https://ntfy.epaflix.com` and the Service is
+`ClusterIP`. The owner's phrase on #904 was that the LoadBalancer "stops being the
+interface"; it has now also stopped existing.
 
 Because the Service moves namespace while keeping the same explicit `loadBalancerIP`,
 the cutover has an order: **sync `observability` first, then `odysseus`**. kube-vip's
@@ -115,6 +121,32 @@ part of the alert path.
 **Not written here. #922 owns this.** The GPU health signal, `node_exporter` on
 192.168.10.200, and the ARC/memory metrics belong in this section and none of them are
 decided by #904, #914 or #915. Do not read this file as a finished spec.
+
+## Component 3 - what PVE notifies natively, and what alerts from Prometheus (#920)
+
+The split is decided by one measurement, not by preference: `pve-exporter` exposes **zero
+metrics matching `^pve_(backup|vzdump|task)`** (re-verified with a negative control — the
+same query shape against `^pve_up` returns 32 series). Backup and task outcomes cannot be
+expressed as a Prometheus alert at all, so they are exactly the set that has to stay on
+PVE's native targets.
+
+- **Native, on PVE.** Backup and task outcomes. `matcher: ntfy-failures`
+  (`match-severity warning,error`, `mode all`) routes them to `webhook: ntfy-pve`, which
+  posts to `https://ntfy.epaflix.com/pve-backups`. That target depends on a server-side
+  ntfy setting: `NTFY_MESSAGE_SIZE_LIMIT=32k`, because the 4096-byte default rejected
+  every real 16311-byte failure body with `400` / `40014` (#1076).
+- **Alertmanager, from metrics.** Everything metric-backed: `pve_up` (32 series), storage
+  and guest state. Those get grouping, silencing and `repeat_interval`, which the native
+  path has none of.
+- **PVE's mail leg is off.** `matcher: default-matcher` carries `disable 1`. It targeted
+  `sendmail: mail-to-root`, which reported success and delivered nothing (#461, #720), so
+  leaving it enabled was worse than having no second leg: it made a failed notification
+  look notified.
+- **Alertmanager's receiver is `ntfy` and carries `webhook_configs` only.**
+  `email_configs` and every `global.smtp_*` key were deleted with #921. The
+  `severity: critical` child route keeps `continue: true`, so **no sibling route may be
+  added beside it** without accepting double delivery of every critical alert — which is
+  why the PVE half of this split is not written as an Alertmanager route.
 
 ## Observability
 
