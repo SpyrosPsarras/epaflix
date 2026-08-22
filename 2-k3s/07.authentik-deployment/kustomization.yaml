@@ -40,6 +40,14 @@ resources:
   - namespace.yaml
   - storage/pv-pvc.yaml
   - ingress/outpost-ingressroute.yaml
+  # Issue #883: daily in-cluster validation of the blueprint payload nested in
+  # authentik-iac-blueprint's stringData - the second YAML document that no
+  # gate parsed, so #876 (bad indent) and #940 (!KeyOf at a state:absent entry)
+  # both merged green. Carries its own ServiceAccount + Role (`get` on that ONE
+  # named Secret, never list/watch) + RoleBinding + CronJob. The check script
+  # itself is files/check_authentik_blueprint.py, built into the ConfigMap by
+  # the configMapGenerator below.
+  - blueprint-check-cronjob.yaml
 generators:
   - ksops-generator.yaml
 helmCharts:
@@ -53,3 +61,15 @@ helmCharts:
 images:
   - name: ghcr.io/goauthentik/server
     newTag: 2026.8.0
+
+# Issue #883: the blueprint checker the CronJob above mounts. ONE on-disk copy,
+# two consumers - this generator and the CI fixture suite
+# .github/hooks/test-check-authentik-blueprint.sh, which runs the same file
+# against synthetic plaintext payloads (no age key, no cluster). Same pattern as
+# the maintenance directory's files/ + configMapGenerator. The generated name
+# carries a content-hash suffix, so a script edit rolls the CronJob's volume
+# reference automatically.
+configMapGenerator:
+  - name: authentik-blueprint-check-script
+    files:
+      - files/check_authentik_blueprint.py

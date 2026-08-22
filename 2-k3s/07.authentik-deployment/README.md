@@ -227,6 +227,76 @@ Cross-references: **#185** (the durable declarative token this guards); **#230**
 **#339** (the scoped-RBAC flip landed 2026-08-10, so the post-upgrade expectation
 is now the scoped `ak-iac IaC` role plus `is_superuser: false`, not superuser).
 
+#### In-cluster blueprint check (#883)
+
+`blueprint-check-cronjob.yaml` ships a daily CronJob in `app-authentik` that reads the
+live `authentik-iac-blueprint` Secret through the kube API and runs
+`files/check_authentik_blueprint.py` over every YAML-suffixed key in it. Two classes are
+caught:
+
+1. **Payload YAML syntax** (#876). The Secret file is valid YAML; the blueprint nested
+   inside `stringData` is a second document that nothing parsed, so a misindented entry
+   merged green and stopped *all* entries from reconciling. The checker loads the payload
+   with the ten Authentik tags registered. A tag outside those ten also fails, on purpose:
+   a new Authentik tag has to be added to the checker deliberately.
+2. **`!KeyOf` / `!Find` resolution and absent-entry hygiene** (#940). The payload that
+   failed every apply for two days parsed *cleanly* - a `present` entry's `!KeyOf` pointed
+   at a `state: absent` entry, which `KeyOf.resolve` cannot resolve, so the importer
+   aborted the run. Layer 1 provably cannot see that. So every `!KeyOf` must name a
+   declared, non-absent entry; every `!Find` must be shaped `[model, [attr, value]]` and
+   must not resolve onto a sibling entry declared absent; and `state: absent` plus `attrs`
+   is a hard fail (attrs are ignored on a delete, and a tag inside them silently skips it).
+   `state: created` counts as resolvable, not absent - a skipped `created` entry still
+   populates `entry._state` (#1040).
+
+What it does **not** catch: every other semantic error - wrong model paths, bad attr
+names, permissions Authentik would reject at apply. Only Authentik's own importer knows
+those.
+
+**The trade-off, stated rather than glossed.** This is a detector, not a gate. A
+pre-commit hook would have refused a broken blueprint *before* it reached `main`; this
+finds it *after* merge, up to a day later. That is later than #883's framing wanted, and
+it was accepted knowingly: a hook would have to decrypt `authentik-iac-blueprint.enc.yaml`
+at commit time, which means `sops`, which means the age key, which on this workstation
+lives behind KeePassXC - a personal password manager on the owner's own machines. A
+repo-wide commit path must not depend on it. In the cluster the Secret is already
+decrypted, so the Job needs no age key and no `sops`, only RBAC to `get` one Secret. And
+a day is still far earlier than the status quo, where the only signal was `failed to parse
+blueprint` in a worker log nothing reads - #940 sat unnoticed for two days that way.
+
+This also covers #883's third box (alert on `failed to parse blueprint` in the
+`authentik-worker` log): the Job parses the same payload on a schedule and exits non-zero,
+which reaches the same conclusion earlier and without log scraping.
+
+Operational notes:
+
+- **RBAC is one Secret wide.** The Role grants `get` on `resourceNames:
+  [authentik-iac-blueprint]` only - no `list`, no `watch` (both ignore `resourceNames` and
+  would hand the Job every Secret in the namespace, including `authentik-app-secrets`).
+- **Alerting is inherited, not reinvented.** No ntfy URL is hardcoded in the CronJob.
+  `KubeJobFailedLastRun` in `2-k3s/10.observability/alertmanager-config/custom-alerts.yaml`
+  already covers CronJob-owned Jobs cluster-wide, so a failing run reaches Alertmanager
+  and ntfy on the existing route.
+- **One copy of the checker, two consumers.** `files/check_authentik_blueprint.py` is
+  built into the `authentik-blueprint-check-script` ConfigMap by the `configMapGenerator`
+  in `kustomization.yaml`, and the same file is run against synthetic plaintext fixtures
+  by `.github/hooks/test-check-authentik-blueprint.sh`, which CI executes. The fixtures
+  need no age key and no cluster. A fixture case asserts the ConfigMap is generated from
+  that same path, so the suite cannot drift into testing a copy nobody deploys.
+- **It refuses to pass vacuously.** If the Secret carries no `.yaml`/`.yml` key - say the
+  blueprint key gets renamed - the check exits non-zero instead of reporting a clean run
+  over zero payloads.
+- **Baseline on `main` today**, so a future drop in coverage is visible:
+  `entries=56 ids=56 absent=4 !KeyOf refs checked=32 !Find refs checked=135
+  (sibling-matched=17)`. Measured identically through both paths - `sops -d` of the
+  committed `.enc.yaml` (`stringData`) and `kubectl --context epaflix -n app-authentik get
+  secret authentik-iac-blueprint -o json` (base64 `data`, the CronJob's own input).
+- **Reading a run:**
+  `kubectl --context epaflix -n app-authentik logs job/<authentik-blueprint-check-...>`.
+  The checker reports YAML errors as `problem` plus line/column and locates violations by
+  `entries[i]:<id>`; it never prints payload content, because `str(yaml.YAMLError)` embeds
+  the offending source line and that line is Secret material (#602).
+
 ## Configuration
 
 All configuration is managed via [helm-values.yaml](helm-values.yaml):
