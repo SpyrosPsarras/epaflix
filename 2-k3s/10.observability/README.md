@@ -258,7 +258,7 @@ made it official and #921 deleted the email leg on 2026-08-22.
 | Retention | ntfy's built-in **12h** default — `NTFY_CACHE_DURATION` is set nowhere, so the PVC can never hold more than 12h of backlog |
 | In-cluster address | `http://ntfy.observability.svc.cluster.local:8091` (Alertmanager's webhook url, and `NTFY_BASE_URL` in `odysseus-config`, which is Odysseus's dial address) |
 | ntfy's own `base-url` | `https://ntfy.epaflix.com`, set via the `NTFY_BASE_URL` env in `ntfy.yaml`. That is a *server-side* setting — the public-facing URL ntfy writes into attachment/click links and push payloads — not an address anything dials, so it follows the entry point and not the namespace |
-| Topics | `k8s-alertmanager` (Alertmanager), `pve-backups` (Proxmox VE), `truenas-alerts` (the TrueNAS GPU cron) |
+| Topics | `k8s-alertmanager` (Alertmanager), `pve-backups` (Proxmox VE), `truenas-alerts` (the TrueNAS GPU cron, retired at the #919 gate, see "TrueNAS GPU + ARC monitoring" below, after which GPU alerts arrive on `k8s-alertmanager` like everything else) |
 | Message size limit | **32k**, via `NTFY_MESSAGE_SIZE_LIMIT` on the Deployment. The default is 4096 bytes, and ntfy treats anything larger as an attachment upload; attachments are off, so the POST comes back `400` with body code `40014` "attachments not allowed". That is the whole of #1076: a real failed-vzdump body is 16311 bytes, so every genuine backup failure from 2026-08-10 on was rejected while every clean night looked healthy. Residual: a body over 32k 400s the same silent way, which the notification-target failure guard follow-up covers |
 
 **The LoadBalancer at 192.168.10.112 is retired** (#904 / #920, deploy gate of
@@ -486,6 +486,170 @@ paste the literal
 `kubectl --context epaflix -n argocd get application observability -o jsonpath='{.spec.syncPolicy.automated}'`
 showing `selfHeal` and `prune` true, and a final full `argocd app sync
 observability` reporting Synced/Healthy with an empty diff.
+
+### TrueNAS GPU + ARC monitoring (#916-#919): deploy gate
+
+Nothing in the PR that added this section touches the appliance. Everything
+below happens **after** merge, in the order the #919 decision fixed: vendor the
+rules → stand up the exporters → observe a real alert path → *then* remove the
+cron. Delete the cron first and you reopen the window with no GPU signal at all,
+which is the 23-hour condition (2026-08-08 → 09) this whole map came from.
+
+What lands with the merge, applied by ArgoCD on its own: `truenas-exporters.yaml`
+(2 Services + 2 EndpointSlices + 2 ServiceMonitors, #917) and two alert groups in
+`alertmanager-config/custom-alerts.yaml`: `truenas-gpu` (5 expressions vendored
+from `utkuozdemir/nvidia_gpu_exporter` v1.14.0, #916) and `truenas-memory`
+(3 baseline-free ARC rules, #918). The exporters themselves are TrueNAS custom
+apps installed by hand from `0-truenas/custom-apps/`.
+
+**Subscribe the phone to `k8s-alertmanager` before step 5.** GPU alerts arrive
+via Alertmanager from now on, not on `truenas-alerts`. The cron was the only
+publisher of that topic. Deleting the cron before the new subscription exists
+swaps one silence for another.
+
+#### 0. Preconditions, and record the rollback recipe
+
+```bash
+# From TrueNAS: the ntfy hostname resolves and answers with a valid chain.
+ssh truenas_admin@192.168.10.200 'getent hosts ntfy.epaflix.com; curl -fsS -4 -m 10 -o /dev/null -w "%{http_code}\n" https://ntfy.epaflix.com/v1/health'
+# want: 192.168.10.102, then 200
+ssh truenas_admin@192.168.10.200 'curl -m 5 -o /dev/null -w "%{http_code}\n" https://192.168.10.102/v1/health'
+# CONTROL: must FAIL certificate verification. If it returns 200 the first
+# check proved nothing about TLS.
+
+# The cron row this gate eventually deletes. midclt is the only honest channel:
+# the job is middleware-managed and `crontab -l` is a documented false negative.
+ssh truenas_admin@192.168.10.200 'sudo midclt call cronjob.query | jq "[.[]|select(.command|contains(\"gpu\"))]"'
+# want: the id-2 row, enabled=true, */15, /bin/bash /root/gpu-health-check.sh.
+# PASTE IT VERBATIM. It is both the pre-state for step 5's control and the
+# recipe to re-create the job if this gate has to be rolled back.
+```
+
+Back up the live script beside itself (`cp /root/gpu-health-check.sh
+/root/gpu-health-check.sh.bak-$(date +%F)`) before anything else.
+
+#### 1. Merge, sync, and read the pre-install state
+
+```bash
+SOPS_AGE_KEY=$(~/.pi/shared/skills/keepassxc-secrets/scripts/kpx.sh get sops-age-k3s-cluster) \
+  kustomize build --enable-helm --enable-alpha-plugins --enable-exec 2-k3s/10.observability \
+  | grep -cE '^ *- alert: (Nvidia|Truenas)'          # want: 8
+kubectl --context epaflix -n observability get endpointslice truenas-node-exporter truenas-gpu-exporter -o wide
+# want: both, addresses 192.168.10.200
+kubectl --context epaflix -n observability port-forward pod/prometheus-kube-prometheus-stack-prometheus-0 19090:9090 &
+curl -s localhost:19090/api/v1/rules | jq '{rules:([.data.groups[].rules[]]|length), err:([.data.groups[].rules[]|select(.health!="ok")]|length)}'
+# baseline measured 2026-08-22 BEFORE this PR: {rules: 277, err: 0} over 53
+# groups. want after sync: 285 and err still 0.
+curl -s 'localhost:19090/api/v1/query?query=up%7Bjob%3D~%22truenas-.*%22%7D' | jq '.data.result|length'
+# want: 0 HERE, and that is the point. It is the pre-install reading, and only the
+# 0 → 1 flip across the install counts as install evidence (measured 2026-08-22:
+# 0 results, both jobs absent).
+```
+
+#### 2. Install the two custom apps
+
+Recipes and rollback: `0-truenas/custom-apps/node-exporter/README.md` and
+`0-truenas/custom-apps/nvidia-gpu-exporter/README.md`. Then, from the host:
+
+```bash
+ssh truenas_admin@192.168.10.200 'curl -4 -m5 -s http://localhost:9100/metrics | grep -c "^node_zfs_arc_size"'   # want: >= 1
+ssh truenas_admin@192.168.10.200 'curl -4 -m5 -s http://localhost:9835/metrics | grep -c "^nvidia_smi_gpu_info"'  # want: >= 1
+ssh truenas_admin@192.168.10.200 'curl -4 -m5 -s http://localhost:9101/metrics'
+# CONTROL: must FAIL (connection refused). A probe that cannot tell listening
+# from not-listening has not earned its "yes" on 9100. The port-80 "answers"
+# control is documented DEAD. Never reuse it.
+ssh truenas_admin@192.168.10.200 'curl -4 -m5 -s http://localhost:9835/metrics | grep -c "^nvidia_smi_nvml_return_code"'
+# want: 1, which is the proof the NVML backend is live.
+```
+
+**The NVML backend is not optional decoration.** `NvidiaGpuXidCritical` queries
+`nvidia_smi_xid_last_timestamp_seconds`, which only the NVML backend produces
+(upstream `docs/CONFIGURE.md` at v1.14.0), which is why the compose pins the
+`1.14.0-nvml` image. If that flavor will not run on this box, fall back to the
+plain `1.14.0` tag and **record the downgrade in the same breath**: the Xid rule
+is then synthetic-evidence-only (step 4's promtool run), and a follow-up issue
+owns getting NVML working. Do not leave a permanently-empty expression standing
+without a written reason. That is the failure this design rejected the
+textfile-collector route for.
+
+If `node_zfs_arc_size` is absent, **stop before step 5**: the #918 decision's own
+clause says the ARC signal collapses and the choice is forced back open. The cron
+stays until that is resolved.
+
+#### 3. Prometheus sees both targets
+
+```bash
+curl -s 'localhost:19090/api/v1/query?query=up%7Bjob%3D~%22truenas-.*%22%7D' | jq -r '.data.result[]|"\(.metric.job) \(.value[1])"'
+# want: truenas-node-exporter 1, truenas-gpu-exporter 1 (was 0 results in step 1)
+curl -s 'localhost:19090/api/v1/query?query=node_zfs_arc_c_max' | jq -r '.data.result[].value[1]'
+# want the literal 12884901888, the 12 GiB cap from the 2026-08-09 recovery
+# and the number TruenasArcCapDrift compares against. Paste it.
+curl -s 'localhost:19090/api/v1/query?query=count(node_memory_MemAvailable_bytes)' | jq -r '.data.result[0].value[1]'
+# positive control: 7 → 8 as the TrueNAS host joins the cluster's 7 nodes.
+```
+
+#### 4. Watch the alerts fire, and resolve
+
+*Collection health, live, end-to-end.* Re-create the GPU app with
+`--nvidia-smi-command=/bin/false` (exec backend), or stop the driver-library
+injection on the NVML one, so the **exporter stays UP while collection fails**.
+That is the 2026-08-09 shape: healthy-looking process, no card behind it.
+`NvidiaGpuExporterCollectionFailing` must fire within its 10m window, reach
+Alertmanager, and land on the phone via ntfy topic `k8s-alertmanager`. Restore
+the real command and it must **RESOLVE**. An alert that cannot resolve fails
+this gate exactly as hard as one that cannot fire.
+
+*Scrape loss.* `sudo midclt call app.stop nvidia-gpu-exporter` → `TargetDown`
+fires → `app.start` → resolves.
+
+*Xid, and why it is synthetic.* An Xid cannot be provoked on a working card
+without harming it. The committed unit tests are the evidence:
+
+```bash
+cd 2-k3s/10.observability/alertmanager-config
+mkdir -p /tmp/promtool-rules
+yq '.spec' custom-alerts.yaml > /tmp/promtool-rules/custom-alerts-rules-full.yaml
+yq 'del(.spec.groups[].rules[].annotations) | .spec' custom-alerts.yaml > /tmp/promtool-rules/custom-alerts-rules.yaml
+cp custom-alerts-tests.yaml /tmp/promtool-rules/
+docker run --rm -v /tmp/promtool-rules:/w -w /w --entrypoint /bin/promtool \
+  quay.io/prometheus/prometheus:v3.13.1 check rules custom-alerts-rules-full.yaml
+docker run --rm -v /tmp/promtool-rules:/w -w /w --entrypoint /bin/promtool \
+  quay.io/prometheus/prometheus:v3.13.1 test rules custom-alerts-tests.yaml
+# CONTROL: break one parenthesis in a copy of the extracted rules and re-run
+# `check rules`. It must exit non-zero, or the check is not evidence.
+```
+
+The two extracts exist because `promtool test rules` compares annotations too;
+the behaviour run uses the annotation-stripped copy while `check rules` validates
+the full one, templates included. Header of `custom-alerts-tests.yaml` has the
+same recipe.
+
+#### 5. Only now: delete the cron (#919)
+
+```bash
+ssh truenas_admin@192.168.10.200 'sudo midclt call cronjob.delete 2'
+ssh truenas_admin@192.168.10.200 'sudo midclt call cronjob.query | jq "[.[]|select(.command|contains(\"gpu\"))]"'
+# want: []. The SAME jq must have shown the id-2 row in step 0. A probe
+# that cannot see the live row is not allowed to certify its absence.
+ssh truenas_admin@192.168.10.200 'sudo mv /root/gpu-health-check.sh /root/gpu-health-check.sh.retired-$(date +%F)'
+rm -rf artifacts/close-all-issues/gpu-scripts   # the stale git-ignored 2896-byte draft (#662)
+```
+
+Every probe in this section names **192.168.10.200** on purpose. The same GPU
+probe pointed at 192.168.10.10/11 finds nothing and reads as "nothing to alert
+on". That wrong-host answer is what falsely closed #919 once already. And never
+use the `nvidia-smi -L | head || lspci` shape: a pipeline exits with `head`'s 0,
+so the `||` fallback is dead code and the line prints empty either way.
+
+#### 6. Close it out
+
+Close #919 with the literal `cronjob.query` before/after pasted (#50/#551: never
+"soak elapsed", always the value). Open the follow-up issues: the trailing PR for
+the now-orphaned tracked `gpu-health-check.sh` and the guards-table row, the ARC
+baseline (normal day + ollama load) that any tuned threshold waits on, the
+upstream-drift watch row for `nvidia_gpu_exporter`, post-TrueNAS-update
+verification of both apps, and the ntfy delivery guard for the
+Alertmanager → ntfy leg.
 
 ### Alertmanager routing (the email leg is gone)
 
