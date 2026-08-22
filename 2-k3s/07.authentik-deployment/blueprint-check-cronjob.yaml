@@ -1,0 +1,176 @@
+---
+# Daily in-cluster validation of the Authentik IaC blueprint payload (#883,
+# #876, #940).
+#
+# WHAT BROKE. The Secret file authentik-iac-blueprint.enc.yaml is valid YAML.
+# The blueprint is a SECOND YAML document nested inside its
+# stringData["iac-service-account.yaml"], and nothing parses that. #876 inserted
+# entries at 6-space indent where the list uses 2; CI went green, ArgoCD stayed
+# Synced/Healthy, and every one of the 54 entries stopped reconciling. #940 was
+# worse: the payload parsed cleanly and a `present` entry's !KeyOf pointed at a
+# `state: absent` entry, so KeyOf.resolve aborted the whole apply for 2 days.
+# The only signal either time was `failed to parse blueprint` in the
+# authentik-worker log, which nothing reads.
+#
+# WHY IN THE CLUSTER AND NOT IN THE COMMIT PATH (owner decision, 2026-08-22).
+# A pre-commit version would have to decrypt the .enc.yaml, which means sops,
+# which means the age key, which on this workstation sits behind KeePassXC - a
+# personal password manager that exists only on the owner's own machines. A
+# repo-wide commit hook must not depend on it. The live Secret is ALREADY
+# decrypted in the cluster, so this Job needs no age key and no sops at all:
+# only RBAC to `get` that one named Secret.
+#
+# THE TRADE-OFF, STATED. A hook would have refused a broken blueprint BEFORE it
+# reached main. This detects it AFTER merge, up to a day later. That is later
+# than #883's framing wanted and it was accepted knowingly, because it is still
+# far earlier than the status quo (an unread worker log) and it costs the commit
+# path nothing.
+#
+# THIS ALSO CLOSES #883's THIRD BOX. That box asks for an alert on `failed to
+# parse blueprint` in the authentik-worker log. This Job parses the same payload
+# on a schedule and exits non-zero, which covers the same ground earlier and
+# without log scraping.
+#
+# NOTIFICATION: none is configured here on purpose. KubeJobFailedLastRun in
+# 2-k3s/10.observability/alertmanager-config/custom-alerts.yaml already covers
+# CronJob-owned Jobs cluster-wide (its only `unless` exclusion is a named list
+# of servarr reporters), so a failed run reaches Alertmanager and ntfy through
+# the path PR #1088 proved. A hardcoded ntfy URL in here would duplicate a
+# working route and rot the day the LoadBalancer address changes.
+#
+# LEAK DISCIPLINE. The blueprint is Secret content. The Job never prints it: the
+# API response is written to a memory-backed emptyDir and piped into the
+# checker, which reports YAML errors as `problem` plus line/column and locates
+# violations by entries[i]:<id> - never str(yaml.YAMLError), which was measured
+# to embed the offending source line (the #602 class).
+#
+# The check script is NOT inlined here. It is
+# files/check_authentik_blueprint.py, one copy, built into the ConfigMap by the
+# configMapGenerator in kustomization.yaml and exercised in CI by
+# .github/hooks/test-check-authentik-blueprint.sh.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: authentik-blueprint-check
+  namespace: app-authentik
+  labels:
+    app: authentik-blueprint-check
+---
+# Role: `get` on ONE named Secret and nothing else.
+#
+# resourceNames pins it to authentik-iac-blueprint, so this ServiceAccount
+# cannot read authentik-app-secrets (AUTHENTIK_SECRET_KEY, the postgres and
+# SMTP passwords) or the chart-generated `authentik` Secret sharing the
+# namespace. There is deliberately NO `list` and NO `watch`: both ignore
+# resourceNames entirely and would hand the Job every Secret in the namespace.
+# `kubectl get secret <name>` is a get, so the Job works with exactly this.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: authentik-blueprint-check
+  namespace: app-authentik
+  labels:
+    app: authentik-blueprint-check
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["authentik-iac-blueprint"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: authentik-blueprint-check
+  namespace: app-authentik
+  labels:
+    app: authentik-blueprint-check
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: authentik-blueprint-check
+subjects:
+  - kind: ServiceAccount
+    name: authentik-blueprint-check
+    namespace: app-authentik
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: authentik-blueprint-check
+  namespace: app-authentik
+  labels:
+    app: authentik-blueprint-check
+spec:
+  # 05:35 UTC daily. Daily is proportional: the blueprint changes rarely, and
+  # the window this closes is "a broken blueprint sat unnoticed for 2 days".
+  schedule: "35 5 * * *"
+  concurrencyPolicy: Forbid
+  # #841: a schedule missed during a control-plane blip is stale by the time it
+  # could be retried, so skip it rather than run it late.
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 6
+  jobTemplate:
+    spec:
+      # #841: under Forbid, a run that hangs blocks every later run and leaves
+      # no failed Job to alert on - the check goes quiet and quiet reads as
+      # healthy. This is one API read plus a YAML parse.
+      activeDeadlineSeconds: 300
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 2592000 # keep 30 days
+      template:
+        metadata:
+          labels:
+            app: authentik-blueprint-check
+        spec:
+          restartPolicy: Never
+          serviceAccountName: authentik-blueprint-check
+          automountServiceAccountToken: true
+          containers:
+            - name: blueprint-check
+              # alpine 3.20 matches the maintenance-CronJob precedent; kubectl
+              # and PyYAML come from the alpine repos at start.
+              image: alpine:3.20
+              imagePullPolicy: IfNotPresent
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  apk add --no-cache kubectl python3 py3-yaml >/dev/null
+                  echo "=== authentik blueprint check @ $(date -u +%FT%TZ) ==="
+
+                  # Two statements, not a pipeline: busybox ash has no reliable
+                  # pipefail, so a failed `kubectl get` in a pipe would be
+                  # masked by the checker's exit code and the check would pass
+                  # on an empty read. /work is memory-backed (see volumes), so
+                  # the decrypted payload never lands on a node disk, and it is
+                  # never echoed.
+                  kubectl -n app-authentik get secret authentik-iac-blueprint \
+                    -o json > /work/secret.json
+
+                  exec python3 /script/check_authentik_blueprint.py \
+                    --path 'secret/app-authentik/authentik-iac-blueprint' \
+                    < /work/secret.json
+              volumeMounts:
+                - name: script
+                  mountPath: /script
+                  readOnly: true
+                - name: work
+                  mountPath: /work
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "500m"
+                  memory: "256Mi"
+          volumes:
+            - name: script
+              configMap:
+                name: authentik-blueprint-check-script
+                defaultMode: 0444
+            # medium: Memory - the API response holds the decrypted blueprint.
+            - name: work
+              emptyDir:
+                medium: Memory
+                sizeLimit: 16Mi
