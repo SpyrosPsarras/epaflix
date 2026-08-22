@@ -84,14 +84,17 @@ LAN-only dnsmasq A record plus an Unbound `local-zone` AAAA guard, same as `sear
 forward-auth middleware** on purpose: the publishers are machines posting with no
 interactive login.
 
-**The LoadBalancer at 192.168.10.112 is retired** (#904 / #920, 2026-08-22). Proxmox VE
-posted to the hardcoded `http://192.168.10.112:8091/pve-backups` (#597,
-`1-proxmox/pbs/notifications.cfg`) and the TrueNAS GPU cron did the same for
-`truenas-alerts`, so the Service outlived the entry point by one PR: retiring it before
-those two publishers moved would have left PVE with no path at all and the symptom would
-have been silence. Both now publish to `https://ntfy.epaflix.com` and the Service is
-`ClusterIP`. The owner's phrase on #904 was that the LoadBalancer "stops being the
-interface"; it has now also stopped existing.
+**The LoadBalancer at 192.168.10.112 is retired by this change** (#904 / #920), with the
+retirement applied at phase 4 of the deploy gate in `2-k3s/10.observability/README.md`,
+not at merge. Proxmox VE posted to the hardcoded `http://192.168.10.112:8091/pve-backups`
+(#597, `1-proxmox/pbs/notifications.cfg`) and the TrueNAS GPU cron did the same for
+`truenas-alerts`, so the Service outlives the entry point by exactly the gate phases that
+repoint those two publishers: retiring it first would have left PVE with no path at all
+and the symptom would have been silence. Once phase 4 runs, both publish to
+`https://ntfy.epaflix.com` and the Service is `ClusterIP`. The owner's phrase on #904 was
+that the LoadBalancer "stops being the interface"; do not treat .112 as free to reassign
+until the gate evidence (connection-refused probe, `ip addr` on the former vipHost) is
+pasted on #920.
 
 Because the Service moves namespace while keeping the same explicit `loadBalancerIP`,
 the cutover has an order: **sync `observability` first, then `odysseus`**. kube-vip's
