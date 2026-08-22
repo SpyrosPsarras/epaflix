@@ -1,0 +1,156 @@
+# Scrape targets for the two TrueNAS exporters on 192.168.10.200 (#917, #918).
+#
+# WHY THIS SHAPE
+# TrueNAS is not a K3s member, so pod/endpoint discovery does not reach it. The
+# #917 decision (2026-08-21, "Reuse Service + EndpointSlice") settled the
+# convention for every off-cluster TrueNAS target: a selector-less headless
+# Service, a hand-written static EndpointSlice behind it, and a ServiceMonitor
+# on top. No `static_config` in prometheus-values.yaml, no second convention.
+# In-repo precedents this copies: control-plane-endpointslices.yaml in this
+# directory and 2-k3s/08.servarr/jellyfin/jellyfin-truenas-redirect.yaml (which
+# already points a selector-less Service at this exact host).
+#
+# NEVER A v1 Endpoints OBJECT
+# ArgoCD's global `resource.exclusions` (2-k3s/11.argocd/helm-values.yaml) drops
+# core `Endpoints` cluster-wide, so an Endpoints object here would live
+# out-of-band: not in the Application's managed set, not selfHeal-recreatable,
+# and silently gone if anything deletes it (#147/#121). `discovery.k8s.io`
+# EndpointSlice is NOT excluded and is tracked normally.
+#
+# EXPLICIT `namespace: observability` ON EVERY OBJECT IS MANDATORY.
+# kustomization.yaml in this directory has NO top-level `namespace:`
+# transformer, by documented design - a blanket transformer would rewrite
+# kube-prometheus-stack's kube-system control-plane exporter Services into
+# endpoint-less shells (#53).
+#
+# THE `job` LABEL IS THE ONE THAT DISCRIMINATES, NOT `instance`.
+# Both ServiceMonitors relabel `instance` to the bare host address
+# `192.168.10.200` (pve-exporter/servicemonitor.yaml precedent: readable alerts
+# instead of a pod IP), so `instance` alone cannot tell the two exporters apart.
+# The Prometheus Operator sets `job` to the Service name, so the alert groups
+# `truenas-gpu` and `truenas-memory` in alertmanager-config/custom-alerts.yaml
+# scope on job="truenas-gpu-exporter" / job="truenas-node-exporter". Renaming a
+# Service below silently empties those expressions - rename the alert scoping in
+# the same commit.
+#
+# The exporters themselves are TrueNAS custom apps, installed from the tracked
+# compose files at 0-truenas/custom-apps/{node-exporter,nvidia-gpu-exporter}/.
+# Their lifecycle is middleware-managed on the appliance, outside ArgoCD - the
+# cost the #918 decision accepted explicitly.
+---
+# --- node-exporter (host + ZFS ARC, #918) ------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: truenas-node-exporter
+  namespace: observability
+  labels:
+    app: truenas-node-exporter
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - name: http-metrics
+      port: 9100
+      protocol: TCP
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: truenas-node-exporter
+  namespace: observability
+  labels:
+    # Binds this slice to the selector-less Service above. Without this label
+    # the Service has no backing endpoints and the target simply never appears.
+    kubernetes.io/service-name: truenas-node-exporter
+addressType: IPv4
+ports:
+  - name: http-metrics
+    port: 9100
+    protocol: TCP
+endpoints:
+  - addresses:
+      - 192.168.10.200
+    conditions:
+      ready: true
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: truenas-node-exporter
+  namespace: observability
+  labels:
+    app: truenas-node-exporter
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app: truenas-node-exporter
+  endpoints:
+    - port: http-metrics
+      interval: 60s
+      scrapeTimeout: 30s
+      path: /metrics
+      relabelings:
+        # `action: replace` is the Prometheus Operator default - written out so
+        # ArgoCD does not read the operator-injected default as drift under
+        # ServerSideApply (same note as pve-exporter/servicemonitor.yaml).
+        - action: replace
+          targetLabel: instance
+          replacement: "192.168.10.200"
+---
+# --- nvidia_gpu_exporter (GPU, #916) -----------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: truenas-gpu-exporter
+  namespace: observability
+  labels:
+    app: truenas-gpu-exporter
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - name: http-metrics
+      port: 9835
+      protocol: TCP
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: truenas-gpu-exporter
+  namespace: observability
+  labels:
+    kubernetes.io/service-name: truenas-gpu-exporter
+addressType: IPv4
+ports:
+  - name: http-metrics
+    port: 9835
+    protocol: TCP
+endpoints:
+  - addresses:
+      - 192.168.10.200
+    conditions:
+      ready: true
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: truenas-gpu-exporter
+  namespace: observability
+  labels:
+    app: truenas-gpu-exporter
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app: truenas-gpu-exporter
+  endpoints:
+    - port: http-metrics
+      interval: 60s
+      scrapeTimeout: 30s
+      path: /metrics
+      relabelings:
+        - action: replace
+          targetLabel: instance
+          replacement: "192.168.10.200"

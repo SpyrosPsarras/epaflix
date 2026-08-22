@@ -931,3 +931,265 @@ spec:
               log for the report before touching anything. This alert clears by
               itself once a later scheduled run succeeds; deleting the failed Job
               object is not required and is not a fix.
+
+    # =========================================================================
+    # TrueNAS GPU (#916). VENDORED, NOT WRITTEN HERE.
+    #
+    # Source: utkuozdemir/nvidia_gpu_exporter, tag **v1.14.0** (pinned),
+    #   charts/nvidia-gpu-exporter/templates/prometheusrule.yaml
+    #   https://raw.githubusercontent.com/utkuozdemir/nvidia_gpu_exporter/v1.14.0/charts/nvidia-gpu-exporter/templates/prometheusrule.yaml
+    # Fetched 2026-08-22. The template's knobs are rendered with the chart's own
+    # defaults from charts/nvidia-gpu-exporter/values.yaml at the same tag.
+    #
+    # The #916 decision (2026-08-21, "Repo owns, both conditions, delete cron")
+    # makes this repo the single source of truth for GPU alert expressions: no
+    # chart template sits in the GPU alerting path, matching the traefik rules
+    # at line 231 of this file and the four standalone monitoring manifests.
+    #
+    # FORK WARNING, recorded so nobody rediscovers it: upstream PromQL fixes no
+    # longer arrive automatically. This is a fork and its drift is ours to
+    # carry, closed only by a human noticing an upstream change. A
+    # nvidia_gpu_exporter row in .github/workflows/upstream-release-watch.yml is
+    # the follow-up issue that makes "a human notices" mechanical.
+    #
+    # NEVER SILENCE NvidiaGpuExporterCollectionFailing (and NvidiaGpuMissing).
+    # On 2026-08-09 the driver stayed loaded, /dev/nvidia* stayed present, and
+    # nvidia-smi exited 6 with "No devices were found" for ~23 hours while
+    # ollama answered 200 at 2.97 tok/s on CPU. Xid-only coverage would have
+    # been silent through all of it. Application health is NOT a GPU signal and
+    # appears in none of these expressions - the decision forecloses it.
+    #
+    # DEVIATIONS FROM THE UPSTREAM BYTES, all of them, for the reviewer:
+    #  1. Every expression is scoped to `job="truenas-gpu-exporter"`. Upstream
+    #     ships them unscoped. The job label is what discriminates our two
+    #     TrueNAS exporters, because both ServiceMonitors relabel `instance` to
+    #     the bare host address - see the header of ../truenas-exporters.yaml.
+    #  2. Template knobs rendered at chart defaults: collectionFailing.for 10m /
+    #     severity warning, collectionSlow.thresholdSeconds 5 with for 10m,
+    #     xidCritical.codes [48,62,64,74,79,95,119,120].
+    #  3. A `component: truenas-gpu` label is added (house convention, used by
+    #     no routing rule today) and each description gains a local pointer to
+    #     0-truenas/README.md, section "GPU (RTX 2070 SUPER)". Upstream's own
+    #     wording is otherwise kept.
+    #  4. NAME: the #916 decision comment lists the slow-collection alert as
+    #     `NvidiaGpuCollectionSlow`. Upstream v1.14.0 names it
+    #     `NvidiaGpuExporterCollectionSlow`; the decision transcribed it. The
+    #     upstream spelling wins here because the instruction is to vendor
+    #     verbatim - greps and runbooks must use it.
+    #  5. NvidiaGpuMissing is a DELIBERATE FIFTH RULE beyond the four names the
+    #     decision enumerates, added on the owner's ruling 2026-08-22. Upstream
+    #     ships it opt-in (values.yaml gpuMissing.enabled: false). Reason it is
+    #     on: the decision's operative sentence is "both conditions", meaning
+    #     GPU loss and collection health, and "exporter up, nvidia-smi sees no
+    #     GPU" IS the 2026-08-09 signature. It joins collection-health in the
+    #     never-silence class. Upstream's own caveat travels with it: it also
+    #     fires for up to 6h after a GPU is deliberately removed, and it needs a
+    #     stable instance label across exporter restarts - both are satisfied
+    #     here, the card is not removable in normal operation and `instance` is
+    #     relabelled to a constant.
+    #
+    # BACKEND DEPENDENCY, load-bearing: NvidiaGpuXidCritical queries
+    # nvidia_smi_xid_last_timestamp_seconds, which exists ONLY on the exporter's
+    # native NVML backend (upstream docs/CONFIGURE.md at v1.14.0). That is why
+    # 0-truenas/custom-apps/nvidia-gpu-exporter/docker-compose.yaml pins the
+    # `1.14.0-nvml` image flavor. On the plain exec image this rule is an
+    # expression that can never fire - if the gate has to fall back to it, that
+    # is recorded there and in the deploy-gate runbook, not left implied.
+    # Xid firing evidence is synthetic by necessity either way: an Xid cannot be
+    # forced on real hardware without harming the card, so the promtool unit
+    # tests in custom-alerts-tests.yaml (must-fire + must-not-fire pair) are the
+    # evidence, and they are committed next to this file.
+    # =========================================================================
+    - name: truenas-gpu
+      interval: 60s
+      rules:
+        - alert: NvidiaGpuExporterCollectionFailing
+          expr: nvidia_smi_last_collect_success{job="truenas-gpu-exporter"} == 0
+          for: 10m
+          labels:
+            severity: warning
+            component: truenas-gpu
+          annotations:
+            summary: "GPU metric collection is failing on {{ $labels.instance }}"
+            description: >-
+              The exporter on {{ $labels.instance }} cannot collect GPU metrics.
+              Run nvidia-smi on the host by hand and check dmesg for NVRM/Xid messages. The most
+              common cause is a driver/library mismatch after a driver upgrade. THIS IS THE
+              2026-08-09 SIGNATURE: exporter serving, card gone, every application still
+              answering on CPU. Recovery runbook: 0-truenas/README.md, section
+              "GPU (RTX 2070 SUPER)". Never silence this one.
+
+        - alert: NvidiaGpuMissing
+          expr: |
+            (
+              count by (job, instance) (nvidia_smi_gpu_info{job="truenas-gpu-exporter"})
+              or
+              0 * sum by (job, instance) (nvidia_smi_last_collect_success{job="truenas-gpu-exporter"})
+            )
+            < max_over_time((count by (job, instance) (nvidia_smi_gpu_info{job="truenas-gpu-exporter"}))[6h:5m])
+            and on (job, instance) nvidia_smi_last_collect_success{job="truenas-gpu-exporter"} == 1
+          for: 10m
+          labels:
+            severity: warning
+            component: truenas-gpu
+          annotations:
+            summary: "A GPU disappeared on {{ $labels.instance }}"
+            description: >-
+              nvidia-smi reports fewer GPUs on {{ $labels.instance }} than the maximum seen in
+              the last 6 hours while collection stays healthy. There is exactly ONE card in this
+              box (RTX 2070 SUPER at 01:00.0), so this means it is gone while the driver still
+              answers - the 2026-08-09 WPR2 wedge, and the condition that went unnoticed for
+              ~23 hours. Check dmesg for "unexpected WPR2 already up" and "RmInitAdapter failed",
+              then follow the no-reboot recovery in 0-truenas/README.md, section
+              "GPU (RTX 2070 SUPER)". Never silence this one.
+
+        - alert: NvidiaGpuRecoveryActionNeeded
+          expr: nvidia_smi_gpu_recovery_action{job="truenas-gpu-exporter"} > 0
+          labels:
+            severity: critical
+            component: truenas-gpu
+          annotations:
+            summary: "A GPU on {{ $labels.instance }} needs a recovery action"
+            description: >-
+              The NVIDIA driver itself reports that GPU {{ $labels.uuid }} needs recovery. The
+              value names the action: 1 = reset the GPU, 2 = reboot the node, 3 = drain
+              peer-to-peer workloads, 4 = drain and reset (current value: {{ $value }}). Stop
+              ollama and Jellyfin first - nothing may hold /dev/nvidia* during a reset. Runbook:
+              0-truenas/README.md, section "GPU (RTX 2070 SUPER)".
+
+        - alert: NvidiaGpuXidCritical
+          expr: |
+            time() - nvidia_smi_xid_last_timestamp_seconds{job="truenas-gpu-exporter", xid=~"48|62|64|74|79|95|119|120"} < 600
+          labels:
+            severity: critical
+            component: truenas-gpu
+          annotations:
+            summary: "Critical GPU Xid error on {{ $labels.instance }}"
+            description: >-
+              GPU {{ $labels.uuid }} reported Xid {{ $labels.xid }}, a critical error, in the last
+              10 minutes. Among the default codes, 48/62/64/95/119/120 mean an uncorrectable
+              memory, microcontroller or GSP fault: reset the GPU. Xid 79 means the GPU fell off
+              the PCIe bus. Xid 74 is an NVLink fault. Check dmesg for the matching NVRM Xid line.
+              REQUIRES THE NVML BACKEND - the exporter must run the `-nvml` image flavor or this
+              series does not exist. Recovery: 0-truenas/README.md, section
+              "GPU (RTX 2070 SUPER)".
+
+        - alert: NvidiaGpuExporterCollectionSlow
+          expr: nvidia_smi_last_collect_duration_seconds{job="truenas-gpu-exporter"} > 5
+          for: 10m
+          labels:
+            severity: warning
+            component: truenas-gpu
+          annotations:
+            summary: "GPU metric collection is slow on {{ $labels.instance }}"
+            description: >-
+              Collecting GPU metrics on {{ $labels.instance }} takes longer than 5 seconds. A
+              healthy collection answers well under a second when the persistence daemon runs.
+              Check that nvidia-persistenced is up (0-truenas/scripts/gpu-persistenced.sh) and
+              read dmesg for Xid messages: sustained slowness often precedes a wedged driver.
+              Collections that hang entirely are caught by NvidiaGpuExporterCollectionFailing
+              instead of this one.
+
+    # =========================================================================
+    # TrueNAS host memory / ZFS ARC (#918).
+    #
+    # The #918 decision (2026-08-21, "Require it, signal is ARC vs its own cap")
+    # names the leading indicator: ARC measured against its own target/maximum,
+    # plus forced shrink under pressure. NOT a free-memory floor - a ZFS host
+    # fills RAM with ARC by design (22G of 31G in use with ARC at its cap on a
+    # healthy box), so a floor fires constantly and a constantly-firing alert
+    # gets silenced, which is how this map started.
+    #
+    # NO TUNED NUMBER LIVES HERE. The decision refuses a threshold that has no
+    # baseline behind it, and the baseline (a normal day plus an ollama load) is
+    # its own follow-up issue. Every rule below is either a recorded recovery
+    # fact (the 12 GiB cap) or a structural ratio against the box's own setting.
+    #
+    # Series come from node-exporter's ZFS collector, which parses
+    # /proc/spl/kstat/zfs/arcstats and emits each uint64 key as
+    # node_zfs_arc_<key> (node_exporter v1.12.1, collector/zfs_linux.go).
+    # Scoped on job="truenas-node-exporter" for the reason in the header of
+    # ../truenas-exporters.yaml: `instance` is relabelled to the bare host
+    # address on BOTH TrueNAS exporters, so only `job` discriminates.
+    # =========================================================================
+    - name: truenas-memory
+      interval: 60s
+      rules:
+        # 12884901888 = 12 GiB. Not a tuned threshold: it is the zfs_arc_max
+        # tunable applied during the 2026-08-09 recovery on this 31 GB box,
+        # which previously ran ARC uncapped. This rule catches the cap being
+        # lost - a TrueNAS update resetting the tunable, a /etc/modprobe.d edit
+        # that does not survive, a hand-change - which is the precondition of
+        # the wedge, not the wedge itself.
+        - alert: TruenasArcCapDrift
+          expr: node_zfs_arc_c_max{job="truenas-node-exporter"} != 12884901888
+          for: 15m
+          labels:
+            severity: warning
+            component: truenas-memory
+          annotations:
+            summary: "TrueNAS ZFS ARC cap is no longer 12 GiB"
+            description: >-
+              node_zfs_arc_c_max on 192.168.10.200 reads {{ $value }} instead of the
+              12884901888 (12 GiB) cap applied during the 2026-08-09 recovery. Uncapped ARC on
+              this 31 GB box is the suspected trigger of the WPR2 GPU wedge: the driver hit
+              NV_ERR_NO_MEMORY part-way through initialising the GSP firmware. Re-apply the ZFS
+              tunable AND the /etc/modprobe.d/zfs.conf boot copy - see the guards table in
+              0-truenas/README.md, section "GPU (RTX 2070 SUPER)".
+
+        # THE 5% MARGIN IS FORCED BY MEASUREMENT, not taste. ARC oscillates
+        # around its cap and overshoots it slightly in normal operation.
+        # Measured read-only on 192.168.10.200, 2026-08-22, four reads of
+        # /proc/spl/kstat/zfs/arcstats 60s apart, c_max=12884901888 throughout:
+        #   size=12873050760   (under)
+        #   size=12882305584   (under)
+        #   size=12895364840   (ABOVE cap by 10462952 B, +0.081%)
+        #   size=12894717704   (ABOVE cap by 9815816 B, +0.076%)
+        # So the naive `size > c_max` form would fire permanently on a healthy
+        # box - exactly the constantly-firing alert #918 refuses. 5% of the cap
+        # is 644 MiB, roughly 60x the observed jitter, and it is a fraction of
+        # the box's own setting rather than an absolute number needing a
+        # baseline. It says "the cap is not being honoured", not "ARC is full".
+        - alert: TruenasArcOverCap
+          expr: |
+            node_zfs_arc_size{job="truenas-node-exporter"}
+            / node_zfs_arc_c_max{job="truenas-node-exporter"}
+            > 1.05
+          for: 15m
+          labels:
+            severity: warning
+            component: truenas-memory
+          annotations:
+            summary: "TrueNAS ZFS ARC is sustained above its own cap"
+            description: >-
+              ARC on 192.168.10.200 has been more than 5% above its own c_max for 15 minutes
+              (ratio {{ $value }}). Normal jitter is under 0.1%, so this is the cap not being
+              enforced rather than a warm cache. Check the zfs_arc_max tunable and
+              /etc/modprobe.d/zfs.conf, and watch the GPU: uncapped ARC on this 31 GB box is the
+              suspected trigger of the 2026-08-09 WPR2 wedge.
+
+        # Forced shrink under pressure, the second half of the #918 signal.
+        # THROTTLE COUNT ONLY, deliberately. Measured 2026-08-22 on the box:
+        # memory_throttle_count = 0 (it only moves under genuine memory
+        # pressure), while memory_direct_count = 545799 cumulative and flat
+        # across a 2-minute sample. A counter that already sits near 546k on a
+        # HEALTHY box is evidence it ticks during normal operation, so
+        # increase()>0 on it would be a warning that fires on routine behaviour
+        # - and a warning that fires on routine behaviour erodes trust in the
+        # whole set. Whether memory_direct_count joins as a RATE threshold is
+        # the explicit job of the ARC baseline follow-up issue (normal day plus
+        # ollama load). The unambiguous signal alerts now; the ambiguous one
+        # gets measured first.
+        - alert: TruenasArcForcedShrink
+          expr: increase(node_zfs_arc_memory_throttle_count{job="truenas-node-exporter"}[15m]) > 0
+          labels:
+            severity: warning
+            component: truenas-memory
+          annotations:
+            summary: "TrueNAS ZFS ARC was throttled by memory pressure"
+            description: >-
+              node_zfs_arc_memory_throttle_count on 192.168.10.200 increased by {{ $value }} in
+              15 minutes; it was 0 and static before. ZFS is being forced to give memory back
+              under pressure, which is the condition the driver hit NV_ERR_NO_MEMORY under on
+              2026-08-09. Find what is asking for the memory (ollama model load, a large
+              transcode) and check nvidia-smi still sees the card.
