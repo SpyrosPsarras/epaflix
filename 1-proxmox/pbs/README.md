@@ -255,7 +255,10 @@ What the stanzas do:
   weeks of nightly backup failures went unnoticed. Tracked in #720.
 - `ntfy-pve` - webhook to `http://192.168.10.112:8091/pve-backups`, the LAN-only
   kube-vip LoadBalancer on the in-cluster ntfy Service
-  (`2-k3s/13.odysseus/ntfy.yaml`). Header and body values are base64 per the API
+  (`2-k3s/10.observability/ntfy.yaml` - ntfy moved out of the `odysseus`
+  namespace and Application under #914). That LoadBalancer is retained on
+  purpose until this webhook is repointed at `https://ntfy.epaflix.com`, which
+  is #904 / #920. Header and body values are base64 per the API
   schema: `Title = {{ title }}`, `Tags = warning`, `Priority = 4`,
   body = `{{ title }}\n\n{{ message }}`.
 - `ntfy-failures` - routes `warning,error` only, so a successful nightly job
@@ -275,5 +278,5 @@ pvesh create /cluster/notifications/matchers --name ntfy-failures --mode all \
 
 Job failures now route to ntfy instead of unread local root mail — see
 [`notifications.cfg`](notifications.cfg) in this directory, and
-`2-k3s/13.odysseus/ntfy.yaml` for the LAN-only LoadBalancer that makes ntfy
+`2-k3s/10.observability/ntfy.yaml` for the LAN-only LoadBalancer that makes ntfy
 reachable from the PVE hosts.

@@ -38,6 +38,7 @@ Complete monitoring, logging, and service mesh observability for the K3s cluster
 - **node-exporter** (DaemonSet): Node-level CPU, memory, disk, network metrics
 - **kube-state-metrics** (2 replicas): Kubernetes cluster state metrics
 - **pve-exporter** (1 replica): Proxmox VE host and VM metrics from 192.168.10.10 and .11
+- **ntfy** (1 replica): the load-bearing notification receiver for the whole platform. Moved in from the `odysseus` namespace under the #914 decision. See "ntfy" under Alerting
 
 ### Optional Components (Not Installed)
 - **Cilium CNI**: eBPF-based networking (currently using Flannel)
@@ -54,6 +55,7 @@ Complete monitoring, logging, and service mesh observability for the K3s cluster
 | **Grafana** | https://grafana.epaflix.com | Authentik SSO (or admin / <POSTGRES_PASSWORD>) | ✅ Running |
 | **Prometheus** | Port-forward only | N/A | ✅ Running |
 | **AlertManager** | Port-forward only | N/A | ✅ Running |
+| **ntfy** | https://ntfy.epaflix.com (Traefik `internal`, 192.168.10.102) — plus the legacy plaintext http://192.168.10.112:8091, still live for PVE | None (un-gated on the LAN, by design) | ✅ Running. The hostname needs the deploy-gate DNS record below before it resolves |
 
 ## Installation
    # - k3s-master-51: 10GB (192.168.10.51, Proxmox takaros)
@@ -239,10 +241,171 @@ See [PERFORMANCE-METRICS.md](PERFORMANCE-METRICS.md) for detailed before/after c
 
 ## Alerting
 
+### ntfy
+
+ntfy is **the leg that actually delivers**. SMTP has been dead since #461, so
+the Alertmanager `webhook_configs` leg on topic `k8s-alertmanager` (#568/PR
+#574) is what reaches a human. The owner's 2026-08-21 decision on #904/#914/#915
+made that official: ntfy is the load-bearing receiver, email drops to secondary
+or goes entirely (the email receiver's deletion is #921).
+
+| Aspect | Value |
+|---|---|
+| Manifests | `ntfy.yaml` (Deployment + LoadBalancer Service), `ntfy-cache-pvc.yaml`, `ingress/ntfy-ingressroute.yaml` |
+| Namespace / owning app | `observability` / ArgoCD Application `observability` (moved from `odysseus`, #914) |
+| Entry point | `https://ntfy.epaflix.com` on Traefik's `internal` entry point at **192.168.10.102**, TLS from the `cloudflare` certResolver (#904). NOT the public `websecure` entry point on .101 — see the header of `ingress/ntfy-ingressroute.yaml` |
+| Auth | none. Publishers are machines (PVE, the TrueNAS GPU cron) posting with no interactive login, so a forward-auth middleware would break them. Same posture as `searxng-internal` and `qbittorrent-internal` |
+| Cache | `ntfy-cache` PVC, local-path, RWO, 1Gi (#915). Was an `emptyDir`. The Deployment is `strategy: Recreate` because local-path is RWO + WaitForFirstConsumer |
+| Retention | ntfy's built-in **12h** default — `NTFY_CACHE_DURATION` is set nowhere, so the PVC can never hold more than 12h of backlog |
+| In-cluster address | `http://ntfy.observability.svc.cluster.local:8091` (Alertmanager's webhook url, and `NTFY_BASE_URL` in `odysseus-config`, which is Odysseus's dial address) |
+| ntfy's own `base-url` | `https://ntfy.epaflix.com`, set via the `NTFY_BASE_URL` env in `ntfy.yaml`. That is a *server-side* setting — the public-facing URL ntfy writes into attachment/click links and push payloads — not an address anything dials, so it follows the entry point and not the namespace |
+| Topics | `k8s-alertmanager` (Alertmanager), `pve-backups` (Proxmox VE), `truenas-alerts` (the TrueNAS GPU cron) |
+
+**The LoadBalancer at 192.168.10.112 is still live and that is deliberate.**
+The Proxmox VE hosts POST vzdump failures to the hardcoded
+`http://192.168.10.112:8091/pve-backups` (#597,
+`1-proxmox/pbs/notifications.cfg`) and PVE's own native target is separately
+broken (#1076), so deleting the Service before the PVE cutover would leave PVE
+with no path at all and the symptom would be silence. The reroute and the
+retirement land together in #904 / #920.
+
+#### Two DNS changes happen on the Pi-hole box, not through ArgoCD
+
+`ntfy.epaflix.com` needs a LAN-only record. Neither change is applied by a sync;
+both are hand-applied on the Pi-hole LXC (192.168.10.30) at this PR's deploy
+gate, and until then the hostname resolves to the Cloudflare wildcard and the
+IngressRoute is unreachable. `10-epaflix.conf` has no representation in this
+repo at all — exactly the live-only-fix trap `CLAUDE.md` warns about — so it is
+recorded here and in `.github/instructions/pihole.instructions.md`. The Unbound
+file does have a tracked copy and is updated in this PR.
+
+1. `/etc/dnsmasq.d/10-epaflix.conf` on 192.168.10.30 gets
+   `address=/ntfy.epaflix.com/192.168.10.102` (back the file up first — the box
+   already carries dated `.bak` copies, which is the local convention), then
+   restart `pihole-FTL`. Without it the name resolves to the Cloudflare
+   wildcard and the IngressRoute is unreachable.
+2. `/etc/unbound/unbound.conf.d/no-aaaa-leak.conf` gets
+   `local-zone: "ntfy.epaflix.com." static` next to the existing
+   searxng / qbittorrent / remote-pi entries, then `unbound-checkconf` and
+   `unbound-control reload`. dnsmasq answers the A record authoritatively while
+   Unbound suppresses the AAAA, so an IPv6 LAN client is not sent to the gated
+   public route on .101. The git source of truth for that file is
+   `1-proxmox/pihole/unbound-no-aaaa-leak.conf` and it is updated in the same
+   PR; `1-proxmox/pihole/aaaa-tripwire.sh` is the mechanical check.
+
+`unbound-checkconf` before the reload is not optional: a malformed file takes
+LAN DNS down entirely.
+
+#### Cutover: sync order, the prune, and the 192.168.10.112 handover
+
+The move crosses two ArgoCD Applications, so for a moment two Services in two
+namespaces ask for the same `loadBalancerIP` — and .112 is the only path PVE
+has, since its native target is broken (#1076). Order the two syncs by hand at
+the deploy gate rather than letting the 120s reconciliation timer
+(`argocd-cm` `timeout.reconciliation=120s`) pick an order for you:
+
+```bash
+argocd app sync observability   # FIRST: creates observability/ntfy, which claims .112
+argocd app sync odysseus        # THEN: prunes odysseus/ntfy
+```
+
+Why that order and not the reverse — read out of the pinned sources and the live
+cluster on 2026-08-22, not assumed:
+
+- **Allocation does not deduplicate.** kube-vip-cloud-provider v0.0.12
+  (`2-k3s/03.kube-vip-cloud-provider/cloud-controller.yaml`) short-circuits any
+  Service that already carries `spec.loadBalancerIP`:
+  `checkLegacyLoadBalancerIPAnnotation` in `pkg/provider/loadBalancer.go` copies
+  the value into the `kube-vip.io/loadbalancerIPs` annotation and returns. The
+  pool in `ip-pool-configmap.yaml` and its in-use set (`mapImplementedServices`)
+  are only read on the auto-allocation path, which an explicit IP never reaches.
+  So `range-global` being namespace-agnostic is beside the point: both Services
+  are simply granted .112, with no error and no Event.
+- **Both claims land on one node, not two.** The kube-vip DaemonSet (v0.8.7,
+  `2-k3s/01.kube-vip/kube-vip-daemonset.yaml`) sets `cp_enable=true` +
+  `vip_leaderelection=true` and does NOT set `svc_election`, so one leader — the
+  holder of the `plndr-svcs-lock` lease — advertises every service VIP. Live:
+  `plndr-svcs-lock` and `plndr-cp-lock` are both held by `k3s-master-53`, every
+  service VIP including .112 is on that node's `eth0`, and `odysseus/ntfy`
+  carries `kube-vip.io/vipHost: k3s-master-53`. The duplicate therefore never
+  becomes two nodes ARPing one address.
+- **Claiming an address that is already plumbed is a no-op.** `AddIP` in
+  `pkg/vip/address.go` prechecks and then uses `netlink.AddrReplace`, so the
+  second claim does not fail.
+- **Deleting the first claim while a second holds the same VIP does NOT tear the
+  address down.** `deleteService` in `pkg/manager/services.go` intersects the
+  departing instance's VIPs with those of every remaining instance and skips
+  `cluster.Stop()` when they overlap. That is the entire reason for the order:
+  with `observability/ntfy` already up, the odysseus prune leaves .112 plumbed.
+  Prune first and there is no other holder, so kube-vip *does* remove .112 from
+  eth0 and PVE's only working target is dark until the observability sync
+  re-adds it.
+- **Not established:** which of the two Services kube-proxy's DNAT for
+  192.168.10.112:8091 wins during the overlap. Both backends are working ntfy
+  pods, so a publish gets its 200 either way, but a message published in that
+  window may be cached in the pod that is about to go away. The overlap lasts
+  one manual sync; run the cutover outside the nightly vzdump window and the
+  question does not arise. Measuring it properly would mean applying a duplicate
+  Service to the live cluster, which was out of scope for the PR.
+
+**The prune is automatic, and these are the tracking-ids that have to
+disappear.** Both Applications carry
+`{"automated":{"prune":true,"selfHeal":true}}` (verified live 2026-08-22) and
+their headers agree — `app-odysseus.yaml` "prune ENABLED 2026-08-01",
+`app-observability.yaml` "prune enabled 2026-05-31 after soak (#53)" — so this
+is not one of the nine "prune NEVER turns on" Applications and no manual
+`kubectl delete` is wanted. The odysseus sync must remove exactly two resources,
+whose live tracking-ids are:
+
+- `odysseus:apps/Deployment:odysseus/ntfy`
+- `odysseus:/Service:odysseus/ntfy`
+
+Post-sync checks. Run all of them and paste the literal values, per #50/#551:
+
+```bash
+# 1. the old objects are gone, not merely reported out of sync
+kubectl --context epaflix -n odysseus get deploy ntfy    # want: NotFound
+kubectl --context epaflix -n odysseus get svc ntfy       # want: NotFound
+
+# 2. the new objects carry the new tracking-id
+kubectl --context epaflix -n observability get deploy ntfy \
+  -o jsonpath='{.metadata.annotations.argocd\.argoproj\.io/tracking-id}{"\n"}'
+# want: observability:apps/Deployment:observability/ntfy
+kubectl --context epaflix -n observability get svc ntfy \
+  -o jsonpath='{.metadata.annotations.argocd\.argoproj\.io/tracking-id}{"\n"}'
+# want: observability:/Service:observability/ntfy
+
+# 3. .112 STILL ANSWERS. This is PVE's only working path (#1076) - the one
+#    check that must not be skipped.
+curl -s -o /dev/null -w '%{http_code}\n' http://192.168.10.112:8091/v1/health   # want: 200
+kubectl --context epaflix -n observability get svc ntfy \
+  -o jsonpath='{.status.loadBalancer.ingress[0].ip} {.metadata.annotations.kube-vip\.io/vipHost}{"\n"}'
+# want: 192.168.10.112 <the plndr-svcs-lock holder>
+ssh ubuntu@192.168.10.53 'ip -4 -o addr show eth0' | grep 192.168.10.112        # want: one hit
+
+# 4. the new entry point answers, and the cache is bound
+curl -sk -o /dev/null -w '%{http_code}\n' https://ntfy.epaflix.com/v1/health    # want: 200
+kubectl --context epaflix -n observability get pvc ntfy-cache \
+  -o jsonpath='{.status.phase}{"\n"}'                                          # want: Bound
+
+# 5. both Applications settled
+argocd app get observability --refresh -o json | jq '.status.sync.status, .status.health.status'
+argocd app get odysseus      --refresh -o json | jq '.status.sync.status, .status.health.status'
+```
+
+If check 3 is not 200, kube-vip lost the address — the order was inverted, or
+the services leader moved mid-cutover. Remedy without touching git: delete the
+kube-vip pod on the `plndr-svcs-lock` holder so it rebuilds its service
+instances, `kubectl --context epaflix -n kube-system delete pod -l
+name=kube-vip --field-selector spec.nodeName=<that node>`. Do not "fix" it by
+editing the Service.
+
 ### Email Configuration
 
 The single `email` receiver carries two legs - `email_configs` (SMTP) and
-`webhook_configs` (ntfy topic `k8s-alertmanager`, added by #568/PR #574).
+`webhook_configs` (ntfy topic `k8s-alertmanager`, added by #568/PR #574). The
+webhook url is `http://ntfy.observability.svc.cluster.local:8091` since the
+#914 namespace move; it read `ntfy.odysseus...` before.
 
 SMTP relays through `vh4c.ezhellas.com:587` (STARTTLS + AUTH), **not**
 `mail.epaflix.com`. `mail.epaflix.com` is caught by the proxied

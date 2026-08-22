@@ -43,7 +43,7 @@ Pi-hole FTL / dnsmasq (192.168.10.30)
 Pi-hole's `custom.list` is intentionally empty. Unbound holds no `local-data` for `epaflix.com`
 domains — its only role is upstream resolution for everything not in dnsmasq.d, plus two
 `local-zone: static` guards that stop names leaking to public DNS: one for the whole
-`vm.epaflix.com` zone, one per name for four internal-only `*.epaflix.com` names
+`vm.epaflix.com` zone, one per name for eight internal-only `*.epaflix.com` names
 (see "AAAA and the Cloudflare wildcard" below).
 
 > **HTTPS record type filtering (verified 2026-03-22):** Modern browsers (Firefox, Chrome)
@@ -71,7 +71,7 @@ domains — its only role is upstream resolution for everything not in dnsmasq.d
 | `/etc/pihole/custom.list` | **Empty** — intentionally cleared, do not repopulate |
 | `/etc/unbound/unbound.conf.d/pi-hole.conf` | Unbound core: port 5335, cache, DoT upstream |
 | `/etc/unbound/unbound.conf.d/vm-epaflix.conf` | `local-zone: static` security directive only — no data entries |
-| `/etc/unbound/unbound.conf.d/no-aaaa-leak.conf` | **Active** - seven per-name `local-zone: static` entries that stop AAAA leaking to the Cloudflare wildcard (#868). Tracked in git at `1-proxmox/pihole/unbound-no-aaaa-leak.conf`; `1-proxmox/pihole/aaaa-tripwire.sh` checks it against the live records (#882) |
+| `/etc/unbound/unbound.conf.d/no-aaaa-leak.conf` | **Active** - eight per-name `local-zone: static` entries that stop AAAA leaking to the Cloudflare wildcard (#868). Tracked in git at `1-proxmox/pihole/unbound-no-aaaa-leak.conf`; `1-proxmox/pihole/aaaa-tripwire.sh` checks it against the live records (#882) |
 | `/etc/unbound/unbound.conf.d/remote-control.conf` | Enables `unbound-control` via `/run/unbound.ctl` |
 | `/etc/unbound/unbound.conf.d/disable-ipv6.conf` | Placeholder (`server:` stanza only, no directives) |
 | `/etc/pihole/pihole.toml` | Pi-hole v6 config — managed by FTL, do not edit directly |
@@ -114,13 +114,15 @@ IP column, do not assume. Rows are in live-file order, so a `diff` against the b
 | `syncthing.epaflix.com` | **192.168.10.110** | Syncthing GUI - its own kube-vip LoadBalancer (`syncthing-gui`), no Traefik |
 | `remote-pi.epaflix.com` | **192.168.10.102** | Remote Pi relay - Traefik `internal` entry point, not the public LB |
 | `cliproxy.epaflix.com` | **192.168.10.102** | CLIProxyAPI - Traefik `internal` entry point, not the public LB (#858) |
+| `ntfy.epaflix.com` | **192.168.10.102** | ntfy - Traefik `internal` entry point, not the public LB (#904). The `address=` line is appended to `10-epaflix.conf` on the box at this PR's deploy gate, so until then this row is the plan and not the live file. The `ntfy-internal` IngressRoute carries **no** Authentik middleware on purpose: the publishers are machines (Proxmox VE on topic `pve-backups`, the TrueNAS GPU cron on `truenas-alerts`) that POST with no interactive login. There is no `websecure` route for this name at all - a public one would publish an unauthenticated publish/subscribe endpoint. The legacy plaintext LoadBalancer at `192.168.10.112:8091` is still live pending the PVE cutover (#920) |
 
 > **Not every record is 192.168.10.101.** Services on Traefik's `internal` entry
 > point resolve to the dedicated `traefik-internal` LoadBalancer at
-> `192.168.10.102`, which the router forwards nothing to. Four names are on it:
-> `searxng`, `qbittorrent`, `remote-pi` and `cliproxy`. Of those, only `searxng`
-> and `qbittorrent` also have a gated public route on `.101` that DNS never
-> reaches - so "it is behind Authentik" is false for both by name.
+> `192.168.10.102`, which the router forwards nothing to. Five names are on it:
+> `searxng`, `qbittorrent`, `remote-pi`, `cliproxy` and `ntfy`. Of those, only
+> `searxng` and `qbittorrent` also have a gated public route on `.101` that DNS
+> never reaches - so "it is behind Authentik" is false for both by name.
+> `ntfy` has no public route to be confused with.
 
 > **No wildcard**: any unlisted `*.epaflix.com` subdomain falls through to public DNS
 > and resolves to the real Cloudflare IPs (`172.67.179.219` / `104.21.59.155`).
@@ -317,9 +319,9 @@ alone. Everything else points straight at a box on the LAN and needs one of:
 
 ### The non-`192.168.10.101` names
 
-Nine names, one per non-`192.168.10.101` `*.epaflix.com` `address=` line on the box.
-Every row was measured on 2026-08-10: A from `@192.168.10.30`, AAAA from both
-`@192.168.10.30` and `@1.1.1.1`.
+Ten names, one per non-`192.168.10.101` `*.epaflix.com` `address=` line on the box.
+The first nine rows were measured on 2026-08-10: A from `@192.168.10.30`, AAAA from
+both `@192.168.10.30` and `@1.1.1.1`. `ntfy` is the tenth and is added by #904.
 
 | Domain | IP | AAAA protection |
 |---|---|---|
@@ -332,12 +334,14 @@ Every row was measured on 2026-08-10: A from `@192.168.10.30`, AAAA from both
 | `remote-pi.epaflix.com` | 192.168.10.102 | Unbound `local-zone`, added 2026-08-09. #868 queued an exact Cloudflare record for this name and it was **not** taken - `dig +short A remote-pi.epaflix.com @1.1.1.1` answers the Cloudflare proxy pair, not `192.168.10.102`. A `local-zone` was chosen instead so `.102` is not published a third time. See `2-k3s/17.remote-pi/README.md` |
 | `cliproxy.epaflix.com` | 192.168.10.102 | Exact DNS-only Cloudflare A record, already in place (#858). Clean |
 | `wg-hop.epaflix.com` | 192.168.10.45 | Exact DNS-only Cloudflare A record, already in place. Clean |
+| `ntfy.epaflix.com` | 192.168.10.102 | Unbound `local-zone`, added by #904 with the `ntfy-internal` IngressRoute. Same case as `searxng`, `qbittorrent` and `remote-pi`: `.102` is the internal entry point and ntfy has no public route at all, so a Cloudflare AAAA would send an IPv6 LAN client to a `websecure` route that does not exist. Both the `address=` line and this `local-zone` are applied on the box at the deploy gate; the tracked copy is `1-proxmox/pihole/unbound-no-aaaa-leak.conf` |
 
-Seven of the nine are `local-zone`, and they deliberately get **no** Cloudflare
+Eight of the ten are `local-zone`, and they deliberately get **no** Cloudflare
 record. For `bastion`, `takaros`, `evanthoulaki` and `syncthing` one would publish
 `192.168.10.43`, `.10`, `.11` and `.110` in public DNS, which is worse than the leak it
-fixes. For `searxng`, `qbittorrent` and `remote-pi` it would publish `192.168.10.102`
-for no benefit and still point IPv6 clients at the gated public route.
+fixes. For `searxng`, `qbittorrent`, `remote-pi` and `ntfy` it would publish
+`192.168.10.102` for no benefit and still point IPv6 clients at a public route that is
+gated (searxng, qbittorrent) or absent entirely (ntfy).
 
 > **The live list is the file, not a count in this doc.** Read it with
 > `ssh root@192.168.10.30 "grep local-zone /etc/unbound/unbound.conf.d/no-aaaa-leak.conf"`.
@@ -504,7 +508,7 @@ same change. The deleted text is in git history if you want to read it:
 | `/etc/unbound/unbound.conf` | Entry point — includes all `unbound.conf.d/*.conf` |
 | `/etc/unbound/unbound.conf.d/pi-hole.conf` | Core: listen on `127.0.0.1:5335`, cache, DoT upstream |
 | `/etc/unbound/unbound.conf.d/vm-epaflix.conf` | `local-zone: static` - security only, no data entries |
-| `/etc/unbound/unbound.conf.d/no-aaaa-leak.conf` | Seven per-name `local-zone: static` entries - AAAA leak guard, no data entries. Source of truth is `1-proxmox/pihole/unbound-no-aaaa-leak.conf` in git |
+| `/etc/unbound/unbound.conf.d/no-aaaa-leak.conf` | Eight per-name `local-zone: static` entries - AAAA leak guard, no data entries. Source of truth is `1-proxmox/pihole/unbound-no-aaaa-leak.conf` in git |
 | `/etc/unbound/unbound.conf.d/remote-control.conf` | Enables `unbound-control` via `/run/unbound.ctl` |
 | `/etc/unbound/unbound.conf.d/disable-ipv6.conf` | Placeholder (`server:` stanza only, no directives) |
 
@@ -700,7 +704,7 @@ ssh root@192.168.10.30 "unbound-control flush_zone epaflix.com && systemctl rest
 sudo resolvectl flush-caches
 
 # 3. Every name below must show its LAN IPv4 and an EMPTY AAAA
-for n in bastion takaros evanthoulaki syncthing searxng qbittorrent remote-pi cliproxy wg-hop; do
+for n in bastion takaros evanthoulaki syncthing searxng qbittorrent remote-pi cliproxy wg-hop ntfy; do
     printf '%-14s A=[%s] AAAA=[%s]\n' "$n" \
       "$(dig +short A    $n.epaflix.com @192.168.10.30 | tr '\n' ' ')" \
       "$(dig +short AAAA $n.epaflix.com @192.168.10.30 | tr '\n' ' ')"
@@ -712,8 +716,8 @@ A Cloudflare address (`2606:4700:...`) in the AAAA column means that name is
 unprotected - find it in the non-`192.168.10.101` table above and give it a
 `local-zone` or an exact DNS-only Cloudflare record.
 
-> This loop hardcodes its nine names, so it goes stale the moment a tenth record
-> lands. Prefer the script, which derives the list from the box.
+> This loop hardcodes its ten names, so it goes stale the moment an eleventh
+> record lands. Prefer the script, which derives the list from the box.
 
 ```bash
 # The Unbound layer on its own, if you want to isolate it
