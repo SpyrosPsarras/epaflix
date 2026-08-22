@@ -165,8 +165,17 @@ generated="$repo/.kube/epaflix.kubeconfig"
 
 run_installer() {
   : >"$output"
+  # KUBECONFIG is cleared for the installer invocation. The stub kubectl uses
+  # "KUBECONFIG set and file exists" to tell the installer's two phases apart
+  # (source read vs product verification), so an AMBIENT KUBECONFIG from the
+  # caller's shell makes the source phase grep the caller's real kubeconfig for
+  # '# ctx:' markers, find none, and refuse. That is exactly the state the
+  # guard's own docs put a user in (export the epaflix-only kubeconfig), so
+  # without this line the suite fails precisely when the remediation advice has
+  # been followed. Found 2026-08-22 by the verify harness, which exports it.
   (cd "$repo" \
-    && PATH="$stub:$PATH" \
+    && env -u KUBECONFIG \
+       PATH="$stub:$PATH" \
        FIXTURE_SOURCE_CONTEXTS="$tmp/source-contexts" \
        FIXTURE_PRODUCT="$product" \
        bash "$installer") >"$output" 2>&1
