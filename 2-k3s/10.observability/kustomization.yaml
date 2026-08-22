@@ -16,12 +16,20 @@
 #   - grafana-db-secret           (Grafana → Postgres password)
 #   - grafana-oauth-secret        (Grafana → Authentik client_secret)
 #   - grafana-admin-secret        (Grafana admin user/password)
-#   - alertmanager-config-secret  (full alertmanager.yaml incl. SMTP creds).
-#                                  Smarthost is vh4c.ezhellas.com:587, NOT
-#                                  mail.epaflix.com — the proxied
-#                                  *.epaflix.com Cloudflare wildcard answers
-#                                  for mail.epaflix.com but carries no SMTP
-#                                  (#461). See README.md "Email Configuration".
+#   - alertmanager-config-secret  (full alertmanager.yaml, ROUTING ONLY since
+#                                  #921: the email leg was deleted 2026-08-22,
+#                                  the receiver is named `ntfy`, and every
+#                                  global smtp_* key went with it. The blob
+#                                  therefore holds no secret today, and it
+#                                  STAYS SOPS-encrypted anyway — the repo-wide
+#                                  rule is that every ArgoCD-reconciled Secret
+#                                  is a *.enc.yaml, and the next credential to
+#                                  land in alertmanager.yaml (an ntfy auth
+#                                  token, say) lands in this exact file. The
+#                                  reviewability that costs is bought back
+#                                  procedurally: because nothing in it is
+#                                  secret, every PR that touches it pastes the
+#                                  DECRYPTED after-state in full.
 #   - pve-exporter-secrets        (Proxmox API token; carries pve.yml as a
 #                                  stringData key, mounted at /etc/prometheus
 #                                  by the pve-exporter Deployment — replaces
@@ -70,8 +78,9 @@ resources:
   # ntfy — arrived here from 2-k3s/13.odysseus/ under the #914 decision
   # (2026-08-21): it is the load-bearing notification receiver, so it belongs
   # with the stack that produces the alerts rather than with a consumer.
-  # Deployment + LoadBalancer Service, its message-cache PVC (#915), and the
-  # Traefik `internal` entry point (#904). Each of the three carries its own
+  # Deployment + ClusterIP Service, its message-cache PVC (#915), and the
+  # Traefik `internal` entry point (#904), which is the only front door since
+  # the 192.168.10.112 LoadBalancer was retired (#920). Each of the three carries its own
   # explicit `namespace: observability` — required, there is no namespace
   # transformer above.
   - ntfy.yaml
