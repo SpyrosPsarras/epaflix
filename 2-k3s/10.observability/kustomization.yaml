@@ -94,6 +94,12 @@ resources:
   # — there is no top-level namespace transformer, so they are NOT rewritten to
   # observability (intentional: they must resolve against the control plane).
   - control-plane-endpointslices.yaml
+  # Off-cluster scrape targets on TrueNAS 192.168.10.200 (#917 convention, #918
+  # node-exporter, #916 GPU exporter): selector-less Service + static
+  # EndpointSlice + ServiceMonitor per exporter, six objects. Every one carries
+  # its own explicit `namespace: observability`, required, there is no
+  # namespace transformer above.
+  - truenas-exporters.yaml
 
 generators:
   - secrets/ksops-generator.yaml
