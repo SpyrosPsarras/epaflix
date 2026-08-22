@@ -20,9 +20,13 @@ data:
   # Models served by the EXISTING remote Ollama on TrueNAS (no GPU on k3s).
   OLLAMA_BASE_URL: "http://192.168.10.200:30068/v1"
   LLM_HOST: "http://192.168.10.200:30068/v1"
-  # Intra-namespace sidecars.
+  # Sidecars. Only chromadb is still intra-namespace; searxng has its own
+  # `searxng` namespace and Application, and ntfy moved to `observability`
+  # under the #914 decision, so both are reached by cross-namespace FQDN.
+  # The bare `ntfy` short name no longer resolves from here — and Odysseus
+  # would keep running and simply stop notifying, with no error.
   SEARXNG_INSTANCE: "http://searxng.searxng.svc.cluster.local:8080"
   CHROMADB_HOST: "chromadb"
   CHROMADB_PORT: "8000"
-  NTFY_BASE_URL: "http://ntfy:8091"
+  NTFY_BASE_URL: "http://ntfy.observability.svc.cluster.local:8091"
   DATABASE_URL: "sqlite:////app/data/app.db"

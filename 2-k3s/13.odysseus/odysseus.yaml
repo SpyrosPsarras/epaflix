@@ -6,8 +6,11 @@
 # have no GPU; chat/embedding models are served by the EXISTING remote Ollama
 # on TrueNAS (http://192.168.10.200:30068/v1), and fastembed runs on CPU.
 #
-# Sidecars (searxng, chromadb, ntfy) live in the same `odysseus` namespace and
-# are reached by intra-namespace DNS (searxng:8080, chromadb:8000, ntfy:8091).
+# Only chromadb is an intra-namespace sidecar (chromadb:8000). searxng lives in
+# its own `searxng` namespace and Application
+# (searxng.searxng.svc.cluster.local:8080), and ntfy moved to `observability`
+# under the #914 decision (ntfy.observability.svc.cluster.local:8091). Both are
+# reached by cross-namespace FQDN — see configmap.yaml.
 #
 # Auth: the perimeter is gated by Authentik forward-auth at Traefik
 # (odysseus.epaflix.com). Odysseus ALSO keeps its own built-in login

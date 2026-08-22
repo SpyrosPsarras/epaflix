@@ -46,7 +46,10 @@ resources:
   - odysseus.yaml
   - odysseus-ssh-config.yaml
   - odysseus-bastion-pv.yaml
-  - ntfy.yaml
+  # ntfy is NOT missing by accident: it moved to 2-k3s/10.observability/ under
+  # the #914 decision (2026-08-21) and is now owned by the observability app.
+  # Odysseus is a cross-namespace consumer of it — see NTFY_BASE_URL in
+  # configmap.yaml.
   - pdb.yaml
   - backup-cronjob.yaml
 generators:
