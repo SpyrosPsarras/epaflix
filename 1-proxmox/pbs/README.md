@@ -223,13 +223,26 @@ but these are real and were found while investigating:
 ## Notifications
 ### Applying `notifications.cfg`
 
+Back the live file up on BOTH hosts before touching it (#716 — a broken
+`notifications.cfg` disables every notification path at once, and `/etc/pve` is
+shared, so a local `/root` copy is what survives a pmxcfs problem):
+
+```
+ssh root@192.168.10.10 'cp /etc/pve/notifications.cfg /root/notifications.cfg.bak-$(date +%F)'
+ssh root@192.168.10.11 'cp /etc/pve/notifications.cfg /root/notifications.cfg.bak-$(date +%F)'
+```
+
+Restore is the same copy backwards:
+`ssh root@192.168.10.10 'cp /root/notifications.cfg.bak-<date> /etc/pve/notifications.cfg'`.
+
 ```
 scp 1-proxmox/pbs/notifications.cfg root@192.168.10.10:/etc/pve/notifications.cfg
 ssh root@192.168.10.10 'pvesh get /cluster/notifications/targets'
 ssh root@192.168.10.10 'pvesh create /cluster/notifications/targets/ntfy-pve/test'
 ```
 
-`/etc/pve` is pmxcfs, so one copy covers both takaros and evanthoulaki.
+`/etc/pve` is pmxcfs, so one copy covers both takaros and evanthoulaki. Verify
+on both anyway: the propagation is what you are testing, not what you assume.
 
 **The file must contain no comments.** PVE's section-config parser rejects any
 line before the first section header - a leading `#` block makes the whole file
@@ -249,34 +262,65 @@ ssh root@192.168.10.10 'cat /etc/pve/notifications.cfg' > 1-proxmox/pbs/notifica
 
 What the stanzas do:
 
-- `mail-to-root` / `default-matcher` - PVE builtins, kept so info-level
-  behaviour is unchanged. Local mail delivery is dead on both nodes (postfix has
-  no `/etc/aliases.db`, every notification sits deferred forever), which is why
-  weeks of nightly backup failures went unnoticed. Tracked in #720.
-- `ntfy-pve` - webhook to `http://192.168.10.112:8091/pve-backups`, the LAN-only
-  kube-vip LoadBalancer on the in-cluster ntfy Service
+- `mail-to-root` / `default-matcher` - PVE builtins. `default-matcher` now
+  carries `disable 1` (#920). Local mail delivery is dead on both nodes (postfix
+  has no `/etc/aliases.db`, every notification sits deferred forever, #720), and
+  the leg still reported `notified via target mail-to-root` in the task log — a
+  success line for a message nobody received, which is how weeks of nightly
+  backup failures went unnoticed (#461/#720/#1076). Disabled rather than
+  deleted: both objects are PVE builtins and the file has to stay in the shape
+  PVE itself writes.
+- `ntfy-pve` - webhook to `https://ntfy.epaflix.com/pve-backups`, the Traefik
+  `internal` entry point at 192.168.10.102 (LE TLS, LAN-only dnsmasq record, no
+  router port forward) in front of the in-cluster ntfy Service
   (`2-k3s/10.observability/ntfy.yaml` - ntfy moved out of the `odysseus`
-  namespace and Application under #914). That LoadBalancer is retained on
-  purpose until this webhook is repointed at `https://ntfy.epaflix.com`, which
-  is #904 / #920. Header and body values are base64 per the API
-  schema: `Title = {{ title }}`, `Tags = warning`, `Priority = 4`,
-  body = `{{ title }}\n\n{{ message }}`.
+  namespace and Application under #914). It posted to the plaintext
+  `http://192.168.10.112:8091/pve-backups` until #920 retired that LoadBalancer.
+  Header and body values are base64 per the API schema: `Title = {{ title }}`,
+  `Tags = warning`, `Priority = 4`, body = `{{ title }}\n\n{{ message }}`, and
+  they are unchanged by the reroute.
+- **This target depends on a server-side ntfy setting.** Every vzdump failure
+  from 2026-08-10 to 2026-08-22 was rejected with HTTP 400, body code `40014`
+  "attachments not allowed" (#1076): ntfy's default `message-size-limit` is 4096
+  bytes, anything larger is treated as an attachment upload, and a real
+  failed-vzdump body is 16311 bytes because PVE puts the per-VM table in
+  `{{ message }}`. The fix is `NTFY_MESSAGE_SIZE_LIMIT=32k` on the ntfy
+  Deployment, not a change here — PVE's template engine has no truncate helper
+  and the actionable line ("No space left on device" on VM 1073) lives in the
+  body, not in the generic title. A body over 32k would 400 the same way.
 - `ntfy-failures` - routes `warning,error` only, so a successful nightly job
-  stays silent and a failed one pushes.
+  stays silent and a failed one pushes. Silence therefore proves nothing on its
+  own; that mistake closed #725's third box and cost twelve days (#1076). Test
+  with a real error-severity event.
 
 Prefer creating changes through the API rather than editing the file, since PVE
 then writes canonical syntax for you:
 
 ```
 pvesh create /cluster/notifications/endpoints/webhook --name ntfy-pve --method post \
-  --url "http://192.168.10.112:8091/pve-backups" \
+  --url "https://ntfy.epaflix.com/pve-backups" \
   --header "name=Title,value=e3sgdGl0bGUgfX0=" ... 
 pvesh create /cluster/notifications/matchers --name ntfy-failures --mode all \
   --match-severity "warning,error" --target ntfy-pve
 ```
 
+The two changes #920 applies to an already-configured pair of hosts, run once
+(pmxcfs propagates) and verified on both:
 
-Job failures now route to ntfy instead of unread local root mail — see
+```
+pvesh set /cluster/notifications/endpoints/webhook/ntfy-pve --url "https://ntfy.epaflix.com/pve-backups"
+pvesh set /cluster/notifications/matchers/default-matcher --disable 1
+```
+
+Order matters: repoint and prove the ntfy leg with a real failing job first,
+disable the mail matcher last. Then regenerate the tracked copy with the recipe
+above and diff it against this directory's `notifications.cfg`; an empty diff is
+the check. If PVE spells the disable flag differently from the tracked
+`disable 1`, the host-written bytes win — realign the tracked file, do not
+"fix" the host.
+
+
+Job failures route to ntfy instead of unread local root mail — see
 [`notifications.cfg`](notifications.cfg) in this directory, and
-`2-k3s/10.observability/ntfy.yaml` for the LAN-only LoadBalancer that makes ntfy
-reachable from the PVE hosts.
+`2-k3s/10.observability/ingress/ntfy-ingressroute.yaml` for the Traefik
+`internal` route that makes ntfy reachable from the PVE hosts.
