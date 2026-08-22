@@ -54,6 +54,17 @@ prometheus:
     podMonitorSelectorNilUsesHelmValues: false
     ruleSelectorNilUsesHelmValues: false
 
+    # Discover ServiceMonitor targets via EndpointSlice, not legacy v1 Endpoints
+    # (#917 deploy gate, PR #1110 post-merge finding). The default Endpoints role
+    # cannot see hand-written EndpointSlices, so the truenas-* targets in
+    # truenas-exporters.yaml never appeared. The control-plane targets only ever
+    # worked because the chart also renders real v1 Endpoints objects - the
+    # static slices in control-plane-endpointslices.yaml were unread until this
+    # flip. Every selector Service gets slices from the EndpointSlice controller
+    # and custom Endpoints are mirrored, so no existing target is lost; verified
+    # 2026-08-22: 0 relabelings reference __meta_kubernetes_endpoint* labels.
+    serviceDiscoveryRole: EndpointSlice
+
     # Additional scrape configs for Cilium and Hubble
     additionalScrapeConfigs:
       - job_name: "cilium-agent"
