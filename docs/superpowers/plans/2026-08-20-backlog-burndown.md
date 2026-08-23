@@ -10,14 +10,16 @@ that change what the goal should be.
 
 ## The prior attempt
 
-Babysitter run `01KZK3CKNPY463MAC9707DX69V`, process
-`.a5c/processes/close-all-open-issues.js`, paused 2026-08-10 for a host reboot.
+Automated run `01KZK3CKNPY463MAC9707DX69V`, process
+`close-all-open-issues.js`, paused 2026-08-10 for a host reboot.
 
-It cannot be resumed. `~/.a5c/runs/01KZK3CKNPY463MAC9707DX69V` is gone, so the
-journal that made it resumable no longer exists. What survives is the process
-definition, `close-all-open-issues.inputs.json` with its 12 cluster
-definitions, `artifacts/close-all-issues/ledger.json`, and about 50 working
-files under `artifacts/close-all-issues/`. That is enough to restart without
+It cannot be resumed: the run journal that made it resumable is gone, and the
+orchestrator that produced it has since been retired (2026-08-23). What
+survives is the process definition and `close-all-open-issues.inputs.json` with
+its 12 cluster definitions — both archived out of the repo to
+`~/.a5c-archive-epaflix/processes/` — plus
+`artifacts/close-all-issues/ledger.json` and about 50 working files under
+`artifacts/close-all-issues/`. That is enough to restart without
 re-deriving anything. It is not enough to `run:iterate`.
 
 Three of its findings matter more than its output.
@@ -364,4 +366,4 @@ Storage moves from position 9 to position 3. pool1 is at 88%, it moved 6 points 
 
 ## Open process risk
 
-Eight concurrent agent sessions were writing this repo during Phase 0 and Phase 1, plus a babysitter run that created `.github/babysitter/review-gate.mjs` and edited `babysitter.instructions.md` mid-session. A serial one-PR-at-a-time plan assumes one writer. It does not hold today, and the five orphaned working-tree files this session cleaned up are what that looks like after a few weeks. Resolve the writer question before Phase 3, or expect the same mess again.
+Eight concurrent agent sessions were writing this repo during Phase 0 and Phase 1, plus one automated run adding tooling and editing instruction files mid-session. A serial one-PR-at-a-time plan assumes one writer. It does not hold today, and the five orphaned working-tree files this session cleaned up are what that looks like after a few weeks. Resolve the writer question before Phase 3, or expect the same mess again.
