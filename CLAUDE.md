@@ -46,14 +46,14 @@ Infrastructure-as-code and documentation for a K3s Kubernetes cluster + Docker S
 | Worker | k3s-worker-63 | 1063 | 192.168.10.63 | 10.0.0.63   | evanthoulaki |
 | Worker | k3s-worker-65 | 1065 | 192.168.10.65 | 10.0.0.65   | evanthoulaki |
 
-### Docker Swarm (1 manager, 2 workers — all on evanthoulaki)
-| Role    | Hostname    | VMID | IP            |
-|---------|-------------|------|---------------|
-| Manager | ds-master   | 1071 | 192.168.10.71 |
-| Worker  | ds-worker-1 | 1072 | 192.168.10.72 |
-| Worker  | ds-worker-2 | 1073 | 192.168.10.73 |
+### Docker Swarm - DECOMMISSIONED 2026-08-23 (#583)
+VMs 1071/1072/1073 (ds-master, ds-worker-1/2) were destroyed on 2026-08-23 after an
+owner ruling: the stack's services had been Pending at 0/1 for ~2 months with zero
+running containers, and nothing depended on them. Their PBS backup groups were
+deleted the same day (#1075). `3-docker-swarm/` is historical documentation only.
+VMIDs 1071-1073 and IPs .71-.73 are free for reuse.
 
-**Status: the Swarm has been down since ~2026-06** — VMs stopped, `registry`/`swarm-api`/`traefik` services stuck Pending (#583). Treat all swarm docs as dormant until that issue resolves; do not assume a live second cluster.
+**Status: decommissioned 2026-08-23 (#583)** — the VMs no longer exist. Treat all swarm docs as historical; there is no second cluster.
 
 ### Key IPs
 | Service              | IP             |
@@ -100,7 +100,7 @@ TrueNAS: `ssh truenas_admin@192.168.10.200`.
 0-truenas/          # TrueNAS iSCSI + NFS setup
 1-proxmox/          # Proxmox host config, VM creation, user VMs
 2-k3s/              # K3s cluster — numbered subdirs (01-15) in deploy order + maintenance/
-3-docker-swarm/     # Docker Swarm cluster + stacks (dormant, see #583)
+3-docker-swarm/     # Docker Swarm cluster + stacks (decommissioned 2026-08-23, #583 — historical only)
 docs/               # Design docs — docs/superpowers/{plans,specs} is the default (and only) spec system for feature designs (#818; OpenSpec was evaluated and not adopted)
 artifacts/          # Per-issue triage / feature working notes (git-ignored scratch, see general.instructions.md, #662)
 backups/            # Local backups (git-ignored)
@@ -112,7 +112,7 @@ raid-migration/     # Proxmox RAID migration guides
 
 ## Conventions
 
-- VMIDs: masters 1051-1053, workers 1061-1065, swarm 1071-1073, templates 9000+
+- VMIDs: masters 1051-1053, workers 1061-1065, templates 9000+ (1071-1073 freed by the swarm decommission, #583)
 - IPs mirror VMIDs: VMID 1051 → .51, VMID 1071 → .71
 - K3s subdirs numbered in deploy order: `01.kube-vip/`, `02.cert-manager/`, etc.
 - Stack compose files: `3-docker-swarm/stacks/<name>/docker-compose.yml`
