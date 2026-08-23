@@ -113,7 +113,7 @@ rest under `apps/ix-apps`):
 
 | Placeholder | Source of real value |
 |-------------|----------------------|
-| `<ODYSSEUS_ADMIN_PASSWORD>` | `openssl rand -base64 24`; store in the credential store `.github/instructions/secrets.enc.yaml` under an `odysseus` block. Change in-app after first login + rotate the stored value. |
+| `<ODYSSEUS_ADMIN_PASSWORD>` | generate without echoing: `PW=$(openssl rand -base64 24)` - a bare `openssl rand` prints the new password into the transcript (#602); store in the credential store `.github/instructions/secrets.enc.yaml` as a top-level `odysseus_admin_password` key (the store is flat - no nested blocks, #979). Change in-app after first login + rotate the stored value. |
 | `<SEARXNG_SECRET>` | Leave unset to let the searxng entrypoint auto-generate (`token_urlsafe(48)`), OR an `openssl rand` value kept in the credential store. |
 | `<OPENAI_API_KEY>` | Only if cloud OpenAI fallback is wanted; else leave blank. Credential store if used. |
 | `<HF_TOKEN>` | Only if pulling gated HuggingFace models; else leave blank. Credential store if used. |

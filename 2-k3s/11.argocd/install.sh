@@ -46,8 +46,9 @@ cat <<EOF
         kubectl -n argocd rollout restart deploy/argocd-server
   • Image bumps are delivered by Renovate (2-k3s/12.renovate/), not
     Image Updater — nothing to install here (retired in #192/#265).
-  • Get the initial admin password (only valid before OIDC works):
-        kubectl -n argocd get secret argocd-initial-admin-secret \\
-          -o jsonpath='{.data.password}' | base64 -d ; echo
+  • Get the initial admin password (only valid before OIDC works).
+    Capture, never print in a recorded shell (#602):
+        PW=\$(kubectl --context epaflix -n argocd get secret argocd-initial-admin-secret \\
+          -o jsonpath='{.data.password}' | base64 -d)
 
 EOF

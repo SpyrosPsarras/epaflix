@@ -398,6 +398,12 @@ git commit -m "chore(<app>): rotate my-thing password"
 
 ## Decrypt for inspection only
 
+**Never in an agent or otherwise retained transcript.** This recipe prints a
+plaintext value by design, which is exactly what burned a token in #602. Use it
+only in a human-driven shell whose scrollback is not recorded; in any agent
+session use key names (`yq '.stringData | keys'`), lengths (`${#VAR}`) or
+`sha256sum` comparisons instead.
+
 ```bash
 sops -d 2-k3s/<App>/my-thing.enc.yaml | yq '.stringData.password'
 ```

@@ -196,7 +196,7 @@ enable prune during initial adoption.
 
 2. **Render the git source before ArgoCD syncs it**:
   ```
-  kubectl --context epaflix kustomize --enable-helm 2-k3s/05.traefik-deployment >/tmp/traefik-rendered.yaml
+  kustomize build --enable-helm --enable-alpha-plugins --enable-exec 2-k3s/05.traefik-deployment >/tmp/traefik-rendered.yaml
   ```
   Check that the rendered Traefik values still reference
   `cloudflare-api-token`, mount ACME storage at `/data/acme.json`, keep
@@ -349,8 +349,10 @@ without breaking sessions:
    ```
    Keys: `AUTHENTIK_SECRET_KEY`, `AUTHENTIK_POSTGRESQL__PASSWORD`,
    `AUTHENTIK_EMAIL__PASSWORD`. `AUTHENTIK_SECRET_KEY` MUST match the value
-   currently live in the chart-managed `authentik` Secret —
-   `kubectl --context epaflix -n app-authentik get secret authentik -o jsonpath='{.data.AUTHENTIK_SECRET_KEY}' | base64 -d`.
+   currently live in the chart-managed `authentik` Secret. Compare hashes,
+   never print either value (#602):
+   `kubectl --context epaflix -n app-authentik get secret authentik -o jsonpath='{.data.AUTHENTIK_SECRET_KEY}' | base64 -d | sha256sum`
+   against your candidate value hashed the same way (`printf '%s' "$VAL" | sha256sum`).
    Mismatch invalidates every session/cookie/token.
 
 3. **Re-render the chart locally** so the cluster matches the new
@@ -423,7 +425,7 @@ cleanly.
 3. **Render-then-diff** against the live cluster (the step omitted on the
    filebrowser adoption that lost its OIDC Secret — non-negotiable):
    ```
-   kubectl --context epaflix diff -f <(kubectl --context epaflix kustomize --enable-helm 2-k3s/10.observability)
+   kubectl --context epaflix diff -f <(kustomize build --enable-helm --enable-alpha-plugins --enable-exec 2-k3s/10.observability)
    ```
    The diff MUST be empty modulo `ignoreDifferences`-covered fields. If
    anything else shows, fix git — do not proceed.

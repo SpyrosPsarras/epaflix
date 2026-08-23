@@ -572,8 +572,7 @@ shred -u airvpn-credentials.enc.yaml
 ```bash
 cd /home/spy/Documents/Epaflix/k3s-swarm-proxmox-vpn
 grep -c "airusername: [^E]" 2-k3s/08.servarr/_shared/secrets/airvpn-credentials.enc.yaml
-AGEKEY=$(kubectl --context epaflix get secret sops-age -n argocd -o jsonpath='{.data}' \
-  | python3 -c "import sys,json,base64;[print(base64.b64decode(v).decode(),end='') for v in json.load(sys.stdin).values()]")
+AGEKEY=$(kubectl --context epaflix get secret sops-age -n argocd -o jsonpath='{.data.keys\.txt}' | base64 -d)
 SOPS_AGE_KEY="$AGEKEY" sops -d 2-k3s/08.servarr/_shared/secrets/airvpn-credentials.enc.yaml \
   | sed -E 's/(airusername|airpassword): .*/\1: <redacted>/'
 unset AGEKEY
@@ -606,8 +605,7 @@ and add the matching comment line to the `# Reconciled via the ksops generator` 
 ```bash
 cd /home/spy/Documents/Epaflix/k3s-swarm-proxmox-vpn
 export PATH="$HOME/.local/bin:$PATH"
-export SOPS_AGE_KEY=$(kubectl --context epaflix get secret sops-age -n argocd -o jsonpath='{.data}' \
-  | python3 -c "import sys,json,base64;[print(base64.b64decode(v).decode(),end='') for v in json.load(sys.stdin).values()]")
+export SOPS_AGE_KEY=$(kubectl --context epaflix get secret sops-age -n argocd -o jsonpath='{.data.keys\.txt}' | base64 -d)
 kustomize build --enable-alpha-plugins --enable-exec 2-k3s/08.servarr >/dev/null && echo "render ok"
 unset SOPS_AGE_KEY
 ```
@@ -668,6 +666,8 @@ kubectl --context epaflix create namespace airvpn-test --dry-run=client -o yaml 
 kubectl --context epaflix -n servarr get cm airvpn-bluetit-config -o yaml \
   | sed 's/namespace: servarr/namespace: airvpn-test/; s/^\(\s*\)airkey  *Default/\1airkey                      k3s-test/' \
   | kubectl --context epaflix apply -f -
+# Whole-object read is deliberate: a namespace copy that stays inside the pipe.
+# Never run the left side alone - it would print the values (#712/#602).
 kubectl --context epaflix -n servarr get secret airvpn-credentials -o yaml \
   | sed 's/namespace: servarr/namespace: airvpn-test/' \
   | grep -v "annotations\|argocd" | kubectl --context epaflix apply -f -
@@ -975,8 +975,7 @@ docker buildx imagetools inspect qbittorrentofficial/qbittorrent-nox:latest --fo
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
-export SOPS_AGE_KEY=$(kubectl --context epaflix get secret sops-age -n argocd -o jsonpath='{.data}' \
-  | python3 -c "import sys,json,base64;[print(base64.b64decode(v).decode(),end='') for v in json.load(sys.stdin).values()]")
+export SOPS_AGE_KEY=$(kubectl --context epaflix get secret sops-age -n argocd -o jsonpath='{.data.keys\.txt}' | base64 -d)
 kustomize build --enable-alpha-plugins --enable-exec 2-k3s/08.servarr | python3 -c "
 import sys,yaml
 docs=[d for d in yaml.safe_load_all(sys.stdin) if d]

@@ -833,7 +833,7 @@ sops --filename-override \
 
 # 4. Destroy the plaintext, verify, commit.
 shred -u /tmp/newtarr-seed-plain.yaml && rm -rf /tmp/newtarr-seed
-sops -d 2-k3s/08.servarr/_shared/secrets/newtarr-config-seed.enc.yaml | head
+sops -d 2-k3s/08.servarr/_shared/secrets/newtarr-config-seed.enc.yaml | yq '.stringData | keys'   # key NAMES only - piping a decrypt to head prints values (#602/#943)
 ```
 
 > **Note:** the initContainer's non-clobber guard means a refreshed seed does
