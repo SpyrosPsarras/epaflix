@@ -27,12 +27,9 @@ secrets.yml
 !.history/2026-05-17-wg-hop-public-exposure.md
 raid-migration
 .claude/
-# Babysitter (.a5c) — entirely local scaffolding, nothing under it belongs in
-# git. Supersedes the earlier "track process definitions as institutional
-# knowledge" approach (#659 and its per-file negation predecessor): the 176
-# tracked files were untracked and the whole tree blanket-ignored, so a run's
-# scratch never has to be curated into or out of history again. Deliverables
-# that matter go to docs/ or .github/instructions/, not here.
+
+# Retired agent scaffolding, archived to ~/.a5c-archive-epaflix on 2026-08-23.
+# The rule stays as a guard so the tree can never come back (cf. secrets.yml).
 .a5c/
 
 # Sensitive data - database dumps, backups, research extracts with credentials
