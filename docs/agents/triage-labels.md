@@ -12,6 +12,27 @@ The skills speak in terms of five canonical triage roles. This file maps those r
 
 When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the corresponding label string from this table.
 
+## Orthogonal labels
+
+These are **not** state roles. An issue carries one *alongside* its state role,
+not instead of it.
+
+| Label | Meaning |
+| ----------------- | ------------------------------------------------------- |
+| `blocked-time` | Evaluated and correct, but cannot start until a date or event |
+| `blocked-external`| Waiting on a third party outside this repo's control |
+
+`blocked-time` exists because the five canonical states cannot express "not yet
+due". A soak window or an "after the next upgrade" gate is not `needs-triage`
+(evaluation is done), not `needs-info` (nobody is waiting on a reporter), and
+must not be `ready-for-agent` — an AFK agent would either stall or close it on
+time elapsed, which `CLAUDE.md` forbids: a soak closes on the live value pasted,
+never on the calendar.
+
+**A `blocked-time` issue must state its gate** in a comment: the earliest date,
+or the event that unblocks it, plus what to measure when it opens. A gate nobody
+wrote down is indistinguishable from a stalled issue.
+
 ## Retired labels
 
 `agent-gated`, `agent-now`, `needs-hands` and `needs-decision` came from a
