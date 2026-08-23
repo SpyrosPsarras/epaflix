@@ -1,5 +1,11 @@
 # Docker Swarm on Proxmox
 
+> **DECOMMISSIONED 2026-08-23 (#583).** VMs 1071/1072/1073 were destroyed after the
+> stack sat at 0/1 replicas with zero running containers for ~2 months and nothing
+> depended on it. Everything below is historical documentation of how the cluster
+> was built and run. Do not follow it against live infrastructure; there is no
+> swarm cluster anymore.
+
 This directory contains instructions and configuration for deploying a Docker Swarm cluster on Proxmox VE, running on dedicated VMs on the `evanthoulaki` Proxmox host.
 
 ## Overview
