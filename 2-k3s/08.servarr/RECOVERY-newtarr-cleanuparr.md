@@ -1399,7 +1399,7 @@ rollback point:
 - `cleanuparr.db.bak-qbtpw-20260803-225508`: qBittorrent-password rotation
   artifact, out of scope for this sweep (owned by the AirVPN/qbittorrent
   work)
-- `.a5c/processes/sonarr-import-series-290.{js,inputs.json}`: checked —
+- the local-only `sonarr-import-series-290` automation files: checked —
   these only ever held the `<SONARR_API_KEY>` placeholder, never a real
   value, so there was nothing to clean
 

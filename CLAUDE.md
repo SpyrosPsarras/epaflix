@@ -15,7 +15,6 @@ Infrastructure-as-code and documentation for a K3s Kubernetes cluster + Docker S
   2. Append a `- [ ]` checkbox to an open issue that already owns the subsystem or theme, with a dated comment linking the evidence. Do not open a sibling issue for a finding an existing issue can carry.
   3. Record an accepted risk in `docs/accepted-risks.md`: one dated entry with the finding, why no action, and what would reopen it.
   4. Open a new `gh issue` on `SpyrosPsarras/epaflix` only for standalone work: something with its own verification, its own PR, or an owner decision. Use the enhancement-issue shape (`## Finding` / `## Current state` / `## Desired outcome` / `## Notes`) and cross-link related issues.
-- **Every babysitter run that changes a tracked file gets a reviewer, always.** The implementer does not certify its own work. Route the write through `implementWithReview` from `.github/babysitter/review-gate.mjs`: implement (agent A) → verify (real commands, stdout captured) → review (agent B, different agent name *and* different model, sees only the diff and the verification output). A failed review feeds its issues back and re-runs the implementer, four attempts, then the run fails at stage `implementation-review` without merging or opening a PR. Hard gate, not advisory. Details and the `failIf` requirement: `.github/instructions/babysitter.instructions.md` → "Mandatory review gate".
 - **Execute PR test plans.** If a PR description contains a test plan / checklist (typically under `## Test plan` or `## Verification`), every unchecked box must be run, and the outcome recorded by editing the PR description itself (tick boxes, append result inline) — NEVER add a new PR comment. Applies to both open PRs (run before merge) and merged PRs where boxes were left unticked (run retroactively against live state). If a step is no longer applicable (e.g. soak window already elapsed, environment changed), strike it through and note why in the same description. Post-merge boxes (soak windows, next-reboot checks) must not stay unchecked forever: at merge time either run them or tick them with "tracked in #NNN" and open that issue — an unchecked box with no issue is a lost follow-up (24 merged PRs accumulated exactly this).
 - **Encrypted Secret files use `.enc.yaml` suffix.** All Secrets that ArgoCD must reconcile live as `*.enc.yaml` next to their kustomization, encrypted with SOPS+age (single cluster recipient). The pre-commit hook (`.github/hooks/check-sops-encrypted.sh`) rejects plaintext credential values but permits content-validated placeholder templates; CI runs the same guard over all tracked YAML. New clones must run `./.github/hooks/install-hooks.sh` once. **No hook decrypts anything.** The commit path must not depend on the age key, which lives behind KeePassXC on the owner's own machines. Validating what is *inside* an encrypted Secret therefore happens where the Secret is already decrypted. The `authentik-blueprint-check` CronJob (`2-k3s/07.authentik-deployment/blueprint-check-cronjob.yaml`) parses the blueprint payload nested in `stringData` daily and fails loudly, catching after merge what a hook would have caught before it (#883, #876, #940). Encrypt/rotate and placeholder rules: `.github/instructions/sops.instructions.md`.
 - **Merge policy: merge-commit + mandatory rebase (semi-linear).** Every commit on main arrives via a branch+PR as a `Merge pull request #N` marker. Before merging: rebase the branch onto `origin/main` and `push --force-with-lease` (the required `validate` check + strict up-to-date block stale branches), wait for `validate`, then `gh pr merge <n> --merge`.
@@ -129,8 +128,18 @@ Domain-specific guidance lives in `.github/instructions/`:
 - `truenas.instructions.md` — SSH access, midclt commands, NFS/iSCSI management
 - `pihole.instructions.md` — DNS architecture, record management, Unbound config
 - `general.instructions.md` — Security rules, history logging format
-- `babysitter.instructions.md` — methodology, recommended processes, CI/CD setup
+- `sops.instructions.md` — credential store, encrypt/rotate, placeholder rules
 
-## Babysitter
+## Agent skills
 
-Babysitter orchestrates complex multi-step workflows; project profile lives at `.a5c/project-profile.json`, process definitions under `.a5c/processes/`, runs under `.a5c/runs/`. **The whole `.a5c/` tree is git-ignored** — it is local scaffolding, never committed, so nothing under it survives a fresh clone, and the profiles under it can be reset at any time. Anything worth keeping goes to `docs/`, `.github/instructions/` or `.github/babysitter/`. Semi-autonomous, breakpoint tolerance `moderate` with known patterns skipped, always break on destructive-git and deploy. The mandatory review gate is tracked code at `.github/babysitter/review-gate.mjs`. Guardrails are in `## Critical Rules` above; methodology and process selection are in `.github/instructions/babysitter.instructions.md`.
+### Issue tracker
+
+GitHub Issues on `SpyrosPsarras/epaflix`, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical roles, each label string equal to its name. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context — `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
