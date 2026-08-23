@@ -532,6 +532,29 @@ guest-side `lscpu` cannot be checked there - verify those hypervisor-side instea
 ssh root@<pvehost> 'tr "\0" "\n" < /proc/$(cat /var/run/qemu-server/<vmid>.pid)/cmdline | grep -A1 "^-cpu" | tail -1'
 ```
 
+## ACME host certificates (Cloudflare DNS-01, #1086)
+
+Both hosts renew their `:8006` certs via the `cloudflare-dns` ACME plugin. What the
+2026-08-23 repair established, kept here so it is not rediscovered:
+
+- The credential lives in `/etc/pve/priv/acme/plugins.cfg` as a base64 `data` blob
+  holding `CF_Account_ID` + `CF_Token`. `/etc/pve` is pmxcfs, so ONE
+  `pvenode acme plugin set cloudflare-dns --data <file>` updates both hosts.
+  Source of truth for the token: credential store key `cloudflare-api-token`
+  (mirrored in KeePassXC as `cloudflare epaflix`).
+- The token is an **account-owned** Cloudflare token (53 chars, not 40).
+  Account-owned tokens ALWAYS fail `GET /client/v4/user/tokens/verify` with
+  `401 code 1000 Invalid API Token`, even when live. Verify against
+  `GET /client/v4/accounts/<CF_Account_ID>/tokens/verify` instead. Never print the
+  value; compare `sha256sum` prefixes (#602).
+- A plugin token that cannot list the zone surfaces as `invalid domain` from the
+  `cf` hook while adding the `_acme-challenge` TXT record - that is a credential
+  error, not a DNS one.
+- After `pvenode acme cert order`, CHECK THE SERVED CERT, not just `Task OK`:
+  `echo | openssl s_client -connect <host>:8006 2>/dev/null | openssl x509 -noout -dates`.
+  On evanthoulaki the ACME-triggered pveproxy restart kept serving the expired cert
+  until a manual `systemctl restart pveproxy`.
+
 ## Security Notes
 
 - Use SSH keys, not passwords
