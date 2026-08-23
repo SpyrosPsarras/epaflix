@@ -230,7 +230,7 @@ To add multiple users to the group:
 **Cause**: Client ID or Client Secret is incorrect.
 
 **Solution**:
-- Verify Kubernetes secret has correct values: `kubectl --context epaflix get secret seerr-oidc-secret -n servarr -o yaml`
+- Verify the Kubernetes secret carries both keys (names only, never `-o yaml` on a Secret - #712): `kubectl --context epaflix get secret seerr-oidc-secret -n servarr --template '{{range $k,$v := .data}}{{$k}}{{"\n"}}{{end}}'`. If values must be compared, compare `sha256sum` output, never the plaintext (#602).
 - Check Jellyseerr OIDC configuration has correct client ID
 - Regenerate client secret in Authentik if needed
 

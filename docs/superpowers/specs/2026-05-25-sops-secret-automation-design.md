@@ -243,9 +243,9 @@ ArgoCD repo-server clones repo
 ### Pre-merge
 
 ```
-T1. sops round-trip
-    sops -d 2-k3s/09.filebrowser/filebrowser-oidc.enc.yaml | head -20
-    → emits valid Secret YAML with real OIDC client_secret
+T1. sops round-trip (key NAMES only - never pipe a decrypt to head, #602/#943)
+    sops -d 2-k3s/09.filebrowser/filebrowser-oidc.enc.yaml | yq '.stringData | keys'
+    → lists the expected key names; decrypt succeeded without printing a value
 
 T2. kustomize render with ksops locally
     cd 2-k3s/09.filebrowser
@@ -271,9 +271,9 @@ T5. Pre-commit safety
 T6. ArgoCD sync filebrowser App (manual first)
     → Synced + Healthy
 
-T7. Secret unchanged in-cluster
-    kubectl --context epaflix -n filebrowser get secret filebrowser-oidc -o yaml | yq '.data'
-    → matches pre-migration values
+T7. Secret unchanged in-cluster (names + hashes, never the values)
+    kubectl --context epaflix -n filebrowser get secret filebrowser-oidc -o jsonpath='{.data.client-secret}' | sha256sum
+    → hash matches the pre-migration hash of the same key
 
 T8. Filebrowser pod still serves OIDC login
     curl -sI https://filebrowser.epaflix.com/ → 302 → /api/auth/oidc
