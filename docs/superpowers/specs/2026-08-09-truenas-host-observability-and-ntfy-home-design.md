@@ -1,9 +1,10 @@
 # TrueNAS host observability and ntfy's home - design
 
 > Date: 2026-08-09 (dated for the decision set it records; ntfy component written 2026-08-22)
-> Status: **partial**. `## Component 1 - ntfy` and `## Component 3 - what PVE notifies
-> natively` are written. The TrueNAS host observability half is #922's to author and is
-> deliberately left as headings below.
+> Status: **complete** (2026-08-23). All sections are written. Component 2 records the
+> #916/#917/#918/#919 decisions (decided 2026-08-21, executed 2026-08-22 via PRs #1110
+> and #1111); `## Observability` records the accepted single-delivery-path posture and
+> the guards tracked against it.
 > Repo: `SpyrosPsarras/epaflix` (this repo)
 > Decisions recorded: #904 (entry point), #914 (owning namespace and ArgoCD Application),
 > #915 (message cache on a PVC). All three carry an owner decision comment dated 2026-08-21
@@ -111,19 +112,58 @@ consequences carried deliberately:
 
 - local-path is RWO with `WaitForFirstConsumer`, so the claim **pins ntfy to one node**
   and forces `strategy: Recreate` on the Deployment - a RollingUpdate would deadlock the
-  new pod on the old pod's volume.
-- Retention is ntfy's built-in **12h** default, because `NTFY_CACHE_DURATION` is set
-  nowhere. The volume can never hold more than 12h of backlog. Longer catch-up would be
-  a retention decision, explicitly out of scope of #915.
+  new pod on the old pod's volume. The pin is an **accepted single point of failure**
+  (owner ruling 2026-08-23, #1089); the lost-node operator step is documented in
+  `2-k3s/10.observability/README.md` under the ntfy table.
+- Retention is ntfy's built-in **12h** default, and that is now **deliberate** (owner
+  ruling 2026-08-23, #1091): `NTFY_CACHE_DURATION` stays unset on purpose. The PVC is
+  restart persistence for the one-shot `pve-backups` publisher, not multi-day
+  subscriber catch-up.
 
 ntfy is therefore no longer disposable: capacity, storage class and volume lifecycle are
 part of the alert path.
 
 ## Component 2 - TrueNAS host observability
 
-**Not written here. #922 owns this.** The GPU health signal, `node_exporter` on
-192.168.10.200, and the ARC/memory metrics belong in this section and none of them are
-decided by #904, #914 or #915. Do not read this file as a finished spec.
+Written 2026-08-23 from the decisions on #916, #917, #918 and #919 (all decided
+2026-08-21, executed 2026-08-22 through PRs #1110/#1111 and the #919 deploy gate in
+`2-k3s/10.observability/README.md`).
+
+**Collection: two exporters on the TrueNAS box, both installed as TrueNAS custom apps.**
+`nvidia_gpu_exporter` (utkuozdemir) watches the RTX 2070 SUPER; `node_exporter` supplies
+host memory and ZFS ARC series. node_exporter was a first landing - nothing listened on
+9100 before (#918's measurement). Both apps must be re-verified after a SCALE update
+(#1115).
+
+**Scrape: the selector-less Service plus EndpointSlice pattern, no second convention**
+(#917). Two Kubernetes objects per target, and 192.168.10.200 stays hand-maintained
+inside a manifest rather than discovered - the precedent (`servarr/jellyfin-truenas`,
+`traefik-system/truenas-ui`) was already decisive. One execution caveat is load-bearing
+(PR #1111): Prometheus's default `Endpoints` discovery role cannot see hand-authored
+EndpointSlices, so `serviceDiscoveryRole: EndpointSlice` in `prometheus-values.yaml` is
+what makes the whole pattern visible. Removing it silently blanks every off-cluster
+target.
+
+**Alert expressions: this repo owns them** (#916, owner: "Repo owns, both conditions,
+delete cron"). The four upstream expressions are vendored into
+`alertmanager-config/custom-alerts.yaml`. Coverage is both Xid events and collection
+health, and **collection health is the condition that must never be silenced**: the
+2026-08-09 incident produced no Xid to catch - the driver stayed loaded, `/dev/nvidia*`
+stayed present, `nvidia-smi` exited 6. The recorded cost: this is a fork, upstream
+PromQL fixes no longer arrive automatically, and the drift is ours to notice (#1114).
+
+**Leading memory indicator: ARC measured against its own target/cap** (#918) -
+`node_zfs_arc_size` vs `node_zfs_arc_c_max`, plus forced shrink under pressure. Not a
+free-memory floor: a healthy ZFS host fills RAM with ARC by design, so a floor alert
+fires constantly and gets silenced. Threshold tuning waits on the #1113 baseline
+capture.
+
+**The untracked cron is gone** (#919). `/root/gpu-health-check.sh`'s cron was deleted
+2026-08-22 only after the full gate ran: rules vendored, exporters live, a real alert
+observed fire-and-resolve end to end on the phone. The script is retired in place on the
+host, the tracked copy lives at `0-truenas/scripts/gpu-health-check.sh`, and the
+`truenas-alerts` topic retired with the cron - GPU alerts now arrive on
+`k8s-alertmanager` like everything else.
 
 ## Component 3 - what PVE notifies natively, and what alerts from Prometheus (#920)
 
@@ -153,7 +193,20 @@ PVE's native targets.
 
 ## Observability
 
-**Not written here. #922 owns this**, together with Component 2 - what alerts on ntfy
-itself being down, and what alerts on the TrueNAS host, are the same question and it has
-not been answered. Today nothing watches the watcher: if the ntfy pod is unschedulable
-because its RWO volume's node is drained, the failure mode is silence.
+Written 2026-08-23. The question this section owed - what watches the watcher - now has
+an answered half and a tracked half.
+
+Answered: Alertmanager -> ntfy on `k8s-alertmanager` is the **single delivery path**, by
+decision (#920/#921), and it runs inside the very cluster whose problems it reports.
+`TargetDown` and `NvidiaGpuExporterCollectionFailing` were proven live on 2026-08-22,
+FIRING and RESOLVED, delivered to the topic and the phone. ntfy's two structural
+weaknesses are accepted and written down rather than fixed: the node pin (#1089 ruling)
+and the 12h cache ceiling (#1091 ruling).
+
+Tracked, not yet guarded: silence still cannot be distinguished from delivery failure
+without the guards in #1108 (a PVE notification-target failure must be noticed within a
+day; absorbed #1116's Alertmanager->ntfy leg, where
+`alertmanager_notifications_failed_total` per integration is the candidate signal) and
+#1100 (one demonstrated end-to-end `KubeJobFailedLastRun` failure). Until those close,
+the honest statement is: a broken delivery leg looks identical to a quiet day, for at
+most one day's worth of alerts.

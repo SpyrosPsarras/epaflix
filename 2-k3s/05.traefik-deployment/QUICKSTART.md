@@ -20,7 +20,7 @@ For an already-running cluster with ArgoCD installed, use the Traefik
 Application instead of re-running `./01.deploy.sh`:
 
 ```bash
-kubectl --context epaflix kustomize --enable-helm 2-k3s/05.traefik-deployment >/tmp/traefik-rendered.yaml
+kustomize build --enable-helm --enable-alpha-plugins --enable-exec 2-k3s/05.traefik-deployment >/tmp/traefik-rendered.yaml
 kubectl --context epaflix -n traefik-system get secret cloudflare-api-token
 kubectl --context epaflix -n traefik-system get pvc
 kubectl --context epaflix -n traefik-system get svc traefik -o wide
@@ -108,8 +108,9 @@ Local Record:
 # Check Traefik logs for errors
 kubectl --context epaflix -n traefik-system logs -l app.kubernetes.io/name=traefik --tail=100
 
-# Verify Cloudflare token
-kubectl --context epaflix -n traefik-system get secret cloudflare-api-token -o jsonpath='{.data.api-token}' | base64 -d
+# Verify Cloudflare token - length only, never print the value (#602)
+TOKEN=$(kubectl --context epaflix -n traefik-system get secret cloudflare-api-token -o jsonpath='{.data.api-token}' | base64 -d)
+echo "${#TOKEN}"   # expect a nonzero length; compare by sha256sum if a match matters
 ```
 
 ### LoadBalancer stuck in Pending

@@ -44,7 +44,8 @@
 # published while a subscriber was offline has to survive a restart.
 # Retention is ntfy's built-in 12h default because NTFY_CACHE_DURATION is set
 # nowhere, so the PVC preserves at most 12h of backlog — it is a
-# restart-survival buffer, not an archive.
+# restart-survival buffer, not an archive. Deliberate as of 2026-08-23
+# (owner ruling, #1091) - do not "fix" this by setting the env var.
 #
 # `strategy: Recreate` is REQUIRED by that PVC: local-path is RWO +
 # WaitForFirstConsumer, so a RollingUpdate would deadlock the new pod waiting

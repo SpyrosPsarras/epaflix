@@ -575,7 +575,13 @@ In that session, do three things:
 1. Set `remote-management.allow-remote` to `true`, otherwise the internal
    hostname stays useless.
 2. Confirm the management key. `MANAGEMENT_PASSWORD` comes from the
-   `management-password` key of `cliproxy-secrets`. If a plaintext
+   `management-password` key of `cliproxy-secrets`. A human reads it from the
+   credential store:
+   `sops -d --extract '["cliproxy_management_password"]' .github/instructions/secrets.enc.yaml`
+   (added by PR #1071). Rotate via SOPS plus a pod restart, never through the
+   management UI - a UI-side change writes only a bcrypt hash into the Postgres
+   `config_store` row and silently orphans both the Secret and the store copy
+   (`reconcile-config.psql` does not touch `remote-management.secret-key`). If a plaintext
    `remote-management.secret-key` is present in `config.yaml`, the process
    rewrites it in place as a bcrypt hash on first start - so a later `grep` of
    that file showing a hash is normal, not corruption.
@@ -601,7 +607,9 @@ curl -X PUT http://127.0.0.1:8317/v0/management/api-keys \
 `PATCH` returns `400 missing fields`. Only a bare array works on `v7.2.123`.
 
 The current key is kept in `cliproxy-secrets.enc.yaml` under `omp-api-key` so a
-rebuild does not lose it. Nothing consumes that value automatically yet - it is
+rebuild does not lose it. The same value also sits in the credential store as
+`cliproxy_api_key` (PR #1071) - one value under two names, so a rotation must
+update both. Nothing consumes that value automatically yet - it is
 still typed in through the management API by hand. See #861 for seeding it
 properly.
 

@@ -229,8 +229,9 @@ kubectl --context epaflix exec -n observability deployment/kube-prometheus-stack
 
 **Check**:
 ```bash
-# Verify client secret
-kubectl --context epaflix get secret grafana-oauth-secret -n observability -o jsonpath='{.data.client_secret}' | base64 -d
+# Verify client secret - compare hashes, never print the value (#602)
+kubectl --context epaflix get secret grafana-oauth-secret -n observability -o jsonpath='{.data.client_secret}' | base64 -d | sha256sum
+# Compare against the Authentik-side value hashed the same way
 ```
 
 **Solution**: Regenerate credentials in Authentik and update Kubernetes secret:

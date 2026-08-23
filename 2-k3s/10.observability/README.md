@@ -255,7 +255,8 @@ made it official and #921 deleted the email leg on 2026-08-22.
 | Entry point | `https://ntfy.epaflix.com` on Traefik's `internal` entry point at **192.168.10.102**, TLS from the `cloudflare` certResolver (#904). NOT the public `websecure` entry point on .101 — see the header of `ingress/ntfy-ingressroute.yaml` |
 | Auth | none. Publishers are machines (PVE, the TrueNAS GPU cron) posting with no interactive login, so a forward-auth middleware would break them. Same posture as `searxng-internal` and `qbittorrent-internal` |
 | Cache | `ntfy-cache` PVC, local-path, RWO, 1Gi (#915). Was an `emptyDir`. The Deployment is `strategy: Recreate` because local-path is RWO + WaitForFirstConsumer |
-| Retention | ntfy's built-in **12h** default — `NTFY_CACHE_DURATION` is set nowhere, so the PVC can never hold more than 12h of backlog |
+| Node pin | **Accepted single point of failure** (owner ruling 2026-08-23, #1089): local-path RWO pins ntfy to the node the volume was provisioned on (k3s-worker-65). If that node is lost: `kubectl --context epaflix -n observability delete pvc ntfy-cache` and delete the pod; ntfy reschedules with an empty cache and the backlog loss is accepted |
+| Retention | ntfy's built-in **12h** default, **deliberate** (owner ruling 2026-08-23, #1091): `NTFY_CACHE_DURATION` stays unset on purpose. The PVC exists for restart persistence, not multi-day subscriber catch-up |
 | In-cluster address | `http://ntfy.observability.svc.cluster.local:8091` (Alertmanager's webhook url, and `NTFY_BASE_URL` in `odysseus-config`, which is Odysseus's dial address) |
 | ntfy's own `base-url` | `https://ntfy.epaflix.com`, set via the `NTFY_BASE_URL` env in `ntfy.yaml`. That is a *server-side* setting — the public-facing URL ntfy writes into attachment/click links and push payloads — not an address anything dials, so it follows the entry point and not the namespace |
 | Topics | `k8s-alertmanager` (Alertmanager), `pve-backups` (Proxmox VE), `truenas-alerts` (the TrueNAS GPU cron, retired at the #919 gate, see "TrueNAS GPU + ARC monitoring" below, after which GPU alerts arrive on `k8s-alertmanager` like everything else) |
@@ -310,6 +311,12 @@ tracked copy. Both steps are kept below because they are the rebuild recipe:
 LAN DNS down entirely.
 
 #### Cutover: sync order, the prune, and the 192.168.10.112 handover (#914, done)
+
+One cost paid here, recorded so "where did that message go" has an answer (#1090):
+moving a pod off an `emptyDir` discards whatever the emptyDir held. The pre-move
+cache in `odysseus` held a live 61KB `cache.db` and no copy was taken before the
+prune, by choice - anything buffered for an offline subscriber at cutover time is
+gone. The alternatives were copy-first or accept the loss; the loss was accepted.
 
 Completed history, kept because it is the only written record of how kube-vip
 behaves when two Services claim one address. This ran at PR #1088's deploy gate;
@@ -816,14 +823,20 @@ kubectl --context epaflix get pvc -n observability
 
 ### Cleanup Old Data
 
-```bash
-# Reduce Loki retention to 14 days
-helm upgrade loki grafana/loki -n observability \
-  --set loki.limits_config.retention_period=336h
+This stack is ArgoCD-managed with `selfHeal: true`: an imperative `helm upgrade`
+is reverted on the next reconcile, and worse, it refreshes the stale `helm`
+field manager that silently pins fields against future git changes (#779/#1052).
+The only supported change path is git:
 
-# Reduce Prometheus retention to 7 days
-helm upgrade kube-prometheus-stack prometheus-community/kube-prometheus-stack -n observability \
-  --set prometheus.prometheusSpec.retention=7d
+1. Edit the value in the tracked file - Loki retention in `loki-values.yaml`
+   (`loki.limits_config.retention_period`), Prometheus retention in
+   `prometheus-values.yaml` (`prometheus.prometheusSpec.retention`).
+2. Merge through a PR and let ArgoCD sync.
+3. Verify with **both** the manifest literal and the live value (#50/#551), e.g.:
+
+```bash
+grep -n 'retention' 2-k3s/10.observability/prometheus-values.yaml
+kubectl --context epaflix -n observability get prometheus -o jsonpath='{.items[0].spec.retention}'
 ```
 
 ## Troubleshooting
@@ -960,14 +973,14 @@ kubectl --context epaflix get deployment -n app-authentik authentik-server -o ya
 
 ### Updating Components
 
-```bash
-# Update kube-prometheus-stack
-helm repo update
-helm upgrade kube-prometheus-stack prometheus-community/kube-prometheus-stack \
-  -n observability -f prometheus-values.yaml
+Chart versions are pinned in this directory's kustomization/HelmChart config and
+bumped via PR (Renovate proposes them). Never `helm upgrade` an ArgoCD-adopted
+release - it re-animates the stale `helm` field manager (#779/#1052). To update:
+bump the pinned chart version in git, merge, let ArgoCD sync, verify the new
+version with `kubectl --context epaflix -n observability get pods -o
+jsonpath='{range .items[*]}{.spec.containers[0].image}{"\n"}{end}' | sort -u`.
 
-# Update Loki
-helm upgrade loki grafana/loki -n observability -f loki-values.yaml
+```bash
 
 # Update Cilium
 cilium upgrade --version 1.15.0
