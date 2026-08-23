@@ -199,7 +199,7 @@ Keep runtime secrets and certificate state outside git:
 
 Safe adoption flow:
 ```bash
-kubectl --context epaflix kustomize --enable-helm 2-k3s/05.traefik-deployment >/tmp/traefik-rendered.yaml
+kustomize build --enable-helm --enable-alpha-plugins --enable-exec 2-k3s/05.traefik-deployment >/tmp/traefik-rendered.yaml
 kubectl --context epaflix -n traefik-system get secret cloudflare-api-token
 kubectl --context epaflix -n traefik-system get pvc
 kubectl --context epaflix -n traefik-system get svc traefik -o wide
@@ -384,8 +384,10 @@ spec:
 # Check Traefik logs
 kubectl --context epaflix -n traefik-system logs -l app.kubernetes.io/name=traefik | grep -i acme
 
-# Verify Cloudflare token
-kubectl --context epaflix -n traefik-system get secret cloudflare-api-token -o yaml
+# Verify the Cloudflare token Secret exists and carries the expected key
+# (key names only - never fetch the whole Secret, #712/#932)
+kubectl --context epaflix -n traefik-system get secret cloudflare-api-token \
+  --template '{{range $k,$v := .data}}{{$k}}{{"\n"}}{{end}}'
 ```
 
 ### LoadBalancer pending

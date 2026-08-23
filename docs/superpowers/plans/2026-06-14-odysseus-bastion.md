@@ -379,7 +379,7 @@ PY
 sops -e /tmp/odysseus-secrets-plaintext.yaml > odysseus-secrets.enc.yaml
 rm -f /tmp/odysseus-secrets-plaintext.yaml
 ```
-Expected: `odysseus-secrets.enc.yaml` re-encrypted (contains `sops:` block). Verify: `sops -d odysseus-secrets.enc.yaml | grep ODYSSEUS_BASTION_SSH_KEY`.
+Expected: `odysseus-secrets.enc.yaml` re-encrypted (contains `sops:` block). Verify (count only - a bare grep would print the value on the matched line, #602): `sops -d odysseus-secrets.enc.yaml | grep -c ODYSSEUS_BASTION_SSH_KEY`.
 
 - [ ] **Step 3: Authorize the pubkey on the bastion**
 
@@ -566,7 +566,7 @@ git commit -m "feat(odysseus): mount bastion workspace + ssh key into pod"
 - [ ] **Step 1: Inspect the current seed payload**
 
 ```bash
-cd 2-k3s/13.odysseus && sops -d odysseus-data-seed.enc.yaml | grep -E 'settings.json|auth.json' 
+cd 2-k3s/13.odysseus && sops -d odysseus-data-seed.enc.yaml | grep -cE 'settings.json|auth.json'   # count only, never page the decrypt (#602/#943)
 ```
 Expected: see which JSON files are seeded. Identify where a custom instruction/system-prompt field lives in `settings.json` (read the decrypted `settings.json` value fully to find the right key — Odysseus stores agent instructions there).
 
@@ -584,7 +584,7 @@ $EDITOR /tmp/seed-plaintext.yaml
 sops -e /tmp/seed-plaintext.yaml > odysseus-data-seed.enc.yaml
 rm -f /tmp/seed-plaintext.yaml
 ```
-Expected: re-encrypted file. Verify: `sops -d odysseus-data-seed.enc.yaml | grep -i bastion`.
+Expected: re-encrypted file. Verify (count only, #602): `sops -d odysseus-data-seed.enc.yaml | grep -ci bastion`.
 
 > NOTE: the seed is **non-clobbering** (only seeds absent files). On the live PVC `settings.json` already exists, so this seed alone will NOT update it — see Task 16 (runtime API) for the live update. The seed guarantees the instruction on a fresh PVC.
 

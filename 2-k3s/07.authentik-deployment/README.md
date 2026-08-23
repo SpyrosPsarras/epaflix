@@ -609,7 +609,7 @@ shipped inside a SOPS-encrypted Secret:
 > Same check straight from the cluster, no age key needed - this is the real
 > break-glass path, since the token is only useful while the API is up anyway:
 > ```bash
-> BP=$(kubectl --context epaflix -n app-authentik get secret authentik-iac-blueprint -o jsonpath='{.data.*}' \
+> BP=$(kubectl --context epaflix -n app-authentik get secret authentik-iac-blueprint -o jsonpath='{.data.iac-service-account\.yaml}' \
 >      | base64 -d | awk '/identifiers:/,0' | awk -F': *' '/^[[:space:]]*key:/{print $2; exit}')
 > ```
 
@@ -1116,7 +1116,9 @@ they are only in the SOPS-encrypted `authentik-app-secrets`
 ([authentik-app-secrets.enc.yaml](authentik-app-secrets.enc.yaml)) as
 `AUTHENTIK_EMAIL__HOST` / `__USERNAME` / `__FROM` / `__PASSWORD`, mirrored in
 the credential store `.github/instructions/secrets.enc.yaml` under the
-`auth_email_*` keys. Env vars override
+`auth_email_*` keys - **three** of them (`hostname`, `username`, `password`).
+There is deliberately no `auth_email_from` key: `__FROM` reuses the
+`auth_email_username` value, per the relay constraint below (#979). Env vars override
 the chart's own config, which is what makes the split work.
 
 `from` is set to the **same mailbox as `username`**: the relay rejects a sender

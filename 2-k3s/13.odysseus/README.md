@@ -278,7 +278,8 @@ the refresh is a deliberate manual flow. Resolves **#211**.
 
 > **RETIRED 2026-08-04 (#344).** `ghcr_write_packages_pat` no longer exists in
 > the credential store `.github/instructions/secrets.enc.yaml`. It held the same value as
-> `argocd_image_updater_github_pat` and `RENOVATE_GITHUB_PAT` — one shared
+> `argocd_image_updater_github_pat` (also retired - no longer in the store, #979)
+> and `RENOVATE_GITHUB_PAT` — one shared
 > classic PAT (`ghp_`, scopes `repo, write:packages`, no expiry) — which was
 > retired because it was orphaned by the Image Updater decommission (#266) and
 > re-exposed twice in agent transcripts (#712, #761).

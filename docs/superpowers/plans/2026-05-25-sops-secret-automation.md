@@ -441,9 +441,10 @@ shred -u my-thing-plaintext.yaml
 #      generators:
 #        - ksops-generator.yaml
 
-# 4. Verify locally:
-sops -d my-thing.enc.yaml | head
-KSOPS_BIN=$(which ksops) kustomize build --enable-alpha-plugins --enable-exec . | grep -A5 'name: my-thing'
+# 4. Verify locally - key NAMES only, never pipe a decrypt to head/cat/grep -A (#602/#943):
+sops -d my-thing.enc.yaml | yq '.stringData | keys'
+KSOPS_BIN=$(which ksops) kustomize build --enable-alpha-plugins --enable-exec . \
+  | yq -N 'select(.kind == "Secret") | .metadata.name as $n | (.data // .stringData) | keys | .[] | $n + ": " + .'
 
 # 5. Commit.
 git add my-thing.enc.yaml ksops-generator.yaml kustomization.yaml
@@ -797,10 +798,11 @@ Expected: `secret/sops-age created`.
 - [ ] **Step 4: Verify**
 
 ```bash
-kubectl --context epaflix -n argocd get secret sops-age -o jsonpath='{.data.keys\.txt}' | base64 -d | head -2
+# Print ONLY the public-key comment line - head -N one line too far prints the private key (#602)
+kubectl --context epaflix -n argocd get secret sops-age -o jsonpath='{.data.keys\.txt}' | base64 -d | grep '^# public key:'
 ```
 
-Expected: matches `# created: ...` / `# public key: age1...` lines from your local file.
+Expected: matches the `# public key: age1...` line from your local file.
 
 - [ ] **Step 5: Log to .history**
 
@@ -820,8 +822,7 @@ kubectl --context epaflix create secret generic sops-age -n argocd \
 
 Verification:
 ```bash
-$ kubectl --context epaflix -n argocd get secret sops-age -o jsonpath='{.data.keys\.txt}' | base64 -d | head -2
-# created: 2026-05-25T...
+$ kubectl --context epaflix -n argocd get secret sops-age -o jsonpath='{.data.keys\.txt}' | base64 -d | grep '^# public key:'
 # public key: age1...
 ```
 EOF
@@ -1183,11 +1184,12 @@ Expected: Synced + Healthy.
 - [ ] **Step 4: Verify Secret unchanged in-cluster**
 
 ```bash
-kubectl --context epaflix -n filebrowser get secret filebrowser-oidc -o jsonpath='{.data.client-id}' | base64 -d
+CID=$(kubectl --context epaflix -n filebrowser get secret filebrowser-oidc -o jsonpath='{.data.client-id}' | base64 -d)
+[ "$CID" = filebrowser ] && echo client-id-ok   # compare, never print (#602)
 kubectl --context epaflix -n filebrowser get secret filebrowser-oidc -o jsonpath='{.data.client-secret}' | base64 -d | wc -c
 ```
 
-Expected: client-id is `filebrowser`; client-secret byte count matches the `filebrowser_oidc_client_secret` entry in the credential store (`sops -d --extract '["filebrowser_oidc_client_secret"]' .github/instructions/secrets.enc.yaml | wc -c`, allowing for the trailing newline `sops` adds).
+Expected: `client-id-ok`; client-secret byte count matches the `filebrowser_oidc_client_secret` entry in the credential store (`sops -d --extract '["filebrowser_oidc_client_secret"]' .github/instructions/secrets.enc.yaml | wc -c`, allowing for the trailing newline `sops` adds).
 
 - [ ] **Step 5: Verify Pod still Ready**
 
@@ -1284,10 +1286,11 @@ argocd app set filebrowser --self-heal=true   # already on, this is a no-op conf
 kubectl --context epaflix -n filebrowser delete secret filebrowser-oidc   # destructive test
 # Wait ~30s for selfHeal to recreate it:
 sleep 30
-kubectl --context epaflix -n filebrowser get secret filebrowser-oidc -o jsonpath='{.data.client-id}' | base64 -d
+CID=$(kubectl --context epaflix -n filebrowser get secret filebrowser-oidc -o jsonpath='{.data.client-id}' | base64 -d)
+[ "$CID" = filebrowser ] && echo recreated-ok   # compare, never print (#602)
 ```
 
-Expected: Secret recreated by ArgoCD with identical content (matches Task 16 Step 4).
+Expected: `recreated-ok` - Secret recreated by ArgoCD with identical content (matches Task 16 Step 4).
 
 - [ ] **Step 2: Edit PR description — tick T9**
 

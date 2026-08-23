@@ -45,10 +45,13 @@ Wait for pods:
 kubectl --context epaflix -n argocd get pods -w
 ```
 
-Initial admin password (only until OIDC is wired; use SSO afterwards):
+Initial admin password (only until OIDC is wired; use SSO afterwards). Capture
+it into a variable; print it only in a human, non-recorded shell - never in an
+agent transcript (#602):
 ```
-kubectl --context epaflix -n argocd get secret argocd-initial-admin-secret \
-  -o jsonpath='{.data.password}' | base64 -d ; echo
+PW=$(kubectl --context epaflix -n argocd get secret argocd-initial-admin-secret \
+  -o jsonpath='{.data.password}' | base64 -d)
+echo "${#PW}"   # length check; type the value from a human shell when logging in
 ```
 
 ## 3. Authentik OIDC provider

@@ -75,6 +75,8 @@ value ends up in the shell history and in the agent transcript.
 
 ```bash
 kubectl --context epaflix create ns pg-restore-test
+# Whole-object read is deliberate here: it is a namespace copy that stays inside
+# the pipe. Never run the left side alone - it would print the values (#712/#602).
 kubectl --context epaflix get secret minio-backup-credentials -n postgres-system -o json \
   | python3 -c "import sys,json;d=json.load(sys.stdin);d['metadata']={'name':d['metadata']['name'],'namespace':'pg-restore-test'};print(json.dumps(d))" \
   | kubectl --context epaflix apply -f -

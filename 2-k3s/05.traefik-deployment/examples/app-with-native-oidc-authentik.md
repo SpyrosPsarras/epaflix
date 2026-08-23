@@ -254,7 +254,7 @@ Add multiple users at once:
 **Cause**: Incorrect Client ID or Client Secret.
 
 **Solution**:
-- Verify Kubernetes secret: `kubectl --context epaflix get secret <app-name>-oidc-secret -n <namespace> -o yaml`
+- Verify the Kubernetes secret exists and carries both keys (names only, never `-o yaml` on a Secret - #712): `kubectl --context epaflix get secret <app-name>-oidc-secret -n <namespace> --template '{{range $k,$v := .data}}{{$k}}{{"\n"}}{{end}}'`
 - Check application configuration has matching Client ID
 - Regenerate credentials in Authentik if needed
 

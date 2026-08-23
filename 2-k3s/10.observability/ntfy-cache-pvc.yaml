@@ -11,8 +11,9 @@
 #   2. Retention is ntfy's built-in 12h default (NTFY_CACHE_DURATION is set
 #      nowhere), so this volume can never hold more than 12h of backlog. It is
 #      a restart-survival buffer for an offline subscriber, not an archive.
-#      Longer catch-up would be a retention decision, explicitly out of scope
-#      of #915.
+#      DELIBERATE as of 2026-08-23 (owner ruling, #1091): 12h is the chosen
+#      answer, not an inherited default. The node pin in (1) is likewise an
+#      accepted single point of failure (#1089) - lost-node step in README.md.
 #
 # 1Gi matches the smallest comparable claims in this repo (remote-pi-data 1Gi,
 # homarr-config 1Gi) and is far above the observed live cache size of 64KiB.

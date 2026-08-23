@@ -62,8 +62,10 @@ kubectl --context epaflix logs -n servarr -l app=seerr --tail=100
 kubectl --context epaflix get pvc jellyseerr-config -n servarr
 kubectl --context epaflix describe pvc jellyseerr-config -n servarr
 
-# Database connection issues?
-kubectl --context epaflix get secret servarr-postgres -n servarr -o jsonpath='{.data.jellyseerr-host}' | base64 -d
+# Database connection issues? Check the host key without printing Secret values
+# into a retained transcript (#602) - compare by length/hash if a match matters
+DBHOST=$(kubectl --context epaflix get secret servarr-postgres -n servarr -o jsonpath='{.data.jellyseerr-host}' | base64 -d)
+echo "${#DBHOST}"
 ```
 
 ## See also
