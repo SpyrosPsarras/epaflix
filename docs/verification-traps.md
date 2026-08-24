@@ -8,14 +8,17 @@ greps for evidence.
 
 ## The through-line
 
-Every trap below fails toward **"nothing here"** rather than toward an error:
+Trap 1 fails toward a loud false alarm. Every other trap below fails toward
+**"nothing here"** rather than toward an error:
 
 - A render that cannot decrypt reports missing manifests.
 - A diff range that is empty reports an unchanged file.
 - A truncated evidence bundle reports absent evidence.
 - A regex that cannot match reports a clean repo.
+- A filter the server dropped reports somebody else's history as yours.
+- A guard that cannot reject anything reports a clean run.
 
-None of them raise an exception. All of them produce a confident wrong answer,
+None of those raise an exception. All of them produce a confident wrong answer,
 and the wrong answer looks exactly like success.
 
 **Design rule:** a check must distinguish "I looked and found nothing" from
@@ -94,6 +97,46 @@ is load-bearing evidence, also run it in a form you expect to **match** — a
 pattern that finds nothing everywhere is not distinguishable from a broken
 pattern.
 
+### 7. A parameter the server ignores, read as an answer
+
+A filter or sort passed to an API is a request, not a guarantee. When the
+server drops it, the response is still a well-formed 200, and the caller reads
+somebody else's data as an answer about the thing it asked for.
+
+Seen 2026-08-24, looking up whether an *arr had already failed a download:
+`GET /api/v3/history?downloadId=<hash>&pageSize=1&sortKey=date&sortDirection=descending`.
+An empty `downloadId` returns `totalRecords 8462`, because Sonarr reads an empty
+filter as no filter, so a torrent with no hash was about to be explained by an
+arbitrary event belonging to some other download. The filter is also
+case-sensitive, and it fails the other way: the same hash lowercased returns 0
+records, which is indistinguishable from "this download has no history". Whether
+the sort was honoured cannot be told from the response at all with `pageSize=1`,
+and that one fails open, because a stale `downloadFailed` under a newer
+`grabbed` then reads as a failed download.
+
+**Fix:** make the server prove it did what was asked. Request one more row than
+you need so ordering is checkable, and require every returned record to carry
+the key you filtered on. That discipline was already in the sibling read in the
+same file: `arr_download_ids()` compares `totalRecords` against the rows fetched
+and refuses to run against a partial queue.
+
+### 8. A guard nobody has watched fail
+
+Seen 2026-08-24: the repair for trap 7 shipped with a live run in which both new
+guards passed, which proved nothing about either. One of them was inert. It
+compared `str(r.get("date", ""))` on both sides, so a response carrying no
+`date` compared `"" < ""`, passed, and was trusted as newest-first. Unverifiable
+resolved to verified, one layer below the defect it was fixing.
+
+**Fix:** seed each guard with the input it exists to reject, and record the
+abort. For that history lookup it meant asserting `SystemExit` on seven seeded
+responses: a foreign key in record 0, a foreign key in record 1, a missing key,
+reversed ordering, an exact date tie, a missing date and an empty date. The
+fan-out cap got the same treatment, with a live run at a cap of 1 so its own
+error appears in the log. Fixtures need it too. An assertion reading
+`("a" * 40).upper().lower()` against the same string claimed to test case
+handling and could not fail.
+
 ## Mechanical, not advisory
 
 Traps 1, 4 and 5 are boilerplate every new check re-derives. They can be removed
@@ -105,6 +148,11 @@ by construction rather than by remembering:
 
 Traps 3 and 6 suit a lint. Trap 2 needs the shared preamble in trap 2's fix.
 
+Traps 7 and 8 are review-shaped rather than lint-shaped. The cheap mechanical
+part of trap 7 is a shared response-validation helper for *arr reads; the rest
+is a question to ask in review, "has anyone seen this check fail?", which is
+what caught both of them.
+
 ## Origin
 
 Traps 1-5 were recorded in #1096 from a 2026-08-22 automated run, where three of
@@ -114,3 +162,9 @@ of dying with it. Trap 6 was added when the same species of bug — failing towa
 "nothing here" — appeared in the very session that retired that tooling.
 
 Related: #1095 (planner arrays dying with a git-ignored run), #1035, #1088.
+
+Traps 7 and 8 were added on 2026-08-24 from PR #1134, where the review gate
+blocked the same change three times. Two public retractions from the same week
+sit behind them: Sonarr#8899, withdrawn in #705, and the first diagnosis comment
+on #834, which sorted the two populations by memory versus disk and was
+corrected by a later comment the same day.
