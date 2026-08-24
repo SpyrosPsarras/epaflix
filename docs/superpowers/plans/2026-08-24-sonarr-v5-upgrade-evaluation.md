@@ -17,12 +17,12 @@ is now tracked in #1129.
 | `gh api repos/Sonarr/Sonarr/git/matching-refs/tags/v5` | length 0. No v5 tag of any kind. |
 | `gh api repos/Sonarr/Sonarr/branches` | v5 work lives on `v5-develop`, head `e27c1f47` (2026-08-19). `develop` is stale since 2025-02-22. |
 | `gh api repos/Sonarr/Sonarr/compare/main...2f9e12a` | `diverged`, 789 ahead. Not in `main`. Same result against `develop`. |
-| `gh api repos/Sonarr/Sonarr/compare/v5-develop...2f9e12a` | `behind`, 0 ahead. Contained in `v5-develop`. Do not use `/branches-where-head` for this: it answered `v5-develop` on one run and empty on the next. |
+| `gh api repos/Sonarr/Sonarr/compare/v5-develop...2f9e12a` | `behind`, 0 ahead. Contained in `v5-develop`. Do not use `/branches-where-head` for this. It answered `v5-develop` on one run and empty on the next. |
 | `curl "services.sonarr.tv/v1/update/$br?version=4.0.19.2979&os=linux&arch=x64&runtime=netcore"` | `develop` and `nightly` both serve 4.0.19.3001. `main` and `v5-develop` return `{"available":false}`, but so does a deliberately bogus branch name, so read those two cells as "not a channel that offers us an update" and nothing stronger. |
-| `curl "hub.docker.com/v2/repositories/linuxserver/sonarr/tags?page_size=100"` | 8398 tags exist; the newest 100 hold no tag starting with 5 or containing a non-4 `5.`. Newest-first, so this shows no v5 yet rather than enumerating everything. |
+| `curl "hub.docker.com/v2/repositories/linuxserver/sonarr/tags?page_size=100"` | 8398 tags exist; no tag in the newest 100 starts with 5 or v5. Newest-first, so this shows no v5 yet rather than enumerating everything. |
 
 None of those checks found a v5 build, and the two negative ones are weak on
-their own. Note also that channel does not equal git branch here: the `develop`
+their own. Note also that channel does not equal git branch here. The `develop`
 channel serves 4.0.19.3001 from 2026-08-11 while the `develop` branch has not
 moved since 2025-02-22, so the pre-releases are built from something these checks
 did not identify. Read the section as "no v5 build was found anywhere we looked",
@@ -118,7 +118,7 @@ three `images:` entries, because `sonarr` and `sonarr2` run the same image.
 `bazarr` is digest-only on `:latest` in the same block and also lives on the
 shared Postgres, so it belongs in the same fix.
 
-Nine more entries in that block are digest-only under the same rule: `jellyfin`,
+Eight more entries in that block are digest-only under the same rule: `jellyfin`,
 `cleanuparr`, `byparr`, `unpackerr`, `qbittorrent-nox`, `bazarr_autotranslate`,
 and the locally built `airvpn-bluetit` and `vpn-picker`. They are excluded from
 the pin on the judgement that none owns a one-way relational migration. I did not
@@ -153,8 +153,8 @@ Neither matches `major`.
    `images:` block to a version tag so a major arrives as a `major` update
    Renovate will not auto-merge. The `sonarr` entry covers both the `sonarr` and
    `sonarr2` Deployments. Tracked in #1129.
-3. Revisit v5 when a `v5.x` tag appears on `Sonarr/Sonarr` releases and a
-   LinuxServer image carries it. At that point the migration needs a
+3. Revisit v5 when a v5 build becomes reachable by any path, not only a release
+   tag. At that point the migration needs a
    `sonarr-main` backup (`2-k3s/maintenance/backup-all-databases.sh`), a read of
    the v5 release notes for API changes used by the census, Cleanuparr and
    newtarr, and a rollback plan that assumes the database cannot be downgraded.
@@ -175,8 +175,8 @@ Four claims rest on other sources. The 648-row and 15-re-grab counts come from
 the #834 comments of 2026-08-24, which quote the SQL and the Cleanuparr
 `/api/events` reads behind them. The claim that the census guard is the only
 proposed item unblocking #618 is a reading of #834 and #618, not a command. The
-#540 quotation above comes from that issue's closing text, read with `gh issue
-view 540`. The code claims come from reading
+#540 quotation above comes from that issue's closing text, read with
+`gh issue view 540`. The code claims come from reading
 `src/NzbDrone.Core/Download/TrackedDownloads/TrackedDownloadService.cs`,
 `DownloadMonitoringService.cs` and `src/NzbDrone.Core/Queue/QueueService.cs` at
 both tag `v4.0.19.2979` and `v5-develop` head `e27c1f47`.
