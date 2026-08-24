@@ -15,12 +15,17 @@ finding worth acting on and is now tracked in #1129.
 | `gh api repos/Sonarr/Sonarr/releases` | newest tag `v4.0.19.3001` (pre-release, 2026-08-11). No v5 tag at all. |
 | `gh api repos/Sonarr/Sonarr/git/matching-refs/tags/v5` | length 0. No v5 tag of any kind. |
 | `gh api repos/Sonarr/Sonarr/branches` | v5 work lives on `v5-develop`, head `e27c1f47` (2026-08-19). `develop` is stale since 2025-02-22. |
-| `gh api repos/Sonarr/Sonarr/compare/main...2f9e12a` | `diverged`, 789 ahead. Not in `main`. |
+| `gh api repos/Sonarr/Sonarr/compare/main...2f9e12a` | `diverged`, 789 ahead. Not in `main`. Same result against `develop`. |
 | `gh api repos/Sonarr/Sonarr/compare/v5-develop...2f9e12a` | `behind`, 0 ahead. Contained in `v5-develop`. Do not use `/branches-where-head` for this: it answered `v5-develop` on one run and empty on the next. |
 | `curl "services.sonarr.tv/v1/update/$br?version=4.0.19.2979&os=linux&arch=x64&runtime=netcore"` | `develop` and `nightly` both serve 4.0.19.3001. `main` and `v5-develop` return `{"available":false}`, but so does a deliberately bogus branch name, so read those two cells as "not a channel that offers us an update" and nothing stronger. |
 | `curl "hub.docker.com/v2/repositories/linuxserver/sonarr/tags?page_size=100"` | 8398 tags exist; the newest 100 hold no tag starting with 5 or containing a non-4 `5.`. Newest-first, so this shows no v5 yet rather than enumerating everything. |
 
-So no update channel, official build or LinuxServer image carries v5. The only
+None of those checks found a v5 build, and the two negative ones are weak on
+their own. Note also that channel does not equal git branch here: the `develop`
+channel serves 4.0.19.3001 from 2026-08-11 while the `develop` branch has not
+moved since 2025-02-22, so the pre-releases are built from something these checks
+did not identify. Read the section as "no v5 build was found anywhere we looked",
+not as an exhaustive proof. The only
 way to run `2f9e12a` today is to build `v5-develop` ourselves, which means owning
 a Sonarr build for one 18-line event handler. Not worth it.
 
@@ -33,14 +38,33 @@ as plausible within months, not years.
 
 #834 turned up two separate populations behind our blind queue reads:
 
-| population | pinned state | survives restart | fixed by `2f9e12a` |
+| population | pinned state | newest `DownloadHistory` event after the grab | fixed by `2f9e12a` |
 |---|---|---|---|
-| the 16 re-grabs of 2026-08-07 | `Imported`, in memory | no | yes |
-| 648 rows, incl. the 5 stalled torrents in #1029 | `Failed`, re-seeded from `DownloadHistory` | yes | no |
+| the 16 re-grabs of 2026-08-07 | `Imported` | `DownloadGrabbed`, so a cold cache reads `Downloading` | yes |
+| 648 rows, incl. the 5 stalled torrents in #1029 | `Failed` | `DownloadFailed`, written after the grab, so a cold cache reads `Failed` again | no |
 
-`2f9e12a` adds an `EpisodeGrabbedEvent` handler that evicts cache entries in
-`Imported`, `Failed` or `Ignored`. That clears the in-memory population on the
-next grab. It does not help the second population, and that verdict is read from
+The discriminator is which `DownloadHistory` row is newest, not memory versus
+disk. `GetStateFromHistory()` re-seeds `Imported` from the DB exactly as it
+re-seeds `Failed`. The difference is that a re-grab writes a `DownloadGrabbed`
+row, which falls to `default` and returns `Downloading`, so the first population
+recovers on any process start while the second does not, because Cleanuparr
+writes a newer `DownloadFailed` row hours later.
+
+`2f9e12a` adds an `EpisodeGrabbedEvent` handler, read at
+`v5-develop:src/NzbDrone.Core/Download/TrackedDownloads/TrackedDownloadService.cs:277-292`:
+
+```csharp
+var trackedDownload = _cache.Find(message.DownloadId);
+
+if (trackedDownload is { State: TrackedDownloadState.Imported or
+                                TrackedDownloadState.Failed or
+                                TrackedDownloadState.Ignored })
+{
+    _cache.Remove(message.DownloadId);
+}
+```
+
+That clears the in-memory entry on the next grab. It does not help the second population, and that verdict is read from
 v5 source, not from ours: on `v5-develop` at `e27c1f47`,
 `TrackedDownloadService.cs:122-127` still seeds state from
 `GetLatestDownloadHistoryItem()`, `:262-270` still maps `DownloadFailed` to
@@ -48,11 +72,11 @@ v5 source, not from ours: on `v5-develop` at `e27c1f47`,
 trackable. So v5 re-pins `Failed` from `DownloadHistory` on every process start
 exactly as v4 does.
 
-The first population also self-healed within 70 minutes on 2026-08-07 (all 16
-imported at 08:12Z after a 07:01Z grab). So v5 buys us a shorter blind window on
-a fault that already resolves itself, and buys nothing for the fault that does
-not. The census guard change tracked in #834 remains the only work that unblocks
-#618.
+The first population also self-healed in 71 minutes on 2026-08-07 (grabbed
+07:01Z, all 16 imported by 08:12Z). So v5 buys a shorter blind window on a fault
+that already resolves itself, and buys nothing for the fault that does not. Of the
+work proposed on #834 so far, the census guard change is the only item that
+unblocks #618.
 
 ## The real cost is that we do not control when it lands
 
@@ -76,9 +100,19 @@ hold for it. Sonarr is stateful on PostgreSQL and its schema migrations are
 one-way, with no downgrade path once v5 has migrated `sonarr-main`.
 
 On the day LinuxServer flips `:latest` to v5, we take a major version with a
-one-way database migration through an auto-merged PR at 2am. Four Deployments are
-exposed, `sonarr`, `sonarr2`, `radarr` and `prowlarr`, from three `images:`
-entries, because `sonarr` and `sonarr2` run the same image.
+one-way database migration through an auto-merged PR at 2am. I did not verify
+whether Sonarr documents a supported downgrade, so do not repeat the "one-way"
+claim as upstream fact. What is true for us: we have never tested rolling a
+migrated `sonarr-main` backwards, so plan on a restore as the only rollback until
+someone proves otherwise.
+
+Four Deployments are exposed, `sonarr`, `sonarr2`, `radarr` and `prowlarr`, from
+three `images:` entries, because `sonarr` and `sonarr2` run the same image.
+`bazarr` is digest-only on `:latest` in the same block and also lives on the
+shared Postgres, so it belongs in the same fix. `jellyfin`, `cleanuparr`,
+`byparr`, `unpackerr` and `qbittorrent-nox` are digest-only too, and are excluded
+here on the grounds that none of them owns a one-way relational migration. That
+is a judgement, not a verified property of each app.
 
 Those four also pull on every restart, which is a live-only fact worth flagging:
 `kubectl --context epaflix -n servarr get deploy -o custom-columns=NAME,IMAGE,POLICY`
@@ -89,8 +123,14 @@ explanation is suspect, since a digest-pinned reference should default to
 
 LinuxServer does publish usable version tags. `curl
 "hub.docker.com/v2/repositories/linuxserver/sonarr/tags?page_size=100"` returns
-`4.0.19`, `4.0.19.2979-ls322` and `version-4.0.19.2979` among the newest 100, so
-the homarr fix transfers directly.
+`4.0.19`, `4.0.19.2979-ls322` and `version-4.0.19.2979` among the newest 100.
+
+One thing to test rather than assume when doing the pin: homarr is clean
+`vX.Y.Z` semver, while these tags are four-component with an `-lsNNN` suffix, so
+whether Renovate classifies a 4 to 5 move as `major` for that shape needs
+checking. The automerge half is safe either way, because the only two automerge
+rules in `.github/renovate.json` match `patch` repo-wide and `digest` in the
+servarr file. Neither matches `major`.
 
 ## Recommendation
 
@@ -106,12 +146,18 @@ the homarr fix transfers directly.
    the v5 release notes for API changes used by the census, Cleanuparr and
    newtarr, and a rollback plan that assumes the database cannot be downgraded.
    Nothing watches Sonarr releases today, so this doc cannot be the trigger.
-   `docs/accepted-risks.md` carries the dated entry and its reopen condition.
+   `docs/accepted-risks.md` carries the dated entry and its reopen condition. A
+   release tag is not the only way v5 could reach us: given that channels do not
+   track git branches here, an LSIO `develop` or `latest` flip could land first.
 
 ## Sources
 
 Every command above ran on 2026-08-24 and each one is quoted where its result is
-claimed. Two claims here rest on other sources rather than on those commands: the
+claimed, so this document is the reproducible record. Raw outputs also went to
+`.history/2026-08-24-sonarr-v5-evaluation.log`, which is git-ignored and
+therefore local to the machine that ran them.
+
+Two claims rest on other sources rather than on those commands: the
 648-row and 16-re-grab counts come from the #834 comments of 2026-08-24, which
 quote the SQL and the Cleanuparr `/api/events` reads that produced them, and the
 code claims come from reading
