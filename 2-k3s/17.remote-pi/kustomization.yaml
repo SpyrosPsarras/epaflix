@@ -34,7 +34,7 @@ generators:
 # leaves Renovate's kustomize manager with no currentValue to resolve against.
 # Never set `newTag:` and `digest:` together, that is
 # skipReason: invalid-dependency-specification and silently kills tracking.
-# v7.2.123 and `latest` resolve to the same manifest index today.
+# v7.2.140 and `latest` resolve to the same manifest index today.
 images:
   - name: docker.io/eceasy/cli-proxy-api
     newTag: v7.2.140@sha256:87c0bc86d4a8d6a5aff670bbdfea18bfe28decfee0888924301b502d57fe303e
@@ -46,7 +46,10 @@ configMapGenerator:
   - name: cliproxy-scripts
     files:
       - cliproxy/files/reconcile-config.psql
-      - cliproxy/files/fetch-pi-bridge.sh
+      # One fetcher for both plugin initContainers. The id, version, sha256 and
+      # release URL are its arguments in cliproxy/deployment.yaml, which is
+      # therefore where a plugin version is pinned.
+      - cliproxy/files/fetch-plugin.sh
       # The transcript sidecar and the parser it shares with
       # cliproxy/tools/render-payload.py (#1016). payload_lib.py is imported, not
       # executed - it must be a valid module name, so underscores, unlike every
