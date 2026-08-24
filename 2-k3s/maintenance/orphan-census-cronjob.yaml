@@ -60,7 +60,12 @@
 # Sonarr pins such a tracked download at `Failed`, re-seeds that state from
 # DownloadHistory on every restart, and `DownloadIsTrackable()` keeps `Failed`
 # out of the queue for good, so the torrent can sit in the client forever with
-# no queue row and nothing broken. Cleanuparr produces this state by deleting
+# no queue row and a working queue read. The torrent itself is not fine: it can
+# keep downloading into a Failed tracked state, it will never be imported, and
+# once it completes classify() calls it "complete" and it leaves this census's
+# scope for good. That population is #1029's to dispose of, and this carve-out
+# silences the only guard that currently trips over it. Cleanuparr produces this
+# state by deleting
 # the queue record with removeFromClient=false; a bulk manual "Remove from
 # queue" with client-removal unchecked produces the identical shape (#142).
 # Attribution is confirmed on a 4-of-5 sample against Cleanuparr's /api/events
@@ -201,6 +206,13 @@ data:
     # that owns it MUST have a queue row for it. Only live traffic proves a
     # queue read is broken; an empty queue on its own never does.
     ACTIVE_WITHIN_HOURS = float(os.environ.get("ACTIVE_WITHIN_HOURS", "6"))
+
+    # Ceiling on the serial per-hash history lookups one suspect *arr may cost
+    # (#834). Each is a TIMEOUT-second request and the Job's
+    # activeDeadlineSeconds is 300, so an uncapped burst would kill the run with
+    # no reason in the log. Failing with a message beats being reaped by the
+    # deadline. Observed cost of a real run: 3 lookups.
+    MAX_HISTORY_LOOKUPS = int(os.environ.get("MAX_HISTORY_LOOKUPS", "8"))
 
     QBT_URL = os.environ.get("QBT_URL", "http://qbittorrent:8080").rstrip("/")
     ARRS = [
@@ -424,14 +436,25 @@ data:
     def newest_is_failure(records):
         """True if the newest *arr history record is a terminal failure.
 
-        Pure, so the selftest can pin it. The caller asks for one record with
-        sortKey=date&sortDirection=descending, so records[0] is the newest.
+        Pure, so the selftest can pin it. records[0] must be the newest, and the
+        caller VERIFIES that rather than trusting the sort it asked for.
 
         `downloadFailed` ONLY. `downloadIgnored` is deliberately not here: #834
         established the mechanism for `Failed`, and an ignored download licenses
         a weaker conclusion. Adding it would widen the silence past the evidence.
         """
         return bool(records) and records[0].get("eventType") == "downloadFailed"
+
+
+    def arr_cleared(queryable, live, unexplained):
+        """True if a suspect *arr's zero-row queue read is fully accounted for.
+
+        Every live torrent must have been asked about (queryable == live) and
+        every answer must have been a failure (no unexplained left). A partial
+        answer is not an answer: `queryable < live` means at least one live
+        torrent had no hash to look up, and that *arr stays suspect.
+        """
+        return not unexplained and queryable == live
 
 
     def unexplained_active(active_hashes, failed_hashes):
@@ -471,12 +494,21 @@ data:
         the torrent stays unexplained and the abort stands. That asymmetry is
         deliberate and points the safe way. Do not "fix" it into the other one.
         """
+        if len(hashes) > MAX_HISTORY_LOOKUPS:
+            fail("%s: %d live torrents to look up, over the %d cap - refusing "
+                 "to spend the Job's whole deadline on serial history reads. "
+                 "Raise MAX_HISTORY_LOOKUPS if this is legitimate."
+                 % (name, len(hashes), MAX_HISTORY_LOOKUPS))
         failed = set()
         for digest in sorted(hashes):
             query = urllib.parse.urlencode({
                 "downloadId": digest,
                 "page": 1,
-                "pageSize": 1,
+                # Two records, not one, so the sort can be CHECKED instead of
+                # trusted. With pageSize=1 an unhonoured sortDirection is
+                # undetectable by construction, and it fails open: a stale
+                # downloadFailed under a newer grabbed would read as explained.
+                "pageSize": 2,
                 "sortKey": "date",
                 "sortDirection": "descending",
             })
@@ -493,6 +525,24 @@ data:
             if not isinstance(records, list):
                 fail("%s: history response for %s has no 'records' array"
                      % (name, digest[:8]))
+            # The *arr must prove it applied the filter. An empty downloadId
+            # returns totalRecords 8462 on this instance, so "filter not
+            # applied" means "newest event of the WHOLE instance", which would
+            # explain every hash at once and clear a genuinely blind *arr. A
+            # renamed parameter or a proxy that strips the query string lands in
+            # exactly that state, so verify rather than assume.
+            for rec in records:
+                got = str(rec.get("downloadId", "")).strip().upper()
+                if got != digest:
+                    fail("%s: history filter was not applied for %s (server "
+                         "answered for %s) - refusing to read that as an answer "
+                         "about this torrent"
+                         % (name, digest[:8], got[:8] or "<none>"))
+            if len(records) > 1 and str(records[0].get("date", "")) < str(
+                    records[1].get("date", "")):
+                fail("%s: history for %s came back oldest-first despite "
+                     "sortDirection=descending - refusing to treat record 0 as "
+                     "the newest event" % (name, digest[:8]))
             if newest_is_failure(records):
                 failed.add(digest)
         return failed
@@ -591,8 +641,12 @@ data:
         assert verdict(amount_left=0) == "ok"
         # still in an *arr queue -> not an orphan
         assert classify(dict(base), {"a" * 40}, now)[0] == "ok"
-        # uppercase downloadId from *arr must still match qBittorrent's lowercase
-        assert classify(dict(base), {("a" * 40).upper().lower()}, now)[0] == "ok"
+        # classify() normalises the TORRENT side, so a client reporting the hash
+        # uppercased still matches the lowercased queue id space. The old
+        # version of this assert compared ("a"*40).upper().lower() against the
+        # same string and could not fail.
+        assert classify(dict(base, hash=("a" * 40).upper()),
+                        {"a" * 40}, now)[0] == "ok"
         # too young
         assert verdict(added_on=now - 3600) == "ok"
         # the #479 held torrents
@@ -684,8 +738,9 @@ data:
             [{"category": "tv-sonarr", "progress": 0.4, "amount_left": 10,
               "last_activity": now_t - 60, "hash": "abcdef01"}],
             now_t) == {"sonarr": {"ABCDEF01"}}
-        # two live torrents in one category count as two, so a dedup regression
-        # in the hash primitive cannot hide behind the > 0 test.
+        # two live torrents in one category count as two. The counter and the
+        # hash set share one is_live_work() predicate, so this pins the counter
+        # half, and arr_cleared() below pins what happens when they disagree.
         assert recently_active_by_arr(
             [{"category": "tv-sonarr", "progress": 0.4, "amount_left": 10,
               "last_activity": now_t - 60, "hash": "aa"},
@@ -711,6 +766,15 @@ data:
         # not explain a re-grab that is downloading right now (#1133).
         assert newest_is_failure(
             [{"eventType": "grabbed"}, {"eventType": "downloadFailed"}]) is False
+        # THE DECISION THAT CLEARS AN *ARR. Everything asked about, every answer
+        # a failure -> the zero-row read is accounted for.
+        assert arr_cleared(3, 3, []) is True
+        # one torrent unaccounted for -> still blind.
+        assert arr_cleared(3, 3, ["A"]) is False
+        # A PARTIAL ANSWER IS NOT AN ANSWER: 2 of 3 live torrents were
+        # queryable, both came back failed, and the *arr still is not cleared.
+        assert arr_cleared(2, 3, []) is False
+        assert arr_cleared(0, 1, []) is False
         # every live torrent already failed in the *arr's own history -> the
         # zero queue read is correct and the census must be allowed to proceed.
         assert unexplained_active({"A", "B"}, {"A", "B"}) == []
@@ -808,9 +872,7 @@ data:
                 print("%s: %d live torrent(s), %d queryable, %d already failed "
                       "in its own history, %d unexplained"
                       % (name, live, len(mine), len(failed), len(left)))
-                # len(mine) < live means at least one live torrent had no hash
-                # to ask about. Never clear an *arr on a partial answer.
-                if left or len(mine) != live:
+                if not arr_cleared(len(mine), live, left):
                     still_suspect.append(name)
             suspect = still_suspect
         if suspect:
