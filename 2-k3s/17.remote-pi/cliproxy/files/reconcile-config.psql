@@ -125,8 +125,9 @@ $ollama$,
   RAISE NOTICE 'openai-compatibility: ollama appended';
 END $$;
 
--- Enable the pi-bridge plugin (#858). Three edits inside the seeded `plugins:`
--- block, which ships disabled with `dir: "plugins"` and `configs: {}`.
+-- Enable the plugins (#858 pi-bridge, plus the GitHub Copilot provider). Edits
+-- inside the seeded `plugins:` block, which ships disabled with
+-- `dir: "plugins"` and `configs: {}`.
 --
 -- Line-anchored replacements, same reasoning as allow-remote above: each of
 -- these keys occurs exactly ONCE at this indentation in the live config, which
@@ -137,15 +138,24 @@ END $$;
 -- `dir` must point at the plugins emptyDir. The default is relative to the
 -- image WORKDIR, which #862 made read-only.
 --
--- No `store.version` on purpose: the pinned version lives in exactly one place,
--- fetch-pi-bridge.sh, and with a single .so present the host loads that one.
+-- No `store.version` on purpose: a plugin version is pinned in exactly one
+-- place, its fetch-plugin.sh arguments in deployment.yaml, and the host loads
+-- the .so that is present.
 -- `allow_all_api_keys` keeps quota readable by the same client key used for
 -- model calls - the plugin's whole point - and never exposes the management key.
+--
+-- The Copilot entry carries only the two non-default values. Every other field
+-- the plugin's install doc lists (github_client_id, the three base URLs, the
+-- three timeouts) is already that exact value in the plugin's own
+-- DefaultConfig(), so repeating them here would only be a second copy to keep in
+-- sync. `excluded_model_prefixes` keeps Copilot's Claude and Gemini re-offerings
+-- from colliding with the native Anthropic and Gemini OAuth accounts, which own
+-- those model IDs here; drop a line to let Copilot serve them too.
 DO $$
 DECLARE
   c text;
   n integer;
-  plugin_cfg constant text := E'    pi-bridge:\n      enabled: true\n      priority: 3\n      allow_all_api_keys: true';
+  want record;
 BEGIN
   -- First boot: the proxy has not seeded the table yet. Without this the block
   -- raises undefined_table and CrashLoops the initContainer on an empty
@@ -168,24 +178,33 @@ BEGIN
   c := regexp_replace(c, '^  dir:[ \t]*"plugins"[ \t]*$', '  dir: "/CLIProxyAPI/plugins"', 'n');
 
   -- `configs:` is `{}` on a freshly seeded row and a mapping once anything has
-  -- been configured through the UI. Handle both; adding the entry first keeps
-  -- the replacement a single anchored line either way.
-  IF NOT EXISTS (SELECT 1 FROM regexp_matches(c, '^\s*pi-bridge:[ \t]*$', 'n')) THEN
+  -- been configured through the UI. Handle both; inserting straight after the
+  -- `configs:` line keeps the replacement a single anchored line either way, and
+  -- keeps working for the second entry because that line survives the first.
+  FOR want IN
+    SELECT * FROM (VALUES
+      ('pi-bridge',
+       E'    pi-bridge:\n      enabled: true\n      priority: 3\n      allow_all_api_keys: true'),
+      ('cliproxyapi-copilot',
+       E'    cliproxyapi-copilot:\n      enabled: true\n      priority: 100\n      excluded_model_prefixes:\n        - "claude-"\n        - "gemini-"')
+    ) AS t(id, cfg)
+  LOOP
+    CONTINUE WHEN EXISTS (SELECT 1 FROM regexp_matches(c, '^\s*' || want.id || ':[ \t]*$', 'n'));
     IF EXISTS (SELECT 1 FROM regexp_matches(c, '^  configs:[ \t]*\{\}[ \t]*$', 'n')) THEN
-      c := regexp_replace(c, '^  configs:[ \t]*\{\}[ \t]*$', E'  configs:\n' || plugin_cfg, 'n');
+      c := regexp_replace(c, '^  configs:[ \t]*\{\}[ \t]*$', E'  configs:\n' || want.cfg, 'n');
     ELSIF EXISTS (SELECT 1 FROM regexp_matches(c, '^  configs:[ \t]*$', 'n')) THEN
-      c := regexp_replace(c, '^  configs:[ \t]*$', E'  configs:\n' || plugin_cfg, 'n');
+      c := regexp_replace(c, '^  configs:[ \t]*$', E'  configs:\n' || want.cfg, 'n');
     ELSE
       RAISE EXCEPTION 'plugins.configs is neither {} nor a mapping - reconcile by hand';
     END IF;
-  END IF;
+  END LOOP;
 
   UPDATE public.config_store
      SET content = c,
          updated_at = now()
    WHERE id = 'config';
 
-  RAISE NOTICE 'plugins: pi-bridge reconciled';
+  RAISE NOTICE 'plugins: pi-bridge and cliproxyapi-copilot reconciled';
 END $$;
 
 -- Request payload logging (#1007). `request-log: true` makes the proxy write one
@@ -219,7 +238,8 @@ END $$;
 -- about 20-30 minutes of an active session. 256MB is ~230 requests. It still
 -- fits the budget: 256 logs + ~10 management SPA + a small pgstore spool against
 -- the `work` emptyDir's 512Mi sizeLimit, and the container's 1Gi
--- ephemeral-storage limit with tmp at 64Mi and plugins at ~10MB. Raising this
+-- ephemeral-storage limit with tmp at 64Mi and plugins declared at 128Mi
+-- (~47MiB of that is actually used by the two .so files). Raising this
 -- further means raising both of those too, so check them first.
 DO $$
 DECLARE
@@ -288,6 +308,9 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM regexp_matches(c, '^\s*pi-bridge:[ \t]*$', 'n')) THEN
     RAISE EXCEPTION 'plugins.configs.pi-bridge is missing';
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM regexp_matches(c, '^\s*cliproxyapi-copilot:[ \t]*$', 'n')) THEN
+    RAISE EXCEPTION 'plugins.configs.cliproxyapi-copilot is missing';
+  END IF;
 
   IF NOT EXISTS (SELECT 1 FROM regexp_matches(c, '^request-log:[ \t]*true[ \t]*$', 'n')) THEN
     RAISE EXCEPTION 'request-log is not true after reconcile';
@@ -301,5 +324,5 @@ BEGIN
     RAISE EXCEPTION 'logging-to-file is true - that takes the access log off stdout and blinds Loki; see #1007';
   END IF;
 
-  RAISE NOTICE 'verified: allow-remote true, auth-dir /var/lib/cliproxy/pgstore/auths, pi-bridge enabled, request-log true capped at 256MB, logging-to-file false';
+  RAISE NOTICE 'verified: allow-remote true, auth-dir /var/lib/cliproxy/pgstore/auths, pi-bridge and cliproxyapi-copilot enabled, request-log true capped at 256MB, logging-to-file false';
 END $$;
