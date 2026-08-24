@@ -271,7 +271,8 @@ A second, unrelated workload in this same namespace and this same ArgoCD
 Application. It is not part of the relay and shares no data with it.
 
 CLIProxyAPI (`https://help.router-for.me`) signs in to Gemini, Codex and Claude
-accounts and re-exposes them behind OpenAI-, Anthropic- and Gemini-compatible
+accounts, plus GitHub Copilot through a plugin (see below), and re-exposes them
+behind OpenAI-, Anthropic- and Gemini-compatible
 HTTP APIs, so a local client such as `omp` can point at one endpoint instead of
 juggling provider SDKs. Tracking issue #858.
 
@@ -538,7 +539,7 @@ If a future image bump reintroduces a write outside the emptyDirs, the pod will 
 What still holds the blast radius down: no service account token
 (`automountServiceAccountToken: false`), no host mounts, all capabilities
 dropped, `allowPrivilegeEscalation: false`, `seccompProfile: RuntimeDefault`,
-and an `ephemeral-storage` limit of 2Gi that caps the writable container layer.
+and an `ephemeral-storage` limit of 1Gi that caps the writable container layer.
 The `/var/lib/cliproxy` emptyDir (512Mi) holds the Postgres spool and the
 downloaded management SPA so neither grows that layer.
 
@@ -638,6 +639,10 @@ one-off bootstrap quirk:
 port-forward above and drive the flow from `127.0.0.1`.** Normal day-to-day use
 over the internal hostname is unaffected.
 
+GitHub Copilot is the one exception: it uses a device code, not a loopback
+redirect, so it authorises over `cliproxy.epaflix.com`. See the Copilot section
+below.
+
 ### `management.html` 404 is not automatically a broken deployment
 
 The management SPA is not baked into the image. It is downloaded from GitHub
@@ -682,22 +687,25 @@ is read-only (#862) and there is no PVC. So git owns both halves:
 | the artifact | `plugins` emptyDir at `/CLIProxyAPI/plugins` | `fetch-pi-bridge` initContainer |
 | the config | `plugins:` block of the config row in Postgres | `reconcile-config.psql` |
 
-The version is pinned in **exactly one place**, `VERSION` in
-`cliproxy/files/fetch-pi-bridge.sh`, together with the sha256 of the release zip
-from its own `checksums.txt`. The config block deliberately sets no
-`store.version`: with a single `.so` present the host loads that one, verified
-on v7.2.127. A bump is a one-line edit plus the new checksum.
+The version is pinned in **exactly one place**, the `fetch-pi-bridge`
+initContainer's `args` in `cliproxy/deployment.yaml`, together with the sha256 of
+the release zip from its own `checksums.txt`. The fetch logic itself lives in the
+shared `cliproxy/files/fetch-plugin.sh`, which both plugin initContainers call
+with `<id> <version> <sha256> <zip-url>`. The config block deliberately sets no
+`store.version`: the host loads the `.so` that is present, verified on v7.2.140.
+A bump is a two-line edit, the version and the new checksum.
 
 The initContainer **fails closed on a checksum mismatch and open on an
 unreachable GitHub**. A tampered artifact must never load; a GitHub outage must
 not take the proxy down for an optional quota endpoint. If it logs the warning,
 the proxy runs and the four routes 404 until the next pod start succeeds.
 
-Upstream builds the plugin against SDK `v7.2.93` while we run `v7.2.127`, and
-its README says the versions must match. They do not have to: the release `.so`
-was loaded and exercised against the exact `v7.2.127` digest pinned in
-`kustomization.yaml` - under `runAsNonRoot` + `readOnlyRootFilesystem`, the same
-posture as the pod - before any of this was committed. After an image bump,
+Upstream builds the plugin against SDK `v7.2.93` while the pin is now `v7.2.140`,
+and its README says the versions must match. They do not have to: the release
+`.so` was loaded and exercised against the pinned digest - under `runAsNonRoot` +
+`readOnlyRootFilesystem`, the same posture as the pod - before any of this was
+committed, first on v7.2.127 and re-checked on v7.2.140 when the Copilot plugin
+landed, both plugins loaded together. After an image bump,
 re-check the startup log for `pluginhost: plugin loaded plugin_id=pi-bridge`;
 a rejected plugin logs `pluginhost: failed to load plugin` and does not stop the
 proxy, so it will not announce itself any other way.
@@ -728,6 +736,249 @@ Postgres, and that script only moves values forward. To disable it live, set
 `plugins.configs.pi-bridge.enabled` to `false` in the management UI, or delete
 the `plugins:` edits there; the pod picks the change up by fsnotify without a
 restart.
+
+## GitHub Copilot provider (`gpt-5.6-sol`)
+
+Copilot is **not** a native provider in the CLIProxyAPI we run. Upstream keeps
+its Copilot integration in the separate CLIProxyAPIPlus product. What is
+deployed here is
+[`arthur-sommer-etc/cliproxyapi-copilot-plugin`](https://github.com/arthur-sommer-etc/cliproxyapi-copilot-plugin)
+(MIT), a third-party plugin against the official plugin ABI. It registers an
+AuthProvider (GitHub device-code OAuth), a ModelProvider (discovery from
+Copilot's `/models`), and an executor, and it is the only reason `gpt-5.6-sol`
+appears in `/v1/models`. That model is always routed to Copilot's `/responses`
+endpoint; the plugin carries the Claude Messages to OpenAI Responses bridge that
+the official translators do not have.
+
+`gpt-5.6-terra`, which the plugin also claims, is not new here. The Codex account
+already serves `gpt-5.6-terra` and `gpt-5.6-luna`, so Copilot is the second
+source for that name, not the only one. `gpt-5.6-sol` is the one model this
+plugin actually adds to the catalogue.
+
+Measured on the live deployment after authorising one Copilot account: the model
+count went from 27 to 52. The 25 additions, verbatim:
+
+```text
+gpt-3.5-turbo                    gpt-4o-2024-08-06
+gpt-3.5-turbo-0613               gpt-4o-2024-11-20
+gpt-4                            gpt-4o-mini
+gpt-4-0125-preview               gpt-4o-mini-2024-07-18
+gpt-4-0613                       gpt-5-mini
+gpt-4-o-preview                  gpt-5.3-codex
+gpt-4.1                          gpt-5.4
+gpt-4.1-2025-04-14               gpt-5.6-sol
+gpt-41-copilot                   kimi-k2.7-code
+gpt-4o                           mai-code-1-flash-picker
+gpt-4o-2024-05-13                trajectory-compaction
+text-embedding-3-small           text-embedding-ada-002
+text-embedding-3-small-inference
+```
+
+No `claude-*` or `gemini-*` appeared, which is `excluded_model_prefixes` doing
+its job.
+
+Installed the same way as pi-bridge, for the same reason: the read-only rootfs
+(#862) leaves nothing durable for the panel's store-install button to write to,
+so git owns both halves.
+
+The panel's Plugins -> Store **can** install this plugin, and that is in fact how
+it first reached the live pod. `cliproxyapi-copilot` is in the official registry
+(`CLIProxyAPI-Plugins-Store`) at the same 0.3.3 pinned here, and the button put
+it at `/CLIProxyAPI/plugins/linux/amd64/cliproxyapi-copilot-v0.3.3.so`. It does
+not survive: that directory is an emptyDir, and the only code path that
+re-downloads a store plugin at startup is gated on `cfg.Home.Enabled`
+(`sdk/cliproxy/home_plugins.go`), the router-for.me hosted control plane, which
+this deployment does not use. The config half does survive, because config is a
+Postgres row, so a restart without the initContainer leaves a config that enables
+a plugin whose library is gone. The models then disappear with no error and no
+CrashLoop. That is the failure this initContainer exists to prevent.
+
+| Half | Where | Mechanism |
+| --- | --- | --- |
+| the artifact | `plugins` emptyDir at `/CLIProxyAPI/plugins` | `fetch-copilot-plugin` initContainer |
+| the config | `plugins.configs` of the config row in Postgres | `reconcile-config.psql` |
+
+It shares `cliproxy/files/fetch-plugin.sh` with pi-bridge; the id, version,
+sha256 and release URL are the `fetch-copilot-plugin` initContainer's `args` in
+`cliproxy/deployment.yaml`. Fails closed on a checksum mismatch, open on an
+unreachable GitHub.
+
+The plugin's install doc says CLIProxyAPI derives the plugin id from the
+filename, so that the id must match the `plugins.configs` key. That is not true
+of this build, and it matters because it decides whether the `.so` can carry a
+version suffix. Measured on v7.2.140 by loading the release as
+`cliproxyapi-copilot-v0.3.3.so`: the host logged
+`plugin_id=cliproxyapi-copilot version=0.3.3`, so the id comes from the plugin's
+own metadata. The live pod has been demonstrating the same thing for pi-bridge
+all along, with `pi-bridge-v0.9.1.so` reporting `plugin_id=pi-bridge`.
+
+The library is 37.3 MiB. The `plugins` emptyDir went from 64Mi to 128Mi for it,
+though 64Mi would in fact have held: peak during the fetch is pi-bridge's 10.0
+MiB plus the 12.6 MiB zip plus the 37.3 MiB library, 60.0 MiB against 64.0. That
+is 6% of headroom on a shared volume, which is not enough to leave alone.
+
+### The version skew is fine, and that was measured
+
+The release is built against SDK `v7.2.118` and the pinned image is `v7.2.140`.
+A Go plugin normally refuses to load across a package-version mismatch, so this
+was proven before it was committed rather than assumed from the pi-bridge
+precedent. The exact digest pinned in `kustomization.yaml` was run locally with
+both plugins present, a local file store and no Postgres, and it logged:
+
+```text
+pluginhost: plugin loaded plugin_id=cliproxyapi-copilot version=0.3.3
+pluginhost: plugin registered plugin_id=cliproxyapi-copilot plugin_name=GitHub Copilot subscription provider version=0.3.3
+pluginhost: plugin loaded plugin_id=pi-bridge version=0.9.1
+pluginhost: plugin registered plugin_id=pi-bridge plugin_name=pi-bridge version=0.9.1
+```
+
+`GET /v0/management/plugins` then reported `registered: true`,
+`supports_oauth: true`, `oauth_provider: copilot`, and
+`/v0/management/copilot-auth-url` returned a live `github.com/login/device`
+URL. Re-check the `plugin registered` line after any image bump: a rejected
+plugin logs `pluginhost: failed to load plugin` and does not stop the proxy, so
+the only other symptom is Copilot models quietly missing from `/v1/models`.
+
+### Config, and why it is two lines
+
+```yaml
+    cliproxyapi-copilot:
+      enabled: true
+      priority: 100
+      excluded_model_prefixes:
+        - "claude-"
+        - "gemini-"
+```
+
+The live config row already holds exactly this, set through
+`PATCH /v0/management/plugins/cliproxyapi-copilot/config` after the store button
+wrote only `enabled: true`. So the block above is what `reconcile-config.psql`
+seeds into a **fresh** database; on the current one its insert is skipped,
+because the loop leaves an existing key alone rather than fighting the operator
+for it. If you ever change these values in git, change them in the UI too, or
+restore the database. That is the same one-way rule the top of this file states
+for every config value here.
+
+The live row also carries a `store:` sub-block the store install wrote: registry
+id, repository, `release-tag: v0.3.3`, source URL. `"store": null` in a PATCH
+does not remove it, the persist path puts it back for a store-installed plugin.
+It is inert. Nothing in the load path reads it, the plugin's own `ParseConfig`
+ignores unknown keys, and the plugin re-registered fine with it present. It is
+not the `store.version` pin the pi-bridge section warns about; that warning is
+about letting the store choose which `.so` to load, which is not happening here.
+
+The plugin's install doc lists nine more fields (`github_client_id`, three base
+URLs, three timeouts). Every one of them is already that exact value in the
+plugin's `DefaultConfig()`, so writing them here would only create a second copy
+to keep in sync. `excluded_model_prefixes` is the one that earns its place:
+Copilot re-offers Claude and Gemini models, and the native Anthropic and Gemini
+OAuth accounts own those model IDs here. Drop a line to let Copilot serve them
+too.
+
+The default GitHub OAuth client ID `Iv1.b507a08c87ecfe98` is the public VS Code
+Copilot device-flow client. It is not a secret and there is no client secret, so
+nothing here goes into SOPS.
+
+### Authorising the account
+
+Nothing below works until a human syncs the `remote-pi` Application. Its
+`syncPolicy: {}` means merging these files changes nothing that is running, and
+the same sync also replaces the proxy pod, so both plugin fetches and
+`reconcile-config.psql` run in the new pod's init sequence.
+
+That sync carries one thing this change did not ask for: the live pod is
+`v7.2.135` while `kustomization.yaml` pins `v7.2.140`, because the Application
+has not been synced since that bump landed. So the same click also rolls the
+image forward five patch versions. Both plugins were loaded against `v7.2.140`
+locally, which is the reason that is a note and not a blocker, but read the
+upstream release notes for those five before clicking.
+
+Then: device code, not a loopback redirect, so this is the one provider that does
+not need the port-forward:
+
+```bash
+curl -sS -H "Authorization: Bearer <management key>" \
+  https://cliproxy.epaflix.com/v0/management/copilot-auth-url
+# open the returned github.com/login/device URL, approve the code, then poll
+# no faster than every five seconds:
+curl -sS -H "Authorization: Bearer <management key>" \
+  "https://cliproxy.epaflix.com/v0/management/get-auth-status?state=<state>"
+```
+
+The management UI has a Copilot login button that drives the same endpoints. The
+GitHub access and refresh material is stored through the normal auth storage, so
+it lands in `auth_store` in Postgres and survives a pod replacement. The
+short-lived Copilot token from `copilot_internal/v2/token` is cached in process
+memory only.
+
+`get-auth-status` answers `{"status":"ok"}` both while it is still waiting and
+once the credential is saved, so it is not a completion signal. Check
+`/v0/management/auth-files` for a `copilot-<login>.json` entry instead, or just
+ask for the model list.
+
+### Which endpoint a Copilot model answers on
+
+Measured against the live deployment with one Copilot account authorised. A blank
+cell was not tested, not tested and found broken:
+
+| Model | `/v1/messages` | `/v1/responses` | `/v1/chat/completions` |
+| --- | --- | --- | --- |
+| `gpt-5.6-sol` (Copilot) | works | works | empty 200 |
+| `gpt-4.1` (Copilot) | | | empty 200 |
+| `gpt-5.6-terra` (Codex) | | | empty 200 |
+| `claude-sonnet-5` (Anthropic) | | | works |
+| `ollama-qwen3.5-9b` (Ollama) | | | works |
+
+An empty 200 means a well-formed response whose content is `''` and whose usage
+counts are all zero. No error, no log line saying why. The `gpt-5.6-*` family is
+Responses-native and does not answer on `chat/completions` through this proxy at
+all, which is not a Copilot problem: Codex's own `gpt-5.6-terra` does the same.
+Copilot's `gpt-4.1` behaving that way is a plugin gap.
+
+The practical consequence is for client config. The `omp` block at the end of
+this file uses `api: openai-completions`, which for `gpt-5.6-sol` yields silent
+empty replies. Point a Copilot model at the Anthropic Messages shape or at
+`/v1/responses` instead.
+
+Verify, in this order. Listing a model proves discovery; only a call proves the
+executor:
+
+```bash
+curl -sS -H "Authorization: Bearer <client api key>" \
+  https://cliproxy.epaflix.com/v1/models | grep -o 'gpt-5\.6-[a-z]*'
+
+curl -sS -H "x-api-key: <client api key>" -H 'anthropic-version: 2023-06-01' \
+  -H 'Content-Type: application/json' \
+  --data '{"model":"gpt-5.6-sol","max_tokens":64,"messages":[{"role":"user","content":"Reply with exactly: sol-ok"}]}' \
+  https://cliproxy.epaflix.com/v1/messages
+```
+
+### What we are accepting by running this
+
+Two things, both worth stating rather than discovering later:
+
+- The plugin authenticates as a VS Code Copilot client and sends the recognised
+  `Copilot-Integration-Id` headers, because Copilot rejects unrecognised ones.
+  That is a Copilot subscription being consumed by something that is not the
+  editor it was sold for. GitHub can rate-limit or suspend the account, and
+  nothing here makes that our decision to make.
+- It is one maintainer's repository in the request path for whatever prompt you
+  send. The checksum pin means we get the artifact we reviewed and not a
+  substituted one; it says nothing about the code inside it. Read the diff
+  before bumping the version.
+
+And one thing worth knowing rather than accepting: `/v1/responses` returns a
+`copilot_usage` block with per-token-type counts and a `total_nano_aiu` figure,
+so Copilot spend is visible per call. Nothing here collects it yet.
+
+### Rollback
+
+Revert the commit and let the next pod start drop the `.so`. As with pi-bridge,
+config lives in Postgres and `reconcile-config.psql` only moves values forward,
+so the revert alone does not disable an already-written config entry. To disable
+it live, set `plugins.configs.cliproxyapi-copilot.enabled` to `false` in the
+management UI; the pod picks that up by fsnotify without a restart. Removing the
+stored GitHub credential is a separate deliberate step in the UI.
 
 ## Backup and restore
 
@@ -786,11 +1037,17 @@ curl -H 'Authorization: Bearer <api key>' https://cliproxy.epaflix.com/v1/models
 omp models cliproxy
 ```
 
-`omp models cliproxy` listing the proxied models is the check that the whole
-chain works - DNS, Traefik internal entry point, the client API key, and at
-least one authorised provider account behind it. An empty list with a 200 means
-the key is fine but no provider account is authorised yet, so `models:` stays
-empty until an account is added.
+`omp models cliproxy` listing the proxied models checks most of the chain - DNS,
+Traefik internal entry point, the client API key, and at least one authorised
+provider account behind it. It does not check that a given model answers: that is
+discovery, not execution. An empty list with a 200 means the key is fine but no
+provider account is authorised yet, so `models:` stays empty until an account is
+added.
+
+`api: openai-completions` is right for the Claude and Ollama models and wrong for
+the `gpt-5.6-*` family, which returns an empty 200 on `/v1/chat/completions`. See
+"Which endpoint a Copilot model answers on" above before adding one of those to
+`models:`, or the model will list correctly and reply with nothing.
 
 To make it the default without the interactive picker, add to
 `~/.omp/agent/config.yml`:

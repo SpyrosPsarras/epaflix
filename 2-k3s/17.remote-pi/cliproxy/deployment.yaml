@@ -110,11 +110,59 @@ spec:
         # version because the read-only rootfs leaves the panel's store-install
         # button nowhere durable to write. Fails closed on checksum mismatch,
         # open on an unreachable GitHub - see the script and #858.
+        #
+        # These four args are the ONLY place the pi-bridge version is pinned. The
+        # sha256 is the one from the release's own checksums.txt. A bump is an
+        # edit here. Without the plugin the four quota routes 404.
         - name: fetch-pi-bridge
           image: docker.io/library/alpine:3.21
           command:
             - sh
-            - /scripts/fetch-pi-bridge.sh
+            - /scripts/fetch-plugin.sh
+          args:
+            - pi-bridge
+            - "0.9.1"
+            - 7cfea7b47888c870acc8afca73d8f78cb8454559040c401a2aa08a870107db26
+            - https://github.com/abix5/pi-cliproxyapi-bridge/releases/download/v0.9.1/pi-bridge_0.9.1_linux_amd64.zip
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+            - name: plugins
+              mountPath: /plugins
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "32Mi"
+            limits:
+              memory: "128Mi"
+        # Places the GitHub Copilot provider plugin .so on the same plugins
+        # emptyDir. Copilot is not a native CLIProxyAPI provider - upstream keeps
+        # it in the separate CLIProxyAPIPlus product - so this third-party plugin
+        # is what makes gpt-5.6-sol reachable here. Same fetch contract as
+        # pi-bridge: closed on checksum mismatch, open on an unreachable GitHub.
+        # Without it the Copilot models are simply absent from /v1/models.
+        #
+        # This library is 37.3 MiB, which is what took the plugins emptyDir
+        # sizeLimit below from 64Mi to 128Mi. See the numbers there: 64Mi would
+        # have held it, with 6% to spare, which is too little to leave alone.
+        - name: fetch-copilot-plugin
+          image: docker.io/library/alpine:3.21
+          command:
+            - sh
+            - /scripts/fetch-plugin.sh
+          args:
+            - cliproxyapi-copilot
+            - "0.3.3"
+            - 6ac5c58fe2507468d08bc33d6365cfb822180ba3f37ae51e06cea884b933ca3a
+            - https://github.com/arthur-sommer-etc/cliproxyapi-copilot-plugin/releases/download/v0.3.3/cliproxyapi-copilot_0.3.3_linux_amd64.zip
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -317,10 +365,13 @@ spec:
         - name: tmp
           emptyDir:
             sizeLimit: 64Mi
-        # The pi-bridge .so is ~10 MiB; the zip is deleted after unpacking.
+        # pi-bridge is 10.0 MiB, the Copilot provider plugin is 37.3 MiB, and
+        # each zip is deleted after unpacking. Peak during the Copilot fetch is
+        # 60.0 MiB, so 64Mi would still have fit, with 6% left. This is headroom
+        # for the next plugin or a larger release, not a measured overflow.
         - name: plugins
           emptyDir:
-            sizeLimit: 64Mi
+            sizeLimit: 128Mi
         - name: scripts
           configMap:
             name: cliproxy-scripts
