@@ -55,6 +55,22 @@
 # broken one and sonarr2's single unrelated queue row was enough to silence the
 # gate.
 #
+# #834 narrows that gate with one question: has the *arr itself already marked
+# this download failed? If so, a zero queue row is the CORRECT answer for it.
+# Sonarr pins such a tracked download at `Failed`, re-seeds that state from
+# DownloadHistory on every restart, and `DownloadIsTrackable()` keeps `Failed`
+# out of the queue for good, so the torrent can sit in the client forever with
+# no queue row and nothing broken. Cleanuparr manufactures exactly this state:
+# it deletes the queue record with removeFromClient=false and leaves the torrent
+# behind. 648 downloadIds in sonarr-main have `DownloadFailed` as their newest
+# event. Before aborting, the script asks each suspect *arr about its own live
+# torrents by downloadId, and only the ones it cannot account for keep the abort
+# alive - see arr_failed_downloadids() and unexplained_active(). This does NOT
+# make the gate quiet: on the 2026-08-24 verification run, two of sonarr's three
+# live torrents were explained this way and the third, a re-grab of a
+# previously-imported infohash downloading at 1.6 MB/s with no queue row, still
+# aborted the run. That third shape is #1133.
+#
 # Credentials, no new machinery:
 #   - the three *arr API keys are read from the EXISTING `unpackerr-secret`
 #     (2-k3s/08.servarr/_shared/secrets/unpackerr-secret.enc.yaml) - same three
@@ -331,6 +347,26 @@ data:
         return suspect
 
 
+    def active_hashes_by_arr(torrents, now):
+        """{*arr name or None: set of UPPERCASE hashes} still moving bytes.
+
+        The primitive behind recently_active_by_arr(). The hashes matter because
+        a suspect *arr has to be asked about its own torrents by downloadId, and
+        the *arr APIs store the infohash uppercased while qBittorrent reports it
+        lowercased (#834).
+        """
+        out = {}
+        for t in torrents:
+            if float(t.get("progress", 0.0)) >= 1.0 or int(
+                    t.get("amount_left", 0) or 0) <= 0:
+                continue
+            if idle_hours(t, now) >= ACTIVE_WITHIN_HOURS:
+                continue
+            arr = CATEGORY_ARR.get(str(t.get("category", "")))
+            out.setdefault(arr, set()).add(str(t.get("hash", "")).upper())
+        return out
+
+
     def recently_active_by_arr(torrents, now):
         """{*arr name or None: count} of torrents that moved bytes recently.
 
@@ -347,16 +383,67 @@ data:
         INCOMPLETE torrent that is still moving is work an *arr queue must
         know about.
         """
-        out = {}
-        for t in torrents:
-            if float(t.get("progress", 0.0)) >= 1.0 or int(
-                    t.get("amount_left", 0) or 0) <= 0:
-                continue
-            if idle_hours(t, now) >= ACTIVE_WITHIN_HOURS:
-                continue
-            arr = CATEGORY_ARR.get(str(t.get("category", "")))
-            out[arr] = out.get(arr, 0) + 1
-        return out
+        return {arr: len(hashes)
+                for arr, hashes in active_hashes_by_arr(torrents, now).items()}
+
+
+    def unexplained_active(active_hashes, failed_hashes):
+        """Hashes that a zero queue read still does not account for.
+
+        A download the *arr itself has marked failed is NOT work in flight, so
+        its absence from the queue is correct rather than evidence of a broken
+        read. Sonarr pins such a tracked download at `Failed` and re-seeds that
+        state from DownloadHistory on every restart, and `DownloadIsTrackable()`
+        keeps `Failed` out of the queue permanently, so the torrent can sit in
+        the client forever with no queue row and nothing wrong (#834).
+
+        Everything else stays unexplained, which keeps the guard fail-closed:
+        an empty failed set leaves every active hash unexplained and the *arr
+        stays suspect.
+        """
+        return sorted(h for h in active_hashes if h not in failed_hashes)
+
+
+    def arr_failed_downloadids(name, url, key, hashes):
+        """Subset of `hashes` whose NEWEST *arr history event is a failure.
+
+        One request per hash, and only ever called for an *arr already flagged
+        suspect, so the call count is bounded by that *arr's live torrents.
+
+        Fails closed like every other read in this script. A history read that
+        breaks must not resolve into "explained" - that would turn this guard
+        into a check that cannot fail (docs/verification-traps.md).
+
+        `downloadId` filtering is case-SENSITIVE: the lowercase hash that
+        qBittorrent reports returns totalRecords 0, which is indistinguishable
+        from "no history at all". Callers must pass uppercase hashes.
+        """
+        failed = set()
+        for digest in sorted(hashes):
+            query = urllib.parse.urlencode({
+                "downloadId": digest,
+                "page": 1,
+                "pageSize": 1,
+                "sortKey": "date",
+                "sortDirection": "descending",
+            })
+            req = urllib.request.Request(
+                "%s/api/v3/history?%s" % (url.rstrip("/"), query),
+                headers={"X-Api-Key": key})
+            try:
+                with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+                    doc = json.load(resp)
+            except Exception as exc:  # noqa: BLE001
+                fail("%s: history fetch for %s failed (%s, http=%s)"
+                     % (name, digest[:8], type(exc).__name__, http_status(exc)))
+            records = doc.get("records")
+            if not isinstance(records, list):
+                fail("%s: history response for %s has no 'records' array"
+                     % (name, digest[:8]))
+            if records and records[0].get("eventType") in (
+                    "downloadFailed", "downloadIgnored"):
+                failed.add(digest)
+        return failed
 
 
     def idle_hours(torrent, now):
@@ -538,6 +625,23 @@ data:
         assert recently_active_by_arr(
             [{"category": "tv-sonarr", "progress": 1.0, "amount_left": 0,
               "last_activity": now_t - 60}] * 27, now_t) == {}
+        # === #834: a failed download explains its own absence ===
+        # The hash primitive uppercases, because qBittorrent reports lowercase
+        # and the *arr history filter is case-sensitive.
+        assert active_hashes_by_arr(
+            [{"category": "tv-sonarr", "progress": 0.4, "amount_left": 10,
+              "last_activity": now_t - 60, "hash": "abcdef01"}],
+            now_t) == {"sonarr": {"ABCDEF01"}}
+        # every live torrent already failed in the *arr's own history -> the
+        # zero queue read is correct and the census must be allowed to proceed.
+        assert unexplained_active({"A", "B"}, {"A", "B"}) == []
+        # one unaccounted-for torrent is still a blind *arr.
+        assert unexplained_active({"A", "B"}, {"A"}) == ["B"]
+        # FAIL CLOSED: no failure information at all explains nothing. A history
+        # read that returns an empty set must never look like "all explained".
+        assert unexplained_active({"A", "B"}, set()) == ["A", "B"]
+        # and it cannot invent an explanation from unrelated hashes.
+        assert unexplained_active({"A"}, {"X", "Y"}) == ["A"]
 
         print("selftest OK")
         return 0
@@ -603,6 +707,30 @@ data:
                           for n, _, _ in ARRS),
                  active_by_arr.get(None, 0)))
         suspect = queue_read_path_suspect(arr_rows, active_by_arr)
+        # #834: before aborting, ask each suspect *arr about its own live
+        # torrents. A download that *arr has already marked failed is not work
+        # in flight, so a zero queue read is the CORRECT answer for it, not a
+        # broken read path. Cleanuparr produces exactly this state: it removes
+        # the queue record with removeFromClient=false, Sonarr writes
+        # DownloadFailed, and the torrent keeps sitting in the client.
+        if suspect:
+            arr_by_name = {n: (u, k) for n, u, k in ARRS}
+            active_hashes = active_hashes_by_arr(torrents, now)
+            still_suspect = []
+            for name in suspect:
+                if name not in arr_by_name:  # "unmapped-categories"
+                    still_suspect.append(name)
+                    continue
+                url, key = arr_by_name[name]
+                mine = active_hashes.get(name, set())
+                failed = arr_failed_downloadids(name, url, key, mine)
+                left = unexplained_active(mine, failed)
+                print("%s: %d live torrent(s), %d already failed in its own "
+                      "history, %d unexplained"
+                      % (name, len(mine), len(failed), len(left)))
+                if left:
+                    still_suspect.append(name)
+            suspect = still_suspect
         if suspect:
             fail("%s report(s) 0 queue rows (all: %s) while qBittorrent is "
                  "actively moving bytes for torrents in their OWN categories "
