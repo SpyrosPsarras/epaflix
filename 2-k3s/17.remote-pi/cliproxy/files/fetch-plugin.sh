@@ -2,13 +2,26 @@
 # Fetch one CLIProxyAPI plugin release into the plugins emptyDir before the proxy
 # starts. Used by both plugin initContainers. See #858.
 #
-# Usage: sh fetch-plugin.sh <id> <version> <sha256> <zip-url>
+# Usage: sh fetch-plugin.sh <id> <version> <sha256> <owner/repo>
 #
 # The four values live in the initContainer args in cliproxy/deployment.yaml,
 # which is therefore the ONE place a version is pinned. There is no default and
 # no fallback: a missing argument is a hard failure, because a silently skipped
 # plugin looks identical to a working one until someone notices a model or an
 # endpoint is missing.
+#
+# The release URL is composed rather than passed, so the version string appears
+# exactly ONCE per plugin in deployment.yaml. That is what lets the Renovate
+# custom manager in .github/renovate.json bump it: a regex manager rewrites one
+# captured span, so a version repeated in a tag, a filename and an arg would come
+# out inconsistent. Both plugins publish the same release shape:
+#
+#   https://github.com/<owner/repo>/releases/download/v<version>/<id>_<version>_linux_amd64.zip
+#
+# A new plugin that does NOT follow it will 404 here, which fails open (see
+# below) and looks exactly like a GitHub outage. If a plugin is missing right
+# after being added, check its release page for the real asset name before
+# suspecting the network.
 #
 # Why an initContainer at all: the proxy's root filesystem is read-only (#862)
 # and there is no PVC, so the management panel's "Plugins -> Store" install
@@ -29,15 +42,16 @@
 set -eu
 
 if [ "$#" -ne 4 ]; then
-  echo "ERROR: usage: fetch-plugin.sh <id> <version> <sha256> <zip-url>" >&2
+  echo "ERROR: usage: fetch-plugin.sh <id> <version> <sha256> <owner/repo>" >&2
   exit 1
 fi
 
 ID=$1
 VERSION=$2
 SHA256=$3
-URL=$4
+REPO=$4
 
+URL="https://github.com/${REPO}/releases/download/v${VERSION}/${ID}_${VERSION}_linux_amd64.zip"
 TARGET="/plugins/${ID}-v${VERSION}.so"
 ZIP="/plugins/.${ID}.zip"
 

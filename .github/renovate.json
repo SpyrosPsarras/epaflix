@@ -84,6 +84,16 @@
       "automerge": false
     },
     {
+      "description": "CLIProxyAPI plugin pins (#997): NEVER auto-merge, and this rule MUST stay after the repo-wide patch rule above, because later packageRules win. Renovate cannot compute the sha256 of a release zip, so it bumps the version and leaves the checksum stale. The fetch script fails CLOSED on a mismatch with exit 1, which fails the initContainer, which means an auto-merged patch bump would take cliproxy.epaflix.com down at the next sync rather than merely skipping a plugin. A plugin 0.9.1 -> 0.9.2 IS a patch, so the generic automerge rule would have caught these. The ci.yml step 'CLIProxyAPI plugin pins match upstream checksums' turns that stale checksum into a red gate instead of an outage, but this rule is the first line: a human updates the checksum from the release's own checksums.txt and pushes it to the Renovate branch before merging.",
+      "matchManagers": ["custom.regex"],
+      "matchPackageNames": [
+        "abix5/pi-cliproxyapi-bridge",
+        "arthur-sommer-etc/cliproxyapi-copilot-plugin"
+      ],
+      "automerge": false,
+      "labels": ["renovate", "needs-checksum"]
+    },
+    {
       "description": "Pin the CI validate-gate helm to 3.x. The reason is NOT that helm v4 is unproven in general — it is GA (v4.2.3). It is that this gate's only job is to predict whether ArgoCD's repo-server can render this repo, and that repo-server bundles helm 3.19.4 (argo-cd chart 9.7.0 / ArgoCD v3.4.4, observed 2026-08-03). A gate rendering with a newer helm MAJOR than the thing that actually deploys is a false green: it passes on templating/OCI semantics ArgoCD then rejects. #384/#386 are exactly that failure, already survived once, with a chart major instead of a helm major. So the unblock condition is mechanical, not a soak: when the ArgoCD repo-server image ships helm 4.x, raise this cap to <5 in the same PR as the argo-cd chart bump. Check with `helm version --short` inside the running repo-server pod. Within-major drift the other way is fine and expected (gate 3.21.0 vs repo-server 3.19.4) — only the major has to match. #221/#164/#331.",
       "matchDatasources": ["github-releases"],
       "matchPackageNames": ["helm/helm"],
@@ -115,6 +125,16 @@
       ],
       "versioningTemplate": "semver",
       "extractVersionTemplate": "^kustomize/v(?<version>.+)$"
+    },
+    {
+      "description": "Keep the two CLIProxyAPI plugin versions in 2-k3s/17.remote-pi/cliproxy/deployment.yaml fresh (#997). Both plugins are fetched by cliproxy/files/fetch-plugin.sh from initContainer args, which Renovate's kustomize/docker managers cannot see: a plugin is a GitHub release zip, not an image. Marker is a '# renovate: datasource=... depName=...' comment on the line ABOVE the quoted version arg, the same shape as the HELM_VERSION managers above but leading rather than trailing, because a YAML sequence item carrying a trailing comment reads badly next to a sha256 on the next line. The version appears exactly ONCE per plugin on purpose: fetch-plugin.sh composes the release URL from <owner/repo>, the version and the plugin id, because a regex manager rewrites one captured span and a version repeated in a tag, a filename and an arg would come out inconsistent. Renovate CANNOT update the sha256 on the following line - see the matching packageRule, which blocks auto-merge, and the ci.yml step that fails the gate when the pinned checksum does not match the release's own checksums.txt.",
+      "customType": "regex",
+      "managerFilePatterns": ["/^2-k3s/17\\.remote-pi/cliproxy/deployment\\.yaml$/"],
+      "matchStrings": [
+        "#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)\\s*\\n\\s*-\\s*\"(?<currentValue>[^\"]+)\""
+      ],
+      "versioningTemplate": "semver",
+      "extractVersionTemplate": "^v?(?<version>.+)$"
     },
     {
       "description": "Keep the pinned AIRVPN_SUITE_VERSION in images/airvpn-bluetit/Dockerfile fresh. Renovate only ever sees the image tag we publish ourselves (ghcr.io/spyrospsarras/airvpn-bluetit), so without this regex manager nothing would ever report the vendored 2.1.0 tarball as stale. The bump also needs AIRVPN_SUITE_SHA512 updated by hand from AirVPN's published checksum - Renovate cannot compute that, see images/airvpn-bluetit/README.md. Uses managerFilePatterns, the correct native field on the deployed Renovate. The bot runs 43.33.2, set via the images: override in 2-k3s/12.renovate/kustomization.yaml, not the stale 39.264.0 literal in cronjob.yaml below — that literal was never what actually ran, and this manager (like the other two above) extracted fine the whole time (#486). This file isn't under .github/workflows/, so it doesn't hit the workflow-scope push rejection that blocks the ci.yml managers. Datasource is the custom.airvpn-suite-x86_64 entry below, not gitlab-tags: AirVPN/AirVPN-Suite has no upstream git tags or GitLab releases at all (verified via the GitLab API) - versions only ever show up as tarball filenames under binary/ on master, see #487.",
