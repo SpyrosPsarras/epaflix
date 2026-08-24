@@ -4,9 +4,10 @@ Question from #834: Sonarr commit `2f9e12a` fixes the stale tracked-download cac
 that blinded our queue on 2026-08-07. A maintainer called it "already fixed in
 v5". What does moving to v5 cost us, and does it fix what we actually have?
 
-The question is moot today. There is no Sonarr v5 to move to. When there is, it
-arrives through a Renovate rule that will auto-merge it unattended, which is the
-finding worth acting on and is now tracked in #1129.
+The question is moot today. No v5 build turned up anywhere we looked: no release
+tag, no update channel, no image. When one appears, it arrives through a Renovate
+rule that will auto-merge it unattended, which is the finding worth acting on and
+is now tracked in #1129.
 
 ## v5 does not exist as a shippable artifact
 
@@ -32,9 +33,13 @@ means owning a Sonarr build for one event handler. Not worth it.
 
 How close is it? `gh api repos/Sonarr/Sonarr/milestones` reports the `v5.0`
 milestone at 142 closed issues against 3 open, `due_on: null`, last updated
-2026-08-04. `curl -o /dev/null -w '%{http_code}' "https://sonarr.tv/docs/api/?api=v5"`
-returns 200, so the v5 API reference is already published. Treat a v5 GA as
-plausible within months, not years.
+2026-08-04. Treat a v5 GA as plausible within months, not years, on that number
+alone.
+
+I tried to strengthen that with the published v5 API reference, and the check was
+worthless. `curl -o /dev/null -w '%{http_code}' "https://sonarr.tv/docs/api/?api=v5"`
+returns 200, and so does `?api=v99`, because the value is a query string on a
+page that exists either way. Dropped rather than dressed up.
 
 ## What v5 would and would not fix
 
@@ -49,8 +54,11 @@ The discriminator is which `DownloadHistory` row is newest, not memory versus
 disk. `GetStateFromHistory()` re-seeds `Imported` from the DB exactly as it
 re-seeds `Failed`. The difference is that a re-grab writes a `DownloadGrabbed`
 row, which falls to `default` and returns `Downloading`, so the first population
-recovers on any process start while the second does not, because Cleanuparr
-writes a newer `DownloadFailed` row hours later.
+recovers on any process start while the second does not. Cleanuparr writes that
+newer `DownloadFailed` row hours after the grab. Its `/api/events` history
+matches the Sonarr row to the second for 4 of the 5 torrents in #1029, and the
+fifth falls outside event retention, so read the cause as confirmed on a sample
+rather than proven for all 648.
 
 `2f9e12a` adds an `EpisodeGrabbedEvent` handler, read at
 `v5-develop:src/NzbDrone.Core/Download/TrackedDownloads/TrackedDownloadService.cs:277-292`:
@@ -108,31 +116,34 @@ backwards, so plan on a restore as the only rollback.
 Four Deployments are exposed, `sonarr`, `sonarr2`, `radarr` and `prowlarr`, from
 three `images:` entries, because `sonarr` and `sonarr2` run the same image.
 `bazarr` is digest-only on `:latest` in the same block and also lives on the
-shared Postgres, so it belongs in the same fix. `jellyfin`, `cleanuparr`,
-`byparr`, `unpackerr` and `qbittorrent-nox` are digest-only too, and are excluded
-here on the grounds that none of them owns a one-way relational migration. That
-is a judgement, not a verified property of each app.
+shared Postgres, so it belongs in the same fix.
 
-Those four also pull on every restart, which is a live-only fact worth flagging:
-`kubectl --context epaflix -n servarr get deploy -o custom-columns=NAME,IMAGE,POLICY`
-reports `Always` for all four while none of the four manifests sets
-`imagePullPolicy` at all. I did not establish why they drift, and the obvious
-explanation is suspect, since a digest-pinned reference should default to
-`IfNotPresent`. Treat the live value as the fact and the cause as unknown. The
-drift is a checkbox on #1129 rather than a loose end in this doc. It does not
-change the exposure either way: a digest bump rewrites the pod template, so the
-new ReplicaSet pulls whatever the policy says.
+Nine more entries in that block are digest-only under the same rule: `jellyfin`,
+`cleanuparr`, `byparr`, `unpackerr`, `qbittorrent-nox`, `bazarr_autotranslate`,
+and the locally built `airvpn-bluetit` and `vpn-picker`. They are excluded from
+the pin on the judgement that none owns a one-way relational migration. I did not
+verify that per app, so it is a checkbox on #1129 rather than a settled question.
+Only `homarr`, `lingarr` and `newtarr` carry a `newTag`.
 
-LinuxServer does publish usable version tags. `curl
-"hub.docker.com/v2/repositories/linuxserver/sonarr/tags?page_size=100"` returns
-`4.0.19`, `4.0.19.2979-ls322` and `version-4.0.19.2979` among the newest 100.
+All four *arr Deployments run `imagePullPolicy: Always` live while none of the
+manifests sets it. That is the documented Kubernetes default, not drift. The
+default is `Always` when the tag is `:latest` or when no tag is given, the
+manifests carry `:latest`, and the kustomize bare-`digest:` override rewrites the
+reference to `name@sha256:...` with no tag at all, so both readings land on
+`Always`. It makes no difference to the exposure either way, because a digest
+bump rewrites the pod template and the new ReplicaSet pulls regardless.
 
-One thing to test rather than assume when doing the pin: homarr is clean
-`vX.Y.Z` semver, while these tags are four-component with an `-lsNNN` suffix, so
-whether Renovate classifies a 4 to 5 move as `major` for that shape needs
-checking. The automerge half is safe either way, because the only two automerge
-rules in `.github/renovate.json` match `patch` repo-wide and `digest` in the
-servarr file. Neither matches `major`.
+LinuxServer does publish usable version tags.
+`curl "hub.docker.com/v2/repositories/linuxserver/sonarr/tags?page_size=100"`
+returns `4.0.19`, `4.0.19.2979-ls322` and `version-4.0.19.2979` among the newest
+100.
+
+One thing to test rather than assume when doing the pin. homarr is clean `vX.Y.Z`
+semver, while these tags are four-component with an `-lsNNN` suffix, so whether
+Renovate types a 4 to 5 move as `major` for that shape needs checking. The
+automerge half is safe either way, because the only two automerge rules in
+`.github/renovate.json` match `patch` repo-wide and `digest` in the servarr file.
+Neither matches `major`.
 
 ## Recommendation
 
@@ -149,8 +160,9 @@ servarr file. Neither matches `major`.
    newtarr, and a rollback plan that assumes the database cannot be downgraded.
    Nothing watches Sonarr releases today, so this doc cannot be the trigger.
    `docs/accepted-risks.md` carries the dated entry and its reopen condition. A
-   release tag is not the only way v5 could reach us: given that channels do not
-   track git branches here, an LSIO `develop` or `latest` flip could land first.
+   release tag is not the only way v5 could reach us. Channels do not track git
+   branches here, so an LSIO `develop` or `latest` flip could land first, and the
+   reopen condition covers any of those paths.
 
 ## Sources
 
@@ -159,10 +171,12 @@ claimed, so this document is the reproducible record. Raw outputs also went to
 `.history/2026-08-24-sonarr-v5-evaluation.log`, which is git-ignored and
 therefore local to the machine that ran them.
 
-Three claims rest on other sources. The 648-row and 15-re-grab counts come from
+Four claims rest on other sources. The 648-row and 15-re-grab counts come from
 the #834 comments of 2026-08-24, which quote the SQL and the Cleanuparr
-`/api/events` reads behind them. The #540 quotation above comes from that issue's
-closing text, read with `gh issue view 540`. The code claims come from reading
+`/api/events` reads behind them. The claim that the census guard is the only
+proposed item unblocking #618 is a reading of #834 and #618, not a command. The
+#540 quotation above comes from that issue's closing text, read with `gh issue
+view 540`. The code claims come from reading
 `src/NzbDrone.Core/Download/TrackedDownloads/TrackedDownloadService.cs`,
 `DownloadMonitoringService.cs` and `src/NzbDrone.Core/Queue/QueueService.cs` at
 both tag `v4.0.19.2979` and `v5-develop` head `e27c1f47`.
