@@ -121,9 +121,10 @@ spec:
             - /scripts/fetch-plugin.sh
           args:
             - pi-bridge
+            # renovate: datasource=github-releases depName=abix5/pi-cliproxyapi-bridge
             - "0.9.1"
             - 7cfea7b47888c870acc8afca73d8f78cb8454559040c401a2aa08a870107db26
-            - https://github.com/abix5/pi-cliproxyapi-bridge/releases/download/v0.9.1/pi-bridge_0.9.1_linux_amd64.zip
+            - abix5/pi-cliproxyapi-bridge
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -160,9 +161,10 @@ spec:
             - /scripts/fetch-plugin.sh
           args:
             - cliproxyapi-copilot
+            # renovate: datasource=github-releases depName=arthur-sommer-etc/cliproxyapi-copilot-plugin
             - "0.3.3"
             - 6ac5c58fe2507468d08bc33d6365cfb822180ba3f37ae51e06cea884b933ca3a
-            - https://github.com/arthur-sommer-etc/cliproxyapi-copilot-plugin/releases/download/v0.3.3/cliproxyapi-copilot_0.3.3_linux_amd64.zip
+            - arthur-sommer-etc/cliproxyapi-copilot-plugin
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
