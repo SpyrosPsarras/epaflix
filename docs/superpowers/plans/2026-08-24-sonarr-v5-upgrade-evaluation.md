@@ -25,14 +25,16 @@ their own. Note also that channel does not equal git branch here: the `develop`
 channel serves 4.0.19.3001 from 2026-08-11 while the `develop` branch has not
 moved since 2025-02-22, so the pre-releases are built from something these checks
 did not identify. Read the section as "no v5 build was found anywhere we looked",
-not as an exhaustive proof. The only
-way to run `2f9e12a` today is to build `v5-develop` ourselves, which means owning
-a Sonarr build for one 18-line event handler. Not worth it.
+not as an exhaustive proof.
+
+The only way to run `2f9e12a` today is to build `v5-develop` ourselves, which
+means owning a Sonarr build for one event handler. Not worth it.
 
 How close is it? `gh api repos/Sonarr/Sonarr/milestones` reports the `v5.0`
 milestone at 142 closed issues against 3 open, `due_on: null`, last updated
-2026-08-04, and `sonarr.tv/docs/api/?api=v5` already returns 200. Treat a v5 GA
-as plausible within months, not years.
+2026-08-04. `curl -o /dev/null -w '%{http_code}' "https://sonarr.tv/docs/api/?api=v5"`
+returns 200, so the v5 API reference is already published. Treat a v5 GA as
+plausible within months, not years.
 
 ## What v5 would and would not fix
 
@@ -40,7 +42,7 @@ as plausible within months, not years.
 
 | population | pinned state | newest `DownloadHistory` event after the grab | fixed by `2f9e12a` |
 |---|---|---|---|
-| the 16 re-grabs of 2026-08-07 | `Imported` | `DownloadGrabbed`, so a cold cache reads `Downloading` | yes |
+| the 15 re-grabs of 2026-08-07 | `Imported` | `DownloadGrabbed`, so a cold cache reads `Downloading` | yes |
 | 648 rows, incl. the 5 stalled torrents in #1029 | `Failed` | `DownloadFailed`, written after the grab, so a cold cache reads `Failed` again | no |
 
 The discriminator is which `DownloadHistory` row is newest, not memory versus
@@ -64,19 +66,19 @@ if (trackedDownload is { State: TrackedDownloadState.Imported or
 }
 ```
 
-That clears the in-memory entry on the next grab. It does not help the second population, and that verdict is read from
-v5 source, not from ours: on `v5-develop` at `e27c1f47`,
-`TrackedDownloadService.cs:122-127` still seeds state from
-`GetLatestDownloadHistoryItem()`, `:262-270` still maps `DownloadFailed` to
+That clears the in-memory entry on the next grab. It does not help the second
+population, and that verdict comes from v5 source rather than ours. On
+`v5-develop` at `e27c1f47`, `TrackedDownloadService.cs:122-127` still seeds state
+from `GetLatestDownloadHistoryItem()`, `:262-270` still maps `DownloadFailed` to
 `Failed`, and `DownloadMonitoringService.cs:139-145` still excludes `Failed` from
-trackable. So v5 re-pins `Failed` from `DownloadHistory` on every process start
+trackable. So v5 re-pins `Failed` from `DownloadHistory` on every process start,
 exactly as v4 does.
 
-The first population also self-healed in 71 minutes on 2026-08-07 (grabbed
-07:01Z, all 16 imported by 08:12Z). So v5 buys a shorter blind window on a fault
-that already resolves itself, and buys nothing for the fault that does not. Of the
-work proposed on #834 so far, the census guard change is the only item that
-unblocks #618.
+The first population also self-healed in about 71 minutes on 2026-08-07: 15 grabs
+between 07:00:57Z and 07:01:31Z, 15 imports between 08:12:34Z and 08:13:09Z. So
+v5 buys a shorter blind window on a fault that already resolves itself, and buys
+nothing for the fault that does not. Of the work proposed on #834 so far, the
+census guard change is the only item that unblocks #618.
 
 ## The real cost is that we do not control when it lands
 
@@ -93,18 +95,15 @@ verbatim:
 > (#540, follow-up to #284).
 
 #540 fixed homarr by pinning it to a `vX.Y.Z` tag. Nobody did that for the *arrs,
-and #540's
-closing claim that "every other image in the same automerge rule is either
-genuinely tag-pinned to a version stream or stateless/easy to roll back" does not
-hold for it. Sonarr is stateful on PostgreSQL and its schema migrations are
-one-way, with no downgrade path once v5 has migrated `sonarr-main`.
+and #540's closing claim that "every other image in the same automerge rule is
+either genuinely tag-pinned to a version stream or stateless/easy to roll back"
+does not hold for them. Sonarr keeps its state in PostgreSQL and runs a schema
+migration on start.
 
-On the day LinuxServer flips `:latest` to v5, we take a major version with a
-one-way database migration through an auto-merged PR at 2am. I did not verify
-whether Sonarr documents a supported downgrade, so do not repeat the "one-way"
-claim as upstream fact. What is true for us: we have never tested rolling a
-migrated `sonarr-main` backwards, so plan on a restore as the only rollback until
-someone proves otherwise.
+So on the day LinuxServer flips `:latest` to v5, an auto-merged PR at 2am gives us
+a major version and a migrated `sonarr-main`. I did not check whether Sonarr
+documents a downgrade, and we have never tested rolling a migrated database
+backwards, so plan on a restore as the only rollback.
 
 Four Deployments are exposed, `sonarr`, `sonarr2`, `radarr` and `prowlarr`, from
 three `images:` entries, because `sonarr` and `sonarr2` run the same image.
@@ -119,7 +118,10 @@ Those four also pull on every restart, which is a live-only fact worth flagging:
 reports `Always` for all four while none of the four manifests sets
 `imagePullPolicy` at all. I did not establish why they drift, and the obvious
 explanation is suspect, since a digest-pinned reference should default to
-`IfNotPresent`. Treat the live value as the fact and the cause as unknown.
+`IfNotPresent`. Treat the live value as the fact and the cause as unknown. The
+drift is a checkbox on #1129 rather than a loose end in this doc. It does not
+change the exposure either way: a digest bump rewrites the pod template, so the
+new ReplicaSet pulls whatever the policy says.
 
 LinuxServer does publish usable version tags. `curl
 "hub.docker.com/v2/repositories/linuxserver/sonarr/tags?page_size=100"` returns
@@ -136,7 +138,7 @@ servarr file. Neither matches `major`.
 
 1. Do not pursue v5 now. Nothing to install, and it fixes the lesser half of the
    problem.
-2. Pin the `lscr.io/linuxserver/{sonarr,radarr,prowlarr}` entries in the
+2. Pin the `lscr.io/linuxserver/{sonarr,radarr,prowlarr,bazarr}` entries in the
    `images:` block to a version tag so a major arrives as a `major` update
    Renovate will not auto-merge. The `sonarr` entry covers both the `sonarr` and
    `sonarr2` Deployments. Tracked in #1129.
@@ -157,10 +159,10 @@ claimed, so this document is the reproducible record. Raw outputs also went to
 `.history/2026-08-24-sonarr-v5-evaluation.log`, which is git-ignored and
 therefore local to the machine that ran them.
 
-Two claims rest on other sources rather than on those commands: the
-648-row and 16-re-grab counts come from the #834 comments of 2026-08-24, which
-quote the SQL and the Cleanuparr `/api/events` reads that produced them, and the
-code claims come from reading
+Three claims rest on other sources. The 648-row and 15-re-grab counts come from
+the #834 comments of 2026-08-24, which quote the SQL and the Cleanuparr
+`/api/events` reads behind them. The #540 quotation above comes from that issue's
+closing text, read with `gh issue view 540`. The code claims come from reading
 `src/NzbDrone.Core/Download/TrackedDownloads/TrackedDownloadService.cs`,
 `DownloadMonitoringService.cs` and `src/NzbDrone.Core/Queue/QueueService.cs` at
 both tag `v4.0.19.2979` and `v5-develop` head `e27c1f47`.
