@@ -691,9 +691,45 @@ The version is pinned in **exactly one place**, the `fetch-pi-bridge`
 initContainer's `args` in `cliproxy/deployment.yaml`, together with the sha256 of
 the release zip from its own `checksums.txt`. The fetch logic itself lives in the
 shared `cliproxy/files/fetch-plugin.sh`, which both plugin initContainers call
-with `<id> <version> <sha256> <zip-url>`. The config block deliberately sets no
-`store.version`: the host loads the `.so` that is present, verified on v7.2.140.
-A bump is a two-line edit, the version and the new checksum.
+with `<id> <version> <sha256> <owner/repo>`. The config block deliberately sets
+no `store.version`: the host loads the `.so` that is present, verified on
+v7.2.140.
+
+### Bumping a plugin, and why it is half automated (#997)
+
+Renovate watches both plugin releases through a regex custom manager over the
+`# renovate:` marker above each version arg. It opens the PR and rewrites the
+version. It **cannot** rewrite the sha256 on the next line, because nothing can
+compute a release zip's checksum from a version number.
+
+That asymmetry is dangerous rather than merely annoying, so it is fenced twice:
+
+- A `packageRule` blocks auto-merge for both plugin packages. It has to sit after
+  the repo-wide patch auto-merge rule, since later rules win. Without it a
+  `0.9.1 -> 0.9.2` patch bump would auto-merge with a stale checksum, and
+  `fetch-plugin.sh` fails closed with exit 1, which fails the initContainer and
+  stops the proxy. Not a degraded plugin, a dead proxy.
+- The `validate` gate step "CLIProxyAPI plugin pins match upstream checksums"
+  downloads each release's own `checksums.txt` and compares. A stale checksum is
+  a red check, so the outage above cannot be merged. A 404 is also fatal, because
+  `fetch-plugin.sh` fails *open* on one and would leave the plugin silently
+  absent. Any other network error is a warning, so a GitHub outage does not
+  redden the gate for unrelated PRs.
+
+So a bump is: let Renovate open the PR, copy the value from the release's
+`checksums.txt` into the args, push it to the Renovate branch, watch the gate go
+green, merge, then sync. The gate is the thing that makes the manual half safe;
+do not disable it to "unblock" a bump.
+
+The release URL is composed by the script from `<owner/repo>`, the version and
+the plugin id, rather than passed in. Both projects publish
+`.../releases/download/v<version>/<id>_<version>_linux_amd64.zip`, and the point
+is that the version then appears exactly once per plugin: a regex manager
+rewrites one captured span, so a version repeated in a tag, a filename and an arg
+would come out inconsistent. A future plugin that names its asset differently
+will 404 and fail open, which looks exactly like a GitHub outage, so check the
+release page before blaming the network.
+
 
 The initContainer **fails closed on a checksum mismatch and open on an
 unreachable GitHub**. A tampered artifact must never load; a GitHub outage must
@@ -799,9 +835,11 @@ CrashLoop. That is the failure this initContainer exists to prevent.
 | the config | `plugins.configs` of the config row in Postgres | `reconcile-config.psql` |
 
 It shares `cliproxy/files/fetch-plugin.sh` with pi-bridge; the id, version,
-sha256 and release URL are the `fetch-copilot-plugin` initContainer's `args` in
+sha256 and `owner/repo` are the `fetch-copilot-plugin` initContainer's `args` in
 `cliproxy/deployment.yaml`. Fails closed on a checksum mismatch, open on an
-unreachable GitHub.
+unreachable GitHub. Renovate watches this version too, and the same rule applies:
+it bumps the version, you supply the checksum, and the gate blocks the pair from
+diverging. See "Bumping a plugin" above.
 
 The plugin's install doc says CLIProxyAPI derives the plugin id from the
 filename, so that the id must match the `plugins.configs` key. That is not true

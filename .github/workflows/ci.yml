@@ -213,6 +213,98 @@ jobs:
           print("\nAll Helm chart pins resolve and values validate.")
           PY
 
+      - name: CLIProxyAPI plugin pins match upstream checksums
+        run: |
+          python3 - <<'PY'
+          # Renovate bumps the plugin VERSION in the fetch-plugin.sh args and
+          # cannot touch the sha256 on the next line (#997). fetch-plugin.sh
+          # fails CLOSED on a mismatch with exit 1, which fails the
+          # initContainer, which takes cliproxy.epaflix.com down at the next
+          # sync. So a stale checksum has to be caught here, in the required
+          # gate, rather than in the cluster.
+          #
+          # Mismatch is FATAL. A 404 is also FATAL: it means the release does not
+          # exist, so fetch-plugin.sh would 404 too and fail OPEN, leaving the
+          # plugin silently absent - the quiet failure this gate exists to catch.
+          # Renovate only ever proposes versions that exist, so a 404 here is a
+          # hand-edit typo. Every OTHER network error is a WARNING, deliberately:
+          # the same split fetch-plugin.sh itself makes. A GitHub outage must not
+          # redden this gate for every unrelated PR, and it cannot hide a bad pin
+          # for long because the next run re-checks.
+          import sys, urllib.request, urllib.error, yaml, posixpath
+
+          DEPLOY = "2-k3s/17.remote-pi/cliproxy/deployment.yaml"
+          spec = yaml.safe_load(open(DEPLOY))["spec"]["template"]["spec"]
+
+          pins, fail, warn = [], [], []
+          for c in spec.get("initContainers", []):
+              if not any("fetch-plugin.sh" in t for t in (c.get("command") or [])):
+                  continue
+              args = c.get("args") or []
+              if len(args) != 4:
+                  fail.append(f"{c['name']}: expected 4 args, got {len(args)}: {args}")
+                  continue
+              pins.append((c["name"], *args))
+
+          if not pins:
+              # An empty check is not a passing check. If the args shape changes,
+              # say so instead of reporting success over zero pins.
+              print(f"No fetch-plugin.sh initContainer found in {DEPLOY}")
+              sys.exit(1)
+
+          for name, plugin_id, version, sha256, repo in pins:
+              asset = f"{plugin_id}_{version}_linux_amd64.zip"
+              base = f"https://github.com/{repo}/releases/download/v{version}"
+              url = f"{base}/checksums.txt"
+              print(f"[{name}] {plugin_id} {version} <- {repo}")
+              try:
+                  with urllib.request.urlopen(url, timeout=30) as r:
+                      body = r.read().decode()
+              except urllib.error.HTTPError as e:
+                  if e.code == 404:
+                      fail.append(
+                          f"{plugin_id} {version}: {url} is 404, so that release does "
+                          f"not exist. fetch-plugin.sh fails OPEN on a 404, so this "
+                          f"would start the proxy with the plugin silently missing."
+                      )
+                  else:
+                      warn.append(f"{plugin_id} {version}: could not fetch {url}: {e}")
+                  continue
+              except (urllib.error.URLError, TimeoutError) as e:
+                  warn.append(f"{plugin_id} {version}: could not fetch {url}: {e}")
+                  continue
+              upstream = {
+                  parts[1].lstrip("*"): parts[0]
+                  for line in body.splitlines()
+                  if len(parts := line.split()) == 2
+              }
+              want = upstream.get(asset)
+              if want is None:
+                  fail.append(
+                      f"{plugin_id} {version}: {asset} absent from {url}. "
+                      f"Assets there: {sorted(upstream) or 'none parsed'}. "
+                      f"Either the version does not exist or the release names its "
+                      f"asset differently, which fetch-plugin.sh would 404 on."
+                  )
+              elif want.lower() != sha256.lower():
+                  fail.append(
+                      f"{plugin_id} {version}: pinned sha256 {sha256} does not match "
+                      f"upstream {want} for {asset}. If Renovate raised this PR, copy "
+                      f"the upstream value into the {name} args before merging: an "
+                      f"unmatched checksum fails the initContainer and stops the proxy."
+                  )
+              else:
+                  print(f"  sha256 matches upstream checksums.txt ({sha256[:12]}...)")
+
+          for w in warn:
+              print(f"WARNING: {w}")
+          if fail:
+              print("\nPlugin pin problems:")
+              print("\n".join(fail))
+              sys.exit(1)
+          print(f"\nAll {len(pins)} plugin pins checked ({len(warn)} unreachable).")
+          PY
+
       - name: Kustomize build (sops-free dirs)
         run: |
           set -euo pipefail
