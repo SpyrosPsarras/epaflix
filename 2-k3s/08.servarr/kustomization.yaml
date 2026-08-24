@@ -158,7 +158,7 @@ images:
   - name: lscr.io/linuxserver/sonarr
     digest: sha256:c19aa4ecdf03d73e1d5c901da33744cb7eb4d921f89bafed1ca264601d7fa224
   - name: lscr.io/linuxserver/radarr
-    digest: sha256:a45b5ab0f850f39edb4cc9c95bbd967b52ddc3d4574a4dfb45561177db6c88f4
+    digest: sha256:119aaa4a4f7349bcd2a136c5373a0d7925b5479915c7dfe0c0ad352db2a6d438
   - name: lscr.io/linuxserver/prowlarr
     digest: sha256:1295cff29d10b486c0d8324d1559a552140a5932bf8b3d87e398654414f63f92
   - name: ghcr.io/cleanuparr/cleanuparr
