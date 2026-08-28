@@ -736,8 +736,8 @@ unreachable GitHub**. A tampered artifact must never load; a GitHub outage must
 not take the proxy down for an optional quota endpoint. If it logs the warning,
 the proxy runs and the four routes 404 until the next pod start succeeds.
 
-Upstream builds the plugin against SDK `v7.2.93` while the pin is now `v7.2.140`,
-and its README says the versions must match. They do not have to: the release
+Upstream builds the plugin against SDK `v7.2.93`, far behind whatever
+`kustomization.yaml` currently pins, and its README says the versions must match. They do not have to: the release
 `.so` was loaded and exercised against the pinned digest - under `runAsNonRoot` +
 `readOnlyRootFilesystem`, the same posture as the pod - before any of this was
 committed, first on v7.2.127 and re-checked on v7.2.140 when the Copilot plugin
@@ -857,7 +857,8 @@ is 6% of headroom on a shared volume, which is not enough to leave alone.
 
 ### The version skew is fine, and that was measured
 
-The release is built against SDK `v7.2.118` and the pinned image is `v7.2.140`.
+The release is built against SDK `v7.2.118`, well behind whatever
+`kustomization.yaml` currently pins.
 A Go plugin normally refuses to load across a package-version mismatch, so this
 was proven before it was committed rather than assumed from the pi-bridge
 precedent. The exact digest pinned in `kustomization.yaml` was run locally with
@@ -924,12 +925,21 @@ Nothing below works until a human syncs the `remote-pi` Application. Its
 the same sync also replaces the proxy pod, so both plugin fetches and
 `reconcile-config.psql` run in the new pod's init sequence.
 
-That sync carries one thing this change did not ask for: the live pod is
-`v7.2.135` while `kustomization.yaml` pins `v7.2.140`, because the Application
-has not been synced since that bump landed. So the same click also rolls the
-image forward five patch versions. Both plugins were loaded against `v7.2.140`
-locally, which is the reason that is a note and not a blocker, but read the
-upstream release notes for those five before clicking.
+That sync usually carries something this change did not ask for. Renovate keeps
+bumping the `cli-proxy-api` pin and nothing syncs the Application, so the live pod
+is normally several patch versions behind git, and the same click rolls the image
+forward as well. Do not restate the two versions here - that is how this paragraph
+came to name a live version and a pin that were both wrong. Read them off the
+cluster instead, then check the upstream release notes for the span between:
+
+```bash
+kubectl --context epaflix -n remote-pi get pod -l app.kubernetes.io/name=cliproxy \
+  -o jsonpath='{.items[0].spec.containers[?(@.name=="cliproxy")].image}'
+grep -A1 'cli-proxy-api' 2-k3s/17.remote-pi/kustomization.yaml | grep newTag
+```
+
+Both plugins have been loaded locally against the pinned digest before each bump
+was committed, which is why the skew is a note and not a blocker.
 
 Then: device code, not a loopback redirect, so this is the one provider that does
 not need the port-forward:
