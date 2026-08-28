@@ -737,7 +737,8 @@ not take the proxy down for an optional quota endpoint. If it logs the warning,
 the proxy runs and the four routes 404 until the next pod start succeeds.
 
 Upstream builds the plugin against SDK `v7.2.93`, far behind whatever
-`kustomization.yaml` currently pins, and its README says the versions must match. They do not have to: the release
+`kustomization.yaml` currently pins, and its README says the versions must
+match. They do not have to: the release
 `.so` was loaded and exercised against the pinned digest - under `runAsNonRoot` +
 `readOnlyRootFilesystem`, the same posture as the pod - before any of this was
 committed, first on v7.2.127 and re-checked on v7.2.140 when the Copilot plugin
@@ -938,8 +939,13 @@ kubectl --context epaflix -n remote-pi get pod -l app.kubernetes.io/name=cliprox
 grep -A1 'cli-proxy-api' 2-k3s/17.remote-pi/kustomization.yaml | grep newTag
 ```
 
-Both plugins have been loaded locally against the pinned digest before each bump
-was committed, which is why the skew is a note and not a blocker.
+What has NOT been done is a load test of the plugins against every pin. Both were
+loaded locally at the two checkpoints named above, and Renovate's bumps since then
+have not been exercised that way - CI only verifies each plugin's own release
+checksum, not that it loads against the current CPA build. So the startup-log
+check after a sync is the real safety net, not a prior guarantee: a plugin the
+host rejects logs `pluginhost: failed to load plugin` and the proxy still starts,
+which is why the four `pi-bridge` routes can 404 on a pod that looks healthy.
 
 Then: device code, not a loopback redirect, so this is the one provider that does
 not need the port-forward:
