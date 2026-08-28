@@ -257,7 +257,22 @@ BEGIN
   FOR want IN
     SELECT * FROM (VALUES
       ('request-log',            'true'),
-      ('logs-max-total-size-mb', '256')
+      ('logs-max-total-size-mb', '256'),
+      -- Feeds CPAMP (cpamanager/deployment.yaml). This defaults to FALSE in
+      -- internal/config/config_load.go, and redisqueue enqueues nothing while it
+      -- is false, so every CPAMP panel would sit empty with no error anywhere -
+      -- the failure mode is "no data", which is exactly the direction this
+      -- repo's verifications have historically failed in. Unlike request-log
+      -- this key IS present in the seeded config - `usage-statistics-enabled:
+      -- false` at line 126 of the v7.2.140 image's own config.example.yaml - so
+      -- it takes the regexp_replace branch below, not the append branch. Both
+      -- were exercised: reconcile run twice against a postgres:16 seeded from
+      -- that file lands on exactly one occurrence, value true.
+      --
+      -- CPAMP can also set this itself during its setup wizard. Git sets it
+      -- instead: a value only live in the app's own DB is reverted by the next
+      -- rebuild, and this pod restores config from Postgres on every start.
+      ('usage-statistics-enabled', 'true')
     ) AS t(key, value)
   LOOP
     -- Both are top-level keys at column 0, so no leading \s* - that would also
@@ -274,7 +289,7 @@ BEGIN
      SET content = c, updated_at = now()
    WHERE id = 'config';
 
-  RAISE NOTICE 'request payload logging reconciled: request-log true, logs-max-total-size-mb 256';
+  RAISE NOTICE 'request payload logging reconciled: request-log true, logs-max-total-size-mb 256, usage-statistics-enabled true';
 END $$;
 
 -- Prove it, and fail the initContainer if either value is not what git wants.
@@ -318,11 +333,16 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM regexp_matches(c, '^logs-max-total-size-mb:[ \t]*256[ \t]*$', 'n')) THEN
     RAISE EXCEPTION 'logs-max-total-size-mb is not 256 after reconcile';
   END IF;
+  -- Top-level key at column 0, so no leading \s* - a nested key of the same
+  -- name must not satisfy this check.
+  IF NOT EXISTS (SELECT 1 FROM regexp_matches(c, '^usage-statistics-enabled:[ \t]*true[ \t]*$', 'n')) THEN
+    RAISE EXCEPTION 'usage-statistics-enabled is not true after reconcile - CPAMP would show an empty dashboard with no error';
+  END IF;
   -- Guard the pairing, not just the values: request-log with logging-to-file
   -- true would move the access lines off stdout and blind Loki (#1006 territory).
   IF EXISTS (SELECT 1 FROM regexp_matches(c, '^logging-to-file:[ \t]*true[ \t]*$', 'n')) THEN
     RAISE EXCEPTION 'logging-to-file is true - that takes the access log off stdout and blinds Loki; see #1007';
   END IF;
 
-  RAISE NOTICE 'verified: allow-remote true, auth-dir /var/lib/cliproxy/pgstore/auths, pi-bridge and cliproxyapi-copilot enabled, request-log true capped at 256MB, logging-to-file false';
+  RAISE NOTICE 'verified: allow-remote true, auth-dir /var/lib/cliproxy/pgstore/auths, pi-bridge and cliproxyapi-copilot enabled, request-log true capped at 256MB, logging-to-file false, usage-statistics-enabled true';
 END $$;
