@@ -736,8 +736,9 @@ unreachable GitHub**. A tampered artifact must never load; a GitHub outage must
 not take the proxy down for an optional quota endpoint. If it logs the warning,
 the proxy runs and the four routes 404 until the next pod start succeeds.
 
-Upstream builds the plugin against SDK `v7.2.93` while the pin is now `v7.2.140`,
-and its README says the versions must match. They do not have to: the release
+Upstream builds the plugin against SDK `v7.2.93`, far behind whatever
+`kustomization.yaml` currently pins, and its README says the versions must
+match. They do not have to: the release
 `.so` was loaded and exercised against the pinned digest - under `runAsNonRoot` +
 `readOnlyRootFilesystem`, the same posture as the pod - before any of this was
 committed, first on v7.2.127 and re-checked on v7.2.140 when the Copilot plugin
@@ -857,7 +858,8 @@ is 6% of headroom on a shared volume, which is not enough to leave alone.
 
 ### The version skew is fine, and that was measured
 
-The release is built against SDK `v7.2.118` and the pinned image is `v7.2.140`.
+The release is built against SDK `v7.2.118`, well behind whatever
+`kustomization.yaml` currently pins.
 A Go plugin normally refuses to load across a package-version mismatch, so this
 was proven before it was committed rather than assumed from the pi-bridge
 precedent. The exact digest pinned in `kustomization.yaml` was run locally with
@@ -924,12 +926,26 @@ Nothing below works until a human syncs the `remote-pi` Application. Its
 the same sync also replaces the proxy pod, so both plugin fetches and
 `reconcile-config.psql` run in the new pod's init sequence.
 
-That sync carries one thing this change did not ask for: the live pod is
-`v7.2.135` while `kustomization.yaml` pins `v7.2.140`, because the Application
-has not been synced since that bump landed. So the same click also rolls the
-image forward five patch versions. Both plugins were loaded against `v7.2.140`
-locally, which is the reason that is a note and not a blocker, but read the
-upstream release notes for those five before clicking.
+That sync usually carries something this change did not ask for. Renovate keeps
+bumping the `cli-proxy-api` pin and nothing syncs the Application, so the live pod
+is normally several patch versions behind git, and the same click rolls the image
+forward as well. Do not restate the two versions here - that is how this paragraph
+came to name a live version and a pin that were both wrong. Read them off the
+cluster instead, then check the upstream release notes for the span between:
+
+```bash
+kubectl --context epaflix -n remote-pi get pod -l app.kubernetes.io/name=cliproxy \
+  -o jsonpath='{.items[0].spec.containers[?(@.name=="cliproxy")].image}'
+grep -A1 'cli-proxy-api' 2-k3s/17.remote-pi/kustomization.yaml | grep newTag
+```
+
+What has NOT been done is a load test of the plugins against every pin. Both were
+loaded locally at the two checkpoints named above, and Renovate's bumps since then
+have not been exercised that way - CI only verifies each plugin's own release
+checksum, not that it loads against the current CPA build. So the startup-log
+check after a sync is the real safety net, not a prior guarantee: a plugin the
+host rejects logs `pluginhost: failed to load plugin` and the proxy still starts,
+which is why the four `pi-bridge` routes can 404 on a pod that looks healthy.
 
 Then: device code, not a loopback redirect, so this is the one provider that does
 not need the port-forward:
@@ -1100,3 +1116,232 @@ Do not set `modelRoles.default` while the proxy advertises no models.
 Requires the Pi-hole record for `cliproxy.epaflix.com` (see
 `.github/instructions/pihole.instructions.md`) and the Cloudflare DNS-only
 shadow record, same two prerequisites as `remote-pi.epaflix.com`.
+
+# CPA Manager Plus (request history, token and cost analytics)
+
+[CPAMP](https://github.com/seakee/CPA-Manager-Plus) full mode runs as a second
+Deployment in this namespace, `cpa-manager-plus`. It exists because **CPA stores
+no usage history of its own**: `internal/store/postgresstore.go` creates exactly
+three tables — `config`, `auth`, `cooldown` — and the only request logging is a
+file logger writing to an emptyDir that dies with the pod. Persistent per-request
+history, token counts and cost per model/provider/account/API key live here or
+nowhere.
+
+## Two usage transports — read before adding any usage consumer
+
+CPA can hand out usage events two ways, with opposite rules. Both fail silently
+when confused, which is why this section exists.
+
+**1. RESP `SUBSCRIBE` — what this deployment actually uses. Fan-out, safe.**
+CPA multiplexes protocols on the same 8317 port: `internal/api/protocol_multiplexer.go`
+peeks the first byte of each connection and routes RESP-looking ones to
+`internal/api/redis_queue_protocol.go`, whose `SUBSCRIBE` handler calls
+`redisqueue.SubscribeUsage()`. Every subscriber gets its own cloned channel, so
+any number of them receive events independently and take nothing from each
+other. One caveat, for symmetry with the OOMKill note below: the send is
+non-blocking, and a subscriber whose 256-message buffer is full is dropped and
+its channel closed, silently (`internal/redisqueue/queue.go:12,148-156`). At the
+~160 requests/day observed here that is unreachable, but it is a drop, not
+backpressure.
+CPAMP defaults to `USAGE_COLLECTOR_MODE=auto`, and `auto` tries subscribe
+**first** (mode dispatch at
+`apps/manager-server/internal/collector/collector.go:139-158`), falling back to
+HTTP if the dial, the `AUTH`, or the `SUBSCRIBE` command itself fails — three
+branches at `:180`, `:190` and `:200` inside `runSubscribe` (`:159`). If HTTP
+also fails, `auto` tries `runRESP` (`:156`) against a real Redis endpoint, which
+this deployment does not have, so that third stage is inert here.
+`resp.Dial` plain-TCP dials the CPA URL host, and `cliproxy` is a ClusterIP TCP
+passthrough on 8317, so it connects.
+
+**2. `GET /v0/management/usage-queue` — the fallback. Destructive.**
+`internal/api/handlers/management/usage.go:36` calls `redisqueue.PopOldest`,
+which removes what it returns, with a 60s default retention
+(`redis-usage-queue-retention-seconds`, clamped to 3600). At most one poller of
+that endpoint can work. Despite the package name this is an in-memory buffer,
+not an external Redis, so nothing extra is deployed.
+
+**The trap is the interaction.** `Enqueue` publishes to subscribers and returns
+**without queueing** when any subscriber exists
+(`internal/redisqueue/queue.go:72-76`). So:
+
+- While CPAMP holds its subscription, the HTTP queue stays empty. Anything
+  polling it — the `dms-cliproxy-quota` widget, a debugging one-liner during an
+  incident — reads nothing and looks merely idle rather than misconfigured.
+- If CPAMP ever falls back to HTTP while another subscriber is attached, CPAMP
+  is the one that gets nothing.
+- Neither case logs an error anywhere.
+
+So the practical rules:
+
+- `replicas: 1` and `strategy: Recreate`. The binding reason is the **RWO SQLite
+  volume**, not queue contention — two subscribers would each get a full copy,
+  but two writers to one SQLite file corrupt it. Upstream also asks for one
+  Manager Server per queue.
+- Do not poll `/v0/management/usage-queue` while this runs. Not because it
+  steals CPAMP's subscription, but because it is destructive to any other poller
+  and will read empty here anyway.
+- `pi-bridge` uses neither transport today (quota, models and `/api-call` only).
+  A plugin that wants token data should use the in-process
+  `pluginapi.UsagePlugin` fan-out — `Manager.dispatch()` hands every registered
+  plugin its own copy.
+
+## The prerequisite that fails silently
+
+`usage-statistics-enabled` defaults to **false** in
+`internal/config/config_load.go`, and while it is false `redisqueue` enqueues
+nothing. CPAMP would then show empty panels with no error in either pod. Git
+owns it, in `reconcile-config.psql`, next to `request-log` — CPAMP's setup
+wizard can also flip it, but a value living only in the app's own DB is exactly
+what the next rebuild reverts.
+
+## First setup — one human, one port-forward
+
+There is deliberately **no Service and no IngressRoute**. Nothing in-cluster
+consumes CPAMP yet, and one less admin panel on the network is worth a
+port-forward. Add a Service when `pi-bridge`'s `cpam_url` is actually pointed at
+it; add a route (plus the Pi-hole record on `.102` for the `internal` entry
+point) only if it must be reachable without one.
+
+```bash
+kubectl --context epaflix -n remote-pi port-forward deploy/cpa-manager-plus 18317:18317
+# then open http://127.0.0.1:18317/management.html
+```
+
+The admin key is **supplied by git**, in the sops-encrypted
+`cpamanager/cpamanager-secrets.enc.yaml`, so CPAMP never generates or logs one.
+Retrieve it into the clipboard without ever printing it:
+
+```bash
+sops -d --extract '["stringData"]["admin-key"]' \
+  2-k3s/17.remote-pi/cpamanager/cpamanager-secrets.enc.yaml | wl-copy
+```
+
+**Do not** `grep` the pod log for it and do not `cat` the decrypted file. Left
+unset, upstream prints the generated key to stdout
+(`apps/manager-server/cmd/cpa-manager-plus/main.go:128`), and this namespace's
+stdout goes to Loki for 31 days — which is exactly why it is supplied
+instead. With the Secret in
+place the startup line is the value-free `CPA Manager Plus admin credential
+initialized`; seeing `admin key generated:` instead means the env var did not
+reach the container, and that log line now needs deleting from Loki.
+
+Also in the wizard: CPA URL `http://cliproxy:8317` and the CPA Management Key.
+That key is the `management-password` entry of the ksops-managed
+`cliproxy-secrets`, which the pod consumes as `MANAGEMENT_PASSWORD`
+(`cliproxy/deployment.yaml`) — **not** `remote-management.secret-key`, which is
+the `config.yaml`/Postgres field this repo deliberately leaves alone (see "First boot"
+above: `reconcile-config.psql` does not touch it, and the process rewrites a
+plaintext value there as a bcrypt hash on first start). Read it the same way as
+every other credential here, without printing it:
+
+```bash
+sops -d --extract '["cliproxy_management_password"]' \
+  .github/instructions/secrets.enc.yaml | wl-copy
+```
+
+The CPA key is then stored encrypted in CPAMP's own SQLite under
+`/data/data.key`; the config API only ever reports `managementKeyConfigured` and
+never returns it. That is why no CPA key is mounted into this pod.
+
+## Verification
+
+```bash
+kubectl --context epaflix -n remote-pi get deploy cpa-manager-plus
+# unauthenticated, safe to curl - and it does NOT drain the queue
+curl -s http://127.0.0.1:18317/usage-service/info   # through the port-forward
+```
+
+Before setup that reports `"setupRequired":true`, `"configured":false`,
+`"mode":"embedded"`. `/health` answers
+`{"ok":true,"service":"cpa-manager-plus"}`.
+
+`"hasHistoricalData"` is **not** a live data-flow check, so do not use it as one.
+It is computed once during bootstrap
+(`apps/manager-server/internal/service/bootstrap/service.go:35,80`) and the info
+endpoint returns that stored value
+(`apps/manager-server/internal/service/setup/service.go:96`); setup's `markBootstrapReady()` does not
+refresh it. A fresh instance keeps reporting `false` after successful collection
+until the next Manager Server start. To confirm events are actually landing, look
+at the dashboard in the panel, or check the database is growing:
+
+```bash
+kubectl --context epaflix -n remote-pi exec deploy/cpa-manager-plus -- \
+  du -sh /data/usage.sqlite /data
+```
+
+`"mode":"embedded"` is **not** a lesser mode and does not mean the Manager
+Server is missing. It is a hardcoded constant in the Manager Server's own setup
+service (`apps/manager-server/internal/service/setup/service.go:88`) describing
+the panel asset as embedded in the binary rather than loaded from disk. The
+lightweight thing upstream calls the "CPAMP panel" is a single HTML file served
+by CPA itself on 8317 via `panel-github-repository` — no Manager Server, no
+SQLite, no second port. This endpoint answering on 18317 is what proves full
+mode is running.
+
+## How much history you actually get
+
+No production path in CPAMP age-prunes the raw usage history, so **the volume
+size is the retention policy** — see `cpamanager/storage.yaml` and the entry in
+`docs/accepted-risks.md`. The ~7 days the `dms-cliproxy-quota` widget wants is a
+subset of "everything until the disk is full", so there is no retention value to
+set here and none to check.
+
+Worse, the claim itself bounds nothing: `local-path` is a bind mount with no
+quota, so 2Gi is advisory and the real limit is the **node root disk**, shared
+with every other pod on that node — the #463 shape. Accepted on the arithmetic
+(~160 requests/day observed → ~100 MiB/year), with measurable reopen conditions
+in `docs/accepted-risks.md`. Measure with `du -sh /data`, not `df`, which reports
+the host filesystem.
+
+If it does fill, events are **lost, not deferred**: the collector pops a batch
+from CPA before it writes, and in the default `auto` mode CPA hands payloads
+straight to subscribers without queueing them, so nothing is left behind to retry
+or age out. CPA keeps serving model requests throughout.
+
+What it does **not** fix: **Copilot quota**. `grep -ril copilot` across the whole
+CPAMP repo returns nothing — no Copilot support at all, and its credential-quota
+views read CPA the same way `pi-bridge` does, so they hit the same failure. CPA
+resolves a `$TOKEN$` placeholder from auth metadata `accessToken`,
+`access_token`, `token` (string, or a map carrying either of the first two),
+`id_token` or `cookie` (`tokenValueFromMetadata`,
+`internal/api/handlers/management/api_tools.go:422-464`) — five key names, the
+`token` one accepted as a string or as a map carrying either of the first two —
+and failing all of them, from attribute `api_key` (`tokenValueForAuth`,
+`:229-242`). The Copilot plugin
+stores its credential as `github_access_token` inside StorageJSON and publishes
+metadata of only `{type, github_login}` — none of those five keys, and no
+`api_key` attribute either. So the
+substitution yields an empty token and `/api-call` answers 400 `auth token not
+found` (`internal/api/handlers/management/api_tools.go:151-156`) before any request reaches GitHub. Same chain in
+`docs/superpowers/plans/2026-08-28-cpamp-manager-server-deployment.md` →
+"What CPAMP does NOT fix".
+
+## Backup and restore
+
+**CPAMP's SQLite on the `cpa-manager-plus-data` claim is not backed up by
+anything.** The CNPG `ScheduledBackup` for `postgres-cluster` covers the
+`cliproxy` database, not this volume, and `local-path` is node-local, so losing
+the bound node loses the request history. Recorded, with the reopening
+conditions, in `docs/accepted-risks.md` — "2026-08-28 CPAMP request history is
+unbacked, node-local and growth-unbounded".
+
+Two manual copy paths exist, neither automated here: CPAMP's JSONL export, and
+its `manager-data-snapshot` command (`apps/manager-server/cmd/cpa-manager-plus/main.go:59`). The
+snapshot archive includes `data.key` alongside the database and WAL
+(`apps/manager-server/internal/command/managerdatasnapshot/command.go:21-26`, `snapshotFiles`), so a
+snapshot is secret material — do not park one in a shared directory or commit it.
+
+## Rollback
+
+Remove the three `cpamanager/` entries from `kustomization.yaml` — the two under
+`resources:` and the generator — then merge and sync. The
+PVC is not garbage-collected with the Deployment, so the history survives a
+revert and comes back on re-add. Deleting the claim is the deliberate,
+irreversible step — nothing backs it up today. Two manual copy paths exist and
+neither is automated here: CPAMP's JSONL export, and its `manager-data-snapshot`
+command, whose archive carries `data.key` and is therefore secret material. See "Backup and
+restore" above.
+
+`usage-statistics-enabled: true` stays behind in the config row after a revert,
+as with every other value `reconcile-config.psql` moves forward. Harmless: with
+no drainer the queue just ages out every 60s.
