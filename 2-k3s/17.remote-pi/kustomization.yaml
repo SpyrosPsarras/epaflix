@@ -24,9 +24,18 @@ resources:
   - cliproxy/deployment.yaml
   - cliproxy/service.yaml
   - cliproxy/ingress.yaml
+  # CPA Manager Plus - subscribes to CPA's usage events over RESP on 8317, which is
+  # fan-out rather than destructive. The separate HTTP usage-queue endpoint IS
+  # destructive and must not be polled while this runs. No Service and no ingress
+  # yet on purpose; the transport rules are in cpamanager/deployment.yaml.
+  - cpamanager/storage.yaml
+  - cpamanager/deployment.yaml
 
 generators:
   - cliproxy/ksops-generator.yaml
+  # cpa-manager-plus-secrets (remote-pi) - the CPAMP panel admin key, supplied
+  # so the Manager Server never prints a generated one into Loki.
+  - cpamanager/ksops-generator.yaml
 
 # Digest-pinned so a moving tag cannot swap the running build under us, and so
 # Renovate has something to bump. `newTag: <tag>@<digest>`, NOT a bare
@@ -34,10 +43,20 @@ generators:
 # leaves Renovate's kustomize manager with no currentValue to resolve against.
 # Never set `newTag:` and `digest:` together, that is
 # skipReason: invalid-dependency-specification and silently kills tracking.
-# v7.2.140 and `latest` resolve to the same manifest index today.
+# Renovate rewrites the tag and the digest together on this line, so the tag
+# named here is whatever it last bumped to - do not restate it in prose above,
+# which is how this comment came to name v7.2.140 while the pin said v7.2.144.
 images:
   - name: docker.io/eceasy/cli-proxy-api
     newTag: v7.2.144@sha256:ce1c9ac29d8efe13304d580a87c30fa24e75160769b349ccfb15718e077a2e10
+  # Digest is the v1.9.2 multi-arch index (amd64 child
+  # sha256:6151374a5d065fdabb4f479f05612442cc16ff56099732732ba23970bd78c70b),
+  # resolved from the registry on 2026-08-28 and verified by running that exact
+  # tag under the pod's posture before this entry was written. v1.9.2 is the
+  # newest of 126 published tags; `latest` was a DIFFERENT manifest
+  # (sha256:dbaad3f9...) at resolve time, so pin the tag, never latest.
+  - name: docker.io/seakee/cpa-manager-plus
+    newTag: v1.9.2@sha256:c0751252cc3a04eb7da97bc1e2b8b8abd9f120c26c9f9ab96aaf94d5251e64c2
 
 # Owned by ArgoCD Application "remote-pi".
 # The scripts the cliproxy initContainers run. Generated rather than
