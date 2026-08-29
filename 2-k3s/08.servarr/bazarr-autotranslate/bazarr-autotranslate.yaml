@@ -10,6 +10,9 @@ metadata:
     secret.reloader.stakater.com/reload: "bazarr-autotranslate-secret"
 spec:
   replicas: 1
+  # state.json on the logs PVC is single-writer; avoid two pods scanning at once
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: bazarr-autotranslate
@@ -35,6 +38,12 @@ spec:
               value: "el"
             - name: TRANSLATION_REQUEST_TIMEOUT
               value: "900"
+            - name: REQUEST_TIMEOUT
+              value: "300"
+            - name: SEARCH_ROUNDS_BEFORE_TRANSLATE
+              value: "3"
+            - name: TRANSLATE_GRACE_HOURS
+              value: "6"
             - name: INTERVAL_BETWEEN_SCANS
               value: "3600"
             - name: LOG_LEVEL
@@ -42,6 +51,10 @@ spec:
           volumeMounts:
             - name: logs
               mountPath: /usr/src/app/logs
+            # subPath mounts never hot-reload: main.py changes need a pod restart
+            - name: main-override
+              mountPath: /usr/src/app/main.py
+              subPath: main.py
           resources:
             requests:
               memory: "256Mi"
@@ -50,6 +63,9 @@ spec:
               memory: "512Mi"
               cpu: "500m"
       volumes:
+        - name: main-override
+          configMap:
+            name: bazarr-autotranslate-main
         - name: logs
           persistentVolumeClaim:
             claimName: bazarr-autotranslate-logs
