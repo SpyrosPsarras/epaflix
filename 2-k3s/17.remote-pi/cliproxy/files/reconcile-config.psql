@@ -125,6 +125,169 @@ $ollama$,
   RAISE NOTICE 'openai-compatibility: ollama appended';
 END $$;
 
+-- Register OpenRouter as a second openai-compatibility upstream.
+--
+-- Why here and not the management UI: same #861 reason as everything above. A
+-- provider added through the panel is a row in the live config only, and the
+-- next rebuild eats it. The Copilot session log (.history/2026-08-24) records
+-- that failure mode in full.
+--
+-- This does NOT reuse the ollama block above. That one is guarded on the
+-- top-level `openai-compatibility:` key being absent, which stopped being true
+-- the moment it ran once, so it is now a permanent no-op and cannot carry a
+-- second provider. This block instead splices an item INTO the existing list,
+-- immediately after the `openai-compatibility:` line. Inserting at the head of
+-- the list keeps the edit a single anchored line no matter what follows it -
+-- the same trick the `configs:` insert below uses, and it stays correct now
+-- that `request-log:` and friends are appended at column 0 after the list.
+--
+-- Idempotency is on `- name: "openrouter"` rather than on a top-level key,
+-- because the top-level key is now always present.
+--
+-- Model choice: only models the proxy does NOT already serve from a
+-- subscription account. No anthropic, openai, x-ai or moonshotai entries - we
+-- hold flat-rate accounts for those, and routing them here would bill per token
+-- for capacity already paid for. Every alias carries an `or-` prefix, the same
+-- convention the ollama entries use, so an OpenRouter model can never collide
+-- with a native account's model ID no matter what OpenRouter renames upstream.
+--
+-- Unlike the ollama api-key above, this one IS a secret. It arrives as
+-- OPENROUTER_API_KEY on the initContainer from cliproxy-secrets, and is read
+-- with a psql backtick \set - see the deployment.yaml comment for why not
+-- --set=. Note that it lands in the config_store row in cleartext: that row is
+-- how CLIProxyAPI stores every provider credential, so this is the existing
+-- posture, not a new exposure.
+
+-- \o /dev/null around this is load-bearing, not tidiness. set_config() RETURNS
+-- the value it set, so a bare SELECT prints the API key on stdout - which for
+-- this initContainer is the pod log, which promtail ships to Loki on a 31-day
+-- retention. This repo has already had to purge credential-shaped lines out of
+-- that index four times (#634, #702, #824, #911). Caught by running it.
+--
+-- The value cannot go into a DO block instead: psql does not interpolate
+-- :'var' inside a dollar-quoted body, which is the same constraint recorded at
+-- the top of this file for the auth-dir replacement.
+\set openrouter_key `printenv OPENROUTER_API_KEY`
+\o /dev/null
+SELECT set_config('cliproxy.openrouter_key', :'openrouter_key', false);
+\o
+
+-- Validate the key BEFORE any table guard. Every other block in this file may
+-- legitimately return early on first boot, when the proxy has not seeded
+-- config_store yet. A missing secret is not a first-boot condition, it is a
+-- broken deployment, and returning early on it would let the pod start with no
+-- OpenRouter credential and report success. This block therefore touches no
+-- table at all, so an unset key fails the initContainer on an empty database
+-- exactly as it does on a seeded one.
+DO $$
+DECLARE
+  k text := coalesce(current_setting('cliproxy.openrouter_key', true), '');
+BEGIN
+  -- An empty value would write `api-key: ""` and the provider would list its
+  -- models and then 401 on every call - a failure that looks like a broken
+  -- model, not like a missing secret.
+  IF k = '' THEN
+    RAISE EXCEPTION 'OPENROUTER_API_KEY is empty - the cliproxy-secrets key did not reach the initContainer';
+  END IF;
+
+  -- Shape check doubles as YAML injection defence: the key is interpolated into
+  -- a double-quoted scalar below, so anything carrying a quote, backslash or
+  -- newline must not get that far.
+  IF k !~ '^sk-or-v1-[A-Za-z0-9._-]+$' THEN
+    RAISE EXCEPTION 'OPENROUTER_API_KEY is not shaped like an OpenRouter key (sk-or-v1-...)';
+  END IF;
+END $$;
+
+DO $$
+DECLARE
+  c     text;
+  orig  text;
+  k     text;
+  n     integer;
+  entry text;
+BEGIN
+  IF to_regclass('public.config_store') IS NULL THEN RETURN; END IF;
+  SELECT content INTO c FROM public.config_store WHERE id = 'config';
+  IF c IS NULL THEN RETURN; END IF;
+  orig := c;
+
+  -- Already validated by the block above; re-read rather than re-check.
+  k := current_setting('cliproxy.openrouter_key');
+
+  -- Rotation path. Presence of the provider is NOT proof that its credential is
+  -- the one git holds: rotating openrouter-api-key in cliproxy-secrets.enc.yaml
+  -- would otherwise leave the superseded key live in the config row forever,
+  -- because this block would see `- name: "openrouter"` and return. So when the
+  -- provider exists, reconcile its api-key line to the wanted value instead of
+  -- skipping. Anchored on the sk-or-v1- prefix, which is unique to this
+  -- provider - the ollama entry above carries a literal placeholder - so this
+  -- cannot touch another provider's credential.
+  IF EXISTS (SELECT 1 FROM regexp_matches(c, '^  - name: "openrouter"[ \t]*$', 'n')) THEN
+    c := regexp_replace(c,
+                        '^      - api-key: "sk-or-v1-[A-Za-z0-9._-]*"[ \t]*$',
+                        '      - api-key: "' || k || '"',
+                        'n');
+    IF c IS DISTINCT FROM orig THEN
+      UPDATE public.config_store SET content = c, updated_at = now() WHERE id = 'config';
+      RAISE NOTICE 'openai-compatibility: openrouter api-key reconciled to the value git holds';
+    ELSE
+      RAISE NOTICE 'openai-compatibility: openrouter already present and current';
+    END IF;
+    RETURN;
+  END IF;
+
+  -- Exactly one splice target, for the same reason the plugins block below
+  -- counts its keys: a management UI that re-serialises the file could produce
+  -- a second list, and editing the first of two silently configures a provider
+  -- nothing reads.
+  SELECT count(*) INTO n FROM regexp_matches(c, '^openai-compatibility:[ \t]*$', 'n');
+  IF n <> 1 THEN
+    RAISE EXCEPTION 'expected exactly one top-level openai-compatibility: key, found %', n;
+  END IF;
+
+  entry := replace($openrouter$  - name: "openrouter"
+    base-url: "https://openrouter.ai/api/v1"
+    api-key-entries:
+      - api-key: "__OPENROUTER_API_KEY__"
+    models:
+      - name: "z-ai/glm-5.3-flash"
+        alias: "or-glm-5.3-flash"
+        display-name: "GLM 5.3 Flash (OpenRouter)"
+      - name: "z-ai/glm-5.3"
+        alias: "or-glm-5.3"
+        display-name: "GLM 5.3 (OpenRouter)"
+      - name: "google/gemini-3.7-flash"
+        alias: "or-gemini-3.7-flash"
+        display-name: "Gemini 3.7 Flash (OpenRouter)"
+      - name: "deepseek/deepseek-v4-flash-0731"
+        alias: "or-deepseek-v4-flash"
+        display-name: "DeepSeek V4 Flash (OpenRouter)"
+      - name: "deepseek/deepseek-v4-pro-0813"
+        alias: "or-deepseek-v4-pro"
+        display-name: "DeepSeek V4 Pro (OpenRouter)"
+      - name: "qwen/qwen3.8-max"
+        alias: "or-qwen3.8-max"
+        display-name: "Qwen3.8 Max (OpenRouter)"
+      - name: "qwen/qwen3.8-27b"
+        alias: "or-qwen3.8-27b"
+        display-name: "Qwen3.8 27B (OpenRouter)"
+      - name: "minimax/minimax-m3"
+        alias: "or-minimax-m3"
+        display-name: "MiniMax M3 (OpenRouter)"$openrouter$, '__OPENROUTER_API_KEY__', k);
+
+  c := regexp_replace(c,
+                      '^openai-compatibility:[ \t]*$',
+                      'openai-compatibility:' || E'\n' || entry,
+                      'n');
+
+  UPDATE public.config_store
+     SET content = c,
+         updated_at = now()
+   WHERE id = 'config';
+
+  RAISE NOTICE 'openai-compatibility: openrouter spliced in';
+END $$;
+
 -- Enable the plugins (#858 pi-bridge, plus the GitHub Copilot provider). Edits
 -- inside the seeded `plugins:` block, which ships disabled with
 -- `dir: "plugins"` and `configs: {}`.
@@ -327,6 +490,30 @@ BEGIN
     RAISE EXCEPTION 'plugins.configs.cliproxyapi-copilot is missing';
   END IF;
 
+  -- Both openai-compatibility providers, and one alias from each, so a splice
+  -- that lands the entry but mangles the model list still fails the container.
+  IF NOT EXISTS (SELECT 1 FROM regexp_matches(c, '^  - name: "ollama"[ \t]*$', 'n')) THEN
+    RAISE EXCEPTION 'openai-compatibility: the ollama provider is gone';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM regexp_matches(c, '^  - name: "openrouter"[ \t]*$', 'n')) THEN
+    RAISE EXCEPTION 'openai-compatibility: the openrouter provider is missing after reconcile';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM regexp_matches(c, '^        alias: "or-glm-5.3-flash"[ \t]*$', 'n')) THEN
+    RAISE EXCEPTION 'openai-compatibility: openrouter model list did not survive the splice';
+  END IF;
+  -- An empty api-key would list models and 401 on every call. Catch it here
+  -- too, not just at write time, in case a later edit blanks it.
+  IF EXISTS (SELECT 1 FROM regexp_matches(c, '^      - api-key: ""[ \t]*$', 'n')) THEN
+    RAISE EXCEPTION 'an openai-compatibility api-key is empty';
+  END IF;
+  -- The stored credential must be the one git holds, not merely non-empty -
+  -- otherwise a rotation that failed to apply passes verification. position()
+  -- rather than a regex because the key is interpolated, and `.` in a key would
+  -- be a wildcard that quietly matches a DIFFERENT key. Compares, never prints.
+  IF position('      - api-key: "' || current_setting('cliproxy.openrouter_key') || '"' in c) = 0 THEN
+    RAISE EXCEPTION 'the openrouter api-key in the config row is not the value git holds';
+  END IF;
+
   IF NOT EXISTS (SELECT 1 FROM regexp_matches(c, '^request-log:[ \t]*true[ \t]*$', 'n')) THEN
     RAISE EXCEPTION 'request-log is not true after reconcile';
   END IF;
@@ -344,5 +531,5 @@ BEGIN
     RAISE EXCEPTION 'logging-to-file is true - that takes the access log off stdout and blinds Loki; see #1007';
   END IF;
 
-  RAISE NOTICE 'verified: allow-remote true, auth-dir /var/lib/cliproxy/pgstore/auths, pi-bridge and cliproxyapi-copilot enabled, request-log true capped at 256MB, logging-to-file false, usage-statistics-enabled true';
+  RAISE NOTICE 'verified: allow-remote true, auth-dir /var/lib/cliproxy/pgstore/auths, pi-bridge and cliproxyapi-copilot enabled, openai-compatibility ollama + openrouter present, request-log true capped at 256MB, logging-to-file false, usage-statistics-enabled true';
 END $$;
