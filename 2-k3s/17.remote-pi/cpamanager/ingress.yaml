@@ -1,0 +1,104 @@
+# Owned by ArgoCD Application "remote-pi".
+# Rationale: expose the CPAMP panel the same way every other browser panel in
+# the fleet is exposed - the 3-part shape from grafana-ingressroute.yaml:
+#
+#   1. HTTP -> HTTPS redirect
+#   2. app route priority 10, security-headers FIRST then authentik-forwardauth
+#      (order per PR #694: headers must also apply to the auth-deny 302)
+#   3. outpost route priority 15 for /outpost.goauthentik.io/ (the auth
+#      callback; higher priority than the app route or it loops)
+#
+# Authentik is the outer gate (SSO session required before any request reaches
+# the pod); CPAMP's own admin key stays the inner gate and still guards every
+# API call. No /api bypass, deliberately: the panel's browser JS is the only
+# consumer, and clipping the edge gate to exempt an API path is the bypass this
+# shape exists to prevent.
+#
+# The matching Authentik proxy provider + application (`cpamp-forwardauth`) are
+# declared in 07.authentik-deployment/authentik-iac-blueprint.enc.yaml, bound to
+# the "authentik Admins" group (truenas precedent: an admin panel holding
+# sensitive data admits superusers only). `intercept_header_auth: false` is
+# required because the panel sends its own Authorization Bearer admin key on
+# every API call - intercepting it would have Authentik reject the app's own
+# header after login (same reason grafana/truenas set it false).
+#
+# Prerequisite: a Pi-hole managed local record
+#   cpamp.epaflix.com -> 192.168.10.101
+# so LAN clients reach the websecure entry point instead of the Cloudflare
+# wildcard (README, "First setup and everyday access").
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: cpa-manager-plus-https
+  namespace: remote-pi
+  labels:
+    app.kubernetes.io/name: cpa-manager-plus
+    app.kubernetes.io/component: ingress
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - kind: Rule
+      match: Host(`cpamp.epaflix.com`)
+      priority: 10
+      middlewares:
+        - name: security-headers
+          namespace: traefik-system
+        - name: authentik-forwardauth
+          namespace: traefik-system
+      services:
+        - name: cpa-manager-plus
+          port: 18317
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
+---
+# Outpost route - handles the auth callback on cpamp.epaflix.com.
+# priority 15 > the app route's 10, else the callback loops.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: cpa-manager-plus-outpost-https
+  namespace: remote-pi
+  labels:
+    app.kubernetes.io/name: cpa-manager-plus
+    app.kubernetes.io/component: ingress
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - kind: Rule
+      match: Host(`cpamp.epaflix.com`) && PathPrefix(`/outpost.goauthentik.io/`)
+      priority: 15
+      services:
+        - name: authentik-server
+          namespace: app-authentik
+          port: 80
+  tls:
+    certResolver: cloudflare
+---
+# HTTP to HTTPS redirect for the panel
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: cpa-manager-plus-http
+  namespace: remote-pi
+  labels:
+    app.kubernetes.io/name: cpa-manager-plus
+    app.kubernetes.io/component: ingress
+spec:
+  entryPoints:
+    - web
+  routes:
+    - kind: Rule
+      match: Host(`cpamp.epaflix.com`)
+      middlewares:
+        - name: redirect-https
+          namespace: traefik-system
+      services:
+        - name: cpa-manager-plus
+          port: 18317

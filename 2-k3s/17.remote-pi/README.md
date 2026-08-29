@@ -1331,13 +1331,38 @@ owns it, in `reconcile-config.psql`, next to `request-log` — CPAMP's setup
 wizard can also flip it, but a value living only in the app's own DB is exactly
 what the next rebuild reverts.
 
-## First setup — one human, one port-forward
+## First setup and everyday access
 
-There is deliberately **no Service and no IngressRoute**. Nothing in-cluster
-consumes CPAMP yet, and one less admin panel on the network is worth a
-port-forward. Add a Service when `pi-bridge`'s `cpam_url` is actually pointed at
-it; add a route (plus the Pi-hole record on `.102` for the `internal` entry
-point) only if it must be reachable without one.
+Setup was completed on 2026-08-29 through the port-forward path documented at the
+bottom of this section. From that day the panel also has a standing route:
+
+```bash
+https://cpamp.epaflix.com/management.html
+```
+
+The exposure is `cpamanager/service.yaml` (ClusterIP 18317 - the first Service
+this Deployment ever had) plus `cpamanager/ingress.yaml` (IngressRoute on the
+`websecure` entry point). The old note that anticipated a route on the
+`internal` entry point at `.102` was written before the panel's audience was
+known; browser panels in this fleet go the other way, and for a reason:
+
+- **`websecure` + Authentik forward-auth + security headers** is how grafana and
+  every `*arr` UI are published: an SSO session gate in front of the app's own
+  auth. CPAMP gets the same layering - Authentik decides who may knock, CPAMP's
+  git-supplied admin key decides what they may do. Two independent gates, and
+  the admin key never crosses a login form it did not ask for.
+- **`internal` at `.102`** exists for non-browser API traffic (`cliproxy` clients
+  and the relay). A browser panel there would trade the SSO gate for a bare host
+  with only CPAMP's own auth - the weaker posture for more convenience.
+
+**Prerequisite that fails silently:** a Pi-hole managed local record
+`cpamp.epaflix.com -> 192.168.10.101` (the `websecure` LoadBalancer). Without
+it, LAN clients resolve the name to the Cloudflare wildcard and see a Cloudflare
+error page that looks like a broken panel, not a broken resolver. Same pattern
+as the relay's shadow record; note the IP is `.101`, not `.102`.
+
+If Authentik or the DNS record is broken, the port-forward still works and
+carries the same admin-key auth:
 
 ```bash
 kubectl --context epaflix -n remote-pi port-forward deploy/cpa-manager-plus 18317:18317

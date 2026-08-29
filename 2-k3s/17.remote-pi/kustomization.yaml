@@ -26,10 +26,12 @@ resources:
   - cliproxy/ingress.yaml
   # CPA Manager Plus - subscribes to CPA's usage events over RESP on 8317, which is
   # fan-out rather than destructive. The separate HTTP usage-queue endpoint IS
-  # destructive and must not be polled while this runs. No Service and no ingress
-  # yet on purpose; the transport rules are in cpamanager/deployment.yaml.
+  # destructive and must not be polled while this runs. Transport rules and the
+  # panel exposure contract are in cpamanager/deployment.yaml + cpamanager/ingress.yaml.
   - cpamanager/storage.yaml
   - cpamanager/deployment.yaml
+  - cpamanager/service.yaml
+  - cpamanager/ingress.yaml
 
 generators:
   - cliproxy/ksops-generator.yaml
