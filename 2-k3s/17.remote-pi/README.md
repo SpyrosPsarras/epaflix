@@ -274,7 +274,72 @@ CLIProxyAPI (`https://help.router-for.me`) signs in to Gemini, Codex and Claude
 accounts, plus GitHub Copilot through a plugin (see below), and re-exposes them
 behind OpenAI-, Anthropic- and Gemini-compatible
 HTTP APIs, so a local client such as `omp` can point at one endpoint instead of
-juggling provider SDKs. Tracking issue #858.
+juggling provider SDKs. Tracking issue #858. Two further upstreams arrive as
+`openai-compatibility` providers rather than as accounts: the LAN Ollama on
+TrueNAS, and OpenRouter (see "The OpenRouter provider" below).
+
+## The OpenRouter provider
+
+OpenRouter is a pay-per-token `openai-compatibility` upstream, reconciled into
+the config row by `reconcile-config.psql` like everything else git owns. Eight
+models, all aliased with an `or-` prefix:
+
+| alias | upstream model |
+| --- | --- |
+| `or-glm-5.3-flash` | `z-ai/glm-5.3-flash` |
+| `or-glm-5.3` | `z-ai/glm-5.3` |
+| `or-gemini-3.7-flash` | `google/gemini-3.7-flash` |
+| `or-deepseek-v4-flash` | `deepseek/deepseek-v4-flash-0731` |
+| `or-deepseek-v4-pro` | `deepseek/deepseek-v4-pro-0813` |
+| `or-qwen3.8-max` | `qwen/qwen3.8-max` |
+| `or-qwen3.8-27b` | `qwen/qwen3.8-27b` |
+| `or-minimax-m3` | `minimax/minimax-m3` |
+
+What is deliberately absent is as load-bearing as what is present. No
+`anthropic/*`, `openai/*`, `x-ai/*` or `moonshotai/*` model is routed here: this
+proxy already serves those from subscription accounts, and adding them through
+OpenRouter would bill per token for capacity already paid for flat-rate. The
+`or-` prefix exists so that an OpenRouter model can never take a model ID that a
+native account owns - the same problem `excluded_model_prefixes` solves for the
+Copilot plugin, solved here by naming instead, because an `openai-compatibility`
+provider has no prefix-exclusion setting.
+
+Unlike the ollama entry, whose api-key is a placeholder because Ollama does not
+authenticate, this provider's key is a real credential. It lives as
+`openrouter-api-key` in `cliproxy/cliproxy-secrets.enc.yaml` and reaches the
+reconcile initContainer as `OPENROUTER_API_KEY`. Note that it lands in the
+config row in cleartext: that row is where CLIProxyAPI keeps every provider
+credential, so this is the existing posture rather than a new exposure.
+
+**Rotation is a one-file edit.** Change the value in the encrypted Secret and
+sync; the reconcile rewrites the `api-key` line in the config row to match on
+the next pod start. Presence of the provider is deliberately not treated as
+proof that its credential is current - an earlier draft of this block returned
+early on `- name: "openrouter"` and would have left a superseded key live
+forever. The final verification block compares the stored credential against the
+one git holds and fails the initContainer if they differ.
+
+The key is read with a psql backtick `\set` and assigned under `\o /dev/null`,
+because `set_config()` returns the value it sets and a bare `SELECT` would print
+the API key into the pod log, which promtail ships to Loki on 31-day retention.
+That is the #634/#702/#824/#911 failure mode and it was caught by running the
+script, not by reading it.
+
+Use `api: openai-completions` for these on the client - see the endpoint trap
+below, which applies to the `gpt-5.6-*` family and not to these.
+
+One gotcha that imitates that trap without being it. Both GLM entries have
+mandatory reasoning at `max` effort, so reasoning tokens are drawn from the same
+budget as the answer. Measured on `z-ai/glm-5.3`:
+
+```text
+max_tokens=32   finish_reason=length  content=''    reasoning_tokens=34
+max_tokens=512  finish_reason=stop    content='OK'  reasoning_tokens=45
+```
+
+An HTTP 200 with empty content from `or-glm-5.3` is a `max_tokens` that the
+model spent thinking, not a broken route. Check `finish_reason` before assuming
+the provider is at fault.
 
 ## Why it shares the namespace and the Application
 
