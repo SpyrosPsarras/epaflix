@@ -1,9 +1,4 @@
 #!/usr/bin/env bash
-
-# Every kubectl call in this script runs against the homelab cluster, whatever
-# the ambient kubeconfig says (issue #971). Override with KUBECTL_CONTEXT=... .
-: "${KUBECTL_CONTEXT:=epaflix}"
-kubectl() { command kubectl --context "$KUBECTL_CONTEXT" "$@"; }
 # Read cliproxy request payloads - the prompts and completions that stdout and
 # Loki deliberately do NOT carry. See ../../README.md "Logs - two surfaces".
 #
