@@ -78,5 +78,5 @@ spec:
     # entry in the kustomization. Nothing is created here.
     namespace: servarr
   syncPolicy:
-    automated: { selfHeal: true, prune: false }
+    automated: { selfHeal: true, prune: true }
     syncOptions: [ServerSideApply=true]
