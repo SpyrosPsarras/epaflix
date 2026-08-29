@@ -664,12 +664,16 @@ One receiver, one leg. `receivers[0]` is named **`ntfy`** and carries
 `webhook_configs` only, posting to
 `http://ntfy.observability.svc.cluster.local:8091` on topic `k8s-alertmanager`
 with `send_resolved: true` (#568/PR #574; the url read `ntfy.odysseus...`
-before the #914 namespace move). `route.receiver` is `ntfy`, the
-`severity: critical` child route points at `ntfy` and keeps `continue: true`.
+before the #914 namespace move). `route.receiver` is `ntfy`; the only child
+route sends `Watchdog|InfoInhibitor` to `null`.
 
-That `continue: true` is a live trap rather than a curiosity: it is a no-op
-only because the child has no sibling. Add one route beside it and every
-critical alert is delivered twice. This PR deliberately adds none — PVE backup
+The `severity: critical` child route that used to point at `ntfy` with
+`continue: true` is gone (removed 2026-08-29, #1055): it duplicated the root
+receiver and its `continue` reached no later sibling, so `amtool config
+routes test` returned identical receivers with and without it. The lesson
+that outlives the route: a `continue: true` child pointing at the root
+default is a no-op, and the moment a sibling appears it becomes a double
+delivery. No route was added in its place — PVE backup
 outcomes stay on PVE's native target because zero metrics match
 `^pve_(backup|vzdump|task)` (#920), so there is nothing to route here.
 
