@@ -1,6 +1,11 @@
 #!/bin/bash
 set -e
 
+# Every kubectl call in this script runs against the homelab cluster, whatever
+# the ambient kubeconfig says (issue #971). Override with KUBECTL_CONTEXT=... .
+: "${KUBECTL_CONTEXT:=epaflix}"
+kubectl() { command kubectl --context "$KUBECTL_CONTEXT" "$@"; }
+
 # Observability Stack Deployment Script
 # Deploys: Cilium, Hubble, Istio, Prometheus, Grafana, Loki, Promtail, PVE-Exporter
 
