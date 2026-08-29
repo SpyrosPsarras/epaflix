@@ -42,8 +42,10 @@ spec:
               value: "300"
             - name: SEARCH_ROUNDS_BEFORE_TRANSLATE
               value: "3"
+            - name: ROUND_SPACING_HOURS
+              value: "8"
             - name: TRANSLATE_GRACE_HOURS
-              value: "6"
+              value: "216"
             - name: INTERVAL_BETWEEN_SCANS
               value: "3600"
             - name: LOG_LEVEL
