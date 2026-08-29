@@ -7,6 +7,7 @@ import urllib.request
 
 BASE = os.environ["JELLYFIN_URL"].rstrip("/")
 API_KEY = os.environ["JELLYFIN_API_KEY"]
+LIBRARIES = [lib.strip() for lib in os.environ.get("JELLYFIN_LIBRARIES", "").split(",") if lib.strip()]
 PAGE_SIZE = 1000
 RECHECK_SECONDS = 180
 
@@ -27,28 +28,44 @@ def jellyfin(path, method="GET", body=None, **params):
         return json.loads(payload) if payload else {}
 
 
+def library_ids():
+    if not LIBRARIES:
+        return None
+    folders = jellyfin("/Library/VirtualFolders")
+    ids = {folder["ItemId"]: folder["Name"] for folder in folders if folder.get("Name") in LIBRARIES}
+    missing = set(LIBRARIES) - set(ids.values())
+    if missing:
+        print(f"warning: libraries not found: {sorted(missing)}")
+    return list(ids)
+
+
 def unmatched_items():
+    parents = library_ids()
+    parents = parents if parents is not None else [None]
     found = []
-    for item_type in ("Episode", "Movie"):
-        start = 0
-        while True:
-            page = jellyfin(
-                "/Items",
-                IncludeItemTypes=item_type,
-                Recursive="true",
-                Fields="ProviderIds,SeriesName",
-                Limit=PAGE_SIZE,
-                StartIndex=start,
-            )
-            items = page.get("Items", [])
-            found += [
-                item
-                for item in items
-                if item.get("Type") == item_type and not item.get("ProviderIds")
-            ]
-            start += PAGE_SIZE
-            if start >= page.get("TotalRecordCount", 0) or not items:
-                break
+    for parent in parents:
+        for item_type in ("Episode", "Movie"):
+            start = 0
+            while True:
+                params = {
+                    "IncludeItemTypes": item_type,
+                    "Recursive": "true",
+                    "Fields": "ProviderIds,SeriesName",
+                    "Limit": PAGE_SIZE,
+                    "StartIndex": start,
+                }
+                if parent:
+                    params["ParentId"] = parent
+                page = jellyfin("/Items", **params)
+                items = page.get("Items", [])
+                found += [
+                    item
+                    for item in items
+                    if item.get("Type") == item_type and not item.get("ProviderIds")
+                ]
+                start += PAGE_SIZE
+                if start >= page.get("TotalRecordCount", 0) or not items:
+                    break
     return found
 
 
