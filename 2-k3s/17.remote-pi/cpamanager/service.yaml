@@ -1,0 +1,22 @@
+# Owned by ArgoCD Application "remote-pi".
+# Rationale: the panel previously had no Service at all - access was
+# kubectl port-forward deploy/cpa-manager-plus 18317:18317. A ClusterIP Service
+# is the seam Traefik needs; it exposes nothing outside the cluster by itself.
+# The route that publishes it is cpamanager/ingress.yaml.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cpa-manager-plus
+  namespace: remote-pi
+  labels:
+    app.kubernetes.io/name: cpa-manager-plus
+    app.kubernetes.io/component: observability
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: cpa-manager-plus
+  ports:
+    - name: http
+      port: 18317
+      targetPort: http
