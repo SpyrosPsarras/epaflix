@@ -1,11 +1,7 @@
 #!/bin/bash
 
-# Every kubectl call in this script runs against the homelab cluster, whatever
-# the ambient kubeconfig says (issue #971). Override with KUBECTL_CONTEXT=... .
 : "${KUBECTL_CONTEXT:=epaflix}"
 kubectl() { command kubectl --context "$KUBECTL_CONTEXT" "$@"; }
-# Automated restore script for *arr applications using PostgreSQL
-# Based on Servarr Wiki: https://wiki.servarr.com/prowlarr/faq#using-file-system-backup
 
 set -e
 
@@ -25,12 +21,10 @@ fi
 
 echo "=== Restoring $APP_NAME from $BACKUP_ZIP ==="
 
-# Step 1: Scale deployment to 0
 echo "[1/6] Stopping $APP_NAME..."
 kubectl -n servarr scale deployment "$APP_NAME" --replicas=0
 sleep 5
 
-# Step 2: Find the hostPath for the app's config
 echo "[2/6] Finding config volume path..."
 PVC_NAME="${APP_NAME}-config"
 PV_NAME=$(kubectl -n servarr get pvc "$PVC_NAME" -o jsonpath='{.spec.volumeName}')
@@ -43,7 +37,6 @@ fi
 
 echo "   Config path: $CONFIG_PATH"
 
-# Step 3: Find which node has the volume first
 echo "[3/6] Finding node with volume..."
 NODE=""
 for N in $(kubectl get nodes -o jsonpath='{.items[*].metadata.name}'); do
@@ -59,18 +52,15 @@ if [ -z "$NODE" ]; then
     exit 1
 fi
 
-# Step 4: Extract backup and copy to node's /tmp
 echo "[4/6] Extracting and uploading backup to node..."
 TEMP_DIR="/tmp/${APP_NAME}_restore_$$"
 NODE_TEMP="/tmp/${APP_NAME}_restore_$$"
 mkdir -p "$TEMP_DIR"
 unzip -q "$BACKUP_ZIP" -d "$TEMP_DIR"
 
-# Copy extracted files to node via kubectl cp
 TAR_FILE="/tmp/${APP_NAME}_backup_$$.tar"
 tar -czf "$TAR_FILE" -C "$TEMP_DIR" .
 
-# Use a temporary pod to receive the tar file
 cat > /tmp/upload-pod-$$.yaml <<EOF
 apiVersion: v1
 kind: Pod
@@ -96,13 +86,11 @@ EOF
 kubectl apply -f /tmp/upload-pod-$$.yaml >/dev/null
 kubectl -n servarr wait --for=condition=Ready pod/upload-helper-$$ --timeout=60s >/dev/null 2>&1
 
-# Upload and extract
 kubectl -n servarr cp "$TAR_FILE" upload-helper-$$:/tmp/backup.tar.gz
 kubectl -n servarr exec upload-helper-$$ -- sh -c "mkdir -p /tmp-host/${APP_NAME}_restore && cd /tmp-host/${APP_NAME}_restore && tar -xzf /tmp/backup.tar.gz"
 kubectl -n servarr delete pod upload-helper-$$ >/dev/null
 rm /tmp/upload-pod-$$.yaml "$TAR_FILE"
 
-# Step 5: Clean existing data
 echo "[5/6] Cleaning existing database files..."
 kubectl debug node/"$NODE" -it --image=busybox:latest -- sh -c "
     rm -f /host${CONFIG_PATH}/*.db 2>/dev/null || true
@@ -111,7 +99,6 @@ kubectl debug node/"$NODE" -it --image=busybox:latest -- sh -c "
     rm -f /host${CONFIG_PATH}/config.xml 2>/dev/null || true
 " 2>/dev/null
 
-# Step 6: Copy backup files to config directory
 echo "[6/6] Copying backup files to config directory..."
 cat > /tmp/restore-pod-$$.yaml <<EOF
 apiVersion: v1
@@ -145,11 +132,9 @@ kubectl -n servarr wait --for=condition=ContainersReady pod/restore-helper-$$ --
 kubectl -n servarr delete pod restore-helper-$$ >/dev/null 2>&1 || true
 rm /tmp/restore-pod-$$.yaml
 
-# Cleanup
 rm -rf "$TEMP_DIR"
 kubectl debug node/"$NODE" -it --image=busybox:latest -- sh -c "rm -rf /host/tmp/${APP_NAME}_restore" 2>/dev/null || true
 
-# Step 7: Start the application
 echo "[7/7] Starting $APP_NAME..."
 kubectl -n servarr scale deployment "$APP_NAME" --replicas=1
 

@@ -8,20 +8,6 @@ spec:
     sslRedirect: true
     browserXssFilter: true
     contentTypeNosniff: true
-    # stsPreload was REMOVED 2026-08-04 (#695). It only takes effect if the apex
-    # domain is submitted to hstspreload.org, which we have not done and do not
-    # intend to - so advertising it claimed something untrue. It was also the flag
-    # that turned dangerous later: HSTS is scoped to the host that sends it, so
-    # today `sonarr.epaflix.com` pins only `*.sonarr.epaflix.com` (which does not
-    # exist) and the header is inert. The moment a route serves the APEX
-    # `epaflix.com`, preload + includeSubdomains would pin every `*.epaflix.com`
-    # subdomain for a year - including jumpbox-only `*.vm.epaflix.com`, which is
-    # not necessarily HTTPS. A cached HSTS pin cannot be undone remotely; it has
-    # to expire or be overwritten per browser.
-    #
-    # stsIncludeSubdomains is KEPT deliberately: harmless on the single-label
-    # hosts we actually serve, and correct defence if any service ever gains a
-    # sub-subdomain. If an apex route is added, re-read this block first.
     forceSTSHeader: true
     stsIncludeSubdomains: true
     stsSeconds: 31536000

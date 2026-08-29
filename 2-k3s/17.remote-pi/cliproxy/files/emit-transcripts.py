@@ -105,7 +105,6 @@ def emit(name, path):
                                  tool_result_chars=MAX_TOOL_RESULT_CHARS)
     reply = parsed["reply"]
 
-    # The account label, not the token: "provider=claude, auth_id=..., label=x"
     account = ""
     for part in (parsed.get("upstream_auth") or "").split(","):
         part = part.strip()
@@ -137,21 +136,10 @@ def emit(name, path):
 
 
 def main():
-    # `seen` means "dealt with": emitted, or retried enough times to give up.
     seen = set()
-    # A parse failure must NOT be final. For a streaming call CLIProxyAPI spools
-    # chunks to temp files and writes the real .log once at Close() with O_TRUNC
-    # (internal/logging/request_logger_streaming.go), so the window is narrow -
-    # but reading a 2MB file mid-write does happen, and the first version marked
-    # it seen and lost that request forever. Caught by feeding the watcher a
-    # deliberately truncated file: it logged `request body is not parseable JSON`
-    # and then ignored the complete file that replaced it.
     attempts = {}
 
     if not EMIT_BACKLOG:
-        # The log dir is an emptyDir, so on a normal pod start it is empty and
-        # this is a no-op. It matters when only the sidecar restarted: without
-        # it, every surviving payload would be re-emitted as if it were new.
         backlog = [name for name, _, _, _ in candidates()]
         seen.update(backlog)
         log("watching %s (skipped %d pre-existing payload file(s); "
@@ -164,10 +152,6 @@ def main():
         for name, path, mtime, size in candidates():
             if name in seen:
                 continue
-            # A payload file is appended to for the whole life of the request -
-            # streaming replies arrive frame by frame. Reading it while the call
-            # is still in flight yields a transcript with no reply in it, so wait
-            # for the writer to stop touching it.
             if size == 0 or (now - mtime) < STABLE_SECONDS:
                 continue
             try:
@@ -183,8 +167,6 @@ def main():
                     log("giving up on %s after %d attempts: %r"
                         % (name, count, exc))
 
-        # The cleaner deletes oldest-first at the 256MB cap (#1011); drop those
-        # names so `seen` cannot grow without bound in a long-lived pod.
         if len(seen) > 5000:
             present = {name for name, _, _, _ in candidates()}
             seen.intersection_update(present)

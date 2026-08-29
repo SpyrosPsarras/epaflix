@@ -1,13 +1,4 @@
 ---
-# Weekly Postgres Sequence Drift Audit
-# Scans all sequence-backed columns in sonarr-main, sonarr2-main, radarr-main,
-# bazarr-main and reports any sequence whose last_value is below MAX(<column>).
-# Output goes to pod logs only (no notifications). Empty drift list = clean.
-#
-# Background: existing sync_sequence_after_insert() triggers (see
-# 2-k3s/08.servarr/_shared/postgres/SEQUENCE-TRIGGERS-PERMANENT-FIX.md) only
-# cover hardcoded "Id" column on a subset of tables, so drift can still occur
-# (e.g. bazarr 2026-05-01 incident — table_history_movie seq=310 vs max=1447).
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -73,20 +64,13 @@ metadata:
   labels:
     app: postgres-sequence-audit
 spec:
-  # Mondays 06:00 UTC = 08:00 Europe/Oslo
   schedule: "0 6 * * 1"
   concurrencyPolicy: Forbid
-  # #841: a schedule missed during a control-plane blip is stale by the
-  # time it could be retried, so skip it rather than run it late.
   startingDeadlineSeconds: 300
   successfulJobsHistoryLimit: 6
   failedJobsHistoryLimit: 6
   jobTemplate:
     spec:
-      # #841: under Forbid, a run that hangs blocks every later run and
-      # leaves no failed Job to alert on - the check goes quiet and quiet
-      # reads as healthy. Observed runtime 6-17s; this deadline is
-      # walks every sequence in 16 databases - grows with the data.
       activeDeadlineSeconds: 600
       backoffLimit: 0
       ttlSecondsAfterFinished: 2592000  # keep 30 days

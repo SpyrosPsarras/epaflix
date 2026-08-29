@@ -1,20 +1,4 @@
 ---
-# ArgoCD root Application: app-of-apps.
-# Closes Issue #48 (the "Projects, Applications" half of #19 / PR #45).
-#
-# Source:       this repo, path 2-k3s/11.argocd/apps. The kustomization.yaml
-#               there enumerates every child Application manifest (including
-#               this file — self-referential, which is the canonical pattern).
-# Destination:  in-cluster `argocd` namespace.
-# Sync:         MANUAL on first install (syncPolicy: {}). After a clean
-#               manual sync confirming all 15 child Applications stay
-#               Synced+Healthy, AND a 48 h soak, flip to:
-#                 syncPolicy:
-#                   automated: { selfHeal: true, prune: false }
-#                   syncOptions: [ServerSideApply=true]
-#               `prune` NEVER turns on — accidental file deletion must
-#               NOT cascade-drop a child Application (and through it,
-#               an entire stack).
 
 apiVersion: argoproj.io/v1alpha1
 kind: Application

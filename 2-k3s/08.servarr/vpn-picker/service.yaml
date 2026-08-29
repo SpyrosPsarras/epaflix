@@ -1,19 +1,4 @@
 ---
-# The second transport channel for the ranking, carrying the same bytes as the
-# /media file. Nick's VM (192.168.10.41) has no NFS mount, so it reads over
-# HTTP. A LAN host can reach this because its source IP matches Bluetit's
-# LAN-to-LAN allow rule; the qbittorrent POD cannot, which is why the file
-# transport exists at all.
-#
-# 192.168.10.111 is the first free address in the kube-vip `range-global` pool
-# (192.168.10.110-199). Only .110 (syncthing-gui) was allocated out of it.
-#
-# Plain HTTP, no IngressRoute and no Authentik: the payload is a list of public
-# VPN server names and their published entry IPs, and the consumer is a shell
-# loop on a LAN box.
-#
-# This is also the ServiceMonitor's scrape target - the Endpoints behind it are
-# pod IPs, so Prometheus never goes through the LoadBalancer address.
 apiVersion: v1
 kind: Service
 metadata:

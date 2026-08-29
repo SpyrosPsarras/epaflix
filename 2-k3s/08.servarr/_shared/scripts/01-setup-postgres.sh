@@ -1,11 +1,7 @@
 #!/bin/bash
 
-# Every kubectl call in this script runs against the homelab cluster, whatever
-# the ambient kubeconfig says (issue #971). Override with KUBECTL_CONTEXT=... .
 : "${KUBECTL_CONTEXT:=epaflix}"
 kubectl() { command kubectl --context "$KUBECTL_CONTEXT" "$@"; }
-# PostgreSQL Database Setup for Servarr Apps
-# Run this script to create databases and users on PostgreSQL server
 
 set -e
 
@@ -21,12 +17,10 @@ echo ""
 echo "PostgreSQL Server: $POSTGRES_HOST:$POSTGRES_PORT"
 echo ""
 
-# Function to generate secure password
 generate_password() {
     openssl rand -base64 24 | tr -d "=+/" | cut -c1-20
 }
 
-# Generate passwords
 SONARR_PASSWORD=$(generate_password)
 SONARR2_PASSWORD=$(generate_password)
 RADARR_PASSWORD=$(generate_password)
@@ -36,7 +30,6 @@ JELLYSEERR_PASSWORD=$(generate_password)
 echo "Generated secure passwords for database users"
 echo ""
 
-# Create databases and users
 echo "Creating databases and users..."
 echo ""
 
@@ -80,7 +73,6 @@ echo ""
 echo "✓ Databases and users created successfully!"
 echo ""
 
-# Create Kubernetes secret
 echo "Creating Kubernetes secret..."
 echo ""
 

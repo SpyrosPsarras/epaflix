@@ -1,5 +1,3 @@
-# Owned by ArgoCD Application "remote-pi".
-# Rationale: persist the relay's small SQLite membership database across pod replacement.
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

@@ -1,33 +1,9 @@
 ---
-# qBittorrent with its VPN run by a Bluetit native sidecar
-#
-# Source of truth: live cluster state in `servarr` ns — see project memory
-# `project_argocd_servarr` / drift policy: live wins on divergence.
-#
-# The AirVPN Bluetit sidecar (`airvpn` initContainer, restartPolicy: Always)
-# owns the WireGuard tunnel and the iptables network lock. It replaces the
-# old `tenseiken/qbittorrent-wireguard` image's built-in wg-quick + the
-# postStart iptables hack that used to punch LAN/cluster CIDR holes in its
-# default-DROP OUTPUT chain — Bluetit's own `networklockpersist iptables` +
-# `allowprivatenetwork yes` (see bluetit-config.yaml) does that instead. The
-# app container now runs the official `qbittorrentofficial/qbittorrent-nox`
-# image and shares the pod netns with the sidecar, so it no longer touches
-# the network itself.
-#
-# AirVPN credentials live in Secret `airvpn-credentials` (NOT in this repo —
-# see secrets.enc.yaml + `_shared/secrets/airvpn-credentials.enc.yaml`).
-#
-# BT listen port: 39998, forwarded by AirVPN account-wide — it follows
-# whichever server Bluetit picks, unlike a per-server forward. Declared via
-# QBT_TORRENTING_PORT on the app container, so there's no manual WebUI step.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: qbittorrent
   annotations:
-    # Reloader (#299/#715): roll this Deployment when airvpn-credentials
-    # rotates. the AirVPN Bluetit sidecar reads these at start; a rotation without a roll leaves the tunnel on the old credentials.
-    # PR #714 wired the servarr Reloader but missed this workload.
     secret.reloader.stakater.com/reload: "airvpn-credentials"
   namespace: servarr
   labels:
@@ -35,8 +11,6 @@ metadata:
 spec:
   replicas: 1
   strategy:
-    # Recreate — VPN provider allows one session at a time; RollingUpdate
-    # would have two pods kick each other off the tunnel.
     type: Recreate
   selector:
     matchLabels:
@@ -47,18 +21,6 @@ spec:
         app: qbittorrent
     spec:
       dnsPolicy: None
-      # Exactly ONE nameserver, and it is public on purpose (#517).
-      # The LAN Pi-hole 192.168.10.30 used to be first here and was dead the
-      # whole time: Bluetit's blunt `0.0.0.0/1` + `128.0.0.0/1` routes swallow
-      # RFC1918 into tun0 and the AirVPN exit discards it, so every lookup to
-      # .30 timed out (~6s, measured) - full routing story in bluetit-config.yaml.
-      # It cost nothing only because this image is Alpine/musl, which queries
-      # all nameservers in PARALLEL; a glibc image would have stalled ~5s per
-      # lookup with every probe still green.
-      # Do NOT swap 1.1.1.1 for the tunnel-pushed 10.128.0.1: it only exists
-      # after connect, so Bluetit could never resolve AirVPN's bootstrap hosts
-      # to bring the tunnel up. Adding it alongside buys no privacy either -
-      # musl asks every resolver, so Cloudflare sees the query regardless.
       dnsConfig:
         nameservers:
           - 1.1.1.1
@@ -73,15 +35,6 @@ spec:
               sysctl -w net.ipv4.conf.all.src_valid_mark=1
           securityContext:
             privileged: true
-        # Kubernetes requires every volumeMount subPath to exist before the app
-        # container is created. Create both the shared dot-directory and its
-        # dedicated verdict child before the native sidecar and ordinary init
-        # containers start, so a clean PVC and a simultaneous vpn-picker/
-        # qBittorrent rollout are both safe. mkdir -p is idempotent when the
-        # scorer wins the same race. This short-lived init container is the only
-        # agent-side process that sees the whole media PVC writable; the
-        # long-running agent is scoped below to only the .vpn-picker/verdicts
-        # subPath.
         - name: init-vpn-picker-shared
           image: busybox:latest
           command:
@@ -101,28 +54,8 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
-        # Seed qBittorrent's WebAPI key into its PVC-only qBittorrent.conf
-        # (issue #723). The key comes from a SOPS-encrypted Secret and is used
-        # by Sonarr, Sonarr2 and Radarr instead of username/password sessions.
-        #
-        # IDEMPOTENT + NON-CLOBBERING: a missing config gets the smallest valid
-        # [Preferences] seed. A populated config gets WebUI\APIKey only when
-        # that key is absent; an existing value is never read, printed, rotated
-        # or overwritten. The insertion preserves every unrelated setting and
-        # the existing file's mode/owner. qBittorrent is not running yet, so it
-        # cannot rewrite the file underneath this operation.
-        #
-        # Fail closed on the committed placeholder or malformed input. Upstream
-        # qBittorrent 5.2.x accepts API keys only as 32-byte strings beginning
-        # with `qbt_`; starting without a usable key would leave the documented
-        # *arr database settings unable to authenticate.
         - name: seed-webapi-key
           image: busybox:1.36
-          # Root is required for both a fresh root-owned local-path PVC and an
-          # existing UID-568-owned config directory. Keep it narrowly scoped:
-          # CHOWN sets the fresh file's final owner, DAC_OVERRIDE permits the
-          # surgical temp-file update in the existing directory, and FOWNER
-          # lets `cp -p` preserve the existing file's mode/owner/timestamps.
           securityContext:
             runAsUser: 0
             runAsGroup: 0
@@ -215,10 +148,6 @@ spec:
               mountPath: /seed
               readOnly: true
 
-        # Native sidecar (restartPolicy: Always) - starts before the app container
-        # and keeps running. Replaces wg-quick inside the old qbittorrent image:
-        # Bluetit takes a server whitelist/blacklist and picks an AirVPN-recommended
-        # server, which WireGuard alone cannot do.
         - name: airvpn
           image: ghcr.io/spyrospsarras/airvpn-bluetit:latest
           restartPolicy: Always
@@ -237,36 +166,11 @@ spec:
             - name: bluetit-config
               mountPath: /config
               readOnly: true
-            # REQUIRED. Bluetit checks modules.builtin and loads iptable_* and
-            # wireguard itself, even though the node already has them loaded.
             - name: lib-modules
               mountPath: /lib/modules
               readOnly: true
-            # Shared with the `agent` container - Bluetit is driven over its
-            # D-Bus system socket, which is container-local, so only a container
-            # in this pod sharing this directory can reach it.
-            #
-            # This is ONLY safe because the #524 cleanup is in the image.
-            # /run/dbus now survives an `airvpn` container restart, so the
-            # previous run's /run/dbus/pid and /run/dbus/system_bus_socket are
-            # still there on start, dbus-daemon refuses to start with a stale
-            # pid file (it never checks whether that pid is alive), and under
-            # `set -eu` entrypoint.sh aborts before bluetit runs - the container
-            # then CrashLoopBackOffs forever. Reproduced twice on a scratch pod.
-            # entrypoint.sh removes both files on start. Do NOT deploy this
-            # volume on an image built before that fix.
             - name: dbus
               mountPath: /run/dbus
-          # Gates the app container: k8s only waits for a sidecar's PROCESS to
-          # start, so without this qbittorrent would run for ~15s before the
-          # tunnel and the iptables lock exist. Measured on a scratch pod:
-          # ~20s from container start to "Connected to AirVPN server".
-          #
-          # ALSO checks traffic, not just the status string - see the
-          # livenessProbe comment below. Proved live on this exact pod,
-          # 2026-08-02 20:04-20:05 UTC: "Connected to AirVPN server Aspidiske"
-          # both times while Connection time reset 00:00:58 -> 00:00:28 and
-          # transfer stayed "In 0 bytes" - the dead shape, now caught here.
           startupProbe:
             exec:
               command: ["sh","-c","goldcrest --bluetit-status | grep -q 'Connected to AirVPN server' && ping -c 2 -W 2 10.128.0.1 >/dev/null 2>&1"]
@@ -275,32 +179,6 @@ spec:
             timeoutSeconds: 10
           livenessProbe:
             exec:
-              # The connected output contains "Connected to AirVPN server <name>".
-              # It does NOT say "Bluetit is connected" - that string never appears.
-              # The disconnected form is "Bluetit is not connected", so do not
-              # grep for a bare "connected".
-              #
-              # The string alone lies: goldcrest --bluetit-status prints
-              # "Connected to AirVPN server X" for a WireGuard interface that
-              # never completed a handshake (#627 rootcause). Bluetit's own
-              # "handshake failed to resume -> Reconnecting" loop rebuilds
-              # tun0 from the cached profile without re-logging in, so it
-              # retries the same dead peer forever and the string never
-              # changes. Incident: tunnel dead from 13:33, both probes green
-              # throughout, only fired at 13:46 when a human ran --disconnect
-              # (which changed the string) - 13 minutes green on 0 bytes
-              # transferred, 100% ICMP loss, no AirVPN session.
-              #
-              # Fix: keep the grep (a dead daemon must still fail) AND require
-              # a small ping to the in-tunnel gateway 10.128.0.1 - already
-              # trusted for this (`allowping yes` in bluetit-config.yaml, and
-              # the vpn-picker agent probes it every 60s). `-c 2 -W 2` costs a
-              # few seconds, well inside timeoutSeconds: 20. Not tightened
-              # further on purpose: a restart here is a SIGTERM, and #535
-              # measured SIGTERM dropping the network lock, so flapping on an
-              # ordinary blip is worse than a slightly slower catch of a truly
-              # dead tunnel - periodSeconds/timeoutSeconds/failureThreshold
-              # unchanged.
               command: ["sh","-c","goldcrest --bluetit-status | grep -q 'Connected to AirVPN server' && ping -c 2 -W 2 10.128.0.1 >/dev/null 2>&1"]
             periodSeconds: 60
             timeoutSeconds: 20
@@ -313,26 +191,9 @@ spec:
             runAsUser: 0
             capabilities:
               add:
-                # SYS_MODULE is REQUIRED, not defensive. Without it Bluetit fails
-                # with "Error while loading kernel module wireguard (-3)" and never
-                # connects, even though the module is already loaded on the node.
                 - NET_ADMIN
                 - SYS_MODULE
 
-        # Binds qBittorrent to the tunnel device. Ordinary initContainer (no
-        # restartPolicy), so it runs to completion AFTER the airvpn sidecar is
-        # started and BEFORE the app container - which is the only window where
-        # tun0 exists and qBittorrent is not running.
-        #
-        # Why this cannot be done by hand in the WebUI: the Network interface
-        # dropdown only offers devices that exist at that moment, and today it
-        # lists wg0/lo/eth0 with no tun0, because wg0 is created by the OLD
-        # image we are removing. So the value has to be written while the new
-        # tunnel is up and qBittorrent is stopped - exactly here.
-        #
-        # Editing the file directly is safe only when qBittorrent is not
-        # running, because it rewrites the whole conf on exit and would
-        # clobber us. That holds here by construction.
         - name: init-bind-interface
           image: busybox:latest
           command:
@@ -355,18 +216,6 @@ spec:
               mountPath: /config
       containers:
         - name: qbittorrent
-          # Bound to the sidecar's tunnel device tun0 by the
-          # init-bind-interface initContainer above - a second, independent
-          # leak guard on top of the network lock, and a strong one: a socket
-          # bound to tun0 breaks rather than silently falling back to eth0.
-          #
-          # The binding lives in PVC state
-          # (/config/qBittorrent/config/qBittorrent.conf), which is why an
-          # initContainer writes it rather than this manifest. The old
-          # tenseiken image created wg0 via its internal wg-quick; that device
-          # is gone, and a conf still pointing at wg0 makes qBittorrent open no
-          # listen socket at all while the WebUI keeps answering - so both
-          # probes and ArgoCD stay green with the client completely dead.
           image: qbittorrentofficial/qbittorrent-nox
           env:
             - { name: PUID, value: "568" }
@@ -374,7 +223,6 @@ spec:
             - { name: TZ, value: "Europe/Oslo" }
             - { name: QBT_LEGAL_NOTICE, value: "confirm" }
             - { name: QBT_WEBUI_PORT, value: "8080" }
-            # Declarative BT port - replaces the old manual "set it in the WebUI" step.
             - { name: QBT_TORRENTING_PORT, value: "39998" }
           ports:
             - containerPort: 8080
@@ -403,8 +251,6 @@ spec:
             requests:
               memory: "512Mi"
               cpu: "200m"
-          # No longer touches the network - the sidecar owns the tunnel and the
-          # lock, so this drops privileged and NET_ADMIN.
           securityContext:
             runAsUser: 0
           volumeMounts:
@@ -413,47 +259,6 @@ spec:
             - name: media
               mountPath: /media
 
-        # vpn-picker agent - Components 4-7 of
-        # docs/superpowers/specs/2026-08-01-vpn-picker-design.md (#608, map #498).
-        #
-        # It reads the ranking the scorer publishes, watches the current tunnel,
-        # and drives Bluetit over the shared D-Bus socket when it has to switch.
-        # Same image as the sidecar, different command - goldcrest and the D-Bus
-        # client libraries are already in there.
-        #
-        # A plain container, not a native sidecar: it must not gate qBittorrent's
-        # start, and it has nothing to do before the tunnel exists. No probes on
-        # purpose either. A readinessProbe here would make an agent hiccup pull
-        # the whole pod out of the qbittorrent Service endpoints, taking the
-        # WebUI and every *arr download client with it; /agent-entrypoint.sh
-        # supervises the process instead so a crash never becomes a
-        # CrashLoopBackOff.
-        #
-        # That guard only covers agent.py crashing - it does nothing if
-        # /agent-entrypoint.sh itself is missing, not executable, malformed,
-        # or exits non-zero for any other reason.
-        # #617: a stale digest pin left the file out of the image entirely, the
-        # container hit RunContainerError on every start, CrashLoopBackOff'd,
-        # and took qbittorrent's only Service endpoint down with it - k8s has
-        # no way to let one container opt a Pod out of readiness gating (a
-        # native sidecar counts the same as a regular container here), so the
-        # only real fix is making sure this container can never fail to start.
-        # `command` below wraps the real entrypoint in /bin/sh - which ships in
-        # every debian-slim build regardless of what's in /agent-entrypoint.sh
-        # - so a missing/broken entrypoint falls through to `sleep infinity`
-        # (up, idle, Ready) instead of crash-looping the pod out of the
-        # Service.
-        #
-        # No `exec` on the primary call: `exec`ing a missing/non-executable/
-        # bad-shebang file makes dash (debian's /bin/sh) abort the whole shell
-        # on the spot, bypassing `||` entirely - verified against debian:13-slim
-        # for all three failure shapes (missing file, chmod-less, bad shebang).
-        # A plain (non-exec) invocation turns every one of those into an
-        # ordinary non-zero exit that `||` catches. `exec` is only used for the
-        # fallback `sleep infinity`, which always exists, so that idle case
-        # never crash-loops. `sleep` as PID 1 ignores SIGTERM though, so it
-        # always burns the full terminationGracePeriodSeconds before SIGKILL -
-        # unchanged from before this fix, the baseline behaves the same way.
         - name: agent
           image: ghcr.io/spyrospsarras/airvpn-bluetit:latest
           command:
@@ -465,11 +270,6 @@ spec:
               exec sleep infinity; }
           env:
             - { name: TZ, value: "Europe/Oslo" }
-            # goldcrest needs these for --air-connect. Without them it does not
-            # fail, it prompts `AirVPN Username: ` forever and emits 673 MB in
-            # 20 s. The entrypoint puts them in a 0600 /root/.goldcrest.rc
-            # rather than on a command line, which is world-readable in /proc
-            # and this container shares a pod with qBittorrent.
             - name: AIRVPN_USERNAME
               valueFrom:
                 secretKeyRef:
@@ -480,148 +280,31 @@ spec:
                 secretKeyRef:
                   name: airvpn-credentials
                   key: airpassword
-            # OFF means the agent acts. The flag exists because the spec's
-            # rollback is "flip the agent back to dry-run" - one env var, never
-            # a manifest revert.
-            #
-            # THE AGENT IS ALLOWED TO ACT (#670). It was parked in dry-run as
-            # the rollback for #613: the 2026-08-02 boot_upgrade from Aspidiske
-            # to Dalim left Bluetit reporting "Connected to AirVPN server
-            # Dalim" for a tunnel AirVPN never actually established (no session
-            # for the cluster key, 0 bit/s traffic, 100% ICMP loss to
-            # 10.128.0.1, connection time flapping every 40-60s).
-            #
-            # An earlier note here said to leave this "true" until the
-            # credential path on --air-connect was fixed. That framing is
-            # superseded - #627 root-caused it and credentials were never the
-            # cause. `airport`/`airvpntype`/the country lists are all re-applied
-            # on a credentialed connect, the endpoint port was 1637 on every
-            # single connect, and the agent already passes --air-key. The real
-            # cause: `goldcrest --bluetit-status` prints "Connected to AirVPN
-            # server X" for a WireGuard interface that never completed a
-            # handshake, and that string was the agent's ONLY success criterion.
-            #
-            # The safeguards that make acting safe are #627's, both live in the
-            # pinned image:
-            #   1. A switch is verified by TRAFFIC (5 ICMP packets to
-            #      10.128.0.1, <=50% loss), not by the status string, and a
-            #      candidate that fails verification is dropped, never
-            #      re-dialled.
-            #   2. A switch that has not earned the full cooldown arms
-            #      VPN_AGENT_FAILED_COOLDOWN_SECONDS (300 s) instead of 21600 s.
-            #      Two kinds qualify: one that produced no working tunnel
-            #      (#627 fix 2), and one whose reason is only a placement rather
-            #      than a measured correction - `boot_upgrade` and its `quick`
-            #      fallback (#789). Only a `degradation` switch earns the 6 h.
-            #      The 6 h cooldown its own boot upgrade armed is what locked the
-            #      agent out of rescuing itself, on 2026-08-02 over a tunnel that
-            #      never handshook and again on 2026-08-04 over one that was
-            #      merely lossy. VPN_AGENT_MAX_SWITCHES_PER_DAY still bounds
-            #      churn: worst case is one boot placement plus two degradation
-            #      corrections 6 h apart, then nothing for the rest of the day.
-            #
-            # ROLLBACK: flip this back to "true". One env var, never a manifest
-            # revert - the agent then probes, reads the ranking, logs
-            # "DRY RUN reason=... would switch from=... to=..." and touches
-            # nothing.
             - { name: VPN_AGENT_DRY_RUN, value: "false" }
-            # Defaults below are the spec's own numbers, set explicitly so a
-            # change is a reviewable diff instead of an image rebuild.
-            #
-            # The FILE, not the scorer's LoadBalancer. This pod cannot reach
-            # RFC1918 outbound at all - Bluetit's split routes exclude private
-            # ranges and then a blunt 0.0.0.0/1 + 128.0.0.0/1 pair re-swallows
-            # them into tun0. Measured: LAN, ClusterIP and the kube API all time
-            # out from in here.
             - { name: VPN_AGENT_RANKING_PATH, value: "/media/.vpn-picker/ranking.json" }
-            # /media stays read-only. Only the pre-created
-            # .vpn-picker/verdicts subPath is writable, and the variable points
-            # directly at that mount. Scorer-owned ranking.json and
-            # ranking-base.json remain accessible only through read-only /media.
             - { name: VPN_AGENT_VERDICT_DIR, value: "/vpn-picker-verdicts" }
             - { name: VPN_AGENT_CACHE_PATH, value: "/var/cache/vpn-agent/ranking.json" }
-            # MUST match `airkey` in bluetit-config.yaml, and it has to be here
-            # rather than left to the daemon. A credentialed goldcrest call
-            # pushes a fresh option set into Bluetit before running, and the key
-            # in that set is the built-in `Default` - the `airkey` directive is
-            # not re-read on the connect path. Measured on a scratch pod
-            # configured `airkey test`: the agent's switch logged
-            # `Selected user key: Default`. The country lists ARE re-applied
-            # from the rc on the same call; the key is not.
             - { name: VPN_AGENT_AIR_KEY, value: "Default" }
-            # Sticky band. quick's pick inside the top 5 is left alone, so an
-            # ordinary pod restart causes no churn.
             - { name: VPN_AGENT_BAND, value: "5" }
-            # In-tunnel gateway, reachable because `allowping yes` is set in
-            # bluetit-config.yaml.
             - { name: VPN_AGENT_PROBE_TARGET, value: "10.128.0.1" }
             - { name: VPN_AGENT_PROBE_COUNT, value: "50" }
             - { name: VPN_AGENT_PROBE_INTERVAL_SECONDS, value: "60" }
-            # DEGRADATION SWITCHING IS GENUINELY ARMED (#771), at the 2026-07-31
-            # outage profile of 6.7-9% sustained. Loss ALONE decides a window:
-            # over this number, three in a row, switch. There is no second
-            # condition, and #771 removed the one there was.
-            #
-            # MEASURED, same pod, same 50-packet probe, same code:
-            #
-            #   2026-08-03  Dalim     ~4.2 MB/s through tun0   15% loss
-            #   2026-08-04  Dedalus    13.66 MB/s              0.0%
-            #   2026-08-04  Dedalus     4.40 MB/s              0.0%
-            #   2026-08-04  Dedalus     3.49 MB/s              0.0%
-            #
-            # RULED OUT by that: the claim this block used to make, that loaded
-            # seeding puts a 15-20% ICMP floor under every window. Dedalus at
-            # 3.3x the Dalim load reads 0.0%, so load is not the variable.
-            #
-            # NOT ESTABLISHED: that the loss was Dalim's own fault. That fits
-            # better and is unproven. Never recorded: time of day, torrent set,
-            # peer mix, AirVPN-side load on Dalim. The discriminating test - put
-            # comparable load on Dalim and re-measure loss to 10.128.0.1 - has
-            # NOT been run, because it needs a deliberate switch onto a suspect
-            # server, costing a peer drop and a private-tracker re-announce
-            # (#498). Do not write a confident cause here until it is run; #517
-            # is what happens when a wrong comment is swapped for a differently
-            # wrong one that then gets trusted.
-            #
-            # Do NOT raise this, and do NOT re-add a throughput gate
-            # (VPN_AGENT_HEALTHY_THROUGHPUT_BYTES_PER_SEC, PR #764/#766). It
-            # returned "healthy" on a lossy-but-still-delivering server, and
-            # because a seeding box is almost never under 64 KiB/s the loss path
-            # was hardly ever consulted - the detector read as armed while being
-            # unreachable. vpn_agent_healthy_by_throughput_windows_total sat at 0
-            # for its whole life and is deleted with the gate.
             - { name: VPN_AGENT_BAD_LOSS_PCT, value: "5" }
             - { name: VPN_AGENT_BAD_WINDOWS, value: "3" }
-            # 6 h. A switch changes the exit IP, which drops every peer and
-            # re-announces to private trackers that have hit-and-run rules. We
-            # never switch to chase a marginally better server.
             - { name: VPN_AGENT_COOLDOWN_SECONDS, value: "21600" }
             - { name: VPN_AGENT_MAX_SWITCHES_PER_DAY, value: "3" }
-            # The sidecar liveness probe gives ~180 s (60 s x 3) and the restart
-            # it ends in is a SIGTERM, which removes the network lock (#535).
-            # The agent has to resolve a failed connect itself, inside this.
             - { name: VPN_AGENT_RECOVERY_BUDGET_SECONDS, value: "120" }
             - { name: VPN_AGENT_QUICK_RESERVE_SECONDS, value: "35" }
-            # Both qBittorrent instances read the same ranking. Jitter so this
-            # pod and Nick's VM do not stampede the same winner.
             - { name: VPN_AGENT_JITTER_SECONDS, value: "30" }
           ports:
             - containerPort: 8081
               name: agent-metrics
           volumeMounts:
-            # The Bluetit D-Bus socket. See the #524 note on the airvpn
-            # container's copy of this mount.
             - name: dbus
               mountPath: /run/dbus
-            # Read the scorer's ranking through the full media tree, but never
-            # give the long-running UID-0 agent write access to that tree.
             - name: media
               mountPath: /media
               readOnly: true
-            # The only writable shared path. init-vpn-picker-shared creates the
-            # exact verdict subPath before container creation; mounting only
-            # that child keeps scorer-owned ranking.json/ranking-base.json and
-            # all media outside the agent's write scope (#792 review).
             - name: media
               mountPath: /vpn-picker-verdicts
               subPath: .vpn-picker/verdicts
@@ -634,19 +317,12 @@ spec:
             limits:
               memory: "128Mi"
               cpu: "250m"
-          # runAsUser 0 is REQUIRED, not tidiness: uid 1000 makes goldcrest
-          # SIGSEGV (exit 139) printing only its banner and no error, which a
-          # probe reads as a dead tunnel. No added capabilities - NET_ADMIN and
-          # SYS_MODULE belong to the airvpn container, and the agent does not
-          # touch the network itself.
           securityContext:
             runAsUser: 0
       volumes:
         - name: config
           persistentVolumeClaim:
             claimName: qbittorrent-config
-        # SOPS-encrypted qBittorrent WebAPI key (issue #723), consumed only by
-        # seed-webapi-key. It is not exposed to any long-running container.
         - name: webapi-key-seed
           secret:
             secretName: qbittorrent-webapi-key
@@ -656,22 +332,11 @@ spec:
         - name: media
           persistentVolumeClaim:
             claimName: servarr-media
-        # Shared between airvpn and agent so goldcrest can reach the Bluetit
-        # D-Bus system socket from the second container. Verified on a scratch
-        # pod: --bluetit-status from the agent returns real session detail, and
-        # the emptyDir does not break dbus-daemon as long as the #524 cleanup
-        # is in the image.
         - name: dbus
           emptyDir: {}
-        # Last good ranking. emptyDir is enough - boot always starts on `quick`,
-        # so the cache only has to survive within one pod lifetime.
         - name: agent-cache
           emptyDir: {}
         - name: bluetit-config
-          # Plain ConfigMap reference, not a configMapGenerator output - it has
-          # no content-hash suffix, so editing the server pool does NOT roll
-          # this pod automatically. Follow up with:
-          #   kubectl -n servarr rollout restart deploy/qbittorrent
           configMap:
             name: airvpn-bluetit-config
             items:
@@ -706,40 +371,11 @@ spec:
       port: 39998
       targetPort: bt-udp
       protocol: UDP
-    # vpn-picker agent metrics (#608). Scraping works because only OUTBOUND
-    # RFC1918 is blackholed in this pod - inbound traffic reaches it fine.
     - name: agent-metrics
       port: 8081
       targetPort: agent-metrics
       protocol: TCP
 ---
-# Metrics from day one, because alerting is dead (#461) and no behaviour in this
-# design may depend on a human being told something. Nothing here alerts - it
-# makes sure the data already exists when alerting is fixed, and gives the
-# manual rollout gates something to read.
-#
-# Exported series: vpn_agent_current_server (info), vpn_agent_switches_total by
-# reason, vpn_agent_current_loss_pct, vpn_agent_consecutive_bad_windows,
-# vpn_agent_ranking_age_seconds, plus vpn_agent_dry_run so the rollback state is
-# visible and vpn_agent_tunnel_device_ok for the silent failure where the tunnel
-# comes back as tun1 and qBittorrent opens no listen socket.
-#
-# Read vpn_agent_tunnel_device_ok TOGETHER WITH vpn_agent_switch_in_progress
-# (#690). The device metric is a real /sys/class/net read on every scrape, and
-# WireGuardClient::stop() deletes the device on every disconnect, so a scrape
-# landing inside a switch honestly reports 0. `tunnel_device_ok == 0 unless
-# switch_in_progress` is the condition that means a taken tun0 slot. The window
-# is bounded by VPN_AGENT_RECOVERY_BUDGET_SECONDS (120 s) and capped at 3
-# switches a day.
-#
-# vpn_agent_current_server is re-read from Bluetit once per probe window (60 s),
-# not per scrape: a goldcrest call can take 25 s and the metric render runs in
-# the HTTP handler thread, where that would blow this ServiceMonitor's scrape
-# timeout and take the whole target down (#690).
-#
-# The cluster Prometheus selects all ServiceMonitors (serviceMonitorSelector:
-# {}), so no `release: kube-prometheus-stack` label is needed. Same pattern as
-# 2-k3s/08.servarr/vpn-picker/servicemonitor.yaml.
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:

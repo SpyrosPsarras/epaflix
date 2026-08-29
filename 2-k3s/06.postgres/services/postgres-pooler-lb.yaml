@@ -1,8 +1,4 @@
 ---
-# NOTE: name MUST stay `postgres-pooler-lb`. The CNPG Pooler controller
-# already owns a Service named `postgres-pooler` (ClusterIP, with
-# ownerReferences → Pooler/postgres-pooler) and will revert any LoadBalancer
-# spec applied to that name — infinite reconcile loop with ArgoCD.
 apiVersion: v1
 kind: Service
 metadata:

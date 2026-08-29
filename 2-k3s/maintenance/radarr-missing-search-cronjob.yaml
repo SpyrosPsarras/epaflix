@@ -1,69 +1,4 @@
 ---
-# Daily Radarr missing-movie search, rate-limited by rotation (Issue #1024).
-#
-# WHY THIS EXISTS
-# Radarr never searches for a missing movie on its own. Its scheduled tasks are
-# RSS Sync (30m), Import List Sync (5m), Refresh Monitored Downloads (1m),
-# Refresh Movie / Refresh Collections (24h), plus housekeeping. There is no
-# missing-movies search task, and RSS Sync only sees releases posted SINCE the
-# last poll. So for any catalogue title - anything not brand new - a release
-# already sitting on a tracker is never seen, and the movie stays missing
-# forever unless a human clicks Search.
-#
-# Measured 2026-08-19: 21 monitored movies with hasFile=false had ZERO history
-# rows - never grabbed, never failed, never retried. The Radarr queue was empty.
-# Nothing was stuck; nothing was being asked for either.
-#
-# WHAT IT DOES NOT DO
-# It does NOT trigger Radarr's all-missing search. That would fire one query per
-# missing movie per run at every indexer, which is how you get rate-limited off
-# a private tracker - AvistaZ already 429s and self-disables for an hour under
-# modest load (observed during #1022 triage), and IPTorrents/TorrentDay/Mpellas
-# are private too. Instead it searches BATCH_SIZE movies per run, chosen by a
-# stateless rotation, so every candidate comes round roughly every
-# ceil(len(candidates) / BATCH_SIZE) days.
-#
-# WHY THE ROTATION IS STATELESS
-# The obvious design - remember when each movie was last searched - has nowhere
-# good to keep that state. Radarr writes NO history row for a search that finds
-# nothing (which is exactly why those 21 movies have empty history), so its own
-# database cannot tell us. A ConfigMap would need write RBAC, and movie tags
-# would mutate the library. Instead the candidate list is sorted by movie id and
-# sliced by a day counter, which gives every candidate an equal, predictable
-# turn with no state at all. Adding or removing a movie reshuffles who lands in
-# today's slice, which is harmless - the guarantee is coverage over a cycle, not
-# a fixed calendar slot per title.
-#
-# CANDIDATE FILTER
-# monitored AND NOT hasFile AND isAvailable. `isAvailable` is Radarr's own field
-# and already accounts for the movie's minimumAvailability, so announced and
-# in-cinemas titles are excluded without this job reimplementing that logic
-# (verified live: Moana, The Odyssey, Spider-Man: Brand New Day et al report
-# isAvailable=false, while Passion (1996) and The Golden Bird (1987) report
-# true).
-#
-# EXIT-CODE CONTRACT - DIFFERENT FROM ITS SIBLINGS
-# The other jobs in this directory are DETECTORS: non-zero means "I found
-# something you must look at". This one is an ACTOR. Triggering a search is the
-# normal, boring outcome, so it exits 0 on success and non-zero ONLY on a real
-# failure (cannot reach Radarr, bad API key, malformed response). It therefore
-# does not need its own scoped alert - KubeJobFailedLastRun
-# (2-k3s/10.observability/alertmanager-config/custom-alerts.yaml) covers it, and
-# will only fire while the newest run is the failed one (#1027).
-#
-# Finding nothing is NOT a failure here. Several candidates genuinely have no
-# releases anywhere - Monty Python & the Holy Grail Location Report is a Blu-ray
-# bonus featurette, Company: A Musical Comedy and Breaking Bread return zero
-# results on all 8 working indexers. Searching them costs a handful of queries
-# every few days, which is cheaper and more reversible than unmonitoring titles
-# that might get uploaded later.
-#
-# Credentials: RADARR_API_KEY from the existing unpackerr-secret key
-# UN_RADARR_0_API_KEY - the same source blind-queue-check and orphan-census
-# already use. Verified 2026-08-19 to match Radarr's live config.xml by sha256,
-# because #1021 was exactly this going stale unnoticed.
-#
-# Stdlib-only Python, matching the sibling jobs.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -150,7 +85,6 @@ data:
         ]
         cands = candidates(movies)
         assert [m["id"] for m in cands] == [4, 5], cands
-        # Rotation covers everything over a cycle and never returns nothing.
         items = list(range(7))
         seen = set()
         for day in range(3):
@@ -158,7 +92,6 @@ data:
             assert len(batch) == 3, batch
             seen.update(batch)
         assert seen == set(items), seen
-        # Degenerate inputs must not explode.
         assert rotate([], 3, 0) == []
         assert rotate([1], 5, 9) == [1]
         assert rotate(items, 0, 1) == []
@@ -229,20 +162,13 @@ metadata:
   labels:
     app: radarr-missing-search
 spec:
-  # 05:20 UTC daily - before orphan-census (07:00) and outside the hourly
-  # reporters' minutes, so a slow indexer sweep does not overlap them.
   schedule: "20 5 * * *"
   concurrencyPolicy: Forbid
-  # #841: a schedule missed during a control-plane blip is stale by the time it
-  # could be retried, so skip it rather than run it late.
   startingDeadlineSeconds: 300
   successfulJobsHistoryLimit: 6
   failedJobsHistoryLimit: 6
   jobTemplate:
     spec:
-      # Radarr returns from the command POST immediately - it queues the search
-      # rather than running it inline - so this only needs to cover two API
-      # calls. #841: under Forbid a hung run blocks every later run.
       activeDeadlineSeconds: 300
       backoffLimit: 0
       ttlSecondsAfterFinished: 2592000  # keep 30 days
@@ -260,9 +186,6 @@ spec:
               env:
                 - name: RADARR_URL
                   value: "http://radarr:7878"
-                # Keep this modest. Each movie in the batch costs one query per
-                # enabled indexer, and AvistaZ 429s and self-disables for an
-                # hour under load.
                 - name: BATCH_SIZE
                   value: "3"
                 - name: RADARR_API_KEY

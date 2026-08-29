@@ -1,6 +1,4 @@
 ---
-# PostgreSQL Database Setup Job for Grafana
-# Creates 'observability' database and user on CloudNativePG cluster
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -32,15 +30,12 @@ spec:
               set -e
               echo "Creating observability database and user..."
 
-              # Create database if it doesn't exist
               psql -tc "SELECT 1 FROM pg_database WHERE datname = 'observability'" | grep -q 1 || \
                 psql -c "CREATE DATABASE observability;"
 
-              # Create user if it doesn't exist
               psql -tc "SELECT 1 FROM pg_roles WHERE rolname = 'observability'" | grep -q 1 || \
                 psql -c "CREATE USER observability WITH PASSWORD '<POSTGRES_PASSWORD>';"
 
-              # Grant privileges
               psql -c "GRANT ALL PRIVILEGES ON DATABASE observability TO observability;"
               psql -d observability -c "GRANT ALL ON SCHEMA public TO observability;"
 

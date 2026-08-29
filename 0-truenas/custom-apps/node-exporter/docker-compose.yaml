@@ -1,41 +1,7 @@
-# Prometheus node-exporter as a TrueNAS SCALE custom app on 192.168.10.200 (#918).
-#
-# WHY IT IS HERE AND NOT IN THE CLUSTER
-# TrueNAS is not a K3s member, so nothing in 2-k3s/ can produce host metrics for
-# it. The #918 decision (2026-08-21, "Require it, signal is ARC vs its own cap")
-# requires node-exporter on this box and accepts the cost it names: another app
-# on the appliance, with its lifecycle outside ArgoCD. Scraped from the cluster
-# through the selector-less Service + EndpointSlice + ServiceMonitor trio in
-# 2-k3s/10.observability/truenas-exporters.yaml (#917).
-#
-# WHAT THE SIGNAL NEEDS
-# The ZFS collector is on by default on Linux and parses
-# /proc/spl/kstat/zfs/arcstats, emitting every uint64 key as node_zfs_arc_<key>
-# (node_exporter v1.12.1 collector/zfs_linux.go: subsystem map "zfs_arc" ->
-# "arcstats", metricName() = the last dotted segment). That is where
-# node_zfs_arc_size, node_zfs_arc_c_max and node_zfs_arc_memory_throttle_count
-# come from - the three series the truenas-memory alert group queries.
-# `--path.procfs=/host/proc` is therefore load-bearing, not decoration: without
-# it the collector reads the container's own /proc, which has no spl/kstat.
-#
-# host networking + pid: host + / mounted read-only at /host is the standard
-# node-exporter-in-a-container shape. `rslave` propagates later host mounts
-# (new datasets) into the container instead of freezing today's mount table.
-#
-# UPDATE SURVIVAL: custom apps are middleware-managed and stored on the ix-apps
-# pool dataset (/mnt/.ix-apps/app_configs/<app>), so a TrueNAS update redeploys
-# them. Nothing is installed onto the immutable boot pool - an apt/pip install
-# there is what would NOT survive. wg-easy already proves this lifecycle on this
-# exact box. The app REGISTRATION lives in middleware config, not in git; the
-# re-create recipe after a fresh install is in README.md next to this file, the
-# same accepted posture as the POSTINIT initshutdownscript for
-# ../../scripts/gpu-persistenced.sh.
 services:
   node-exporter:
     image: docker.io/prom/node-exporter:v1.12.1
     restart: unless-stopped
-    # Host networking, so the exporter is reachable at 192.168.10.200:9100 -
-    # the address the EndpointSlice in truenas-exporters.yaml hardcodes.
     network_mode: host
     pid: host
     command:

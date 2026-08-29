@@ -1,5 +1,3 @@
-# Owned by the ArgoCD app-of-apps Application.
-# Rationale: register the Remote Pi relay for an explicit, human-approved first sync.
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -15,6 +13,3 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: remote-pi
-  # Manual sync only — explicit, human-approved first sync (see above).
-  # (syncPolicy omitted = manual. Empty `{}` drifts against live `null` whenever no
-  # field manager owns spec.syncPolicy — needs `--show-managed-fields` to see. #1033.)

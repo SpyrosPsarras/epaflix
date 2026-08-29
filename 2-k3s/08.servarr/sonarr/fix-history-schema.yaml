@@ -1,5 +1,4 @@
 ---
-# Job to fix missing DownloadId column in Sonarr History table
 apiVersion: batch/v1
 kind: Job
 metadata:

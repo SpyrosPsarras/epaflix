@@ -1,11 +1,3 @@
-# system-upgrade Plans — the actual K3s rolling-upgrade Plans (k3s-server +
-# k3s-agent) consumed by the system-upgrade-controller.
-#
-# These were parked one directory up (system-upgrade-plans.yaml) until a
-# maintainer-supervised first rolling upgrade validated the controller end-
-# to-end. The controller has now soaked (Healthy 5d+), so the Plans are
-# brought under GitOps via the automated `system-upgrade-plans` Application
-# (Issue #74). Merging auto-applies them and starts the rolling upgrade.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 

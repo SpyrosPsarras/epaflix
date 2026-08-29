@@ -1,9 +1,5 @@
 name: build-airvpn-bluetit
 
-# Builds and publishes the AirVPN Bluetit sidecar image (images/airvpn-bluetit/).
-# Additive to the existing `validate` required check in ci.yml — does not
-# modify it. On a pull request this only builds and runs test.sh, it never
-# logs in or pushes, so a broken image cannot reach GHCR.
 
 on:
   push:
@@ -19,10 +15,6 @@ permissions:
 
 jobs:
   build:
-    # Fork-guard, same rule as ci.yml's validate job: only run for PRs from
-    # branches in THIS repo (plus pushes and manual dispatch, which are never
-    # fork-authored). Public repo, and this job holds packages:write on push,
-    # so fork PR workflow code must never execute here.
     if: >-
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository

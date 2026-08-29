@@ -1,6 +1,4 @@
 ---
-# Job to fix missing Type column in sonarr2 SceneMappings table
-# Error: column SceneMappings.Type does not exist (SqlState: 42703)
 apiVersion: batch/v1
 kind: Job
 metadata:

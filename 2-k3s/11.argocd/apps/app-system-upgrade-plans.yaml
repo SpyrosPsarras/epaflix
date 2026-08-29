@@ -1,16 +1,4 @@
 ---
-# ArgoCD Application: system-upgrade Plans (k3s-server + k3s-agent).
-# AUTOMATED per owner decision (no manual sync). MERGE auto-applies the
-# Plans via app-of-apps + selfHeal. The upgrade target is now an explicitly
-# PINNED `spec.version` in the Plans (issue #130), NOT a moving channel — so
-# every bump is a reviewed git change and selfHeal only re-applies whatever
-# version is committed. There is no unsupervised channel-driven roll.
-#
-# Source:       this repo, path 2-k3s/maintenance/system-upgrade/plans.
-#               kustomization.yaml references system-upgrade-plans.yaml
-#               (the k3s-server + k3s-agent Plans, pinned spec.version).
-# Destination:  `system-upgrade` namespace (owned by the controller App).
-# Sync:         AUTOMATED — selfHeal: true, prune: false, ServerSideApply.
 
 apiVersion: argoproj.io/v1alpha1
 kind: Application

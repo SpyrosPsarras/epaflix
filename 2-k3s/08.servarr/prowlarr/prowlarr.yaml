@@ -1,6 +1,4 @@
 ---
-# Prowlarr - Indexer Manager
-# Manages indexers for all *arr apps
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -9,9 +7,6 @@ metadata:
   labels:
     app: prowlarr
   annotations:
-    # Reloader (#299): rolls on servarr-postgres rotation (shared by
-    # bazarr/lingarr/prowlarr/radarr/seerr, so all 5 restart together on a
-    # credential change — accepted, see PR for the tradeoff).
     secret.reloader.stakater.com/reload: "servarr-postgres"
 spec:
   replicas: 1
@@ -44,7 +39,6 @@ spec:
               value: "568"
             - name: TZ
               value: "Europe/Oslo"
-            # PostgreSQL configuration
             - name: PROWLARR__POSTGRES__HOST
               valueFrom:
                 secretKeyRef:
@@ -102,7 +96,6 @@ spec:
         - name: config
           persistentVolumeClaim:
             claimName: prowlarr-config
-      # Extra host for bitmagnet
       hostAliases:
         - ip: "192.168.10.1" # Replace with actual host-gateway IP if needed
           hostnames:

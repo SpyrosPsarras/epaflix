@@ -35,36 +35,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 log = logging.getLogger("vpn-agent")
 
-# Contract version the scorer publishes. A breaking change ships as a new
-# filename (ranking.v2.json), so anything else here is a document we cannot read.
 SCHEMA = 1
 
-# Separate contract for the agent's in-tunnel bad-server verdict. The scorer's
-# ranking schema stays at 1 and carries no producer state; verdicts are separate
-# files so two qBittorrent instances sharing /media can merge without either
-# writer replacing the other's evidence (#792).
 VERDICT_SCHEMA = 1
 VERDICT_SOURCE = "vpn-agent"
 VERDICT_TTL_SECONDS = 21600
-# Hard memory bound for evidence waiting behind one kernel-wedged NFS write.
-# Coalescing happens per destination, so observations for different servers do
-# not erase each other. If every slot is occupied, a new destination is rejected
-# rather than destroying earlier evidence; same-destination refreshes still fit.
 MAX_PENDING_VERDICT_DESTINATIONS = 128
-# A ranking is normally a few KiB. Bound the one daemon reader's allocation so
-# a corrupt replacement cannot turn the storage-isolation worker into an
-# unbounded memory consumer. This does not change the schema contract; an
-# oversized document is simply unusable like malformed JSON.
 MAX_RANKING_BYTES = 1024 * 1024
-# Schema-1's published lease is 2100 seconds: one 15-minute scorer cycle plus
-# room for a failed cycle. Treat that contract value as the upper bound, not a
-# caller-controlled extension. This matters when ranking.json is already
-# verdict-filtered: an excessive lease would turn a temporary server ejection
-# into an effectively permanent ban while the scorer is unavailable (#792).
 MAX_RANKING_TTL_SECONDS = 2100
-# Clocks can differ slightly across the scorer, NFS clients and the two agents,
-# but a future timestamp must not extend the lease without bound. Match the
-# verdict channel's five-minute allowance.
 RANKING_FUTURE_SKEW_SECONDS = 300
 RANKING_DOCUMENT_KEYS = frozenset((
     "schema", "generated_at", "ttl_seconds", "servers",
@@ -74,49 +52,8 @@ RANKING_SERVER_KEYS = frozenset((
 ))
 _IDENTITY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}$")
 
-# Shortest interval throughput_since() will divide by. Below this the quotient is
-# an artefact of packet arrival timing, not a rate, so there is NO measurement -
-# not a zero (#768).
-#
-# The arithmetic, at the tun0 MTU of 1500 bytes:
-#   1 ms  -> one packet reads as 1.5 MB/s, and zero packets reads as 0.0 B/s
-#   10 ms -> one packet reads as 150 KB/s
-#   1 s   -> one packet reads as 1.5 KB/s, and 1 MB/s needs ~700 packets
-# One second is where a single packet stops being able to move the number by more
-# than its own share of it, i.e. where the quotient starts describing the traffic
-# instead of the sampling. Measured on the live pod 2026-08-04: the same tunnel,
-# in the same second, moving several MB/s, read 0.0 B/s in two windows and
-# 11.5 MB/s in a third, because the probe was stubbed and returned instantly.
-#
-# Deliberately NOT justified by the old 64 KiB/s throughput gate (PR #764/#766) -
-# that gate is gone (#771) and this number must not depend on it coming back. The
-# only reason is metric resolution.
-#
-# It cannot suppress the real metric: a production window is one `ping` of
-# probe_count (50) packets at probe_rate (5/s), so ~10 s of wall time - four
-# orders of magnitude above this floor.
 MIN_THROUGHPUT_INTERVAL_SECONDS = 1.0
 
-# Which switch reasons have EARNED the full cooldown, and it is only the one that
-# corrected something MEASURED. A `degradation` switch left a server the agent
-# had just watched fail bad_windows consecutive loss windows, so spacing the next
-# one 6 h out is the flap damper working as designed.
-#
-# `boot_upgrade` measured nothing: quick's pick was merely outside the ranking's
-# top band, and the ranking is scored from a LAN node against each server's ENTRY
-# IP, which cannot see an in-tunnel fault (#775, #767). So it is an unverified
-# PLACEMENT, and arming 6 h on it blocks the only instrument that CAN see the
-# fault. Measured live 2026-08-04: a boot_upgrade landed on Dalim, verified it at
-# loss=0.0%, and nine minutes later the degradation watch reached 3/3 at 6-8%
-# loss and was refused with "cooldown, 21034s left" (#789). Same principle as
-# #627 fix 2 - a switch must never lock out recovery from itself - for a switch
-# that produced a working but LOSSY tunnel rather than no tunnel at all.
-#
-# `fallback` is not here either: it ends on whatever Bluetit's own quick-connect
-# picked after every ranked candidate failed, which is the least considered
-# destination of the three. A degradation switch that ends on `quick` still gets
-# the full cooldown, because the reason is what is scored here, not the
-# destination - it did correct a measured fault.
 FULL_COOLDOWN_REASONS = ("degradation",)
 
 
@@ -136,156 +73,49 @@ class Config:
     """Every knob the spec names, no magic numbers buried in the logic."""
 
     def __init__(self):
-        # The FILE, never the scorer's HTTP endpoint. The pod cannot reach
-        # RFC1918 outbound: Bluetit's split routes exclude private ranges and
-        # then a blunt 0.0.0.0/1 + 128.0.0.0/1 pair re-swallows them into tun0,
-        # where AirVPN drops them. Measured - every LAN and ClusterIP address
-        # times out from inside this netns.
         self.ranking_path = os.environ.get(
             "VPN_AGENT_RANKING_PATH", "/media/.vpn-picker/ranking.json"
         )
-        # The ranking lives on a hard NFS mount. Exactly one daemon owns every
-        # open/read against it and polls atomic replacements without stat(). A
-        # five-second poll matches the scorer's verdict reconciliation cadence
-        # and is tiny beside the 15-minute score cycle without busy-looping.
         self.ranking_poll_seconds = _env_float(
             "VPN_AGENT_RANKING_POLL_SECONDS", 5.0
         )
-        # Boot may wait briefly for the daemon's FIRST attempt so a healthy NFS
-        # ranking still drives the existing top-band upgrade. This is a bounded
-        # Condition wait, never an NFS call: a kernel-wedged reader releases boot
-        # after one second and the local emptyDir cache (if still within the
-        # document TTL) is the only fallback.
         self.ranking_initial_wait_seconds = _env_float(
             "VPN_AGENT_RANKING_INITIAL_WAIT_SECONDS", 1.0
         )
-        # emptyDir is enough. Boot always starts on `quick`, so the cache only
-        # has to survive within one pod lifetime.
         self.cache_path = os.environ.get(
             "VPN_AGENT_CACHE_PATH", "/var/cache/vpn-agent/ranking.json"
         )
-        # Next to the cache, on the same emptyDir. Not a PVC: a pod restart
-        # always re-runs `quick` and re-derives everything, so the budget only
-        # has to outlive an agent.py restart inside one pod.
         self.budget_path = os.environ.get(
             "VPN_AGENT_BUDGET_PATH", "/var/cache/vpn-agent/switches.json"
         )
-        # Sticky top-N band. Inside it we stay put, so ordinary pod restarts
-        # cause no churn.
         self.band = _env_int("VPN_AGENT_BAND", 5)
 
-        # In-tunnel gateway, reachable because `allowping yes` is set. Pinging
-        # anything outside the tunnel measures the wrong path.
         self.probe_target = os.environ.get("VPN_AGENT_PROBE_TARGET", "10.128.0.1")
         self.probe_count = _env_int("VPN_AGENT_PROBE_COUNT", 50)
         self.probe_rate = _env_float("VPN_AGENT_PROBE_RATE", 5.0)
         self.probe_interval = _env_int("VPN_AGENT_PROBE_INTERVAL_SECONDS", 60)
-        # The 2026-07-31 outage profile was 6.7-9% sustained. Loss decides a
-        # window on its own, which is what #771 restored.
-        #
-        # What is MEASURED - same pod, same 50-packet probe, same code, and the
-        # load comparable across rows:
-        #
-        #   2026-08-03  Dalim     ~4.2 MB/s through tun0   15% loss
-        #   2026-08-04  Dedalus    13.66 MB/s              0.0%
-        #   2026-08-04  Dedalus     4.40 MB/s              0.0%
-        #   2026-08-04  Dedalus     3.49 MB/s              0.0%
-        #
-        # What that RULES OUT: the earlier claim that loaded seeding puts a
-        # 15-20% ICMP floor under every window. Dedalus at 3.3x the Dalim load
-        # reads 0.0%, so load is not the variable.
-        #
-        # What it does NOT establish: that the loss was Dalim's fault. That
-        # explanation fits better and is unproven. Confounders never recorded:
-        # time of day, torrent set, peer mix, AirVPN-side load on Dalim. The
-        # discriminating test - put comparable load on Dalim and re-measure loss
-        # to the in-tunnel gateway - has NOT been run, because it needs a
-        # deliberate switch onto a suspect server and that costs a peer drop and
-        # a private-tracker re-announce (#498). Do not write down a confident
-        # cause here until someone runs it (#517 is what happens if you do).
-        #
-        # Do NOT re-add a throughput gate (PR #764/#766, removed in #771). Two
-        # faults: on a lossy-but-still-delivering server it returns "healthy" and
-        # suppresses a correct detection; and because a seeding box is almost
-        # never under 64 KiB/s it made the detector LOOK armed while being
-        # effectively unreachable - vpn_agent_healthy_by_throughput_windows_total
-        # read 0 for its entire life. Same shape as #629, #686 and #690.
         self.bad_loss_pct = _env_float("VPN_AGENT_BAD_LOSS_PCT", 5.0)
-        # Same semantics as a probe's failureThreshold: 3.
         self.bad_windows = _env_int("VPN_AGENT_BAD_WINDOWS", 3)
-        # Long on purpose. A switch changes the exit IP, which drops every peer
-        # and re-announces to private trackers that have hit-and-run rules.
         self.cooldown_seconds = _env_int("VPN_AGENT_COOLDOWN_SECONDS", 21600)
         self.max_switches_per_day = _env_int("VPN_AGENT_MAX_SWITCHES_PER_DAY", 3)
 
         self.goldcrest_timeout = _env_int("VPN_AGENT_GOLDCREST_TIMEOUT", 25)
-        # Bound by BYTES, never lines - see goldcrest() for the 673 MB reason.
         self.max_output_bytes = _env_int("VPN_AGENT_MAX_OUTPUT_BYTES", 65536)
         self.verify_seconds = _env_int("VPN_AGENT_VERIFY_SECONDS", 30)
         self.verify_interval = _env_float("VPN_AGENT_VERIFY_INTERVAL", 2.0)
-        # Post-connect traffic check (#627 fix 1). A short burst on purpose:
-        # 5 packets at probe_rate is about 1 s of sending plus the -W 2 wait,
-        # and the failed-connect walk deadline has ~85 s spare, so it fits
-        # without touching the recovery budget.
         self.verify_probe_count = _env_int("VPN_AGENT_VERIFY_PROBE_COUNT", 5)
-        # The shape this has to catch is 100% loss on a tunnel that never
-        # handshook. Deliberately NOT bad_loss_pct: over 5 packets a 5% bar
-        # means one dropped packet fails a perfectly good candidate. Anything
-        # between "traffic moves" and "traffic moves well" is the degradation
-        # watch's job, not this one's.
         self.verify_max_loss_pct = _env_float("VPN_AGENT_VERIFY_MAX_LOSS_PCT", 50.0)
-        # The SHORT cooldown - what an attempt that has not earned the full one
-        # arms. Two kinds of attempt use it: one that produced NO working tunnel
-        # (#627 fix 2) and one that is an unverified placement rather than a
-        # measured correction, i.e. any reason outside FULL_COOLDOWN_REASONS
-        # (#789). Short because the agent must be able to recover from its own
-        # bad switch; longer than one degradation trip (3 x ~70 s windows) so a
-        # failure cannot immediately chain into the next attempt - which means
-        # the earliest trip after a boot_upgrade is refused once and the next one
-        # (~7 min in) goes through. That is deliberate, see _earned_cooldown().
-        # The daily cap is what actually bounds thrash - both count against it
-        # exactly like a successful degradation switch.
         self.failed_cooldown_seconds = _env_int("VPN_AGENT_FAILED_COOLDOWN_SECONDS", 300)
         self.attempts_per_candidate = _env_int("VPN_AGENT_ATTEMPTS", 2)
         self.retry_backoff = _env_float("VPN_AGENT_RETRY_BACKOFF", 5.0)
-        # The liveness budget is ~180 s (periodSeconds 60, failureThreshold 3)
-        # and the restart it ends in is a SIGTERM, which drops the network lock
-        # (#535). The agent must resolve a failed connect itself, inside this.
         self.recovery_budget = _env_int("VPN_AGENT_RECOVERY_BUDGET_SECONDS", 120)
-        # Held back from the candidate walk so the terminal `quick` fallback
-        # always has a verify window left. Without it the walk eats the whole
-        # budget and the pod ends tunnel-less, which is the one outcome this
-        # design must never produce.
         self.quick_reserve = _env_int("VPN_AGENT_QUICK_RESERVE_SECONDS", 35)
-        # Both qBittorrent instances read the same ranking. Jitter so this box
-        # and Nick's do not stampede the same winner.
         self.jitter_seconds = _env_float("VPN_AGENT_JITTER_SECONDS", 30.0)
 
-        # Bluetit connects on its own at boot via `airconnectatboot quick`.
-        # This is only how long we wait for that before giving up on the
-        # post-boot band check.
         self.boot_wait_seconds = _env_int("VPN_AGENT_BOOT_WAIT_SECONDS", 300)
-        # MUST match `airkey` in bluetit.conf, and must be passed explicitly.
-        # A credentialed goldcrest call pushes a fresh option set into Bluetit
-        # first, and the key in that set is the built-in default - the `airkey`
-        # directive in bluetit.rc is NOT re-read on this path. Measured on a
-        # scratch pod configured `airkey test`: the agent's own switch logged
-        # `Selected user key: Default` and dialled AirVPN on the live cluster's
-        # key. The country white/black lists ARE re-applied from the rc on the
-        # same call; the key is the one thing that is not.
         self.air_key = os.environ.get("VPN_AGENT_AIR_KEY", "Default")
         self.tun_device = os.environ.get("VPN_AGENT_TUN_DEVICE", "tun0")
 
-        # Shared, durable verdict channel for #792. Default next to ranking.json
-        # so the existing /media transport carries both. A later deployment PR
-        # makes the agent's mount writable; this image-only PR changes no pod.
-        #
-        # The device key is the default producer identity because it is stable
-        # across pod/container recreation and unique for the two AirVPN sessions
-        # (`Default` and `nick`). VPN_AGENT_PRODUCER_ID is the explicit override.
-        # Files are per producer+server, not one mutable producer document: one
-        # writer observing a second bad server must not erase its first verdict,
-        # and neither qBittorrent instance may erase the other's evidence.
         ranking_dir = os.path.dirname(self.ranking_path) or "."
         self.verdict_dir = os.environ.get(
             "VPN_AGENT_VERDICT_DIR", os.path.join(ranking_dir, "verdicts")
@@ -298,32 +128,17 @@ class Config:
         )
 
         self.listen_port = _env_int("VPN_AGENT_LISTEN_PORT", 8081)
-        # DEFAULT OFF - the agent acts. The flag exists because the spec's
-        # rollback is "flip the agent back to dry-run", one env var, never a
-        # manifest revert.
         self.dry_run = _env_bool("VPN_AGENT_DRY_RUN", False)
 
 
-# --------------------------------------------------------------------------
-# Parsing. Pure functions, so the fixture tests in agent_selftest.py exercise
-# the real decision code and not a copy of it.
-# --------------------------------------------------------------------------
 
-# iputils prints exact counts; its own "N% packet loss" field is rounded to a
-# whole percent. Same parser as the scorer's - the two images cannot share code,
-# so keep them in step by hand.
 _SENT_RECV = re.compile(r"(\d+) packets transmitted, (\d+) (?:packets )?received")
 _RTT = re.compile(r"(?:rtt|round-trip) min/avg/max(?:/mdev)? = [\d.]+/([\d.]+)/")
 
-# "Connected to AirVPN server Aspidiske (Alblasserdam, Netherlands)". It does
-# NOT say "Bluetit is connected" - that string never appears. The disconnected
-# form is "Bluetit is not connected", so never grep for a bare "connected".
 _CONNECTED = re.compile(r"Connected to AirVPN server (\S+)")
 
-# Carries goldcrest's own exit code out of the pipeline - see goldcrest().
 _RC_MARKER = re.compile(r"___rc=(\d+)")
 
-# goldcrest prints a refusal as a bare `ERROR: ...` line.
 _ERROR = re.compile(r"ERROR: .*")
 
 
@@ -556,8 +371,6 @@ class RankingReader:
             return self._attempted
 
     def _problem(self, key, message, *args):
-        # A missing/malformed file checked every five seconds must not flood the
-        # log. Say each state transition once; a successful read clears it.
         if key != self._last_problem:
             log.warning(message, *args)
         self._last_problem = key
@@ -592,10 +405,6 @@ class RankingReader:
                         age,
                     )
 
-            # Fresh ranking adoption writes only the local emptyDir. Do it before
-            # exposing the snapshot so a process crash cannot make a ranking
-            # usable in memory without first attempting to preserve its exact
-            # generated_at/TTL document for the fallback path.
             if valid and servers:
                 with self._condition:
                     if self._stopping:
@@ -603,8 +412,6 @@ class RankingReader:
                 try:
                     self.on_fresh(snapshot.payload, servers)
                 except Exception as exc:
-                    # The local cache is an optimization, never permission to
-                    # discard a valid in-memory ranking.
                     log.warning("cannot adopt fresh ranking into local cache: %s", exc)
 
             with self._condition:
@@ -669,8 +476,6 @@ class VerdictPublisher:
         self._writer = writer
         self._max_pending = max_pending
         self._condition = threading.Condition()
-        # Plain dict insertion order is the drain order. Assigning an existing
-        # path refreshes its payload without moving it behind noisier servers.
         self._pending = {}
         self._active = False
         self._logging = False
@@ -723,18 +528,8 @@ class VerdictPublisher:
             try:
                 self._writer(publication)
             except Exception as exc:
-                # Storage exceptions are expected here. The important property
-                # is that they are confined to this daemon and never re-enter
-                # the switch path.
                 error = exc
 
-            # Claim the completion-log phase while holding the same Condition
-            # shutdown() uses. There are only two possible orderings:
-            # shutdown wins and this daemon never logs, or completion wins and
-            # shutdown marks stopping + discards pending work before waiting for
-            # that already-started log. Claiming the stop FIRST is load-bearing:
-            # after the log this worker must not pop another destination and
-            # enter a new hard-NFS syscall while teardown is waiting (#792).
             with self._condition:
                 if self._stopping:
                     self._active = False
@@ -756,8 +551,6 @@ class VerdictPublisher:
                         publication.producer, publication.ttl_seconds,
                     )
             finally:
-                # Completion includes logging. wait_idle() and shutdown() must
-                # not report it finished while the daemon still touches stdout.
                 with self._condition:
                     self._logging = False
                     self._active = False
@@ -910,9 +703,6 @@ class SwitchBudget:
         self._save()
 
 
-# --------------------------------------------------------------------------
-# Talking to Bluetit
-# --------------------------------------------------------------------------
 
 
 def goldcrest(args, cfg):
@@ -1016,11 +806,6 @@ class Bluetit:
         if name:
             args += ["--air-server", name]
         _, out = self.runner(args, self.cfg)
-        # A refusal is loud and instant: `ERROR: AirVPN Server "X" does not
-        # exist.` for a name a stale manifest cannot resolve, or `is not allowed
-        # by <list> policy` for one outside the pool. Polling 30 s for a connect
-        # that was already rejected spends the recovery budget on nothing, and
-        # the budget is what has to cover the `quick` fallback.
         refused = _ERROR.search(out)
 
         limit = self.clock() + self.cfg.verify_seconds
@@ -1034,9 +819,6 @@ class Bluetit:
                 log.warning("connect to %s refused: %s", name, refused.group(0).strip())
                 return None
             if current and name is not None:
-                # Connected, but not where we asked. Bluetit refuses names
-                # outside its own pool and a stale manifest can reject a valid
-                # one, so this is a real outcome, not a transient.
                 log.warning("asked for %s, Bluetit reports %s", name, current)
             if self.clock() >= limit:
                 return None
@@ -1143,9 +925,6 @@ class Bluetit:
         return False
 
 
-# --------------------------------------------------------------------------
-# The agent
-# --------------------------------------------------------------------------
 
 
 class Agent:
@@ -1156,70 +935,21 @@ class Agent:
         self.sleep = sleep
         self.clock = clock
         self.wallclock = wallclock
-        # Wall time, not the monotonic clock: the history outlives this
-        # process, and a monotonic stamp means nothing to the next one.
         self.budget = SwitchBudget(cfg.cooldown_seconds, cfg.max_switches_per_day,
                                    clock=wallclock, path=cfg.budget_path)
         self.lock = threading.Lock()
-        # RankingReader adopts fresh bytes concurrently with control/metrics
-        # consumers expiring the finite local cache. One separate transaction
-        # lock covers BOTH in-memory fields and the emptyDir file: otherwise a
-        # consumer can parse an old expired payload, the reader can install a
-        # fresh replacement, and the consumer can resume by clearing/unlinking
-        # that replacement (#792 reader review). Keep this separate from the
-        # metrics/switch lock above; local cache I/O must not stall unrelated
-        # state reads.
         self.cache_lock = threading.Lock()
-        # Lazy: no thread exists until the first authoritative verdict. Once
-        # started, this is the only code allowed to touch the hard NFS verdict
-        # path. One wedged call cannot freeze watch_once() or create more workers.
         self.verdict_publisher = VerdictPublisher(self._write_bad_server)
         self.current_server = None
         self.current_loss_pct = None
-        # Last window's tunnel throughput, or None when the window produced no
-        # honest number (see throughput_since()). Written on EVERY window,
-        # including back to None - a stale rate is the #686 defect, and absent is
-        # readable here because render_metrics() also publishes the raw byte
-        # counter read at scrape time, which a reader can rate() itself.
         self.throughput_bps = None
-        # There is deliberately NO self.healthy_by_throughput. It counted windows
-        # the throughput gate cleared, and #771 removed the gate - so nothing
-        # could ever have incremented it again. A counter parked at 0 that no code
-        # path writes is the #629/#686/#690 shape, so the field went with the gate
-        # rather than being left to read as coverage. Do not re-add it.
         self.consecutive_bad = 0
-        # The counter belongs to one server AND one tun0 generation, not merely
-        # to this process. The airvpn sidecar can reconnect independently while
-        # the agent stays up. Server identity prevents two windows on Dalim plus
-        # one on Dedalus becoming a false 3/3 verdict (#792 first review).
-        # Generation identity also covers a same-server reconnect that completes
-        # BETWEEN windows: both brackets around the next probe then see Dalim and
-        # the new ifindex, so only carrying the server name would let ifindex 41's
-        # two windows become ifindex 42's third (#792 fourth refinement).
         self.consecutive_bad_server = None
         self.consecutive_bad_generation = None
-        # There is deliberately NO self.tun_device_ok. It existed, was
-        # initialised True and written only on the switch path, so a pod that
-        # never switched published `1` without ever having looked (#690). The
-        # metric reads /sys/class/net at scrape time instead - see
-        # render_metrics(). Do not re-add a field for it.
-        #
-        # `switching` is what makes that scrape-time read usable: True from the
-        # disconnect until the switch resolves, published as
-        # vpn_agent_switch_in_progress. The device is DELETED and rebuilt inside
-        # that window (wg_del_device on every disconnect), so a scrape landing
-        # mid-switch honestly sees no device. That is the teardown, not a taken
-        # slot, and this flag is how a reader tells the two apart without the
-        # device metric having to lie about what it sees.
         self.switching = False
         self.switches = {"degradation": 0, "boot_upgrade": 0, "fallback": 0}
         self.cached = []
-        # The full bytes retain generated_at + ttl_seconds. A cached server list
-        # alone has no finite lease and can preserve an already-ejected ranking
-        # forever while the scorer is down (#792 second review).
         self.cached_payload = None
-        # Constructed once and never replaced. All hard-NFS ranking access lives
-        # in this one daemon; control and metrics paths see immutable bytes only.
         self.ranking_reader = RankingReader(
             cfg.ranking_path,
             wallclock=self.wallclock,
@@ -1227,7 +957,6 @@ class Agent:
             poll_seconds=cfg.ranking_poll_seconds,
         )
 
-    # -- ranking + shared verdicts ----------------------------------------
 
     def verdict_path(self, server):
         """Stable file for one producer+server, safe for arbitrary identities.
@@ -1330,16 +1059,8 @@ class Agent:
     def _adopt_fresh_ranking(self, payload, servers):
         """RankingReader callback: atomically adopt memory + local emptyDir."""
         payload = bytes(payload)
-        # The disk write, cached_payload and diagnostic tuple are one cache
-        # transaction. A stale consumer must finish discarding the OLD document
-        # before this starts, or finish validating the NEW one after this ends;
-        # it may never unlink/clear this adoption halfway through (#792).
         with self.cache_lock:
             self._write_cache_locked(payload)
-            # Immutable bytes are the authority. `cached` remains for
-            # diagnostics and old tests only; every decision reparses
-            # cached_payload against the current wall clock so generated_at/TTL
-            # can never become a new lease.
             self.cached_payload = payload
             self.cached = tuple(servers)
 
@@ -1359,16 +1080,12 @@ class Agent:
         except Exception:
             return []
         if not servers:
-            # RankingReader already logs the observed stale transition. This
-            # path may reach the TTL while that daemon is blocked on its NEXT
-            # open, so stay silent and fail through the finite cache to quick.
             return []
         return servers
 
     def ranking_age_now(self):
         """Age of the published ranking snapshot AS OF THIS CALL, with no I/O.
 
-        #686 removed the write-once age field and made the metric follow wall
         time. The follow-up keeps that property without opening hard NFS in the
         HTTP handler: the daemon supplies immutable bytes, and each scrape parses
         their original generated_at against the current clock. If the daemon is
@@ -1497,7 +1214,6 @@ class Agent:
             return [], "none"
         return candidate_names(servers, self.cfg.band, exclude), source
 
-    # -- switching --------------------------------------------------------
 
     def switch(self, names, reason, mandatory):
         """Apply a switch: disconnect, then walk the candidates, then `quick`.
@@ -1510,14 +1226,9 @@ class Agent:
         if self.cfg.dry_run:
             log.info("DRY RUN reason=%s would switch from=%s to=%s",
                      reason, self.current_server, names[0] if names else "quick")
-            # Recorded anyway, so a dry-run soak shows the real switch rate
-            # instead of one trip every three minutes forever. Same cooldown the
-            # real path would arm, or the soak measures a rate nothing produces.
             self.budget.record(self._earned_cooldown(reason))
             return None
 
-        # Jitter before we touch anything. Both instances read the same file and
-        # would otherwise pile onto the same winner the moment it publishes.
         delay = random.uniform(0, self.cfg.jitter_seconds)
         log.info("switching reason=%s from=%s candidates=%s jitter=%.1fs mandatory=%s",
                  reason, self.current_server, names or ["quick"], delay, mandatory)
@@ -1527,12 +1238,6 @@ class Agent:
         hard_deadline = started + self.cfg.recovery_budget
         walk_deadline = hard_deadline - self.cfg.quick_reserve
 
-        # Everything from here to the end of the walk runs with no tunnel device
-        # for part of the time, so say so for the whole of it. try/finally, not a
-        # clear-on-the-way-out: `watch_once()` is wrapped in a bare `except` by
-        # run(), so a crash anywhere below would otherwise leave the flag stuck
-        # at 1 forever - which is the same class of permanently-wrong signal this
-        # change exists to remove.
         with self.lock:
             self.switching = True
         try:
@@ -1546,21 +1251,7 @@ class Agent:
                         return self._fall_back(hard_deadline, reason)
                     connected = self.bluetit.connect(name, deadline=walk_deadline)
                     if connected:
-                        # A local, not a field. `tun_ok()` is the loud verdict
-                        # that fails this switch; what the METRIC reports is a
-                        # fresh read at scrape time (#690).
                         if not self.bluetit.tun_ok():
-                            # Connected, wrong device. The switch is NOT successful -
-                            # qBittorrent is bound to tun0 and has no listen socket, so
-                            # counting this as a win would hide a client that is dead
-                            # while the WebUI, both probes and ArgoCD stay green.
-                            # Reconnecting cannot free the taken slot either, so stop
-                            # rather than walk the pool creating tun2, tun3, ...
-                            # The FULL cooldown is right here, unlike a verification
-                            # failure below: another switch cannot fix a taken slot,
-                            # it can only take one more. Passed by VALUE, because
-                            # `None` means "whatever this reason earned" and this is
-                            # the one case that wants the full one regardless (#789).
                             log.error("connected to %s but the tunnel device is wrong - "
                                       "the switch FAILED", connected)
                             return self._finish(connected, reason, None,
@@ -1569,14 +1260,6 @@ class Agent:
                             log.info("connected server=%s reason=%s attempt=%d elapsed=%.1fs",
                                      connected, reason, attempt, self.clock() - started)
                             return self._finish(connected, reason, reason)
-                        # The name matched and no packet came back (#627 fix 3).
-                        # Drop the candidate rather than re-dial it: re-dialling the
-                        # same dead peer is exactly what Bluetit's internal reconnect
-                        # already does, and that was measured doing it four times
-                        # over a clean path with zero handshakes. The disconnect is
-                        # not optional - Bluetit refuses a connect while it believes
-                        # it is connected, and only a fresh connect re-logs in to
-                        # AirVPN (#627 fix 4).
                         log.warning("dropping candidate %s - it reported connected but "
                                     "passed no traffic, walking to the next one", name)
                         self.bluetit.disconnect()
@@ -1601,10 +1284,6 @@ class Agent:
         log.warning("falling back to quick")
         connected = self.bluetit.connect(None, deadline=deadline)
         if connected:
-            # For the log line only, and the return value is deliberately
-            # dropped: `quick` is the last thing between the pod and no tunnel at
-            # all, so a wrong device here is not a reason to refuse it - but it
-            # has to be SAID. The metric reads the device itself (#690).
             self.bluetit.tun_ok()
         return connected
 
@@ -1688,31 +1367,8 @@ class Agent:
             self.consecutive_bad_generation = None
             if connected and counted_as:
                 self.switches[counted_as] = self.switches.get(counted_as, 0) + 1
-        # Every attempt arms a cooldown, successful or not. Ending on `quick`
-        # rather than a ranked candidate is the Component 7 circuit breaker -
-        # a bad pool must not cause thrash, and every switch costs peer
-        # connections and a private-tracker re-announce.
-        #
-        # But an attempt that has not earned the full cooldown arms the SHORT one,
-        # and there are two of those. A switch that produced no working tunnel
-        # (#627 fix 2, passed in explicitly): the 2026-08-02 boot upgrade onto a
-        # tunnel that never handshook armed the full 21600 s, and three minutes
-        # later the degradation watch reached bad_windows=3, asked
-        # budget.allowed(), was told "cooldown, ~21400s left", logged
-        # `degradation switch suppressed` and did nothing for six hours. And a
-        # switch whose REASON is only a placement rather than a measured
-        # correction (#789, derived from `reason` when no cooldown is passed):
-        # 2026-08-04 that same lockout happened again with a tunnel that DID
-        # handshake and was merely lossy, so the verification carve-out alone was
-        # not enough. A switch must never lock out recovery from itself, whichever
-        # way it went wrong. The daily cap still counts every one of them, so a
-        # broken pool cannot thrash instead.
         armed = self._earned_cooldown(reason) if cooldown is None else cooldown
         self.budget.record(armed)
-        # Say which one was armed. The budget lives on an emptyDir, so after the
-        # pod is gone this log line is the only record of whether a boot pick
-        # locked the degradation watch out (#789), and "which cooldown did it
-        # arm" was exactly the question that could not be answered live.
         log.info("armed a %ds cooldown for reason=%s, %d/%d switches used today",
                  armed, reason, len(self.budget.history), self.cfg.max_switches_per_day)
         if not connected:
@@ -1724,7 +1380,6 @@ class Agent:
                         "successful %s", reason, connected, reason)
         return connected
 
-    # -- boot -------------------------------------------------------------
 
     def wait_for_tunnel(self):
         """Bluetit connects on its own via `airconnectatboot quick`.
@@ -1750,10 +1405,6 @@ class Agent:
 
     def boot_check(self):
         """Post-boot upgrade - bounded snapshot, then finite cache, never NFS."""
-        # Start before the D-Bus wait so a healthy reader overlaps it. The only
-        # explicit wait is bounded and observes a Condition, not storage. A hard
-        # NFS syscall therefore adds at most ranking_initial_wait_seconds to boot
-        # and can never strand the agent process.
         self.ranking_reader.start()
         current = self.wait_for_tunnel()
         if not current:
@@ -1778,7 +1429,6 @@ class Agent:
                  [s.get("name") for s in servers[: self.cfg.band]], source)
         self.switch(names, "boot_upgrade", mandatory=False)
 
-    # -- degradation ------------------------------------------------------
 
     def probe(self, count=None):
         """50 ICMP packets to the in-tunnel gateway. Returns loss percent.
@@ -1797,8 +1447,6 @@ class Agent:
                 capture_output=True, text=True,
                 timeout=count * interval + 60,
             )
-            # `ping` exits 1 on total loss and still prints the summary, so the
-            # return code alone is not a failure signal.
             loss, _ = parse_ping(result.stdout + result.stderr)
         except Exception as exc:
             log.warning("probe failed: %s", exc)
@@ -1835,19 +1483,9 @@ class Agent:
 
     def watch_once(self):
         """One degradation window. Returns True if it triggered a switch."""
-        # A loss window is evidence about ONE unchanged tunnel SESSION. The
-        # airvpn sidecar can reconnect independently while this process stays up.
-        # Server names catch Dalim -> Dedalus, but not a same-server reconnect or
-        # A -> B -> A during ping: both names read A while teardown loss crosses
-        # sessions. Bracket both the server and tun0's ifindex generation. Any
-        # changed/disconnected/unmeasurable endpoint discards the whole window.
         server_before = self.bluetit.status()
         generation_before = self.bluetit.tun_generation()
 
-        # Bracket the probe's byte counters too, so throughput covers the SAME
-        # interval the loss figure describes. Not the whole 60 s window and not
-        # either status call - a goldcrest call can take 25 s, and averaging the
-        # traffic over that would describe a different interval than the loss.
         before, started = self.bluetit.tun_bytes(), self.clock()
         loss = self.probe()
         throughput = self.throughput_since(before, started)
@@ -1865,9 +1503,6 @@ class Agent:
 
         with self.lock:
             self.current_server = current
-            # A reconnect-spanning rate/loss is not attributable to the current
-            # server. Clear it instead of leaving a stale value next to the new
-            # current_server label (#686/#690).
             self.throughput_bps = throughput if same_session else None
             self.current_loss_pct = loss if same_session and loss is not None else None
             if not same_session:
@@ -1875,13 +1510,6 @@ class Agent:
                 self.consecutive_bad_server = None
                 self.consecutive_bad_generation = None
 
-        # TWO `--bluetit-status` calls and two cheap ifindex reads per window,
-        # before and after the probe, and none per scrape. One status call fixed
-        # the stale current_server metric in #690; the second plus the ifindex
-        # generation bind this safety-critical verdict to one unchanged session.
-        # Status stays in the loop, not render_metrics(): a call can take 25 s
-        # plus a 15 s subprocess backstop, which would blow the Prometheus scrape
-        # timeout and lose every metric.
         if not same_session:
             log.info(
                 "discarding probe window because tunnel session changed during "
@@ -1901,16 +1529,6 @@ class Agent:
                 self.consecutive_bad_generation = None
             return False
 
-        # NOTHING about `throughput` may appear between here and the verdict.
-        # PR #764 put a gate here that returned "healthy" whenever tun0 was busy,
-        # and #771 removed it: a lossy-but-still-delivering server was declared
-        # healthy, and since a seeding box is almost never under the floor the
-        # detector was unreachable in practice while looking armed. `throughput`
-        # is measured above for the METRICS only - it is not an input to this
-        # decision, and an unmeasurable window is a missing metric, not a veto.
-        #
-        # A fully dead tunnel is EXEMPT. The liveness probe plus `quick` already
-        # own that path, and a switch cannot fix a Bluetit that is not connected.
         if not current:
             log.warning("loss=%.2f%% but Bluetit is not connected - the liveness probe "
                         "owns this, not the agent", loss)
@@ -1918,9 +1536,6 @@ class Agent:
 
         with self.lock:
             server_key = current.lower()
-            # same_session proves this ONE window did not cross a reconnect.
-            # Carry the ifindex too so a reconnect completed BETWEEN windows
-            # starts a new run even when it returns to the same server name.
             if (self.consecutive_bad_server != server_key
                     or self.consecutive_bad_generation != generation_after):
                 self.consecutive_bad = 0
@@ -1938,13 +1553,6 @@ class Agent:
             self.consecutive_bad_server = None
             self.consecutive_bad_generation = None
 
-        # Submit the MEASUREMENT before asking whether a switch is allowed.
-        # Cooldown and the daily cap govern peer-disrupting actions; they do not
-        # make three sustained in-tunnel loss windows untrue. The one daemon
-        # writer persists it when storage is available, but hard NFS can never
-        # hold this control loop before allowed()/switch() (#792 hardening).
-        # Dry-run is the one exception: changing the shared ranking would be an
-        # action, so rollback to dry-run remains behaviorally inert.
         if self.cfg.dry_run:
             log.info(
                 "DRY RUN would publish in-tunnel bad-server verdict "
@@ -1965,9 +1573,6 @@ class Agent:
         return True
 
     def run(self):
-        # Local emptyDir first. If the one ranking daemon wedges on its initial
-        # hard-NFS open, boot_check() can still use this document only through
-        # its original generated_at/TTL, then fail open to quick.
         self.load_cache()
         self.ranking_reader.start()
         self.boot_check()
@@ -1976,10 +1581,6 @@ class Agent:
             try:
                 self.watch_once()
             except Exception:
-                # Nothing in the loop may kill this process. A crash-looping
-                # agent container makes the POD not-ready, which pulls
-                # qBittorrent out of its Service endpoints and takes the WebUI
-                # and every *arr download client down with it.
                 log.exception("watch cycle crashed, staying up for the next one")
 
     def close(self):
@@ -1988,9 +1589,6 @@ class Agent:
         self.verdict_publisher.shutdown()
 
 
-# --------------------------------------------------------------------------
-# Metrics
-# --------------------------------------------------------------------------
 
 
 def render_metrics(agent):
@@ -2001,32 +1599,9 @@ def render_metrics(agent):
         switching = agent.switching
         switches = dict(agent.switches)
         throughput = agent.throughput_bps
-    # Both of these are MEASURED HERE, outside the lock, not taken off a field on
-    # the agent. A cached value is only ever as fresh as its last writer, and in
-    # both cases the only writer was the switch path - which a healthy pod never
-    # enters, so the age froze at its boot value (#686) and the device flag
-    # published the `True` it was initialised with, without ever having looked
-    # (#690). Do NOT "simplify" either of these back to an attribute lookup.
-    #
-    # Both are cheap enough to sit in the HTTP handler thread: ranking age parses
-    # immutable bytes supplied by the one daemon reader, and device state is one
-    # os.listdir. There is NO ranking stat/open/read here: hard NFS must never
-    # own a Prometheus handler. Anything needing a goldcrest call is refreshed in
-    # watch_once() instead, because a 25 s D-Bus call would blow the scrape
-    # timeout and take the whole target down.
     age = agent.ranking_age_now()
     device_ok = agent.bluetit.tun_present()
-    # Same rule, same reason: MEASURED here, at scrape time, two /sys reads. This
-    # is the raw counter, so a reader (or #736's alert) can rate() it without
-    # trusting anything the agent cached. The windowed rate below is a different
-    # thing - last probe window's average - and it is absent, not stale, when a
-    # window could not produce one.
     tun_bytes = agent.bluetit.tun_bytes()
-    # Same rule once more, and this one is the ENFORCEMENT's own state rather than
-    # a count of what the switch path happened to increment. snapshot() is
-    # read-only and lock-free on purpose - see its docstring - and costs one
-    # clock() call plus a filter of at most max_switches_per_day entries, no file
-    # I/O and no subprocess, so it belongs in the handler thread (#783).
     budget_used, budget_exhausted, cooldown_left = agent.budget.snapshot()
     lines = [
         "# HELP vpn_agent_dry_run Whether the agent is logging switches instead of applying them.",
@@ -2039,14 +1614,6 @@ def render_metrics(agent):
         lines.append('vpn_agent_switches_total{reason="%s"} %d'
                      % (reason, switches.get(reason, 0)))
     lines += [
-        # What vpn_agent_switches_total above cannot say, per reason it cannot:
-        # _finish() calls budget.record() unconditionally but increments
-        # switches[] only `if connected and counted_as`, so a switch that ends
-        # with no tunnel (and a dry-run switch) spends a slot and moves no
-        # counter; Agent.switches is in-memory while the history is on disk
-        # exactly so it outlives an agent.py restart; and the counter is
-        # monotonic with no window while the budget prunes on a rolling 24 h.
-        # These three read the budget itself, so there is nothing left to infer.
         "# HELP vpn_agent_switch_budget_used Switch slots spent inside the enforced rolling 24 h window, counting every reason - len(SwitchBudget.history) after pruning, measured at scrape time. Counts switches vpn_agent_switches_total cannot see (no tunnel, dry run) and survives an agent.py restart.",
         "# TYPE vpn_agent_switch_budget_used gauge",
         "vpn_agent_switch_budget_used %d" % budget_used,
@@ -2062,14 +1629,6 @@ def render_metrics(agent):
         "# HELP vpn_agent_tunnel_device_ok Whether the device qBittorrent is bound to exists, read from /sys/class/net at scrape time. Read it together with vpn_agent_switch_in_progress: 0 during a switch is the normal teardown, not a failure.",
         "# TYPE vpn_agent_tunnel_device_ok gauge",
         "vpn_agent_tunnel_device_ok %d" % (1 if device_ok else 0),
-        # The companion the scrape-time read needs, rather than fudging the read
-        # itself. The device is deleted and rebuilt on every switch, so a scrape
-        # inside that window honestly sees no device - suppressing the metric
-        # there would trade a true 0 for an absent series, and absent is the one
-        # state that cannot be told apart from "the agent stopped answering".
-        # Emitting both lets a reader (or an alert) say `device_ok == 0 unless
-        # switch_in_progress` and be exactly right. The window is bounded by
-        # recovery_budget (120 s) and capped at 3 switches a day.
         "# HELP vpn_agent_switch_in_progress Whether a switch is between its disconnect and its outcome, the window in which the tunnel device is torn down and rebuilt.",
         "# TYPE vpn_agent_switch_in_progress gauge",
         "vpn_agent_switch_in_progress %d" % (1 if switching else 0),
@@ -2086,11 +1645,6 @@ def render_metrics(agent):
             "# TYPE vpn_agent_tunnel_bytes_total counter",
             "vpn_agent_tunnel_bytes_total %d" % tun_bytes,
         ]
-    # Absent, never 0, when the window produced no number. `vpn_agent_tunnel_bytes_total`
-    # above is published independently and is measured at scrape time, so a reader
-    # keeps the raw counter and can rate() it over its own window even when this
-    # series is gone - which is what makes omitting this one cheap. A placeholder
-    # here would be a value that reads as measured and is not (#686/#690/#771).
     if throughput is not None:
         lines += [
             "# HELP vpn_agent_tunnel_throughput_bytes_per_sec rx+tx bytes/sec over the last probe window, i.e. the same interval vpn_agent_current_loss_pct describes. Diagnostic only - it decides nothing (#771). Absent when the window produced no honest number (device gone, tun0 rebuilt mid-window so the counters reset, or the window was shorter than MIN_THROUGHPUT_INTERVAL_SECONDS and too short to measure - #768).",
@@ -2099,11 +1653,6 @@ def render_metrics(agent):
         ]
     if loss is not None:
         lines += [
-            # This is the whole degradation decision again (#771). Read it next to
-            # vpn_agent_tunnel_throughput_bytes_per_sec, but read that as context
-            # and not as an excuse: a busy tunnel at high loss is NOT known to be
-            # fine - measured 2026-08-04, 13.66 MB/s came with 0.0% loss, so
-            # throughput does not explain loss away. See Config.bad_loss_pct.
             "# HELP vpn_agent_current_loss_pct Last measured ICMP loss to the in-tunnel gateway.",
             "# TYPE vpn_agent_current_loss_pct gauge",
             "vpn_agent_current_loss_pct %s" % loss,
@@ -2169,9 +1718,6 @@ def main():
     try:
         agent.run()
     finally:
-        # Both NFS workers are daemons by design, and close() never joins either.
-        # A thread asleep forever inside a hard-NFS syscall cannot delay process
-        # or container shutdown.
         agent.close()
     return 0
 

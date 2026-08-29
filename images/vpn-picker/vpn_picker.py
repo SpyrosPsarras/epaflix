@@ -31,13 +31,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 log = logging.getLogger("vpn-picker")
 
-# Contract version. A breaking change ships as a new filename (ranking.v2.json)
-# so the non-GitOps consumer on Nick's VM can lag safely - see Component 3.
 SCHEMA = 1
 
-# Agent verdict contract (#792). This is intentionally separate from ranking's
-# schema: consumers still receive the exact Component 3 ranking document, while
-# producers can independently add bounded, temporary in-tunnel evidence.
 VERDICT_SCHEMA = 1
 VERDICT_SOURCE = "vpn-agent"
 VERDICT_MAX_BYTES = 65536
@@ -70,8 +65,6 @@ class Config:
     def __init__(self):
         self.api_url = os.environ.get("VPN_PICKER_API_URL", "https://airvpn.org/api/")
         self.api_key = os.environ.get("AIRVPN_API_KEY", "")
-        # Must match `airwhitecountrylist` in bluetit-config.yaml. A winner
-        # outside the pool is refused on connect, not silently ignored.
         self.countries = [
             c.strip().lower()
             for c in os.environ.get("VPN_PICKER_COUNTRIES", "nl,de,se").split(",")
@@ -87,23 +80,12 @@ class Config:
         self.output_path = os.environ.get(
             "VPN_PICKER_OUTPUT", "/media/.vpn-picker/ranking.json"
         )
-        # ranking.json is the PUBLIC, verdict-filtered view and therefore cannot
-        # reconstruct a hidden server after a scorer restart. Persist the last
-        # measured pre-ejection bases separately. The journal keeps both the new
-        # candidate and the currently served base, so a crash or failed ranking
-        # publish between the two atomic replaces still leaves a base matching
-        # the public file (#792 review).
         self.base_state_path = os.environ.get(
             "VPN_PICKER_BASE_STATE",
             os.path.join(
                 os.path.dirname(self.output_path) or ".", "ranking-base.json"
             ),
         )
-        # Agents publish one atomic file per producer+server under this shared
-        # directory. The scorer is the only writer of ranking.json and merges
-        # every producer, so the cluster and Nick's instance cannot erase one
-        # another. Defaults are code-only on purpose; deploy wiring follows the
-        # first image PR and keeps issue #792 open until then.
         self.verdict_dir = os.environ.get(
             "VPN_PICKER_VERDICT_DIR",
             os.path.join(os.path.dirname(self.output_path) or ".", "verdicts"),
@@ -117,10 +99,6 @@ class Config:
         self.max_ejection_fraction = _env_float(
             "VPN_PICKER_MAX_EJECTION_FRACTION", MAX_EJECTION_FRACTION
         )
-        # A normal score/probe cycle is 15 minutes. Reapply verdicts to the last
-        # measured base ranking every few seconds so a pod recreation cannot
-        # race that cadence and boot straight back onto the server just ejected.
-        # This does no API call and no ICMP probe, and preserves generated_at.
         self.verdict_recheck_seconds = _env_int(
             "VPN_PICKER_VERDICT_RECHECK_SECONDS", VERDICT_RECHECK_SECONDS
         )
@@ -128,10 +106,6 @@ class Config:
         self.api_timeout = _env_int("VPN_PICKER_API_TIMEOUT", 30)
 
 
-# --------------------------------------------------------------------------
-# Component 2 - the scoring rule. Pure functions, so the fixture test in
-# selftest.py exercises the real ranking code and not a copy of it.
-# --------------------------------------------------------------------------
 
 
 def headroom(server):
@@ -173,9 +147,6 @@ def rank_survivors(probed, max_loss_pct):
     return survivors
 
 
-# --------------------------------------------------------------------------
-# API + probe
-# --------------------------------------------------------------------------
 
 
 def fetch_servers(cfg):
@@ -189,9 +160,6 @@ def fetch_servers(cfg):
     return servers
 
 
-# iputils prints exact counts; the "N% packet loss" field it also prints is
-# rounded to a whole percent, which cannot express the 1% gate. Parse the
-# counts and do the division ourselves.
 _SENT_RECV = re.compile(r"(\d+) packets transmitted, (\d+) (?:packets )?received")
 _RTT = re.compile(r"(?:rtt|round-trip) min/avg/max(?:/mdev)? = [\d.]+/([\d.]+)/")
 
@@ -206,8 +174,6 @@ def parse_ping(text):
         raise ValueError("ping transmitted 0 packets")
     loss_pct = round(100.0 * (sent - received) / sent, 2)
     rtt = _RTT.search(text)
-    # 100% loss prints no rtt line at all. Such a candidate is rejected by the
-    # gate anyway, so a sentinel RTT is enough to keep it sortable.
     rtt_ms = round(float(rtt.group(1)), 2) if rtt else float("inf")
     return loss_pct, rtt_ms
 
@@ -226,9 +192,6 @@ def probe(ip, cfg):
     comment on `net.ipv4.ping_group_range`).
     """
     interval = 1.0 / cfg.probe_rate
-    # A `ping -i` below 0.2 s needs root or CAP_NET_RAW. The default rate of
-    # 5/s sits exactly on that line; raising VPN_PICKER_PROBE_RATE past 5
-    # only works because the container runs as uid 0.
     expected = cfg.probe_count * interval
     result = subprocess.run(
         ["ping", "-n", "-q", "-c", str(cfg.probe_count), "-i", f"{interval:g}", "-W", "2", ip],
@@ -236,8 +199,6 @@ def probe(ip, cfg):
         text=True,
         timeout=expected + 60,
     )
-    # `ping` exits 1 on total loss and still prints the summary, so the return
-    # code alone is not a failure signal. Only an unparseable body is.
     return parse_ping(result.stdout + result.stderr)
 
 
@@ -270,9 +231,6 @@ def probe_all(candidates, cfg):
         return [r for r in pool.map(one, candidates) if r is not None]
 
 
-# --------------------------------------------------------------------------
-# #792 - shared agent verdicts and bounded temporary ranking ejection
-# --------------------------------------------------------------------------
 
 
 def parse_verdict(payload, cfg, now_epoch=None):
@@ -427,9 +385,6 @@ def apply_ejections(survivors, verdicts, max_fraction):
     return kept, ejected, capped
 
 
-# --------------------------------------------------------------------------
-# Component 3 - the published ranking, and the atomic publish
-# --------------------------------------------------------------------------
 
 
 def _ranking_number(value, field, minimum=None, maximum=None):
@@ -520,8 +475,6 @@ def publish(payload, path):
             os.fsync(fh.fileno())
         os.replace(tmp, path)
     except Exception:
-        # A failed publish must not leave a stray temp file behind for the next
-        # reader to trip over.
         try:
             os.unlink(tmp)
         except OSError:
@@ -623,16 +576,6 @@ def load_persisted_base(cfg, public_servers, generated_at):
             payload = fh.read(BASE_STATE_MAX_BYTES + 1)
         bases = parse_base_state(payload)
     except FileNotFoundError:
-        # Missing is ambiguous: it may be the first pre-#792 startup, or it may
-        # have been lost AFTER an ejected public ranking was published. There is
-        # no marker in ranking schema 1 that distinguishes those histories, so
-        # never guess that the filtered public rows are the measured base.
-        #
-        # Fail open with only what is knowable: preserve the public bytes and
-        # their original generated_at, disable further verdict reconciliation,
-        # and let consumers discard that ranking at its own TTL and use `quick`.
-        # A successful API/probe cycle writes a new journal and restores normal
-        # reconciliation. Hidden rows cannot be reconstructed here.
         log.warning(
             "base state at %s is missing; preserving the public ranking only "
             "until its original TTL and disabling verdict reconciliation until "
@@ -662,9 +605,6 @@ def load_persisted_base(cfg, public_servers, generated_at):
     return [], None
 
 
-# --------------------------------------------------------------------------
-# State + HTTP
-# --------------------------------------------------------------------------
 
 
 class State:
@@ -684,9 +624,6 @@ class State:
         self.last_cycle_ok = False
         self.active_verdicts = 0
         self.ejected = 0
-        # Last scoring cycle BEFORE verdict ejection. Needed to apply a newly
-        # published verdict immediately without another 60 s ICMP probe, and to
-        # restore an expired ejection. Never served directly.
         self.base_servers = []
         self.base_generated_at = None
 
@@ -764,8 +701,6 @@ def render_metrics(state):
         "# TYPE vpn_picker_servers_ejected gauge",
         f"vpn_picker_servers_ejected {ejected}",
     ]
-    # Every probed candidate, not only the survivors - the rejected one at 22%
-    # loss is the interesting series.
     for label, help_text in (
         ("loss_pct", "Measured ICMP packet loss percent."),
         ("rtt_ms", "Measured average ICMP round-trip time in ms."),
@@ -821,9 +756,6 @@ def serve(state, cfg):
     log.info("serving ranking and metrics on :%s", cfg.listen_port)
 
 
-# --------------------------------------------------------------------------
-# Cycle
-# --------------------------------------------------------------------------
 
 
 def _log_ejections(base_survivors, ejected, capped, cfg):
@@ -855,9 +787,6 @@ def refresh_ejections(state, cfg):
     base_survivors, generated_at = state.base_snapshot()
     if not base_survivors or not generated_at:
         return False
-    # This path runs every few seconds. Malformed files are warned by the full
-    # 15-minute scorer cycle; repeating the warning here would make one stale
-    # file a permanent log flood.
     verdicts = load_active_verdicts(cfg, log_issues=False)
     survivors, ejected, capped = apply_ejections(
         base_survivors, verdicts, cfg.max_ejection_fraction
@@ -869,11 +798,6 @@ def refresh_ejections(state, cfg):
         try:
             publish(payload, cfg.output_path)
         except Exception as exc:
-            # File and HTTP are two transports for the SAME bytes. Do not commit
-            # the desired payload to memory if the atomic file replace failed:
-            # that would split the consumers, and the next pass would compare
-            # against memory, see no change, and never retry the NFS write
-            # (#792 review).
             log.error("verdict refresh publish to %s failed: %s", cfg.output_path, exc)
             return False
         _log_ejections(base_survivors, ejected, capped, cfg)
@@ -949,11 +873,6 @@ def run_cycle(state, cfg):
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     payload = build_document(survivors, cfg, generated_at=generated_at)
 
-    # Persist the PRE-ejection base first. ranking.json cannot reconstruct rows
-    # it omits, so publishing an ejected view without this recovery state would
-    # turn a finite verdict lease into a permanent ban after scorer restart. The
-    # journal also carries the base behind the currently served payload: if the
-    # public replace below fails, a restart still finds the old matching base.
     served_base, served_generated_at = state.base_snapshot()
     base_state = build_base_state(
         base_survivors, generated_at, served_base, served_generated_at
@@ -974,9 +893,6 @@ def run_cycle(state, cfg):
     try:
         publish(payload, cfg.output_path)
     except Exception as exc:
-        # The file and HTTP endpoints are the same contract. Serving the new
-        # bytes only over HTTP would split Nick from k3s and report success after
-        # a failed publish, so neither state nor base advances (#792 review).
         log.error("publish to %s failed; keeping the last good ranking: %s",
                   cfg.output_path, exc)
         with state.lock:
@@ -1025,13 +941,8 @@ def main():
         try:
             if now >= next_cycle:
                 started = now
-                # Set this BEFORE the cycle: an unexpected exception must not
-                # leave next_cycle in the past and turn the outer safety loop
-                # into a hot retry storm.
                 next_cycle = started + cfg.interval_seconds
                 run_cycle(state, cfg)
-                # Start-to-start cadence is preserved even though the parallel
-                # ICMP probes take about 60 s.
             else:
                 refresh_ejections(state, cfg)
         except Exception:

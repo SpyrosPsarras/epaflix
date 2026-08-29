@@ -1,24 +1,4 @@
 ---
-# Bazarr - Subtitle Manager (Development Branch)
-#
-# Sonarr/Radarr connection settings (#465) - PVC-only, NOT git-seeded, verify
-# after any config PVC rebuild (they come back empty/default otherwise):
-#   sonarr: ip=sonarr.servarr.svc.cluster.local port=8989 ssl=false
-#   radarr: ip=radarr.servarr.svc.cluster.local port=7878 ssl=false
-#   sonarr.apikey / radarr.apikey = secrets.enc.yaml `sonarr_api_key` /
-#     `radarr_api_key` - so bazarr is a consumer on every *arr key rotation
-#     (#712, see the rotation runbook in 2-k3s/08.servarr/README.md).
-# Live in /config/config/config.yaml on the bazarr pod, under `sonarr:`/`radarr:`.
-# Why internal Service DNS and not the public *.epaflix.com hostname: bazarr's
-# SignalR client has no Authentik session, so /signalr/negotiate on the public
-# host returns a 302 (Authentik login) that bazarr can't parse as JSON -> the
-# SignalR feed dies in a loop (20 restarts/4d10h, confirmed 2026-07-26, #466).
-# /api/v3 calls kept working the whole time, because back then a priority-20
-# `/api` bypass still existed on the public host, which is why it looked
-# half-healthy. That bypass is gone since #296 (2026-08-10), so today the
-# public host would fail bazarr on every path instead of only /signalr - the
-# same conclusion, reached faster. See 2-k3s/08.servarr/README.md for the
-# general in-cluster-DNS policy this follows (#465, #466, #468).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -27,9 +7,6 @@ metadata:
   labels:
     app: bazarr
   annotations:
-    # Reloader (#299): rolls on servarr-postgres rotation (shared by
-    # bazarr/lingarr/prowlarr/radarr/seerr, so all 5 restart together on a
-    # credential change — accepted, see PR for the tradeoff).
     secret.reloader.stakater.com/reload: "servarr-postgres"
 spec:
   replicas: 1
@@ -63,7 +40,6 @@ spec:
               value: "568"
             - name: TZ
               value: "Europe/Oslo"
-            # PostgreSQL configuration
             - name: POSTGRES_ENABLED
               value: "true"
             - name: POSTGRES_HOST

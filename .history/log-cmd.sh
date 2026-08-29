@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Command logger wrapper - logs individual commands with context
-# Usage: ./log-cmd.sh "Description of what this does" "command to run"
 
 set -euo pipefail
 
@@ -16,18 +14,14 @@ DATE=$(date +%Y-%m-%d)
 TIME=$(date +%H:%M:%S)
 LOG_FILE="${3:-.history/${DATE}-commands.log}"
 
-# Create log file if it doesn't exist
 if [ ! -f "${LOG_FILE}" ]; then
     cat > "${LOG_FILE}" << EOF
-# Command Log
-# Date: ${DATE}
 
 ---
 
 EOF
 fi
 
-# Log the command entry
 {
     echo ""
     echo "## [${DATE} ${TIME}] - ${DESCRIPTION}"
@@ -41,7 +35,6 @@ fi
     echo '```'
 } >> "${LOG_FILE}"
 
-# Execute command and capture output
 if eval "${COMMAND}" 2>&1 | tee -a "${LOG_FILE}"; then
     EXIT_CODE=0
     RESULT="Success"
@@ -50,7 +43,6 @@ else
     RESULT="Failed (exit code: ${EXIT_CODE})"
 fi
 
-# Log the result
 {
     echo '```'
     echo ""

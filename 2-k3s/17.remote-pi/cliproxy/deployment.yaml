@@ -1,25 +1,3 @@
-# Owned by ArgoCD Application "remote-pi".
-# Rationale: run exactly one CLIProxyAPI writer against the shared CNPG Postgres
-# store, so provider tokens and config survive pod replacement without a PVC.
-#
-# Hardened to match the relay pod next door: non-root, read-only root
-# filesystem, all capabilities dropped. #862.
-#
-# This was NOT possible as originally reasoned, and the original reasoning was
-# wrong. It assumed the process rewrites `/CLIProxyAPI/config.yaml` in place and
-# needs `/root/.cli-proxy-api`. With the Postgres backend it does neither -
-# checked on the running pod, both paths were absent. Config and auth live in
-# Postgres and are mirrored to `PGSTORE_LOCAL_PATH`, which is the mounted
-# emptyDir. The only writes are there, plus `/tmp`.
-#
-# Proven before changing anything, with a throwaway probe Deployment running
-# this same image under runAsNonRoot + readOnlyRootFilesystem and an isolated
-# PGSTORE_SCHEMA so it could not touch the live tables: it reached 1/1, logged
-# `postgres-backed token store enabled`, downloaded the management SPA, and
-# served /management.html with HTTP 200 as uid 1000 with a read-only rootfs.
-#
-# HOME is redirected because the image's default is /root, which uid 1000
-# cannot write. Anything that still wants a home lands on the emptyDir.
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -55,14 +33,6 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       initContainers:
-        # Reconciles the two config values git must own, before the proxy starts.
-        # Neither has an environment variable, so without this they are live-only
-        # database state that a rebuild loses - #861.
-        #
-        # Plain psql on purpose. The first attempt pip-installed psycopg2 and
-        # pyyaml at pod start and failed twice over: no writable HOME under the
-        # non-root securityContext from #862, and psycopg2-binary ships no musl
-        # wheels. This needs no network, no interpreter and no packages.
         - name: reconcile-config
           image: docker.io/library/postgres:16
           command:
@@ -95,12 +65,6 @@ spec:
               value: cliproxy
             - name: PGSSLMODE
               value: require
-            # Spliced into the openai-compatibility block of the config row by
-            # reconcile-config.psql. Passed as env and read there with a psql
-            # backtick \set, NOT as a --set= argument: kubelet expands $(VAR)
-            # into args, which would put the key in this container's argv where
-            # any `ps` inside it can read it. Env is readable only through
-            # /proc/<pid>/environ by the same uid, which is a smaller surface.
             - name: OPENROUTER_API_KEY
               valueFrom:
                 secretKeyRef:
@@ -117,14 +81,6 @@ spec:
               memory: "32Mi"
             limits:
               memory: "128Mi"
-        # Places the pi-bridge plugin .so on the plugins emptyDir. Git owns the
-        # version because the read-only rootfs leaves the panel's store-install
-        # button nowhere durable to write. Fails closed on checksum mismatch,
-        # open on an unreachable GitHub - see the script and #858.
-        #
-        # These four args are the ONLY place the pi-bridge version is pinned. The
-        # sha256 is the one from the release's own checksums.txt. A bump is an
-        # edit here. Without the plugin the four quota routes 404.
         - name: fetch-pi-bridge
           image: docker.io/library/alpine:3.21
           command:
@@ -155,16 +111,6 @@ spec:
               memory: "32Mi"
             limits:
               memory: "128Mi"
-        # Places the GitHub Copilot provider plugin .so on the same plugins
-        # emptyDir. Copilot is not a native CLIProxyAPI provider - upstream keeps
-        # it in the separate CLIProxyAPIPlus product - so this third-party plugin
-        # is what makes gpt-5.6-sol reachable here. Same fetch contract as
-        # pi-bridge: closed on checksum mismatch, open on an unreachable GitHub.
-        # Without it the Copilot models are simply absent from /v1/models.
-        #
-        # This library is 37.3 MiB, which is what took the plugins emptyDir
-        # sizeLimit below from 64Mi to 128Mi. See the numbers there: 64Mi would
-        # have held it, with 6% to spare, which is too little to leave alone.
         - name: fetch-copilot-plugin
           image: docker.io/library/alpine:3.21
           command:
@@ -195,24 +141,6 @@ spec:
               memory: "32Mi"
             limits:
               memory: "128Mi"
-        # Tails the request-log directory and prints one JSON line per request, so
-        # the MESSAGES land in Loki next to the access lines and Grafana is the
-        # only place anyone has to look - #1016.
-        #
-        # A native sidecar (initContainer + restartPolicy: Always, GA since 1.29,
-        # this cluster runs v1.35.5+k3s1), NOT an ordinary container. Two reasons
-        # that matter here: it is guaranteed to be running before the proxy
-        # starts serving, so no request goes untailed, and it is terminated with
-        # the pod instead of keeping a Job-like pod alive.
-        #
-        # It emits a DELTA, not the file. A payload is ~1.1MB because an agent
-        # replays the whole conversation every call; at the observed 106
-        # `/v1/messages` per hour, shipping files whole would be ~2.8GB/day
-        # against a 15Gi Loki PVC. Last turn + reply is ~1KB. See the script.
-        #
-        # No promtail change is needed: promtail scrapes every container in the
-        # pod, proven by loki-0 shipping both `loki` and `loki-sc-rules` as
-        # separate `container` label values.
         - name: transcripts
           restartPolicy: Always
           image: docker.io/library/python:3.13-alpine
@@ -226,25 +154,15 @@ spec:
               drop:
                 - ALL
           env:
-            # Python buffers stdout when it is a pipe, which would hold lines
-            # back from promtail for as long as the buffer takes to fill. The
-            # script also flushes explicitly; this covers the interpreter's own
-            # output, including a traceback.
             - name: PYTHONUNBUFFERED
               value: "1"
-            # /scripts is a read-only ConfigMap mount. Python tolerates not being
-            # able to write __pycache__, but saying so avoids the attempt.
             - name: PYTHONDONTWRITEBYTECODE
               value: "1"
-            # Nothing is written, but the default is /root and uid 1000 cannot
-            # write there if anything ever tries.
             - name: HOME
               value: /tmp
           volumeMounts:
             - name: scripts
               mountPath: /scripts
-            # Read-only: this container must never be able to corrupt or delete
-            # the payloads it is reporting on, and it has no reason to write.
             - name: work
               mountPath: /var/lib/cliproxy
               readOnly: true
@@ -266,18 +184,8 @@ spec:
               drop:
                 - ALL
           env:
-            # PG_PASSWORD MUST stay above PGSTORE_DSN. The DSN below uses
-            # kubelet dependent-env-var expansion, and kubelet only substitutes
-            # `$(VAR)` from variables already declared earlier in this list.
-            # Move it down and the pod gets a literal `$(PG_PASSWORD)` in its
-            # connection string.
-            # The image's HOME is /root, which uid 1000 cannot write.
             - name: HOME
               value: /var/lib/cliproxy/home
-            # The image bakes ENV TZ=Asia/Shanghai. The management UI formats
-            # the live-traffic bucket labels server-side, so without this the
-            # x-axis reads 6h ahead of a CEST wall clock. tzdata is present in
-            # the image, so overriding TZ is enough.
             - name: TZ
               value: Europe/Oslo
             - name: PG_PASSWORD
@@ -290,45 +198,12 @@ spec:
                 secretKeyRef:
                   name: cliproxy-secrets
                   key: management-password
-            # Storage backend is picked by env-var presence at startup:
-            # PGSTORE_DSN > OBJECTSTORE_ENDPOINT > GITSTORE_GIT_URL > local
-            # files. Setting this is what selects Postgres.
             - name: PGSTORE_DSN
               value: postgresql://cliproxy:$(PG_PASSWORD)@postgres-rw.postgres-system.svc.cluster.local:5432/cliproxy?sslmode=require
-            # Both of these default to paths relative to the WORKDIR. Point
-            # them at the emptyDir so the spool and the downloaded management
-            # SPA do not grow the container layer.
-            #
-            # PGSTORE_LOCAL_PATH, not PGSTORE_SPOOL_DIR. Some upstream docs name
-            # the latter but this build does not read it - #867. The name was
-            # verified against the running binary, not the docs:
-            #   grep -oa 'PGSTORE_[A-Z_]*' /CLIProxyAPI/CLIProxyAPI | sort -u
-            # on v7.2.123 returns exactly PGSTORE_DSN, PGSTORE_LOCAL_PATH and
-            # PGSTORE_SCHEMA. With the wrong name the spool silently falls back
-            # to the WORKDIR and grows the container layer instead - there is no
-            # error, so check the startup log line `workspace path:` after any
-            # image bump.
-            # LOCAL_PATH is a BASE directory - the binary appends `pgstore/`
-            # to it itself. Setting it to /var/lib/cliproxy/pgstore produced
-            # /var/lib/cliproxy/pgstore/pgstore, which worked but read wrong.
             - name: PGSTORE_LOCAL_PATH
               value: /var/lib/cliproxy
             - name: MANAGEMENT_STATIC_PATH
               value: /var/lib/cliproxy/static
-            # Where request-log payload files land (#1007). The ONLY env var the
-            # binary offers for the log directory - verified in
-            # internal/util/util.go WritablePath(), which reads WRITABLE_PATH or
-            # writable_path and nothing else. There is no *LOG* env var at all:
-            #   grep -oa 'CLIPROXY[A-Z_]*\|[A-Z_]*LOG[A-Z_]*' CLIProxyAPI
-            # returns no logging knob, which is why `request-log` itself has to
-            # be reconciled into the Postgres config row instead.
-            #
-            # Without this, ResolveLogDirectory() falls through: `./logs`
-            # relative to the WORKDIR is unwritable under #862's read-only
-            # rootfs, so it lands on `<auth-dir>/logs` =
-            # /var/lib/cliproxy/pgstore/auths/logs. That happens to work, but it
-            # buries request payloads inside the credential directory. Naming the
-            # base explicitly puts them in /var/lib/cliproxy/logs instead.
             - name: WRITABLE_PATH
               value: /var/lib/cliproxy
           ports:
@@ -338,17 +213,10 @@ spec:
           volumeMounts:
             - name: work
               mountPath: /var/lib/cliproxy
-            # With a read-only rootfs /tmp must be a volume or anything writing
-            # a temp file fails.
             - name: tmp
               mountPath: /tmp
-            # `plugins.dir` in config.yaml points here. A subdirectory of the
-            # image WORKDIR, so the rest of /CLIProxyAPI stays read-only.
             - name: plugins
               mountPath: /CLIProxyAPI/plugins
-          # tcpSocket, not httpGet. `/v1/*` requires a client API key, and
-          # `/management.html` can legitimately 404 until the SPA download from
-          # GitHub finishes. A listening socket is the only honest signal here.
           readinessProbe:
             tcpSocket:
               port: 8317
@@ -378,10 +246,6 @@ spec:
         - name: tmp
           emptyDir:
             sizeLimit: 64Mi
-        # pi-bridge is 10.0 MiB, the Copilot provider plugin is 37.3 MiB, and
-        # each zip is deleted after unpacking. Peak during the Copilot fetch is
-        # 60.0 MiB, so 64Mi would still have fit, with 6% left. This is headroom
-        # for the next plugin or a larger release, not a measured overflow.
         - name: plugins
           emptyDir:
             sizeLimit: 128Mi

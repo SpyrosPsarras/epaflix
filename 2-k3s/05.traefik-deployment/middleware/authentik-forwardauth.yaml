@@ -1,19 +1,4 @@
 ---
-# Authentik ForwardAuth Middleware for Traefik
-# Based on: https://docs.goauthentik.io/add-secure-apps/providers/proxy/server_traefik/
-#
-# Usage in IngressRoute:
-#   middlewares:
-#     - name: authentik-forwardauth
-#       namespace: traefik-system
-#
-# Prerequisites:
-# 1. Create Proxy Provider in Authentik (Forward auth mode)
-# 2. Create Application in Authentik linked to the provider
-# 3. Ensure Authentik embedded outpost is enabled
-#
-# IMPORTANT: You also need a route for /outpost.goauthentik.io/ path
-# with HIGHER priority than your app route (see outpost-ingressroute.yaml)
 
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
@@ -22,12 +7,9 @@ metadata:
   namespace: traefik-system
 spec:
   forwardAuth:
-    # Embedded outpost URL
-    # Service port 80 maps to container port 9000 (outpost API)
     address: http://authentik-server.app-authentik.svc.cluster.local/outpost.goauthentik.io/auth/traefik
     trustForwardHeader: true
     authResponseHeaders:
-      # Headers passed from Authentik to your app (user info)
       - X-authentik-username
       - X-authentik-groups
       - X-authentik-entitlements

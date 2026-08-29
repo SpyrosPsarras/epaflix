@@ -1,8 +1,4 @@
 ---
-# ArgoCD Application: Syncthing (internal-only, RAID-backed sync node).
-# Source:      this repo, path 2-k3s/15.syncthing, plain kustomize.
-# Destination: in-cluster `syncthing` namespace.
-# Sync:        selfHeal on, prune enabled.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

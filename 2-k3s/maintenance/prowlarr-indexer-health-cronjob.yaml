@@ -1,46 +1,4 @@
 ---
-# Hourly Prowlarr indexer-backoff health check (Issue #607).
-#
-# Prowlarr already tracks indexer failures itself and raises a health warning
-# once an indexer has been failing for more than 6 hours
-# (`IndexerLongTermStatusCheck`, verified live 2026-08-03 — see below). Nothing
-# was watching that endpoint, so a broken indexer (AvistaZ, 1337x — #471) sat
-# silently excluded from every search for days with zero signal to anyone.
-#
-# This job does NOT reimplement Prowlarr's backoff/threshold logic — it just
-# polls the health endpoint Prowlarr already computes and surfaces
-# `IndexerLongTermStatusCheck` specifically (not every health entry — e.g.
-# `IndexerNoDefinitionCheck` is a different, unrelated problem and stays out
-# of scope here).
-#
-# Verified LIVE response shape (2026-08-03, `GET /api/v1/health` with
-# `X-Api-Key`, from the real prowlarr pod — this is a real firing case, not a
-# synthetic one):
-#   [
-#     {"source": "IndexerNoDefinitionCheck", "type": "error", "message": "...", "wikiUrl": "..."},
-#     {"source": "IndexerLongTermStatusCheck", "type": "warning",
-#      "message": "Indexers unavailable due to failures for more than 6 hours: 1337x, AvistaZ",
-#      "wikiUrl": "..."}
-#   ]
-#
-# Exit-code contract, same as the sibling detectors in this directory
-# (cleanuparr-blocklist-drift, newtarr-config-drift, orphan-census): NON-ZERO
-# on a finding OR any fetch failure (fail LOUD, never a silent pass), so the
-# chart's default KubeJobFailed rule + the scoped
-# ProwlarrIndexerBackoffCheckFailed PrometheusRule
-# (2-k3s/10.observability/alertmanager-config/custom-alerts.yaml) fire and
-# route through the working ntfy receiver (#568/#574).
-#
-# Stdlib-only Python (matches orphan-census's #483 rationale — this is also
-# the classifier logic, keep it in real code, not a dense jq filter).
-#
-# Credentials: prowlarr-api-key Secret, lives in the SERVARR overlay
-# (2-k3s/08.servarr/_shared/secrets/prowlarr-api-key.enc.yaml) — NOT here —
-# because CI's "Kustomize build (sops-free dirs)" step builds
-# `2-k3s/maintenance` without the age key; a ksops generator in this overlay
-# would drop the whole directory out of that gate. Cross-App Secret
-# reference is the existing precedent (qbittorrent-webui-credentials,
-# newtarr-config-seed).
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -94,17 +52,14 @@ data:
 
 
     def selftest():
-        # No backoff at all.
         ok, hits = classify([])
         assert ok and hits == [], "empty health list must be OK"
 
-        # A different, unrelated health warning must NOT trip this check.
         ok, hits = classify(
             [{"source": "IndexerNoDefinitionCheck", "type": "error", "message": "x"}]
         )
         assert ok and hits == [], "unrelated health source must not fail the check"
 
-        # The real live shape captured 2026-08-03.
         ok, hits = classify(
             [
                 {"source": "IndexerNoDefinitionCheck", "type": "error", "message": "x"},
@@ -120,8 +75,6 @@ data:
             "Indexers unavailable due to failures for more than 6 hours: 1337x, AvistaZ"
         ]
 
-        # Malformed entries (missing keys, wrong types) must not crash and
-        # must not accidentally count as a hit.
         ok, hits = classify([{}, {"source": None}, "not-a-dict", 42])
         assert ok and hits == [], "malformed entries must not crash or false-positive"
 
@@ -169,22 +122,13 @@ metadata:
   labels:
     app: prowlarr-indexer-health
 spec:
-  # Hourly — Prowlarr itself already gates IndexerLongTermStatusCheck behind a
-  # 6h failure window, so checking hourly adds negligible load while catching
-  # a new backoff within an hour of Prowlarr raising it.
   schedule: "10 * * * *"
   concurrencyPolicy: Forbid
-  # #841: a schedule missed during a control-plane blip is stale by the
-  # time it could be retried, so skip it rather than run it late.
   startingDeadlineSeconds: 300
   successfulJobsHistoryLimit: 6
   failedJobsHistoryLimit: 6
   jobTemplate:
     spec:
-      # #841: under Forbid, a run that hangs blocks every later run and
-      # leaves no failed Job to alert on - the check goes quiet and quiet
-      # reads as healthy. Observed runtime 10-12s; this deadline is
-      # HTTP check against Prowlarr.
       activeDeadlineSeconds: 300
       backoffLimit: 0
       ttlSecondsAfterFinished: 2592000  # keep 30 days

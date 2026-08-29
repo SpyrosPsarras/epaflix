@@ -1,33 +1,4 @@
 ---
-# ArgoCD Application: CloudNativePG operator + Barman Cloud Plugin (the
-# cnpg-system control plane: CRDs, Deployments, ClusterRoles, webhook configs).
-#
-# Brings the operator/CRDs under GitOps — issue #93. The data plane
-# (postgres-system Cluster/Pooler/ScheduledBackup/ObjectStore) stays in the
-# separate "postgres" Application; this App owns ONLY the operator layer.
-#
-# Source:       this repo, path 2-k3s/06.postgres/operator-kustomization.
-# Destination:  in-cluster `cnpg-system` namespace.
-#
-# Sync: AUTOMATED selfHeal (issue #127) after a clean 48 h adoption soak with no
-# reconcile loop. The operator + plugin first ran live (bootstrap
-# 01.install-operator.sh / 03.install-barman-plugin.sh) and were adopted (#93)
-# via a manual `argocd app sync --server-side --force` field-manager takeover;
-# selfHeal now keeps live == git automatically.
-#
-# `syncOptions: [ServerSideApply=true]` is MANDATORY, not cosmetic: the vendored
-# cnpg-operator.yaml is ~1 MB, which overflows the client-side
-# last-applied-configuration annotation, so a client-side apply fails. The
-# adoption sync only succeeded because `--server-side` was passed by hand —
-# selfHeal uses the App's own syncOptions, so without this it would loop-fail.
-#
-# `prune` NEVER turns on — these raw-vendored CRDs have no Helm `crds.keep`
-# safety net, so a prune/cascade-delete would drop every CRD and
-# cascade-delete the live Postgres Cluster. Detach is always
-# `argocd app delete cnpg-operator --cascade=false`.
-#
-# CNPG 1.30 bump (#102/#10) follows adoption as a normal reviewable manifest
-# swap — adopting v1.28.0 now decouples it.
 
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -43,10 +14,6 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: cnpg-system
-  # AUTOMATED selfHeal after a clean 48 h adoption soak (issue #127, #34
-  # convention). ServerSideApply=true is mandatory — the ~1 MB manifest
-  # overflows the client-side apply annotation. prune stays OFF permanently
-  # (issue #21) — raw-vendored CRDs have no crds.keep net.
   syncPolicy:
     automated:
       selfHeal: true
@@ -54,7 +21,6 @@ spec:
     syncOptions:
       - ServerSideApply=true
   ignoreDifferences:
-    # cert-manager injects the webhook CA at runtime via the cainjector.
     - group: admissionregistration.k8s.io
       kind: MutatingWebhookConfiguration
       jqPathExpressions:
@@ -63,13 +29,10 @@ spec:
       kind: ValidatingWebhookConfiguration
       jqPathExpressions:
         - .webhooks[].clientConfig.caBundle
-    # The plugin ships an empty placeholder Secret; cert-manager fills its data
-    # at runtime (CNPG-i gRPC TLS). Allowlisted in check-sops-encrypted.sh.
     - group: ""
       kind: Secret
       jsonPointers:
         - /data
-    # cert-manager Issuer/Certificate status is controller-maintained.
     - group: cert-manager.io
       kind: Certificate
       jsonPointers:

@@ -13,9 +13,6 @@ import os
 import signal
 import sys
 
-# `show <id> | head` is the normal way to use this. Without restoring the default
-# SIGPIPE handler, python turns the closed pipe into a BrokenPipeError traceback
-# on top of the output you were reading.
 signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),

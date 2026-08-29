@@ -1,15 +1,8 @@
 #!/usr/bin/env bash
-# Verifies the image without touching AirVPN or the live cluster. No API key is
-# passed anywhere in here, so no cycle ever reaches the real API.
 set -euo pipefail
 IMAGE="${1:-vpn-picker:dev}"
 
 echo "== 1. ping resolves and answers with NO capabilities =="
-# The scorer runs with `capabilities: {drop: ["ALL"]}`. iputils falls back to an
-# unprivileged SOCK_DGRAM ICMP socket when it cannot get a raw one, and that
-# only works because the container netns has net.ipv4.ping_group_range wide
-# open. Assert both here so a base-image change that breaks the fallback fails
-# the build instead of silently killing every probe in production.
 out=$(docker run --rm --cap-drop ALL --entrypoint sh "$IMAGE" -c '
   grep CapEff /proc/self/status
   cat /proc/sys/net/ipv4/ping_group_range
@@ -23,9 +16,6 @@ fi
 echo "ok"
 
 echo "== 2. the app parses the ping output THIS image actually produces =="
-# NB: `grep -q X && { ...; }` is wrong under `set -e` - when grep finds nothing
-# it returns 1 and the script exits on the SUCCESS path. Use if/then for every
-# "fail if found" check in this file.
 if ! docker run --rm --cap-drop ALL --entrypoint sh "$IMAGE" -c '
   cd /app
   ping -n -q -c 5 -i 0.2 -W 2 127.0.0.1 > /tmp/p.txt 2>&1
@@ -42,9 +32,6 @@ fi
 echo "ok"
 
 echo "== 3. scoring rule, contract and atomic publish self-checks =="
-# Covers the design's own sanity anchors: Dedalus beats Anser, Anser is rejected
-# by the probe gate at 22% loss, Cygnus is excluded on health. Plus the atomic
-# publish race and the API-outage behaviour.
 docker run --rm --entrypoint python3 "$IMAGE" /app/selftest.py
 
 echo "== 4. no API key means a clean exit 1, never a crash loop on a stack trace =="
@@ -60,8 +47,6 @@ fi
 echo "ok"
 
 echo "== 5. HTTP serves 503, not an empty list, before the first ranking =="
-# Never serve an empty `servers` array - a consumer cannot tell that apart from
-# "every candidate failed the gate".
 cid=$(docker run -d --rm -p 18080:8080 -e AIRVPN_API_KEY=invalid \
         -e VPN_PICKER_API_URL=http://127.0.0.1:1/unreachable \
         -e VPN_PICKER_OUTPUT=/tmp/ranking.json "$IMAGE")

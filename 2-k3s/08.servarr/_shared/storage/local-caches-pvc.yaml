@@ -1,5 +1,3 @@
-# Local-path Storage for High I/O Operations
-# Jellyfin and Tdarr transcoding caches
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

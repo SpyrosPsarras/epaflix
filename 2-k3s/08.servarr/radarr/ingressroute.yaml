@@ -1,22 +1,4 @@
 ---
-# Radarr - Public Internet-facing IngressRoutes with Let's Encrypt TLS,
-# fronted by Authentik forward-auth SSO (issue #176, servarr forward-auth rollout).
-#
-# The Radarr WEB UI is gated by the authentik-forwardauth middleware (Authentik
-# embedded outpost, provider + app slug `radarr`), authorized by the
-# "Servarr users" group, for BOTH local and internet traffic.
-#
-# /api is NOT exempt. Radarr is an INTEGRATION TARGET called machine-to-machine
-# by seerr, bazarr, cleanuparr and newtarr, but every one of them reaches it
-# over in-cluster Service DNS (http://radarr:7878) - verified against their own
-# stored config in #296. The priority-20 `radarr-api` exemption this file used
-# to carry was removed in #296 (2026-08-10) because it published the whole
-# Radarr API to the internet for no consumer. Do not re-add it - see the
-# "NO /api exemption route here" note further down this file.
-#
-# Pattern mirrors 08.servarr/newtarr/ingressroute.yaml:
-#   - app route priority:10 + authentik-forwardauth middleware
-#   - outpost route priority:15 matching PathPrefix(/outpost.goauthentik.io/)
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -44,7 +26,6 @@ spec:
         sans:
           - "*.epaflix.com"
 ---
-# Outpost route - handles auth callback on radarr.epaflix.com
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -68,17 +49,7 @@ spec:
         sans:
           - "*.epaflix.com"
 ---
-# NO /api exemption route here, deliberately (#296, removed 2026-08-10).
-# A priority-20 `Host(`radarr.epaflix.com`) && PathPrefix(`/api`)` route with no
-# middleware used to sit here, so API-key callers could bypass forward-auth over
-# the public host. It also made the API internet-reachable with the API key as
-# the only control. The comment it replaced named seerr/bazarr/cleanuparr/newtarr
-# - all verified live to use internal Service DNS (`http://radarr:7878`), and
-# seerr's own config stores `hostname=radarr port=7878 useSsl=false`. 30d of
-# access logs showed no headless external caller. /api now matches `radarr-https`
-# (priority 10) and is forward-auth'd. Re-adding this re-publishes it. Don't.
 ---
-# HTTP to HTTPS redirect for Radarr
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:

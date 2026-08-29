@@ -22,9 +22,6 @@ import uuid
 
 DB = os.environ.get("CLEANUPARR_DB", "/config/cleanuparr.db")
 
-# Private-tracker thresholds. max_ratio well above 1.0 so a torrent can bank a
-# surplus instead of being cut at break-even; max_seed_time still bounded so the
-# downloads directory cannot grow without limit.
 PRIVATE_MAX_RATIO = 5.0
 PRIVATE_MAX_SEED_TIME = 720.0  # hours (30 days)
 
@@ -40,12 +37,9 @@ def enforce(con, table):
     if not cur.fetchone()[0]:
         return 0, 0
 
-    # 1. No rule may govern private torrents with the public thresholds.
     demoted = cur.execute(
         f"UPDATE {table} SET privacy_type='public' WHERE privacy_type='both'").rowcount
 
-    # 2. Every public rule gets a private counterpart, unless one already exists
-    #    for the same categories (so an operator-tuned rule is never clobbered).
     cols = [r[1] for r in cur.execute(f"PRAGMA table_info({table})")]
     added = 0
     publics = cur.execute(

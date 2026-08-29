@@ -28,20 +28,6 @@ format change upstream surfaces as an empty field rather than as invented text.
 import json
 import re
 
-# ---------------------------------------------------------------------------
-# redaction
-#
-# The logger already truncates Authorization values, so a payload is not a
-# credential leak on its own. These patterns exist for the other direction: a
-# tool result or a prompt that quotes a secret. #602 forced a real token
-# rotation because a matched line landed in a retained transcript, and anything
-# emitted from here goes into a 31-day searchable index - so redact at the
-# source, not in the query.
-#
-# Deliberately prefix-anchored rather than entropy-based: a heuristic that
-# guesses at "looks secret" would silently eat legitimate output, and the point
-# of the transcript is to be readable.
-# ---------------------------------------------------------------------------
 _REDACTIONS = [
     (re.compile(r"\b(sk-ant-[A-Za-z0-9_\-]{8,})"), "sk-ant-<REDACTED>"),
     (re.compile(r"\b(sk-[A-Za-z0-9]{20,})"), "sk-<REDACTED>"),
@@ -52,7 +38,6 @@ _REDACTIONS = [
     (re.compile(r"\b(AKIA[0-9A-Z]{16})"), "AKIA<REDACTED>"),
     (re.compile(r"\b(AIza[0-9A-Za-z_\-]{30,})"), "AIza<REDACTED>"),
     (re.compile(r"\b(omp-[A-Za-z0-9]{16,})"), "omp-<REDACTED>"),
-    # Same shape promtail already redacts for the *arr apps (#634, #702).
     (re.compile(r"(?i)(password\s*=\s*)([^\s;\"']{3,})"), r"\1<REDACTED>"),
     (re.compile(r"(?i)(\"(?:password|token|secret|api[_-]?key)\"\s*:\s*\")([^\"]{3,})"),
      r"\1<REDACTED>"),
@@ -70,9 +55,6 @@ def redact(text):
     return text
 
 
-# ---------------------------------------------------------------------------
-# payload parsing
-# ---------------------------------------------------------------------------
 def section(raw, name):
     match = re.search(r"^=== " + re.escape(name) + r"[^=\n]*===\n(.*?)(?=^=== |\Z)",
                       raw, re.S | re.M)

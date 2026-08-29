@@ -1,33 +1,3 @@
-# ArgoCD-managed kustomization for ArgoCD itself (self-management).
-# Owned by ArgoCD Application "argocd" (2-k3s/11.argocd/apps/app-argocd.yaml).
-#
-# Inflates the upstream argo-cd Helm chart at the same pinned version as the
-# original `helm install` (helm-values.yaml header comment), with the existing
-# helm-values.yaml as valuesFile. This is the same kustomize-with-helm pattern
-# used by cert-manager (2-k3s/02.cert-manager/kustomization.yaml).
-#
-# CRDs are deliberately NOT inflated here (`includeCRDs: false`). The three
-# CRDs (applications, applicationsets, appprojects.argoproj.io) were installed
-# at original `helm install` time and stay operator-managed. Matches the
-# repo-wide convention (cert-manager, authentik, traefik, observability).
-#
-# Excluded from `resources:` (left operator-managed for now):
-#   - apps/*.yaml          — ArgoCD Application objects (app-of-apps is a
-#                            separate follow-up, see Issue #19 thread).
-#   - oidc-secret.yaml     — placeholder only; real OIDC client-id/secret are
-#                            merge-patched into the chart-generated argocd-secret
-#                            (see install.sh step 4). Out of scope until Issue #29.
-#   - sops-age Secret      — created imperatively (chicken-egg: the age key has
-#                            to exist before ArgoCD can decrypt anything,
-#                            including any GitOps version of itself). The
-#                            one-shot bootstrap recipe (the age key lives in
-#                            KeePassXC, not on disk, so it is piped in through
-#                            stdin) and the rotation procedure are both in
-#                            .github/instructions/sops.instructions.md.
-#
-# Field-manager note: original install used field manager "helm". ArgoCD
-# applies under "argocd-controller" with ServerSideApply=true. The first sync
-# will force-conflict-take ownership of chart-rendered fields.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 

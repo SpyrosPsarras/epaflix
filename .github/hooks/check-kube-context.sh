@@ -1,21 +1,4 @@
 #!/usr/bin/env bash
-# Pre-commit hook: refuse the commit if the shell's resolved kubeconfig can see
-# any context other than `epaflix` (#856).
-#
-# The name matches the `check-*.sh` glob in run-pre-commit.sh, so the
-# dispatcher discovers it with no installer change. Anything named otherwise
-# silently never runs.
-#
-# Enforcement half of #856 option 1: install-kubeconfig-epaflix.sh generates
-# the homelab-only kubeconfig and .envrc / a ~/.zshenv export activate it, but
-# an activation that did not happen is invisible. This makes it loud at commit
-# time instead.
-#
-# ALLOWLIST ONLY, COUNTS ONLY. This repo is public and #856 deliberately
-# withholds the names of the work contexts, two of which are customer-facing
-# production. So the check compares against the single literal `epaflix`,
-# never enumerates or echoes the resolved context list, and never carries a
-# denylist. Do not add a "which one was it?" line here.
 set -euo pipefail
 
 if ! command -v kubectl >/dev/null 2>&1; then

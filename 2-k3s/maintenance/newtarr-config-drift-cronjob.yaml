@@ -1,39 +1,4 @@
 ---
-# Weekly newtarr config-seed drift detector (Issue #179).
-#
-# newtarr v1.0.0 stores its entire configuration as JSON files under the
-# `newtarr-config` PVC (/config). Those files are codified in git as the
-# SOPS-encrypted seed Secret `newtarr-config-seed`
-# (2-k3s/08.servarr/_shared/secrets/newtarr-config-seed.enc.yaml) and restored on
-# a FRESH PVC by the newtarr `seed-config` initContainer (#137). The seed is
-# NON-CLOBBERING — it never overwrites a populated PVC — and the app rewrites
-# these JSONs at runtime (#135/#177), so the committed seed steadily DRIFTS from
-# the live /config.
-#
-# This Job is a DETECTOR, not an auto-updater (mirrors the #182
-# cleanuparr-blocklist-drift CronJob; auto-PR write-back to main is rejected per
-# the #192 lesson). Weekly it:
-#   1. Reads the BASELINE from the ksops-rendered newtarr-config-seed Secret,
-#      mounted READ-ONLY as a volume (NO sops decrypt in-job, no private key) —
-#      the same Secret the deployment's seed-config initContainer consumes.
-#   2. Reads the LIVE side via `kubectl exec` into the newtarr pod (cat each
-#      declarative /config file).
-#   3. Normalizes BOTH sides with `jq -S .` (canonical sort-keys) and diffs.
-# It compares ONLY the declarative keys (per-app instance lists + hunt settings,
-# swaparr, general, and the scheduler list). It EXCLUDES nzb_hunt_bandwidth.json
-# and any other volatile runtime JSON. It exits NON-ZERO on ANY normalized diff
-# OR any read/exec failure (fail LOUD), so the chart's default KubeJobFailed rule
-# + the scoped NewtarrConfigDriftCheckFailed PrometheusRule fire. The actual
-# re-snapshot/re-encrypt stays the MANUAL #137 runbook in
-# 2-k3s/08.servarr/RECOVERY-newtarr-cleanuparr.md (#179 section).
-#
-# #742: sonarr.json/radarr.json carry `instances[].api_key`, so a raw diff body
-# printed on drift would leak both the old and new *arr key into the job log.
-# The DETECTION diff still runs on the full unredacted normalized JSON (same
-# drift/no-drift verdict, same exit code, same alert), but what gets PRINTED is
-# piped through redact_diff() first, which blanks only the api_key value on
-# each side. Run `sh check.sh --selftest` to exercise redact_diff() against a
-# synthetic diff with no cluster access.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -43,9 +8,6 @@ data:
   check.sh: |
     set -eu
 
-    # Strip api_key VALUES from a unified diff before it is ever printed
-    # (#742). Only the value is replaced — the key name and +/- markers stay,
-    # so a human can still see THAT api_key changed, just not to what.
     redact_diff() {
       sed 's/^\([+-][[:space:]]*"api_key"[[:space:]]*:[[:space:]]*\)"[^"]*"/\1"REDACTED"/'
     }
@@ -101,11 +63,6 @@ data:
 
     echo "=== newtarr config-seed drift check @ $(date -u +%FT%TZ) ==="
 
-    # Declarative keys to compare. Format: "<seed-key>:<live-path>". The seed
-    # Secret stores the scheduler under the flat key scheduling-list.json (k8s
-    # Secret keys cannot contain '/'); live it is /config/scheduling/list.json.
-    # nzb_hunt_bandwidth.json is INTENTIONALLY EXCLUDED — volatile runtime state,
-    # not part of the seed.
     PAIRS="
     sonarr.json:/config/sonarr.json
     radarr.json:/config/radarr.json
@@ -118,7 +75,6 @@ data:
     scheduling-list.json:/config/scheduling/list.json
     "
 
-    # Resolve the running newtarr pod once (fail LOUD if none is Ready).
     POD=$(kubectl -n servarr get pod -l app=newtarr \
       -o jsonpath='{.items[?(@.status.phase=="Running")].metadata.name}' \
       | awk '{print $1}')
@@ -134,8 +90,6 @@ data:
       key=${pair%%:*}
       live=${pair#*:}
 
-      # BASELINE: the seed Secret, mounted read-only at /seed. A declarative key
-      # MUST be present in the seed — its absence is a fail-loud condition.
       seedfile=/seed/$key
       if [ ! -f "$seedfile" ]; then
         echo "ERROR: seed key '$key' missing from newtarr-config-seed Secret" >&2
@@ -143,8 +97,6 @@ data:
         continue
       fi
 
-      # LIVE: cat the file out of the pod. A missing/unreadable live file or a
-      # non-JSON body is a fail-loud condition (do NOT silently pass).
       if ! kubectl -n servarr exec "$POD" -- cat "$live" > /tmp/live.raw 2>/tmp/live.err; then
         echo "ERROR: cannot read live $live from pod $POD:" >&2
         cat /tmp/live.err >&2
@@ -152,8 +104,6 @@ data:
         continue
       fi
 
-      # Normalize BOTH sides canonically (sort-keys). Invalid JSON on either
-      # side fails loud.
       if ! jq -S . "$seedfile" > /tmp/seed.n 2>/dev/null; then
         echo "ERROR: seed key '$key' is not valid JSON" >&2
         drift=1
@@ -180,12 +130,10 @@ data:
       exit 0
     fi
     echo "ACTION: the committed seed has drifted from live newtarr /config (or a"
-    echo "  read/exec failed). Re-snapshot via the MANUAL #137 runbook in"
-    echo "  2-k3s/08.servarr/RECOVERY-newtarr-cleanuparr.md (#179 section). The"
-    echo "  detector NEVER auto-fixes; refresh stays manual."
+    echo "  read/exec failed). Re-snapshot via the MANUAL #137 runbook"
+    echo "  (#179 section). The detector NEVER auto-fixes; refresh stays manual."
     exit 1
 ---
-# ServiceAccount for the drift-check pod — scoped to namespace servarr.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -194,8 +142,6 @@ metadata:
   labels:
     app: newtarr-config-drift
 ---
-# Role: the MINIMUM to resolve + exec into the newtarr pod. No cluster-wide /
-# wildcard rules; scoped to namespace servarr only.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -238,22 +184,13 @@ metadata:
   labels:
     app: newtarr-config-drift
 spec:
-  # Mondays 06:45 UTC = 08:45 Europe/Oslo (just after postgres-sequence-audit at
-  # 06:00 and cleanuparr-blocklist-drift at 06:30). Weekly cadence — proportional
-  # to a slowly-drifting point-in-time seed.
   schedule: "45 6 * * 1"
   concurrencyPolicy: Forbid
-  # #841: a schedule missed during a control-plane blip is stale by the
-  # time it could be retried, so skip it rather than run it late.
   startingDeadlineSeconds: 300
   successfulJobsHistoryLimit: 6
   failedJobsHistoryLimit: 6
   jobTemplate:
     spec:
-      # #841: under Forbid, a run that hangs blocks every later run and
-      # leaves no failed Job to alert on - the check goes quiet and quiet
-      # reads as healthy. Observed runtime 18-19s; this deadline is
-      # config comparison against a mounted Secret.
       activeDeadlineSeconds: 300
       backoffLimit: 0
       ttlSecondsAfterFinished: 2592000  # keep 30 days
@@ -266,8 +203,6 @@ spec:
           serviceAccountName: newtarr-config-drift
           containers:
             - name: drift-check
-              # alpine 3.20 (matches the cleanuparr-blocklist-drift precedent);
-              # jq + kubectl pulled from the alpine community repo at start.
               image: alpine:3.20
               imagePullPolicy: IfNotPresent
               command: ["/bin/sh", "-c"]
@@ -291,8 +226,6 @@ spec:
                   cpu: "500m"
                   memory: "256Mi"
           volumes:
-            # Same Secret the deployment's seed-config initContainer consumes —
-            # the ksops-rendered BASELINE, mounted read-only. NO sops key in-job.
             - name: seed
               secret:
                 secretName: newtarr-config-seed

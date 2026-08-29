@@ -1,30 +1,4 @@
 #!/usr/bin/env bash
-# One-shot generator for a homelab-only KUBECONFIG (#856, option 1).
-#
-# ~/.kube/config is Syncthing-synced and carries work AKS contexts, including
-# production ones, next to `epaflix`. A sync from another machine can change
-# the active context under a running session, so `kubectl config use-context
-# epaflix` is a value something else can overwrite, not a guard. This writes a
-# kubeconfig that can see ONLY the `epaflix` context, so from a shell that
-# exports it the other clusters are simply unreachable - which is why #856
-# calls option 1 "the least code and the most protection".
-#
-# Product: .kube/epaflix.kubeconfig, mode 600, git-ignored. `kubectl config
-# view --flatten` EMBEDS client-certificate-data and client-key-data, i.e. live
-# cluster credentials, so this file must never be committed (.gitignore has
-# /.kube/, which also enlists check-no-force-added-ignored.sh and the ci.yml
-# "No tracked file matches .gitignore" step).
-#
-# This repo is public. Every diagnostic below is a COUNT plus the literal
-# allowlisted name `epaflix`. Do not "helpfully" print the names of the
-# contexts that were filtered out - #856 withholds them on purpose, and a
-# denylist would have to name them.
-#
-# Activation is deliberately a separate, documented step: .envrc for
-# interactive shells, a ~/.zshenv export for non-interactive ones (direnv hooks
-# never fire in non-interactive shells, which is where tool-emitted kubectl
-# runs happen). check-kube-context.sh is the forcing function that makes a
-# missing activation loud at the next commit instead of silent.
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
@@ -47,9 +21,6 @@ umask 077
 kubectl config view --minify --flatten --context epaflix >"$target"
 chmod 600 "$target"
 
-# Verify the PRODUCT, not the exit status of the command that made it. A
-# half-good kubeconfig is worse than none: it would pass activation and still
-# expose another cluster. Anything unexpected here deletes the file.
 contexts="$(KUBECONFIG="$target" kubectl config get-contexts -o name 2>/dev/null || true)"
 context_count="$(printf '%s\n' "$contexts" | grep -c . || true)"
 cluster_count="$(KUBECONFIG="$target" kubectl config view \
