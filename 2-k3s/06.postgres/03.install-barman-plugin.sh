@@ -1,6 +1,11 @@
 #!/bin/bash
 set -e
 
+# Every kubectl call in this script runs against the homelab cluster, whatever
+# the ambient kubeconfig says (issue #971). Override with KUBECTL_CONTEXT=... .
+: "${KUBECTL_CONTEXT:=epaflix}"
+kubectl() { command kubectl --context "$KUBECTL_CONTEXT" "$@"; }
+
 # Bootstrap-only. Day-to-day Barman Cloud Plugin lifecycle is now owned by
 # ArgoCD Application "cnpg-operator" (2-k3s/11.argocd/apps/app-cnpg-operator.yaml),
 # which renders operator-kustomization/barman-manifest.yaml via
