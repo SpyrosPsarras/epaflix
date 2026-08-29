@@ -34,7 +34,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: cpa-manager-plus
-          image: docker.io/seakee/cpa-manager-plus:v1.9.2
+          image: docker.io/seakee/cpa-manager-plus:v1.12.6
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -60,6 +60,8 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
+            - name: tmp
+              mountPath: /tmp
           readinessProbe:
             httpGet:
               path: /health
@@ -87,3 +89,6 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: cpa-manager-plus-data
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
