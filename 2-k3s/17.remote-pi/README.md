@@ -360,6 +360,68 @@ Layout is `2-k3s/17.remote-pi/cliproxy/`. The parent kustomization deliberately
 has NO top-level `namespace:` transformer: two of the objects under `cliproxy/`
 belong to `postgres-system`, not `remote-pi`.
 
+## Sync cliproxy's credential contract as one unit
+
+Three resources share one contract: a credential, the script that consumes it,
+and the wiring between them.
+
+| resource | carries |
+| --- | --- |
+| `Secret/cliproxy-secrets` | the credential |
+| `ConfigMap/cliproxy-scripts` | the script that consumes it |
+| `Deployment/cliproxy` | the `env` that delivers it to the initContainer |
+
+Selective sync is fine in general - a Secret-only rotation or an unrelated
+Deployment edit is safe, because each still satisfies the contract the others
+expect. The rule is narrower: **when one change spans that contract, sync every
+resource it touches at the same revision.** Adding a provider does span it, so
+all three go together.
+
+Get the scope from a `status.resources` read taken **after** the merge. A
+pre-merge `OutOfSync` list describes the old `main` and silently under-reports
+every resource the merge is about to change - which is exactly how #1149 went
+wrong, and cost nine minutes of downtime.
+
+```bash
+argocd app sync remote-pi \
+  --resource :Secret:remote-pi/cliproxy-secrets \
+  --resource :ConfigMap:remote-pi/cliproxy-scripts \
+  --resource apps:Deployment:remote-pi/cliproxy
+```
+
+### A partial sync does not fail, it arms
+
+This is the part worth internalising. `configMapGenerator` sets
+`disableNameSuffixHash: true`, so the ConfigMap has a stable name and syncing it
+changes no pod spec field. **Nothing rolls.** The running pod keeps its old
+script, stays healthy, and the cluster looks correct.
+
+The mismatch surfaces only at the next pod replacement - a node drain, an
+eviction, an image bump, a `kubectl rollout restart`. `reconcile-config` then
+starts under the new script without the env the new script requires, raises,
+and because this Deployment is `Recreate` at one replica the old pod is already
+gone:
+
+```text
+ERROR:  OPENROUTER_API_KEY is empty - the cliproxy-secrets key did not reach the initContainer
+```
+
+So the window between an incomplete sync and the outage is unbounded, and the
+detonation is usually unattended. In #1149 it was a deliberate restart two
+minutes later, with someone watching. That was luck, not design.
+
+Two things that do NOT protect you here, both checked:
+
+- **A Reloader annotation.** It is the obvious fix for the no-rolling-trigger
+  problem above, and it is the wrong one: the missing piece was the Deployment,
+  not the trigger, so Reloader would only have reached the same crash sooner and
+  with nobody watching. (A manual `kubectl rollout restart deployment/cliproxy`
+  is still needed after any change to `cliproxy/files/`.)
+- **A dry run against a copy of the live config row.** One was done for #1149
+  and passed, because the operator supplied the key by hand. It exercised the
+  script against real data and never exercised the delivery of the secret, which
+  is the half that was about to be missing.
+
 ## Postgres dependency
 
 Durable state lives in the existing CNPG cluster, not on a PVC. The proxy picks
