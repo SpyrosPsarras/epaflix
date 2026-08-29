@@ -27,6 +27,8 @@ spec:
               env:
                 - name: JELLYFIN_URL
                   value: http://jellyfin-truenas.servarr.svc.cluster.local:30013
+                - name: JELLYFIN_LIBRARIES
+                  value: Shows,Movies,Anime
                 - name: JELLYFIN_API_KEY
                   valueFrom:
                     secretKeyRef:
