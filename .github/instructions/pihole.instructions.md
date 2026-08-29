@@ -109,6 +109,7 @@ IP column, do not assume. Rows are in live-file order, so a `diff` against the b
 | `minio.epaflix.com` | 192.168.10.101 | MinIO S3 API on TrueNAS, fronted by Traefik (added 2026-05-22) |
 | `minio-console.epaflix.com` | 192.168.10.101 | MinIO console, same backend |
 | `newtarr.epaflix.com` | 192.168.10.101 | Newtarr |
+| `cpamp.epaflix.com` | 192.168.10.101 | CPA Manager Plus panel - websecure + Authentik forward-auth (PR #1155). Shadows the proxied Cloudflare wildcard so LAN browsers reach the SSO gate instead of a CF error page. No unbound `local-zone`: the proxied public wildcard is intentional for websecure names (same as `grafana`) |
 | `bastion.epaflix.com` | **192.168.10.43** | Odysseus bastion VM - straight to the VM, no Traefik |
 | `searxng.epaflix.com` | 192.168.10.102 | SearXNG - **internal entry point on purpose** (#547). The public route on `.101` requires Authentik; LAN and API clients use this unauthenticated internal route. Do not move it back to `.101`. |
 | `syncthing.epaflix.com` | **192.168.10.110** | Syncthing GUI - its own kube-vip LoadBalancer (`syncthing-gui`), no Traefik |
