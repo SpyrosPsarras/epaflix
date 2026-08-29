@@ -21,12 +21,11 @@
 # Destination:  resources land in the existing `servarr`, `traefik-system`,
 #               `odysseus`, `app-authentik`, `argocd` and `observability`
 #               namespaces (no new namespace is created).
-# Sync:         AUTOMATED, `selfHeal: true, prune: false` (#726). Installed by
-#               manual sync first (the usual adoption order: push aligned git
-#               BEFORE creating the Application), then flipped here.
-#               `prune` stays false and flips to true only after a further
-#               week of clean operation, same as every other adoption in this
-#               repo — that flip is still open on #726.
+# Sync:         AUTOMATED, `selfHeal: true, prune: true` (#726 selfHeal;
+#               prune added by #1048 on 2026-08-29 after an 8-day clean
+#               automated window). Installed by manual sync first (the usual
+#               adoption order: push aligned git BEFORE creating the
+#               Application), then flipped here.
 #               NOTE on the flip: #726's gate was "a clean 48h with no manual
 #               rollout restart". That gate was NOT met. At flip time the
 #               Application's last successful sync was 2026-08-03T15:52:34Z
@@ -78,8 +77,9 @@ spec:
     # entry in the kustomization. Nothing is created here.
     namespace: servarr
   syncPolicy:
-    # prune is deliberately ON here first: 8-day clean automated soak
-    # (zero drift, zero orphans) measured in #1048. Every other app stays
-    # prune: false behind its own soak; #21 tracks the rollout.
+    # prune is ON as of 2026-08-29 (#1048) after an 8-day clean automated
+    # soak: zero deploys, zero drift, zero orphans. Most child apps now run
+    # prune: true behind their own soaks; the rest stay OFF per-app,
+    # tracked by #21.
     automated: { selfHeal: true, prune: true }
     syncOptions: [ServerSideApply=true]
