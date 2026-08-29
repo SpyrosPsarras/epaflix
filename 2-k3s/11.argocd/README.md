@@ -142,7 +142,13 @@ flip casually:
   See issues #96 / #46.
 - **`system-upgrade-controller`** — manual.
 
-`prune` is OFF everywhere on purpose (issue #21 tracks enabling it).
+`prune` flips per-app, each behind its own clean soak (issue #21 tracks the
+rollout). ON as of 2026-08-29: authentik, observability, odysseus, servarr,
+traefik, syncthing, searxng, renovate, and now `reloader` (#1048, after an
+8-day clean window). Still OFF: cert-manager, cnpg-operator, coredns, both
+kube-vip apps, maintenance, app-of-apps, postgres, both system-upgrade
+apps; `argocd` and `remote-pi` are manual (no syncPolicy). The manifests
+are the source of truth; this paragraph ages.
 Note: an empty `syncPolicy: {}` in a manifest causes a permanent
 *cosmetic* OutOfSync (never matches live `null`) — omit `syncPolicy`
 entirely for a manual app instead.
