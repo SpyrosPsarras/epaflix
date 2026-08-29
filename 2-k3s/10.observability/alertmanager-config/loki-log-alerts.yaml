@@ -145,3 +145,33 @@ data:
                 query and widens the exposure. Locate by route/container:
                 {namespace="{{ $labels.namespace }}"} |~ `apikey=`
 
+      # Renovate GitHub-token write failures (#957). Renovate logs a refused
+      # issue write as WARN "Could not ensure issue" and still completes the
+      # Job, so the dashboard (#31) can freeze silently for weeks (it did:
+      # 2026-08-04..08-29, PAT missing Issues: write). Regression detector:
+      # > 0, for: 0m, one occurrence is the incident. Selector is
+      # namespace="renovate", which the ruler's own query-log echo (#910,
+      # namespace="observability") cannot match, so no query= guard is needed.
+      # Validated against live Loki 2026-08-29 both directions: fires on the
+      # real pre-fix failure, silent at post-fix steady state.
+      - name: renovate-token
+        rules:
+          - alert: RenovateDashboardWriteFailed
+            expr: |
+              sum (
+                count_over_time({namespace="renovate", container="renovate"} |= "Could not ensure issue" [10m])
+              ) > 0
+            for: 0m
+            labels:
+              severity: warning
+              component: renovate
+            annotations:
+              summary: "Renovate cannot write the Dependency Dashboard"
+              description: >-
+                Renovate logged `Could not ensure issue` in the last 10m: a
+                GitHub issue write was refused (token scope or API refusal).
+                The dashboard (#31) is now silently stale while runs still
+                report success. Check the fine-grained PAT's Issues
+                permission (#335/#957) and the failing run's log in
+                namespace renovate:
+                {namespace="renovate"} |= "Could not ensure issue"
