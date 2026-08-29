@@ -64,6 +64,9 @@ configMapGenerator:
   - name: jellyfin-metadata-healer-script
     files:
       - metadata-healer.py=jellyfin/files/metadata-healer.py
+  - name: bazarr-autotranslate-main
+    files:
+      - main.py=bazarr-autotranslate/files/main.py
 images:
   - name: lscr.io/linuxserver/sonarr
     digest: sha256:c19aa4ecdf03d73e1d5c901da33744cb7eb4d921f89bafed1ca264601d7fa224
