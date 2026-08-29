@@ -119,11 +119,18 @@ metadata:
   name: cpa-manager-plus
   namespace: remote-pi
   annotations:
-    # Same waves as cliproxy: Secrets at -2, workload at 1. The container's
-    # CPA_MANAGER_ADMIN_KEY is a secretKeyRef, so without this the Deployment can
-    # be applied before ksops has produced the Secret and the pod sits in
-    # CreateContainerConfigError until a retry catches up.
-    argocd.argoproj.io/sync-wave: "1"
+    # Wave 0, the same wave as its PVC in storage.yaml. The container's
+    # CPA_MANAGER_ADMIN_KEY is a secretKeyRef, but the Secrets are wave -2, so
+    # ksops has produced them before any non-negative wave applies.
+    #
+    # The PVC must share its consumer's wave: local-path uses
+    # WaitForFirstConsumer, so the PVC stays Pending (health: Progressing)
+    # until a pod mounts it. ArgoCD waits for wave-N health before wave N+1,
+    # so a wave-1 Deployment behind a wave-0 PVC never applies - the first
+    # sync of #1145 sat in "waiting for healthy state" with nothing to wait
+    # FOR. Same shape as the relay, whose PVC and Deployment are both
+    # unannotated wave 0 for exactly this reason.
+    argocd.argoproj.io/sync-wave: "0"
   labels:
     app.kubernetes.io/name: cpa-manager-plus
     app.kubernetes.io/component: observability
