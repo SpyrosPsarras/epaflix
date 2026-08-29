@@ -12,10 +12,6 @@ rules:
   - apiGroups: [""]
     resources: ["services", "services/status", "nodes", "endpoints"]
     verbs: ["list", "get", "watch", "update"]
-  # Newer kube-vip (post a9e5374a digest) watches EndpointSlices instead of
-  # the deprecated v1 Endpoints. Without this, ARP-leader floods logs with
-  # "endpointslices.discovery.k8s.io is forbidden" and skips advertising
-  # service LB IPs.
   - apiGroups: ["discovery.k8s.io"]
     resources: ["endpointslices"]
     verbs: ["list", "get", "watch"]
@@ -60,10 +56,6 @@ spec:
         node-role.kubernetes.io/control-plane: "true"
       containers:
         - name: kube-vip
-          # Pinned to v0.8.7 stable. Two prior digests broke service VIP ARP:
-          #   :latest @ 5e0d817b (broken) → swapped 2026-05-22 08:09
-          #   a9e5374a (v1.2.0-rc.0, also broken — detects svc, never plumbs IP to eth0)
-          # Roll forward only after verifying VIP ARP on one master.
           image: ghcr.io/kube-vip/kube-vip:v0.8.7@sha256:32829cc6f8630eba4e1b5e4df5bcbc34c767e70703d26e64a0f7317951c7b517
           imagePullPolicy: IfNotPresent
           args:
@@ -87,9 +79,6 @@ spec:
               value: "true"
             - name: vip_leaderelection
               value: "true"
-            # Increased timeouts to handle API slowness during I/O load
-            # Default: leaseDuration=15s, renewDeadline=10s, retryPeriod=2s
-            # Increased to tolerate slow etcd/iSCSI storage (1-2s API latency spikes)
             - name: vip_leaseduration
               value: "30"
             - name: vip_renewdeadline

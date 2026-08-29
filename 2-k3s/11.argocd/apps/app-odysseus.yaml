@@ -1,22 +1,4 @@
 ---
-# ArgoCD Application: Odysseus AI workspace (issue #184).
-#
-# Source:       this repo, path 2-k3s/13.odysseus (kustomization.yaml).
-#               kustomize-managed; the kustomization inflates the ksops
-#               generator which decrypts odysseus-secrets.enc.yaml +
-#               odysseus-data-seed.enc.yaml at render time inside
-#               argocd-repo-server (Issue #29 — sops + age).
-# Destination:  in-cluster `odysseus` namespace.
-# Sync:         AUTOMATED self-heal as of the #210 flip (post-soak — migrated
-#               off TrueNAS 2026-06-07, ~7d clean / zero drift). The image was
-#               pushed + made public and the secrets encrypted in git BEFORE
-#               this Application existed (adoption-order rule), then a clean
-#               explicit `argocd app sync odysseus` + Synced/Healthy + soak
-#               window gated this flip. selfHeal reverts any manual `kubectl
-#               edit` on managed resources; ServerSideApply avoids noisy
-#               tracking-id annotation diffs. prune ENABLED 2026-08-01 — the
-#               38-day clean Synced+Healthy soak with zero sync activity since
-#               2026-06-24 cleared the #316 gate (7-day minimum).
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -31,11 +13,6 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: odysseus
-  # AUTOMATED self-heal after a clean post-migration soak (#210). selfHeal
-  # reverts any manual `kubectl edit` on managed resources; ServerSideApply
-  # avoids noisy tracking-id annotation diffs. prune ENABLED 2026-08-01 —
-  # 38-day clean Synced+Healthy soak, zero sync activity since 2026-06-24,
-  # cleared the #316 gate (7-day minimum).
   syncPolicy:
     automated:
       selfHeal: true
@@ -49,25 +26,16 @@ spec:
         - /spec/clusterIP
         - /spec/clusterIPs
         - /status
-    # The bastion NFS PV binds at runtime — k8s populates claimRef/status that
-    # are not in git, so ignore them to keep the app Synced.
     - group: ""
       kind: PersistentVolume
       jsonPointers:
         - /spec/claimRef
         - /status
-    # ChromaDB Helm chart drift (none are real config changes): the StatefulSet
-    # and its PVC carry fields the k3s controller populates at runtime, and
-    # v1-config is a chart hook ConfigMap (helm.sh/hook) ArgoCD perpetually flags.
     - group: apps
       kind: StatefulSet
       name: chromadb
       managedFieldsManagers:
         - k3s
-      # spec.volumeClaimTemplates is owned by argocd-controller (not k3s), so the
-      # managedFields ignore above is a no-op for it; the cluster injects
-      # volumeMode: Filesystem (chart never sets it) => perpetual cosmetic diff.
-      # Explicit jsonPointer normalizes it. (#327)
       jsonPointers:
         - /spec/volumeClaimTemplates
     - group: ""

@@ -1,12 +1,4 @@
 ---
-# Self-Signed ClusterIssuer.
-# Used by any namespace that needs a quick self-signed cert (e.g. webhook
-# bootstrap, internal-only TLS handoffs).
-#
-# Note: the original `epavli-ca` / `epavli-ca-issuer` CA chain that used to
-# live in this file was retired in April 2026 — all public-facing TLS is
-# issued via the `letsencrypt-dns` ClusterIssuer (Cloudflare DNS-01 +
-# Let's Encrypt) in issuers/letsencrypt-dns-issuer.yaml.
 
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer

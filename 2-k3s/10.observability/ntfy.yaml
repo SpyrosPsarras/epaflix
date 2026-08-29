@@ -1,55 +1,4 @@
 ---
-# ntfy — the load-bearing notification receiver for the whole platform.
-#
-# Moved here from 2-k3s/13.odysseus/ntfy.yaml under the owner decision on #914
-# (2026-08-21): "it moves to `observability` ... As alerting infrastructure it
-# belongs with the stack that produces the alerts, and the owning ArgoCD
-# Application changes with it." It used to be a convenience sidecar for
-# Odysseus; it is not one any more. SMTP has been dead since #461, so the
-# Alertmanager -> ntfy webhook (topic `k8s-alertmanager`, #568) is the leg that
-# actually delivers, and Alertmanager is ntfy's main publisher. Owning ArgoCD
-# Application is now "observability" (2-k3s/11.argocd/apps/app-observability.yaml),
-# not "odysseus".
-#
-# The namespace is written EXPLICITLY on both objects below and that is
-# mandatory: 2-k3s/10.observability/kustomization.yaml has NO top-level
-# `namespace:` transformer, by documented design — a blanket transformer would
-# rewrite kube-prometheus-stack's kube-system control-plane exporter Services
-# into endpoint-less shells.
-#
-# The compose published host 8091 -> ntfy default 80. Here ntfy is told to
-# listen on :8091 directly (NTFY_LISTEN_HTTP) so the Service port and the
-# container port line up.
-#
-# NTFY_BASE_URL is ntfy's own server-side `base-url`, which is its PUBLIC-FACING
-# URL: the address it writes into attachment and click links, web-push and
-# e-mail payloads. It is NOT the address a publisher dials, so it does not
-# follow the namespace move - it follows the entry point #904 adds, and it is
-# therefore https://ntfy.epaflix.com (ingress/ntfy-ingressroute.yaml). Two
-# consequences, both accepted: those links resolve only for LAN clients, off
-# the dnsmasq record added at PR #1088's gate (README.md in this directory),
-# and publishers that dial ntfy.observability.svc.cluster.local:8091 are
-# unaffected, because ntfy does not match incoming requests against base-url.
-#
-# Do not confuse it with NTFY_BASE_URL in 2-k3s/13.odysseus/configmap.yaml:
-# that key is Odysseus's own DIAL address for publishing, and it correctly
-# carries the in-cluster FQDN http://ntfy.observability.svc.cluster.local:8091.
-#
-# The cache is a PVC, not an emptyDir (#915, owner decision 2026-08-21: "Move
-# to a PVC, as #903 proposed"). The cache only ever matters for a subscriber
-# that was offline when a message was published. Alertmanager repeats every 12h
-# and the TrueNAS GPU cron every 15 minutes, so both self-heal; PVE is the one
-# event-driven publisher with no repeat behaviour, and its only other leg is
-# `mail-to-root`, which does not deliver (#461). So a `pve-backups` message
-# published while a subscriber was offline has to survive a restart.
-# Retention is ntfy's built-in 12h default because NTFY_CACHE_DURATION is set
-# nowhere, so the PVC preserves at most 12h of backlog — it is a
-# restart-survival buffer, not an archive. Deliberate as of 2026-08-23
-# (owner ruling, #1091) - do not "fix" this by setting the env var.
-#
-# `strategy: Recreate` is REQUIRED by that PVC: local-path is RWO +
-# WaitForFirstConsumer, so a RollingUpdate would deadlock the new pod waiting
-# for a volume the old pod still holds.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -59,7 +8,6 @@ metadata:
     app: ntfy
 spec:
   replicas: 1
-  # RWO volume — see the header. Do not change this back to RollingUpdate.
   strategy:
     type: Recreate
   selector:
@@ -70,9 +18,6 @@ spec:
       labels:
         app: ntfy
     spec:
-      # Disable per-Service env-var injection for this pod (ntfy is told its
-      # listen addr explicitly via NTFY_* env, and observability is a busy
-      # namespace full of chart Services).
       enableServiceLinks: false
       containers:
         - name: ntfy
@@ -84,21 +29,8 @@ spec:
               value: ":8091"
             - name: NTFY_CACHE_FILE
               value: "/var/cache/ntfy/cache.db"
-            # ntfy's server-side base-url: the public-facing URL it puts in the
-            # links it generates, not an address anything dials. See the header.
             - name: NTFY_BASE_URL
               value: "https://ntfy.epaflix.com"
-            # Root cause of #1076. ntfy's default message-size-limit is 4096
-            # bytes; a body over it is treated as an attachment upload,
-            # attachments are disabled, and the POST comes back 400 with body
-            # code 40014 "attachments not allowed". A real failed-vzdump body
-            # is 16311 bytes (PVE puts the per-VM table in {{ message }}), so
-            # every genuine backup failure from 2026-08-10 on was rejected
-            # while every clean night, which sends nothing, looked healthy.
-            # 32k clears the measured worst case with room to spare. A body
-            # over 32k would 400 the same way, silently — that residual is why
-            # a notification-target failure guard is a tracked follow-up and
-            # not something this env var solves.
             - name: NTFY_MESSAGE_SIZE_LIMIT
               value: "32k"
           ports:
@@ -141,42 +73,10 @@ metadata:
   labels:
     app: ntfy
 spec:
-  # One front door, and it is not this Service.
-  #
-  # Everything outside the cluster reaches ntfy at https://ntfy.epaflix.com on
-  # Traefik's `internal` entry point, 192.168.10.102
-  # (ingress/ntfy-ingressroute.yaml, #904): LE TLS from the cloudflare
-  # certResolver, LAN-only dnsmasq A record, no router port forward. NOT the
-  # public `websecure` entry point on 192.168.10.101 — .101 is where the
-  # Cloudflare-proxied *.epaflix.com wildcard lands, so a route there really
-  # would publish an unauthenticated publish/subscribe endpoint to the
-  # internet.
-  #
-  # The kube-vip LoadBalancer pinned to 192.168.10.112 is RETIRED here
-  # (#904/#920). It existed for two LAN publishers that dialled it by IP over
-  # plaintext: the Proxmox VE hosts on topic pve-backups (#597,
-  # 1-proxmox/pbs/notifications.cfg) and the TrueNAS GPU cron on
-  # truenas-alerts. Both move to https://ntfy.epaflix.com — the PVE url is
-  # changed in this PR's tracked notifications.cfg and applied with `pvesh`
-  # at the deploy gate (pmxcfs, one edit covers both hosts), the TrueNAS
-  # gpu-health-check.sh is sed'd in the same window.
-  #
-  # Order at the gate is load-bearing: the ntfy leg gets fixed (#1076) and
-  # proven with a real error-severity vzdump event, then PVE and TrueNAS are
-  # repointed, and only then does this Service become ClusterIP. Retiring the
-  # address before the publishers move would leave PVE with no path at all,
-  # and the symptom of that is silence.
-  #
-  # In-cluster consumers never used .112 and are untouched: Alertmanager's
-  # webhook leg and Odysseus's NTFY_BASE_URL both dial
-  # ntfy.observability.svc.cluster.local:8091.
   type: ClusterIP
   selector:
     app: ntfy
   ports:
-    # In-cluster consumers reach this as
-    # ntfy.observability.svc.cluster.local:8091 — the Alertmanager -> ntfy leg
-    # (topic k8s-alertmanager, #568) and NTFY_BASE_URL in odysseus-config.
     - name: http
       port: 8091
       targetPort: http

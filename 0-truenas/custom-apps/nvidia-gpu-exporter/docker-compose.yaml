@@ -1,64 +1,13 @@
-# utkuozdemir/nvidia_gpu_exporter as a TrueNAS SCALE custom app on
-# 192.168.10.200 (#916). Serves the GPU series the vendored alert group
-# `truenas-gpu` in 2-k3s/10.observability/alertmanager-config/custom-alerts.yaml
-# queries. Scraped from the cluster through the trio in
-# 2-k3s/10.observability/truenas-exporters.yaml (#917).
-#
-# WHY A DEDICATED EXPORTER AND NOT A TEXTFILE COLLECTOR
-# The #916 decision vendors upstream's own expressions, and those query this
-# exporter's own series (nvidia_smi_last_collect_success,
-# nvidia_smi_gpu_recovery_action, nvidia_smi_xid_last_timestamp_seconds,
-# nvidia_smi_gpu_info). A .prom textfile fed by ../../scripts/gpu-health-check.sh
-# cannot emit them, so that route would vendor four permanently-empty
-# expressions that never fire - the silent-toward-"nothing here" failure this
-# whole map exists to kill - and would tie the metric source to the very script
-# #919 deletes.
-#
-# THE -nvml TAG IS DELIBERATE, AND NvidiaGpuXidCritical DEPENDS ON IT
-# Upstream docs/CONFIGURE.md ("Experimental: native NVML backend", v1.14.0): the
-# XID families (nvidia_smi_xid_errors_total, nvidia_smi_xid_last_timestamp_seconds)
-# exist ONLY on the nvml backend - the default exec backend shells out to
-# nvidia-smi and cannot produce them. The `-nvml` image tags default to that
-# backend with no flag. Ship the plain `1.14.0` tag instead and
-# NvidiaGpuXidCritical becomes an expression that can never fire on real
-# hardware, which is exactly what this PR refuses to do silently. The backend is
-# marked experimental upstream (Linux x86_64, glibc, cgo build); if it does not
-# come up on this box the deploy-gate runbook in
-# 2-k3s/10.observability/README.md records the fallback to `1.14.0` (exec
-# backend, Xid rule synthetic-evidence-only) and the follow-up issue it opens.
-#
-# NO nvidia-smi / NVML BIND MOUNTS ON PURPOSE
-# The image is distroless and bundles no NVIDIA components; the NVIDIA Container
-# Toolkit injects the driver libraries (and nvidia-smi) matched to the host
-# driver at container start (upstream docs/INSTALL.md, "Running in Docker").
-# Measured on 192.168.10.200, 2026-08-22: docker 28.3.1, runtimes include
-# `nvidia` (/usr/bin/nvidia-container-runtime) and the DEFAULT runtime is
-# `nvidia`; host driver 570.172.08, RTX 2070 SUPER, persistence_mode Enabled.
-# Hand-mounting host paths instead would break on the next driver update in a
-# way that looks like a broken card.
-#
-# UPDATE SURVIVAL: same as the node-exporter app next door - middleware-managed,
-# stored on the ix-apps pool dataset, nothing on the immutable boot pool. The
-# app registration lives in middleware config, not git; the re-create recipe is
-# in README.md beside this file.
 services:
   nvidia-gpu-exporter:
     image: docker.io/utkuozdemir/nvidia_gpu_exporter:1.14.0-nvml
     restart: unless-stopped
-    # Host networking, so the exporter is reachable at 192.168.10.200:9835 -
-    # the address the EndpointSlice in truenas-exporters.yaml hardcodes.
     network_mode: host
     command:
       - --web.listen-address=:9835
     environment:
-      # The nvidia runtime reads these. `utility` is the nvidia-smi/NVML tier,
-      # which is all this exporter needs - it never runs CUDA work, so it does
-      # not compete with ollama or Jellyfin for VRAM.
       NVIDIA_VISIBLE_DEVICES: "all"
       NVIDIA_DRIVER_CAPABILITIES: "utility"
-    # Device reservation copied from the tracked odysseus compose
-    # (../odysseus/docker-compose.yaml). `count: all` is safe here for the same
-    # reason it is there: exactly ONE GPU exists on this box.
     deploy:
       resources:
         reservations:

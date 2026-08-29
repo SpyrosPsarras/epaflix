@@ -1,27 +1,5 @@
 name: seerr-oidc-watch
 
-# Watch for #218. The cluster pins `fallenbagel/jellyseerr:preview-OIDC`
-# (2-k3s/08.servarr/seerr/seerr.yaml) only because no stable seerr release
-# ships native OIDC. Upstream PR seerr-team/seerr#2715 has been open since
-# 2026-03-17 with no landing date, so a human re-checking it by hand every few
-# weeks is pure waste - three identical "still blocked" comments already sit on
-# #218. This job does the re-check instead and reopens #218 the moment the
-# answer changes.
-#
-# Renovate cannot express this condition: the target image tag does not exist
-# yet, and the trigger is "a foreign repo's PR landed / a foreign tag now
-# contains OIDC code", not "a newer tag of a pinned image exists". A scheduled
-# API check is the only mechanism that can see it.
-#
-# Notify conditions (any one reopens #218):
-#   A. latest stable release tag actually contains OIDC source paths - the real
-#      goal, and it also catches OIDC arriving via some other PR than #2715
-#   B. PR #2715 is merged - migration planning can start even pre-release
-#   C. PR #2715 is closed unmerged - the tracked lineage died, needs re-triage
-#
-# Same shape as k3s-stable-drift.yml: CI-side reminder, no cluster surface, no
-# secrets, single issue updated in place. Reads a public repo with the default
-# GITHUB_TOKEN.
 
 on:
   schedule:
@@ -46,7 +24,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          # --- upstream PR #2715 ---
           PR=$(gh api "repos/$UPSTREAM/pulls/$UPSTREAM_PR" \
             --jq '{state,merged,base:.base.ref,updated_at}' || true)
           if [ -z "$PR" ]; then
@@ -59,10 +36,6 @@ jobs:
           PR_BASE=$(printf '%s' "$PR" | jq -r '.base')
           PR_UPDATED=$(printf '%s' "$PR" | jq -r '.updated_at')
 
-          # --- latest stable (non-draft, non-prerelease) release ---
-          # No --paginate: with --jq, gh applies the filter per page, so a
-          # `[...][0]` would emit one line per page. Page 1 (30 releases,
-          # newest first) is more than enough.
           STABLE=$(gh api "repos/$UPSTREAM/releases" \
             --jq '[.[] | select(.draft == false and .prerelease == false)][0].tag_name' || true)
           if [ -z "$STABLE" ] || [ "$STABLE" = "null" ]; then
@@ -71,10 +44,6 @@ jobs:
             exit 0
           fi
 
-          # --- does that tag actually carry OIDC code? ---
-          # Release notes lie by omission, so walk the tag's git tree instead.
-          # `oauth` is deliberately NOT matched: Plex OAuth already exists and
-          # would false-positive forever.
           OIDC_HITS=$(gh api "repos/$UPSTREAM/git/trees/$STABLE?recursive=1" \
             --jq '[.tree[].path | select(test("oidc|openid";"i"))] | length' || echo "err")
           if [ "$OIDC_HITS" = "err" ]; then
@@ -133,7 +102,6 @@ jobs:
           esac
 
           BODY=$(cat <<EOF
-          ## Upstream state changed - reopened automatically
 
           $HEAD
 
@@ -143,11 +111,9 @@ jobs:
           - latest stable release: \`$STABLE\`
           - OIDC source paths in the \`$STABLE\` git tree: \`$OIDC_HITS\`
 
-          ## Next step
 
           $NEXT
 
-          ## Verify by hand
 
           \`\`\`shell
           gh api repos/$UPSTREAM/pulls/$UPSTREAM_PR --jq '{state,merged,base:.base.ref}'

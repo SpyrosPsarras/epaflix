@@ -1,15 +1,10 @@
 #!/bin/bash
 
-# Every kubectl call in this script runs against the homelab cluster, whatever
-# the ambient kubeconfig says (issue #971). Override with KUBECTL_CONTEXT=... .
 : "${KUBECTL_CONTEXT:=epaflix}"
 kubectl() { command kubectl --context "$KUBECTL_CONTEXT" "$@"; }
-# Radarr Database Health Check Script
-# Checks for duplicate IDs and sequence mismatches in critical tables
 
 set -euo pipefail
 
-# Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -21,7 +16,6 @@ echo "Radarr Database Health Check"
 echo -e "==========================================${NC}"
 echo ""
 
-# Get database credentials
 echo "🔍 Retrieving database credentials..."
 RADARR_PW=$(kubectl get secret servarr-postgres -n servarr -o jsonpath='{.data.radarr-password}' | base64 -d)
 DB_HOST="192.168.10.105"
@@ -36,12 +30,10 @@ fi
 echo -e "${GREEN}✅ Credentials retrieved${NC}"
 echo ""
 
-# Function to run psql query
 run_query() {
   PGPASSWORD="${RADARR_PW}" psql -h "${DB_HOST}" -U "${DB_USER}" -d "${DB_NAME}" -t -c "$1"
 }
 
-# Function to check for duplicates in a table
 check_duplicates() {
   local table=$1
   local count=$(run_query "SELECT COUNT(*) FROM (SELECT \"Id\" FROM \"${table}\" GROUP BY \"Id\" HAVING COUNT(*) > 1) sub;")
@@ -57,7 +49,6 @@ check_duplicates() {
   fi
 }
 
-# Function to check sequence alignment
 check_sequence() {
   local table=$1
   local result=$(run_query "SELECT MAX(\"Id\"), (SELECT last_value FROM \"${table}_Id_seq\") FROM \"${table}\";")
@@ -74,7 +65,6 @@ check_sequence() {
   fi
 }
 
-# Check duplicates in critical tables
 echo -e "${BLUE}📊 Checking for duplicate IDs...${NC}"
 DUPLICATES_FOUND=0
 
@@ -83,7 +73,6 @@ check_duplicates "MovieFiles" || DUPLICATES_FOUND=1
 
 echo ""
 
-# Check sequence alignment
 echo -e "${BLUE}📊 Checking sequence alignment...${NC}"
 SEQUENCES_BAD=0
 
@@ -92,14 +81,12 @@ check_sequence "MovieFiles" || SEQUENCES_BAD=1
 
 echo ""
 
-# Show detailed stats
 echo -e "${BLUE}📊 Database Statistics:${NC}"
 run_query "SELECT COUNT(*) as total_movies FROM \"Movies\";" | xargs | awk '{print "   Movies: " $1}'
 run_query "SELECT COUNT(*) as total_files FROM \"MovieFiles\";" | xargs | awk '{print "   MovieFiles: " $1}'
 
 echo ""
 
-# Final summary
 if [ $DUPLICATES_FOUND -eq 0 ] && [ $SEQUENCES_BAD -eq 0 ]; then
   echo -e "${GREEN}=========================================="
   echo "✅ Database is HEALTHY"

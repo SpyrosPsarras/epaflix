@@ -1,27 +1,4 @@
 ---
-# Sonarr - Public Internet-facing IngressRoutes with Let's Encrypt TLS,
-# fronted by Authentik forward-auth SSO (issue #176, servarr forward-auth
-# rollout).
-#
-# Sonarr is an INTEGRATION TARGET, but every caller reaches it over in-cluster
-# Service DNS (http://sonarr:8989) - seerr, bazarr, cleanuparr, newtarr and
-# unpackerr were all verified against their own stored config in #296. Nothing
-# calls it on the public host.
-#
-# Routing model:
-#   - Route A (sonarr-https, priority 10) gates the HUMAN UI via the
-#     authentik-forwardauth middleware (Authentik embedded outpost,
-#     "Servarr users" group).
-#   - There is NO /api route. The priority-20 PathPrefix(/api) exemption this
-#     file used to carry was removed in #296 (2026-08-10) because it published
-#     the whole Sonarr API to the internet for no consumer. /api is now gated
-#     by Route A like every other path. Do not re-add it - see the
-#     "NO /api exemption route here" note further down this file.
-#
-# Pattern mirrors newtarr/ingressroute.yaml and
-# 05.traefik-deployment/ingress/traefik-dashboard-sso.yaml:
-#   - UI route priority:10 + authentik-forwardauth middleware
-#   - outpost route priority:15 matching PathPrefix(/outpost.goauthentik.io/)
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -49,7 +26,6 @@ spec:
         sans:
           - "*.epaflix.com"
 ---
-# Outpost route - handles auth callback on sonarr.epaflix.com
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -73,18 +49,7 @@ spec:
         sans:
           - "*.epaflix.com"
 ---
-# NO /api exemption route here, deliberately (#296, removed 2026-08-10).
-# A priority-20 `Host(`sonarr.epaflix.com`) && PathPrefix(`/api`)` route with no
-# middleware used to sit here, so API-key callers could bypass forward-auth over
-# the public host. It also made the API internet-reachable with the API key as
-# the only control. Removed because nothing needs it: every in-cluster caller
-# uses internal Service DNS (`http://sonarr:8989` - seerr, unpackerr, prowlarr's
-# app sync, bazarr all verified), and 30d of Traefik access logs showed no
-# headless external caller, only browser XHRs that already carry the Authentik
-# cookie. /api now matches `sonarr-https` (priority 10) and is forward-auth'd.
-# Re-adding this re-publishes the API to the internet. Don't.
 ---
-# HTTP to HTTPS redirect for Sonarr
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:

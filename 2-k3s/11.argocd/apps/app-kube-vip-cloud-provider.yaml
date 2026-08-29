@@ -1,33 +1,4 @@
 ---
-# ArgoCD Application: kube-vip cloud provider — vendored upstream v0.0.12
-# manifest (SA, ClusterRole, ClusterRoleBinding, Deployment) plus the
-# `kubevip` IP-pool ConfigMap that drives LoadBalancer IP allocation.
-#
-# Source:       this repo, path 2-k3s/03.kube-vip-cloud-provider
-#               (kustomization.yaml with cloud-controller.yaml + ip-pool-configmap.yaml).
-# Destination:  in-cluster `kube-system` namespace.
-# Sync:         MANUAL on first install (syncPolicy: {}). After a clean
-#               `argocd app diff` showing only `argocd.argoproj.io/tracking-id`
-#               per resource, a manual sync with no Deployment restart and no
-#               disruption to LoadBalancer IPs (especially `192.168.10.101`
-#               carrying Traefik), and a 48 h soak, flip to:
-#                 syncPolicy:
-#                   automated: { selfHeal: true, prune: false }
-#                   syncOptions: [ServerSideApply=true]
-#               `prune` NEVER turns on — accidental file deletion must NOT
-#               cascade-drop the IP-pool ConfigMap (would re-allocate every
-#               LoadBalancer IP on the next service event) or the Deployment.
-#
-# Infra-critical note (per Issue #16): adoption must NOT alter the existing
-# LoadBalancer IP assignments. The `kubevip` ConfigMap in git exactly mirrors
-# live (range-traefik-system: 101-109, range-global: 110-199). The
-# cloud-controller Deployment is byte-identical to the live spec at v0.0.12;
-# the only first-sync change is the addition of the tracking-id annotation.
-#
-# Out of scope (deferred, not part of this Application):
-#   - example-*.yaml / test-network-speed.yaml in the dir — docs only.
-#   - kube-vip itself (control-plane VIP DaemonSet at 2-k3s/01.kube-vip) —
-#     separate Application candidate (Issue tbd).
 
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -43,9 +14,6 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: kube-system
-  # PHASE 2: automated self-heal after clean 48h soak (issue #38).
-  # prune stays OFF — accidental file deletion must NOT cascade-drop the IP-pool
-  # ConfigMap (would re-allocate every LoadBalancer IP) or the cloud-controller Deployment.
   syncPolicy:
     automated:
       selfHeal: true

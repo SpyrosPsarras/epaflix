@@ -1,61 +1,4 @@
 ---
-# Hourly blind-*arr-queue detector (Issue #835).
-#
-# On 2026-08-07 Sonarr's queue read (`GET /api/v3/queue`) returned
-# `totalRecords=0` and `queue/status` said `errors=false` while Sonarr had
-# grabbed 10 releases and completed downloads piled up unimported. A
-# `kubectl rollout restart deployment/sonarr` released 21 imports in about
-# 90 seconds (#834). Every health signal said fine throughout: the pod was
-# 1/1 Running with 0 restarts, `queue/status` reported no errors, and the
-# only `/api/v3/health` entry was the unrelated `IndexerLongTermStatusCheck`.
-# Root cause is an upstream stale `TrackedDownloadService` cache (#705); this
-# instance ran three days before the cache went stale, so it is intermittent
-# and WILL recur. This job is the detector, not the fix.
-#
-# THE SIGNAL (comparing two numbers Sonarr/Radarr already expose, no log
-# scraping): a `grabbed` history event carrying a `downloadId`, inside a
-# recent window, with NEITHER a live queue row for that `downloadId` NOR a
-# `downloadFolderImported`/`downloadImported` history event for it. That
-# combination is the blind-queue signature seen on 2026-08-07 — the grab
-# happened, nothing tracks it, and nothing imported it.
-#
-# WHY AN IDLE LIBRARY IS NOT FLAGGED (the whole point, per #835): a genuinely
-# idle library has ZERO grabs in the recent window (or every grab in the
-# window already has a queue row or already imported), so there is nothing
-# to compare and the job reports OK. Today's live `sonarr queue=0` with 5
-# `stalledDL` torrents in qBittorrent is exactly this case — those torrents
-# were grabbed long ago, already have a queue row (or already imported), and
-# an idle client-side stall is a qBittorrent/tracker fact, not a Sonarr
-# tracking fact. Comparing "grab -> queue-or-import" rather than "queue == 0"
-# is what tells the two apart; see orphan-census-cronjob.yaml's #631/#632
-# comments for the sibling half of this same distinction (there: queue
-# absence is not evidence of an orphan; here: queue absence is not evidence
-# of idleness).
-#
-# GRACE_MINUTES exists for the same anti-flap reason as orphan-census's
-# MIN_AGE_HOURS: a grab races its own queue row by design (Sonarr writes the
-# history row and the queue row from two different code paths), so a grab
-# younger than GRACE_MINUTES is never flagged even with no queue row yet.
-#
-# Exit-code contract, same as every sibling detector in this directory
-# (orphan-census, prowlarr-indexer-health, cleanuparr-queuecleaner-health):
-# NON-ZERO on a finding OR any fetch/pagination failure (fail LOUD, never a
-# silent pass), so the chart's default KubeJobFailed rule + the scoped
-# BlindQueueCheckFailed PrometheusRule
-# (2-k3s/10.observability/alertmanager-config/custom-alerts.yaml) fire and
-# route through the working ntfy receiver.
-#
-# Covers sonarr, sonarr2 AND radarr (#835's ask) — same image, same upstream
-# defect, all three read their own `/api/v3/queue` and `/api/v3/history`.
-#
-# Never scrapes *arr logs (#702, #634 — API keys in plaintext there). Every
-# number this job reads is an API field; it never echoes a response body or
-# a key value, only lengths/counts/http status codes.
-#
-# Credentials: the three *arr API keys are read from the EXISTING
-# `unpackerr-secret` (2-k3s/08.servarr/_shared/secrets/unpackerr-secret.enc.yaml)
-# — same three instances, same keys, no duplication. Same precedent as
-# orphan-census-cronjob.yaml in this directory.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -82,32 +25,10 @@ data:
     PAGE_SIZE = 250
     MAX_PAGES = 8  # safety cap: 8 * 250 = 2000 history rows per *arr per run
 
-    # How far back to look for grabs. 6h comfortably covers an hourly
-    # schedule with margin, and every real grab in the #834 incident was
-    # inside a single-digit-hour window.
     WINDOW_HOURS = float(os.environ.get("WINDOW_HOURS", "6"))
 
-    # A grab this young is never flagged even with no queue row yet - it is
-    # racing its own queue row, not blind. #834 measured the queue catching up
-    # to a burst of grabs within 90s of a restart; 15m is generous headroom
-    # on top of that for a live, unrestarted instance.
     GRACE_MINUTES = float(os.environ.get("GRACE_MINUTES", "15"))
 
-    # History event types that mean "this download was handled" - the grab
-    # reached a terminal, TRACKED outcome, so a missing queue row afterwards
-    # is that outcome, not blindness. Verified terminology:
-    # 2-k3s/08.servarr/RECOVERY-newtarr-cleanuparr.md uses
-    # "downloadFolderImported" for Sonarr; Radarr's Servarr-common history API
-    # uses the same event name for a movie folder import. downloadImported is
-    # kept as a defensive alias for older/renamed builds.
-    #
-    # A failed or ignored grab counts as resolved too, and leaving it out was a
-    # real false-positive source rather than a theoretical one: sonarr's own
-    # history carries 7 `downloadFailed` events in the last 7 days against 190
-    # grabs. Each one has no queue row and no import BY DEFINITION, so an
-    # imports-only rule would have reported a blind queue about once a day and
-    # trained everyone to ignore this alert. Blindness is a grab with NO
-    # recorded outcome at all - that is the distinction being drawn here.
     RESOLVED_EVENT_TYPES = {
         "downloadFolderImported", "downloadImported",
         "downloadFailed", "downloadIgnored",
@@ -247,7 +168,6 @@ data:
                 continue  # tracked normally
             if did in resolved_ids:
                 continue  # imported, failed or ignored - a recorded outcome,
-                          # so the missing queue row is that outcome
             blind.append((did, age_min))
         return blind
 
@@ -267,47 +187,30 @@ data:
             return {"eventType": "downloadFolderImported", "downloadId": did,
                     "date": _iso(now - minutes_ago * 60)}
 
-        # 1. Blind queue detected: grabbed 60m ago, no queue row, no import.
         blind = find_blind([grabbed("aaaa", 60)], set(), now, 6.0, 15.0)
         assert [d for d, _ in blind] == ["aaaa"], blind
 
-        # 2. Idle library NOT flagged: zero grabs in the window at all.
         assert find_blind([], set(), now, 6.0, 15.0) == []
-        # also idle when the only history is old imports of past, unrelated
-        # downloads and nothing was grabbed recently.
         assert find_blind([imported("zzzz", 500)], set(), now, 6.0, 15.0) == []
 
-        # 3. Already imported NOT flagged: queue row is gone on purpose.
         assert find_blind(
             [grabbed("bbbb", 90), imported("bbbb", 45)], set(), now, 6.0, 15.0
         ) == []
 
-        # Still tracked normally (in the live queue) - not flagged.
         assert find_blind([grabbed("cccc", 60)], {"cccc"}, now, 6.0, 15.0) == []
 
-        # Too young - racing its own queue row, never flagged even bare.
         assert find_blind([grabbed("dddd", 5)], set(), now, 6.0, 15.0) == []
 
-        # Outside the window entirely - not this run's problem.
         assert find_blind([grabbed("eeee", 500)], set(), now, 6.0, 15.0) == []
 
-        # Case-insensitive downloadId match (queue vs history casing differs
-        # in the wild, same as orphan-census's qBittorrent/*arr comparison).
         assert find_blind([grabbed("FFFF", 60)], {"ffff"}, now, 6.0, 15.0) == []
 
-        # Duplicate grabbed events for the same downloadId (a retry) collapse
-        # to one verdict, not one entry per event.
         blind = find_blind(
             [grabbed("gggg", 60), grabbed("gggg", 55)], set(), now, 6.0, 15.0)
         assert [d for d, _ in blind] == ["gggg"], blind
 
-        # REGRESSION (#835 review): a grab that FAILED has no queue row and no
-        # import by definition. Counting only imports as "resolved" made this
-        # look identical to a blind queue. sonarr's own history carries 7 of
-        # these in 7 days against 190 grabs, so it would have misfired daily.
         assert find_blind(
             [grabbed("f1", 60), failed("f1", 30)], set(), now, 6.0, 15.0) == []
-        # ...and one with NO recorded outcome at all is still caught.
         assert [d for d, _ in find_blind(
             [grabbed("f2", 60)], set(), now, 6.0, 15.0)] == ["f2"]
 
@@ -350,9 +253,6 @@ data:
             print("%s: %d grabbed event(s) in window | %d live queue row(s) | "
                   "%d blind" % (name, grabbed_n, len(queue_ids), len(blind)))
             for did, age_min in sorted(blind, key=lambda x: -x[1]):
-                # downloadId (infohash) only - no release/series titles, no key
-                # values. These logs are readable by anyone with cluster
-                # access.
                 print("    downloadId=%s  age=%.0fm  no queue row, no import"
                       % (did[:12], age_min))
             if blind:
@@ -384,23 +284,13 @@ metadata:
   labels:
     app: blind-queue-check
 spec:
-  # Hourly - the #834 incident ran the cache stale for 3 days before it was
-  # noticed, so an hourly check catches it well within that margin. Offset
-  # from the sibling servarr health checks in this namespace (prowlarr at
-  # :10, cleanuparr-queuecleaner-health at :25) to spread API load.
   schedule: "40 * * * *"
   concurrencyPolicy: Forbid
-  # #841: a schedule missed during a control-plane blip is stale by the
-  # time it could be retried, so skip it rather than run it late.
   startingDeadlineSeconds: 300
   successfulJobsHistoryLimit: 6
   failedJobsHistoryLimit: 6
   jobTemplate:
     spec:
-      # #841: under Forbid, a run that hangs blocks every later run and
-      # leaves no failed Job to alert on - the check goes quiet and quiet
-      # reads as healthy. Observed runtime 17-20s; this deadline is
-      # HTTP checks against three *arr instances.
       activeDeadlineSeconds: 300
       backoffLimit: 0
       ttlSecondsAfterFinished: 2592000  # keep 30 days
@@ -420,8 +310,6 @@ spec:
                   value: "6"
                 - name: GRACE_MINUTES
                   value: "15"
-                # Reuse the existing unpackerr Secret - same three *arr
-                # instances, same keys. No second copy of an API key in git.
                 - name: SONARR_API_KEY
                   valueFrom:
                     secretKeyRef:

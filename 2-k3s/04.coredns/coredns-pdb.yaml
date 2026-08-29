@@ -1,25 +1,4 @@
 ---
-# PodDisruptionBudget for the k3s addon-owned `coredns` Deployment.
-#
-# Why (pre-flight for the #413 k3s roll): the system-upgrade Plans cordon and
-# drain every node. `k3s-server` rolls the 3 masters one at a time, `k3s-agent`
-# drains TWO workers at once. CoreDNS runs 2 replicas; with no budget a drain
-# can evict the second pod before the first has rescheduled and gone Ready, and
-# cluster-wide DNS hits zero.
-#
-# `minAvailable: 1` makes the eviction API refuse that second eviction until a
-# replacement is Ready. `kubectl drain` retries, so the roll waits a few seconds
-# instead of blacking out DNS. The Plans set no drain timeout, so the retry is
-# not racing a deadline.
-#
-# `unhealthyPodEvictionPolicy: AlwaysAllow` is the anti-deadlock valve: a CoreDNS
-# pod that is stuck NotReady is evictable even when the budget is at its floor.
-# Without it (default `IfHealthyBudget`) a single wedged pod could block a drain
-# forever during an unattended roll.
-#
-# Scope note: this is a NEW object, not an adoption. k3s's coredns addon ships
-# no PDB, so ArgoCD owns it outright with no field-manager conflict against the
-# addon - unlike `spec.replicas`, see README "Replica count".
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:

@@ -1,26 +1,4 @@
 ---
-# ntfy message cache — replaces the emptyDir the Deployment used to carry
-# (#915, owner decision 2026-08-21: "Move to a PVC, as #903 proposed").
-#
-# Two consequences of this claim, both named at decision time:
-#
-#   1. local-path is ReadWriteOnce with volumeBindingMode
-#      WaitForFirstConsumer, so this PVC PINS ntfy to whichever node first
-#      schedules it and it forces `strategy: Recreate` on the Deployment — a
-#      RollingUpdate would deadlock the new pod on the old pod's volume.
-#   2. Retention is ntfy's built-in 12h default (NTFY_CACHE_DURATION is set
-#      nowhere), so this volume can never hold more than 12h of backlog. It is
-#      a restart-survival buffer for an offline subscriber, not an archive.
-#      DELIBERATE as of 2026-08-23 (owner ruling, #1091): 12h is the chosen
-#      answer, not an inherited default. The node pin in (1) is likewise an
-#      accepted single point of failure (#1089) - lost-node step in README.md.
-#
-# 1Gi matches the smallest comparable claims in this repo (remote-pi-data 1Gi,
-# homarr-config 1Gi) and is far above the observed live cache size of 64KiB.
-#
-# `namespace: observability` is explicit because
-# 2-k3s/10.observability/kustomization.yaml has NO top-level namespace
-# transformer, by documented design.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

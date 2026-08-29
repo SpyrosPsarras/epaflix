@@ -1,9 +1,4 @@
 ---
-# Unpackerr — extracts RAR/archive-packed releases so Sonarr can import them.
-# Needed because qBittorrent's "excluded_file_names" no longer skips archives
-# (#275 follow-up): scene releases (e.g. *-ARISTA) ship as .rar/.r00…; qBit now
-# downloads them and unpackerr extracts the video in-place, then the *arr imports.
-# Covers Sonarr + Sonarr2 (anime) + Radarr (keys read from k3s configs, #275).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -12,8 +7,6 @@ metadata:
   labels:
     app: unpackerr
   annotations:
-    # Reloader (#299): env-var secretKeyRef consumer, doesn't auto-roll
-    # otherwise. Scoped to the exact Secret.
     secret.reloader.stakater.com/reload: "unpackerr-secret"
 spec:
   replicas: 1
@@ -46,15 +39,12 @@ spec:
               value: "002"
             - name: TZ
               value: "Europe/Oslo"
-            # global behaviour
             - name: UN_INTERVAL
               value: "2m0s"
             - name: UN_START_DELAY
               value: "1m0s"
             - name: UN_PARALLEL
               value: "1"
-            # Sonarr instance (Genius/Ángela live here). Path must match what
-            # Sonarr sees so the extracted file imports cleanly.
             - name: UN_SONARR_0_URL
               value: "http://sonarr:8989"
             - name: UN_SONARR_0_API_KEY
@@ -68,7 +58,6 @@ spec:
               value: "torrent"
             - name: UN_SONARR_0_DELETE_DELAY
               value: "5m0s"
-            # Sonarr2 (anime)
             - name: UN_SONARR_1_URL
               value: "http://sonarr2:8989"
             - name: UN_SONARR_1_API_KEY
@@ -82,7 +71,6 @@ spec:
               value: "torrent"
             - name: UN_SONARR_1_DELETE_DELAY
               value: "5m0s"
-            # Radarr (movies)
             - name: UN_RADARR_0_URL
               value: "http://radarr:7878"
             - name: UN_RADARR_0_API_KEY

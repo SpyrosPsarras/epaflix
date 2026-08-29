@@ -1,27 +1,6 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-# Adopted under ArgoCD 2026-05-25 (Issue #17).
-#
-# Scope is intentionally narrow: user-managed objects only.
-#   - `coredns-custom` ConfigMap — the k3s-supported extension mechanism,
-#     mounted at /etc/coredns/custom/ by the addon-owned `coredns` Deployment.
-#   - `coredns` PodDisruptionBudget — a NEW object; k3s's addon ships no PDB,
-#     so there is nothing to fight over.
-#
-# The main `coredns` ConfigMap and the `coredns` Deployment itself are NOT in
-# this Application — they are owned by the k3s helm/addon controller
-# (objectset.rio.cattle.io annotations) and adopting them would fight that
-# controller. The CoreDNS replica count is deliberately live-only for the same
-# reason; see README "Replica count (HA)".
-#
-# The deprecated `coredns-custom.yaml` stub in this dir (empty data, kept
-# only as historical doc) is excluded; it shares the same ConfigMap name as
-# `coredns-epaflix-domains.yaml` and would clobber the live data keys.
-#
-# Bootstrap-only assets in this dir (not part of the Application):
-#   - configure-dns.sh — one-shot systemd-resolved listener setup on nodes.
-#   - DNS-FIX-2026-02-26.md, README.md — docs.
 
 resources:
   - coredns-epaflix-domains.yaml

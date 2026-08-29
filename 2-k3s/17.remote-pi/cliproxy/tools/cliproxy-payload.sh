@@ -1,20 +1,4 @@
 #!/usr/bin/env bash
-# Read cliproxy request payloads - the prompts and completions that stdout and
-# Loki deliberately do NOT carry. See ../../README.md "Logs - two surfaces".
-#
-# Grafana answers "which call, when, status, how long". This answers "what was
-# actually sent and returned", by reading the per-request files that
-# `request-log: true` writes on the pod (#1007).
-#
-# Files live on an emptyDir, so a pod restart wipes them and the 256MB cap
-# (#1011) trims oldest-first. This is a debugging surface, not an audit log.
-#
-#   list [N]        newest N payloads: request id, time, size, first user line
-#   show <id>       readable transcript for one request id
-#   raw <id> [out]  the whole payload file, unparsed
-#
-# The request id is the bracketed token in the Grafana access line:
-#   [2026-08-17 20:53:21] [91def450] [info] ... 200 | POST "/v1/messages"
 set -euo pipefail
 
 CTX="${CLIPROXY_CONTEXT:-epaflix}"
@@ -27,8 +11,6 @@ pod() {
     -o jsonpath='{.items[0].metadata.name}'
 }
 
-# Read a file off the pod. `kubectl exec cat` rather than `kubectl cp`, which
-# needs tar in the image - this one is distroless-ish and has no tar.
 pod_cat() {
   kubectl --context "$CTX" -n "$NS" exec "$(pod)" -c cliproxy -- cat "$1"
 }
@@ -61,8 +43,6 @@ cmd_list() {
 
 cmd_show() {
   local id="${1:?usage: $0 show <request-id>}" path
-  # Resolve first, on its own line. `pod_cat "$(resolve ...)"` would swallow
-  # resolve's non-zero exit inside the substitution and cat an empty path.
   path=$(resolve "$id") || exit 1
   pod_cat "$path" | python3 "$(dirname "$0")/render-payload.py"
 }

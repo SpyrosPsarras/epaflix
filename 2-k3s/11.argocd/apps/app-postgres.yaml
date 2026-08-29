@@ -1,31 +1,4 @@
 ---
-# ArgoCD Application: PostgreSQL data plane (CNPG Cluster + Pooler +
-# ScheduledBackup + 4 LB Services + namespace + backup PVC).
-#
-# Source:       this repo, path 2-k3s/06.postgres (kustomization.yaml).
-# Destination:  in-cluster `postgres-system` namespace.
-# Sync:         MANUAL on first install (syncPolicy: {}). After a clean
-#               `argocd app sync postgres --dry-run` followed by a real
-#               manual sync that shows only known-safe diffs, AND a 48 h
-#               soak with no reconcile loop, flip to
-#                 syncPolicy:
-#                   automated: { selfHeal: true, prune: false }
-#                   syncOptions: [ServerSideApply=true]
-#               `prune` NEVER turns on — accidental file deletion must NOT
-#               cascade-drop the live Cluster CR.
-#
-# Excluded from this Application (out of scope of issue #14):
-#   - cnpg-system operator (CRDs / Deployment / webhooks) — operator stays
-#     imperative; continues to be applied via 01.install-operator.sh.
-#   - cluster/postgres-secret.yaml — placeholder values; live Secrets are real.
-#   - minio-backup-credentials — not in repo at all; rotated out-of-band.
-#
-# CNPG controller mutations: the webhook + controller default-fill parts of
-# Cluster.spec post-bootstrap (most importantly `bootstrap.initdb` is a
-# one-shot that may be normalized after first init). ignoreDifferences
-# below is intentionally NARROW — wider ignores would defeat self-heal on
-# fields we want enforced. If the manual-sync dry-run surfaces drift on
-# fields not listed here, the right fix is to align git, not to ignore.
 
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -41,8 +14,6 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: postgres-system
-  # PHASE 2: automated self-heal after clean 48h soak (issue #34).
-  # prune stays OFF — accidental file deletion must NOT cascade-drop the live Cluster CR.
   syncPolicy:
     automated:
       selfHeal: true

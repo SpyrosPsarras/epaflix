@@ -1,19 +1,4 @@
 ---
-# Bazarr - Public Internet-facing IngressRoutes with Let's Encrypt TLS,
-# fronted by Authentik forward-auth SSO (issue #176, servarr forward-auth
-# rollout).
-#
-# Bazarr is an INTEGRATION TARGET: it calls out to sonarr/radarr and may be
-# called by lingarr via its API. Both directions run over in-cluster Service
-# DNS (http://bazarr:6767) - verified against lingarr's stored config in #296.
-# /api is therefore NOT exempt: the priority-20 PathPrefix(/api) exemption this
-# file used to carry was removed in #296 (2026-08-10) because it published the
-# whole API, and Bazarr's Swagger UI, to the internet for no consumer. Do not re-add it - see the
-# "NO /api exemption route here" note further down this file.
-#
-# Pattern mirrors 08.servarr/newtarr/ingressroute.yaml:
-#   - app route priority:10 + authentik-forwardauth middleware
-#   - outpost route priority:15 matching PathPrefix(/outpost.goauthentik.io/)
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -41,7 +26,6 @@ spec:
         sans:
           - "*.epaflix.com"
 ---
-# Outpost route - handles auth callback on bazarr.epaflix.com
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -65,17 +49,7 @@ spec:
         sans:
           - "*.epaflix.com"
 ---
-# NO /api exemption route here, deliberately (#296, removed 2026-08-10).
-# A priority-20 `Host(`bazarr.epaflix.com`) && PathPrefix(`/api`)` route with no
-# middleware used to sit here, so API-key callers could bypass forward-auth over
-# the public host. It also published `/api/` - bazarr's Swagger UI - to the
-# internet, and made the API key the only control. The one real caller was
-# bazarr-autotranslate; commit 67ae39e (2026-08-04) repointed it to
-# `http://bazarr.servarr.svc.cluster.local:6767`, which is what made removal
-# safe. /api now matches `bazarr-https` (priority 10) and is forward-auth'd.
-# Re-adding this re-publishes the API and the Swagger UI. Don't.
 ---
-# HTTP to HTTPS redirect for Bazarr
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:

@@ -1,6 +1,3 @@
-# Syncthing — kustomization for the ArgoCD-managed App. Plain kustomize
-# (no Helm, no Secret): config is generated on the PV on first run, and
-# Syncthing peer/folder state is intentionally not in git.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 

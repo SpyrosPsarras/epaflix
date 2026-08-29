@@ -1,44 +1,4 @@
 ---
-# ArgoCD Application: cert-manager (jetstack chart inflated via kustomize+helm).
-#
-# Source:       this repo, path 2-k3s/02.cert-manager (kustomization.yaml with
-#               a single `helmCharts:` entry pinned to jetstack v1.20.2, plus
-#               the two ClusterIssuers).
-# Destination:  in-cluster `cert-manager` namespace.
-# Sync:         MANUAL on first install (syncPolicy: {}). After a clean
-#               `argocd app diff cert-manager --core` showing only the
-#               argocd.argoproj.io/tracking-id annotation per resource, AND
-#               a manual sync with no webhook downtime / no Certificate
-#               churn, AND a 48 h soak, flip to:
-#                 syncPolicy:
-#                   automated: { selfHeal: true, prune: false }
-#                   syncOptions: [ServerSideApply=true]
-#               `prune` NEVER turns on — accidental file deletion must NOT
-#               cascade-drop the cert-manager Deployment or ClusterIssuers.
-#
-# CRDs: NOW managed by this Application (`includeCRDs: true` in the
-#       kustomization, `crds.enabled: true` + `crds.keep: true` in the chart
-#       values) — adopted under issue #93. The CRDs were originally installed
-#       at `helm install` time under field manager "helm"; the first ArgoCD
-#       sync after this flip needs a ONE-TIME `--force-conflicts` to take over
-#       the CRD field managership (helm -> argocd-controller):
-#         argocd app sync cert-manager \
-#           --server-side --force-conflicts
-#       This also reconciles the live v1.19.3 -> v1.20.2 CRD drift (the live
-#       CRDs were never bumped when the chart pin moved to v1.20.2).
-#       `crds.keep: true` keeps the CRDs (and their CRs) safe if this
-#       Application is ever pruned/deleted.
-#
-# Secrets (excluded; pending Issue #29 cluster-wide secret automation):
-#   - cloudflare-api-token            (DNS-01 solver for letsencrypt-dns)
-#   - letsencrypt-dns-private-key     (ACME account key — operator-maintained)
-# Both must exist in the cert-manager namespace before this Application is
-# created or synced.
-#
-# Field-manager note: the original install used field manager "helm". ArgoCD
-# applies under "argocd-controller" with ServerSideApply=true. The first sync
-# will force-conflict-take over the relevant fields. The cainjector-injected
-# `caBundle` is in `ignoreDifferences` so it stays out of the sync loop.
 
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -54,8 +14,6 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: cert-manager
-  # PHASE 2: automated self-heal after clean 48h soak (issue #34).
-  # prune stays OFF — accidental file deletion must NOT cascade-drop cert-manager Deployments / ClusterIssuers.
   syncPolicy:
     automated:
       selfHeal: true
@@ -73,11 +31,6 @@ spec:
       kind: Deployment
       jsonPointers:
         - /spec/replicas
-    # cainjector populates webhook caBundle at runtime via the
-    # `cert-manager.io/inject-ca-from-secret` annotation. The chart renders
-    # the webhook with NO caBundle field, so today's diff is clean — but
-    # ignoreDifferences here is belt-and-suspenders for future chart bumps
-    # that may render a placeholder.
     - group: admissionregistration.k8s.io
       kind: ValidatingWebhookConfiguration
       name: cert-manager-webhook
@@ -88,8 +41,6 @@ spec:
       name: cert-manager-webhook
       jsonPointers:
         - /webhooks/0/clientConfig/caBundle
-    # ClusterIssuer status is controller-maintained (ACME registration,
-    # last-renewal timestamps, etc.).
     - group: cert-manager.io
       kind: ClusterIssuer
       jsonPointers:

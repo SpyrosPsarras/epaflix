@@ -1,28 +1,4 @@
 ---
-# Prowlarr - Public Internet-facing IngressRoutes with Let's Encrypt TLS,
-# fronted by Authentik forward-auth SSO (issue #176, servarr forward-auth rollout).
-#
-# The Prowlarr UI is SSO-gated: the authentik-forwardauth middleware (Authentik
-# embedded outpost, provider + app slug `prowlarr`) gates browser traffic,
-# authorized by the "Servarr users" group.
-#
-# /api is NOT exempt. Prowlarr is an INTEGRATION TARGET, but every caller
-# reaches it over in-cluster Service DNS (http://prowlarr:9696) - newtarr,
-# sonarr, sonarr2 and radarr were all verified against their own stored config
-# in #296. The priority-20 `prowlarr-api` exemption this file used to carry was
-# removed in #296 (2026-08-10) because it published the whole Prowlarr API, and
-# its Swagger UI, to the internet for no consumer. Do not re-add it - see the
-# "NO /api exemption route here" note further down this file.
-#
-# Pattern mirrors 08.servarr/newtarr/ingressroute.yaml:
-#   - app route priority:10 + authentik-forwardauth middleware
-#   - outpost route priority:15 matching PathPrefix(/outpost.goauthentik.io/)
-#
-# NOTE: the live cluster has a DUPLICATE legacy IngressRoute `prowlarr-external`
-# (imperative-only, NOT in git) serving the same Host. This canonical set
-# SUPERSEDES it. After this merges, manually remove the stale route — prune is
-# OFF, so ArgoCD will not delete it for us:
-#   kubectl -n servarr delete ingressroute prowlarr-external
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -50,7 +26,6 @@ spec:
         sans:
           - "*.epaflix.com"
 ---
-# Outpost route - handles auth callback on prowlarr.epaflix.com
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -74,17 +49,7 @@ spec:
         sans:
           - "*.epaflix.com"
 ---
-# NO /api exemption route here, deliberately (#296, removed 2026-08-10).
-# A priority-20 `Host(`prowlarr.epaflix.com`) && PathPrefix(`/api`)` route with no
-# middleware used to sit here, so API-key callers could bypass forward-auth over
-# the public host. It also made the API internet-reachable with the API key as
-# the only control. Each *arr reaches prowlarr at `http://prowlarr:9696/<id>/`
-# and prowlarr's own app sync uses `http://sonarr:8989` / `http://radarr:7878`
-# - all verified live. 30d of access logs showed no headless external caller.
-# /api now matches `prowlarr-https` (priority 10) and is forward-auth'd.
-# Re-adding this re-publishes the API to the internet. Don't.
 ---
-# HTTP to HTTPS redirect for Prowlarr
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:

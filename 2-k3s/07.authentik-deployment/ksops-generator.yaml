@@ -1,16 +1,3 @@
-# ksops generator — decrypts the SOPS-encrypted Secrets below at render time.
-# Decryption performed inside argocd-repo-server via the ksops binary
-# (see 2-k3s/11.argocd/helm-values.yaml).
-#
-#   - authentik-app-secrets.enc.yaml: runtime app secrets (secret_key,
-#     postgresql/email passwords) consumed via global.envFrom.
-#   - authentik-iac-blueprint.enc.yaml: the `authentik-iac-blueprint` Secret
-#     holding the declarative IaC service-account blueprint, mounted via the
-#     chart's blueprints.secrets (issue #185).
-#
-# The chart-generated `authentik` Secret (20 keys, non-sensitive config)
-# remains operator-managed via the goauthentik chart's `secret-env`
-# template — NOT covered here.
 apiVersion: viaduct.ai/v1
 kind: ksops
 metadata:

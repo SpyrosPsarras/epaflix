@@ -1,88 +1,20 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-# Adopted under ArgoCD 2026-05-25 (Issue #18).
-#
-# Scope: recurring maintenance CronJobs (+ their RBAC and ConfigMap
-# sidecars) that are already live in the cluster. Manifests span two
-# namespaces — each carries its own `metadata.namespace`, so no
-# top-level `namespace:` is set here.
-#
-#   kube-system : containerd-cleanup, node-os-updater (+ SA/CR/CRB)
-#   servarr     : postgres-sequence-audit (+ sql ConfigMap)
-#
-# DELIBERATELY EXCLUDED from `resources:`:
-#   - servarr-image-updater-cronjob.yaml — superseded by
-#     argocd-image-updater; no live counterpart in the cluster (RBAC
-#     not provisioned). Kept on disk for historical reference.
-#   - system-upgrade/plans/ — the K3s rolling-upgrade Plans (k3s-server,
-#     k3s-agent). Owned by their own automated `system-upgrade-plans`
-#     ArgoCD Application (Issue #74), NOT this maintenance App. Kept out
-#     of this resource list so the two Apps don't fight over the Plans.
-#   - backup-all-databases.sh, fix-worker-61-diskpressure.sh — shell
-#     tooling, not k8s manifests.
-#   - backups/*.sql.gz — DB dumps.
-#   - README.md, system-upgrade/README.md — docs.
 
 resources:
   - image-cleanup-cronjob.yaml
   - node-os-updater-cronjob.yaml
   - postgres-sequence-audit-cronjob.yaml
-  # Issue #182: weekly Cleanuparr Sonarr blocklist drift detector (servarr ns).
-  # Carries its own ConfigMap (compare script) + CronJob; the upstream-only diff
-  # baseline ConfigMap is built by the configMapGenerator below.
   - cleanuparr-blocklist-drift-cronjob.yaml
-  # Issue #179: weekly newtarr config-seed drift detector (servarr ns). Carries
-  # its own check-script ConfigMap + scoped SA/Role/RoleBinding + CronJob; the
-  # BASELINE is the ksops-rendered newtarr-config-seed Secret (mounted RO), so no
-  # configMapGenerator is needed here.
   - newtarr-config-drift-cronjob.yaml
-  # Issue #483: daily qBittorrent orphan census (servarr ns). Carries its own
-  # census-script ConfigMap + CronJob; no RBAC (it talks HTTP only, never the
-  # kube API). SHIPS DISARMED — `ARMED: "false"` in the CronJob env. The two
-  # Secrets it reads (qbittorrent-webui-credentials, unpackerr-secret) are
-  # rendered by the SERVARR App's ksops generator, deliberately: a ksops
-  # generator here would drop this whole directory out of CI's sops-free
-  # kustomize gate.
   - orphan-census-cronjob.yaml
-  # Issue #607: hourly Prowlarr indexer-backoff health check (servarr ns).
-  # Carries its own check-script ConfigMap + CronJob; no RBAC (HTTP only). The
-  # prowlarr-api-key Secret is rendered by the SERVARR App's ksops generator,
-  # same cross-App reason as qbittorrent-webui-credentials above.
   - prowlarr-indexer-health-cronjob.yaml
-  # Issue #606: hourly cleanuparr QueueCleaner health check (servarr ns).
-  # Carries its own check-script ConfigMap + CronJob; no RBAC (HTTP only). The
-  # cleanuparr-api-key Secret is rendered by the SERVARR App's ksops generator,
-  # same cross-App reason as above.
   - cleanuparr-queuecleaner-health-cronjob.yaml
-  # Issue #835: hourly blind-*arr-queue detector (servarr ns, sonarr/sonarr2/
-  # radarr). Carries its own check-script ConfigMap + CronJob; no RBAC (HTTP
-  # only). Reuses the existing unpackerr-secret *arr API keys - no new Secret,
-  # so this needed no ksops generator here.
   - blind-queue-check-cronjob.yaml
-  # Issue #839: hourly qBittorrent missingFiles/error detector (servarr ns).
-  # Carries its own check-script ConfigMap + CronJob; no RBAC (HTTP only,
-  # REPORT ONLY - never deletes/pauses/rechecks a torrent). Reuses the
-  # existing qbittorrent-webui-credentials Secret, same cross-App reason as
-  # orphan-census-cronjob.yaml above.
   - qbt-stuck-torrent-check-cronjob.yaml
-  # Issue #1024: daily Radarr missing-movie search (servarr ns). The ONLY ACTOR
-  # in this directory - every sibling is a detector that exits non-zero on a
-  # finding, this one exits 0 on success and non-zero only on an API failure,
-  # so it needs no scoped alert (KubeJobFailedLastRun covers it, #1027).
-  # Radarr has no missing-search task of its own and RSS Sync only sees newly
-  # posted releases, so catalogue titles were never retried - 21 monitored
-  # movies had zero history. Rate-limited to BATCH_SIZE=3 per run via a
-  # stateless id-sorted rotation, because a full missing sweep would 429
-  # AvistaZ off the air. Reuses the unpackerr-secret *arr API keys like
-  # blind-queue-check, so no ksops generator is needed here.
   - radarr-missing-search-cronjob.yaml
 
-# Issue #182: diff baseline for the cleanuparr-blocklist-drift CronJob. Single
-# on-disk source of truth = files/cleanuparr-blocklist-expected.txt (verbatim
-# upstream Cleanuparr/Cleanuparr `blacklist`, public data -> NOT a Secret). The
-# generated name carries a content-hash suffix; kustomize rewrites the CronJob
-# volume reference automatically.
 configMapGenerator:
   - name: cleanuparr-blocklist-expected
     namespace: servarr

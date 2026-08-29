@@ -38,7 +38,6 @@ spec:
       labels:
         app: postgres-pooler
     spec:
-      # Topology spread constraints for even distribution
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: kubernetes.io/hostname

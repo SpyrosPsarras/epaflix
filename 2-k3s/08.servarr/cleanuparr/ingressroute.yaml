@@ -1,16 +1,4 @@
 ---
-# Cleanuparr - Public Internet-facing IngressRoutes with Let's Encrypt TLS,
-# fronted by Authentik forward-auth SSO (issue #176, servarr forward-auth rollout).
-#
-# Cleanuparr is a caller-only / pure-UI app: nothing calls into it, so there is
-# NO inbound API integration and therefore NO /api bypass route. The WHOLE host
-# is gated by the authentik-forwardauth middleware (Authentik embedded outpost,
-# provider + app slug `cleanuparr`), authorized by the "Servarr users" group --
-# same whole-host pattern as newtarr.
-#
-# Pattern mirrors 05.traefik-deployment/ingress/traefik-dashboard-sso.yaml:
-#   - app route priority:10 + authentik-forwardauth middleware
-#   - outpost route priority:15 matching PathPrefix(/outpost.goauthentik.io/)
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -38,7 +26,6 @@ spec:
         sans:
           - "*.epaflix.com"
 ---
-# Outpost route - handles auth callback on cleanuparr.epaflix.com
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -62,7 +49,6 @@ spec:
         sans:
           - "*.epaflix.com"
 ---
-# HTTP to HTTPS redirect for Cleanuparr
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:

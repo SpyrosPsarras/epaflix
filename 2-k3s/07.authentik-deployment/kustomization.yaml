@@ -1,38 +1,3 @@
-# Kustomize + Helm inflation for Authentik. Rendered by ArgoCD's repo-server
-# with `kustomize build --enable-helm` (set via configs.cm.kustomize.buildOptions
-# in 2-k3s/11.argocd/helm-values.yaml).
-#
-# Why this layer and not a direct Helm Application:
-#   Inflating the chart with kustomize keeps the Application a single git
-#   source and exposes a normal `images:` block (below) that bump tooling can
-#   edit in-place — exactly like the servarr stack. (The original driver was
-#   argocd-image-updater's multi-source write-back limitation; Image Updater
-#   was retired in #192/#265 and the single-source layer is still the right
-#   shape for Renovate.)
-#
-# Image bumps (Renovate — .github/renovate.json):
-#   Chart version + container image move together upstream, so Renovate groups
-#   them in one PR (groupName: authentik). Patch bumps auto-merge; minor/major
-#   open a PR you review and merge manually. On merge, the `newTag` field below
-#   (and helmCharts.version) is updated and kustomize replaces the chart-
-#   rendered server + worker image references in-place.
-#
-# Secrets:
-#   - authentik-app-secrets (AUTHENTIK_SECRET_KEY, AUTHENTIK_POSTGRESQL__
-#     PASSWORD, AUTHENTIK_EMAIL__PASSWORD) reconciled via the ksops
-#     generator below from authentik-app-secrets.enc.yaml
-#     (Issue #29 / PR #58, follow-up #59).
-#     The placeholder file `secret-app.yaml` is kept for reference.
-#   - authentik-iac-blueprint (single key `iac-service-account.yaml`)
-#     reconciled via the same ksops generator from
-#     authentik-iac-blueprint.enc.yaml. It is NOT an app runtime secret:
-#     it is mounted via the chart's `blueprints.secrets` and applied by the
-#     worker to declaratively create the `ak-iac` service account + the scoped
-#     `ak-iac` role + its non-superuser `ak-iac IaC` group membership + a
-#     non-expiring API token for IaC automation (issues #185, #230, #339;
-#     supersedes the retired personal token #175).
-#   - The chart-generated `authentik` Secret (20 non-sensitive config
-#     keys) stays operator-managed.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: app-authentik
@@ -40,13 +5,6 @@ resources:
   - namespace.yaml
   - storage/pv-pvc.yaml
   - ingress/outpost-ingressroute.yaml
-  # Issue #883: daily in-cluster validation of the blueprint payload nested in
-  # authentik-iac-blueprint's stringData - the second YAML document that no
-  # gate parsed, so #876 (bad indent) and #940 (!KeyOf at a state:absent entry)
-  # both merged green. Carries its own ServiceAccount + Role (`get` on that ONE
-  # named Secret, never list/watch) + RoleBinding + CronJob. The check script
-  # itself is files/check_authentik_blueprint.py, built into the ConfigMap by
-  # the configMapGenerator below.
   - blueprint-check-cronjob.yaml
 generators:
   - ksops-generator.yaml
@@ -62,13 +20,6 @@ images:
   - name: ghcr.io/goauthentik/server
     newTag: 2026.8.0
 
-# Issue #883: the blueprint checker the CronJob above mounts. ONE on-disk copy,
-# two consumers - this generator and the CI fixture suite
-# .github/hooks/test-check-authentik-blueprint.sh, which runs the same file
-# against synthetic plaintext payloads (no age key, no cluster). Same pattern as
-# the maintenance directory's files/ + configMapGenerator. The generated name
-# carries a content-hash suffix, so a script edit rolls the CronJob's volume
-# reference automatically.
 configMapGenerator:
   - name: authentik-blueprint-check-script
     files:

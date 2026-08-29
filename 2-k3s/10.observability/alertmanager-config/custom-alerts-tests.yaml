@@ -1,50 +1,9 @@
-# promtool unit tests for the rules this PR adds to custom-alerts.yaml:
-# the vendored `truenas-gpu` group (#916) and the `truenas-memory` group (#918).
-#
-# NOT a kustomization resource - it is never applied to the cluster. It is the
-# firing evidence for the conditions that cannot be forced on real hardware:
-# an Xid cannot be provoked on a working card without harming it, and ARC cannot
-# be pushed past its own cap on demand.
-#
-# Every alert added by this PR gets a PAIR: one input that must fire it, and one
-# healthy input that must produce zero alerts. A rule set that fires on healthy
-# input fails the gate exactly as hard as one that cannot fire.
-#
-# TWO EXTRACTS, ON PURPOSE. `promtool test rules` compares annotations too, so
-# a test that omits `exp_annotations` fails against a rule that HAS them - and
-# pinning every rendered annotation string here would test wording, not
-# behaviour. So the behaviour run uses an annotation-stripped extract (upstream
-# does the same with its rules-noann.yml), while `check rules` runs against the
-# FULL extract, which is what validates the annotation templates.
-#
-# HOW TO RUN (also in the deploy-gate section of ../README.md):
-#   cd 2-k3s/10.observability/alertmanager-config
-#   mkdir -p /tmp/promtool-rules
-#   yq '.spec' custom-alerts.yaml > /tmp/promtool-rules/custom-alerts-rules-full.yaml
-#   yq 'del(.spec.groups[].rules[].annotations) | .spec' custom-alerts.yaml \
-#     > /tmp/promtool-rules/custom-alerts-rules.yaml
-#   cp custom-alerts-tests.yaml /tmp/promtool-rules/
-#   promtool check rules /tmp/promtool-rules/custom-alerts-rules-full.yaml
-#   promtool test rules /tmp/promtool-rules/custom-alerts-tests.yaml
-# promtool resolves `rule_files` relative to THIS file, which is why both land
-# in the same scratch directory. No promtool binary locally? Use the
-# chart-pinned Prometheus image (kube-prometheus-stack 87.21.0 runs
-# quay.io/prometheus/prometheus:v3.13.1):
-#   docker run --rm -v /tmp/promtool-rules:/w -w /w \
-#     --entrypoint /bin/promtool quay.io/prometheus/prometheus:v3.13.1 \
-#     test rules custom-alerts-tests.yaml
-#
-# NEGATIVE CONTROL FOR THE CHECKER ITSELF: copy the extracted rules, break one
-# parenthesis, and `promtool check rules` must exit non-zero. A checker that
-# passes anything is not evidence.
 rule_files:
   - custom-alerts-rules.yaml
 
 evaluation_interval: 1m
 
 tests:
-  # ---- #916 GPU: collection health (the never-silence condition) ------------
-  # The 2026-08-09 shape: exporter serving happily, collection failing.
   - interval: 1m
     input_series:
       - series: 'nvidia_smi_last_collect_success{job="truenas-gpu-exporter", instance="192.168.10.200"}'
@@ -59,9 +18,6 @@ tests:
               severity: warning
               component: truenas-gpu
 
-  # ---- #916 GPU: healthy control, nothing in the group may fire ------------
-  # One GPU, present throughout; collection succeeding, fast; no Xid series at
-  # all; no recovery action.
   - interval: 1m
     input_series:
       - series: 'nvidia_smi_last_collect_success{job="truenas-gpu-exporter", instance="192.168.10.200"}'
@@ -89,9 +45,6 @@ tests:
         alertname: NvidiaGpuXidCritical
         exp_alerts: []
 
-  # ---- #916 GPU: the card vanishes while the exporter stays healthy --------
-  # This IS the 2026-08-09 signature, and the reason NvidiaGpuMissing is
-  # vendored beyond the four names the decision enumerates.
   - interval: 1m
     input_series:
       - series: 'nvidia_smi_gpu_info{job="truenas-gpu-exporter", instance="192.168.10.200", uuid="GPU-2070s"}'
@@ -107,15 +60,10 @@ tests:
               instance: 192.168.10.200
               severity: warning
               component: truenas-gpu
-      # collection itself never failed, so the failing rule must stay quiet -
-      # the two conditions are distinct, and this proves it.
       - eval_time: 40m
         alertname: NvidiaGpuExporterCollectionFailing
         exp_alerts: []
 
-  # ---- #916 GPU: critical Xid (synthetic by necessity) ---------------------
-  # Xid 79 (GPU fell off the bus) is in the critical list; Xid 13 (application
-  # fault) is deliberately not, and must not fire in the same evaluation.
   - interval: 1m
     input_series:
       - series: 'nvidia_smi_xid_last_timestamp_seconds{job="truenas-gpu-exporter", instance="192.168.10.200", uuid="GPU-2070s", xid="79"}'
@@ -134,9 +82,6 @@ tests:
               severity: critical
               component: truenas-gpu
 
-  # ---- #916 GPU: an OLD critical Xid must not fire -------------------------
-  # Same series, evaluated 30 minutes in: the event is now 21 minutes old, past
-  # the 10-minute window. Proves the rule reports a RECENT Xid, not a stored one.
   - interval: 1m
     input_series:
       - series: 'nvidia_smi_xid_last_timestamp_seconds{job="truenas-gpu-exporter", instance="192.168.10.200", uuid="GPU-2070s", xid="79"}'
@@ -146,7 +91,6 @@ tests:
         alertname: NvidiaGpuXidCritical
         exp_alerts: []
 
-  # ---- #916 GPU: driver-requested recovery action --------------------------
   - interval: 1m
     input_series:
       - series: 'nvidia_smi_gpu_recovery_action{job="truenas-gpu-exporter", instance="192.168.10.200", uuid="GPU-2070s"}'
@@ -162,7 +106,6 @@ tests:
               severity: critical
               component: truenas-gpu
 
-  # ---- #916 GPU: slow collection -------------------------------------------
   - interval: 1m
     input_series:
       - series: 'nvidia_smi_last_collect_duration_seconds{job="truenas-gpu-exporter", instance="192.168.10.200"}'
@@ -177,7 +120,6 @@ tests:
               severity: warning
               component: truenas-gpu
 
-  # ---- #918 ARC: the 12 GiB cap is lost ------------------------------------
   - interval: 1m
     input_series:
       - series: 'node_zfs_arc_c_max{job="truenas-node-exporter", instance="192.168.10.200"}'
@@ -192,11 +134,6 @@ tests:
               severity: warning
               component: truenas-memory
 
-  # ---- #918 ARC: healthy control, using TODAY'S MEASURED VALUES ------------
-  # size=12895364840 / c_max=12884901888 is a real read from the box on
-  # 2026-08-22 - ARC 0.081% ABOVE its own cap, which is normal jitter. Ratio
-  # 1.0008, well under the 1.05 margin. Idealising this to size == c_max would
-  # test a box that does not exist. Throttle counter flat at 0, as measured.
   - interval: 1m
     input_series:
       - series: 'node_zfs_arc_size{job="truenas-node-exporter", instance="192.168.10.200"}'
@@ -216,7 +153,6 @@ tests:
         alertname: TruenasArcForcedShrink
         exp_alerts: []
 
-  # ---- #918 ARC: ARC sustained 10% above its own cap -----------------------
   - interval: 1m
     input_series:
       - series: 'node_zfs_arc_size{job="truenas-node-exporter", instance="192.168.10.200"}'
@@ -233,8 +169,6 @@ tests:
               severity: warning
               component: truenas-memory
 
-  # ---- #918 ARC: forced shrink under memory pressure -----------------------
-  # The counter sits at 0 on this box and only moves under genuine pressure.
   - interval: 1m
     input_series:
       - series: 'node_zfs_arc_memory_throttle_count{job="truenas-node-exporter", instance="192.168.10.200"}'

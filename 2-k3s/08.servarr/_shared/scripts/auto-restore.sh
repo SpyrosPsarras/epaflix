@@ -1,11 +1,7 @@
 #!/bin/bash
 
-# Every kubectl call in this script runs against the homelab cluster, whatever
-# the ambient kubeconfig says (issue #971). Override with KUBECTL_CONTEXT=... .
 : "${KUBECTL_CONTEXT:=epaflix}"
 kubectl() { command kubectl --context "$KUBECTL_CONTEXT" "$@"; }
-# Simplified automated restore for *arr apps with PostgreSQL
-# Places backup in Backups folder for auto-restore on startup
 
 set -e
 
@@ -27,18 +23,15 @@ echo "=== Auto-Restore for $APP_NAME ==="
 echo "Backup: $(basename $BACKUP_ZIP)"
 echo ""
 
-# Scale down
 echo "[1/5] Stopping $APP_NAME..."
 kubectl -n servarr scale deployment "$APP_NAME" --replicas=0
 sleep 5
 
-# Find config path
 echo "[2/5] Locating config directory..."
 PV_NAME=$(kubectl -n servarr get pvc "${APP_NAME}-config" -o jsonpath='{.spec.volumeName}')
 CONFIG_PATH=$(kubectl get pv "$PV_NAME" -o jsonpath='{.spec.hostPath.path}')
 echo "   Path: $CONFIG_PATH"
 
-# Find node with volume
 echo "[3/5] Finding node..."
 NODE=""
 for N in $(kubectl get nodes -o jsonpath='{.items[*].metadata.name}'); do
@@ -54,17 +47,14 @@ if [ -z "$NODE" ]; then
     exit 1
 fi
 
-# Place backup file for auto-restore
 echo "[4/5] Placing backup file for auto-restore..."
 
-# Copy backup to node's /tmp
 BACKUP_NAME=$(basename "$BACKUP_ZIP")
 kubectl debug node/"$NODE" -it --image=busybox:latest -- sh -c "
     mkdir -p /host/tmp
     cat > /host/tmp/$BACKUP_NAME
 " < "$BACKUP_ZIP" 2>/dev/null
 
-# Use temp pod to move backup to Backups folder
 cat > /tmp/restore-mover-$$.yaml <<EOF
 apiVersion: v1
 kind: Pod
@@ -98,7 +88,6 @@ sleep 2
 kubectl -n servarr delete pod restore-mover
 rm /tmp/restore-mover-$$.yaml
 
-# Start app - it will auto-restore from the Backups folder
 echo "[5/5] Starting $APP_NAME (will auto-restore on startup)..."
 kubectl -n servarr scale deployment "$APP_NAME" --replicas=1
 

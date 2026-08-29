@@ -48,7 +48,6 @@ spec:
           echo "🔧 Starting fix..."
           echo ""
 
-          # Create fix SQL file
           cat > /tmp/fix-duplicates.sql << 'EOSQL'
           -- Sonarr2 Episodes Duplicate Fix
           BEGIN;
@@ -91,7 +90,6 @@ spec:
           COMMIT;
           EOSQL
 
-          # Execute the fix
           psql -f /tmp/fix-duplicates.sql
 
           echo ""

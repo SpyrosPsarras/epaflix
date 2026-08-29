@@ -1,36 +1,10 @@
-# kube-prometheus-stack Helm Values
-# Prometheus + Grafana + AlertManager + node-exporter + kube-state-metrics
 
-# Prometheus configuration
 prometheus:
   prometheusSpec:
     replicas: 1 # Single replica due to PV limitations
     retention: 8d
-    # Must stay BELOW the PVC claim below (25Gi). local-path is a bind mount with
-    # no quota, so the claim is advisory — retentionSize is the only real bound,
-    # and the node root disk is only 48G. At "45GB" Prometheus grew to 30G and
-    # pushed k3s-worker-62 to 85%, which broke kubelet image GC (#463).
-    # If 15d of history matters more than node headroom, grow the PVC — do not
-    # raise this back above the claim.
-    #
-    # 8d, not 15d (#913). Point-in-time measurement, 2026-08-21. All three
-    # numbers drift with cardinality, so re-run the queries rather than trusting
-    # them:
-    #   prometheus_tsdb_storage_blocks_bytes                            -> 18.05 GiB
-    #   (time() - prometheus_tsdb_lowest_timestamp_seconds) / 86400     -> 8.25 days
-    #   prometheus_tsdb_head_series                                     -> 515,435
-    # 18.05 GiB against the 20GB (= 18.63 GiB) cap held 8.25 days, i.e.
-    # 2.19 GiB/day, so 15d needs ~33 GiB. The PVC cannot grow: this pod is on
-    # k3s-worker-62, where `ssh ubuntu@192.168.10.62 df -h /` reported 9.8G free
-    # of 48G that day, and #463 above is what happened last time Prometheus
-    # outgrew it. So 8d is the retention this cluster actually had at that
-    # measurement, and at 8d the time bound binds first (17.5 GiB), so the two
-    # settings stop disagreeing. PrometheusRetentionBelowConfigured in
-    # alertmanager-config/custom-alerts.yaml is the check that reports it if
-    # that stops being true.
     retentionSize: "20GB"
 
-    # Resource limits
     resources:
       requests:
         cpu: 500m
@@ -39,7 +13,6 @@ prometheus:
         cpu: 2000m
         memory: 4Gi
 
-    # Storage configuration
     storageSpec:
       volumeClaimTemplate:
         spec:
@@ -49,23 +22,12 @@ prometheus:
             requests:
               storage: 25Gi
 
-    # Enable service monitors
     serviceMonitorSelectorNilUsesHelmValues: false
     podMonitorSelectorNilUsesHelmValues: false
     ruleSelectorNilUsesHelmValues: false
 
-    # Discover ServiceMonitor targets via EndpointSlice, not legacy v1 Endpoints
-    # (#917 deploy gate, PR #1110 post-merge finding). The default Endpoints role
-    # cannot see hand-written EndpointSlices, so the truenas-* targets in
-    # truenas-exporters.yaml never appeared. The control-plane targets only ever
-    # worked because the chart also renders real v1 Endpoints objects - the
-    # static slices in control-plane-endpointslices.yaml were unread until this
-    # flip. Every selector Service gets slices from the EndpointSlice controller
-    # and custom Endpoints are mirrored, so no existing target is lost; verified
-    # 2026-08-22: 0 relabelings reference __meta_kubernetes_endpoint* labels.
     serviceDiscoveryRole: EndpointSlice
 
-    # Additional scrape configs for Cilium and Hubble
     additionalScrapeConfigs:
       - job_name: "cilium-agent"
         kubernetes_sd_configs:
@@ -99,21 +61,13 @@ prometheus:
             replacement: "${1}:9965"
             target_label: __address__
 
-# Grafana configuration
 grafana:
   enabled: true
   replicas: 2
 
-  # Roll on a `grafana-admin-secret` rotation (#715, recipe proven by #780).
-  # Scoped `secret.reloader.stakater.com/reload`, never the blanket
-  # `reloader.stakater.com/auto` (#299). This is `grafana.annotations`, which
-  # the subchart renders into the Deployment's own metadata.annotations — where
-  # Reloader looks. `grafana.podAnnotations` lands on the pod template instead
-  # and would be a silent no-op.
   annotations:
     secret.reloader.stakater.com/reload: "grafana-admin-secret"
 
-  # Topology spread constraints for even distribution
   topologySpreadConstraints:
     - maxSkew: 1
       topologyKey: kubernetes.io/hostname
@@ -122,21 +76,16 @@ grafana:
         matchLabels:
           app.kubernetes.io/name: grafana
 
-  # Admin credentials — sourced from imperative Secret grafana-admin-secret
-  # (placeholder manifest at grafana-admin-secret.yaml). Real values live in
-  # .github/instructions/secrets.enc.yaml and are applied imperatively before sync.
   admin:
     existingSecret: grafana-admin-secret
     userKey: admin-user
     passwordKey: admin-password
 
-  # Disable default datasource to avoid conflicts
   sidecar:
     datasources:
       enabled: true
       defaultDatasourceEnabled: false
 
-  # Mount database password secret and OAuth secret
   extraSecretMounts:
     - name: grafana-db-secret
       secretName: grafana-db-secret
@@ -149,7 +98,6 @@ grafana:
       mountPath: /etc/secrets/grafana-oauth
       readOnly: true
 
-  # Grafana configuration
   grafana.ini:
     server:
       domain: grafana.epaflix.com
@@ -170,10 +118,6 @@ grafana:
     auth.generic_oauth:
       enabled: true
       name: Authentik
-      # client_id is a non-secret OIDC client identifier — committed verbatim.
-      # client_secret stays file-mounted from grafana-oauth-secret (placeholder
-      # at grafana-config/oauth-secret.yaml; real value from
-      # .github/instructions/secrets.enc.yaml).
       client_id: m4oQzhxf8oVyJY7EOrL7lCM81BUQ42Uc3w9OXDAs
       client_secret: $__file{/etc/secrets/grafana-oauth/client_secret}
       scopes: openid email profile
@@ -185,7 +129,6 @@ grafana:
       auto_login: false
       use_pkce: true
 
-  # Datasources
   datasources:
     datasources.yaml:
       apiVersion: 1
@@ -202,14 +145,10 @@ grafana:
           access: proxy
           jsonData:
             maxLines: 1000
-            # Loki runs with auth_enabled: true (multi-tenant). Promtail writes as
-            # tenant "1" (promtail-values.yaml tenant_id). Queries MUST carry the
-            # matching X-Scope-OrgID header or Loki returns 401 "no org id".
             httpHeaderName1: "X-Scope-OrgID"
           secureJsonData:
             httpHeaderValue1: "1"
 
-  # Dashboard providers
   dashboardProviders:
     dashboardproviders.yaml:
       apiVersion: 1
@@ -250,44 +189,11 @@ grafana:
           options:
             path: /var/lib/grafana/dashboards/logs
 
-  # Dashboard auto-import from grafana.com
-  # Note: Auto-import creates datasource variable issues - use built-in dashboards instead
-  # Built-in dashboards from kube-prometheus-stack are better and already configured
   dashboards: {}
-    # kubernetes-cluster:
-    #   kubernetes-cluster-overview:
-    #     gnetId: 315
-    #     revision: 3
-    #     datasource: Prometheus
-    #   node-exporter-full:
-    #     gnetId: 1860
-    #     revision: 37
-    #     datasource: Prometheus
-    # network-service-mesh:
-    #   cilium-hubble-overview:
-    #     gnetId: 16611
-    #     revision: 2
-    #     datasource: Prometheus
-    #   istio-control-plane:
-    #     gnetId: 7645
-    #     revision: 225
-    #     datasource: Prometheus
-    #   istio-service-dashboard:
-    #     gnetId: 7636
-    #     revision: 225
-    #     datasource: Prometheus
-    # infrastructure:
-    # Dashboard 10347 imported manually - auto-import creates unresolved datasource variable
-    # proxmox-ve-cluster:
-    #   gnetId: 10347
-    #   revision: 5
-    #   datasource: Prometheus
 
-  # Persistence disabled (using PostgreSQL)
   persistence:
     enabled: false
 
-  # Resources
   resources:
     requests:
       cpu: 250m
@@ -296,21 +202,14 @@ grafana:
       cpu: 1000m
       memory: 1Gi
 
-  # Ingress disabled (using Traefik IngressRoute)
   ingress:
     enabled: false
 
-# AlertManager configuration. The full alertmanager.yaml (route, receivers,
-# SMTP globals) lives in the imperative Secret alertmanager-config-secret
-# (placeholder manifest at alertmanager-config-secret.yaml). The chart's
-# alertmanager.config block cannot reference $__file{} mounts, so configSecret
-# is the only chart-supported path that keeps the SMTP password out of git.
 alertmanager:
   alertmanagerSpec:
     replicas: 3
     configSecret: alertmanager-config-secret
 
-    # Topology spread constraints for even distribution
     topologySpreadConstraints:
       - maxSkew: 1
         topologyKey: kubernetes.io/hostname
@@ -327,28 +226,12 @@ alertmanager:
         cpu: 200m
         memory: 256Mi
 
-# node-exporter configuration
 prometheus-node-exporter:
   tolerations:
     - key: node-role.kubernetes.io/control-plane
       operator: Exists
       effect: NoSchedule
 
-  # NO cpu limit, on purpose (#912). Point-in-time measurement, 2026-08-21,
-  # across 7 of 7 node-exporters. These numbers drift, so re-run the queries
-  # rather than trusting them:
-  #   sum by (pod) (rate(container_cpu_cfs_throttled_periods_total{container="node-exporter"}[24h]))
-  #     / sum by (pod) (rate(container_cpu_cfs_periods_total{container="node-exporter"}[24h]))
-  #     -> 0.24 to 0.40 per pod
-  #   quantile_over_time(0.99, sum by (pod) (rate(container_cpu_usage_seconds_total{container="node-exporter"}[5m]))[24h:5m])
-  #     -> 0.0095 cores
-  # 24-40% of CFS periods throttled while p99 CPU sat at 5% of the old 200m
-  # limit is CFS quota granularity on a bursty scrape handler (it reads dozens
-  # of /proc files in one go, blowing the 20ms-per-100ms-period budget every
-  # scrape), not an undersized limit, so RAISING the limit does not fix it. The
-  # memory limit stays: memory is incompressible, CPU is not, and the 100m
-  # request still provides the scheduling share. Verified no
-  # LimitRange/ResourceQuota exists to re-inject a default.
   resources:
     requests:
       cpu: 100m
@@ -356,11 +239,9 @@ prometheus-node-exporter:
     limits:
       memory: 200Mi
 
-# kube-state-metrics configuration
 kube-state-metrics:
   replicas: 2
 
-  # Topology spread constraints for even distribution
   topologySpreadConstraints:
     - maxSkew: 1
       topologyKey: kubernetes.io/hostname
@@ -369,14 +250,6 @@ kube-state-metrics:
         matchLabels:
           app.kubernetes.io/name: kube-state-metrics
 
-  # NO cpu limit, same reasoning as node-exporter above (#912). Point-in-time
-  # measurement, 2026-08-21, from the same throttled-fraction query as above
-  # with container="kube-state-metrics": 0.017, i.e. only 1.7% of CFS periods
-  # throttled. Re-run it rather than trusting that number. On that reading this
-  # limit removal is preventative and consistent rather than urgent.
-  # replicas: 2 above stays: dropping to 1 would trade away HA to work around a
-  # rule bug, and the job-failure rules dedupe the two replicas with
-  # `max by (...)` anyway (#909).
   resources:
     requests:
       cpu: 100m
@@ -384,7 +257,6 @@ kube-state-metrics:
     limits:
       memory: 512Mi
 
-# Default ServiceMonitors
 defaultRules:
   create: true
   rules:
@@ -412,21 +284,9 @@ defaultRules:
     nodeExporterRecording: true
     prometheus: true
     prometheusOperator: true
-  # The chart's KubeJobFailed is `kube_job_failed > 0` with no recency bound, so
-  # it fires for every RETAINED failed Job. The servarr reporter CronJobs keep
-  # failed Jobs 30 days (ttlSecondsAfterFinished: 2592000), so one transient
-  # finding alerted for 30 days and kept alerting after later runs passed -
-  # 34 of 73 active alerts were this rule, most of them stale, and that
-  # saturation is why the #1021 stale-API-key failures went unseen for 6h.
-  # Replaced by KubeJobFailedLastRun in
-  # alertmanager-config/custom-alerts.yaml, which keeps only the newest Job of
-  # each CronJob (plus any failed ownerless Job) and dedupes the two
-  # kube-state-metrics replicas. Re-enable this and delete that rule if you
-  # ever want the raw upstream behaviour back.
   disabled:
     KubeJobFailed: true
 
-# Component scraping
 kubelet:
   enabled: true
 kubeApiServer:

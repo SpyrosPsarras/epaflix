@@ -5,10 +5,6 @@ metadata:
   name: renovate
   namespace: renovate
 ---
-# Self-hosted Renovate: runs against SpyrosPsarras/epaflix once per hour,
-# discovers updates via renovate.json at the repo root (.github/renovate.json),
-# opens PRs on main. See `2-k3s/11.argocd/README.md` (Renovate section)
-# for the end-to-end flow.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -17,9 +13,6 @@ metadata:
   labels:
     app.kubernetes.io/name: renovate
 spec:
-  # Hourly is the standard cadence for self-hosted Renovate — schedule
-  # window inside renovate.json (Europe/Athens after 2am and before 6am)
-  # decides which PRs actually open; the CronJob can wake any time.
   schedule: "17 * * * *"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 1
@@ -29,10 +22,6 @@ spec:
     spec:
       backoffLimit: 1
       activeDeadlineSeconds: 1800
-      # Delete finished Jobs after 7 days. Without this, failedJobsHistoryLimit
-      # keeps the last 3 failures forever and KubeJobFailed never clears, so a
-      # fresh failure is indistinguishable from a 51-day-old one (#464).
-      # Runs hourly, so 7 days is plenty of window to notice a failure.
       ttlSecondsAfterFinished: 604800
       template:
         spec:
@@ -40,12 +29,6 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: renovate
-              # No tag here on purpose. The tag lives only in kustomization.yaml's
-              # `images:` block — that's the single source Renovate's own
-              # kustomize manager bumps and ArgoCD applies. A duplicate tag here
-              # went stale at 39.264.0 while the images: override moved the live
-              # bot to 43.33.2, and the drift was misread as proof the bot never
-              # left 39.264.0 (#486).
               image: ghcr.io/renovatebot/renovate
               imagePullPolicy: IfNotPresent
               args:

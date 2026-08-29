@@ -1,12 +1,4 @@
 ---
-# Lingarr — AI subtitle translator (forked image with zombie/concurrency fix, upstream PR #377)
-#
-# Lingarr keeps its Sonarr/Radarr API keys in its OWN Postgres (`lingarr-main`,
-# `settings.sonarr_api_key` / `radarr_api_key`) and stores them ENCRYPTED
-# (~176 chars), so a plaintext value scan does NOT find them - lingarr is an
-# easy-to-miss consumer of every *arr API-key rotation. Write them only through
-# `POST /api/setting/encrypted`; see the rotation runbook in
-# 2-k3s/08.servarr/README.md (#712).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -15,9 +7,6 @@ metadata:
   labels:
     app: lingarr
   annotations:
-    # Reloader (#299): rolls on servarr-postgres rotation (shared by
-    # bazarr/lingarr/prowlarr/radarr/seerr, so all 5 restart together on a
-    # credential change — accepted, see PR for the tradeoff).
     secret.reloader.stakater.com/reload: "servarr-postgres"
 spec:
   replicas: 1
@@ -43,67 +32,6 @@ spec:
         runAsGroup: 568
         fsGroup: 568
       initContainers:
-        # `request_timeout` has NO environment-variable binding upstream
-        # (StartupService.ApplySettingsFromEnvironment covers URLs/keys/models only),
-        # so it can only be set in the DB — classic live-only drift, same class as #317.
-        #
-        # Why it matters: the shipped default of 5s is shorter than a cold-start on the
-        # Ollama endpoint and shorter than a context-heavy warm call
-        # (ai_context_before/after=8). On timeout Lingarr burns max_retries and then writes
-        # the SOURCE line to the output file, so a translation "succeeds" with a correct
-        # .<lang>.srt name and a Lingarr header but untranslated text inside.
-        #
-        # Measured on 2026-08-09 against the live endpoint, so the numbers here are not
-        # guesses: a cold call (model not resident, /api/ps empty) took 10.6s for 4 tokens
-        # including the model load, and warm calls run at 56 tok/s. An earlier version of
-        # this comment said the cold start was ~30s; that was never measured. 5s is still
-        # far too short - it cannot even cover the model load - so 60 stands.
-        #
-        # The damage this caused, re-counted from the quarantine archive that holds exactly
-        # those files (/media/backups/fake-greek-el-2026-08-07): 152 .el.srt across 16
-        # titles were archived, of which 100 across 14 titles are English content by the
-        # project's <10%-non-ASCII rule. The other 52 measure 44-53% non-ASCII, the same
-        # band as healthy Greek on this tree, so they were swept in by mistake. An earlier
-        # version of this comment called all 152 "English-content", which over-counts the
-        # real damage by 52 files.
-        #
-        # Note for anyone re-running that scan: healthy Greek here measures 50-59%
-        # non-ASCII (1716 of 2065 live files), NOT the 63-67% older issues quote, and the
-        # 10% line is closer than it looks - one legitimate dialogue-sparse film measures
-        # 11%, because timestamps dominate its bytes. Scan /media/tvshows /media/movies
-        # /media/animes, never /media, or the count includes the backups above.
-        #
-        # Raise-only (never lowers a deliberately higher value) and tolerates the table not
-        # existing yet on a first-ever install, before the app runs its migrations.
-        #
-        # Second statement, #870: clear stale Hangfire TranslationJob work before the
-        # app boots. On startup Lingarr re-enqueues every Pending/InProgress request
-        # unconditionally (TranslationRequestService.cs:471, reached via
-        # ScheduleService.cs:107) and repoints `job_id` at the new job without deleting
-        # the old one, leaving a fetchable duplicate that cancel cannot reach.
-        #
-        # The guard is PRE-BOOT only and depends on `replicas: 1` + `strategy: Recreate`
-        # above: no Lingarr process is alive while an initContainer runs, and that
-        # single-writer window is what makes the delete safe. It must NEVER write to
-        # `translation_requests` - see the safety contract in the SQL file.
-        #
-        # BOTH statements are FATAL under `set -e`. `request_timeout` is a correctness
-        # floor for translation quality (#844). The reconcile below is fail-CLOSED as of
-        # #925 - it used to run with `|| echo WARN`, which made a failed guard exit 0:
-        # the initContainer reported `Completed`, lingarr booted anyway, and the
-        # duplicated queue that #870 exists to prevent was back with nothing but one
-        # unread WARN line to say so. A broken guard must not look like a healthy boot.
-        #
-        # This costs less availability than it reads. The `request_timeout` psql above
-        # hits the SAME database first and is already fatal, so every connection-level
-        # failure (postgres down, wrong host, bad credentials) already blocked boot
-        # before this change. The only newly-fatal class is a reconcile-SPECIFIC failure
-        # - a SQL error, a revoked grant, a lock timeout - which is exactly the class
-        # that used to be invisible.
-        #
-        # "Nothing to reconcile" is NOT a failure: the SQL reports `cleared 0 ... reaped
-        # 0` and exits 0, and a missing hangfire schema on a first-ever install raises a
-        # NOTICE and returns cleanly. Only an attempted-and-failed reconcile is fatal.
         - name: enforce-db-invariants
           image: postgres:16
           command:
@@ -165,27 +93,15 @@ spec:
               cpu: "200m"
       containers:
         - name: lingarr
-          # Upstream Lingarr (off the retired SpyrosPsarras fork). Effective image is
-          # digest-pinned in ../kustomization.yaml images: block (moving :main tag).
-          # :main carries the #432 "convert DateTime to utc" fix (not in any release
-          # tag yet — latest 1.2.4 predates it); revisit when upstream cuts >1.2.4. #270
           image: ghcr.io/lingarr-translate/lingarr:main
           imagePullPolicy: IfNotPresent
           env:
             - name: ASPNETCORE_URLS
               value: "http://+:9876"
-            # Integration URLs MUST stay on in-cluster Service names. The public
-            # hostnames sit behind Authentik forward-auth (#176), which answers 401 to
-            # Lingarr's API calls — the nightly Sonarr/Radarr sync had been failing with
-            # `Integration request failed: Unauthorized` and Lingarr was blind to new
-            # media. Same failure shape as the Cleanuparr blind window.
-            # StartupService.ApplySettingsFromEnvironment re-applies these on every boot,
-            # so env is the source of truth and a UI edit cannot silently win.
             - name: SONARR_URL
               value: "http://sonarr:8989"
             - name: RADARR_URL
               value: "http://radarr:7878"
-            # Postgres (managed by CloudNativePG in postgres-system ns)
             - name: DB_CONNECTION
               value: "postgres"
             - name: DB_HOST
@@ -249,7 +165,6 @@ spec:
         - name: media
           persistentVolumeClaim:
             claimName: servarr-media
-        # Consumed only by the enforce-db-invariants initContainer.
         - name: jobqueue-guard
           configMap:
             name: lingarr-jobqueue-guard

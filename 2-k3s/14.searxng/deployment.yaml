@@ -1,8 +1,4 @@
 ---
-# SearXNG deployment. The render-config initContainer substitutes the
-# secret_key from the searxng-secret Secret into the ConfigMap-templated
-# settings.yml, writing the result to an emptyDir the main container reads.
-# Keeps the real secret_key out of the ArgoCD-managed ConfigMap.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -22,10 +18,6 @@ spec:
       labels:
         app: searxng
     spec:
-      # Service is named `searxng`, so kubelet would inject a Docker-link
-      # env var SEARXNG_PORT=tcp://<clusterIP>:8080 that collides with the
-      # SEARXNG_PORT the image reads for its bind port (granian --port).
-      # Disable service-link env injection to avoid the collision.
       enableServiceLinks: false
       securityContext:
         runAsUser: 977

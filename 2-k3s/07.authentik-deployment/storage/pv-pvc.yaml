@@ -1,7 +1,4 @@
 ---
-# PersistentVolumeClaim for Authentik media using local-path storage
-# Note: local-path uses ReadWriteOnce, so server and worker must be deployed
-# with pod affinity to ensure they run on the same node
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

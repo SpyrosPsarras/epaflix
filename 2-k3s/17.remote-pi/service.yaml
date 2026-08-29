@@ -1,5 +1,3 @@
-# Owned by ArgoCD Application "remote-pi".
-# Rationale: expose the relay only inside the cluster for Traefik to proxy.
 ---
 apiVersion: v1
 kind: Service

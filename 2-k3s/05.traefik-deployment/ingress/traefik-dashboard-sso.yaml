@@ -1,13 +1,5 @@
 ---
-# Traefik Dashboard - Protected with Authentik SSO
-#
-# Prerequisites:
-# 1. Proxy Provider in Authentik: "Forward auth (single application)"
-#    - External host: https://traefik.epaflix.com
-# 2. Application in Authentik linked to the provider
-# 3. authentik-forwardauth middleware applied
 
-# HTTP to HTTPS redirect
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -27,7 +19,6 @@ spec:
           name: api@internal
 
 ---
-# Dashboard route - protected by ForwardAuth middleware
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -56,7 +47,6 @@ spec:
           - "*.epaflix.com"
 
 ---
-# Outpost route - handles auth callback on traefik.epaflix.com
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:

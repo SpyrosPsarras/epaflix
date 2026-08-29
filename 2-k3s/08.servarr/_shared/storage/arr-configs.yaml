@@ -1,6 +1,3 @@
-# Config storage for *arr apps (Sonarr, Radarr, Prowlarr, Bazarr, Lingarr)
-# Uses local-path StorageClass with dynamic provisioning
-# Data stored on k3s node iSCSI storage
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -67,7 +64,6 @@ spec:
     requests:
       storage: 2Gi
 ---
-# Lingarr — ASP.NET Data Protection keys (/app/config/keys). Main DB on CNPG.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

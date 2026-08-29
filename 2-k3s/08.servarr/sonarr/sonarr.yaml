@@ -1,13 +1,9 @@
 ---
-# Sonarr - TV Shows Manager
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: sonarr
   annotations:
-    # Reloader (#299/#715): roll this Deployment when servarr-postgres
-    # rotates. same shared secret as bazarr/lingarr/prowlarr/radarr/seerr, which already roll together on it.
-    # PR #714 wired the servarr Reloader but missed this workload.
     secret.reloader.stakater.com/reload: "servarr-postgres"
   namespace: servarr
   labels:

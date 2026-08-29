@@ -1,5 +1,4 @@
 ---
-# Custom Prometheus Alert Rules
 
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
@@ -62,17 +61,6 @@ spec:
             summary: "Prometheus storage usage high"
             description: "Prometheus PVC {{ $labels.persistentvolumeclaim }} is {{ $value | humanizePercentage }} full (threshold 85%)."
 
-        # #913: retentionSize ("20GB") bound before retentionTime for months
-        # while prometheus-values.yaml claimed 15d, and nothing reported the
-        # gap. retention is now 8d, the measured truth, and this rule keeps the
-        # two settings from disagreeing silently again. The 7d floor under an 8d
-        # setting leaves one day of slack so normal block churn does not flap it.
-        # Point-in-time check, 2026-08-21, both exprs sent to the Prometheus
-        # HTTP API (`GET /api/v1/query`): this one returned empty at 8.26 days of
-        # history (correctly quiet), and the same expr with the threshold raised
-        # to `< 9` returned the series (so it is live-sensitive, not dead). Days
-        # of history moves every day. Re-run both if you need to know it still
-        # holds.
         - alert: PrometheusRetentionBelowConfigured
           expr: |
             ((time() - prometheus_tsdb_lowest_timestamp_seconds) / 86400) < 7
@@ -163,22 +151,12 @@ spec:
             component: system-upgrade
           annotations:
             summary: "K3s nodes running mixed kubelet versions (roll in progress)"
-            description: "K3s nodes are on {{ $value }} distinct kubelet versions — likely a rolling upgrade in progress. Confirm this was an intended, reviewed version bump (pinned spec.version, issue #130). See the Future-Upgrade SOP: 2-k3s/maintenance/system-upgrade/README.md."
+            description: "K3s nodes are on {{ $value }} distinct kubelet versions — likely a rolling upgrade in progress. Confirm this was an intended, reviewed version bump (pinned spec.version, issue #130)."
 
     - name: cleanuparr-blocklist
       interval: 60s
       rules:
         - alert: CleanuparrBlocklistDriftCheckFailed
-          # LAST-RUN-ONLY (2026-08-19). The bare `kube_job_failed > 0` this
-          # replaced fired for every retained failed Job, and these CronJobs keep
-          # failed Jobs for 30 days (ttlSecondsAfterFinished: 2592000). One
-          # transient finding therefore alerted for 30 days, and kept alerting
-          # after the next run passed - 73 active alerts, most of them stale, is
-          # how the #1021 stale-API-key failures went unnoticed for 6 hours.
-          # The `and on (job_name) ... >= scalar(max(...))` clause keeps only the
-          # NEWEST Job of the family, so the alert self-resolves as soon as a
-          # later run succeeds. `max by (job_name)` dedupes the two
-          # kube-state-metrics replicas, which were double-firing every alert.
           expr: |
             max by (job_name) (
               kube_job_failed{namespace="servarr", job_name=~"cleanuparr-blocklist-drift.*"} > 0
@@ -193,22 +171,12 @@ spec:
             component: servarr
           annotations:
             summary: "Cleanuparr Sonarr blocklist drifted from upstream (or check failed)"
-            description: "The weekly cleanuparr-blocklist-drift Job ({{ $labels.job_name }}) failed — either upstream Cleanuparr/Cleanuparr 'blacklist' diverged from the committed snapshot, or the upstream fetch failed. Inspect the Job logs for the diff, then refresh 2-k3s/maintenance/files/cleanuparr-blocklist-expected.txt from live upstream via branch+PR. BASELINE ONLY - do NOT re-merge upstream into the cleanuparr-blocklist-seed Secret: those patterns were removed 2026-06-13 because they block unpackerr's .rar/.rNN volumes, and the pre-2026-08-19 runbook wording would reintroduce that. See the #182 section of 2-k3s/08.servarr/RECOVERY-newtarr-cleanuparr.md."
+            description: "The weekly cleanuparr-blocklist-drift Job ({{ $labels.job_name }}) failed — either upstream Cleanuparr/Cleanuparr 'blacklist' diverged from the committed snapshot, or the upstream fetch failed. Inspect the Job logs for the diff, then refresh 2-k3s/maintenance/files/cleanuparr-blocklist-expected.txt from live upstream via branch+PR. BASELINE ONLY - do NOT re-merge upstream into the cleanuparr-blocklist-seed Secret: those patterns were removed 2026-06-13 because they block unpackerr's .rar/.rNN volumes, and the pre-2026-08-19 runbook wording would reintroduce that (runbook section: issue #182)."
 
     - name: newtarr-config-drift
       interval: 60s
       rules:
         - alert: NewtarrConfigDriftCheckFailed
-          # LAST-RUN-ONLY (2026-08-19). The bare `kube_job_failed > 0` this
-          # replaced fired for every retained failed Job, and these CronJobs keep
-          # failed Jobs for 30 days (ttlSecondsAfterFinished: 2592000). One
-          # transient finding therefore alerted for 30 days, and kept alerting
-          # after the next run passed - 73 active alerts, most of them stale, is
-          # how the #1021 stale-API-key failures went unnoticed for 6 hours.
-          # The `and on (job_name) ... >= scalar(max(...))` clause keeps only the
-          # NEWEST Job of the family, so the alert self-resolves as soon as a
-          # later run succeeds. `max by (job_name)` dedupes the two
-          # kube-state-metrics replicas, which were double-firing every alert.
           expr: |
             max by (job_name) (
               kube_job_failed{namespace="servarr", job_name=~"newtarr-config-drift.*"} > 0
@@ -223,22 +191,12 @@ spec:
             component: servarr
           annotations:
             summary: "newtarr config-seed drifted from live /config (or check failed)"
-            description: "The weekly newtarr-config-drift Job ({{ $labels.job_name }}) failed — either the committed SOPS seed newtarr-config-seed diverged from the live newtarr /config JSON, or a read/exec into the pod failed. Inspect the Job logs for the per-file diff, then re-snapshot via the MANUAL #137 runbook in 2-k3s/08.servarr/RECOVERY-newtarr-cleanuparr.md (#179 section). The detector NEVER auto-fixes; refresh stays manual (no auto-PR per #192). nzb_hunt_bandwidth.json is intentionally excluded (volatile runtime state)."
+            description: "The weekly newtarr-config-drift Job ({{ $labels.job_name }}) failed — either the committed SOPS seed newtarr-config-seed diverged from the live newtarr /config JSON, or a read/exec into the pod failed. Inspect the Job logs for the per-file diff, then re-snapshot via the MANUAL #137 runbook (#179 section). The detector NEVER auto-fixes; refresh stays manual (no auto-PR per #192). nzb_hunt_bandwidth.json is intentionally excluded (volatile runtime state)."
 
     - name: orphan-census
       interval: 60s
       rules:
         - alert: OrphanCensusFailed
-          # LAST-RUN-ONLY (2026-08-19). The bare `kube_job_failed > 0` this
-          # replaced fired for every retained failed Job, and these CronJobs keep
-          # failed Jobs for 30 days (ttlSecondsAfterFinished: 2592000). One
-          # transient finding therefore alerted for 30 days, and kept alerting
-          # after the next run passed - 73 active alerts, most of them stale, is
-          # how the #1021 stale-API-key failures went unnoticed for 6 hours.
-          # The `and on (job_name) ... >= scalar(max(...))` clause keeps only the
-          # NEWEST Job of the family, so the alert self-resolves as soon as a
-          # later run succeeds. `max by (job_name)` dedupes the two
-          # kube-state-metrics replicas, which were double-firing every alert.
           expr: |
             max by (job_name) (
               kube_job_failed{namespace="servarr", job_name=~"orphan-census.*"} > 0
@@ -253,22 +211,12 @@ spec:
             component: servarr
           annotations:
             summary: "Orphaned qBittorrent torrents found (or the census failed)"
-            description: "The daily orphan-census Job ({{ $labels.job_name }}) exited non-zero — either it found torrents that are in qBittorrent, incomplete, have moved ZERO bytes for NO_PROGRESS_HOURS (24h) and have NO *arr queue row (exit 1), or it could not complete the census safely (exit 2: qBittorrent login, a queue fetch, a paginated queue, or an *arr reporting 0 queue rows while orphan-shaped torrents sit in the categories it owns — a broken queue read path, #631/#632). Read the Job log for the per-orphan table (hash prefix / category / state / owning *arr / progress / age / idle / uploaded) and the `orphans by owning *arr` line. The job SHIPS DISARMED (ARMED=\"false\") — it changes nothing until that env value is flipped in 2-k3s/maintenance/orphan-census-cronjob.yaml. Root cause of new orphans is the Cleanuparr `private stalled` rule with delete_private_torrents_from_client=0; the owner-action split is in the #196 section of 2-k3s/08.servarr/RECOVERY-newtarr-cleanuparr.md (#483)."
+            description: "The daily orphan-census Job ({{ $labels.job_name }}) exited non-zero — either it found torrents that are in qBittorrent, incomplete, have moved ZERO bytes for NO_PROGRESS_HOURS (24h) and have NO *arr queue row (exit 1), or it could not complete the census safely (exit 2: qBittorrent login, a queue fetch, a paginated queue, or an *arr reporting 0 queue rows while orphan-shaped torrents sit in the categories it owns — a broken queue read path, #631/#632). Read the Job log for the per-orphan table (hash prefix / category / state / owning *arr / progress / age / idle / uploaded) and the `orphans by owning *arr` line. The job SHIPS DISARMED (ARMED=\"false\") — it changes nothing until that env value is flipped in 2-k3s/maintenance/orphan-census-cronjob.yaml. Root cause of new orphans is the Cleanuparr `private stalled` rule with delete_private_torrents_from_client=0; the owner-action split is documented in #196 / #483."
 
     - name: prowlarr-indexer-health
       interval: 60s
       rules:
         - alert: ProwlarrIndexerBackoffCheckFailed
-          # LAST-RUN-ONLY (2026-08-19). The bare `kube_job_failed > 0` this
-          # replaced fired for every retained failed Job, and these CronJobs keep
-          # failed Jobs for 30 days (ttlSecondsAfterFinished: 2592000). One
-          # transient finding therefore alerted for 30 days, and kept alerting
-          # after the next run passed - 73 active alerts, most of them stale, is
-          # how the #1021 stale-API-key failures went unnoticed for 6 hours.
-          # The `and on (job_name) ... >= scalar(max(...))` clause keeps only the
-          # NEWEST Job of the family, so the alert self-resolves as soon as a
-          # later run succeeds. `max by (job_name)` dedupes the two
-          # kube-state-metrics replicas, which were double-firing every alert.
           expr: |
             max by (job_name) (
               kube_job_failed{namespace="servarr", job_name=~"prowlarr-indexer-health.*"} > 0
@@ -289,16 +237,6 @@ spec:
       interval: 60s
       rules:
         - alert: CleanuparrQueueCleanerHealthCheckFailed
-          # LAST-RUN-ONLY (2026-08-19). The bare `kube_job_failed > 0` this
-          # replaced fired for every retained failed Job, and these CronJobs keep
-          # failed Jobs for 30 days (ttlSecondsAfterFinished: 2592000). One
-          # transient finding therefore alerted for 30 days, and kept alerting
-          # after the next run passed - 73 active alerts, most of them stale, is
-          # how the #1021 stale-API-key failures went unnoticed for 6 hours.
-          # The `and on (job_name) ... >= scalar(max(...))` clause keeps only the
-          # NEWEST Job of the family, so the alert self-resolves as soon as a
-          # later run succeeds. `max by (job_name)` dedupes the two
-          # kube-state-metrics replicas, which were double-firing every alert.
           expr: |
             max by (job_name) (
               kube_job_failed{namespace="servarr", job_name=~"cleanuparr-queuecleaner-health.*"} > 0
@@ -319,16 +257,6 @@ spec:
       interval: 60s
       rules:
         - alert: BlindQueueCheckFailed
-          # LAST-RUN-ONLY (2026-08-19). The bare `kube_job_failed > 0` this
-          # replaced fired for every retained failed Job, and these CronJobs keep
-          # failed Jobs for 30 days (ttlSecondsAfterFinished: 2592000). One
-          # transient finding therefore alerted for 30 days, and kept alerting
-          # after the next run passed - 73 active alerts, most of them stale, is
-          # how the #1021 stale-API-key failures went unnoticed for 6 hours.
-          # The `and on (job_name) ... >= scalar(max(...))` clause keeps only the
-          # NEWEST Job of the family, so the alert self-resolves as soon as a
-          # later run succeeds. `max by (job_name)` dedupes the two
-          # kube-state-metrics replicas, which were double-firing every alert.
           expr: |
             max by (job_name) (
               kube_job_failed{namespace="servarr", job_name=~"blind-queue-check.*"} > 0
@@ -349,16 +277,6 @@ spec:
       interval: 60s
       rules:
         - alert: QbtStuckTorrentCheckFailed
-          # LAST-RUN-ONLY (2026-08-19). The bare `kube_job_failed > 0` this
-          # replaced fired for every retained failed Job, and these CronJobs keep
-          # failed Jobs for 30 days (ttlSecondsAfterFinished: 2592000). One
-          # transient finding therefore alerted for 30 days, and kept alerting
-          # after the next run passed - 73 active alerts, most of them stale, is
-          # how the #1021 stale-API-key failures went unnoticed for 6 hours.
-          # The `and on (job_name) ... >= scalar(max(...))` clause keeps only the
-          # NEWEST Job of the family, so the alert self-resolves as soon as a
-          # later run succeeds. `max by (job_name)` dedupes the two
-          # kube-state-metrics replicas, which were double-firing every alert.
           expr: |
             max by (job_name) (
               kube_job_failed{namespace="servarr", job_name=~"qbt-stuck-torrent-check.*"} > 0
@@ -378,10 +296,6 @@ spec:
     - name: traefik
       interval: 60s
       rules:
-        # Traefik 5xx (#352). Needs Traefik Prometheus metrics + ServiceMonitor
-        # (enabled in 2-k3s/05.traefik-deployment/values/traefik-values.yaml).
-        # Ratio of 5xx to total per backend service, gated by a minimum request
-        # rate so a single error on a near-idle service can't trip 100%.
         - alert: TraefikHigh5xxRate
           expr: |
             (
@@ -402,17 +316,6 @@ spec:
     - name: servarr-qbittorrent
       interval: 60s
       rules:
-        # qBittorrent VPN flap (#352). The Bluetit sidecar owns the tunnel now,
-        # so a VPN flap restarts the `airvpn` container, not `qbittorrent` -
-        # the app container's own probes only touch the local WebUI and its
-        # restart count stays flat through a VPN flap. Match both containers
-        # or the alert cannot fire for the thing it is named after.
-        #
-        # `agent` added (#622): the vpn-picker agent sidecar (#608) is a third
-        # container in this pod and was missing from the regex entirely, so a
-        # crash-looping agent produced zero series here. Confirmed against the
-        # #617 outage - three generic alerts fired (TargetDown, KubePodCrashLooping,
-        # KubePodNotReady) but this pod-specific rule stayed silent throughout.
         - alert: QbittorrentVpnFlap
           expr: increase(kube_pod_container_status_restarts_total{namespace="servarr", pod=~"qbittorrent.*", container=~"qbittorrent|airvpn|agent"}[15m]) > 2
           for: 5m
@@ -426,79 +329,7 @@ spec:
     - name: servarr-vpn-picker
       interval: 60s
       rules:
-        # vpn-picker alerting (#622, #689, #555). Replaces the deleted Loki rule
-        # E (AirVPNBluetitReconnecting, #668) - that matched a log string the
-        # image no longer emits, and the signal it was reaching for now lives in
-        # the agent's own metrics.
-        #
-        # WHAT IS DELIBERATELY NOT ALERTED ON, and why - read this before adding
-        # anything to this group:
-        #
-        #   vpn_agent_current_loss_pct - not alerted on because the agent already
-        #   ACTS on it: over VPN_AGENT_BAD_LOSS_PCT (5) three windows running it
-        #   switches server, and vpn_agent_switches_total is where that shows up.
-        #   A page on the raw reading would fire on windows the agent handles.
-        #
-        #   NOTE, this block used to say the probe "reads 10-20% in normal loaded
-        #   steady state because ICMP is the first thing a saturated upload queue
-        #   drops". That is NOT supported (#771). Same probe, same code: Dalim read
-        #   15% at ~4.2 MB/s on 2026-08-03, while Dedalus read 0.0% at 13.66, 4.40
-        #   and 3.49 MB/s on 2026-08-04. Load is not the variable. Whether Dalim
-        #   itself was lossy fits better but is unproven - the discriminating test
-        #   (comparable load on Dalim, re-measure) has not been run.
-        #
-        #   vpn_agent_consecutive_bad_windows - genuinely reachable as of #771,
-        #   which removed the throughput gate: it counts windows at or over
-        #   VPN_AGENT_BAD_LOSS_PCT, full stop. Under the gate (PR #764/#766) it
-        #   could barely move at all, because the loss path was only consulted
-        #   below 64 KiB/s and this pod seeds. Still not alerted on here: it resets
-        #   on every good window by design, and the switch it leads to is the thing
-        #   worth paging about, not the counting.
-        #
-        #   vpn_agent_switches_total{reason="degradation"} - reachable, and for the
-        #   first time actually so (#771). Alerted on by VpnAgentSwitchingRepeatedly
-        #   below (#736), which is a repeat/cap rule and NOT a "a switch happened"
-        #   rule - one degradation switch is the agent doing its job.
-        #
-        #   vpn_agent_tunnel_throughput_bytes_per_sec - diagnostic only, it decides
-        #   nothing (#771), and deliberately NOT an alert: a quiet tunnel is the
-        #   normal state whenever nothing is downloading, so low throughput on its
-        #   own says nothing. Read it next to vpn_agent_current_loss_pct as
-        #   context, NOT as an excuse - a busy tunnel at high loss is not known to
-        #   be fine, which is the whole of #771.
-        #   vpn_agent_tunnel_bytes_total is the raw counter behind it if you want
-        #   your own rate() window.
-        #
-        #   vpn_agent_healthy_by_throughput_windows_total - GONE, deleted with the
-        #   gate in #771. Do not write a rule against it.
-        #
-        # So this group alerts only on states that are unambiguous with the probe
-        # as it stands: the agent not answering, the tunnel device gone outside a
-        # switch window, the ranking stale past its own TTL, the ranked pool having
-        # failed, dry-run left parked, and the scorer finding nothing.
 
-        # #622: the one alert written for this pod (QbittorrentVpnFlap above) is a
-        # restart-count rule, and #620 made the agent container fall through to
-        # `exec sleep infinity` instead of crash-looping. That was the right trade -
-        # a crash-looping sidecar used to take qBittorrent's WebUI and every *arr
-        # download client down with it - but it means a dead agent leaves the pod
-        # 3/3 Ready with a flat restart count, so KubePodCrashLooping,
-        # KubePodNotReady and QbittorrentVpnFlap all go quiet.
-        #
-        # agent.py binds ThreadingHTTPServer(("", 8081)) and is the only thing in
-        # the image binding that port, so `sleep infinity` means no listener means
-        # `up == 0` while the pod stays Ready. Verified live 2026-08-03:
-        # `up{namespace="servarr",job="qbittorrent",endpoint="agent-metrics"}` is a
-        # single real series reading 1.
-        #
-        # The `or absent(...)` clause covers the other half - a deleted
-        # ServiceMonitor or a changed Service selector makes the target vanish
-        # rather than fail, and a missing series cannot compare to 0. Verified that
-        # absent() re-attaches the equality matchers: the same expression with a
-        # deliberately wrong endpoint returned
-        # `{endpoint="nope", job="qbittorrent", namespace="servarr"} 1`.
-        #
-        # for: 15m rides out a normal Deployment roll (~2-3 min) without paging.
         - alert: VpnAgentDown
           expr: |
             up{namespace="servarr", job="qbittorrent", endpoint="agent-metrics"} == 0
@@ -512,22 +343,6 @@ spec:
             summary: "vpn-picker agent is not serving metrics"
             description: "The vpn-picker agent sidecar in {{ $labels.namespace }} has not answered a scrape on :8081 for 15m. The pod is probably still 3/3 Ready - since #620 the agent container falls through to `exec sleep infinity` when /agent-entrypoint.sh is missing or fails, so a broken agent looks healthy and stops protecting the tunnel silently. Check that the `agent` container is running the entrypoint and not sleeping (Grafana → Explore → Loki: {namespace=\"servarr\", container=\"agent\"}), NOT a network problem (#622, #620, #617)."
 
-        # #689: the honest replacement for the degradation signal. Alerts on the
-        # tunnel device qBittorrent is bound to being gone, which is unambiguous -
-        # no egress at all - as opposed to the loss percentage, which is not.
-        #
-        # vpn_agent_tunnel_device_ok is read from /sys/class/net at scrape time
-        # (#690), so it is a live reading rather than the cached True the metric
-        # used to publish without ever looking. The device is deleted and rebuilt
-        # on every switch, so a scrape inside that window honestly sees no device -
-        # `and vpn_agent_switch_in_progress == 0` is the companion the agent
-        # exports for exactly this, and both series carry identical labels so the
-        # `and` matches 1:1. Verified live 2026-08-03: the inverted form
-        # (`tunnel_device_ok == 1 and switch_in_progress == 0`) returns the real
-        # series, the alerting form returns empty.
-        #
-        # for: 5m is well clear of the switch window, which is bounded by
-        # VPN_AGENT_RECOVERY_BUDGET_SECONDS (120 s) and capped at 3 switches a day.
         - alert: VpnAgentTunnelDeviceMissing
           expr: |
             vpn_agent_tunnel_device_ok{namespace="servarr"} == 0
@@ -541,19 +356,6 @@ spec:
             summary: "qBittorrent's VPN tunnel device is gone and no switch is running"
             description: "vpn_agent_tunnel_device_ok is 0 on {{ $labels.pod }} with vpn_agent_switch_in_progress 0, so this is not the normal teardown inside a switch - the device qBittorrent binds to does not exist. The Bluetit network lock is still armed so nothing leaks, but qBittorrent has no egress at all. Check the airvpn and agent container logs (Grafana → Explore → Loki: {namespace=\"servarr\", container=\"airvpn\"}) - the 2026-08-02 incident was a boot upgrade to a tunnel that never handshook (#627, #689)."
 
-        # #555 ("ranking stale beyond TTL for over 2 h"). vpn-picker publishes
-        # ranking.json every 15 min with ttl_seconds: 2100 (35 min = two missed
-        # cycles plus slack, images/vpn-picker/vpn_picker.py:62). Past the TTL the
-        # agent treats the ranking as ABSENT and falls back to its cached last-good
-        # list, then to `quick` - so this degrades quietly, it does not break
-        # anything immediately. Hence warning, not critical.
-        #
-        # 2100 is the TTL itself and `for: 2h` is the "for over 2 h" from #555, so
-        # this needs the ranking to be roughly 2 h 35 m old before it pages. The
-        # metric is measured at scrape time from the file (#686 fixed it being read
-        # once at boot and frozen), so it really does climb. Verified live
-        # 2026-08-03: `vpn_agent_ranking_age_seconds` = 768, the alerting form
-        # (`> 2100`) returns empty.
         - alert: VpnAgentRankingStale
           expr: vpn_agent_ranking_age_seconds{namespace="servarr"} > 2100
           for: 2h
@@ -564,13 +366,6 @@ spec:
             summary: "vpn-picker ranking is stale past its TTL"
             description: "The ranking the agent reads is {{ $value | humanizeDuration }} old on {{ $labels.pod }}, past its 2100 s TTL, and has been for over 2 h. The agent is running on its cached last-good list or on `quick`, so server selection is no longer measured. Check the vpn-picker Deployment in servarr and that it can still write /media/.vpn-picker/ranking.json (#555, #498)."
 
-        # #555 ("zero candidates passing the probe gate"). The scorer's own view:
-        # nothing in the pool passed its probe gate, so even a working agent has
-        # nothing better to switch to. Cannot be inferred from any agent metric.
-        # Verified live 2026-08-03: vpn_picker_candidates_passing_gate = 4.
-        #
-        # for: 1h = four scoring cycles, so one bad round trip to the AirVPN API
-        # does not page.
         - alert: VpnPickerNoCandidates
           expr: vpn_picker_candidates_passing_gate{namespace="servarr"} == 0
           for: 1h
@@ -581,29 +376,6 @@ spec:
             summary: "vpn-picker has no server passing the probe gate"
             description: "vpn_picker_candidates_passing_gate has been 0 for an hour on {{ $labels.pod }} - every scored AirVPN server failed the gate, so the agent has no ranked candidate to move to and a switch would land on `quick`. Check the vpn-picker logs and whether the AirVPN API is answering (Grafana → Explore → Loki: {namespace=\"servarr\", container=\"vpn-picker\"}) (#555, #498)."
 
-        # A switch that ends on `quick` instead of a ranked candidate is counted as
-        # `fallback` and treated as failed by the agent itself
-        # (agent.py:_finish - "ended on quick ... treating it as failed and holding
-        # the full cooldown"). It means every ranked candidate failed, and the pod
-        # stays on a mediocre server until something changes.
-        #
-        # This is the absolute counter value, deliberately NOT
-        # increase(...[window]). The counter is per-pod and starts at 0 on every
-        # pod, and the boot switch can complete before the first 60 s scrape - a
-        # series whose first sample is already 1 gives increase() nothing to see,
-        # so an event-shaped rule would silently miss the boot case, which is the
-        # one that actually happened on 2026-08-02. Read as state instead: "this
-        # pod is on a fallback server". It therefore stays firing for the life of
-        # the pod, which is correct - the condition really does persist - and
-        # resolves when the pod rolls. Verified live 2026-08-03:
-        # `vpn_agent_switches_total{reason="fallback"}` = 0, alerting form empty.
-        #
-        # reason="boot_upgrade" is deliberately not covered here: it increments on
-        # a normal pod start whenever `quick` lands outside the top-N band.
-        # reason="degradation" is covered by VpnAgentSwitchingRepeatedly below -
-        # it is genuinely reachable as of #771/#774 (VPN_AGENT_BAD_LOSS_PCT is 5
-        # and the throughput gate that made it near-unreachable is gone; this
-        # comment previously said 101, which was PR #733's disarm and is stale).
         - alert: VpnAgentFallbackServer
           expr: vpn_agent_switches_total{namespace="servarr", reason="fallback"} > 0
           for: 5m
@@ -614,92 +386,6 @@ spec:
             summary: "vpn-picker agent fell back to `quick`, the ranked pool failed"
             description: "{{ $labels.pod }} has recorded {{ $value }} fallback switch(es) - every ranked candidate failed to come up, so the agent connected via `airconnect quick` and is on an unmeasured server. Each switch also drops every peer and re-announces to private trackers, and the agent is capped at VPN_AGENT_MAX_SWITCHES_PER_DAY (3), so once the cap is hit it will not try again today. Check the agent logs for `ended on quick` / `passed no traffic` (Grafana → Explore → Loki: {namespace=\"servarr\", container=\"agent\"}) (#555, #505)."
 
-        # #736 / #555 ("switch flapping, daily cap hit"), from #505's list. Held
-        # back by PR #734 because degradation switching was disarmed - PR #733 had
-        # VPN_AGENT_BAD_LOSS_PCT at 101, then PR #766's throughput gate made the
-        # loss path near-unreachable on a seeding box. PR #773/#774 removed the
-        # gate and left the bar at 5, so reason="degradation" can finally move.
-        #
-        # WHERE THE CAP ACTUALLY LIVES, because it decides the expression. The
-        # enforced cap is SwitchBudget in images/airvpn-bluetit/agent.py: a history
-        # of [when, cooldown] entries on /var/cache/vpn-agent/switches.json,
-        # pruned to the last 86400 s on wall clock, and allowed() refuses when
-        # len(history) >= VPN_AGENT_MAX_SWITCHES_PER_DAY (3). Read live off
-        # qbittorrent-7dffdc9cb-sn99z on 2026-08-04:
-        #
-        #   switches.json                 [[1785831245.8235333, 21600]]
-        #   findmnt /var/cache/vpn-agent  ext4 ... kubernetes.io~empty-dir/agent-cache
-        #
-        # So the budget is on an emptyDir - pod-scoped, and one slot of three was
-        # already spent by this pod's boot_upgrade. Two consequences:
-        #
-        #   1. A rolling 24 h window is what the agent enforces, NOT a lifetime
-        #      count. So this rule uses increase(), the opposite call from
-        #      VpnAgentFallbackServer above - deliberately, and here is the
-        #      difference. Fallback is a STATE ("this pod is on an unmeasured
-        #      server") that persists until the pod rolls, so the absolute counter
-        #      is right there. A cap hit is an EVENT COUNT inside a window that
-        #      the agent itself forgets after 24 h. The absolute counter has no
-        #      window, so on a pod alive for days it would latch on forever after
-        #      the third switch while the agent had long pruned back to one slot
-        #      used and was switching happily - an alert stuck on, describing a
-        #      state that ended. That is the "reads as coverage and is not"
-        #      failure this group's header exists to prevent.
-        #
-        #   2. The metric and the budget can disagree by one in either direction,
-        #      so this cannot be an exact cap rule. #783 tracks exporting
-        #      len(history) as vpn_agent_switch_budget_used / _exhausted, which
-        #      would make it exact. Until then: _finish() calls budget.record()
-        #      unconditionally but increments switches[] only `if connected and
-        #      counted_as`, so a switch ending with no tunnel spends a slot
-        #      silently; and Agent.switches is in-memory while the history is on
-        #      disk precisely to survive an agent.py restart, so after a restart
-        #      the metric reads low.
-        #
-        # WHY increase() IS SAFE FOR degradation AND NOT FOR THE OTHER REASONS.
-        # PR #734's trap is real and was re-measured today, not taken on trust -
-        # the live pod's boot_upgrade counter reads 1 absolute but
-        # increase(...[24h]) reads 0, because the boot switch completed before the
-        # first 60 s scrape and a series whose first sample is already 1 gives
-        # increase() nothing to see. degradation structurally cannot do that:
-        # main() calls serve() before agent.run(), run() sleeps one
-        # probe_interval before the first watch_once(), and a trip needs
-        # bad_windows (3) consecutive bad windows - so the earliest possible
-        # degradation switch is 4 x 60 s = ~240 s after the agent starts, against
-        # a 60 s ServiceMonitor interval. The series is always scraped at 0
-        # several times before it can move. That margin is 4x and depends on
-        # VPN_AGENT_PROBE_INTERVAL_SECONDS x (VPN_AGENT_BAD_WINDOWS + 1) staying
-        # well over the scrape interval - if either is ever retuned, recheck this.
-        #
-        # WHY THE THRESHOLD IS 2 AND NOT THE CAP OF 3. The cap counts all reasons
-        # together, and boot_check() spends a slot on boot whenever `quick` lands
-        # outside the top-N band (it returns early and spends nothing when the
-        # pick is already in band). Both happen:
-        #
-        #   boot upgraded  -> 1 slot gone, degradation can reach 2 and NEVER 3
-        #                     inside 24 h. This is the live pod, measured above.
-        #   boot in band   -> all 3 slots free, degradation can reach 3.
-        #
-        # So `>= 3` on degradation is unfirable on any pod that boot-upgraded,
-        # which is the pod running right now. 2 is the only threshold that fires
-        # in both shapes, and in the measured shape it lands exactly on the cap
-        # hit. Read the alert as "capped, or one switch from it" - the metric
-        # cannot distinguish those two, per #783.
-        #
-        # Extrapolation checked rather than assumed: increase() over a window the
-        # series only partly covers inflates by about half a scrape interval per
-        # end, not to the full window. Measured on the two pods that do show a
-        # scraped boot switch - 1.0025 and 1.0033 for one real switch, ~0.3%. So
-        # one real switch cannot cross 2.
-        #
-        # sum by (namespace, pod) drops instance/job/endpoint/container/service
-        # and keeps pods apart: the same query at >= 0 returns 8 separate pod
-        # series for one 24 h window, which is the multi-series problem #736
-        # warned about, handled.
-        #
-        # for: 15m matches the group and rides out a scrape gap; the value moves
-        # slowly, and it self-resolves 24 h after the last switch, tracking the
-        # budget's own prune.
         - alert: VpnAgentSwitchingRepeatedly
           expr: |
             sum by (namespace, pod) (
@@ -713,13 +399,6 @@ spec:
             summary: "vpn-picker agent is switching server repeatedly, at or near its daily cap"
             description: "{{ $labels.pod }} has made {{ $value }} degradation switches in the last 24 h. The agent is capped at VPN_AGENT_MAX_SWITCHES_PER_DAY (3) counting every reason, and a boot upgrade usually spends one of those, so this pod is at the cap or one switch from it - once the cap is reached it stops trying until the window rolls, and a genuinely bad server is then kept. Every switch also drops every peer and re-announces to private trackers (#498). Look at whether one server keeps being picked and keeps degrading, or whether the probe is misreading: vpn_agent_current_server, vpn_agent_current_loss_pct and the `bad window` / `degradation trip` lines (Grafana → Explore → Loki: {namespace=\"servarr\", container=\"agent\"}). The exact enforced count is not exported yet (#783) (#736, #555, #505, #771)."
 
-        # Spyros on #622: dry-run is the rollback state, so if it is still set days
-        # later somebody parked it and forgot - the agent is logging switches it
-        # would make instead of making them. It was parked after the 2026-08-02
-        # dead-tunnel incident and has since been put back: verified live
-        # 2026-08-03, `vpn_agent_dry_run` = 0.
-        #
-        # for: 24h so a deliberate day of observation is not a page.
         - alert: VpnAgentDryRunStuck
           expr: vpn_agent_dry_run{namespace="servarr"} == 1
           for: 24h
@@ -733,21 +412,6 @@ spec:
     - name: postgres-backup
       interval: 60s
       rules:
-        # Backup-age alert for postgres-cluster (#569). Metric is the CNPG
-        # instance manager's plugin-native
-        # barman_cloud_cloudnative_pg_io_last_available_backup_timestamp on
-        # :9187 (needs spec.monitoring.enablePodMonitor: true, flipped in
-        # 2-k3s/06.postgres/cluster/postgres-cluster.yaml) - deliberately NOT
-        # cnpg_collector_last_available_backup_timestamp, which is permanently
-        # stale under the Barman Cloud Plugin (#571) and would false-fire
-        # forever the moment it's scraped.
-        # max by (namespace) (#577) - the bare metric has 3 series (one per
-        # postgres-cluster instance/pod); a bare max() with no grouping
-        # collapses them to a single value AND drops every label, so the
-        # ALERTS series (and the ntfy .GroupLabels.namespace) came out
-        # empty. `by (namespace)` keeps the exact same one-alert-per-cluster
-        # result (still a single series, since all 3 instances share the
-        # namespace) while carrying the label through.
         - alert: PostgresBackupAgeHigh
           expr: (time() - max by (namespace) (barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{namespace="postgres-system"})) > 36*3600
           for: 10m
@@ -758,7 +422,6 @@ spec:
             summary: "postgres-cluster backup is aging"
             description: "postgres-cluster (namespace postgres-system) has had no successful backup for {{ $value | humanizeDuration }} (threshold 36h - covers one missed daily 02:00 UTC run plus a slow failover). Check ObjectStore/postgres-minio-store status and the Barman Cloud plugin logs (Grafana → Explore → Loki: {namespace=\"postgres-system\"})."
 
-        # Same by (namespace) fix as PostgresBackupAgeHigh above (#577).
         - alert: PostgresBackupAgeCritical
           expr: (time() - max by (namespace) (barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{namespace="postgres-system"})) > 72*3600
           for: 10m
@@ -769,19 +432,6 @@ spec:
             summary: "postgres-cluster backup is critically aged"
             description: "postgres-cluster (namespace postgres-system) has had no successful backup for {{ $value | humanizeDuration }} (threshold 72h - three missed daily runs in a row, unambiguous). MinIO or the Barman Cloud plugin is almost certainly broken - check ObjectStore/postgres-minio-store status and the plugin/archiver logs immediately (Grafana → Explore → Loki: {namespace=\"postgres-system\"})."
 
-        # If the scrape target disappears (PodMonitor broken, pods gone) the
-        # timestamp metric goes missing rather than stale, and the two alerts
-        # above go quiet with no data instead of firing - the exact silent
-        # hole this issue exists to close. `for: 30m` gives a full CNPG
-        # rolling restart across all 3 instances (sequential, unsupervised
-        # primaryUpdateStrategy) room to complete without a false page.
-        #
-        # No `by (...)`/static label needed here (#577): unlike max(),
-        # absent() re-attaches every EQUALITY matcher from its selector to
-        # the result vector, and namespace="postgres-system" is an equality
-        # matcher - confirmed live: `absent(nonexistent{namespace="postgres-system"})`
-        # returns `{namespace="postgres-system"} 1`, not `{} 1`. The label
-        # was never actually missing on this one.
         - alert: PostgresBackupMetricMissing
           expr: absent(barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{namespace="postgres-system"})
           for: 30m
@@ -792,36 +442,6 @@ spec:
             summary: "postgres-cluster backup-age metric missing"
             description: "barman_cloud_cloudnative_pg_io_last_available_backup_timestamp has been absent for 30m - the postgres-system scrape target is down or gone, so the backup-age alerts above cannot fire even if backups are broken. Check that postgres-cluster pods are Running and the PodMonitor is picking them up."
 
-    # Credential redaction counter (#634, #702). Pairs with the log-content rule
-    # CredentialInLogs in loki-log-alerts.yaml - read both before changing either.
-    #
-    # promtail now redacts credential-shaped values before pushing to Loki, so the
-    # stored line reads `Password=<REDACTED>` and the log-content rule can no
-    # longer see it. That is deliberate, and it is why this metric exists: the
-    # promtail pipeline COUNTS each line while the secret is still visible, then
-    # redacts. This counter is the durable signal; the log-content rule stays as a
-    # catch-all for credential shapes the redaction regex does not recognise.
-    #
-    # Known non-zero contributors when this shipped: sonarr, radarr and prowlarr
-    # each log their full Postgres connection string including the plaintext
-    # password at Info level on EVERY start (#634, upstream behaviour). So this
-    # WILL increment on any of those restarting. That is a true positive, not
-    # noise - the credential really did leave the app in clear. Do not silence it;
-    # the fix is for those apps to stop logging connection strings.
-    #
-    # FALSE-POSITIVE HISTORY: the first version of promtail's redaction regex used
-    # a negated charset for the value, which matched regex PATTERN TEXT as well as
-    # secrets. Loki logs the LogQL of every delete request, so the #751 purge for
-    # `apikey=[A-Za-z0-9]{16,}` made this alert fire on our own tooling - 6
-    # increments, all container=loki. Fixed by excluding regex metacharacters and
-    # requiring 8+ chars. If this alert fires with namespace="observability" and
-    # container=loki, check that before assuming an app leaked something.
-    #
-    # `increase() > 0` over 15m rather than a rate threshold: one leaked line is
-    # already the event, and restarts are infrequent enough that this is not
-    # chatty. Redaction means the secret did not reach Loki, so severity is
-    # warning rather than critical - the exposure is bounded to the pod's own
-    # stdout (`kubectl logs`), which promtail cannot clean.
     - name: credential-redaction
       rules:
         - alert: CredentialRedactedFromLogs
@@ -845,48 +465,6 @@ spec:
               offender treat that credential as exposed and rotate it. Do NOT grep
               Loki for the literal value.
 
-    # Replacement for the chart's KubeJobFailed, which is disabled in
-    # prometheus-values.yaml (defaultRules.disabled.KubeJobFailed).
-    #
-    # The upstream rule is `kube_job_failed > 0` with no recency bound, so it
-    # fires once per RETAINED failed Job object. Every servarr reporter CronJob
-    # keeps failed Jobs for 30 days (ttlSecondsAfterFinished: 2592000), so a
-    # single transient finding alerted for 30 days and kept alerting long after
-    # later runs went green. Measured before this change: 34 of 73 active alerts
-    # were this one rule, 12 of them for blind-queue-check runs from 2026-08-15
-    # and 08-18 whose every successor had succeeded. That saturation is why the
-    # #1021 stale-API-key failures sat unnoticed for six hours (#1025).
-    #
-    # This version alerts only when the failed Job is the NEWEST Job of its
-    # CronJob, joined via kube_job_owner, so it self-resolves as soon as a later
-    # run succeeds. The second branch keeps ownerless Jobs (hand-created, Argo
-    # hooks) alerting while they are failed, since nothing will ever supersede
-    # them. `max by (...)` on every operand dedupes the two kube-state-metrics
-    # replicas, which were double-firing every alert.
-    #
-    # Verified live before commit: 34 series -> 2, both genuine
-    # (orphan-census' current finding, and one ownerless synthetic Job).
-    #
-    # ONE OWNER PER CONDITION (#909). The 7 servarr reporter CronJobs are owned
-    # by their own scoped rules in the groups above, which carry the per-job
-    # runbook text this generic rule cannot. They are excluded here by
-    # owner_name, so a reporter finding produces one alert and one email instead
-    # of two. Adding a new scoped reporter rule REQUIRES adding its CronJob name
-    # to that regex, or the failure will alert twice.
-    # Excluding by owner_name (the CronJob name) rather than by a job_name regex
-    # is deliberate: it is exact and namespace-scoped to servarr, so it cannot
-    # swallow a same-prefixed Job in another namespace.
-    # The OUTER PARENS around the existing expr are mandatory, not cosmetic:
-    # `unless` binds tighter than `or`, so without them `A or B unless C` parses
-    # as `A or (B unless C)` and the exclusion would apply only to the ownerless
-    # branch - no parse error, no visible symptom, duplicate alerts still firing.
-    # Point-in-time check, 2026-08-21, each expr sent to the Prometheus HTTP API
-    # (`GET /api/v1/query`): without the `unless` clause 1 series
-    # (namespace=servarr, orphan-census-29788260), with it 0, while
-    # ALERTS{alertname="OrphanCensusFailed"} still returned its 1 firing series.
-    # A control run with the outer parens stripped returned 1, which is the
-    # precedence trap described above. Job names and series counts change daily,
-    # so re-run the three queries rather than trusting these numbers.
     - name: kube-job-failed-last-run
       interval: 60s
       rules:
@@ -932,74 +510,6 @@ spec:
               itself once a later scheduled run succeeds; deleting the failed Job
               object is not required and is not a fix.
 
-    # =========================================================================
-    # TrueNAS GPU (#916). VENDORED, NOT WRITTEN HERE.
-    #
-    # Source: utkuozdemir/nvidia_gpu_exporter, tag **v1.14.0** (pinned),
-    #   charts/nvidia-gpu-exporter/templates/prometheusrule.yaml
-    #   https://raw.githubusercontent.com/utkuozdemir/nvidia_gpu_exporter/v1.14.0/charts/nvidia-gpu-exporter/templates/prometheusrule.yaml
-    # Fetched 2026-08-22. The template's knobs are rendered with the chart's own
-    # defaults from charts/nvidia-gpu-exporter/values.yaml at the same tag.
-    #
-    # The #916 decision (2026-08-21, "Repo owns, both conditions, delete cron")
-    # makes this repo the single source of truth for GPU alert expressions: no
-    # chart template sits in the GPU alerting path, matching the traefik rules
-    # at line 231 of this file and the four standalone monitoring manifests.
-    #
-    # FORK WARNING, recorded so nobody rediscovers it: upstream PromQL fixes no
-    # longer arrive automatically. This is a fork and its drift is ours to
-    # carry, closed only by a human noticing an upstream change. A
-    # nvidia_gpu_exporter row in .github/workflows/upstream-release-watch.yml is
-    # the follow-up issue that makes "a human notices" mechanical.
-    #
-    # NEVER SILENCE NvidiaGpuExporterCollectionFailing (and NvidiaGpuMissing).
-    # On 2026-08-09 the driver stayed loaded, /dev/nvidia* stayed present, and
-    # nvidia-smi exited 6 with "No devices were found" for ~23 hours while
-    # ollama answered 200 at 2.97 tok/s on CPU. Xid-only coverage would have
-    # been silent through all of it. Application health is NOT a GPU signal and
-    # appears in none of these expressions - the decision forecloses it.
-    #
-    # DEVIATIONS FROM THE UPSTREAM BYTES, all of them, for the reviewer:
-    #  1. Every expression is scoped to `job="truenas-gpu-exporter"`. Upstream
-    #     ships them unscoped. The job label is what discriminates our two
-    #     TrueNAS exporters, because both ServiceMonitors relabel `instance` to
-    #     the bare host address - see the header of ../truenas-exporters.yaml.
-    #  2. Template knobs rendered at chart defaults: collectionFailing.for 10m /
-    #     severity warning, collectionSlow.thresholdSeconds 5 with for 10m,
-    #     xidCritical.codes [48,62,64,74,79,95,119,120].
-    #  3. A `component: truenas-gpu` label is added (house convention, used by
-    #     no routing rule today) and each description gains a local pointer to
-    #     0-truenas/README.md, section "GPU (RTX 2070 SUPER)". Upstream's own
-    #     wording is otherwise kept.
-    #  4. NAME: the #916 decision comment lists the slow-collection alert as
-    #     `NvidiaGpuCollectionSlow`. Upstream v1.14.0 names it
-    #     `NvidiaGpuExporterCollectionSlow`; the decision transcribed it. The
-    #     upstream spelling wins here because the instruction is to vendor
-    #     verbatim - greps and runbooks must use it.
-    #  5. NvidiaGpuMissing is a DELIBERATE FIFTH RULE beyond the four names the
-    #     decision enumerates, added on the owner's ruling 2026-08-22. Upstream
-    #     ships it opt-in (values.yaml gpuMissing.enabled: false). Reason it is
-    #     on: the decision's operative sentence is "both conditions", meaning
-    #     GPU loss and collection health, and "exporter up, nvidia-smi sees no
-    #     GPU" IS the 2026-08-09 signature. It joins collection-health in the
-    #     never-silence class. Upstream's own caveat travels with it: it also
-    #     fires for up to 6h after a GPU is deliberately removed, and it needs a
-    #     stable instance label across exporter restarts - both are satisfied
-    #     here, the card is not removable in normal operation and `instance` is
-    #     relabelled to a constant.
-    #
-    # BACKEND DEPENDENCY, load-bearing: NvidiaGpuXidCritical queries
-    # nvidia_smi_xid_last_timestamp_seconds, which exists ONLY on the exporter's
-    # native NVML backend (upstream docs/CONFIGURE.md at v1.14.0). That is why
-    # 0-truenas/custom-apps/nvidia-gpu-exporter/docker-compose.yaml pins the
-    # `1.14.0-nvml` image flavor. On the plain exec image this rule is an
-    # expression that can never fire - if the gate has to fall back to it, that
-    # is recorded there and in the deploy-gate runbook, not left implied.
-    # Xid firing evidence is synthetic by necessity either way: an Xid cannot be
-    # forced on real hardware without harming the card, so the promtool unit
-    # tests in custom-alerts-tests.yaml (must-fire + must-not-fire pair) are the
-    # evidence, and they are committed next to this file.
-    # =========================================================================
     - name: truenas-gpu
       interval: 60s
       rules:
@@ -1016,8 +526,7 @@ spec:
               Run nvidia-smi on the host by hand and check dmesg for NVRM/Xid messages. The most
               common cause is a driver/library mismatch after a driver upgrade. THIS IS THE
               2026-08-09 SIGNATURE: exporter serving, card gone, every application still
-              answering on CPU. Recovery runbook: 0-truenas/README.md, section
-              "GPU (RTX 2070 SUPER)". Never silence this one.
+              answering on CPU. Never silence this one.
 
         - alert: NvidiaGpuMissing
           expr: |
@@ -1040,8 +549,7 @@ spec:
               box (RTX 2070 SUPER at 01:00.0), so this means it is gone while the driver still
               answers - the 2026-08-09 WPR2 wedge, and the condition that went unnoticed for
               ~23 hours. Check dmesg for "unexpected WPR2 already up" and "RmInitAdapter failed",
-              then follow the no-reboot recovery in 0-truenas/README.md, section
-              "GPU (RTX 2070 SUPER)". Never silence this one.
+              then follow the no-reboot recovery procedure. Never silence this one.
 
         - alert: NvidiaGpuRecoveryActionNeeded
           expr: nvidia_smi_gpu_recovery_action{job="truenas-gpu-exporter"} > 0
@@ -1054,8 +562,7 @@ spec:
               The NVIDIA driver itself reports that GPU {{ $labels.uuid }} needs recovery. The
               value names the action: 1 = reset the GPU, 2 = reboot the node, 3 = drain
               peer-to-peer workloads, 4 = drain and reset (current value: {{ $value }}). Stop
-              ollama and Jellyfin first - nothing may hold /dev/nvidia* during a reset. Runbook:
-              0-truenas/README.md, section "GPU (RTX 2070 SUPER)".
+              ollama and Jellyfin first - nothing may hold /dev/nvidia* during a reset.
 
         - alert: NvidiaGpuXidCritical
           expr: |
@@ -1071,8 +578,7 @@ spec:
               memory, microcontroller or GSP fault: reset the GPU. Xid 79 means the GPU fell off
               the PCIe bus. Xid 74 is an NVLink fault. Check dmesg for the matching NVRM Xid line.
               REQUIRES THE NVML BACKEND - the exporter must run the `-nvml` image flavor or this
-              series does not exist. Recovery: 0-truenas/README.md, section
-              "GPU (RTX 2070 SUPER)".
+              series does not exist.
 
         - alert: NvidiaGpuExporterCollectionSlow
           expr: nvidia_smi_last_collect_duration_seconds{job="truenas-gpu-exporter"} > 5
@@ -1090,37 +596,9 @@ spec:
               Collections that hang entirely are caught by NvidiaGpuExporterCollectionFailing
               instead of this one.
 
-    # =========================================================================
-    # TrueNAS host memory / ZFS ARC (#918).
-    #
-    # The #918 decision (2026-08-21, "Require it, signal is ARC vs its own cap")
-    # names the leading indicator: ARC measured against its own target/maximum,
-    # plus forced shrink under pressure. NOT a free-memory floor - a ZFS host
-    # fills RAM with ARC by design (22G of 31G in use with ARC at its cap on a
-    # healthy box), so a floor fires constantly and a constantly-firing alert
-    # gets silenced, which is how this map started.
-    #
-    # NO TUNED NUMBER LIVES HERE. The decision refuses a threshold that has no
-    # baseline behind it, and the baseline (a normal day plus an ollama load) is
-    # its own follow-up issue. Every rule below is either a recorded recovery
-    # fact (the 12 GiB cap) or a structural ratio against the box's own setting.
-    #
-    # Series come from node-exporter's ZFS collector, which parses
-    # /proc/spl/kstat/zfs/arcstats and emits each uint64 key as
-    # node_zfs_arc_<key> (node_exporter v1.12.1, collector/zfs_linux.go).
-    # Scoped on job="truenas-node-exporter" for the reason in the header of
-    # ../truenas-exporters.yaml: `instance` is relabelled to the bare host
-    # address on BOTH TrueNAS exporters, so only `job` discriminates.
-    # =========================================================================
     - name: truenas-memory
       interval: 60s
       rules:
-        # 12884901888 = 12 GiB. Not a tuned threshold: it is the zfs_arc_max
-        # tunable applied during the 2026-08-09 recovery on this 31 GB box,
-        # which previously ran ARC uncapped. This rule catches the cap being
-        # lost - a TrueNAS update resetting the tunable, a /etc/modprobe.d edit
-        # that does not survive, a hand-change - which is the precondition of
-        # the wedge, not the wedge itself.
         - alert: TruenasArcCapDrift
           expr: node_zfs_arc_c_max{job="truenas-node-exporter"} != 12884901888
           for: 15m
@@ -1134,22 +612,8 @@ spec:
               12884901888 (12 GiB) cap applied during the 2026-08-09 recovery. Uncapped ARC on
               this 31 GB box is the suspected trigger of the WPR2 GPU wedge: the driver hit
               NV_ERR_NO_MEMORY part-way through initialising the GSP firmware. Re-apply the ZFS
-              tunable AND the /etc/modprobe.d/zfs.conf boot copy - see the guards table in
-              0-truenas/README.md, section "GPU (RTX 2070 SUPER)".
+              tunable AND the /etc/modprobe.d/zfs.conf boot copy.
 
-        # THE 5% MARGIN IS FORCED BY MEASUREMENT, not taste. ARC oscillates
-        # around its cap and overshoots it slightly in normal operation.
-        # Measured read-only on 192.168.10.200, 2026-08-22, four reads of
-        # /proc/spl/kstat/zfs/arcstats 60s apart, c_max=12884901888 throughout:
-        #   size=12873050760   (under)
-        #   size=12882305584   (under)
-        #   size=12895364840   (ABOVE cap by 10462952 B, +0.081%)
-        #   size=12894717704   (ABOVE cap by 9815816 B, +0.076%)
-        # So the naive `size > c_max` form would fire permanently on a healthy
-        # box - exactly the constantly-firing alert #918 refuses. 5% of the cap
-        # is 644 MiB, roughly 60x the observed jitter, and it is a fraction of
-        # the box's own setting rather than an absolute number needing a
-        # baseline. It says "the cap is not being honoured", not "ARC is full".
         - alert: TruenasArcOverCap
           expr: |
             node_zfs_arc_size{job="truenas-node-exporter"}
@@ -1168,18 +632,6 @@ spec:
               /etc/modprobe.d/zfs.conf, and watch the GPU: uncapped ARC on this 31 GB box is the
               suspected trigger of the 2026-08-09 WPR2 wedge.
 
-        # Forced shrink under pressure, the second half of the #918 signal.
-        # THROTTLE COUNT ONLY, deliberately. Measured 2026-08-22 on the box:
-        # memory_throttle_count = 0 (it only moves under genuine memory
-        # pressure), while memory_direct_count = 545799 cumulative and flat
-        # across a 2-minute sample. A counter that already sits near 546k on a
-        # HEALTHY box is evidence it ticks during normal operation, so
-        # increase()>0 on it would be a warning that fires on routine behaviour
-        # - and a warning that fires on routine behaviour erodes trust in the
-        # whole set. Whether memory_direct_count joins as a RATE threshold is
-        # the explicit job of the ARC baseline follow-up issue (normal day plus
-        # ollama load). The unambiguous signal alerts now; the ambiguous one
-        # gets measured first.
         - alert: TruenasArcForcedShrink
           expr: increase(node_zfs_arc_memory_throttle_count{job="truenas-node-exporter"}[15m]) > 0
           labels:

@@ -1,6 +1,4 @@
 ---
-# Example: nginx deployment with LoadBalancer service
-# This demonstrates basic LoadBalancer usage with automatic IP assignment
 
 apiVersion: apps/v1
 kind: Deployment
@@ -46,14 +44,3 @@ spec:
       protocol: TCP
 
 ---
-# To deploy:
-# kubectl apply -f example-nginx-lb.yaml
-#
-# To check the assigned IP:
-# kubectl get svc nginx-loadbalancer
-#
-# To test:
-# curl http://<EXTERNAL-IP>
-#
-# To delete:
-# kubectl delete -f example-nginx-lb.yaml

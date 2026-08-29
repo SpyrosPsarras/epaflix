@@ -1,5 +1,3 @@
-# Config storage for media apps (Jellyfin, Jellyseerr, Tdarr)
-# Uses local-path for all configs and caches
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -52,8 +50,3 @@ spec:
   resources:
     requests:
       storage: 2Gi
-# tdarr-config and tdarr-transcode-cache PVCs REMOVED 2026-05-17 —
-# tdarr is not deployed in this cluster (no Deployment, no Service).
-# Their Pending state was keeping the ArgoCD Application stuck at
-# Health: Progressing. Re-add together with a tdarr Deployment when
-# transcoding workload is needed.

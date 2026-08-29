@@ -1,5 +1,4 @@
 ---
-# Cleanuparr - Automated cleanup for *arr apps
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -25,17 +24,6 @@ spec:
             matchLabels:
               app: cleanuparr
       initContainers:
-        # Seed the /config PVC with the codified Sonarr custom blocklist
-        # (issue #138 — the seriesId 40 S04E13 re-arm guard). Cleanuparr v2+
-        # keeps its config in SQLite (cleanuparr.db), so the only file-seedable
-        # artifact is the flat custom-blocklist-sonarr.txt referenced by the
-        # content-blocker sonarr_blocklist_path DB row. This initContainer
-        # restores that file on a fresh local-path PVC; the DB pointer itself is
-        # a one-time manual UI step (see RECOVERY-newtarr-cleanuparr.md).
-        #
-        # IDEMPOTENT + NON-CLOBBERING: each seed file is copied only when the
-        # destination does NOT already exist. On a populated PVC it is skipped
-        # (no-op) so we never clobber a live, possibly edited, blocklist.
         - name: seed-config
           image: busybox:1.36
           securityContext:
@@ -63,30 +51,6 @@ spec:
               mountPath: /seed
               readOnly: true
 
-        # Keep the Download Cleaner OFF private-tracker torrents.
-        #
-        # Cleanuparr removes a download when (max_ratio AND min_seed_time) are
-        # reached, OR when max_seed_time is reached REGARDLESS of ratio. A rule
-        # left at privacy_type='both' therefore applies those thresholds to
-        # private trackers too - and with max_ratio=1.0 that can never produce an
-        # account ratio >= 1.0: torrents that would earn a surplus are cut dead
-        # exactly at break-even, and torrents that never get there are cut at
-        # max_seed_time at whatever ratio they had. The average can only fall.
-        #
-        # That is exactly what happened. All 3 rules shipped at 'both' /
-        # max_ratio=1.0 / max_seed_time=400h, TorrentDay fell to ratio 0.218 and
-        # SUSPENDED our download privileges (every .torrent fetch returned an HTML
-        # "ratio critically low" page, which Prowlarr surfaced only as the useless
-        # `Invalid torrent file contents`). 0 TorrentDay torrents were left seeding,
-        # and in one 3.7-day window 49 of 83 removals fired on MAX_SEED_TIME with an
-        # unfinished ratio. The pre-existing `avistaz-reseed` category is an earlier
-        # hand-rolled dodge of this same rule (#477) - the rule itself was never fixed.
-        #
-        # Rules live ONLY in cleanuparr.db (SQLite on the PVC), so there is nothing
-        # declarative to reconcile - hence enforcement here, on every boot, including
-        # onto a restored PVC. Idempotent: it repairs a 'both' rule, creates a private
-        # counterpart only when one does not already exist for those categories, and
-        # never clobbers an operator-tuned private rule.
         - name: enforce-private-seeding
           image: python:3.13-alpine
           securityContext:
@@ -125,12 +89,6 @@ spec:
           volumeMounts:
             - name: config
               mountPath: /config
-            # Single unified media mount (issue #195 / #240): the whole export
-            # tree (downloads + library) is one NFS submount, so Cleanuparr can
-            # see hardlinks across downloads and library (nlink>1). The
-            # unlinked-orphan rule itself stays DISABLED (in-app DB config);
-            # Cleanuparr acts on downloads via the qbt API, not by deleting
-            # library files on disk.
             - name: media
               mountPath: /media
           resources:
@@ -161,14 +119,9 @@ spec:
         - name: media
           persistentVolumeClaim:
             claimName: servarr-media
-        # SOPS-encrypted Sonarr custom-blocklist seed (issue #138 — the
-        # seriesId 40 S04E13 re-arm guard), reconciled by the servarr ksops
-        # generator from _shared/secrets/cleanuparr-blocklist-seed.enc.yaml.
-        # Consumed only by the seed-config initContainer.
         - name: seed
           secret:
             secretName: cleanuparr-blocklist-seed
-        # Consumed only by the enforce-private-seeding initContainer.
         - name: seeding-guard
           configMap:
             name: cleanuparr-seeding-guard
