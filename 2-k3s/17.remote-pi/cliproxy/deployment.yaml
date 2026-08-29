@@ -95,6 +95,17 @@ spec:
               value: cliproxy
             - name: PGSSLMODE
               value: require
+            # Spliced into the openai-compatibility block of the config row by
+            # reconcile-config.psql. Passed as env and read there with a psql
+            # backtick \set, NOT as a --set= argument: kubelet expands $(VAR)
+            # into args, which would put the key in this container's argv where
+            # any `ps` inside it can read it. Env is readable only through
+            # /proc/<pid>/environ by the same uid, which is a smaller surface.
+            - name: OPENROUTER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cliproxy-secrets
+                  key: openrouter-api-key
           volumeMounts:
             - name: scripts
               mountPath: /scripts
