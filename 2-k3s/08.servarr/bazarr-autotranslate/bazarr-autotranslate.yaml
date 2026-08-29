@@ -21,6 +21,17 @@ spec:
       containers:
         - name: bazarr-autotranslate
           image: ghcr.io/zelak312/bazarr_autotranslate:latest
+          # Upstream times out on Bazarr's slow /api/episodes/wanted (httpx default 5s vs 15s
+          # response); REQUEST_TIMEOUT is patched into every httpx client at boot.
+          # Guard fails loudly if upstream changes the target string instead of silently
+          # reverting to the 5s timeout.
+          command:
+            - sh
+            - -c
+            - |
+              grep -q 'httpx\.AsyncClient()' /usr/src/app/main.py || { echo 'upstream main.py changed, sed patch target missing'; exit 1; }
+              sed -i 's|httpx\.AsyncClient()|httpx.AsyncClient(timeout=int(os.getenv("REQUEST_TIMEOUT", "300")))|g' /usr/src/app/main.py
+              exec python3 /usr/src/app/main.py
           env:
             - name: BAZARR_BASE_URL
               value: "http://bazarr.servarr.svc.cluster.local:6767"
@@ -35,6 +46,8 @@ spec:
               value: "el"
             - name: TRANSLATION_REQUEST_TIMEOUT
               value: "900"
+            - name: REQUEST_TIMEOUT
+              value: "300"
             - name: INTERVAL_BETWEEN_SCANS
               value: "3600"
             - name: LOG_LEVEL
