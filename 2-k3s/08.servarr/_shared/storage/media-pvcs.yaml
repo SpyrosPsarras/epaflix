@@ -1,26 +1,5 @@
 ---
-# Media Storage PersistentVolume - Using hostPath to node NFS mount
-#
-# LIVE CLAIM (issue #195): `servarr-media` (hostPath /mnt/k3s-media, the unified
-# parent NFS export id 32 of /mnt/pool1/dataset01) is the SINGLE media claim.
-# All five media pods (qbittorrent/sonarr/sonarr2/radarr/cleanuparr) mount it once
-# at /media (no subPath) so intra-export hardlinks work (nlink>=2, no EXDEV).
-#
-# TORN DOWN (issue #247): the four legacy PV/PVC (servarr-media-{animes,tvshows,
-# movies,downloads}, hostPath /mnt/k3s-{animes,...}) that backed the pre-#195
-# per-category exports have been removed. They had no consumer since bazarr +
-# lingarr migrated to the unified servarr-media /media mount (issue #250) and
-# the #195 soak-window rollback snapshot no longer exists (#444 reclaim).
-#
-# Each node has an NFS mount at /mnt/k3s-media (unified export). This PV uses
-# hostPath to access the node-mounted NFS share.
 
-# Unified media PV (issue #195) — single NFS parent export
-# /mnt/pool1/dataset01 mounted on each worker at /mnt/k3s-media.
-# Collapses the four legacy child exports (animes/tvshows/movies/downloads,
-# torn down in #247) onto ONE on-wire fsid so intra-export hardlinks work (no
-# EXDEV). Consumers mount this via subPath to keep in-container paths identical.
-# Capacity is nominal (RWX hostPath); >= the dataset capacity.
 apiVersion: v1
 kind: PersistentVolume
 metadata:
@@ -36,7 +15,6 @@ spec:
     path: /mnt/k3s-media
     type: Directory
 ---
-# Unified media PVC (issue #195)
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

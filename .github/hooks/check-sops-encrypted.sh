@@ -1,24 +1,4 @@
 #!/usr/bin/env bash
-# Secret guard entry point.
-#
-# Default mode validates staged YAML blobs from Git's index.  --full-tree
-# validates every tracked YAML blob for CI.  The structured checker accepts
-# plaintext Secret templates only when sensitive keys contain exact approved
-# placeholders and no scalar has a credential-like shape.  It validates each
-# SOPS document's canonical AES-GCM envelopes and age metadata, so a stub
-# `sops:` mapping cannot bless plaintext or another document.
-#
-# This is not a general secret scanner, but no scalar size is a free pass.
-# Entropy detection covers internal whitespace and printable Unicode; below the
-# entropy length a second band rejects short unbroken tokens that mix letter
-# case or digits; above the analysis limit an opaque scalar is rejected rather
-# than skipped.  Sensitive scalar keys remain hard-gated even when their names
-# end in name/ref/reference/id; only constrained structural references
-# (including pve.yml's paired token identifier/value fields) are semantic
-# identifiers. Keep templates content-classified and freely editable; do not
-# replace this with per-file key allowlists.
-#
-# Wire up via .github/hooks/install-hooks.sh (one-shot).
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

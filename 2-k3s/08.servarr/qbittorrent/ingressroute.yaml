@@ -1,25 +1,4 @@
 ---
-# qBittorrent - Public Internet-facing IngressRoutes with Let's Encrypt TLS,
-# fronted by Authentik forward-auth SSO (issue #176, servarr forward-auth rollout).
-#
-# qBittorrent is an INTEGRATION TARGET, but every caller reaches it over
-# in-cluster Service DNS (http://qbittorrent:8080) - the sonarr / sonarr2 /
-# radarr download-client integrations, cleanuparr and newtarr were all verified
-# against their own stored config in #296. The WEB UI is SSO-gated via the
-# authentik-forwardauth middleware (authorized by the "Servarr users" group),
-# and so is /api: the priority-20 PathPrefix(/api) exemption this file used to
-# carry, which covered the /api/v2 endpoints, was removed in #296 (2026-08-10)
-# because it published them to the internet for no consumer. Do not re-add it - see the
-# "NO /api exemption route here" note further down this file.
-#
-# NOTE: `qbittorrent-internal` further down is a SEPARATE route on the
-# `internal` entry point (LB 192.168.10.102, no router port-forward) and is
-# deliberately un-gated. qBittorrent runs with bypass_local_auth=false, so its
-# own login is the only control there. That route was NOT one of #296's six.
-#
-# Pattern mirrors 08.servarr/newtarr/ingressroute.yaml:
-#   - app route priority:10 + authentik-forwardauth middleware
-#   - outpost route priority:15 matching PathPrefix(/outpost.goauthentik.io/)
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -47,7 +26,6 @@ spec:
         sans:
           - "*.epaflix.com"
 ---
-# Outpost route - handles auth callback on qbittorrent.epaflix.com
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -71,18 +49,7 @@ spec:
         sans:
           - "*.epaflix.com"
 ---
-# NO /api exemption route here, deliberately (#296, removed 2026-08-10).
-# A priority-20 `Host(`qbittorrent.epaflix.com`) && PathPrefix(`/api`)` route with
-# no middleware used to sit here for the *arr download clients, cleanuparr and
-# newtarr. All of them were verified live to use `http://qbittorrent:8080`
-# instead - which is already this repo's rule, see the 2026-07-10 incident in
-# `RECOVERY-newtarr-cleanuparr.md`. The WebUI moved to the `internal` entry point
-# in a92f5d2, and this route's traffic fell from 19456 hits/7d to 22/24h.
-# qBittorrent keeps its OWN login enabled on purpose (`bypass_local_auth=false`):
-# `qbittorrent-internal` on 192.168.10.102 has no forward-auth, so that login is
-# the only control there. Do not "fix the double login" by bypassing it.
 ---
-# HTTP to HTTPS redirect for qBittorrent
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -101,22 +68,6 @@ spec:
         - name: qbittorrent
           port: 8080
 ---
-# qBittorrent on the INTERNAL entry point (192.168.10.102), deliberately
-# WITHOUT forward-auth. Owner decision 2026-08-08: the Web UI should not ask
-# for an Authentik login on the LAN, but must stay gated from the internet.
-#
-# Pi-hole resolves qbittorrent.epaflix.com to 192.168.10.102, so LAN clients
-# land here. Public DNS goes through Cloudflare to the origin, which is the
-# gated websecure route above - and that route also covers anyone reaching
-# the origin IP directly around Cloudflare, since Traefik enforces it (#547).
-#
-# An IP allow-list on the public route is not an option: Traefik records
-# 10.42.0.0 as the source of every request while the LoadBalancers run
-# externalTrafficPolicy: Cluster (#560). A separate entry point is the only
-# way to tell LAN from internet today. Same pattern as searxng-internal.
-#
-# No /api or outpost carve-outs needed here: nothing on this entry point is
-# authenticated, so there is nothing to bypass.
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:

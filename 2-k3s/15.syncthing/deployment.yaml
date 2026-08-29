@@ -1,9 +1,4 @@
 ---
-# Syncthing — single always-on sync node. Pinned to k3s-worker-63 where the
-# 1 TiB RAID-backed data disk lives. Config + synced data both on the local PV
-# (subdirs /var/syncthing/config and /var/syncthing/data). Runs as 1000:1000 to
-# match the host chown. Global discovery / relays / usage-reporting are turned
-# OFF post-deploy via the GUI (internal-only); peers use tcp://192.168.10.101:22000.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

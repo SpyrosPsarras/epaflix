@@ -1,115 +1,3 @@
-# Owned by ArgoCD Application "remote-pi".
-# Rationale: CPA Manager Plus (CPAMP) full mode - the Manager Server half, which
-# drains CPA's usage queue and keeps persistent request history, token and cost
-# analytics per model/provider/account/API key. CPA itself has no usage
-# storage: internal/store/postgresstore.go creates exactly three tables
-# (config, auth, cooldown), and its only request logging is a file logger on an
-# emptyDir that dies with the pod. This Deployment is where that history lives.
-#
-# TWO usage transports exist, with DIFFERENT rules. Getting this wrong in either
-# direction loses data silently, so read both before adding any usage consumer.
-#
-# 1. RESP SUBSCRIBE - what this deployment actually uses, and it is FAN-OUT.
-#    CPA multiplexes protocols on the same 8317 port: internal/api/
-#    protocol_multiplexer.go peeks the first byte and routes RESP connections to
-#    internal/api/redis_queue_protocol.go, whose SUBSCRIBE handler (:147, :229)
-#    calls redisqueue.SubscribeUsage(). Each subscriber gets its OWN cloned
-#    channel - allocated per caller in queue.subscribe()
-#    (internal/redisqueue/queue.go:163) and cloned per payload in
-#    publishToSubscribers (:141-160) - so any number of
-#    subscribers receive events
-#    independently and take nothing from each other. The send is non-blocking
-#    though: a subscriber whose 256-message buffer fills is DROPPED and its
-#    channel closed silently (internal/redisqueue/queue.go:12 and :148-156).
-#    Unreachable at the ~160 requests/day observed here, but it is a drop rather
-#    than backpressure.
-#    CPAMP defaults to USAGE_COLLECTOR_MODE=auto
-#    (apps/manager-server/internal/config/config.go:147) and auto tries
-#    runSubscribe FIRST (mode dispatch at
-#    apps/manager-server/internal/collector/collector.go:139-158), falling back
-#    to HTTP if the dial, the AUTH, or the SUBSCRIBE command itself fails -
-#    three branches at :180, :190 and :200 inside runSubscribe (:159). If HTTP
-#    also fails, auto makes a third attempt via runRESP (:156) - a real Redis
-#    endpoint, which this deployment does not have, so that stage is inert here.
-#    resp.Dial does a plain TCP dial to the CPA URL host
-#    (apps/manager-server/internal/resp/client.go:25-37), and cliproxy/service.yaml is a plain
-#    ClusterIP TCP passthrough on 8317, so the handshake succeeds here.
-#
-# 2. GET /v0/management/usage-queue - the FALLBACK, and it is DESTRUCTIVE.
-#    internal/api/handlers/management/usage.go:36 calls redisqueue.PopOldest,
-#    which removes what it returns, with a 60s default retention. At most one
-#    poller of that endpoint can work.
-#
-# The trap is the interaction, not either mechanism alone: Enqueue publishes to
-# subscribers and RETURNS WITHOUT QUEUEING when any subscriber exists
-# (internal/redisqueue/queue.go:72-76). So while CPAMP holds a subscription, the
-# HTTP queue stays
-# empty - anything polling it reads nothing and looks merely idle. And if CPAMP
-# ever falls back to HTTP while another subscriber is attached, CPAMP is the one
-# that gets nothing. Neither failure logs an error anywhere.
-#
-# Practical rules:
-#   - replicas stays 1 with strategy Recreate. The binding reason is the RWO
-#     SQLite volume, not queue contention: two subscribers would each get a full
-#     copy, but two writers to one SQLite file corrupt it. Upstream asks for one
-#     Manager Server per queue too - its docs are Chinese, apps/docs/deployment/
-#     docker.md:34 reads "同一个 CPA 用量队列只由一个 CPAMP Manager Server 消费。",
-#     i.e. one usage queue is consumed by exactly one Manager Server. That is a
-#     translation, not a quotation of English source text.
-#   - do not poll /v0/management/usage-queue while this runs. Not because it
-#     steals from CPAMP's subscription, but because it is destructive to any
-#     OTHER poller and will read empty here anyway.
-#   - a plugin wanting token data should use the in-process
-#     pluginapi.UsagePlugin fan-out, which every registered plugin receives a
-#     copy of. The pi-bridge plugin uses neither transport today (quota, models
-#     and /api-call only).
-#
-# Requires `usage-statistics-enabled: true` in CPA's config - it defaults to
-# FALSE (internal/config/config_load.go), and with it false the queue is never
-# populated and every CPAMP panel is silently empty. That value is reconciled by
-# cliproxy/files/reconcile-config.psql, not by CPAMP's setup wizard, so git owns
-# it and a pod restart cannot lose it.
-#
-# Posture MEASURED against this exact image before this file existed, not
-# assumed: `docker run --read-only --user 1000:1000 -v ...:/data` starts clean,
-# writes only /data (data.key 0600, usage.sqlite + -shm + -wal), answers
-# /health with {"ok":true,"service":"cpa-manager-plus"} and needs no writable
-# /tmp. The image declares no USER, so runAsUser here is what makes it non-root.
-#
-# This IS full mode / Manager Server. `/usage-service/info` reporting
-# `"mode":"embedded"` does not mean a lesser mode: that string is a hardcoded
-# constant in the Manager Server's own setup service
-# (apps/manager-server/internal/service/setup/service.go:88) and refers to the
-# panel asset being embedded in the binary rather than loaded from disk
-# (internal/service/panel/service.go's `Embedded fs.FS`). The lightweight
-# alternative upstream calls the "CPAMP panel" is a single HTML file served by
-# CPA itself on 8317 via `panel-github-repository`, with no Manager Server, no
-# SQLite and no second port - none of which is what this file deploys. The
-# endpoint answering on 18317 at all is what proves Manager Server is running.
-#
-# Service + IngressRoute now exist (cpamanager/service.yaml, cpamanager/ingress.yaml):
-# the panel is published at https://cpamp.epaflix.com behind Authentik forward-auth,
-# with CPAMP's own admin key still guarding every API call. The port-forward
-# remains the fallback when Authentik or the DNS shadow record is broken:
-#   kubectl --context epaflix -n remote-pi port-forward deploy/cpa-manager-plus 18317:18317
-#
-# The admin key is SUPPLIED from the sops-encrypted Secret next to this file,
-# never generated. Left unset, CPAMP generates one and prints it to stdout
-# (apps/manager-server/cmd/cpa-manager-plus/main.go:128), and this cluster ships
-# stdout to Loki with
-# 31 days of retention - so the panel credential would be searchable in the log
-# store, and every "read it back" recipe would echo it into a terminal
-# transcript as well. Supplying it takes the value-free branch instead:
-#
-# "CPA Manager Plus admin credential initialized". Both branches were run
-# against this image before these manifests existed.
-# Retrieval without echoing, and rotation, are in cpamanager-secrets.enc.yaml.
-#
-# The CPA Management Key is likewise not mounted here. First-time setup in the
-# browser stores the CPA connection encrypted in CPAMP's own SQLite under
-# /data/data.key, which is why upstream's installer deletes its temporary key
-# file afterwards and why the config API only ever reports
-# `managementKeyConfigured`. CPA URL to enter: http://cliproxy:8317
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -117,17 +5,6 @@ metadata:
   name: cpa-manager-plus
   namespace: remote-pi
   annotations:
-    # Wave 0, the same wave as its PVC in storage.yaml. The container's
-    # CPA_MANAGER_ADMIN_KEY is a secretKeyRef, but the Secrets are wave -2, so
-    # ksops has produced them before any non-negative wave applies.
-    #
-    # The PVC must share its consumer's wave: local-path uses
-    # WaitForFirstConsumer, so the PVC stays Pending (health: Progressing)
-    # until a pod mounts it. ArgoCD waits for wave-N health before wave N+1,
-    # so a wave-1 Deployment behind a wave-0 PVC never applies - the first
-    # sync of #1145 sat in "waiting for healthy state" with nothing to wait
-    # FOR. Same shape as the relay, whose PVC and Deployment are both
-    # unannotated wave 0 for exactly this reason.
     argocd.argoproj.io/sync-wave: "0"
   labels:
     app.kubernetes.io/name: cpa-manager-plus
@@ -165,38 +42,12 @@ spec:
               drop:
                 - ALL
           env:
-            # 0.0.0.0 is REQUIRED, and it is not "pod-local": the kubelet probes
-            # below connect to the pod IP, so a 127.0.0.1 bind would fail
-            # readiness and liveness even though `kubectl port-forward` (which
-            # enters the pod's netns) would still work.
-            #
-            # So state the exposure honestly: any workload that can route to
-            # this pod's IP can reach 18317, because this namespace has no
-            # NetworkPolicy. Omitting the Service and the IngressRoute removes
-            # DNS discovery and the external route, NOT in-cluster reachability.
-            # The admin key is the only thing standing in front of the panel.
-            #
-            # One nuance, measured: until setup completes, GET
-            # /usage-service/config answers ANY caller, including a wrong key.
-            # That is deliberate upstream bootstrap behaviour: authorizeRead
-            # returns true while no management key is stored, at
-            # apps/manager-server/internal/http/controller/managerconfig/handler.go:75-76
-            # while no management key is stored - and it discloses only an
-            # unconfigured config document, never the CPA key. POST /setup does
-            # require the admin key (apps/manager-server/internal/http/controller/setup/handler.go:22
-            # via middleware.AuthorizeAdmin), so
-            # supplying that key from the Secret is also what stops another
-            # workload from claiming this instance before a human does.
             - name: HTTP_ADDR
               value: "0.0.0.0:18317"
             - name: USAGE_DB_PATH
               value: /data/usage.sqlite
             - name: CPA_MANAGER_DATA_KEY_PATH
               value: /data/data.key
-            # Supplied, not generated - see the header. The key is consumed at
-            # bootstrap; changing it here re-points the credential, it does not
-            # rotate what is already stored in /data (upstream's
-            # apps/docs/operations/reset-admin-key.md is the rotation path).
             - name: CPA_MANAGER_ADMIN_KEY
               valueFrom:
                 secretKeyRef:
@@ -225,20 +76,6 @@ spec:
             periodSeconds: 30
             timeoutSeconds: 5
             failureThreshold: 3
-          # Both sibling patterns exist in this namespace: cliproxy sets a memory
-          # limit on every container, remote-pi-relay sets requests only. Follow
-          # cliproxy, because this workload's whole accepted risk is that it can
-          # consume node resources unbounded (see storage.yaml) - a memory limit
-          # is the half of that we CAN enforce.
-          #
-          # 512Mi is headroom, NOT a measurement: a fresh instance is tens of MiB,
-          # but no dashboard query over a large usage_events table has been
-          # observed on this cluster. An OOMKill costs the RESP subscription and
-          # every event published during the restart gap, so if this is ever wrong
-          # it should be raised, not tuned down. Symptom to look for:
-          # `kubectl --context epaflix -n remote-pi get pod -l
-          # app.kubernetes.io/name=cpa-manager-plus -o jsonpath='{..lastState}'`
-          # reporting OOMKilled.
           resources:
             requests:
               cpu: "25m"

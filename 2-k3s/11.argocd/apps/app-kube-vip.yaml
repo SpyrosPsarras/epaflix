@@ -1,19 +1,4 @@
 ---
-# ArgoCD Application: kube-vip control-plane VIP DaemonSet.
-# Closes Issue #39 (sister to #16 / PR #37 which adopted kube-vip-
-# cloud-provider).
-#
-# Source:       this repo, path 2-k3s/01.kube-vip. kustomization.yaml
-#               references kube-vip-daemonset.yaml (SA + RBAC + DS).
-# Destination:  `kube-system` (per the manifests' metadata.namespace).
-# Sync:         MANUAL on first install (syncPolicy: {}). After a clean
-#               annotation-only sync AND a 48h soak with kubectl --server=
-#               https://192.168.10.100:6443 still serving, flip to:
-#                 syncPolicy:
-#                   automated: { selfHeal: true, prune: false }
-#                   syncOptions: [ServerSideApply=true]
-#               `prune` NEVER turns on — losing the DaemonSet drops the
-#               kubeconfig VIP and the cluster's external API endpoint.
 
 apiVersion: argoproj.io/v1alpha1
 kind: Application

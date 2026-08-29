@@ -1,49 +1,12 @@
-# ChromaDB Helm chart values (amikos-tech chroma/chromadb 0.2.2, appVersion
-# Chroma 1.5.3). Replaces the hand-rolled Deployment/Service/PVC in the
-# now-deleted chromadb.yaml (issue #215, closes #189).
-#
-# Only keys that exist in the chart's own values are set here (verified with
-# `helm show values chroma/chromadb --version 0.2.2`). The chart renders a
-# StatefulSet named "chromadb" (releaseName) + a Service "chromadb" on port
-# 8000, so Odysseus's CHROMADB_HOST=chromadb / CHROMADB_PORT=8000 keep
-# resolving unchanged.
-#
-# IMAGE: intentionally NOT overridden here. The chart defaults the server image
-# to ghcr.io/chroma-core/chroma at its own appVersion (0.2.2 -> Chroma 1.5.3),
-# so the image follows the chart appVersion automatically — no hardcoded tag to
-# drift out of sync, and the floating :latest is still avoided because the
-# appVersion is a concrete version. Renovate bumps BOTH the chart and the image
-# together via the single `version: "0.2.2"` chart pin in kustomization.yaml
-# (renovate datasource=helm), so there is no separate image hint to maintain.
-#
-# NOTE on chart hooks (verify post-merge against the live odysseus App):
-#   - The chart's two helm.sh/hook:test Jobs (chromadb-test-api /
-#     chromadb-test-connection, which hit the deprecated /api/v1 endpoints) ARE
-#     rendered by kustomize's Helm inflator, but ArgoCD recognises the
-#     `helm.sh/hook: test` annotation and does NOT apply test-hook resources
-#     during sync — so no stale /api test Jobs run in-cluster.
-#   - The chart's `v1-config` ConfigMap carries `helm.sh/hook:
-#     pre-install,pre-upgrade`, so ArgoCD treats it as a PreSync hook. The
-#     StatefulSet mounts it at /config.yaml (supplies persist_path:/data +
-#     port 8000), so this PreSync hook lifecycle must be verified post-merge
-#     against the live odysseus Application (confirm the ConfigMap is applied
-#     before the StatefulSet rolls and the mount resolves).
-# The chart has no `skipTests` value key, and we intentionally leave the chart
-# output as-is (no hook-annotation stripping); the deploy step verifies the
-# live reconcile.
 
 chromadb:
-  # Rust server (>= 1.0.0): controls PVC creation/mounting. The server writes
-  # to persistDirectory; persistence is durable because a PVC is mounted there.
   isPersistent: true
   persistDirectory: /data
   data:
-    # >= the old PVC's 2Gi; same local-path StorageClass on a worker node.
     volumeSize: "2Gi"
     storageClass: local-path
     accessModes: ["ReadWriteOnce"]
 
-# Sane requests/limits (mirrors the old Deployment's footprint).
 resources:
   requests:
     cpu: 100m

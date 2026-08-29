@@ -1,19 +1,4 @@
 ---
-# Sonarr2 (anime) - Public Internet-facing IngressRoutes with Let's Encrypt TLS,
-# fronted by Authentik forward-auth SSO (issue #176, servarr forward-auth rollout).
-#
-# Sonarr2 is an INTEGRATION TARGET, but every caller reaches it over in-cluster
-# Service DNS (http://sonarr2:8989) - seerr, cleanuparr and newtarr were all
-# verified against their own stored config in #296. The browser UI is gated by
-# the authentik-forwardauth middleware (Authentik embedded outpost, "Servarr
-# users" group), and so is /api: the priority-20 PathPrefix(/api) exemption this
-# file used to carry was removed in #296 (2026-08-10) because it published the
-# whole API to the internet for no consumer. Do not re-add it - see the
-# "NO /api exemption route here" note further down this file.
-#
-# Pattern mirrors newtarr/ingressroute.yaml:
-#   - app route priority:10 + authentik-forwardauth middleware
-#   - outpost route priority:15 matching PathPrefix(/outpost.goauthentik.io/)
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -41,7 +26,6 @@ spec:
         sans:
           - "*.epaflix.com"
 ---
-# Outpost route - handles auth callback on sonarr2.epaflix.com
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -65,17 +49,7 @@ spec:
         sans:
           - "*.epaflix.com"
 ---
-# NO /api exemption route here, deliberately (#296, removed 2026-08-10).
-# A priority-20 `Host(`sonarr2.epaflix.com`) && PathPrefix(`/api`)` route with no
-# middleware used to sit here, so API-key callers could bypass forward-auth over
-# the public host. It also made the API internet-reachable with the API key as
-# the only control. The comment it replaced named seerr/cleanuparr/newtarr as the
-# reason - all three were checked live and use internal Service DNS
-# (`http://sonarr2:8989`), so the reason no longer held. 30d of access logs showed
-# no headless external caller. /api now matches `sonarr2-https` (priority 10) and
-# is forward-auth'd. Re-adding this re-publishes the API to the internet. Don't.
 ---
-# HTTP to HTTPS redirect for Sonarr2
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:

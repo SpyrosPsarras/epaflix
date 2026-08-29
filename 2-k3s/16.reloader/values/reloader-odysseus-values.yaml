@@ -1,6 +1,3 @@
-# stakater/reloader v1.4.19 (chart 2.2.14) — instance scoped to the odysseus
-# namespace only (issue #299). See kustomization.yaml for why this is a
-# separate release per watched namespace rather than one shared instance.
 reloader:
   watchGlobally: false
   ignoreCronJobs: true

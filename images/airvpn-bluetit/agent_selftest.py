@@ -26,8 +26,6 @@ import time
 import agent as ag
 
 
-# The live ranking, 2026-08-02T09:30:59Z. Aspidiske - what `quick` actually
-# picked on the live pod, a 2 Gbit box at 69% load - is deliberately absent.
 RANKING = {
     "schema": 1,
     "generated_at": "2026-08-02T09:30:59Z",
@@ -45,8 +43,6 @@ RANKING = {
 }
 GENERATED_EPOCH = 1785663059.0  # 2026-08-02T09:30:59Z
 
-# Agents built by the current @with_tmp test. Async verdict writers must drain
-# before that test removes its temporary directory; production never waits.
 _TEST_AGENTS = []
 
 
@@ -102,9 +98,6 @@ class FakeBluetit:
             return 0, "___rc=0\n"
         if args[0] == "--air-connect":
             assert "--async" in args, "--air-connect without --async tears the tunnel down"
-            # Without an explicit --air-key the connect silently uses the
-            # built-in `Default` key, not the one in bluetit.conf. Proved on a
-            # scratch pod configured `airkey test`.
             assert "--air-key" in args, "--air-connect without --air-key uses the wrong device key"
             assert args[args.index("--air-key") + 1] == cfg.air_key, args
             name = args[args.index("--air-server") + 1] if "--air-server" in args else None
@@ -136,13 +129,8 @@ def build(tmp, ranking=RANKING, server="Aspidiske", refused=(), silent=(), dead=
     os.environ["VPN_AGENT_BUDGET_PATH"] = os.path.join(tmp, "cache", "switches.json")
     cfg = ag.Config()
     cfg.jitter_seconds = 0.0
-    # Production polls every five seconds and waits at most one second for the
-    # first boot attempt. Keep the same behavior but compress wall time in this
-    # suite; replacement tests still prove the reader sleeps between attempts.
     cfg.ranking_poll_seconds = 0.02
     cfg.ranking_initial_wait_seconds = 0.05
-    # `lo` always exists, so tun_ok() runs its real /sys/class/net read and
-    # passes. Point it at a device that does not exist to test the failure.
     cfg.tun_device = "lo"
     for k, v in overrides.items():
         setattr(cfg, k, v)
@@ -153,29 +141,14 @@ def build(tmp, ranking=RANKING, server="Aspidiske", refused=(), silent=(), dead=
     clock = FakeClock()
     fake = FakeBluetit(clock, server=server, refused=refused, silent=silent)
     bluetit = ag.Bluetit(cfg, runner=fake, sleep=clock.sleep, clock=clock)
-    # The wall clock moves with the fake one, offset so the ranking starts 60 s
-    # old. The switch budget is on wall time because it is persisted.
     agent = ag.Agent(cfg, bluetit=bluetit, sleep=clock.sleep, clock=clock,
                      wallclock=lambda: GENERATED_EPOCH + 60 + (clock() - 1000.0))
     _TEST_AGENTS.append(agent)
 
-    # The probe is the agent's only view of real traffic, so model it off the
-    # fake daemon's CURRENT server: a `dead` one reads as 100% loss exactly the
-    # way the live tunnel did on 2026-08-02 while --bluetit-status kept naming
-    # it. This also keeps every test off a real ping - 10.128.0.1 is
-    # unreachable from a build container, so an unstubbed post-connect
-    # verification would be a slow false red on every check in this file.
     dead_names = {n.lower() for n in dead}
     agent.probe = lambda count=None: (
         100.0 if (fake.server or "").lower() in dead_names else 0.0
     )
-    # The throughput METRIC's input, stubbed for the same reason the probe is: the
-    # fixture has no tun0, and the fake clock does not move during a scripted
-    # probe, so the real /sys read would divide by a zero interval. It decides
-    # nothing since #771, so its value does not change any degradation test - it
-    # only makes vpn_agent_tunnel_throughput_bytes_per_sec assertable. The real
-    # read and the real delta arithmetic are covered by
-    # test_throughput_is_measured_not_assumed().
     agent.throughput_since = lambda before, started: throughput
     if start_ranking_reader:
         agent.ranking_reader.start()
@@ -227,9 +200,6 @@ def with_tmp(fn):
                 close = getattr(agent, "close", None)
                 if close is not None:
                     close()
-                # Production deliberately never joins a hard-NFS reader. Tests
-                # release every simulated wedge before teardown, so joining the
-                # now-healthy daemon only prevents cross-test thread buildup.
                 reader = getattr(agent, "ranking_reader", None)
                 worker = getattr(reader, "_thread", None)
                 if worker is not None and worker is not threading.current_thread():
@@ -240,7 +210,6 @@ def with_tmp(fn):
     return wrapper
 
 
-# --------------------------------------------------------------------------
 
 
 @with_tmp
@@ -251,17 +220,13 @@ def test_stale_ranking_is_absent(tmp):
     fresh, age = ag.parse_ranking(payload, GENERATED_EPOCH + 60)
     assert len(fresh) == 4 and age == 60, (fresh, age)
 
-    # 2100 s TTL. One second past it is already gone.
     stale, age = ag.parse_ranking(payload, GENERATED_EPOCH + 2101)
     assert stale == [], "a ranking past its TTL must read as absent, got %s" % stale
     assert age == 2101, age
 
-    # And the boundary is not off by one - exactly at the TTL it is still good.
     edge, _ = ag.parse_ranking(payload, GENERATED_EPOCH + 2100)
     assert len(edge) == 4, "the ranking must survive right up to its TTL"
 
-    # A stale file must not refresh the cache, or the fallback chain silently
-    # promotes an expired ranking to "last good".
     agent, _, _ = build(tmp, start_ranking_reader=False)
     agent.wallclock = lambda: GENERATED_EPOCH + 9999
     agent.ranking_reader.wallclock = agent.wallclock
@@ -361,8 +326,6 @@ def test_ranking_schema_and_time_bounds():
                 % label
             )
 
-    # The live contract's 2100-second lease is the maximum, not merely today's
-    # default. Small clock skew is tolerated, but it has a hard 300-second cap.
     assert ag.MAX_RANKING_TTL_SECONDS == 2100
     assert ag.RANKING_FUTURE_SKEW_SECONDS == 300
     near_future = dict(RANKING)
@@ -458,13 +421,9 @@ def test_ranking_age_is_measured_at_scrape_time(tmp):
         "the ranking aged 600 s and the metric says %s - it is reporting a value "
         "written by some earlier code path instead of measuring (#686)" % aged)
 
-    # Past the 2100 s TTL the ranking is absent for DECISIONS, but the metric
-    # exists to say how far gone it is, so it must keep counting.
     clock.sleep(2000)
     assert metric(agent, "vpn_agent_ranking_age_seconds") == 2660.0
 
-    # A truncated or missing file is an honest absent - never a stale number,
-    # and never an exception out of the /metrics handler.
     attempt = reader_attempts(agent)
     with open(agent.cfg.ranking_path, "w") as fh:
         fh.write('{"schema": 1, "generated_a')
@@ -478,7 +437,6 @@ def test_ranking_age_is_measured_at_scrape_time(tmp):
         "the reader did not observe the missing ranking"
     assert metric(agent, "vpn_agent_ranking_age_seconds") is None, \
         "a missing ranking must not report an age"
-    # And the rest of the render still works with no ranking at all.
     assert metric(agent, "vpn_agent_dry_run") == 0.0
     print("ok  ranking age: measured at scrape time, absent when the file is not usable")
 
@@ -525,14 +483,9 @@ def test_tunnel_device_is_measured_at_scrape_time(tmp):
         "value nothing measured. qBittorrent would be bound to a device that "
         "does not exist with every signal green (#690)" % got)
 
-    # No field left for the metric to be wired back to. An unread cache is what
-    # invites exactly that, which is why #686 deleted its one too.
     assert not hasattr(agent, "tun_device_ok"), \
         "self.tun_device_ok is back - a cached device verdict is what #690 removed"
 
-    # Scraping must be SILENT. /metrics is scraped every 60 s and tun_ok()'s log
-    # line is four lines of recovery instructions, so the loud version in here
-    # would bury the one occurrence that matters under a thousand copies.
     with CaptureLog() as caught:
         for _ in range(5):
             ag.render_metrics(agent)
@@ -540,7 +493,6 @@ def test_tunnel_device_is_measured_at_scrape_time(tmp):
             "%d log records from scraping a missing device - at 60 s scrapes that "
             "is a flood: %s" % (len(caught.records), caught.messages()))
 
-        # The switch path stays loud, or a genuinely taken tun0 slot goes unsaid.
         assert agent.bluetit.tun_ok() is False
         assert any("MISSING" in m for m in caught.messages()), \
             "tun_ok() stopped saying the device is missing: %s" % caught.messages()
@@ -582,9 +534,6 @@ def test_switch_in_progress_marks_the_device_rebuild(tmp):
     assert metric(agent, "vpn_agent_switch_in_progress") == 0.0, \
         "the flag never cleared - a stuck 1 excuses every later device failure"
 
-    # And it clears through a crash. run() wraps watch_once() in a bare `except`
-    # to keep the container up, so a flag left set would stay set for the life of
-    # the pod - the same permanently-wrong signal this change removes.
     boom = RuntimeError("connect blew up")
 
     def explode(*args, **kwargs):
@@ -629,8 +578,6 @@ def test_current_server_is_refreshed_every_window(tmp):
         % agent.current_server)
     assert b'vpn_agent_current_server{server="Ashlesha"} 1' in ag.render_metrics(agent)
 
-    # Exactly two status calls per window. One before and one after the probe
-    # bind its loss to an unchanged server (#792); none may happen per scrape.
     def status_calls():
         return sum(1 for c in fake.calls if c[0] == "--bluetit-status")
 
@@ -641,15 +588,11 @@ def test_current_server_is_refreshed_every_window(tmp):
         "3 clean windows made %d status calls, expected 6 (before+after each probe)" \
         % (status_calls() - before)
 
-    # And a scrape makes NONE. render_metrics() runs in the HTTP handler thread
-    # and a goldcrest call can take 25 s, which would blow the Prometheus scrape
-    # timeout and take the target down - losing every metric, honest ones too.
     before = status_calls()
     for _ in range(5):
         ag.render_metrics(agent)
     assert status_calls() == before, "a /metrics scrape called goldcrest"
 
-    # Bluetit going down is an honest absent, never a stale name.
     fake.server = None
     agent.watch_once()
     assert agent.current_server is None, agent.current_server
@@ -670,12 +613,10 @@ def test_boot_in_band_stays_put(tmp):
     assert fake.server == "Menkent"
     assert agent.switches["boot_upgrade"] == 0
 
-    # Case-insensitive, because the connect path is.
     assert ag.in_band("menkent", RANKING["servers"], 5)
     assert ag.in_band("DALIM", RANKING["servers"], 5)
     assert not ag.in_band("Aspidiske", RANKING["servers"], 5)
     assert not ag.in_band(None, RANKING["servers"], 5)
-    # The band is a real cut, not the whole list.
     assert not ag.in_band("Ashlesha", RANKING["servers"], 2)
     print("ok  boot: in-band stays put, band test is case-insensitive and bounded")
 
@@ -689,8 +630,6 @@ def test_boot_out_of_band_upgrades(tmp):
     assert fake.connects() == ["Dalim"], fake.connects()
     assert fake.server == "Dalim"
     assert agent.switches["boot_upgrade"] == 1
-    # A live switch is REFUSED while connected, so the disconnect must come
-    # first and there must be exactly one of it.
     order = [c[0] for c in fake.calls if c[0] in ("--disconnect", "--air-connect")]
     assert order == ["--disconnect", "--air-connect"], order
     print("ok  boot: out-of-band upgrades, disconnect strictly before connect")
@@ -723,7 +662,6 @@ def test_degradation_counting(tmp):
     assert agent.switches["degradation"] == 1
     assert agent.consecutive_bad == 0, "the counter must reset after a switch"
 
-    # 4.99% is not a bad window. The bar is >= 5%.
     agent2, fake2, _ = build(tmp, server="Aspidiske")
     agent2.probe = scripted_probe(4.99)
     for _ in range(5):
@@ -749,14 +687,11 @@ def test_high_loss_counts_on_a_busy_tunnel_too(tmp):
     almost never under 64 KiB/s, so the loss path was effectively never
     consulted while the detector reported itself armed.
     """
-    # One tmp per case: the switch budget file lives in it, so two trips sharing a
-    # directory means the second is suppressed by the first one's cooldown.
     def sub(name):
         path = os.path.join(tmp, name)
         os.makedirs(path)
         return path
 
-    # The 2026-08-03 Dalim window: 15% loss with 3.8 MiB/s + 292 KiB/s moving.
     busy, fake, _ = build(sub("busy"), server="Aspidiske",
                           throughput=(3825 + 292) * 1024.0)
     busy.probe = scripted_probe(15.0)
@@ -772,12 +707,7 @@ def test_high_loss_counts_on_a_busy_tunnel_too(tmp):
         "detection on a lossy-but-still-delivering server"
     assert fake.connects() == ["Dalim"], fake.connects()
 
-    # The idle-tunnel half needs no case of its own: build()'s default throughput is
-    # 0.0, so test_degradation_counting() already trips on loss alone with tun0 idle.
 
-    # An UNMEASURABLE window is a missing metric, not a veto. The gate returned
-    # early here, so a torn-down tun0 (every switch rebuilds it) silently held the
-    # verdict back. Loss is the whole decision now, so it counts.
     blind, fake3, _ = build(sub("blind"), server="Aspidiske")
     blind.throughput_since = lambda before, started: None
     blind.probe = scripted_probe(15.0)
@@ -788,7 +718,6 @@ def test_high_loss_counts_on_a_busy_tunnel_too(tmp):
         "unmeasurable - an absent metric is vetoing the decision (#771)"
     assert fake3.connects() == ["Dalim"], fake3.connects()
 
-    # And the counter this all used to feed is GONE, not parked at 0 (#771).
     assert not hasattr(busy, "healthy_by_throughput"), \
         "healthy_by_throughput is still a field - with the gate removed nothing " \
         "can write it, and a counter no code path writes is the #629/#686/#690 " \
@@ -817,16 +746,12 @@ def test_throughput_is_measured_not_assumed(tmp):
     assert isinstance(live, int) and live >= 0, \
         "the real rx+tx read of `lo` returned %r" % (live,)
 
-    # A missing device is None - never 0. Zero would mean "idle tunnel", which
-    # hands the verdict straight back to the loss threshold (#732).
     agent.cfg.tun_device = "tun-nope-0"
     assert agent.bluetit.tun_bytes() is None, \
         "an unreadable counter read as a number - a missing device is not an idle one"
     assert agent.throughput_since(0, clock() - 10) is None
     agent.cfg.tun_device = "lo"
 
-    # And it is SILENT, on both paths. This runs once per window AND once per
-    # scrape, so a log line here is 2 lines a minute forever (#690's flood).
     with CaptureLog() as caught:
         agent.cfg.tun_device = "tun-nope-0"
         for _ in range(5):
@@ -837,18 +762,12 @@ def test_throughput_is_measured_not_assumed(tmp):
                 len(caught.records), caught.messages())
     agent.cfg.tun_device = "lo"
 
-    # The counter reset. `before` is the old device's total, the read after it is
-    # the new device starting from ~0, so the delta is negative.
     agent.bluetit.tun_bytes = lambda: 24576
     assert agent.throughput_since(50 * 1024 * 1024, clock() - 10) is None, \
         "a negative delta produced a number - tun0 is rebuilt on every switch, " \
         "so this is the normal post-switch window, and reading it as 0 bytes/s " \
         "would count the window as bad on loss alone"
-    # Nothing to divide by is no number either - and neither is anything under
-    # MIN_THROUGHPUT_INTERVAL_SECONDS, which
-    # test_a_window_too_short_to_measure_is_no_measurement() owns (#768).
     assert agent.throughput_since(0, clock()) is None
-    # A plain positive delta is the ordinary case, and the arithmetic is bytes/sec.
     assert agent.throughput_since(4096, clock() - 10) == 2048.0
     print("ok  throughput: real /sys read, silent, resets and gaps are no-number not zero")
 
@@ -871,29 +790,18 @@ def test_a_window_too_short_to_measure_is_no_measurement(tmp):
     del agent.throughput_since                  # drop the stub, use the real method
     agent.bluetit.tun_bytes = lambda: 1500000
 
-    # One MTU-sized packet over a millisecond. 1.5 MB/s if you divide it.
     assert agent.throughput_since(1500000 - 1500, clock() - 0.001) is None, \
         "a 1 ms interval produced %r - one 1500-byte packet divided by a " \
         "millisecond is 1.5 MB/s, which is the #768 defect" \
         % (agent.throughput_since(1500000 - 1500, clock() - 0.001),)
-    # Zero bytes over a millisecond. This is the unsafe direction: 0.0 B/s reads
-    # as a measured idle tunnel.
     assert agent.throughput_since(1500000, clock() - 0.001) is None, \
         "a 1 ms interval with no bytes produced %r - that publishes an idle " \
         "tunnel nobody measured (#768)" \
         % (agent.throughput_since(1500000, clock() - 0.001),)
-    # Just under and just over the floor, so the boundary is pinned.
     assert agent.throughput_since(1500000 - 1500, clock() - 0.999) is None
     assert agent.throughput_since(1500000 - 1500, clock() - 1.0) == 1500.0
-    # A realistic ~10 s window is unaffected - the floor must never eat the metric
-    # in production.
     assert agent.throughput_since(500000, clock() - 10.0) == 100000.0
 
-    # End to end through the real window path, which is how it was measured: a
-    # probe that returns almost instantly, one packet landing between the two
-    # counter reads. The rate must be ABSENT from /metrics, and the raw counter
-    # must still be there - it is read at scrape time and is what a reader
-    # rate()s instead.
     reads = iter([1500000, 1500000 + 1500])
     agent.bluetit.tun_bytes = lambda: next(reads, 1500000 + 1500)
     agent.probe = lambda count=None: (clock.sleep(0.001), 0.0)[1]
@@ -909,15 +817,9 @@ def test_a_window_too_short_to_measure_is_no_measurement(tmp):
         "the raw counter went missing with the rate - it is measured at scrape " \
         "time and stays publishable when the rate is not"
 
-    # The floor is a named constant, and it is bounded on BOTH sides. Asserted
-    # last on purpose, so an unfixed agent.py fails on the arithmetic above with a
-    # message about the defect rather than on an AttributeError here.
     assert ag.MIN_THROUGHPUT_INTERVAL_SECONDS >= 1.0, \
         "the floor is %r - under a second one 1500-byte packet still swings the " \
         "quotient by MB/s" % (ag.MIN_THROUGHPUT_INTERVAL_SECONDS,)
-    # It must not be able to suppress a real window: production is 50 packets at
-    # 5/s, so ~10 s. A floor anywhere near that would delete the metric in normal
-    # operation, which is a regression, not a fix.
     assert ag.MIN_THROUGHPUT_INTERVAL_SECONDS < 10.0, \
         "the floor is %r, which a real ~10 s probe window cannot reliably clear - " \
         "that would delete the metric in normal operation" \
@@ -944,8 +846,6 @@ def test_throughput_metrics_are_measurements(tmp):
 
     agent.watch_once()
     assert metric(agent, "vpn_agent_tunnel_throughput_bytes_per_sec") == 1048576.0
-    # Loss is published because it is the decision (#771). The throughput series
-    # next to it is context, not a reason to discount it.
     assert metric(agent, "vpn_agent_current_loss_pct") == 15.0
 
     agent.throughput_since = lambda before, started: None
@@ -975,10 +875,6 @@ def test_dead_tunnel_is_the_liveness_probes_job(tmp):
 
 @with_tmp
 def test_cooldown_and_daily_cap(tmp):
-    # This test advances almost two days while isolating SwitchBudget. In live
-    # operation the scorer republishes every 15 minutes; keep candidate selection
-    # independent of the intentionally finite 2100 s lease instead of minting an
-    # invalid multi-day ranking fixture or falling through to `quick`.
     agent, fake, clock = build(tmp, server="Aspidiske")
     agent.probe = scripted_probe(9.0)
     agent.candidates = lambda exclude=None: (
@@ -993,11 +889,9 @@ def test_cooldown_and_daily_cap(tmp):
     assert trip() is True
     assert agent.switches["degradation"] == 1
 
-    # Straight back into a bad window - the cooldown must hold.
     assert trip() is False, "switched again inside the 6 h cooldown"
     assert agent.switches["degradation"] == 1
 
-    # Just short of 6 h is still inside it.
     clock.sleep(agent.cfg.cooldown_seconds - 10)
     assert trip() is False, "cooldown expired early"
 
@@ -1009,12 +903,10 @@ def test_cooldown_and_daily_cap(tmp):
     assert trip() is True
     assert agent.switches["degradation"] == 3
 
-    # Three in a day is the cap, and it outlives the cooldown.
     clock.sleep(agent.cfg.cooldown_seconds + 1)
     assert trip() is False, "went over the 3-a-day cap"
     assert agent.switches["degradation"] == 3
 
-    # A full day later the window has rolled.
     clock.sleep(86401)
     assert trip() is True, "the daily cap never rolls off"
     print("ok  cooldown: holds for the full 6 h, daily cap of 3 holds past it and rolls")
@@ -1053,10 +945,6 @@ def test_every_candidate_fails_ends_on_quick(tmp):
     assert clock() - started <= agent.cfg.recovery_budget, \
         "recovery ran past the budget - the liveness restart would beat us to it"
 
-    # The circuit breaker: ending on quick still arms a cooldown and still costs
-    # a daily slot. Its LENGTH is the short one here, because the reason was a
-    # boot_upgrade - an unverified placement (#789) - and quick's own pick is the
-    # least considered destination of the lot.
     allowed, why = agent.budget.allowed()
     assert allowed is False, "a failed recovery did not arm the cooldown"
     assert "cooldown" in why, why
@@ -1107,7 +995,6 @@ def test_wrong_tunnel_device_fails_the_switch(tmp):
         "a switch that left qBittorrent with no listen socket was counted as a success"
     assert b"vpn_agent_tunnel_device_ok 0" in ag.render_metrics(agent), \
         "the missing device is invisible in metrics"
-    # The switch is over, so the 0 above is the real thing and not the teardown.
     assert b"vpn_agent_switch_in_progress 0" in ag.render_metrics(agent)
     print("ok  tun device: not tun0 means the switch failed, and it says so in metrics")
 
@@ -1126,8 +1013,6 @@ def test_verification_rejects_a_lying_status_string(tmp):
     agent, fake, _ = build(tmp, server="Aspidiske", dead=("Dalim",))
     agent.boot_check()
 
-    # Dalim answered the status grep with its own name, exactly as the live
-    # daemon did. Traffic said otherwise, so the agent walked on to Piautos.
     assert fake.connects()[0] == "Dalim", fake.connects()
     assert fake.server == "Piautos", \
         "the agent settled on %s - a status string with no traffic behind it " \
@@ -1136,8 +1021,6 @@ def test_verification_rejects_a_lying_status_string(tmp):
     assert agent.switches["boot_upgrade"] == 1, agent.switches
     assert agent.switches["fallback"] == 0, "a verified candidate is not a fallback"
 
-    # And the verified switch arms a cooldown - the short one, since a
-    # boot_upgrade is a placement and not a measured correction (#789).
     allowed, why = agent.budget.allowed()
     assert allowed is False and "cooldown" in why, why
     assert agent.budget.history[-1][1] == agent.cfg.failed_cooldown_seconds, \
@@ -1183,8 +1066,6 @@ def test_recovery_is_disconnect_plus_connect_never_a_signal(tmp):
     pairs = [c[0] for c in fake.calls if c[0] in ("--disconnect", "--air-connect")]
     assert pairs == ["--disconnect", "--air-connect",   # Dalim, connects and lies
                      "--disconnect", "--air-connect"], pairs
-    # FakeBluetit raises on anything that is not status/disconnect/air-connect,
-    # so a signal or a listing call cannot pass this line silently.
     assert all(c[0] in ("--bluetit-status", "--disconnect", "--air-connect")
                for c in fake.calls), fake.calls
     print("ok  recovery: fresh disconnect + connect for every attempt, no signal")
@@ -1197,9 +1078,6 @@ def test_no_signal_path_survives_in_the_source():
     diff. `kill -0` is fine and stays - it sends no signal, it only asks
     whether Bluetit is still alive.
     """
-    # Ways either file could actually deliver a signal. Prose about SIGUSR2 is
-    # wanted, a call that sends one is not - so match the call shapes, not the
-    # word. agent.py does not import `signal` at all and must not start.
     forbidden = ("kill -USR2", "kill -SIG", "os.kill", "pkill",
                  "import signal", "signal.SIG")
     here = os.path.dirname(os.path.abspath(__file__))
@@ -1236,7 +1114,6 @@ def test_a_failed_switch_does_not_arm_the_full_cooldown(tmp):
         dead=("Dalim", "Piautos", "Menkent", "Ashlesha", "QuickPick"))
     agent.boot_check()
 
-    # Everything lied, including the terminal `quick` fallback.
     assert fake.connects() == ["Dalim", "Piautos", "Menkent", "Ashlesha", "quick"], \
         fake.connects()
 
@@ -1251,8 +1128,6 @@ def test_a_failed_switch_does_not_arm_the_full_cooldown(tmp):
         % (agent.cfg.failed_cooldown_seconds, why)
     assert agent.cfg.failed_cooldown_seconds < agent.cfg.cooldown_seconds
 
-    # It still costs one of the day's three, so a broken pool cannot thrash
-    # instead. Two more failures and the cap holds for the rest of the day.
     for _ in range(2):
         agent.switch(["Dalim"], "degradation", mandatory=True)
         clock.sleep(agent.cfg.failed_cooldown_seconds + 1)
@@ -1260,9 +1135,6 @@ def test_a_failed_switch_does_not_arm_the_full_cooldown(tmp):
     assert allowed is False and "daily cap" in why, \
         "failed switches do not count against the daily cap: %s" % why
 
-    # A switch that WORKS still arms the full 6 h - the Component 7 circuit
-    # breaker is untouched, and that is checked by
-    # test_every_candidate_fails_ends_on_quick and test_cooldown_and_daily_cap.
     print("ok  cooldown: a failed switch arms the short one, still costs a daily slot")
 
 
@@ -1270,7 +1142,6 @@ def test_a_failed_switch_does_not_arm_the_full_cooldown(tmp):
 def test_a_boot_upgrade_does_not_lock_out_the_degradation_watch(tmp):
     """#789. The 2026-08-04 lockout - #627's principle, one costume over.
 
-    #627 fix 2 only carved out the switch that produced NO tunnel. A boot_upgrade
     that lands on a working but LOSSY server still armed the full 21600 s, and
     then blocked the only instrument that can see the fault. Measured live: the
     PR #786 recreate ran boot_upgrade onto Dalim, verified it at loss=0.0%, and
@@ -1289,10 +1160,6 @@ def test_a_boot_upgrade_does_not_lock_out_the_degradation_watch(tmp):
     by hand between windows because the fake one does not move during a scripted
     probe (#768) - which is also what makes the timing arithmetic real here.
     """
-    # This test advances two full cooldowns while isolating cooldown/cap logic.
-    # Consume the real ranking at boot, then hold candidate selection at its
-    # fixture value: a healthy scorer would republish every 15 minutes, but this
-    # fake must not weaken the 2100 s contract with an invalid one-day lease.
     agent, fake, clock = build(tmp, server="Aspidiske")
     agent.probe = scripted_probe(0.0)         # a clean boot pick, like Dalim's
     agent.boot_check()
@@ -1311,7 +1178,6 @@ def test_a_boot_upgrade_does_not_lock_out_the_degradation_watch(tmp):
         "is the only thing able to correct it (#789)"
         % (armed, agent.cfg.failed_cooldown_seconds))
 
-    # Now the live sequence: the server it picked turns out to be lossy.
     agent.probe = scripted_probe(8.0, verify=0.0)
     window = agent.cfg.probe_interval + 10    # 60 s of sleep + ~10 s of probing
     windows = 0
@@ -1329,11 +1195,6 @@ def test_a_boot_upgrade_does_not_lock_out_the_degradation_watch(tmp):
     assert fake.server == "Piautos", \
         "corrected onto %s - the lossy server must be excluded" % fake.server
 
-    # The arithmetic, pinned rather than left to luck. The earliest trip is
-    # bad_windows x window = 3 x 70 s = 210 s, which is INSIDE the 300 s cooldown,
-    # so that trip is refused - deliberately, it is what stops a flapping pool
-    # chaining switches back to back. The bad-window counter resets, three more
-    # windows run, and the second trip goes through at ~420 s.
     assert windows == 2 * agent.cfg.bad_windows, (
         "the correction took %d windows, expected exactly %d: one trip refused "
         "inside the %ds cooldown, the next one through"
@@ -1343,8 +1204,6 @@ def test_a_boot_upgrade_does_not_lock_out_the_degradation_watch(tmp):
         "corrected %.0fs after the boot pick - expected between the %ds cooldown "
         "and ~10 min" % (elapsed, agent.cfg.failed_cooldown_seconds))
 
-    # And the daily cap still bounds it. Worst case is this boot placement plus
-    # two degradation corrections, and then nothing for the rest of the day.
     clock.sleep(agent.cfg.cooldown_seconds + 1)
     while not agent.watch_once():
         clock.sleep(window)
@@ -1411,13 +1270,6 @@ def test_a_blocked_ranking_open_cannot_delay_live_degradation_switch(tmp):
     builtins.open = blocked_open
     caller = threading.Thread(target=third_window, name="blocked-ranking-watch-once")
     try:
-        # Compatibility is intentional: this same changed test can be copied
-        # next to origin/main's unchanged agent.py and invoked with
-        # --ranking-open-regression-only. The unfixed Agent has no
-        # ranking_reader, so its CONTROL thread enters the blocked open. The
-        # fixed Agent starts its sole daemon first, and the control thread must
-        # remain independent of that already-wedged worker. Do not access the
-        # new API unconditionally before the original assertion can run.
         ranking_reader = getattr(agent, "ranking_reader", None)
         if ranking_reader is not None:
             ranking_reader.start()
@@ -1496,8 +1348,6 @@ def test_boot_metrics_and_shutdown_do_not_wait_for_blocked_ranking_nfs(tmp):
 
         worker = agent.ranking_reader._thread
         assert worker is not None and worker.daemon and worker.is_alive()
-        # Exercise every former synchronous reader while the syscall remains
-        # wedged. No call may start a helper/replacement thread.
         started = time.monotonic()
         assert agent.read_ranking() == []
         names, source = agent.candidates(exclude="Aspidiske")
@@ -1562,8 +1412,6 @@ def test_ranking_reader_refreshes_atomic_replacements_without_busy_looping(tmp):
     with open(agent.cfg.cache_path, "rb") as fh:
         assert fh.read() == payload, "the local cache did not receive exact replacement bytes"
 
-    # Polling is periodic, not a busy loop. With a 20 ms test interval, 120 ms
-    # should produce a handful of attempts, never hundreds.
     before = reader_attempts(agent)
     time.sleep(0.12)
     attempts = reader_attempts(agent) - before
@@ -1595,7 +1443,6 @@ def test_fresh_cache_adoption_cannot_be_erased_by_stale_discard(tmp):
     fresh_servers, _ = ag.parse_ranking(fresh_payload, agent.wallclock())
     assert fresh_servers and old_payload != fresh_payload
 
-    # Seed both representations with the old document before concurrency.
     agent._write_cache(old_payload)
     agent.cached_payload = old_payload
     agent.cached = tuple(old_doc["servers"])
@@ -1644,9 +1491,6 @@ def test_fresh_cache_adoption_cannot_be_erased_by_stale_discard(tmp):
             "cached_ranking did not pause after parsing the old expired lease"
         adopter.start()
         assert adoption_started.wait(1.0)
-        # With the fix, the callback cannot finish while the stale consumer owns
-        # the cache transaction. Before the fix it deterministically writes the
-        # fresh file here, which the resumed stale path then unlinks.
         adoption_finished_before_discard = adoption_done.wait(0.1)
         allow_stale_discard.set()
         assert stale_done.wait(1.0), "stale cache consumer did not finish"
@@ -1669,8 +1513,6 @@ def test_fresh_cache_adoption_cannot_be_erased_by_stale_discard(tmp):
         assert fh.read() == fresh_payload, \
             "the resumed stale consumer unlinked or replaced the fresh disk cache"
 
-    # Model a process restart: erase only memory under the cache lock, then
-    # prove the exact fresh document remains adoptable from emptyDir.
     with agent.cache_lock:
         agent.cached_payload = None
         agent.cached = ()
@@ -1698,8 +1540,6 @@ def test_malformed_snapshot_fails_open_to_cache_then_quick(tmp):
     names, source = agent.candidates(exclude="Aspidiske")
     assert source == "cache" and names[0] == "Dalim", (source, names)
 
-    # The cache is the original document, not a new lease. Once its own TTL is
-    # gone malformed NFS cannot keep it alive and the only honest answer is quick.
     clock.sleep(RANKING["ttl_seconds"] + 1)
     names, source = agent.candidates()
     assert (names, source) == ([], "none"), (names, source)
@@ -1739,9 +1579,6 @@ def test_wedged_reader_snapshot_and_cache_expire_on_original_ttl(tmp):
         assert (names, source) == ([], "none"), (
             "a stale in-memory snapshot/cache survived its original ranking TTL: %s"
             % ((names, source),))
-        # Age still moves from immutable generated_at bytes even though the NFS
-        # worker cannot complete another read. Stale for decisions is not absent
-        # telemetry when the last observed document itself was valid.
         assert metric(agent, "vpn_agent_ranking_age_seconds") == 2161.0
         assert not os.path.exists(agent.cfg.cache_path)
     finally:
@@ -1817,8 +1654,6 @@ def test_a_blocked_verdict_writer_cannot_delay_switching(tmp):
         assert worker is not None and worker.daemon and worker.is_alive(), \
             "the one NFS worker must be a live daemon so it cannot hold process exit"
 
-        # Cooldown still governs the next trip even while publication is wedged.
-        # A blocked writer is not permission to bypass either flap damper.
         agent.probe = scripted_probe(9.0)
         for _ in range(agent.cfg.bad_windows):
             assert agent.watch_once() is False
@@ -1826,8 +1661,6 @@ def test_a_blocked_verdict_writer_cannot_delay_switching(tmp):
         allowed, why = agent.budget.allowed()
         assert allowed is False and "cooldown" in why, why
 
-        # Move past cooldown, fill the remaining two daily slots without a
-        # switch, and prove the daily cap remains independent too.
         clock.sleep(agent.cfg.cooldown_seconds + 1)
         agent.budget.record(0)
         agent.budget.record(0)
@@ -1837,12 +1670,6 @@ def test_a_blocked_verdict_writer_cannot_delay_switching(tmp):
             assert agent.watch_once() is False
         assert fake.connects() == ["Dalim"], "went over the daily cap"
 
-        # Repeated evidence while the first write is stuck does not start a
-        # worker per verdict or grow without bound. Latest-useful coalescing is
-        # PER DESTINATION: a newer Dalim observation may replace pending Dalim,
-        # but observing Piautos or Menkent must not erase either server. These
-        # files are the durable contract that keeps every measured-bad server
-        # out of the shared ranking after NFS recovers.
         submitted = time.monotonic()
         for server, loss in (("Dalim", 7.0), ("Piautos", 8.0), ("Menkent", 9.0),
                              ("Dalim", 10.0)):
@@ -1907,9 +1734,6 @@ def test_verdict_pending_set_has_a_hard_bound(tmp):
             assert writer_entered.wait(1.0), "the bounded-set worker did not start"
             assert publisher.submit(publication("Dalim", 7.0)) is True
             assert publisher.submit(publication("Piautos", 8.0)) is True
-            # Refreshing an existing destination is always useful and does not
-            # consume another slot. A new destination at the hard bound is
-            # rejected, never substituted for evidence already accepted.
             assert publisher.submit(publication("Dalim", 10.0)) is True
             assert publisher.submit(publication("Menkent", 9.0)) is False
             with publisher._condition:
@@ -2129,9 +1953,6 @@ def test_verdict_completion_and_shutdown_cannot_race_logging(tmp):
         assert agent.publish_bad_server("Dalim", 9.0) is True
         assert log_entered.wait(1.0), "the completion log was never reached"
 
-        # Completion logging is part of the publication lifecycle. Reporting
-        # idle before it finishes lets teardown remove handlers/streams under a
-        # daemon that still intends to use them.
         idle_before_log_finished = publisher.wait_idle(0.05)
 
         def stop():
@@ -2181,8 +2002,6 @@ def test_degradation_publishes_a_durable_shared_verdict(tmp):
         verdict_producer_id="cluster-default", verdict_ttl_seconds=21600)
     agent.probe = scripted_probe(9.0)
 
-    # The placement's short cooldown is still holding. The third window is a
-    # real verdict even though the switch itself is (correctly) refused.
     agent.budget.record(agent.cfg.failed_cooldown_seconds)
     for window in range(agent.cfg.bad_windows - 1):
         assert agent.watch_once() is False
@@ -2212,9 +2031,6 @@ def test_degradation_publishes_a_durable_shared_verdict(tmp):
         "bad_windows": agent.cfg.bad_windows,
     }, doc
 
-    # Same producer, another bad server: one verdict must not erase the first.
-    # Different producer: it must not erase either. A file per producer+server
-    # is the merge contract for the two qBittorrent instances sharing /media.
     assert agent.publish_bad_server("Dalim", 8.0) is True
     assert agent.verdict_publisher.wait_idle(2.0)
     nick_tmp = os.path.join(tmp, "nick")
@@ -2227,9 +2043,6 @@ def test_degradation_publishes_a_durable_shared_verdict(tmp):
     files = glob.glob(os.path.join(verdict_dir, "*.json"))
     assert len(files) == 3, "one producer erased another verdict: %s" % files
 
-    # Replacing one producer+server verdict is atomic under a live reader. A
-    # partial JSON document is fail-open in the scorer, so an in-place write can
-    # silently put a bad server back into ranking.json.
     path = agent.verdict_path("Dalim")
     partial = []
     stop = threading.Event()
@@ -2245,8 +2058,6 @@ def test_degradation_publishes_a_durable_shared_verdict(tmp):
     thread = threading.Thread(target=reader)
     thread.start()
     try:
-        # publish_bad_server logs each real verdict at WARNING. Capture those
-        # records so the atomicity stress does not bury the suite's output.
         with CaptureLog():
             for loss in range(200):
                 assert agent.publish_bad_server("Dalim", float(loss % 101)) is True
@@ -2259,8 +2070,6 @@ def test_degradation_publishes_a_durable_shared_verdict(tmp):
     assert not glob.glob(os.path.join(verdict_dir, ".*.tmp.*")), \
         "atomic verdict writer left temp files behind"
 
-    # Shared storage failure is fail-open for switching. Ejection is a safety
-    # improvement, never a new way to strand the tunnel on a measured bad box.
     failure_tmp = os.path.join(tmp, "write-failure")
     os.makedirs(failure_tmp)
     blocked = os.path.join(failure_tmp, "not-a-directory")
@@ -2278,8 +2087,6 @@ def test_degradation_publishes_a_durable_shared_verdict(tmp):
     assert failing.verdict_publisher.wait_idle(2.0), \
         "an immediate write error left the publisher active"
 
-    # A new Agent has no relation to the first one's emptyDir, but the shared
-    # verdict remains. This is the half of #792 the old switch budget cannot do.
     recreated_tmp = os.path.join(tmp, "recreated")
     os.makedirs(recreated_tmp)
     recreated, _, _ = build(
@@ -2306,10 +2113,6 @@ def test_bad_windows_are_bound_to_one_unchanged_session(tmp):
         os.makedirs(path)
         return path
 
-    # The sharp race: Dalim owns two bad windows, then the sidecar reconnects to
-    # Dedalus while the third probe is running. Reading status only after the
-    # probe falsely attributes all three windows to Dedalus and publishes a
-    # durable verdict against a good server for both consumers.
     during = sub("during-probe")
     verdict_dir = os.path.join(during, "shared", "verdicts")
     agent, fake, _ = build(
@@ -2339,11 +2142,6 @@ def test_bad_windows_are_bound_to_one_unchanged_session(tmp):
         "a reconnect during the third window published a false verdict against "
         "Dedalus for both ranking consumers")
 
-    # An unchanged NAME is not an unchanged tunnel session. Bluetit may replace
-    # tun0 and reconnect to the same server, or move A -> B -> A, while ping is
-    # running. Both endpoint names then read Dalim even though teardown loss
-    # belongs to no stable session. The netdevice ifindex is the generation
-    # bracket: a replacement gets a new one even when the name comes back.
     same_name = sub("same-name-session-replacement")
     verdict_dir = os.path.join(same_name, "shared", "verdicts")
     agent, fake, _ = build(
@@ -2358,8 +2156,6 @@ def test_bad_windows_are_bound_to_one_unchanged_session(tmp):
 
     def same_name_replacement(count=None):
         if count is None:
-            # Same reported server after a same-server reconnect (and the same
-            # final state as A -> B -> A), but a different tun0 incarnation.
             fake.server = "Dalim"
             generation[0] += 1
             return 9.0
@@ -2376,11 +2172,6 @@ def test_bad_windows_are_bound_to_one_unchanged_session(tmp):
         "teardown loss during a same-name reconnect published a verdict against "
         "a healthy Dalim session (#792 second review)")
 
-    # The same race also exists BETWEEN probe windows. A reconnect may complete
-    # after one window and before the next, leaving both brackets in the third
-    # window stable on the same server name and the same NEW ifindex. The old
-    # two-window count belongs to ifindex 41, not the recovered session at 42.
-    # Tracking only consecutive_bad_server falsely completes 3/3 here.
     between_sessions = sub("same-server-replacement-between-windows")
     verdict_dir = os.path.join(between_sessions, "shared", "verdicts")
     agent, fake, _ = build(
@@ -2406,8 +2197,6 @@ def test_bad_windows_are_bound_to_one_unchanged_session(tmp):
         "a recovered same-server session inherited the old session's bad "
         "windows and published a shared Dalim verdict (#792 fourth refinement)")
 
-    # A server change BETWEEN windows is measurable, but starts a new run. One
-    # stable bad Dedalus window is 1/3, never Dalim's third.
     between = sub("between-windows")
     verdict_dir = os.path.join(between, "shared", "verdicts")
     agent, fake, _ = build(
@@ -2450,16 +2239,9 @@ def test_cache_is_the_fallback_when_the_file_goes_away(tmp):
     assert source == "cache", source
     assert names == ["Dalim", "Piautos", "Menkent", "Ashlesha"], names
 
-    # The server we are already on is never a candidate - a cached ranking will
-    # usually still list the box that is dropping our packets.
     names, _ = agent.candidates(exclude="Dalim")
     assert "Dalim" not in names, names
 
-    # The scorer now stays down past ranking.json's own finite lease. No scorer
-    # refresh is invoked: this is the outage the restart test did not cover.
-    # The cached list may already be verdict-filtered and cannot restore hidden
-    # rows, so it must expire with the original generated_at and release the
-    # consumer to unfiltered `quick` selection.
     clock.sleep(agent.cfg.verdict_ttl_seconds + 1)
     names, source = agent.candidates()
     assert (names, source) == ([], "none"), (
@@ -2486,7 +2268,6 @@ def test_budget_survives_a_restart(tmp):
     assert agent.switches["degradation"] == 1
     assert os.path.exists(agent.cfg.budget_path), "the switch history was not persisted"
 
-    # A brand new Agent over the same emptyDir, as after a supervisor restart.
     cfg = agent.cfg
     bluetit = ag.Bluetit(cfg, runner=FakeBluetit(clock, server="Dalim"),
                          sleep=clock.sleep, clock=clock)
@@ -2519,9 +2300,6 @@ def test_switch_budget_is_exported_at_scrape_time(tmp):
     cross-checked against allowed() and against the on-disk switches.json, which
     is the same cross-check the live verification does.
     """
-    # Every ranked candidate is refused and `quick` is accepted but never lands,
-    # so this switch ends with no tunnel at all: connected is None, counted_as is
-    # "fallback", and _finish() records the slot and increments nothing.
     agent, fake, clock = build(tmp, server="Aspidiske",
                                refused=("Dalim", "Piautos", "Menkent", "Ashlesha"),
                                silent=("QuickPick",))
@@ -2550,8 +2328,6 @@ def test_switch_budget_is_exported_at_scrape_time(tmp):
         assert metric(agent, "vpn_agent_switch_budget_used") == len(json.load(fh)), \
             "the exported count disagrees with the budget file the agent enforces"
 
-    # The cooldown is MEASURED, not the value armed: it counts down as the clock
-    # moves, with no switch and no writer in between (#686/#690/#771).
     first = metric(agent, "vpn_agent_switch_cooldown_seconds_left")
     assert first == agent.cfg.failed_cooldown_seconds, (first, agent.budget.history)
     clock.sleep(100)
@@ -2565,10 +2341,6 @@ def test_switch_budget_is_exported_at_scrape_time(tmp):
         "an expired cooldown must read 0, not a negative number"
     assert agent.budget.allowed()[0] is True, "the short cooldown never expired"
 
-    # Spend the rest of the day's slots and the exported flag must flip in step
-    # with allowed(), not one switch early and not one late. Bluetit is back on a
-    # server first - `quick` reconnects on its own and the liveness probe owns the
-    # tunnel-less case, so watch_once() deliberately refuses to switch without one.
     fake.server, fake.refused, fake.silent = "Aspidiske", set(), set()
     agent.probe = scripted_probe(9.0)
     for _ in range(agent.cfg.max_switches_per_day + 1):
@@ -2593,9 +2365,6 @@ def test_switch_budget_is_exported_at_scrape_time(tmp):
     assert metric(agent, "vpn_agent_switch_budget_exhausted") == 1, \
         "allowed() refuses with %r and the exported flag says not exhausted" % why
 
-    # And the window rolls. The counter cannot do this - it is monotonic for the
-    # life of the process - so a pod alive for days would keep reading 3 while the
-    # agent had pruned back to an empty budget and was switching happily.
     clock.sleep(86401)
     assert metric(agent, "vpn_agent_switch_budget_used") == 0, (
         "%s slots still counted a day after the last switch - the exported budget "
@@ -2603,10 +2372,6 @@ def test_switch_budget_is_exported_at_scrape_time(tmp):
         "latches on forever (#783)"
         % metric(agent, "vpn_agent_switch_budget_used"))
     assert metric(agent, "vpn_agent_switch_budget_exhausted") == 0
-    # Those scrapes pruned READ-ONLY. record() appends to the list _prune()
-    # rebinds, so a scrape thread that pruned could drop a switch the agent thread
-    # was recording - a slot that never counted against the cap. Checked before
-    # anything on the agent's own path runs, because allowed() legitimately prunes.
     assert len(agent.budget.history) == agent.cfg.max_switches_per_day, \
         "render_metrics() mutated the budget - snapshot() must be read-only, it " \
         "runs in the HTTP handler thread with no lock (#783)"
@@ -2625,8 +2390,6 @@ def test_dry_run_takes_no_action(tmp):
     assert fake.server == "Aspidiske"
     assert agent.switches["boot_upgrade"] == 0
 
-    # A verdict changes the shared ranking for both consumers, so it is an
-    # action too. Dry-run must not publish one even after a real 3/3 trip.
     agent.probe = scripted_probe(9.0)
     for _ in range(agent.cfg.bad_windows):
         agent.watch_once()
@@ -2644,8 +2407,6 @@ def test_goldcrest_is_bounded_by_bytes():
     try:
         fake = os.path.join(tmp, "goldcrest")
         with open(fake, "w") as fh:
-            # `trap '' PIPE` models the real binary: goldcrest survives SIGPIPE,
-            # so `head -c` closing the pipe does NOT end it. Only `timeout` does.
             fh.write("#!/bin/sh\ntrap '' PIPE\n"
                      "while true; do printf 'AirVPN Username: '; done\n")
         os.chmod(fake, os.stat(fake).st_mode | stat.S_IEXEC)
@@ -2661,13 +2422,9 @@ def test_goldcrest_is_bounded_by_bytes():
         assert 0 < len(out) <= cfg.max_output_bytes, \
             "output was not bounded by bytes, got %d" % len(out)
         assert rc is None, "a flood must report as a failure, got rc=%s" % rc
-        # goldcrest's own `timeout` has to be what ends this. Our outer
-        # subprocess timeout is a backstop, and hitting it instead means the
-        # call ran 15 s longer than the budget allows for.
         assert elapsed < cfg.goldcrest_timeout + 5, \
             "the goldcrest timeout did not end it, took %.1fs" % elapsed
 
-        # And a well-behaved call carries its real exit code out of the pipeline.
         with open(fake, "w") as fh:
             fh.write("#!/bin/sh\necho 'Bluetit is not connected'\nexit 3\n")
         rc, out = ag.goldcrest(["--bluetit-status"], cfg)
@@ -2683,7 +2440,6 @@ def test_parse_status():
                  "(Alblasserdam, Netherlands)\n"
                  "2026-08-02 09:42:59 Users: 138 - Load: 69%\n")
     assert ag.parse_status(connected) == "Aspidiske"
-    # The disconnected form contains the word "connected" - never grep for that.
     assert ag.parse_status("Bluetit is not connected") is None
     assert ag.parse_status("") is None
     print("ok  parse_status: exact name out, 'is not connected' is not a match")
@@ -2704,10 +2460,6 @@ rtt min/avg/max/mdev = 26.0/27.0/28.0/1.0 ms
 
 if __name__ == "__main__":
     if sys.argv[1:] == ["--ranking-open-regression-only"]:
-        # Compatibility harness for TDD proof. Copy this changed selftest next
-        # to origin/main's unchanged agent.py: it reaches the original blocked
-        # candidates()->read_ranking()->open() assertion instead of touching a
-        # RankingReader attribute that old code cannot have.
         test_a_blocked_ranking_open_cannot_delay_live_degradation_switch()
         raise SystemExit(0)
     if sys.argv[1:]:

@@ -1,15 +1,10 @@
 #!/bin/bash
 
-# Every kubectl call in this script runs against the homelab cluster, whatever
-# the ambient kubeconfig says (issue #971). Override with KUBECTL_CONTEXT=... .
 : "${KUBECTL_CONTEXT:=epaflix}"
 kubectl() { command kubectl --context "$KUBECTL_CONTEXT" "$@"; }
-# Fix missing DownloadId and Languages columns in all Servarr History tables
-# This script is idempotent and safe to run multiple times
 
 set -euo pipefail
 
-# Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -21,7 +16,6 @@ echo "  Servarr History Schema Fix - All Apps"
 echo "=================================================="
 echo ""
 
-# Get database credentials from secret
 echo "🔍 Retrieving database credentials..."
 SONARR_PW=$(kubectl get secret servarr-postgres -n servarr -o jsonpath='{.data.sonarr-password}' | base64 -d)
 SONARR2_PW=$(kubectl get secret servarr-postgres -n servarr -o jsonpath='{.data.sonarr2-password}' | base64 -d)
@@ -31,7 +25,6 @@ DB_HOST="192.168.10.105"
 echo "✅ Credentials retrieved"
 echo ""
 
-# Function to check and fix a database
 fix_database() {
     local APP=$1
     local USER=$2
@@ -42,14 +35,12 @@ fix_database() {
     echo "📦 Checking ${APP} (${DB})"
     echo "----------------------------------------"
     
-    # Check current schema
     echo "Current columns:"
     COLUMNS=$(PGPASSWORD="${PW}" psql -h "${DB_HOST}" -U "${USER}" -d "${DB}" -t -c \
         "SELECT count(*) FROM information_schema.columns WHERE table_name = 'History';")
     
     echo "  Column count: ${COLUMNS}"
     
-    # Check for missing columns
     HAS_DOWNLOADID=$(PGPASSWORD="${PW}" psql -h "${DB_HOST}" -U "${USER}" -d "${DB}" -t -c \
         "SELECT count(*) FROM information_schema.columns WHERE table_name = 'History' AND column_name = 'DownloadId';")
     HAS_LANGUAGES=$(PGPASSWORD="${PW}" psql -h "${DB_HOST}" -U "${USER}" -d "${DB}" -t -c \
@@ -88,14 +79,12 @@ EOF
         echo -e "${GREEN}✅ ${APP} schema is correct (no fix needed)${NC}"
     fi
     
-    # Show final column count
     FINAL_COLUMNS=$(PGPASSWORD="${PW}" psql -h "${DB_HOST}" -U "${USER}" -d "${DB}" -t -c \
         "SELECT count(*) FROM information_schema.columns WHERE table_name = 'History';")
     echo "  Final column count: ${FINAL_COLUMNS}"
     echo ""
 }
 
-# Fix all databases
 fix_database "Sonarr" "sonarr" "sonarr-main" "${SONARR_PW}"
 fix_database "Sonarr2" "sonarr2" "sonarr2-main" "${SONARR2_PW}"
 fix_database "Radarr" "radarr" "radarr-main" "${RADARR_PW}"

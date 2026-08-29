@@ -33,10 +33,6 @@ import yaml
 BARMAN_PATH = "2-k3s/06.postgres/operator-kustomization/barman-manifest.yaml"
 BARMAN_KEY = "SIDECAR_IMAGE"
 
-# Approved placeholders are whole scalar values only.  New angle-bracket
-# placeholders must be UPPER_SNAKE_CASE.  The exact legacy set keeps the three
-# established lowercase forms editable without accepting arbitrary
-# passphrase-shaped text inside angle brackets.
 PLACEHOLDER_PATTERNS = (
     re.compile(r"<[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*>"),
     re.compile(r"REPLACE_WITH_[A-Z0-9]+(?:_[A-Z0-9]+)*"),
@@ -69,31 +65,13 @@ HEX_RUN_RE = re.compile(r"(?<![0-9A-Fa-f])[0-9A-Fa-f]{32,}(?![0-9A-Fa-f])")
 BASE64_RUN_RE = re.compile(
     r"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{32,}={0,2}(?![A-Za-z0-9+/=])"
 )
-# Entropy checks cover printable Unicode plus internal whitespace, not only a
-# whitespace-free ASCII alphabet.  Entropy density catches generated values of
-# MIN_ENTROPY_LENGTH characters and up, while ordinary words, hostnames, ports,
-# usernames, and image tags stay below the threshold.
 MIN_ENTROPY_LENGTH = 16
 MIN_ENTROPY_DENSITY = 4.0
 MIN_UNIQUE_CHARACTER_RATIO = 0.75
-# Below MIN_ENTROPY_LENGTH the density band above cannot separate a generated
-# credential from an ordinary identifier, so a second bounded band uses
-# character-class mixing instead (#822).  Template identifiers in these
-# manifests are DNS-1123 lowercase words joined by "-", "." or "/", so each
-# unbroken token carries a single character class, while a short credential is
-# one unbroken run that mixes letter case, digits, or both.  Measured against
-# every scalar of the 14 tracked plaintext Secret documents this band has no
-# false positives.
 MIN_SHORT_CREDENTIAL_LENGTH = 8
 MIN_SHORT_CREDENTIAL_CLASSES = 2
 MIN_SHORT_CREDENTIAL_UNIQUE = 6
 MIN_SHORT_CREDENTIAL_DENSITY = 2.5
-# An opaque plaintext scalar longer than this is rejected rather than analysed
-# (#823).  Entropy analysis has to be bounded somewhere, and any bound is a
-# padding bypass, so oversized opaque values fail closed instead.  The longest
-# opaque scalar in the tracked plaintext Secrets is 82 characters, so the limit
-# constrains no real template.  A scalar that parses as embedded YAML or JSON is
-# decomposed instead, and every leaf it yields is held to the same limit.
 MAX_PLAINTEXT_SCALAR_LENGTH = 2048
 SOPS_ENVELOPE_RE = re.compile(
     r"^ENC\[AES256_GCM,"
@@ -251,9 +229,6 @@ def looks_like_credential(value: Any) -> bool:
         return True
     if HEX_RUN_RE.search(candidate) or BASE64_RUN_RE.search(candidate):
         return True
-    # Values shorter than MIN_ENTROPY_LENGTH are handled by the separate
-    # character-class band, and values longer than the analysis limit are
-    # rejected before this classifier is consulted.
     if (
         MIN_ENTROPY_LENGTH <= len(candidate) <= MAX_PLAINTEXT_SCALAR_LENGTH
         and all(char.isprintable() or char.isspace() for char in candidate)
@@ -274,8 +249,6 @@ def embedded_structure(value: str) -> Any | None:
     try:
         parsed = yaml.load(value, Loader=UniqueKeyLoader)
     except yaml.YAMLError:
-        # Keep failing closed for content that visibly claims to be embedded
-        # structure.  An ordinary one-line scalar need not itself be valid YAML.
         return EMBEDDED_PARSE_ERROR if structurally_plausible else None
     return parsed if isinstance(parsed, (dict, list)) else None
 
@@ -324,7 +297,6 @@ def sops_envelope(value: Any) -> tuple[bytes, bytes, bytes, str] | None:
     tag = canonical_base64(match.group(3))
     if data is None or iv is None or tag is None:
         return None
-    # SOPS AES256_GCM currently emits a 32-byte IV and a 16-byte GCM tag.
     if not data or len(iv) != 32 or len(tag) != 16:
         return None
     return data, iv, tag, match.group(4)
@@ -388,9 +360,6 @@ def valid_sops_document(path: str, document: int, doc: dict[Any, Any]) -> bool:
             ok = False
             continue
         for leaf in scalar_leaves(payload):
-            # SOPS intentionally leaves empty YAML scalars unchanged because
-            # there is no value to protect.  Every non-empty leaf must carry a
-            # canonical AES256_GCM envelope, not merely begin with `ENC[`.
             if leaf in (None, ""):
                 continue
             found_leaf = True
@@ -441,8 +410,6 @@ def validate_plaintext(
     reference_fields: bool = False,
     exempt_value_paths: frozenset[tuple[str, ...]] = frozenset(),
 ) -> bool:
-    # A validated path exception exempts only this exact scalar value. Its
-    # containing document and every sibling still use the generic classifier.
     if key_path in exempt_value_paths:
         return True
 
@@ -536,9 +503,6 @@ def validate_file(path: str, raw: bytes) -> bool:
         if not isinstance(doc, dict):
             continue
         if doc.get("kind") in {"List", "SecretList"}:
-            # Kubernetes deploys Secret objects nested under items.  Reject the
-            # container outright rather than letting nested Secrets bypass the
-            # document-local plaintext and SOPS checks.
             report(path, number, ("items",), "Secret container kinds are not accepted")
             ok = False
             continue

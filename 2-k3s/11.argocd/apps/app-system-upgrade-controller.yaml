@@ -1,17 +1,4 @@
 ---
-# ArgoCD Application: system-upgrade-controller install (controller-only).
-# Closes the controller-install half of Issue #44.
-#
-# Source:       this repo, path 2-k3s/maintenance/system-upgrade/controller.
-#               kustomization.yaml references the vendored upstream
-#               crd.yaml + system-upgrade-controller.yaml at v0.19.2.
-# Destination:  `system-upgrade` namespace (created by the upstream manifest).
-# Sync:         AUTOMATED — selfHeal: true, prune: false, ServerSideApply.
-#               The controller installed manually and has soaked (Healthy
-#               5d+) producing zero cluster activity beyond Deployment
-#               readiness. Settled to automated per owner decision; the
-#               sibling system-upgrade-plans App (Issue #74) now brings the
-#               Plans live under the same automated regime.
 
 apiVersion: argoproj.io/v1alpha1
 kind: Application

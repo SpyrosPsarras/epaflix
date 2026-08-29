@@ -23,9 +23,6 @@ import vpn_picker as vp
 def cfg(**overrides):
     os.environ["AIRVPN_API_KEY"] = "x"
     c = vp.Config()
-    # Tests commonly redirect only ranking.json after Config construction. The
-    # runtime derives both paths from env in one pass; keep the fixture's private
-    # base journal beside its redirected ranking unless a test names it.
     if "output_path" in overrides and "base_state_path" not in overrides:
         overrides["base_state_path"] = overrides["output_path"] + ".base"
     for k, v in overrides.items():
@@ -33,26 +30,17 @@ def cfg(**overrides):
     return c
 
 
-# 2026-07-31, from the design doc. `bw` is back-calculated from the published
-# load percent so headroom comes out as the doc states it.
 FIXTURE = [
-    # The 20 Gbit box the design says must win. ~17 Gbit spare.
     {"public_name": "Dedalus", "country_code": "nl", "health": "ok",
      "currentload": 15, "bw": 3199, "bw_max": 20000, "ip_v4_in1": "109.235.50.5"},
-    # AirVPN's own `server_best` for nl, health ok, and 22% measured loss on our
-    # line. 2 Gbit box, ~1.2 Gbit spare.
     {"public_name": "Anser", "country_code": "nl", "health": "ok",
      "currentload": 39, "bw": 780, "bw_max": 2000, "ip_v4_in1": "109.235.50.7"},
-    # Excluded at stage 1 on health. `error` means CLOSED to new connections.
     {"public_name": "Cygnus", "country_code": "nl", "health": "error",
      "currentload": 10, "bw": 100, "bw_max": 20000, "ip_v4_in1": "1.2.3.4"},
-    # Excluded on country - not in nl,de,se.
     {"public_name": "Achernar", "country_code": "ch", "health": "ok",
      "currentload": 5, "bw": 100, "bw_max": 20000, "ip_v4_in1": "1.2.3.5"},
-    # Excluded on load - the class of box `quick` keeps picking.
     {"public_name": "Overloaded", "country_code": "se", "health": "ok",
      "currentload": 78, "bw": 1560, "bw_max": 2000, "ip_v4_in1": "1.2.3.6"},
-    # Filler so the top-5 cap is actually exercised.
     {"public_name": "Felix", "country_code": "nl", "health": "ok",
      "currentload": 30, "bw": 6000, "bw_max": 20000, "ip_v4_in1": "1.2.3.7"},
     {"public_name": "Menkent", "country_code": "de", "health": "ok",
@@ -73,12 +61,9 @@ def test_shortlist():
     assert "Overloaded" not in picks, "currentload 78 must fail the <=75 ceiling"
     assert len(picks) == 5, "top 5 expected, got %s" % picks
 
-    # Ranked by absolute headroom, not bare load percent.
     assert picks == ["Dedalus", "Menkent", "Felix", "Sheliak", "Piautos"], picks
     assert picks.index("Dedalus") < picks.index("Felix"), "headroom order broken"
 
-    # A 20 Gbit box must sit above a 2 Gbit one even when the 2 Gbit box has the
-    # lower load percent. This is the whole reason we rank on headroom.
     assert vp.headroom(FIXTURE[0]) > vp.headroom(FIXTURE[1])
     print("ok  shortlist: health/country/load filters + headroom order + top-5 cap")
 
@@ -98,7 +83,6 @@ def test_probe_gate():
 
     assert "Anser" not in ranked, "22%% loss must be rejected by the gate, got %s" % ranked
     assert ranked[0] == "Dedalus", "Dedalus must beat Anser and Felix, got %s" % ranked
-    # Equal loss falls through to RTT, then load.
     assert ranked == ["Dedalus", "Felix", "Menkent"], ranked
     print("ok  probe gate: Anser rejected at 22%, Dedalus wins, loss>rtt>load order")
 
@@ -111,8 +95,6 @@ def test_parse_ping():
 rtt min/avg/max/mdev = 26.439/29.278/71.601/5.670 ms
 """
     loss, rtt = vp.parse_ping(iputils)
-    # 6/300 is exactly 2.0, but the point is we compute it instead of trusting
-    # the integer-rounded "2%" field, which cannot express the 1% gate.
     assert loss == 2.0, loss
     assert rtt == 29.28, rtt
 
@@ -154,7 +136,6 @@ def test_atomic_publish():
     try:
         path = os.path.join(d, "ranking.json")
         small = json.dumps({"schema": 1, "servers": []}).encode()
-        # Big enough that a non-atomic write spans several page flushes.
         big = json.dumps({"schema": 1, "servers": [{"n": "x" * 200}] * 500}).encode()
         vp.publish(small, path)
 
@@ -183,7 +164,6 @@ def test_atomic_publish():
         leftovers = glob.glob(os.path.join(d, "*"))
         assert leftovers == [path], "temp files left behind: %s" % leftovers
 
-        # A failed publish must clean up after itself too.
         try:
             vp.publish(b"{}", os.path.join(d, "nope", "\x00bad"))
         except Exception:
@@ -227,10 +207,8 @@ def test_agent_verdicts_eject_servers_with_a_bounded_fail_open_cap():
         stamp = lambda seconds=0: datetime.fromtimestamp(
             now + seconds, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-        # A clean scorer verdict is NOT an authority for in-tunnel health (#767).
         _verdict(os.path.join(verdict_dir, "wrong-source.json"),
                  "scorer", "Menkent", stamp(), source="vpn-picker")
-        # Finite TTL: an old agent verdict no longer bans a recovered server.
         _verdict(os.path.join(verdict_dir, "stale.json"),
                  "old-pod", "Dedalus", stamp(-21601))
 
@@ -265,10 +243,6 @@ def test_agent_verdicts_eject_servers_with_a_bounded_fail_open_cap():
             "Dalim", "Piautos", "Menkent", "Dedalus"
         ], baseline
 
-        # Both qBittorrent instances contribute AFTER the 15-minute score cycle.
-        # The short verdict reconciliation must update the same ranking bytes
-        # without waiting for another API call/probe, and without restamping the
-        # base data (which would defeat ranking's own TTL).
         _verdict(os.path.join(verdict_dir, "cluster-dalim.json"),
                  "cluster-default", "Dalim", stamp())
         _verdict(os.path.join(verdict_dir, "nick-piautos.json"),
@@ -293,8 +267,6 @@ def test_agent_verdicts_eject_servers_with_a_bounded_fail_open_cap():
             "in-tunnel agent already rejected (#792)" % names)
         assert state.snapshot()[5:7] == (2, 2), state.snapshot()
 
-        # Unknown schema and a timestamp past the bounded future-skew allowance
-        # are malformed, not authority. They must fail open.
         invalid = {
             "schema": 2, "source": "vpn-agent", "producer": "cluster-default",
             "server": "Dalim", "observed_at": stamp(), "ttl_seconds": 21600,
@@ -315,8 +287,6 @@ def test_agent_verdicts_eject_servers_with_a_bounded_fail_open_cap():
         else:
             raise AssertionError("future verdict timestamp was accepted")
 
-        # Expiry restores the measured base ranking promptly and still preserves
-        # its generated_at. This is a temporary ejection, never a permanent ban.
         _verdict(os.path.join(verdict_dir, "cluster-dalim.json"),
                  "cluster-default", "Dalim", stamp(-21601))
         _verdict(os.path.join(verdict_dir, "nick-piautos.json"),
@@ -329,9 +299,6 @@ def test_agent_verdicts_eject_servers_with_a_bounded_fail_open_cap():
         ], restored
         assert restored["generated_at"] == baseline["generated_at"]
 
-        # Make all four verdicts valid. The newest half are ejected; the oldest
-        # half stay in their original rank order. Never empty ranking on a rough
-        # day, and never make `quick` the only fallback.
         _verdict(os.path.join(verdict_dir, "cluster-dalim.json"),
                  "cluster-default", "Dalim", stamp())
         _verdict(os.path.join(verdict_dir, "nick-piautos.json"),
@@ -416,8 +383,6 @@ def test_verdict_refresh_publish_failure_keeps_consumers_identical_and_retries()
             assert fh.read() == baseline
         assert len(attempts) == 1
 
-        # The in-memory bytes stayed old, so restoring the writer must retry and
-        # converge both consumers without waiting for another 15-minute score.
         vp.publish = old_publish
         assert vp.refresh_ejections(state, c) is True, (
             "the reconciliation did not retry after a transient publish failure")
@@ -499,13 +464,9 @@ def test_restart_restores_servers_when_verdict_expires_or_breaks():
             ]
             return restarted
 
-        # Expiry after the process dies must restore from the separately
-        # persisted measured base, not from the ejected public document.
         _verdict(verdict_path, "cluster-default", "Dalim", stamp(-21601))
         restored = restart_and_restore("expired")
 
-        # Re-eject without a new score, then corrupt the verdict and repeat the
-        # restart. Malformed input fails open in the same finite-lease shape.
         _verdict(verdict_path, "cluster-default", "Dalim", stamp())
         assert vp.refresh_ejections(restored, c) is True
         with open(verdict_path, "w") as fh:
@@ -547,8 +508,6 @@ def test_missing_or_corrupt_base_state_fails_open_without_guessing():
         journal = vp.build_base_state(base, generated_at)
         vp.publish(public, c.output_path)
         vp.publish(journal, c.base_state_path)
-        # A stale file proves the verdict channel existed, but cannot supply the
-        # omitted ranking row. It must not be treated as restoration data.
         _verdict(
             os.path.join(c.verdict_dir, "cluster-dalim.json"),
             "cluster-default", "Dalim", "2026-08-04T00:00:00Z",

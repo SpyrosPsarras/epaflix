@@ -1,82 +1,15 @@
-# ArgoCD-managed kustomization for the servarr stack.
-#
-# Owned by ArgoCD Application "servarr" (see 2-k3s/11.argocd/apps/app-servarr.yaml).
-# Argo CD Image Updater writes new image tags/digests to the `images:` block at
-# the bottom of this file via `kustomize edit set image`.
-#
-# DELIBERATELY EXCLUDED from `resources:`:
-#   - _shared/secrets/*-secret.yaml   — placeholder values kept for reference.
-#                                       Real values are reconciled via the
-#                                       ksops generator in _shared/secrets/
-#                                       (Issue #29 / PR #58, follow-up #61).
-#   - seerr/authentik-oidc-secret.yaml — placeholder OIDC creds; still
-#                                       imperative until migrated (covered by
-#                                       follow-up #61, scope-limited PR).
-#   - postgres-setup-job.yaml         — one-shot Job, already executed.
-#   - **/fix-*.yaml                   — one-shot remediation Jobs from past
-#                                       migrations (sonarr/radarr/sonarr2 schema
-#                                       and dedup fixes). Kept on disk for audit.
-#   - research/                       — config dumps, not k8s manifests.
-#   - _shared/scripts/                — shell helpers, not k8s manifests.
-#
-# Reconciled via the ksops generator (_shared/secrets/ksops-generator.yaml):
-#   - servarr-postgres                from _shared/secrets/servarr-postgres.enc.yaml
-#   - newtarr-config-seed             from _shared/secrets/newtarr-config-seed.enc.yaml
-#                                       (issue #137 — newtarr JSON config seed,
-#                                       consumed by the seed-config initContainer)
-#   - seerr-config-seed                from _shared/secrets/seerr-config-seed.enc.yaml
-#                                       (issue #518 — seerr's /app/config/settings.json,
-#                                       same PVC-only durable-state gap as newtarr #137;
-#                                       consumed by the seed-config initContainer)
-#   - cleanuparr-blocklist-seed       from _shared/secrets/cleanuparr-blocklist-seed.enc.yaml
-#                                       (issue #138 — Sonarr custom-blocklist
-#                                       seriesId 40 S04E13 re-arm guard, consumed
-#                                       by the cleanuparr seed-config initContainer)
-#   - bazarr-autotranslate-secret    from _shared/secrets/bazarr-autotranslate-secret.enc.yaml
-#                                       (issue #283 — bazarr-autotranslate
-#                                       BAZARR_API_KEY, was inline plaintext)
-#   - airvpn-credentials              from _shared/secrets/airvpn-credentials.enc.yaml
-#   - airvpn-api-key                  from _shared/secrets/airvpn-api-key.enc.yaml
-#                                       (issue #596 — AirVPN REST API key for the
-#                                       vpn-picker scorer. Separate from
-#                                       airvpn-credentials, which holds the
-#                                       Bluetit login and is read by a different
-#                                       pod)
-#   - homarr-secret                   from _shared/secrets/homarr-secret.enc.yaml
-#                                       (issue #284 — homarr-labs SECRET_ENCRYPTION_KEY,
-#                                       required by the maintained image, ajnart fork
-#                                       had no such requirement)
-#   - qbittorrent-webapi-key          from _shared/secrets/qbittorrent-webapi-key.enc.yaml
-#                                       (issue #723 — qBittorrent 5.2 WebAPI key,
-#                                       consumed only by the non-clobber config seed;
-#                                       Sonarr/Sonarr2/Radarr keep their copy in app DBs)
-#   - prowlarr-api-key                 from _shared/secrets/prowlarr-api-key.enc.yaml
-#                                       (issue #607 — consumed by the maintenance App's
-#                                       prowlarr-indexer-health CronJob, not any servarr
-#                                       workload; same cross-App pattern as
-#                                       qbittorrent-webui-credentials below)
-#   - cleanuparr-api-key               from _shared/secrets/cleanuparr-api-key.enc.yaml
-#                                       (issue #606 — consumed by the maintenance App's
-#                                       cleanuparr-queuecleaner-health CronJob)
-#
-# Re-add a Job here only if you intend Argo to re-run it on every sync.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: servarr
 resources:
-  # namespace + shared infra
   - namespace.yaml
   - _shared/tls-options.yaml
   - _shared/ingress/public-routes.yaml
   - _shared/storage/arr-configs.yaml
-  # local-caches-pvc.yaml intentionally OMITTED — its 3 PVCs
-  # (jellyfin-cache, jellyfin-transcodes, tdarr-transcode-cache) are duplicates
-  # of entries in media-app-configs.yaml. Including both fails kustomize build.
   - _shared/storage/media-app-configs.yaml
   - _shared/storage/media-pvcs.yaml
   - _shared/storage/media-storageclass.yaml
   - _shared/storage/utility-configs.yaml
-  # *arr apps
   - sonarr/sonarr.yaml
   - sonarr/pdb.yaml
   - sonarr/ingressroute.yaml
@@ -93,7 +26,6 @@ resources:
   - bazarr/pdb.yaml
   - bazarr/ingressroute.yaml
   - bazarr-autotranslate/bazarr-autotranslate.yaml
-  # utilities
   - newtarr/newtarr.yaml
   - newtarr/pdb.yaml
   - newtarr/ingressroute.yaml
@@ -105,55 +37,29 @@ resources:
   - lingarr/lingarr.yaml
   - lingarr/pdb.yaml
   - lingarr/ingress.yaml
-  # media servers
   - jellyfin/jellyfin.yaml
   - jellyfin/jellyfin-truenas-redirect.yaml
-  # jellyseerr/jellyseerr.yaml RETIRED — the media-request Deployment is
-  # consolidated into seerr/ (canonical). The legacy data names are
-  # intentionally retained: PVC jellyseerr-config, Postgres DB/user
-  # jellyseerr, and the jellyseerr-* keys in the servarr-postgres Secret —
-  # renaming any of those would force a data migration.
-  # jellyseerr/ingress.yaml DELETED 2026-05-17 — dead duplicate of the
-  # Traefik IngressRoute in _shared/ingress/public-routes.yaml; was never
-  # applied live.
   - seerr/seerr.yaml
   - seerr/pdb.yaml
-  # seerr/ingress.yaml DELETED 2026-05-17 — same reason.
-  # download + invites + dashboard
   - qbittorrent/qbittorrent.yaml
   - qbittorrent/pdb.yaml
   - qbittorrent/ingressroute.yaml
-  # qbittorrent/ingress.yaml DELETED 2026-05-17 — same reason.
   - qbittorrent/priority-class.yaml
   - qbittorrent/bluetit-config.yaml
   - unpackerr/unpackerr.yaml
-  # vpn-picker scorer (#596) — Deployment + LoadBalancer + ServiceMonitor.
-  # A directory, not single files: it is a self-contained component, not part
-  # of an *arr app.
   - vpn-picker
   - homarr/homarr.yaml
   - homarr/pdb.yaml
   - homarr/ingressroute.yaml
 generators:
   - _shared/secrets/ksops-generator.yaml
-# Script for the cleanuparr enforce-private-seeding initContainer. Generated (not
-# a static ConfigMap) so the name-suffix hash rolls the Deployment whenever the
-# guard changes. Public logic, no credentials -> ConfigMap, not a Secret.
 configMapGenerator:
   - name: cleanuparr-seeding-guard
     files:
       - enforce-private-seeding.py=cleanuparr/files/enforce-private-seeding.py
-  # SQL for the lingarr enforce-db-invariants initContainer (#870). Same reason it is
-  # generated: the name-suffix hash rolls the lingarr Deployment whenever the guard
-  # changes. Public SQL, no credentials -> ConfigMap, not a Secret.
   - name: lingarr-jobqueue-guard
     files:
       - reconcile-job-queue.sql=lingarr/files/reconcile-job-queue.sql
-# `images:` is digest-pinned on moving tags (:latest, :development, …) and is
-# the bump-target for Renovate (Image Updater retired — #192/#265). Renovate's
-# servarr-scoped digest rule (.github/renovate.json,
-# matchFileNames: 2-k3s/08.servarr/kustomization.yaml) auto-merges digest
-# re-rolls through the PR + validate gate; ArgoCD then syncs the Deployments.
 images:
   - name: lscr.io/linuxserver/sonarr
     digest: sha256:c19aa4ecdf03d73e1d5c901da33744cb7eb4d921f89bafed1ca264601d7fa224
@@ -163,96 +69,25 @@ images:
     digest: sha256:ab91301778251f82a31bbfc87f0497376d59e84439d9a1ceff6a61d594d1e3d7
   - name: ghcr.io/cleanuparr/cleanuparr
     digest: sha256:c7cd53ad559a67147637de3d825f66ef6e6a5498490b73f49c6e4d72f13bed76
-  # Byparr — FlareSolverr replacement (#275); seleniumbase/Chromium solver.
   - name: ghcr.io/thephaseless/byparr
     digest: sha256:874f719518f617d03a60e03411fc5d090647e1a877041e81f8dc965927c7deb6
-  # Unpackerr — extracts archive-packed releases for Sonarr (#275 follow-up).
   - name: ghcr.io/hotio/unpackerr
     digest: sha256:724c702e81727e3d90c42cf2b3d900674203906a6d135ba07416c9a3f9f67fbb
   - name: jellyfin/jellyfin
     digest: sha256:aefb67e6a7ff1debdd154a78a7bbb780fd0c873d8639210a7f6a2016ad2b35db
-  # Homarr — pinned to a RELEASE TAG, not `:latest` (#540, follow-up to #284).
-  # It is the only stateful single-writer app in this block (SQLite on an RWO
-  # PVC, strategy: Recreate) and it has already shipped one migration-breaking
-  # major upstream (0.x -> 1.0). On a bare digest it was indistinguishable from
-  # the stateless entries: Renovate resolves a digest-only entry against
-  # `:latest`, so a homarr MAJOR would have arrived as an opaque digest bump
-  # and auto-merged unattended under the servarr digest rule.
-  #
-  # #540 assumed homarr ships no version tag stream. It does — 102 semver tags
-  # on GHCR (no `1`/`1.73` rolling aliases, but full `vX.Y.Z` is enough). On a
-  # real tag Renovate reports the version, so `.github/renovate.json` can gate
-  # minor+major for review the same way it gates authentik, and the PR title
-  # says which one it is instead of showing seven hex characters.
-  # v1.73.0 is byte-identical to the `:latest` this replaces.
   - name: ghcr.io/homarr-labs/homarr
     newTag: v1.76.2@sha256:7d87f7fdd35f8bbee1b922b9b74fad8ce9967a1a66b8c6db1a168780c03d693b
   - name: ghcr.io/zelak312/bazarr_autotranslate
     digest: sha256:5388463f8e45320c00a472763a8e0fb4584a255d6d31b98f9063b9eb5cada5cf
   - name: lscr.io/linuxserver/bazarr
     digest: sha256:3a820372f19fcb2981ea19fe4b5382934d67414afaba974bce831ddda0a64a02
-  # Upstream Lingarr :main (moving tag) — carries the #432 DateTime->UTC fix that
-  # resolves the Bazarr->Lingarr 500 (timestamptz write). Not in a release tag yet.
-  #
-  # `newTag: main@sha256:...`, NOT a bare `digest:` like every other entry here.
-  # This one is load-bearing, do not "normalize" it back (#530/#531):
-  #   - A digest-only entry gives Renovate no tag to resolve against, so its
-  #     docker datasource falls back to `:latest`. For sonarr/radarr/bazarr/…
-  #     that is correct — `:latest` IS the tag their Deployment runs. Lingarr is
-  #     the exception: the Deployment runs `:main`, but `:latest` is the frozen
-  #     `1.2.4` release, which predates the fix above.
-  #   - That mismatch is what made PR #273 roll the #271 `:main` pin BACK to
-  #     1.2.4 five hours after it landed, and then report "no update" for seven
-  #     weeks — Renovate was tracking the wrong tag the whole time, not stalled.
-  #   - `digest:` and `newTag:` together are rejected by Renovate as an invalid
-  #     dependency specification; `newTag: <tag>@<digest>` is its documented
-  #     form for pinning a tag by digest. kustomize renders it as
-  #     `…/lingarr:main@sha256:…`, where the digest is what actually resolves.
-  # Renovate keeps the digest fresh against `:main` and opens a PR for review
-  # instead of auto-merging (see the lingarr rule in .github/renovate.json).
-  # Retire this whole shape for a plain release tag once >1.2.4 ships — #270.
   - name: ghcr.io/lingarr-translate/lingarr
     newTag: main@sha256:bb8e2acf387150a701a6dc07bf6f8134d8cda83bf002db03f497f1856101b416
-  # ElfHosted newtarr :rolling (fast-moving community fork, newtarr v1.0.0). Pinned to
-  # the running digest so Renovate's servarr-digest rule (#192) tracks + auto-merges it
-  # and there are no surprise mid-day re-rolls (#238). The Deployment keeps the bare
-  # :rolling tag; this override swaps in the digest for both refs.
-  #
-  # MUST be `newTag: <tag>@<digest>`, NOT a bare `digest:` (#587). This repo has no
-  # `:latest` on GHCR - only `rolling` and `v1.0.0`. A tagless `digest:` entry leaves
-  # Renovate's kustomize manager with currentValue undefined, the docker datasource
-  # then falls back to `newValue ?? 'latest'`, and GHCR 404s -> the dashboard warning
-  # "Could not determine new digest". Carrying the tag gives Renovate a real
-  # currentValue to look up. Do NOT set `newTag:` and `digest:` together - that is
-  # skipReason: invalid-dependency-specification and silently disables tracking.
   - name: ghcr.io/elfhosted/newtarr
     newTag: rolling@sha256:d5d9d5194e1e8a58732f6ccc7660ad86f9cf6763a7b437a955a022e99a6ef8a4
-  # Official qBittorrent. Replaced tenseiken/qbittorrent-wireguard, which cannot
-  # run without a VPN of its own (2026-07-30 Bluetit sidecar migration).
   - name: qbittorrentofficial/qbittorrent-nox
     digest: sha256:9ebb534fe30bab98622cb84a8c3acecfd88319b2d540f52ecdec7b9f866374d7
-  # Our own image - see images/airvpn-bluetit/ and the 2026-07-30 design doc.
-  # Any PR touching images/airvpn-bluetit/** must bump this digest to the
-  # published build, in the same PR or right after the build workflow
-  # publishes it. Skip this and ArgoCD (servarr is automated+selfHeal)
-  # deploys a manifest pointing at an image that does not have the new code
-  # (#613: agent container CrashLoopBackOff, stat /agent-entrypoint.sh: no
-  # such file or directory).
   - name: ghcr.io/spyrospsarras/airvpn-bluetit
     digest: sha256:5451e02a16f534af151826b62f7c9291c8fc19f844313e811d07cd7010659b4e
-  # Our own image too - see images/vpn-picker/. Same rule as the entry above,
-  # and the same reason it is here at all: the Deployment carries a bare
-  # `:latest`, and a moving tag tells you nothing about which build is live
-  # (#599). It is also how Renovate SEES it - the servarr digest rule matches on
-  # this file only, so an image absent from this block cannot be re-rolled.
-  #
-  # A bare `digest:` is correct here, unlike lingarr and newtarr above: the
-  # Deployment really does run `:latest`, which is what Renovate's docker
-  # datasource falls back to for a tagless entry (#530, #587).
-  #
-  # Lower stakes than airvpn-bluetit - the scorer only publishes
-  # /media/.vpn-picker/ranking.json, so a bad pin stops the ranking going stale
-  # rather than dropping the tunnel. The agent already treats a past-TTL ranking
-  # as absent and stays on the server it is on.
   - name: ghcr.io/spyrospsarras/vpn-picker
     digest: sha256:99d58f70c7d7e0294e0ce2ee41135d2969ff65efea88febcb2ad97b7bb55e28c

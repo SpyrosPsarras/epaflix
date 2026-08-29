@@ -14,7 +14,6 @@ spec:
             - bash
             - -c
             - |
-              # Generate passwords
               SONARR_PW=$(openssl rand -base64 24 | tr -d "=+/" | cut -c1-20)
               SONARR2_PW=$(openssl rand -base64 24 | tr -d "=+/" | cut -c1-20)
               RADARR_PW=$(openssl rand -base64 24 | tr -d "=+/" | cut -c1-20)
@@ -22,7 +21,6 @@ spec:
               JELLYSEERR_PW=$(openssl rand -base64 24 | tr -d "=+/" | cut -c1-20)
               LINGARR_PW=$(openssl rand -base64 24 | tr -d "=+/" | cut -c1-20)
 
-              # Create databases
               PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres-cluster-rw -U postgres <<SQL
               CREATE DATABASE IF NOT EXISTS "sonarr-main";
               CREATE DATABASE IF NOT EXISTS "sonarr2-main";
@@ -46,13 +44,11 @@ spec:
               GRANT ALL PRIVILEGES ON DATABASE "lingarr-main" TO lingarr;
               SQL
 
-              # Lingarr needs schema ownership on its DB (EF Core creates/alters tables in public)
               PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres-cluster-rw -U postgres -d lingarr-main <<SQL
               GRANT ALL ON SCHEMA public TO lingarr;
               ALTER SCHEMA public OWNER TO lingarr;
               SQL
 
-              # Create Kubernetes secret
               kubectl create secret generic servarr-postgres -n servarr \
                 --from-literal=sonarr-host=192.168.10.105 \
                 --from-literal=sonarr-port=5432 \

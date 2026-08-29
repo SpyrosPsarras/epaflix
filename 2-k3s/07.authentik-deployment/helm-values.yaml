@@ -1,7 +1,4 @@
-# Authentik Helm Chart Values
-# External PostgreSQL (CloudNativePG), Local Storage, Traefik IngressRoute
 
-# Global configuration
 global:
   image:
     repository: ghcr.io/goauthentik/server
@@ -14,72 +11,21 @@ global:
       maxSurge: 1
       maxUnavailable: 0
 
-  # Runtime secrets live in the `authentik-app-secrets` Secret, reconciled by
-  # ArgoCD from authentik-app-secrets.enc.yaml (SOPS+age) — secret-app.yaml is
-  # only a placeholder-shaped imperative fallback. Appended AFTER the
-  # chart-managed `authentik` Secret so its keys win on the merged envFrom.
-  # Keys:
-  #   AUTHENTIK_SECRET_KEY  AUTHENTIK_POSTGRESQL__PASSWORD
-  #   AUTHENTIK_EMAIL__PASSWORD  AUTHENTIK_EMAIL__HOST
-  #   AUTHENTIK_EMAIL__USERNAME  AUTHENTIK_EMAIL__FROM
-  #   AUTHENTIK_BOOTSTRAP_PASSWORD_HASH  AUTHENTIK_BOOTSTRAP_EMAIL
-  # The email ones are here and not in `authentik.email` below because the repo
-  # is public — see the comment on that block.
-  # The bootstrap pair seeds `akadmin` on a FRESH install only (#1064): the
-  # startup hook skips any tenant where `Setup.get(tenant)` is true, which it is
-  # here, so both are inert on this cluster. Plaintext of the hash is in the
-  # credential store under `authentik_bootstrap_password`; no
-  # AUTHENTIK_BOOTSTRAP_TOKEN, the `ak-iac` blueprint already makes the API
-  # token. See README → "Rebuilding the ArgoCD login path from scratch".
   envFrom:
     - secretRef:
         name: authentik-app-secrets
 
-  # Reloader opt-in (#780). `authentik-app-secrets` is consumed as env vars via
-  # the envFrom above, and env values are resolved once at pod start, so a
-  # rotated key stays pinned until the pods restart (#299). This annotation
-  # hands that restart to the `reloader-app-authentik` instance
-  # (2-k3s/16.reloader) instead of a human remembering
-  # `kubectl rollout restart`.
-  #
-  # Convention: the scoped `secret.reloader.stakater.com/reload: "<name>"`
-  # form every other workload in this repo uses, never
-  # `reloader.stakater.com/auto: "true"` — an unrelated Secret edit in
-  # app-authentik must not bounce SSO.
-  #
-  # `global.deploymentAnnotations` is the chart's path onto BOTH Deployments:
-  # server/deployment.yaml and worker/deployment.yaml both render
-  # `mergeOverwrite (deepCopy .Values.global.deploymentAnnotations)
-  # .Values.<component>.deploymentAnnotations` into `metadata.annotations`,
-  # which is where Reloader looks. Not `podAnnotations` — that lands on the
-  # pod template, which Reloader does not read.
-  #
-  # Only `authentik-app-secrets` is listed. The chart-managed `authentik`
-  # Secret already rolls the pods on its own via the chart's
-  # `checksum/secret` pod annotation, and `authentik-iac-blueprint` is a
-  # mounted volume the worker re-reads on blueprint discovery, so neither
-  # needs Reloader.
   deploymentAnnotations:
     secret.reloader.stakater.com/reload: "authentik-app-secrets"
 
-# Authentik core configuration
 authentik:
-  # Sensitive values (secret_key, postgresql.password, and the whole email
-  # host/username/from/password set) are supplied via global.envFrom →
-  # authentik-app-secrets above. An empty string — or omitting the key
-  # entirely, as the email block now does — keeps them OUT of the
-  # chart-managed `authentik` Secret so ArgoCD can safely render this file
-  # from git.
   secret_key: ""
 
-  # Logging
   log_level: info
 
-  # Error reporting (disabled)
   error_reporting:
     enabled: false
 
-  # External PostgreSQL configuration (CloudNativePG pooler)
   postgresql:
     host: "postgres-rw.postgres-system.svc.cluster.local"
     port: 5432
@@ -87,58 +33,30 @@ authentik:
     user: "authentik"
     password: ""
 
-  # SMTP/Email configuration
-  #
-  # host / username / from / password are NOT here on purpose. They come from
-  # the SOPS-encrypted `authentik-app-secrets` Secret via `global.envFrom`
-  # above (AUTHENTIK_EMAIL__HOST / __USERNAME / __FROM / __PASSWORD), because
-  # THIS REPO IS PUBLIC — a mail hostname plus a real mailbox address is a
-  # ready-made credential-stuffing target, so neither is committed in
-  # plaintext. Env vars override the chart's config, which is what makes the
-  # split work.
-  #
-  # What used to be here was dead and broke every send (#461): host was
-  # `mail.epaflix.com`, which has no record of its own, so the proxied
-  # `*.epaflix.com` Cloudflare wildcard answered for it with 104.21.59.155 /
-  # 172.67.179.219 — hosts that serve 443 and no SMTP. Measured from a pod in
-  # app-authentik: `mail.epaflix.com:587` times out, the real relay node
-  # answers, does STARTTLS and accepts AUTH. username was `truenas_admin`,
-  # never a mailbox on that relay. Same two breaks Alertmanager had (PR #684).
-  #
-  # Only the non-sensitive transport settings stay in git:
-  #   port 587 + use_tls (STARTTLS) / use_ssl false — matches the mailbox
-  #   settings the owner provisioned (`auth_email_SMTP_port` 587,
-  #   `auth_email_SMTP_SSL_encryption` STARTTLS). 465 + use_ssl would be the
-  #   implicit-TLS alternative; the relay listens on both, we use STARTTLS.
   email:
     port: 587
     use_tls: true
     use_ssl: false
     timeout: 30
 
-# Server configuration
 server:
   enabled: true
   name: server
   replicas: 1 # Single replica due to ReadWriteOnce storage
 
-  # Disable built-in Kubernetes Ingress (using Traefik IngressRoute instead)
   ingress:
     enabled: false
 
-  # Service configuration
   service:
     type: ClusterIP
     servicePortHttp: 80
     servicePortHttps: 443
 
-  # Resource limits
   resources:
     requests:
       memory: "512Mi"
       cpu: "250m"
 
-  # Health probes
   livenessProbe:
     httpGet:
       path: /-/health/live/
@@ -157,7 +75,6 @@ server:
     timeoutSeconds: 5
     failureThreshold: 3
 
-  # Local storage for media files (ReadWriteOnce PVC, shared with worker on same node)
   volumeMounts:
     - name: media
       mountPath: /media
@@ -167,7 +84,6 @@ server:
       persistentVolumeClaim:
         claimName: authentik-media-pvc
 
-  # Pod affinity to ensure server and worker run on same node (required for RWO storage)
   affinity:
     podAffinity:
       requiredDuringSchedulingIgnoredDuringExecution:
@@ -179,19 +95,16 @@ server:
                   - authentik
           topologyKey: kubernetes.io/hostname
 
-# Worker configuration
 worker:
   enabled: true
   name: worker
   replicas: 3
 
-  # Resource limits
   resources:
     requests:
       memory: "1024Mi"
       cpu: "500m"
 
-  # Health probes - more lenient for background tasks
   livenessProbe:
     exec:
       command:
@@ -222,7 +135,6 @@ worker:
     timeoutSeconds: 10
     failureThreshold: 20
 
-  # Local storage for media files (ReadWriteOnce PVC, shared with worker on same node)
   volumeMounts:
     - name: media
       mountPath: /media
@@ -232,7 +144,6 @@ worker:
       persistentVolumeClaim:
         claimName: authentik-media-pvc
 
-  # Pod affinity to ensure server and worker run on same node (required for RWO storage)
   affinity:
     podAffinity:
       requiredDuringSchedulingIgnoredDuringExecution:
@@ -244,32 +155,18 @@ worker:
                   - authentik
           topologyKey: kubernetes.io/hostname
 
-# Declarative blueprints mounted from SOPS-encrypted Secrets.
-# The chart iterates `range $name := .Values.blueprints.secrets` (a plain
-# string list) and mounts each Secret at /blueprints/mounted/secret-<name>;
-# the worker auto-discovers any `*.yaml` key in the Secret and applies it.
-#   - authentik-iac-blueprint: ships the durable `ak-iac` service account, the
-#     scoped `ak-iac` role, its non-superuser `ak-iac IaC` group membership,
-#     and a non-expiring API token for IaC/automation (issues #185, #230,
-#     #339). Decrypted by ksops on argocd-repo-server
-#     from authentik-iac-blueprint.enc.yaml.
 blueprints:
   secrets:
     - authentik-iac-blueprint
 
-# Disable bundled PostgreSQL (using external CloudNativePG)
 postgresql:
   enabled: false
 
-# Service account configuration
 serviceAccount:
   create: true
   fullnameOverride: "authentik"
 
-# Additional Kubernetes resources managed by Helm
-# Traefik IngressRoute for auth.epaflix.com
 additionalObjects:
-  # HTTP IngressRoute - Redirect to HTTPS
   - apiVersion: traefik.io/v1alpha1
     kind: IngressRoute
     metadata:
@@ -288,7 +185,6 @@ additionalObjects:
             - name: authentik-server
               port: 80
 
-  # HTTPS IngressRoute - Let's Encrypt via Cloudflare DNS-01
   - apiVersion: traefik.io/v1alpha1
     kind: IngressRoute
     metadata:

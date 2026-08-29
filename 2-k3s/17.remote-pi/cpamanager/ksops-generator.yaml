@@ -1,16 +1,3 @@
-# ksops generator — decrypts the CPAMP Secret at render time.
-# Decryption performed inside argocd-repo-server via the ksops binary
-# (see 2-k3s/11.argocd/helm-values.yaml).
-#
-# Separate from cliproxy/ksops-generator.yaml on purpose: that one exists because
-# two Secrets in two namespaces share one Postgres password. This Secret shares
-# nothing with them, and a ksops generator names its own resources, so folding it
-# in would tie the CPAMP admin key's lifecycle to the database role's.
-#
-# The path below is relative to the KUSTOMIZATION ROOT (2-k3s/17.remote-pi/),
-# not to this file's directory. Write it as a bare
-# `cpamanager-secrets.enc.yaml` and ksops fails with
-# "no such file or directory".
 apiVersion: viaduct.ai/v1
 kind: ksops
 metadata:

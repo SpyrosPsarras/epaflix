@@ -1,13 +1,10 @@
 ---
-# Let's Encrypt ClusterIssuer using Cloudflare DNS-01 challenge
-# This allows issuing publicly trusted certificates for internal domains
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:
   name: letsencrypt-dns
 spec:
   acme:
-    # Let's Encrypt production server
     server: https://acme-v02.api.letsencrypt.org/directory
     email: contact@epaflix.com # Update with your email
     privateKeySecretRef:

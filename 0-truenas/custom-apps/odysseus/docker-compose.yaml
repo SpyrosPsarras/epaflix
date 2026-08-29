@@ -2,8 +2,6 @@ services:
   odysseus:
     image: odysseus:73673258
     restart: unless-stopped
-    # GPU overlay merged in (docker/gpu.nvidia.yml). count: all is fine - only ONE GPU exists;
-    # it is shared with the already-running ollama app, VRAM permitting.
     deploy:
       resources:
         reservations:
@@ -16,25 +14,19 @@ services:
     ports:
       - "0.0.0.0:30070:7000"
     environment:
-      # --- bind / serving ---
       APP_BIND: "0.0.0.0"
       APP_PORT: "7000"
-      # --- GPU (nvidia runtime, no CDI on this host) ---
       NVIDIA_VISIBLE_DEVICES: "all"
       NVIDIA_DRIVER_CAPABILITIES: "compute,utility"
-      # --- auth / perimeter posture ---
       AUTH_ENABLED: "true"
       LOCALHOST_BYPASS: "false"
       SECURE_COOKIES: "true"
       ALLOWED_ORIGINS: "https://odysseus.epaflix.com"
       ODYSSEUS_ADMIN_USER: "admin"
       ODYSSEUS_ADMIN_PASSWORD: "<ODYSSEUS_ADMIN_PASSWORD>"
-      # --- agent shell hardening (do NOT point at a real host) ---
       ODYSSEUS_SCRIPT_HOST: "localhost"
-      # --- local model serving: REUSE existing GPU-pinned ollama on host port 30068 ---
       OLLAMA_BASE_URL: "http://host.docker.internal:30068/v1"
       LLM_HOST: "localhost"
-      # --- sidecar wiring (compose-internal) ---
       SEARXNG_INSTANCE: "http://searxng:8080"
       CHROMADB_HOST: "chromadb"
       CHROMADB_PORT: "8000"
@@ -43,7 +35,6 @@ services:
       NTFY_BASE_URL: "http://localhost:8091"
       PUID: "1000"
       PGID: "1000"
-      # --- optional provider keys (placeholders, default empty if unused) ---
       OPENAI_API_KEY: "<OPENAI_API_KEY>"
       HF_TOKEN: "<HF_TOKEN>"
       SEARXNG_SECRET: "<SEARXNG_SECRET>"
@@ -52,7 +43,6 @@ services:
       - /mnt/pool1/odysseus/logs:/app/logs:z
       - /mnt/pool1/odysseus/data/huggingface:/app/.cache/huggingface:z
       - /mnt/pool1/odysseus/data/local:/app/.local:z
-      # NOTE: ./data/ssh:/app/.ssh DELIBERATELY OMITTED (RCE hardening, see sshMountDecision)
     depends_on:
       searxng:
         condition: service_healthy

@@ -1,11 +1,7 @@
 #!/bin/bash
 
-# Every kubectl call in this script runs against the homelab cluster, whatever
-# the ambient kubeconfig says (issue #971). Override with KUBECTL_CONTEXT=... .
 : "${KUBECTL_CONTEXT:=epaflix}"
 kubectl() { command kubectl --context "$KUBECTL_CONTEXT" "$@"; }
-# Servarr Database Health Check
-# Checks for common database corruption issues
 
 set -euo pipefail
 
@@ -21,7 +17,6 @@ echo "  Servarr Database Health Check"
 echo "=================================================="
 echo ""
 
-# Get credentials
 echo "🔍 Retrieving database credentials..."
 SONARR_PW=$(kubectl get secret servarr-postgres -n servarr -o jsonpath='{.data.sonarr-password}' | base64 -d)
 SONARR2_PW=$(kubectl get secret servarr-postgres -n servarr -o jsonpath='{.data.sonarr2-password}' | base64 -d)
@@ -30,7 +25,6 @@ DB_HOST="192.168.10.105"
 
 ISSUES_FOUND=0
 
-# Function to check a database
 check_database() {
     local APP=$1
     local USER=$2
@@ -44,7 +38,6 @@ check_database() {
     echo -e "${BLUE}📦 Checking ${APP} (${DB})${NC}"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-    # Check 1: Duplicate Primary Keys in File table
     echo -n "  [1/5] Checking for duplicate ${FILE_TABLE} IDs... "
     DUP_FILES=$(PGPASSWORD="${PW}" psql -h "${DB_HOST}" -U "${USER}" -d "${DB}" -t -c \
         "SELECT COUNT(*) FROM (SELECT \"Id\" FROM \"${FILE_TABLE}\" GROUP BY \"Id\" HAVING COUNT(*) > 1) AS dups;")
@@ -59,7 +52,6 @@ check_database() {
         echo -e "${GREEN}✓${NC}"
     fi
 
-    # Check 2: Duplicate Primary Keys in Items (Episodes/Movies)
     echo -n "  [2/5] Checking for duplicate ${ITEM_TABLE} IDs... "
     DUP_ITEMS=$(PGPASSWORD="${PW}" psql -h "${DB_HOST}" -U "${USER}" -d "${DB}" -t -c \
         "SELECT COUNT(*) FROM (SELECT \"Id\" FROM \"${ITEM_TABLE}\" GROUP BY \"Id\" HAVING COUNT(*) > 1) AS dups;")
@@ -72,7 +64,6 @@ check_database() {
         echo -e "${GREEN}✓${NC}"
     fi
 
-    # Check 3: Orphaned items (referencing non-existent files)
     local FILE_ID_COL
     if [[ "${ITEM_TABLE}" == "Episodes" ]]; then
         FILE_ID_COL="EpisodeFileId"
@@ -92,7 +83,6 @@ check_database() {
         echo -e "${GREEN}✓${NC}"
     fi
 
-    # Check 4: History table schema (DownloadId and Languages columns)
     echo -n "  [4/5] Checking History table schema... "
     HAS_DOWNLOADID=$(PGPASSWORD="${PW}" psql -h "${DB_HOST}" -U "${USER}" -d "${DB}" -t -c \
         "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'History' AND column_name = 'DownloadId';")
@@ -112,7 +102,6 @@ check_database() {
         echo -e "${GREEN}✓${NC}"
     fi
 
-    # Check 5: File table sequence alignment
     echo -n "  [5/5] Checking ${FILE_TABLE} sequence... "
     MAX_ID=$(PGPASSWORD="${PW}" psql -h "${DB_HOST}" -U "${USER}" -d "${DB}" -t -c \
         "SELECT COALESCE(MAX(\"Id\"), 0) FROM \"${FILE_TABLE}\";")
@@ -129,7 +118,6 @@ check_database() {
     fi
 }
 
-# Check all databases
 check_database "Sonarr" "sonarr" "sonarr-main" "${SONARR_PW}" "EpisodeFiles" "Episodes"
 check_database "Sonarr2 (Anime)" "sonarr2" "sonarr2-main" "${SONARR2_PW}" "EpisodeFiles" "Episodes"
 check_database "Radarr" "radarr" "radarr-main" "${RADARR_PW}" "MovieFiles" "Movies"
@@ -142,8 +130,6 @@ else
     echo -e "${RED}❌ Found ${ISSUES_FOUND} issue(s) requiring attention!${NC}"
     echo ""
     echo "Fix guides:"
-    echo "  • Duplicate IDs: 2-k3s/08.servarr/TROUBLESHOOTING-DUPLICATE-FILE-IDS.md"
-    echo "  • Missing columns: 2-k3s/08.servarr/TROUBLESHOOTING-DB-SCHEMA.md"
     echo "  • Run fix scripts in: 2-k3s/08.servarr/_shared/scripts/"
 fi
 echo "=================================================="

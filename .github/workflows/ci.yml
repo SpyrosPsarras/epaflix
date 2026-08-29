@@ -1,10 +1,5 @@
 name: ci
 
-# Secret-free validation gate so Renovate's platform auto-merge has a required
-# check to wait on. Validates exactly Renovate's change surface — malformed
-# YAML, unresolvable Helm chart pins, broken kustomize overlays — WITHOUT
-# needing the SOPS age key (so sops/ksops dirs are never fully rendered here).
-# See issue #88.
 
 on:
   pull_request:
@@ -16,9 +11,6 @@ permissions:
 
 jobs:
   validate:
-    # Fork-guard: only run for PRs from branches in THIS repo (and pushes to
-    # main). Fork PRs trigger nothing — no fork-authored workflow code ever
-    # executes on the runner. Public repo, so this is the safety boundary.
     if: >-
       github.event_name == 'push' ||
       github.event.pull_request.head.repo.full_name == github.repository
@@ -29,13 +21,6 @@ jobs:
       - name: No tracked file matches .gitignore
         run: |
           set -euo pipefail
-          # Server-side complement to the local pre-commit hook (PR #302):
-          # fail if any tracked file matches .gitignore (via `git commit
-          # --no-verify` or a clone without hooks installed). Widened from
-          # the secrets-only check (#303/PR #388) to the general case now
-          # that .history/*.{md,sh} has real negations instead of dead ones
-          # (#389) — this is a strict superset, so it also covers the
-          # original secrets.yml scenario for free.
           tracked_ignored=$(git ls-files -ci --exclude-standard)
           if [ -n "$tracked_ignored" ]; then
             echo "ERROR: the following tracked files match .gitignore:" >&2
@@ -48,23 +33,6 @@ jobs:
       - name: Hook fixture suites + plaintext Secret guard
         run: |
           set -euo pipefail
-          # Local hooks are optional, so run both the real staged-index fixture
-          # suite and the full tracked-tree mode server-side. The job-level fork
-          # guard above remains the boundary for executing repository code.
-          #
-          # What CI can and cannot do here: every fixture below is synthetic
-          # plaintext, so no age key is needed. The REAL Authentik blueprint
-          # payload cannot be read in CI at all - it sits inside a
-          # SOPS-encrypted Secret and this job has no key (see the two steps
-          # further down that say so). That check therefore runs in the
-          # cluster, where the Secret is already decrypted: the
-          # authentik-blueprint-check CronJob in
-          # 2-k3s/07.authentik-deployment. CI gets the fixture suite, which
-          # exercises the very same checker file the CronJob's ConfigMap is
-          # generated from - one copy, two consumers (#883).
-          #
-          # test-check-kube-context.sh self-skips its kubeconfig cases with a
-          # loud SKIP line if the runner image has no kubectl (#856).
           python3 -m pip install --disable-pip-version-check \
             -r .github/hooks/requirements.txt
           ./.github/hooks/test-check-sops-encrypted.sh
@@ -75,15 +43,9 @@ jobs:
       - name: Install tools
         run: |
           set -euo pipefail
-          # Pinned, direct release-asset downloads only — NO unauthenticated
-          # GitHub API tag lookup (the install_kustomize.sh rate-limit flake,
-          # issue #164) and NO curl|bash from a moving branch. Renovate keeps
-          # the two pins below fresh via a customManager regex.
           KUSTOMIZE_VERSION=5.8.1  # renovate: datasource=github-releases depName=kubernetes-sigs/kustomize
           HELM_VERSION=3.21.4      # renovate: datasource=github-releases depName=helm/helm
 
-          # Bounded retry: 3 attempts, 5s then 10s backoff, so a transient
-          # CDN blip self-heals instead of red-flagging the required check.
           dl() {
             url=$1; out=$2; n=0
             until curl -fsSL -o "$out" "$url"; do
@@ -98,10 +60,6 @@ jobs:
 
           tmp=$(mktemp -d)
 
-          # helm — official dist CDN (get.helm.sh), with checksum verification.
-          # Keep the canonical asset filename: the published .sha256sum line
-          # references "helm-v${HELM_VERSION}-linux-amd64.tar.gz", so `sha256sum -c`
-          # must run against that exact name.
           helm_tgz="helm-v${HELM_VERSION}-linux-amd64.tar.gz"
           dl "https://get.helm.sh/${helm_tgz}" "$tmp/${helm_tgz}"
           dl "https://get.helm.sh/${helm_tgz}.sha256sum" "$tmp/${helm_tgz}.sha256sum"
@@ -109,7 +67,6 @@ jobs:
           tar -xzf "$tmp/${helm_tgz}" -C "$tmp"
           sudo mv "$tmp/linux-amd64/helm" /usr/local/bin/helm
 
-          # kustomize — GitHub release-asset CDN (302 -> objects.githubusercontent.com)
           dl "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv${KUSTOMIZE_VERSION}/kustomize_v${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" "$tmp/kustomize.tar.gz"
           tar -xzf "$tmp/kustomize.tar.gz" -C "$tmp"
           sudo mv "$tmp/kustomize" /usr/local/bin/kustomize
@@ -143,13 +100,6 @@ jobs:
           import glob, subprocess, sys, yaml, os, time
           os.makedirs("/tmp/charts", exist_ok=True)
 
-          # Several pins are GitHub-release-hosted charts (argo-cd, authentik,
-          # loki) whose CDN intermittently 504s, hard-failing this required gate
-          # and blocking Renovate auto-merge — same transient-flake class as the
-          # install-tools download retry (#164). Retry ONLY on transient
-          # network/5xx markers; a genuine error (404 / chart-not-found /
-          # invalid version) is non-transient and fast-fails on attempt 1, so
-          # every pin is still validated.
           def helm_pull(cmd, attempts=4):
               for i in range(attempts):
                   r = subprocess.run(cmd, capture_output=True, text=True)
@@ -171,11 +121,6 @@ jobs:
 
           fail = []
           pulled = set()  # (name, repo, ver) already untarred into /tmp/charts/<name> —
-                           # multiple helmCharts entries can share one chart (e.g. issue
-                           # #299's 3 per-namespace Reloader releases); re-running `helm
-                           # pull --untar` for the same chart dir fails with "already
-                           # exists", so pull once and reuse for every occurrence's
-                           # values-schema check below.
           for f in glob.glob("2-k3s/**/kustomization.yaml", recursive=True):
               doc = yaml.safe_load(open(f)) or {}
               for c in doc.get("helmCharts", []):
@@ -194,11 +139,6 @@ jobs:
                           fail.append(f"{name} {ver} ({repo}): {r.stderr.strip()}")
                           continue
                       pulled.add(key)
-                  # Validate the values file against the chart's values.schema.json.
-                  # ArgoCD's repo-server enforces it at inflation; plain `helm pull`
-                  # does NOT — the gap that let traefik v41's stale `logs:` key pass
-                  # CI yet break the live render (#386, #384/#385). No age key needed:
-                  # schema enforcement happens before any ksops decryption.
                   vf = c.get("valuesFile")
                   tcmd = ["helm", "template", name, f"/tmp/charts/{name}"]
                   if vf:
@@ -216,21 +156,6 @@ jobs:
       - name: CLIProxyAPI plugin pins match upstream checksums
         run: |
           python3 - <<'PY'
-          # Renovate bumps the plugin VERSION in the fetch-plugin.sh args and
-          # cannot touch the sha256 on the next line (#997). fetch-plugin.sh
-          # fails CLOSED on a mismatch with exit 1, which fails the
-          # initContainer, which takes cliproxy.epaflix.com down at the next
-          # sync. So a stale checksum has to be caught here, in the required
-          # gate, rather than in the cluster.
-          #
-          # Mismatch is FATAL. A 404 is also FATAL: it means the release does not
-          # exist, so fetch-plugin.sh would 404 too and fail OPEN, leaving the
-          # plugin silently absent - the quiet failure this gate exists to catch.
-          # Renovate only ever proposes versions that exist, so a 404 here is a
-          # hand-edit typo. Every OTHER network error is a WARNING, deliberately:
-          # the same split fetch-plugin.sh itself makes. A GitHub outage must not
-          # redden this gate for every unrelated PR, and it cannot hide a bad pin
-          # for long because the next run re-checks.
           import sys, urllib.request, urllib.error, yaml, posixpath
 
           DEPLOY = "2-k3s/17.remote-pi/cliproxy/deployment.yaml"
@@ -247,8 +172,6 @@ jobs:
               pins.append((c["name"], *args))
 
           if not pins:
-              # An empty check is not a passing check. If the args shape changes,
-              # say so instead of reporting success over zero pins.
               print(f"No fetch-plugin.sh initContainer found in {DEPLOY}")
               sys.exit(1)
 
@@ -308,9 +231,6 @@ jobs:
       - name: Kustomize build (sops-free dirs)
         run: |
           set -euo pipefail
-          # Only dirs with neither helmCharts nor sops/ksops generators — these
-          # render fully offline. sops/helm dirs are covered by the YAML parse
-          # and Helm-pin checks above (full render needs the age key, withheld).
           dirs="
             2-k3s/01.kube-vip
             2-k3s/03.kube-vip-cloud-provider

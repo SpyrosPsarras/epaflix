@@ -1,16 +1,4 @@
 #!/usr/bin/env bash
-# Fixture suite for check-kube-context.sh and install-kubeconfig-epaflix.sh
-# (#856).
-#
-# Writes synthetic kubeconfigs to a temp dir and runs the real check with
-# KUBECONFIG pointed at each one. Named test-*, not check-*, so the pre-commit
-# dispatcher does NOT pick it up (same convention as test-check-sops-encrypted.sh).
-#
-# The non-epaflix fixture names are invented and resemble nothing real: the
-# five withheld work context names appear nowhere in this repo. Case 6 is the
-# leak control - it asserts the check's own output never contains a context
-# name, which is the mechanical proof that the code path is name-agnostic and
-# so generalises to the withheld names.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -36,7 +24,6 @@ fail() {
   fi
 }
 
-# $1 name, $2 kubeconfig fixture file
 expect_pass() {
   : >"$output"
   if KUBECONFIG="$2" bash "$hook" >"$output" 2>&1; then
@@ -55,7 +42,6 @@ expect_fail() {
   fi
 }
 
-# A kubeconfig holding one entry per named context. Server URLs are loopback.
 write_kubeconfig() {
   local path=$1
   shift
@@ -95,7 +81,6 @@ if command -v kubectl >/dev/null 2>&1; then
     >"$tmp/no-contexts"
   expect_fail "a kubeconfig with zero contexts is refused" "$tmp/no-contexts"
 
-  # LEAK CONTROL: the multi-context run must not name anything it rejected.
   : >"$output"
   KUBECONFIG="$tmp/multi" bash "$hook" >"$output" 2>&1 || true
   leaked=0
@@ -111,9 +96,6 @@ if command -v kubectl >/dev/null 2>&1; then
   fi
 fi
 
-# kubectl absent from PATH: the check must self-skip, loudly, and pass. Only
-# shell builtins run on that path, so an emptied PATH is enough - bash itself
-# is invoked by absolute path because PATH lookup is gone.
 bash_bin="$(command -v bash)"
 : >"$output"
 if PATH=/nonexistent-for-fixture "$bash_bin" "$hook" >"$output" 2>&1; then
@@ -126,17 +108,10 @@ else
   fail "kubectl absent from PATH must pass, not fail"
 fi
 
-# The installer's product verification, with a stub kubectl so the fixture can
-# hand it a deliberately bad product. Without this, "the generated kubeconfig
-# holds exactly one context" is an untested claim.
 stub="$tmp/stub-bin"
 mkdir -p "$stub"
 cat >"$stub/kubectl" <<'SH'
 #!/usr/bin/env bash
-# Fixture stub: just enough `kubectl config` surface for the installer. Source
-# context names come from $FIXTURE_SOURCE_CONTEXTS; the "generated" kubeconfig
-# is $FIXTURE_PRODUCT, whose `# ctx:`/`# cluster:`/`# user:` marker lines are
-# what the installer's verification reads back.
 set -euo pipefail
 args="$*"
 case "$args" in
@@ -165,14 +140,6 @@ generated="$repo/.kube/epaflix.kubeconfig"
 
 run_installer() {
   : >"$output"
-  # KUBECONFIG is cleared for the installer invocation. The stub kubectl uses
-  # "KUBECONFIG set and file exists" to tell the installer's two phases apart
-  # (source read vs product verification), so an AMBIENT KUBECONFIG from the
-  # caller's shell makes the source phase grep the caller's real kubeconfig for
-  # '# ctx:' markers, find none, and refuse. That is exactly the state the
-  # guard's own docs put a user in (export the epaflix-only kubeconfig), so
-  # without this line the suite fails precisely when the remediation advice has
-  # been followed. Found 2026-08-22 by the verify harness, which exports it.
   (cd "$repo" \
     && env -u KUBECONFIG \
        PATH="$stub:$PATH" \
@@ -215,8 +182,6 @@ else
   fail "installer accepts a verified single-context product and writes it mode 600"
 fi
 
-# The dispatcher runs `check-*.sh` only. A check named anything else silently
-# never runs, and a fixture suite named check-* would run on every commit.
 discovered="$(cd "$repo_root/.github/hooks" && echo check-*.sh)"
 if printf '%s\n' "$discovered" | grep -qw 'check-kube-context.sh' \
   && ! printf '%s\n' "$discovered" | grep -q 'test-'; then

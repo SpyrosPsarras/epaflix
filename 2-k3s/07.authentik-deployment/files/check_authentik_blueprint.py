@@ -63,9 +63,6 @@ from typing import Any
 import yaml
 
 
-# The ten tags #883 lists.  !KeyOf and !Find become marker objects because
-# layer 2 has to resolve them; the rest are no-ops, exactly as the manual check
-# used to verify #880 did.
 INERT_TAGS = (
     "!Context",
     "!Format",
@@ -161,7 +158,6 @@ class PayloadCheck:
 
         self.ids: set[str] = set()
         self.absent_ids: set[str] = set()
-        # (model, attr, value) -> entry indices whose `identifiers` declare it.
         self.identifier_index: dict[str, list[int]] = {}
 
         for index, entry in enumerate(self.entries):
@@ -173,9 +169,6 @@ class PayloadCheck:
             entry_id = entry.get("id")
             if isinstance(entry_id, str):
                 self.ids.add(entry_id)
-                # `state: created` is resolvable, not absent: a skipped
-                # `created` entry still populates `entry._state`, so !KeyOf
-                # resolves off it (#1040). Only `absent` is unresolvable.
                 if entry.get("state") == "absent":
                     self.absent_ids.add(entry_id)
             identifiers = entry.get("identifiers")
@@ -272,8 +265,6 @@ def check_payload(payload: str, where: str) -> tuple[list[str], str | None]:
     try:
         blueprint = yaml.load(payload, Loader=BlueprintLoader)
     except yaml.YAMLError as error:
-        # Never str(error): it embeds the offending source line, which is
-        # decrypted Secret content.
         return [f"{where}: {yaml_error_summary(error)}"], None
 
     if not isinstance(blueprint, dict):
@@ -330,7 +321,6 @@ def main() -> int:
     try:
         documents = list(yaml.safe_load_all(raw))
     except yaml.YAMLError as error:
-        # The decrypted Secret itself, so same rule: problem and mark only.
         print(
             f"ERROR: {args.path}: decrypted document does not parse: "
             f"{yaml_error_summary(error)}",

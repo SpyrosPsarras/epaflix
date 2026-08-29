@@ -1,16 +1,4 @@
 ---
-# ArgoCD Application: Traefik ingress controller and edge routes.
-#
-# Source:       this repo, path 2-k3s/05.traefik-deployment
-#               (kustomization.yaml with `helmCharts:` that inflates the
-#               upstream traefik/traefik chart using values/traefik-values.yaml).
-# Destination:  in-cluster `traefik-system` namespace.
-# Sync:         automated self-heal after clean manual adoption on 2026-05-24,
-#               with prune ENABLED after the 48h soak (issue #51). Uses ArgoCD's
-#               default client-side apply because server-side apply conflicts
-#               with Helm-owned fields from the pre-ArgoCD Traefik release.
-# Secrets:      cloudflare-api-token is intentionally created imperatively from
-#               .github/instructions/secrets.enc.yaml and only referenced by values.
 
 apiVersion: argoproj.io/v1alpha1
 kind: Application

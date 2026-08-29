@@ -6,8 +6,7 @@ Why this exists: TrueNAS prunes a periodic snapshot only if its parsed timestamp
 falls on the task's schedule (`PeriodicSnapshotTaskSnapshotOwner.owns_snapshot`
 returns `schedule.should_run(...)`). A snapshot created by "Run Now" is stamped
 with the wall-clock minute, so it matches the naming schema but not the
-schedule, no owner claims it, and it is never destroyed. See issue #843 and
-`0-truenas/README.md`.
+schedule, no owner claims it, and it is never destroyed. See issue #843.
 
 The check reuses the box's own zettarepl decision functions rather than
 reimplementing them, so it cannot drift from the real pruner.
@@ -29,7 +28,6 @@ from zettarepl.snapshot.name import parse_snapshot_name
 from zettarepl.snapshot.snapshot import Snapshot
 from zettarepl.utils.datetime import idealized_datetime
 
-# The middleware stores lifetime as value + unit; zettarepl wants a duration.
 ISO_DURATION = {"HOUR": "PT%dH", "DAY": "P%dD", "WEEK": "P%dW",
                 "MONTH": "P%dM", "YEAR": "P%dY"}
 
@@ -87,7 +85,6 @@ def main():
         snapshots.append(Snapshot(dataset, name))
         used_by[full] = int(used)
 
-    # What the real pruner would destroy on this run.
     doomed = {f"{s.dataset}@{s.name}"
               for s in calculate_snapshots_to_remove(owners, snapshots)}
 
@@ -106,9 +103,6 @@ def main():
             if owner.should_retain(snapshot.dataset, parsed):
                 continue  # inside the retention window, correct to keep
             if owner.owns_snapshot(snapshot.dataset, parsed):
-                # Claimed and expired but not doomed: kept only because it is the
-                # last snapshot for its naming schema, which the pruner refuses
-                # to destroy.
                 reason = "LAST kept as the only snapshot left for its naming schema"
             else:
                 reason = "ORPHAN timestamp does not fall on the task schedule"
@@ -116,7 +110,6 @@ def main():
             leaks.append((full, used_by[full], owner.task, age, reason))
             break
 
-    # A dataset whose only task is disabled keeps its snapshots forever too.
     disabled = [t for t in tasks if not t["enabled"]]
     for snapshot in snapshots:
         full = f"{snapshot.dataset}@{snapshot.name}"

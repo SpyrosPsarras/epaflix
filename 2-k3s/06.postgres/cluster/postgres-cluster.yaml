@@ -112,11 +112,3 @@ spec:
       secret:
         name: postgres-app-user
 
-  # Backups now go through the Barman Cloud Plugin (migrated from in-tree
-  # `barmanObjectStore` per issue #10). The `plugins:` entry above references
-  # the `ObjectStore` CR `postgres-minio-store` (see
-  # `2-k3s/06.postgres/cluster/postgres-object-store.yaml`), which carries the
-  # full destination/credentials config. Target: TrueNAS-hosted MinIO at
-  # https://minio.epaflix.com, bucket "postgres-backups". Credentials in the
-  # `minio-backup-credentials` Secret (ACCESS_KEY_ID / ACCESS_SECRET_KEY) —
-  # bucket-scoped "postgres-backup" user.

@@ -1,16 +1,3 @@
-# Owned by ArgoCD Application "remote-pi".
-# Rationale: render the complete relay namespace, workload, storage, and internal route,
-# plus the CLIProxyAPI workload that shares this namespace and this manual-sync gate.
-#
-# NO top-level `namespace:` transformer on purpose. cliproxy/database.yaml and one
-# of the two Secrets in cliproxy/cliproxy-secrets.enc.yaml belong to
-# `postgres-system`, next to the CNPG Cluster. A namespace transformer here would
-# drag them into `remote-pi` and the operator would never see them.
-#
-# Reconciled via the ksops generator (cliproxy/ksops-generator.yaml):
-#   - cliproxy-db-role   (postgres-system) - CNPG role password, basic-auth shape
-#   - cliproxy-secrets   (remote-pi)       - same password for the pod's DSN,
-#                                            plus the management password
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -24,10 +11,6 @@ resources:
   - cliproxy/deployment.yaml
   - cliproxy/service.yaml
   - cliproxy/ingress.yaml
-  # CPA Manager Plus - subscribes to CPA's usage events over RESP on 8317, which is
-  # fan-out rather than destructive. The separate HTTP usage-queue endpoint IS
-  # destructive and must not be polled while this runs. Transport rules and the
-  # panel exposure contract are in cpamanager/deployment.yaml + cpamanager/ingress.yaml.
   - cpamanager/storage.yaml
   - cpamanager/deployment.yaml
   - cpamanager/service.yaml
@@ -35,46 +18,19 @@ resources:
 
 generators:
   - cliproxy/ksops-generator.yaml
-  # cpa-manager-plus-secrets (remote-pi) - the CPAMP panel admin key, supplied
-  # so the Manager Server never prints a generated one into Loki.
   - cpamanager/ksops-generator.yaml
 
-# Digest-pinned so a moving tag cannot swap the running build under us, and so
-# Renovate has something to bump. `newTag: <tag>@<digest>`, NOT a bare
-# `digest:` - this repo publishes 800+ real `vX.Y.Z` tags, and a tagless entry
-# leaves Renovate's kustomize manager with no currentValue to resolve against.
-# Never set `newTag:` and `digest:` together, that is
-# skipReason: invalid-dependency-specification and silently kills tracking.
-# Renovate rewrites the tag and the digest together on this line, so the tag
-# named here is whatever it last bumped to - do not restate it in prose above,
-# which is how this comment came to name v7.2.140 while the pin said v7.2.144.
 images:
   - name: docker.io/eceasy/cli-proxy-api
     newTag: v7.2.145@sha256:b90fcd2282e8b8da9ee05d531fb92e5215ac8340722f8842adb47bb7120226fd
-  # Digest is the v1.9.2 multi-arch index (amd64 child
-  # sha256:6151374a5d065fdabb4f479f05612442cc16ff56099732732ba23970bd78c70b),
-  # resolved from the registry on 2026-08-28 and verified by running that exact
-  # tag under the pod's posture before this entry was written. v1.9.2 is the
-  # newest of 126 published tags; `latest` was a DIFFERENT manifest
-  # (sha256:dbaad3f9...) at resolve time, so pin the tag, never latest.
   - name: docker.io/seakee/cpa-manager-plus
     newTag: v1.12.6@sha256:dbaad3f95a08743dc585d639fae0a60a187f62c79a4a02f6550f821564f35d17
 
-# Owned by ArgoCD Application "remote-pi".
-# The scripts the cliproxy initContainers run. Generated rather than
-# hand-written as a ConfigMap so each file stays reviewable in its own language.
 configMapGenerator:
   - name: cliproxy-scripts
     files:
       - cliproxy/files/reconcile-config.psql
-      # One fetcher for both plugin initContainers. The id, version, sha256 and
-      # release URL are its arguments in cliproxy/deployment.yaml, which is
-      # therefore where a plugin version is pinned.
       - cliproxy/files/fetch-plugin.sh
-      # The transcript sidecar and the parser it shares with
-      # cliproxy/tools/render-payload.py (#1016). payload_lib.py is imported, not
-      # executed - it must be a valid module name, so underscores, unlike every
-      # other file here.
       - cliproxy/files/emit-transcripts.py
       - cliproxy/files/payload_lib.py
     options:

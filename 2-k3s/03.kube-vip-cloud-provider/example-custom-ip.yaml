@@ -1,6 +1,4 @@
 ---
-# Example: Service with specific IP address
-# This demonstrates requesting a specific LoadBalancer IP
 
 apiVersion: apps/v1
 kind: Deployment
@@ -52,7 +50,6 @@ metadata:
   name: webapp-custom-ip
 spec:
   type: LoadBalancer
-  # Request a specific IP address (must be in your pool or outside range)
   loadBalancerIP: "192.168.10.150"
   selector:
     app: webapp
@@ -63,15 +60,3 @@ spec:
       protocol: TCP
 
 ---
-# To deploy:
-# kubectl apply -f example-custom-ip.yaml
-#
-# To verify:
-# kubectl get svc webapp-custom-ip
-# Expected EXTERNAL-IP: 192.168.10.150
-#
-# To test:
-# curl http://192.168.10.150
-#
-# To delete:
-# kubectl delete -f example-custom-ip.yaml

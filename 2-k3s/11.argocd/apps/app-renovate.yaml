@@ -1,19 +1,4 @@
 ---
-# ArgoCD Application: self-hosted Renovate.
-#
-# Source:       this repo, path 2-k3s/12.renovate (CronJob + ServiceAccount).
-# Destination:  in-cluster `renovate` namespace.
-# Sync:         AUTOMATED with selfHeal from the start — nothing pre-existed
-#               in-cluster, no adoption drift to worry about. prune is now
-#               ENABLED after the 48h soak (issue #54) — last of the 5 split
-#               prune-flips.
-#
-# Versioning:   Renovate-the-bot owns its own image tag. Its kustomize
-#               manager scans 2-k3s/12.renovate/kustomization.yaml + cronjob.yaml
-#               and opens PRs for tag bumps; majors land via the Dependency
-#               Dashboard checkbox (deliberate, since the renovate.json schema
-#               can drift across majors). No argocd-image-updater here — it
-#               would race the bot and silently revert intentional major bumps.
 
 apiVersion: argoproj.io/v1alpha1
 kind: Application

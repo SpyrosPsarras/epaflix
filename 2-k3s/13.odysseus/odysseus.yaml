@@ -1,21 +1,4 @@
 ---
-# Odysseus — AI workspace / agent app (pewdiepie-archdaemon/odysseus).
-#
-# Migrated from a 4-container TrueNAS Custom App (port 30070) to this GitOps
-# tier (issue #184). On k3s the GPU reservation is DROPPED — cluster workers
-# have no GPU; chat/embedding models are served by the EXISTING remote Ollama
-# on TrueNAS (http://192.168.10.200:30068/v1), and fastembed runs on CPU.
-#
-# Only chromadb is an intra-namespace sidecar (chromadb:8000). searxng lives in
-# its own `searxng` namespace and Application
-# (searxng.searxng.svc.cluster.local:8080), and ntfy moved to `observability`
-# under the #914 decision (ntfy.observability.svc.cluster.local:8091). Both are
-# reached by cross-namespace FQDN — see configmap.yaml.
-#
-# Auth: the perimeter is gated by Authentik forward-auth at Traefik
-# (odysseus.epaflix.com). Odysseus ALSO keeps its own built-in login
-# (AUTH_ENABLED=true) — double-login by design, mirrors the pre-migration
-# TrueNAS posture. There is NO trusted-header SSO into Odysseus.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -24,9 +7,6 @@ metadata:
   labels:
     app: odysseus
   annotations:
-    # Reloader (#299): env-var secretKeyRef consumer (odysseus-secrets,
-    # cliproxy-client-key), doesn't auto-roll otherwise. Scoped to the exact
-    # Secrets, not reloader.stakater.com/auto.
     secret.reloader.stakater.com/reload: "odysseus-secrets,cliproxy-client-key"
 spec:
   replicas: 1
@@ -38,13 +18,7 @@ spec:
       labels:
         app: odysseus
     spec:
-      # Odysseus addresses its sidecars by explicit env (CHROMADB_HOST,
-      # SEARXNG_INSTANCE, NTFY_BASE_URL, OLLAMA_BASE_URL) so the injected
-      # per-Service env vars are unneeded; disabled for consistency/safety
-      # across the namespace (searxng crashloops on them).
       enableServiceLinks: false
-      # The NFS workspace export is scoped to worker IPs only; pin off
-      # control-plane nodes so the pod never lands where the mount is denied.
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -60,24 +34,6 @@ spec:
             matchLabels:
               app: odysseus
       initContainers:
-        # Seed the /app/data PVC from the SOPS-encrypted odysseus-data-seed
-        # Secret. This codifies the small IRREPLACEABLE state (auth.json with
-        # the owner's hashed login, settings.json incl. the SearXNG-json /
-        # disabled_tools state) so a freshly-provisioned local-path PVC comes
-        # up pre-configured instead of empty.
-        #
-        # IDEMPOTENT + NON-CLOBBERING: each seed key is only copied when the
-        # destination file does NOT already exist. On a populated PVC every
-        # file is skipped, so this is a no-op — the app rewrites these JSONs at
-        # runtime and we NEVER overwrite live state. This is critical: the
-        # large binary state (app.db) and the dir trees (skills/, personal_docs/,
-        # rag/) are migrated out-of-band by tarring from TrueNAS into the PVC
-        # (see README — data migration), and that migration MUST land before
-        # Odysseus serves so the app never auto-creates a fresh admin that
-        # would clobber the migrated auth.json. The skip-if-exists guard means
-        # the tar-restore and this seed can run in any order safely.
-        #
-        # Pattern copied verbatim from 08.servarr/newtarr/newtarr.yaml.
         - name: seed-data
           image: busybox:1.36
           securityContext:
@@ -105,12 +61,6 @@ spec:
             - name: seed
               mountPath: /seed
               readOnly: true
-        # Assemble /app/.ssh for the pod->bastion channel with correct perms.
-        # /app is uid 1000's (user `odysseus`) passwd HOME, and the app + its
-        # bash tool run as 1000 — so ssh reads /app/.ssh/config and the key must
-        # be owned/readable by 1000. (A subPath secret mount would be
-        # world-readable and ssh would refuse it; /root/.ssh is unreadable to
-        # uid 1000 — both fail. Hence: copy into an emptyDir, chown 1000, here.)
         - name: seed-ssh
           image: busybox:1.36
           securityContext:
@@ -142,13 +92,6 @@ spec:
               readOnly: true
             - name: ssh-home
               mountPath: /app/.ssh
-        # Install the Claude Code CLI via the official native installer on every
-        # pod start (no prebuilt image; always latest). Reuses the odysseus image
-        # (already ships curl + glibc, python:3.12-slim) so there is no second
-        # image to pull. The standalone binary lands at /opt/claude/.local/bin/
-        # claude in the shared claude-bin emptyDir, world-executable so the
-        # uid-1000 app can run it from the run_local heartbeat Task. See
-        # docs/superpowers/specs/2026-06-15-odysseus-claude-heartbeat-task-design.md
         - name: install-claude
           image: ghcr.io/spyrospsarras/odysseus:73673258-bastion
           securityContext:
@@ -169,10 +112,6 @@ spec:
               memory: "256Mi"
               cpu: "100m"
             limits:
-              # The native installer + first `claude --version` spikes well past
-              # 512Mi (OOMKilled / exit 137 observed). 2Gi matches the main
-              # container ceiling; the initContainer is transient so this does
-              # not raise steady-state usage.
               memory: "2Gi"
               cpu: "1000m"
           volumeMounts:
@@ -180,18 +119,12 @@ spec:
               mountPath: /opt/claude
       containers:
         - name: odysseus
-          # Pushed from the TrueNAS docker engine to GHCR (lowercase namespace),
-          # made public so k3s containerd can pull without an imagePullSecret.
-          # Immutable numeric tag — no image-updater tracking needed initially.
           image: ghcr.io/spyrospsarras/odysseus:73673258-bastion
           env:
             - name: PUID
               value: "1000"
             - name: PGID
               value: "1000"
-            # Secret values (SOPS odysseus-secrets). ODYSSEUS_ADMIN_PASSWORD is
-            # the bootstrap/admin-reset password — the seeded auth.json carries
-            # the owner's ACTUAL login hash, so this is only a fallback.
             - name: ODYSSEUS_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -212,18 +145,6 @@ spec:
                 secretKeyRef:
                   name: odysseus-secrets
                   key: HF_TOKEN
-            # Claude Code heartbeat (run_local Task). Routed through the
-            # in-cluster CLIProxyAPI (2-k3s/17.remote-pi) instead of straight
-            # to api.anthropic.com, so the cluster holds ONE set of Claude
-            # subscription credentials - the provider accounts already
-            # authorised in cliproxy's Postgres auth store. The old
-            # CLAUDE_CODE_OAUTH_TOKEN / `claude-oauth-token` Secret is gone;
-            # it MUST stay gone, an OAuth token present here outranks
-            # ANTHROPIC_AUTH_TOKEN and would bypass the proxy.
-            #
-            # Service DNS, not cliproxy.epaflix.com: that name resolves only
-            # on the LAN via Pi-hole and would leave the cluster for the
-            # Traefik internal LB and back. Plain http is fine in-cluster.
             - name: ANTHROPIC_BASE_URL
               value: "http://cliproxy.remote-pi.svc.cluster.local:8317"
             - name: ANTHROPIC_AUTH_TOKEN
@@ -231,23 +152,10 @@ spec:
                 secretKeyRef:
                   name: cliproxy-client-key
                   key: ANTHROPIC_AUTH_TOKEN
-            # NOTE: do NOT set a container-wide PATH env here — overriding the
-            # image default drops /usr/sbin (groupadd/gosu/useradd) and breaks
-            # the entrypoint. The run_local heartbeat Task prepends the CLI dir
-            # itself: `export PATH=/opt/claude/.local/bin:$PATH; claude -p ...`.
-            # /app is root-owned (entrypoint only chowns /app/data + /app/logs to
-            # 1000), so point claude's config/credentials cache at the writable
-            # data PVC instead of the default ~/.claude under /app.
             - name: CLAUDE_CONFIG_DIR
               value: "/app/data/.claude"
-            # Reinstalled each pod start by install-claude; no self-update needed.
             - name: DISABLE_AUTOUPDATER
               value: "1"
-          # Non-secret env (APP_BIND/APP_PORT/AUTH_ENABLED/ALLOWED_ORIGINS/
-          # OLLAMA_BASE_URL/SEARXNG_INSTANCE/CHROMADB_*/etc) from the ConfigMap.
-          # NOTE: /app/.ssh IS now mounted (seed-ssh initContainer) — a single
-          # bastion-only key, the deliberate exception to the original
-          # no-SSH hardening, for the odysseus-bastion execution sandbox.
           envFrom:
             - configMapRef:
                 name: odysseus-config
@@ -257,16 +165,10 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /app/data
-            # Shared NFS workspace (same path on pod + bastion VM).
             - name: workspace
               mountPath: /workspace
-            # /app/.ssh (uid 1000's HOME/.ssh) assembled by the seed-ssh
-            # initContainer (id_bastion, config with the `bastion` alias,
-            # pre-seeded known_hosts) — owned 1000 so the bash tool can use it.
             - name: ssh-home
               mountPath: /app/.ssh
-            # Claude CLI installed fresh each pod start by the install-claude
-            # initContainer; read-only here, run by the run_local heartbeat Task.
             - name: claude-bin
               mountPath: /opt/claude
               readOnly: true
@@ -295,18 +197,12 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: odysseus-data
-        # SOPS-encrypted data seed, reconciled by the odysseus ksops generator
-        # from odysseus-data-seed.enc.yaml. Consumed only by the seed-data
-        # initContainer.
         - name: seed
           secret:
             secretName: odysseus-data-seed
-        # Shared NFS workspace (TrueNAS apps/odysseus-bastion).
         - name: workspace
           persistentVolumeClaim:
             claimName: odysseus-bastion-workspace
-        # pod->bastion private key (single key from the SOPS odysseus-secrets);
-        # copied into /app/.ssh by the seed-ssh initContainer.
         - name: bastion-ssh-key
           secret:
             secretName: odysseus-secrets
@@ -318,10 +214,6 @@ spec:
             name: odysseus-ssh-config
         - name: ssh-home
           emptyDir: {}
-        # Claude CLI is (re)installed fresh on every pod start by the
-        # install-claude initContainer into this emptyDir; the main container
-        # runs it from /opt/claude/.local/bin. Ephemeral on purpose — always
-        # latest CLI, no prebuilt image to maintain.
         - name: claude-bin
           emptyDir: {}
 ---
@@ -351,8 +243,5 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      # Irreplaceable state is a few MB (app.db, auth.json, settings.json,
-      # skills/personal_docs/rag). The ~4.8G HF/fastembed caches are NOT
-      # migrated — they re-download on first run on CPU.
       storage: 5Gi
   storageClassName: local-path
