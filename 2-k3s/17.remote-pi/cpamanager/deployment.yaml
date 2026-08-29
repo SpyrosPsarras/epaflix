@@ -261,4 +261,5 @@ spec:
           persistentVolumeClaim:
             claimName: cpa-manager-plus-data
         - name: tmp
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: 64Mi
