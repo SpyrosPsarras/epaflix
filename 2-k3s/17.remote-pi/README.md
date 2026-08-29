@@ -868,11 +868,15 @@ Upstream builds the plugin against SDK `v7.2.93`, far behind whatever
 match. They do not have to: the release
 `.so` was loaded and exercised against the pinned digest - under `runAsNonRoot` +
 `readOnlyRootFilesystem`, the same posture as the pod - before any of this was
-committed, first on v7.2.127 and re-checked on v7.2.140 when the Copilot plugin
-landed, both plugins loaded together. After an image bump,
-re-check the startup log for `pluginhost: plugin loaded plugin_id=pi-bridge`;
-a rejected plugin logs `pluginhost: failed to load plugin` and does not stop the
-proxy, so it will not announce itself any other way.
+committed, first on v7.2.127, re-checked on v7.2.140 when the Copilot plugin
+landed (both plugins loaded together), and re-checked on v7.2.145 on 2026-08-29
+with both plugins loading and the pi-bridge routes answering 200. After an image
+bump, re-check the startup log for `pluginhost: plugin loaded plugin_id=pi-bridge`.
+What a rejection does depends on why: a version-rejected plugin is believed to
+log `pluginhost: failed to load plugin` and not stop the proxy (that path is
+untested), so it will not announce itself any other way. A corrupt `.so` that
+still reaches the host instead hard-crashes the process (exit=2 inside
+`cliproxy_dlopen`), which the checksum gate should never let ship.
 
 ### Verification
 
@@ -1005,6 +1009,8 @@ pluginhost: plugin registered plugin_id=pi-bridge plugin_name=pi-bridge version=
 URL. Re-check the `plugin registered` line after any image bump: a rejected
 plugin logs `pluginhost: failed to load plugin` and does not stop the proxy, so
 the only other symptom is Copilot models quietly missing from `/v1/models`.
+That claim covers version rejection and is untested; a corrupt `.so` that
+reaches the host crashes the process outright (exit=2), not a quiet skip.
 
 ### Config, and why it is two lines
 
@@ -1071,8 +1077,12 @@ loaded locally at the two checkpoints named above, and Renovate's bumps since th
 have not been exercised that way - CI only verifies each plugin's own release
 checksum, not that it loads against the current CPA build. So the startup-log
 check after a sync is the real safety net, not a prior guarantee: a plugin the
-host rejects logs `pluginhost: failed to load plugin` and the proxy still starts,
-which is why the four `pi-bridge` routes can 404 on a pod that looks healthy.
+host rejects logs `pluginhost: failed to load plugin` and — for version
+rejection, the untested path — the proxy keeps running, which is why the four
+`pi-bridge` routes can 404 on a pod that looks healthy. A corrupt library that
+reaches the host instead is a hard crash: exit=2 inside `cliproxy_dlopen`,
+reproduced on both v7.2.144 and v7.2.145 with a truncated `.so`. The checksum
+gate is what keeps that second case off the pod.
 
 Then: device code, not a loopback redirect, so this is the one provider that does
 not need the port-forward:
