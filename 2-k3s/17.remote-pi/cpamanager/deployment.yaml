@@ -87,13 +87,11 @@
 # SQLite and no second port - none of which is what this file deploys. The
 # endpoint answering on 18317 at all is what proves Manager Server is running.
 #
-# No Service and no IngressRoute on purpose. Nothing in-cluster consumes CPAMP
-# yet, and the setup wizard plus the dashboard are a human-at-a-browser job:
+# Service + IngressRoute now exist (cpamanager/service.yaml, cpamanager/ingress.yaml):
+# the panel is published at https://cpamp.epaflix.com behind Authentik forward-auth,
+# with CPAMP's own admin key still guarding every API call. The port-forward
+# remains the fallback when Authentik or the DNS shadow record is broken:
 #   kubectl --context epaflix -n remote-pi port-forward deploy/cpa-manager-plus 18317:18317
-# Add a Service when pi-bridge is actually pointed at cpam_url, and an
-# IngressRoute (plus the Pi-hole record, .102 for the `internal` entry point)
-# only if this needs to be reachable without a port-forward. One less admin
-# panel on the network until then.
 #
 # The admin key is SUPPLIED from the sops-encrypted Secret next to this file,
 # never generated. Left unset, CPAMP generates one and prints it to stdout
