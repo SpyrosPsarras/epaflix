@@ -58,7 +58,7 @@ images:
   # newest of 126 published tags; `latest` was a DIFFERENT manifest
   # (sha256:dbaad3f9...) at resolve time, so pin the tag, never latest.
   - name: docker.io/seakee/cpa-manager-plus
-    newTag: v1.9.2@sha256:c0751252cc3a04eb7da97bc1e2b8b8abd9f120c26c9f9ab96aaf94d5251e64c2
+    newTag: v1.12.6@sha256:dbaad3f95a08743dc585d639fae0a60a187f62c79a4a02f6550f821564f35d17
 
 # Owned by ArgoCD Application "remote-pi".
 # The scripts the cliproxy initContainers run. Generated rather than
