@@ -78,5 +78,8 @@ spec:
     # entry in the kustomization. Nothing is created here.
     namespace: servarr
   syncPolicy:
+    # prune is deliberately ON here first: 8-day clean automated soak
+    # (zero drift, zero orphans) measured in #1048. Every other app stays
+    # prune: false behind its own soak; #21 tracks the rollout.
     automated: { selfHeal: true, prune: true }
     syncOptions: [ServerSideApply=true]

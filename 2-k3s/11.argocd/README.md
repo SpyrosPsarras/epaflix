@@ -142,7 +142,9 @@ flip casually:
   See issues #96 / #46.
 - **`system-upgrade-controller`** — manual.
 
-`prune` is OFF everywhere on purpose (issue #21 tracks enabling it).
+`prune` stays OFF everywhere on purpose, one app at a time behind its own
+soak (issue #21 tracks the rollout). First flip: `reloader` on 2026-08-29
+(#1048, after an 8-day clean window); every other app is still `prune: false`.
 Note: an empty `syncPolicy: {}` in a manifest causes a permanent
 *cosmetic* OutOfSync (never matches live `null`) — omit `syncPolicy`
 entirely for a manual app instead.
