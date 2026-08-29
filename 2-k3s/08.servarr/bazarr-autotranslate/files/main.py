@@ -14,6 +14,9 @@ subtitle:
   4. Once a translation is queued the item is left alone for
      TRANSLATE_GRACE_HOURS; if it is still wanted after that (Lingarr
      failed or dropped it), the search rounds restart from zero.
+  5. Search rounds are spaced ROUND_SPACING_HOURS apart: a search request
+     is only enqueued into Bazarr's job queue, so spacing gives the queue
+     time to execute it before the next round counts.
 
 Bazarr's own scheduled wanted search (every 6h) keeps running underneath;
 the rounds here are extra on top of it.
@@ -65,7 +68,8 @@ to_languages = [lang.strip() for lang in os.getenv("TO_LANGUAGES", "").split(","
 translation_request_timeout = float(get_env_or_default("TRANSLATION_REQUEST_TIMEOUT", 15 * 60))
 http_timeout = httpx.Timeout(float(get_env_or_default("REQUEST_TIMEOUT", 300)))
 search_rounds = int(get_env_or_default("SEARCH_ROUNDS_BEFORE_TRANSLATE", 3))
-translate_grace_seconds = float(get_env_or_default("TRANSLATE_GRACE_HOURS", 6)) * 3600
+round_spacing_seconds = float(get_env_or_default("ROUND_SPACING_HOURS", 8)) * 3600
+translate_grace_seconds = float(get_env_or_default("TRANSLATE_GRACE_HOURS", 216)) * 3600
 num_workers = int(get_env_or_default("NUM_WORKERS", 1))
 interval_between_scans = int(get_env_or_default("INTERVAL_BETWEEN_SCANS", 5 * 60))
 log_level = get_env_or_default("LOG_LEVEL", "INFO")
@@ -247,15 +251,20 @@ async def process(client: httpx.AsyncClient, videos: List, kind: str):
 
     for cand in candidates:
         key = item_key(cand.is_serie, cand.video_id, cand.to_language)
-        entry = state.get(key) or {"phase": "search", "rounds": 0, "ts": now}
+        # ts=0 for fresh items so the first search fires immediately; later searches
+        # are spaced out because a PATCH only enqueues the search - Bazarr's job
+        # queue executes it later, and a round must not count before that happened
+        entry = state.get(key) or {"phase": "search", "rounds": 0, "ts": 0}
 
         if entry["phase"] == "translate":
             if now - entry["ts"] < translate_grace_seconds:
                 continue
             logger.info(f"[translate] {kind} id {cand.video_id} still wanted after grace period, restarting search rounds")
-            entry = {"phase": "search", "rounds": 0, "ts": now}
+            entry = {"phase": "search", "rounds": 0, "ts": 0}
 
         if entry["rounds"] < search_rounds:
+            if now - entry["ts"] < round_spacing_seconds:
+                continue
             if await request_search(client, cand):
                 entry["rounds"] += 1
                 entry["ts"] = now
@@ -404,6 +413,7 @@ if __name__ == "__main__":
             logger.debug(f"base_languages: {base_languages}")
             logger.debug(f"to_languages: {to_languages}")
             logger.debug(f"search_rounds: {search_rounds}")
+            logger.debug(f"round_spacing_hours: {round_spacing_seconds / 3600}")
             logger.debug(f"translate_grace_hours: {translate_grace_seconds / 3600}")
             logger.debug(f"translation_request_timeout: {translation_request_timeout}")
             logger.debug(f"http_timeout: {http_timeout}")
