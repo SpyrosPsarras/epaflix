@@ -145,3 +145,43 @@ data:
                 query and widens the exposure. Locate by route/container:
                 {namespace="{{ $labels.namespace }}"} |~ `apikey=`
 
+      # G — Renovate GitHub-token write failures (#957). The fine-grained PAT
+      #     was minted without Issues: write (#335), so for 25 days every run
+      #     failed the Dependency Dashboard write with `403 Resource not
+      #     accessible by personal access token` while the Job itself went
+      #     Complete: Renovate logs the refusal as WARN `Could not ensure
+      #     issue` and still reports `result: done`, so KubeJobFailed can
+      #     never see it and the dashboard (#31) silently froze at its last
+      #     successful write. This rule is a REGRESSION detector, not a spike
+      #     detector: threshold > 0, for: 0m — one occurrence is already the
+      #     incident. The string is Renovate's stable platform-level message
+      #     (emitted by ensureIssue for ANY refused issue write, not a
+      #     version-specific log line), so it survives Renovate upgrades.
+      #     VALIDATED against live Loki 2026-08-29, both directions:
+      #       matched the real pre-fix failure line from run
+      #         renovate-29800397 (2026-08-29T17:38:36Z, 403 PATCH issues/31)
+      #       0 occurrences since the PAT fix (18:06 manual run was clean)
+      #     The selector is namespace="renovate", so the ruler's own
+      #     query-log echo (#910) cannot reach it: the ruler runs in
+      #     `observability`, outside this selector. No `!= `query=`` guard
+      #     is needed and adding one would be cargo cult here.
+      - name: renovate-token
+        rules:
+          - alert: RenovateDashboardWriteFailed
+            expr: |
+              sum (
+                count_over_time({namespace="renovate", container="renovate"} |= "Could not ensure issue" [10m])
+              ) > 0
+            for: 0m
+            labels:
+              severity: warning
+              component: renovate
+            annotations:
+              summary: "Renovate cannot write the Dependency Dashboard"
+              description: >-
+                Renovate logged `Could not ensure issue` in the last 10m: a
+                GitHub issue write was refused (token scope or API refusal).
+                The dashboard (#31) is now silently stale while runs still
+                report success. Check the fine-grained PAT's Issues
+                permission (#335/#957) and the failing run's log in
+                namespace renovate.
