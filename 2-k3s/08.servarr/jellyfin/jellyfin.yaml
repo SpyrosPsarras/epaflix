@@ -1,5 +1,4 @@
 ---
-# Jellyfin - Media Server with NVIDIA GPU Transcoding
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -8,9 +7,6 @@ metadata:
   labels:
     app: jellyfin
 spec:
-  # Scaled to 0 on 2026-05-17 — jellyfin.epaflix.com is served by the
-  # TrueNAS Jellyfin instance (see jellyfin-truenas-redirect.yaml). The
-  # k3s pod is kept as manifest-only for fast failover.
   replicas: 0
   selector:
     matchLabels:
@@ -88,14 +84,9 @@ spec:
         - name: transcodes
           persistentVolumeClaim:
             claimName: jellyfin-transcodes
-        # Unified media on the servarr-media PVC (#256, matches bazarr/lingarr
-        # #250/#251). Library paths /media/{animes,tvshows,movies} resolve to the
-        # subdirs of the single mount; retires the legacy /mnt/k3s-* hostPaths
-        # so this no longer blocks the #247 NFS teardown.
         - name: media
           persistentVolumeClaim:
             claimName: servarr-media
-      # Schedule on node with GPU
       affinity:
         nodeAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:

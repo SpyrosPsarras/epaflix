@@ -1,7 +1,4 @@
 ---
-# Network Speed Test Between Proxmox Hosts
-# This deploys iperf3 server on worker-61 and client on worker-62
-# to test the bonded network throughput between Proxmox hosts
 
 apiVersion: v1
 kind: Service
@@ -85,33 +82,3 @@ spec:
               memory: 256Mi
 
 ---
-# To run the test:
-#
-# 1. Deploy:
-#    kubectl apply -f test-network-speed.yaml
-#
-# 2. Wait for pods to be ready:
-#    kubectl wait --for=condition=ready pod -l app=iperf3-server --timeout=60s
-#    kubectl wait --for=condition=ready pod -l app=iperf3-client --timeout=60s
-#
-# 3. Get the server ClusterIP:
-#    SERVER_IP=$(kubectl get svc iperf3-server -o jsonpath='{.spec.clusterIP}')
-#
-# 4. Run speed test (10 seconds, TCP):
-#    kubectl exec -it deployment/iperf3-client -- iperf3 -c $SERVER_IP -t 10
-#
-# 5. Run speed test with parallel streams (more accurate for bonded links):
-#    kubectl exec -it deployment/iperf3-client -- iperf3 -c $SERVER_IP -t 10 -P 4
-#
-# 6. Run UDP test to check maximum throughput:
-#    kubectl exec -it deployment/iperf3-client -- iperf3 -c $SERVER_IP -u -b 2G -t 10
-#
-# Expected results with balance-xor bonding:
-# - TCP: ~1.8-1.9 Gbps (close to 2 Gbps theoretical)
-# - UDP: Should hit 2 Gbps with low packet loss
-#
-# To verify pod placement:
-#    kubectl get pods -o wide | grep iperf3
-#
-# To clean up:
-#    kubectl delete -f test-network-speed.yaml

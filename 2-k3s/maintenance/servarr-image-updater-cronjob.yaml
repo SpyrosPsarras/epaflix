@@ -1,33 +1,6 @@
 ---
-# Servarr Image Updater
-#
-# Performs a weekly rolling restart of all Deployments in the servarr namespace
-# so that the latest version of each container image is pulled and applied.
-#
-# How image updates work in Kubernetes:
-#   - Images tagged `:latest` have imagePullPolicy: Always by default, so a pod
-#     restart is enough to pull a newer upstream image.
-#   - Images tagged with a non-latest mutable tag (e.g. :development, :preview-OIDC)
-#     require imagePullPolicy: Always to be set EXPLICITLY in their Deployment spec
-#     so that Kubernetes doesn't skip the pull.
-#
-# Deployments that require explicit imagePullPolicy: Always (non-latest tags):
-#   - bazarr          (lscr.io/linuxserver/bazarr:development)
-#   - jellyseerr      (fallenbagel/jellyseerr:preview-OIDC)
-#   - seerr           (fallenbagel/jellyseerr:preview-OIDC)
-#
-# Schedule: 3 AM every Sunday — runs one hour after the containerd-cleanup CronJob
-# so that disk space has already been freed before new images are pulled.
-#
-# Deploy:
-#   kubectl apply -f servarr-image-updater-cronjob.yaml
-#
-# Trigger manually:
-#   kubectl create job --from=cronjob/servarr-image-updater servarr-update-manual -n kube-system
-#   kubectl -n kube-system logs -f job/servarr-update-manual
 
 ---
-# ServiceAccount used by the CronJob pod
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -37,8 +10,6 @@ metadata:
     app: servarr-image-updater
 
 ---
-# ClusterRole: permission to list/get/patch Deployments in the servarr namespace.
-# Scoped to only the resources the job actually needs.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -58,7 +29,6 @@ rules:
     verbs: ["get", "list", "watch"]
 
 ---
-# RoleBinding: bind the ServiceAccount (in kube-system) to the Role (in servarr)
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
@@ -76,7 +46,6 @@ subjects:
     namespace: kube-system
 
 ---
-# Weekly CronJob — restarts all servarr Deployments and waits for each rollout
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -85,16 +54,12 @@ metadata:
   labels:
     app: servarr-image-updater
 spec:
-  # 3 AM every Sunday (one hour after containerd-cleanup at 2 AM)
   schedule: "0 3 * * 0"
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
-  # Prevent a second run if a previous update is still in progress
   concurrencyPolicy: Forbid
   jobTemplate:
     spec:
-      # Give the job up to 45 minutes before it is considered failed.
-      # Each rollout waits up to 5 minutes, and there are ~14 deployments.
       activeDeadlineSeconds: 2700
       template:
         metadata:
@@ -106,8 +71,6 @@ spec:
 
           containers:
             - name: updater
-              # bitnami/kubectl mirrors the cluster's kubectl version and is
-              # regularly updated. The `latest` tag tracks the most recent stable release.
               image: bitnami/kubectl:latest
               imagePullPolicy: Always
 
@@ -124,7 +87,6 @@ spec:
                   echo "Servarr Image Updater — $(date)"
                   echo "============================================"
 
-                  # Collect all Deployment names in the servarr namespace
                   DEPLOYMENTS=$(kubectl get deployments -n "$NAMESPACE" \
                     -o jsonpath='{.items[*].metadata.name}')
 
@@ -142,9 +104,6 @@ spec:
                   done
                   echo ""
 
-                  # Rolling restart each deployment one at a time.
-                  # This ensures only one app is restarting at any moment,
-                  # keeping the *arr ecosystem healthy during the update window.
                   FAILED=""
                   for deploy in $DEPLOYMENTS; do
                     echo "--------------------------------------------"

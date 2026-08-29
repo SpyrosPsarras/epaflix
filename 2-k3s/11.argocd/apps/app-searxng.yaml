@@ -1,12 +1,4 @@
 ---
-# ArgoCD Application: SearXNG (self-hosted metasearch, JSON API for Pi).
-#
-# Source:       this repo, path 2-k3s/14.searxng, kustomize. The
-#               kustomization inflates the ksops generator which decrypts
-#               searxng-secret.enc.yaml at render time (Issue #29).
-# Destination:  in-cluster `searxng` namespace.
-# Sync:         selfHeal on, prune enabled. Spyros opted to flip immediately
-#               rather than wait the soak window (#375).
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

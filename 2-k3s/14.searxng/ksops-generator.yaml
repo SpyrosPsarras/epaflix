@@ -1,14 +1,3 @@
-# ksops generator — decrypts searxng-secret.enc.yaml at render time inside
-# argocd-repo-server (ksops binary from the install-ksops initContainer; see
-# 2-k3s/11.argocd/helm-values.yaml). Local build:
-#   SOPS_AGE_KEY=$(~/.pi/shared/skills/keepassxc-secrets/scripts/kpx.sh get sops-age-k3s-cluster) \
-#   KSOPS_BIN=$(which ksops) kustomize build --enable-alpha-plugins --enable-exec .
-# ksops decrypts with the sops Go library, it never execs the `sops` binary, so
-# the KeePassXC wrapper on PATH does not apply: the key has to be in the
-# render's own environment. Verified 2026-08-21 in this directory, exit 0 with
-# the prefix and "Error getting data key" without it. Do NOT point
-# SOPS_AGE_KEY_FILE at ~/.config/sops/age/, that file was shredded on
-# 2026-08-21. See .github/instructions/sops.instructions.md.
 apiVersion: viaduct.ai/v1
 kind: ksops
 metadata:

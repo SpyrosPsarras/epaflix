@@ -1,5 +1,3 @@
-# Loki Helm Values
-# SingleBinary mode with filesystem storage (simpler for small clusters)
 
 deploymentMode: SingleBinary
 
@@ -37,14 +35,6 @@ loki:
     compaction_interval: 2h
     delete_request_store: filesystem
 
-  # Ruler — evaluate LogQL alerting rules and forward firing alerts to the
-  # existing Alertmanager (kube-prometheus-stack). The chart already runs a rules
-  # sidecar (loki-sc-rules) that watches ConfigMaps labelled `loki_rule` and
-  # writes them into /rules; the ONLY missing piece was `alertmanager_url`, so
-  # rules previously had nowhere to fire. Rules for tenant "1" (matching the
-  # promtail tenant_id) land in /rules/1 via the rule ConfigMap's
-  # k8s-sidecar-target-directory annotation
-  # (alertmanager-config/loki-log-alerts.yaml).
   rulerConfig:
     storage:
       type: local
@@ -55,7 +45,6 @@ loki:
     enable_alertmanager_v2: true
     enable_api: true
 
-# Single Binary deployment
 singleBinary:
   replicas: 1 # Only 1 replica supported with filesystem storage
   persistence:
@@ -69,7 +58,6 @@ singleBinary:
     limits:
       cpu: 1000m
       memory: 1Gi
-# Explicitly disable scalable components
 write:
   replicas: 0
 read:
@@ -77,28 +65,11 @@ read:
 backend:
   replicas: 0
 
-# memcached caches — right-sized for this cluster.
-#
-# The chart defaults are built for object-storage backends where every chunk
-# read is a network round trip: chunksCache.allocatedMemory 8192 and
-# resultsCache.allocatedMemory 1024 (MB). The chart turns those into pod
-# requests AND limits of floor(1.2 * allocatedMemory), so the defaults reserved
-# 9830Mi + 1229Mi = 11Gi of schedulable memory.
-#
-# Measured 2026-07-28: chunks-cache held 230Mi, results-cache 25Mi. The 9830Mi
-# request alone was 44% of k3s-worker-61 and was the single reason that node
-# looked different from the other three (67% memory requested vs 17-28%). It
-# blocked any uniform, low balloon floor across the worker VMs, because the
-# Proxmox host is only safe to squeeze a node down to its pod requests.
-#
-# We use `object_store: filesystem` on local-path, so there is no network round
-# trip for these caches to save — the guest page cache already covers it.
 chunksCache:
   allocatedMemory: 1024 # -> requests/limits 1229Mi (was 9830Mi)
 resultsCache:
   allocatedMemory: 256 # -> requests/limits 307Mi (was 1229Mi)
 
-# Gateway (nginx)
 gateway:
   enabled: true
   replicas: 1
@@ -110,7 +81,6 @@ gateway:
       cpu: 200m
       memory: 256Mi
 
-# Monitoring
 monitoring:
   selfMonitoring:
     enabled: false
@@ -119,12 +89,8 @@ monitoring:
   serviceMonitor:
     enabled: true
 
-# loki-canary toggle moved to top level in chart 6.x; the `monitoring.lokiCanary`
-# path above is ignored and the chart default (enabled: true) used to apply.
-# Disabling fully — we don't need synthetic canary metrics.
 lokiCanary:
   enabled: false
 
-# Test
 test:
   enabled: false

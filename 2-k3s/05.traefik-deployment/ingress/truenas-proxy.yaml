@@ -1,34 +1,4 @@
 ---
-# Proxy truenas.epaflix.com (192.168.10.101, Traefik) → TrueNAS SCALE UI (192.168.10.200:8443)
-#
-# Real Let's Encrypt wildcard cert terminates at Traefik.
-# Backend is TrueNAS with a self-signed cert, so serversTransport skips verify.
-# DNS for truenas.epaflix.com is internal-only (Pi-hole address= → 192.168.10.101).
-# No public A record needed — DNS-01 ACME via Cloudflare proves domain ownership.
-#
-# Target :8443 (TrueNAS ui_httpsport), NOT :443. Port 443 on the host is bound by
-# the nginx-proxy-manager app — going through it adds a second proxy hop and breaks
-# WebSocket reconnect (SPA logs you out on page refresh).
-#
-# Gated by Authentik forward-auth (issue #552) — 3-part shape, same as
-# odysseus-proxy.yaml: app route priority 10 with security-headers FIRST then
-# authentik-forwardauth (order per PR #694 — headers must still apply to the
-# auth-deny 302), outpost route priority 15 for /outpost.goauthentik.io/.
-#
-# No /api bypass. Nothing in this repo calls the TrueNAS HTTP API through this
-# hostname — every runbook uses `ssh truenas_admin@192.168.10.200` + `midclt`,
-# which does not traverse Traefik at all. The SCALE UI is websocket-driven; the
-# upgrade request carries the outpost session cookie, so it authenticates fine.
-#
-# Circular-dependency note: this gate depends on Authentik, which runs on k3s,
-# whose VM disks are TrueNAS iSCSI targets. If TrueNAS is the thing that is
-# broken, do NOT go through this route — hit https://192.168.10.200:8443
-# directly (also the path for unlocking the encrypted-backups dataset after a
-# reboot, #149).
-#
-# SSO objects live in 07.authentik-deployment/authentik-iac-blueprint.enc.yaml:
-# proxy provider + application `truenas-forwardauth`, bound to group
-# `authentik Admins`, and added to the embedded outpost's providers list.
 
 apiVersion: v1
 kind: Endpoints
@@ -119,8 +89,6 @@ spec:
           - "*.epaflix.com"
 
 ---
-# Outpost route - handles the auth callback on truenas.epaflix.com.
-# priority 15 > the app route's 10, else the callback loops.
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:

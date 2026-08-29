@@ -1,43 +1,4 @@
 ---
-# Proxy odysseus.epaflix.com (192.168.10.101, Traefik) → in-cluster Odysseus
-# Service `odysseus` in namespace `odysseus`, port 7000 (the k3s GitOps tier
-# 13.odysseus — issue #184). Cross-namespace reference relies on Traefik's
-# providers.kubernetescrd.allowCrossNamespace=true.
-#
-# This SUPERSEDES the earlier TrueNAS-backend cutover (Endpoints/headless
-# Service → 192.168.10.200:30070). Now that the workload runs on k3s the route
-# targets it directly — no manual Endpoints object needed.
-#
-# Backend is plain HTTP (uvicorn :7000), so NO ServersTransport. The real
-# Let's Encrypt wildcard cert terminates at Traefik; DNS-01 ACME via Cloudflare
-# proves domain ownership.
-#
-# This is the perimeter for a publicly (Cloudflare-proxied) reachable, GPU-less
-# agent app whose agent has a built-in shell tool. The route is gated by
-# Authentik forward-auth (authentik-forwardauth middleware) — mirrors
-# traefik-dashboard-sso.yaml:
-#   - app route (priority 10) carries the authentik-forwardauth middleware
-#   - outpost route (priority 15) handles /outpost.goauthentik.io/ auth callbacks
-#     and MUST out-prioritise the app route or callbacks break.
-#   - api route (priority 20) for PathPrefix(`/api`) is EXEMPT from forward-auth
-#     so programmatic/API clients (which can't do browser SSO) can reach it.
-#     This is safe on its own terms: Odysseus's API is independently
-#     authenticated (AUTH_ENABLED=true) - every agent/shell-capable endpoint
-#     (/api/chat, /api/agent, /api/run, /api/execute, /api/shell, /api/tools,
-#     ...) returns 401 unauthenticated; only /api/health + /api/auth/status are
-#     open and harmless. So the agent-with-shell stays behind Odysseus's own
-#     login. This used to be justified as "mirrors the servarr /api-bypass
-#     (#176)"; that pattern is gone, deleted by #296 on 2026-08-10 because the
-#     six servarr bypasses had NO remaining caller. This one does have real
-#     programmatic callers, which is why it stays. If that ever stops being
-#     true, delete this route too rather than keeping it on precedent.
-# This only gates the perimeter — Odysseus has NO trusted-header SSO, so it ALSO
-# keeps its own built-in login (AUTH_ENABLED=true). Result is a double login by
-# design (see README).
-#
-# SSO objects (group "Odysseus users", proxy provider + application slug odysseus,
-# embedded-outpost binding) must exist in Authentik BEFORE this is merged, else the
-# route would expose the raw backend behind only Odysseus's own login.
 
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
@@ -89,12 +50,6 @@ spec:
           - "*.epaflix.com"
 
 ---
-# /api bypass — priority 20 (out-prioritises the app route) so PathPrefix(`/api`)
-# is served WITHOUT the authentik-forwardauth middleware. Odysseus's API enforces
-# its own auth (AUTH_ENABLED=true; sensitive endpoints return 401), so this exposes
-# no agent/shell surface unauthenticated. This is the LAST `/api` bypass in the
-# cluster: the six servarr ones it used to mirror (#176) were deleted by #296 on
-# 2026-08-10 for having no caller left. Keep this one only while it has one.
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:

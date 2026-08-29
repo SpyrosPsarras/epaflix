@@ -1,87 +1,27 @@
 ---
-# argo-cd Helm chart values
-#
-# Chart: argo/argo-cd 9.5.17 (app v3.4.3)
-# Repo:  https://argoproj.github.io/argo-helm
-#
-# Design notes:
-#   - TLS is terminated at Traefik (see ingress.yaml). argocd-server runs with
-#     `--insecure` so it does not also terminate TLS itself; the external URL
-#     is still https://argocd.epaflix.com.
-#   - OIDC is wired to Authentik (auth.epaflix.com). The client-id/secret live
-#     in the `argocd-secret` Secret keys `oidc.authentik.clientId` /
-#     `oidc.authentik.clientSecret` (see oidc-secret.yaml).
-#   - RBAC: Authentik group `ArgoCD Admins` maps to ArgoCD `role:admin`.
-#     Everyone else gets read-only.
 
 global:
   domain: argocd.epaflix.com
-  # fsGroup 999 lets the argocd user (uid/gid 999) read group-readable
-  # mounted files — needed so the sops-age Secret volume on
-  # argocd-repo-server (mode 0440, see `repoServer.volumes.sops-age`)
-  # is readable by the running process. Applied pod-wide via the
-  # chart's global.securityContext slot (not repoServer.securityContext,
-  # which the chart does not recognize). See Issue #29.
   securityContext:
     fsGroup: 999
 
-# CRDs (applications, applicationsets, appprojects.argoproj.io) were installed
-# at original `helm install` time and stay operator-managed. The ArgoCD self-
-# management Application uses `includeCRDs: false` in its kustomization, but
-# the argo-cd chart embeds CRDs as regular templates (not in the `crds/` dir),
-# so `--include-crds=false` alone does not suppress them. This explicit flag
-# does. Matches the repo-wide convention (cert-manager, authentik, traefik).
 crds:
   install: false
 
 configs:
   params:
-    # TLS terminated at Traefik; argocd-server speaks plain HTTP on :8080.
     server.insecure: true
 
   cm:
     url: https://argocd.epaflix.com
-    # Local `admin` account is OFF. Authentik SSO is the only login path.
-    #
-    # This is declared explicitly rather than left to the chart, whose default
-    # is `true` (charts/argo-cd-*/argo-cd/values.yaml). argocd.epaflix.com is
-    # reachable from the internet on a route that bypasses Cloudflare (#547),
-    # so an enabled local account puts a single password in front of a
-    # cluster-admin-equivalent UI with no edge control ahead of it (#1039).
-    # Forward-auth is deliberately NOT the answer here - see ingress.yaml and
-    # #703, it would break the argocd CLI's gRPC-web calls.
-    #
-    # BREAK-GLASS: if Authentik is down or the OIDC client secret is wrong,
-    # nobody can log in to the tool that deploys Authentik. Recovery does not
-    # need this repo - see 2-k3s/11.argocd/README.md, "Break-glass: restoring
-    # local admin login". It works because this Application is manual-sync,
-    # so a live patch is not reverted by selfHeal.
     admin.enabled: false
-    # Allow the dot in resource names + Application API extensions.
     application.resourceTrackingMethod: annotation
-    # Kustomize-with-Helm inflation. The `authentik` Application's
-    # 2-k3s/07.authentik-deployment/kustomization.yaml uses `helmCharts:`
-    # to render the upstream chart at build time so image-updater can
-    # write back to the standard `images:` block (same pattern as servarr).
-    # --enable-helm: kustomize-with-helm inflation (authentik, servarr).
-    # --enable-alpha-plugins / --enable-exec: required by ksops generator
-    # (encrypted Secret decryption sidecar; see Issue #29 / .github/
-    # instructions/sops.instructions.md).
     kustomize.buildOptions: --enable-helm --enable-alpha-plugins --enable-exec
-    # Default `resource.exclusions` drops both `Endpoints` and
-    # `discovery.k8s.io/EndpointSlice` (assumed to be auto-managed by the
-    # endpoints controller per Service selector). We rely on a STATIC
-    # EndpointSlice for jellyfin-truenas (no selector, points at the
-    # TrueNAS IP), so we need ArgoCD to track EndpointSlice.
-    # Keep the legacy `Endpoints` exclusion (still controller-managed).
     resource.exclusions: |
       - apiGroups:
           - ""
         kinds:
           - Endpoints
-    # Authentik OIDC. Provider must be created in Authentik first (see
-    # 2-k3s/05.traefik-deployment/examples/app-with-native-oidc-authentik.md).
-    # The OIDC provider's app slug in Authentik must be `argocd`.
     oidc.config: |
       name: authentik
       issuer: https://auth.epaflix.com/application/o/argocd/
@@ -98,39 +38,20 @@ configs:
 
   rbac:
     policy.default: role:readonly
-    # Map Authentik group "ArgoCD Admins" → ArgoCD admin.
-    #
-    # This mapping is load-bearing now that admin.enabled is false: it is the
-    # only route to write access. Verified live 2026-08-20 - an SSO session
-    # reports groups [Grafana Admins, Servarr users, ArgoCD Admins,
-    # PegaProx Admins, authentik Admins] and lands on role:admin.
-    #
-    # The `groups` claim rides in Authentik's default `profile` scope mapping.
-    # Do not conclude it is missing because the discovery document's
-    # `scopes_supported` lists only openid/email/profile and no `groups` -
-    # scopes_supported enumerates scope mappings, not deliverable claims, and
-    # reading it the other way produced a false alarm (#1040).
     policy.csv: |
       g, ArgoCD Admins, role:admin
     scopes: "[groups]"
 
-  # Disable the bundled SSO-disabling notices.
   cmp:
     create: false
 
 server:
-  # Roll on an `argocd-redis` rotation (#715, recipe proven by #780). Scoped
-  # `secret.reloader.stakater.com/reload`, never the blanket
-  # `reloader.stakater.com/auto` (#299). The chart renders this key into the
-  # Deployment's own metadata.annotations, which is where Reloader looks.
   deploymentAnnotations:
     secret.reloader.stakater.com/reload: "argocd-redis"
-  # IngressRoute lives in ingress.yaml (Traefik IngressRoute, not k8s Ingress).
   ingress:
     enabled: false
   service:
     type: ClusterIP
-  # Resource limits suitable for a small homelab.
   resources:
     requests:
       cpu: 100m
@@ -139,10 +60,6 @@ server:
       memory: 512Mi
 
 controller:
-  # Same #715 coverage as server/repoServer/redis, but this component is a
-  # StatefulSet, so the chart reads `controller.statefulsetAnnotations`.
-  # `deploymentAnnotations` here would be a silent no-op (verified against the
-  # pinned argo-cd 10.4.0 templates).
   statefulsetAnnotations:
     secret.reloader.stakater.com/reload: "argocd-redis"
   resources:
@@ -153,7 +70,6 @@ controller:
       memory: 1Gi
 
 repoServer:
-  # #715 coverage — see the note under `server:`.
   deploymentAnnotations:
     secret.reloader.stakater.com/reload: "argocd-redis"
   resources:
@@ -162,26 +78,12 @@ repoServer:
       memory: 256Mi
     limits:
       memory: 512Mi
-  # ksops CMP — see Issue #29 and .github/instructions/sops.instructions.md.
-  # Canonical install pattern (matches viaduct.ai/ksops upstream docs):
-  #   - initContainer copies the ksops + kustomize binaries into an
-  #     emptyDir shared with the main repo-server container.
-  #   - The age private key is mounted on the main container so `ksops`
-  #     can decrypt at `kustomize build` time.
-  #   - --enable-alpha-plugins --enable-exec already set via configs.cm
-  #     above.
-  # Image pinned by digest after first successful sync (Renovate).
   volumes:
     - name: custom-tools
       emptyDir: {}
     - name: sops-age
       secret:
         secretName: sops-age
-        # 0400 with default kubelet behavior makes the file root-only,
-        # but the repo-server container runs as uid/gid 999 (argocd) and
-        # cannot read it. Setting `0440` plus a pod-level fsGroup=999
-        # (configured below under `securityContext`) puts the file in
-        # the argocd group while keeping it inaccessible to others.
         defaultMode: 0440
   volumeMounts:
     - name: custom-tools
@@ -194,9 +96,6 @@ repoServer:
       value: /var/sops/keys.txt
     - name: XDG_CONFIG_HOME
       value: /.config
-    # Make ksops + the ksops-bundled kustomize discoverable to the
-    # in-pod `kustomize build`. The generator annotation uses bare
-    # `path: ksops`, so the binary has to be on PATH.
     - name: PATH
       value: /custom-tools:/usr/local/bin:/usr/bin:/bin
   initContainers:
@@ -221,7 +120,6 @@ notifications:
   enabled: false
 
 dex:
-  # OIDC via Authentik directly — Dex not used.
   enabled: false
 
 redis-ha:
@@ -229,15 +127,8 @@ redis-ha:
 
 redis:
   enabled: true
-  # #715 coverage — see the note under `server:`. redis-ha is disabled above, so
-  # it is this plain `redis` Deployment that consumes the argocd-redis Secret.
   deploymentAnnotations:
     secret.reloader.stakater.com/reload: "argocd-redis"
 
-# Disable the chart's pre-install/pre-upgrade redis-secret-init hook (Job + SA
-# + Role + RoleBinding). The `argocd-redis` Secret already exists in-cluster
-# from the original `helm install`. Under ArgoCD self-management the hook
-# resources would otherwise be rendered as regular manifests and cause sync
-# noise (the Job has no idempotent "already initialized" exit path).
 redisSecretInit:
   enabled: false

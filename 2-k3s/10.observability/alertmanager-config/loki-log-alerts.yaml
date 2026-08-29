@@ -1,84 +1,16 @@
 ---
-# Loki LogQL alerting rules (log-CONTENT alerts), as distinct from the
-# metric-based PrometheusRules in custom-alerts.yaml.
-#
-# Delivery: the loki chart's rules sidecar (loki-sc-rules) WATCHes ConfigMaps
-# labelled `loki_rule` and writes each data key as a file under FOLDER=/rules.
-# Loki runs with auth_enabled: true (multi-tenant) and promtail writes as tenant
-# "1", so rules must live under /rules/1 — the k8s-sidecar-target-directory
-# annotation places them there. The ruler forwards firing alerts to the existing
-# Alertmanager (alertmanager_url set in loki-values.yaml rulerConfig), which
-# routes by severity/namespace and emails admin@epaflix.com.
-#
-# Scope: groups A (servarr error spikes), D (cluster-wide panic/fatal) plus the
-# app-specific log rules authored against real log strings read from the live
-# cluster (#352):
-#   B — Postgres FATAL/PANIC/deadlock (CloudNativePG JSON: record.error_severity)
-#   C — Authentik failed logins (audit action login_failed)
-# One item is NOT a log rule and lives elsewhere:
-#   - Traefik 5xx → needs Traefik Prometheus metrics + ServiceMonitor enabled
-#     first (still open in #352); 5xx is a metric, not a log line.
-#
-# Group E (AirVPN Bluetit forced-reconnect, container="airvpn") REMOVED (#668).
-# It matched the log line `reconnect triggered`, written by the entrypoint's
-# own degradation probe. #611/#627 removed that probe - the kill -USR2 recovery
-# it drove could not recover a lost handshake, it only rebuilt tun0 from a
-# cached profile without re-logging in to AirVPN. The string has not been
-# emitted since (images/airvpn-bluetit/entrypoint.sh, #611/PR #666, live from
-# digest sha256:38021e42 / PR #667). This rule could never fire again, so it
-# was deleted rather than left as a rule that reads as coverage and is not.
-#
-# Degradation detection now belongs to the vpn-picker agent sidecar
-# (container="agent", images/airvpn-bluetit/agent.py), which logs
-# `degradation switch suppressed`, `dropping candidate ... passed no traffic`
-# and `switch reason=... ended with NO tunnel`, and already exports
-# vpn_agent_consecutive_bad_windows / vpn_agent_current_loss_pct /
-# vpn_agent_switches_total via the qbittorrent-vpn-agent ServiceMonitor. A
-# metric-based PrometheusRule on those is the better home for this signal than
-# a log match, and that is now BUILT - see the `servarr-vpn-picker` group in
-# custom-alerts.yaml (#689, #622, #555). Note it does NOT alert on loss or on
-# consecutive_bad_windows: loss reads 10-20% on a healthy loaded tunnel (#732)
-# and the bad-windows gauge is pinned at 0 by the #733 disarm. Read that group's
-# header before adding anything vpn-related here.
-#
-# DO NOT re-add a rule matching "reconnect triggered" - that string is gone
-# from the image and cannot come back without reverting #611/#627.
-#
-# qBittorrent VPN flap IS covered by the restart-count PrometheusRule in
-# custom-alerts.yaml, matching `container=~"qbittorrent|airvpn|agent"` (#622) -
-# a flap can restart `airvpn` or, since the vpn-picker agent shipped, `agent`.
-#
-# LOKI LOGS EVERY QUERY IT RUNS, at level=info, including the query text (#910).
-# Any rule here whose selector is not namespace-scoped and whose pattern is a
-# literal string will eventually match its own echo. Same class as #751. Before
-# adding a rule with `{namespace=~".+"}`, add the `!= `query=`` guard or scope
-# the selector to a namespace the ruler does not run in.
-#
-# Audit done for #910: only PodPanicOrFatal (now guarded) and CredentialInLogs
-# use the unbounded `{namespace=~".+"}` selector. ServarrErrorSpike
-# (namespace="servarr"), PostgresPanic / PostgresFatalSpike / PostgresDeadlock
-# (namespace="postgres-system") and AuthentikLoginFailures
-# (namespace="app-authentik") are structurally immune: the ruler runs in
-# `observability` and those selectors cannot reach it. That is design, not luck -
-# it corrects #910's claim that AuthentikLoginFailures is safe only by luck.
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: loki-log-alerts
   namespace: observability
   labels:
-    # Matches the rules sidecar's LABEL=loki_rule selector.
     loki_rule: "1"
   annotations:
-    # kiwigrid k8s-sidecar: write this ConfigMap's files into /rules/1 (tenant 1)
-    # so the multi-tenant ruler loads them for the tenant promtail writes to.
     k8s-sidecar-target-directory: "/rules/1"
 data:
   log-alerts.yaml: |
     groups:
-      # A — application error spikes across the servarr stack
-      #     (sonarr/sonarr2/radarr/qbittorrent/prowlarr/bazarr). Threshold is a
-      #     conservative starting point; tune against observed steady-state.
       - name: servarr-app-errors
         rules:
           - alert: ServarrErrorSpike
@@ -98,38 +30,8 @@ data:
                 Explore → Loki:
                 {namespace="servarr", container="{{ $labels.container }}"} |~ `(?i)error`
 
-      # D — cluster-wide safety net for hard failures in any namespace.
-      #     Specific tokens (not bare "error") to stay low-noise.
       - name: cluster-fatal
         rules:
-          # The `!= `query=`` line filter is load-bearing (#910). Loki logs the
-          # TEXT of every query it runs at level=info: three lines per rule
-          # evaluation (caller=compat.go:68, engine.go:274, metrics.go:237),
-          # plus a line per querier/frontend hop, plus loki-gateway's nginx
-          # access-log line for the query URL. Promtail ships all of them back,
-          # and `{namespace=~".+"}` includes `observability`, so this rule
-          # counted its own output, permanently true, with zero genuine matches.
-          # The rule's threshold is 5. Sending both exprs to the Loki query API
-          # (`/loki/api/v1/query`, header `X-Scope-OrgID: 1`) on 2026-08-21
-          # returned counts between 15 and 25 lines/5m in the `observability`
-          # namespace for the unguarded expr, and 0 series for the guarded one.
-          # The count moves because each query adds its own echo lines to the
-          # window being counted: measuring it perturbs it. What is stable is
-          # the relationship - the unguarded expr sits far above 5 continuously
-          # while none of the matches are genuine, and the guarded expr returns
-          # no series at all. Expect a different number when you re-run it, and
-          # compare it against the threshold of 5, not against 15 or 25.
-          # `git log 7613e8b` dates
-          # the rule to 2026-06-15, so it self-fired from then until #910.
-          # The guard is `query=` and not a pod/component exclusion because the
-          # echoes are not all `component=ruler`: compat.go:68 carries
-          # `rule_name=` and no component label at all, and querier, frontend
-          # and the gateway each carry their own. `query=` is the one token
-          # every Loki query-log line has, so a single filter kills all of them
-          # and survives Loki version bumps and caller renames.
-          # Do NOT "fix" this with `pod!~"loki-.*"` instead: that also blinds
-          # the rule to a real Loki crash, which is exactly what it is for - a
-          # Go goroutine dump contains no `query=`.
           - alert: PodPanicOrFatal
             expr: |
               sum by (namespace) (
@@ -146,10 +48,6 @@ data:
                 namespace {{ $labels.namespace }}. Identify the offending pod in
                 Grafana → Explore → Loki and investigate.
 
-      # B — Postgres (CloudNativePG). Logs are JSON with the server line under
-      #     record.error_severity. Match ONLY severe events; the benign, chatty
-      #     `WARNING ... you don't own a lock of type ExclusiveLock` is excluded
-      #     by matching FATAL/PANIC/"deadlock detected" rather than bare severity.
       - name: postgres-health
         rules:
           - alert: PostgresPanic
@@ -198,10 +96,6 @@ data:
                 A deadlock was detected in the last 10m. One transaction was
                 rolled back. Investigate concurrent writers (servarr / authentik).
 
-      # C — Authentik failed logins (brute-force signal). Authentik logs the
-      #     audit action `login_failed`. NOTE: no failed-login sample was
-      #     available when authored — the alternate phrasings below hedge the
-      #     match; confirm against a real failed login and tighten if needed.
       - name: authentik-auth
         rules:
           - alert: AuthentikLoginFailures
@@ -221,90 +115,8 @@ data:
                 Grafana → Explore → Loki:
                 {namespace="app-authentik"} |~ `login_failed`
 
-      # F — credentials leaking into logs (#702 box 4). This is a REGRESSION
-      #     detector, not a spike detector, so the threshold is > 0 rather than
-      #     a tuned number.
-      #
-      #     History: Traefik's access log records the full request URI, and the
-      #     *arr integrations used to authenticate with `?apikey=` in the query
-      #     string. That put live API keys into Loki at 20,984 lines/24h for
-      #     months of retention (#702, #730 - which forced a rotation of every
-      #     key involved). #561/PR #744 fixed the cause by moving the in-cluster
-      #     callers to internal Service DNS so those calls never reach Traefik.
-      #
-      #     Steady state after that fix is a MEASURED ZERO - verified on a 90s
-      #     live Traefik tail and via Loki over 2m/5m/10m windows, with
-      #     servarr-*-api route traffic also at 0. That is why `> 0` is the right
-      #     threshold and needs no tuning: there is no baseline noise to sit
-      #     above. Any hit means a caller was repointed back at a public
-      #     hostname, or a new integration was configured the old way.
-      #
-      #     Deliberately NOT restricted to namespace="traefik-system": the point
-      #     is to catch a credential in ANY log stream, including an app that
-      #     starts logging its own request URLs (the #634 shape, where Sonarr
-      #     logged its Postgres password at Info level).
-      #
-      #     The regex matches the key NAME plus a value, never a specific key, so
-      #     it keeps working across rotations. `for: 0m` because a single
-      #     occurrence is already the incident - waiting to confirm just means
-      #     more copies land in storage.
-      #
-      #     VALIDATED against live Loki before merge, both directions:
-      #       last 10m : 0       - silent at steady state, no false positives
-      #       last 24h : 21130   - would have caught the leak
-      #     Breakdown over that 24h:
-      #       traefik-system/traefik  20749   the ?apikey= URLs, fixed by #561
-      #       servarr/sonarr            359   <-- NOT Traefik. This is #634.
-      #       servarr/sonarr2            10
-      #
-      #     STALE AS OF #755 - READ BEFORE TRIAGING THE FIRST FIRING. The
-      #     paragraph above describes this rule's behavior at merge time (#748),
-      #     BEFORE #749/#750/#753 shipped promtail-side redaction. Those PRs
-      #     replace the credential VALUE with `<REDACTED>` before the line ever
-      #     reaches Loki, so the regex below (which requires the value itself,
-      #     `[A-Za-z0-9._~+/-]{8,}`, right after the key) structurally cannot
-      #     match `password=<REDACTED>` anymore. Verified live 2026-08-03:
-      #     restarting sonarr reproduced the #634 plaintext password in the raw
-      #     pod log and incremented promtail_custom_credential_lines_redacted_total,
-      #     but CredentialInLogs stayed `inactive` the whole time - it no longer
-      #     fires for the sonarr/radarr/prowlarr Postgres-connection-string shape.
-      #     That shape is now caught by the counter-based CredentialRedactedFromLogs
-      #     in custom-alerts.yaml instead (group credential-redaction) - read that
-      #     rule's header too, it explains the pairing.
-      #
-      #     This rule's remaining job is narrower than it was at merge: it is now
-      #     a catch-all for credential SHAPES the promtail redaction regex does
-      #     NOT recognise (a key name it doesn't match, or a value shorter/odder
-      #     than its charset) - i.e. a gap in the redaction regex - plus any
-      #     stream promtail doesn't scrape. If this fires with container=traefik,
-      #     it still means a caller went back to a public hostname (#561-class
-      #     regression) or a new ?apikey= integration. If it fires with
-      #     container=sonarr/sonarr2/radarr/prowlarr, do NOT assume "#634 again,
-      #     expected" as the pre-#755 guidance said - that path is now blocked by
-      #     redaction, so a firing there means the redaction regex has a gap for
-      #     whatever key/value shape appeared. Compare against promtail's regex
-      #     in 2-k3s/10.observability/promtail-values.yaml and widen it, don't
-      #     just silence this rule.
       - name: credential-leak
         rules:
-          # NO `!= `query=`` GUARD HERE, deliberately (#910). This rule has the
-          # same unbounded `{namespace=~".+"}` selector as PodPanicOrFatal, but
-          # it exists to catch `?apikey=` in Traefik access logs, and a request
-          # URI can legitimately contain `query=` - the guard would be a false
-          # negative on a severity: critical security rule. It is not needed:
-          # this rule's own echoed regex renders as
-          # `client_secret)=[A-Za-z0-9._~+/-]{8,}`, with a `)` before the `=`,
-          # so the alternation cannot match its own query log line.
-          # Point-in-time check, 2026-08-21: the expr below, copied verbatim out
-          # of this file and sent to the Loki query API over a 24h range,
-          # returned 0 series. Copy it verbatim when you re-run it. The
-          # alternation is exactly
-          # `apikey|api_key|api-key|x-api-key|passwd|password|client_secret`, and
-          # an approximation such as `token|api_?key` matches 3 unrelated lines,
-          # which is the difference between "safe" and "false alarm".
-          # That safety is positional, not structural: reordering the alternation
-          # so a key NAME ends the group would make this rule self-fire the way
-          # PodPanicOrFatal did.
           - alert: CredentialInLogs
             expr: |
               sum by (namespace, container) (
@@ -333,6 +145,3 @@ data:
                 query and widens the exposure. Locate by route/container:
                 {namespace="{{ $labels.namespace }}"} |~ `apikey=`
 
-      # Group E (airvpn-bluetit / AirVPNBluetitReconnecting) removed here -
-      # see the file header comment for why. Do not re-add a rule matching
-      # "reconnect triggered": that log line no longer exists in the image.

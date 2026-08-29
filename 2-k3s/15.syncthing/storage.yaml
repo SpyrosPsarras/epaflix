@@ -1,8 +1,4 @@
 ---
-# Node-pinned local storage for Syncthing. The data lives on a 1 TiB ext4
-# disk on evanthoulaki local-raid (hardware RAID), mounted at
-# /mnt/syncthing-data inside k3s-worker-63. A `local` volume + nodeAffinity
-# pins the pod to that node (the disk is host-local, not network storage).
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:

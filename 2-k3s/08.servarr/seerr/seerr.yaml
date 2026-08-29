@@ -1,13 +1,4 @@
 ---
-# Seerr - Media Request Management (single canonical deployment)
-#
-# This is the ONLY media-request Deployment/Service in the stack — the
-# redundant `jellyseerr` Deployment has been retired (consolidated here).
-# This is a NAME consolidation, not an image migration: it runs the
-# fallenbagel/jellyseerr:preview-OIDC fork image (UID 568) because OIDC is
-# not in any stable seerr release. The jellyseerr-named data resources are
-# retained legacy names (no migration): PVC jellyseerr-config, Postgres
-# DB/user jellyseerr, and the jellyseerr-* keys in the servarr-postgres Secret.
 
 apiVersion: apps/v1
 kind: Deployment
@@ -17,9 +8,6 @@ metadata:
   labels:
     app: seerr
   annotations:
-    # Reloader (#299): rolls on servarr-postgres rotation (shared by
-    # bazarr/lingarr/prowlarr/radarr/seerr, so all 5 restart together on a
-    # credential change — accepted, see PR for the tradeoff).
     secret.reloader.stakater.com/reload: "servarr-postgres"
 spec:
   replicas: 1
@@ -38,23 +26,11 @@ spec:
           labelSelector:
             matchLabels:
               app: seerr
-      # Security context for Jellyseerr OIDC preview (UID 568)
       securityContext:
         runAsUser: 568
         runAsGroup: 568
         fsGroup: 568
       initContainers:
-        # Seed the /app/config PVC from the SOPS-encrypted seerr-config-seed
-        # Secret (issue #518). This codifies settings.json (service definitions,
-        # main API key, Sonarr/Radarr instance config) in git so a freshly
-        # re-provisioned local-path PVC comes up pre-configured instead of
-        # empty, and durably captures fixes that were previously PVC-only
-        # (e.g. #253's is4k flag flip, #522's Sonarr2 seriesType fix).
-        #
-        # NON-CLOBBERING: only copied when settings.json does NOT already
-        # exist on the PVC. On a populated PVC this is a no-op — the app
-        # rewrites settings.json at runtime, and this never overwrites live
-        # state. Same pattern as newtarr's seed-config initContainer (#137).
         - name: seed-config
           image: busybox:1.36
           securityContext:
@@ -80,18 +56,6 @@ spec:
               readOnly: true
       containers:
         - name: seerr
-          # Fork image, pinned for OIDC only (#218). Nothing bumps this line:
-          # Renovate sets no kubernetes-manager file pattern, and image-updater
-          # was retired (#192/#265). The tag itself is mutable and the pull
-          # policy is Always, so the fork still moves under us on every restart.
-          # Unpin condition - a stable seerr tag whose git tree carries OIDC:
-          #   STABLE=$(gh api repos/seerr-team/seerr/releases \
-          #     --jq '[.[]|select(.draft==false and .prerelease==false)][0].tag_name')
-          #   gh api "repos/seerr-team/seerr/git/trees/$STABLE?recursive=1" \
-          #     --jq '[.tree[].path|select(test("oidc|openid";"i"))]'
-          # Non-empty -> migrate to ghcr.io/seerr-team/seerr:$STABLE (destructive,
-          # owner-gated: see #218). Checked weekly by
-          # .github/workflows/seerr-oidc-watch.yml, which reopens #218 on change.
           image: fallenbagel/jellyseerr:preview-OIDC
           imagePullPolicy: Always
           env:
@@ -101,7 +65,6 @@ spec:
               value: "568"
             - name: TZ
               value: "Europe/Oslo"
-            # PostgreSQL database configuration (same as jellyseerr)
             - name: DB_TYPE
               value: "postgres"
             - name: DB_HOST
@@ -149,17 +112,6 @@ spec:
             initialDelaySeconds: 120
             timeoutSeconds: 10
             periodSeconds: 10
-          # NO cpu limit, on purpose (#912). #912 asked whether seerr was a real
-          # workload problem. Point-in-time measurement, 2026-08-21. These
-          # numbers drift, so re-run the queries rather than trusting them:
-          #   sum(rate(container_cpu_cfs_throttled_periods_total{container="seerr"}[24h]))
-          #     / sum(rate(container_cpu_cfs_periods_total{container="seerr"}[24h]))
-          #     -> 0.452
-          #   quantile_over_time(0.99, sum by (pod) (rate(container_cpu_usage_seconds_total{container="seerr"}[5m]))[24h:5m])
-          #     -> 0.0501 cores
-          # 45.2% of CFS periods throttled at 10% of the old 500m limit is not a
-          # workload problem. It is the same CFS-granularity shape as the
-          # observability exporters, so the same fix. The 2Gi memory limit stays.
           resources:
             requests:
               memory: "256Mi"
@@ -169,11 +121,7 @@ spec:
       volumes:
         - name: config
           persistentVolumeClaim:
-            # Reusing the jellyseerr config PVC
             claimName: jellyseerr-config
-        # SOPS-encrypted seed config (issue #518), reconciled by the servarr
-        # ksops generator from _shared/secrets/seerr-config-seed.enc.yaml.
-        # Consumed only by the seed-config initContainer.
         - name: seed
           secret:
             secretName: seerr-config-seed

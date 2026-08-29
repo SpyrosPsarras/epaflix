@@ -1,10 +1,3 @@
-# vpn-picker scorer, included from 2-k3s/08.servarr/kustomization.yaml and so
-# owned by the existing `servarr` ArgoCD Application. No new Application - the
-# scorer writes to the servarr-media PVC, which is namespaced in `servarr`.
-#
-# The airvpn-api-key Secret is NOT listed here. Every servarr Secret is
-# reconciled through the one ksops generator in _shared/secrets/, and a nested
-# kustomization cannot reach it.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:

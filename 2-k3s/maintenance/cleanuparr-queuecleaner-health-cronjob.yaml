@@ -1,52 +1,4 @@
 ---
-# Hourly cleanuparr QueueCleaner health check (Issue #606).
-#
-# QueueCleaner's only log line, ever, is the startup trigger — a healthy
-# no-op run and a silently broken one look identical in the logs (see #606
-# for the full investigation, including the #467 27-day silent-skip
-# precedent this is meant to catch earlier next time). cleanuparr's own
-# `/api/stats` already tracks a per-job run history (totalRuns/completed/
-# failed/lastRunAt/nextRunAt) — this job polls it and turns "stale or
-# failed" into a real alert instead of something only found by manually
-# curling the API during triage.
-#
-# Verified LIVE response shape (2026-08-03, `GET /api/stats?hours=24` with
-# `X-Api-Key`, from the real cleanuparr pod):
-#   {
-#     "jobs": {
-#       "byType": {
-#         "QueueCleaner": {
-#           "totalRuns": 169, "completed": 169, "failed": 0,
-#           "lastRunAt": "2026-08-03T15:00:00.0074189+00:00",
-#           "nextRunAt": "2026-08-03T16:00:00+00:00"
-#         },
-#         ... (BlacklistSynchronizer, DownloadCleaner, MalwareBlocker, Seeker, ...)
-#       },
-#       "timeframeHours": 24
-#     },
-#     ...
-#   }
-# lastRunAt carries a variable-length fractional-second component (7 digits
-# above, cleanuparr's .NET `DateTime` serialization) — datetime.fromisoformat
-# only handles that reliably from Python 3.11+, hence python:3.13-alpine
-# rather than shell `date -d` (busybox date cannot parse this format at all).
-#
-# This does NOT catch the "succeeded but wrong" class named in #606's own
-# closing analysis (e.g. the #467 forward-auth-200-but-wrong-page failure,
-# which left job counters green) — that needs cleanuparr's independent
-# HealthCheckBackgroundService probe, tracked separately if it turns out
-# job-failure alone isn't enough in practice.
-#
-# Exit-code contract, same as the sibling detectors in this directory: NON-
-# ZERO on `failed > 0` OR a stale `lastRunAt` OR any fetch failure (fail
-# LOUD, never a silent pass), so the chart's default KubeJobFailed rule +
-# the scoped CleanuparrQueueCleanerHealthCheckFailed PrometheusRule
-# (2-k3s/10.observability/alertmanager-config/custom-alerts.yaml) fire and
-# route through the working ntfy receiver (#568/#574).
-#
-# Credentials: cleanuparr-api-key Secret, lives in the SERVARR overlay
-# (2-k3s/08.servarr/_shared/secrets/cleanuparr-api-key.enc.yaml) for the same
-# cross-App, sops-free-maintenance-dir reason as prowlarr-api-key above.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -74,9 +26,6 @@ data:
         "CLEANUPARR_URL", "http://cleanuparr.servarr.svc.cluster.local:30263"
     )
     API_KEY = os.environ.get("CLEANUPARR_API_KEY", "")
-    # 3x cleanuparr's own hourly QueueCleaner cadence — tolerates one missed
-    # run plus scheduling jitter before alerting (same reasoning as
-    # PostgresBackupAgeHigh's 36h threshold on a daily backup).
     STALE_THRESHOLD_SECONDS = int(os.environ.get("STALE_THRESHOLD_SECONDS", "10800"))
 
 
@@ -130,7 +79,6 @@ data:
     def selftest():
         now = datetime.datetime(2026, 8, 3, 15, 30, tzinfo=datetime.timezone.utc)
 
-        # Real live shape (2026-08-03), 30 minutes after lastRunAt: OK.
         ok, reason = evaluate(
             {
                 "totalRuns": 169, "completed": 169, "failed": 0,
@@ -141,34 +89,27 @@ data:
         )
         assert ok, reason
 
-        # A recorded failure must fail even if lastRunAt is fresh.
         ok, reason = evaluate(
             {"totalRuns": 10, "completed": 9, "failed": 1, "lastRunAt": "2026-08-03T15:00:00+00:00"},
             now,
         )
         assert not ok, "failed>0 must fail the check"
 
-        # Stale lastRunAt (4h old, over the 3h default threshold) must fail.
         ok, reason = evaluate(
             {"totalRuns": 5, "completed": 5, "failed": 0, "lastRunAt": "2026-08-03T11:30:00+00:00"},
             now,
         )
         assert not ok, "stale lastRunAt must fail the check"
 
-        # Missing job entry entirely (e.g. a cleanuparr upstream rename) must
-        # fail, never silently pass.
         ok, reason = evaluate(None, now)
         assert not ok, "a missing QueueCleaner entry must fail the check"
 
-        # Unparseable lastRunAt must fail, not crash.
         ok, reason = evaluate(
             {"totalRuns": 1, "completed": 1, "failed": 0, "lastRunAt": "not-a-date"},
             now,
         )
         assert not ok, "unparseable lastRunAt must fail the check"
 
-        # A naive (no-offset) lastRunAt within threshold must still be OK —
-        # exercises the tzinfo-less branch.
         ok, reason = evaluate(
             {"totalRuns": 1, "completed": 1, "failed": 0, "lastRunAt": "2026-08-03T15:00:00"},
             now,
@@ -221,21 +162,13 @@ metadata:
   labels:
     app: cleanuparr-queuecleaner-health
 spec:
-  # Hourly, offset 25m past the hour so it runs after QueueCleaner's own
-  # :00 hourly trigger (giving it time to actually run/finish first).
   schedule: "25 * * * *"
   concurrencyPolicy: Forbid
-  # #841: a schedule missed during a control-plane blip is stale by the
-  # time it could be retried, so skip it rather than run it late.
   startingDeadlineSeconds: 300
   successfulJobsHistoryLimit: 6
   failedJobsHistoryLimit: 6
   jobTemplate:
     spec:
-      # #841: under Forbid, a run that hangs blocks every later run and
-      # leaves no failed Job to alert on - the check goes quiet and quiet
-      # reads as healthy. Observed runtime 10-12s; this deadline is
-      # HTTP check against Cleanuparr.
       activeDeadlineSeconds: 300
       backoffLimit: 0
       ttlSecondsAfterFinished: 2592000  # keep 30 days

@@ -1,37 +1,4 @@
 ---
-# ArgoCD Application: Authentik (SSO / IdP).
-#
-# Source:       this repo, path 2-k3s/07.authentik-deployment (kustomization.yaml
-#               with `helmCharts:` that inflates the upstream authentik chart
-#               at build time — requires kustomize.buildOptions: --enable-helm
-#               on argocd-cm, set via 2-k3s/11.argocd/helm-values.yaml).
-# Destination:  in-cluster `app-authentik` namespace.
-# Sync:         AUTOMATED with selfHeal (enabled 2026-05-19 after the
-#               first manual sync at revision 634b800 landed clean —
-#               adoption diff was tracking-id annotation + a-k-i-of-instance
-#               label only). prune ENABLED 2026-05-25 — 6-day clean soak
-#               on selfHeal, picked as the lowest-risk canary for the
-#               repo-wide prune rollout tracked in issue #21.
-#
-# Image bumps:
-#   Authentik image + chart bumps are delivered by Renovate (grouped in one
-#   PR via the `authentik` packageRule in .github/renovate.json so the chart
-#   version and container image move together; MINOR/MAJOR are manual-merge,
-#   only patch auto-merges). The old ArgoCD Image Updater git write-back was
-#   retired (#192).
-#
-# Why single-source kustomize-with-helm and not Helm multi-source:
-#   Keeping the Application a single git source (kustomize-with-helm inflating
-#   the upstream chart at build time) avoids ArgoCD's multi-source Helm repo
-#   credential validation path for `charts.goauthentik.io`.
-#
-# Secrets:
-#   The 3 sensitive values (AUTHENTIK_SECRET_KEY, AUTHENTIK_POSTGRESQL__PASSWORD,
-#   AUTHENTIK_EMAIL__PASSWORD) live in K8s Secret `authentik-app-secrets`
-#   (applied imperatively from secret-app.yaml). global.envFrom on the
-#   chart's helm-values.yaml merges them onto server + worker. The chart's
-#   bundled `authentik` Secret carries the non-sensitive config but omits
-#   those three keys (empty strings in helm-values.yaml).
 
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -53,7 +20,6 @@ spec:
       prune: true
     syncOptions:
       - ServerSideApply=true
-  # Quiet noisy controller-mutated fields once auto-sync is on.
   ignoreDifferences:
     - group: apps
       kind: Deployment

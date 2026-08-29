@@ -1,21 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Every kubectl call in this script runs against the homelab cluster, whatever
-# the ambient kubeconfig says (issue #971). Override with KUBECTL_CONTEXT=... .
 : "${KUBECTL_CONTEXT:=epaflix}"
 kubectl() { command kubectl --context "$KUBECTL_CONTEXT" "$@"; }
 
-# Bootstrap-only install for cert-manager (jetstack chart).
-#
-# Day-to-day cert-manager lifecycle is owned by ArgoCD Application "cert-manager"
-# (2-k3s/11.argocd/apps/app-cert-manager.yaml), which kustomize-with-helm renders
-# the same jetstack chart from this directory's `kustomization.yaml` +
-# `values/cert-manager-values.yaml`.
-#
-# Run this script ONLY for the very first install (fresh cluster, before ArgoCD
-# is up) — it installs the CRDs and the operator imperatively so ArgoCD can
-# then adopt the ClusterIssuers without a chicken-and-egg.
 
 cd "$(dirname "$0")"
 

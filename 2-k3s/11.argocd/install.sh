@@ -1,19 +1,7 @@
 #!/usr/bin/env bash
 
-# Every kubectl call in this script runs against the homelab cluster, whatever
-# the ambient kubeconfig says (issue #971). Override with KUBECTL_CONTEXT=... .
 : "${KUBECTL_CONTEXT:=epaflix}"
 kubectl() { command kubectl --context "$KUBECTL_CONTEXT" "$@"; }
-# Install / upgrade ArgoCD on the k3s cluster.
-#
-# Order:
-#   1. namespace.yaml
-#   2. oidc-secret.yaml (placeholder — real values from secrets.enc.yaml)
-#   3. helm upgrade --install argocd … helm-values.yaml
-#   4. ingress.yaml (after Service exists)
-#   5. image-updater install (separate script)
-#
-# Re-run is safe: helm upgrade is idempotent.
 
 set -euo pipefail
 
@@ -24,8 +12,6 @@ echo ">>> 1/4  apply namespace"
 kubectl apply -f "${SCRIPT_DIR}/namespace.yaml"
 
 echo ">>> 2/4  helm upgrade --install argocd (chart ${CHART_VERSION})"
-# The chart creates `argocd-secret` itself with a random server.secretkey;
-# OIDC client-id/secret are merge-patched AFTER install (see step 4 notes).
 helm repo add argo https://argoproj.github.io/argo-helm 2>/dev/null || true
 helm repo update argo
 helm upgrade --install argocd argo/argo-cd \

@@ -1,21 +1,16 @@
-# Service configuration - fixed IP via kube-vip
 service:
   enabled: true
   type: LoadBalancer
   spec:
     loadBalancerIP: 192.168.10.101
   annotations: {}
-  # Dedicated internal-only frontend for the Remote Pi native client. This is
-  # additive: the default public Service on 192.168.10.101 remains unchanged.
   additionalServices:
     internal:
       spec:
         type: LoadBalancer
         loadBalancerIP: 192.168.10.102
-        # Prevent an alternate path through a NodePort on every K3s node.
         allocateLoadBalancerNodePorts: false
 
-# NOTE: deployment.replicas is set below with initContainers
 
 podSecurityContext:
   fsGroup: 986
@@ -24,12 +19,10 @@ securityContext:
   runAsUser: 986
   runAsGroup: 986
 
-# Ports configuration
 ports:
   web:
     port: 80
     exposedPort: 80
-    # Redirect HTTP to HTTPS
     http:
       redirections:
         entryPoint:
@@ -39,58 +32,30 @@ ports:
   websecure:
     port: 443
     exposedPort: 443
-  # Remote Pi HTTPS/WSS. Listen on 8443 in the shared Traefik pod, but expose
-  # it as 443 only on the dedicated traefik-internal Service (192.168.10.102).
   internal:
     port: 8443
     exposedPort: 443
     expose: {default: false, internal: true}
-  # Syncthing sync protocol (BEP). Dedicated TCP entrypoint so the sync port
-  # rides the existing Traefik LB (192.168.10.101) instead of a new LB IP.
-  # Routed by 2-k3s/15.syncthing/ingressroute-tcp.yaml (HostSNI(`*`), passthrough).
   syncthing:
     port: 22000
-    # Custom ports do NOT inherit the chart's default expose; set it so the
-    # port lands on the LoadBalancer Service (.101), not just the pod.
     expose:
       default: true
     exposedPort: 22000
     protocol: TCP
 
-# Dashboard (optional - secure it!)
 ingressRoute:
   dashboard:
-    # Git tracks the SSO-protected dashboard route in ingress/traefik-dashboard-sso.yaml.
     enabled: false
     matchRule: Host(`traefik.epaflix.com`)
     entryPoints: ["websecure"]
     tls:
       certResolver: cloudflare
 
-# Logs
-# Traefik chart v41 (PR #360) reorganized logging values: general logging moved to
-# top-level `log:` (level set directly, no `general:` nesting) and access logging to
-# top-level `accessLog:`. The chart's values.schema.json is now `additionalProperties:
-# false`, so the old `logs:` key hard-fails the ArgoCD helm render. See issue #384.
 log:
   level: INFO
 accessLog:
   enabled: true
 
-# Prometheus metrics (#352). Traefik already serves request metrics on the in-pod
-# `metrics` entrypoint (port 9100, NOT exposed on the public LB). This enables the
-# ClusterIP metrics Service so the metrics port is scrapeable.
-# addServicesLabels gives per-service `code`/`service` labels on
-# traefik_service_requests_total, which the TraefikHigh5xxRate alert in
-# 2-k3s/10.observability/alertmanager-config/custom-alerts.yaml depends on.
-#
-# We deliberately DO NOT use the chart's `serviceMonitor.enabled`: its template
-# hard-fails (`fail "You have to deploy monitoring.coreos.com/v1 first"`) under
-# plain `helm template`, which is exactly how ArgoCD renders this app
-# (`kustomize build --enable-helm`, no --helm-api-versions). That would break the
-# whole Traefik app render. Instead a standalone ServiceMonitor manifest
-# (servicemonitor.yaml) is added to the kustomization — same pattern as
-# pve-exporter — which ArgoCD applies directly (the CRD already exists in-cluster).
 metrics:
   prometheus:
     addServicesLabels: true
@@ -98,11 +63,7 @@ metrics:
     service:
       enabled: true
 
-# Cloudflare DNS Challenge for Let's Encrypt
-# NOTE: certificatesResolvers here is NOT used - we use additionalArguments instead
-# to ensure correct storage path /data/acme.json (not /data/acme/acme.json)
 
-# Environment variables for Cloudflare API token
 env:
   - name: CF_DNS_API_TOKEN
     valueFrom:
@@ -110,25 +71,16 @@ env:
         name: cloudflare-api-token
         key: api-token
 
-# Persistence for ACME certificates - using local-path (PVC already exists)
 persistence:
   enabled: true
   storageClass: local-path
   accessMode: ReadWriteOnce
   size: 128Mi
 
-# Deployment configuration
 deployment:
   replicas: 1 # ACME requires single replica for certificate management
-  # Reloader (#299): CF_DNS_API_TOKEN is a env-var secretKeyRef, so it
-  # doesn't auto-roll when cloudflare-api-token rotates — Traefik's own ACME
-  # client needed a manual `kubectl rollout restart` once already (cert-manager
-  # reads the same Secret live via the API, unaffected). Scoped to the exact
-  # Secret, not reloader.stakater.com/auto.
   annotations:
     secret.reloader.stakater.com/reload: "cloudflare-api-token"
-  # Init container to fix acme.json permissions (must be 600 for Traefik)
-  # This ensures permissions are correct even after node reboots or pod restarts
   initContainers:
     - name: fix-acme-permissions
       image: busybox:latest
@@ -141,7 +93,6 @@ deployment:
         - name: data
           mountPath: /data
 
-# Additional arguments
 additionalArguments:
   - "--providers.kubernetesingress.ingressclass=traefik"
   - "--providers.kubernetescrd"
@@ -153,7 +104,6 @@ additionalArguments:
   - "--certificatesresolvers.cloudflare.acme.dnschallenge.resolvers=1.1.1.1:53,1.0.0.1:53"
   - "--certificatesresolvers.cloudflare.acme.dnschallenge.delaybeforecheck=30"
 
-# Resource limits
 resources:
   requests:
     cpu: 100m
@@ -161,5 +111,3 @@ resources:
   limits:
     cpu: 500m
     memory: 512Mi
-# Run on worker nodes (default - no tolerations or nodeSelector needed)
-# Masters are tainted NoSchedule, so workloads naturally schedule to workers

@@ -1,14 +1,4 @@
 ---
-# Bazarr Auto-Translate - Automatic subtitle translation
-#
-# BAZARR_BASE_URL uses internal Service DNS (#752), not the public
-# bazarr.epaflix.com hostname. This pod runs on worker-61 and hit the public
-# hostname for its hourly wanted-subtitles scan (`/api/movies/wanted`,
-# `/api/episodes/wanted`, `/api/movies?radarrid[]=...`) - the one in-cluster
-# caller #561 missed, because that fix was scoped from the `?apikey=` log
-# sample and this caller authenticates with a header, not a query string.
-# Same pattern as #468/#561: internal DNS for the API call, public hostname
-# only where a UI needs it (this app has no UI, so no external_url field).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -17,10 +7,6 @@ metadata:
   labels:
     app: bazarr-autotranslate
   annotations:
-    # Reloader (#299): env-var secretKeyRef consumers don't auto-roll on
-    # Secret rotation otherwise. Kept scoped to the exact Secret, not
-    # reloader.stakater.com/auto, to avoid surprise reloads from unrelated
-    # namespace Secret edits.
     secret.reloader.stakater.com/reload: "bazarr-autotranslate-secret"
 spec:
   replicas: 1

@@ -1,9 +1,4 @@
 ---
-# Non-secret Bluetit directives. Kept out of the Secret on purpose so that
-# server-pool changes are readable in a PR diff.
-#
-# Syntax is DIRECTIVE<whitespace>VALUE - not `key = value`. Copied from the
-# shipped bluetit.rc, which this fragment is appended to at container start.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -11,169 +6,26 @@ metadata:
   namespace: servarr
 data:
   bluetit.conf: |
-    # quick = connect to an AirVPN-recommended server from the whitelist,
-    # minus the blacklist. This is the whole point of using Bluetit: WireGuard
-    # cannot fail over inside one config, so the client has to choose.
     airconnectatboot            quick
     airvpntype                  wireguard
     airport                     1637
 
-    # REVERTED to a country whitelist after a live failure on 2026-07-31.
-    #
-    # `airwhiteserverlist Dedalus,Piautos,Dalim,Menkent,Felix,Adhil,Ashlesha`
-    # was correct in intent - it excluded the 2 Gbit boxes that caused the
-    # original outage - but Bluetit rejected it outright at boot:
-    #     Selected user key: Default
-    #     ERROR: Reached end of AirVPN server list. No suitable server found.
-    # The pod never got past Init, so qBittorrent never started. All seven
-    # names were verified present in the manifest the daemon actually loaded,
-    # so the cause is NOT a typo or a stale manifest and is still unexplained.
-    #
-    # This country list is the configuration that demonstrably connected on a
-    # scratch pod the same day. Do not re-narrow it to named servers without
-    # first reproducing a successful boot on a scratch pod - see the follow-up
-    # issue for the throughput work this was meant to fix.
     airwhitecountrylist         nl,de,se
 
-    # Belt and braces. These three are already excluded by the whitelist above
-    # - they are 2 Gbit boxes and simply not named in it - but they are the
-    # servers that actually caused the outage (6.7-9% packet loss each, all in
-    # Alblasserdam at 50-57% load, with nl3.vpn.airdns.org rotating between
-    # them), so name them explicitly in case the whitelist is ever widened.
     airblackserverlist          Cygnus,Hassaleh,Kajam
 
-    # Home country. Bluetit auto-detects this correctly via ipleak.net, but
-    # pinning it avoids an outbound call on every start.
     country                     NO
     forbidquickhomecountry      yes
 
-    # Real killswitch, replacing the postStart iptables hack. Upstream draws a
-    # hard line between the two lock directives: `networklock` only holds
-    # DURING THE CONNECTION - if the sidecar restarts (its liveness probe kills
-    # a dead Bluetit) the lock goes down with it, and Kubernetes does NOT
-    # restart or pause the already-running qbittorrent container just because
-    # a sidecar restarted. The new Bluetit takes ~20s to reconnect, and
-    # qBittorrent would keep announcing/dialling peers unprotected for that
-    # whole window. `networklockpersist` holds for the WHOLE BLUETIT SESSION
-    # and takes priority over `networklock` per upstream's README. That is why
-    # we use it here. Do NOT revert this to `networklock` "to simplify" - that
-    # reopens the restart-window leak this exists to close.
-    #
-    # It is NOT unconditional, though (#535, correcting the earlier "sidecar
-    # restart or not" wording here). Measured on a scratch pod, same pod, same
-    # "connected then killed" setup, only the signal differing:
-    #
-    #   clean `goldcrest --disconnect`  lock HOLDS. tun0 gone, OUTPUT policy
-    #                                   still DROP, control probe blocked.
-    #   SIGKILL to bluetit              lock HOLDS. No userspace teardown runs
-    #                                   at all, so the rules simply stay.
-    #   SIGTERM to bluetit              lock DIES. ~1.4s after the signal the
-    #                                   OUTPUT chain is empty and the policy is
-    #                                   back to ACCEPT. Discriminator was a
-    #                                   probe to 1.0.0.1 (never allow-listed):
-    #                                   7ms untunnelled vs 73ms tunnelled to
-    #                                   the same IP seconds earlier.
-    #
-    # The saving grace is that NOTHING IN THIS POD CAN REACH THE SIGTERM CASE.
-    # A kubelet restart - liveness/startup probe failure, `kubectl delete pod`,
-    # a rollout - never signals bluetit. The runtime signals PID 1 only, and
-    # PID 1 here is entrypoint.sh, a /bin/sh script with no `trap`. The kernel
-    # discards a default-disposition signal sent to the init process of a PID
-    # namespace from outside it, so that SIGTERM is dropped on the floor; after
-    # terminationGracePeriodSeconds (30s, qbittorrent.yaml) the runtime SIGKILLs
-    # the whole cgroup and bluetit dies in the column where the lock holds.
-    # Corroborated live on 2026-08-02: the airvpn container's
-    # lastState.terminated.exitCode was 137 (SIGKILL of PID 1 - not 143, not the
-    # entrypoint's own `exit 1`) with reason Error, not OOMKilled, and
-    # startedAt->finishedAt was 209s against a startupProbe budget of 36x5s=180s
-    # plus the 30s grace. Also observed independently in
-    # artifacts/vpn-picker/509-stale-dbus-restart.md, which had to use
-    # `pkill -x bluetit` because `kill 1` "is ignored by the container's own
-    # PID 1".
-    #
-    # Consequence for anyone hardening this later: do NOT add a plain SIGTERM
-    # trap to entrypoint.sh that forwards the signal to bluetit. That is the one
-    # change that would convert today's safe SIGKILL teardown into the single
-    # measured path that drops the lock. If a graceful shutdown is ever wanted,
-    # the trap must run `goldcrest --disconnect` (holds the lock) and must not
-    # SIGTERM the daemon.
-    #
-    # Its two documented side-effects are already covered: manifest refresh is
-    # suspended until reconnected (harmless - the image ships a local manifest
-    # copy, see the Dockerfile), and automatic home-country detection stops
-    # working, which is exactly why `country NO` above is pinned explicitly
-    # rather than left to auto-detect.
-    #
-    # allowprivatenetwork only opens the iptables filter for RFC1918 - it does
-    # NOT make the LAN reachable outbound. The ~35 split routes the WireGuard
-    # session installs actually EXCLUDE RFC1918 (no `10.0.0.0/8`, no
-    # `172.16.0.0/12`, no `192.168.0.0/16` among them) - it's the blunt
-    # `0.0.0.0/1` + `128.0.0.0/1` pair Bluetit installs alongside them that
-    # re-swallows those ranges into tun0, and AirVPN drops it there. Routing
-    # wins over the filter. A LAN host survives this because it has a
-    # link-scope route to its own /24 that beats a /1 - a pod has no such
-    # route, so `/0` loses to `/1` here where it wouldn't on a host. Verified
-    # live: `ip route get 192.168.10.30` and `ip route get 10.43.0.1` both
-    # resolve to `dev tun0`, pings to .30/.101 fail, and the kube API at
-    # 10.43.0.1 is unreachable.
-    #
-    # DNS survives this, but barely (see #517, correcting #512/#513).
-    # `resolv.conf` now lists ONE resolver, `1.1.1.1` (reachable, inside the
-    # tunnel). `192.168.10.30` (Pi-hole, RFC1918) used to be first and was
-    # blackholed exactly like above - it timed out on every lookup and was
-    # dropped in #517. The tunnel-pushed `10.128.0.1` also answers, but it
-    # only exists after connect so it cannot be the pod's only resolver.
-    # End-to-end lookups succeed in well under 100ms (measured
-    # 30-76ms across repeated checks). Before #517 that speed depended on the
-    # image being Alpine/musl: musl queries every configured nameserver in
-    # PARALLEL and takes whichever answers first, so the dead `192.168.10.30`
-    # never got in the way. A glibc image queries resolvers sequentially and
-    # would have burned ~5s timing out on it on EVERY lookup while every
-    # health probe still read green - same silent-failure class as the
-    # restart-window leak `networklockpersist` guards against above. Dropping
-    # .30 removed that dependency, so do NOT add an RFC1918 resolver back
-    # here: it would time out, and on a non-musl image it would stall.
-    #
-    # INBOUND private traffic (WebUI, probes, Service traffic reaching the
-    # pod) still works, which is why nobody noticed. allowping IS genuinely
-    # required: the degradation probe pings the in-tunnel gateway
-    # 10.128.0.1, reachable because it lives inside the tunnel, not because
-    # of anything this directive opens on the LAN.
     networklockpersist          iptables
     allowprivatenetwork         yes
     allowping                   yes
 
-    # airipv6/air6to4 no do NOT stop Bluetit assigning the AirVPN device's IPv6
-    # address to tun0 - that's handled by init-sysctls no longer disabling
-    # IPv6 (see qbittorrent.yaml). These just keep Bluetit from routing our
-    # own IPv6 traffic over the tunnel.
-    #
-    # `airipv6 no` does NOT arm an ip6tables lock - networklockpersist above is
-    # iptables (v4) only. IPv6 is only safe here because the pod currently has
-    # no global IPv6 address to leak from. Revisit this if the cluster ever
-    # goes dual-stack - an ip6tables companion lock would be needed then.
     airipv6                     no
     air6to4                     no
 
-    # REQUIRED. Without it Bluetit throws "Cannot set pushed DNS to system"
-    # because kubelet owns /etc/resolv.conf, and that exception tears down an
-    # already-connected tunnel (goldcrest then reports "Bluetit is not
-    # connected" with no error surfaced). Found on a live scratch-pod run,
-    # 2026-07-30 — the subtlest failure of the bunch.
     ignorednspush               yes
 
-    # Inert under WireGuard. Per the AirVPN-Suite 2.1.0 source,
-    # wireguardclient.cpp never reads this directive - only the OpenVPN
-    # client config does (bluetit.cpp). WireGuardClient::stop() unconditionally
-    # calls wg_del_device() on every disconnect and every reconnect, so tun0
-    # is destroyed and rebuilt regardless of this setting; it only comes back
-    # named tun0 because that is the first free tun<N> slot, not because of
-    # persistence. Kept `yes` harmlessly in case this config ever runs
-    # OpenVPN instead. Nothing here may assume tun0 survives a reconnect -
-    # anything that reconnects must re-assert tun0 (or re-check the device
-    # name) afterwards.
     tunpersist                  yes
 
-    # AirVPN device key. Default = the cluster (10.135.227.175). Nick's VM uses
-    # its own key `nick`, so the two never share key material.
     airkey                      Default

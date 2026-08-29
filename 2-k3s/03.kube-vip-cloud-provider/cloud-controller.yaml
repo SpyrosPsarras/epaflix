@@ -1,7 +1,3 @@
-# kube-vip cloud provider — vendored from upstream v0.0.12.
-# Source: https://raw.githubusercontent.com/kube-vip/kube-vip-cloud-provider/v0.0.12/manifest/kube-vip-cloud-controller.yaml
-# Bumping: replace this file with the same path at a newer tag, then rerender via
-#   kustomize build --enable-helm 2-k3s/03.kube-vip-cloud-provider | kubectl diff -f - --server-side --field-manager=argocd-controller --force-conflicts
 ---
 apiVersion: v1
 kind: ServiceAccount

@@ -5,7 +5,6 @@ metadata:
   name: postgres-daily-backup
   namespace: postgres-system
 spec:
-  # Daily backup at 2:00 AM UTC
   schedule: "0 0 2 * * *"
   backupOwnerReference: self
   cluster:
@@ -14,8 +13,6 @@ spec:
   pluginConfiguration:
     name: barman-cloud.cloudnative-pg.io
 
-  # Online/Hot backup
   immediate: false
 
-  # Suspend to false means backups will run on schedule
   suspend: false

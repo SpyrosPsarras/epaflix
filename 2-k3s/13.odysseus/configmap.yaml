@@ -1,6 +1,4 @@
 ---
-# Non-secret app env for Odysseus. NO secret values, NO NVIDIA_* keys (GPU
-# dropped on k3s). Consumed by the odysseus Deployment via envFrom.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -15,16 +13,9 @@ data:
   LOCALHOST_BYPASS: "false"
   SECURE_COOKIES: "true"
   ALLOWED_ORIGINS: "https://odysseus.epaflix.com"
-  # Hard sandbox: route the agent shell tool through the bastion over SSH (see services/shell/service.py patch).
   SHELL_EXEC_HOST: "bastion"
-  # Models served by the EXISTING remote Ollama on TrueNAS (no GPU on k3s).
   OLLAMA_BASE_URL: "http://192.168.10.200:30068/v1"
   LLM_HOST: "http://192.168.10.200:30068/v1"
-  # Sidecars. Only chromadb is still intra-namespace; searxng has its own
-  # `searxng` namespace and Application, and ntfy moved to `observability`
-  # under the #914 decision, so both are reached by cross-namespace FQDN.
-  # The bare `ntfy` short name no longer resolves from here — and Odysseus
-  # would keep running and simply stop notifying, with no error.
   SEARXNG_INSTANCE: "http://searxng.searxng.svc.cluster.local:8080"
   CHROMADB_HOST: "chromadb"
   CHROMADB_PORT: "8000"

@@ -1,7 +1,4 @@
 ---
-# Proxmox VE Exporter ServiceMonitor
-# Note: Proxmox hosts are clustered - scraping one host returns metrics for the entire cluster
-# We only scrape evanthoulaki (192.168.10.11) to avoid duplicate metrics
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
@@ -15,7 +12,6 @@ spec:
     matchLabels:
       app: pve-exporter
   endpoints:
-    # Scrape evanthoulaki (192.168.10.11) - returns cluster-wide metrics for both nodes
     - port: metrics
       interval: 60s
       scrapeTimeout: 30s
@@ -24,10 +20,6 @@ spec:
         target: ["192.168.10.11"]
         module: ["default"]
       relabelings:
-        # Set instance to the Proxmox cluster endpoint instead of pod IP.
-        # `action: replace` is the Prometheus Operator default — committing it
-        # explicitly so ArgoCD does not see the operator-injected default as
-        # drift under ServerSideApply.
         - action: replace
           targetLabel: instance
           replacement: "192.168.10.11"

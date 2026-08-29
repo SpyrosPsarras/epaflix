@@ -1,5 +1,3 @@
-# Config storage for utility apps (qBittorrent, Homarr)
-# Uses local-path StorageClass with dynamic provisioning
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

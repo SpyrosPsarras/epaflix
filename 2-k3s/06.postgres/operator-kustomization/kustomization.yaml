@@ -1,24 +1,3 @@
-# ArgoCD render dir for the CNPG operator + Barman Cloud Plugin.
-# Owned by ArgoCD Application "cnpg-operator"
-# (2-k3s/11.argocd/apps/app-cnpg-operator.yaml) — adopted under issue #93.
-#
-# Both vendored upstream manifests live HERE (not in sibling dirs) so this
-# kustomization stays within its own root: ArgoCD's repo-server renders with
-# the default `LoadRestrictionsRootOnly`, which rejects `../` references. We
-# deliberately do NOT relax that cluster-wide just to adopt one operator.
-#
-# Deliberately NO `namespace:` transformer: these manifests are mostly
-# cluster-scoped (CRDs, ClusterRoles/Bindings, webhook configs) which must NOT
-# be namespace-rewritten, and the namespaced objects already carry cnpg-system
-# (the operator manifest even ships its own `kind: Namespace`).
-#
-# CNPG operator v1.30.0 (cnpg-operator.yaml) + Barman Cloud Plugin v0.14.0
-# (barman-manifest.yaml). Re-vendor recipes: ../README.md and
-# ../barman-cloud-plugin/README.md.
-#
-# First sync needs a one-time `--force-conflicts` to move field-manager
-# ownership from the imperative `kubectl apply --server-side` bootstrap to
-# "argocd-controller"; see app-cnpg-operator.yaml.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 

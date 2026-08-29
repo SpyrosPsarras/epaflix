@@ -1,25 +1,7 @@
 #!/usr/bin/env bash
 
-# Every kubectl call in this script runs against the homelab cluster, whatever
-# the ambient kubeconfig says (issue #971). Override with KUBECTL_CONTEXT=... .
 : "${KUBECTL_CONTEXT:=epaflix}"
 kubectl() { command kubectl --context "$KUBECTL_CONTEXT" "$@"; }
-# kube-vip Cloud Provider — bootstrap helper.
-#
-# Since 2026-05-25 (Issue #16) this stack is GitOps-managed by ArgoCD via
-# `2-k3s/11.argocd/apps/app-kube-vip-cloud-provider.yaml`. The cloud-controller
-# manifest and the `kubevip` IP-pool ConfigMap both live in this directory
-# (kustomization.yaml). Day-to-day changes go through git → ArgoCD sync.
-#
-# This script remains only for fresh-cluster bootstrap (before ArgoCD itself
-# is up). It applies the same kustomization that the Application later adopts,
-# so the first sync is a no-op (only the tracking-id annotation is added).
-#
-# Bumping kube-vip-cloud-provider: replace `cloud-controller.yaml` with the
-# upstream file at the new tag, render with `kubectl kustomize .`, confirm
-# `kubectl diff` is empty against any unrelated drift, commit, let ArgoCD sync.
-#
-# Pinned version: v0.0.12 (see cloud-controller.yaml header).
 
 set -euo pipefail
 

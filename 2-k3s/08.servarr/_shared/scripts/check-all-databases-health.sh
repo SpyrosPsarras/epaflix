@@ -1,15 +1,10 @@
 #!/bin/bash
 
-# Every kubectl call in this script runs against the homelab cluster, whatever
-# the ambient kubeconfig says (issue #971). Override with KUBECTL_CONTEXT=... .
 : "${KUBECTL_CONTEXT:=epaflix}"
 kubectl() { command kubectl --context "$KUBECTL_CONTEXT" "$@"; }
-# Master Database Health Check Script for All *arr Services
-# Checks Sonarr, Sonarr2, and Radarr databases for duplicates and sequence issues
 
 set -euo pipefail
 
-# Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -30,7 +25,6 @@ SERVICES_CHECKED=0
 SERVICES_HEALTHY=0
 SERVICES_UNHEALTHY=0
 
-# Function to run individual health check
 check_service() {
   local service_name=$1
   local service_dir=$2
@@ -60,12 +54,10 @@ check_service() {
   fi
 }
 
-# Check all services
 check_service "Sonarr (TV Shows)" "sonarr"
 check_service "Sonarr2 (Anime)" "sonarr2"
 check_service "Radarr (Movies)" "radarr"
 
-# Final summary
 echo -e "${CYAN}=========================================="
 echo "Overall Summary"
 echo -e "==========================================${NC}"

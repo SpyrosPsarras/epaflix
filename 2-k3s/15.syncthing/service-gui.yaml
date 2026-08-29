@@ -1,8 +1,4 @@
 ---
-# Syncthing GUI — LAN-only LoadBalancer (kube-vip), pinned to 192.168.10.110.
-# Reachable on the LAN and over WireGuard; RFC1918, not internet-routable.
-# Replaces the previous Traefik IngressRoute + Authentik forward-auth (removed):
-# GUI auth is now Syncthing's own username/password (see QUICKSTART.md).
 apiVersion: v1
 kind: Service
 metadata:

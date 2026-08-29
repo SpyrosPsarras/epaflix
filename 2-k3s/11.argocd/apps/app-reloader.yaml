@@ -1,63 +1,4 @@
 ---
-# ArgoCD Application: reloader (stakater/Reloader chart).
-#
-# Closes Issue #299 — env-var secretKeyRef consumers (bazarr-autotranslate,
-# unpackerr, homarr, the 5 servarr-postgres apps, odysseus, traefik's
-# Cloudflare token) don't auto-roll on Secret rotation. Reloader watches the
-# Secrets they reference and rolls the Deployment when one changes.
-# Extended by #780 to app-authentik (`authentik-app-secrets`, consumed as env
-# vars by authentik-server + authentik-worker via the chart's global.envFrom).
-# Extended by #715 to the two chart-rendered consumers: `argocd-redis`
-# (argocd-server, argocd-repo-server, argocd-redis and the
-# argocd-application-controller StatefulSet) and `grafana-admin-secret`
-# (kube-prometheus-stack-grafana). Those are annotated through their own
-# charts' values keys rather than a manifest we template directly — see
-# 2-k3s/11.argocd/helm-values.yaml and
-# 2-k3s/10.observability/prometheus-values.yaml.
-#
-# Source:       this repo, path 2-k3s/16.reloader (kustomization.yaml with
-#               SIX `helmCharts:` entries — one stakater/reloader v2.2.16
-#               release per watched namespace, see that file for why).
-# Destination:  resources land in the existing `servarr`, `traefik-system`,
-#               `odysseus`, `app-authentik`, `argocd` and `observability`
-#               namespaces (no new namespace is created).
-# Sync:         AUTOMATED, `selfHeal: true, prune: true` (#726 selfHeal;
-#               prune added by #1048 on 2026-08-29 after an 8-day clean
-#               automated window). Installed by manual sync first (the usual
-#               adoption order: push aligned git BEFORE creating the
-#               Application), then flipped here.
-#               NOTE on the flip: #726's gate was "a clean 48h with no manual
-#               rollout restart". That gate was NOT met. At flip time the
-#               Application's last successful sync was 2026-08-03T15:52:34Z
-#               and it had been OutOfSync for 18 days, so the first automated
-#               reconcile applied a backlog (the app-authentik release, which
-#               was declared in git but absent live, and a v1.4.19 -> v1.4.21
-#               image bump) rather than being a no-op. The owner accepted that
-#               deliberately; recorded here so the next reader is not misled
-#               into thinking a soak was observed.
-#
-# RBAC: namespace-scoped, not cluster-wide. Each of the 6 releases runs
-# `reloader.watchGlobally: false`, which ties that release's pod +
-# ServiceAccount + Role + RoleBinding to its own namespace only (verified
-# against the pulled chart's templates, not assumed) — a plain Role, never a
-# ClusterRole. Reloader in servarr can only read Secrets/ConfigMaps in
-# servarr, and likewise for traefik-system, odysseus, app-authentik, argocd
-# and observability.
-#
-# Deliberately OUT OF SCOPE for this Application (see issue #715 for why):
-#   - plugin-barman-cloud-* SIDECAR_IMAGE — CNPG operator/plugin-generated
-#     Secret+Deployment, not a static manifest in git; also not really a
-#     rotating credential (an image ref), low priority.
-#   - qbittorrent (airvpn-credentials) / vpn-picker (airvpn-api-key) — AirVPN
-#     workloads owned by a separate in-flight effort; listed in the PR's
-#     inventory but intentionally not annotated here.
-#   - renovate CronJob / orphan-census CronJob — every run is a fresh pod, so
-#     each run already picks up the current Secret. Not affected by #299.
-#   - authentik-server / authentik-worker — already solved by the authentik
-#     chart's own `checksum/secret` pod annotation.
-#   - sonarr / sonarr2 — run on SQLite, not servarr-postgres; do not consume
-#     any Secret via env (corrects a servarr-postgres listing in an earlier
-#     issue comment that didn't match the actual manifests).
 
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -72,14 +13,7 @@ spec:
     path: 2-k3s/16.reloader
   destination:
     server: https://kubernetes.default.svc
-    # Fallback only — every rendered resource carries its own explicit
-    # namespace (servarr / traefik-system / odysseus), set per helmChart
-    # entry in the kustomization. Nothing is created here.
     namespace: servarr
   syncPolicy:
-    # prune is ON as of 2026-08-29 (#1048) after an 8-day clean automated
-    # soak: zero deploys, zero drift, zero orphans. Most child apps now run
-    # prune: true behind their own soaks; the rest stay OFF per-app,
-    # tracked by #21.
     automated: { selfHeal: true, prune: true }
     syncOptions: [ServerSideApply=true]

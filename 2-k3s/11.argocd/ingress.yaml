@@ -1,36 +1,4 @@
 ---
-# Traefik IngressRoute for ArgoCD UI/API.
-#
-# Hostname:    argocd.epaflix.com
-# DNS:         Pi-hole entry → 192.168.10.101 (Traefik LB).
-# TLS:         cert-manager-issued via cloudflare DNS-01 (certResolver: cloudflare).
-# Backend:     argocd-server Service in `argocd` ns, port 80 (plain HTTP;
-#              TLS terminated at Traefik. helm-values sets server.insecure=true).
-#
-# Pattern mirrors 2-k3s/08.servarr/_shared/ingress/public-routes.yaml.
-#
-# DELIBERATELY NOT behind Authentik forward-auth. #552 asked for it; the rest of
-# that issue shipped (truenas, minio-console, grafana, plus pegaprox
-# from #548) and this host was carved out on purpose. Do not "finish the job"
-# without dealing with all three of these:
-#
-# 1. Non-browser clients. `argocd app sync|diff` is the documented operational
-#    path in ~10 runbooks in this repo. The CLI talks gRPC-web to THIS host and
-#    cannot do a browser SSO round-trip, so forward-auth 302s it. A blanket
-#    PathPrefix(`/api`) bypass does not cover it either — the gRPC service paths
-#    are /session.SessionService/*, /application.ApplicationService/*, etc.
-# 2. Lockout blast radius. ArgoCD is what deploys everything else, including
-#    Authentik itself. A misconfigured gate here means the recovery tool is the
-#    thing that is down, and the way back is kubectl on a master.
-# 3. It would not even deploy. The `argocd` Application has NO syncPolicy
-#    (manual sync, permanently, per #19 / PR #45) and sits OutOfSync as normal
-#    state, so this file changing does not reach the cluster until someone runs
-#    an explicit sync.
-#
-# ArgoCD already has Authentik SSO at the application layer (OAuth2 provider
-# "ArgoCD", application slug `argocd`, group `ArgoCD Admins`), so the host is not
-# unauthenticated — it is single-layer, which is what #552 wanted to improve.
-# Tracked as its own issue so the trade-off gets a decision instead of a default.
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -55,7 +23,6 @@ spec:
         sans:
           - "*.epaflix.com"
 ---
-# HTTP → HTTPS redirect.
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:

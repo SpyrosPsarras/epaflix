@@ -1,10 +1,7 @@
 #!/bin/bash
 
-# Every kubectl call in this script runs against the homelab cluster, whatever
-# the ambient kubeconfig says (issue #971). Override with KUBECTL_CONTEXT=... .
 : "${KUBECTL_CONTEXT:=epaflix}"
 kubectl() { command kubectl --context "$KUBECTL_CONTEXT" "$@"; }
-# Complete Traefik deployment script with Cloudflare DNS challenge and local k3s storage
 
 set -e
 
@@ -13,24 +10,18 @@ echo "Traefik Deployment for *.epaflix.com"
 echo "========================================"
 echo ""
 
-# Navigate to deployment directory
 cd "$(dirname "$0")"
 
-# Step 1: Create namespace
 echo "[1/5] Creating traefik namespace..."
 kubectl apply -f namespace.yaml
 
-# Step 2: Create Cloudflare API token secret
 echo "[2/5] Creating Cloudflare API token secret..."
 kubectl create secret generic cloudflare-api-token \
   --namespace=traefik-system \
   --from-literal=api-token=<CLOUDFLARE_API_TOKEN> \
   --dry-run=client -o yaml | kubectl apply -f -
 
-# Step 3: Deploy Traefik via Helm
 echo "[3/5] Deploying Traefik (initially with 1 replica)..."
-# Note: Helm chart requires 1 replica for initial ACME setup
-# We'll scale to 2 after deployment
 helm repo add traefik https://traefik.github.io/charts
 helm repo update
 helm upgrade --install traefik traefik/traefik \
@@ -38,13 +29,11 @@ helm upgrade --install traefik traefik/traefik \
   -f values/traefik-values.yaml \
   --wait
 
-# Step 4: Wait for LoadBalancer IP
 echo "[4/5] Waiting for LoadBalancer IP assignment..."
 kubectl -n traefik-system wait --for=condition=ready pod -l app.kubernetes.io/name=traefik --timeout=120s
 TRAEFIK_IP=$(kubectl -n traefik-system get svc traefik -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
 echo "Traefik LoadBalancer IP: $TRAEFIK_IP"
 
-# Step 5: Apply middleware
 echo "[5/5] Applying middleware..."
 kubectl apply -f middleware/
 
