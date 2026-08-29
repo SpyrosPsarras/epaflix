@@ -70,11 +70,12 @@
 # cliproxy/files/reconcile-config.psql, not by CPAMP's setup wizard, so git owns
 # it and a pod restart cannot lose it.
 #
-# Posture MEASURED against this exact image before this file existed, not
-# assumed: `docker run --read-only --user 1000:1000 -v ...:/data` starts clean,
-# writes only /data (data.key 0600, usage.sqlite + -shm + -wal), answers
-# /health with {"ok":true,"service":"cpa-manager-plus"} and needs no writable
-# /tmp. The image declares no USER, so runAsUser here is what makes it non-root.
+# Posture MEASURED against the image before this file existed, not assumed:
+# `docker run --read-only --user 1000:1000 -v ...:/data` starts clean,
+# writes only /data (data.key 0600, usage.sqlite + -shm + -wal) and answers
+# /health with {"ok":true,"service":"cpa-manager-plus"}. v1.9.2 needed no
+# writable /tmp; v1.12.6 DOES (see the tmp emptyDir in the volume list below).
+# The image declares no USER, so runAsUser here is what makes it non-root.
 #
 # This IS full mode / Manager Server. `/usage-service/info` reporting
 # `"mode":"embedded"` does not mean a lesser mode: that string is a hardcoded
@@ -157,7 +158,9 @@ spec:
           type: RuntimeDefault
       containers:
         - name: cpa-manager-plus
-          image: docker.io/seakee/cpa-manager-plus:v1.9.2
+          # Placeholder tag - kustomization.yaml `images:` (Renovate-managed)
+          # overrides it with the pinned tag@digest.
+          image: docker.io/seakee/cpa-manager-plus:v1.12.6
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -209,6 +212,13 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
+            # sqlite reports SQLITE_IOERR_GETTEMPPATH (6410, "open sqlite: disk
+            # I/O error (6410)") under readOnlyRootFilesystem: v1.12.6 needs a
+            # writable directory for SQLite temp files during open/migration of
+            # an existing usage.sqlite. emptyDir here is the minimal fix; the
+            # dir is pod-lifetime scratch, nothing persistent is stored in it.
+            - name: tmp
+              mountPath: /tmp
           readinessProbe:
             httpGet:
               path: /health
@@ -250,3 +260,5 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: cpa-manager-plus-data
+        - name: tmp
+          emptyDir: {}
