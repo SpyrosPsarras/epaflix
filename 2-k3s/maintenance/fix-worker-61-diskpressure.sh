@@ -1,4 +1,9 @@
 #!/bin/bash
+
+# Every kubectl call in this script runs against the homelab cluster, whatever
+# the ambient kubeconfig says (issue #971). Override with KUBECTL_CONTEXT=... .
+: "${KUBECTL_CONTEXT:=epaflix}"
+kubectl() { command kubectl --context "$KUBECTL_CONTEXT" "$@"; }
 # Fix Worker-61 Disk Pressure
 # This script provides options to resolve disk pressure on worker-61
 
