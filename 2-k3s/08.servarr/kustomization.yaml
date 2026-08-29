@@ -39,7 +39,6 @@ resources:
   - lingarr/ingress.yaml
   - jellyfin/jellyfin.yaml
   - jellyfin/jellyfin-truenas-redirect.yaml
-  - jellyfin/metadata-healer.yaml
   - seerr/seerr.yaml
   - seerr/pdb.yaml
   - qbittorrent/qbittorrent.yaml
@@ -61,9 +60,6 @@ configMapGenerator:
   - name: lingarr-jobqueue-guard
     files:
       - reconcile-job-queue.sql=lingarr/files/reconcile-job-queue.sql
-  - name: jellyfin-metadata-healer-script
-    files:
-      - metadata-healer.py=jellyfin/files/metadata-healer.py
 images:
   - name: lscr.io/linuxserver/sonarr
     digest: sha256:c19aa4ecdf03d73e1d5c901da33744cb7eb4d921f89bafed1ca264601d7fa224
