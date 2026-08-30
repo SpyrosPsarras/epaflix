@@ -48,9 +48,6 @@ resources:
   - qbittorrent/bluetit-config.yaml
   - unpackerr/unpackerr.yaml
   - vpn-picker
-  - homarr/homarr.yaml
-  - homarr/pdb.yaml
-  - homarr/ingressroute.yaml
 generators:
   - _shared/secrets/ksops-generator.yaml
 configMapGenerator:
@@ -78,8 +75,6 @@ images:
     digest: sha256:724c702e81727e3d90c42cf2b3d900674203906a6d135ba07416c9a3f9f67fbb
   - name: jellyfin/jellyfin
     digest: sha256:aefb67e6a7ff1debdd154a78a7bbb780fd0c873d8639210a7f6a2016ad2b35db
-  - name: ghcr.io/homarr-labs/homarr
-    newTag: v1.76.2@sha256:7d87f7fdd35f8bbee1b922b9b74fad8ce9967a1a66b8c6db1a168780c03d693b
   - name: ghcr.io/zelak312/bazarr_autotranslate
     digest: sha256:5388463f8e45320c00a472763a8e0fb4584a255d6d31b98f9063b9eb5cada5cf
   - name: lscr.io/linuxserver/bazarr
