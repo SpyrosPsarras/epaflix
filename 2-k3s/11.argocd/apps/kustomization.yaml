@@ -9,6 +9,7 @@ resources:
   - app-cnpg-operator.yaml
   - app-cert-manager.yaml
   - app-coredns.yaml
+  - app-ddns-updater.yaml
   - app-kube-vip.yaml
   - app-kube-vip-cloud-provider.yaml
   - app-maintenance.yaml
