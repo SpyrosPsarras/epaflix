@@ -37,8 +37,6 @@ data:
     ARRS = [
         ("sonarr", os.environ.get("SONARR_URL", "http://sonarr:8989"),
          os.environ.get("SONARR_API_KEY", "")),
-        ("sonarr2", os.environ.get("SONARR2_URL", "http://sonarr2:8989"),
-         os.environ.get("SONARR2_API_KEY", "")),
         ("radarr", os.environ.get("RADARR_URL", "http://radarr:7878"),
          os.environ.get("RADARR_API_KEY", "")),
     ]
@@ -315,11 +313,6 @@ spec:
                     secretKeyRef:
                       name: unpackerr-secret
                       key: UN_SONARR_0_API_KEY
-                - name: SONARR2_API_KEY
-                  valueFrom:
-                    secretKeyRef:
-                      name: unpackerr-secret
-                      key: UN_SONARR_1_API_KEY
                 - name: RADARR_API_KEY
                   valueFrom:
                     secretKeyRef:

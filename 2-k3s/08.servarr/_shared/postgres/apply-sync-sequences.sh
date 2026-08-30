@@ -8,7 +8,7 @@ set -euo pipefail
 NAMESPACE="${NAMESPACE:-servarr}"
 SECRET="${SECRET:-servarr-postgres}"
 SQL_FILE="${SQL_FILE:-$(dirname "$0")/sync-sequences.sql}"
-APPS=("${@:-sonarr sonarr2 radarr bazarr}")
+APPS=("${@:-sonarr radarr bazarr}")
 
 if [[ ! -f "${SQL_FILE}" ]]; then
     echo "ERROR: SQL file not found: ${SQL_FILE}" >&2

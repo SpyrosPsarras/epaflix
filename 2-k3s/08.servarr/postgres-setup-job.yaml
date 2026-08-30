@@ -15,7 +15,6 @@ spec:
             - -c
             - |
               SONARR_PW=$(openssl rand -base64 24 | tr -d "=+/" | cut -c1-20)
-              SONARR2_PW=$(openssl rand -base64 24 | tr -d "=+/" | cut -c1-20)
               RADARR_PW=$(openssl rand -base64 24 | tr -d "=+/" | cut -c1-20)
               PROWLARR_PW=$(openssl rand -base64 24 | tr -d "=+/" | cut -c1-20)
               JELLYSEERR_PW=$(openssl rand -base64 24 | tr -d "=+/" | cut -c1-20)
@@ -23,21 +22,18 @@ spec:
 
               PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres-cluster-rw -U postgres <<SQL
               CREATE DATABASE IF NOT EXISTS "sonarr-main";
-              CREATE DATABASE IF NOT EXISTS "sonarr2-main";
               CREATE DATABASE IF NOT EXISTS "radarr-main";
               CREATE DATABASE IF NOT EXISTS "prowlarr-main";
               CREATE DATABASE IF NOT EXISTS jellyseerr;
               CREATE DATABASE IF NOT EXISTS "lingarr-main";
 
               CREATE USER sonarr WITH PASSWORD '$SONARR_PW';
-              CREATE USER sonarr2 WITH PASSWORD '$SONARR2_PW';
               CREATE USER radarr WITH PASSWORD '$RADARR_PW';
               CREATE USER prowlarr WITH PASSWORD '$PROWLARR_PW';
               CREATE USER jellyseerr WITH PASSWORD '$JELLYSEERR_PW';
               CREATE USER lingarr WITH PASSWORD '$LINGARR_PW';
 
               GRANT ALL PRIVILEGES ON DATABASE "sonarr-main" TO sonarr;
-              GRANT ALL PRIVILEGES ON DATABASE "sonarr2-main" TO sonarr2;
               GRANT ALL PRIVILEGES ON DATABASE "radarr-main" TO radarr;
               GRANT ALL PRIVILEGES ON DATABASE "prowlarr-main" TO prowlarr;
               GRANT ALL PRIVILEGES ON DATABASE jellyseerr TO jellyseerr;
@@ -55,11 +51,6 @@ spec:
                 --from-literal=sonarr-database=sonarr-main \
                 --from-literal=sonarr-user=sonarr \
                 --from-literal=sonarr-password=$SONARR_PW \
-                --from-literal=sonarr2-host=192.168.10.105 \
-                --from-literal=sonarr2-port=5432 \
-                --from-literal=sonarr2-database=sonarr2-main \
-                --from-literal=sonarr2-user=sonarr2 \
-                --from-literal=sonarr2-password=$SONARR2_PW \
                 --from-literal=radarr-host=192.168.10.105 \
                 --from-literal=radarr-port=5432 \
                 --from-literal=radarr-database=radarr-main \

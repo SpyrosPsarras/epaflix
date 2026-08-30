@@ -18,7 +18,6 @@ echo ""
 
 echo "🔍 Retrieving database credentials..."
 SONARR_PW=$(kubectl get secret servarr-postgres -n servarr -o jsonpath='{.data.sonarr-password}' | base64 -d)
-SONARR2_PW=$(kubectl get secret servarr-postgres -n servarr -o jsonpath='{.data.sonarr2-password}' | base64 -d)
 RADARR_PW=$(kubectl get secret servarr-postgres -n servarr -o jsonpath='{.data.radarr-password}' | base64 -d)
 DB_HOST="192.168.10.105"
 
@@ -86,7 +85,6 @@ EOF
 }
 
 fix_database "Sonarr" "sonarr" "sonarr-main" "${SONARR_PW}"
-fix_database "Sonarr2" "sonarr2" "sonarr2-main" "${SONARR2_PW}"
 fix_database "Radarr" "radarr" "radarr-main" "${RADARR_PW}"
 
 echo "=================================================="

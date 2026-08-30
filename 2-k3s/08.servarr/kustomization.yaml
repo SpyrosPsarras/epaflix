@@ -13,9 +13,6 @@ resources:
   - sonarr/sonarr.yaml
   - sonarr/pdb.yaml
   - sonarr/ingressroute.yaml
-  - sonarr2/sonarr2.yaml
-  - sonarr2/pdb.yaml
-  - sonarr2/ingressroute.yaml
   - radarr/radarr.yaml
   - radarr/pdb.yaml
   - radarr/ingressroute.yaml
