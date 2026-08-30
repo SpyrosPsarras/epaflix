@@ -53,8 +53,7 @@ spec:
               -- SeasonNumber; a NOT NULL constraint rolls back the upsert and
               -- breaks scene-name matching. DROP NOT NULL is idempotent (no-op
               -- if already nullable, cannot affect existing rows). This is the
-              -- durable record of the live fix. For sonarr2: run with
-              -- PGDATABASE=sonarr2-main (currently already nullable, no action).
+              -- durable record of the live fix.
               ALTER TABLE "SceneMappings" ALTER COLUMN "SeasonNumber" DROP NOT NULL;
 
               ALTER TABLE "SceneMappings" ADD COLUMN IF NOT EXISTS "SceneSeasonNumber" integer;
