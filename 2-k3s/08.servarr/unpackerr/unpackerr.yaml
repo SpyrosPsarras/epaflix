@@ -58,19 +58,6 @@ spec:
               value: "torrent"
             - name: UN_SONARR_0_DELETE_DELAY
               value: "5m0s"
-            - name: UN_SONARR_1_URL
-              value: "http://sonarr2:8989"
-            - name: UN_SONARR_1_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: unpackerr-secret
-                  key: UN_SONARR_1_API_KEY
-            - name: UN_SONARR_1_PATHS_0
-              value: "/media/downloads"
-            - name: UN_SONARR_1_PROTOCOLS
-              value: "torrent"
-            - name: UN_SONARR_1_DELETE_DELAY
-              value: "5m0s"
             - name: UN_RADARR_0_URL
               value: "http://radarr:7878"
             - name: UN_RADARR_0_API_KEY

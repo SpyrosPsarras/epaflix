@@ -139,12 +139,11 @@ echo ""
 
 echo "Step 6: Deploying *arr applications..."
 kubectl apply -f "$BASE_DIR/sonarr/sonarr.yaml"
-kubectl apply -f "$BASE_DIR/sonarr2/sonarr2.yaml"
 kubectl apply -f "$BASE_DIR/radarr/radarr.yaml"
 kubectl apply -f "$BASE_DIR/bazarr/bazarr.yaml"
 info "*arr apps deployed"
 
-wait_for_pods servarr "app in (sonarr,sonarr2,radarr,bazarr)" 300
+wait_for_pods servarr "app in (sonarr,radarr,bazarr)" 300
 echo ""
 
 echo "Step 7: Deploying media applications..."
@@ -178,7 +177,6 @@ echo "  Seerr:       https://seerr.epaflix.com (legacy: https://jellyseerr.epafl
 echo ""
 echo "Internal (LAN - *.epaflix.com):"
 echo "  Sonarr:      http://sonarr.epaflix.com"
-echo "  Sonarr2:     http://sonarr2.epaflix.com"
 echo "  Radarr:      http://radarr.epaflix.com"
 echo "  Prowlarr:    http://prowlarr.epaflix.com"
 echo "  Bazarr:      http://bazarr.epaflix.com"

@@ -208,7 +208,7 @@ expect_fail "short mixed-class value under a non-sensitive key fails"
 
 reset_repo
 servarr="2-k3s/08.servarr/_shared/secrets/postgres-secret.yaml"
-printf '  optional-database: "jellyseerr"\n  optional-user: "prowlarr"\n  optional-instance: "sonarr2-database"\n' >>"$tmp/$servarr"
+printf '  optional-database: "jellyseerr"\n  optional-user: "prowlarr"\n  optional-instance: "radarr-database"\n' >>"$tmp/$servarr"
 git -C "$tmp" add "$servarr"
 expect_pass "short lowercase template identifiers still pass the new band"
 

@@ -54,8 +54,7 @@ check_service() {
   fi
 }
 
-check_service "Sonarr (TV Shows)" "sonarr"
-check_service "Sonarr2 (Anime)" "sonarr2"
+check_service "Sonarr (TV Shows + Anime)" "sonarr"
 check_service "Radarr (Movies)" "radarr"
 
 echo -e "${CYAN}=========================================="
@@ -90,15 +89,11 @@ else
   echo "  kubectl apply -f sonarr/fix-duplicate-series.yaml"
   echo "  kubectl apply -f sonarr/fix-duplicate-episodes.yaml"
   echo "  kubectl apply -f sonarr/fix-duplicate-episodefiles.yaml"
-  echo "  kubectl apply -f sonarr2/fix-duplicate-series.yaml"
-  echo "  kubectl apply -f sonarr2/fix-duplicate-episodes.yaml"
-  echo "  kubectl apply -f sonarr2/fix-duplicate-episodefiles.yaml"
   echo "  kubectl apply -f radarr/fix-duplicate-movies.yaml"
   echo "  kubectl apply -f radarr/fix-duplicate-moviefiles.yaml"
   echo ""
   echo "  # Then restart all services:"
   echo "  kubectl rollout restart deployment/sonarr -n servarr"
-  echo "  kubectl rollout restart deployment/sonarr2 -n servarr"
   echo "  kubectl rollout restart deployment/radarr -n servarr"
 fi
 

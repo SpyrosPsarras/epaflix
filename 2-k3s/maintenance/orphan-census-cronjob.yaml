@@ -35,7 +35,7 @@ data:
         pair.split("=", 1)
         for pair in os.environ.get(
             "CATEGORY_ARR_MAP",
-            "tv-sonarr=sonarr,animes=sonarr2,radarr=radarr").split(",")
+            "tv-sonarr=sonarr,animes=sonarr,radarr=radarr").split(",")
         if "=" in pair
     )
 
@@ -57,8 +57,6 @@ data:
     ARRS = [
         ("sonarr", os.environ.get("SONARR_URL", "http://sonarr:8989"),
          os.environ.get("SONARR_API_KEY", "")),
-        ("sonarr2", os.environ.get("SONARR2_URL", "http://sonarr2:8989"),
-         os.environ.get("SONARR2_API_KEY", "")),
         ("radarr", os.environ.get("RADARR_URL", "http://radarr:7878"),
          os.environ.get("RADARR_API_KEY", "")),
     ]
@@ -452,7 +450,7 @@ data:
         NO_PROGRESS_HOURS = 24.0
         ACTIVE_WITHIN_HOURS = 6.0
         KEEP_HASH_PREFIXES = ("deadbeef",)
-        CATEGORY_ARR = {"tv-sonarr": "sonarr", "animes": "sonarr2",
+        CATEGORY_ARR = {"tv-sonarr": "sonarr", "animes": "sonarr",
                         "radarr": "radarr"}
 
         now = 1000000.0
@@ -499,9 +497,9 @@ data:
                                {"category": "animes"},
                                {"category": "tv-sonarr"},
                                {"category": "nobody-owns-this"}]) == {
-            "sonarr": 2, "sonarr2": 1, None: 1}
+            "sonarr": 3, None: 1}
 
-        rows = {"sonarr": 0, "sonarr2": 1, "radarr": 3}
+        rows = {"sonarr": 0, "radarr": 3}
         assert queue_read_path_suspect(rows, {"sonarr": 1}) == ["sonarr"]
         assert queue_read_path_suspect(rows, {"radarr": 2}) == []
         assert queue_read_path_suspect({"sonarr": 0, "radarr": 0}, {}) == []
@@ -511,9 +509,9 @@ data:
             {"sonarr": 0, "radarr": 0}, {None: 1}) == ["unmapped-categories"]
         assert queue_read_path_suspect(rows, {None: 1}) == []
         assert queue_read_path_suspect(
-            {"sonarr": 0, "sonarr2": 0, "radarr": 0},
-            {"sonarr": 1, "sonarr2": 1, "radarr": 1}) == [
-                "radarr", "sonarr", "sonarr2"]
+            {"sonarr": 0, "radarr": 0},
+            {"sonarr": 1, "radarr": 1}) == [
+                "radarr", "sonarr"]
         now_t = 1000000.0
         assert recently_active_by_arr(
             [{"category": "tv-sonarr", "progress": 0.4, "amount_left": 10,
@@ -756,7 +754,7 @@ spec:
                 - name: NO_PROGRESS_HOURS
                   value: "24"
                 - name: CATEGORY_ARR_MAP
-                  value: "tv-sonarr=sonarr,animes=sonarr2,radarr=radarr"
+                  value: "tv-sonarr=sonarr,animes=sonarr,radarr=radarr"
                 - name: MAX_HISTORY_LOOKUPS
                   value: "4"
                 - name: QBT_USERNAME
@@ -774,11 +772,6 @@ spec:
                     secretKeyRef:
                       name: unpackerr-secret
                       key: UN_SONARR_0_API_KEY
-                - name: SONARR2_API_KEY
-                  valueFrom:
-                    secretKeyRef:
-                      name: unpackerr-secret
-                      key: UN_SONARR_1_API_KEY
                 - name: RADARR_API_KEY
                   valueFrom:
                     secretKeyRef:
