@@ -82,7 +82,7 @@ else
   if [[ -z "$PROXMOX_API_TOKEN_VALUE" ]]; then
     echo -e "${RED}Could not decrypt proxmox_grafana_api_token from $SECRETS_ENC${NC}"
     echo -e "${RED}  Is KeePassXC unlocked? The age key lives there now (entry sops-age-k3s-cluster),${NC}"
-    echo -e "${RED}  not in ~/.config/sops/age/. See .github/instructions/sops.instructions.md.${NC}"
+    echo -e "${RED}  not in ~/.config/sops/age/.${NC}"
     exit 1
   fi
   sed "s|<PROXMOX_API_TOKEN_VALUE>|$PROXMOX_API_TOKEN_VALUE|g" pve-exporter/secret.yaml \
