@@ -157,14 +157,7 @@ info "Jellyfin (TrueNAS redirect) and Seerr deployed"
 wait_for_pods servarr "app in (jellyfin,seerr)" 300
 echo ""
 
-echo "Step 8: Deploying utility applications..."
-kubectl apply -f "$BASE_DIR/homarr/"
-info "Homarr deployed"
-
-wait_for_pods servarr "app in (homarr)" 300
-echo ""
-
-echo "Step 9: Deploying Traefik IngressRoutes..."
+echo "Step 8: Deploying Traefik IngressRoutes..."
 kubectl apply -f "$SHARED_DIR/ingress/"
 info "IngressRoutes deployed"
 echo ""
@@ -191,7 +184,6 @@ echo "  Prowlarr:    http://prowlarr.epaflix.com"
 echo "  Bazarr:      http://bazarr.epaflix.com"
 echo "  qBittorrent: http://qbittorrent.epaflix.com"
 echo "  Tdarr:       http://tdarr.epaflix.com"
-echo "  Homarr:      http://homarr.epaflix.com"
 echo ""
 echo "Next steps:"
 echo "1. Configure download clients in *arr apps"
