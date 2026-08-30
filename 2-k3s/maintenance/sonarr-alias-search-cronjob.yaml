@@ -1,0 +1,630 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sonarr-alias-search-script
+  namespace: servarr
+data:
+  search.py: |
+    #!/usr/bin/env python3
+    """Sonarr alias search-grab-import for series with TVDB-only aliases (#526).
+
+    Sonarr ignores TheTVDB alternative titles by design (Sonarr#8768/#5382)
+    and this Sonarr has no download client configured, so alias-titled
+    releases are never grabbed or imported on their own. The SceneMappings
+    row inserted for #526 fixes PARSING of alias-titled releases; this job
+    closes the remaining loop, statelessly:
+
+      1. IMPORT PASS - finished torrents in the Sonarr qBittorrent category
+         whose name contains the alias and that target a still-missing
+         episode are handed to Sonarr via DownloadedEpisodesScan (the same
+         import path ManualImport uses). Re-scanning an already-imported
+         path is a Sonarr-side no-op, so this is safe to repeat.
+      2. SEARCH PASS - while episodes are missing, query Prowlarr with the
+         alias (fetched live from Skyhook), pick the best seeded torrent
+         targeting a missing episode and add it to qBittorrent in the
+         Sonarr category. The next run's import pass takes it from there.
+
+    Conservative by design: a release or torrent whose episode cannot be
+    identified (no parseable date or SxxEyy) is never grabbed and never
+    imported. Run with --selftest to exercise the pure logic against
+    synthetic payloads without touching the network.
+    """
+    import datetime
+    import json
+    import os
+    import re
+    import sys
+    import time
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    TIMEOUT = 60
+
+    SONARR_URL = os.environ.get(
+        "SONARR_URL", "http://sonarr.servarr.svc.cluster.local:8989"
+    ).rstrip("/")
+    SONARR_API_KEY = os.environ.get("SONARR_API_KEY", "")
+    SONARR_SERIES_ID = int(os.environ.get("SONARR_SERIES_ID", "273"))
+
+    PROWLARR_URL = os.environ.get(
+        "PROWLARR_URL", "http://prowlarr.servarr.svc.cluster.local:9696"
+    ).rstrip("/")
+    PROWLARR_API_KEY = os.environ.get("PROWLARR_API_KEY", "")
+    PROWLARR_CATEGORIES = os.environ.get(
+        "PROWLARR_CATEGORIES", "5000,5030,5040,5045"
+    )
+
+    SKYHOOK_URL = os.environ.get(
+        "SKYHOOK_URL", "https://skyhook.sonarr.tv"
+    ).rstrip("/")
+
+    QBT_URL = os.environ.get("QBT_URL", "http://qbittorrent:8080").rstrip("/")
+    QBT_USERNAME = os.environ.get("QBT_USERNAME", "")
+    QBT_PASSWORD = os.environ.get("QBT_PASSWORD", "")
+    QBT_CATEGORY = os.environ.get("QBT_CATEGORY", "tv-sonarr")
+    TORRENT_TAG = os.environ.get("TORRENT_TAG", "alias-search-526")
+
+    DRY_RUN = os.environ.get("DRY_RUN", "false").lower() == "true"
+
+    EPISODE_KEY_RE = re.compile(r"\bS(\d{1,2})E(\d{1,3})\b", re.IGNORECASE)
+    DATE_KEY_RE = re.compile(r"\b(\d{4})[._ -](\d{2})[._ -](\d{2})\b")
+
+
+    def fail(msg):
+        """Abort LOUD. Never let a failed step look like 'nothing missing'."""
+        print("ERROR: " + msg, file=sys.stderr)
+        sys.exit(2)
+
+
+    def http_status(exc):
+        """Status code only - never echo a response body, it can carry a key."""
+        return str(exc.code) if isinstance(exc, urllib.error.HTTPError) else "-"
+
+
+    def _get_json(url, headers):
+        req = urllib.request.Request(url, headers=dict(headers))
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+            return json.loads(resp.read().decode())
+
+
+    def _post_json(url, headers, payload):
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode(),
+            headers=dict(headers, **{"Content-Type": "application/json"}),
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+            return json.loads(resp.read().decode())
+
+
+    def sonarr_headers():
+        return {"X-Api-Key": SONARR_API_KEY, "Accept": "application/json"}
+
+
+    def missing_episodes(episodes, now):
+        """Monitored, file-less episodes whose air date has already passed.
+
+        Defensive against missing/odd fields: an episode that cannot be
+        evaluated never qualifies (fail-safe direction, same as the rest of
+        this job family).
+        """
+        out = []
+        for ep in episodes:
+            if not isinstance(ep, dict) or not ep.get("monitored"):
+                continue
+            if ep.get("hasFile"):
+                continue
+            air = str(ep.get("airDateUtc") or "")
+            try:
+                aired = datetime.datetime.fromisoformat(
+                    air.replace("Z", "+00:00")
+                ).timestamp()
+            except ValueError:
+                continue
+            if aired <= now:
+                out.append(ep)
+        return out
+
+
+    def release_episode_keys(title):
+        """Episode a release title targets, as comparable keys.
+
+        Returns a set of keys so a title carrying both a date and SxxEyy
+        matches either way: ('date', 'YYYY-MM-DD') and ('sae', season, ep).
+        Daily scene releases usually use the date; season/episode naming is
+        matched too so rerun packs still qualify. Returns an empty set when
+        nothing identifiable is present - callers treat that as never a
+        match (conservative).
+        """
+        keys = set()
+        for season, episode in EPISODE_KEY_RE.findall(title or ""):
+            keys.add(("sae", int(season), int(episode)))
+        for year, month, day in DATE_KEY_RE.findall(title or ""):
+            y, m, d = int(year), int(month), int(day)
+            if 1 <= m <= 12 and 1 <= d <= 31:
+                keys.add(("date", "%04d-%02d-%02d" % (y, m, d)))
+        return keys
+
+
+    def episode_keys(ep):
+        """The same key vocabulary for a Sonarr episode record.
+
+        Both air dates are keyed: release titles carry the TVDB local air
+        date, which can differ from airDateUtc by a day (review F2).
+        """
+        keys = set()
+        air = str(ep.get("airDateUtc") or "")
+        if len(air) >= 10:
+            keys.add(("date", air[:10]))
+        local = str(ep.get("airDate") or "")
+        if len(local) >= 10:
+            keys.add(("date", local))
+        season, episode = ep.get("seasonNumber"), ep.get("episodeNumber")
+        if isinstance(season, int) and isinstance(episode, int):
+            keys.add(("sae", season, episode))
+        return keys
+
+
+    def matches_missing(title, missing):
+        """True only when the release targets an episode that is missing."""
+        want = release_episode_keys(title)
+        if not want:
+            return False
+        for ep in missing:
+            if want & episode_keys(ep):
+                return True
+        return False
+
+
+    def pick_candidate(releases, alias, missing):
+        """Best seeded torrent for the alias that targets a missing episode.
+
+        Torrent protocol only, seeders > 0, title must carry the alias and a
+        identifiable episode, and a grabbable link must exist. Ranked by
+        seeders desc, then publish date desc.
+        """
+        alias_l = (alias or "").casefold()
+        cands = []
+        for r in releases if isinstance(releases, list) else []:
+            if not isinstance(r, dict):
+                continue
+            if r.get("protocol") != "torrent":
+                continue
+            if (r.get("seeders") or 0) <= 0:
+                continue
+            title = str(r.get("title") or "")
+            if not alias_l or alias_l not in title.casefold():
+                continue
+            if not (r.get("magnetUrl") or r.get("downloadUrl")):
+                continue
+            if not matches_missing(title, missing):
+                continue
+            cands.append(r)
+        cands.sort(key=lambda r: str(r.get("publishDate") or ""), reverse=True)
+        cands.sort(key=lambda r: r.get("seeders") or 0, reverse=True)
+        return cands[0] if cands else None
+
+
+    def importable_torrents(torrents, alias, missing):
+        """Finished torrents in the Sonarr category that cover missing episodes.
+
+        Name must contain the alias, progress must be complete and a
+        content_path must exist for DownloadedEpisodesScan.
+        """
+        alias_l = (alias or "").casefold()
+        out = []
+        for t in torrents if isinstance(torrents, list) else []:
+            if not isinstance(t, dict):
+                continue
+            if str(t.get("category") or "") != QBT_CATEGORY:
+                continue
+            if float(t.get("progress") or 0.0) < 1.0:
+                continue
+            name = str(t.get("name") or "")
+            if not alias_l or alias_l not in name.casefold():
+                continue
+            path = str(t.get("content_path") or "")
+            if not path:
+                continue
+            if not matches_missing(name, missing):
+                continue
+            out.append({"name": name, "path": path})
+        return out
+
+
+    def in_flight_torrents(torrents, alias, missing):
+        """Still-downloading Sonarr-category torrents targeting missing episodes.
+
+        The mirror of importable_torrents: grabbing another release for an
+        episode that is already downloading would waste the grab (review F1).
+        """
+        alias_l = (alias or "").casefold()
+        out = []
+        for t in torrents if isinstance(torrents, list) else []:
+            if not isinstance(t, dict):
+                continue
+            if str(t.get("category") or "") != QBT_CATEGORY:
+                continue
+            if float(t.get("progress") or 0.0) >= 1.0:
+                continue
+            name = str(t.get("name") or "")
+            if not alias_l or alias_l not in name.casefold():
+                continue
+            if not matches_missing(name, missing):
+                continue
+            out.append(name)
+        return out
+
+
+    def qbt_login():
+        import http.cookiejar
+
+        cj = http.cookiejar.CookieJar()
+        opener = urllib.request.build_opener(
+            urllib.request.HTTPCookieProcessor(cj))
+        body = urllib.parse.urlencode({
+            "username": QBT_USERNAME,
+            "password": QBT_PASSWORD,
+        }).encode()
+        req = urllib.request.Request(
+            QBT_URL + "/api/v2/auth/login", data=body,
+            headers={"Referer": QBT_URL})
+        try:
+            answer = opener.open(req, timeout=TIMEOUT).read().decode().strip()
+        except Exception as exc:  # noqa: BLE001 - any failure is fatal here
+            fail("qBittorrent login request failed (%s, http=%s)"
+                 % (type(exc).__name__, http_status(exc)))
+        if answer and answer != "Ok.":
+            fail("qBittorrent login rejected")
+        return opener
+
+
+    def qbt_torrents(opener):
+        try:
+            with opener.open(
+                QBT_URL + "/api/v2/torrents/info", timeout=TIMEOUT
+            ) as resp:
+                torrents = json.load(resp)
+        except urllib.error.HTTPError as exc:
+            fail("qBittorrent torrent list failed (http=%d)" % exc.code)
+        except Exception as exc:  # noqa: BLE001
+            fail("qBittorrent torrent list failed (%s)" % type(exc).__name__)
+        if not isinstance(torrents, list):
+            fail("qBittorrent torrent list was not a JSON array")
+        return torrents
+
+
+    def qbt_add(opener, url):
+        body = urllib.parse.urlencode({
+            "urls": url,
+            "category": QBT_CATEGORY,
+            "tags": TORRENT_TAG,
+        }).encode()
+        req = urllib.request.Request(
+            QBT_URL + "/api/v2/torrents/add", data=body,
+            headers={"Referer": QBT_URL})
+        with opener.open(req, timeout=TIMEOUT) as resp:
+            return resp.read().decode().strip() == "Ok."
+
+
+    def skyhook_alias(tvdb_id):
+        """First alternativeTitle Skyhook serves for the TVDB id."""
+        url = "%s/v1/tvdb/shows/en/%d" % (SKYHOOK_URL, tvdb_id)
+        data = _get_json(url, {"Accept": "application/json"})
+        titles = data.get("alternativeTitles") or []
+        for entry in titles:
+            title = str((entry or {}).get("title") or "")
+            if title:
+                return title
+        return None
+
+
+    def selftest():
+        now = datetime.datetime(2026, 8, 30, 12, 0, 0,
+                                tzinfo=datetime.timezone.utc).timestamp()
+
+        def ep(eid, aired, monitored=True, has_file=False):
+            return {
+                "id": eid, "monitored": monitored, "hasFile": has_file,
+                "seasonNumber": 1, "episodeNumber": eid,
+                "airDateUtc": aired + "T21:30:00Z",
+            }
+
+        episodes = [
+            ep(1, "2026-08-28"),
+            ep(2, "2026-08-29"),
+            ep(3, "2026-08-30"),
+            ep(4, "2026-08-31"),
+            ep(5, "2026-08-27", monitored=False),
+            ep(6, "2026-08-27", has_file=True),
+        ]
+        missing = missing_episodes(episodes, now)
+        assert [m["id"] for m in missing] == [1, 2], missing
+
+        assert release_episode_keys("Show.2026.08.28.720p") == \
+            {("date", "2026-08-28")}
+        assert release_episode_keys("Show S01E28 720p") == {("sae", 1, 28)}
+        assert release_episode_keys("Show S01E28 2026.08.28") == \
+            {("sae", 1, 28), ("date", "2026-08-28")}
+        assert release_episode_keys("Show.2026.13.40") == set()
+        assert release_episode_keys("Show 1080p x264") == set()
+        assert release_episode_keys(None) == set()
+
+        assert matches_missing("Show.2026.08.28.720p", missing)
+        assert matches_missing("Show S01E01 720p", missing)
+        assert not matches_missing("Show S01E28 720p", missing)
+        assert not matches_missing("Show.2026.08.31.720p", missing)
+        assert not matches_missing("Show.1080p.x264", missing)
+
+        def rel(title, seeders=5, protocol="torrent", magnet="magnet:?x"):
+            return {
+                "title": title, "seeders": seeders, "protocol": protocol,
+                "magnetUrl": magnet, "downloadUrl": None,
+                "publishDate": "2026-08-30T10:00:00Z",
+            }
+
+        releases = [
+            rel("Other.Show.2026.08.28"),          # no alias
+            rel("Alias.2026.08.28", protocol="usenet"),
+            rel("Alias.2026.08.28", seeders=0),    # unseeded
+            rel("Alias.2026.08.31", seeders=99),   # not a missing episode
+            rel("Alias.S01E01", seeders=3),
+            rel("Alias.2026.08.28", seeders=7),
+        ]
+        best = pick_candidate(releases, "Alias", missing)
+        assert best is not None and best["seeders"] == 7, best
+
+        assert pick_candidate(releases, "", missing) is None
+        assert pick_candidate([], "Alias", missing) is None
+
+        def torrent(name, progress=1.0, category="tv-sonarr",
+                    content_path="/media/x"):
+            return {
+                "name": name, "progress": progress, "category": category,
+                "content_path": content_path,
+            }
+
+        torrents = [
+            torrent("Alias.2026.08.28"),
+            torrent("Alias.2026.08.29", progress=0.4),   # still downloading
+            torrent("Alias.2026.08.29", category="other"),  # wrong category
+            torrent("Other.Show.2026.08.29"),            # no alias
+            torrent("Alias.2026.08.28", content_path=""),  # no path
+        ]
+        importable = importable_torrents(torrents, "Alias", missing)
+        assert [i["name"] for i in importable] == ["Alias.2026.08.28"], \
+            importable
+
+        inflight = in_flight_torrents(torrents, "Alias", missing)
+        assert inflight == ["Alias.2026.08.29"], inflight
+        assert in_flight_torrents(
+            [torrent("Alias.2026.08.31", progress=0.4)], "Alias", missing
+        ) == []
+
+        print("selftest OK")
+        return 0
+
+
+    def main():
+        if "--selftest" in sys.argv:
+            return selftest()
+
+        if not SONARR_API_KEY or not PROWLARR_API_KEY or not QBT_USERNAME:
+            print("ERROR: SONARR_API_KEY / PROWLARR_API_KEY / QBT_USERNAME "
+                  "are empty", file=sys.stderr)
+            return 2
+
+        mode = "DRY_RUN" if DRY_RUN else "live"
+        print("=== sonarr alias search @ %s (%s) ==="
+              % (time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), mode))
+
+        try:
+            series = _get_json(
+                "%s/api/v3/series/%d" % (SONARR_URL, SONARR_SERIES_ID),
+                sonarr_headers())
+            episodes = _get_json(
+                "%s/api/v3/episode?seriesId=%d" % (SONARR_URL, SONARR_SERIES_ID),
+                sonarr_headers())
+        except Exception as exc:  # noqa: BLE001
+            fail("could not read series/episodes from Sonarr (%s)"
+                 % type(exc).__name__)
+
+        now = time.time()
+        missing = missing_episodes(episodes, now)
+        print("series %d: %d episodes | %d monitored, missing and aired"
+              % (SONARR_SERIES_ID, len(episodes), len(missing)))
+
+        if not missing:
+            print("OK: nothing missing - no search, no import needed.")
+            return 0
+
+        try:
+            alias = skyhook_alias(series.get("tvdbId", 0))
+        except Exception as exc:  # noqa: BLE001
+            fail("Skyhook alias fetch failed (%s)" % type(exc).__name__)
+        if not alias:
+            print("OK: Skyhook serves no alternativeTitle for tvdbId %s - "
+                  "nothing this job can do." % series.get("tvdbId"))
+            return 0
+
+        opener = qbt_login()
+        torrents = qbt_torrents(opener)
+
+        imports = importable_torrents(torrents, alias, missing)
+        print("import pass: %d finished alias torrent(s) covering missing "
+              "episodes" % len(imports))
+        for item in imports:
+            print("    scan %s" % item["name"])
+            if DRY_RUN:
+                print("    DRY_RUN - DownloadedEpisodesScan not sent.")
+                continue
+            try:
+                cmd = _post_json(
+                    "%s/api/v3/command" % SONARR_URL, sonarr_headers(),
+                    {"name": "DownloadedEpisodesScan",
+                     "path": item["path"],
+                     "seriesId": SONARR_SERIES_ID})
+            except Exception as exc:  # noqa: BLE001
+                print("ERROR: DownloadedEpisodesScan failed (%s)"
+                      % type(exc).__name__, file=sys.stderr)
+                return 2
+            print("    queued commandId=%s status=%s"
+                  % (cmd.get("id"), cmd.get("status")))
+
+        # Only short-circuit when the finished torrents cover every missing
+        # episode; a torrent that can never import must not starve the search
+        # pass for the others (review F5).
+        covered = set()
+        for item in imports:
+            covered |= release_episode_keys(item["name"])
+        remaining = [ep for ep in missing
+                     if not (episode_keys(ep) & covered)]
+        if imports and not remaining:
+            print("OK: import pass done - Sonarr parses alias-titled "
+                  "releases via the #526 scene mapping.")
+            return 0
+        if remaining:
+            missing = remaining
+
+        grabbing = in_flight_torrents(torrents, alias, missing)
+        if grabbing:
+            print("OK: %d alias torrent(s) already downloading for missing "
+                  "episodes - skipping the search pass."
+                  % len(grabbing))
+            for name in grabbing:
+                print("    %s" % name)
+            return 0
+
+        print("search pass: querying Prowlarr with the Skyhook alias")
+        query = urllib.parse.urlencode({
+            "query": alias,
+            "categories": PROWLARR_CATEGORIES,
+            "limit": "100",
+            "type": "search",
+        })
+        try:
+            releases = _get_json(
+                "%s/api/v1/search?%s" % (PROWLARR_URL, query),
+                {"X-Api-Key": PROWLARR_API_KEY, "Accept": "application/json"})
+        except Exception as exc:  # noqa: BLE001
+            fail("Prowlarr search failed (%s)" % type(exc).__name__)
+        if not isinstance(releases, list):
+            fail("Prowlarr search response was not a JSON array")
+
+        known_hashes = {
+            str(t.get("hash") or "").lower() for t in torrents
+            if isinstance(t, dict)
+        }
+        best = pick_candidate(releases, alias, missing)
+        if best is None:
+            print("OK: no seeded torrent for the alias targets a missing "
+                  "episode yet.")
+            return 0
+
+        info_hash = str(best.get("infoHash") or "").lower()
+        if info_hash and info_hash in known_hashes:
+            print("OK: best candidate is already in qBittorrent - waiting "
+                  "for the next import pass.")
+            return 0
+
+        url = best.get("magnetUrl") or best.get("downloadUrl")
+        title = str(best.get("title") or "")
+        print("    grab: %d seeders | infoHash=%s"
+              % (best.get("seeders") or 0, info_hash or "-"))
+        print("    grab link kind: %s (host=%s)"
+              % ("magnet" if best.get("magnetUrl") else "download",
+                 urllib.parse.urlparse(str(url)).hostname or "-"))
+        if DRY_RUN:
+            print("    DRY_RUN - torrent not added to qBittorrent.")
+            return 0
+
+        try:
+            added = qbt_add(opener, url)
+        except Exception as exc:  # noqa: BLE001
+            fail("qBittorrent add failed (%s)" % type(exc).__name__)
+        if not added:
+            fail("qBittorrent rejected the torrent add")
+        print("OK: torrent added to qBittorrent (category=%s, tag=%s) - the "
+              "next run's import pass hands it to Sonarr."
+              % (QBT_CATEGORY, TORRENT_TAG))
+        return 0
+
+
+    if __name__ == "__main__":
+        sys.exit(main())
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: sonarr-alias-search
+  namespace: servarr
+  labels:
+    app: sonarr-alias-search
+spec:
+  schedule: "18,48 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 6
+  failedJobsHistoryLimit: 6
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 600
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 21600  # keep 6 hours
+      template:
+        metadata:
+          labels:
+            app: sonarr-alias-search
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: alias-search
+              image: python:3.13-alpine
+              imagePullPolicy: IfNotPresent
+              command: ["python3", "/script/search.py"]
+              env:
+                - name: SONARR_SERIES_ID
+                  value: "273"
+                - name: QBT_CATEGORY
+                  value: "tv-sonarr"
+                - name: TORRENT_TAG
+                  value: "alias-search-526"
+                - name: SONARR_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: unpackerr-secret
+                      key: UN_SONARR_0_API_KEY
+                - name: PROWLARR_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: prowlarr-api-key
+                      key: apiKey
+                - name: QBT_USERNAME
+                  valueFrom:
+                    secretKeyRef:
+                      name: qbittorrent-webui-credentials
+                      key: QBT_USERNAME
+                - name: QBT_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: qbittorrent-webui-credentials
+                      key: QBT_PASSWORD
+              volumeMounts:
+                - name: script
+                  mountPath: /script
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "250m"
+                  memory: "128Mi"
+          volumes:
+            - name: script
+              configMap:
+                name: sonarr-alias-search-script
+                defaultMode: 0555

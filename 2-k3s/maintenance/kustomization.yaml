@@ -14,6 +14,7 @@ resources:
   - blind-queue-check-cronjob.yaml
   - qbt-stuck-torrent-check-cronjob.yaml
   - radarr-missing-search-cronjob.yaml
+  - sonarr-alias-search-cronjob.yaml
 
 configMapGenerator:
   - name: cleanuparr-blocklist-expected
