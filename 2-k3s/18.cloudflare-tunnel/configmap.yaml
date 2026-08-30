@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cloudflared-config
+  namespace: cloudflare-tunnel
+data:
+  config.yaml: |
+    tunnel: 958fbb24-85ea-4812-9189-2dc63bca82e9
+    credentials-file: /etc/cloudflared/creds/credentials.json
+    ingress:
+      - service: https://traefik.traefik-system.svc.cluster.local:443
+        originRequest:
+          originServerName: epaflix.com
+          connectTimeout: 10s
