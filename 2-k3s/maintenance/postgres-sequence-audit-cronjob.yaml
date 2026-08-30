@@ -89,7 +89,7 @@ spec:
                 - |
                   echo "=== Postgres sequence drift audit @ $(date -u +%FT%TZ) ==="
                   fail=0
-                  for app in sonarr sonarr2 radarr bazarr; do
+                  for app in sonarr radarr bazarr; do
                     PGHOST=$(cat /secrets/${app}-host)
                     PGPORT=$(cat /secrets/${app}-port)
                     PGDATABASE=$(cat /secrets/${app}-database)

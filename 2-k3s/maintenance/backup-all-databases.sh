@@ -21,7 +21,6 @@ DATABASES=(
     "radarr-main"
     "sonarr-log"
     "sonarr-main"
-    "sonarr2-main"
 )
 
 echo "========================================="

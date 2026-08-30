@@ -22,7 +22,6 @@ generate_password() {
 }
 
 SONARR_PASSWORD=$(generate_password)
-SONARR2_PASSWORD=$(generate_password)
 RADARR_PASSWORD=$(generate_password)
 PROWLARR_PASSWORD=$(generate_password)
 JELLYSEERR_PASSWORD=$(generate_password)
@@ -34,17 +33,11 @@ echo "Creating databases and users..."
 echo ""
 
 PGPASSWORD="$POSTGRES_ADMIN_PASSWORD" psql -h "$POSTGRES_HOST" -U "$POSTGRES_ADMIN_USER" -p "$POSTGRES_PORT" <<EOF
--- Sonarr (TV Shows)
+-- Sonarr (TV Shows + Anime)
 CREATE DATABASE "sonarr-main";
 CREATE USER sonarr WITH PASSWORD '$SONARR_PASSWORD';
 GRANT ALL PRIVILEGES ON DATABASE "sonarr-main" TO sonarr;
 ALTER DATABASE "sonarr-main" OWNER TO sonarr;
-
--- Sonarr2 (Anime)
-CREATE DATABASE "sonarr2-main";
-CREATE USER sonarr2 WITH PASSWORD '$SONARR2_PASSWORD';
-GRANT ALL PRIVILEGES ON DATABASE "sonarr2-main" TO sonarr2;
-ALTER DATABASE "sonarr2-main" OWNER TO sonarr2;
 
 -- Radarr (Movies)
 CREATE DATABASE "radarr-main";
@@ -82,11 +75,6 @@ kubectl create secret generic servarr-postgres \
   --from-literal=sonarr-database="sonarr-main" \
   --from-literal=sonarr-user="sonarr" \
   --from-literal=sonarr-password="$SONARR_PASSWORD" \
-  --from-literal=sonarr2-host="$POSTGRES_HOST" \
-  --from-literal=sonarr2-port="$POSTGRES_PORT" \
-  --from-literal=sonarr2-database="sonarr2-main" \
-  --from-literal=sonarr2-user="sonarr2" \
-  --from-literal=sonarr2-password="$SONARR2_PASSWORD" \
   --from-literal=radarr-host="$POSTGRES_HOST" \
   --from-literal=radarr-port="$POSTGRES_PORT" \
   --from-literal=radarr-database="radarr-main" \
@@ -116,11 +104,6 @@ echo "Sonarr:"
 echo "  Database: sonarr-main"
 echo "  User: sonarr"
 echo "  Password: $SONARR_PASSWORD"
-echo ""
-echo "Sonarr2:"
-echo "  Database: sonarr2-main"
-echo "  User: sonarr2"
-echo "  Password: $SONARR2_PASSWORD"
 echo ""
 echo "Radarr:"
 echo "  Database: radarr-main"
