@@ -28,6 +28,8 @@ spec:
           env:
             - name: TZ
               value: Europe/Oslo
+            - name: RESOLVER_ADDRESS
+              value: 1.1.1.1:53   # split DNS: LAN resolvers override wg-hop to a LAN IP; public view needed for skip-logic + healthcheck
           envFrom:
             - secretRef:
                 name: ddns-updater-config
