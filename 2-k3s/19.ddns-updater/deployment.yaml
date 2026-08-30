@@ -1,0 +1,52 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ddns-updater
+  namespace: ddns-updater
+  labels:
+    app: ddns-updater
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: ddns-updater
+  template:
+    metadata:
+      labels:
+        app: ddns-updater
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: ddns-updater
+          image: ghcr.io/qdm12/ddns-updater:v2.10.0   # tag tracked via kustomization.yaml images override (Renovate)
+          env:
+            - name: TZ
+              value: Europe/Oslo
+          envFrom:
+            - secretRef:
+                name: ddns-updater-config
+          ports:
+            - containerPort: 8000
+              name: http
+          readinessProbe:
+            exec:
+              command: ["/updater/ddns-updater", "healthcheck"]
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "64Mi"
+          volumeMounts:
+            - name: data
+              mountPath: /updater/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: ddns-updater-data
