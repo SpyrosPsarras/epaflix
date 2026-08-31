@@ -24,7 +24,7 @@ images:
   - name: docker.io/eceasy/cli-proxy-api
     newTag: v7.2.146@sha256:238691ac26ce55e4d1c5219d72e3ad74838f81eda26359912eeb415e2820d163
   - name: docker.io/seakee/cpa-manager-plus
-    newTag: v1.12.6@sha256:dbaad3f95a08743dc585d639fae0a60a187f62c79a4a02f6550f821564f35d17
+    newTag: v1.12.7@sha256:da4486eab2afddc36f1db7391cad7c0dd6384f35f60d1fb06326542b443faf3c
 
 configMapGenerator:
   - name: cliproxy-scripts
