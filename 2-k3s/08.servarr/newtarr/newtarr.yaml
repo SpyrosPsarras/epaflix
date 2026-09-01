@@ -128,7 +128,6 @@ spec:
               mountPath: /config
             - name: stateful-void
               mountPath: /stateful-void
-              readOnly: true
           resources:
             requests:
               memory: "512Mi"
