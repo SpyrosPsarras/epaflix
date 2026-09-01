@@ -293,6 +293,26 @@ spec:
             summary: "qBittorrent torrent(s) stuck in missingFiles/error (or the check failed)"
             description: "The hourly qbt-stuck-torrent-check Job ({{ $labels.job_name }}) failed — either at least one torrent has been in qBittorrent `state` missingFiles or error for at least GRACE_MINUTES (15m), confirmed via two live snapshots taken GRACE_MINUTES apart (a torrent that recovers before the second snapshot, e.g. a recheck completing, is never reported), or the qBittorrent login/torrent-list fetch itself failed. This is the #610/#839 signature — a torrent can sit broken indefinitely with no *arr rule covering it (#482: `error` matches no Cleanuparr rule). Read the Job log for the affected hash prefix(es), state, category, size and age (never a torrent name), then inspect by hash in the qBittorrent WebUI. REPORT ONLY — this job never deletes, pauses or rechecks a torrent (`max_ratio_act=0` exists so private torrents are never auto-removed); any action is a human decision (#839)."
 
+    - name: seerr-availability-drift
+      interval: 60s
+      rules:
+        - alert: SeerrAvailabilityDriftFailed
+          expr: |
+            max by (job_name) (
+              kube_job_failed{namespace="servarr", job_name=~"seerr-availability-drift.*"} > 0
+              and on (job_name) (
+                max by (job_name) (kube_job_status_start_time{namespace="servarr", job_name=~"seerr-availability-drift.*"})
+                  >= scalar(max(kube_job_status_start_time{namespace="servarr", job_name=~"seerr-availability-drift.*"}))
+              )
+            )
+          for: 5m
+          labels:
+            severity: warning
+            component: servarr
+          annotations:
+            summary: "jellyseerr still shows pending/processing for a movie radarr already has (or the check failed)"
+            description: "The hourly seerr-availability-drift Job ({{ $labels.job_name }}) failed — either at least one movie sits at jellyseerr MediaStatus pending/processing while radarr reports hasFile, past GRACE_MINUTES (60m), or the postgres export / radarr fetch itself failed. jellyseerr does NOT promote a movie to Available when radarr imports it: it promotes when its Jellyfin Sync job finds a Jellyfin item carrying the movie's TMDB id, so the file can be on disk while the badge stays 'Requested' forever. Read the Job log for the per-movie verdict, which names the broken link: `path-outside-library` (radarr imported outside /media, so Jellyfin cannot see it — fix the root folder and re-import), `jellyfin-unmatched` (no jellyfinMediaId on the seerr row — scan the Jellyfin library, Identify the item so it carries a TMDB id, then run seerr Settings > Jobs > Jellyfin Sync), `seerr-stale` (Jellyfin has it linked but seerr never promoted — run Jellyfin Sync and read its log), `not-in-radarr` (seerr sent it but radarr has no such movie). REPORT ONLY — this job never writes to the jellyseerr database or to radarr; promoting a status by hand would claim availability Jellyfin cannot serve. See the CronJob's own comments in 2-k3s/maintenance/seerr-availability-drift-cronjob.yaml."
+
     - name: traefik
       interval: 60s
       rules:
@@ -493,7 +513,7 @@ spec:
             )
             unless on (namespace, job_name)
             max by (namespace, job_name) (
-              kube_job_owner{namespace="servarr", owner_kind="CronJob", owner_name=~"cleanuparr-blocklist-drift|newtarr-config-drift|orphan-census|prowlarr-indexer-health|cleanuparr-queuecleaner-health|blind-queue-check|qbt-stuck-torrent-check"}
+              kube_job_owner{namespace="servarr", owner_kind="CronJob", owner_name=~"cleanuparr-blocklist-drift|newtarr-config-drift|orphan-census|prowlarr-indexer-health|cleanuparr-queuecleaner-health|blind-queue-check|qbt-stuck-torrent-check|seerr-availability-drift"}
             )
           for: 15m
           labels:
