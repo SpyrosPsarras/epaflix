@@ -2,20 +2,14 @@
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
-  name: prowlarr-https
+  name: prowlarr-internal
   namespace: servarr
 spec:
   entryPoints:
-    - websecure
+    - internal
   routes:
     - match: Host(`prowlarr.epaflix.com`)
       kind: Rule
-      priority: 10
-      middlewares:
-        - name: security-headers
-          namespace: traefik-system
-        - name: authentik-forwardauth
-          namespace: traefik-system
       services:
         - name: prowlarr
           port: 9696
@@ -25,45 +19,3 @@ spec:
       - main: epaflix.com
         sans:
           - "*.epaflix.com"
----
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
-metadata:
-  name: prowlarr-outpost-https
-  namespace: servarr
-spec:
-  entryPoints:
-    - websecure
-  routes:
-    - match: Host(`prowlarr.epaflix.com`) && PathPrefix(`/outpost.goauthentik.io/`)
-      kind: Rule
-      priority: 15
-      services:
-        - name: authentik-server
-          namespace: app-authentik
-          port: 80
-  tls:
-    certResolver: cloudflare
-    domains:
-      - main: epaflix.com
-        sans:
-          - "*.epaflix.com"
----
----
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
-metadata:
-  name: prowlarr-http
-  namespace: servarr
-spec:
-  entryPoints:
-    - web
-  routes:
-    - match: Host(`prowlarr.epaflix.com`)
-      kind: Rule
-      middlewares:
-        - name: redirect-https
-          namespace: traefik-system
-      services:
-        - name: prowlarr
-          port: 9696
