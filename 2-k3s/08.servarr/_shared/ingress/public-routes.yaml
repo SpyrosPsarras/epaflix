@@ -10,12 +10,38 @@ spec:
   routes:
     - match: Host(`seerr.epaflix.com`)
       kind: Rule
+      priority: 10
       middlewares:
         - name: security-headers
+          namespace: traefik-system
+        - name: authentik-forwardauth
           namespace: traefik-system
       services:
         - name: seerr
           port: 5055
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: seerr-outpost-https
+  namespace: servarr
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`seerr.epaflix.com`) && PathPrefix(`/outpost.goauthentik.io/`)
+      kind: Rule
+      priority: 15
+      services:
+        - name: authentik-server
+          namespace: app-authentik
+          port: 80
   tls:
     certResolver: cloudflare
     domains:
@@ -37,61 +63,6 @@ spec:
       middlewares:
         - name: redirect-https
           namespace: traefik-system
-      services:
-        - name: seerr
-          port: 5055
----
-apiVersion: traefik.io/v1alpha1
-kind: Middleware
-metadata:
-  name: jellyseerr-to-seerr
-  namespace: servarr
-spec:
-  redirectRegex:
-    regex: ^https?://jellyseerr\.epaflix\.com/(.*)
-    replacement: https://seerr.epaflix.com/${1}
-    permanent: true
----
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
-metadata:
-  name: jellyseerr-https
-  namespace: servarr
-spec:
-  entryPoints:
-    - websecure
-  routes:
-    - match: Host(`jellyseerr.epaflix.com`)
-      kind: Rule
-      middlewares:
-        - name: security-headers
-          namespace: traefik-system
-        - name: jellyseerr-to-seerr
-          namespace: servarr
-      services:
-        - name: seerr
-          port: 5055
-  tls:
-    certResolver: cloudflare
-    domains:
-      - main: epaflix.com
-        sans:
-          - "*.epaflix.com"
----
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
-metadata:
-  name: jellyseerr-http
-  namespace: servarr
-spec:
-  entryPoints:
-    - web
-  routes:
-    - match: Host(`jellyseerr.epaflix.com`)
-      kind: Rule
-      middlewares:
-        - name: jellyseerr-to-seerr
-          namespace: servarr
       services:
         - name: seerr
           port: 5055
