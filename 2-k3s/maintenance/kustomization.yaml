@@ -15,6 +15,7 @@ resources:
   - qbt-stuck-torrent-check-cronjob.yaml
   - radarr-missing-search-cronjob.yaml
   - sonarr-alias-search-cronjob.yaml
+  - seerr-availability-drift-cronjob.yaml
 
 configMapGenerator:
   - name: cleanuparr-blocklist-expected

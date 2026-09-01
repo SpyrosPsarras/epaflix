@@ -1,0 +1,516 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: seerr-availability-drift-script
+  namespace: servarr
+data:
+  export.sql: |
+    \set ON_ERROR_STOP on
+    \pset tuples_only on
+    \pset format unaligned
+    \pset footer off
+
+    -- One compact JSON object per line, whole row, so drift.py can read
+    -- columns defensively instead of breaking on a jellyseerr schema bump.
+    -- Only the non-4k lane: `status` is what the badge on the title page
+    -- shows. 2 = PENDING, 3 = PROCESSING in the MediaStatus enum.
+    SELECT to_jsonb(m)
+    FROM   media m
+    WHERE  m."mediaType" = 'movie'
+      AND  m.status IN (2, 3)
+    ORDER BY m.id;
+  drift.py: |
+    #!/usr/bin/env python3
+    """Jellyseerr availability drift detector. Python stdlib only - no pip, no apk.
+
+    Catches the "seerr still says Requested/Processing but Radarr already has the
+    movie" class of drift. Jellyseerr does NOT flip a movie to Available when
+    Radarr imports it - it flips when its Jellyfin sync finds a Jellyfin item
+    carrying the movie's TMDB id. So a movie can sit at Processing forever while
+    the file is happily on disk, and the break is in one of three places. This
+    job names which one.
+
+    Input is two halves that never talk to each other in production:
+      - /work/seerr-media.jsonl - one `to_jsonb(media)` row per line, exported by
+        the psql initContainer for movie rows still at PENDING/PROCESSING.
+      - the Radarr v3 API - the authoritative "do we have the file" answer.
+
+    Only the non-4k `status` column is checked, which is what the badge on the
+    seerr title page reflects; `status4k` is a separate request lane.
+
+    Run with --selftest to exercise the classifier against synthetic media rows
+    and Radarr payloads without touching the network or a database.
+    """
+    import calendar
+    import datetime
+    import json
+    import os
+    import sys
+    import time
+    import urllib.error
+    import urllib.request
+
+    TIMEOUT = 60
+
+    RADARR_URL = os.environ.get("RADARR_URL", "http://radarr:7878")
+    API_KEY = os.environ.get("RADARR_API_KEY", "")
+    MEDIA_FILE = os.environ.get("SEERR_MEDIA_FILE", "/work/seerr-media.jsonl")
+
+    # How long Radarr is allowed to hold an imported file before Jellyfin +
+    # seerr are expected to have caught up. Jellyfin's own library scan plus
+    # seerr's recently-added sync run well inside an hour.
+    GRACE_MINUTES = float(os.environ.get("GRACE_MINUTES", "60"))
+
+    # Jellyfin mounts the servarr-media PVC read-only at /media, so a file Radarr
+    # imported outside these prefixes is invisible to Jellyfin no matter how many
+    # scans run.
+    MEDIA_ROOT_PREFIXES = [
+        p for p in os.environ.get("MEDIA_ROOT_PREFIXES", "/media").split(",") if p
+    ]
+
+    # Overseerr/Jellyseerr MediaStatus enum.
+    STATUS_NAMES = {
+        1: "unknown",
+        2: "pending",
+        3: "processing",
+        4: "partially-available",
+        5: "available",
+        6: "deleted",
+        7: "blacklisted",
+    }
+
+    # Verdicts that mean "someone has to go look at this".
+    DRIFT = {
+        "not-in-radarr",
+        "path-outside-library",
+        "jellyfin-unmatched",
+        "seerr-stale",
+    }
+
+    REMEDY = {
+        "not-in-radarr":
+            "seerr thinks it handed this to Radarr but Radarr has no such movie - "
+            "it was deleted in Radarr, or seerr's Radarr service points at a "
+            "different instance. Re-request it, or clear the stale seerr row.",
+        "path-outside-library":
+            "Radarr imported outside the paths Jellyfin can see - fix Radarr's "
+            "root folder, then re-import. Jellyfin will never scan this file.",
+        "jellyfin-unmatched":
+            "the file is on disk but no Jellyfin item is linked, so Jellyfin has "
+            "not scanned it or identified it without a TMDB id (common for very "
+            "new releases). Scan the Jellyfin library, then Identify the item so "
+            "it carries the TMDB id, then run seerr's Jellyfin Sync job.",
+        "seerr-stale":
+            "Jellyfin has the item linked but seerr never promoted the status - "
+            "run seerr's Jellyfin Sync job (Settings > Jobs) and check its log "
+            "for sync errors.",
+    }
+
+
+    def http_status(exc):
+        """Status code only - never echo a response body, it can carry a key."""
+        return str(exc.code) if isinstance(exc, urllib.error.HTTPError) else "-"
+
+
+    def parse_epoch(date_str):
+        """Radarr ISO-8601 -> unix seconds, or None if unparseable."""
+        if not date_str:
+            return None
+        s = str(date_str).strip()
+        if s.endswith("Z"):
+            s = s[:-1]
+        if "+" in s[10:]:
+            s = s[:10] + s[10:].split("+", 1)[0]
+        if "." in s:
+            s = s.split(".", 1)[0]
+        try:
+            dt = datetime.datetime.strptime(s, "%Y-%m-%dT%H:%M:%S")
+        except ValueError:
+            return None
+        return calendar.timegm(dt.timetuple())
+
+
+    def get_movies():
+        req = urllib.request.Request(
+            RADARR_URL.rstrip("/") + "/api/v3/movie",
+            headers={"X-Api-Key": API_KEY, "Accept": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+            return json.load(resp)
+
+
+    def index_movies(movies):
+        """tmdbId -> movie, plus Radarr id -> movie as the fallback join."""
+        by_tmdb, by_id = {}, {}
+        for m in movies:
+            tmdb = m.get("tmdbId")
+            if tmdb:
+                by_tmdb[int(tmdb)] = m
+            mid = m.get("id")
+            if mid:
+                by_id[int(mid)] = m
+        return by_tmdb, by_id
+
+
+    def load_media(path):
+        """Read the psql export. A malformed line is loud, not skipped."""
+        rows = []
+        with open(path) as fh:
+            for lineno, line in enumerate(fh, 1):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rows.append(json.loads(line))
+                except ValueError as exc:
+                    raise ValueError("%s:%d is not JSON: %s" % (path, lineno, exc))
+        return rows
+
+
+    def find_movie(row, by_tmdb, by_id):
+        tmdb = row.get("tmdbId")
+        if tmdb is not None:
+            movie = by_tmdb.get(int(tmdb))
+            if movie:
+                return movie
+        ext = row.get("externalServiceId")
+        if ext is not None:
+            return by_id.get(int(ext))
+        return None
+
+
+    def file_epoch(movie):
+        mf = movie.get("movieFile") or {}
+        return parse_epoch(mf.get("dateAdded"))
+
+
+    def file_path(movie):
+        mf = movie.get("movieFile") or {}
+        rel = mf.get("relativePath") or ""
+        path = mf.get("path") or ""
+        if path:
+            return path
+        base = movie.get("path") or ""
+        if base and rel:
+            return base.rstrip("/") + "/" + rel
+        return base
+
+
+    def classify(row, movie, now, grace_seconds):
+        """One media row -> (verdict, detail). See DRIFT for what needs a human."""
+        status = row.get("status")
+
+        if movie is None:
+            if status == 3:
+                return "not-in-radarr", "no Radarr movie for this tmdbId"
+            return "awaiting-approval", "not sent to Radarr yet"
+
+        if not movie.get("hasFile"):
+            return "downloading", "Radarr has the movie, no file yet"
+
+        path = file_path(movie)
+        if MEDIA_ROOT_PREFIXES and path and not any(
+            path.startswith(p) for p in MEDIA_ROOT_PREFIXES
+        ):
+            return "path-outside-library", "file at %s" % path
+
+        added = file_epoch(movie)
+        if added is not None and now - added < grace_seconds:
+            return "importing", "imported %d min ago, inside grace" % (
+                (now - added) // 60)
+
+        age = "age unknown" if added is None else "imported %d min ago" % (
+            (now - added) // 60)
+        if not row.get("jellyfinMediaId"):
+            return "jellyfin-unmatched", "no jellyfinMediaId on the seerr row, %s" % age
+        return "seerr-stale", "jellyfinMediaId=%s, %s" % (
+            row["jellyfinMediaId"], age)
+
+
+    def report(rows, by_tmdb, by_id, now, grace_seconds):
+        """-> (verdict, row, movie, detail) per media row, drift first."""
+        out = []
+        for row in rows:
+            movie = find_movie(row, by_tmdb, by_id)
+            verdict, detail = classify(row, movie, now, grace_seconds)
+            out.append((verdict, row, movie, detail))
+        return sorted(out, key=lambda r: (r[0] not in DRIFT, r[0], r[1].get("id", 0)))
+
+
+    def title_of(row, movie):
+        if movie and movie.get("title"):
+            return "%s (%s)" % (movie["title"], movie.get("year", "?"))
+        return "tmdb:%s" % row.get("tmdbId", "?")
+
+
+    def selftest():
+        now = 1_700_000_000
+        grace = 3600
+
+        def iso(offset):
+            return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now + offset))
+
+        movies = [
+            {"id": 10, "tmdbId": 111, "title": "Imported Long Ago", "year": 2026,
+             "hasFile": True, "path": "/media/movies/Imported Long Ago (2026)",
+             "movieFile": {"relativePath": "a.mkv", "dateAdded": iso(-7200)}},
+            {"id": 11, "tmdbId": 222, "title": "Just Imported", "year": 2026,
+             "hasFile": True, "path": "/media/movies/Just Imported (2026)",
+             "movieFile": {"relativePath": "b.mkv", "dateAdded": iso(-600)}},
+            {"id": 12, "tmdbId": 333, "title": "Still Grabbing", "year": 2026,
+             "hasFile": False, "path": "/media/movies/Still Grabbing (2026)"},
+            {"id": 13, "tmdbId": 444, "title": "Wrong Root", "year": 2026,
+             "hasFile": True, "path": "/downloads/complete/Wrong Root (2026)",
+             "movieFile": {"path": "/downloads/complete/Wrong Root (2026)/c.mkv",
+                           "dateAdded": iso(-7200)}},
+            {"id": 14, "tmdbId": 555, "title": "Linked But Stale", "year": 2026,
+             "hasFile": True, "path": "/media/movies/Linked But Stale (2026)",
+             "movieFile": {"relativePath": "d.mkv", "dateAdded": iso(-7200)}},
+            {"id": 15, "tmdbId": 666, "title": "Joined By ServiceId", "year": 2026,
+             "hasFile": True, "path": "/media/movies/Joined By ServiceId (2026)",
+             "movieFile": {"relativePath": "e.mkv", "dateAdded": iso(-7200)}},
+        ]
+        by_tmdb, by_id = index_movies(movies)
+
+        rows = [
+            # the reported symptom: file on disk, Jellyfin never linked it
+            {"id": 1, "tmdbId": 111, "status": 3, "jellyfinMediaId": None},
+            # imported minutes ago - normal, still inside grace
+            {"id": 2, "tmdbId": 222, "status": 3, "jellyfinMediaId": None},
+            # still downloading - normal
+            {"id": 3, "tmdbId": 333, "status": 3, "jellyfinMediaId": None},
+            # Radarr put the file where Jellyfin cannot see it
+            {"id": 4, "tmdbId": 444, "status": 3, "jellyfinMediaId": None},
+            # Jellyfin linked it, seerr never promoted the status
+            {"id": 5, "tmdbId": 555, "status": 3, "jellyfinMediaId": "abc123"},
+            # processing but the movie is gone from Radarr
+            {"id": 6, "tmdbId": 777, "status": 3, "jellyfinMediaId": None},
+            # pending approval and not in Radarr - expected, not drift
+            {"id": 7, "tmdbId": 888, "status": 2, "jellyfinMediaId": None},
+            # tmdbId missing on the seerr row: join through externalServiceId
+            {"id": 8, "tmdbId": None, "externalServiceId": 15, "status": 3,
+             "jellyfinMediaId": None},
+            # pending in seerr while the file is already on disk - still drift
+            {"id": 9, "tmdbId": 111, "status": 2, "jellyfinMediaId": None},
+        ]
+
+        got = {r["id"]: classify(r, find_movie(r, by_tmdb, by_id), now, grace)[0]
+               for r in rows}
+        want = {
+            1: "jellyfin-unmatched",
+            2: "importing",
+            3: "downloading",
+            4: "path-outside-library",
+            5: "seerr-stale",
+            6: "not-in-radarr",
+            7: "awaiting-approval",
+            8: "jellyfin-unmatched",
+            9: "jellyfin-unmatched",
+        }
+        assert got == want, got
+
+        # drift sorts ahead of the informational rows
+        ordered = report(rows, by_tmdb, by_id, now, grace)
+        drift_len = len([v for v, _, _, _ in ordered if v in DRIFT])
+        assert drift_len == 6, ordered
+        assert all(v in DRIFT for v, _, _, _ in ordered[:drift_len]), ordered
+        assert not any(v in DRIFT for v, _, _, _ in ordered[drift_len:]), ordered
+
+        # every drift verdict has a remedy to print
+        assert DRIFT <= set(REMEDY), DRIFT - set(REMEDY)
+
+        # a hasFile movie whose payload carries no movieFile cannot be dated, and
+        # must not be excused by the grace window
+        undated = {"id": 20, "tmdbId": 999, "title": "No File Block", "year": 2026,
+                   "hasFile": True, "path": "/media/movies/No File Block (2026)"}
+        v, detail = classify({"id": 30, "tmdbId": 999, "status": 3}, undated,
+                            now, grace)
+        assert v == "jellyfin-unmatched", v
+        assert "age unknown" in detail, detail
+
+        assert parse_epoch("2023-11-14T22:13:20Z") == now
+        assert parse_epoch("2023-11-14T22:13:20.123456Z") == now
+        assert parse_epoch("2023-11-14T22:13:20+00:00") == now
+        assert parse_epoch("") is None
+        assert parse_epoch("not a date") is None
+
+        assert file_path(movies[0]) == "/media/movies/Imported Long Ago (2026)/a.mkv"
+        assert file_path(movies[3]) == "/downloads/complete/Wrong Root (2026)/c.mkv"
+
+        print("selftest OK")
+        return 0
+
+
+    def main():
+        if "--selftest" in sys.argv:
+            return selftest()
+
+        print("=== jellyseerr availability drift @ %s ==="
+              % time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+
+        if not API_KEY:
+            print("ERROR: RADARR_API_KEY is empty", file=sys.stderr)
+            return 2
+
+        try:
+            rows = load_media(MEDIA_FILE)
+        except (OSError, ValueError) as exc:
+            print("ERROR: could not read the seerr media export: %s" % exc,
+                  file=sys.stderr)
+            return 2
+
+        if not rows:
+            print("OK: no movie sits at pending/processing in seerr - "
+                  "nothing to reconcile.")
+            return 0
+
+        try:
+            movies = get_movies()
+        except (urllib.error.URLError, urllib.error.HTTPError, ValueError) as exc:
+            print("ERROR: could not list movies from %s: %s (http=%s)"
+                  % (RADARR_URL, type(exc).__name__, http_status(exc)),
+                  file=sys.stderr)
+            return 2
+
+        by_tmdb, by_id = index_movies(movies)
+        now = int(time.time())
+        grace_seconds = GRACE_MINUTES * 60
+
+        print("seerr: %d movie(s) at pending/processing | radarr: %d movie(s) | "
+              "grace=%.0fmin | jellyfin-visible roots=%s"
+              % (len(rows), len(movies), GRACE_MINUTES,
+                 ",".join(MEDIA_ROOT_PREFIXES) or "(unchecked)"))
+        print()
+
+        results = report(rows, by_tmdb, by_id, now, grace_seconds)
+        drift = [r for r in results if r[0] in DRIFT]
+
+        for verdict, row, movie, detail in results:
+            print("    %-21s %-45s seerr=%s %s"
+                  % (verdict, title_of(row, movie)[:45],
+                     STATUS_NAMES.get(row.get("status"), row.get("status")),
+                     detail))
+
+        if not drift:
+            print("\nOK: every pending/processing movie is legitimately still "
+                  "in flight - no drift.")
+            return 0
+
+        print("\n%d movie(s) drifted. What to do:" % len(drift))
+        for verdict in sorted({v for v, _, _, _ in drift}):
+            print("  - %s: %s" % (verdict, REMEDY[verdict]))
+        return 1
+
+
+    if __name__ == "__main__":
+        sys.exit(main())
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: seerr-availability-drift
+  namespace: servarr
+  labels:
+    app: seerr-availability-drift
+spec:
+  schedule: "5 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 6
+  failedJobsHistoryLimit: 6
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 300
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 2592000  # keep 30 days
+      template:
+        metadata:
+          labels:
+            app: seerr-availability-drift
+        spec:
+          restartPolicy: Never
+          initContainers:
+            # The jellyseerr config PVC is ReadWriteOnce and holds the only
+            # copy of the API key, so this reads the media table straight from
+            # postgres instead. psql lives here, python does not - hence the
+            # handoff through an emptyDir.
+            - name: export-seerr-media
+              image: postgres:16-alpine
+              imagePullPolicy: IfNotPresent
+              command: ["/bin/sh", "-eu", "-c"]
+              args:
+                - |
+                  PGHOST=$(cat /secrets/jellyseerr-host)
+                  PGPORT=$(cat /secrets/jellyseerr-port)
+                  PGDATABASE=$(cat /secrets/jellyseerr-database)
+                  PGUSER=$(cat /secrets/jellyseerr-user)
+                  PGPASSWORD=$(cat /secrets/jellyseerr-password)
+                  export PGHOST PGPORT PGDATABASE PGUSER PGPASSWORD
+                  echo "exporting pending/processing movies from ${PGDATABASE} @ ${PGHOST}"
+                  psql -X -v ON_ERROR_STOP=1 -f /sql/export.sql \
+                    > /work/seerr-media.jsonl
+                  unset PGPASSWORD
+                  echo "exported $(wc -l < /work/seerr-media.jsonl) row(s)"
+              volumeMounts:
+                - name: secrets
+                  mountPath: /secrets
+                  readOnly: true
+                - name: script
+                  mountPath: /sql
+                  readOnly: true
+                - name: work
+                  mountPath: /work
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "250m"
+                  memory: "128Mi"
+          containers:
+            - name: drift-check
+              image: python:3.13-alpine
+              imagePullPolicy: IfNotPresent
+              command: ["python3", "/script/drift.py"]
+              env:
+                - name: RADARR_URL
+                  value: "http://radarr:7878"
+                - name: SEERR_MEDIA_FILE
+                  value: "/work/seerr-media.jsonl"
+                - name: GRACE_MINUTES
+                  value: "60"
+                # Jellyfin mounts servarr-media read-only at /media; a file
+                # imported anywhere else is invisible to it.
+                - name: MEDIA_ROOT_PREFIXES
+                  value: "/media"
+                - name: RADARR_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: unpackerr-secret
+                      key: UN_RADARR_0_API_KEY
+              volumeMounts:
+                - name: script
+                  mountPath: /script
+                  readOnly: true
+                - name: work
+                  mountPath: /work
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "250m"
+                  memory: "192Mi"
+          volumes:
+            - name: secrets
+              secret:
+                secretName: servarr-postgres
+                defaultMode: 0400
+            - name: script
+              configMap:
+                name: seerr-availability-drift-script
+                defaultMode: 0555
+            - name: work
+              emptyDir: {}
