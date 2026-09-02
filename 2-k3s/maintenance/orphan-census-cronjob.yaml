@@ -750,7 +750,7 @@ spec:
               command: ["python3", "/script/census.py"]
               env:
                 - name: ARMED
-                  value: "false"
+                  value: "true"
                 - name: NO_PROGRESS_HOURS
                   value: "24"
                 - name: CATEGORY_ARR_MAP
