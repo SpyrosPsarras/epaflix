@@ -756,7 +756,7 @@ spec:
                 - name: CATEGORY_ARR_MAP
                   value: "tv-sonarr=sonarr,animes=sonarr,radarr=radarr"
                 - name: MAX_HISTORY_LOOKUPS
-                  value: "4"
+                  value: "16"
                 - name: QBT_USERNAME
                   valueFrom:
                     secretKeyRef:
