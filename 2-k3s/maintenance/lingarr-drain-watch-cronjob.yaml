@@ -1,0 +1,339 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: lingarr-drain-watch-script
+  namespace: servarr
+data:
+  watch.py: |
+    #!/usr/bin/env python3
+    """Lingarr drain watcher: is the Bazarr->Lingarr subtitle pipeline draining?
+
+    Reports every run: pending translation/search jobs in Bazarr's queue,
+    in-window completions and failures in Lingarr, drain rate, ETA and the
+    dominant failure signature. Exits 1 when the in-window failure rate hits
+    FAIL_RATE_THRESHOLD - the known signature is Lingarr's request_timeout
+    canceling slow local-AI translations ("The operation was canceled").
+
+    Run with --selftest to exercise bucketing/ETA against synthetic payloads
+    without touching the network. Python stdlib only - no pip, no apk.
+    """
+    import datetime
+    import json
+    import os
+    import sys
+    import time
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    TIMEOUT = 30
+    PAGE_SIZE = 100
+    MAX_PAGES = 8  # safety cap: 8 * 100 = 800 requests per run
+
+    def env_num(name, default, cast):
+        try:
+            return cast(os.environ.get(name, default))
+        except ValueError:
+            print("ERROR: %s=%r is not a number" % (name, os.environ.get(name)),
+                  file=sys.stderr)
+            sys.exit(2)
+
+    WINDOW_HOURS = env_num("WINDOW_HOURS", "24", float)
+    FAIL_RATE_THRESHOLD = env_num("FAIL_RATE_THRESHOLD", "25", float)
+
+    BAZARR_URL = os.environ.get("BAZARR_URL", "http://bazarr:6767")
+    LINGARR_URL = os.environ.get("LINGARR_URL", "http://lingarr:9876")
+    BAZARR_API_KEY = os.environ.get("BAZARR_API_KEY", "")
+
+    OUTSTANDING = {"queued", "inprogress", "in_progress"}
+    DONE = {"completed"}
+    FAILED = {"failed"}
+    INTERRUPTED = {"interrupted"}  # Lingarr's failure-shaped terminal state
+
+
+    def iso_ts(value):
+        """Lingarr timestamps to UTC epoch (aware ISO-8601, '.NET +00:00' shape)."""
+        if not value:
+            return None
+        s = value.strip()
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        try:
+            dt = datetime.datetime.fromisoformat(s)
+        except ValueError:
+            return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=datetime.timezone.utc)
+        return dt.timestamp()
+
+
+    def http_status(exc):
+        """Status code only - never echo a response body, it can carry a key."""
+        return str(exc.code) if isinstance(exc, urllib.error.HTTPError) else "-"
+
+
+    def api_get(url, path, query=None, headers=None):
+        q = urllib.parse.urlencode(query or {})
+        full = "%s%s" % (url.rstrip("/"), path)
+        if q:
+            full += "?" + q
+        req = urllib.request.Request(full, headers=headers or {"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+            return json.load(resp)
+
+
+    def fetch_lingarr_requests():
+        """All translation requests, newest-CreatedAt first.
+
+        Fails closed if totalCount is not covered within MAX_PAGES - same
+        'refuse to judge on partial data' contract as blind-queue-check. The
+        server ignores orderBy other than CreatedAt, so a full scan is the
+        only way to count completions of long-queued items inside the window.
+        """
+        items = []
+        page = 1
+        while page <= MAX_PAGES:
+            doc = api_get(LINGARR_URL, "/api/translationRequest/requests", {
+                "pageNumber": page, "pageSize": PAGE_SIZE, "orderBy": "CreatedAt",
+                "ascending": "false",
+            })
+            batch = doc.get("items")
+            if not isinstance(batch, list):
+                raise RuntimeError("lingarr: requests response has no 'items' array")
+            items.extend(batch)
+            total = doc.get("totalCount")
+            if not isinstance(total, int):
+                raise RuntimeError("lingarr: requests response has no totalCount")
+            if len(items) >= total:
+                return items
+            if not batch:
+                raise RuntimeError(
+                    "lingarr: %d of %d requests fetched and the feed ended early"
+                    % (len(items), total))
+            page += 1
+        raise RuntimeError(
+            "lingarr: %d requests do not fit in MAX_PAGES=%d pages of %d - refusing "
+            "to judge a partial history" % (total, MAX_PAGES, PAGE_SIZE))
+
+
+    def bucket(requests, now, window_hours):
+        """Pure bucketing of Lingarr request payloads - exercised by --selftest."""
+        cutoff = now - window_hours * 3600.0
+        counts = {"done": 0, "failed": 0, "outstanding": 0, "unjudgeable": 0}
+        errors = {}
+        for item in requests:
+            status = str(item.get("status", "")).strip().lower()
+            ts = iso_ts(item.get("completedAt")) or iso_ts(item.get("updatedAt"))
+            if status in OUTSTANDING:
+                counts["outstanding"] += 1
+            elif status in DONE:
+                if ts is None:
+                    counts["unjudgeable"] += 1
+                elif ts >= cutoff:
+                    counts["done"] += 1
+            elif status in FAILED or status in INTERRUPTED:
+                if ts is None:
+                    counts["unjudgeable"] += 1
+                elif ts >= cutoff:
+                    counts["failed"] += 1
+                    msg = str(item.get("errorMessage") or "(none)").strip()[:120]
+                    errors[msg] = errors.get(msg, 0) + 1
+            elif status == "cancelled":
+                pass  # deliberate user action - never a fault signal
+            else:
+                counts["unjudgeable"] += 1  # unknown status: upstream drift, fail closed
+        top_error = max(errors.items(), key=lambda kv: kv[1])[0] if errors else None
+        return counts, errors, top_error
+
+
+    def fetch_bazarr_backlog():
+        """Pending Lingarr translations / pending searches / running translations."""
+        doc = api_get(BAZARR_URL, "/api/system/jobs",
+                      headers={"X-API-KEY": BAZARR_API_KEY, "Accept": "application/json"})
+        jobs = doc.get("data")
+        if not isinstance(jobs, list):
+            raise RuntimeError("bazarr: jobs response has no 'data' array")
+        backlog = searches = running = 0
+        for job in jobs:
+            name = str(job.get("job_name", ""))
+            status = str(job.get("status", "")).lower()
+            if "using lingarr" in name and "translating" in name:
+                if status == "pending":
+                    backlog += 1
+                elif status == "running":
+                    running += 1
+            elif name == "Searching subtitles" and status == "pending":
+                searches += 1
+        return backlog, searches, running
+
+
+    def report(now, requests, active_count, backlog, searches, running,
+               window_hours, threshold):
+        counts, errors, top_error = bucket(requests, now, window_hours)
+        if counts["unjudgeable"]:
+            print("\nFAIL: %d terminal request(s) have an unknown status or no "
+                  "timestamp - cannot judge the window (upstream shape change?). "
+                  "ACTION: inspect Lingarr /api/translationRequest/requests and "
+                  "update bucket() statuses." % counts["unjudgeable"])
+            return 2
+        done, failed = counts["done"], counts["failed"]
+        terminal = done + failed
+        if terminal == 0:
+            print("\nFAIL: 0 terminal requests in the window - no evidence to "
+                  "judge (stuck queue, empty history, or a wiped backlog). "
+                  "ACTION: check Bazarr's queue and Lingarr's active list.")
+            return 2
+        rate = done / window_hours if window_hours > 0 else 0.0
+        fail_rate = 100.0 * failed / terminal
+        eta_hours = (backlog / rate) if backlog and rate > 0 else None
+
+        print("=== lingarr drain watch @ %s ==="
+              % datetime.datetime.now(datetime.timezone.utc)
+              .strftime("%Y-%m-%dT%H:%M:%SZ"))
+        print("window: %.0fh | failure threshold: %.0f%%" % (window_hours, threshold))
+        print("bazarr queue: %d pending Lingarr translations (%d running), "
+              "%d pending searches" % (backlog, running, searches))
+        print("lingarr: %d requests scanned | active now %d | outstanding %d | "
+              "%.0fh done %d | failed %d"
+              % (len(requests), active_count, counts["outstanding"],
+                 window_hours, done, failed))
+        if rate > 0:
+            line = "drain rate ~%.1f/h" % rate
+            if eta_hours is not None:
+                line += " | eta for %d pending ~%.0fh" % (backlog, eta_hours)
+            print(line)
+        else:
+            print("drain rate 0/h in window - nothing completed")
+        print("failure rate (window): %.1f%%" % fail_rate)
+        if top_error:
+            print("dominant failure: %r x%d" % (top_error, errors[top_error]))
+
+        if fail_rate >= threshold:
+            print("\nFAIL: failure rate %.1f%% >= %.0f%% - translations are being "
+                  "canceled or erroring. Known cause: request_timeout too low for "
+                  "the local AI model (signature 'The operation was canceled'). "
+                  "ACTION: raise request_timeout in Lingarr (>=300s enforced by the "
+                  "init guard) and check the model endpoint is responsive."
+                  % (fail_rate, threshold))
+            return 1
+        print("\nOK: pipeline draining within the failure budget.")
+        return 0
+
+
+    def selftest():
+        now = 1_900_000_000.0
+        iso = lambda offset: datetime.datetime.fromtimestamp(
+            now - offset * 3600, datetime.timezone.utc).isoformat()
+        healthy = [
+            {"status": "Completed", "completedAt": iso(1), "errorMessage": None},
+            {"status": "Failed", "completedAt": iso(2), "errorMessage": "The operation was canceled."},
+            {"status": "InProgress", "completedAt": None},
+            {"status": "Completed", "completedAt": iso(48)},  # outside window: ignored
+        ]
+        counts, errors, top = bucket(healthy, now, 24)
+        assert counts == {"done": 1, "failed": 1, "outstanding": 1,
+                          "unjudgeable": 0}, counts
+        assert top == "The operation was canceled." and errors[top] == 1
+        assert iso_ts("2026-09-01T09:24:54.443489+00:00") is not None
+        assert iso_ts("2026-09-01T09:24:54Z") is not None
+        assert iso_ts(None) is None and iso_ts("garbage") is None
+        rc = report(now, healthy, 2, 340, 138, 1, 24, 25)
+        assert rc == 1, "1/2 terminal failed = 50% >= 25% threshold must fail"
+        ok = [{"status": "Completed", "completedAt": iso(h)} for h in (1, 2, 3, 5, 6, 7, 8)] \
+            + [{"status": "Failed", "completedAt": iso(4), "errorMessage": "x"}]
+        assert report(now, ok, 0, 10, 0, 0, 24, 25) == 0, "12.5% below threshold is a pass"
+        assert report(now, [], 0, 0, 0, 0, 24, 25) == 2, "no terminal evidence must exit 2"
+        assert report(now, [{"status": "Completed", "completedAt": None}],
+                      0, 1, 0, 0, 24, 25) == 2, "untimestamped terminal must exit 2"
+        assert report(now, [{"status": "Mystery"}], 0, 1, 0, 0, 24, 25) == 2, \
+            "unknown status must exit 2"
+        interrupted = [{"status": "Interrupted", "completedAt": iso(3), "errorMessage": "boom"},
+                       {"status": "Cancelled", "completedAt": iso(5)}]
+        counts, _, _ = bucket(interrupted, now, 24)
+        assert counts["failed"] == 1 and counts["unjudgeable"] == 0, counts
+        print("selftest OK")
+        return 0
+
+
+    def main(argv):
+        if "--selftest" in argv:
+            return selftest()
+        if not BAZARR_API_KEY:
+            print("ERROR: BAZARR_API_KEY is empty", file=sys.stderr)
+            return 2
+        try:
+            requests = fetch_lingarr_requests()
+            active = api_get(LINGARR_URL, "/api/translationRequest/active")
+            if not isinstance(active, list):
+                raise RuntimeError("lingarr: active response is not a list")
+            backlog, searches, running = fetch_bazarr_backlog()
+        except (urllib.error.URLError, urllib.error.HTTPError,
+                RuntimeError, ValueError, json.JSONDecodeError) as exc:
+            print("ERROR: %s (http=%s)" % (exc, http_status(exc)
+                                            if isinstance(exc, urllib.error.HTTPError) else "-"),
+                  file=sys.stderr)
+            return 2
+        return report(time.time(),
+                      requests, len(active), backlog, searches, running,
+                      WINDOW_HOURS, FAIL_RATE_THRESHOLD)
+
+
+    if __name__ == "__main__":
+        sys.exit(main(sys.argv[1:]))
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: lingarr-drain-watch
+  namespace: servarr
+  labels:
+    app: lingarr-drain-watch
+spec:
+  schedule: "5 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 6
+  failedJobsHistoryLimit: 6
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 300
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 3600  # keep 1 hour
+      template:
+        metadata:
+          labels:
+            app: lingarr-drain-watch
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: lingarr-drain-watch
+              image: python:3.13-alpine
+              imagePullPolicy: IfNotPresent
+              command: ["python3", "/script/watch.py"]
+              env:
+                - name: WINDOW_HOURS
+                  value: "24"
+                - name: FAIL_RATE_THRESHOLD
+                  value: "25"
+                - name: BAZARR_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: bazarr-autotranslate-secret
+                      key: BAZARR_API_KEY
+              volumeMounts:
+                - name: script
+                  mountPath: /script
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "250m"
+                  memory: "128Mi"
+          volumes:
+            - name: script
+              configMap:
+                name: lingarr-drain-watch-script
+                defaultMode: 0555
