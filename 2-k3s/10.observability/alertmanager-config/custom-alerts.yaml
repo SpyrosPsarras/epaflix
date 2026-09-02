@@ -251,7 +251,7 @@ spec:
             component: servarr
           annotations:
             summary: "cleanuparr QueueCleaner stalled, failing, or the health check itself failed"
-            description: "The hourly cleanuparr-queuecleaner-health Job ({{ $labels.job_name }}) failed — either cleanuparr's own /api/stats reports QueueCleaner failed>0 or a stale lastRunAt (>3h), or the /api/stats fetch itself failed. Inspect the Job logs for the reason, then the cleanuparr pod logs (Grafana → Explore → Loki: {namespace=\"servarr\", container=\"cleanuparr\"}). Does NOT catch a succeeded-but-wrong run (the #467 class) — only failed/stale job counters (#606)."
+            description: "The hourly cleanuparr-queuecleaner-health Job ({{ $labels.job_name }}) failed — either cleanuparr's own /api/v2/stats reports QueueCleaner failed>0 or a stale lastRunAt (>3h), or the /api/v2/stats fetch itself failed. Inspect the Job logs for the reason, then the cleanuparr pod logs (Grafana → Explore → Loki: {namespace=\"servarr\", container=\"cleanuparr\"}). Does NOT catch a succeeded-but-wrong run (the #467 class) — only failed/stale job counters (#606)."
 
     - name: blind-queue-check
       interval: 60s

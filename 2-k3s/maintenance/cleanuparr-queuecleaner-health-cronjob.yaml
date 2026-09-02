@@ -10,7 +10,7 @@ data:
     """cleanuparr QueueCleaner health check (#606). Python stdlib only.
 
     Run with --selftest to exercise the evaluator against synthetic
-    /api/stats payloads without touching the network.
+    /api/v2/stats payloads without touching the network.
     """
     import datetime
     import json
@@ -35,13 +35,13 @@ data:
         missing job entry, a missing/unparseable lastRunAt, and failed>0 —
         every one of those is a FAIL, never a silent pass."""
         if not isinstance(job_stats, dict):
-            return (False, f"{JOB_NAME} is absent from /api/stats jobs.byType")
+            return (False, f"{JOB_NAME} is absent from /api/v2/stats jobs.byType")
 
         failed = job_stats.get("failed")
         if not isinstance(failed, int):
             return (False, f"{JOB_NAME}.failed is missing or not an int: {failed!r}")
         if failed > 0:
-            total = job_stats.get("totalRuns", "?")
+            total = job_stats.get("total", "?")
             return (False, f"{JOB_NAME} has {failed} failed run(s) out of {total} in the lookback window")
 
         last_run_raw = job_stats.get("lastRunAt")
@@ -69,7 +69,7 @@ data:
 
     def fetch_stats():
         req = urllib.request.Request(
-            f"{CLEANUPARR_URL}/api/stats?hours=24",
+            f"{CLEANUPARR_URL}/api/v2/stats?hours=24",
             headers={"X-Api-Key": API_KEY},
         )
         with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
@@ -81,7 +81,7 @@ data:
 
         ok, reason = evaluate(
             {
-                "totalRuns": 169, "completed": 169, "failed": 0,
+                "total": 169, "completed": 169, "failed": 0,
                 "lastRunAt": "2026-08-03T15:00:00.0074189+00:00",
                 "nextRunAt": "2026-08-03T16:00:00+00:00",
             },
@@ -90,13 +90,13 @@ data:
         assert ok, reason
 
         ok, reason = evaluate(
-            {"totalRuns": 10, "completed": 9, "failed": 1, "lastRunAt": "2026-08-03T15:00:00+00:00"},
+            {"total": 10, "completed": 9, "failed": 1, "lastRunAt": "2026-08-03T15:00:00+00:00"},
             now,
         )
         assert not ok, "failed>0 must fail the check"
 
         ok, reason = evaluate(
-            {"totalRuns": 5, "completed": 5, "failed": 0, "lastRunAt": "2026-08-03T11:30:00+00:00"},
+            {"total": 5, "completed": 5, "failed": 0, "lastRunAt": "2026-08-03T11:30:00+00:00"},
             now,
         )
         assert not ok, "stale lastRunAt must fail the check"
@@ -105,13 +105,13 @@ data:
         assert not ok, "a missing QueueCleaner entry must fail the check"
 
         ok, reason = evaluate(
-            {"totalRuns": 1, "completed": 1, "failed": 0, "lastRunAt": "not-a-date"},
+            {"total": 1, "completed": 1, "failed": 0, "lastRunAt": "not-a-date"},
             now,
         )
         assert not ok, "unparseable lastRunAt must fail the check"
 
         ok, reason = evaluate(
-            {"totalRuns": 1, "completed": 1, "failed": 0, "lastRunAt": "2026-08-03T15:00:00"},
+            {"total": 1, "completed": 1, "failed": 0, "lastRunAt": "2026-08-03T15:00:00"},
             now,
         )
         assert ok, reason
@@ -131,10 +131,10 @@ data:
         try:
             stats = fetch_stats()
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as exc:
-            print(f"ERROR: could not reach {CLEANUPARR_URL}/api/stats: {exc}", file=sys.stderr)
+            print(f"ERROR: could not reach {CLEANUPARR_URL}/api/v2/stats: {exc}", file=sys.stderr)
             return 1
         except (json.JSONDecodeError, ValueError) as exc:
-            print(f"ERROR: unparseable response from cleanuparr /api/stats: {exc}", file=sys.stderr)
+            print(f"ERROR: unparseable response from cleanuparr /api/v2/stats: {exc}", file=sys.stderr)
             return 1
 
         job_stats = (stats.get("jobs") or {}).get("byType", {}).get(JOB_NAME)
@@ -147,7 +147,7 @@ data:
 
         print(f"FAIL: {reason}")
         print("ACTION: check the cleanuparr pod logs (Grafana -> Explore -> Loki: "
-              "{namespace=\"servarr\", container=\"cleanuparr\"}) and /api/stats directly. See #606.")
+              "{namespace=\"servarr\", container=\"cleanuparr\"}) and /api/v2/stats directly. See #606.")
         return 1
 
 
