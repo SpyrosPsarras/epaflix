@@ -75,7 +75,7 @@ images:
   - name: ghcr.io/zelak312/bazarr_autotranslate
     digest: sha256:5388463f8e45320c00a472763a8e0fb4584a255d6d31b98f9063b9eb5cada5cf
   - name: lscr.io/linuxserver/bazarr
-    digest: sha256:3a820372f19fcb2981ea19fe4b5382934d67414afaba974bce831ddda0a64a02
+    digest: sha256:a20fb11a440d704a9d61c283aa26462aad33dc63223b173f8d8c77d33e8e9d59
   - name: ghcr.io/lingarr-translate/lingarr
     newTag: main@sha256:bb8e2acf387150a701a6dc07bf6f8134d8cda83bf002db03f497f1856101b416
   - name: ghcr.io/elfhosted/newtarr
