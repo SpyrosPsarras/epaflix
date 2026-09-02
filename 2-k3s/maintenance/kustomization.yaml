@@ -13,6 +13,7 @@ resources:
   - cleanuparr-queuecleaner-health-cronjob.yaml
   - blind-queue-check-cronjob.yaml
   - qbt-stuck-torrent-check-cronjob.yaml
+  - lingarr-drain-watch-cronjob.yaml
   - radarr-missing-search-cronjob.yaml
   - sonarr-alias-search-cronjob.yaml
 
