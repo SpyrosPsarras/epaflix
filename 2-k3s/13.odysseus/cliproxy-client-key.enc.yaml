@@ -8,7 +8,7 @@ metadata:
         app.kubernetes.io/component: client-key
 type: Opaque
 stringData:
-    ANTHROPIC_AUTH_TOKEN: ENC[AES256_GCM,data:vp4iSBGNuI2OWSYFqsFfCHfBN5OXEgPqeKV9zic2aY6X5R70dzZfIi/s4U6UBgXOS5RlPw==,iv:50An6N3u8Ff41MdREhrrmp7c9a7QG+kZ9TxcajJJYUQ=,tag:d7Zj/67NxdbdOevIRg+70g==,type:str]
+    ANTHROPIC_AUTH_TOKEN: ENC[AES256_GCM,data:PeZNJS24+kS6IwXxMQg1zfYDFMpH/qivbZW1U/xJj+WtJFYo5dOzbg4zkEYNSA==,iv:WC/q5/Hwz1k36sY2OpM5+zOppoGAckPLrICXayJxzus=,tag:ByVNQ0uv8EGFUAS2eP32YQ==,type:str]
 sops:
     age:
         - enc: |
@@ -21,6 +21,6 @@ sops:
             -----END AGE ENCRYPTED FILE-----
           recipient: age1586thf5vkcdf5lcn3zwjpu8ltkwyq8efrhj8lr0vdrrt9k5f3qgsxeg7gx
     encrypted_regex: ^(data|stringData)$
-    lastmodified: "2026-08-10T16:58:23Z"
-    mac: ENC[AES256_GCM,data:J2L2dR8KCGI1ePJthlyTCfecqlFRtjuIjaV7Bs0ccJwaoNEaWHqJtGUjvTnrxpL1m8DbajESI8QdGLmhRINBeMHdnrplV7jpazt4FE4RLs1hteyQft+/rU4Ehj9gXuFc1iFb2YG8geqqQKMne0yWOJE+8FbrHWIf6DAYBadbr98=,iv:JyfkwQRKOd5/K5Mk7mjXYFFmJVRzKMOCa27O9/2vYDU=,tag:n9Jt/+Xsag1/RD2CUkcFLQ==,type:str]
+    lastmodified: "2026-09-03T09:57:38Z"
+    mac: ENC[AES256_GCM,data:MVz04HsqT57rG68AgBpTNveRqX4Z2jk7cPGIJDXlrkPOR+/Kftzuc9hnHL6dw1qOQacAv4fMbytHcPPoiW8JqtLu8tV8v/8PiH5kLM9vp193mArCwD2EvFt9v3RFC2k/gEyd/vizXwXbryx4gd/z4QJixWaJkr79xSaYso9/h2s=,iv:3P8EKa4rPaJf3b+3cRGdy8YMNj6ltnGAmwe/8CTZqjo=,tag:nXgTvj3YCD39RD6pjg4+fA==,type:str]
     version: 3.13.3
