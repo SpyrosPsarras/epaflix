@@ -2,14 +2,20 @@
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
-  name: neutarr-internal
+  name: neutarr-https
   namespace: servarr
 spec:
   entryPoints:
-    - internal
+    - websecure
   routes:
     - match: Host(`neutarr.epaflix.com`)
       kind: Rule
+      priority: 10
+      middlewares:
+        - name: security-headers
+          namespace: traefik-system
+        - name: authentik-forwardauth
+          namespace: traefik-system
       services:
         - name: neutarr
           port: 30262
@@ -19,3 +25,44 @@ spec:
       - main: epaflix.com
         sans:
           - "*.epaflix.com"
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: neutarr-outpost-https
+  namespace: servarr
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`neutarr.epaflix.com`) && PathPrefix(`/outpost.goauthentik.io/`)
+      kind: Rule
+      priority: 15
+      services:
+        - name: authentik-server
+          namespace: app-authentik
+          port: 80
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: neutarr-http
+  namespace: servarr
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`neutarr.epaflix.com`)
+      kind: Rule
+      middlewares:
+        - name: redirect-https
+          namespace: traefik-system
+      services:
+        - name: neutarr
+          port: 30262
