@@ -1,0 +1,121 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: streamystats
+  namespace: servarr
+  labels:
+    app: streamystats
+  annotations:
+    secret.reloader.stakater.com/reload: "streamystats-seed"
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: streamystats
+  template:
+    metadata:
+      labels:
+        app: streamystats
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: streamystats
+      securityContext:
+        fsGroup: 999
+      containers:
+        - name: streamystats
+          image: ghcr.io/fredrikburmester/streamystats-aio:latest
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: POSTGRES_USER
+              value: postgres
+            - name: POSTGRES_DB
+              value: streamystats
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: streamystats-seed
+                  key: postgres-password
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: streamystats-seed
+                  key: database-url
+            - name: SESSION_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: streamystats-seed
+                  key: session-secret
+            - name: NEXT_SERVER_ACTIONS_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: streamystats-seed
+                  key: next-actions-key
+          ports:
+            - containerPort: 3000
+              name: http
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "100m"
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 90
+            periodSeconds: 15
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 120
+            periodSeconds: 60
+            timeoutSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: streamystats-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: streamystats
+  namespace: servarr
+  labels:
+    app: streamystats
+spec:
+  type: ClusterIP
+  selector:
+    app: streamystats
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: streamystats-data
+  namespace: servarr
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: local-path
