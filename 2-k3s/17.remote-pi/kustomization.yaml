@@ -26,7 +26,8 @@ images:
   # when a release >= v7.2.149 ships containing #5411 (watched by upstream-release-watch).
   # Renovate must not track this image (disabled in .github/renovate.json) - a PR build has
   # no tag stream, so tracking it is permanent lookup-failure noise.
-  - name: ghcr.io/spyrospsarras/cli-proxy-api
+  - name: docker.io/eceasy/cli-proxy-api
+    newName: ghcr.io/spyrospsarras/cli-proxy-api
     newTag: pr-5411-da1b2ef@sha256:70a3ab3c9f945edf41c898848911d29fac88609970a4f6ea19a80a704eb88a8d
   - name: docker.io/seakee/cpa-manager-plus
     newTag: v1.12.8@sha256:d7628d4790a951433069fd3e657bb27e72cde3b76323a5e9688538434a267993
