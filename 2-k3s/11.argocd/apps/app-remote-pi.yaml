@@ -13,3 +13,29 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: remote-pi
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: false
+    syncOptions:
+      - ServerSideApply=true
+  ignoreDifferences:
+    - group: ""
+      kind: Service
+      jsonPointers:
+        - /spec/clusterIP
+        - /spec/clusterIPs
+        - /status
+    - group: ""
+      kind: PersistentVolumeClaim
+      jsonPointers:
+        - /status
+        - /spec/volumeName
+    - group: postgresql.cnpg.io
+      kind: Database
+      jsonPointers:
+        - /status
+    - group: postgresql.cnpg.io
+      kind: DatabaseRole
+      jsonPointers:
+        - /status
