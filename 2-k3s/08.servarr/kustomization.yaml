@@ -63,7 +63,7 @@ images:
   - name: lscr.io/linuxserver/radarr
     digest: sha256:119aaa4a4f7349bcd2a136c5373a0d7925b5479915c7dfe0c0ad352db2a6d438
   - name: lscr.io/linuxserver/prowlarr
-    digest: sha256:ab91301778251f82a31bbfc87f0497376d59e84439d9a1ceff6a61d594d1e3d7
+    digest: sha256:91844fa2c927ad6ede5630127183cc7868b175f6223e83e6a5da1fffea2aa782
   - name: ghcr.io/cleanuparr/cleanuparr
     digest: sha256:c7cd53ad559a67147637de3d825f66ef6e6a5498490b73f49c6e4d72f13bed76
   - name: ghcr.io/thephaseless/byparr
