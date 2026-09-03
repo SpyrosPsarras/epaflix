@@ -47,7 +47,7 @@ spec:
               mountPath: /rendered
       containers:
         - name: searxng
-          image: searxng/searxng:2026.6.22-cce0957f5
+          image: searxng/searxng:2026.9.3-8f452ee89
           env:
             - name: SEARXNG_SETTINGS_PATH
               value: /etc/searxng/settings.yml
