@@ -1,3 +1,28 @@
+# PVC-loss restore for the scheduled heartbeat task. The seed below only
+# restores memory.json; the app DB (and with it this task) lives only on the
+# odysseus-data PVC. If the PVC is lost, recreate the task with:
+#
+#   kubectl exec -n odysseus deploy/odysseus -- python3 - <<'PY'
+#   import sqlite3
+#   con = sqlite3.connect('/app/data/app.db')
+#   con.execute("""
+#   INSERT INTO scheduled_tasks (id, owner, name, prompt, task_type, action,
+#     schedule, trigger_type, trigger_counter, status, output_target,
+#     cron_expression, email_results, notifications_enabled, created_at, updated_at)
+#   VALUES ('3a3bbfb2-d210-487e-8233-de37555f1bb8', 'spypower',
+#     'Anthropic (cliproxy) heartbeat',
+#     'export PATH=/opt/claude/.local/bin:$PATH; : "${ANTHROPIC_AUTH_TOKEN:?cliproxy anthropic key missing from env}"; claude -p "just reply pong" --model claude-haiku-4-5-20251001',
+#     'action', 'run_script', 'cron', 'schedule', 0, 'active', 'session',
+#     '0 3,8,13 * * *', 1, 1, datetime('now'), datetime('now'));
+#   """)
+#   con.commit()
+#   PY
+#
+# Then open the task once in the Odysseus UI and save, so the scheduler
+# recomputes next_run from the cron expression. The ANTHROPIC_AUTH_TOKEN the
+# script expects comes from secret cliproxy-client-key (see
+# cliproxy-client-key.enc.yaml); the model is the smallest anthropic model
+# served by cliproxy (verified against /v1/models, 2026-09-03).
 apiVersion: v1
 kind: Secret
 metadata:
