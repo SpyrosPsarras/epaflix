@@ -1,0 +1,43 @@
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: jellysweep-https
+  namespace: servarr
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`jellysweep.epaflix.com`)
+      kind: Rule
+      priority: 10
+      middlewares:
+        - name: security-headers
+          namespace: traefik-system
+      services:
+        - name: jellysweep
+          port: 3002
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: jellysweep-http
+  namespace: servarr
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`jellysweep.epaflix.com`)
+      kind: Rule
+      middlewares:
+        - name: redirect-https
+          namespace: traefik-system
+      services:
+        - name: jellysweep
+          port: 3002
