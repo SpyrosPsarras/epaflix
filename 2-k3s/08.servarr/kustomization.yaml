@@ -29,6 +29,8 @@ resources:
   - cleanuparr/cleanuparr.yaml
   - cleanuparr/pdb.yaml
   - cleanuparr/ingressroute.yaml
+  - jellysweep/jellysweep.yaml
+  - jellysweep/ingressroute.yaml
   - byparr/byparr.yaml
   - byparr/pdb.yaml
   - lingarr/lingarr.yaml
@@ -66,6 +68,8 @@ images:
     digest: sha256:91844fa2c927ad6ede5630127183cc7868b175f6223e83e6a5da1fffea2aa782
   - name: ghcr.io/cleanuparr/cleanuparr
     digest: sha256:c7cd53ad559a67147637de3d825f66ef6e6a5498490b73f49c6e4d72f13bed76
+  - name: ghcr.io/jon4hz/jellysweep
+    newTag: v0.16.0@sha256:ecc93c32e8929d139d57743ba898bd58a167612e743c6596e5e7a5accbcf11de
   - name: ghcr.io/thephaseless/byparr
     digest: sha256:874f719518f617d03a60e03411fc5d090647e1a877041e81f8dc965927c7deb6
   - name: ghcr.io/hotio/unpackerr
