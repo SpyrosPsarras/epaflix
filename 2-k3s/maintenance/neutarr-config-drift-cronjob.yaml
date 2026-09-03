@@ -2,7 +2,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: newtarr-config-drift-script
+  name: neutarr-config-drift-script
   namespace: servarr
 data:
   check.sh: |
@@ -13,7 +13,7 @@ data:
     }
 
     selftest() {
-      echo "=== newtarr-config-drift selftest (no cluster access) ==="
+      echo "=== neutarr-config-drift selftest (no cluster access) ==="
 
       cat > /tmp/st.diff <<'EOF'
     --- seed
@@ -61,7 +61,7 @@ data:
       exit 0
     fi
 
-    echo "=== newtarr config-seed drift check @ $(date -u +%FT%TZ) ==="
+    echo "=== neutarr config-seed drift check @ $(date -u +%FT%TZ) ==="
 
     PAIRS="
     sonarr.json:/config/sonarr.json
@@ -75,11 +75,11 @@ data:
     scheduling-list.json:/config/scheduling/list.json
     "
 
-    POD=$(kubectl -n servarr get pod -l app=newtarr \
+    POD=$(kubectl -n servarr get pod -l app=neutarr \
       -o jsonpath='{.items[?(@.status.phase=="Running")].metadata.name}' \
       | awk '{print $1}')
     if [ -z "$POD" ]; then
-      echo "ERROR: no Running newtarr pod found (label app=newtarr)" >&2
+      echo "ERROR: no Running neutarr pod found (label app=neutarr)" >&2
       exit 1
     fi
     echo "live pod: $POD"
@@ -92,7 +92,7 @@ data:
 
       seedfile=/seed/$key
       if [ ! -f "$seedfile" ]; then
-        echo "ERROR: seed key '$key' missing from newtarr-config-seed Secret" >&2
+        echo "ERROR: seed key '$key' missing from neutarr-config-seed Secret" >&2
         drift=1
         continue
       fi
@@ -126,10 +126,10 @@ data:
 
     echo
     if [ "$drift" -eq 0 ]; then
-      echo "OK: committed newtarr-config-seed matches live /config (0 drift)."
+      echo "OK: committed neutarr-config-seed matches live /config (0 drift)."
       exit 0
     fi
-    echo "ACTION: the committed seed has drifted from live newtarr /config (or a"
+    echo "ACTION: the committed seed has drifted from live neutarr /config (or a"
     echo "  read/exec failed). Re-snapshot via the MANUAL #137 runbook"
     echo "  (#179 section). The detector NEVER auto-fixes; refresh stays manual."
     exit 1
@@ -137,18 +137,18 @@ data:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: newtarr-config-drift
+  name: neutarr-config-drift
   namespace: servarr
   labels:
-    app: newtarr-config-drift
+    app: neutarr-config-drift
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: newtarr-config-drift
+  name: neutarr-config-drift
   namespace: servarr
   labels:
-    app: newtarr-config-drift
+    app: neutarr-config-drift
 rules:
   - apiGroups: [""]
     resources: ["pods"]
@@ -163,26 +163,26 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: newtarr-config-drift
+  name: neutarr-config-drift
   namespace: servarr
   labels:
-    app: newtarr-config-drift
+    app: neutarr-config-drift
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: newtarr-config-drift
+  name: neutarr-config-drift
 subjects:
   - kind: ServiceAccount
-    name: newtarr-config-drift
+    name: neutarr-config-drift
     namespace: servarr
 ---
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: newtarr-config-drift
+  name: neutarr-config-drift
   namespace: servarr
   labels:
-    app: newtarr-config-drift
+    app: neutarr-config-drift
 spec:
   schedule: "45 6 * * 1"
   concurrencyPolicy: Forbid
@@ -193,14 +193,14 @@ spec:
     spec:
       activeDeadlineSeconds: 300
       backoffLimit: 0
-      ttlSecondsAfterFinished: 2592000  # keep 30 days
+      ttlSecondsAfterFinished: 2592000
       template:
         metadata:
           labels:
-            app: newtarr-config-drift
+            app: neutarr-config-drift
         spec:
           restartPolicy: Never
-          serviceAccountName: newtarr-config-drift
+          serviceAccountName: neutarr-config-drift
           containers:
             - name: drift-check
               image: alpine:3.20
@@ -228,9 +228,9 @@ spec:
           volumes:
             - name: seed
               secret:
-                secretName: newtarr-config-seed
+                secretName: neutarr-config-seed
                 defaultMode: 0444
             - name: script
               configMap:
-                name: newtarr-config-drift-script
+                name: neutarr-config-drift-script
                 defaultMode: 0444

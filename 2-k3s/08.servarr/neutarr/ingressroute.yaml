@@ -2,16 +2,16 @@
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
-  name: newtarr-internal
+  name: neutarr-internal
   namespace: servarr
 spec:
   entryPoints:
     - internal
   routes:
-    - match: Host(`newtarr.epaflix.com`)
+    - match: Host(`neutarr.epaflix.com`)
       kind: Rule
       services:
-        - name: newtarr
+        - name: neutarr
           port: 30262
   tls:
     certResolver: cloudflare

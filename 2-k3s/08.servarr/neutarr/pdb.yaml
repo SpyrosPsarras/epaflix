@@ -1,10 +1,10 @@
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: newtarr-pdb
+  name: neutarr-pdb
   namespace: servarr
 spec:
   maxUnavailable: 1
   selector:
     matchLabels:
-      app: newtarr
+      app: neutarr

@@ -173,16 +173,16 @@ spec:
             summary: "Cleanuparr Sonarr blocklist drifted from upstream (or check failed)"
             description: "The weekly cleanuparr-blocklist-drift Job ({{ $labels.job_name }}) failed — either upstream Cleanuparr/Cleanuparr 'blacklist' diverged from the committed snapshot, or the upstream fetch failed. Inspect the Job logs for the diff, then refresh 2-k3s/maintenance/files/cleanuparr-blocklist-expected.txt from live upstream via branch+PR. BASELINE ONLY - do NOT re-merge upstream into the cleanuparr-blocklist-seed Secret: those patterns were removed 2026-06-13 because they block unpackerr's .rar/.rNN volumes, and the pre-2026-08-19 runbook wording would reintroduce that (runbook section: issue #182)."
 
-    - name: newtarr-config-drift
+    - name: neutarr-config-drift
       interval: 60s
       rules:
-        - alert: NewtarrConfigDriftCheckFailed
+        - alert: NeutarrConfigDriftCheckFailed
           expr: |
             max by (job_name) (
-              kube_job_failed{namespace="servarr", job_name=~"newtarr-config-drift.*"} > 0
+              kube_job_failed{namespace="servarr", job_name=~"neutarr-config-drift.*"} > 0
               and on (job_name) (
-                max by (job_name) (kube_job_status_start_time{namespace="servarr", job_name=~"newtarr-config-drift.*"})
-                  >= scalar(max(kube_job_status_start_time{namespace="servarr", job_name=~"newtarr-config-drift.*"}))
+                max by (job_name) (kube_job_status_start_time{namespace="servarr", job_name=~"neutarr-config-drift.*"})
+                  >= scalar(max(kube_job_status_start_time{namespace="servarr", job_name=~"neutarr-config-drift.*"}))
               )
             )
           for: 5m
@@ -190,8 +190,8 @@ spec:
             severity: warning
             component: servarr
           annotations:
-            summary: "newtarr config-seed drifted from live /config (or check failed)"
-            description: "The weekly newtarr-config-drift Job ({{ $labels.job_name }}) failed — either the committed SOPS seed newtarr-config-seed diverged from the live newtarr /config JSON, or a read/exec into the pod failed. Inspect the Job logs for the per-file diff, then re-snapshot via the MANUAL #137 runbook (#179 section). The detector NEVER auto-fixes; refresh stays manual (no auto-PR per #192). nzb_hunt_bandwidth.json is intentionally excluded (volatile runtime state)."
+            summary: "neutarr config-seed drifted from live /config (or check failed)"
+            description: "The weekly neutarr-config-drift Job ({{ $labels.job_name }}) failed — either the committed SOPS seed neutarr-config-seed diverged from the live neutarr /config JSON, or a read/exec into the pod failed. Inspect the Job logs for the per-file diff, then re-snapshot via the MANUAL #137 runbook (#179 section). The detector NEVER auto-fixes; refresh stays manual (no auto-PR per #192). nzb_hunt_bandwidth.json is intentionally excluded (volatile runtime state)."
 
     - name: orphan-census
       interval: 60s
@@ -493,7 +493,7 @@ spec:
             )
             unless on (namespace, job_name)
             max by (namespace, job_name) (
-              kube_job_owner{namespace="servarr", owner_kind="CronJob", owner_name=~"cleanuparr-blocklist-drift|newtarr-config-drift|orphan-census|prowlarr-indexer-health|cleanuparr-queuecleaner-health|blind-queue-check|qbt-stuck-torrent-check"}
+              kube_job_owner{namespace="servarr", owner_kind="CronJob", owner_name=~"cleanuparr-blocklist-drift|neutarr-config-drift|orphan-census|prowlarr-indexer-health|cleanuparr-queuecleaner-health|blind-queue-check|qbt-stuck-torrent-check"}
             )
           for: 15m
           labels:
