@@ -78,6 +78,12 @@
       "automerge": false
     },
     {
+      "description": "Temporary PR-build image (#1219 follow-up): ghcr.io/spyrospsarras/cli-proxy-api:pr-5411-da1b2ef is a one-off build of router-for-me/CLIProxyAPI#5411 (block-binding beta fix for Zed Fable 5.1), pinned with an immutable digest while upstream review is pending. A PR build has no tag stream, so the docker datasource can never resolve it and tracking it is permanent 'Package lookup failures' WARN noise on the Dependency Dashboard. Disable tracking the same way odysseus is disabled (#211 precedent). The images: block in 2-k3s/17.remote-pi/kustomization.yaml carries a TEMP OVERRIDE comment naming the revert condition: when a CLIProxyAPI release >= v7.2.149 ships containing #5411, the pin goes back to docker.io/eceasy/cli-proxy-api and this rule is deleted in the same PR.",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["ghcr.io/spyrospsarras/cli-proxy-api"],
+      "enabled": false
+    },
+    {
       "description": "CLIProxyAPI plugin pins (#997): NEVER auto-merge, and this rule MUST stay after the repo-wide patch rule above, because later packageRules win. Renovate cannot compute the sha256 of a release zip, so it bumps the version and leaves the checksum stale. The fetch script fails CLOSED on a mismatch with exit 1, which fails the initContainer, which means an auto-merged patch bump would take cliproxy.epaflix.com down at the next sync rather than merely skipping a plugin. A plugin 0.9.1 -> 0.9.2 IS a patch, so the generic automerge rule would have caught these. The ci.yml step 'CLIProxyAPI plugin pins match upstream checksums' turns that stale checksum into a red gate instead of an outage, but this rule is the first line: a human updates the checksum from the release's own checksums.txt and pushes it to the Renovate branch before merging.",
       "matchManagers": ["custom.regex"],
       "matchPackageNames": [
