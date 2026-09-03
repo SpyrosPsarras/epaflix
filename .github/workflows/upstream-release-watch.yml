@@ -29,6 +29,10 @@ jobs:
             upstreamRepo: "lingarr-translate/lingarr"
             pinnedVersion: "1.2.4"
             whatToDoWhenItMoves: "Check whether the release notes (or its git log) show `TranslationRequestService.ResumeTranslationRequests()` no longer re-enqueues Pending/InProgress requests unconditionally, or that `TranslationJob` gained `[DisableConcurrentExecution]`. Either one retires the boot-time guard. If so, delete `2-k3s/08.servarr/lingarr/files/reconcile-job-queue.sql`, its `lingarr-jobqueue-guard` entry in the `configMapGenerator:` block of `2-k3s/08.servarr/kustomization.yaml`, and in `2-k3s/08.servarr/lingarr/lingarr.yaml` the `psql -f /sql/reconcile-job-queue.sql` line, the `jobqueue-guard` volumeMount and the `jobqueue-guard` volume. Keep the `enforce-db-invariants` initContainer itself - it still enforces `request_timeout` (#844). If neither is fixed, leave everything as it is and close this issue again."
+          - issue: "1221"
+            upstreamRepo: "router-for-me/CLIProxyAPI"
+            pinnedVersion: "v7.2.148"
+            whatToDoWhenItMoves: "A new stable release exists while the cluster runs the temporary pr-5411 build (TEMP OVERRIDE comment in 2-k3s/17.remote-pi/kustomization.yaml). Check the release notes (or its git log) for router-for-me/CLIProxyAPI#5411 'gate block binding beta on final body' (or the phrase 'block binding'). If present: execute the revert checklist in epaflix issue #1221 - pin back to docker.io/eceasy/cli-proxy-api at the new tag with its Docker Hub tag digest, drop the TEMP OVERRIDE comment, drop the ghcr.io/spyrospsarras/cli-proxy-api disable rule from .github/renovate.json, delete this watch row - all in one PR, then close #1221. If the notes do NOT contain the fix, do nothing: close the signal and leave the temp pin in place."
 
     name: "#${{ matrix.issue }} ${{ matrix.upstreamRepo }}"
 
