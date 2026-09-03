@@ -29,7 +29,7 @@ data:
 
     TIMEOUT = 30
     PAGE_SIZE = 100
-    MAX_PAGES = 8  # safety cap: 8 * 100 = 800 requests per run
+    MAX_PAGES = 32  # safety cap: 32 * 100 = 3200 requests; history hit 1003 on 2026-09-03 (#1215)
 
     def env_num(name, default, cast):
         try:
