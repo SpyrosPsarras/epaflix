@@ -1,0 +1,101 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jellysweep
+  namespace: servarr
+  labels:
+    app: jellysweep
+  annotations:
+    secret.reloader.stakater.com/reload: "jellysweep-config"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jellysweep
+  template:
+    metadata:
+      labels:
+        app: jellysweep
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: jellysweep
+      securityContext:
+        runAsUser: 568
+        runAsGroup: 568
+        fsGroup: 568
+      containers:
+        - name: jellysweep
+          image: ghcr.io/jon4hz/jellysweep:v0.16.0
+          ports:
+            - containerPort: 3002
+              name: http
+          volumeMounts:
+            - name: config
+              mountPath: /app/config.yml
+              subPath: config.yml
+              readOnly: true
+            - name: data
+              mountPath: /app/data
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "50m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+      volumes:
+        - name: config
+          secret:
+            secretName: jellysweep-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: jellysweep-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jellysweep
+  namespace: servarr
+  labels:
+    app: jellysweep
+spec:
+  type: ClusterIP
+  selector:
+    app: jellysweep
+  ports:
+    - name: http
+      port: 3002
+      targetPort: http
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jellysweep-data
+  namespace: servarr
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: local-path
