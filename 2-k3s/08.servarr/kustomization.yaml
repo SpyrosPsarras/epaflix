@@ -23,9 +23,9 @@ resources:
   - bazarr/pdb.yaml
   - bazarr/ingressroute.yaml
   - bazarr-autotranslate/bazarr-autotranslate.yaml
-  - newtarr/newtarr.yaml
-  - newtarr/pdb.yaml
-  - newtarr/ingressroute.yaml
+  - neutarr/neutarr.yaml
+  - neutarr/pdb.yaml
+  - neutarr/ingressroute.yaml
   - cleanuparr/cleanuparr.yaml
   - cleanuparr/pdb.yaml
   - cleanuparr/ingressroute.yaml
@@ -78,8 +78,8 @@ images:
     digest: sha256:a20fb11a440d704a9d61c283aa26462aad33dc63223b173f8d8c77d33e8e9d59
   - name: ghcr.io/lingarr-translate/lingarr
     newTag: main@sha256:d1b815d4a06ec198207942a7b0a11c50738c81f31cc8ce3a9ea15ecd111301f9
-  - name: ghcr.io/elfhosted/newtarr
-    newTag: rolling@sha256:d5d9d5194e1e8a58732f6ccc7660ad86f9cf6763a7b437a955a022e99a6ef8a4
+  - name: iampuid0/neutarr
+    newTag: 1.11.1@sha256:c3df05a854c93aac640708e002e8fe85193f73da8406c8a230a5484a342a1107
   - name: qbittorrentofficial/qbittorrent-nox
     digest: sha256:9ebb534fe30bab98622cb84a8c3acecfd88319b2d540f52ecdec7b9f866374d7
   - name: ghcr.io/spyrospsarras/airvpn-bluetit
