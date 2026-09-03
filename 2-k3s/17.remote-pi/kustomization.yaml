@@ -22,7 +22,7 @@ generators:
 
 images:
   - name: docker.io/eceasy/cli-proxy-api
-    newTag: v7.2.147@sha256:f077e153476466e0ea8355400e39bf1508e637585b661ed3991b7b8129ce054d
+    newTag: v7.2.148@sha256:150195d92f3a26459f61e06f36f4f6f6312f267d5a43e4df5629d67369bc672d
   - name: docker.io/seakee/cpa-manager-plus
     newTag: v1.12.8@sha256:d7628d4790a951433069fd3e657bb27e72cde3b76323a5e9688538434a267993
 
