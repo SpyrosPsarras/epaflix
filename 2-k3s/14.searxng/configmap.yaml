@@ -29,3 +29,8 @@ data:
       method: "GET"
     ui:
       static_use_hash: true
+    engines:
+      - name: wikipedia
+        timeout: 5.0
+      - name: bing
+        disabled: false
