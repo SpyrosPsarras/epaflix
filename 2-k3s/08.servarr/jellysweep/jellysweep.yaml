@@ -40,6 +40,8 @@ spec:
               mountPath: /app/config.yml
               subPath: config.yml
               readOnly: true
+            - name: cache
+              mountPath: /app/data
           resources:
             requests:
               memory: "128Mi"
@@ -65,6 +67,8 @@ spec:
         - name: config
           secret:
             secretName: jellysweep-config
+        - name: cache
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
