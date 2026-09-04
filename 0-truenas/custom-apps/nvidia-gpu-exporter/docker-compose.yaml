@@ -1,6 +1,6 @@
 services:
   nvidia-gpu-exporter:
-    image: docker.io/utkuozdemir/nvidia_gpu_exporter:1.14.0-nvml
+    image: docker.io/utkuozdemir/nvidia_gpu_exporter:1.15.1-nvml
     restart: unless-stopped
     network_mode: host
     command:
