@@ -40,8 +40,6 @@ spec:
               mountPath: /app/config.yml
               subPath: config.yml
               readOnly: true
-            - name: data
-              mountPath: /app/data
           resources:
             requests:
               memory: "128Mi"
@@ -67,9 +65,6 @@ spec:
         - name: config
           secret:
             secretName: jellysweep-config
-        - name: data
-          persistentVolumeClaim:
-            claimName: jellysweep-data
 ---
 apiVersion: v1
 kind: Service
@@ -86,16 +81,3 @@ spec:
     - name: http
       port: 3002
       targetPort: http
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: jellysweep-data
-  namespace: servarr
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 1Gi
-  storageClassName: local-path
