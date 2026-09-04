@@ -12,8 +12,10 @@ data:
     Reports every run: pending translation/search jobs in Bazarr's queue,
     in-window completions and failures in Lingarr, drain rate, ETA and the
     dominant failure signature. Exits 1 when the in-window failure rate hits
-    FAIL_RATE_THRESHOLD - the known signature is Lingarr's request_timeout
-    canceling slow local-AI translations ("The operation was canceled").
+    FAIL_RATE_THRESHOLD - the known signature is cancels pinned at exactly
+    1800s: upstream Lingarr hardcodes a 30-min job-queue invisibility timeout
+    that reclaims translations the slow local-AI endpoint never finished
+    (#1239). request_timeout is minutes and does not bind.
 
     Run with --selftest to exercise bucketing/ETA against synthetic payloads
     without touching the network. Python stdlib only - no pip, no apk.
@@ -211,10 +213,12 @@ data:
 
         if fail_rate >= threshold:
             print("\nFAIL: failure rate %.1f%% >= %.0f%% - translations are being "
-                  "canceled or erroring. Known cause: request_timeout too low for "
-                  "the local AI model (signature 'The operation was canceled'). "
-                  "ACTION: raise request_timeout in Lingarr (>=300s enforced by the "
-                  "init guard) and check the model endpoint is responsive."
+                  "canceled or erroring. Known cause: cancels pinned at ~1800s "
+                  "are the upstream 30-min job-queue invisibility timeout "
+                  "reclaiming work the local-AI endpoint has not finished; "
+                  "request_timeout is minutes (floor 30) and does not bind. "
+                  "ACTION: check ollama throughput and GPU state on "
+                  "192.168.10.200, not request_timeout."
                   % (fail_rate, threshold))
             return 1
         print("\nOK: pipeline draining within the failure budget.")
