@@ -43,9 +43,12 @@ spec:
                 DO \$\$
                 BEGIN
                   IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'settings') THEN
-                    UPDATE settings SET value = '900'
+                    -- request_timeout is MINUTES (LocalAiService: TimeSpan.FromMinutes),
+                    -- not seconds; floor = the upstream 30-min job-queue invisibility
+                    -- timeout (=1800s) so the HTTP timeout never binds first (#1239)
+                    UPDATE settings SET value = '30'
                      WHERE key = 'request_timeout'
-                       AND (value ~ '^[0-9]+\$' AND value::int < 900);
+                       AND (value ~ '^[0-9]+\$' AND value::int < 30);
                     INSERT INTO settings (key, value) VALUES ('use_batch_translation', 'true')
                     ON CONFLICT (key) DO UPDATE SET value = 'true';
                     INSERT INTO settings (key, value) VALUES ('max_batch_size', '25')
