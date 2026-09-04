@@ -1,0 +1,52 @@
+---
+
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: t3code
+  namespace: traefik-system
+subsets:
+  - addresses:
+      - ip: 192.168.10.240
+    ports:
+      - name: http
+        port: 3773
+        protocol: TCP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: t3code
+  namespace: traefik-system
+  labels:
+    app: t3code
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - name: http
+      port: 3773
+      protocol: TCP
+
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: t3code-https
+  namespace: traefik-system
+spec:
+  entryPoints:
+    - internal
+  routes:
+    - match: Host(`t3code.epaflix.com`)
+      kind: Rule
+      services:
+        - name: t3code
+          port: 3773
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"

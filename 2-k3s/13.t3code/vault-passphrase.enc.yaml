@@ -1,0 +1,27 @@
+# Plaintext draft (gitignored per .gitignore *-plaintext.yaml rule).
+# B2: sops -e this file to vault-passphrase.enc.yaml, then commit only the enc file.
+# The enc file is never applied to the cluster — its only consumer is local
+# decryption at provision time, which keeps the guest's root-only env file
+# repopulated on re-runs, so reboot self-heals unattended (Q9).
+apiVersion: v1
+kind: Secret
+metadata:
+    name: t3code-vault-passphrase
+type: Opaque
+stringData:
+    VAULT_PASSPHRASE: ENC[AES256_GCM,data:dKIVUmpw5aujzGAu,iv:OKuTIB2fBgk/TcMQ20zLu4iiDI8LBDruXyMbYGt5SZA=,tag:RRougN48bSS08odaVb+SUg==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSB4TURoaDVtZTFaN3dVeHEy
+            UEk1NVZxeXMvU2hydHVYZndSWXlpSlh6TGxRCk9hNVpiUTZITFV5Y2V6U200WDh5
+            anFQeUt5M3d2MFNjWmpXRXpQL0QyNDgKLS0tIFRjamsyeXNrRlJWVXVURjU0WkZJ
+            L1d1N2xEbTlnWFBoQzNTcHQzZDM3blkKNr/SNqVWcKwfw6RjYLOcQ4WUvTrHNT8K
+            T5b5um89b1c1lq2nOA/z8X++TPiktlv3pJOg6M4pLkfRHVhYizN1zw==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1586thf5vkcdf5lcn3zwjpu8ltkwyq8efrhj8lr0vdrrt9k5f3qgsxeg7gx
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-09-04T21:16:09Z"
+    mac: ENC[AES256_GCM,data:Fh0+Sr+gPVxToBxvUlA5HlxN6HEM0C6F//omPUgUTJt2/ai5qkNkJ2hG/XX1oIWdHThi+dusOH3pgMmLJEiX++30EGklE/2IHjKyB19zSF0FTDpS4+BzO364VaDQGreSfWR9lM4oTN5cWjV0gp8cEDgIW6j4/CkzXcBAlZIom8Q=,iv:LHxJxB/0uPElYT5Vhp6aBLkXITLiL10iEvgiR2KfCac=,tag:bfePTTUcX+oWsmjEeF7pJQ==,type:str]
+    version: 3.13.3
