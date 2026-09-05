@@ -25,10 +25,6 @@ models = {
     "or-qwen3.8-max": "Qwen 3.8 Max",
     "or-qwen3.8-27b": "Qwen 3.8 27B",
     "or-minimax-m3": "MiniMax M3",
-    "claude-opus-5": "Claude Opus 5",
-    "claude-sonnet-5": "Claude Sonnet 5",
-    "claude-fable-5": "Claude Fable 5",
-    "claude-fable-5-1": "Claude Fable 5.1",
 }
 cfg = {
     "$schema": "https://opencode.ai/config.json",
