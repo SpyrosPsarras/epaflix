@@ -1,0 +1,88 @@
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cliproxy-heartbeat
+  namespace: remote-pi
+  labels:
+    app.kubernetes.io/name: cliproxy
+    app.kubernetes.io/component: heartbeat
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  schedule: "0 3,8,13 * * *"
+  timeZone: Europe/Oslo
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 300
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: cliproxy
+            app.kubernetes.io/component: heartbeat
+        spec:
+          automountServiceAccountToken: false
+          enableServiceLinks: false
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 100
+            runAsGroup: 100
+            fsGroup: 100
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: heartbeat
+              image: docker.io/curlimages/curl:8.14.1
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
+              env:
+                - name: HOME
+                  value: /tmp
+                - name: CLIPROXY_URL
+                  value: http://cliproxy.remote-pi.svc.cluster.local:8317
+                - name: ANTHROPIC_MODEL
+                  value: claude-haiku-4-5-20251001
+                - name: CLIPROXY_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: cliproxy-secrets
+                      key: omp-api-key
+              command:
+                - sh
+                - -c
+                - |
+                  set -eu
+                  body=/tmp/resp.json
+                  code=$(curl -sS --max-time 120 -o "$body" -w '%{http_code}' \
+                    -H "authorization: Bearer ${CLIPROXY_API_KEY}" \
+                    -H "x-api-key: ${CLIPROXY_API_KEY}" \
+                    -H "content-type: application/json" \
+                    -H "anthropic-version: 2023-06-01" \
+                    -d "{\"model\":\"${ANTHROPIC_MODEL}\",\"max_tokens\":16,\"messages\":[{\"role\":\"user\",\"content\":\"just reply pong\"}]}" \
+                    "${CLIPROXY_URL}/v1/messages")
+                  echo "http ${code}"
+                  case "${code}" in 2??) ;; *) cat "$body" || true; exit 1;; esac
+                  grep -q '"type":"message"' "$body" || { head -c 400 "$body"; exit 1; }
+                  head -c 400 "$body"; echo
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests:
+                  cpu: "10m"
+                  memory: "32Mi"
+                limits:
+                  memory: "128Mi"
+          volumes:
+            - name: tmp
+              emptyDir:
+                sizeLimit: 16Mi
