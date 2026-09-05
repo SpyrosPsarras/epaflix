@@ -283,9 +283,7 @@ else
     warn "could not extract the passphrase from $ENC"
     SKIPPED+=("guest provisioning (passphrase extraction failed)")
   else
-    ssh "root@$T3_CT_IP" "mkdir -p /root/t3code/files"
-    scp -q "$T3_DIR/provision.sh" "root@$T3_CT_IP:/root/t3code/provision.sh"
-    scp -q "$T3_DIR/files/keepass_mcp.py" "root@$T3_CT_IP:/root/t3code/files/keepass_mcp.py"
+    ssh "root@$T3_CT_IP" "command -v git >/dev/null || (apt-get update -q && apt-get install -y -q git); test -d /opt/epaflix/.git || git clone -q https://github.com/SpyrosPsarras/epaflix.git /opt/epaflix; git -C /opt/epaflix pull --ff-only -q"
     {
       printf 'T3_GUEST_IP=%q\n' "$T3_CT_IP"
       printf 'ANTHROPIC_AUTH_TOKEN=%q\n' "$ANTHROPIC_AUTH_TOKEN"
@@ -293,7 +291,7 @@ else
     } > "$SECRETS_TMP"
     scp -q "$SECRETS_TMP" "root@$T3_CT_IP:/root/t3secrets"
     rm -f "$SECRETS_TMP"
-    ssh -t "root@$T3_CT_IP" "trap 'rm -f /root/t3secrets' EXIT; chmod 600 /root/t3secrets && cd /root/t3code && set -a && . /root/t3secrets && rm -f /root/t3secrets && bash provision.sh"
+    ssh -t "root@$T3_CT_IP" "trap 'rm -f /root/t3secrets' EXIT; chmod 600 /root/t3secrets && set -a && . /root/t3secrets && rm -f /root/t3secrets && bash /opt/epaflix/2-k3s/13.t3code/provision.sh"
     say "Provisioning finished. Secrets file removed on the guest."
   fi
 fi

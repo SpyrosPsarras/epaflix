@@ -94,23 +94,33 @@
   ],
   "customManagers": [
     {
-      "description": "Keep every pinned HELM_VERSION fresh: ci.yml (the secret-free validate gate's Install tools step), upstream-release-watch.yml (the renderer used by shape-probe rows, #290) and 2-k3s/13.t3code/provision.sh (the t3code guest's cluster tooling, kept at the gate's version). Marker is an inline trailing comment '# renovate: datasource=... depName=...' on the HELM_VERSION= line. Split out from a single shared regex manager (was kustomize+helm) because one regex manager carries only one extractVersionTemplate, and kustomize needs one while helm does not — helm/helm github-releases auto-strips the leading v, so no extractVersion here. #222/#220. Uses managerFilePatterns, the correct native field on the deployed Renovate — the bot runs 43.33.2, set via the images: override in 2-k3s/12.renovate/kustomization.yaml, not the stale 39.264.0 literal in cronjob.yaml (that literal is dead, see #486). This manager extracts helm/helm fine on every run; the branch just never becomes a PR, because it touches .github/workflows/ and the PAT lacks the workflow scope to push that diff — root cause tracked in #486.",
+      "description": "Keep every pinned HELM_VERSION fresh: ci.yml (the secret-free validate gate's Install tools step), upstream-release-watch.yml (the renderer used by shape-probe rows, #290) and 2-k3s/13.t3code/versions.env (the t3code guest's cluster tooling, kept at the gate's version). Marker is an inline trailing comment '# renovate: datasource=... depName=...' on the HELM_VERSION= line. Split out from a single shared regex manager (was kustomize+helm) because one regex manager carries only one extractVersionTemplate, and kustomize needs one while helm does not — helm/helm github-releases auto-strips the leading v, so no extractVersion here. #222/#220. Uses managerFilePatterns, the correct native field on the deployed Renovate — the bot runs 43.33.2, set via the images: override in 2-k3s/12.renovate/kustomization.yaml, not the stale 39.264.0 literal in cronjob.yaml (that literal is dead, see #486). This manager extracts helm/helm fine on every run; the branch just never becomes a PR, because it touches .github/workflows/ and the PAT lacks the workflow scope to push that diff — root cause tracked in #486.",
       "customType": "regex",
-      "managerFilePatterns": ["/^\\.github/workflows/ci\\.yml$/", "/^\\.github/workflows/upstream-release-watch\\.yml$/", "/^2-k3s/13\\.t3code/provision\\.sh$/"],
+      "managerFilePatterns": ["/^\\.github/workflows/ci\\.yml$/", "/^\\.github/workflows/upstream-release-watch\\.yml$/", "/^2-k3s/13\\.t3code/versions\\.env$/"],
       "matchStrings": [
         "HELM_VERSION=(?<currentValue>\\S+)\\s*#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)"
       ],
       "versioningTemplate": "semver"
     },
     {
-      "description": "Keep the pinned KUSTOMIZE_VERSION in ci.yml (the secret-free validate gate's Install tools step) and 2-k3s/13.t3code/provision.sh (the t3code guest) fresh. Marker is an inline trailing comment '# renovate: datasource=... depName=...' on the KUSTOMIZE_VERSION= line. Split out from the shared helm+kustomize regex manager (#222/#220): kustomize github-releases tags are 'kustomize/vX.Y.Z', so extractVersion strips that prefix — without it the bump would be silently no-op or wrong. One regex manager carries only one extractVersionTemplate, hence the split from helm. Uses managerFilePatterns, the correct native field on the deployed Renovate — same as the HELM_VERSION manager above, the bot runs 43.33.2 per the kustomization.yaml images: override, and the branch this manager computes gets its push rejected for missing workflow PAT scope, not a config problem — see #486.",
+      "description": "Keep the pinned KUSTOMIZE_VERSION in ci.yml (the secret-free validate gate's Install tools step) and 2-k3s/13.t3code/versions.env (the t3code guest) fresh. Marker is an inline trailing comment '# renovate: datasource=... depName=...' on the KUSTOMIZE_VERSION= line. Split out from the shared helm+kustomize regex manager (#222/#220): kustomize github-releases tags are 'kustomize/vX.Y.Z', so extractVersion strips that prefix — without it the bump would be silently no-op or wrong. One regex manager carries only one extractVersionTemplate, hence the split from helm. Uses managerFilePatterns, the correct native field on the deployed Renovate — same as the HELM_VERSION manager above, the bot runs 43.33.2 per the kustomization.yaml images: override, and the branch this manager computes gets its push rejected for missing workflow PAT scope, not a config problem — see #486.",
       "customType": "regex",
-      "managerFilePatterns": ["/^\\.github/workflows/ci\\.yml$/", "/^2-k3s/13\\.t3code/provision\\.sh$/"],
+      "managerFilePatterns": ["/^\\.github/workflows/ci\\.yml$/", "/^2-k3s/13\\.t3code/versions\\.env$/"],
       "matchStrings": [
         "KUSTOMIZE_VERSION=(?<currentValue>\\S+)\\s*#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)"
       ],
       "versioningTemplate": "semver",
       "extractVersionTemplate": "^kustomize/v(?<version>.+)$"
+    },
+    {
+      "description": "t3code guest pins in 2-k3s/13.t3code/versions.env other than HELM/KUSTOMIZE (those two are owned by the managers above so the guest stays at the gate's versions): t3, @anthropic-ai/claude-code and opencode-ai from npm, argo-cd and sops from GitHub releases. Marker is the same trailing '# renovate:' comment; the five variable names are listed literally so RE2 (no lookaround) compiles it and a future line cannot be picked up by accident. The guest's daily t3code-update.timer (06:30 Athens, after the 02:00-06:00 Renovate window) git-pulls and applies whatever merged overnight; patch bumps automerge via the repo-wide rule; minors and majors open a PR for a human, same as everything else here. extractVersion strips a leading v (argo-cd/sops tags carry one, npm versions do not).",
+      "customType": "regex",
+      "managerFilePatterns": ["/^2-k3s/13\\.t3code/versions\\.env$/"],
+      "matchStrings": [
+        "(?:T3|CLAUDE_CODE|OPENCODE|ARGOCD|SOPS)_VERSION=(?<currentValue>\\S+)\\s*#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)"
+      ],
+      "versioningTemplate": "semver",
+      "extractVersionTemplate": "^v?(?<version>.+)$"
     },
     {
       "description": "Keep the two CLIProxyAPI plugin versions in 2-k3s/17.remote-pi/cliproxy/deployment.yaml fresh (#997). Both plugins are fetched by cliproxy/files/fetch-plugin.sh from initContainer args, which Renovate's kustomize/docker managers cannot see: a plugin is a GitHub release zip, not an image. Marker is a '# renovate: datasource=... depName=...' comment on the line ABOVE the quoted version arg, the same shape as the HELM_VERSION managers above but leading rather than trailing, because a YAML sequence item carrying a trailing comment reads badly next to a sha256 on the next line. The version appears exactly ONCE per plugin on purpose: fetch-plugin.sh composes the release URL from <owner/repo>, the version and the plugin id, because a regex manager rewrites one captured span and a version repeated in a tag, a filename and an arg would come out inconsistent. Renovate CANNOT update the sha256 on the following line - see the matching packageRule, which blocks auto-merge, and the ci.yml step that fails the gate when the pinned checksum does not match the release's own checksums.txt.",

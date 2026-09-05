@@ -11,17 +11,19 @@
 #   T3_USER              default: spyros
 #   CLIPROXY_BASE_URL    default: https://cliproxy.epaflix.com
 #   KEEPASS_KDBX         default: /home/<user>/sync/keepass.kdbx (B4 pairs the Syncthing folder)
-# Expects files/keepass_mcp.py next to this script (scp both to the guest).
+# Runs from the guest's clone of the repo (/opt/epaflix): the same dir holds
+# versions.env, update.sh and files/keepass_mcp.py.
 set -euo pipefail
 
 T3_USER=${T3_USER:-spyros}
 CLIPROXY_BASE_URL=${CLIPROXY_BASE_URL:-https://cliproxy.epaflix.com}
 KEEPASS_KDBX=${KEEPASS_KDBX:-/home/$T3_USER/sync/keepass.kdbx}
-SERVER_SRC=$(dirname "$0")/files/keepass_mcp.py
+T3_DIR=$(cd "$(dirname "$0")" && pwd)
+SERVER_SRC=$T3_DIR/files/keepass_mcp.py
 : "${T3_GUEST_IP:?set T3_GUEST_IP}"
 : "${ANTHROPIC_AUTH_TOKEN:?set ANTHROPIC_AUTH_TOKEN}"
 : "${VAULT_PASSPHRASE:?set VAULT_PASSPHRASE}"
-[[ -f $SERVER_SRC ]] || { echo "missing $SERVER_SRC; scp the repo's files/ dir alongside this script"; exit 1; }
+[[ -f $SERVER_SRC ]] || { echo "missing $SERVER_SRC; run from the repo clone at /opt/epaflix"; exit 1; }
 
 # sudo -u drops XDG_RUNTIME_DIR, which breaks every systemd --user call.
 as_user() {
@@ -39,36 +41,43 @@ systemctl enable --now ssh
 curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
 DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs
 
-npm install -g t3 @anthropic-ai/claude-code
-
 curl -fsSL https://aka.ms/InstallAzureCLIDeb | bash
 
-# kubectl tracks the cluster's minor (k3s v1.36); helm/kustomize pins mirror
-# ci.yml so what validates here is what the gate validates.
+# kubectl apt repo tracks the cluster's minor (k3s v1.36).
 install -d -m 0755 /etc/apt/keyrings
 curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.36/deb/Release.key | gpg --dearmor --yes -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
 echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.36/deb/ /' >/etc/apt/sources.list.d/kubernetes.list
 apt-get update
-DEBIAN_FRONTEND=noninteractive apt-get install -y kubectl
 
-HELM_VERSION=3.21.4      # renovate: datasource=github-releases depName=helm/helm
-KUSTOMIZE_VERSION=5.8.1  # renovate: datasource=github-releases depName=kubernetes-sigs/kustomize
-tmp=$(mktemp -d)
-helm_tgz="helm-v${HELM_VERSION}-linux-amd64.tar.gz"
-curl -fsSL -o "$tmp/$helm_tgz" "https://get.helm.sh/$helm_tgz"
-curl -fsSL -o "$tmp/$helm_tgz.sha256sum" "https://get.helm.sh/$helm_tgz.sha256sum"
-(cd "$tmp" && sha256sum -c "$helm_tgz.sha256sum")
-tar -xzf "$tmp/$helm_tgz" -C "$tmp"
-install -m 0755 "$tmp/linux-amd64/helm" /usr/local/bin/helm
-curl -fsSL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv${KUSTOMIZE_VERSION}/kustomize_v${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" | tar -xzf - -C "$tmp"
-install -m 0755 "$tmp/kustomize" /usr/local/bin/kustomize
-rm -rf "$tmp"
-curl -fsSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
-chmod 0755 /usr/local/bin/argocd
-SOPS_TAG=$(curl -fsSLo /dev/null -w '%{url_effective}' https://github.com/getsops/sops/releases/latest)
-SOPS_TAG=${SOPS_TAG##*/}
-curl -fsSL -o /usr/local/bin/sops "https://github.com/getsops/sops/releases/download/${SOPS_TAG}/sops-${SOPS_TAG}.linux.amd64"
-chmod 0755 /usr/local/bin/sops
+# Pinned tooling (t3, claude, opencode, helm, kustomize, argocd, sops) comes
+# from update.sh, which a daily timer re-runs after Renovate's window so a
+# merged bump lands on the guest the same morning.
+bash "$T3_DIR/update.sh"
+cat >/etc/systemd/system/t3code-update.service <<EOF
+[Unit]
+Description=Pull the repo and apply t3code pinned versions
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=T3_USER=$T3_USER
+ExecStart=/usr/bin/git -C $T3_DIR pull --ff-only -q
+ExecStart=/usr/bin/bash $T3_DIR/update.sh
+EOF
+cat >/etc/systemd/system/t3code-update.timer <<'EOF'
+[Unit]
+Description=Daily t3code update, after Renovate's 02:00-06:00 window
+
+[Timer]
+OnCalendar=*-*-* 06:30:00 Europe/Athens
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+systemctl daemon-reload
+systemctl enable --now t3code-update.timer
 
 if ! id "$T3_USER" >/dev/null 2>&1; then
   useradd -m -s /bin/bash -G sudo "$T3_USER"

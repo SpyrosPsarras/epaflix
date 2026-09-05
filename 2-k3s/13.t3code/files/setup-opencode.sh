@@ -3,7 +3,8 @@
 # (models = Spyros' Zed set), and enables the OpenCode driver in T3 settings.
 set -euo pipefail
 
-npm i -g opencode-ai >/dev/null 2>&1
+. "$(dirname "$0")/../versions.env"
+npm i -g "opencode-ai@$OPENCODE_VERSION" >/dev/null 2>&1
 echo "opencode installed: $(opencode --version 2>/dev/null | head -1)"
 
 mkdir -p /home/spyros/.config/opencode
