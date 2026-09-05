@@ -11,17 +11,19 @@
 #   T3_USER              default: spyros
 #   CLIPROXY_BASE_URL    default: https://cliproxy.epaflix.com
 #   KEEPASS_KDBX         default: /home/<user>/sync/keepass.kdbx (B4 pairs the Syncthing folder)
-# Expects files/keepass_mcp.py next to this script (scp both to the guest).
+# Runs from the guest's clone of the repo (/opt/epaflix): the same dir holds
+# versions.env, update.sh and files/keepass_mcp.py.
 set -euo pipefail
 
 T3_USER=${T3_USER:-spyros}
 CLIPROXY_BASE_URL=${CLIPROXY_BASE_URL:-https://cliproxy.epaflix.com}
 KEEPASS_KDBX=${KEEPASS_KDBX:-/home/$T3_USER/sync/keepass.kdbx}
-SERVER_SRC=$(dirname "$0")/files/keepass_mcp.py
+T3_DIR=$(cd "$(dirname "$0")" && pwd)
+SERVER_SRC=$T3_DIR/files/keepass_mcp.py
 : "${T3_GUEST_IP:?set T3_GUEST_IP}"
 : "${ANTHROPIC_AUTH_TOKEN:?set ANTHROPIC_AUTH_TOKEN}"
 : "${VAULT_PASSPHRASE:?set VAULT_PASSPHRASE}"
-[[ -f $SERVER_SRC ]] || { echo "missing $SERVER_SRC; scp the repo's files/ dir alongside this script"; exit 1; }
+[[ -f $SERVER_SRC ]] || { echo "missing $SERVER_SRC; run from the repo clone at /opt/epaflix"; exit 1; }
 
 # sudo -u drops XDG_RUNTIME_DIR, which breaks every systemd --user call.
 as_user() {
@@ -31,7 +33,7 @@ as_user() {
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
   curl ca-certificates gnupg git sudo unzip openssh-server syncthing gh python3-venv \
-  build-essential polkitd
+  python3-yaml build-essential polkitd
 
 systemctl enable --now ssh
 
@@ -39,15 +41,55 @@ systemctl enable --now ssh
 curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
 DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs
 
-npm install -g t3 @anthropic-ai/claude-code
-
 curl -fsSL https://aka.ms/InstallAzureCLIDeb | bash
+
+# kubectl apt repo tracks the cluster's minor (k3s v1.36).
+install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.36/deb/Release.key | gpg --dearmor --yes -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.36/deb/ /' >/etc/apt/sources.list.d/kubernetes.list
+apt-get update
+
+# Pinned tooling (t3, claude, opencode, helm, kustomize, argocd, sops) comes
+# from update.sh, which a daily timer re-runs after Renovate's window so a
+# merged bump lands on the guest the same morning.
+bash "$T3_DIR/update.sh"
+cat >/etc/systemd/system/t3code-update.service <<EOF
+[Unit]
+Description=Pull the repo and apply t3code pinned versions
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=T3_USER=$T3_USER
+ExecStart=/usr/bin/git -C $T3_DIR pull --ff-only -q
+ExecStart=/usr/bin/bash $T3_DIR/update.sh
+EOF
+cat >/etc/systemd/system/t3code-update.timer <<'EOF'
+[Unit]
+Description=Daily t3code update, after Renovate's 02:00-06:00 window
+
+[Timer]
+OnCalendar=*-*-* 06:30:00 Europe/Athens
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+systemctl daemon-reload
+systemctl enable --now t3code-update.timer
 
 if ! id "$T3_USER" >/dev/null 2>&1; then
   useradd -m -s /bin/bash -G sudo "$T3_USER"
 fi
 
 install -d -o "$T3_USER" -g "$T3_USER" /home/"$T3_USER"/projects /home/"$T3_USER"/sync
+
+# wizard-b2 copies the epaflix-only kubeconfig and the sops age key here.
+# keys.txt is sops' default key path, so plain `sops -d` works with no env.
+as_user mkdir -p /home/"$T3_USER"/.kube /home/"$T3_USER"/.config/sops/age
+chmod 0700 /home/"$T3_USER"/.kube /home/"$T3_USER"/.config/sops/age
+as_user ln -sfn k3s-cluster.txt /home/"$T3_USER"/.config/sops/age/keys.txt
 
 # One root-owned env file feeds the service and the keepass MCP wrapper.
 # Values are single-quoted with '\'' escaping, safe for both the sh wrapper
