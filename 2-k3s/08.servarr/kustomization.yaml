@@ -62,7 +62,7 @@ configMapGenerator:
       - main.py=bazarr-autotranslate/files/main.py
 images:
   - name: lscr.io/linuxserver/sonarr
-    digest: sha256:c19aa4ecdf03d73e1d5c901da33744cb7eb4d921f89bafed1ca264601d7fa224
+    digest: sha256:4d9df314875e1249ab7d6170c2b9b3dc1d8e6383f168ceb10dc9a5ad9b324739
   - name: lscr.io/linuxserver/radarr
     digest: sha256:119aaa4a4f7349bcd2a136c5373a0d7925b5479915c7dfe0c0ad352db2a6d438
   - name: lscr.io/linuxserver/prowlarr
