@@ -1,8 +1,0 @@
----
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: odysseus
-  labels:
-    name: odysseus
-    app.kubernetes.io/name: odysseus

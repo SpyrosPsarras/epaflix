@@ -11,6 +11,7 @@ resources:
   - cliproxy/deployment.yaml
   - cliproxy/service.yaml
   - cliproxy/ingress.yaml
+  - cliproxy/heartbeat-cronjob.yaml
   - cpamanager/storage.yaml
   - cpamanager/deployment.yaml
   - cpamanager/service.yaml
