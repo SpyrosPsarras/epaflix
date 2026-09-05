@@ -31,7 +31,7 @@ as_user() {
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
   curl ca-certificates gnupg git sudo unzip openssh-server syncthing gh python3-venv \
-  build-essential polkitd
+  python3-yaml build-essential polkitd
 
 systemctl enable --now ssh
 
@@ -43,11 +43,44 @@ npm install -g t3 @anthropic-ai/claude-code
 
 curl -fsSL https://aka.ms/InstallAzureCLIDeb | bash
 
+# kubectl tracks the cluster's minor (k3s v1.36); helm/kustomize pins mirror
+# ci.yml so what validates here is what the gate validates.
+install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.36/deb/Release.key | gpg --dearmor --yes -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.36/deb/ /' >/etc/apt/sources.list.d/kubernetes.list
+apt-get update
+DEBIAN_FRONTEND=noninteractive apt-get install -y kubectl
+
+HELM_VERSION=3.21.4      # renovate: datasource=github-releases depName=helm/helm
+KUSTOMIZE_VERSION=5.8.1  # renovate: datasource=github-releases depName=kubernetes-sigs/kustomize
+tmp=$(mktemp -d)
+helm_tgz="helm-v${HELM_VERSION}-linux-amd64.tar.gz"
+curl -fsSL -o "$tmp/$helm_tgz" "https://get.helm.sh/$helm_tgz"
+curl -fsSL -o "$tmp/$helm_tgz.sha256sum" "https://get.helm.sh/$helm_tgz.sha256sum"
+(cd "$tmp" && sha256sum -c "$helm_tgz.sha256sum")
+tar -xzf "$tmp/$helm_tgz" -C "$tmp"
+install -m 0755 "$tmp/linux-amd64/helm" /usr/local/bin/helm
+curl -fsSL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv${KUSTOMIZE_VERSION}/kustomize_v${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" | tar -xzf - -C "$tmp"
+install -m 0755 "$tmp/kustomize" /usr/local/bin/kustomize
+rm -rf "$tmp"
+curl -fsSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+chmod 0755 /usr/local/bin/argocd
+SOPS_TAG=$(curl -fsSLo /dev/null -w '%{url_effective}' https://github.com/getsops/sops/releases/latest)
+SOPS_TAG=${SOPS_TAG##*/}
+curl -fsSL -o /usr/local/bin/sops "https://github.com/getsops/sops/releases/download/${SOPS_TAG}/sops-${SOPS_TAG}.linux.amd64"
+chmod 0755 /usr/local/bin/sops
+
 if ! id "$T3_USER" >/dev/null 2>&1; then
   useradd -m -s /bin/bash -G sudo "$T3_USER"
 fi
 
 install -d -o "$T3_USER" -g "$T3_USER" /home/"$T3_USER"/projects /home/"$T3_USER"/sync
+
+# wizard-b2 copies the epaflix-only kubeconfig and the sops age key here.
+# keys.txt is sops' default key path, so plain `sops -d` works with no env.
+as_user mkdir -p /home/"$T3_USER"/.kube /home/"$T3_USER"/.config/sops/age
+chmod 0700 /home/"$T3_USER"/.kube /home/"$T3_USER"/.config/sops/age
+as_user ln -sfn k3s-cluster.txt /home/"$T3_USER"/.config/sops/age/keys.txt
 
 # One root-owned env file feeds the service and the keepass MCP wrapper.
 # Values are single-quoted with '\'' escaping, safe for both the sh wrapper
