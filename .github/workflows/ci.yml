@@ -40,6 +40,7 @@ jobs:
           ./.github/hooks/test-check-kube-context.sh
           ./.github/hooks/test-keystatus-check.sh
           ./.github/hooks/test-pool-capacity-forecast.sh
+          ./.github/hooks/test-print-age-key-backup.sh
           ./.github/hooks/check-sops-encrypted.sh --full-tree
 
       - name: Install tools
