@@ -191,13 +191,12 @@ PLAINTEXT="$REPO_ROOT/2-k3s/13.t3code/vault-passphrase.plaintext.yaml"
 ENC="$REPO_ROOT/2-k3s/13.t3code/vault-passphrase.enc.yaml"
 CLIPROXY_ENC="$REPO_ROOT/2-k3s/17.remote-pi/cliproxy/cliproxy-secrets.enc.yaml"
 PROXY_YAML="$REPO_ROOT/2-k3s/05.traefik-deployment/ingress/t3code-proxy.yaml"
-T3_DIR="$REPO_ROOT/2-k3s/13.t3code"
 SECRETS_TMP=$(mktemp)
 TMPENC=
 chmod 0600 "$SECRETS_TMP"
 trap 'rm -f "$SECRETS_TMP" "$TMPENC"' EXIT
 
-TOTAL_STAGES=8
+TOTAL_STAGES=9
 
 banner "t3code B2+B3 — sops secrets, provisioning, logins"
 
@@ -283,9 +282,7 @@ else
     warn "could not extract the passphrase from $ENC"
     SKIPPED+=("guest provisioning (passphrase extraction failed)")
   else
-    ssh "root@$T3_CT_IP" "mkdir -p /root/t3code/files"
-    scp -q "$T3_DIR/provision.sh" "root@$T3_CT_IP:/root/t3code/provision.sh"
-    scp -q "$T3_DIR/files/keepass_mcp.py" "root@$T3_CT_IP:/root/t3code/files/keepass_mcp.py"
+    ssh "root@$T3_CT_IP" "command -v git >/dev/null || (apt-get update -q && apt-get install -y -q git); test -d /opt/epaflix/.git || git clone -q https://github.com/SpyrosPsarras/epaflix.git /opt/epaflix; git -C /opt/epaflix pull --ff-only -q"
     {
       printf 'T3_GUEST_IP=%q\n' "$T3_CT_IP"
       printf 'ANTHROPIC_AUTH_TOKEN=%q\n' "$ANTHROPIC_AUTH_TOKEN"
@@ -293,26 +290,45 @@ else
     } > "$SECRETS_TMP"
     scp -q "$SECRETS_TMP" "root@$T3_CT_IP:/root/t3secrets"
     rm -f "$SECRETS_TMP"
-    ssh -t "root@$T3_CT_IP" "trap 'rm -f /root/t3secrets' EXIT; chmod 600 /root/t3secrets && cd /root/t3code && set -a && . /root/t3secrets && rm -f /root/t3secrets && bash provision.sh"
+    ssh -t "root@$T3_CT_IP" "trap 'rm -f /root/t3secrets' EXIT; chmod 600 /root/t3secrets && set -a && . /root/t3secrets && rm -f /root/t3secrets && bash /opt/epaflix/2-k3s/13.t3code/provision.sh"
     say "Provisioning finished. Secrets file removed on the guest."
   fi
 fi
 
-# ── Stage 6: gh auth login (B3, part 1) ───────────────────────────────────
+# ── Stage 6: cluster access (kubeconfig + sops age key) ───────────────────
+stage "Cluster access → guest"
+KUBECFG="$REPO_ROOT/.kube/epaflix.kubeconfig"
+AGE_KEY="$HOME/.config/sops/age/k3s-cluster.txt"
+[[ -s $KUBECFG ]] || (cd "$REPO_ROOT" && bash .github/hooks/install-kubeconfig-epaflix.sh >/dev/null) || true
+if [[ -s $KUBECFG && -s $AGE_KEY ]]; then
+  if ssh "root@$T3_CT_IP" "sudo -iu spyros sh -c 'umask 077; cat > /home/spyros/.kube/config'" < "$KUBECFG" \
+     && ssh "root@$T3_CT_IP" "sudo -iu spyros sh -c 'umask 077; cat > /home/spyros/.config/sops/age/k3s-cluster.txt'" < "$AGE_KEY" \
+     && ssh "root@$T3_CT_IP" "sudo -iu spyros kubectl get nodes"; then
+    say "kubeconfig (epaflix context only) + age key on the guest; kubectl reaches the cluster."
+  else
+    warn "copy or kubectl get nodes failed on the guest"
+    SKIPPED+=("cluster access on guest (kubeconfig + age key)")
+  fi
+else
+  warn "missing ${KUBECFG#"$REPO_ROOT"/} or $AGE_KEY — skipped (run .github/hooks/install-kubeconfig-epaflix.sh)"
+  SKIPPED+=("cluster access on guest (kubeconfig + age key)")
+fi
+
+# ── Stage 7: gh auth login (B3, part 1) ───────────────────────────────────
 stage "GitHub login (device flow)"
 open_url "https://github.com/login/device"
 ssh -t "root@$T3_CT_IP" "sudo -iu spyros gh auth login --hostname github.com --git-protocol https --web --skip-ssh-key" \
   || SKIPPED+=("gh auth login on guest")
 pause "Press Enter once gh reports logged in."
 
-# ── Stage 7: Azure login (B3, part 2) ─────────────────────────────────────
+# ── Stage 8: Azure login (B3, part 2) ─────────────────────────────────────
 stage "Azure login (device code)"
 open_url "https://microsoft.com/devicelogin"
 ssh -t "root@$T3_CT_IP" "sudo -iu spyros az login --use-device-code" \
   || SKIPPED+=("az login on guest")
 pause "Press Enter once az reports the subscription."
 
-# ── Stage 8: verify + what remains ────────────────────────────────────────
+# ── Stage 9: verify + what remains ────────────────────────────────────────
 stage "Verify"
 if ssh -o ConnectTimeout=5 "root@$T3_CT_IP" "t3 service status; ss -tln | grep -q 3773 && echo PORT_3773_BOUND" 2>/dev/null; then
   say "Service and port check ran on the guest."
