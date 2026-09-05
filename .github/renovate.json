@@ -14,12 +14,6 @@
   "commitMessagePrefix": "[renovate]",
   "packageRules": [
     {
-      "description": "odysseus is a locally-built image (no upstream registry repo / no semver tag stream) — Renovate can't look it up, which raises a permanent 'Package lookup failures' WARN on the Dependency Dashboard. Disable tracking for it (docker datasource). Matches the LIVE fully-qualified GHCR image used by the k3s deployment (2-k3s/13.odysseus/odysseus.yaml) and the bare 'odysseus' name (the TrueNAS compose image). Refresh is manual — see the Image refresh / rebuild section in 2-k3s/13.odysseus/README.md (#211).",
-      "matchDatasources": ["docker"],
-      "matchPackageNames": ["odysseus", "ghcr.io/spyrospsarras/odysseus"],
-      "enabled": false
-    },
-    {
       "description": "Authentik: chart version and container image move together upstream. Group them in one PR so ArgoCD never sees a chart/image schema mismatch.",
       "matchManagers": ["kustomize"],
       "matchPackageNames": [
