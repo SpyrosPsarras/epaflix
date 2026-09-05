@@ -197,7 +197,7 @@ TMPENC=
 chmod 0600 "$SECRETS_TMP"
 trap 'rm -f "$SECRETS_TMP" "$TMPENC"' EXIT
 
-TOTAL_STAGES=8
+TOTAL_STAGES=9
 
 banner "t3code B2+B3 — sops secrets, provisioning, logins"
 
@@ -298,21 +298,40 @@ else
   fi
 fi
 
-# ── Stage 6: gh auth login (B3, part 1) ───────────────────────────────────
+# ── Stage 6: cluster access (kubeconfig + sops age key) ───────────────────
+stage "Cluster access → guest"
+KUBECFG="$REPO_ROOT/.kube/epaflix.kubeconfig"
+AGE_KEY="$HOME/.config/sops/age/k3s-cluster.txt"
+[[ -s $KUBECFG ]] || (cd "$REPO_ROOT" && bash .github/hooks/install-kubeconfig-epaflix.sh >/dev/null) || true
+if [[ -s $KUBECFG && -s $AGE_KEY ]]; then
+  if ssh "root@$T3_CT_IP" "sudo -iu spyros sh -c 'umask 077; cat > /home/spyros/.kube/config'" < "$KUBECFG" \
+     && ssh "root@$T3_CT_IP" "sudo -iu spyros sh -c 'umask 077; cat > /home/spyros/.config/sops/age/k3s-cluster.txt'" < "$AGE_KEY" \
+     && ssh "root@$T3_CT_IP" "sudo -iu spyros kubectl get nodes"; then
+    say "kubeconfig (epaflix context only) + age key on the guest; kubectl reaches the cluster."
+  else
+    warn "copy or kubectl get nodes failed on the guest"
+    SKIPPED+=("cluster access on guest (kubeconfig + age key)")
+  fi
+else
+  warn "missing ${KUBECFG#"$REPO_ROOT"/} or $AGE_KEY — skipped (run .github/hooks/install-kubeconfig-epaflix.sh)"
+  SKIPPED+=("cluster access on guest (kubeconfig + age key)")
+fi
+
+# ── Stage 7: gh auth login (B3, part 1) ───────────────────────────────────
 stage "GitHub login (device flow)"
 open_url "https://github.com/login/device"
 ssh -t "root@$T3_CT_IP" "sudo -iu spyros gh auth login --hostname github.com --git-protocol https --web --skip-ssh-key" \
   || SKIPPED+=("gh auth login on guest")
 pause "Press Enter once gh reports logged in."
 
-# ── Stage 7: Azure login (B3, part 2) ─────────────────────────────────────
+# ── Stage 8: Azure login (B3, part 2) ─────────────────────────────────────
 stage "Azure login (device code)"
 open_url "https://microsoft.com/devicelogin"
 ssh -t "root@$T3_CT_IP" "sudo -iu spyros az login --use-device-code" \
   || SKIPPED+=("az login on guest")
 pause "Press Enter once az reports the subscription."
 
-# ── Stage 8: verify + what remains ────────────────────────────────────────
+# ── Stage 9: verify + what remains ────────────────────────────────────────
 stage "Verify"
 if ssh -o ConnectTimeout=5 "root@$T3_CT_IP" "t3 service status; ss -tln | grep -q 3773 && echo PORT_3773_BOUND" 2>/dev/null; then
   say "Service and port check ran on the guest."
