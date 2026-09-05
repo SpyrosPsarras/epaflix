@@ -17,7 +17,8 @@ FIELDS = ("username", "url", "notes")
 
 
 def _entry_path(entry):
-    return "/" + "/".join(entry.path)
+    parts = entry.path or []
+    return "/" + "/".join(p if isinstance(p, str) and p else "" for p in parts)
 
 
 def _entry_summary(entry):
