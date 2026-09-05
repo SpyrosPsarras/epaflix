@@ -6,6 +6,7 @@ Env: KEEPASS_DB (path to the KDBX), KEEPASS_PASSPHRASE. Both come from
 creates a throwaway vault, exercises both tools, and never touches KEEPASS_DB.
 """
 
+import json
 import os
 import sys
 import tempfile
@@ -115,14 +116,14 @@ def main():
     mcp = MCPServer("keepass", instructions="Read-only access to the personal KeePass vault.")
 
     @mcp.tool()
-    def vault_list(prefix: str = "") -> list[dict]:
-        """List vault entries below the given group path prefix (no passwords). Empty prefix lists all."""
-        return _list_tool(prefix)
+    def vault_list(prefix: str = "") -> str:
+        """List vault entries below the given group path prefix (no passwords). Empty prefix lists all. Returns a JSON array."""
+        return json.dumps(_list_tool(prefix))
 
     @mcp.tool()
-    def vault_get(path: str, include_password: bool = True) -> dict:
-        """Fetch one entry by its full vault path (as returned by vault_list, e.g. /Group/Title)."""
-        return _get_tool(path, include_password)
+    def vault_get(path: str, include_password: bool = True) -> str:
+        """Fetch one entry by its full vault path (as returned by vault_list, e.g. /Group/Title). Returns a JSON object."""
+        return json.dumps(_get_tool(path, include_password))
 
     mcp.run()
 
