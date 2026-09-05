@@ -11,4 +11,4 @@ resources:
 
 images:
   - name: syncthing/syncthing
-    newTag: 1.30.0
+    newTag: 2.1.3
