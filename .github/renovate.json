@@ -64,18 +64,10 @@
       "automerge": false
     },
     {
-      "description": "Self-hosted Renovate image: cut noise — suppress minor+patch (no branch/PR). Only major updates remain, so a branch on this image always signals a major.",
+      "description": "Self-hosted Renovate image: every update adopted by hand via the images: override in 2-k3s/12.renovate/kustomization.yaml (was: minor+patch suppressed, majors opened a PR). The v44 major got as far as its branch but the PR never opened; every in-window run re-attempted PR creation and hung until activeDeadlineSeconds killed it, 16 consecutive failures across 4 nights from 2026-07-29, while out-of-window runs stayed fast because the schedule skips this update entirely (#595, mechanism inferred from the last log line, not confirmed: release-notes fetch against renovatebot/renovate's multi-thousand-release history). Branch renovate/ghcr.io-renovatebot-renovate-44.x deleted at ddfe5d9, recoverable from that sha. To adopt: bump newTag by hand, confirm the next in-window run completes, and in the same PR either keep this rule or restore major-opens-a-PR.",
       "matchManagers": ["kustomize"],
       "matchPackageNames": ["ghcr.io/renovatebot/renovate"],
-      "matchUpdateTypes": ["minor", "patch"],
       "enabled": false
-    },
-    {
-      "description": "Self-hosted Renovate image: major updates open a PR on renovate/<image>-<newMajor>.x for manual review — never auto-merge.",
-      "matchManagers": ["kustomize"],
-      "matchPackageNames": ["ghcr.io/renovatebot/renovate"],
-      "matchUpdateTypes": ["major"],
-      "automerge": false
     },
     {
       "description": "Temporary PR-build image (#1219 follow-up): ghcr.io/spyrospsarras/cli-proxy-api:pr-5411-da1b2ef is a one-off build of router-for-me/CLIProxyAPI#5411 (block-binding beta fix for Zed Fable 5.1), pinned with an immutable digest while upstream review is pending. A PR build has no tag stream, so the docker datasource can never resolve it and tracking it is permanent 'Package lookup failures' WARN noise on the Dependency Dashboard. Disable tracking the same way odysseus is disabled (#211 precedent). The images: block in 2-k3s/17.remote-pi/kustomization.yaml carries a TEMP OVERRIDE comment naming the revert condition: when a CLIProxyAPI release >= v7.2.149 ships containing #5411, the pin goes back to docker.io/eceasy/cli-proxy-api and this rule is deleted in the same PR.",
