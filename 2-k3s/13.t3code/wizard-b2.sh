@@ -191,7 +191,6 @@ PLAINTEXT="$REPO_ROOT/2-k3s/13.t3code/vault-passphrase.plaintext.yaml"
 ENC="$REPO_ROOT/2-k3s/13.t3code/vault-passphrase.enc.yaml"
 CLIPROXY_ENC="$REPO_ROOT/2-k3s/17.remote-pi/cliproxy/cliproxy-secrets.enc.yaml"
 PROXY_YAML="$REPO_ROOT/2-k3s/05.traefik-deployment/ingress/t3code-proxy.yaml"
-T3_DIR="$REPO_ROOT/2-k3s/13.t3code"
 SECRETS_TMP=$(mktemp)
 TMPENC=
 chmod 0600 "$SECRETS_TMP"
