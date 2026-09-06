@@ -8,11 +8,22 @@ probe the shortlist by ICMP from outside any VPN netns, apply active in-tunnel
 agent verdicts, and publish the ranked survivors. Between cycles, reapply new or
 expired verdicts to the last measured base ranking without restamping it (#792).
 
+Producers publish verdicts two ways: writing a per-producer/server file under
+VPN_PICKER_VERDICT_DIR (the k3s agent path), or POSTing the same schema-1
+document to the bearer-token-gated `/verdict` endpoint over HTTP (the path
+for producers without shared storage, e.g. Nick's VM - #817). Both paths go
+through `parse_verdict()` and `load_active_verdicts()`, so the file cap and
+TTL are enforced identically. An HTTP verdict is written to the same directory
+the file intake reads, so a producer's verdict is one logical object with two
+write surfaces.
+
 Stdlib only on purpose. The whole job is one HTTPS GET, five `ping` runs and a
 JSON file, and adding a dependency would mean a pip layer and a supply chain to
 watch for something `urllib` already does.
 """
 
+import hashlib
+import hmac
 import ipaddress
 import json
 import logging
@@ -42,6 +53,8 @@ MAX_EJECTION_FRACTION = 0.5
 VERDICT_RECHECK_SECONDS = 5
 BASE_STATE_SCHEMA = 1
 BASE_STATE_MAX_BYTES = 1048576
+INTAKE_PATH = "/verdict"
+INTAKE_MAX_BODY_BYTES = VERDICT_MAX_BYTES
 _IDENTITY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}$")
 RANKING_DOCUMENT_KEYS = frozenset((
     "schema", "generated_at", "ttl_seconds", "servers",
@@ -104,6 +117,7 @@ class Config:
         )
         self.listen_port = _env_int("VPN_PICKER_LISTEN_PORT", 8080)
         self.api_timeout = _env_int("VPN_PICKER_API_TIMEOUT", 30)
+        self.intake_token = os.environ.get("VPN_PICKER_INTAKE_TOKEN", "")
 
 
 
@@ -233,6 +247,19 @@ def probe_all(candidates, cfg):
 
 
 
+def verdict_filename(producer, server):
+    """Stable file for one producer+server, byte-identical with the agent (#817).
+
+    The identity remains inside the validated JSON; only its SHA-256 digest
+    enters the pathname. Mirroring the agent's verdict_path() is what makes
+    HTTP and file intakes produce the same filename for the same pair, so an
+    HTTP verdict and a file verdict from the same producer+server overwrite
+    each other cleanly without a second set of rules.
+    """
+    identity = "%s\0%s" % (producer, str(server).lower())
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24] + ".json"
+
+
 def parse_verdict(payload, cfg, now_epoch=None):
     """Validate one agent verdict; return a normalized dict or None if stale.
 
@@ -298,6 +325,50 @@ def parse_verdict(payload, cfg, now_epoch=None):
         "loss_pct": loss,
         "bad_windows": bad_windows,
     }
+
+
+def persist_verdict(verdict, cfg, observed_at):
+    """Atomically write one HTTP verdict into the same dir the file intake reads.
+
+    The HTTP intake is one path into the same store: parse_verdict() validates,
+    this writes under the filename the file intake would assign, and the next
+    refresh_ejections() cycle reads it back. Filename byte-equal to the agent's
+    verdict_path() so a producer+server pair is a single logical verdict
+    regardless of which surface wrote it. Same atomic rename as the agent
+    (`fsync` then `os.replace`) so a concurrent reader never sees a half file.
+    """
+    payload = json.dumps({
+        "schema": VERDICT_SCHEMA,
+        "source": VERDICT_SOURCE,
+        "producer": verdict["producer"],
+        "server": verdict["server"],
+        "observed_at": observed_at,
+        "ttl_seconds": verdict["ttl_seconds"],
+        "loss_pct": verdict["loss_pct"],
+        "bad_windows": verdict["bad_windows"],
+    }, indent=2, sort_keys=True).encode() + b"\n"
+
+    os.makedirs(cfg.verdict_dir, exist_ok=True)
+    final = os.path.join(cfg.verdict_dir, verdict_filename(verdict["producer"], verdict["server"]))
+    tmp = os.path.join(
+        cfg.verdict_dir,
+        ".%s.tmp.%d.%d" % (
+            os.path.basename(final), os.getpid(), threading.get_ident(),
+        ),
+    )
+    try:
+        with open(tmp, "wb") as fh:
+            fh.write(payload)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, final)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    return final
 
 
 def load_active_verdicts(cfg, now_epoch=None, log_issues=True):
@@ -719,6 +790,7 @@ def render_metrics(state):
 
 class Handler(BaseHTTPRequestHandler):
     state = None
+    cfg = None
     protocol_version = "HTTP/1.1"
 
     def _send(self, code, body, content_type):
@@ -745,12 +817,78 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._send(404, b"not found\n", "text/plain")
 
+    def do_POST(self):
+        """Authenticated verdict intake (#817). One rule set, one store.
+
+        The token gates the endpoint; parse_verdict() applies the same
+        validation as the file intake; persist_verdict() writes under the
+        same per-producer/server filename. An empty configured token
+        disables the endpoint entirely - fail closed for a write surface.
+        """
+        path = urllib.parse.urlparse(self.path).path
+        if path != INTAKE_PATH:
+            self._send(404, b"not found\n", "text/plain")
+            return
+        cfg = self.cfg
+        if not cfg.intake_token:
+            log.warning("rejected /verdict intake: VPN_PICKER_INTAKE_TOKEN is empty")
+            self._send(503, b"intake disabled\n", "text/plain")
+            return
+        header = self.headers.get("Authorization", "")
+        if not header.startswith("Bearer "):
+            self._send(401, b"missing bearer token\n", "text/plain")
+            return
+        presented = header[len("Bearer "):].strip()
+        if not presented or not hmac.compare_digest(
+                presented.encode("utf-8"), cfg.intake_token.encode("utf-8")):
+            log.warning("rejected /verdict intake: bearer token mismatch")
+            self._send(401, b"invalid bearer token\n", "text/plain")
+            return
+
+        length = self.headers.get("Content-Length")
+        try:
+            length_int = int(length) if length is not None else 0
+        except ValueError:
+            length_int = -1
+        if length_int <= 0:
+            self._send(400, b"bad or missing content length\n", "text/plain")
+            return
+        if length_int > INTAKE_MAX_BODY_BYTES:
+            self.close_connection = True
+            self._send(413, b"verdict body too large\n", "text/plain")
+            return
+        body = self.rfile.read(length_int)
+
+        try:
+            verdict = parse_verdict(body, cfg)
+        except ValueError as exc:
+            log.warning("rejected /verdict intake: %s", exc)
+            self._send(400, b"invalid verdict\n", "text/plain")
+            return
+        if verdict is None:
+            log.warning("rejected /verdict intake: stale verdict")
+            self._send(400, b"stale verdict\n", "text/plain")
+            return
+
+        try:
+            persist_verdict(verdict, cfg, verdict["observed_at"])
+        except Exception as exc:
+            log.error("cannot persist intake verdict producer=%s server=%s: %s",
+                      verdict["producer"], verdict["server"], exc)
+            self._send(500, b"cannot persist verdict\n", "text/plain")
+            return
+        log.info("intake verdict accepted producer=%s server=%s loss_pct=%s ttl=%s",
+                 verdict["producer"], verdict["server"], verdict["loss_pct"],
+                 verdict["ttl_seconds"])
+        self._send(202, b"accepted\n", "text/plain")
+
     def log_message(self, fmt, *args):
         log.debug("http %s", fmt % args)
 
 
 def serve(state, cfg):
     Handler.state = state
+    Handler.cfg = cfg
     server = ThreadingHTTPServer(("", cfg.listen_port), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     log.info("serving ranking and metrics on :%s", cfg.listen_port)
