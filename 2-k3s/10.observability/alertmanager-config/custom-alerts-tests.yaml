@@ -182,3 +182,45 @@ tests:
               instance: 192.168.10.200
               severity: warning
               component: truenas-memory
+
+  - interval: 1m
+    input_series:
+      - series: 'node_filesystem_avail_bytes{device="pool1",device_error="",fstype="zfs",instance="192.168.10.200",job="truenas-node-exporter",mountpoint="/mnt/pool1"}'
+        values: "429496729599x90"  # 400 GiB - 1, below both pool1 thresholds
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: TruenasPool1FreeLow
+        exp_alerts:
+          - exp_labels:
+              job: truenas-node-exporter
+              instance: 192.168.10.200
+              device: pool1
+              device_error: ""
+              fstype: zfs
+              mountpoint: /mnt/pool1
+              severity: warning
+              component: truenas-storage
+      - eval_time: 70m
+        alertname: TruenasPool1FreeCritical
+        exp_alerts:
+          - exp_labels:
+              job: truenas-node-exporter
+              instance: 192.168.10.200
+              device: pool1
+              device_error: ""
+              fstype: zfs
+              mountpoint: /mnt/pool1
+              severity: critical
+              component: truenas-storage
+
+  - interval: 1m
+    input_series:
+      - series: 'node_filesystem_avail_bytes{device="pool1",device_error="",fstype="zfs",instance="192.168.10.200",job="truenas-node-exporter",mountpoint="/mnt/pool1"}'
+        values: "2199023255552x90"  # 2 TiB, above both thresholds (live 2026-09-05: 1.72 TiB)
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: TruenasPool1FreeLow
+        exp_alerts: []
+      - eval_time: 70m
+        alertname: TruenasPool1FreeCritical
+        exp_alerts: []
