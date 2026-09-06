@@ -94,6 +94,48 @@ spec:
             summary: "Proxmox host unreachable"
             description: "Proxmox VE exporter cannot reach host {{ $labels.instance }} for 5 minutes."
 
+        - alert: ProxmoxThinPoolDataNearFull
+          expr: |
+            (
+              pve_disk_usage_bytes{id=~"storage/.*/local-raid"}
+              /
+              pve_disk_size_bytes{id=~"storage/.*/local-raid"}
+            ) > 0.90
+          for: 10m
+          labels:
+            severity: warning
+            component: infrastructure
+          annotations:
+            summary: "Proxmox thin pool local-raid data above 90%"
+            description: >-
+              Thin pool data on {{ $labels.id }} is {{ $value | humanizePercentage }} and has been
+              above 90% for 10m. dmeventd autoextend is armed at 90/20 via /etc/lvm/lvmlocal.conf on
+              both hosts (tracked as 1-proxmox/lvm/lvmlocal.conf, issue #719), but each VG holds
+              under 1 GiB of free extents, so the extension attempt fails and only logs - expect
+              dmeventd lines in syslog, not freed space. The headroom decision is #564. This metric
+              covers data usage only: PVE does not export metadata usage, so also run
+              lvs -o+metadata_percent on the host (takaros metadata read 36.14% on 2026-09-06 Athens).
+
+        - alert: ProxmoxThinPoolDataCritical
+          expr: |
+            (
+              pve_disk_usage_bytes{id=~"storage/.*/local-raid"}
+              /
+              pve_disk_size_bytes{id=~"storage/.*/local-raid"}
+            ) > 0.95
+          for: 5m
+          labels:
+            severity: critical
+            component: infrastructure
+          annotations:
+            summary: "Proxmox thin pool local-raid data above 95%"
+            description: >-
+              Thin pool data on {{ $labels.id }} is {{ $value | humanizePercentage }} and has been
+              above 95% for 5m - close to the point where every guest with extents on local-raid
+              takes write errors at once. Free space fast: delete stale vzdump snapshots and check
+              the PBS datastore volume vm-1031-disk-1 (93.6% full on 2026-09-06 Athens), or extend the VG
+              per #564. Metadata usage is invisible to this metric - see ProxmoxThinPoolDataNearFull.
+
     - name: cilium
       interval: 60s
       rules:
