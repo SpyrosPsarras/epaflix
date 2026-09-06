@@ -2382,6 +2382,225 @@ def test_switch_budget_is_exported_at_scrape_time(tmp):
           "counts, the cooldown counts down, exhausted tracks allowed()")
 
 
+def _intake_env_off():
+    """Intake env vars are global process state; every intake test resets them."""
+    for name in ("VPN_AGENT_INTAKE_URL", "VPN_AGENT_INTAKE_TOKEN",
+                 "VPN_AGENT_RANKING_URL"):
+        os.environ.pop(name, None)
+
+
+class _FakeResponse:
+    def __init__(self, status):
+        self.status = status
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def read(self, limit=-1):
+        return b""
+
+
+class FakeIntake:
+    """Records urlopen calls the way FakeBluetit records goldcrest calls."""
+
+    def __init__(self, status=202, error=None):
+        self.requests = []
+        self.status = status
+        self.error = error
+
+    def __call__(self, req, timeout=None):
+        self.requests.append((req, timeout))
+        if self.error is not None:
+            raise self.error
+        return _FakeResponse(self.status)
+
+    def bodies(self):
+        return [json.loads(req.data) for req, _ in self.requests]
+
+
+def test_intake_config_requires_a_token():
+    """#817: VPN_AGENT_INTAKE_URL without a token must fail at startup.
+
+    The scorer's intake answers 503 to a bearer-less POST by design, so an
+    agent in that state could measure faults and silently publish nothing -
+    the exact lie-detect-later failure the rest of this agent refuses.
+    """
+    _intake_env_off()
+    try:
+        os.environ["VPN_AGENT_INTAKE_URL"] = "http://relay:8080/verdict"
+        try:
+            ag.Config()
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("intake URL without a token was accepted")
+        os.environ["VPN_AGENT_INTAKE_TOKEN"] = "secret"
+        cfg = ag.Config()
+        assert cfg.intake_token == "secret"
+    finally:
+        _intake_env_off()
+    print("ok  #817 intake config: URL without a token refuses to start")
+
+
+@with_tmp
+def test_intake_verdicts_are_posted_not_written(tmp):
+    """#817: in intake mode the same verdict goes out as a POST, not a file.
+
+    Same publish_bad_server() gate, same document, same producer identity -
+    only the transport changes. Nothing may appear in the verdict directory,
+    because on Nick's VM that path is not the shared store the scorer reads.
+    """
+    _intake_env_off()
+    try:
+        intake = FakeIntake()
+        agent, fake, _ = build(
+            tmp, server="Aspidiske", verdict_producer_id="nick",
+            verdict_ttl_seconds=21600,
+            intake_url="http://vpn-picker-relay:8080/verdict",
+            intake_token="secret")
+        agent._intake_urlopen = intake
+        agent.probe = scripted_probe(9.0)
+
+        for _ in range(agent.cfg.bad_windows):
+            agent.watch_once()
+        assert agent.verdict_publisher.wait_idle(2.0), \
+            "healthy intake POST did not complete"
+
+        assert len(intake.requests) == 1, intake.requests
+        req, timeout = intake.requests[0]
+        assert req.get_full_url() == "http://vpn-picker-relay:8080/verdict"
+        assert req.get_method() == "POST"
+        assert req.get_header("Authorization") == "Bearer secret"
+        assert req.get_header("Content-type") == "application/json"
+        assert timeout == agent.cfg.intake_timeout
+        assert intake.bodies() == [{
+            "schema": 1,
+            "source": "vpn-agent",
+            "producer": "nick",
+            "server": "Aspidiske",
+            "observed_at": "2026-08-02T09:31:59Z",
+            "ttl_seconds": 21600,
+            "loss_pct": 9.0,
+            "bad_windows": agent.cfg.bad_windows,
+        }], "the POST body is not the schema-1 verdict the file path writes"
+        assert glob.glob(os.path.join(agent.cfg.verdict_dir, "*.json")) == [], \
+            "intake mode still wrote verdict files"
+    finally:
+        _intake_env_off()
+    print("ok  #817 intake transport: verdict POSTed with bearer, no file written")
+
+
+@with_tmp
+def test_intake_http_failures_raise_and_the_worker_survives(tmp):
+    """#817: a failed POST behaves like a failed write, and the worker lives on.
+
+    The publisher is best-effort by design (#792): an intake outage must log
+    and drop the verdict, never crash the worker or delay the budgeted switch.
+    A later verdict must still go out once the intake recovers.
+    """
+    import urllib.error
+    _intake_env_off()
+    try:
+        intake = FakeIntake(error=urllib.error.URLError("relay down"))
+        agent, _, _ = build(
+            tmp, server="Aspidiske", verdict_producer_id="nick",
+            intake_url="http://vpn-picker-relay:8080/verdict",
+            intake_token="secret")
+        agent._intake_urlopen = intake
+        agent.probe = scripted_probe(9.0)
+        for _ in range(agent.cfg.bad_windows):
+            agent.watch_once()
+        assert agent.verdict_publisher.wait_idle(2.0), \
+            "a failed POST wedged the verdict worker"
+        assert len(intake.requests) == 1
+
+        intake.error = None
+        agent.probe = scripted_probe(9.0)
+        agent.consecutive_bad = 0
+        for _ in range(agent.cfg.bad_windows):
+            agent.watch_once()
+        assert agent.verdict_publisher.wait_idle(2.0)
+        assert len(intake.requests) == 2, \
+            "the worker did not publish after the intake recovered"
+
+        intake.error = None
+        intake.status = 500
+        agent.probe = scripted_probe(9.0)
+        agent.consecutive_bad = 0
+        for _ in range(agent.cfg.bad_windows):
+            agent.watch_once()
+        assert agent.verdict_publisher.wait_idle(2.0), \
+            "a non-202 status wedged the verdict worker"
+        assert len(intake.requests) == 3
+    finally:
+        _intake_env_off()
+    print("ok  #817 intake failures: raise like a failed write, worker survives, retry works")
+
+
+@with_tmp
+def test_ranking_reader_adopts_http_documents(tmp):
+    """#817: fetch mode runs the same validation, snapshot and cache pipeline.
+
+    The only difference from file mode is where the bytes come from. A valid
+    document must be adopted into memory AND the local cache; a failing fetch
+    publishes an absent snapshot the same way an unreadable file does.
+    """
+    _intake_env_off()
+    try:
+        agent, _, _ = build(
+            tmp, ranking=None, start_ranking_reader=False,
+            ranking_url="http://vpn-picker-relay:8080/ranking.json")
+        agent.ranking_reader.fetch = lambda limit: json.dumps(RANKING).encode()
+
+        agent.ranking_reader.start()
+        assert agent.ranking_reader.wait_initial(1.0)
+        servers = agent.read_ranking()
+        assert [s["name"] for s in servers] == [
+            "Dalim", "Piautos", "Menkent", "Ashlesha"], servers
+        with open(agent.cfg.cache_path, "rb") as fh:
+            assert json.load(fh) == RANKING, "HTTP ranking was not cached"
+        agent.ranking_reader.shutdown()
+        print("ok  #817 ranking fetch: HTTP document adopted, validated, cached")
+    finally:
+        _intake_env_off()
+
+
+@with_tmp
+def test_ranking_fetch_failure_fails_open(tmp):
+    """#817: an unreachable ranking source behaves like an unreadable file.
+
+    No snapshot, empty fresh read, cache fallback still works, and the worker
+    keeps polling for recovery.
+    """
+    import urllib.error
+    _intake_env_off()
+    try:
+        agent, _, _ = build(
+            tmp, ranking=None, start_ranking_reader=False,
+            ranking_url="http://vpn-picker-relay:8080/ranking.json")
+
+        def unreachable(limit):
+            raise urllib.error.URLError("relay down")
+
+        agent.ranking_reader.fetch = unreachable
+        agent.ranking_reader.start()
+        assert agent.ranking_reader.wait_initial(1.0)
+        assert agent.ranking_reader.snapshot() is None, \
+            "a failed fetch produced a snapshot"
+        assert agent.read_ranking() == [], \
+            "a failed fetch produced a usable ranking"
+        attempts = reader_attempts(agent)
+        assert wait_for_reader_attempt(agent, attempts), \
+            "the reader stopped polling after a failed fetch"
+        agent.ranking_reader.shutdown()
+        print("ok  #817 ranking fetch failure: absent snapshot, worker keeps polling")
+    finally:
+        _intake_env_off()
+
+
 @with_tmp
 def test_dry_run_takes_no_action(tmp):
     agent, fake, _ = build(tmp, server="Aspidiske", dry_run=True)
@@ -2512,4 +2731,9 @@ if __name__ == "__main__":
     test_budget_survives_a_restart()
     test_switch_budget_is_exported_at_scrape_time()
     test_dry_run_takes_no_action()
+    test_intake_config_requires_a_token()
+    test_intake_verdicts_are_posted_not_written()
+    test_intake_http_failures_raise_and_the_worker_survives()
+    test_ranking_reader_adopts_http_documents()
+    test_ranking_fetch_failure_fails_open()
     print("ALL AGENT SELF-CHECKS PASSED")
