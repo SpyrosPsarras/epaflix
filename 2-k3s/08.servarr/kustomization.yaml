@@ -57,6 +57,7 @@ configMapGenerator:
   - name: lingarr-jobqueue-guard
     files:
       - reconcile-job-queue.sql=lingarr/files/reconcile-job-queue.sql
+      - reconcile-ai-provider.sql=lingarr/files/reconcile-ai-provider.sql
   - name: bazarr-autotranslate-main
     files:
       - main.py=bazarr-autotranslate/files/main.py
