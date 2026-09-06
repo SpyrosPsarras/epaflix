@@ -79,6 +79,14 @@ END $$;
 --
 -- Model names carry a colon (qwen3.5:9b), which is awkward in a client model
 -- string, so each gets a colon-free alias.
+--
+-- The last entry is the lingarr failover alias: aya-expanse:8b ALSO answers as
+-- or-minimax-m3:free, the same alias the openrouter provider below serves. The
+-- openrouter entry carries priority 10, this provider stays at the default 0,
+-- and credential selection only considers the highest healthy priority tier -
+-- so minimax serves the alias until an openrouter cooldown (its 429 daily cap),
+-- then aya takes over until the cooldown lifts. This deliberate cross-provider
+-- alias collision is the failover, not a naming accident.
 DO $$
 DECLARE
   c text;
@@ -118,6 +126,9 @@ openai-compatibility:
       - name: "aya-expanse:8b"
         alias: "ollama-aya-expanse-8b"
         display-name: "Aya Expanse 8B (Ollama)"
+      - name: "aya-expanse:8b"
+        alias: "or-minimax-m3:free"
+        display-name: "Aya Expanse 8B (Ollama, lingarr failover)"
 $ollama$,
          updated_at = now()
    WHERE id = 'config';
@@ -150,6 +161,18 @@ END $$;
 -- for capacity already paid for. Every alias carries an `or-` prefix, the same
 -- convention the ollama entries use, so an OpenRouter model can never collide
 -- with a native account's model ID no matter what OpenRouter renames upstream.
+--
+-- minimax-m3:free exists because lingarr (08.servarr) pins it as its only
+-- translation model via reconcile-ai-provider.sql. It rides OpenRouter's shared
+-- free-tier daily cap, so 429 bursts through this alias are expected, not an
+-- outage. The entry was first added through the management UI and is now
+-- git-owned here; the UI copy carried a wrong display-name until reconciled.
+-- Its alias is the one deliberate exception to colon-free naming: the :free
+-- suffix mirrors OpenRouter's own slug and the entry has served under it.
+-- priority 10 keeps this provider the preferred credential for the alias; the
+-- ollama provider serves the same alias at the default priority 0 as lingarr's
+-- failover target, and the selector only ever mixes tiers when the higher one
+-- is cooling down.
 --
 -- Unlike the ollama api-key above, this one IS a secret. It arrives as
 -- OPENROUTER_API_KEY on the initContainer from cliproxy-secrets, and is read
@@ -246,6 +269,7 @@ BEGIN
   END IF;
 
   entry := replace($openrouter$  - name: "openrouter"
+    priority: 10
     base-url: "https://openrouter.ai/api/v1"
     api-key-entries:
       - api-key: "__OPENROUTER_API_KEY__"
@@ -273,7 +297,10 @@ BEGIN
         display-name: "Qwen3.8 27B (OpenRouter)"
       - name: "minimax/minimax-m3"
         alias: "or-minimax-m3"
-        display-name: "MiniMax M3 (OpenRouter)"$openrouter$, '__OPENROUTER_API_KEY__', k);
+        display-name: "MiniMax M3 (OpenRouter)"
+      - name: "minimax/minimax-m3:free"
+        alias: "or-minimax-m3:free"
+        display-name: "MiniMax M3 Free (OpenRouter)"$openrouter$, '__OPENROUTER_API_KEY__', k);
 
   c := regexp_replace(c,
                       '^openai-compatibility:[ \t]*$',
@@ -458,7 +485,8 @@ END $$;
 -- Prove it, and fail the initContainer if either value is not what git wants.
 DO $$
 DECLARE
-  c text;
+  c   text;
+  n   integer;
 BEGIN
   -- First boot: the proxy has not seeded the table yet. Without this the block
   -- raises undefined_table and CrashLoops the initContainer on an empty
@@ -500,6 +528,22 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM regexp_matches(c, '^        alias: "or-glm-5.3-flash"[ \t]*$', 'n')) THEN
     RAISE EXCEPTION 'openai-compatibility: openrouter model list did not survive the splice';
+  END IF;
+  -- lingarr's pinned translation model; its absence would not fail the proxy
+  -- itself, which is exactly why it gets its own line here. EXACTLY TWO
+  -- providers must serve the alias: openrouter (priority 10) as primary, the
+  -- ollama provider as cooldown fallback. Counting matches instead of
+  -- anchoring a display-name keeps this immune to cosmetic UI renames.
+  SELECT count(*) INTO n
+    FROM regexp_matches(c, '^        alias: "or-minimax-m3:free"[ \t]*$', 'gn');
+  IF n <> 2 THEN
+    RAISE EXCEPTION 'openai-compatibility: or-minimax-m3:free must be served by exactly two providers (openrouter + ollama failover), found %', n;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM regexp_matches(c, '^      - name: "minimax/minimax-m3:free"[ \t]*$', 'n')) THEN
+    RAISE EXCEPTION 'openai-compatibility: the openrouter minimax-m3:free model is missing';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM regexp_matches(c, '^    priority: 10[ \t]*$', 'n')) THEN
+    RAISE EXCEPTION 'openai-compatibility: the openrouter provider lost its priority: 10 failover marking';
   END IF;
   -- An empty api-key would list models and 401 on every call. Catch it here
   -- too, not just at write time, in case a later edit blanks it.
