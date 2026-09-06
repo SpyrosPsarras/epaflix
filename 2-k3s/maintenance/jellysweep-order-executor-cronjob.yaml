@@ -1,0 +1,90 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jellysweep-order-executor-sql
+  namespace: servarr
+data:
+  exec.sql: |
+    -- Fast-track admin-ordered deletions (delete button sets unkeepable=true)
+    -- so the next jellysweep cleanup run picks them up today. Only pulls
+    -- dates earlier, never later. Filtered items without an admin order keep
+    -- their far-future cleanup_delay date and are never touched.
+    WITH ordered AS (
+        UPDATE media
+        SET default_delete_at = NOW(),
+            updated_at        = NOW()
+        WHERE unkeepable = TRUE
+          AND deleted_at IS NULL
+          AND default_delete_at > NOW()
+        RETURNING id, title, library_name
+    )
+    SELECT COUNT(*) AS fast_tracked,
+           COALESCE(string_agg(title || ' [' || library_name || ']', ' | ' ORDER BY id), 'none') AS titles
+    FROM ordered;
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: jellysweep-order-executor
+  namespace: servarr
+  labels:
+    app: jellysweep-order-executor
+spec:
+  # 30 min before the jellysweep cleanup job (04:00 UTC), so an admin delete
+  # press executes the next morning. UTC.
+  schedule: "30 3 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 6
+  failedJobsHistoryLimit: 6
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 600
+      backoffLimit: 2
+      ttlSecondsAfterFinished: 2592000  # keep 30 days
+      template:
+        metadata:
+          labels:
+            app: jellysweep-order-executor
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: executor
+              image: postgres:16-alpine
+              imagePullPolicy: IfNotPresent
+              command: ["/bin/sh", "-eu", "-c"]
+              args:
+                - |
+                  echo "=== Jellysweep order executor @ $(date -u +%FT%TZ) ==="
+                  PGHOST=$(cat /secrets/jellysweep-host)
+                  PGPORT=$(cat /secrets/jellysweep-port)
+                  PGDATABASE=$(cat /secrets/jellysweep-database)
+                  PGUSER=$(cat /secrets/jellysweep-user)
+                  PGPASSWORD=$(cat /secrets/jellysweep-password)
+                  export PGHOST PGPORT PGDATABASE PGUSER PGPASSWORD
+                  psql -v ON_ERROR_STOP=1 -f /sql/exec.sql
+                  echo "=== Done @ $(date -u +%FT%TZ) ==="
+              volumeMounts:
+                - name: secrets
+                  mountPath: /secrets
+                  readOnly: true
+                - name: sql
+                  mountPath: /sql
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "500m"
+                  memory: "256Mi"
+          volumes:
+            - name: secrets
+              secret:
+                secretName: servarr-postgres
+                defaultMode: 0400
+            - name: sql
+              configMap:
+                name: jellysweep-order-executor-sql
+                defaultMode: 0444
