@@ -16,6 +16,7 @@ resources:
   - lingarr-drain-watch-cronjob.yaml
   - radarr-missing-search-cronjob.yaml
   - sonarr-alias-search-cronjob.yaml
+  - helm-manager-drift-cronjob.yaml
 
 configMapGenerator:
   - name: cleanuparr-blocklist-expected
