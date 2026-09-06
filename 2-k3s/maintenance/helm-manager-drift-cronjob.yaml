@@ -1,0 +1,683 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: helm-manager-drift-script
+  namespace: servarr
+data:
+  drift.py: |
+    #!/usr/bin/env python3
+    """Stale helm field-manager drift sweep (#779). Python stdlib only.
+
+    An app adopted into ArgoCD after a `helm install` keeps a `helm` field
+    manager in its objects' managedFields. Under ServerSideApply, dropping a
+    field from git releases only argocd-controller's ownership, the helm
+    entry keeps the value live, and ArgoCD reports Synced because it diffs
+    against the predicted merge result, which also keeps the field.
+
+    Per helm-owned field that argocd-controller does not own, the sweep
+    decides:
+
+    DEAD      data/binaryData key argocd also does not apply via stringData.
+              Git dropped it, the cluster still serves the helm value. Loud.
+    SUSPECT   spec field that is not a known server default. Loud.
+    DEFAULT   spec field whose name is a server default (value unchecked).
+    CONVERTED Secret data key argocd applies via stringData - the API server
+              rewrites stringData into data on every apply, so the value
+              tracks git even though helm still owns the data path.
+    LATENT    co-owned by helm and argocd. Converges today; drifts silently
+              the next time git drops it.
+
+    ARMED=false (default) reports only and prints the kubectl patch that
+    removes each loud field. ARMED=true applies the same JSON patches via
+    the API server. A workload patch may roll out pods. List elements,
+    whole maps/lists and gone keys are refused and reported for manual
+    handling. The DEFAULT/CONVERTED/LATENT buckets are never patched: a
+    removed server default is instantly re-defaulted under a new owner.
+
+    Loud findings exit 1 so the CronJob failure is visible.
+
+    Run with --selftest to exercise the ownership math against synthetic
+    managedFields without touching the cluster. Outside the cluster, set
+    K8S_API (e.g. kubectl proxy --port=18001) to point the script at an API.
+    """
+    import json
+    import os
+    import ssl
+    import sys
+    import time
+    import urllib.error
+    import urllib.request
+
+    ARMED = os.environ.get("ARMED", "false").strip().lower() == "true"
+    K8S_API = os.environ.get("K8S_API", "").rstrip("/")
+    K8S_TOKEN = os.environ.get("K8S_TOKEN", "")
+    SA = "/var/run/secrets/kubernetes.io/serviceaccount"
+    BASE = K8S_API or "https://%s:%s" % (
+        os.environ.get("KUBERNETES_SERVICE_HOST", "kubernetes.default"),
+        os.environ.get("KUBERNETES_SERVICE_PORT", "443"))
+
+    KINDS = [
+        ("/api/v1", "secrets", "Secret"),
+        ("/api/v1", "configmaps", "ConfigMap"),
+        ("/apis/apps/v1", "deployments", "Deployment"),
+        ("/apis/apps/v1", "statefulsets", "StatefulSet"),
+        ("/apis/apps/v1", "daemonsets", "DaemonSet"),
+        ("/apis/batch/v1", "jobs", "Job"),
+        ("/apis/batch/v1", "cronjobs", "CronJob"),
+    ]
+    PREFIX = {kind: prefix for prefix, _, kind in KINDS}
+    PLURAL = {kind: plural for _, plural, kind in KINDS}
+    DATA_KINDS = {"Secret", "ConfigMap"}
+    SPEC_DEFAULTS = {
+        "dnsPolicy", "restartPolicy", "schedulerName", "serviceAccount",
+        "terminationMessagePath", "terminationMessagePolicy",
+        "terminationGracePeriodSeconds", "successThreshold",
+        "failureThreshold", "periodSeconds", "timeoutSeconds",
+        "initialDelaySeconds", "scheme", "protocol", "defaultMode",
+        "progressDeadlineSeconds", "revisionHistoryLimit", "imagePullPolicy",
+        "enableServiceLinks", "type", "whenDeleted", "whenScaled",
+        "rollingUpdate", "persistentVolumeClaimRetentionPolicy", "resources",
+        "strategy", "updateStrategy", "maxSurge", "maxUnavailable",
+        "podManagementPolicy", "partition", "metadata", "annotations",
+        "labels",
+    }
+
+
+    def fail(msg):
+        """Abort LOUD. Never let a failed read look like 'no drift'."""
+        print("ERROR: " + msg, file=sys.stderr)
+        sys.exit(2)
+
+
+    def http(method, path, patch=None):
+        req = urllib.request.Request(BASE + path, method=method)
+        if K8S_API:
+            ctx = None
+            if K8S_TOKEN:
+                req.add_header("Authorization", "Bearer " + K8S_TOKEN)
+        else:
+            try:
+                token = open(SA + "/token").read().strip()
+            except OSError:
+                fail("in-cluster service account token unreadable")
+            req.add_header("Authorization", "Bearer " + token)
+            ctx = ssl.create_default_context(cafile=SA + "/ca.crt")
+        if patch is not None:
+            req.add_header("Content-Type", "application/json-patch+json")
+            req.data = json.dumps(patch).encode()
+        try:
+            with urllib.request.urlopen(req, timeout=60, context=ctx) as resp:
+                return json.load(resp)
+        except urllib.error.HTTPError as exc:
+            fail("%s %s -> http %d" % (method, BASE + path, exc.code))
+        except Exception as exc:
+            fail("%s %s failed (%s)" % (method, BASE + path,
+                                        type(exc).__name__))
+
+
+    def join(path, name):
+        return path + "." + name if path else name
+
+
+    def flatten(node, path, ptr, manual, out):
+        """managedFields fieldsV1 tree -> [(display, ptr, manual), ...].
+
+        f: map fields, k: map-key list entries, v: value list entries,
+        "." marks ownership of the map itself. Every node in the tree is an
+        owned path, intermediates and leaves alike. Everything under k:/v:
+        lives in a list, so it is flagged manual: a JSON pointer cannot
+        address a list element by name and index-based removal is blind.
+        """
+        for key, val in (node or {}).items():
+            if key == ".":
+                out.append((path or "<whole-object>", list(ptr), path == ""))
+            elif key.startswith("f:"):
+                name = key[2:]
+                out.append((join(path, name), ptr + [name], manual))
+                flatten(val, join(path, name), ptr + [name], manual, out)
+            elif key.startswith("k:") or key.startswith("v:"):
+                shown = path + "[" + key[2:] + "]"
+                out.append((shown, ptr + [key[2:]], True))
+                flatten(val, shown, ptr + [key[2:]], True, out)
+
+
+    def paths_of(fieldsV1):
+        raw = []
+        flatten(fieldsV1, "", [], False, raw)
+        seen, out = set(), []
+        for disp, ptr, manual in raw:
+            key = tuple(ptr)
+            if key not in seen:
+                seen.add(key)
+                out.append((disp, ptr, manual))
+        return out
+
+
+    def owned(managed, name):
+        out = []
+        for entry in managed or []:
+            if entry.get("subresource"):
+                continue
+            if entry.get("manager") == name:
+                out.extend(paths_of(entry.get("fieldsV1")))
+        return out
+
+
+    def scoped(display, roots):
+        return any(display == r or display.startswith(r + ".")
+                   for r in roots)
+
+
+    def leaf_of(display):
+        last = display.rsplit(".", 1)[-1]
+        return "" if last.endswith("]") else last
+
+
+    def live_at(item, ptr):
+        node = item
+        for seg in ptr:
+            node = node.get(seg) if isinstance(node, dict) else None
+            if node is None:
+                return None
+        return node
+
+
+    def _empty_at(item, ptr):
+        """True if the live value is gone or an empty map/list - nothing is
+        there to hold a stale value, so the helm-only claim is inert."""
+        val = live_at(item, ptr)
+        if val is None:
+            return True
+        return isinstance(val, (dict, list)) and not val
+
+
+    def managers_line(managed):
+        counts = {}
+        for entry in managed or []:
+            if entry.get("subresource"):
+                continue
+            label = "%s/%s" % (entry.get("manager", "?"),
+                               entry.get("operation", "?"))
+            counts[label] = counts.get(label, 0) + len(
+                paths_of(entry.get("fieldsV1")))
+        return " ".join("%s(%d)" % kv for kv in sorted(counts.items())) \
+            or "no field managers"
+
+
+    def classify(item, kind):
+        """None if helm is not a manager; else the drift shape of one object."""
+        managed = (item.get("metadata") or {}).get("managedFields") or []
+        names = {e.get("manager") for e in managed}
+        if "helm" not in names:
+            return None
+        roots = ("data", "binaryData") if kind in DATA_KINDS else ("spec",)
+        helm = owned(managed, "helm")
+        argo = {tuple(p) for _, p, _ in owned(managed, "argocd-controller")}
+        dead, suspect, default, converted, latent, outside = \
+            [], [], [], [], [], []
+        for display, ptr, manual in helm:
+            if not scoped(display, roots):
+                outside.append(display)
+            elif tuple(ptr) in argo:
+                latent.append(display)
+            elif kind == "Secret" and \
+                    (display == "data" or display.startswith("data.")) and \
+                    tuple(["stringData"] + ptr[1:]) in argo:
+                converted.append(display)
+            elif not manual and _empty_at(item, ptr):
+                default.append(display)
+            elif kind not in DATA_KINDS and \
+                    leaf_of(display) in SPEC_DEFAULTS:
+                default.append(display)
+            elif kind in DATA_KINDS:
+                dead.append((display, ptr, manual))
+            else:
+                suspect.append((display, ptr, manual))
+        return {
+            "item": item,
+            "name": (item.get("metadata") or {}).get("name", "?"),
+            "namespace": (item.get("metadata") or {}).get("namespace", ""),
+            "managed": managed,
+            "helm_only": "argocd-controller" not in names,
+            "dead": dead,
+            "suspect": suspect,
+            "default": default,
+            "converted": converted,
+            "latent": latent,
+            "outside": outside,
+        }
+
+
+    def esc(seg):
+        return seg.replace("~", "~0").replace("/", "~1")
+
+
+    def build_patch(item, fields):
+        """JSON-patch ops removing the given fields, plus refusals.
+
+        Refuses anything that would remove more than one scalar: list
+        elements (manual), whole maps or lists as the live target, and keys
+        gone from the live object. Those stay for manual handling.
+        """
+        ops, skipped = [], []
+        for display, ptr, manual in fields:
+            node = live_at(item, ptr[:-1])
+            if manual or not isinstance(node, dict) or ptr[-1] not in node \
+                    or isinstance(node[ptr[-1]], (dict, list)):
+                skipped.append(display)
+                continue
+            ops.append({"op": "remove",
+                        "path": "/" + "/".join(esc(s) for s in ptr)})
+        return ops, skipped
+
+
+    def selftest():
+        def secret(keys_helm, keys_argo, argo_string=()):
+            argo_fv = {}
+            if keys_argo:
+                argo_fv["f:data"] = {".": {},
+                                     **{"f:" + k: {} for k in keys_argo}}
+            if argo_string:
+                argo_fv["f:stringData"] = {".": {},
+                                           **{"f:" + k: {}
+                                              for k in argo_string}}
+            mf = [
+                {"manager": "argocd-controller", "operation": "Apply",
+                 "fieldsV1": argo_fv},
+                {"manager": "helm", "operation": "Update",
+                 "fieldsV1": {"f:data": {".": {},
+                             **{"f:" + k: {} for k in keys_helm}}}},
+            ]
+            return {"metadata": {"name": "s", "namespace": "ns",
+                                 "managedFields": mf},
+                    "data": {k: "dmFsdWU=" for k in keys_helm | keys_argo}}
+
+        kept = {"A%d" % i for i in range(17)}
+        dropped = {"AUTHENTIK_EMAIL__HOST", "AUTHENTIK_EMAIL__USERNAME",
+                   "AUTHENTIK_EMAIL__FROM"}
+        item = secret(kept | dropped, kept)
+        f = classify(item, "Secret")
+        assert f is not None and not f["helm_only"]
+        assert {d[0] for d in f["dead"]} == {"data." + k for k in dropped}
+        assert f["converted"] == [] and f["suspect"] == []
+        assert set(f["latent"]) == {"data"} | {"data." + k for k in kept}
+        assert f["outside"] == []
+        ops, skipped = build_patch(item, f["dead"])
+        assert len(ops) == 3 and skipped == []
+        assert all(o["op"] == "remove" and
+                   o["path"].startswith("/data/AUTHENTIK_EMAIL__")
+                   for o in ops)
+
+        item = secret(kept, kept)
+        f = classify(item, "Secret")
+        assert f["dead"] == [] and f["latent"]
+
+        f = classify(secret(kept | dropped, kept), "ConfigMap")
+        assert {d[0] for d in f["dead"]} == {"data." + k for k in dropped}
+
+        item = secret({"promtail.yaml"}, set(), ("promtail.yaml",))
+        f = classify(item, "Secret")
+        assert f["dead"] == [] and set(f["converted"]) == \
+            {"data", "data.promtail.yaml"}
+
+        f = classify(secret({"token"}, set(), ("other",)), "Secret")
+        assert {d[0] for d in f["dead"]} == {"data.token"} and \
+            f["converted"] == ["data"]
+
+        f = classify({"metadata": {"name": "x", "namespace": "ns",
+                                   "managedFields": [
+                                       {"manager": "argocd-controller",
+                                        "operation": "Apply",
+                                        "fieldsV1": {"f:data": {"f:k": {}}}},
+                                       {"manager": "helm",
+                                        "operation": "Update",
+                                        "fieldsV1": {"f:binaryData": {
+                                            "f:blob": {}}}}]},
+                     "binaryData": {"blob": "eA=="}, "data": {"k": "eA=="}},
+                     "Secret")
+        assert {d[0] for d in f["dead"]} == {"binaryData",
+                                             "binaryData.blob"}
+
+        item = secret({"type", "labels", "k1"}, set())
+        f = classify(item, "Secret")
+        assert {d[0] for d in f["dead"]} == {"data", "data.type",
+                                             "data.labels", "data.k1"}
+        assert f["default"] == []
+
+        f = classify({"metadata": {"name": "x", "namespace": "ns",
+                                   "managedFields": [
+                                       {"manager": "argocd-controller",
+                                        "operation": "Apply",
+                                        "fieldsV1": {"f:data": {"f:k": {}}}}]}},
+                     "Secret")
+        assert f is None
+
+        mf = [
+            {"manager": "argocd-controller", "operation": "Apply",
+             "fieldsV1": {"f:spec": {"f:template": {"f:spec": {
+                 "f:containers": {"k:{\"name\":\"app\"}": {
+                     "f:image": {}, "f:name": {}}}}}}}},
+            {"manager": "helm", "operation": "Update",
+             "fieldsV1": {"f:spec": {"f:template": {
+                 "f:metadata": {"f:annotations": {
+                     "f:checksum/config": {}}},
+                 "f:spec": {"f:restartPolicy": {},
+                            "f:minReadySeconds": {},
+                            "f:containers": {"k:{\"name\":\"app\"}": {
+                                "f:image": {}}}}}}}},
+        ]
+        item = {"metadata": {"name": "d", "namespace": "ns",
+                             "managedFields": mf},
+                "spec": {"template": {
+                    "metadata": {"annotations": {"checksum/config": "x"}},
+                    "spec": {"restartPolicy": "Always",
+                             "minReadySeconds": 5,
+                             "containers": [{"name": "app",
+                                             "image": "i"}]}}}}
+        f = classify(item, "Deployment")
+        assert [d[0] for d in f["dead"]] == []
+        assert {d[0] for d in f["suspect"]} == {
+            "spec.template.metadata.annotations.checksum/config",
+            "spec.template.spec.minReadySeconds"}
+        assert set(f["default"]) == {"spec.template.metadata",
+                                     "spec.template.metadata.annotations",
+                                     "spec.template.spec.restartPolicy"}
+        assert set(f["latent"]) == {
+            "spec", "spec.template", "spec.template.spec",
+            "spec.template.spec.containers",
+            "spec.template.spec.containers[{\"name\":\"app\"}]",
+            "spec.template.spec.containers[{\"name\":\"app\"}].image"}
+        ops, skipped = build_patch(item, f["suspect"])
+        assert ops == [
+            {"op": "remove", "path": "/spec/template/metadata/annotations/"
+                                     "checksum~1config"},
+            {"op": "remove", "path": "/spec/template/spec/minReadySeconds"}]
+        assert skipped == []
+
+        whole = {"metadata": {"name": "d", "namespace": "ns",
+                              "managedFields": [
+                                  {"manager": "argocd-controller",
+                                   "operation": "Apply",
+                                   "fieldsV1": {"f:spec": {}}},
+                                  {"manager": "helm", "operation": "Update",
+                                   "fieldsV1": {"f:spec": {
+                                       "f:template": {}}}}]},
+               "spec": {"template": {}}}
+        f = classify(whole, "Deployment")
+        assert f["suspect"] == [] and \
+            f["default"] == ["spec.template"]
+
+        def helm_map(live_sec):
+            return {"metadata": {"name": "d", "namespace": "ns",
+                                 "managedFields": [
+                                     {"manager": "argocd-controller",
+                                      "operation": "Apply",
+                                      "fieldsV1": {"f:spec": {
+                                          "f:template": {"f:spec": {}}}}},
+                                     {"manager": "helm",
+                                      "operation": "Update",
+                                      "fieldsV1": {"f:spec": {
+                                          "f:template": {"f:spec": {
+                                              "f:securityContext": {}}}}}}]},
+                    "spec": {"template": {"spec": {
+                        "securityContext": live_sec}}}}
+
+        f = classify(helm_map({"runAsUser": 1000}), "Deployment")
+        assert [d[0] for d in f["suspect"]] == \
+            ["spec.template.spec.securityContext"]
+        ops, skipped = build_patch(helm_map({"runAsUser": 1000}),
+                                   f["suspect"])
+        assert ops == [] and \
+            skipped == ["spec.template.spec.securityContext"]
+
+        f = classify(helm_map({}), "Deployment")
+        assert f["suspect"] == [] and f["default"] == \
+            ["spec.template.spec.securityContext"]
+
+        atom = {"metadata": {"name": "d", "namespace": "ns",
+                             "managedFields": [
+                                 {"manager": "argocd-controller",
+                                  "operation": "Apply",
+                                  "fieldsV1": {"f:spec": {}}},
+                                 {"manager": "helm", "operation": "Update",
+                                  "fieldsV1": {"f:spec": {
+                                      "f:containers": {}}}}]},
+               "spec": {"containers": [{"name": "app"}]}}
+        f = classify(atom, "Deployment")
+        ops, skipped = build_patch(atom, f["suspect"])
+        assert ops == [] and skipped == ["spec.containers"]
+
+        f = classify({"metadata": {"name": "d", "namespace": "ns",
+                                   "managedFields": [
+                                       {"manager": "helm",
+                                        "operation": "Update",
+                                        "fieldsV1": {"f:data": {
+                                            "f:a~b/c": {}}}},
+                                       {"manager": "argocd-controller",
+                                        "operation": "Apply",
+                                        "fieldsV1": {}}]},
+                     "data": {"a~b/c": "x"}}, "Secret")
+        ops, skipped = build_patch(
+            {"data": {"a~b/c": "x"}}, f["dead"])
+        assert ops == [{"op": "remove", "path": "/data/a~0b~1c"}]
+        assert skipped == ["data"]
+
+        gone = classify({"metadata": {"name": "d", "namespace": "ns",
+                                      "managedFields": [
+                                          {"manager": "helm",
+                                           "operation": "Update",
+                                           "fieldsV1": {"f:data": {
+                                               "f:gone": {}}}},
+                                          {"manager": "argocd-controller",
+                                           "operation": "Apply",
+                                           "fieldsV1": {}}]}},
+                        "Secret")
+        assert gone["dead"] == [] and \
+            set(gone["default"]) == {"data", "data.gone"}
+
+        print("selftest OK")
+        return 0
+
+
+    def main():
+        if "--selftest" in sys.argv:
+            return selftest()
+
+        print("=== helm field-manager drift sweep @ %s ==="
+              % time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+        print("api: %s | mode: %s"
+              % (BASE, "ARMED (will remove dead/suspect fields)"
+                 if ARMED else "DISARMED (report only)"))
+
+        findings, scanned, helm_only = [], {}, 0
+        for prefix, plural, kind in KINDS:
+            doc = http("GET", "%s/%s" % (prefix, plural))
+            items = doc.get("items")
+            if not isinstance(items, list):
+                fail("%s list has no items array" % kind)
+            scanned[kind] = len(items)
+            for item in items:
+                f = classify(item, kind)
+                if f is None:
+                    continue
+                if f["helm_only"]:
+                    helm_only += 1
+                    continue
+                findings.append((kind, f))
+
+        print("scanned: %s | helm+argocd objects: %d | helm-only objects "
+              "(not adopted, skipped): %d"
+              % (", ".join("%s=%d" % kv for kv in scanned.items()),
+                 len(findings), helm_only))
+
+        exit_code, removed, manual = 0, 0, 0
+        for kind, f in sorted(findings, key=lambda x: (
+                x[1]["namespace"], x[1]["name"])):
+            loud = f["dead"] or f["suspect"]
+            print("\nFLAG %s/%s/%s" % (f["namespace"], kind, f["name"]))
+            print("  managers: %s" % managers_line(f["managed"]))
+            if f["outside"]:
+                print("  helm-only metadata (not data/spec, informational): "
+                      "%s" % ", ".join(sorted(f["outside"])))
+            for display in sorted(f["converted"]):
+                print("  CONVERTED %s (chart applies stringData, the API "
+                      "server rewrites data - value tracks git)" % display)
+            for display in sorted(f["default"]):
+                print("  DEFAULT %s (name is a server default, value "
+                      "unchecked, no action)" % display)
+            if not loud:
+                print("  OK: 0 dead, 0 suspect | latent co-owned (%d): %s"
+                      % (len(f["latent"]), ", ".join(sorted(f["latent"]))
+                         or "-"))
+                continue
+            for display, _, _ in f["dead"]:
+                print("  DEAD %s (git dropped it, helm keeps the value live)"
+                      % display)
+            for display, _, _ in f["suspect"]:
+                print("  SUSPECT %s (helm-only spec field, not a server "
+                      "default - verify against the git render)" % display)
+            if f["latent"]:
+                print("  LATENT co-owned (%d): %s"
+                      % (len(f["latent"]), ", ".join(sorted(f["latent"]))))
+            ops, skipped = build_patch(f["item"], f["dead"] + f["suspect"])
+            manual += len(skipped)
+            if not ARMED:
+                if ops:
+                    print("  kubectl -n %s patch %s %s --type=json -p '%s'"
+                          % (f["namespace"], PLURAL[kind], f["name"],
+                             json.dumps(ops, separators=(",", ":"))))
+                for s in skipped:
+                    print("  MANUAL %s (list element / whole map / gone)"
+                          % s)
+            else:
+                for s in skipped:
+                    print("  SKIPPED (manual): %s" % s)
+                if ops:
+                    http("PATCH", "%s/namespaces/%s/%s/%s" % (
+                        PREFIX[kind], f["namespace"], PLURAL[kind],
+                        f["name"]), patch=ops)
+                    removed += len(ops)
+                    print("  PATCHED: removed %d field(s)%s"
+                          % (len(ops),
+                             " - a workload patch may roll out pods"
+                             if kind not in DATA_KINDS else ""))
+            exit_code = 1
+
+        loud_total = sum(len(f["dead"]) + len(f["suspect"])
+                         for _, f in findings)
+        print("\n%d object(s) flagged, %d loud field(s) (dead+suspect), "
+              "%d removed, %d manual"
+              % (len(findings), loud_total, removed, manual))
+        if not findings:
+            print("OK: no object carries a stale helm field manager alongside "
+                  "argocd-controller.")
+        elif not loud_total:
+            print("OK: no dead or suspect fields. Remaining flags are "
+                  "server defaults, stringData conversions and latent "
+                  "co-ownership.")
+        elif ARMED and not manual:
+            print("ARMED: converged. Expect a clean run on the next schedule.")
+        elif ARMED:
+            print("ARMED: manual findings remain - handle them with kubectl "
+                  "patch, then rerun.")
+        else:
+            print("DISARMED - nothing was changed. Verify the loud fields "
+                  "against the git render, apply the kubectl patches above, "
+                  "or set ARMED=\"true\" on the helm-manager-drift CronJob "
+                  "in git and let ArgoCD sync it.")
+        return exit_code
+
+
+    if __name__ == "__main__":
+        sys.exit(main())
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: helm-manager-drift
+  namespace: servarr
+  labels:
+    app: helm-manager-drift
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: helm-manager-drift
+  labels:
+    app: helm-manager-drift
+rules:
+  - apiGroups: [""]
+    resources: ["secrets", "configmaps"]
+    verbs: ["get", "list", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "patch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: helm-manager-drift
+  labels:
+    app: helm-manager-drift
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: helm-manager-drift
+subjects:
+  - kind: ServiceAccount
+    name: helm-manager-drift
+    namespace: servarr
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: helm-manager-drift
+  namespace: servarr
+  labels:
+    app: helm-manager-drift
+spec:
+  schedule: "20 6 * * 3"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 6
+  failedJobsHistoryLimit: 6
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 300
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 2592000  # keep 30 days
+      template:
+        metadata:
+          labels:
+            app: helm-manager-drift
+        spec:
+          restartPolicy: Never
+          serviceAccountName: helm-manager-drift
+          containers:
+            - name: drift-sweep
+              image: python:3.13-alpine
+              imagePullPolicy: IfNotPresent
+              command: ["python3", "/script/drift.py"]
+              env:
+                - name: ARMED
+                  value: "false"
+              volumeMounts:
+                - name: script
+                  mountPath: /script
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "500m"
+                  memory: "256Mi"
+          volumes:
+            - name: script
+              configMap:
+                name: helm-manager-drift-script
+                defaultMode: 0444
