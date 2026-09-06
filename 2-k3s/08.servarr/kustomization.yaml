@@ -85,7 +85,7 @@ images:
   - name: lscr.io/linuxserver/bazarr
     digest: sha256:a20fb11a440d704a9d61c283aa26462aad33dc63223b173f8d8c77d33e8e9d59
   - name: ghcr.io/lingarr-translate/lingarr
-    newTag: main@sha256:f553814d2ded254b65f642337a18999cf644d671618dc958f09020937139a490
+    newTag: main@sha256:c20a50283a3bf67cea84fc661aec5f5721ee248ceea1504da4f5c47880ee3e65
   - name: iampuid0/neutarr
     newTag: 1.11.1@sha256:c3df05a854c93aac640708e002e8fe85193f73da8406c8a230a5484a342a1107
   - name: qbittorrentofficial/qbittorrent-nox
