@@ -319,6 +319,17 @@ data:
         every answer must have been a failure (no unexplained left). A partial
         answer is not an answer: `queryable < live` means at least one live
         torrent had no hash to look up, and that *arr stays suspect.
+
+        What a True answer licenses is wider than what was checked. The
+        lookups cover only torrents live inside ACTIVE_WITHIN_HOURS, but the
+        caller drops this *arr from the suspect list entirely and trusts its
+        zero-row read while classifying EVERY torrent in its categories,
+        stale ones included. Neither failure mode seen so far is partial: the
+        stale-cache read (#631) hid the whole queue, and a Failed download is
+        absent by design (#834). A read that dropped rows for a subset would
+        pass here and misclassify its victims as orphans, which is only
+        lethal once the reaper is armed - re-ask this before arming again
+        (#1029).
         """
         return not unexplained and queryable == live
 
