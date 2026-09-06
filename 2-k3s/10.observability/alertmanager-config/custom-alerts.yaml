@@ -645,3 +645,50 @@ spec:
               under pressure, which is the condition the driver hit NV_ERR_NO_MEMORY under on
               2026-08-09. Find what is asking for the memory (ollama model load, a large
               transcode) and check nvidia-smi still sees the card.
+
+    - name: truenas-pool-capacity
+      interval: 60s
+      rules:
+        - alert: TruenasPool1FreeLow
+          expr: node_filesystem_avail_bytes{job="truenas-node-exporter", device="pool1", fstype="zfs"} < 1099511627776  # 1 TiB
+          for: 1h
+          labels:
+            severity: warning
+            component: truenas-storage
+          annotations:
+            summary: "pool1 free space is under 1 TiB (~92% used)"
+            description: >-
+              The pool1 root dataset's node_filesystem_avail_bytes has been under 1 TiB for an
+              hour. That metric is the POOL-WIDE free space, not the root dataset's own: every
+              pool1 dataset reports the same value because none of them is quota-bound for
+              statfs purposes (verified against all 8 pool1 datasets, 2026-09-05). It is statfs
+              avail, so it reads lower than `zpool list free` by the ZFS slop reservation
+              (~3% of the pool, ~0.7 TiB here). Never build a used% from
+              node_filesystem_size_bytes on pool1: the root dataset is quota-bounded, so its
+              size label is 2.25 TiB against a 21.8 TiB pool - take used% from
+              `zpool list` or 0-truenas/scripts/pool-capacity-forecast.py. pool1 has sat near
+              88% since August 2026; with no disk budget until ~2027-02 the headroom plan is
+              the media deletion service (owner decision in #805, 2026-08-21), and the weekly
+              growth measurement and runway forecast live in
+              0-truenas/scripts/pool-capacity-forecast.py (#805). This alert is the floor
+              between the weekly runs: check what grew (`zfs list -o space -r pool1` sorted by
+              used) before deleting anything, and remember dapc-backup is a permanent keep
+              (#807).
+
+        - alert: TruenasPool1FreeCritical
+          expr: node_filesystem_avail_bytes{job="truenas-node-exporter", device="pool1", fstype="zfs"} < 429496729600  # 400 GiB
+          for: 30m
+          labels:
+            severity: critical
+            component: truenas-storage
+          annotations:
+            summary: "pool1 free space is under 400 GiB (~95% used) - the ZFS floor"
+            description: >-
+              Pool-wide free space on pool1 (same metric semantics and size-label caveat as
+              TruenasPool1FreeLow) has been under 400 GiB for 30 minutes. 95% used is the
+              practical ZFS floor: CoW has no room to write, fragmentation climbs and writes
+              start failing before the pool reads as technically full. This is the "stops
+              being enough" date the #805 forecast tracks, arrived early. Reclaim space now
+              (the #609 download reclaim and #968 snapshot paths are the catalogued
+              candidates; dapc-backup is a permanent keep per #807) and treat every write to
+              pool1 as at-risk until free space is back above 1 TiB.
