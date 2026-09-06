@@ -91,6 +91,6 @@ images:
   - name: qbittorrentofficial/qbittorrent-nox
     digest: sha256:9ebb534fe30bab98622cb84a8c3acecfd88319b2d540f52ecdec7b9f866374d7
   - name: ghcr.io/spyrospsarras/airvpn-bluetit
-    digest: sha256:cf5ae9affe106e7e9c95c20a259694053d8943ce5681319f6aa467fb4500e76f
+    digest: sha256:debf573767d5471207a864ca60d6a3bb9fe27fa342c286b9ff49d620ec343bf4
   - name: ghcr.io/spyrospsarras/vpn-picker
     digest: sha256:271e8ed47ac1f2625205fabbe45c3d2dedb162b458c011af0a95163da42c6747
