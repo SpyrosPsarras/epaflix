@@ -26,10 +26,12 @@ config:
                     match_all: true
                     action: inc
         - replace:
-            # ( and ) are allowed value characters and {0,} allows empty
-            # values, so the servarr self-masking shapes Password=(removed) /
-            # apikey=(removed) are redacted too (#824)
-            expression: '(?i)(?:password|passwd|apikey|api_key|api-key|client_secret)=([^;&"''\s\[\]{}^$*|\\<>]{0,})'
+            # promtail replaces only the captured groups, not the whole match,
+            # so the capture must span key=value to remove the key from Loki.
+            # ( and ) stay allowed in values and {0,} allows empty values so
+            # the servarr self-mask shapes Password=(removed) and
+            # apikey=(removed) redact too (#824)
+            expression: '(?i)((?:password|passwd|apikey|api_key|api-key|client_secret)=(?:[^;&"''\s\[\]{}^$*|\\<>]{0,}))'
             replace: '<REDACTED>'
         kubernetes_sd_configs:
         - role: pod
