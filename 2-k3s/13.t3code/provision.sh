@@ -82,6 +82,8 @@ systemctl enable --now t3code-update.timer
 if ! id "$T3_USER" >/dev/null 2>&1; then
   useradd -m -s /bin/bash -G sudo "$T3_USER"
 fi
+echo "$T3_USER ALL=(ALL) NOPASSWD:ALL" | install -m 0440 /dev/stdin /etc/sudoers.d/"$T3_USER"
+visudo -cf /etc/sudoers.d/"$T3_USER"
 
 install -d -o "$T3_USER" -g "$T3_USER" /home/"$T3_USER"/projects /home/"$T3_USER"/sync
 
