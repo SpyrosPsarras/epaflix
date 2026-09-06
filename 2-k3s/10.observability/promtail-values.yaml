@@ -26,7 +26,10 @@ config:
                     match_all: true
                     action: inc
         - replace:
-            expression: '(?i)(?:password|passwd|apikey|api_key|api-key|client_secret)=([^;&"''\s\[\]{}^$*()|\\<>]{8,})'
+            # ( and ) are allowed value characters and {0,} allows empty
+            # values, so the servarr self-masking shapes Password=(removed) /
+            # apikey=(removed) are redacted too (#824)
+            expression: '(?i)(?:password|passwd|apikey|api_key|api-key|client_secret)=([^;&"''\s\[\]{}^$*|\\<>]{0,})'
             replace: '<REDACTED>'
         kubernetes_sd_configs:
         - role: pod
