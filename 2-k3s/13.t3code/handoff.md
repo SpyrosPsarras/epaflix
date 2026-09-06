@@ -52,7 +52,7 @@ Always-in-force per global AGENTS.md: `unslop` (all prose), `ponytail` (lazy-min
 - **B1** Create LXC on Proxmox + static IP (user runs the A2 artifact or clicks the Proxmox UI).
 - **B2** sops: decrypt `cliproxy-secrets` → extract client api-key into the guest env file; encrypt vault passphrase into the A6 secret. Requires Spyros' sops key.
 - **B3** On guest: `gh auth login` (device flow), `az login --use-device-code`, enable lingering + start `t3code.service`.
-- **B4** Syncthing: pair guest folder ↔ the PC holding the KDBX.
+- **B4** Syncthing: share the guest `secrets-vault` folder with the k3s Syncthing hub (2-k3s/15.syncthing, device H4I72HH, 192.168.10.101:22000), the same hub every other machine syncs through. Done 2026-09-06.
 - **B5** Client pairing from Spyros' PC over WireGuard: desktop app or `https://app.t3.codes` pair against `https://t3code.epaflix.com` with the one-time token from the server.
 - **B6** Optional (recommended): rotate the F0 PAT, move it into KeePassXC, update Zed settings.
 

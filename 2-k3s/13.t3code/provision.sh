@@ -10,14 +10,14 @@
 # Optional env:
 #   T3_USER              default: spyros
 #   CLIPROXY_BASE_URL    default: https://cliproxy.epaflix.com
-#   KEEPASS_KDBX         default: /home/<user>/sync/keepass.kdbx (B4 pairs the Syncthing folder)
+#   KEEPASS_KDBX         default: /home/spy/sync/Passwords.kdbx (B4 pairs the Syncthing folder there)
 # Runs from the guest's clone of the repo (/opt/epaflix): the same dir holds
 # versions.env, update.sh and files/keepass_mcp.py.
 set -euo pipefail
 
 T3_USER=${T3_USER:-spyros}
 CLIPROXY_BASE_URL=${CLIPROXY_BASE_URL:-https://cliproxy.epaflix.com}
-KEEPASS_KDBX=${KEEPASS_KDBX:-/home/$T3_USER/sync/keepass.kdbx}
+KEEPASS_KDBX=${KEEPASS_KDBX:-/home/spy/sync/Passwords.kdbx}
 T3_DIR=$(cd "$(dirname "$0")" && pwd)
 SERVER_SRC=$T3_DIR/files/keepass_mcp.py
 : "${T3_GUEST_IP:?set T3_GUEST_IP}"
