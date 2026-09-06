@@ -72,4 +72,57 @@ for m in vpn_picker_ranking_generated_timestamp_seconds vpn_picker_candidates_pa
 done
 echo "ok"
 
+echo "== 6. POST /verdict intake: bearer-token gated, persists under verdict_dir =="
+docker rm -f "$cid" >/dev/null 2>&1 || true
+verdict_dir=$(mktemp -d)
+ranking_path=$(mktemp -u)
+cid=$(docker run -d --rm -p 18080:8080 -e AIRVPN_API_KEY=invalid \
+        -e VPN_PICKER_API_URL=http://127.0.0.1:1/unreachable \
+        -e VPN_PICKER_OUTPUT="$ranking_path" \
+        -e VPN_PICKER_VERDICT_DIR="$verdict_dir" \
+        -e VPN_PICKER_INTAKE_TOKEN=test-token \
+        -v "$verdict_dir:$verdict_dir" "$IMAGE")
+trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
+for _ in $(seq 1 30); do
+  code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/healthz || true)
+  [ "$code" = "200" ] && break
+  sleep 1
+done
+stamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+body="{\"schema\":1,\"source\":\"vpn-agent\",\"producer\":\"nick\",\"server\":\"Piautos\",\"observed_at\":\"$stamp\",\"ttl_seconds\":21600,\"loss_pct\":8.0,\"bad_windows\":3}"
+
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer wrong' \
+  --data "$body" http://127.0.0.1:18080/verdict)
+if [ "$code" != "401" ]; then
+  echo "FAIL: wrong token must be 401, got $code"; docker logs "$cid"; exit 1
+fi
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+  -H 'Content-Type: application/json' \
+  --data "$body" http://127.0.0.1:18080/verdict)
+if [ "$code" != "401" ]; then
+  echo "FAIL: missing token must be 401, got $code"; docker logs "$cid"; exit 1
+fi
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer test-token' \
+  --data "$body" http://127.0.0.1:18080/verdict)
+if [ "$code" != "202" ]; then
+  echo "FAIL: right token must be 202, got $code"; docker logs "$cid"; exit 1
+fi
+sleep 1
+if [ "$(ls "$verdict_dir" | wc -l)" -ne 1 ]; then
+  echo "FAIL: intake did not write exactly one file under verdict_dir"; ls "$verdict_dir"; exit 1
+fi
+written=$(cat "$verdict_dir"/*.json)
+if ! echo "$written" | grep -q '"producer": "nick"' \
+   || ! echo "$written" | grep -q '"server": "Piautos"' \
+   || ! echo "$written" | grep -q '"source": "vpn-agent"'; then
+  echo "FAIL: written verdict does not match the accepted document"; echo "$written"; exit 1
+fi
+docker rm -f "$cid" >/dev/null 2>&1 || true
+rm -rf "$verdict_dir"
+echo "ok"
+
 echo "ALL CHECKS PASSED"

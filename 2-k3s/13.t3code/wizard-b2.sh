@@ -15,9 +15,9 @@ set -euo pipefail
 
 if [[ -t 1 ]] && command -v tput >/dev/null 2>&1 && [[ "$(tput colors 2>/dev/null || echo 0)" -ge 8 ]]; then
   BOLD=$(tput bold); DIM=$(tput dim); RESET=$(tput sgr0)
-  BLUE=$(tput setaf 4); GREEN=$(tput setaf 2); YELLOW=$(tput setaf 3); RED=$(tput setaf 1)
+  BLUE=$(tput setaf 4); GREEN=$(tput setaf 2); YELLOW=$(tput setaf 3)
 else
-  BOLD=""; DIM=""; RESET=""; BLUE=""; GREEN=""; YELLOW=""; RED=""
+  BOLD=""; DIM=""; RESET=""; BLUE=""; GREEN=""; YELLOW=""
 fi
 
 # Author sets this at the top of the stages section.
@@ -341,7 +341,11 @@ if curl -skI --max-time 5 https://t3code.epaflix.com | head -1; then
 else
   warn "https://t3code.epaflix.com not answering yet — needs DNS (stage 3 of B1) + the branch committed and merged so ArgoCD syncs the IngressRoute"
 fi
-SKIPPED+=("B4: pair the guest Syncthing folder with the PC holding the KDBX (desktop apps, both sides)")
+if ssh -o ConnectTimeout=5 "root@$T3_CT_IP" "sudo -iu spyros syncthing cli config folders secrets-vault devices list" 2>/dev/null | grep -q H4I72HH; then
+  say "B4 done: guest secrets-vault is shared with the k3s Syncthing hub (192.168.10.101:22000)."
+else
+  SKIPPED+=("B4: share the guest secrets-vault folder with the k3s Syncthing hub (H4I72HH, 192.168.10.101:22000), not only this PC")
+fi
 SKIPPED+=("B5: pair a client over WireGuard against https://t3code.epaflix.com (one-time token from the guest)")
 SKIPPED+=("B6 (optional): rotate the F0 GitHub PAT, store in KeePassXC, update Zed settings")
 pause "All done here."
