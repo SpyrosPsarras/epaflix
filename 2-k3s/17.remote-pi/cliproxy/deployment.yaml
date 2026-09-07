@@ -88,10 +88,16 @@ spec:
             - /scripts/fetch-plugin.sh
           args:
             - pi-bridge
-            # renovate: datasource=github-releases depName=abix5/pi-cliproxyapi-bridge
-            - "0.9.1"
-            - 7cfea7b47888c870acc8afca73d8f78cb8454559040c401a2aa08a870107db26
-            - abix5/pi-cliproxyapi-bridge
+            # TEMP OVERRIDE (model-token-usage): fork build of abix5/pi-cliproxyapi-bridge that registers
+            # the usage.handle sink and serves cumulative per-model token counters as the "models" field
+            # on the contract v2 usage document (consumed by the dms-cliproxy-quota widget).
+            # Revert to abix5/pi-cliproxyapi-bridge once upstream ships the usage sink (tracked in the
+            # upstream-release-watch row; drop this comment and restore the # renovate: marker then).
+            # The # renovate: marker is deliberately absent: renovate would "downgrade" the fork to
+            # upstream v0.9.1.
+            - "0.10.0"
+            - e22153a2a76ef80d273aa18f03ba28afcbabb50e9761d731342f1fff9d919ea5
+            - SpyrosPsarras/pi-cliproxyapi-bridge
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
