@@ -95,8 +95,8 @@ spec:
             # upstream-release-watch row; drop this comment and restore the # renovate: marker then).
             # The # renovate: marker is deliberately absent: renovate would "downgrade" the fork to
             # upstream v0.9.1.
-            - "0.10.0"
-            - e22153a2a76ef80d273aa18f03ba28afcbabb50e9761d731342f1fff9d919ea5
+            - "0.10.1"
+            - d857a114b5808ce9e9b5a9604954b265be48f9f605c0d75d6e3072cd0b703ffe
             - SpyrosPsarras/pi-cliproxyapi-bridge
           securityContext:
             allowPrivilegeEscalation: false
