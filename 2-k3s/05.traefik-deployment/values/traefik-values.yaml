@@ -32,10 +32,16 @@ ports:
   websecure:
     port: 443
     exposedPort: 443
+    transport:
+      respondingTimeouts:
+        readTimeout: 0s
   internal:
     port: 8443
     exposedPort: 443
     expose: {default: false, internal: true}
+    transport:
+      respondingTimeouts:
+        readTimeout: 0s
   syncthing:
     port: 22000
     expose:
