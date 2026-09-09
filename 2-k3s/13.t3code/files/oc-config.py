@@ -105,6 +105,11 @@ cfg = {
             "enabled": True,
         }
     },
+    # Claude's skill library, pointed at rather than duplicated. OpenCode takes
+    # a search path here, so unlike Codex (which needs one symlink per skill -
+    # see provision.sh) a newly added skill is picked up with no re-run of
+    # anything. Same folders, same SKILL.md files, one copy on disk.
+    "skills": {"paths": ["/home/spyros/.claude/skills"]},
 }
 
 CONFIG_PATH = "/home/spyros/.config/opencode/opencode.json"
