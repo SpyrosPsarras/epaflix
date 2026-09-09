@@ -9,13 +9,25 @@ T3_USER=${T3_USER:-spyros}
 STAMP=/var/lib/t3code/versions.applied
 . "$DIR/versions.env"
 
+# Keeps OpenCode's model list in sync with whatever cliproxy serves today
+# (oc-config.py queries it live). Runs on every invocation of this script —
+# unlike the tool-version pinning below, it must NOT sit behind the
+# versions.env stamp check, or it would only refresh when Renovate bumps a
+# pin instead of daily. Skipped on first boot, before /etc/t3code/t3code.env
+# exists; a transient cliproxy outage on a later run logs and moves on
+# rather than failing the tool-version pinning that follows.
+if [[ -f /etc/t3code/t3code.env ]] && id "$T3_USER" >/dev/null 2>&1; then
+  sudo -u "$T3_USER" -H python3 "$DIR/files/oc-config.py" \
+    || echo "oc-config.py refresh failed (cliproxy unreachable?) - keeping last-known opencode.json" >&2
+fi
+
 if [[ -f $STAMP ]] && cmp -s "$STAMP" "$DIR/versions.env"; then
   echo "t3code already at pinned versions"
   exit 0
 fi
 prev_t3=$(sed -n 's/^T3_VERSION=\([^ ]*\).*/\1/p' "$STAMP" 2>/dev/null || true)
 
-npm install -g "t3@$T3_VERSION" "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION" "opencode-ai@$OPENCODE_VERSION"
+npm install -g "t3@$T3_VERSION" "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION" "opencode-ai@$OPENCODE_VERSION" "@openai/codex@$CODEX_VERSION"
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -43,4 +55,5 @@ if [[ $prev_t3 != "$T3_VERSION" ]] && id "$T3_USER" >/dev/null 2>&1; then
     systemctl --user try-restart t3code.service
   echo "t3 ${prev_t3:-none} -> $T3_VERSION, service restarted"
 fi
-echo "t3code at: t3=$T3_VERSION claude=$CLAUDE_CODE_VERSION opencode=$OPENCODE_VERSION helm=$HELM_VERSION kustomize=$KUSTOMIZE_VERSION argocd=$ARGOCD_VERSION sops=$SOPS_VERSION"
+
+echo "t3code at: t3=$T3_VERSION claude=$CLAUDE_CODE_VERSION opencode=$OPENCODE_VERSION codex=$CODEX_VERSION helm=$HELM_VERSION kustomize=$KUSTOMIZE_VERSION argocd=$ARGOCD_VERSION sops=$SOPS_VERSION"
