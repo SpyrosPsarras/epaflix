@@ -174,4 +174,40 @@ as_user ln -sfn /home/"$T3_USER"/.claude/CLAUDE.md /home/"$T3_USER"/.codex/AGENT
 as_user ln -sfn /home/"$T3_USER"/.claude/CLAUDE.md /home/"$T3_USER"/.config/opencode/AGENTS.md
 as_user codex mcp add keepass -- /usr/local/bin/keepass-mcp
 
+# Claude Code's skill library, shared rather than copied. Codex uses the
+# identical SKILL.md format (name/description frontmatter in a named folder),
+# so this is a link job and not a port. Deliberately not a curated subset: link
+# everything and let each harness decide. Codex honours
+# `disable-model-invocation: true` and withholds those from the model while
+# still allowing explicit invocation; OpenCode currently offers all of them.
+#
+# One link per skill because Codex has no "extra skills directory" setting. Its
+# own config validator was asked: `skills` is a valid table, but skills.paths,
+# skills.dirs and skills.extra_paths are each rejected as unknown fields. That
+# is also why OpenCode is handled in oc-config.py instead - it DOES take a
+# skills.paths search path, so it needs no links at all.
+#
+# Consequence worth knowing: editing a skill reaches Codex immediately, but a
+# NEW skill needs this loop to run again (re-run provision.sh, or add the one
+# link by hand). The alternative was copying, which drifts.
+#
+# Guarded because ~/.claude/skills arrives over Syncthing like CLAUDE.md, so on
+# a fresh guest there may be nothing here yet - without the guard the glob would
+# stay unexpanded and link a folder literally named `*`. The inner -d test
+# rejects that case too.
+#
+# Codex's own `.system` folder is safe because glob skips dotfiles unless
+# dotglob is set, which provision.sh never sets; that, not name luck, is what
+# protects the builtins.
+#
+# Adding a skill needs this loop again; REMOVING one leaves a dangling link
+# behind until it is deleted by hand. Both beat a copy that silently goes stale.
+if [[ -d /home/$T3_USER/.claude/skills ]]; then
+  as_user mkdir -p /home/"$T3_USER"/.codex/skills
+  for skill in /home/"$T3_USER"/.claude/skills/*/; do
+    [[ -d $skill ]] || continue
+    as_user ln -sfn "${skill%/}" /home/"$T3_USER"/.codex/skills/"$(basename "$skill")"
+  done
+fi
+
 echo "Done. Next (B3): gh auth login + az login --use-device-code as $T3_USER, then verify with t3 service status."
