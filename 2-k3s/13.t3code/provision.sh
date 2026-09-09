@@ -150,4 +150,28 @@ chmod 0755 /usr/local/bin/keepass-mcp
 sudo -u "$T3_USER" -H claude mcp remove -s user keepass >/dev/null 2>&1 || true
 sudo -u "$T3_USER" -H claude mcp add -s user keepass -- /usr/local/bin/keepass-mcp
 
+# Same vault, same instructions, for the other two harnesses (Q3: one estate,
+# three front-ends). Codex reads $CODEX_HOME/AGENTS.md as its GLOBAL layer and
+# OpenCode reads ~/.config/opencode/AGENTS.md; symlinking both at CLAUDE.md
+# keeps one source of truth, so editing preferences once reaches all three.
+# A copy was tried first and had already been made by hand - it drifts the
+# moment CLAUDE.md is edited, which is exactly the failure a symlink cannot
+# have. CLAUDE.md is ~6KB, well inside Codex's 32KiB project_doc_max_bytes.
+#
+# The dirs are created here because neither tool makes its own until first run,
+# and provision.sh may execute before either has ever been launched. On a truly
+# fresh guest both links dangle until Syncthing delivers CLAUDE.md (B4 pairs the
+# folder); ln does not care, and they resolve the moment the file lands.
+# `codex mcp add` is idempotent (verified: re-running leaves one entry) and
+# merges into config.toml rather than replacing it, which matters because T3's
+# codex sessions also write project trust levels into that same file.
+#
+# OpenCode's keepass registration is NOT here: oc-config.py rewrites
+# opencode.json wholesale on every daily refresh, so anything added to that
+# file by hand is erased overnight. It lives in the generator instead.
+as_user mkdir -p /home/"$T3_USER"/.codex /home/"$T3_USER"/.config/opencode
+as_user ln -sfn /home/"$T3_USER"/.claude/CLAUDE.md /home/"$T3_USER"/.codex/AGENTS.md
+as_user ln -sfn /home/"$T3_USER"/.claude/CLAUDE.md /home/"$T3_USER"/.config/opencode/AGENTS.md
+as_user codex mcp add keepass -- /usr/local/bin/keepass-mcp
+
 echo "Done. Next (B3): gh auth login + az login --use-device-code as $T3_USER, then verify with t3 service status."

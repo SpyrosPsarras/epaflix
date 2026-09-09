@@ -92,10 +92,27 @@ cfg = {
         }
     },
     "model": f"cliproxy/{default_model}",
+    # The read-only KeePass vault, same server Claude Code and Codex use, so a
+    # credential lookup works in whichever harness you happen to be in.
+    # It belongs HERE rather than in provision.sh next to the other two
+    # registrations: this script rewrites opencode.json from scratch on every
+    # daily refresh, so an mcp block added to that file directly would be
+    # silently erased the next morning.
+    "mcp": {
+        "keepass": {
+            "type": "local",
+            "command": ["/usr/local/bin/keepass-mcp"],
+            "enabled": True,
+        }
+    },
 }
 
 CONFIG_PATH = "/home/spyros/.config/opencode/opencode.json"
 os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
-json.dump(cfg, open(CONFIG_PATH, "w"), indent=2)
-os.chmod(CONFIG_PATH, 0o600)
+# fchmod before writing, not chmod after: this file embeds the cliproxy client
+# key, and a chmod that follows json.dump leaves it world-readable at the
+# prevailing umask for however long the write takes.
+with open(CONFIG_PATH, "w") as handle:
+    os.fchmod(handle.fileno(), 0o600)
+    json.dump(cfg, handle, indent=2)
 print("opencode.json written with", len(model_ids), "models")
