@@ -3,14 +3,18 @@
 # (models = Spyros' Zed set), and enables the OpenCode driver in T3 settings.
 set -euo pipefail
 
-. "$(dirname "$0")/../versions.env"
+DIR=$(cd "$(dirname "$0")" && pwd)
+. "$DIR/../versions.env"
 npm i -g "opencode-ai@$OPENCODE_VERSION" >/dev/null 2>&1
 echo "opencode installed: $(opencode --version 2>/dev/null | head -1)"
 
 mkdir -p /home/spyros/.config/opencode
 chown spyros:spyros /home/spyros/.config/opencode
 
-sudo -iu spyros python3 /tmp/oc-config.py
+# Absolute path: sudo -i resets cwd to spyros' home before the relative form
+# in "$(dirname "$0")" would resolve, breaking this exactly where the old
+# hardcoded /tmp/oc-config.py path didn't.
+sudo -iu spyros python3 "$DIR/oc-config.py"
 chmod 600 /home/spyros/.config/opencode/opencode.json
 chown spyros:spyros /home/spyros/.config/opencode/opencode.json
 
