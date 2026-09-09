@@ -1,0 +1,7 @@
+{
+  "grants": [{
+    "src": ["spypsarras@gmail.com"],
+    "dst": ["192.168.10.0/24", "10.0.0.0/24", "autogroup:self"],
+    "ip": ["*"]
+  }]
+}
