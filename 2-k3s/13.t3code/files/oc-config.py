@@ -17,9 +17,7 @@ provider.setdefault("options", {}).update(
 # The config hook supplies the catalog each time OpenCode loads a workspace.
 provider.pop("models", None)
 cfg.setdefault("model", "cliproxy/or-glm-5.3-flash")
-enabled_providers = cfg.setdefault("enabled_providers", [])
-if "cliproxy" not in enabled_providers:
-    enabled_providers.append("cliproxy")
+cfg["enabled_providers"] = ["cliproxy"]
 cfg.setdefault("mcp", {}).setdefault("keepass", {
     "type": "local", "command": ["/usr/local/bin/keepass-mcp"], "enabled": True,
 })
