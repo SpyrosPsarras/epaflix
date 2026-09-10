@@ -346,6 +346,7 @@ DECLARE
   c text;
   n integer;
   want record;
+  store_auth text := E'    - match: "https://api.github.com/"\n      apply-to: ["metadata"]\n      type: github-token\n      token-env: "CLIPROXY_GITHUB_TOKEN"';
 BEGIN
   -- First boot: the proxy has not seeded the table yet. Without this the block
   -- raises undefined_table and CrashLoops the initContainer on an empty
@@ -366,6 +367,19 @@ BEGIN
 
   c := regexp_replace(c, '^  enabled:[ \t]*false[ \t]*$', '  enabled: true', 'n');
   c := regexp_replace(c, '^  dir:[ \t]*"plugins"[ \t]*$', '  dir: "/CLIProxyAPI/plugins"', 'n');
+
+  -- Authenticate GitHub release metadata requests; leave artifact hosts unauthenticated.
+  IF NOT EXISTS (SELECT 1 FROM regexp_matches(c, '^[ \t]+token-env:[ \t]*"?CLIPROXY_GITHUB_TOKEN"?[ \t]*$', 'n')) THEN
+    IF EXISTS (SELECT 1 FROM regexp_matches(c, '^  store-auth:[ \t]*(\[\])?[ \t]*$', 'n')) THEN
+      c := regexp_replace(c, '^  store-auth:[ \t]*(\[\])?[ \t]*$',
+                          E'  store-auth:\n' || store_auth, 'n');
+    ELSIF EXISTS (SELECT 1 FROM regexp_matches(c, '^  store-auth:', 'n')) THEN
+      RAISE EXCEPTION 'unsupported plugins.store-auth format - reconcile by hand';
+    ELSE
+      c := regexp_replace(c, '^plugins:[ \t]*$',
+                          E'plugins:\n  store-auth:\n' || store_auth, 'n');
+    END IF;
+  END IF;
 
   -- `configs:` is `{}` on a freshly seeded row and a mapping once anything has
   -- been configured through the UI. Handle both; inserting straight after the
