@@ -172,6 +172,7 @@ as_user mkdir -p /home/"$T3_USER"/.codex /home/"$T3_USER"/.config/opencode
 as_user ln -sfn /home/"$T3_USER"/.claude/CLAUDE.md /home/"$T3_USER"/.codex/AGENTS.md
 as_user ln -sfn /home/"$T3_USER"/.claude/CLAUDE.md /home/"$T3_USER"/.config/opencode/AGENTS.md
 as_user codex mcp add keepass -- /usr/local/bin/keepass-mcp
+bash "$T3_DIR/files/setup-search.sh"
 
 # Claude Code's skill library, shared rather than copied. Codex uses the
 # identical SKILL.md format (name/description frontmatter in a named folder),

@@ -17,6 +17,10 @@ if [[ -f /etc/t3code/t3code.env ]] && id "$T3_USER" >/dev/null 2>&1; then
     || echo "OpenCode configuration refresh failed - keeping last-known opencode.json" >&2
 fi
 
+if [[ -x /opt/keepass-mcp/bin/python ]]; then
+  bash "$DIR/files/setup-search.sh"
+fi
+
 if [[ -f $STAMP ]] && cmp -s "$STAMP" "$DIR/versions.env"; then
   echo "t3code already at pinned versions"
   exit 0
