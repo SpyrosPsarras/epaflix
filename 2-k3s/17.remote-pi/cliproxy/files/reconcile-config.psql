@@ -315,6 +315,78 @@ BEGIN
   RAISE NOTICE 'openai-compatibility: openrouter spliced in';
 END $$;
 
+-- Advertise each openai-compatibility model's real context window (#1317).
+--
+-- CLIProxyAPI has no metadata for these upstreams, so its model catalog reports
+-- a 272000 context for every one of them. OpenCode reads that catalog and
+-- compacts a session once it reaches context minus output, so a wrong number
+-- either compacts far too early (Ollama serves 8192) or lets a session grow
+-- until the upstream rejects it. `max-context-length` is the per-model override
+-- the schema provides for exactly this (config.example.yaml).
+--
+-- Unlike the two splice blocks above, this one runs on EVERY boot and rewrites
+-- the value in place, because both providers are already in the live row and
+-- their insert-once guards will never touch a model entry again. Each model is
+-- anchored on its upstream `name` AND `alias` lines together: aya-expanse:8b
+-- serves two aliases and or-minimax-m3:free is served by two providers, so
+-- neither line alone is unique. An entry the live row does not carry is a
+-- no-op, not an error - the openrouter list has been trimmed through the UI
+-- before and a missing model is not a broken config.
+--
+-- Values: Ollama numbers are what the server on 192.168.10.200 actually serves
+-- (/api/ps context_length after a load, 2026-09-10), which is its default
+-- num_ctx, not the models' native maximum. OpenRouter numbers are
+-- context_length from openrouter.ai/api/v1/models on the same date.
+-- minimax-m3:free is deliberately absent: OpenRouter publishes no context for
+-- the free variant, and a guess that is too high is worse than the default.
+DO $$
+DECLARE
+  c    text;
+  orig text;
+  want record;
+BEGIN
+  IF to_regclass('public.config_store') IS NULL THEN RETURN; END IF;
+  SELECT content INTO c FROM public.config_store WHERE id = 'config';
+  IF c IS NULL THEN RETURN; END IF;
+  orig := c;
+
+  FOR want IN
+    SELECT * FROM (VALUES
+      ('qwen3.5:9b',                      'ollama-qwen3.5-9b',     8192),
+      ('gemma4:12b-it-qat',               'ollama-gemma4-12b',     8192),
+      ('gemma4:e4b',                      'ollama-gemma4-e4b',     8192),
+      ('lfm2.5:8b',                       'ollama-lfm2.5-8b',      8192),
+      ('aya-expanse:8b',                  'ollama-aya-expanse-8b', 8192),
+      ('aya-expanse:8b',                  'or-minimax-m3:free',    8192),
+      ('z-ai/glm-5.3-flash',              'or-glm-5.3-flash',      1310720),
+      ('z-ai/glm-5.3',                    'or-glm-5.3',            1310720),
+      ('google/gemini-3.7-flash',         'or-gemini-3.7-flash',   1048576),
+      ('deepseek/deepseek-v4-flash-0731', 'or-deepseek-v4-flash',  1310720),
+      ('deepseek/deepseek-v4-pro-0813',   'or-deepseek-v4-pro',    1048576),
+      ('qwen/qwen3.8-max',                'or-qwen3.8-max',        1000000),
+      ('qwen/qwen3.8-27b',                'or-qwen3.8-27b',        1000000),
+      ('minimax/minimax-m3',              'or-minimax-m3',         1048576)
+    ) AS t(upstream, alias, ctx)
+  LOOP
+    -- Match the three-line entry plus an existing override if there is one, and
+    -- write the entry back with the wanted override. \1 carries the display-name.
+    -- The names go into a regex, so their dots are escaped first; a bare `.`
+    -- would also match `qwen3-5:9b`.
+    c := regexp_replace(c,
+           '^(      - name: "' || replace(want.upstream, '.', '\.') || E'"\n        alias: "' || replace(want.alias, '.', '\.') || E'"\n        display-name: "[^"]*"\n)'
+             || E'(        max-context-length: [0-9]+\n)?',
+           E'\\1        max-context-length: ' || want.ctx || E'\n',
+           'n');
+  END LOOP;
+
+  IF c IS DISTINCT FROM orig THEN
+    UPDATE public.config_store SET content = c, updated_at = now() WHERE id = 'config';
+    RAISE NOTICE 'openai-compatibility: max-context-length reconciled';
+  ELSE
+    RAISE NOTICE 'openai-compatibility: max-context-length already current';
+  END IF;
+END $$;
+
 -- Enable the plugins (#858 pi-bridge, plus the GitHub Copilot provider). Edits
 -- inside the seeded `plugins:` block, which ships disabled with
 -- `dir: "plugins"` and `configs: {}`.
@@ -560,6 +632,9 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM regexp_matches(c, '^    priority: 10[ \t]*$', 'n')) THEN
     RAISE EXCEPTION 'openai-compatibility: the openrouter provider lost its priority: 10 failover marking';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM regexp_matches(c, E'^        alias: "or-glm-5.3-flash"\n        display-name: "[^"]*"\n        max-context-length: 1310720[ \t]*$', 'n')) THEN
+    RAISE EXCEPTION 'openai-compatibility: or-glm-5.3-flash carries no max-context-length after reconcile';
   END IF;
   -- An empty api-key would list models and 401 on every call. Catch it here
   -- too, not just at write time, in case a later edit blanks it.
