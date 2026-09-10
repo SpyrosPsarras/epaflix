@@ -204,6 +204,11 @@ spec:
                 secretKeyRef:
                   name: cliproxy-secrets
                   key: management-password
+            - name: CLIPROXY_GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: cliproxy-secrets
+                  key: github-token
             - name: PGSTORE_DSN
               value: postgresql://cliproxy:$(PG_PASSWORD)@postgres-rw.postgres-system.svc.cluster.local:5432/cliproxy?sslmode=require
             - name: PGSTORE_LOCAL_PATH
