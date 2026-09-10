@@ -166,9 +166,8 @@ sudo -u "$T3_USER" -H claude mcp add -s user keepass -- /usr/local/bin/keepass-m
 # merges into config.toml rather than replacing it, which matters because T3's
 # codex sessions also write project trust levels into that same file.
 #
-# OpenCode's keepass registration is NOT here: oc-config.py rewrites
-# opencode.json wholesale on every daily refresh, so anything added to that
-# file by hand is erased overnight. It lives in the generator instead.
+# oc-config.py seeds OpenCode's KeePass registration while preserving existing
+# MCP settings on setup and daily refresh.
 as_user mkdir -p /home/"$T3_USER"/.codex /home/"$T3_USER"/.config/opencode
 as_user ln -sfn /home/"$T3_USER"/.claude/CLAUDE.md /home/"$T3_USER"/.codex/AGENTS.md
 as_user ln -sfn /home/"$T3_USER"/.claude/CLAUDE.md /home/"$T3_USER"/.config/opencode/AGENTS.md

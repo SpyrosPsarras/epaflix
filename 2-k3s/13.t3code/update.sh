@@ -9,16 +9,12 @@ T3_USER=${T3_USER:-spyros}
 STAMP=/var/lib/t3code/versions.applied
 . "$DIR/versions.env"
 
-# Keeps OpenCode's model list in sync with whatever cliproxy serves today
-# (oc-config.py queries it live). Runs on every invocation of this script —
-# unlike the tool-version pinning below, it must NOT sit behind the
-# versions.env stamp check, or it would only refresh when Renovate bumps a
-# pin instead of daily. Skipped on first boot, before /etc/t3code/t3code.env
-# exists; a transient cliproxy outage on a later run logs and moves on
-# rather than failing the tool-version pinning that follows.
+# Installs the current OpenCode catalog hook and preserves user configuration.
+# Run before the version stamp check so hook updates do not require a tool bump.
+# The hook fetches subscription-scoped models when OpenCode loads a workspace.
 if [[ -f /etc/t3code/t3code.env ]] && id "$T3_USER" >/dev/null 2>&1; then
   sudo -u "$T3_USER" -H python3 "$DIR/files/oc-config.py" \
-    || echo "oc-config.py refresh failed (cliproxy unreachable?) - keeping last-known opencode.json" >&2
+    || echo "OpenCode configuration refresh failed - keeping last-known opencode.json" >&2
 fi
 
 if [[ -f $STAMP ]] && cmp -s "$STAMP" "$DIR/versions.env"; then
