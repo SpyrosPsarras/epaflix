@@ -147,6 +147,36 @@ spec:
               memory: "32Mi"
             limits:
               memory: "128Mi"
+        - name: fetch-opencode-cloak
+          image: docker.io/library/alpine:3.21
+          command:
+            - sh
+            - /scripts/fetch-plugin.sh
+          args:
+            - opencode-cloak
+            # renovate: datasource=github-releases depName=conversun/cliproxy-plugin-opencode-cloak
+            - "0.2.2"
+            - 5aaa00dc08510cbf9d8c25536886c9412d29bc8ace4824ff902223e0704b15a4
+            - conversun/cliproxy-plugin-opencode-cloak
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+            - name: plugins
+              mountPath: /plugins
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "32Mi"
+            limits:
+              memory: "128Mi"
         - name: transcripts
           restartPolicy: Always
           image: docker.io/library/python:3.13-alpine

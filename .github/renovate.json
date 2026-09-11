@@ -74,7 +74,8 @@
       "matchManagers": ["custom.regex"],
       "matchPackageNames": [
         "abix5/pi-cliproxyapi-bridge",
-        "arthur-sommer-etc/cliproxyapi-copilot-plugin"
+        "arthur-sommer-etc/cliproxyapi-copilot-plugin",
+        "conversun/cliproxy-plugin-opencode-cloak"
       ],
       "automerge": false,
       "labels": ["renovate", "needs-checksum"]
