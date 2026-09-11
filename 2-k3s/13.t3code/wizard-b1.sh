@@ -224,7 +224,7 @@ note "Template check: ssh root@$T3_PVE_HOST 'pveam list local' if unsure."
 
 # ── Stage 2: create the LXC ───────────────────────────────────────────────
 stage "Create the LXC"
-say "Runs 1-proxmox/t3code/create-lxc.sh (unprivileged Debian 13, 4c/8G/64G, static IP)."
+say "Runs 1-proxmox/t3code/create-lxc.sh (unprivileged Debian 13, all host cores/8G/64G, static IP)."
 if confirm "Run it now over SSH as root@$T3_PVE_HOST?"; then
   if [[ -n $T3_SSH_KEYS ]]; then
     ssh "root@$T3_PVE_HOST" "cat > /root/t3code.keys" < "$T3_SSH_KEYS"
