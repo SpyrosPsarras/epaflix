@@ -48,11 +48,16 @@ export default async () => ({
         } else {
           continue
         }
+        const input = Array.isArray(model.input_modalities)
+          ? model.input_modalities.filter(value => ["text", "image", "audio", "video", "pdf"].includes(value))
+          : ["text"]
         models[id] = {
           // Preserve saved OpenCode selections while sending the scoped API ID.
           id: model.slug,
           name,
           provider: { npm },
+          modalities: { input, output: ["text"] },
+          attachment: input.some(value => value !== "text"),
           // OpenCode compacts at context minus output, so a wrong small context
           // compacts every few turns. CLIProxyAPI omits max_tokens for models it
           // has no metadata for; 8192 keeps that fallback conservative.
@@ -63,7 +68,7 @@ export default async () => ({
       if (!Object.keys(models).length) throw new Error("catalog has no supported models")
     } catch (error) {
       const cached = JSON.parse(await readFile(cachePath, "utf8").catch(() => "null"))
-      if (cached?.version !== 3 || cached.url !== url || !cached.models || !Object.keys(cached.models).length) throw error
+      if (cached?.version !== 4 || cached.url !== url || !cached.models || !Object.keys(cached.models).length) throw error
       provider.models = cached.models
       console.error(`[cliproxy-models] ${error.message}; using catalog saved at ${cached.updatedAt}`)
       return
@@ -71,7 +76,7 @@ export default async () => ({
     provider.models = models
     await mkdir(cacheDir, { recursive: true })
     const temporary = `${cachePath}.${process.pid}.${crypto.randomUUID()}`
-    await writeFile(temporary, JSON.stringify({ version: 3, url, updatedAt: new Date().toISOString(), models }), { mode: 0o600 })
+    await writeFile(temporary, JSON.stringify({ version: 4, url, updatedAt: new Date().toISOString(), models }), { mode: 0o600 })
     await rename(temporary, cachePath)
     console.error(`[cliproxy-models] discovered ${Object.keys(models).length} models`)
   },
