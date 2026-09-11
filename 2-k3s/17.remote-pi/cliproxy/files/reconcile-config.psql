@@ -464,7 +464,13 @@ BEGIN
       -- Native Codex clients send bare model IDs. Keep those out of Copilot's
       -- shared routing pool so they consume only the Codex subscription.
       ('cliproxyapi-copilot',
-       E'    cliproxyapi-copilot:\n      enabled: true\n      priority: 100\n      excluded_model_prefixes:\n        - "claude-"\n        - "gemini-"\n        - "gpt-"\n        - "codex-"')
+       E'    cliproxyapi-copilot:\n      enabled: true\n      priority: 100\n      excluded_model_prefixes:\n        - "claude-"\n        - "gemini-"\n        - "gpt-"\n        - "codex-"'),
+      -- Request interceptor: rewrites OpenCode's Claude requests to carry a
+      -- Claude Code billing header so the OAuth subscription is not flagged as
+      -- third-party. Only `enabled` is set; its single option
+      -- (claude_code_user_agent) ships with a working default.
+      ('opencode-cloak',
+       E'    opencode-cloak:\n      enabled: true')
     ) AS t(id, cfg)
   LOOP
     CONTINUE WHEN EXISTS (SELECT 1 FROM regexp_matches(c, '^\s*' || want.id || ':[ \t]*$', 'n'));
@@ -482,7 +488,7 @@ BEGIN
          updated_at = now()
    WHERE id = 'config';
 
-  RAISE NOTICE 'plugins: pi-bridge and cliproxyapi-copilot reconciled';
+  RAISE NOTICE 'plugins: pi-bridge, cliproxyapi-copilot and opencode-cloak reconciled';
 END $$;
 
 -- Request payload logging (#1007). `request-log: true` makes the proxy write one
@@ -605,6 +611,9 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM regexp_matches(c, '^\s*cliproxyapi-copilot:[ \t]*$', 'n')) THEN
     RAISE EXCEPTION 'plugins.configs.cliproxyapi-copilot is missing';
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM regexp_matches(c, '^\s*opencode-cloak:[ \t]*$', 'n')) THEN
+    RAISE EXCEPTION 'plugins.configs.opencode-cloak is missing';
+  END IF;
 
   -- Both openai-compatibility providers, and one alias from each, so a splice
   -- that lands the entry but mangles the model list still fails the container.
@@ -666,5 +675,5 @@ BEGIN
     RAISE EXCEPTION 'logging-to-file is true - that takes the access log off stdout and blinds Loki; see #1007';
   END IF;
 
-  RAISE NOTICE 'verified: allow-remote true, auth-dir /var/lib/cliproxy/pgstore/auths, pi-bridge and cliproxyapi-copilot enabled, openai-compatibility ollama + openrouter present, request-log true capped at 256MB, logging-to-file false, usage-statistics-enabled true';
+  RAISE NOTICE 'verified: allow-remote true, auth-dir /var/lib/cliproxy/pgstore/auths, pi-bridge, cliproxyapi-copilot and opencode-cloak enabled, openai-compatibility ollama + openrouter present, request-log true capped at 256MB, logging-to-file false, usage-statistics-enabled true';
 END $$;
