@@ -9,7 +9,7 @@ data:
     -- Fast-track admin-ordered deletions (delete button sets unkeepable=true)
     -- so the next jellysweep cleanup run picks them up today. Only pulls
     -- dates earlier, never later. Filtered items without an admin order keep
-    -- their far-future cleanup_delay date and are never touched.
+    -- their cleanup_delay date and are never touched.
     WITH ordered AS (
         UPDATE media
         SET default_delete_at = NOW(),
