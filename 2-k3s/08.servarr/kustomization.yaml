@@ -70,8 +70,14 @@ images:
     digest: sha256:c7502a75b021d964481c129c84590b9cbc40f83aadd4e553f173871bc0deaa3c
   - name: ghcr.io/cleanuparr/cleanuparr
     digest: sha256:c7cd53ad559a67147637de3d825f66ef6e6a5498490b73f49c6e4d72f13bed76
+  # TEMP OVERRIDE (pr-430, #1336): build of upstream main 1576c01 + jon4hz/jellysweep#430 so the
+  # Database Filter matches tracked rows by media type as well as arr ID. Without it a tracked
+  # Radarr movie with ID N hides the Sonarr series with ID N forever (Squid Game / Pirates, 49 titles).
+  # Revert to ghcr.io/jon4hz/jellysweep when a release > v0.16.0 ships containing #430 (watched by
+  # upstream-release-watch). Renovate must not track this image (disabled in .github/renovate.json).
   - name: ghcr.io/jon4hz/jellysweep
-    newTag: v0.16.0@sha256:ecc93c32e8929d139d57743ba898bd58a167612e743c6596e5e7a5accbcf11de
+    newName: ghcr.io/spyrospsarras/jellysweep
+    newTag: pr-430@sha256:ed55a035484f9f0f5c17bf7d648bf09162e046a673e0d592e65c40368e60eeaa
   - name: ghcr.io/fredrikburmester/streamystats-aio
     newTag: latest@sha256:43e2325d206ef6e4d5176af1c3f97be86a905d5a92ca873d777ddd4119a82545
   - name: ghcr.io/thephaseless/byparr
