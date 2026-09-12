@@ -1,0 +1,16 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bread
+  namespace: bread
+  labels:
+    app: bread
+spec:
+  type: ClusterIP
+  selector:
+    app: bread
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
