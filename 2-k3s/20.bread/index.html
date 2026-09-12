@@ -5,39 +5,72 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Ψωμί: υπολογιστής ποσοτήτων</title>
 <style>
-  body{font:16px/1.4 system-ui,sans-serif;max-width:640px;margin:2rem auto;padding:0 1rem;color:#222}
-  h1{font-size:1.4rem}
-  form{display:grid;grid-template-columns:1fr 6rem;gap:.5rem 1rem;align-items:center}
-  input{font:inherit;padding:.3rem;width:100%;text-align:right}
-  table{width:100%;border-collapse:collapse;margin-top:1.5rem}
-  td{padding:.35rem 0;border-bottom:1px solid #ddd}
-  td:last-child{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
-  .sub td{color:#666;padding-left:1.5rem;font-size:.9rem}
-  .total td{font-weight:bold;border-bottom:none}
-  small{color:#666}
-  h2{font-size:1.15rem;margin-top:2rem}
-  li{margin-bottom:.6rem}
-  time{color:#666;white-space:nowrap}
+  :root{color-scheme:light;--bg:#f7f1e7;--card:#fffaf2;--ink:#392b23;--muted:#6e5d50;--line:#d9cbbc;--accent:#914321;--wash:#eee2d3}
+  *{box-sizing:border-box}
+  body{font:16px/1.6 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:720px;margin:0 auto;padding:2rem 1rem;color:var(--ink);background:var(--bg);font-variant-numeric:tabular-nums}
+  h1{font-size:clamp(1.5rem,5vw,2rem);line-height:1.25;margin:0 0 .75rem;letter-spacing:-.025em}
+  header{margin-bottom:1.5rem}
+  p{margin:.75rem 0 0}
+  small{font-size:.875rem;color:var(--muted)}
+  h2,caption{font-size:1.15rem;font-weight:700;text-align:left;margin:0 0 1rem}
+  form,.card{padding:1rem;border:1px solid var(--line);border-radius:16px;background:var(--card);margin-bottom:1.25rem}
+  form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem .75rem}
+  .field{min-width:0;display:flex;flex-direction:column;justify-content:space-between;gap:.4rem}
+  .field label{font-size:.875rem;line-height:1.4}
+  input,button{font:inherit}
+  input[type=number]{width:100%;min-width:0;min-height:48px;padding:.5rem .65rem;text-align:right;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;font-variant-numeric:tabular-nums}
+  :focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+  table{width:100%;border-collapse:collapse;table-layout:fixed}
+  caption{padding-bottom:.25rem}
+  td{padding:.65rem 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
+  td:last-child{width:5.5rem;text-align:right;white-space:nowrap;padding-left:.5rem}
+  .sub td{color:var(--muted);font-size:.875rem}
+  .sub td:first-child{padding-left:.75rem}
+  .total td{font-weight:700;border-bottom:none;color:var(--accent);padding-top:1rem}
+  .steps-heading{display:flex;align-items:center;justify-content:space-between;gap:1rem;margin:1.75rem 0 1rem}
+  .steps-heading h2{margin:0}
+  button{min-height:44px;padding:.4rem .8rem;border:1px solid var(--accent);border-radius:8px;color:var(--accent);background:var(--card);cursor:pointer}
+  #steps{list-style:none;padding:0;margin:0 0 1.75rem;counter-reset:step}
+  #steps li{counter-increment:step;margin-bottom:.75rem;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+  #steps label{display:flex;align-items:flex-start;gap:.75rem;padding:1rem;cursor:pointer;overflow-wrap:anywhere}
+  #steps input{flex:0 0 26px;width:26px;height:26px;margin:.15rem 0 0;accent-color:var(--accent);cursor:pointer}
+  .step-text{min-width:0}
+  .step-text::before{content:counter(step,decimal-leading-zero);display:block;color:var(--accent);font-weight:700;font-size:.875rem;margin-bottom:.35rem}
+  #steps input:checked + .step-text{color:var(--muted)}
+  #steps input:checked + .step-text::before{text-decoration:line-through}
+  #steps li:has(input:checked){background:var(--wash)}
+  #steps li:has(input:checked) time{background:var(--card)}
+  time{display:inline-block;color:var(--muted);font-size:.875rem;background:var(--wash);border-radius:6px;padding:.1rem .4rem;white-space:nowrap}
   time::before{content:"\23F1  "}
+  .notes ul{margin:0;padding-left:1.25rem}
+  .notes li{margin-bottom:.75rem}
+  .notes li:last-child{margin-bottom:0}
+  @media(min-width:600px){body{padding:3rem 1.5rem}form,.card{padding:1.5rem}form{gap:1rem 1.5rem}}
+  @media(prefers-color-scheme:dark){:root{color-scheme:dark;--bg:#211b17;--card:#2c241e;--ink:#f4e8d9;--muted:#c6b5a4;--line:#5e4d3e;--accent:#efaa7e;--wash:#3b3027}}
 </style>
 </head>
 <body>
+<main>
+<header>
 <h1>Προζυμένιο με σπέλτα, σταρένιο ολικής &amp; χοντρή σίκαλη</h1>
 <small>Όλα τα ποσοστά είναι επί του συνολικού αλευριού (μαζί με το αλεύρι του προζυμιού).</small>
+</header>
 
 <form id="f" onsubmit="return false">
-  <label for="loaves">Καρβέλια</label><input id="loaves" type="number" min="1" step="1" value="3">
-  <label for="weight">Βάρος ζύμης ανά καρβέλι (g)</label><input id="weight" type="number" min="100" step="10" value="700">
-  <label for="hyd">Υδάτωση (%)</label><input id="hyd" type="number" min="50" max="100" step="1" value="76">
-  <label for="salt">Αλάτι (%)</label><input id="salt" type="number" min="0" max="4" step="0.1" value="2">
-  <label for="lev">Προζύμι (%)</label><input id="lev" type="number" min="0" max="50" step="0.5" value="18.6">
-  <label for="levHyd">Υδάτωση προζυμιού (%)</label><input id="levHyd" type="number" min="50" max="150" step="5" value="100">
-  <label for="rye">Σίκαλη (%)</label><input id="rye" type="number" min="0" max="50" step="1" value="17">
-  <label for="spelt">Σπέλτα στο υπόλοιπο αλεύρι (%)</label><input id="spelt" type="number" min="0" max="100" step="1" value="60">
-  <label for="soak">Νερό μουλιάσματος ανά g σίκαλης</label><input id="soak" type="number" min="0" max="3" step="0.05" value="1.25">
+  <div class="field"><label for="loaves">Καρβέλια</label><input id="loaves" type="number" min="1" step="1" value="3"></div>
+  <div class="field"><label for="weight">Βάρος ζύμης ανά καρβέλι (g)</label><input id="weight" type="number" min="100" step="10" value="700"></div>
+  <div class="field"><label for="hyd">Υδάτωση (%)</label><input id="hyd" type="number" min="50" max="100" step="1" value="76"></div>
+  <div class="field"><label for="salt">Αλάτι (%)</label><input id="salt" type="number" min="0" max="4" step="0.1" value="2"></div>
+  <div class="field"><label for="lev">Προζύμι (%)</label><input id="lev" type="number" min="0" max="50" step="0.5" value="18.6"></div>
+  <div class="field"><label for="levHyd">Υδάτωση προζυμιού (%)</label><input id="levHyd" type="number" min="50" max="150" step="5" value="100"></div>
+  <div class="field"><label for="rye">Σίκαλη (%)</label><input id="rye" type="number" min="0" max="50" step="1" value="17"></div>
+  <div class="field"><label for="spelt">Σπέλτα στο υπόλοιπο αλεύρι (%)</label><input id="spelt" type="number" min="0" max="100" step="1" value="60"></div>
+  <div class="field"><label for="soak">Νερό μουλιάσματος ανά g σίκαλης</label><input id="soak" type="number" min="0" max="3" step="0.05" value="1.25"></div>
 </form>
 
+<section class="card">
 <table>
+  <caption>Ποσότητες</caption>
   <tr><td>Siktet speltmel (κοσκινισμένο σπέλτα)</td><td id="oSpelt"></td></tr>
   <tr><td>Sammalt hvetemel fin (λεπτό σταρένιο ολικής)</td><td id="oWw"></td></tr>
   <tr><td>Rugmel sammalt grovmalt (χοντρή σίκαλη ολικής)</td><td id="oRye"></td></tr>
@@ -50,30 +83,34 @@
   <tr class="total"><td>Σύνολο ζύμης</td><td id="oTotal"></td></tr>
 </table>
 <p><small id="oInfo"></small></p>
+</section>
 
-<h2>Βήματα</h2>
-<ol id="steps">
-  <li>Τάισε το προζύμι 4-8 ώρες νωρίτερα ώστε να είναι στο peak του όταν ξεκινήσεις: διπλασιασμένο, φουσκωτό, με θολωτή επιφάνεια. Χρειάζεσαι <b data-v="levain"></b> ενεργό προζύμι.</li>
-  <li>Ρίξε τα <b data-v="rye"></b> χοντρή σίκαλη σε μπολ και περίχυσε με <b data-v="soakW"></b> νερό στους ~70°C. Ανακάτεψε σε χυλό, σκέπασε και άσε να κρυώσει στους ~30°C. Η χοντροαλεσμένη σίκαλη ρουφάει νερό αργά. Χωρίς αυτό το βήμα θα τραβήξει υγρασία αργότερα και θα βγει στεγνή ψίχα. <time>1h</time></li>
-  <li>Στον κάδο ανάμειξε <b data-v="spelt"></b> σπέλτα και <b data-v="ww"></b> σταρένιο ολικής με τα υπόλοιπα <b data-v="mainW"></b> νερό, μέχρι να μη μείνει στεγνό αλεύρι. Σκέπασε και άσε το να ξεκουραστεί. <time>40m</time></li>
-  <li>Πρόσθεσε στον κάδο το κρύο πλέον μούλιασμα σίκαλης και τα <b data-v="levain"></b> προζύμι. Ζύμωσε σε χαμηλή ταχύτητα 3-4 λεπτά μέχρι να γίνει ομοιόμορφη μάζα.</li>
-  <li>Πρόσθεσε τα <b data-v="salt"></b> αλάτι (και τα <b data-v="yeast"></b> ξερή μαγιά διαλυμένα σε μια κουταλιά νερό, αν τα βάλεις). Ζύμωσε σε μέτρια ταχύτητα 4-5 λεπτά. Η σπέλτα παραζυμώνεται εύκολα. Σταμάτα μόλις γίνει λεία και ελαστική, μην ψάχνεις τέλειο windowpane. <time>5m</time></li>
-  <li>Άσε τη ζύμη σκεπασμένη στους ~24°C. Στα πρώτα 90 λεπτά κάνε 3 coil folds ανά 30 λεπτά. Σταμάτα όταν φουσκώσει 50-60%. Με σίκαλη και σπέλτα το παραφούσκωμα δεν επανορθώνεται. Πήγαινε με το μάτι, όχι με το ρολόι. <time>3h 30m</time></li>
-  <li>Άδειασε σε ελαφρώς αλευρωμένο πάγκο και χώρισε σε <b data-v="loaves"></b> κομμάτια των <b data-v="weight"></b>. Προσχημάτισε χαλαρά σε μπάλες και άσε να ξεκουραστούν σκεπασμένα. <time>20m</time></li>
-  <li>Σχημάτισε σφιχτά boule ή batard και βάλε σε αλευρωμένα μπανέτον με τη ραφή προς τα πάνω. Για το αλεύρωμα του μπανέτον χρησιμοποίησε ρυζάλευρο ή λίγη σίκαλη, κολλάει λιγότερο.</li>
-  <li>Σε σακούλα, στο ψυγείο (4-5°C) για 10-14 ώρες. Ψήνεις κατευθείαν από το κρύο, χωρίς να έρθουν σε θερμοκρασία δωματίου. <time>12h</time></li>
-  <li>Βάλε τη γάστρα (Dutch oven) μέσα στον φούρνο και ζέστανε στους 250°C. <time>50m</time></li>
-  <li>Αναποδογύρισε το καρβέλι σε χαρτί, χάραξε βαθιά με λεπίδα και ψήσε στους 250°C με το καπάκι κλειστό. <time>20m</time></li>
-  <li>Βγάλε το καπάκι, ρίξε στους 230°C και συνέχισε μέχρι να πάρει σκούρο χρώμα. Εσωτερική θερμοκρασία 96-98°C. <time>25m</time></li>
-  <li>Σε σχάρα, τουλάχιστον 3 ώρες πριν το κόψεις. Με σίκαλη η ψίχα σταθεροποιείται αργά. Αν το κόψεις ζεστό, θα είναι κολλώδης. <time>3h</time></li>
+<div class="steps-heading"><h2>Βήματα</h2><button id="resetSteps" type="button">Καθάρισε</button></div>
+<ol id="steps" role="list">
+  <li><label><input type="checkbox"><span class="step-text">Τάισε το προζύμι 4-8 ώρες νωρίτερα ώστε να είναι στο peak του όταν ξεκινήσεις: διπλασιασμένο, φουσκωτό, με θολωτή επιφάνεια. Χρειάζεσαι <b data-v="levain"></b> ενεργό προζύμι.</span></label></li>
+  <li><label><input type="checkbox"><span class="step-text">Ρίξε τα <b data-v="rye"></b> χοντρή σίκαλη σε μπολ και περίχυσε με <b data-v="soakW"></b> νερό στους ~70°C. Ανακάτεψε σε χυλό, σκέπασε και άσε να κρυώσει στους ~30°C. Η χοντροαλεσμένη σίκαλη ρουφάει νερό αργά. Χωρίς αυτό το βήμα θα τραβήξει υγρασία αργότερα και θα βγει στεγνή ψίχα. <time datetime="PT1H">1h</time></span></label></li>
+  <li><label><input type="checkbox"><span class="step-text">Στον κάδο ανάμειξε <b data-v="spelt"></b> σπέλτα και <b data-v="ww"></b> σταρένιο ολικής με τα υπόλοιπα <b data-v="mainW"></b> νερό, μέχρι να μη μείνει στεγνό αλεύρι. Σκέπασε και άσε το να ξεκουραστεί. <time datetime="PT40M">40m</time></span></label></li>
+  <li><label><input type="checkbox"><span class="step-text">Πρόσθεσε στον κάδο το κρύο πλέον μούλιασμα σίκαλης και τα <b data-v="levain"></b> προζύμι. Ζύμωσε σε χαμηλή ταχύτητα 3-4 λεπτά μέχρι να γίνει ομοιόμορφη μάζα.</span></label></li>
+  <li><label><input type="checkbox"><span class="step-text">Πρόσθεσε τα <b data-v="salt"></b> αλάτι (και τα <b data-v="yeast"></b> ξερή μαγιά διαλυμένα σε μια κουταλιά νερό, αν τα βάλεις). Ζύμωσε σε μέτρια ταχύτητα 4-5 λεπτά. Η σπέλτα παραζυμώνεται εύκολα. Σταμάτα μόλις γίνει λεία και ελαστική, μην ψάχνεις τέλειο windowpane. <time datetime="PT5M">5m</time></span></label></li>
+  <li><label><input type="checkbox"><span class="step-text">Άσε τη ζύμη σκεπασμένη στους ~24°C. Στα πρώτα 90 λεπτά κάνε 3 coil folds ανά 30 λεπτά. Σταμάτα όταν φουσκώσει 50-60%. Με σίκαλη και σπέλτα το παραφούσκωμα δεν επανορθώνεται. Πήγαινε με το μάτι, όχι με το ρολόι. <time datetime="PT3H30M">3h 30m</time></span></label></li>
+  <li><label><input type="checkbox"><span class="step-text">Άδειασε σε ελαφρώς αλευρωμένο πάγκο και χώρισε σε <b data-v="loaves"></b> κομμάτια των <b data-v="weight"></b>. Προσχημάτισε χαλαρά σε μπάλες και άσε να ξεκουραστούν σκεπασμένα. <time datetime="PT20M">20m</time></span></label></li>
+  <li><label><input type="checkbox"><span class="step-text">Σχημάτισε σφιχτά boule ή batard και βάλε σε αλευρωμένα μπανέτον με τη ραφή προς τα πάνω. Για το αλεύρωμα του μπανέτον χρησιμοποίησε ρυζάλευρο ή λίγη σίκαλη, κολλάει λιγότερο.</span></label></li>
+  <li><label><input type="checkbox"><span class="step-text">Σε σακούλα, στο ψυγείο (4-5°C) για 10-14 ώρες. Ψήνεις κατευθείαν από το κρύο, χωρίς να έρθουν σε θερμοκρασία δωματίου. <time datetime="PT12H">12h</time></span></label></li>
+  <li><label><input type="checkbox"><span class="step-text">Βάλε τη γάστρα (Dutch oven) μέσα στον φούρνο και ζέστανε στους 250°C. <time datetime="PT50M">50m</time></span></label></li>
+  <li><label><input type="checkbox"><span class="step-text">Αναποδογύρισε το καρβέλι σε χαρτί, χάραξε βαθιά με λεπίδα και ψήσε στους 250°C με το καπάκι κλειστό. <time datetime="PT20M">20m</time></span></label></li>
+  <li><label><input type="checkbox"><span class="step-text">Βγάλε το καπάκι, ρίξε στους 230°C και συνέχισε μέχρι να πάρει σκούρο χρώμα. Εσωτερική θερμοκρασία 96-98°C. <time datetime="PT25M">25m</time></span></label></li>
+  <li><label><input type="checkbox"><span class="step-text">Σε σχάρα, τουλάχιστον 3 ώρες πριν το κόψεις. Με σίκαλη η ψίχα σταθεροποιείται αργά. Αν το κόψεις ζεστό, θα είναι κολλώδης. <time datetime="PT3H">3h</time></span></label></li>
 </ol>
 
+<section class="card notes">
 <h2>Σημειώσεις</h2>
 <ul>
   <li>Η ζύμη θα σου φανεί πιο κολλώδης απ' ό,τι με σκέτη σπέλτα. Φταίει η σίκαλη, μην προσθέσεις αλεύρι. Βρέχε τα χέρια σου στα folds.</li>
   <li>Μαγιά: αν κάνεις overnight retard, κράτα τη στη δόση του πίνακα ή κόψ' την τελείως. Με σίκαλη η ζύμωση τρέχει έτσι κι αλλιώς πιο γρήγορα.</li>
   <li>Τα <b data-v="weight"></b> ζύμης δίνουν καρβέλι περίπου <b data-v="baked"></b>. Αν θες συγκεκριμένο ψημένο βάρος, διαίρεσε με 0.87 και βάλε το στο πεδίο "Βάρος ζύμης".</li>
 </ul>
+</section>
+</main>
 
 <script>
 const $ = id => document.getElementById(id);
@@ -123,6 +160,22 @@ function calc() {
 
 $("f").addEventListener("input", calc);
 calc();
+
+const stepBoxes = [...document.querySelectorAll('#steps input[type="checkbox"]')];
+const progressKey = "bread-step-progress";
+try {
+  const saved = JSON.parse(localStorage.getItem(progressKey));
+  if (Array.isArray(saved)) stepBoxes.forEach((box, i) => { box.checked = saved[i] === true; });
+} catch { /* Progress stays usable when storage is unavailable or invalid. */ }
+for (const box of stepBoxes) box.addEventListener("change", () => {
+  try { localStorage.setItem(progressKey, JSON.stringify(stepBoxes.map(b => b.checked))); }
+  catch { /* Keep the current ticks when storage is unavailable. */ }
+});
+$("resetSteps").addEventListener("click", () => {
+  stepBoxes.forEach(box => { box.checked = false; });
+  try { localStorage.removeItem(progressKey); }
+  catch { /* The visible ticks are still cleared. */ }
+});
 </script>
 </body>
 </html>
