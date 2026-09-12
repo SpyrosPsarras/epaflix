@@ -114,9 +114,6 @@ openai-compatibility:
       - name: "qwen3.5:9b"
         alias: "ollama-qwen3.5-9b"
         display-name: "Qwen 3.5 9B (Ollama)"
-      - name: "gemma4:12b-it-qat"
-        alias: "ollama-gemma4-12b"
-        display-name: "Gemma 4 12B IT QAT (Ollama)"
       - name: "gemma4:e4b"
         alias: "ollama-gemma4-e4b"
         display-name: "Gemma 4 E4B (Ollama)"
@@ -134,6 +131,55 @@ $ollama$,
    WHERE id = 'config';
 
   RAISE NOTICE 'openai-compatibility: ollama appended';
+END $$;
+
+-- Drop the gemma4:12b-it-qat model that the 2026-08-09 seed (#901) carried. The
+-- 8 GB RTX 2070 SUPER on TrueNAS cannot hold it resident (#902): a 6.7 GiB blob
+-- spills layers to CPU and the resulting minute-long completions look exactly
+-- like the dead-GPU symptom that issue started with. The seed above no longer
+-- emits it, but that block is a no-op on any row that already carries
+-- openai-compatibility, so this strip runs every start and removes the stanza
+-- from the live row without waiting for a rebuild.
+--
+-- The live row carries a `max-context-length` line under every model that the
+-- seed format does not emit (verified against config_store 2026-09-12), so the
+-- match includes it with a tolerant number: a 3-line strip would leave it
+-- orphaned and YAML would see a duplicate key on the next model. Literal match
+-- on what the row holds. If the model is present but this text does not match
+-- (another re-serialization), the block raises and fails the initContainer: git
+-- owning the removal means it must converge, not silently leave a model the
+-- card cannot hold.
+DO $$
+DECLARE
+  c    text;
+  orig text;
+BEGIN
+  IF to_regclass('public.config_store') IS NULL THEN RETURN; END IF;
+  SELECT content INTO c FROM public.config_store WHERE id = 'config';
+  IF c IS NULL THEN RETURN; END IF;
+  orig := c;
+
+  IF position('gemma4:12b-it-qat' in c) = 0 THEN
+    RAISE NOTICE 'gemma4:12b-it-qat not present - nothing to drop';
+    RETURN;
+  END IF;
+
+  c := regexp_replace(
+         c,
+         '\n      - name: "gemma4:12b-it-qat"\n        alias: "ollama-gemma4-12b"\n        display-name: "Gemma 4 12B IT QAT \(Ollama\)"\n        max-context-length: [0-9]+',
+         '',
+         'n');
+
+  IF c = orig THEN
+    RAISE EXCEPTION 'gemma4:12b-it-qat is in the config row but the expected stanza did not match - the row text has drifted from the seed format, reconcile by hand';
+  END IF;
+
+  UPDATE public.config_store
+     SET content = c,
+         updated_at = now()
+   WHERE id = 'config';
+
+  RAISE NOTICE 'gemma4:12b-it-qat dropped from the ollama model list';
 END $$;
 
 -- Register OpenRouter as a second openai-compatibility upstream.
