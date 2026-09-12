@@ -101,3 +101,7 @@ artifacts/
 # git history for ~6 months (#730). Untracking stops further copies; it does
 # NOT remove them from history - rotation is the remedy.
 2-k3s/08.servarr/jellyseerr/backups/
+
+# Bare rules file generated from custom-alerts.yaml by the extraction step
+# documented at the top of custom-alerts-tests.yaml. Regenerate after edits.
+2-k3s/10.observability/alertmanager-config/custom-alerts-rules.yaml
