@@ -1,9 +1,38 @@
+# promtool cannot read the PrometheusRule CR. Generate the bare rules file, then run:
+#   python3 -c "import yaml;yaml.safe_dump(yaml.safe_load(open('custom-alerts.yaml'))['spec'],open('custom-alerts-rules.yaml','w'))"
+#   promtool test rules custom-alerts-tests.yaml
 rule_files:
   - custom-alerts-rules.yaml
 
 evaluation_interval: 1m
 
 tests:
+  - interval: 1m
+    input_series:
+      - series: 'promtail_custom_credential_lines_redacted_total{namespace="observability",pod="promtail-abc",container="promtail",exported_namespace="traefik-system",exported_container="traefik",exported_pod="traefik-6444675d5-x6mdf"}'
+        values: "0+1x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: CredentialRedactedFromLogs
+        exp_alerts:
+          - exp_labels:
+              exported_namespace: traefik-system
+              exported_container: traefik
+              severity: warning
+              component: security
+            exp_annotations:
+              summary: "An app logged a credential in traefik-system (redacted before Loki)"
+              description: "15 log line(s) from traefik-system/traefik contained a credential-shaped key=value in the last 15m. promtail redacted the value before pushing, so it is NOT in Loki - but it IS in the pod's own stdout and visible via `kubectl logs`. The exported_* labels name the offending app; plain namespace/pod/container are promtail itself (#911). Most likely causes: sonarr/radarr/prowlarr restarting and logging their Postgres connection string (#634), or traefik access lines carrying jellyfin's query-string ApiKey (#702). If it is a new offender treat that credential as exposed and rotate it. Do NOT grep Loki for the literal value."
+
+  - interval: 1m
+    input_series:
+      - series: 'promtail_custom_credential_lines_redacted_total{namespace="observability",pod="promtail-abc",container="promtail",exported_namespace="servarr",exported_container="sonarr",exported_pod="sonarr-68855b8c7f-s8879"}'
+        values: "4x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: CredentialRedactedFromLogs
+        exp_alerts: []
+
   - interval: 1m
     input_series:
       - series: 'nvidia_smi_last_collect_success{job="truenas-gpu-exporter", instance="192.168.10.200"}'

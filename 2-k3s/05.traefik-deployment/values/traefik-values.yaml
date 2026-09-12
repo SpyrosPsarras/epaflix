@@ -55,6 +55,14 @@ log:
   level: INFO
 accessLog:
   enabled: true
+  fields:
+    queryParameters:
+      # Drop all query parameters from access logs (#702, #911): the jellyfin
+      # TV clients put their ApiKey in the URL, and the full URI lands in
+      # traefik's stdout (~1.4k lines/day) where `kubectl logs` can read it.
+      # promtail redacts the Loki copy, never the source. Paths, methods,
+      # statuses, routers and durations stay.
+      defaultMode: drop
 
 metrics:
   prometheus:
