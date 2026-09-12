@@ -488,7 +488,7 @@ spec:
       rules:
         - alert: CredentialRedactedFromLogs
           expr: |
-            sum by (namespace) (
+            sum by (exported_namespace, exported_container) (
               increase(promtail_custom_credential_lines_redacted_total[15m])
             ) > 0
           for: 0m
@@ -496,16 +496,18 @@ spec:
             severity: warning
             component: security
           annotations:
-            summary: "An app logged a credential in {{ $labels.namespace }} (redacted before Loki)"
+            summary: "An app logged a credential in {{ $labels.exported_namespace }} (redacted before Loki)"
             description: >-
-              {{ $value }} log line(s) in namespace {{ $labels.namespace }}
+              {{ $value }} log line(s) from {{ $labels.exported_namespace }}/{{ $labels.exported_container }}
               contained a credential-shaped key=value in the last 15m. promtail
               redacted the value before pushing, so it is NOT in Loki - but it IS
-              in the pod's own stdout and visible via `kubectl logs`. Most likely
-              cause is sonarr/radarr/prowlarr restarting and logging their Postgres
-              connection string (#634). Identify the pod, and if it is a new
-              offender treat that credential as exposed and rotate it. Do NOT grep
-              Loki for the literal value.
+              in the pod's own stdout and visible via `kubectl logs`. The exported_*
+              labels name the offending app; plain namespace/pod/container are
+              promtail itself (#911). Most likely causes: sonarr/radarr/prowlarr
+              restarting and logging their Postgres connection string (#634), or
+              traefik access lines carrying jellyfin's query-string ApiKey (#702).
+              If it is a new offender treat that credential as exposed and rotate
+              it. Do NOT grep Loki for the literal value.
 
     - name: kube-job-failed-last-run
       interval: 60s
