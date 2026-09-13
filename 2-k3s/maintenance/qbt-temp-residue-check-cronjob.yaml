@@ -1,0 +1,217 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: qbt-temp-residue-check-script
+  namespace: servarr
+data:
+  check.py: |
+    #!/usr/bin/env python3
+    """Watch for NEW redundant names under the qBittorrent temp dir (#969).
+
+    The 699.7 G of redundant temp names measured in #842 was historical: every
+    mtime fell in the 90-365 day band and nothing newer had landed. The
+    mechanism that made it is unchanged - qBittorrent moves a torrent out of
+    temp when the WHOLE torrent completes, while Sonarr and Radarr import per
+    file by hardlink. A torrent that stalls or is abandoned after its files
+    were imported keeps its temp names forever.
+
+    Rather than reconfigure a download path that currently works, this job
+    watches for the mechanism firing again. A completed file under temp that
+    carries more than one name and is younger than MAX_AGE_DAYS is exactly
+    what "an *arr imported it and the torrent never finished" looks like.
+
+    Partials (.!qB) are ignored no matter their age - a torrent still writing
+    is the normal case, not residue. Files with a single name are ignored too:
+    nothing outside temp depends on them.
+
+    REPORT ONLY. This job never unlinks, moves or writes anything, and the
+    media mount is read-only. Cleaning up what it finds is a separate, gated,
+    human-run pass: 0-truenas/scripts/temp-redundant-name-unlink.py.
+
+    Run with --selftest to exercise the classifier without touching the mount.
+
+    Exit 0 = no new residue, 1 = new residue found, 2 = could not run.
+    """
+    import os
+    import stat
+    import sys
+    import time
+
+    TEMP_DIR = os.environ.get("TEMP_DIR", "/media/downloads/temp")
+
+    MAX_AGE_DAYS = float(os.environ.get("MAX_AGE_DAYS", "90"))
+
+    PARTIAL_SUFFIX = ".!qB"
+
+    GIB = 1024.0 ** 3
+
+    DAY = 86400.0
+
+
+    def fail(msg):
+        """Abort LOUD. An unreadable mount must never look like 'all clear'."""
+        print("ERROR: " + msg, file=sys.stderr)
+        sys.exit(2)
+
+
+    def scan(root):
+        """(path, nlink, mtime, bytes) for every regular file under root.
+
+        os.walk rather than find: the job image is alpine, whose busybox find
+        has no -printf, and temp holds tens of files, not millions.
+        """
+        out = []
+        for parent, _dirs, names in os.walk(root, onerror=fail):
+            for name in names:
+                path = os.path.join(parent, name)
+                try:
+                    st = os.lstat(path)
+                except OSError:
+                    continue
+                if stat.S_ISREG(st.st_mode):
+                    out.append((path, st.st_nlink, st.st_mtime,
+                                st.st_blocks * 512))
+        return out
+
+
+    def residue(files, now, max_age_days):
+        """The files that mean the mechanism fired again, newest first.
+
+        Three conditions, all required: more than one name (something outside
+        temp holds the same inode), not a partial (the download finished), and
+        young enough that it is not part of the historical set #969 cleaned up.
+        """
+        found = [f for f in files
+                 if f[1] > 1
+                 and not f[0].endswith(PARTIAL_SUFFIX)
+                 and (now - f[2]) < max_age_days * DAY]
+        return sorted(found, key=lambda f: f[2], reverse=True)
+
+
+    def selftest():
+        now = 1_000_000_000.0
+        day = DAY
+        files = [
+            ("/t/new.mkv", 2, now - 5 * day, 4096),
+            ("/t/old.mkv", 2, now - 200 * day, 4096),
+            ("/t/part.mkv" + PARTIAL_SUFFIX, 2, now - 1 * day, 2048),
+            ("/t/alone.mkv", 1, now - 1 * day, 1024),
+            ("/t/edge.mkv", 2, now - 89.5 * day, 512),
+        ]
+        found = residue(files, now, 90)
+        assert [f[0] for f in found] == ["/t/new.mkv", "/t/edge.mkv"], found
+
+        assert residue(files, now, 0) == []
+        assert len(residue(files, now, 365)) == 3
+
+        older = [("/t/a.mkv", 2, now - 3 * day, 1),
+                 ("/t/b.mkv", 2, now - 1 * day, 1)]
+        assert [f[0] for f in residue(older, now, 90)] == ["/t/b.mkv",
+                                                           "/t/a.mkv"]
+
+        print("selftest OK")
+        return 0
+
+
+    def main():
+        if "--selftest" in sys.argv:
+            return selftest()
+
+        if not os.path.isdir(TEMP_DIR):
+            fail("%s is not a directory - the media mount is missing or the "
+                 "temp path moved" % TEMP_DIR)
+
+        files = scan(TEMP_DIR)
+        found = residue(files, time.time(), MAX_AGE_DAYS)
+        print("=== qbittorrent temp residue check @ %s ==="
+              % time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+        print("%s: %d file(s) | threshold: younger than %.0f days"
+              % (TEMP_DIR, len(files), MAX_AGE_DAYS))
+
+        if not found:
+            print("\nOK: no completed multi-name file under temp is younger "
+                  "than %.0f days - the mechanism has not fired since."
+                  % MAX_AGE_DAYS)
+            return 0
+
+        print("\nNEW RESIDUE: %d completed file(s) under temp carry a second "
+              "name and are younger than %.0f days, totalling %.1f G:"
+              % (len(found), MAX_AGE_DAYS,
+                 sum(f[3] for f in found) / GIB))
+        now = time.time()
+        for path, nlink, mtime, size in found:
+            print("    %6.1f d  %2d names  %8.2f G  %s"
+                  % ((now - mtime) / DAY, nlink, size / GIB, path))
+
+        print("\nFAIL: the temp-residue mechanism fired again (#969). These "
+              "names free nothing if deleted - the library holds the other "
+              "name for the same inodes - so never empty temp to reclaim "
+              "space. To remove them, run the gated pass on the TrueNAS box: "
+              "0-truenas/scripts/temp-redundant-name-unlink.py (dry run "
+              "first). If this job fires repeatedly, the durable fix is to "
+              "stop qBittorrent writing to a temp path the *arrs import "
+              "from.")
+        return 1
+
+
+    if __name__ == "__main__":
+        sys.exit(main())
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: qbt-temp-residue-check
+  namespace: servarr
+  labels:
+    app: qbt-temp-residue-check
+spec:
+  schedule: "37 5 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 6
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 600
+      ttlSecondsAfterFinished: 86400  # keep 1 day
+      template:
+        metadata:
+          labels:
+            app: qbt-temp-residue-check
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: qbt-temp-residue-check
+              image: python:3.13-alpine
+              imagePullPolicy: IfNotPresent
+              command: ["python3", "/script/check.py"]
+              env:
+                - name: TEMP_DIR
+                  value: "/media/downloads/temp"
+                - name: MAX_AGE_DAYS
+                  value: "90"
+              volumeMounts:
+                - name: script
+                  mountPath: /script
+                  readOnly: true
+                - name: media
+                  mountPath: /media
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "250m"
+                  memory: "128Mi"
+          volumes:
+            - name: script
+              configMap:
+                name: qbt-temp-residue-check-script
+                defaultMode: 0555
+            - name: media
+              persistentVolumeClaim:
+                claimName: servarr-media
+                readOnly: true
