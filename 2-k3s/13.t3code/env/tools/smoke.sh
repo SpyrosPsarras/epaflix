@@ -14,6 +14,7 @@ print(imgs.pop())' "$ROOT/env/statefulset.yaml")
   trap 'docker rm -f "$name" >/dev/null 2>&1 || :' EXIT
   timeout 900 docker run --rm --name "$name" --user 1000:1000 \
     --tmpfs /tools:uid=1000,gid=1000,exec --tmpfs /scripts:uid=1000,gid=1000,exec --tmpfs /tmp:uid=1000,gid=1000,exec \
+    --tmpfs /private-agent-config:uid=1000,gid=1000 \
     -v "$ROOT:/src:ro" -e HOME=/tmp/home \
     "$image" bash /src/env/tools/smoke.sh --inner
   exit
@@ -31,6 +32,8 @@ cleanup() {
 trap cleanup EXIT
 mkdir -p "$HOME"
 install -m 0555 /src/env/files/entrypoint.sh /src/env/files/git-credential-github.sh /src/files/cliproxy-models.js /scripts/
+install -m 0555 /src/env/files/private-config.py /scripts/
+python3 /src/env/tools/private-config.test.py fixture /private-agent-config/bundle.json
 cp /src/env/tools/package.json /src/env/tools/package-lock.json /tools/
 (cd /tools && timeout 600 npm ci --no-fund --no-audit)
 pin() { node -p "require('/tools/package.json').dependencies['$1']"; }
@@ -60,6 +63,8 @@ wait_url() {
 }
 wait_url http://127.0.0.1:4096/global/health 120
 wait_url http://127.0.0.1:3773/health 180
+curl -fsS --get --data-urlencode "directory=$HOME/projects/remote" http://127.0.0.1:4096/command | node -e '
+let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{if(!JSON.parse(s).some(c=>c.name==="implement"))process.exit(1);console.log("smoke: implement command discovered");});'
 curl -fsS --max-time 5 http://127.0.0.1:3773/.well-known/t3/environment | node -e '
 let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
 const j=JSON.parse(s),p=require("/tools/package.json");

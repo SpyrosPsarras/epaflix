@@ -136,6 +136,9 @@ spec:
           volumeMounts:
             - name: home
               mountPath: /home/t3
+            - name: private-config
+              mountPath: /private-agent-config
+              readOnly: true
             - name: tools
               mountPath: /tools
               readOnly: true
@@ -165,6 +168,10 @@ spec:
             limits:
               memory: "6Gi"
       volumes:
+        - name: private-config
+          secret:
+            secretName: t3env-private-config
+            defaultMode: 0440
         - name: lock
           configMap:
             name: t3env-tools
