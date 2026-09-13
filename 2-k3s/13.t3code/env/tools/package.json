@@ -1,0 +1,11 @@
+{
+  "name": "t3env-tools",
+  "private": true,
+  "description": "Pinned CLI set for the t3env pods; regenerate with regen-lock.sh",
+  "dependencies": {
+    "t3": "0.0.40",
+    "@anthropic-ai/claude-code": "2.1.270",
+    "opencode-ai": "1.18.30",
+    "@openai/codex": "0.153.4"
+  }
+}
