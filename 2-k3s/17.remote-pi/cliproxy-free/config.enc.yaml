@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: Secret
+metadata:
+    name: cliproxy-free-config
+    namespace: remote-pi
+    labels:
+        app.kubernetes.io/name: cliproxy-free
+        app.kubernetes.io/component: proxy
+    annotations:
+        argocd.argoproj.io/sync-wave: "-2"
+type: Opaque
+stringData:
+    config.yaml: ENC[AES256_GCM,data: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,iv:dqTDMsIEPIJlJyiSPDnSSnQWY8D0FmO8X5N0QGTJUjw=,tag:7jnDd876tAiYL8NvMnb5Fw==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBUT2NieDFWTHlOcC9yd21I
+            Zjc5VkI3dTBuc05QeTV5QzRzeEhic09ra1N3CkZRZzE5OXFiZWMrNVFKakUra1hD
+            L2JRMXR6bjJ1UktYOHBvaWprT2thMEkKLS0tIFlQT0RTYnhMbmlKRHRBVVJ6bGxK
+            czNTVEhrRkZLUnVDUXlJWjlTMGJDS1UK+hV6TQ3oLVOnHid4syaJuU6Ed9kXbVMo
+            e3B4/q1/y4Rkoc+ZXvMkzr960bvjxr0SUzFvE0ZDTTDy0/ZvbGNVXQ==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1586thf5vkcdf5lcn3zwjpu8ltkwyq8efrhj8lr0vdrrt9k5f3qgsxeg7gx
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-09-13T07:02:24Z"
+    mac: ENC[AES256_GCM,data:PjsnSbY+wupwNRX/OKnynJz6Xc6k2JYGS8bWLvjR/csQxTrNCFAdyxmBzTif9HechrYsImMV7Ql0eIXnhLYHdU2HkMB9c8XLtEJQSAqQ/38SGkw1Pnv/INvQKVOTCJVc3CCIc0L7g5KljcKgmHAZ3xB8nq7c5U7xwi3GsEUm2xA=,iv:D9BnqMcFGIXj2noXo8mGcA0TU/qypaPBQr43wkIL6fA=,tag:dklH1qw9gStFqPLA9ecBow==,type:str]
+    version: 3.13.3
