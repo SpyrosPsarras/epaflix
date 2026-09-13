@@ -88,10 +88,16 @@ spec:
             - /scripts/fetch-plugin.sh
           args:
             - pi-bridge
-            # renovate: datasource=github-releases depName=abix5/pi-cliproxyapi-bridge
-            - "0.9.1"
-            - 7cfea7b47888c870acc8afca73d8f78cb8454559040c401a2aa08a870107db26
-            - abix5/pi-cliproxyapi-bridge
+            # TEMP OVERRIDE (model-token-usage): fork build of abix5/pi-cliproxyapi-bridge that registers
+            # the usage.handle sink and serves cumulative per-model token counters as the "models" field
+            # on the contract v2 usage document (consumed by the dms-cliproxy-quota widget).
+            # Revert to abix5/pi-cliproxyapi-bridge once upstream ships the usage sink (tracked in the
+            # upstream-release-watch row; drop this comment and restore the # renovate: marker then).
+            # The # renovate: marker is deliberately absent: renovate would "downgrade" the fork to
+            # upstream v0.9.1.
+            - "0.10.1"
+            - d857a114b5808ce9e9b5a9604954b265be48f9f605c0d75d6e3072cd0b703ffe
+            - SpyrosPsarras/pi-cliproxyapi-bridge
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -122,6 +128,36 @@ spec:
             - "0.3.3"
             - 6ac5c58fe2507468d08bc33d6365cfb822180ba3f37ae51e06cea884b933ca3a
             - arthur-sommer-etc/cliproxyapi-copilot-plugin
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+            - name: plugins
+              mountPath: /plugins
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "32Mi"
+            limits:
+              memory: "128Mi"
+        - name: fetch-opencode-cloak
+          image: docker.io/library/alpine:3.21
+          command:
+            - sh
+            - /scripts/fetch-plugin.sh
+          args:
+            - opencode-cloak
+            # renovate: datasource=github-releases depName=conversun/cliproxy-plugin-opencode-cloak
+            - "0.2.2"
+            - 5aaa00dc08510cbf9d8c25536886c9412d29bc8ace4824ff902223e0704b15a4
+            - conversun/cliproxy-plugin-opencode-cloak
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -198,6 +234,11 @@ spec:
                 secretKeyRef:
                   name: cliproxy-secrets
                   key: management-password
+            - name: CLIPROXY_GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: cliproxy-secrets
+                  key: github-token
             - name: PGSTORE_DSN
               value: postgresql://cliproxy:$(PG_PASSWORD)@postgres-rw.postgres-system.svc.cluster.local:5432/cliproxy?sslmode=require
             - name: PGSTORE_LOCAL_PATH

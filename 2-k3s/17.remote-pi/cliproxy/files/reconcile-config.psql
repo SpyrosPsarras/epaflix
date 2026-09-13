@@ -79,6 +79,14 @@ END $$;
 --
 -- Model names carry a colon (qwen3.5:9b), which is awkward in a client model
 -- string, so each gets a colon-free alias.
+--
+-- The last entry is the lingarr failover alias: aya-expanse:8b ALSO answers as
+-- or-minimax-m3:free, the same alias the openrouter provider below serves. The
+-- openrouter entry carries priority 10, this provider stays at the default 0,
+-- and credential selection only considers the highest healthy priority tier -
+-- so minimax serves the alias until an openrouter cooldown (its 429 daily cap),
+-- then aya takes over until the cooldown lifts. This deliberate cross-provider
+-- alias collision is the failover, not a naming accident.
 DO $$
 DECLARE
   c text;
@@ -106,9 +114,6 @@ openai-compatibility:
       - name: "qwen3.5:9b"
         alias: "ollama-qwen3.5-9b"
         display-name: "Qwen 3.5 9B (Ollama)"
-      - name: "gemma4:12b-it-qat"
-        alias: "ollama-gemma4-12b"
-        display-name: "Gemma 4 12B IT QAT (Ollama)"
       - name: "gemma4:e4b"
         alias: "ollama-gemma4-e4b"
         display-name: "Gemma 4 E4B (Ollama)"
@@ -118,11 +123,69 @@ openai-compatibility:
       - name: "aya-expanse:8b"
         alias: "ollama-aya-expanse-8b"
         display-name: "Aya Expanse 8B (Ollama)"
+      - name: "aya-expanse:8b"
+        alias: "or-minimax-m3:free"
+        display-name: "Aya Expanse 8B (Ollama, lingarr failover)"
 $ollama$,
          updated_at = now()
    WHERE id = 'config';
 
   RAISE NOTICE 'openai-compatibility: ollama appended';
+END $$;
+
+-- Drop the gemma4:12b-it-qat model that the 2026-08-09 seed (#901) carried. The
+-- 8 GB RTX 2070 SUPER on TrueNAS cannot hold it resident (#902): a 6.7 GiB blob
+-- spills layers to CPU and the resulting minute-long completions look exactly
+-- like the dead-GPU symptom that issue started with. The seed list above no
+-- longer emits it and the context-length loop below no longer names it, but the
+-- append block is a no-op on any row that already carries openai-compatibility,
+-- so this strip runs every start and removes the entry from the live row
+-- without waiting for a rebuild.
+--
+-- The max-context-length block below (#1317) writes a `max-context-length` line
+-- under every model entry on every boot, so a live entry is four lines, not
+-- three: the match includes it with a tolerant number, because a 3-line strip
+-- would leave that line orphaned and YAML would see a duplicate key on the next
+-- model. The upstream name is the unique anchor; alias and display-name are
+-- deliberately `[^"]*`, the same immunity to cosmetic UI renames the
+-- context-length block states as its convention. Every occurrence is removed,
+-- not just the first.
+--
+-- If the model name is present but this shape does not match (a structurally
+-- different entry), the block raises and fails the initContainer: git owning
+-- the removal means it must converge, not silently leave a model the card
+-- cannot hold.
+DO $$
+DECLARE
+  c    text;
+  orig text;
+BEGIN
+  IF to_regclass('public.config_store') IS NULL THEN RETURN; END IF;
+  SELECT content INTO c FROM public.config_store WHERE id = 'config';
+  IF c IS NULL THEN RETURN; END IF;
+  orig := c;
+
+  IF position('gemma4:12b-it-qat' in c) = 0 THEN
+    RAISE NOTICE 'gemma4:12b-it-qat not present - nothing to drop';
+    RETURN;
+  END IF;
+
+  c := regexp_replace(
+         c,
+         '\n      - name: "gemma4:12b-it-qat"\n        alias: "[^"]*"\n        display-name: "[^"]*"\n        max-context-length: [0-9]+',
+         '',
+         'ng');
+
+  IF c = orig THEN
+    RAISE EXCEPTION 'gemma4:12b-it-qat is in the config row but the expected entry shape did not match - the row text has drifted, reconcile by hand';
+  END IF;
+
+  UPDATE public.config_store
+     SET content = c,
+         updated_at = now()
+   WHERE id = 'config';
+
+  RAISE NOTICE 'gemma4:12b-it-qat dropped from the ollama model list';
 END $$;
 
 -- Register OpenRouter as a second openai-compatibility upstream.
@@ -150,6 +213,18 @@ END $$;
 -- for capacity already paid for. Every alias carries an `or-` prefix, the same
 -- convention the ollama entries use, so an OpenRouter model can never collide
 -- with a native account's model ID no matter what OpenRouter renames upstream.
+--
+-- minimax-m3:free exists because lingarr (08.servarr) pins it as its only
+-- translation model via reconcile-ai-provider.sql. It rides OpenRouter's shared
+-- free-tier daily cap, so 429 bursts through this alias are expected, not an
+-- outage. The entry was first added through the management UI and is now
+-- git-owned here; the UI copy carried a wrong display-name until reconciled.
+-- Its alias is the one deliberate exception to colon-free naming: the :free
+-- suffix mirrors OpenRouter's own slug and the entry has served under it.
+-- priority 10 keeps this provider the preferred credential for the alias; the
+-- ollama provider serves the same alias at the default priority 0 as lingarr's
+-- failover target, and the selector only ever mixes tiers when the higher one
+-- is cooling down.
 --
 -- Unlike the ollama api-key above, this one IS a secret. It arrives as
 -- OPENROUTER_API_KEY on the initContainer from cliproxy-secrets, and is read
@@ -246,6 +321,7 @@ BEGIN
   END IF;
 
   entry := replace($openrouter$  - name: "openrouter"
+    priority: 10
     base-url: "https://openrouter.ai/api/v1"
     api-key-entries:
       - api-key: "__OPENROUTER_API_KEY__"
@@ -273,7 +349,10 @@ BEGIN
         display-name: "Qwen3.8 27B (OpenRouter)"
       - name: "minimax/minimax-m3"
         alias: "or-minimax-m3"
-        display-name: "MiniMax M3 (OpenRouter)"$openrouter$, '__OPENROUTER_API_KEY__', k);
+        display-name: "MiniMax M3 (OpenRouter)"
+      - name: "minimax/minimax-m3:free"
+        alias: "or-minimax-m3:free"
+        display-name: "MiniMax M3 Free (OpenRouter)"$openrouter$, '__OPENROUTER_API_KEY__', k);
 
   c := regexp_replace(c,
                       '^openai-compatibility:[ \t]*$',
@@ -286,6 +365,77 @@ BEGIN
    WHERE id = 'config';
 
   RAISE NOTICE 'openai-compatibility: openrouter spliced in';
+END $$;
+
+-- Advertise each openai-compatibility model's real context window (#1317).
+--
+-- CLIProxyAPI has no metadata for these upstreams, so its model catalog reports
+-- a 272000 context for every one of them. OpenCode reads that catalog and
+-- compacts a session once it reaches context minus output, so a wrong number
+-- either compacts far too early (Ollama serves 8192) or lets a session grow
+-- until the upstream rejects it. `max-context-length` is the per-model override
+-- the schema provides for exactly this (config.example.yaml).
+--
+-- Unlike the two splice blocks above, this one runs on EVERY boot and rewrites
+-- the value in place, because both providers are already in the live row and
+-- their insert-once guards will never touch a model entry again. Each model is
+-- anchored on its upstream `name` AND `alias` lines together: aya-expanse:8b
+-- serves two aliases and or-minimax-m3:free is served by two providers, so
+-- neither line alone is unique. An entry the live row does not carry is a
+-- no-op, not an error - the openrouter list has been trimmed through the UI
+-- before and a missing model is not a broken config.
+--
+-- Values: Ollama numbers are what the server on 192.168.10.200 actually serves
+-- (/api/ps context_length after a load, 2026-09-10), which is its default
+-- num_ctx, not the models' native maximum. OpenRouter numbers are
+-- context_length from openrouter.ai/api/v1/models on the same date.
+-- minimax-m3:free is deliberately absent: OpenRouter publishes no context for
+-- the free variant, and a guess that is too high is worse than the default.
+DO $$
+DECLARE
+  c    text;
+  orig text;
+  want record;
+BEGIN
+  IF to_regclass('public.config_store') IS NULL THEN RETURN; END IF;
+  SELECT content INTO c FROM public.config_store WHERE id = 'config';
+  IF c IS NULL THEN RETURN; END IF;
+  orig := c;
+
+  FOR want IN
+    SELECT * FROM (VALUES
+      ('qwen3.5:9b',                      'ollama-qwen3.5-9b',     8192),
+      ('gemma4:e4b',                      'ollama-gemma4-e4b',     8192),
+      ('lfm2.5:8b',                       'ollama-lfm2.5-8b',      8192),
+      ('aya-expanse:8b',                  'ollama-aya-expanse-8b', 8192),
+      ('aya-expanse:8b',                  'or-minimax-m3:free',    8192),
+      ('z-ai/glm-5.3-flash',              'or-glm-5.3-flash',      1310720),
+      ('z-ai/glm-5.3',                    'or-glm-5.3',            1310720),
+      ('google/gemini-3.7-flash',         'or-gemini-3.7-flash',   1048576),
+      ('deepseek/deepseek-v4-flash-0731', 'or-deepseek-v4-flash',  1310720),
+      ('deepseek/deepseek-v4-pro-0813',   'or-deepseek-v4-pro',    1048576),
+      ('qwen/qwen3.8-max',                'or-qwen3.8-max',        1000000),
+      ('qwen/qwen3.8-27b',                'or-qwen3.8-27b',        1000000),
+      ('minimax/minimax-m3',              'or-minimax-m3',         1048576)
+    ) AS t(upstream, alias, ctx)
+  LOOP
+    -- Match the three-line entry plus an existing override if there is one, and
+    -- write the entry back with the wanted override. \1 carries the display-name.
+    -- The names go into a regex, so their dots are escaped first; a bare `.`
+    -- would also match `qwen3-5:9b`.
+    c := regexp_replace(c,
+           '^(      - name: "' || replace(want.upstream, '.', '\.') || E'"\n        alias: "' || replace(want.alias, '.', '\.') || E'"\n        display-name: "[^"]*"\n)'
+             || E'(        max-context-length: [0-9]+\n)?',
+           E'\\1        max-context-length: ' || want.ctx || E'\n',
+           'n');
+  END LOOP;
+
+  IF c IS DISTINCT FROM orig THEN
+    UPDATE public.config_store SET content = c, updated_at = now() WHERE id = 'config';
+    RAISE NOTICE 'openai-compatibility: max-context-length reconciled';
+  ELSE
+    RAISE NOTICE 'openai-compatibility: max-context-length already current';
+  END IF;
 END $$;
 
 -- Enable the plugins (#858 pi-bridge, plus the GitHub Copilot provider). Edits
@@ -307,18 +457,19 @@ END $$;
 -- `allow_all_api_keys` keeps quota readable by the same client key used for
 -- model calls - the plugin's whole point - and never exposes the management key.
 --
--- The Copilot entry carries only the two non-default values. Every other field
+-- The Copilot entry carries only the needed overrides. Every other field
 -- the plugin's install doc lists (github_client_id, the three base URLs, the
 -- three timeouts) is already that exact value in the plugin's own
 -- DefaultConfig(), so repeating them here would only be a second copy to keep in
--- sync. `excluded_model_prefixes` keeps Copilot's Claude and Gemini re-offerings
--- from colliding with the native Anthropic and Gemini OAuth accounts, which own
--- those model IDs here; drop a line to let Copilot serve them too.
+-- sync. `excluded_model_prefixes` keeps Claude, Gemini, GPT and Codex model IDs
+-- out of Copilot's shared routing pool. GPT/Codex requests use the Codex OAuth
+-- accounts; these models are unavailable through Copilot for all clients.
 DO $$
 DECLARE
   c text;
   n integer;
   want record;
+  store_auth text := E'    - match: "https://api.github.com/"\n      apply-to: ["metadata"]\n      type: github-token\n      token-env: "CLIPROXY_GITHUB_TOKEN"';
 BEGIN
   -- First boot: the proxy has not seeded the table yet. Without this the block
   -- raises undefined_table and CrashLoops the initContainer on an empty
@@ -340,6 +491,19 @@ BEGIN
   c := regexp_replace(c, '^  enabled:[ \t]*false[ \t]*$', '  enabled: true', 'n');
   c := regexp_replace(c, '^  dir:[ \t]*"plugins"[ \t]*$', '  dir: "/CLIProxyAPI/plugins"', 'n');
 
+  -- Authenticate GitHub release metadata requests; leave artifact hosts unauthenticated.
+  IF NOT EXISTS (SELECT 1 FROM regexp_matches(c, '^[ \t]+token-env:[ \t]*"?CLIPROXY_GITHUB_TOKEN"?[ \t]*$', 'n')) THEN
+    IF EXISTS (SELECT 1 FROM regexp_matches(c, '^  store-auth:[ \t]*(\[\])?[ \t]*$', 'n')) THEN
+      c := regexp_replace(c, '^  store-auth:[ \t]*(\[\])?[ \t]*$',
+                          E'  store-auth:\n' || store_auth, 'n');
+    ELSIF EXISTS (SELECT 1 FROM regexp_matches(c, '^  store-auth:', 'n')) THEN
+      RAISE EXCEPTION 'unsupported plugins.store-auth format - reconcile by hand';
+    ELSE
+      c := regexp_replace(c, '^plugins:[ \t]*$',
+                          E'plugins:\n  store-auth:\n' || store_auth, 'n');
+    END IF;
+  END IF;
+
   -- `configs:` is `{}` on a freshly seeded row and a mapping once anything has
   -- been configured through the UI. Handle both; inserting straight after the
   -- `configs:` line keeps the replacement a single anchored line either way, and
@@ -348,8 +512,16 @@ BEGIN
     SELECT * FROM (VALUES
       ('pi-bridge',
        E'    pi-bridge:\n      enabled: true\n      priority: 3\n      allow_all_api_keys: true'),
+      -- Native Codex clients send bare model IDs. Keep those out of Copilot's
+      -- shared routing pool so they consume only the Codex subscription.
       ('cliproxyapi-copilot',
-       E'    cliproxyapi-copilot:\n      enabled: true\n      priority: 100\n      excluded_model_prefixes:\n        - "claude-"\n        - "gemini-"')
+       E'    cliproxyapi-copilot:\n      enabled: true\n      priority: 100\n      excluded_model_prefixes:\n        - "claude-"\n        - "gemini-"\n        - "gpt-"\n        - "codex-"'),
+      -- Request interceptor: rewrites OpenCode's Claude requests to carry a
+      -- Claude Code billing header so the OAuth subscription is not flagged as
+      -- third-party. Only `enabled` is set; its single option
+      -- (claude_code_user_agent) ships with a working default.
+      ('opencode-cloak',
+       E'    opencode-cloak:\n      enabled: true')
     ) AS t(id, cfg)
   LOOP
     CONTINUE WHEN EXISTS (SELECT 1 FROM regexp_matches(c, '^\s*' || want.id || ':[ \t]*$', 'n'));
@@ -367,7 +539,7 @@ BEGIN
          updated_at = now()
    WHERE id = 'config';
 
-  RAISE NOTICE 'plugins: pi-bridge and cliproxyapi-copilot reconciled';
+  RAISE NOTICE 'plugins: pi-bridge, cliproxyapi-copilot and opencode-cloak reconciled';
 END $$;
 
 -- Request payload logging (#1007). `request-log: true` makes the proxy write one
@@ -458,7 +630,8 @@ END $$;
 -- Prove it, and fail the initContainer if either value is not what git wants.
 DO $$
 DECLARE
-  c text;
+  c   text;
+  n   integer;
 BEGIN
   -- First boot: the proxy has not seeded the table yet. Without this the block
   -- raises undefined_table and CrashLoops the initContainer on an empty
@@ -489,6 +662,9 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM regexp_matches(c, '^\s*cliproxyapi-copilot:[ \t]*$', 'n')) THEN
     RAISE EXCEPTION 'plugins.configs.cliproxyapi-copilot is missing';
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM regexp_matches(c, '^\s*opencode-cloak:[ \t]*$', 'n')) THEN
+    RAISE EXCEPTION 'plugins.configs.opencode-cloak is missing';
+  END IF;
 
   -- Both openai-compatibility providers, and one alias from each, so a splice
   -- that lands the entry but mangles the model list still fails the container.
@@ -500,6 +676,25 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM regexp_matches(c, '^        alias: "or-glm-5.3-flash"[ \t]*$', 'n')) THEN
     RAISE EXCEPTION 'openai-compatibility: openrouter model list did not survive the splice';
+  END IF;
+  -- lingarr's pinned translation model; its absence would not fail the proxy
+  -- itself, which is exactly why it gets its own line here. EXACTLY TWO
+  -- providers must serve the alias: openrouter (priority 10) as primary, the
+  -- ollama provider as cooldown fallback. Counting matches instead of
+  -- anchoring a display-name keeps this immune to cosmetic UI renames.
+  SELECT count(*) INTO n
+    FROM regexp_matches(c, '^        alias: "or-minimax-m3:free"[ \t]*$', 'gn');
+  IF n <> 2 THEN
+    RAISE EXCEPTION 'openai-compatibility: or-minimax-m3:free must be served by exactly two providers (openrouter + ollama failover), found %', n;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM regexp_matches(c, '^      - name: "minimax/minimax-m3:free"[ \t]*$', 'n')) THEN
+    RAISE EXCEPTION 'openai-compatibility: the openrouter minimax-m3:free model is missing';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM regexp_matches(c, '^    priority: 10[ \t]*$', 'n')) THEN
+    RAISE EXCEPTION 'openai-compatibility: the openrouter provider lost its priority: 10 failover marking';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM regexp_matches(c, E'^        alias: "or-glm-5.3-flash"\n        display-name: "[^"]*"\n        max-context-length: 1310720[ \t]*$', 'n')) THEN
+    RAISE EXCEPTION 'openai-compatibility: or-glm-5.3-flash carries no max-context-length after reconcile';
   END IF;
   -- An empty api-key would list models and 401 on every call. Catch it here
   -- too, not just at write time, in case a later edit blanks it.
@@ -531,5 +726,5 @@ BEGIN
     RAISE EXCEPTION 'logging-to-file is true - that takes the access log off stdout and blinds Loki; see #1007';
   END IF;
 
-  RAISE NOTICE 'verified: allow-remote true, auth-dir /var/lib/cliproxy/pgstore/auths, pi-bridge and cliproxyapi-copilot enabled, openai-compatibility ollama + openrouter present, request-log true capped at 256MB, logging-to-file false, usage-statistics-enabled true';
+  RAISE NOTICE 'verified: allow-remote true, auth-dir /var/lib/cliproxy/pgstore/auths, pi-bridge, cliproxyapi-copilot and opencode-cloak enabled, openai-compatibility ollama + openrouter present, request-log true capped at 256MB, logging-to-file false, usage-statistics-enabled true';
 END $$;

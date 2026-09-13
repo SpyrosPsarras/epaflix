@@ -4,7 +4,7 @@ kind: Deployment
 metadata:
   name: vpn-picker
   annotations:
-    secret.reloader.stakater.com/reload: "airvpn-api-key"
+    secret.reloader.stakater.com/reload: "airvpn-api-key,vpn-picker-intake-token"
   namespace: servarr
   labels:
     app: vpn-picker
@@ -34,6 +34,11 @@ spec:
                 secretKeyRef:
                   name: airvpn-api-key
                   key: airvpn_api_key
+            - name: VPN_PICKER_INTAKE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: vpn-picker-intake-token
+                  key: intake_token
             - name: VPN_PICKER_COUNTRIES
               value: "nl,de,se"
             - name: VPN_PICKER_MAX_LOAD

@@ -1,47 +1,41 @@
 #!/usr/bin/env python3
-"""Writes the OpenCode config for the t3code guest: cliproxy as an
-openai-compatible provider with Spyros' Zed model set. The API key comes
-from the T3 env file (never printed)."""
+"""Configure CLIProxyAPI without replacing the user's OpenCode settings."""
 import json
-
-env = {}
-for line in open("/etc/t3code/t3code.env"):
-    line = line.strip()
-    if line.startswith("ANTHROPIC_AUTH_TOKEN="):
-        v = line.split("=", 1)[1]
-        env["token"] = v[1:-1] if v.startswith("'") and v.endswith("'") else v
-    if line.startswith("ANTHROPIC_BASE_URL="):
-        env["base"] = line.split("=", 1)[1].strip("'\"")
-
-models = {
-    "or-glm-5.3-flash": "GLM 5.3 Flash",
-    "or-glm-5.3": "GLM 5.3",
-    "gpt-5.6-terra": "GPT Terra",
-    "gpt-5.6-sol": "GPT Sol",
-    "gpt-5.6-luna": "GPT Luna",
-    "or-gemini-3.7-flash": "Gemini 3.7 Flash",
-    "or-deepseek-v4-flash": "DeepSeek V4 Flash",
-    "or-deepseek-v4-pro": "DeepSeek V4 Pro",
-    "or-qwen3.8-max": "Qwen 3.8 Max",
-    "or-qwen3.8-27b": "Qwen 3.8 27B",
-    "or-minimax-m3": "MiniMax M3",
-}
-cfg = {
-    "$schema": "https://opencode.ai/config.json",
-    "provider": {
-        "cliproxy": {
-            "npm": "@ai-sdk/openai-compatible",
-            "name": "Cliproxy",
-            "options": {
-                "baseURL": "https://cliproxy.epaflix.com/v1",
-                "apiKey": env["token"],
-            },
-            "models": {mid: {"name": name} for mid, name in models.items()},
-        }
-    },
-    "model": "cliproxy/or-glm-5.3-flash",
-}
 import os
-os.makedirs("/home/spyros/.config/opencode", exist_ok=True)
-json.dump(cfg, open("/home/spyros/.config/opencode/opencode.json", "w"), indent=2)
-print("opencode.json written with", len(models), "models")
+from pathlib import Path
+import tempfile
+
+path = Path.home() / ".config/opencode/opencode.json"
+cfg = json.loads(path.read_text()) if path.exists() else {}
+cfg.setdefault("$schema", "https://opencode.ai/config.json")
+provider = cfg.setdefault("provider", {}).setdefault("cliproxy", {})
+provider.update(npm="@ai-sdk/openai-compatible", name="CLIProxyAPI")
+provider.setdefault("options", {}).update(
+    baseURL="{env:ANTHROPIC_BASE_URL}/v1",
+    apiKey="{env:ANTHROPIC_AUTH_TOKEN}",
+)
+# The config hook supplies the catalog each time OpenCode loads a workspace.
+provider.pop("models", None)
+cfg.setdefault("model", "cliproxy/or-glm-5.3-flash")
+cfg["enabled_providers"] = ["cliproxy"]
+cfg.setdefault("mcp", {}).setdefault("keepass", {
+    "type": "local", "command": ["/usr/local/bin/keepass-mcp"], "enabled": True,
+})
+skill_path = str(Path.home() / ".claude/skills")
+skill_paths = cfg.setdefault("skills", {}).setdefault("paths", [])
+if skill_path not in skill_paths:
+    skill_paths.append(skill_path)
+
+# Install on setup and daily refresh, before removing the old static catalog.
+plugins_dir = path.parent / "plugins"
+plugins_dir.mkdir(parents=True, exist_ok=True)
+with tempfile.NamedTemporaryFile(mode="w", dir=plugins_dir, delete=False) as hook:
+    hook.write(Path(__file__).with_name("cliproxy-models.js").read_text())
+    os.fchmod(hook.fileno(), 0o644)
+os.replace(hook.name, plugins_dir / "cliproxy-models.js")
+path.parent.mkdir(parents=True, exist_ok=True)
+with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as out:
+    json.dump(cfg, out, indent=2)
+    out.write("\n")
+os.replace(out.name, path)
+print("OpenCode configured for the CLIProxyAPI catalog")

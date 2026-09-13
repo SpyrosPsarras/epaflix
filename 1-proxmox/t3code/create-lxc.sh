@@ -16,7 +16,6 @@ SSH_ARGS=()
 pct create "$CT_ID" "$CT_TEMPLATE" \
   --hostname t3code \
   --unprivileged 1 \
-  --cores 4 \
   --memory 8192 \
   --swap 8192 \
   --rootfs "${STORAGE}:64" \
