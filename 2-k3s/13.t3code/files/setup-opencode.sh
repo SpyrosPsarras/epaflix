@@ -4,7 +4,7 @@
 set -euo pipefail
 
 DIR=$(cd "$(dirname "$0")" && pwd)
-. "$DIR/../versions.env"
+OPENCODE_VERSION=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["dependencies"]["opencode-ai"])' "$DIR/../env/tools/package.json")
 npm i -g "opencode-ai@$OPENCODE_VERSION" >/dev/null 2>&1
 echo "opencode installed: $(opencode --version 2>/dev/null | head -1)"
 
