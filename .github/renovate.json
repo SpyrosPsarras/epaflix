@@ -14,6 +14,14 @@
   "commitMessagePrefix": "[renovate]",
   "packageRules": [
     {
+      "description": "Shared T3 pod/LXC CLI pins. Native npm updates the package and lock together; ArgoCD rolls merged updates. Patch automerge follows the repo policy.",
+      "matchManagers": ["npm"],
+      "matchFileNames": ["2-k3s/13.t3code/env/tools/package.json"],
+      "rangeStrategy": "pin",
+      "platformAutomerge": false,
+      "automerge": false
+    },
+    {
       "description": "Authentik: chart version and container image move together upstream. Group them in one PR so ArgoCD never sees a chart/image schema mismatch.",
       "matchManagers": ["kustomize"],
       "matchPackageNames": [
@@ -97,6 +105,15 @@
       "matchDatasources": ["github-releases"],
       "matchPackageNames": ["kubernetes-sigs/kustomize"],
       "allowedVersions": "<6"
+    },
+    {
+      "description": "T3 patches: Renovate waits for CI itself because this repository has no required status checks for GitHub platform automerge.",
+      "matchManagers": ["npm"],
+      "matchFileNames": ["2-k3s/13.t3code/env/tools/package.json"],
+      "matchUpdateTypes": ["patch"],
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": false
     }
   ],
   "customManagers": [
@@ -120,11 +137,11 @@
       "extractVersionTemplate": "^kustomize/v(?<version>.+)$"
     },
     {
-      "description": "t3code guest pins in 2-k3s/13.t3code/versions.env other than HELM/KUSTOMIZE (those two are owned by the managers above so the guest stays at the gate's versions): t3, @anthropic-ai/claude-code and opencode-ai from npm, argo-cd and sops from GitHub releases. Marker is the same trailing '# renovate:' comment; the five variable names are listed literally so RE2 (no lookaround) compiles it and a future line cannot be picked up by accident. The guest's daily t3code-update.timer (06:30 Athens, after the 02:00-06:00 Renovate window) git-pulls and applies whatever merged overnight; patch bumps automerge via the repo-wide rule; minors and majors open a PR for a human, same as everything else here. extractVersion strips a leading v (argo-cd/sops tags carry one, npm versions do not).",
+      "description": "Guest argo-cd and sops pins. Shared npm CLI pins moved to env/tools/package.json under the native npm manager. The guest timer applies merged pins at 06:30 Athens.",
       "customType": "regex",
       "managerFilePatterns": ["/^2-k3s/13\\.t3code/versions\\.env$/"],
       "matchStrings": [
-        "(?:T3|CLAUDE_CODE|OPENCODE|ARGOCD|SOPS)_VERSION=(?<currentValue>\\S+)\\s*#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)"
+        "(?:ARGOCD|SOPS)_VERSION=(?<currentValue>\\S+)\\s*#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)"
       ],
       "versioningTemplate": "semver",
       "extractVersionTemplate": "^v?(?<version>.+)$"
