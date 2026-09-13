@@ -40,32 +40,33 @@ payload:
         - "route"
         - "plugins"
         - "transforms"
-  # nemotron-3-super is a reasoning model, reasoning on at "medium" by default
-  # (OpenRouter catalog: mandatory=false, supported_efforts=[medium,low]). On a
-  # 25-line lingarr batch that is ~4.7k hidden tokens and 60-200s per call,
-  # which produced lingarr's 499 cancels and "No completion choices" fallbacks.
-  # Same noisy batch, same minute, 2026-09-13: medium 68s/4672 reasoning
-  # tokens; low 52s/2794, complete, credible Greek; off 8s/0 but with
-  # Spanish and Cyrillic slips in the output, rejected on quality. "low" is
-  # the floor this model offers. The whole `reasoning` object is replaced
-  # (override + map value = json.Marshal), so a caller's effort/max_tokens
-  # cannot raise it. Matched on the upstream name: applies for any alias.
-  override:
-    - models:
-        - name: "nvidia/nemotron-3-super-120b-a12b:free"
-      params:
-        reasoning:
-          effort: "low"
 
 # The only upstream, ONE explicit free model behind the alias. openrouter/free
 # (the random free router) is banned: it hands lingarr's batches to
 # non-translators (safety classifiers, 2.6B models answering in Arabic,
 # reasoning models running for minutes), and lingarr then logs "Failed to
-# parse JSON response" and keeps the original lines. Measured 2026-09-13:
-# router 3/6 batches failed, this model 3/3 passed (batch-repro.sh).
-# google/gemma-4-31b-it:free was rejected by OpenRouter's guardrail policy
-# (404, 0 endpoints). To add a model: pass batch-repro.sh 3/3 first, then add
-# it as a second entry with the same alias (CLIProxyAPI pools the alias).
+# parse JSON response" and keeps the original lines.
+#
+# Model history, 2026-09-13, all on lingarr's exact 25-line structured request:
+#   nvidia/nemotron-3-super-120b-a12b:free  structurally 25/25 but rejected on
+#     translation quality by independent review of a 100-line job (invented
+#     words, mixed Vietnamese/Polish/Cyrillic tokens, "Anything" -> "Τιποτά"),
+#     plus a 24-line batch lost when its structured response came back as
+#     chain-of-thought prose and the retry returned zero choices. The
+#     reasoning-effort override that lived here went with it.
+#   google/gemma-4-31b-it:free  rejected by OpenRouter's guardrail policy for
+#     this account (404, 0 endpoints).
+#   dots-studio/dots-3-note-preview:free  25/25, judged inferior to nex.
+#   nex-agi/nex-n2.5-pro:free  25/25 in 83s with 1608 reasoning tokens,
+#     judged faithful Greek on the same 25 dialogue lines
+#     (lingarr-batch-fix/76-candidates-3). Chosen. No reasoning override:
+#     none was measured for this model, and the catalog exposes no
+#     reasoning effort block for it.
+# That is one 25-line sample. It is not a quality guarantee; the 100-line
+# controlled job and production logs are the check.
+# No qwen, deepseek, mistral, llama or glm :free variant existed in the
+# catalog on that date. To add a model: pass batch-repro.sh 3/3 first, then
+# add it as a second entry with the same alias (CLIProxyAPI pools the alias).
 openai-compatibility:
   - name: "openrouter"
     # One credential, one model: a cooldown here is a blackout, not a failover.
@@ -92,8 +93,8 @@ openai-compatibility:
     api-key-entries:
       - api-key: "__OPENROUTER_API_KEY__"
     models:
-      - name: "nvidia/nemotron-3-super-120b-a12b:free"
+      - name: "nex-agi/nex-n2.5-pro:free"
         alias: "or-free"
-        display-name: "Nemotron 3 Super 120B free (lingarr)"
+        display-name: "Nex N2.5 Pro free (lingarr)"
         # context_length from openrouter.ai/api/v1/models, 2026-09-13
         max-context-length: 262144
