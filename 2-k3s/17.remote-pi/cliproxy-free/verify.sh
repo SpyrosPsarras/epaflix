@@ -54,6 +54,13 @@ cfg = open("/cfg/config.yaml").read()
 keys = re.findall(r'^\s*-\s*"(omp-[A-Za-z0-9._-]+)"\s*$', cfg, re.M)
 assert len(keys) == 1, f"expected exactly one omp- api-key in config, found {len(keys)}"
 KEY = keys[0]
+# The explicit free upstreams the config declares. Every upstream must carry
+# OpenRouter's :free suffix, and the answering model must be one of them, not
+# merely "some :free model" - that is the policy this instance exists for.
+UPSTREAMS = re.findall(r'^\s*-\s*name:\s*"([^"]+)"\s*$', cfg.split("openai-compatibility:", 1)[1], re.M)
+UPSTREAMS = [u for u in UPSTREAMS if u != "openrouter"]
+assert UPSTREAMS and all(u.endswith(":free") for u in UPSTREAMS), f"config upstreams are not all :free: {UPSTREAMS}"
+assert "openrouter/free" not in UPSTREAMS, "openrouter/free (random router) is banned; pin explicit :free models"
 
 def redact(s): return str(s).replace(KEY, "<key>")
 
@@ -79,7 +86,7 @@ if st != 200 or ids != ["or-free"]: fail(f"catalog -> {st} {ids}")
 ok("catalog -> ['or-free'] only")
 
 # 2. paid / prefixed / bare-upstream IDs refused before OpenRouter
-for m in ["or-glm-5.3", "openrouter/or-free", "minimax/minimax-m3", "anthropic/claude-sonnet-4.5", "openrouter/free"]:
+for m in ["or-glm-5.3", "openrouter/or-free", "minimax/minimax-m3", "anthropic/claude-sonnet-4.5", "openrouter/free"] + UPSTREAMS:
     st, body = call(FREE, "/v1/chat/completions", {"model": m, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1})
     code = (body.get("error") or {}).get("code")
     if st not in (400, 404) or code != "model_not_found": fail(f"reject model={m} -> {st} {body}")
@@ -103,7 +110,7 @@ if call_upstream:
         "max_tokens": 60})
     if st != 200: fail(f"upstream -> {st} {body}")
     answered = body.get("model", "")
-    if not (answered.endswith(":free") or answered == "openrouter/free"): fail(f"upstream answered by non-free model {answered!r}")
+    if answered not in UPSTREAMS: fail(f"upstream answered by {answered!r}, not one of the configured free upstreams {UPSTREAMS}")
     content = ((body.get("choices") or [{}])[0].get("message") or {}).get("content")
     if not isinstance(content, str) or not content.strip(): fail(f"empty content from {answered}: {body}")
     if not re.search(r"[\u0370-\u03FF]", content): fail(f"content has no Greek letters: {content!r}")

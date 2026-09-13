@@ -41,19 +41,23 @@ payload:
         - "plugins"
         - "transforms"
 
-# The only upstream. openrouter/free is OpenRouter's Free Models Router: it
-# picks a currently-available free model per request and bills nothing
-# (docs/guides/routing/routers/free-router). That is the "dynamic free model
-# selection" - OpenRouter does it, this config does not. The response `model`
-# field names the model that actually answered.
+# The only upstream, ONE explicit free model behind the alias. openrouter/free
+# (the random free router) is banned: it hands lingarr's batches to
+# non-translators (safety classifiers, 2.6B models answering in Arabic,
+# reasoning models running for minutes), and lingarr then logs "Failed to
+# parse JSON response" and keeps the original lines. Measured 2026-09-13:
+# router 3/6 batches failed, this model 3/3 passed (batch-repro.sh).
+# google/gemma-4-31b-it:free was rejected by OpenRouter's guardrail policy
+# (404, 0 endpoints). To add a model: pass batch-repro.sh 3/3 first, then add
+# it as a second entry with the same alias (CLIProxyAPI pools the alias).
 openai-compatibility:
   - name: "openrouter"
     base-url: "https://openrouter.ai/api/v1"
     api-key-entries:
       - api-key: "__OPENROUTER_API_KEY__"
     models:
-      - name: "openrouter/free"
+      - name: "nvidia/nemotron-3-super-120b-a12b:free"
         alias: "or-free"
-        display-name: "OpenRouter Free Router (lingarr)"
+        display-name: "Nemotron 3 Super 120B free (lingarr)"
         # context_length from openrouter.ai/api/v1/models, 2026-09-13
-        max-context-length: 200000
+        max-context-length: 262144
