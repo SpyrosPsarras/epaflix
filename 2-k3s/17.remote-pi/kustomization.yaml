@@ -12,6 +12,8 @@ resources:
   - cliproxy/service.yaml
   - cliproxy/ingress.yaml
   - cliproxy/heartbeat-cronjob.yaml
+  - cliproxy-free/deployment.yaml
+  - cliproxy-free/service.yaml
   - cpamanager/storage.yaml
   - cpamanager/deployment.yaml
   - cpamanager/service.yaml
@@ -19,6 +21,7 @@ resources:
 
 generators:
   - cliproxy/ksops-generator.yaml
+  - cliproxy-free/ksops-generator.yaml
   - cpamanager/ksops-generator.yaml
 
 images:
