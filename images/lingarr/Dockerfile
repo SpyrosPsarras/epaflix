@@ -36,5 +36,10 @@ RUN dotnet restore "./Lingarr.Server/Lingarr.Server.csproj" --arch "$TARGETARCH"
  && rm -rf /app/publish/wwwroot /app/publish/Lingarr.Server.staticwebassets.endpoints.json
 
 FROM ${BASE_IMAGE} AS final
+# Without this label GitHub does not auto-link the published package to this
+# repo. The package then gets created unlinked on first publish, and
+# GITHUB_TOKEN is denied write_package against it - the exact failure in #534,
+# and the failure the first main-branch run of build-lingarr hit.
+LABEL org.opencontainers.image.source=https://github.com/SpyrosPsarras/epaflix
 WORKDIR /app
 COPY --from=build /app/publish .
