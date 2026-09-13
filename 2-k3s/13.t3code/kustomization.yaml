@@ -11,18 +11,14 @@ resources:
   - env/ingress.yaml
 
 configMapGenerator:
-  # package.json is derived from versions.env by env/tools/regen-lock.sh; the
-  # lock pins the whole tree so `npm ci` in the init container is reproducible.
+  # Content hashes change the pod template on tool or script updates.
+  # ArgoCD rolls the pods, then PruneLast removes superseded ConfigMaps.
   - name: t3env-tools
     files:
       - env/tools/package.json
       - env/tools/package-lock.json
-    options:
-      disableNameSuffixHash: true
   - name: t3env-scripts
     files:
       - env/files/entrypoint.sh
       - env/files/git-credential-github.sh
       - files/cliproxy-models.js
-    options:
-      disableNameSuffixHash: true

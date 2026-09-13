@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Self-check for the t3env scripts without starting T3. Runs locally or in
 # the pod. Exercises: credential helper host filtering, entrypoint home
-# seeding is idempotent, lock pins match versions.env.
+# seeding is idempotent, lock pins match package.json.
 set -euo pipefail
 DIR=$(cd "$(dirname "$0")" && pwd)
 HELPER=$DIR/git-credential-github.sh
@@ -43,14 +43,13 @@ run
 echo "ok: entrypoint seeds once and keeps user edits"
 [[ $(stat -c %a "$HOME/.config/opencode/plugins/cliproxy-models.js") == 644 ]] || fail "plugin copy must be writable after restart"
 
-# Lock pins agree with versions.env.
-# shellcheck source=2-k3s/13.t3code/versions.env
-. "$DIR/../../versions.env"
-python3 - "$DIR/../tools/package-lock.json" "$T3_VERSION" "$CLAUDE_CODE_VERSION" "$OPENCODE_VERSION" "$CODEX_VERSION" <<'PY'
+# Lock root and resolved versions agree with package.json.
+python3 - "$DIR/../tools/package.json" "$DIR/../tools/package-lock.json" <<'PY'
 import json, sys
-lock = json.load(open(sys.argv[1]))["packages"]
-want = dict(zip(["t3", "@anthropic-ai/claude-code", "opencode-ai", "@openai/codex"], sys.argv[2:]))
+want = json.load(open(sys.argv[1]))["dependencies"]
+lock = json.load(open(sys.argv[2]))["packages"]
+assert lock[""]["dependencies"] == want, "lock root dependencies differ from package.json"
 got = {n: lock[f"node_modules/{n}"]["version"] for n in want}
-assert got == want, f"lock {got} != versions.env {want}; run env/tools/regen-lock.sh"
+assert got == want, f"lock {got} != package.json {want}"
 PY
-echo "ok: package-lock.json matches versions.env"
+echo "ok: package-lock.json matches package.json"

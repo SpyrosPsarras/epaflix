@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Runs inside the t3env pod as the main container. The init container has
-# already installed the pinned CLIs (versions.env) into /tools. This script
+# already installed the locked CLIs into /tools. This script
 # seeds the persisted HOME on the PVC (idempotent, never overwrites user
 # state) and starts T3 without opening a browser.
 #

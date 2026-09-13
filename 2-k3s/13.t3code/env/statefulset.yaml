@@ -11,6 +11,9 @@ spec:
   serviceName: t3env
   replicas: 2
   podManagementPolicy: Parallel
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
   selector:
     matchLabels:
       app.kubernetes.io/name: t3env
