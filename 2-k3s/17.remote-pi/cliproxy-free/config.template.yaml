@@ -40,6 +40,22 @@ payload:
         - "route"
         - "plugins"
         - "transforms"
+  # nemotron-3-super is a reasoning model, reasoning on at "medium" by default
+  # (OpenRouter catalog: mandatory=false, supported_efforts=[medium,low]). On a
+  # 25-line lingarr batch that is ~4.7k hidden tokens and 60-200s per call,
+  # which produced lingarr's 499 cancels and "No completion choices" fallbacks.
+  # Same noisy batch, same minute, 2026-09-13: medium 68s/4672 reasoning
+  # tokens; low 52s/2794, complete, credible Greek; off 8s/0 but with
+  # Spanish and Cyrillic slips in the output, rejected on quality. "low" is
+  # the floor this model offers. The whole `reasoning` object is replaced
+  # (override + map value = json.Marshal), so a caller's effort/max_tokens
+  # cannot raise it. Matched on the upstream name: applies for any alias.
+  override:
+    - models:
+        - name: "nvidia/nemotron-3-super-120b-a12b:free"
+      params:
+        reasoning:
+          effort: "low"
 
 # The only upstream, ONE explicit free model behind the alias. openrouter/free
 # (the random free router) is banned: it hands lingarr's batches to
