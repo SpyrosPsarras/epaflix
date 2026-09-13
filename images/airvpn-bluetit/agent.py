@@ -30,6 +30,7 @@ import sys
 import threading
 import time
 import urllib.parse
+import urllib.request
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -129,6 +130,26 @@ class Config:
 
         self.listen_port = _env_int("VPN_AGENT_LISTEN_PORT", 8081)
         self.dry_run = _env_bool("VPN_AGENT_DRY_RUN", False)
+
+        # HTTP transports for producers without shared storage (#817). Both are
+        # empty by default: the k3s agent keeps its file ranking and file
+        # verdicts, and only an env-configured producer (Nick's VM) goes over
+        # HTTP. The URLs sit behind a bridge-local relay because the tunnel
+        # netns cannot reach the LAN - measured 2026-09-06, all routes point
+        # into tun0 and AirVPN does not return client-LAN traffic.
+        self.ranking_url = os.environ.get("VPN_AGENT_RANKING_URL", "").strip()
+        self.ranking_fetch_timeout = _env_float(
+            "VPN_AGENT_RANKING_FETCH_TIMEOUT", 15.0
+        )
+        self.intake_url = os.environ.get("VPN_AGENT_INTAKE_URL", "").strip()
+        self.intake_token = os.environ.get("VPN_AGENT_INTAKE_TOKEN", "")
+        self.intake_timeout = _env_float("VPN_AGENT_INTAKE_TIMEOUT", 10.0)
+        if self.intake_url and not self.intake_token:
+            raise ValueError(
+                "VPN_AGENT_INTAKE_URL is set but VPN_AGENT_INTAKE_TOKEN is empty - "
+                "the scorer's intake answers 503 without a bearer token, so this "
+                "agent could never publish a verdict"
+            )
 
 
 
@@ -283,6 +304,20 @@ def candidate_names(servers, band, exclude=None):
     ]
 
 
+def http_fetch_ranking(url, timeout):
+    """Return a bounded fetch(limit) for one HTTP ranking document (#817).
+
+    `limit` caps each read and the socket timeout bounds every operation, but
+    a slow-drip server can still stretch one fetch across many timeouts - the
+    reader tolerates a stalled worker by design, and every failure is an
+    ordinary exception the worker already handles.
+    """
+    def fetch(limit):
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            return resp.read(limit)
+    return fetch
+
+
 class RankingSnapshot:
     """Immutable in-memory result of one valid ranking-file read."""
 
@@ -296,7 +331,7 @@ class RankingSnapshot:
 
 
 class RankingReader:
-    """Exactly one daemon owns all access to the hard-NFS ranking path.
+    """Exactly one daemon owns all access to the ranking source.
 
     An NFS `open()` or `read()` may sleep in the kernel forever. No timeout or
     try/except can bound that syscall, so control and HTTP-handler threads only
@@ -315,7 +350,7 @@ class RankingReader:
     """
 
     def __init__(self, path, wallclock, on_fresh, poll_seconds,
-                 max_bytes=MAX_RANKING_BYTES):
+                 max_bytes=MAX_RANKING_BYTES, fetch=None):
         if poll_seconds <= 0:
             raise ValueError("ranking poll interval must be positive")
         if max_bytes < 1:
@@ -325,6 +360,11 @@ class RankingReader:
         self.on_fresh = on_fresh
         self.poll_seconds = poll_seconds
         self.max_bytes = max_bytes
+        # fetch=None reads the ranking file at self.path; a callable reads one
+        # document from elsewhere (HTTP for producers without shared storage,
+        # #817). Everything downstream - validation, snapshot, cache - is the
+        # same for both.
+        self.fetch = fetch
         self._condition = threading.Condition()
         self._snapshot = None
         self._attempted = False
@@ -381,8 +421,11 @@ class RankingReader:
             servers = []
             valid = False
             try:
-                with open(self.path, "rb") as fh:
-                    payload = fh.read(self.max_bytes + 1)
+                if self.fetch is not None:
+                    payload = self.fetch(self.max_bytes + 1)
+                else:
+                    with open(self.path, "rb") as fh:
+                        payload = fh.read(self.max_bytes + 1)
                 if len(payload) > self.max_bytes:
                     raise ValueError("ranking exceeds %d bytes" % self.max_bytes)
                 servers, age = parse_ranking(payload, self.wallclock())
@@ -939,7 +982,15 @@ class Agent:
                                    clock=wallclock, path=cfg.budget_path)
         self.lock = threading.Lock()
         self.cache_lock = threading.Lock()
-        self.verdict_publisher = VerdictPublisher(self._write_bad_server)
+        # One verdict transport per agent, chosen by config: HTTP POST to the
+        # scorer's intake when VPN_AGENT_INTAKE_URL is set (#817), otherwise the
+        # per-producer/server file the shared store reads. The document, its
+        # validation and the scorer-side cap rules are identical either way.
+        if cfg.intake_url:
+            self._intake_urlopen = urllib.request.urlopen
+            self.verdict_publisher = VerdictPublisher(self._post_bad_server)
+        else:
+            self.verdict_publisher = VerdictPublisher(self._write_bad_server)
         self.current_server = None
         self.current_loss_pct = None
         self.throughput_bps = None
@@ -951,10 +1002,14 @@ class Agent:
         self.cached = []
         self.cached_payload = None
         self.ranking_reader = RankingReader(
-            cfg.ranking_path,
+            # In fetch mode the URL is the source label problem logs should
+            # carry; self.path is otherwise unused there.
+            cfg.ranking_url or cfg.ranking_path,
             wallclock=self.wallclock,
             on_fresh=self._adopt_fresh_ranking,
             poll_seconds=cfg.ranking_poll_seconds,
+            fetch=(http_fetch_ranking(cfg.ranking_url, cfg.ranking_fetch_timeout)
+                   if cfg.ranking_url else None),
         )
 
 
@@ -1054,6 +1109,29 @@ class Agent:
             except OSError:
                 pass
             raise
+
+    def _post_bad_server(self, publication):
+        """HTTP transport half of publish_bad_server(), daemon-worker only (#817).
+
+        Posts the same schema-1 document the file path would have written, to
+        the scorer's bearer-token intake. The scorer validates it with the same
+        parse_verdict() as the file intake and stores it under the same
+        per-producer/server name, so this is a transport swap, not a second
+        rule set. 202 is the only success; HTTP errors raise and the publisher
+        worker logs them like a failed write.
+        """
+        req = urllib.request.Request(
+            self.cfg.intake_url,
+            data=publication.payload,
+            method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": "Bearer " + self.cfg.intake_token,
+            },
+        )
+        with self._intake_urlopen(req, timeout=self.cfg.intake_timeout) as resp:
+            if resp.status != 202:
+                raise ValueError("verdict intake answered HTTP %s" % resp.status)
 
 
     def _adopt_fresh_ranking(self, payload, servers):
@@ -1707,11 +1785,13 @@ def main():
     log.info(
         "vpn-picker agent starting dry_run=%s band=%d probe=%d packets to %s every %ds "
         "bad>=%.1f%% trip=%d cooldown=%ds failed_cooldown=%ds cap=%d/day "
-        "verify=%d packets at <=%.0f%% loss",
+        "verify=%d packets at <=%.0f%% loss ranking=%s verdicts=%s",
         cfg.dry_run, cfg.band, cfg.probe_count, cfg.probe_target, cfg.probe_interval,
         cfg.bad_loss_pct, cfg.bad_windows, cfg.cooldown_seconds,
         cfg.failed_cooldown_seconds, cfg.max_switches_per_day,
         cfg.verify_probe_count, cfg.verify_max_loss_pct,
+        cfg.ranking_url or cfg.ranking_path,
+        ("POST %s" % cfg.intake_url) if cfg.intake_url else cfg.verdict_dir,
     )
     agent = Agent(cfg)
     serve(agent)

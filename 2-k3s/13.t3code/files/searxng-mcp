@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /opt/keepass-mcp/bin/python /opt/keepass-mcp/searxng_mcp.py "$@"

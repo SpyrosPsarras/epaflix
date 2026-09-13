@@ -94,6 +94,48 @@ spec:
             summary: "Proxmox host unreachable"
             description: "Proxmox VE exporter cannot reach host {{ $labels.instance }} for 5 minutes."
 
+        - alert: ProxmoxThinPoolDataNearFull
+          expr: |
+            (
+              pve_disk_usage_bytes{id=~"storage/.*/local-raid"}
+              /
+              pve_disk_size_bytes{id=~"storage/.*/local-raid"}
+            ) > 0.90
+          for: 10m
+          labels:
+            severity: warning
+            component: infrastructure
+          annotations:
+            summary: "Proxmox thin pool local-raid data above 90%"
+            description: >-
+              Thin pool data on {{ $labels.id }} is {{ $value | humanizePercentage }} and has been
+              above 90% for 10m. dmeventd autoextend is armed at 90/20 via /etc/lvm/lvmlocal.conf on
+              both hosts (tracked as 1-proxmox/lvm/lvmlocal.conf, issue #719), but each VG holds
+              under 1 GiB of free extents, so the extension attempt fails and only logs - expect
+              dmeventd lines in syslog, not freed space. The headroom decision is #564. This metric
+              covers data usage only: PVE does not export metadata usage, so also run
+              lvs -o+metadata_percent on the host (takaros metadata read 36.14% on 2026-09-06 Athens).
+
+        - alert: ProxmoxThinPoolDataCritical
+          expr: |
+            (
+              pve_disk_usage_bytes{id=~"storage/.*/local-raid"}
+              /
+              pve_disk_size_bytes{id=~"storage/.*/local-raid"}
+            ) > 0.95
+          for: 5m
+          labels:
+            severity: critical
+            component: infrastructure
+          annotations:
+            summary: "Proxmox thin pool local-raid data above 95%"
+            description: >-
+              Thin pool data on {{ $labels.id }} is {{ $value | humanizePercentage }} and has been
+              above 95% for 5m - close to the point where every guest with extents on local-raid
+              takes write errors at once. Free space fast: delete stale vzdump snapshots and check
+              the PBS datastore volume vm-1031-disk-1 (93.6% full on 2026-09-06 Athens), or extend the VG
+              per #564. Metadata usage is invisible to this metric - see ProxmoxThinPoolDataNearFull.
+
     - name: cilium
       interval: 60s
       rules:
@@ -211,7 +253,7 @@ spec:
             component: servarr
           annotations:
             summary: "Orphaned qBittorrent torrents found (or the census failed)"
-            description: "The daily orphan-census Job ({{ $labels.job_name }}) exited non-zero — either it found torrents that are in qBittorrent, incomplete, have moved ZERO bytes for NO_PROGRESS_HOURS (24h) and have NO *arr queue row (exit 1), or it could not complete the census safely (exit 2: qBittorrent login, a queue fetch, a paginated queue, or an *arr reporting 0 queue rows while orphan-shaped torrents sit in the categories it owns — a broken queue read path, #631/#632). Read the Job log for the per-orphan table (hash prefix / category / state / owning *arr / progress / age / idle / uploaded) and the `orphans by owning *arr` line. The job SHIPS DISARMED (ARMED=\"false\") — it changes nothing until that env value is flipped in 2-k3s/maintenance/orphan-census-cronjob.yaml. Root cause of new orphans is the Cleanuparr `private stalled` rule with delete_private_torrents_from_client=0; the owner-action split is documented in #196 / #483."
+            description: "The daily orphan-census Job ({{ $labels.job_name }}) exited non-zero — either it found orphans: torrents in qBittorrent that are incomplete, have NO *arr queue row, are older than MIN_AGE_HOURS (24h) and have moved ZERO bytes for NO_PROGRESS_HOURS (24h) (exit 1), or it could not complete the census safely (exit 2): qBittorrent login, a queue fetch, a paginated queue, a *arr history read failing its filter/sort verification, the MAX_HISTORY_LOOKUPS cap on per-torrent history lookups, or a per-*arr guard — an *arr reporting 0 queue rows while torrents in its OWN categories moved bytes inside ACTIVE_WITHIN_HOURS (6h), unless every one of those live torrents is already downloadFailed in the *arr's own history (a download whose newest history event is downloadFailed stays out of the queue by design, `DownloadIsTrackable()`, #834; live work must have a queue row, #631/#632). Read the Job log for the per-orphan table (hash prefix / category / state / owning *arr / progress / age / idle / priv / uploaded), the `orphans by owning *arr` line and, when the guard fires, the `N live torrent(s), N queryable, N already failed in its own history, N unexplained` line; unexplained > 0 means a genuinely blind queue read — `kubectl rollout restart deployment/<arr> -n servarr` released 21 stuck imports in ~90s the last time (2026-08-07). The job runs DISARMED (ARMED=\"false\") and changes nothing until that env value is flipped in 2-k3s/maintenance/orphan-census-cronjob.yaml (armed once to reap 3 confirmed orphans, disarmed again, #1200). Root cause of new orphans is the Cleanuparr `private stalled` rule with delete_private_torrents_from_client=0; the owner-action split is documented in #196 / #483."
 
     - name: prowlarr-indexer-health
       interval: 60s
@@ -446,7 +488,7 @@ spec:
       rules:
         - alert: CredentialRedactedFromLogs
           expr: |
-            sum by (namespace) (
+            sum by (exported_namespace, exported_container) (
               increase(promtail_custom_credential_lines_redacted_total[15m])
             ) > 0
           for: 0m
@@ -454,16 +496,18 @@ spec:
             severity: warning
             component: security
           annotations:
-            summary: "An app logged a credential in {{ $labels.namespace }} (redacted before Loki)"
+            summary: "An app logged a credential in {{ $labels.exported_namespace }} (redacted before Loki)"
             description: >-
-              {{ $value }} log line(s) in namespace {{ $labels.namespace }}
+              {{ $value }} log line(s) from {{ $labels.exported_namespace }}/{{ $labels.exported_container }}
               contained a credential-shaped key=value in the last 15m. promtail
               redacted the value before pushing, so it is NOT in Loki - but it IS
-              in the pod's own stdout and visible via `kubectl logs`. Most likely
-              cause is sonarr/radarr/prowlarr restarting and logging their Postgres
-              connection string (#634). Identify the pod, and if it is a new
-              offender treat that credential as exposed and rotate it. Do NOT grep
-              Loki for the literal value.
+              in the pod's own stdout and visible via `kubectl logs`. The exported_*
+              labels name the offending app; plain namespace/pod/container are
+              promtail itself (#911). Most likely causes: sonarr/radarr/prowlarr
+              restarting and logging their Postgres connection string (#634), or
+              traefik access lines carrying jellyfin's query-string ApiKey (#702).
+              If it is a new offender treat that credential as exposed and rotate
+              it. Do NOT grep Loki for the literal value.
 
     - name: kube-job-failed-last-run
       interval: 60s
@@ -645,3 +689,50 @@ spec:
               under pressure, which is the condition the driver hit NV_ERR_NO_MEMORY under on
               2026-08-09. Find what is asking for the memory (ollama model load, a large
               transcode) and check nvidia-smi still sees the card.
+
+    - name: truenas-pool-capacity
+      interval: 60s
+      rules:
+        - alert: TruenasPool1FreeLow
+          expr: node_filesystem_avail_bytes{job="truenas-node-exporter", device="pool1", fstype="zfs"} < 1099511627776  # 1 TiB
+          for: 1h
+          labels:
+            severity: warning
+            component: truenas-storage
+          annotations:
+            summary: "pool1 free space is under 1 TiB (~92% used)"
+            description: >-
+              The pool1 root dataset's node_filesystem_avail_bytes has been under 1 TiB for an
+              hour. That metric is the POOL-WIDE free space, not the root dataset's own: every
+              pool1 dataset reports the same value because none of them is quota-bound for
+              statfs purposes (verified against all 8 pool1 datasets, 2026-09-05). It is statfs
+              avail, so it reads lower than `zpool list free` by the ZFS slop reservation
+              (~3% of the pool, ~0.7 TiB here). Never build a used% from
+              node_filesystem_size_bytes on pool1: the root dataset is quota-bounded, so its
+              size label is 2.25 TiB against a 21.8 TiB pool - take used% from
+              `zpool list` or 0-truenas/scripts/pool-capacity-forecast.py. pool1 has sat near
+              88% since August 2026; with no disk budget until ~2027-02 the headroom plan is
+              the media deletion service (owner decision in #805, 2026-08-21), and the weekly
+              growth measurement and runway forecast live in
+              0-truenas/scripts/pool-capacity-forecast.py (#805). This alert is the floor
+              between the weekly runs: check what grew (`zfs list -o space -r pool1` sorted by
+              used) before deleting anything, and remember dapc-backup is a permanent keep
+              (#807).
+
+        - alert: TruenasPool1FreeCritical
+          expr: node_filesystem_avail_bytes{job="truenas-node-exporter", device="pool1", fstype="zfs"} < 429496729600  # 400 GiB
+          for: 30m
+          labels:
+            severity: critical
+            component: truenas-storage
+          annotations:
+            summary: "pool1 free space is under 400 GiB (~95% used) - the ZFS floor"
+            description: >-
+              Pool-wide free space on pool1 (same metric semantics and size-label caveat as
+              TruenasPool1FreeLow) has been under 400 GiB for 30 minutes. 95% used is the
+              practical ZFS floor: CoW has no room to write, fragmentation climbs and writes
+              start failing before the pool reads as technically full. This is the "stops
+              being enough" date the #805 forecast tracks, arrived early. Reclaim space now
+              (the #609 download reclaim and #968 snapshot paths are the catalogued
+              candidates; dapc-backup is a permanent keep per #807) and treat every write to
+              pool1 as at-risk until free space is back above 1 TiB.

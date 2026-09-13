@@ -609,6 +609,247 @@ def test_stale_ranking_keeps_its_timestamp():
         shutil.rmtree(d)
 
 
+def test_verdict_filename_matches_the_agent_so_file_and_http_overwrite():
+    """#817: HTTP and file intakes must hit the same per-(producer,server) path.
+
+    Otherwise a Nick HTTP verdict and a Nick file verdict for the same server
+    land in two separate files, load_active_verdicts keeps the newer one and
+    drops the other, and the producer is the loser for racing its own writes.
+    The filename helper has to be byte-equal to the agent's verdict_path().
+    """
+    import hashlib
+    identity = "nick\0pias".encode("utf-8")
+    expected = hashlib.sha256(identity).hexdigest()[:24] + ".json"
+    assert vp.verdict_filename("nick", "Pias") == expected, (
+        "the HTTP intake's filename diverged from the agent's verdict_path(); "
+        "an HTTP and a file verdict from the same producer+server would land "
+        "in two files (#817): %r vs %r" % (vp.verdict_filename("nick", "Pias"), expected)
+    )
+    assert vp.verdict_filename("nick", "PIAS") == vp.verdict_filename("nick", "pias"), \
+        "verdict_filename must lowercase the server like the agent does"
+    print("ok  #817 verdict_filename: HTTP/file intakes share the per-(producer,server) path")
+
+
+def test_intake_endpoint_validates_and_persists_then_ejects_like_file_intake():
+    """#817: Nick HTTP verdicts coexist with k3s file verdicts in one ranking.
+
+    Same parse_verdict, same refresh_ejections, same cap. The endpoint is an
+    alternate path into one store, not a parallel scorer. Acceptance: a Nick
+    verdict and a k3s verdict coexist, both eject, both restore on expiry,
+    and file bytes and HTTP bytes stay byte-identical throughout.
+    """
+    d = tempfile.mkdtemp()
+    try:
+        verdict_dir = os.path.join(d, "verdicts")
+        c = cfg(output_path=os.path.join(d, "ranking.json"),
+                verdict_dir=verdict_dir, max_ejection_fraction=0.5,
+                verdict_max_ttl_seconds=21600, verdict_future_skew_seconds=60)
+        base = [
+            {"name": "Dalim", "entry_ip": "1.1.1.1", "loss_pct": 0.0,
+             "rtt_ms": 20.0, "load": 10, "bw_max": 20000, "headroom": 18000},
+            {"name": "Piautos", "entry_ip": "1.1.1.2", "loss_pct": 0.0,
+             "rtt_ms": 21.0, "load": 11, "bw_max": 20000, "headroom": 17900},
+            {"name": "Menkent", "entry_ip": "1.1.1.3", "loss_pct": 0.0,
+             "rtt_ms": 22.0, "load": 12, "bw_max": 20000, "headroom": 17800},
+            {"name": "Dedalus", "entry_ip": "1.1.1.4", "loss_pct": 0.0,
+             "rtt_ms": 23.0, "load": 13, "bw_max": 20000, "headroom": 17700},
+        ]
+        generated_at = "2026-08-06T12:00:00Z"
+        baseline = vp.build_document(base, c, generated_at=generated_at)
+        vp.publish(baseline, c.output_path)
+        state = vp.State()
+        with state.lock:
+            state.payload = baseline
+            state.generated_epoch = datetime.strptime(
+                generated_at, "%Y-%m-%dT%H:%M:%SZ").replace(
+                    tzinfo=timezone.utc).timestamp()
+            state.passing = len(base)
+            state.base_servers = list(base)
+            state.base_generated_at = generated_at
+
+        now = time.time()
+        stamp = lambda seconds=0: datetime.fromtimestamp(
+            now + seconds, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        nick_doc = {
+            "schema": 1, "source": "vpn-agent", "producer": "nick",
+            "server": "Piautos", "observed_at": stamp(),
+            "ttl_seconds": 21600, "loss_pct": 8.0, "bad_windows": 3,
+        }
+        verdict = vp.parse_verdict(json.dumps(nick_doc).encode(), c, now_epoch=now)
+        assert verdict is not None, "a fresh Nick verdict parsed as stale"
+        vp.persist_verdict(verdict, c, verdict["observed_at"])
+        nick_path = os.path.join(c.verdict_dir, vp.verdict_filename("nick", "Piautos"))
+        assert os.path.exists(nick_path), (
+            "HTTP-intake verdict did not land under cfg.verdict_dir at the "
+            "filename the file intake would assign (#817)"
+        )
+        on_disk = json.loads(open(nick_path).read())
+        assert on_disk["producer"] == "nick" and on_disk["server"] == "Piautos"
+        assert on_disk["source"] == "vpn-agent" and on_disk["schema"] == 1
+
+        _verdict(os.path.join(verdict_dir, "cluster-dalim.json"),
+                 "cluster-default", "Dalim", stamp())
+
+        assert vp.refresh_ejections(state, c) is True, (
+            "the scorer did not pick up the HTTP-intake verdict at the next "
+            "reconciliation; the intake is a parallel store, not part of the "
+            "shared store (#817)"
+        )
+        on_disk_ranking = json.loads(open(c.output_path, "rb").read())
+        assert state.snapshot()[0] == open(c.output_path, "rb").read(), (
+            "file and HTTP ranking bytes diverged after the HTTP intake "
+            "ejected Piautos (#817)"
+        )
+        assert on_disk_ranking["generated_at"] == generated_at, (
+            "the reconciliation restamped the public ranking after an "
+            "HTTP-intake verdict and can keep probe data fresh forever"
+        )
+        assert [s["name"] for s in on_disk_ranking["servers"]] == [
+            "Menkent", "Dedalus"
+        ], ("coexistence broken: Nick and cluster-default should both eject, "
+            "got %s" % [s["name"] for s in on_disk_ranking["servers"]])
+        assert state.snapshot()[5:7] == (2, 2), state.snapshot()
+
+        os.unlink(nick_path)
+        _verdict(os.path.join(verdict_dir, "cluster-dalim.json"),
+                 "cluster-default", "Dalim", stamp(-21601))
+        assert vp.refresh_ejections(state, c) is True, \
+            "the next refresh after both verdicts expired did not restore"
+        restored = json.loads(open(c.output_path, "rb").read())
+        assert [s["name"] for s in restored["servers"]] == [
+            "Dalim", "Piautos", "Menkent", "Dedalus"
+        ], ("both verdicts expired (HTTP-intake file removed, file verdict "
+            "restamped stale), the full base must be restored: %r" % restored)
+        assert restored["generated_at"] == generated_at
+        assert state.snapshot()[0] == open(c.output_path, "rb").read()
+        print("ok  #817 intake coexistence: HTTP + file verdicts merge, both expire, both restore")
+    finally:
+        shutil.rmtree(d)
+
+
+def test_intake_endpoint_rejects_invalid_documents_without_persisting():
+    """#817: validation is one rule set, applied before any disk write.
+
+    A bad verdict must NEVER reach cfg.verdict_dir. The endpoint reuses
+    parse_verdict(), and the same future-skew / ttl / loss range checks that
+    the file intake runs apply here.
+    """
+    d = tempfile.mkdtemp()
+    try:
+        verdict_dir = os.path.join(d, "verdicts")
+        c = cfg(output_path=os.path.join(d, "ranking.json"),
+                verdict_dir=verdict_dir, max_ejection_fraction=0.5,
+                verdict_max_ttl_seconds=21600, verdict_future_skew_seconds=60)
+        before = set(os.listdir(verdict_dir)) if os.path.isdir(verdict_dir) else set()
+
+        invalid_cases = [
+            ('{"schema":2,"source":"vpn-agent","producer":"nick","server":"Piautos",'
+             '"observed_at":"2026-08-06T12:00:00Z","ttl_seconds":21600,'
+             '"loss_pct":8.0,"bad_windows":3}', "unknown schema"),
+            ('{"schema":1,"source":"vpn-picker","producer":"nick","server":"Piautos",'
+             '"observed_at":"2026-08-06T12:00:00Z","ttl_seconds":21600,'
+             '"loss_pct":8.0,"bad_windows":3}', "wrong source"),
+            ('{"schema":1,"source":"vpn-agent","producer":"nick","server":"../etc",'
+             '"observed_at":"2026-08-06T12:00:00Z","ttl_seconds":21600,'
+             '"loss_pct":8.0,"bad_windows":3}', "bad server identity"),
+            ('{"schema":1,"source":"vpn-agent","producer":"nick","server":"Piautos",'
+             '"observed_at":"2026-08-06T12:00:00Z","ttl_seconds":21601,'
+             '"loss_pct":8.0,"bad_windows":3}', "ttl exceeds cap"),
+            ('not-json', "not JSON"),
+            ('[]', "verdict is not an object"),
+        ]
+        for body, label in invalid_cases:
+            try:
+                vp.parse_verdict(body.encode(), c)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("invalid verdict was accepted: %s" % label)
+
+        stale = json.dumps({
+            "schema": 1, "source": "vpn-agent", "producer": "nick",
+            "server": "Piautos", "observed_at": "2020-01-01T00:00:00Z",
+            "ttl_seconds": 21600, "loss_pct": 8.0, "bad_windows": 3,
+        }).encode()
+        assert vp.parse_verdict(stale, c, now_epoch=time.time()) is None, \
+            "stale verdict was not None"
+
+        after = set(os.listdir(verdict_dir)) if os.path.isdir(verdict_dir) else set()
+        assert after == before, (
+            "the intake wrote to cfg.verdict_dir despite parse_verdict failing "
+            "or returning None - validation must be one rule set, not a copy "
+            "in the HTTP path (#817): before=%r after=%r" % (before, after)
+        )
+        print("ok  #817 intake validation: parse_verdict shared with file intake, nothing persisted on failure")
+    finally:
+        shutil.rmtree(d)
+
+
+def test_intake_endpoint_auth():
+    """#817: bearer token gates the intake endpoint, constant-time compare.
+
+    The intake must refuse every request without a correct bearer token,
+    including no header, a wrong token, and a prefix that is not 'Bearer '.
+    Without a token, the endpoint must report 503 and refuse to accept any
+    verdict - leaving the unauthenticated endpoint disabled is the only safe
+    fail-open when the credential is missing.
+    """
+    import io
+
+    class _Hdr:
+        def __init__(self, mapping):
+            self._m = mapping
+
+        def get(self, key, default=None):
+            value = self._m.get(key, default)
+            if isinstance(value, bytes):
+                return value.decode("utf-8")
+            return value if value is None else str(value)
+
+    def run_case(token, header_value, body):
+        captured = io.BytesIO()
+        vp.Handler.cfg = vp.Config()
+        vp.Handler.cfg.intake_token = token
+        vp.Handler.cfg.verdict_dir = tempfile.mkdtemp()
+        h = vp.Handler.__new__(vp.Handler)
+        h.requestline = ""
+        h.request_version = "HTTP/1.1"
+        h.command = "POST"
+        h.client_address = ("127.0.0.1", 0)
+        h.close_connection = True
+        h.path = "/verdict"
+        h.headers = _Hdr({
+            "Authorization": header_value,
+            "Content-Length": str(len(body)),
+        })
+        h.rfile = io.BytesIO(body)
+        h.wfile = captured
+        h.do_POST()
+        return captured.getvalue().split(b"\r\n", 1)[0]
+
+    stamp = datetime.fromtimestamp(
+        time.time(), timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    body = json.dumps({
+        "schema": 1, "source": "vpn-agent", "producer": "nick",
+        "server": "Piautos", "observed_at": stamp,
+        "ttl_seconds": 21600, "loss_pct": 8.0, "bad_windows": 3,
+    }).encode()
+
+    cases = [
+        ("", b"Bearer right", body, b"503", "no token configured"),
+        ("right", b"", body, b"401", "no header"),
+        ("right", b"Basic right", body, b"401", "wrong scheme"),
+        ("right", b"Bearer wrong", body, b"401", "wrong token"),
+        ("right", b"Bearer right", body, b"202", "right token"),
+    ]
+    for tok, header, b, expected, label in cases:
+        status = run_case(tok, header, b)
+        assert status.startswith(b"HTTP/1.1 " + expected), \
+            "auth case %r: expected status %s, got %r" % (label, expected, status)
+    print("ok  #817 intake auth: 503 empty token, 401 missing/wrong, 202 right")
+
+
 if __name__ == "__main__":
     test_shortlist()
     test_probe_gate()
@@ -621,4 +862,8 @@ if __name__ == "__main__":
     test_missing_or_corrupt_base_state_fails_open_without_guessing()
     test_base_state_requires_the_complete_ranking_row_contract()
     test_stale_ranking_keeps_its_timestamp()
+    test_verdict_filename_matches_the_agent_so_file_and_http_overwrite()
+    test_intake_endpoint_validates_and_persists_then_ejects_like_file_intake()
+    test_intake_endpoint_rejects_invalid_documents_without_persisting()
+    test_intake_endpoint_auth()
     print("ALL SELF-CHECKS PASSED")

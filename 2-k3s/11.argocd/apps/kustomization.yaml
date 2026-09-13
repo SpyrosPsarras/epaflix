@@ -6,6 +6,7 @@ resources:
   - app-of-apps.yaml
   - app-argocd.yaml
   - app-authentik.yaml
+  - app-bread.yaml
   - app-cnpg-operator.yaml
   - app-cert-manager.yaml
   - app-coredns.yaml
