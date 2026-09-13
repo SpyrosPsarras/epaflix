@@ -14,6 +14,15 @@
   "commitMessagePrefix": "[renovate]",
   "packageRules": [
     {
+      "description": "Keep the shared runtime image reference aligned with updated tool and base-image inputs.",
+      "matchFileNames": ["2-k3s/13.t3code/env/tools/package.json", "2-k3s/13.t3code/versions.env", "2-k3s/13.t3code/env/Dockerfile"],
+      "postUpgradeTasks": {
+        "commands": ["bash 2-k3s/13.t3code/env/tools/sync-runtime-image.sh"],
+        "fileFilters": ["2-k3s/13.t3code/env/statefulset.yaml"],
+        "executionMode": "branch"
+      }
+    },
+    {
       "description": "Shared T3 pod/LXC CLI pins. Native npm updates the package and lock together; ArgoCD rolls merged updates. Patch automerge follows the repo policy.",
       "matchManagers": ["npm"],
       "matchFileNames": ["2-k3s/13.t3code/env/tools/package.json"],

@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Runs inside the t3env pod as the main container. The init container has
-# already installed the locked CLIs into /tools. This script
+# Runs inside the t3env pod with image-installed CLIs in /tools. This script
 # seeds the persisted HOME on the PVC (idempotent, never overwrites user
 # state) and starts T3 without opening a browser.
 #
@@ -48,6 +47,29 @@ if [[ ! -f $OC_DIR/opencode.json ]]; then
 }
 EOF
   chmod 0600 "$OC_DIR/opencode.json"
+fi
+
+# Register the runtime vault bridge without replacing provider or user settings.
+if [[ -r /run/t3-credentials/identity ]]; then
+  python3 - "$OC_DIR/opencode.json" <<'PY'
+import json, os, sys
+path = sys.argv[1]
+with open(path) as f:
+    config = json.load(f)
+if "keepass" in config.get("mcp", {}):
+    sys.exit(0)
+config.setdefault("mcp", {})["keepass"] = {
+    "type": "local", "command": ["bash", "/scripts/keepass-remote.sh"], "enabled": True
+}
+with open(path, "w") as f:
+    json.dump(config, f, indent=2)
+    f.write("\n")
+os.chmod(path, 0o600)
+PY
+  claude mcp add -s user keepass -- bash /scripts/keepass-remote.sh >/dev/null 2>&1 || \
+    claude mcp get keepass >/dev/null
+  codex mcp get keepass >/dev/null 2>&1 || \
+    codex mcp add keepass -- bash /scripts/keepass-remote.sh >/dev/null
 fi
 
 # T3 provider instances: same layout as files/t3-write-provider-settings.py,

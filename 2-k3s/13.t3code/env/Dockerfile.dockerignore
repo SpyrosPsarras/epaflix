@@ -1,0 +1,9 @@
+**
+!versions.env
+!env/
+!env/Dockerfile
+!env/tools/
+!env/tools/os-packages.txt
+!env/tools/install-cluster-tools.sh
+!env/tools/package.json
+!env/tools/package-lock.json
