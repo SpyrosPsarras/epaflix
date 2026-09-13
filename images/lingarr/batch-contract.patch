@@ -1,0 +1,529 @@
+diff --git a/Lingarr.Server.Tests/Services/SubtitleTranslationServiceTests.cs b/Lingarr.Server.Tests/Services/SubtitleTranslationServiceTests.cs
+index 5d9af34..913efae 100644
+--- a/Lingarr.Server.Tests/Services/SubtitleTranslationServiceTests.cs
++++ b/Lingarr.Server.Tests/Services/SubtitleTranslationServiceTests.cs
+@@ -406,6 +406,30 @@ public class SubtitleTranslationServiceTests
+ 
+     #region ProcessSubtitleBatch Tests
+ 
++    [Fact]
++    public async Task ProcessSubtitleBatch_BatchServiceOmitsAPosition_ThrowsAndLeavesNothingTranslated()
++    {
++        // Arrange: the batch service answers only position 1. Before this change the caller kept
++        // the English source for position 2 and logged a warning; now it must fail the batch.
++        var harness = CreateBatchHarness(items =>
++            items.Where(i => i.Position == 1).ToDictionary(i => i.Position, _ => "hola"));
++        var subtitles = new List<SubtitleItem> { Subtitle(1, "hello"), Subtitle(2, "world") };
++
++        // Act
++        var exception = await Assert.ThrowsAsync<TranslationException>(() =>
++            harness.Service.ProcessSubtitleBatch(subtitles,
++                "en", "es",
++                stripSubtitleFormatting: false,
++                preserveLineBreaks: false,
++                CancellationToken.None));
++
++        // Assert: the only configured service failed, so the batch fails, and no subtitle carries
++        // its source text as a "translation".
++        Assert.Contains("All configured batch translation services failed", exception.Message);
++        Assert.Contains("position 2", exception.InnerException!.Message);
++        Assert.DoesNotContain(subtitles, subtitle => subtitle.TranslatedLines.SequenceEqual(subtitle.Lines));
++    }
++
+     [Fact]
+     public async Task ProcessSubtitleBatch_PreserveOff_JoinsWithSpaceAndReturnsSingleLine()
+     {
+@@ -494,24 +518,6 @@ public class SubtitleTranslationServiceTests
+         Assert.All(translated, line => Assert.True(line.Length <= 42, $"Line exceeded max length: '{line}'"));
+     }
+ 
+-    [Fact]
+-    public async Task ProcessSubtitleBatch_MissingTranslation_FallsBackToOriginalLines()
+-    {
+-        // Arrange
+-        var harness = CreateBatchHarness(_ => new Dictionary<int, string>());
+-        var subtitles = new List<SubtitleItem> { Subtitle(1, "hello", "world") };
+-
+-        // Act
+-        await harness.Service.ProcessSubtitleBatch(subtitles,
+-            "en", "es",
+-            stripSubtitleFormatting: false,
+-            preserveLineBreaks: false,
+-            CancellationToken.None);
+-
+-        // Assert
+-        Assert.Equal(["hello", "world"], subtitles[0].TranslatedLines);
+-    }
+-
+     #endregion
+ 
+     #region Chain-wide best-match resolution
+diff --git a/Lingarr.Server.Tests/Services/Translation/LocalAiServiceTests.cs b/Lingarr.Server.Tests/Services/Translation/LocalAiServiceTests.cs
+index 43ca0d8..e7252dd 100644
+--- a/Lingarr.Server.Tests/Services/Translation/LocalAiServiceTests.cs
++++ b/Lingarr.Server.Tests/Services/Translation/LocalAiServiceTests.cs
+@@ -39,6 +39,7 @@ public class LocalAiServiceTests
+     private readonly Mock<ILogger<LocalAiService>> _loggerMock;
+     private readonly Mock<HttpMessageHandler> _httpMessageHandlerMock;
+     private readonly LocalAiService _service;
++    private readonly List<string> _sentBodies = [];
+ 
+     public LocalAiServiceTests()
+     {
+@@ -92,29 +93,179 @@ public class LocalAiServiceTests
+         VerifyRequestsSent(3); // MaxRetries
+     }
+ 
++    private const string ValidWrapper = "{\"translations\":" + ValidJson + "}";
++
+     [Fact]
+-    public async Task TranslateBatchAsync_ShouldRetry_WhenChatApiFallbackReturnsMalformedJson()
++    public async Task TranslateBatchAsync_ShouldReturnAllPositions_WhenChatApiReturnsValidStructuredResponse()
+     {
+-        // Arrange
+         UseSettings(ChatEndpoint);
++        SetupResponseSequence(ChatResponse(ValidWrapper));
+ 
+-        // The chat endpoint tries structured output first and falls back to plain JSON parsing,
+-        // so a failing attempt sends two requests before the retry kicks in.
+-        SetupResponseSequence(
+-            ChatResponse(MalformedJson),
+-            ChatResponse(MalformedJson),
+-            ChatResponse("{\"translations\":" + ValidJson + "}"));
++        var result = await _service.TranslateBatchAsync(Batch(), "en", "es", CancellationToken.None);
++
++        Assert.Equal(2, result.Count);
++        Assert.Equal("Hola", result[1]);
++        Assert.Equal("Mundo", result[2]);
++        VerifyRequestsSent(1);
++        VerifyAllRequestsCarriedResponseFormat();
++    }
++
++    [Fact]
++    public async Task TranslateBatchAsync_ShouldRetryStructured_WhenChatApiReturnsMalformedJson()
++    {
++        UseSettings(ChatEndpoint);
++
++        // No schema-less fallback any more: one structured request per attempt, retried with the
++        // same response_format.
++        SetupResponseSequence(ChatResponse(MalformedJson), ChatResponse(ValidWrapper));
++
++        var result = await _service.TranslateBatchAsync(Batch(), "en", "es", CancellationToken.None);
++
++        Assert.Equal("Mundo", result[2]);
++        VerifyRequestsSent(2);
++        VerifyAllRequestsCarriedResponseFormat();
++        VerifyWarningLogged("returned an unparsable response", Times.Once());
++    }
++
++    public static IEnumerable<object[]> MalformedEnvelopes =>
++    [
++        ["not json at all", "envelope not JSON"],
++        ["{\"choices\":[]}", "empty choices"],
++        ["{\"choices\":[null]}", "null choice element"],
++        ["{\"choices\":[{\"message\":null}]}", "null message"],
++        ["{\"choices\":[{\"message\":{\"content\":null}}]}", "null content"],
++        ["{\"choices\":[{\"message\":{\"content\":\"\"}}]}", "empty content"],
++        ["{\"choices\":[{\"message\":{\"content\":\"{\\\"translations\\\":[null]}\"}}]}", "null translation element"],
++        ["{\"choices\":[{\"message\":{\"content\":\"{\\\"translations\\\":\\\"nope\\\"}\"}}]}", "translations not an array"],
++        ["{\"choices\":[{\"message\":{\"content\":\"42\"}}]}", "content is a scalar"],
++    ];
++
++    [Theory]
++    [MemberData(nameof(MalformedEnvelopes))]
++    public async Task TranslateBatchAsync_ShouldRetryStructured_WhenEnvelopeIsMalformed(string rawBody, string _)
++    {
++        UseSettings(ChatEndpoint);
++        SetupResponseSequence(RawResponse(rawBody), ChatResponse(ValidWrapper));
+ 
+-        // Act
+         var result = await _service.TranslateBatchAsync(Batch(), "en", "es", CancellationToken.None);
+ 
+-        // Assert
+         Assert.Equal(2, result.Count);
+         Assert.Equal("Mundo", result[2]);
+-        VerifyRequestsSent(3);
++        VerifyRequestsSent(2);
++        VerifyAllRequestsCarriedResponseFormat();
+         VerifyWarningLogged("returned an unparsable response", Times.Once());
+     }
+ 
++    [Theory]
++    [MemberData(nameof(MalformedEnvelopes))]
++    public async Task TranslateBatchAsync_ShouldFailClosedAfterMaxRetries_WhenEnvelopeStaysMalformed(string rawBody, string _)
++    {
++        UseSettings(ChatEndpoint);
++        SetupResponse(() => RawResponse(rawBody));
++
++        var exception = await Assert.ThrowsAsync<TranslationException>(
++            () => _service.TranslateBatchAsync(Batch(), "en", "es", CancellationToken.None));
++
++        Assert.Contains("Retry limit reached", exception.Message);
++        Assert.IsType<TranslationParseException>(exception.InnerException);
++        VerifyRequestsSent(3); // MaxRetries, every one structured
++        VerifyAllRequestsCarriedResponseFormat();
++    }
++
++    [Fact]
++    public async Task TranslateBatchAsync_ShouldPropagateCancellation_NotRetry()
++    {
++        UseSettings(ChatEndpoint);
++        using var cts = new CancellationTokenSource();
++        _httpMessageHandlerMock.Protected()
++            .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
++            .Returns(() => { cts.Cancel(); throw new OperationCanceledException(cts.Token); });
++
++        await Assert.ThrowsAnyAsync<OperationCanceledException>(
++            () => _service.TranslateBatchAsync(Batch(), "en", "es", cts.Token));
++        VerifyRequestsSent(1);
++    }
++
++    [Fact]
++    public async Task TranslateBatchAsync_ShouldRetry_WhenStructuredResponseMissesAPosition()
++    {
++        UseSettings(ChatEndpoint);
++        SetupResponseSequence(
++            ChatResponse("{\"translations\":[{\"position\":1,\"line\":\"Hola\"}]}"),
++            ChatResponse(ValidWrapper));
++
++        var result = await _service.TranslateBatchAsync(Batch(), "en", "es", CancellationToken.None);
++
++        Assert.Equal(2, result.Count);
++        Assert.Equal("Mundo", result[2]);
++        VerifyRequestsSent(2);
++    }
++
++    [Theory]
++    [InlineData("{\"translations\":[{\"position\":1,\"line\":\"Hola\"},{\"position\":1,\"line\":\"Hola\"},{\"position\":2,\"line\":\"Mundo\"}]}", "duplicate")]
++    [InlineData("{\"translations\":[{\"position\":1,\"line\":\"Hola\"},{\"position\":2,\"line\":\"Mundo\"},{\"position\":3,\"line\":\"Extra\"}]}", "extra")]
++    [InlineData("{\"translations\":[{\"position\":1,\"line\":\"Hola\"},{\"position\":2,\"line\":\"\"}]}", "empty")]
++    [InlineData("[{\"position\":1,\"line\":\"Hola\"},{\"position\":2,\"line\":\"Mundo\"}]", "bare array without translations wrapper")]
++    [InlineData("Hola\nMundo", "prose")]
++    public async Task TranslateBatchAsync_ShouldRejectThenRecover_WhenStructuredResponseViolatesContract(string badContent, string _)
++    {
++        UseSettings(ChatEndpoint);
++        SetupResponseSequence(ChatResponse(badContent), ChatResponse(ValidWrapper));
++
++        var result = await _service.TranslateBatchAsync(Batch(), "en", "es", CancellationToken.None);
++
++        Assert.Equal(2, result.Count);
++        Assert.Equal("Hola", result[1]);
++        Assert.Equal("Mundo", result[2]);
++        VerifyRequestsSent(2);
++    }
++
++    [Fact]
++    public async Task TranslateBatchAsync_ShouldAcceptEmptyLine_WhenSourceLineWasEmpty()
++    {
++        UseSettings(ChatEndpoint);
++        var batch = new List<BatchSubtitleItem>
++        {
++            new() { Position = 1, Line = "Hello" },
++            new() { Position = 2, Line = "" }
++        };
++        SetupResponseSequence(
++            ChatResponse("{\"translations\":[{\"position\":1,\"line\":\"Hola\"},{\"position\":2,\"line\":\"\"}]}"));
++
++        var result = await _service.TranslateBatchAsync(batch, "en", "es", CancellationToken.None);
++
++        Assert.Equal("Hola", result[1]);
++        VerifyRequestsSent(1);
++    }
++
++    [Fact]
++    public async Task TranslateBatchAsync_ShouldThrowWithoutResult_WhenChatApiKeepsMissingPositions()
++    {
++        UseSettings(ChatEndpoint);
++        SetupResponse(() => ChatResponse("{\"translations\":[{\"position\":1,\"line\":\"Hola\"}]}"));
++
++        var exception = await Assert.ThrowsAsync<TranslationException>(
++            () => _service.TranslateBatchAsync(Batch(), "en", "es", CancellationToken.None));
++
++        Assert.Contains("Retry limit reached", exception.Message);
++        Assert.IsType<TranslationParseException>(exception.InnerException);
++        Assert.Contains("missing: [2]", exception.InnerException!.Message);
++        VerifyRequestsSent(3); // MaxRetries, all structured, no schema-less fallback request
++        VerifyAllRequestsCarriedResponseFormat();
++    }
++
++    [Fact]
++    public async Task TranslateAsync_ShouldReturnPlainText_ForSingleLine()
++    {
++        UseSettings(ChatEndpoint);
++        SetupResponseSequence(ChatResponse("Hola mundo"));
++
++        var result = await _service.TranslateAsync("Hello world", "en", "es", null, null, CancellationToken.None);
++
++        Assert.Equal("Hola mundo", result);
++        VerifyRequestsSent(1);
++    }
++
+     [Fact]
+     public async Task TranslateBatchAsync_ShouldNotRetry_WhenRequestFailsWithNonRetryableStatus()
+     {
+@@ -147,6 +298,12 @@ public class LocalAiServiceTests
+     private static HttpResponseMessage ChatResponse(string translatedJson) =>
+         JsonResponse(new { choices = new[] { new { message = new { content = translatedJson } } } });
+ 
++    private static HttpResponseMessage RawResponse(string rawBody) => new()
++    {
++        StatusCode = HttpStatusCode.OK,
++        Content = new StringContent(rawBody, Encoding.UTF8, "application/json")
++    };
++
+     private static HttpResponseMessage JsonResponse(object body) => new()
+     {
+         StatusCode = HttpStatusCode.OK,
+@@ -185,21 +342,37 @@ public class LocalAiServiceTests
+                 "SendAsync",
+                 ItExpr.IsAny<HttpRequestMessage>(),
+                 ItExpr.IsAny<CancellationToken>())
+-            .Returns(() => Task.FromResult(responseFactory()));
++            .Returns(async (HttpRequestMessage request, CancellationToken _) =>
++            {
++                _sentBodies.Add(await request.Content!.ReadAsStringAsync());
++                return responseFactory();
++            });
+     }
+ 
+     private void SetupResponseSequence(params HttpResponseMessage[] responses)
+     {
+-        var sequence = _httpMessageHandlerMock.Protected()
+-            .SetupSequence<Task<HttpResponseMessage>>(
++        var queue = new Queue<HttpResponseMessage>(responses);
++        _httpMessageHandlerMock.Protected()
++            .Setup<Task<HttpResponseMessage>>(
+                 "SendAsync",
+                 ItExpr.IsAny<HttpRequestMessage>(),
+-                ItExpr.IsAny<CancellationToken>());
++                ItExpr.IsAny<CancellationToken>())
++            .Returns(async (HttpRequestMessage request, CancellationToken _) =>
++            {
++                _sentBodies.Add(await request.Content!.ReadAsStringAsync());
++                return queue.Dequeue();
++            });
++    }
+ 
+-        foreach (var response in responses)
+-        {
+-            sequence = sequence.ReturnsAsync(response);
+-        }
++    /// <summary>
++    /// Every batch request on the chat endpoint must carry the json_schema response_format:
++    /// the point of the change is that no schema-less request is ever sent.
++    /// </summary>
++    private void VerifyAllRequestsCarriedResponseFormat()
++    {
++        Assert.NotEmpty(_sentBodies);
++        Assert.All(_sentBodies, body => Assert.Contains("\"response_format\"", body));
++        Assert.All(_sentBodies, body => Assert.Contains("\"json_schema\"", body));
+     }
+ 
+     private void VerifyRequestsSent(int count)
+diff --git a/Lingarr.Server/Services/SubtitleTranslationService.cs b/Lingarr.Server/Services/SubtitleTranslationService.cs
+index d0081ec..7c57a83 100644
+--- a/Lingarr.Server/Services/SubtitleTranslationService.cs
++++ b/Lingarr.Server/Services/SubtitleTranslationService.cs
+@@ -438,9 +438,11 @@ public class SubtitleTranslationService
+             var contentLines = stripSubtitleFormatting ? subtitle.PlaintextLines : subtitle.Lines;
+             if (!batchResults.TryGetValue(subtitle.Position, out var translated))
+             {
+-                _logger.LogWarning("Translation not found for subtitle at position {Position} using original line.", subtitle.Position);
+-                subtitle.TranslatedLines = contentLines;
+-                continue;
++                // Never publish an untranslated source line as a translation. The batch
++                // service validates coverage before returning, so reaching this means a
++                // service without that check answered; fail the batch (and the job).
++                throw new TranslationException(
++                    $"Batch translation service {candidate.Entry.Name} returned no translation for position {subtitle.Position}.");
+             }
+ 
+             if (stripSubtitleFormatting)
+diff --git a/Lingarr.Server/Services/Translation/LocalAiService.cs b/Lingarr.Server/Services/Translation/LocalAiService.cs
+index a474c20..27ac541 100644
+--- a/Lingarr.Server/Services/Translation/LocalAiService.cs
++++ b/Lingarr.Server/Services/Translation/LocalAiService.cs
+@@ -323,16 +323,12 @@ public class LocalAiService : BaseLanguageService, ITranslationService, IBatchTr
+             return await TranslateBatchWithGenerateApi(subtitleBatch, cancellationToken);
+         }
+ 
+-        // Try structured output first (OpenAI-compatible format)
+-        try
+-        {
+-            return await TranslateBatchWithStructuredOutput(subtitleBatch, cancellationToken);
+-        }
+-        catch (Exception ex)
+-        {
+-            _logger.LogWarning(ex, "Structured output failed, falling back to JSON parsing");
+-            return await TranslateBatchWithJsonParsing(subtitleBatch, cancellationToken);
+-        }
++        // Structured output only. The previous schema-less fallback
++        // (TranslateBatchWithJsonParsing) sent the batch with no response_format
++        // and no JSON instruction, so models answered with prose and the whole
++        // batch was lost; a parse failure here is retried by TranslateBatchAsync
++        // with the same structured request instead.
++        return await TranslateBatchWithStructuredOutput(subtitleBatch, cancellationToken);
+     }
+ 
+     private async Task<Dictionary<int, string>> TranslateBatchWithStructuredOutput(
+@@ -406,101 +402,87 @@ public class LocalAiService : BaseLanguageService, ITranslationService, IBatchTr
+         }
+ 
+         var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+-        var chatResponse = JsonSerializer.Deserialize<ChatResponse>(responseBody);
+-        if (chatResponse?.Choices == null || chatResponse.Choices.Count == 0)
+-        {
+-            throw new TranslationException("No completion choices returned from LocalAI");
+-        }
+-
+-        var translatedJson = chatResponse.Choices[0].Message.Content;
+-
++        // Everything from here to the return is "the model answered, but not with what we
++        // asked for": envelope not JSON, choices/message/content null, wrapper not an
++        // object, translations not an array, elements null, coverage wrong. All of it is
++        // TranslationParseException so TranslateBatchAsync retries the same structured
++        // request. HTTP status handling above and cancellation are untouched.
++        string? translatedJson = null;
+         try
+         {
+-            // Parse the wrapper object first, extract the translations array
++            var chatResponse = JsonSerializer.Deserialize<ChatResponse>(responseBody);
++            var message = chatResponse?.Choices is { Count: > 0 } choices ? choices[0]?.Message : null;
++            translatedJson = message?.Content;
++            if (string.IsNullOrWhiteSpace(translatedJson))
++            {
++                throw new TranslationParseException("Structured response had no completion choices or no message content");
++            }
++
+             var responseWrapper = JsonSerializer.Deserialize<JsonElement>(translatedJson);
+-            if (!responseWrapper.TryGetProperty("translations", out var translationsElement))
++            if (responseWrapper.ValueKind != JsonValueKind.Object
++                || !responseWrapper.TryGetProperty("translations", out var translationsElement)
++                || translationsElement.ValueKind != JsonValueKind.Array)
+             {
+-                throw new TranslationParseException("Response does not contain 'translations' property");
++                throw new TranslationParseException("Response is not an object with a 'translations' array");
+             }
+ 
+             var translatedItems =
+-                JsonSerializer.Deserialize<List<StructuredBatchResponse>>(translationsElement.GetRawText());
+-
+-            if (translatedItems == null)
++                JsonSerializer.Deserialize<List<StructuredBatchResponse?>>(translationsElement.GetRawText());
++            if (translatedItems == null || translatedItems.Any(item => item is null))
+             {
+-                throw new TranslationParseException("Failed to deserialize translated subtitles");
++                throw new TranslationParseException("Translations array contained null elements");
+             }
+ 
+-            return MergeByPosition(translatedItems);
++            var items = translatedItems.Select(item => item!).ToList();
++            ValidateBatchCoverage(subtitleBatch, items);
++            return MergeByPosition(items);
+         }
+         catch (JsonException ex)
+         {
+-            _logger.LogError(ex, "Failed to parse structured JSON response: {Json}", translatedJson);
++            _logger.LogError(ex, "Failed to parse structured JSON response: {Json}", translatedJson ?? responseBody);
+             throw new TranslationParseException("Failed to parse structured translated subtitles", ex);
+         }
+     }
+ 
+-    private async Task<Dictionary<int, string>> TranslateBatchWithJsonParsing(
++    /// <summary>
++    /// A structured batch response is only accepted when it covers exactly the requested
++    /// positions: nothing missing, nothing extra, no duplicates, and no empty line where the
++    /// source line had content. Anything else is a TranslationParseException so the caller
++    /// retries the same structured request instead of silently keeping original lines.
++    /// </summary>
++    private static void ValidateBatchCoverage(
+         List<BatchSubtitleItem> subtitleBatch,
+-        CancellationToken cancellationToken)
++        List<StructuredBatchResponse> translatedItems)
+     {
+-        var replacements = GetBatchReplacements(_model!, JsonSerializer.Serialize(subtitleBatch));
+-        var bodyJson = _requestTemplateService.BuildRequestBody(_chatRequestTemplate!, replacements);
+-
+-        var requestContent = new StringContent(
+-            bodyJson,
+-            Encoding.UTF8,
+-            "application/json");
+-
+-        var response = await _httpClient.PostAsync(_endpoint, requestContent, cancellationToken);
+-        if (!response.IsSuccessStatusCode)
+-        {
+-            var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
+-            _logger.LogError(
+-                "LocalAI JSON parsing batch request failed with status {StatusCode}: {ResponseContent}",
+-                response.StatusCode, 
+-                responseContent);
+-            throw new TranslationException(
+-                $"LocalAI JSON parsing batch request failed with status {response.StatusCode}: {responseContent}");
+-        }
+-
+-        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+-        var chatResponse = JsonSerializer.Deserialize<ChatResponse>(responseBody);
+-
+-        if (chatResponse?.Choices == null || chatResponse.Choices.Count == 0)
++        var requested = subtitleBatch.Select(item => item.Position).ToHashSet();
++        var returned = translatedItems.Select(item => item.Position).ToList();
++        var returnedSet = returned.ToHashSet();
++
++        var missing = requested.Except(returnedSet).Order().ToList();
++        var extra = returnedSet.Except(requested).Order().ToList();
++        var duplicates = returned.GroupBy(position => position)
++            .Where(group => group.Count() > 1)
++            .Select(group => group.Key)
++            .Order()
++            .ToList();
++        var empty = translatedItems
++            .Where(item => string.IsNullOrWhiteSpace(item.Line)
++                           && subtitleBatch.Any(source => source.Position == item.Position
++                                                          && !string.IsNullOrWhiteSpace(source.Line)))
++            .Select(item => item.Position)
++            .Distinct()
++            .Order()
++            .ToList();
++
++        if (missing.Count == 0 && extra.Count == 0 && duplicates.Count == 0 && empty.Count == 0)
+         {
+-            throw new TranslationException("No completion choices returned from LocalAI");
++            return;
+         }
+ 
+-        // Try to extract JSON
+-        var translatedJson = chatResponse.Choices[0].Message.Content;
+-        var jsonStart = translatedJson.IndexOf('[');
+-        var jsonEnd = translatedJson.LastIndexOf(']');
+-        if (jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart)
+-        {
+-            translatedJson = translatedJson.Substring(jsonStart, jsonEnd - jsonStart + 1);
+-        }
+-
+-        try
+-        {
+-            var translatedItems = JsonSerializer.Deserialize<List<StructuredBatchResponse>>(translatedJson,
+-                new JsonSerializerOptions
+-                {
+-                    PropertyNameCaseInsensitive = true
+-                });
+-
+-            if (translatedItems == null)
+-            {
+-                throw new TranslationParseException("Failed to deserialize translated subtitles from JSON parsing");
+-            }
+-
+-            return MergeByPosition(translatedItems);
+-        }
+-        catch (JsonException ex)
+-        {
+-            _logger.LogError(ex, "Failed to parse JSON response: {Json}", translatedJson);
+-            throw new TranslationParseException("Failed to parse JSON translated subtitles", ex);
+-        }
++        throw new TranslationParseException(
++            $"Structured batch response did not cover the requested positions " +
++            $"(missing: [{string.Join(",", missing)}], extra: [{string.Join(",", extra)}], " +
++            $"duplicate: [{string.Join(",", duplicates)}], empty: [{string.Join(",", empty)}])");
+     }
+ 
+     private async Task<Dictionary<int, string>> TranslateBatchWithGenerateApi(
