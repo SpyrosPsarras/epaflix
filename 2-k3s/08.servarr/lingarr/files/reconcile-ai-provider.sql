@@ -1,14 +1,14 @@
--- Boot guard: pin lingarr's AI provider to cliproxy -> OpenRouter's minimax
--- free model. Runs from the same initContainer psql flow as
+-- Boot guard: pin lingarr's AI provider to cliproxy-free -> OpenRouter's free
+-- router. Runs from the same initContainer psql flow as
 -- reconcile-job-queue.sql (see lingarr.yaml); same rationale as #925 - these
 -- settings are live-only DB state otherwise, and a rebuild or a stray UI edit
 -- silently repoints translations at whatever the UI last left behind.
 --
--- The 429 daily cap on the free model is handled at the cliproxy layer, not
--- here: the openrouter provider (priority 10) and the ollama provider
--- (aya-expanse:8b, priority 0) both serve the or-minimax-m3:free alias, and
--- cliproxy fails over to ollama while the openrouter credential cools down.
--- lingarr therefore keeps ONE service, endpoint and model.
+-- cliproxy-free (17.remote-pi/cliproxy-free) is a dedicated proxy whose whole
+-- catalog is one alias for openrouter/free. There is NO failover to ollama or
+-- to any paid model: a free-tier 429 is a failed translation that lingarr
+-- retries client-side (max_retries, retry_delay). That is the requirement, not
+-- a gap. lingarr keeps ONE service, endpoint and model.
 --
 -- Secret handling copies reconcile-config.psql in 17.remote-pi/cliproxy: the
 -- key is read from the environment and echoed nowhere, so a failing statement
@@ -48,15 +48,14 @@ BEGIN
   -- directly and treats a trailing ".../completions" as its chat-API switch.
   -- Cluster-internal name, not the traefik one: no TLS hop, no ingress
   -- dependency, and it still works when the LAN-facing path does not.
-  INSERT INTO settings (key, value) VALUES ('local_ai_endpoint', 'http://cliproxy.remote-pi.svc.cluster.local:8317/v1/chat/completions')
+  INSERT INTO settings (key, value) VALUES ('local_ai_endpoint', 'http://cliproxy-free.remote-pi.svc.cluster.local:8317/v1/chat/completions')
    ON CONFLICT (key) DO UPDATE SET value = excluded.value;
 
-  -- The one model lingarr may use: OpenRouter's minimax free variant through
-  -- cliproxy. It rides OpenRouter's shared daily cap, so 429 bursts are normal;
-  -- cliproxy fails over to the local ollama for the duration of the cooldown,
-  -- and lingarr retries whatever slips through client-side (max_retries,
-  -- retry_delay).
-  INSERT INTO settings (key, value) VALUES ('local_ai_model', 'or-minimax-m3:free')
+  -- The one model lingarr may use, and the only one cliproxy-free serves:
+  -- or-free, OpenRouter's free router (openrouter/free). OpenRouter picks a
+  -- currently-available free model per request. 429 bursts from the shared
+  -- free tier are normal and lingarr retries them client-side.
+  INSERT INTO settings (key, value) VALUES ('local_ai_model', 'or-free')
    ON CONFLICT (key) DO UPDATE SET value = excluded.value;
 
   -- The previous ollama-era template carried ollama-only body fields
@@ -91,8 +90,8 @@ BEGIN
   SELECT count(*) INTO n
     FROM settings
    WHERE (key = 'local_ai_endpoint'
-          AND value = 'http://cliproxy.remote-pi.svc.cluster.local:8317/v1/chat/completions')
-      OR (key = 'local_ai_model'    AND value = 'or-minimax-m3:free')
+          AND value = 'http://cliproxy-free.remote-pi.svc.cluster.local:8317/v1/chat/completions')
+      OR (key = 'local_ai_model'    AND value = 'or-free')
       OR (key = 'local_ai_chat_request_template' AND value = '')
       OR (key = 'service_type'      AND value = '["localai"]')
       OR (key = 'local_ai_api_key'  AND value = current_setting('lingarr.cliproxy_key'));
@@ -101,6 +100,6 @@ BEGIN
     RAISE EXCEPTION 'AI provider pins incomplete: % of 5 settings hold the wanted values', n;
   END IF;
 
-  RAISE NOTICE 'AI provider pinned: cliproxy -> OpenRouter minimax-m3:free';
+  RAISE NOTICE 'AI provider pinned: cliproxy-free -> OpenRouter free router (or-free)';
 END
 $$;
