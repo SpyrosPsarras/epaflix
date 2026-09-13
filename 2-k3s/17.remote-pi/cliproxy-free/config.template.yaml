@@ -52,6 +52,26 @@ payload:
 # it as a second entry with the same alias (CLIProxyAPI pools the alias).
 openai-compatibility:
   - name: "openrouter"
+    # One credential, one model: a cooldown here is a blackout, not a failover.
+    # With cooling on, one upstream 502 made CLIProxyAPI answer every following
+    # request with a synthetic 503 for the cooldown window (2026-09-13: 247
+    # lingarr batch failures in 6 min from one Nvidia 502). lingarr retries only
+    # on 429/503 (LocalAiService), 5 attempts at 1s x2, so a 502 drops the
+    # batch outright and a 503 window outlives the retry budget.
+    #
+    # disable-cooling: no synthetic 503s; each call gets the real upstream
+    # status. request-retry: up to 3 extra upstream attempts INSIDE one client
+    # call for 403/408/429/500/502/503/504 (config.example.yaml), so a transient
+    # 502 or 429 comes back to lingarr as 200 from the same request. Both are
+    # documented per-provider fields (internal/config/config_types.go,
+    # OpenAICompatibility). Measured on the pinned binary against a mock
+    # upstream, 21-cooling-mock-test: 502-then-200 one client call: baseline
+    # 502, this config 200 (upstream saw 502,200). 429-then-200: 200. Upstream
+    # down (8x502): client 502, exactly 4 upstream attempts per call, then the
+    # next call after recovery is 200. Not a fix for an upstream that stays
+    # down; lingarr then keeps the original lines for that batch.
+    disable-cooling: true
+    request-retry: 3
     base-url: "https://openrouter.ai/api/v1"
     api-key-entries:
       - api-key: "__OPENROUTER_API_KEY__"
