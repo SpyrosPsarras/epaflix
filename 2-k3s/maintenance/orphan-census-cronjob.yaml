@@ -707,8 +707,9 @@ data:
             print("\nDISARMED - nothing was changed. To reap these, set ARMED="
                   '"true" on the orphan-census CronJob in git and let ArgoCD '
                   "sync it.")
-            print("ACTION: also apply the #196 `private stalled` rule split, or new "
-                  "orphans keep being manufactured (#483).")
+            print("ACTION: the Cleanuparr strike rules that manufactured past "
+                  "orphans are gone (since 2026-08-02, see #1029); a new orphan "
+                  "needs a new explanation before any reap.")
             return 1
 
         hashes = "|".join(str(t.get("hash", "")) for t in orphans)
