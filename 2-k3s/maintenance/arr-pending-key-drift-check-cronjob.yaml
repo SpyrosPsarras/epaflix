@@ -1,0 +1,233 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: arr-pending-key-drift-check-sql
+  namespace: servarr
+data:
+  check.sql: |
+    -- Pending *arr releases whose stored Prowlarr download URL carries an
+    -- API key that no longer matches the live prowlarr-api-key Secret
+    -- (#975). Prowlarr bakes its key into the downloadUrl of every release
+    -- it returns; an *arr parks the release in PendingReleases with that
+    -- URL stored verbatim. A later key rotation makes the stored URL
+    -- permanently dead, and a parked release retries it forever (one row
+    -- retried a dead URL every ~15.5 min for 70 days, #873/#975).
+    --
+    -- Hashes only, and the hashing happens in-query (#740): the stored key
+    -- and the live key never leave Postgres or the Secret file as values.
+    -- The shell passes SHA-256(live key) as the psql variable live_hash -
+    -- the ONLY thing that crosses from the Secret into SQL - and Postgres
+    -- compares hash to hash. Nothing in the output can carry a key: only
+    -- hash prefixes, titles, ids and URL hosts.
+
+    \set ON_ERROR_STOP on
+    \pset format unaligned
+    \pset tuples_only on
+    \pset null '(null)'
+
+    -- One REPEATABLE READ transaction for everything: Postgres takes the
+    -- snapshot at the first statement, so the flagged set, the census and
+    -- the summary count below all read the same state and can never
+    -- disagree because a release was parked mid-run. The transaction is
+    -- writable only in the sense that a temp table needs it; no real table
+    -- is ever written (this job is REPORT ONLY).
+    BEGIN ISOLATION LEVEL REPEATABLE READ;
+
+    -- The flagged set, materialized ONCE so the alarm rows and the summary
+    -- count below share one predicate instead of two copies that can drift
+    -- apart under a future edit. Any pending release with a stored
+    -- apikey= whose key does not hash to the live key is flagged - the
+    -- url_host column shows which host the URL points at, so a release
+    -- from a non-Prowlarr source is visible in the report instead of
+    -- silently assumed. A pending release is live traffic: the *arr
+    -- retries its stored downloadUrl until the grab succeeds or the
+    -- operator removes the row.
+    CREATE TEMP TABLE flagged_pending ON COMMIT DROP AS
+    SELECT "Id", "Title", "Added",
+           substring("Release"::text from '"downloadUrl"[ ]*:[ ]*"https?://([^/]+)') AS url_host,
+           substring("Release"::text from 'apikey=([A-Za-z0-9]{32})') AS k
+    FROM "PendingReleases"
+    WHERE "Release"::text LIKE '%apikey=%';
+
+    -- ALARM rows: a key that hashes to something other than the live key,
+    -- or an apikey= substring that yields no 32-char key (an unreadable
+    -- key must fail closed, never pass as current).
+    SELECT 'STALE_PENDING' AS finding,
+           "Id",
+           "Title",
+           "Added",
+           url_host,
+           CASE
+             WHEN k IS NULL THEN '(unextractable)'
+             ELSE left(encode(sha256(k::bytea), 'hex'), 16)
+           END AS stored_key_hash16
+    FROM flagged_pending
+    WHERE k IS NULL
+       OR sha256(k::bytea) <> decode(:'live_hash', 'hex')
+    ORDER BY "Id";
+
+    -- Inert residue census, informational only: History, DownloadHistory
+    -- and IndexerStatus.LastRssSyncReleaseInfo store the same
+    -- key-bearing URLs, but nothing replays them (grab records are for
+    -- display/dedup, LastRssSyncReleaseInfo is only read for RSS resume),
+    -- so they never fail the check. The census keeps #975's "is the
+    -- residue shrinking or growing" question answerable from logs, and a
+    -- NEW dead-key generation appearing here is the visible footprint of
+    -- a rotation that happened without draining.
+    -- Blocklist is deliberately absent: in both app schemas it has no
+    -- column that carries a stored URL (SourceTitle/Message/TorrentInfoHash
+    -- only), so it cannot hold this class - the Blocklist residue #975
+    -- mentions lived in sonarr2's SQLite schema, and sonarr2 is gone.
+    SELECT 'RESIDUE' AS finding,
+           src,
+           CASE
+             WHEN k IS NULL THEN '(unextractable)'
+             WHEN sha256(k::bytea) = decode(:'live_hash', 'hex') THEN '(live-key)'
+             ELSE left(encode(sha256(k::bytea), 'hex'), 16)
+           END AS key_hash16,
+           n
+    FROM (
+      SELECT 'DownloadHistory.Release' AS src,
+             substring("Release"::text from 'apikey=([A-Za-z0-9]{32})') AS k,
+             count(*) AS n
+      FROM "DownloadHistory"
+      WHERE "Release"::text LIKE '%apikey=%'
+      GROUP BY 1, 2
+      UNION ALL
+      SELECT 'History.Data',
+             substring("Data"::text from 'apikey=([A-Za-z0-9]{32})'),
+             count(*)
+      FROM "History"
+      WHERE "Data"::text LIKE '%apikey=%'
+      GROUP BY 1, 2
+      UNION ALL
+      SELECT 'IndexerStatus.LastRssSyncReleaseInfo',
+             substring("LastRssSyncReleaseInfo"::text from 'apikey=([A-Za-z0-9]{32})'),
+             count(*)
+      FROM "IndexerStatus"
+      WHERE "LastRssSyncReleaseInfo"::text LIKE '%apikey=%'
+      GROUP BY 1, 2
+    ) q
+    ORDER BY src, n DESC;
+
+    -- The number the job shell branches on - derived from the same
+    -- flagged_pending set as the alarm rows, never a second predicate.
+    SELECT 'pending_total=' || count(*) FROM "PendingReleases";
+    SELECT 'stale_pending=' || count(*) FROM flagged_pending
+    WHERE k IS NULL
+       OR sha256(k::bytea) <> decode(:'live_hash', 'hex');
+
+    COMMIT;
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: arr-pending-key-drift-check
+  namespace: servarr
+  labels:
+    app: arr-pending-key-drift-check
+spec:
+  schedule: "20 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 6
+  failedJobsHistoryLimit: 6
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 300
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 3600  # keep 1 hour
+      template:
+        metadata:
+          labels:
+            app: arr-pending-key-drift-check
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: check
+              image: postgres:16-alpine
+              imagePullPolicy: IfNotPresent
+              command: ["/bin/sh", "-eu", "-c"]
+              args:
+                - |
+                  echo "=== arr pending-release key drift check @ $(date -u +%FT%TZ) ==="
+                  # Live prowlarr key -> hash only. The Secret file is read by
+                  # sha256sum directly; the value never enters a variable,
+                  # an argument list or the log. Length guard fails closed on
+                  # a misconfigured Secret (empty/truncated file = 40-char
+                  # hash of the wrong bytes, which would flag everything).
+                  key_len=$(wc -c < /prowlarr-key/apiKey)
+                  if [ "$key_len" -ne 32 ]; then
+                    echo "ERROR: prowlarr-api-key Secret value is ${key_len} chars, expected 32 - refusing to judge" >&2
+                    exit 2
+                  fi
+                  LIVE_HASH=$(sha256sum /prowlarr-key/apiKey | cut -d' ' -f1)
+                  # sonarr and radarr only: they are the two *arrs whose
+                  # Postgres schemas have PendingReleases at all. bazarr-main
+                  # has no PendingReleases/History/DownloadHistory tables
+                  # (bazarr fetches subtitles, not releases), and sonarr2 -
+                  # the instance #975 measured - no longer exists.
+                  fail=0
+                  for app in sonarr radarr; do
+                    PGHOST=$(cat /secrets/${app}-host)
+                    PGPORT=$(cat /secrets/${app}-port)
+                    PGDATABASE=$(cat /secrets/${app}-database)
+                    PGUSER=$(cat /secrets/${app}-user)
+                    PGPASSWORD=$(cat /secrets/${app}-password)
+                    export PGHOST PGPORT PGDATABASE PGUSER PGPASSWORD
+                    echo
+                    echo "--- ${app} (${PGDATABASE} @ ${PGHOST}) ---"
+                    if ! out=$(psql -X -v ON_ERROR_STOP=1 -v live_hash="$LIVE_HASH" -f /sql/check.sql); then
+                      # Print whatever psql produced before dying: a partial
+                      # report is evidence, an aborted run that shows nothing
+                      # is not.
+                      printf '%s\n' "$out"
+                      echo "ERROR: ${app}: psql failed - cannot judge (exit 2)" >&2
+                      exit 2
+                    fi
+                    printf '%s\n' "$out"
+                    n=$(printf '%s\n' "$out" | sed -n 's/^stale_pending=//p')
+                    n=${n:-0}
+                    if [ "$n" -gt 0 ]; then
+                      fail=1
+                    fi
+                    unset PGPASSWORD
+                  done
+                  echo
+                  if [ "$fail" -ne 0 ]; then
+                    echo "FAIL: a pending release holds a Prowlarr downloadUrl whose apikey does not match the live prowlarr-api-key. That row retries a permanently dead URL (401) until drained - the #975 signature. ACTION: remove the delayed item in the *arr queue UI (or DELETE /api/v3/queue/<id>) and re-search the episode/movie if still wanted. Rotation runbook step that prevents the class: after rotating prowlarr_api_key, drain PendingReleases in each *arr. If Prowlarr itself rejects the Secret key (401 on /api/v1/health), the prowlarr-api-key Secret is stale instead - re-seed it first (#1021); a pending release grabbed with the CURRENT key reads as stale while the Secret lags."
+                    exit 1
+                  fi
+                  echo "OK: no *arr holds a pending release whose stored Prowlarr key is stale. RESIDUE lines above are inert (nothing retries them)."
+                  exit 0
+              volumeMounts:
+                - name: secrets
+                  mountPath: /secrets
+                  readOnly: true
+                - name: prowlarr-key
+                  mountPath: /prowlarr-key
+                  readOnly: true
+                - name: sql
+                  mountPath: /sql
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "500m"
+                  memory: "256Mi"
+          volumes:
+            - name: secrets
+              secret:
+                secretName: servarr-postgres
+                defaultMode: 0400
+            - name: prowlarr-key
+              secret:
+                secretName: prowlarr-api-key
+                defaultMode: 0400
+            - name: sql
+              configMap:
+                name: arr-pending-key-drift-check-sql
+                defaultMode: 0444
