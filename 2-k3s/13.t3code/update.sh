@@ -17,6 +17,7 @@ CODEX_VERSION=$(npm_pin @openai/codex)
 # Preserve KEY=value stamps so previous T3 versions still parse after migration.
 pins() {
   cat "$DIR/versions.env"
+  printf 'OS_PACKAGES_SHA256=%s\n' "$(sha256sum "$DIR/env/tools/os-packages.txt" | cut -d ' ' -f 1)"
   printf 'T3_VERSION=%s\nCLAUDE_CODE_VERSION=%s\nOPENCODE_VERSION=%s\nCODEX_VERSION=%s\n' \
     "$T3_VERSION" "$CLAUDE_CODE_VERSION" "$OPENCODE_VERSION" "$CODEX_VERSION"
 }
@@ -43,21 +44,10 @@ npm install -g "t3@$T3_VERSION" "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION"
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-helm_tgz="helm-v${HELM_VERSION}-linux-amd64.tar.gz"
-curl -fsSL -o "$tmp/$helm_tgz" "https://get.helm.sh/$helm_tgz"
-curl -fsSL -o "$tmp/$helm_tgz.sha256sum" "https://get.helm.sh/$helm_tgz.sha256sum"
-(cd "$tmp" && sha256sum -c "$helm_tgz.sha256sum" >/dev/null)
-tar -xzf "$tmp/$helm_tgz" -C "$tmp"
-install -m 0755 "$tmp/linux-amd64/helm" /usr/local/bin/helm
-curl -fsSL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv${KUSTOMIZE_VERSION}/kustomize_v${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" | tar -xzf - -C "$tmp" kustomize
-install -m 0755 "$tmp/kustomize" /usr/local/bin/kustomize
-curl -fsSL -o "$tmp/argocd" "https://github.com/argoproj/argo-cd/releases/download/v${ARGOCD_VERSION}/argocd-linux-amd64"
-install -m 0755 "$tmp/argocd" /usr/local/bin/argocd
-curl -fsSL -o "$tmp/sops" "https://github.com/getsops/sops/releases/download/v${SOPS_VERSION}/sops-v${SOPS_VERSION}.linux.amd64"
-install -m 0755 "$tmp/sops" /usr/local/bin/sops
+T3_VERSIONS_FILE="$DIR/versions.env" bash "$DIR/env/tools/install-cluster-tools.sh"
 
 apt-get update -q >/dev/null
-DEBIAN_FRONTEND=noninteractive apt-get install -y -q kubectl >/dev/null
+DEBIAN_FRONTEND=noninteractive xargs -a "$DIR/env/tools/os-packages.txt" apt-get install -y -q kubectl >/dev/null
 
 install -d -m 0755 /var/lib/t3code
 pins >"$tmp/stamp"

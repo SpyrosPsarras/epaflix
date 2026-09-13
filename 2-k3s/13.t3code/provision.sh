@@ -34,6 +34,7 @@ apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
   curl ca-certificates gnupg git sudo unzip openssh-server syncthing gh python3-venv \
   python3-yaml build-essential polkitd
+DEBIAN_FRONTEND=noninteractive xargs -a "$T3_DIR/env/tools/os-packages.txt" apt-get install -y --no-install-recommends
 
 systemctl enable --now ssh
 

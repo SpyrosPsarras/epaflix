@@ -7,10 +7,16 @@ cp -r "$SRC" "$tmp/repo"
 # Redirect external state only in the test copy, including optional integrations.
 sed -i "s|^STAMP=.*|STAMP=$tmp/stamp|; s|/var/lib/t3code|$tmp/lib|g; s|/etc/t3code|$tmp/etc|g; s|/opt/keepass-mcp|$tmp/keepass|g" "$tmp/repo/update.sh"
 mkdir -p "$tmp/bin"
-for c in npm curl tar sha256sum apt-get sudo; do
+for c in npm curl tar apt-get sudo; do
   printf '#!/bin/sh\necho "STUB %s $*" >>"%s/calls"\n' "$c" "$tmp" >"$tmp/bin/$c"
   chmod +x "$tmp/bin/$c"
 done
+cat >"$tmp/bin/sha256sum" <<'SH'
+#!/bin/sh
+if [ "$1" = -c ] || [ "$1" = --check ]; then exit 0; fi
+exec /usr/bin/sha256sum "$@"
+SH
+chmod +x "$tmp/bin/sha256sum"
 printf '#!/bin/sh\nexit 1\n' >"$tmp/bin/id"
 chmod +x "$tmp/bin/id"
 printf '#!/bin/sh\ncase "$*" in *"/usr/local/bin/"*) exit 0;; esac\nexec /usr/bin/install "$@"\n' >"$tmp/bin/install"
@@ -26,6 +32,11 @@ grep -q "^T3_VERSION=$(pin t3)$" "$tmp/stamp" || fail "stamp must carry T3_VERSI
 out=$(run)
 grep -q 'already at pinned versions' <<<"$out" || fail "same pins must no-op"
 [[ ! -s $tmp/calls ]] || fail "no-op must not install"
+printf '\nhtop\n' >>"$tmp/repo/env/tools/os-packages.txt"
+run >/dev/null
+grep -q 'STUB apt-get install .*htop' "$tmp/calls" || fail "shared OS inventory change must install the new package"
+out=$(run)
+grep -q 'already at pinned versions' <<<"$out" || fail "applied OS inventory must no-op"
 python3 - "$tmp/repo/env/tools/package.json" <<'PY'
 import json, sys
 p = json.load(open(sys.argv[1]))

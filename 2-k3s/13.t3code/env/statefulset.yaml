@@ -54,54 +54,11 @@ spec:
               labelSelector:
                 matchLabels:
                   app.kubernetes.io/name: t3env
-      initContainers:
-        # No published T3 image exists, so the pinned CLIs are installed into an
-        # emptyDir at every pod start from a committed lockfile (`npm ci`), so
-        # the tree is identical across restarts and across both pods. Cost:
-        # ~1-2 min per restart. Upgrade path: build an image from the same lock
-        # once restarts become frequent enough to matter.
-        - name: install-tools
-          image: docker.io/library/node:24-bookworm@sha256:6dac556d980b7f0e5498d08f08cee0ca67798b4ad6c23964a9214920e67758d0
-          command:
-            - bash
-            - -euo
-            - pipefail
-            - -c
-            - |
-              cp /lock/package.json /lock/package-lock.json /tools/
-              cd /tools
-              # Install scripts stay on: claude-code, opencode-ai and node-pty
-              # (a t3 dependency) need their postinstall to place binaries.
-              npm ci --no-fund --no-audit
-              ./node_modules/.bin/t3 --version
-          env:
-            - name: HOME
-              value: /tmp
-            - name: npm_config_cache
-              value: /tmp/npm-cache
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities:
-              drop:
-                - ALL
-          volumeMounts:
-            - name: lock
-              mountPath: /lock
-              readOnly: true
-            - name: tools
-              mountPath: /tools
-            - name: tmp
-              mountPath: /tmp
-          resources:
-            requests:
-              cpu: "250m"
-              memory: "256Mi"
-            limits:
-              memory: "1Gi"
       containers:
         - name: t3
-          image: docker.io/library/node:24-bookworm@sha256:6dac556d980b7f0e5498d08f08cee0ca67798b4ad6c23964a9214920e67758d0
+          # Derived from public build inputs by env/tools/runtime-tag.sh.
+          image: ghcr.io/spyrospsarras/t3-runtime:inputs-41655b4c218fa5f152f140ee98abf3fa
+          imagePullPolicy: Always
           command:
             - bash
             - /scripts/entrypoint.sh
@@ -139,8 +96,11 @@ spec:
             - name: private-config
               mountPath: /private-agent-config
               readOnly: true
-            - name: tools
-              mountPath: /tools
+            - name: vault-access
+              mountPath: /run/t3-credentials
+              readOnly: true
+            - name: lock
+              mountPath: /runtime-pins
               readOnly: true
             - name: scripts
               mountPath: /scripts
@@ -168,6 +128,10 @@ spec:
             limits:
               memory: "6Gi"
       volumes:
+        - name: vault-access
+          secret:
+            secretName: t3env-vault-access
+            defaultMode: 0440
         - name: private-config
           secret:
             secretName: t3env-private-config
@@ -180,8 +144,6 @@ spec:
             name: t3env-scripts
             # Git executes credential.helper directly.
             defaultMode: 0555
-        - name: tools
-          emptyDir: {}
         - name: tmp
           emptyDir: {}
   volumeClaimTemplates:
