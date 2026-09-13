@@ -135,6 +135,6 @@ printf 'TRIPWIRE FAIL - %d check(s) fired (%d passed, %d skipped)\n' "$fail" "$p
 for f in "${failures[@]}"; do
     printf '  - %s\n' "$f"
 done
-printf 'Next step: see "The non-192.168.10.101 names" in .github/instructions/pihole.instructions.md.\n'
-printf 'Give each failing name an Unbound local-zone or an exact DNS-only Cloudflare record before enabling IPv6 (#882).\n'
+printf 'Next step: give each failing name an Unbound local-zone or an exact DNS-only Cloudflare record before enabling IPv6 (#882).\n'
+printf 'Wildcard policy: the epaflix.com Cloudflare wildcard stays; the decision record is issue #966.\n'
 exit 1
