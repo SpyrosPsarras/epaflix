@@ -242,7 +242,6 @@ jobs:
             2-k3s/06.postgres/operator-kustomization
             2-k3s/11.argocd/apps
             2-k3s/12.renovate
-            2-k3s/13.t3code
             2-k3s/20.bread
             2-k3s/maintenance
             2-k3s/maintenance/system-upgrade/controller
@@ -257,6 +256,7 @@ jobs:
         run: |
           set -euo pipefail
           bash 2-k3s/13.t3code/env/files/selftest.sh
+          python3 2-k3s/13.t3code/env/tools/private-config.test.py
           bash 2-k3s/13.t3code/env/tools/update.test.sh
           bash 2-k3s/13.t3code/env/tools/rollout-hash.test.sh
           bash 1-proxmox/t3env/pin-vm-host.test.sh

@@ -20,5 +20,23 @@ configMapGenerator:
   - name: t3env-scripts
     files:
       - env/files/entrypoint.sh
+      - env/files/private-config.py
       - env/files/git-credential-github.sh
       - files/cliproxy-models.js
+
+generators:
+  - env/ksops-generator.yaml
+
+replacements:
+  - source:
+      kind: Secret
+      name: t3env-private-config
+      fieldPath: metadata.annotations.[t3code.epaflix.com/private-revision]
+    targets:
+      - select:
+          kind: StatefulSet
+          name: t3env
+        fieldPaths:
+          - spec.template.metadata.annotations.[t3code.epaflix.com/private-revision]
+        options:
+          create: true
