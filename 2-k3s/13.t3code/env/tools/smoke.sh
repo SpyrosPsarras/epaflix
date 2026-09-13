@@ -4,16 +4,14 @@
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 if [[ ${1:-} != --inner ]]; then
-  image=$(python3 -c '
-import sys, yaml
-s = yaml.safe_load(open(sys.argv[1]))["spec"]["template"]["spec"]
-imgs = {c["image"] for c in s["containers"] + s["initContainers"]}
-assert len(imgs) == 1, imgs
-print(imgs.pop())' "$ROOT/env/statefulset.yaml")
+  image=${T3_RUNTIME_IMAGE:-t3-runtime:dev}
+  if [[ -z ${T3_RUNTIME_IMAGE:-} ]]; then
+    docker build -f "$ROOT/env/Dockerfile" -t "$image" "$ROOT"
+  fi
   name=t3env-smoke-$$
   trap 'docker rm -f "$name" >/dev/null 2>&1 || :' EXIT
   timeout 900 docker run --rm --name "$name" --user 1000:1000 \
-    --tmpfs /tools:uid=1000,gid=1000,exec --tmpfs /scripts:uid=1000,gid=1000,exec --tmpfs /tmp:uid=1000,gid=1000,exec \
+    --tmpfs /scripts:uid=1000,gid=1000,exec --tmpfs /tmp:uid=1000,gid=1000,exec \
     --tmpfs /private-agent-config:uid=1000,gid=1000 \
     -v "$ROOT:/src:ro" -e HOME=/tmp/home \
     "$image" bash /src/env/tools/smoke.sh --inner
@@ -33,9 +31,14 @@ trap cleanup EXIT
 mkdir -p "$HOME"
 install -m 0555 /src/env/files/entrypoint.sh /src/env/files/git-credential-github.sh /src/files/cliproxy-models.js /scripts/
 install -m 0555 /src/env/files/private-config.py /scripts/
+install -m 0555 /src/env/files/keepass-remote.sh /scripts/
 python3 /src/env/tools/private-config.test.py fixture /private-agent-config/bundle.json
-cp /src/env/tools/package.json /src/env/tools/package-lock.json /tools/
-(cd /tools && timeout 600 npm ci --no-fund --no-audit)
+for tool in tree kubectl az gh helm kustomize argocd sops git curl ssh python3; do
+  command -v "$tool" >/dev/null || fail "missing $tool"
+done
+kubectl version --client >/dev/null
+az version >/dev/null
+gh --version >/dev/null
 pin() { node -p "require('/tools/package.json').dependencies['$1']"; }
 ver() { timeout 60 "$1" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1; }
 for p in t3:t3 @anthropic-ai/claude-code:claude @openai/codex:codex opencode-ai:opencode; do
