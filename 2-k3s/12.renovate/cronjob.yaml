@@ -34,6 +34,8 @@ spec:
               args:
                 - "SpyrosPsarras/epaflix"
               env:
+                - name: RENOVATE_ALLOWED_COMMANDS
+                  value: '["^bash 2-k3s/13\\.t3code/env/tools/sync-runtime-image\\.sh$"]'
                 - name: RENOVATE_PLATFORM
                   value: github
                 - name: RENOVATE_TOKEN

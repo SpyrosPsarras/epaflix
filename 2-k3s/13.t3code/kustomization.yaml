@@ -22,6 +22,7 @@ configMapGenerator:
       - env/files/entrypoint.sh
       - env/files/private-config.py
       - env/files/git-credential-github.sh
+      - env/files/keepass-remote.sh
       - files/cliproxy-models.js
 
 generators:
