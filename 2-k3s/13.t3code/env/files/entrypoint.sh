@@ -88,6 +88,7 @@ fi
 
 echo "t3env: $(t3 --version) claude=$(claude --version 2>/dev/null | head -1) opencode=$(opencode --version 2>/dev/null | head -1) codex=$(codex --version 2>/dev/null | head -1)"
 # `serve` forces project bootstrap off; `start --no-browser` honors the flag.
+python3 /scripts/private-config.py install /private-agent-config/bundle.json
 # Keep OpenCode running: its CLI cold start can exceed T3's fixed 4s probe.
 # Stop both children if either exits; Kubernetes restarts the container.
 pids=()
