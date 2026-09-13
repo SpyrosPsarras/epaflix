@@ -1,0 +1,59 @@
+# Rendered into the cliproxy-free-config sops secret by render-config.sh; this
+# file is the reviewable policy, config.enc.yaml is the deployed copy. Edit
+# here, re-render, never edit the encrypted file by hand.
+#
+# Everything not listed keeps the binary's default. Relevant defaults that the
+# policy relies on: plugins.enabled false, logging-to-file false (access lines
+# stay on stdout for Loki), force-model-prefix false.
+port: 8317
+auth-dir: "/var/lib/cliproxy/auths"
+
+# The management API is disabled outright (404 on /v0/management) - an empty
+# secret-key does that. There is nothing to manage: the policy is this file.
+remote-management:
+  allow-remote: false
+  secret-key: ""
+
+# The one client. lingarr reads it from the lingarr-cliproxy-api-key secret in
+# 08.servarr; the main cliproxy never sees this key, so it 401s there.
+api-keys:
+  - "__LINGARR_API_KEY__"
+
+# Per-key usage counters, same as the main instance. request-log stays off: those
+# files carry the client Authorization header verbatim, and this instance has no
+# request-log-by-id consumer. The stdout access line (model, status, latency)
+# is the observability surface.
+usage-statistics-enabled: true
+
+# Client requests may carry OpenRouter routing fields that would let a caller
+# escape the free pool: `models` (fallback array, billed by whichever model
+# answers), `provider` (order/only/sort/max_price), `route`, `plugins`,
+# `transforms`. Strip all of them from every payload before it leaves this
+# process. `name: "*"` matches any model; there is only one anyway.
+payload:
+  filter:
+    - models:
+        - name: "*"
+      params:
+        - "models"
+        - "provider"
+        - "route"
+        - "plugins"
+        - "transforms"
+
+# The only upstream. openrouter/free is OpenRouter's Free Models Router: it
+# picks a currently-available free model per request and bills nothing
+# (docs/guides/routing/routers/free-router). That is the "dynamic free model
+# selection" - OpenRouter does it, this config does not. The response `model`
+# field names the model that actually answered.
+openai-compatibility:
+  - name: "openrouter"
+    base-url: "https://openrouter.ai/api/v1"
+    api-key-entries:
+      - api-key: "__OPENROUTER_API_KEY__"
+    models:
+      - name: "openrouter/free"
+        alias: "or-free"
+        display-name: "OpenRouter Free Router (lingarr)"
+        # context_length from openrouter.ai/api/v1/models, 2026-09-13
+        max-context-length: 200000

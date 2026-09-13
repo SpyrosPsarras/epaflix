@@ -1,0 +1,120 @@
+---
+# Dedicated CLIProxyAPI for lingarr: one client key, one upstream (OpenRouter),
+# one model alias that resolves to OpenRouter's free router. Nothing else.
+#
+# Why a second instance and not a second key on the main proxy: CLIProxyAPI's
+# api-keys is a flat list with no per-key model scope
+# (internal/access/config_access/provider.go at the pinned commit), so a key on
+# the main instance could call every paid model it serves. Here the catalog IS
+# the policy: the only model this process knows is the free alias, so any paid
+# or prefixed model ID is a 404 before anything reaches OpenRouter.
+#
+# Plain-file config mode: no PGSTORE_DSN, so the binary reads /config/config.yaml
+# (cmd/server/main.go, PGSTORE_DSN gate) and never touches Postgres. No plugins,
+# no management API, no ingress - the Service is cluster-internal only.
+#
+# The config file is a sops secret because it carries both the lingarr client
+# key and the OpenRouter credential; that is the same storage posture as the
+# main instance's config_store row.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cliproxy-free
+  namespace: remote-pi
+  labels:
+    app.kubernetes.io/name: cliproxy-free
+    app.kubernetes.io/component: proxy
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+    secret.reloader.stakater.com/reload: "cliproxy-free-config"
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cliproxy-free
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cliproxy-free
+        app.kubernetes.io/component: proxy
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: cliproxy
+          # Same image as cliproxy/deployment.yaml; the images: override in
+          # ../kustomization.yaml rewrites both to the pinned build.
+          image: docker.io/eceasy/cli-proxy-api:v7.2.123
+          # The image ships CMD, not ENTRYPOINT, so `args` alone would replace
+          # the binary. WORKDIR is /CLIProxyAPI.
+          command:
+            - ./CLIProxyAPI
+            - -config
+            - /config/config.yaml
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: HOME
+              value: /var/lib/cliproxy/home
+            - name: TZ
+              value: Europe/Oslo
+            - name: WRITABLE_PATH
+              value: /var/lib/cliproxy
+          ports:
+            - name: http
+              containerPort: 8317
+              protocol: TCP
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: work
+              mountPath: /var/lib/cliproxy
+            - name: tmp
+              mountPath: /tmp
+          readinessProbe:
+            tcpSocket:
+              port: 8317
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: 8317
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "64Mi"
+            limits:
+              memory: "256Mi"
+              ephemeral-storage: "256Mi"
+      terminationGracePeriodSeconds: 30
+      volumes:
+        - name: config
+          secret:
+            secretName: cliproxy-free-config
+        - name: work
+          emptyDir:
+            sizeLimit: 128Mi
+        - name: tmp
+          emptyDir:
+            sizeLimit: 32Mi
