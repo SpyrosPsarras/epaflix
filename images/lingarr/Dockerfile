@@ -11,7 +11,7 @@
 # UPSTREAM_COMMIT and the base digest must describe the same source: the base
 # image's assembly InformationalVersion is 0.0.0-dev+<UPSTREAM_COMMIT>.
 ARG UPSTREAM_COMMIT=28f6a190529187c70fddb2b1435157ed1635dccb
-ARG BASE_IMAGE=ghcr.io/lingarr-translate/lingarr@sha256:c20a50283a3bf67cea84fc661aec5f5721ee248ceea1504da4f5c47880ee3e65
+ARG BASE_IMAGE=ghcr.io/lingarr-translate/lingarr@sha256:12473f6f40beac1bb91ffadc7d8c7f1c2a0cd99ba336e4bf2c1dfa617c27a763
 
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG UPSTREAM_COMMIT
