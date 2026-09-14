@@ -79,7 +79,7 @@ images:
     newName: ghcr.io/spyrospsarras/jellysweep
     newTag: pr-430@sha256:ed55a035484f9f0f5c17bf7d648bf09162e046a673e0d592e65c40368e60eeaa
   - name: ghcr.io/fredrikburmester/streamystats-aio
-    newTag: latest@sha256:909cd6b30ed5bfc0a6164db5db2210905542f007367d0d0b510a6507b033d979
+    newTag: latest@sha256:9bc68f6301cc2ae749da950121d6efcbaa63335d458dad1d5967265af8e49382
   - name: ghcr.io/thephaseless/byparr
     digest: sha256:874f719518f617d03a60e03411fc5d090647e1a877041e81f8dc965927c7deb6
   - name: ghcr.io/hotio/unpackerr
