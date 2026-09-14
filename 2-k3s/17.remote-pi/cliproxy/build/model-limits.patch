@@ -1,0 +1,92 @@
+diff --git a/internal/client/codex/models/models.go b/internal/client/codex/models/models.go
+--- a/internal/client/codex/models/models.go
++++ b/internal/client/codex/models/models.go
+@@ -73,8 +73,9 @@
+ 			continue
+ 		}
+ 
+-		if template, ok := templates[id]; ok {
++		if template, ok := templates[codexClientTemplateID(id)]; ok {
+ 			entry := cloneCodexClientModelMap(template)
++			entry["slug"] = id
+ 			applyCodexClientDisplayName(entry, model)
+ 			applyCodexClientMaxContextLengthOverride(entry, model)
+ 			applyCodexClientMaxTokens(entry, model)
+@@ -106,6 +107,17 @@
+ 	return result
+ }
+ 
++// codexClientTemplatePrefix is the provider scope that OpenCode-style clients
++// prepend to Codex model IDs (e.g. "codex/gpt-6-astra"). Only this prefix maps
++// back to the official Codex templates; other provider prefixes do not.
++const codexClientTemplatePrefix = "codex/"
++
++// codexClientTemplateID returns the template slug for a model ID, stripping the
++// known Codex provider prefix. Unprefixed IDs are returned unchanged.
++func codexClientTemplateID(id string) string {
++	return strings.TrimPrefix(id, codexClientTemplatePrefix)
++}
++
+ func maxCodexClientTemplatePriority(templates map[string]map[string]any) int {
+ 	maxPriority := 0
+ 	for _, template := range templates {
+@@ -132,7 +144,7 @@
+ 	pending := make([]nonTemplateEntry, 0)
+ 	for index, entry := range result {
+ 		slug := stringModelValue(entry, "slug")
+-		if _, ok := templates[slug]; ok {
++		if _, ok := templates[codexClientTemplateID(slug)]; ok {
+ 			continue
+ 		}
+ 		displayName := stringModelValue(entry, "display_name")
+diff --git a/internal/config/config_types.go b/internal/config/config_types.go
+--- a/internal/config/config_types.go
++++ b/internal/config/config_types.go
+@@ -710,6 +710,8 @@
+ // OpenAICompatibilityModel represents a model configuration for OpenAI compatibility,
+ // including the actual model name and its alias for API routing.
+ type OpenAICompatibilityModel struct {
++	// MaxCompletionTokens overrides the advertised output limit for this model.
++	MaxCompletionTokens int `yaml:"max-completion-tokens,omitempty" json:"max-completion-tokens,omitempty"`
+ 	// Name is the actual model name used by the external provider.
+ 	Name string `yaml:"name" json:"name"`
+ 
+diff --git a/internal/registry/model_definitions.go b/internal/registry/model_definitions.go
+--- a/internal/registry/model_definitions.go
++++ b/internal/registry/model_definitions.go
+@@ -34,7 +34,21 @@
+ 
+ // GetClaudeModels returns the standard Claude model definitions.
+ func GetClaudeModels() []*ModelInfo {
+-	return cloneModelInfos(getModels().Claude)
++	models := cloneModelInfos(getModels().Claude)
++	// Temporary corrections to the remote catalog, verified against Anthropic's
++	// Models API and archived model docs on 2026-09-14. Apply after cloning so
++	// periodic catalog refreshes cannot restore the incorrect limits.
++	for _, model := range models {
++		switch model.ID {
++		case "claude-sonnet-4-6":
++			model.ContextLength, model.MaxCompletionTokens = 1000000, 128000
++		case "claude-3-7-sonnet-20250219":
++			model.ContextLength, model.MaxCompletionTokens = 200000, 64000
++		case "claude-3-5-haiku-20241022":
++			model.ContextLength, model.MaxCompletionTokens = 200000, 8192
++		}
++	}
++	return models
+ }
+ 
+ // GetGeminiModels returns the standard Gemini model definitions.
+diff --git a/sdk/cliproxy/service_models.go b/sdk/cliproxy/service_models.go
+--- a/sdk/cliproxy/service_models.go
++++ b/sdk/cliproxy/service_models.go
+@@ -727,6 +727,9 @@
+ 		if info == nil {
+ 			continue
+ 		}
++		if model.MaxCompletionTokens > 0 {
++			info.MaxCompletionTokens = model.MaxCompletionTokens
++		}
+ 		thinkingSupport := model.Thinking
+ 		if thinkingSupport == nil && !model.Image {
+ 			thinkingSupport = &registry.ThinkingSupport{Levels: []string{"low", "medium", "high"}}
