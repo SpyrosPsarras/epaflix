@@ -21,6 +21,11 @@ jobs:
             upstreamRepo: "lingarr-translate/lingarr"
             pinnedVersion: "1.2.4"
             whatToDoWhenItMoves: "Confirm the release notes (or its git log) contain upstream #432 `6f9d879d` \"fix: on npgsql convert DateTime to utc\" - without it the Bazarr->Lingarr 500 comes back. Then replace the `newTag: main@sha256:...` entry for `ghcr.io/lingarr-translate/lingarr` in `2-k3s/08.servarr/kustomization.yaml` with a plain release tag, drop the `:main` reference in `2-k3s/08.servarr/lingarr/lingarr.yaml`, and delete the now-pointless lingarr `automerge: false` rule in `.github/renovate.json` (it exists only because `:main` is a dev branch). Restarting lingarr rolls the pod - check the open soak/timeout issues first."
+          - issue: "1114"
+            upstreamRepo: "utkuozdemir/nvidia_gpu_exporter"
+            probe: "nvidia-gpu-alert-rules"
+            pinnedVersion: "v1.14.0"
+            whatToDoWhenItMoves: "The `truenas-gpu` group in `2-k3s/10.observability/alertmanager-config/custom-alerts.yaml` vendors five expressions (NvidiaGpuExporterCollectionFailing, NvidiaGpuMissing, NvidiaGpuRecoveryActionNeeded, NvidiaGpuXidCritical, NvidiaGpuExporterCollectionSlow) copied from upstream's chart rule template at the pinned ref (#916). The vendored copies are adapted on purpose - `job=\"truenas-gpu-exporter\"` selector, this repo's severity/component labels, incident notes - so judge drift semantically, not byte-wise. Run the diff in the verify command, port every changed expression, threshold or Xid code into the vendored group, then re-point `pinnedVersion` in this row at the new tag. Rules upstream adds that the repo does not vendor are optional: decide each and say so in the PR. The exporter image pin in `0-truenas/custom-apps/nvidia-gpu-exporter/docker-compose.yaml` is a plain docker tag renovate bumps - this watch only covers the vendored expressions."
           - issue: "290"
             upstreamRepo: "prometheus-community/helm-charts"
             probe: "kps-control-plane-endpointslice"
@@ -107,8 +112,8 @@ jobs:
             echo "linkLine=Release page: https://github.com/$UPSTREAM/releases"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Install pinned helm (probe rows only)
-        if: ${{ matrix.probe }}
+      - name: Install pinned helm (kps probe row only)
+        if: ${{ matrix.probe == 'kps-control-plane-endpointslice' }}
         run: |
           set -euo pipefail
           # `.github/workflows/ci.yml`: an inline `# renovate:` marker on the
@@ -133,13 +138,81 @@ jobs:
           rm -rf "$tmp"
           helm version --short
 
-      - name: Probe the rendered shape upstream
+      - name: Probe upstream
         id: probe
         if: ${{ matrix.probe }}
         env:
           PROBE: ${{ matrix.probe }}
         run: |
           set -euo pipefail
+
+          if [ "$PROBE" = "nvidia-gpu-alert-rules" ]; then
+            RULE_FILE="charts/nvidia-gpu-exporter/templates/prometheusrule.yaml"
+
+            RELEASES=$(gh api "repos/$UPSTREAM/releases") || RELEASES=""
+            if [ -z "$RELEASES" ] || [ "$(printf '%s' "$RELEASES" | jq -r 'type')" != "array" ]; then
+              echo "signal=error" >> "$GITHUB_OUTPUT"
+              echo "detail=could not read repos/$UPSTREAM/releases - upstream renamed, deleted or private?" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            LATEST=$(printf '%s' "$RELEASES" | jq -r '[.[] | select(.draft == false and .prerelease == false)][0].tag_name // ""')
+            if [ -z "$LATEST" ] || [ "$LATEST" = "null" ]; then
+              echo "signal=error" >> "$GITHUB_OUTPUT"
+              echo "detail=$UPSTREAM has no non-draft, non-prerelease release on page 1" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "newest stable release: $LATEST"
+
+            GH_ERR=$(mktemp)
+            if ! PINNED_FETCH=$(gh api "repos/$UPSTREAM/contents/$RULE_FILE?ref=$PINNED" 2>"$GH_ERR"); then
+              echo "signal=error" >> "$GITHUB_OUTPUT"
+              echo "detail=could not fetch $RULE_FILE at pinned ref $PINNED in $UPSTREAM ($(head -n 1 "$GH_ERR")) - the ref vanished or the path changed, so the watch row needs re-basing" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            printf '%s' "$PINNED_FETCH" | jq -r '.content' | base64 -d > rule-pinned.yaml
+
+            if ! LATEST_FETCH=$(gh api "repos/$UPSTREAM/contents/$RULE_FILE?ref=$LATEST" 2>"$GH_ERR"); then
+              if grep -q "HTTP 404" "$GH_ERR"; then
+                echo "signal=moved" >> "$GITHUB_OUTPUT"
+                echo "latest=$LATEST" >> "$GITHUB_OUTPUT"
+                {
+                  echo 'headline<<DETECTOR_EOF'
+                  echo "The \`truenas-gpu\` alert group vendors five expressions copied from \`$UPSTREAM\` at \`$PINNED\` (#916). Upstream no longer ships \`$RULE_FILE\` at **\`$LATEST\`**, so the vendored expressions are now an unmanaged fork."
+                  echo 'DETECTOR_EOF'
+                  echo 'verify<<DETECTOR_EOF'
+                  echo "gh api repos/$UPSTREAM/git/trees/$LATEST?recursive=1 --jq '.tree[].path' | grep prometheusrule"
+                  echo 'DETECTOR_EOF'
+                  echo "linkLine=Latest release: https://github.com/$UPSTREAM/releases/tag/$LATEST"
+                } >> "$GITHUB_OUTPUT"
+              else
+                echo "signal=error" >> "$GITHUB_OUTPUT"
+                echo "detail=could not fetch $RULE_FILE at latest $LATEST in $UPSTREAM ($(head -n 1 "$GH_ERR")) - transient upstream failure, re-run before assuming drift" >> "$GITHUB_OUTPUT"
+              fi
+              exit 0
+            fi
+            printf '%s' "$LATEST_FETCH" | jq -r '.content' | base64 -d > rule-latest.yaml
+
+            if cmp -s rule-pinned.yaml rule-latest.yaml; then
+              echo "signal=unchanged" >> "$GITHUB_OUTPUT"
+              echo "observed=the alert-rule template $RULE_FILE is still identical between the pinned ref $PINNED and latest stable $LATEST - the vendored truenas-gpu expressions have not drifted." >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            echo "signal=moved" >> "$GITHUB_OUTPUT"
+            echo "latest=$LATEST" >> "$GITHUB_OUTPUT"
+            {
+              echo 'headline<<DETECTOR_EOF'
+              echo "The \`truenas-gpu\` alert group vendors five expressions copied from \`$UPSTREAM\` at \`$PINNED\` (#916). Upstream's alert-rule template \`$RULE_FILE\` has changed by **\`$LATEST\`**, so the vendored expressions have drifted."
+              echo 'DETECTOR_EOF'
+              echo 'verify<<DETECTOR_EOF'
+              echo "diff <(gh api 'repos/$UPSTREAM/contents/$RULE_FILE?ref=$PINNED' --jq .content | base64 -d) \\"
+              echo "     <(gh api 'repos/$UPSTREAM/contents/$RULE_FILE?ref=$LATEST' --jq .content | base64 -d)"
+              echo 'DETECTOR_EOF'
+              echo "linkLine=Rule template at latest: https://github.com/$UPSTREAM/blob/$LATEST/$RULE_FILE"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           if [ "$PROBE" != "kps-control-plane-endpointslice" ]; then
             echo "signal=error" >> "$GITHUB_OUTPUT"
