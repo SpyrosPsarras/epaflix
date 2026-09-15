@@ -63,8 +63,8 @@ spec:
 
         - alert: PrometheusRetentionBelowConfigured
           expr: |
-            ((time() - prometheus_tsdb_lowest_timestamp_seconds) / 86400) < 7
-          for: 6h
+            ((time() - prometheus_tsdb_lowest_timestamp_seconds) / 86400) < 13
+          for: 7d
           labels:
             severity: warning
             component: prometheus
@@ -72,14 +72,18 @@ spec:
             summary: "Prometheus is holding less history than prometheus-values.yaml claims"
             description: >-
               Prometheus holds {{ $value | printf "%.1f" }} days of history,
-              below the 7d floor for the 8d configured in
-              2-k3s/10.observability/prometheus-values.yaml. retentionSize
-              ("20GB") is binding before retentionTime, which is the #913
-              failure mode: documented retention and real retention drift apart
-              with nothing reporting it. Either cardinality grew (check
-              prometheus_tsdb_head_series against the 515k baseline) or the
-              8d value needs lowering again. Do NOT raise retentionSize above
-              the 25Gi claim - see the #463 note in prometheus-values.yaml.
+              below the 13d floor for the 15d configured in
+              2-k3s/10.observability/prometheus-values.yaml. The
+              retentionSize ("20GB" = 18.63 GiB) binds before the time bound
+              once ingestion passes ~1.2 GiB/day, which is the #913 failure
+              mode: documented retention and real retention drift apart with
+              nothing reporting it. Check prometheus_tsdb_head_series against
+              the ~260k post-#1056 baseline; the pre-dedup state was ~578k
+              series and ~2.3 GiB/day. The 7d hold rides out the ~5d ramp
+              while history accumulates from the old 8d regime to the 15d
+              target, so expect silence there too. Do NOT raise retentionSize
+              above the 25Gi claim: the PVC lives on k3s-worker-62's 48G root
+              disk and Prometheus outgrowing it broke kubelet image GC (#463).
 
     - name: proxmox
       interval: 60s
