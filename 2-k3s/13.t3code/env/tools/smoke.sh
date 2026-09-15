@@ -64,10 +64,9 @@ wait_url() {
   done
   fail "$1 did not become healthy"
 }
-wait_url http://127.0.0.1:4096/global/health 120
 wait_url http://127.0.0.1:3773/health 180
-curl -fsS --get --data-urlencode "directory=$HOME/projects/remote" http://127.0.0.1:4096/command | node -e '
-let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{if(!JSON.parse(s).some(c=>c.name==="implement"))process.exit(1);console.log("smoke: implement command discovered");});'
+(cd "$HOME/projects/remote" && timeout 60 /tools/node_modules/.bin/opencode debug config) | node -e '
+let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{if(!JSON.parse(s).command?.implement)process.exit(1);console.log("smoke: implement command discovered");});'
 curl -fsS --max-time 5 http://127.0.0.1:3773/.well-known/t3/environment | node -e '
 let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
 const j=JSON.parse(s),p=require("/tools/package.json");
@@ -87,7 +86,7 @@ done
 node -e '
 const d=require(process.argv[1]);
 if(Object.keys(d.providerInstances).sort().join(",")!=="claudeAgent,codex,opencode")throw Error("provider instances");
-if(d.providerInstances.opencode.config.serverUrl!=="http://127.0.0.1:4096")throw Error("serverUrl");
+if(d.providers.opencode.serverUrl || d.providerInstances.opencode.config?.serverUrl)throw Error("OpenCode must be T3-managed");
 console.log("smoke: project bootstrap and provider settings verified");' "$T3CODE_HOME/userdata/settings.json"
 kill -TERM "$sup"
 timeout 30 tail --pid="$sup" -f /dev/null || fail 'supervisor did not stop in 30s'
