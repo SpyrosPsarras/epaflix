@@ -46,6 +46,13 @@ tests:
               instance: 192.168.10.200
               severity: warning
               component: truenas-gpu
+            exp_annotations:
+              summary: "GPU metric collection is failing on 192.168.10.200"
+              description: >-
+                  The exporter on 192.168.10.200 cannot collect GPU metrics. Run nvidia-smi on the host by hand
+                  and check dmesg for NVRM/Xid messages. The most common cause is a driver/library mismatch after
+                  a driver upgrade. THIS IS THE 2026-08-09 SIGNATURE: exporter serving, card gone, every
+                  application still answering on CPU. Never silence this one.
 
   - interval: 1m
     input_series:
@@ -89,6 +96,14 @@ tests:
               instance: 192.168.10.200
               severity: warning
               component: truenas-gpu
+            exp_annotations:
+              summary: "A GPU disappeared on 192.168.10.200"
+              description: >-
+                  nvidia-smi reports fewer GPUs on 192.168.10.200 than the maximum seen in the last 6 hours while
+                  collection stays healthy. There is exactly ONE card in this box (RTX 2070 SUPER at 01:00.0), so
+                  this means it is gone while the driver still answers - the 2026-08-09 WPR2 wedge, and the
+                  condition that went unnoticed for ~23 hours. Check dmesg for "unexpected WPR2 already up" and
+                  "RmInitAdapter failed", then follow the no-reboot recovery procedure. Never silence this one.
       - eval_time: 40m
         alertname: NvidiaGpuExporterCollectionFailing
         exp_alerts: []
@@ -110,6 +125,14 @@ tests:
               xid: "79"
               severity: critical
               component: truenas-gpu
+            exp_annotations:
+              summary: "Critical GPU Xid error on 192.168.10.200"
+              description: >-
+                  GPU GPU-2070s reported Xid 79, a critical error, in the last 10 minutes. Among the default
+                  codes, 48/62/64/95/119/120 mean an uncorrectable memory, microcontroller or GSP fault: reset
+                  the GPU. Xid 79 means the GPU fell off the PCIe bus. Xid 74 is an NVLink fault. Check dmesg for
+                  the matching NVRM Xid line. REQUIRES THE NVML BACKEND - the exporter must run the `-nvml` image
+                  flavor or this series does not exist.
 
   - interval: 1m
     input_series:
@@ -134,6 +157,13 @@ tests:
               uuid: GPU-2070s
               severity: critical
               component: truenas-gpu
+            exp_annotations:
+              summary: "A GPU on 192.168.10.200 needs a recovery action"
+              description: >-
+                  The NVIDIA driver itself reports that GPU GPU-2070s needs recovery. The value names the action:
+                  1 = reset the GPU, 2 = reboot the node, 3 = drain peer-to-peer workloads, 4 = drain and reset
+                  (current value: 2). Stop ollama and Jellyfin first - nothing may hold /dev/nvidia* during a
+                  reset.
 
   - interval: 1m
     input_series:
@@ -148,6 +178,14 @@ tests:
               instance: 192.168.10.200
               severity: warning
               component: truenas-gpu
+            exp_annotations:
+              summary: "GPU metric collection is slow on 192.168.10.200"
+              description: >-
+                  Collecting GPU metrics on 192.168.10.200 takes longer than 5 seconds. A healthy collection
+                  answers well under a second when the persistence daemon runs. Check that nvidia-persistenced is
+                  up (0-truenas/scripts/gpu-persistenced.sh) and read dmesg for Xid messages: sustained slowness
+                  often precedes a wedged driver. Collections that hang entirely are caught by
+                  NvidiaGpuExporterCollectionFailing instead of this one.
 
   - interval: 1m
     input_series:
@@ -162,6 +200,13 @@ tests:
               instance: 192.168.10.200
               severity: warning
               component: truenas-memory
+            exp_annotations:
+              summary: "TrueNAS ZFS ARC cap is no longer 12 GiB"
+              description: >-
+                  node_zfs_arc_c_max on 192.168.10.200 reads 3.3285996544e+10 instead of the 12884901888 (12 GiB)
+                  cap applied during the 2026-08-09 recovery. Uncapped ARC on this 31 GB box is the suspected
+                  trigger of the WPR2 GPU wedge: the driver hit NV_ERR_NO_MEMORY part-way through initialising
+                  the GSP firmware. Re-apply the ZFS tunable AND the /etc/modprobe.d/zfs.conf boot copy.
 
   - interval: 1m
     input_series:
@@ -197,6 +242,13 @@ tests:
               instance: 192.168.10.200
               severity: warning
               component: truenas-memory
+            exp_annotations:
+              summary: "TrueNAS ZFS ARC is sustained above its own cap"
+              description: >-
+                  ARC on 192.168.10.200 has been more than 5% above its own c_max for 15 minutes (ratio
+                  1.0999999999379118). Normal jitter is under 0.1%, so this is the cap not being enforced rather
+                  than a warm cache. Check the zfs_arc_max tunable and /etc/modprobe.d/zfs.conf, and watch the
+                  GPU: uncapped ARC on this 31 GB box is the suspected trigger of the 2026-08-09 WPR2 wedge.
 
   - interval: 1m
     input_series:
@@ -211,6 +263,13 @@ tests:
               instance: 192.168.10.200
               severity: warning
               component: truenas-memory
+            exp_annotations:
+              summary: "TrueNAS ZFS ARC was throttled by memory pressure"
+              description: >-
+                  node_zfs_arc_memory_throttle_count on 192.168.10.200 increased by 15 in 15 minutes; it was 0
+                  and static before. ZFS is being forced to give memory back under pressure, which is the
+                  condition the driver hit NV_ERR_NO_MEMORY under on 2026-08-09. Find what is asking for the
+                  memory (ollama model load, a large transcode) and check nvidia-smi still sees the card.
 
   - interval: 1m
     input_series:
@@ -224,11 +283,26 @@ tests:
               job: truenas-node-exporter
               instance: 192.168.10.200
               device: pool1
-              device_error: ""
               fstype: zfs
               mountpoint: /mnt/pool1
               severity: warning
               component: truenas-storage
+            exp_annotations:
+              summary: "pool1 free space is under 1 TiB (~92% used)"
+              description: >-
+                  The pool1 root dataset's node_filesystem_avail_bytes has been under 1 TiB for an hour. That
+                  metric is the POOL-WIDE free space, not the root dataset's own: every pool1 dataset reports the
+                  same value because none of them is quota-bound for statfs purposes (verified against all 8
+                  pool1 datasets, 2026-09-05). It is statfs avail, so it reads lower than `zpool list free` by
+                  the ZFS slop reservation (~3% of the pool, ~0.7 TiB here). Never build a used% from
+                  node_filesystem_size_bytes on pool1: the root dataset is quota-bounded, so its size label is
+                  2.25 TiB against a 21.8 TiB pool - take used% from `zpool list` or
+                  0-truenas/scripts/pool-capacity-forecast.py. pool1 has sat near 88% since August 2026; with no
+                  disk budget until ~2027-02 the headroom plan is the media deletion service (owner decision in
+                  #805, 2026-08-21), and the weekly growth measurement and runway forecast live in
+                  0-truenas/scripts/pool-capacity-forecast.py (#805). This alert is the floor between the weekly
+                  runs: check what grew (`zfs list -o space -r pool1` sorted by used) before deleting anything,
+                  and remember dapc-backup is a permanent keep (#807).
       - eval_time: 70m
         alertname: TruenasPool1FreeCritical
         exp_alerts:
@@ -236,11 +310,20 @@ tests:
               job: truenas-node-exporter
               instance: 192.168.10.200
               device: pool1
-              device_error: ""
               fstype: zfs
               mountpoint: /mnt/pool1
               severity: critical
               component: truenas-storage
+            exp_annotations:
+              summary: "pool1 free space is under 400 GiB (~95% used) - the ZFS floor"
+              description: >-
+                  Pool-wide free space on pool1 (same metric semantics and size-label caveat as
+                  TruenasPool1FreeLow) has been under 400 GiB for 30 minutes. 95% used is the practical ZFS
+                  floor: CoW has no room to write, fragmentation climbs and writes start failing before the pool
+                  reads as technically full. This is the "stops being enough" date the #805 forecast tracks,
+                  arrived early. Reclaim space now (the #609 download reclaim and #968 snapshot paths are the
+                  catalogued candidates; dapc-backup is a permanent keep per #807) and treat every write to pool1
+                  as at-risk until free space is back above 1 TiB.
 
   - interval: 1m
     input_series:
