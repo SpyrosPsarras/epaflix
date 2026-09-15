@@ -68,6 +68,10 @@ controller:
       memory: 512Mi
     limits:
       memory: 1Gi
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
 
 repoServer:
   deploymentAnnotations:
