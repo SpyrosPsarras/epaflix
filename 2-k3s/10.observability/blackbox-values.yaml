@@ -1,0 +1,57 @@
+fullnameOverride: blackbox-exporter
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 32Mi
+  limits:
+    memory: 128Mi
+
+config:
+  modules:
+    https_certificate:
+      prober: http
+      timeout: 10s
+      http:
+        preferred_ip_protocol: ip4
+        ip_protocol_fallback: false
+        fail_if_not_ssl: true
+        follow_redirects: false
+        # Read the endpoint's own certificate, not an authentication redirect's.
+        valid_status_codes: [200, 301, 302, 303, 307, 308, 401, 403, 404]
+        tls_config:
+          # IP targets and private CAs must still expose dates after expiry.
+          # This monitors expiry and reachability, not CA/hostname validity.
+          insecure_skip_verify: true
+
+serviceMonitor:
+  enabled: true
+  selfMonitor:
+    enabled: true
+  defaults:
+    module: https_certificate
+    interval: 60s
+    scrapeTimeout: 15s
+    additionalRelabeling:
+      - targetLabel: job
+        action: replace
+        replacement: tls-probe
+      - sourceLabels: [__param_target]
+        action: replace
+        targetLabel: instance
+  targets:
+    - name: takaros
+      url: https://192.168.10.10:8006
+      hostname: takaros.epaflix.com
+    - name: evanthoulaki
+      url: https://192.168.10.11:8006
+      hostname: evanthoulaki.epaflix.com
+    - name: traefik-external
+      url: https://192.168.10.101
+      hostname: grafana.epaflix.com
+    - name: traefik-internal
+      url: https://192.168.10.102
+      hostname: grafana.epaflix.com
+    - name: truenas-ui
+      url: https://192.168.10.200:8443
+      hostname: truenas.epaflix.com

@@ -83,7 +83,9 @@ spec:
               port: http
             initialDelaySeconds: 60
             periodSeconds: 30
-            timeoutSeconds: 10
+            timeoutSeconds: 30
+            # Allow ~12 min for mass subtitle searches and provider stalls (#1171).
+            failureThreshold: 24
           readinessProbe:
             httpGet:
               path: /

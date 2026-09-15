@@ -39,8 +39,11 @@ jobs:
           ./.github/hooks/test-check-authentik-blueprint.sh
           ./.github/hooks/test-check-kube-context.sh
           ./.github/hooks/test-check-no-plaintext-store-values.sh
+          ./.github/hooks/test-check-credential-reuse.sh
           ./.github/hooks/test-keystatus-check.sh
           ./.github/hooks/test-pool-capacity-forecast.sh
+          ./.github/hooks/test-datastore-usage-alert.sh
+          ./.github/hooks/test-arc-baseline-export.sh
           ./.github/hooks/test-temp-redundant-name-unlink.sh
           ./.github/hooks/test-print-age-key-backup.sh
           ./.github/hooks/test-render-tier.sh
@@ -263,6 +266,8 @@ jobs:
           bash 2-k3s/13.t3code/env/tools/rollout-hash.test.sh
           bash 2-k3s/13.t3code/files/collapse-duplicate-email-keys.test.sh
           bash 1-proxmox/t3env/pin-vm-host.test.sh
+          python3 2-k3s/17.remote-pi/search-guard/search-guard.test.py
+          bash 2-k3s/maintenance/node-os-updater.test.sh
 
       - name: T3 install and runtime smoke
         timeout-minutes: 20

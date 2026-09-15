@@ -99,6 +99,13 @@ class Config:
         self.bad_windows = _env_int("VPN_AGENT_BAD_WINDOWS", 3)
         self.cooldown_seconds = _env_int("VPN_AGENT_COOLDOWN_SECONDS", 21600)
         self.max_switches_per_day = _env_int("VPN_AGENT_MAX_SWITCHES_PER_DAY", 3)
+        # The escape slot (#1031): a degradation trip while suppressed is allowed
+        # past the cooldown AND the daily cap when the server it escapes was
+        # placed this recently, at most once per rolling 24 h. 7200 s because the
+        # measured failure was a server tripping 5047 s after the switch that
+        # put us on it - a "recent arrival" window under that would not have
+        # fired, and a window over the cooldown it outranks would never end.
+        self.escape_window_seconds = _env_int("VPN_AGENT_ESCAPE_WINDOW_SECONDS", 7200)
 
         self.goldcrest_timeout = _env_int("VPN_AGENT_GOLDCREST_TIMEOUT", 25)
         self.max_output_bytes = _env_int("VPN_AGENT_MAX_OUTPUT_BYTES", 65536)
@@ -642,12 +649,24 @@ class SwitchBudget:
     time - a crash loop would then switch every restart and walk straight
     through the 6 h cooldown this exists to enforce.
 
-    Each entry is `[when, cooldown]`, not a bare timestamp, because the outcomes
+    Each entry is `[when, cooldown, kind]`, not a bare timestamp, because the outcomes
     have to cost different amounts of time (#627 fix 2, #789). A switch that
     corrected a measured fault arms the full cooldown; one that produced nothing,
     and one that is only an unverified placement, arm a short retry window so the
     agent can still recover from its own bad switch. See FULL_COOLDOWN_REASONS
     and Agent._earned_cooldown(). All of them count against the daily cap.
+
+    `kind` is "switch" or "escape" (#1031). The escape is the one slot outside
+    the daily cap: a degradation trip refused by the budget goes through anyway
+    when the current server was placed within VPN_AGENT_ESCAPE_WINDOW_SECONDS
+    and the pod would otherwise stay stuck - the cap is full, or the placement
+    armed the full cooldown. A placement on the short retry cooldown with cap
+    room left is refused no hatch: the front door opens when that expires
+    (#789), and the escape must still be there hours later when a real lockout
+    lands. At most one escape per rolling 24 h - the marker in the history is
+    what bounds it, including across a restart, and the bound must not depend
+    on cooldown_seconds > escape_window_seconds holding by configuration luck.
+    Old two-field files load as plain switches.
 
     The old bare-timestamp file cannot be read by this code and does not need to
     be: the budget lives on an emptyDir that only survives inside one pod, and
@@ -668,7 +687,10 @@ class SwitchBudget:
             return
         try:
             with open(self.path) as fh:
-                self.history = [[float(when), float(cd)] for when, cd in json.load(fh)]
+                self.history = [[float(entry[0]), float(entry[1]),
+                                 "escape" if len(entry) > 2 and entry[2] == "escape"
+                                 else "switch"]
+                                for entry in json.load(fh)]
         except FileNotFoundError:
             return
         except Exception as exc:
@@ -699,7 +721,7 @@ class SwitchBudget:
         self.history = self._fresh(now)
 
     def snapshot(self):
-        """(used, exhausted, cooldown_left) for the metrics. Read-only, no lock.
+        """(used, exhausted, cooldown_left, escapes) for the metrics. Read-only.
 
         This is called from the HTTP handler thread, so it MUST NOT mutate.
         _prune() rebinds self.history and record() appends to the list it just
@@ -722,27 +744,70 @@ class SwitchBudget:
         history = self._fresh(now)
         left = 0.0
         if history:
-            when, cooldown = history[-1]
-            left = max(0.0, cooldown - (now - when))
-        return len(history), len(history) >= self.max_per_day, left
+            entry = history[-1]
+            left = max(0.0, entry[1] - (now - entry[0]))
+        return (len(history), len(history) >= self.max_per_day, left,
+                sum(1 for e in history if e[2] == "escape"))
 
     def allowed(self):
         """Return (allowed, reason). The reason is for the log line."""
         now = self.clock()
         self._prune(now)
         if self.history:
-            when, cooldown = self.history[-1]
-            if now - when < cooldown:
-                return False, "cooldown, %ds left" % int(cooldown - (now - when))
+            entry = self.history[-1]
+            if now - entry[0] < entry[1]:
+                return False, "cooldown, %ds left" % int(entry[1] - (now - entry[0]))
         if len(self.history) >= self.max_per_day:
             return False, "daily cap %d reached" % self.max_per_day
         return True, ""
 
-    def record(self, cooldown=None):
-        """Arm a cooldown. None means the full one - see the class docstring."""
+    def allowed_or_escape(self, window):
+        """(allowed, why, escape) - allowed(), then the #1031 escape slot.
+
+        Called where a refused degradation trip would end the watch cycle. The
+        escape fires when the refusal is real but the server it would strand us
+        on was placed within `window` seconds - young enough that the cooldown
+        and the cap are protecting a placement that has already measured bad -
+        and when no escape has been spent in the rolling 24 h. It stays shut
+        when the refusal is about to clear itself: a placement on the short
+        retry cooldown with cap room left walks through the front door the
+        moment that expires (#789), and spending the one escape a day there
+        would buy a correction ~90 s sooner at the cost of the hatch. `why`
+        carries the whole story either way: the allowed() refusal, and on
+        refusal the escape rule that also said no, so the log line names both
+        gates.
+        """
+        allowed, why = self.allowed()
+        if allowed:
+            return True, "", False
         now = self.clock()
         self._prune(now)
-        self.history.append([now, self.cooldown if cooldown is None else cooldown])
+        if not self.history:
+            return False, why, False
+        entry = self.history[-1]
+        age = now - entry[0]
+        if any(e[2] == "escape" for e in self.history):
+            return False, "%s; escape already spent in this window" % why, False
+        if len(self.history) < self.max_per_day and entry[1] < self.cooldown:
+            return False, ("%s; the short %ds cooldown expires in %.0fs with cap "
+                           "room left - no escape needed"
+                           % (why, entry[1], entry[1] - age)), False
+        if age >= window:
+            return False, ("%s; the server was placed %.0fs ago, outside the %ds "
+                           "escape window" % (why, age, window)), False
+        return True, ("%s; placed %.0fs ago, inside the %ds escape window"
+                      % (why, age, window)), True
+
+    def record(self, cooldown=None, kind="switch"):
+        """Arm a cooldown. None means the full one - see the class docstring.
+
+        kind marks the entry "escape" when this slot was spent past the cap and
+        cooldown (#1031); every other path records a plain "switch".
+        """
+        now = self.clock()
+        self._prune(now)
+        self.history.append([now, self.cooldown if cooldown is None else cooldown,
+                             kind if kind == "escape" else "switch"])
         self._save()
 
 
@@ -1293,23 +1358,29 @@ class Agent:
         return candidate_names(servers, self.cfg.band, exclude), source
 
 
-    def switch(self, names, reason, mandatory):
+    def switch(self, names, reason, mandatory, escape=False):
         """Apply a switch: disconnect, then walk the candidates, then `quick`.
 
         `mandatory` is the boot/mid-session asymmetry. At boot we are already
         connected via `quick`, so the switch is optional and ending back on
         `quick` is merely a no-op. Mid-session the tunnel is already down before
         this returns, so recovery has to happen.
+
+        `escape` marks the #1031 slot: this switch is going through past the
+        cooldown and the daily cap, so the budget entry it writes is marked and
+        bounds it to one per rolling 24 h, whatever the outcome.
         """
         if self.cfg.dry_run:
             log.info("DRY RUN reason=%s would switch from=%s to=%s",
                      reason, self.current_server, names[0] if names else "quick")
-            self.budget.record(self._earned_cooldown(reason))
+            self.budget.record(self._earned_cooldown(reason),
+                               kind="escape" if escape else "switch")
             return None
 
         delay = random.uniform(0, self.cfg.jitter_seconds)
-        log.info("switching reason=%s from=%s candidates=%s jitter=%.1fs mandatory=%s",
-                 reason, self.current_server, names or ["quick"], delay, mandatory)
+        log.info("switching reason=%s from=%s candidates=%s jitter=%.1fs mandatory=%s%s",
+                 reason, self.current_server, names or ["quick"], delay, mandatory,
+                 " escape" if escape else "")
         self.sleep(delay)
 
         started = self.clock()
@@ -1326,18 +1397,19 @@ class Agent:
                     if self.clock() >= walk_deadline:
                         log.warning("recovery budget spent on the candidate walk, "
                                     "falling back to quick")
-                        return self._fall_back(hard_deadline, reason)
+                        return self._fall_back(hard_deadline, reason, escape=escape)
                     connected = self.bluetit.connect(name, deadline=walk_deadline)
                     if connected:
                         if not self.bluetit.tun_ok():
                             log.error("connected to %s but the tunnel device is wrong - "
                                       "the switch FAILED", connected)
                             return self._finish(connected, reason, None,
-                                                cooldown=self.cfg.cooldown_seconds)
+                                                cooldown=self.cfg.cooldown_seconds,
+                                                escape=escape)
                         if self.verify_tunnel(connected):
                             log.info("connected server=%s reason=%s attempt=%d elapsed=%.1fs",
                                      connected, reason, attempt, self.clock() - started)
-                            return self._finish(connected, reason, reason)
+                            return self._finish(connected, reason, reason, escape=escape)
                         log.warning("dropping candidate %s - it reported connected but "
                                     "passed no traffic, walking to the next one", name)
                         self.bluetit.disconnect()
@@ -1348,7 +1420,7 @@ class Agent:
                     log.warning("candidate %s failed %d attempts, moving on",
                                 name, self.cfg.attempts_per_candidate)
 
-            return self._fall_back(hard_deadline, reason)
+            return self._fall_back(hard_deadline, reason, escape=escape)
         finally:
             with self.lock:
                 self.switching = False
@@ -1365,7 +1437,7 @@ class Agent:
             self.bluetit.tun_ok()
         return connected
 
-    def _fall_back(self, hard_deadline, reason):
+    def _fall_back(self, hard_deadline, reason, escape=False):
         """`quick`, then the bookkeeping. Verified like any other connect.
 
         `quick` is the last thing standing between the pod and no tunnel at all,
@@ -1376,7 +1448,8 @@ class Agent:
         verified = bool(connected) and self.verify_tunnel(connected)
         return self._finish(
             connected, reason, "fallback",
-            cooldown=None if verified else self.cfg.failed_cooldown_seconds)
+            cooldown=None if verified else self.cfg.failed_cooldown_seconds,
+            escape=escape)
 
     def verify_tunnel(self, name):
         """Did the tunnel actually pass a packet? The only signal that cannot lie.
@@ -1427,16 +1500,21 @@ class Agent:
 
         The daily cap is untouched and still bounds churn: worst case is one boot
         placement plus two degradation corrections (the second 6 h after the
-        first), then max_switches_per_day (3) stops the agent for the day.
+        first), then max_switches_per_day (3) stops the agent for the day. The
+        one exception is the #1031 escape slot in SwitchBudget.allowed_or_escape():
+        a trip while suppressed still goes through when the server was placed
+        within VPN_AGENT_ESCAPE_WINDOW_SECONDS and the pod would otherwise stay
+        stuck, once per rolling 24 h.
         """
         return (self.cfg.cooldown_seconds if reason in FULL_COOLDOWN_REASONS
                 else self.cfg.failed_cooldown_seconds)
 
-    def _finish(self, connected, reason, counted_as, cooldown=None):
+    def _finish(self, connected, reason, counted_as, cooldown=None, escape=False):
         """counted_as is None when the switch is not to be called a success.
 
         `cooldown` is what this attempt arms; None means "whatever `reason` has
-        earned" - see _earned_cooldown().
+        earned" - see _earned_cooldown(). `escape` marks the budget entry so the
+        #1031 slot stays bounded at one per rolling 24 h.
         """
         with self.lock:
             self.current_server = connected
@@ -1446,7 +1524,7 @@ class Agent:
             if connected and counted_as:
                 self.switches[counted_as] = self.switches.get(counted_as, 0) + 1
         armed = self._earned_cooldown(reason) if cooldown is None else cooldown
-        self.budget.record(armed)
+        self.budget.record(armed, kind="escape" if escape else "switch")
         log.info("armed a %ds cooldown for reason=%s, %d/%d switches used today",
                  armed, reason, len(self.budget.history), self.cfg.max_switches_per_day)
         if not connected:
@@ -1639,15 +1717,19 @@ class Agent:
         else:
             self.publish_bad_server(current, loss)
 
-        allowed, why = self.budget.allowed()
+        allowed, why, escape = self.budget.allowed_or_escape(
+            self.cfg.escape_window_seconds)
         if not allowed:
             log.warning("degradation switch suppressed: %s", why)
             return False
+        if escape:
+            log.warning("degradation switch past the budget: %s - using the "
+                        "escape slot", why)
 
         names, source = self.candidates(exclude=current)
         log.info("degradation trip on %s, candidates from the %s ranking: %s",
                  current, source, names or ["quick"])
-        self.switch(names, "degradation", mandatory=True)
+        self.switch(names, "degradation", mandatory=True, escape=escape)
         return True
 
     def run(self):
@@ -1680,7 +1762,7 @@ def render_metrics(agent):
     age = agent.ranking_age_now()
     device_ok = agent.bluetit.tun_present()
     tun_bytes = agent.bluetit.tun_bytes()
-    budget_used, budget_exhausted, cooldown_left = agent.budget.snapshot()
+    budget_used, budget_exhausted, cooldown_left, escapes_used = agent.budget.snapshot()
     lines = [
         "# HELP vpn_agent_dry_run Whether the agent is logging switches instead of applying them.",
         "# TYPE vpn_agent_dry_run gauge",
@@ -1701,6 +1783,9 @@ def render_metrics(agent):
         "# HELP vpn_agent_switch_cooldown_seconds_left Seconds until the cooldown armed by the last switch expires - the other half of allowed(), and what made the 2026-08-02 and 2026-08-04 lockouts invisible. 0 when no cooldown is holding.",
         "# TYPE vpn_agent_switch_cooldown_seconds_left gauge",
         "vpn_agent_switch_cooldown_seconds_left %.0f" % cooldown_left,
+        "# HELP vpn_agent_switch_escapes_used Escape slots spent inside the enforced rolling 24 h window (#1031): degradation switches allowed past the cooldown and the daily cap because the server they escape was placed within VPN_AGENT_ESCAPE_WINDOW_SECONDS and then tripped. At most one per window; the switch itself also counts in vpn_agent_switches_total, as reason=\"degradation\" when it lands on a ranked server and reason=\"fallback\" when it ends on quick.",
+        "# TYPE vpn_agent_switch_escapes_used gauge",
+        "vpn_agent_switch_escapes_used %d" % escapes_used,
         "# HELP vpn_agent_consecutive_bad_windows Consecutive probe windows with ICMP loss to the in-tunnel gateway at or over VPN_AGENT_BAD_LOSS_PCT. Resets on the first window under it.",
         "# TYPE vpn_agent_consecutive_bad_windows gauge",
         "vpn_agent_consecutive_bad_windows %d" % bad,
@@ -1784,11 +1869,11 @@ def main():
     cfg = Config()
     log.info(
         "vpn-picker agent starting dry_run=%s band=%d probe=%d packets to %s every %ds "
-        "bad>=%.1f%% trip=%d cooldown=%ds failed_cooldown=%ds cap=%d/day "
+        "bad>=%.1f%% trip=%d cooldown=%ds failed_cooldown=%ds cap=%d/day escape=%ds "
         "verify=%d packets at <=%.0f%% loss ranking=%s verdicts=%s",
         cfg.dry_run, cfg.band, cfg.probe_count, cfg.probe_target, cfg.probe_interval,
         cfg.bad_loss_pct, cfg.bad_windows, cfg.cooldown_seconds,
-        cfg.failed_cooldown_seconds, cfg.max_switches_per_day,
+        cfg.failed_cooldown_seconds, cfg.max_switches_per_day, cfg.escape_window_seconds,
         cfg.verify_probe_count, cfg.verify_max_loss_pct,
         cfg.ranking_url or cfg.ranking_path,
         ("POST %s" % cfg.intake_url) if cfg.intake_url else cfg.verdict_dir,
