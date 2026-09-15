@@ -40,7 +40,7 @@ kubectl version --client >/dev/null
 az version >/dev/null
 gh --version >/dev/null
 pin() { node -p "require('/tools/package.json').dependencies['$1']"; }
-ver() { timeout 60 "$1" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1; }
+ver() { timeout 60 "$1" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?' | head -1; }
 for p in t3:t3 @anthropic-ai/claude-code:claude @openai/codex:codex opencode-ai:opencode; do
   want=$(pin "${p%%:*}"); got=$(ver "/tools/node_modules/.bin/${p##*:}")
   [[ $got == "$want" ]] || fail "${p##*:} reports $got; expected $want"
