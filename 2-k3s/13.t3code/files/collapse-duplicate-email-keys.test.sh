@@ -50,7 +50,11 @@ case "$mode" in
   e)
     {
       echo "__FAKE_SOPS_CIPHERTEXT__"
-      cat "$file"
+      if [ "${SOPS_FAKE_NOENC:-0}" = "1" ]; then
+        cat "$file"
+      else
+        sed -E 's/^([[:space:]]*[^:#][^:]*): (.+)$/\1: ENC[FAKE]\2/' "$file"
+      fi
       echo "__END_FAKE_SOPS_CIPHERTEXT__"
       printf 'sops:\n    age:\n        - recipient: %s\n' \
         "${SOPS_FAKE_RECIPIENT:-age1fakefakefakefakefakefake}"
@@ -59,7 +63,7 @@ case "$mode" in
   *)
     if grep -q '^__FAKE_SOPS_CIPHERTEXT__$' "$file"; then
       sed '/^__FAKE_SOPS_CIPHERTEXT__$/d;/^__END_FAKE_SOPS_CIPHERTEXT__$/d' "$file" |
-        sed '/^sops:$/,$d'
+        sed '/^sops:$/,$d' | sed 's/ENC\[FAKE\]//'
     else
       sed '/^sops:$/,$d' "$file"
     fi
@@ -83,6 +87,10 @@ write_store() {
 run_script() {
   (cd "$tmp/repo" && PATH="$tmp/bin:$PATH" KEY_FILE="$tmp/key.txt" \
     STORE="$tmp/repo/store.enc.yaml" bash "$script" "$@")
+}
+
+decrypt_store() {
+  "$tmp/bin/sops" -d "$tmp/repo/store.enc.yaml"
 }
 
 assert_output_has() {
@@ -151,6 +159,21 @@ else
   fail "dry-run leaves the store untouched"
 fi
 
+if (cd "$tmp/repo" && PATH="$tmp/bin:$PATH" KEY_FILE="$tmp/key.txt" \
+  STORE="$tmp/repo/store.enc.yaml" SOPS_FAKE_NOENC=1 bash "$script" --apply) \
+  >"$output" 2>&1; then
+  fail "re-encrypt that leaves plaintext values is refused"
+else
+  pass "re-encrypt that leaves plaintext values is refused"
+fi
+assert_output_has "value not ciphertext" "refusal names the ciphertext shape problem"
+assert_output_has "Nothing written" "ciphertext refusal writes nothing"
+if cmp -s "$tmp/repo/store.enc.yaml" "$tmp/store.before"; then
+  pass "ciphertext refusal leaves the store untouched"
+else
+  fail "ciphertext refusal leaves the store untouched"
+fi
+
 if run_script --apply >"$output" 2>&1; then
   pass "apply exits zero"
 else
@@ -170,22 +193,22 @@ assert_line_count "$tmp/repo/store.enc.yaml" "alert_email_hostname:" 0 \
 assert_line_count "$tmp/repo/store.enc.yaml" "auth_email_hostname:" 0 \
   "per-mailbox hostname keys are gone (auth)"
 
-grep -q "^alert_email_username: alerts@example.test$" "$tmp/repo/store.enc.yaml" &&
+decrypt_store | grep -q "^alert_email_username: alerts@example.test$" &&
   pass "alert username preserved verbatim" ||
   fail "alert username preserved verbatim"
-grep -q "^alert_email_password: $SECRET_ALERT_PASS$" "$tmp/repo/store.enc.yaml" &&
+decrypt_store | grep -q "^alert_email_password: $SECRET_ALERT_PASS$" &&
   pass "alert password preserved verbatim" ||
   fail "alert password preserved verbatim"
-grep -q "^auth_email_username: auth@example.test$" "$tmp/repo/store.enc.yaml" &&
+decrypt_store | grep -q "^auth_email_username: auth@example.test$" &&
   pass "auth username preserved verbatim" ||
   fail "auth username preserved verbatim"
-grep -q "^auth_email_password: $SECRET_AUTH_PASS$" "$tmp/repo/store.enc.yaml" &&
+decrypt_store | grep -q "^auth_email_password: $SECRET_AUTH_PASS$" &&
   pass "auth password preserved verbatim" ||
   fail "auth password preserved verbatim"
-grep -q "^truenas_admin_password: supersecret42-value$" "$tmp/repo/store.enc.yaml" &&
+decrypt_store | grep -q "^truenas_admin_password: supersecret42-value$" &&
   pass "unrelated keys preserved verbatim" ||
   fail "unrelated keys preserved verbatim"
-grep -q "^last_key: keepme$" "$tmp/repo/store.enc.yaml" &&
+decrypt_store | grep -q "^last_key: keepme$" &&
   pass "trailing keys preserved" ||
   fail "trailing keys preserved"
 
@@ -272,7 +295,7 @@ assert_output_has "ROUND_TRIP_OK" "nested subtree round-trip verified"
 grep -q "^epaflix_bot:$" "$tmp/repo/store.enc.yaml" &&
   pass "nested map header preserved" ||
   fail "nested map header preserved"
-grep -q "^  pbs_token: epaflix-bot-pbs-token-value$" "$tmp/repo/store.enc.yaml" &&
+decrypt_store | grep -q "^  pbs_token: epaflix-bot-pbs-token-value$" &&
   pass "nested child preserved verbatim" ||
   fail "nested child preserved verbatim"
 grep -q "^  # PENDING owner action - a comment inside the subtree$" "$tmp/repo/store.enc.yaml" &&
