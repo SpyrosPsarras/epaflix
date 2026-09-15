@@ -1,0 +1,63 @@
+# Extract tls-alerts.yaml's spec to tls-alerts-rules.yaml, then:
+# promtool test rules tls-alerts-tests.yaml
+rule_files:
+  - tls-alerts-rules.yaml
+evaluation_interval: 1m
+tests:
+  - name: expiry thresholds and recovery
+    interval: 1m
+    input_series:
+      # Remaining lifetime stays exactly at each boundary until recovery.
+      - series: 'probe_ssl_earliest_cert_expiry{job="tls-probe",instance="14d"}'
+        values: '1209600+60x10'
+      - series: 'probe_ssl_earliest_cert_expiry{job="tls-probe",instance="3d"}'
+        values: '259200+60x10'
+      - series: 'probe_ssl_earliest_cert_expiry{job="tls-probe",instance="expired"}'
+        values: '0x10 2000000+60x10'
+      - series: 'probe_ssl_earliest_cert_expiry{job="unrelated",instance="ignored"}'
+        values: '0x20'
+    promql_expr_test:
+      - expr: 'ALERTS{alertstate="firing"}'
+        eval_time: 4m
+        exp_samples: []
+      - expr: 'ALERTS{alertstate="firing"}'
+        eval_time: 6m
+        exp_samples:
+          - labels: 'ALERTS{alertname="TLSCertificateExpiringSoon",alertstate="firing",job="tls-probe",instance="3d",severity="warning",component="infrastructure"}'
+            value: 1
+          - labels: 'ALERTS{alertname="TLSCertificateExpiringSoon",alertstate="firing",job="tls-probe",instance="expired",severity="warning",component="infrastructure"}'
+            value: 1
+          - labels: 'ALERTS{alertname="TLSCertificateExpiryCritical",alertstate="firing",job="tls-probe",instance="expired",severity="critical",component="infrastructure"}'
+            value: 1
+      - expr: 'ALERTS{alertstate="firing",instance="expired"}'
+        eval_time: 12m
+        exp_samples: []
+  - name: failed probe, failed scrape, missing dates and recovery
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="tls-probe",instance="probe"}'
+        values: '0x6 1x10'
+      - series: 'probe_ssl_earliest_cert_expiry{job="tls-probe",instance="probe"}'
+        values: '2000000x20'
+      - series: 'up{job="tls-probe",instance="scrape"}'
+        values: '0x6 1x10'
+      - series: 'probe_success{job="tls-probe",instance="missing-date"}'
+        values: '1x20'
+      - series: 'probe_ssl_earliest_cert_expiry{job="tls-probe",instance="missing-date"}'
+        values: '_ _ _ _ _ _ _ 2000000x10'
+    promql_expr_test:
+      - expr: 'ALERTS{alertname="TLSProbeFailed",alertstate="firing"}'
+        eval_time: 4m
+        exp_samples: []
+      - expr: 'ALERTS{alertname="TLSProbeFailed",alertstate="firing"}'
+        eval_time: 6m
+        exp_samples:
+          - labels: 'ALERTS{alertname="TLSProbeFailed",alertstate="firing",job="tls-probe",instance="probe",severity="critical",component="infrastructure"}'
+            value: 1
+          - labels: 'ALERTS{alertname="TLSProbeFailed",alertstate="firing",job="tls-probe",instance="scrape",severity="critical",component="infrastructure"}'
+            value: 1
+          - labels: 'ALERTS{alertname="TLSProbeFailed",alertstate="firing",job="tls-probe",instance="missing-date",severity="critical",component="infrastructure"}'
+            value: 1
+      - expr: 'ALERTS{alertstate="firing"}'
+        eval_time: 8m
+        exp_samples: []
