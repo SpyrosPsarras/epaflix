@@ -266,6 +266,7 @@ jobs:
           bash 2-k3s/13.t3code/env/tools/rollout-hash.test.sh
           bash 2-k3s/13.t3code/files/collapse-duplicate-email-keys.test.sh
           bash 1-proxmox/t3env/pin-vm-host.test.sh
+          bash 2-k3s/maintenance/node-os-updater.test.sh
 
       - name: T3 install and runtime smoke
         timeout-minutes: 20

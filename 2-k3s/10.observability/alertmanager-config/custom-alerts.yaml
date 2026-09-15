@@ -199,6 +199,34 @@ spec:
             summary: "K3s nodes running mixed kubelet versions (roll in progress)"
             description: "K3s nodes are on {{ $value }} distinct kubelet versions — likely a rolling upgrade in progress. Confirm this was an intended, reviewed version bump (pinned spec.version, issue #130)."
 
+        - alert: K3sNodeCordoned
+          expr: |
+            max by (node) (kube_node_spec_unschedulable) == 1
+            and on (node)
+            max by (node) (kube_node_status_condition{condition="Ready",status="true"}) == 1
+          for: 15m
+          labels:
+            severity: warning
+            component: system-upgrade
+          annotations:
+            summary: "Node {{ $labels.node }} is Ready but cordoned for over 15 minutes"
+            description: >-
+              Node {{ $labels.node }} has spec.unschedulable=1 while Ready, for more than
+              15 minutes. Nothing schedules onto it, and a check that only counts Ready
+              shows it green: the STATUS column prints Ready,SchedulingDisabled, which an
+              exact-match Ready count silently drops - that off-by-one is how the 2026-08-22
+              strand of k3s-master-52 sat unnoticed for 6h (#1087). Two automations cordon
+              nodes and are supposed to uncordon within minutes: system-upgrade-controller
+              plan jobs, whose uncordon is applied only when the controller processes the job
+              completion (a Failed job leaves the node cordoned), and the node-os-updater
+              CronJob (Saturdays 02:00, 2-k3s/maintenance/node-os-updater-cronjob.yaml),
+              whose safe_reboot cordons before drain and reboot, so any failed step in
+              between strands the node until Phase 0 of the next run. If no roll is in
+              progress, confirm with
+              kubectl --context epaflix get node {{ $labels.node }} -o jsonpath='{.spec.unschedulable}',
+              check the latest jobs in -n system-upgrade and -n kube-system, then
+              kubectl --context epaflix uncordon {{ $labels.node }}.
+
     - name: cleanuparr-blocklist
       interval: 60s
       rules:
