@@ -8,8 +8,9 @@ the same request lands on the Authentik-gated public route and the harness
 receives an HTML 302 where it expects JSON, which reads as a bad or quiet
 search rather than a broken route.
 
-The harness therefore points searxngBaseUrl at this guard
-(http://127.0.0.1:8893, see setup-search-guard.sh). The guard forwards the
+The harness therefore points searxngBaseUrl at this guard - either the
+in-cluster deployment (search-guard/ manifests, LoadBalancer IP on the LAN)
+or the localhost install (setup-search-guard.sh). The guard forwards the
 query to the upstream name and asserts the answer is JSON before the harness
 trusts it. A 3xx, a non-JSON content type, an unparsable body or an
 unreachable upstream becomes a hard configuration error naming this issue,
@@ -18,11 +19,13 @@ break; it stops the break from being silent.
 """
 
 import json
+import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 PORT = 8893
+BIND = os.environ.get("SEARCH_GUARD_BIND", "127.0.0.1")
 UPSTREAM = "https://searxng.epaflix.com"
 TIMEOUT = 30  # seconds, matches pi-web-access's own search timeout
 ISSUE = "epaflix#1038"
@@ -108,8 +111,8 @@ class Guard(BaseHTTPRequestHandler):
 
 
 def main():
-    server = ThreadingHTTPServer(("127.0.0.1", PORT), Guard)
-    print("search-guard on http://127.0.0.1:%d -> %s (%s)" % (PORT, UPSTREAM, ISSUE), flush=True)
+    server = ThreadingHTTPServer((BIND, PORT), Guard)
+    print("search-guard on http://%s:%d -> %s (%s)" % (BIND, PORT, UPSTREAM, ISSUE), flush=True)
     server.serve_forever()
 
 
