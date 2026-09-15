@@ -387,6 +387,68 @@ spec:
             summary: "qBittorrent torrent(s) stuck in missingFiles/error (or the check failed)"
             description: "The hourly qbt-stuck-torrent-check Job ({{ $labels.job_name }}) failed — either at least one torrent has been in qBittorrent `state` missingFiles or error for at least GRACE_MINUTES (15m), confirmed via two live snapshots taken GRACE_MINUTES apart (a torrent that recovers before the second snapshot, e.g. a recheck completing, is never reported), or the qBittorrent login/torrent-list fetch itself failed. This is the #610/#839 signature — a torrent can sit broken indefinitely with no *arr rule covering it (#482: `error` matches no Cleanuparr rule). Read the Job log for the affected hash prefix(es), state, category, size and age (never a torrent name), then inspect by hash in the qBittorrent WebUI. REPORT ONLY — this job never deletes, pauses or rechecks a torrent (`max_ratio_act=0` exists so private torrents are never auto-removed); any action is a human decision (#839)."
 
+    - name: alertmanager
+      interval: 60s
+      rules:
+        - alert: AlertmanagerWebhookDeliveryFailing
+          expr: increase(alertmanager_notifications_failed_total{integration="webhook"}[30m]) > 0
+          for: 0m
+          labels:
+            severity: critical
+            component: observability
+          annotations:
+            summary: "Alertmanager failed to deliver to a webhook receiver ({{ $labels.pod }})"
+            description: >-
+              alertmanager_notifications_failed_total rose on {{ $labels.pod }} in the last 30m:
+              Alertmanager attempted a webhook delivery and it FAILED. This fires only on
+              attempted-and-failed delivery, so it never confuses "no alerts fired" with "no
+              delivery" (#1108). The k8s-alertmanager leg to cover is the `ntfy` receiver
+              (posts in-cluster to http://ntfy.observability.svc.cluster.local:8091), but
+              Alertmanager does not label notification metrics per receiver, so the `deadman`
+              webhook (Watchdog -> hc-ping) counts here too — check the Alertmanager logs to
+              tell them apart. If ntfy delivery is what broke, you are likely NOT seeing this
+              on the phone: read it in the Alertmanager UI or Grafana, and expect
+              NtfyCanaryPublishFailing to be failing for the same window. Start with
+              `kubectl logs -n observability -l app.kubernetes.io/name=alertmanager --tail=100`
+              and `kubectl get pods -n observability -l app=ntfy`. Self-clears 30m after the
+              last failed attempt.
+
+    - name: ntfy-canary
+      interval: 60s
+      rules:
+        - alert: NtfyCanaryPublishFailing
+          expr: |
+            max by (job_name) (
+              kube_job_failed{namespace="observability", job_name=~"ntfy-canary-check.*"} > 0
+              and on (job_name) (
+                max by (job_name) (kube_job_status_start_time{namespace="observability", job_name=~"ntfy-canary-check.*"})
+                  >= scalar(max(kube_job_status_start_time{namespace="observability", job_name=~"ntfy-canary-check.*"}))
+              )
+            )
+          for: 5m
+          labels:
+            severity: critical
+            component: observability
+          annotations:
+            summary: "ntfy canary publish failed — the real PVE notification target is broken (or the check could not run)"
+            description: >-
+              The hourly ntfy-canary-check Job ({{ $labels.job_name }}) failed — the canary
+              POST through the exact PVE target path (https://ntfy.epaflix.com/pve-backups,
+              Title/Tags/Priority headers, see 1-proxmox/pbs/notifications.cfg target ntfy-pve)
+              did not return 200 with a message id, or could not connect at all. A real PVE
+              notification would fail the same way right now: this is the #1076 signature
+              (twelve days of failed backups surfaced only as `could not notify via target`
+              in a vzdump task log). ntfy code 40014 in the Job log means
+              NTFY_MESSAGE_SIZE_LIMIT=32k regressed to the 4096 default on the ntfy
+              Deployment (#1105) — `kubectl set env deployment/ntfy -n observability
+              NTFY_MESSAGE_SIZE_LIMIT=32k` then `kubectl rollout restart deployment/ntfy
+              -n observability`. Any other status or an exit 2: check `kubectl get pods -n
+              observability -l app=ntfy` and the Traefik ingressroute for ntfy.epaflix.com.
+              Exit 1 and exit 2 are both findings (#1108) — a canary that cannot verify must
+              never count as a clean run (#725). One failed run right after a deploy may be
+              transient; the alert needs the latest run to stay failed for 5m, and it clears
+              by itself once the next hourly run succeeds.
+
     - name: traefik
       interval: 60s
       rules:
@@ -591,6 +653,8 @@ spec:
             unless on (namespace, job_name)
             max by (namespace, job_name) (
               kube_job_owner{namespace="servarr", owner_kind="CronJob", owner_name=~"cleanuparr-blocklist-drift|neutarr-config-drift|orphan-census|prowlarr-indexer-health|prowlarr-appsync-drift|cleanuparr-queuecleaner-health|blind-queue-check|qbt-stuck-torrent-check"}
+              or
+              kube_job_owner{namespace="observability", owner_kind="CronJob", owner_name="ntfy-canary-check"}
             )
           for: 15m
           labels:
