@@ -2,7 +2,7 @@
 prometheus:
   prometheusSpec:
     replicas: 1 # Single replica due to PV limitations
-    retention: 8d
+    retention: 15d # dedup cut ingestion to ~1.1 GiB/day so 15d (~16 GiB) fits the 20GB cap; drift is reported by PrometheusRetentionBelowConfigured
     retentionSize: "20GB"
 
     resources:
@@ -289,6 +289,15 @@ defaultRules:
 
 kubelet:
   enabled: true
+  serviceMonitor:
+    metricRelabelings:
+      # k3s runs every control-plane component in one process sharing one
+      # metrics registry, so :10250 on control-plane nodes also serves the
+      # apiserver's metrics. Those families are already scraped from the
+      # apiserver job (6443); scraping them here again tripled head series.
+      - sourceLabels: [__name__]
+        regex: "(apiserver_|etcd_requests?_|kubeproxy_).*"
+        action: drop
 kubeApiServer:
   enabled: true
 kubeControllerManager:
@@ -305,6 +314,10 @@ kubeControllerManager:
     enabled: true
     https: true
     insecureSkipVerify: true
+    metricRelabelings:
+      - sourceLabels: [__name__]
+        regex: "(apiserver_|etcd_requests?_|kubeproxy_).*"
+        action: drop
 coreDns:
   enabled: true
 kubeEtcd:
@@ -331,5 +344,9 @@ kubeScheduler:
     enabled: true
     https: true
     insecureSkipVerify: true
+    metricRelabelings:
+      - sourceLabels: [__name__]
+        regex: "(apiserver_|etcd_requests?_|kubeproxy_).*"
+        action: drop
 kubeProxy:
   enabled: false # Disabled because using Cilium
