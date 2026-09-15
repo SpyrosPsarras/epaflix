@@ -45,6 +45,20 @@ expect_fail() {
   fi
 }
 
+expect_fail_with() {
+  local name=$1 pattern=$2
+  shift 2
+  : >"$output"
+  if (cd "$tmp" && bash "$hook" "$@") >"$output" 2>&1; then
+    fail "$name"
+  elif grep -qF -- "$pattern" "$output"; then
+    pass "$name"
+  else
+    printf '  expected failure output to contain: %s\n' "$pattern" >&2
+    fail "$name"
+  fi
+}
+
 reset_repo() {
   git -C "$tmp" reset --hard -q "$baseline"
   git -C "$tmp" clean -fdqx
@@ -211,6 +225,44 @@ servarr="2-k3s/08.servarr/_shared/secrets/postgres-secret.yaml"
 printf '  optional-database: "jellyseerr"\n  optional-user: "prowlarr"\n  optional-instance: "radarr-database"\n' >>"$tmp/$servarr"
 git -C "$tmp" add "$servarr"
 expect_pass "short lowercase template identifiers still pass the new band"
+
+reset_repo
+cat >"$tmp/fixtures/credential-key.yaml" <<'YAML'
+apiVersion: v1
+kind: Secret
+metadata:
+  name: synthetic-credential-key
+stringData:
+  ghp_SYNTHETIC0000000000000000000000000000: <SYNTHETIC_TOKEN>
+YAML
+git -C "$tmp" add fixtures/credential-key.yaml
+expect_fail_with "credential-shaped mapping key is rejected and redacted" '<redacted-key>'
+
+reset_repo
+cat >"$tmp/fixtures/ordinary-keys.yaml" <<'YAML'
+apiVersion: v1
+kind: Secret
+metadata:
+  name: synthetic-ordinary-keys
+stringData:
+  admin-user: <ADMIN_USER>
+  sonarr-database: <SONARR_DATABASE>
+  AUTHENTIK_EMAIL__HOST: <AUTHENTIK_EMAIL_HOST>
+YAML
+git -C "$tmp" add fixtures/ordinary-keys.yaml
+expect_pass "ordinary Secret field names still pass"
+
+reset_repo
+cat >"$tmp/fixtures/ordinary-key-failing-value.yaml" <<'YAML'
+apiVersion: v1
+kind: Secret
+metadata:
+  name: synthetic-ordinary-key-failing-value
+stringData:
+  AUTHENTIK_EMAIL__HOST: github_pat_SYNTHETIC_NOT_A_REAL_TOKEN_000000000000
+YAML
+git -C "$tmp" add fixtures/ordinary-key-failing-value.yaml
+expect_fail_with "ordinary key names are still printed in full" 'stringData.AUTHENTIK_EMAIL__HOST'
 
 reset_repo
 python3 - "$tmp/fixtures/oversized-scalar.yaml" 2400 <<'PY'
