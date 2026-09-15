@@ -65,8 +65,14 @@ wait_url() {
   fail "$1 did not become healthy"
 }
 wait_url http://127.0.0.1:3773/health 180
-(cd "$HOME/projects/remote" && timeout 60 /tools/node_modules/.bin/opencode debug config) | node -e '
-let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{if(!JSON.parse(s).command?.implement)process.exit(1);console.log("smoke: implement command discovered");});'
+# Probe command discovery separately; T3 must not be configured to use this server.
+/tools/node_modules/.bin/opencode serve --hostname 127.0.0.1 --port 4097 >/tmp/opencode-probe.log 2>&1 &
+probe=$!; pids+=("$probe")
+wait_url http://127.0.0.1:4097/global/health 120
+curl -fsS --get --data-urlencode "directory=$HOME/projects/remote" http://127.0.0.1:4097/command | node -e '
+let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{if(!JSON.parse(s).some(c=>c.name==="implement"))process.exit(1);console.log("smoke: implement command discovered");});'
+kill -TERM "$probe"
+wait "$probe" || :
 curl -fsS --max-time 5 http://127.0.0.1:3773/.well-known/t3/environment | node -e '
 let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
 const j=JSON.parse(s),p=require("/tools/package.json");
