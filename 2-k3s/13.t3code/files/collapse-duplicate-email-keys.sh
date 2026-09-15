@@ -29,7 +29,13 @@ done
 
 command -v sops >/dev/null 2>&1 || { echo "ERROR: sops is not on PATH." >&2; exit 1; }
 command -v python3 >/dev/null 2>&1 || { echo "ERROR: python3 is not on PATH." >&2; exit 1; }
-[ -f "$KEY_FILE" ] || { echo "ERROR: key file not found at $KEY_FILE." >&2; exit 1; }
+[ -f "$KEY_FILE" ] || {
+  echo "ERROR: key file not found at $KEY_FILE." >&2
+  echo "       Restore copy 1 from the KeePassXC entry /sops-age-k3s-cluster" >&2
+  echo "       (see .github/hooks/print-age-key-backup.sh), or point KEY_FILE" >&2
+  echo "       at wherever the age key is materialized." >&2
+  exit 1
+}
 [ -f "$STORE" ] || { echo "ERROR: store not found at $STORE." >&2; exit 1; }
 
 export SOPS_AGE_KEY_FILE="$KEY_FILE"
