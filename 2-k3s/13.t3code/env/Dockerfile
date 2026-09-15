@@ -17,6 +17,8 @@ RUN bash /tmp/cluster-tools/install-cluster-tools.sh
 COPY env/tools/package.json env/tools/package-lock.json /tools/
 # npm 11 drops T3's bundled native package on glibc; npm 10 installs it correctly.
 RUN cd /tools && npx --yes npm@10.9.4 ci --no-fund --no-audit && npm cache clean --force
+# Run the native server directly so container TERM reaches it without a CLI shim.
+RUN ln -sf "../@t3code/t3-$(node -p process.platform)-$(node -p process.arch)/t3" /tools/node_modules/.bin/t3
 ENV PATH="/tools/node_modules/.bin:${PATH}"
 ENV HOME=/home/t3
 RUN mkdir -p /home/t3 && chown 1000:1000 /home/t3
