@@ -875,7 +875,10 @@ def test_dead_tunnel_is_the_liveness_probes_job(tmp):
 
 @with_tmp
 def test_cooldown_and_daily_cap(tmp):
-    agent, fake, clock = build(tmp, server="Aspidiske")
+    # escape_window_seconds=0 shuts the #1031 escape slot: every suppression
+    # below must come from the cooldown and the cap alone. The hatch itself has
+    # its own tests, which is also how an operator turns it off in production.
+    agent, fake, clock = build(tmp, server="Aspidiske", escape_window_seconds=0)
     agent.probe = scripted_probe(9.0)
     agent.candidates = lambda exclude=None: (
         ag.candidate_names(RANKING["servers"], agent.cfg.band, exclude), "fixture"
@@ -910,6 +913,164 @@ def test_cooldown_and_daily_cap(tmp):
     clock.sleep(86401)
     assert trip() is True, "the daily cap never rolls off"
     print("ok  cooldown: holds for the full 6 h, daily cap of 3 holds past it and rolls")
+
+
+@with_tmp
+def test_an_escape_switch_passes_cap_and_cooldown(tmp):
+    """#1031. The 2026-09-14 lockout, replayed.
+
+    The live sequence: a verified degradation switch at 06:13 armed the full
+    21600 s as switch 3/3; the server it landed on tripped at 07:37, 5047 s
+    after placement; `degradation switch suppressed: cooldown, 16553s left`
+    and the pod held a tunnel it had measured at up to 18% loss for another
+    4.6 h. The escape slot is the answer to exactly that shape: the refusal is
+    real, but the server it protects measured bad 5047 s after arriving, so one
+    switch goes through anyway - once per rolling 24 h, whatever the outcome.
+
+    600 s of placement age stands in for the live 5047 s: the same side of the
+    7200 s window, far inside the cooldown that is doing the refusing.
+    """
+    agent, fake, clock = build(tmp, server="Aspidiske")
+    agent.probe = scripted_probe(9.0)
+    agent.candidates = lambda exclude=None: (
+        ag.candidate_names(RANKING["servers"], agent.cfg.band, exclude), "fixture"
+    )
+
+    def trip():
+        for _ in range(agent.cfg.bad_windows):
+            got = agent.watch_once()
+        return got
+
+    assert trip() is True
+    clock.sleep(agent.cfg.cooldown_seconds + 1)
+    assert trip() is True
+    clock.sleep(agent.cfg.cooldown_seconds + 1)
+    assert trip() is True
+    assert len(agent.budget.history) == 3, agent.budget.history
+    assert metric(agent, "vpn_agent_switch_escapes_used") == 0, \
+        "the first three switches went through the front door"
+
+    clock.sleep(600)
+    assert trip() is True, "a trip 600 s after placement stayed suppressed"
+    assert agent.switches["degradation"] == 4, agent.switches
+    assert len(agent.budget.history) == 4, agent.budget.history
+    assert agent.budget.history[-1][2] == "escape", \
+        "the escape slot is not marked, so nothing bounds it to one per window"
+    assert agent.budget.history[-1][1] == agent.cfg.cooldown_seconds, \
+        "the escape armed %ds - an escape is a degradation switch in every other " \
+        "respect, and the placement it lands must be protected the same way" \
+        % agent.budget.history[-1][1]
+    assert metric(agent, "vpn_agent_switch_escapes_used") == 1, \
+        "the gauge the peer-cost analysis reads did not move with the enforcement"
+
+    clock.sleep(600)
+    assert trip() is False, "a second escape inside the same window went through"
+    assert agent.switches["degradation"] == 4, agent.switches
+
+    clock.sleep(86401)
+    assert trip() is True, "the escape slot never came back"
+    print("ok  escape: one switch past cooldown and cap when the server tripped "
+          "young, once per window, back the next day")
+
+
+@with_tmp
+def test_an_escape_needs_a_recent_placement(tmp):
+    """The escape is for a server that tripped YOUNG. A server the agent has
+    been on for hours is the accepted trade-off (#1031): the cooldown and cap
+    then mean what they usually mean, and no hatch opens."""
+    agent, fake, clock = build(tmp, server="Aspidiske")
+    agent.probe = scripted_probe(9.0)
+    agent.candidates = lambda exclude=None: (
+        ag.candidate_names(RANKING["servers"], agent.cfg.band, exclude), "fixture"
+    )
+
+    def trip():
+        for _ in range(agent.cfg.bad_windows):
+            got = agent.watch_once()
+        return got
+
+    assert trip() is True
+    clock.sleep(agent.cfg.cooldown_seconds + 1)
+    assert trip() is True
+    clock.sleep(agent.cfg.cooldown_seconds + 1)
+    assert trip() is True
+    assert agent.budget.snapshot()[1] is True, "the cap is not full, setup is wrong"
+
+    clock.sleep(agent.cfg.escape_window_seconds + 1)
+    assert trip() is False, "escaped a server placed %ds ago" % \
+        agent.cfg.escape_window_seconds
+    assert agent.switches["degradation"] == 3, agent.switches
+
+    clock.sleep(agent.cfg.cooldown_seconds)          # cooldown gone, only the cap left
+    assert trip() is False, "escaped a capped pod with no young placement"
+    assert agent.switches["degradation"] == 3, agent.switches
+    assert metric(agent, "vpn_agent_switch_escapes_used") == 0
+    assert all(e[2] == "switch" for e in agent.budget.history), agent.budget.history
+    print("ok  escape scope: refuses placements older than the window, capped "
+          "pods stay capped")
+
+
+@with_tmp
+def test_an_escape_fires_for_a_capped_short_cooldown_placement(tmp):
+    """The hatch is not only for placements on the full cooldown. A boot pick
+    (short retry cooldown) on a pod whose cap is already full would otherwise
+    sit measured-bad until entries age out - up to a day - so the escape covers
+    it too. The uncapped twin of this case is
+    test_a_boot_upgrade_does_not_lock_out_the_degradation_watch: there the
+    front door opens after 300 s and the hatch must stay shut."""
+    agent, fake, clock = build(tmp, server="Aspidiske")
+    agent.probe = scripted_probe(0.0)         # a clean boot pick
+    agent.boot_check()
+    assert agent.switches["boot_upgrade"] == 1, agent.switches
+    agent.candidates = lambda exclude=None: (
+        ag.candidate_names(RANKING["servers"], agent.cfg.band, exclude), "fixture"
+    )
+    agent.budget.record(agent.cfg.failed_cooldown_seconds)
+    agent.budget.record(agent.cfg.failed_cooldown_seconds)   # cap full, no escapes
+
+    agent.probe = scripted_probe(8.0, verify=0.0)
+    got = False
+    for _ in range(agent.cfg.bad_windows):
+        got = agent.watch_once()
+    assert got is True, "a capped pod held a young bad boot pick past the hatch"
+    assert agent.switches["degradation"] == 1, agent.switches
+    assert agent.budget.history[-1][2] == "escape", agent.budget.history[-1]
+    assert metric(agent, "vpn_agent_switch_escapes_used") == 1
+    print("ok  escape scope: a capped short-cooldown placement escapes too")
+
+
+@with_tmp
+def test_budget_adopts_the_old_two_field_file(tmp):
+    """#1031. The escape marker added a third field to the budget file; the
+    file on an emptyDir was written by the previous process with two. Adoption
+    must normalize, not fail safe to an empty history - that would let a
+    restart walk straight through the cooldown the file exists to enforce."""
+    path = os.path.join(tmp, "switches.json")
+    clock = FakeClock()
+    when = clock() - 100
+    with open(path, "w") as fh:
+        json.dump([[when, 21600]], fh)
+
+    budget = ag.SwitchBudget(21600, 3, clock=clock, path=path)
+    assert budget.history == [[when, 21600.0, "switch"]], budget.history
+    allowed, why = budget.allowed()
+    assert allowed is False and "cooldown" in why, \
+        "the two-field file did not survive adoption: %s" % why
+
+    budget.record(300)
+    with open(path) as fh:
+        on_disk = json.load(fh)
+    assert on_disk == [[when, 21600.0, "switch"], [clock(), 300.0, "switch"]], on_disk
+
+    with open(path, "w") as fh:
+        json.dump([[when, 21600, "escape"]], fh)
+    escaped = ag.SwitchBudget(21600, 3, clock=clock, path=path)
+    assert escaped.history == [[when, 21600.0, "escape"]], escaped.history
+    allowed, why, is_escape = escaped.allowed_or_escape(7200)
+    assert allowed is False and is_escape is False and "already spent" in why, \
+        "an escape marker on disk did not survive a restart: %s" % why
+    print("ok  budget file: two-field entries load as plain switches, the escape "
+          "marker survives a restart")
 
 
 @with_tmp
@@ -1169,7 +1330,7 @@ def test_a_boot_upgrade_does_not_lock_out_the_degradation_watch(tmp):
 
     assert fake.connects() == ["Dalim"], fake.connects()
     assert agent.switches["boot_upgrade"] == 1, agent.switches
-    armed_at, armed = agent.budget.history[-1]
+    armed_at, armed = agent.budget.history[-1][:2]
     assert armed == agent.cfg.failed_cooldown_seconds, (
         "a boot_upgrade armed a %ds cooldown. It is an unverified PLACEMENT - "
         "nothing was measured about the server it left, and the ranking that "
@@ -1600,8 +1761,9 @@ def test_a_blocked_verdict_writer_cannot_delay_switching(tmp):
     verdict_dir = os.path.join(tmp, "hard-nfs", "verdicts")
     agent, fake, clock = build(
         tmp, server="Aspidiske", verdict_dir=verdict_dir,
-        verdict_producer_id="cluster-default", verdict_ttl_seconds=21600)
-    agent.probe = scripted_probe(9.0)
+        verdict_producer_id="cluster-default", verdict_ttl_seconds=21600,
+        escape_window_seconds=0)   # the suppression phases below trip seconds
+    agent.probe = scripted_probe(9.0)   # after a switch; #1031 has its own tests
     for _ in range(agent.cfg.bad_windows - 1):
         assert agent.watch_once() is False
 
@@ -2305,7 +2467,8 @@ def test_switch_budget_is_exported_at_scrape_time(tmp):
                                silent=("QuickPick",))
     for name in ("vpn_agent_switch_budget_used",
                  "vpn_agent_switch_budget_exhausted",
-                 "vpn_agent_switch_cooldown_seconds_left"):
+                 "vpn_agent_switch_cooldown_seconds_left",
+                 "vpn_agent_switch_escapes_used"):
         assert metric(agent, name) == 0, (
             "%s reads %s on a fresh budget with no switch behind it. The cap the "
             "agent ENFORCES is len(SwitchBudget.history) >= max_per_day, and "
@@ -2378,6 +2541,8 @@ def test_switch_budget_is_exported_at_scrape_time(tmp):
     allowed, why = agent.budget.allowed()
     assert allowed is True, "the daily cap never rolls off: %s" % why
     assert agent.budget.history == [], "allowed() is the path that prunes"
+    assert metric(agent, "vpn_agent_switch_escapes_used") == 0, \
+        "no switch in this test went past the budget, yet the escape gauge moved"
     print("ok  #783: the budget is exported at scrape time - a no-tunnel switch "
           "counts, the cooldown counts down, exhausted tracks allowed()")
 
@@ -2704,6 +2869,10 @@ if __name__ == "__main__":
     test_throughput_metrics_are_measurements()
     test_dead_tunnel_is_the_liveness_probes_job()
     test_cooldown_and_daily_cap()
+    test_an_escape_switch_passes_cap_and_cooldown()
+    test_an_escape_needs_a_recent_placement()
+    test_an_escape_fires_for_a_capped_short_cooldown_placement()
+    test_budget_adopts_the_old_two_field_file()
     test_failed_connect_walks_the_pool()
     test_every_candidate_fails_ends_on_quick()
     test_recovery_never_spends_the_quick_reserve()
