@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Brings the guest to versions.env and env/tools/package.json. Run as root.
-# A stamp of the last applied pins makes the daily run a no-op
+# A stamp of the last applied pins makes polling a no-op
 # unless Renovate changed a pin. Restarts t3code.service when t3 changed.
 set -euo pipefail
 
@@ -49,14 +49,15 @@ T3_VERSIONS_FILE="$DIR/versions.env" bash "$DIR/env/tools/install-cluster-tools.
 apt-get update -q >/dev/null
 DEBIAN_FRONTEND=noninteractive xargs -a "$DIR/env/tools/os-packages.txt" apt-get install -y -q kubectl >/dev/null
 
+if [[ $prev_t3 != "$T3_VERSION" ]] && id "$T3_USER" >/dev/null 2>&1; then
+  sudo -u "$T3_USER" -H env XDG_RUNTIME_DIR="/run/user/$(id -u "$T3_USER")" \
+    t3 service update
+  echo "t3 ${prev_t3:-none} -> $T3_VERSION, service updated"
+fi
+
+# A failed service update must be retried rather than stamped as applied.
 install -d -m 0755 /var/lib/t3code
 pins >"$tmp/stamp"
 install -m 0644 "$tmp/stamp" "$STAMP"
-
-if [[ $prev_t3 != "$T3_VERSION" ]] && id "$T3_USER" >/dev/null 2>&1; then
-  sudo -u "$T3_USER" -H env XDG_RUNTIME_DIR="/run/user/$(id -u "$T3_USER")" \
-    systemctl --user try-restart t3code.service
-  echo "t3 ${prev_t3:-none} -> $T3_VERSION, service restarted"
-fi
 
 echo "t3code at: t3=$T3_VERSION claude=$CLAUDE_CODE_VERSION opencode=$OPENCODE_VERSION codex=$CODEX_VERSION helm=$HELM_VERSION kustomize=$KUSTOMIZE_VERSION argocd=$ARGOCD_VERSION sops=$SOPS_VERSION"
