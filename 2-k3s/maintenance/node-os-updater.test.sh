@@ -12,7 +12,7 @@ cat >"$stub/kubectl" <<'STUB'
 echo "kubectl $*" >>"$CALLS"
 case "${SCENARIO}:${1} ${2}" in
   "drainfail:drain k3s-test") exit 1 ;;
-  "waittimeout:wait --for=condition=Ready") [ "${READY_BACK:-0}" = "1" ] && exit 0 || exit 1 ;;
+  "waittimeout:wait --for=condition=Ready") exit 1 ;;
   "retry:uncordon k3s-test")
     if [ -z "${UNCORDON_ONCE:-}" ]; then UNCORDON_ONCE=1; exit 1; fi
     exit 0 ;;

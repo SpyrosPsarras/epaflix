@@ -177,7 +177,7 @@ spec:
                     if [ "${rc}" = "0" ]; then
                       echo "  [${node}] ✅ Reboot complete — node is Ready."
                     else
-                      echo "  [${node}] ❌ Reboot path failed - node left schedulable so it rejoins the fleet."
+                      echo "  [${node}] ❌ Reboot path failed - uncordon still applied."
                     fi
                     return "${rc}"
                   }
