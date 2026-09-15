@@ -73,6 +73,7 @@ def unquote(s):
 
 def store_values(path):
     values = {}
+    parent = None
     current_key = None
     block_lines = None
 
@@ -82,6 +83,10 @@ def store_values(path):
                 content = raw.strip()
                 if len(content) >= MIN_LEN:
                     values.setdefault(current_key, []).append(content)
+
+    def add_value(key, value):
+        if len(value) >= MIN_LEN:
+            values.setdefault(key, []).append(value)
 
     with open(path) as f:
         for line in f:
@@ -97,21 +102,29 @@ def store_values(path):
             stripped = body.strip()
             if not stripped or stripped.startswith("#") or stripped == "---":
                 continue
-            if body[:1] in (" ", "\t") or stripped.startswith("- "):
+            indented = body[:1] in (" ", "\t")
+            key, sep, rest = stripped.partition(":")
+            if not sep or stripped.startswith("- "):
                 continue
-            key, sep, rest = body.partition(":")
-            if not sep:
-                continue
+            key = key.strip()
             rest = rest.strip()
+            if indented:
+                if parent:
+                    if rest in ("|", "|-", "|+", ">", ">-", ">+"):
+                        current_key = f"{parent}.{key}"
+                        block_lines = []
+                    elif rest:
+                        add_value(f"{parent}.{key}", unquote(rest))
+                continue
             if rest in ("|", "|-", "|+", ">", ">-", ">+"):
-                current_key = key.strip()
+                current_key = key
                 block_lines = []
+                parent = None
             elif rest == "":
-                pass
+                parent = key
             else:
-                value = unquote(rest)
-                if len(value) >= MIN_LEN:
-                    values.setdefault(key.strip(), []).append(value)
+                add_value(key, unquote(rest))
+                parent = None
     flush_block()
     return values
 
