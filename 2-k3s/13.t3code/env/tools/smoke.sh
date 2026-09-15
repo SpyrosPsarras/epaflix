@@ -40,7 +40,7 @@ kubectl version --client >/dev/null
 az version >/dev/null
 gh --version >/dev/null
 pin() { node -p "require('/tools/package.json').dependencies['$1']"; }
-ver() { timeout 60 "$1" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1; }
+ver() { timeout 60 "$1" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?' | head -1; }
 for p in t3:t3 @anthropic-ai/claude-code:claude @openai/codex:codex opencode-ai:opencode; do
   want=$(pin "${p%%:*}"); got=$(ver "/tools/node_modules/.bin/${p##*:}")
   [[ $got == "$want" ]] || fail "${p##*:} reports $got; expected $want"
@@ -97,8 +97,8 @@ console.log("smoke: project bootstrap and provider settings verified");' "$T3COD
 kill -TERM "$sup"
 timeout 30 tail --pid="$sup" -f /dev/null || fail 'supervisor did not stop in 30s'
 set +e; wait "$sup"; rc=$?; set -e
-# T3's CLI handles TERM and exits 130; the former shell supervisor exited 143.
-[[ $rc == 130 ]] || fail "TERM exit was $rc, expected 130"
+# JS and native T3 launchers report TERM as 130 and 143 respectively.
+[[ $rc == 130 || $rc == 143 ]] || fail "TERM exit was $rc, expected 130 or 143"
 for port in 3773 4096; do
   node -e 'const s=require("node:net").connect(+process.argv[1],"127.0.0.1");s.on("connect",()=>process.exit(1));s.on("error",()=>process.exit(0));s.setTimeout(1000,()=>process.exit(1));' "$port" || fail "port $port still open"
 done
