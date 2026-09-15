@@ -44,7 +44,7 @@ metadata:
   labels:
     app: authentik-blueprint-check
 spec:
-  schedule: "10,40 15 15 9 *" # 1100: one success run inside the sabotage window (15:10+15:40 UTC 2026-09-15); restore commit follows
+  schedule: "35 5 * * *"
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 300
   successfulJobsHistoryLimit: 3
