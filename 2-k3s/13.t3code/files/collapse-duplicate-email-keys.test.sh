@@ -253,24 +253,48 @@ assert_output_has "nothing to do: no alert_email_" "store without email keys is 
 
 init_repo
 write_store <<EOF
-key:
-  nested: value
+epaflix_bot:
+  proxmox_token: epaflix-bot-pve-token-value
+  pbs_token: epaflix-bot-pbs-token-value
+  # PENDING owner action - a comment inside the subtree
+alert_email_hostname: $SECRET_HOST
+auth_email_hostname: $SECRET_HOST
+sops:
+    age:
+        - recipient: age1fakefakefakefakefakefake
+EOF
+if run_script --apply >"$output" 2>&1; then
+  pass "nested subtree applies cleanly"
+else
+  fail "nested subtree applies cleanly"
+fi
+assert_output_has "ROUND_TRIP_OK" "nested subtree round-trip verified"
+grep -q "^epaflix_bot:$" "$tmp/repo/store.enc.yaml" &&
+  pass "nested map header preserved" ||
+  fail "nested map header preserved"
+grep -q "^  pbs_token: epaflix-bot-pbs-token-value$" "$tmp/repo/store.enc.yaml" &&
+  pass "nested child preserved verbatim" ||
+  fail "nested child preserved verbatim"
+grep -q "^  # PENDING owner action - a comment inside the subtree$" "$tmp/repo/store.enc.yaml" &&
+  pass "comment inside the subtree preserved" ||
+  fail "comment inside the subtree preserved"
+assert_line_count "$tmp/repo/store.enc.yaml" "mail_relay_hostname:" 1 \
+  "collapse still happens with a nested map present"
+
+init_repo
+write_store <<'EOF'
+key: value
+  stray: indent
 sops:
     age:
         - recipient: age1fakefakefakefakefakefake
 EOF
 if run_script >"$output" 2>&1; then
-  fail "non-flat store is refused"
+  fail "indented line after a plain scalar is refused"
 else
-  pass "non-flat store is refused"
+  pass "indented line after a plain scalar is refused"
 fi
-assert_output_has "not a flat key: value entry" "non-flat store names the layout problem"
-
-if run_script --apply >"$output" 2>&1; then
-  fail "non-flat store is refused in apply mode"
-else
-  pass "non-flat store is refused in apply mode"
-fi
+assert_output_has "unexpected indentation after" "refusal names the layout problem"
 
 init_repo
 write_store <<'EOF'

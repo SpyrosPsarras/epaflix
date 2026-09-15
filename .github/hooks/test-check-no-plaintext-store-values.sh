@@ -36,6 +36,9 @@ ssh_deploy_key: |-
   -----BEGIN OPENSSH PRIVATE KEY-----
   b3BlbnNzaC1rZXktdjEAAAAABGxvY2FsaG9zdHJ1bg
   -----END OPENSSH PRIVATE KEY-----
+epaflix_bot:
+  proxmox_token: epaflix-bot-pve-token-value
+  # PENDING owner action - a comment inside the subtree
 EOF
 
 mkdir -p "$tmp/bin"
@@ -165,6 +168,13 @@ KEY
 EOF
 expect_fail "block-scalar store values are scanned line-by-line"
 grep -q "ssh_deploy_key" "$output" && pass "block-scalar finding names the store key" || fail "block-scalar finding names the store key"
+reset_staged
+
+stage_content bot-notes.txt <<EOF
+The bot uses epaflix-bot-pve-token-value against the PVE API.
+EOF
+expect_fail "values nested under a store map are scanned"
+grep -q "epaflix_bot.proxmox_token" "$output" && pass "nested finding names the dotted key" || fail "nested finding names the dotted key"
 reset_staged
 
 stage_content published.md <<EOF

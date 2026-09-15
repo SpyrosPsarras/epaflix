@@ -10,8 +10,10 @@
 # 12-char sha256 prefixes, the same identification #977 used. Needs the age
 # key (copy 1 in .github/hooks/print-age-key-backup.sh: workstation
 # ~/.config/sops/age/k3s-cluster.txt). Idempotent: on an already-collapsed
-# store it is a no-op. python3 stdlib only; the store is treated as the flat
-# key: value map it is, and anything else aborts instead of guessing.
+# store it is a no-op. python3 stdlib only; top-level entries are the flat
+# key: value scalars the email keys live in, comments pass through verbatim,
+# and nested subtrees ride along as opaque byte-preserved blocks — the
+# round-trip check refuses to write if any of that comes back different.
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
@@ -44,8 +46,6 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
 sops -d "$STORE" > "$work/plain.yaml"
-recipient="$(grep -m1 -o 'recipient: age1[a-z0-9]*' "$STORE" | awk '{print $2}')"
-[ -n "$recipient" ] || { echo "ERROR: no age recipient found in $STORE." >&2; exit 1; }
 
 build_status=0
 python3 - "$work/plain.yaml" "$work/new.yaml" "$work/plan.json" <<'PYEOF' || build_status=$?
@@ -77,19 +77,16 @@ def parse_flat(path):
     for lineno, line in enumerate(text.splitlines(keepends=True), 1):
         body = line.rstrip("\n")
         if current is not None:
-            if body == "":
-                if current.get("block"):
+            if body == "" or body[:1] in (" ", "\t"):
+                if current.get("block") or current.get("subtree"):
                     current["lines"].append(line)
                     continue
-                current = None
-                items.append({"kind": "raw", "lines": [line]})
-                continue
-            if body[:1] in (" ", "\t"):
-                if current.get("block"):
-                    current["lines"].append(line)
+                if body == "":
+                    current = None
+                    items.append({"kind": "raw", "lines": [line]})
                     continue
-                raise Abort(f'line {lineno}: nested mapping under '
-                            f'"{current["key"]}" is not a flat key: value entry')
+                raise Abort(f'line {lineno}: unexpected indentation after '
+                            f'"{current["key"]}"')
             current = None
         stripped = body.strip()
         if not stripped or stripped.startswith("#") or stripped == "---":
@@ -108,7 +105,8 @@ def parse_flat(path):
             current = {"kind": "entry", "key": key, "lines": [line],
                        "scalar": None, "block": True}
         elif rest == "":
-            current = {"kind": "entry", "key": key, "lines": [line], "scalar": None}
+            current = {"kind": "entry", "key": key, "lines": [line],
+                       "scalar": None, "subtree": True}
         else:
             current = {"kind": "entry", "key": key, "lines": [line],
                        "scalar": unquote(rest)}
@@ -242,7 +240,7 @@ if [ "$MODE" = dry-run ]; then
   exit 0
 fi
 
-sops --encrypt --age "$recipient" "$work/new.yaml" > "$work/new.enc.yaml"
+sops --encrypt --filename-override "$STORE" "$work/new.yaml" > "$work/new.enc.yaml"
 sops -d "$work/new.enc.yaml" > "$work/rt.yaml"
 
 python3 - "$work/plain.yaml" "$work/rt.yaml" "$work/plan.json" <<'PYEOF' || exit 1
@@ -268,19 +266,16 @@ def parse_flat(path):
     for lineno, line in enumerate(text.splitlines(keepends=True), 1):
         body = line.rstrip("\n")
         if current is not None:
-            if body == "":
-                if current.get("block"):
+            if body == "" or body[:1] in (" ", "\t"):
+                if current.get("block") or current.get("subtree"):
                     current["lines"].append(line)
                     continue
-                current = None
-                items.append({"kind": "raw", "lines": [line]})
-                continue
-            if body[:1] in (" ", "\t"):
-                if current.get("block"):
-                    current["lines"].append(line)
+                if body == "":
+                    current = None
+                    items.append({"kind": "raw", "lines": [line]})
                     continue
-                raise Abort(f'line {lineno}: nested mapping under '
-                            f'"{current["key"]}" is not a flat key: value entry')
+                raise Abort(f'line {lineno}: unexpected indentation after '
+                            f'"{current["key"]}"')
             current = None
         stripped = body.strip()
         if not stripped or stripped.startswith("#") or stripped == "---":
@@ -299,7 +294,8 @@ def parse_flat(path):
             current = {"kind": "entry", "key": key, "lines": [line],
                        "scalar": None, "block": True}
         elif rest == "":
-            current = {"kind": "entry", "key": key, "lines": [line], "scalar": None}
+            current = {"kind": "entry", "key": key, "lines": [line],
+                       "scalar": None, "subtree": True}
         else:
             current = {"kind": "entry", "key": key, "lines": [line],
                        "scalar": unquote(rest)}
