@@ -1,0 +1,122 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prowlarr-appsync-drift-sql
+  namespace: servarr
+data:
+  check.sql: |
+    -- Prowlarr app-sync convergence check (#1032). Pure SQL against Prowlarr's
+    -- own Postgres schema (v2.5.2.5491).
+    --
+    -- Invariant: for every enabled application (SyncLevel <> 0) and every
+    -- enabled indexer it would handle (app untagged, or app and indexer tags
+    -- intersect; this mirrors ShouldHandleIndexer in ApplicationService.cs),
+    -- an ApplicationIndexerMapping row must exist. A missing row means
+    -- app-sync will attempt AddIndexer for that pair on every sync cycle;
+    -- when the app-side test fails (e.g. the limetorrents latest page parses
+    -- categoryless), the pair 400-retries forever and never converges.
+    --
+    -- Known false positives: an indexer added less than one sync interval
+    -- (~15 min) before the run, and an enabled indexer whose settings fail
+    -- validation (app-sync skips those; the SQL cannot re-run that check).
+    \set ON_ERROR_STOP on
+    DO $$
+    DECLARE
+      r   RECORD;
+      cnt int := 0;
+    BEGIN
+      FOR r IN
+        SELECT a."Name" AS app_name, i."Name" AS idx_name
+        FROM "Applications" a
+        CROSS JOIN "Indexers" i
+        WHERE a."SyncLevel" <> 0
+          AND i."Enable" = true
+          AND (
+            COALESCE(NULLIF(a."Tags", ''), '[]')::jsonb = '[]'::jsonb
+            OR EXISTS (
+              SELECT 1
+              FROM jsonb_array_elements_text(COALESCE(NULLIF(a."Tags", ''), '[]')::jsonb) app_tag
+              JOIN jsonb_array_elements_text(COALESCE(NULLIF(i."Tags", ''), '[]')::jsonb) idx_tag
+                ON idx_tag.value = app_tag.value
+            )
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM "ApplicationIndexerMapping" m
+            WHERE m."AppId" = a."Id" AND m."IndexerId" = i."Id"
+          )
+        ORDER BY 1, 2
+      LOOP
+        RAISE WARNING 'unmapped: app=% indexer=%', r.app_name, r.idx_name;
+        cnt := cnt + 1;
+      END LOOP;
+
+      IF cnt > 0 THEN
+        RAISE EXCEPTION 'app-sync not converged: % enabled tag-matched indexer(s) unmapped', cnt;
+      END IF;
+      RAISE NOTICE 'OK: app-sync converged (no enabled tag-matched indexer is unmapped)';
+    END
+    $$;
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: prowlarr-appsync-drift
+  namespace: servarr
+  labels:
+    app: prowlarr-appsync-drift
+spec:
+  schedule: "37 4 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 6
+  failedJobsHistoryLimit: 6
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 300
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 604800  # keep 7 days
+      template:
+        metadata:
+          labels:
+            app: prowlarr-appsync-drift
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: check
+              image: postgres:16-alpine
+              imagePullPolicy: IfNotPresent
+              command: ["/bin/sh", "-eu", "-c"]
+              args:
+                - |
+                  echo "=== Prowlarr app-sync drift check @ $(date -u +%FT%TZ) ==="
+                  PGHOST=$(cat /secrets/prowlarr-host)
+                  PGPORT=$(cat /secrets/prowlarr-port)
+                  PGDATABASE=$(cat /secrets/prowlarr-database)
+                  PGUSER=$(cat /secrets/prowlarr-user)
+                  PGPASSWORD=$(cat /secrets/prowlarr-password)
+                  export PGHOST PGPORT PGDATABASE PGUSER PGPASSWORD
+                  psql -v ON_ERROR_STOP=1 -f /sql/check.sql
+              volumeMounts:
+                - name: secrets
+                  mountPath: /secrets
+                  readOnly: true
+                - name: sql
+                  mountPath: /sql
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "500m"
+                  memory: "256Mi"
+          volumes:
+            - name: secrets
+              secret:
+                secretName: servarr-postgres
+                defaultMode: 0400
+            - name: sql
+              configMap:
+                name: prowlarr-appsync-drift-sql
+                defaultMode: 0444
