@@ -5,7 +5,7 @@
     "db_password": "<AUTHENTIK_DB_PASSWORD>"
     "email":
       "from": "noreply@epaflix.com"
-      "host": "mail.epaflix.com"
+      "host": "<SMTP_HOST>"
       "password": "<POSTGRES_PASSWORD>"
       "port": 587
       "security": "tls"
