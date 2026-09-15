@@ -1,4 +1,16 @@
 ---
+# LogQL log-content alerts, as distinct from the metric PrometheusRules in
+# custom-alerts.yaml. Two echo channels make any literal pattern here match
+# text about itself rather than the fault it looks for: the ruler logs every
+# query it runs including the query text (#910), and the cliproxy transcripts
+# sidecar ships agent conversations to Loki as ordinary remote-pi pod logs
+# (#1057), so a pattern mentioned in a chat counts as a match. Rules:
+# keep selectors namespace-scoped where possible; where they cannot be, use
+# {namespace=~".+", namespace!="remote-pi"} (a lone negative matcher is
+# rejected by Loki) and guard against the ruler echo with a line filter.
+# The usual filter is != `query=`, but only where it cannot create a false
+# negative: CredentialInLogs stays unguarded because a request URI can
+# legitimately contain query=. Same class as #751.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -35,7 +47,7 @@ data:
           - alert: PodPanicOrFatal
             expr: |
               sum by (namespace) (
-                count_over_time({namespace=~".+"} |~ `(?i)(panic:|fatal error|out of memory|segfault|runtime error)` != `query=` [5m])
+                count_over_time({namespace=~".+", namespace!="remote-pi"} |~ `(?i)(panic:|fatal error|out of memory|segfault|runtime error)` != `query=` [5m])
               ) > 5
             for: 5m
             labels:
@@ -120,7 +132,7 @@ data:
           - alert: CredentialInLogs
             expr: |
               sum by (namespace, container) (
-                count_over_time({namespace=~".+"} |~ `(?i)(apikey|api_key|api-key|x-api-key|passwd|password|client_secret)=[A-Za-z0-9._~+/-]{8,}` [5m])
+                count_over_time({namespace=~".+", namespace!="remote-pi"} |~ `(?i)(apikey|api_key|api-key|x-api-key|passwd|password|client_secret)=[A-Za-z0-9._~+/-]{8,}` [5m])
               ) > 0
             for: 0m
             labels:
@@ -131,7 +143,10 @@ data:
               description: >-
                 {{ $value }} log line(s) in the last 5m contain what looks like a
                 credential in a URL or key=value form, from
-                {{ $labels.namespace }}/{{ $labels.container }}. Steady state is
+                {{ $labels.namespace }}/{{ $labels.container }}. remote-pi is
+                excluded from this selector: agent transcripts routinely quote
+                credential-shaped text without any credential reaching a system
+                log. Steady state is
                 zero (#702, #561), so this is a regression - BUT since #749/#750
                 promtail redacts credential-shaped values before Loki, this can
                 no longer be the sonarr/radarr/prowlarr Postgres-password shape
