@@ -1,0 +1,249 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ntfy-canary-check-script
+  namespace: observability
+data:
+  check.py: |
+    #!/usr/bin/env python3
+    """Hourly canary publish through the real PVE notification target (#1108).
+
+    When the PVE notification target fails, the only trace used to be a
+    `could not notify via target` line in a vzdump task log nobody reads.
+    That is how #1076 ran twelve days of silently failed backups: the ntfy
+    target 400'd on every real failure and nothing surfaced the 400.
+    #1105 fixed the trigger (NTFY_MESSAGE_SIZE_LIMIT 4096 -> 32k on the ntfy
+    Deployment), but nothing notices if that env var disappears and the
+    4096 default comes back, or if ntfy stops accepting publishes for any
+    other reason. pve_exporter exposes no notification metrics, so there is
+    nothing to alert on from the exporter side.
+
+    Mechanism choice (#1108): a periodic canary publish, not log watching.
+    Watching for `could not notify via target` would need PVE task logs
+    shipped into Loki first, a whole new pipeline; the canary exercises the
+    exact path PVE uses and fails closed in minutes.
+
+    What it publishes: one POST to the same URL as target ntfy-pve
+    (1-proxmox/pbs/notifications.cfg), with the same Title/Tags/Priority
+    header set, plain-text body like PVE sends. Two properties are checked:
+
+      - reachability: the publish must return 200 with a message id;
+      - the live size limit: the body is 20k by default, above ntfy's 4096
+        default limit and below the 32k configured one. If the env var
+        regresses, the canary 400s exactly like a real oversized
+        notification would (#1076/#1105 class).
+
+    Priority is 1 (min) instead of PVE's 4 so the canary never buzzes the
+    phone; the header path is exercised either way.
+
+    A failed Job trips NtfyCanaryPublishFailing (custom-alerts.yaml). That
+    alert routes back through Alertmanager -> ntfy, so if you receive it on
+    the phone, delivery has already recovered and the Job log names the
+    failed window. If the phone is silent while the deadman (Watchdog ->
+    hc-ping) keeps beating, check Alertmanager directly: that is the leg
+    this canary cannot cover - AlertmanagerWebhookDeliveryFailing does,
+    via alertmanager_notifications_failed_total.
+
+    Run with --selftest to exercise the sizing and diagnosis logic offline.
+
+    Exit 0 = canary delivered, 1 = target rejected or failed the canary,
+    2 = could not run (DNS/socket). Exit 1 and 2 are both findings: this
+    job has exactly one job to do, and an unverified publish must never
+    look like a clean one (#725).
+    """
+    import json
+    import os
+    import socket
+    import sys
+    import time
+    import urllib.error
+    import urllib.request
+
+    NTFY_URL = os.environ.get("NTFY_URL", "https://ntfy.epaflix.com/pve-backups")
+    BODY_BYTES = int(os.environ.get("NTFY_BODY_BYTES", "20000"))
+    TIMEOUT = int(os.environ.get("NTFY_TIMEOUT", "15"))
+
+    # The two limits the body size must sit between: ntfy's compiled-in
+    # default (what a reverted Deployment env var leaves behind) and the
+    # 32k set on the ntfy Deployment since #1105.
+    DEFAULT_LIMIT = 4096
+    LIVE_LIMIT = 32 * 1024
+
+    CANARY_TITLE = "ntfy canary (PVE target check #1108)"
+    CANARY_TAGS = "white_check_mark"
+    CANARY_PRIORITY = "1"  # min: silent on the phone, unlike PVE's 4
+
+
+    def build_body(target_bytes):
+        """Exactly target_bytes of plain text, like a rendered PVE message."""
+        line = "ntfy canary #1108: PVE target publish-path check.\n"
+        repeats = max(1, target_bytes // len(line))
+        body = (line * repeats).encode()
+        return body + b"x" * (target_bytes - len(body))
+
+
+    def headers():
+        return {
+            "Title": CANARY_TITLE,
+            "Tags": CANARY_TAGS,
+            "Priority": CANARY_PRIORITY,
+        }
+
+
+    def publish(url, body, timeout):
+        """(status, payload) for one publish; payload is parsed JSON or text.
+
+        No Content-Type: PVE's webhook target sets none, and ntfy treats the
+        bare body as the raw message.
+        """
+        req = urllib.request.Request(url, data=body, headers=headers(),
+                                     method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return resp.status, _payload(resp.read())
+        except urllib.error.HTTPError as err:
+            return err.code, _payload(err.read())
+
+
+    def _payload(raw):
+        try:
+            return json.loads(raw.decode("utf-8", "replace"))
+        except (ValueError, UnicodeDecodeError):
+            return raw.decode("utf-8", "replace")
+
+
+    def diagnose(status, payload):
+        """One line saying what the target actually did."""
+        if isinstance(payload, dict):
+            if status == 200 and payload.get("id"):
+                return "HTTP 200, message id %s on topic %s" % (
+                    payload["id"], payload.get("topic", "?"))
+            return "HTTP %s ntfy code %s: %s" % (
+                status, payload.get("code", "?"), payload.get("error", "?"))
+        return "HTTP %s, unparsed body: %r" % (status, payload[:200])
+
+
+    def selftest():
+        body = build_body(BODY_BYTES)
+        assert len(body) == BODY_BYTES, len(body)
+        assert b"\n" in body
+
+        # The default body must trip a revert to ntfy's 4096 default limit
+        # and still fit the live 32k one - that is the #1076/#1105 class.
+        assert DEFAULT_LIMIT < BODY_BYTES < LIVE_LIMIT, BODY_BYTES
+
+        # Sizes at the boundaries build without blowing up.
+        assert len(build_body(DEFAULT_LIMIT + 1)) == DEFAULT_LIMIT + 1
+        assert len(build_body(LIVE_LIMIT - 1)) == LIVE_LIMIT - 1
+
+        hdrs = headers()
+        assert set(hdrs) == {"Title", "Tags", "Priority"}, hdrs
+
+        assert "40014" in diagnose(400, {"code": 40014, "http": 400,
+                                         "error": "message too large"})
+        assert "HTTP 200" in diagnose(200, {"id": "abc", "topic": "pve"})
+        assert "HTTP 502" in diagnose(502, "<html>bad gateway</html>")
+
+        print("selftest OK")
+        return 0
+
+
+    def main():
+        if "--selftest" in sys.argv:
+            return selftest()
+
+        body = build_body(BODY_BYTES)
+        print("=== ntfy canary check @ %s ==="
+              % time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+        print("POST %s (%d bytes, Title/Tags/Priority headers)"
+              % (NTFY_URL, len(body)))
+
+        started = time.monotonic()
+        try:
+            status, payload = publish(NTFY_URL, body, TIMEOUT)
+        except (urllib.error.URLError, socket.timeout, OSError) as err:
+            print("ERROR: could not reach the target at all: %r" % err,
+                  file=sys.stderr)
+            print("FAIL: the publish path is down (exit 2). ntfy, its "
+                  "ingress or DNS is broken - real PVE backup notifications "
+                  "are not being delivered either (#1108).", file=sys.stderr)
+            return 2
+
+        detail = diagnose(status, payload)
+        print("%s in %.2fs" % (detail, time.monotonic() - started))
+
+        if status == 200 and isinstance(payload, dict) and payload.get("id"):
+            print("\nOK: the real PVE target path accepted a publish and "
+                  "the 32k size limit is live.")
+            return 0
+
+        print("\nFAIL: the target rejected the canary (exit 1). A real PVE "
+              "notification would fail the same way right now - this is "
+              "the #1076 signature. If the body size is the cause "
+              "(ntfy code 40014, which presents as 'attachments not "
+              "allowed' when attachments are disabled - ntfy treats an "
+              "over-limit raw body as an attachment attempt, verified live "
+              "2026-09-15), NTFY_MESSAGE_SIZE_LIMIT=32k has regressed "
+              "on the ntfy Deployment: `kubectl set env deployment/ntfy "
+              "-n observability NTFY_MESSAGE_SIZE_LIMIT=32k` then "
+              "`kubectl rollout restart deployment/ntfy -n observability`.",
+              file=sys.stderr)
+        return 1
+
+
+    if __name__ == "__main__":
+        sys.exit(main())
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ntfy-canary-check
+  namespace: observability
+  labels:
+    app: ntfy-canary-check
+spec:
+  schedule: "12 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 6
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 120
+      ttlSecondsAfterFinished: 3600
+      template:
+        metadata:
+          labels:
+            app: ntfy-canary-check
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: ntfy-canary-check
+              image: python:3.13-alpine
+              imagePullPolicy: IfNotPresent
+              command: ["python3", "/script/check.py"]
+              env:
+                - name: NTFY_URL
+                  value: "https://ntfy.epaflix.com/pve-backups"
+                - name: NTFY_BODY_BYTES
+                  value: "20000"
+                - name: NTFY_TIMEOUT
+                  value: "15"
+              volumeMounts:
+                - name: script
+                  mountPath: /script
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "250m"
+                  memory: "128Mi"
+          volumes:
+            - name: script
+              configMap:
+                name: ntfy-canary-check-script
+                defaultMode: 0555

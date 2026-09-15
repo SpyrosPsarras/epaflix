@@ -96,6 +96,14 @@
       "automerge": false
     },
     {
+      "description": "Lingarr build SDK: majors must never be bumped by Renovate (#1372). The dotnet/sdk tag in images/lingarr/Dockerfile has to satisfy upstream Lingarr's own global.json, cloned in-container at UPSTREAM_COMMIT (currently 10.0.0, rollForward latestMinor) - an SDK 11 image fails dotnet restore with exit 155, as PR #1372's build run showed. Our repo holds no global.json, so the dotnet-sdk manager cannot own this either. Minors stay enabled and valid: rollForward latestMinor accepts any 10.x. Lift this rule only in the same change that moves UPSTREAM_COMMIT to a .NET 11 source, and pick the matching SDK tag by reading upstream's global.json at the new commit.",
+      "matchManagers": ["docker"],
+      "matchPackageNames": ["mcr.microsoft.com/dotnet/sdk"],
+      "matchFileNames": ["images/lingarr/Dockerfile"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
+    },
+    {
       "description": "Self-hosted Renovate image: every update adopted by hand via the images: override in 2-k3s/12.renovate/kustomization.yaml (was: minor+patch suppressed, majors opened a PR). The v44 major got as far as its branch but the PR never opened; every in-window run re-attempted PR creation and hung until activeDeadlineSeconds killed it, 16 consecutive failures across 4 nights from 2026-07-29, while out-of-window runs stayed fast because the schedule skips this update entirely (#595, mechanism inferred from the last log line, not confirmed: release-notes fetch against renovatebot/renovate's multi-thousand-release history). Branch renovate/ghcr.io-renovatebot-renovate-44.x deleted at ddfe5d9, recoverable from that sha. To adopt: bump newTag by hand, confirm the next in-window run completes, and in the same PR either keep this rule or restore major-opens-a-PR.",
       "matchManagers": ["kustomize"],
       "matchPackageNames": ["ghcr.io/renovatebot/renovate"],

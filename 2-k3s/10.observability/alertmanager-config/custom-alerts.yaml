@@ -387,6 +387,68 @@ spec:
             summary: "qBittorrent torrent(s) stuck in missingFiles/error (or the check failed)"
             description: "The hourly qbt-stuck-torrent-check Job ({{ $labels.job_name }}) failed — either at least one torrent has been in qBittorrent `state` missingFiles or error for at least GRACE_MINUTES (15m), confirmed via two live snapshots taken GRACE_MINUTES apart (a torrent that recovers before the second snapshot, e.g. a recheck completing, is never reported), or the qBittorrent login/torrent-list fetch itself failed. This is the #610/#839 signature — a torrent can sit broken indefinitely with no *arr rule covering it (#482: `error` matches no Cleanuparr rule). Read the Job log for the affected hash prefix(es), state, category, size and age (never a torrent name), then inspect by hash in the qBittorrent WebUI. REPORT ONLY — this job never deletes, pauses or rechecks a torrent (`max_ratio_act=0` exists so private torrents are never auto-removed); any action is a human decision (#839)."
 
+    - name: alertmanager
+      interval: 60s
+      rules:
+        - alert: AlertmanagerWebhookDeliveryFailing
+          expr: increase(alertmanager_notifications_failed_total{integration="webhook"}[30m]) > 0
+          for: 0m
+          labels:
+            severity: critical
+            component: observability
+          annotations:
+            summary: "Alertmanager failed to deliver to a webhook receiver ({{ $labels.pod }})"
+            description: >-
+              alertmanager_notifications_failed_total rose on {{ $labels.pod }} in the last 30m:
+              Alertmanager attempted a webhook delivery and it FAILED. This fires only on
+              attempted-and-failed delivery, so it never confuses "no alerts fired" with "no
+              delivery" (#1108). The k8s-alertmanager leg to cover is the `ntfy` receiver
+              (posts in-cluster to http://ntfy.observability.svc.cluster.local:8091), but
+              Alertmanager does not label notification metrics per receiver, so the `deadman`
+              webhook (Watchdog -> hc-ping) counts here too — check the Alertmanager logs to
+              tell them apart. If ntfy delivery is what broke, you are likely NOT seeing this
+              on the phone: read it in the Alertmanager UI or Grafana, and expect
+              NtfyCanaryPublishFailing to be failing for the same window. Start with
+              `kubectl logs -n observability -l app.kubernetes.io/name=alertmanager --tail=100`
+              and `kubectl get pods -n observability -l app=ntfy`. Self-clears 30m after the
+              last failed attempt.
+
+    - name: ntfy-canary
+      interval: 60s
+      rules:
+        - alert: NtfyCanaryPublishFailing
+          expr: |
+            max by (job_name) (
+              kube_job_failed{namespace="observability", job_name=~"ntfy-canary-check.*"} > 0
+              and on (job_name) (
+                max by (job_name) (kube_job_status_start_time{namespace="observability", job_name=~"ntfy-canary-check.*"})
+                  >= scalar(max(kube_job_status_start_time{namespace="observability", job_name=~"ntfy-canary-check.*"}))
+              )
+            )
+          for: 5m
+          labels:
+            severity: critical
+            component: observability
+          annotations:
+            summary: "ntfy canary publish failed — the real PVE notification target is broken (or the check could not run)"
+            description: >-
+              The hourly ntfy-canary-check Job ({{ $labels.job_name }}) failed — the canary
+              POST through the exact PVE target path (https://ntfy.epaflix.com/pve-backups,
+              Title/Tags/Priority headers, see 1-proxmox/pbs/notifications.cfg target ntfy-pve)
+              did not return 200 with a message id, or could not connect at all. A real PVE
+              notification would fail the same way right now: this is the #1076 signature
+              (twelve days of failed backups surfaced only as `could not notify via target`
+              in a vzdump task log). ntfy code 40014 in the Job log means
+              NTFY_MESSAGE_SIZE_LIMIT=32k regressed to the 4096 default on the ntfy
+              Deployment (#1105) — `kubectl set env deployment/ntfy -n observability
+              NTFY_MESSAGE_SIZE_LIMIT=32k` then `kubectl rollout restart deployment/ntfy
+              -n observability`. Any other status or an exit 2: check `kubectl get pods -n
+              observability -l app=ntfy` and the Traefik ingressroute for ntfy.epaflix.com.
+              Exit 1 and exit 2 are both findings (#1108) — a canary that cannot verify must
+              never count as a clean run (#725). One failed run right after a deploy may be
+              transient; the alert needs the latest run to stay failed for 5m, and it clears
+              by itself once the next hourly run succeeds.
+
     - name: traefik
       interval: 60s
       rules:
@@ -471,14 +533,15 @@ spec:
             description: "vpn_picker_candidates_passing_gate has been 0 for an hour on {{ $labels.pod }} - every scored AirVPN server failed the gate, so the agent has no ranked candidate to move to and a switch would land on `quick`. Check the vpn-picker logs and whether the AirVPN API is answering (Grafana → Explore → Loki: {namespace=\"servarr\", container=\"vpn-picker\"}) (#555, #498)."
 
         - alert: VpnAgentFallbackServer
-          expr: vpn_agent_switches_total{namespace="servarr", reason="fallback"} > 0
+          expr: |
+            increase(vpn_agent_switches_total{namespace="servarr", reason="fallback"}[24h]) > 0
           for: 5m
           labels:
             severity: warning
             component: servarr
           annotations:
             summary: "vpn-picker agent fell back to `quick`, the ranked pool failed"
-            description: "{{ $labels.pod }} has recorded {{ $value }} fallback switch(es) - every ranked candidate failed to come up, so the agent connected via `airconnect quick` and is on an unmeasured server. Each switch also drops every peer and re-announces to private trackers, and the agent is capped at VPN_AGENT_MAX_SWITCHES_PER_DAY (3), so once the cap is hit it will not try again today. Check the agent logs for `ended on quick` / `passed no traffic` (Grafana → Explore → Loki: {namespace=\"servarr\", container=\"agent\"}) (#555, #505)."
+            description: "{{ $labels.pod }} has recorded {{ $value }} fallback switch(es) in the last 24 h - every ranked candidate failed to come up, so the agent connected via `airconnect quick` and is on an unmeasured server. Each switch also drops every peer and re-announces to private trackers, and the agent is capped at VPN_AGENT_MAX_SWITCHES_PER_DAY (3), so once the cap is hit it will not try again today. Check the agent logs for `ended on quick` / `passed no traffic` (Grafana → Explore → Loki: {namespace=\"servarr\", container=\"agent\"}) (#555, #505). Scoped to a 24 h window in #1031: the old expr was the lifetime counter and stayed red for 12 days after a later ranked switch had long left `quick`; a pod restart also clears it, which matches the pod-lifetime counter underneath."
 
         - alert: VpnAgentSwitchingRepeatedly
           expr: |
@@ -491,7 +554,7 @@ spec:
             component: servarr
           annotations:
             summary: "vpn-picker agent is switching server repeatedly, at or near its daily cap"
-            description: "{{ $labels.pod }} has made {{ $value }} degradation switches in the last 24 h. The agent is capped at VPN_AGENT_MAX_SWITCHES_PER_DAY (3) counting every reason, and a boot upgrade usually spends one of those, so this pod is at the cap or one switch from it - once the cap is reached it stops trying until the window rolls, and a genuinely bad server is then kept. Every switch also drops every peer and re-announces to private trackers (#498). Look at whether one server keeps being picked and keeps degrading, or whether the probe is misreading: vpn_agent_current_server, vpn_agent_current_loss_pct and the `bad window` / `degradation trip` lines (Grafana → Explore → Loki: {namespace=\"servarr\", container=\"agent\"}). The exact enforced count is not exported yet (#783) (#736, #555, #505, #771)."
+            description: "{{ $labels.pod }} has made {{ $value }} degradation switches in the last 24 h. The agent is capped at VPN_AGENT_MAX_SWITCHES_PER_DAY (3) counting every reason, and a boot upgrade usually spends one of those, so this pod is at the cap or one switch from it - once the cap is reached it stops trying until the window rolls, and a genuinely bad server is then kept. Every switch also drops every peer and re-announces to private trackers (#498). Look at whether one server keeps being picked and keeps degrading, or whether the probe is misreading: vpn_agent_current_server, vpn_agent_current_loss_pct and the `bad window` / `degradation trip` lines (Grafana → Explore → Loki: {namespace=\"servarr\", container=\"agent\"}). The enforced count is vpn_agent_switch_budget_used; since #1031 a server that trips within VPN_AGENT_ESCAPE_WINDOW_SECONDS (7200 s) of being placed is escaped once per 24 h past the cooldown and the cap - those show up here too and in vpn_agent_switch_escapes_used (#736, #555, #505, #771)."
 
         - alert: VpnAgentDryRunStuck
           expr: vpn_agent_dry_run{namespace="servarr"} == 1
@@ -590,6 +653,8 @@ spec:
             unless on (namespace, job_name)
             max by (namespace, job_name) (
               kube_job_owner{namespace="servarr", owner_kind="CronJob", owner_name=~"cleanuparr-blocklist-drift|neutarr-config-drift|orphan-census|prowlarr-indexer-health|prowlarr-appsync-drift|cleanuparr-queuecleaner-health|blind-queue-check|qbt-stuck-torrent-check"}
+              or
+              kube_job_owner{namespace="observability", owner_kind="CronJob", owner_name="ntfy-canary-check"}
             )
           for: 15m
           labels:
@@ -605,6 +670,30 @@ spec:
               log for the report before touching anything. This alert clears by
               itself once a later scheduled run succeeds; deleting the failed Job
               object is not required and is not a fix.
+
+    - name: argocd
+      interval: 60s
+      rules:
+        - alert: ArgoCDAppOutOfSync
+          expr: argocd_app_info{sync_status="OutOfSync"} == 1
+          for: 30m
+          labels:
+            severity: warning
+            component: gitops
+          annotations:
+            summary: "ArgoCD application {{ $labels.name }} has been OutOfSync for 30m"
+            description: >-
+              Application {{ $labels.name }} has disagreed with git for 30m.
+              For manual-sync Applications (argocd, system-upgrade-controller)
+              every merged change to their git path is INERT until a human
+              triggers the sync: kubectl --context epaflix -n argocd patch
+              application {{ $labels.name }} --type merge -p
+              '{"operation":{"initiatedBy":{"username":"<you>-manual"},"sync":{"revision":"main","syncStrategy":{"apply":{}}}}}'.
+              This is how the argocd Application sat OutOfSync since
+              2026-06-24 while nine chart bumps and the #715/#1039 values
+              never went live (#1050). For automated apps, selfHeal is not
+              converging - read the app status conditions (ComparisonError)
+              before acting.
 
     - name: truenas-gpu
       interval: 60s

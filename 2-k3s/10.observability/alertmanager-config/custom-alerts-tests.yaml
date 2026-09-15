@@ -401,3 +401,160 @@ tests:
       - eval_time: 20m
         alertname: K3sNodeCordoned
         exp_alerts: []
+
+  # VpnAgentFallbackServer #1031: the old expr was the lifetime counter
+  # (vpn_agent_switches_total{reason="fallback"} > 0) and stayed red for 12 days
+  # after a later ranked switch had long left `quick`. The windowed expr fires
+  # on a fallback inside the last 24 h and goes silent once it ages out.
+  - interval: 1m
+    input_series:
+      - series: 'vpn_agent_switches_total{namespace="servarr",pod="qbittorrent-abc",reason="fallback"}'
+        values: "0+0x10 1+0x20"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: VpnAgentFallbackServer
+        exp_alerts:
+          - exp_labels:
+              namespace: servarr
+              pod: qbittorrent-abc
+              reason: fallback
+              severity: warning
+              component: servarr
+            exp_annotations:
+              summary: "vpn-picker agent fell back to `quick`, the ranked pool failed"
+              description: "qbittorrent-abc has recorded 1 fallback switch(es) in the last 24 h - every ranked candidate failed to come up, so the agent connected via `airconnect quick` and is on an unmeasured server. Each switch also drops every peer and re-announces to private trackers, and the agent is capped at VPN_AGENT_MAX_SWITCHES_PER_DAY (3), so once the cap is hit it will not try again today. Check the agent logs for `ended on quick` / `passed no traffic` (Grafana → Explore → Loki: {namespace=\"servarr\", container=\"agent\"}) (#555, #505). Scoped to a 24 h window in #1031: the old expr was the lifetime counter and stayed red for 12 days after a later ranked switch had long left `quick`; a pod restart also clears it, which matches the pod-lifetime counter underneath."
+
+  - interval: 1m
+    input_series:
+      # One fallback 26 h ago, nothing since: the lifetime latch would still be
+      # firing here. The 24 h window must not.
+      - series: 'vpn_agent_switches_total{namespace="servarr",pod="qbittorrent-abc",reason="fallback"}'
+        values: "1x1560"
+    alert_rule_test:
+      - eval_time: 1560m
+        alertname: VpnAgentFallbackServer
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'argocd_app_info{name="argocd",namespace="argocd",project="default",repo="https://github.com/SpyrosPsarras/epaflix.git",sync_status="OutOfSync",health_status="Healthy",autosync_enabled="false"}'
+        values: "1x40"
+      - series: 'argocd_app_info{name="servarr",namespace="argocd",project="default",repo="https://github.com/SpyrosPsarras/epaflix.git",sync_status="Synced",health_status="Healthy",autosync_enabled="true"}'
+        values: "1x40"
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: ArgoCDAppOutOfSync
+        exp_alerts:
+          - exp_labels:
+              name: argocd
+              namespace: argocd
+              project: default
+              repo: https://github.com/SpyrosPsarras/epaflix.git
+              sync_status: OutOfSync
+              health_status: Healthy
+              autosync_enabled: "false"
+              severity: warning
+              component: gitops
+            exp_annotations:
+              summary: "ArgoCD application argocd has been OutOfSync for 30m"
+              description: "Application argocd has disagreed with git for 30m. For manual-sync Applications (argocd, system-upgrade-controller) every merged change to their git path is INERT until a human triggers the sync: kubectl --context epaflix -n argocd patch application argocd --type merge -p '{\"operation\":{\"initiatedBy\":{\"username\":\"<you>-manual\"},\"sync\":{\"revision\":\"main\",\"syncStrategy\":{\"apply\":{}}}}}'. This is how the argocd Application sat OutOfSync since 2026-06-24 while nine chart bumps and the #715/#1039 values never went live (#1050). For automated apps, selfHeal is not converging - read the app status conditions (ComparisonError) before acting."
+
+  - interval: 1m
+    input_series:
+      - series: 'argocd_app_info{name="argocd",namespace="argocd",project="default",repo="https://github.com/SpyrosPsarras/epaflix.git",sync_status="OutOfSync",health_status="Healthy",autosync_enabled="false"}'
+        values: "1 0 1x45"  # OutOfSync at t=0, one Synced sample at t=1, OutOfSync from t=2 - the blip resets the 30m timer
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: ArgoCDAppOutOfSync
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: ArgoCDAppOutOfSync
+        exp_alerts:
+          - exp_labels:
+              name: argocd
+              namespace: argocd
+              project: default
+              repo: https://github.com/SpyrosPsarras/epaflix.git
+              sync_status: OutOfSync
+              health_status: Healthy
+              autosync_enabled: "false"
+              severity: warning
+              component: gitops
+            exp_annotations:
+              summary: "ArgoCD application argocd has been OutOfSync for 30m"
+              description: "Application argocd has disagreed with git for 30m. For manual-sync Applications (argocd, system-upgrade-controller) every merged change to their git path is INERT until a human triggers the sync: kubectl --context epaflix -n argocd patch application argocd --type merge -p '{\"operation\":{\"initiatedBy\":{\"username\":\"<you>-manual\"},\"sync\":{\"revision\":\"main\",\"syncStrategy\":{\"apply\":{}}}}}'. This is how the argocd Application sat OutOfSync since 2026-06-24 while nine chart bumps and the #715/#1039 values never went live (#1050). For automated apps, selfHeal is not converging - read the app status conditions (ComparisonError) before acting."
+
+  - interval: 1m
+    input_series:
+      - series: 'alertmanager_notifications_failed_total{integration="webhook",pod="alertmanager-0"}'
+        values: "0+1x30"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: AlertmanagerWebhookDeliveryFailing
+        exp_alerts:
+          - exp_labels:
+              integration: webhook
+              pod: alertmanager-0
+              severity: critical
+              component: observability
+            exp_annotations:
+              description: 'alertmanager_notifications_failed_total rose on alertmanager-0 in the last 30m: Alertmanager attempted a webhook delivery and it FAILED. This fires only on attempted-and-failed delivery, so it never confuses "no alerts fired" with "no delivery" (#1108). The k8s-alertmanager leg to cover is the `ntfy` receiver (posts in-cluster to http://ntfy.observability.svc.cluster.local:8091), but Alertmanager does not label notification metrics per receiver, so the `deadman` webhook (Watchdog -> hc-ping) counts here too — check the Alertmanager logs to tell them apart. If ntfy delivery is what broke, you are likely NOT seeing this on the phone: read it in the Alertmanager UI or Grafana, and expect NtfyCanaryPublishFailing to be failing for the same window. Start with `kubectl logs -n observability -l app.kubernetes.io/name=alertmanager --tail=100` and `kubectl get pods -n observability -l app=ntfy`. Self-clears 30m after the last failed attempt.'
+              summary: Alertmanager failed to deliver to a webhook receiver (alertmanager-0)
+
+  - interval: 1m
+    input_series:
+      - series: 'alertmanager_notifications_failed_total{integration="webhook",pod="alertmanager-0"}'
+        values: "0x30"
+      - series: 'alertmanager_notifications_total{integration="webhook",pod="alertmanager-0"}'
+        values: "0+1x30"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: AlertmanagerWebhookDeliveryFailing
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'alertmanager_notifications_total{integration="webhook",pod="alertmanager-0"}'
+        values: "0+1x30"
+    alert_rule_test:
+      # Delivery attempts all succeeded and the failed counter was never
+      # touched - the failed series is absent entirely. "No alerts" must
+      # not look like "no delivery" (#1108).
+      - eval_time: 30m
+        alertname: AlertmanagerWebhookDeliveryFailing
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'kube_job_status_start_time{namespace="observability",job_name="ntfy-canary-check-1900"}'
+        values: "1750000000x30"
+      - series: 'kube_job_failed{namespace="observability",job_name="ntfy-canary-check-1900"}'
+        values: "1x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: NtfyCanaryPublishFailing
+        exp_alerts:
+          - exp_labels:
+              job_name: ntfy-canary-check-1900
+              severity: critical
+              component: observability
+            exp_annotations:
+              description: 'The hourly ntfy-canary-check Job (ntfy-canary-check-1900) failed — the canary POST through the exact PVE target path (https://ntfy.epaflix.com/pve-backups, Title/Tags/Priority headers, see 1-proxmox/pbs/notifications.cfg target ntfy-pve) did not return 200 with a message id, or could not connect at all. A real PVE notification would fail the same way right now: this is the #1076 signature (twelve days of failed backups surfaced only as `could not notify via target` in a vzdump task log). ntfy code 40014 in the Job log means NTFY_MESSAGE_SIZE_LIMIT=32k regressed to the 4096 default on the ntfy Deployment (#1105) — `kubectl set env deployment/ntfy -n observability NTFY_MESSAGE_SIZE_LIMIT=32k` then `kubectl rollout restart deployment/ntfy -n observability`. Any other status or an exit 2: check `kubectl get pods -n observability -l app=ntfy` and the Traefik ingressroute for ntfy.epaflix.com. Exit 1 and exit 2 are both findings (#1108) — a canary that cannot verify must never count as a clean run (#725). One failed run right after a deploy may be transient; the alert needs the latest run to stay failed for 5m, and it clears by itself once the next hourly run succeeds.'
+              summary: ntfy canary publish failed — the real PVE notification target is broken (or the check could not run)
+
+  - interval: 1m
+    input_series:
+      - series: 'kube_job_status_start_time{namespace="observability",job_name="ntfy-canary-check-1900"}'
+        values: "1750000000x30"
+      - series: 'kube_job_failed{namespace="observability",job_name="ntfy-canary-check-1900"}'
+        values: "1x30"
+      - series: 'kube_job_status_start_time{namespace="observability",job_name="ntfy-canary-check-1912"}'
+        values: "1750000720x30"
+      - series: 'kube_job_failed{namespace="observability",job_name="ntfy-canary-check-1912"}'
+        values: "0x30"
+    alert_rule_test:
+      # The 1912 run succeeded, so the lingering 1900 failure is history,
+      # not the current state - the alert only covers the LATEST run.
+      - eval_time: 20m
+        alertname: NtfyCanaryPublishFailing
+        exp_alerts: []

@@ -21,6 +21,7 @@ resources:
   - sonarr-alias-search-cronjob.yaml
   - helm-manager-drift-cronjob.yaml
   - jellysweep-order-executor-cronjob.yaml
+  - ntfy-canary-check-cronjob.yaml
 
 configMapGenerator:
   - name: cleanuparr-blocklist-expected
