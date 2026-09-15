@@ -78,6 +78,7 @@ spec:
 
                   exec python3 /script/check_authentik_blueprint.py \
                     --path 'secret/app-authentik/authentik-iac-blueprint' \
+                    --validate-url 'http://authentik-server.app-authentik.svc.cluster.local/api/v3/managed/blueprints/validate/' \
                     < /work/secret.json
               volumeMounts:
                 - name: script
