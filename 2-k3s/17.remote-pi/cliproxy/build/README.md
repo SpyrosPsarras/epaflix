@@ -26,6 +26,9 @@ and code-level reproduction were verified independently.
 
 ## Rebuild
 
+For the current model-limit build, also apply the steps in `model-limits.md`
+before testing and building the binary below.
+
 Requires Git, Go 1.26, a C compiler, tar, and `crane`. Run from a fresh temporary directory.
 CGO must be enabled for the dynamic plugin loader. Check the binary's required
 GLIBC versions against the base image before publication. The verified build

@@ -51,36 +51,36 @@ diff --git a/internal/config/config_types.go b/internal/config/config_types.go
  	// Name is the actual model name used by the external provider.
  	Name string `yaml:"name" json:"name"`
  
-diff --git a/internal/registry/model_definitions.go b/internal/registry/model_definitions.go
---- a/internal/registry/model_definitions.go
-+++ b/internal/registry/model_definitions.go
-@@ -34,7 +34,21 @@
- 
- // GetClaudeModels returns the standard Claude model definitions.
- func GetClaudeModels() []*ModelInfo {
--	return cloneModelInfos(getModels().Claude)
-+	models := cloneModelInfos(getModels().Claude)
-+	// Temporary corrections to the remote catalog, verified against Anthropic's
-+	// Models API and archived model docs on 2026-09-14. Apply after cloning so
-+	// periodic catalog refreshes cannot restore the incorrect limits.
-+	for _, model := range models {
-+		switch model.ID {
-+		case "claude-sonnet-4-6":
-+			model.ContextLength, model.MaxCompletionTokens = 1000000, 128000
-+		case "claude-3-7-sonnet-20250219":
-+			model.ContextLength, model.MaxCompletionTokens = 200000, 64000
-+		case "claude-3-5-haiku-20241022":
-+			model.ContextLength, model.MaxCompletionTokens = 200000, 8192
-+		}
-+	}
-+	return models
- }
- 
- // GetGeminiModels returns the standard Gemini model definitions.
 diff --git a/sdk/cliproxy/service_models.go b/sdk/cliproxy/service_models.go
 --- a/sdk/cliproxy/service_models.go
 +++ b/sdk/cliproxy/service_models.go
-@@ -727,6 +727,9 @@
+@@ -113,6 +113,7 @@
+ 				excluded = entry.ExcludedModels
+ 			}
+ 		}
++		models = s.applyUpstreamLimits(ctx, a, models, nil)
+ 		models = applyExcludedModels(models, excluded)
+ 	case "codex":
+ 		if authKind == "apikey" {
+@@ -199,7 +200,7 @@
+ 					return false
+ 				}
+ 				isCompatAuth = true
+-				ms := buildOpenAICompatibilityConfigModels(compat)
++				ms := s.applyUpstreamLimits(ctx, a, buildOpenAICompatibilityConfigModels(compat), compat)
+ 				if providerKey == "" {
+ 					providerKey = "openai-compatibility"
+ 				}
+@@ -224,7 +225,7 @@
+ 				if providerKey == "" {
+ 					providerKey = "openai-compatibility"
+ 				}
+-				ms := cached.models
++				ms := s.applyUpstreamLimits(ctx, a, cached.models, cached.compat)
+ 				if len(ms) > 0 {
+ 					ms = s.appendPluginModels(providerKey, ms)
+ 					s.registerResolvedModelsForAuth(a, providerKey, applyModelPrefixes(ms, a.Prefix, s.cfg.ForceModelPrefix))
+@@ -727,6 +728,9 @@
  		if info == nil {
  			continue
  		}
@@ -90,3 +90,60 @@ diff --git a/sdk/cliproxy/service_models.go b/sdk/cliproxy/service_models.go
  		thinkingSupport := model.Thinking
  		if thinkingSupport == nil && !model.Image {
  			thinkingSupport = &registry.ThinkingSupport{Levels: []string{"low", "medium", "high"}}
+diff --git a/internal/registry/model_updater.go b/internal/registry/model_updater.go
+--- a/internal/registry/model_updater.go
++++ b/internal/registry/model_updater.go
+@@ -103,6 +103,8 @@
+ // catalog, and notifies the registered callback if any provider changed.
+ func tryPeriodicRefresh(ctx context.Context) {
+ 	tryRefreshModels(ctx, "periodic model refresh")
++	// Provider APIs can change even when the shared static catalog does not.
++	notifyModelRefresh([]string{"upstream-limits"})
+ }
+ 
+ // tryStartupRefresh fetches models from remote in the background during
+diff --git a/sdk/cliproxy/service.go b/sdk/cliproxy/service.go
+--- a/sdk/cliproxy/service.go
++++ b/sdk/cliproxy/service.go
+@@ -32,6 +32,9 @@
+ 	// cfgMu protects concurrent access to the configuration.
+ 	cfgMu sync.RWMutex
+ 
++	// Per-account last successful upstream limits and retry timestamps.
++	upstreamLimits sync.Map
++
+ 	// configUpdateMu serializes config updates across watcher + home.
+ 	configUpdateMu sync.Mutex
+ 
+diff --git a/sdk/cliproxy/service_executors.go b/sdk/cliproxy/service_executors.go
+--- a/sdk/cliproxy/service_executors.go
++++ b/sdk/cliproxy/service_executors.go
+@@ -26,6 +26,7 @@
+ type openAICompatibilityRegistrationEntry struct {
+ 	providerKey string
+ 	models      []*ModelInfo
++	compat      *config.OpenAICompatibility
+ }
+ 
+ func (s *Service) newOpenAICompatibilityRegistrationCache() *openAICompatibilityRegistrationCache {
+@@ -55,6 +56,7 @@
+ 			providerName = "openai-compatibility"
+ 		}
+ 		entry := &openAICompatibilityRegistrationEntry{
++			compat:      compat,
+ 			providerKey: util.OpenAICompatibleProviderKey(providerName),
+ 			models:      buildOpenAICompatibilityConfigModels(compat),
+ 		}
+diff --git a/sdk/cliproxy/service_plugins.go b/sdk/cliproxy/service_plugins.go
+--- a/sdk/cliproxy/service_plugins.go
++++ b/sdk/cliproxy/service_plugins.go
+@@ -332,7 +332,8 @@
+ 				continue
+ 			}
+ 			provider := strings.ToLower(strings.TrimSpace(auth.Provider))
+-			if !providerSet[provider] {
++			refreshLimits := providerSet["upstream-limits"] && (provider == "claude" || strings.HasPrefix(provider, "openai-compatible-") || provider == "openrouter")
++			if !providerSet[provider] && !refreshLimits {
+ 				continue
+ 			}
+ 			authForRefresh := auth

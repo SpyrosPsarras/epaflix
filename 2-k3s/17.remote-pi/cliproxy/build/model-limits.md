@@ -1,64 +1,68 @@
-# Model limit correction, 2026-09-14
+# Dynamic model limits
 
-Apply `model-limits.patch` after the existing Claude and auth-selection patches
-in `README.md`, before building. Keep CGO enabled and the same base image.
-The resulting image is pinned in `../../kustomization.yaml`.
+Claude limits come from authenticated `https://api.anthropic.com/v1/models`.
+OpenRouter limits come from `https://openrouter.ai/api/v1/models`, including
+`top_provider.max_completion_tokens` and any smaller top-provider context.
+The implementation uses each provider's existing credential and HTTP transport.
+It follows Anthropic pagination and matches configured OpenRouter aliases to
+upstream IDs before applying limits.
 
-The published binary SHA-256 is
-`b460eca2ec9ed224ae2630d0e60659c94cd4721b32cbe20216c6be341feaf9a3`.
+The existing three-hour catalog refresh also triggers these fetches when the
+static catalog is unchanged or unavailable. Successful results are cached per
+account for two hours. Failed attempts retain the last successful in-memory
+result and permit another attempt after five minutes, on the next registration
+or periodic refresh. Restarting discards this cache. Missing upstream models
+and first-fetch failures use CLIProxyAPI's existing metadata. `--local-model`
+disables the periodic updater. Explicit configuration overrides take precedence.
 
-## Findings
+The user chose to trust live catalog values even when documentation conflicts,
+including Sonnet 4.5. There are no model-specific limit corrections in this
+patch. Retired models absent from live catalogs retain upstream fallback data.
 
-The authenticated Codex catalog at
-`https://chatgpt.com/backend-api/codex/models?client_version=0.154.0`
-returned default 272000 and maximum 872000 for Astra, Luna, Terra, Sol and
-auto-review. GPT-5.5 returned 272000 for both. The deployed proxy missed
-templates for `codex/`-prefixed IDs. The patch restores template lookup and
-preserves the scoped routing slug. OpenCode now selects `max_context_window`.
-Remote template updates remain enabled, so these values can change upstream.
+Codex continues to use CLIProxyAPI's separately refreshed subscription model
+templates. The prefix fix lets `codex/` IDs find those templates. It does not
+query the authenticated Codex catalog per account and does not substitute public
+OpenAI API limits. OpenCode reads `max_context_window` before `context_window`.
+Codex output values remain template metadata, not independently verified limits.
 
-The public OpenAI API advertises 1050000 context and 128000 output for Astra
-and GPT-5.6. That context is not substituted for the subscription limit.
-The existing Codex output value of 128000 is retained. The authenticated
-catalog does not independently confirm output limits. Spark is absent from
-that catalog; its existing 128000/128000 values remain unverified.
+## Rebuild
 
-Anthropic's authenticated Models API confirms Sonnet 4.6 at 1000000/128000.
-Archived official documentation gives Sonnet 3.7 at 200000/64000 and Haiku 3.5
-at 200000/8192. The latter two are retired. Other listed Claude limits match
-published values. Sonnet 4.5 retains the plain endpoint's 200000/64000 because
-its 1M window requires the beta header. Fable 5.1 is 1000000/128000.
+Follow `README.md` through the Claude and auth-selection patches. Before its test
+and build steps, run:
 
-OpenRouter's model catalog reports context 1310720 for GLM 5.3 Flash and
-DeepSeek V4 Flash 0731, with top-provider output limits 131072 and 943718.
-Backend limits vary. MiniMax M3 Free is absent from the current catalog;
-its retained fallback limits are not verified capabilities.
+```sh
+git apply "$RECIPE_DIR/model-limits.patch"
+cp "$RECIPE_DIR/upstream_model_limits.go" sdk/cliproxy/
+cp "$RECIPE_DIR/upstream_model_limits_test.go" sdk/cliproxy/
+go test ./sdk/cliproxy/... ./internal/registry ./internal/client/codex/models ./internal/config ./internal/runtime/executor ./internal/runtime/executor/helps
+CGO_ENABLED=1 go build -trimpath -o CLIProxyAPI ./cmd/server
+```
 
-## Validation
+Publish with a new tag and pin the returned digest in `kustomization.yaml`.
+The recipe preserves the existing Claude and auth-selection changes.
 
-The registry, config, service, Codex catalog, auth, Claude executor and helper
-Go test packages passed. The CGO server build passed. Separate Fable 5.1
-Standards and Spec reviews passed before image publication.
+Published binary SHA-256:
+`1cb90bfdcf34ad42981803a80a3996842cc8a1fee898aa8786eb397746b2e421`.
+Image tag `dynamic-limits-20260915`, digest
+`sha256:14b34253b9eab832b4acaec612ed8b3397af10d97878b76d78fe8272b1631dec`.
 
-Argo CD reverted the initial live image change to the Git-pinned version.
-This PR must be merged before rollout and final live verification can complete.
-After deployment, verify `/v1/models?client_version=99.0.0` and
-`opencode models cliproxy --verbose` on t3code. Restart existing OpenCode
-processes to load the changed plugin.
+## Verification and deployment
 
-After the new image is running, update the existing OpenRouter model entries
-through the management API, preserving all other provider settings. Set
-`max-completion-tokens: 131072` on `z-ai/glm-5.3-flash` and
-`max-completion-tokens: 943718` on `deepseek/deepseek-v4-flash-0731`.
-The old image silently discards this field. The first attempt was discarded
-after Argo CD reverted the image, so these values are still pending.
+Focused tests cover pagination, response fields, invalid catalog rejection,
+alias matching, shared-object preservation, and configuration overrides.
+SDK, registry, Codex model, config, and executor package checks passed on rerun.
+An existing auth publisher timing test failed on the first run. CGO build passed.
+Independent Fable Standards and Spec source reviews passed.
+
+Deployment and live validation are pending PR merge. Argo CD self-heals manual
+image changes back to Git. After rollout, inspect `upstream model limits` logs,
+`/v1/models?client_version=99.0.0`, and `opencode models cliproxy --verbose`.
+Restart existing OpenCode processes to reload the discovery plugin.
+Manual OpenRouter output settings from the earlier revision are no longer needed.
 
 ## Sources
 
-- https://developers.openai.com/api/docs/models/gpt-6-astra
-- https://developers.openai.com/api/docs/models/gpt-5.5
-- https://developers.openai.com/api/docs/models/gpt-5.6-sol
-- https://platform.claude.com/docs/en/about-claude/models/overview
 - https://platform.claude.com/docs/en/api/models/list
-- https://web.archive.org/web/20250820094837/https://docs.anthropic.com/en/docs/about-claude/models/overview
+- https://platform.claude.com/docs/en/build-with-claude/context-windows
 - https://openrouter.ai/api/v1/models
+- CLIProxyAPI's `internal/registry/codex_client_models_updater.go`
