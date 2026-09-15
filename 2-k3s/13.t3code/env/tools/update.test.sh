@@ -53,3 +53,13 @@ printf 'T3_VERSION=0.0.1\n' >"$tmp/stamp"
 out=$(run)
 grep -q 'already at pinned' <<<"$out" && fail "legacy stamp must trigger migration"
 echo 'ok: shared npm pins, no-op, npm/tool updates and legacy stamp migration'
+printf '#!/bin/sh\necho 1000\n' >"$tmp/bin/id"
+printf 'T3_VERSION=0.0.1\n' >"$tmp/stamp"
+printf '#!/bin/sh\nexit 42\n' >"$tmp/bin/sudo"
+if run >/dev/null; then fail 'failed service update must fail the updater'; fi
+grep -qx 'T3_VERSION=0.0.1' "$tmp/stamp" || fail 'failed service update must not advance stamp'
+printf '#!/bin/sh\necho "STUB sudo $*" >>"%s/calls"\n' "$tmp" >"$tmp/bin/sudo"
+run >/dev/null
+grep -q 't3 service update' "$tmp/calls" || fail 'must update versioned service launcher'
+grep -q '^T3_VERSION=9.9.9$' "$tmp/stamp" || fail 'successful retry must advance stamp'
+echo 'ok: native service update and retry after failure'

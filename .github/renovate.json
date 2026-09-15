@@ -50,7 +50,7 @@
       "platformAutomerge": true
     },
     {
-      "description": "Servarr image digests: Renovate owns these end-to-end (Image Updater retired — #192). The images: block in 2-k3s/08.servarr/kustomization.yaml is digest-pinned moving tags (:latest etc.); auto-merge digest bumps through the normal PR + validate gate. File+datasource+digest scoped so it cannot reach authentik (different file) or any minor/major/patch update.",
+      "description": "Servarr digest rebuilds auto-merge. Release tags make minor/major changes typed updates (#1129). Moving-tag exceptions and registry evidence are in docs/servarr-image-pins.md; later rules require review for development images.",
       "matchFileNames": ["2-k3s/08.servarr/kustomization.yaml"],
       "matchDatasources": ["docker"],
       "matchUpdateTypes": ["digest"],
@@ -59,11 +59,32 @@
       "platformAutomerge": true
     },
     {
-      "description": "Lingarr is the one entry in that images: block tracking an unreleased development branch (:main, for the upstream #432 DateTime->UTC fix — #270 retires it for a release tag once >1.2.4 ships). Everything else there tracks a released stream, so a digest roll is a rebuild; a lingarr digest roll is a raw upstream dev commit with no release notes. Open a PR and let a human read it. An unattended lingarr merge is precisely what silently reverted the pin to the pre-fix 1.2.4 build for seven weeks (#273/#530/#531). MUST stay after the servarr-digest rule above — later packageRules win.",
+      "description": "Servarr minor and major releases require review for migrations and breaking changes (#1129). Patch updates and same-tag digest rebuilds retain their earlier automerge rules.",
       "matchFileNames": ["2-k3s/08.servarr/kustomization.yaml"],
       "matchDatasources": ["docker"],
-      "matchPackageNames": ["ghcr.io/lingarr-translate/lingarr"],
-      "automerge": false
+      "matchUpdateTypes": ["minor", "major"],
+      "automerge": false,
+      "platformAutomerge": false
+    },
+    {
+      "description": "Hotio release tags have a release- prefix. Parse the numeric version so patch/minor/major updates remain discoverable (#1129).",
+      "matchFileNames": ["2-k3s/08.servarr/kustomization.yaml"],
+      "matchPackageNames": ["ghcr.io/hotio/unpackerr"],
+      "versioning": "regex:^release-(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)$"
+    },
+    {
+      "description": "qBittorrent's numeric suffix is an image rebuild, not a compatibility constraint. Track rebuilds as patches while keeping the separate lt2 variant excluded (#1129).",
+      "matchFileNames": ["2-k3s/08.servarr/kustomization.yaml"],
+      "matchPackageNames": ["qbittorrentofficial/qbittorrent-nox"],
+      "versioning": "regex:^(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-(?<build>\\d+)$"
+    },
+    {
+      "description": "Lingarr tracks :main for the upstream DateTime fix (#270). Streamystats' pinned build has no matching release tag (#1129). These moving tags can carry unreleased migrations, so every update needs review. Keep this after the digest and patch automerge rules.",
+      "matchFileNames": ["2-k3s/08.servarr/kustomization.yaml"],
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["ghcr.io/lingarr-translate/lingarr", "ghcr.io/fredrikburmester/streamystats-aio"],
+      "automerge": false,
+      "platformAutomerge": false
     },
     {
       "description": "Authentik MINOR/MAJOR: never auto-merge — release notes can carry DB migrations and breaking changes. PR opens, you review, you click merge.",
