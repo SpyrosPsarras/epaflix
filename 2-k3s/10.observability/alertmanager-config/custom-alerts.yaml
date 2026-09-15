@@ -607,6 +607,30 @@ spec:
               itself once a later scheduled run succeeds; deleting the failed Job
               object is not required and is not a fix.
 
+    - name: argocd
+      interval: 60s
+      rules:
+        - alert: ArgoCDAppOutOfSync
+          expr: argocd_app_info{sync_status="OutOfSync"} == 1
+          for: 30m
+          labels:
+            severity: warning
+            component: gitops
+          annotations:
+            summary: "ArgoCD application {{ $labels.name }} has been OutOfSync for 30m"
+            description: >-
+              Application {{ $labels.name }} has disagreed with git for 30m.
+              For manual-sync Applications (argocd, system-upgrade-controller)
+              every merged change to their git path is INERT until a human
+              triggers the sync: kubectl --context epaflix -n argocd patch
+              application {{ $labels.name }} --type merge -p
+              '{"operation":{"initiatedBy":{"username":"<you>-manual"},"sync":{"revision":"main","syncStrategy":{"apply":{}}}}}'.
+              This is how the argocd Application sat OutOfSync since
+              2026-06-24 while nine chart bumps and the #715/#1039 values
+              never went live (#1050). For automated apps, selfHeal is not
+              converging - read the app status conditions (ComparisonError)
+              before acting.
+
     - name: truenas-gpu
       interval: 60s
       rules:
