@@ -401,3 +401,36 @@ tests:
       - eval_time: 20m
         alertname: K3sNodeCordoned
         exp_alerts: []
+
+  # VpnAgentFallbackServer #1031: the old expr was the lifetime counter
+  # (vpn_agent_switches_total{reason="fallback"} > 0) and stayed red for 12 days
+  # after a later ranked switch had long left `quick`. The windowed expr fires
+  # on a fallback inside the last 24 h and goes silent once it ages out.
+  - interval: 1m
+    input_series:
+      - series: 'vpn_agent_switches_total{namespace="servarr",pod="qbittorrent-abc",reason="fallback"}'
+        values: "0+0x10 1+0x20"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: VpnAgentFallbackServer
+        exp_alerts:
+          - exp_labels:
+              namespace: servarr
+              pod: qbittorrent-abc
+              reason: fallback
+              severity: warning
+              component: servarr
+            exp_annotations:
+              summary: "vpn-picker agent fell back to `quick`, the ranked pool failed"
+              description: "qbittorrent-abc has recorded 1 fallback switch(es) in the last 24 h - every ranked candidate failed to come up, so the agent connected via `airconnect quick` and is on an unmeasured server. Each switch also drops every peer and re-announces to private trackers, and the agent is capped at VPN_AGENT_MAX_SWITCHES_PER_DAY (3), so once the cap is hit it will not try again today. Check the agent logs for `ended on quick` / `passed no traffic` (Grafana → Explore → Loki: {namespace=\"servarr\", container=\"agent\"}) (#555, #505). Scoped to a 24 h window in #1031: the old expr was the lifetime counter and stayed red for 12 days after a later ranked switch had long left `quick`; a pod restart also clears it, which matches the pod-lifetime counter underneath."
+
+  - interval: 1m
+    input_series:
+      # One fallback 26 h ago, nothing since: the lifetime latch would still be
+      # firing here. The 24 h window must not.
+      - series: 'vpn_agent_switches_total{namespace="servarr",pod="qbittorrent-abc",reason="fallback"}'
+        values: "1x1560"
+    alert_rule_test:
+      - eval_time: 1560m
+        alertname: VpnAgentFallbackServer
+        exp_alerts: []

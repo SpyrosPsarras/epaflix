@@ -471,14 +471,15 @@ spec:
             description: "vpn_picker_candidates_passing_gate has been 0 for an hour on {{ $labels.pod }} - every scored AirVPN server failed the gate, so the agent has no ranked candidate to move to and a switch would land on `quick`. Check the vpn-picker logs and whether the AirVPN API is answering (Grafana → Explore → Loki: {namespace=\"servarr\", container=\"vpn-picker\"}) (#555, #498)."
 
         - alert: VpnAgentFallbackServer
-          expr: vpn_agent_switches_total{namespace="servarr", reason="fallback"} > 0
+          expr: |
+            increase(vpn_agent_switches_total{namespace="servarr", reason="fallback"}[24h]) > 0
           for: 5m
           labels:
             severity: warning
             component: servarr
           annotations:
             summary: "vpn-picker agent fell back to `quick`, the ranked pool failed"
-            description: "{{ $labels.pod }} has recorded {{ $value }} fallback switch(es) - every ranked candidate failed to come up, so the agent connected via `airconnect quick` and is on an unmeasured server. Each switch also drops every peer and re-announces to private trackers, and the agent is capped at VPN_AGENT_MAX_SWITCHES_PER_DAY (3), so once the cap is hit it will not try again today. Check the agent logs for `ended on quick` / `passed no traffic` (Grafana → Explore → Loki: {namespace=\"servarr\", container=\"agent\"}) (#555, #505)."
+            description: "{{ $labels.pod }} has recorded {{ $value }} fallback switch(es) in the last 24 h - every ranked candidate failed to come up, so the agent connected via `airconnect quick` and is on an unmeasured server. Each switch also drops every peer and re-announces to private trackers, and the agent is capped at VPN_AGENT_MAX_SWITCHES_PER_DAY (3), so once the cap is hit it will not try again today. Check the agent logs for `ended on quick` / `passed no traffic` (Grafana → Explore → Loki: {namespace=\"servarr\", container=\"agent\"}) (#555, #505). Scoped to a 24 h window in #1031: the old expr was the lifetime counter and stayed red for 12 days after a later ranked switch had long left `quick`; a pod restart also clears it, which matches the pod-lifetime counter underneath."
 
         - alert: VpnAgentSwitchingRepeatedly
           expr: |
@@ -491,7 +492,7 @@ spec:
             component: servarr
           annotations:
             summary: "vpn-picker agent is switching server repeatedly, at or near its daily cap"
-            description: "{{ $labels.pod }} has made {{ $value }} degradation switches in the last 24 h. The agent is capped at VPN_AGENT_MAX_SWITCHES_PER_DAY (3) counting every reason, and a boot upgrade usually spends one of those, so this pod is at the cap or one switch from it - once the cap is reached it stops trying until the window rolls, and a genuinely bad server is then kept. Every switch also drops every peer and re-announces to private trackers (#498). Look at whether one server keeps being picked and keeps degrading, or whether the probe is misreading: vpn_agent_current_server, vpn_agent_current_loss_pct and the `bad window` / `degradation trip` lines (Grafana → Explore → Loki: {namespace=\"servarr\", container=\"agent\"}). The exact enforced count is not exported yet (#783) (#736, #555, #505, #771)."
+            description: "{{ $labels.pod }} has made {{ $value }} degradation switches in the last 24 h. The agent is capped at VPN_AGENT_MAX_SWITCHES_PER_DAY (3) counting every reason, and a boot upgrade usually spends one of those, so this pod is at the cap or one switch from it - once the cap is reached it stops trying until the window rolls, and a genuinely bad server is then kept. Every switch also drops every peer and re-announces to private trackers (#498). Look at whether one server keeps being picked and keeps degrading, or whether the probe is misreading: vpn_agent_current_server, vpn_agent_current_loss_pct and the `bad window` / `degradation trip` lines (Grafana → Explore → Loki: {namespace=\"servarr\", container=\"agent\"}). The enforced count is vpn_agent_switch_budget_used; since #1031 a server that trips within VPN_AGENT_ESCAPE_WINDOW_SECONDS (7200 s) of being placed is escaped once per 24 h past the cooldown and the cap - those show up here too and in vpn_agent_switch_escapes_used (#736, #555, #505, #771)."
 
         - alert: VpnAgentDryRunStuck
           expr: vpn_agent_dry_run{namespace="servarr"} == 1
