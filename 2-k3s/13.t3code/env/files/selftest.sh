@@ -33,6 +33,12 @@ run
 [[ $(git config --global credential.helper) == "$tmp/scripts/git-credential-github.sh" ]] || fail "helper not configured"
 python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$HOME/.config/opencode/opencode.json" || fail "opencode.json invalid"
 python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert "http://cliproxy.test/v1" in d["providerInstances"]["codex"]["config"]["launchArgs"]' "$HOME/.t3/userdata/settings.json" || fail "settings.json invalid"
+python3 - "$HOME/.t3/userdata/settings.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert not d["providers"]["opencode"].get("serverUrl"), "fresh legacy provider must use managed OpenCode"
+assert not d["providerInstances"]["opencode"].get("config", {}).get("serverUrl"), "fresh instance must use managed OpenCode"
+PY
 [[ $(stat -c %a "$HOME/.t3/userdata/settings.json") == 600 ]] || fail "settings.json must be 0600"
 echo '{"user":"edited"}' >"$HOME/.t3/userdata/settings.json"
 echo '{"user":"edited"}' >"$HOME/.config/opencode/opencode.json"
@@ -42,6 +48,36 @@ run
 [[ $(<"$HOME/.config/opencode/opencode.json") == '{"user":"edited"}' ]] || fail "second run overwrote opencode.json"
 echo "ok: entrypoint seeds once and keeps user edits"
 [[ $(stat -c %a "$HOME/.config/opencode/plugins/cliproxy-models.js") == 644 ]] || fail "plugin copy must be writable after restart"
+
+python3 - "$HOME/.t3/userdata/settings.json" <<'PY'
+import json, sys
+d = {
+    "user": "edited",
+    "providers": {"opencode": {"enabled": True, "serverUrl": "http://127.0.0.1:4096"}},
+    "providerInstances": {
+        "opencode": {"driver": "opencode", "config": {"serverUrl": "http://127.0.0.1:4096", "customModels": ["keep-me"]}},
+        "renamed": {"driver": "opencode", "config": {"serverUrl": "http://127.0.0.1:4096"}},
+        "external": {"driver": "opencode", "config": {"serverUrl": "https://custom.example"}},
+        "codex": {"driver": "codex", "config": {"launchArgs": "keep-me"}},
+    },
+}
+json.dump(d, open(sys.argv[1], "w"))
+PY
+run
+python3 - "$HOME/.t3/userdata/settings.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert d["user"] == "edited"
+assert d["providers"]["opencode"] == {"enabled": True}
+assert d["providerInstances"]["opencode"]["config"] == {"customModels": ["keep-me"]}
+assert d["providerInstances"]["renamed"]["config"] == {}
+assert d["providerInstances"]["external"]["config"]["serverUrl"] == "https://custom.example"
+assert d["providerInstances"]["codex"]["config"]["launchArgs"] == "keep-me"
+PY
+before=$(sha256sum "$HOME/.t3/userdata/settings.json")
+run
+[[ $(sha256sum "$HOME/.t3/userdata/settings.json") == "$before" ]] || fail "migration must be idempotent"
+echo "ok: managed OpenCode migration preserves other settings and is idempotent"
 
 # Lock root and resolved versions agree with package.json.
 python3 - "$DIR/../tools/package.json" "$DIR/../tools/package-lock.json" <<'PY'
