@@ -34,8 +34,10 @@ serviceMonitor:
     scrapeTimeout: 15s
     additionalRelabeling:
       - targetLabel: job
+        action: replace
         replacement: tls-probe
       - sourceLabels: [__param_target]
+        action: replace
         targetLabel: instance
   targets:
     - name: takaros
