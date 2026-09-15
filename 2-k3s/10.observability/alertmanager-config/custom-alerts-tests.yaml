@@ -336,3 +336,62 @@ tests:
       - eval_time: 70m
         alertname: TruenasPool1FreeCritical
         exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'kube_node_spec_unschedulable{node="k3s-master-52"}'
+        values: "1x25"
+      - series: 'kube_node_spec_unschedulable{node="k3s-worker-61"}'
+        values: "0x25"
+      - series: 'kube_node_status_condition{condition="Ready",node="k3s-master-52",status="true"}'
+        values: "1x25"
+      - series: 'kube_node_status_condition{condition="Ready",node="k3s-worker-61",status="true"}'
+        values: "1x25"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: K3sNodeCordoned
+        exp_alerts:
+          - exp_labels:
+              node: k3s-master-52
+              severity: warning
+              component: system-upgrade
+            exp_annotations:
+              summary: "Node k3s-master-52 is Ready but cordoned for over 15 minutes"
+              description: >-
+                Node k3s-master-52 has spec.unschedulable=1 while Ready, for more than
+                15 minutes. Nothing schedules onto it, and a check that only counts Ready
+                shows it green: the STATUS column prints Ready,SchedulingDisabled, which an
+                exact-match Ready count silently drops - that off-by-one is how the 2026-08-22
+                strand of k3s-master-52 sat unnoticed for 6h (#1087). Two automations cordon
+                nodes and are supposed to uncordon within minutes: system-upgrade-controller
+                plan jobs, whose uncordon is applied only when the controller processes the job
+                completion (a Failed job leaves the node cordoned), and the node-os-updater
+                CronJob (Saturdays 02:00, 2-k3s/maintenance/node-os-updater-cronjob.yaml),
+                whose safe_reboot cordons before drain and reboot, so any failed step in
+                between strands the node until Phase 0 of the next run. If no roll is in
+                progress, confirm with
+                kubectl --context epaflix get node k3s-master-52 -o jsonpath='{.spec.unschedulable}',
+                check the latest jobs in -n system-upgrade and -n kube-system, then
+                kubectl --context epaflix uncordon k3s-master-52.
+
+  - interval: 1m
+    input_series:
+      - series: 'kube_node_spec_unschedulable{node="k3s-master-52"}'
+        values: "0x10 1x10"
+      - series: 'kube_node_status_condition{condition="Ready",node="k3s-master-52",status="true"}'
+        values: "1x20"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: K3sNodeCordoned
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'kube_node_spec_unschedulable{node="k3s-master-52"}'
+        values: "1x25"
+      - series: 'kube_node_status_condition{condition="Ready",node="k3s-master-52",status="true"}'
+        values: "0x25"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: K3sNodeCordoned
+        exp_alerts: []
