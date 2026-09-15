@@ -51,8 +51,7 @@ echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.
 apt-get update
 
 # Pinned tooling (t3, claude, opencode, helm, kustomize, argocd, sops) comes
-# from update.sh, which a daily timer re-runs after Renovate's window so a
-# merged bump lands on the guest the same morning.
+# from update.sh. Check merged pins every two minutes; unchanged pins are a no-op.
 bash "$T3_DIR/update.sh"
 cat >/etc/systemd/system/t3code-update.service <<EOF
 [Unit]
@@ -68,10 +67,10 @@ ExecStart=/usr/bin/bash $T3_DIR/update.sh
 EOF
 cat >/etc/systemd/system/t3code-update.timer <<'EOF'
 [Unit]
-Description=Daily t3code update, after Renovate's 02:00-06:00 window
+Description=Check merged T3 pins every two minutes
 
 [Timer]
-OnCalendar=*-*-* 06:30:00 Europe/Athens
+OnCalendar=*-*-* *:0/2:00
 Persistent=true
 
 [Install]
