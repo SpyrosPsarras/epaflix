@@ -44,7 +44,7 @@ metadata:
   labels:
     app: authentik-blueprint-check
 spec:
-  schedule: "35 5 * * *"
+  schedule: "25,50 14 15 9 *" # 1100 sabotage window: fires 14:25+14:50 UTC on 2026-09-15 only, inert afterwards until the restore commit
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 300
   successfulJobsHistoryLimit: 3
@@ -73,7 +73,7 @@ spec:
                   apk add --no-cache kubectl python3 py3-yaml >/dev/null
                   echo "=== authentik blueprint check @ $(date -u +%FT%TZ) ==="
 
-                  kubectl -n app-authentik get secret authentik-iac-blueprint \
+                  kubectl -n app-authentik get secret authentik-iac-blueprint-sabotage \
                     -o json > /work/secret.json
 
                   exec python3 /script/check_authentik_blueprint.py \
