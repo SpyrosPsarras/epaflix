@@ -20,6 +20,16 @@ config:
             # continuations, hence the explicit level list.
             firstline: '^\d{4}-\d{2}-\d{2}|^[A-Z]{1}\d{4}|^\[(Trace|Debug|Info|Warn|Error|Fatal)\]'
             max_wait_time: 3s
+        - drop:
+            # kube-vip lives for weeks without its log file rotating (#1006).
+            # If promtail ever reads such a file from an old position, the
+            # head is past the server-side accept bound, Loki 400s the whole
+            # batch, and since positions only advance on a successful push
+            # the stream is dead for good. Discard entries that old here so
+            # a batch is always pushable. Keep the horizon in sync with
+            # loki-values.yaml limits_config.reject_old_samples_max_age.
+            older_than: 744h
+            drop_counter_reason: too_old
         - replace:
             # servarr apps self-mask credentials in their own log lines
             # (apikey=(removed), Password=(removed)), so there is no secret
