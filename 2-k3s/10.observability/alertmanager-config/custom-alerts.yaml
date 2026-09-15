@@ -279,6 +279,26 @@ spec:
             summary: "Prowlarr indexer(s) in long-term backoff (or the health check failed)"
             description: "The hourly prowlarr-indexer-health Job ({{ $labels.job_name }}) failed — either Prowlarr raised IndexerLongTermStatusCheck (an indexer has been failing for more than 6 hours), or the health-endpoint fetch itself failed. Inspect the Job logs for which indexer(s), then check credentials/rate-limits in the Prowlarr UI. Closes the #471/#477 silent-backoff gap (#607)."
 
+    - name: prowlarr-appsync-drift
+      interval: 60s
+      rules:
+        - alert: ProwlarrAppSyncDrift
+          expr: |
+            max by (job_name) (
+              kube_job_failed{namespace="servarr", job_name=~"prowlarr-appsync-drift.*"} > 0
+              and on (job_name) (
+                max by (job_name) (kube_job_status_start_time{namespace="servarr", job_name=~"prowlarr-appsync-drift.*"})
+                  >= scalar(max(kube_job_status_start_time{namespace="servarr", job_name=~"prowlarr-appsync-drift.*"}))
+              )
+            )
+          for: 5m
+          labels:
+            severity: warning
+            component: servarr
+          annotations:
+            summary: "Prowlarr app-sync not converged (or the drift check failed)"
+            description: "The daily prowlarr-appsync-drift Job ({{ $labels.job_name }}) failed: an enabled indexer that an enabled app would handle (app untagged, or tags intersect) has no ApplicationIndexerMapping row, so app-sync will retry AddIndexer for that pair on every sync cycle and can 400-loop forever when the app-side test fails (#1032, LimeTorrents 400-retried against radarr and sonarr2 for weeks without a health warning). Read the Job log for the app/indexer pairs, then either fix the indexer definition or exclude the indexer from the app via tag asymmetry; do not ignore a pair that repeats. A pair seen less than one sync interval (~15 min) after intentionally adding an indexer can be a benign race."
+
     - name: cleanuparr-queuecleaner-health
       interval: 60s
       rules:
@@ -541,7 +561,7 @@ spec:
             )
             unless on (namespace, job_name)
             max by (namespace, job_name) (
-              kube_job_owner{namespace="servarr", owner_kind="CronJob", owner_name=~"cleanuparr-blocklist-drift|neutarr-config-drift|orphan-census|prowlarr-indexer-health|cleanuparr-queuecleaner-health|blind-queue-check|qbt-stuck-torrent-check"}
+              kube_job_owner{namespace="servarr", owner_kind="CronJob", owner_name=~"cleanuparr-blocklist-drift|neutarr-config-drift|orphan-census|prowlarr-indexer-health|prowlarr-appsync-drift|cleanuparr-queuecleaner-health|blind-queue-check|qbt-stuck-torrent-check"}
             )
           for: 15m
           labels:
