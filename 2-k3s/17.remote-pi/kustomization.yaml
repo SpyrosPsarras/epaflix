@@ -12,6 +12,8 @@ resources:
   - cliproxy/service.yaml
   - cliproxy/ingress.yaml
   - cliproxy/heartbeat-cronjob.yaml
+  - search-guard/deployment.yaml
+  - search-guard/service.yaml
   - cliproxy-free/deployment.yaml
   - cliproxy-free/service.yaml
   - cpamanager/storage.yaml
@@ -44,3 +46,7 @@ configMapGenerator:
       - cliproxy/files/fetch-plugin.sh
       - cliproxy/files/emit-transcripts.py
       - cliproxy/files/payload_lib.py
+  - name: search-guard-scripts
+    namespace: remote-pi
+    files:
+      - search-guard/search-guard.py
