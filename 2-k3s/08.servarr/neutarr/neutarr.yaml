@@ -87,6 +87,9 @@ spec:
               value: "Europe/Oslo"
             - name: UMASK
               value: "002"
+            # Keeps the processed-ID state off the /config PVC: without it NeutArr
+            # falls back to /config/stateful and the list stops resetting on pod
+            # restarts. See the stateful-void volume below.
             - name: STATEFUL_DIR
               value: /stateful-void
           ports:
@@ -125,6 +128,16 @@ spec:
         - name: seed
           secret:
             secretName: neutarr-config-seed
+        # Deliberately writable AND ephemeral: the emptyDir is wiped when the pod
+        # is recreated, resetting the processed-ID hunt state with it. NeutArr
+        # expires the list itself too (stateful_management_hours, 7 days - the
+        # same value the init container bakes into lock.json), so the list only
+        # needs to outlive a hunt cycle, not a restart.
+        # stateful-void-init pre-creates the tree and chowns it to 568.
+        # Do not "fix" either half of this:
+        #   readOnly mount -> every write logs Errno 30; that refusal was 100%
+        #                    of the ERROR volume that #955 removed
+        #   PVC / /config  -> the list stops resetting on restarts
         - name: stateful-void
           emptyDir: {}
 ---
