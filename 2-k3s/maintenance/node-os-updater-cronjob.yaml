@@ -142,6 +142,7 @@ spec:
                   safe_reboot() {
                     local node="$1"
                     local ip="$2"
+                    local rc=0
 
                     echo "  [${node}] Cordoning..."
                     kubectl label node "${node}" node-os-updater-cordoned=true --overwrite
@@ -153,23 +154,32 @@ spec:
                       --delete-emptydir-data \
                       --force \
                       --grace-period=60 \
-                      --timeout=5m
+                      --timeout=5m || rc=1
 
-                    echo "  [${node}] Sending reboot command..."
-                    ssh $SSH_OPTS ubuntu@"${ip}" 'sudo reboot' || true
+                    if [ "${rc}" = "0" ]; then
+                      echo "  [${node}] Sending reboot command..."
+                      ssh $SSH_OPTS ubuntu@"${ip}" 'sudo reboot' || true
 
-                    echo "  [${node}] Waiting for node to go offline (NotReady)..."
-                    kubectl wait --for=condition=Ready=false node/"${node}" \
-                      --timeout=120s || true
+                      echo "  [${node}] Waiting for node to go offline (NotReady)..."
+                      kubectl wait --for=condition=Ready=false node/"${node}" \
+                        --timeout=120s || true
 
-                    echo "  [${node}] Waiting for node to come back online (Ready)..."
-                    kubectl wait --for=condition=Ready node/"${node}" --timeout=300s
+                      echo "  [${node}] Waiting for node to come back online (Ready)..."
+                      kubectl wait --for=condition=Ready node/"${node}" --timeout=300s || rc=1
+                    else
+                      echo "  [${node}] ❌ Drain failed - skipping reboot."
+                    fi
 
                     echo "  [${node}] Uncordoning..."
-                    kubectl uncordon "${node}"
+                    kubectl uncordon "${node}" || { sleep 5; kubectl uncordon "${node}"; }
                     kubectl label node "${node}" node-os-updater-cordoned- --overwrite
 
-                    echo "  [${node}] ✅ Reboot complete — node is Ready."
+                    if [ "${rc}" = "0" ]; then
+                      echo "  [${node}] ✅ Reboot complete — node is Ready."
+                    else
+                      echo "  [${node}] ❌ Reboot path failed - node left schedulable so it rejoins the fleet."
+                    fi
+                    return "${rc}"
                   }
 
                   update_remote_node() {
