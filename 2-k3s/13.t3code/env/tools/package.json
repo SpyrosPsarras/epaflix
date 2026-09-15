@@ -5,7 +5,7 @@
   "dependencies": {
     "t3": "0.0.40",
     "@anthropic-ai/claude-code": "2.1.272",
-    "opencode-ai": "1.18.30",
+    "opencode-ai": "1.18.31",
     "@openai/codex": "0.154.0"
   }
 }
