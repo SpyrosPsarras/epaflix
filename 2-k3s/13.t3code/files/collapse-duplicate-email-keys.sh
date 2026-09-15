@@ -241,6 +241,41 @@ if [ "$MODE" = dry-run ]; then
 fi
 
 sops --encrypt --filename-override "$STORE" "$work/new.yaml" > "$work/new.enc.yaml"
+
+python3 - "$work/new.enc.yaml" <<'PYEOF' || exit 1
+import sys
+
+in_sops = False
+bad = 0
+with open(sys.argv[1]) as f:
+    for lineno, line in enumerate(f, 1):
+        body = line.rstrip("\n")
+        if body.strip() == "sops:":
+            in_sops = True
+            continue
+        if in_sops:
+            continue
+        stripped = body.strip()
+        if not stripped or stripped.startswith("#") or stripped == "---":
+            continue
+        key, sep, rest = stripped.partition(":")
+        if not sep:
+            continue
+        rest = rest.strip()
+        if rest == "":
+            continue
+        if rest in ("|", "|-", "|+", ">", ">-", ">+") or not rest.startswith("ENC["):
+            bad += 1
+            print(f"  line {lineno} ({key.strip()}): value not ciphertext")
+if bad:
+    print(f"ERROR: {bad} value(s) in the re-encrypted store are not ciphertext;")
+    print("       the active .sops.yaml rule did not encrypt the values")
+    print("       (e.g. an absolute STORE path matching the wrong rule).")
+    print("       Nothing written.")
+    raise SystemExit(1)
+print("CIPHERTEXT_SHAPE_OK")
+PYEOF
+
 sops -d "$work/new.enc.yaml" > "$work/rt.yaml"
 
 python3 - "$work/plain.yaml" "$work/rt.yaml" "$work/plan.json" <<'PYEOF' || exit 1
