@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Runs inside the t3env pod with image-installed CLIs in /tools. This script
-# seeds the persisted HOME on the PVC (idempotent, never overwrites user
-# state) and starts T3 without opening a browser.
+# seeds the persisted HOME on the PVC, migrates legacy provider settings,
+# and starts T3 without opening a browser.
 #
 # Required env: ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN, HOME (PVC mount).
 # Optional env: GITHUB_TOKEN (git push over https), T3_PROJECT_REPO.
@@ -80,13 +80,12 @@ if [[ ! -f $SETTINGS ]]; then
   mkdir -p "$T3_HOME/userdata"
   cat >"$SETTINGS" <<EOF
 {
-  "providers": { "opencode": { "enabled": true, "serverUrl": "http://127.0.0.1:4096" } },
+  "providers": { "opencode": { "enabled": true } },
   "providerInstances": {
     "opencode": {
       "driver": "opencode",
       "displayName": "OpenCode (via cliproxy)",
-      "enabled": true,
-      "config": { "serverUrl": "http://127.0.0.1:4096" }
+      "enabled": true
     },
     "claudeAgent": {
       "driver": "claudeAgent",
@@ -108,37 +107,31 @@ EOF
   chmod 0600 "$SETTINGS"
 fi
 
+# T3 only injects thread-scoped MCP tools into servers it manages. Migrate
+# the endpoint seeded by older images, preserving other settings and URLs.
+python3 - "$SETTINGS" <<'PY'
+import json, os, sys, tempfile
+path = sys.argv[1]
+with open(path) as f:
+    settings = json.load(f)
+configs = [settings.get("providers", {}).get("opencode", {})]
+configs += [v.get("config", {}) for v in settings.get("providerInstances", {}).values()
+            if v.get("driver") == "opencode"]
+changed = False
+for config in configs:
+    if config.get("serverUrl") == "http://127.0.0.1:4096":
+        del config["serverUrl"]
+        changed = True
+if changed:
+    with tempfile.NamedTemporaryFile(mode="w", dir=os.path.dirname(path), delete=False) as f:
+        json.dump(settings, f, indent=2)
+        f.write("\n")
+    os.replace(f.name, path)
+    print("t3env: migrated OpenCode to T3-managed servers")
+PY
+
 echo "t3env: $(t3 --version) claude=$(claude --version 2>/dev/null | head -1) opencode=$(opencode --version 2>/dev/null | head -1) codex=$(codex --version 2>/dev/null | head -1)"
 # `serve` forces project bootstrap off; `start --no-browser` honors the flag.
 python3 /scripts/private-config.py install /private-agent-config/bundle.json
-# Keep OpenCode running: its CLI cold start can exceed T3's fixed 4s probe.
-# Stop both children if either exits; Kubernetes restarts the container.
-pids=()
-stop() { kill -TERM "${pids[@]}" 2>/dev/null || :; }
-trap 'stop; wait; exit 143' TERM INT
-opencode serve --hostname 127.0.0.1 --port 4096 &
-pids+=("$!")
-ready=false
-for ((attempt = 0; attempt < 60; attempt++)); do
-  if curl -fsS --max-time 1 http://127.0.0.1:4096/global/health >/dev/null 2>&1; then
-    ready=true
-    break
-  fi
-  kill -0 "${pids[0]}" 2>/dev/null || break
-  sleep 1
-done
-if [[ $ready != true ]]; then
-  echo "OpenCode server did not become healthy" >&2
-  stop
-  wait
-  exit 1
-fi
-t3 start --no-browser --host 0.0.0.0 --port 3773 --base-dir "$T3_HOME" \
-  --auto-bootstrap-project-from-cwd "$PROJECT_DIR" &
-pids+=("$!")
-set +e
-wait -n "${pids[@]}"
-rc=$?
-stop
-wait
-exit "$rc"
+exec t3 start --no-browser --host 0.0.0.0 --port 3773 --base-dir "$T3_HOME" \
+  --auto-bootstrap-project-from-cwd "$PROJECT_DIR"
