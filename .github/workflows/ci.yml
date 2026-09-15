@@ -42,6 +42,7 @@ jobs:
           ./.github/hooks/test-check-credential-reuse.sh
           ./.github/hooks/test-keystatus-check.sh
           ./.github/hooks/test-pool-capacity-forecast.sh
+          ./.github/hooks/test-datastore-usage-alert.sh
           ./.github/hooks/test-arc-baseline-export.sh
           ./.github/hooks/test-temp-redundant-name-unlink.sh
           ./.github/hooks/test-print-age-key-backup.sh
