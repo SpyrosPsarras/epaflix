@@ -17,6 +17,7 @@ resources:
   - qbt-stuck-torrent-check-cronjob.yaml
   - qbt-temp-residue-check-cronjob.yaml
   - lingarr-drain-watch-cronjob.yaml
+  - lingarr-arr-key-drift-check-cronjob.yaml
   - radarr-missing-search-cronjob.yaml
   - sonarr-alias-search-cronjob.yaml
   - helm-manager-drift-cronjob.yaml
