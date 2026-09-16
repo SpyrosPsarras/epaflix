@@ -2,7 +2,7 @@
 """Read-only look at the T3 state database: tables, schemas, provider rows."""
 import sqlite3
 
-c = sqlite3.connect("file:/home/spyros/.t3/userdata/state.sqlite?mode=ro", uri=True)
+c = sqlite3.connect("file:/home/spyros/.t3/userdata/statev2.sqlite?mode=ro", uri=True)
 tables = [r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")]
 print("tables:", tables)
 for t in tables:
