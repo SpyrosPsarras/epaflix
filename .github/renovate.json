@@ -79,10 +79,10 @@
       "versioning": "regex:^(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-(?<build>\\d+)$"
     },
     {
-      "description": "Lingarr tracks :main for the upstream DateTime fix (#270). Streamystats' pinned build has no matching release tag (#1129). These moving tags can carry unreleased migrations, so every update needs review. Keep this after the digest and patch automerge rules.",
+      "description": "Streamystats' pinned build has no matching release tag (#1129). These moving tags can carry unreleased migrations, so every update needs review. Keep this after the digest and patch automerge rules. Lingarr left this rule with the batch-contract override: the kustomization entry now carries newName ghcr.io/spyrospsarras/lingarr (disabled by the overlay rule below), so the upstream name no longer extracts as a dependency - the build-lingarr.yml invariant guard covers the upstream base digest instead.",
       "matchFileNames": ["2-k3s/08.servarr/kustomization.yaml"],
       "matchDatasources": ["docker"],
-      "matchPackageNames": ["ghcr.io/lingarr-translate/lingarr", "ghcr.io/fredrikburmester/streamystats-aio"],
+      "matchPackageNames": ["ghcr.io/fredrikburmester/streamystats-aio"],
       "automerge": false,
       "platformAutomerge": false
     },
@@ -119,6 +119,12 @@
       "description": "Temporary PR-build image (#1336): ghcr.io/spyrospsarras/jellysweep:pr-430 is a one-off build of jon4hz/jellysweep#430 (Database Filter matches tracked rows by media type, not arr ID alone), pinned with an immutable digest while upstream review is pending. A PR build has no tag stream, so tracking it is permanent lookup-failure noise. The images: block in 2-k3s/08.servarr/kustomization.yaml carries a TEMP OVERRIDE comment naming the revert condition: when a jellysweep release > v0.16.0 ships containing #430, the pin goes back to ghcr.io/jon4hz/jellysweep and this rule is deleted in the same PR.",
       "matchDatasources": ["docker"],
       "matchPackageNames": ["ghcr.io/spyrospsarras/jellysweep"],
+      "enabled": false
+    },
+    {
+      "description": "Temporary overlay image (batch-contract): ghcr.io/spyrospsarras/lingarr is a build of lingarr-translate/lingarr main 28f6a19 + images/lingarr/batch-contract.patch (chat batch path publishes untranslated lines and its schema-less fallback NREs on null model content), pinned with an immutable digest until upstream ships the equivalents. The images: block in 2-k3s/08.servarr/kustomization.yaml carries a TEMP OVERRIDE comment naming the revert condition, watched by upstream-release-watch row #270. The digest has no tag stream Renovate could follow, so tracking it is permanent lookup-failure noise. Upstream churn still reaches the overlay through images/lingarr/Dockerfile: Renovate tracks its final-stage FROM (ghcr.io/lingarr-translate/lingarr :main digest) into BASE_IMAGE, and build-lingarr.yml's invariant guard fails the build when that digest's source revision is not UPSTREAM_COMMIT - the :main tag has already regressed once (PR #1368).",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["ghcr.io/spyrospsarras/lingarr"],
       "enabled": false
     },
     {
