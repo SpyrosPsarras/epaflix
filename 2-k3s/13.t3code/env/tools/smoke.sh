@@ -83,7 +83,7 @@ for ((i=0; i<60; i++)); do
   if node -e '
 const db=new(require("node:sqlite").DatabaseSync)(process.argv[1],{readOnly:true});
 const rows=db.prepare("select workspace_root from projection_projects where deleted_at is null").all();
-process.exit(rows.some(r=>r.workspace_root===process.argv[2])?0:3);' "$T3CODE_HOME/userdata/state.sqlite" "$HOME/projects/remote" 2>/dev/null; then
+process.exit(rows.some(r=>r.workspace_root===process.argv[2])?0:3);' "$T3CODE_HOME/userdata/statev2.sqlite" "$HOME/projects/remote" 2>/dev/null; then
     ready=true; break
   fi
   sleep 2
