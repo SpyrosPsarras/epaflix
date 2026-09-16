@@ -293,6 +293,7 @@ spec:
             - { name: VPN_AGENT_BAD_WINDOWS, value: "3" }
             - { name: VPN_AGENT_COOLDOWN_SECONDS, value: "21600" }
             - { name: VPN_AGENT_MAX_SWITCHES_PER_DAY, value: "3" }
+            - { name: VPN_AGENT_ESCAPE_WINDOW_SECONDS, value: "7200" }
             - { name: VPN_AGENT_RECOVERY_BUDGET_SECONDS, value: "120" }
             - { name: VPN_AGENT_QUICK_RESERVE_SECONDS, value: "35" }
             - { name: VPN_AGENT_JITTER_SECONDS, value: "30" }

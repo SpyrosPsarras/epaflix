@@ -1,0 +1,43 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: tls-alerts
+  namespace: observability
+  labels:
+    prometheus: kube-prometheus-stack-prometheus
+    role: alert-rules
+spec:
+  groups:
+    - name: tls-certificates
+      interval: 60s
+      rules:
+        - alert: TLSCertificateExpiringSoon
+          expr: probe_ssl_earliest_cert_expiry{job="tls-probe"} - time() < 14 * 86400
+          for: 5m
+          labels:
+            severity: warning
+            component: infrastructure
+          annotations:
+            summary: "TLS certificate expires within 14 days"
+            description: "Certificate on {{ $labels.instance }} expires in {{ $value | humanizeDuration }}. Check the endpoint's ACME renewal task and DNS credentials."
+        - alert: TLSCertificateExpiryCritical
+          expr: probe_ssl_earliest_cert_expiry{job="tls-probe"} - time() < 3 * 86400
+          for: 5m
+          labels:
+            severity: critical
+            component: infrastructure
+          annotations:
+            summary: "TLS certificate expires within 3 days"
+            description: "Certificate on {{ $labels.instance }} expires in {{ $value | humanizeDuration }}. Renew the endpoint certificate now and verify its live expiry date."
+        - alert: TLSProbeFailed
+          expr: |
+            probe_success{job="tls-probe"} == 0
+            or up{job="tls-probe"} == 0
+            or (probe_success{job="tls-probe"} == 1 unless probe_ssl_earliest_cert_expiry{job="tls-probe"})
+          for: 5m
+          labels:
+            severity: critical
+            component: infrastructure
+          annotations:
+            summary: "TLS endpoint probe failed"
+            description: "Cannot read a TLS certificate from {{ $labels.instance }}. Check endpoint connectivity and the blackbox-exporter pod."

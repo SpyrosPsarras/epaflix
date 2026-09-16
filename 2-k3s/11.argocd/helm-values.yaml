@@ -68,6 +68,10 @@ controller:
       memory: 512Mi
     limits:
       memory: 1Gi
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
 
 repoServer:
   deploymentAnnotations:
@@ -100,15 +104,8 @@ repoServer:
       value: /custom-tools:/usr/local/bin:/usr/bin:/bin
   initContainers:
     - name: install-ksops
-      image: viaductoss/ksops:v4.3.3
-      command: ["/bin/sh", "-c"]
-      args:
-        - |
-          set -e
-          echo "Copying ksops + kustomize into shared volume..."
-          cp /usr/local/bin/ksops /custom-tools/
-          cp /usr/local/bin/kustomize /custom-tools/
-          echo "Done."
+      image: viaductoss/ksops:v4.5.1
+      command: ["/usr/local/bin/ksops", "install", "/custom-tools"]
       volumeMounts:
         - name: custom-tools
           mountPath: /custom-tools

@@ -58,10 +58,12 @@ export default async () => ({
           provider: { npm },
           modalities: { input, output: ["text"] },
           attachment: input.some(value => value !== "text"),
+          // Codex advertises separate default and maximum windows. Use the
+          // subscription maximum, not the smaller CLI default.
           // OpenCode compacts at context minus output, so a wrong small context
           // compacts every few turns. CLIProxyAPI omits max_tokens for models it
           // has no metadata for; 8192 keeps that fallback conservative.
-          limit: { context: model.context_window || 32768, output: model.max_tokens || 8192 },
+          limit: { context: model.max_context_window || model.context_window || 32768, output: model.max_tokens || 8192 },
           ...(subscription === "codex" ? { reasoning: true } : {}),
         }
       }

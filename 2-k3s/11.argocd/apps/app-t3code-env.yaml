@@ -1,0 +1,33 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: t3code-env
+  namespace: argocd
+  annotations:
+    # Compare API-defaulted resources using the same strategy as sync.
+    argocd.argoproj.io/compare-options: ServerSideDiff=true
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/SpyrosPsarras/epaflix.git
+    targetRevision: main
+    path: 2-k3s/13.t3code
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: remote-pi
+  # Prune old ConfigMaps after rollout. StatefulSet PVCs use Retain/Retain.
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: true
+    syncOptions:
+      - ServerSideApply=true
+      - PruneLast=true
+  ignoreDifferences:
+    - group: ""
+      kind: Service
+      jsonPointers:
+        - /spec/clusterIP
+        - /spec/clusterIPs
+        - /status

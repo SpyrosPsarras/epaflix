@@ -14,6 +14,23 @@
   "commitMessagePrefix": "[renovate]",
   "packageRules": [
     {
+      "description": "Keep the shared runtime image reference aligned with updated tool and base-image inputs.",
+      "matchFileNames": ["2-k3s/13.t3code/env/tools/package.json", "2-k3s/13.t3code/versions.env", "2-k3s/13.t3code/env/Dockerfile"],
+      "postUpgradeTasks": {
+        "commands": ["bash 2-k3s/13.t3code/env/tools/sync-runtime-image.sh"],
+        "fileFilters": ["2-k3s/13.t3code/env/statefulset.yaml"],
+        "executionMode": "branch"
+      }
+    },
+    {
+      "description": "Shared T3 pod/LXC CLI pins. Native npm updates the package and lock together; ArgoCD rolls merged updates. Patch automerge follows the repo policy.",
+      "matchManagers": ["npm"],
+      "matchFileNames": ["2-k3s/13.t3code/env/tools/package.json"],
+      "rangeStrategy": "pin",
+      "platformAutomerge": false,
+      "automerge": false
+    },
+    {
       "description": "Authentik: chart version and container image move together upstream. Group them in one PR so ArgoCD never sees a chart/image schema mismatch.",
       "matchManagers": ["kustomize"],
       "matchPackageNames": [
@@ -33,7 +50,7 @@
       "platformAutomerge": true
     },
     {
-      "description": "Servarr image digests: Renovate owns these end-to-end (Image Updater retired — #192). The images: block in 2-k3s/08.servarr/kustomization.yaml is digest-pinned moving tags (:latest etc.); auto-merge digest bumps through the normal PR + validate gate. File+datasource+digest scoped so it cannot reach authentik (different file) or any minor/major/patch update.",
+      "description": "Servarr digest rebuilds auto-merge. Release tags make minor/major changes typed updates (#1129). Moving-tag exceptions and registry evidence are in docs/servarr-image-pins.md; later rules require review for development images.",
       "matchFileNames": ["2-k3s/08.servarr/kustomization.yaml"],
       "matchDatasources": ["docker"],
       "matchUpdateTypes": ["digest"],
@@ -42,11 +59,32 @@
       "platformAutomerge": true
     },
     {
-      "description": "Lingarr is the one entry in that images: block tracking an unreleased development branch (:main, for the upstream #432 DateTime->UTC fix — #270 retires it for a release tag once >1.2.4 ships). Everything else there tracks a released stream, so a digest roll is a rebuild; a lingarr digest roll is a raw upstream dev commit with no release notes. Open a PR and let a human read it. An unattended lingarr merge is precisely what silently reverted the pin to the pre-fix 1.2.4 build for seven weeks (#273/#530/#531). MUST stay after the servarr-digest rule above — later packageRules win.",
+      "description": "Servarr minor and major releases require review for migrations and breaking changes (#1129). Patch updates and same-tag digest rebuilds retain their earlier automerge rules.",
       "matchFileNames": ["2-k3s/08.servarr/kustomization.yaml"],
       "matchDatasources": ["docker"],
-      "matchPackageNames": ["ghcr.io/lingarr-translate/lingarr"],
-      "automerge": false
+      "matchUpdateTypes": ["minor", "major"],
+      "automerge": false,
+      "platformAutomerge": false
+    },
+    {
+      "description": "Hotio release tags have a release- prefix. Parse the numeric version so patch/minor/major updates remain discoverable (#1129).",
+      "matchFileNames": ["2-k3s/08.servarr/kustomization.yaml"],
+      "matchPackageNames": ["ghcr.io/hotio/unpackerr"],
+      "versioning": "regex:^release-(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)$"
+    },
+    {
+      "description": "qBittorrent's numeric suffix is an image rebuild, not a compatibility constraint. Track rebuilds as patches while keeping the separate lt2 variant excluded (#1129).",
+      "matchFileNames": ["2-k3s/08.servarr/kustomization.yaml"],
+      "matchPackageNames": ["qbittorrentofficial/qbittorrent-nox"],
+      "versioning": "regex:^(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-(?<build>\\d+)$"
+    },
+    {
+      "description": "Streamystats' pinned build has no matching release tag (#1129). These moving tags can carry unreleased migrations, so every update needs review. Keep this after the digest and patch automerge rules. Lingarr left this rule with the batch-contract override: the kustomization entry now carries newName ghcr.io/spyrospsarras/lingarr (disabled by the overlay rule below), so the upstream name no longer extracts as a dependency - the build-lingarr.yml invariant guard covers the upstream base digest instead.",
+      "matchFileNames": ["2-k3s/08.servarr/kustomization.yaml"],
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["ghcr.io/fredrikburmester/streamystats-aio"],
+      "automerge": false,
+      "platformAutomerge": false
     },
     {
       "description": "Authentik MINOR/MAJOR: never auto-merge — release notes can carry DB migrations and breaking changes. PR opens, you review, you click merge.",
@@ -56,6 +94,14 @@
       ],
       "matchUpdateTypes": ["minor", "major"],
       "automerge": false
+    },
+    {
+      "description": "Lingarr build SDK: majors must never be bumped by Renovate (#1372). The dotnet/sdk tag in images/lingarr/Dockerfile has to satisfy upstream Lingarr's own global.json, cloned in-container at UPSTREAM_COMMIT (currently 10.0.0, rollForward latestMinor) - an SDK 11 image fails dotnet restore with exit 155, as PR #1372's build run showed. Our repo holds no global.json, so the dotnet-sdk manager cannot own this either. Minors stay enabled and valid: rollForward latestMinor accepts any 10.x. Lift this rule only in the same change that moves UPSTREAM_COMMIT to a .NET 11 source, and pick the matching SDK tag by reading upstream's global.json at the new commit.",
+      "matchManagers": ["docker"],
+      "matchPackageNames": ["mcr.microsoft.com/dotnet/sdk"],
+      "matchFileNames": ["images/lingarr/Dockerfile"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
     },
     {
       "description": "Self-hosted Renovate image: every update adopted by hand via the images: override in 2-k3s/12.renovate/kustomization.yaml (was: minor+patch suppressed, majors opened a PR). The v44 major got as far as its branch but the PR never opened; every in-window run re-attempted PR creation and hung until activeDeadlineSeconds killed it, 16 consecutive failures across 4 nights from 2026-07-29, while out-of-window runs stayed fast because the schedule skips this update entirely (#595, mechanism inferred from the last log line, not confirmed: release-notes fetch against renovatebot/renovate's multi-thousand-release history). Branch renovate/ghcr.io-renovatebot-renovate-44.x deleted at ddfe5d9, recoverable from that sha. To adopt: bump newTag by hand, confirm the next in-window run completes, and in the same PR either keep this rule or restore major-opens-a-PR.",
@@ -73,6 +119,12 @@
       "description": "Temporary PR-build image (#1336): ghcr.io/spyrospsarras/jellysweep:pr-430 is a one-off build of jon4hz/jellysweep#430 (Database Filter matches tracked rows by media type, not arr ID alone), pinned with an immutable digest while upstream review is pending. A PR build has no tag stream, so tracking it is permanent lookup-failure noise. The images: block in 2-k3s/08.servarr/kustomization.yaml carries a TEMP OVERRIDE comment naming the revert condition: when a jellysweep release > v0.16.0 ships containing #430, the pin goes back to ghcr.io/jon4hz/jellysweep and this rule is deleted in the same PR.",
       "matchDatasources": ["docker"],
       "matchPackageNames": ["ghcr.io/spyrospsarras/jellysweep"],
+      "enabled": false
+    },
+    {
+      "description": "Temporary overlay image (batch-contract): ghcr.io/spyrospsarras/lingarr is a build of lingarr-translate/lingarr main 28f6a19 + images/lingarr/batch-contract.patch (chat batch path publishes untranslated lines and its schema-less fallback NREs on null model content), pinned with an immutable digest until upstream ships the equivalents. The images: block in 2-k3s/08.servarr/kustomization.yaml carries a TEMP OVERRIDE comment naming the revert condition, watched by upstream-release-watch row #270. The digest has no tag stream Renovate could follow, so tracking it is permanent lookup-failure noise. Upstream churn still reaches the overlay through images/lingarr/Dockerfile: Renovate tracks its final-stage FROM (ghcr.io/lingarr-translate/lingarr :main digest) into BASE_IMAGE, and build-lingarr.yml's invariant guard fails the build when that digest's source revision is not UPSTREAM_COMMIT - the :main tag has already regressed once (PR #1368).",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["ghcr.io/spyrospsarras/lingarr"],
       "enabled": false
     },
     {
@@ -97,6 +149,15 @@
       "matchDatasources": ["github-releases"],
       "matchPackageNames": ["kubernetes-sigs/kustomize"],
       "allowedVersions": "<6"
+    },
+    {
+      "description": "T3 patches: Renovate waits for CI itself because this repository has no required status checks for GitHub platform automerge.",
+      "matchManagers": ["npm"],
+      "matchFileNames": ["2-k3s/13.t3code/env/tools/package.json"],
+      "matchUpdateTypes": ["patch"],
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": false
     }
   ],
   "customManagers": [
@@ -120,11 +181,11 @@
       "extractVersionTemplate": "^kustomize/v(?<version>.+)$"
     },
     {
-      "description": "t3code guest pins in 2-k3s/13.t3code/versions.env other than HELM/KUSTOMIZE (those two are owned by the managers above so the guest stays at the gate's versions): t3, @anthropic-ai/claude-code and opencode-ai from npm, argo-cd and sops from GitHub releases. Marker is the same trailing '# renovate:' comment; the five variable names are listed literally so RE2 (no lookaround) compiles it and a future line cannot be picked up by accident. The guest's daily t3code-update.timer (06:30 Athens, after the 02:00-06:00 Renovate window) git-pulls and applies whatever merged overnight; patch bumps automerge via the repo-wide rule; minors and majors open a PR for a human, same as everything else here. extractVersion strips a leading v (argo-cd/sops tags carry one, npm versions do not).",
+      "description": "Guest argo-cd and sops pins. Shared npm CLI pins moved to env/tools/package.json under the native npm manager. The guest timer applies merged pins at 06:30 Athens.",
       "customType": "regex",
       "managerFilePatterns": ["/^2-k3s/13\\.t3code/versions\\.env$/"],
       "matchStrings": [
-        "(?:T3|CLAUDE_CODE|OPENCODE|ARGOCD|SOPS)_VERSION=(?<currentValue>\\S+)\\s*#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)"
+        "(?:ARGOCD|SOPS)_VERSION=(?<currentValue>\\S+)\\s*#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)"
       ],
       "versioningTemplate": "semver",
       "extractVersionTemplate": "^v?(?<version>.+)$"

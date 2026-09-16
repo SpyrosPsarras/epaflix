@@ -23,6 +23,12 @@ loki:
 
   limits_config:
     retention_period: 744h # 31 days
+    # Default 168h: the head of a container log file that lived longer than
+    # a week without rotating (kube-vip, #1006) is older than the accept
+    # bound, so Loki 400s every batch carrying it and promtail's position
+    # never advances past it. Accept anything still inside retention. Must
+    # stay >= the promtail drop horizon in promtail-values.yaml.
+    reject_old_samples_max_age: 744h
     max_query_series: 10000
     max_query_lookback: 720h
     ingestion_rate_mb: 50
@@ -41,7 +47,12 @@ loki:
       local:
         directory: /rules
     rule_path: /tmp/loki/scratch
-    alertmanager_url: http://kube-prometheus-stack-alertmanager.observability.svc.cluster.local:9093
+    # One URL per Alertmanager pod, not the load-balanced Service: gossip
+    # replicates silences and the notification log, not the alert set, so a
+    # Service URL lets each alert land on a single replica and single-replica
+    # checks read false passes (#1053). Update this list if
+    # prometheus-values.yaml alertmanagerSpec.replicas changes.
+    alertmanager_url: http://alertmanager-kube-prometheus-stack-alertmanager-0.alertmanager-operated.observability.svc.cluster.local:9093,http://alertmanager-kube-prometheus-stack-alertmanager-1.alertmanager-operated.observability.svc.cluster.local:9093,http://alertmanager-kube-prometheus-stack-alertmanager-2.alertmanager-operated.observability.svc.cluster.local:9093
     enable_alertmanager_v2: true
     enable_api: true
 

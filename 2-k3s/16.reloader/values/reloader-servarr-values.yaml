@@ -2,6 +2,7 @@ reloader:
   watchGlobally: false
   ignoreCronJobs: true
   ignoreJobs: true
+  reloadStrategy: annotations
 
 resources:
   requests:

@@ -12,6 +12,10 @@ resources:
   - cliproxy/service.yaml
   - cliproxy/ingress.yaml
   - cliproxy/heartbeat-cronjob.yaml
+  - search-guard/deployment.yaml
+  - search-guard/service.yaml
+  - cliproxy-free/deployment.yaml
+  - cliproxy-free/service.yaml
   - cpamanager/storage.yaml
   - cpamanager/deployment.yaml
   - cpamanager/service.yaml
@@ -19,6 +23,7 @@ resources:
 
 generators:
   - cliproxy/ksops-generator.yaml
+  - cliproxy-free/ksops-generator.yaml
   - cpamanager/ksops-generator.yaml
 
 images:
@@ -29,16 +34,19 @@ images:
   # no tag stream, so tracking it is permanent lookup-failure noise.
   - name: docker.io/eceasy/cli-proxy-api
     newName: ghcr.io/spyrospsarras/cli-proxy-api
-    newTag: pr-5411-authfix-cgo-20260912@sha256:bfdca615f5ed55f13a671878694cbcff6f704340cb15113edcefcf3f571b09b0
+    newTag: dynamic-limits-20260915@sha256:14b34253b9eab832b4acaec612ed8b3397af10d97878b76d78fe8272b1631dec
   - name: docker.io/seakee/cpa-manager-plus
-    newTag: v1.12.12@sha256:f1a184972e34ca700e1c2a6d05c3701476de9c7ec03de8015e3b7679c263d2bb
+    newTag: v1.12.13@sha256:0886b3b84cbe0a04efc5b19032a65602a4f7d1d6a57d868d7200668802cea3ae
 
 configMapGenerator:
   - name: cliproxy-scripts
+    namespace: remote-pi
     files:
       - cliproxy/files/reconcile-config.psql
       - cliproxy/files/fetch-plugin.sh
       - cliproxy/files/emit-transcripts.py
       - cliproxy/files/payload_lib.py
-    options:
-      disableNameSuffixHash: true
+  - name: search-guard-scripts
+    namespace: remote-pi
+    files:
+      - search-guard/search-guard.py

@@ -1,0 +1,145 @@
+name: build-lingarr
+
+on:
+  push:
+    branches: [main]
+    paths: ['images/lingarr/**', '.github/workflows/build-lingarr.yml']
+  pull_request:
+    paths: ['images/lingarr/**', '.github/workflows/build-lingarr.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The Dockerfile's build stage runs the patched unit tests, so a failing
+      # patch never reaches the final stage. Then boot the overlay for real:
+      # SQLite in a temp dir, no external services, and check the API, the
+      # SPA index and one asset it references, plus the patched assembly.
+      # /api/version strips build metadata, so the patch marker is read from
+      # the assembly inside the running container.
+      # The base must describe the same upstream source as UPSTREAM_COMMIT
+      # (see the Dockerfile header). Renovate bumps BASE_IMAGE from the moving
+      # :main tag, and that tag has already regressed once (PR #1368), so this
+      # check fails closed on a mismatch instead of shipping a client that
+      # predates the patched server.
+      - name: Check BASE_IMAGE matches UPSTREAM_COMMIT
+        run: |
+          cd images/lingarr
+          BASE_IMAGE=$(awk -F'=' '/ARG BASE_IMAGE=/ {print $2}' Dockerfile)
+          UPSTREAM_COMMIT=$(awk -F'=' '/ARG UPSTREAM_COMMIT=/ {print $2}' Dockerfile)
+          BASE_REVISION=$(BASE_IMAGE="$BASE_IMAGE" python3 <<'PY'
+          import json, os, subprocess, urllib.request
+
+          scope = "repository:lingarr-translate/lingarr:pull"
+          token = json.load(urllib.request.urlopen("https://ghcr.io/token?scope=" + scope))["token"]
+
+          def inspect(digest_or_ref):
+              ref = digest_or_ref.split("@")[-1]
+              url = "https://ghcr.io/v2/lingarr-translate/lingarr/manifests/" + ref
+              accept = ("application/vnd.oci.image.index.v1+json, "
+                        "application/vnd.oci.image.manifest.v1+json, "
+                        "application/vnd.docker.distribution.manifest.v2+json")
+              req = urllib.request.Request(url, headers={"Authorization": "Bearer " + token, "Accept": accept})
+              return json.load(urllib.request.urlopen(req))
+
+          doc = inspect(os.environ["BASE_IMAGE"])
+          if "manifests" in doc:  # multi-arch index: use the linux/amd64 child
+              child = next(m["digest"] for m in doc["manifests"]
+                           if m.get("platform", {}).get("os") == "linux"
+                           and m.get("platform", {}).get("architecture") == "amd64")
+              doc = inspect(child)
+          url = "https://ghcr.io/v2/lingarr-translate/lingarr/blobs/" + doc["config"]["digest"]
+          req = urllib.request.Request(url, headers={"Authorization": "Bearer " + token, "Accept": "application/octet-stream"})
+          config = json.load(urllib.request.urlopen(req))
+          print(config["config"]["Labels"].get("org.opencontainers.image.revision", ""))
+          PY
+          )
+          echo "BASE_IMAGE=$BASE_IMAGE revision=$BASE_REVISION, UPSTREAM_COMMIT=$UPSTREAM_COMMIT"
+          if [ "$BASE_REVISION" != "$UPSTREAM_COMMIT" ]; then
+            echo "::error::BASE_IMAGE $BASE_IMAGE was built from revision ${BASE_REVISION:-<none>}, not UPSTREAM_COMMIT $UPSTREAM_COMMIT - pick the ghcr.io/lingarr-translate/lingarr digest whose labels match the commit (the :main tag regresses; see images/lingarr/Dockerfile header)"
+            exit 1
+          fi
+
+      - name: Build and smoke-test the overlay before publishing anything
+        run: |
+          set -euo pipefail
+          cd images/lingarr
+          docker build -t lingarr:dev .
+
+          # Cleanup is registered before the container starts and runs on every
+          # exit path. On failure it prints the container log (no secrets are
+          # mounted or passed) and preserves the failing step's exit status.
+          cleanup() {
+            status=$?
+            if [ "$status" -ne 0 ]; then
+              echo "::group::lingarr-smoke container log (failure)"
+              docker logs lingarr-smoke 2>&1 | tail -80 || true
+              echo "::endgroup::"
+            fi
+            docker rm -f lingarr-smoke >/dev/null 2>&1 || true
+            exit "$status"
+          }
+          trap cleanup EXIT
+
+          # The base image has no USER, so the container runs as root here (the cluster
+          # sets runAsUser 568). A writable /app/config is all SQLite needs.
+          docker run -d --name lingarr-smoke -p 127.0.0.1:9876:9876 \
+            -e DB_CONNECTION=sqlite -e SQLITE_DB_PATH=smoke.db -e ASPNETCORE_URLS=http://+:9876 \
+            --tmpfs /app/config lingarr:dev
+
+          ready=0
+          for _ in $(seq 1 60); do
+            if curl -sf -m 3 http://127.0.0.1:9876/api/version >/tmp/version.json; then ready=1; break; fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo "lingarr did not answer /api/version within 120s"
+            exit 1
+          fi
+          # Shape check on the actual response, not just "some bytes came back".
+          jq -e 'has("currentVersion") and (.currentVersion|type=="string") and has("latestVersion")' /tmp/version.json >/dev/null
+          echo "version: $(jq -c . /tmp/version.json)"
+
+          curl -sf -m 5 http://127.0.0.1:9876/ >/tmp/index.html
+          grep -q '<div id="app"' /tmp/index.html
+          asset=$(grep -oE 'src="[^"]+\.js"' /tmp/index.html | head -1 | sed -E 's#src="\./?([^"]+)"#\1#')
+          if [ -z "$asset" ]; then
+            echo "SPA index has no script asset reference"
+            exit 1
+          fi
+          curl -sf -m 5 -o /dev/null "http://127.0.0.1:9876/$asset"
+          echo "SPA index and asset $asset served"
+
+          docker exec lingarr-smoke sh -c 'grep -a -q "0.0.0-dev+28f6a190529187c70fddb2b1435157ed1635dccb.batch-contract" /app/Lingarr.Server.dll && test -d /app/wwwroot'
+          echo "patched Lingarr.Server.dll present, wwwroot intact"
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: images/lingarr
+          push: true
+          tags: |
+            ghcr.io/spyrospsarras/lingarr:28f6a19-batch-contract-${{ github.sha }}
+
+      - name: Print the digest to pin
+        if: github.event_name != 'pull_request'
+        run: docker buildx imagetools inspect ghcr.io/spyrospsarras/lingarr:28f6a19-batch-contract-${{ github.sha }} --format '{{.Manifest.Digest}}'

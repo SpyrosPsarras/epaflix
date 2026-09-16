@@ -4,6 +4,7 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - alertmanager-config/custom-alerts.yaml
+  - alertmanager-config/tls-alerts.yaml
   - alertmanager-config/loki-log-alerts.yaml
   - ingress/grafana-ingressroute.yaml
   - pve-exporter/service.yaml
@@ -19,9 +20,16 @@ generators:
   - secrets/ksops-generator.yaml
 
 helmCharts:
+  - name: prometheus-blackbox-exporter
+    repo: https://prometheus-community.github.io/helm-charts
+    version: "11.18.0"
+    releaseName: blackbox-exporter
+    namespace: observability
+    valuesFile: blackbox-values.yaml
+    includeCRDs: false
   - name: kube-prometheus-stack
     repo: https://prometheus-community.github.io/helm-charts
-    version: "90.0.0"
+    version: "91.2.3"
     releaseName: kube-prometheus-stack
     namespace: observability
     valuesFile: prometheus-values.yaml

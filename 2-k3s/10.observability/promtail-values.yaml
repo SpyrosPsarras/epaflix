@@ -13,8 +13,34 @@ config:
         pipeline_stages:
         - cri: {}
         - multiline:
-            firstline: '^\d{4}-\d{2}-\d{2}|^[A-Z]{1}\d{4}'
+            # radarr v6 writes its console format without a timestamp:
+            # [Debug] Api: ... (#976). Without the bracket alternative every
+            # radarr burst glues into one Loki entry under the burst-start
+            # timestamp. Exception blocks ([v6.x.y] ... / at ...) must stay
+            # continuations, hence the explicit level list.
+            firstline: '^\d{4}-\d{2}-\d{2}|^[A-Z]{1}\d{4}|^\[(Trace|Debug|Info|Warn|Error|Fatal)\]'
             max_wait_time: 3s
+        - drop:
+            # kube-vip lives for weeks without its log file rotating (#1006).
+            # If promtail ever reads such a file from an old position, the
+            # head is past the server-side accept bound, Loki 400s the whole
+            # batch, and since positions only advance on a successful push
+            # the stream is dead for good. Discard entries that old here so
+            # a batch is always pushable. Keep the horizon in sync with
+            # loki-values.yaml limits_config.reject_old_samples_max_age.
+            older_than: 744h
+            drop_counter_reason: too_old
+        - replace:
+            # servarr apps self-mask credentials in their own log lines
+            # (apikey=(removed), Password=(removed)), so there is no secret
+            # left to protect (#824). Rewrite those shapes before the
+            # credential counter below sees them, otherwise a Debug-level
+            # *arr console (#976 radarr, unpackerr's per-minute query-param
+            # polling) fires CredentialRedactedFromLogs around the clock.
+            # Keep the credential-key alternation in sync across all three
+            # regexes in this block (selector, self-mask, redact).
+            expression: '(?i)((?:password|passwd|apikey|api_key|api-key|client_secret)=\(removed\))'
+            replace: '<self-masked>'
         - match:
             selector: '{namespace=~".+"} |~ "(?i)(password|passwd|apikey|api_key|api-key|client_secret)="'
             stages:
@@ -29,8 +55,8 @@ config:
             # promtail replaces only the captured groups, not the whole match,
             # so the capture must span key=value to remove the key from Loki.
             # ( and ) stay allowed in values and {0,} allows empty values so
-            # the servarr self-mask shapes Password=(removed) and
-            # apikey=(removed) redact too (#824)
+            # shapes like Password=(removed) and apikey=(removed) redact too
+            # if they somehow get past the self-mask rewrite above (#824)
             expression: '(?i)((?:password|passwd|apikey|api_key|api-key|client_secret)=(?:[^;&"''\s\[\]{}^$*|\\<>]{0,}))'
             replace: '<REDACTED>'
         kubernetes_sd_configs:

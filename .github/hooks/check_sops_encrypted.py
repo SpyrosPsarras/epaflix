@@ -10,7 +10,9 @@ This is deliberately a guard, not a complete secret scanner, but no scalar in a
 plaintext Secret escapes analysis by being awkwardly sized.  Values from
 MIN_SHORT_CREDENTIAL_LENGTH up are classified, and an opaque scalar longer than
 MAX_PLAINTEXT_SCALAR_LENGTH is rejected instead of skipped, so padding cannot
-buy an exemption.  Sensitive key names remain hard-gated.  Do not replace that
+buy an exemption.  Mapping key names are classified for credential shapes, and
+a credential-shaped key segment is redacted in reports instead of echoed.
+Sensitive key names remain hard-gated.  Do not replace that
 accepted trade-off with per-file key policies: templates must stay editable
 without a second policy update.
 """
@@ -253,8 +255,29 @@ def embedded_structure(value: str) -> Any | None:
     return parsed if isinstance(parsed, (dict, list)) else None
 
 
+def credential_shaped_key(key: Any) -> bool:
+    """Classify a mapping key name for credential-like material.
+
+    Only looks_like_credential applies to keys: the short mixed-class band
+    (#822) is deliberately not used here because Kubernetes camelCase field
+    names such as ``apiVersion`` or ``stringData`` share its shape and would
+    reject ordinary manifests.  Known credential prefixes, private material,
+    JWTs, and long high-entropy runs in a key name are still caught.  The
+    redaction in display_key mirrors this exact rule, so a key this function
+    flags can never be echoed into a report.
+    """
+    return looks_like_credential(key)
+
+
+REDACTED_KEY_SEGMENT = "<redacted-key>"
+
+
 def display_key(path: tuple[str, ...]) -> str:
-    return ".".join(path) if path else "<document>"
+    segments = (
+        REDACTED_KEY_SEGMENT if credential_shaped_key(segment) else segment
+        for segment in path
+    )
+    return ".".join(segments) if path else "<document>"
 
 
 def report(path: str, document: int, key_path: tuple[str, ...], reason: str) -> None:
@@ -418,6 +441,9 @@ def validate_plaintext(
         for key, child in value.items():
             key_name = str(key) if isinstance(key, (str, int, float, bool)) else "<non-string-key>"
             child_path = key_path + (key_name,)
+            if credential_shaped_key(key):
+                report(path, document, child_path, "mapping key has a credential-like shape")
+                ok = False
             child_is_reference = structural_reference_object(key, child)
             identifier_is_reference = paired_reference_identifier(value, key)
             if child_is_reference or reference_fields or identifier_is_reference:

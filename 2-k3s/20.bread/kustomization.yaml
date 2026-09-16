@@ -15,4 +15,4 @@ configMapGenerator:
 
 images:
   - name: nginxinc/nginx-unprivileged
-    newTag: 1.31.5-alpine
+    newTag: 1.31.6-alpine
