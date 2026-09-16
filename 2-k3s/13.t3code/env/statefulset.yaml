@@ -57,7 +57,7 @@ spec:
       containers:
         - name: t3
           # Derived from public build inputs by env/tools/runtime-tag.sh.
-          image: ghcr.io/spyrospsarras/t3-runtime:inputs-5b77a7ebd1ef656567aa6c37f845d5da
+          image: ghcr.io/spyrospsarras/t3-runtime:inputs-0cbe3312f27c83eeb4398cb17cbb7914
           imagePullPolicy: Always
           command:
             - bash
