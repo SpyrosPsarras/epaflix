@@ -9,9 +9,13 @@
 # from the base unchanged.
 #
 # UPSTREAM_COMMIT and the base digest must describe the same source: the base
-# image's assembly InformationalVersion is 0.0.0-dev+<UPSTREAM_COMMIT>.
+# image's assembly InformationalVersion is 0.0.0-dev+<UPSTREAM_COMMIT>. This is
+# load-bearing: Renovate tracks this FROM line against the moving ghcr :main tag,
+# and that tag has already been re-pushed backwards once (2026-09-13 merged a
+# bump to the 2026-08-12 5eadc933 build while UPSTREAM_COMMIT said 28f6a19, PR
+# #1368). build-lingarr.yml fails the build when the two disagree.
 ARG UPSTREAM_COMMIT=28f6a190529187c70fddb2b1435157ed1635dccb
-ARG BASE_IMAGE=ghcr.io/lingarr-translate/lingarr@sha256:12473f6f40beac1bb91ffadc7d8c7f1c2a0cd99ba336e4bf2c1dfa617c27a763
+ARG BASE_IMAGE=ghcr.io/lingarr-translate/lingarr@sha256:c20a50283a3bf67cea84fc661aec5f5721ee248ceea1504da4f5c47880ee3e65
 
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG UPSTREAM_COMMIT

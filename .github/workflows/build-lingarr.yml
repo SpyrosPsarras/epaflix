@@ -27,6 +27,49 @@ jobs:
       # SPA index and one asset it references, plus the patched assembly.
       # /api/version strips build metadata, so the patch marker is read from
       # the assembly inside the running container.
+      # The base must describe the same upstream source as UPSTREAM_COMMIT
+      # (see the Dockerfile header). Renovate bumps BASE_IMAGE from the moving
+      # :main tag, and that tag has already regressed once (PR #1368), so this
+      # check fails closed on a mismatch instead of shipping a client that
+      # predates the patched server.
+      - name: Check BASE_IMAGE matches UPSTREAM_COMMIT
+        run: |
+          cd images/lingarr
+          BASE_IMAGE=$(awk -F'=' '/ARG BASE_IMAGE=/ {print $2}' Dockerfile)
+          UPSTREAM_COMMIT=$(awk -F'=' '/ARG UPSTREAM_COMMIT=/ {print $2}' Dockerfile)
+          BASE_REVISION=$(BASE_IMAGE="$BASE_IMAGE" python3 <<'PY'
+          import json, os, subprocess, urllib.request
+
+          scope = "repository:lingarr-translate/lingarr:pull"
+          token = json.load(urllib.request.urlopen("https://ghcr.io/token?scope=" + scope))["token"]
+
+          def inspect(digest_or_ref):
+              ref = digest_or_ref.split("@")[-1]
+              url = "https://ghcr.io/v2/lingarr-translate/lingarr/manifests/" + ref
+              accept = ("application/vnd.oci.image.index.v1+json, "
+                        "application/vnd.oci.image.manifest.v1+json, "
+                        "application/vnd.docker.distribution.manifest.v2+json")
+              req = urllib.request.Request(url, headers={"Authorization": "Bearer " + token, "Accept": accept})
+              return json.load(urllib.request.urlopen(req))
+
+          doc = inspect(os.environ["BASE_IMAGE"])
+          if "manifests" in doc:  # multi-arch index: use the linux/amd64 child
+              child = next(m["digest"] for m in doc["manifests"]
+                           if m.get("platform", {}).get("os") == "linux"
+                           and m.get("platform", {}).get("architecture") == "amd64")
+              doc = inspect(child)
+          url = "https://ghcr.io/v2/lingarr-translate/lingarr/blobs/" + doc["config"]["digest"]
+          req = urllib.request.Request(url, headers={"Authorization": "Bearer " + token, "Accept": "application/octet-stream"})
+          config = json.load(urllib.request.urlopen(req))
+          print(config["config"]["Labels"].get("org.opencontainers.image.revision", ""))
+          PY
+          )
+          echo "BASE_IMAGE=$BASE_IMAGE revision=$BASE_REVISION, UPSTREAM_COMMIT=$UPSTREAM_COMMIT"
+          if [ "$BASE_REVISION" != "$UPSTREAM_COMMIT" ]; then
+            echo "::error::BASE_IMAGE $BASE_IMAGE was built from revision ${BASE_REVISION:-<none>}, not UPSTREAM_COMMIT $UPSTREAM_COMMIT - pick the ghcr.io/lingarr-translate/lingarr digest whose labels match the commit (the :main tag regresses; see images/lingarr/Dockerfile header)"
+            exit 1
+          fi
+
       - name: Build and smoke-test the overlay before publishing anything
         run: |
           set -euo pipefail
