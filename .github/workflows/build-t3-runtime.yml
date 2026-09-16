@@ -1,0 +1,47 @@
+name: build-t3-runtime
+on:
+  push:
+    branches: [main]
+    paths:
+      - '2-k3s/13.t3code/env/**'
+      - '2-k3s/13.t3code/versions.env'
+      - '2-k3s/13.t3code/files/cliproxy-models.js'
+      - '.github/workflows/build-t3-runtime.yml'
+  pull_request:
+    paths:
+      - '2-k3s/13.t3code/env/**'
+      - '2-k3s/13.t3code/versions.env'
+      - '2-k3s/13.t3code/files/cliproxy-models.js'
+      - '.github/workflows/build-t3-runtime.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build and boot without production credentials
+        run: |
+          bash 2-k3s/13.t3code/env/tools/sync-runtime-image.sh
+          git diff --exit-code -- 2-k3s/13.t3code/env/statefulset.yaml
+          bash 2-k3s/13.t3code/env/tools/smoke.sh
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish the tested image
+        if: github.event_name != 'pull_request'
+        run: |
+          image=ghcr.io/spyrospsarras/t3-runtime
+          tag=$(bash 2-k3s/13.t3code/env/tools/runtime-tag.sh)
+          docker tag t3-runtime:dev "$image:inputs-$tag"
+          docker push "$image:inputs-$tag"
+          docker tag t3-runtime:dev "$image:${{ github.sha }}"
+          docker push "$image:${{ github.sha }}"
+          docker tag t3-runtime:dev "$image:latest"
+          docker push "$image:latest"

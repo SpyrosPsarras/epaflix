@@ -10,14 +10,19 @@ resources:
   - neutarr-config-drift-cronjob.yaml
   - orphan-census-cronjob.yaml
   - prowlarr-indexer-health-cronjob.yaml
+  - prowlarr-appsync-drift-cronjob.yaml
   - cleanuparr-queuecleaner-health-cronjob.yaml
   - blind-queue-check-cronjob.yaml
+  - arr-pending-key-drift-check-cronjob.yaml
   - qbt-stuck-torrent-check-cronjob.yaml
+  - qbt-temp-residue-check-cronjob.yaml
   - lingarr-drain-watch-cronjob.yaml
+  - lingarr-arr-key-drift-check-cronjob.yaml
   - radarr-missing-search-cronjob.yaml
   - sonarr-alias-search-cronjob.yaml
   - helm-manager-drift-cronjob.yaml
   - jellysweep-order-executor-cronjob.yaml
+  - ntfy-canary-check-cronjob.yaml
 
 configMapGenerator:
   - name: cleanuparr-blocklist-expected

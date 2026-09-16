@@ -1,0 +1,234 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: lingarr-arr-key-drift-check-script
+  namespace: servarr
+data:
+  check.py: |
+    #!/usr/bin/env python3
+    """Lingarr <-> *arr integration key drift check.
+
+    Answers one question: will Lingarr's next Radarr/Sonarr sync succeed with
+    the keys Lingarr has stored right now? On 2026-09-15 17:32 a Radarr config
+    rewrite carried a regenerated API key; Lingarr kept the old one and every
+    SyncMovieJob 401'd for ~15h before anyone read the logs (Radarr's own API
+    log shows `[GET] /api/v3/movie/?apikey=... 401.Unauthorized` from the sync,
+    while other clients got 200 seconds earlier). Sonarr kept matching, so the
+    DPAPI decryption path was fine - only the stored key was stale.
+
+    The probe replicates IntegrationService.GetApiResponse's exact request
+    shape (GET {url}{path}?apikey={key}, key decrypted via Lingarr's
+    /api/setting/multiple/encrypted/get): a 401 there is precisely the
+    SyncMovieJob signature, and it fails regardless of WHY the key drifted
+    (config restore via restore-from-backup.sh, UI regeneration, config volume
+    recreation).
+
+    Deliberately NOT checked: local_ai_api_key. reconcile-ai-provider.sql
+    re-pins it from the lingarr-cliproxy-api-key Secret on every boot and
+    fails the boot if the pin does not land - that key cannot drift for more
+    than one restart.
+
+    Report-only, like every sibling drift check here. Exit 1 = key drift (the
+    alarm), exit 2 = cannot judge (fail closed). Keys are hashed to 16 hex
+    chars for cross-run correlation and are NEVER printed or logged.
+    Stdlib only - no pip, no apk.
+    """
+    import datetime
+    import hashlib
+    import json
+    import os
+    import sys
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    TIMEOUT = 15
+    LINGARR_URL = os.environ.get("LINGARR_URL", "http://lingarr:9876")
+    APPS = ("radarr", "sonarr")
+    ENCRYPTED_KEYS = ["%s_api_key" % a for a in APPS]
+    PLAIN_KEYS = ["%s_url" % a for a in APPS]
+
+
+    def api_call(url, path, payload):
+        full = "%s%s" % (url.rstrip("/"), path)
+        data = json.dumps(payload).encode()
+        req = urllib.request.Request(full, data=data, headers={
+            "Accept": "application/json", "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+            return json.load(resp)
+
+
+    def hash16(key):
+        return hashlib.sha256(key.encode()).hexdigest()[:16]
+
+
+    def judge(app, key, status):
+        """Pure verdict for one probe result - exercised by --selftest.
+
+        Returns (rc, verdict): rc 0 pass, 1 drift, 2 cannot-judge. An empty or
+        undecryptable key (Lingarr returns "" for those) fails closed on any
+        status: a missing key must never read as current.
+        """
+        if not key:
+            return 2, "Lingarr returned an empty %s_api_key (not stored, or not " \
+                      "decryptable - GetEncryptedSettings yields \"\" on " \
+                      "CryptographicException). Refusing to judge." % app
+        if status == 200:
+            return 0, "Lingarr's stored key (hash %s) authenticates against %s" \
+                      % (hash16(key), app)
+        if status == 401:
+            return 1, "%s rejected Lingarr's stored key (hash %s) with 401 - " \
+                      "exactly the SyncMovieJob signature. The arr's key " \
+                      "changed without re-pinning Lingarr." % (app, hash16(key))
+        return 2, "%s answered %s instead of 200/401 - cannot judge the key " \
+                  "against this state." % (app, status)
+
+
+    def probe_app(app, key, base_url):
+        try:
+            req = urllib.request.Request(
+                "%s/api/v3/health?%s" % (base_url.rstrip("/"),
+                                         urllib.parse.urlencode({"apikey": key})),
+                headers={"Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+                return resp.status
+        except urllib.error.HTTPError as exc:
+            return exc.code
+        except urllib.error.URLError:
+            return None  # unreachable: conn refused/DNS - distinct from auth
+
+
+    def selftest():
+        assert judge("radarr", "k" * 32, 200)[0] == 0
+        rc, msg = judge("radarr", "k" * 32, 401)
+        assert rc == 1 and "401" in msg and ("k" * 32) not in msg, \
+            "401 must be drift and the key must not survive into the verdict"
+        assert judge("radarr", "", 200)[0] == 2, "empty key fails closed"
+        assert judge("radarr", "", 401)[0] == 2
+        assert judge("sonarr", "k" * 32, 502)[0] == 2
+        assert judge("sonarr", "k" * 32, None)[0] == 2, \
+            "unreachable arr cannot judge the key"
+        print("selftest OK")
+        return 0
+
+
+    def main(argv):
+        if "--selftest" in argv:
+            return selftest()
+        try:
+            keys = api_call(LINGARR_URL, "/api/setting/multiple/encrypted/get",
+                            ENCRYPTED_KEYS)
+            urls = api_call(LINGARR_URL, "/api/setting/multiple/get", PLAIN_KEYS)
+        except urllib.error.HTTPError as exc:
+            if exc.code in (401, 403):
+                print("ERROR: lingarr api answered %s - auth_enabled is likely "
+                      "true now; wire an X-Api-Key (settings key 'api_key') "
+                      "into this job before it can judge again." % exc.code,
+                      file=sys.stderr)
+            else:
+                print("ERROR: lingarr api answered %s" % exc.code,
+                      file=sys.stderr)
+            return 2
+        except (urllib.error.URLError, ValueError, json.JSONDecodeError) as exc:
+            print("ERROR: lingarr api unreachable or not JSON: %s" % exc,
+                  file=sys.stderr)
+            return 2
+        if not isinstance(keys, dict) or not isinstance(urls, dict):
+            print("ERROR: lingarr api returned unexpected shapes",
+                  file=sys.stderr)
+            return 2
+
+        print("=== lingarr arr key drift check @ %s ==="
+              % datetime.datetime.now(datetime.timezone.utc)
+              .strftime("%Y-%m-%dT%H:%M:%SZ"))
+        worst = 0
+        for app in APPS:
+            key = str(keys.get("%s_api_key" % app, ""))
+            base_url = str(urls.get("%s_url" % app, "")).strip()
+            if not base_url:
+                print("FAIL: lingarr has no %s_url setting - refusing to "
+                      "guess the target. ACTION: set the %s URL in Lingarr "
+                      "Settings -> Integrations." % (app, app))
+                return 2
+            status = probe_app(app, key, base_url)
+            rc, verdict = judge(app, key, status)
+            worst = max(worst, rc)
+            print("[%s] %s (probe status: %s)"
+                  % ("PASS" if rc == 0 else ("DRIFT" if rc == 1 else "ERROR"),
+                     verdict, status if status is not None else "unreachable"))
+
+        if worst == 1:
+            print("\nFAIL: Lingarr holds a stale arr API key - Radarr/Sonarr "
+                  "syncs 401 until re-pinned (2026-09-16 signature). ACTION: "
+                  "read the current key from the arr pod (kubectl exec "
+                  "deploy/<app> -n servarr -- grep -o '<ApiKey>[^<]*</ApiKey>' "
+                  "/config/config.xml), then re-pin via Lingarr UI Settings -> "
+                  "Integrations, or POST {\"key\":\"<app>_api_key\",\"value\":"
+                  "\"<key>\"} to /api/setting/encrypted, then trigger GET "
+                  "/api/schedule/job/movie to verify. Known drift triggers: "
+                  "arr config restores (restore-from-backup.sh deletes "
+                  "config.xml; a regenerated key lands on next boot) and UI "
+                  "key regeneration in the arr.")
+            return 1
+        if worst == 2:
+            print("\nFAIL: could not judge every key. ACTION: read the "
+                  "evidence above - an unreachable or 5xx arr, or a lingarr "
+                  "auth/API change, needs fixing before this check can judge "
+                  "the keys again.")
+            return 2
+        print("\nOK: Lingarr's stored keys authenticate against both arrs.")
+        return 0
+
+
+    if __name__ == "__main__":
+        sys.exit(main(sys.argv[1:]))
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: lingarr-arr-key-drift-check
+  namespace: servarr
+  labels:
+    app: lingarr-arr-key-drift-check
+spec:
+  schedule: "35 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 6
+  failedJobsHistoryLimit: 6
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 300
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 3600  # keep 1 hour
+      template:
+        metadata:
+          labels:
+            app: lingarr-arr-key-drift-check
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: lingarr-arr-key-drift-check
+              image: python:3.13-alpine
+              imagePullPolicy: IfNotPresent
+              command: ["python3", "/script/check.py"]
+              env:
+                - name: LINGARR_URL
+                  value: http://lingarr:9876
+              volumeMounts:
+                - name: script
+                  mountPath: /script
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "250m"
+                  memory: "128Mi"
+          volumes:
+            - name: script
+              configMap:
+                name: lingarr-arr-key-drift-check-script
+                defaultMode: 0555

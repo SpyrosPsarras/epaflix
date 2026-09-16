@@ -24,4 +24,5 @@ resources:
   - app-syncthing.yaml
   - app-system-upgrade-controller.yaml
   - app-system-upgrade-plans.yaml
+  - app-t3code-env.yaml
   - app-traefik.yaml

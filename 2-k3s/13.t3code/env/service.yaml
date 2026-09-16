@@ -1,0 +1,61 @@
+---
+# Headless governing Service required by the StatefulSet (stable pod DNS).
+apiVersion: v1
+kind: Service
+metadata:
+  name: t3env
+  namespace: remote-pi
+  labels:
+    app.kubernetes.io/name: t3env
+    app.kubernetes.io/component: server
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: t3env
+  ports:
+    - name: http
+      port: 3773
+      targetPort: 3773
+      protocol: TCP
+
+---
+# One Service per pod so each environment has its own hostname. Clients pair
+# with each environment separately and balance new threads between them.
+apiVersion: v1
+kind: Service
+metadata:
+  name: t3env-0
+  namespace: remote-pi
+  labels:
+    app.kubernetes.io/name: t3env
+    app.kubernetes.io/component: server
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: t3env
+    statefulset.kubernetes.io/pod-name: t3env-0
+  ports:
+    - name: http
+      port: 3773
+      targetPort: 3773
+      protocol: TCP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: t3env-1
+  namespace: remote-pi
+  labels:
+    app.kubernetes.io/name: t3env
+    app.kubernetes.io/component: server
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: t3env
+    statefulset.kubernetes.io/pod-name: t3env-1
+  ports:
+    - name: http
+      port: 3773
+      targetPort: 3773
+      protocol: TCP
