@@ -20,8 +20,13 @@ const moving = new Set([
   'ghcr.io/spyrospsarras/vpn-picker',
 ]);
 const manual = new Set([
-  'ghcr.io/lingarr-translate/lingarr',
   'ghcr.io/fredrikburmester/streamystats-aio',
+]);
+// Self-built overlay images (TEMP OVERRIDE entries): excluded from Renovate in
+// .github/renovate.json, so extraction must see exactly these names disabled.
+const disabled = new Set([
+  'ghcr.io/spyrospsarras/jellysweep',
+  'ghcr.io/spyrospsarras/lingarr',
 ]);
 for (const dep of deps) {
   assert(!dep.skipReason, `${dep.depName}: ${dep.skipReason}`);
@@ -29,7 +34,7 @@ for (const dep of deps) {
   const base = { ...dep, packageFile, manager: 'kustomize', packageRules, automerge: false };
   const configured = await applyPackageRules(base, 'test');
   if (configured.enabled === false) {
-    assert.equal(dep.depName, 'ghcr.io/spyrospsarras/jellysweep');
+    assert(disabled.has(dep.depName), `${dep.depName}: unexpectedly disabled`);
     continue;
   }
   const versioning = get(configured.versioning ?? 'docker');
