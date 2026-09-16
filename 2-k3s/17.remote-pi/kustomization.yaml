@@ -36,7 +36,7 @@ images:
     newName: ghcr.io/spyrospsarras/cli-proxy-api
     newTag: dynamic-limits-20260915@sha256:14b34253b9eab832b4acaec612ed8b3397af10d97878b76d78fe8272b1631dec
   - name: docker.io/seakee/cpa-manager-plus
-    newTag: v1.12.12@sha256:f1a184972e34ca700e1c2a6d05c3701476de9c7ec03de8015e3b7679c263d2bb
+    newTag: v1.12.13@sha256:0886b3b84cbe0a04efc5b19032a65602a4f7d1d6a57d868d7200668802cea3ae
 
 configMapGenerator:
   - name: cliproxy-scripts
