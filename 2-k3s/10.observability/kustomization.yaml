@@ -29,7 +29,7 @@ helmCharts:
     includeCRDs: false
   - name: kube-prometheus-stack
     repo: https://prometheus-community.github.io/helm-charts
-    version: "91.2.3"
+    version: "91.4.1"
     releaseName: kube-prometheus-stack
     namespace: observability
     valuesFile: prometheus-values.yaml
