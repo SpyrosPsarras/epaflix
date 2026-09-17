@@ -3,9 +3,11 @@ name: lingarr-ghcr-cleanup
 # Deletes package versions under ghcr.io/spyrospsarras/lingarr by REST version
 # id (GET /user/packages/container/lingarr/versions lists them). The package is
 # linked to this repo, so GITHUB_TOKEN with packages:write is the credential.
-# Guardrail: the workflow prints the surviving tags after deletion - always
-# confirm the digest pinned in 2-k3s/08.servarr/kustomization.yaml is among
-# them. Never delete a version whose tag matches the pin.
+#
+# Guardrail: versions carrying a tag with the protected prefix are refused.
+# The prefix must match the tag stream the kustomization digest pin resolves
+# to (the pin itself is a digest and cannot be compared here) - if the pin
+# moves to a different tag prefix, pass the new one via protected_tag_prefix.
 
 on:
   workflow_dispatch:
@@ -13,6 +15,10 @@ on:
       version_ids:
         description: "Comma-separated package version ids to delete (NOT tag names)."
         required: true
+      protected_tag_prefix:
+        description: "Refuse versions whose tags start with this prefix."
+        required: false
+        default: "28f6a19-batch-contract-"
 
 permissions:
   packages: write
@@ -25,11 +31,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           IDS: ${{ inputs.version_ids }}
+          PROTECTED: ${{ inputs.protected_tag_prefix }}
         run: |
           set -euo pipefail
           failed=0
           for id in $(printf '%s' "$IDS" | tr ',' ' '); do
             [ -n "$id" ] || continue
+            tags=$(gh api "/user/packages/container/lingarr/versions/$id" \
+              --jq '[.metadata.container.tags[]] | join(",")' || true)
+            echo "version $id tags: ${tags:-<none>}"
+            if [[ ",${tags}," == *",${PROTECTED}"* || "${tags}" == "${PROTECTED}"* ]]; then
+              echo "::error::version $id carries a protected tag ($tags) - it may be the digest the cluster pins. Refusing."
+              failed=1
+              continue
+            fi
             echo "deleting version $id..."
             if gh api --method DELETE "/user/packages/container/lingarr/versions/$id"; then
               echo "deleted $id"
@@ -38,7 +53,7 @@ jobs:
               failed=1
             fi
           done
-          echo "--- surviving tags:"
+          echo "--- surviving versions:"
           gh api /user/packages/container/lingarr/versions \
-            --jq '.[] | .id + " " + (.metadata.container.tags | join(","))' || true
+            --jq '.[] | (.id | tostring) + " tags=[" + ([.metadata.container.tags[]] | join(",")) + "]"'
           exit "$failed"
