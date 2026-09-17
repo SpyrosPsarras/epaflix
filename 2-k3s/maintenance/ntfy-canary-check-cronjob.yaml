@@ -7,7 +7,8 @@ metadata:
 data:
   check.py: |
     #!/usr/bin/env python3
-    """Hourly canary publish through the real PVE notification target (#1108).
+    """Hourly canary publish through the ntfy server behind the real PVE
+    notification target (#1108).
 
     When the PVE notification target fails, the only trace used to be a
     `could not notify via target` line in a vzdump task log nobody reads.
@@ -22,11 +23,16 @@ data:
     Mechanism choice (#1108): a periodic canary publish, not log watching.
     Watching for `could not notify via target` would need PVE task logs
     shipped into Loki first, a whole new pipeline; the canary exercises the
-    exact path PVE uses and fails closed in minutes.
+    publish path PVE uses and fails closed in minutes.
 
-    What it publishes: one POST to the same URL as target ntfy-pve
+    What it publishes: one POST to the same server as target ntfy-pve
     (1-proxmox/pbs/notifications.cfg), with the same Title/Tags/Priority
-    header set, plain-text body like PVE sends. Two properties are checked:
+    header set, plain-text body like PVE sends, on the dedicated topic
+    pve-backups-canary instead of PVE's pve-backups. The 20k body renders
+    on a phone as 400 repeated lines (observed 2026-09-16), so the canary
+    stays off the subscribed topic. PVE and the canary share no auth and
+    the size limit is server-wide, so the separate topic costs no
+    fidelity. Two properties are checked:
 
       - reachability: the publish must return 200 with a message id;
       - the live size limit: the body is 20k by default, above ntfy's 4096
@@ -34,8 +40,8 @@ data:
         regresses, the canary 400s exactly like a real oversized
         notification would (#1076/#1105 class).
 
-    Priority is 1 (min) instead of PVE's 4 so the canary never buzzes the
-    phone; the header path is exercised either way.
+    The topic keeps the canary off the phone. Priority is 1 (min) instead
+    of PVE's 4 as a second layer; the header path is exercised either way.
 
     A failed Job trips NtfyCanaryPublishFailing (custom-alerts.yaml). That
     alert routes back through Alertmanager -> ntfy, so if you receive it on
@@ -60,7 +66,8 @@ data:
     import urllib.error
     import urllib.request
 
-    NTFY_URL = os.environ.get("NTFY_URL", "https://ntfy.epaflix.com/pve-backups")
+    NTFY_URL = os.environ.get("NTFY_URL",
+                              "https://ntfy.epaflix.com/pve-backups-canary")
     BODY_BYTES = int(os.environ.get("NTFY_BODY_BYTES", "20000"))
     TIMEOUT = int(os.environ.get("NTFY_TIMEOUT", "15"))
 
@@ -174,7 +181,7 @@ data:
         print("%s in %.2fs" % (detail, time.monotonic() - started))
 
         if status == 200 and isinstance(payload, dict) and payload.get("id"):
-            print("\nOK: the real PVE target path accepted a publish and "
+            print("\nOK: the publish path accepted a 20k canary and "
                   "the 32k size limit is live.")
             return 0
 
@@ -226,7 +233,7 @@ spec:
               command: ["python3", "/script/check.py"]
               env:
                 - name: NTFY_URL
-                  value: "https://ntfy.epaflix.com/pve-backups"
+                  value: "https://ntfy.epaflix.com/pve-backups-canary"
                 - name: NTFY_BODY_BYTES
                   value: "20000"
                 - name: NTFY_TIMEOUT

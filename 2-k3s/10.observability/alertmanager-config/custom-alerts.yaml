@@ -433,8 +433,9 @@ spec:
             summary: "ntfy canary publish failed — the real PVE notification target is broken (or the check could not run)"
             description: >-
               The hourly ntfy-canary-check Job ({{ $labels.job_name }}) failed — the canary
-              POST through the exact PVE target path (https://ntfy.epaflix.com/pve-backups,
-              Title/Tags/Priority headers, see 1-proxmox/pbs/notifications.cfg target ntfy-pve)
+              POST through the ntfy publish path (https://ntfy.epaflix.com/pve-backups-canary,
+              same server and Title/Tags/Priority headers as PVE target ntfy-pve in
+              1-proxmox/pbs/notifications.cfg)
               did not return 200 with a message id, or could not connect at all. A real PVE
               notification would fail the same way right now: this is the #1076 signature
               (twelve days of failed backups surfaced only as `could not notify via target`
