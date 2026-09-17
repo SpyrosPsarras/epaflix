@@ -1,0 +1,65 @@
+name: lingarr-ghcr-cleanup
+
+# Deletes package versions under ghcr.io/spyrospsarras/lingarr by REST version
+# id (GET /user/packages/container/lingarr/versions lists them). The package is
+# linked to this repo, so GITHUB_TOKEN with packages:write is the credential.
+#
+# Guardrail: versions carrying a tag with the protected prefix are refused.
+# The prefix must match the tag stream the kustomization digest pin resolves
+# to (the pin itself is a digest and cannot be compared here) - if the pin
+# moves to a different tag prefix, pass the new one via protected_tag_prefix.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_ids:
+        description: "Comma-separated package version ids to delete (NOT tag names)."
+        required: true
+      protected_tag_prefix:
+        description: "Refuse versions whose tags start with this prefix."
+        required: false
+        default: "28f6a19-batch-contract-"
+
+permissions:
+  packages: write
+
+jobs:
+  delete:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete package versions
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IDS: ${{ inputs.version_ids }}
+          PROTECTED: ${{ inputs.protected_tag_prefix }}
+        run: |
+          set -euo pipefail
+          failed=0
+          for id in $(printf '%s' "$IDS" | tr ',' ' '); do
+            [ -n "$id" ] || continue
+            # Fail closed: an unreadable tag list must refuse the delete,
+            # not skip the guard. Untagged versions read as empty (allowed).
+            if ! tags=$(gh api "/user/packages/container/lingarr/versions/$id" \
+              --jq '[.metadata.container.tags[]?] | join(",")'); then
+              echo "::error::could not read tags for version $id - refusing to delete"
+              failed=1
+              continue
+            fi
+            echo "version $id tags: ${tags:-<none>}"
+            if [[ ",${tags}," == *",${PROTECTED}"* || "${tags}" == "${PROTECTED}"* ]]; then
+              echo "::error::version $id carries a protected tag ($tags) - it may be the digest the cluster pins. Refusing."
+              failed=1
+              continue
+            fi
+            echo "deleting version $id..."
+            if gh api --method DELETE "/user/packages/container/lingarr/versions/$id"; then
+              echo "deleted $id"
+            else
+              echo "::error::deletion failed for version $id"
+              failed=1
+            fi
+          done
+          echo "--- surviving versions:"
+          gh api /user/packages/container/lingarr/versions \
+            --jq '.[] | (.id | tostring) + " tags=[" + ([.metadata.container.tags[]] | join(",")) + "]"'
+          exit "$failed"

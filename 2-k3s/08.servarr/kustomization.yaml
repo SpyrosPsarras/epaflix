@@ -97,10 +97,15 @@ images:
   # untranslated subtitles as translated (522 positions kept in English in 3h, 2026-09-13),
   # and its schema-less fallback crashed with NullReferenceException on null model content
   # (98 "All configured batch translation services failed." deaths 09-12..09-15, the signal
-  # behind the lingarr-drain-watch failures that kept the maintenance App Degraded).
+  # behind the lingarr-drain-watch failures that kept the maintenance App Degraded). The
+  # content-translation API also cancelled work whenever the caller disconnected (Bazarr's
+  # 1920s HTTP timeout), an endless retry loop on big files - the patch detaches the
+  # translation from the request token and converges retries onto the running request
+  # (upstream #542, maintainer-endorsed option 3).
   # Revert to ghcr.io/lingarr-translate/lingarr when upstream LocalAiService no longer
   # falls back to a schema-less request, validates returned positions against the batch,
-  # and RunBatch throws instead of filling original lines (watched by upstream-release-watch).
+  # RunBatch throws instead of filling original lines, and /api/translate/content no
+  # longer cancels on client disconnect (watched by upstream-release-watch).
   # Renovate must not track this image (disabled in .github/renovate.json).
   - name: ghcr.io/lingarr-translate/lingarr
     newName: ghcr.io/spyrospsarras/lingarr
