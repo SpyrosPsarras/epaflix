@@ -322,10 +322,10 @@ index 43ca0d8..e7252dd 100644
      private void VerifyRequestsSent(int count)
 diff --git a/Lingarr.Server.Tests/Services/TranslationRequestServiceTests.cs b/Lingarr.Server.Tests/Services/TranslationRequestServiceTests.cs
 new file mode 100644
-index 0000000..46aa309
+index 0000000..1253375
 --- /dev/null
 +++ b/Lingarr.Server.Tests/Services/TranslationRequestServiceTests.cs
-@@ -0,0 +1,333 @@
+@@ -0,0 +1,370 @@
 +using System;
 +using System.Collections.Generic;
 +using System.Linq;
@@ -372,7 +372,7 @@ index 0000000..46aa309
 +    private sealed class Harness
 +    {
 +        public LingarrDbContext DbContext { get; init; } = null!;
-+        public SqliteConnection Connection { get; init; } = null!;
++        public string ConnectionString { get; init; } = null!;
 +        public Mock<IBatchTranslationService> BatchServiceMock { get; init; } = null!;
 +        public TranslationRequestService Service { get; init; } = null!;
 +    }
@@ -381,9 +381,12 @@ index 0000000..46aa309
 +    {
 +        // SQLite in memory, not the InMemory provider: the service uses
 +        // ExecuteUpdateAsync (terminal-state writes), which InMemory refuses.
-+        // One open connection keeps the database alive across context
-+        // instances (the wait-flip test uses a second context).
-+        var connection = new SqliteConnection("DataSource=:memory:");
++        // A named shared-cache database keeps the store alive across context
++        // instances while letting a second context write concurrently (the
++        // wait-flip tests) - one plain :memory: connection cannot do both.
++        var databaseName = $"memdb_{Guid.NewGuid():N}";
++        var connectionString = $"DataSource=file:{databaseName}?mode=memory&cache=shared";
++        var connection = new SqliteConnection(connectionString: connectionString);
 +        connection.Open();
 +        var options = new DbContextOptionsBuilder<LingarrDbContext>()
 +            .UseSqlite(connection)
@@ -464,7 +467,7 @@ index 0000000..46aa309
 +        return new Harness
 +        {
 +            DbContext = dbContext,
-+            Connection = connection,
++            ConnectionString = connectionString,
 +            BatchServiceMock = batchInterface,
 +            Service = service
 +        };
@@ -585,7 +588,7 @@ index 0000000..46aa309
 +            // A second context on the same connection: the service under test
 +            // is polling with its own context instance (not thread-safe).
 +            var options = new DbContextOptionsBuilder<LingarrDbContext>()
-+                .UseSqlite(harness.Connection)
++                .UseSqlite(harness.ConnectionString)
 +                .Options;
 +            await using var other = new LingarrDbContext(options);
 +            var row = await other.TranslationRequests.SingleAsync(r => r.Id == 1);
@@ -628,6 +631,40 @@ index 0000000..46aa309
 +    }
 +
 +    [Fact]
++    public async Task TranslateContentAsync_RunningDuplicateFails_RetryFallsThroughToFreshTranslation()
++    {
++        // Arrange: the first attempt is running but dies with Failed. The
++        // waiting retry must not deliver the failed request's lines: it falls
++        // through to a fresh translation (a new row).
++        var harness = CreateHarness(items => items.ToDictionary(i => i.Position, i => "φρέσκο"));
++        harness.DbContext.TranslationRequests.Add(StoredRequest(1, TranslationStatus.InProgress));
++        SeedLines(harness.DbContext, 1, (1, "η γάτα"), (2, "ο σκύλος"));
++        harness.DbContext.SaveChanges();
++
++        var flip = Task.Run(async () =>
++        {
++            await Task.Delay(50);
++            var options = new DbContextOptionsBuilder<LingarrDbContext>()
++                .UseSqlite(harness.ConnectionString)
++                .Options;
++            await using var other = new LingarrDbContext(options);
++            var row = await other.TranslationRequests.SingleAsync(r => r.Id == 1);
++            row.Status = TranslationStatus.Failed;
++            row.CompletedAt = DateTimeOffset.UtcNow;
++            await other.SaveChangesAsync();
++        });
++
++        // Act
++        var results = await harness.Service.TranslateContentAsync(Content(2), CancellationToken.None);
++        await flip;
++
++        // Assert: fresh lines delivered; the failed attempt is preserved as history.
++        Assert.Equal(2, results.Length);
++        Assert.Equal("φρέσκο", results[0].Line);
++        Assert.Equal(2, await harness.DbContext.TranslationRequests.CountAsync());
++    }
++
++    [Fact]
 +    public async Task TranslateContentAsync_WaitingClientDisconnects_DoesNotStartSecondTranslation()
 +    {
 +        // Arrange: the running duplicate must never be raced by a fresh
@@ -653,7 +690,7 @@ index 0000000..46aa309
 +        // Fresh context: ExecuteUpdateAsync bypasses change tracking, so a
 +        // context that already tracks the row would return the stale entity.
 +        var options = new DbContextOptionsBuilder<LingarrDbContext>()
-+            .UseSqlite(harness.Connection)
++            .UseSqlite(harness.ConnectionString)
 +            .Options;
 +        await using var other = new LingarrDbContext(options);
 +        return await other.TranslationRequests.SingleAsync(r => r.Id == id);
@@ -884,7 +921,7 @@ index a474c20..27ac541 100644
  
      private async Task<Dictionary<int, string>> TranslateBatchWithGenerateApi(
 diff --git a/Lingarr.Server/Services/TranslationRequestService.cs b/Lingarr.Server/Services/TranslationRequestService.cs
-index 2a4dbbf..ab4e348 100644
+index 2a4dbbf..c814610 100644
 --- a/Lingarr.Server/Services/TranslationRequestService.cs
 +++ b/Lingarr.Server/Services/TranslationRequestService.cs
 @@ -760,9 +760,14 @@ public class TranslationRequestService : ITranslationRequestService
@@ -958,7 +995,7 @@ index 2a4dbbf..ab4e348 100644
              // ExecuteUpdateAsync bypasses change-tracking so a concurrent write cannot abort this save.
              var now = DateTimeOffset.UtcNow;
              await _dbContext.TranslationRequests
-@@ -962,6 +969,117 @@ public class TranslationRequestService : ITranslationRequestService
+@@ -962,6 +969,118 @@ public class TranslationRequestService : ITranslationRequestService
          }
      }
  
@@ -1041,15 +1078,16 @@ index 2a4dbbf..ab4e348 100644
 +                    return null;
 +                }
 +                await Task.Delay(DuplicatePollInterval, pollCancellationToken);
-+                status = await _dbContext.TranslationRequests
++                var row = await _dbContext.TranslationRequests
 +                    .Where(r => r.Id == existing.Id)
-+                    .Select(r => r.Status)
++                    .Select(r => (TranslationStatus?)r.Status)
 +                    .FirstOrDefaultAsync(dbCancellationToken);
-+                if (status == default && existing.Status == TranslationStatus.Pending)
++                if (row == null)
 +                {
 +                    // Row vanished between polls; nothing to reuse.
 +                    return null;
 +                }
++                status = row.Value;
 +            }
 +            if (status != TranslationStatus.Completed)
 +            {

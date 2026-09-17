@@ -7,7 +7,8 @@ patch, `batch-contract.patch`, republished as `ghcr.io/spyrospsarras/lingarr`.
 
 Lingarr's `LocalAiService` chat batch path (used for cliproxy-free -> OpenRouter
 free models) had three defects that together published untranslated subtitles
-as translated:
+as translated, and the content-translation HTTP API had a fourth defect that
+made big files untranslatable through Bazarr:
 
 1. When the structured (`response_format: json_schema`) request failed to
    parse, it fell back to a request with no schema and no JSON instruction.
