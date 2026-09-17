@@ -65,11 +65,11 @@ images:
   # Version tags make release changes typed Renovate updates (#1129).
   # Keep digests alongside tags. Exceptions and registry evidence: docs/servarr-image-pins.md.
   - name: lscr.io/linuxserver/sonarr
-    newTag: 4.0.19@sha256:82172b363f9eddc02aca544f880a044f2ceb9aaf190bc87e4454e2f705eb91d0
+    newTag: 4.0.20@sha256:a5c1a5fecbef946927ab90ad68df319ac5fe644057e5fc18cd993f01ac07b2b2
   - name: lscr.io/linuxserver/radarr
     newTag: 6.3.0@sha256:fe051413dfd91b383ba04910552e83fb0306895fefee275c48dafe7bb90807dc
   - name: lscr.io/linuxserver/prowlarr
-    newTag: 2.5.2@sha256:c7502a75b021d964481c129c84590b9cbc40f83aadd4e553f173871bc0deaa3c
+    newTag: 2.5.2@sha256:aaa16ba7d66e413db6d0358d3b6c68d833578ba7f176f24a51807181e7637fce
   - name: ghcr.io/cleanuparr/cleanuparr
     newTag: 2.10.6@sha256:8136c3beda7aa217012657e0ee31f0473ff4ae7e54a156730ff04523987fa815
   # TEMP OVERRIDE (pr-430, #1336): build of upstream main 1576c01 + jon4hz/jellysweep#430 so the
