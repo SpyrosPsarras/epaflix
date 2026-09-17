@@ -7,7 +7,8 @@ patch, `batch-contract.patch`, republished as `ghcr.io/spyrospsarras/lingarr`.
 
 Lingarr's `LocalAiService` chat batch path (used for cliproxy-free -> OpenRouter
 free models) had three defects that together published untranslated subtitles
-as translated:
+as translated, and the content-translation HTTP API had a fourth defect that
+made big files untranslatable through Bazarr:
 
 1. When the structured (`response_format: json_schema`) request failed to
    parse, it fell back to a request with no schema and no JSON instruction.
@@ -22,10 +23,21 @@ as translated:
    did not return with the English source and logged a warning. It now throws,
    which fails the job (both callers already set `Failed` before writing
    anything: `TranslationJob` and `TranslateContentAsync`).
+4. `TranslateContentAsync` tied the translation to `HttpContext.RequestAborted`:
+   a caller whose HTTP timeout is shorter than the translation (Bazarr blocks
+   1920s) disconnected, the request got cancelled, and the file never
+   translated - an infinite retry loop on big files. The translation now runs
+   detached from the request token (only the UI/API cancel can stop it), and a
+   re-POST for content that is still translating waits for the running request
+   and delivers its stored lines (`AwaitDuplicateRequestAsync`). A running
+   request with no line activity for 60 minutes is a restart zombie: it is
+   reaped as Interrupted so the next POST starts fresh. Endorsed upstream
+   (lingarr-translate/lingarr#542, maintainer option 3).
 
 Generate-API (non-chat) batches and per-line translation are unchanged. The
 upstream test asserting behaviour 3 is deleted; the rest of the suite (234
-tests) passes with the patch.
+tests) passes with the patch, plus the new TranslationRequestServiceTests for
+behaviour 4.
 
 ## Measured need
 
