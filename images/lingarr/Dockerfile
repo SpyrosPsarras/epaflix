@@ -15,7 +15,7 @@
 # bump to the 2026-08-12 5eadc933 build while UPSTREAM_COMMIT said 28f6a19, PR
 # #1368). build-lingarr.yml fails the build when the two disagree.
 ARG UPSTREAM_COMMIT=28f6a190529187c70fddb2b1435157ed1635dccb
-ARG BASE_IMAGE=ghcr.io/lingarr-translate/lingarr@sha256:c20a50283a3bf67cea84fc661aec5f5721ee248ceea1504da4f5c47880ee3e65
+ARG BASE_IMAGE=ghcr.io/lingarr-translate/lingarr@sha256:12473f6f40beac1bb91ffadc7d8c7f1c2a0cd99ba336e4bf2c1dfa617c27a763
 
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG UPSTREAM_COMMIT
