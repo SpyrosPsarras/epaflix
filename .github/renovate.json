@@ -151,6 +151,16 @@
       "allowedVersions": "<6"
     },
     {
+      "description": "t3 follows the npm nightly dist-tag. The desktop app on the laptop runs nightly and shows every server on an older version as behind. Automerge is set here too because the patch rule below only covers 0.0.x bumps. A 0.1.0-nightly bump is a minor and would otherwise fall back to automerge false.",
+      "matchManagers": ["npm"],
+      "matchFileNames": ["2-k3s/13.t3code/env/tools/package.json"],
+      "matchPackageNames": ["t3"],
+      "followTag": "nightly",
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": false
+    },
+    {
       "description": "T3 patches: Renovate waits for CI itself because this repository has no required status checks for GitHub platform automerge.",
       "matchManagers": ["npm"],
       "matchFileNames": ["2-k3s/13.t3code/env/tools/package.json"],
@@ -181,7 +191,7 @@
       "extractVersionTemplate": "^kustomize/v(?<version>.+)$"
     },
     {
-      "description": "Guest argo-cd and sops pins. Shared npm CLI pins moved to env/tools/package.json under the native npm manager. The guest timer applies merged pins at 06:30 Athens.",
+      "description": "Guest argo-cd and sops pins. Shared npm CLI pins moved to env/tools/package.json under the native npm manager. The guest timer applies merged pins every 2 minutes (provision.sh).",
       "customType": "regex",
       "managerFilePatterns": ["/^2-k3s/13\\.t3code/versions\\.env$/"],
       "matchStrings": [
