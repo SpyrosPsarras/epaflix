@@ -37,8 +37,14 @@ jobs:
           failed=0
           for id in $(printf '%s' "$IDS" | tr ',' ' '); do
             [ -n "$id" ] || continue
-            tags=$(gh api "/user/packages/container/lingarr/versions/$id" \
-              --jq '[.metadata.container.tags[]] | join(",")' || true)
+            # Fail closed: an unreadable tag list must refuse the delete,
+            # not skip the guard. Untagged versions read as empty (allowed).
+            if ! tags=$(gh api "/user/packages/container/lingarr/versions/$id" \
+              --jq '[.metadata.container.tags[]?] | join(",")'); then
+              echo "::error::could not read tags for version $id - refusing to delete"
+              failed=1
+              continue
+            fi
             echo "version $id tags: ${tags:-<none>}"
             if [[ ",${tags}," == *",${PROTECTED}"* || "${tags}" == "${PROTECTED}"* ]]; then
               echo "::error::version $id carries a protected tag ($tags) - it may be the digest the cluster pins. Refusing."
