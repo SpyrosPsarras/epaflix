@@ -6,7 +6,7 @@ The LXC updater and both Kubernetes replicas consume the same tool inventory:
 - Agent CLI versions go in `tools/package.json` and its npm lockfile.
 - Helm, Kustomize, Argo CD and SOPS versions go in `../versions.env`.
 
-After changing image inputs, run `bash tools/sync-runtime-image.sh` from this directory and include the StatefulSet change. CI checks the image reference, builds the image, boots T3 with synthetic configuration, and publishes the tested image on main. ArgoCD may briefly wait for publication before pulling the new content-tagged image. Each replica retains its own home PVC. The LXC daily updater applies the shared inventory after pulling main. Manual apt installs on one server do not propagate.
+After changing image inputs, run `bash tools/sync-runtime-image.sh` from this directory and include the StatefulSet change. CI checks the image reference, builds the image, boots T3 with synthetic configuration, and publishes the tested image on main. ArgoCD may briefly wait for publication before pulling the new content-tagged image. Each replica retains its own home PVC. The LXC updater timer (every 2 minutes) applies the shared inventory after pulling main. The replicas have no self-update path, so the T3 UI shows "Manual update required" for them. The only way their t3 version moves is a merged bump of `tools/package.json`, which ArgoCD rolls out. Manual apt installs on one server do not propagate.
 
 Azure CLI and kubectl use their vendor apt repositories. Adding a new vendor tool also requires its repository setup in provisioning and the Dockerfile. Host services such as SSH and Syncthing remain LXC provisioning responsibilities.
 
