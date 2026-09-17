@@ -1,0 +1,44 @@
+name: lingarr-ghcr-cleanup
+
+# Deletes package versions under ghcr.io/spyrospsarras/lingarr by REST version
+# id (GET /user/packages/container/lingarr/versions lists them). The package is
+# linked to this repo, so GITHUB_TOKEN with packages:write is the credential.
+# Guardrail: the workflow prints the surviving tags after deletion - always
+# confirm the digest pinned in 2-k3s/08.servarr/kustomization.yaml is among
+# them. Never delete a version whose tag matches the pin.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_ids:
+        description: "Comma-separated package version ids to delete (NOT tag names)."
+        required: true
+
+permissions:
+  packages: write
+
+jobs:
+  delete:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete package versions
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IDS: ${{ inputs.version_ids }}
+        run: |
+          set -euo pipefail
+          failed=0
+          for id in $(printf '%s' "$IDS" | tr ',' ' '); do
+            [ -n "$id" ] || continue
+            echo "deleting version $id..."
+            if gh api --method DELETE "/user/packages/container/lingarr/versions/$id"; then
+              echo "deleted $id"
+            else
+              echo "::error::deletion failed for version $id"
+              failed=1
+            fi
+          done
+          echo "--- surviving tags:"
+          gh api /user/packages/container/lingarr/versions \
+            --jq '.[] | .id + " " + (.metadata.container.tags | join(","))' || true
+          exit "$failed"

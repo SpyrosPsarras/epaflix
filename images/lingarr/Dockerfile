@@ -30,7 +30,7 @@ RUN git apply --check /tmp/batch-contract.patch && git apply /tmp/batch-contract
 # source came from; the suffix marks the patch.
 RUN dotnet restore "./Lingarr.Server/Lingarr.Server.csproj" --arch "$TARGETARCH" \
  && dotnet test "./Lingarr.Server.Tests/Lingarr.Server.Tests.csproj" -c Release --nologo -v q \
-      --filter "FullyQualifiedName~LocalAiServiceTests|FullyQualifiedName~SubtitleTranslationServiceTests" \
+      --filter "FullyQualifiedName~LocalAiServiceTests|FullyQualifiedName~SubtitleTranslationServiceTests|FullyQualifiedName~TranslationRequestServiceTests" \
  && dotnet publish "./Lingarr.Server/Lingarr.Server.csproj" -c Release -o /app/publish \
       /p:UseAppHost=false --arch "$TARGETARCH" \
       "/p:Version=0.0.0-dev+${UPSTREAM_COMMIT}.batch-contract" \
