@@ -1,8 +1,14 @@
 name: lingarr-ghcr-cleanup
 
 # Deletes package versions under ghcr.io/spyrospsarras/lingarr by REST version
-# id (GET /user/packages/container/lingarr/versions lists them). The package is
-# linked to this repo, so GITHUB_TOKEN with packages:write is the credential.
+# id (GET /user/packages/container/lingarr/versions lists them, PAT not
+# required for reads with the repo-linked GITHUB_TOKEN... but DELETES via the
+# /user/packages REST endpoint only accept a CLASSIC PAT with delete:packages:
+# GITHUB_TOKEN answers 404 "Package not found" on deletes even for a linked
+# package (tried 2026-09-17). So this workflow authenticates with the
+# GHCR_DELETE_TOKEN repository secret - a classic PAT with read:packages and
+# delete:packages. Create it once (Settings -> Developer settings -> PATs
+# classic), this workflow then owns all ghcr hygiene for this image.
 #
 # Guardrail: versions carrying a tag with the protected prefix are refused.
 # The prefix must match the tag stream the kustomization digest pin resolves
@@ -21,15 +27,24 @@ on:
         default: "28f6a19-batch-contract-"
 
 permissions:
-  packages: write
+  contents: read
 
 jobs:
   delete:
     runs-on: ubuntu-latest
     steps:
+      - name: Check for the deletion credential
+        env:
+          GHCR_DELETE_TOKEN: ${{ secrets.GHCR_DELETE_TOKEN }}
+        run: |
+          if [ -z "$GHCR_DELETE_TOKEN" ]; then
+            echo "::error::repository secret GHCR_DELETE_TOKEN is not set - create a classic PAT with read:packages and delete:packages and add it as this secret. GITHUB_TOKEN cannot delete user-package versions (404 Package not found)."
+            exit 1
+          fi
+
       - name: Delete package versions
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.GHCR_DELETE_TOKEN }}
           IDS: ${{ inputs.version_ids }}
           PROTECTED: ${{ inputs.protected_tag_prefix }}
         run: |
@@ -61,5 +76,5 @@ jobs:
           done
           echo "--- surviving versions:"
           gh api /user/packages/container/lingarr/versions \
-            --jq '.[] | (.id | tostring) + " tags=[" + ([.metadata.container.tags[]] | join(",")) + "]"'
+            --jq '.[] | (.id | tostring) + " tags=[" + ([.metadata.container.tags[]?] | join(",")) + "]"'
           exit "$failed"
