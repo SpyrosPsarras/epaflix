@@ -26,3 +26,4 @@ resources:
   - app-system-upgrade-plans.yaml
   - app-t3code-env.yaml
   - app-traefik.yaml
+  - app-vidar-edge.yaml
