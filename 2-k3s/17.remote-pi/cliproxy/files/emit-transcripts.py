@@ -30,6 +30,12 @@ Env:
   POLL_SECONDS          default 2
   STABLE_SECONDS        default 2      file must stop changing before it is read
   MAX_ATTEMPTS          default 5      re-reads before a file is abandoned
+  MAX_PAYLOAD_BYTES     default 8000000  bigger files are skipped, not parsed.
+                        A request with attachments (PDF/PNG as base64) is
+                        15-18MB and is replayed every turn; reading one whole
+                        needs 3-5x its size in memory and OOMKilled this
+                        sidecar at 128Mi on 2026-09-18. Text-only payloads
+                        top out under 3MB.
   MAX_USER_CHARS        default 2000
   MAX_REPLY_CHARS       default 4000
   MAX_TOOL_RESULT_CHARS default 500
@@ -59,6 +65,7 @@ MAX_USER_CHARS = env_int("MAX_USER_CHARS", 2000)
 MAX_REPLY_CHARS = env_int("MAX_REPLY_CHARS", 4000)
 MAX_TOOL_RESULT_CHARS = env_int("MAX_TOOL_RESULT_CHARS", 500)
 MAX_ATTEMPTS = env_int("MAX_ATTEMPTS", 5)
+MAX_PAYLOAD_BYTES = env_int("MAX_PAYLOAD_BYTES", 8000000)
 EMIT_BACKLOG = env_int("EMIT_BACKLOG", 0) == 1
 
 
@@ -153,6 +160,11 @@ def main():
             if name in seen:
                 continue
             if size == 0 or (now - mtime) < STABLE_SECONDS:
+                continue
+            if size > MAX_PAYLOAD_BYTES:
+                seen.add(name)
+                log("skipping %s: %d bytes exceeds MAX_PAYLOAD_BYTES=%d"
+                    % (name, size, MAX_PAYLOAD_BYTES))
                 continue
             try:
                 emit(name, path)

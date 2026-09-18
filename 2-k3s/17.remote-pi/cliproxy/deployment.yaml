@@ -209,7 +209,7 @@ spec:
               cpu: "10m"
               memory: "32Mi"
             limits:
-              memory: "128Mi"
+              memory: "256Mi"
       containers:
         - name: cliproxy
           image: docker.io/eceasy/cli-proxy-api:v7.2.123
@@ -277,7 +277,7 @@ spec:
               cpu: "25m"
               memory: "128Mi"
             limits:
-              memory: "512Mi"
+              memory: "1Gi"
               ephemeral-storage: "1Gi"
       terminationGracePeriodSeconds: 30
       volumes:
