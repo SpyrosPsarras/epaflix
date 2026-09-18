@@ -28,11 +28,14 @@ jobs:
       # /api/version strips build metadata, so the patch marker is read from
       # the assembly inside the running container.
       # The base must describe the same upstream source as UPSTREAM_COMMIT
-      # (see the Dockerfile header). Renovate bumps BASE_IMAGE from the moving
-      # :main tag, and that tag has already regressed once (PR #1368), so this
-      # check fails closed on a mismatch instead of shipping a client that
-      # predates the patched server.
+      # (see the Dockerfile header). The base digest is moved by hand, following
+      # the upstream-release-watch row #270 procedure - move UPSTREAM_COMMIT,
+      # pick the digest whose org.opencontainers.image.revision label equals it.
+      # The ghcr :main tag has regressed twice (PRs #1368, #1434), so this check
+      # fails closed on a mismatch instead of shipping a client that predates
+      # the patched server.
       - name: Check BASE_IMAGE matches UPSTREAM_COMMIT
+        id: guard
         run: |
           cd images/lingarr
           BASE_IMAGE=$(awk -F'=' '/ARG BASE_IMAGE=/ {print $2}' Dockerfile)
@@ -66,11 +69,18 @@ jobs:
           )
           echo "BASE_IMAGE=$BASE_IMAGE revision=$BASE_REVISION, UPSTREAM_COMMIT=$UPSTREAM_COMMIT"
           if [ "$BASE_REVISION" != "$UPSTREAM_COMMIT" ]; then
-            echo "::error::BASE_IMAGE $BASE_IMAGE was built from revision ${BASE_REVISION:-<none>}, not UPSTREAM_COMMIT $UPSTREAM_COMMIT - pick the ghcr.io/lingarr-translate/lingarr digest whose labels match the commit (the :main tag regresses; see images/lingarr/Dockerfile header)"
+            echo "::error::BASE_IMAGE $BASE_IMAGE was built from revision ${BASE_REVISION:-<none>}, not UPSTREAM_COMMIT $UPSTREAM_COMMIT - pick the ghcr.io/lingarr-translate/lingarr digest whose org.opencontainers.image.revision label equals UPSTREAM_COMMIT (upstream-release-watch row #270 owns this update; the :main tag regresses - see images/lingarr/Dockerfile header)"
             exit 1
           fi
+          # Downstream steps derive everything from the parsed commit so an
+          # UPSTREAM_COMMIT move never touches this workflow (the kustomization
+          # digest pin still moves, per the row #270 procedure).
+          echo "upstream_commit=$UPSTREAM_COMMIT" >> "$GITHUB_OUTPUT"
+          echo "short_commit=${UPSTREAM_COMMIT:0:7}" >> "$GITHUB_OUTPUT"
 
       - name: Build and smoke-test the overlay before publishing anything
+        env:
+          UPSTREAM_COMMIT: ${{ steps.guard.outputs.upstream_commit }}
         run: |
           set -euo pipefail
           cd images/lingarr
@@ -120,7 +130,7 @@ jobs:
           curl -sf -m 5 -o /dev/null "http://127.0.0.1:9876/$asset"
           echo "SPA index and asset $asset served"
 
-          docker exec lingarr-smoke sh -c 'grep -a -q "0.0.0-dev+28f6a190529187c70fddb2b1435157ed1635dccb.batch-contract" /app/Lingarr.Server.dll && test -d /app/wwwroot'
+          docker exec lingarr-smoke sh -c "grep -a -q '0.0.0-dev+${UPSTREAM_COMMIT}.batch-contract' /app/Lingarr.Server.dll && test -d /app/wwwroot"
           echo "patched Lingarr.Server.dll present, wwwroot intact"
 
       - name: Log in to GHCR
@@ -138,8 +148,8 @@ jobs:
           context: images/lingarr
           push: true
           tags: |
-            ghcr.io/spyrospsarras/lingarr:28f6a19-batch-contract-${{ github.sha }}
+            ghcr.io/spyrospsarras/lingarr:${{ steps.guard.outputs.short_commit }}-batch-contract-${{ github.sha }}
 
       - name: Print the digest to pin
         if: github.event_name != 'pull_request'
-        run: docker buildx imagetools inspect ghcr.io/spyrospsarras/lingarr:28f6a19-batch-contract-${{ github.sha }} --format '{{.Manifest.Digest}}'
+        run: docker buildx imagetools inspect ghcr.io/spyrospsarras/lingarr:${{ steps.guard.outputs.short_commit }}-batch-contract-${{ github.sha }} --format '{{.Manifest.Digest}}'

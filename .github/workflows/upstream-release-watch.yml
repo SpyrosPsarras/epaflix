@@ -19,8 +19,8 @@ jobs:
         include:
           - issue: "270"
             upstreamRepo: "lingarr-translate/lingarr"
-            pinnedVersion: "1.2.4"
-            whatToDoWhenItMoves: "The cluster runs the temporary batch-contract overlay build (TEMP OVERRIDE comment in 2-k3s/08.servarr/kustomization.yaml; patch and README in images/lingarr/, which lists the four replaced behaviours: no schema-less fallback in LocalAiService batch translation, returned positions validated against the batch, RunBatch throwing instead of filling original lines, and the content API no longer cancelling on client disconnect - the disconnect-retry convergence endorsed in lingarr#542). Check the release notes (or its git log) for all four equivalents. If ALL are in: execute the revert checklist - drop the newName/digest pin in 2-k3s/08.servarr/kustomization.yaml and pin ghcr.io/lingarr-translate/lingarr at the new release tag with its GHCR digest, drop the TEMP OVERRIDE comment, drop the ghcr.io/spyrospsarras/lingarr disable rule from .github/renovate.json together with the Lingarr build SDK rule (#1372, matchFileNames images/lingarr/Dockerfile - it dies with the directory), update the Lingarr row in docs/servarr-image-pins.md, drop the images/lingarr overlay and the build-lingarr workflow, delete this watch row - all in one PR, then reopen/close #270 accordingly. If only SOME are in: move UPSTREAM_COMMIT in images/lingarr/Dockerfile to the new commit, pick the base digest whose org.opencontainers.image.revision label equals the commit (build-lingarr.yml's guard enforces it), re-check git apply --check, and let the workflow republish - the digest pin then gets updated in the same PR. The original #270 blocker (upstream #432 `6f9d879d` Npgsql UTC fix) is an ancestor of 28f6a19 (compare: ahead, not diverged), so it is inside every overlay build and no longer gates anything. Restarting lingarr rolls the pod - check the open soak/timeout issues first."
+            pinnedVersion: "1.3.0"
+            whatToDoWhenItMoves: "The cluster runs the temporary batch-contract overlay build (TEMP OVERRIDE comment in 2-k3s/08.servarr/kustomization.yaml; patch and README in images/lingarr/, which lists the four replaced behaviours: no schema-less fallback in LocalAiService batch translation, returned positions validated against the batch, RunBatch throwing instead of filling original lines, and the content API no longer cancelling on client disconnect - the disconnect-retry convergence endorsed in lingarr#542). Check the release notes (or its git log) for all four equivalents. If ALL are in: execute the revert checklist - drop the newName/digest pin in 2-k3s/08.servarr/kustomization.yaml and pin ghcr.io/lingarr-translate/lingarr at the new release tag with its GHCR digest, drop the TEMP OVERRIDE comment, drop the ghcr.io/spyrospsarras/lingarr disable rule from .github/renovate.json together with the upstream base-digest disable rule (matchPackageNames ghcr.io/lingarr-translate/lingarr) and the Lingarr build SDK rule (#1372, matchFileNames images/lingarr/Dockerfile - both die with the directory), update the Lingarr row in docs/servarr-image-pins.md, drop the images/lingarr overlay and the build-lingarr workflow, delete this watch row - all in one PR, then reopen/close #270 accordingly. If only SOME are in: move UPSTREAM_COMMIT in images/lingarr/Dockerfile to the new commit, pick the base digest whose org.opencontainers.image.revision label equals the commit (build-lingarr.yml's guard enforces it), re-check git apply --check, and let the workflow republish - the digest pin then gets updated in the same PR. Baseline re-based 1.2.4 -> 1.3.0 on 2026-09-17: 1.3.0 (2026-08-12, the 5eadc933 build) was already consumed - the overlay moved past it to main 28f6a19, which carries the #432 Npgsql UTC fix, and the batch behaviors were re-assessed absent at that commit. The original #270 blocker (upstream #432 `6f9d879d` Npgsql UTC fix) is an ancestor of 28f6a19 (compare: ahead, not diverged), so it is inside every overlay build and no longer gates anything. Restarting lingarr rolls the pod - check the open soak/timeout issues first."
           - issue: "1114"
             upstreamRepo: "utkuozdemir/nvidia_gpu_exporter"
             probe: "nvidia-gpu-alert-rules"
@@ -32,6 +32,13 @@ jobs:
             whatToDoWhenItMoves: "Upstream now offers native EndpointSlice for the control-plane exporters, so `2-k3s/10.observability/control-plane-endpointslices.yaml` (the 3 static `discovery.k8s.io/v1` slices from #147) can be retired. Turn the new chart toggle on in `2-k3s/10.observability/prometheus-values.yaml`, then delete `control-plane-endpointslices.yaml` and its entry in `2-k3s/10.observability/kustomization.yaml`. Check FIRST that the chart-rendered slice carries the same master IPs and the `http-metrics` port name, and confirm all 9 control-plane targets are still UP in Prometheus before deleting anything - this is a live observability change, so give it its own PR and watch the targets. ArgoCD's cluster-global `core/v1 Endpoints` exclusion stays either way (#199 Option A rejected - not scopable)."
           - issue: "870"
             upstreamRepo: "lingarr-translate/lingarr"
+            # Baseline stays 1.2.4 on purpose: 1.3.0 shipped (2026-08-12) while the
+            # reopen step was dead (missing GH_REPO, every run since 2026-08-17 failed),
+            # so the overdue condition check - ResumeTranslationRequests re-enqueue
+            # behaviour or [DisableConcurrentExecution] - has not been executed for it.
+            # Upstream added "prevent duplicate job by checking request id" (#527,
+            # 3fc2f50) in that window, so the next fire drives a real decision, not a
+            # rubber stamp. Re-base to 1.3.0 only in the PR that closes this row.
             pinnedVersion: "1.2.4"
             whatToDoWhenItMoves: "Check whether the release notes (or its git log) show `TranslationRequestService.ResumeTranslationRequests()` no longer re-enqueues Pending/InProgress requests unconditionally, or that `TranslationJob` gained `[DisableConcurrentExecution]`. Either one retires the boot-time guard. If so, delete `2-k3s/08.servarr/lingarr/files/reconcile-job-queue.sql` and its `reconcile-job-queue.sql=` line in the `lingarr-jobqueue-guard` `configMapGenerator:` entry of `2-k3s/08.servarr/kustomization.yaml` - the same configMap entry and `/sql` volume also carry `reconcile-ai-provider.sql`, the AI-provider pin, so keep that file, its generator line and the volume; in `2-k3s/08.servarr/lingarr/lingarr.yaml` remove only the `psql -f /sql/reconcile-job-queue.sql` if-block, keeping the `reconcile-ai-provider.sql` one. Keep the `enforce-db-invariants` initContainer itself - it still enforces `request_timeout` (#844). If neither is fixed, leave everything as it is and close this issue again."
           - issue: "1290"
@@ -55,6 +62,14 @@ jobs:
       TRACKING_ISSUE: ${{ matrix.issue }}
       NEXT_ACTION: ${{ matrix.whatToDoWhenItMoves }}
       GH_TOKEN: ${{ github.token }}
+      # The workflow never checks out the repository (all probes use gh api with
+      # full repo paths), so gh has no repo context for the issue commands in the
+      # reopen step. Without this, "gh issue view/reopen" fall back to inferring
+      # the repo from git and die with "fatal: not a git repository" - the exact
+      # failure of every scheduled run since 2026-08-17, which silently ate the
+      # #270/#870/#1221 move signals (1.3.0 shipped 2026-08-12 and was never
+      # reported).
+      GH_REPO: ${{ github.repository }}
 
     steps:
       - name: Resolve latest upstream stable release
