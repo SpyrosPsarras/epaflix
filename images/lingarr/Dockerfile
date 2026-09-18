@@ -9,11 +9,16 @@
 # from the base unchanged.
 #
 # UPSTREAM_COMMIT and the base digest must describe the same source: the base
-# image's assembly InformationalVersion is 0.0.0-dev+<UPSTREAM_COMMIT>. This is
-# load-bearing: Renovate tracks this FROM line against the moving ghcr :main tag,
-# and that tag has already been re-pushed backwards once (2026-09-13 merged a
-# bump to the 2026-08-12 5eadc933 build while UPSTREAM_COMMIT said 28f6a19, PR
-# #1368). build-lingarr.yml fails the build when the two disagree.
+# image's assembly InformationalVersion is 0.0.0-dev+<UPSTREAM_COMMIT>, and the
+# base carries the wwwroot build for that same commit. UPSTREAM_COMMIT is main
+# 28f6a19, seven commits past release 1.3.0 (the 5eadc933 build), so it keeps
+# the upstream #432 Npgsql UTC fix; its matching base digest is the ghcr :main
+# build of that commit. Renovate no longer tracks this FROM line: :main has
+# been re-pushed backwards twice (PR #1368, then re-raised as #1434 on
+# 2026-09-17), and a digest bump without moving UPSTREAM_COMMIT first is always
+# wrong. Base digest moves go through upstream-release-watch row #270: move
+# UPSTREAM_COMMIT, pick the digest whose org.opencontainers.image.revision
+# label equals it, and build-lingarr.yml fails the build when the two disagree.
 ARG UPSTREAM_COMMIT=28f6a190529187c70fddb2b1435157ed1635dccb
 ARG BASE_IMAGE=ghcr.io/lingarr-translate/lingarr@sha256:c20a50283a3bf67cea84fc661aec5f5721ee248ceea1504da4f5c47880ee3e65
 
