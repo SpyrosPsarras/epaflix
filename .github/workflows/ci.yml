@@ -248,6 +248,7 @@ jobs:
             2-k3s/11.argocd/apps
             2-k3s/12.renovate
             2-k3s/20.bread
+            2-k3s/21.vidar-edge
             2-k3s/maintenance
             2-k3s/maintenance/system-upgrade/controller
           "
