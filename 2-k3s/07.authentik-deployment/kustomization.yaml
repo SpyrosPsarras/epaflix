@@ -11,14 +11,14 @@ generators:
 helmCharts:
   - name: authentik
     repo: https://charts.goauthentik.io
-    version: "2026.8.2" # bump in lockstep with the image MINOR
+    version: "2026.8.3" # bump in lockstep with the image MINOR
     releaseName: authentik
     namespace: app-authentik
     valuesFile: helm-values.yaml
     includeCRDs: false
 images:
   - name: ghcr.io/goauthentik/server
-    newTag: 2026.8.2
+    newTag: 2026.8.3
 
 configMapGenerator:
   - name: authentik-blueprint-check-script
