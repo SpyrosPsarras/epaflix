@@ -97,19 +97,24 @@ images:
   # untranslated subtitles as translated (522 positions kept in English in 3h, 2026-09-13),
   # and its schema-less fallback crashed with NullReferenceException on null model content
   # (98 "All configured batch translation services failed." deaths 09-12..09-15, the signal
-  # behind the lingarr-drain-watch failures that kept the maintenance App Degraded).
+  # behind the lingarr-drain-watch failures that kept the maintenance App Degraded). The
+  # content-translation API also cancelled work whenever the caller disconnected (Bazarr's
+  # 1920s HTTP timeout), an endless retry loop on big files - the patch detaches the
+  # translation from the request token and converges retries onto the running request
+  # (upstream #542, maintainer-endorsed option 3).
   # Revert to ghcr.io/lingarr-translate/lingarr when upstream LocalAiService no longer
   # falls back to a schema-less request, validates returned positions against the batch,
-  # and RunBatch throws instead of filling original lines (watched by upstream-release-watch).
+  # RunBatch throws instead of filling original lines, and /api/translate/content no
+  # longer cancels on client disconnect (watched by upstream-release-watch).
   # Renovate must not track this image (disabled in .github/renovate.json).
   - name: ghcr.io/lingarr-translate/lingarr
     newName: ghcr.io/spyrospsarras/lingarr
-    digest: sha256:2f886387ee0e9ed69ca6ae2a91c10ab378b0a52b94ea10e00614c435491030c6
+    digest: sha256:e17453745614c5414cde78d99970a96cc1504997aa0b0f96be0b2c9632b88aab
   - name: iampuid0/neutarr
     newTag: 1.11.1@sha256:c3df05a854c93aac640708e002e8fe85193f73da8406c8a230a5484a342a1107
   - name: qbittorrentofficial/qbittorrent-nox
     newTag: 5.2.3-1@sha256:9ebb534fe30bab98622cb84a8c3acecfd88319b2d540f52ecdec7b9f866374d7
   - name: ghcr.io/spyrospsarras/airvpn-bluetit
-    digest: sha256:33f259ea33feaf40925f8bfe7aa033e3d952ceb04490814478f17d6f75f41c29
+    digest: sha256:50a6cff38548dc825ae46df0d35e71d1308be8900db3fa6bd80c2f6c5fdf3d63
   - name: ghcr.io/spyrospsarras/vpn-picker
-    digest: sha256:271e8ed47ac1f2625205fabbe45c3d2dedb162b458c011af0a95163da42c6747
+    digest: sha256:5bed0bc43f13df980ff33ca5634adbae89cfc8adeb028e6f77fed6dc38777f8c

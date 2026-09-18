@@ -320,6 +320,399 @@ index 43ca0d8..e7252dd 100644
      }
  
      private void VerifyRequestsSent(int count)
+diff --git a/Lingarr.Server.Tests/Services/TranslationRequestServiceTests.cs b/Lingarr.Server.Tests/Services/TranslationRequestServiceTests.cs
+new file mode 100644
+index 0000000..1253375
+--- /dev/null
++++ b/Lingarr.Server.Tests/Services/TranslationRequestServiceTests.cs
+@@ -0,0 +1,370 @@
++using System;
++using System.Collections.Generic;
++using System.Linq;
++using System.Threading;
++using System.Threading.Tasks;
++using Hangfire;
++using Lingarr.Contracts.Models;
++using Lingarr.Contracts.Models.Batch;
++using Lingarr.Contracts.Translation;
++using Lingarr.Core.Configuration;
++using Lingarr.Core.Data;
++using Lingarr.Core.Entities;
++using Lingarr.Core.Enum;
++using Lingarr.Server.Hubs;
++using Lingarr.Server.Interfaces.Services;
++using Lingarr.Server.Interfaces.Services.Translation;
++using Lingarr.Server.Models.FileSystem;
++using Lingarr.Server.Services;
++using Microsoft.AspNetCore.SignalR;
++using Microsoft.Data.Sqlite;
++using Microsoft.EntityFrameworkCore;
++using Microsoft.Extensions.Logging.Abstractions;
++using Moq;
++using Xunit;
++
++namespace Lingarr.Server.Tests.Services;
++
++/// <summary>
++/// Tests for the content-translation POST path: a disconnecting client must
++/// not cancel the translation (token decoupling), and a re-POST for content
++/// that is already translating or already translated must converge on the
++/// existing request instead of starting a second translation.
++/// </summary>
++public class TranslationRequestServiceTests
++{
++    static TranslationRequestServiceTests()
++    {
++        // The duplicate poll interval defaults to 15s; the tests drive it at
++        // 1ms so the wait loop is exercised without real sleeping. Only this
++        // test class touches the static.
++        TranslationRequestService.DuplicatePollInterval = TimeSpan.FromMilliseconds(1);
++    }
++
++    private sealed class Harness
++    {
++        public LingarrDbContext DbContext { get; init; } = null!;
++        public string ConnectionString { get; init; } = null!;
++        public Mock<IBatchTranslationService> BatchServiceMock { get; init; } = null!;
++        public TranslationRequestService Service { get; init; } = null!;
++    }
++
++    private static Harness CreateHarness(Func<List<BatchSubtitleItem>, Dictionary<int, string>>? batchTranslate = null)
++    {
++        // SQLite in memory, not the InMemory provider: the service uses
++        // ExecuteUpdateAsync (terminal-state writes), which InMemory refuses.
++        // A named shared-cache database keeps the store alive across context
++        // instances while letting a second context write concurrently (the
++        // wait-flip tests) - one plain :memory: connection cannot do both.
++        var databaseName = $"memdb_{Guid.NewGuid():N}";
++        var connectionString = $"DataSource=file:{databaseName}?mode=memory&cache=shared";
++        var connection = new SqliteConnection(connectionString: connectionString);
++        connection.Open();
++        var options = new DbContextOptionsBuilder<LingarrDbContext>()
++            .UseSqlite(connection)
++            .Options;
++        var dbContext = new LingarrDbContext(options);
++        dbContext.Database.EnsureCreated();
++
++        // One mock implementing both interfaces: TranslateContentAsync takes
++        // the batch path only when entry.Service is IBatchTranslationService.
++        var translationServiceMock = new Mock<ITranslationService>();
++        translationServiceMock
++            .Setup(t => t.GetLanguagePair(
++                It.IsAny<string>(),
++                It.IsAny<string>(),
++                It.IsAny<CancellationToken>()))
++            .ReturnsAsync((string source, string target, CancellationToken _) =>
++                new LanguagePair { Source = source, Target = target, Tier = MatchTier.Exact });
++        var batchInterface = translationServiceMock.As<IBatchTranslationService>();
++        if (batchTranslate != null)
++        {
++            batchInterface
++                .Setup(b => b.TranslateBatchAsync(
++                    It.IsAny<List<BatchSubtitleItem>>(),
++                    It.IsAny<string>(),
++                    It.IsAny<string>(),
++                    It.IsAny<CancellationToken>()))
++                .ReturnsAsync((List<BatchSubtitleItem> items, string _, string _, CancellationToken _) =>
++                    batchTranslate(items));
++        }
++
++        var factoryMock = new Mock<ITranslationServiceFactory>();
++        factoryMock
++            .Setup(f => f.CreateTranslationServices(It.IsAny<IReadOnlyList<string>>()))
++            .Returns(new List<TranslationServiceEntry>
++            {
++                new("localai", translationServiceMock.Object, batchInterface.Object)
++            });
++
++        var settingServiceMock = new Mock<ISettingService>();
++        settingServiceMock
++            .Setup(s => s.GetSettings(It.IsAny<IEnumerable<string>>()))
++            .ReturnsAsync(new Dictionary<string, string>
++            {
++                [SettingKeys.Translation.UseBatchTranslation] = "true",
++                [SettingKeys.Translation.ServiceType] = "[\"localai\"]",
++                [SettingKeys.Translation.MaxBatchSize] = "25",
++                [SettingKeys.Translation.StripSubtitleFormatting] = "false",
++                [SettingKeys.Translation.PreserveLineBreaks] = "false"
++            });
++
++        var mediaServiceMock = new Mock<IMediaService>();
++        mediaServiceMock
++            .Setup(m => m.GetMovieIdOrSyncFromRadarrMovieId(It.IsAny<int>()))
++            .ReturnsAsync(7);
++
++        var hubClientsMock = new Mock<IHubClients>();
++        hubClientsMock
++            .Setup(c => c.Group(It.IsAny<string>()))
++            .Returns(new Mock<IClientProxy>().Object);
++        var hubContextMock = new Mock<IHubContext<TranslationRequestsHub>>();
++        hubContextMock
++            .SetupGet(h => h.Clients)
++            .Returns(hubClientsMock.Object);
++
++        var service = new TranslationRequestService(
++            dbContext,
++            new Mock<IBackgroundJobClient>().Object,
++            hubContextMock.Object,
++            factoryMock.Object,
++            new Mock<IProgressService>().Object,
++            new Mock<IStatisticsService>().Object,
++            mediaServiceMock.Object,
++            settingServiceMock.Object,
++            new Mock<ISubtitleService>().Object,
++            new Mock<ITranslationRequestEventService>().Object,
++            NullLogger<TranslationRequestService>.Instance);
++
++        return new Harness
++        {
++            DbContext = dbContext,
++            ConnectionString = connectionString,
++            BatchServiceMock = batchInterface,
++            Service = service
++        };
++    }
++
++    private static TranslateAbleSubtitleContent Content(int lineCount, string title = "Show · file.srt") => new()
++    {
++        ArrMediaId = 5,
++        MediaType = MediaType.Movie,
++        Title = title,
++        SourceLanguage = "en",
++        TargetLanguage = "el",
++        Lines = Enumerable.Range(1, lineCount)
++            .Select(i => new BatchSubtitleLine { Position = i, Line = $"line {i}" })
++            .ToList()
++    };
++
++    private static TranslationRequest StoredRequest(int id, TranslationStatus status, DateTimeOffset? createdAt = null) => new()
++    {
++        Id = id,
++        MediaId = 7,
++        Title = "Show · file.srt",
++        SourceLanguage = "en",
++        TargetLanguage = "el",
++        MediaType = MediaType.Movie,
++        Status = status,
++        CreatedAt = createdAt ?? DateTimeOffset.UtcNow,
++        UpdatedAt = DateTimeOffset.UtcNow
++    };
++
++    private static void SeedLines(LingarrDbContext db, int requestId, params (int position, string target)[] lines)
++    {
++        foreach (var (position, target) in lines)
++        {
++            db.TranslationRequestLines.Add(new TranslationRequestLine
++            {
++                TranslationRequestId = requestId,
++                Position = position,
++                Source = $"source {position}",
++                Target = target
++            });
++        }
++        db.SaveChanges();
++    }
++
++    [Fact]
++    public async Task TranslateContentAsync_ClientDisconnects_TranslationStillCompletes()
++    {
++        // Arrange: the caller's connection is already gone (Bazarr hit its HTTP
++        // timeout). Before the token decoupling this cancelled the request and
++        // marked it Cancelled; now the work must run to completion.
++        var harness = CreateHarness(items => items.ToDictionary(i => i.Position, i => $"μετάφραση {i.Position}"));
++        var disconnected = new CancellationToken(canceled: true);
++
++        // Act
++        var results = await harness.Service.TranslateContentAsync(Content(2), disconnected);
++
++        // Assert
++        Assert.Equal(2, results.Length);
++        Assert.Equal("μετάφραση 1", results[0].Line);
++        var stored = await harness.DbContext.TranslationRequests.SingleAsync();
++        Assert.Equal(TranslationStatus.Completed, stored.Status);
++    }
++
++    [Fact]
++    public async Task TranslateContentAsync_CompletedDuplicateWithSameLines_DeliversStoredLines()
++    {
++        // Arrange: a completed request for the same content exists (the first
++        // caller timed out and the detached work finished afterwards). The
++        // retry must be served from the stored lines, not re-translated.
++        var harness = CreateHarness();
++        harness.DbContext.TranslationRequests.Add(StoredRequest(1, TranslationStatus.Completed));
++        SeedLines(harness.DbContext, 1, (1, "η γάτα"), (2, "ο σκύλος"), (3, "το ποντίκι"));
++        harness.DbContext.SaveChanges();
++
++        // Act
++        var results = await harness.Service.TranslateContentAsync(Content(3), CancellationToken.None);
++
++        // Assert: delivered by position from storage; no second request row.
++        Assert.Equal(3, results.Length);
++        Assert.Equal("ο σκύλος", results[1].Line);
++        Assert.Equal(1, await harness.DbContext.TranslationRequests.CountAsync());
++    }
++
++    [Fact]
++    public async Task TranslateContentAsync_CompletedDuplicateWithDifferentLines_TranslatesFresh()
++    {
++        // Arrange: the stored request translated a different file version (a
++        // re-downloaded episode). The count mismatch must fall through to a
++        // fresh translation, never deliver mismatched lines.
++        var harness = CreateHarness(items => items.ToDictionary(i => i.Position, i => $"νέο {i.Position}"));
++        harness.DbContext.TranslationRequests.Add(StoredRequest(1, TranslationStatus.Completed));
++        SeedLines(harness.DbContext, 1, (1, "η γάτα"), (2, "ο σκύλος"));
++        harness.DbContext.SaveChanges();
++
++        // Act
++        var results = await harness.Service.TranslateContentAsync(Content(3), CancellationToken.None);
++
++        // Assert: fresh lines, and the fresh attempt is its own request row.
++        Assert.Equal(3, results.Length);
++        Assert.Equal("νέο 1", results[0].Line);
++        Assert.Equal(2, await harness.DbContext.TranslationRequests.CountAsync());
++    }
++
++    [Fact]
++    public async Task TranslateContentAsync_RunningDuplicateEventuallyDeliversStoredLines()
++    {
++        // Arrange: the first attempt is still running (detached). The retry
++        // waits; a background completion lets the wait deliver the lines.
++        var harness = CreateHarness();
++        harness.DbContext.TranslationRequests.Add(StoredRequest(1, TranslationStatus.InProgress));
++        SeedLines(harness.DbContext, 1, (1, "η γάτα"), (2, "ο σκύλος"));
++        harness.DbContext.SaveChanges();
++
++        var flip = Task.Run(async () =>
++        {
++            await Task.Delay(50);
++            // A second context on the same connection: the service under test
++            // is polling with its own context instance (not thread-safe).
++            var options = new DbContextOptionsBuilder<LingarrDbContext>()
++                .UseSqlite(harness.ConnectionString)
++                .Options;
++            await using var other = new LingarrDbContext(options);
++            var row = await other.TranslationRequests.SingleAsync(r => r.Id == 1);
++            row.Status = TranslationStatus.Completed;
++            row.CompletedAt = DateTimeOffset.UtcNow;
++            await other.SaveChangesAsync();
++        });
++
++        // Act
++        var results = await harness.Service.TranslateContentAsync(Content(2), CancellationToken.None);
++        await flip;
++
++        // Assert
++        Assert.Equal(2, results.Length);
++        Assert.Equal("η γάτα", results[0].Line);
++        Assert.Equal(1, await harness.DbContext.TranslationRequests.CountAsync());
++    }
++
++    [Fact]
++    public async Task TranslateContentAsync_StaleRunningDuplicate_ReapedAndFreshTranslationRuns()
++    {
++        // Arrange: an InProgress row with no line activity for over an hour -
++        // a restart or crash left it behind. The wait must not hang on it:
++        // reap it as Interrupted, then translate fresh in this request.
++        var harness = CreateHarness(items => items.ToDictionary(i => i.Position, i => "φρέσκο"));
++        harness.DbContext.TranslationRequests.Add(
++            StoredRequest(1, TranslationStatus.InProgress, DateTimeOffset.UtcNow.AddHours(-2)));
++        harness.DbContext.SaveChanges();
++
++        // Act
++        var results = await harness.Service.TranslateContentAsync(Content(2), CancellationToken.None);
++
++        // Assert: the zombie is Interrupted and the fresh work completed as a
++        // new row.
++        Assert.Equal(2, results.Length);
++        Assert.Equal("φρέσκο", results[0].Line);
++        var zombie = await GetRowUnchecked(harness, 1);
++        Assert.Equal(TranslationStatus.Interrupted, zombie.Status);
++        Assert.Equal(2, await harness.DbContext.TranslationRequests.CountAsync());
++    }
++
++    [Fact]
++    public async Task TranslateContentAsync_RunningDuplicateFails_RetryFallsThroughToFreshTranslation()
++    {
++        // Arrange: the first attempt is running but dies with Failed. The
++        // waiting retry must not deliver the failed request's lines: it falls
++        // through to a fresh translation (a new row).
++        var harness = CreateHarness(items => items.ToDictionary(i => i.Position, i => "φρέσκο"));
++        harness.DbContext.TranslationRequests.Add(StoredRequest(1, TranslationStatus.InProgress));
++        SeedLines(harness.DbContext, 1, (1, "η γάτα"), (2, "ο σκύλος"));
++        harness.DbContext.SaveChanges();
++
++        var flip = Task.Run(async () =>
++        {
++            await Task.Delay(50);
++            var options = new DbContextOptionsBuilder<LingarrDbContext>()
++                .UseSqlite(harness.ConnectionString)
++                .Options;
++            await using var other = new LingarrDbContext(options);
++            var row = await other.TranslationRequests.SingleAsync(r => r.Id == 1);
++            row.Status = TranslationStatus.Failed;
++            row.CompletedAt = DateTimeOffset.UtcNow;
++            await other.SaveChangesAsync();
++        });
++
++        // Act
++        var results = await harness.Service.TranslateContentAsync(Content(2), CancellationToken.None);
++        await flip;
++
++        // Assert: fresh lines delivered; the failed attempt is preserved as history.
++        Assert.Equal(2, results.Length);
++        Assert.Equal("φρέσκο", results[0].Line);
++        Assert.Equal(2, await harness.DbContext.TranslationRequests.CountAsync());
++    }
++
++    [Fact]
++    public async Task TranslateContentAsync_WaitingClientDisconnects_DoesNotStartSecondTranslation()
++    {
++        // Arrange: the running duplicate must never be raced by a fresh
++        // translation. A pre-cancelled parent token simulates the client
++        // hanging up while the waiter polls.
++        var harness = CreateHarness();
++        harness.DbContext.TranslationRequests.Add(StoredRequest(1, TranslationStatus.InProgress));
++        SeedLines(harness.DbContext, 1, (1, "η γάτα"), (2, "ο σκύλος"));
++        harness.DbContext.SaveChanges();
++        var disconnected = new CancellationToken(canceled: true);
++
++        // Act + Assert: the wait rethrows the client's cancel...
++        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
++            harness.Service.TranslateContentAsync(Content(2), disconnected));
++        // ...and no second request row was created for the content.
++        Assert.Equal(1, await harness.DbContext.TranslationRequests.CountAsync());
++        var stillRunning = await GetRowUnchecked(harness, 1);
++        Assert.Equal(TranslationStatus.InProgress, stillRunning.Status);
++    }
++
++    private static async Task<TranslationRequest> GetRowUnchecked(Harness harness, int id)
++    {
++        // Fresh context: ExecuteUpdateAsync bypasses change tracking, so a
++        // context that already tracks the row would return the stale entity.
++        var options = new DbContextOptionsBuilder<LingarrDbContext>()
++            .UseSqlite(harness.ConnectionString)
++            .Options;
++        await using var other = new LingarrDbContext(options);
++        return await other.TranslationRequests.SingleAsync(r => r.Id == id);
++    }
++}
+diff --git a/Lingarr.Server/Lingarr.Server.csproj b/Lingarr.Server/Lingarr.Server.csproj
+index 37060e2..732c4b7 100644
+--- a/Lingarr.Server/Lingarr.Server.csproj
++++ b/Lingarr.Server/Lingarr.Server.csproj
+@@ -13,6 +13,12 @@
+     <NoWarn>$(NoWarn);1591</NoWarn>
+   </PropertyGroup>
+ 
++  <ItemGroup>
++    <!-- The test suite exercises the content-translation wait loop through its
++         internal poll-interval seam (no 15s sleeps in tests). -->
++    <InternalsVisibleTo Include="Lingarr.Server.Tests" />
++  </ItemGroup>
++
+   <ItemGroup>
+     <PackageReference Include="BCrypt.Net-Next" />
+     <PackageReference Include="DeepL.net" />
 diff --git a/Lingarr.Server/Services/SubtitleTranslationService.cs b/Lingarr.Server/Services/SubtitleTranslationService.cs
 index d0081ec..7c57a83 100644
 --- a/Lingarr.Server/Services/SubtitleTranslationService.cs
@@ -527,3 +920,197 @@ index a474c20..27ac541 100644
      }
  
      private async Task<Dictionary<int, string>> TranslateBatchWithGenerateApi(
+diff --git a/Lingarr.Server/Services/TranslationRequestService.cs b/Lingarr.Server/Services/TranslationRequestService.cs
+index 2a4dbbf..c814610 100644
+--- a/Lingarr.Server/Services/TranslationRequestService.cs
++++ b/Lingarr.Server/Services/TranslationRequestService.cs
+@@ -760,9 +760,14 @@ public class TranslationRequestService : ITranslationRequestService
+             JobType = TranslationJobType.Translation
+         };
+ 
+-        // Link cancel token with new source to be able to cancel the async translation
+-        var asyncTranslationCancellationTokenSource = new CancellationTokenSource();
+-        var cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(parentCancellationToken, asyncTranslationCancellationTokenSource.Token);
++        // A disconnecting client is not a cancel (upstream #542, option 3): the
++        // request-aborted token must not reach the translation work, so a
++        // caller with an HTTP timeout shorter than the translation leaves the
++        // request InProgress instead of Cancelled. Only the UI/API cancel
++        // source can stop it; the next POST for the same content then awaits
++        // this request in ReuseOrAwaitExistingAsync and delivers its stored
++        // lines.
++        var cancellationTokenSource = new CancellationTokenSource();
+         var cancellationToken = cancellationTokenSource.Token;
+ 
+         try
+@@ -787,25 +792,19 @@ public class TranslationRequestService : ITranslationRequestService
+             }
+             var translationService = services[0].Service;
+ 
+-            // Skip if an active content-translation row for this media+target already exists.
+-            var existingId = await _dbContext.TranslationRequests
+-                .Where(r => r.MediaId == translationRequest.MediaId
+-                         && r.MediaType == translationRequest.MediaType
+-                         && r.Title == translationRequest.Title
+-                         && r.SourceLanguage == translationRequest.SourceLanguage
+-                         && r.TargetLanguage == translationRequest.TargetLanguage
+-                         && (r.Status == TranslationStatus.Pending || r.Status == TranslationStatus.InProgress))
+-                .Select(r => (int?)r.Id)
+-                .FirstOrDefaultAsync(cancellationToken);
+-
+-            if (existingId != null)
++            // Reuse an existing translation for this content when one is
++            // alive (wait for it) or already finished (deliver its stored
++            // lines). A client disconnect is not a cancel - see the detached
++            // token above - so the caller's retry after its own HTTP timeout
++            // must converge here instead of starting a second translation
++            // (upstream #542, option 3). null means nothing reusable: fall
++            // through and translate fresh.
++            var reuse = await ReuseOrAwaitExistingAsync(
++                translationRequest, translateAbleContent.Lines.Count,
++                cancellationToken, parentCancellationToken);
++            if (reuse != null)
+             {
+-                _logger.LogInformation(
+-                    "Duplicate content-translation request skipped for mediaId {MediaId} ({MediaType}) '{Title}' {Src}->{Tgt} (existing id {Id}).",
+-                    translationRequest.MediaId, translationRequest.MediaType,
+-                    translationRequest.Title,
+-                    translationRequest.SourceLanguage, translationRequest.TargetLanguage, existingId.Value);
+-                return Array.Empty<BatchTranslatedLine>();
++                return reuse;
+             }
+ 
+             // Add TranslationRequest
+@@ -917,6 +916,14 @@ public class TranslationRequestService : ITranslationRequestService
+         }
+         catch (OperationCanceledException ex)
+         {
++            // Nothing was persisted yet (the caller disconnected while the
++            // reuse-wait was polling): there is no row to cancel, and logging
++            // against id 0 would write junk. The detached work, if any, is
++            // untouched.
++            if (translationRequest.Id == 0)
++            {
++                throw;
++            }
+             // ExecuteUpdateAsync bypasses change-tracking so a concurrent write cannot abort this save.
+             var now = DateTimeOffset.UtcNow;
+             await _dbContext.TranslationRequests
+@@ -962,6 +969,118 @@ public class TranslationRequestService : ITranslationRequestService
+         }
+     }
+ 
++    /// <summary>
++    /// Finds a reusable translation for the incoming content and either
++    /// delivers its stored lines or waits for the running request to finish:
++    /// a client disconnect is not a cancel (the translation runs detached
++    /// from the request-aborted token), so the caller's retry after its own
++    /// HTTP timeout must converge on the running request instead of starting
++    /// a second one. A completed request is reused by delivering its stored
++    /// lines; a line count mismatch (the source file changed between
++    /// attempts) falls through to a fresh translation.
++    /// A Pending/InProgress request with no line activity for
++    /// <see cref="StaleRequestAfter"/> is a zombie left behind by a restart
++    /// or a crashed run: it is reaped as Interrupted so the next POST starts
++    /// fresh. The threshold must sit above the longest normal silent stretch
++    /// of one batch, not above the whole translation.
++    /// Returns null when nothing is reusable (translate fresh). A client
++    /// disconnect while waiting rethrows: falling through would start a
++    /// second translation of content that is already running.
++    /// </summary>
++    private static readonly TimeSpan StaleRequestAfter = TimeSpan.FromMinutes(60);
++    internal static TimeSpan DuplicatePollInterval = TimeSpan.FromSeconds(15);
++
++    private async Task<BatchTranslatedLine[]?> ReuseOrAwaitExistingAsync(
++        TranslationRequest translationRequest,
++        int expectedLineCount,
++        CancellationToken dbCancellationToken,
++        CancellationToken pollCancellationToken)
++    {
++        var existing = await _dbContext.TranslationRequests
++            .Where(r => r.MediaId == translationRequest.MediaId
++                     && r.MediaType == translationRequest.MediaType
++                     && r.Title == translationRequest.Title
++                     && r.SourceLanguage == translationRequest.SourceLanguage
++                     && r.TargetLanguage == translationRequest.TargetLanguage
++                     && (r.Status == TranslationStatus.Pending
++                         || r.Status == TranslationStatus.InProgress
++                         || r.Status == TranslationStatus.Completed))
++            .OrderByDescending(r => r.Id)
++            .Select(r => new { r.Id, r.Status, r.CreatedAt })
++            .FirstOrDefaultAsync(dbCancellationToken);
++        if (existing == null)
++        {
++            return null;
++        }
++
++        _logger.LogInformation(
++            "Content-translation request for mediaId {MediaId} ({MediaType}) '{Title}' {Src}->{Tgt} reuses request {Id} in status {Status}.",
++            translationRequest.MediaId, translationRequest.MediaType, translationRequest.Title,
++            translationRequest.SourceLanguage, translationRequest.TargetLanguage, existing.Id, existing.Status);
++
++        try
++        {
++            var status = existing.Status;
++            while (status is TranslationStatus.Pending or TranslationStatus.InProgress)
++            {
++                var lastActivity = await _dbContext.TranslationRequestLines
++                    .Where(l => l.TranslationRequestId == existing.Id)
++                    .OrderByDescending(l => l.CreatedAt)
++                    .Select(l => (DateTimeOffset?)l.CreatedAt)
++                    .FirstOrDefaultAsync(dbCancellationToken);
++                if ((lastActivity ?? existing.CreatedAt) < DateTimeOffset.UtcNow - StaleRequestAfter)
++                {
++                    _logger.LogWarning(
++                        "Content-translation request {Id} is {Status} but shows no line activity for {Hours:0}h - marking it Interrupted so the next request starts fresh.",
++                        existing.Id, status, StaleRequestAfter.TotalHours);
++                    var now = DateTimeOffset.UtcNow;
++                    // CancellationToken.None: the reap must finish even if the
++                    // waiting client hangs up mid-call.
++                    await _dbContext.TranslationRequests
++                        .Where(r => r.Id == existing.Id)
++                        .ExecuteUpdateAsync(s => s
++                            .SetProperty(r => r.Status, TranslationStatus.Interrupted)
++                            .SetProperty(r => r.ErrorMessage, $"stale: no line activity for {StaleRequestAfter.TotalHours:0}h")
++                            .SetProperty(r => r.CompletedAt, now)
++                            .SetProperty(r => r.UpdatedAt, now), CancellationToken.None);
++                    await _eventService.LogEvent(existing.Id, TranslationStatus.Interrupted, "stale: no line activity");
++                    await UpdateActiveCount();
++                    return null;
++                }
++                await Task.Delay(DuplicatePollInterval, pollCancellationToken);
++                var row = await _dbContext.TranslationRequests
++                    .Where(r => r.Id == existing.Id)
++                    .Select(r => (TranslationStatus?)r.Status)
++                    .FirstOrDefaultAsync(dbCancellationToken);
++                if (row == null)
++                {
++                    // Row vanished between polls; nothing to reuse.
++                    return null;
++                }
++                status = row.Value;
++            }
++            if (status != TranslationStatus.Completed)
++            {
++                return null;
++            }
++            var stored = await _dbContext.TranslationRequestLines
++                .Where(l => l.TranslationRequestId == existing.Id)
++                .OrderBy(l => l.Position)
++                .Select(l => new BatchTranslatedLine { Position = l.Position, Line = l.Target })
++                .ToListAsync(dbCancellationToken);
++            return stored.Count == expectedLineCount ? stored.ToArray() : null;
++        }
++        catch (OperationCanceledException)
++        {
++            // The waiting client went away. The running translation is
++            // detached from this token and keeps going; the caller's next
++            // attempt will find it terminal and reuse or fall through.
++            // Rethrow instead of returning null: falling through would start
++            // a second translation of content that is already running.
++            throw;
++        }
++    }
++
+     /// <summary>
+     /// Get the Lingarr's media id for the Episode or the Show
+     /// </summary>
