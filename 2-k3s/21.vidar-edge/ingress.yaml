@@ -1,0 +1,63 @@
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: vidar-edge-https
+  namespace: vidar-edge
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`playlist.epaflix.com`) || Host(`podstudio.epaflix.com`)
+      kind: Rule
+      middlewares:
+        - name: security-headers
+          namespace: traefik-system
+      services:
+        - name: vidar-edge
+          port: 80
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: vidar-edge-http
+  namespace: vidar-edge
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`playlist.epaflix.com`) || Host(`podstudio.epaflix.com`)
+      kind: Rule
+      middlewares:
+        - name: redirect-https
+          namespace: traefik-system
+      services:
+        - name: vidar-edge
+          port: 80
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: vidar-edge-internal
+  namespace: vidar-edge
+spec:
+  entryPoints:
+    - internal
+  routes:
+    - match: Host(`playlist.epaflix.com`) || Host(`podstudio.epaflix.com`)
+      kind: Rule
+      services:
+        - name: vidar-edge
+          port: 80
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
