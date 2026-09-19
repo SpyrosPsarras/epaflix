@@ -89,6 +89,34 @@ spec:
           - "*.epaflix.com"
 
 ---
+# LAN DNS points at 192.168.10.102, which exposes only the internal listener.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: truenas-internal-https
+  namespace: traefik-system
+spec:
+  entryPoints:
+    - internal
+  routes:
+    - match: Host(`truenas.epaflix.com`)
+      kind: Rule
+      middlewares:
+        - name: security-headers
+          namespace: traefik-system
+      services:
+        - name: truenas-ui
+          port: 8443
+          scheme: https
+          serversTransport: truenas-insecure
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
+
+---
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
