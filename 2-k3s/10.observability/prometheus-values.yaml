@@ -2,8 +2,8 @@
 prometheus:
   prometheusSpec:
     replicas: 1 # Single replica due to PV limitations
-    retention: 15d # dedup cut ingestion to ~1.1 GiB/day so 15d (~16 GiB) fits the 20GB cap; drift is reported by PrometheusRetentionBelowConfigured
-    retentionSize: "20GB"
+    retention: 15d # the #1056 dedup measured ~1.0 GiB/day (774M samples/day, 261k series, 2026-09-19), so 15d (~15 GiB) fits under the cap; drift below the 13d floor is reported by PrometheusRetentionBelowConfigured
+    retentionSize: "16GB" # base-2 parse = 16 GiB ("20GB" was 20 GiB, not the 18.63 GiB assumed until 2026-09). While the pre-#1056 heavy tail ages out, the store pins at the cap: 16 GiB + ~1.3 GiB WAL = ~69% of the 25Gi claim, under the 85% disk alert - at 20GB it pinned at ~85.4% (measured 2026-09-19) and fired PrometheusStorageNearFull for the rest of the ramp. Steady state is ~15 GiB, so the cap binds only on ingestion growth: above ~1.07 GiB/day (16/15), while the 13d floor starts failing above ~1.23 GiB/day (16/13) and between the two the window shrinks silently within the floor. Do not raise it: the PVC sits on k3s-worker-62's 48G root disk and outgrowing it broke kubelet image GC (#463)
 
     resources:
       requests:
