@@ -214,6 +214,32 @@ spec:
           volumeMounts:
             - name: config
               mountPath: /config
+
+        - name: init-disk-io-mode
+          image: busybox:1.36
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              conf=/config/qBittorrent/config/qBittorrent.conf
+              [ -f "$conf" ] || { echo "no conf yet, first run - qBittorrent will create it"; exit 0; }
+              if grep -q '^Session\\DiskIOType=3$' "$conf"; then
+                echo "already DiskIOType=3, nothing to do"; exit 0
+              fi
+              cp "$conf" "$conf.bak-$(date +%s)"
+              if grep -q '^Session\\DiskIOType=' "$conf"; then
+                sed -i 's/^Session\\DiskIOType=.*/Session\\DiskIOType=3/' "$conf"
+              elif grep -q '^\[BitTorrent\]' "$conf"; then
+                sed -i 's/^\[BitTorrent\]/[BitTorrent]\nSession\\DiskIOType=3/' "$conf"
+              else
+                printf '\n[BitTorrent]\nSession\\DiskIOType=3\n' >> "$conf"
+              fi
+              echo "forced DiskIOType=3 (simple pread/pwrite):"
+              grep '^Session\\DiskIOType=' "$conf"
+          volumeMounts:
+            - name: config
+              mountPath: /config
       containers:
         - name: qbittorrent
           image: qbittorrentofficial/qbittorrent-nox

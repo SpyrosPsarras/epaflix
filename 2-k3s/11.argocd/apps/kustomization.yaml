@@ -27,3 +27,4 @@ resources:
   - app-t3code-env.yaml
   - app-traefik.yaml
   - app-vidar-edge.yaml
+  - app-gh-runner.yaml
