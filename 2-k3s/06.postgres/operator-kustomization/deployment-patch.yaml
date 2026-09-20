@@ -1,0 +1,44 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cnpg-controller-manager
+  namespace: cnpg-system
+spec:
+  template:
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values:
+                      - qbittorrent
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: manager
+          args:
+            - controller
+            - --leader-elect
+            - --leader-lease-duration=60
+            - --leader-renew-deadline=45
+            - --max-concurrent-reconciles=10
+            - --config-map-name=cnpg-controller-manager-config
+            - --secret-name=cnpg-controller-manager-config
+            - --webhook-port=9443
+          livenessProbe:
+            httpGet:
+              path: /readyz
+              port: 9443
+              scheme: HTTPS
+            timeoutSeconds: 5
+            failureThreshold: 6
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 9443
+              scheme: HTTPS
+            timeoutSeconds: 5
+            failureThreshold: 6
