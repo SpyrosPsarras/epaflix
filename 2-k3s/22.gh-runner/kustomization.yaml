@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - storage.yaml
+  - deployment.yaml
+
+generators:
+  - ksops-generator.yaml
+
+images:
+  - name: ghcr.io/actions/actions-runner
+    newTag: 2.329.0@sha256:75599cd393958a52142f489a160123f5b9b21605a40609696deb13d49867d53f
