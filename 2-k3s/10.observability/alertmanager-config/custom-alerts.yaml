@@ -459,6 +459,46 @@ spec:
               transient; the alert needs the latest run to stay failed for 5m, and it clears
               by itself once the next hourly run succeeds.
 
+    - name: aaaa-tripwire
+      interval: 60s
+      rules:
+        - alert: AaaaTripwireCheckFailed
+          expr: |
+            max by (job_name) (
+              kube_job_failed{namespace="kube-system", job_name=~"aaaa-tripwire.*"} > 0
+              and on (job_name) (
+                max by (job_name) (kube_job_status_start_time{namespace="kube-system", job_name=~"aaaa-tripwire.*"})
+                  >= scalar(max(kube_job_status_start_time{namespace="kube-system", job_name=~"aaaa-tripwire.*"}))
+              )
+            )
+          for: 5m
+          labels:
+            severity: warning
+            component: dns
+          annotations:
+            summary: "AAAA leak guard check failed (or could not run)"
+            description: >-
+              The nightly aaaa-tripwire Job ({{ $labels.job_name }}) failed — either an
+              internal *.epaflix.com name lost its AAAA guard, the Pi-hole could not be
+              checked at all, or IPv6 is live on a host that must stay IPv4-only. Read the
+              FAIL lines in the Job log:
+              aaaa/<name> means the name's dnsmasq `address=` target is a LAN IP, no guard
+              covers it any more (the Unbound local-zone in
+              /etc/unbound/unbound.conf.d/no-aaaa-leak.conf on the Pi-hole LXC 1030 was
+              removed, or its exact DNS-only Cloudflare record was deleted), and the
+              proxied wildcard's synthesized AAAA now answers LAN AAAA queries for it.
+              guard/<name> is the same no-guard case, caught before the AAAA probes run.
+              records/read means the SSH reach failed and NOTHING was verified — an
+              unverifiable tripwire is not a clean one (#725 shape). ipv6/* means a host
+              grew a global v6 address or route, the #882 trigger: while that is true,
+              every unguarded name is leaking live, not latent. The guard policy and the
+              fix recipe live in 1-proxmox/pihole/aaaa-tripwire.sh and
+              1-proxmox/pihole/unbound-no-aaaa-leak.conf; the wildcard decision is #966,
+              the cliproxy fix that started the nightly runs is #1079. Fix on the Pi-hole,
+              then `kubectl delete job -n kube-system <job>` to let the next run confirm
+              green (or run the script from the workstation for the two SKIPped
+              hypervisor IPv6 checks). Clears by itself once the next nightly run passes.
+
     - name: traefik
       interval: 60s
       rules:
