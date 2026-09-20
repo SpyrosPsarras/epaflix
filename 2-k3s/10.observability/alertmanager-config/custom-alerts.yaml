@@ -59,7 +59,7 @@ spec:
             component: prometheus
           annotations:
             summary: "Prometheus storage usage high"
-            description: "Prometheus PVC {{ $labels.persistentvolumeclaim }} is {{ $value | humanizePercentage }} full (threshold 85%)."
+            description: "Prometheus PVC {{ $labels.persistentvolumeclaim }} is {{ $value | humanizePercentage }} full (threshold 85%). The 16GB (base-2 = 16 GiB) retentionSize pins a binding store at ~69% (up to ~76% with a ~3 GiB WAL spike). Above 85% is real disk pressure on this PVC, which lives on k3s-worker-62's 48G root disk - outgrowing it broke kubelet image GC (#463)."
 
         - alert: PrometheusRetentionBelowConfigured
           expr: |
@@ -74,16 +74,25 @@ spec:
               Prometheus holds {{ $value | printf "%.1f" }} days of history,
               below the 13d floor for the 15d configured in
               2-k3s/10.observability/prometheus-values.yaml. The
-              retentionSize ("20GB" = 18.63 GiB) binds before the time bound
-              once ingestion passes ~1.2 GiB/day, which is the #913 failure
-              mode: documented retention and real retention drift apart with
-              nothing reporting it. Check prometheus_tsdb_head_series against
-              the ~260k post-#1056 baseline; the pre-dedup state was ~578k
-              series and ~2.3 GiB/day. The 7d hold rides out the ~5d ramp
-              while history accumulates from the old 8d regime to the 15d
-              target, so expect silence there too. Do NOT raise retentionSize
-              above the 25Gi claim: the PVC lives on k3s-worker-62's 48G root
-              disk and Prometheus outgrowing it broke kubelet image GC (#463).
+              retentionSize binds before the time bound once ingestion passes
+              ~1.07 GiB/day (16/15), which is the #913 failure mode:
+              documented retention and real retention drift apart with
+              nothing reporting it. The 13d floor starts failing above
+              ~1.23 GiB/day (16/13); between the two the window shrinks
+              silently within the floor. The size unit is base-2: "16GB" =
+              16 GiB, and the old "20GB" was 20 GiB, not the 18.63 GiB
+              assumed until 2026-09. A binding cap reads ~69% disk (16 GiB +
+              ~1.3 GiB WAL of 25Gi; a ~3 GiB WAL spike still reads ~76%), so
+              PrometheusStorageNearFull no longer tracks cap binding - this
+              alert is the drift detector. Check prometheus_tsdb_head_series
+              against the ~260k post-#1056 baseline; the pre-dedup state was
+              ~578k series and ~2.3 GiB/day. The 7d hold does NOT ride out
+              the current ramp: the hold ends ~2026-09-22 while the window
+              only reaches 13d around 2026-09-26, so expect ONE firing in
+              that week that clears by itself a few days later - not a new
+              incident. Do NOT raise retentionSize above the 25Gi claim: the
+              PVC lives on k3s-worker-62's 48G root disk and Prometheus
+              outgrowing it broke kubelet image GC (#463).
 
     - name: proxmox
       interval: 60s
