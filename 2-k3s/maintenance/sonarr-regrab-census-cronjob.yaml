@@ -1,0 +1,528 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sonarr-regrab-census-script
+  namespace: servarr
+data:
+  regrab.py: |
+    #!/usr/bin/env python3
+    """Sonarr re-grab census (#1133). Python stdlib only - no pip, no apk.
+
+    Measures the #1133 counts from Sonarr's own History API over a rolling
+    WINDOW_DAYS window ending at run time:
+
+      1. grabs total in window
+      2. grabs of an infohash this Sonarr already imported, and how many
+         distinct infohashes - the headline count. Should trend to zero once
+         the #834 queue-read fix lands (Sonarr v5, #1131: no v5 release as of
+         2026-08-24), and a count that stays flat means the fix did not reach
+         this path.
+      3. episodes with more than one import in window
+      4. episodeFileDeleted events followed by a downloadFolderImported event
+         for the same episode within 5 minutes, in window
+
+    Mechanism (#834): a tracked download whose newest DownloadHistory event is
+    DownloadFailed stays out of the queue by design, and the stale-cache
+    defect pins others at Imported. Either way the release has no queue row,
+    QueueSpecification cannot reject it, and the next scheduled search picks
+    the same release again. Each re-grab writes a fresh DownloadGrabbed row,
+    which is why the full history is fetched: the "already imported"
+    back-reference must see imports that predate the window.
+
+    Sonarr-only, per #1133. Radarr has never shown this shape; if it does,
+    that is a separate issue.
+
+    Run with --selftest to exercise the pure logic against synthetic history
+    pages without touching the network.
+    """
+    import datetime
+    import json
+    import os
+    import sys
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    TIMEOUT = 60
+
+    SONARR_URL = os.environ.get(
+        "SONARR_URL", "http://sonarr.servarr.svc.cluster.local:8989"
+    ).rstrip("/")
+    SONARR_API_KEY = os.environ.get("SONARR_API_KEY", "")
+
+    WINDOW_DAYS = float(os.environ.get("WINDOW_DAYS", "60"))
+    MAX_PAGES = int(os.environ.get("MAX_PAGES", "24"))
+    PAGE_SIZE = int(os.environ.get("PAGE_SIZE", "2000"))
+    TOP_N = int(os.environ.get("TOP_N", "10"))
+
+    PAIR_WINDOW_SECONDS = 300.0
+
+    DATE_FORMATS = ("%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ")
+
+
+    def fail(msg):
+        """Abort LOUD. Never let a failed read look like 'no re-grabs'."""
+        print("ERROR: " + msg, file=sys.stderr)
+        sys.exit(2)
+
+
+    def http_status(exc):
+        """Status code only - never echo a response body, it can carry a key."""
+        return str(exc.code) if isinstance(exc, urllib.error.HTTPError) else "-"
+
+
+    def parse_date(text):
+        """Parse a Sonarr History 'date' into an aware UTC datetime."""
+        for fmt in DATE_FORMATS:
+            try:
+                return datetime.datetime.strptime(text, fmt).replace(
+                    tzinfo=datetime.timezone.utc)
+            except (ValueError, TypeError):
+                continue
+        raise ValueError("unparseable date %r" % (text,))
+
+
+    def project_records(records, page_no):
+        """Validate and shrink one page of history to the fields this job uses.
+
+        The 'data' dict is deliberately dropped: it carries URLs with embedded
+        API keys (#834). Each row survives as a 7-tuple indexed by position:
+        id, date, eventType, downloadId (uppercased), episodeId, seriesId,
+        sourceTitle. downloadId is the infohash; qBittorrent reports it
+        lowercased while the *arr APIs store it uppercased (#834).
+        """
+        rows = []
+        for rec in records:
+            if not isinstance(rec, dict):
+                fail("history page %d has a non-object record" % page_no)
+            try:
+                when = parse_date(rec.get("date"))
+            except ValueError as exc:
+                fail("history page %d: %s" % (page_no, exc))
+            digest = rec.get("downloadId")
+            if not isinstance(digest, str):
+                digest = ""
+            rows.append((
+                rec.get("id"),
+                when,
+                rec.get("eventType"),
+                digest.strip().upper(),
+                rec.get("episodeId"),
+                rec.get("seriesId"),
+                str(rec.get("sourceTitle") or ""),
+            ))
+        return rows
+
+
+    def assemble_pages(pages, total_records):
+        """Dedup joined pages, verify pagination actually covered the history.
+
+        Rows shift between page fetches (a new grab lands at the top of a
+        date-descending list and pushes older rows down), so the same history
+        row can appear on two pages: dedup by id, keeping the first sighting.
+        Order within one page must be newest-first - a page that is not means
+        the requested sort was ignored, and then nothing about coverage can be
+        trusted (#834's history-sort lesson).
+
+        The join stopping before unique ids reach totalRecords means whole
+        pages were never read (a lying count or a cap), and every count would
+        undercount - that fails closed.
+        """
+        seen = {}
+        for page in pages:
+            for row in page:
+                key = row[0]
+                if key in seen:
+                    continue
+                seen[key] = row
+        rows = list(seen.values())
+        for page in pages:
+            for i in range(len(page) - 1):
+                if page[i][1] < page[i + 1][1]:
+                    fail("a history page did not come back newest-first despite "
+                         "sortDirection=descending - refusing to count against "
+                         "an unverifiable read (#834)")
+        if len(rows) < total_records:
+            fail("joined %d unique history rows but Sonarr reports %d total - "
+                 "pagination stopped early or the cap is too small; refusing "
+                 "to count a partial history"
+                 % (len(rows), total_records))
+        return rows
+
+
+    def compute_counts(rows, now, window_start):
+        """The #1133 counts. Pure, so the selftest can pin every rule.
+
+        - a grab counts as a re-grab only when an import of the SAME infohash
+          exists strictly BEFORE the grab (any date, full history);
+        - delete->import pairs are window-scoped, the definition that produced
+          the #1133 count of 294 exactly;
+        - multi-import episodes are >=2 downloadFolderImported events per
+          episodeId in window. The issue's DB query measured 159 for its
+          window; this API definition measures 121 for the same window, so
+          the two are NOT the same grouping - the number that must trend to
+          zero is the re-grab count, and the trend is compared against runs
+          of THIS job, not against the issue's DB numbers.
+        """
+        in_window = [r for r in rows if window_start <= r[1] <= now]
+        grabs = [r for r in in_window if r[2] == "grabbed"]
+        imports = [r for r in in_window if r[2] == "downloadFolderImported"]
+        deletes = [r for r in in_window if r[2] == "episodeFileDeleted"]
+
+        first_import = {}
+        import_count = {}
+        for r in rows:
+            if r[2] == "downloadFolderImported" and r[3]:
+                import_count[r[3]] = import_count.get(r[3], 0) + 1
+                if r[3] not in first_import or r[1] < first_import[r[3]]:
+                    first_import[r[3]] = r[1]
+
+        regrabs = [g for g in grabs if g[3] and g[3] in first_import
+                   and first_import[g[3]] < g[1]]
+        regrab_hashes = {g[3] for g in regrabs}
+
+        imports_by_ep = {}
+        for r in imports:
+            if r[4] is not None:
+                imports_by_ep.setdefault(r[4], []).append(r[1])
+        multi_import_episodes = {ep: len(ts) for ep, ts in imports_by_ep.items()
+                                 if len(ts) > 1}
+
+        pair = 0
+        for d in deletes:
+            if d[4] is None:
+                continue
+            for t in imports_by_ep.get(d[4], []):
+                gap = (t - d[1]).total_seconds()
+                if 0 <= gap <= PAIR_WINDOW_SECONDS:
+                    pair += 1
+                    break
+
+        return {
+            "grabs": grabs,
+            "imports": imports,
+            "deletes": deletes,
+            "regrabs": regrabs,
+            "regrab_hashes": regrab_hashes,
+            "multi_import_episodes": multi_import_episodes,
+            "delete_import_pairs": pair,
+            "import_count": import_count,
+            "first_import": first_import,
+        }
+
+
+    def top_offenders(counts, top_n):
+        """The per-release detail, newest grab of each infohash for context."""
+        lines = []
+        newest_grab = {}
+        for g in counts["regrabs"]:
+            if g[3] not in newest_grab or g[1] > newest_grab[g[3]][1]:
+                newest_grab[g[3]] = g
+        ordered = sorted(counts["regrabs"], key=lambda g: g[3])
+        per_hash = {}
+        for g in ordered:
+            per_hash.setdefault(g[3], []).append(g)
+        for digest, grabs in sorted(per_hash.items(),
+                                    key=lambda kv: (-len(kv[1]), kv[0]))[:top_n]:
+            g = newest_grab[digest]
+            lines.append(
+                "    %-8s  seriesId=%-6s episodeId=%-8s grabs=%-3d "
+                "imports=%-3d  last grab %s  first import %s  %s"
+                % (digest[:8],
+                   g[5] if g[5] is not None else "-",
+                   g[4] if g[4] is not None else "-",
+                   len(grabs),
+                   counts["import_count"].get(digest, 0),
+                   g[1].strftime("%m-%d %H:%M"),
+                   counts["first_import"].get(digest).strftime("%Y-%m-%d"),
+                   g[6][:60]))
+        return lines
+
+
+    def fetch_page(page_no):
+        query = urllib.parse.urlencode({
+            "page": page_no,
+            "pageSize": PAGE_SIZE,
+            "sortKey": "date",
+            "sortDirection": "descending",
+        })
+        req = urllib.request.Request(
+            "%s/api/v3/history?%s" % (SONARR_URL, query),
+            headers={"X-Api-Key": SONARR_API_KEY})
+        try:
+            with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+                return json.loads(resp.read().decode())
+        except Exception as exc:  # noqa: BLE001 - any failure is fatal here
+            fail("history fetch for page %d failed (%s, http=%s)"
+                 % (page_no, type(exc).__name__, http_status(exc)))
+
+
+    def main():
+        if "--selftest" in sys.argv:
+            return selftest()
+
+        if not SONARR_API_KEY:
+            fail("SONARR_API_KEY is empty")
+
+        now = datetime.datetime.now(datetime.timezone.utc)
+        window_start = now - datetime.timedelta(days=WINDOW_DAYS)
+        print("=== sonarr re-grab census @ %s ==="
+              % now.strftime("%Y-%m-%dT%H:%M:%SZ"))
+        print("window: %.0f days (%s .. %s)"
+              % (WINDOW_DAYS, window_start.strftime("%Y-%m-%d"),
+                 now.strftime("%Y-%m-%d")))
+
+        pages = []
+        total_records = None
+        for page_no in range(1, MAX_PAGES + 1):
+            doc = fetch_page(page_no)
+            if not isinstance(doc, dict) or not isinstance(
+                    doc.get("records"), list) or not isinstance(
+                    doc.get("totalRecords"), int):
+                fail("history response for page %d is not a well-formed "
+                     "paged payload" % page_no)
+            if total_records is None:
+                total_records = doc["totalRecords"]
+                if total_records == 0:
+                    if doc["records"]:
+                        fail("page 1 carries %d record(s) but totalRecords=0 - "
+                             "the payload contradicts itself, refusing to read "
+                             "that as an empty history" % len(doc["records"]))
+                    break
+            elif doc["totalRecords"] != total_records:
+                fail("totalRecords changed between page 1 (%d) and page %d (%d)"
+                     % (total_records, page_no, doc["totalRecords"]))
+            if not doc["records"]:
+                fail("page %d came back empty despite totalRecords=%d"
+                     % (page_no, total_records))
+            pages.append(project_records(doc["records"], page_no))
+            if len({r[0] for p in pages for r in p}) >= total_records:
+                break
+        else:
+            fail("%d pages fetched, over the MAX_PAGES=%d cap - history is "
+                 "bigger than this job is allowed to read; raise MAX_PAGES"
+                 % (MAX_PAGES, MAX_PAGES))
+
+        rows = assemble_pages(pages, total_records) if pages else []
+        if rows:
+            oldest = min(r[1] for r in rows)
+            newest = max(r[1] for r in rows)
+            print("history: %d rows (%s .. %s), %d page(s) read"
+                  % (len(rows), oldest.strftime("%Y-%m-%d"),
+                     newest.strftime("%Y-%m-%d"), len(pages)))
+            if oldest > window_start:
+                print("NOTE: history does not reach the window start; counts "
+                      "cover the shorter span since %s (young install or "
+                      "lowered retention)" % oldest.strftime("%Y-%m-%d"))
+        else:
+            print("history: 0 rows")
+
+        counts = compute_counts(rows, now, window_start)
+        print("grabs total in window: %d | import events in window: %d | "
+              "episodeFileDeleted in window: %d"
+              % (len(counts["grabs"]), len(counts["imports"]),
+                 len(counts["deletes"])))
+        print("grabs of an infohash this Sonarr already imported: %d across %d "
+              "infohashes" % (len(counts["regrabs"]),
+                              len(counts["regrab_hashes"])))
+        print("episodes with more than one import: %d"
+              % len(counts["multi_import_episodes"]))
+        print("episodeFileDeleted -> downloadFolderImported within 5 min: %d"
+              % counts["delete_import_pairs"])
+        if counts["regrabs"]:
+            print("top re-grabbed infohashes:")
+            for line in top_offenders(counts, TOP_N):
+                print(line)
+
+        if not counts["regrabs"]:
+            print("\nOK: no re-grabs of an already-imported release in the "
+                  "window (#1133 acceptance: trend to zero after the #834 fix).")
+            return 0
+
+        print("\nFINDING: %d re-grab(s) of already-imported releases in the "
+              "last %.0f days. This is the #1133 measure: the count should "
+              "trend to zero once the #834 queue-read fix lands; a count that "
+              "stays flat means the fix did not reach this path. The release "
+              "has no queue row (tracked download pinned at Imported or "
+              "Failed), so QueueSpecification cannot reject the repeat grab."
+              % (len(counts["regrabs"]), WINDOW_DAYS))
+        return 1
+
+
+    def selftest():
+        T0 = datetime.datetime(2026, 9, 20, 12, 0, 0,
+                               tzinfo=datetime.timezone.utc)
+        H = datetime.timedelta(hours=1)
+
+        def row(rid, dt, ev, digest="", ep=None, series=None, title=""):
+            return (rid, dt, ev, digest.upper(), ep, series, title)
+
+        def pages_of(*page_rows):
+            return [list(p) for p in page_rows]
+
+        # parse_date: both formats, and a reject
+        assert parse_date("2026-09-20T07:05:54Z") == T0.replace(hour=7, minute=5,
+                                                                second=54)
+        assert parse_date("2026-09-20T07:05:54.123Z") == T0.replace(
+            hour=7, minute=5, second=54,
+            microsecond=123000)
+        try:
+            parse_date("not-a-date")
+            raise AssertionError("parse_date accepted garbage")
+        except ValueError:
+            pass
+
+        # project_records drops everything else and uppercases the infohash
+        got = project_records([
+            {"id": 1, "date": "2026-09-20T07:05:54Z", "eventType": "grabbed",
+             "downloadId": "abc", "episodeId": 7, "seriesId": 3,
+             "sourceTitle": "t", "data": {"downloadUrl": "key"}},
+            {"id": 2, "date": "2026-09-20T06:00:00Z",
+             "eventType": "downloadFolderImported", "downloadId": None,
+             "episodeId": None},
+        ], 1)
+        assert got == [(1, parse_date("2026-09-20T07:05:54Z"), "grabbed", "ABC",
+                        7, 3, "t"),
+                       (2, parse_date("2026-09-20T06:00:00Z"),
+                        "downloadFolderImported", "", None, None, "")]
+
+        def must_fail(fn, *a):
+            """Every fail-closed path must exit 2, not return."""
+            try:
+                fn(*a)
+            except SystemExit as exc:
+                assert exc.code == 2, exc.code
+                return
+            raise AssertionError("%s did not fail closed" % fn.__name__)
+
+        # assemble_pages: dedup by id, first sighting kept
+        w0 = T0 - datetime.timedelta(days=60)
+        dup = assemble_pages(
+            pages_of([row(1, T0, "grabbed", "a"), row(2, T0 - H, "grabbed", "b")],
+                     [row(2, T0 - H, "grabbed", "b"), row(3, T0 - 2 * H, "grabbed",
+                                                          "c")]),
+            3)
+        assert sorted(r[0] for r in dup) == [1, 2, 3]
+
+        # unsorted page fails closed
+        must_fail(assemble_pages,
+                  pages_of([row(1, T0, "grabbed", "a"),
+                            row(2, T0 + H, "grabbed", "b")]),
+                  2)
+
+        # short join against the reported total fails closed
+        must_fail(assemble_pages,
+                  pages_of([row(1, T0, "grabbed", "a")]), 2)
+
+        # compute_counts on a synthetic history
+        h = "DC108147"
+        rows = [
+            row(10, T0 - 40 * H, "grabbed", h, 5, 310, "rel"),
+            row(11, T0 - 39 * H, "downloadFolderImported", h, 5, 310, "rel"),
+            row(12, T0 - 20 * H, "grabbed", h, 5, 310, "rel"),
+            row(13, T0 - 10 * H, "grabbed", h, 5, 310, "rel"),
+            row(14, T0 - 9 * H, "downloadFolderImported", h, 5, 310, "rel"),
+            # import AFTER a grab: that grab is not a re-grab
+            row(15, T0 - 8 * H, "grabbed", "BBBB", 6, 310, "other"),
+            row(16, T0 - 7 * H, "downloadFolderImported", "BBBB", 6, 310, "other"),
+            # import at the same second as the grab: not strictly earlier
+            row(17, T0 - 6 * H, "grabbed", "CCCC", 7, 310, "same"),
+            row(18, T0 - 6 * H, "downloadFolderImported", "CCCC", 7, 310, "same"),
+            # an infohash imported long before the window: still a re-grab
+            row(19, T0 - 100 * H, "downloadFolderImported", "DDDD", 8, 310,
+                "old"),
+            row(20, T0 - 30 * H, "grabbed", "DDDD", 8, 310, "old"),
+            # grabbed but never imported: context, not a re-grab
+            row(21, T0 - 5 * H, "grabbed", "EEEE", 9, 310, "fresh"),
+        ]
+        counts = compute_counts(rows, T0, w0)
+        assert len(counts["grabs"]) == 7, counts["grabs"]
+        assert len(counts["regrabs"]) == 3, counts["regrabs"]
+        assert counts["regrab_hashes"] == {h, "DDDD"}
+        assert counts["multi_import_episodes"] == {5: 2}
+        assert counts["delete_import_pairs"] == 0
+        assert counts["import_count"][h] == 2
+        assert counts["first_import"][h] == T0 - 39 * H
+
+        # delete -> import pairing: inside, on the edge, and just outside
+        rows = [
+            row(1, T0 - 3 * H, "episodeFileDeleted", "", 5, 310),
+            row(2, T0 - 3 * H + datetime.timedelta(seconds=299),
+                "downloadFolderImported", "A", 5, 310),
+            row(3, T0 - 2 * H, "episodeFileDeleted", "", 6, 310),
+            row(4, T0 - 2 * H + datetime.timedelta(seconds=301),
+                "downloadFolderImported", "B", 6, 310),
+            row(5, T0 - 1 * H, "episodeFileDeleted", "", 7, 310),
+            row(6, T0 - 1 * H - datetime.timedelta(seconds=60),
+                "downloadFolderImported", "C", 7, 310),
+            row(7, T0 - 30 * 60 * H, "episodeFileDeleted", "", 8, 310),
+        ]
+        counts = compute_counts(rows, T0, w0)
+        assert counts["delete_import_pairs"] == 1, counts["delete_import_pairs"]
+
+        # future-dated rows are outside the window, not inside it
+        rows = [row(1, T0 + H, "grabbed", "FFFF", 1, 310, "future")]
+        counts = compute_counts(rows, T0, w0)
+        assert counts["grabs"] == []
+
+        print("selftest OK")
+        return 0
+
+
+    if __name__ == "__main__":
+        sys.exit(main())
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: sonarr-regrab-census
+  namespace: servarr
+  labels:
+    app: sonarr-regrab-census
+spec:
+  schedule: "10 7 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 6
+  failedJobsHistoryLimit: 6
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 300
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 2592000  # keep 30 days
+      template:
+        metadata:
+          labels:
+            app: sonarr-regrab-census
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: sonarr-regrab-census
+              image: python:3.13-alpine
+              imagePullPolicy: IfNotPresent
+              command: ["python3", "/script/regrab.py"]
+              env:
+                - name: WINDOW_DAYS
+                  value: "60"
+                - name: SONARR_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: unpackerr-secret
+                      key: UN_SONARR_0_API_KEY
+              volumeMounts:
+                - name: script
+                  mountPath: /script
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "500m"
+                  memory: "256Mi"
+          volumes:
+            - name: script
+              configMap:
+                name: sonarr-regrab-census-script
+                defaultMode: 0444
