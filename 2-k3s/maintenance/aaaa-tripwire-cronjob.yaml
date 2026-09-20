@@ -1,0 +1,110 @@
+---
+# Nightly re-run of the LAN AAAA tripwire (1-proxmox/pihole/aaaa-tripwire.sh)
+# from inside the cluster, so the #1079 class of regression - an internal
+# *.epaflix.com name losing its Unbound local-zone or exact DNS-only
+# Cloudflare record and silently falling through to the proxied wildcard's
+# synthesized AAAA - is caught continuously instead of the next time someone
+# runs the script by hand from the workstation.
+#
+# What a failed run means (the FAIL lines in the Job log say which):
+#   - aaaa/<name>: the name's dnsmasq `address=` target is a LAN IP, the
+#     wildcard's AAAA now reaches LAN AAAA queries, and NO guard exists
+#     (no covering Unbound local-zone on the Pi-hole, no exact DNS-only
+#     Cloudflare record). While the LAN is IPv4-only (#868/#882) this is
+#     latent; the moment IPv6 exists anywhere it is live.
+#   - ipv6/*: a host that must stay IPv4-only grew a global address, a
+#     default route or an on-link prefix, which is the #882 trigger.
+#   - records/read: the Pi-hole could not be reached over SSH at all, so
+#     nothing was verified. Fail closed - an unverifiable tripwire is not
+#     a clean tripwire (#725 shape). A guard/<name> FAIL is the same
+#     no-guard case as aaaa/<name>, seen before the AAAA probes run.
+#
+# Mechanism, verbatim from 1-proxmox/pihole/aaaa-tripwire.sh: it SSHes to
+# the Pi-hole (192.168.10.30, Proxmox LXC 1030), reads every
+# `address=/name/<ip>` line from /etc/dnsmasq.d/*.conf, and requires each
+# non-hairpin name (anything not on the public Traefik LB 192.168.10.101)
+# to be covered by an Unbound local-zone (`/etc/unbound/unbound.conf.d/`)
+# or an exact DNS-only Cloudflare record (e.g. wg-hop, #547). Skips (the
+# two hypervisor IPv6 checks, unreachable with the pihole-only key) are
+# expected and never fail the run.
+#
+# Script source of truth: 1-proxmox/pihole/aaaa-tripwire.sh. The copy in
+# files/ is a byte-for-byte mirror enforced by aaaa-tripwire-cronjob.test.sh
+# in CI; edit the canonical file and re-copy, never the other way round.
+#
+# The SSH key comes from the cluster Secret `aaaa-tripwire-ssh`
+# (id_ed25519 = the vault's /SSH/t3code-pihole key, authorized on the
+# Pi-hole's /root/.ssh/authorized_keys as `t3code`). The maintenance
+# overlay is sops-free by CI design, so the Secret is cluster-side, like
+# node-os-updater-ssh before it. Recreate with:
+#   kubectl create secret generic aaaa-tripwire-ssh -n kube-system \
+#     --from-file=id_ed25519=<private key file>
+# Rotation: new keypair -> vault /SSH/t3code-pihole -> authorized_keys on
+# the Pi-hole -> recreate this Secret. If a `from=` restriction is ever
+# added to the authorized_keys line, the k3s pod CIDR 10.42.0.0/16 must
+# be included or every run fails at records/read.
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: aaaa-tripwire
+  namespace: kube-system
+  labels:
+    app: aaaa-tripwire
+spec:
+  schedule: "40 3 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 6
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 600
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app: aaaa-tripwire
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: tripwire
+              image: alpine:3.19
+              imagePullPolicy: IfNotPresent
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -eu
+
+                  apk add --no-cache openssh-client bind-tools bash iproute2 >/dev/null
+
+                  install -d -m 700 /root/.ssh
+                  install -m 600 /ssh-secret/id_ed25519 /root/.ssh/id_ed25519
+                  ssh-keyscan -t ed25519 192.168.10.30 >> /root/.ssh/known_hosts 2>/dev/null
+
+                  bash /script/aaaa-tripwire.sh
+              volumeMounts:
+                - name: script
+                  mountPath: /script
+                  readOnly: true
+                - name: ssh-key
+                  mountPath: /ssh-secret
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "250m"
+                  memory: "128Mi"
+          volumes:
+            - name: script
+              configMap:
+                name: aaaa-tripwire-script
+                defaultMode: 0555
+            - name: ssh-key
+              secret:
+                secretName: aaaa-tripwire-ssh
+                defaultMode: 0400

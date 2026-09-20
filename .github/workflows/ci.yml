@@ -269,6 +269,7 @@ jobs:
           bash 1-proxmox/t3env/pin-vm-host.test.sh
           python3 2-k3s/17.remote-pi/search-guard/search-guard.test.py
           bash 2-k3s/maintenance/node-os-updater.test.sh
+          bash 2-k3s/maintenance/aaaa-tripwire-cronjob.test.sh
 
       - name: T3 install and runtime smoke
         timeout-minutes: 20
