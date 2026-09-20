@@ -296,6 +296,26 @@ spec:
             summary: "Orphaned qBittorrent torrents found (or the census failed)"
             description: "The daily orphan-census Job ({{ $labels.job_name }}) exited non-zero — either it found orphans: torrents in qBittorrent that are incomplete, have NO *arr queue row, are older than MIN_AGE_HOURS (24h) and have moved ZERO bytes for NO_PROGRESS_HOURS (24h) (exit 1), or it could not complete the census safely (exit 2): qBittorrent login, a queue fetch, a paginated queue, a *arr history read failing its filter/sort verification, the MAX_HISTORY_LOOKUPS cap on per-torrent history lookups, or a per-*arr guard — an *arr reporting 0 queue rows while torrents in its OWN categories moved bytes inside ACTIVE_WITHIN_HOURS (6h), unless every one of those live torrents is already downloadFailed in the *arr's own history (a download whose newest history event is downloadFailed stays out of the queue by design, `DownloadIsTrackable()`, #834; live work must have a queue row, #631/#632). Read the Job log for the per-orphan table (hash prefix / category / state / owning *arr / progress / age / idle / priv / uploaded), the `orphans by owning *arr` line and, when the guard fires, the `N live torrent(s), N queryable, N already failed in its own history, N unexplained` line; unexplained > 0 means a genuinely blind queue read — `kubectl rollout restart deployment/<arr> -n servarr` released 21 stuck imports in ~90s the last time (2026-08-07). The job runs DISARMED (ARMED=\"false\") and changes nothing until that env value is flipped in 2-k3s/maintenance/orphan-census-cronjob.yaml (armed once to reap 3 confirmed orphans, disarmed again, #1200). The Cleanuparr strike rules that manufactured past orphans were removed on 2026-08-02, so a new orphan needs a new explanation before any reap; disposition history and arming guards in #1029."
 
+    - name: sonarr-regrab-census
+      interval: 60s
+      rules:
+        - alert: SonarrRegrabCensusFailed
+          expr: |
+            max by (job_name) (
+              kube_job_failed{namespace="servarr", job_name=~"sonarr-regrab-census.*"} > 0
+              and on (job_name) (
+                max by (job_name) (kube_job_status_start_time{namespace="servarr", job_name=~"sonarr-regrab-census.*"})
+                  >= scalar(max(kube_job_status_start_time{namespace="servarr", job_name=~"sonarr-regrab-census.*"}))
+              )
+            )
+          for: 5m
+          labels:
+            severity: warning
+            component: servarr
+          annotations:
+            summary: "Sonarr re-grabbed an already-imported release (or the census failed)"
+            description: "The daily sonarr-regrab-census Job ({{ $labels.job_name }}) exited non-zero — either it found re-grabs: a grab in the last WINDOW_DAYS=60 of a release (infohash) Sonarr had already imported earlier, the headline #1133 count (exit 1), or it could not complete the census safely (exit 2): empty SONARR_API_KEY, a history fetch failure, a malformed paged payload, a self-contradicting page (totalRecords=0 with records present), a page not coming back newest-first (#834 sort lesson), pagination stopping short of totalRecords, or MAX_PAGES=24 pages (48000 rows) over the cap. Read the Job log for the four counts (grabs total / re-grabs of an already-imported infohash / episodes with more than one import / episodeFileDeleted -> downloadFolderImported within 5 min) and the top re-grabbed infohashes. This count is the #1133 acceptance measure for the #834 queue-read fix: a tracked download pinned at Imported or Failed has no queue row, so QueueSpecification cannot reject the repeat grab, and it should trend to zero once that fix lands (Sonarr v5, #1131 — no v5 release as of 2026-08-24). A count that stays flat as the window rolls means the fix did not reach this path. Sonarr-only per #1133; the #834 Failed population belongs to #1029, and the completed duplicate torrents the re-grabs leave in qBittorrent are seeding policy, not this alert."
+
     - name: prowlarr-indexer-health
       interval: 60s
       rules:
