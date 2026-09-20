@@ -558,3 +558,37 @@ tests:
       - eval_time: 20m
         alertname: NtfyCanaryPublishFailing
         exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'kube_job_status_start_time{namespace="kube-system",job_name="aaaa-tripwire-29581040"}'
+        values: "1750000000x30"
+      - series: 'kube_job_failed{namespace="kube-system",job_name="aaaa-tripwire-29581040"}'
+        values: "1x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: AaaaTripwireCheckFailed
+        exp_alerts:
+          - exp_labels:
+              job_name: aaaa-tripwire-29581040
+              severity: warning
+              component: dns
+            exp_annotations:
+              summary: "AAAA leak guard check failed (or could not run)"
+
+  - interval: 1m
+    input_series:
+      - series: 'kube_job_status_start_time{namespace="kube-system",job_name="aaaa-tripwire-29581040"}'
+        values: "1750000000x30"
+      - series: 'kube_job_failed{namespace="kube-system",job_name="aaaa-tripwire-29581040"}'
+        values: "1x30"
+      - series: 'kube_job_status_start_time{namespace="kube-system",job_name="aaaa-tripwire-29582040"}'
+        values: "1750000720x30"
+      - series: 'kube_job_failed{namespace="kube-system",job_name="aaaa-tripwire-29582040"}'
+        values: "0x30"
+    alert_rule_test:
+      # The 2040 run passed, so the earlier failure is history - the alert
+      # only covers the LATEST run, same semantics as the ntfy canary.
+      - eval_time: 20m
+        alertname: AaaaTripwireCheckFailed
+        exp_alerts: []

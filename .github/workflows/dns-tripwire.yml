@@ -1,0 +1,54 @@
+name: dns-tripwire
+
+on:
+  pull_request:
+    paths:
+      - 1-proxmox/pihole/**
+      - 2-k3s/**
+  push:
+    branches: [main]
+    paths:
+      - 1-proxmox/pihole/**
+      - 2-k3s/**
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dns-tripwire-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tripwire:
+    if: >-
+      github.event_name == 'push' || github.event_name == 'workflow_dispatch' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, epaflix]
+    timeout-minutes: 15
+    env:
+      PIHOLE: 192.168.10.30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install dig
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq dnsutils
+
+      - name: Flush pihole-FTL cache
+        run: |
+          set -euo pipefail
+          ssh -n -o ConnectTimeout=8 -o BatchMode=yes "root@${PIHOLE}" \
+            'systemctl restart pihole-FTL && systemctl is-active pihole-FTL'
+          sleep 3
+          out=$(dig +short +time=3 +tries=1 A pi.hole "@${PIHOLE}")
+          if [ -z "$out" ]; then
+            echo "pihole-FTL is not answering after the restart; refusing to run the tripwire against a dead resolver" >&2
+            exit 1
+          fi
+          echo "pihole-FTL restarted and answering: pi.hole -> ${out}"
+
+      - name: Run aaaa-tripwire
+        run: bash 1-proxmox/pihole/aaaa-tripwire.sh
