@@ -4,3 +4,9 @@ kind: Kustomization
 resources:
   - cnpg-operator.yaml
   - barman-manifest.yaml
+
+patches:
+  - path: deployment-patch.yaml
+    target:
+      kind: Deployment
+      name: cnpg-controller-manager
