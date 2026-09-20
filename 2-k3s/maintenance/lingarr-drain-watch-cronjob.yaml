@@ -14,12 +14,14 @@ data:
     dominant failure signature. Exits 0 when the pipeline is draining within
     the failure budget OR is fully idle (nothing terminal in the window and
     nothing pending or running). Exits 1 when the in-window failure rate hits
-    FAIL_RATE_THRESHOLD - the known signature is cancels pinned at exactly
-    1800s: upstream Lingarr hardcodes a 30-min job-queue invisibility timeout
-    that reclaims translations the slow local-AI endpoint never finished
-    (#1239). request_timeout is minutes and does not bind. Exits 2 when the
-    window cannot be judged (unknown statuses, or pending/active work with
-    zero terminal events - a stuck pipeline).
+    FAIL_RATE_THRESHOLD. Known signatures: cancels pinned at exactly 1800s
+    are upstream Lingarr's hardcoded 30-min job-queue invisibility timeout
+    (#1239); instant "All configured batch translation services failed."
+    means the provider path is broken (2026-09-18: OpenRouter workspace ZDR
+    guardrail excluded the pinned model, 404 per batch). request_timeout is
+    minutes (floor 30) and does not bind. Exits 2 when the window cannot be
+    judged (unknown statuses, or pending/active work with zero terminal
+    events - a stuck pipeline).
 
     Run with --selftest to exercise bucketing/ETA against synthetic payloads
     without touching the network. Python stdlib only - no pip, no apk.
@@ -229,12 +231,15 @@ data:
 
         if fail_rate >= threshold:
             print("\nFAIL: failure rate %.1f%% >= %.0f%% - translations are being "
-                  "canceled or erroring. Known cause: cancels pinned at ~1800s "
-                  "are the upstream 30-min job-queue invisibility timeout "
-                  "reclaiming work the local-AI endpoint has not finished; "
-                  "request_timeout is minutes (floor 30) and does not bind. "
-                  "ACTION: check ollama throughput and GPU state on "
-                  "192.168.10.200, not request_timeout."
+                  "canceled or erroring. Known signatures: instant "
+                  "\"All configured batch translation services failed.\" means the "
+                  "provider path is broken (OpenRouter workspace guardrails or a "
+                  "dropped model: re-run batch-repro.sh and GET /api/v1/models/user "
+                  "with the sk-or-v1 upstream key from cliproxy-free-config); "
+                  "cancels pinned at ~1800s are the upstream 30-min job-queue "
+                  "invisibility timeout reclaiming work a slow endpoint never "
+                  "finished (#1239). request_timeout (minutes, floor 30) does "
+                  "not bind."
                   % (fail_rate, threshold))
             return 1
         print("\nOK: pipeline draining within the failure budget.")
