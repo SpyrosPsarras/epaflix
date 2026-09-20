@@ -10,6 +10,7 @@ resources:
   - cleanuparr-blocklist-drift-cronjob.yaml
   - neutarr-config-drift-cronjob.yaml
   - orphan-census-cronjob.yaml
+  - sonarr-regrab-census-cronjob.yaml
   - prowlarr-indexer-health-cronjob.yaml
   - prowlarr-appsync-drift-cronjob.yaml
   - cleanuparr-queuecleaner-health-cronjob.yaml
