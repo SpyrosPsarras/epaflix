@@ -1,11 +1,19 @@
 #!/usr/bin/env python3
-"""Read-only MCP server over the Syncthing-synced KeePass KDBX.
+"""Read-write MCP server over the Syncthing-synced KeePass KDBX.
 
 Env: KEEPASS_DB (path to the KDBX), KEEPASS_PASSPHRASE. Both come from
 /etc/t3code/t3code.env via the keepass-mcp wrapper. Self-test: --selftest
-creates a throwaway vault, exercises both tools, and never touches KEEPASS_DB.
+creates a throwaway vault, exercises every tool, and never touches KEEPASS_DB.
+
+Writes hold an flock on "<DB>.lock" and land via atomic replace, so concurrent
+MCP sessions on this host cannot interleave a load-modify-save. Writes from
+other hosts still race through Syncthing; avoid editing the vault on two
+devices at the same time.
 """
 
+import base64
+import contextlib
+import fcntl
 import json
 import os
 import sys
@@ -26,6 +34,7 @@ def _entry_summary(entry):
     out = {"path": _entry_path(entry), "title": entry.title, "expired": entry.expired}
     for field in FIELDS:
         out[field] = getattr(entry, field)
+    out["attachments"] = sorted(a.filename for a in entry.attachments)
     return out
 
 
@@ -33,6 +42,39 @@ def _open():
     from pykeepass import PyKeePass
 
     return PyKeePass(DB, password=PASSPHRASE)
+
+
+@contextlib.contextmanager
+def _writing():
+    """Load the vault under an exclusive lock, mutate, save atomically.
+
+    Refuses to save if the file changed on disk while we held it (e.g. a
+    synced edit from another device landed mid-write); retry instead.
+    """
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(DB) or ".", prefix=".keepass-", suffix=".tmp")
+    os.close(fd)
+    lock = DB + ".lock"
+    with open(lock, "a") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            kp = _open()
+            before = os.stat(DB)
+            yield kp
+            after = os.stat(DB)
+            if (before.st_mtime_ns, before.st_size) != (after.st_mtime_ns, after.st_size):
+                raise RuntimeError(
+                    "vault file changed on disk during this write; nothing was saved, retry"
+                )
+            kp.save(tmp)
+            os.chmod(tmp, before.st_mode & 0o777)
+            meta = os.stat(tmp)
+            if (before.st_uid, before.st_gid) != (meta.st_uid, meta.st_gid):
+                os.chown(tmp, before.st_uid, before.st_gid)
+            os.replace(tmp, DB)
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+            if os.path.exists(tmp):
+                os.unlink(tmp)
 
 
 def _all_entries(kp):
@@ -45,6 +87,31 @@ def _find(kp, path):
     if not matches:
         raise ValueError(f"no entry at path '{path}' (list entries to see valid paths)")
     return matches[0]
+
+
+def _child_group(group, name):
+    return next((g for g in group.subgroups if g.name == name), None)
+
+
+def _resolve_group(kp, group_path):
+    """Walk to the group at group_path, creating missing groups along the way."""
+    group = kp.root_group
+    for name in [p for p in group_path.strip("/").split("/") if p]:
+        child = _child_group(group, name)
+        if child is None:
+            group = kp.add_group(group, name)
+        else:
+            group = child
+    return group
+
+
+def _split_path(path):
+    parts = [p for p in path.strip("/").split("/") if p]
+    if not parts:
+        raise ValueError("path must name an entry, e.g. /Group/Title")
+    if "Recycle Bin" in parts:
+        raise ValueError("entries inside the Recycle Bin are managed by vault_trash and KeePassXC")
+    return "/".join(parts[:-1]), parts[-1]
 
 
 def _list_tool(prefix: str = ""):
@@ -67,6 +134,70 @@ def _get_tool(path: str, include_password: bool = True):
         out["password"] = None
         out["note"] = "entry is expired; password withheld. Update the entry's expiry in KeePassXC, then retry."
     return out
+
+
+def _add_tool(path: str, username: str = "", password: str = "", url: str = "",
+              notes: str = "", props: dict | None = None):
+    group_path, title = _split_path(path)
+    with _writing() as kp:
+        group = _resolve_group(kp, group_path)
+        entry = kp.add_entry(group, title, username, password, url=url, notes=notes)
+        for key, value in (props or {}).items():
+            entry.set_custom_property(key, value)
+        return _entry_summary(entry)
+
+
+def _update_tool(path: str, title: str | None = None, username: str | None = None,
+                 password: str | None = None, url: str | None = None,
+                 notes: str | None = None, props: dict | None = None):
+    with _writing() as kp:
+        entry = _find(kp, path)
+        if title is not None:
+            entry.title = title
+        if username is not None:
+            entry.username = username
+        if password is not None:
+            entry.password = password
+        if url is not None:
+            entry.url = url
+        if notes is not None:
+            entry.notes = notes
+        for key, value in (props or {}).items():
+            if value is None:
+                if key in entry.custom_properties:
+                    entry.delete_custom_property(key)
+            else:
+                entry.set_custom_property(key, value)
+        return _entry_summary(entry)
+
+
+def _trash_tool(path: str):
+    with _writing() as kp:
+        entry = _find(kp, path)
+        kp.trash_entry(entry)
+        return {"trashed": path.strip("/")}
+
+
+def _attach_tool(path: str, filename: str, content_b64: str):
+    data = base64.b64decode(content_b64)
+    if not data:
+        raise ValueError("content_b64 is empty")
+    with _writing() as kp:
+        entry = _find(kp, path)
+        for a in list(entry.attachments):
+            if a.filename == filename:
+                kp.delete_binary(a.id)  # removes the entry reference and the blob
+        entry.add_attachment(kp.add_binary(data), filename)
+        return {"attached": filename, "entry": path.strip("/"), "bytes": len(data)}
+
+
+def _attachment_tool(path: str, filename: str):
+    kp = _open()
+    entry = _find(kp, path)
+    for a in entry.attachments:
+        if a.filename == filename:
+            return {"filename": filename, "entry": path.strip("/"), "content_b64": base64.b64encode(a.data).decode()}
+    raise ValueError(f"no attachment '{filename}' on '{path}' (see 'attachments' in vault_get)")
 
 
 def _selftest():
@@ -98,9 +229,43 @@ def _selftest():
             raise AssertionError("missing path must raise")
         except ValueError:
             pass
+
+        _add_tool("/SSH/new key", username="agent", password="k", url="ssh://x", notes="n",
+                  props={"k1": "v1"})
+        added = _get_tool("/SSH/new key")
+        assert added["username"] == "agent" and added["custom_properties"]["k1"] == "v1", added
+
+        _update_tool("/SSH/new key", password="k2", notes=None, props={"k1": None, "k2": "v2"})
+        updated = _get_tool("/SSH/new key")
+        assert updated["password"] == "k2" and "k1" not in updated["custom_properties"], updated
+        assert updated["custom_properties"]["k2"] == "v2", updated
+        _update_tool("/SSH/new key", props={"absent-key": None})  # no-op, must not raise
+
+        try:
+            _add_tool("/Recycle Bin/nope")
+            raise AssertionError("Recycle Bin path must be rejected")
+        except ValueError:
+            pass
+
+        payload = base64.b64encode(b"-----BEGIN OPENSSH PRIVATE KEY-----").decode()
+        _attach_tool("/SSH/new key", "id_test", payload)
+        _attach_tool("/SSH/new key", "id_test", payload)  # replace same-name attachment
+        fetched = _attachment_tool("/SSH/new key", "id_test")
+        assert base64.b64decode(fetched["content_b64"]) == b"-----BEGIN OPENSSH PRIVATE KEY-----", fetched
+        assert _get_tool("/SSH/new key")["attachments"] == ["id_test"]
+        binaries_before = len(_open().binaries)
+        _attach_tool("/SSH/new key", "id_test", payload)
+        assert len(_open().binaries) == binaries_before, "replace must not strand old blobs"
+
+        _trash_tool("/SSH/new key")
+        assert _list_tool("/SSH") == [], _list_tool("/SSH")
+
         print("selftest OK")
     finally:
         os.unlink(path)
+        for extra in (path + ".lock",):
+            if os.path.exists(extra):
+                os.unlink(extra)
 
 
 def main():
@@ -113,7 +278,7 @@ def main():
     if not DB or not PASSPHRASE:
         sys.exit("KEEPASS_DB and KEEPASS_PASSPHRASE must be set (keepass-mcp wrapper)")
 
-    mcp = MCPServer("keepass", instructions="Read-only access to the personal KeePass vault.")
+    mcp = MCPServer("keepass", instructions="Read-write access to the personal KeePass vault. Writes are serialized on the vault host; do not edit the vault on two devices at once.")
 
     @mcp.tool()
     def vault_list(prefix: str = "") -> str:
@@ -124,6 +289,34 @@ def main():
     def vault_get(path: str, include_password: bool = True) -> str:
         """Fetch one entry by its full vault path (as returned by vault_list, e.g. /Group/Title). Returns a JSON object."""
         return json.dumps(_get_tool(path, include_password))
+
+    @mcp.tool()
+    def vault_add(path: str, username: str = "", password: str = "", url: str = "",
+                  notes: str = "", props: dict | None = None) -> str:
+        """Create an entry at the full vault path (e.g. /Group/Title); missing groups are created. props sets custom string properties. Returns the new entry summary."""
+        return json.dumps(_add_tool(path, username, password, url, notes, props))
+
+    @mcp.tool()
+    def vault_update(path: str, title: str | None = None, username: str | None = None,
+                     password: str | None = None, url: str | None = None,
+                     notes: str | None = None, props: dict | None = None) -> str:
+        """Update fields of the entry at the full vault path. Fields left as null are unchanged; empty string clears. props sets custom properties (null value deletes one). Returns the entry summary."""
+        return json.dumps(_update_tool(path, title, username, password, url, notes, props))
+
+    @mcp.tool()
+    def vault_trash(path: str) -> str:
+        """Move the entry at the full vault path to the recycle bin (recoverable in KeePassXC). Returns a confirmation object."""
+        return json.dumps(_trash_tool(path))
+
+    @mcp.tool()
+    def vault_attach(path: str, filename: str, content_b64: str) -> str:
+        """Store a base64-encoded file (e.g. an SSH private key) as an attachment on the entry at the full vault path. Replaces an existing attachment with the same name. Returns a confirmation object."""
+        return json.dumps(_attach_tool(path, filename, content_b64))
+
+    @mcp.tool()
+    def vault_attachment(path: str, filename: str) -> str:
+        """Fetch an attachment by name from the entry at the full vault path. Returns {filename, content_b64}. Use vault_get to list attachment names."""
+        return json.dumps(_attachment_tool(path, filename))
 
     mcp.run()
 
