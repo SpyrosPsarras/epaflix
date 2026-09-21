@@ -24,7 +24,7 @@
 # `address=/name/<ip>` line from /etc/dnsmasq.d/*.conf, and requires each
 # non-hairpin name (anything not on the public Traefik LB 192.168.10.101)
 # to be covered by an Unbound local-zone (`/etc/unbound/unbound.conf.d/`)
-# or an exact DNS-only Cloudflare record (e.g. wg-hop, #547). Skips (the
+# or an exact DNS-only Cloudflare record. Skips (the
 # two hypervisor IPv6 checks, unreachable with the pihole-only key) are
 # expected and never fail the run.
 #
