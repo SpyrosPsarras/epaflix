@@ -1,0 +1,28 @@
+---
+# Staging hostname only. The live t3code.epaflix.com route stays on the LXC
+# EndpointSlice in 05.traefik-deployment/ingress/t3code-proxy.yaml until
+# cutover swaps it (see migration/cutover.sh). Pihole: t3new.epaflix.com ->
+# 192.168.10.102 like the other single-label hosts.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: t3code-https
+  namespace: t3code
+  labels:
+    app.kubernetes.io/name: t3code
+    app.kubernetes.io/component: ingress
+spec:
+  entryPoints:
+    - internal
+  routes:
+    - match: Host(`t3new.epaflix.com`)
+      kind: Rule
+      services:
+        - name: t3code
+          port: 3773
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"

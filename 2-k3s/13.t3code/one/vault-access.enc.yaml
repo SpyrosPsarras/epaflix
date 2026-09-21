@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: Secret
+metadata:
+    name: t3code-vault-access
+    namespace: t3code
+type: Opaque
+data:
+    identity: ENC[AES256_GCM,data:qkDkW7a+b5yQOZqRgFopBxh6yYCHWZtvCkhHPcBf82uxVMnEsDIrmbGljFN2hzW/Bprnxaoa38PhIgOSHTEM8J1ZcmXfzxC9krJyoIH8WMO+7Uxg8nv5Sq9WaSkM20mYxUaQzQzz5Sgvr68Qm19OpyCS8XNCi4rj532yAnmvgGcLQsvxDb4F9GK7A7rvR9j2I6dwxVkqUAp+EJwzPJTIbn44UayHGvXkGi0lD7uHbhnYUh1uzuUlOEFZxGsXkH+/IreLoizUlYo7sNW3fLiwz0FkTvfDUaZtttYWczsU9bUXe0CxorOUhQtdcKgNoot2MeoDyP7i0XrWIs2m6XItkuL+JtNFR3czTwrcasU89w6+xkrv03h2iTuAwgbWWrzoxSu3wOFageA1xSAS30W6Z+WSDZbh66B5Oa/ZVmQn84YAf3djfQJTIVzUo/+X+32kVgdedhlnYhTH8aGVtV0OsLQq4eLuUR5yf+QHwigYAdxxMvO+p4LD+pnpm7g4BM5AtHXaV+wF3EH17IBQM8sRWtCEaQ2/ugTfDvi7kj11m7gCGncYNGI4t/ziAszusdvzztFPlU+lyaquj3zSyFKaompfoXVE4sLRLCDfm+T9aYrLOY8Ime91RtOIEhDuFkHS1L7n40iw2VgJRbWDp20kqv7d9HeRsJBsUenErh1AD9poXOq8kvAP67dIweAg+j45ePlJNb3Yx2Nutft+GZdEYoO6pok=,iv:lpAwZoRAt+JR36m9RDsDccaFBbCdxFEmGrd+S00NIn0=,tag:gyNeyvRD7pjRPbKGzxGA7g==,type:str]
+    known_hosts: ENC[AES256_GCM,data:9DMkEx/MGX/PYgV1n3gLRUz8Ziun9cGWUW3ZUkcnj/t5v8cJVmmScl3uG5Mz+lrFIXoX4eIykLuQpIvGTGF2RiKicNp9UymxCzzlTnuNfnKHY1aDScarng7PSuAk75U6ZeyJhopAiQdgTdTw2E9OtJtpJNIVHAnt+gcWNwPcmV4=,iv:CvkaskxCwHi3Om4/zpt7lNej01Jo9fTbmZQRArJ82aQ=,tag:0QardXLSdkuTQUDr/lnqtw==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBLa3pVckNHT3RHeFcrRGtp
+            MW9BSllRQzUraE1ROVFKem1TL2hWd1ZKSTFRCkpzMHBiblcyeE8yUnFoZ3ErelNE
+            UE9TL3k4L3pNenl5L2IwNmloU0Q5dUEKLS0tIDl0NE04U2hzZk1Sc2tmdVFjc1FK
+            ZExNYWo5emQ2dGxyYWtSMnNIUkhxMUkK1FU4eKN6X3QplandJJptoG6H4Sw9VlaI
+            bq9qC/ycPzysxTF1Q8Z0p71EBQEzGeI7QmKn7EGArGiDhvur3Yhlcg==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1586thf5vkcdf5lcn3zwjpu8ltkwyq8efrhj8lr0vdrrt9k5f3qgsxeg7gx
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-09-21T11:08:18Z"
+    mac: ENC[AES256_GCM,data:3UoiwO+Vq90Vs0vgl1gWp6AVame0lP88UBTI+SF1ztO+0r3JIFXF+VFpwSd+K11S4No9eHM4vav7MwKqX40yQNWcc86LJxvmiDMskWOmb0p7EHLs1SOH+Nj6cHXkY/j3tZtRcjUmGkAdakjwrIgHjF43V5ULLe8HmaB1hCseFuI=,iv:eQtS/C+lFFZ0bck+Ec9ypgT58vDPk8v9ddJA7cnwyyA=,tag:MPml85+Ro1MLRNmsv1BCBQ==,type:str]
+    version: 3.13.3
