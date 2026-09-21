@@ -61,6 +61,24 @@ import time, urllib.request, urllib.error
 BASE, ALIAS, N = sys.argv[1], sys.argv[2], int(sys.argv[3])
 cfg = open("/cfg/config.yaml").read()
 KEY = re.findall(r'"(omp-[A-Za-z0-9._-]+)"', cfg)[0]
+# The answering model must be one of the configured upstreams: the zero-cost
+# pool is the policy, and a stray paid model answering under the alias would
+# be the exact failure this check exists to catch. Same two-level parse as
+# verify.sh: provider entry names at two-space indent, model names at six.
+pairs, provider, in_models = [], None, False
+for line in cfg.splitlines():
+    m = re.match(r'^ {2}- name: "([^"]+)"$', line)
+    if m:
+        provider, in_models = m.group(1), False
+        continue
+    if provider and line.strip() == "models:":
+        in_models = True
+        continue
+    m = re.match(r'^ {6}- name: "([^"]+)"$', line)
+    if m and provider and in_models:
+        pairs.append((provider, m.group(1)))
+UPSTREAMS = [model for _, model in pairs]
+assert UPSTREAMS, f"no upstream models parsed from config (pairs={pairs})"
 
 # The live ai_prompt (settings.ai_prompt, 2026-09-13) with {sourceLanguage}/{targetLanguage} filled.
 SYSTEM = ("You are a professional subtitle translator. Translate the line from en to el. Output ONLY the translated text, "
@@ -89,7 +107,7 @@ for i in range(N):
     model = resp.get("model", "?"); ch = (resp.get("choices") or [{}])[0]
     content = ((ch.get("message") or {}).get("content")) or ""
     v = verdict(content) if st == 200 else f"http-{st}:{resp.get('raw','')}"
-    if not model.endswith(":free"): v += " NON-FREE-MODEL"
+    if model not in UPSTREAMS: v += " NON-FREE-MODEL"
     if v != "OK": red += 1
     sample = (f'| 50: {json.loads(content)["translations"][0]["line"]!r}' if v == "OK"
               else f"| {content[:80].replace(chr(10),' ')!r}")
