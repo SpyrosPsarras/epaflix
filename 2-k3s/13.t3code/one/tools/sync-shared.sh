@@ -4,7 +4,8 @@
 # env/ or files/. `--check` exits 1 on drift.
 #
 # Owned by this overlay, NOT synced: files/entrypoint.sh (three homes, MCP path
-# rewrite, T3_PROJECT_DIR) and files/searxng-mcp.py (pod has no `mcp` package).
+# rewrite, T3_PROJECT_DIR), files/searxng-mcp.py (pod has no `mcp` package) and
+# files/opencode-fast-version.sh.
 set -euo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd)
 pairs=(
