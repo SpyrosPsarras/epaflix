@@ -126,12 +126,16 @@ path = sys.argv[1]
 with open(path) as f:
     settings = json.load(f)
 configs = [settings.get("providers", {}).get("opencode", {})]
-configs += [v.get("config", {}) for v in settings.get("providerInstances", {}).values()
+configs += [v.setdefault("config", {}) for v in settings.get("providerInstances", {}).values()
             if v.get("driver") == "opencode"]
 changed = False
 for config in configs:
     if config.get("serverUrl") == "http://127.0.0.1:4096":
         del config["serverUrl"]
+        changed = True
+for config in configs[1:]:
+    if config.get("binaryPath") != "/scripts/opencode-fast-version.sh":
+        config["binaryPath"] = "/scripts/opencode-fast-version.sh"
         changed = True
 if changed:
     with tempfile.NamedTemporaryFile(mode="w", dir=os.path.dirname(path), delete=False) as f:
