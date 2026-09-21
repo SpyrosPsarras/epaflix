@@ -54,13 +54,39 @@ cfg = open("/cfg/config.yaml").read()
 keys = re.findall(r'^\s*-\s*"(omp-[A-Za-z0-9._-]+)"\s*$', cfg, re.M)
 assert len(keys) == 1, f"expected exactly one omp- api-key in config, found {len(keys)}"
 KEY = keys[0]
-# The explicit free upstreams the config declares. Every upstream must carry
-# OpenRouter's :free suffix, and the answering model must be one of them, not
-# merely "some :free model" - that is the policy this instance exists for.
-UPSTREAMS = re.findall(r'^\s*-\s*name:\s*"([^"]+)"\s*$', cfg.split("openai-compatibility:", 1)[1], re.M)
-UPSTREAMS = [u for u in UPSTREAMS if u != "openrouter"]
-assert UPSTREAMS and all(u.endswith(":free") for u in UPSTREAMS), f"config upstreams are not all :free: {UPSTREAMS}"
-assert "openrouter/free" not in UPSTREAMS, "openrouter/free (random router) is banned; pin explicit :free models"
+# The explicit upstreams the config declares, checked against a zero-cost
+# allowlist per provider. The policy is "no money can move", not a suffix:
+# OpenRouter free models carry the :free suffix, Groq free-plan models and
+# Google AI Studio free-tier flash models are pinned by name. The answering
+# model must be one of the configured upstreams, not merely some free model
+# anywhere - that is the policy this instance exists for.
+#
+# Parse provider->model pairs by the template's fixed shape: entry names sit at
+# two-space indent ("  - name:"), model names at six ("      - name:"). Model
+# names only - the provider entry names must never leak into the pool checks.
+pairs, provider, in_models = [], None, False
+for line in cfg.splitlines():
+    m = re.match(r'^ {2}- name: "([^"]+)"$', line)
+    if m:
+        provider, in_models = m.group(1), False
+        continue
+    if provider and line.strip() == "models:":
+        in_models = True
+        continue
+    m = re.match(r'^ {6}- name: "([^"]+)"$', line)
+    if m and provider and in_models:
+        pairs.append((provider, m.group(1)))
+UPSTREAMS = [model for _, model in pairs]
+assert UPSTREAMS, f"no upstream models parsed from config (pairs={pairs})"
+def _zero_cost(u):
+    if u.endswith(":free"): return True                # OpenRouter free pool
+    if u in ("openai/gpt-oss-120b", "openai/gpt-oss-20b",
+             "qwen/qwen3.8-27b"): return True          # Groq free-plan chat models (policy permit list)
+    if re.fullmatch(r"gemini-[0-9.]+-flash", u): return True  # AI Studio free-tier flash
+    return False
+_outside = [u for u in UPSTREAMS if not _zero_cost(u)]
+assert not _outside, f"upstream(s) outside the zero-cost allowlist: {_outside}"
+assert "openrouter/free" not in UPSTREAMS, "openrouter/free (random router) is banned; pin explicit free models"
 
 def redact(s): return str(s).replace(KEY, "<key>")
 
@@ -86,7 +112,7 @@ if st != 200 or ids != ["or-free"]: fail(f"catalog -> {st} {ids}")
 ok("catalog -> ['or-free'] only")
 
 # 2. paid / prefixed / bare-upstream IDs refused before OpenRouter
-for m in ["or-glm-5.3", "openrouter/or-free", "minimax/minimax-m3", "anthropic/claude-sonnet-4.5", "openrouter/free"] + UPSTREAMS:
+for m in ["or-glm-5.3", "openrouter/or-free", "minimax/minimax-m3", "anthropic/claude-sonnet-4.5", "openrouter/free", "gpt-oss-120b", "gemini-3.5-flash"] + UPSTREAMS:
     st, body = call(FREE, "/v1/chat/completions", {"model": m, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1})
     code = (body.get("error") or {}).get("code")
     if st not in (400, 404) or code != "model_not_found": fail(f"reject model={m} -> {st} {body}")
@@ -99,8 +125,8 @@ ok(f"main instance -> 401 {body}")
 
 # 4. one translation-shaped call carrying an escape attempt: OpenRouter
 #    `models` fallback array and `provider.order`. Both must be stripped by
-#    payload.filter, the answering model must be :free, and the content must
-#    be a non-empty translation.
+#    payload.filter, the answering model must be a configured upstream from the
+#    zero-cost pool, and the content must be a non-empty translation.
 if call_upstream:
     st, body = call(FREE, "/v1/chat/completions", {
         "model": "or-free",

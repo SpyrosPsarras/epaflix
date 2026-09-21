@@ -7,6 +7,8 @@
 # Inputs (env only):
 #   OPENROUTER_API_KEY  required. Reuse the main instance's credential from
 #                       cliproxy/cliproxy-secrets.enc.yaml (stringData.openrouter-api-key).
+#   GROQ_API_KEY        required. Groq free-plan key (gsk_-shaped).
+#   GEMINI_API_KEY      required. Google AI Studio key (AIza- or AQ.-shaped).
 #   LINGARR_API_KEY     optional. Omitted = generate a new one (rotation).
 #
 # Both outputs are encrypted to temp files first; the destinations are replaced
@@ -20,6 +22,8 @@ config_out="$here/config.enc.yaml"
 lingarr_out="$here/../../08.servarr/_shared/secrets/lingarr-cliproxy-api-key.enc.yaml"
 
 : "${OPENROUTER_API_KEY:?set OPENROUTER_API_KEY}"
+: "${GROQ_API_KEY:?set GROQ_API_KEY}"
+: "${GEMINI_API_KEY:?set GEMINI_API_KEY}"
 # Shape must satisfy the lingarr boot guard (reconcile-ai-provider.sql: ^omp-[A-Za-z0-9._-]+$).
 export LINGARR_API_KEY="${LINGARR_API_KEY:-omp-lingarr-$(openssl rand -hex 24)}"
 export TEMPLATE="$here/config.template.yaml"
@@ -28,15 +32,22 @@ config_tmp=$(mktemp "$config_out.XXXXXX")
 lingarr_tmp=$(mktemp "$lingarr_out.XXXXXX")
 trap 'rm -f "$config_tmp" "$lingarr_tmp"' EXIT
 
-# Python reads both secrets from its environment, validates their shape (which
+# Python reads all secrets from its environment, validates their shape (which
 # doubles as YAML injection defence: the values land inside double quotes) and
 # emits the Secret manifest on stdout for sops.
 python3 - <<'PY' | sops -e --filename-override "$config_out" /dev/stdin > "$config_tmp"
 import os, re, sys, yaml
 ork, lk = os.environ["OPENROUTER_API_KEY"], os.environ["LINGARR_API_KEY"]
+gk, gemk = os.environ["GROQ_API_KEY"], os.environ["GEMINI_API_KEY"]
 if not re.fullmatch(r"sk-or-v1-[A-Za-z0-9._-]+", ork): sys.exit("OPENROUTER_API_KEY is not sk-or-v1- shaped")
+if not re.fullmatch(r"gsk_[A-Za-z0-9]+", gk): sys.exit("GROQ_API_KEY is not gsk_ shaped")
+if not re.fullmatch(r"(AIza[A-Za-z0-9_-]+|AQ\.[A-Za-z0-9._-]+)", gemk): sys.exit("GEMINI_API_KEY is not AIza/AQ.- shaped")
 if not re.fullmatch(r"omp-[A-Za-z0-9._-]+", lk): sys.exit("LINGARR_API_KEY is not omp- shaped")
-cfg = open(os.environ["TEMPLATE"]).read().replace("__LINGARR_API_KEY__", lk).replace("__OPENROUTER_API_KEY__", ork)
+cfg = (open(os.environ["TEMPLATE"]).read()
+       .replace("__LINGARR_API_KEY__", lk)
+       .replace("__OPENROUTER_API_KEY__", ork)
+       .replace("__GROQ_API_KEY__", gk)
+       .replace("__GEMINI_API_KEY__", gemk))
 yaml.safe_load(cfg)  # must still parse
 print(yaml.safe_dump({
     "apiVersion": "v1", "kind": "Secret",
