@@ -1,6 +1,6 @@
 -- Boot guard: pin lingarr's AI provider to cliproxy-free -> OpenRouter's free
--- router. Runs from the same initContainer psql flow as
--- reconcile-job-queue.sql (see lingarr.yaml); same rationale as #925 - these
+-- router. Runs from the enforce-db-invariants initContainer psql flow (see
+-- lingarr.yaml); same rationale as #925 - these
 -- settings are live-only DB state otherwise, and a rebuild or a stray UI edit
 -- silently repoints translations at whatever the UI last left behind.
 --

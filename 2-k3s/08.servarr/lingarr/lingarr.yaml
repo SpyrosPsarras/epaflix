@@ -60,11 +60,6 @@ spec:
                 END
                 \$\$;"
               if ! psql -v ON_ERROR_STOP=1 -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USERNAME" -d "$DB_DATABASE" \
-                     -f /sql/reconcile-job-queue.sql; then
-                echo "FATAL: reconcile-job-queue failed, refusing to boot on an unreconciled job queue (#925)" >&2
-                exit 1
-              fi
-              if ! psql -v ON_ERROR_STOP=1 -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USERNAME" -d "$DB_DATABASE" \
                      -f /sql/reconcile-ai-provider.sql; then
                 echo "FATAL: reconcile-ai-provider failed, refusing to boot with an unpinned AI provider" >&2
                 exit 1
