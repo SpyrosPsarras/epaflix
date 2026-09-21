@@ -87,7 +87,7 @@ fi
 #   when the overlap is gone.
 # e7a1b07ac4c5: the shared lab password recorded in #778: the seven k3s
 #   node passwords kept by decision (#745), the owner's four personal
-#   machines, and smtp/tplink/wg-hop rotating per-credential at the owner's
+#   machines, and smtp/tplink rotating per-credential at the owner's
 #   pace. Stays accepted while the value lives; warns once the last member
 #   rotates.
 export ACCEPTED_REUSE="${ACCEPTED_REUSE-d0ccf31122f7 e7a1b07ac4c5}"

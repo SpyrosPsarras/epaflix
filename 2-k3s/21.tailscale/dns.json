@@ -1,0 +1,6 @@
+{
+  "nameservers": [{"address": "192.168.10.30"}],
+  "preferences": {"overrideLocalDNS": true, "magicDNS": false},
+  "splitDNS": {},
+  "searchPaths": []
+}
