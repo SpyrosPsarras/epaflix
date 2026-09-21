@@ -1,6 +1,7 @@
 ---
-# Dedicated CLIProxyAPI for lingarr: one client key, one upstream (OpenRouter),
-# one model alias that resolves to OpenRouter's free router. Nothing else.
+# Dedicated CLIProxyAPI for lingarr: one client key, a pool of free upstreams
+# (OpenRouter, Groq, Google AI Studio) rotating under one model alias. Nothing
+# else.
 #
 # Why a second instance and not a second key on the main proxy: CLIProxyAPI's
 # api-keys is a flat list with no per-key model scope
@@ -13,9 +14,9 @@
 # (cmd/server/main.go, PGSTORE_DSN gate) and never touches Postgres. No plugins,
 # no management API, no ingress - the Service is cluster-internal only.
 #
-# The config file is a sops secret because it carries both the lingarr client
-# key and the OpenRouter credential; that is the same storage posture as the
-# main instance's config_store row.
+# The config file is a sops secret because it carries the lingarr client key
+# and every upstream credential; that is the same storage posture as the main
+# instance's config_store row.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
