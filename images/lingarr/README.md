@@ -33,11 +33,17 @@ made big files untranslatable through Bazarr:
    request with no line activity for 60 minutes is a restart zombie: it is
    reaped as Interrupted so the next POST starts fresh. Endorsed upstream
    (lingarr-translate/lingarr#542, maintainer option 3).
+5. `TranslateBatchWithStructuredOutput` wrapped every non-200 as
+   `TranslationException`, which `TranslateBatchAsync`'s retry catch filters
+   out (it matches on `HttpRequestException.StatusCode`) - so a provider 429
+   failed the batch on attempt 1. groq's shared free-tier TPM window 429s
+   with a "try again in ~8s" hint; 429/503 now surface as
+   `HttpRequestException` and the existing 1/2/4/8/16s backoff retries them.
 
 Generate-API (non-chat) batches and per-line translation are unchanged. The
 upstream test asserting behaviour 3 is deleted; the rest of the suite (234
 tests) passes with the patch, plus the new TranslationRequestServiceTests for
-behaviour 4.
+behaviour 4 and the rate-limit retry tests for behaviour 5.
 
 ## Measured need
 

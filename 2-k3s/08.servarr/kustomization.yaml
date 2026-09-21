@@ -100,11 +100,14 @@ images:
   # content-translation API also cancelled work whenever the caller disconnected (Bazarr's
   # 1920s HTTP timeout), an endless retry loop on big files - the patch detaches the
   # translation from the request token and converges retries onto the running request
-  # (upstream #542, maintainer-endorsed option 3).
+  # (upstream #542, maintainer-endorsed option 3). And the batch path treated provider
+  # 429/503 as file-fatal (groq's shared TPM window 429s at ~8s intervals) where the
+  # patch surfaces them to the retry loop.
   # Revert to ghcr.io/lingarr-translate/lingarr when upstream LocalAiService no longer
   # falls back to a schema-less request, validates returned positions against the batch,
-  # RunBatch throws instead of filling original lines, and /api/translate/content no
-  # longer cancels on client disconnect (watched by upstream-release-watch).
+  # RunBatch throws instead of filling original lines, /api/translate/content no longer
+  # cancels on client disconnect, and 429/503 on the structured batch request is retried
+  # (watched by upstream-release-watch).
   # Renovate must not track this image (disabled in .github/renovate.json).
   - name: ghcr.io/lingarr-translate/lingarr
     newName: ghcr.io/spyrospsarras/lingarr
