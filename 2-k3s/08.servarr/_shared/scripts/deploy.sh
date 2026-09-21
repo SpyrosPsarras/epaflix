@@ -79,18 +79,6 @@ else
     fi
 fi
 
-if [ -f "$SHARED_DIR/secrets/wireguard-secret-generated.yaml" ]; then
-    kubectl apply -f "$SHARED_DIR/secrets/wireguard-secret-generated.yaml"
-    info "WireGuard secret applied"
-else
-    warn "WireGuard secret not found. Create it from secrets.enc.yaml values using _shared/secrets/wireguard-secret.yaml"
-    read -p "Continue anyway? (y/N) " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        exit 1
-    fi
-fi
-
 echo ""
 
 echo "Step 3: Creating storage (PV/PVC)..."
