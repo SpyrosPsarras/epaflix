@@ -59,7 +59,7 @@ index 5d9af34..913efae 100644
  
      #region Chain-wide best-match resolution
 diff --git a/Lingarr.Server.Tests/Services/Translation/LocalAiServiceTests.cs b/Lingarr.Server.Tests/Services/Translation/LocalAiServiceTests.cs
-index 43ca0d8..e7252dd 100644
+index 43ca0d8..59cf52c 100644
 --- a/Lingarr.Server.Tests/Services/Translation/LocalAiServiceTests.cs
 +++ b/Lingarr.Server.Tests/Services/Translation/LocalAiServiceTests.cs
 @@ -39,6 +39,7 @@ public class LocalAiServiceTests
@@ -70,7 +70,7 @@ index 43ca0d8..e7252dd 100644
  
      public LocalAiServiceTests()
      {
-@@ -92,29 +93,179 @@ public class LocalAiServiceTests
+@@ -92,18 +93,190 @@ public class LocalAiServiceTests
          VerifyRequestsSent(3); // MaxRetries
      }
  
@@ -79,17 +79,10 @@ index 43ca0d8..e7252dd 100644
      [Fact]
 -    public async Task TranslateBatchAsync_ShouldRetry_WhenChatApiFallbackReturnsMalformedJson()
 +    public async Task TranslateBatchAsync_ShouldReturnAllPositions_WhenChatApiReturnsValidStructuredResponse()
-     {
--        // Arrange
-         UseSettings(ChatEndpoint);
++    {
++        UseSettings(ChatEndpoint);
 +        SetupResponseSequence(ChatResponse(ValidWrapper));
- 
--        // The chat endpoint tries structured output first and falls back to plain JSON parsing,
--        // so a failing attempt sends two requests before the retry kicks in.
--        SetupResponseSequence(
--            ChatResponse(MalformedJson),
--            ChatResponse(MalformedJson),
--            ChatResponse("{\"translations\":" + ValidJson + "}"));
++
 +        var result = await _service.TranslateBatchAsync(Batch(), "en", "es", CancellationToken.None);
 +
 +        Assert.Equal(2, result.Count);
@@ -135,19 +128,16 @@ index 43ca0d8..e7252dd 100644
 +    {
 +        UseSettings(ChatEndpoint);
 +        SetupResponseSequence(RawResponse(rawBody), ChatResponse(ValidWrapper));
- 
--        // Act
-         var result = await _service.TranslateBatchAsync(Batch(), "en", "es", CancellationToken.None);
- 
--        // Assert
-         Assert.Equal(2, result.Count);
-         Assert.Equal("Mundo", result[2]);
--        VerifyRequestsSent(3);
++
++        var result = await _service.TranslateBatchAsync(Batch(), "en", "es", CancellationToken.None);
++
++        Assert.Equal(2, result.Count);
++        Assert.Equal("Mundo", result[2]);
 +        VerifyRequestsSent(2);
 +        VerifyAllRequestsCarriedResponseFormat();
-         VerifyWarningLogged("returned an unparsable response", Times.Once());
-     }
- 
++        VerifyWarningLogged("returned an unparsable response", Times.Once());
++    }
++
 +    [Theory]
 +    [MemberData(nameof(MalformedEnvelopes))]
 +    public async Task TranslateBatchAsync_ShouldFailClosedAfterMaxRetries_WhenEnvelopeStaysMalformed(string rawBody, string _)
@@ -214,8 +204,9 @@ index 43ca0d8..e7252dd 100644
 +
 +    [Fact]
 +    public async Task TranslateBatchAsync_ShouldAcceptEmptyLine_WhenSourceLineWasEmpty()
-+    {
-+        UseSettings(ChatEndpoint);
+     {
+-        // Arrange
+         UseSettings(ChatEndpoint);
 +        var batch = new List<BatchSubtitleItem>
 +        {
 +            new() { Position = 1, Line = "Hello" },
@@ -253,15 +244,69 @@ index 43ca0d8..e7252dd 100644
 +        SetupResponseSequence(ChatResponse("Hola mundo"));
 +
 +        var result = await _service.TranslateAsync("Hello world", "en", "es", null, null, CancellationToken.None);
-+
+ 
+-        // The chat endpoint tries structured output first and falls back to plain JSON parsing,
+-        // so a failing attempt sends two requests before the retry kicks in.
 +        Assert.Equal("Hola mundo", result);
 +        VerifyRequestsSent(1);
 +    }
 +
++    [Fact]
++    public async Task TranslateBatchAsync_ShouldRetry_WhenProviderRateLimits()
++    {
++        // Arrange: the shared free tier 429s the first request (groq TPM
++        // window, "try again in ~8s"); the second attempt succeeds. Before the
++        // 429 was surfaced as HttpRequestException, the retry loop never saw
++        // it and the batch died on attempt 1.
++        UseSettings(ChatEndpoint);
+         SetupResponseSequence(
+-            ChatResponse(MalformedJson),
+-            ChatResponse(MalformedJson),
+-            ChatResponse("{\"translations\":" + ValidJson + "}"));
++            RateLimitedResponse(),
++            ChatResponse(ValidWrapper));
+ 
+         // Act
+         var result = await _service.TranslateBatchAsync(Batch(), "en", "es", CancellationToken.None);
+@@ -111,8 +284,24 @@ public class LocalAiServiceTests
+         // Assert
+         Assert.Equal(2, result.Count);
+         Assert.Equal("Mundo", result[2]);
+-        VerifyRequestsSent(3);
+-        VerifyWarningLogged("returned an unparsable response", Times.Once());
++        VerifyRequestsSent(2);
++    }
++
++    [Fact]
++    public async Task TranslateBatchAsync_ShouldFailClosed_WhenRateLimitPersists()
++    {
++        // Arrange: every attempt rate-limited - the retry budget exhausts and
++        // the batch fails, still on the provider's terms.
++        UseSettings(ChatEndpoint);
++        SetupResponse(() => RateLimitedResponse());
++
++        // Act
++        var exception = await Assert.ThrowsAsync<TranslationException>(
++            () => _service.TranslateBatchAsync(Batch(), "en", "es", CancellationToken.None));
++
++        // Assert
++        Assert.Contains("Retry limit reached after TooManyRequests", exception.Message);
++        VerifyRequestsSent(3); // MaxRetries
+     }
+ 
      [Fact]
-     public async Task TranslateBatchAsync_ShouldNotRetry_WhenRequestFailsWithNonRetryableStatus()
-     {
-@@ -147,6 +298,12 @@ public class LocalAiServiceTests
+@@ -144,9 +333,23 @@ public class LocalAiServiceTests
+     private static HttpResponseMessage GenerateResponse(string translatedJson) =>
+         JsonResponse(new { model = "gemma4:e4b", response = translatedJson, done = true });
+ 
++    private static HttpResponseMessage RateLimitedResponse() => new()
++    {
++        StatusCode = HttpStatusCode.TooManyRequests,
++        Content = new StringContent(
++            "{\"error\":{\"message\":\"Rate limit reached for model `openai/gpt-oss-120b` on tokens per minute (TPM): Limit 8000. Please try again in 8.6475s.\",\"type\":\"tokens\",\"code\":\"rate_limit_exceeded\"}}",
++            Encoding.UTF8, "application/json")
++    };
++
      private static HttpResponseMessage ChatResponse(string translatedJson) =>
          JsonResponse(new { choices = new[] { new { message = new { content = translatedJson } } } });
  
@@ -274,7 +319,7 @@ index 43ca0d8..e7252dd 100644
      private static HttpResponseMessage JsonResponse(object body) => new()
      {
          StatusCode = HttpStatusCode.OK,
-@@ -185,21 +342,37 @@ public class LocalAiServiceTests
+@@ -185,21 +388,37 @@ public class LocalAiServiceTests
                  "SendAsync",
                  ItExpr.IsAny<HttpRequestMessage>(),
                  ItExpr.IsAny<CancellationToken>())
@@ -733,7 +778,7 @@ index d0081ec..7c57a83 100644
  
              if (stripSubtitleFormatting)
 diff --git a/Lingarr.Server/Services/Translation/LocalAiService.cs b/Lingarr.Server/Services/Translation/LocalAiService.cs
-index a474c20..27ac541 100644
+index a474c20..c533755 100644
 --- a/Lingarr.Server/Services/Translation/LocalAiService.cs
 +++ b/Lingarr.Server/Services/Translation/LocalAiService.cs
 @@ -323,16 +323,12 @@ public class LocalAiService : BaseLanguageService, ITranslationService, IBatchTr
@@ -759,7 +804,26 @@ index a474c20..27ac541 100644
      }
  
      private async Task<Dictionary<int, string>> TranslateBatchWithStructuredOutput(
-@@ -406,101 +402,87 @@ public class LocalAiService : BaseLanguageService, ITranslationService, IBatchTr
+@@ -401,106 +397,106 @@ public class LocalAiService : BaseLanguageService, ITranslationService, IBatchTr
+                 "LocalAI structured output batch request failed with status {StatusCode}: {ResponseContent}",
+                 response.StatusCode, 
+                 responseContent);
++            // 429/503 are transient provider states (free-tier TPM windows).
++            // Surface them as HttpRequestException so TranslateBatchAsync's
++            // retry loop sees them (its catch filters on ex.StatusCode)
++            // instead of failing the batch on attempt 1: groq's free tier
++            // 429s with a "try again in ~8s" hint while the shared TPM window
++            // drains, and the 1/2/4/8/16s backoff rides that out. Any other
++            // status stays file-fatal.
++            if (response.StatusCode is HttpStatusCode.TooManyRequests or HttpStatusCode.ServiceUnavailable)
++            {
++                throw new HttpRequestException(
++                    $"LocalAI structured output batch request failed with status {response.StatusCode}: {responseContent}",
++                    inner: null,
++                    statusCode: response.StatusCode);
++            }
+             throw new TranslationException(
+                 $"LocalAI structured output batch request failed with status {response.StatusCode}: {responseContent}");
          }
  
          var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -844,20 +908,6 @@ index a474c20..27ac541 100644
 -
 -        var response = await _httpClient.PostAsync(_endpoint, requestContent, cancellationToken);
 -        if (!response.IsSuccessStatusCode)
--        {
--            var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
--            _logger.LogError(
--                "LocalAI JSON parsing batch request failed with status {StatusCode}: {ResponseContent}",
--                response.StatusCode, 
--                responseContent);
--            throw new TranslationException(
--                $"LocalAI JSON parsing batch request failed with status {response.StatusCode}: {responseContent}");
--        }
--
--        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
--        var chatResponse = JsonSerializer.Deserialize<ChatResponse>(responseBody);
--
--        if (chatResponse?.Choices == null || chatResponse.Choices.Count == 0)
 +        var requested = subtitleBatch.Select(item => item.Position).ToHashSet();
 +        var returned = translatedItems.Select(item => item.Position).ToList();
 +        var returnedSet = returned.ToHashSet();
@@ -880,10 +930,23 @@ index a474c20..27ac541 100644
 +
 +        if (missing.Count == 0 && extra.Count == 0 && duplicates.Count == 0 && empty.Count == 0)
          {
+-            var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
+-            _logger.LogError(
+-                "LocalAI JSON parsing batch request failed with status {StatusCode}: {ResponseContent}",
+-                response.StatusCode, 
+-                responseContent);
+-            throw new TranslationException(
+-                $"LocalAI JSON parsing batch request failed with status {response.StatusCode}: {responseContent}");
+-        }
+-
+-        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+-        var chatResponse = JsonSerializer.Deserialize<ChatResponse>(responseBody);
+-
+-        if (chatResponse?.Choices == null || chatResponse.Choices.Count == 0)
+-        {
 -            throw new TranslationException("No completion choices returned from LocalAI");
-+            return;
-         }
- 
+-        }
+-
 -        // Try to extract JSON
 -        var translatedJson = chatResponse.Choices[0].Message.Content;
 -        var jsonStart = translatedJson.IndexOf('[');
@@ -891,8 +954,9 @@ index a474c20..27ac541 100644
 -        if (jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart)
 -        {
 -            translatedJson = translatedJson.Substring(jsonStart, jsonEnd - jsonStart + 1);
--        }
--
++            return;
+         }
+ 
 -        try
 -        {
 -            var translatedItems = JsonSerializer.Deserialize<List<StructuredBatchResponse>>(translatedJson,
