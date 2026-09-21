@@ -346,7 +346,7 @@ if ssh -o ConnectTimeout=5 "root@$T3_CT_IP" "sudo -iu spyros syncthing cli confi
 else
   SKIPPED+=("B4: share the guest secrets-vault folder with the k3s Syncthing hub (H4I72HH, 192.168.10.101:22000), not only this PC")
 fi
-SKIPPED+=("B5: pair a client over WireGuard against https://t3code.epaflix.com (one-time token from the guest)")
+SKIPPED+=("B5: pair a client over Tailscale against https://t3code.epaflix.com (one-time token from the guest)")
 SKIPPED+=("B6 (optional): rotate the F0 GitHub PAT, store in KeePassXC, update Zed settings")
 pause "All done here."
 
