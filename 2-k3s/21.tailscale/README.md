@@ -2,7 +2,7 @@
 
 Tailscale replaces NetBird on spylinux and the Pixel 8. The homelab subnet router advertises `192.168.10.0/24` and `10.0.0.0/24`. Pi-hole `192.168.10.30` is the sole global DNS upstream, with DNS override enabled and MagicDNS disabled. Internet traffic stays on the local connection; no exit node is configured.
 
-Cloudflare public ingress and the NetBird deployments remain in place. The NetBird client profiles and the existing `pihole-hop` container remain available for rollback.
+Cloudflare public ingress remains in place. The NetBird client profiles and the existing `pihole-hop` container remain available for rollback.
 
 ## Deploy and enroll
 

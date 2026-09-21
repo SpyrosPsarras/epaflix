@@ -23,8 +23,6 @@ secrets.yml
 !.history/log-cmd.sh
 !.history/shell-functions.sh
 !.history/start-logged-session.sh
-!.history/2026-05-17-wg-hop-lxc-setup.md
-!.history/2026-05-17-wg-hop-public-exposure.md
 raid-migration
 .claude/
 
