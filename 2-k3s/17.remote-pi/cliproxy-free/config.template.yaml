@@ -100,7 +100,14 @@ payload:
 openai-compatibility:
   # Pool tiers: groq and gemini share tier 10 (the selector round-robins within
   # a tier; observed split shifts with cooldown events); nex sits at the
-  # default 0 and serves only while both higher tiers are cooling.
+  # default 0 and would serve only while both higher tiers are cooling.
+  #
+  # nex is disabled as of 2026-09-21: during cooldown windows it served
+  # malformed batches (OpenRouter 400 json_validate_failed - bare array,
+  # mangled entries - and 17/25 position truncations), and a single 400 is
+  # file-fatal for lingarr (strict-fail, no retry on 4xx). Two healthy
+  # upstreams beat three with one poison pill; re-enable by flipping the flag
+  # when OpenRouter's free tier behaves again.
   # Priority is a strict ladder (selector.go, availableAuthsFromPriorityBuckets
   # with allPriorities=false): only the highest available tier is picked.
   #
@@ -121,6 +128,7 @@ openai-compatibility:
   # down (8x502): client 502, exactly 4 upstream attempts per call, then the
   # next call after recovery is 200.
   - name: "openrouter"
+    disabled: true
     request-retry: 3
     base-url: "https://openrouter.ai/api/v1"
     api-key-entries:
