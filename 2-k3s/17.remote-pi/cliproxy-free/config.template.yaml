@@ -98,26 +98,29 @@ payload:
 # (gemini), 102-118s (nex). To add a model: pass batch-repro.sh 3/3 first, then
 # add it as an entry with the same alias (CLIProxyAPI pools the alias).
 openai-compatibility:
+  # Pool tiers: groq and gemini share tier 10 (the selector round-robins within
+  # a tier; observed split shifts with cooldown events); nex sits at the
+  # default 0 and serves only while both higher tiers are cooling.
+  # Priority is a strict ladder (selector.go, availableAuthsFromPriorityBuckets
+  # with allPriorities=false): only the highest available tier is picked.
+  #
+  # Cooling is ON for every entry, deliberately. The 2026-09-13 disable-cooling
+  # rationale ("a cooldown here is a blackout, not a failover - 247 batch
+  # failures in 6 min from one Nvidia 502") held for a single-upstream config:
+  # with one entry, cooling the only credential meant answering synthetic 503s
+  # until the window closed. In a pool the cooldown is the failover: a saturated
+  # entry cools, the selector drops to the healthy tier, and the synthetic 503
+  # fires only when every upstream is cooling at once. With cooling disabled a
+  # 429-exhausted entry would keep receiving half the traffic and failing it.
+  #
+  # request-retry: up to 3 extra upstream attempts INSIDE one client call for
+  # 403/408/429/500/502/503/504 (config.example.yaml), absorbing transient blips
+  # before a cooldown is even considered. Measured on the pinned binary against
+  # a mock upstream, 21-cooling-mock-test: 502-then-200 one client call: baseline
+  # 502, this config 200 (upstream saw 502,200). 429-then-200: 200. Upstream
+  # down (8x502): client 502, exactly 4 upstream attempts per call, then the
+  # next call after recovery is 200.
   - name: "openrouter"
-    # One credential, one model: a cooldown here is a blackout, not a failover.
-    # With cooling on, one upstream 502 made CLIProxyAPI answer every following
-    # request with a synthetic 503 for the cooldown window (2026-09-13: 247
-    # lingarr batch failures in 6 min from one Nvidia 502). lingarr retries only
-    # on 429/503 (LocalAiService), 5 attempts at 1s x2, so a 502 drops the
-    # batch outright and a 503 window outlives the retry budget.
-    #
-    # disable-cooling: no synthetic 503s; each call gets the real upstream
-    # status. request-retry: up to 3 extra upstream attempts INSIDE one client
-    # call for 403/408/429/500/502/503/504 (config.example.yaml), so a transient
-    # 502 or 429 comes back to lingarr as 200 from the same request. Both are
-    # documented per-provider fields (internal/config/config_types.go,
-    # OpenAICompatibility). Measured on the pinned binary against a mock
-    # upstream, 21-cooling-mock-test: 502-then-200 one client call: baseline
-    # 502, this config 200 (upstream saw 502,200). 429-then-200: 200. Upstream
-    # down (8x502): client 502, exactly 4 upstream attempts per call, then the
-    # next call after recovery is 200. Not a fix for an upstream that stays
-    # down; lingarr then keeps the original lines for that batch.
-    disable-cooling: true
     request-retry: 3
     base-url: "https://openrouter.ai/api/v1"
     api-key-entries:
@@ -129,10 +132,9 @@ openai-compatibility:
         # context_length from openrouter.ai/api/v1/models, 2026-09-13
         max-context-length: 262144
 
-  # Groq free plan. The request-retry/cooling rationale above applies to every
-  # entry in this pool equally.
+  # Groq free plan.
   - name: "groq"
-    disable-cooling: true
+    priority: 10
     request-retry: 3
     base-url: "https://api.groq.com/openai/v1"
     api-key-entries:
@@ -146,7 +148,7 @@ openai-compatibility:
 
   # Google AI Studio free tier via Google's OpenAI-compatibility layer.
   - name: "gemini"
-    disable-cooling: true
+    priority: 10
     request-retry: 3
     base-url: "https://generativelanguage.googleapis.com/v1beta/openai"
     api-key-entries:
