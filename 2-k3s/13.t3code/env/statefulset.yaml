@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/component: server
 spec:
   serviceName: t3env
-  replicas: 2
+  replicas: 0
   podManagementPolicy: Parallel
   persistentVolumeClaimRetentionPolicy:
     whenDeleted: Retain

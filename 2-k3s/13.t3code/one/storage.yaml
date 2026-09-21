@@ -1,0 +1,48 @@
+---
+# Three homes, one server. Each keeps the paths its provider history was
+# written with, so Codex rollouts and Claude transcripts resume without edits.
+# Sized from the sources on 2026-09-21: host 20G used, env homes under 3G each.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: home-spyros
+  namespace: t3code
+  labels:
+    app.kubernetes.io/name: t3code
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 40Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: home-t3env-0
+  namespace: t3code
+  labels:
+    app.kubernetes.io/name: t3code
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: home-t3env-1
+  namespace: t3code
+  labels:
+    app.kubernetes.io/name: t3code
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 10Gi
