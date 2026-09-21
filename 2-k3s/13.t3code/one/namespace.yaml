@@ -1,0 +1,7 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: t3code
+  labels:
+    app.kubernetes.io/name: t3code

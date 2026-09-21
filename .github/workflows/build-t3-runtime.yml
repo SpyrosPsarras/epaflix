@@ -4,12 +4,14 @@ on:
     branches: [main]
     paths:
       - '2-k3s/13.t3code/env/**'
+      - '2-k3s/13.t3code/one/**'
       - '2-k3s/13.t3code/versions.env'
       - '2-k3s/13.t3code/files/cliproxy-models.js'
       - '.github/workflows/build-t3-runtime.yml'
   pull_request:
     paths:
       - '2-k3s/13.t3code/env/**'
+      - '2-k3s/13.t3code/one/**'
       - '2-k3s/13.t3code/versions.env'
       - '2-k3s/13.t3code/files/cliproxy-models.js'
       - '.github/workflows/build-t3-runtime.yml'
@@ -26,6 +28,7 @@ jobs:
         run: |
           bash 2-k3s/13.t3code/env/tools/sync-runtime-image.sh
           git diff --exit-code -- 2-k3s/13.t3code/env/statefulset.yaml
+          bash 2-k3s/13.t3code/one/tools/sync-shared.sh --check
           bash 2-k3s/13.t3code/env/tools/smoke.sh
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'

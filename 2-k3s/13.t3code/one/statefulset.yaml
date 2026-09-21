@@ -1,26 +1,29 @@
 ---
+# One T3 server replacing the LXC host and the two remote-pi/t3env replicas.
+# The server runs as the host identity (/home/spyros) so merged state, skills
+# and secrets keep their paths. The env homes are mounted read-write so their
+# provider instances can append to their own Codex/Claude/OpenCode stores.
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: t3env
-  namespace: remote-pi
+  name: t3code
+  namespace: t3code
   labels:
-    app.kubernetes.io/name: t3env
+    app.kubernetes.io/name: t3code
     app.kubernetes.io/component: server
 spec:
-  serviceName: t3env
-  replicas: 0
-  podManagementPolicy: Parallel
+  serviceName: t3code
+  replicas: 1
   persistentVolumeClaimRetentionPolicy:
     whenDeleted: Retain
     whenScaled: Retain
   selector:
     matchLabels:
-      app.kubernetes.io/name: t3env
+      app.kubernetes.io/name: t3code
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: t3env
+        app.kubernetes.io/name: t3code
         app.kubernetes.io/component: server
     spec:
       automountServiceAccountToken: false
@@ -41,22 +44,14 @@ spec:
               - matchExpressions:
                   - key: node-role.kubernetes.io/control-plane
                     operator: DoesNotExist
-                  # These workers are pinned to different physical Proxmox hosts
-                  # by 1-proxmox/t3env/pin-vm-host.sh. No fallback worker.
+                  # Most free local-path disk on 2026-09-21. local-path pins the
+                  # PVCs to this node after first bind; moving them is a copy.
                   - key: kubernetes.io/hostname
                     operator: In
                     values:
-                      - k3s-worker-62
                       - k3s-worker-65
-        podAntiAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            - topologyKey: kubernetes.io/hostname
-              labelSelector:
-                matchLabels:
-                  app.kubernetes.io/name: t3env
       containers:
         - name: t3
-          # Derived from public build inputs by env/tools/runtime-tag.sh.
           image: ghcr.io/spyrospsarras/t3-runtime:inputs-c902ec959b7c488d5c18be5420338afb
           imagePullPolicy: Always
           command:
@@ -64,9 +59,11 @@ spec:
             - /scripts/entrypoint.sh
           env:
             - name: HOME
-              value: /home/t3
+              value: /home/spyros
             - name: T3CODE_HOME
-              value: /home/t3/.t3
+              value: /home/spyros/.t3
+            - name: T3_PROJECT_DIR
+              value: /home/spyros/epaflix
             - name: ANTHROPIC_BASE_URL
               value: http://cliproxy.remote-pi.svc.cluster.local:8317
             - name: ANTHROPIC_AUTH_TOKEN
@@ -91,8 +88,12 @@ spec:
               drop:
                 - ALL
           volumeMounts:
-            - name: home
-              mountPath: /home/t3
+            - name: home-spyros
+              mountPath: /home/spyros
+            - name: home-t3env-0
+              mountPath: /home/t3env-0
+            - name: home-t3env-1
+              mountPath: /home/t3env-1
             - name: private-config
               mountPath: /private-agent-config
               readOnly: true
@@ -111,7 +112,7 @@ spec:
             tcpSocket:
               port: http
             periodSeconds: 5
-            failureThreshold: 36
+            failureThreshold: 60
           readinessProbe:
             tcpSocket:
               port: http
@@ -123,36 +124,34 @@ spec:
             failureThreshold: 3
           resources:
             requests:
-              cpu: "500m"
-              memory: "1Gi"
+              cpu: "1"
+              memory: "2Gi"
             limits:
-              memory: "6Gi"
+              memory: "12Gi"
       volumes:
+        - name: home-spyros
+          persistentVolumeClaim:
+            claimName: home-spyros
+        - name: home-t3env-0
+          persistentVolumeClaim:
+            claimName: home-t3env-0
+        - name: home-t3env-1
+          persistentVolumeClaim:
+            claimName: home-t3env-1
         - name: vault-access
           secret:
-            secretName: t3env-vault-access
+            secretName: t3code-vault-access
             defaultMode: 0440
         - name: private-config
           secret:
-            secretName: t3env-private-config
+            secretName: t3code-private-config
             defaultMode: 0440
         - name: lock
           configMap:
-            name: t3env-tools
+            name: t3code-tools
         - name: scripts
           configMap:
-            name: t3env-scripts
-            # Git executes credential.helper directly.
+            name: t3code-scripts
             defaultMode: 0555
         - name: tmp
           emptyDir: {}
-  volumeClaimTemplates:
-    - metadata:
-        name: home
-      spec:
-        accessModes:
-          - ReadWriteOnce
-        storageClassName: local-path
-        resources:
-          requests:
-            storage: 20Gi
