@@ -56,7 +56,6 @@ configMapGenerator:
       - enforce-private-seeding.py=cleanuparr/files/enforce-private-seeding.py
   - name: lingarr-jobqueue-guard
     files:
-      - reconcile-job-queue.sql=lingarr/files/reconcile-job-queue.sql
       - reconcile-ai-provider.sql=lingarr/files/reconcile-ai-provider.sql
   - name: bazarr-autotranslate-main
     files:
