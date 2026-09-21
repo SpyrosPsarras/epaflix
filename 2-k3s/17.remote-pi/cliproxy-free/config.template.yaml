@@ -41,11 +41,16 @@ payload:
         - "plugins"
         - "transforms"
 
-# The only upstream, ONE explicit free model behind the alias. openrouter/free
-# (the random free router) is banned: it hands lingarr's batches to
-# non-translators (safety classifiers, 2.6B models answering in Arabic,
-# reasoning models running for minutes), and lingarr then logs "Failed to
-# parse JSON response" and keeps the original lines.
+# The free-provider pool: every entry exposes its model under the ONE alias
+# or-free, and CLIProxyAPI rotates requests across the pool (RoundRobinSelector,
+# per-alias pool rotation). Rotation is the point: OpenRouter's shared free tier
+# holds requests up to ~30 min at peak (#1239), so one upstream alone set the
+# drain rate. openrouter/free (the random free router) stays banned: it hands
+# lingarr's batches to non-translators (safety classifiers, 2.6B models
+# answering in Arabic, reasoning models running for minutes), and lingarr then
+# logs "Failed to parse JSON response" and keeps the original lines.
+#
+# Every upstream here is zero-cost by policy; verify.sh enforces the allowlist.
 #
 # Model history, 2026-09-13, all on lingarr's exact 25-line structured request:
 #   nvidia/nemotron-3-super-120b-a12b:free  structurally 25/25 but rejected on
@@ -62,11 +67,36 @@ payload:
 #     (lingarr-batch-fix/76-candidates-3). Chosen. No reasoning override:
 #     none was measured for this model, and the catalog exposes no
 #     reasoning effort block for it.
-# That is one 25-line sample. It is not a quality guarantee; the 100-line
-# controlled job and production logs are the check.
-# No qwen, deepseek, mistral, llama or glm :free variant existed in the
-# catalog on that date. To add a model: pass batch-repro.sh 3/3 first, then
-# add it as a second entry with the same alias (CLIProxyAPI pools the alias).
+#
+# Pool expansion, 2026-09-21, each candidate run on lingarr's exact 25-line
+# structured request through a canary CLIProxyAPI, then a 111-line controlled
+# job in production-size chunks:
+#   openai/gpt-oss-120b (Groq free plan: 30 RPM / 1K RPD / 200K TPD)  25-line
+#     2/2 in 3.7s; chunks 5/5, 111/111 lines in 3.4-5.2s each. Review: no
+#     invented words, ~5% wobbly lines (worst: "forty" -> "πενήντα", #13
+#     broken genitive). Groq's json_schema enforcement fails above ~30 input
+#     lines ("Failed to validate JSON"), so the max_batch_size=25 pin is load-
+#     bearing for this upstream. Groq sits behind Cloudflare (403/1010 on
+#     python-urllib user agents); the Go client passes.
+#   gemini-3.5-flash (Google AI Studio free tier; data may be used to improve
+#     Google products - accepted by the owner when the OpenRouter ZDR guardrail
+#     was relaxed)  25-line OK in 15.9s; 111-line job 200 in 30.8s, 111/111,
+#     judged the most idiomatic Greek of all candidates ("καΐκι που μπάζει",
+#     "σεντίνα"). 3.6/3.7-flash and flash-latest 503 under high demand;
+#     3.5-flash answered every time it was tried. 2.5-flash is closed to new
+#     projects. Pinned to the specific version because -latest aliases point
+#     at the overloaded newest.
+#   ling-3.0-flash-vl:free (OpenRouter)  reachable and structurally 8/8 with a
+#     proxy-side response_format strip plus a JSON-instructing ai_prompt, but
+#     its 111-line review hit invented/garbled tokens in 1 of 2 runs - the
+#     nemotron failure class. Not pooled.
+#   qwen3.8-27b:free (OpenRouter)  the only other guardrail-legal structured
+#     model; upstream-429 saturated for 4h+ on 2026-09-20. Superseded by the
+#     Groq entry of the same model family.
+# Canary rotation check (2026-09-21): 9/9 structurally OK across the pool with
+# strict gemini -> groq -> nex rotation; per-batch 2.4-4.9s (groq), 10.8-13.5s
+# (gemini), 102-118s (nex). To add a model: pass batch-repro.sh 3/3 first, then
+# add it as an entry with the same alias (CLIProxyAPI pools the alias).
 openai-compatibility:
   - name: "openrouter"
     # One credential, one model: a cooldown here is a blackout, not a failover.
@@ -98,3 +128,32 @@ openai-compatibility:
         display-name: "Nex N2.5 Pro free (lingarr)"
         # context_length from openrouter.ai/api/v1/models, 2026-09-13
         max-context-length: 262144
+
+  # Groq free plan. The request-retry/cooling rationale above applies to every
+  # entry in this pool equally.
+  - name: "groq"
+    disable-cooling: true
+    request-retry: 3
+    base-url: "https://api.groq.com/openai/v1"
+    api-key-entries:
+      - api-key: "__GROQ_API_KEY__"
+    models:
+      - name: "openai/gpt-oss-120b"
+        alias: "or-free"
+        display-name: "Groq gpt-oss-120b free (lingarr)"
+        # Groq models page, 2026-09-21
+        max-context-length: 131072
+
+  # Google AI Studio free tier via Google's OpenAI-compatibility layer.
+  - name: "gemini"
+    disable-cooling: true
+    request-retry: 3
+    base-url: "https://generativelanguage.googleapis.com/v1beta/openai"
+    api-key-entries:
+      - api-key: "__GEMINI_API_KEY__"
+    models:
+      - name: "gemini-3.5-flash"
+        alias: "or-free"
+        display-name: "Gemini 3.5 Flash free (lingarr)"
+        # Google's documented 1M-token flash context
+        max-context-length: 1048576
