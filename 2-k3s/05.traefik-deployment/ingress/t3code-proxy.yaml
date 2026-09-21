@@ -1,39 +1,4 @@
 ---
-
-apiVersion: discovery.k8s.io/v1
-kind: EndpointSlice
-metadata:
-  name: t3code
-  namespace: traefik-system
-  labels:
-    kubernetes.io/service-name: t3code
-addressType: IPv4
-endpoints:
-  - addresses:
-      - 192.168.10.240
-    conditions: {}
-ports:
-  - name: http
-    port: 3773
-    protocol: TCP
-
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: t3code
-  namespace: traefik-system
-  labels:
-    app: t3code
-spec:
-  type: ClusterIP
-  clusterIP: None
-  ports:
-    - name: http
-      port: 3773
-      protocol: TCP
-
----
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -47,6 +12,7 @@ spec:
       kind: Rule
       services:
         - name: t3code
+          namespace: t3code
           port: 3773
   tls:
     certResolver: cloudflare

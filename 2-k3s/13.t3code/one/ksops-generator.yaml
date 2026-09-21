@@ -1,0 +1,12 @@
+apiVersion: viaduct.ai/v1
+kind: ksops
+metadata:
+  name: t3code-secrets
+  annotations:
+    config.kubernetes.io/function: |
+      exec:
+        path: ksops
+files:
+  - private-agent-config.enc.yaml
+  - vault-access.enc.yaml
+  - cliproxy-secrets.enc.yaml

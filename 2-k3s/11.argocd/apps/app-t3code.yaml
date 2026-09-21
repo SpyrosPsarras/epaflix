@@ -1,0 +1,36 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: t3code
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/compare-options: ServerSideDiff=true
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/SpyrosPsarras/epaflix.git
+    targetRevision: main
+    path: 2-k3s/13.t3code/one
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: t3code
+  # Manual sync until the merged state is loaded: cutover.sh scales the
+  # StatefulSet by hand while copying homes, and an automated selfHeal would
+  # fight that. Switch to automated after the bake period.
+  syncPolicy:
+    syncOptions:
+      - ServerSideApply=true
+      - PruneLast=true
+      - CreateNamespace=false
+  ignoreDifferences:
+    - group: ""
+      kind: Service
+      jsonPointers:
+        - /spec/clusterIP
+        - /spec/clusterIPs
+        - /status
+    - group: apps
+      kind: StatefulSet
+      jsonPointers:
+        - /spec/replicas
