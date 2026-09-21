@@ -1,0 +1,94 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tailscale
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: subnet-router-state
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: subnet-router
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: tailscale-subnet-router
+  template:
+    metadata:
+      labels:
+        app: tailscale-subnet-router
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: tailscale
+          image: tailscale/tailscale:v1.102.3
+          env:
+            - name: TS_HOSTNAME
+              value: epaflix-subnet-router
+            - name: TS_STATE_DIR
+              value: /var/lib/tailscale
+            - name: TS_KUBE_SECRET
+              value: ""
+            - name: TS_AUTH_ONCE
+              value: "true"
+            - name: TS_BOOT_TIMEOUT
+              value: 1h
+            # ponytail: userspace handles TCP, UDP and ping for two clients.
+            # Use kernel routing if other IP protocols or throughput require it.
+            - name: TS_USERSPACE
+              value: "true"
+            - name: TS_ROUTES
+              value: 192.168.10.0/24,10.0.0.0/24
+            - name: TS_ACCEPT_DNS
+              value: "false"
+            - name: TS_EXTRA_ARGS
+              value: --accept-routes=false
+            - name: TS_DISABLE_PORTMAPPER
+              value: "true"
+            - name: TS_ENABLE_HEALTH_CHECK
+              value: "true"
+            - name: TS_ENABLE_METRICS
+              value: "true"
+            - name: TS_LOCAL_ADDR_PORT
+              value: "[::]:9002"
+          ports:
+            - name: health-metrics
+              containerPort: 9002
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: health-metrics
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: "1"
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - NET_RAW
+          volumeMounts:
+            - name: state
+              mountPath: /var/lib/tailscale
+      volumes:
+        - name: state
+          persistentVolumeClaim:
+            claimName: subnet-router-state
