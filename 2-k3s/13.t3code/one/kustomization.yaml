@@ -7,7 +7,8 @@ namespace: t3code
 #
 # Kustomize refuses to read above its root, so tools/ and most of files/ are
 # byte copies of ../env inputs; tools/sync-shared.sh refreshes them and CI
-# diffs them. files/entrypoint.sh and files/searxng-mcp.py are this overlay's
+# diffs them. files/entrypoint.sh, files/searxng-mcp.py and
+# files/opencode-fast-version.sh are this overlay's
 # own: the live t3env pods keep the untouched env/ entrypoint until sunset.
 resources:
   - namespace.yaml
@@ -29,6 +30,7 @@ configMapGenerator:
       - files/keepass-remote.sh
       - files/cliproxy-models.js
       - files/searxng-mcp.py
+      - files/opencode-fast-version.sh
 
 generators:
   - ksops-generator.yaml
