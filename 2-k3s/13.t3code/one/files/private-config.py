@@ -83,7 +83,9 @@ def pack(home, output):
         raise ValueError('Private configuration exceeds Secret size budget')
     secret = {'apiVersion': 'v1', 'kind': 'Secret', 'metadata': {
         'name': 't3env-private-config', 'namespace': 'remote-pi',
-        'annotations': {'t3code.epaflix.com/private-revision': hashlib.sha256(payload).hexdigest()}},
+        'annotations': {
+            'argocd.argoproj.io/sync-options': 'ServerSideApply=true',
+            't3code.epaflix.com/private-revision': hashlib.sha256(payload).hexdigest()}},
         'type': 'Opaque', 'data': {'bundle.json': base64.b64encode(payload).decode()}}
     result = subprocess.run(['sops', '--encrypt', '--input-type', 'json', '--output-type', 'yaml',
                              '--filename-override', str(output), '/dev/stdin'],
