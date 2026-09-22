@@ -29,6 +29,7 @@ OC_DIR=$HOME/.config/opencode
 mkdir -p "$OC_DIR/plugins"
 # Replace read-only copies from earlier starts and keep the destination writable.
 install -m 0644 /scripts/cliproxy-models.js "$OC_DIR/plugins/cliproxy-models.js"
+install -m 0644 /scripts/jev-shadow.js "$OC_DIR/plugins/jev-shadow.js"
 if [[ ! -f $OC_DIR/opencode.json ]]; then
   cat >"$OC_DIR/opencode.json" <<'EOF'
 {
