@@ -18,6 +18,22 @@ export PATH=/tools/node_modules/.bin:$PATH
 mkdir -p "$(dirname "$PROJECT_DIR")"
 git config --global credential.helper /scripts/git-credential-github.sh
 
+# git@github.com: remotes (the Davidhorn checkouts). ssh expands ~ from
+# /etc/passwd (/home/node), not $HOME, so the pinned key and host keys go there.
+if [[ -r /run/t3-github-ssh/identity ]]; then
+  SSH_DIR=$(getent passwd "$(id -u)" | cut -d: -f6)/.ssh
+  mkdir -m 0700 "$SSH_DIR" 2>/dev/null || chmod 0700 "$SSH_DIR"
+  cat >"$SSH_DIR/config" <<'EOF'
+Host github.com
+  User git
+  IdentityFile /run/t3-github-ssh/identity
+  IdentitiesOnly yes
+  UserKnownHostsFile /run/t3-github-ssh/known_hosts
+  StrictHostKeyChecking yes
+EOF
+  chmod 0600 "$SSH_DIR/config"
+fi
+
 # Same remote in both environments so T3 groups them as one project.
 if [[ ! -d $PROJECT_DIR/.git ]]; then
   git clone -q "$T3_PROJECT_REPO" "$PROJECT_DIR"
