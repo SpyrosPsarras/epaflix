@@ -65,7 +65,20 @@ try {
   assert.equal(Object.keys(models).length, 6)
   const saved = await readFile(join(cache, "opencode/cliproxy-models.json"), "utf8")
   assert.ok(!saved.includes("test-secret"))
+  // A partial listing (credential in cooldown) must not drop models seen before.
   data = [{ slug: "openrouter/or-new-model", context_window: 272000, input_modalities: ["text", "image"] }]
+  await hook.config(config)
+  assert.deepEqual(Object.keys(config.provider.cliproxy.models).sort(), ["claude-fable-5-1", "gpt-5.3-codex-spark", "gpt-6-astra", "or-gcp-a-model-name", "or-glm-5.3-flash", "or-minimax-m3:free", "or-new-model"])
+  assert.equal(config.provider.cliproxy.models["gpt-6-astra"].id, "codex/gpt-6-astra")
+  data = [{ slug: "openrouter/or-new-model", context_window: 300000, input_modalities: ["text"] }]
+  await hook.config(config)
+  assert.deepEqual(config.provider.cliproxy.models["or-new-model"].limit, { context: 300000, output: 8192 })
+  globalThis.fetch = async () => new Response("unavailable", { status: 503 })
+  await hook.config(config)
+  assert.equal(Object.keys(config.provider.cliproxy.models).length, 7)
+  // A corrupt cache must not block a successful fetch from replacing it.
+  await writeFile(join(cache, "opencode/cliproxy-models.json"), "{not json")
+  globalThis.fetch = async () => Response.json({ models: [{ slug: "openrouter/or-new-model", context_window: 272000, input_modalities: ["text", "image"] }] })
   await hook.config(config)
   assert.deepEqual(Object.keys(config.provider.cliproxy.models), ["or-new-model"])
   globalThis.fetch = async () => new Response("unavailable", { status: 503 })
@@ -87,7 +100,7 @@ try {
   await assert.rejects(hook.config(config), /HTTP 503/)
   globalThis.fetch = async () => Response.json({ models: [{ slug: "gpt-6-astra" }] })
   await assert.rejects(hook.config(config), /no supported models/)
-  console.log("PASS: subscription routing, token limits, collision exclusion, stable selections, names, SDK routing, catalog updates, safe cache fallback, legacy cache rejection, no cached secrets")
+  console.log("PASS: subscription routing, token limits, collision exclusion, stable selections, names, SDK routing, catalog merge over cache, safe cache fallback, legacy cache rejection, no cached secrets")
 } finally {
   globalThis.fetch = originalFetch
   if (previousCache === undefined) delete process.env.XDG_CACHE_HOME
