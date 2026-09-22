@@ -100,6 +100,9 @@ spec:
             - name: vault-access
               mountPath: /run/t3-credentials
               readOnly: true
+            - name: github-ssh
+              mountPath: /run/t3-github-ssh
+              readOnly: true
             - name: lock
               mountPath: /runtime-pins
               readOnly: true
@@ -145,6 +148,10 @@ spec:
         - name: private-config
           secret:
             secretName: t3code-private-config
+            defaultMode: 0440
+        - name: github-ssh
+          secret:
+            secretName: t3code-github-ssh
             defaultMode: 0440
         - name: lock
           configMap:
