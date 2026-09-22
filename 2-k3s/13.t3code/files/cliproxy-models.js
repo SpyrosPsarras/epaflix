@@ -12,6 +12,8 @@ export default async () => ({
     if (!url || !key) throw new Error("CLIProxyAPI URL or API key is missing")
     const cacheDir = join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "opencode")
     const cachePath = join(cacheDir, "cliproxy-models.json")
+    const cached = await readFile(cachePath, "utf8").then(JSON.parse).catch(() => null)
+    const usable = cached?.version === 4 && cached.url === url && Object.keys(cached.models ?? {}).length > 0
     let models
     try {
       // The plain listing strips every field but id. The Codex client listing on
@@ -68,9 +70,11 @@ export default async () => ({
         }
       }
       if (!Object.keys(models).length) throw new Error("catalog has no supported models")
+      // CLIProxyAPI lists only models of credentials active right now. A model
+      // seen once stays selectable while its credential is in quota cooldown.
+      if (usable) models = { ...cached.models, ...models }
     } catch (error) {
-      const cached = JSON.parse(await readFile(cachePath, "utf8").catch(() => "null"))
-      if (cached?.version !== 4 || cached.url !== url || !cached.models || !Object.keys(cached.models).length) throw error
+      if (!usable) throw error
       provider.models = cached.models
       console.error(`[cliproxy-models] ${error.message}; using catalog saved at ${cached.updatedAt}`)
       return
