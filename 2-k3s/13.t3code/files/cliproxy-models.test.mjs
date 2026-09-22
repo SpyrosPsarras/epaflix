@@ -65,7 +65,32 @@ try {
   assert.equal(Object.keys(models).length, 6)
   const saved = await readFile(join(cache, "opencode/cliproxy-models.json"), "utf8")
   assert.ok(!saved.includes("test-secret"))
+  // A partial listing (credential in cooldown) must not drop models seen before.
   data = [{ slug: "openrouter/or-new-model", context_window: 272000, input_modalities: ["text", "image"] }]
+  await hook.config(config)
+  assert.deepEqual(Object.keys(config.provider.cliproxy.models).sort(), ["claude-fable-5-1", "gpt-5.3-codex-spark", "gpt-6-astra", "or-gcp-a-model-name", "or-glm-5.3-flash", "or-minimax-m3:free", "or-new-model"])
+  assert.equal(config.provider.cliproxy.models["gpt-6-astra"].id, "codex/gpt-6-astra")
+  data = [{ slug: "openrouter/or-new-model", context_window: 300000, input_modalities: ["text"] }]
+  await hook.config(config)
+  assert.deepEqual(config.provider.cliproxy.models["or-new-model"].limit, { context: 300000, output: 8192 })
+  globalThis.fetch = async () => new Response("unavailable", { status: 503 })
+  await hook.config(config)
+  assert.equal(Object.keys(config.provider.cliproxy.models).length, 7)
+  // A model unlisted for over 14 days is retired; a recently unlisted one is kept with its original timestamp.
+  const cachePath = join(cache, "opencode/cliproxy-models.json")
+  const aged = JSON.parse(await readFile(cachePath, "utf8"))
+  const fifteenDaysAgo = Date.now() - 15 * 24 * 60 * 60 * 1000
+  aged.seen["gpt-5.3-codex-spark"] = fifteenDaysAgo
+  aged.seen["gpt-6-astra"] = fifteenDaysAgo + 2 * 24 * 60 * 60 * 1000
+  await writeFile(cachePath, JSON.stringify(aged))
+  globalThis.fetch = async () => Response.json({ models: data })
+  await hook.config(config)
+  assert.equal(config.provider.cliproxy.models["gpt-5.3-codex-spark"], undefined)
+  assert.equal(config.provider.cliproxy.models["gpt-6-astra"].id, "codex/gpt-6-astra")
+  assert.equal(JSON.parse(await readFile(cachePath, "utf8")).seen["gpt-6-astra"], aged.seen["gpt-6-astra"])
+  // A corrupt cache must not block a successful fetch from replacing it.
+  await writeFile(join(cache, "opencode/cliproxy-models.json"), "{not json")
+  globalThis.fetch = async () => Response.json({ models: [{ slug: "openrouter/or-new-model", context_window: 272000, input_modalities: ["text", "image"] }] })
   await hook.config(config)
   assert.deepEqual(Object.keys(config.provider.cliproxy.models), ["or-new-model"])
   globalThis.fetch = async () => new Response("unavailable", { status: 503 })
@@ -79,15 +104,15 @@ try {
   globalThis.fetch = async () => Response.json({ models: [{ slug: 42 }] })
   await hook.config(config)
   assert.deepEqual(Object.keys(config.provider.cliproxy.models), ["or-new-model"])
-  // A pre-capabilities cache would silently restore text-only models.
+  // A cache without per-model timestamps could never retire anything.
   const legacy = JSON.parse(saved)
-  legacy.version = 3
+  legacy.version = 4
   await writeFile(join(cache, "opencode/cliproxy-models.json"), JSON.stringify(legacy))
   globalThis.fetch = async () => new Response("unavailable", { status: 503 })
   await assert.rejects(hook.config(config), /HTTP 503/)
   globalThis.fetch = async () => Response.json({ models: [{ slug: "gpt-6-astra" }] })
   await assert.rejects(hook.config(config), /no supported models/)
-  console.log("PASS: subscription routing, token limits, collision exclusion, stable selections, names, SDK routing, catalog updates, safe cache fallback, legacy cache rejection, no cached secrets")
+  console.log("PASS: subscription routing, token limits, collision exclusion, stable selections, names, SDK routing, catalog merge over cache, retirement after 14 days, safe cache fallback, legacy cache rejection, no cached secrets")
 } finally {
   globalThis.fetch = originalFetch
   if (previousCache === undefined) delete process.env.XDG_CACHE_HOME
