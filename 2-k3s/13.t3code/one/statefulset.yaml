@@ -60,6 +60,8 @@ spec:
           env:
             - name: HOME
               value: /home/spyros
+            - name: JEV_OPENROUTER_KEY_FILE
+              value: /run/jev/openrouter-key
             - name: T3CODE_HOME
               value: /home/spyros/.t3
             - name: T3_PROJECT_DIR
@@ -88,6 +90,9 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: jev-key
+              mountPath: /run/jev
+              readOnly: true
             - name: home-spyros
               mountPath: /home/spyros
             - name: home-t3env-0
@@ -129,6 +134,10 @@ spec:
             limits:
               memory: "12Gi"
       volumes:
+        - name: jev-key
+          secret:
+            secretName: t3code-jev
+            defaultMode: 0440
         - name: home-spyros
           persistentVolumeClaim:
             claimName: home-spyros
