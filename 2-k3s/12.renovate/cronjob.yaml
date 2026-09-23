@@ -13,7 +13,9 @@ metadata:
   labels:
     app.kubernetes.io/name: renovate
 spec:
-  schedule: "17 * * * *"
+  # Every 6h, not hourly: each run writes ~3 GB into the emptyDirs below, 73 GB/day on
+  # worker-65's root disk, which PBS then re-uploaded every night (#1075 follow-up).
+  schedule: "17 */6 * * *"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 3
