@@ -28,6 +28,7 @@ configMapGenerator:
       - files/keepass-remote.sh
       - files/cliproxy-models.js
       - files/jev-shadow.js
+      - files/jev-auto.js
       - files/searxng-mcp.py
       - files/opencode-fast-version.sh
 
