@@ -82,7 +82,7 @@ def pack(home, output):
     if len(payload) > 900_000:
         raise ValueError('Private configuration exceeds Secret size budget')
     secret = {'apiVersion': 'v1', 'kind': 'Secret', 'metadata': {
-        'name': 't3env-private-config', 'namespace': 'remote-pi',
+        'name': 't3code-private-config', 'namespace': 't3code',
         'annotations': {
             'argocd.argoproj.io/sync-options': 'ServerSideApply=true',
             't3code.epaflix.com/private-revision': hashlib.sha256(payload).hexdigest()}},

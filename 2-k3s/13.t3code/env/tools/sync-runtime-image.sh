@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Run after changing the shared inventory or image inputs, before committing.
-# Rewrites the runtime image in both overlays; they share one image.
+# Rewrites the runtime image in the one/ StatefulSet.
 set -euo pipefail
 dir=$(cd "$(dirname "$0")" && pwd)
 tag=$(bash "$dir/runtime-tag.sh")
-python3 - "$tag" "$dir/../statefulset.yaml" "$dir/../../one/statefulset.yaml" <<'PY'
+python3 - "$tag" "$dir/../../one/statefulset.yaml" <<'PY'
 import pathlib, re, sys
 for arg in sys.argv[2:]:
     path = pathlib.Path(arg)
