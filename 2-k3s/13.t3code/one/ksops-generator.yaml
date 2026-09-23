@@ -9,6 +9,5 @@ metadata:
 files:
   - jev-secret.enc.yaml
   - private-agent-config.enc.yaml
-  - vault-access.enc.yaml
   - cliproxy-secrets.enc.yaml
   - github-ssh.enc.yaml
