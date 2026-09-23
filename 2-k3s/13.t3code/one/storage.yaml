@@ -9,6 +9,9 @@ metadata:
   namespace: t3code
   labels:
     app.kubernetes.io/name: t3code
+  annotations:
+    # All agent history lives here; ArgoCD must never remove it.
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
 spec:
   accessModes:
     - ReadWriteOnce
@@ -24,6 +27,9 @@ metadata:
   namespace: t3code
   labels:
     app.kubernetes.io/name: t3code
+  annotations:
+    # All agent history lives here; ArgoCD must never remove it.
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
 spec:
   accessModes:
     - ReadWriteOnce
@@ -39,6 +45,9 @@ metadata:
   namespace: t3code
   labels:
     app.kubernetes.io/name: t3code
+  annotations:
+    # All agent history lives here; ArgoCD must never remove it.
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
 spec:
   accessModes:
     - ReadWriteOnce

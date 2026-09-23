@@ -5,7 +5,7 @@
 #
 # Required env: ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN, HOME (PVC mount).
 # Optional env: GITHUB_TOKEN (git push over https), T3_PROJECT_REPO,
-# T3_PROJECT_DIR (checkout path; the merged t3code server keeps $HOME/epaflix).
+# T3_PROJECT_DIR (checkout path; the t3code server keeps $HOME/epaflix).
 set -euo pipefail
 
 T3_PROJECT_REPO=${T3_PROJECT_REPO:-https://github.com/SpyrosPsarras/epaflix.git}
@@ -66,16 +66,6 @@ if [[ ! -f $OC_DIR/opencode.json ]]; then
 EOF
   chmod 0600 "$OC_DIR/opencode.json"
 fi
-
-# The LXC host configs point at /usr/local/bin/{keepass,searxng}-mcp. In the
-# pod those are the kubectl exec vault bridge and the bundled searxng script. Rewrite
-# once per home; idempotent because the target strings never match again.
-for h in "$HOME" /home/t3env-*; do
-  for f in "$h/.config/opencode/opencode.json" "$h/.codex/config.toml" "$h/.claude.json"; do
-    [[ -f $f ]] && grep -q '/usr/local/bin/\(keepass\|searxng\)-mcp' "$f" && \
-      sed -i 's#/usr/local/bin/keepass-mcp#/scripts/keepass-remote.sh#g; s#/usr/local/bin/searxng-mcp#/scripts/searxng-mcp.py#g' "$f"
-  done
-done
 
 # Register the runtime vault bridge without replacing provider or user settings.
 if [[ -r /var/run/secrets/kubernetes.io/serviceaccount/token ]]; then

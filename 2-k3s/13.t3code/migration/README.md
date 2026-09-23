@@ -2,7 +2,7 @@
 
 Base commit `8b45bdca9b132cc243433d4d8466474f8f7f9dff`.
 
-The destination is one T3 server pod in namespace `t3code`. This directory contains migration tooling only. It does not deploy, stop, restart, or modify a source server.
+The destination is one T3 server pod in namespace `t3code`. This file is the record of the migration, finished on 2026-09-23. The tooling it describes (`cutover.sh`, `migrate.py`, `repair_home.py`, `verify.py`, `resume_smoke.mjs`, the tests) was removed after the sunset; `git show 0f94ffe:2-k3s/13.t3code/migration/<file>` brings any of it back.
 
 ## Plan
 
@@ -128,8 +128,8 @@ Done early, two days into the bake, on request.
 - Pi-hole: removed `t3code-ssh.epaflix.com` from `10-epaflix.conf` and the `t3env0`/`t3env1` host records, then restarted `pihole-FTL`. `t3new.epaflix.com` was already gone, so `one/ingress.yaml` went too.
 - t3env: the ArgoCD app `t3code-env` and its resources are deleted, as are the PVCs `remote-pi/home-t3env-0` and `home-t3env-1` (40Gi). The copies of those homes in `t3code/home-t3env-*` stay; the pod mounts them.
 - Repo: LXC provisioning (`1-proxmox/t3code`, `provision.sh`, `update.sh`, the wizards, the guest-only `files/` scripts) and the t3env manifests are removed. `env/` keeps only what the runtime image and its CI use.
+- ArgoCD: the `t3code` app is automated (selfHeal, prune). The namespace and the three home PVCs carry `Prune=false,Delete=false`, so neither a prune nor an app delete can remove agent history. The migration tooling in this directory was deleted; this README stays as the record.
 
 ## Known gaps
 
 - `one/tools` and most of `one/files` are byte copies of `env/` inputs because kustomize cannot read above its root. `one/files/entrypoint.sh` and `one/files/searxng-mcp.py` are this overlay's own. `one/tools/sync-shared.sh --check` catches drift; the `build-t3-runtime` workflow runs it.
-- The ArgoCD app `t3code` is manual-sync. Flip to automated after the bake.
