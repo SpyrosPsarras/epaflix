@@ -6,10 +6,16 @@ metadata:
   name: coredns-custom
   namespace: kube-system
 data:
+  # Straight to Pi-hole, which owns the internal *.epaflix.com records. The
+  # masters' systemd-resolved (the old target) also lists 1.1.1.1 and sticks
+  # to it after one Pi-hole hiccup, so pods got public Cloudflare IPs for
+  # names Pi-hole answers with LAN IPs (ntfy canary 403 1010 since 2026-09-21). Pi-hole down
+  # now means epaflix.com lookups fail (SERVFAIL) instead of resolving to the
+  # wrong place.
   epaflix.server: |
     epaflix.com:53 {
         errors
         cache 30
-        forward . 192.168.10.51 192.168.10.52 192.168.10.53
+        forward . 192.168.10.30
         log
     }
