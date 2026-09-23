@@ -44,3 +44,7 @@ configMapGenerator:
     namespace: remote-pi
     files:
       - search-guard/search-guard.py
+  - name: cliproxy-heartbeat-scripts
+    namespace: remote-pi
+    files:
+      - cliproxy/files/heartbeat.py
