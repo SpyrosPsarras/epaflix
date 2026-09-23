@@ -94,8 +94,15 @@ with open(path, "w") as f:
     f.write("\n")
 os.chmod(path, 0o600)
 PY
-  claude mcp add -s user keepass -- bash /scripts/keepass-remote.sh >/dev/null 2>&1 || \
-    claude mcp get keepass >/dev/null
+  # The claudeAgent instances run with CLAUDE_CONFIG_DIR=<home>/.claude, which
+  # reads <home>/.claude/.claude.json, not ~/.claude.json. Register there.
+  for h in "$HOME" /home/t3env-*; do
+    for s in keepass:/scripts/keepass-remote.sh searxng:/scripts/searxng-mcp.py; do
+      HOME=$h CLAUDE_CONFIG_DIR=$h/.claude claude mcp get "${s%%:*}" >/dev/null 2>&1 || \
+        HOME=$h CLAUDE_CONFIG_DIR=$h/.claude claude mcp add -s user "${s%%:*}" -- "${s#*:}" >/dev/null || \
+        echo "t3env: claude mcp add ${s%%:*} failed in $h" >&2
+    done
+  done
   codex mcp get keepass >/dev/null 2>&1 || \
     codex mcp add keepass -- bash /scripts/keepass-remote.sh >/dev/null
 fi
