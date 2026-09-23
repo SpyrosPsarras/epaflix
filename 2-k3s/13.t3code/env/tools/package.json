@@ -4,7 +4,7 @@
   "description": "Shared pod and LXC CLI pins; Renovate maintains the package and lock together.",
   "dependencies": {
     "t3": "0.0.43-nightly.20260922.2083",
-    "@anthropic-ai/claude-code": "2.1.278",
+    "@anthropic-ai/claude-code": "2.1.280",
     "opencode-ai": "1.18.31",
     "@openai/codex": "0.155.1"
   }
