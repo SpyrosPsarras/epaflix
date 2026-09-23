@@ -58,7 +58,7 @@ log_info "  ✓ CoreDNS main configuration updated"
 
 log_info "Step 3/4: Updating custom epaflix domains configuration..."
 if kubectl get configmap coredns-custom -n kube-system &> /dev/null; then
-    kubectl patch configmap coredns-custom -n kube-system --type=json -p='[{"op":"replace","path":"/data/epaflix.server","value":"epaflix.com:53 {\n    errors\n    cache 30\n    forward . 192.168.10.51 192.168.10.52 192.168.10.53\n    log\n}\n"}]'
+    kubectl patch configmap coredns-custom -n kube-system --type=json -p='[{"op":"replace","path":"/data/epaflix.server","value":"epaflix.com:53 {\n    errors\n    cache 30\n    forward . 192.168.10.30\n    log\n}\n"}]'
     log_info "  ✓ Custom epaflix domains configuration updated"
 else
     log_warn "  coredns-custom ConfigMap not found, applying from file..."
