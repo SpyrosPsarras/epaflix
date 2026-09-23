@@ -26,7 +26,8 @@ export HOME=$tmp/home ANTHROPIC_BASE_URL=http://cliproxy.test ANTHROPIC_AUTH_TOK
 export T3_PROJECT_REPO=$tmp/remote.git
 mkdir -p "$tmp/scripts"
 cp "$HELPER" "$DIR/../../files/cliproxy-models.js" "$tmp/scripts/"
-sed -e "s|/scripts/|$tmp/scripts/|g" -e '/^echo "t3env:/,$d' "$DIR/entrypoint.sh" >"$tmp/entrypoint-noexec.sh"
+sed -e "s|/scripts/|$tmp/scripts/|g" -e "s|/var/run/secrets/kubernetes.io/serviceaccount/token|$tmp/no-sa-token|g" \
+  -e '/^echo "t3env:/,$d' "$DIR/entrypoint.sh" >"$tmp/entrypoint-noexec.sh"
 run() { bash "$tmp/entrypoint-noexec.sh"; }
 run
 [[ -d $HOME/projects/remote/.git ]] || fail "project not cloned"
