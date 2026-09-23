@@ -3,7 +3,7 @@
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
-cp -r "$ROOT" "$tmp/k"
+cp -r "$ROOT/one" "$tmp/k"
 python3 "$ROOT/env/tools/private-config.test.py" overlay "$tmp/k"
 render() { kustomize build "$1" | python3 -c '
 import sys, yaml
@@ -15,14 +15,14 @@ assert sorted(refs.values()) == cms
 assert sts["spec"]["persistentVolumeClaimRetentionPolicy"] == {"whenDeleted": "Retain", "whenScaled": "Retain"}
 print(refs["lock"], refs["scripts"])'; }
 base=$(render "$tmp/k"); read -r lock0 scripts0 <<<"$base"
-[[ $lock0 == t3env-tools-* && $scripts0 == t3env-scripts-* ]]
-printf '\n' >>"$tmp/k/env/tools/package-lock.json"
+[[ $lock0 == t3code-tools-* && $scripts0 == t3code-scripts-* ]]
+printf '\n' >>"$tmp/k/tools/package-lock.json"
 after=$(render "$tmp/k"); read -r lock1 scripts1 <<<"$after"
 [[ $lock1 != "$lock0" && $scripts1 == "$scripts0" ]]
-printf '\n' >>"$tmp/k/env/files/entrypoint.sh"
+printf '\n' >>"$tmp/k/files/entrypoint.sh"
 after=$(render "$tmp/k"); read -r lock2 scripts2 <<<"$after"
 [[ $scripts2 != "$scripts1" && $lock2 == "$lock1" ]]
-printf '\n' >>"$tmp/k/env/ingress.yaml"
+printf '\n' >>"$tmp/k/service.yaml"
 [[ $(render "$tmp/k") == "$after" ]]
 echo 'ok: tool/script updates roll pods; unrelated edits do not; PVCs retained'
 before=$(kustomize build "$tmp/k" | python3 -c 'import yaml,sys;print(next(d for d in yaml.safe_load_all(sys.stdin) if d["kind"]=="StatefulSet")["spec"]["template"]["metadata"]["annotations"])')

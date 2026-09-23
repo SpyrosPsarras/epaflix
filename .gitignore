@@ -64,7 +64,7 @@ charts/
 .env
 *.env
 !*.env.example
-# Version pins, no secrets; Renovate and the t3code guest both read it from git.
+# Version pins, no secrets; Renovate and the runtime image build read it from git.
 !2-k3s/13.t3code/versions.env
 
 # Playwright MCP scratch - browser snapshots, which can capture account pages.
