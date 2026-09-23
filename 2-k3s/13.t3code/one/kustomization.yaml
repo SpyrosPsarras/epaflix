@@ -2,20 +2,18 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: t3code
 
-# One merged T3 Code server. Replaces the LXC host (t3code.epaflix.com) and the
-# two remote-pi/t3env replicas after migration/cutover.sh runs.
+# The T3 Code server behind t3code.epaflix.com. It replaced the t3code LXC and
+# the two remote-pi/t3env replicas (migration/README.md).
 #
 # Kustomize refuses to read above its root, so tools/ and most of files/ are
 # byte copies of ../env inputs; tools/sync-shared.sh refreshes them and CI
 # diffs them. files/entrypoint.sh, files/searxng-mcp.py and
-# files/opencode-fast-version.sh are this overlay's
-# own: the live t3env pods keep the untouched env/ entrypoint until sunset.
+# files/opencode-fast-version.sh are this overlay's own.
 resources:
   - namespace.yaml
   - storage.yaml
   - statefulset.yaml
   - service.yaml
-  - ingress.yaml
 
 configMapGenerator:
   - name: t3code-tools

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Same pins as the LXC. This image targets the existing amd64 workers.
+# Pins from ../../versions.env. This image targets the existing amd64 workers.
 set -euo pipefail
 source "${T3_VERSIONS_FILE:-$(dirname "$0")/versions.env}"
 [[ $(dpkg --print-architecture) == amd64 ]]

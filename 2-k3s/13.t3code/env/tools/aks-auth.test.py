@@ -13,7 +13,6 @@ with tempfile.TemporaryDirectory() as tmp:
     for name, text in {
         'kubelogin': '#!/bin/sh\nprintf \'{"kind":"ExecCredential"}\\n\'\n',
         'az': '#!/bin/sh\necho "device-code $*"\n',
-        'ssh': '#!/bin/sh\nprintf "%s\\n" "$@"\n',
     }.items():
         p = bin_dir / name
         p.write_text(text)
@@ -43,7 +42,7 @@ printf '{"kind":"ExecCredential"}\\n'
     (bin_dir / 'az').write_text('#!/bin/sh\necho "device-code $*"\ntouch "$HOME/authenticated"\n')
     r = central('token')
     assert r.returncode == 0 and r.stdout == '{"kind":"ExecCredential"}\n', r
-    assert 'device-code' in r.stderr and 'central host' in r.stderr
+    assert 'device-code' in r.stderr and 'Starting Azure login' in r.stderr
     assert 'partial failed output' not in r.stdout
     r = central('token')
     assert r.returncode == 0 and 'device-code' not in r.stderr
@@ -51,10 +50,11 @@ printf '{"kind":"ExecCredential"}\\n'
     (bin_dir / 'az').write_text('#!/bin/sh\necho "login denied" >&2\nexit 1\n')
     r = central('token')
     assert r.returncode == 1 and not r.stdout and 'login denied' in r.stderr
+    (bin_dir / 'aks-auth-central').write_text('#!/bin/sh\nprintf "central %s\\n" "$@"\n')
+    (bin_dir / 'aks-auth-central').chmod(0o700)
     for action in ['token', 'login']:
         r = subprocess.run(['bash', str(scripts / 'aks-auth.sh'), action], env=env, capture_output=True, text=True)
-        assert r.returncode == 0 and r.stdout.endswith('spyros@192.168.10.240\n' + action + '\n')
-        assert 'StrictHostKeyChecking=yes' in r.stdout
+        assert r.returncode == 0 and r.stdout == 'central ' + action + '\n', r
     r = subprocess.run(['bash', str(scripts / 'aks-auth.sh'), 'id'], env=env, capture_output=True)
     assert r.returncode == 2
-print('PASS: allowlist, clean token stdout, automatic central login and retry, failed login, no login on non-auth errors, SSH routing')
+print('PASS: allowlist, clean token stdout, automatic central login and retry, failed login, no login on non-auth errors, local routing')

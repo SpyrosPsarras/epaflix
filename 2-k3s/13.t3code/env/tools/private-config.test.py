@@ -28,7 +28,7 @@ def overlay(root):
     cfg['resources'].append('synthetic-private.yaml')
     path.write_text(yaml.safe_dump(cfg))
     secret = {'apiVersion': 'v1', 'kind': 'Secret', 'metadata': {
-        'name': 't3env-private-config', 'annotations': {'t3code.epaflix.com/private-revision': 'synthetic-v1'}},
+        'name': 't3code-private-config', 'annotations': {'t3code.epaflix.com/private-revision': 'synthetic-v1'}},
         'type': 'Opaque', 'data': {'bundle.json': base64.b64encode(json.dumps(fixture()).encode()).decode()}}
     (root / 'synthetic-private.yaml').write_text(yaml.safe_dump(secret))
 
