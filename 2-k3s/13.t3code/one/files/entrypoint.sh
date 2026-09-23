@@ -68,7 +68,7 @@ EOF
 fi
 
 # The LXC host configs point at /usr/local/bin/{keepass,searxng}-mcp. In the
-# pod those are the SSH vault bridge and the bundled searxng script. Rewrite
+# pod those are the kubectl exec vault bridge and the bundled searxng script. Rewrite
 # once per home; idempotent because the target strings never match again.
 for h in "$HOME" /home/t3env-*; do
   for f in "$h/.config/opencode/opencode.json" "$h/.codex/config.toml" "$h/.claude.json"; do
@@ -78,7 +78,7 @@ for h in "$HOME" /home/t3env-*; do
 done
 
 # Register the runtime vault bridge without replacing provider or user settings.
-if [[ -r /run/t3-credentials/identity ]]; then
+if [[ -r /var/run/secrets/kubernetes.io/serviceaccount/token ]]; then
   python3 - "$OC_DIR/opencode.json" <<'PY'
 import json, os, sys
 path = sys.argv[1]

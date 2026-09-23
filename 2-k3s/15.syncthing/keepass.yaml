@@ -1,0 +1,134 @@
+---
+# KeePass MCP server next to the Syncthing vault folder. Nothing runs until a
+# client connects: the T3 pod starts one server per session with
+# `kubectl exec -i deploy/keepass -- python /app/keepass_mcp.py`
+# (13.t3code/one/files/keepass-remote.sh). Writes land in the synced folder,
+# Syncthing carries them to the other devices.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keepass
+  namespace: syncthing
+  labels:
+    app: keepass
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: keepass
+  template:
+    metadata:
+      labels:
+        app: keepass
+    spec:
+      # syncthing-data is a local PV on this node.
+      nodeSelector:
+        kubernetes.io/hostname: k3s-worker-63
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 5
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: keepass
+          image: docker.io/library/python:3.13-alpine
+          # ponytail: installs pinned wheels on every start (~20s). Bake an
+          # image if restarts get frequent or PyPI becomes a problem.
+          command:
+            - sh
+            - -c
+            - >-
+              pip install -q --no-cache-dir --disable-pip-version-check
+              --target /opt/py pykeepass==4.2.0 mcp==2.2.0 &&
+              python /app/keepass_mcp.py --selftest &&
+              touch /opt/py/.ready &&
+              exec sleep infinity
+          env:
+            - name: HOME
+              value: /tmp
+            - name: PYTHONPATH
+              value: /opt/py
+            - name: KEEPASS_DB
+              value: /vault/Passwords.kdbx
+            - name: KEEPASS_PASSPHRASE
+              valueFrom:
+                secretKeyRef:
+                  name: t3code-vault-passphrase
+                  key: VAULT_PASSPHRASE
+          readinessProbe:
+            exec:
+              command: [test, -f, /opt/py/.ready]
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: vault
+              mountPath: /vault
+              subPath: data/secrets-vault
+            - name: app
+              mountPath: /app
+              readOnly: true
+            - name: py
+              mountPath: /opt/py
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: vault
+          persistentVolumeClaim:
+            claimName: syncthing-data
+        - name: app
+          configMap:
+            name: keepass-mcp
+        - name: py
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+---
+# The only rights the T3 pod ServiceAccount has: start the MCP server above.
+# pods/exec cannot be pinned to one pod name, so it covers the whole
+# namespace, which also holds the Syncthing pod.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: keepass-exec
+  namespace: syncthing
+rules:
+  - apiGroups: [apps]
+    resources: [deployments]
+    resourceNames: [keepass]
+    verbs: [get]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list]
+  - apiGroups: [""]
+    resources: [pods/exec]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: keepass-exec
+  namespace: syncthing
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: keepass-exec
+subjects:
+  - kind: ServiceAccount
+    name: t3code
+    namespace: t3code

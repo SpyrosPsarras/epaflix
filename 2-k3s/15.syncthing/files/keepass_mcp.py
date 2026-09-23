@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Read-write MCP server over the Syncthing-synced KeePass KDBX.
 
-Env: KEEPASS_DB (path to the KDBX), KEEPASS_PASSPHRASE. Both come from
-/etc/t3code/t3code.env via the keepass-mcp wrapper. Self-test: --selftest
+Env: KEEPASS_DB (path to the KDBX), KEEPASS_PASSPHRASE. Both come from the
+syncthing/keepass Deployment (../keepass.yaml). Self-test: --selftest
 creates a throwaway vault, exercises every tool, and never touches KEEPASS_DB.
 
 Writes hold an flock on "<DB>.lock" and land via atomic replace, so concurrent
-MCP sessions on this host cannot interleave a load-modify-save. Writes from
+MCP sessions in this pod cannot interleave a load-modify-save. Writes from
 other hosts still race through Syncthing; avoid editing the vault on two
 devices at the same time.
 """
@@ -276,9 +276,9 @@ def main():
     from mcp.server.mcpserver import MCPServer
 
     if not DB or not PASSPHRASE:
-        sys.exit("KEEPASS_DB and KEEPASS_PASSPHRASE must be set (keepass-mcp wrapper)")
+        sys.exit("KEEPASS_DB and KEEPASS_PASSPHRASE must be set (see keepass.yaml)")
 
-    mcp = MCPServer("keepass", instructions="Read-write access to the personal KeePass vault. Writes are serialized on the vault host; do not edit the vault on two devices at once.")
+    mcp = MCPServer("keepass", instructions="Read-write access to the personal KeePass vault. Writes are serialized in the keepass pod; do not edit the vault on two devices at once.")
 
     @mcp.tool()
     def vault_list(prefix: str = "") -> str:

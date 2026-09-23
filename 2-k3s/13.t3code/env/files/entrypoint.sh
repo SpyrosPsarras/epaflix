@@ -50,7 +50,7 @@ EOF
 fi
 
 # Register the runtime vault bridge without replacing provider or user settings.
-if [[ -r /run/t3-credentials/identity ]]; then
+if [[ -r /var/run/secrets/kubernetes.io/serviceaccount/token ]]; then
   python3 - "$OC_DIR/opencode.json" <<'PY'
 import json, os, sys
 path = sys.argv[1]
