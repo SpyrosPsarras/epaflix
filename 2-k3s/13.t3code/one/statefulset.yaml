@@ -26,7 +26,10 @@ spec:
         app.kubernetes.io/name: t3code
         app.kubernetes.io/component: server
     spec:
-      automountServiceAccountToken: false
+      # Token only for the vault bridge (keepass-remote.sh); the Role in
+      # 15.syncthing/keepass.yaml is all it grants.
+      serviceAccountName: t3code
+      automountServiceAccountToken: true
       enableServiceLinks: false
       terminationGracePeriodSeconds: 60
       securityContext:
@@ -102,9 +105,6 @@ spec:
             - name: private-config
               mountPath: /private-agent-config
               readOnly: true
-            - name: vault-access
-              mountPath: /run/t3-credentials
-              readOnly: true
             - name: github-ssh
               mountPath: /run/t3-github-ssh
               readOnly: true
@@ -150,10 +150,6 @@ spec:
         - name: home-t3env-1
           persistentVolumeClaim:
             claimName: home-t3env-1
-        - name: vault-access
-          secret:
-            secretName: t3code-vault-access
-            defaultMode: 0440
         - name: private-config
           secret:
             secretName: t3code-private-config
@@ -171,3 +167,10 @@ spec:
             defaultMode: 0555
         - name: tmp
           emptyDir: {}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: t3code
+  namespace: t3code
+automountServiceAccountToken: false
