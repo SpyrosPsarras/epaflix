@@ -38,10 +38,6 @@ jobs:
             upstreamRepo: "jon4hz/jellysweep"
             pinnedVersion: "v0.16.0"
             whatToDoWhenItMoves: "A new release exists while the cluster runs the temporary pr-430 build (TEMP OVERRIDE comment in 2-k3s/08.servarr/kustomization.yaml). Check the release notes (or its git log) for jon4hz/jellysweep#430 'match database rows by media type as well as arr ID'. If present: execute the revert checklist in epaflix issue #1336 - drop newName, pin ghcr.io/jon4hz/jellysweep at the new tag with its GHCR digest, drop the TEMP OVERRIDE comment, drop the ghcr.io/spyrospsarras/jellysweep disable rule from .github/renovate.json, delete this watch row - all in one PR, then close #1336. If the notes do NOT contain the fix, do nothing: close the signal and leave the temp pin in place."
-          - issue: "1221"
-            upstreamRepo: "router-for-me/CLIProxyAPI"
-            pinnedVersion: "v7.2.148"
-            whatToDoWhenItMoves: "A new stable release exists while the cluster runs the temporary pr-5411 build (TEMP OVERRIDE comment in 2-k3s/17.remote-pi/kustomization.yaml). Check the release notes (or its git log) for router-for-me/CLIProxyAPI#5411 'gate block binding beta on final body' (or the phrase 'block binding'). If present: execute the revert checklist in epaflix issue #1221 - pin back to docker.io/eceasy/cli-proxy-api at the new tag with its Docker Hub tag digest, drop the TEMP OVERRIDE comment, drop the ghcr.io/spyrospsarras/cli-proxy-api disable rule from .github/renovate.json, delete this watch row - all in one PR, then close #1221. If the notes do NOT contain the fix, do nothing: close the signal and leave the temp pin in place."
 
     name: "#${{ matrix.issue }} ${{ matrix.upstreamRepo }}"
 
