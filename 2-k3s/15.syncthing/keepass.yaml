@@ -65,12 +65,17 @@ spec:
             exec:
               command: [test, -f, /opt/py/.ready]
             periodSeconds: 10
+          # Every MCP client gets its own python process (~70-100Mi after the
+          # KDF runs), and each T3 agent session is a client. 256Mi was
+          # OOM-killed with a handful of sessions, dropping all of them.
+          # ponytail: ~20 concurrent sessions fit; past that, serve one
+          # long-lived HTTP MCP instead of one process per exec.
           resources:
             requests:
               cpu: 10m
-              memory: 64Mi
-            limits:
               memory: 256Mi
+            limits:
+              memory: 2Gi
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
