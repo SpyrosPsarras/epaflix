@@ -9,6 +9,7 @@ export default async ({ directory, project }) => {
   const logDir = join(process.env.XDG_STATE_HOME || join(home, ".local/state"), "opencode")
   return {
     async "chat.message"(input, output) {
+      if (input.model?.providerID === "jev-auto") return
       const parts = output.parts.filter(p => p.type === "text" && !p.synthetic && !p.ignored)
       const text = parts.map(p => p.text).join("\n").trim()
       if (!text || !output.message.id) return
