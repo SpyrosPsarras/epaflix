@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Forced SSH command. Never evaluate SSH_ORIGINAL_COMMAND as shell code.
+# AKS token/login helper. Takes the action from $1 (or SSH_ORIGINAL_COMMAND);
+# never evaluates it as shell code.
 set -euo pipefail
 umask 077
 export AZURE_CONFIG_DIR="$HOME/.azure"
@@ -27,7 +28,7 @@ case "${SSH_ORIGINAL_COMMAND:-${1:-token}}" in
       if ! grep -Eqi 'az login|interaction_required|invalid_grant|AADSTS(50058|50076|50079|50173|70043|700082|700084)' "$errors"; then
         exit 1
       fi
-      echo 'Starting Azure login on the central host. Complete the device-code prompt below; this request will then retry automatically.' >&2
+      echo 'Starting Azure login. Complete the device-code prompt below; this request will then retry automatically.' >&2
       login
       credential=$(token)
       printf '%s\n' "$credential"

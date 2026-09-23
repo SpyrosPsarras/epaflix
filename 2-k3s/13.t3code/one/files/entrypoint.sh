@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs inside the t3env pod with image-installed CLIs in /tools. This script
+# Runs inside the t3code pod with image-installed CLIs in /tools. This script
 # seeds the persisted HOME on the PVC, migrates legacy provider settings,
 # and starts T3 without opening a browser.
 #
@@ -39,8 +39,7 @@ if [[ ! -d $PROJECT_DIR/.git ]]; then
   git clone -q "$T3_PROJECT_REPO" "$PROJECT_DIR"
 fi
 
-# OpenCode: cliproxy provider with env references (mirrors files/oc-config.py
-# minus the keepass MCP and skills path, which do not exist in the pod).
+# OpenCode: cliproxy provider with env references, written once.
 OC_DIR=$HOME/.config/opencode
 mkdir -p "$OC_DIR/plugins"
 # Replace read-only copies from earlier starts and keep the destination writable.
@@ -100,8 +99,8 @@ PY
     codex mcp add keepass -- bash /scripts/keepass-remote.sh >/dev/null
 fi
 
-# T3 provider instances: same layout as files/t3-write-provider-settings.py,
-# written once so later edits from the UI survive restarts.
+# T3 provider instances, written once so later edits from the UI survive
+# restarts.
 T3_HOME=$HOME/.t3
 SETTINGS=$T3_HOME/userdata/settings.json
 if [[ ! -f $SETTINGS ]]; then

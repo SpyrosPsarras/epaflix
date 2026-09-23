@@ -117,8 +117,19 @@ ArgoCD: `app-of-apps`, `t3code-env` and `traefik` had `automated` sync removed b
 - Inside the pod, `t3 connect link --headless --base-dir /home/spyros/.t3` re-links T3 Connect. Parked LXC link secrets sit in `userdata/secrets-cloud-premerge`.
 - Drop the `t3new.epaflix.com` Pi-hole record and `one/ingress.yaml` once nothing uses the name.
 
+## Sunset result (2026-09-23)
+
+Done early, two days into the bake, on request.
+
+- The LXC was still reachable after cutover. The T3 desktop app kept launching a server on it over SSH, and both servers share environment id `efa9a9de-95da-40c1-bc19-b85690f16e68`. It held one thread from 2026-09-23 09:05 to 09:20 UTC+2, a question about the update button asked on the wrong box. Nothing else changed in its home after cutover except caches and repo checkouts. T3 Connect was left alone on the LXC because logging out there could revoke the shared environment link the pod uses.
+- Vault: `syncthing/keepass` now serves the MCP (PR #1507). The LXC was removed as a Syncthing device after the hub reported it 100% in sync on `secrets-vault`.
+- AKS: `~/.local/bin/aks-auth` in the pod home ran over SSH to the LXC. It now runs `aks-auth-central` locally, and `az` in the pod was already logged in.
+- CT 100 destroyed with `purge=1&destroy-unreferenced-disks=1`: disk `local-raid:vm-100-disk-0` removed, vmid dropped from backup job `backup-ef3c2d49-5f5a`, about 110G freed on `local-raid`. The last PBS backup is `pbs-backup-local:backup/ct/100/2026-09-22T23:00:14Z`. It could not be marked protected because the PBS datastore is full (`No space left on device`), so prune will eventually remove it.
+- Pi-hole: removed `t3code-ssh.epaflix.com` from `10-epaflix.conf` and the `t3env0`/`t3env1` host records, then restarted `pihole-FTL`. `t3new.epaflix.com` was already gone, so `one/ingress.yaml` went too.
+- t3env: the ArgoCD app `t3code-env` and its resources are deleted, as are the PVCs `remote-pi/home-t3env-0` and `home-t3env-1` (40Gi). The copies of those homes in `t3code/home-t3env-*` stay; the pod mounts them.
+- Repo: LXC provisioning (`1-proxmox/t3code`, `provision.sh`, `update.sh`, the wizards, the guest-only `files/` scripts) and the t3env manifests are removed. `env/` keeps only what the runtime image and its CI use.
+
 ## Known gaps
 
 - `one/tools` and most of `one/files` are byte copies of `env/` inputs because kustomize cannot read above its root. `one/files/entrypoint.sh` and `one/files/searxng-mcp.py` are this overlay's own. `one/tools/sync-shared.sh --check` catches drift; the `build-t3-runtime` workflow runs it.
 - The ArgoCD app `t3code` is manual-sync. Flip to automated after the bake.
-- `env/statefulset.yaml` is committed with `replicas: 0` so ArgoCD keeps the old env pods down after merge. Sunset deletes it.
