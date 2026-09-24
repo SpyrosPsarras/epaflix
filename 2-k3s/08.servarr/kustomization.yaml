@@ -68,7 +68,7 @@ images:
   - name: lscr.io/linuxserver/radarr
     newTag: 6.4.4@sha256:adb6c09d6b729ea5e642c99cea35af72702ef476bf4763f153299ac5db9f0b4f
   - name: lscr.io/linuxserver/prowlarr
-    newTag: 2.6.5@sha256:c96b56d94d116a9f4de94bc23d3381689492e6c3cfb7435320e8d982e406f99a
+    newTag: 2.6.5@sha256:f2b26429893d4c4cb71941b7ee50b1bdecd9d5f9f9e02d5410615e9f4f7c8d95
   - name: ghcr.io/cleanuparr/cleanuparr
     newTag: 2.10.7@sha256:8bc918de0131502d0bd9b78b3c7821ae3455e8c8b4ae9006b9ddfbbd6db529d7
   # TEMP OVERRIDE (pr-430, #1336): build of upstream main 1576c01 + jon4hz/jellysweep#430 so the
