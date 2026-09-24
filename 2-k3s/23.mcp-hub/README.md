@@ -82,10 +82,12 @@ the manual t3code sync the running pod keeps its old MCP setup (stdio
 searxng, hosted Notion; it has never had hub paths, since t3code was last
 synced before the hub existed). **Its keepass tools fail**: the merge removes the
 `keepass-exec` RBAC and the pod's `kubectl exec` bridge with it. Sync t3code
-soon after the merge. Then, on the laptop:
-`add-client.py laptop --reuse` (switches OpenCode's notion/searxng to the hub,
+soon after the merge. Then, on each PC:
+`add-client.py <pc> --reuse` (switches OpenCode's notion/searxng to the hub,
 adds keepass and kubernetes-epaflix, wires Claude Code), then
-`tools/bootstrap-notion.py`, and remove `~/.config/opencode/mcp/searxng-mcp.py`.
+`tools/bootstrap-notion.py` once, and remove `~/.config/opencode/mcp/searxng-mcp.py`.
+Done on homepc (registered first as `laptop`, renamed); the laptop itself is
+not a client yet.
 
 ## Secrets
 
