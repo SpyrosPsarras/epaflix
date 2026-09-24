@@ -322,6 +322,15 @@ data:
         return None
 
 
+    def search_query(alias):
+        """Prowlarr's /api/v1/search binds categories as int[] and answers
+        HTTP 400 to one comma-joined value, so repeat the parameter."""
+        params = [("query", alias), ("limit", "100"), ("type", "search")]
+        params += [("categories", c.strip())
+                   for c in PROWLARR_CATEGORIES.split(",") if c.strip()]
+        return urllib.parse.urlencode(params)
+
+
     def selftest():
         now = datetime.datetime(2026, 8, 30, 12, 0, 0,
                                 tzinfo=datetime.timezone.utc).timestamp()
@@ -352,6 +361,10 @@ data:
         assert release_episode_keys("Show.2026.13.40") == set()
         assert release_episode_keys("Show 1080p x264") == set()
         assert release_episode_keys(None) == set()
+
+        assert urllib.parse.parse_qs(search_query("Alias"))["categories"] \
+            == PROWLARR_CATEGORIES.replace(" ", "").split(","), \
+            search_query("Alias")
 
         assert matches_missing("Show.2026.08.28.720p", missing)
         assert matches_missing("Show S01E01 720p", missing)
@@ -499,15 +512,9 @@ data:
             return 0
 
         print("search pass: querying Prowlarr with the Skyhook alias")
-        query = urllib.parse.urlencode({
-            "query": alias,
-            "categories": PROWLARR_CATEGORIES,
-            "limit": "100",
-            "type": "search",
-        })
         try:
             releases = _get_json(
-                "%s/api/v1/search?%s" % (PROWLARR_URL, query),
+                "%s/api/v1/search?%s" % (PROWLARR_URL, search_query(alias)),
                 {"X-Api-Key": PROWLARR_API_KEY, "Accept": "application/json"})
         except Exception as exc:  # noqa: BLE001
             fail("Prowlarr search failed (%s)" % type(exc).__name__)
