@@ -7,5 +7,5 @@ metadata:
       exec:
         path: ksops
 files:
-  - mcp-hub-token.enc.yaml
+  - mcp-hub-keepass.enc.yaml
   - mcp-hub-gmail.enc.yaml

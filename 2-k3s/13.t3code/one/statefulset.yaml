@@ -26,10 +26,10 @@ spec:
         app.kubernetes.io/name: t3code
         app.kubernetes.io/component: server
     spec:
-      # Token only for the vault bridge (keepass-remote.sh); the Role in
-      # 15.syncthing/keepass.yaml is all it grants.
+      # No API token: the vault is reached through the MCP hub now, and the
+      # agents' kubectl uses the kubeconfig in $HOME.
       serviceAccountName: t3code
-      automountServiceAccountToken: true
+      automountServiceAccountToken: false
       enableServiceLinks: false
       terminationGracePeriodSeconds: 60
       securityContext:
@@ -83,8 +83,9 @@ spec:
                   key: github-token
             - name: GH_TOKEN
               value: $(GITHUB_TOKEN)
-            # Bearer token for the in-cluster MCP hub (2-k3s/23.mcp-hub); the
-            # entrypoint registers hub servers in $HOME's OpenCode config only.
+            # This pod's hub token (client "t3code", 2-k3s/23.mcp-hub); the
+            # entrypoint registers every hub path for OpenCode, Claude and
+            # Codex in every home, as an env reference.
             - name: MCP_HUB_URL
               value: http://mcp-hub.mcp-hub.svc.cluster.local:8000
             - name: MCP_HUB_TOKEN

@@ -1,8 +1,42 @@
 ---
-# One long-lived streamable-HTTP MCP process for every agent client (the T3
-# pod in-cluster, laptops over the internal entry point). Servers are mounted
-# by path in files/mcp_hub.py; today only /gmail. This is the "serve one
-# long-lived HTTP MCP" step that 15.syncthing/keepass.yaml deferred.
+# The MCP hub (README.md): one long-lived streamable-HTTP gateway for every
+# agent client (the T3 pod in-cluster, LAN PCs over the internal entry point).
+# Paths are listed in files/mcp_hub.py: modules in-process, upstreams
+# forwarded (keepass in ns syncthing, kubernetes-mcp.yaml, hosted Notion).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mcp-hub
+  namespace: mcp-hub
+---
+# The Notion grant rotates on every refresh; the hub writes each new pair back
+# (files/notion_grant.py). This Secret is not in git: tools/bootstrap-notion.py
+# creates it. No other API rights.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: mcp-hub-notion-grant
+  namespace: mcp-hub
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [mcp-hub-notion-grant]
+    verbs: [get, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mcp-hub-notion-grant
+  namespace: mcp-hub
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: mcp-hub-notion-grant
+subjects:
+  - kind: ServiceAccount
+    name: mcp-hub
+    namespace: mcp-hub
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -22,7 +56,8 @@ spec:
       labels:
         app: mcp-hub
     spec:
-      automountServiceAccountToken: false
+      serviceAccountName: mcp-hub
+      automountServiceAccountToken: true
       enableServiceLinks: false
       terminationGracePeriodSeconds: 10
       securityContext:
@@ -51,11 +86,11 @@ spec:
               value: /opt/py
             - name: PYTHONUNBUFFERED
               value: "1"
-            - name: MCP_HUB_TOKEN
+            - name: KEEPASS_HUB_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: mcp-hub-token
-                  key: token
+                  name: mcp-hub-keepass
+                  key: secret
             - name: GMAIL_CLIENT_ID
               valueFrom:
                 secretKeyRef:

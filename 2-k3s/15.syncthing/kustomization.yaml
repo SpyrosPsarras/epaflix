@@ -19,6 +19,23 @@ configMapGenerator:
 generators:
   - ksops-generator.yaml
 
+# KEEPASS_HUB_SECRET is env and no Reloader watches this namespace: the
+# Secret's plaintext revision annotation (23.mcp-hub/tools/sops_secret.py)
+# is copied into the pod template so a new secret rolls the keepass pod.
+replacements:
+  - source:
+      kind: Secret
+      name: keepass-hub-secret
+      fieldPath: metadata.annotations.[mcp-hub.epaflix.com/revision]
+    targets:
+      - select:
+          kind: Deployment
+          name: keepass
+        fieldPaths:
+          - spec.template.metadata.annotations.[mcp-hub.epaflix.com/hub-secret-revision]
+        options:
+          create: true
+
 images:
   - name: syncthing/syncthing
     newTag: 2.1.5

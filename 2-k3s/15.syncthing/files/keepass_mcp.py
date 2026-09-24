@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """Read-write MCP server over the Syncthing-synced KeePass KDBX.
 
-Env: KEEPASS_DB (path to the KDBX), KEEPASS_PASSPHRASE. Both come from the
-syncthing/keepass Deployment (../keepass.yaml). Self-test: --selftest
-creates a throwaway vault, exercises every tool, and never touches KEEPASS_DB.
+Env: KEEPASS_DB (path to the KDBX), KEEPASS_PASSPHRASE, and for --http
+KEEPASS_HUB_SECRET. All come from the syncthing/keepass Deployment
+(../keepass.yaml). --http serves streamable HTTP at /keepass on PORT (8000)
+for the MCP hub (2-k3s/23.mcp-hub), which sends the shared secret as
+X-Hub-Secret; without --http it speaks stdio. Self-test: --selftest creates a
+throwaway vault, exercises every tool and the HTTP wrapper, and never touches
+KEEPASS_DB.
 
 Writes hold an flock on "<DB>.lock" and land via atomic replace, so concurrent
 MCP sessions in this pod cannot interleave a load-modify-save. Writes from
@@ -260,6 +264,7 @@ def _selftest():
         _trash_tool("/SSH/new key")
         assert _list_tool("/SSH") == [], _list_tool("/SSH")
 
+        _http_selftest()
         print("selftest OK")
     finally:
         os.unlink(path)
@@ -268,57 +273,134 @@ def _selftest():
                 os.unlink(extra)
 
 
-def main():
-    if "--selftest" in sys.argv:
-        _selftest()
-        return
+def _run(fn, *args):
+    """JSON-encode a result; expected failures become ToolError so their text reaches the model (the SDK hides any other exception text)."""
+    from mcp.server.mcpserver.exceptions import ToolError
+    from pykeepass import exceptions as kpx
 
+    expected = (ValueError, RuntimeError, OSError, kpx.CredentialsError, kpx.HeaderChecksumError,
+                kpx.PayloadChecksumError, kpx.BinaryError, kpx.UnableToSendToRecycleBin)
+    try:
+        return json.dumps(fn(*args))
+    except expected as e:  # wrong passphrase, half-synced KDBX, ...
+        raise ToolError(f"{type(e).__name__}: {e}") from None
+
+
+def server():
     from mcp.server.mcpserver import MCPServer
-
-    if not DB or not PASSPHRASE:
-        sys.exit("KEEPASS_DB and KEEPASS_PASSPHRASE must be set (see keepass.yaml)")
 
     mcp = MCPServer("keepass", instructions="Read-write access to the personal KeePass vault. Writes are serialized in the keepass pod; do not edit the vault on two devices at once.")
 
     @mcp.tool()
     def vault_list(prefix: str = "") -> str:
         """List vault entries below the given group path prefix (no passwords). Empty prefix lists all. Returns a JSON array."""
-        return json.dumps(_list_tool(prefix))
+        return _run(_list_tool, prefix)
 
     @mcp.tool()
     def vault_get(path: str, include_password: bool = True) -> str:
         """Fetch one entry by its full vault path (as returned by vault_list, e.g. /Group/Title). Returns a JSON object."""
-        return json.dumps(_get_tool(path, include_password))
+        return _run(_get_tool, path, include_password)
 
     @mcp.tool()
     def vault_add(path: str, username: str = "", password: str = "", url: str = "",
                   notes: str = "", props: dict | None = None) -> str:
         """Create an entry at the full vault path (e.g. /Group/Title); missing groups are created. props sets custom string properties. Returns the new entry summary."""
-        return json.dumps(_add_tool(path, username, password, url, notes, props))
+        return _run(_add_tool, path, username, password, url, notes, props)
 
     @mcp.tool()
     def vault_update(path: str, title: str | None = None, username: str | None = None,
                      password: str | None = None, url: str | None = None,
                      notes: str | None = None, props: dict | None = None) -> str:
         """Update fields of the entry at the full vault path. Fields left as null are unchanged; empty string clears. props sets custom properties (null value deletes one). Returns the entry summary."""
-        return json.dumps(_update_tool(path, title, username, password, url, notes, props))
+        return _run(_update_tool, path, title, username, password, url, notes, props)
 
     @mcp.tool()
     def vault_trash(path: str) -> str:
         """Move the entry at the full vault path to the recycle bin (recoverable in KeePassXC). Returns a confirmation object."""
-        return json.dumps(_trash_tool(path))
+        return _run(_trash_tool, path)
 
     @mcp.tool()
     def vault_attach(path: str, filename: str, content_b64: str) -> str:
         """Store a base64-encoded file (e.g. an SSH private key) as an attachment on the entry at the full vault path. Replaces an existing attachment with the same name. Returns a confirmation object."""
-        return json.dumps(_attach_tool(path, filename, content_b64))
+        return _run(_attach_tool, path, filename, content_b64)
 
     @mcp.tool()
     def vault_attachment(path: str, filename: str) -> str:
         """Fetch an attachment by name from the entry at the full vault path. Returns {filename, content_b64}. Use vault_get to list attachment names."""
-        return json.dumps(_attachment_tool(path, filename))
+        return _run(_attachment_tool, path, filename)
 
-    mcp.run()
+    return mcp
+
+
+class HubSecret:
+    """Only the MCP hub may call: it sends X-Hub-Secret (Secret keepass-hub-secret). /healthz is open."""
+
+    def __init__(self, app, secret):
+        self.app, self.secret = app, secret.encode()
+
+    async def __call__(self, scope, receive, send):
+        import hmac
+
+        from starlette.datastructures import Headers
+        from starlette.responses import PlainTextResponse
+
+        if scope["type"] == "http" and scope["path"] != "/healthz":
+            got = Headers(scope=scope).get("x-hub-secret", "").encode(errors="replace")
+            if not hmac.compare_digest(got, self.secret):
+                await PlainTextResponse("unauthorized", status_code=401)(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+
+def http_app(secret):
+    from starlette.applications import Starlette
+    from starlette.middleware import Middleware
+    from starlette.responses import PlainTextResponse
+    from starlette.routing import Route
+
+    if not secret:
+        sys.exit("KEEPASS_HUB_SECRET must be set (see keepass.yaml)")
+    mcp = server()
+    routes = [Route("/healthz", lambda request: PlainTextResponse("ok"))]
+    routes += mcp.streamable_http_app(streamable_http_path="/keepass", host="0.0.0.0",
+                                      stateless_http=True, json_response=True).routes
+    return Starlette(routes=routes, lifespan=lambda app: mcp.session_manager.run(),
+                     middleware=[Middleware(HubSecret, secret=secret)])
+
+
+def _http_selftest():
+    from starlette.testclient import TestClient
+
+    init = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+        "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "selftest", "version": "0"}}}
+    accept = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
+    with TestClient(http_app("s3cret")) as c:
+        assert c.get("/healthz").status_code == 200
+        assert c.post("/keepass", json=init, headers=accept).status_code == 401
+        assert c.post("/keepass", json=init, headers={**accept, "X-Hub-Secret": "nope"}).status_code == 401
+        ok = {**accept, "X-Hub-Secret": "s3cret"}
+        assert c.post("/keepass", json=init, headers=ok).json()["result"]["serverInfo"]["name"] == "keepass"
+        r = c.post("/keepass", json={"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                                     "params": {"name": "vault_get", "arguments": {"path": "/nope"}}}, headers=ok)
+        result = r.json()["result"]
+        assert result["isError"] and "no entry at path" in result["content"][0]["text"], result
+    print("http selftest OK")
+
+
+def main():
+    if "--selftest" in sys.argv:
+        _selftest()
+        return
+
+    if not DB or not PASSPHRASE:
+        sys.exit("KEEPASS_DB and KEEPASS_PASSPHRASE must be set (see keepass.yaml)")
+    if "--http" in sys.argv:
+        import uvicorn
+
+        uvicorn.run(http_app(os.environ.get("KEEPASS_HUB_SECRET", "")), host="0.0.0.0",
+                    port=int(os.environ.get("PORT", "8000")), log_level="info")
+    else:
+        server().run()
 
 
 if __name__ == "__main__":
