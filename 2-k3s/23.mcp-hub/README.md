@@ -36,10 +36,9 @@ refresh error until then.
 
 ## First deploy
 
-1. Apply split DNS on the Pi-hole (CT 1030), per `1-proxmox/pihole/README.md`:
-   copy `dnsmasq.d/10-epaflix.conf` to `/etc/dnsmasq.d/` and
-   `unbound-no-aaaa-leak.conf` to unbound's config, then `pihole reloaddns`
-   and restart unbound. Until then the laptop cannot reach the hub.
+1. Split DNS on the Pi-hole (CT 1030), per `1-proxmox/pihole/README.md`
+   (applied 2026-09-24): the `mcp.epaflix.com` address line plus its unbound
+   local-zone, then `systemctl restart pihole-FTL`.
 2. Merge; ArgoCD creates `mcp-hub` (automated). `t3code` syncs manually:
    sync it in ArgoCD to pick up `MCP_HUB_*` and the entrypoint change.
 3. Gmail bootstrap below, merge again.
