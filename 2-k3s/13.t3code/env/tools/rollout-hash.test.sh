@@ -30,3 +30,7 @@ sed -i 's/synthetic-v1/synthetic-v2/' "$tmp/k/synthetic-private.yaml"
 after=$(kustomize build "$tmp/k" | python3 -c 'import yaml,sys;print(next(d for d in yaml.safe_load_all(sys.stdin) if d["kind"]=="StatefulSet")["spec"]["template"]["metadata"]["annotations"])')
 [[ $before != "$after" ]]
 echo 'ok: private configuration updates trigger rollout'
+sed -i 's/hub-v1/hub-v2/' "$tmp/k/synthetic-private.yaml"
+rotated=$(kustomize build "$tmp/k" | python3 -c 'import yaml,sys;print(next(d for d in yaml.safe_load_all(sys.stdin) if d["kind"]=="StatefulSet")["spec"]["template"]["metadata"]["annotations"])')
+[[ $rotated != "$after" && $rotated == *hub-v2* ]]
+echo 'ok: MCP hub token rotation triggers rollout'

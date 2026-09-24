@@ -13,6 +13,7 @@ resources:
   - app-kube-vip.yaml
   - app-kube-vip-cloud-provider.yaml
   - app-maintenance.yaml
+  - app-mcp-hub.yaml
   - app-observability.yaml
   - app-postgres.yaml
   - app-reloader.yaml

@@ -1,0 +1,24 @@
+---
+# Internal entry point only (LAN LB 192.168.10.102, split DNS in
+# 1-proxmox/pihole). The hub checks its own bearer token, so no forwardAuth:
+# MCP clients cannot follow an Authentik login redirect.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: mcp-hub-internal
+  namespace: mcp-hub
+spec:
+  entryPoints:
+    - internal
+  routes:
+    - match: Host(`mcp.epaflix.com`)
+      kind: Rule
+      services:
+        - name: mcp-hub
+          port: 8000
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"

@@ -11,3 +11,4 @@ files:
   - private-agent-config.enc.yaml
   - cliproxy-secrets.enc.yaml
   - github-ssh.enc.yaml
+  - mcp-hub-client.enc.yaml
