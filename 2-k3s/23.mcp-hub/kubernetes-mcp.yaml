@@ -1,0 +1,141 @@
+---
+# Upstream for the hub's /kubernetes path (client name kubernetes-epaflix):
+# containers/kubernetes-mcp-server with cluster-admin on this cluster only.
+# It has no static-token auth, so the NetworkPolicy is the gate: only hub pods
+# reach the MCP port. PCs keep their local multi-context server for other
+# clusters. Mutating tools prompt in OpenCode (tools/hub_clients.py ASK).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kubernetes-mcp
+  namespace: mcp-hub
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: mcp-hub-kubernetes-mcp
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: kubernetes-mcp
+    namespace: mcp-hub
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubernetes-mcp
+  namespace: mcp-hub
+  labels:
+    app: kubernetes-mcp
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: kubernetes-mcp
+  template:
+    metadata:
+      labels:
+        app: kubernetes-mcp
+    spec:
+      serviceAccountName: kubernetes-mcp
+      automountServiceAccountToken: true
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 10
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: server
+          # Bumping: recheck the mutating tool names in tools/hub_clients.py ASK.
+          image: ghcr.io/containers/kubernetes-mcp-server:v0.0.67
+          # TOML, not flags: upstream main drops the runtime flags.
+          args: [--config, /etc/kubernetes-mcp/config.toml]
+          env:
+            - name: HOME
+              value: /tmp
+          ports:
+            - containerPort: 8080
+              name: mcp
+            - containerPort: 9090
+              name: health
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: config
+              mountPath: /etc/kubernetes-mcp
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: kubernetes-mcp-config
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubernetes-mcp
+  namespace: mcp-hub
+  labels:
+    app: kubernetes-mcp
+spec:
+  type: ClusterIP
+  selector:
+    app: kubernetes-mcp
+  ports:
+    - name: mcp
+      port: 8080
+      targetPort: mcp
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kubernetes-mcp-from-hub
+  namespace: mcp-hub
+spec:
+  podSelector:
+    matchLabels:
+      app: kubernetes-mcp
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: mcp-hub
+      ports:
+        - port: 8080
+          protocol: TCP
+    # /healthz, /metrics, /stats only (no MCP, no cluster access): kubelet probes.
+    - ports:
+        - port: 9090
+          protocol: TCP

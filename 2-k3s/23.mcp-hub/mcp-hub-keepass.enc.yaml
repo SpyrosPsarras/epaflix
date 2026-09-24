@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: Secret
+metadata:
+    name: mcp-hub-keepass
+    namespace: mcp-hub
+    annotations:
+        mcp-hub.epaflix.com/revision: 20260924T143554Z
+type: Opaque
+stringData:
+    secret: ENC[AES256_GCM,data:yxp2KyggYuJ4gsX2vV8dHmj4frhoCe+9XFW3v1Lgmir0PO0tFO5sqsK9xg==,iv:1NJB6FzMQsUSRclZhwMPWWSfSWZaz0NcZef5Z1Zt30w=,tag:TfKtDi3WLs6Xxx3SMyC1Eg==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBSZFRWaGl5OTljZndKamZl
+            Y3grWTMzNG5mTHB5Sk8rb2xNaDJHTTd6Y2p3Ckl5Qm44ZG9BeHhCaHY4dXpRUUlC
+            ZHZ5L29BMHpwbDBCTk1NTmZnNzVDTFkKLS0tIEdxRlBKNlFkc2Ryd0I2OENCdlha
+            dzN3WkMzYUliRjFsaVg1aE1IcEk3MDQKT4pScz3xSZHu7G7wPEajVvKFyhNugUXa
+            85OyonILtHg7AlxU66DeF94wmWVITyBX89Z9D/e3yWeGsc1XzGOyWA==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1586thf5vkcdf5lcn3zwjpu8ltkwyq8efrhj8lr0vdrrt9k5f3qgsxeg7gx
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-09-24T14:35:54Z"
+    mac: ENC[AES256_GCM,data:m10xSDW2JIhBpz17l7u15f3/rYLNvcbTdMZ4zVq6yFbRmzlc1i/Wl7ZfMUDS7oPjXfixpznCMwEZfm8bKHgKdBsdfycJHyjzlLjS+kHM8t97idcirM9SDtMcOrrhpzjhCrCd54uoj0HRBi4jqpGvwTNxiFplBpTjXiFYFtQJpts=,iv:k2DI77+rYVodE5EgtUc39eip1PjK06Q/eqG7TMCCU5s=,tag:qcEXtymdp89AYJ+zzLL5Hg==,type:str]
+    version: 3.13.3

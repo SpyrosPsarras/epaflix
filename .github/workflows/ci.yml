@@ -273,9 +273,13 @@ jobs:
       - name: MCP hub selftest
         run: |
           set -euo pipefail
-          # Same pin as 2-k3s/23.mcp-hub/deployment.yaml.
-          python3 -m venv /tmp/mcp-hub && /tmp/mcp-hub/bin/pip install -q --disable-pip-version-check mcp==2.2.0
+          # Same pins as 2-k3s/23.mcp-hub/deployment.yaml and 15.syncthing/keepass.yaml.
+          python3 -m venv /tmp/mcp-hub && /tmp/mcp-hub/bin/pip install -q --disable-pip-version-check mcp==2.2.0 pykeepass==4.2.0
           /tmp/mcp-hub/bin/python 2-k3s/23.mcp-hub/files/mcp_hub.py --selftest
+          /tmp/mcp-hub/bin/python 2-k3s/15.syncthing/files/keepass_mcp.py --selftest
+          python3 2-k3s/23.mcp-hub/tools/hub_clients.py --selftest
+          # The t3code pod's copy of hub_clients.py (and the other shared inputs) must not drift.
+          bash 2-k3s/13.t3code/one/tools/sync-shared.sh --check
 
       - name: T3 install and runtime smoke
         timeout-minutes: 20

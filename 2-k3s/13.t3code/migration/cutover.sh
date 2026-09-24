@@ -281,7 +281,7 @@ assert set(st.values()) == {top}, st
 assert cleanup >= merged, (cleanup, merged)
 print("start: data projectors at", top, "attachment cleanup drained to", cleanup)
 EOF
-  k -n "$NS" exec t3code-0 -- sh -c 't3 connect status --base-dir /home/spyros/.t3 | sed -n 2,4p; timeout 5 bash /scripts/keepass-remote.sh </dev/null >/dev/null 2>&1 && echo "vault bridge ok"'
+  k -n "$NS" exec t3code-0 -- sh -c 't3 connect status --base-dir /home/spyros/.t3 | sed -n 2,4p; curl -fsS -m 5 "$MCP_HUB_URL/healthz" >/dev/null && echo "mcp hub ok"'
   curl -sS -m 10 -k -o /dev/null -w "start: via traefik %{http_code}\n" -H "Host: t3new.epaflix.com" "https://$(k -n traefik-system get svc traefik-internal -o jsonpath='{.status.loadBalancer.ingress[0].ip}')/"
   log "start: resuming one thread per source/provider (this sends a real turn to each)"
   k -n "$NS" cp "$MIG/resume_smoke.mjs" t3code-0:/tmp/resume_smoke.mjs --retries=10

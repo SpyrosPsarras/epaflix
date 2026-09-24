@@ -31,7 +31,6 @@ trap cleanup EXIT
 mkdir -p "$HOME"
 install -m 0555 /src/env/files/entrypoint.sh /src/env/files/git-credential-github.sh /src/files/cliproxy-models.js /scripts/
 install -m 0555 /src/env/files/private-config.py /scripts/
-install -m 0555 /src/env/files/keepass-remote.sh /scripts/
 python3 /src/env/tools/private-config.test.py fixture /private-agent-config/bundle.json
 for tool in tree kubectl az gh helm kustomize argocd sops git curl ssh python3; do
   command -v "$tool" >/dev/null || fail "missing $tool"
