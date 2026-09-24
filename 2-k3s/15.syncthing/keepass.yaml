@@ -1,9 +1,11 @@
 ---
-# KeePass MCP server next to the Syncthing vault folder. Nothing runs until a
-# client connects: the T3 pod starts one server per session with
-# `kubectl exec -i deploy/keepass -- python /app/keepass_mcp.py`
-# (13.t3code/one/files/keepass-remote.sh). Writes land in the synced folder,
-# Syncthing carries them to the other devices.
+# KeePass MCP server next to the Syncthing vault folder: one long-lived
+# streamable-HTTP process at keepass.syncthing.svc:8000/keepass. Only the MCP
+# hub (2-k3s/23.mcp-hub, path /keepass) may call it: the NetworkPolicy below
+# admits only hub pods, and the process checks the shared X-Hub-Secret
+# (Secret keepass-hub-secret, written by 23.mcp-hub/tools/sops_secret.py
+# --keepass). Writes land in the synced folder, Syncthing carries them to the
+# other devices.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -47,8 +49,7 @@ spec:
               pip install -q --no-cache-dir --disable-pip-version-check
               --target /opt/py pykeepass==4.2.0 mcp==2.2.0 &&
               python /app/keepass_mcp.py --selftest &&
-              touch /opt/py/.ready &&
-              exec sleep infinity
+              exec python /app/keepass_mcp.py --http
           env:
             - name: HOME
               value: /tmp
@@ -61,21 +62,35 @@ spec:
                 secretKeyRef:
                   name: t3code-vault-passphrase
                   key: VAULT_PASSPHRASE
+            - name: KEEPASS_HUB_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: keepass-hub-secret
+                  key: secret
+          ports:
+            - containerPort: 8000
+              name: http
+          # exec, not httpGet: the NetworkPolicy admits only hub pods.
           readinessProbe:
             exec:
-              command: [test, -f, /opt/py/.ready]
+              command: [python, -c, "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
+            initialDelaySeconds: 20
             periodSeconds: 10
-          # Every MCP client gets its own python process (~70-100Mi after the
-          # KDF runs), and each T3 agent session is a client. 256Mi was
-          # OOM-killed with a handful of sessions, dropping all of them.
-          # ponytail: ~20 concurrent sessions fit; past that, serve one
-          # long-lived HTTP MCP instead of one process per exec.
+            timeoutSeconds: 5
+          livenessProbe:
+            exec:
+              command: [python, -c, "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
+            initialDelaySeconds: 90
+            periodSeconds: 30
+            timeoutSeconds: 5
+          # One process now; each tool call opens the vault (~70-100Mi while
+          # the KDF runs), in parallel for concurrent calls.
           resources:
             requests:
               cpu: 10m
-              memory: 256Mi
+              memory: 192Mi
             limits:
-              memory: 2Gi
+              memory: 1Gi
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -104,36 +119,40 @@ spec:
         - name: tmp
           emptyDir: {}
 ---
-# The only rights the T3 pod ServiceAccount has: start the MCP server above.
-# pods/exec cannot be pinned to one pod name, so it covers the whole
-# namespace, which also holds the Syncthing pod.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
+apiVersion: v1
+kind: Service
 metadata:
-  name: keepass-exec
+  name: keepass
   namespace: syncthing
-rules:
-  - apiGroups: [apps]
-    resources: [deployments]
-    resourceNames: [keepass]
-    verbs: [get]
-  - apiGroups: [""]
-    resources: [pods]
-    verbs: [get, list]
-  - apiGroups: [""]
-    resources: [pods/exec]
-    verbs: [create]
+  labels:
+    app: keepass
+spec:
+  type: ClusterIP
+  selector:
+    app: keepass
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
 ---
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
 metadata:
-  name: keepass-exec
+  name: keepass-from-mcp-hub
   namespace: syncthing
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: keepass-exec
-subjects:
-  - kind: ServiceAccount
-    name: t3code
-    namespace: t3code
+spec:
+  podSelector:
+    matchLabels:
+      app: keepass
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: mcp-hub
+          podSelector:
+            matchLabels:
+              app: mcp-hub
+      ports:
+        - port: 8000
+          protocol: TCP
