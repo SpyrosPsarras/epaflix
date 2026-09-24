@@ -107,6 +107,38 @@ PY
     codex mcp add keepass -- bash /scripts/keepass-remote.sh >/dev/null
 fi
 
+# MCP hub (2-k3s/23.mcp-hub): remote servers behind one bearer token. The
+# token stays an env reference, never a literal in the PVC config. Written
+# once per server; sending and trashing mail prompt for approval.
+if [[ -n ${MCP_HUB_TOKEN:-} && -n ${MCP_HUB_URL:-} ]]; then
+  python3 - "$OC_DIR/opencode.json" "$MCP_HUB_URL" <<'PY'
+import json, os, sys
+path, hub = sys.argv[1], sys.argv[2].rstrip("/")
+with open(path) as f:
+    config = json.load(f)
+mcp = config.setdefault("mcp", {})
+perms = config.setdefault("permission", {})
+if isinstance(perms, str):  # "allow"-everything shorthand: expand so per-tool rules can follow
+    perms = config["permission"] = {"*": perms}
+changed = False
+if "gmail" not in mcp:
+    mcp["gmail"] = {
+        "type": "remote", "url": f"{hub}/gmail", "enabled": True, "timeout": 30000,
+        "headers": {"Authorization": "Bearer {env:MCP_HUB_TOKEN}"},
+    }
+    changed = True
+for tool in ("gmail_gmail_send", "gmail_gmail_send_draft", "gmail_gmail_trash"):
+    if tool not in perms:
+        perms[tool] = "ask"
+        changed = True
+if changed:
+    with open(path, "w") as f:
+        json.dump(config, f, indent=2)
+        f.write("\n")
+    os.chmod(path, 0o600)
+PY
+fi
+
 # T3 provider instances, written once so later edits from the UI survive
 # restarts.
 T3_HOME=$HOME/.t3

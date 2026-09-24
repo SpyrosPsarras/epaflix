@@ -270,6 +270,13 @@ jobs:
           bash 2-k3s/maintenance/node-os-updater.test.sh
           bash 2-k3s/maintenance/aaaa-tripwire-cronjob.test.sh
 
+      - name: MCP hub selftest
+        run: |
+          set -euo pipefail
+          # Same pin as 2-k3s/23.mcp-hub/deployment.yaml.
+          python3 -m venv /tmp/mcp-hub && /tmp/mcp-hub/bin/pip install -q --disable-pip-version-check mcp==2.2.0
+          /tmp/mcp-hub/bin/python 2-k3s/23.mcp-hub/files/mcp_hub.py --selftest
+
       - name: T3 install and runtime smoke
         timeout-minutes: 20
         run: bash 2-k3s/13.t3code/env/tools/smoke.sh
