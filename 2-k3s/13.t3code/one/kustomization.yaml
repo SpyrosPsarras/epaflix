@@ -48,3 +48,16 @@ replacements:
           - spec.template.metadata.annotations.[t3code.epaflix.com/private-revision]
         options:
           create: true
+  # MCP_HUB_TOKEN is env; a rotated hub token (23.mcp-hub/README.md) rolls T3.
+  - source:
+      kind: Secret
+      name: mcp-hub-client
+      fieldPath: metadata.annotations.[mcp-hub.epaflix.com/revision]
+    targets:
+      - select:
+          kind: StatefulSet
+          name: t3code
+        fieldPaths:
+          - spec.template.metadata.annotations.[mcp-hub.epaflix.com/token-revision]
+        options:
+          create: true

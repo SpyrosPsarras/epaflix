@@ -1,0 +1,115 @@
+---
+# One long-lived streamable-HTTP MCP process for every agent client (the T3
+# pod in-cluster, laptops over the internal entry point). Servers are mounted
+# by path in files/mcp_hub.py; today only /gmail. This is the "serve one
+# long-lived HTTP MCP" step that 15.syncthing/keepass.yaml deferred.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-hub
+  namespace: mcp-hub
+  labels:
+    app: mcp-hub
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: mcp-hub
+  template:
+    metadata:
+      labels:
+        app: mcp-hub
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 10
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: hub
+          image: docker.io/library/python:3.13-alpine
+          # ponytail: installs the pinned SDK on every start (~20s), same as the
+          # keepass pod. Bake an image if restarts get frequent.
+          command:
+            - sh
+            - -c
+            - >-
+              pip install -q --no-cache-dir --disable-pip-version-check
+              --target /opt/py mcp==2.2.0 &&
+              python /app/mcp_hub.py --selftest &&
+              exec python /app/mcp_hub.py
+          env:
+            - name: HOME
+              value: /tmp
+            - name: PYTHONPATH
+              value: /opt/py
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            - name: MCP_HUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-hub-token
+                  key: token
+            - name: GMAIL_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-hub-gmail
+                  key: client-id
+            - name: GMAIL_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-hub-gmail
+                  key: client-secret
+            - name: GMAIL_REFRESH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-hub-gmail
+                  key: refresh-token
+          ports:
+            - containerPort: 8000
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 10m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: app
+              mountPath: /app
+              readOnly: true
+            - name: py
+              mountPath: /opt/py
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: app
+          configMap:
+            name: mcp-hub-app
+        - name: py
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}

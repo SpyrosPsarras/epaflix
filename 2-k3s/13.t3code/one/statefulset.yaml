@@ -83,6 +83,15 @@ spec:
                   key: github-token
             - name: GH_TOKEN
               value: $(GITHUB_TOKEN)
+            # Bearer token for the in-cluster MCP hub (2-k3s/23.mcp-hub); the
+            # entrypoint registers hub servers in $HOME's OpenCode config only.
+            - name: MCP_HUB_URL
+              value: http://mcp-hub.mcp-hub.svc.cluster.local:8000
+            - name: MCP_HUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-hub-client
+                  key: token
           ports:
             - name: http
               containerPort: 3773
