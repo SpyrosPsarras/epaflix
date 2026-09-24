@@ -57,11 +57,20 @@ spec:
                     -- retry_delay is SECONDS, doubled per 429/503 retry. At 1 the
                     -- 1/2/4/8s waits (~15s) end inside groq's 60s TPM window and
                     -- gemini 503 spikes, so batches failed while the free pool was
-                    -- only cooling down. Floor 10 -> 10/20/40/80s.
+                    -- only cooling down. Floor 10 -> 10/20/40/80s... (count: max_retries below).
                     INSERT INTO settings (key, value) VALUES ('retry_delay', '10')
                     ON CONFLICT (key) DO UPDATE SET value = '10'
                      WHERE CASE WHEN settings.value ~ '^[0-9]+\$'
                                 THEN settings.value::int < 10 ELSE true END;
+                    -- max_retries counts ATTEMPTS (LocalAiService: attempt 1..N, no
+                    -- wait after the last), so N attempts = N-1 waits. At 5 the waits
+                    -- total 150s, but cliproxy-free cools a saturated upstream for up
+                    -- to ~17 min (gemini 503 high demand, groq 8K TPM); with both
+                    -- cooling at once every batch failed. Floor 8 -> 7 waits, 1270s.
+                    INSERT INTO settings (key, value) VALUES ('max_retries', '8')
+                    ON CONFLICT (key) DO UPDATE SET value = '8'
+                     WHERE CASE WHEN settings.value ~ '^[0-9]+\$'
+                                THEN settings.value::int < 8 ELSE true END;
                     INSERT INTO settings (key, value) VALUES ('strip_subtitle_formatting', 'true')
                     ON CONFLICT (key) DO UPDATE SET value = 'true';
                   END IF;
