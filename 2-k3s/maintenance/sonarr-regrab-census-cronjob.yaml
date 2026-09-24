@@ -33,6 +33,9 @@ data:
     Sonarr-only, per #1133. Radarr has never shown this shape; if it does,
     that is a separate issue.
 
+    Exits 0 with or without re-grabs (read the counts in the Job log) and 2
+    when the census cannot complete safely.
+
     Run with --selftest to exercise the pure logic against synthetic history
     pages without touching the network.
     """
@@ -347,7 +350,10 @@ data:
               "has no queue row (tracked download pinned at Imported or "
               "Failed), so QueueSpecification cannot reject the repeat grab."
               % (len(counts["regrabs"]), WINDOW_DAYS))
-        return 1
+        # Report-only: the count cannot move until Sonarr v5 (#834/#1131), so a
+        # failing Job here was a daily alert nobody could act on. Exit 2 (the
+        # census could not be trusted) still fails the Job and alerts.
+        return 0
 
 
     def selftest():
