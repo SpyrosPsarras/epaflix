@@ -67,76 +67,25 @@ EOF
   chmod 0600 "$OC_DIR/opencode.json"
 fi
 
-# The LXC host configs point at /usr/local/bin/{keepass,searxng}-mcp. In the
-# pod those are the kubectl exec vault bridge and the bundled searxng script. Rewrite
-# once per home; idempotent because the target strings never match again.
-for h in "$HOME" /home/t3env-*; do
-  for f in "$h/.config/opencode/opencode.json" "$h/.codex/config.toml" "$h/.claude.json"; do
-    [[ -f $f ]] && grep -q '/usr/local/bin/\(keepass\|searxng\)-mcp' "$f" && \
-      sed -i 's#/usr/local/bin/keepass-mcp#/scripts/keepass-remote.sh#g; s#/usr/local/bin/searxng-mcp#/scripts/searxng-mcp.py#g' "$f"
-  done
-done
-
-# Register the runtime vault bridge without replacing provider or user settings.
-if [[ -r /var/run/secrets/kubernetes.io/serviceaccount/token ]]; then
-  python3 - "$OC_DIR/opencode.json" <<'PY'
-import json, os, sys
-path = sys.argv[1]
-with open(path) as f:
-    config = json.load(f)
-if "keepass" in config.get("mcp", {}):
-    sys.exit(0)
-config.setdefault("mcp", {})["keepass"] = {
-    "type": "local", "command": ["bash", "/scripts/keepass-remote.sh"], "enabled": True
-}
-with open(path, "w") as f:
-    json.dump(config, f, indent=2)
-    f.write("\n")
-os.chmod(path, 0o600)
-PY
-  # The claudeAgent instances run with CLAUDE_CONFIG_DIR=<home>/.claude, which
-  # reads <home>/.claude/.claude.json, not ~/.claude.json. Register there.
-  for h in "$HOME" /home/t3env-*; do
-    for s in keepass:/scripts/keepass-remote.sh searxng:/scripts/searxng-mcp.py; do
-      HOME=$h CLAUDE_CONFIG_DIR=$h/.claude claude mcp get "${s%%:*}" >/dev/null 2>&1 || \
-        HOME=$h CLAUDE_CONFIG_DIR=$h/.claude claude mcp add -s user "${s%%:*}" -- "${s#*:}" >/dev/null || \
-        echo "t3env: claude mcp add ${s%%:*} failed in $h" >&2
-    done
-  done
-  codex mcp get keepass >/dev/null 2>&1 || \
-    codex mcp add keepass -- bash /scripts/keepass-remote.sh >/dev/null
-fi
-
-# MCP hub (2-k3s/23.mcp-hub): remote servers behind one bearer token. The
-# token stays an env reference, never a literal in the PVC config. Written
-# once per server; sending and trashing mail prompt for approval.
+# MCP hub (2-k3s/23.mcp-hub): every agent MCP server behind one gateway and
+# this pod's hub token. Register every hub path for OpenCode, Claude and Codex
+# in every home; the token stays an env reference, never a literal on the PVC.
+# hub_clients.py also replaces the stdio keepass/searxng bridges and the
+# hosted Notion entries the hub superseded. The claudeAgent instances run with
+# CLAUDE_CONFIG_DIR=<home>/.claude (<home>/.claude/.claude.json); a plain
+# `claude` in a shell reads <home>/.claude.json. Both get the servers.
 if [[ -n ${MCP_HUB_TOKEN:-} && -n ${MCP_HUB_URL:-} ]]; then
-  python3 - "$OC_DIR/opencode.json" "$MCP_HUB_URL" <<'PY'
-import json, os, sys
-path, hub = sys.argv[1], sys.argv[2].rstrip("/")
-with open(path) as f:
-    config = json.load(f)
-mcp = config.setdefault("mcp", {})
-perms = config.setdefault("permission", {})
-if isinstance(perms, str):  # "allow"-everything shorthand: expand so per-tool rules can follow
-    perms = config["permission"] = {"*": perms}
-changed = False
-if "gmail" not in mcp:
-    mcp["gmail"] = {
-        "type": "remote", "url": f"{hub}/gmail", "enabled": True, "timeout": 30000,
-        "headers": {"Authorization": "Bearer {env:MCP_HUB_TOKEN}"},
-    }
-    changed = True
-for tool in ("gmail_gmail_send", "gmail_gmail_send_draft", "gmail_gmail_trash"):
-    if tool not in perms:
-        perms[tool] = "ask"
-        changed = True
-if changed:
-    with open(path, "w") as f:
-        json.dump(config, f, indent=2)
-        f.write("\n")
-    os.chmod(path, 0o600)
-PY
+  for h in "$HOME" /home/t3env-*; do
+    [[ -d $h ]] || continue
+    python3 /scripts/hub_clients.py opencode "$h/.config/opencode/opencode.json" "$MCP_HUB_URL" \
+      'Bearer {env:MCP_HUB_TOKEN}' || echo "t3env: hub opencode config failed in $h" >&2
+    for cfg in "$h/.claude/.claude.json" "$h/.claude.json"; do
+      python3 /scripts/hub_clients.py claude "$cfg" "$MCP_HUB_URL" 'Bearer ${MCP_HUB_TOKEN}' || \
+        echo "t3env: hub claude config failed for $cfg" >&2
+    done
+    python3 /scripts/hub_clients.py codex "$h/.codex" "$MCP_HUB_URL" MCP_HUB_TOKEN || \
+      echo "t3env: hub codex config failed in $h" >&2
+  done
 fi
 
 # T3 provider instances, written once so later edits from the UI survive

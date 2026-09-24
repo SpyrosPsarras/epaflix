@@ -2,29 +2,38 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: mcp-hub
 
-# Streamable-HTTP MCP hub behind mcp.epaflix.com (internal) and
-# mcp-hub.mcp-hub.svc:8000 (in-cluster). README.md covers the Gmail OAuth
-# bootstrap and how clients are wired.
+# The MCP hub behind mcp.epaflix.com (internal) and mcp-hub.mcp-hub.svc:8000
+# (in-cluster). README.md covers vocabulary, clients, secrets and bootstraps.
 resources:
   - namespace.yaml
   - deployment.yaml
   - service.yaml
   - ingress.yaml
+  - kubernetes-mcp.yaml
 
 configMapGenerator:
   - name: mcp-hub-app
     files:
       - files/mcp_hub.py
       - files/gmail_mcp.py
+      - files/searxng_mcp.py
+      - files/upstream.py
+      - files/notion_grant.py
+      # Client name -> SHA-256 of its hub token (tools/add-client.py). The
+      # generated name hash rolls the hub when a client is added or revoked.
+      - files/clients.json
+  - name: kubernetes-mcp-config
+    files:
+      - config.toml=files/kubernetes-mcp.toml
 
 generators:
   - ksops-generator.yaml
 
 # The Secrets feed env vars read at start, and no Reloader watches this
 # namespace. Each Secret carries a plaintext revision annotation (sops only
-# encrypts stringData) that is copied into the pod template, so a new token
-# or refresh token rolls the pod. Writers bump it: tools/bootstrap-gmail.py,
-# and the Rotation snippet in README.md.
+# encrypts stringData) that is copied into the pod template, so a new
+# secret rolls the pod. Writers bump it: tools/bootstrap-gmail.py and
+# tools/sops_secret.py.
 replacements:
   - source:
       kind: Secret
@@ -40,13 +49,13 @@ replacements:
           create: true
   - source:
       kind: Secret
-      name: mcp-hub-token
+      name: mcp-hub-keepass
       fieldPath: metadata.annotations.[mcp-hub.epaflix.com/revision]
     targets:
       - select:
           kind: Deployment
           name: mcp-hub
         fieldPaths:
-          - spec.template.metadata.annotations.[mcp-hub.epaflix.com/token-revision]
+          - spec.template.metadata.annotations.[mcp-hub.epaflix.com/keepass-revision]
         options:
           create: true

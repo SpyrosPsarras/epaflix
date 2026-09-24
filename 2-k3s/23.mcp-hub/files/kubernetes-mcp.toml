@@ -1,0 +1,7 @@
+# containers/kubernetes-mcp-server, behind the hub's /kubernetes path
+# (../kubernetes-mcp.yaml). Keys: docs/configuration.md at the pinned tag.
+port = "8080"
+metrics_port = "9090"
+stateless = true
+cluster_provider_strategy = "in-cluster"
+toolsets = ["core", "config", "helm"]

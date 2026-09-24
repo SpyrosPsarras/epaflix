@@ -7,8 +7,8 @@ namespace: t3code
 #
 # Kustomize refuses to read above its root, so tools/ and most of files/ are
 # byte copies of ../env inputs; tools/sync-shared.sh refreshes them and CI
-# diffs them. files/entrypoint.sh, files/searxng-mcp.py and
-# files/opencode-fast-version.sh are this overlay's own.
+# diffs them (files/hub_clients.py is a copy of 23.mcp-hub/tools/hub_clients.py).
+# files/entrypoint.sh and files/opencode-fast-version.sh are this overlay's own.
 resources:
   - namespace.yaml
   - storage.yaml
@@ -25,11 +25,10 @@ configMapGenerator:
       - files/entrypoint.sh
       - files/private-config.py
       - files/git-credential-github.sh
-      - files/keepass-remote.sh
+      - files/hub_clients.py
       - files/cliproxy-models.js
       - files/jev-shadow.js
       - files/jev-auto.js
-      - files/searxng-mcp.py
       - files/opencode-fast-version.sh
 
 generators:
@@ -48,7 +47,7 @@ replacements:
           - spec.template.metadata.annotations.[t3code.epaflix.com/private-revision]
         options:
           create: true
-  # MCP_HUB_TOKEN is env; a rotated hub token (23.mcp-hub/README.md) rolls T3.
+  # MCP_HUB_TOKEN is env; a new pod token (23.mcp-hub/tools/add-client.py t3code) rolls T3.
   - source:
       kind: Secret
       name: mcp-hub-client
