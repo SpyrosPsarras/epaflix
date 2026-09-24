@@ -54,6 +54,14 @@ spec:
                     INSERT INTO settings (key, value) VALUES ('max_batch_size', '25')
                     ON CONFLICT (key) DO UPDATE SET value = '25'
                      WHERE settings.value ~ '^[0-9]+\$' AND settings.value::int < 25;
+                    -- retry_delay is SECONDS, doubled per 429/503 retry. At 1 the
+                    -- 1/2/4/8s waits (~15s) end inside groq's 60s TPM window and
+                    -- gemini 503 spikes, so batches failed while the free pool was
+                    -- only cooling down. Floor 10 -> 10/20/40/80s.
+                    INSERT INTO settings (key, value) VALUES ('retry_delay', '10')
+                    ON CONFLICT (key) DO UPDATE SET value = '10'
+                     WHERE CASE WHEN settings.value ~ '^[0-9]+\$'
+                                THEN settings.value::int < 10 ELSE true END;
                     INSERT INTO settings (key, value) VALUES ('strip_subtitle_formatting', 'true')
                     ON CONFLICT (key) DO UPDATE SET value = 'true';
                   END IF;
