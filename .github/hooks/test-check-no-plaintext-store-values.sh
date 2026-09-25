@@ -29,9 +29,9 @@ SECRET_PASS="supersecret42-value"
 store_plaintext="$tmp/store-plain.yaml"
 cat >"$store_plaintext" <<EOF
 truenas_admin_password: $SECRET_PASS
-alert_email_hostname: $SECRET_HOST
-alert_email_SMTP_port: '587'
-auth_email_username: auth@example.test
+mail_relay_hostname: $SECRET_HOST
+mail_relay_SMTP_port: '587'
+virtualmin_username: relay@example.test
 ssh_deploy_key: |-
   -----BEGIN OPENSSH PRIVATE KEY-----
   b3BlbnNzaC1rZXktdjEAAAAABGxvY2FsaG9zdHJ1bg
@@ -143,7 +143,7 @@ stage_content runbook.txt <<EOF
 Mail is delivered by $SECRET_HOST on port 587.
 EOF
 expect_fail "staged file with a store value is refused"
-grep -q "alert_email_hostname" "$output" && pass "finding names the store key" || fail "finding names the store key"
+grep -q "mail_relay_hostname" "$output" && pass "finding names the store key" || fail "finding names the store key"
 if grep -q "$SECRET_HOST" "$output"; then
   fail "finding never prints the value"
 else
