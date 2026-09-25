@@ -1,0 +1,66 @@
+# Lets Moonlight's "Wake PC" work over Tailscale. The subnet router forwards the
+# unicast magic packet to homePC's LAN IP, but a sleeping PC answers no ARP, so
+# the node drops it. A permanent neighbour entry makes the node send the frame
+# to homePC's MAC anyway. Runs on every node because the router follows its
+# local-path PVC, which only moves if the claim is recreated elsewhere.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: homepc-wol-neigh
+spec:
+  selector:
+    matchLabels:
+      app: homepc-wol-neigh
+  template:
+    metadata:
+      labels:
+        app: homepc-wol-neigh
+    spec:
+      automountServiceAccountToken: false
+      hostNetwork: true
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: neigh
+          # Same image as the router: already cached on the nodes, ships iproute2.
+          image: tailscale/tailscale:v1.102.3
+          env:
+            # homePC must keep this IP: reserve it for the MAC in the Archer's DHCP.
+            - name: WOL_IP
+              value: 192.168.10.177
+            - name: WOL_MAC
+              value: d8:43:ae:20:7d:23
+          command:
+            - sh
+            - -c
+            - |
+              last=
+              while :; do
+                route=$(ip -o route get "$WOL_IP" 2>/dev/null || true)
+                dev=$(echo "$route" | sed -n 's/.* dev \([^ ]*\).*/\1/p')
+                case "$route" in
+                  *" via "*) echo "$WOL_IP is not on a local subnet: $route" >&2; last= ;;
+                  *)
+                    if [ -n "$dev" ] && ip neigh replace "$WOL_IP" lladdr "$WOL_MAC" nud permanent dev "$dev"; then
+                      [ "$dev" = "$last" ] || echo "pinned $WOL_IP -> $WOL_MAC on $dev"
+                      last=$dev
+                    else
+                      echo "failed to pin $WOL_IP (dev '$dev')" >&2; last=
+                    fi ;;
+                esac
+                sleep 60
+              done
+          resources:
+            requests:
+              cpu: 1m
+              memory: 8Mi
+            limits:
+              memory: 32Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - NET_ADMIN
