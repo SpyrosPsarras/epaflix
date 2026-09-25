@@ -9,6 +9,8 @@ metadata:
   namespace: t3code
   labels:
     app.kubernetes.io/name: t3code
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
 spec:
   accessModes:
     - ReadWriteOnce
@@ -24,6 +26,8 @@ metadata:
   namespace: t3code
   labels:
     app.kubernetes.io/name: t3code
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
 spec:
   accessModes:
     - ReadWriteOnce
@@ -39,6 +43,8 @@ metadata:
   namespace: t3code
   labels:
     app.kubernetes.io/name: t3code
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
 spec:
   accessModes:
     - ReadWriteOnce

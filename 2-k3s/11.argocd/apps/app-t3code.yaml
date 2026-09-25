@@ -15,10 +15,10 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: t3code
-  # Manual sync until the merged state is loaded: cutover.sh scales the
-  # StatefulSet by hand while copying homes, and an automated selfHeal would
-  # fight that. Switch to automated after the bake period.
   syncPolicy:
+    automated:
+      selfHeal: true
+      prune: true
     syncOptions:
       - ServerSideApply=true
       - PruneLast=true
