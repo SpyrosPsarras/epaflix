@@ -14,6 +14,7 @@ resources:
   - storage.yaml
   - statefulset.yaml
   - service.yaml
+  - image-prepull.yaml
 
 configMapGenerator:
   - name: t3code-tools
@@ -60,3 +61,23 @@ replacements:
           - spec.template.metadata.annotations.[mcp-hub.epaflix.com/token-revision]
         options:
           create: true
+  - source:
+      kind: StatefulSet
+      name: t3code
+      fieldPath: spec.template.spec.containers.[name=t3].image
+    targets:
+      - select:
+          kind: Job
+          name: t3code-image-prepull
+        fieldPaths:
+          - spec.template.spec.containers.[name=pull].image
+  - source:
+      kind: StatefulSet
+      name: t3code
+      fieldPath: spec.template.spec.affinity
+    targets:
+      - select:
+          kind: Job
+          name: t3code-image-prepull
+        fieldPaths:
+          - spec.template.spec.affinity
