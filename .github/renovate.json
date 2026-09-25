@@ -122,12 +122,6 @@
       "enabled": false
     },
     {
-      "description": "Temporary PR-build image (#1336): ghcr.io/spyrospsarras/jellysweep:pr-430 is a one-off build of jon4hz/jellysweep#430 (Database Filter matches tracked rows by media type, not arr ID alone), pinned with an immutable digest while upstream review is pending. A PR build has no tag stream, so tracking it is permanent lookup-failure noise. The images: block in 2-k3s/08.servarr/kustomization.yaml carries a TEMP OVERRIDE comment naming the revert condition: when a jellysweep release > v0.16.0 ships containing #430, the pin goes back to ghcr.io/jon4hz/jellysweep and this rule is deleted in the same PR.",
-      "matchDatasources": ["docker"],
-      "matchPackageNames": ["ghcr.io/spyrospsarras/jellysweep"],
-      "enabled": false
-    },
-    {
       "description": "Temporary overlay image (batch-contract): ghcr.io/spyrospsarras/lingarr is a build of lingarr-translate/lingarr main 28f6a19 + images/lingarr/batch-contract.patch (chat batch path publishes untranslated lines, its schema-less fallback NREs on null model content, the content API cancels translations when the caller disconnects - Bazarr's 1920s timeout made big files untranslatable - and the batch path treats provider 429/503 as fatal instead of retrying), pinned with an immutable digest until upstream ships the equivalents. The images: block in 2-k3s/08.servarr/kustomization.yaml carries a TEMP OVERRIDE comment naming the revert condition, watched by upstream-release-watch row #270. The digest has no tag stream Renovate could follow, so tracking it is permanent lookup-failure noise. Upstream churn reaches the overlay through images/lingarr/Dockerfile, whose UPSTREAM_COMMIT/base-digest pair is watch-managed: upstream-release-watch row #270 carries the procedure, and build-lingarr.yml's invariant guard fails the build when the base digest's source revision is not UPSTREAM_COMMIT - the :main tag has regressed twice (PR #1368, then #1434 on 2026-09-17). The upstream base digest itself is untracked: see the disable rule below.",
       "matchDatasources": ["docker"],
       "matchPackageNames": ["ghcr.io/spyrospsarras/lingarr"],

@@ -25,7 +25,6 @@ const manual = new Set([
 // Self-built overlay images (TEMP OVERRIDE entries): excluded from Renovate in
 // .github/renovate.json, so extraction must see exactly these names disabled.
 const disabled = new Set([
-  'ghcr.io/spyrospsarras/jellysweep',
   'ghcr.io/spyrospsarras/lingarr',
 ]);
 for (const dep of deps) {
