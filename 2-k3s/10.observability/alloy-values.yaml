@@ -1,0 +1,196 @@
+
+# Grafana Alloy daemonset, replacing promtail (EOL, #1381). The pipeline in
+# loki.process is a 1:1 port of the old promtail scrape config.
+crds:
+  create: false
+
+alloy:
+  # Positions must survive pod restarts, otherwise every restart re-reads
+  # every pod log from byte 0. The chart default (/tmp/alloy) lives in the
+  # container filesystem, so point it at a hostPath.
+  storagePath: /var/lib/alloy
+  enableReporting: false
+
+  mounts:
+    varlog: true
+    extra:
+      - name: storage
+        mountPath: /var/lib/alloy
+      - name: promtail-positions
+        mountPath: /run/promtail
+        readOnly: true
+
+  # /var/log/pods is root:root 0750 and kubelet creates the hostPaths as
+  # root, same reason promtail ran as uid 0.
+  securityContext:
+    runAsUser: 0
+    runAsGroup: 0
+
+  # promtail peaked at 143Mi under a 256Mi limit. Alloy's baseline is
+  # higher, and an OOM kill stops log shipping on that node.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  configMap:
+    content: |
+      // One daemonset pod per node, so only discover pods on this node.
+      // promtail did the same through its __host__ label.
+      discovery.kubernetes "pods" {
+        role = "pod"
+        selectors {
+          role  = "pod"
+          field = "spec.nodeName=" + sys.env("HOSTNAME")
+        }
+      }
+
+      discovery.relabel "pods" {
+        targets = discovery.kubernetes.pods.targets
+
+        rule {
+          source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_name"]
+          separator     = "/"
+          target_label  = "job"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          target_label  = "namespace"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          target_label  = "pod"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_container_name"]
+          target_label  = "container"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+          separator     = "/"
+          replacement   = "/var/log/pods/*$1/*.log"
+          target_label  = "__path__"
+        }
+        // Static pods log under their config hash, not their uid.
+        rule {
+          source_labels = [
+            "__meta_kubernetes_pod_annotationpresent_kubernetes_io_config_hash",
+            "__meta_kubernetes_pod_annotation_kubernetes_io_config_hash",
+            "__meta_kubernetes_pod_container_name",
+          ]
+          separator    = "/"
+          regex        = "true/(.*)"
+          replacement  = "/var/log/pods/*$1/*.log"
+          target_label = "__path__"
+        }
+      }
+
+      local.file_match "pods" {
+        path_targets = discovery.relabel.pods.output
+      }
+
+      loki.source.file "pods" {
+        targets    = local.file_match.pods.targets
+        forward_to = [loki.process.pods.receiver]
+        // One-time handover: on first start (no Alloy positions file yet)
+        // import promtail's read offsets so nothing is re-read or skipped.
+        // /run is tmpfs, so the file is gone after the next node reboot and
+        // this line and the promtail-positions mount become dead weight.
+        legacy_positions_file = "/run/promtail/positions.yaml"
+      }
+
+      loki.process "pods" {
+        forward_to = [loki.write.default.receiver]
+
+        stage.cri { }
+
+        // radarr v6 writes its console format without a timestamp:
+        // [Debug] Api: ... (#976). Without the bracket alternative every
+        // radarr burst glues into one Loki entry under the burst-start
+        // timestamp. Exception blocks ([v6.x.y] ... / at ...) must stay
+        // continuations, hence the explicit level list.
+        stage.multiline {
+          firstline     = `^\d{4}-\d{2}-\d{2}|^[A-Z]{1}\d{4}|^\[(Trace|Debug|Info|Warn|Error|Fatal)\]`
+          max_wait_time = "3s"
+        }
+
+        // kube-vip lives for weeks without its log file rotating (#1006).
+        // If the agent ever reads such a file from an old position, the
+        // head is past the server-side accept bound, Loki 400s the whole
+        // batch, and since positions only advance on a successful push
+        // the stream is dead for good. Discard entries that old here so
+        // a batch is always pushable. Keep the horizon in sync with
+        // loki-values.yaml limits_config.reject_old_samples_max_age.
+        stage.drop {
+          older_than          = "744h"
+          drop_counter_reason = "too_old"
+        }
+
+        // servarr apps self-mask credentials in their own log lines
+        // (apikey=(removed), Password=(removed)), so there is no secret
+        // left to protect (#824). Rewrite those shapes before the
+        // credential counter below sees them, otherwise a Debug-level
+        // *arr console (#976 radarr, unpackerr's per-minute query-param
+        // polling) fires CredentialRedactedFromLogs around the clock.
+        // Keep the credential-key alternation in sync across all three
+        // regexes in this block (selector, self-mask, redact).
+        stage.replace {
+          expression = `(?i)((?:password|passwd|apikey|api_key|api-key|client_secret)=\(removed\))`
+          replace    = "<self-masked>"
+        }
+
+        // Exposed as loki_process_custom_credential_lines_redacted_total,
+        // read by the CredentialRedactedFromLogs alert.
+        stage.match {
+          selector = `{namespace=~".+"} |~ "(?i)(password|passwd|apikey|api_key|api-key|client_secret)="`
+
+          stage.metrics {
+            metric.counter {
+              name        = "credential_lines_redacted_total"
+              description = "Log lines containing a credential-shaped key=value that alloy redacted before pushing to Loki (#634)."
+              match_all   = true
+              action      = "inc"
+            }
+          }
+        }
+
+        // stage.replace replaces only the captured groups, not the whole
+        // match, so the capture must span key=value to remove the key from
+        // Loki. ( and ) stay allowed in values and {0,} allows empty values
+        // so shapes like Password=(removed) and apikey=(removed) redact too
+        // if they somehow get past the self-mask rewrite above (#824).
+        stage.replace {
+          expression = `(?i)((?:password|passwd|apikey|api_key|api-key|client_secret)=(?:[^;&"'\s\[\]{}^$*|\\<>]{0,}))`
+          replace    = "<REDACTED>"
+        }
+      }
+
+      loki.write "default" {
+        endpoint {
+          url       = "http://loki-gateway.observability.svc.cluster.local/loki/api/v1/push"
+          tenant_id = "1"
+        }
+      }
+
+controller:
+  type: daemonset
+  tolerations:
+    - key: node-role.kubernetes.io/control-plane
+      operator: Exists
+      effect: NoSchedule
+  volumes:
+    extra:
+      - name: storage
+        hostPath:
+          path: /var/lib/alloy
+          type: DirectoryOrCreate
+      - name: promtail-positions
+        hostPath:
+          path: /run/promtail
+          type: DirectoryOrCreate
+
+serviceMonitor:
+  enabled: true

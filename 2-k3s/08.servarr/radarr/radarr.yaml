@@ -40,7 +40,7 @@ spec:
             - name: TZ
               value: "Europe/Oslo"
             # Debug so Api request lines (incl. inbound 401s) reach stdout and
-            # promtail (#976). Trace would add source IPs but also outbound
+            # alloy (#976). Trace would add source IPs but also outbound
             # response bodies; flip it temporarily only when a burst needs
             # attribution, then let ArgoCD selfHeal revert it.
             - name: RADARR__LOG__CONSOLELEVEL
