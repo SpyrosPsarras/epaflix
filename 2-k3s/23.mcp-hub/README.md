@@ -77,12 +77,12 @@ at connect time (verified on 2.1.281; the stored config keeps the literal).
 
 ### Rollout of the gateway change (2026-09)
 
-mcp-hub and syncthing sync on merge; t3code does not. Between the merge and
-the manual t3code sync the running pod keeps its old MCP setup (stdio
-searxng, hosted Notion; it has never had hub paths, since t3code was last
-synced before the hub existed). **Its keepass tools fail**: the merge removes the
-`keepass-exec` RBAC and the pod's `kubectl exec` bridge with it. Sync t3code
-soon after the merge. Then, on each PC:
+mcp-hub and syncthing synced on merge; t3code was then synced by hand.
+Between the merge and that sync the running pod kept its old MCP setup (stdio
+searxng, hosted Notion; it had never had hub paths, since t3code was last
+synced before the hub existed). **Its keepass tools failed**: the merge removed the
+`keepass-exec` RBAC and the pod's `kubectl exec` bridge with it. t3code now
+syncs on merge too. Then, on each PC:
 `add-client.py <pc> --reuse` (switches OpenCode's notion/searxng to the hub,
 adds keepass and kubernetes-epaflix, wires Claude Code), then
 `tools/bootstrap-notion.py` once, and remove `~/.config/opencode/mcp/searxng-mcp.py`.
@@ -101,8 +101,7 @@ not a client yet.
 The sops writers need only `sops` and the age recipient in `.sops.yaml`.
 They stamp a plaintext `mcp-hub.epaflix.com/revision` annotation that the
 kustomizations copy into the pod templates, so a new secret rolls the pod
-once synced (no Reloader watches these namespaces). mcp-hub and syncthing sync
-automatically on merge, t3code only by hand.
+on merge (no Reloader watches these namespaces).
 
 ## Keepass
 
