@@ -5,3 +5,6 @@ metadata:
   name: t3code
   labels:
     app.kubernetes.io/name: t3code
+  annotations:
+    # Deleting the namespace deletes the home PVCs and their local-path data.
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
