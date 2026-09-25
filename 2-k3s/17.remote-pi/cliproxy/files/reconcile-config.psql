@@ -728,3 +728,50 @@ BEGIN
 
   RAISE NOTICE 'verified: allow-remote true, auth-dir /var/lib/cliproxy/pgstore/auths, pi-bridge, cliproxyapi-copilot and opencode-cloak enabled, openai-compatibility ollama + openrouter present, request-log true capped at 256MB, logging-to-file false, usage-statistics-enabled true';
 END $$;
+
+-- Claude OAuth credential: cloak_mode must be explicit since v7.3.17.
+--
+-- Upstream #6096 (shipped in v7.3.17) made a direct /v1/messages call on a
+-- Claude OAuth credential with no explicit cloak setting a passthrough: the
+-- proxy forwards the caller's own User-Agent and anthropic-beta set instead of
+-- disguising it as Claude Code. Anthropic then rejects every non-Claude-Code
+-- client on the subscription: 429 rate_limit_error on Opus 5.5 / Opus 5, and
+-- 400 `thinking.adaptive.block_binding: Extra inputs are not permitted` for a
+-- client that sends block_binding (Zed does) because the proxy only adds the
+-- thinking-binding-controls beta on the cloaked path
+-- (internal/runtime/executor/claude_executor_request.go). Reported upstream as
+-- router-for-me/CLIProxyAPI#6120; the operator-side fix that report validated
+-- is `cloak_mode: "always"` on the credential file, the per-credential lever
+-- config.example.yaml documents next to disable-claude-cloak-mode. "always"
+-- still leaves a confirmed Claude Code client as passthrough
+-- (resolveClaudeWirePolicy in claude_executor_cloaking.go).
+--
+-- The credential lives in auth_store as JSONB (internal/store/postgresstore.go)
+-- and the proxy rewrites the local auth dir from that table on every start, so
+-- a row-level patch here lands in the file the executor reads. Token refresh
+-- round-trips the whole metadata blob, so the key survives. Keyed on type, not
+-- id: the id carries the account e-mail, and any future Claude OAuth credential
+-- needs the same value. Git owns the value, same rule as the config keys above.
+DO $$
+DECLARE
+  n integer;
+BEGIN
+  IF to_regclass('public.auth_store') IS NULL THEN
+    RAISE NOTICE 'auth_store does not exist yet - first boot, nothing to cloak';
+    RETURN;
+  END IF;
+
+  UPDATE public.auth_store
+     SET content = content || '{"cloak_mode": "always"}'::jsonb,
+         updated_at = now()
+   WHERE content->>'type' = 'claude'
+     AND content->>'cloak_mode' IS DISTINCT FROM 'always';
+  GET DIAGNOSTICS n = ROW_COUNT;
+  RAISE NOTICE 'claude credentials set to cloak_mode always: % changed', n;
+
+  IF EXISTS (SELECT 1 FROM public.auth_store
+              WHERE content->>'type' = 'claude'
+                AND content->>'cloak_mode' IS DISTINCT FROM 'always') THEN
+    RAISE EXCEPTION 'a claude credential still lacks cloak_mode always after reconcile';
+  END IF;
+END $$;
