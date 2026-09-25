@@ -25,6 +25,7 @@ resources:
   - helm-manager-drift-cronjob.yaml
   - jellysweep-order-executor-cronjob.yaml
   - ntfy-canary-check-cronjob.yaml
+  - gntm-star-download-cronjob.yaml
 
 configMapGenerator:
   - name: aaaa-tripwire-script

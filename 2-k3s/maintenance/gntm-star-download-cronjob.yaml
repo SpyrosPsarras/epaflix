@@ -1,0 +1,231 @@
+---
+# Downloads new Greece's Next Top Model episodes from star.gr into the Sonarr
+# series folder, because no indexer carries the show.
+#
+# The star.gr player hides the video outside GR/CY, but that check is only a
+# cookie in the browser. The HLS stream itself plays from any country, so the
+# job reads the stream URL from each episode page and copies it with ffmpeg
+# (no re-encode, highest variant, 1080p at the time of writing).
+#
+# Sonarr series 404 is set to the "daily" type so it matches these files by
+# air date once TVDB lists the episodes. Jellyfin sees them straight away.
+#
+# SEASONAL: delete this file (and its kustomization entry) after the GNTM 2026
+# finale. For a later season, point TAG_URL at that season's tag page.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gntm-star-download-script
+  namespace: servarr
+data:
+  download.py: |
+    #!/usr/bin/env python3
+    """Download every episode listed on the star.gr tag page that is not on disk.
+
+    Exits non-zero if the tag page yields no episodes, an episode page has no
+    stream URL or date, two pages share a date, or a download fails or comes
+    out shorter than the source, so problems fail the Job loudly.
+    """
+    import os
+    import re
+    import subprocess
+    import sys
+    import urllib.request
+    from html import unescape
+
+    TAG_URL = os.environ.get("TAG_URL", "")
+    SERIES_DIR = os.environ.get("SERIES_DIR", "")
+    SERIES_TITLE = os.environ.get("SERIES_TITLE", "")
+    BASE = "https://www.star.gr"
+    UA = "Mozilla/5.0"
+
+
+    def fail(msg):
+        print("FAIL: " + msg, file=sys.stderr)
+
+
+    def fetch(url):
+        req = urllib.request.Request(url, headers={"User-Agent": UA})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return unescape(r.read().decode("utf-8", "replace"))
+
+
+    def episode_links(html, tag_url):
+        # Episode links sit under the show path (relative or absolute); skip tag pages.
+        show_path = re.sub(r"^https?://[^/]+", "", tag_url).rsplit("/", 1)[0]
+        pat = r'href="(?:%s)?(%s/[^"/]+)"' % (re.escape(BASE), re.escape(show_path))
+        return sorted({BASE + p for p in re.findall(pat, html) if "/tag_" not in p})
+
+
+    def stream_url(html):
+        m = re.search(r'https?://[^"\s]+\.m3u8\?key=[^"\s]+', html)
+        return m.group(0) if m else None
+
+
+    def air_date(html):
+        # PlayerTitle looks like "GNTM 2026 - 22.9.2026" (day.month.year).
+        m = re.search(r'"PlayerTitle":"[^"]*?(\d{1,2})\.(\d{1,2})\.(\d{4})', html)
+        return "%s-%02d-%02d" % (m.group(3), int(m.group(2)), int(m.group(1))) if m else None
+
+
+    def duration(target):
+        r = subprocess.run(["ffprobe", "-v", "error", "-user_agent", UA,
+                            "-show_entries", "format=duration", "-of", "csv=p=0", target],
+                           capture_output=True, text=True)
+        try:
+            return float(r.stdout.strip())
+        except ValueError:
+            return None
+
+
+    def selftest():
+        tag = BASE + "/tv/x/show/tag_1998"
+        page = ('<a href="/tv/x/show/ep-2292026"><a href="/tv/x/show/ep-2292026">'
+                '<a href="https://www.star.gr/tv/x/show/ep-2392026">'
+                '<a href="/tv/x/show/tag_1998"><a href="/tv/x/other/ep">')
+        assert episode_links(page, tag) == [BASE + "/tv/x/show/ep-2292026",
+                                            BASE + "/tv/x/show/ep-2392026"]
+        ep = '"PlayerTitle":"GNTM 2026 - 1.10.2026 - X","Url":"https://a.b/k/s.m3u8?key=Ab_1"'
+        assert air_date(ep) == "2026-10-01"
+        assert stream_url(ep) == "https://a.b/k/s.m3u8?key=Ab_1"
+        assert air_date("no title") is None and stream_url("none") is None
+        print("selftest ok")
+
+
+    def download(url, date):
+        """Return the final path, or None after reporting why it failed."""
+        out = os.path.join(SERIES_DIR, "%s - %s.mp4" % (SERIES_TITLE, date))
+        if os.path.exists(out):
+            print("skip  %s (on disk)" % date)
+            return out
+        expected = duration(url)
+        if not expected:
+            fail("%s: cannot read source duration" % date)
+            return None
+        tmp = out + ".part"
+        print("get   %s (%.0f min)" % (date, expected / 60))
+        # No -map: ffmpeg picks the highest-resolution video and one audio.
+        r = subprocess.run(
+            ["ffmpeg", "-nostdin", "-loglevel", "warning", "-y",
+             "-user_agent", UA, "-seg_max_retry", "5", "-i", url,
+             "-c", "copy", "-bsf:a", "aac_adtstoasc",
+             "-movflags", "+faststart", "-f", "mp4", tmp],
+            stderr=subprocess.PIPE, text=True)
+        if r.stderr:
+            print(r.stderr[-2000:], file=sys.stderr, end="")
+        # ffmpeg skips a segment it cannot fetch and still exits 0, so check the
+        # warning and the length (the source and a good copy differ by < 1 s).
+        holes = "failed too many times, skipping" in r.stderr
+        got = duration(tmp) if r.returncode == 0 and not holes else None
+        if not got or got < expected - 5:
+            fail("%s: ffmpeg exit %d, skipped segments %s, got %s of %.0f s"
+                 % (date, r.returncode, holes, got, expected))
+            if os.path.exists(tmp):
+                os.remove(tmp)
+            return None
+        os.rename(tmp, out)  # atomic: Sonarr/Jellyfin never see a partial file
+        print("done  %s (%.1f GB)" % (date, os.path.getsize(out) / 1e9))
+        return out
+
+
+    def main():
+        if not (TAG_URL and SERIES_DIR and SERIES_TITLE):
+            fail("TAG_URL, SERIES_DIR and SERIES_TITLE must be set")
+            return 2
+        # Started as root only to apk-add ffmpeg; write files as the *arr user.
+        os.setgroups([])
+        os.setgid(568)
+        os.setuid(568)
+        os.umask(0o002)
+        os.makedirs(SERIES_DIR, exist_ok=True)
+
+        links = episode_links(fetch(TAG_URL), TAG_URL)
+        print("tag page: %d episode link(s)" % len(links))
+        if not links:
+            fail("no episode links on %s, star.gr layout changed?" % TAG_URL)
+            return 1
+
+        failed, seen = 0, {}
+        for link in links:
+            html = fetch(link)
+            url, date = stream_url(html), air_date(html)
+            if not (url and date):
+                fail("%s stream=%s date=%s" % (link, bool(url), date))
+                failed += 1
+            elif date in seen:
+                fail("%s and %s both dated %s" % (seen[date], link, date))
+                failed += 1
+            else:
+                seen[date] = link
+                if download(url, date) is None:
+                    failed += 1
+
+        return 1 if failed else 0
+
+
+    if __name__ == "__main__":
+        if sys.argv[1:] == ["--selftest"]:
+            selftest()
+            sys.exit(0)
+        sys.exit(main())
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: gntm-star-download
+  namespace: servarr
+  labels:
+    app: gntm-star-download
+spec:
+  schedule: "23 */3 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 6
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 21600  # a backlog of 2h episodes can take hours
+      ttlSecondsAfterFinished: 86400  # keep 1 day
+      template:
+        metadata:
+          labels:
+            app: gntm-star-download
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: gntm-star-download
+              image: python:3.13-alpine
+              imagePullPolicy: IfNotPresent
+              command:
+                - sh
+                - -c
+                - apk add --no-cache ffmpeg >/dev/null && exec python3 -u /script/download.py
+              env:
+                - name: TAG_URL
+                  value: "https://www.star.gr/tv/psychagogia/greeces-next-top-model/tag_1998"
+                - name: SERIES_DIR
+                  value: "/media/tvshows/Greece's Next Top Model (2009) [tvdbid-320284]"
+                - name: SERIES_TITLE
+                  value: "Greece's Next Top Model"
+              volumeMounts:
+                - name: script
+                  mountPath: /script
+                  readOnly: true
+                - name: media
+                  mountPath: /media
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "128Mi"
+                limits:
+                  cpu: "500m"
+                  memory: "256Mi"
+          volumes:
+            - name: script
+              configMap:
+                name: gntm-star-download-script
+                defaultMode: 0555
+            - name: media
+              persistentVolumeClaim:
+                claimName: servarr-media
