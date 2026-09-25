@@ -94,6 +94,8 @@ spec:
                 secretKeyRef:
                   name: mcp-hub-client
                   key: token
+            - name: OPENCODE_CONFIG_CONTENT
+              value: '{"enabled_providers":["cliproxy"]}'
           ports:
             - name: http
               containerPort: 3773
