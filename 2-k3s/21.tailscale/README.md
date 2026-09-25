@@ -43,6 +43,10 @@ For Android 1.102.3, open App split tunneling, open its menu, choose "Switch to 
 
 Linux and the subnet router have `TS_DISABLE_PORTMAPPER=true`. The home Archer AX90 already had UPnP off, and its NAT-PMP/PCP port refused discovery probes. No router settings or port forwards were changed. Android has no configured equivalent of that environment flag: the attempted `only-tcp-443` tailnet attribute was rejected by this account and is not deployed. Automatic mappings are prevented at the home router, not proven disabled inside Android on arbitrary Wi-Fi networks. Keep automatic mappings disabled on any other router you administer.
 
+## Wake-on-LAN for homePC
+
+Moonlight's "Wake PC" sends a unicast magic packet to homePC's LAN IP `192.168.10.177`. The router forwards it from worker-65, but a sleeping PC answers no ARP, so the node dropped the packet. `wol-neigh.yaml` runs on every node and pins a permanent neighbour entry for that IP to homePC's MAC every 60 seconds, so the frame reaches the network card. It runs everywhere because the router moves only if its PVC is recreated on another node. homePC must keep the IP: reserve it for `d8:43:ae:20:7d:23` in the Archer's DHCP. The pin also applies while homePC is awake, so if it joins the LAN with another network card, update `WOL_MAC` or no node can reach it. Each pod logs `pinned ...` once; check one node with `kubectl -n tailscale logs $(kubectl -n tailscale get pod -l app=homepc-wol-neigh --field-selector spec.nodeName=k3s-worker-65 -o name)`.
+
 ## Phone regression test
 
 The USB connection runs through the existing `adbbox` container on spylinux. Preserve that container and its ADB authorization. Copy `phone-roam-test.py` to spylinux and run:

@@ -3,3 +3,4 @@ kind: Kustomization
 namespace: tailscale
 resources:
   - subnet-router.yaml
+  - wol-neigh.yaml
