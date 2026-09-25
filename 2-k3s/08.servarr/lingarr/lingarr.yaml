@@ -45,10 +45,15 @@ spec:
                   IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'settings') THEN
                     -- request_timeout is MINUTES (LocalAiService: TimeSpan.FromMinutes),
                     -- not seconds; floor = the upstream 30-min job-queue invisibility
-                    -- timeout (=1800s) so the HTTP timeout never binds first (#1239)
+                    -- timeout (=1800s) so the HTTP timeout never binds first (#1239).
+                    -- Ceiling 60: 900 was set under the seconds assumption (#1201) and
+                    -- meant 15h, so one hung call could pin the single worker (#1345)
                     UPDATE settings SET value = '30'
                      WHERE key = 'request_timeout'
                        AND (value ~ '^[0-9]+\$' AND value::int < 30);
+                    UPDATE settings SET value = '60'
+                     WHERE key = 'request_timeout'
+                       AND (value ~ '^[0-9]+\$' AND value::int > 60);
                     INSERT INTO settings (key, value) VALUES ('use_batch_translation', 'true')
                     ON CONFLICT (key) DO UPDATE SET value = 'true';
                     INSERT INTO settings (key, value) VALUES ('max_batch_size', '25')
