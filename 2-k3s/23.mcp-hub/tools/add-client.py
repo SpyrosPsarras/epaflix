@@ -10,7 +10,7 @@ Claude Code user configs get every hub path (tools/hub_clients.py); neither
 stores the token itself, both read the key file at connect time.
 
 The t3code token goes, sops-encrypted, into 13.t3code/one/mcp-hub-client.enc.yaml
-with a new revision annotation, which rolls the pod once t3code is synced.
+with a new revision annotation, which rolls the pod on merge.
 
 Either way files/clients.json gets the SHA-256 of the token: commit it and
 merge; ArgoCD rolls the hub. Hashes of 256-bit random tokens are safe in git.
@@ -96,7 +96,7 @@ def main():
 
     if a.name != "t3code" and not a.no_configure:
         configure_pc(key_file)
-    print("Commit and merge; ArgoCD rolls the hub." + (" Then sync t3code in ArgoCD." if a.name == "t3code" else ""))
+    print("Commit and merge; ArgoCD rolls the hub" + (" and t3code." if a.name == "t3code" else "."))
 
 
 if __name__ == "__main__":
