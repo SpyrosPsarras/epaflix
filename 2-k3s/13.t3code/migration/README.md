@@ -132,4 +132,3 @@ Done early, two days into the bake, on request.
 ## Known gaps
 
 - `one/tools` and most of `one/files` are byte copies of `env/` inputs because kustomize cannot read above its root. `one/files/entrypoint.sh` is this overlay's own (the stdio `searxng-mcp.py` it once had moved into the MCP hub, `2-k3s/23.mcp-hub`). `one/tools/sync-shared.sh --check` catches drift; CI runs it.
-- The ArgoCD app `t3code` is manual-sync. Flip to automated after the bake.
