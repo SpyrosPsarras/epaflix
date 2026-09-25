@@ -70,7 +70,7 @@ images:
   - name: lscr.io/linuxserver/prowlarr
     newTag: 2.6.5@sha256:f2b26429893d4c4cb71941b7ee50b1bdecd9d5f9f9e02d5410615e9f4f7c8d95
   - name: ghcr.io/cleanuparr/cleanuparr
-    newTag: 2.10.7@sha256:8bc918de0131502d0bd9b78b3c7821ae3455e8c8b4ae9006b9ddfbbd6db529d7
+    newTag: 2.10.8@sha256:ec444338a67e429a20f6eef938e1ed771ce357ed4831765026096061a09bbbb7
   # TEMP OVERRIDE (pr-430, #1336): build of upstream main 1576c01 + jon4hz/jellysweep#430 so the
   # Database Filter matches tracked rows by media type as well as arr ID. Without it a tracked
   # Radarr movie with ID N hides the Sonarr series with ID N forever (Squid Game / Pirates, 49 titles).
