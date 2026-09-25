@@ -9,24 +9,24 @@ evaluation_interval: 1m
 tests:
   - interval: 1m
     input_series:
-      - series: 'promtail_custom_credential_lines_redacted_total{namespace="observability",pod="promtail-abc",container="promtail",exported_namespace="traefik-system",exported_container="traefik",exported_pod="traefik-6444675d5-x6mdf"}'
+      - series: 'loki_process_custom_credential_lines_redacted_total{namespace="traefik-system",container="traefik",pod="traefik-6444675d5-x6mdf",job="traefik-system/traefik-6444675d5-x6mdf",component_id="loki.process.pods",component_path="/",filename="/var/log/pods/x/0.log",stream="stdout",instance="10.42.0.10:12345"}'
         values: "0+1x30"
     alert_rule_test:
       - eval_time: 20m
         alertname: CredentialRedactedFromLogs
         exp_alerts:
           - exp_labels:
-              exported_namespace: traefik-system
-              exported_container: traefik
+              namespace: traefik-system
+              container: traefik
               severity: warning
               component: security
             exp_annotations:
               summary: "An app logged a credential in traefik-system (redacted before Loki)"
-              description: "15 log line(s) from traefik-system/traefik contained a credential-shaped key=value in the last 15m. promtail redacted the value before pushing, so it is NOT in Loki - but it IS in the pod's own stdout and visible via `kubectl logs`. The exported_* labels name the offending app; plain namespace/pod/container are promtail itself (#911). Most likely causes: sonarr/radarr/prowlarr restarting and logging their Postgres connection string (#634), or traefik access lines carrying jellyfin's query-string ApiKey (#702). If it is a new offender treat that credential as exposed and rotate it. Do NOT grep Loki for the literal value."
+              description: "15 log line(s) from traefik-system/traefik contained a credential-shaped key=value in the last 15m. alloy redacted the value before pushing, so it is NOT in Loki - but it IS in the pod's own stdout and visible via `kubectl logs`. The alloy chart's ServiceMonitor sets honorLabels, so namespace/pod/container name the offending app, not alloy (#911 was the exported_* shape under promtail, #1381). Most likely causes: sonarr/radarr/prowlarr restarting and logging their Postgres connection string (#634), or traefik access lines carrying jellyfin's query-string ApiKey (#702). If it is a new offender treat that credential as exposed and rotate it. Do NOT grep Loki for the literal value."
 
   - interval: 1m
     input_series:
-      - series: 'promtail_custom_credential_lines_redacted_total{namespace="observability",pod="promtail-abc",container="promtail",exported_namespace="servarr",exported_container="sonarr",exported_pod="sonarr-68855b8c7f-s8879"}'
+      - series: 'loki_process_custom_credential_lines_redacted_total{namespace="servarr",container="sonarr",pod="sonarr-68855b8c7f-s8879",job="servarr/sonarr-68855b8c7f-s8879",component_id="loki.process.pods",component_path="/",filename="/var/log/pods/x/0.log",stream="stdout",instance="10.42.0.10:12345"}'
         values: "4x30"
     alert_rule_test:
       - eval_time: 20m

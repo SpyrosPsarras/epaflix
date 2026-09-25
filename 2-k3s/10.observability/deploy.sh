@@ -64,12 +64,12 @@ helm install loki grafana/loki \
 echo -e "${GREEN}✓ Loki installed${NC}"
 echo ""
 
-echo -e "${YELLOW}Step 6: Installing Promtail...${NC}"
-helm install promtail grafana/promtail \
+echo -e "${YELLOW}Step 6: Installing Alloy...${NC}"
+helm install alloy grafana/alloy \
   -n observability \
-  -f promtail-values.yaml \
+  -f alloy-values.yaml \
   --wait --timeout=5m
-echo -e "${GREEN}✓ Promtail installed${NC}"
+echo -e "${GREEN}✓ Alloy installed${NC}"
 echo ""
 
 echo -e "${YELLOW}Step 7: Deploying Proxmox VE Exporter...${NC}"

@@ -148,7 +148,7 @@ data:
                 credential-shaped text without any credential reaching a system
                 log. Steady state is
                 zero (#702, #561), so this is a regression - BUT since #749/#750
-                promtail redacts credential-shaped values before Loki, this can
+                the log agent redacts credential-shaped values before Loki, this can
                 no longer be the sonarr/radarr/prowlarr Postgres-password shape
                 (#634, see the group header, #755); it means either a caller went
                 back to a public hostname / a new ?apikey= integration (check
