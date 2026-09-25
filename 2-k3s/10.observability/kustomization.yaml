@@ -41,10 +41,10 @@ helmCharts:
     namespace: observability
     valuesFile: loki-values.yaml
     includeCRDs: false
-  - name: promtail
+  - name: alloy
     repo: https://grafana.github.io/helm-charts
-    version: "6.17.1"
-    releaseName: promtail
+    version: "1.13.0"
+    releaseName: alloy
     namespace: observability
-    valuesFile: promtail-values.yaml
+    valuesFile: alloy-values.yaml
     includeCRDs: false
