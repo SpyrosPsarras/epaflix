@@ -136,9 +136,22 @@ alloy:
         // *arr console (#976 radarr, unpackerr's per-minute query-param
         // polling) fires CredentialRedactedFromLogs around the clock.
         // Keep the credential-key alternation in sync across all three
-        // regexes in this block (selector, self-mask, redact).
+        // regexes in this block (selector, both self-masks, redact).
         stage.replace {
           expression = `(?i)((?:password|passwd|apikey|api_key|api-key|client_secret)=\(removed\))`
+          replace    = "<self-masked>"
+        }
+
+        // cliproxy prints upstream keys as first4...last4 in its cooldown
+        // and 429 warnings (api_key=gsk_...ab12), ~1.5k lines a day from
+        // cliproxy-free. At most 12 characters of a 39+ character key is
+        // not a credential. The value must end where the redact stage below
+        // also ends a value (optionally after a comma), so anything longer
+        // (abcd...wxyz:SECRET, abcd...wxyz.SECRET) does not match and still
+        // gets redacted and counted. That end character sits outside the
+        // capture, so the rest of the line stays intact.
+        stage.replace {
+          expression = `(?i)((?:password|passwd|apikey|api_key|api-key|client_secret)=[A-Za-z0-9_.-]{1,6}\.\.\.[A-Za-z0-9_-]{1,6})(?:,?(?:[;&"'\s\[\]{}^$*|\\<>]|$))`
           replace    = "<self-masked>"
         }
 
