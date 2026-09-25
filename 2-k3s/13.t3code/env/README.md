@@ -6,7 +6,7 @@ The `t3code` pod (`../one/`) runs the image built from this directory:
 - Agent CLI versions go in `tools/package.json` and its npm lockfile.
 - Helm, Kustomize, Argo CD and SOPS versions go in `../versions.env`.
 
-After changing image inputs, run `bash tools/sync-runtime-image.sh` from this directory and include the `one/statefulset.yaml` change. CI checks the image reference, builds the image, boots T3 with synthetic configuration, and publishes the tested image on main. ArgoCD may briefly wait for publication before pulling the new content-tagged image. The pod has no self-update path, so the T3 UI shows "Manual update required". The only way its t3 version moves is a merged bump of `tools/package.json`. Manual apt installs in the pod do not survive a restart.
+After changing image inputs, run `bash tools/sync-runtime-image.sh` from this directory and include the `one/statefulset.yaml` change. CI checks the image reference, builds the image, boots T3 with synthetic configuration, and publishes the tested image on main. Before ArgoCD replaces the pod, its PreSync Job `t3code-image-prepull` (`one/image-prepull.yaml`) pulls the new content-tagged image onto the pod's node, waiting up to 30 minutes for CI to publish it. The old pod keeps serving meanwhile, so an image update costs a normal restart instead of a download with T3 down. The pod has no self-update path, so the T3 UI shows "Manual update required". The only way its t3 version moves is a merged bump of `tools/package.json`. Manual apt installs in the pod do not survive a restart.
 
 Azure CLI and kubectl use their vendor apt repositories. Adding a new vendor tool also requires its repository setup in the Dockerfile.
 
