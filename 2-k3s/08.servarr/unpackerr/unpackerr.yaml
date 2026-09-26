@@ -71,9 +71,23 @@ spec:
               value: "torrent"
             - name: UN_RADARR_0_DELETE_DELAY
               value: "5m0s"
+            # Extract failures (wrong or missing password, broken RAR set) go
+            # to the ntfy topic Alertmanager uses. Event 3 = extract failed,
+            # sent once per attempt (1 + UN_MAX_RETRIES, default 3).
+            - name: UN_WEBHOOK_0_URL
+              value: "http://ntfy.observability.svc.cluster.local:8091"
+            - name: UN_WEBHOOK_0_NAME
+              value: "ntfy"
+            - name: UN_WEBHOOK_0_EVENTS_0
+              value: "3"
+            - name: UN_WEBHOOK_0_TEMPLATE_PATH
+              value: "/templates/ntfy.json.tmpl"
           volumeMounts:
             - name: media
               mountPath: /media
+            - name: ntfy-template
+              mountPath: /templates
+              readOnly: true
           resources:
             requests:
               memory: "64Mi"
@@ -85,3 +99,6 @@ spec:
         - name: media
           persistentVolumeClaim:
             claimName: servarr-media
+        - name: ntfy-template
+          configMap:
+            name: unpackerr-ntfy-template
