@@ -1,0 +1,11 @@
+---
+apiVersion: viaduct.ai/v1
+kind: ksops
+metadata:
+  name: deal-finder-secrets
+  annotations:
+    config.kubernetes.io/function: |
+      exec:
+        path: ksops
+files:
+  - deal-finder-secrets.enc.yaml

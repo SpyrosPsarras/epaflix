@@ -1,0 +1,19 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: deal-finder
+  namespace: deal-finder
+  labels:
+    app: deal-finder
+spec:
+  namespaceSelector:
+    matchNames:
+      - deal-finder
+  selector:
+    matchLabels:
+      app: deal-finder
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 60s
