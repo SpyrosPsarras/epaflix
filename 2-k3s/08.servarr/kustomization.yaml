@@ -54,6 +54,12 @@ configMapGenerator:
   - name: cleanuparr-seeding-guard
     files:
       - enforce-private-seeding.py=cleanuparr/files/enforce-private-seeding.py
+  - name: cleanuparr-malware-blocklist
+    files:
+      - malware-blocklist.txt=cleanuparr/files/malware-blocklist.txt
+  - name: unpackerr-ntfy-template
+    files:
+      - ntfy.json.tmpl=unpackerr/files/ntfy.json.tmpl
   - name: lingarr-jobqueue-guard
     files:
       - reconcile-ai-provider.sql=lingarr/files/reconcile-ai-provider.sql

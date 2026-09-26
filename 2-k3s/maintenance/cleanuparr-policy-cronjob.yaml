@@ -1,0 +1,288 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cleanuparr-policy-script
+  namespace: servarr
+data:
+  policy.py: |
+    #!/usr/bin/env python3
+    """Keep the Cleanuparr and qBittorrent download policy in git. Stdlib only.
+
+    Why: on 2026-09-25 Cleanuparr's Blacklist Sync pushed the upstream
+    malware list into qBittorrent's "Excluded file names". That list skips
+    *.rar and *.r00-*.r04 but not *.r05+, so 18 scene releases downloaded
+    half their RAR volumes, qBittorrent called them complete, unpackerr had
+    nothing to extract and Sonarr sat on "No files found are eligible for
+    import". The 2026-06-13 fix (#182) had only cleaned the MalwareBlocker
+    list, and nothing in git could see the Blacklist Sync setting.
+
+    Policy (a torrent is accepted or rejected whole, never half-downloaded):
+      - Blacklist Sync off; qBittorrent excluded file names off.
+      - MalwareBlocker blocks executables only (/blocklists, mounted from
+        git), rejects the whole torrent on any hit, skips private trackers.
+      - QueueCleaner treats "No files found are eligible for import" as a
+        failed import: after its strikes the item is removed from the arr
+        and blocklisted, so the arr grabs another release. Private torrents
+        stay in qBittorrent (deletePrivate=false) to finish seeding.
+
+    Each run reads the live config, puts back anything that drifted, and
+    prints what it changed.
+    Exit 0 = already correct, 1 = drift found and corrected (a finding: the
+    log names each field), 2 = could not run.
+    Run with --selftest to check the merge logic offline.
+    """
+    import copy
+    import json
+    import os
+    import sys
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    TIMEOUT = 20
+    CLEANUPARR_URL = os.environ.get(
+        "CLEANUPARR_URL", "http://cleanuparr.servarr.svc.cluster.local:30263").rstrip("/")
+    QBT_URL = os.environ.get("QBT_URL", "http://qbittorrent:8080").rstrip("/")
+    DRY_RUN = os.environ.get("DRY_RUN", "") == "1"
+
+    BLOCKLIST = "/blocklists/malware-blocklist.txt"
+    NO_FILES = "No files found are eligible for import"
+    ARR_LIST = {"enabled": True, "blocklistType": "Blacklist", "blocklistPath": BLOCKLIST}
+
+    # Desired subset per Cleanuparr config endpoint. Keys not listed keep
+    # their live value. malware_blocker goes last: Cleanuparr rejects its PUT
+    # until the Deployment mounting /blocklists has rolled out, and that must
+    # not skip the other sections.
+    DESIRED = {
+        "blacklist_sync": {"enabled": False},
+        "queue_cleaner": {
+            "failedImport": {
+                "maxStrikes": 3,
+                # Include: a matching pattern earns a strike. Exclude would
+                # turn NO_FILES into an exemption.
+                "patternMode": "Include",
+                "ignorePrivate": False,
+                "deletePrivate": False,
+            },
+        },
+        "malware_blocker": {
+            "enabled": True,
+            "ignorePrivate": True,
+            "deletePrivate": False,
+            "deleteIfAnyFileBlocked": True,
+            "sonarr": ARR_LIST,
+            "radarr": ARR_LIST,
+        },
+    }
+
+
+    def merge(current, desired, path=()):
+        """Return (merged copy, [changed field paths])."""
+        out = copy.deepcopy(current)
+        changes = []
+        for key, want in desired.items():
+            if isinstance(want, dict) and isinstance(out.get(key), dict):
+                out[key], sub = merge(out[key], want, path + (key,))
+                changes += sub
+            elif out.get(key) != want:
+                changes.append("%s: %r -> %r" % (".".join(path + (key,)), out.get(key), want))
+                out[key] = copy.deepcopy(want)
+        return out, changes
+
+
+    def reconcile(section, current):
+        cfg, changes = merge(current, DESIRED[section], (section,))
+        if section == "queue_cleaner":
+            # Append, never replace: patterns someone added in the UI stay.
+            patterns = cfg["failedImport"].get("patterns") or []
+            if NO_FILES not in patterns:
+                cfg["failedImport"]["patterns"] = patterns + [NO_FILES]
+                changes.append("queue_cleaner.failedImport.patterns: added %r" % NO_FILES)
+        return cfg, changes
+
+
+    def request(url, headers, method="GET", data=None):
+        req = urllib.request.Request(url, data=data, method=method, headers=headers)
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+            body = resp.read().decode()
+        return json.loads(body) if body.strip() else None
+
+
+    def cleanuparr(section, key, body=None):
+        headers = {"X-Api-Key": key, "Content-Type": "application/json"}
+        url = "%s/api/configuration/%s" % (CLEANUPARR_URL, section)
+        if body is None:
+            return request(url, headers)
+        return request(url, headers, "PUT", json.dumps(body).encode())
+
+
+    def qbt(path, key, form=None):
+        headers = {"Authorization": "Bearer " + key}
+        data = None
+        if form is not None:
+            data = urllib.parse.urlencode({"json": json.dumps(form)}).encode()
+            headers["Content-Type"] = "application/x-www-form-urlencoded"
+        return request(QBT_URL + path, headers, "POST" if data else "GET", data)
+
+
+    def selftest():
+        live = {"enabled": True, "ignorePrivate": False, "deleteIfAnyFileBlocked": False,
+                "deletePrivate": False, "cronExpression": "0 0/5 * ? * * *",
+                "sonarr": {"enabled": True, "blocklistType": "Blacklist",
+                           "blocklistPath": "/config/custom-blocklist-sonarr.txt"},
+                "radarr": {"enabled": True, "blocklistType": "Blacklist",
+                           "blocklistPath": "https://raw.githubusercontent.com/x/blacklist"},
+                "lidarr": {"enabled": False, "blocklistType": "Blacklist", "blocklistPath": None}}
+        cfg, changes = reconcile("malware_blocker", live)
+        assert cfg["ignorePrivate"] and cfg["deleteIfAnyFileBlocked"], cfg
+        assert cfg["sonarr"]["blocklistPath"] == BLOCKLIST
+        assert cfg["radarr"]["blocklistPath"] == BLOCKLIST
+        assert cfg["cronExpression"] == live["cronExpression"], "unlisted keys must survive"
+        assert cfg["lidarr"] == live["lidarr"], "unlisted arrs must survive"
+        assert len(changes) == 4, changes
+        assert live["sonarr"]["blocklistPath"] != BLOCKLIST, "input must not be mutated"
+        assert reconcile("malware_blocker", cfg)[1] == [], "second pass must be a no-op"
+
+        qc = {"enabled": True, "failedImport": {"maxStrikes": 3, "patternMode": "Include",
+              "ignorePrivate": False, "deletePrivate": False,
+              "patterns": ["Not an upgrade for existing"]}}
+        cfg, changes = reconcile("queue_cleaner", qc)
+        assert cfg["failedImport"]["patterns"] == ["Not an upgrade for existing", NO_FILES]
+        assert len(changes) == 1, changes
+        assert reconcile("queue_cleaner", cfg)[1] == []
+
+        flipped = copy.deepcopy(cfg)
+        flipped["failedImport"].update(patternMode="Exclude", maxStrikes=0)
+        cfg2, changes = reconcile("queue_cleaner", flipped)
+        assert cfg2 == cfg and len(changes) == 2, changes
+
+        cfg, changes = reconcile("queue_cleaner", {"failedImport": {"patterns": None}})
+        assert cfg["failedImport"]["patterns"] == [NO_FILES], cfg
+
+        cfg, changes = reconcile("blacklist_sync", {"enabled": True, "blacklistPath": "u"})
+        assert cfg == {"enabled": False, "blacklistPath": "u"} and len(changes) == 1
+        print("selftest OK")
+        return 0
+
+
+    def main():
+        if "--selftest" in sys.argv:
+            return selftest()
+        cu_key = os.environ.get("CLEANUPARR_API_KEY", "").strip()
+        qbt_key = os.environ.get("QBT_WEBAPI_KEY", "").strip()
+        if not (cu_key and qbt_key):
+            print("ERROR: CLEANUPARR_API_KEY or QBT_WEBAPI_KEY is empty", file=sys.stderr)
+            return 2
+
+        def qbt_step():
+            if not qbt("/api/v2/app/preferences", qbt_key).get("excluded_file_names_enabled"):
+                return []
+            if not DRY_RUN:
+                qbt("/api/v2/app/setPreferences", qbt_key, {"excluded_file_names_enabled": False})
+            return ["qbittorrent.excluded_file_names_enabled: True -> False"]
+
+        def cleanuparr_step(section):
+            cfg, changes = reconcile(section, cleanuparr(section, cu_key))
+            if changes and not DRY_RUN:
+                cleanuparr(section, cu_key, cfg)
+            return changes
+
+        steps = [("qbittorrent", qbt_step)] + [
+            (s, lambda s=s: cleanuparr_step(s)) for s in DESIRED]
+        verb = "would correct (DRY_RUN)" if DRY_RUN else "corrected"
+        drift, failed = 0, 0
+        for name, step in steps:
+            # One broken step must not hide the others, and any failure is exit 2.
+            try:
+                changes = step()
+            except urllib.error.HTTPError as exc:
+                # Status only: a response body or redirect URL can echo a key.
+                print("ERROR %s: HTTP %d" % (name, exc.code), file=sys.stderr)
+                failed += 1
+                continue
+            except (urllib.error.URLError, TimeoutError) as exc:
+                print("ERROR %s: %s" % (name, exc), file=sys.stderr)
+                failed += 1
+                continue
+            except Exception as exc:  # noqa: BLE001 - anything else is also "could not run"
+                # Type only: messages such as "Invalid header value" embed the key.
+                print("ERROR %s: %s" % (name, type(exc).__name__), file=sys.stderr)
+                failed += 1
+                continue
+            for line in changes:
+                print("DRIFT %s: %s" % (verb, line))
+            drift += len(changes)
+
+        if failed:
+            print("FAIL: %d step(s) could not run, see ERROR lines above." % failed)
+            return 2
+        if not drift:
+            print("OK: Cleanuparr and qBittorrent match the download policy.")
+            return 0
+        print("Someone or something changed these outside git. They are back to "
+              "policy; if the change was wanted, edit DESIRED in "
+              "2-k3s/maintenance/cleanuparr-policy-cronjob.yaml via branch+PR.")
+        return 1
+
+
+    if __name__ == "__main__":
+        sys.exit(main())
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cleanuparr-policy
+  namespace: servarr
+  labels:
+    app: cleanuparr-policy
+spec:
+  # Hourly at :40, clear of the QueueCleaner (:00) and its health check (:25).
+  schedule: "40 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 300
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app: cleanuparr-policy
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: policy
+              image: python:3.13-alpine
+              imagePullPolicy: IfNotPresent
+              command: ["python3", "/script/policy.py"]
+              env:
+                - name: CLEANUPARR_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: cleanuparr-api-key
+                      key: apiKey
+                - name: QBT_WEBAPI_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: qbittorrent-webapi-key
+                      key: QBT_WEBAPI_KEY
+              volumeMounts:
+                - name: script
+                  mountPath: /script
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "250m"
+                  memory: "128Mi"
+          volumes:
+            - name: script
+              configMap:
+                name: cleanuparr-policy-script
+                defaultMode: 0555
