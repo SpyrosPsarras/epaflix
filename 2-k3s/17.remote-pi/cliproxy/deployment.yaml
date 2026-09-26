@@ -155,8 +155,8 @@ spec:
           args:
             - opencode-cloak
             # renovate: datasource=github-releases depName=conversun/cliproxy-plugin-opencode-cloak
-            - "0.2.2"
-            - 5aaa00dc08510cbf9d8c25536886c9412d29bc8ace4824ff902223e0704b15a4
+            - "0.2.3"
+            - 199537e3c216f4ffb5e7fa137e527e6315285c03cb74fcccd70cda3322905da4
             - conversun/cliproxy-plugin-opencode-cloak
           securityContext:
             allowPrivilegeEscalation: false
