@@ -91,6 +91,13 @@ spec:
               mountPath: /config
             - name: media
               mountPath: /media
+            # MalwareBlocker list for Sonarr and Radarr, pointed at by the
+            # cleanuparr-policy CronJob. Executables only: archives must stay
+            # downloadable for unpackerr. Cleanuparr reads every line as a
+            # pattern (no comment syntax), so the file carries no comments.
+            - name: malware-blocklist
+              mountPath: /blocklists
+              readOnly: true
           resources:
             requests:
               memory: "512Mi"
@@ -125,6 +132,9 @@ spec:
         - name: seeding-guard
           configMap:
             name: cleanuparr-seeding-guard
+        - name: malware-blocklist
+          configMap:
+            name: cleanuparr-malware-blocklist
 ---
 apiVersion: v1
 kind: Service

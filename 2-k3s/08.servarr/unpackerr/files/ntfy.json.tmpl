@@ -1,0 +1,3 @@
+{{- $err := "no error text" -}}
+{{- with .Data }}{{ with .Error }}{{ $err = . }}{{ end }}{{ end -}}
+{"topic":"k8s-alertmanager","title":"Unpackerr: extract failed","priority":3,"tags":["package"],"message":{{ encode (printf "%s: %s\n%s\nQueueCleaner removes it from the queue and blocklists it after 3 failed-import strikes." .App .Path $err) }}}
