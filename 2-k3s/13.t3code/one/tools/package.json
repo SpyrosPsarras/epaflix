@@ -6,6 +6,6 @@
     "t3": "0.0.43-nightly.20260924.2223",
     "@anthropic-ai/claude-code": "2.1.283",
     "opencode-ai": "1.18.32",
-    "@openai/codex": "0.156.1"
+    "@openai/codex": "0.157.1"
   }
 }
