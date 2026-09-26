@@ -1,21 +1,22 @@
 ---
-# Downloads new Greece's Next Top Model episodes from star.gr into the Sonarr
-# series folder, because no indexer carries the show.
+# Downloads new episodes of Greek shows from star.gr into their Sonarr series
+# folders, because no indexer carries them. One CronJob per show, all sharing
+# the script below.
 #
 # The star.gr player hides the video outside GR/CY, but that check is only a
 # cookie in the browser. The HLS stream itself plays from any country, so the
 # job reads the stream URL from each episode page and copies it with ffmpeg
 # (no re-encode, highest variant, 1080p at the time of writing).
 #
-# Sonarr series 404 is set to the "daily" type so it matches these files by
+# Each Sonarr series is set to the "daily" type so it matches these files by
 # air date once TVDB lists the episodes. Jellyfin sees them straight away.
 #
-# SEASONAL: delete this file (and its kustomization entry) after the GNTM 2026
-# finale. For a later season, point TAG_URL at that season's tag page.
+# SEASONAL: when a show's season ends, delete its CronJob. For a later season,
+# point its TAG_URL at that season's tag page (and SERIES_DIR if it changes).
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: gntm-star-download-script
+  name: star-gr-download-script
   namespace: servarr
 data:
   download.py: |
@@ -63,7 +64,8 @@ data:
 
 
     def air_date(html):
-        # PlayerTitle looks like "GNTM 2026 - 22.9.2026" (day.month.year).
+        # PlayerTitle holds the air date as day.month.year, e.g.
+        # "GNTM 2026 - 22.9.2026" or "24.9.2026 - First Dates".
         m = re.search(r'"PlayerTitle":"[^"]*?(\d{1,2})\.(\d{1,2})\.(\d{4})', html)
         return "%s-%02d-%02d" % (m.group(3), int(m.group(2)), int(m.group(1))) if m else None
 
@@ -87,6 +89,7 @@ data:
                                             BASE + "/tv/x/show/ep-2392026"]
         ep = '"PlayerTitle":"GNTM 2026 - 1.10.2026 - X","Url":"https://a.b/k/s.m3u8?key=Ab_1"'
         assert air_date(ep) == "2026-10-01"
+        assert air_date('"PlayerTitle":"24.9.2026 - First Dates"') == "2026-09-24"
         assert stream_url(ep) == "https://a.b/k/s.m3u8?key=Ab_1"
         assert air_date("no title") is None and stream_url("none") is None
         print("selftest ok")
@@ -224,7 +227,68 @@ spec:
           volumes:
             - name: script
               configMap:
-                name: gntm-star-download-script
+                name: star-gr-download-script
+                defaultMode: 0555
+            - name: media
+              persistentVolumeClaim:
+                claimName: servarr-media
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: first-dates-star-download
+  namespace: servarr
+  labels:
+    app: first-dates-star-download
+spec:
+  schedule: "53 */3 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 6
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 21600  # a backlog of 2h episodes can take hours
+      ttlSecondsAfterFinished: 86400  # keep 1 day
+      template:
+        metadata:
+          labels:
+            app: first-dates-star-download
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: first-dates-star-download
+              image: python:3.13-alpine
+              imagePullPolicy: IfNotPresent
+              command:
+                - sh
+                - -c
+                - apk add --no-cache ffmpeg >/dev/null && exec python3 -u /script/download.py
+              env:
+                - name: TAG_URL
+                  value: "https://www.star.gr/tv/psychagogia/first-dates/tag_2045"
+                - name: SERIES_DIR
+                  value: "/media/tvshows/First Dates (2023) [tvdbid-436492]"
+                - name: SERIES_TITLE
+                  value: "First Dates"
+              volumeMounts:
+                - name: script
+                  mountPath: /script
+                  readOnly: true
+                - name: media
+                  mountPath: /media
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "128Mi"
+                limits:
+                  cpu: "500m"
+                  memory: "256Mi"
+          volumes:
+            - name: script
+              configMap:
+                name: star-gr-download-script
                 defaultMode: 0555
             - name: media
               persistentVolumeClaim:
