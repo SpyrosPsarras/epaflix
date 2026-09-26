@@ -1,0 +1,22 @@
+---
+# Internal entry point only (192.168.10.102): reachable from the LAN, 404 from the internet.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: deal-finder-internal
+  namespace: deal-finder
+spec:
+  entryPoints:
+    - internal
+  routes:
+    - match: Host(`deals.epaflix.com`)
+      kind: Rule
+      services:
+        - name: deal-finder
+          port: 8080
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"

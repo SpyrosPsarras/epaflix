@@ -1,0 +1,38 @@
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: DatabaseRole
+metadata:
+  name: dealfinder
+  namespace: postgres-system
+  labels:
+    app.kubernetes.io/name: deal-finder
+    app.kubernetes.io/component: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  cluster:
+    name: postgres-cluster
+  name: dealfinder
+  ensure: present
+  login: true
+  passwordSecret:
+    name: deal-finder-db-role
+  databaseRoleReclaimPolicy: retain
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: dealfinder
+  namespace: postgres-system
+  labels:
+    app.kubernetes.io/name: deal-finder
+    app.kubernetes.io/component: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  cluster:
+    name: postgres-cluster
+  name: dealfinder
+  owner: dealfinder
+  ensure: present
+  databaseReclaimPolicy: retain
