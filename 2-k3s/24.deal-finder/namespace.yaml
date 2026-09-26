@@ -1,0 +1,10 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: deal-finder
+  labels:
+    app: deal-finder
+  annotations:
+    # before the wave -2 Secrets: ArgoCD orders by wave before kind
+    argocd.argoproj.io/sync-wave: "-3"
