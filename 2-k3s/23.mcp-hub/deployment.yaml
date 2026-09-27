@@ -91,6 +91,11 @@ spec:
                 secretKeyRef:
                   name: mcp-hub-keepass
                   key: secret
+            - name: JEV_OPENROUTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-hub-jev
+                  key: openrouter-key
             - name: GMAIL_CLIENT_ID
               valueFrom:
                 secretKeyRef:

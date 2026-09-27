@@ -22,6 +22,7 @@ business.
 |---------------|----------|------------------------------------------|----------------------|
 | `/gmail`      | module   | `files/gmail_mcp.py`, Gmail API          | `gmail`              |
 | `/searxng`    | module   | `files/searxng_mcp.py`, in-cluster SearXNG | `searxng`          |
+| `/jev`        | module   | `files/jev_mcp.py`, Jev decisions via OpenRouter (Secret `mcp-hub-jev`). OpenCode clients only: its instructions make the agent consult Jev before each task | `jev` |
 | `/keepass`    | upstream | `15.syncthing/keepass.yaml`, the Syncthing vault | `keepass`    |
 | `/kubernetes` | upstream | `kubernetes-mcp.yaml`, cluster-admin on this cluster | `kubernetes-epaflix` |
 | `/notion`     | upstream | hosted `https://mcp.notion.com/mcp`      | `notion`             |
