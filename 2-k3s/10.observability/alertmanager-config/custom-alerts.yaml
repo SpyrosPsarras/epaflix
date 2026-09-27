@@ -316,6 +316,44 @@ spec:
             summary: "The Sonarr re-grab census could not complete"
             description: "The daily sonarr-regrab-census Job ({{ $labels.job_name }}) exited non-zero. The script itself only exits 2, meaning it could not complete the census safely; any other code is a crash or an OOM kill. Causes of exit 2: empty SONARR_API_KEY, a history fetch failure, a malformed paged payload, a self-contradicting page (totalRecords=0 with records present), a page not coming back newest-first (#834 sort lesson), pagination stopping short of totalRecords, totalRecords changing between pages, an empty page before totalRecords, or MAX_PAGES=24 pages (48000 rows) over the cap. Re-grabs themselves no longer fail the Job: the #1133 counts are in every Job log, and they cannot trend to zero before the #834 queue-read fix (Sonarr v5, #1131)."
 
+    - name: seadexarr
+      interval: 60s
+      rules:
+        # Job names are <cronjob>-<minutes>, so the digit anchor keeps
+        # seadexarr-import-* out of this rule.
+        - alert: SeadexarrFailed
+          expr: |
+            max by (job_name) (
+              kube_job_failed{namespace="servarr", job_name=~"seadexarr-[0-9]+"} > 0
+              and on (job_name) (
+                max by (job_name) (kube_job_status_start_time{namespace="servarr", job_name=~"seadexarr-[0-9]+"})
+                  >= scalar(max(kube_job_status_start_time{namespace="servarr", job_name=~"seadexarr-[0-9]+"}))
+              )
+            )
+          for: 5m
+          labels:
+            severity: warning
+            component: servarr
+          annotations:
+            summary: "SeaDexArr run failed"
+            description: "The 6-hourly seadexarr Job ({{ $labels.job_name }}) exited non-zero: SeaDexArr logged an error for at least one series (it logs and continues), the pip install of seadexarr==1.0.0 failed, or Sonarr/qBittorrent login failed. The Job log names the series and the error. Script: 2-k3s/maintenance/files/seadexarr-run.py."
+        - alert: SeadexarrImportFailed
+          expr: |
+            max by (job_name) (
+              kube_job_failed{namespace="servarr", job_name=~"seadexarr-import-.*"} > 0
+              and on (job_name) (
+                max by (job_name) (kube_job_status_start_time{namespace="servarr", job_name=~"seadexarr-import-.*"})
+                  >= scalar(max(kube_job_status_start_time{namespace="servarr", job_name=~"seadexarr-import-.*"}))
+              )
+            )
+          for: 5m
+          labels:
+            severity: warning
+            component: servarr
+          annotations:
+            summary: "A SeaDexArr batch needs a manual import in Sonarr"
+            description: "The seadexarr-import Job ({{ $labels.job_name }}) exited non-zero. Exit 1: a finished torrent is tagged seadexarr-manual because the ManualImport command failed, its series-id tag is missing or ambiguous, or the series still has missing episodes after the import and no other open seadexarr torrent of that series can fill them (files skipped: misparsed, rejected by Sonarr, or two files on one episode). The Job log that tagged it lists the torrent and each skipped file with its reason. Import it from the series page > Manual Import, then remove the seadexarr-manual tag or the torrent in qBittorrent and the alert clears on the next run. Exit 2: a Sonarr or qBittorrent call failed. Script: 2-k3s/maintenance/files/seadexarr-import.py."
+
     - name: prowlarr-indexer-health
       interval: 60s
       rules:
