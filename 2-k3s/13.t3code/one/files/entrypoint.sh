@@ -49,8 +49,9 @@ install -m 0644 /scripts/cliproxy-models.js "$OC_DIR/plugins/cliproxy-models.js"
 rm -f "$OC_DIR/plugins/jev-shadow.js"
 install -m 0644 /scripts/jev-auto.js "$OC_DIR/plugins/jev-auto.js"
 # When OpenCode uses the hub's jev MCP: screening, completion gates and
-# picking by meaning. Registered in opencode.json by the MCP hub block below;
-# the retired jev-first rule is removed from both places.
+# picking by meaning. jev-auto.js adds it to the system prompt of OpenAI and
+# Anthropic models only, so it is not a global instruction; the MCP hub block
+# below removes it and the retired jev-first rule from opencode.json.
 install -m 0644 /scripts/jev-checks.md "$OC_DIR/jev-checks.md"
 rm -f "$OC_DIR/jev-first.md"
 if [[ ! -f $OC_DIR/opencode.json ]]; then
@@ -93,15 +94,17 @@ if [[ -n ${MCP_HUB_TOKEN:-} && -n ${MCP_HUB_URL:-} ]]; then
     python3 /scripts/hub_clients.py codex "$h/.codex" "$MCP_HUB_URL" MCP_HUB_TOKEN || \
       echo "t3env: hub codex config failed in $h" >&2
   done
-  # Primary home only: register the jev-checks rule once and drop the retired
-  # jev-first entry, keeping every other instruction.
-  python3 - "$OC_DIR/opencode.json" "$OC_DIR/jev-checks.md" "$OC_DIR/jev-first.md" <<'PY' || echo "t3env: jev-checks registration failed" >&2
+fi
+
+# Primary home, with or without the hub: drop the Jev rules from the global
+# instructions (jev-auto.js scopes jev-checks per model), keeping every other one.
+python3 - "$OC_DIR/opencode.json" "$OC_DIR/jev-checks.md" "$OC_DIR/jev-first.md" <<'PY' || echo "t3env: jev instructions cleanup failed" >&2
 import json, os, sys, tempfile
-path, rule, retired = sys.argv[1:]
+path, *retired = sys.argv[1:]
 with open(path) as f:
     config = json.load(f)
-old = config.setdefault("instructions", [])
-new = [i for i in old if i != retired] + ([] if rule in old else [rule])
+old = config.get("instructions", [])
+new = [i for i in old if i not in retired]
 if new != old:
     config["instructions"] = new
     with tempfile.NamedTemporaryFile(mode="w", dir=os.path.dirname(path), delete=False) as f:
@@ -110,7 +113,6 @@ if new != old:
     os.chmod(f.name, 0o600)
     os.replace(f.name, path)
 PY
-fi
 
 # T3 provider instances, written once so later edits from the UI survive
 # restarts.

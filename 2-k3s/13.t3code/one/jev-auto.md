@@ -18,8 +18,25 @@ preserves the smaller-model option without adding paid OpenRouter executor
 requests. It does not establish monetary savings or remaining subscription
 quota. Jev classification is billed through the existing OpenRouter key.
 
-The plugin registers Auto only when both executor models are available in the
-CLIProxyAPI catalog.
+The plugin registers Auto only when both executor models are in the
+CLIProxyAPI catalog on a `codex/` or `claude/` route.
+
+## OpenAI and Anthropic only
+
+The same plugin limits every use of Jev in OpenCode to OpenAI and Anthropic
+models: a direct `openai` or `anthropic` provider, or a CLIProxyAPI catalog
+route starting `codex/` or `claude/`. OpenRouter routes (`openrouter/`, such as
+GLM, DeepSeek, MiniMax) and anything else get no Jev.
+
+- `jev-checks.md` (screen, gate and verify, find and rerank) is added to the
+  system prompt of allowed models only. It is not a global `instructions`
+  entry; the entrypoint removes it from `opencode.json`.
+- Every `jev_*` MCP tool call is refused unless the session's latest turn ran
+  on an allowed model (after Auto's rewrite). Unknown sessions and models not
+  in the catalog fail closed. The model gets the refusal as a tool error and
+  continues without Jev.
+- Claude Code and Codex never get the jev MCP (hub_clients.py OPENCODE_ONLY).
+
 Routes log IDs, model, classification, confidence, latency and decision cost,
 never prompt text or credential values. Tool permissions are unchanged.
 
