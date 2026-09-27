@@ -70,7 +70,7 @@ images:
   # Version tags make release changes typed Renovate updates (#1129).
   # Keep digests alongside tags. Exceptions and registry evidence: docs/servarr-image-pins.md.
   - name: lscr.io/linuxserver/sonarr
-    newTag: 4.0.20@sha256:a5c1a5fecbef946927ab90ad68df319ac5fe644057e5fc18cd993f01ac07b2b2
+    newTag: 4.0.20@sha256:f247545d23ba8b233d6604575347e48a623fe6ad75dda02348bf81917f3b5c06
   - name: lscr.io/linuxserver/radarr
     newTag: 6.4.4@sha256:adb6c09d6b729ea5e642c99cea35af72702ef476bf4763f153299ac5db9f0b4f
   - name: lscr.io/linuxserver/prowlarr
