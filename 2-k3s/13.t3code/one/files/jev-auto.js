@@ -5,12 +5,29 @@ import { join } from "node:path"
 const fast = "gpt-6-luna"
 const fallback = "gpt-6-astra"
 
+// Jev is for OpenAI and Anthropic models only: direct providers, or CLIProxyAPI
+// catalog routes codex/ and claude/ (never openrouter/). Applies to Auto's
+// targets, the jev-checks instructions and every jev MCP tool call.
+const allowedModel = (providerID, apiId) =>
+  providerID === "openai" || providerID === "anthropic" || /^(codex|claude)\//.test(apiId || "")
+
 export default async ({ client, directory, project }) => {
   let available = false
+  let cfg = {}
+  // ponytail: one entry per session for the server's lifetime; sessions are few.
+  const jevAllowed = new Map()
+  const checks = await readFile(join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"),
+    "opencode", "jev-checks.md"), "utf8").catch(() => "")
+  // The model that runs this turn, after Auto's rewrite, decides Jev access.
+  const scope = (input, output) => {
+    const { providerID, modelID } = output.message.model
+    jevAllowed.set(input.sessionID, allowedModel(providerID, cfg.provider?.[providerID]?.models?.[modelID]?.id))
+  }
   return {
     async config(config) {
+      cfg = config
       const proxy = config.provider?.cliproxy
-      available = Boolean(proxy?.models?.[fast] && proxy.models[fallback])
+      available = [fast, fallback].every(m => allowedModel("cliproxy", proxy?.models?.[m]?.id))
       if (!available) return
       config.provider["jev-auto"] = {
         npm: "@ai-sdk/openai-compatible", name: "Jev Auto",
@@ -19,10 +36,22 @@ export default async ({ client, directory, project }) => {
       }
       if (config.enabled_providers && !config.enabled_providers.includes("jev-auto")) config.enabled_providers.push("jev-auto")
     },
+    async "experimental.chat.system.transform"(input, output) {
+      if (checks && allowedModel(input.model?.providerID, input.model?.api?.id)) output.system.push(checks)
+    },
+    async "tool.execute.before"(input) {
+      // Fail closed: a session this plugin has not seen a turn for gets no Jev.
+      if (input.tool.startsWith("jev_") && jevAllowed.get(input.sessionID) !== true) {
+        throw new Error("Jev is available only on OpenAI and Anthropic models; this thread's model is neither.")
+      }
+    },
     async "chat.message"(input, output) {
-      if (output.message.model.providerID !== "jev-auto") return
+      if (output.message.model.providerID !== "jev-auto") return scope(input, output)
       // The catalog entry itself points to Astra if this hook cannot route.
       output.message.model = { providerID: "cliproxy", modelID: fallback }
+      // Both Auto targets are allowed routes (config guard), so record access now:
+      // every later path, including failures, keeps Jev on this turn.
+      scope(input, output)
       const start = Date.now()
       const record = {
         timestamp: new Date().toISOString(), mode: "auto", project: project?.id,
