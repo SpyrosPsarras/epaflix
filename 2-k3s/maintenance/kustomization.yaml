@@ -27,6 +27,7 @@ resources:
   - jellysweep-order-executor-cronjob.yaml
   - ntfy-canary-check-cronjob.yaml
   - star-gr-download-cronjob.yaml
+  - seadexarr-cronjob.yaml
 
 configMapGenerator:
   - name: aaaa-tripwire-script
@@ -37,3 +38,8 @@ configMapGenerator:
     namespace: servarr
     files:
       - files/cleanuparr-blocklist-expected.txt
+  - name: seadexarr-scripts
+    namespace: servarr
+    files:
+      - files/seadexarr-run.py
+      - files/seadexarr-import.py

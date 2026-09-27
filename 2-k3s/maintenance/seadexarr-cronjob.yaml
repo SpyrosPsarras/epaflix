@@ -1,0 +1,150 @@
+# Old anime often exists only as full-series batches with no episode numbers
+# in the torrent name. Sonarr rejects those at search time and ignores
+# torrents it did not grab itself, so two jobs close the gap:
+#   seadexarr         grabs the SeaDex pick for ended anime with missing episodes
+#   seadexarr-import  imports those torrents into Sonarr once they finish
+# Scripts: files/seadexarr-run.py and files/seadexarr-import.py.
+# Alerts: SeadexarrFailed, SeadexarrImportFailed (10.observability custom-alerts).
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: seadexarr
+  namespace: servarr
+  labels:
+    app: seadexarr
+spec:
+  schedule: "23 */6 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 3600
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app: seadexarr
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: seadexarr
+              image: python:3.13-slim
+              imagePullPolicy: IfNotPresent
+              command: ["sh", "-c"]
+              args:
+                - >-
+                  pip install --no-cache-dir -q --root-user-action=ignore seadexarr==1.0.0
+                  && exec python3 /script/seadexarr-run.py
+              env:
+                - name: SONARR_URL
+                  value: "http://sonarr.servarr.svc.cluster.local:8989"
+                - name: QBT_URL
+                  value: "http://qbittorrent:8080"
+                - name: QBT_CATEGORY
+                  value: "tv-sonarr"
+                # SeaDex picks are often BluRay remuxes (80 GB for 15 episodes
+                # seen live), so add at most this many torrents per run.
+                - name: MAX_TORRENTS
+                  value: "2"
+                - name: SONARR_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: unpackerr-secret
+                      key: UN_SONARR_0_API_KEY
+                - name: QBT_USERNAME
+                  valueFrom:
+                    secretKeyRef:
+                      name: qbittorrent-webui-credentials
+                      key: QBT_USERNAME
+                - name: QBT_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: qbittorrent-webui-credentials
+                      key: QBT_PASSWORD
+              volumeMounts:
+                - name: script
+                  mountPath: /script
+                  readOnly: true
+                - name: work
+                  mountPath: /work
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "128Mi"
+                limits:
+                  cpu: "1"
+                  memory: "512Mi"
+          volumes:
+            - name: script
+              configMap:
+                name: seadexarr-scripts
+            - name: work
+              emptyDir: {}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: seadexarr-import
+  namespace: servarr
+  labels:
+    app: seadexarr-import
+spec:
+  schedule: "4-59/15 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # One Sonarr import of a remux batch can take a while when it copies.
+      activeDeadlineSeconds: 3000
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 21600
+      template:
+        metadata:
+          labels:
+            app: seadexarr-import
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: import
+              image: python:3.13-alpine
+              imagePullPolicy: IfNotPresent
+              command: ["python3", "/script/seadexarr-import.py"]
+              env:
+                - name: QBT_CATEGORY
+                  value: "tv-sonarr"
+                - name: SONARR_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: unpackerr-secret
+                      key: UN_SONARR_0_API_KEY
+                - name: QBT_USERNAME
+                  valueFrom:
+                    secretKeyRef:
+                      name: qbittorrent-webui-credentials
+                      key: QBT_USERNAME
+                - name: QBT_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: qbittorrent-webui-credentials
+                      key: QBT_PASSWORD
+              volumeMounts:
+                - name: script
+                  mountPath: /script
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: "20m"
+                  memory: "32Mi"
+                limits:
+                  cpu: "250m"
+                  memory: "128Mi"
+          volumes:
+            - name: script
+              configMap:
+                name: seadexarr-scripts
