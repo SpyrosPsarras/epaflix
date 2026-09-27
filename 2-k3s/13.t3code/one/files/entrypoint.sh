@@ -48,9 +48,11 @@ install -m 0644 /scripts/cliproxy-models.js "$OC_DIR/plugins/cliproxy-models.js"
 # Its jev-shadow.jsonl records stay in ~/.local/state/opencode.
 rm -f "$OC_DIR/plugins/jev-shadow.js"
 install -m 0644 /scripts/jev-auto.js "$OC_DIR/plugins/jev-auto.js"
-# OpenCode asks the hub's jev MCP what to do first (the rule the package's own
-# skill does not state). Registered in opencode.json by the MCP hub block below.
-install -m 0644 /scripts/jev-first.md "$OC_DIR/jev-first.md"
+# When OpenCode uses the hub's jev MCP: screening, completion gates and
+# picking by meaning. Registered in opencode.json by the MCP hub block below;
+# the retired jev-first rule is removed from both places.
+install -m 0644 /scripts/jev-checks.md "$OC_DIR/jev-checks.md"
+rm -f "$OC_DIR/jev-first.md"
 if [[ ! -f $OC_DIR/opencode.json ]]; then
   cat >"$OC_DIR/opencode.json" <<'EOF'
 {
@@ -91,14 +93,17 @@ if [[ -n ${MCP_HUB_TOKEN:-} && -n ${MCP_HUB_URL:-} ]]; then
     python3 /scripts/hub_clients.py codex "$h/.codex" "$MCP_HUB_URL" MCP_HUB_TOKEN || \
       echo "t3env: hub codex config failed in $h" >&2
   done
-  # Primary home only: register the jev-first rule once, keeping other entries.
-  python3 - "$OC_DIR/opencode.json" "$OC_DIR/jev-first.md" <<'PY' || echo "t3env: jev-first registration failed" >&2
+  # Primary home only: register the jev-checks rule once and drop the retired
+  # jev-first entry, keeping every other instruction.
+  python3 - "$OC_DIR/opencode.json" "$OC_DIR/jev-checks.md" "$OC_DIR/jev-first.md" <<'PY' || echo "t3env: jev-checks registration failed" >&2
 import json, os, sys, tempfile
-path, rule = sys.argv[1:]
+path, rule, retired = sys.argv[1:]
 with open(path) as f:
     config = json.load(f)
-if rule not in config.setdefault("instructions", []):
-    config["instructions"].append(rule)
+old = config.setdefault("instructions", [])
+new = [i for i in old if i != retired] + ([] if rule in old else [rule])
+if new != old:
+    config["instructions"] = new
     with tempfile.NamedTemporaryFile(mode="w", dir=os.path.dirname(path), delete=False) as f:
         json.dump(config, f, indent=2)
         f.write("\n")
