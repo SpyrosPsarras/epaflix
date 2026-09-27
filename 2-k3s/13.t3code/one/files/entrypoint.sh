@@ -44,7 +44,9 @@ OC_DIR=$HOME/.config/opencode
 mkdir -p "$OC_DIR/plugins"
 # Replace read-only copies from earlier starts and keep the destination writable.
 install -m 0644 /scripts/cliproxy-models.js "$OC_DIR/plugins/cliproxy-models.js"
-install -m 0644 /scripts/jev-shadow.js "$OC_DIR/plugins/jev-shadow.js"
+# Retired shadow logger: the copy on the PVC would keep loading otherwise.
+# Its jev-shadow.jsonl records stay in ~/.local/state/opencode.
+rm -f "$OC_DIR/plugins/jev-shadow.js"
 install -m 0644 /scripts/jev-auto.js "$OC_DIR/plugins/jev-auto.js"
 # OpenCode asks the hub's jev MCP what to do first (the rule the package's own
 # skill does not state). Registered in opencode.json by the MCP hub block below.
