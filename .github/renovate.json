@@ -198,11 +198,11 @@
       "extractVersionTemplate": "^kustomize/v(?<version>.+)$"
     },
     {
-      "description": "Runtime image argo-cd and sops pins. npm CLI pins live in env/tools/package.json under the native npm manager.",
+      "description": "Runtime image argo-cd, sops and gh pins. gh comes from its GitHub release, not Debian apt: bookworm froze it at 2.23.0 (2023-02), which lacks commands agents use, such as gh pr update-branch --rebase. npm CLI pins live in env/tools/package.json under the native npm manager.",
       "customType": "regex",
       "managerFilePatterns": ["/^2-k3s/13\\.t3code/versions\\.env$/"],
       "matchStrings": [
-        "(?:ARGOCD|SOPS)_VERSION=(?<currentValue>\\S+)\\s*#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)"
+        "(?:ARGOCD|SOPS|GH)_VERSION=(?<currentValue>\\S+)\\s*#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)"
       ],
       "versioningTemplate": "semver",
       "extractVersionTemplate": "^v?(?<version>.+)$"

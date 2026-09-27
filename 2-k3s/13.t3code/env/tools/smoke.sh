@@ -37,7 +37,8 @@ for tool in tree kubectl az gh helm kustomize argocd sops git curl ssh python3; 
 done
 kubectl version --client >/dev/null
 az version >/dev/null
-gh --version >/dev/null
+gh_want=$(source /src/versions.env && echo "$GH_VERSION")
+[[ $(gh --version | head -1) == "gh version $gh_want "* ]] || fail "gh is not the pinned $gh_want"
 pin() { node -p "require('/tools/package.json').dependencies['$1']"; }
 ver() { timeout 60 "$1" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?' | head -1; }
 for p in t3:t3 @anthropic-ai/claude-code:claude @openai/codex:codex opencode-ai:opencode; do
