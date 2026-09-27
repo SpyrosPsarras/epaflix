@@ -10,7 +10,7 @@ opens every path. GET /healthz is the only unauthenticated route. Modules
 use stateless JSON transport, so a pod restart costs a client one retry.
 
 Env: CLIENTS_FILE (default /app/clients.json) plus whatever the mounted
-servers need: GMAIL_*, SEARXNG_URL, KEEPASS_URL + KEEPASS_HUB_SECRET,
+servers need: GMAIL_*, SEARXNG_URL, JEV_OPENROUTER_KEY, KEEPASS_URL + KEEPASS_HUB_SECRET,
 KUBERNETES_MCP_URL, NOTION_MCP_URL.
 
 Self-test: --selftest runs each module's selftest, then boots the ASGI app
@@ -32,11 +32,12 @@ from starlette.responses import PlainTextResponse
 from starlette.routing import Route
 
 import gmail_mcp
+import jev_mcp
 import searxng_mcp
 import upstream
 from upstream import Upstream, UpstreamError
 
-MODULES = [("/gmail", gmail_mcp.server), ("/searxng", searxng_mcp.server)]
+MODULES = [("/gmail", gmail_mcp.server), ("/searxng", searxng_mcp.server), ("/jev", jev_mcp.server)]
 PORT = int(os.environ.get("PORT", "8000"))
 
 
@@ -122,6 +123,7 @@ def _selftest():
     import notion_grant
 
     gmail_mcp._selftest()
+    jev_mcp._selftest()
     notion_grant._selftest()
     for k in ("GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN"):
         os.environ.setdefault(k, "selftest")
@@ -203,6 +205,10 @@ def _selftest():
         assert result["isError"] and "message_ids must not be empty" in result["content"][0]["text"], result
         result = call("/searxng", "searxng_search", {"query": " "})
         assert result["isError"] and "searxng error: query must not be empty" in result["content"][0]["text"], result
+        assert tools("/jev") == ["jev_decide"], tools("/jev")
+        assert "before any other tool call" in c.post("/jev", json=init, headers=auth).json()["result"]["instructions"]
+        result = call("/jev", "jev_decide", {"situation": "s", "question": "q", "options": {"only": "one"}})
+        assert result["isError"] and "jev error: options needs 2 to 10 entries" in result["content"][0]["text"], result
 
         # Forwarding: the hub token stays home, the upstream credential and MCP headers go out.
         r = c.post("/plain", json=init, headers={**auth, "Mcp-Session-Id": "s1", "Mcp-Protocol-Version": "2025-06-18",
