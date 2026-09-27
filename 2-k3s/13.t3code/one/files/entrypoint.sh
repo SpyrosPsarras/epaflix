@@ -46,6 +46,9 @@ mkdir -p "$OC_DIR/plugins"
 install -m 0644 /scripts/cliproxy-models.js "$OC_DIR/plugins/cliproxy-models.js"
 install -m 0644 /scripts/jev-shadow.js "$OC_DIR/plugins/jev-shadow.js"
 install -m 0644 /scripts/jev-auto.js "$OC_DIR/plugins/jev-auto.js"
+# OpenCode asks the hub's jev MCP what to do first (the rule the package's own
+# skill does not state). Registered in opencode.json by the MCP hub block below.
+install -m 0644 /scripts/jev-first.md "$OC_DIR/jev-first.md"
 if [[ ! -f $OC_DIR/opencode.json ]]; then
   cat >"$OC_DIR/opencode.json" <<'EOF'
 {
@@ -86,6 +89,20 @@ if [[ -n ${MCP_HUB_TOKEN:-} && -n ${MCP_HUB_URL:-} ]]; then
     python3 /scripts/hub_clients.py codex "$h/.codex" "$MCP_HUB_URL" MCP_HUB_TOKEN || \
       echo "t3env: hub codex config failed in $h" >&2
   done
+  # Primary home only: register the jev-first rule once, keeping other entries.
+  python3 - "$OC_DIR/opencode.json" "$OC_DIR/jev-first.md" <<'PY' || echo "t3env: jev-first registration failed" >&2
+import json, os, sys, tempfile
+path, rule = sys.argv[1:]
+with open(path) as f:
+    config = json.load(f)
+if rule not in config.setdefault("instructions", []):
+    config["instructions"].append(rule)
+    with tempfile.NamedTemporaryFile(mode="w", dir=os.path.dirname(path), delete=False) as f:
+        json.dump(config, f, indent=2)
+        f.write("\n")
+    os.chmod(f.name, 0o600)
+    os.replace(f.name, path)
+PY
 fi
 
 # T3 provider instances, written once so later edits from the UI survive
