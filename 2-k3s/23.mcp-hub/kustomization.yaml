@@ -10,6 +10,7 @@ resources:
   - service.yaml
   - ingress.yaml
   - kubernetes-mcp.yaml
+  - jev-mcp.yaml
 
 configMapGenerator:
   - name: mcp-hub-app
@@ -17,7 +18,6 @@ configMapGenerator:
       - files/mcp_hub.py
       - files/gmail_mcp.py
       - files/searxng_mcp.py
-      - files/jev_mcp.py
       - files/upstream.py
       - files/notion_grant.py
       # Client name -> SHA-256 of its hub token (tools/add-client.py). The
@@ -26,6 +26,11 @@ configMapGenerator:
   - name: kubernetes-mcp-config
     files:
       - config.toml=files/kubernetes-mcp.toml
+  # The generated name hash rolls jev-mcp when the pinned version changes.
+  - name: jev-mcp-app
+    files:
+      - files/jev-mcp/package.json
+      - files/jev-mcp/package-lock.json
 
 generators:
   - ksops-generator.yaml
@@ -56,6 +61,13 @@ replacements:
       - select:
           kind: Deployment
           name: mcp-hub
+        fieldPaths:
+          - spec.template.metadata.annotations.[mcp-hub.epaflix.com/jev-revision]
+        options:
+          create: true
+      - select:
+          kind: Deployment
+          name: jev-mcp
         fieldPaths:
           - spec.template.metadata.annotations.[mcp-hub.epaflix.com/jev-revision]
         options:
