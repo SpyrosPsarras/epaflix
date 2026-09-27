@@ -29,7 +29,7 @@ configMapGenerator:
       - files/hub_clients.py
       - files/cliproxy-models.js
       - files/jev-auto.js
-      - files/jev-first.md
+      - files/jev-checks.md
       - files/opencode-fast-version.sh
 
 generators:
