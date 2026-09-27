@@ -30,6 +30,7 @@ configMapGenerator:
       - files/cliproxy-models.js
       - files/jev-shadow.js
       - files/jev-auto.js
+      - files/jev-first.md
       - files/opencode-fast-version.sh
 
 generators:
