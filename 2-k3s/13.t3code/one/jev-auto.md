@@ -19,7 +19,7 @@ requests. It does not establish monetary savings or remaining subscription
 quota. Jev classification is billed through the existing OpenRouter key.
 
 The plugin registers Auto only when both executor models are available in the
-CLIProxyAPI catalog. The existing shadow classifier skips Auto requests.
+CLIProxyAPI catalog.
 Routes log IDs, model, classification, confidence, latency and decision cost,
 never prompt text or credential values. Tool permissions are unchanged.
 
