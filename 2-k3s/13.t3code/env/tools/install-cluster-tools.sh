@@ -26,3 +26,10 @@ curl -fsSL -o "$tmp/sops-checksums.txt" "https://github.com/getsops/sops/release
 (cd "$tmp" && sha256sum --check --ignore-missing sops-checksums.txt)
 install -m 0755 "$tmp/argocd-linux-amd64" /usr/local/bin/argocd
 install -m 0755 "$tmp/sops-v${SOPS_VERSION}.linux.amd64" /usr/local/bin/sops
+gh_url="https://github.com/cli/cli/releases/download/v${GH_VERSION}"
+gh_tgz="gh_${GH_VERSION}_linux_amd64.tar.gz"
+curl -fsSL -o "$tmp/$gh_tgz" "$gh_url/$gh_tgz"
+curl -fsSL -o "$tmp/gh-checksums.txt" "$gh_url/gh_${GH_VERSION}_checksums.txt"
+(cd "$tmp" && sha256sum --check --ignore-missing gh-checksums.txt)
+tar -xzf "$tmp/$gh_tgz" -C "$tmp"
+install -m 0755 "$tmp/gh_${GH_VERSION}_linux_amd64/bin/gh" /usr/local/bin/gh
