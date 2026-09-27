@@ -22,6 +22,8 @@ import tempfile
 
 SERVERS = {"gmail": "/gmail", "searxng": "/searxng", "notion": "/notion", "keepass": "/keepass",
            "kubernetes-epaflix": "/kubernetes"}
+# Its instructions tell the agent to consult it before every task; trialled in OpenCode only.
+OPENCODE_ONLY = {"jev": "/jev"}
 # Irreversible or vault/cluster-changing tools prompt in OpenCode (<server>_<tool>).
 # The kubernetes names are kubernetes-mcp-server's at the tag pinned in
 # 23.mcp-hub/kubernetes-mcp.yaml; recheck them when bumping it.
@@ -61,7 +63,7 @@ def opencode(config, hub, authorization):
     mcp = config.setdefault("mcp", {})
     for name in [n for n, e in mcp.items() if n not in SERVERS and isinstance(e, dict) and _legacy(e)]:
         del mcp[name]
-    for name, path in SERVERS.items():
+    for name, path in {**SERVERS, **OPENCODE_ONLY}.items():
         old = mcp.get(name, {})
         mcp[name] = {"type": "remote", "url": hub + path, "enabled": old.get("enabled", True) if
                      old.get("type") == "remote" else True, "timeout": 30000,
@@ -141,7 +143,8 @@ def _selftest():
                   "mine": {"type": "local", "command": ["foo"]}},
           "permission": "allow"}
     out = opencode(oc, "https://hub/", "Bearer {env:T}")
-    assert set(out["mcp"]) == set(SERVERS) | {"mine"}, out["mcp"]
+    assert set(out["mcp"]) == set(SERVERS) | set(OPENCODE_ONLY) | {"mine"}, out["mcp"]
+    assert out["mcp"]["jev"]["url"] == "https://hub/jev", out["mcp"]["jev"]
     assert out["mcp"]["searxng"]["url"] == "https://hub/searxng" and out["mcp"]["searxng"]["enabled"] is True
     assert out["mcp"]["gmail"]["enabled"] is False, "a user's disable of a remote entry survives"
     assert out["permission"]["*"] == "allow" and out["permission"]["keepass_vault_trash"] == "ask"

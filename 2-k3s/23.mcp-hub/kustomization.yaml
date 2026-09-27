@@ -17,6 +17,7 @@ configMapGenerator:
       - files/mcp_hub.py
       - files/gmail_mcp.py
       - files/searxng_mcp.py
+      - files/jev_mcp.py
       - files/upstream.py
       - files/notion_grant.py
       # Client name -> SHA-256 of its hub token (tools/add-client.py). The
@@ -45,6 +46,18 @@ replacements:
           name: mcp-hub
         fieldPaths:
           - spec.template.metadata.annotations.[mcp-hub.epaflix.com/gmail-revision]
+        options:
+          create: true
+  - source:
+      kind: Secret
+      name: mcp-hub-jev
+      fieldPath: metadata.annotations.[mcp-hub.epaflix.com/revision]
+    targets:
+      - select:
+          kind: Deployment
+          name: mcp-hub
+        fieldPaths:
+          - spec.template.metadata.annotations.[mcp-hub.epaflix.com/jev-revision]
         options:
           create: true
   - source:
