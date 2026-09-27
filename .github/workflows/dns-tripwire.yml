@@ -15,15 +15,15 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: dns-tripwire-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   tripwire:
     if: >-
       github.event_name == 'push' || github.event_name == 'workflow_dispatch' ||
       github.event.pull_request.head.repo.full_name == github.repository
+    # One run at a time across all refs: every run touches the same live Pi-hole.
+    concurrency:
+      group: dns-tripwire
+      cancel-in-progress: false
     runs-on: [self-hosted, epaflix]
     timeout-minutes: 15
     env:
@@ -37,18 +37,21 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq dnsutils
 
+      # SIGHUP flushes FTL's DNS cache without stopping it. The old restart
+      # caused a DNS gap on every run, and a 2 min outage for LAN and
+      # Tailscale clients when two runs overlapped on 2026-09-27.
       - name: Flush pihole-FTL cache
         run: |
           set -euo pipefail
           ssh -n -o ConnectTimeout=8 -o BatchMode=yes "root@${PIHOLE}" \
-            'systemctl restart pihole-FTL && systemctl is-active pihole-FTL'
-          sleep 3
+            'systemctl kill --kill-whom=main -s HUP pihole-FTL && systemctl is-active pihole-FTL'
+          sleep 1
           out=$(dig +short +time=3 +tries=1 A pi.hole "@${PIHOLE}")
           if [ -z "$out" ]; then
-            echo "pihole-FTL is not answering after the restart; refusing to run the tripwire against a dead resolver" >&2
+            echo "pihole-FTL is not answering after the cache flush; refusing to run the tripwire against a dead resolver" >&2
             exit 1
           fi
-          echo "pihole-FTL restarted and answering: pi.hole -> ${out}"
+          echo "pihole-FTL cache flushed and answering: pi.hole -> ${out}"
 
       - name: Run aaaa-tripwire
         run: bash 1-proxmox/pihole/aaaa-tripwire.sh
