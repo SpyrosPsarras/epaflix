@@ -16,4 +16,4 @@ generators:
 images:
   # built by github.com/SpyrosPsarras/jbod-epaflix CI; bump the digest to roll out a new version
   - name: ghcr.io/spyrospsarras/deal-finder
-    digest: sha256:ec8652a0064d8b6566ba9be05076941b1bcd6177d8a8a435f0c866399e2c56cb
+    digest: sha256:3992c11b563f88a0420d7ccfd95edcc1d6254d68aeea241c524e6e13697298db
