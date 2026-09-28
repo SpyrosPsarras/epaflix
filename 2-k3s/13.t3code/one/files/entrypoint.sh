@@ -48,6 +48,8 @@ install -m 0644 /scripts/cliproxy-models.js "$OC_DIR/plugins/cliproxy-models.js"
 # Its jev-shadow.jsonl records stay in ~/.local/state/opencode.
 rm -f "$OC_DIR/plugins/jev-shadow.js"
 install -m 0644 /scripts/jev-auto.js "$OC_DIR/plugins/jev-auto.js"
+# Tool-call guard (jev-guard.md); the config block below adds cc-safety-net and bash denies.
+install -m 0644 /scripts/jev-guard.js "$OC_DIR/plugins/jev-guard.js"
 # OpenCode Loop, pinned in env/tools/package.json and patched by env/Dockerfile
 # to keep its state out of worktrees. Same files its own installer copies; a
 # manual `npx @bybrawe/opencode-loop` update gets replaced on the next start.
@@ -107,15 +109,28 @@ fi
 
 # Primary home, with or without the hub: drop the Jev rules from the global
 # instructions (jev-auto.js scopes jev-checks per model), keeping every other one.
-python3 - "$OC_DIR/opencode.json" "$OC_DIR/jev-checks.md" "$OC_DIR/jev-first.md" <<'PY' || echo "t3env: jev instructions cleanup failed" >&2
+# Also pin cc-safety-net (jev-guard.md) and seed bash denies once; an existing
+# permission.bash is left as the user set it.
+python3 - "$OC_DIR/opencode.json" "$OC_DIR/jev-checks.md" "$OC_DIR/jev-first.md" <<'PY' || echo "t3env: opencode.json guard/instructions update failed" >&2
 import json, os, sys, tempfile
+SAFETY_NET = "cc-safety-net@2.4.11"
+BASH_DENY = ["mkfs*", "dd *of=/dev/*", "kubectl delete *", "kubectl drain *", "kubectl cordon *",
+             "helm uninstall *", "reboot*", "shutdown*", "poweroff*", "qm stop *", "qm shutdown *"]
 path, *retired = sys.argv[1:]
 with open(path) as f:
     config = json.load(f)
-old = config.get("instructions", [])
-new = [i for i in old if i not in retired]
-if new != old:
-    config["instructions"] = new
+before = json.dumps(config, sort_keys=True)
+if "instructions" in config:
+    config["instructions"] = [i for i in config["instructions"] if i not in retired]
+name = lambda p: (p if isinstance(p, str) else p[0] if isinstance(p, list) and p else "").split("@")[0]
+config["plugin"] = [p for p in config.get("plugin") or [] if name(p) != "cc-safety-net"] + [SAFETY_NET]
+# No "*" key, so a top-level permission default still applies to other commands.
+# Read rules are left to cc-safety-net and jev-guard: OpenCode matches read
+# patterns against project-relative paths, so "**/.ssh/**" missed in a test.
+permission = config.setdefault("permission", {})
+if isinstance(permission, dict):
+    permission.setdefault("bash", {p: "deny" for p in BASH_DENY})
+if json.dumps(config, sort_keys=True) != before:
     with tempfile.NamedTemporaryFile(mode="w", dir=os.path.dirname(path), delete=False) as f:
         json.dump(config, f, indent=2)
         f.write("\n")
