@@ -22,7 +22,7 @@ generators:
 helmCharts:
   - name: prometheus-blackbox-exporter
     repo: https://prometheus-community.github.io/helm-charts
-    version: "11.18.0"
+    version: "11.19.1"
     releaseName: blackbox-exporter
     namespace: observability
     valuesFile: blackbox-values.yaml
