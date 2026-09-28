@@ -270,6 +270,7 @@ jobs:
           bash 2-k3s/maintenance/node-os-updater.test.sh
           bash 2-k3s/maintenance/aaaa-tripwire-cronjob.test.sh
           node --test 2-k3s/13.t3code/one/files/jev-guard.test.mjs
+          node --test 2-k3s/13.t3code/one/files/jev-auto.test.mjs
 
       - name: MCP hub selftest
         run: |
