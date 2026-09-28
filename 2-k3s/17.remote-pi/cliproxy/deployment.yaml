@@ -93,10 +93,11 @@ spec:
             # on the contract v2 usage document (consumed by the dms-cliproxy-quota widget).
             # Revert to abix5/pi-cliproxyapi-bridge once upstream ships the usage sink (tracked in the
             # upstream-release-watch row; drop this comment and restore the # renovate: marker then).
+            # Offered upstream as abix5/pi-cliproxyapi-bridge#3.
             # The # renovate: marker is deliberately absent: renovate would "downgrade" the fork to
             # upstream v0.9.1.
-            - "0.10.1"
-            - d857a114b5808ce9e9b5a9604954b265be48f9f605c0d75d6e3072cd0b703ffe
+            - "0.10.2"
+            - 5c577408e9d0ffe9e6671598626ec78e2eec822a36f2e48b2a348c99427402e4
             - SpyrosPsarras/pi-cliproxyapi-bridge
           securityContext:
             allowPrivilegeEscalation: false
