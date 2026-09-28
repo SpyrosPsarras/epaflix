@@ -87,6 +87,12 @@ END $$;
 -- so minimax serves the alias until an openrouter cooldown (its 429 daily cap),
 -- then aya takes over until the cooldown lifts. This deliberate cross-provider
 -- alias collision is the failover, not a naming accident.
+--
+-- INACTIVE since force-model-prefix: true (see the top-level keys block below).
+-- The live openrouter entry carries `prefix: openrouter`, so it now serves only
+-- openrouter/or-minimax-m3:free and a bare or-minimax-m3:free goes to aya alone.
+-- Nothing on this proxy calls the alias any more: lingarr moved to
+-- cliproxy-free, which runs without the flag.
 DO $$
 DECLARE
   c text;
@@ -224,7 +230,8 @@ END $$;
 -- priority 10 keeps this provider the preferred credential for the alias; the
 -- ollama provider serves the same alias at the default priority 0 as lingarr's
 -- failover target, and the selector only ever mixes tiers when the higher one
--- is cooling down.
+-- is cooling down. That failover is inactive since force-model-prefix: true;
+-- see the ollama block above.
 --
 -- Unlike the ollama api-key above, this one IS a secret. It arrives as
 -- OPENROUTER_API_KEY on the initContainer from cliproxy-secrets, and is read
@@ -607,10 +614,21 @@ BEGIN
       -- CPAMP can also set this itself during its setup wizard. Git sets it
       -- instead: a value only live in the app's own DB is reverted by the next
       -- rebuild, and this pod restores config from Postgres on every start.
-      ('usage-statistics-enabled', 'true')
+      ('usage-statistics-enabled', 'true'),
+      -- A credential with a prefix registers only <prefix>/<model>, not the
+      -- bare name as well (applyModelPrefixes in sdk/cliproxy/service_models.go).
+      -- Without it every such model is listed twice under two names for the
+      -- same account. Prefixes live in the auth files (claude, codex) and, for
+      -- openrouter, in the live config row only: the splice above sets none, so
+      -- a rebuilt row serves openrouter models under bare names. Every caller
+      -- of this proxy sends prefixed names; the t3code pod's Claude Code
+      -- provider, which could only send bare ones, is disabled in
+      -- 13.t3code/one/files/entrypoint.sh. Credentials without a prefix
+      -- (ollama, Copilot) keep their bare names.
+      ('force-model-prefix',       'true')
     ) AS t(key, value)
   LOOP
-    -- Both are top-level keys at column 0, so no leading \s* - that would also
+    -- All are top-level keys at column 0, so no leading \s* - that would also
     -- match a nested key of the same name and edit the wrong line.
     pattern := '^' || want.key || ':[ \t]*.*$';
     IF EXISTS (SELECT 1 FROM regexp_matches(c, pattern, 'n')) THEN
@@ -624,7 +642,7 @@ BEGIN
      SET content = c, updated_at = now()
    WHERE id = 'config';
 
-  RAISE NOTICE 'request payload logging reconciled: request-log true, logs-max-total-size-mb 256, usage-statistics-enabled true';
+  RAISE NOTICE 'top-level keys reconciled: request-log true, logs-max-total-size-mb 256, usage-statistics-enabled true, force-model-prefix true';
 END $$;
 
 -- Prove it, and fail the initContainer if either value is not what git wants.
@@ -681,7 +699,9 @@ BEGIN
   -- itself, which is exactly why it gets its own line here. EXACTLY TWO
   -- providers must serve the alias: openrouter (priority 10) as primary, the
   -- ollama provider as cooldown fallback. Counting matches instead of
-  -- anchoring a display-name keeps this immune to cosmetic UI renames.
+  -- anchoring a display-name keeps this immune to cosmetic UI renames. With
+  -- force-model-prefix: true this only proves both entries exist; the two no
+  -- longer share a routable name (see the ollama block at the top).
   SELECT count(*) INTO n
     FROM regexp_matches(c, '^        alias: "or-minimax-m3:free"[ \t]*$', 'gn');
   IF n <> 2 THEN
@@ -720,13 +740,16 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM regexp_matches(c, '^usage-statistics-enabled:[ \t]*true[ \t]*$', 'n')) THEN
     RAISE EXCEPTION 'usage-statistics-enabled is not true after reconcile - CPAMP would show an empty dashboard with no error';
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM regexp_matches(c, '^force-model-prefix:[ \t]*true[ \t]*$', 'n')) THEN
+    RAISE EXCEPTION 'force-model-prefix is not true after reconcile';
+  END IF;
   -- Guard the pairing, not just the values: request-log with logging-to-file
   -- true would move the access lines off stdout and blind Loki (#1006 territory).
   IF EXISTS (SELECT 1 FROM regexp_matches(c, '^logging-to-file:[ \t]*true[ \t]*$', 'n')) THEN
     RAISE EXCEPTION 'logging-to-file is true - that takes the access log off stdout and blinds Loki; see #1007';
   END IF;
 
-  RAISE NOTICE 'verified: allow-remote true, auth-dir /var/lib/cliproxy/pgstore/auths, pi-bridge, cliproxyapi-copilot and opencode-cloak enabled, openai-compatibility ollama + openrouter present, request-log true capped at 256MB, logging-to-file false, usage-statistics-enabled true';
+  RAISE NOTICE 'verified: allow-remote true, auth-dir /var/lib/cliproxy/pgstore/auths, pi-bridge, cliproxyapi-copilot and opencode-cloak enabled, openai-compatibility ollama + openrouter present, request-log true capped at 256MB, logging-to-file false, usage-statistics-enabled true, force-model-prefix true';
 END $$;
 
 -- Claude OAuth credential: cloak_mode must be explicit since v7.3.17.

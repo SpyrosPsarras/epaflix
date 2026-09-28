@@ -67,7 +67,7 @@ if [[ ! -f $SETTINGS ]]; then
     "claudeAgent": {
       "driver": "claudeAgent",
       "displayName": "Claude (via cliproxy)",
-      "enabled": true
+      "enabled": false
     },
     "codex": {
       "driver": "codex",
@@ -75,7 +75,7 @@ if [[ ! -f $SETTINGS ]]; then
       "enabled": true,
       "config": {
         "launchArgs": "-c model_providers.cliproxy.name=\"cliproxy\" -c model_providers.cliproxy.base_url=\"${ANTHROPIC_BASE_URL}/v1\" -c model_providers.cliproxy.env_key=\"ANTHROPIC_AUTH_TOKEN\" -c model_providers.cliproxy.wire_api=\"responses\" -c model_provider=\"cliproxy\"",
-        "customModels": ["gpt-5.3-codex", "codex-auto-review"]
+        "customModels": ["codex/codex-auto-review"]
       }
     }
   }
