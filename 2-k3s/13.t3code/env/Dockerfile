@@ -17,6 +17,14 @@ RUN bash /tmp/cluster-tools/install-cluster-tools.sh
 COPY env/tools/package.json env/tools/package-lock.json /tools/
 # npm 11 drops T3's bundled native package on glibc; npm 10 installs it correctly.
 RUN cd /tools && npx --yes npm@10.9.4 ci --no-fund --no-audit && npm cache clean --force
+# OpenCode Loop hardcodes its state dir to <project>/.opencode/opencode-loop, so
+# every worktree gets one. Move it to ~/.local/state/opencode-loop/<project path>.
+# The build fails if a Renovate bump changes that line, so the PR shows it.
+RUN f=/tools/node_modules/@bybrawe/opencode-loop/src/server.js \
+    && [ "$(grep -cF 'return path.join(directory, STATE_DIR);' "$f")" = 1 ] \
+    && sed -i 's|return path.join(directory, STATE_DIR);|return path.join(os.homedir(), ".local/state/opencode-loop", path.resolve(directory).replace(/[^a-zA-Z0-9_.-]+/g, "-"));|' "$f" \
+    && grep -qF '".local/state/opencode-loop"' "$f" \
+    && ls /tools/node_modules/@bybrawe/opencode-loop/commands/*.md /tools/node_modules/@bybrawe/opencode-loop/agents/*.md >/dev/null
 # Run the native server directly so container TERM reaches it without a CLI shim.
 RUN ln -sf "../@t3code/t3-$(node -p process.platform)-$(node -p process.arch)/t3" /tools/node_modules/.bin/t3
 ENV PATH="/tools/node_modules/.bin:${PATH}"
