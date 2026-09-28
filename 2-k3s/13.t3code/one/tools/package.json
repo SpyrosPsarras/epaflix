@@ -3,9 +3,10 @@
   "private": true,
   "description": "T3 pod CLI pins; Renovate maintains the package and lock together.",
   "dependencies": {
-    "t3": "0.0.43-nightly.20260924.2223",
     "@anthropic-ai/claude-code": "2.1.283",
+    "@bybrawe/opencode-loop": "0.5.38",
+    "@openai/codex": "0.157.1",
     "opencode-ai": "1.18.32",
-    "@openai/codex": "0.157.1"
+    "t3": "0.0.43-nightly.20260924.2223"
   }
 }

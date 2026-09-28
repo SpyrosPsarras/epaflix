@@ -48,6 +48,15 @@ install -m 0644 /scripts/cliproxy-models.js "$OC_DIR/plugins/cliproxy-models.js"
 # Its jev-shadow.jsonl records stay in ~/.local/state/opencode.
 rm -f "$OC_DIR/plugins/jev-shadow.js"
 install -m 0644 /scripts/jev-auto.js "$OC_DIR/plugins/jev-auto.js"
+# OpenCode Loop, pinned in env/tools/package.json and patched by env/Dockerfile
+# to keep its state out of worktrees. Same files its own installer copies; a
+# manual `npx @bybrawe/opencode-loop` update gets replaced on the next start.
+OL=/tools/node_modules/@bybrawe/opencode-loop
+mkdir -p "$OC_DIR/commands" "$OC_DIR/agents"
+install -m 0644 "$OL/src/server.js" "$OC_DIR/plugins/opencode-loop.ts"
+rm -f "$OC_DIR/plugins/opencode-loop.js"
+install -m 0644 "$OL"/commands/*.md "$OC_DIR/commands/"
+install -m 0644 "$OL"/agents/*.md "$OC_DIR/agents/"
 # When OpenCode uses the hub's jev MCP: screening, completion gates and
 # picking by meaning. jev-auto.js adds it to the system prompt of OpenAI and
 # Anthropic models only, so it is not a global instruction; the MCP hub block
