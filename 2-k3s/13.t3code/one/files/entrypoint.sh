@@ -141,7 +141,7 @@ if [[ ! -f $SETTINGS ]]; then
     "claudeAgent": {
       "driver": "claudeAgent",
       "displayName": "Claude (via cliproxy)",
-      "enabled": true
+      "enabled": false
     },
     "codex": {
       "driver": "codex",
@@ -149,7 +149,7 @@ if [[ ! -f $SETTINGS ]]; then
       "enabled": true,
       "config": {
         "launchArgs": "-c model_providers.cliproxy.name=\"cliproxy\" -c model_providers.cliproxy.base_url=\"${ANTHROPIC_BASE_URL}/v1\" -c model_providers.cliproxy.env_key=\"ANTHROPIC_AUTH_TOKEN\" -c model_providers.cliproxy.wire_api=\"responses\" -c model_provider=\"cliproxy\"",
-        "customModels": ["gpt-5.3-codex", "codex-auto-review"]
+        "customModels": ["codex/codex-auto-review"]
       }
     }
   }
@@ -177,12 +177,25 @@ for config in configs[1:]:
     if config.get("binaryPath") != "/scripts/opencode-fast-version.sh":
         config["binaryPath"] = "/scripts/opencode-fast-version.sh"
         changed = True
+# cliproxy runs with force-model-prefix: true, so Claude and Codex models route
+# only as claude/... and codex/.... Claude Code offers only its built-in bare
+# names, so its instances stay off; OpenCode serves Claude from the catalog.
+# T3's built-in bare Codex names fail the same way. The seeded Codex
+# list was bare too, and gpt-5.3-codex is no longer served at all.
+for instance in settings.get("providerInstances", {}).values():
+    if instance.get("driver") == "claudeAgent" and instance.get("enabled", True):
+        instance["enabled"] = False
+        changed = True
+    config = instance.get("config", {})
+    if instance.get("driver") == "codex" and config.get("customModels") == ["gpt-5.3-codex", "codex-auto-review"]:
+        config["customModels"] = ["codex/codex-auto-review"]
+        changed = True
 if changed:
     with tempfile.NamedTemporaryFile(mode="w", dir=os.path.dirname(path), delete=False) as f:
         json.dump(settings, f, indent=2)
         f.write("\n")
     os.replace(f.name, path)
-    print("t3env: migrated OpenCode to T3-managed servers")
+    print("t3env: migrated T3 provider settings")
 PY
 
 echo "t3env: $(t3 --version) claude=$(claude --version 2>/dev/null | head -1) opencode=$(opencode --version 2>/dev/null | head -1) codex=$(codex --version 2>/dev/null | head -1)"
