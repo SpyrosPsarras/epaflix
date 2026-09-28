@@ -56,7 +56,7 @@ spec:
                       - k3s-worker-65
       containers:
         - name: t3
-          image: ghcr.io/spyrospsarras/t3-runtime:inputs-c1b3f3c525fdf90dc8229221f0664813
+          image: ghcr.io/spyrospsarras/t3-runtime:inputs-3834a53db9b3355b60d0027ac378d3f5
           imagePullPolicy: Always
           command:
             - bash
