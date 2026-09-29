@@ -104,6 +104,13 @@ func (v *Vault) refresh(ctx context.Context) error {
 	return nil
 }
 
+// LastSync is the time of the last successful /changes call.
+func (v *Vault) LastSync() time.Time {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.lastSync
+}
+
 // Entries returns every entry, sorted by path.
 func (v *Vault) Entries() []Entry {
 	v.mu.Lock()
