@@ -47,6 +47,16 @@ effort (Astra under Auto). The session lookup before it has its own 3 s limit,
 so the worst case adds about 6 s. A new subagent under a non-OpenAI/Anthropic
 parent gets no routing; one routed earlier keeps its route. Normal tools use no model and are not routed.
 
+A line `route: <model>:<effort>` (or `<model>_<effort>`, the form `jev_decide`
+candidate ids allow) on its own line in the subagent's task pins
+the route with no Jev call and is logged as `status: "pinned"`. The review gate
+in AGENTS.md uses it to run the reviewer on the model its own Jev call picked.
+Pins accept the five tier models (Luna, Astra, Sol, Sonnet 5, Opus 5.5) and any `claude-haiku-*` model in the catalog
+(Haiku is enabled in CLIProxy by `17.remote-pi/cliproxy/files/reconcile-config.psql`).
+Haiku gets no effort parameter; Anthropic does not support effort on it. A pin
+to any other model, a model missing from the catalog, or an effort other than
+low, medium or high is ignored and Jev routes as usual.
+
 Jev answers three questions rather than choosing from model names because a
 single Choice over the 15 model and effort pairs had confidence 0.22 to 0.42 on
 four of six sample tasks in live runs; the split questions scored 0.81 to 1.0.

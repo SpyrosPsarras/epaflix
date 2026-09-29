@@ -798,3 +798,43 @@ BEGIN
     RAISE EXCEPTION 'a claude credential still lacks cloak_mode always after reconcile';
   END IF;
 END $$;
+
+-- Claude OAuth credential: Haiku stays enabled.
+--
+-- The credential's excluded_models list is set by hand (CPAMP), not in git. It
+-- hid claude-haiku-4-5-20251001 (bare and claude/ prefixed) from the catalog,
+-- which the heartbeat fix cf845ad read as the subscription no longer serving
+-- it. The t3code subagent router pins Haiku for cheap reviews
+-- (13.t3code/one/jev-auto.md), so git owns this one exclusion: any
+-- claude-haiku-* entry is removed, the rest of the list is left as set. The
+-- older claude-3-5-haiku does not match the pattern and stays excluded.
+DO $$
+DECLARE
+  n integer;
+BEGIN
+  IF to_regclass('public.auth_store') IS NULL THEN
+    RAISE NOTICE 'auth_store does not exist yet - first boot, no exclusions to fix';
+    RETURN;
+  END IF;
+
+  UPDATE public.auth_store
+     SET content = jsonb_set(content, '{excluded_models}', (
+           SELECT coalesce(jsonb_agg(e), '[]'::jsonb)
+             FROM jsonb_array_elements_text(content->'excluded_models') AS e
+            WHERE e !~ '(^|/)claude-haiku-')),
+         updated_at = now()
+   WHERE content->>'type' = 'claude'
+     AND jsonb_typeof(content->'excluded_models') = 'array'
+     AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(content->'excluded_models') AS e
+                  WHERE e ~ '(^|/)claude-haiku-');
+  GET DIAGNOSTICS n = ROW_COUNT;
+  RAISE NOTICE 'claude credentials with Haiku re-enabled: % changed', n;
+
+  IF EXISTS (SELECT 1 FROM public.auth_store
+              WHERE content->>'type' = 'claude'
+                AND jsonb_typeof(content->'excluded_models') = 'array'
+                AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(content->'excluded_models') AS e
+                             WHERE e ~ '(^|/)claude-haiku-')) THEN
+    RAISE EXCEPTION 'a claude credential still excludes Haiku after reconcile';
+  END IF;
+END $$;
