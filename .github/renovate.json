@@ -80,6 +80,14 @@
       "platformAutomerge": false
     },
     {
+      "description": "KeePass MCP Go modules: never auto-merge, any update type. The upstream keepass-deltasync client/mobile module does the vault crypto and canonical decoding, and the go-sdk module serves the MCP transport, so even a patch bump can change what this pod can decrypt or how the hub talks to it. Keep this after the repo-wide patch automerge rule, because later packageRules win. gomodTidy keeps go.sum in step.",
+      "matchManagers": ["gomod"],
+      "matchFileNames": ["images/keepass-mcp/go.mod"],
+      "automerge": false,
+      "platformAutomerge": false,
+      "postUpdateOptions": ["gomodTidy"]
+    },
+    {
       "description": "Hotio release tags have a release- prefix. Parse the numeric version so patch/minor/major updates remain discoverable (#1129).",
       "matchFileNames": ["2-k3s/08.servarr/kustomization.yaml"],
       "matchPackageNames": ["ghcr.io/hotio/unpackerr"],
