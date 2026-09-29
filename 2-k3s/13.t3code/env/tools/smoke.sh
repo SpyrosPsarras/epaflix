@@ -17,7 +17,13 @@ if [[ ${1:-} != --inner ]]; then
     "$image" bash /src/env/tools/smoke.sh --inner
   exit
 fi
-fail() { echo "FAIL: $*" >&2; if [[ -f /tmp/entrypoint.log ]]; then cat /tmp/entrypoint.log; fi; exit 1; }
+fail() {
+  echo "FAIL: $*" >&2
+  for log in /tmp/entrypoint.log /tmp/opencode-probe.log; do
+    if [[ -f $log ]]; then echo "--- $log"; cat "$log"; fi
+  done
+  exit 1
+}
 pids=()
 cleanup() {
   if (( ${#pids[@]} )); then
