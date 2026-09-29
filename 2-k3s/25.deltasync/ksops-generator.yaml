@@ -10,3 +10,4 @@ metadata:
 files:
   - deltasync-secrets.enc.yaml
   - deltasync-db-role.enc.yaml
+  - keepass-mcp.enc.yaml
