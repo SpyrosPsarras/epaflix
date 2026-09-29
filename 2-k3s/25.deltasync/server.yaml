@@ -1,0 +1,117 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deltasync
+  namespace: deltasync
+  labels:
+    app: deltasync
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: deltasync
+  template:
+    metadata:
+      labels:
+        app: deltasync
+    spec:
+      enableServiceLinks: false
+      # The image starts as root (entrypoint + Apache on :80), so no
+      # runAsNonRoot and no capability drop (see README).
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: deltasync
+          image: registry.gitlab.com/star95/keepass-deltasync/server
+          securityContext:
+            allowPrivilegeEscalation: false
+          env:
+            - name: DATABASE_URL
+              value: pgsql:host=postgres-cluster-rw.postgres-system.svc;port=5432;dbname=deltasync
+            - name: DATABASE_USER
+              value: deltasync
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: deltasync-secrets
+                  key: db-password
+            # PG* feed the entrypoint's migrations
+            - name: PGHOST
+              value: postgres-cluster-rw.postgres-system.svc
+            - name: PGPORT
+              value: "5432"
+            - name: PGDATABASE
+              value: deltasync
+            - name: PGUSER
+              value: deltasync
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: deltasync-secrets
+                  key: db-password
+            - name: LOG_LEVEL
+              value: INFO
+            - name: ADMIN_USERNAME
+              value: admin
+            - name: ADMIN_PASSWORD_FILE
+              value: /run/secrets/deltasync/admin-password
+            - name: ADMIN_TOKEN_FILE
+              value: /run/secrets/deltasync/admin-token
+            # k3s pod CIDR, where Traefik runs: session cookie gets Secure, audit log gets real client IPs
+            - name: TRUSTED_PROXIES
+              value: 10.42.0.0/16
+          ports:
+            - containerPort: 80
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: http
+            periodSeconds: 30
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: http
+            periodSeconds: 60
+            failureThreshold: 3
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+          volumeMounts:
+            - name: admin
+              mountPath: /run/secrets/deltasync
+              readOnly: true
+      volumes:
+        - name: admin
+          secret:
+            secretName: deltasync-secrets
+            # only the root entrypoint reads these files (see README)
+            defaultMode: 0400
+            items:
+              - key: admin-password
+                path: admin-password
+              - key: admin-token
+                path: admin-token
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: deltasync
+  namespace: deltasync
+  labels:
+    app: deltasync
+spec:
+  selector:
+    app: deltasync
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

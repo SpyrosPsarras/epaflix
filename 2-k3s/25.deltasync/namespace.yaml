@@ -1,0 +1,10 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: deltasync
+  labels:
+    app: deltasync
+  annotations:
+    # before the wave -2 Secrets: ArgoCD orders by wave before kind
+    argocd.argoproj.io/sync-wave: "-3"

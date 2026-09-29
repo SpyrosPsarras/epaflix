@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# No top-level namespace: the DatabaseRole, Database and role Secret must land in postgres-system.
+resources:
+  - namespace.yaml
+  - database.yaml
+  - server.yaml
+  - ingress.yaml
+
+generators:
+  - ksops-generator.yaml
+
+images:
+  # Renovate bumps the tag; minor and major updates need review (.github/renovate.json)
+  - name: registry.gitlab.com/star95/keepass-deltasync/server
+    newTag: 0.5.0

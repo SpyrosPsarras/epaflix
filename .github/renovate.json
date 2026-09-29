@@ -72,6 +72,13 @@
       "platformAutomerge": false
     },
     {
+      "description": "DeltaSync server minor and major releases require review: the entrypoint applies schema migrations to the shared CNPG database on start, and the KeePass clients must speak the same API. Patch updates keep the repo-wide automerge.",
+      "matchFileNames": ["2-k3s/25.deltasync/kustomization.yaml"],
+      "matchUpdateTypes": ["minor", "major"],
+      "automerge": false,
+      "platformAutomerge": false
+    },
+    {
       "description": "Hotio release tags have a release- prefix. Parse the numeric version so patch/minor/major updates remain discoverable (#1129).",
       "matchFileNames": ["2-k3s/08.servarr/kustomization.yaml"],
       "matchPackageNames": ["ghcr.io/hotio/unpackerr"],
