@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: Secret
+metadata:
+    name: deltasync-db-role
+    namespace: postgres-system
+    labels:
+        cnpg.io/reload: "true"
+    annotations:
+        argocd.argoproj.io/sync-wave: "-2"
+type: Opaque
+stringData:
+    username: ENC[AES256_GCM,data:dIuF0M7qeLio,iv:PVeJgll4FF/FadjM10Eo724jQpFZZlPAHloDW8nWBJU=,tag:zmRfQ4TPtvJkO0e0pAeexA==,type:str]
+    password: ENC[AES256_GCM,data:fPtoDbiUaOJeTHjZUl8CKWcWQZhpUHHkYgTEVi1T+Nk=,iv:f7+RJQi6lg6cI+fYkyTnxVDpa2dtQMETeWNOZG9DKKQ=,tag:TmrukjcC2VuT9SAo2K2sOQ==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBlWWp4WUw3R2pFejBQbW0z
+            U0dvQ3YxaEZ5R0N4T1o4QnJqbGsrV1AramlJCjNpYnhDN0FrVms5SGxCa1puMlV4
+            K2QyRWN0Qi9NQ0ZmWVJ6TFlkR2VHMjgKLS0tIDZKYXdlMVRGWXNheWI2VlVBMFNq
+            NTJqSDBPTVB4UjFrSkM5YzlzZGNyQ3cKVEqVoVRGv3pkp6kH7gmRgmC0cJkk4rYa
+            6ToZ9GLBxCrX23gDtUVD89hqYjzn88r1c8FnzahvRdJf6X7BOx88Jg==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1586thf5vkcdf5lcn3zwjpu8ltkwyq8efrhj8lr0vdrrt9k5f3qgsxeg7gx
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-09-29T08:31:52Z"
+    mac: ENC[AES256_GCM,data:9rwo/3ZQwly9EmfnJlmRgiD37mvlE4xG7ru+xtIL7RuPMaHbV/bronKnFEznymjUfQwUjRdmGYJF3YMJvnMjOGQz/9inb6iSMQjaqaoc1AFpdKlro9bQc4AO6RdzwiTns/KVX79eDIs1ugOE9vbSTGY+TDdi8z6rG8JnztJP9qM=,iv:MnIv35WtyIY4i9P6vOnw3vulj5MZDeG8hfNkKeWx7HA=,tag:2YmWH2JIAu9jUMTgXXnXhg==,type:str]
+    version: 3.13.3
