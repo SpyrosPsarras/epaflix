@@ -25,7 +25,7 @@ try {
     "claude-haiku-4-5-20251001": { id: "claude/claude-haiku-4-5-20251001" } })
   const config = { provider: { cliproxy: { options: { baseURL: "http://proxy/v1" }, models: catalog() } }, enabled_providers: ["cliproxy"] }
   await hooks.config(config)
-  assert.equal(config.provider["jev-auto"].models.auto.id, "codex/gpt-6-astra")
+  assert.equal(config.provider["jev-auto"].models.auto.id, "codex/gpt-6-sol")
   assert.ok(config.enabled_providers.includes("jev-auto"))
   const fresh = () => ({ message: { id: "test", model: { providerID: "jev-auto", modelID: "auto" }, system: "original" }, parts: [{ type: "text", text: "Fix the typo: deploymnet" }] })
   const input = { sessionID: "test", model: { providerID: "jev-auto", modelID: "auto" } }
@@ -43,14 +43,24 @@ try {
     globalThis.fetch = response(route, confidence)
     output = fresh()
     await hooks["chat.message"](input, output)
-    assert.equal(output.message.model.modelID, "gpt-6-astra")
+    assert.equal(output.message.model.modelID, "gpt-6-sol")
+  }
+  for (const route of ["deep", "dialogue"]) {
+    globalThis.fetch = response(route, 0.9)
+    output = fresh()
+    await hooks["chat.message"](input, output)
+    assert.equal(output.message.model.modelID, "claude-opus-5-5", `${route} uses Opus`)
+    globalThis.fetch = response(route, 0.3)
+    output = fresh()
+    await hooks["chat.message"](input, output)
+    assert.equal(output.message.model.modelID, "gpt-6-sol", "uncertain classification keeps Sol")
   }
   globalThis.fetch = response("trivial", 1)
   const before = calls
   history = [{ info: { role: "user" } }]
   output = fresh()
   await hooks["chat.message"](input, output)
-  assert.equal(output.message.model.modelID, "gpt-6-astra")
+  assert.equal(output.message.model.modelID, "gpt-6-sol")
   history = []
   output = fresh(); output.parts.push({ type: "file" })
   await hooks["chat.message"](input, output)
@@ -62,13 +72,13 @@ try {
   globalThis.fetch = async () => { throw new Error("secret error") }
   output = fresh()
   await hooks["chat.message"](input, output)
-  assert.equal(output.message.model.modelID, "gpt-6-astra")
+  assert.equal(output.message.model.modelID, "gpt-6-sol")
   const log = await readFile(join(dir, "opencode/jev-auto.jsonl"), "utf8")
   assert.ok(!/test-key|deploymnet|secret error/.test(log))
   assert.equal(JSON.parse(log.split("\n")[0]).actualModel, "cliproxy/gpt-6-luna")
 
   // Auto is never registered unless both targets are OpenAI or Anthropic routes.
-  const offRoute = { provider: { cliproxy: { options: {}, models: { ...catalog(), "gpt-6-astra": { id: "openrouter/gpt-6-astra" } } } } }
+  const offRoute = { provider: { cliproxy: { options: {}, models: { ...catalog(), "gpt-6-sol": { id: "openrouter/gpt-6-sol" } } } } }
   await (await plugin({ client, directory: "/test", project: { id: "test" } })).config(offRoute)
   assert.equal(offRoute.provider["jev-auto"], undefined, "Auto must not target a non-OpenAI/Anthropic route")
 
@@ -120,7 +130,7 @@ try {
   // Subagents: Jev scores tier, effort and prose once per child session; parent's model when unsure.
   let body
   const answer = (answers) => async (url, init) => { calls++; body = JSON.parse(init.body); return Response.json({ id: "req", answers, usage: { cost: 0.00003 } }) }
-  const pick = (tier, tierConfidence, effort, prose) => answer({ tier: { score: tier, confidence: tierConfidence }, effort: { score: effort, confidence: 0.5 }, prose: { noul: prose } })
+  const pick = (tier, tierConfidence, effort, dialogue) => answer({ tier: { score: tier, confidence: tierConfidence }, effort: { score: effort, confidence: 0.5 }, dialogue: { noul: dialogue } })
   const child = async (sessionID, model, text = "Find where parseConfig is defined and list its callers", agent = "explore") => {
     const out = { message: { id: "m-" + sessionID, model: { ...model }, system: "s" }, parts: [{ type: "text", text }] }
     await hooks["chat.message"]({ sessionID, agent }, out)
@@ -137,7 +147,7 @@ try {
   let n = calls
   assert.deepEqual(await child("c1", opus), { providerID: "cliproxy", modelID: "gpt-6-luna" })
   assert.equal(calls, n + 1)
-  assert.deepEqual(Object.keys(body.questions).sort(), ["effort", "prose", "tier"])
+  assert.deepEqual(Object.keys(body.questions).sort(), ["dialogue", "effort", "tier"])
   assert.equal(body.state.agent, "explore")
   assert.match(body.state.task, /parseConfig/)
   assert.deepEqual(await params("c1", "codex/gpt-6-luna"), { reasoningEffort: "low" })
@@ -150,14 +160,14 @@ try {
   getFails = false
   assert.equal(calls, n + 1)
   globalThis.fetch = pick(1.2, 0.8, 1.8, 0.9)
-  assert.equal((await child("c2", opus)).modelID, "claude-sonnet-5")
-  assert.deepEqual(await params("c2", "claude/claude-sonnet-5"), { effort: "high" })
+  assert.equal((await child("c2", opus)).modelID, "claude-opus-5-5")
+  assert.deepEqual(await params("c2", "claude/claude-opus-5-5"), { effort: "high" })
   globalThis.fetch = pick(0.1, 0.3, 0, 0)
   assert.deepEqual(await child("c3", opus), opus, "unsure: parent's model")
   assert.deepEqual(await params("c3", "claude/claude-opus-5-5"), {})
   globalThis.fetch = pick("x", 0.9, 1, 0.5)
   assert.deepEqual(await child("c4", opus), opus, "malformed answers are rejected")
-  for (const [answers, want] of [[[2, 0.9, 2, 0.8], "claude-opus-5-5:high"], [[1.9, 0.9, 1, 0.2], "gpt-6-sol:medium"], [[0.9, 0.9, 0.4, 0.1], "gpt-6-astra:low"], [[0.2, 0.9, 1.5, 0.9], "gpt-6-luna:high"]]) {
+  for (const [answers, want] of [[[2, 0.9, 2, 0.8], "claude-opus-5-5:high"], [[1.9, 0.9, 1, 0.2], "claude-opus-5-5:medium"], [[0.9, 0.9, 0.4, 0.1], "gpt-6-sol:low"], [[0.2, 0.9, 1.5, 0.1], "gpt-6-luna:high"]]) {
     globalThis.fetch = pick(...answers)
     const sid = "map-" + want
     const m = await child(sid, opus)
@@ -170,11 +180,11 @@ try {
   assert.deepEqual(await child("c6", { providerID: "cliproxy", modelID: "or-glm-5.3-flash" }), { providerID: "cliproxy", modelID: "or-glm-5.3-flash" })
   assert.equal(calls, n, "no Jev for a non-OpenAI/Anthropic parent")
   globalThis.fetch = pick(0, 0.2, 0, 0)
-  assert.deepEqual(await child("c7", { providerID: "jev-auto", modelID: "auto" }), { providerID: "cliproxy", modelID: "gpt-6-astra" }, "unsure under Auto: Astra")
-  // A catalog without Sol keeps the parent's model for large code tasks.
+  assert.deepEqual(await child("c7", { providerID: "jev-auto", modelID: "auto" }), { providerID: "cliproxy", modelID: "gpt-6-sol" }, "unsure under Auto: Sol")
+  // A catalog without Sol keeps the parent's model for ordinary work.
   const noSol = await plugin({ client, directory: "/test", project: { id: "test" } })
   await noSol.config({ provider: { cliproxy: { options: {}, models: Object.fromEntries(Object.entries(catalog()).filter(([k]) => k !== "gpt-6-sol")) } } })
-  globalThis.fetch = pick(2, 0.9, 2, 0.1)
+  globalThis.fetch = pick(1, 0.9, 2, 0.1)
   const nsOut = { message: { id: "m", model: { ...opus } }, parts: [{ type: "text", text: "design it" }] }
   await noSol["chat.message"]({ sessionID: "ns", agent: "general" }, nsOut)
   assert.deepEqual(nsOut.message.model, opus, "model missing from the catalog: parent's model")
@@ -205,22 +215,22 @@ try {
   const grown = { ...catalog(),
     "claude-opus-5": { id: "claude/claude-opus-5" }, "claude-opus-4-8": { id: "claude/claude-opus-4-8" },
     "claude-sonnet-5-5": { id: "claude/claude-sonnet-5-5" }, "claude-haiku-5": { id: "claude/claude-haiku-5" }, "claude-haiku-10": { id: "claude/claude-haiku-10" },
-    "gpt-5.6-sol": { id: "codex/gpt-5.6-sol" }, "gpt-7-luna": { id: "codex/gpt-7-luna" }, "gpt-6.1-astra": { id: "codex/gpt-6.1-astra" },
+    "gpt-5.6-sol": { id: "codex/gpt-5.6-sol" }, "gpt-6.1-sol": { id: "codex/gpt-6.1-sol" }, "gpt-7-luna": { id: "codex/gpt-7-luna" }, "gpt-6.1-astra": { id: "codex/gpt-6.1-astra" },
     "gpt-9-sol": { id: "openrouter/gpt-9-sol" }, "claude-opus-4-6-1m": { id: "claude/claude-opus-4-6-1m" }, "claude-opus-6-1m": { id: "claude/claude-opus-6-1m" } }
   const grownCfg = { provider: { cliproxy: { options: {}, models: grown } } }
   await newer.config(grownCfg)
-  assert.equal(grownCfg.provider["jev-auto"].models.auto.id, "codex/gpt-6.1-astra", "Auto falls back to the newest Astra")
+  assert.equal(grownCfg.provider["jev-auto"].models.auto.id, "codex/gpt-6.1-sol", "Auto falls back to the newest Sol")
   const route = async (sid, answers, text = "do the task") => {
     globalThis.fetch = pick(...answers)
     const out = { message: { id: "m", model: { ...opus } }, parts: [{ type: "text", text }] }
     await newer["chat.message"]({ sessionID: sid, agent: "general" }, out)
     return out.message.model.modelID
   }
-  assert.equal(await route("v1", [1, 0.9, 1, 0.9]), "claude-sonnet-5-5", "Sonnet 5.5 beats Sonnet 5")
+  assert.equal(await route("v1", [1, 0.9, 1, 0.9]), "claude-opus-5-5", "discussion uses newest Opus")
   assert.equal(await route("v2", [2, 0.9, 2, 0.9]), "claude-opus-5-5", "Opus 5.5 beats Opus 5 and 4.8; 4-6-1m is not a version")
-  assert.equal(await route("v3", [2, 0.9, 2, 0.1]), "gpt-6-sol", "an openrouter/ route never counts, and 6 beats 5.6")
+  assert.equal(await route("v3", [1, 0.9, 2, 0.1]), "gpt-6.1-sol", "an openrouter/ route never counts, and 6.1 beats 6 and 5.6")
   assert.equal(await route("v4", [0, 0.9, 0, 0.1]), "gpt-7-luna")
-  assert.equal(await route("v5", [1, 0.9, 1, 0.1]), "gpt-6.1-astra")
+  assert.equal(await route("v5", [1, 0.9, 1, 0.1]), "gpt-6.1-sol")
   assert.equal(await route("v6", [0, 0.9, 0, 0], "route: claude-opus-5:high"), "claude-opus-5-5", "a pin to an old version gets the newest")
   assert.equal(await route("v7", [0, 0.9, 0, 0], "route: opus_high"), "claude-opus-5-5", "a pin can name the family")
   assert.equal(await route("v8", [0, 0.9, 0, 0], "route: haiku_low"), "claude-haiku-10", "versions compare as numbers: 10 beats 5 beats 4.5 (dated)")
@@ -237,6 +247,26 @@ try {
     "classified", "classified", "classified", "classified", "classified", "pinned", "pinned", "pinned", "classified"])
   assert.equal(sub.find(r => r.sessionId === "ns").reason, "model_not_in_catalog")
   assert.ok(!JSON.stringify(sub).includes("parseConfig"), "subagent prompts are not logged")
+
+  parentID = "parent"
+  for (const [sid, text, tier, dialogue, want] of [
+    ["triage", "Triage the reported issue against the supplied logs", 1, 0.1, "gpt-6-sol"],
+    ["validate", "Validate the change using the checks and report failures", 1, 0.1, "gpt-6-sol"],
+    ["review", "Review this ordinary diff for bugs", 1, 0.1, "gpt-6-sol"],
+    ["deep", "Deep dive into a subtle concurrency bug across services", 2, 0.1, "claude-opus-5-5"],
+    ["decide", "Discuss architectural tradeoffs with the user and decide", 1, 0.9, "claude-opus-5-5"],
+  ]) {
+    globalThis.fetch = pick(tier, 0.9, 2, dialogue)
+    assert.equal((await child(sid, opus, text, "general")).modelID, want)
+  }
+  parentID = undefined
+
+  const noOpus = await plugin({ client, directory: "/test", project: { id: "test" } })
+  await noOpus.config({ provider: { cliproxy: { options: {}, models: Object.fromEntries(Object.entries(catalog()).filter(([k]) => !k.includes("opus"))) } } })
+  globalThis.fetch = response("deep", 0.9)
+  const missingOpus = fresh()
+  await noOpus["chat.message"]({ sessionID: "no-opus" }, missingOpus)
+  assert.equal(missingOpus.message.model.modelID, "gpt-6-sol", "missing Opus keeps the valid Sol default")
 
   // Skills: one Jev call per user message, one line in the system prompt when it fits.
   const skills = "<available_skills>\n  <skill>\n    <name>tdd</name>\n    <description>Test-driven development. Use when building features test-first.</description>\n    <location>/x</location>\n  </skill>\n  <skill>\n    <name>grill-me</name>\n    <description>A relentless interview to sharpen a plan.</description>\n    <location>/y</location>\n  </skill>\n</available_skills>"
@@ -296,7 +326,7 @@ try {
   release()
   await slow
   assert.deepEqual(await sys("s1"), ["JEV CHECKS RULE"], "a stale pick is dropped")
-  // Session lookup down: no skill pick (it may be a subagent), Auto stays on Astra.
+  // Session lookup down: no skill pick (it may be a subagent), Auto stays on Sol.
   getFails = true
   n = calls
   globalThis.fetch = skillAnswer(0.9, "tdd", 0.9)
@@ -304,7 +334,7 @@ try {
   assert.deepEqual(await sys("lf"), ["JEV CHECKS RULE"])
   const lfAuto = fresh()
   await hooks["chat.message"]({ sessionID: "lf-auto" }, lfAuto)
-  assert.equal(lfAuto.message.model.modelID, "gpt-6-astra")
+  assert.equal(lfAuto.message.model.modelID, "gpt-6-sol")
   assert.equal(calls, n, "no Jev call when the session lookup fails")
   getFails = false
   globalThis.fetch = async () => { throw new Error("down") }
