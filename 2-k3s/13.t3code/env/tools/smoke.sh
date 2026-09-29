@@ -52,6 +52,12 @@ for p in t3:t3 @anthropic-ai/claude-code:claude @openai/codex:codex opencode-ai:
   [[ $got == "$want" ]] || fail "${p##*:} reports $got; expected $want"
 done
 echo 'smoke: all four CLI versions match'
+# jev-auto's proxy under the Bun that OpenCode ships (it uses Bun.serve there; CI's
+# node --test covers only the node:http path).
+oc_bun=$(ls /tools/node_modules/opencode-linux-*/bin/opencode | head -1)
+(cd /src/one/files && BUN_BE_BUN=1 timeout 120 "$oc_bun" run ./jev-steps.test.mjs) | grep -q 'all checks passed (bun)' ||
+  fail 'jev-steps.test.mjs failed under OpenCode Bun'
+echo 'smoke: jev-steps passes under OpenCode Bun'
 node -e 'require("node:http").createServer((q,s)=>{s.writeHead(200,{"content-type":"application/json"});s.end("{}");}).listen(18317,"127.0.0.1")' &
 pids+=("$!")
 git init -q --bare --initial-branch=main /tmp/remote.git
