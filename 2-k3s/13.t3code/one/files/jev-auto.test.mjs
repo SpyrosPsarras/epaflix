@@ -200,11 +200,41 @@ try {
   const nhOut = { message: { id: "m", model: { ...opus } }, parts: [{ type: "text", text: "route: claude-haiku-4-5-20251001:low" }] }
   await noHaiku["chat.message"]({ sessionID: "nh", agent: "general" }, nhOut)
   assert.notEqual(nhOut.message.model.modelID, "claude-haiku-4-5-20251001", "a pin to a model missing from the catalog is ignored")
+  // Families resolve to their highest version in the live catalog, for routes, pins and Auto.
+  const newer = await plugin({ client, directory: "/test", project: { id: "test" } })
+  const grown = { ...catalog(),
+    "claude-opus-5": { id: "claude/claude-opus-5" }, "claude-opus-4-8": { id: "claude/claude-opus-4-8" },
+    "claude-sonnet-5-5": { id: "claude/claude-sonnet-5-5" }, "claude-haiku-5": { id: "claude/claude-haiku-5" }, "claude-haiku-10": { id: "claude/claude-haiku-10" },
+    "gpt-5.6-sol": { id: "codex/gpt-5.6-sol" }, "gpt-7-luna": { id: "codex/gpt-7-luna" }, "gpt-6.1-astra": { id: "codex/gpt-6.1-astra" },
+    "gpt-9-sol": { id: "openrouter/gpt-9-sol" }, "claude-opus-4-6-1m": { id: "claude/claude-opus-4-6-1m" }, "claude-opus-6-1m": { id: "claude/claude-opus-6-1m" } }
+  const grownCfg = { provider: { cliproxy: { options: {}, models: grown } } }
+  await newer.config(grownCfg)
+  assert.equal(grownCfg.provider["jev-auto"].models.auto.id, "codex/gpt-6.1-astra", "Auto falls back to the newest Astra")
+  const route = async (sid, answers, text = "do the task") => {
+    globalThis.fetch = pick(...answers)
+    const out = { message: { id: "m", model: { ...opus } }, parts: [{ type: "text", text }] }
+    await newer["chat.message"]({ sessionID: sid, agent: "general" }, out)
+    return out.message.model.modelID
+  }
+  assert.equal(await route("v1", [1, 0.9, 1, 0.9]), "claude-sonnet-5-5", "Sonnet 5.5 beats Sonnet 5")
+  assert.equal(await route("v2", [2, 0.9, 2, 0.9]), "claude-opus-5-5", "Opus 5.5 beats Opus 5 and 4.8; 4-6-1m is not a version")
+  assert.equal(await route("v3", [2, 0.9, 2, 0.1]), "gpt-6-sol", "an openrouter/ route never counts, and 6 beats 5.6")
+  assert.equal(await route("v4", [0, 0.9, 0, 0.1]), "gpt-7-luna")
+  assert.equal(await route("v5", [1, 0.9, 1, 0.1]), "gpt-6.1-astra")
+  assert.equal(await route("v6", [0, 0.9, 0, 0], "route: claude-opus-5:high"), "claude-opus-5-5", "a pin to an old version gets the newest")
+  assert.equal(await route("v7", [0, 0.9, 0, 0], "route: opus_high"), "claude-opus-5-5", "a pin can name the family")
+  assert.equal(await route("v8", [0, 0.9, 0, 0], "route: haiku_low"), "claude-haiku-10", "versions compare as numbers: 10 beats 5 beats 4.5 (dated)")
+  assert.equal(await route("v9", [0, 0.9, 0, 0], "route: fable_high") !== "claude-fable-5-1", true, "Fable is never pinnable")
   parentID = undefined
+  const autoOut = fresh()
+  globalThis.fetch = response("trivial", 0.95)
+  await newer["chat.message"]({ sessionID: "v-auto" }, autoOut)
+  assert.equal(autoOut.message.model.modelID, "gpt-7-luna", "Auto's cheap path uses the newest Luna")
   assert.deepEqual(await params("test", "codex/gpt-6-astra"), {}, "top-level turns keep their effort")
   const sub = (await readFile(join(dir, "opencode/jev-auto.jsonl"), "utf8")).trim().split("\n").map(l => JSON.parse(l)).filter(r => r.mode === "subagent")
   assert.deepEqual(sub.map(r => r.status), ["classified", "classified", "fallback", "fallback", "classified", "classified", "classified", "classified", "fallback", "fallback", "fallback",
-    "pinned", "pinned", "pinned", "classified", "classified", "classified", "classified", "classified"])
+    "pinned", "pinned", "pinned", "classified", "classified", "classified", "classified", "classified",
+    "classified", "classified", "classified", "classified", "classified", "pinned", "pinned", "pinned", "classified"])
   assert.equal(sub.find(r => r.sessionId === "ns").reason, "model_not_in_catalog")
   assert.ok(!JSON.stringify(sub).includes("parseConfig"), "subagent prompts are not logged")
 
