@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -115,9 +116,7 @@ func TestHealthzStale(t *testing.T) {
 	if got := status(); got != http.StatusOK {
 		t.Fatalf("fresh: %d", got)
 	}
-	v.mu.Lock()
-	v.lastSync = time.Now().Add(-6 * time.Minute)
-	v.mu.Unlock()
+	v.lastSync.Store(time.Now().Add(-6 * time.Minute).UnixNano())
 	if got := status(); got != http.StatusServiceUnavailable {
 		t.Fatalf("stale: %d", got)
 	}
@@ -255,7 +254,7 @@ func TestWriteTools(t *testing.T) {
 			t.Fatalf("log leaks %q:\n%s", secret, out)
 		}
 	}
-	if !strings.Contains(out, "tool=vault_trash") || !strings.Contains(out, uid(1)) || !strings.Contains(out, "result=ok") {
+	if !strings.Contains(out, "tool=vault_trash") || !strings.Contains(out, uid(1)) || !strings.Contains(out, "result=ok") || !strings.Contains(out, "device=t3code") {
 		t.Fatalf("write log line missing tool, uuid or result:\n%s", out)
 	}
 }
@@ -280,6 +279,133 @@ func TestExpiredWithholdsPassword(t *testing.T) {
 	}
 	if got["note"] != "entry is expired; password withheld. Update the entry's expiry in KeePassXC, then retry." {
 		t.Fatalf("note = %v", got["note"])
+	}
+}
+
+func TestExpiredAttachmentWithheld(t *testing.T) {
+	f := newFake(t)
+	past := time.Now().Add(-time.Hour)
+	e := testEntry(uid(1), "old", "")
+	e["times"] = testTimes(true, &past)
+	e["binaries"] = []any{map[string]any{"name": "id", "data": base64.StdEncoding.EncodeToString([]byte("secret-key"))}}
+	f.seedEntry(e)
+	cs := connect(t, f.open(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	text, isErr := call(t, cs, "vault_attachment", map[string]any{"path": "/old", "filename": "id"})
+	if !isErr || !strings.Contains(text, expiredNote) || strings.Contains(text, base64.StdEncoding.EncodeToString([]byte("secret-key"))) {
+		t.Fatalf("expired attachment: %q %v", text, isErr)
+	}
+}
+
+func TestExpiredHidesProtectedProps(t *testing.T) {
+	f := newFake(t)
+	past := time.Now().Add(-time.Hour)
+	e := testEntry(uid(1), "old", "")
+	e["times"] = testTimes(true, &past)
+	e["strings"].(map[string]any)["Token"] = map[string]any{"v": "tok-secret", "protected": true}
+	f.seedEntry(e)
+	live := testEntry(uid(2), "live", "")
+	live["strings"].(map[string]any)["Token"] = map[string]any{"v": "tok-live", "protected": true}
+	f.seedEntry(live)
+	cs := connect(t, f.open(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	var got map[string]any
+	callJSON(t, cs, "vault_get", map[string]any{"path": "/old"}, &got)
+	if props := got["custom_properties"].(map[string]any); props["Env"] != "prod" || props["Token"] != nil {
+		t.Fatalf("expired props = %v", props)
+	}
+	callJSON(t, cs, "vault_get", map[string]any{"path": "/live"}, &got)
+	if props := got["custom_properties"].(map[string]any); props["Token"] != "tok-live" {
+		t.Fatalf("live props = %v", props)
+	}
+}
+
+// mcpPost sends one JSON-RPC message to /keepass and returns status, session id and body.
+func mcpPost(t *testing.T, url, sessionID, msg string) (int, string, string) {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodPost, url+"/keepass", strings.NewReader(msg))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	req.Header.Set("X-Hub-Secret", "s")
+	if sessionID != "" {
+		req.Header.Set("Mcp-Session-Id", sessionID)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, resp.Header.Get("Mcp-Session-Id"), string(body)
+}
+
+func TestStatelessHTTP(t *testing.T) {
+	f := newFake(t)
+	f.seedEntry(testEntry(uid(1), "k", ""))
+	v := f.open()
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	before := httptest.NewServer(newHandler(v, "s", quiet))
+	defer before.Close()
+	after := httptest.NewServer(newHandler(v, "s", quiet)) // the pod after a restart
+	defer after.Close()
+
+	const initialize = `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}`
+	const list = `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"vault_list","arguments":{}}}`
+	check := func(name string, status int, body string) {
+		t.Helper()
+		if status != http.StatusOK || !strings.HasPrefix(body, "{") || !strings.Contains(body, `"result"`) || !strings.Contains(body, `\"/k\"`) {
+			t.Errorf("%s: %d %q", name, status, body)
+		}
+	}
+	status, _, body := mcpPost(t, before.URL, "", list)
+	check("tools/call without a session", status, body)
+
+	_, sid, _ := mcpPost(t, before.URL, "", initialize)
+	status, _, body = mcpPost(t, after.URL, sid, list)
+	check("tools/call after a restart", status, body)
+}
+
+func TestHealthzIgnoresVaultLock(t *testing.T) {
+	f := newFake(t)
+	v := f.open()
+	srv := httptest.NewServer(newHandler(v, "s", slog.New(slog.NewTextHandler(io.Discard, nil))))
+	defer srv.Close()
+	v.mu.Lock() // a write stuck on network I/O
+	defer v.mu.Unlock()
+	resp, err := (&http.Client{Timeout: 2 * time.Second}).Get(srv.URL + "/healthz")
+	if err != nil {
+		t.Fatalf("healthz blocked on the vault lock: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("healthz = %d", resp.StatusCode)
+	}
+}
+
+func TestGracefulShutdown(t *testing.T) {
+	started, finished := make(chan struct{}), make(chan struct{})
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		close(started)
+		time.Sleep(300 * time.Millisecond)
+		close(finished)
+	})}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- run(ctx, srv, ln) }()
+	go http.Get("http://" + ln.Addr().String())
+	<-started
+	cancel() // SIGTERM
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-finished:
+	default:
+		t.Fatal("run returned before the in-flight request finished")
 	}
 }
 

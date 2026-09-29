@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"gitlab.com/Star95/keepass-deltasync/client/mobile"
@@ -19,14 +21,17 @@ import (
 // are kept as decrypted canonical JSON (map[string]any) so fields this code
 // does not know about survive an edit.
 type Vault struct {
-	mu       sync.Mutex
-	api      *API
-	dbID     string
-	sess     *mobile.Session
-	entries  map[string]map[string]any
-	groups   map[string]map[string]any
-	seq      int64
-	lastSync time.Time
+	mu      sync.Mutex
+	api     *API
+	dbID    string
+	sess    *mobile.Session
+	entries map[string]map[string]any
+	groups  map[string]map[string]any
+	// unreadable holds uuids whose newest version failed to decode or decrypt.
+	// They are refused for reads and writes until a readable version arrives.
+	unreadable map[string]bool
+	seq        int64
+	lastSync   atomic.Int64 // unix nanos; atomic so /healthz never waits on mu
 }
 
 // Entry is the flattened view of one KeePass entry.
@@ -34,6 +39,7 @@ type Entry struct {
 	UUID, Path, Title, Username, URL, Notes, Password string
 	Expired                                           bool
 	Props                                             map[string]string
+	ProtectedProps                                    map[string]bool // Props keys marked protected
 	Attachments                                       []Attachment
 }
 
@@ -57,9 +63,12 @@ func Open(ctx context.Context, api *API, dbID string, password []byte) (*Vault, 
 	if err != nil {
 		return nil, err
 	}
-	v := &Vault{api: api, dbID: dbID, sess: sess, entries: map[string]map[string]any{}, groups: map[string]map[string]any{}}
+	v := &Vault{api: api, dbID: dbID, sess: sess, entries: map[string]map[string]any{}, groups: map[string]map[string]any{}, unreadable: map[string]bool{}}
 	if err := v.Refresh(ctx); err != nil {
 		return nil, err
+	}
+	if len(v.unreadable) > 0 && len(v.entries)+len(v.groups) == 0 {
+		return nil, fmt.Errorf("none of %d objects decrypt: wrong passphrase or database", len(v.unreadable))
 	}
 	return v, nil
 }
@@ -77,38 +86,59 @@ func (v *Vault) refresh(ctx context.Context) error {
 		return err
 	}
 	for _, c := range ch.Objects {
-		index, decrypt := v.entries, v.sess.DecryptEntry
-		if c.Kind == kindGroup {
+		var index map[string]map[string]any
+		var decrypt func([]byte) ([]byte, error)
+		switch c.Kind {
+		case 0, 1:
+			index, decrypt = v.entries, v.sess.DecryptEntry
+		case kindGroup:
 			index, decrypt = v.groups, v.sess.DecryptGroup
+		default:
+			slog.Warn("skipping object of unknown kind", "uuid", c.UUID, "kind", c.Kind)
+			continue
 		}
+		delete(v.unreadable, c.UUID)
 		if c.Deleted {
 			delete(index, c.UUID)
 			continue
 		}
-		blob, err := base64.StdEncoding.DecodeString(c.Blob)
+		raw, err := decode(c.Blob, decrypt)
 		if err != nil {
-			return fmt.Errorf("object %s: decode blob: %w", c.UUID, err)
-		}
-		plain, err := decrypt(blob)
-		if err != nil {
-			return fmt.Errorf("object %s: %w", c.UUID, err)
-		}
-		var raw map[string]any
-		if err := json.Unmarshal(plain, &raw); err != nil {
-			return fmt.Errorf("object %s: %w", c.UUID, err)
+			// One bad object must not stop the sync. Drop our old copy so it
+			// is never written back, and refuse the uuid until it is readable.
+			slog.Error("unreadable object", "uuid", c.UUID, "kind", c.Kind, "err", err.Error())
+			delete(index, c.UUID)
+			v.unreadable[c.UUID] = true
+			continue
 		}
 		index[c.UUID] = raw
 	}
 	v.seq = ch.CurrentSeq
-	v.lastSync = time.Now()
+	v.lastSync.Store(time.Now().UnixNano())
 	return nil
+}
+
+func decode(b64 string, decrypt func([]byte) ([]byte, error)) (map[string]any, error) {
+	blob, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		return nil, fmt.Errorf("decode blob: %w", err)
+	}
+	plain, err := decrypt(blob)
+	if err != nil {
+		return nil, err
+	}
+	var raw map[string]any
+	return raw, json.Unmarshal(plain, &raw)
+}
+
+// errUnreadable is returned for a uuid whose newest version cannot be read.
+func errUnreadable(uuid string) error {
+	return fmt.Errorf("entry %s is unreadable on this device (its newest version failed to decrypt or decode); edit it in KeePassXC instead", uuid)
 }
 
 // LastSync is the time of the last successful /changes call.
 func (v *Vault) LastSync() time.Time {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	return v.lastSync
+	return time.Unix(0, v.lastSync.Load())
 }
 
 // Entries returns every entry, sorted by path.
@@ -133,6 +163,9 @@ func (v *Vault) Find(path, uuid string) (Entry, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	if uuid != "" {
+		if v.unreadable[uuid] {
+			return Entry{}, errUnreadable(uuid)
+		}
 		raw, ok := v.entries[uuid]
 		if !ok {
 			return Entry{}, fmt.Errorf("no entry with uuid %s", uuid)
@@ -167,6 +200,9 @@ func (v *Vault) Write(ctx context.Context, uuid string, edit func(raw map[string
 	defer v.mu.Unlock()
 	if err := v.refresh(ctx); err != nil {
 		return err
+	}
+	if v.unreadable[uuid] {
+		return errUnreadable(uuid)
 	}
 	cur, ok := v.entries[uuid]
 	if !ok {
@@ -265,6 +301,9 @@ func (v *Vault) Add(ctx context.Context, path string, fields map[string]String) 
 func (v *Vault) Trash(ctx context.Context, uuid string) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
+	if v.unreadable[uuid] {
+		return errUnreadable(uuid)
+	}
 	if _, ok := v.entries[uuid]; !ok {
 		return fmt.Errorf("no entry with uuid %s", uuid)
 	}
@@ -314,10 +353,13 @@ func (v *Vault) entry(id string, raw map[string]any) Entry {
 		return val
 	}
 	e := Entry{UUID: id, Title: get("Title"), Username: get("UserName"), Password: get("Password"),
-		URL: get("URL"), Notes: get("Notes"), Props: map[string]string{}}
+		URL: get("URL"), Notes: get("Notes"), Props: map[string]string{}, ProtectedProps: map[string]bool{}}
 	for k := range strs {
 		if !standardKeys[k] {
 			e.Props[k] = get(k)
+			if s, _ := strs[k].(map[string]any); s["protected"] == true {
+				e.ProtectedProps[k] = true
+			}
 		}
 	}
 
@@ -335,9 +377,8 @@ func (v *Vault) entry(id string, raw map[string]any) Entry {
 
 	if t, _ := raw["times"].(map[string]any); t["expires"] == true {
 		at, _ := t["expires_at"].(string)
-		if ts, err := time.Parse(time.RFC3339Nano, at); err == nil && ts.Before(time.Now()) {
-			e.Expired = true
-		}
+		ts, err := time.Parse(time.RFC3339Nano, at)
+		e.Expired = err != nil || !ts.After(time.Now()) // fail closed on a missing or bad expires_at
 	}
 
 	bins, _ := raw["binaries"].([]any)

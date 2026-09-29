@@ -397,7 +397,7 @@ func TestDeletedDropsOut(t *testing.T) {
 	if last := f.changes[len(f.changes)-1]; last != 3 {
 		t.Fatalf("refresh asked since=%d, want 3", last)
 	}
-	if v.lastSync.IsZero() {
+	if v.LastSync().IsZero() {
 		t.Fatal("lastSync not set")
 	}
 
@@ -418,17 +418,25 @@ func TestExpired(t *testing.T) {
 	for i, tc := range []struct {
 		expires bool
 		at      *time.Time
-	}{{true, &past}, {true, &future}, {false, &past}} {
+	}{{true, &past}, {true, &future}, {false, &past}, {true, nil}} {
 		e := testEntry(uid(i+1), fmt.Sprint(i), "")
 		e["times"] = testTimes(tc.expires, tc.at)
 		f.seedEntry(e)
 	}
 	v := f.open()
-	want := map[string]bool{"/0": true, "/1": false, "/2": false}
+	// expires=true with a missing expires_at (/3) fails closed.
+	want := map[string]bool{"/0": true, "/1": false, "/2": false, "/3": true}
 	for _, e := range v.Entries() {
 		if e.Expired != want[e.Path] {
 			t.Errorf("%s expired = %v", e.Path, e.Expired)
 		}
+	}
+	// Upstream EncryptEntry rejects a bad expires_at, so feed entry() directly.
+	raw := testEntry(uid(9), "bad", "")
+	raw["times"].(map[string]any)["expires"] = true
+	raw["times"].(map[string]any)["expires_at"] = "not a time"
+	if !v.entry(uid(9), raw).Expired {
+		t.Error("unparseable expires_at must count as expired")
 	}
 }
 
@@ -481,6 +489,76 @@ func TestAddCreatesMissingGroups(t *testing.T) {
 	f.seedGroup(uid(5), "SSH", "")
 	if _, err := v.Add(context.Background(), "/SSH/x", nil); err == nil || !strings.Contains(err.Error(), uid(5)) {
 		t.Errorf("sibling groups with the same name must be ambiguous, got %v", err)
+	}
+}
+
+func TestBadBlobSkipped(t *testing.T) {
+	f := newFake(t)
+	f.seedEntry(testEntry(uid(1), "good", ""))
+	f.seedEntry(testEntry(uid(2), "bad", ""))
+	v := f.open()
+
+	f.store(uid(2), 1, []byte("not a ciphertext"), false) // another device wrote something we cannot read
+	f.store(uid(3), 7, []byte("future kind"), false)      // unknown kind: skipped, not decrypted
+	if err := v.Refresh(context.Background()); err != nil {
+		t.Fatalf("one bad object must not fail the refresh: %v", err)
+	}
+	if v.seq != f.seq {
+		t.Fatalf("seq = %d, want %d", v.seq, f.seq)
+	}
+	if got := v.Entries(); len(got) != 1 || got[0].UUID != uid(1) {
+		t.Fatalf("entries = %+v", got)
+	}
+	if _, err := v.Find("", uid(2)); err == nil || !strings.Contains(err.Error(), "unreadable") {
+		t.Fatalf("Find bad uuid: %v", err)
+	}
+	if _, err := v.Find("", uid(3)); err == nil || strings.Contains(err.Error(), "unreadable") {
+		t.Fatalf("unknown kind must be skipped, not marked unreadable: %v", err)
+	}
+	f.mu.Lock()
+	nWrites := len(f.writes)
+	f.mu.Unlock()
+	if err := v.Write(context.Background(), uid(2), func(map[string]any) error { return nil }); err == nil || !strings.Contains(err.Error(), "unreadable") {
+		t.Fatalf("Write bad uuid: %v", err)
+	}
+	if err := v.Trash(context.Background(), uid(2)); err == nil || !strings.Contains(err.Error(), "unreadable") {
+		t.Fatalf("Trash bad uuid: %v", err)
+	}
+	f.mu.Lock()
+	if len(f.writes) != nWrites {
+		t.Fatalf("a refused write reached the server: %+v", f.writes[nWrites:])
+	}
+	f.mu.Unlock()
+	if err := v.Write(context.Background(), uid(1), func(map[string]any) error { return nil }); err != nil {
+		t.Fatalf("Write good uuid: %v", err)
+	}
+
+	// A restart must still open the vault.
+	if n := len(f.open().Entries()); n != 1 {
+		t.Fatalf("reopen: %d entries", n)
+	}
+
+	// A later readable version clears it.
+	f.seedEntry(testEntry(uid(2), "fixed", ""))
+	if err := v.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if e, err := v.Find("", uid(2)); err != nil || e.Title != "fixed" {
+		t.Fatalf("fixed entry: %+v %v", e, err)
+	}
+}
+
+func TestOpenWrongPassphraseFails(t *testing.T) {
+	f := newFake(t)
+	f.seedEntry(testEntry(uid(1), "a", ""))
+	api := &API{Base: f.srv.URL, Token: testToken, HTTP: f.srv.Client()}
+	if _, err := Open(context.Background(), api, testDB, []byte("wrong")); err == nil {
+		t.Fatal("Open with the wrong passphrase must fail")
+	}
+	empty := newFake(t)
+	api.Base = empty.srv.URL
+	if _, err := Open(context.Background(), api, testDB, []byte("wrong")); err != nil {
+		t.Fatalf("an empty database has nothing to check: %v", err)
 	}
 }
 

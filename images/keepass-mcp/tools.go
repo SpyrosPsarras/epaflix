@@ -17,6 +17,9 @@ import (
 // readFreshness is how old the index may be before a tool call pulls /changes.
 const readFreshness = 3 * time.Second
 
+// device names this client in the write log; DeltaSync enrolls it as t3code.
+const device = "t3code"
+
 const expiredNote = "entry is expired; password withheld. Update the entry's expiry in KeePassXC, then retry."
 
 type tools struct {
@@ -144,7 +147,7 @@ func (t *tools) logWrite(tool, uuid string, err error) {
 	if err != nil {
 		result = err.Error()
 	}
-	t.log.Info("write", "tool", tool, "uuid", uuid, "result", result)
+	t.log.Info("write", "tool", tool, "uuid", uuid, "device", device, "result", result)
 }
 
 func summary(e Entry) map[string]any {
@@ -177,7 +180,16 @@ func (t *tools) get(ctx context.Context, in getIn) (any, error) {
 		return nil, err
 	}
 	out := summary(e)
-	out["custom_properties"] = e.Props
+	props := e.Props
+	if e.Expired {
+		props = map[string]string{}
+		for k, val := range e.Props {
+			if !e.ProtectedProps[k] {
+				props[k] = val
+			}
+		}
+	}
+	out["custom_properties"] = props
 	switch {
 	case e.Expired:
 		out["password"] = nil
@@ -316,6 +328,9 @@ func (t *tools) attachment(ctx context.Context, in attachmentIn) (any, error) {
 	e, err := t.find(ctx, in.Path, "")
 	if err != nil {
 		return nil, err
+	}
+	if e.Expired {
+		return nil, errors.New(expiredNote)
 	}
 	for _, a := range e.Attachments {
 		if a.Name == in.Filename {
