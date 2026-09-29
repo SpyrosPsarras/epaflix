@@ -80,6 +80,7 @@ func serve() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	slog.SetDefault(log) // the vault logs unreadable objects through the default logger
 
 	api := &API{Base: strings.TrimRight(env("DELTASYNC_URL", defaultURL), "/"), Token: token, HTTP: &http.Client{Timeout: 30 * time.Second}}
 	dbName := env("DELTASYNC_DATABASE", "passwords")
@@ -106,23 +107,39 @@ func serve() error {
 	}()
 
 	srv := &http.Server{Addr: env("LISTEN", ":8000"), Handler: newHandler(v, secret, log), ReadHeaderTimeout: 10 * time.Second}
+	ln, err := net.Listen("tcp", srv.Addr)
+	if err != nil {
+		return err
+	}
+	log.Info("serving", "addr", srv.Addr, "database", dbName, "entries", len(v.Entries()))
+	return run(ctx, srv, ln)
+}
+
+// run serves srv on ln until ctx ends, then drains in-flight requests
+// (up to 5 s) before it returns.
+func run(ctx context.Context, srv *http.Server, ln net.Listener) error {
+	drained := make(chan struct{})
 	go func() {
+		defer close(drained)
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		srv.Shutdown(shutdown)
 	}()
-	log.Info("serving", "addr", srv.Addr, "database", dbName, "entries", len(v.Entries()))
-	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+	if err := srv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
+	<-drained
 	return nil
 }
 
 // newHandler mounts the MCP endpoint behind the hub secret and an open /healthz.
 func newHandler(v *Vault, secret string, log *slog.Logger) http.Handler {
 	server := newServer(v, log)
-	mcpHandler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
+	// Stateless like the Python server (stateless_http, json_response): no
+	// sessions to lose on a pod restart or to pile up.
+	mcpHandler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server },
+		&mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true})
 	mux := http.NewServeMux()
 	mux.Handle("/keepass", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if secret == "" || subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Hub-Secret")), []byte(secret)) != 1 {
