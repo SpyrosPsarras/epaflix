@@ -21,7 +21,8 @@ try {
   const hooks = await plugin({ client, directory: "/test", project: { id: "test" } })
   const catalog = () => ({ "gpt-6-luna": { id: "codex/gpt-6-luna" }, "gpt-6-astra": { id: "codex/gpt-6-astra", limit: { context: 872000, output: 128000 } },
     "or-glm-5.3-flash": { id: "openrouter/or-glm-5.3-flash" }, "claude-opus-5-5": { id: "claude/claude-opus-5-5" },
-    "gpt-6-sol": { id: "codex/gpt-6-sol" }, "claude-sonnet-5": { id: "claude/claude-sonnet-5" }, "claude-fable-5-1": { id: "claude/claude-fable-5-1" } })
+    "gpt-6-sol": { id: "codex/gpt-6-sol" }, "claude-sonnet-5": { id: "claude/claude-sonnet-5" }, "claude-fable-5-1": { id: "claude/claude-fable-5-1" },
+    "claude-haiku-4-5-20251001": { id: "claude/claude-haiku-4-5-20251001" } })
   const config = { provider: { cliproxy: { options: { baseURL: "http://proxy/v1" }, models: catalog() } }, enabled_providers: ["cliproxy"] }
   await hooks.config(config)
   assert.equal(config.provider["jev-auto"].models.auto.id, "codex/gpt-6-astra")
@@ -177,11 +178,34 @@ try {
   const nsOut = { message: { id: "m", model: { ...opus } }, parts: [{ type: "text", text: "design it" }] }
   await noSol["chat.message"]({ sessionID: "ns", agent: "general" }, nsOut)
   assert.deepEqual(nsOut.message.model, opus, "model missing from the catalog: parent's model")
+  // A `route: <model>:<effort>` line pins the subagent without a Jev call (review gate).
+  n = calls
+  globalThis.fetch = pick(2, 0.9, 2, 0.9)
+  const pinned = (sid, line) => child(sid, opus, `Review this diff for bugs.\n${line}\nReport file:line.`, "general")
+  assert.deepEqual(await pinned("p1", "route: claude-sonnet-5:high"), { providerID: "cliproxy", modelID: "claude-sonnet-5" })
+  assert.deepEqual(await params("p1", "claude/claude-sonnet-5"), { effort: "high" })
+  assert.deepEqual(await pinned("p2", "route: gpt-6-luna_low"), { providerID: "cliproxy", modelID: "gpt-6-luna" })
+  assert.deepEqual(await params("p2", "codex/gpt-6-luna"), { reasoningEffort: "low" })
+  assert.deepEqual(await pinned("p3", "route: claude-haiku-4-5-20251001:low"), { providerID: "cliproxy", modelID: "claude-haiku-4-5-20251001" }, "any catalog Haiku can be pinned")
+  assert.deepEqual(await params("p3", "claude/claude-haiku-4-5-20251001"), {}, "Haiku takes no effort parameter")
+  assert.equal(calls, n, "pinned routes make no Jev call")
+  assert.deepEqual(await child("p1", opus, "continue"), { providerID: "cliproxy", modelID: "claude-sonnet-5" }, "a pin holds on resume")
+  for (const [sid, line] of [["x1", "route: claude-fable-5-1:low"], ["x2", "route: claude-sonnet-5:max"], ["x3", "route: gpt-9:low"], ["x4", "please use route: claude-sonnet-5:high"]]) {
+    await pinned(sid, line)
+    assert.ok(calls > n, `${line} is not a valid pin, so Jev routes`)
+    n = calls
+  }
+  const noHaiku = await plugin({ client, directory: "/test", project: { id: "test" } })
+  await noHaiku.config({ provider: { cliproxy: { options: {}, models: Object.fromEntries(Object.entries(catalog()).filter(([k]) => !k.includes("haiku"))) } } })
+  const nhOut = { message: { id: "m", model: { ...opus } }, parts: [{ type: "text", text: "route: claude-haiku-4-5-20251001:low" }] }
+  await noHaiku["chat.message"]({ sessionID: "nh", agent: "general" }, nhOut)
+  assert.notEqual(nhOut.message.model.modelID, "claude-haiku-4-5-20251001", "a pin to a model missing from the catalog is ignored")
   parentID = undefined
   assert.deepEqual(await params("test", "codex/gpt-6-astra"), {}, "top-level turns keep their effort")
   const sub = (await readFile(join(dir, "opencode/jev-auto.jsonl"), "utf8")).trim().split("\n").map(l => JSON.parse(l)).filter(r => r.mode === "subagent")
-  assert.deepEqual(sub.map(r => r.status), ["classified", "classified", "fallback", "fallback", "classified", "classified", "classified", "classified", "fallback", "fallback", "fallback"])
-  assert.equal(sub.at(-1).reason, "model_not_in_catalog")
+  assert.deepEqual(sub.map(r => r.status), ["classified", "classified", "fallback", "fallback", "classified", "classified", "classified", "classified", "fallback", "fallback", "fallback",
+    "pinned", "pinned", "pinned", "classified", "classified", "classified", "classified", "classified"])
+  assert.equal(sub.find(r => r.sessionId === "ns").reason, "model_not_in_catalog")
   assert.ok(!JSON.stringify(sub).includes("parseConfig"), "subagent prompts are not logged")
 
   // Skills: one Jev call per user message, one line in the system prompt when it fits.
