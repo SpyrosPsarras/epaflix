@@ -22,6 +22,8 @@ client-encrypted blobs; state lives in the shared CNPG cluster.
 | `database.yaml` | CNPG `DatabaseRole` + `Database` `deltasync` on `postgres-cluster` (ns `postgres-system`) |
 | `server.yaml` | Deployment (1 replica, `Recreate`) and Service |
 | `ingress.yaml` | IngressRoute on `internal` |
+| `keepass-mcp.yaml` | keepass MCP Deployment, Service, NetworkPolicy |
+| `keepass-mcp.enc.yaml` | ns `deltasync`: Secret `keepass-mcp` |
 | `deltasync-secrets.enc.yaml` | ns `deltasync`: `db-password`, `admin-password`, `admin-token` |
 | `deltasync-db-role.enc.yaml` | ns `postgres-system`: `username`/`password` for the `DatabaseRole`, label `cnpg.io/reload` |
 
@@ -49,6 +51,21 @@ kubectl -n deltasync exec deploy/deltasync -- php bin/admin user:create spyros
 
 Enrollment tokens for new devices come from the admin panel,
 `https://deltasync.epaflix.com/admin.html`.
+
+## keepass MCP
+
+`keepass-mcp.yaml` runs the Go keepass MCP (`images/keepass-mcp`) as
+Deployment, Service and NetworkPolicy `keepass` (port 8000, path `/keepass`).
+Only `mcp-hub` pods may reach it. Secret `keepass-mcp` is in
+`keepass-mcp.enc.yaml` (`device-token`, `private-key`, `passphrase`,
+`hub-secret`); the process reads all but `private-key`.
+
+- It points at the test database `passwords-test`
+  (`DELTASYNC_DATABASE` in `keepass-mcp.yaml`). To switch to the real vault,
+  set it to `passwords`.
+- The MCP hub (`23.mcp-hub`) still points at `keepass.syncthing.svc`. Switch
+  the hub over at cutover; nothing calls this pod until then.
+- Check: `kubectl -n deltasync exec deploy/keepass -- /keepass-mcp healthcheck`.
 
 ## Security context
 
