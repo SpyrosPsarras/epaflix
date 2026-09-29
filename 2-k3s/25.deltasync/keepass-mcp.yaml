@@ -1,0 +1,124 @@
+---
+# Go keepass MCP: one process at keepass.deltasync.svc:8000/keepass, backed by
+# DeltaSync (no local file). Only MCP hub pods may call it: the NetworkPolicy
+# below admits only them, and the process checks the shared X-Hub-Secret.
+# The hub still points at keepass.syncthing.svc until cutover.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keepass
+  namespace: deltasync
+  labels:
+    app: keepass
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: keepass
+  template:
+    metadata:
+      labels:
+        app: keepass
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 10
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: keepass
+          image: ghcr.io/spyrospsarras/keepass-mcp
+          env:
+            - name: DELTASYNC_URL
+              value: http://deltasync.deltasync.svc
+            # test database; switch to "passwords" at cutover (see README)
+            - name: DELTASYNC_DATABASE
+              value: passwords-test
+            - name: DELTASYNC_DEVICE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: keepass-mcp
+                  key: device-token
+            - name: KEEPASS_PASSPHRASE
+              valueFrom:
+                secretKeyRef:
+                  name: keepass-mcp
+                  key: passphrase
+            - name: KEEPASS_HUB_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: keepass-mcp
+                  key: hub-secret
+            - name: LISTEN
+              value: ":8000"
+          ports:
+            - containerPort: 8000
+              name: http
+          # exec, not httpGet: the NetworkPolicy admits only hub pods.
+          readinessProbe:
+            exec:
+              command: [/keepass-mcp, healthcheck]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 6
+          livenessProbe:
+            exec:
+              command: [/keepass-mcp, healthcheck]
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 6
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keepass
+  namespace: deltasync
+  labels:
+    app: keepass
+spec:
+  type: ClusterIP
+  selector:
+    app: keepass
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: keepass-from-mcp-hub
+  namespace: deltasync
+spec:
+  podSelector:
+    matchLabels:
+      app: keepass
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: mcp-hub
+          podSelector:
+            matchLabels:
+              app: mcp-hub
+      ports:
+        - port: 8000
+          protocol: TCP

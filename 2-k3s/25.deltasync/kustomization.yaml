@@ -7,11 +7,32 @@ resources:
   - database.yaml
   - server.yaml
   - ingress.yaml
+  - keepass-mcp.yaml
 
 generators:
   - ksops-generator.yaml
 
+# KEEPASS_HUB_SECRET is env and no Reloader watches this namespace: the
+# Secret's plaintext revision annotation (23.mcp-hub/tools/sops_secret.py)
+# is copied into the pod template so a new secret rolls the keepass pod.
+replacements:
+  - source:
+      kind: Secret
+      name: keepass-mcp
+      fieldPath: metadata.annotations.[mcp-hub.epaflix.com/revision]
+    targets:
+      - select:
+          kind: Deployment
+          name: keepass
+        fieldPaths:
+          - spec.template.metadata.annotations.[mcp-hub.epaflix.com/hub-secret-revision]
+        options:
+          create: true
+
 images:
+  # built by github.com/SpyrosPsarras/jbod-epaflix CI; bump the digest to roll out a new version
+  - name: ghcr.io/spyrospsarras/keepass-mcp
+    digest: sha256:08d02275d2da856caeba2a822f8be2b1c88232fa2f2bdb0f6108f9a775d64fdf
   # Renovate bumps the tag; minor and major updates need review (.github/renovate.json)
   - name: registry.gitlab.com/star95/keepass-deltasync/server
     newTag: 0.5.0
