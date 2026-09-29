@@ -67,12 +67,9 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 10
             timeoutSeconds: 6
-          livenessProbe:
-            exec:
-              command: [/keepass-mcp, healthcheck]
-            initialDelaySeconds: 60
-            periodSeconds: 30
-            timeoutSeconds: 6
+          # No livenessProbe: /healthz is 503 during a DeltaSync outage, and a
+          # restart would only crash-loop (startup needs DeltaSync). The process
+          # exits on fatal errors by itself.
           resources:
             requests:
               cpu: 10m
