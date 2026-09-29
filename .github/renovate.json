@@ -74,6 +74,7 @@
     {
       "description": "DeltaSync server minor and major releases require review: the entrypoint applies schema migrations to the shared CNPG database on start, and the KeePass clients must speak the same API. Patch updates keep the repo-wide automerge.",
       "matchFileNames": ["2-k3s/25.deltasync/kustomization.yaml"],
+      "matchDatasources": ["docker"],
       "matchUpdateTypes": ["minor", "major"],
       "automerge": false,
       "platformAutomerge": false
