@@ -2,8 +2,9 @@
 """Probe the Claude subscription through CLIProxyAPI with one tiny request.
 
 The model comes from the live catalog, never from config. A pinned name failed
-every run from 2026-09-22 once the subscription stopped serving
-claude-haiku-4-5-20251001.
+every run from 2026-09-22 once claude-haiku-4-5-20251001 left the catalog. The
+cause was a hand-set excluded_models entry on the credential, not the
+subscription; reconcile-config.psql now keeps Haiku enabled.
 
 owned_by "anthropic" selects it. In CLIProxyAPI v7.3.15 two channels set that
 owner: claude (OAuth or claude-api-key, service_models.go) and devin, for the

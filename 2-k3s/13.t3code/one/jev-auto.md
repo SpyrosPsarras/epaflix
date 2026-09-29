@@ -6,8 +6,8 @@ the executor is instructed to prefix its reply with its actual model. The
 authoritative route is in `$XDG_STATE_HOME/opencode/jev-auto.jsonl`, defaulting
 to `~/.local/state/opencode/jev-auto.jsonl`. Reply prefixes are best-effort.
 
-For a standalone initial text request, Jev can choose `gpt-6-luna` at confidence
-0.9 or above. Everything else uses `gpt-6-astra`: follow-ups,
+For a standalone initial text request, Jev can choose the newest Luna at
+confidence 0.9 or above. Everything else uses the newest Astra: follow-ups,
 attachments, synthetic context, long prompts, uncertain classifications and
 classifier failures. This first version does not classify conversation history.
 The chosen model stays fixed through that message's tool loop. Executor failures
@@ -27,13 +27,30 @@ Pick any OpenAI or Anthropic model for the thread (for example Opus 5.5). When
 the agent starts a subagent (the `task` tool), the subagent's first message
 gets one Jev call with three questions: how capable a model the task needs
 (small, medium, large), how much reasoning effort (low, medium, high), and
-whether it is mostly prose rather than code. Code maps the answers:
+whether it is mostly prose rather than code. Code maps the answers to a model
+family:
 
 | Tier | Code | Prose |
 | --- | --- | --- |
-| Small | `gpt-6-luna` | `gpt-6-luna` |
-| Medium | `gpt-6-astra` | `claude-sonnet-5` |
-| Large | `gpt-6-sol` | `claude-opus-5-5` |
+| Small | Luna | Luna |
+| Medium | Astra | Sonnet |
+| Large | Sol | Opus |
+
+## Newest version wins
+
+A family always means its highest version in the live CLIProxy catalog, among
+models on a `codex/` or `claude/` route. OpenCode reads that catalog at start
+(`files/cliproxy-models.js`), so a new release is used after the next t3code
+restart with no change here or in AGENTS.md. Versions come from the model ID
+and compare as numbers: `gpt-6-luna` is Luna 6, `gpt-5.6-sol` Sol 5.6,
+`claude-opus-5-5` Opus 5.5, `claude-haiku-4-5-20251001` Haiku 4.5 (the date
+is ignored). IDs that do not follow these forms, such as
+`claude-opus-4-6-1m`, are ignored. The same rule picks Jev Auto's two models
+(the newest Luna for trivial tasks, the newest Astra otherwise). On 2026-09-29
+it resolved Sonnet to `claude-sonnet-5-5`, which had just appeared in the
+catalog. `cliproxy-models.js` keeps a model for 14 days after CLIProxy stops
+listing it, so a newest version that is withdrawn keeps being chosen, and its
+calls fail, until it ages out or its catalog entry is removed.
 
 Effort goes to the provider as `reasoning_effort` (Codex routes) or
 `output_config.effort` (Claude routes), only while the subagent runs on the
@@ -46,6 +63,18 @@ Jev errors or takes longer than 3 s, the subagent keeps the parent's model and
 effort (Astra under Auto). The session lookup before it has its own 3 s limit,
 so the worst case adds about 6 s. A new subagent under a non-OpenAI/Anthropic
 parent gets no routing; one routed earlier keeps its route. Normal tools use no model and are not routed.
+
+A line `route: <family>:<effort>` (or `<family>_<effort>`, the form
+`jev_decide` candidate ids allow) on its own line in the subagent's task pins
+the route with no Jev call and is logged as `status: "pinned"`. The review gate
+in AGENTS.md uses it to run the reviewer on the model its own Jev call picked.
+Families are `luna`, `astra`, `sol`, `haiku`, `sonnet` and `opus`; a full ID
+such as `claude-opus-5` also works. Either way the newest version of that
+family runs. Haiku is enabled in CLIProxy by
+`17.remote-pi/cliproxy/files/reconcile-config.psql` and gets no effort
+parameter; Anthropic does not support effort on it. A pin to any other family
+(Fable), a family with no model in the catalog, or an effort other than low,
+medium or high is ignored and Jev routes as usual.
 
 Jev answers three questions rather than choosing from model names because a
 single Choice over the 15 model and effort pairs had confidence 0.22 to 0.42 on
