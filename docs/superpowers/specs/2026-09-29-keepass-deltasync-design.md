@@ -100,9 +100,10 @@ release that contains the fix.
 
 ### D3. New keepass MCP (Go)
 
-- Lives in `2-k3s/15.syncthing` or its own `2-k3s/26.keepass-mcp`. The
-  implementation plan decides which. It replaces `files/keepass_mcp.py` and
-  the pykeepass Deployment.
+- Lives in `2-k3s/25.deltasync` next to the server. The vault leaves
+  Syncthing, so `15.syncthing` is the wrong home. It replaces
+  `15.syncthing/files/keepass_mcp.py` and the pykeepass Deployment, which
+  are removed at cutover step 6.
 - Crypto comes from the upstream public package
   `gitlab.com/Star95/keepass-deltasync/client/mobile` (`NewSession`,
   `EncryptEntry`, `DecryptEntry`, `EncryptGroup`, `DecryptGroup`). We port no
