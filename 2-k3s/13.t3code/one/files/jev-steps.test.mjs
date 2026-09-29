@@ -52,8 +52,8 @@ globalThis.fetch = async (url, init) => {
   }
   return saved.fetch(url, init)
 }
-const step = (tier, effort, tierConfidence = 0.9, effortConfidence = 0.9) =>
-  ({ tier: { score: tier, confidence: tierConfidence }, effort: { score: effort, confidence: effortConfidence } })
+const step = (tier, effort, tierConfidence = 0.9, effortConfidence = 0.9, dialogue = 0) =>
+  ({ tier: { score: tier, confidence: tierConfidence }, effort: { score: effort, confidence: effortConfidence }, dialogue: { noul: dialogue } })
 
 try {
   let parentID
@@ -123,6 +123,12 @@ try {
   assert.equal(r.up.body.model, "claude/claude-opus-5-5")
   assert.deepEqual(r.up.body.output_config, { effort: "low" })
   assert.equal(r.up.body.max_tokens, 128000)
+
+  // User decisions stay on Opus even when the capability tier is medium.
+  answer = step(1, 1, 0.9, 0.9, 0.9)
+  r = await post("/v1/messages", claude("claude/claude-opus-5-5"))
+  assert.equal(r.up.body.model, "claude/claude-opus-5-5")
+  assert.deepEqual(r.up.body.output_config, { effort: "medium" })
 
   // Too long for Haiku's 200K window: Sonnet instead.
   answer = step(0, 0)
@@ -250,7 +256,7 @@ try {
   assert.equal(seen.at(-1).method, "GET")
 
   const steps = (await readFile(join(dir, "opencode/jev-auto.jsonl"), "utf8")).trim().split("\n").map(l => JSON.parse(l)).filter(l => l.mode === "step")
-  assert.deepEqual(steps.map(s => s.status), ["routed", "routed", "routed", "routed", "routed", "kept", "kept", "kept", "routed", "routed", "routed", "routed", "routed"])
+  assert.deepEqual(steps.map(s => s.status), ["routed", "routed", "routed", "routed", "routed", "routed", "kept", "kept", "kept", "routed", "routed", "routed", "routed", "routed"])
   assert.deepEqual(steps.slice(0, 3).map(s => `${s.requestedModel}>${s.actualModel}:${s.effort ?? "none"}`), [
     "claude/claude-opus-5-5>claude/claude-haiku-4-5-20251001:none",
     "claude/claude-haiku-4-5-20251001>claude/claude-sonnet-5-5:high",

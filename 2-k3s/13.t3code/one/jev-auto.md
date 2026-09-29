@@ -7,13 +7,17 @@ authoritative route is in `$XDG_STATE_HOME/opencode/jev-auto.jsonl`, defaulting
 to `~/.local/state/opencode/jev-auto.jsonl`. Reply prefixes are best-effort.
 
 For a standalone initial text request, Jev can choose the newest Luna at
-confidence 0.9 or above. Everything else uses the newest Astra: follow-ups,
+confidence 0.9 or above. Ordinary work uses the newest Sol. Nontrivial deep
+dives and substantive decisions or user discussion use the newest Opus at
+confidence 0.5 or above. The Sol default also covers follow-ups,
 attachments, synthetic context, long prompts, uncertain classifications and
 classifier failures. This first version does not classify conversation history.
-The chosen model stays fixed through that message's tool loop. Executor failures
-are handled by OpenCode normally; there is no automatic replay on Astra.
+The chosen provider protocol stays fixed through that message's tool loop;
+Claude models can change within that protocol as described below. Executor failures
+are handled by OpenCode normally; there is no automatic replay on another model.
 
-Both executors use the existing Codex subscription through CLIProxyAPI. This
+Luna and Sol use the existing Codex subscription through CLIProxyAPI; Opus
+uses the existing Claude route. This
 preserves the smaller-model option without adding paid OpenRouter executor
 requests. It does not establish monetary savings or remaining subscription
 quota. Jev classification is billed through the existing OpenRouter key.
@@ -27,14 +31,19 @@ Pick any OpenAI or Anthropic model for the thread (for example Opus 5.5). When
 the agent starts a subagent (the `task` tool), the subagent's first message
 gets one Jev call with three questions: how capable a model the task needs
 (small, medium, large), how much reasoning effort (low, medium, high), and
-whether it is mostly prose rather than code. Code maps the answers to a model
-family:
+whether it mainly requires a substantive decision or discussion with the
+user. Routine triage, validation, code review and reporting findings do not
+count as dialogue. The answers map to a model family:
 
-| Tier | Code | Prose |
+| Tier | Work | Decisions and user discussion |
 | --- | --- | --- |
-| Small | Luna | Luna |
-| Medium | Astra | Sonnet |
-| Large | Sol | Opus |
+| Small | Luna | Opus |
+| Medium | Sol | Opus |
+| Large, nontrivial deep dive | Opus | Opus |
+
+High reasoning effort alone does not make a task a deep dive. An ordinary
+review can use Sol high. Astra remains available through manual selection
+and explicit pins but has no automatic tier. Fable stays excluded.
 
 ## Newest version wins
 
@@ -45,8 +54,9 @@ restart with no change here or in AGENTS.md. Versions come from the model ID
 and compare as numbers: `gpt-6-luna` is Luna 6, `gpt-5.6-sol` Sol 5.6,
 `claude-opus-5-5` Opus 5.5, `claude-haiku-4-5-20251001` Haiku 4.5 (the date
 is ignored). IDs that do not follow these forms, such as
-`claude-opus-4-6-1m`, are ignored. The same rule picks Jev Auto's two models
-(the newest Luna for trivial tasks, the newest Astra otherwise). On 2026-09-29
+`claude-opus-4-6-1m`, are ignored. The same rule picks Jev Auto's models
+(the newest Luna for trivial tasks, Sol for ordinary work and Opus for deep
+dives and dialogue). On 2026-09-29
 it resolved Sonnet to `claude-sonnet-5-5`, which had just appeared in the
 catalog. `cliproxy-models.js` keeps a model for 14 days after CLIProxy stops
 listing it, so a newest version that is withdrawn keeps being chosen, and its
@@ -57,10 +67,10 @@ Effort goes to the provider as `reasoning_effort` (Codex routes) or
 routed model. Fable is not in the pool. The route is fixed for the subagent
 session while the OpenCode server runs, including when it is resumed; after a
 restart a resumed subagent is routed again. Only the tier confidence is gated;
-the effort and prose answers are used as they come. If the tier confidence is
+the effort and dialogue answers are used as they come. If the tier confidence is
 below 0.5, the answer is malformed, the model is missing from the catalog, or
 Jev errors or takes longer than 3 s, the subagent keeps the parent's model and
-effort (Astra under Auto). The session lookup before it has its own 3 s limit,
+effort (Sol under Auto). The session lookup before it has its own 3 s limit,
 so the worst case adds about 6 s. A new subagent under a non-OpenAI/Anthropic
 parent gets no routing; one routed earlier keeps its route. Normal tools use no model and are not routed.
 
@@ -68,6 +78,9 @@ A line `route: <family>:<effort>` (or `<family>_<effort>`, the form
 `jev_decide` candidate ids allow) on its own line in the subagent's task pins
 the route with no Jev call and is logged as `status: "pinned"`. The review gate
 in AGENTS.md uses it to run the reviewer on the model its own Jev call picked.
+The injected `jev-checks.md` tells the agent to pass the same Sol/Opus
+preferences to that call, so an explicit reviewer selection follows the
+policy too.
 Families are `luna`, `astra`, `sol`, `haiku`, `sonnet` and `opus`; a full ID
 such as `claude-opus-5` also works. Either way the newest version of that
 family runs. Haiku is enabled in CLIProxy by
@@ -95,11 +108,13 @@ on `127.0.0.1` and points the `cliproxy` provider at. The plugin tags each
 request with its session (`chat.headers`); the tag is removed before CLIProxy.
 Jev reads the task (the first user message) and the latest action with its
 result, both cut to a few thousand characters and without thinking, and scores
-the next step's tier (small, medium, large) and effort.
+the next step's tier (small, medium, large), effort and whether it needs a
+substantive decision or user discussion.
 
 - Claude requests: the step runs on the newest Haiku, Sonnet or Opus for the
   tier, at Jev's effort (`output_config.effort`). Any Claude model can go to any
-  of the three. Haiku gets no thinking or effort and at most 64K output tokens,
+  of the three. Decisions and user discussion select Opus even at a lower
+  tier. Haiku gets no thinking or effort and at most 64K output tokens,
   and is skipped (Sonnet instead) when the request is over 300K characters:
   code, JSON and Greek run at 2 to 3 characters a token, so that is 100K to
   150K tokens of its 200K window.
@@ -181,3 +196,7 @@ Checks: `node --test 2-k3s/13.t3code/one/files/jev-auto.test.mjs`.
 An isolated OpenCode run verified that the first typo task executed on Luna and
 a context-dependent follow-up executed on Astra. These are integration checks,
 not a task-quality benchmark or a claim of measured savings.
+
+The routing-policy tests cover Sol defaults, Opus deep dives and dialogue,
+confidence fallback, explicit pins and newest-version resolution. Earlier
+live-run examples above describe the policy at the time of those runs.
