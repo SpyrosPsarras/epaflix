@@ -67,14 +67,24 @@ spec:
           ports:
             - containerPort: 80
               name: http
+          # The entrypoint waits up to 120s for Postgres, then migrates: 300s grace.
+          startupProbe:
+            httpGet:
+              path: /api/v1/health
+              port: http
+            periodSeconds: 10
+            failureThreshold: 30
+            timeoutSeconds: 5
           readinessProbe:
             httpGet:
               path: /api/v1/health
               port: http
             periodSeconds: 30
+            timeoutSeconds: 5
+          # TCP, not /api/v1/health: health answers 503 on a startup error or a
+          # DB outage by design, and a restart loop would hide the reason.
           livenessProbe:
-            httpGet:
-              path: /api/v1/health
+            tcpSocket:
               port: http
             periodSeconds: 60
             failureThreshold: 3
