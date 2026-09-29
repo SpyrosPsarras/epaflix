@@ -86,6 +86,53 @@ and a migration design to Sol high. An isolated `opencode run` with an Opus 5.5
 parent ran an `explore` subagent on `codex/gpt-6-luna` with
 `reasoning_effort: low`.
 
+## Every step
+
+After the model is chosen, each step of the tool loop is re-routed: every
+request OpenCode sends to CLIProxyAPI that offers tools (a step of the agent,
+not a title or summary call) goes through a local proxy that this plugin starts
+on `127.0.0.1` and points the `cliproxy` provider at. The plugin tags each
+request with its session (`chat.headers`); the tag is removed before CLIProxy.
+Jev reads the task (the first user message) and the latest action with its
+result, both cut to a few thousand characters and without thinking, and scores
+the next step's tier (small, medium, large) and effort.
+
+- Claude requests: the step runs on the newest Haiku, Sonnet or Opus for the
+  tier, at Jev's effort (`output_config.effort`). Any Claude model can go to any
+  of the three. Haiku gets no thinking or effort and at most 64K output tokens,
+  and is skipped (Sonnet instead) when the request is over 300K characters:
+  code, JSON and Greek run at 2 to 3 characters a token, so that is 100K to
+  150K tokens of its 200K window.
+- Codex requests: only `reasoning_effort` changes; the model stays, because a
+  vendor switch mid-task breaks the history.
+- Unchanged: requests without tools, OpenRouter models, pinned subagents
+  (`route:`), and any step where the tier confidence is below 0.5 (Claude), Jev
+  errors or takes longer than 3 s. Effort is not gated on confidence: with a
+  0.5 gate, 6 of the first 8 live Codex steps were skipped, their effort
+  confidences 0.22 to 0.46 with scores between low and medium. A wrong effort
+  changes less than a wrong model.
+
+The proxy keeps request bodies as bytes and re-encodes only a rewritten step,
+streams responses through, passes upstream errors on unchanged, and returns an
+Anthropic-shaped 502 when CLIProxy is unreachable. OpenCode runs on Bun, so the
+proxy uses `Bun.serve` there (Bun's `node:http` never reports a client
+disconnect) and `node:http` under Node. A client abort aborts the upstream
+request. A stream that breaks midway ends with a protocol error event
+(`event: error` for Claude, `data: {"error": ...}` for Codex), because Bun ends
+an errored response body cleanly. Only CLIProxy requests carry the session
+header, and the proxy removes it. `jev-steps.test.mjs` covers these under both
+runtimes in CI: `node --test`, and the runtime smoke (`env/tools/smoke.sh`)
+runs it with the Bun inside the pinned OpenCode binary. By hand on the pod:
+`BUN_BE_BUN=1 /tools/node_modules/opencode-linux-x64/bin/opencode run ./jev-steps.test.mjs`.
+
+Each step costs one Jev call ($0.00002 to $0.00007 in the live runs) and 250 to 550 ms, and a model
+switch drops the prompt cache. Records have `mode: "step"`: session, requested
+and actual model, effort, Jev's scores and confidences, latency, cost. No
+prompt text. On 2026-09-29 isolated `opencode run`s fixed a failing test: an
+Opus 5.5 thread given the task in Greek took 4 steps, two on Sonnet 5.5 and two
+on Haiku 4.5; an Astra thread took 13, each with Jev's effort; a pinned
+`route: sonnet_low` subagent ran untouched.
+
 ## Skills
 
 For every message you send on an OpenAI or Anthropic model (not subagents), one
