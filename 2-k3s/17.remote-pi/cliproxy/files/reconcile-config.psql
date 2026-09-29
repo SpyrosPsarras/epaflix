@@ -460,7 +460,11 @@ END $$;
 --
 -- No `store.version` on purpose: a plugin version is pinned in exactly one
 -- place, its fetch-plugin.sh arguments in deployment.yaml, and the host loads
--- the .so that is present.
+-- the .so that is present. The panel's Plugin Store writes a `store:` block
+-- (with `version`) into a plugin's config on install, and the v8 host then
+-- silently skips any .so whose version differs (selectPluginFilesWithCandidates
+-- in internal/pluginhost/platform.go). A renovate bump alone unregistered
+-- opencode-cloak that way, so every plugin's `store:` block is deleted here.
 -- `allow_all_api_keys` keeps quota readable by the same client key used for
 -- model calls - the plugin's whole point - and never exposes the management key.
 --
@@ -497,6 +501,9 @@ BEGIN
 
   c := regexp_replace(c, '^  enabled:[ \t]*false[ \t]*$', '  enabled: true', 'n');
   c := regexp_replace(c, '^  dir:[ \t]*"plugins"[ \t]*$', '  dir: "/CLIProxyAPI/plugins"', 'n');
+
+  -- Drop `plugins.configs.<id>.store` and every deeper-indented line under it.
+  c := regexp_replace(c, '^      store:[ \t]*\n(( {7}[^\n]*)?\n)*', '', 'gn');
 
   -- Authenticate GitHub release metadata requests; leave artifact hosts unauthenticated.
   IF NOT EXISTS (SELECT 1 FROM regexp_matches(c, '^[ \t]+token-env:[ \t]*"?CLIPROXY_GITHUB_TOKEN"?[ \t]*$', 'n')) THEN
@@ -682,6 +689,9 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM regexp_matches(c, '^\s*opencode-cloak:[ \t]*$', 'n')) THEN
     RAISE EXCEPTION 'plugins.configs.opencode-cloak is missing';
+  END IF;
+  IF EXISTS (SELECT 1 FROM regexp_matches(c, '^[ \t]+store:[ \t]*$', 'n')) THEN
+    RAISE EXCEPTION 'a plugins.configs entry still has a store: block - it pins a version the .so may not match';
   END IF;
 
   -- Both openai-compatibility providers, and one alias from each, so a splice
