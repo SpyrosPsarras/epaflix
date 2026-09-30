@@ -27,6 +27,20 @@ class Backup(unittest.TestCase):
             with sqlite3.connect(copies[-1] / 'statev2.sqlite') as db:
                 self.assertEqual(db.execute('select value from data').fetchone()[0], 'saved')
 
+    def test_attachment_recovery_copy(self):
+        with tempfile.TemporaryDirectory() as temp:
+            home = pathlib.Path(temp)
+            (home / 'userdata/attachments').mkdir(parents=True)
+            (home / 'userdata/attachments/file.txt').write_text('attachment')
+            with sqlite3.connect(home / 'userdata/statev2.sqlite') as db:
+                db.execute('create table data(value)')
+            copy = module.backup(home, 'restore', reserve=0)
+            self.assertEqual((copy / 'attachments/file.txt').read_text(), 'attachment')
+            restored = home / 'restored.sqlite'
+            with sqlite3.connect(copy / 'statev2.sqlite') as src, sqlite3.connect(restored) as target:
+                src.backup(target)
+                self.assertEqual(target.execute('pragma integrity_check').fetchone()[0], 'ok')
+
     def test_space_requirement_blocks_without_pruning(self):
         with tempfile.TemporaryDirectory() as temp:
             home = pathlib.Path(temp)

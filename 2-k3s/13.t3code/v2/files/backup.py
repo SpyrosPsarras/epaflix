@@ -12,7 +12,11 @@ def backup(home, label, reserve=8 * 1024**3):
     source = home / 'userdata/statev2.sqlite'
     root = home / 'backups'
     settings = [home / 'userdata/settings.json', home / 'monitor.json']
-    size = source.stat().st_size + sum(p.stat().st_size for p in settings if p.exists())
+    attachments = home / 'userdata/attachments'
+    attachment_files = list(attachments.rglob('*')) if attachments.exists() else []
+    if attachments.is_symlink() or any(p.is_symlink() for p in attachment_files):
+        raise ValueError('Attachment backup must not follow symlinks')
+    size = source.stat().st_size + sum(p.stat().st_size for p in settings if p.exists()) + sum(p.stat().st_size for p in attachment_files if p.is_file())
     if shutil.disk_usage(home).free < reserve + size * 2:
         raise OSError('Insufficient backup and free-space headroom')
     if not label or '/' in label or label in {'.', '..'}:
@@ -32,8 +36,10 @@ def backup(home, label, reserve=8 * 1024**3):
         for path in settings:
             if path.exists():
                 shutil.copy2(path, temporary / path.name)
+        if attachments.exists():
+            shutil.copytree(attachments, temporary / 'attachments')
         for path in temporary.iterdir():
-            path.chmod(0o600)
+            path.chmod(0o700 if path.is_dir() else 0o600)
         if shutil.disk_usage(home).free < reserve:
             raise OSError('Backup crossed free-space floor')
         os.replace(temporary, destination)
