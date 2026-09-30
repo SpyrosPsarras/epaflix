@@ -1,0 +1,11 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: t3code
+resources:
+  - storage.yaml
+  - statefulset.yaml
+  - service.yaml
+  - rollout-gate.yaml
+  - image-prepull.yaml
+generators:
+  - ksops-generator.yaml
