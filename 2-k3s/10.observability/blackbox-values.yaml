@@ -55,5 +55,3 @@ serviceMonitor:
     - name: truenas-ui
       url: https://192.168.10.200:8443
       hostname: truenas.epaflix.com
-    - name: deltasync
-      url: https://deltasync.epaflix.com/api/v1/health

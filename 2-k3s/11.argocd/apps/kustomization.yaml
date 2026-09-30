@@ -11,7 +11,6 @@ resources:
   - app-cert-manager.yaml
   - app-coredns.yaml
   - app-deal-finder.yaml
-  - app-deltasync.yaml
   - app-kube-vip.yaml
   - app-kube-vip-cloud-provider.yaml
   - app-maintenance.yaml
