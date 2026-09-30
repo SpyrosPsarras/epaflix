@@ -50,6 +50,9 @@ rm -f "$OC_DIR/plugins/jev-shadow.js"
 install -m 0644 /scripts/jev-auto.js "$OC_DIR/plugins/jev-auto.js"
 # Tool-call guard (jev-guard.md); the config block below adds cc-safety-net and bash denies.
 install -m 0644 /scripts/jev-guard.js "$OC_DIR/plugins/jev-guard.js"
+# Permit vault attachment names while protecting SSH files in both HOME locations.
+python3 /scripts/ssh-policy.py "$HOME/.cc-safety-net/policy.json" \
+  "$HOME" "$(getent passwd "$(id -u)" | cut -d: -f6)" /root
 # OpenCode Loop, pinned in env/tools/package.json and patched by env/Dockerfile
 # to keep its state out of worktrees. Same files its own installer copies; a
 # manual `npx @bybrawe/opencode-loop` update gets replaced on the next start.
