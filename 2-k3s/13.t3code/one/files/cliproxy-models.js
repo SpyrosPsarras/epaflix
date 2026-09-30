@@ -3,6 +3,7 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 
 const RETIRE_AFTER_MS = 14 * 24 * 60 * 60 * 1000
+const codexName = id => id.startsWith("codex-") ? id : `codex-${id.replace(/^gpt-/, "")}`
 
 // OpenCode calls this hook before building the provider inventory used by T3.
 export default async () => ({
@@ -16,6 +17,12 @@ export default async () => ({
     const cachePath = join(cacheDir, "cliproxy-models.json")
     const cached = await readFile(cachePath, "utf8").then(JSON.parse).catch(() => null)
     const usable = cached?.version === 5 && cached.url === url && Object.keys(cached.models ?? {}).length > 0
+    // Update old display names even when a credential is cooling down or the API is offline.
+    if (usable) {
+      for (const model of Object.values(cached.models)) {
+        if (model.id?.startsWith("codex/")) model.name = codexName(model.id.slice(6))
+      }
+    }
     const now = Date.now()
     let models
     const seen = {}
@@ -46,8 +53,7 @@ export default async () => ({
           name = `anthropic-${id.replace(/(\d)-(\d)(?=-|$)/g, "$1.$2")}`
           npm = "@ai-sdk/anthropic"
         } else if (subscription === "codex" && !id.startsWith("gpt-image-")) {
-          name = id.startsWith("codex-") ? id : `codex-${id.replace(/^gpt-(\d+(?:\.\d+)?)-([a-z]+)$/, (_, version, suffix) =>
-            ["mini", "nano", "codex"].includes(suffix) ? `${version}-${suffix}` : suffix).replace(/^gpt-/, "")}`
+          name = codexName(id)
           // Responses item IDs change between events in CLIProxyAPI's stream.
           // Chat Completions uses indexed deltas and avoids that broken parser path.
           npm = "@ai-sdk/openai-compatible"
