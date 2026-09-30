@@ -109,6 +109,7 @@ jobs:
           python3 2-k3s/13.t3code/v2/tools/bootstrap-projects.test.py
           python3 2-k3s/13.t3code/v2/tools/rollout-ready.test.py
           python3 2-k3s/13.t3code/v2/tools/backup.test.py
+          python3 2-k3s/13.t3code/v2/tools/render.test.py
 
       - name: Helm chart pins resolve
         run: |
