@@ -46,7 +46,7 @@ try {
   assert.equal(models["claude-fable-5-1"].name, "anthropic-claude-fable-5.1")
   assert.equal(models["claude-fable-5-1"].id, "claude/claude-fable-5-1")
   assert.equal(models["claude-fable-5-1"].provider.npm, "@ai-sdk/anthropic")
-  assert.equal(models["gpt-6-astra"].name, "codex-astra")
+  assert.equal(models["gpt-6-astra"].name, "codex-6-astra")
   assert.equal(models["gpt-6-astra"].id, "codex/gpt-6-astra")
   // CLIProxyAPI's Responses stream changes item IDs and crashes the Responses parser.
   assert.equal(models["gpt-6-astra"].provider.npm, "@ai-sdk/openai-compatible")
@@ -98,6 +98,27 @@ try {
   assert.deepEqual(Object.keys(config.provider.cliproxy.models), ["or-new-model"])
   assert.deepEqual(config.provider.cliproxy.models["or-new-model"].modalities.input, ["text", "image"])
   assert.equal(config.provider.cliproxy.models["or-new-model"].attachment, true)
+  // Distinct versions stay distinguishable, including old names in an offline cache.
+  const versions = ["gpt-6.1-sol", "gpt-6-sol", "gpt-5.6-sol", "gpt-6-luna", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.5", "codex-auto-review"]
+  globalThis.fetch = async () => Response.json({ models: versions.map(id => ({ slug: `codex/${id}` })) })
+  await hook.config(config)
+  for (const id of versions) {
+    assert.equal(config.provider.cliproxy.models[id].name, id.startsWith("codex-") ? id : `codex-${id.slice(4)}`)
+    assert.equal(config.provider.cliproxy.models[id].id, `codex/${id}`)
+  }
+  const oldNames = JSON.parse(await readFile(cachePath, "utf8"))
+  for (const id of versions) oldNames.models[id].name = "old-label"
+  await writeFile(cachePath, JSON.stringify(oldNames))
+  globalThis.fetch = async () => new Response("unavailable", { status: 503 })
+  await hook.config(config)
+  assert.equal(config.provider.cliproxy.models["gpt-6.1-sol"].name, "codex-6.1-sol")
+  globalThis.fetch = async () => Response.json({ models: [{ slug: "openrouter/or-new-model" }] })
+  await hook.config(config)
+  assert.equal(config.provider.cliproxy.models["gpt-5.6-luna"].name, "codex-5.6-luna")
+  // Restore the single-model cache used by the remaining fallback checks.
+  await writeFile(cachePath, "{not json")
+  await hook.config(config)
+  globalThis.fetch = async () => new Response("unavailable", { status: 503 })
   config.provider.cliproxy.options.baseURL = "https://different.invalid/v1"
   await assert.rejects(hook.config(config), /HTTP 503/)
   config.provider.cliproxy.options.baseURL = "https://proxy.invalid/v1"
