@@ -8,8 +8,10 @@ import { setTimeout as delay } from 'node:timers/promises';
 const home = await mkdtemp(join(tmpdir(), 't3-v2-container-probe-'));
 const env = { PATH: process.env.PATH, HOME: home, T3CODE_HOME: join(home, '.t3') };
 const binary = process.env.PROBE_BINARY ?? '/src/apps/server/dist/bin.mjs';
+const executable = process.env.PROBE_EXECUTABLE ?? process.execPath;
+const prefix = process.env.PROBE_EXECUTABLE ? [] : [binary];
 const origin = 'http://127.0.0.1:13773';
-const server = spawn(process.execPath, [binary, 'start', '--no-browser', '--host', '127.0.0.1', '--port', '13773', '--base-dir', env.T3CODE_HOME, home], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+const server = spawn(executable, [...prefix, 'start', '--no-browser', '--host', '127.0.0.1', '--port', '13773', '--base-dir', env.T3CODE_HOME, home], { env, stdio: ['ignore', 'pipe', 'pipe'] });
 let log = '';
 server.stdout.on('data', chunk => { log = (log + chunk).slice(-12000); });
 server.stderr.on('data', chunk => { log = (log + chunk).slice(-12000); });
@@ -29,7 +31,7 @@ try {
     const response = await fetch(origin + path, { signal: AbortSignal.timeout(5000) });
     assert.equal(response.status, 200);
   }
-  const token = execFileSync(process.execPath, [binary, 'auth', 'session', 'issue', '--base-dir', env.T3CODE_HOME, '--ttl', '5m', '--token-only'], { env, encoding: 'utf8' }).trim();
+  const token = execFileSync(executable, [...prefix, 'auth', 'session', 'issue', '--base-dir', env.T3CODE_HOME, '--ttl', '5m', '--token-only'], { env, encoding: 'utf8' }).trim();
   const count = async () => {
     const response = await fetch(`${origin}/api/auth/clients`, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(5000) });
     assert.equal(response.status, 200);
