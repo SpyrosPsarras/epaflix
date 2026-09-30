@@ -13,7 +13,7 @@ metadata:
   name: syncthing-data-pv
 spec:
   capacity:
-    storage: 1Ti
+    storage: 512Gi
   accessModes:
     - ReadWriteOnce
   persistentVolumeReclaimPolicy: Retain
@@ -40,4 +40,4 @@ spec:
   storageClassName: syncthing-local
   resources:
     requests:
-      storage: 1Ti
+      storage: 512Gi
