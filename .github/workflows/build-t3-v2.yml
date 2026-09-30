@@ -8,6 +8,7 @@ on:
     paths:
       - '2-k3s/13.t3code/env/**'
       - '2-k3s/13.t3code/one/files/**'
+      - '2-k3s/13.t3code/one/private-agent-config.enc.yaml'
       - '2-k3s/13.t3code/versions.env'
       - '2-k3s/13.t3code/v2/**'
       - '.github/workflows/build-t3-v2.yml'
@@ -43,9 +44,10 @@ jobs:
             exit 1
           fi
           base_tag=$(bash 2-k3s/13.t3code/env/tools/runtime-tag.sh)
-          inputs=$({ printf '%s\n' "$base_tag"; git ls-files 2-k3s/13.t3code/v2/Dockerfile 2-k3s/13.t3code/v2/Dockerfile.dockerignore 2-k3s/13.t3code/v2/files 2-k3s/13.t3code/v2/projects.json 2-k3s/13.t3code/v2/probe/smoke.mjs 2-k3s/13.t3code/v2/tools/install-extra-tools.sh 2-k3s/13.t3code/v2/tools/full-smoke.py 2-k3s/13.t3code/one/files | xargs sha256sum; } | sha256sum | cut -c1-16)
+          inputs=$({ printf '%s\n' "$base_tag"; git ls-files 2-k3s/13.t3code/v2/Dockerfile 2-k3s/13.t3code/v2/Dockerfile.dockerignore 2-k3s/13.t3code/v2/files 2-k3s/13.t3code/v2/projects.json 2-k3s/13.t3code/v2/provision.enc.yaml 2-k3s/13.t3code/one/private-agent-config.enc.yaml 2-k3s/13.t3code/v2/probe/smoke.mjs 2-k3s/13.t3code/v2/tools/install-extra-tools.sh 2-k3s/13.t3code/v2/tools/full-smoke.py 2-k3s/13.t3code/one/files | xargs sha256sum; } | sha256sum | cut -c1-16)
           echo "revision=$revision" >> "$GITHUB_OUTPUT"
           echo "base=ghcr.io/spyrospsarras/t3-runtime:inputs-$base_tag" >> "$GITHUB_OUTPUT"
+          echo "inputs=$inputs" >> "$GITHUB_OUTPUT"
           echo "image=ghcr.io/spyrospsarras/t3-runtime-v2:$revision-$inputs" >> "$GITHUB_OUTPUT"
           current=$(python3 -c 'import json;print(json.load(open("2-k3s/13.t3code/v2/runtime.json")).get("candidateTag",""))')
           echo "changed=$([[ "$current" != "$revision-$inputs" ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
@@ -63,6 +65,7 @@ jobs:
           docker build -f 2-k3s/13.t3code/v2/Dockerfile
           --build-arg UPSTREAM_REVISION=${{ steps.candidate.outputs.revision }}
           --build-arg BASE_IMAGE=${{ steps.candidate.outputs.base }}
+          --build-arg CONFIG_INPUT_HASH=${{ steps.candidate.outputs.inputs }}
           -t ${{ steps.candidate.outputs.image }} 2-k3s/13.t3code
       - name: Verify executable without production secrets
         if: steps.candidate.outputs.changed == 'true'
@@ -100,6 +103,12 @@ jobs:
           git fetch origin main
           branch="automation/t3code-v2-${GITHUB_RUN_ID}"
           git switch -c "$branch" origin/main
+          base_tag=$(bash 2-k3s/13.t3code/env/tools/runtime-tag.sh)
+          current_inputs=$({ printf '%s\n' "$base_tag"; git ls-files 2-k3s/13.t3code/v2/Dockerfile 2-k3s/13.t3code/v2/Dockerfile.dockerignore 2-k3s/13.t3code/v2/files 2-k3s/13.t3code/v2/projects.json 2-k3s/13.t3code/v2/provision.enc.yaml 2-k3s/13.t3code/one/private-agent-config.enc.yaml 2-k3s/13.t3code/v2/probe/smoke.mjs 2-k3s/13.t3code/v2/tools/install-extra-tools.sh 2-k3s/13.t3code/v2/tools/full-smoke.py 2-k3s/13.t3code/one/files | xargs sha256sum; } | sha256sum | cut -c1-16)
+          if [[ "${IMAGE##*-}" != "$current_inputs" ]]; then
+            echo 'Runtime inputs changed during the build; discard stale promotion and retry next hour.'
+            exit 0
+          fi
           python3 - <<'PY'
           import json,os,pathlib,re
           root=pathlib.Path('2-k3s/13.t3code/v2')

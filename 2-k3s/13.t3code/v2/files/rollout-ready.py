@@ -68,6 +68,16 @@ def status_blockers(kind, statuses):
     return [kind] if any(status in active for status in statuses) else []
 
 
+def provider_background(raw):
+    payload = json.loads(raw)
+    if not isinstance(payload, dict):
+        raise ValueError('Invalid provider thread payload')
+    tasks = payload.get('pendingBackgroundTasks', [])
+    if not isinstance(tasks, list) or any(not isinstance(task, dict) for task in tasks):
+        raise ValueError('Invalid provider background task list')
+    return bool(tasks)
+
+
 def terminal_blockers(server_pid, proc_root=pathlib.Path('/proc')):
     # Only inspect the server's PTY children; inherited idle shells are allowed.
     processes = {}
@@ -86,6 +96,8 @@ def terminal_blockers(server_pid, proc_root=pathlib.Path('/proc')):
     for pid, (parent, tty, command) in processes.items():
         if parent != server_pid or tty == 0:
             continue
+        if command.removeprefix('-') not in {'sh', 'bash', 'zsh', 'fish', 'dash', 'ksh'}:
+            return ['terminal']
         for child, (child_parent, _, child_command) in processes.items():
             if child_parent == pid and (child_command != command or any(p == child for p, _, _ in processes.values())):
                 return ['terminal']
@@ -104,8 +116,9 @@ def observe(home, origin, credential):
         blockers += status_blockers('requests', [row[0] for row in db.execute('select status from orchestration_v2_projection_runtime_requests')])
         blockers += status_blockers('items', [row[0] for row in db.execute("select status from orchestration_v2_projection_turn_items where type in ('command_execution','dynamic_tool','subagent')")])
         blockers += status_blockers('effects', [row[0] for row in db.execute('select status from orchestration_v2_effect_outbox')])
+        if any(provider_background(row[0]) for row in db.execute('select payload_json from orchestration_v2_projection_provider_threads')):
+            blockers.append('provider-background')
         checks = {
-            'provider-background': "select count(*) from orchestration_v2_projection_provider_threads where json_array_length(payload_json,'$.pendingBackgroundTasks')>0",
             'effects': "select count(*) from orchestration_v2_effect_outbox where status in ('pending','running') and effect_type in ('provider-turn.start','provider-turn.interrupt','provider-turn.steer','provider-turn.restart','runtime-request.respond')",
             # 15 minute observation plus a conservative five-minute restart allowance.
             'schedule': "select count(*) from scheduled_tasks where last_run_status='running' or (enabled=1 and next_run_at <= strftime('%Y-%m-%dT%H:%M:%fZ','now','+20 minutes'))",
