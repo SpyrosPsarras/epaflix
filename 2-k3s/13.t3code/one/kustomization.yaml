@@ -30,6 +30,7 @@ configMapGenerator:
       - files/cliproxy-models.js
       - files/jev-auto.js
       - files/jev-guard.js
+      - files/ssh-policy.py
       - files/jev-checks.md
       - files/opencode-fast-version.sh
 
