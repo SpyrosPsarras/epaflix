@@ -1,0 +1,89 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: t3code-v2-rollout
+  namespace: t3code
+  annotations:
+    argocd.argoproj.io/sync-wave: '-3'
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: t3code-v2-rollout
+  namespace: t3code
+  annotations:
+    argocd.argoproj.io/sync-wave: '-3'
+rules:
+  - apiGroups: ['']
+    resources: [pods]
+    resourceNames: [t3code-v2-0]
+    verbs: [get]
+  - apiGroups: ['']
+    resources: [pods/exec]
+    resourceNames: [t3code-v2-0]
+    verbs: [get, create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: t3code-v2-rollout
+  namespace: t3code
+  annotations:
+    argocd.argoproj.io/sync-wave: '-3'
+subjects:
+  - kind: ServiceAccount
+    name: t3code-v2-rollout
+    namespace: t3code
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: t3code-v2-rollout
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: t3code-v2-rollout
+  namespace: t3code
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/sync-wave: '-1'
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 1800
+  template:
+    spec:
+      serviceAccountName: t3code-v2-rollout
+      restartPolicy: Never
+      containers:
+        - name: gate
+          image: ghcr.io/spyrospsarras/t3-runtime:inputs-de0baaa22ef10175ade9f0ed68a5c272
+          command:
+            - bash
+            - -c
+            - |
+              set -euo pipefail
+              # A 404 allows initial creation only. Other API failures block.
+              result=$(kubectl -n t3code get pod t3code-v2-0 --ignore-not-found -o name)
+              [[ -n "$result" ]] || exit 0
+              running=$(kubectl -n t3code get pod t3code-v2-0 -o json | python3 -c 'import json,sys; p=json.load(sys.stdin); print(any("running" in c.get("state",{}) for c in p.get("status",{}).get("containerStatuses",[]) if c.get("name")=="t3-v2"))')
+              if [[ "$running" == False ]]; then
+                echo 'V2 server container is stopped; allow recovery as for the current T3 pod. No fresh backup was taken.'
+                exit 0
+              fi
+              elapsed=0
+              previous=$(date +%s)
+              while (( elapsed < 900 )); do
+                now=$(date +%s)
+                if (( now < previous || now - previous > 30 )); then elapsed=0; fi
+                previous=$now
+                if kubectl -n t3code exec t3code-v2-0 -c t3-v2 -- python3 /v2/rollout-ready.py --home /home/spyros/.t3 --credential /home/spyros/.t3/monitor.json; then
+                  elapsed=$((elapsed + 15))
+                else
+                  elapsed=0
+                fi
+                sleep 15
+              done
+              kubectl -n t3code exec t3code-v2-0 -c t3-v2 -- python3 /v2/rollout-ready.py --home /home/spyros/.t3 --credential /home/spyros/.t3/monitor.json
+              kubectl -n t3code exec t3code-v2-0 -c t3-v2 -- python3 /v2/backup.py --home /home/spyros/.t3 --label "$(date -u +%Y%m%dT%H%M%SZ)"
+              kubectl -n t3code exec t3code-v2-0 -c t3-v2 -- python3 /v2/rollout-ready.py --home /home/spyros/.t3 --credential /home/spyros/.t3/monitor.json

@@ -1,0 +1,6 @@
+{
+  "upstreamRevision": "0fb3731eb43762459cdab350bf9a8cc247d09548",
+  "reviewedActivityRevision": "0fb3731eb43762459cdab350bf9a8cc247d09548",
+  "image": "ghcr.io/spyrospsarras/t3-runtime-v2@sha256:67a5f96f1b83835ec331dfaffed33d4dc43e6febd63f3ae81053dd9bbfe5af1a",
+  "candidateTag": "0fb3731eb43762459cdab350bf9a8cc247d09548-8c9f58827b316f56"
+}

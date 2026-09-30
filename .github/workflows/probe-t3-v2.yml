@@ -1,0 +1,26 @@
+name: probe-t3-v2
+on:
+  workflow_dispatch:
+  push:
+    branches: [t3code/a5bf2355-v2-probe]
+    paths:
+      - '.github/workflows/probe-t3-v2.yml'
+      - '2-k3s/13.t3code/v2/probe/**'
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build pinned upstream v2 with synthetic configuration
+        run: >-
+          docker build
+          --build-arg UPSTREAM_REVISION=0a42dd3921b12ff9bbc89058a15e51c21764b430
+          -t t3-v2-probe
+          2-k3s/13.t3code/v2/probe
+      - name: Verify container runtime without production secrets
+        run: timeout 180 docker run --rm --network none t3-v2-probe
