@@ -66,6 +66,11 @@ spec:
               # A 404 allows initial creation only. Other API failures block.
               result=$(kubectl -n t3code get pod t3code-v2-0 --ignore-not-found -o name)
               [[ -n "$result" ]] || exit 0
+              running=$(kubectl -n t3code get pod t3code-v2-0 -o json | python3 -c 'import json,sys; p=json.load(sys.stdin); print(any("running" in c.get("state",{}) for c in p.get("status",{}).get("containerStatuses",[]) if c.get("name")=="t3-v2"))')
+              if [[ "$running" == False ]]; then
+                echo 'V2 server container is stopped; allow recovery as for the current T3 pod. No fresh backup was taken.'
+                exit 0
+              fi
               elapsed=0
               while (( elapsed < 900 )); do
                 if kubectl -n t3code exec t3code-v2-0 -c t3-v2 -- python3 /v2/rollout-ready.py --home /home/spyros/.t3 --credential /home/spyros/.t3/monitor.json; then

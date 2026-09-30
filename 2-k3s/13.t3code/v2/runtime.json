@@ -1,5 +1,6 @@
 {
   "upstreamRevision": "0fb3731eb43762459cdab350bf9a8cc247d09548",
-  "image": "ghcr.io/spyrospsarras/t3-runtime-v2@sha256:5c948a72d18bf1740f49e60b0a71f7f8ed0e85ad4eb4e823b5e5e6d724e015ea",
-  "candidateTag": "0fb3731eb43762459cdab350bf9a8cc247d09548-f6405c4b7cc717e1"
+  "reviewedActivityRevision": "0fb3731eb43762459cdab350bf9a8cc247d09548",
+  "image": "ghcr.io/spyrospsarras/t3-runtime-v2@sha256:67254575fb9d92c2a2a306040b07b8e2daf242cfa89fd057d7fbad4f76e81948",
+  "candidateTag": "0fb3731eb43762459cdab350bf9a8cc247d09548-b847832032004206"
 }

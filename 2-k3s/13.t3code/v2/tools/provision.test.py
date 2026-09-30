@@ -54,6 +54,52 @@ class Provision(unittest.TestCase):
             with self.assertRaises(ValueError):
                 module.install(home, {'.kube/config': 'data'})
 
+    def test_json_key_refresh_preserves_user_edits(self):
+        with tempfile.TemporaryDirectory() as temp:
+            home = pathlib.Path(temp)
+            name = '.config/opencode/opencode.json'
+            module.install(home, {name: '{"provider":{"cliproxy":{"name":"old"}},"model":"old"}'})
+            (home / name).write_text('{"provider":{"cliproxy":{"name":"old"}},"model":"user","local":true}')
+            conflicts = module.install(home, {name: '{"provider":{"cliproxy":{"name":"new"}},"model":"new"}'})
+            import json
+            result = json.loads((home / name).read_text())
+            self.assertEqual(result['provider']['cliproxy']['name'], 'new')
+            self.assertEqual(result['model'], 'user')
+            self.assertTrue(result['local'])
+            self.assertIn(name + ':model', conflicts)
+
+    def test_toml_managed_value_refresh_preserves_user_value(self):
+        with tempfile.TemporaryDirectory() as temp:
+            home = pathlib.Path(temp)
+            name = '.codex/config.toml'
+            module.install(home, {name: '[mcp_servers.test]\nurl = "old"\nmodel = "old"\n'})
+            (home / name).write_text('[mcp_servers.test]\nurl = "old"\nmodel = "user"\n')
+            conflicts = module.install(home, {name: '[mcp_servers.test]\nurl = "new"\nmodel = "new"\n'})
+            self.assertIn('url = "new"', (home / name).read_text())
+            self.assertIn('model = "user"', (home / name).read_text())
+            self.assertTrue(conflicts)
+
+    def test_new_toml_section_with_two_keys_survives_next_refresh(self):
+        import tomllib
+        with tempfile.TemporaryDirectory() as temp:
+            home = pathlib.Path(temp)
+            name = '.codex/config.toml'
+            module.install(home, {name: 'model = "a"\n'})
+            incoming = 'model = "a"\n[mcp_servers.hub]\nurl = "http://hub"\nbearer_token_env_var = "HUB_TOKEN"\n'
+            module.install(home, {name: incoming})
+            parsed = tomllib.loads((home / name).read_text())
+            self.assertEqual(parsed['mcp_servers']['hub']['bearer_token_env_var'], 'HUB_TOKEN')
+            module.install(home, {name: incoming})
+            self.assertEqual(tomllib.loads((home / name).read_text()), parsed)
+
+    def test_toml_insert_does_not_shift_later_replacement(self):
+        import tomllib
+        old = '[a]\nx = 1\n[b]\ny = 1\n'
+        incoming = '[a]\nx = 1\nnew = 2\n[b]\ny = 2\n'
+        merged, conflicts = module.merge_toml(old, old, incoming)
+        self.assertEqual(tomllib.loads(merged), {'a': {'x': 1, 'new': 2}, 'b': {'y': 2}})
+        self.assertEqual(conflicts, [])
+
 
 if __name__ == '__main__':
     unittest.main()
