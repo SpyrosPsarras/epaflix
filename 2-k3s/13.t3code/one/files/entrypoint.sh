@@ -88,13 +88,13 @@ fi
 
 # MCP hub (2-k3s/23.mcp-hub): every agent MCP server behind one gateway and
 # this pod's hub token. Register every hub path for OpenCode, Claude and Codex
-# in every home; the token stays an env reference, never a literal on the PVC.
+# in the active home; the token stays an env reference, never a literal on the PVC.
 # hub_clients.py also replaces the stdio keepass/searxng bridges and the
 # hosted Notion entries the hub superseded. The claudeAgent instances run with
 # CLAUDE_CONFIG_DIR=<home>/.claude (<home>/.claude/.claude.json); a plain
 # `claude` in a shell reads <home>/.claude.json. Both get the servers.
 if [[ -n ${MCP_HUB_TOKEN:-} && -n ${MCP_HUB_URL:-} ]]; then
-  for h in "$HOME" /home/t3env-*; do
+  for h in "$HOME"; do
     [[ -d $h ]] || continue
     python3 /scripts/hub_clients.py opencode "$h/.config/opencode/opencode.json" "$MCP_HUB_URL" \
       'Bearer {env:MCP_HUB_TOKEN}' || echo "t3env: hub opencode config failed in $h" >&2
@@ -215,11 +215,6 @@ PY
 
 echo "t3env: $(t3 --version) claude=$(claude --version 2>/dev/null | head -1) opencode=$(opencode --version 2>/dev/null | head -1) codex=$(codex --version 2>/dev/null | head -1)"
 python3 /scripts/private-config.py install /private-agent-config/bundle.json
-# Migrated env homes carry skill links that pointed at /home/t3. Re-link them
-# in place so the source-specific provider instances still find instructions.
-for extra in /home/t3env-*; do
-  [[ -d $extra/.t3 ]] && python3 /scripts/private-config.py install /private-agent-config/bundle.json --home "$extra"
-done
 # `serve` forces project bootstrap off; `start --no-browser` honors the flag.
 exec t3 start --no-browser --host 0.0.0.0 --port 3773 --base-dir "$T3_HOME" \
   --auto-bootstrap-project-from-cwd "$PROJECT_DIR"

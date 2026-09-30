@@ -1,8 +1,7 @@
 ---
 # The one T3 server. It replaced the t3code LXC and the two remote-pi/t3env
 # replicas, and runs as the old LXC identity (/home/spyros) so merged state, skills
-# and secrets keep their paths. The env homes are mounted read-write so their
-# provider instances can append to their own Codex/Claude/OpenCode stores.
+# and secrets keep their paths.
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -86,7 +85,7 @@ spec:
               value: $(GITHUB_TOKEN)
             # This pod's hub token (client "t3code", 2-k3s/23.mcp-hub); the
             # entrypoint registers every hub path for OpenCode, Claude and
-            # Codex in every home, as an env reference.
+            # Codex in the active home, as an env reference.
             - name: MCP_HUB_URL
               value: http://mcp-hub.mcp-hub.svc.cluster.local:8000
             - name: MCP_HUB_TOKEN
@@ -111,10 +110,6 @@ spec:
               readOnly: true
             - name: home-spyros
               mountPath: /home/spyros
-            - name: home-t3env-0
-              mountPath: /home/t3env-0
-            - name: home-t3env-1
-              mountPath: /home/t3env-1
             - name: private-config
               mountPath: /private-agent-config
               readOnly: true
@@ -157,12 +152,6 @@ spec:
         - name: home-spyros
           persistentVolumeClaim:
             claimName: home-spyros
-        - name: home-t3env-0
-          persistentVolumeClaim:
-            claimName: home-t3env-0
-        - name: home-t3env-1
-          persistentVolumeClaim:
-            claimName: home-t3env-1
         - name: private-config
           secret:
             secretName: t3code-private-config
