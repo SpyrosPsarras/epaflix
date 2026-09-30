@@ -18,6 +18,6 @@ spec:
         kubernetes.io/hostname: k3s-worker-65
       containers:
         - name: pull
-          image: ghcr.io/spyrospsarras/t3-runtime-v2:pending-validation
+          image: ghcr.io/spyrospsarras/t3-runtime-v2@sha256:5c948a72d18bf1740f49e60b0a71f7f8ed0e85ad4eb4e823b5e5e6d724e015ea
           imagePullPolicy: IfNotPresent
           command: ['true']
