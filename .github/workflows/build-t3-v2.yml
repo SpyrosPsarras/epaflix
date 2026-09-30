@@ -33,6 +33,15 @@ jobs:
         run: |
           set -euo pipefail
           revision=$(gh api repos/pingdotgg/t3code/git/ref/heads/t3code/codex-turn-mapping --jq .object.sha)
+          reviewed=$(python3 -c 'import json;print(json.load(open("2-k3s/13.t3code/v2/runtime.json"))["reviewedActivityRevision"])')
+          git clone --filter=blob:none --no-checkout https://github.com/pingdotgg/t3code.git /tmp/v2-upstream-check
+          git -C /tmp/v2-upstream-check cat-file -e "$reviewed^{commit}"
+          git -C /tmp/v2-upstream-check cat-file -e "$revision^{commit}"
+          git -C /tmp/v2-upstream-check diff --name-only "$reviewed" "$revision" > /tmp/v2-changed-paths
+          if grep -Eq '^(apps/server/src/persistence/Migrations/|apps/server/src/orchestration-v2/|packages/contracts/src/orchestrationV2|packages/contracts/src/environmentHttp|apps/server/src/scheduledTasks/|apps/server/src/auth/|apps/server/src/terminal/|packages/shared/src/orchestrationV2PendingBackgroundWork)' /tmp/v2-changed-paths; then
+            echo 'Upstream activity/auth contracts changed; gate revalidation is required before promotion.' >&2
+            exit 1
+          fi
           base_tag=$(bash 2-k3s/13.t3code/env/tools/runtime-tag.sh)
           inputs=$({ printf '%s\n' "$base_tag"; git ls-files 2-k3s/13.t3code/v2/Dockerfile 2-k3s/13.t3code/v2/Dockerfile.dockerignore 2-k3s/13.t3code/v2/files 2-k3s/13.t3code/v2/projects.json 2-k3s/13.t3code/v2/probe/smoke.mjs 2-k3s/13.t3code/v2/tools/install-extra-tools.sh 2-k3s/13.t3code/v2/tools/full-smoke.py 2-k3s/13.t3code/one/files | xargs sha256sum; } | sha256sum | cut -c1-16)
           echo "revision=$revision" >> "$GITHUB_OUTPUT"
@@ -97,7 +106,8 @@ jobs:
           for name in ['statefulset.yaml','image-prepull.yaml']:
             p=root/name
             p.write_text(re.sub(r'image: ghcr.io/spyrospsarras/t3-runtime-v2:[^\s]+|image: ghcr.io/spyrospsarras/t3-runtime-v2@[^\s]+', 'image: '+os.environ['DIGEST'],p.read_text()))
-          (root/'runtime.json').write_text(json.dumps({'upstreamRevision':os.environ['REVISION'],'image':os.environ['DIGEST'],'candidateTag':os.environ['IMAGE'].rsplit(':',1)[1]},indent=2)+'\n')
+          previous=json.loads((root/'runtime.json').read_text())
+          (root/'runtime.json').write_text(json.dumps({**previous,'upstreamRevision':os.environ['REVISION'],'image':os.environ['DIGEST'],'candidateTag':os.environ['IMAGE'].rsplit(':',1)[1]},indent=2)+'\n')
           PY
           if git diff --quiet; then exit 0; fi
           git -c user.name='T3 v2 update bot' -c user.email='t3-v2@epaflix.com' commit -am 'chore(t3code): update validated v2 runtime'
