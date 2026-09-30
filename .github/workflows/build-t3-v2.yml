@@ -1,0 +1,106 @@
+name: build-t3-v2
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 * * * *'
+  push:
+    branches: [main, t3code/a5bf2355-v2-probe]
+    paths:
+      - '2-k3s/13.t3code/env/**'
+      - '2-k3s/13.t3code/one/files/**'
+      - '2-k3s/13.t3code/versions.env'
+      - '2-k3s/13.t3code/v2/**'
+      - '.github/workflows/build-t3-v2.yml'
+concurrency:
+  group: t3-v2-candidate
+  cancel-in-progress: false
+permissions:
+  contents: read
+  packages: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Resolve immutable candidate inputs
+        id: candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          revision=$(gh api repos/pingdotgg/t3code/git/ref/heads/t3code/codex-turn-mapping --jq .object.sha)
+          base_tag=$(bash 2-k3s/13.t3code/env/tools/runtime-tag.sh)
+          inputs=$({ printf '%s\n' "$base_tag"; git ls-files 2-k3s/13.t3code/v2/Dockerfile 2-k3s/13.t3code/v2/Dockerfile.dockerignore 2-k3s/13.t3code/v2/files 2-k3s/13.t3code/v2/projects.json 2-k3s/13.t3code/v2/probe/smoke.mjs 2-k3s/13.t3code/v2/tools/install-extra-tools.sh 2-k3s/13.t3code/v2/tools/full-smoke.py 2-k3s/13.t3code/one/files | xargs sha256sum; } | sha256sum | cut -c1-16)
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+          echo "base=ghcr.io/spyrospsarras/t3-runtime:inputs-$base_tag" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/spyrospsarras/t3-runtime-v2:$revision-$inputs" >> "$GITHUB_OUTPUT"
+          current=$(python3 -c 'import json;print(json.load(open("2-k3s/13.t3code/v2/runtime.json")).get("candidateTag",""))')
+          echo "changed=$([[ "$current" != "$revision-$inputs" ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+      - name: Confirm maintained base image is available
+        run: docker manifest inspect '${{ steps.candidate.outputs.base }}' >/dev/null
+      - name: Run v2 behavioral tests
+        run: |
+          python3 2-k3s/13.t3code/v2/tools/provision.test.py
+          python3 2-k3s/13.t3code/v2/tools/bootstrap-projects.test.py
+          python3 2-k3s/13.t3code/v2/tools/rollout-ready.test.py
+          python3 2-k3s/13.t3code/v2/tools/backup.test.py
+      - name: Build native runtime candidate
+        if: steps.candidate.outputs.changed == 'true'
+        run: >-
+          docker build -f 2-k3s/13.t3code/v2/Dockerfile
+          --build-arg UPSTREAM_REVISION=${{ steps.candidate.outputs.revision }}
+          --build-arg BASE_IMAGE=${{ steps.candidate.outputs.base }}
+          -t ${{ steps.candidate.outputs.image }} 2-k3s/13.t3code
+      - name: Verify executable without production secrets
+        if: steps.candidate.outputs.changed == 'true'
+        run: >-
+          timeout 180 docker run --rm --network none
+          --entrypoint node -e PROBE_EXECUTABLE=/runtime/t3
+          ${{ steps.candidate.outputs.image }} /v2/smoke.mjs
+      - name: Verify supervisor and recovery path
+        if: steps.candidate.outputs.changed == 'true'
+        run: >-
+          timeout 240 docker run --rm --network none --user 0
+          --entrypoint python3 ${{ steps.candidate.outputs.image }} /v2/full-smoke.py
+      - name: Publish validated v2 image
+        if: steps.candidate.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE: ${{ steps.candidate.outputs.image }}
+        run: |
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker push "$IMAGE"
+      - name: Propose immutable image through protected main
+        if: steps.candidate.outputs.changed == 'true' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.T3_V2_BOT_TOKEN }}
+          IMAGE: ${{ steps.candidate.outputs.image }}
+          REVISION: ${{ steps.candidate.outputs.revision }}
+        run: |
+          set -euo pipefail
+          if [[ $(gh pr list --state open --json headRefName --jq '[.[] | select(.headRefName | startswith("automation/t3code-v2-"))] | length') != 0 ]]; then
+            echo 'Existing v2 candidate PR must finish before another promotion.'
+            exit 0
+          fi
+          digest=$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE")
+          export DIGEST="$digest"
+          git fetch origin main
+          branch="automation/t3code-v2-${GITHUB_RUN_ID}"
+          git switch -c "$branch" origin/main
+          python3 - <<'PY'
+          import json,os,pathlib,re
+          root=pathlib.Path('2-k3s/13.t3code/v2')
+          for name in ['statefulset.yaml','image-prepull.yaml']:
+            p=root/name
+            p.write_text(re.sub(r'image: ghcr.io/spyrospsarras/t3-runtime-v2:[^\s]+|image: ghcr.io/spyrospsarras/t3-runtime-v2@[^\s]+', 'image: '+os.environ['DIGEST'],p.read_text()))
+          (root/'runtime.json').write_text(json.dumps({'upstreamRevision':os.environ['REVISION'],'image':os.environ['DIGEST'],'candidateTag':os.environ['IMAGE'].rsplit(':',1)[1]},indent=2)+'\n')
+          PY
+          if git diff --quiet; then exit 0; fi
+          git -c user.name='T3 v2 update bot' -c user.email='t3-v2@epaflix.com' commit -am 'chore(t3code): update validated v2 runtime'
+          git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push origin "$branch"
+          url=$(gh pr create --head "$branch" --base main --title 'Update validated T3 Code v2 runtime' --body "Upstream revision: $REVISION. Native build and synthetic runtime checks passed. V2 rollout waits for disconnected idle state.")
+          gh pr merge "$url" --auto --merge

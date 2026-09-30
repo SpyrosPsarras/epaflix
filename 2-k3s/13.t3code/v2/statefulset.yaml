@@ -1,0 +1,129 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: t3code-v2
+  namespace: t3code
+spec:
+  serviceName: t3code-v2
+  replicas: 1
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: t3code-v2
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: t3code-v2
+    spec:
+      serviceAccountName: t3code
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      shareProcessNamespace: true
+      terminationGracePeriodSeconds: 60
+      nodeSelector:
+        kubernetes.io/hostname: k3s-worker-65
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: t3-v2
+          image: ghcr.io/spyrospsarras/t3-runtime-v2:pending-validation
+          env:
+            - name: HOME
+              value: /home/spyros
+            - name: T3CODE_HOME
+              value: /home/spyros/.t3
+            - name: T3_PROJECT_DIR
+              value: /home/spyros/epaflix
+            - name: ANTHROPIC_BASE_URL
+              value: http://cliproxy.remote-pi.svc.cluster.local:8317
+            - name: ANTHROPIC_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: cliproxy-secrets
+                  key: omp-api-key
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: cliproxy-secrets
+                  key: github-token
+            - name: GH_TOKEN
+              value: $(GITHUB_TOKEN)
+            - name: MCP_HUB_URL
+              value: http://mcp-hub.mcp-hub.svc.cluster.local:8000
+            - name: MCP_HUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: t3code-v2-mcp
+                  key: token
+            - name: JEV_OPENROUTER_KEY_FILE
+              value: /run/jev/openrouter-key
+            - name: OPENCODE_CONFIG_CONTENT
+              value: '{"enabled_providers":["cliproxy"]}'
+          ports:
+            - name: http
+              containerPort: 3773
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: home
+              mountPath: /home/spyros
+            - name: private-config
+              mountPath: /private-agent-config
+              readOnly: true
+            - name: provision
+              mountPath: /v2-private
+              readOnly: true
+            - name: ssh
+              mountPath: /run/t3-github-ssh
+              readOnly: true
+            - name: jev
+              mountPath: /run/jev
+              readOnly: true
+          startupProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 5
+            failureThreshold: 120
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: '1'
+              memory: 2Gi
+            limits:
+              memory: 12Gi
+      volumes:
+        - name: home
+          persistentVolumeClaim:
+            claimName: t3code-v2-home
+        - name: private-config
+          secret:
+            secretName: t3code-private-config
+            defaultMode: 0440
+        - name: provision
+          secret:
+            secretName: t3code-v2-provision
+            defaultMode: 0440
+        - name: ssh
+          secret:
+            secretName: t3code-github-ssh
+            defaultMode: 0440
+        - name: jev
+          secret:
+            secretName: t3code-jev
+            defaultMode: 0440

@@ -45,8 +45,10 @@ def write_private(path, text):
     os.replace(tmp, path)
 
 
-def t3code_secret(token):
-    sops_secret.publish([sops_secret.encrypt("2-k3s/13.t3code/one/mcp-hub-client.enc.yaml", "mcp-hub-client",
+def t3code_secret(token, name="t3code"):
+    path = "2-k3s/13.t3code/one/mcp-hub-client.enc.yaml" if name == "t3code" else "2-k3s/13.t3code/v2/mcp-client.enc.yaml"
+    secret = "mcp-hub-client" if name == "t3code" else "t3code-v2-mcp"
+    sops_secret.publish([sops_secret.encrypt(path, secret,
                                              "t3code", {"token": token})])
 
 
@@ -72,9 +74,9 @@ def main():
     key_file = os.path.expanduser(os.environ.get("KEY_FILE", "~/.config/opencode/mcp-hub.key"))
     os.umask(0o077)
 
-    if a.name == "t3code":
+    if a.name in ("t3code", "t3code-v2"):
         token = secrets.token_urlsafe(32)
-        t3code_secret(token)
+        t3code_secret(token, a.name)
     elif a.reuse:
         with open(key_file) as f:
             token = f.read().strip()
@@ -94,7 +96,7 @@ def main():
     os.chmod(clients_file, 0o644)
     print(f"registered {a.name} in {os.path.relpath(clients_file, ROOT)}")
 
-    if a.name != "t3code" and not a.no_configure:
+    if a.name not in ("t3code", "t3code-v2") and not a.no_configure:
         configure_pc(key_file)
     print("Commit and merge; ArgoCD rolls the hub" + (" and t3code." if a.name == "t3code" else "."))
 

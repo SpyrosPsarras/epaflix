@@ -1,0 +1,23 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: t3code-v2-image-prepull
+  namespace: t3code
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/sync-wave: '-2'
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  activeDeadlineSeconds: 1800
+  backoffLimit: 1
+  template:
+    spec:
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      nodeSelector:
+        kubernetes.io/hostname: k3s-worker-65
+      containers:
+        - name: pull
+          image: ghcr.io/spyrospsarras/t3-runtime-v2:pending-validation
+          imagePullPolicy: IfNotPresent
+          command: ['true']
