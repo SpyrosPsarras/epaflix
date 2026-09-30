@@ -15,9 +15,17 @@ Three layers, cheapest first. Research: `docs/jev-tool-guard-research.md`
 2. cc-safety-net, pinned in the entrypoint (`SAFETY_NET`) and put in the
    `plugin` list on every start. It parses commands and blocks destructive git
    and filesystem commands (`rm -rf`, `git reset --hard`, `git push --force`)
-   and reads of secret files (SSH keys, `.env`, `~/.aws`, `opencode.json`, CLI
+   and reads of secret files (SSH files, `.env`, `~/.aws`, `opencode.json`, CLI
    credential files) in every tool. Bump the pin by hand; Renovate does not
    track it.
+   The shared entrypoint runs `ssh-policy.py` to turn off
+   `secret.basename.id-ed25519` and `secret.pattern.ssh-key-basename`. These
+   rules also match a vault attachment identifier in Python, blocking SSH
+   authentication before any key is retrieved. Explicit deny paths protect
+   `.ssh` under the active HOME, the account's passwd HOME and `/root`, plus
+   `/run/t3-github-ssh`. Existing policy fields and deny paths survive. SSH
+   keys stored elsewhere no longer get basename-only protection from the
+   disabled rules. Jev still checks credential uploads in guarded sessions.
 3. `files/jev-guard.js`, an OpenCode plugin.
    - Every model, on the pod, nothing sent out:
      - blocks a tool call whose arguments hold a secret environment value
@@ -46,7 +54,11 @@ Three layers, cheapest first. Research: `docs/jev-tool-guard-research.md`
        downloads and runs code. "The wrong place" is anywhere but the service
        that issued the credential; calling a service with its own key, reading
        or decrypting secrets on the pod, and storing them in the vault or
-       cluster are fine. Blocked at risk >= 2.5, credential >= 0.8 or
+       cluster are fine. SSH authentication with `ssh -i` or an SSH agent
+       uses the private key locally to sign and is allowed, including a key
+       retrieved from the vault into a local temporary file. Copying the key
+       file or its contents to another host is still a credential leak.
+       Blocked at risk >= 2.5, credential >= 0.8 or
        download-and-run >= 0.8. Everything below runs. Ordinary data sent out
        (git push, deploys, API calls) is not asked about.
        Routine means `ls`, `pwd`, `echo`, `wc`, `rg`, `grep`, `which`, `stat`,
@@ -98,9 +110,14 @@ numbers, so a new threshold can be checked against past calls before it ships.
 ## Checks
 
 - Offline: `node --test 2-k3s/13.t3code/one/files/jev-guard.test.mjs` (in CI).
+- SSH policy: `SAFETY_NET_CLI=/path/to/cc-safety-net python3
+  2-k3s/13.t3code/one/files/ssh-policy.test.py`. The pinned 2.4.11 analyzer
+  checks vault attachment retrieval, SSH authentication, protected SSH files,
+  existing deny paths and force push. Commands are judged, never executed.
 - Live, after changing questions or thresholds:
   `XDG_STATE_HOME=$(mktemp -d) node 2-k3s/13.t3code/one/files/jev-guard.live.mjs`.
-  It judges 36 labeled commands (never runs them), about $0.001. On
+  It judges 39 labeled commands, never runs them, and fails on API errors
+  rather than counting a fail-open decision as a pass. On
   2026-09-28 against `jev-1.13` the first 21 matched, 250 to 560 ms per call.
   The first question wording blocked `npm install`, `git push`, `kubectl apply`
   and `gh pr create`. `git reset --hard && git clean -fdx` scored 2.12 and is
