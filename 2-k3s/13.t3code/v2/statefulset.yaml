@@ -33,7 +33,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: t3-v2
-          image: ghcr.io/spyrospsarras/t3-runtime-v2@sha256:67a5f96f1b83835ec331dfaffed33d4dc43e6febd63f3ae81053dd9bbfe5af1a
+          image: ghcr.io/spyrospsarras/t3-runtime-v2@sha256:75f99b75a7fba4ccf7e2b3e3922d5bf9d0d51316b4db80511c564d44eaf76bb1
           env:
             - name: HOME
               value: /home/spyros
