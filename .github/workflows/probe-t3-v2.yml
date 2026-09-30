@@ -1,6 +1,11 @@
 name: probe-t3-v2
 on:
   workflow_dispatch:
+  push:
+    branches: [t3code/a5bf2355-v2-probe]
+    paths:
+      - '.github/workflows/probe-t3-v2.yml'
+      - '2-k3s/13.t3code/v2/probe/**'
 permissions:
   contents: read
 jobs:
