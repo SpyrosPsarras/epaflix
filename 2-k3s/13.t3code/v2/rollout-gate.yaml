@@ -72,7 +72,11 @@ spec:
                 exit 0
               fi
               elapsed=0
+              previous=$(date +%s)
               while (( elapsed < 900 )); do
+                now=$(date +%s)
+                if (( now < previous || now - previous > 30 )); then elapsed=0; fi
+                previous=$now
                 if kubectl -n t3code exec t3code-v2-0 -c t3-v2 -- python3 /v2/rollout-ready.py --home /home/spyros/.t3 --credential /home/spyros/.t3/monitor.json; then
                   elapsed=$((elapsed + 15))
                 else

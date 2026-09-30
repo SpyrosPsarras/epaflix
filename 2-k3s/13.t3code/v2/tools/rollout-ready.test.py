@@ -82,6 +82,19 @@ class RolloutReadiness(unittest.TestCase):
             process(3, 2, 1, 'sleep')
             self.assertEqual(module.terminal_blockers(1, root), ['terminal'])
 
+    def test_exec_replaced_shell_blocks(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            for pid, parent, tty, command in [(1, 0, 0, 't3'), (2, 1, 1, 'sleep')]:
+                (root / str(pid)).mkdir()
+                (root / str(pid) / 'stat').write_text(f'{pid} ({command}) S {parent} 0 0 {tty} 0')
+            self.assertEqual(module.terminal_blockers(1, root), ['terminal'])
+
+    def test_malformed_provider_background_blocks(self):
+        for payload in ['[]', '{"pendingBackgroundTasks":"running"}', '{"pendingBackgroundTasks":{}}']:
+            with self.subTest(payload=payload), self.assertRaises(ValueError):
+                module.provider_background(payload)
+
     def test_stale_sample_does_not_count_as_continuous_idle(self):
         self.assertEqual(module.advance(100, [], 1000, last_sample=900), {'idleSince': 1000, 'eligible': False})
 

@@ -25,6 +25,8 @@ RUN npm install --global pnpm@11.10.0 \
     && tar -xzf "/tmp/archive/t3-$version-linux-x64.tar.gz" -C /runtime --strip-components=1
 
 FROM ${BASE_IMAGE}
+ARG CONFIG_INPUT_HASH
+LABEL t3code.epaflix.com/config-input-hash=$CONFIG_INPUT_HASH
 USER root
 COPY --from=build /runtime /runtime
 COPY one/files/ /scripts/
