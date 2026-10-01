@@ -112,11 +112,13 @@ fi
 
 # Primary home, with or without the hub: drop the Jev rules from the global
 # instructions (jev-auto.js scopes jev-checks per model), keeping every other one.
-# Also pin cc-safety-net (jev-guard.md) and seed bash denies once; an existing
+# Verify/install the reviewed guard before startup; failure aborts startup.
+/usr/bin/env -i PATH=/usr/local/bin:/usr/bin:/bin /usr/bin/python3 -I -S /scripts/cc-safety-net-install.py \
+  "$HOME/.local/share/opencode/cc-safety-net/2.4.11-print-third" --config "$OC_DIR/opencode.json"
+# Also seed bash denies once; an existing
 # permission.bash is left as the user set it.
 python3 - "$OC_DIR/opencode.json" "$OC_DIR/jev-checks.md" "$OC_DIR/jev-first.md" <<'PY' || echo "t3env: opencode.json guard/instructions update failed" >&2
 import json, os, sys, tempfile
-SAFETY_NET = "cc-safety-net@2.4.11"
 BASH_DENY = ["mkfs*", "dd *of=/dev/*", "kubectl delete *", "kubectl drain *", "kubectl cordon *",
              "helm uninstall *", "reboot*", "shutdown*", "poweroff*", "qm stop *", "qm shutdown *"]
 path, *retired = sys.argv[1:]
@@ -125,8 +127,6 @@ with open(path) as f:
 before = json.dumps(config, sort_keys=True)
 if "instructions" in config:
     config["instructions"] = [i for i in config["instructions"] if i not in retired]
-name = lambda p: (p if isinstance(p, str) else p[0] if isinstance(p, list) and p else "").split("@")[0]
-config["plugin"] = [p for p in config.get("plugin") or [] if name(p) != "cc-safety-net"] + [SAFETY_NET]
 # No "*" key, so a top-level permission default still applies to other commands.
 # Read rules are left to cc-safety-net and jev-guard: OpenCode matches read
 # patterns against project-relative paths, so "**/.ssh/**" missed in a test.
