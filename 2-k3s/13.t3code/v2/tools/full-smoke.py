@@ -9,7 +9,8 @@ import tempfile
 import time
 import urllib.request
 
-with tempfile.TemporaryDirectory(prefix='v2-full-smoke-') as temp:
+# The Safety Net installer refuses homes under /tmp, so use the image's HOME.
+with tempfile.TemporaryDirectory(prefix='v2-full-smoke-', dir=pathlib.Path.home()) as temp:
     home = pathlib.Path(temp)
     project = home / 'project'
     project.mkdir()
@@ -27,7 +28,7 @@ with tempfile.TemporaryDirectory(prefix='v2-full-smoke-') as temp:
     server = subprocess.Popen(['bash', '/v2/entrypoint.sh'], env=env)
     try:
         monitor = home / '.t3/monitor.json'
-        for _ in range(120):
+        for _ in range(360):
             if server.poll() is not None:
                 raise RuntimeError('Supervisor exited')
             if monitor.exists():

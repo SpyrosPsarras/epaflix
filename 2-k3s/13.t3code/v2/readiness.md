@@ -137,6 +137,12 @@ Configuration refresh must preserve v2 user edits: seed private configuration on
 - P5. Validate the selected bot-PR/auto-merge mechanism and credential permissions.
 - P6. Review the exact implementation addendum before Task 3. Native Arch packaging remains a separate pending decision.
 
+## Activity gate revalidation, 2026-10-01
+
+`reviewedActivityRevision` moved from `0fb3731` to `4ee6c32` (preview `v0.0.45-preview.20261001.2518`). In that range no migrations, v2 contracts, environment HTTP, scheduled-task, terminal or background-work files changed. `auth/RpcAuthorization.ts` only adds the operate-scoped `projectsEnsureScratch`, outside the monitor's read scopes. The orchestration-v2 changes add the OpenCode 2 adapter and Scratch workspaces, and change background-wake handling in the ACP and Grok adapters. None changes a table, column, status, effect type, `queueHeld`, `pendingBackgroundTasks`, the clients response, an auth scope or a CLI flag used by `rollout-ready.py`, `supervise.py` or `backup.py`.
+
+Against the preview binary on a temporary home, the `supervise.py` monitor bootstrap issued a session scoped `access:read orchestration:read`, and the revoked admin session then got HTTP 401. The production `observe()` with that session ran every query and returned no blockers. `smoke.mjs` on the same binary reported live clients 0/1/0. This proves the idle path and client counting. It does not exercise detection of active runs, requests, effects or schedules at this revision.
+
 ## Evidence locations
 
-The disposable probe is `/tmp/opencode/t3-v2-probe.py`; it creates and removes only its own temporary home. The source checkout and installed build dependencies remain at `/tmp/opencode/t3code-src`. The successful web-build log is in the harness output file `tool_0f285f6b7001V2Z1IiDz4uTzN4`. Keep these until the readiness investigation is reviewed; they are not production scripts.
+The disposable probe script, source checkout and build logs from this investigation have been deleted. The source-build probe workflow and Dockerfile were removed on 2026-10-01 when CI switched to the upstream preview archive (spec D7).
