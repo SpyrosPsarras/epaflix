@@ -18,6 +18,6 @@ spec:
         kubernetes.io/hostname: k3s-worker-65
       containers:
         - name: pull
-          image: ghcr.io/spyrospsarras/t3-runtime-v2@sha256:97a0cad7b5e31224267a750ccc2bddf788dd8a5138917b44bcb3fcb02aaffabf
+          image: ghcr.io/spyrospsarras/t3-runtime-v2@sha256:56807ef2e631b5350b75b7780ddac6705268750864ca187b77bd2601ae725461
           imagePullPolicy: IfNotPresent
           command: ['true']
