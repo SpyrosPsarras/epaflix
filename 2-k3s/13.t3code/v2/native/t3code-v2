@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+export T3CODE_HOME="$HOME/.t3-v2"
+export T3CODE_DISABLE_AUTO_UPDATE=1
+export T3CODE_V2_NO_URI_REGISTRATION=1
+exec /opt/t3code-v2/t3code "$@"
