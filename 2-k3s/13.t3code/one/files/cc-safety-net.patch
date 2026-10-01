@@ -1,0 +1,269 @@
+diff --git a/src/core/budget.ts b/src/core/budget.ts
+--- a/src/core/budget.ts
++++ b/src/core/budget.ts
+@@ -67,6 +67,7 @@ export function createBudget() {
+   const counters = new Map<CountedKind, number>();
+   return {
+     counters,
++    pythonDisplayAnalyzed: false,
+ 
+     resolvedPaths: new Map<string, string>(),
+     charge(kind: CountedKind, units = 1): void {
+diff --git a/src/gate/secret/secret-protection.ts b/src/gate/secret/secret-protection.ts
+--- a/src/gate/secret/secret-protection.ts
++++ b/src/gate/secret/secret-protection.ts
+@@ -38,6 +38,7 @@ import {
+   StructuralShellSyntaxLimitError,
+ } from '@/gate/guards/semantic-facts';
+ import { createToolInvocation, type ToolRoute } from '@/gate/invocation';
++import { pythonDisplayLiteralRanges } from './python-print';
+ 
+ export const REASON_SECRET_PROTECTION = 'Access to a sensitive path is not allowed.';
+ 
+@@ -220,6 +221,8 @@ type PathExtractionOptions = {
+   readonly standard?: boolean;
+   // Inside `$( )` an echo/printf operand is captured output, not display text.
+   readonly capturedOutput?: boolean;
++  // The display exception is limited to uncaptured inline code, never stdin or pipe carriers.
++  readonly keepPythonDisplay?: boolean;
+ };
+ 
+ /** @internal */
+@@ -459,6 +462,15 @@ function extractCommandPathTargets(
+   if (syntax.status === 'structural-limit') throw new StructuralShellSyntaxLimitError();
+   if (syntax.status === 'unclosed-quote') return [];
+   if (syntax.status === 'invalid') throw new Error('Unable to parse command for secret protection');
++  options = {
++    ...options,
++    keepPythonDisplay:
++      options.keepPythonDisplay === true ||
++      options.capturedOutput === true ||
++      syntax.program.nodes.some(
++        (node) => node.kind !== 'command' || node.nested.length > 0 || node.redirections.length > 0,
++      ),
++  };
+ 
+   const targets = [
+     ...syntax.assignmentFallbacks.map((target) => ({ target, cwd })),
+@@ -795,7 +807,15 @@ function extractStdinScriptPathTargets(
+           cwd,
+           budget,
+         )
+-      : extractInlineCodePathTargets(interpreter, body, store, options, environment, cwd, budget),
++      : extractInlineCodePathTargets(
++          interpreter,
++          body,
++          store,
++          { ...options, keepPythonDisplay: true },
++          environment,
++          cwd,
++          budget,
++        ),
+   );
+ }
+ 
+@@ -1296,11 +1316,24 @@ function extractInlineCodePathTargets(
+       LANGUAGE_EVAL_PREFIX.test(masked.masked.slice(0, literal.start)),
+     );
+   const refine = options.standard === true && !SHELL_STDIN_INTERPRETERS.has(command);
++  const displayRanges =
++    refine &&
++    (command === 'python' || command === 'python3') &&
++    !languageEval &&
++    options.keepPythonDisplay !== true
++      ? pythonDisplayLiteralRanges(code, budget)
++      : [];
++  const candidateLiterals = masked.literals.filter(
++    (literal) =>
++      !displayRanges.some(
++        ([start, end]) => literal.start >= start && literal.start + literal.text.length <= end,
++      ),
++  );
+   // Standard mode: literals are data unless the code as a whole holds a read, exec or eval marker.
+   const literals =
+     refine && !(containsRecognizableInlineAccess(masked.masked) || shellExec || languageEval)
+       ? []
+-      : masked.literals;
++      : candidateLiterals;
+   // Standard mode walks as shell only what an exec call receives: every literal when the call's
+   // first argument holds a name, otherwise the literals inside the call's parentheses.
+   const execCalls = refine
+@@ -1311,8 +1344,8 @@ function extractInlineCodePathTargets(
+     : [];
+   const shellLiterals =
+     !refine || execCalls.some((call) => firstArgumentHasName(masked.masked, call.start))
+-      ? masked.literals
+-      : masked.literals.filter(
++      ? candidateLiterals
++      : candidateLiterals.filter(
+           (literal) =>
+             SHELL_EXEC_PREFIX.test(masked.masked.slice(0, literal.start)) ||
+             execCalls.some((call) => literal.start >= call.start && literal.start < call.end),
+diff --git a/src/gate/secret/python-print.ts b/src/gate/secret/python-print.ts
+new file mode 100644
+--- /dev/null
++++ b/src/gate/secret/python-print.ts
+@@ -0,0 +1,163 @@
++import { spawnSync } from 'node:child_process';
++import { lstatSync, realpathSync, statSync } from 'node:fs';
++import { dirname } from 'node:path';
++import { type Budget, createBudget } from '@/core/budget';
++
++// Trust the Linux system administrator, never PATH or a user-managed Python installation.
++// Check both the named path and its resolved target, including every parent. Other platforms
++// and unknown ownership keep the conservative fallback. Root can still replace system files.
++/** @internal */
++export function trustedPython(): string | null {
++  if (process.platform !== 'linux') return null;
++  try {
++    const executable = realpathSync('/usr/bin/python3');
++    const binary = statSync(executable);
++    if (
++      !binary.isFile() ||
++      binary.uid !== 0 ||
++      (binary.mode & 0o022) !== 0 ||
++      (binary.mode & 0o111) === 0
++    )
++      return null;
++    for (const candidate of ['/usr/bin/python3', executable]) {
++      let path = candidate;
++      for (;;) {
++        const entry = lstatSync(path);
++        if (entry.uid !== 0 || (!entry.isSymbolicLink() && (entry.mode & 0o022) !== 0)) {
++          return null;
++        }
++        if (path === '/') break;
++        path = dirname(path);
++      }
++    }
++    return executable;
++  } catch {
++    return null;
++  }
++}
++
++// Only this fixed analyzer runs. Submitted Python is stdin data for ast.parse, never executed.
++// ponytail: a small accepted AST/call set avoids general Python value-flow analysis. Unknown
++// syntax, bindings, calls, or an unavailable parser preserve the existing literal fallback.
++const ANALYZER = String.raw`
++import ast, json, re, sys
++
++def analyze(code):
++    tree = ast.parse(code)
++    allowed = (
++        ast.Module, ast.Import, ast.alias, ast.Assign, ast.Assert, ast.Expr,
++        ast.Name, ast.Load, ast.Store, ast.Constant, ast.Call, ast.keyword,
++        ast.List, ast.Tuple, ast.Dict, ast.ListComp, ast.comprehension,
++        ast.Compare, ast.Eq, ast.BinOp, ast.Add, ast.Attribute,
++    )
++    modules = {'subprocess', 'json', 'secrets'}
++    imported = set()
++    for statement in tree.body:
++        if not isinstance(statement, (ast.Import, ast.Assign, ast.Assert, ast.Expr)):
++            return []
++        if isinstance(statement, ast.Import):
++            for alias in statement.names:
++                if alias.name not in modules or alias.asname is not None:
++                    return []
++                imported.add(alias.name)
++    displays = [statement.value for statement in tree.body
++                if isinstance(statement, ast.Expr)
++                and isinstance(statement.value, ast.Call)
++                and isinstance(statement.value.func, ast.Name)
++                and statement.value.func.id == 'print'
++                and len(statement.value.args) == 1
++                and not statement.value.keywords
++                and isinstance(statement.value.args[0], ast.Constant)
++                and isinstance(statement.value.args[0].value, str)]
++    print_names = {id(call.func) for call in displays}
++    bound = {node.id for node in ast.walk(tree)
++             if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)} | imported
++    module_attributes = {
++        'subprocess': {'run', 'call', 'Popen', 'check_output', 'check_call',
++                       'getoutput', 'getstatusoutput', 'PIPE', 'DEVNULL', 'STDOUT'},
++        'json': {'dumps'},
++        'secrets': {'token_urlsafe'},
++    }
++    for node in ast.walk(tree):
++        if not isinstance(node, allowed):
++            return []
++        if isinstance(node, ast.keyword) and node.arg in {None, 'preexec_fn', 'default', 'cls'}:
++            return []
++        if isinstance(node, ast.Name):
++            if node.id == 'print' and id(node) not in print_names:
++                return []
++            if isinstance(node.ctx, ast.Load) and node.id != 'print' and node.id not in bound:
++                return []
++            if node.id.startswith('__') or (isinstance(node.ctx, ast.Store)
++                                            and node.id in modules):
++                return []
++        if isinstance(node, ast.Attribute):
++            if not isinstance(node.ctx, ast.Load):
++                return []
++            module_member = (isinstance(node.value, ast.Name)
++                             and node.value.id in imported
++                             and node.attr in module_attributes[node.value.id])
++            if not module_member and node.attr not in {'returncode', 'stderr', 'stdout'}:
++                return []
++        if isinstance(node, ast.Call) and node not in displays:
++            if not (isinstance(node.func, ast.Attribute)
++                    and isinstance(node.func.value, ast.Name)
++                    and node.func.value.id in imported
++                    and node.func.attr in module_attributes[node.func.value.id]
++                    and node.func.attr not in {'PIPE', 'DEVNULL', 'STDOUT'}):
++                return []
++    # AST line numbers use physical CR/LF boundaries, not Unicode separators inside strings.
++    starts = [0] + [match.end() for match in re.finditer(r'\r\n|\r|\n', code)]
++    def offset(line, column):
++        start = starts[line - 1]
++        prefix = code[:start] + code[start:].encode('utf-8')[:column].decode('utf-8')
++        return len(prefix.encode('utf-16-le')) // 2
++    return [[offset(call.args[0].lineno, call.args[0].col_offset),
++             offset(call.args[0].end_lineno, call.args[0].end_col_offset)]
++            for call in displays if any(c.isspace() for c in call.args[0].value)
++            and not call.args[0].value.startswith(('/', '.', '~', '\\'))]
++
++try:
++    print(json.dumps(analyze(sys.stdin.buffer.read().decode('utf-8'))))
++except (SyntaxError, ValueError, TypeError, RecursionError, MemoryError):
++    print('[]')
++`;
++
++export function pythonDisplayLiteralRanges(
++  code: string,
++  budget: Budget = createBudget(),
++): readonly (readonly [number, number])[] {
++  if (code.length > 32_768 || !code.includes('print')) return [];
++  if (budget.pythonDisplayAnalyzed) return [];
++  const executable = trustedPython();
++  if (executable === null) return [];
++  budget.pythonDisplayAnalyzed = true;
++  const result = spawnSync(executable, ['-I', '-S', '-c', ANALYZER], {
++    // An absolute binary still runs loader hooks such as LD_PRELOAD if we inherit the environment.
++    env: {},
++    input: code,
++    encoding: 'utf8',
++    timeout: 500,
++    maxBuffer: 65_536,
++    windowsHide: true,
++  });
++  if (result.error || result.status !== 0) return [];
++  try {
++    const ranges: unknown = JSON.parse(result.stdout);
++    return Array.isArray(ranges) &&
++      ranges.every(
++        (range): range is [number, number] =>
++          Array.isArray(range) &&
++          range.length === 2 &&
++          Number.isInteger(range[0]) &&
++          Number.isInteger(range[1]) &&
++          range[0] >= 0 &&
++          range[0] < range[1] &&
++          range[1] <= code.length,
++      )
++      ? ranges
++      : [];
++  } catch {
++    return [];
++  }
++}
