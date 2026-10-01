@@ -92,8 +92,10 @@ jobs:
           ${{ steps.candidate.outputs.image }} /v2/smoke.mjs
       - name: Verify supervisor and recovery path
         if: steps.candidate.outputs.changed == 'true'
+        # Network on: startup builds the pinned, hash-checked Safety Net guard
+        # from GitHub and npm, as production does. No credentials are passed in.
         run: >-
-          timeout 240 docker run --rm --network none --user 0
+          timeout 420 docker run --rm --user 0
           --entrypoint python3 ${{ steps.candidate.outputs.image }} /v2/full-smoke.py
       - name: Verify OpenCode health helper as production user
         if: steps.candidate.outputs.changed == 'true'
