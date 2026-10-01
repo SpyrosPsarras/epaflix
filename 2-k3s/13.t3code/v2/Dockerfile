@@ -38,6 +38,7 @@ COPY v2/tools/full-smoke.py /v2/full-smoke.py
 RUN bash /tmp/install-extra-tools.sh
 RUN ln -sf /v2/t3 /tools/node_modules/.bin/t3 \
     && ln -sf /v2/t3 /usr/local/bin/t3 \
+    && chmod 0755 /scripts/opencode-fast-version.sh \
     && chmod 0755 /v2/t3 /v2/entrypoint.sh
 ENV PATH=/v2:/usr/local/bin:/tools/node_modules/.bin:$PATH
 USER 1000:1000
