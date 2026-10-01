@@ -24,6 +24,9 @@ configMapGenerator:
   - name: t3code-scripts
     files:
       - files/entrypoint.sh
+      - files/cc-safety-net-install.py
+      - files/cc-safety-net.patch
+      - files/cc-safety-net-hashes.json
       - files/private-config.py
       - files/git-credential-github.sh
       - files/hub_clients.py
