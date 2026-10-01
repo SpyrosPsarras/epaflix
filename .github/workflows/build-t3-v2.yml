@@ -4,7 +4,7 @@ on:
   schedule:
     - cron: '17 * * * *'
   push:
-    branches: [main, t3code/a5bf2355-v2-probe]
+    branches: [main]
     paths:
       - '2-k3s/13.t3code/env/**'
       - '2-k3s/13.t3code/one/files/**'
@@ -33,19 +33,35 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          revision=$(gh api repos/pingdotgg/t3code/git/ref/heads/t3code/codex-turn-mapping --jq .object.sha)
           reviewed=$(python3 -c 'import json;print(json.load(open("2-k3s/13.t3code/v2/runtime.json"))["reviewedActivityRevision"])')
           git clone --filter=blob:none --no-checkout https://github.com/pingdotgg/t3code.git /tmp/v2-upstream-check
           git -C /tmp/v2-upstream-check cat-file -e "$reviewed^{commit}"
-          git -C /tmp/v2-upstream-check cat-file -e "$revision^{commit}"
+          # Previews are cut from several branches; only accept ones on the v2 branch.
+          release='' revision=''
+          previews=$(gh release list -R pingdotgg/t3code --limit 50 --json tagName --jq '.[].tagName | select(contains("-preview."))')
+          for tag in $previews; do
+            sha=$(git -C /tmp/v2-upstream-check rev-parse --verify -q "refs/tags/$tag^{commit}") || continue
+            if git -C /tmp/v2-upstream-check merge-base --is-ancestor "$sha" refs/remotes/origin/t3code/codex-turn-mapping; then
+              release=$tag revision=$sha
+              break
+            fi
+          done
+          if [[ -z "$release" ]]; then
+            echo 'No preview release on t3code/codex-turn-mapping.' >&2
+            exit 1
+          fi
+          archive_sha=$(gh release download "$release" -R pingdotgg/t3code -p SHA256SUMS -O - | awk -v f="t3-${release#v}-linux-x64.tar.gz" '$2 == f {print $1}')
+          [[ "$archive_sha" =~ ^[0-9a-f]{64}$ ]]
           git -C /tmp/v2-upstream-check diff --name-only "$reviewed" "$revision" > /tmp/v2-changed-paths
           if grep -Eq '^(apps/server/src/persistence/Migrations/|apps/server/src/orchestration-v2/|packages/contracts/src/orchestrationV2|packages/contracts/src/environmentHttp|apps/server/src/scheduledTasks/|apps/server/src/auth/|apps/server/src/terminal/|packages/shared/src/orchestrationV2PendingBackgroundWork)' /tmp/v2-changed-paths; then
             echo 'Upstream activity/auth contracts changed; gate revalidation is required before promotion.' >&2
             exit 1
           fi
           base_tag=$(bash 2-k3s/13.t3code/env/tools/runtime-tag.sh)
-          inputs=$({ printf '%s\n' "$base_tag"; git ls-files 2-k3s/13.t3code/v2/Dockerfile 2-k3s/13.t3code/v2/Dockerfile.dockerignore 2-k3s/13.t3code/v2/files 2-k3s/13.t3code/v2/projects.json 2-k3s/13.t3code/v2/provision.enc.yaml 2-k3s/13.t3code/one/private-agent-config.enc.yaml 2-k3s/13.t3code/v2/probe/smoke.mjs 2-k3s/13.t3code/v2/tools/install-extra-tools.sh 2-k3s/13.t3code/v2/tools/full-smoke.py 2-k3s/13.t3code/one/files | xargs sha256sum; } | sha256sum | cut -c1-16)
+          inputs=$({ printf '%s\n' "$base_tag" "$release"; git ls-files 2-k3s/13.t3code/v2/Dockerfile 2-k3s/13.t3code/v2/Dockerfile.dockerignore 2-k3s/13.t3code/v2/files 2-k3s/13.t3code/v2/projects.json 2-k3s/13.t3code/v2/provision.enc.yaml 2-k3s/13.t3code/one/private-agent-config.enc.yaml 2-k3s/13.t3code/v2/tools/smoke.mjs 2-k3s/13.t3code/v2/tools/install-extra-tools.sh 2-k3s/13.t3code/v2/tools/full-smoke.py 2-k3s/13.t3code/one/files | xargs sha256sum; } | sha256sum | cut -c1-16)
           echo "revision=$revision" >> "$GITHUB_OUTPUT"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+          echo "archive_sha=$archive_sha" >> "$GITHUB_OUTPUT"
           echo "base=ghcr.io/spyrospsarras/t3-runtime:inputs-$base_tag" >> "$GITHUB_OUTPUT"
           echo "inputs=$inputs" >> "$GITHUB_OUTPUT"
           echo "image=ghcr.io/spyrospsarras/t3-runtime-v2:$revision-$inputs" >> "$GITHUB_OUTPUT"
@@ -63,7 +79,8 @@ jobs:
         if: steps.candidate.outputs.changed == 'true'
         run: >-
           docker build -f 2-k3s/13.t3code/v2/Dockerfile
-          --build-arg UPSTREAM_REVISION=${{ steps.candidate.outputs.revision }}
+          --build-arg UPSTREAM_RELEASE=${{ steps.candidate.outputs.release }}
+          --build-arg UPSTREAM_ARCHIVE_SHA256=${{ steps.candidate.outputs.archive_sha }}
           --build-arg BASE_IMAGE=${{ steps.candidate.outputs.base }}
           --build-arg CONFIG_INPUT_HASH=${{ steps.candidate.outputs.inputs }}
           -t ${{ steps.candidate.outputs.image }} 2-k3s/13.t3code
@@ -71,7 +88,7 @@ jobs:
         if: steps.candidate.outputs.changed == 'true'
         run: >-
           timeout 180 docker run --rm --network none
-          --entrypoint node -e PROBE_EXECUTABLE=/runtime/t3
+          --entrypoint node
           ${{ steps.candidate.outputs.image }} /v2/smoke.mjs
       - name: Verify supervisor and recovery path
         if: steps.candidate.outputs.changed == 'true'
@@ -98,6 +115,7 @@ jobs:
           GH_TOKEN: ${{ secrets.T3_V2_BOT_TOKEN }}
           IMAGE: ${{ steps.candidate.outputs.image }}
           REVISION: ${{ steps.candidate.outputs.revision }}
+          RELEASE: ${{ steps.candidate.outputs.release }}
         run: |
           set -euo pipefail
           if [[ $(gh pr list --state open --json headRefName --jq '[.[] | select(.headRefName | startswith("automation/t3code-v2-"))] | length') != 0 ]]; then
@@ -110,7 +128,7 @@ jobs:
           branch="automation/t3code-v2-${GITHUB_RUN_ID}"
           git switch -c "$branch" origin/main
           base_tag=$(bash 2-k3s/13.t3code/env/tools/runtime-tag.sh)
-          current_inputs=$({ printf '%s\n' "$base_tag"; git ls-files 2-k3s/13.t3code/v2/Dockerfile 2-k3s/13.t3code/v2/Dockerfile.dockerignore 2-k3s/13.t3code/v2/files 2-k3s/13.t3code/v2/projects.json 2-k3s/13.t3code/v2/provision.enc.yaml 2-k3s/13.t3code/one/private-agent-config.enc.yaml 2-k3s/13.t3code/v2/probe/smoke.mjs 2-k3s/13.t3code/v2/tools/install-extra-tools.sh 2-k3s/13.t3code/v2/tools/full-smoke.py 2-k3s/13.t3code/one/files | xargs sha256sum; } | sha256sum | cut -c1-16)
+          current_inputs=$({ printf '%s\n' "$base_tag" "$RELEASE"; git ls-files 2-k3s/13.t3code/v2/Dockerfile 2-k3s/13.t3code/v2/Dockerfile.dockerignore 2-k3s/13.t3code/v2/files 2-k3s/13.t3code/v2/projects.json 2-k3s/13.t3code/v2/provision.enc.yaml 2-k3s/13.t3code/one/private-agent-config.enc.yaml 2-k3s/13.t3code/v2/tools/smoke.mjs 2-k3s/13.t3code/v2/tools/install-extra-tools.sh 2-k3s/13.t3code/v2/tools/full-smoke.py 2-k3s/13.t3code/one/files | xargs sha256sum; } | sha256sum | cut -c1-16)
           if [[ "${IMAGE##*-}" != "$current_inputs" ]]; then
             echo 'Runtime inputs changed during the build; discard stale promotion and retry next hour.'
             exit 0
@@ -122,10 +140,10 @@ jobs:
             p=root/name
             p.write_text(re.sub(r'image: ghcr.io/spyrospsarras/t3-runtime-v2:[^\s]+|image: ghcr.io/spyrospsarras/t3-runtime-v2@[^\s]+', 'image: '+os.environ['DIGEST'],p.read_text()))
           previous=json.loads((root/'runtime.json').read_text())
-          (root/'runtime.json').write_text(json.dumps({**previous,'upstreamRevision':os.environ['REVISION'],'image':os.environ['DIGEST'],'candidateTag':os.environ['IMAGE'].rsplit(':',1)[1]},indent=2)+'\n')
+          (root/'runtime.json').write_text(json.dumps({**previous,'upstreamRelease':os.environ['RELEASE'],'upstreamRevision':os.environ['REVISION'],'image':os.environ['DIGEST'],'candidateTag':os.environ['IMAGE'].rsplit(':',1)[1]},indent=2)+'\n')
           PY
           if git diff --quiet; then exit 0; fi
           git -c user.name='T3 v2 update bot' -c user.email='t3-v2@epaflix.com' commit -am 'chore(t3code): update validated v2 runtime'
           git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push origin "$branch"
-          url=$(gh pr create --head "$branch" --base main --title 'Update validated T3 Code v2 runtime' --body "Upstream revision: $REVISION. Native build and synthetic runtime checks passed. V2 rollout waits for disconnected idle state.")
+          url=$(gh pr create --head "$branch" --base main --title 'Update validated T3 Code v2 runtime' --body "Upstream preview: $RELEASE ($REVISION). Release archive and synthetic runtime checks passed. V2 rollout waits for disconnected idle state.")
           gh pr merge "$url" --auto --merge
