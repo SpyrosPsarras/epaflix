@@ -1,0 +1,64 @@
+name: build-t3-v2-native
+on:
+  workflow_dispatch:
+  push:
+    branches: [t3code/a5bf2355-v2-native]
+    paths:
+      - '2-k3s/13.t3code/v2/native/**'
+      - '.github/workflows/build-t3-v2-native.yml'
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build patched native desktop directory
+        run: |
+          set -euo pipefail
+          revision=$(python3 -c 'import json;print(json.load(open("2-k3s/13.t3code/v2/runtime.json"))["upstreamRevision"])')
+          git clone --filter=blob:none --no-checkout https://github.com/pingdotgg/t3code.git /tmp/t3-v2-native
+          git -C /tmp/t3-v2-native checkout --detach "$revision"
+          python3 2-k3s/13.t3code/v2/native/patch-client.py /tmp/t3-v2-native
+          docker run --rm -v /tmp/t3-v2-native:/src -w /src node:24-bookworm bash -c '
+            set -euo pipefail
+            apt-get update && apt-get install -y --no-install-recommends libsecret-1-dev imagemagick pkg-config
+            curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup.sh
+            sh /tmp/rustup.sh -y --profile minimal
+            export PATH=/root/.cargo/bin:$PATH
+            npm install --global pnpm@11.10.0
+            pnpm install --frozen-lockfile
+            pnpm exec vp run build:desktop
+            node scripts/build-desktop-artifact.ts --platform linux --arch x64 --target deb
+          '
+          mkdir -p /tmp/arch-v2/client
+          deb=$(find /tmp/t3-v2-native -type f -name '*amd64.deb' -print -quit)
+          test -n "$deb"
+          dpkg-deb -x "$deb" /tmp/arch-v2/deb
+          cp -a '/tmp/arch-v2/deb/opt/T3 Code (Alpha)/.' /tmp/arch-v2/client/
+          tar -czf /tmp/arch-v2/client.tar.gz -C /tmp/arch-v2 client
+          cp 2-k3s/13.t3code/v2/native/{PKGBUILD,t3code-v2,t3code-v2.desktop} /tmp/arch-v2/
+          python3 - <<'PY'
+          import hashlib,pathlib
+          root=pathlib.Path('/tmp/arch-v2')
+          hashes=[hashlib.sha256((root/name).read_bytes()).hexdigest() for name in ['client.tar.gz','t3code-v2','t3code-v2.desktop']]
+          p=root/'PKGBUILD'
+          p.write_text(p.read_text().replace("sha256sums=('SKIP' 'SKIP' 'SKIP')",'sha256sums=('+ ' '.join(repr(h) for h in hashes)+')'))
+          PY
+      - name: Assemble pacman package
+        run: |
+          docker run --rm -v /tmp/arch-v2:/work -w /work archlinux:base-devel bash -c '
+            set -euo pipefail
+            useradd -m builder
+            chown -R builder:builder /work
+            su builder -c "makepkg --nodeps --noconfirm"
+          '
+          ls -l /tmp/arch-v2/*.pkg.tar.zst
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: t3code-v2-arch-x64
+          path: /tmp/arch-v2/*.pkg.tar.zst
+          if-no-files-found: error
