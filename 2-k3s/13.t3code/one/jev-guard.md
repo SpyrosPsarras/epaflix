@@ -23,7 +23,16 @@ Three layers, cheapest first. Research: `docs/jev-tool-guard-research.md`
    rules also match a vault attachment identifier in Python, blocking SSH
    authentication before any key is retrieved. Explicit deny paths protect
    `.ssh` under the active HOME, the account's passwd HOME and `/root`, plus
-   `/run/t3-github-ssh`. Existing policy fields and deny paths survive. SSH
+   `/run/t3-github-ssh`. Startup publishes public host-key records from the
+   active HOME's `.ssh/known_hosts` into `.config/ssh/known_hosts`, outside
+   protected credential directories. It rejects a symlink source, validates
+   the complete Ed25519 public-key structure, preserves revocation and CA
+   markers, and strips comments and
+   unrelated lines. Other key algorithms are omitted. Missing or rejected
+   sources produce an empty snapshot.
+   Agents can use this snapshot with `UserKnownHostsFile` and strict host
+   checking. It refreshes on startup, not on later SSH-file changes.
+   Existing policy fields and deny paths survive. SSH
    keys stored elsewhere no longer get basename-only protection from the
    disabled rules. Jev still checks credential uploads in guarded sessions.
 3. `files/jev-guard.js`, an OpenCode plugin.
@@ -112,7 +121,7 @@ numbers, so a new threshold can be checked against past calls before it ships.
 - Offline: `node --test 2-k3s/13.t3code/one/files/jev-guard.test.mjs` (in CI).
 - SSH policy: `SAFETY_NET_CLI=/path/to/cc-safety-net python3
   2-k3s/13.t3code/one/files/ssh-policy.test.py`. The pinned 2.4.11 analyzer
-  checks vault attachment retrieval, SSH authentication, protected SSH files,
+  checks vault attachment retrieval, public host keys, SSH authentication, protected SSH files,
   existing deny paths and force push. Commands are judged, never executed.
 - Live, after changing questions or thresholds:
   `XDG_STATE_HOME=$(mktemp -d) node 2-k3s/13.t3code/one/files/jev-guard.live.mjs`.
