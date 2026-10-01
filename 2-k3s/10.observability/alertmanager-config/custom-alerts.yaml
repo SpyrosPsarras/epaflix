@@ -991,3 +991,18 @@ spec:
               (the #609 download reclaim and #968 snapshot paths are the catalogued
               candidates; dapc-backup is a permanent keep per #807) and treat every write to
               pool1 as at-risk until free space is back above 1 TiB.
+
+    - name: t3code-v2
+      interval: 60s
+      rules:
+        - alert: T3CodeV2NotReady
+          # max by: kube-state-metrics runs two replicas. A deleted pod has no
+          # series, so a normal restart only alerts if the new pod stays unready.
+          expr: max by (namespace, pod) (kube_pod_status_ready{namespace="t3code", pod="t3code-v2-0", condition="true"}) == 0
+          for: 5m
+          labels:
+            severity: warning
+            component: t3code
+          annotations:
+            summary: "T3 Code v2 pod is not ready"
+            description: "t3code-v2-0 has not been Ready for 5m. A healthy restart is ready in about a minute, so this usually means startup is failing (2026-10-01: a duplicate cc-safety-net plugin entry aborted the entrypoint). Check `kubectl -n t3code logs t3code-v2-0 --previous`. The rollout gate allows recovery while the container is stopped, so a fixed image can still roll out."
