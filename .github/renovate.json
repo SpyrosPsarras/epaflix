@@ -28,12 +28,10 @@
       "enabled": false
     },
     {
-      "description": "T3 pod CLI pins. Native npm updates the package and lock together; ArgoCD rolls merged updates. Patch automerge follows the repo policy.",
+      "description": "T3 pod CLI pins. Native npm updates the package and lock together; ArgoCD rolls merged updates. Automerge is set by the two t3code runtime inputs rules at the end of this list.",
       "matchManagers": ["npm"],
       "matchFileNames": ["2-k3s/13.t3code/env/tools/package.json"],
-      "rangeStrategy": "pin",
-      "platformAutomerge": false,
-      "automerge": false
+      "rangeStrategy": "pin"
     },
     {
       "description": "Authentik: chart version and container image move together upstream. Group them in one PR so ArgoCD never sees a chart/image schema mismatch.",
@@ -158,23 +156,27 @@
       "allowedVersions": "<6"
     },
     {
-      "description": "t3 follows the npm nightly dist-tag. The desktop app on the laptop runs nightly and shows every server on an older version as behind. Automerge is set here too because the patch rule below only covers 0.0.x bumps. A 0.1.0-nightly bump is a minor and would otherwise fall back to automerge false.",
+      "description": "t3 follows the npm nightly dist-tag. The desktop app on the laptop runs nightly and shows every server on an older version as behind. Automerge comes from the group rule below.",
       "matchManagers": ["npm"],
       "matchFileNames": ["2-k3s/13.t3code/env/tools/package.json"],
       "matchPackageNames": ["t3"],
-      "followTag": "nightly",
+      "followTag": "nightly"
+    },
+    {
+      "description": "t3code runtime inputs: one automerged PR for the non-major bumps that feed the runtime image hash. Every bump rewrites the inputs-<hash> tag in one/statefulset.yaml, and the npm pins sit on adjacent package.json lines, so separate PRs conflicted once the first merged (#1616/#1617). Grouped, the postUpgradeTasks above run once over all bumps. This automerges every non-major bump in these files: the npm CLIs (claude-code, codex, opencode-ai, opencode-loop, t3), argo-cd, gh and sops in versions.env, and node base-image digests. Renovate waits for CI itself (platformAutomerge false) because the repo has no required status checks, so build-t3-runtime's smoke test is the gate. Not in the group: helm and kustomize, because the same deps live in ci.yml and versions.env must stay on the gate's version; majors, which go to a separate major- group branch (next rule). Either can still conflict with this PR. The file lists here and in the next rule must match the postUpgradeTasks rule at the top. Keep both rules last: later rules win, and the repo-wide patch rule sets platformAutomerge true.",
+      "matchFileNames": ["2-k3s/13.t3code/env/tools/package.json", "2-k3s/13.t3code/versions.env", "2-k3s/13.t3code/env/Dockerfile"],
+      "matchPackageNames": ["!helm/helm", "!kubernetes-sigs/kustomize"],
+      "groupName": "t3code runtime inputs",
       "automerge": true,
       "automergeType": "pr",
       "platformAutomerge": false
     },
     {
-      "description": "T3 patches: Renovate waits for CI itself because this repository has no required status checks for GitHub platform automerge.",
-      "matchManagers": ["npm"],
-      "matchFileNames": ["2-k3s/13.t3code/env/tools/package.json"],
-      "matchUpdateTypes": ["patch"],
-      "automerge": true,
-      "automergeType": "pr",
-      "platformAutomerge": false
+      "description": "t3code runtime inputs majors: review by hand (a node base-image or CLI major can change the runtime under every agent session). They land in the separate major- group branch, so this does not block the minor/patch group.",
+      "matchFileNames": ["2-k3s/13.t3code/env/tools/package.json", "2-k3s/13.t3code/versions.env", "2-k3s/13.t3code/env/Dockerfile"],
+      "matchPackageNames": ["!helm/helm", "!kubernetes-sigs/kustomize"],
+      "matchUpdateTypes": ["major"],
+      "automerge": false
     }
   ],
   "customManagers": [
