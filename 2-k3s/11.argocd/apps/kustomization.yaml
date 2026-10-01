@@ -26,6 +26,7 @@ resources:
   - app-system-upgrade-controller.yaml
   - app-system-upgrade-plans.yaml
   - app-t3code.yaml
+  - app-t3code-v2.yaml
   - app-traefik.yaml
   - app-vidar-edge.yaml
   - app-gh-runner.yaml
