@@ -6,8 +6,7 @@
 !v2/files/
 !v2/files/**
 !v2/projects.json
-!v2/probe/
-!v2/probe/smoke.mjs
 !v2/tools/
+!v2/tools/smoke.mjs
 !v2/tools/install-extra-tools.sh
 !v2/tools/full-smoke.py
