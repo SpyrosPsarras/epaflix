@@ -9,7 +9,7 @@ import tempfile
 import time
 import urllib.request
 
-# The Safety Net installer refuses homes under /tmp, so use root's home.
+# The Safety Net installer refuses homes under /tmp, so use the image's HOME.
 with tempfile.TemporaryDirectory(prefix='v2-full-smoke-', dir=pathlib.Path.home()) as temp:
     home = pathlib.Path(temp)
     project = home / 'project'
