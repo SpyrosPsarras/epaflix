@@ -66,6 +66,7 @@ with tempfile.TemporaryDirectory(prefix='v2-full-smoke-') as temp:
         assert (home / '.codex/AGENTS.md').exists()
         assert (home / '.config/opencode/plugins/jev-auto.js').exists()
         assert (home / '.local/bin/kubelogin').resolve() == pathlib.Path('/usr/local/bin/kubelogin')
+        subprocess.run(['/scripts/opencode-fast-version.sh', '--version'], env=env, check=True)
         print('PASS: shared entrypoint, supervisor, private instructions, plugins, scoped monitoring, idle observation, backup and restored boot')
     finally:
         if server.poll() is None:

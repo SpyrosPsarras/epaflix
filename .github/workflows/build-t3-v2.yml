@@ -78,6 +78,12 @@ jobs:
         run: >-
           timeout 240 docker run --rm --network none --user 0
           --entrypoint python3 ${{ steps.candidate.outputs.image }} /v2/full-smoke.py
+      - name: Verify OpenCode health helper as production user
+        if: steps.candidate.outputs.changed == 'true'
+        run: >-
+          docker run --rm --network none --user 1000:1000
+          --entrypoint /scripts/opencode-fast-version.sh
+          ${{ steps.candidate.outputs.image }} --version
       - name: Publish validated v2 image
         if: steps.candidate.outputs.changed == 'true'
         env:
