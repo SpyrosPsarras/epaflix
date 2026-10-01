@@ -7,6 +7,6 @@
     "@bybrawe/opencode-loop": "0.5.38",
     "@openai/codex": "0.158.0",
     "opencode-ai": "1.18.33",
-    "t3": "0.0.43-nightly.20260928.2375"
+    "t3": "0.0.45-nightly.20260930.2510"
   }
 }
