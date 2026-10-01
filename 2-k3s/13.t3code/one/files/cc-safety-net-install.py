@@ -131,6 +131,11 @@ def replace_pin(config, uri):
         config["plugin"] = plugins
         return config
     if len(matches) != 1:
+        # Older entrypoints re-added the bare npm pin beside the reviewed build. Drop only those copies.
+        found = [plugins[i] for i in matches]
+        if found.count(uri) == 1 and all(p in (uri, f"cc-safety-net@{VERSION}") for p in found):
+            config["plugin"] = [p for p in plugins if p != f"cc-safety-net@{VERSION}"]
+            return config
         raise ValueError("Expected exactly one known cc-safety-net declaration")
     index = matches[0]
     plugin = plugins[index]
