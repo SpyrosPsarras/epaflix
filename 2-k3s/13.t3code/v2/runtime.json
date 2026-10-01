@@ -1,7 +1,7 @@
 {
   "upstreamRevision": "4ee6c323706130b132e3def62bca9dd33bcd2ccc",
   "reviewedActivityRevision": "4ee6c323706130b132e3def62bca9dd33bcd2ccc",
-  "image": "ghcr.io/spyrospsarras/t3-runtime-v2@sha256:97a0cad7b5e31224267a750ccc2bddf788dd8a5138917b44bcb3fcb02aaffabf",
-  "candidateTag": "4ee6c323706130b132e3def62bca9dd33bcd2ccc-b85c5927d20f3db1",
+  "image": "ghcr.io/spyrospsarras/t3-runtime-v2@sha256:56807ef2e631b5350b75b7780ddac6705268750864ca187b77bd2601ae725461",
+  "candidateTag": "4ee6c323706130b132e3def62bca9dd33bcd2ccc-41377c45b7354618",
   "upstreamRelease": "v0.0.45-preview.20261001.2518"
 }
