@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=T3 Code v2
+Comment=Orchestrator v2 test client
+Exec=/usr/bin/t3code-v2 %U
+Terminal=false
+Categories=Development;
+StartupWMClass=t3code
