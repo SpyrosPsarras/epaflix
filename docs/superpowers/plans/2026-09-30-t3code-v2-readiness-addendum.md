@@ -9,7 +9,7 @@ Evidence: `2-k3s/13.t3code/v2/readiness.md`.
 ## Settled choices and verified interfaces
 
 - D11. Clone the nine remotes in `v2/projects.json`. Exclude the seven approved local-only/stale entries. Register missing project roots through `POST /api/projects/mutate`, using `project.create`; read `/api/projects` first to avoid duplicating auto-bootstrapped roots.
-- D12. Build upstream's native executable and archive. The pinned feasibility checkout is `0a42dd3921b12ff9bbc89058a15e51c21764b430`; hourly candidates resolve and record a new full SHA. Use the verified upstream build-exe, locked resource-monitor build and build-cli-archive sequence from `v2/probe/Dockerfile`, then copy only the assembled archive into the existing maintained runtime image. The Node 26 builder and Rust toolchain must be pinned before production CI; the runtime tools stay on their existing maintained base.
+- D12. Superseded on 2026-10-01: CI now downloads the preview release's `linux-x64` archive and checks it against `SHA256SUMS` (see spec D7). Original decision: build upstream's native executable and archive. The pinned feasibility checkout is `0a42dd3921b12ff9bbc89058a15e51c21764b430`; hourly candidates resolve and record a new full SHA. Use the verified upstream build-exe, locked resource-monitor build and build-cli-archive sequence from `v2/probe/Dockerfile`, then copy only the assembled archive into the existing maintained runtime image. The Node 26 builder and Rust toolchain must be pinned before production CI; the runtime tools stay on their existing maintained base.
 - D13. Use bot image-bump PRs with auto-merge after repository-required checks. Bot permission, check-triggering and permitted merge behavior must be demonstrated before enabling hourly promotion. No branch-protection bypass is part of this design.
 - D14. Require 900 seconds of continuous no-client/no-work observations, followed by an immediate final check. A blocker or failed observation resets the interval. Keep the image prepull before that final check. Never treat missing observations as idle.
 - D15. Use a monitoring session with only `access:read` and `orchestration:read`. Read `/api/auth/clients` for connected clients and `/api/orchestration/shell` for supported activity. Supply `x-t3-orchestration-protocol: 2`. Session rows or CLI session lists cannot replace live client observation.
@@ -31,7 +31,7 @@ Task 6 requires DNS mapping for `t3code-v2.epaflix.com` in the existing internal
 
 ## Remaining prerequisite checks
 
-- P7. Test native archive dependency resolution reproducibility and pin builder inputs. Upstream archive staging installs production dependencies afresh; record its actual resolution rather than claim frozen source-lock reproduction.
+- P7. Dropped on 2026-10-01 with D12: CI no longer builds the archive. Original item: test native archive dependency resolution reproducibility and pin builder inputs. Upstream archive staging installs production dependencies afresh; record its actual resolution rather than claim frozen source-lock reproduction.
 - P8. Finish combined fail-closed/reconnect/background activity checks and scoped credential refresh. Real OpenCode/Codex turns and one MCP hub call through each passed; full parity remains Task 6 acceptance work.
 - P9. Finalize selective provisioning precedence and bounded backup/image/cache retention. The selected small allocation is not permission to delete existing node artifacts.
 - P10. Verify bot credential/merge permissions and internal DNS change mechanism before external mutations.

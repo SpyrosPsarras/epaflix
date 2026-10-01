@@ -139,4 +139,4 @@ Configuration refresh must preserve v2 user edits: seed private configuration on
 
 ## Evidence locations
 
-The disposable probe is `/tmp/opencode/t3-v2-probe.py`; it creates and removes only its own temporary home. The source checkout and installed build dependencies remain at `/tmp/opencode/t3code-src`. The successful web-build log is in the harness output file `tool_0f285f6b7001V2Z1IiDz4uTzN4`. Keep these until the readiness investigation is reviewed; they are not production scripts.
+The disposable probe script, source checkout and build logs from this investigation have been deleted. The source-build probe workflow and Dockerfile were removed on 2026-10-01 when CI switched to the upstream preview archive (spec D7).

@@ -18,7 +18,7 @@ Run the unreleased T3 Code orchestrator v2 alongside the current v1 deployment. 
 | D4 | Inventory all current v1 projects and create fresh repository clones in v2. Do not copy worktrees or uncommitted files. This is an initial inventory, not ongoing project synchronization. |
 | D5 | Keep tools, private configuration, instructions, skills, plugins and effective access aligned with v1 over time. Reuse maintained inputs where compatible rather than maintaining independent copies. |
 | D6 | Give v2 a distinct MCP hub client identity with equivalent permissions. Reuse existing service credentials where appropriate through runtime secret references. |
-| D7 | Check upstream branch `t3code/codex-turn-mapping` hourly. Build automatically when its revision or maintained runtime inputs change. Pin each candidate to an exact source revision and immutable image tag. |
+| D7 | Check upstream preview releases hourly and take the newest one whose commit is on branch `t3code/codex-turn-mapping`. Build automatically when that preview or maintained runtime inputs change. Pin each candidate to the release tag, its commit, the archive SHA-256 and an immutable image tag. |
 | D8 | Automatically deploy validated candidates only when v2 has no connected clients and no active work. Use guarded best-effort checks; this is not a guarantee against a task starting between the final check and restart. |
 | D9 | Failed builds or compatibility checks retain the running v2 build. Retry when source or configuration changes. Failures must be visible in CI. |
 | D10 | Keep Spyros's current Arch native application installed. `/usr/bin/t3code-nightly` is owned by `t3code-nightly-bin 0.0.45_nightly.20260930.2468-1`. Decide v2 native packaging separately. |
@@ -43,7 +43,7 @@ V2 has the same effective access to real services as v1. Separate storage isolat
 
 Reuse the existing image build, smoke-test and ArgoCD mechanisms where possible. Build v2 separately from v1. V2 publication must not overwrite v1 image tags or change its package pins.
 
-The source build and packaging command must be verified before selecting the final CI implementation. Tracking the npm `preview` tag alone does not satisfy hourly branch tracking because upstream publishes previews separately.
+Upstream preview releases ship the same `t3-<version>-linux-x64.tar.gz` archive that a source build produces, with `SHA256SUMS`. Spyros accepted preview cadence over per-commit builds on 2026-10-01, so CI downloads that archive instead of building from source.
 
 An eligible rollout requires:
 
@@ -71,7 +71,7 @@ Native package delivery, updates and installer coexistence remain open. Do not i
 - T2. V2 starts fresh, with no imported v1 threads or transcripts. Every repository in the initial inventory has a fresh usable clone. Unsupported or non-remote project entries are reported rather than silently skipped.
 - T3. A parity checklist maps every inventoried capability to provisioning and verification evidence. Test authentication without exposing secrets or performing unapproved mutations to external systems.
 - T4. OpenCode and Codex complete representative turns with the configured proxy and models. Verify relevant plugins, commands, MCP calls and T3 thread tools.
-- T5. Hourly checking detects a branch change, produces a revision-pinned candidate and deploys it when eligible. A failed candidate keeps the existing build running.
+- T5. Hourly checking detects a new preview release on the v2 branch, produces a revision-pinned candidate and deploys it when eligible. A failed candidate keeps the existing build running.
 - T6. Connected clients and each active-work category prevent deployment. Unknown state fails closed. Demonstrate deferred rollout becoming eligible after disconnection and completion of work. Record the remaining best-effort race.
 - T7. Restart preserves v2 configuration and its own new history. Validate recovery from a failed upgrade using an appropriate state backup, not only an image switch.
 - T8. Once laptop packaging is decided, native v1 and v2 coexist; the v2 client pairs to the v2 endpoint and performs a real agent task. Confirm launcher state isolation and link-handler behavior.
