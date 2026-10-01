@@ -54,6 +54,7 @@ jobs:
           set -euo pipefail
           KUSTOMIZE_VERSION=5.8.2  # renovate: datasource=github-releases depName=kubernetes-sigs/kustomize
           HELM_VERSION=4.3.0      # renovate: datasource=github-releases depName=helm/helm
+          PROMTOOL_VERSION=3.5.0  # renovate: datasource=github-releases depName=prometheus/prometheus
 
           dl() {
             url=$1; out=$2; n=0
@@ -80,9 +81,32 @@ jobs:
           tar -xzf "$tmp/kustomize.tar.gz" -C "$tmp"
           sudo mv "$tmp/kustomize" /usr/local/bin/kustomize
 
+          prom_tgz="prometheus-${PROMTOOL_VERSION}.linux-amd64.tar.gz"
+          prom_url="https://github.com/prometheus/prometheus/releases/download/v${PROMTOOL_VERSION}"
+          dl "${prom_url}/${prom_tgz}" "$tmp/${prom_tgz}"
+          dl "${prom_url}/sha256sums.txt" "$tmp/prom-sha256sums.txt"
+          ( cd "$tmp" && grep " ${prom_tgz}\$" prom-sha256sums.txt | sha256sum -c - )
+          tar -xzf "$tmp/${prom_tgz}" -C "$tmp" "prometheus-${PROMTOOL_VERSION}.linux-amd64/promtool"
+          sudo mv "$tmp/prometheus-${PROMTOOL_VERSION}.linux-amd64/promtool" /usr/local/bin/promtool
+
           rm -rf "$tmp"
           helm version
           kustomize version
+          promtool --version
+
+      - name: Alert rule tests (promtool)
+        run: |
+          set -euo pipefail
+          tmp=$(mktemp -d)
+          cd 2-k3s/10.observability/alertmanager-config
+          # promtool cannot read the PrometheusRule CR; test its bare spec.
+          for name in custom-alerts tls-alerts; do
+            python3 -c "import sys,yaml;yaml.safe_dump(yaml.safe_load(open(sys.argv[1]))['spec'],open(sys.argv[2],'w'))" \
+              "$name.yaml" "$tmp/$name-rules.yaml"
+            cp "$name-tests.yaml" "$tmp/"
+            promtool check rules "$tmp/$name-rules.yaml"
+            ( cd "$tmp" && promtool test rules "$name-tests.yaml" )
+          done
 
       - name: YAML parse check (syntax only, no style)
         run: |

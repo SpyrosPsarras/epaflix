@@ -181,6 +181,15 @@
   ],
   "customManagers": [
     {
+      "description": "Keep the pinned PROMTOOL_VERSION in ci.yml (the validate job's alert rule tests) fresh. Marker is an inline trailing comment '# renovate: datasource=... depName=...' on the PROMTOOL_VERSION= line. prometheus/prometheus github-releases tags are vX.Y.Z and the leading v is stripped automatically, as for helm. Like the HELM_VERSION manager, the branch it computes cannot be pushed until the PAT gets workflow scope (#486).",
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github/workflows/ci\\.yml$/"],
+      "matchStrings": [
+        "PROMTOOL_VERSION=(?<currentValue>\\S+)\\s*#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)"
+      ],
+      "versioningTemplate": "semver"
+    },
+    {
       "description": "Keep every pinned HELM_VERSION fresh: ci.yml (the secret-free validate gate's Install tools step), upstream-release-watch.yml (the renderer used by shape-probe rows, #290) and 2-k3s/13.t3code/versions.env (the t3code runtime image's cluster tooling, kept at the gate's version). Marker is an inline trailing comment '# renovate: datasource=... depName=...' on the HELM_VERSION= line. Split out from a single shared regex manager (was kustomize+helm) because one regex manager carries only one extractVersionTemplate, and kustomize needs one while helm does not — helm/helm github-releases auto-strips the leading v, so no extractVersion here. #222/#220. Uses managerFilePatterns, the correct native field on the deployed Renovate — the bot runs 43.33.2, set via the images: override in 2-k3s/12.renovate/kustomization.yaml, not the stale 39.264.0 literal in cronjob.yaml (that literal is dead, see #486). This manager extracts helm/helm fine on every run; the branch just never becomes a PR, because it touches .github/workflows/ and the PAT lacks the workflow scope to push that diff — root cause tracked in #486.",
       "customType": "regex",
       "managerFilePatterns": ["/^\\.github/workflows/ci\\.yml$/", "/^\\.github/workflows/upstream-release-watch\\.yml$/", "/^2-k3s/13\\.t3code/versions\\.env$/"],
