@@ -26,8 +26,13 @@ assert installer.replace_pin(copy.deepcopy(original), uri) == expected
 assert installer.replace_pin(copy.deepcopy(expected), uri) == expected
 assert installer.replace_pin({"plugin": ["other@1"]}, uri) == {"plugin": ["other@1", uri]}
 assert installer.replace_pin({}, uri) == {"plugin": [uri]}
+# Legacy npm pin left beside the reviewed build by older entrypoints.
+assert installer.replace_pin({"plugin": ["other@1", uri, "cc-safety-net@2.4.11"]}, uri) == {"plugin": ["other@1", uri]}
+assert installer.replace_pin({"plugin": ["cc-safety-net@2.4.11", uri]}, uri) == {"plugin": [uri]}
 for plugins in (["cc-safety-net@9"], ["file:///unknown/cc-safety-net/index.js"],
-                ["cc-safety-net@2.4.11", "cc-safety-net@2.4.11"], "invalid"):
+                ["cc-safety-net@2.4.11", "cc-safety-net@2.4.11"], [uri, uri],
+                [uri, ["cc-safety-net@2.4.11", {"mode": "strict"}]], [[uri, {"mode": "strict"}], "cc-safety-net@2.4.11"],
+                "invalid"):
     try:
         installer.replace_pin({"plugin": plugins}, uri)
     except ValueError:
@@ -100,7 +105,7 @@ with tempfile.TemporaryDirectory() as tmp:
         assert not (root / "bun").exists()
 print("PASS: runner archive integrity mismatch rejected before executable creation", flush=True)
 print("PASS: trusted missing/user-owned tools fail before spawn; unsafe parent ownership/mode rejected; build env is an explicit allowlist", flush=True)
-print("PASS: preserve unrelated config/options, idempotency, fresh config, unknown/duplicate pins, hash and symlink rejection", flush=True)
+print("PASS: preserve unrelated config/options, idempotency, fresh config, legacy npm pin beside reviewed build, unknown/duplicate pins, hash and symlink rejection", flush=True)
 if len(sys.argv) > 1:
     assert sys.argv[1] == "--build"
     # Test under this repository, outside /tmp, and remove staging on exit.
