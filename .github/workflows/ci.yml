@@ -52,7 +52,7 @@ jobs:
       - name: Install tools
         run: |
           set -euo pipefail
-          KUSTOMIZE_VERSION=5.8.1  # renovate: datasource=github-releases depName=kubernetes-sigs/kustomize
+          KUSTOMIZE_VERSION=5.8.2  # renovate: datasource=github-releases depName=kubernetes-sigs/kustomize
           HELM_VERSION=4.3.0      # renovate: datasource=github-releases depName=helm/helm
 
           dl() {
