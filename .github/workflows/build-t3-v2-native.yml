@@ -28,7 +28,7 @@ jobs:
             apt-get update && apt-get install -y --no-install-recommends libsecret-1-dev imagemagick pkg-config
             curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup.sh
             sh /tmp/rustup.sh -y --profile minimal
-            export PATH=/root/.cargo/bin:$PATH
+            export PATH=/root/.cargo/bin:/src/node_modules/.bin:$PATH
             npm install --global pnpm@11.10.0
             pnpm install --frozen-lockfile
             pnpm exec vp run build:desktop
