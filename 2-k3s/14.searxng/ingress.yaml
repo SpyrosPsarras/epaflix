@@ -11,6 +11,8 @@ spec:
     - match: Host(`searxng.epaflix.com`)
       kind: Rule
       middlewares:
+        - name: security-headers
+          namespace: traefik-system
         - name: authentik-forwardauth
           namespace: traefik-system
       services:
