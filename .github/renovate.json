@@ -34,6 +34,13 @@
       "rangeStrategy": "pin"
     },
     {
+      "description": "Hold @bitwarden/cli at 2026.8.0 while Vaultwarden is 1.37.3. From 2026.9.0, `bw unlock` runs a user key id backfill that POSTs to an endpoint Vaultwarden does not have (404) and the CLI crashes, so t3code's vault-ssh-agent.py loads no keys (tested 2026-10-02 against vaultwarden.epaflix.com: 2026.8.0 loads, 2026.9.0 and 2026.9.1 fail). Raise the cap after a Vaultwarden upgrade that serves the endpoint, by running one/files/vault-ssh-agent.py with the new bw against the server.",
+      "matchManagers": ["npm"],
+      "matchFileNames": ["2-k3s/13.t3code/env/tools/package.json"],
+      "matchPackageNames": ["@bitwarden/cli"],
+      "allowedVersions": "<=2026.8.0"
+    },
+    {
       "description": "Authentik: chart version and container image move together upstream. Group them in one PR so ArgoCD never sees a chart/image schema mismatch.",
       "matchManagers": ["kustomize"],
       "matchPackageNames": [
