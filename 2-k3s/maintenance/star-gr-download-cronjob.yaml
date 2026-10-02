@@ -8,8 +8,8 @@
 # job reads the stream URL from each episode page and copies it with ffmpeg
 # (no re-encode, highest variant, 1080p at the time of writing).
 #
-# Each Sonarr series is set to the "daily" type so it matches these files by
-# air date once TVDB lists the episodes. Jellyfin sees them straight away.
+# The job asks Sonarr which episode aired on each date and names the file
+# S09E04 style, so Sonarr (standard series type) and Jellyfin both match it.
 #
 # SEASONAL: when a show's season ends, delete its CronJob. For a later season,
 # point its TAG_URL at that season's tag page (and SERIES_DIR if it changes).
@@ -23,6 +23,12 @@ data:
     #!/usr/bin/env python3
     """Download every episode listed on the star.gr tag page that is not on disk.
 
+    Files are named "<Title> - S09E04.mp4" when Sonarr knows which episode
+    aired on that date, because Jellyfin cannot map a date to an episode. Until
+    TVDB lists the episode the file is named "<Title> - <date>.mp4", and a
+    later run renames it. An episode Sonarr already has a file for is skipped,
+    whatever that file is called.
+
     Exits non-zero if the tag page yields no episodes, an episode page has no
     stream URL or date, two pages share a date, or a download fails or comes
     out shorter than the source, so problems fail the Job loudly.
@@ -31,12 +37,16 @@ data:
     import re
     import subprocess
     import sys
+    import json
     import urllib.request
     from html import unescape
 
     TAG_URL = os.environ.get("TAG_URL", "")
     SERIES_DIR = os.environ.get("SERIES_DIR", "")
     SERIES_TITLE = os.environ.get("SERIES_TITLE", "")
+    SONARR_URL = os.environ.get("SONARR_URL", "http://sonarr.servarr.svc.cluster.local:8989")
+    SONARR_SERIES_ID = os.environ.get("SONARR_SERIES_ID", "")
+    SONARR_API_KEY = os.environ.get("SONARR_API_KEY", "")
     BASE = "https://www.star.gr"
     UA = "Mozilla/5.0"
 
@@ -56,6 +66,24 @@ data:
         show_path = re.sub(r"^https?://[^/]+", "", tag_url).rsplit("/", 1)[0]
         pat = r'href="(?:%s)?(%s/[^"/]+)"' % (re.escape(BASE), re.escape(show_path))
         return sorted({BASE + p for p in re.findall(pat, html) if "/tag_" not in p})
+
+
+    def sonarr(path, body=None):
+        req = urllib.request.Request(
+            SONARR_URL + "/api/v3/" + path, method="POST" if body else "GET",
+            data=json.dumps(body).encode() if body else None,
+            headers={"X-Api-Key": SONARR_API_KEY, "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return json.load(r)
+
+
+    def episodes_by_date(episodes):
+        """Map air date to its regular (non-special) episodes."""
+        by_date = {}
+        for e in episodes:
+            if e.get("seasonNumber") and e.get("airDate"):
+                by_date.setdefault(e["airDate"], []).append(e)
+        return by_date
 
 
     def stream_url(html):
@@ -92,15 +120,34 @@ data:
         assert air_date('"PlayerTitle":"24.9.2026 - First Dates"') == "2026-09-24"
         assert stream_url(ep) == "https://a.b/k/s.m3u8?key=Ab_1"
         assert air_date("no title") is None and stream_url("none") is None
+        eps = episodes_by_date([
+            {"seasonNumber": 9, "episodeNumber": 4, "airDate": "2026-09-29"},
+            {"seasonNumber": 9, "episodeNumber": 5, "airDate": "2026-10-05"},
+            {"seasonNumber": 9, "episodeNumber": 6, "airDate": "2026-10-05"},
+            {"seasonNumber": 0, "episodeNumber": 1, "airDate": "2026-10-06"},
+            {"seasonNumber": 9, "episodeNumber": 7}])
+        assert sorted(eps) == ["2026-09-29", "2026-10-05"]
+        assert eps["2026-09-29"][0]["episodeNumber"] == 4 and len(eps["2026-10-05"]) == 2
         print("selftest ok")
 
 
-    def download(url, date):
-        """Return the final path, or None after reporting why it failed."""
-        out = os.path.join(SERIES_DIR, "%s - %s.mp4" % (SERIES_TITLE, date))
+    def download(url, date, ep):
+        """Return "skip", "renamed" or "done", or None after reporting a failure."""
+        dated = os.path.join(SERIES_DIR, "%s - %s.mp4" % (SERIES_TITLE, date))
+        out = dated
+        if ep:
+            if ep.get("hasFile"):
+                print("skip  %s (Sonarr has a file)" % date)
+                return "skip"
+            out = os.path.join(SERIES_DIR, "%s - S%02dE%02d.mp4"
+                               % (SERIES_TITLE, ep["seasonNumber"], ep["episodeNumber"]))
+            if os.path.exists(dated) and not os.path.exists(out):
+                os.rename(dated, out)
+                print("renamed %s -> %s" % (date, os.path.basename(out)))
+                return "renamed"
         if os.path.exists(out):
             print("skip  %s (on disk)" % date)
-            return out
+            return "skip"
         expected = duration(url)
         if not expected:
             fail("%s: cannot read source duration" % date)
@@ -127,13 +174,14 @@ data:
                 os.remove(tmp)
             return None
         os.rename(tmp, out)  # atomic: Sonarr/Jellyfin never see a partial file
-        print("done  %s (%.1f GB)" % (date, os.path.getsize(out) / 1e9))
-        return out
+        print("done  %s -> %s (%.1f GB)" % (date, os.path.basename(out),
+                                              os.path.getsize(out) / 1e9))
+        return "done"
 
 
     def main():
-        if not (TAG_URL and SERIES_DIR and SERIES_TITLE):
-            fail("TAG_URL, SERIES_DIR and SERIES_TITLE must be set")
+        if not (TAG_URL and SERIES_DIR and SERIES_TITLE and SONARR_SERIES_ID and SONARR_API_KEY):
+            fail("TAG_URL, SERIES_DIR, SERIES_TITLE, SONARR_SERIES_ID, SONARR_API_KEY must be set")
             return 2
         # Started as root only to apk-add ffmpeg; write files as the *arr user.
         os.setgroups([])
@@ -148,7 +196,8 @@ data:
             fail("no episode links on %s, star.gr layout changed?" % TAG_URL)
             return 1
 
-        failed, seen = 0, {}
+        eps = episodes_by_date(sonarr("episode?seriesId=" + SONARR_SERIES_ID))
+        failed, changed, seen = 0, False, {}
         for link in links:
             html = fetch(link)
             url, date = stream_url(html), air_date(html)
@@ -158,11 +207,21 @@ data:
             elif date in seen:
                 fail("%s and %s both dated %s" % (seen[date], link, date))
                 failed += 1
+            elif len(eps.get(date, [])) > 1:
+                # Cannot tell which episode this page is; never guess or duplicate.
+                fail("%s: Sonarr has %d episodes on %s" % (link, len(eps[date]), date))
+                failed += 1
             else:
                 seen[date] = link
-                if download(url, date) is None:
+                result = download(url, date, (eps.get(date) or [None])[0])
+                if result is None:
                     failed += 1
+                elif result != "skip":
+                    changed = True
 
+        if changed:  # import new files now instead of at Sonarr's next refresh
+            sonarr("command", {"name": "RescanSeries", "seriesId": int(SONARR_SERIES_ID)})
+            print("asked Sonarr to rescan series %s" % SONARR_SERIES_ID)
         return 1 if failed else 0
 
 
@@ -211,6 +270,13 @@ spec:
                   value: "/media/tvshows/Greece's Next Top Model (2009) [tvdbid-320284]"
                 - name: SERIES_TITLE
                   value: "Greece's Next Top Model"
+                - name: SONARR_SERIES_ID
+                  value: "404"
+                - name: SONARR_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: unpackerr-secret
+                      key: UN_SONARR_0_API_KEY
               volumeMounts:
                 - name: script
                   mountPath: /script
@@ -272,6 +338,13 @@ spec:
                   value: "/media/tvshows/First Dates (2023) [tvdbid-436492]"
                 - name: SERIES_TITLE
                   value: "First Dates"
+                - name: SONARR_SERIES_ID
+                  value: "408"
+                - name: SONARR_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: unpackerr-secret
+                      key: UN_SONARR_0_API_KEY
               volumeMounts:
                 - name: script
                   mountPath: /script
