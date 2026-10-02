@@ -1,6 +1,5 @@
-# Placeholder until the t3code Vaultwarden account exists. Replace the key
-# with client-id, client-secret and password (`sops edit`), then restart
-# t3code-0. Without a password file the pod starts with no vault keys.
+# Vaultwarden login for t3code-agent (vault item 'vaultwarden t3code-agent').
+# Edit with `sops edit`, then restart t3code-0.
 apiVersion: v1
 kind: Secret
 metadata:
@@ -8,19 +7,21 @@ metadata:
     namespace: t3code
 type: Opaque
 stringData:
-    placeholder: ENC[AES256_GCM,data:oTs5+jslkevPPsOAFq4=,iv:jWqm1s1ld9qZ/LMRRRNki9DZTICh1IwCDfhPVaxmO8M=,tag:qBKsbp4Wur9ao+5DGItmCg==,type:str]
+    client-id: ENC[AES256_GCM,data:BF/5wafqkx69YTUaQQmviib+QtrxwnY3QjFfNDjTwIRYtwEn2wIoVjs=,iv:jAvqr4exLO6dcvmj8v/l0Cl4EwbaZ+vRwr5pr9c3ZIQ=,tag:00xIxUMdAEBpKeWKT869Gw==,type:str]
+    client-secret: ENC[AES256_GCM,data:hnedRKa8T7xR3lVzGIElw5JppwJF4rh0tHrRoiF0,iv:nvUv3tcMehfJsVSQFPxqjL/Nnry1CqZjOS8ROpZ6cp8=,tag:FDDuiE0vvx2kSrOny6WCeA==,type:str]
+    password: ENC[AES256_GCM,data:vsKAxYe3BxRWlUeLsXbPr+lzHyhK5eFYj/OJjWg+0L1o6NuhaAnM318k6Q==,iv:wLf+OQ4J+cBTcyCeuUs7z3nyUlvQdBTyvaE4VSp71DQ=,tag:a0qzGr2PQJ13oSzGb5JeHQ==,type:str]
 sops:
     age:
         - enc: |
             -----BEGIN AGE ENCRYPTED FILE-----
-            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSA3eUN2TGZCbXZiWmxWVE5p
-            ZnMxRmY2V0lMUEY3LzFGNWhnSTNGQU5za2lRCjk3MUdCY28xWVJtU2lscFo0RUg0
-            WDFhTDN1YVZOd0s5dWRBc2pqRGRhQUEKLS0tIDEydGVlRFZNY3JlR1htcEVmeE50
-            ODdLUjR5TEJtYWZtK2ZEakdiZWJtbEEK4SspUIPUSdarBcVrVjN+IlsV9G6CdqOH
-            G99tOQb7SQEHuox3DP/4xbEZH4ump190tZWTHJurdNKko2xQ4Co3qA==
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBaYlVZWXc0VEZPV0Iyd3Q4
+            TTVjRFk5TWEyMXdlM0F4Vy95aWhRd0NwR2h3CktockVaNlNZS0k0TmRtbnZIancw
+            VW5GejlCRUdycCsyK2FOL0EycVAvNEkKLS0tIDJiWWE2dHpBUVZoZjZiY1B6MVdk
+            STJKdTBZODY1ZUZ2bFE3RDY5VWJDcHMKACXI3BZ7DTmRbrNbM4rxOde00i4KfVj7
+            7iiBPQ7j+LA8iiWiCXzzMopnfxQco/cJJvI9Ybo2O7gkmRwCxVSMbA==
             -----END AGE ENCRYPTED FILE-----
           recipient: age1586thf5vkcdf5lcn3zwjpu8ltkwyq8efrhj8lr0vdrrt9k5f3qgsxeg7gx
     encrypted_regex: ^(data|stringData)$
-    lastmodified: "2026-10-02T17:21:55Z"
-    mac: ENC[AES256_GCM,data:Y97gINLy/idZc+0/VcwavtOV/nkvkjAgNLBx05GpgnQmDO/exoPtpyCj1dEYEyfqlAQU4KyzuZOastFP8pkybzl2CvDz9BI4TvJjRFH1lAmK/aK5ZtbCMIEtP86aLOK6/80xjfLWq3kpE0MoEY/GqiHTg46cSSLE0QZ9a8ztkm0=,iv:he0tdUWgwIpuF1vXImHiTj27qfW3vz1Lqz1ffafyhWs=,tag:LSVEG+pRx4nQ2krdRQ+z8Q==,type:str]
+    lastmodified: "2026-10-02T19:12:33Z"
+    mac: ENC[AES256_GCM,data:Ax4xoDPqoWCkxaxHS8N+mWj50/Z8mmaUxgBgKMB6Xc6QLdizKHwrIShZebtLWVspzvYhDVkk1oel/bJbFg7JPBRrizy3+/NXUbCVRt2HmgCjMvHwZbTsvrqzX5wIEiiIsBuS+LqS+cGKlOVGHf1b8HzylCvoX4N6HT/jrRPu/+M=,iv:z19r3bC/b3LMnt8kuLQQNVGEIP34OuxBZlVI4U7yPNg=,tag:UPcunAX3Uaan+RoErioHbw==,type:str]
     version: 3.13.3
