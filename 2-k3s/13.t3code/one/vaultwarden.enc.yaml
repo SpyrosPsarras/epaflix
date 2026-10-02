@@ -1,0 +1,26 @@
+# Placeholder until the t3code Vaultwarden account exists. Replace the key
+# with client-id, client-secret and password (`sops edit`), then restart
+# t3code-0. Without a password file the pod starts with no vault keys.
+apiVersion: v1
+kind: Secret
+metadata:
+    name: t3code-vaultwarden
+    namespace: t3code
+type: Opaque
+stringData:
+    placeholder: ENC[AES256_GCM,data:oTs5+jslkevPPsOAFq4=,iv:jWqm1s1ld9qZ/LMRRRNki9DZTICh1IwCDfhPVaxmO8M=,tag:qBKsbp4Wur9ao+5DGItmCg==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSA3eUN2TGZCbXZiWmxWVE5p
+            ZnMxRmY2V0lMUEY3LzFGNWhnSTNGQU5za2lRCjk3MUdCY28xWVJtU2lscFo0RUg0
+            WDFhTDN1YVZOd0s5dWRBc2pqRGRhQUEKLS0tIDEydGVlRFZNY3JlR1htcEVmeE50
+            ODdLUjR5TEJtYWZtK2ZEakdiZWJtbEEK4SspUIPUSdarBcVrVjN+IlsV9G6CdqOH
+            G99tOQb7SQEHuox3DP/4xbEZH4ump190tZWTHJurdNKko2xQ4Co3qA==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1586thf5vkcdf5lcn3zwjpu8ltkwyq8efrhj8lr0vdrrt9k5f3qgsxeg7gx
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-10-02T17:21:55Z"
+    mac: ENC[AES256_GCM,data:Y97gINLy/idZc+0/VcwavtOV/nkvkjAgNLBx05GpgnQmDO/exoPtpyCj1dEYEyfqlAQU4KyzuZOastFP8pkybzl2CvDz9BI4TvJjRFH1lAmK/aK5ZtbCMIEtP86aLOK6/80xjfLWq3kpE0MoEY/GqiHTg46cSSLE0QZ9a8ztkm0=,iv:he0tdUWgwIpuF1vXImHiTj27qfW3vz1Lqz1ffafyhWs=,tag:LSVEG+pRx4nQ2krdRQ+z8Q==,type:str]
+    version: 3.13.3

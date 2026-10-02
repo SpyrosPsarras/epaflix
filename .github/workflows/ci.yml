@@ -304,6 +304,7 @@ jobs:
           node --test 2-k3s/13.t3code/one/files/jev-guard.test.mjs
           npm install --prefix /tmp/ssh-policy-check --ignore-scripts --no-audit --no-fund cc-safety-net@2.4.11
           SAFETY_NET_CLI=/tmp/ssh-policy-check/node_modules/.bin/cc-safety-net python3 2-k3s/13.t3code/one/files/ssh-policy.test.py
+          python3 2-k3s/13.t3code/one/files/vault-ssh-agent.test.py
           node --test 2-k3s/13.t3code/one/files/jev-auto.test.mjs
           node --test 2-k3s/13.t3code/one/files/jev-steps.test.mjs
 
