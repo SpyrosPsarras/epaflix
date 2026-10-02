@@ -12,3 +12,4 @@ files:
   - cliproxy-secrets.enc.yaml
   - github-ssh.enc.yaml
   - mcp-hub-client.enc.yaml
+  - vaultwarden.enc.yaml

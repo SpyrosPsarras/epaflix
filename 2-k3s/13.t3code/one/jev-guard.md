@@ -23,7 +23,10 @@ Three layers, cheapest first. Research: `docs/jev-tool-guard-research.md`
    rules also match a vault attachment identifier in Python, blocking SSH
    authentication before any key is retrieved. Explicit deny paths protect
    `.ssh` under the active HOME, the account's passwd HOME and `/root`, plus
-   `/run/t3-github-ssh`. Startup publishes public host-key records from the
+   `/run/t3-github-ssh`, `/run/t3-vaultwarden` (the Vaultwarden login that
+   `files/vault-ssh-agent.py` uses at startup to load homelab SSH keys into an
+   agent; agents get only `SSH_AUTH_SOCK`) and `/run/t3-bw` (bw's data dir
+   during that load, in memory). Startup publishes public host-key records from the
    active HOME's `.ssh/known_hosts` into `.config/ssh/known_hosts`, outside
    protected credential directories. It rejects a symlink source, validates
    the complete Ed25519 public-key structure, preserves revocation and CA

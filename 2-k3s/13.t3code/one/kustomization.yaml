@@ -34,6 +34,7 @@ configMapGenerator:
       - files/jev-auto.js
       - files/jev-guard.js
       - files/ssh-policy.py
+      - files/vault-ssh-agent.py
       - files/jev-checks.md
       - files/opencode-fast-version.sh
 
