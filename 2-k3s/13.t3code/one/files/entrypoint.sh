@@ -34,6 +34,20 @@ EOF
   chmod 0600 "$SSH_DIR/config"
 fi
 
+# Homelab SSH keys from Vaultwarden (files/vault-ssh-agent.py). T3 and its
+# agents get only the agent socket; the vault login stays in /run/t3-vaultwarden
+# and bw's data dir in the memory-backed /run/t3-bw, both denied by
+# cc-safety-net (ssh-policy.py). Keys load once per container start.
+if [[ -s /run/t3-vaultwarden/password ]]; then
+  if python3 /scripts/vault-ssh-agent.py /run/t3-vaultwarden /tmp/t3-ssh-agent/agent.sock /run/t3-bw; then
+    export SSH_AUTH_SOCK=/tmp/t3-ssh-agent/agent.sock
+  else
+    echo "t3env: vault SSH keys not loaded; SSH falls back to key files" >&2
+  fi
+else
+  echo "t3env: no Vaultwarden login in t3code-vaultwarden; vault SSH keys skipped" >&2
+fi
+
 # Same remote in both environments so T3 groups them as one project.
 if [[ ! -d $PROJECT_DIR/.git ]]; then
   git clone -q "$T3_PROJECT_REPO" "$PROJECT_DIR"

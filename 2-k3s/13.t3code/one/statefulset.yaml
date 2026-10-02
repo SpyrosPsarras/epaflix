@@ -55,7 +55,7 @@ spec:
                       - k3s-worker-65
       containers:
         - name: t3
-          image: ghcr.io/spyrospsarras/t3-runtime:inputs-2f63e0747a7acf1b476e07597b5d9f15
+          image: ghcr.io/spyrospsarras/t3-runtime:inputs-6a559386f99271a33b516f4b867d6d06
           imagePullPolicy: Always
           command:
             - bash
@@ -116,6 +116,11 @@ spec:
             - name: github-ssh
               mountPath: /run/t3-github-ssh
               readOnly: true
+            - name: vaultwarden
+              mountPath: /run/t3-vaultwarden
+              readOnly: true
+            - name: bw-scratch
+              mountPath: /run/t3-bw
             - name: lock
               mountPath: /runtime-pins
               readOnly: true
@@ -160,6 +165,20 @@ spec:
           secret:
             secretName: t3code-github-ssh
             defaultMode: 0440
+        # Vaultwarden login for the SSH key agent (files/vault-ssh-agent.py):
+        # client-id, client-secret, password (vaultwarden.enc.yaml). No
+        # password file means no vault keys. Keys load at container start, so restart
+        # the pod after `sops edit` or a key change. bw saves the login in its data dir, so
+        # that goes to memory, never to the node disk.
+        - name: vaultwarden
+          secret:
+            secretName: t3code-vaultwarden
+            defaultMode: 0440
+            optional: true
+        - name: bw-scratch
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Mi
         - name: lock
           configMap:
             name: t3code-tools

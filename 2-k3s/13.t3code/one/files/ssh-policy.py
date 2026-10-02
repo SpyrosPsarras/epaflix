@@ -14,7 +14,7 @@ def update(path, homes):
     secret.setdefault('overrides', {})['secret.basename.id-ed25519'] = 'off'
     secret['overrides']['secret.pattern.ssh-key-basename'] = 'off'
     denied = secret.setdefault('deny_paths', [])
-    for directory in [*(str(Path(home) / '.ssh') for home in homes), '/run/t3-github-ssh']:
+    for directory in [*(str(Path(home) / '.ssh') for home in homes), '/run/t3-github-ssh', '/run/t3-vaultwarden', '/run/t3-bw']:
         if directory not in denied:
             denied.append(directory)
     content = json.dumps(config, indent=2) + '\n'
