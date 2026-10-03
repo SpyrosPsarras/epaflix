@@ -16,6 +16,7 @@ pairs=(
   "$here/../../23.mcp-hub/tools/hub_clients.py:$here/files/hub_clients.py"
   "$here/../files/cliproxy-models.js:$here/files/cliproxy-models.js"
   "$here/../../../1-proxmox/ssh/homelab.conf:$here/files/homelab-ssh.conf"
+  "$here/../../../1-proxmox/ssh/homelab-ssh.md:$here/files/homelab-ssh.md"
 )
 rc=0
 for pair in "${pairs[@]}"; do
