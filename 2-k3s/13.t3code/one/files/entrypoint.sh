@@ -18,12 +18,20 @@ export PATH=/tools/node_modules/.bin:$PATH
 mkdir -p "$(dirname "$PROJECT_DIR")"
 git config --global credential.helper /scripts/git-credential-github.sh
 
-# git@github.com: remotes (the Davidhorn checkouts). ssh expands ~ from
-# /etc/passwd (/home/node), not $HOME, so the pinned key and host keys go there.
-if [[ -r /run/t3-github-ssh/identity ]]; then
-  SSH_DIR=$(getent passwd "$(id -u)" | cut -d: -f6)/.ssh
-  mkdir -m 0700 "$SSH_DIR" 2>/dev/null || chmod 0700 "$SSH_DIR"
-  cat >"$SSH_DIR/config" <<'EOF'
+# ssh expands ~ from /etc/passwd (/home/node), not $HOME, so its config goes
+# there. It is rewritten on every start.
+SSH_DIR=$(getent passwd "$(id -u)" | cut -d: -f6)/.ssh
+mkdir -m 0700 "$SSH_DIR" 2>/dev/null || chmod 0700 "$SSH_DIR"
+{
+  # Homelab hosts (generated from the .lan DNS records, 1-proxmox/ssh). First,
+  # so no Host block scopes the Include. They include
+  # ~/.ssh/homelab-identity.conf: the key comes from SSH_AUTH_SOCK (the vault
+  # agent below); host keys persist on the PVC and a new host's key is saved on
+  # first connect, then must never change.
+  printf 'Include /scripts/homelab-ssh.conf\n\n'
+  # git@github.com: remotes (the Davidhorn checkouts).
+  if [[ -r /run/t3-github-ssh/identity ]]; then
+    cat <<'EOF'
 Host github.com
   User git
   IdentityFile /run/t3-github-ssh/identity
@@ -31,8 +39,12 @@ Host github.com
   UserKnownHostsFile /run/t3-github-ssh/known_hosts
   StrictHostKeyChecking yes
 EOF
-  chmod 0600 "$SSH_DIR/config"
-fi
+  fi
+} >"$SSH_DIR/config"
+# ssh does not create the directory of a UserKnownHostsFile; a fresh PVC has none.
+mkdir -p -m 0700 "$HOME/.ssh"
+printf 'UserKnownHostsFile %s/.ssh/known_hosts\nStrictHostKeyChecking accept-new\n' "$HOME" >"$SSH_DIR/homelab-identity.conf"
+chmod 0600 "$SSH_DIR/config" "$SSH_DIR/homelab-identity.conf"
 
 # Homelab SSH keys from Vaultwarden (files/vault-ssh-agent.py). T3 and its
 # agents get only the agent socket; the vault login stays in /run/t3-vaultwarden
