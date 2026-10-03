@@ -20,6 +20,8 @@ const TOKENS = [
 // A command start, then optional wrappers such as `bash -c '` or `exec`.
 const START = String.raw`(?:^|[;&|(]\s*)(?:(?:command|exec|nice|busybox)\s+|(?:ba|z)?sh -c\s+['"]?)*(?:(?:/usr)?/bin/)?`
 const ENV_DUMP = new RegExp(`${START}(?:env(?:\\s+-[-\\w]+)*|set|export(?: -p)?|declare(?: -[xp]+)?)\\s*(?:$|[;&|)>'"])|${START}printenv\\b|/proc/\\S*/environ|${START}ps\\s+[a-z]*e[a-z]*(?:\\s|$)`)
+// MCP vault servers (<server>_<tool>): their arguments and output are credentials by design.
+const VAULT_TOOL = /^(keepass|vaultwarden)_/
 // Read-only commands and the project's own tests and builds, with no chaining,
 // redirection, substitution or output flags, stay on the pod. File readers
 // (cat, head) go to Jev, which is asked about credential reads.
@@ -110,7 +112,7 @@ export default async () => {
       const cmd = redact(command).slice(0, 2000)
       const path = String(output.args?.filePath ?? output.args?.path ?? "")
       // Vault tools carry secrets by design.
-      if (!tool.startsWith("keepass_") && (redact(args) !== args || `${path} ${command}`.includes("/run/jev"))) {
+      if (!VAULT_TOOL.test(tool) && (redact(args) !== args || `${path} ${command}`.includes("/run/jev"))) {
         await record({ ...base, layer: "local", decision: "block", reason: "credential", command: cmd })
         throw block("its arguments contain a credential or the Jev key path")
       }
@@ -137,7 +139,7 @@ export default async () => {
     async "tool.execute.after"(input, output) {
       const { tool, sessionID, callID } = input
       // Vault output is the credential the agent asked for.
-      if (tool.startsWith("keepass_")) return
+      if (VAULT_TOOL.test(tool)) return
       mapText(output, redact)
       if (!UNTRUSTED.test(tool) || jevAllowed.get(sessionID) !== true) return
       let text = ""

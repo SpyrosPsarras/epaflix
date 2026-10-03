@@ -20,7 +20,7 @@ import subprocess
 import sys
 import tempfile
 
-SERVERS = {"gmail": "/gmail", "searxng": "/searxng", "notion": "/notion", "keepass": "/keepass",
+SERVERS = {"gmail": "/gmail", "searxng": "/searxng", "notion": "/notion", "keepass": "/keepass", "vaultwarden": "/vaultwarden",
            "kubernetes-epaflix": "/kubernetes"}
 # Its instructions tell the agent to consult it before every task; trialled in OpenCode only.
 OPENCODE_ONLY = {"jev": "/jev"}
@@ -30,6 +30,7 @@ OPENCODE_ONLY = {"jev": "/jev"}
 ASK = {
     "gmail": ["gmail_send", "gmail_send_draft", "gmail_trash"],
     "keepass": ["vault_add", "vault_update", "vault_trash", "vault_attach"],
+    "vaultwarden": ["vault_add", "vault_update", "vault_trash", "vault_attach"],
     "kubernetes-epaflix": ["pods_delete", "pods_exec", "pods_run", "resources_create_or_update",
                            "resources_delete", "resources_scale", "helm_install", "helm_uninstall"],
 }
@@ -148,6 +149,7 @@ def _selftest():
     assert out["mcp"]["searxng"]["url"] == "https://hub/searxng" and out["mcp"]["searxng"]["enabled"] is True
     assert out["mcp"]["gmail"]["enabled"] is False, "a user's disable of a remote entry survives"
     assert out["permission"]["*"] == "allow" and out["permission"]["keepass_vault_trash"] == "ask"
+    assert out["permission"]["vaultwarden_vault_trash"] == "ask" and out["mcp"]["vaultwarden"]["url"] == "https://hub/vaultwarden"
     assert opencode(json.loads(json.dumps(out)), "https://hub", "Bearer {env:T}") == out, "idempotent"
     cl = claude({"mcpServers": {"keepass": {"command": "/scripts/keepass-remote.sh"},
                                 "old": {"command": "bash", "args": ["/scripts/keepass-remote.sh"]}}, "x": 1},

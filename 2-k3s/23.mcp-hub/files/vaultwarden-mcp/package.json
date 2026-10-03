@@ -1,0 +1,8 @@
+{
+  "name": "vaultwarden-mcp-bw",
+  "private": true,
+  "description": "Bitwarden CLI for the vaultwarden-mcp pod. Held at 2026.8.0 while Vaultwarden is 1.37.3 (see .github/renovate.json).",
+  "dependencies": {
+    "@bitwarden/cli": "2026.8.0"
+  }
+}

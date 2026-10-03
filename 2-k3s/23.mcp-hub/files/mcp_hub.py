@@ -11,6 +11,7 @@ use stateless JSON transport, so a pod restart costs a client one retry.
 
 Env: CLIENTS_FILE (default /app/clients.json) plus whatever the mounted
 servers need: GMAIL_*, SEARXNG_URL, KEEPASS_URL + KEEPASS_HUB_SECRET,
+VAULTWARDEN_URL + VAULTWARDEN_HUB_SECRET,
 KUBERNETES_MCP_URL, JEV_MCP_URL + JEV_MCP_AUTH_TOKEN, NOTION_MCP_URL.
 
 Self-test: --selftest runs each module's selftest, then boots the ASGI app
@@ -57,10 +58,19 @@ def upstreams():
             raise UpstreamError("KEEPASS_HUB_SECRET is not set (Secret mcp-hub-keepass)")
         return {"x-hub-secret": secret}
 
+    def vaultwarden_secret():
+        secret = os.environ.get("VAULTWARDEN_HUB_SECRET", "")
+        if not secret:
+            raise UpstreamError("VAULTWARDEN_HUB_SECRET is not set (Secret mcp-hub-vaultwarden)")
+        return {"x-hub-secret": secret}
+
     grant = notion_grant.Grant(notion_grant.SecretStore("mcp-hub", "mcp-hub-notion-grant"))
     return [
         ("/keepass", Upstream("keepass", os.environ.get(
             "KEEPASS_URL", "http://keepass.syncthing.svc.cluster.local:8000/keepass"), keepass_secret)),
+        ("/vaultwarden", Upstream("vaultwarden", os.environ.get(
+            "VAULTWARDEN_URL", "http://vaultwarden-mcp.mcp-hub.svc.cluster.local:8000/vaultwarden"),
+            vaultwarden_secret)),
         ("/kubernetes", Upstream("kubernetes", os.environ.get(
             "KUBERNETES_MCP_URL", "http://kubernetes-mcp.mcp-hub.svc.cluster.local:8080/mcp"))),
         ("/jev", Upstream("jev", os.environ.get(
@@ -257,6 +267,16 @@ def _selftest():
     # The production table mounts /jev at jev-mcp with this credential (constructors do no I/O).
     jev = dict(upstreams())["/jev"]
     assert jev.url == "http://jev-mcp.mcp-hub.svc.cluster.local:8080/mcp" and jev.credential is jev_token, jev.url
+    vw = dict(upstreams())["/vaultwarden"]
+    assert vw.url == "http://vaultwarden-mcp.mcp-hub.svc.cluster.local:8000/vaultwarden", vw.url
+    os.environ["VAULTWARDEN_HUB_SECRET"] = "vw"
+    assert vw.credential() == {"x-hub-secret": "vw"}
+    os.environ["VAULTWARDEN_HUB_SECRET"] = ""
+    try:
+        vw.credential()
+        raise AssertionError("an unset VAULTWARDEN_HUB_SECRET must fail")
+    except UpstreamError as e:
+        assert "mcp-hub-vaultwarden" in str(e)
     print("hub selftest OK")
 
 

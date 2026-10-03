@@ -11,6 +11,7 @@ resources:
   - ingress.yaml
   - kubernetes-mcp.yaml
   - jev-mcp.yaml
+  - vaultwarden-mcp.yaml
 
 configMapGenerator:
   - name: mcp-hub-app
@@ -31,6 +32,14 @@ configMapGenerator:
     files:
       - files/jev-mcp/package.json
       - files/jev-mcp/package-lock.json
+  # Name hashes roll vaultwarden-mcp when the server or the bw pin changes.
+  - name: vaultwarden-mcp-app
+    files:
+      - files/vaultwarden_mcp.py
+  - name: vaultwarden-mcp-bw
+    files:
+      - files/vaultwarden-mcp/package.json
+      - files/vaultwarden-mcp/package-lock.json
 
 generators:
   - ksops-generator.yaml
@@ -82,5 +91,24 @@ replacements:
           name: mcp-hub
         fieldPaths:
           - spec.template.metadata.annotations.[mcp-hub.epaflix.com/keepass-revision]
+        options:
+          create: true
+  - source:
+      kind: Secret
+      name: mcp-hub-vaultwarden
+      fieldPath: metadata.annotations.[mcp-hub.epaflix.com/revision]
+    targets:
+      - select:
+          kind: Deployment
+          name: mcp-hub
+        fieldPaths:
+          - spec.template.metadata.annotations.[mcp-hub.epaflix.com/vaultwarden-revision]
+        options:
+          create: true
+      - select:
+          kind: Deployment
+          name: vaultwarden-mcp
+        fieldPaths:
+          - spec.template.metadata.annotations.[mcp-hub.epaflix.com/vaultwarden-revision]
         options:
           create: true
