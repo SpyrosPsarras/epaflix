@@ -43,8 +43,13 @@ EOF
 } >"$SSH_DIR/config"
 # ssh does not create the directory of a UserKnownHostsFile; a fresh PVC has none.
 mkdir -p -m 0700 "$HOME/.ssh"
-printf 'UserKnownHostsFile %s/.ssh/known_hosts\nStrictHostKeyChecking accept-new\n' "$HOME" >"$SSH_DIR/homelab-identity.conf"
-chmod 0600 "$SSH_DIR/config" "$SSH_DIR/homelab-identity.conf"
+# OpenSSH 9.2 expands ~ in Include from $HOME (the PVC), not the passwd home,
+# so write the file to both.
+for d in "$SSH_DIR" "$HOME/.ssh"; do
+  printf 'UserKnownHostsFile %s/.ssh/known_hosts\nStrictHostKeyChecking accept-new\n' "$HOME" >"$d/homelab-identity.conf"
+  chmod 0600 "$d/homelab-identity.conf"
+done
+chmod 0600 "$SSH_DIR/config"
 
 # Homelab SSH keys from Vaultwarden (files/vault-ssh-agent.py). T3 and its
 # agents get only the agent socket; the vault login stays in /run/t3-vaultwarden
