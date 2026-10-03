@@ -158,6 +158,9 @@ with open(path) as f:
 before = json.dumps(config, sort_keys=True)
 if "instructions" in config:
     config["instructions"] = [i for i in config["instructions"] if i not in retired]
+# Homelab SSH how-to (1-proxmox/ssh/homelab-ssh.md) for every OpenCode session.
+if "/scripts/homelab-ssh.md" not in config.setdefault("instructions", []):
+    config["instructions"].append("/scripts/homelab-ssh.md")
 # No "*" key, so a top-level permission default still applies to other commands.
 # Read rules are left to cc-safety-net and jev-guard: OpenCode matches read
 # patterns against project-relative paths, so "**/.ssh/**" missed in a test.
@@ -249,6 +252,14 @@ PY
 
 echo "t3env: $(t3 --version) claude=$(claude --version 2>/dev/null | head -1) opencode=$(opencode --version 2>/dev/null | head -1) codex=$(codex --version 2>/dev/null | head -1)"
 python3 /scripts/private-config.py install /private-agent-config/bundle.json
+# Codex has no extra-instructions list: it reads ~/.codex/AGENTS.override.md
+# instead of AGENTS.md when present, so give it the bundle plus the homelab SSH how-to.
+# Written whole or not at all: a partial override would hide the bundle.
+if ! { cat "$HOME/.codex/AGENTS.md" /scripts/homelab-ssh.md >"$HOME/.codex/AGENTS.override.md.tmp" &&
+        mv -f "$HOME/.codex/AGENTS.override.md.tmp" "$HOME/.codex/AGENTS.override.md"; } 2>/dev/null; then
+  rm -f "$HOME/.codex/AGENTS.override.md" "$HOME/.codex/AGENTS.override.md.tmp" || true
+  echo "t3env: codex homelab SSH instructions not written; Codex uses the bundle alone" >&2
+fi
 # `serve` forces project bootstrap off; `start --no-browser` honors the flag.
 exec t3 start --no-browser --host 0.0.0.0 --port 3773 --base-dir "$T3_HOME" \
   --auto-bootstrap-project-from-cwd "$PROJECT_DIR"

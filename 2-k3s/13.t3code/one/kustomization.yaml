@@ -36,6 +36,7 @@ configMapGenerator:
       - files/ssh-policy.py
       - files/vault-ssh-agent.py
       - files/homelab-ssh.conf
+      - files/homelab-ssh.md
       - files/jev-checks.md
       - files/opencode-fast-version.sh
 
