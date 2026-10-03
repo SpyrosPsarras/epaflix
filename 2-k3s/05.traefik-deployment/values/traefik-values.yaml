@@ -122,6 +122,7 @@ resources:
   requests:
     cpu: 100m
     memory: 128Mi
+  # No CPU limit: a 500m cap throttled TLS streaming to ~140 Mbps total,
+  # which stalled 4K remux playback through jellyfin.epaflix.com.
   limits:
-    cpu: 500m
     memory: 512Mi
