@@ -122,6 +122,7 @@ resources:
   requests:
     cpu: 100m
     memory: 128Mi
+  # No CPU limit: with 500m, one TLS download throttled Traefik in every
+  # CFS period and ran at ~150 Mbps (HTTP/2) vs ~2.5 Gbps direct.
   limits:
-    cpu: 500m
     memory: 512Mi
