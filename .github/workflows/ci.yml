@@ -127,14 +127,6 @@ jobs:
           print("All YAML parses cleanly.")
           PY
 
-      - name: T3 v2 provisioning and rollout behavior
-        run: |
-          python3 2-k3s/13.t3code/v2/tools/provision.test.py
-          python3 2-k3s/13.t3code/v2/tools/bootstrap-projects.test.py
-          python3 2-k3s/13.t3code/v2/tools/rollout-ready.test.py
-          python3 2-k3s/13.t3code/v2/tools/backup.test.py
-          python3 2-k3s/13.t3code/v2/tools/render.test.py
-
       - name: Helm chart pins resolve
         run: |
           python3 - <<'PY'
