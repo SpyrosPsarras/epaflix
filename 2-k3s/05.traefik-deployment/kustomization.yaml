@@ -13,7 +13,6 @@ resources:
   - ingress/pegaprox-proxy.yaml
   - ingress/minio-proxy.yaml
   - ingress/t3code-proxy.yaml
-  - ingress/t3code-v2-proxy.yaml
   - servicemonitor.yaml
 generators:
   - ksops-generator.yaml
