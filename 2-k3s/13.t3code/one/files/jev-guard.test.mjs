@@ -69,6 +69,7 @@ try {
     "rg -w 'set' lib", `git commit -m "set"`, "echo 'declare'", `git log --grep "command env"`])
     await before("bash", { command }, "glm")
   await before("keepass_vault_add", { path: "/x", password: token })
+  await before("vaultwarden_vault_add", { path: "/x", password: token })
   for (const command of ["echo API-documentation-review", "echo API-GatewayConfigurationManagementService", "echo hf_hub_download_from_the_model_repository", "echo the hf_ models", "echo tskey-api-docs",
     "cat docs/risk-assessment-for-production-rollout.md", "ls ~/task-scheduler-configuration-notes", "git log --grep=desk-booking-feature-implementation"])
     await before("bash", { command }, "glm")
@@ -126,6 +127,7 @@ try {
   assert.ok(!out.content[0].text.includes(token) && !out.content[1].resource.text.includes(token))
   out = { content: [{ type: "text", text: `password ${token}` }] }
   await after("keepass_vault_get", out)
+  await after("vaultwarden_vault_get", out)
   assert.ok(out.content[0].text.includes(token), "vault output is the credential the agent asked for")
   calls = 0
   globalThis.fetch = answer({ injection: { type: "noul", noul: 0.95 } })

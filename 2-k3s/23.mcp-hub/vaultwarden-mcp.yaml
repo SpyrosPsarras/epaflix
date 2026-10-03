@@ -1,0 +1,221 @@
+---
+# Upstream for the hub's /vaultwarden path: read-write access to Spyros's
+# Vaultwarden vault, replacing the KeePass server (docs/superpowers/specs/
+# 2026-10-03-keepass-sunset-design.md). Two containers share the pod network:
+#   bw      logs in with the personal API key, unlocks with the master password
+#           and runs `bw serve` (Bitwarden CLI's REST API) on 127.0.0.1:8087.
+#           Only this container sees the login keys of Secret mcp-hub-vaultwarden.
+#   server  files/vaultwarden_mcp.py: the 7 vault_* tools over bw serve, at
+#           :8000/vaultwarden. It and the hub hold only the hub-secret key.
+# The NetworkPolicy keeps every pod but the hub off port 8000.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vaultwarden-mcp
+  namespace: mcp-hub
+  labels:
+    app: vaultwarden-mcp
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: vaultwarden-mcp
+  template:
+    metadata:
+      labels:
+        app: vaultwarden-mcp
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 10
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: bw
+          image: docker.io/library/node:22-alpine
+          # ponytail: npm ci from the pinned lockfile on every start (~15s),
+          # like jev-mcp. Bake an image if restarts get frequent.
+          # /tmp/bw is wiped first: emptyDirs survive container restarts, and a
+          # still-logged-in bw refuses `config server` and `login` (crash loop).
+          # The login values are unset before exec so bw serve never holds them.
+          command:
+            - sh
+            - -c
+            - >-
+              rm -rf /tmp/bw &&
+              cp /app/package.json /app/package-lock.json /opt/bw/ &&
+              cd /opt/bw &&
+              npm ci --omit=dev --no-audit --no-fund --loglevel=error &&
+              bw=/opt/bw/node_modules/.bin/bw &&
+              $bw config server https://vaultwarden.epaflix.com >/dev/null &&
+              $bw login --apikey >/dev/null &&
+              export BW_SESSION="$($bw unlock --passwordenv BW_PASSWORD --raw)" &&
+              test -n "$BW_SESSION" &&
+              unset BW_PASSWORD BW_CLIENTID BW_CLIENTSECRET &&
+              exec $bw serve --hostname 127.0.0.1 --port 8087
+          env:
+            - name: HOME
+              value: /tmp
+            - name: npm_config_cache
+              value: /tmp/.npm
+            - name: BITWARDENCLI_APPDATA_DIR
+              value: /tmp/bw
+            - name: BW_NOINTERACTION
+              value: "true"
+            - name: BW_CLIENTID
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-hub-vaultwarden
+                  key: client-id
+            - name: BW_CLIENTSECRET
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-hub-vaultwarden
+                  key: client-secret
+            - name: BW_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-hub-vaultwarden
+                  key: password
+          readinessProbe:
+            exec:
+              command: [sh, -c, 'wget -q -O- http://127.0.0.1:8087/status | grep -q "\"status\":\"unlocked\""']
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: [sh, -c, 'wget -q -O- http://127.0.0.1:8087/status | grep -q "\"status\":\"unlocked\""']
+            initialDelaySeconds: 120
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 10m
+              memory: 160Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: bw-app
+              mountPath: /app
+              readOnly: true
+            - name: bw
+              mountPath: /opt/bw
+            - name: bw-tmp
+              mountPath: /tmp
+        - name: server
+          image: docker.io/library/python:3.13-alpine
+          # ponytail: installs the pinned SDK on every start, same as the hub.
+          command:
+            - sh
+            - -c
+            - >-
+              pip install -q --no-cache-dir --disable-pip-version-check
+              --target /opt/py mcp==2.2.0 &&
+              exec python /app/vaultwarden_mcp.py --http
+          env:
+            - name: HOME
+              value: /tmp
+            - name: PYTHONPATH
+              value: /opt/py
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            - name: BW_SERVE_URL
+              value: http://127.0.0.1:8087
+            - name: VAULTWARDEN_HUB_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-hub-vaultwarden
+                  key: hub-secret
+          ports:
+            - containerPort: 8000
+              name: mcp
+          # exec, not httpGet: the NetworkPolicy admits only hub pods.
+          readinessProbe:
+            exec:
+              command: [wget, -q, -O, /dev/null, http://127.0.0.1:8000/healthz]
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: [wget, -q, -O, /dev/null, http://127.0.0.1:8000/healthz]
+            initialDelaySeconds: 90
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: server-app
+              mountPath: /app
+              readOnly: true
+            - name: py
+              mountPath: /opt/py
+            - name: server-tmp
+              mountPath: /tmp
+      volumes:
+        - name: bw-app
+          configMap:
+            name: vaultwarden-mcp-bw
+        - name: server-app
+          configMap:
+            name: vaultwarden-mcp-app
+        - name: bw
+          emptyDir: {}
+        - name: bw-tmp
+          emptyDir: {}
+        - name: py
+          emptyDir: {}
+        - name: server-tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vaultwarden-mcp
+  namespace: mcp-hub
+  labels:
+    app: vaultwarden-mcp
+spec:
+  type: ClusterIP
+  selector:
+    app: vaultwarden-mcp
+  ports:
+    - name: mcp
+      port: 8000
+      targetPort: mcp
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: vaultwarden-mcp-from-hub
+  namespace: mcp-hub
+spec:
+  podSelector:
+    matchLabels:
+      app: vaultwarden-mcp
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: mcp-hub
+      ports:
+        - port: 8000
+          protocol: TCP
