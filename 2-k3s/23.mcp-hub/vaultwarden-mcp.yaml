@@ -41,11 +41,14 @@ spec:
           image: docker.io/library/node:22-alpine
           # ponytail: npm ci from the pinned lockfile on every start (~15s),
           # like jev-mcp. Bake an image if restarts get frequent.
+          # /tmp/bw is wiped first: emptyDirs survive container restarts, and a
+          # still-logged-in bw refuses `config server` and `login` (crash loop).
           # The login values are unset before exec so bw serve never holds them.
           command:
             - sh
             - -c
             - >-
+              rm -rf /tmp/bw &&
               cp /app/package.json /app/package-lock.json /opt/bw/ &&
               cd /opt/bw &&
               npm ci --omit=dev --no-audit --no-fund --loglevel=error &&

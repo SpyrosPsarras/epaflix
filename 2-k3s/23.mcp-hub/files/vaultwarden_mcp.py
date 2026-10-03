@@ -38,7 +38,7 @@ def _bw(method, path, body=None, file=None, raw=False):
         headers["Content-Type"], data = "application/json", json.dumps(body).encode()
     if file is not None:
         boundary = uuid.uuid4().hex
-        name = file[0].replace('"', "_")
+        name = file[0]
         headers["Content-Type"] = f"multipart/form-data; boundary={boundary}"
         data = (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="{name}"\r\n'
                 f"Content-Type: application/octet-stream\r\n\r\n").encode() + file[1] + f"\r\n--{boundary}--\r\n".encode()
@@ -62,9 +62,9 @@ def _bw(method, path, body=None, file=None, raw=False):
     return env.get("data")
 
 
-def _sync():
+def _sync(force=False):
     global _last_sync
-    if time.monotonic() - _last_sync >= SYNC_EVERY:
+    if force or time.monotonic() - _last_sync >= SYNC_EVERY:
         _bw("POST", "/sync")
         _last_sync = time.monotonic()
 
@@ -73,14 +73,18 @@ def _folders():
     return {f["id"]: f["name"] for f in _bw("GET", "/list/object/folders")["data"] if f.get("id")}
 
 
-def _items():
+def _path(folder, name):
+    return "/" + (f"{folder}/" if folder else "") + name
+
+
+def _items(fresh=False):
     """Live items with their paths, in bw's order (first match wins on duplicate paths)."""
-    _sync()
+    _sync(fresh)
     folders = _folders()
     out = []
     for it in _bw("GET", "/list/object/items")["data"]:
         folder = folders.get(it.get("folderId"))
-        out.append(("/" + (f"{folder}/" if folder else "") + it["name"], it))
+        out.append((_path(folder, it["name"]), it))
     return out
 
 
@@ -91,10 +95,11 @@ def _split(path):
     return "/".join(parts[:-1]), parts[-1]
 
 
-def _find(path):
+def _find(path, fresh=False):
+    """First item at path. Writes pass fresh=True so they never PUT back a stale copy."""
     folder, name = _split(path)
-    needle = "/" + (f"{folder}/" if folder else "") + name
-    for p, it in _items():
+    needle = _path(folder, name)
+    for p, it in _items(fresh):
         if p == needle:
             return p, it
     raise ValueError(f"no entry at path '{path}' (list entries to see valid paths)")
@@ -111,9 +116,10 @@ def _summary(p, it):
 def _set_props(it, props):
     fields = it.get("fields") or []
     for key, value in (props or {}).items():
+        old = next((f for f in fields if f.get("name") == key), None)
         fields = [f for f in fields if f.get("name") != key]
         if value is not None:
-            fields.append({"name": key, "value": value, "type": 0})
+            fields.append({"name": key, "value": value, "type": old.get("type", 0) if old else 0})
     it["fields"] = fields
 
 
@@ -139,21 +145,25 @@ def _add_tool(path: str, username: str = "", password: str = "", url: str = "",
         folder_id = next((i for i, n in _folders().items() if n == folder), None)
         if folder_id is None:
             folder_id = _bw("POST", "/object/folder", {"name": folder})["id"]
-    it = {"type": 1, "name": name, "notes": notes or None, "folderId": folder_id, "favorite": False,
+    it = {"type": 1, "name": name, "notes": notes or None, "folderId": folder_id, "organizationId": None,
+          "collectionIds": None, "reprompt": 0, "favorite": False,
           "fields": [], "login": {"username": username or None, "password": password or None,
                                   "uris": [{"match": None, "uri": url}] if url else []}}
     _set_props(it, props)
     created = _bw("POST", "/object/item", it)
-    return _summary("/" + (f"{folder}/" if folder else "") + name, created)
+    return _summary(_path(folder, name), created)
 
 
 def _update_tool(path: str, title: str | None = None, username: str | None = None,
                  password: str | None = None, url: str | None = None,
                  notes: str | None = None, props: dict | None = None):
-    p, it = _find(path)
-    login = it.setdefault("login", {}) or {}
-    it["login"] = login
+    p, it = _find(path, fresh=True)
+    if (username, password, url) != (None, None, None) and it.get("type", 1) != 1:
+        raise ValueError(f"'{path}' is not a login item; username, password and url cannot be set on it")
+    login = it["login"] = it.get("login") or {}
     if title is not None:
+        if "/" in title:
+            raise ValueError("title must not contain '/' (it would make the item unreachable by path)")
         it["name"] = title
         p = p.rsplit("/", 1)[0] + "/" + title
     if username is not None:
@@ -169,7 +179,7 @@ def _update_tool(path: str, title: str | None = None, username: str | None = Non
 
 
 def _trash_tool(path: str):
-    _, it = _find(path)
+    _, it = _find(path, fresh=True)
     _bw("DELETE", f"/object/item/{it['id']}")
     return {"trashed": path.strip("/")}
 
@@ -178,11 +188,13 @@ def _attach_tool(path: str, filename: str, content_b64: str):
     data = base64.b64decode(content_b64)
     if not data:
         raise ValueError("content_b64 is empty")
-    _, it = _find(path)
-    for a in it.get("attachments") or []:
-        if a["fileName"] == filename:
-            _bw("DELETE", f"/object/attachment/{a['id']}?itemid={it['id']}")
-    _bw("POST", f"/attachment?itemid={it['id']}", file=(filename, data))
+    if not filename or any(c in filename for c in '\r\n"/\\\0'):
+        raise ValueError("filename must be non-empty and contain no quotes, slashes or control characters")
+    _, it = _find(path, fresh=True)
+    old = [a["id"] for a in it.get("attachments") or [] if a["fileName"] == filename]
+    _bw("POST", f"/attachment?itemid={it['id']}", file=(filename, data))  # upload first: a failure keeps the old copy
+    for aid in old:
+        _bw("DELETE", f"/object/attachment/{aid}?itemid={it['id']}")
     return {"attached": filename, "entry": path.strip("/"), "bytes": len(data)}
 
 
@@ -202,6 +214,7 @@ class _FakeBw:
 
     def __init__(self):
         self.items, self.folders, self.files, self.syncs = {}, {}, {}, 0
+        self.fail_uploads = False
 
     def folder(self, name):
         fid = str(uuid.uuid4())
@@ -268,6 +281,8 @@ class _FakeBw:
                         del fake.items[iid]
                         return self._send(200)
                 if method == "POST" and p == "/attachment":
+                    if fake.fail_uploads:
+                        return self._send(500, "upload failed")
                     boundary = self.headers["Content-Type"].split("boundary=")[1].encode()
                     part = body.split(b"--" + boundary)[1]
                     head, data = part.split(b"\r\n\r\n", 1)
@@ -372,6 +387,27 @@ def _selftest():
         assert base64.b64decode(_attachment_tool("/Personal/gh", "id_test")["content_b64"]) == b"key-bytes"
         _raises(ValueError, _attach_tool, "/Personal/gh", "e", "", contains="empty")
         _raises(ValueError, _attachment_tool, "/Personal/gh", "nope", contains="no attachment")
+
+        _raises(ValueError, _attach_tool, "/Personal/gh", "a\r\nb", payload, contains="filename")
+        # A failed upload must keep the old attachment (KeePass replaced atomically).
+        fake.fail_uploads = True
+        _raises(RuntimeError, _attach_tool, "/Personal/gh", "id_test", payload)
+        fake.fail_uploads = False
+        assert _get_tool("/Personal/gh")["attachments"] == ["id_test"]
+
+        # writes re-sync first, so an edit made in the apps a moment ago is not overwritten
+        before = fake.syncs
+        _update_tool("/Personal/gh", notes="n2")
+        assert fake.syncs == before + 1, (before, fake.syncs)
+
+        # non-login items, titles with "/", hidden fields
+        fake.items[fake.item("note", personal)]["type"] = 2
+        _raises(ValueError, _update_tool, "/Personal/note", None, None, "pw", contains="not a login")
+        _update_tool("/Personal/note", notes="ok")
+        _raises(ValueError, _update_tool, "/Personal/gh", "a/b", contains="'/'")
+        hid = fake.item("hidden", personal, fields=[{"name": "otp", "value": "1", "type": 1}])
+        _update_tool("/Personal/hidden", props={"otp": "2"})
+        assert fake.items[hid]["fields"] == [{"name": "otp", "value": "2", "type": 1}], fake.items[hid]["fields"]
 
         # trash
         assert _trash_tool("/Personal/gh") == {"trashed": "Personal/gh"}
