@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-if [[ ${1:-} == start && ${T3_V2_SUPERVISED_START:-} == 1 ]]; then
-  unset T3_V2_SUPERVISED_START
-  exec python3 /v2/supervise.py "$@"
-fi
-exec /runtime/t3 "$@"
