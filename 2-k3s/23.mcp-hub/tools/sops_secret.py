@@ -4,7 +4,6 @@ mcp-hub.epaflix.com/revision annotation (the kustomizations copy it into the
 pod template so a changed Secret rolls the pod). Encrypting needs only sops
 and the age recipient in .sops.yaml, no private key.
 
-  rotate-keepass-secret:  sops_secret.py --keepass       new hub<->keepass shared secret, both copies
   vaultwarden login:      sops_secret.py --vaultwarden   prompts for the Vaultwarden personal API key
                           and master password, adds a fresh hub secret; re-run to rotate any of them
 """
@@ -48,22 +47,6 @@ def publish(staged):
         print(f"wrote {os.path.relpath(path, ROOT)}")
 
 
-def keepass():
-    secret = secrets.token_urlsafe(32)
-    staged = []
-    try:
-        staged.append(encrypt("2-k3s/15.syncthing/keepass-hub-secret.enc.yaml", "keepass-hub-secret", "syncthing",
-                              {"secret": secret}))
-        staged.append(encrypt("2-k3s/23.mcp-hub/mcp-hub-keepass.enc.yaml", "mcp-hub-keepass", "mcp-hub",
-                              {"secret": secret}))
-    except BaseException:
-        for tmp, _ in staged:
-            os.unlink(tmp)
-        raise
-    publish(staged)
-    print("Commit both, merge. ArgoCD rolls the hub and the keepass pod; /keepass fails until both rolled.")
-
-
 def vaultwarden():
     """Secret mcp-hub-vaultwarden: the bw container's login and the hub<->vaultwarden-mcp shared secret."""
     from getpass import getpass
@@ -80,9 +63,7 @@ def vaultwarden():
 
 
 if __name__ == "__main__":
-    if sys.argv[1:] == ["--keepass"]:
-        keepass()
-    elif sys.argv[1:] == ["--vaultwarden"]:
+    if sys.argv[1:] == ["--vaultwarden"]:
         vaultwarden()
     else:
         sys.exit(__doc__)

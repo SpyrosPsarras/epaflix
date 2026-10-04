@@ -12,7 +12,7 @@ business.
   (laptop, homepc, ...) and the t3code pod.
 - **Hub token**: one client's bearer secret. Every client has its own; any
   hub token opens every path.
-- **Path**: one MCP server as clients see it (`/gmail`, `/keepass`, ...).
+- **Path**: one MCP server as clients see it (`/gmail`, `/vaultwarden`, ...).
 - **Module**: a path served in-process from our Python code.
 - **Upstream**: a path the hub forwards to an MCP server it does not run
   in-process; the hub adds an **upstream credential** clients never see.
@@ -23,7 +23,6 @@ business.
 | `/gmail`      | module   | `files/gmail_mcp.py`, Gmail API          | `gmail`              |
 | `/searxng`    | module   | `files/searxng_mcp.py`, in-cluster SearXNG | `searxng`          |
 | `/jev`        | upstream | `jev-mcp.yaml`, published [`@jkudish/jev-mcp`](https://github.com/jkudish/jev-mcp) (11 Jev judgment tools) via OpenRouter, Secret `mcp-hub-jev`. OpenCode clients only | `jev` |
-| `/keepass`    | upstream | `15.syncthing/keepass.yaml`, the Syncthing vault | `keepass`    |
 | `/vaultwarden` | upstream | `vaultwarden-mcp.yaml`, Spyros's Vaultwarden vault via `bw serve` | `vaultwarden` |
 | `/kubernetes` | upstream | `kubernetes-mcp.yaml`, cluster-admin on this cluster | `kubernetes-epaflix` |
 | `/notion`     | upstream | hosted `https://mcp.notion.com/mcp`      | `notion`             |
@@ -97,7 +96,6 @@ not a client yet.
 |---|---|---|
 | `t3code/mcp-hub-client` | `token` | `tools/add-client.py t3code` |
 | `mcp-hub/mcp-hub-gmail` | `client-id`, `client-secret`, `refresh-token` | `tools/bootstrap-gmail.py` |
-| `mcp-hub/mcp-hub-keepass` + `syncthing/keepass-hub-secret` | `secret` (same value) | `tools/sops_secret.py --keepass` |
 | `mcp-hub/mcp-hub-vaultwarden` | `client-id`, `client-secret`, `password` (bw container only), `hub-secret` (hub and server) | `tools/sops_secret.py --vaultwarden` |
 | `mcp-hub/mcp-hub-notion-grant` (not in git) | see `files/notion_grant.py` | `tools/bootstrap-notion.py`, then the hub |
 
@@ -106,30 +104,21 @@ They stamp a plaintext `mcp-hub.epaflix.com/revision` annotation that the
 kustomizations copy into the pod templates, so a new secret rolls the pod
 on merge (no Reloader watches these namespaces).
 
-## Keepass
-
-The vault stays where Syncthing keeps it (local PV on `k3s-worker-63`); the
-keepass pod serves it over streamable HTTP next to it. Only hub pods may
-connect (NetworkPolicy), and the pod checks the hub's `X-Hub-Secret`. So the
-vault is readable and writable by any client with a hub token, from the LAN.
-Writes are serialized in the pod; Syncthing carries them to the other devices.
-Editing the same vault in KeePassXC at the same moment can leave a
-`.sync-conflict` copy. Rotate the shared secret with `tools/sops_secret.py
---keepass`, commit both files, merge.
-
 ## Vaultwarden
 
-`vaultwarden-mcp.yaml` serves the same 7 `vault_*` tools as the KeePass server,
-over Spyros's own Vaultwarden account. Its `bw` container logs in with his
+`vaultwarden-mcp.yaml` serves 7 `vault_*` tools over Spyros's own Vaultwarden account. Its `bw` container logs in with his
 personal API key, unlocks with his master password and runs `bw serve` on
 127.0.0.1; `files/vaultwarden_mcp.py` turns that REST API into MCP. Paths are
 `/<folder>/<item name>`. Reads run `bw sync` at most once a minute, so edits
 in the Bitwarden apps show up within a minute. Only hub pods may connect, and
-the server checks the hub's `X-Hub-Secret`, so like KeePass before it the
-vault is readable and writable by any client with a hub token, from the LAN.
+the server checks the hub's `X-Hub-Secret`, so the vault is readable and writable by any client with a hub token, from the LAN.
 `bw` stays at 2026.8.0 until Vaultwarden is upgraded (`.github/renovate.json`).
 Write or rotate the login and hub secret with `tools/sops_secret.py
 --vaultwarden` (prompts; values never echo), commit, merge.
+
+Vaultwarden replaced the KeePass vault and its `/keepass` path on 2026-10-04
+(`docs/superpowers/specs/2026-10-03-keepass-sunset-design.md`).
+`hub_clients.py` drops `keepass` entries from existing client configs.
 
 ## Kubernetes
 

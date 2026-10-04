@@ -44,20 +44,20 @@ Three layers, cheapest first. Research: `docs/jev-tool-guard-research.md`
        (names with KEY, TOKEN, SECRET, PASS or AUTH, 16+ characters), the Jev
        key, or a known token shape (`sk-`, `gh[pousr]_`, `github_pat_`,
        `AKIA`, `xox?-`, `glpat-`, `omp-`, age keys, PEM private keys, and from
-       the KeePass vault: Atlassian `ATATT`, Octopus `API-`, Cloudflare
+       the password vault: Atlassian `ATATT`, Octopus `API-`, Cloudflare
        `cfat_`/`cfut_`, DigitalOcean `dop_v1_`/`doo_v1_`/`dor_v1_`, Tailscale
        `tskey-`, Hugging Face `hf_`, NetBird `nbp_`, `cmp_admin_`, named
        CLIProxy keys `omp-<name>-`). A token at the start of a line counts too.
        Such a command is never sent to Jev or
        written unmasked to the log. Env
        values that start with `/` (socket and file paths) are ignored.
-       `keepass_*` tools are exempt;
+       `vaultwarden_*` tools are exempt;
      - blocks a path argument or bash command that names `/run/jev`;
      - blocks bash commands that print the environment: bare `env`, `set`,
        `export`, `declare`, any `printenv`, `/proc/*/environ`, `ps e`, also
        behind `bash|sh|zsh -c`, `command`, `exec`, `nice` or `busybox`;
      - masks the same credentials in every tool output, text and resource
-       items, before the model sees it. `keepass_*` output is left alone.
+       items, before the model sees it. `vaultwarden_*` output is left alone.
    - OpenAI and Anthropic models only (same rule as `jev-auto.md`; the Jev Auto
      model counts), one Jev call through OpenRouter with the existing
      `/run/jev/openrouter-key`:

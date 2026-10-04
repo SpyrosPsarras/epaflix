@@ -1,5 +1,7 @@
 # KeePass vault on DeltaSync Implementation Plan
 
+> **Superseded** by `2026-10-03-keepass-sunset` (KeePass retired in favour of Vaultwarden).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** The vault syncs per entry through a self-hosted DeltaSync server to t3code (new Go MCP), home PC, laptop and later the phone, and Syncthing no longer carries it.

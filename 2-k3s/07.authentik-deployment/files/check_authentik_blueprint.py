@@ -10,8 +10,8 @@ file against synthetic fixtures in CI.  Do not copy it anywhere.
 WHERE IT RUNS AND WHY (owner decision, 2026-08-22).  It runs in the cluster, on
 a schedule, NOT in the commit path.  A pre-commit version would have to decrypt
 ``authentik-iac-blueprint.enc.yaml``, which means sops, which means the age key,
-which on this workstation lives behind KeePassXC - a personal password manager
-on the owner's own machines.  A repo-wide commit hook must not depend on it.
+which on this workstation lives in the login keyring (gnome-keyring) on the
+owner's own machines.  A repo-wide commit hook must not depend on it.
 The live Secret ``app-authentik/authentik-iac-blueprint`` is already decrypted
 in the cluster, so the CronJob needs no age key and no sops: only RBAC to *get*
 that one Secret.  The trade-off is real and is not hidden: the hook would have
