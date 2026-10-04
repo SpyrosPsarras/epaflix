@@ -83,18 +83,6 @@ replacements:
           create: true
   - source:
       kind: Secret
-      name: mcp-hub-keepass
-      fieldPath: metadata.annotations.[mcp-hub.epaflix.com/revision]
-    targets:
-      - select:
-          kind: Deployment
-          name: mcp-hub
-        fieldPaths:
-          - spec.template.metadata.annotations.[mcp-hub.epaflix.com/keepass-revision]
-        options:
-          create: true
-  - source:
-      kind: Secret
       name: mcp-hub-vaultwarden
       fieldPath: metadata.annotations.[mcp-hub.epaflix.com/revision]
     targets:
