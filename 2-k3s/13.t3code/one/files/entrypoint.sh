@@ -84,15 +84,9 @@ install -m 0644 /scripts/jev-guard.js "$OC_DIR/plugins/jev-guard.js"
 # Permit vault attachment names while protecting SSH files in both HOME locations.
 python3 /scripts/ssh-policy.py "$HOME/.cc-safety-net/policy.json" \
   "$HOME" "$(getent passwd "$(id -u)" | cut -d: -f6)" /root
-# OpenCode Loop, pinned in env/tools/package.json and patched by env/Dockerfile
-# to keep its state out of worktrees. Same files its own installer copies; a
-# manual `npx @bybrawe/opencode-loop` update gets replaced on the next start.
-OL=/tools/node_modules/@bybrawe/opencode-loop
-mkdir -p "$OC_DIR/commands" "$OC_DIR/agents"
-install -m 0644 "$OL/src/server.js" "$OC_DIR/plugins/opencode-loop.ts"
-rm -f "$OC_DIR/plugins/opencode-loop.js"
-install -m 0644 "$OL"/commands/*.md "$OC_DIR/commands/"
-install -m 0644 "$OL"/agents/*.md "$OC_DIR/agents/"
+# Retired OpenCode Loop: remove the copies earlier starts left on the PVC.
+rm -f "$OC_DIR"/plugins/opencode-loop.{ts,js} "$OC_DIR"/commands/loop.md \
+  "$OC_DIR"/commands/loop-*.md "$OC_DIR"/agents/opencode-loop-local.md
 # When OpenCode uses the hub's jev MCP: screening, completion gates and
 # picking by meaning. jev-auto.js adds it to the system prompt of OpenAI and
 # Anthropic models only, so it is not a global instruction; the MCP hub block
