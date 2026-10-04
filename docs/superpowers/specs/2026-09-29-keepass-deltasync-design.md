@@ -1,5 +1,7 @@
 # KeePass vault on DeltaSync
 
+> **Superseded** by `2026-10-03-keepass-sunset` (KeePass retired in favour of Vaultwarden).
+
 Status: draft for review, 2026-09-29.
 
 ## Goal

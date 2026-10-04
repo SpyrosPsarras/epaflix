@@ -2,7 +2,7 @@
 # The MCP hub (README.md): one long-lived streamable-HTTP gateway for every
 # agent client (the T3 pod in-cluster, LAN PCs over the internal entry point).
 # Paths are listed in files/mcp_hub.py: modules in-process, upstreams
-# forwarded (keepass in ns syncthing, vaultwarden-mcp.yaml, kubernetes-mcp.yaml,
+# forwarded (vaultwarden-mcp.yaml, kubernetes-mcp.yaml,
 # hosted Notion).
 apiVersion: v1
 kind: ServiceAccount
@@ -71,7 +71,7 @@ spec:
         - name: hub
           image: docker.io/library/python:3.13-alpine
           # ponytail: installs the pinned SDK on every start (~20s), same as the
-          # keepass pod. Bake an image if restarts get frequent.
+          # vaultwarden-mcp pod. Bake an image if restarts get frequent.
           command:
             - sh
             - -c
@@ -87,11 +87,6 @@ spec:
               value: /opt/py
             - name: PYTHONUNBUFFERED
               value: "1"
-            - name: KEEPASS_HUB_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: mcp-hub-keepass
-                  key: secret
             - name: VAULTWARDEN_HUB_SECRET
               valueFrom:
                 secretKeyRef:

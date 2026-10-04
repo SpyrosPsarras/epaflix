@@ -118,7 +118,8 @@ fi
 # this pod's hub token. Register every hub path for OpenCode, Claude and Codex
 # in the active home; the token stays an env reference, never a literal on the PVC.
 # hub_clients.py also replaces the stdio keepass/searxng bridges and the
-# hosted Notion entries the hub superseded. The claudeAgent instances run with
+# hosted Notion entries the hub superseded, and drops retired hub servers
+# (keepass). The claudeAgent instances run with
 # CLAUDE_CONFIG_DIR=<home>/.claude (<home>/.claude/.claude.json); a plain
 # `claude` in a shell reads <home>/.claude.json. Both get the servers.
 if [[ -n ${MCP_HUB_TOKEN:-} && -n ${MCP_HUB_URL:-} ]]; then

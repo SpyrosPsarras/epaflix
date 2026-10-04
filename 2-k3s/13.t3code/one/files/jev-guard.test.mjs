@@ -44,7 +44,7 @@ try {
     await blocked(before("bash", { command: "echo envsecretvalue-1234567890" }, s))
     await blocked(before("write", { filePath: "/proj/a.txt", content: "key=sk-or-v1-filesecretvalue000000000000" }, s))
   }
-  // Formats from the KeePass vault: blocked locally, never sent to Jev.
+  // Formats from the password vault: blocked locally, never sent to Jev.
   for (const secret of ["ATATT3xFfGF0" + "A".repeat(40), "API-" + "ABCDEFGHIJKLMNOPQRSTUVWXYZ12", "cfat_" + "a1".repeat(24),
     "dop_v1_" + "ab".repeat(32), "doo_v1_" + "cd".repeat(32), "cfut_" + "b2".repeat(24), "tskey-api-" + "kX".repeat(24), "hf_" + "Ab".repeat(17), "nbp_" + "Zz".repeat(16),
     "cmp_admin_" + "q9".repeat(24), "omp-lingarr-" + "0f".repeat(24)])
@@ -61,14 +61,13 @@ try {
   for (const command of ["export", "declare", "/usr/bin/env", "printenv HOME", "ps eww", "x && set", "  env", "env -0", "bash -c env", "sh -c 'env'", "command env", "exec env"]) await blocked(before("bash", { command }, "glm"))
   assert.equal(calls, 0)
 
-  // Allowed: env with arguments, keepass writes, words that look like token prefixes,
+  // Allowed: env with arguments, vault writes, words that look like token prefixes,
   // the Jev key path mentioned in file content, routine commands.
   await before("bash", { command: "env FOO=1 node x.js" }, "glm")
   for (const command of ["ps -ef", "ps aux", "docker compose ps web", "git config --global --get user.name", "set -euo pipefail; make", "export FOO=bar", "declare -A map", "npm run env",
     `rg "env" src`, "grep -rn 'env' .", `grep -r "printenv" src`, `kubectl get pod -o yaml | grep "env"`, `git grep "export" -- '*.sh'`,
     "rg -w 'set' lib", `git commit -m "set"`, "echo 'declare'", `git log --grep "command env"`])
     await before("bash", { command }, "glm")
-  await before("keepass_vault_add", { path: "/x", password: token })
   await before("vaultwarden_vault_add", { path: "/x", password: token })
   for (const command of ["echo API-documentation-review", "echo API-GatewayConfigurationManagementService", "echo hf_hub_download_from_the_model_repository", "echo the hf_ models", "echo tskey-api-docs",
     "cat docs/risk-assessment-for-production-rollout.md", "ls ~/task-scheduler-configuration-notes", "git log --grep=desk-booking-feature-implementation"])
@@ -126,7 +125,6 @@ try {
   await after("gmail_gmail_get", out, "glm")
   assert.ok(!out.content[0].text.includes(token) && !out.content[1].resource.text.includes(token))
   out = { content: [{ type: "text", text: `password ${token}` }] }
-  await after("keepass_vault_get", out)
   await after("vaultwarden_vault_get", out)
   assert.ok(out.content[0].text.includes(token), "vault output is the credential the agent asked for")
   calls = 0
@@ -149,7 +147,7 @@ try {
   assert.equal(out.output, page)
   calls = 0
   await after("read", { title: "", output: page, metadata: {} })
-  await after("keepass_vault_get", { content: [{ type: "text", text: page }] })
+  await after("vaultwarden_vault_get", { content: [{ type: "text", text: page }] })
   await after("kubernetes-epaflix_resources_get", { content: [{ type: "text", text: page }] })
   assert.equal(calls, 0)
   for (const tool of ["t3-code_preview_snapshot", "kubernetes-epaflix_pods_log", "searxng_searxng_search"]) await after(tool, { content: [{ type: "text", text: page }] })

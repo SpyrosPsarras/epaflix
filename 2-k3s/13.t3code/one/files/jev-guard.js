@@ -6,7 +6,7 @@ import { join } from "node:path"
 // the Jev check runs only on OpenAI and Anthropic models, same rule as jev-auto.js.
 const keyFile = process.env.JEV_OPENROUTER_KEY_FILE || "/run/jev/openrouter-key"
 // The lookbehind keeps words such as `risk-` and `task-` from matching. The second
-// line holds formats found in the KeePass vault on 2026-09-29 (Atlassian, Octopus,
+// line holds formats found in the password vault on 2026-09-29 (Atlassian, Octopus,
 // Cloudflare, DigitalOcean, Tailscale, Hugging Face, NetBird, CLIProxy management).
 const TOKENS = [
   /sk-(?:or-v1-|ant-[a-z0-9]+-|proj-)?[A-Za-z0-9_-]{24,}/g, /gh[pousr]_[A-Za-z0-9]{30,}/g, /github_pat_[A-Za-z0-9_]{30,}/g,
@@ -21,7 +21,7 @@ const TOKENS = [
 const START = String.raw`(?:^|[;&|(]\s*)(?:(?:command|exec|nice|busybox)\s+|(?:ba|z)?sh -c\s+['"]?)*(?:(?:/usr)?/bin/)?`
 const ENV_DUMP = new RegExp(`${START}(?:env(?:\\s+-[-\\w]+)*|set|export(?: -p)?|declare(?: -[xp]+)?)\\s*(?:$|[;&|)>'"])|${START}printenv\\b|/proc/\\S*/environ|${START}ps\\s+[a-z]*e[a-z]*(?:\\s|$)`)
 // MCP vault servers (<server>_<tool>): their arguments and output are credentials by design.
-const VAULT_TOOL = /^(keepass|vaultwarden)_/
+const VAULT_TOOL = /^vaultwarden_/
 // Read-only commands and the project's own tests and builds, with no chaining,
 // redirection, substitution or output flags, stay on the pod. File readers
 // (cat, head) go to Jev, which is asked about credential reads.
