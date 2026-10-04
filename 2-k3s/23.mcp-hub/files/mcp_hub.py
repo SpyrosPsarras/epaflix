@@ -10,7 +10,7 @@ opens every path. GET /healthz is the only unauthenticated route. Modules
 use stateless JSON transport, so a pod restart costs a client one retry.
 
 Env: CLIENTS_FILE (default /app/clients.json) plus whatever the mounted
-servers need: GMAIL_*, SEARXNG_URL, KEEPASS_URL + KEEPASS_HUB_SECRET,
+servers need: GMAIL_*, SEARXNG_URL,
 VAULTWARDEN_URL + VAULTWARDEN_HUB_SECRET,
 KUBERNETES_MCP_URL, JEV_MCP_URL + JEV_MCP_AUTH_TOKEN, NOTION_MCP_URL.
 
@@ -52,12 +52,6 @@ def jev_token():
 def upstreams():
     import notion_grant
 
-    def keepass_secret():
-        secret = os.environ.get("KEEPASS_HUB_SECRET", "")
-        if not secret:
-            raise UpstreamError("KEEPASS_HUB_SECRET is not set (Secret mcp-hub-keepass)")
-        return {"x-hub-secret": secret}
-
     def vaultwarden_secret():
         secret = os.environ.get("VAULTWARDEN_HUB_SECRET", "")
         if not secret:
@@ -66,8 +60,6 @@ def upstreams():
 
     grant = notion_grant.Grant(notion_grant.SecretStore("mcp-hub", "mcp-hub-notion-grant"))
     return [
-        ("/keepass", Upstream("keepass", os.environ.get(
-            "KEEPASS_URL", "http://keepass.syncthing.svc.cluster.local:8000/keepass"), keepass_secret)),
         ("/vaultwarden", Upstream("vaultwarden", os.environ.get(
             "VAULTWARDEN_URL", "http://vaultwarden-mcp.mcp-hub.svc.cluster.local:8000/vaultwarden"),
             vaultwarden_secret)),
@@ -267,6 +259,7 @@ def _selftest():
     # The production table mounts /jev at jev-mcp with this credential (constructors do no I/O).
     jev = dict(upstreams())["/jev"]
     assert jev.url == "http://jev-mcp.mcp-hub.svc.cluster.local:8080/mcp" and jev.credential is jev_token, jev.url
+    assert "/keepass" not in dict(upstreams()), "the keepass route is retired"
     vw = dict(upstreams())["/vaultwarden"]
     assert vw.url == "http://vaultwarden-mcp.mcp-hub.svc.cluster.local:8000/vaultwarden", vw.url
     os.environ["VAULTWARDEN_HUB_SECRET"] = "vw"

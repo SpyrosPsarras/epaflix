@@ -598,9 +598,9 @@ stop_stub
 
 discovered="$(cd "$repo_root/.github/hooks" && echo check-*.sh)"
 if ! printf '%s\n' "$discovered" | grep -q 'blueprint'; then
-  pass "no blueprint check in the pre-commit dispatcher glob (commit path is KeePassXC-free)"
+  pass "no blueprint check in the pre-commit dispatcher glob (commit path needs no age key)"
 else
-  fail "no blueprint check in the pre-commit dispatcher glob (commit path is KeePassXC-free)"
+  fail "no blueprint check in the pre-commit dispatcher glob (commit path needs no age key)"
 fi
 
 kustomization="$repo_root/2-k3s/07.authentik-deployment/kustomization.yaml"

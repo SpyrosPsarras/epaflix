@@ -17,7 +17,7 @@ On first deployment, open the login URL from `tailscale status` and enroll under
 - D2. Approve both advertised routes on `epaflix-subnet-router` and disable that device's key expiry.
 - D3. Configure DNS from `dns.json`: sole nameserver `192.168.10.30`, override local DNS, no split DNS, and MagicDNS off. These JSON files are admin/API inputs, not Kubernetes resources.
 
-The equivalent API endpoints are `POST /api/v2/tailnet/-/acl`, `POST /api/v2/tailnet/-/dns/configuration`, `POST /api/v2/device/DEVICE_ID/routes` with `{"routes":["192.168.10.0/24","10.0.0.0/24"]}`, and `POST /api/v2/device/DEVICE_ID/key` with `{"keyExpiryDisabled":true}`. Read the API credential from KeePass; do not put it in manifests or shell history.
+The equivalent API endpoints are `POST /api/v2/tailnet/-/acl`, `POST /api/v2/tailnet/-/dns/configuration`, `POST /api/v2/device/DEVICE_ID/routes` with `{"routes":["192.168.10.0/24","10.0.0.0/24"]}`, and `POST /api/v2/device/DEVICE_ID/key` with `{"keyExpiryDisabled":true}`. Read the API credential from Vaultwarden; do not put it in manifests or shell history.
 
 The router uses Tailscale's userspace forwarding for TCP, UDP and ping. It needs no privileged container, host networking or kernel forwarding changes. It stores its enrolled identity on the `subnet-router-state` PVC. Do not delete that claim during upgrades. The local-path volume pins this single replica to one worker; loss of that worker stops remote private access and DNS until it returns or the router is recovered and enrolled again. This is not a highly available deployment.
 

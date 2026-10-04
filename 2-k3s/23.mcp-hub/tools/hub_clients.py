@@ -10,8 +10,9 @@ tools/add-client.py (PCs) and the t3code pod entrypoint (a byte copy in
 Idempotent: a file is rewritten only when an entry differs. Existing entries
 with a hub server's name are replaced (they were the stdio or hosted copies
 the hub supersedes), and so is any entry still pointing at a removed stdio
-bridge (LEGACY). Everything else in the file is left alone, including a
-user's "enabled": false and any permission already set.
+bridge (LEGACY). Entries and <server>_* permissions of RETIRED servers are
+removed. Everything else in the file is left alone, including a user's
+"enabled": false and any other permission already set.
 """
 
 import json
@@ -20,7 +21,7 @@ import subprocess
 import sys
 import tempfile
 
-SERVERS = {"gmail": "/gmail", "searxng": "/searxng", "notion": "/notion", "keepass": "/keepass", "vaultwarden": "/vaultwarden",
+SERVERS = {"gmail": "/gmail", "searxng": "/searxng", "notion": "/notion", "vaultwarden": "/vaultwarden",
            "kubernetes-epaflix": "/kubernetes"}
 # Its instructions tell the agent to consult it before every task; trialled in OpenCode only.
 OPENCODE_ONLY = {"jev": "/jev"}
@@ -29,12 +30,13 @@ OPENCODE_ONLY = {"jev": "/jev"}
 # 23.mcp-hub/kubernetes-mcp.yaml; recheck them when bumping it.
 ASK = {
     "gmail": ["gmail_send", "gmail_send_draft", "gmail_trash"],
-    "keepass": ["vault_add", "vault_update", "vault_trash", "vault_attach"],
     "vaultwarden": ["vault_add", "vault_update", "vault_trash", "vault_attach"],
     "kubernetes-epaflix": ["pods_delete", "pods_exec", "pods_run", "resources_create_or_update",
                            "resources_delete", "resources_scale", "helm_install", "helm_uninstall"],
 }
 LEGACY = ("keepass-remote.sh", "searxng-mcp")
+# Hub servers that were retired: their entries and permissions are removed.
+RETIRED = ("keepass",)
 
 
 def _legacy(entry):
@@ -64,6 +66,8 @@ def opencode(config, hub, authorization):
     mcp = config.setdefault("mcp", {})
     for name in [n for n, e in mcp.items() if n not in SERVERS and isinstance(e, dict) and _legacy(e)]:
         del mcp[name]
+    for name in RETIRED:
+        mcp.pop(name, None)
     for name, path in {**SERVERS, **OPENCODE_ONLY}.items():
         old = mcp.get(name, {})
         mcp[name] = {"type": "remote", "url": hub + path, "enabled": old.get("enabled", True) if
@@ -72,6 +76,8 @@ def opencode(config, hub, authorization):
     perms = config.setdefault("permission", {})
     if isinstance(perms, str):  # "allow"-everything shorthand: expand so per-tool rules can follow
         perms = config["permission"] = {"*": perms}
+    for key in [k for k in perms if k.startswith(tuple(r + "_" for r in RETIRED))]:
+        del perms[key]
     for server, tools in ASK.items():
         for tool in tools:
             perms.setdefault(f"{server}_{tool}", "ask")
@@ -83,6 +89,8 @@ def claude(config, hub, authorization):
     servers = config.setdefault("mcpServers", {})
     for name in [n for n, e in servers.items() if n not in SERVERS and isinstance(e, dict) and _legacy(e)]:
         del servers[name]
+    for name in RETIRED:
+        servers.pop(name, None)
     for name, path in SERVERS.items():
         entry = {"type": "http", "url": hub + path}
         if authorization.startswith("helper:"):
@@ -106,7 +114,10 @@ def codex(codex_home, hub, env_var, run=subprocess.run):
     env = {**os.environ, "CODEX_HOME": codex_home}
     os.makedirs(codex_home, exist_ok=True)
     changed = []
-    for name in [n for n, e in current.items() if n not in SERVERS and _legacy(e)]:
+    for name in [n for n, e in current.items() if n not in SERVERS and n not in RETIRED and _legacy(e)]:
+        run(["codex", "mcp", "remove", name], env=env, check=True, capture_output=True)
+        changed.append(name)
+    for name in [n for n in RETIRED if n in current]:
         run(["codex", "mcp", "remove", name], env=env, check=True, capture_output=True)
         changed.append(name)
     for name, p in SERVERS.items():
@@ -143,15 +154,18 @@ def _selftest():
                   "bridge": {"type": "local", "command": ["bash", "/scripts/keepass-remote.sh"]},
                   "mine": {"type": "local", "command": ["foo"]}},
           "permission": "allow"}
+    oc["mcp"]["keepass"] = {"type": "remote", "url": "https://hub/keepass"}
+    oc["permission"] = {"*": "allow", "keepass_vault_trash": "ask", "keepass_vault_add": "ask"}
     out = opencode(oc, "https://hub/", "Bearer {env:T}")
     assert set(out["mcp"]) == set(SERVERS) | set(OPENCODE_ONLY) | {"mine"}, out["mcp"]
     assert out["mcp"]["jev"]["url"] == "https://hub/jev", out["mcp"]["jev"]
     assert out["mcp"]["searxng"]["url"] == "https://hub/searxng" and out["mcp"]["searxng"]["enabled"] is True
     assert out["mcp"]["gmail"]["enabled"] is False, "a user's disable of a remote entry survives"
-    assert out["permission"]["*"] == "allow" and out["permission"]["keepass_vault_trash"] == "ask"
+    assert out["permission"]["*"] == "allow" and "keepass" not in out["mcp"]
+    assert not [k for k in out["permission"] if k.startswith("keepass_")], out["permission"]
     assert out["permission"]["vaultwarden_vault_trash"] == "ask" and out["mcp"]["vaultwarden"]["url"] == "https://hub/vaultwarden"
     assert opencode(json.loads(json.dumps(out)), "https://hub", "Bearer {env:T}") == out, "idempotent"
-    cl = claude({"mcpServers": {"keepass": {"command": "/scripts/keepass-remote.sh"},
+    cl = claude({"mcpServers": {"keepass": {"type": "http", "url": "http://h/keepass"},
                                 "old": {"command": "bash", "args": ["/scripts/keepass-remote.sh"]}}, "x": 1},
                 "http://h", "helper:cat key")
     assert set(cl["mcpServers"]) == set(SERVERS) and cl["x"] == 1, cl
@@ -162,10 +176,10 @@ def _selftest():
     calls = []
     with tempfile.TemporaryDirectory() as home:
         with open(os.path.join(home, "config.toml"), "w") as f:
-            f.write('[mcp_servers.keepass]\ncommand = "bash"\nargs = ["/scripts/keepass-remote.sh"]\n'
+            f.write('[mcp_servers.keepass]\nurl = "http://h/keepass"\nbearer_token_env_var = "T"\n'
                     '[mcp_servers.gmail]\nurl = "http://h/gmail"\nbearer_token_env_var = "T"\n')
         changed = codex(home, "http://h/", "T", run=lambda cmd, **kw: calls.append(cmd[2:4]))
-    assert "gmail" not in changed and ["remove", "keepass"] in calls and ["add", "keepass"] in calls, calls
+    assert "gmail" not in changed and ["remove", "keepass"] in calls and ["add", "keepass"] not in calls, calls
     print("hub_clients selftest OK")
 
 
