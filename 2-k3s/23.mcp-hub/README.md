@@ -24,6 +24,7 @@ business.
 | `/searxng`    | module   | `files/searxng_mcp.py`, in-cluster SearXNG | `searxng`          |
 | `/jev`        | upstream | `jev-mcp.yaml`, published [`@jkudish/jev-mcp`](https://github.com/jkudish/jev-mcp) (11 Jev judgment tools) via OpenRouter, Secret `mcp-hub-jev`. OpenCode clients only | `jev` |
 | `/vaultwarden` | upstream | `vaultwarden-mcp.yaml`, Spyros's Vaultwarden vault via `bw serve` | `vaultwarden` |
+| `/vault-secret` | upstream | the same server's `/secret`, plain JSON for `vault-run.py` (see Vaultwarden) | none |
 | `/kubernetes` | upstream | `kubernetes-mcp.yaml`, cluster-admin on this cluster | `kubernetes-epaflix` |
 | `/notion`     | upstream | hosted `https://mcp.notion.com/mcp`      | `notion`             |
 
@@ -115,6 +116,13 @@ the server checks the hub's `X-Hub-Secret`, so the vault is readable and writabl
 `bw` stays at 2026.8.0 until Vaultwarden is upgraded (`.github/renovate.json`).
 Write or rotate the login and hub secret with `tools/sops_secret.py
 --vaultwarden` (prompts; values never echo), commit, merge.
+
+`vault_get` never returns a password, because a tool result lands in the
+model's context and in session files. Passwords leave only through
+`POST /vault-secret {"path": ...}`, a plain JSON route (not MCP) that the hub
+forwards to the server's `/secret`. `13.t3code/one/files/vault-run.py` is its
+only caller: it runs a command with the password in `$VAULT_PASSWORD`. This
+stops accidental leaks, not a determined agent: any hub token opens the route.
 
 Vaultwarden replaced the KeePass vault and its `/keepass` path on 2026-10-04
 (`docs/superpowers/specs/2026-10-03-keepass-sunset-design.md`).
