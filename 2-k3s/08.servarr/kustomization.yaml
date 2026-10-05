@@ -72,7 +72,7 @@ images:
   - name: lscr.io/linuxserver/sonarr
     newTag: 4.0.20@sha256:f247545d23ba8b233d6604575347e48a623fe6ad75dda02348bf81917f3b5c06
   - name: lscr.io/linuxserver/radarr
-    newTag: 6.4.4@sha256:adb6c09d6b729ea5e642c99cea35af72702ef476bf4763f153299ac5db9f0b4f
+    newTag: 6.4.4@sha256:7dfd049e79c00b16fbc29c3f5d96a9e7b9e73a23930b4c5b3c4541d60b366814
   - name: lscr.io/linuxserver/prowlarr
     newTag: 2.6.5@sha256:f2b26429893d4c4cb71941b7ee50b1bdecd9d5f9f9e02d5410615e9f4f7c8d95
   - name: ghcr.io/cleanuparr/cleanuparr
