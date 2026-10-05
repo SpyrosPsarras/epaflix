@@ -41,6 +41,8 @@ python3 /src/env/tools/private-config.test.py fixture /private-agent-config/bund
 for tool in tree kubectl az gh helm kustomize argocd sops git curl ssh python3; do
   command -v "$tool" >/dev/null || fail "missing $tool"
 done
+[[ -x /usr/sbin/sshd ]] || fail 'missing sshd'
+! compgen -G '/etc/ssh/ssh_host_*' >/dev/null || fail 'image ships SSH host keys'
 kubectl version --client >/dev/null
 az version >/dev/null
 gh_want=$(source /src/versions.env && echo "$GH_VERSION")
