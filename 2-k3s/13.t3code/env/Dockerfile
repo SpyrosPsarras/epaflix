@@ -3,8 +3,9 @@ LABEL org.opencontainers.image.source="https://github.com/SpyrosPsarras/epaflix"
 
 # Build from 2-k3s/13.t3code. Only public tool inputs enter the image.
 COPY env/tools/os-packages.txt /tmp/os-packages.txt
+# No SSH host private keys in the public image.
 RUN apt-get update && xargs -a /tmp/os-packages.txt apt-get install -y --no-install-recommends \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* /etc/ssh/ssh_host_*
 RUN curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft.gpg \
     && echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft.gpg] https://packages.microsoft.com/repos/azure-cli/ bookworm main' > /etc/apt/sources.list.d/azure-cli.list \
     && curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.36/deb/Release.key | gpg --dearmor -o /usr/share/keyrings/kubernetes.gpg \
