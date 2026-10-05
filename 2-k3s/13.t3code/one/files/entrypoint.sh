@@ -97,6 +97,9 @@ then
 else
   echo "t3env: sshd not set up; ssh t3code unavailable" >&2
 fi
+# /etc/profile resets PATH in login shells (`ssh t3code`), dropping the image CLIs.
+printf '%s\n' 'PATH=/tools/node_modules/.bin:$PATH' '[ -r "$HOME/.profile" ] && . "$HOME/.profile"' \
+  >"$HOME/.bash_profile"
 
 # Same remote in both environments so T3 groups them as one project.
 if [[ ! -d $PROJECT_DIR/.git ]]; then
