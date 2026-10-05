@@ -90,7 +90,7 @@ SetEnv HOME=$HOME SSH_AUTH_SOCK=/tmp/t3-ssh-agent/agent.sock PATH=/tools/node_mo
 EOF
 then
   if /usr/sbin/sshd -t -f "$SSHD_DIR/sshd_config"; then
-    ( while :; do /usr/sbin/sshd -D -e -f "$SSHD_DIR/sshd_config" || :; sleep 5; done ) &
+    START_SSHD=1
   else
     echo "t3env: sshd config invalid; ssh t3code unavailable" >&2
   fi
@@ -290,6 +290,25 @@ if ! { cat "$HOME/.codex/AGENTS.md" /scripts/homelab-ssh.md >"$HOME/.codex/AGENT
         mv -f "$HOME/.codex/AGENTS.override.md.tmp" "$HOME/.codex/AGENTS.override.md"; } 2>/dev/null; then
   rm -f "$HOME/.codex/AGENTS.override.md" "$HOME/.codex/AGENTS.override.md.tmp" || true
   echo "t3env: codex homelab SSH instructions not written; Codex uses the bundle alone" >&2
+fi
+# The T3 app's SSH launcher reuses the server named in server-runtime.json and
+# otherwise starts its own on the next free port, whose tunnel PermitOpen
+# refuses. T3 servers delete that file when they stop and `t3 project` deletes
+# it when a call fails, so it is a file mount (statefulset.yaml): unlink and
+# rename fail there, and this in-place write names this server ($$ survives the
+# exec below) for the container's lifetime.
+printf '{"version":1,"pid":%s,"host":"0.0.0.0","port":3773,"origin":"http://127.0.0.1:3773","startedAt":"%s"}\n' \
+  "$$" "$(date -u +%FT%T.000Z)" >"$T3_HOME/userdata/server-runtime.json"
+# The launcher's pid files outlive the container; a stale pid would make it
+# kill whichever process now has that number.
+rm -f "$T3_HOME"/ssh-launch/*/pid "$T3_HOME"/ssh-launch/*/port "$T3_HOME"/ssh-launch/*/managed
+# sshd waits for the server: before it listens, a launch would start its own
+# server and could take port 3773 first.
+if [[ -n ${START_SSHD:-} ]]; then
+  (
+    until curl -fs -o /dev/null http://127.0.0.1:3773/; do sleep 1; done
+    while :; do /usr/sbin/sshd -D -e -f "$SSHD_DIR/sshd_config" || :; sleep 5; done
+  ) &
 fi
 # `serve` forces project bootstrap off; `start --no-browser` honors the flag.
 exec t3 start --no-browser --host 0.0.0.0 --port 3773 --base-dir "$T3_HOME" \

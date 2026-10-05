@@ -53,6 +53,20 @@ spec:
                     operator: In
                     values:
                       - k3s-worker-65
+      # A subPath mount of a missing path becomes a directory; the runtime
+      # state mount below needs a file.
+      initContainers:
+        - name: runtime-state
+          image: t3-runtime-from-t3-container
+          command: [touch, /runtime-state/server-runtime.json]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: runtime-state
+              mountPath: /runtime-state
       containers:
         - name: t3
           image: ghcr.io/spyrospsarras/t3-runtime:inputs-5b592454e9f2325eeff5c9ea80aa1cba
@@ -113,6 +127,10 @@ spec:
               readOnly: true
             - name: home-spyros
               mountPath: /home/spyros
+            # Only the entrypoint writes it; see files/entrypoint.sh.
+            - name: runtime-state
+              mountPath: /home/spyros/.t3/userdata/server-runtime.json
+              subPath: server-runtime.json
             - name: private-config
               mountPath: /private-agent-config
               readOnly: true
@@ -191,6 +209,10 @@ spec:
             defaultMode: 0555
         - name: tmp
           emptyDir: {}
+        - name: runtime-state
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
 ---
 apiVersion: v1
 kind: ServiceAccount
