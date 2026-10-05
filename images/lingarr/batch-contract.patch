@@ -367,10 +367,10 @@ index 43ca0d8..59cf52c 100644
      private void VerifyRequestsSent(int count)
 diff --git a/Lingarr.Server.Tests/Services/TranslationRequestServiceTests.cs b/Lingarr.Server.Tests/Services/TranslationRequestServiceTests.cs
 new file mode 100644
-index 0000000..1253375
+index 0000000..b0d3bdd
 --- /dev/null
 +++ b/Lingarr.Server.Tests/Services/TranslationRequestServiceTests.cs
-@@ -0,0 +1,370 @@
+@@ -0,0 +1,421 @@
 +using System;
 +using System.Collections.Generic;
 +using System.Linq;
@@ -387,6 +387,7 @@ index 0000000..1253375
 +using Lingarr.Server.Hubs;
 +using Lingarr.Server.Interfaces.Services;
 +using Lingarr.Server.Interfaces.Services.Translation;
++using Lingarr.Server.Models;
 +using Lingarr.Server.Models.FileSystem;
 +using Lingarr.Server.Services;
 +using Microsoft.AspNetCore.SignalR;
@@ -419,6 +420,7 @@ index 0000000..1253375
 +        public LingarrDbContext DbContext { get; init; } = null!;
 +        public string ConnectionString { get; init; } = null!;
 +        public Mock<IBatchTranslationService> BatchServiceMock { get; init; } = null!;
++        public Mock<IProgressService> ProgressServiceMock { get; init; } = null!;
 +        public TranslationRequestService Service { get; init; } = null!;
 +    }
 +
@@ -496,12 +498,13 @@ index 0000000..1253375
 +            .SetupGet(h => h.Clients)
 +            .Returns(hubClientsMock.Object);
 +
++        var progressServiceMock = new Mock<IProgressService>();
 +        var service = new TranslationRequestService(
 +            dbContext,
 +            new Mock<IBackgroundJobClient>().Object,
 +            hubContextMock.Object,
 +            factoryMock.Object,
-+            new Mock<IProgressService>().Object,
++            progressServiceMock.Object,
 +            new Mock<IStatisticsService>().Object,
 +            mediaServiceMock.Object,
 +            settingServiceMock.Object,
@@ -514,6 +517,7 @@ index 0000000..1253375
 +            DbContext = dbContext,
 +            ConnectionString = connectionString,
 +            BatchServiceMock = batchInterface,
++            ProgressServiceMock = progressServiceMock,
 +            Service = service
 +        };
 +    }
@@ -728,6 +732,53 @@ index 0000000..1253375
 +        Assert.Equal(1, await harness.DbContext.TranslationRequests.CountAsync());
 +        var stillRunning = await GetRowUnchecked(harness, 1);
 +        Assert.Equal(TranslationStatus.InProgress, stillRunning.Status);
++    }
++
++    [Fact]
++    public async Task TranslateContentAsync_FailedPriorAttempt_CarriesOverMatchingLinesAndTranslatesOnlyTheRest()
++    {
++        var sent = new List<int>();
++        var harness = CreateHarness(items =>
++        {
++            sent.AddRange(items.Select(i => i.Position));
++            return items.ToDictionary(i => i.Position, i => $"νέο {i.Position}");
++        });
++        harness.DbContext.TranslationRequests.Add(StoredRequest(1, TranslationStatus.Failed));
++        harness.DbContext.TranslationRequestLines.AddRange(
++            new TranslationRequestLine { TranslationRequestId = 1, Position = 1, Source = "line 1", Target = "παλιό 1" },
++            new TranslationRequestLine { TranslationRequestId = 1, Position = 2, Source = "changed 2", Target = "παλιό 2" },
++            new TranslationRequestLine { TranslationRequestId = 1, Position = 3, Source = "line 3", Target = "" },
++            new TranslationRequestLine { TranslationRequestId = 1, Position = 4, Source = "line 4", Target = "line 4" });
++        harness.DbContext.SaveChanges();
++
++        var results = await harness.Service.TranslateContentAsync(Content(5), CancellationToken.None);
++
++        Assert.Equal(new[] { 2, 3, 4, 5 }, sent);
++        Assert.Equal(new[] { "παλιό 1", "νέο 2", "νέο 3", "νέο 4", "νέο 5" }, results.Select(r => r.Line));
++        harness.ProgressServiceMock.Verify(p => p.EmitLines(
++            It.Is<TranslationRequest>(r => r.Id != 1),
++            It.Is<List<TranslatedLineData>>(l => l.Count == 1 && l[0].Position == 1 && l[0].Target == "παλιό 1")),
++            Times.Once);
++    }
++
++    [Fact]
++    public async Task TranslateContentAsync_CompletedRequestsAreNotCarriedOver()
++    {
++        var sent = new List<int>();
++        var harness = CreateHarness(items =>
++        {
++            sent.AddRange(items.Select(i => i.Position));
++            return items.ToDictionary(i => i.Position, i => "νέο");
++        });
++        harness.DbContext.TranslationRequests.Add(StoredRequest(1, TranslationStatus.Completed));
++        harness.DbContext.TranslationRequestLines.Add(
++            new TranslationRequestLine { TranslationRequestId = 1, Position = 1, Source = "line 1", Target = "παλιό" });
++        harness.DbContext.SaveChanges();
++
++        var results = await harness.Service.TranslateContentAsync(Content(2), CancellationToken.None);
++
++        Assert.Equal(new[] { 1, 2 }, sent);
++        Assert.All(results, r => Assert.Equal("νέο", r.Line));
 +    }
 +
 +    private static async Task<TranslationRequest> GetRowUnchecked(Harness harness, int id)
@@ -985,7 +1036,7 @@ index a474c20..c533755 100644
  
      private async Task<Dictionary<int, string>> TranslateBatchWithGenerateApi(
 diff --git a/Lingarr.Server/Services/TranslationRequestService.cs b/Lingarr.Server/Services/TranslationRequestService.cs
-index 2a4dbbf..c814610 100644
+index 2a4dbbf..c00c650 100644
 --- a/Lingarr.Server/Services/TranslationRequestService.cs
 +++ b/Lingarr.Server/Services/TranslationRequestService.cs
 @@ -760,9 +760,14 @@ public class TranslationRequestService : ITranslationRequestService
@@ -1044,7 +1095,16 @@ index 2a4dbbf..c814610 100644
              }
  
              // Add TranslationRequest
-@@ -917,6 +916,14 @@ public class TranslationRequestService : ITranslationRequestService
+@@ -843,6 +842,8 @@ public class TranslationRequestService : ITranslationRequestService
+                     PlaintextLines = new List<string> { item.Line }
+                 }).ToList();
+ 
++                await CarryOverPriorLinesAsync(translationRequest, subtitleItems, cancellationToken);
++
+                 await subtitleTranslator.TranslateSubtitlesBatch(
+                     subtitleItems,
+                     translationRequest,
+@@ -917,6 +918,14 @@ public class TranslationRequestService : ITranslationRequestService
          }
          catch (OperationCanceledException ex)
          {
@@ -1059,7 +1119,7 @@ index 2a4dbbf..c814610 100644
              // ExecuteUpdateAsync bypasses change-tracking so a concurrent write cannot abort this save.
              var now = DateTimeOffset.UtcNow;
              await _dbContext.TranslationRequests
-@@ -962,6 +969,118 @@ public class TranslationRequestService : ITranslationRequestService
+@@ -962,6 +971,191 @@ public class TranslationRequestService : ITranslationRequestService
          }
      }
  
@@ -1173,6 +1233,79 @@ index 2a4dbbf..c814610 100644
 +            // a second translation of content that is already running.
 +            throw;
 +        }
++    }
++
++    /// <summary>
++    /// The caller re-POSTs content after a failed attempt as a new request
++    /// that would start again from line 1. On a quota-limited provider every
++    /// retry then re-spends the budget on the same opening batches and long
++    /// files never finish. Seed the new request with the newest failed,
++    /// interrupted or cancelled attempt's lines whose position and source
++    /// text still match and whose target is neither empty nor the source
++    /// copied through; the batch loop skips items that already carry a
++    /// translation. The carried lines are stored on the new request as well,
++    /// so the next retry and the completed-reuse count both see them.
++    /// </summary>
++    private async Task CarryOverPriorLinesAsync(
++        TranslationRequest translationRequest,
++        List<SubtitleItem> subtitleItems,
++        CancellationToken cancellationToken)
++    {
++        var priorId = await _dbContext.TranslationRequests
++            .Where(r => r.Id != translationRequest.Id
++                     && r.MediaId == translationRequest.MediaId
++                     && r.MediaType == translationRequest.MediaType
++                     && r.Title == translationRequest.Title
++                     && r.SourceLanguage == translationRequest.SourceLanguage
++                     && r.TargetLanguage == translationRequest.TargetLanguage
++                     && (r.Status == TranslationStatus.Failed
++                         || r.Status == TranslationStatus.Interrupted
++                         || r.Status == TranslationStatus.Cancelled))
++            .OrderByDescending(r => r.Id)
++            .Select(r => (int?)r.Id)
++            .FirstOrDefaultAsync(cancellationToken);
++        if (priorId == null)
++        {
++            return;
++        }
++
++        var priorByPosition = (await _dbContext.TranslationRequestLines
++                .Where(l => l.TranslationRequestId == priorId)
++                .OrderBy(l => l.Id)
++                .Select(l => new { l.Position, l.Source, l.Target, l.Service })
++                .ToListAsync(cancellationToken))
++            .GroupBy(l => l.Position)
++            .ToDictionary(g => g.Key, g => g.Last());
++
++        var carried = new List<TranslatedLineData>();
++        foreach (var item in subtitleItems)
++        {
++            var source = item.Lines[0];
++            if (!priorByPosition.TryGetValue(item.Position, out var prior)
++                || prior.Source != source
++                || (!string.IsNullOrWhiteSpace(source)
++                    && (string.IsNullOrWhiteSpace(prior.Target) || prior.Target == source)))
++            {
++                continue;
++            }
++            item.TranslatedLines = [prior.Target];
++            carried.Add(new TranslatedLineData
++            {
++                Position = item.Position,
++                Source = prior.Source,
++                Target = prior.Target,
++                Service = prior.Service
++            });
++        }
++        if (carried.Count == 0)
++        {
++            return;
++        }
++
++        await _progressService.EmitLines(translationRequest, carried);
++        _logger.LogInformation(
++            "Request {Id} carries over {Carried}/{Total} translated lines from request {PriorId}.",
++            translationRequest.Id, carried.Count, subtitleItems.Count, priorId);
 +    }
 +
      /// <summary>

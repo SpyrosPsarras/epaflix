@@ -39,11 +39,21 @@ made big files untranslatable through Bazarr:
    failed the batch on attempt 1. groq's shared free-tier TPM window 429s
    with a "try again in ~8s" hint; 429/503 now surface as
    `HttpRequestException` and the existing 1/2/4/8/16s backoff retries them.
+6. Bazarr re-POSTs a failed file as a new request, and `TranslateContentAsync`
+   started every request from line 1. With the free pool out of daily quota
+   most of the day, each retry re-spent its few successful batches on the same
+   opening lines: 1 file completed between 2026-09-27 and 2026-10-05, ~200
+   failed per day, one episode retried 62 times in a day. A new batch request
+   now carries over the lines of the newest Failed/Interrupted/Cancelled
+   request for the same content whose position and source text still match
+   and whose target is neither empty nor the source copied through
+   (`CarryOverPriorLinesAsync`), stores them on the new request, and sends only
+   the rest to the provider.
 
 Generate-API (non-chat) batches and per-line translation are unchanged. The
 upstream test asserting behaviour 3 is deleted; the rest of the suite (234
 tests) passes with the patch, plus the new TranslationRequestServiceTests for
-behaviour 4 and the rate-limit retry tests for behaviour 5.
+behaviours 4 and 6 and the rate-limit retry tests for behaviour 5.
 
 ## Measured need
 
