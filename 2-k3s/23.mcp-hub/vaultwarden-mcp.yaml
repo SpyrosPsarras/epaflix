@@ -6,7 +6,8 @@
 #           and runs `bw serve` (Bitwarden CLI's REST API) on 127.0.0.1:8087.
 #           Only this container sees the login keys of Secret mcp-hub-vaultwarden.
 #   server  files/vaultwarden_mcp.py: the 7 vault_* tools over bw serve, at
-#           :8000/vaultwarden. It and the hub hold only the hub-secret key.
+#           :8000/vaultwarden, and passwords for vault-run.py at :8000/secret.
+#           It and the hub hold only the hub-secret key.
 # The NetworkPolicy keeps every pod but the hub off port 8000.
 apiVersion: apps/v1
 kind: Deployment

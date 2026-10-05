@@ -9,7 +9,10 @@ VAULTWARDEN_HUB_SECRET. --http serves streamable HTTP at /vaultwarden on PORT
 --http it speaks stdio. --selftest runs every tool against an in-process fake
 `bw serve` and never touches a real vault.
 
-Same 7 tools as the KeePass server it replaces. An item's path is
+Same 7 tools as the KeePass server it replaces, except that vault_get never
+returns a password. Passwords leave only through POST /secret {"path": ...}
+(same X-Hub-Secret), which the hub serves as /vault-secret for vault-run.py.
+An item's path is
 /<folder name>/<item name>, or /<item name> without a folder; folder names may
 contain "/" (Personal/Git), so a path splits on its last "/".
 """
@@ -128,13 +131,20 @@ def _list_tool(prefix: str = ""):
     return [_summary(p, it) for p, it in _items() if p.lstrip("/").startswith(want)]
 
 
-def _get_tool(path: str, include_password: bool = True):
+def _get_tool(path: str):
+    """No password: tool output lands in the model's context and session files. vault-run.py gets it from /secret."""
     p, it = _find(path)
     out = _summary(p, it)
     out["custom_properties"] = {f["name"]: f.get("value") for f in it.get("fields") or [] if f.get("name")}
-    if include_password:
-        out["password"] = (it.get("login") or {}).get("password")
+    out["has_password"] = bool((it.get("login") or {}).get("password"))
     return out
+
+
+def _secret(path: str):
+    """For POST /secret only (vault-run.py via the hub's /vault-secret), never an MCP tool."""
+    _, it = _find(path)
+    login = it.get("login") or {}
+    return {"password": login.get("password"), "username": login.get("username")}
 
 
 def _add_tool(path: str, username: str = "", password: str = "", url: str = "",
@@ -346,9 +356,10 @@ def _selftest():
         # test_list_get_roundtrip
         assert len(_list_tool()) == 2, _list_tool()
         got = _get_tool("/Personal/github.com")
-        assert got["password"] == "p1" and got["custom_properties"] == {"k1": "v1"}, got
+        assert "password" not in got and got["has_password"] and got["custom_properties"] == {"k1": "v1"}, got
+        assert "p1" not in json.dumps(got), got
         assert got["expired"] is False and got["attachments"] == [], got
-        assert "password" not in _get_tool("/Personal/github.com", False)
+        assert _secret("/Personal/github.com") == {"password": "p1", "username": None}
         assert _get_tool("/rootitem")["path"] == "/rootitem"
         assert [e["path"] for e in _list_tool("Personal")] == ["/Personal/github.com"]
         _raises(ValueError, _get_tool, "/nope", contains="list entries to see valid paths")
@@ -359,7 +370,8 @@ def _selftest():
         assert added["path"] == "/Personal/Git/new", added
         assert "Personal/Git" in [f["name"] for f in fake.folders.values()]
         got = _get_tool("/Personal/Git/new")
-        assert (got["username"], got["password"], got["url"], got["notes"]) == ("u", "x", "https://g", "n"), got
+        assert (got["username"], _secret("/Personal/Git/new")["password"], got["url"], got["notes"]) == (
+            "u", "x", "https://g", "n"), got
         assert got["custom_properties"] == {"a": "b"}, got
         _raises(ValueError, _add_tool, "/", contains="path must name an entry")
 
@@ -367,7 +379,7 @@ def _selftest():
         dup = fake.folder("Dup")
         first = fake.item("x", dup, "a")
         second = fake.item("x", dup, "b")
-        assert _get_tool("/Dup/x")["password"] == "a"
+        assert _secret("/Dup/x")["password"] == "a"
         _update_tool("/Dup/x", password="c")
         assert fake.items[first]["login"]["password"] == "c" and fake.items[second]["login"]["password"] == "b"
 
@@ -413,6 +425,15 @@ def _selftest():
         assert _trash_tool("/Personal/gh") == {"trashed": "Personal/gh"}
         _raises(ValueError, _get_tool, "/Personal/gh")
 
+        # POST /secret is the only way out for a password
+        from starlette.testclient import TestClient
+
+        with TestClient(http_app("s3cret")) as c:
+            r = c.post("/secret", json={"path": "/rootitem"}, headers={"X-Hub-Secret": "s3cret"})
+            assert r.status_code == 200 and r.json() == {"password": "r", "username": None}, r.text
+            r = c.post("/secret", json={"path": "/nope"}, headers={"X-Hub-Secret": "s3cret"})
+            assert r.status_code == 404 and "no entry" in r.text, r.text
+
         # test_bw_unreachable_error
         srv.shutdown()
         srv.server_close()
@@ -448,9 +469,9 @@ def server():
         return _run(_list_tool, prefix)
 
     @mcp.tool()
-    def vault_get(path: str, include_password: bool = True) -> str:
-        """Fetch one item by its full vault path (as returned by vault_list, e.g. /Folder/Name). Returns a JSON object."""
-        return _run(_get_tool, path, include_password)
+    def vault_get(path: str) -> str:
+        """Fetch one item by its full vault path (as returned by vault_list, e.g. /Folder/Name). Returns a JSON object without the password. To use the password in a command, run `python3 /scripts/vault-run.py <path> <command>` (on a PC: 2-k3s/13.t3code/one/files/vault-run.py in the epaflix checkout); the command gets it as $VAULT_PASSWORD."""
+        return _run(_get_tool, path)
 
     @mcp.tool()
     def vault_add(path: str, username: str = "", password: str = "", url: str = "",
@@ -511,8 +532,20 @@ def http_app(secret):
 
     if not secret:
         sys.exit("VAULTWARDEN_HUB_SECRET must be set (see vaultwarden-mcp.yaml)")
+    import anyio
+    from starlette.responses import JSONResponse
+
+    async def get_secret(request):
+        try:
+            path = (await request.json())["path"]
+            return JSONResponse(await anyio.to_thread.run_sync(_secret, path))
+        except (ValueError, KeyError, TypeError) as e:  # bad body or unknown path; text never holds a secret
+            return PlainTextResponse(f"{type(e).__name__}: {e}", status_code=404)
+        except RuntimeError as e:
+            return PlainTextResponse(str(e), status_code=502)
+
     mcp = server()
-    routes = [Route("/healthz", lambda request: PlainTextResponse("ok"))]
+    routes = [Route("/healthz", lambda request: PlainTextResponse("ok")), Route("/secret", get_secret, methods=["POST"])]
     routes += mcp.streamable_http_app(streamable_http_path="/vaultwarden", host="0.0.0.0",
                                       stateless_http=True, json_response=True).routes
     return Starlette(routes=routes, lifespan=lambda app: mcp.session_manager.run(),
@@ -536,6 +569,17 @@ def _http_selftest():
         result = r.json()["result"]
         # bw serve is down at this point of the selftest: the error must name it.
         assert result["isError"] and "bw serve" in result["content"][0]["text"], result
+        names = [t["name"] for t in c.post("/vaultwarden", json={"jsonrpc": "2.0", "id": 3, "method": "tools/list"},
+                                           headers=ok).json()["result"]["tools"]]
+        assert "vault_get" in names and not any("secret" in n for n in names), names
+        schema = next(t for t in c.post("/vaultwarden", json={"jsonrpc": "2.0", "id": 4, "method": "tools/list"},
+                                        headers=ok).json()["result"]["tools"] if t["name"] == "vault_get")
+        assert "include_password" not in json.dumps(schema), schema
+        assert c.post("/secret", json={"path": "/x"}).status_code == 401
+        assert c.post("/secret", json={"path": "/x"}, headers={"X-Hub-Secret": "nope"}).status_code == 401
+        assert c.post("/secret", json={"path": "/x"}, headers={"X-Hub-Secret": "s3cret"}).status_code == 502
+        assert c.post("/secret", json={}, headers={"X-Hub-Secret": "s3cret"}).status_code == 404
+        assert c.get("/secret", headers={"X-Hub-Secret": "s3cret"}).status_code == 405
     print("http selftest OK")
 
 
