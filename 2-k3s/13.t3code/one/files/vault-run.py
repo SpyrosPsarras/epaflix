@@ -2,10 +2,14 @@
 
 Usage: python3 /scripts/vault-run.py <vault path> <command> [args...]
 
-The item comes from the hub's vault_get, the same access the agent has through
-the vaultwarden MCP tools. The command gets VAULT_PASSWORD, and VAULT_USERNAME
-when the item has one. Agents use this instead of pasting a secret into a
-command: tool arguments are saved in session files, and jev-guard blocks them.
+The item comes from the hub's /vault-secret route (2-k3s/23.mcp-hub), the only
+place a password leaves the vault: the vault_get MCP tool never returns one.
+The command gets VAULT_PASSWORD, and VAULT_USERNAME when the item has one.
+Agents use this instead of putting a secret in a command: tool arguments and
+results are saved in session files, and jev-guard blocks them.
+
+Hub: MCP_HUB_URL and MCP_HUB_TOKEN (t3code pod), else https://mcp.epaflix.com
+and the token in ~/.config/opencode/mcp-hub.key (a LAN PC).
 
   python3 /scripts/vault-run.py '/jira api token' \
     sh -c 'curl -su "me@example.com:$VAULT_PASSWORD" https://example.atlassian.net/rest/api/2/myself'
@@ -13,6 +17,7 @@ command: tool arguments are saved in session files, and jev-guard blocks them.
 import json
 import os
 import sys
+import urllib.error
 import urllib.request
 
 
@@ -21,17 +26,18 @@ class NotFound(Exception):
 
 
 def fetch(path):
+    token = os.environ.get("MCP_HUB_TOKEN") or open(os.path.expanduser("~/.config/opencode/mcp-hub.key")).read().strip()
     request = urllib.request.Request(
-        os.environ["MCP_HUB_URL"].rstrip("/") + "/vaultwarden",
-        data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
-            "name": "vault_get", "arguments": {"path": path, "include_password": True}}}).encode(),
-        headers={"Authorization": f"Bearer {os.environ['MCP_HUB_TOKEN']}", "Content-Type": "application/json",
-                 "Accept": "application/json, text/event-stream"})
-    with urllib.request.urlopen(request, timeout=30) as response:
-        result = json.load(response)["result"]
-    if result.get("isError"):
-        raise NotFound
-    return json.loads(result["content"][0]["text"])
+        os.environ.get("MCP_HUB_URL", "https://mcp.epaflix.com").rstrip("/") + "/vault-secret",
+        data=json.dumps({"path": path}).encode(),
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return json.load(response)
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            raise NotFound from None
+        raise
 
 
 def main(argv):
@@ -42,7 +48,7 @@ def main(argv):
         item = fetch(argv[0])
         password, username = item["password"], item.get("username")
     except NotFound:
-        sys.exit(f"vault-run: vault_get failed for {argv[0]!r}; check the path with vault_list")
+        sys.exit(f"vault-run: no vault item at {argv[0]!r}; check the path with vault_list")
     except Exception as e:  # noqa: BLE001 - any message here may carry the response
         sys.exit(f"vault-run: hub request failed ({type(e).__name__})")
     if not isinstance(password, str) or not password:

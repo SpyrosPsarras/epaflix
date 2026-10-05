@@ -6,6 +6,7 @@ import socket
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import threading
 import unittest
 
@@ -21,16 +22,15 @@ seen = []
 class Hub(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         call = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-        seen.append((self.headers["Authorization"], call["params"]["name"], call["params"]["arguments"]))
-        path = call["params"]["arguments"]["path"]
+        seen.append((self.headers["Authorization"], self.path, call))
+        path = call["path"]
         if path == LEAKY:
-            result = {"isError": True, "content": [{"type": "text", "text": "upstream failed: synthetic-item-secret"}]}
+            code, body = 502, b"upstream failed: synthetic-item-secret"
         elif path in ITEMS:
-            result = {"isError": False, "content": [{"type": "text", "text": json.dumps({"path": path, **ITEMS[path]})}]}
+            code, body = 200, json.dumps(ITEMS[path]).encode()
         else:
-            result = {"isError": True, "content": [{"type": "text", "text": f"ValueError: no entry at path '{path}'"}]}
-        body = json.dumps({"jsonrpc": "2.0", "id": 1, "result": result}).encode()
-        self.send_response(200)
+            code, body = 404, f"ValueError: no entry at path '{path}'".encode()
+        self.send_response(code)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -58,7 +58,19 @@ class VaultRun(unittest.TestCase):
         seen.clear()
         r = self.run_script("/demo/token", "sh", "-c", 'printf "%s:%s" "$VAULT_USERNAME" "$VAULT_PASSWORD"')
         self.assertEqual((r.returncode, r.stdout), (0, "demo-user:synthetic-secret-1"))
-        self.assertEqual(seen, [("Bearer hub-token", "vault_get", {"path": "/demo/token", "include_password": True})])
+        self.assertEqual(seen, [("Bearer hub-token", "/vault-secret", {"path": "/demo/token"})])
+
+    def test_pc_fallback_reads_token_file(self):
+        with tempfile.TemporaryDirectory() as home:
+            Path(home, ".config/opencode").mkdir(parents=True)
+            Path(home, ".config/opencode/mcp-hub.key").write_text("file-token\n")
+            env = {k: v for k, v in os.environ.items() if k != "MCP_HUB_TOKEN"}
+            env.update(HOME=home, MCP_HUB_URL=f"http://127.0.0.1:{self.server.server_port}")
+            seen.clear()
+            r = subprocess.run([sys.executable, str(SCRIPT), "/demo/token", "true"], env=env, capture_output=True,
+                               text=True, timeout=30)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(seen[0][0], "Bearer file-token")
 
     def test_no_username_leaves_it_unset(self):
         r = self.run_script("/demo/no-user", "sh", "-c", 'printf "%s|%s" "${VAULT_USERNAME-unset}" "$VAULT_PASSWORD"')
