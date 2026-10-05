@@ -1,0 +1,3 @@
+# The two homelab SSH keys (Vaultwarden).
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIC5ZHz5Mv8wiAVV4okDH/vSGEteRmZKZanykseVjfeeO spy
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIM4+tH27vsJyA4nkKC5d/AuGOfuTTAzhtSpq33QjH1Po t3code

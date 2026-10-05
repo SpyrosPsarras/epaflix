@@ -38,6 +38,7 @@ configMapGenerator:
       - files/vault-run.py
       - files/homelab-ssh.conf
       - files/homelab-ssh.md
+      - files/sshd-authorized-keys
       - files/jev-checks.md
       - files/opencode-fast-version.sh
 

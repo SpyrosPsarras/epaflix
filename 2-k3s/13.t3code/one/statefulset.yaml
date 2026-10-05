@@ -55,7 +55,7 @@ spec:
                       - k3s-worker-65
       containers:
         - name: t3
-          image: ghcr.io/spyrospsarras/t3-runtime:inputs-45c6db9e3d1e88366d0c8b7700c307ff
+          image: ghcr.io/spyrospsarras/t3-runtime:inputs-5b592454e9f2325eeff5c9ea80aa1cba
           imagePullPolicy: Always
           command:
             - bash
@@ -98,6 +98,9 @@ spec:
           ports:
             - name: http
               containerPort: 3773
+              protocol: TCP
+            - name: ssh
+              containerPort: 2222
               protocol: TCP
           securityContext:
             allowPrivilegeEscalation: false

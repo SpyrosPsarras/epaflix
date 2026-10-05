@@ -65,6 +65,38 @@ else
   echo "t3env: no Vaultwarden login in t3code-vaultwarden; vault SSH keys skipped" >&2
 fi
 
+# `ssh t3code` (t3code-ssh Service). authorized_keys goes to the passwd home:
+# StrictModes rejects the PVC home (mode 2777). Sessions do not get T3's env tokens.
+SSHD_DIR=$HOME/.ssh/sshd
+if [[ -r /scripts/sshd-authorized-keys && -x /usr/sbin/sshd ]] &&
+  mkdir -p -m 0700 "$SSHD_DIR" &&
+  { [[ -s $SSHD_DIR/ssh_host_ed25519_key ]] ||
+    ssh-keygen -q -t ed25519 -N '' -C t3code -f "$SSHD_DIR/ssh_host_ed25519_key"; } &&
+  install -m 0600 /scripts/sshd-authorized-keys "$SSH_DIR/authorized_keys" &&
+  cat >"$SSHD_DIR/sshd_config" <<EOF
+Port 2222
+HostKey $SSHD_DIR/ssh_host_ed25519_key
+PidFile none
+UsePAM no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+AllowAgentForwarding no
+AllowTcpForwarding no
+X11Forwarding no
+PermitTunnel no
+PrintMotd no
+SetEnv HOME=$HOME SSH_AUTH_SOCK=/tmp/t3-ssh-agent/agent.sock PATH=/tools/node_modules/.bin:/usr/local/bin:/usr/bin:/bin
+EOF
+then
+  if /usr/sbin/sshd -t -f "$SSHD_DIR/sshd_config"; then
+    ( while :; do /usr/sbin/sshd -D -e -f "$SSHD_DIR/sshd_config" || :; sleep 5; done ) &
+  else
+    echo "t3env: sshd config invalid; ssh t3code unavailable" >&2
+  fi
+else
+  echo "t3env: sshd not set up; ssh t3code unavailable" >&2
+fi
+
 # Same remote in both environments so T3 groups them as one project.
 if [[ ! -d $PROJECT_DIR/.git ]]; then
   git clone -q "$T3_PROJECT_REPO" "$PROJECT_DIR"
