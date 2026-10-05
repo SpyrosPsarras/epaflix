@@ -1,0 +1,122 @@
+"""vault-run.py against a fake hub, with a synthetic item."""
+import http.server
+import json
+import os
+import socket
+from pathlib import Path
+import subprocess
+import sys
+import threading
+import unittest
+
+SCRIPT = Path(__file__).with_name("vault-run.py")
+ITEMS = {"/demo/token": {"username": "demo-user", "password": "synthetic-secret-1"},
+         "/demo/no-user": {"username": None, "password": "synthetic-secret-2"},
+         "/demo/empty": {"username": None, "password": None}}
+# The hub's error text for this path carries a secret; vault-run must not print it.
+LEAKY = "/demo/leaky"
+seen = []
+
+
+class Hub(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        call = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        seen.append((self.headers["Authorization"], call["params"]["name"], call["params"]["arguments"]))
+        path = call["params"]["arguments"]["path"]
+        if path == LEAKY:
+            result = {"isError": True, "content": [{"type": "text", "text": "upstream failed: synthetic-item-secret"}]}
+        elif path in ITEMS:
+            result = {"isError": False, "content": [{"type": "text", "text": json.dumps({"path": path, **ITEMS[path]})}]}
+        else:
+            result = {"isError": True, "content": [{"type": "text", "text": f"ValueError: no entry at path '{path}'"}]}
+        body = json.dumps({"jsonrpc": "2.0", "id": 1, "result": result}).encode()
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass
+
+
+class VaultRun(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = http.server.HTTPServer(("127.0.0.1", 0), Hub)
+        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+
+    def run_script(self, *args):
+        env = {**os.environ, "MCP_HUB_URL": f"http://127.0.0.1:{self.server.server_port}/", "MCP_HUB_TOKEN": "hub-token"}
+        env["VAULT_USERNAME"] = "outer-user"  # vault-run must replace or drop it
+        return subprocess.run([sys.executable, str(SCRIPT), *args], env=env, capture_output=True, text=True, timeout=30)
+
+    def test_command_gets_secret_and_username(self):
+        seen.clear()
+        r = self.run_script("/demo/token", "sh", "-c", 'printf "%s:%s" "$VAULT_USERNAME" "$VAULT_PASSWORD"')
+        self.assertEqual((r.returncode, r.stdout), (0, "demo-user:synthetic-secret-1"))
+        self.assertEqual(seen, [("Bearer hub-token", "vault_get", {"path": "/demo/token", "include_password": True})])
+
+    def test_no_username_leaves_it_unset(self):
+        r = self.run_script("/demo/no-user", "sh", "-c", 'printf "%s|%s" "${VAULT_USERNAME-unset}" "$VAULT_PASSWORD"')
+        self.assertEqual(r.stdout, "unset|synthetic-secret-2")
+
+    def test_command_exit_code_passes_through(self):
+        self.assertEqual(self.run_script("/demo/token", "sh", "-c", "exit 7").returncode, 7)
+
+    def test_missing_item_fails_without_running_command(self):
+        r = self.run_script("/demo/none", "sh", "-c", "echo ran")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertNotIn("ran", r.stdout)
+        self.assertIn("'/demo/none'", r.stderr)
+
+    def test_hub_error_text_is_not_printed(self):
+        r = self.run_script(LEAKY, "true")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertNotIn("synthetic-item-secret", r.stderr + r.stdout)
+
+    def test_bad_token_is_not_printed(self):
+        env = {**os.environ, "MCP_HUB_URL": f"http://127.0.0.1:{self.server.server_port}", "MCP_HUB_TOKEN": "synthetic-hub-token\n"}
+        r = subprocess.run([sys.executable, str(SCRIPT), "/demo/token", "true"], env=env, capture_output=True, text=True, timeout=30)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertNotIn("synthetic-hub-token", r.stderr + r.stdout)
+
+    def test_missing_command_fails_cleanly(self):
+        r = self.run_script("/demo/token", "/does-not-exist")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertNotIn("Traceback", r.stderr)
+        self.assertNotIn("synthetic-secret-1", r.stderr + r.stdout)
+
+    def test_item_without_password_fails(self):
+        r = self.run_script("/demo/empty", "sh", "-c", "echo ran")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertNotIn("ran", r.stdout)
+
+    def test_malformed_response_is_not_printed(self):
+        listener = socket.create_server(("127.0.0.1", 0))
+
+        def reply():
+            conn, _ = listener.accept()
+            conn.recv(65536)
+            conn.sendall(b"synthetic-upstream-secret\r\n")
+            conn.close()
+        threading.Thread(target=reply, daemon=True).start()
+        env = {**os.environ, "MCP_HUB_URL": f"http://127.0.0.1:{listener.getsockname()[1]}", "MCP_HUB_TOKEN": "hub-token"}
+        r = subprocess.run([sys.executable, str(SCRIPT), "/demo/token", "true"], env=env, capture_output=True, text=True, timeout=30)
+        listener.close()
+        self.assertNotEqual(r.returncode, 0)
+        self.assertNotIn("synthetic-upstream-secret", r.stderr + r.stdout)
+        self.assertNotIn("Traceback", r.stderr)
+
+    def test_hub_down_fails_without_leaking(self):
+        env = {**os.environ, "MCP_HUB_URL": "http://127.0.0.1:1", "MCP_HUB_TOKEN": "hub-token"}
+        r = subprocess.run([sys.executable, str(SCRIPT), "/demo/token", "true"], env=env, capture_output=True, text=True, timeout=30)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertNotIn("hub-token", r.stderr)
+
+
+if __name__ == "__main__":
+    unittest.main()
