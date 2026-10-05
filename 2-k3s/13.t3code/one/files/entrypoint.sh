@@ -67,6 +67,7 @@ fi
 
 # `ssh t3code` (t3code-ssh Service). authorized_keys goes to the passwd home:
 # StrictModes rejects the PVC home (mode 2777). Sessions do not get T3's env tokens.
+# The only tunnel allowed is to the T3 backend, for the desktop app's SSH route.
 SSHD_DIR=$HOME/.ssh/sshd
 if [[ -r /scripts/sshd-authorized-keys && -x /usr/sbin/sshd ]] &&
   mkdir -p -m 0700 "$SSHD_DIR" &&
@@ -81,7 +82,8 @@ UsePAM no
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 AllowAgentForwarding no
-AllowTcpForwarding no
+AllowTcpForwarding local
+PermitOpen 127.0.0.1:3773 localhost:3773
 X11Forwarding no
 PermitTunnel no
 PrintMotd no
