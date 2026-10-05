@@ -51,7 +51,9 @@ Three layers, cheapest first. Research: `docs/jev-tool-guard-research.md`
        Such a command is never sent to Jev or
        written unmasked to the log. Env
        values that start with `/` (socket and file paths) are ignored.
-       `vaultwarden_*` tools are exempt;
+       `vaultwarden_*` tools are exempt. The block message points to
+       `files/vault-run.py`, which runs a command with a vault item in
+       `$VAULT_PASSWORD` so the secret never sits in tool arguments;
      - blocks a path argument or bash command that names `/run/jev`;
      - blocks bash commands that print the environment: bare `env`, `set`,
        `export`, `declare`, any `printenv`, `/proc/*/environ`, `ps e`, also

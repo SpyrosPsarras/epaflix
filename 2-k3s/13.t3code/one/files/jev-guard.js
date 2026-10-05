@@ -114,7 +114,7 @@ export default async () => {
       // Vault tools carry secrets by design.
       if (!VAULT_TOOL.test(tool) && (redact(args) !== args || `${path} ${command}`.includes("/run/jev"))) {
         await record({ ...base, layer: "local", decision: "block", reason: "credential", command: cmd })
-        throw block("its arguments contain a credential or the Jev key path")
+        throw block("its arguments contain a credential or the Jev key path. To use a vault secret in a command, run it through `python3 /scripts/vault-run.py <vault path> <command>`, which passes it as $VAULT_PASSWORD")
       }
       if (tool !== "bash" || !command.trim()) return
       if (ENV_DUMP.test(command.trim())) {
