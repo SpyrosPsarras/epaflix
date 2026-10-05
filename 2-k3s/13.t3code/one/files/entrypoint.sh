@@ -81,7 +81,8 @@ UsePAM no
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 AllowAgentForwarding no
-AllowTcpForwarding no
+AllowTcpForwarding local
+PermitOpen 127.0.0.1:3773 localhost:3773
 X11Forwarding no
 PermitTunnel no
 PrintMotd no
