@@ -13,18 +13,18 @@ import tempfile
 
 def bundle(home):
     files = {}
-    source = home / '.claude/skills'
-    for path in sorted(source.rglob('*')):
-        if path.is_symlink():
-            raise ValueError('Skill source must contain real files')
-        if path.is_file():
+    source = home / '.agents/skills'
+    for directory, subdirs, names in os.walk(source, followlinks=True):
+        subdirs[:] = [d for d in subdirs if not d.startswith('.') and (directory, d) != (str(source), 'synced')]
+        for name in names:
+            path = Path(directory, name)
             files['skills/' + path.relative_to(source).as_posix()] = {
                 'data': base64.b64encode(path.read_bytes()).decode(),
                 'executable': bool(path.stat().st_mode & 0o111)}
     if not any(p.endswith('/SKILL.md') for p in files):
         raise ValueError('No skills found')
     files['instructions.md'] = {
-        'data': base64.b64encode((home / '.claude/CLAUDE.md').read_bytes()).decode(),
+        'data': base64.b64encode((home / 'agent/AGENTS.md').read_bytes()).decode(),
         'executable': False}
     return {'sourceHome': str(home), 'files': files}
 
@@ -60,8 +60,11 @@ def install(payload, home):
             if stage.exists():
                 shutil.rmtree(stage)
     links = {'.claude/skills': 'skills', '.agents/skills': 'skills',
-             '.claude/CLAUDE.md': 'instructions.md', '.codex/AGENTS.md': 'instructions.md',
+             '.claude/AGENTS.md': 'instructions.md', '.codex/AGENTS.md': 'instructions.md',
              '.config/opencode/AGENTS.md': 'instructions.md'}
+    retired = home / '.claude/CLAUDE.md'
+    if retired.is_symlink() and Path(os.path.realpath(retired)).is_relative_to(root.resolve()):
+        retired.unlink()
     for name, relative in links.items():
         link = home / name
         link.parent.mkdir(parents=True, exist_ok=True)

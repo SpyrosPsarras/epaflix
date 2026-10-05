@@ -43,6 +43,22 @@ if __name__ == '__main__':
         Path(sys.argv[2]).write_text(json.dumps(fixture()))
     else:
         with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp)
+            (source / 'elsewhere').mkdir()
+            (source / 'elsewhere/SKILL.md').write_text('linked skill\n')
+            (source / '.agents/skills/linked').mkdir(parents=True)
+            (source / '.agents/skills/linked/SKILL.md').symlink_to(source / 'elsewhere/SKILL.md')
+            (source / '.agents/skills/.stversions/old').mkdir(parents=True)
+            (source / '.agents/skills/.stversions/old/SKILL.md').write_text('old version\n')
+            (source / '.agents/skills/synced/docx').mkdir(parents=True)
+            (source / '.agents/skills/synced/docx/SKILL.md').write_text('claude.ai synced skill\n')
+            (source / 'agent').mkdir()
+            (source / 'agent/AGENTS.md').write_text('Synthetic AGENTS.md\n')
+            packed = module.bundle(source)
+            assert sorted(packed['files']) == ['instructions.md', 'skills/linked/SKILL.md']
+            assert base64.b64decode(packed['files']['skills/linked/SKILL.md']['data']) == b'linked skill\n'
+            assert base64.b64decode(packed['files']['instructions.md']['data']) == b'Synthetic AGENTS.md\n'
+        with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
             old = home / '.claude/skills/local'
             old.mkdir(parents=True)
@@ -52,6 +68,24 @@ if __name__ == '__main__':
             assert (home / '.claude/skills.before-git/local').is_dir()
             assert (home / '.agents/skills/implement/SKILL.md').is_file()
             assert str(home) in (home / '.codex/AGENTS.md').read_text()
+            assert (home / '.claude/AGENTS.md').read_text() == (home / '.codex/AGENTS.md').read_text()
+            stale = home / '.claude/CLAUDE.md'
+            stale.symlink_to(home / '.local/share/t3-private-config/old/instructions.md')
+            module.install(payload, home)
+            assert not stale.is_symlink() and not stale.exists()
+            stale.symlink_to('../.local/share/t3-private-config/old/instructions.md')
+            module.install(payload, home)
+            assert not stale.is_symlink()
+            (home / 'user.md').write_text('user file')
+            for target in (home / '.local/share/t3-private-config/../../../user.md', home / 'user.md'):
+                stale.symlink_to(target)
+                module.install(payload, home)
+                assert stale.read_text() == 'user file'
+                stale.unlink()
+            stale.write_text('user file')
+            module.install(payload, home)
+            assert stale.read_text() == 'user file'
+            stale.unlink()
             updated = fixture()
             updated['files']['skills/implement/SKILL.md']['data'] = base64.b64encode(b'changed').decode()
             module.install(json.dumps(updated).encode(), home)
@@ -64,4 +98,4 @@ if __name__ == '__main__':
             except ValueError:
                 pass
             assert (home / '.claude/skills/implement/SKILL.md').read_text() == 'changed'
-        print('ok: private config migration, updates, native paths, and rejection')
+        print('ok: private config pack, migration, updates, native paths, and rejection')
