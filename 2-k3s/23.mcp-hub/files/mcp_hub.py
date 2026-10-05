@@ -63,6 +63,10 @@ def upstreams():
         ("/vaultwarden", Upstream("vaultwarden", os.environ.get(
             "VAULTWARDEN_URL", "http://vaultwarden-mcp.mcp-hub.svc.cluster.local:8000/vaultwarden"),
             vaultwarden_secret)),
+        # Plain JSON, not MCP: vault-run.py fetches a password here so it never enters a tool result.
+        ("/vault-secret", Upstream("vault-secret", os.environ.get(
+            "VAULT_SECRET_URL", "http://vaultwarden-mcp.mcp-hub.svc.cluster.local:8000/secret"),
+            vaultwarden_secret)),
         ("/kubernetes", Upstream("kubernetes", os.environ.get(
             "KUBERNETES_MCP_URL", "http://kubernetes-mcp.mcp-hub.svc.cluster.local:8080/mcp"))),
         ("/jev", Upstream("jev", os.environ.get(
@@ -262,6 +266,10 @@ def _selftest():
     assert "/keepass" not in dict(upstreams()), "the keepass route is retired"
     vw = dict(upstreams())["/vaultwarden"]
     assert vw.url == "http://vaultwarden-mcp.mcp-hub.svc.cluster.local:8000/vaultwarden", vw.url
+    table = dict(upstreams())
+    vs = table["/vault-secret"]
+    assert vs.url == "http://vaultwarden-mcp.mcp-hub.svc.cluster.local:8000/secret", vs.url
+    assert vs.credential is table["/vaultwarden"].credential
     os.environ["VAULTWARDEN_HUB_SECRET"] = "vw"
     assert vw.credential() == {"x-hub-secret": "vw"}
     os.environ["VAULTWARDEN_HUB_SECRET"] = ""
