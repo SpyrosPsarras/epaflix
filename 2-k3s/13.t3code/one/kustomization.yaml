@@ -35,6 +35,7 @@ configMapGenerator:
       - files/jev-guard.js
       - files/ssh-policy.py
       - files/vault-ssh-agent.py
+      - files/vault-run.py
       - files/homelab-ssh.conf
       - files/homelab-ssh.md
       - files/jev-checks.md
