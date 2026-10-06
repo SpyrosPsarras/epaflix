@@ -1,5 +1,5 @@
 #!/usr/bin/python3 -I
-"""Build the reviewed runtime hunks, verify every artifact, then update one pin."""
+"""Build the reviewed runtime hunks, verify every artifact, then update one pin to its OpenCode 2 package directory."""
 import argparse
 import base64
 import hashlib
@@ -115,14 +115,18 @@ def verify(root, hashes):
             raise ValueError(f"Hash mismatch: {name}")
 
 
-def replace_pin(config, uri):
+def replace_pin(config, uri, legacy=()):
     plugins = config.get("plugin", [])
     if not isinstance(plugins, list):
         raise ValueError("plugin must be an array")
+    if "cc-safety-net" in json.dumps(config.get("plugins", [])):
+        raise ValueError("cc-safety-net in plugins; inspect before replacing")
+    # OpenCode 1 pins: the npm package and the reviewed build's dist/index.js file.
+    known = (f"cc-safety-net@{VERSION}", *legacy)
     matches = []
     for index, plugin in enumerate(plugins):
         name = plugin[0] if isinstance(plugin, list) and plugin else plugin
-        if name in (f"cc-safety-net@{VERSION}", uri):
+        if name == uri or name in known:
             matches.append(index)
         elif isinstance(name, str) and "cc-safety-net" in name:
             raise ValueError("Unknown cc-safety-net declaration; inspect before replacing")
@@ -133,14 +137,35 @@ def replace_pin(config, uri):
     if len(matches) != 1:
         # Older entrypoints re-added the bare npm pin beside the reviewed build. Drop only those copies.
         found = [plugins[i] for i in matches]
-        if found.count(uri) == 1 and all(p in (uri, f"cc-safety-net@{VERSION}") for p in found):
-            config["plugin"] = [p for p in plugins if p != f"cc-safety-net@{VERSION}"]
+        if found.count(uri) == 1 and all(p == uri or (isinstance(p, str) and p in known) for p in found):
+            config["plugin"] = [p for p in plugins if not (isinstance(p, str) and p in known)]
             return config
         raise ValueError("Expected exactly one known cc-safety-net declaration")
     index = matches[0]
     plugin = plugins[index]
     plugins[index] = [uri, *plugin[1:]] if isinstance(plugin, list) else uri
     return config
+
+
+def wrapper(destination):
+    # OpenCode 2 loads a plugin package directory, not a file, and the reviewed
+    # package.json exports no server entry. This directory re-exports the build.
+    path = destination.parent / f"{destination.name}-opencode2"
+    files = {
+        "package.json": json.dumps({"name": "cc-safety-net-opencode2", "private": True, "type": "module", "main": "index.js"}) + "\n",
+        "index.js": f"export {{ default }} from {json.dumps((destination / 'dist/index.js').as_uri())}\n",
+    }
+    if path.is_symlink():
+        raise ValueError("Wrapper must not be a symlink")
+    path.mkdir(exist_ok=True)
+    for name, text in files.items():
+        target = path / name
+        if target.is_symlink() or not target.exists() or target.read_text() != text:
+            with tempfile.NamedTemporaryFile("w", dir=path, delete=False) as out:
+                out.write(text)
+            os.chmod(out.name, 0o644)
+            os.replace(out.name, target)
+    return path
 
 
 def install(destination):
@@ -192,10 +217,11 @@ def main():
     parser.add_argument("--config", type=Path, help="explicitly enable the config update after building")
     args = parser.parse_args()
     entry = install(args.destination)
+    plugin = wrapper(entry.parent.parent)
     if args.config:
         path = args.config.resolve()
         original = path.read_bytes()
-        config = replace_pin(json.loads(original), entry.as_uri())
+        config = replace_pin(json.loads(original), plugin.as_uri(), legacy=(entry.as_uri(),))
         updated = (json.dumps(config, indent=2) + "\n").encode()
         if original != updated:
             with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as out:
@@ -208,7 +234,7 @@ def main():
                 os.replace(temporary, path)
             finally:
                 temporary.unlink(missing_ok=True)
-    print(entry.as_uri())
+    print(plugin.as_uri())
 
 
 if __name__ == "__main__":
