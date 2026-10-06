@@ -11,17 +11,20 @@ process.env.XDG_CACHE_HOME = cache
 process.env.ANTHROPIC_BASE_URL = "https://proxy.invalid"
 process.env.ANTHROPIC_AUTH_TOKEN = "test-secret"
 // OpenCode 2 runs setup once, then replays the synchronous provider transform on every reload.
-const timers = { setInterval: globalThis.setInterval }
-let added, runs = 0, transform, reloads = 0, refresh
+// A saved catalog is served at once and refetched by a zero-delay timer after setup.
+const timers = { setInterval: globalThis.setInterval, setTimeout: globalThis.setTimeout }
+let added, runs = 0, transform, reloads = 0, refresh, startup
 globalThis.setInterval = (fn) => { refresh = fn; return { unref() {} } }
+globalThis.setTimeout = (fn) => { startup = fn }
 const run = () => { const out = []; transform({ add: (x) => out.push(x) }); runs++; return out }
 const load = async () => {
-  added = transform = undefined
+  added = transform = startup = undefined
   const cleanup = await plugin.setup({ provider: {
     transform: async (callback) => { transform = callback; return { dispose: async () => {} } },
     reload: async () => { reloads++ },
   } })
   if (!transform) return undefined
+  await startup?.()
   assert.equal(typeof cleanup, "function")
   const first = run()
   assert.deepEqual(run(), first, "a provider reload replays the same catalog")
@@ -105,7 +108,23 @@ try {
   await refresh()
   assert.equal(reloads, 1, "offline: the saved catalog is the same, so nothing reloads")
   globalThis.fetch = online
-  data = data.filter(m => m.slug !== "codex/gpt-6-terra")
+  // With a saved catalog, setup must not wait for the catalog request.
+  let fetches = 0, release
+  const gate = new Promise(resolve => { release = resolve })
+  globalThis.fetch = async () => { fetches++; await gate; return Response.json({ models: data }) }
+  added = transform = startup = undefined
+  await plugin.setup({ provider: { transform: async (callback) => { transform = callback }, reload: async () => { reloads++ } } })
+  assert.equal(fetches, 0, "setup returns before the catalog request starts")
+  assert.equal(run()[0].models.length, 8, "the saved catalog is listed at once")
+  const pending = startup()
+  data = [...data, { slug: "codex/gpt-6-luna", context_window: 272000, max_tokens: 128000 }]
+  release()
+  await pending
+  assert.equal(fetches, 1)
+  assert.equal(reloads, 2, "a changed fresh catalog reloads the provider")
+  assert.equal(run()[0].models.length, 9)
+  globalThis.fetch = online
+  data = data.filter(m => !["codex/gpt-6-terra", "codex/gpt-6-luna"].includes(m.slug))
   await writeFile(join(cache, "opencode/cliproxy-models.json"), beforeRefresh)
   // A partial listing (credential in cooldown) must not drop models seen before.
   data = [{ slug: "openrouter/or-new-model", context_window: 272000, input_modalities: ["text", "image"] }]
@@ -180,7 +199,7 @@ try {
   delete process.env.ANTHROPIC_BASE_URL
   assert.equal(await load(), undefined)
   assert.ok(runs > 0)
-  console.log("PASS: subscription routing, token limits, effort variants, collision exclusion, stable selections, names, SDK routing, catalog merge over cache, retirement after 14 days, safe cache fallback, legacy cache rejection, reload replay, timed refresh and reload, no cached secrets")
+  console.log("PASS: subscription routing, token limits, effort variants, collision exclusion, stable selections, names, SDK routing, catalog merge over cache, retirement after 14 days, safe cache fallback, legacy cache rejection, reload replay, timed refresh and reload, saved catalog served before the fetch, no cached secrets")
 } finally {
   globalThis.fetch = originalFetch
   Object.assign(globalThis, timers)
