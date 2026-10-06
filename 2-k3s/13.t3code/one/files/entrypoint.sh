@@ -25,38 +25,8 @@ git config --global credential.helper /scripts/git-credential-github.sh
 git config --global user.name "Spyros Psarras"
 git config --global user.email 13405649+SpyrosPsarras@users.noreply.github.com
 
-# ssh expands ~ from /etc/passwd (/home/node), not $HOME, so its config goes
-# there. It is rewritten on every start.
-SSH_DIR=$(getent passwd "$(id -u)" | cut -d: -f6)/.ssh
-mkdir -m 0700 "$SSH_DIR" 2>/dev/null || chmod 0700 "$SSH_DIR"
-{
-  # Homelab hosts (generated from the .lan DNS records, 1-proxmox/ssh). First,
-  # so no Host block scopes the Include. They include
-  # ~/.ssh/homelab-identity.conf: the key comes from SSH_AUTH_SOCK (the vault
-  # agent below); host keys persist on the PVC and a new host's key is saved on
-  # first connect, then must never change.
-  printf 'Include /scripts/homelab-ssh.conf\n\n'
-  # git@github.com: remotes (the Davidhorn checkouts).
-  if [[ -r /run/t3-github-ssh/identity ]]; then
-    cat <<'EOF'
-Host github.com
-  User git
-  IdentityFile /run/t3-github-ssh/identity
-  IdentitiesOnly yes
-  UserKnownHostsFile /run/t3-github-ssh/known_hosts
-  StrictHostKeyChecking yes
-EOF
-  fi
-} >"$SSH_DIR/config"
-# ssh does not create the directory of a UserKnownHostsFile; a fresh PVC has none.
-mkdir -p -m 0700 "$HOME/.ssh"
-# OpenSSH 9.2 expands ~ in Include from $HOME (the PVC), not the passwd home,
-# so write the file to both.
-for d in "$SSH_DIR" "$HOME/.ssh"; do
-  printf 'UserKnownHostsFile %s/.ssh/known_hosts\nStrictHostKeyChecking accept-new\n' "$HOME" >"$d/homelab-identity.conf"
-  chmod 0600 "$d/homelab-identity.conf"
-done
-chmod 0600 "$SSH_DIR/config"
+# SSH client config for the agents; the sshd container runs it too.
+bash /scripts/ssh-config.sh
 
 # Homelab SSH keys from Vaultwarden (files/vault-ssh-agent.py). T3 and its
 # agents get only the agent socket; the vault login stays in /run/t3-vaultwarden
@@ -71,42 +41,6 @@ if [[ -s /run/t3-vaultwarden/password ]]; then
 else
   echo "t3env: no Vaultwarden login in t3code-vaultwarden; vault SSH keys skipped" >&2
 fi
-
-# `ssh t3code` (t3code-ssh Service). authorized_keys goes to the passwd home:
-# StrictModes rejects the PVC home (mode 2777). Sessions do not get T3's env tokens.
-SSHD_DIR=$HOME/.ssh/sshd
-if [[ -r /scripts/sshd-authorized-keys && -x /usr/sbin/sshd ]] &&
-  mkdir -p -m 0700 "$SSHD_DIR" &&
-  { [[ -s $SSHD_DIR/ssh_host_ed25519_key ]] ||
-    ssh-keygen -q -t ed25519 -N '' -C t3code -f "$SSHD_DIR/ssh_host_ed25519_key"; } &&
-  install -m 0600 /scripts/sshd-authorized-keys "$SSH_DIR/authorized_keys" &&
-  cat >"$SSHD_DIR/sshd_config" <<EOF
-Port 2222
-HostKey $SSHD_DIR/ssh_host_ed25519_key
-PidFile none
-UsePAM no
-PasswordAuthentication no
-KbdInteractiveAuthentication no
-AllowAgentForwarding no
-AllowTcpForwarding local
-PermitOpen 127.0.0.1:3773 localhost:3773
-X11Forwarding no
-PermitTunnel no
-PrintMotd no
-SetEnv HOME=$HOME SSH_AUTH_SOCK=/tmp/t3-ssh-agent/agent.sock PATH=/tools/node_modules/.bin:/usr/local/bin:/usr/bin:/bin
-EOF
-then
-  if /usr/sbin/sshd -t -f "$SSHD_DIR/sshd_config"; then
-    START_SSHD=1
-  else
-    echo "t3env: sshd config invalid; ssh t3code unavailable" >&2
-  fi
-else
-  echo "t3env: sshd not set up; ssh t3code unavailable" >&2
-fi
-# /etc/profile resets PATH in login shells (`ssh t3code`), dropping the image CLIs.
-printf '%s\n' 'PATH=/tools/node_modules/.bin:$PATH' '[ -r "$HOME/.profile" ] && . "$HOME/.profile"' \
-  >"$HOME/.bash_profile"
 
 # Same remote in both environments so T3 groups them as one project.
 if [[ ! -d $PROJECT_DIR/.git ]]; then
@@ -324,15 +258,6 @@ printf '{"version":1,"pid":%s,"host":"0.0.0.0","port":3773,"origin":"http://127.
 # The launcher's pid files outlive the container; a stale pid would make it
 # kill whichever process now has that number.
 rm -f "$T3_HOME"/ssh-launch/*/pid "$T3_HOME"/ssh-launch/*/port "$T3_HOME"/ssh-launch/*/managed
-# sshd waits for the server: before it listens, a launch would start its own
-# server and could take port 3773 first. A request the starting server accepts
-# but never answers would hold the wait forever, so each try is capped.
-if [[ -n ${START_SSHD:-} ]]; then
-  (
-    until curl -fs --max-time 5 -o /dev/null http://127.0.0.1:3773/; do sleep 1; done
-    while :; do /usr/sbin/sshd -D -e -f "$SSHD_DIR/sshd_config" || :; sleep 5; done
-  ) &
-fi
 # T3 starts OpenCode per thread, so a plugin that is missing or fails to load
 # would otherwise surface only in a session. Stop startup instead.
 node /scripts/opencode-plugin-check.mjs /tools/node_modules/@opencode/cli/bin/opencode.exe "$OC_DIR" \

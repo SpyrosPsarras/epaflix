@@ -115,9 +115,6 @@ spec:
             - name: http
               containerPort: 3773
               protocol: TCP
-            - name: ssh
-              containerPort: 2222
-              protocol: TCP
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -176,6 +173,59 @@ spec:
               memory: "2Gi"
             limits:
               memory: "12Gi"
+        # `ssh t3code` and the T3 app's tunnel. Its own container, so a failed
+        # probe restarts sshd and leaves T3 and its sessions running. sshd
+        # runs only while T3 does (files/sshd.sh).
+        - name: sshd
+          image: t3-runtime-from-t3-container
+          # The tag is content-addressed; a liveness restart must not wait on ghcr.
+          imagePullPolicy: IfNotPresent
+          command:
+            - bash
+            - /scripts/sshd.sh
+          env:
+            - name: HOME
+              value: /home/spyros
+          ports:
+            - name: ssh
+              containerPort: 2222
+              protocol: TCP
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: home-spyros
+              mountPath: /home/spyros
+            - name: runtime-state
+              mountPath: /home/spyros/.t3/userdata/server-runtime.json
+              subPath: server-runtime.json
+              readOnly: true
+            - name: github-ssh
+              mountPath: /run/t3-github-ssh
+              readOnly: true
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+            # The vault SSH agent's socket (entrypoint.sh) lives here.
+            - name: tmp
+              mountPath: /tmp
+          # No startup or readiness probe: a not-ready container would take T3
+          # out of its Services too. The check passes while sshd waits for T3.
+          livenessProbe:
+            exec:
+              command: [bash, /scripts/sshd.sh, check]
+            periodSeconds: 15
+            timeoutSeconds: 10
+            failureThreshold: 2
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            # `ssh t3code` sessions run here.
+            limits:
+              memory: 8Gi
       volumes:
         - name: jev-key
           secret:
