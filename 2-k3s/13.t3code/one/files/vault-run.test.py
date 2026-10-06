@@ -12,6 +12,11 @@ import unittest
 
 SCRIPT = Path(__file__).with_name("vault-run.py")
 ITEMS = {"/demo/token": {"username": "demo-user", "password": "synthetic-secret-1"},
+         "/demo/fields": {"username": None, "password": "synthetic-secret-3",
+                          "fields": {"api token": "synthetic-field-1", "x.y-z": "synthetic-field-2"}},
+         "/demo/fields-only": {"username": None, "password": None, "fields": {"api token": "synthetic-field-3"}},
+         "/demo/collision": {"username": None, "password": "p", "fields": {"api-token": "synthetic-field-4",
+                                                                           "api token": "synthetic-field-5"}},
          "/demo/no-user": {"username": None, "password": "synthetic-secret-2"},
          "/demo/empty": {"username": None, "password": None}}
 # The hub's error text for this path carries a secret; vault-run must not print it.
@@ -52,6 +57,8 @@ class VaultRun(unittest.TestCase):
     def run_script(self, *args):
         env = {**os.environ, "MCP_HUB_URL": f"http://127.0.0.1:{self.server.server_port}/", "MCP_HUB_TOKEN": "hub-token"}
         env["VAULT_USERNAME"] = "outer-user"  # vault-run must replace or drop it
+        env["VAULT_FIELD_STALE"] = "outer-field"
+        env["VAULT_PASSWORD"] = "outer-password"
         return subprocess.run([sys.executable, str(SCRIPT), *args], env=env, capture_output=True, text=True, timeout=30)
 
     def test_command_gets_secret_and_username(self):
@@ -59,6 +66,21 @@ class VaultRun(unittest.TestCase):
         r = self.run_script("/demo/token", "sh", "-c", 'printf "%s:%s" "$VAULT_USERNAME" "$VAULT_PASSWORD"')
         self.assertEqual((r.returncode, r.stdout), (0, "demo-user:synthetic-secret-1"))
         self.assertEqual(seen, [("Bearer hub-token", "/vault-secret", {"path": "/demo/token"})])
+
+    def test_custom_fields_become_env_vars(self):
+        r = self.run_script("/demo/fields", "sh", "-c", 'printf "%s|%s|%s" "$VAULT_FIELD_API_TOKEN" "$VAULT_FIELD_X_Y_Z" "${VAULT_FIELD_STALE-unset}"')
+        self.assertEqual(r.stdout, "synthetic-field-1|synthetic-field-2|unset")
+
+    def test_item_with_only_fields_runs_without_password(self):
+        r = self.run_script("/demo/fields-only", "sh", "-c", 'printf "%s|%s" "$VAULT_FIELD_API_TOKEN" "${VAULT_PASSWORD-unset}"')
+        self.assertEqual((r.returncode, r.stdout), (0, "synthetic-field-3|unset"))
+
+    def test_colliding_field_names_fail_without_leaking(self):
+        r = self.run_script("/demo/collision", "sh", "-c", "echo ran")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertNotIn("ran", r.stdout)
+        self.assertIn("VAULT_FIELD_API_TOKEN", r.stderr)
+        self.assertNotIn("synthetic-field", r.stderr + r.stdout)
 
     def test_pc_fallback_reads_token_file(self):
         with tempfile.TemporaryDirectory() as home:

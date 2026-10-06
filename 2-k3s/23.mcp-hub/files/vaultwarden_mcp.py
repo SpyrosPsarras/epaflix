@@ -10,7 +10,7 @@ VAULTWARDEN_HUB_SECRET. --http serves streamable HTTP at /vaultwarden on PORT
 `bw serve` and never touches a real vault.
 
 Same 7 tools as the KeePass server it replaces, except that vault_get never
-returns a password. Passwords leave only through POST /secret {"path": ...}
+returns a password or a custom field value. They leave only through POST /secret {"path": ...}
 (same X-Hub-Secret), which the hub serves as /vault-secret for vault-run.py.
 An item's path is
 /<folder name>/<item name>, or /<item name> without a folder; folder names may
@@ -131,11 +131,16 @@ def _list_tool(prefix: str = ""):
     return [_summary(p, it) for p, it in _items() if p.lstrip("/").startswith(want)]
 
 
+def _fields(it):
+    return {f["name"]: f.get("value") for f in it.get("fields") or [] if f.get("name")}
+
+
 def _get_tool(path: str):
-    """No password: tool output lands in the model's context and session files. vault-run.py gets it from /secret."""
+    """No password and no custom field values: an API secret often sits in a field, and tool output lands in the
+    model's context and session files. vault-run.py gets both from /secret."""
     p, it = _find(path)
     out = _summary(p, it)
-    out["custom_properties"] = {f["name"]: f.get("value") for f in it.get("fields") or [] if f.get("name")}
+    out["custom_fields"] = sorted(_fields(it))
     out["has_password"] = bool((it.get("login") or {}).get("password"))
     return out
 
@@ -143,8 +148,12 @@ def _get_tool(path: str):
 def _secret(path: str):
     """For POST /secret only (vault-run.py via the hub's /vault-secret), never an MCP tool."""
     _, it = _find(path)
+    names = [f["name"] for f in it.get("fields") or [] if f.get("name")]
+    dupes = sorted({n for n in names if names.count(n) > 1})
+    if dupes:
+        raise ValueError(f"'{path}' has more than one custom field named {dupes}; rename them")
     login = it.get("login") or {}
-    return {"password": login.get("password"), "username": login.get("username")}
+    return {"password": login.get("password"), "username": login.get("username"), "fields": _fields(it)}
 
 
 def _add_tool(path: str, username: str = "", password: str = "", url: str = "",
@@ -356,13 +365,21 @@ def _selftest():
         # test_list_get_roundtrip
         assert len(_list_tool()) == 2, _list_tool()
         got = _get_tool("/Personal/github.com")
-        assert "password" not in got and got["has_password"] and got["custom_properties"] == {"k1": "v1"}, got
-        assert "p1" not in json.dumps(got), got
+        assert "password" not in got and got["has_password"] and got["custom_fields"] == ["k1"], got
+        assert "p1" not in json.dumps(got) and "v1" not in json.dumps(got), got
         assert got["expired"] is False and got["attachments"] == [], got
-        assert _secret("/Personal/github.com") == {"password": "p1", "username": None}
+        assert _secret("/Personal/github.com") == {"password": "p1", "username": None, "fields": {"k1": "v1"}}
         assert _get_tool("/rootitem")["path"] == "/rootitem"
         assert [e["path"] for e in _list_tool("Personal")] == ["/Personal/github.com"]
         _raises(ValueError, _get_tool, "/nope", contains="list entries to see valid paths")
+        fake.item("twice", personal, "p", [{"name": "k", "value": "dup-1", "type": 0},
+                                           {"name": "k", "value": "dup-2", "type": 0}])
+        try:
+            _secret("/Personal/twice")
+            raise AssertionError("duplicate field names must fail")
+        except ValueError as e:
+            assert "more than one custom field" in str(e) and "dup-" not in str(e), e
+        assert _get_tool("/Personal/twice")["custom_fields"] == ["k"]
 
         # test_nested_folder_path
         added = _add_tool("/Personal/Git/new", username="u", password="x", url="https://g", notes="n",
@@ -372,7 +389,7 @@ def _selftest():
         got = _get_tool("/Personal/Git/new")
         assert (got["username"], _secret("/Personal/Git/new")["password"], got["url"], got["notes"]) == (
             "u", "x", "https://g", "n"), got
-        assert got["custom_properties"] == {"a": "b"}, got
+        assert got["custom_fields"] == ["a"] and _secret("/Personal/Git/new")["fields"] == {"a": "b"}, got
         _raises(ValueError, _add_tool, "/", contains="path must name an entry")
 
         # test_duplicate_path_reads_first
@@ -385,7 +402,7 @@ def _selftest():
 
         # update: props delete/set, no-op delete, rename
         _update_tool("/Personal/github.com", props={"k1": None, "k2": "v2"})
-        assert _get_tool("/Personal/github.com")["custom_properties"] == {"k2": "v2"}
+        assert _secret("/Personal/github.com")["fields"] == {"k2": "v2"}
         _update_tool("/Personal/github.com", props={"absent": None})
         _update_tool("/Personal/github.com", title="gh", notes="")
         assert _get_tool("/Personal/gh")["notes"] == ""
@@ -430,7 +447,7 @@ def _selftest():
 
         with TestClient(http_app("s3cret")) as c:
             r = c.post("/secret", json={"path": "/rootitem"}, headers={"X-Hub-Secret": "s3cret"})
-            assert r.status_code == 200 and r.json() == {"password": "r", "username": None}, r.text
+            assert r.status_code == 200 and r.json() == {"password": "r", "username": None, "fields": {}}, r.text
             r = c.post("/secret", json={"path": "/nope"}, headers={"X-Hub-Secret": "s3cret"})
             assert r.status_code == 404 and "no entry" in r.text, r.text
 
@@ -470,7 +487,7 @@ def server():
 
     @mcp.tool()
     def vault_get(path: str) -> str:
-        """Fetch one item by its full vault path (as returned by vault_list, e.g. /Folder/Name). Returns a JSON object without the password. To use the password in a command, run `python3 /scripts/vault-run.py <path> <command>` (on a PC: 2-k3s/13.t3code/one/files/vault-run.py in the epaflix checkout); the command gets it as $VAULT_PASSWORD."""
+        """Fetch one item by its full vault path (as returned by vault_list, e.g. /Folder/Name). Returns a JSON object without the password and with custom field names only, no values. To use them in a command, run `python3 /scripts/vault-run.py <path> <command>` (on a PC: 2-k3s/13.t3code/one/files/vault-run.py in the epaflix checkout); the command gets the password as $VAULT_PASSWORD and field "api token" as $VAULT_FIELD_API_TOKEN."""
         return _run(_get_tool, path)
 
     @mcp.tool()
