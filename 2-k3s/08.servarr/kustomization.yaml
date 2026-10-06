@@ -102,7 +102,8 @@ images:
   # translation from the request token and converges retries onto the running request
   # (upstream #542, maintainer-endorsed option 3). And the batch path treated provider
   # 429/503 as file-fatal (groq's shared TPM window 429s at ~8s intervals) where the
-  # patch surfaces them to the retry loop.
+  # patch surfaces them to the retry loop. A re-POST after a failed attempt also carries
+  # over the lines that attempt already translated instead of starting from line 1.
   # Revert to ghcr.io/lingarr-translate/lingarr when upstream LocalAiService no longer
   # falls back to a schema-less request, validates returned positions against the batch,
   # RunBatch throws instead of filling original lines, /api/translate/content no longer
@@ -111,7 +112,7 @@ images:
   # Renovate must not track this image (disabled in .github/renovate.json).
   - name: ghcr.io/lingarr-translate/lingarr
     newName: ghcr.io/spyrospsarras/lingarr
-    digest: sha256:84209cdd7905a7cd7338300787e46c77282940d7e6e1c934cab038781a87079e
+    digest: sha256:44cb79bfa47acfdf9ac3a4818e22a38dbee9db40d7e2e40f20961ee3201e8f93
   - name: iampuid0/neutarr
     newTag: 1.11.1@sha256:c3df05a854c93aac640708e002e8fe85193f73da8406c8a230a5484a342a1107
   - name: qbittorrentofficial/qbittorrent-nox
