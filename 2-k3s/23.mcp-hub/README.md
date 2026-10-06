@@ -117,11 +117,13 @@ the server checks the hub's `X-Hub-Secret`, so the vault is readable and writabl
 Write or rotate the login and hub secret with `tools/sops_secret.py
 --vaultwarden` (prompts; values never echo), commit, merge.
 
-`vault_get` never returns a password, because a tool result lands in the
-model's context and in session files. Passwords leave only through
+`vault_get` never returns a password or a custom field value (it lists field
+names), because a tool result lands in the model's context and in session
+files. They leave only through
 `POST /vault-secret {"path": ...}`, a plain JSON route (not MCP) that the hub
 forwards to the server's `/secret`. `13.t3code/one/files/vault-run.py` is its
-only caller: it runs a command with the password in `$VAULT_PASSWORD`. This
+only caller: it runs a command with the password in `$VAULT_PASSWORD` and each
+custom field in `$VAULT_FIELD_<NAME>`. This
 stops accidental leaks, not a determined agent: any hub token opens the route.
 
 Vaultwarden replaced the KeePass vault and its `/keepass` path on 2026-10-04
