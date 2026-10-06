@@ -135,13 +135,12 @@ wait_for_pods servarr "app in (sonarr,radarr,bazarr)" 300
 echo ""
 
 echo "Step 7: Deploying media applications..."
-kubectl apply -f "$BASE_DIR/jellyfin/jellyfin.yaml"
 kubectl apply -f "$BASE_DIR/jellyfin/jellyfin-truenas-redirect.yaml"
 kubectl apply -f "$BASE_DIR/seerr/seerr.yaml"
 kubectl apply -f "$BASE_DIR/seerr/pdb.yaml"
 info "Jellyfin (TrueNAS redirect) and Seerr deployed"
 
-wait_for_pods servarr "app in (jellyfin,seerr)" 300
+wait_for_pods servarr "app=seerr" 300
 echo ""
 
 echo "Step 8: Deploying Traefik IngressRoutes..."
@@ -174,6 +173,5 @@ echo ""
 echo "Next steps:"
 echo "1. Configure download clients in *arr apps"
 echo "2. Configure Prowlarr sync with Sonarr/Radarr"
-echo "3. Configure Jellyfin GPU transcoding"
-echo "4. Verify hardlinks are working"
+echo "3. Verify hardlinks are working"
 echo ""

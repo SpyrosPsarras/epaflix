@@ -14,7 +14,6 @@ Registry checks on 2026-09-15 resolved each tag below to the existing digest in 
 | linuxserver/bazarr | 1.6.1 | d24bd0048c75 |
 | cleanuparr/cleanuparr | 2.10.6 | 8136c3beda7a |
 | hotio/unpackerr | release-0.15.2 | 724c702e8172 |
-| jellyfin/jellyfin | 12.1 | 78d3ea1207d1 |
 | zelak312/bazarr_autotranslate | v1.0.0 | 5388463f8e45 |
 | qbittorrentofficial/qbittorrent-nox | 5.2.3-1 | 9ebb534fe30ba |
 
@@ -24,7 +23,7 @@ Minor and major releases require review throughout this images block. Patch rele
 
 ## Scope and exceptions
 
-All twelve originally listed digest-only entries were assessed. CleanUparr and Jellyfin have persistent application config, so they are pinned rather than assumed safe. Unpackerr, Bazarr Autotranslate and qBittorrent are also pinned without relying on an absence-of-migrations claim. Neutarr already has a release pin. Homarr and Sonarr2 are no longer in this checkout.
+All twelve originally listed digest-only entries were assessed. CleanUparr and Jellyfin had persistent application config, so they were pinned rather than assumed safe. The k3s Jellyfin Deployment was later removed; Jellyfin runs on TrueNAS. Unpackerr, Bazarr Autotranslate and qBittorrent are also pinned without relying on an absence-of-migrations claim. Neutarr already has a release pin. Homarr and Sonarr2 are no longer in this checkout.
 
 | Entry left on a moving tag | Evidence and policy |
 | --- | --- |
