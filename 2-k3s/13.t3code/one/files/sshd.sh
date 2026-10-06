@@ -58,9 +58,10 @@ while :; do
   /usr/sbin/sshd -D -e -f "$SSHD_DIR/sshd_config" &
   sshd=$!
   while kill -0 "$sshd" 2>/dev/null && (exec 3<>/dev/tcp/127.0.0.1/3773) 2>/dev/null; do sleep 2; done
-  # Sessions too, as when sshd ran in the T3 container: an open connection could
-  # otherwise launch a server while port 3773 is free.
-  pkill -x sshd || :
+  # Open connections too, as when sshd ran in the T3 container: one could
+  # otherwise launch a server while port 3773 is free. OpenSSH 9.8+ names them
+  # sshd-session.
+  pkill -x 'sshd|sshd-session' || :
   wait "$sshd" || :
   echo "t3env: T3 or sshd stopped; sshd waits for T3 again" >&2
   sleep 5
