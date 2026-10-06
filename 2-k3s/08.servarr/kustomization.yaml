@@ -86,7 +86,7 @@ images:
   - name: ghcr.io/hotio/unpackerr
     newTag: release-0.15.2@sha256:724c702e81727e3d90c42cf2b3d900674203906a6d135ba07416c9a3f9f67fbb
   - name: jellyfin/jellyfin
-    newTag: 12.1@sha256:78d3ea1207d1322471fcac39a614f004f2ccf7e878f95ab2977d752f07e4dd7e
+    newTag: 12.2@sha256:357724bf0ae27a672c7cbaa899db2d9abeb13dbd8657ccce750258a4c059d037
   - name: ghcr.io/zelak312/bazarr_autotranslate
     newTag: v1.0.0@sha256:5388463f8e45320c00a472763a8e0fb4584a255d6d31b98f9063b9eb5cada5cf
   - name: lscr.io/linuxserver/bazarr
