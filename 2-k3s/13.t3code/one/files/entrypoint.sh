@@ -325,10 +325,11 @@ printf '{"version":1,"pid":%s,"host":"0.0.0.0","port":3773,"origin":"http://127.
 # kill whichever process now has that number.
 rm -f "$T3_HOME"/ssh-launch/*/pid "$T3_HOME"/ssh-launch/*/port "$T3_HOME"/ssh-launch/*/managed
 # sshd waits for the server: before it listens, a launch would start its own
-# server and could take port 3773 first.
+# server and could take port 3773 first. A request the starting server accepts
+# but never answers would hold the wait forever, so each try is capped.
 if [[ -n ${START_SSHD:-} ]]; then
   (
-    until curl -fs -o /dev/null http://127.0.0.1:3773/; do sleep 1; done
+    until curl -fs --max-time 5 -o /dev/null http://127.0.0.1:3773/; do sleep 1; done
     while :; do /usr/sbin/sshd -D -e -f "$SSHD_DIR/sshd_config" || :; sleep 5; done
   ) &
 fi
