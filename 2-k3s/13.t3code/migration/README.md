@@ -129,6 +129,60 @@ Done early, two days into the bake, on request.
 - t3env: the ArgoCD app `t3code-env` and its resources are deleted, as are the PVCs `remote-pi/home-t3env-0` and `home-t3env-1` (40Gi). The copies of those homes in `t3code/home-t3env-*` stay; the pod mounts them.
 - Repo: LXC provisioning (`1-proxmox/t3code`, `provision.sh`, `update.sh`, the wizards, the guest-only `files/` scripts) and the t3env manifests are removed. `env/` keeps only what the runtime image and its CI use.
 
+## OpenCode 2 cutover
+
+The pod has one home, `/home/spyros`, and one OpenCode store, `~/.local/share/opencode/opencode.db` (about 5.4 GB with its WAL). OpenCode 2 converts that file in place on its first start, so the first start of the new image is the cutover, and ArgoCD rolls the image out on merge. The old home layouts above (three homes, `/home/t3env-*`) are history; nothing in the OpenCode 2 change uses them.
+
+### What the entrypoint does first
+
+`one/files/entrypoint.sh` runs `files/opencode-v1-backup.py` before anything opens the database or rewrites the OpenCode config. It writes, next to the database:
+
+| File | Content |
+| --- | --- |
+| `opencode.db.v1-backup` | SQLite online backup of the OpenCode 1 database, WAL included, integrity-checked. A file copy would miss the rows still in the WAL. |
+| `v1-backup-files/opencode-config/` | the OpenCode config directory, plugins and the cc-safety-net registration as OpenCode 1 left them |
+| `v1-backup-files/t3-userdata/` | T3's `settings.json` and `*.sqlite` state (online backup) |
+| `opencode.db.v1-backup.marker` | written last |
+
+Everything is mode 0700/0600. It needs 2.5 times the database plus WAL free (about 14 GB for 5.4 GB and 110 MB) and stops startup, with the reason in the pod log, if the space is missing, the copy fails its integrity check, or a marker exists without a good backup. A start that stopped after publishing the backup but before the marker reuses that backup after a full integrity check and needs free space only for the config and T3 snapshot. The 30 minute startup probe (`one/statefulset.yaml`, 360 checks at 5 s) is a first guess for the backup, its integrity check and the conversion. Rehearse on a copy of the full-size database and set it from that run: copy `opencode.db` with SQLite's backup API into a scratch HOME, start the new image or `opencode serve` there, and time it.
+
+Marker states:
+
+- `v1-backup`: a verified backup exists. The marker records the size, mtime, ctime, inode and SHA-256 of the backup and of every file in `v1-backup-files/`. Later starts check those, run `PRAGMA quick_check` on the backup and check it is not an OpenCode 2 database, and never replace it. The full `integrity_check` runs only when the backup is made; the hashes prove the bytes are still the ones it passed. A file is hashed again only when its size, mtime, ctime or inode changed, so a restart does not read the 5 GB backup; the trade-off is that the check trusts the kernel's ctime, which user space cannot set back, so only someone who can change the system clock or write the raw disk can slip an edit past it.
+- `no-v1`: there was no database on the first start (a new home); a later OpenCode 2 database is accepted.
+- No marker and an OpenCode 2 database (it has a `session_v2` table): startup refuses. The backup would have to be labelled V1 by hand, which only makes sense after you checked the files yourself.
+
+Nothing deletes the backup. Keep it until you have accepted OpenCode 2 (sessions resume with their history after a restart, normal use works). Work done after the cutover is not in it. Remove `opencode.db.v1-backup`, its marker and `v1-backup-files/` by hand when you are satisfied.
+
+### Rollback
+
+OpenCode 2 and the converted file cannot be rolled back by reverting the PR alone: the converted database stays on the volume.
+
+1. Stop every writer: scale the StatefulSet to 0 (suspend ArgoCD's automated sync first) so neither T3 nor OpenCode 2 runs.
+2. Revert the PR so the image and entrypoint are the OpenCode 1 ones.
+3. From a helper pod running as uid 1000 with the home PVC at `/home/spyros`, restore. The config directory is replaced, not merged, and the cc-safety-net OpenCode 2 wrapper is removed, so no OpenCode 2 plugin file stays behind, and the SQLite `-wal`/`-shm` files beside each restored database are deleted, so no OpenCode 2 or T3 write is replayed into it. The T3 state matches the OpenCode 1 session ids. The backup files stay.
+
+   ```sh
+   cd /home/spyros/.local/share/opencode
+   rm -f opencode.db opencode.db-wal opencode.db-shm
+   cp -a opencode.db.v1-backup opencode.db
+   rm -rf /home/spyros/.config/opencode cc-safety-net/*-opencode2
+   cp -a v1-backup-files/opencode-config /home/spyros/.config/opencode
+   for f in v1-backup-files/t3-userdata/*; do
+     t=/home/spyros/.t3/userdata/${f##*/}
+     rm -f "$t-wal" "$t-shm"
+     cp -a "$f" "$t"
+   done
+   ```
+
+4. Scale to 1. Start V1 only against the restored files, never against a converted store.
+
+Restoring while OpenCode 2 still runs is invalid. Anything created after the cutover is lost by this restore.
+
+### Historical SQL is V1 only
+
+`repair_home.py` and the SQL in `cutover.sh` and `resume_smoke.mjs` assume the OpenCode 1 schema (`session.directory`, `project` tables). Do not run them against a converted database. Moving a session's directory under OpenCode 2 uses its own session move, not these scripts.
+
 ## Known gaps
 
 - `one/tools` and most of `one/files` are byte copies of `env/` inputs because kustomize cannot read above its root. `one/files/entrypoint.sh` is this overlay's own (the stdio `searxng-mcp.py` it once had moved into the MCP hub, `2-k3s/23.mcp-hub`). `one/tools/sync-shared.sh --check` catches drift; CI runs it.

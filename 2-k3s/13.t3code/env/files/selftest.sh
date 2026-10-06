@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Self-check for the t3env scripts without starting T3. Runs locally or in
 # the pod. Exercises: credential helper host filtering, entrypoint home
-# seeding is idempotent, lock pins match package.json.
+# seeding is idempotent and runs the backup, installer and plugin check,
+# lock pins match package.json.
 set -euo pipefail
 DIR=$(cd "$(dirname "$0")" && pwd)
 HELPER=$DIR/git-credential-github.sh
@@ -23,16 +24,26 @@ echo "ok: credential helper filters host/protocol/operation"
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 git init -q --bare "$tmp/remote.git"
 export HOME=$tmp/home ANTHROPIC_BASE_URL=http://cliproxy.test ANTHROPIC_AUTH_TOKEN=unused
+# The OpenCode 1 backup follows these; set, they would point it at the real store.
+unset XDG_CONFIG_HOME XDG_DATA_HOME XDG_STATE_HOME XDG_CACHE_HOME T3CODE_HOME
 export T3_PROJECT_REPO=$tmp/remote.git
 mkdir -p "$tmp/scripts"
-cp "$HELPER" "$DIR/../../files/cliproxy-models.js" "$tmp/scripts/"
+cp "$HELPER" "$DIR/../../files/cliproxy-models.js" "$DIR/../../one/files/"{jev-auto.js,jev-guard.js,opencode-compat.js,jev-checks.md,opencode-v1-backup.py} "$tmp/scripts/"
+# The cc-safety-net installer and the plugin check need the image (tools/smoke.sh runs them); here they only log their arguments.
+echo 'import sys; open(sys.argv[0] + ".calls", "a").write(" ".join(sys.argv[1:]) + "\n")' >"$tmp/scripts/cc-safety-net-install.py"
+echo 'import { appendFileSync } from "node:fs"; appendFileSync(process.argv[1] + ".calls", process.argv.slice(2).join(" ") + "\n")' >"$tmp/scripts/opencode-plugin-check.mjs"
 sed -e "s|/scripts/|$tmp/scripts/|g" -e "s|/var/run/secrets/kubernetes.io/serviceaccount/token|$tmp/no-sa-token|g" \
   -e '/^echo "t3env:/,$d' "$DIR/entrypoint.sh" >"$tmp/entrypoint-noexec.sh"
 run() { bash "$tmp/entrypoint-noexec.sh"; }
 run
 [[ -d $HOME/projects/remote/.git ]] || fail "project not cloned"
 [[ $(git config --global credential.helper) == "$tmp/scripts/git-credential-github.sh" ]] || fail "helper not configured"
-python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$HOME/.config/opencode/opencode.json" || fail "opencode.json invalid"
+python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["enabled_providers"] == ["cliproxy", "jev-auto"]' "$HOME/.config/opencode/opencode.json" || fail "opencode.json invalid or Jev Auto not allowed"
+python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["plugin"] == ["superpowers@git+https://github.com/obra/superpowers.git"]' "$HOME/.config/opencode/opencode.json" || fail "superpowers not registered"
+[[ $(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["state"])' "$HOME/.local/share/opencode/opencode.db.v1-backup.marker") == no-v1 ]] || fail "OpenCode 1 backup did not run"
+grep -q -- "--config $HOME/.config/opencode/opencode.json" "$tmp/scripts/cc-safety-net-install.py.calls" || fail "cc-safety-net installer not run"
+[[ $(<"$tmp/scripts/opencode-plugin-check.mjs.calls") == "/tools/node_modules/@opencode/cli/bin/opencode.exe $HOME/.config/opencode cliproxy-models jev-auto jev-guard opencode-compat cc-safety-net superpowers" ]] || fail "plugin check not run with the six plugin IDs"
+for plugin in cliproxy-models jev-auto jev-guard opencode-compat; do [[ -f $HOME/.config/opencode/plugins/$plugin.js ]] || fail "plugin $plugin not installed"; done
 python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert "http://cliproxy.test/v1" in d["providerInstances"]["codex"]["config"]["launchArgs"]' "$HOME/.t3/userdata/settings.json" || fail "settings.json invalid"
 python3 - "$HOME/.t3/userdata/settings.json" <<'PY'
 import json, sys
@@ -46,7 +57,7 @@ echo '{"user":"edited"}' >"$HOME/.config/opencode/opencode.json"
 chmod 0444 "$HOME/.config/opencode/plugins/cliproxy-models.js"
 run
 [[ $(<"$HOME/.t3/userdata/settings.json") == '{"user":"edited"}' ]] || fail "second run overwrote settings.json"
-[[ $(<"$HOME/.config/opencode/opencode.json") == '{"user":"edited"}' ]] || fail "second run overwrote opencode.json"
+python3 -c 'import json,sys; assert json.load(open(sys.argv[1])) == {"user": "edited", "plugin": ["superpowers@git+https://github.com/obra/superpowers.git"]}' "$HOME/.config/opencode/opencode.json" || fail "second run overwrote opencode.json"
 echo "ok: entrypoint seeds once and keeps user edits"
 [[ $(stat -c %a "$HOME/.config/opencode/plugins/cliproxy-models.js") == 644 ]] || fail "plugin copy must be writable after restart"
 

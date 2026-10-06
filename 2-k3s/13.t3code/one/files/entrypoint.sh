@@ -12,6 +12,11 @@ T3_PROJECT_REPO=${T3_PROJECT_REPO:-https://github.com/SpyrosPsarras/epaflix.git}
 PROJECT_DIR=${T3_PROJECT_DIR:-$HOME/projects/$(basename "$T3_PROJECT_REPO" .git)}
 export PATH=/tools/node_modules/.bin:$PATH
 
+# OpenCode 2 converts its database in place on first start. Keep the OpenCode 1
+# store, config and T3 state before anything opens or rewrites them
+# (files/opencode-v1-backup.py, migration/README.md); a failure stops startup.
+python3 /scripts/opencode-v1-backup.py
+
 # github.com-only credential helper (files/git-credential-github.sh), set
 # before the clone so a private remote works on first boot. The token stays
 # in the process env; the helper prints it only to git, only for github.com.
@@ -119,6 +124,12 @@ rm -f "$OC_DIR/plugins/jev-shadow.js"
 install -m 0644 /scripts/jev-auto.js "$OC_DIR/plugins/jev-auto.js"
 # Tool-call guard (jev-guard.md); the config block below adds cc-safety-net and bash denies.
 install -m 0644 /scripts/jev-guard.js "$OC_DIR/plugins/jev-guard.js"
+# OpenCode 1 tools OpenCode 2 lacks: todowrite, and `name` for the skill tool.
+install -m 0644 /scripts/opencode-compat.js "$OC_DIR/plugins/opencode-compat.js"
+# A hand-made ~/.local/bin/opencode on the PVC ran the OpenCode 1 package path.
+if [[ -f $HOME/.local/bin/opencode ]] && grep -q opencode-ai "$HOME/.local/bin/opencode"; then
+  install -m 0755 /scripts/opencode-fast-version.sh "$HOME/.local/bin/opencode"
+fi
 # Permit vault attachment names while protecting SSH files in both HOME locations.
 python3 /scripts/ssh-policy.py "$HOME/.cc-safety-net/policy.json" \
   "$HOME" "$(getent passwd "$(id -u)" | cut -d: -f6)" /root
@@ -146,7 +157,7 @@ if [[ ! -f $OC_DIR/opencode.json ]]; then
     }
   },
   "model": "cliproxy/or-glm-5.3-flash",
-  "enabled_providers": ["cliproxy"]
+  "enabled_providers": ["cliproxy", "jev-auto"]
 }
 EOF
   chmod 0600 "$OC_DIR/opencode.json"
@@ -176,11 +187,14 @@ fi
 
 # Primary home, with or without the hub: drop the Jev rules from the global
 # instructions (jev-auto.js scopes jev-checks per model), keeping every other one.
-# Verify/install the reviewed guard before startup; failure aborts startup.
+# Verify/install the reviewed guard before startup and register its OpenCode 2
+# package directory in place of the OpenCode 1 file pin; failure aborts startup.
 /usr/bin/env -i PATH=/usr/local/bin:/usr/bin:/bin /usr/bin/python3 -I -S /scripts/cc-safety-net-install.py \
   "$HOME/.local/share/opencode/cc-safety-net/2.4.11-print-third" --config "$OC_DIR/opencode.json"
-# Also seed bash denies once; an existing
-# permission.bash is left as the user set it.
+# Also seed bash denies once (OpenCode 2 applies them to its shell tool); an
+# existing permission.bash is left as the user set it. OpenCode 2 has no plugin
+# hook for the provider allowlist, so Jev Auto is added to it here, and
+# superpowers is registered when missing.
 python3 - "$OC_DIR/opencode.json" "$OC_DIR/jev-checks.md" "$OC_DIR/jev-first.md" <<'PY' || echo "t3env: opencode.json guard/instructions update failed" >&2
 import json, os, sys, tempfile
 BASH_DENY = ["mkfs*", "dd *of=/dev/*", "kubectl delete *", "kubectl drain *", "kubectl cordon *",
@@ -200,6 +214,12 @@ if "/scripts/homelab-ssh.md" not in config.setdefault("instructions", []):
 permission = config.setdefault("permission", {})
 if isinstance(permission, dict):
     permission.setdefault("bash", {p: "deny" for p in BASH_DENY})
+enabled = config.get("enabled_providers")
+if isinstance(enabled, list) and "cliproxy" in enabled and "jev-auto" not in enabled:
+    enabled.append("jev-auto")
+plugins = config.setdefault("plugin", [])
+if not any(str(p[0] if isinstance(p, list) else p).startswith("superpowers@") for p in plugins):
+    plugins.insert(0, "superpowers@git+https://github.com/obra/superpowers.git")
 if json.dumps(config, sort_keys=True) != before:
     with tempfile.NamedTemporaryFile(mode="w", dir=os.path.dirname(path), delete=False) as f:
         json.dump(config, f, indent=2)
@@ -312,6 +332,10 @@ if [[ -n ${START_SSHD:-} ]]; then
     while :; do /usr/sbin/sshd -D -e -f "$SSHD_DIR/sshd_config" || :; sleep 5; done
   ) &
 fi
+# T3 starts OpenCode per thread, so a plugin that is missing or fails to load
+# would otherwise surface only in a session. Stop startup instead.
+node /scripts/opencode-plugin-check.mjs /tools/node_modules/@opencode/cli/bin/opencode.exe "$OC_DIR" \
+  cliproxy-models jev-auto jev-guard opencode-compat cc-safety-net superpowers
 # `serve` forces project bootstrap off; `start --no-browser` honors the flag.
 exec t3 start --no-browser --host 0.0.0.0 --port 3773 --base-dir "$T3_HOME" \
   --auto-bootstrap-project-from-cwd "$PROJECT_DIR"
