@@ -5,8 +5,9 @@
   "dependencies": {
     "@anthropic-ai/claude-code": "2.1.283",
     "@bitwarden/cli": "2026.8.0",
-    "@openai/codex": "0.158.0",
-    "opencode-ai": "1.18.34",
+    "@openai/codex": "0.160.1",
+    "@opencode/cli": "2.0.24",
+    "@opencode/client": "2.0.24",
     "t3": "0.0.46-nightly.20261003.2632"
   }
 }

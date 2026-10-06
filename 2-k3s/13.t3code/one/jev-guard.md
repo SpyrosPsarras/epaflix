@@ -9,11 +9,17 @@ Three layers, cheapest first. Research: `docs/jev-tool-guard-research.md`
    `helm uninstall`, `reboot`, `shutdown`, `poweroff`, `qm stop|shutdown`.
    The node and VM ones enforce the "ask Spyros first" rule; run them yourself.
    It only seeds a missing `permission.bash`, without a `"*"` key, so your edits
-   and a top-level default stay. There are no read rules: OpenCode matched
+   and a top-level default stay. OpenCode 2 reads this V1 shape and applies it
+   to its `shell` tool (V1 `bash`). There are no read rules: OpenCode matched
    read patterns against project-relative paths and `**/.ssh/**` missed in a
    test, so reads are left to layers 2 and 3.
-2. cc-safety-net, pinned in the entrypoint (`SAFETY_NET`) and put in the
-   `plugin` list on every start. It parses commands and blocks destructive git
+2. cc-safety-net, the reviewed 2.4.11 build (`files/cc-safety-net-install.py`),
+   put in the `plugin` list on every start. OpenCode 2 loads plugin package
+   directories, not files, and the build's package.json exports no server
+   entry, so the installer registers a small directory beside the build
+   (`2.4.11-print-third-opencode2`, a package.json and an index.js that
+   re-exports the hash-checked `dist/index.js`) in place of the OpenCode 1
+   `dist/index.js` pin, keeping that entry's options. It parses commands and blocks destructive git
    and filesystem commands (`rm -rf`, `git reset --hard`, `git push --force`)
    and reads of secret files (SSH files, `.env`, `~/.aws`, `opencode.json`, CLI
    credential files) in every tool. Bump the pin by hand; Renovate does not
@@ -38,7 +44,14 @@ Three layers, cheapest first. Research: `docs/jev-tool-guard-research.md`
    Existing policy fields and deny paths survive. SSH
    keys stored elsewhere no longer get basename-only protection from the
    disabled rules. Jev still checks credential uploads in guarded sessions.
-3. `files/jev-guard.js`, an OpenCode plugin.
+3. `files/jev-guard.js`, an OpenCode 2 plugin (`tool.hook("execute.before")`
+   and `execute.after`, the tool's input in `event.input`, its call id in
+   `event.id`). OpenCode 2 runs MCP tools through Code Mode's `execute` tool by
+   default; the plugin's MCP transform sets `codemode = false` on every server,
+   from config, the hub or T3's runtime `t3-code-<thread>` server, so MCP tools
+   stay direct tools named `<server>_<tool>` and the `permission` rules and the
+   prefix checks below keep matching them. Shell checks apply to the OpenCode 2
+   `shell` tool.
    - Every model, on the pod, nothing sent out:
      - blocks a tool call whose arguments hold a secret environment value
        (names with KEY, TOKEN, SECRET, PASS or AUTH, 16+ characters), the Jev
@@ -58,8 +71,11 @@ Three layers, cheapest first. Research: `docs/jev-tool-guard-research.md`
      - blocks bash commands that print the environment: bare `env`, `set`,
        `export`, `declare`, any `printenv`, `/proc/*/environ`, `ps e`, also
        behind `bash|sh|zsh -c`, `command`, `exec`, `nice` or `busybox`;
-     - masks the same credentials in every tool output, text and resource
-       items, before the model sees it. `vaultwarden_*` output is left alone.
+     - masks the same credentials in every tool output before the model sees
+       it: OpenCode 2 returns a result twice, as structured `output` (for the
+       shell, `{ output, exit, ... }`) and as the `content` the model reads, and
+       every string in both is masked, as is the message of a failed call.
+       `vaultwarden_*` output is left alone.
    - OpenAI and Anthropic models only (same rule as `jev-auto.md`; the Jev Auto
      model counts), one Jev call through OpenRouter with the existing
      `/run/jev/openrouter-key`:
@@ -83,9 +99,11 @@ Three layers, cheapest first. Research: `docs/jev-tool-guard-research.md`
        `--output` or `--pre`. Tests and builds run project code; that is
        accepted.
      - output of 200+ characters from tools that return third-party text
-       (`webfetch`, `websearch`, `codesearch`, `gmail_*`, `searxng_*`,
-       `notion_*`, `t3-code_preview_*`, `kubernetes-epaflix_pods_log`) gets a
-       prompt injection probability, after masking. At >= 0.7 a warning is put
+       (`webfetch`, `websearch`, `codesearch`, OpenCode 2 `browser_*`, `gmail_*`,
+       `searxng_*`, `notion_*`, T3's `t3-code*_preview_*`,
+       `kubernetes-epaflix_pods_log`) gets a prompt injection probability, after
+       masking; Jev reads the `content` copy, and the warning goes in front of
+       both copies. At >= 0.7 a warning is put
        in front of it. Other MCP tools (vault, cluster reads) are not sent.
    - Jev errors and 2 s timeouts fail open and are logged. Layers 1 and 2 and
      the local checks do not depend on Jev.
@@ -117,13 +135,19 @@ numbers, so a new threshold can be checked against past calls before it ships.
 - `bash ./script.sh` is judged by its text, not by what the script does.
 - Output masking hides credentials in files the agent reads, so it cannot copy
   a real credential into another file. That is intended.
-- A session the plugin has not seen a turn for gets the local checks but no
-  Jev check.
+- A session the plugin has not seen a step for gets the local checks but no
+  Jev check. The model of each step (OpenCode 2 `context` hook) decides.
 - Claude Code and Codex on this pod are not covered.
 
 ## Checks
 
 - Offline: `node --test 2-k3s/13.t3code/one/files/jev-guard.test.mjs` (in CI).
+- OpenCode 2 parity (runtime smoke, `env/tools/opencode-parity.mjs`): a mock
+  MCP tool with an `ask` rule is offered directly, asks, and makes no remote
+  call after a reject; a `t3-code-*` server added at runtime is offered
+  directly; a token in MCP output never reaches the model; a credential in
+  shell arguments is blocked; `rm -rf /` returns `BLOCKED by CC Safety Net`
+  while a last-resort executor proves the command never ran.
 - SSH policy: `SAFETY_NET_CLI=/path/to/cc-safety-net python3
   2-k3s/13.t3code/one/files/ssh-policy.test.py`. The pinned 2.4.11 analyzer
   checks vault attachment retrieval, public host keys, SSH authentication, protected SSH files,
@@ -167,6 +191,6 @@ numbers, so a new threshold can be checked against past calls before it ships.
   and a private key posted to a real service it does not belong to
   (`api.github.com/gists`, 0.72 to 0.80) is borderline. Jev reads the command
   text only, so it cannot tell which host a key really belongs to.
-- An isolated `opencode run` (1.18.33) confirmed the plugin loads, a local
+- (OpenCode 1) An isolated `opencode run` (1.18.33) confirmed the plugin loads, a local
   block reaches the model as a tool error, cc-safety-net blocks
   `git reset --hard`, and bash denies work without a `"*"` key.

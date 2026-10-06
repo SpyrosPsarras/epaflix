@@ -29,6 +29,8 @@ Researched 2026-09-28. Every claim cites a URL or a file path. Anything I could 
 
 ### OpenCode (we run 1.18.33, `opencode --version`)
 
+The pod now runs OpenCode 2. This section is the OpenCode 1 evidence the guard was designed on, kept as written. The OpenCode 2 hooks (`tool.hook("execute.before"|"execute.after")`, `event.input`, `event.id`, `shell` instead of `bash`, results with both `output` and `content`, MCP Code Mode turned off per server) are in `2-k3s/13.t3code/one/jev-guard.md`.
+
 - `tool.execute.before(input, output)`: `input` is `{ tool, sessionID, callID }`, `output` is `{ args }` (`/home/spyros/.config/opencode/node_modules/@opencode-ai/plugin/dist/index.d.ts` lines 235 to 241, package 1.18.31).
 - The shell tool id is `bash` and its args include `command` and `workdir` (https://github.com/anomalyco/opencode `packages/opencode/src/tool/shell/id.ts`, `tool/shell.ts` lines 612 to 634, commit ad6c72c, which is version 1.18.33).
 - Throwing blocks the call. The docs' `.env protection` example throws `new Error(...)` (https://opencode.ai/docs/plugins/). The plugin runner awaits each hook in sequence with no catch (`plugin/index.ts` lines 284 to 296). Our `jev-auto.js` already relies on this; its notes say "The model gets the refusal as a tool error and continues" (`2-k3s/13.t3code/one/jev-auto.md` lines 34 to 37).
