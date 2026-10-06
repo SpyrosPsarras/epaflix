@@ -149,10 +149,22 @@ Everything is mode 0700/0600. It needs 2.5 times the database plus WAL free (abo
 Marker states:
 
 - `v1-backup`: a verified backup exists. The marker records the size, mtime, ctime, inode and SHA-256 of the backup and of every file in `v1-backup-files/`. Later starts check those, run `PRAGMA quick_check` on the backup and check it is not an OpenCode 2 database, and never replace it. The hashes prove the bytes are still the ones that passed the check when the backup was made. A file is hashed again only when its size, mtime, ctime or inode changed, so a restart does not read the 5 GB backup; the trade-off is that the check trusts the kernel's ctime, which user space cannot set back, so only someone who can change the system clock or write the raw disk can slip an edit past it.
-- `no-v1`: there was no database on the first start (a new home); a later OpenCode 2 database is accepted.
+- `no-v1`: there was no database on the first start (a new home), or the backup was removed after accepting OpenCode 2; a later OpenCode 2 database is accepted.
 - No marker and an OpenCode 2 database (it has a `session_v2` table): startup refuses. The backup would have to be labelled V1 by hand, which only makes sense after you checked the files yourself.
 
-Nothing deletes the backup. Keep it until you have accepted OpenCode 2 (sessions resume with their history after a restart, normal use works). Work done after the cutover is not in it. Remove `opencode.db.v1-backup`, its marker and `v1-backup-files/` by hand when you are satisfied.
+Nothing deletes the backup. Keep it until you have accepted OpenCode 2 (sessions resume with their history after a restart, normal use works). Work done after the cutover is not in it. While it is kept, every start runs `quick_check` on it, about 14 minutes on the live 6 GB backup (measured 2026-10-06).
+
+To remove it, replace the marker with a `no-v1` one; do not delete it. Without a marker, startup finds an OpenCode 2 database and refuses. After this the Rollback below no longer works. Do it while the pod is Ready, not during a start's backup check. In the pod, as uid 1000:
+
+```sh
+set -e
+cd /home/spyros/.local/share/opencode
+printf '{"state": "no-v1", "createdAt": "%s", "note": "V1 backup removed after accepting OpenCode 2"}\n' "$(date -u +%FT%TZ)" > marker.new
+chmod 600 marker.new && mv marker.new opencode.db.v1-backup.marker
+rm -rf opencode.db.v1-backup opencode.db.v1-backup-wal opencode.db.v1-backup-shm opencode.db.v1-backup.tmp-* v1-backup-files
+```
+
+The next start skips the backup check.
 
 ### Rollback
 
