@@ -33,6 +33,9 @@ configMapGenerator:
       - files/cliproxy-models.js
       - files/jev-auto.js
       - files/jev-guard.js
+      - files/opencode-compat.js
+      - files/opencode-v1-backup.py
+      - files/opencode-plugin-check.mjs
       - files/ssh-policy.py
       - files/vault-ssh-agent.py
       - files/vault-run.py

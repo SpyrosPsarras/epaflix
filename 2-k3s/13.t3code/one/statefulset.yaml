@@ -69,7 +69,7 @@ spec:
               mountPath: /runtime-state
       containers:
         - name: t3
-          image: ghcr.io/spyrospsarras/t3-runtime:inputs-5b592454e9f2325eeff5c9ea80aa1cba
+          image: ghcr.io/spyrospsarras/t3-runtime:inputs-9a09d203c747bfe2257c559485613251
           imagePullPolicy: Always
           command:
             - bash
@@ -107,8 +107,10 @@ spec:
                 secretKeyRef:
                   name: mcp-hub-client
                   key: token
+            # OpenCode 2 turns this into a deny-by-default provider policy, so
+            # Jev Auto's virtual provider must be listed too.
             - name: OPENCODE_CONFIG_CONTENT
-              value: '{"enabled_providers":["cliproxy"]}'
+              value: '{"enabled_providers":["cliproxy","jev-auto"]}'
           ports:
             - name: http
               containerPort: 3773
@@ -150,11 +152,15 @@ spec:
               readOnly: true
             - name: tmp
               mountPath: /tmp
+          # 30 minutes: the first OpenCode 2 start backs up the OpenCode 1
+          # database (files/opencode-v1-backup.py) and checks it, then checks
+          # the OpenCode plugins (files/opencode-plugin-check.mjs), before T3
+          # listens. Set from a full-size rehearsal (migration/README.md).
           startupProbe:
             tcpSocket:
               port: http
             periodSeconds: 5
-            failureThreshold: 60
+            failureThreshold: 360
           readinessProbe:
             tcpSocket:
               port: http

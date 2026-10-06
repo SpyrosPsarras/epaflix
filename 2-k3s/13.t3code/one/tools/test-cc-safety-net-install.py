@@ -17,28 +17,40 @@ installer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(installer)
 tools = installer.trusted_tools()
 print("Validated trusted executable paths: " + json.dumps(tools), flush=True)
-uri = "file:///home/fixture/.local/share/opencode/cc-safety-net/2.4.11-print-third/dist/index.js"
+legacy = "file:///home/fixture/.local/share/opencode/cc-safety-net/2.4.11-print-third/dist/index.js"
+uri = "file:///home/fixture/.local/share/opencode/cc-safety-net/2.4.11-print-third-opencode2"
 original = {"plugin": ["other@1", ["cc-safety-net@2.4.11", {"mode": "strict"}], "after@2"],
             "permission": {"bash": {"*": "ask"}}, "provider": {"fixture": {"options": {"apiKey": "test-value"}}}}
 expected = copy.deepcopy(original)
 expected["plugin"][1][0] = uri
-assert installer.replace_pin(copy.deepcopy(original), uri) == expected
-assert installer.replace_pin(copy.deepcopy(expected), uri) == expected
-assert installer.replace_pin({"plugin": ["other@1"]}, uri) == {"plugin": ["other@1", uri]}
-assert installer.replace_pin({}, uri) == {"plugin": [uri]}
-# Legacy npm pin left beside the reviewed build by older entrypoints.
-assert installer.replace_pin({"plugin": ["other@1", uri, "cc-safety-net@2.4.11"]}, uri) == {"plugin": ["other@1", uri]}
-assert installer.replace_pin({"plugin": ["cc-safety-net@2.4.11", uri]}, uri) == {"plugin": [uri]}
+pin = lambda config: installer.replace_pin(config, uri, legacy=(legacy,))
+assert pin(copy.deepcopy(original)) == expected
+assert pin(copy.deepcopy(expected)) == expected
+assert pin({"plugin": ["other@1"]}) == {"plugin": ["other@1", uri]}
+assert pin({}) == {"plugin": [uri]}
+# OpenCode 1's direct-file pin moves to the OpenCode 2 package directory, keeping its options.
+assert pin({"plugin": ["other@1", legacy]}) == {"plugin": ["other@1", uri]}
+assert pin({"plugin": [[legacy, {"mode": "strict"}]]}) == {"plugin": [[uri, {"mode": "strict"}]]}
+# Legacy pins left beside the current registration are dropped, never loaded twice.
+assert pin({"plugin": ["other@1", uri, "cc-safety-net@2.4.11"]}) == {"plugin": ["other@1", uri]}
+assert pin({"plugin": ["cc-safety-net@2.4.11", uri]}) == {"plugin": [uri]}
+assert pin({"plugin": [legacy, uri]}) == {"plugin": [uri]}
 for plugins in (["cc-safety-net@9"], ["file:///unknown/cc-safety-net/index.js"],
-                ["cc-safety-net@2.4.11", "cc-safety-net@2.4.11"], [uri, uri],
+                ["cc-safety-net@2.4.11", "cc-safety-net@2.4.11"], [uri, uri], [legacy, "cc-safety-net@2.4.11"],
                 [uri, ["cc-safety-net@2.4.11", {"mode": "strict"}]], [[uri, {"mode": "strict"}], "cc-safety-net@2.4.11"],
                 "invalid"):
     try:
-        installer.replace_pin({"plugin": plugins}, uri)
+        pin({"plugin": plugins})
     except ValueError:
         pass
     else:
         raise AssertionError(f"Accepted ambiguous declaration: {plugins}")
+try:
+    pin({"plugin": [uri], "plugins": [{"package": legacy}]})
+except ValueError:
+    pass
+else:
+    raise AssertionError("Accepted a second declaration under the OpenCode 2 plugins key")
 with tempfile.TemporaryDirectory() as tmp:
     root = Path(tmp)
     (root / "file").write_text("original")
@@ -58,6 +70,17 @@ with tempfile.TemporaryDirectory() as tmp:
         pass
     else:
         raise AssertionError("Accepted artifact symlink")
+    package = root / "2.4.11-print-third"
+    made = installer.wrapper(package)
+    assert made == root / "2.4.11-print-third-opencode2"
+    assert json.loads((made / "package.json").read_text())["main"] == "index.js"
+    assert (made / "index.js").read_text() == f'export {{ default }} from "{(package / "dist/index.js").as_uri()}"\n'
+    stamp = (made / "index.js").stat().st_mtime_ns
+    installer.wrapper(package)
+    assert (made / "index.js").stat().st_mtime_ns == stamp, "an unchanged wrapper is not rewritten"
+    (made / "index.js").write_text("export default {}\n")
+    installer.wrapper(package)
+    assert "dist/index.js" in (made / "index.js").read_text(), "a tampered wrapper is restored"
     try:
         installer.trusted_path(root / "file", executable=True)
     except ValueError:
@@ -105,7 +128,7 @@ with tempfile.TemporaryDirectory() as tmp:
         assert not (root / "bun").exists()
 print("PASS: runner archive integrity mismatch rejected before executable creation", flush=True)
 print("PASS: trusted missing/user-owned tools fail before spawn; unsafe parent ownership/mode rejected; build env is an explicit allowlist", flush=True)
-print("PASS: preserve unrelated config/options, idempotency, fresh config, legacy npm pin beside reviewed build, unknown/duplicate pins, hash and symlink rejection", flush=True)
+print("PASS: preserve unrelated config/options, idempotency, fresh config, OpenCode 1 file pin migrated to the OpenCode 2 package directory, legacy pins beside it dropped, unknown/duplicate pins, hash and symlink rejection, wrapper rewrite", flush=True)
 if len(sys.argv) > 1:
     assert sys.argv[1] == "--build"
     # Test under this repository, outside /tmp, and remove staging on exit.
@@ -140,7 +163,7 @@ if len(sys.argv) > 1:
         assert not ancestor_marker.exists()
         staged = json.loads(config.read_text())
         wanted = copy.deepcopy(original)
-        wanted["plugin"][1][0] = (destination / "dist/index.js").as_uri()
+        wanted["plugin"][1][0] = installer.wrapper(destination).as_uri()
         assert staged == wanted
         before = config.read_bytes()
         subprocess.run([tools["python"], "-I", "-S", str(FILES / "cc-safety-net-install.py"), str(destination),
