@@ -8,7 +8,8 @@ namespace: t3code
 # Kustomize refuses to read above its root, so tools/ and most of files/ are
 # byte copies of ../env inputs; tools/sync-shared.sh refreshes them and CI
 # diffs them (files/hub_clients.py is a copy of 23.mcp-hub/tools/hub_clients.py).
-# files/entrypoint.sh and files/opencode-fast-version.sh are this overlay's own.
+# files/entrypoint.sh, files/sshd.sh, files/ssh-config.sh and
+# files/opencode-fast-version.sh are this overlay's own.
 resources:
   - namespace.yaml
   - storage.yaml
@@ -42,6 +43,8 @@ configMapGenerator:
       - files/homelab-ssh.conf
       - files/homelab-ssh.md
       - files/sshd-authorized-keys
+      - files/sshd.sh
+      - files/ssh-config.sh
       - files/jev-checks.md
       - files/opencode-fast-version.sh
 
@@ -94,6 +97,7 @@ replacements:
           name: t3code
         fieldPaths:
           - spec.template.spec.initContainers.[name=runtime-state].image
+          - spec.template.spec.containers.[name=sshd].image
   - source:
       kind: StatefulSet
       name: t3code
