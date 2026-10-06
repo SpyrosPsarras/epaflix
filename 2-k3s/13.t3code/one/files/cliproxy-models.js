@@ -1,23 +1,27 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
 const RETIRE_AFTER_MS = 14 * 24 * 60 * 60 * 1000
 const EFFORTS = ["low", "medium", "high"]
 const codexName = id => id.startsWith("codex-") ? id : `codex-${id.replace(/^gpt-/, "")}`
 
+const cachePath = () => join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "opencode", "cliproxy-models.json")
+
 // The cache keeps the version 5 catalog shape; OpenCode 2 model entries are derived from it.
-const discover = async (url, key) => {
-  const cacheDir = join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "opencode")
-  const cachePath = join(cacheDir, "cliproxy-models.json")
-  const cached = await readFile(cachePath, "utf8").then(JSON.parse).catch(() => null)
-  const usable = cached?.version === 5 && cached.url === url && Object.keys(cached.models ?? {}).length > 0
+const readCache = async url => {
+  const cached = await readFile(cachePath(), "utf8").then(JSON.parse).catch(() => null)
+  if (cached?.version !== 5 || cached.url !== url || !Object.keys(cached.models ?? {}).length) return null
   // Update old display names even when a credential is cooling down or the API is offline.
-  if (usable) {
-    for (const model of Object.values(cached.models)) {
-      if (model.id?.startsWith("codex/")) model.name = codexName(model.id.slice(6))
-    }
+  for (const model of Object.values(cached.models)) {
+    if (model.id?.startsWith("codex/")) model.name = codexName(model.id.slice(6))
   }
+  return cached
+}
+
+const discover = async (url, key) => {
+  const cached = await readCache(url)
+  const usable = cached !== null
   const now = Date.now()
   let models
   const seen = {}
@@ -93,10 +97,11 @@ const discover = async (url, key) => {
     console.error(`[cliproxy-models] ${error.message}; using catalog saved at ${cached.updatedAt}`)
     return cached.models
   }
-  await mkdir(cacheDir, { recursive: true })
-  const temporary = `${cachePath}.${process.pid}.${crypto.randomUUID()}`
+  const path = cachePath()
+  await mkdir(dirname(path), { recursive: true })
+  const temporary = `${path}.${process.pid}.${crypto.randomUUID()}`
   await writeFile(temporary, JSON.stringify({ version: 5, url, updatedAt: new Date(now).toISOString(), models, seen }), { mode: 0o600 })
-  await rename(temporary, cachePath)
+  await rename(temporary, path)
   console.error(`[cliproxy-models] discovered ${Object.keys(models).length} models`)
   return models
 }
@@ -133,8 +138,13 @@ export default {
     if (!base && !key) return
     if (!base || !key) throw new Error("CLIProxyAPI URL or API key is missing")
     const url = `${base.replace(/\/$/, "")}/v1`
-    const load = async () => Object.entries(await discover(url, key)).map(([id, model]) => toModel(id, model))
-    let models = await load()
+    const toModels = catalog => Object.entries(catalog).map(([id, model]) => toModel(id, model))
+    const load = async () => toModels(await discover(url, key))
+    // T3 waits 5 s for the model list and keeps an empty answer for 5 minutes.
+    // The saved catalog is served right away; the fresh one replaces it after
+    // setup instead of holding an empty list for up to 10 s.
+    const cached = await readCache(url)
+    let models = cached ? toModels(cached.models) : await load()
     await ctx.provider.transform(editor => editor.add({
       info: { id: "cliproxy", name: "CLIProxyAPI", activation: "enabled", package: "aisdk:@ai-sdk/openai-compatible",
         settings: { baseURL: url, apiKey: key } },
@@ -142,7 +152,7 @@ export default {
     }))
     // OpenCode 1 read the catalog at every config load; a T3-managed server
     // lives for days, so new and retired models are picked up on a timer.
-    const timer = setInterval(async () => {
+    const refresh = async () => {
       try {
         const next = await load()
         if (JSON.stringify(next) === JSON.stringify(models)) return
@@ -151,7 +161,9 @@ export default {
       } catch (error) {
         console.error(`[cliproxy-models] refresh failed: ${error.message}`)
       }
-    }, REFRESH_MS)
+    }
+    if (cached) setTimeout(refresh)
+    const timer = setInterval(refresh, REFRESH_MS)
     timer.unref?.()
     return () => clearInterval(timer)
   },
