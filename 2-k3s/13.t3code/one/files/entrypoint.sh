@@ -252,9 +252,15 @@ fi
 # refuses. T3 servers delete that file when they stop and `t3 project` deletes
 # it when a call fails, so it is a file mount (statefulset.yaml): unlink and
 # rename fail there, and this in-place write names this server ($$ survives the
-# exec below) for the container's lifetime.
-printf '{"version":1,"pid":%s,"host":"0.0.0.0","port":3773,"origin":"http://127.0.0.1:3773","startedAt":"%s"}\n' \
-  "$$" "$(date -u +%FT%T.000Z)" >"$T3_HOME/userdata/server-runtime.json"
+# exec below) for the container's lifetime. T3 refuses to start while the file
+# names a live process, so it stays empty until T3 answers; sshd waits for it.
+: >"$T3_HOME/userdata/server-runtime.json"
+(
+  until curl -fs --max-time 5 -o /dev/null http://127.0.0.1:3773/; do sleep 1; done
+  printf '{"version":1,"pid":%s,"host":"0.0.0.0","port":3773,"origin":"http://127.0.0.1:3773","startedAt":"%s"}\n' \
+    "$$" "$(date -u +%FT%T.000Z)" >"$T3_HOME/userdata/server-runtime.json" ||
+    echo "t3env: server-runtime.json not written; ssh t3code stays down" >&2
+) &
 # The launcher's pid files outlive the container; a stale pid would make it
 # kill whichever process now has that number.
 rm -f "$T3_HOME"/ssh-launch/*/pid "$T3_HOME"/ssh-launch/*/port "$T3_HOME"/ssh-launch/*/managed

@@ -52,9 +52,11 @@ fi
 # launch from the T3 app would start its own server and could take port 3773
 # (files/entrypoint.sh, server-runtime.json). The wait asks for an HTTP answer
 # and caps each try, since a starting server can accept a request and never
-# answer it; the watch only needs the port, so a slow T3 keeps sshd running.
+# answer it, then for the entrypoint to name the server in server-runtime.json;
+# the watch only needs the port, so a slow T3 keeps sshd running.
 while :; do
-  until curl -fs --max-time 5 -o /dev/null http://127.0.0.1:3773/; do sleep 1; done
+  until curl -fs --max-time 5 -o /dev/null http://127.0.0.1:3773/ &&
+    [[ -s $HOME/.t3/userdata/server-runtime.json ]]; do sleep 1; done
   /usr/sbin/sshd -D -e -f "$SSHD_DIR/sshd_config" &
   sshd=$!
   while kill -0 "$sshd" 2>/dev/null && (exec 3<>/dev/tcp/127.0.0.1/3773) 2>/dev/null; do sleep 2; done
