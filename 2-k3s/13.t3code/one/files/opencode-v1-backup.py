@@ -14,9 +14,10 @@ database without a marker is refused, so a V2 database is never labelled V1.
 A "v1-backup" marker records the size, mtime, ctime, inode and SHA-256 of the
 backup and of every snapshot file; each later start checks them, hashing again
 only a file whose size, mtime, ctime or inode changed, and runs PRAGMA
-quick_check on the backup. The full integrity_check runs once, when the
-backup is made: on a multi-gigabyte store it takes minutes, and the hashes
-already prove the bytes are the ones it passed.
+quick_check on the backup. quick_check, not integrity_check, also checks the
+new backup: on a multi-gigabyte store the full check can outlast the startup
+probe, and a start killed before the backup is published redoes it on every
+restart.
 Nothing here deletes a backup: the owner removes it after accepting OpenCode 2.
 """
 from contextlib import closing
@@ -54,8 +55,8 @@ def sessions(path):
     return query(path, "select count(*) from session")[0][0]
 
 
-def integrity(path):
-    return query(path, "pragma integrity_check") == [("ok",)]
+def quick_check(path):
+    return query(path, "pragma quick_check") == [("ok",)]
 
 
 def sqlite_copy(source, target):
@@ -154,7 +155,7 @@ def refuse(reason):
 def verified_backup(data, files=None):
     backup = data / BACKUP
     try:
-        valid = backup.is_file() and not is_v2(backup) and query(backup, "pragma quick_check" if files else "pragma integrity_check") == [("ok",)]
+        valid = backup.is_file() and not is_v2(backup) and quick_check(backup)
     except sqlite3.DatabaseError:
         valid = False
     if not valid:
@@ -199,9 +200,9 @@ def run(data, config, t3):
         temporary = data / f"{BACKUP}.tmp-{os.getpid()}"
         start = time.time()
         sqlite_copy(db, temporary)
-        if not integrity(temporary) or sessions(temporary) != sessions(db):
+        if not quick_check(temporary) or sessions(temporary) != sessions(db):
             temporary.unlink()
-            refuse("backup failed its integrity check")
+            refuse("backup failed its quick_check")
         os.replace(temporary, published)
         print(f"opencode-v1-backup: copied and verified {size} bytes in {int(time.time() - start)} s", flush=True)
     need(data, snapshot_bytes(config, t3), "config and T3 state snapshot")

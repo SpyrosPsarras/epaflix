@@ -152,15 +152,15 @@ spec:
               readOnly: true
             - name: tmp
               mountPath: /tmp
-          # 30 minutes: the first OpenCode 2 start backs up the OpenCode 1
+          # 90 minutes: the first OpenCode 2 start backs up the OpenCode 1
           # database (files/opencode-v1-backup.py) and checks it, then checks
           # the OpenCode plugins (files/opencode-plugin-check.mjs), before T3
-          # listens. Set from a full-size rehearsal (migration/README.md).
+          # listens. Rehearsal timings are in migration/README.md.
           startupProbe:
             tcpSocket:
               port: http
             periodSeconds: 5
-            failureThreshold: 360
+            failureThreshold: 1080
           readinessProbe:
             tcpSocket:
               port: http
