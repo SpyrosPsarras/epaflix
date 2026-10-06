@@ -17,6 +17,8 @@ export PATH=/tools/node_modules/.bin:$PATH
 # in the process env; the helper prints it only to git, only for github.com.
 mkdir -p "$(dirname "$PROJECT_DIR")"
 git config --global credential.helper /scripts/git-credential-github.sh
+git config --global user.name "Spyros Psarras"
+git config --global user.email 13405649+SpyrosPsarras@users.noreply.github.com
 
 # ssh expands ~ from /etc/passwd (/home/node), not $HOME, so its config goes
 # there. It is rewritten on every start.
