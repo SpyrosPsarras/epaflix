@@ -3,7 +3,16 @@ import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 
 const RETIRE_AFTER_MS = 14 * 24 * 60 * 60 * 1000
-const codexName = id => id.startsWith("codex-") ? id : `codex-${id.replace(/^gpt-/, "")}`
+const title = words => words.filter(Boolean).map(word => word[0].toUpperCase() + word.slice(1)).join(" ")
+// claude-opus-5-5 reads Claude Opus 5.5, gpt-6.1-sol reads GPT-6.1 Sol;
+// OpenRouter IDs follow no common pattern and stay as they are.
+const displayName = slug => {
+  const [, subscription, id = slug] = /^([^/]+)\/(.+)$/.exec(slug) ?? []
+  if (subscription === "claude") return title(id.replace(/-\d{8}$/, "").replace(/(\d)-(\d)(?=-|$)/g, "$1.$2").split("-"))
+  if (subscription !== "codex") return id
+  const [, version, rest] = /^gpt-([\d.]+)-?(.*)$/.exec(id) ?? []
+  return version ? [`GPT-${version}`, ...(rest ? [title(rest.split("-"))] : [])].join(" ") : title(id.split("-"))
+}
 
 const cachePath = () => join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "opencode", "cliproxy-models.json")
 
@@ -13,7 +22,7 @@ const readCache = async url => {
   if (cached?.version !== 5 || cached.url !== url || !Object.keys(cached.models ?? {}).length) return null
   // Update old display names even when a credential is cooling down or the API is offline.
   for (const model of Object.values(cached.models)) {
-    if (model.id?.startsWith("codex/")) model.name = codexName(model.id.slice(6))
+    if (model.id?.includes("/")) model.name = displayName(model.id)
   }
   return cached
 }
@@ -43,15 +52,13 @@ const discover = async (url, key) => {
       const route = /^(codex|claude|openrouter)\/(.+)$/.exec(model.slug)
       if (!route) continue
       const [, subscription, id] = route
-      let name, npm
+      const name = displayName(model.slug)
+      let npm
       if (subscription === "openrouter") {
-        name = id
         npm = "@ai-sdk/openai-compatible"
       } else if (subscription === "claude") {
-        name = `anthropic-${id.replace(/(\d)-(\d)(?=-|$)/g, "$1.$2")}`
         npm = "@ai-sdk/anthropic"
       } else if (subscription === "codex" && !id.startsWith("gpt-image-")) {
-        name = codexName(id)
         // Responses item IDs change between events in CLIProxyAPI's stream.
         // Chat Completions uses indexed deltas and avoids that broken parser path.
         npm = "@ai-sdk/openai-compatible"

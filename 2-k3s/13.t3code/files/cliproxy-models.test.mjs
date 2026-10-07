@@ -76,10 +76,12 @@ try {
     assert.deepEqual(models[id].capabilities, { tools: true, input: ["text"], output: ["text"] })
   }
   assert.ok(Object.values(models).every(m => m.providerID === "cliproxy" && m.enabled && m.status === "active"))
-  assert.equal(models["claude-fable-5-1"].name, "anthropic-claude-fable-5.1")
+  assert.equal(models["claude-fable-5-1"].name, "Claude Fable 5.1")
+  assert.equal(models["claude-haiku-4-5-20251001"].name, "Claude Haiku 4.5")
   assert.equal(models["claude-fable-5-1"].modelID, "claude/claude-fable-5-1")
   assert.equal(models["claude-fable-5-1"].package, "aisdk:@ai-sdk/anthropic")
-  assert.equal(models["gpt-6-astra"].name, "codex-6-astra")
+  assert.equal(models["gpt-6-astra"].name, "GPT-6 Astra")
+  assert.equal(models["gpt-5.3-codex-spark"].name, "GPT-5.3 Codex Spark")
   assert.equal(models["gpt-6-astra"].modelID, "codex/gpt-6-astra")
   // CLIProxyAPI's Responses stream changes item IDs and crashes the Responses parser.
   assert.equal(models["gpt-6-astra"].package, "aisdk:@ai-sdk/openai-compatible")
@@ -169,22 +171,40 @@ try {
   assert.deepEqual(Object.keys(models), ["or-new-model"])
   assert.deepEqual(models["or-new-model"].capabilities.input, ["text", "image"])
   // Distinct versions stay distinguishable, including old names in an offline cache.
-  const versions = ["gpt-6.1-sol", "gpt-6-sol", "gpt-5.6-sol", "gpt-6-luna", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.5", "codex-auto-review"]
-  globalThis.fetch = async () => Response.json({ models: versions.map(id => ({ slug: `codex/${id}` })) })
+  const versions = {
+    "gpt-6.1-sol": "GPT-6.1 Sol", "gpt-6-sol": "GPT-6 Sol", "gpt-5.6-sol": "GPT-5.6 Sol", "gpt-6-luna": "GPT-6 Luna",
+    "gpt-5.6-luna": "GPT-5.6 Luna", "gpt-5.6-terra": "GPT-5.6 Terra", "gpt-5.5": "GPT-5.5", "codex-auto-review": "Codex Auto Review",
+  }
+  globalThis.fetch = async () => Response.json({ models: Object.keys(versions).map(id => ({ slug: `codex/${id}` })) })
   models = await load()
-  for (const id of versions) {
-    assert.equal(models[id].name, id.startsWith("codex-") ? id : `codex-${id.slice(4)}`)
+  for (const [id, name] of Object.entries(versions)) {
+    assert.equal(models[id].name, name)
     assert.equal(models[id].modelID, `codex/${id}`)
   }
   const oldNames = JSON.parse(await readFile(cachePath, "utf8"))
-  for (const id of versions) oldNames.models[id].name = "old-label"
+  for (const id of Object.keys(versions)) oldNames.models[id].name = "old-label"
   await writeFile(cachePath, JSON.stringify(oldNames))
   globalThis.fetch = async () => new Response("unavailable", { status: 503 })
   models = await load()
-  assert.equal(models["gpt-6.1-sol"].name, "codex-6.1-sol")
+  assert.equal(models["gpt-6.1-sol"].name, "GPT-6.1 Sol")
   globalThis.fetch = async () => Response.json({ models: [{ slug: "openrouter/or-new-model" }] })
   models = await load()
-  assert.equal(models["gpt-5.6-luna"].name, "codex-5.6-luna")
+  assert.equal(models["gpt-5.6-luna"].name, "GPT-5.6 Luna")
+  // Caches written before the readable names get them too, for every subscription.
+  globalThis.fetch = async () => Response.json({ models: [{ slug: "claude/claude-opus-5-5" }, { slug: "openrouter/or-glm-5.3-flash" }] })
+  await load()
+  const oldClaude = JSON.parse(await readFile(cachePath, "utf8"))
+  oldClaude.models["claude-opus-5-5"].name = "anthropic-claude-opus-5.5"
+  oldClaude.models["or-glm-5.3-flash"].name = "old-label"
+  oldClaude.models["broken"] = { ...oldClaude.models["or-glm-5.3-flash"], id: "/" }
+  oldClaude.seen["broken"] = Date.now()
+  await writeFile(cachePath, JSON.stringify(oldClaude))
+  globalThis.fetch = async () => new Response("unavailable", { status: 503 })
+  models = await load()
+  assert.equal(models["claude-opus-5-5"].name, "Claude Opus 5.5")
+  assert.equal(models["or-glm-5.3-flash"].name, "or-glm-5.3-flash")
+  assert.equal(models["broken"].name, "/", "a malformed cached id keeps startup alive")
+  globalThis.fetch = async () => Response.json({ models: [{ slug: "openrouter/or-new-model" }] })
   // Restore the single-model cache used by the remaining fallback checks.
   await writeFile(cachePath, "{not json")
   await load()
