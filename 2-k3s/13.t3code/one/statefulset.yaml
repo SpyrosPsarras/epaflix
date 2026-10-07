@@ -13,6 +13,9 @@ metadata:
 spec:
   serviceName: t3code
   replicas: 1
+  # A new revision waits for 30 idle minutes; see idle-rollout.yaml.
+  updateStrategy:
+    type: OnDelete
   persistentVolumeClaimRetentionPolicy:
     whenDeleted: Retain
     whenScaled: Retain

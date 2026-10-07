@@ -16,8 +16,15 @@ resources:
   - statefulset.yaml
   - service.yaml
   - image-prepull.yaml
+  - idle-rollout.yaml
 
 configMapGenerator:
+  # Not in t3code-scripts: the job pipes t3-idle.py into the running pod, which
+  # may predate it, and a new file there would itself wait for a rollout.
+  - name: t3code-idle-rollout
+    files:
+      - files/idle-rollout.sh
+      - files/t3-idle.py
   - name: t3code-tools
     files:
       - tools/package.json
@@ -88,6 +95,11 @@ replacements:
           name: t3code-image-prepull
         fieldPaths:
           - spec.template.spec.containers.[name=pull].image
+      - select:
+          kind: CronJob
+          name: t3code-idle-rollout
+        fieldPaths:
+          - spec.jobTemplate.spec.template.spec.containers.[name=rollout].image
   - source:
       kind: StatefulSet
       name: t3code
@@ -109,3 +121,8 @@ replacements:
           name: t3code-image-prepull
         fieldPaths:
           - spec.template.spec.affinity
+      - select:
+          kind: CronJob
+          name: t3code-idle-rollout
+        fieldPaths:
+          - spec.jobTemplate.spec.template.spec.affinity
