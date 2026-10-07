@@ -10,6 +10,13 @@ metadata:
   labels:
     app.kubernetes.io/name: t3code
     app.kubernetes.io/component: server
+  # One-time: server-side apply keeps the defaulted rollingUpdate.partition,
+  # which the API rejects next to OnDelete. A replace drops it. Remove this
+  # once the live StatefulSet is OnDelete (that sync still replaces, since
+  # ArgoCD also reads the live annotation, and clears it). A lasting replace
+  # would undo a manual scale to 0 (app-t3code.yaml ignores /spec/replicas).
+  annotations:
+    argocd.argoproj.io/sync-options: Replace=true
 spec:
   serviceName: t3code
   replicas: 1
@@ -27,6 +34,10 @@ spec:
       labels:
         app.kubernetes.io/name: t3code
         app.kubernetes.io/component: server
+      # Live value from a `kubectl rollout restart`. Dropping it makes a new
+      # revision that idle-rollout rolls. Restart with `kubectl delete pod`.
+      annotations:
+        kubectl.kubernetes.io/restartedAt: "2026-09-29T19:54:28+02:00"
     spec:
       # No API token: the vault is reached through the MCP hub now, and the
       # agents' kubectl uses the kubeconfig in $HOME.
