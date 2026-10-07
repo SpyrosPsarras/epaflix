@@ -260,6 +260,7 @@ fi
   printf '{"version":1,"pid":%s,"host":"0.0.0.0","port":3773,"origin":"http://127.0.0.1:3773","startedAt":"%s"}\n' \
     "$$" "$(date -u +%FT%T.000Z)" >"$T3_HOME/userdata/server-runtime.json" ||
     echo "t3env: server-runtime.json not written; ssh t3code stays down" >&2
+  T3_HOME="$T3_HOME" node /scripts/opencode-refresh.mjs || :
 ) &
 # The launcher's pid files outlive the container; a stale pid would make it
 # kill whichever process now has that number.
