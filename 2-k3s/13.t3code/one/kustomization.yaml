@@ -8,8 +8,8 @@ namespace: t3code
 # Kustomize refuses to read above its root, so tools/ and most of files/ are
 # byte copies of ../env inputs; tools/sync-shared.sh refreshes them and CI
 # diffs them (files/hub_clients.py is a copy of 23.mcp-hub/tools/hub_clients.py).
-# files/entrypoint.sh, files/sshd.sh, files/ssh-config.sh and
-# files/opencode-fast-version.sh are this overlay's own.
+# files/entrypoint.sh, files/sshd.sh, files/ssh-config.sh,
+# files/opencode-fast-version.sh and files/t3-pair.sh are this overlay's own.
 resources:
   - namespace.yaml
   - storage.yaml
@@ -47,6 +47,7 @@ configMapGenerator:
       - files/ssh-config.sh
       - files/jev-checks.md
       - files/opencode-fast-version.sh
+      - files/t3-pair.sh
 
 generators:
   - ksops-generator.yaml
