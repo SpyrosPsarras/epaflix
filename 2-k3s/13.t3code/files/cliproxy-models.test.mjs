@@ -32,7 +32,7 @@ const load = async () => {
   added = first[0]
   return Object.fromEntries(added.models.map(m => [m.id, m]))
 }
-let data = [
+const listed = [
   { slug: "claude/claude-fable-5-1", context_window: 1000000, max_tokens: 128000, input_modalities: ["text", "image"] },
   { slug: "codex/gpt-6-astra", context_window: 272000, max_tokens: 128000, input_modalities: ["text", "image"] },
   { slug: "codex/gpt-5.3-codex-spark", input_modalities: ["text"] },
@@ -41,6 +41,13 @@ let data = [
   { slug: "openrouter/or-gcp-a-model-name", context_window: 272000 },
   { slug: "openrouter/or-minimax-m3:free" },
   { slug: "claude/claude-haiku-4-5-20251001", context_window: 200000, max_tokens: 64000 },
+  // Effort levels come only from the catalog; an empty or missing list means none.
+  { slug: "claude/claude-opus-5-5", supported_reasoning_levels: ["low", "medium", "high", "xhigh", "max"].map(effort => ({ effort })) },
+  { slug: "codex/gpt-5.6-sol", supported_reasoning_levels: ["low", "medium", "high", "xhigh", "max", "ultra"].map(effort => ({ effort })) },
+  { slug: "claude/claude-haiku-5", supported_reasoning_levels: [] },
+  { slug: "openrouter/or-reasoner", supported_reasoning_levels: [{ effort: "high" }] },
+]
+const ignored = [
   // Unscoped or differently scoped entries must never override a pinned route.
   { slug: "gpt-6-astra", context_window: 272000 },
   { slug: "copilot/gpt-6-astra", context_window: 272000 },
@@ -50,6 +57,8 @@ let data = [
   { slug: "codex/gpt-image-2", context_window: 272000 },
   { slug: "text-embedding-3-small", context_window: 272000 },
 ]
+const ids = listed.map(m => m.slug.replace(/^[^/]+\//, ""))
+let data = [...listed, ...ignored]
 try {
   globalThis.fetch = async (url, options) => {
     assert.equal(url, "https://proxy.invalid/v1/models?client_version=99.0.0")
@@ -74,11 +83,12 @@ try {
   assert.equal(models["gpt-6-astra"].modelID, "codex/gpt-6-astra")
   // CLIProxyAPI's Responses stream changes item IDs and crashes the Responses parser.
   assert.equal(models["gpt-6-astra"].package, "aisdk:@ai-sdk/openai-compatible")
-  // Effort variants: reasoningEffort for Codex, effort for Claude, none for Haiku or OpenRouter.
-  assert.deepEqual(models["gpt-6-astra"].variants, ["low", "medium", "high"].map(id => ({ id, settings: { reasoningEffort: id } })))
-  assert.deepEqual(models["claude-fable-5-1"].variants.map(v => v.settings), [{ effort: "low" }, { effort: "medium" }, { effort: "high" }])
-  assert.deepEqual(models["claude-haiku-4-5-20251001"].variants, [])
-  assert.deepEqual(models["or-glm-5.3-flash"].variants, [])
+  // Effort variants mirror the catalog: effort for the Anthropic SDK, reasoningEffort otherwise.
+  assert.deepEqual(models["claude-opus-5-5"].variants, ["low", "medium", "high", "xhigh", "max"].map(id => ({ id, settings: { effort: id } })))
+  assert.deepEqual(models["gpt-5.6-sol"].variants, ["low", "medium", "high", "xhigh", "max", "ultra"].map(id => ({ id, settings: { reasoningEffort: id } })))
+  assert.deepEqual(models["or-reasoner"].variants, [{ id: "high", settings: { reasoningEffort: "high" } }])
+  assert.deepEqual(models["claude-haiku-5"].variants, [])
+  assert.deepEqual(models["claude-fable-5-1"].variants, [], "no advertised levels, no variants")
   // OpenCode compacts at context minus output; 32k here compacted every few turns.
   assert.deepEqual(models["gpt-6-astra"].limit, { context: 272000, output: 128000 })
   assert.deepEqual(models["claude-fable-5-1"].limit, { context: 1000000, output: 128000 })
@@ -89,7 +99,7 @@ try {
   assert.equal(models["or-gcp-a-model-name"].name, "or-gcp-a-model-name")
   assert.equal(models["or-minimax-m3:free"].package, "aisdk:@ai-sdk/openai-compatible")
   assert.equal(models["or-minimax-m3:free"].modelID, "openrouter/or-minimax-m3:free")
-  assert.equal(Object.keys(models).length, 7)
+  assert.deepEqual(Object.keys(models).sort(), [...ids].sort())
   const savedCache = await readFile(join(cache, "opencode/cliproxy-models.json"), "utf8")
   assert.ok(!savedCache.includes("test-secret"))
   assert.equal(JSON.parse(savedCache).version, 5, "the cache shape stays version 5 across the OpenCode 2 upgrade")
@@ -102,7 +112,7 @@ try {
   assert.equal(reloads, 1)
   const reloaded = Object.fromEntries(run()[0].models.map(m => [m.id, m]))
   assert.equal(reloaded["gpt-6-terra"].modelID, "codex/gpt-6-terra", "the reloaded provider lists the new model")
-  assert.equal(Object.keys(reloaded).length, 8)
+  assert.equal(Object.keys(reloaded).length, ids.length + 1)
   const online = globalThis.fetch
   globalThis.fetch = async () => new Response("unavailable", { status: 503 })
   await refresh()
@@ -115,28 +125,28 @@ try {
   added = transform = startup = undefined
   await plugin.setup({ provider: { transform: async (callback) => { transform = callback }, reload: async () => { reloads++ } } })
   assert.equal(fetches, 0, "setup returns before the catalog request starts")
-  assert.equal(run()[0].models.length, 8, "the saved catalog is listed at once")
+  assert.equal(run()[0].models.length, ids.length + 1, "the saved catalog is listed at once")
   const pending = startup()
   data = [...data, { slug: "codex/gpt-6-luna", context_window: 272000, max_tokens: 128000 }]
   release()
   await pending
   assert.equal(fetches, 1)
   assert.equal(reloads, 2, "a changed fresh catalog reloads the provider")
-  assert.equal(run()[0].models.length, 9)
+  assert.equal(run()[0].models.length, ids.length + 2)
   globalThis.fetch = online
   data = data.filter(m => !["codex/gpt-6-terra", "codex/gpt-6-luna"].includes(m.slug))
   await writeFile(join(cache, "opencode/cliproxy-models.json"), beforeRefresh)
   // A partial listing (credential in cooldown) must not drop models seen before.
   data = [{ slug: "openrouter/or-new-model", context_window: 272000, input_modalities: ["text", "image"] }]
   models = await load()
-  assert.deepEqual(Object.keys(models).sort(), ["claude-fable-5-1", "claude-haiku-4-5-20251001", "gpt-5.3-codex-spark", "gpt-6-astra", "or-gcp-a-model-name", "or-glm-5.3-flash", "or-minimax-m3:free", "or-new-model"])
+  assert.deepEqual(Object.keys(models).sort(), [...ids, "or-new-model"].sort())
   assert.equal(models["gpt-6-astra"].modelID, "codex/gpt-6-astra")
   data = [{ slug: "openrouter/or-new-model", context_window: 300000, input_modalities: ["text"] }]
   models = await load()
   assert.deepEqual(models["or-new-model"].limit, { context: 300000, output: 8192 })
   globalThis.fetch = async () => new Response("unavailable", { status: 503 })
   models = await load()
-  assert.equal(Object.keys(models).length, 8)
+  assert.equal(Object.keys(models).length, ids.length + 1)
   // A model unlisted for over 14 days is retired; a recently unlisted one is kept with its original timestamp.
   const cachePath = join(cache, "opencode/cliproxy-models.json")
   const aged = JSON.parse(await readFile(cachePath, "utf8"))
