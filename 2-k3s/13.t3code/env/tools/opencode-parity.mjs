@@ -140,7 +140,7 @@ try {
     for (const want of ["cliproxy/gpt-6-sol:codex/gpt-6-sol", "cliproxy/claude-opus-5-5:claude/claude-opus-5-5", "jev-auto/auto:codex/gpt-6-sol"]) assert.ok(ids.includes(want), `${want} in ${ids.join(" ")}`)
     const name = (id) => models.find(m => m.providerID === "cliproxy" && m.id === id)?.name
     assert.equal(name("gpt-6-sol"), "configured-sol")
-    assert.equal(name("claude-opus-5-5"), "anthropic-claude-opus-5.5")
+    assert.equal(name("claude-opus-5-5"), "Claude Opus 5.5")
   })
 
   const asked = []
