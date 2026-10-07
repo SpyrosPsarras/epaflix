@@ -3,7 +3,6 @@ import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 
 const RETIRE_AFTER_MS = 14 * 24 * 60 * 60 * 1000
-const EFFORTS = ["low", "medium", "high"]
 const codexName = id => id.startsWith("codex-") ? id : `codex-${id.replace(/^gpt-/, "")}`
 
 const cachePath = () => join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "opencode", "cliproxy-models.json")
@@ -76,6 +75,8 @@ const discover = async (url, key) => {
         // has no metadata for; 8192 keeps that fallback conservative.
         limit: { context: model.max_context_window || model.context_window || 32768, output: model.max_tokens || 8192 },
         ...(subscription === "codex" ? { reasoning: true } : {}),
+        efforts: (Array.isArray(model.supported_reasoning_levels) ? model.supported_reasoning_levels : [])
+          .map(level => level?.effort).filter(effort => typeof effort === "string"),
       }
     }
     if (!Object.keys(models).length) throw new Error("catalog has no supported models")
@@ -106,11 +107,10 @@ const discover = async (url, key) => {
   return models
 }
 
-// Codex and Claude models (except Haiku, which takes no effort) get the effort
-// variants that T3's picker and jev-auto's subagent routes select.
+// Each model gets exactly the effort levels CLIProxyAPI advertises for it;
+// T3's picker and jev-auto's subagent routes select them.
 const toModel = (id, model) => {
-  const codex = model.id.startsWith("codex/")
-  const effort = codex || (model.id.startsWith("claude/") && !id.includes("haiku"))
+  const anthropic = model.provider.npm === "@ai-sdk/anthropic"
   return {
     id,
     modelID: model.id,
@@ -118,7 +118,7 @@ const toModel = (id, model) => {
     name: model.name,
     package: `aisdk:${model.provider.npm}`,
     capabilities: { tools: true, input: model.modalities.input, output: ["text"] },
-    variants: effort ? EFFORTS.map(level => ({ id: level, settings: codex ? { reasoningEffort: level } : { effort: level } })) : [],
+    variants: (model.efforts ?? []).map(level => ({ id: level, settings: anthropic ? { effort: level } : { reasoningEffort: level } })),
     time: { released: 0 },
     cost: [],
     status: "active",
