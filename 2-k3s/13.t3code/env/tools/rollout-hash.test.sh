@@ -10,12 +10,14 @@ import sys, yaml
 docs = [d for d in yaml.safe_load_all(sys.stdin) if d]
 sts = next(d for d in docs if d["kind"] == "StatefulSet")
 refs = {v["name"]: v["configMap"]["name"] for v in sts["spec"]["template"]["spec"]["volumes"] if "configMap" in v}
+rollout = next(d for d in docs if d["kind"] == "CronJob")["spec"]["jobTemplate"]["spec"]["template"]["spec"]
+rollout_refs = [v["configMap"]["name"] for v in rollout["volumes"] if "configMap" in v]
 cms = sorted(d["metadata"]["name"] for d in docs if d["kind"] == "ConfigMap")
-assert sorted(refs.values()) == cms
+assert sorted([*refs.values(), *rollout_refs]) == cms
 assert sts["spec"]["persistentVolumeClaimRetentionPolicy"] == {"whenDeleted": "Retain", "whenScaled": "Retain"}
-job = next(d for d in docs if d["kind"] == "Job")["spec"]["template"]["spec"]
-assert job["containers"][0]["image"] == sts["spec"]["template"]["spec"]["containers"][0]["image"]
-assert job["affinity"] == sts["spec"]["template"]["spec"]["affinity"]
+for job in (next(d for d in docs if d["kind"] == "Job")["spec"]["template"]["spec"], rollout):
+    assert job["containers"][0]["image"] == sts["spec"]["template"]["spec"]["containers"][0]["image"]
+    assert job["affinity"] == sts["spec"]["template"]["spec"]["affinity"]
 print(refs["lock"], refs["scripts"])'; }
 base=$(render "$tmp/k"); read -r lock0 scripts0 <<<"$base"
 [[ $lock0 == t3code-tools-* && $scripts0 == t3code-scripts-* ]]
