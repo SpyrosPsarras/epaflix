@@ -1,0 +1,103 @@
+---
+# The StatefulSet uses OnDelete, so a new revision waits until this job sees
+# t3code-0 idle for 30 minutes (files/idle-rollout.sh) and deletes it. Force a
+# rollout now with `kubectl -n t3code delete pod t3code-0`.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: t3code-idle-rollout
+  namespace: t3code
+  labels:
+    app.kubernetes.io/name: t3code-idle-rollout
+    app.kubernetes.io/component: idle-rollout
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 240
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: t3code-idle-rollout
+            app.kubernetes.io/component: idle-rollout
+        spec:
+          restartPolicy: Never
+          serviceAccountName: t3code-idle-rollout
+          enableServiceLinks: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          affinity: {}
+          containers:
+            - name: rollout
+              image: t3-runtime-from-statefulset
+              imagePullPolicy: IfNotPresent
+              command:
+                - bash
+                - /idle-rollout/idle-rollout.sh
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                    - ALL
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 64Mi
+                limits:
+                  memory: 256Mi
+              volumeMounts:
+                - name: idle-rollout
+                  mountPath: /idle-rollout
+                  readOnly: true
+          volumes:
+            - name: idle-rollout
+              configMap:
+                name: t3code-idle-rollout
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: t3code-idle-rollout
+  namespace: t3code
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: t3code-idle-rollout
+  namespace: t3code
+rules:
+  - apiGroups: ["apps"]
+    resources: ["statefulsets"]
+    resourceNames: ["t3code"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    resourceNames: ["t3code-0"]
+    verbs: ["get", "delete"]
+  # WebSocket exec (kubectl 1.30+) is a GET; SPDY exec is a POST.
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    resourceNames: ["t3code-0"]
+    verbs: ["get", "create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: t3code-idle-rollout
+  namespace: t3code
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: t3code-idle-rollout
+subjects:
+  - kind: ServiceAccount
+    name: t3code-idle-rollout
+    namespace: t3code
