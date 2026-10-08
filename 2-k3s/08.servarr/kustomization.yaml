@@ -75,7 +75,7 @@ images:
   - name: lscr.io/linuxserver/prowlarr
     newTag: 2.6.5@sha256:f2b26429893d4c4cb71941b7ee50b1bdecd9d5f9f9e02d5410615e9f4f7c8d95
   - name: ghcr.io/cleanuparr/cleanuparr
-    newTag: 2.10.8@sha256:ec444338a67e429a20f6eef938e1ed771ce357ed4831765026096061a09bbbb7
+    newTag: 2.10.9@sha256:cfada3e5721451403a878ef67afb317692bb3afe277328b28ce4470bfba915d0
   - name: ghcr.io/jon4hz/jellysweep
     newTag: v0.16.1@sha256:b47881bc40ef32a0667384041351a762d584fcc2afb4297cef334f06391fc6cf
   - name: ghcr.io/fredrikburmester/streamystats-aio
