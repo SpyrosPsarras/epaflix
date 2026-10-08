@@ -10,7 +10,7 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "1"
 spec:
-  schedule: "0 3,8,13 * * *"
+  schedule: "0 5,10,15,20 * * *"
   timeZone: Europe/Oslo
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 1
@@ -18,7 +18,7 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 2
-      activeDeadlineSeconds: 300
+      activeDeadlineSeconds: 900
       template:
         metadata:
           # Not app.kubernetes.io/name=cliproxy: the cliproxy Service selects on that
