@@ -22,14 +22,17 @@ import sys
 import tempfile
 
 SERVERS = {"gmail": "/gmail", "searxng": "/searxng", "notion": "/notion", "vaultwarden": "/vaultwarden",
-           "kubernetes-epaflix": "/kubernetes"}
+           "kubernetes-epaflix": "/kubernetes", "drive": "/drive"}
 # Its instructions tell the agent to consult it before every task; trialled in OpenCode only.
 OPENCODE_ONLY = {"jev": "/jev"}
-# Irreversible or vault/cluster-changing tools prompt in OpenCode (<server>_<tool>).
-# The kubernetes names are kubernetes-mcp-server's at the tag pinned in
-# 23.mcp-hub/kubernetes-mcp.yaml; recheck them when bumping it.
+# Irreversible, Drive-writing, or vault/cluster-changing tools prompt in OpenCode (<server>_<tool>).
+# The kubernetes and drive names are those of the images pinned in
+# 23.mcp-hub/kubernetes-mcp.yaml and workspace-mcp.yaml; recheck them when bumping.
 ASK = {
     "gmail": ["gmail_send", "gmail_send_draft", "gmail_trash"],
+    "drive": ["create_drive_file", "create_drive_folder", "copy_drive_file", "import_to_google_doc",
+              "import_to_google_sheets", "import_to_google_slides", "update_drive_file",
+              "manage_drive_access", "set_drive_file_permissions"],
     "vaultwarden": ["vault_add", "vault_update", "vault_trash", "vault_attach"],
     "kubernetes-epaflix": ["pods_delete", "pods_exec", "pods_run", "resources_create_or_update",
                            "resources_delete", "resources_scale", "helm_install", "helm_uninstall"],

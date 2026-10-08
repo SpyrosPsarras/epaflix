@@ -12,7 +12,7 @@ use stateless JSON transport, so a pod restart costs a client one retry.
 Env: CLIENTS_FILE (default /app/clients.json) plus whatever the mounted
 servers need: GMAIL_*, SEARXNG_URL,
 VAULTWARDEN_URL + VAULTWARDEN_HUB_SECRET,
-KUBERNETES_MCP_URL, JEV_MCP_URL + JEV_MCP_AUTH_TOKEN, NOTION_MCP_URL.
+KUBERNETES_MCP_URL, DRIVE_MCP_URL, JEV_MCP_URL + JEV_MCP_AUTH_TOKEN, NOTION_MCP_URL.
 
 Self-test: --selftest runs each module's selftest, then boots the ASGI app
 in-process against fake upstreams and checks auth, the MCP handshake and
@@ -69,6 +69,8 @@ def upstreams():
             vaultwarden_secret)),
         ("/kubernetes", Upstream("kubernetes", os.environ.get(
             "KUBERNETES_MCP_URL", "http://kubernetes-mcp.mcp-hub.svc.cluster.local:8080/mcp"))),
+        ("/drive", Upstream("drive", os.environ.get(
+            "DRIVE_MCP_URL", "http://workspace-mcp.mcp-hub.svc.cluster.local:8000/mcp"))),
         ("/jev", Upstream("jev", os.environ.get(
             "JEV_MCP_URL", "http://jev-mcp.mcp-hub.svc.cluster.local:8080/mcp"), jev_token)),
         ("/notion", Upstream("notion", os.environ.get("NOTION_MCP_URL", "https://mcp.notion.com/mcp"),
@@ -264,6 +266,8 @@ def _selftest():
     jev = dict(upstreams())["/jev"]
     assert jev.url == "http://jev-mcp.mcp-hub.svc.cluster.local:8080/mcp" and jev.credential is jev_token, jev.url
     assert "/keepass" not in dict(upstreams()), "the keepass route is retired"
+    drive = dict(upstreams())["/drive"]
+    assert drive.url == "http://workspace-mcp.mcp-hub.svc.cluster.local:8000/mcp", drive.url
     vw = dict(upstreams())["/vaultwarden"]
     assert vw.url == "http://vaultwarden-mcp.mcp-hub.svc.cluster.local:8000/vaultwarden", vw.url
     table = dict(upstreams())
