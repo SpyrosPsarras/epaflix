@@ -2,7 +2,7 @@
 # The MCP hub (README.md): one long-lived streamable-HTTP gateway for every
 # agent client (the T3 pod in-cluster, LAN PCs over the internal entry point).
 # Paths are listed in files/mcp_hub.py: modules in-process, upstreams
-# forwarded (vaultwarden-mcp.yaml, kubernetes-mcp.yaml,
+# forwarded (vaultwarden-mcp.yaml, kubernetes-mcp.yaml, workspace-mcp.yaml,
 # hosted Notion).
 apiVersion: v1
 kind: ServiceAccount

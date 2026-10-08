@@ -12,6 +12,7 @@ resources:
   - kubernetes-mcp.yaml
   - jev-mcp.yaml
   - vaultwarden-mcp.yaml
+  - workspace-mcp.yaml
 
 configMapGenerator:
   - name: mcp-hub-app
@@ -58,6 +59,13 @@ replacements:
       - select:
           kind: Deployment
           name: mcp-hub
+        fieldPaths:
+          - spec.template.metadata.annotations.[mcp-hub.epaflix.com/gmail-revision]
+        options:
+          create: true
+      - select:
+          kind: Deployment
+          name: workspace-mcp
         fieldPaths:
           - spec.template.metadata.annotations.[mcp-hub.epaflix.com/gmail-revision]
         options:
