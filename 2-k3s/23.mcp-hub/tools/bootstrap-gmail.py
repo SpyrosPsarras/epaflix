@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """One-time, on a workstation with a browser: turn a Google OAuth desktop
-client into the SOPS-encrypted Secret the hub's /gmail server needs.
+client into the SOPS-encrypted Secret the hub's /gmail and /drive servers
+need (one refresh token covers both).
 
 Steps performed:
-  1. PKCE authorization-code flow for scope gmail.modify (access_type=offline,
-     prompt=consent so Google always returns a refresh token).
+  1. PKCE authorization-code flow for scopes gmail.modify and drive
+     (access_type=offline, prompt=consent so Google always returns a refresh token).
   2. Exchange the code, fetch the profile to print which mailbox was granted.
-  3. Write ../mcp-hub-gmail.enc.yaml (client-id, client-secret, refresh-token,
+  3. Write ../mcp-hub-gmail.enc.yaml (client-id, client-secret, refresh-token, email,
      plus a fresh revision annotation that restarts the hub), encrypted with
      sops via a temp file. Encryption only needs the age
      recipient from .sops.yaml, not the private key.
@@ -14,11 +15,12 @@ Steps performed:
 Nothing secret is printed. Stdlib only; no pip install.
 
 Usage:
+  bootstrap-gmail.py --reuse    # the client already in the cluster Secret
   bootstrap-gmail.py --client-json ~/Downloads/client_secret_*.json
   bootstrap-gmail.py --client-id ID --client-secret SECRET
 
-Prerequisites (Google Cloud console, once): a project with the Gmail API
-enabled, an OAuth consent screen of user type External published to
+Prerequisites (Google Cloud console, once): a project with the Gmail and
+Google Drive APIs enabled, an OAuth consent screen of user type External published to
 "In production" (Testing-status refresh tokens expire after 7 days), and an
 OAuth client of type Desktop app. See ../README.md.
 """
@@ -41,12 +43,19 @@ import webbrowser
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 PROFILE_URL = "https://gmail.googleapis.com/gmail/v1/users/me/profile"
-SCOPE = "https://www.googleapis.com/auth/gmail.modify"
+SCOPE = "https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/drive"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "..", "mcp-hub-gmail.enc.yaml")
 
 
 def _client(args):
+    if args.reuse:
+        r = subprocess.run(["kubectl", "--context", args.context, "-n", "mcp-hub", "get", "secret", "mcp-hub-gmail",
+                            "-o", "json"], capture_output=True, text=True)
+        if r.returncode != 0:
+            sys.exit(f"kubectl get secret mcp-hub-gmail failed: {r.stderr.strip()}")
+        data = json.loads(r.stdout)["data"]
+        return (base64.b64decode(data["client-id"]).decode(), base64.b64decode(data["client-secret"]).decode())
     if args.client_json:
         with open(args.client_json) as f:
             data = json.load(f)
@@ -56,7 +65,7 @@ def _client(args):
         return c["client_id"], c["client_secret"]
     if args.client_id and args.client_secret:
         return args.client_id, args.client_secret
-    sys.exit("pass --client-json FILE or --client-id/--client-secret")
+    sys.exit("pass --reuse, --client-json FILE or --client-id/--client-secret")
 
 
 def _authorize(client_id, client_secret):
@@ -113,7 +122,7 @@ def _profile(access_token):
         return json.load(resp)["emailAddress"]
 
 
-def _write_secret(path, client_id, client_secret, refresh_token):
+def _write_secret(path, client_id, client_secret, refresh_token, email):
     path = os.path.abspath(path)
     # The revision annotation stays plaintext (sops encrypts only stringData);
     # ../kustomization.yaml copies it into the pod template so the hub restarts.
@@ -125,7 +134,8 @@ def _write_secret(path, client_id, client_secret, refresh_token):
         "type: Opaque", "stringData:",
         f"  client-id: {json.dumps(client_id)}",
         f"  client-secret: {json.dumps(client_secret)}",
-        f"  refresh-token: {json.dumps(refresh_token)}", "",
+        f"  refresh-token: {json.dumps(refresh_token)}",
+        f"  email: {json.dumps(email)}", "",
     ])
     # Encrypt a sibling temp file (name still matches .sops.yaml's `\.enc\.yaml$`
     # rule) and move it into place, so a sops failure leaves the committed
@@ -146,6 +156,9 @@ def _write_secret(path, client_id, client_secret, refresh_token):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--reuse", action="store_true",
+                   help="reuse the OAuth client already in Secret mcp-hub/mcp-hub-gmail (needs kubectl)")
+    p.add_argument("--context", default="epaflix", help="kubectl context for --reuse")
     p.add_argument("--client-json", help="client_secret_*.json downloaded from the Google Cloud console")
     p.add_argument("--client-id")
     p.add_argument("--client-secret")
@@ -155,7 +168,10 @@ def main():
     client_id, client_secret = _client(args)
     tokens = _authorize(client_id, client_secret)
     mailbox = _profile(tokens["access_token"])
-    _write_secret(args.out, client_id, client_secret, tokens["refresh_token"])
+    granted = set(tokens.get("scope", "").split())
+    if not set(SCOPE.split()) <= granted:
+        sys.exit(f"Google granted only {sorted(granted)}; tick every box on the consent page and retry")
+    _write_secret(args.out, client_id, client_secret, tokens["refresh_token"], mailbox)
     print(f"granted mailbox: {mailbox}")
     print(f"wrote {os.path.relpath(args.out)} (sops-encrypted, new revision annotation). "
           "Commit and merge it; ArgoCD syncs the Secret and the annotation change restarts the hub.")

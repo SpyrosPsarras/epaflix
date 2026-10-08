@@ -27,6 +27,7 @@ business.
 | `/vault-secret` | upstream | the same server's `/secret`, plain JSON for `vault-run.py` (see Vaultwarden) | none |
 | `/kubernetes` | upstream | `kubernetes-mcp.yaml`, cluster-admin on this cluster | `kubernetes-epaflix` |
 | `/notion`     | upstream | hosted `https://mcp.notion.com/mcp`      | `notion`             |
+| `/drive`      | upstream | `workspace-mcp.yaml`, community [`google_workspace_mcp`](https://github.com/taylorwilsdon/google_workspace_mcp) (Drive tools only), same Google account and Secret as `/gmail` | `drive` |
 
 `GET /healthz` is the only unauthenticated route. Traefik routes
 `mcp.epaflix.com` on the `internal` entry point only (LAN LB, split DNS in
@@ -67,7 +68,9 @@ env reference.
 Both use `tools/hub_clients.py` (the pod has a byte copy,
 `13.t3code/one/tools/sync-shared.sh` keeps it in sync; CI checks). It also
 sets these OpenCode tools to `ask` (OpenCode names tools `<server>_<tool>`):
-`gmail_send`, `gmail_send_draft`, `gmail_trash`; the vault writes
+`gmail_send`, `gmail_send_draft`, `gmail_trash`; every Drive tool that
+writes (create, copy, import, `update_drive_file` which also edits and
+trashes, and the sharing tools); the vault writes
 `vault_add`, `vault_update`, `vault_trash`, `vault_attach`; and the mutating
 Kubernetes tools (`pods_delete`, `pods_exec`, `pods_run`,
 `resources_create_or_update`, `resources_delete`, `resources_scale`,
@@ -96,7 +99,7 @@ not a client yet.
 | Secret | Keys | Written by |
 |---|---|---|
 | `t3code/mcp-hub-client` | `token` | `tools/add-client.py t3code` |
-| `mcp-hub/mcp-hub-gmail` | `client-id`, `client-secret`, `refresh-token` | `tools/bootstrap-gmail.py` |
+| `mcp-hub/mcp-hub-gmail` | `client-id`, `client-secret`, `refresh-token`, `email` (hub `/gmail`, `workspace-mcp`) | `tools/bootstrap-gmail.py` |
 | `mcp-hub/mcp-hub-vaultwarden` | `client-id`, `client-secret`, `password` (bw container only), `hub-secret` (hub and server) | `tools/sops_secret.py --vaultwarden` |
 | `mcp-hub/mcp-hub-notion-grant` (not in git) | see `files/notion_grant.py` | `tools/bootstrap-notion.py`, then the hub |
 
@@ -159,15 +162,48 @@ Renew, on a PC with a browser and cluster kubectl:
 It logs in as your personal Notion account (every client acts with its
 permissions) and writes the Secret with kubectl. No commit, no restart.
 
+## Drive
+
+`/drive` gives agents read-write Google Drive on the same account as `/gmail`:
+search, read, create, edit, share and trash files (17 tools minus
+`start_google_auth`, which is disabled). Google's own hosted Drive MCP server
+(`drivemcp.googleapis.com`) is a Developer Preview that needs a Google
+Workspace account, which a personal account cannot get, so the hub runs the
+MIT-licensed community server in single-user mode instead.
+
+`workspace-mcp.yaml` writes the credential file at start from Secret
+`mcp-hub-gmail`, so Gmail and Drive share one refresh token. The OAuth scope is
+full `drive`: sharing and trashing need it, and no Drive scope is narrower and
+still lets an agent edit files it did not create. The server has no auth of its
+own here, so the NetworkPolicy (hub pods only) is the gate, as for `/kubernetes`.
+Mind prompt injection: a document an agent reads can carry instructions, and
+the tools above can then share or trash files.
+
+Rolling it out, on a PC with a browser, sops and cluster kubectl:
+
+1. In the Google Cloud project that already holds the Gmail client, enable the
+   **Google Drive API** (APIs & Services > Library).
+2. `python3 2-k3s/23.mcp-hub/tools/bootstrap-gmail.py --reuse`: it reads the
+   existing OAuth client from Secret `mcp-hub-gmail` with kubectl, so no new
+   client or download is needed. On the consent page, tick both Gmail and Drive.
+3. Commit `mcp-hub-gmail.enc.yaml` to the branch and merge.
+4. `2-k3s/23.mcp-hub/tools/add-client.py <pc> --reuse` on each PC; the t3code
+   pod picks `drive` up on its next start.
+
+Merging before step 2 leaves `workspace-mcp` in `CreateContainerConfigError`
+(the old Secret has no `email` key and no Drive scope); the hub and `/gmail`
+keep working.
+
 ## Gmail bootstrap (once, on a machine with a browser)
 
 Google Cloud console:
 
-1. Create a project (any name), APIs & Services > Library > enable **Gmail API**.
+1. Create a project (any name), APIs & Services > Library > enable **Gmail API**
+   and **Google Drive API**.
 2. APIs & Services > OAuth consent screen: user type **External**, add your
    address as a test user, then **Publish app** (status "In production").
    In Testing status Google expires refresh tokens after 7 days.
-   `gmail.modify` is a restricted scope: unverified, the app still works for
+   `gmail.modify` and `drive` are restricted scopes: unverified, the app still works for
    your own account behind a "Google hasn't verified this app" page you click
    through (Advanced > continue).
 3. Credentials > Create credentials > OAuth client ID > **Desktop app**.

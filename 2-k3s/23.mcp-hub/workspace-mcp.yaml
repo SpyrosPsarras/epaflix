@@ -1,0 +1,168 @@
+---
+# Upstream for the hub's /drive path: read-write Google Drive for the same
+# Google account as /gmail, served by the community Google Workspace MCP
+# server (github.com/taylorwilsdon/google_workspace_mcp, Drive tools only).
+# Google's hosted Drive MCP server needs Workspace Developer Preview
+# membership, which a personal account cannot get (README.md, Drive).
+#
+# Single-user mode reads the credential file seeded at start from Secret
+# mcp-hub-gmail (one refresh token covers gmail.modify and drive). The server
+# rewrites that file on every hourly refresh and drops the credentials if the
+# write fails, so it lives in a writable emptyDir.
+#
+# It has no MCP-level auth in this mode, so the NetworkPolicy is the gate:
+# only hub pods reach port 8000.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: workspace-mcp
+  namespace: mcp-hub
+  labels:
+    app: workspace-mcp
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: workspace-mcp
+  template:
+    metadata:
+      labels:
+        app: workspace-mcp
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 10
+      securityContext:
+        runAsNonRoot: true
+        # The image's user `app` is uid 1000.
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: server
+          # Bumping: recheck the Drive tool names in tools/hub_clients.py ASK.
+          image: ghcr.io/taylorwilsdon/google_workspace_mcp:2.0.1
+          command:
+            - sh
+            - -c
+            - >-
+              /app/.venv/bin/python -c 'import json, os, urllib.parse; e = os.environ; os.umask(0o077);
+              json.dump({"refresh_token": e["GOOGLE_REFRESH_TOKEN"],
+              "token_uri": "https://oauth2.googleapis.com/token",
+              "client_id": e["GOOGLE_OAUTH_CLIENT_ID"], "client_secret": e["GOOGLE_OAUTH_CLIENT_SECRET"],
+              "scopes": ["https://www.googleapis.com/auth/drive"]},
+              open(e["WORKSPACE_MCP_CREDENTIALS_DIR"] + "/" + urllib.parse.quote(e["USER_GOOGLE_EMAIL"], safe="@._-") + ".json", "w"))' &&
+              unset GOOGLE_REFRESH_TOKEN &&
+              exec /app/.venv/bin/python main.py --transport streamable-http --single-user --tools drive
+          env:
+            - name: HOME
+              value: /tmp
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+            - name: WORKSPACE_MCP_HOST
+              value: 0.0.0.0
+            - name: WORKSPACE_MCP_PORT
+              value: "8000"
+            - name: WORKSPACE_MCP_CREDENTIALS_DIR
+              value: /creds
+            # The pod cannot see a client's disk; Drive uploads take content or a URL.
+            - name: WORKSPACE_MCP_DISABLE_LOCAL_FILES
+              value: "true"
+            # Its browser consent flow cannot work here; tools/bootstrap-gmail.py grants access.
+            - name: WORKSPACE_MCP_DISABLED_TOOLS
+              value: start_google_auth
+            - name: USER_GOOGLE_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-hub-gmail
+                  key: email
+            - name: GOOGLE_OAUTH_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-hub-gmail
+                  key: client-id
+            - name: GOOGLE_OAUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-hub-gmail
+                  key: client-secret
+            - name: GOOGLE_REFRESH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-hub-gmail
+                  key: refresh-token
+          ports:
+            - containerPort: 8000
+              name: mcp
+          # exec, not httpGet: the NetworkPolicy admits only hub pods.
+          readinessProbe:
+            exec:
+              command: [curl, -fsS, -o, /dev/null, http://127.0.0.1:8000/health]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: [curl, -fsS, -o, /dev/null, http://127.0.0.1:8000/health]
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 10m
+              memory: 160Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: creds
+              mountPath: /creds
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: creds
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: workspace-mcp
+  namespace: mcp-hub
+  labels:
+    app: workspace-mcp
+spec:
+  type: ClusterIP
+  selector:
+    app: workspace-mcp
+  ports:
+    - name: mcp
+      port: 8000
+      targetPort: mcp
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: workspace-mcp-from-hub
+  namespace: mcp-hub
+spec:
+  podSelector:
+    matchLabels:
+      app: workspace-mcp
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: mcp-hub
+      ports:
+        - port: 8000
+          protocol: TCP
