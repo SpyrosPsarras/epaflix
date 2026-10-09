@@ -10,7 +10,6 @@ resources:
   - service.yaml
   - ingress.yaml
   - kubernetes-mcp.yaml
-  - jev-mcp.yaml
   - vaultwarden-mcp.yaml
   - workspace-mcp.yaml
 
@@ -28,11 +27,6 @@ configMapGenerator:
   - name: kubernetes-mcp-config
     files:
       - config.toml=files/kubernetes-mcp.toml
-  # The generated name hash rolls jev-mcp when the pinned version changes.
-  - name: jev-mcp-app
-    files:
-      - files/jev-mcp/package.json
-      - files/jev-mcp/package-lock.json
   # Name hashes roll vaultwarden-mcp when the server or the bw pin changes.
   - name: vaultwarden-mcp-app
     files:
@@ -68,25 +62,6 @@ replacements:
           name: workspace-mcp
         fieldPaths:
           - spec.template.metadata.annotations.[mcp-hub.epaflix.com/gmail-revision]
-        options:
-          create: true
-  - source:
-      kind: Secret
-      name: mcp-hub-jev
-      fieldPath: metadata.annotations.[mcp-hub.epaflix.com/revision]
-    targets:
-      - select:
-          kind: Deployment
-          name: mcp-hub
-        fieldPaths:
-          - spec.template.metadata.annotations.[mcp-hub.epaflix.com/jev-revision]
-        options:
-          create: true
-      - select:
-          kind: Deployment
-          name: jev-mcp
-        fieldPaths:
-          - spec.template.metadata.annotations.[mcp-hub.epaflix.com/jev-revision]
         options:
           create: true
   - source:
