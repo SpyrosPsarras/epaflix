@@ -53,8 +53,8 @@
       "commitMessageTopic": "authentik"
     },
     {
-      "description": "Auto-merge patches across the repo. Renovate now owns all docker digest + patch bumps for the servarr stack end-to-end (Image Updater retired — #192); this rule covers patch bumps repo-wide (incl. chart-only patches), with the dedicated servarr-digest rule below handling digest re-rolls.",
-      "matchUpdateTypes": ["patch"],
+      "description": "Auto-merge minor and patch updates across the repo. Renovate now owns all docker digest + patch bumps for the servarr stack end-to-end (Image Updater retired — #192); this rule covers minor and patch bumps repo-wide (incl. chart-only updates), with the dedicated servarr-digest rule below handling digest re-rolls.",
+      "matchUpdateTypes": ["minor", "patch"],
       "automerge": true,
       "automergeType": "pr",
       "platformAutomerge": true
@@ -89,7 +89,7 @@
       "versioning": "regex:^(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-(?<build>\\d+)$"
     },
     {
-      "description": "Streamystats' pinned build has no matching release tag (#1129). These moving tags can carry unreleased migrations, so every update needs review. Keep this after the digest and patch automerge rules. Lingarr left this rule with the batch-contract override: the kustomization entry now carries newName ghcr.io/spyrospsarras/lingarr (disabled by the overlay rule below), so the upstream name no longer extracts as a dependency - the build-lingarr.yml invariant guard covers the upstream base digest instead.",
+      "description": "Streamystats' pinned build has no matching release tag (#1129). These moving tags can carry unreleased migrations, so every update needs review. Keep this after the digest and minor/patch automerge rules. Lingarr left this rule with the batch-contract override: the kustomization entry now carries newName ghcr.io/spyrospsarras/lingarr (disabled by the overlay rule below), so the upstream name no longer extracts as a dependency - the build-lingarr.yml invariant guard covers the upstream base digest instead.",
       "matchFileNames": ["2-k3s/08.servarr/kustomization.yaml"],
       "matchDatasources": ["docker"],
       "matchPackageNames": ["ghcr.io/fredrikburmester/streamystats-aio"],
@@ -97,7 +97,7 @@
       "platformAutomerge": false
     },
     {
-      "description": "CLIProxyAPI: never auto-merge, any update type (#1221). Tracking resumed when the pr-5411 fork was retired and the pin went back to this tag stream, so the repo-wide patch automerge at the top of this list would otherwise own it. Two reasons it must not: this image is the gateway every agent session talks to, so a bad bump stops all coding work at once, and upstream ships fast - 27 releases in the 20 days from v7.2.148 (2026-09-03) to v7.3.15 (2026-09-23), including the v7.3.0 minor. The binary also impersonates a pinned Claude Code version (claude_device_profile.go, 2.1.280 at v7.3.15), so a release can change which Anthropic models are accepted, in both directions. PR opens, you merge it when you are not mid-task.",
+      "description": "CLIProxyAPI: never auto-merge, any update type (#1221). Tracking resumed when the pr-5411 fork was retired and the pin went back to this tag stream, so the repo-wide minor/patch automerge at the top of this list would otherwise own it. Two reasons it must not: this image is the gateway every agent session talks to, so a bad bump stops all coding work at once, and upstream ships fast - 27 releases in the 20 days from v7.2.148 (2026-09-03) to v7.3.15 (2026-09-23), including the v7.3.0 minor. The binary also impersonates a pinned Claude Code version (claude_device_profile.go, 2.1.280 at v7.3.15), so a release can change which Anthropic models are accepted, in both directions. PR opens, you merge it when you are not mid-task.",
       "matchManagers": ["kustomize"],
       "matchPackageNames": ["docker.io/eceasy/cli-proxy-api"],
       "automerge": false,
@@ -140,7 +140,7 @@
       "enabled": false
     },
     {
-      "description": "CLIProxyAPI plugin pins (#997): NEVER auto-merge, and this rule MUST stay after the repo-wide patch rule above, because later packageRules win. Renovate cannot compute the sha256 of a release zip, so it bumps the version and leaves the checksum stale. The fetch script fails CLOSED on a mismatch with exit 1, which fails the initContainer, which means an auto-merged patch bump would take cliproxy.epaflix.com down at the next sync rather than merely skipping a plugin. A plugin 0.9.1 -> 0.9.2 IS a patch, so the generic automerge rule would have caught these. The ci.yml step 'CLIProxyAPI plugin pins match upstream checksums' turns that stale checksum into a red gate instead of an outage, but this rule is the first line: a human updates the checksum from the release's own checksums.txt and pushes it to the Renovate branch before merging.",
+      "description": "CLIProxyAPI plugin pins (#997): NEVER auto-merge, and this rule MUST stay after the repo-wide minor/patch rule above, because later packageRules win. Renovate cannot compute the sha256 of a release zip, so it bumps the version and leaves the checksum stale. The fetch script fails CLOSED on a mismatch with exit 1, which fails the initContainer, which means an auto-merged patch bump would take cliproxy.epaflix.com down at the next sync rather than merely skipping a plugin. A plugin 0.9.1 -> 0.9.2 IS a patch, so the generic automerge rule would have caught these. The ci.yml step 'CLIProxyAPI plugin pins match upstream checksums' turns that stale checksum into a red gate instead of an outage, but this rule is the first line: a human updates the checksum from the release's own checksums.txt and pushes it to the Renovate branch before merging.",
       "matchManagers": ["custom.regex"],
       "matchPackageNames": [
         "abix5/pi-cliproxyapi-bridge",
@@ -170,7 +170,7 @@
       "followTag": "nightly"
     },
     {
-      "description": "t3code runtime inputs: one automerged PR for the non-major bumps that feed the runtime image hash. Every bump rewrites the inputs-<hash> tag in one/statefulset.yaml, and the npm pins sit on adjacent package.json lines, so separate PRs conflicted once the first merged (#1616/#1617). Grouped, the postUpgradeTasks above run once over all bumps. This automerges every non-major bump in these files: the npm CLIs (claude-code, codex, @opencode/cli, t3) and the @opencode/client the smoke test drives them with (keep the two OpenCode 2 pins on one version), argo-cd, gh and sops in versions.env, and node base-image digests. Renovate waits for CI itself (platformAutomerge false) because the repo has no required status checks, so build-t3-runtime's smoke test is the gate. Not in the group: helm and kustomize, because the same deps live in ci.yml and versions.env must stay on the gate's version; majors, which go to a separate major- group branch (next rule). Either can still conflict with this PR. The file lists here and in the next rule must match the postUpgradeTasks rule at the top. Keep both rules last: later rules win, and the repo-wide patch rule sets platformAutomerge true. Runs at any time, not in the global 2-6am window, so the pod trails a t3 nightly by one Renovate run (every 6h); the pod itself only switches after 30 idle minutes (one/idle-rollout.yaml).",
+      "description": "t3code runtime inputs: one automerged PR for the non-major bumps that feed the runtime image hash. Every bump rewrites the inputs-<hash> tag in one/statefulset.yaml, and the npm pins sit on adjacent package.json lines, so separate PRs conflicted once the first merged (#1616/#1617). Grouped, the postUpgradeTasks above run once over all bumps. This automerges every non-major bump in these files: the npm CLIs (claude-code, codex, @opencode/cli, t3) and the @opencode/client the smoke test drives them with (keep the two OpenCode 2 pins on one version), argo-cd, gh and sops in versions.env, and node base-image digests. Renovate waits for CI itself (platformAutomerge false) because the repo has no required status checks, so build-t3-runtime's smoke test is the gate. Not in the group: helm and kustomize, because the same deps live in ci.yml and versions.env must stay on the gate's version; majors, which go to a separate major- group branch (next rule). Either can still conflict with this PR. The file lists here and in the next rule must match the postUpgradeTasks rule at the top. Keep both rules last: later rules win, and the repo-wide minor/patch rule sets platformAutomerge true. Runs at any time, not in the global 2-6am window, so the pod trails a t3 nightly by one Renovate run (every 30 min); the pod itself only switches after 30 idle minutes (one/idle-rollout.yaml).",
       "matchFileNames": ["2-k3s/13.t3code/env/tools/package.json", "2-k3s/13.t3code/versions.env", "2-k3s/13.t3code/env/Dockerfile"],
       "matchPackageNames": ["!helm/helm", "!kubernetes-sigs/kustomize"],
       "schedule": ["at any time"],
