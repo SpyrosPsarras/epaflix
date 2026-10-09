@@ -56,8 +56,16 @@ def permissions():
                 'poweroff*', 'qm *stop *', 'qm *shutdown *', 'env', 'env *',
                 'printenv*', 'set', 'set -o', 'set +o', 'export', 'export -p',
                 'declare*', 'typeset*', '*/proc/*/environ*']
-    commands += ['ps e*'] + [f'ps {letter}*e*' for letter in 'abcdefghijklmnopqrstuvwxyz']
-    policy = {'*': 'allow', 'bash': {'*': 'allow', **dict.fromkeys(commands, 'deny')},
+    bash = {'*': 'allow'}
+    for prefix in ['ps', '/bin/ps', '/usr/bin/ps']:
+        bash[f'{prefix} *e*'] = 'deny'
+        for length in range(8, 0, -1):
+            bash[f'{prefix} ' + '?' * length + ' *'] = 'allow'
+            for position in range(length):
+                bash[f'{prefix} ' + '?' * position + 'e' + '?' * (length - position - 1) + ' *'] = 'deny'
+        bash[f'{prefix} -*'] = 'allow'
+    bash.update(dict.fromkeys(commands, 'deny'))
+    policy = {'*': 'allow', 'bash': bash,
               'path': {'*': 'allow'}, 'mcp': {'*': 'allow'}}
     for server, tools in ASK.items():
         for tool in tools:
@@ -66,18 +74,7 @@ def permissions():
     return {'permission': policy}
 
 
-def write(home, safety_entry, ssh_path=Path('/scripts/homelab-ssh.md')):
-    if not Path(safety_entry).is_absolute():
-        raise ValueError('Safety extension entry must be an absolute path')
-    agent = home / '.pi/agent'
-    settings_path = agent / 'settings.json'
-    settings = json.loads(settings_path.read_text()) if settings_path.exists() else {}
-    settings['packages'] = [str(Path('/tools/node_modules') / name) for name in PACKAGES] + [safety_entry]
-    settings['skills'] = ['!**/.agents/skills/ponytail/**']
-    settings.setdefault('pi-cliproxyapi-provider', {})['gpt56ContextWindow'] = 'canonical'
-    write_json(settings_path, settings)
-    write_json(agent / 'extensions/pi-permission-system/config.json', permissions())
-    (agent / 'pi-permissions.jsonc').unlink(missing_ok=True)
+def write_aliases(home):
     base_url = os.environ.get('ANTHROPIC_BASE_URL', '').rstrip('/') + '/v1'
     try:
         models = fetch_models(base_url, os.environ.get('ANTHROPIC_AUTH_TOKEN', ''))
@@ -93,8 +90,23 @@ def write(home, safety_entry, ssh_path=Path('/scripts/homelab-ssh.md')):
     except Exception:
         print('pi-setup: model discovery failed; previous provider config kept', file=sys.stderr)
     else:
-        write_json(agent / 'pi-cliproxyapi-provider/config.json', {
+        write_json(home / '.pi/agent/pi-cliproxyapi-provider/config.json', {
             'providerName': 'cliproxy', 'baseUrl': base_url, 'modelAliases': aliases})
+
+
+def write(home, safety_entry, ssh_path=Path('/scripts/homelab-ssh.md')):
+    if not Path(safety_entry).is_absolute():
+        raise ValueError('Safety extension entry must be an absolute path')
+    agent = home / '.pi/agent'
+    settings_path = agent / 'settings.json'
+    settings = json.loads(settings_path.read_text()) if settings_path.exists() else {}
+    settings['packages'] = [str(Path('/tools/node_modules') / name) for name in PACKAGES] + [safety_entry]
+    settings['skills'] = ['!**/.agents/skills/ponytail/**']
+    settings.setdefault('pi-cliproxyapi-provider', {})['gpt56ContextWindow'] = 'canonical'
+    write_json(settings_path, settings)
+    write_json(agent / 'extensions/pi-permission-system/config.json', permissions())
+    (agent / 'pi-permissions.jsonc').unlink(missing_ok=True)
+    write_aliases(home)
     try:
         instructions = (home / '.claude/AGENTS.md').read_text() + '\n' + ssh_path.read_text()
     except OSError:
@@ -120,12 +132,16 @@ def main():
     setup = commands.add_parser('write')
     setup.add_argument('home', type=Path)
     setup.add_argument('safety_entry')
+    aliases = commands.add_parser('aliases')
+    aliases.add_argument('home', type=Path)
     check = commands.add_parser('check-packages')
     check.add_argument('home', type=Path)
     args = parser.parse_args()
     try:
         if args.action == 'write':
             write(args.home, args.safety_entry)
+        elif args.action == 'aliases':
+            write_aliases(args.home)
         else:
             check_packages(args.home, sys.stdin.read())
     except (OSError, ValueError, TypeError) as error:
