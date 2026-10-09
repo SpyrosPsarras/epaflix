@@ -42,6 +42,7 @@ configMapGenerator:
       - files/homelab-ssh.md
       - files/sshd-authorized-keys
       - files/sshd.sh
+      - files/ssh-command.sh
       - files/ssh-config.sh
 
 generators:
