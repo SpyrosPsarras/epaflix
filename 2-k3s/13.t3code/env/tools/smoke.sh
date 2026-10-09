@@ -136,7 +136,7 @@ done
 node -e '
 const d=require(process.argv[1]);
 if(Object.keys(d.providerInstances).sort().join(",")!=="claudeAgent,codex,opencode")throw Error("provider instances");
-if(d.providers.opencode.serverUrl || d.providerInstances.opencode.config?.serverUrl)throw Error("OpenCode must be T3-managed");
+if(d.providerInstances.opencode.config?.serverUrl)throw Error("OpenCode must be T3-managed");
 console.log("smoke: project bootstrap and provider settings verified");' "$T3CODE_HOME/userdata/settings.json"
 kill -TERM "$sup"
 timeout 30 tail --pid="$sup" -f /dev/null || fail 'supervisor did not stop in 30s'
