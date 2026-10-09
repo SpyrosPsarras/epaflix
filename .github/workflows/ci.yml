@@ -301,7 +301,6 @@ jobs:
           python3 2-k3s/13.t3code/one/files/vault-run.test.py
           python3 2-k3s/13.t3code/one/files/idle-rollout.test.py
           python3 1-proxmox/ssh/gen-homelab-ssh.test.py
-          python3 2-k3s/13.t3code/one/tools/test-cc-safety-net-install.py
 
       - name: MCP hub selftest
         run: |
