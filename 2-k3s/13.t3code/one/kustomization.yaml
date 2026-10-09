@@ -32,6 +32,9 @@ configMapGenerator:
   - name: t3code-scripts
     files:
       - files/entrypoint.sh
+      - files/pi.sh
+      - files/pi-setup.py
+      - files/t3-pi-settings.py
       - files/cc-safety-net-install.py
       - files/cc-safety-net.patch
       - files/cc-safety-net-hashes.json

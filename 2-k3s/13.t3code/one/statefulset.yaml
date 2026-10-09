@@ -76,7 +76,7 @@ spec:
               mountPath: /runtime-state
       containers:
         - name: t3
-          image: ghcr.io/spyrospsarras/t3-runtime:inputs-adface5548665a031b6544345cb94864
+          image: ghcr.io/spyrospsarras/t3-runtime:inputs-76f4595df3a6142bec1533c218a6c736
           imagePullPolicy: Always
           command:
             - bash
@@ -131,6 +131,8 @@ spec:
             - name: jev-key
               mountPath: /run/jev
               readOnly: true
+            - name: jev-guard
+              mountPath: /run/jev-guard
             - name: home-spyros
               mountPath: /home/spyros
             # Only the entrypoint writes it; see files/entrypoint.sh.
@@ -234,6 +236,10 @@ spec:
             limits:
               memory: 8Gi
       volumes:
+        - name: jev-guard
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
         - name: jev-key
           secret:
             secretName: t3code-jev
