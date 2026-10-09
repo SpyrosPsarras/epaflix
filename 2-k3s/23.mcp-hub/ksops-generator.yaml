@@ -8,5 +8,4 @@ metadata:
         path: ksops
 files:
   - mcp-hub-gmail.enc.yaml
-  - mcp-hub-jev.enc.yaml
   - mcp-hub-vaultwarden.enc.yaml

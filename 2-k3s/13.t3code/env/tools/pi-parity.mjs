@@ -37,9 +37,6 @@ try {
   assert.ok(ponytail && pkg, 'package ponytail skill missing')
   assert.equal(realpathSync(ponytail.sourceInfo.path), realpathSync(join(pkg, 'skills/ponytail/SKILL.md')))
   assert.ok(!/failed to load|extension.*error|error.*extension/i.test(stderr), stderr)
-  const jev = settings.packages.find(path => path.endsWith('/jev-guard'))
-  assert.ok(jev, 'jev-guard package missing')
-  assert.ok(readFileSync(join(jev, 'extensions/jev-guard.ts')).length, 'jev-guard extension missing')
   console.log('parity: Pi commands, package skills, permission policy and extension loading PASS')
 } finally {
   clearTimeout(timer)

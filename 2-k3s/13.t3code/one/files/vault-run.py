@@ -8,7 +8,7 @@ The command gets VAULT_PASSWORD and VAULT_USERNAME when the item has them, and
 each non-empty custom field as VAULT_FIELD_<NAME> (name upper-cased,
 non-alphanumerics to "_"; two fields mapping to one name is an error).
 Agents use this instead of putting a secret in a command: tool arguments and
-results are saved in session files, and jev-guard blocks them.
+results are saved in session files.
 
 Hub: MCP_HUB_URL and MCP_HUB_TOKEN (t3code pod), else https://mcp.epaflix.com
 and the token in ~/.config/opencode/mcp-hub.key (a LAN PC).

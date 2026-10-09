@@ -12,7 +12,7 @@ use stateless JSON transport, so a pod restart costs a client one retry.
 Env: CLIENTS_FILE (default /app/clients.json) plus whatever the mounted
 servers need: GMAIL_*, SEARXNG_URL,
 VAULTWARDEN_URL + VAULTWARDEN_HUB_SECRET,
-KUBERNETES_MCP_URL, DRIVE_MCP_URL, JEV_MCP_URL + JEV_MCP_AUTH_TOKEN, NOTION_MCP_URL.
+KUBERNETES_MCP_URL, DRIVE_MCP_URL, NOTION_MCP_URL.
 
 Self-test: --selftest runs each module's selftest, then boots the ASGI app
 in-process against fake upstreams and checks auth, the MCP handshake and
@@ -41,14 +41,6 @@ MODULES = [("/gmail", gmail_mcp.server), ("/searxng", searxng_mcp.server)]
 PORT = int(os.environ.get("PORT", "8000"))
 
 
-def jev_token():
-    """jev-mcp (../jev-mcp.yaml) requires its own bearer; the client's hub token never goes upstream."""
-    token = os.environ.get("JEV_MCP_AUTH_TOKEN", "")
-    if not token:
-        raise UpstreamError("JEV_MCP_AUTH_TOKEN is not set (Secret mcp-hub-jev)")
-    return {"authorization": f"Bearer {token}"}
-
-
 def upstreams():
     import notion_grant
 
@@ -71,8 +63,6 @@ def upstreams():
             "KUBERNETES_MCP_URL", "http://kubernetes-mcp.mcp-hub.svc.cluster.local:8080/mcp"))),
         ("/drive", Upstream("drive", os.environ.get(
             "DRIVE_MCP_URL", "http://workspace-mcp.mcp-hub.svc.cluster.local:8000/mcp"))),
-        ("/jev", Upstream("jev", os.environ.get(
-            "JEV_MCP_URL", "http://jev-mcp.mcp-hub.svc.cluster.local:8080/mcp"), jev_token)),
         ("/notion", Upstream("notion", os.environ.get("NOTION_MCP_URL", "https://mcp.notion.com/mcp"),
                              grant.headers, on_unauthorized=grant.invalidate)),
     ]
@@ -181,8 +171,7 @@ def _selftest():
                                on_unauthorized=refresh, transport=transport)),
            ("/broken", Upstream("broken", "http://up/mcp", broken, transport=transport)),
            ("/crash", Upstream("crash", "http://up/mcp", crash, transport=transport)),
-           ("/down", Upstream("down", "http://127.0.0.1:9/mcp")),
-           ("/jev", Upstream("jev", "http://up/mcp", jev_token, transport=transport))]
+           ("/down", Upstream("down", "http://127.0.0.1:9/mcp"))]
 
     init = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
         "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "selftest", "version": "0"}}}
@@ -253,18 +242,6 @@ def _selftest():
         assert c.get("/down", headers=auth).status_code == 502
         assert c.post("/nope", json=init, headers=auth).status_code == 404
 
-        # /jev: jev-mcp gets its own bearer, never the client's hub token, and no token fails closed.
-        os.environ["JEV_MCP_AUTH_TOKEN"] = "j3v"
-        r = c.post("/jev", json=init, headers=auth)
-        assert r.status_code == 200 and r.json()["result"] == {"method": "initialize"}, r.text[:300]
-        assert seen[-1]["authorization"] == "Bearer j3v", seen[-1]
-        os.environ["JEV_MCP_AUTH_TOKEN"] = ""
-        before = len(seen)
-        r = c.post("/jev", json=init, headers=auth)
-        assert "JEV_MCP_AUTH_TOKEN is not set" in r.json()["error"]["message"] and len(seen) == before, r.text
-    # The production table mounts /jev at jev-mcp with this credential (constructors do no I/O).
-    jev = dict(upstreams())["/jev"]
-    assert jev.url == "http://jev-mcp.mcp-hub.svc.cluster.local:8080/mcp" and jev.credential is jev_token, jev.url
     assert "/keepass" not in dict(upstreams()), "the keepass route is retired"
     drive = dict(upstreams())["/drive"]
     assert drive.url == "http://workspace-mcp.mcp-hub.svc.cluster.local:8000/mcp", drive.url
