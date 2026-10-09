@@ -12,7 +12,7 @@ Credentials arrive at runtime and are never baked into the image. MCP servers co
 
 ## Pi
 
-T3 launches Pi through `/scripts/pi.sh`. `t3-pi-settings.py` registers that binary and selects Pi for migrated default and text-generation settings. `pi-setup.py` writes the package list, permission policy, CLIProxyAPI model aliases and agent instructions. The provider uses the proxy URL and key forwarded by `pi.sh`.
+T3 launches Pi through `/scripts/pi.sh`. `t3-pi-settings.py` registers that binary and selects Pi for migrated default and text-generation settings. `pi-setup.py` writes the package list, permission policy, CLIProxyAPI model aliases and agent instructions, and `pi.sh` refreshes the aliases on every Pi start with a 5 s limit, keeping the previous file if the refresh fails. The provider uses the proxy URL and key forwarded by `pi.sh`.
 
 The packages supply CLIProxyAPI integration, permission enforcement, output redaction, rpiv-todo, rpiv-ask-user-question, superpowers and ponytail. The reviewed cc-safety-net Pi build is registered separately by `cc-safety-net-install.py`. The package's ponytail skill takes precedence over the private bundle copy. Safety layers are described in `../one/pi-safety.md`.
 

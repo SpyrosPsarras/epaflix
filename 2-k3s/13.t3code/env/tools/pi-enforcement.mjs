@@ -26,13 +26,40 @@ export async function checkEnforcement(home, modules = '/tools/node_modules') {
     getShellToolAliases: () => undefined,
   })
   const cases = [
-    ['bash', { command: 'printenv HOME' }, 'deny'],
-    ['bash', { command: 'cat /proc/1/environ' }, 'deny'],
-    ...['ps e', 'ps auxe', 'ps eww'].map(command => ['bash', { command }, 'deny']),
-    ...['git status', 'kubectl -n x get pods', 'ps aux', 'ps -ef', 'ps -o pid,cmd']
+    ...['mkfs.ext4 /dev/sda', 'dd if=x of=/dev/sda', 'kubectl delete pod x',
+      'kubectl drain node', 'kubectl cordon node', 'kubectl -n a delete pod x',
+      'kubectl --context prod drain node', 'kubectl -n a cordon node',
+      'helm uninstall release', 'helm -n a uninstall release', 'reboot', 'shutdown now',
+      'poweroff', 'qm stop 100', 'qm shutdown 100', 'qm --skiplock stop 100',
+      'qm --skiplock shutdown 100', 'env', 'env HOME', 'printenv HOME', 'set', 'set -o',
+      'set +o', 'export', 'export -p', 'declare -p', 'typeset -p', 'cat /proc/1/environ',
+      'ps x /proc/1/environ']
+      .map(command => ['bash', { command }, 'deny']),
+    ...['git status', 'mktemp', 'dd if=/dev/zero of=/tmp/x', 'kubectl get pods',
+      'kubectl -n x get pods', 'helm list', 'qm status 100', 'set -euo pipefail',
+      'set -- arg', 'export NAME=value', 'envsubst', 'printf hello', 'type ps',
+      'cat /proc/1/status', 'ls /run', 'uptime', 'systemctl status']
       .map(command => ['bash', { command }, 'allow']),
     ['mcp__gmail__gmail_send', {}, 'ask'],
   ]
+  for (const prefix of ['ps', '/bin/ps', '/usr/bin/ps']) {
+    for (let length = 1; length <= 8; length++) {
+      cases.push(['bash', { command: `${prefix} ${'x'.repeat(length)} -o pid,etime` }, 'allow'])
+      for (let position = 0; position < length; position++) {
+        const word = 'x'.repeat(position) + 'e' + 'x'.repeat(length - position - 1)
+        cases.push(['bash', { command: `${prefix} ${word}` }, 'deny'])
+      }
+    }
+    cases.push(
+      ...['e', 'auxe', 'eww', 'axe', 'auxwwe', 'auxwwwwwe', 'e -o pid',
+        'ewwwwwwww', 'eauxwwwww']
+        .map(args => ['bash', { command: `${prefix} ${args}` }, 'deny']),
+      ['bash', { command: `ls && ${prefix} auxe` }, 'deny'],
+      ...['', ' aux', ' -ef', ' -eo pid,cmd', ' -o pid,cmd', ' auxf', ' axo pid,comm',
+        ' aux --sort=-%mem', ' x -o pid,etime', ' -A e', ' -ef e']
+        .map(args => ['bash', { command: prefix + args }, 'allow']),
+    )
+  }
   const rank = { allow: 0, ask: 1, deny: 2 }
   for (const [toolName, input, expected] of cases) {
     let actual = 'allow'
