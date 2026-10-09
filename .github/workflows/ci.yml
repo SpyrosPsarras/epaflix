@@ -297,6 +297,7 @@ jobs:
           python3 2-k3s/13.t3code/one/files/t3-pi-settings.test.py
           npm install --prefix /tmp/ssh-policy-check --ignore-scripts --no-audit --no-fund cc-safety-net@2.6.4
           SAFETY_NET_CLI=/tmp/ssh-policy-check/node_modules/.bin/cc-safety-net python3 2-k3s/13.t3code/one/files/ssh-policy.test.py
+          bash 2-k3s/13.t3code/one/files/ssh-command.test.sh
           python3 2-k3s/13.t3code/one/files/vault-ssh-agent.test.py
           python3 2-k3s/13.t3code/one/files/vault-run.test.py
           python3 2-k3s/13.t3code/one/files/idle-rollout.test.py
