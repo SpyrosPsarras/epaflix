@@ -12,11 +12,6 @@ T3_PROJECT_REPO=${T3_PROJECT_REPO:-https://github.com/SpyrosPsarras/epaflix.git}
 PROJECT_DIR=${T3_PROJECT_DIR:-$HOME/projects/$(basename "$T3_PROJECT_REPO" .git)}
 export PATH=/tools/node_modules/.bin:$PATH
 
-# OpenCode 2 converts its database in place on first start. Keep the OpenCode 1
-# store, config and T3 state before anything opens or rewrites them
-# (files/opencode-v1-backup.py, migration/README.md); a failure stops startup.
-python3 /scripts/opencode-v1-backup.py
-
 # github.com-only credential helper (files/git-credential-github.sh), set
 # before the clone so a private remote works on first boot. The token stays
 # in the process env; the helper prints it only to git, only for github.com.
@@ -47,58 +42,12 @@ if [[ ! -d $PROJECT_DIR/.git ]]; then
   git clone -q "$T3_PROJECT_REPO" "$PROJECT_DIR"
 fi
 
-# OpenCode: cliproxy provider with env references, written once.
-OC_DIR=$HOME/.config/opencode
-mkdir -p "$OC_DIR/plugins"
-# Replace read-only copies from earlier starts and keep the destination writable.
-install -m 0644 /scripts/cliproxy-models.js "$OC_DIR/plugins/cliproxy-models.js"
-# Retired shadow logger: the copy on the PVC would keep loading otherwise.
-# Its jev-shadow.jsonl records stay in ~/.local/state/opencode.
-rm -f "$OC_DIR/plugins/jev-shadow.js"
-install -m 0644 /scripts/jev-auto.js "$OC_DIR/plugins/jev-auto.js"
-# Tool-call guard (jev-guard.md); the config block below adds cc-safety-net and bash denies.
-install -m 0644 /scripts/jev-guard.js "$OC_DIR/plugins/jev-guard.js"
-# OpenCode 1 tools OpenCode 2 lacks: todowrite, and `name` for the skill tool.
-install -m 0644 /scripts/opencode-compat.js "$OC_DIR/plugins/opencode-compat.js"
-# A hand-made ~/.local/bin/opencode on the PVC ran the OpenCode 1 package path.
-if [[ -f $HOME/.local/bin/opencode ]] && grep -q opencode-ai "$HOME/.local/bin/opencode"; then
-  install -m 0755 /scripts/opencode-fast-version.sh "$HOME/.local/bin/opencode"
-fi
 # Permit vault attachment names while protecting SSH files in both HOME locations.
 python3 /scripts/ssh-policy.py "$HOME/.cc-safety-net/policy.json" \
   "$HOME" "$(getent passwd "$(id -u)" | cut -d: -f6)" /root
-# Retired OpenCode Loop: remove the copies earlier starts left on the PVC.
-rm -f "$OC_DIR"/plugins/opencode-loop.{ts,js} "$OC_DIR"/commands/loop.md \
-  "$OC_DIR"/commands/loop-*.md "$OC_DIR"/agents/opencode-loop-local.md
-# When OpenCode uses the hub's jev MCP: screening, completion gates and
-# picking by meaning. jev-auto.js adds it to the system prompt of OpenAI and
-# Anthropic models only, so it is not a global instruction; the MCP hub block
-# below removes it and the retired jev-first rule from opencode.json.
-install -m 0644 /scripts/jev-checks.md "$OC_DIR/jev-checks.md"
-rm -f "$OC_DIR/jev-first.md"
-if [[ ! -f $OC_DIR/opencode.json ]]; then
-  cat >"$OC_DIR/opencode.json" <<'EOF'
-{
-  "$schema": "https://opencode.ai/config.json",
-  "provider": {
-    "cliproxy": {
-      "npm": "@ai-sdk/openai-compatible",
-      "name": "CLIProxyAPI",
-      "options": {
-        "baseURL": "{env:ANTHROPIC_BASE_URL}/v1",
-        "apiKey": "{env:ANTHROPIC_AUTH_TOKEN}"
-      }
-    }
-  },
-  "model": "cliproxy/or-glm-5.3-flash",
-  "enabled_providers": ["cliproxy", "jev-auto"]
-}
-EOF
-  chmod 0600 "$OC_DIR/opencode.json"
-fi
 
 # MCP hub (2-k3s/23.mcp-hub): every agent MCP server behind one gateway and
-# this pod's hub token. Register every hub path for OpenCode, Claude and Codex
+# this pod's hub token. Register every hub path for Pi, OpenCode, Claude and Codex
 # in the active home; the token stays an env reference, never a literal on the PVC.
 # hub_clients.py also replaces the stdio keepass/searxng bridges and the
 # hosted Notion entries the hub superseded, and drops retired hub servers
@@ -110,6 +59,8 @@ if [[ -n ${MCP_HUB_TOKEN:-} && -n ${MCP_HUB_URL:-} ]]; then
     [[ -d $h ]] || continue
     python3 /scripts/hub_clients.py opencode "$h/.config/opencode/opencode.json" "$MCP_HUB_URL" \
       'Bearer {env:MCP_HUB_TOKEN}' || echo "t3env: hub opencode config failed in $h" >&2
+    python3 /scripts/hub_clients.py pi "$h/.pi/agent/mcp.json" "$MCP_HUB_URL" MCP_HUB_TOKEN || \
+      echo "t3env: hub pi config failed in $h" >&2
     for cfg in "$h/.claude/.claude.json" "$h/.claude.json"; do
       python3 /scripts/hub_clients.py claude "$cfg" "$MCP_HUB_URL" 'Bearer ${MCP_HUB_TOKEN}' || \
         echo "t3env: hub claude config failed for $cfg" >&2
@@ -119,126 +70,18 @@ if [[ -n ${MCP_HUB_TOKEN:-} && -n ${MCP_HUB_URL:-} ]]; then
   done
 fi
 
-# Primary home, with or without the hub: drop the Jev rules from the global
-# instructions (jev-auto.js scopes jev-checks per model), keeping every other one.
-# Verify/install the reviewed guard before startup and register its OpenCode 2
-# package directory in place of the OpenCode 1 file pin; failure aborts startup.
-/usr/bin/env -i PATH=/usr/local/bin:/usr/bin:/bin /usr/bin/python3 -I -S /scripts/cc-safety-net-install.py \
-  "$HOME/.local/share/opencode/cc-safety-net/2.4.11-print-third" --config "$OC_DIR/opencode.json"
-# Also seed bash denies once (OpenCode 2 applies them to its shell tool); an
-# existing permission.bash is left as the user set it. OpenCode 2 has no plugin
-# hook for the provider allowlist, so Jev Auto is added to it here, and
-# superpowers is registered when missing.
-python3 - "$OC_DIR/opencode.json" "$OC_DIR/jev-checks.md" "$OC_DIR/jev-first.md" <<'PY' || echo "t3env: opencode.json guard/instructions update failed" >&2
-import json, os, sys, tempfile
-BASH_DENY = ["mkfs*", "dd *of=/dev/*", "kubectl delete *", "kubectl drain *", "kubectl cordon *",
-             "helm uninstall *", "reboot*", "shutdown*", "poweroff*", "qm stop *", "qm shutdown *"]
-path, *retired = sys.argv[1:]
-with open(path) as f:
-    config = json.load(f)
-before = json.dumps(config, sort_keys=True)
-if "instructions" in config:
-    config["instructions"] = [i for i in config["instructions"] if i not in retired]
-# Homelab SSH how-to (1-proxmox/ssh/homelab-ssh.md) for every OpenCode session.
-if "/scripts/homelab-ssh.md" not in config.setdefault("instructions", []):
-    config["instructions"].append("/scripts/homelab-ssh.md")
-# No "*" key, so a top-level permission default still applies to other commands.
-# Read rules are left to cc-safety-net and jev-guard: OpenCode matches read
-# patterns against project-relative paths, so "**/.ssh/**" missed in a test.
-permission = config.setdefault("permission", {})
-if isinstance(permission, dict):
-    permission.setdefault("bash", {p: "deny" for p in BASH_DENY})
-enabled = config.get("enabled_providers")
-if isinstance(enabled, list) and "cliproxy" in enabled and "jev-auto" not in enabled:
-    enabled.append("jev-auto")
-plugins = config.setdefault("plugin", [])
-if not any(str(p[0] if isinstance(p, list) else p).startswith("superpowers@") for p in plugins):
-    plugins.insert(0, "superpowers@git+https://github.com/obra/superpowers.git")
-if json.dumps(config, sort_keys=True) != before:
-    with tempfile.NamedTemporaryFile(mode="w", dir=os.path.dirname(path), delete=False) as f:
-        json.dump(config, f, indent=2)
-        f.write("\n")
-    os.chmod(f.name, 0o600)
-    os.replace(f.name, path)
-PY
-
-# T3 provider instances, written once so later edits from the UI survive
-# restarts.
 T3_HOME=$HOME/.t3
-SETTINGS=$T3_HOME/userdata/settings.json
-if [[ ! -f $SETTINGS ]]; then
-  mkdir -p "$T3_HOME/userdata"
-  cat >"$SETTINGS" <<EOF
-{
-  "providers": { "opencode": { "enabled": true } },
-  "providerInstances": {
-    "opencode": {
-      "driver": "opencode",
-      "displayName": "OpenCode (via cliproxy)",
-      "enabled": true
-    },
-    "claudeAgent": {
-      "driver": "claudeAgent",
-      "displayName": "Claude (via cliproxy)",
-      "enabled": false
-    },
-    "codex": {
-      "driver": "codex",
-      "displayName": "Codex (via cliproxy)",
-      "enabled": true,
-      "config": {
-        "launchArgs": "-c model_providers.cliproxy.name=\"cliproxy\" -c model_providers.cliproxy.base_url=\"${ANTHROPIC_BASE_URL}/v1\" -c model_providers.cliproxy.env_key=\"ANTHROPIC_AUTH_TOKEN\" -c model_providers.cliproxy.wire_api=\"responses\" -c model_provider=\"cliproxy\"",
-        "customModels": ["codex/codex-auto-review"]
-      }
-    }
-  }
-}
-EOF
-  chmod 0600 "$SETTINGS"
-fi
+python3 /scripts/t3-pi-settings.py "$T3_HOME" "${ANTHROPIC_BASE_URL:-}"
 
-# T3 only injects thread-scoped MCP tools into servers it manages. Migrate
-# the endpoint seeded by older images, preserving other settings and URLs.
-python3 - "$SETTINGS" <<'PY'
-import json, os, sys, tempfile
-path = sys.argv[1]
-with open(path) as f:
-    settings = json.load(f)
-configs = [settings.get("providers", {}).get("opencode", {})]
-configs += [v.setdefault("config", {}) for v in settings.get("providerInstances", {}).values()
-            if v.get("driver") == "opencode"]
-changed = False
-for config in configs:
-    if config.get("serverUrl") == "http://127.0.0.1:4096":
-        del config["serverUrl"]
-        changed = True
-for config in configs[1:]:
-    if config.get("binaryPath") != "/scripts/opencode-fast-version.sh":
-        config["binaryPath"] = "/scripts/opencode-fast-version.sh"
-        changed = True
-# cliproxy runs with force-model-prefix: true, so Claude and Codex models route
-# only as claude/... and codex/.... Claude Code offers only its built-in bare
-# names, so its instances stay off; OpenCode serves Claude from the catalog.
-# T3's built-in bare Codex names fail the same way. The seeded Codex
-# list was bare too, and gpt-5.3-codex is no longer served at all.
-for instance in settings.get("providerInstances", {}).values():
-    if instance.get("driver") == "claudeAgent" and instance.get("enabled", True):
-        instance["enabled"] = False
-        changed = True
-    config = instance.get("config", {})
-    if instance.get("driver") == "codex" and config.get("customModels") == ["gpt-5.3-codex", "codex-auto-review"]:
-        config["customModels"] = ["codex/codex-auto-review"]
-        changed = True
-if changed:
-    with tempfile.NamedTemporaryFile(mode="w", dir=os.path.dirname(path), delete=False) as f:
-        json.dump(settings, f, indent=2)
-        f.write("\n")
-    os.replace(f.name, path)
-    print("t3env: migrated T3 provider settings")
-PY
-
-echo "t3env: $(t3 --version) claude=$(claude --version 2>/dev/null | head -1) opencode=$(opencode --version 2>/dev/null | head -1) codex=$(codex --version 2>/dev/null | head -1)"
+echo "t3env: $(t3 --version) claude=$(claude --version 2>/dev/null | head -1) pi=$(/scripts/pi.sh --version 2>/dev/null | head -1) codex=$(codex --version 2>/dev/null | head -1)"
 python3 /scripts/private-config.py install /private-agent-config/bundle.json
+SAFETY_ENTRY=$(/usr/bin/env -i HOME="$HOME" PATH=/usr/local/bin:/usr/bin:/bin \
+  /usr/bin/python3 -I -S /scripts/cc-safety-net-install.py | tail -n 1)
+python3 /scripts/pi-setup.py write "$HOME" "$SAFETY_ENTRY"
+if ! python3 /scripts/pi-setup.py jev-config "${JEV_OPENROUTER_KEY_FILE:-/run/jev/openrouter-key}" \
+  /run/jev-guard/config.json >/dev/null 2>&1; then
+  echo "t3env: Jev guard configuration unavailable; startup continues" >&2
+fi
 # Codex has no extra-instructions list: it reads ~/.codex/AGENTS.override.md
 # instead of AGENTS.md when present, so give it the bundle plus the homelab SSH how-to.
 # Written whole or not at all: a partial override would hide the bundle.
@@ -260,15 +103,11 @@ fi
   printf '{"version":1,"pid":%s,"host":"0.0.0.0","port":3773,"origin":"http://127.0.0.1:3773","startedAt":"%s"}\n' \
     "$$" "$(date -u +%FT%T.000Z)" >"$T3_HOME/userdata/server-runtime.json" ||
     echo "t3env: server-runtime.json not written; ssh t3code stays down" >&2
-  T3_HOME="$T3_HOME" node /scripts/opencode-refresh.mjs || :
 ) &
 # The launcher's pid files outlive the container; a stale pid would make it
 # kill whichever process now has that number.
 rm -f "$T3_HOME"/ssh-launch/*/pid "$T3_HOME"/ssh-launch/*/port "$T3_HOME"/ssh-launch/*/managed
-# T3 starts OpenCode per thread, so a plugin that is missing or fails to load
-# would otherwise surface only in a session. Stop startup instead.
-node /scripts/opencode-plugin-check.mjs /tools/node_modules/@opencode/cli/bin/opencode.exe "$OC_DIR" \
-  cliproxy-models jev-auto jev-guard opencode-compat cc-safety-net superpowers
+/scripts/pi.sh list | python3 /scripts/pi-setup.py check-packages "$HOME"
 # `serve` forces project bootstrap off; `start --no-browser` honors the flag.
 exec t3 start --no-browser --host 0.0.0.0 --port 3773 --base-dir "$T3_HOME" \
   --auto-bootstrap-project-from-cwd "$PROJECT_DIR"

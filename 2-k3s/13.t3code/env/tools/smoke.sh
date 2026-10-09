@@ -37,6 +37,9 @@ trap cleanup EXIT
 mkdir -p "$HOME"
 install -m 0555 /src/env/files/entrypoint.sh /src/env/files/git-credential-github.sh /src/files/cliproxy-models.js /scripts/
 install -m 0555 /src/env/files/private-config.py /scripts/
+install -m 0755 /src/one/files/pi.sh /scripts/
+install -m 0555 /src/one/files/pi-setup.py /src/one/files/hub_clients.py \
+  /src/one/files/t3-pi-settings.py /src/one/files/homelab-ssh.md /scripts/
 # The pod's OpenCode plugins and reviewed cc-safety-net installer (HOME is outside
 # /tmp because the installer refuses to build there).
 install -m 0555 /src/one/files/jev-auto.js /src/one/files/jev-guard.js /src/one/files/opencode-compat.js \

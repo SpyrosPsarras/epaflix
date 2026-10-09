@@ -108,12 +108,25 @@ def jev_config(key_file, output):
     write_json(output, {'openRouterApiKey': key})
 
 
+def check_packages(home, listing):
+    packages = json.loads((home / '.pi/agent/settings.json').read_text())['packages']
+    listed = {line.strip() for line in listing.splitlines()}
+    missing = [package for package in packages if package not in listed or not Path(package).exists()]
+    if not packages or missing:
+        for package in missing:
+            print(package, file=sys.stderr)
+        raise ValueError('Registered package missing or unlisted')
+    print('pi-setup: all registered packages listed')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='action', required=True)
     setup = commands.add_parser('write')
     setup.add_argument('home', type=Path)
     setup.add_argument('safety_entry')
+    check = commands.add_parser('check-packages')
+    check.add_argument('home', type=Path)
     secret = commands.add_parser('jev-config')
     secret.add_argument('key_file', type=Path)
     secret.add_argument('output', type=Path)
@@ -121,8 +134,10 @@ def main():
     try:
         if args.action == 'write':
             write(args.home, args.safety_entry)
-        else:
+        elif args.action == 'jev-config':
             jev_config(args.key_file, args.output)
+        else:
+            check_packages(args.home, sys.stdin.read())
     except (OSError, ValueError, TypeError):
         parser.exit(1, 'pi-setup: configuration failed\n')
 
