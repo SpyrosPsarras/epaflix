@@ -47,7 +47,7 @@ python3 /scripts/ssh-policy.py "$HOME/.cc-safety-net/policy.json" \
   "$HOME" "$(getent passwd "$(id -u)" | cut -d: -f6)" /root
 
 # MCP hub (2-k3s/23.mcp-hub): every agent MCP server behind one gateway and
-# this pod's hub token. Register every hub path for Pi, OpenCode, Claude and Codex
+# this pod's hub token. Register every hub path for Pi, Claude and Codex
 # in the active home; the token stays an env reference, never a literal on the PVC.
 # hub_clients.py also replaces the stdio keepass/searxng bridges and the
 # hosted Notion entries the hub superseded, and drops retired hub servers
@@ -57,8 +57,6 @@ python3 /scripts/ssh-policy.py "$HOME/.cc-safety-net/policy.json" \
 if [[ -n ${MCP_HUB_TOKEN:-} && -n ${MCP_HUB_URL:-} ]]; then
   for h in "$HOME"; do
     [[ -d $h ]] || continue
-    python3 /scripts/hub_clients.py opencode "$h/.config/opencode/opencode.json" "$MCP_HUB_URL" \
-      'Bearer {env:MCP_HUB_TOKEN}' || echo "t3env: hub opencode config failed in $h" >&2
     python3 /scripts/hub_clients.py pi "$h/.pi/agent/mcp.json" "$MCP_HUB_URL" MCP_HUB_TOKEN || \
       echo "t3env: hub pi config failed in $h" >&2
     for cfg in "$h/.claude/.claude.json" "$h/.claude.json"; do

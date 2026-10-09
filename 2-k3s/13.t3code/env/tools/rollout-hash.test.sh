@@ -3,7 +3,11 @@
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+mkdir -p "$tmp/env/tools"
 cp -r "$ROOT/one" "$tmp/k"
+cp "$ROOT/env/Dockerfile" "$ROOT/env/Dockerfile.dockerignore" "$tmp/env/"
+cp "$ROOT/env/tools/"{runtime-tag.sh,os-packages.txt,install-cluster-tools.sh,package.json,package-lock.json} "$tmp/env/tools/"
+cp "$ROOT/versions.env" "$tmp/"
 python3 "$ROOT/env/tools/private-config.test.py" overlay "$tmp/k"
 render() { kustomize build "$1" | python3 -c '
 import sys, yaml
@@ -18,15 +22,16 @@ assert sts["spec"]["persistentVolumeClaimRetentionPolicy"] == {"whenDeleted": "R
 for job in (next(d for d in docs if d["kind"] == "Job")["spec"]["template"]["spec"], rollout):
     assert job["containers"][0]["image"] == sts["spec"]["template"]["spec"]["containers"][0]["image"]
     assert job["affinity"] == sts["spec"]["template"]["spec"]["affinity"]
-print(refs["lock"], refs["scripts"])'; }
-base=$(render "$tmp/k"); read -r lock0 scripts0 <<<"$base"
-[[ $lock0 == t3code-tools-* && $scripts0 == t3code-scripts-* ]]
-printf '\n' >>"$tmp/k/tools/package-lock.json"
-after=$(render "$tmp/k"); read -r lock1 scripts1 <<<"$after"
-[[ $lock1 != "$lock0" && $scripts1 == "$scripts0" ]]
+print(refs["scripts"])'; }
+scripts0=$(render "$tmp/k")
+[[ $scripts0 == t3code-scripts-* ]]
+tag0=$(bash "$tmp/env/tools/runtime-tag.sh")
+printf '\n' >>"$tmp/env/tools/package-lock.json"
+[[ $(bash "$tmp/env/tools/runtime-tag.sh") != "$tag0" ]]
+[[ $(render "$tmp/k") == "$scripts0" ]]
 printf '\n' >>"$tmp/k/files/entrypoint.sh"
-after=$(render "$tmp/k"); read -r lock2 scripts2 <<<"$after"
-[[ $scripts2 != "$scripts1" && $lock2 == "$lock1" ]]
+after=$(render "$tmp/k")
+[[ $after != "$scripts0" ]]
 printf '\n' >>"$tmp/k/service.yaml"
 [[ $(render "$tmp/k") == "$after" ]]
 echo 'ok: tool/script updates roll pods; unrelated edits do not; PVCs retained; prepull matches pod image and node'

@@ -293,19 +293,15 @@ jobs:
           python3 2-k3s/17.remote-pi/search-guard/search-guard.test.py
           bash 2-k3s/maintenance/node-os-updater.test.sh
           bash 2-k3s/maintenance/aaaa-tripwire-cronjob.test.sh
-          node --test 2-k3s/13.t3code/one/files/jev-guard.test.mjs
-          npm install --prefix /tmp/ssh-policy-check --ignore-scripts --no-audit --no-fund cc-safety-net@2.4.11
+          python3 2-k3s/13.t3code/one/files/pi-setup.test.py
+          python3 2-k3s/13.t3code/one/files/t3-pi-settings.test.py
+          npm install --prefix /tmp/ssh-policy-check --ignore-scripts --no-audit --no-fund cc-safety-net@2.6.4
           SAFETY_NET_CLI=/tmp/ssh-policy-check/node_modules/.bin/cc-safety-net python3 2-k3s/13.t3code/one/files/ssh-policy.test.py
           python3 2-k3s/13.t3code/one/files/vault-ssh-agent.test.py
           python3 2-k3s/13.t3code/one/files/vault-run.test.py
           python3 2-k3s/13.t3code/one/files/idle-rollout.test.py
           python3 1-proxmox/ssh/gen-homelab-ssh.test.py
-          node --test 2-k3s/13.t3code/one/files/jev-auto.test.mjs
-          node --test 2-k3s/13.t3code/one/files/jev-steps.test.mjs
-          node --test 2-k3s/13.t3code/one/files/opencode-compat.test.mjs
-          node --test 2-k3s/13.t3code/one/files/opencode-plugin-check.test.mjs
-          node --test 2-k3s/13.t3code/files/cliproxy-models.test.mjs
-          python3 2-k3s/13.t3code/one/tools/test-opencode-v1-backup.py
+          python3 2-k3s/13.t3code/one/tools/test-cc-safety-net-install.py
 
       - name: MCP hub selftest
         run: |

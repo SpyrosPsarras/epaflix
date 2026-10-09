@@ -60,8 +60,7 @@ def install(payload, home):
             if stage.exists():
                 shutil.rmtree(stage)
     links = {'.claude/skills': 'skills', '.agents/skills': 'skills',
-             '.claude/AGENTS.md': 'instructions.md', '.codex/AGENTS.md': 'instructions.md',
-             '.config/opencode/AGENTS.md': 'instructions.md'}
+             '.claude/AGENTS.md': 'instructions.md', '.codex/AGENTS.md': 'instructions.md'}
     retired = home / '.claude/CLAUDE.md'
     if retired.is_symlink() and Path(os.path.realpath(retired)).is_relative_to(root.resolve()):
         retired.unlink()
