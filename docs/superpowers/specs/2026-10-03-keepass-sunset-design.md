@@ -141,7 +141,7 @@ by system authentication, and `gh auth status`, `ssh homepc true` and
   `sops_secret.py --keepass` to `--vaultwarden`, swap the CI selftest and
   update the README.
 - `2-k3s/13.t3code`: update `hub_clients.py`, jev-guard and its tests,
-  `ssh-policy.test.py`, `jev-auto.md`, `env/README.md` and
+  `ssh-policy.test.py`, the then-current Jev Auto documentation, `env/README.md` and
   `v2/readiness.md`.
 - Fix the KeePassXC hints in `10.observability/deploy.sh`, the authentik
   blueprint hook, and the "never look in KeePass" lines in `homelab-ssh.md`

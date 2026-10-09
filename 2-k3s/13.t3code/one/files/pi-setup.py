@@ -56,11 +56,11 @@ def permissions():
                 'printenv*', 'set', 'set -o', 'set +o', 'export', 'export -p',
                 'declare*', 'typeset*', '*/proc/*/environ*', '*/run/jev*']
     policy = {'*': 'allow', 'bash': {'*': 'allow', **dict.fromkeys(commands, 'deny')},
-              'path': {'*': 'allow', '/run/jev*': 'deny'}}
+              'path': {'*': 'allow', '/run/jev*': 'deny'}, 'mcp': {'*': 'allow'}}
     for server, tools in ASK.items():
         for tool in tools:
             name = re.sub(r'[^A-Za-z0-9_]', '_', f'mcp__{server}__{tool}')
-            policy[name] = 'ask'
+            policy['mcp'][name] = 'ask'
     return {'permission': policy}
 
 
