@@ -14,5 +14,5 @@ CI runs the Pi setup and T3 settings Python tests. The image smoke starts Pi in 
 - Secrets inside tool arguments are not checked.
 - Jev Auto model routing is dropped.
 - Exact environment-value masking is replaced by pi-redact patterns. They miss bare `omp-` keys and mask SSH config output.
-- Pi has no Jev MCP for explicit screening, review gates or search judgments. Tracked in [issue #1738](https://github.com/SpyrosPsarras/epaflix/issues/1738).
+- The review-gate skill names the OpenCode tool `jev_jev_noul`; Pi exposes it as `mcp__jev__jev_noul`.
 - Unlike the removed OpenCode guard, Jev result screening is not limited to OpenAI and Anthropic providers.

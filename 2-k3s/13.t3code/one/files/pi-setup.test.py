@@ -129,7 +129,8 @@ class SetupTests(unittest.TestCase):
             for tool in tools:
                 self.assertEqual(decision(mcp, f'mcp__{server}__{tool}'), 'ask')
         for name in ['mcp__gmail__gmail_search', 'mcp__vaultwarden__vault_list',
-                     'mcp__kubernetes_epaflix__pods_list', 'mcp__drive__search_drive_files']:
+                     'mcp__kubernetes_epaflix__pods_list', 'mcp__drive__search_drive_files',
+                     'mcp__jev__jev_noul', 'mcp__jev__jev_screen']:
             self.assertEqual(decision(mcp, name), 'allow')
         with patch.dict(self.setup.ASK, {'gmail': ['future_irreversible']}, clear=True):
             self.assertEqual(decision(self.setup.permissions()['permission']['mcp'],
@@ -349,7 +350,9 @@ print('wrapper OK')
         result = hub.pi({'mcpServers': {'mine': {'url': 'https://mine'}, 'keepass': {},
                         'old': {'command': 'keepass-remote.sh'}}, 'user': True},
                         'https://hub/', 'MCP_HUB_TOKEN')
-        self.assertEqual(set(result['mcpServers']), set(hub.SERVERS) | {'mine'})
+        self.assertEqual(set(result['mcpServers']), set(hub.SERVERS) | set(hub.JEV) | {'mine'})
+        self.assertEqual(result['mcpServers']['jev'], {
+            'url': 'https://hub/jev', 'headers': {'Authorization': 'Bearer ${MCP_HUB_TOKEN}'}})
         self.assertEqual(result['mcpServers']['vaultwarden'], {
             'url': 'https://hub/vaultwarden', 'headers': {'Authorization': 'Bearer ${MCP_HUB_TOKEN}'}})
         self.assertTrue(result['user'])

@@ -25,8 +25,8 @@ import tempfile
 
 SERVERS = {"gmail": "/gmail", "searxng": "/searxng", "notion": "/notion", "vaultwarden": "/vaultwarden",
            "kubernetes-epaflix": "/kubernetes", "drive": "/drive"}
-# Its instructions tell the agent to consult it before every task; trialled in OpenCode only.
-OPENCODE_ONLY = {"jev": "/jev"}
+# Its instructions tell the agent to consult it before every task; trialled in OpenCode and Pi only.
+JEV = {"jev": "/jev"}
 # These tools ask in OpenCode (<server>_<tool>) and Pi (mcp__<server>__<tool>).
 # The kubernetes and drive names are those of the images pinned in
 # 23.mcp-hub/kubernetes-mcp.yaml and workspace-mcp.yaml; recheck them when bumping.
@@ -73,7 +73,7 @@ def opencode(config, hub, authorization):
         del mcp[name]
     for name in RETIRED:
         mcp.pop(name, None)
-    for name, path in {**SERVERS, **OPENCODE_ONLY}.items():
+    for name, path in {**SERVERS, **JEV}.items():
         old = mcp.get(name, {})
         mcp[name] = {"type": "remote", "url": hub + path, "enabled": old.get("enabled", True) if
                      old.get("type") == "remote" else True, "timeout": 30000,
@@ -112,7 +112,7 @@ def pi(config, hub, env_var):
         del servers[name]
     for name in RETIRED:
         servers.pop(name, None)
-    for name, path in SERVERS.items():
+    for name, path in {**SERVERS, **JEV}.items():
         servers[name] = {"url": hub.rstrip("/") + path,
                          "headers": {"Authorization": "Bearer ${" + env_var + "}"}}
     return config
@@ -174,7 +174,7 @@ def _selftest():
     oc["mcp"]["keepass"] = {"type": "remote", "url": "https://hub/keepass"}
     oc["permission"] = {"*": "allow", "keepass_vault_trash": "ask", "keepass_vault_add": "ask"}
     out = opencode(oc, "https://hub/", "Bearer {env:T}")
-    assert set(out["mcp"]) == set(SERVERS) | set(OPENCODE_ONLY) | {"mine"}, out["mcp"]
+    assert set(out["mcp"]) == set(SERVERS) | set(JEV) | {"mine"}, out["mcp"]
     assert out["mcp"]["jev"]["url"] == "https://hub/jev", out["mcp"]["jev"]
     assert out["mcp"]["searxng"]["url"] == "https://hub/searxng" and out["mcp"]["searxng"]["enabled"] is True
     assert out["mcp"]["gmail"]["enabled"] is False, "a user's disable of a remote entry survives"
@@ -192,7 +192,9 @@ def _selftest():
 
     p = pi({"mcpServers": {"mine": {"url": "https://mine"}, "keepass": {},
                            "old": {"command": "keepass-remote.sh"}}}, "https://hub/", "MCP_HUB_TOKEN")
-    assert set(p["mcpServers"]) == set(SERVERS) | {"mine"}, p
+    assert set(p["mcpServers"]) == set(SERVERS) | set(JEV) | {"mine"}, p
+    assert p["mcpServers"]["jev"] == {"url": "https://hub/jev",
+        "headers": {"Authorization": "Bearer ${MCP_HUB_TOKEN}"}}, p
     assert p["mcpServers"]["vaultwarden"] == {"url": "https://hub/vaultwarden",
         "headers": {"Authorization": "Bearer ${MCP_HUB_TOKEN}"}}, p
     assert pi(json.loads(json.dumps(p)), "https://hub", "MCP_HUB_TOKEN") == p
