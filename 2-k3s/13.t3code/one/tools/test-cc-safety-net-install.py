@@ -1,7 +1,8 @@
 #!/usr/bin/python3 -I
 """Offline packaging checks. Optional --build tests a fresh pinned build."""
-import copy
+import contextlib
 import hashlib
+import io
 import importlib.util
 import json
 import os
@@ -17,40 +18,41 @@ installer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(installer)
 tools = installer.trusted_tools()
 print("Validated trusted executable paths: " + json.dumps(tools), flush=True)
-legacy = "file:///home/fixture/.local/share/opencode/cc-safety-net/2.4.11-print-third/dist/index.js"
-uri = "file:///home/fixture/.local/share/opencode/cc-safety-net/2.4.11-print-third-opencode2"
-original = {"plugin": ["other@1", ["cc-safety-net@2.4.11", {"mode": "strict"}], "after@2"],
-            "permission": {"bash": {"*": "ask"}}, "provider": {"fixture": {"options": {"apiKey": "test-value"}}}}
-expected = copy.deepcopy(original)
-expected["plugin"][1][0] = uri
-pin = lambda config: installer.replace_pin(config, uri, legacy=(legacy,))
-assert pin(copy.deepcopy(original)) == expected
-assert pin(copy.deepcopy(expected)) == expected
-assert pin({"plugin": ["other@1"]}) == {"plugin": ["other@1", uri]}
-assert pin({}) == {"plugin": [uri]}
-# OpenCode 1's direct-file pin moves to the OpenCode 2 package directory, keeping its options.
-assert pin({"plugin": ["other@1", legacy]}) == {"plugin": ["other@1", uri]}
-assert pin({"plugin": [[legacy, {"mode": "strict"}]]}) == {"plugin": [[uri, {"mode": "strict"}]]}
-# Legacy pins left beside the current registration are dropped, never loaded twice.
-assert pin({"plugin": ["other@1", uri, "cc-safety-net@2.4.11"]}) == {"plugin": ["other@1", uri]}
-assert pin({"plugin": ["cc-safety-net@2.4.11", uri]}) == {"plugin": [uri]}
-assert pin({"plugin": [legacy, uri]}) == {"plugin": [uri]}
-for plugins in (["cc-safety-net@9"], ["file:///unknown/cc-safety-net/index.js"],
-                ["cc-safety-net@2.4.11", "cc-safety-net@2.4.11"], [uri, uri], [legacy, "cc-safety-net@2.4.11"],
-                [uri, ["cc-safety-net@2.4.11", {"mode": "strict"}]], [[uri, {"mode": "strict"}], "cc-safety-net@2.4.11"],
-                "invalid"):
-    try:
-        pin({"plugin": plugins})
-    except ValueError:
-        pass
-    else:
-        raise AssertionError(f"Accepted ambiguous declaration: {plugins}")
-try:
-    pin({"plugin": [uri], "plugins": [{"package": legacy}]})
-except ValueError:
-    pass
-else:
-    raise AssertionError("Accepted a second declaration under the OpenCode 2 plugins key")
+with tempfile.TemporaryDirectory(dir=Path.cwd(), prefix=".safety-cache-test-") as tmp:
+    root = Path(tmp)
+    package = root / "package"
+    entry = package / "dist/pi/index.js"
+    entry.parent.mkdir(parents=True)
+    entry.write_text("export default function () {}\n")
+    (root / "cc-safety-net.patch").write_text("fixture")
+    manifest = {"patch": hashlib.sha256(b"fixture").hexdigest(),
+                "artifact": {"dist/pi/index.js": hashlib.sha256(entry.read_bytes()).hexdigest()}}
+    (root / "cc-safety-net-hashes.json").write_text(json.dumps(manifest))
+    with patch.object(installer, "HERE", root):
+        assert installer.install(package) == entry, "cached installation must return the Pi entry"
+        output = io.StringIO()
+        with patch.object(sys, "argv", ["installer", str(package)]), contextlib.redirect_stdout(output):
+            installer.main()
+        assert output.getvalue().splitlines()[-1] == str(entry), "CLI must print an absolute Pi path"
+        assert not (root / "package-opencode2").exists(), "CLI must not create an OpenCode wrapper"
+        with patch.object(Path, "home", return_value=root), patch.object(installer, "install", return_value=entry) as build:
+            with patch.object(sys, "argv", ["installer"]), contextlib.redirect_stdout(io.StringIO()):
+                installer.main()
+            assert build.call_args.args[0] == root / ".local/share/pi/cc-safety-net" / installer.VERSION
+        with patch.object(sys, "argv", ["installer", str(package), "--config", str(root / "opencode.json")]), contextlib.redirect_stderr(io.StringIO()):
+            try:
+                installer.main()
+            except SystemExit as error:
+                assert error.code == 2
+            else:
+                raise AssertionError("Accepted removed --config argument")
+        (entry.parent / "unexpected.js").write_text("tampered")
+        try:
+            installer.install(package)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("Accepted unreviewed dist file")
 with tempfile.TemporaryDirectory() as tmp:
     root = Path(tmp)
     (root / "file").write_text("original")
@@ -70,17 +72,6 @@ with tempfile.TemporaryDirectory() as tmp:
         pass
     else:
         raise AssertionError("Accepted artifact symlink")
-    package = root / "2.4.11-print-third"
-    made = installer.wrapper(package)
-    assert made == root / "2.4.11-print-third-opencode2"
-    assert json.loads((made / "package.json").read_text())["main"] == "index.js"
-    assert (made / "index.js").read_text() == f'export {{ default }} from "{(package / "dist/index.js").as_uri()}"\n'
-    stamp = (made / "index.js").stat().st_mtime_ns
-    installer.wrapper(package)
-    assert (made / "index.js").stat().st_mtime_ns == stamp, "an unchanged wrapper is not rewritten"
-    (made / "index.js").write_text("export default {}\n")
-    installer.wrapper(package)
-    assert "dist/index.js" in (made / "index.js").read_text(), "a tampered wrapper is restored"
     try:
         installer.trusted_path(root / "file", executable=True)
     except ValueError:
@@ -128,14 +119,15 @@ with tempfile.TemporaryDirectory() as tmp:
         assert not (root / "bun").exists()
 print("PASS: runner archive integrity mismatch rejected before executable creation", flush=True)
 print("PASS: trusted missing/user-owned tools fail before spawn; unsafe parent ownership/mode rejected; build env is an explicit allowlist", flush=True)
-print("PASS: preserve unrelated config/options, idempotency, fresh config, OpenCode 1 file pin migrated to the OpenCode 2 package directory, legacy pins beside it dropped, unknown/duplicate pins, hash and symlink rejection, wrapper rewrite", flush=True)
+print("PASS: cached Pi entry, absolute CLI path, default Pi destination, removed --config, no OpenCode wrapper, hash/symlink and unexpected-dist rejection", flush=True)
 if len(sys.argv) > 1:
     assert sys.argv[1] == "--build"
     # Test under this repository, outside /tmp, and remove staging on exit.
     with tempfile.TemporaryDirectory(dir=Path.cwd(), prefix=".safety-install-test-") as tmp:
         destination = Path(tmp) / "package"
         config = Path(tmp) / "config.json"
-        config.write_text(json.dumps(original))
+        config.write_text('{"plugin": ["untouched@1"]}\n')
+        original = config.read_bytes()
         ancestor_bin = Path(tmp) / "node_modules/.bin"
         ancestor_bin.mkdir(parents=True)
         ancestor_marker = Path(tmp) / "ancestor-executable-ran"
@@ -157,30 +149,36 @@ if len(sys.argv) > 1:
                         NPM_CONFIG_USERCONFIG="/nonexistent/poison.npmrc",
                         GIT_CONFIG_GLOBAL="/nonexistent/poison.gitconfig",
                         ANTHROPIC_AUTH_TOKEN="test-only-never-inherited")
-        subprocess.run([tools["python"], "-I", "-S", str(FILES / "cc-safety-net-install.py"), str(destination),
-                        "--config", str(config)], env=poisoned, check=True)
+        result = subprocess.run([tools["python"], "-I", "-S", str(FILES / "cc-safety-net-install.py"), str(destination)],
+                                env=poisoned, check=True, text=True, stdout=subprocess.PIPE)
+        print(result.stdout, end="")
+        assert result.stdout.splitlines()[-1] == str(destination / "dist/pi/index.js")
         assert not marker.exists()
         assert not ancestor_marker.exists()
-        staged = json.loads(config.read_text())
-        wanted = copy.deepcopy(original)
-        wanted["plugin"][1][0] = installer.wrapper(destination).as_uri()
-        assert staged == wanted
+        assert config.read_bytes() == original
         before = config.read_bytes()
-        subprocess.run([tools["python"], "-I", "-S", str(FILES / "cc-safety-net-install.py"), str(destination),
-                        "--config", str(config)], env=poisoned, check=True)
+        subprocess.run([tools["python"], "-I", "-S", str(FILES / "cc-safety-net-install.py"), str(destination)], env=poisoned, check=True)
         assert config.read_bytes() == before
         assert not marker.exists()
         assert not ancestor_marker.exists()
         subprocess.run([tools["node"], "--input-type=module", "-e", """
 import assert from 'node:assert/strict';
-const {CCSafetyNetPlugin}=await import(process.argv[1]);
-const hooks=await CCSafetyNetPlugin({directory:process.argv[2], homeDir:process.argv[2]});
-assert.equal(typeof hooks['tool.execute.before'], 'function');
-const inspect=command=>hooks['tool.execute.before']({tool:'bash',sessionID:'packaging-test'}, {args:{command}});
-await inspect(`python3 -c 'import subprocess; args=["true"]; subprocess.run(args); print("protected restore credentials encrypted copy saved")'`);
-await assert.rejects(()=>inspect('cat credentials'));
-console.log('PASS: built OpenCode hook allows display prose and denies sensitive-file read; commands were inspection data only');
-""", (destination / "dist/index.js").as_uri(), tmp], env=installer.build_environment(Path(tmp), tools["shell"]), check=True)
+const {default:extension}=await import(process.argv[1]);
+let hook;
+extension({on:(event,handler)=>{if(event==='tool_call') hook=handler}, registerCommand:()=>{}});
+assert.equal(typeof hook, 'function');
+const inspect=command=>hook({toolName:'bash', input:{command}}, {cwd:process.argv[2], sessionManager:{getSessionId:()=> 'packaging-test'}});
+assert.equal(inspect(`python3 -c 'import subprocess; args=["true"]; subprocess.run(args); print("protected restore credentials encrypted copy saved")'`), undefined);
+for (const command of [
+  'cat credentials',
+  `python3 -c 'import subprocess; args=["true"]; subprocess.run(args); print("protected restore credentials encrypted copy saved")' > output`,
+  `python3 -c 'import subprocess; args=["true"]; subprocess.run(args); print("protected restore credentials encrypted copy saved")' | cat`,
+  `echo "$(python3 -c 'import subprocess; args=[\"true\"]; subprocess.run(args); print(\"protected restore credentials encrypted copy saved\")')"`,
+  `python3 -c 'open("credentials"); print("protected restore credentials encrypted copy saved")'`,
+  `python3 - <<'PY'\nimport subprocess\nargs=["true"]\nsubprocess.run(args)\nprint("protected restore credentials encrypted copy saved")\nPY`,
+]) assert.equal(inspect(command)?.block, true, command);
+console.log('PASS: built Pi hook allows display prose; sensitive reads, redirection, pipe, substitution and stdin carriers stay blocked; submitted commands were not executed');
+""", (destination / "dist/pi/index.js").as_uri(), tmp], env=installer.build_environment(Path(tmp), tools["shell"]), check=True)
         print("PASS: malicious PATH wrappers never ran during fresh build or repeat install; poisoned loader/config environment was not inherited", flush=True)
         print("PASS: malicious ancestor node_modules/.bin wrappers never ran in actual fresh-build runner or repeat installation", flush=True)
-        print("PASS: fresh build, complete reviewed artifact hashes/chunks, Node plugin import, isolated config update and repeat install", flush=True)
+        print("PASS: fresh build, complete reviewed artifact hashes/chunks, Node Pi import, unchanged config and repeat install", flush=True)

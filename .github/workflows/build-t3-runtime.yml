@@ -6,14 +6,12 @@ on:
       - '2-k3s/13.t3code/env/**'
       - '2-k3s/13.t3code/one/**'
       - '2-k3s/13.t3code/versions.env'
-      - '2-k3s/13.t3code/files/cliproxy-models.js'
       - '.github/workflows/build-t3-runtime.yml'
   pull_request:
     paths:
       - '2-k3s/13.t3code/env/**'
       - '2-k3s/13.t3code/one/**'
       - '2-k3s/13.t3code/versions.env'
-      - '2-k3s/13.t3code/files/cliproxy-models.js'
       - '.github/workflows/build-t3-runtime.yml'
   workflow_dispatch:
 permissions:

@@ -5,11 +5,9 @@ namespace: t3code
 # The T3 Code server behind t3code.epaflix.com. It replaced the t3code LXC and
 # the two remote-pi/t3env replicas (migration/README.md).
 #
-# Kustomize refuses to read above its root, so tools/ and most of files/ are
-# byte copies of ../env inputs; tools/sync-shared.sh refreshes them and CI
-# diffs them (files/hub_clients.py is a copy of 23.mcp-hub/tools/hub_clients.py).
-# files/entrypoint.sh, files/sshd.sh, files/ssh-config.sh, files/opencode-refresh.mjs
-# and files/opencode-fast-version.sh are this overlay's own.
+# Kustomize refuses to read above its root. tools/sync-shared.sh copies shared
+# files from ../env, 23.mcp-hub and 1-proxmox/ssh; CI checks for drift.
+# The remaining scripts belong to this overlay.
 resources:
   - namespace.yaml
   - storage.yaml
@@ -25,26 +23,18 @@ configMapGenerator:
     files:
       - files/idle-rollout.sh
       - files/t3-idle.py
-  - name: t3code-tools
-    files:
-      - tools/package.json
-      - tools/package-lock.json
   - name: t3code-scripts
     files:
       - files/entrypoint.sh
+      - files/pi.sh
+      - files/pi-setup.py
+      - files/t3-pi-settings.py
       - files/cc-safety-net-install.py
       - files/cc-safety-net.patch
       - files/cc-safety-net-hashes.json
       - files/private-config.py
       - files/git-credential-github.sh
       - files/hub_clients.py
-      - files/cliproxy-models.js
-      - files/jev-auto.js
-      - files/jev-guard.js
-      - files/opencode-compat.js
-      - files/opencode-v1-backup.py
-      - files/opencode-plugin-check.mjs
-      - files/opencode-refresh.mjs
       - files/ssh-policy.py
       - files/vault-ssh-agent.py
       - files/vault-run.py
@@ -53,8 +43,6 @@ configMapGenerator:
       - files/sshd-authorized-keys
       - files/sshd.sh
       - files/ssh-config.sh
-      - files/jev-checks.md
-      - files/opencode-fast-version.sh
 
 generators:
   - ksops-generator.yaml

@@ -814,8 +814,8 @@ END $$;
 -- The credential's excluded_models list is set by hand (CPAMP), not in git. It
 -- hid claude-haiku-4-5-20251001 (bare and claude/ prefixed) from the catalog,
 -- which the heartbeat fix cf845ad read as the subscription no longer serving
--- it. The t3code subagent router pins Haiku for cheap reviews
--- (13.t3code/one/jev-auto.md), so git owns this one exclusion: any
+-- it. Subagent/model routing rules in the private agent instructions require
+-- Haiku to remain available, so git owns this one exclusion: any
 -- claude-haiku-* entry is removed, the rest of the list is left as set. The
 -- older claude-3-5-haiku does not match the pattern and stays excluded.
 DO $$
