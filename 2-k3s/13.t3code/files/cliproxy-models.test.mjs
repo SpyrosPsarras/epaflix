@@ -45,6 +45,7 @@ const listed = [
   { slug: "claude/claude-opus-5-5", supported_reasoning_levels: ["low", "medium", "high", "xhigh", "max"].map(effort => ({ effort })) },
   { slug: "codex/gpt-5.6-sol", supported_reasoning_levels: ["low", "medium", "high", "xhigh", "max", "ultra"].map(effort => ({ effort })) },
   { slug: "claude/claude-haiku-5", supported_reasoning_levels: [] },
+  { slug: "claude/claude-haiku-5-5", context_window: 1000000, max_tokens: 128000 },
   { slug: "openrouter/or-reasoner", supported_reasoning_levels: [{ effort: "high" }] },
 ]
 const ignored = [
@@ -96,6 +97,7 @@ try {
   assert.deepEqual(models["claude-fable-5-1"].limit, { context: 1000000, output: 128000 })
   assert.deepEqual(models["or-glm-5.3-flash"].limit, { context: 272000, output: 8192 })
   assert.deepEqual(models["or-minimax-m3:free"].limit, { context: 32768, output: 8192 })
+  assert.deepEqual(models["claude-haiku-5-5"].limit, { context: 100000, output: 32000 }, "Haiku 5.5 compacts before 100K context")
   assert.equal(models["or-glm-5.3-flash"].name, "or-glm-5.3-flash")
   assert.equal(models["or-glm-5.3-flash"].modelID, "openrouter/or-glm-5.3-flash")
   assert.equal(models["or-gcp-a-model-name"].name, "or-gcp-a-model-name")

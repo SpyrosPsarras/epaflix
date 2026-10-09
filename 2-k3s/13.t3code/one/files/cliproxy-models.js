@@ -14,6 +14,8 @@ const displayName = slug => {
   return version ? [`GPT-${version}`, ...(rest ? [title(rest.split("-"))] : [])].join(" ") : title(id.split("-"))
 }
 
+const CHEAP_TIER_LIMITS = { "claude-haiku-5-5": { context: 100000, output: 32000 } }
+
 const cachePath = () => join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "opencode", "cliproxy-models.json")
 
 // The cache keeps the version 5 catalog shape; OpenCode 2 model entries are derived from it.
@@ -130,7 +132,7 @@ const toModel = (id, model) => {
     cost: [],
     status: "active",
     enabled: true,
-    limit: model.limit,
+    limit: CHEAP_TIER_LIMITS[id] ?? model.limit,
   }
 }
 
