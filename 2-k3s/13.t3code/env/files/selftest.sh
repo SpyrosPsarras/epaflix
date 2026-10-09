@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Self-check without starting T3: credential helper filtering and npm lock pins.
 set -euo pipefail
 DIR=$(cd "$(dirname "$0")" && pwd)
 HELPER=$DIR/git-credential-github.sh

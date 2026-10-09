@@ -55,6 +55,7 @@ def permissions():
                 'poweroff*', 'qm *stop *', 'qm *shutdown *', 'env', 'env *',
                 'printenv*', 'set', 'set -o', 'set +o', 'export', 'export -p',
                 'declare*', 'typeset*', '*/proc/*/environ*', '*/run/jev*']
+    commands += ['ps e*'] + [f'ps {letter}*e*' for letter in 'abcdefghijklmnopqrstuvwxyz']
     policy = {'*': 'allow', 'bash': {'*': 'allow', **dict.fromkeys(commands, 'deny')},
               'path': {'*': 'allow', '/run/jev*': 'deny'}, 'mcp': {'*': 'allow'}}
     for server, tools in ASK.items():
@@ -138,8 +139,8 @@ def main():
             jev_config(args.key_file, args.output)
         else:
             check_packages(args.home, sys.stdin.read())
-    except (OSError, ValueError, TypeError):
-        parser.exit(1, 'pi-setup: configuration failed\n')
+    except (OSError, ValueError, TypeError) as error:
+        parser.exit(1, f'pi-setup {args.action}: {type(error).__name__}: {error}\n')
 
 
 if __name__ == '__main__':

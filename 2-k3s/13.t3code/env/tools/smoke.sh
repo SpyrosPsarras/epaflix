@@ -68,6 +68,10 @@ git init -q --initial-branch=main /tmp/seed
 export ANTHROPIC_BASE_URL=http://127.0.0.1:18317 ANTHROPIC_AUTH_TOKEN=smoke-not-a-secret
 export T3_PROJECT_REPO=/tmp/remote.git T3CODE_HOME=$HOME/.t3
 unset GITHUB_TOKEN GH_TOKEN
+mkdir -p "$T3CODE_HOME/userdata"
+cat >"$T3CODE_HOME/userdata/settings.json" <<'JSON'
+{"providerInstances":{"opencode":{"driver":"opencode"},"codex":{"driver":"codex","enabled":true},"claudeAgent":{"driver":"claudeAgent","enabled":false}},"defaultModelSelection":{"instanceId":"opencode","model":"old","options":[{"id":"variant","value":"high"}]},"textGenerationModelSelection":{"instanceId":"opencode","model":"old","options":[{"id":"variant","value":"low"}]}}
+JSON
 bash /scripts/entrypoint.sh >/tmp/entrypoint.log 2>&1 &
 sup=$!; pids+=("$sup")
 wait_url() {
@@ -84,6 +88,7 @@ mkdir -p "$HOME/.agents/skills/ponytail"
 printf '%s\n' '---' 'name: ponytail' 'description: Private duplicate must not win' '---' 'Duplicate skill fixture' >"$HOME/.agents/skills/ponytail/SKILL.md"
 timeout 90 node /src/env/tools/pi-parity.mjs /scripts/pi.sh "$HOME" > /tmp/pi-parity.log 2>&1 || fail 'Pi extension loading failed'
 grep '^parity:' /tmp/pi-parity.log
+node /src/env/tools/pi-models.mjs /scripts/pi.sh || fail 'Pi model listing failed'
 curl -fsS --max-time 5 http://127.0.0.1:3773/.well-known/t3/environment | node -e '
 let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
 const j=JSON.parse(s),p=require("/tools/package.json");
@@ -106,14 +111,18 @@ node -e '
 const d=require(process.argv[1]);
 if(Object.keys(d.providerInstances).sort().join(",")!=="claudeAgent,codex,pi")throw Error("provider instances");
 if(d.providerInstances.pi.driver!=="pi" || d.providerInstances.pi.config?.binaryPath!=="/scripts/pi.sh")throw Error("Pi launcher");
-console.log("smoke: project bootstrap and provider settings verified");' "$T3CODE_HOME/userdata/settings.json"
+for(const [key,level] of [["defaultModelSelection","high"],["textGenerationModelSelection","low"]]) {
+const selection=d[key];
+if(selection.instanceId!=="pi" || selection.model!=="cliproxy/claude/claude-opus-5-5" || JSON.stringify(selection.options)!==JSON.stringify([{id:"thinking",value:level}]))throw Error("migration selection");
+}
+const fs=require("node:fs"),backup=process.argv[1]+".before-pi";
+if((fs.statSync(backup).mode&0o777)!==0o600 || !JSON.parse(fs.readFileSync(backup)).providerInstances.opencode)throw Error("migration backup");
+console.log("smoke: project bootstrap, migrated provider selections and private rollback backup verified");' "$T3CODE_HOME/userdata/settings.json"
 kill -TERM "$sup"
 timeout 30 tail --pid="$sup" -f /dev/null || fail 'supervisor did not stop in 30s'
 set +e; wait "$sup"; rc=$?; set -e
 # JS and native T3 launchers report TERM as 130 and 143 respectively.
 [[ $rc == 130 || $rc == 143 ]] || fail "TERM exit was $rc, expected 130 or 143"
-for port in 3773; do
-  node -e 'const s=require("node:net").connect(+process.argv[1],"127.0.0.1");s.on("connect",()=>process.exit(1));s.on("error",()=>process.exit(0));s.setTimeout(1000,()=>process.exit(1));' "$port" || fail "port $port still open"
-done
+node -e 'const s=require("node:net").connect(3773,"127.0.0.1");s.on("connect",()=>process.exit(1));s.on("error",()=>process.exit(0));s.setTimeout(1000,()=>process.exit(1));' || fail 'port 3773 still open'
 pids=("${pids[0]}")
 echo 'smoke: clean shutdown, PASS'
