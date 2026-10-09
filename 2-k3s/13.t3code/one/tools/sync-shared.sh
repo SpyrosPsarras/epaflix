@@ -4,7 +4,7 @@
 # the sources in env/, 1-proxmox/ssh/ or 23.mcp-hub/tools/hub_clients.py. `--check`
 # exits 1 on drift.
 #
-# Owned by this overlay, NOT synced: files/entrypoint.sh (three homes, MCP hub
+# Owned by this overlay, NOT synced: files/entrypoint.sh (PVC home, MCP hub
 # registration, T3_PROJECT_DIR).
 set -euo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd)

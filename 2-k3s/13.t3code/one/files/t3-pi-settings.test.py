@@ -2,7 +2,6 @@
 import importlib.util
 import json
 from pathlib import Path
-import subprocess
 import tempfile
 import unittest
 
@@ -103,6 +102,34 @@ class SettingsTests(unittest.TestCase):
             'driver': 'pi', 'enabled': False, 'displayName': 'My Pi',
             'config': {'binaryPath': '/scripts/pi.sh', 'userKey': 1}})
 
+    def test_backup_is_private_exact_original_and_never_overwritten(self):
+        self.path.parent.mkdir()
+        original = b'{"providerInstances": {"opencode": {"driver": "opencode"}}, "user": "keep"}\n'
+        self.path.write_bytes(original)
+        backup = self.path.with_name('settings.json.before-pi')
+        from unittest.mock import patch
+        import os
+        replace = os.replace
+
+        def check_backup_before_replace(source, target):
+            self.assertTrue(backup.exists(), 'backup must exist before changing settings')
+            self.assertEqual(backup.read_bytes(), original)
+            self.assertEqual(backup.stat().st_mode & 0o777, 0o600)
+            replace(source, target)
+
+        with patch.object(self.settings.os, 'replace', side_effect=check_backup_before_replace):
+            self.settings.migrate(self.home, '')
+        self.path.write_text('{"providerInstances": {"opencode": {"driver": "opencode"}}}')
+        self.settings.migrate(self.home, '')
+        self.settings.migrate(self.home, '')
+        self.assertEqual(backup.read_bytes(), original)
+
+    def test_fresh_install_and_non_migration_do_not_create_backup(self):
+        self.settings.migrate(self.home, '')
+        self.assertFalse(self.path.with_name('settings.json.before-pi').exists())
+        self.settings.migrate(self.home, '')
+        self.assertFalse(self.path.with_name('settings.json.before-pi').exists())
+
     def test_cache_reset_happens_once_and_text_selection_migrates(self):
         self.path.parent.mkdir()
         self.path.write_text(json.dumps({'textGenerationModelSelection': {
@@ -147,66 +174,6 @@ class SettingsTests(unittest.TestCase):
         for key in ['defaultModelSelection', 'textGenerationModelSelection']:
             self.assertEqual(data[key]['options'], [None, 'keep', True, 7, ['keep'],
                              {'id': 'thinking', 'value': 'high'}, {'id': 'custom', 'value': 'keep'}])
-
-
-class PackageTests(unittest.TestCase):
-    def test_list_requires_every_registered_package_as_a_complete_line(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            home = Path(tmp)
-            agent = home / '.pi/agent'
-            agent.mkdir(parents=True)
-            package = home / 'pkg'
-            package.mkdir()
-            safety = home / 'index.js'
-            safety.touch()
-            (agent / 'settings.json').write_text(json.dumps({'packages': [str(package), str(safety)]}))
-            command = ['python3', str(ROOT / 'pi-setup.py'), 'check-packages', str(home)]
-            for listing, success in [(f'User packages:\n  {package}\n    {package}\n  {safety}\n    {safety}\n', True),
-                                     (f'  {package}-extra\n  {safety}\n', False),
-                                     (f'  {package}\n', False)]:
-                result = subprocess.run(command, input=listing, capture_output=True, text=True)
-                self.assertEqual(result.returncode == 0, success, result.stderr)
-                if not success:
-                    missing = package if '-extra' in listing else safety
-                    self.assertIn(str(missing), result.stderr)
-                    self.assertLess(result.stderr.index(str(missing)),
-                                    result.stderr.index('pi-setup: configuration failed'))
-
-    def test_real_pi_listing_rejects_missing_directory_or_file(self):
-        listing = '''User packages:
-  /tmp/opencode/pi-test/node_modules/pi-cliproxyapi-provider
-    /tmp/opencode/pi-test/node_modules/pi-cliproxyapi-provider
-  /tmp/opencode/rv4.2zFz/pkgs/real
-    /tmp/opencode/rv4.2zFz/pkgs/real
-  /tmp/opencode/rv4.2zFz/pkgs/missing
-'''
-        with tempfile.TemporaryDirectory() as tmp:
-            home = Path(tmp)
-            agent = home / '.pi/agent'
-            agent.mkdir(parents=True)
-            provider = home / 'provider'
-            provider.mkdir()
-            real = home / 'real'
-            real.mkdir()
-            for missing in [home / 'missing', home / 'index.js']:
-                with self.subTest(missing=missing.name):
-                    fixture = listing.replace('/tmp/opencode/pi-test/node_modules/pi-cliproxyapi-provider', str(provider))
-                    fixture = fixture.replace('/tmp/opencode/rv4.2zFz/pkgs/real', str(real))
-                    fixture = fixture.replace('/tmp/opencode/rv4.2zFz/pkgs/missing', str(missing))
-                    (agent / 'settings.json').write_text(json.dumps({
-                        'packages': [str(provider), str(real), str(missing)]}))
-                    command = ['python3', str(ROOT / 'pi-setup.py'), 'check-packages', str(home)]
-                    result = subprocess.run(command, input=fixture, capture_output=True, text=True)
-                    self.assertNotEqual(result.returncode, 0)
-                    self.assertIn(str(missing), result.stderr)
-                    self.assertLess(result.stderr.index(str(missing)),
-                                    result.stderr.index('pi-setup: configuration failed'))
-                    if missing.suffix:
-                        missing.touch()
-                    else:
-                        missing.mkdir()
-                    result = subprocess.run(command, input=fixture, capture_output=True, text=True)
-                    self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == '__main__':

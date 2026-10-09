@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Migrate T3 provider settings to Pi while preserving a rollback copy."""
 import json
 from pathlib import Path
 import sys
@@ -16,6 +17,7 @@ def migrate(home, base_url):
     else:
         settings = {
             'providerInstances': {
+                # cliproxy force-model-prefix rejects Claude Code's bare model names.
                 'claudeAgent': {'driver': 'claudeAgent', 'displayName': 'Claude (via cliproxy)', 'enabled': False},
                 'codex': {'driver': 'codex', 'displayName': 'Codex (via cliproxy)', 'enabled': True,
                           'config': {
@@ -30,6 +32,15 @@ def migrate(home, base_url):
     before = json.dumps(settings, sort_keys=True)
     instances = settings.setdefault('providerInstances', {})
     migrating = 'opencode' in instances
+    backup = path.with_name('settings.json.before-pi')
+    if migrating and not backup.exists():
+        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix='.before-pi-')
+        try:
+            with os.fdopen(fd, 'wb') as stream:
+                stream.write(path.read_bytes())
+            os.link(tmp, backup)
+        finally:
+            Path(tmp).unlink(missing_ok=True)
     instances.pop('opencode', None)
     settings.get('providers', {}).pop('opencode', None)
     instance = instances.setdefault('pi', {'displayName': 'Pi', 'enabled': True})

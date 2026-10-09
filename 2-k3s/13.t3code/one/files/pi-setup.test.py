@@ -95,11 +95,12 @@ class SetupTests(unittest.TestCase):
                         'qm stop 100', 'qm shutdown 100', 'kubectl -n a delete pod x',
                         'kubectl --context prod drain node', 'kubectl -n a cordon node',
                         'helm -n a uninstall release', 'qm --skiplock stop 100',
-                        'qm --skiplock shutdown 100']:
+                        'qm --skiplock shutdown 100', 'ps e', 'ps auxe', 'ps eww']:
             with self.subTest(command=command):
                 self.assertEqual(decision(policy['bash'], command), 'deny')
         for command in ['git status', 'kubectl get pods', 'helm list', 'qm status 100',
-                        'set -euo pipefail', 'set -- arg', 'export NAME=value']:
+                        'set -euo pipefail', 'set -- arg', 'export NAME=value',
+                        'ps aux', 'ps -ef', 'ps -o pid,cmd']:
             self.assertEqual(decision(policy['bash'], command), 'allow', command)
         self.assertEqual(policy['*'], 'allow')
         for target in ['/run/jev', '/run/jev/key', '/run/jev-guard', '/run/jev-guard/config.json']:
@@ -253,6 +254,7 @@ assert os.environ['CLIPROXYAPI_PROVIDER_NAME'] == 'cliproxy'
 assert os.environ['JEV_GUARD_CONFIG'] == '/run/jev-guard/config.json'
 assert os.environ['JEV_GUARD_ASK_SCORE'] == '3'
 assert os.environ['JEV_GUARD_ASK_P'] == '1'
+assert os.environ['JEV_GUARD_SKIP_SCAN'] == os.environ['JEV_GUARD_SKIP_TOOLS']
 assert set(os.environ['JEV_GUARD_SKIP_TOOLS'].split(',')) == {
     'mcp__vaultwarden__vault_' + name for name in
     ['add', 'attach', 'attachment', 'get', 'list', 'trash', 'update']}
@@ -268,6 +270,14 @@ print('wrapper OK')
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, 'wrapper OK\n')
+        for name in ['ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL']:
+            environment = {**os.environ, 'ANTHROPIC_AUTH_TOKEN': 'fake-key',
+                           'ANTHROPIC_BASE_URL': 'http://proxy.test/'}
+            environment.pop(name)
+            result = subprocess.run(['bash', str(wrapper)], env=environment,
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(name, result.stderr)
 
     def test_secret_config_is_atomic_private_and_silent(self):
         key = self.home / 'fake-key'
@@ -284,8 +294,26 @@ print('wrapper OK')
         key.write_text(' \n')
         result = subprocess.run(command, capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)
+        self.assertIn('pi-setup jev-config: ValueError: Empty key file', result.stderr)
         self.assertEqual(output.read_bytes(), before)
         self.assertEqual(list(output.parent.iterdir()), [output])
+
+    def test_setup_errors_identify_action_and_failure_without_key_contents(self):
+        settings = self.agent / 'settings.json'
+        settings.write_text('{broken')
+        result = subprocess.run(['python3', str(ROOT / 'pi-setup.py'), 'write',
+                                 str(self.home), self.safety], capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('pi-setup write: JSONDecodeError:', result.stderr)
+        key = self.home / 'key'
+        key.write_text('synthetic-key-never-log')
+        output = self.home / 'not-a-directory'
+        output.write_text('fixture')
+        result = subprocess.run(['python3', str(ROOT / 'pi-setup.py'), 'jev-config',
+                                 str(key), str(output / 'config.json')], capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('pi-setup jev-config: FileExistsError:', result.stderr)
+        self.assertNotIn('synthetic-key-never-log', result.stdout + result.stderr)
 
     def test_three_boots_converge_with_legacy_pi_instructions(self):
         private = load('private-config')
@@ -328,6 +356,66 @@ print('wrapper OK')
         before = copy.deepcopy(result)
         self.assertEqual(hub.pi(copy.deepcopy(result), 'https://hub', 'MCP_HUB_TOKEN'), before)
         self.assertEqual(result, before)
+
+
+class PackageTests(unittest.TestCase):
+    def test_list_requires_every_registered_package_as_a_complete_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            agent = home / '.pi/agent'
+            agent.mkdir(parents=True)
+            package = home / 'pkg'
+            package.mkdir()
+            safety = home / 'index.js'
+            safety.touch()
+            (agent / 'settings.json').write_text(json.dumps({'packages': [str(package), str(safety)]}))
+            command = ['python3', str(ROOT / 'pi-setup.py'), 'check-packages', str(home)]
+            for listing, success in [(f'User packages:\n  {package}\n    {package}\n  {safety}\n    {safety}\n', True),
+                                     (f'  {package}-extra\n  {safety}\n', False),
+                                     (f'  {package}\n', False)]:
+                result = subprocess.run(command, input=listing, capture_output=True, text=True)
+                self.assertEqual(result.returncode == 0, success, result.stderr)
+                if not success:
+                    missing = package if '-extra' in listing else safety
+                    self.assertIn(str(missing), result.stderr)
+                    self.assertLess(result.stderr.index(str(missing)),
+                                    result.stderr.index('pi-setup check-packages: ValueError:'))
+
+    def test_real_pi_listing_rejects_missing_directory_or_file(self):
+        listing = '''User packages:
+  /fixture/provider
+    /fixture/provider
+  /fixture/real
+    /fixture/real
+  /fixture/missing
+'''
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            agent = home / '.pi/agent'
+            agent.mkdir(parents=True)
+            provider = home / 'provider'
+            provider.mkdir()
+            real = home / 'real'
+            real.mkdir()
+            for missing in [home / 'missing', home / 'index.js']:
+                with self.subTest(missing=missing.name):
+                    fixture = listing.replace('/fixture/provider', str(provider))
+                    fixture = fixture.replace('/fixture/real', str(real))
+                    fixture = fixture.replace('/fixture/missing', str(missing))
+                    (agent / 'settings.json').write_text(json.dumps({
+                        'packages': [str(provider), str(real), str(missing)]}))
+                    command = ['python3', str(ROOT / 'pi-setup.py'), 'check-packages', str(home)]
+                    result = subprocess.run(command, input=fixture, capture_output=True, text=True)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(str(missing), result.stderr)
+                    self.assertLess(result.stderr.index(str(missing)),
+                                    result.stderr.index('pi-setup check-packages: ValueError:'))
+                    if missing.suffix:
+                        missing.touch()
+                    else:
+                        missing.mkdir()
+                    result = subprocess.run(command, input=fixture, capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == '__main__':

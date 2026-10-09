@@ -76,8 +76,9 @@ python3 /scripts/private-config.py install /private-agent-config/bundle.json
 SAFETY_ENTRY=$(/usr/bin/env -i HOME="$HOME" PATH=/usr/local/bin:/usr/bin:/bin \
   /usr/bin/python3 -I -S /scripts/cc-safety-net-install.py | tail -n 1)
 python3 /scripts/pi-setup.py write "$HOME" "$SAFETY_ENTRY"
+/scripts/pi.sh list | python3 /scripts/pi-setup.py check-packages "$HOME"
 if ! python3 /scripts/pi-setup.py jev-config "${JEV_OPENROUTER_KEY_FILE:-/run/jev/openrouter-key}" \
-  /run/jev-guard/config.json >/dev/null 2>&1; then
+  /run/jev-guard/config.json >/dev/null; then
   echo "t3env: Jev guard configuration unavailable; startup continues" >&2
 fi
 # Codex has no extra-instructions list: it reads ~/.codex/AGENTS.override.md
@@ -105,7 +106,6 @@ fi
 # The launcher's pid files outlive the container; a stale pid would make it
 # kill whichever process now has that number.
 rm -f "$T3_HOME"/ssh-launch/*/pid "$T3_HOME"/ssh-launch/*/port "$T3_HOME"/ssh-launch/*/managed
-/scripts/pi.sh list | python3 /scripts/pi-setup.py check-packages "$HOME"
 # `serve` forces project bootstrap off; `start --no-browser` honors the flag.
 exec t3 start --no-browser --host 0.0.0.0 --port 3773 --base-dir "$T3_HOME" \
   --auto-bootstrap-project-from-cwd "$PROJECT_DIR"

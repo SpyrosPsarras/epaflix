@@ -30,6 +30,7 @@
 
 1. Pi's process env holds `CLIPROXYAPI_API_KEY` and `MCP_HUB_TOKEN`. `env`, `printenv`, `/proc/*/environ` and `set` must be denied (Task 3 test).
 2. jev-guard "ask" prompts would stall unattended subagents. Run it deny-only: `JEV_GUARD_ASK_SCORE=9` and `JEV_GUARD_ASK_P=1.01` (Task 3 test: an ask-level call is allowed and logged, not prompted).
+   Superseded by the ledger: thresholds are 3/1 because upstream rejects out-of-range values; an ask blocks without a UI, it is not merely logged.
 3. T3 never drops a Pi model it has seen once. Startup deletes `~/.t3/caches/pi.json` once, at the switch (Task 4 test).
 4. Existing OpenCode threads lose their provider. T3 must start, and an old thread must show a provider-missing state, not crash (Task 6 verification).
 5. `/run/jev` (the OpenRouter key) must be unreadable through `read`, `bash` and `grep` (Task 3 test).
@@ -67,6 +68,7 @@ Original text (superseded):
 - Modify: `one/files/hub_clients.py` (`pi` target writes `~/.pi/agent/mcp.json`, header `"Authorization": "Bearer ${MCP_HUB_TOKEN}"`), `one/files/private-config.py` (links `.pi/agent/AGENTS.md` → `instructions.md`).
 
 **Interfaces:**
+Ledger rulings supersede the original thresholds with 3/1 and the policy path with `extensions/pi-permission-system/config.json`; deny-only still means an ask blocks without a UI.
 - `pi.sh`: exports `CLIPROXYAPI_BASE_URL="$ANTHROPIC_BASE_URL/v1"`, `CLIPROXYAPI_API_KEY="$ANTHROPIC_AUTH_TOKEN"`, `CLIPROXYAPI_PROVIDER_NAME=cliproxy`, `JEV_GUARD_CONFIG=/run/jev-guard/config.json`. `pi-setup.py jev-config <key-file> <out-file>` writes `{"openRouterApiKey": <trimmed key>}` there at startup, mode 0600, atomically, and never prints the key. `/run/jev-guard` is a memory emptyDir that Task 4 adds to the statefulset. No SOPS edit, `JEV_GUARD_ASK_SCORE=9`, `JEV_GUARD_ASK_P=1.01`, `JEV_GUARD_SKIP_TOOLS=<vaultwarden tools>`. Unsets `ANTHROPIC_AUTH_TOKEN`, then `exec /tools/node_modules/.bin/pi "$@"`.
 - `pi-setup.py write <home>` writes:
   - `settings.json`: the packages list as absolute paths (including `@dietrichgebert/ponytail`), `"skills": ["!**/.agents/skills/ponytail/**"]` (the package's newer ponytail skill wins in Pi; the bundled copy stays for Claude Code and Codex; verified on homePC), plus `"pi-cliproxyapi-provider": {"gpt56ContextWindow": "canonical"}`. Keys the user set are kept; `packages` and `skills` are always rewritten.
@@ -139,10 +141,12 @@ Original steps:
 ### Task 8: Rollout and live checks
 
 - [ ] review-gate passes on the whole branch. Ask Spyros, then merge; ArgoCD syncs and restarts `t3code-0`.
+- [ ] Before and after deployment, list scheduled tasks. Recreate or repoint any selecting instance `opencode` to Pi. `update_scheduled_task` cannot change model selection, so recreate those tasks with their schedule, prompt, enabled state and thread binding preserved.
+- [ ] About 496 existing threads retain provider instance `opencode`. Check that one opens in a provider-missing state without crashing T3; do not rewrite thread history.
 - [ ] In the pod:
   - (a) T3 lists Pi models with Thinking Off–Max for Codex.
   - (b) `delegate_task` to Pi with `cliproxy/codex/gpt-6.1-sol` completes.
   - (c) the synthetic AGENTS.md code word comes back through Claude.
   - (d) `rm -rf /`, `printenv` and `cat /run/jev/openrouter-key` are blocked.
   - (e) an old OpenCode thread opens without crashing T3.
-- [ ] Rollback: revert the merge commit. OpenCode's data on the PVC is not deleted.
+- [ ] Rollback: revert the merge commit, restore $T3_HOME/userdata/settings.json from settings.json.before-pi after the revert, then restart. OpenCode's data on the PVC is not deleted.

@@ -3,12 +3,12 @@ import { spawn } from 'node:child_process'
 import { readFileSync, realpathSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
+import { checkEnforcement } from './pi-enforcement.mjs'
 
-const [binary, home] = process.argv.slice(2)
+const [binary, home, modules] = process.argv.slice(2)
 assert.ok(binary && home, 'usage: pi-parity.mjs <pi launcher> <home>')
 const settings = JSON.parse(readFileSync(join(home, '.pi/agent/settings.json')))
-const policy = JSON.parse(readFileSync(join(home, '.pi/agent/extensions/pi-permission-system/config.json')))
-assert.equal(policy.permission.bash['printenv*'], 'deny')
+await checkEnforcement(home, modules)
 const child = spawn(resolve(binary), ['--mode', 'rpc', '--no-session'], {
   cwd: home, env: { ...process.env, HOME: home }, stdio: ['pipe', 'pipe', 'pipe'],
 })

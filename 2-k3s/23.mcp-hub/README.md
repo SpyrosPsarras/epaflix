@@ -61,8 +61,8 @@ kubeconfig contexts; the hub's is `kubernetes-epaflix`.
 **The t3code pod**: `add-client.py t3code` writes a new token into
 `13.t3code/one/mcp-hub-client.enc.yaml`; merge, and ArgoCD syncs `t3code`.
 The pod gets `MCP_HUB_URL`/`MCP_HUB_TOKEN`, and
-`13.t3code/one/files/entrypoint.sh` registers every path for OpenCode,
-Claude and Codex in `$HOME` and every `/home/t3env-*`, with the token as an
+`13.t3code/one/files/entrypoint.sh` registers the shared paths for Pi,
+Claude and Codex in `$HOME`, with the token as an
 env reference.
 
 Both use `tools/hub_clients.py` (the pod has a byte copy,

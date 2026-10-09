@@ -13,7 +13,8 @@ with a hub server's name are replaced (they were the stdio or hosted copies
 the hub supersedes), and so is any entry still pointing at a removed stdio
 bridge (LEGACY). Entries and <server>_* permissions of RETIRED servers are
 removed. Everything else in the file is left alone, including a user's
-"enabled": false and any other permission already set.
+"enabled": false for existing OpenCode remote entries and permissions already
+set. Pi replaces hub entries whole, including their user-set keys.
 """
 
 import json
@@ -26,7 +27,7 @@ SERVERS = {"gmail": "/gmail", "searxng": "/searxng", "notion": "/notion", "vault
            "kubernetes-epaflix": "/kubernetes", "drive": "/drive"}
 # Its instructions tell the agent to consult it before every task; trialled in OpenCode only.
 OPENCODE_ONLY = {"jev": "/jev"}
-# Irreversible, Drive-writing, or vault/cluster-changing tools prompt in OpenCode (<server>_<tool>).
+# These tools ask in OpenCode (<server>_<tool>) and Pi (mcp__<server>__<tool>).
 # The kubernetes and drive names are those of the images pinned in
 # 23.mcp-hub/kubernetes-mcp.yaml and workspace-mcp.yaml; recheck them when bumping.
 ASK = {
