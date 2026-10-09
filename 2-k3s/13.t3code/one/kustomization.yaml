@@ -3,7 +3,7 @@ kind: Kustomization
 namespace: t3code
 
 # The T3 Code server behind t3code.epaflix.com. It replaced the t3code LXC and
-# the two remote-pi/t3env replicas (migration/README.md).
+# the two remote-pi/t3env replicas.
 #
 # Kustomize refuses to read above its root. tools/sync-shared.sh copies shared
 # files from ../env, 23.mcp-hub and 1-proxmox/ssh; CI checks for drift.
