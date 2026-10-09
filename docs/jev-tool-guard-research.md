@@ -29,11 +29,11 @@ Researched 2026-09-28. Every claim cites a URL or a file path. Anything I could 
 
 ### OpenCode (we run 1.18.33, `opencode --version`)
 
-The pod now runs OpenCode 2. This section is the OpenCode 1 evidence the guard was designed on, kept as written. The OpenCode 2 hooks (`tool.hook("execute.before"|"execute.after")`, `event.input`, `event.id`, `shell` instead of `bash`, results with both `output` and `content`, MCP Code Mode turned off per server) are in `2-k3s/13.t3code/one/jev-guard.md`.
+The pod ran OpenCode 2 when this research was written. This section preserves the OpenCode 1 evidence the guard was designed on. The OpenCode 2 hooks (`tool.hook("execute.before"|"execute.after")`, `event.input`, `event.id`, `shell` instead of `bash`, results with both `output` and `content`, MCP Code Mode turned off per server) were documented in `2-k3s/13.t3code/one/jev-guard.md` before the Pi migration.
 
 - `tool.execute.before(input, output)`: `input` is `{ tool, sessionID, callID }`, `output` is `{ args }` (`/home/spyros/.config/opencode/node_modules/@opencode-ai/plugin/dist/index.d.ts` lines 235 to 241, package 1.18.31).
 - The shell tool id is `bash` and its args include `command` and `workdir` (https://github.com/anomalyco/opencode `packages/opencode/src/tool/shell/id.ts`, `tool/shell.ts` lines 612 to 634, commit ad6c72c, which is version 1.18.33).
-- Throwing blocks the call. The docs' `.env protection` example throws `new Error(...)` (https://opencode.ai/docs/plugins/). The plugin runner awaits each hook in sequence with no catch (`plugin/index.ts` lines 284 to 296). Our `jev-auto.js` already relies on this; its notes say "The model gets the refusal as a tool error and continues" (`2-k3s/13.t3code/one/jev-auto.md` lines 34 to 37).
+- Throwing blocks the call. The docs' `.env protection` example throws `new Error(...)` (https://opencode.ai/docs/plugins/). The plugin runner awaits each hook in sequence with no catch (`plugin/index.ts` lines 284 to 296). Our retired Jev Auto plugin relied on this; its notes said "The model gets the refusal as a tool error and continues".
 - Coverage, from source reading of `session/tools.ts`: the hook fires for native tools (line 107), MCP tools (line 403), MCP resource tools (lines 176, 259, 339) and tools called inside code mode (`tool/code-mode.ts` line 142). There is no branch on parent session, so subagent (task) sessions go through the same path. Unverified by a live run; confirmed only by code reading.
 - For MCP tools the hook runs before the permission prompt (`session/tools.ts` lines 403 to 409 call the hook, then `ctx.ask`).
 - `tool.execute.after(input, output)`: `input` adds `args`; `output` is `{ title, output, metadata }` for native tools (`index.d.ts` lines 249 to 258). Tools return the same object after the hook (`session/tools.ts` lines 121 to 131), so mutating `output.output` changes what the model sees. For MCP tools the object is the raw MCP result, a different shape (`session/tools.ts` lines 419 to 424). The command has already run by then.
@@ -51,17 +51,17 @@ Source: https://docs.claude.com/en/docs/claude-code/hooks (redirects to code.cla
 - `timeout` defaults to 600 s for command hooks; set it low.
 - Hooks run inside subagents too; input carries `agent_id` and `agent_type`.
 - `PostToolUse` can return `updatedToolOutput` to replace what Claude sees, or `decision: "block"` to add a note. The docs stress the tool already ran.
-- Note: our setup gives Claude Code no jev MCP (`jev-auto.md` line 38). A Claude Code hook would call OpenRouter directly, like `jev-auto.js`.
+- Note: at the time, our setup gave Claude Code no jev MCP. A Claude Code hook would call OpenRouter directly, like the retired Jev Auto plugin.
 
 ## 3. Jev API
 
-- Endpoint used by `jev-auto.js`: `POST https://openrouter.ai/api/v1/systemone`, body `{ model: "jev-1.13", state, questions }` (`/home/spyros/.config/opencode/plugins/jev-auto.js` lines 77 to 85). OpenRouter documents two surfaces for Jev: `/api/alpha/decisions` and `/api/v1/systemone`, same key and billing (https://openrouter.ai/docs/guides/community/jev). OpenRouter's documented model id is `typesafe/jev-1.13`. That bare `jev-1.13` works on the systemone surface is supported only by our one logged call with `status: "classified"` (`~/.local/state/opencode/jev-auto.jsonl`). The jev MCP uses the Decisions path with `typesafe/jev-1.13` (https://github.com/jkudish/jev-mcp README, OpenRouter section).
+- Endpoint used by the retired Jev Auto plugin: `POST https://openrouter.ai/api/v1/systemone`, body `{ model: "jev-1.13", state, questions }`. OpenRouter documents two surfaces for Jev: `/api/alpha/decisions` and `/api/v1/systemone`, same key and billing (https://openrouter.ai/docs/guides/community/jev). OpenRouter's documented model id is `typesafe/jev-1.13`. That bare `jev-1.13` works on the systemone surface is supported only by our one logged call with `status: "classified"` in the retired plugin's JSONL log. The jev MCP uses the Decisions path with `typesafe/jev-1.13` (https://github.com/jkudish/jev-mcp README, OpenRouter section).
 - Question types, all three (https://docs.typesafe.ai/api.md):
   - `noul`: yes/no, optional `criteria.true` / `criteria.false`. Answer `{ type, noul }`, a probability. No confidence field.
   - `choice`: `criteria` maps option to description, up to 255 options. Answer `{ choice, probabilities, confidence }`.
   - `score`: `criteria` is 2 to 10 ordered levels. Answer `{ score, legend, probabilities, confidence }`.
 - `usage.cost` in USD is in every OpenRouter response (https://openrouter.ai/docs/guides/community/jev FAQ). TypeSafe's own API returns only token counts (https://docs.typesafe.ai/api.md).
-- Price: $0.042 per million input tokens, output free (https://docs.typesafe.ai/models.md). OpenRouter measured $0.0000168 for a 400-token state (auto-approve recipe) and $0.000030 to $0.000036 with "under 600 ms" (https://openrouter.ai/docs/cookbook/building-agents/gate-tool-calls-with-jev). Our single logged call: $0.00001785, 620 ms including two OpenCode session API calls (`jev-auto.jsonl`). TypeSafe docs give no latency figure; I found none.
+- Price: $0.042 per million input tokens, output free (https://docs.typesafe.ai/models.md). OpenRouter measured $0.0000168 for a 400-token state (auto-approve recipe) and $0.000030 to $0.000036 with "under 600 ms" (https://openrouter.ai/docs/cookbook/building-agents/gate-tool-calls-with-jev). Our single logged call: $0.00001785, 620 ms including two OpenCode session API calls in the retired plugin's JSONL log. TypeSafe docs give no latency figure; I found none.
 - Limits: 1,200 requests per minute, "adjusting dynamically" (https://docs.typesafe.ai/models.md).
 - Errors: 401, 422, 429, 529 (https://docs.typesafe.ai/api.md). OpenRouter adds 402 when credits run out, observed live today.
 - Known weak spots that matter for a guard (https://docs.typesafe.ai/model-jaggedness/jev-1.13.md): literal reading, indirection, and adversarial content in state "can move the answer". Text that argues for its own classification is a real risk when the state is a command the agent wrote. It is also poor at exact string work, so secret detection belongs in regex, not Jev.
@@ -98,9 +98,9 @@ Fail open or closed:
 - Layer 4 should fail open with a logged `jev_unavailable` record. The catastrophic set is already handled in code, and Jev has real outages: 402 today, plus 429 and 529 by design. Failing closed would stop all shell work whenever credits run out. dcg makes the same split: it fails open only on infrastructure errors (https://github.com/Dicklesworthstone/destructive_command_guard docs/opencode-integration.md).
 - The middle band (neither clearly safe nor clearly destructive) has no "ask" in OpenCode 1.x `tool.execute.before`. Either allow and log, or throw a message that tells the agent to ask the user first. In Claude Code, return `permissionDecision: "ask"`.
 
-Logging: one JSONL line per guarded call at `$XDG_STATE_HOME/opencode/jev-guard.jsonl`, same pattern as `jev-auto.js` lines 104 to 110 (mode 0600, dir 0700). Fields: timestamp, sessionId, callId, tool, layer, decision, rule id, Jev probabilities and confidence, requestId, costUsd, latencyMs, and the redacted command. Never the raw command, which may hold a secret.
+Logging: one JSONL line per guarded call at `$XDG_STATE_HOME/opencode/jev-guard.jsonl`, using the retired Jev Auto plugin's pattern (mode 0600, dir 0700). Fields: timestamp, sessionId, callId, tool, layer, decision, rule id, Jev probabilities and confidence, requestId, costUsd, latencyMs, and the redacted command. Never the raw command, which may hold a secret.
 
-Placement: a separate `jev-guard.js` next to `jev-auto.js` in `2-k3s/13.t3code/one/files/`, deployed the same way. `jev-auto.js` has a model-based Jev gate (`allowedModel`); the guard should run for every model, because the risk comes from the command, not the model.
+Historical placement proposal: a separate `jev-guard.js` next to the Jev Auto plugin in `2-k3s/13.t3code/one/files/`, deployed the same way. Jev Auto had a model-based Jev gate (`allowedModel`); the guard should run for every model, because the risk comes from the command, not the model.
 
 Gaps any hook leaves:
 

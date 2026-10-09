@@ -6,13 +6,15 @@ tools/add-client.py (PCs) and the t3code pod entrypoint (a byte copy in
   hub_clients.py opencode <opencode.json> <hub url> <Authorization value>
   hub_clients.py claude   <.claude.json>  <hub url> <Authorization value | helper:CMD>
   hub_clients.py codex    <CODEX_HOME>    <hub url> <token env var>
+  hub_clients.py pi       <mcp.json>      <hub url> <token env var>
 
 Idempotent: a file is rewritten only when an entry differs. Existing entries
 with a hub server's name are replaced (they were the stdio or hosted copies
 the hub supersedes), and so is any entry still pointing at a removed stdio
 bridge (LEGACY). Entries and <server>_* permissions of RETIRED servers are
 removed. Everything else in the file is left alone, including a user's
-"enabled": false and any other permission already set.
+"enabled": false for existing OpenCode remote entries and permissions already
+set. Pi replaces hub entries whole, including their user-set keys.
 """
 
 import json
@@ -25,7 +27,7 @@ SERVERS = {"gmail": "/gmail", "searxng": "/searxng", "notion": "/notion", "vault
            "kubernetes-epaflix": "/kubernetes", "drive": "/drive"}
 # Its instructions tell the agent to consult it before every task; trialled in OpenCode only.
 OPENCODE_ONLY = {"jev": "/jev"}
-# Irreversible, Drive-writing, or vault/cluster-changing tools prompt in OpenCode (<server>_<tool>).
+# These tools ask in OpenCode (<server>_<tool>) and Pi (mcp__<server>__<tool>).
 # The kubernetes and drive names are those of the images pinned in
 # 23.mcp-hub/kubernetes-mcp.yaml and workspace-mcp.yaml; recheck them when bumping.
 ASK = {
@@ -104,6 +106,18 @@ def claude(config, hub, authorization):
     return config
 
 
+def pi(config, hub, env_var):
+    servers = config.setdefault("mcpServers", {})
+    for name in [n for n, e in servers.items() if n not in SERVERS and isinstance(e, dict) and _legacy(e)]:
+        del servers[name]
+    for name in RETIRED:
+        servers.pop(name, None)
+    for name, path in SERVERS.items():
+        servers[name] = {"url": hub.rstrip("/") + path,
+                         "headers": {"Authorization": "Bearer ${" + env_var + "}"}}
+    return config
+
+
 def codex(codex_home, hub, env_var, run=subprocess.run):
     """Codex has no TOML writer we can rely on, so go through its CLI, only for entries that differ."""
     import tomllib
@@ -136,14 +150,14 @@ def codex(codex_home, hub, env_var, run=subprocess.run):
 
 
 def main(argv):
-    if len(argv) != 5 or argv[1] not in ("opencode", "claude", "codex"):
+    if len(argv) != 5 or argv[1] not in ("opencode", "claude", "codex", "pi"):
         sys.exit(__doc__)
     kind, target, hub, auth = argv[1:]
     if kind == "codex":
         changed = codex(target, hub, auth)
     else:
         before = _load(target)
-        after = (opencode if kind == "opencode" else claude)(json.loads(json.dumps(before)), hub, auth)
+        after = {"opencode": opencode, "claude": claude, "pi": pi}[kind](json.loads(json.dumps(before)), hub, auth)
         changed = after != before
         if changed:
             _write_json(target, after)
@@ -175,6 +189,13 @@ def _selftest():
     assert cl["mcpServers"]["kubernetes-epaflix"] == {"type": "http", "url": "http://h/kubernetes",
                                                       "headersHelper": "cat key"}, cl
     assert claude({}, "http://h", "Bearer ${T}")["mcpServers"]["gmail"]["headers"] == {"Authorization": "Bearer ${T}"}
+
+    p = pi({"mcpServers": {"mine": {"url": "https://mine"}, "keepass": {},
+                           "old": {"command": "keepass-remote.sh"}}}, "https://hub/", "MCP_HUB_TOKEN")
+    assert set(p["mcpServers"]) == set(SERVERS) | {"mine"}, p
+    assert p["mcpServers"]["vaultwarden"] == {"url": "https://hub/vaultwarden",
+        "headers": {"Authorization": "Bearer ${MCP_HUB_TOKEN}"}}, p
+    assert pi(json.loads(json.dumps(p)), "https://hub", "MCP_HUB_TOKEN") == p
 
     calls = []
     with tempfile.TemporaryDirectory() as home:
