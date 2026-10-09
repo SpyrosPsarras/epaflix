@@ -95,12 +95,20 @@ class SetupTests(unittest.TestCase):
                         'qm stop 100', 'qm shutdown 100', 'kubectl -n a delete pod x',
                         'kubectl --context prod drain node', 'kubectl -n a cordon node',
                         'helm -n a uninstall release', 'qm --skiplock stop 100',
-                        'qm --skiplock shutdown 100', 'ps e', 'ps auxe', 'ps eww']:
+                        'qm --skiplock shutdown 100', 'ps ewwwwwwww',
+                        '/bin/ps eauxwwwww', '/usr/bin/ps exxxxxxxxx'] + [
+                            f'{prefix} {args}' for prefix in ['ps', '/bin/ps', '/usr/bin/ps']
+                            for args in ['e', 'auxe', 'eww', 'axe', 'auxwwe', 'auxwwwwwe', 'e -o pid']
+                        ]:
             with self.subTest(command=command):
                 self.assertEqual(decision(policy['bash'], command), 'deny')
         for command in ['git status', 'kubectl get pods', 'helm list', 'qm status 100',
                         'set -euo pipefail', 'set -- arg', 'export NAME=value',
-                        'ps aux', 'ps -ef', 'ps -o pid,cmd']:
+                        ] + [f'{prefix}{args}' for prefix in ['ps', '/bin/ps', '/usr/bin/ps']
+                             for args in ['', ' aux', ' -ef', ' -eo pid,cmd', ' -o pid,cmd',
+                                          ' auxf', ' axo pid,comm', ' aux --sort=-%mem',
+                                          ' x -o pid,etime', ' -A e', ' -ef e']
+                        ]:
             self.assertEqual(decision(policy['bash'], command), 'allow', command)
         self.assertEqual(policy['*'], 'allow')
         self.assertEqual(decision(policy['path'], '/workspace/README.md'), 'allow')
@@ -152,6 +160,23 @@ class SetupTests(unittest.TestCase):
                 self.setup.write(self.home, self.safety, self.ssh)
         self.assertIn('previous provider config kept', errors.getvalue())
         self.assertEqual(path.read_bytes(), before)
+
+    def test_aliases_action_refreshes_only_provider_config(self):
+        self.write()
+        before = {p.relative_to(self.agent): p.read_bytes() for p in self.agent.rglob('*') if p.is_file()}
+        provider = Path('pi-cliproxyapi-provider/config.json')
+        with patch.dict(os.environ, {'ANTHROPIC_BASE_URL': 'http://proxy.test',
+                                     'ANTHROPIC_AUTH_TOKEN': 'dummy'}):
+            with patch.object(self.setup, 'fetch_models', return_value=[{'id': 'codex/new-model'}]) as fetch:
+                with patch.object(sys, 'argv', ['pi-setup.py', 'aliases', str(self.home)]):
+                    self.setup.main()
+        fetch.assert_called_once_with('http://proxy.test/v1', 'dummy')
+        config = json.loads((self.agent / provider).read_text())
+        self.assertEqual(config['modelAliases']['codex/new-model'], 'openai/new-model')
+        self.assertNotIn('codex/gpt-6.1-sol', config['modelAliases'])
+        self.assertEqual({p.relative_to(self.agent): p.read_bytes() for p in self.agent.rglob('*')
+                          if p.is_file() and p.relative_to(self.agent) != provider},
+                         {p: data for p, data in before.items() if p != provider})
 
     def test_instructions_replace_symlink_without_changing_bundle(self):
         source = self.home / '.claude/AGENTS.md'
@@ -241,29 +266,78 @@ class SetupTests(unittest.TestCase):
             server.server_close()
             worker.join()
 
+    def test_wrapper_refreshes_aliases_with_authentication_before_starting_pi(self):
+        requests = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                requests.append((self.path, self.headers.get('Authorization')))
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(json.dumps({'data': [{'id': 'codex/new-model'}]}).encode())
+
+            def log_message(self, *args):
+                pass
+
+        binary = self.home / 'fake-pi'
+        binary.write_text("#!/usr/bin/env python3\nprint('wrapper OK')\n")
+        binary.chmod(0o700)
+        wrapper = self.home / 'pi.sh'
+        wrapper.write_text((ROOT / 'pi.sh').read_text()
+                           .replace('/tools/node_modules/.bin/pi', str(binary))
+                           .replace('/scripts/pi-setup.py', str(ROOT / 'pi-setup.py')))
+        server = HTTPServer(('127.0.0.1', 0), Handler)
+        worker = threading.Thread(target=server.serve_forever, daemon=True)
+        worker.start()
+        try:
+            result = subprocess.run(['bash', str(wrapper)],
+                                    env={**os.environ, 'ANTHROPIC_AUTH_TOKEN': 'fake-key',
+                                         'ANTHROPIC_BASE_URL': f'http://127.0.0.1:{server.server_port}/',
+                                         'HOME': str(self.home)},
+                                    capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, 'wrapper OK\n')
+            self.assertEqual(requests, [('/v1/models', 'Bearer fake-key')])
+            config = json.loads((self.agent / 'pi-cliproxyapi-provider/config.json').read_text())
+            self.assertEqual(config['modelAliases']['codex/new-model'], 'openai/new-model')
+        finally:
+            server.shutdown()
+            server.server_close()
+            worker.join()
+
     def test_wrapper_transfers_credentials_unsets_direct_auth_and_forwards_args(self):
         binary = self.home / 'fake-pi'
         binary.write_text('''#!/usr/bin/env python3
 import json, os, sys
 assert 'ANTHROPIC_AUTH_TOKEN' not in os.environ
 assert os.environ['CLIPROXYAPI_API_KEY'] == 'fake-key'
-assert os.environ['CLIPROXYAPI_BASE_URL'] == 'http://proxy.test/v1'
+assert os.environ['CLIPROXYAPI_BASE_URL'] == 'http://127.0.0.1:9/v1'
 assert os.environ['CLIPROXYAPI_PROVIDER_NAME'] == 'cliproxy'
 assert sys.argv[1:] == ['--mode', 'rpc', 'argument with spaces']
 print('wrapper OK')
 ''')
         binary.chmod(0o700)
         wrapper = self.home / 'pi.sh'
-        wrapper.write_text((ROOT / 'pi.sh').read_text().replace('/tools/node_modules/.bin/pi', str(binary)))
+        wrapper.write_text((ROOT / 'pi.sh').read_text()
+                           .replace('/tools/node_modules/.bin/pi', str(binary))
+                           .replace('/scripts/pi-setup.py', str(ROOT / 'pi-setup.py')))
         result = subprocess.run(['bash', str(wrapper), '--mode', 'rpc', 'argument with spaces'],
                                 env={**os.environ, 'ANTHROPIC_AUTH_TOKEN': 'fake-key',
-                                     'ANTHROPIC_BASE_URL': 'http://proxy.test/'},
+                                     'ANTHROPIC_BASE_URL': 'http://127.0.0.1:9/', 'HOME': str(self.home)},
                                 capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, 'wrapper OK\n')
+        self.assertIn('pi-setup: model discovery failed; previous provider config kept', result.stderr)
+        environment = {**os.environ, 'ANTHROPIC_AUTH_TOKEN': 'fake-key',
+                       'ANTHROPIC_BASE_URL': 'http://127.0.0.1:9/'}
+        environment.pop('HOME', None)
+        result = subprocess.run(['bash', str(wrapper), '--mode', 'rpc', 'argument with spaces'],
+                                env=environment, capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, 'wrapper OK\n')
         for name in ['ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL']:
             environment = {**os.environ, 'ANTHROPIC_AUTH_TOKEN': 'fake-key',
-                           'ANTHROPIC_BASE_URL': 'http://proxy.test/'}
+                           'ANTHROPIC_BASE_URL': 'http://127.0.0.1:9/', 'HOME': str(self.home)}
             environment.pop(name)
             result = subprocess.run(['bash', str(wrapper)], env=environment,
                                     capture_output=True, text=True)
