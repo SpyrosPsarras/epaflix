@@ -43,7 +43,7 @@ helmCharts:
     includeCRDs: false
   - name: alloy
     repo: https://grafana.github.io/helm-charts
-    version: "1.13.0"
+    version: "1.13.1"
     releaseName: alloy
     namespace: observability
     valuesFile: alloy-values.yaml
