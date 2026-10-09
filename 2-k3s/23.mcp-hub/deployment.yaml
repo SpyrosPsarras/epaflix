@@ -92,11 +92,6 @@ spec:
                 secretKeyRef:
                   name: mcp-hub-vaultwarden
                   key: hub-secret
-            - name: JEV_MCP_AUTH_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: mcp-hub-jev
-                  key: auth-token
             - name: GMAIL_CLIENT_ID
               valueFrom:
                 secretKeyRef:

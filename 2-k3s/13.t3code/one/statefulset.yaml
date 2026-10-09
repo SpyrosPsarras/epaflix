@@ -76,7 +76,7 @@ spec:
               mountPath: /runtime-state
       containers:
         - name: t3
-          image: ghcr.io/spyrospsarras/t3-runtime:inputs-01026dbff38693a12e00a575b7005b8a
+          image: ghcr.io/spyrospsarras/t3-runtime:inputs-0f30267b9294fb15edcd8a81832f6953
           imagePullPolicy: Always
           command:
             - bash
@@ -84,8 +84,6 @@ spec:
           env:
             - name: HOME
               value: /home/spyros
-            - name: JEV_OPENROUTER_KEY_FILE
-              value: /run/jev/openrouter-key
             - name: T3CODE_HOME
               value: /home/spyros/.t3
             - name: T3_PROJECT_DIR
@@ -124,11 +122,6 @@ spec:
               drop:
                 - ALL
           volumeMounts:
-            - name: jev-key
-              mountPath: /run/jev
-              readOnly: true
-            - name: jev-guard
-              mountPath: /run/jev-guard
             - name: home-spyros
               mountPath: /home/spyros
             # Only the entrypoint writes it; see files/entrypoint.sh.
@@ -226,14 +219,6 @@ spec:
             limits:
               memory: 8Gi
       volumes:
-        - name: jev-guard
-          emptyDir:
-            medium: Memory
-            sizeLimit: 1Mi
-        - name: jev-key
-          secret:
-            secretName: t3code-jev
-            defaultMode: 0440
         - name: home-spyros
           persistentVolumeClaim:
             claimName: home-spyros

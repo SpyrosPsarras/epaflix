@@ -77,10 +77,6 @@ SAFETY_ENTRY=$(/usr/bin/env -i HOME="$HOME" PATH=/usr/local/bin:/usr/bin:/bin \
   /usr/bin/python3 -I -S /scripts/cc-safety-net-install.py | tail -n 1)
 python3 /scripts/pi-setup.py write "$HOME" "$SAFETY_ENTRY"
 /scripts/pi.sh list | python3 /scripts/pi-setup.py check-packages "$HOME"
-if ! python3 /scripts/pi-setup.py jev-config "${JEV_OPENROUTER_KEY_FILE:-/run/jev/openrouter-key}" \
-  /run/jev-guard/config.json >/dev/null; then
-  echo "t3env: Jev guard configuration unavailable; startup continues" >&2
-fi
 # Codex has no extra-instructions list: it reads ~/.codex/AGENTS.override.md
 # instead of AGENTS.md when present, so give it the bundle plus the homelab SSH how-to.
 # Written whole or not at all: a partial override would hide the bundle.
