@@ -29,8 +29,6 @@ export async function checkEnforcement(home, modules = '/tools/node_modules') {
     ['bash', { command: 'printenv HOME' }, 'deny'],
     ['bash', { command: 'cat /proc/1/environ' }, 'deny'],
     ...['ps e', 'ps auxe', 'ps eww'].map(command => ['bash', { command }, 'deny']),
-    ['read', { path: '/run/jev/synthetic-key' }, 'deny'],
-    ['grep', { pattern: '.', path: '/run/jev' }, 'deny'],
     ...['git status', 'kubectl -n x get pods', 'ps aux', 'ps -ef', 'ps -o pid,cmd']
       .map(command => ['bash', { command }, 'allow']),
     ['mcp__gmail__gmail_send', {}, 'ask'],
@@ -50,11 +48,7 @@ export async function checkEnforcement(home, modules = '/tools/node_modules') {
     assert.equal(actual, expected, `${toolName} ${JSON.stringify(input)}`)
     console.log(`enforcement: ${toolName} ${JSON.stringify(input)} -> ${actual}`)
   }
-  const { decide, thresholds } = await import(pathToFileURL(join(modules, 'jev-guard/src/guard.js')))
-  const limits = thresholds({ JEV_GUARD_ASK_SCORE: '3', JEV_GUARD_ASK_P: '1' })
-  assert.equal(decide({ risk: { score: 2.0 }, approval: { p: 0.9 } }, limits).level, 'allow')
-  assert.equal(decide({ risk: { score: 2.6 }, approval: { p: 0.9 } }, limits).level, 'deny')
-  console.log(`parity: shipped permission pipeline ${cases.length}/${cases.length}, Jev thresholds 2/2 PASS`)
+  console.log(`parity: shipped permission pipeline ${cases.length}/${cases.length} PASS`)
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

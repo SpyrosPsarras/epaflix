@@ -25,8 +25,6 @@ import tempfile
 
 SERVERS = {"gmail": "/gmail", "searxng": "/searxng", "notion": "/notion", "vaultwarden": "/vaultwarden",
            "kubernetes-epaflix": "/kubernetes", "drive": "/drive"}
-# Its instructions tell the agent to consult it before every task; trialled in OpenCode only.
-OPENCODE_ONLY = {"jev": "/jev"}
 # These tools ask in OpenCode (<server>_<tool>) and Pi (mcp__<server>__<tool>).
 # The kubernetes and drive names are those of the images pinned in
 # 23.mcp-hub/kubernetes-mcp.yaml and workspace-mcp.yaml; recheck them when bumping.
@@ -41,7 +39,7 @@ ASK = {
 }
 LEGACY = ("keepass-remote.sh", "searxng-mcp")
 # Hub servers that were retired: their entries and permissions are removed.
-RETIRED = ("keepass",)
+RETIRED = ("keepass", "jev")
 
 
 def _legacy(entry):
@@ -73,7 +71,7 @@ def opencode(config, hub, authorization):
         del mcp[name]
     for name in RETIRED:
         mcp.pop(name, None)
-    for name, path in {**SERVERS, **OPENCODE_ONLY}.items():
+    for name, path in SERVERS.items():
         old = mcp.get(name, {})
         mcp[name] = {"type": "remote", "url": hub + path, "enabled": old.get("enabled", True) if
                      old.get("type") == "remote" else True, "timeout": 30000,
@@ -172,10 +170,13 @@ def _selftest():
                   "mine": {"type": "local", "command": ["foo"]}},
           "permission": "allow"}
     oc["mcp"]["keepass"] = {"type": "remote", "url": "https://hub/keepass"}
-    oc["permission"] = {"*": "allow", "keepass_vault_trash": "ask", "keepass_vault_add": "ask"}
+    oc["mcp"]["jev"] = {"type": "remote", "url": "https://hub/jev"}
+    oc["permission"] = {"*": "allow", "keepass_vault_trash": "ask", "keepass_vault_add": "ask",
+                        "jev_x": "ask"}
     out = opencode(oc, "https://hub/", "Bearer {env:T}")
-    assert set(out["mcp"]) == set(SERVERS) | set(OPENCODE_ONLY) | {"mine"}, out["mcp"]
-    assert out["mcp"]["jev"]["url"] == "https://hub/jev", out["mcp"]["jev"]
+    assert "jev" not in out["mcp"], out["mcp"]
+    assert "jev_x" not in out["permission"], out["permission"]
+    assert set(out["mcp"]) == set(SERVERS) | {"mine"}, out["mcp"]
     assert out["mcp"]["searxng"]["url"] == "https://hub/searxng" and out["mcp"]["searxng"]["enabled"] is True
     assert out["mcp"]["gmail"]["enabled"] is False, "a user's disable of a remote entry survives"
     assert out["permission"]["*"] == "allow" and "keepass" not in out["mcp"]

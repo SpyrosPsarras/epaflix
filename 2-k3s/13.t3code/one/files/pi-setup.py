@@ -12,7 +12,7 @@ from hub_clients import ASK
 
 
 PACKAGES = ['pi-cliproxyapi-provider', '@gotgenes/pi-permission-system',
-            '@spences10/pi-redact', '@juicesharp/rpiv-todo', 'jev-guard',
+            '@spences10/pi-redact', '@juicesharp/rpiv-todo',
             'superpowers', '@dietrichgebert/ponytail']
 ALIASES = {
     'openrouter/or-glm-5.3-flash': 'openrouter/z-ai/glm-5.3-flash',
@@ -54,10 +54,10 @@ def permissions():
                 'kubectl *cordon *', 'helm *uninstall *', 'reboot*', 'shutdown*',
                 'poweroff*', 'qm *stop *', 'qm *shutdown *', 'env', 'env *',
                 'printenv*', 'set', 'set -o', 'set +o', 'export', 'export -p',
-                'declare*', 'typeset*', '*/proc/*/environ*', '*/run/jev*']
+                'declare*', 'typeset*', '*/proc/*/environ*']
     commands += ['ps e*'] + [f'ps {letter}*e*' for letter in 'abcdefghijklmnopqrstuvwxyz']
     policy = {'*': 'allow', 'bash': {'*': 'allow', **dict.fromkeys(commands, 'deny')},
-              'path': {'*': 'allow', '/run/jev*': 'deny'}, 'mcp': {'*': 'allow'}}
+              'path': {'*': 'allow'}, 'mcp': {'*': 'allow'}}
     for server, tools in ASK.items():
         for tool in tools:
             name = re.sub(r'[^A-Za-z0-9_]', '_', f'mcp__{server}__{tool}')
@@ -102,13 +102,6 @@ def write(home, safety_entry, ssh_path=Path('/scripts/homelab-ssh.md')):
         atomic_write(agent / 'AGENTS.md', instructions)
 
 
-def jev_config(key_file, output):
-    key = key_file.read_text().strip()
-    if not key:
-        raise ValueError('Empty key file')
-    write_json(output, {'openRouterApiKey': key})
-
-
 def check_packages(home, listing):
     packages = json.loads((home / '.pi/agent/settings.json').read_text())['packages']
     listed = {line.strip() for line in listing.splitlines()}
@@ -128,15 +121,10 @@ def main():
     setup.add_argument('safety_entry')
     check = commands.add_parser('check-packages')
     check.add_argument('home', type=Path)
-    secret = commands.add_parser('jev-config')
-    secret.add_argument('key_file', type=Path)
-    secret.add_argument('output', type=Path)
     args = parser.parse_args()
     try:
         if args.action == 'write':
             write(args.home, args.safety_entry)
-        elif args.action == 'jev-config':
-            jev_config(args.key_file, args.output)
         else:
             check_packages(args.home, sys.stdin.read())
     except (OSError, ValueError, TypeError) as error:

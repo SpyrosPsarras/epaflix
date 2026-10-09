@@ -116,7 +116,7 @@ class VaultSshAgent(unittest.TestCase):
             {"type": 5, "name": "t3code", "collectionIds": ["col-1"], "sshKey": {"privateKey": self.private}},
             {"type": 5, "name": "homepc", "collectionIds": ["col-0"], "sshKey": {"privateKey": self.private}},
             {"type": 1, "name": "a login", "collectionIds": ["col-1"], "login": {"password": "nope"}},
-            # Split so jev-guard's private-key pattern does not block agents editing this file.
+            # Split so pi-redact's private-key block pattern does not mask the source after this line.
             {"type": 5, "name": "broken", "collectionIds": ["col-1"], "sshKey": {"privateKey": "-----BEGIN OPENSSH " + "PRIVATE KEY-----\nAAAA\n"}},
         ]
 

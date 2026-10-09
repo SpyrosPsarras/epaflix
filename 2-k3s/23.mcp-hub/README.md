@@ -22,7 +22,6 @@ business.
 |---------------|----------|------------------------------------------|----------------------|
 | `/gmail`      | module   | `files/gmail_mcp.py`, Gmail API          | `gmail`              |
 | `/searxng`    | module   | `files/searxng_mcp.py`, in-cluster SearXNG | `searxng`          |
-| `/jev`        | upstream | `jev-mcp.yaml`, published [`@jkudish/jev-mcp`](https://github.com/jkudish/jev-mcp) (11 Jev judgment tools) via OpenRouter, Secret `mcp-hub-jev`. OpenCode clients only | `jev` |
 | `/vaultwarden` | upstream | `vaultwarden-mcp.yaml`, Spyros's Vaultwarden vault via `bw serve` | `vaultwarden` |
 | `/vault-secret` | upstream | the same server's `/secret`, plain JSON for `vault-run.py` (see Vaultwarden) | none |
 | `/kubernetes` | upstream | `kubernetes-mcp.yaml`, cluster-admin on this cluster | `kubernetes-epaflix` |

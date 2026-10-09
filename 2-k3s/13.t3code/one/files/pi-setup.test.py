@@ -77,17 +77,16 @@ class SetupTests(unittest.TestCase):
             '/tools/node_modules/@gotgenes/pi-permission-system',
             '/tools/node_modules/@spences10/pi-redact',
             '/tools/node_modules/@juicesharp/rpiv-todo',
-            '/tools/node_modules/jev-guard', '/tools/node_modules/superpowers',
+            '/tools/node_modules/superpowers',
             '/tools/node_modules/@dietrichgebert/ponytail', self.safety])
         before = {p.relative_to(self.agent): p.read_bytes() for p in self.agent.rglob('*') if p.is_file()}
         self.write()
         self.assertEqual(before, {p.relative_to(self.agent): p.read_bytes() for p in self.agent.rglob('*') if p.is_file()})
 
-    def test_policy_blocks_commands_and_file_tools(self):
+    def test_policy_blocks_commands(self):
         self.write()
         policy = json.loads((self.agent / 'extensions/pi-permission-system/config.json').read_text())['permission']
-        for command in ['printenv HOME', 'cat /proc/1/environ', 'cat /run/jev/openrouter-key',
-                        'cat /run/jev-guard/config.json', 'env', 'env HOME', 'set', 'set -o',
+        for command in ['printenv HOME', 'cat /proc/1/environ', 'env', 'env HOME', 'set', 'set -o',
                         'set +o', 'export', 'export -p', 'declare -p', 'typeset -p',
                         'mkfs.ext4 /dev/sda', 'dd if=x of=/dev/sda',
                         'kubectl delete pod x', 'kubectl drain node', 'kubectl cordon node',
@@ -103,8 +102,6 @@ class SetupTests(unittest.TestCase):
                         'ps aux', 'ps -ef', 'ps -o pid,cmd']:
             self.assertEqual(decision(policy['bash'], command), 'allow', command)
         self.assertEqual(policy['*'], 'allow')
-        for target in ['/run/jev', '/run/jev/key', '/run/jev-guard', '/run/jev-guard/config.json']:
-            self.assertEqual(decision(policy['path'], target), 'deny')
         self.assertEqual(decision(policy['path'], '/workspace/README.md'), 'allow')
 
     def test_policy_uses_global_config_path_and_removes_legacy_file(self):
@@ -251,13 +248,6 @@ assert 'ANTHROPIC_AUTH_TOKEN' not in os.environ
 assert os.environ['CLIPROXYAPI_API_KEY'] == 'fake-key'
 assert os.environ['CLIPROXYAPI_BASE_URL'] == 'http://proxy.test/v1'
 assert os.environ['CLIPROXYAPI_PROVIDER_NAME'] == 'cliproxy'
-assert os.environ['JEV_GUARD_CONFIG'] == '/run/jev-guard/config.json'
-assert os.environ['JEV_GUARD_ASK_SCORE'] == '3'
-assert os.environ['JEV_GUARD_ASK_P'] == '1'
-assert os.environ['JEV_GUARD_SKIP_SCAN'] == os.environ['JEV_GUARD_SKIP_TOOLS']
-assert set(os.environ['JEV_GUARD_SKIP_TOOLS'].split(',')) == {
-    'mcp__vaultwarden__vault_' + name for name in
-    ['add', 'attach', 'attachment', 'get', 'list', 'trash', 'update']}
 assert sys.argv[1:] == ['--mode', 'rpc', 'argument with spaces']
 print('wrapper OK')
 ''')
@@ -279,41 +269,13 @@ print('wrapper OK')
             self.assertNotEqual(result.returncode, 0)
             self.assertIn(name, result.stderr)
 
-    def test_secret_config_is_atomic_private_and_silent(self):
-        key = self.home / 'fake-key'
-        key.write_text('  fake-test-key\n')
-        output = self.home / 'runtime/config.json'
-        command = ['python3', str(ROOT / 'pi-setup.py'), 'jev-config', str(key), str(output)]
-        result = subprocess.run(command, capture_output=True, text=True)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout, '')
-        self.assertEqual(result.stderr, '')
-        self.assertEqual(json.loads(output.read_text()), {'openRouterApiKey': 'fake-test-key'})
-        self.assertEqual(output.stat().st_mode & 0o777, 0o600)
-        before = output.read_bytes()
-        key.write_text(' \n')
-        result = subprocess.run(command, capture_output=True, text=True)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn('pi-setup jev-config: ValueError: Empty key file', result.stderr)
-        self.assertEqual(output.read_bytes(), before)
-        self.assertEqual(list(output.parent.iterdir()), [output])
-
-    def test_setup_errors_identify_action_and_failure_without_key_contents(self):
+    def test_setup_errors_identify_action_and_failure(self):
         settings = self.agent / 'settings.json'
         settings.write_text('{broken')
         result = subprocess.run(['python3', str(ROOT / 'pi-setup.py'), 'write',
                                  str(self.home), self.safety], capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('pi-setup write: JSONDecodeError:', result.stderr)
-        key = self.home / 'key'
-        key.write_text('synthetic-key-never-log')
-        output = self.home / 'not-a-directory'
-        output.write_text('fixture')
-        result = subprocess.run(['python3', str(ROOT / 'pi-setup.py'), 'jev-config',
-                                 str(key), str(output / 'config.json')], capture_output=True, text=True)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn('pi-setup jev-config: FileExistsError:', result.stderr)
-        self.assertNotIn('synthetic-key-never-log', result.stdout + result.stderr)
 
     def test_three_boots_converge_with_legacy_pi_instructions(self):
         private = load('private-config')
