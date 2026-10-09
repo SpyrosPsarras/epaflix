@@ -2,6 +2,6 @@
   "name": "mcp-hub-jev-mcp",
   "private": true,
   "dependencies": {
-    "@jkudish/jev-mcp": "0.13.0"
+    "@jkudish/jev-mcp": "0.14.1"
   }
 }
