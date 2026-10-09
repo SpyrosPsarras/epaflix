@@ -37,6 +37,9 @@ try {
   assert.ok(ponytail && pkg, 'package ponytail skill missing')
   assert.equal(realpathSync(ponytail.sourceInfo.path), realpathSync(join(pkg, 'skills/ponytail/SKILL.md')))
   assert.ok(!/failed to load|extension.*error|error.*extension/i.test(stderr), stderr)
+  const ask = settings.packages.find(path => path.endsWith('/@juicesharp/rpiv-ask-user-question'))
+  assert.ok(ask, 'rpiv-ask-user-question package missing')
+  assert.ok(readFileSync(join(ask, 'index.ts')).length, 'rpiv-ask-user-question extension missing')
   console.log('parity: Pi commands, package skills, permission policy and extension loading PASS')
 } finally {
   clearTimeout(timer)

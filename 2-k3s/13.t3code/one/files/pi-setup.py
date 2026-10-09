@@ -13,6 +13,7 @@ from hub_clients import ASK
 
 PACKAGES = ['pi-cliproxyapi-provider', '@gotgenes/pi-permission-system',
             '@spences10/pi-redact', '@juicesharp/rpiv-todo',
+            '@juicesharp/rpiv-ask-user-question',
             'superpowers', '@dietrichgebert/ponytail']
 ALIASES = {
     'openrouter/or-glm-5.3-flash': 'openrouter/z-ai/glm-5.3-flash',
