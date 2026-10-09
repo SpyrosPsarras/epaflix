@@ -10,27 +10,31 @@ data:
     """Lingarr drain watcher: is the Bazarr->Lingarr subtitle pipeline draining?
 
     Reports every run: pending translation/search jobs in Bazarr's queue,
-    in-window completions and failures in Lingarr, drain rate, ETA and the
-    dominant failure signature. Exits 0 when the pipeline is draining within
-    the failure budget OR is fully idle (nothing terminal in the window and
-    nothing pending or running). Exits 1 when the in-window failure rate hits
-    FAIL_RATE_THRESHOLD. Known signatures: cancels pinned at exactly 1800s
-    are upstream Lingarr's hardcoded 30-min job-queue invisibility timeout
-    (#1239); instant "All configured batch translation services failed."
-    means the provider path is broken (2026-09-18: OpenRouter workspace ZDR
-    guardrail excluded the pinned model, 404 per batch) or, with
-    batch-repro.sh green, 429/503 outlasting lingarr's retry backoff
-    (2026-09-24: groq 8000 TPM + gemini 503s vs 1-8s waits). request_timeout is
-    minutes (floor 30) and does not bind. Exits 2 when the window cannot be
-    judged (unknown statuses, or pending/active work with zero terminal
-    events - a stuck pipeline).
+    in-window completions, quota failures and faults in Lingarr, drain rate,
+    ETA and the dominant fault signature. An innermost upstream status of
+    429 / TooManyRequests is quota, falling back to errorMessage only when
+    stackTrace has no status; all other failures are faults.
+    Exits 0 within the fault budget or when fully idle. Quota failures remain
+    visible but do not count toward FAIL_RATE_THRESHOLD: faults / (done +
+    faults). Exits 1 at that threshold or when pending/active work has zero
+    completions in STARVATION_HOURS. Completion history covers
+    max(WINDOW_HOURS, STARVATION_HOURS). Exits 2 when the window cannot be
+    judged (unknown statuses, untimestamped terminal requests, or
+    pending/active work with zero terminal events - a stuck pipeline).
+    Known faults: cancels pinned at ~1800s are Lingarr's 30-min job-queue
+    invisibility timeout (#1239); upstream 404s can mean an OpenRouter ZDR
+    guardrail or a dropped model. 503s can outlast the retry backoff.
+    request_timeout is minutes (floor 30) and does not bind.
 
     Run with --selftest to exercise bucketing/ETA against synthetic payloads
     without touching the network. Python stdlib only - no pip, no apk.
     """
+    import contextlib
     import datetime
+    import io
     import json
     import os
+    import re
     import sys
     import time
     import urllib.error
@@ -50,6 +54,7 @@ data:
             sys.exit(2)
 
     WINDOW_HOURS = env_num("WINDOW_HOURS", "24", float)
+    STARVATION_HOURS = env_num("STARVATION_HOURS", "72", float)
     FAIL_RATE_THRESHOLD = env_num("FAIL_RATE_THRESHOLD", "25", float)
 
     BAZARR_URL = os.environ.get("BAZARR_URL", "http://bazarr:6767")
@@ -60,6 +65,10 @@ data:
     DONE = {"completed"}
     FAILED = {"failed"}
     INTERRUPTED = {"interrupted"}  # Lingarr's failure-shaped terminal state
+    STACK_STATUS_HEADER = re.compile(
+        r"\bfailed with status\s+([A-Z][A-Za-z]{0,31}|\d{3})(?=\s|:|$)")
+    ERROR_STATUS_HEADER = re.compile(
+        r"\b(?:status\s+|does not indicate success:\s+)([A-Z][A-Za-z]{0,31}|\d{3})(?=\s|:|$)")
 
 
     def iso_ts(value):
@@ -127,10 +136,41 @@ data:
             "to judge a partial history" % (total, MAX_PAGES, PAGE_SIZE))
 
 
-    def bucket(requests, now, window_hours):
+    def upstream_status(item):
+        text = str(item.get("errorMessage") or "")
+        match = ERROR_STATUS_HEADER.search(text)
+        for part in reversed(re.split(r"\n[ \t]*--->", str(item.get("stackTrace") or ""))):
+            header = STACK_STATUS_HEADER.search(part)
+            if header:
+                text, match = part, header
+                break
+        if not match:
+            return None, None
+        error = re.search(r'"error"\s*:\s*{([^{}]*)', text[match.end():])
+        code = re.search(r'"code"\s*:\s*"([a-z][a-z0-9_]{0,63})"', error.group(1)) if error else None
+        return match.group(1), code.group(1) if code else None
+
+
+    def failure_kind(item):
+        status, _ = upstream_status(item)
+        return "quota" if status in ("TooManyRequests", "429") else "fault"
+
+
+    def fault_signature(item):
+        msg = str(item.get("errorMessage") or "(none)").strip()
+        status, code = upstream_status(item)
+        if status:
+            return "status %s%s" % (status, " code %s" % code if code else "")
+        return msg if msg in ("(none)", "The operation was canceled.",
+                              "All configured batch translation services failed.") else "no upstream status"
+
+
+    def bucket(requests, now, window_hours, starvation_hours):
         """Pure bucketing of Lingarr request payloads - exercised by --selftest."""
         cutoff = now - window_hours * 3600.0
-        counts = {"done": 0, "failed": 0, "outstanding": 0, "unjudgeable": 0}
+        starvation_cutoff = now - starvation_hours * 3600.0
+        counts = {"done": 0, "done_starvation": 0, "failed": 0, "quota": 0,
+                  "fault": 0, "outstanding": 0, "unjudgeable": 0}
         errors = {}
         for item in requests:
             status = str(item.get("status", "")).strip().lower()
@@ -140,15 +180,21 @@ data:
             elif status in DONE:
                 if ts is None:
                     counts["unjudgeable"] += 1
-                elif ts >= cutoff:
-                    counts["done"] += 1
+                else:
+                    if ts >= cutoff:
+                        counts["done"] += 1
+                    if ts >= starvation_cutoff:
+                        counts["done_starvation"] += 1
             elif status in FAILED or status in INTERRUPTED:
                 if ts is None:
                     counts["unjudgeable"] += 1
                 elif ts >= cutoff:
                     counts["failed"] += 1
-                    msg = str(item.get("errorMessage") or "(none)").strip()[:120]
-                    errors[msg] = errors.get(msg, 0) + 1
+                    kind = failure_kind(item)
+                    counts[kind] += 1
+                    if kind == "fault":
+                        msg = fault_signature(item)
+                        errors[msg] = errors.get(msg, 0) + 1
             elif status == "cancelled":
                 pass  # deliberate user action - never a fault signal
             else:
@@ -184,8 +230,8 @@ data:
 
 
     def report(now, requests, active_count, backlog, searches, running,
-               window_hours, threshold):
-        counts, errors, top_error = bucket(requests, now, window_hours)
+               window_hours, threshold, starvation_hours):
+        counts, errors, top_error = bucket(requests, now, window_hours, starvation_hours)
         if counts["unjudgeable"]:
             print("\nFAIL: %d terminal request(s) have an unknown status or no "
                   "timestamp - cannot judge the window (upstream shape change?). "
@@ -193,24 +239,27 @@ data:
                   "update bucket() statuses." % counts["unjudgeable"])
             return 2
         done, failed = counts["done"], counts["failed"]
+        faults, quota = counts["fault"], counts["quota"]
         terminal = done + failed
         rate = done / window_hours if window_hours > 0 else 0.0
-        fail_rate = 100.0 * failed / terminal if terminal else 0.0
+        fault_rate = 100.0 * faults / (done + faults) if done + faults else 0.0
         eta_hours = (backlog / rate) if backlog and rate > 0 else None
+        pending = active_count or counts["outstanding"] or backlog or searches or running
 
         print("=== lingarr drain watch @ %s ==="
               % datetime.datetime.now(datetime.timezone.utc)
               .strftime("%Y-%m-%dT%H:%M:%SZ"))
-        print("window: %.0fh | failure threshold: %.0f%%" % (window_hours, threshold))
+        print("window: %.0fh | fault threshold: %.0f%% | starvation: %.0fh"
+              % (window_hours, threshold, starvation_hours))
         print("bazarr queue: %d pending Lingarr translations (%d running), "
               "%d pending searches" % (backlog, running, searches))
         print("lingarr: %d requests scanned | active now %d | outstanding %d | "
-              "%.0fh done %d | failed %d"
+              "%.0fh done %d | failed %d (quota %d, faults %d) | %.0fh done %d"
               % (len(requests), active_count, counts["outstanding"],
-                 window_hours, done, failed))
+                 window_hours, done, failed, quota, faults,
+                 starvation_hours, counts["done_starvation"]))
         if terminal == 0:
-            if (active_count == 0 and counts["outstanding"] == 0
-                    and backlog == 0 and searches == 0 and running == 0):
+            if not pending:
                 print("\nOK: no terminal requests in the window and nothing "
                       "pending or running - the pipeline is idle, nothing to "
                       "judge.")
@@ -227,29 +276,35 @@ data:
             print(line)
         else:
             print("drain rate 0/h in window - nothing completed")
-        print("failure rate (window): %.1f%%" % fail_rate)
+        print("fault rate (window, faults / (done + faults)): %.1f%%" % fault_rate)
         if top_error:
-            print("dominant failure: %r x%d" % (top_error, errors[top_error]))
+            print("dominant fault: %r x%d" % (top_error, errors[top_error]))
 
-        if fail_rate >= threshold:
-            print("\nFAIL: failure rate %.1f%% >= %.0f%% - translations are being "
-                  "canceled or erroring. Known signatures: instant "
-                  "\"All configured batch translation services failed.\" means the "
-                  "provider path is broken (OpenRouter workspace guardrails or a "
-                  "dropped model: re-run batch-repro.sh and GET /api/v1/models/user "
-                  "with the sk-or-v1 upstream key from cliproxy-free-config); "
-                  "if batch-repro.sh is green and lingarr logs \"Max retries "
-                  "exhausted\" after 429/503, the free pool stayed saturated "
-                  "longer than the retry backoff (retry_delay and max_retries "
-                  "floors in lingarr.yaml; compare with the cooldown remaining= "
-                  "values in the cliproxy-free log); "
-                  "cancels pinned at ~1800s are the upstream 30-min job-queue "
-                  "invisibility timeout reclaiming work a slow endpoint never "
-                  "finished (#1239). request_timeout (minutes, floor 30) does "
-                  "not bind."
-                  % (fail_rate, threshold))
+        if pending and counts["done_starvation"] == 0:
+            print("\nFAIL: starvation - 0 completions in %.0fh with pending or active "
+                  "work; quota is being spent but nothing completes. ACTION: check "
+                  "per-batch token waste and other consumers of the cliproxy 'or-free' pool."
+                  % starvation_hours)
             return 1
-        print("\nOK: pipeline draining within the failure budget.")
+        if fault_rate >= threshold:
+            print("\nFAIL: fault rate %.1f%% >= %.0f%% - non-quota translations are "
+                  "being canceled or erroring. ACTION: inspect the dominant fault; "
+                  "re-run batch-repro.sh to check the provider path. Upstream 404s "
+                  "can mean OpenRouter ZDR guardrails or a dropped model; check "
+                  "GET /api/v1/models/user with the sk-or-v1 upstream key from "
+                  "cliproxy-free-config. For 503s, compare retry_delay and "
+                  "max_retries floors in lingarr.yaml with the 'cooldown remaining=' "
+                  "values in the cliproxy-free log. "
+                  "Cancels pinned at ~1800s are Lingarr's 30-min job-queue "
+                  "invisibility timeout (#1239). request_timeout is minutes "
+                  "(floor 30) and does not bind. HTTP 429 / "
+                  "TooManyRequests quota failures are excluded from this rate."
+                  % (fault_rate, threshold))
+            return 1
+        if quota:
+            print("\nQUOTA: %d in-window quota failures; fault rate is below threshold "
+                  "and the starvation guard did not fire." % quota)
+        print("\nOK: pipeline within the fault budget and starvation guard.")
         return 0
 
 
@@ -261,34 +316,154 @@ data:
             {"status": "Completed", "completedAt": iso(1), "errorMessage": None},
             {"status": "Failed", "completedAt": iso(2), "errorMessage": "The operation was canceled."},
             {"status": "InProgress", "completedAt": None},
-            {"status": "Completed", "completedAt": iso(48)},  # outside window: ignored
+            {"status": "Completed", "completedAt": iso(48)},  # outside window, counts for starvation
         ]
-        counts, errors, top = bucket(healthy, now, 24)
-        assert counts == {"done": 1, "failed": 1, "outstanding": 1,
+        counts, errors, top = bucket(healthy, now, 24, 72)
+        assert counts == {"done": 1, "done_starvation": 2, "failed": 1,
+                          "quota": 0, "fault": 1, "outstanding": 1,
                           "unjudgeable": 0}, counts
         assert top == "The operation was canceled." and errors[top] == 1
         assert iso_ts("2026-09-01T09:24:54.443489+00:00") is not None
         assert iso_ts("2026-09-01T09:24:54Z") is not None
         assert iso_ts(None) is None and iso_ts("garbage") is None
-        rc = report(now, healthy, 2, 340, 138, 1, 24, 25)
+        rc = report(now, healthy, 2, 340, 138, 1, 24, 25, 72)
         assert rc == 1, "1/2 terminal failed = 50% >= 25% threshold must fail"
         ok = [{"status": "Completed", "completedAt": iso(h)} for h in (1, 2, 3, 5, 6, 7, 8)] \
             + [{"status": "Failed", "completedAt": iso(4), "errorMessage": "x"}]
-        assert report(now, ok, 0, 10, 0, 0, 24, 25) == 0, "12.5% below threshold is a pass"
-        assert report(now, [], 0, 0, 0, 0, 24, 25) == 0, \
+        assert report(now, ok, 0, 10, 0, 0, 24, 25, 72) == 0, "12.5% below threshold is a pass"
+        assert report(now, [], 0, 0, 0, 0, 24, 25, 72) == 0, \
             "0 terminal and nothing pending or running is an idle pipeline, not a fault"
-        assert report(now, [], 0, 340, 0, 0, 24, 25) == 2, \
+        assert report(now, [], 0, 340, 0, 0, 24, 25, 72) == 2, \
             "0 terminal with a pending Bazarr backlog is a stuck pipeline"
-        assert report(now, [], 1, 0, 0, 0, 24, 25) == 2, \
+        assert report(now, [], 1, 0, 0, 0, 24, 25, 72) == 2, \
             "0 terminal with an active Lingarr request is a stuck pipeline"
         assert report(now, [{"status": "Completed", "completedAt": None}],
-                      0, 1, 0, 0, 24, 25) == 2, "untimestamped terminal must exit 2"
-        assert report(now, [{"status": "Mystery"}], 0, 1, 0, 0, 24, 25) == 2, \
+                      0, 1, 0, 0, 24, 25, 72) == 2, "untimestamped terminal must exit 2"
+        assert report(now, [{"status": "Mystery"}], 0, 1, 0, 0, 24, 25, 72) == 2, \
             "unknown status must exit 2"
         interrupted = [{"status": "Interrupted", "completedAt": iso(3), "errorMessage": "boom"},
                        {"status": "Cancelled", "completedAt": iso(5)}]
-        counts, _, _ = bucket(interrupted, now, 24)
+        counts, _, _ = bucket(interrupted, now, 24, 72)
         assert counts["failed"] == 1 and counts["unjudgeable"] == 0, counts
+        generic = "All configured batch translation services failed."
+        quota = [{"status": "Failed", "completedAt": iso(2), "errorMessage": generic,
+                  "stackTrace": 'Retry limit reached after TooManyRequests.\n'
+                                ' ---> request failed with status TooManyRequests: '
+                                '{"error":{"code":"%s","message":"org-private sk-secret"}}' % code}
+                 for code in ("model_cooldown", "rate_limit_exceeded")]
+        assert fault_signature(quota[0]) == "status TooManyRequests code model_cooldown", \
+            "observed error.code must remain available in the signature"
+        quota += [{"status": "Interrupted", "completedAt": iso(3),
+                   "stackTrace": "request failed with status TooManyRequests"},
+                  {"status": "Failed", "completedAt": iso(4), "errorMessage":
+                   "Response status code does not indicate success: 429 (Too Many Requests)."}]
+        recent = {"status": "Completed", "completedAt": iso(48)}
+        counts, errors, top = bucket(quota + [recent], now, 24, 72)
+        assert counts["quota"] == 4 and counts["fault"] == 0 and not errors and top is None, \
+            "quota failures must not count or print as faults"
+        assert counts["done"] == 0 and counts["done_starvation"] == 1, \
+            "48h completion counts only for starvation"
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            assert report(now, quota + [recent], 0, 10, 0, 0, 24, 25, 72) == 0, \
+                "all-quota with a completion inside 72h must pass"
+        assert any(line.startswith("QUOTA: 4 in-window quota failures;")
+                   for line in output.getvalue().splitlines()), "quota must remain visible"
+        print(output.getvalue(), end="")
+        old = {"status": "Completed", "completedAt": iso(73)}
+        for work in ((0, 10, 0, 0), (1, 0, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1)):
+            assert report(now, quota + [old], *work, 24, 25, 72) == 1, \
+                "all-quota with zero completions in 72h and pending/active work must fail"
+        assert report(now, quota + [{"status": "Queued"}], 0, 0, 0, 0, 24, 25, 72) == 1, \
+            "outstanding Lingarr work must trigger starvation"
+        fault = {"status": "Failed", "completedAt": iso(1), "errorMessage": generic,
+                 "stackTrace": 'outer request failed with status ServiceUnavailable\n'
+                               ' ---> inner request failed with status BadRequest: '
+                               '{"error":{"code":"json_validate_failed","message":"org-private sk-secret"}}'}
+        assert failure_kind(fault) == "fault", "BadRequest is a fault"
+        assert fault_signature(fault) == "status BadRequest code json_validate_failed", \
+            "signature must use only the innermost status and code"
+        assert report(now, quota + [fault] + ok, 0, 10, 0, 0, 24, 25, 72) == 0, \
+            "mixed quota and faults below threshold must pass"
+        assert report(now, quota + [fault, recent], 0, 10, 0, 0, 24, 25, 72) == 1, \
+            "quota must not dilute a fault rate over threshold"
+        assert report(now, quota + [recent], 0, 10, 0, 0, 24, 25, 24) == 1, \
+            "custom starvation window excludes the 48h completion"
+        counts, _, _ = bucket(quota + [recent], now, 96, 24)
+        assert counts["done"] == 1 and counts["done_starvation"] == 0, \
+            "completion window can be longer than starvation window"
+        for item in quota + [{"stackTrace": "request failed with status 429"},
+                             {"stackTrace": 'Retry limit reached after TooManyRequests.\n'
+                                            ' ---> System.Net.Http.HttpRequestException: LocalAI '
+                                            'structured output batch request failed with status '
+                                            'TooManyRequests: {"error":{"code":"model_cooldown"}}'},
+                             {"stackTrace": 'request failed with status 429:\n'
+                                            ' ---> System.Threading.Tasks.TaskCanceledException: '
+                                            'The operation was canceled.'},
+                             {"errorMessage": "request failed with status 429"},
+                             {"errorMessage": "status TooManyRequests"},
+                             {"errorMessage": "status 429"}]:
+            assert failure_kind(item) == "quota", "observed 429 shapes are quota"
+        for status, body in (("ServiceUnavailable", "too many requests in flight"),
+                             ("InternalServerError", "upstream returned status 429"),
+                             ("BadRequest", "too many requests; upstream returned status 429")):
+            item = {"errorMessage": "status TooManyRequests", "stackTrace":
+                    'request failed with status %s: {"error":{"message":"%s"}}'
+                    % (status, body)}
+            assert failure_kind(item) == "fault", "upstream status overrides body and errorMessage"
+            assert fault_signature(item) == "status %s" % status, "body must not affect signature"
+        for text in ('request failed with status ServiceUnavailable: '
+                     'upstream request failed with status TooManyRequests',
+                     'failed with status InternalServerError: proxy error\n'
+                     'upstream failed with status 429',
+                     'failed with status BadRequest: {\n'
+                     ' "message": "upstream failed with status TooManyRequests: slow down"\n}',
+                     'failed with status ServiceUnavailable: <html>\n'
+                     'proxy: backend failed with status 429\n</html>'):
+            assert failure_kind({"stackTrace": text}) == "fault", \
+                "status text in plain-text, JSON or HTML bodies must not classify quota"
+        for status, body, expected in (("503", "x ---> backend failed with status 429 now", "fault"),
+                                       ("429", "---> backend failed with status BadRequest now", "quota")):
+            item = {"stackTrace": "request failed with status %s: %s" % (status, body)}
+            assert failure_kind(item) == expected, "body arrows are not exception separators"
+            assert fault_signature(item) == "status %s" % status, "body headers must not set the signature"
+        fallback_fault = {"errorMessage": "Response status code does not indicate success: "
+                          "503 (Service Unavailable). upstream said 429 (Too Many Requests)"}
+        assert failure_kind(fallback_fault) == "fault", "only the first .NET status header decides quota"
+        assert fault_signature(fallback_fault) == "status 503", "fallback must report the .NET header status"
+        nested_code = dict(fault, stackTrace='request failed with status BadRequest: '
+                           '{"error":{"code":"json_validate_failed",'
+                           '"metadata":{"code":"org_abc123_secret"}}}')
+        assert fault_signature(nested_code) == "status BadRequest code json_validate_failed", \
+            "signature must use only a code directly inside error"
+        for body in ('{"error":{"message":"m","metadata":{"code":"org_secret_abc"}}}',
+                     '{"error":{"message":"m"},"code":"org_01hxyz"}'):
+            item = {"stackTrace": "request failed with status BadRequest: " + body}
+            assert fault_signature(item) == "status BadRequest", "nested and sibling codes must not leak"
+        bounded = {"stackTrace": 'request failed with status %s: {"error":{"code":"%s"}}'
+                   % ("A" * 32, "a" * 64)}
+        assert len(fault_signature(bounded)) <= 120, "status and code caps bound the signature"
+        retry_fault = dict(fault, stackTrace='Retry limit reached after TooManyRequests.\n ---> '
+                           'request failed with status BadRequest: '
+                           '{"error":{"code":"json_validate_failed"}}')
+        assert failure_kind(retry_fault) == "fault", "outer retry quota must not override BadRequest"
+        assert fault_signature(retry_fault) == "status BadRequest code json_validate_failed", \
+            "retry chain signature must use the inner failure"
+        retry_fault["stackTrace"] = ('outer request failed with status TooManyRequests:\n ---> '
+                                     + retry_fault["stackTrace"])
+        assert failure_kind(retry_fault) == "fault", "innermost exception-header status wins"
+        for text in ("StatusService", "statuses TooManyRequests", "status org-abc123",
+                     "status code: 429", "HTTP/1.1 429", "HTTP=429"):
+            item = {"stackTrace": text}
+            assert failure_kind(item) == "fault", "unobserved status forms must not classify quota"
+            assert fault_signature(item) == "(none)", "stack frames and body text are not statuses"
+        assert failure_kind({"stackTrace": "request failed with status InternalServerError"}) == "fault", \
+            "500 is a fault"
+        assert fault_signature({"errorMessage": "sk-secret org-private"}) == "no upstream status", \
+            "unrecognized error messages must not expose response text"
+        for field in ("stackTrace", "errorMessage"):
+            assert failure_kind({field: "status TooManyRequests."}) == "fault", \
+                "unobserved period-terminated status must not classify quota"
         print("selftest OK")
         return 0
 
@@ -313,7 +488,7 @@ data:
             return 2
         return report(time.time(),
                       requests, len(active), backlog, searches, running,
-                      WINDOW_HOURS, FAIL_RATE_THRESHOLD)
+                      WINDOW_HOURS, FAIL_RATE_THRESHOLD, STARVATION_HOURS)
 
 
     if __name__ == "__main__":
@@ -353,6 +528,8 @@ spec:
                   value: "24"
                 - name: FAIL_RATE_THRESHOLD
                   value: "25"
+                - name: STARVATION_HOURS
+                  value: "72"
                 - name: BAZARR_API_KEY
                   valueFrom:
                     secretKeyRef:
