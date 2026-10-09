@@ -6,16 +6,24 @@ shell=${SHELL:-/bin/sh}
 command=${SSH_ORIGINAL_COMMAND:-}
 if [[ $command =~ ^sh\ -l\ -s\ --\ [0-9a-f]{16}$ ]]; then
   launch_home=$HOME/.t3-ssh-launch
-  [[ ! -L $launch_home ]] || exit 1
-  if [[ ! -d $launch_home ]]; then
-    mkdir -m 0700 "$launch_home"
+  (umask 0077; mkdir -p "$launch_home")
+  if [[ -L $launch_home ]]; then
+    printf 'ssh-command: refusing %s: symlink\n' "$launch_home" >&2
+    exit 1
   fi
-  [[ -O $launch_home ]] || exit 1
+  if [[ ! -O $launch_home ]]; then
+    printf 'ssh-command: refusing %s: not owned by %s\n' "$launch_home" "$(id -un)" >&2
+    exit 1
+  fi
   chmod 00700 "$launch_home"
-  mkdir -p "$launch_home/.t3/userdata"
-  rm -f "$launch_home/.t3/userdata/server-runtime.json"
-  if [[ -f $HOME/.t3/userdata/server-runtime.json ]]; then
-    cp "$HOME/.t3/userdata/server-runtime.json" "$launch_home/.t3/userdata/server-runtime.json"
+  mkdir -p "$launch_home/.t3/userdata" "$HOME/.t3/runtime"
+  runtime_file=$HOME/.t3/userdata/server-runtime.json
+  if [[ -f $runtime_file ]]; then
+    runtime_copy=$(mktemp "$launch_home/.t3/userdata/server-runtime.json.XXXXXX")
+    cp "$runtime_file" "$runtime_copy"
+    mv -f "$runtime_copy" "$launch_home/.t3/userdata/server-runtime.json"
+  else
+    rm -f "$launch_home/.t3/userdata/server-runtime.json"
   fi
   if [[ ! -L $launch_home/.t3/runtime || $(readlink "$launch_home/.t3/runtime") != "$HOME/.t3/runtime" ]]; then
     ln -sfnT "$HOME/.t3/runtime" "$launch_home/.t3/runtime"

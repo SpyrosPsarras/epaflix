@@ -16,6 +16,17 @@ check_launch_home() {
   [[ $(readlink "$1/.t3/runtime") == "$sandbox/home/.t3/runtime" ]] || fail 'runtime points to the wrong HOME'
 }
 
+mkdir -p "$sandbox/home"
+launch_home=$(run 'sh -l -s -- 0123456789abcdef' <<'PROBE'
+set -eu
+mkdir -p "$HOME/.t3/runtime/versions"
+printf '%s\n' "$HOME"
+PROBE
+)
+check_launch_home "$launch_home"
+[[ -d $sandbox/home/.t3/runtime/versions ]] || fail 'first launch did not create the real runtime directory'
+echo 'PASS: first launch without real .t3 creates shared runtime and versions'
+
 mkdir -p "$sandbox/home/.t3/userdata" "$sandbox/home/.t3/runtime"
 printf '%s\n' '{"pid":123,"port":3773,"origin":"http://127.0.0.1:3773"}' >"$sandbox/home/.t3/userdata/server-runtime.json"
 printf '%s\n' live-data >"$sandbox/home/.t3/userdata/database"
@@ -37,6 +48,31 @@ diff -r "$sandbox/before" "$sandbox/home/.t3"
 echo 'PASS: launch gets private HOME, copied runtime state and shared runtime; live .t3 stays untouched'
 
 first_launch_home=$launch_home
+for attempt in {1..10}; do
+  rm -rf "$launch_home"
+  for launch in 1 2; do
+    run 'sh -l -s -- 0123456789abcdef' >"$sandbox/parallel-$launch" <<'PROBE' &
+set -eu
+mkdir -p "$HOME/.t3/runtime/versions"
+printf '%s\n' "$HOME"
+for read_attempt in 1 2 3 4 5; do
+  [ "$(cat "$HOME/.t3/userdata/server-runtime.json")" = '{"pid":123,"port":3773,"origin":"http://127.0.0.1:3773"}' ] || exit 1
+done
+PROBE
+    if [[ $launch == 1 ]]; then first_pid=$!; else second_pid=$!; fi
+  done
+  status=0
+  wait "$first_pid" || status=$?
+  wait "$second_pid" || status=$?
+  [[ $status == 0 ]] || fail "parallel launch failed on attempt $attempt"
+  [[ $(<"$sandbox/parallel-1") == "$first_launch_home" ]] || fail 'first parallel launch changed HOME'
+  [[ $(<"$sandbox/parallel-2") == "$first_launch_home" ]] || fail 'second parallel launch changed HOME'
+  check_launch_home "$launch_home"
+  cmp "$sandbox/home/.t3/userdata/server-runtime.json" "$launch_home/.t3/userdata/server-runtime.json"
+done
+diff -r "$sandbox/before" "$sandbox/home/.t3"
+echo 'PASS: concurrent launches reuse HOME and see complete runtime copies'
+
 chmod 0777 "$launch_home"
 rm "$launch_home/.t3/runtime"
 ln -s "$sandbox/wrong-runtime" "$launch_home/.t3/runtime"
@@ -64,13 +100,25 @@ echo 'PASS: missing real runtime state removes the stale launch copy'
 mv "$launch_home" "$sandbox/saved-launch-home"
 ln -s "$sandbox/home" "$launch_home"
 status=0
-run 'sh -l -s -- 0123456789abcdef' <<<'exit 0' || status=$?
-[[ $status != 0 ]] || fail 'symlinked launch HOME was accepted'
+run 'sh -l -s -- 0123456789abcdef' 2>"$sandbox/refusal" <<<'exit 0' || status=$?
+[[ $status == 1 ]] || fail 'symlinked launch HOME was accepted'
+[[ $(<"$sandbox/refusal") == "ssh-command: refusing $launch_home: symlink" ]] || fail 'symlink refusal message is missing'
 [[ $(stat -c %a "$sandbox/home") == 2777 ]] || fail 'symlink target permissions changed'
 diff -r "$sandbox/before" "$sandbox/home/.t3"
 rm "$launch_home"
 mv "$sandbox/saved-launch-home" "$launch_home"
 echo 'PASS: symlinked launch HOME is refused without changing real HOME'
+
+if chown 65534 "$launch_home" 2>/dev/null; then
+  status=0
+  run 'sh -l -s -- 0123456789abcdef' 2>"$sandbox/refusal" <<<'exit 0' || status=$?
+  chown "$(id -u)" "$launch_home"
+  [[ $status == 1 ]] || fail 'unowned launch HOME was accepted'
+  [[ $(<"$sandbox/refusal") == "ssh-command: refusing $launch_home: not owned by $(id -un)" ]] || fail 'ownership refusal message is missing'
+  echo 'PASS: unowned launch HOME is refused with an ownership message'
+else
+  echo 'SKIP: ownership refusal requires permission to chown the sandbox directory'
+fi
 
 [[ $(run 'sh -s' <<'PROBE'
 printf '%s\n' "$HOME"
