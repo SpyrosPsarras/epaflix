@@ -1,4 +1,5 @@
 diff --git a/src/core/budget.ts b/src/core/budget.ts
+index f139af4..fca1f3e 100644
 --- a/src/core/budget.ts
 +++ b/src/core/budget.ts
 @@ -67,6 +67,7 @@ export function createBudget() {
@@ -6,101 +7,12 @@ diff --git a/src/core/budget.ts b/src/core/budget.ts
    return {
      counters,
 +    pythonDisplayAnalyzed: false,
- 
+
      resolvedPaths: new Map<string, string>(),
      charge(kind: CountedKind, units = 1): void {
-diff --git a/src/gate/secret/secret-protection.ts b/src/gate/secret/secret-protection.ts
---- a/src/gate/secret/secret-protection.ts
-+++ b/src/gate/secret/secret-protection.ts
-@@ -38,6 +38,7 @@ import {
-   StructuralShellSyntaxLimitError,
- } from '@/gate/guards/semantic-facts';
- import { createToolInvocation, type ToolRoute } from '@/gate/invocation';
-+import { pythonDisplayLiteralRanges } from './python-print';
- 
- export const REASON_SECRET_PROTECTION = 'Access to a sensitive path is not allowed.';
- 
-@@ -220,6 +221,8 @@ type PathExtractionOptions = {
-   readonly standard?: boolean;
-   // Inside `$( )` an echo/printf operand is captured output, not display text.
-   readonly capturedOutput?: boolean;
-+  // The display exception is limited to uncaptured inline code, never stdin or pipe carriers.
-+  readonly keepPythonDisplay?: boolean;
- };
- 
- /** @internal */
-@@ -459,6 +462,15 @@ function extractCommandPathTargets(
-   if (syntax.status === 'structural-limit') throw new StructuralShellSyntaxLimitError();
-   if (syntax.status === 'unclosed-quote') return [];
-   if (syntax.status === 'invalid') throw new Error('Unable to parse command for secret protection');
-+  options = {
-+    ...options,
-+    keepPythonDisplay:
-+      options.keepPythonDisplay === true ||
-+      options.capturedOutput === true ||
-+      syntax.program.nodes.some(
-+        (node) => node.kind !== 'command' || node.nested.length > 0 || node.redirections.length > 0,
-+      ),
-+  };
- 
-   const targets = [
-     ...syntax.assignmentFallbacks.map((target) => ({ target, cwd })),
-@@ -795,7 +807,15 @@ function extractStdinScriptPathTargets(
-           cwd,
-           budget,
-         )
--      : extractInlineCodePathTargets(interpreter, body, store, options, environment, cwd, budget),
-+      : extractInlineCodePathTargets(
-+          interpreter,
-+          body,
-+          store,
-+          { ...options, keepPythonDisplay: true },
-+          environment,
-+          cwd,
-+          budget,
-+        ),
-   );
- }
- 
-@@ -1296,11 +1316,24 @@ function extractInlineCodePathTargets(
-       LANGUAGE_EVAL_PREFIX.test(masked.masked.slice(0, literal.start)),
-     );
-   const refine = options.standard === true && !SHELL_STDIN_INTERPRETERS.has(command);
-+  const displayRanges =
-+    refine &&
-+    (command === 'python' || command === 'python3') &&
-+    !languageEval &&
-+    options.keepPythonDisplay !== true
-+      ? pythonDisplayLiteralRanges(code, budget)
-+      : [];
-+  const candidateLiterals = masked.literals.filter(
-+    (literal) =>
-+      !displayRanges.some(
-+        ([start, end]) => literal.start >= start && literal.start + literal.text.length <= end,
-+      ),
-+  );
-   // Standard mode: literals are data unless the code as a whole holds a read, exec or eval marker.
-   const literals =
-     refine && !(containsRecognizableInlineAccess(masked.masked) || shellExec || languageEval)
-       ? []
--      : masked.literals;
-+      : candidateLiterals;
-   // Standard mode walks as shell only what an exec call receives: every literal when the call's
-   // first argument holds a name, otherwise the literals inside the call's parentheses.
-   const execCalls = refine
-@@ -1311,8 +1344,8 @@ function extractInlineCodePathTargets(
-     : [];
-   const shellLiterals =
-     !refine || execCalls.some((call) => firstArgumentHasName(masked.masked, call.start))
--      ? masked.literals
--      : masked.literals.filter(
-+      ? candidateLiterals
-+      : candidateLiterals.filter(
-           (literal) =>
-             SHELL_EXEC_PREFIX.test(masked.masked.slice(0, literal.start)) ||
-             execCalls.some((call) => literal.start >= call.start && literal.start < call.end),
 diff --git a/src/gate/secret/python-print.ts b/src/gate/secret/python-print.ts
 new file mode 100644
+index 0000000..1847531
 --- /dev/null
 +++ b/src/gate/secret/python-print.ts
 @@ -0,0 +1,163 @@
@@ -267,3 +179,96 @@ new file mode 100644
 +    return [];
 +  }
 +}
+diff --git a/src/gate/secret/secret-protection.ts b/src/gate/secret/secret-protection.ts
+index 985cc44..877f5f4 100644
+--- a/src/gate/secret/secret-protection.ts
++++ b/src/gate/secret/secret-protection.ts
+@@ -35,6 +35,7 @@ import {
+   projectSensitiveShellText,
+   StructuralShellSyntaxLimitError,
+ } from '@/gate/guards/semantic-facts';
++import { pythonDisplayLiteralRanges } from './python-print';
+
+ export const REASON_SECRET_PROTECTION = 'Access to a sensitive path is not allowed.';
+
+@@ -242,6 +243,7 @@ type PathExtractionOptions = {
+   readonly displayOperandsAreCapturedOutput?: boolean;
+   readonly segmentMayFeedReader?: boolean;
+   readonly commandHoldsPipe?: boolean;
++  readonly keepPythonDisplay?: boolean;
+ };
+
+ function findSensitivePolicyPathTarget(
+@@ -509,6 +511,18 @@ function extractCommandPathTargets(
+   if (syntax.status === 'unclosed-quote') return [];
+   if (syntax.status === 'invalid') throw new Error('Unable to parse command for secret protection');
+
++  options = {
++    ...options,
++    keepPythonDisplay:
++      options.keepPythonDisplay === true ||
++      options.displayOperandsAreCapturedOutput === true ||
++      options.segmentMayFeedReader === true ||
++      options.commandHoldsPipe === true ||
++      syntax.program.nodes.some(
++        (node) => node.kind !== 'command' || node.nested.length > 0 || node.redirections.length > 0,
++      ),
++  };
++
+   const targets: SecretCandidate[] = [
+     ...syntax.assignmentFallbacks.map((target) => ({ target, cwd })),
+     ...extractCommandSubstitutionPathTargets(
+@@ -955,7 +969,15 @@ function extractStdinScriptPathTargets(
+           cwd,
+           budget,
+         )
+-      : extractInlineCodePathTargets(interpreter, body, store, options, environment, cwd, budget),
++      : extractInlineCodePathTargets(
++          interpreter,
++          body,
++          store,
++          { ...options, keepPythonDisplay: true },
++          environment,
++          cwd,
++          budget,
++        ),
+   );
+ }
+
+@@ -1461,11 +1483,24 @@ function extractInlineCodePathTargets(
+     options.inlineLiteralsPresumedData === true && !SHELL_STDIN_INTERPRETERS.has(command);
+   const codeRolesReadable =
+     literalsPresumedData && (family === 'python' || family === 'javascript');
++  const displayRanges =
++    literalsPresumedData &&
++    (command === 'python' || command === 'python3') &&
++    !languageEval &&
++    options.keepPythonDisplay !== true
++      ? pythonDisplayLiteralRanges(code, budget)
++      : [];
++  const candidateLiterals = masked.literals.filter(
++    (literal) =>
++      !displayRanges.some(
++        ([start, end]) => literal.start >= start && literal.start + literal.text.length <= end,
++      ),
++  );
+   const literals =
+     literalsPresumedData &&
+     !(containsRecognizableInlineAccess(masked.masked) || shellExec || languageEval)
+       ? []
+-      : masked.literals;
++      : candidateLiterals;
+   const execCalls = literalsPresumedData
+     ? Array.from(masked.masked.matchAll(SHELL_EXEC_CALL), (call) => {
+         const start = call.index + call[0].length;
+@@ -1479,8 +1514,8 @@ function extractInlineCodePathTargets(
+         firstArgumentHasName(masked.masked, call.start) &&
+         !runsArgvWithoutCodeFlag(masked, call.start),
+     )
+-      ? masked.literals
+-      : masked.literals.filter(
++      ? candidateLiterals
++      : candidateLiterals.filter(
+           (literal) =>
+             SHELL_EXEC_PREFIX.test(masked.masked.slice(0, literal.start)) ||
+             execCalls.some((call) => literal.start >= call.start && literal.start < call.end),
