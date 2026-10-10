@@ -1,0 +1,17 @@
+--- a/rpc-fallback.ts
++++ b/rpc-fallback.ts
+@@ -109,11 +109,9 @@
+ 	const options = q.options.map(formatOptionLine);
+ 	options.push(`${q.options.length + 1}. ${displayLabel("other")}`);
+ 	const chosen = await ui.select(`${header}${q.question}${buildPreviewBlock(q)}`, options);
+-	if (chosen == null) return undefined;
+-	const idx = parseIndex(chosen, options.length);
+-	// A host returning something outside the offered list is indistinguishable
+-	// from a dismissal — treat it as one rather than fabricate an answer.
+-	if (idx == null) return undefined;
++	if (chosen == null || chosen.trim().length === 0) return undefined;
++	const idx = options.indexOf(chosen);
++	if (idx === -1) return { questionIndex, question: q.question, kind: "custom", answer: chosen };
+ 	if (idx < q.options.length) {
+ 		const o = q.options[idx];
+ 		return {

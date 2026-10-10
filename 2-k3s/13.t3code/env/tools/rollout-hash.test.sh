@@ -3,10 +3,8 @@
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
-mkdir -p "$tmp/env/tools"
+cp -r "$ROOT/env" "$tmp/"
 cp -r "$ROOT/one" "$tmp/k"
-cp "$ROOT/env/Dockerfile" "$ROOT/env/Dockerfile.dockerignore" "$tmp/env/"
-cp "$ROOT/env/tools/"{runtime-tag.sh,os-packages.txt,install-cluster-tools.sh,package.json,package-lock.json} "$tmp/env/tools/"
 cp "$ROOT/versions.env" "$tmp/"
 python3 "$ROOT/env/tools/private-config.test.py" overlay "$tmp/k"
 render() { kustomize build "$1" | python3 -c '

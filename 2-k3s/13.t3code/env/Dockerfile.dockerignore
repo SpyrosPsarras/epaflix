@@ -2,7 +2,10 @@
 !versions.env
 !env/
 !env/Dockerfile
+!env/files/
+!env/files/rpiv-ask-user-question.patch
 !env/tools/
+!env/tools/rpiv-typed-answer.mjs
 !env/tools/os-packages.txt
 !env/tools/install-cluster-tools.sh
 !env/tools/package.json

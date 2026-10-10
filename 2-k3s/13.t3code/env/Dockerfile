@@ -18,6 +18,15 @@ RUN bash /tmp/cluster-tools/install-cluster-tools.sh
 COPY env/tools/package.json env/tools/package-lock.json /tools/
 # npm 11 drops T3's bundled native package on glibc; npm 10 installs it correctly.
 RUN cd /tools && npx --yes npm@10.9.4 ci --no-fund --no-audit && npm cache clean --force
+COPY env/files/rpiv-ask-user-question.patch env/tools/rpiv-typed-answer.mjs /tmp/
+RUN cd /tools/node_modules/@juicesharp/rpiv-ask-user-question \
+    && if node /tmp/rpiv-typed-answer.mjs "$PWD"; then \
+        echo "Upstream rpiv now keeps typed answers. Delete the patch, the probe, these Dockerfile lines and the matching dockerignore/runtime-tag/README entries." >&2; \
+        exit 1; \
+    fi \
+    && git apply /tmp/rpiv-ask-user-question.patch \
+    && node /tmp/rpiv-typed-answer.mjs "$PWD" \
+    && rm /tmp/rpiv-ask-user-question.patch /tmp/rpiv-typed-answer.mjs
 # Run the native server directly so container TERM reaches it without a CLI shim.
 RUN ln -sf "../@t3code/t3-$(node -p process.platform)-$(node -p process.arch)/t3" /tools/node_modules/.bin/t3
 ENV PATH="/tools/node_modules/.bin:${PATH}"
