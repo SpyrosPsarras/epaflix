@@ -230,6 +230,6 @@ other exception text from the model), add it to `MODULES` in `mcp_hub.py`
 and to the `configMapGenerator`, add its env to `deployment.yaml` (plus a
 revision replacement if it gets a Secret). An upstream: add an `Upstream` to
 `upstreams()` with its credential. Then add the name to `SERVERS` (and any
-approval-gated tools to `ASK`) in `tools/hub_clients.py`, run
+OpenCode approval-gated tools to `ASK`) in `tools/hub_clients.py`, run
 `13.t3code/one/tools/sync-shared.sh`, extend the selftest, and re-run
 `add-client.py <pc> --reuse` on each PC.
