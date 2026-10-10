@@ -4,11 +4,9 @@ import argparse
 import json
 import os
 from pathlib import Path
-import re
 import sys
 import tempfile
 from urllib.request import Request, urlopen
-from hub_clients import ASK
 
 
 PACKAGES = ['pi-cliproxyapi-provider', '@gotgenes/pi-permission-system',
@@ -67,10 +65,6 @@ def permissions():
     bash.update(dict.fromkeys(commands, 'deny'))
     policy = {'*': 'allow', 'bash': bash,
               'path': {'*': 'allow'}, 'mcp': {'*': 'allow'}}
-    for server, tools in ASK.items():
-        for tool in tools:
-            name = re.sub(r'[^A-Za-z0-9_]', '_', f'mcp__{server}__{tool}')
-            policy['mcp'][name] = 'ask'
     return {'permission': policy}
 
 
