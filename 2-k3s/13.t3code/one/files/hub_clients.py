@@ -25,7 +25,7 @@ import tempfile
 
 SERVERS = {"gmail": "/gmail", "searxng": "/searxng", "notion": "/notion", "vaultwarden": "/vaultwarden",
            "kubernetes-epaflix": "/kubernetes", "drive": "/drive"}
-# These tools ask in OpenCode (<server>_<tool>) and Pi (mcp__<server>__<tool>).
+# These tools ask in OpenCode (<server>_<tool>).
 # The kubernetes and drive names are those of the images pinned in
 # 23.mcp-hub/kubernetes-mcp.yaml and workspace-mcp.yaml; recheck them when bumping.
 ASK = {

@@ -40,7 +40,7 @@ export async function checkEnforcement(home, modules = '/tools/node_modules') {
       'set -- arg', 'export NAME=value', 'envsubst', 'printf hello', 'type ps',
       'cat /proc/1/status', 'ls /run', 'uptime', 'systemctl status']
       .map(command => ['bash', { command }, 'allow']),
-    ['mcp__gmail__gmail_send', {}, 'ask'],
+    ['mcp__gmail__gmail_send', {}, 'allow'],
   ]
   for (const prefix of ['ps', '/bin/ps', '/usr/bin/ps']) {
     for (let length = 1; length <= 8; length++) {
