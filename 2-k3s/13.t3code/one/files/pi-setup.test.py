@@ -19,7 +19,6 @@ from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parent
-sys.path.insert(0, str(ROOT))
 
 
 def load(name):
@@ -120,26 +119,15 @@ class SetupTests(unittest.TestCase):
         self.assertTrue((self.agent / 'extensions/pi-permission-system/config.json').is_file())
         self.assertFalse(legacy.exists())
 
-    def test_irreversible_mcp_calls_ask_using_shared_hub_set(self):
-        hub = load('hub_clients')
+    def test_mcp_policy_allows_every_tool(self):
         self.write()
         policy = json.loads((self.agent / 'extensions/pi-permission-system/config.json').read_text())['permission']
         self.assertFalse(any(name.startswith('mcp__') for name in policy))
         mcp = policy['mcp']
-        self.assertEqual(next(iter(mcp)), '*')
-        self.assertEqual(decision(mcp, 'mcp__gmail__gmail_send'), 'ask')
-        self.assertEqual(decision(mcp, 'mcp__vaultwarden__vault_trash'), 'ask')
-        self.assertEqual(decision(mcp, 'mcp__kubernetes_epaflix__pods_delete'), 'ask')
-        for server, tools in hub.ASK.items():
-            server = re.sub(r'[^A-Za-z0-9_]', '_', server)
-            for tool in tools:
-                self.assertEqual(decision(mcp, f'mcp__{server}__{tool}'), 'ask')
-        for name in ['mcp__gmail__gmail_search', 'mcp__vaultwarden__vault_list',
-                     'mcp__kubernetes_epaflix__pods_list', 'mcp__drive__search_drive_files']:
+        self.assertEqual(mcp, {'*': 'allow'})
+        for name in ['mcp__gmail__gmail_send', 'mcp__kubernetes_epaflix__pods_delete',
+                     'mcp__vaultwarden__vault_trash']:
             self.assertEqual(decision(mcp, name), 'allow')
-        with patch.dict(self.setup.ASK, {'gmail': ['future_irreversible']}, clear=True):
-            self.assertEqual(decision(self.setup.permissions()['permission']['mcp'],
-                                      'mcp__gmail__future_irreversible'), 'ask')
 
     def test_aliases_and_fetch_failure_preserve_previous_file(self):
         self.write()

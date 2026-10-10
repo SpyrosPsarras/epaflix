@@ -2,7 +2,7 @@
 
 The entrypoint installs these layers before T3 starts Pi through `/scripts/pi.sh`.
 
-1. `pi-permission-system` reads `~/.pi/agent/extensions/pi-permission-system/config.json`, written by `pi-setup.py`. It denies destructive host commands and environment dumps including `printenv*`. Hub ASK tools require approval before execution.
+1. `pi-permission-system` reads `~/.pi/agent/extensions/pi-permission-system/config.json`, written by `pi-setup.py`. It denies destructive host commands and environment dumps including `printenv*`. It allows every MCP tool. T3's MCP extension skips approval in full-access mode and asks for non-read-only tools in other runtime modes.
 2. `cc-safety-net-install.py` builds and hash-checks the reviewed cc-safety-net 2.6.4 Pi extension. It blocks destructive Git and filesystem commands and secret-file access. `ssh-policy.py` protects SSH keys and the vault login while permitting attachment identifiers and public host-key snapshots.
 3. `pi-redact` masks credentials in tool output before the model sees them.
 
