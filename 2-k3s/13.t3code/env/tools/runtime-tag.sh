@@ -5,4 +5,5 @@ root=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$root"
 sha256sum env/Dockerfile env/Dockerfile.dockerignore env/tools/os-packages.txt \
   env/tools/install-cluster-tools.sh env/tools/package.json env/tools/package-lock.json \
+  env/files/rpiv-ask-user-question.patch env/tools/rpiv-typed-answer.mjs \
   versions.env | sha256sum | cut -c1-32

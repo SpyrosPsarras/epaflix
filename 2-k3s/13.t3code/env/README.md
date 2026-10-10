@@ -16,6 +16,10 @@ T3 launches Pi through `/scripts/pi.sh`. `t3-pi-settings.py` registers that bina
 
 The packages supply CLIProxyAPI integration, permission enforcement, output redaction, rpiv-todo, rpiv-ask-user-question, superpowers and ponytail. The reviewed cc-safety-net Pi build is registered separately by `cc-safety-net-install.py`. The package's ponytail skill takes precedence over the private bundle copy. Safety layers are described in `../one/pi-safety.md`.
 
+The image patches rpiv's RPC single-select so text typed in T3 becomes a custom answer instead of a dismissal, tracked in [rpiv issue #299](https://github.com/juicesharp/rpiv-mono/issues/299). The build fails once upstream fixes this, which is the signal to delete the patch and its build entries.
+
+T3 shows the select title twice and without line breaks, tracked in [T3 issue #17895](https://github.com/pingdotgg/t3code/issues/17895), which needs no change here.
+
 Startup runs `pi list` through `pi-setup.py check-packages` and aborts if a registered package is missing. CI runs `pi-setup.test.py`, `t3-pi-settings.test.py`, the other runtime Python tests and `rollout-hash.test.sh`.
 
 `tools/smoke.sh` boots the built image without production credentials, using synthetic private configuration, OpenCode-era T3 settings and a local Git remote. It waits for T3 health and verifies migrated Pi selections, the private rollback backup and package check. `pi-parity.mjs` runs `/scripts/pi.sh --mode rpc --no-session` to check extension commands, a superpowers skill, package ponytail skill resolution and absence of extension load errors. Its sibling `pi-enforcement.mjs` uses the shipped permission-system pipeline against the written agent directory to assert environment dump denies, read-only allows and the Gmail send allow. `pi-models.mjs` checks `/scripts/pi.sh --list-models` against mock cliproxy, requiring only cliproxy provider models and both mock model IDs. rpiv-ask-user-question has no registered command, so its startup coverage is package registration, its extension file and absence of load errors. These checks do not exercise model calls.
