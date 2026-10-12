@@ -3,15 +3,13 @@ on:
   push:
     branches: [main]
     paths:
-      - '2-k3s/13.t3code/env/**'
-      - '2-k3s/13.t3code/one/**'
-      - '2-k3s/13.t3code/versions.env'
+      - '2-k3s/13.t3code/**'
+      - '2-k3s/13.t3code-homelab/**'
       - '.github/workflows/build-t3-runtime.yml'
   pull_request:
     paths:
-      - '2-k3s/13.t3code/env/**'
-      - '2-k3s/13.t3code/one/**'
-      - '2-k3s/13.t3code/versions.env'
+      - '2-k3s/13.t3code/**'
+      - '2-k3s/13.t3code-homelab/**'
       - '.github/workflows/build-t3-runtime.yml'
   workflow_dispatch:
 permissions:
@@ -20,12 +18,17 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        variant: [mixed, homelab]
+    env:
+      T3_RUNTIME_VARIANT: ${{ matrix.variant }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build and boot without production credentials
         run: |
           bash 2-k3s/13.t3code/env/tools/sync-runtime-image.sh
-          git diff --exit-code -- 2-k3s/13.t3code/one/statefulset.yaml
+          git diff --exit-code -- 2-k3s/13.t3code/one/statefulset.yaml 2-k3s/13.t3code-homelab/statefulset.yaml
           bash 2-k3s/13.t3code/one/tools/sync-shared.sh --check
           bash 2-k3s/13.t3code/env/tools/smoke.sh
       - name: Log in to GHCR
@@ -39,10 +42,12 @@ jobs:
         if: github.event_name != 'pull_request'
         run: |
           image=ghcr.io/spyrospsarras/t3-runtime
-          tag=$(bash 2-k3s/13.t3code/env/tools/runtime-tag.sh)
-          docker tag t3-runtime:dev "$image:inputs-$tag"
-          docker push "$image:inputs-$tag"
-          docker tag t3-runtime:dev "$image:${{ github.sha }}"
-          docker push "$image:${{ github.sha }}"
-          docker tag t3-runtime:dev "$image:latest"
-          docker push "$image:latest"
+          variant=${{ matrix.variant }}
+          tag=$(bash 2-k3s/13.t3code/env/tools/runtime-tag.sh "$variant")
+          source=t3-runtime:dev
+          prefix=
+          if [[ $variant == homelab ]]; then source=t3-runtime:homelab-dev; prefix=homelab-; fi
+          for target in "${prefix}inputs-$tag" "${prefix}${{ github.sha }}" "${prefix}latest"; do
+            docker tag "$source" "$image:$target"
+            docker push "$image:$target"
+          done
