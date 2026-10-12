@@ -3,12 +3,12 @@
 # Rewrites each runtime variant in its StatefulSet.
 set -euo pipefail
 dir=$(cd "$(dirname "$0")" && pwd)
-for variant in mixed homelab; do
+for variant in mixed homelab work; do
   overlay=one
-  [[ $variant != homelab ]] || overlay=../13.t3code-homelab
+  [[ $variant == mixed ]] || overlay=../13.t3code-$variant
   tag=$(bash "$dir/runtime-tag.sh" "$variant")
   prefix=inputs
-  [[ $variant != homelab ]] || prefix=homelab-inputs
+  [[ $variant == mixed ]] || prefix=$variant-inputs
 python3 - "$prefix-$tag" "$dir/../../$overlay/statefulset.yaml" <<'PY'
 import pathlib, re, sys
 for arg in sys.argv[2:]:

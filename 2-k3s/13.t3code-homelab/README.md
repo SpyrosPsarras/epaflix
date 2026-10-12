@@ -10,7 +10,8 @@ component without copying shared scripts or relaxing Kustomize's file loader.
 The component shares the maintained safety installer, package setup, hub
 client generator, SSH launcher workaround and update jobs. Its entrypoint,
 Pi launcher and SSH server use the isolated-runtime paths. This is the small
-pattern for the later work backend; no work backend is implemented here.
+pattern also used by the sibling [work backend](../13.t3code-work/README.md),
+without adding its authentication helper or credentials to homelab.
 
 ## Private inputs
 
@@ -109,9 +110,10 @@ base64 entry format. Required targets are:
 Additional hook files may live under `.config/t3-policy/`. Legacy
 `.pi/agent/extensions/pi-permission-system/config.json` entries are accepted
 under the same input digest and base64 validation but are not installed.
-Existing policy files remain inert for rollback. Remove legacy acceptance
-checks that require that extension before rollout; startup still runs every
-approved check. Update the policies input digest after those reviewed changes.
+Existing policy files remain inert for rollback. Startup still runs every
+approved acceptance check. A check that requires the removed extension must
+fail, then be revised and re-reviewed with a new policies input digest before
+rollout. Do not silently drop checks.
 Secret-protection overrides cannot disable checks. Claude hooks must be present
 and enabled. Startup retains the approved policy files, adds the runtime's credential paths to the secret deny list,
 and runs each approved harmless acceptance check with no credential-bearing
