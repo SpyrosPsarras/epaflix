@@ -4,9 +4,13 @@
 (MODULES) or an upstream the hub forwards to with a credential only it holds
 (upstreams()). ../README.md lists the other steps for adding one.
 
-Every client has its own hub token; clients.json maps client name to the
-SHA-256 of its token (../tools/add-client.py writes it), and any listed token
-opens every path. GET /healthz is the only unauthenticated route. Modules
+Legacy clients.json maps client name to the SHA-256 of its token
+(../tools/add-client.py writes it). Those tokens open every legacy path.
+Homelab/work instances instead require HUB_INSTANCE, HUB_SERVICES_FILE and
+HUB_CREDENTIALS_FILE; only their explicit allowlist is mounted and no legacy
+module, upstream or credential is used. Their token prefixes are reserved
+and rejected by the legacy hub. See ../instances/README.md.
+GET /healthz is the only unauthenticated route. Modules
 use stateless JSON transport, so a pod restart costs a client one retry.
 
 Env: CLIENTS_FILE (default /app/clients.json) plus whatever the mounted
@@ -25,6 +29,7 @@ import hmac
 import json
 import os
 import sys
+import urllib.parse
 
 from starlette.applications import Starlette
 from starlette.datastructures import Headers
@@ -35,6 +40,7 @@ from starlette.routing import Route
 import gmail_mcp
 import searxng_mcp
 import upstream
+import hub_services
 from upstream import Upstream, UpstreamError
 
 MODULES = [("/gmail", gmail_mcp.server), ("/searxng", searxng_mcp.server)]
@@ -72,15 +78,81 @@ def load_clients(path):
     """{client name: sha256 hex of its hub token}."""
     with open(path) as f:
         clients = json.load(f)
-    for name, digest in clients.items():
-        if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
-            raise SystemExit(f"{path}: client {name!r} needs a lowercase sha256 hex digest")
+    validate_clients(clients)
     return clients
 
 
+def validate_clients(clients):
+    if not isinstance(clients, dict) or not clients:
+        raise ValueError("clients must be a nonempty name-to-digest mapping")
+    for name, digest in clients.items():
+        if not isinstance(name, str) or not name or not isinstance(digest, str) or (
+                len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest)):
+            raise ValueError("each client needs a lowercase sha256 hex digest")
+
+
+def instance_app(environment, services_file, credentials_file):
+    if environment not in hub_services.ENVIRONMENTS:
+        raise ValueError("HUB_INSTANCE must be homelab or work")
+    config = hub_services.load_services(services_file, environment)
+    with open(credentials_file) as f:
+        credentials = json.load(f)
+    if not isinstance(credentials, dict) or set(credentials) != {"clients", "upstreams"}:
+        raise ValueError("instance credentials require clients and upstreams")
+    validate_clients(credentials["clients"])
+    connections = credentials["upstreams"]
+    if not isinstance(connections, dict) or set(connections) != set(config["services"]):
+        raise ValueError("upstream credentials must match the service allowlist exactly")
+    for name in config["services"]:
+        connection = connections[name]
+        keys = {"url"} if name == "notion" else {"url", "token"}
+        if not isinstance(connection, dict) or set(connection) != keys:
+            raise ValueError("each upstream requires an explicit URL and its own credential")
+        url = connection["url"]
+        if not isinstance(url, str) or any(ord(c) <= 32 or ord(c) >= 127 for c in url):
+            raise ValueError("upstream URL must be HTTP or HTTPS without embedded credentials")
+        try:
+            parsed = urllib.parse.urlsplit(url)
+            port = parsed.port
+        except ValueError:
+            raise ValueError("invalid upstream URL") from None
+        if parsed.scheme not in ("http", "https") or not parsed.hostname or port == 0 or (
+                parsed.username is not None or parsed.password is not None or parsed.query or parsed.fragment):
+            raise ValueError("upstream URL must be HTTP or HTTPS without embedded credentials")
+        if name == "notion":
+            if url != "https://mcp.notion.com/mcp":
+                raise ValueError("notion must use the hosted MCP endpoint")
+        else:
+            token = connection["token"]
+            if not isinstance(token, str) or not token or any(ord(c) <= 32 or ord(c) >= 127 for c in token):
+                raise ValueError("upstream token must contain only visible ASCII without whitespace")
+            if token.startswith(tuple(name + "." for name in hub_services.ENVIRONMENTS)) or (
+                    hashlib.sha256(token.encode()).hexdigest() in credentials["clients"].values()):
+                raise ValueError("upstream and ordinary client credentials must be separate")
+    ups = []
+    for name in config["services"]:
+        connection = connections[name]
+        if name == "notion":
+            import notion_grant
+
+            store = notion_grant.SecretStore("mcp-hub-" + environment, "mcp-hub-notion-grant")
+            data, _ = store.read()
+            if not all(data.get(key) for key in ("client_id", "refresh_token", "token_endpoint")):
+                raise ValueError("instance Notion grant requires an independent OAuth client and refresh token")
+            grant = notion_grant.Grant(store)
+            grant.access_token()
+            up = Upstream(name, connection["url"], grant.headers, on_unauthorized=grant.invalidate)
+        else:
+            up = Upstream(name, connection["url"], lambda token=connection["token"]:
+                          {"Authorization": "Bearer " + token})
+        ups.append((hub_services.PATHS[name], up))
+    return build_app(credentials["clients"], modules=(), ups=ups, environment=environment)
+
+
 class BearerAuth:
-    def __init__(self, app, clients):
+    def __init__(self, app, clients, environment=None):
         self.app, self.digests = app, [d.encode() for d in clients.values()]
+        self.environment = environment
 
     async def __call__(self, scope, receive, send):
         if scope["type"] == "http" and scope["path"] != "/healthz":
@@ -88,14 +160,19 @@ class BearerAuth:
             # Hash first: equal-length compare, and non-ASCII input cannot raise (500) instead of 401.
             got = hashlib.sha256(header[7:].encode(errors="replace")).hexdigest().encode()
             # A list, not a generator: compare against every client, no early exit.
-            ok = header.startswith("Bearer ") and any([hmac.compare_digest(got, d) for d in self.digests])
+            matches = any([hmac.compare_digest(got, d) for d in self.digests])
+            prefix = "Bearer " if self.environment is None else "Bearer " + self.environment + "."
+            ok = header.startswith(prefix) and matches
+            if self.environment is None and header.startswith(tuple(
+                    "Bearer " + name + "." for name in hub_services.ENVIRONMENTS)):
+                ok = False
             if not ok:
                 await PlainTextResponse("unauthorized", status_code=401)(scope, receive, send)
                 return
         await self.app(scope, receive, send)
 
 
-def build_app(clients, modules=MODULES, ups=None):
+def build_app(clients, modules=MODULES, ups=None, environment=None):
     if not clients:
         raise SystemExit("no clients: CLIENTS_FILE lists none (run 2-k3s/23.mcp-hub/tools/add-client.py)")
     ups = upstreams() if ups is None else ups
@@ -118,7 +195,8 @@ def build_app(clients, modules=MODULES, ups=None):
                 stack.push_async_callback(up.aclose)
             yield
 
-    return Starlette(routes=routes, lifespan=lifespan, middleware=[Middleware(BearerAuth, clients=clients)])
+    return Starlette(routes=routes, lifespan=lifespan,
+                     middleware=[Middleware(BearerAuth, clients=clients, environment=environment)])
 
 
 def _selftest():
@@ -268,8 +346,19 @@ def main():
         return
     import uvicorn
 
+    uvicorn.run(configured_app(), host="0.0.0.0", port=PORT, log_level="info")
+
+
+def configured_app():
+    environment = os.environ.get("HUB_INSTANCE")
+    services_file = os.environ.get("HUB_SERVICES_FILE")
+    credentials_file = os.environ.get("HUB_CREDENTIALS_FILE")
+    if any(value is not None for value in (environment, services_file, credentials_file)):
+        if not all((environment, services_file, credentials_file)):
+            raise ValueError("HUB_INSTANCE, HUB_SERVICES_FILE and HUB_CREDENTIALS_FILE are all required")
+        return instance_app(environment, services_file, credentials_file)
     clients = load_clients(os.environ.get("CLIENTS_FILE", "/app/clients.json"))
-    uvicorn.run(build_app(clients), host="0.0.0.0", port=PORT, log_level="info")
+    return build_app(clients)
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ namespace: mcp-hub
 # (in-cluster). README.md covers vocabulary, clients, secrets and bootstraps.
 resources:
   - namespace.yaml
+  - files
   - deployment.yaml
   - service.yaml
   - ingress.yaml
@@ -15,12 +16,8 @@ resources:
 
 configMapGenerator:
   - name: mcp-hub-app
+    behavior: merge
     files:
-      - files/mcp_hub.py
-      - files/gmail_mcp.py
-      - files/searxng_mcp.py
-      - files/upstream.py
-      - files/notion_grant.py
       # Client name -> SHA-256 of its hub token (tools/add-client.py). The
       # generated name hash rolls the hub when a client is added or revoked.
       - files/clients.json
