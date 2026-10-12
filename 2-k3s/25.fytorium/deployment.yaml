@@ -1,0 +1,89 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fytorium
+  namespace: fytorium
+  labels:
+    app: fytorium
+spec:
+  replicas: 1
+  # Background workers run in-process and assume a single instance.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: fytorium
+  template:
+    metadata:
+      labels:
+        app: fytorium
+    spec:
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile: {type: RuntimeDefault}
+        runAsNonRoot: true
+        # The image uses USER node; Kubernetes needs its numeric UID to verify non-root.
+        runAsUser: 1000
+        runAsGroup: 1000
+      containers:
+        - name: fytorium
+          image: ghcr.io/spyrospsarras/epaflix-fytorium:latest
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: ORIGIN
+              value: https://fytorium.epaflix.com
+            - name: OIDC_ISSUER
+              value: https://auth.epaflix.com/application/o/fytorium/
+            - name: OIDC_REDIRECT_URL
+              value: https://fytorium.epaflix.com/auth/callback
+            - name: MINIO_ENDPOINT
+              value: https://minio.epaflix.com
+            - name: MINIO_BUCKET
+              value: fytorium-photos
+            - name: HOUSEHOLD_TIMEZONE
+              value: Europe/Oslo
+          envFrom:
+            - secretRef:
+                name: fytorium-secrets
+          ports:
+            - containerPort: 3000
+              name: http
+          # dbmate runs migrations before the HTTP server starts.
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 30
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 60
+            failureThreshold: 3
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "50m"
+            limits:
+              memory: "768Mi"
+              cpu: "1000m"
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        # sharp needs writable temporary space while the root filesystem stays read-only.
+        - name: tmp
+          emptyDir:
+            sizeLimit: 512Mi
