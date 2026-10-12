@@ -715,6 +715,16 @@ spec:
               increase(loki_process_custom_credential_lines_redacted_total[15m])
             ) > 0
           for: 0m
+          # ntfy spam fix: one redacted line holds the 15m increase() above 0
+          # for exactly 15m, so every hit was a fire plus a resolve 15m later,
+          # and a repeat offender (remote-pi/transcripts, 21 hits in the week
+          # to 2026-10-11) sent both several times a day. A longer for: would
+          # drop the one-line hits entirely, and a pod restart logging its
+          # connection string once (#634) is exactly that shape. Instead the
+          # alert fires on the first line and stays firing until 6h pass with
+          # no new hit. Measured over that week, 6h cuts 26 fire/resolve
+          # pairs to 10; 12h or 24h only get to 9 and 7.
+          keep_firing_for: 6h
           labels:
             severity: warning
             component: security
@@ -722,7 +732,8 @@ spec:
             summary: "An app logged a credential in {{ $labels.namespace }} (redacted before Loki)"
             description: >-
               {{ $value }} log line(s) from {{ $labels.namespace }}/{{ $labels.container }}
-              contained a credential-shaped key=value in the last 15m. alloy
+              contained a credential-shaped key=value in the last 15m (the
+              alert stays firing until 6h pass with no new hit). alloy
               redacted the value before pushing, so it is NOT in Loki - but it IS
               in the pod's own stdout and visible via `kubectl logs`. The alloy
               chart's ServiceMonitor sets honorLabels, so namespace/pod/container
@@ -736,49 +747,72 @@ spec:
     - name: kube-job-failed-last-run
       interval: 60s
       rules:
+        # ntfy spam fix: CronJob runs are keyed on (namespace, owner_name),
+        # not job_name. With job_name in the labels every run was a new alert,
+        # so a CronJob that kept failing resolved when the next run started
+        # and fired again 15m after that run failed: two pings an hour from
+        # lingarr-drain-watch (5 * * * *) on 2026-10-11. keep_firing_for bridges
+        # runs up to 90m; a fixed CronJob resolves 90m after a good run starts.
+        # shortcut: gntm-star-download and first-dates-star-download allow 6h,
+        # so longer runs can resolve and re-fire; reassess the hold if needed.
+        # Jobs without a CronJob owner keep the job_name key.
         - alert: KubeJobFailedLastRun
           expr: |
             (
-            (
-              (
-                max by (namespace, job_name) (kube_job_status_start_time)
-                * on (namespace, job_name) group_left(owner_name)
-                max by (namespace, job_name, owner_name) (kube_job_owner{owner_kind="CronJob"})
+              max by (namespace, owner_name) (
+                (
+                  (
+                    max by (namespace, job_name) (kube_job_status_start_time)
+                    * on (namespace, job_name) group_left(owner_name)
+                    max by (namespace, job_name, owner_name) (kube_job_owner{owner_kind="CronJob"})
+                  )
+                  and on (namespace, job_name)
+                  (max by (namespace, job_name) (kube_job_failed) > 0)
+                )
+                >= on (namespace, owner_name) group_left()
+                max by (namespace, owner_name) (
+                  max by (namespace, job_name) (kube_job_status_start_time)
+                  * on (namespace, job_name) group_left(owner_name)
+                  max by (namespace, job_name, owner_name) (kube_job_owner{owner_kind="CronJob"})
+                )
               )
-              and on (namespace, job_name)
-              (max by (namespace, job_name) (kube_job_failed) > 0)
-            )
-            >= on (namespace, owner_name) group_left()
-            max by (namespace, owner_name) (
-              max by (namespace, job_name) (kube_job_status_start_time)
-              * on (namespace, job_name) group_left(owner_name)
-              max by (namespace, job_name, owner_name) (kube_job_owner{owner_kind="CronJob"})
+              unless on (namespace, owner_name)
+              max by (namespace, owner_name) (
+                kube_job_owner{namespace="servarr", owner_kind="CronJob", owner_name=~"cleanuparr-blocklist-drift|neutarr-config-drift|orphan-census|prowlarr-indexer-health|prowlarr-appsync-drift|cleanuparr-queuecleaner-health|blind-queue-check|qbt-stuck-torrent-check"}
+                or
+                kube_job_owner{namespace="observability", owner_kind="CronJob", owner_name="ntfy-canary-check"}
+              )
             )
             or
-            (max by (namespace, job_name) (kube_job_failed) > 0)
+            (
+              (max by (namespace, job_name) (kube_job_failed) > 0)
               unless on (namespace, job_name)
               max by (namespace, job_name) (kube_job_owner{owner_kind="CronJob"})
             )
-            unless on (namespace, job_name)
-            max by (namespace, job_name) (
-              kube_job_owner{namespace="servarr", owner_kind="CronJob", owner_name=~"cleanuparr-blocklist-drift|neutarr-config-drift|orphan-census|prowlarr-indexer-health|prowlarr-appsync-drift|cleanuparr-queuecleaner-health|blind-queue-check|qbt-stuck-torrent-check"}
-              or
-              kube_job_owner{namespace="observability", owner_kind="CronJob", owner_name="ntfy-canary-check"}
-            )
           for: 15m
+          keep_firing_for: 90m
           labels:
             severity: warning
             component: kubernetes
           annotations:
-            summary: "Job {{ $labels.namespace }}/{{ $labels.job_name }} failed and is the latest run"
+            summary: >-
+              {{ if $labels.owner_name }}The latest run of CronJob
+              {{ $labels.namespace }}/{{ $labels.owner_name }} failed{{ else }}Job
+              {{ $labels.namespace }}/{{ $labels.job_name }} failed{{ end }}
             description: >-
-              Job {{ $labels.namespace }}/{{ $labels.job_name }} failed and no
-              later run of its CronJob has succeeded, so this is the CURRENT
-              state rather than a retained old failure. For the servarr reporter
+              {{ if $labels.owner_name }}The latest Job of CronJob
+              {{ $labels.namespace }}/{{ $labels.owner_name }} failed and no later
+              run has succeeded, so this is the CURRENT state rather than a
+              retained old failure (newest Job: kubectl -n {{ $labels.namespace }}
+              get jobs --sort-by=.status.startTime | grep {{ $labels.owner_name }}).
+              The alert is keyed on the CronJob and stays firing while the next
+              run is in flight, so a CronJob that keeps failing is one long alert,
+              not one per run.{{ else }}Job {{ $labels.namespace }}/{{ $labels.job_name }}
+              (no CronJob owner) failed.{{ end }} For the servarr reporter
               CronJobs a non-zero exit is a FINDING, not a crash - read the Job
               log for the report before touching anything. This alert clears by
-              itself once a later scheduled run succeeds; deleting the failed Job
-              object is not required and is not a fix.
+              itself 90m after a later run starts, unless that run fails too;
+              deleting the failed Job object is not required and is not a fix.
 
     - name: argocd
       interval: 60s
