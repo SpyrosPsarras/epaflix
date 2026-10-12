@@ -10,6 +10,7 @@
 set -euo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd)
 pairs=(
+  "$here/../env/files/work-aks-auth.py:$here/../../13.t3code-work/auth/work-aks-auth.py"
   "$here/../env/files/private-config.py:$here/files/private-config.py"
   "$here/../env/files/git-credential-github.sh:$here/files/git-credential-github.sh"
   "$here/../../23.mcp-hub/tools/hub_clients.py:$here/files/hub_clients.py"

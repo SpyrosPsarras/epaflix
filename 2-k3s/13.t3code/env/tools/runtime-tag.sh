@@ -4,7 +4,7 @@ set -euo pipefail
 root=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$root"
 variant=${1:-mixed}
-case "$variant" in mixed|homelab) ;; *) exit 1 ;; esac
+case "$variant" in mixed|homelab|work) ;; *) exit 1 ;; esac
 {
 printf '%s\n' "$variant"
 sha256sum env/Dockerfile env/Dockerfile.dockerignore env/tools/os-packages.txt \

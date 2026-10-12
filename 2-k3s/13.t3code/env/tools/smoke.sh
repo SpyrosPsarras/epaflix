@@ -3,8 +3,8 @@
 # Outer mode uses Docker; --inner expects /src, /tools, /scripts and writable /tmp.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-if [[ ${T3_RUNTIME_VARIANT:-mixed} == homelab ]]; then
-  exec bash "$ROOT/env/tools/homelab-smoke.sh" "$@"
+if [[ ${T3_RUNTIME_VARIANT:-mixed} != mixed ]]; then
+  exec bash "$ROOT/env/tools/isolated-smoke.sh" "$@"
 fi
 if [[ ${1:-} != --inner ]]; then
   image=${T3_RUNTIME_IMAGE:-t3-runtime:dev}

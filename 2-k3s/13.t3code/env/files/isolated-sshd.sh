@@ -15,7 +15,7 @@ chmod 0700 "$login" "$state"
 install -m 0600 /run/t3-login/authorized_keys "$login/authorized_keys"
 ssh-keygen -l -f "$login/authorized_keys" >/dev/null
 if [[ ! -s $state/ssh_host_ed25519_key ]]; then
-  ssh-keygen -q -t ed25519 -N '' -C homelab -f "$state/ssh_host_ed25519_key"
+  ssh-keygen -q -t ed25519 -N '' -C isolated-runtime -f "$state/ssh_host_ed25519_key"
 fi
 cat >"$state/sshd_config" <<EOF
 Port 2222

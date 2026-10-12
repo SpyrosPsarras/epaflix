@@ -30,6 +30,7 @@ resources:
   - app-system-upgrade-plans.yaml
   - app-t3code.yaml
   - app-t3code-homelab.yaml
+  - app-t3code-work.yaml
   - app-traefik.yaml
   - app-vidar-edge.yaml
   - app-gh-runner.yaml

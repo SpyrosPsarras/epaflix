@@ -45,10 +45,12 @@ def safe_policy_path(name):
 
 
 def validate(inputs, home, environment):
-    if {path.name for path in inputs.iterdir() if not path.name.startswith('.')} != INPUTS | {'runtime.json'}:
+    reviewed_inputs = INPUTS | ({'work-auth.json'} if environment == 'work' else set())
+    approvals = APPROVALS | ({'workAuth'} if environment == 'work' else set())
+    if {path.name for path in inputs.iterdir() if not path.name.startswith('.')} != reviewed_inputs | {'runtime.json'}:
         raise InputError('Runtime inputs must contain only the reviewed files')
     config = json.loads((inputs / 'runtime.json').read_text())
-    if environment != 'homelab' or config['environment'] != environment:
+    if environment not in {'homelab', 'work'} or config['environment'] != environment:
         raise InputError('Runtime environment mismatch')
     expected_hub = f'http://mcp-hub.mcp-hub-{environment}.svc.cluster.local:8000'
     if config['hubUrl'] != expected_hub:
@@ -57,10 +59,10 @@ def validate(inputs, home, environment):
     project = url(config['projectUrl'])
     if not project.startswith('https://github.com/') or not project.endswith('.git'):
         raise InputError('Project must be an explicitly approved GitHub HTTPS repository')
-    if config['gitAuth'] not in {'public', 'github-token'} or set(config['approvals']) != APPROVALS or any(
+    if config['gitAuth'] not in {'public', 'github-token'} or set(config['approvals']) != approvals or any(
             not isinstance(reference, str) or not reference.strip() for reference in config['approvals'].values()):
         raise InputError('Explicit grant and policy reviews are required')
-    if set(config['sha256']) != INPUTS or any(
+    if set(config['sha256']) != reviewed_inputs or any(
             hashlib.sha256((inputs / name).read_bytes()).hexdigest() != digest
             for name, digest in config['sha256'].items()):
         raise InputError('Reviewed input digest mismatch')
@@ -109,17 +111,12 @@ def validate(inputs, home, environment):
             raise InputError('Invalid policy acceptance check')
     result = subprocess.run(['kubectl', '--kubeconfig', str(inputs / 'kubeconfig'), 'config', 'view', '--raw', '-o', 'json'], capture_output=True)
     if result.returncode:
-        raise InputError('Invalid homelab kubeconfig')
+        raise InputError('Invalid isolated kubeconfig')
     kube = json.loads(result.stdout)
-    if any(len(kube.get(key, [])) != 1 for key in ('clusters', 'users', 'contexts')):
-        raise InputError('Only one approved homelab context, cluster and user is allowed')
-    cluster, user, context = kube['clusters'][0], kube['users'][0], kube['contexts'][0]
-    if kube.get('current-context') != context['name'] or context['context']['cluster'] != cluster['name'] or context['context']['user'] != user['name']:
-        raise InputError('Invalid kubeconfig context references')
-    if not url(cluster['cluster']['server']).startswith('https://') or cluster['cluster'].get('insecure-skip-tls-verify') or not cluster['cluster'].get('certificate-authority-data'):
-        raise InputError('Homelab API requires HTTPS and an inline trusted CA')
-    if not set(user['user']).issubset({'token', 'client-certificate-data', 'client-key-data'}) or not user['user']:
-        raise InputError('Exec, cloud authentication and external credential files are forbidden')
+    if environment == 'work':
+        importlib.import_module('work-aks-auth').validate(inputs, kube)
+    else:
+        validate_homelab_kubeconfig(kube)
     keys = (inputs / 'authorized_keys').read_text().splitlines()
     if not keys or any(not re.fullmatch(r'ssh-ed25519 [A-Za-z0-9+/]+={0,2}( [^\r\n]+)?', key) for key in keys):
         raise InputError('Only approved option-free Ed25519 public login keys are supported')
@@ -133,20 +130,44 @@ def validate(inputs, home, environment):
     else:
         files = [path for path in home.rglob('*') if path.is_file() or path.is_symlink()]
         allowed = home / '.t3/userdata/server-runtime.json'
-        if any(path != allowed or path.is_symlink() or path.stat().st_size for path in files):
+        if (home / '.azure').exists() or any(path != allowed or path.is_symlink() or path.stat().st_size for path in files):
             raise InputError('First boot requires a clean home, not imported state')
-    if any((home / name).exists() or (home / name).is_symlink() for name in ('.azure', '.aws', '.config/gcloud')):
+    forbidden = ('.aws', '.config/gcloud') + (('.azure',) if environment == 'homelab' else ())
+    if any((home / name).exists() or (home / name).is_symlink() for name in forbidden) or (home / '.azure').is_symlink():
         raise InputError('Cloud credential caches are forbidden')
     return config, services, policies
+
+
+def validate_homelab_kubeconfig(kube):
+    if any(len(kube.get(key, [])) != 1 for key in ('clusters', 'users', 'contexts')):
+        raise InputError('Only one approved homelab context, cluster and user is allowed')
+    cluster, user, context = kube['clusters'][0], kube['users'][0], kube['contexts'][0]
+    if kube.get('current-context') != context['name'] or context['context']['cluster'] != cluster['name'] or context['context']['user'] != user['name']:
+        raise InputError('Invalid kubeconfig context references')
+    if not url(cluster['cluster']['server']).startswith('https://') or cluster['cluster'].get('insecure-skip-tls-verify') or not cluster['cluster'].get('certificate-authority-data'):
+        raise InputError('Homelab API requires HTTPS and an inline trusted CA')
+    if not set(user['user']).issubset({'token', 'client-certificate-data', 'client-key-data'}) or not user['user']:
+        raise InputError('Exec, cloud authentication and external credential files are forbidden')
 
 
 def prepare(inputs, home, environment):
     validate(inputs, home, environment)
     marker = home / '.config/t3-runtime/environment'
     marker.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    marker.write_text(environment + '\n')
-    marker.chmod(0o600)
+    write_private(marker, (environment + '\n').encode())
     private_config.install((inputs / 'bundle.json').read_bytes(), home)
+
+
+def write_private(path, data, mode=0o600):
+    fd, temporary = tempfile.mkstemp(dir=path.parent, prefix='.isolated-policy-')
+    try:
+        with os.fdopen(fd, 'wb') as stream:
+            stream.write(data)
+            os.fchmod(stream.fileno(), mode)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 def toml_value(value):
@@ -186,15 +207,15 @@ def apply(inputs, home, environment):
         if target.is_symlink() or any(parent.is_symlink() for parent in target.parents if parent.is_relative_to(home)):
             raise InputError('Policy target must not be a symlink')
         target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        target.write_bytes(base64.b64decode(entry['data'], validate=True))
-        target.chmod(0o700 if entry.get('executable') else 0o600)
+        write_private(target, base64.b64decode(entry['data'], validate=True),
+                      0o700 if entry.get('executable') else 0o600)
     safety_path = home / '.cc-safety-net/policy.json'
     safety = json.loads(safety_path.read_text())
     denied = safety.setdefault('secret_protection', {}).setdefault('deny_paths', [])
-    for path in (str(home / '.ssh'), str(home / '.config/t3-sshd'), str(inputs), '/run/t3-grants'):
+    for path in (str(home / '.ssh'), str(home / '.config/t3-sshd'), str(inputs), '/run/t3-grants', str(home / '.azure')):
         if path not in denied:
             denied.append(path)
-    safety_path.write_text(json.dumps(safety, indent=2) + '\n')
+    hub_clients._write_json(str(safety_path), safety)
     for check in policies['checks']:
         args = [arg.replace('${HOME}', str(home)) for arg in check['argv']]
         result = subprocess.run(args, cwd=home, capture_output=True, timeout=30,
@@ -212,7 +233,7 @@ def apply(inputs, home, environment):
                 state['enabledMcpjsonServers'] = []
         after = hub_clients.pi(before, config['hubUrl'], 'MCP_HUB_TOKEN', services) if relative.startswith('.pi') else hub_clients.claude(before, config['hubUrl'], 'Bearer ${MCP_HUB_TOKEN}', services)
         hub_clients._write_json(str(path), after)
-    project = home / 'projects/homelab'
+    project = home / 'projects' / environment
     for path in (home / '.claude/settings.local.json', project / '.claude/settings.json',
                  project / '.claude/settings.local.json', project / '.mcp.json'):
         if path.exists():
