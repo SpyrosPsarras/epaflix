@@ -5,6 +5,12 @@ kubectl() { command kubectl --context "$KUBECTL_CONTEXT" "$@"; }
 
 set -e
 
+existing_secret=$(kubectl get secret servarr-postgres -n servarr --ignore-not-found -o name)
+if [ -n "$existing_secret" ]; then
+    echo "servarr-postgres already exists; use the encrypted source and manual DB maintenance." >&2
+    exit 1
+fi
+
 POSTGRES_HOST="192.168.10.105"
 POSTGRES_PORT="5432"
 POSTGRES_ADMIN_USER="postgres"
@@ -123,7 +129,7 @@ echo ""
 echo "========================================"
 echo ""
 echo "Next steps:"
-echo "1. Save the passwords above securely"
-echo "2. Apply the secret: kubectl apply -f secrets/postgres-secret-generated.yaml"
+echo "1. Import generated credentials into _shared/secrets/servarr-postgres.enc.yaml with SOPS"
+echo "2. Deploy only the canonical encrypted Secret with _shared/scripts/deploy.sh"
 echo "3. Continue with storage and app deployment"
 echo ""

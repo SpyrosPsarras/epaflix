@@ -65,6 +65,7 @@ jobs:
           ./.github/hooks/test-render-tier.sh
           ./.github/hooks/test-log-pipeline-regexes.sh  # go: runner image default
           python3 .github/hooks/test-sonarr-passfile.py
+          python3 .github/hooks/test-sonarr-rotation-sources.py
           ./.github/hooks/check-sops-encrypted.sh --full-tree
 
       - name: Install tools
