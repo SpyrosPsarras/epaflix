@@ -135,8 +135,9 @@ alloy:
         // credential counter below sees them, otherwise a Debug-level
         // *arr console (#976 radarr, unpackerr's per-minute query-param
         // polling) fires CredentialRedactedFromLogs around the clock.
-        // Keep the credential-key alternation in sync across all three
-        // regexes in this block (selector, both self-masks, redact).
+        // Keep the credential-key alternation in sync across the selector,
+        // self-mask and redact regexes in this block;
+        // .github/hooks/test-log-pipeline-regexes.sh checks it.
         stage.replace {
           expression = `(?i)((?:password|passwd|apikey|api_key|api-key|client_secret)=\(removed\))`
           replace    = "<self-masked>"
@@ -151,7 +152,16 @@ alloy:
         // gets redacted and counted. That end character sits outside the
         // capture, so the rest of the line stays intact.
         stage.replace {
-          expression = `(?i)((?:password|passwd|apikey|api_key|api-key|client_secret)=[A-Za-z0-9_.-]{1,6}\.\.\.[A-Za-z0-9_-]{1,6})(?:,?(?:[;&"'\s\[\]{}^$*|\\<>]|$))`
+          expression = `(?i)((?:password|passwd|apikey|api_key|api-key|client_secret)=[A-Za-z0-9_.-]{1,6}\.\.\.[A-Za-z0-9_-]{1,6})(?:,?(?:[;&"'\s\[\]{}^$|\\<>]|$))`
+          replace    = "<self-masked>"
+        }
+
+        // Grafana logs env overrides with the value already starred out:
+        // var="GF_SECURITY_ADMIN_PASSWORD=*********" on every start. Only a
+        // whole value of 3+ stars ending at a quote, whitespace or end of
+        // line is a mask; ***text still gets redacted and counted.
+        stage.replace {
+          expression = `(?i)((?:password|passwd|apikey|api_key|api-key|client_secret)=\*{3,})(?:["'\s]|$)`
           replace    = "<self-masked>"
         }
 
@@ -166,6 +176,8 @@ alloy:
               description = "Log lines containing a credential-shaped key=value that alloy redacted before pushing to Loki (#634)."
               match_all   = true
               action      = "inc"
+              // The alert uses presence as recent activity, including first hits.
+              max_idle_duration = "5m"
             }
           }
         }
@@ -175,8 +187,10 @@ alloy:
         // Loki. ( and ) stay allowed in values and {0,} allows empty values
         // so shapes like Password=(removed) and apikey=(removed) redact too
         // if they somehow get past the self-mask rewrite above (#824).
+        // * stays allowed too: as a value end it left ***text and abc*def's
+        // *def unredacted in Loki.
         stage.replace {
-          expression = `(?i)((?:password|passwd|apikey|api_key|api-key|client_secret)=(?:[^;&"'\s\[\]{}^$*|\\<>]{0,}))`
+          expression = `(?i)((?:password|passwd|apikey|api_key|api-key|client_secret)=(?:[^;&"'\s\[\]{}^$|\\<>]{0,}))`
           replace    = "<REDACTED>"
         }
       }

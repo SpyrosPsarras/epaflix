@@ -47,6 +47,7 @@ jobs:
           ./.github/hooks/test-temp-redundant-name-unlink.sh
           ./.github/hooks/test-print-age-key-backup.sh
           ./.github/hooks/test-render-tier.sh
+          ./.github/hooks/test-log-pipeline-regexes.sh  # go: runner image default
           ./.github/hooks/check-sops-encrypted.sh --full-tree
 
       - name: Install tools
