@@ -55,8 +55,12 @@ def check_manifest(documents):
     spec = deployment["spec"]["template"]["spec"]
     container = next(c for c in spec["containers"] if c["name"] == "sonarr")
     env = {v["name"]: v for v in container["env"]}
+    # SSA retains another manager's legacy valueFrom even with explicit null.
+    # This is an offline source guard, not a Kubernetes apply-transition test.
+    assert deployment["metadata"]["annotations"].get(
+        "argocd.argoproj.io/sync-options") == "ServerSideApply=false"
     assert env["SONARR__POSTGRES__PASSWORD"] == {
-        "name": "SONARR__POSTGRES__PASSWORD", "value": ""}
+        "name": "SONARR__POSTGRES__PASSWORD", "value": "", "valueFrom": None}
     assert "PGPASSWORD" not in env and "envFrom" not in container
     for setting, key in [("HOST", "host"), ("PORT", "port"),
                          ("MAINDB", "database"), ("USER", "user")]:
