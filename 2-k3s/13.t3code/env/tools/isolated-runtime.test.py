@@ -258,6 +258,20 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
             self.assertEqual(set(path.parent.iterdir()), previous_files)
 
+    def test_policy_last_good_bytes_and_modes_survive_failed_replacement(self):
+        path = self.home / 'policy-fixture'
+        path.write_bytes(b'last-good-policy')
+        path.chmod(0o600)
+        before = set(self.home.iterdir())
+        with patch.object(runtime.os, 'replace', side_effect=OSError('synthetic replace failure')):
+            with self.assertRaises(OSError): runtime.write_private(path, b'new-policy', 0o700)
+        self.assertEqual(path.read_bytes(), b'last-good-policy')
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(set(self.home.iterdir()), before)
+        runtime.write_private(path, b'new-policy', 0o700)
+        self.assertEqual(path.read_bytes(), b'new-policy')
+        self.assertEqual(path.stat().st_mode & 0o777, 0o700)
+
     def test_unmanaged_toml_values_round_trip(self):
         values = tomllib.loads('''text = "quote \\" and Unicode 🏠 and \\u007f"
 flag = true
@@ -635,7 +649,7 @@ def check_pinned_codex_project_requirements():
             for key, value in reviewed['model_providers']['cliproxy'].items():
                 assert actual['model_providers']['cliproxy'][key] == value, key
             assert actual['model_reasoning_effort'] == 'high'
-            print('homelab smoke: pinned Codex requirements enforce provider/MCP in ' + path.name + ' PASS')
+            print('isolated smoke: pinned Codex requirements enforce provider/MCP in ' + path.name + ' PASS')
         name = next(iter(reviewed['mcp_servers']))
         redirected = child / '.codex/config.toml'
         redirected.write_text(redirected.read_text() + '\n[mcp_servers.' + runtime.toml_value(name) + ']\n'
@@ -648,7 +662,7 @@ def check_pinned_codex_project_requirements():
         assert 'requirements' in servers[name]['disabled_reason']
         assert all(not server['enabled'] for server in servers.values())
         assert all(path.read_bytes() == before for path, before in sources.items())
-        print('homelab smoke: pinned Codex denies approved-name URL redirection without editing project files PASS')
+        print('isolated smoke: pinned Codex denies approved-name URL redirection without editing project files PASS')
 
 
 if __name__ == '__main__':

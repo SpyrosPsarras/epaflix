@@ -16,7 +16,17 @@ case "$variant" in
     ;;
   homelab)
     if command -v az >/dev/null || command -v bw >/dev/null || command -v kubelogin >/dev/null; then exit 1; fi
+    [[ -d /etc/codex && ! -e /scripts/work-aks-auth.py ]]
     [[ ! -e /etc/apt/sources.list.d/azure-cli.list && ! -e /usr/share/keyrings/microsoft.gpg ]]
+    for file in /scripts/aks-auth.sh /scripts/aks-auth-central.sh /scripts/vault-run.py /scripts/vault-ssh-agent.py; do
+      [[ ! -e $file ]]
+    done
+    ;;
+  work)
+    command -v az >/dev/null
+    az version >/dev/null
+    [[ -d /etc/codex && -x /scripts/work-aks-auth.py ]]
+    if command -v bw >/dev/null || command -v kubelogin >/dev/null; then exit 1; fi
     for file in /scripts/aks-auth.sh /scripts/aks-auth-central.sh /scripts/vault-run.py /scripts/vault-ssh-agent.py; do
       [[ ! -e $file ]]
     done

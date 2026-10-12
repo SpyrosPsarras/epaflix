@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 inputs=/run/t3-inputs
-[[ ${T3_RUNTIME_VARIANT:-} == homelab && ${MCP_HUB_INSTANCE:-} == homelab ]]
+[[ ${T3_RUNTIME_VARIANT:-} == "${MCP_HUB_INSTANCE:-}" ]]
+[[ $MCP_HUB_INSTANCE == homelab || $MCP_HUB_INSTANCE == work ]]
 [[ $HOME == /home/t3 && ${T3CODE_HOME:-} == "$HOME/.t3" ]]
 export PATH=/tools/node_modules/.bin:$PATH
 export KUBECONFIG=$inputs/kubeconfig MCP_HUB_SERVICES_FILE=$inputs/services.json
@@ -11,7 +12,7 @@ ANTHROPIC_BASE_URL=$(read_config modelUrl)
 MCP_HUB_URL=$(read_config hubUrl)
 export ANTHROPIC_BASE_URL MCP_HUB_URL
 repo=$(read_config projectUrl)
-project=$HOME/projects/homelab
+project=$HOME/projects/$MCP_HUB_INSTANCE
 export GIT_TERMINAL_PROMPT=0
 git config --global credential.helper ''
 if [[ $(read_config gitAuth) == github-token ]]; then

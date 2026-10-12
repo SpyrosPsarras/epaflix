@@ -5,11 +5,13 @@ on:
     paths:
       - '2-k3s/13.t3code/**'
       - '2-k3s/13.t3code-homelab/**'
+      - '2-k3s/13.t3code-work/**'
       - '.github/workflows/build-t3-runtime.yml'
   pull_request:
     paths:
       - '2-k3s/13.t3code/**'
       - '2-k3s/13.t3code-homelab/**'
+      - '2-k3s/13.t3code-work/**'
       - '.github/workflows/build-t3-runtime.yml'
   workflow_dispatch:
 permissions:
@@ -20,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        variant: [mixed, homelab]
+        variant: [mixed, homelab, work]
     env:
       T3_RUNTIME_VARIANT: ${{ matrix.variant }}
     steps:
@@ -28,7 +30,7 @@ jobs:
       - name: Build and boot without production credentials
         run: |
           bash 2-k3s/13.t3code/env/tools/sync-runtime-image.sh
-          git diff --exit-code -- 2-k3s/13.t3code/one/statefulset.yaml 2-k3s/13.t3code-homelab/statefulset.yaml
+          git diff --exit-code -- 2-k3s/13.t3code/one/statefulset.yaml 2-k3s/13.t3code-homelab/statefulset.yaml 2-k3s/13.t3code-work/statefulset.yaml
           bash 2-k3s/13.t3code/one/tools/sync-shared.sh --check
           bash 2-k3s/13.t3code/env/tools/smoke.sh
       - name: Log in to GHCR
@@ -46,7 +48,7 @@ jobs:
           tag=$(bash 2-k3s/13.t3code/env/tools/runtime-tag.sh "$variant")
           source=t3-runtime:dev
           prefix=
-          if [[ $variant == homelab ]]; then source=t3-runtime:homelab-dev; prefix=homelab-; fi
+          if [[ $variant != mixed ]]; then source=t3-runtime:$variant-dev; prefix=$variant-; fi
           for target in "${prefix}inputs-$tag" "${prefix}${{ github.sha }}" "${prefix}latest"; do
             docker tag "$source" "$image:$target"
             docker push "$image:$target"
