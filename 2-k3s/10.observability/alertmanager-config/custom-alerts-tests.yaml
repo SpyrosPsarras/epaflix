@@ -7,10 +7,13 @@ rule_files:
 evaluation_interval: 1m
 
 tests:
+  # Match the credential_lines_redacted 5m idle TTL in alloy-values.yaml.
+
+  # A logger still matching every minute: the live counter is the total.
   - interval: 1m
     input_series:
       - series: 'loki_process_custom_credential_lines_redacted_total{namespace="traefik-system",container="traefik",pod="traefik-6444675d5-x6mdf",job="traefik-system/traefik-6444675d5-x6mdf",component_id="loki.process.pods",component_path="/",filename="/var/log/pods/x/0.log",stream="stdout",instance="10.42.0.10:12345"}'
-        values: "0+1x30"
+        values: "1+1x30"
     alert_rule_test:
       - eval_time: 20m
         alertname: CredentialRedactedFromLogs
@@ -21,27 +24,89 @@ tests:
               severity: warning
               component: security
             exp_annotations:
-              summary: "An app logged a credential in traefik-system (redacted before Loki)"
-              description: "15 log line(s) from traefik-system/traefik contained a credential-shaped key=value in the last 15m (the alert stays firing until 6h pass with no new hit). alloy redacted the value before pushing, so it is NOT in Loki - but it IS in the pod's own stdout and visible via `kubectl logs`. The alloy chart's ServiceMonitor sets honorLabels, so namespace/pod/container name the offending app, not alloy (#911 was the exported_* shape under promtail, #1381). Most likely causes: sonarr/radarr/prowlarr restarting and logging their Postgres connection string (#634), or traefik access lines carrying jellyfin's query-string ApiKey (#702). If it is a new offender treat that credential as exposed and rotate it. Do NOT grep Loki for the literal value."
+              summary: "Credential-shaped log content detected in traefik-system"
+              description: "traefik-system/traefik logged a line with a credential-shaped key=value. alloy counts those lines per log stream in loki_process_custom_credential_lines_redacted_total and drops a series once 5m pass without a matching line (max_idle_duration), so a live series means a hit within about the last 5m. This fires while any is live. The latest reading was 21: lines counted since alloy created the live series, not a count over a fixed window. The alert stays firing until 6h pass with no live series. alloy redacts pattern-matched segments before Loki ingestion. Raw pod stdout can retain the original value, visible via `kubectl logs`. Unknown credential formats can still leak into Loki. The alloy chart's ServiceMonitor sets honorLabels, so namespace/pod/container name the offending app, not alloy (#911 was the exported_* shape under promtail, #1381). Known sources: sonarr/radarr/prowlarr restarting and logging their Postgres connection string (#634), traefik access lines carrying jellyfin's query-string ApiKey (#702), cloudflared logging Jellyfin request URLs with an ApiKey query parameter, and sonarr logging Prowlarr Torznab feed URLs with an apikey parameter. If it is a new offender treat that credential as exposed and rotate it. Do NOT grep Loki for the literal value."
 
+  # First sample 4 expires at 6m; a new life at 400m resets while live.
   - interval: 1m
     input_series:
       - series: 'loki_process_custom_credential_lines_redacted_total{namespace="servarr",container="sonarr",pod="sonarr-68855b8c7f-s8879",job="servarr/sonarr-68855b8c7f-s8879",component_id="loki.process.pods",component_path="/",filename="/var/log/pods/x/0.log",stream="stdout",instance="10.42.0.10:12345"}'
-        values: "4x30"
+        values: "4x5 stale _x393 3 4 1 2x5 stale"
     alert_rule_test:
       - eval_time: 20m
         alertname: CredentialRedactedFromLogs
+        exp_alerts:
+          - exp_labels:
+              namespace: servarr
+              container: sonarr
+              severity: warning
+              component: security
+            exp_annotations:
+              summary: "Credential-shaped log content detected in servarr"
+              description: "servarr/sonarr logged a line with a credential-shaped key=value. alloy counts those lines per log stream in loki_process_custom_credential_lines_redacted_total and drops a series once 5m pass without a matching line (max_idle_duration), so a live series means a hit within about the last 5m. This fires while any is live. The latest reading was 4: lines counted since alloy created the live series, not a count over a fixed window. The alert stays firing until 6h pass with no live series. alloy redacts pattern-matched segments before Loki ingestion. Raw pod stdout can retain the original value, visible via `kubectl logs`. Unknown credential formats can still leak into Loki. The alloy chart's ServiceMonitor sets honorLabels, so namespace/pod/container name the offending app, not alloy (#911 was the exported_* shape under promtail, #1381). Known sources: sonarr/radarr/prowlarr restarting and logging their Postgres connection string (#634), traefik access lines carrying jellyfin's query-string ApiKey (#702), cloudflared logging Jellyfin request URLs with an ApiKey query parameter, and sonarr logging Prowlarr Torznab feed URLs with an apikey parameter. If it is a new offender treat that credential as exposed and rotate it. Do NOT grep Loki for the literal value."
+      - eval_time: 365m
+        alertname: CredentialRedactedFromLogs
+        exp_alerts:
+          - exp_labels:
+              namespace: servarr
+              container: sonarr
+              severity: warning
+              component: security
+            exp_annotations:
+              summary: "Credential-shaped log content detected in servarr"
+              description: "servarr/sonarr logged a line with a credential-shaped key=value. alloy counts those lines per log stream in loki_process_custom_credential_lines_redacted_total and drops a series once 5m pass without a matching line (max_idle_duration), so a live series means a hit within about the last 5m. This fires while any is live. The latest reading was 4: lines counted since alloy created the live series, not a count over a fixed window. The alert stays firing until 6h pass with no live series. alloy redacts pattern-matched segments before Loki ingestion. Raw pod stdout can retain the original value, visible via `kubectl logs`. Unknown credential formats can still leak into Loki. The alloy chart's ServiceMonitor sets honorLabels, so namespace/pod/container name the offending app, not alloy (#911 was the exported_* shape under promtail, #1381). Known sources: sonarr/radarr/prowlarr restarting and logging their Postgres connection string (#634), traefik access lines carrying jellyfin's query-string ApiKey (#702), cloudflared logging Jellyfin request URLs with an ApiKey query parameter, and sonarr logging Prowlarr Torznab feed URLs with an apikey parameter. If it is a new offender treat that credential as exposed and rotate it. Do NOT grep Loki for the literal value."
+      - eval_time: 366m
+        alertname: CredentialRedactedFromLogs
+        exp_alerts: []
+      - eval_time: 399m
+        alertname: CredentialRedactedFromLogs
+        exp_alerts: []
+      - eval_time: 400m
+        alertname: CredentialRedactedFromLogs
+        exp_alerts:
+          - exp_labels:
+              namespace: servarr
+              container: sonarr
+              severity: warning
+              component: security
+            exp_annotations:
+              summary: "Credential-shaped log content detected in servarr"
+              description: "servarr/sonarr logged a line with a credential-shaped key=value. alloy counts those lines per log stream in loki_process_custom_credential_lines_redacted_total and drops a series once 5m pass without a matching line (max_idle_duration), so a live series means a hit within about the last 5m. This fires while any is live. The latest reading was 3: lines counted since alloy created the live series, not a count over a fixed window. The alert stays firing until 6h pass with no live series. alloy redacts pattern-matched segments before Loki ingestion. Raw pod stdout can retain the original value, visible via `kubectl logs`. Unknown credential formats can still leak into Loki. The alloy chart's ServiceMonitor sets honorLabels, so namespace/pod/container name the offending app, not alloy (#911 was the exported_* shape under promtail, #1381). Known sources: sonarr/radarr/prowlarr restarting and logging their Postgres connection string (#634), traefik access lines carrying jellyfin's query-string ApiKey (#702), cloudflared logging Jellyfin request URLs with an ApiKey query parameter, and sonarr logging Prowlarr Torznab feed URLs with an apikey parameter. If it is a new offender treat that credential as exposed and rotate it. Do NOT grep Loki for the literal value."
+      - eval_time: 403m
+        alertname: CredentialRedactedFromLogs
+        exp_alerts:
+          - exp_labels:
+              namespace: servarr
+              container: sonarr
+              severity: warning
+              component: security
+            exp_annotations:
+              summary: "Credential-shaped log content detected in servarr"
+              description: "servarr/sonarr logged a line with a credential-shaped key=value. alloy counts those lines per log stream in loki_process_custom_credential_lines_redacted_total and drops a series once 5m pass without a matching line (max_idle_duration), so a live series means a hit within about the last 5m. This fires while any is live. The latest reading was 2: lines counted since alloy created the live series, not a count over a fixed window. The alert stays firing until 6h pass with no live series. alloy redacts pattern-matched segments before Loki ingestion. Raw pod stdout can retain the original value, visible via `kubectl logs`. Unknown credential formats can still leak into Loki. The alloy chart's ServiceMonitor sets honorLabels, so namespace/pod/container name the offending app, not alloy (#911 was the exported_* shape under promtail, #1381). Known sources: sonarr/radarr/prowlarr restarting and logging their Postgres connection string (#634), traefik access lines carrying jellyfin's query-string ApiKey (#702), cloudflared logging Jellyfin request URLs with an ApiKey query parameter, and sonarr logging Prowlarr Torznab feed URLs with an apikey parameter. If it is a new offender treat that credential as exposed and rotate it. Do NOT grep Loki for the literal value."
+      - eval_time: 768m
+        alertname: CredentialRedactedFromLogs
+        exp_alerts:
+          - exp_labels:
+              namespace: servarr
+              container: sonarr
+              severity: warning
+              component: security
+            exp_annotations:
+              summary: "Credential-shaped log content detected in servarr"
+              description: "servarr/sonarr logged a line with a credential-shaped key=value. alloy counts those lines per log stream in loki_process_custom_credential_lines_redacted_total and drops a series once 5m pass without a matching line (max_idle_duration), so a live series means a hit within about the last 5m. This fires while any is live. The latest reading was 2: lines counted since alloy created the live series, not a count over a fixed window. The alert stays firing until 6h pass with no live series. alloy redacts pattern-matched segments before Loki ingestion. Raw pod stdout can retain the original value, visible via `kubectl logs`. Unknown credential formats can still leak into Loki. The alloy chart's ServiceMonitor sets honorLabels, so namespace/pod/container name the offending app, not alloy (#911 was the exported_* shape under promtail, #1381). Known sources: sonarr/radarr/prowlarr restarting and logging their Postgres connection string (#634), traefik access lines carrying jellyfin's query-string ApiKey (#702), cloudflared logging Jellyfin request URLs with an ApiKey query parameter, and sonarr logging Prowlarr Torznab feed URLs with an apikey parameter. If it is a new offender treat that credential as exposed and rotate it. Do NOT grep Loki for the literal value."
+      - eval_time: 769m
+        alertname: CredentialRedactedFromLogs
         exp_alerts: []
 
-  # CredentialRedactedFromLogs, ntfy spam fix: one redacted line fires at once
-  # (a pod restart logging its connection string once is the #634 shape), and
-  # a second hit inside the 6h keep_firing_for extends the same alert instead
-  # of a resolve followed by a new fire. Resolves 6h after the last hit leaves
-  # the 15m window. Counter: one line at 11m, a second at 200m.
+  # ntfy spam fix: one redacted line fires at once (a pod restart logging
+  # its connection string once is the #634 shape), and a second hit inside
+  # the 6h keep_firing_for extends the same alert instead of a resolve
+  # followed by a new fire. One line at 11m, another at 200m (a new series
+  # life at 1); resolves 6h after the second life goes (last sample 205m).
   - interval: 1m
     input_series:
       - series: 'loki_process_custom_credential_lines_redacted_total{namespace="remote-pi",container="transcripts",pod="cliproxy-5648fff7c5-qgs4q",job="remote-pi/cliproxy-5648fff7c5-qgs4q",component_id="loki.process.pods",component_path="/",filename="/var/log/pods/x/0.log",stream="stdout",instance="10.42.9.22:12345"}'
-        values: "0x10 1x188 2x400"
+        values: "_x11 1x5 stale _x182 1x5 stale"
     alert_rule_test:
       - eval_time: 12m
         alertname: CredentialRedactedFromLogs
@@ -52,18 +117,152 @@ tests:
               severity: warning
               component: security
             exp_annotations:
-              summary: "An app logged a credential in remote-pi (redacted before Loki)"
-              description: "1 log line(s) from remote-pi/transcripts contained a credential-shaped key=value in the last 15m (the alert stays firing until 6h pass with no new hit). alloy redacted the value before pushing, so it is NOT in Loki - but it IS in the pod's own stdout and visible via `kubectl logs`. The alloy chart's ServiceMonitor sets honorLabels, so namespace/pod/container name the offending app, not alloy (#911 was the exported_* shape under promtail, #1381). Most likely causes: sonarr/radarr/prowlarr restarting and logging their Postgres connection string (#634), or traefik access lines carrying jellyfin's query-string ApiKey (#702). If it is a new offender treat that credential as exposed and rotate it. Do NOT grep Loki for the literal value."
-      # The 15m window is empty from 25m; the old rule resolved here.
+              summary: "Credential-shaped log content detected in remote-pi"
+              description: "remote-pi/transcripts logged a line with a credential-shaped key=value. alloy counts those lines per log stream in loki_process_custom_credential_lines_redacted_total and drops a series once 5m pass without a matching line (max_idle_duration), so a live series means a hit within about the last 5m. This fires while any is live. The latest reading was 1: lines counted since alloy created the live series, not a count over a fixed window. The alert stays firing until 6h pass with no live series. alloy redacts pattern-matched segments before Loki ingestion. Raw pod stdout can retain the original value, visible via `kubectl logs`. Unknown credential formats can still leak into Loki. The alloy chart's ServiceMonitor sets honorLabels, so namespace/pod/container name the offending app, not alloy (#911 was the exported_* shape under promtail, #1381). Known sources: sonarr/radarr/prowlarr restarting and logging their Postgres connection string (#634), traefik access lines carrying jellyfin's query-string ApiKey (#702), cloudflared logging Jellyfin request URLs with an ApiKey query parameter, and sonarr logging Prowlarr Torznab feed URLs with an apikey parameter. If it is a new offender treat that credential as exposed and rotate it. Do NOT grep Loki for the literal value."
+      # The series is gone from 17m; the alert remains held.
       - eval_time: 30m
         alertname: CredentialRedactedFromLogs
         exp_alerts: *credential_one_line
       - eval_time: 199m
         alertname: CredentialRedactedFromLogs
         exp_alerts: *credential_one_line
-      # Same alert, re-templated by the second hit at 200m (the value is the
-      # extrapolated increase over the 15m window).
-      - eval_time: 570m
+      - eval_time: 200m
+        alertname: CredentialRedactedFromLogs
+        exp_alerts: *credential_one_line
+      - eval_time: 565m
+        alertname: CredentialRedactedFromLogs
+        exp_alerts: *credential_one_line
+      - eval_time: 566m
+        alertname: CredentialRedactedFromLogs
+        exp_alerts: []
+    promql_expr_test:
+      # Firing at every evaluation from 11m to 565m: one alert, no resolve gap.
+      - expr: count_over_time(ALERTS{alertname="CredentialRedactedFromLogs",alertstate="firing"}[560m])
+        eval_time: 565m
+        exp_samples:
+          - labels: '{alertname="CredentialRedactedFromLogs",alertstate="firing",namespace="remote-pi",container="transcripts",severity="warning",component="security"}'
+            value: 555
+
+  # A single line creates a flat-1 series that expires after 5m.
+  - interval: 1m
+    input_series:
+      - series: 'loki_process_custom_credential_lines_redacted_total{namespace="cloudflare-tunnel",container="cloudflared",pod="cloudflared-8fcb9c9b5-aaaaa",job="cloudflare-tunnel/cloudflared-8fcb9c9b5-aaaaa",component_id="loki.process.pods",component_path="/",filename="/var/log/pods/x/0.log",stream="stdout",instance="10.42.0.10:12345"}'
+        values: "_x10 1x5 stale"
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: CredentialRedactedFromLogs
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: CredentialRedactedFromLogs
+        exp_alerts: &credential_first_hit
+          - exp_labels:
+              namespace: cloudflare-tunnel
+              container: cloudflared
+              severity: warning
+              component: security
+            exp_annotations:
+              summary: "Credential-shaped log content detected in cloudflare-tunnel"
+              description: "cloudflare-tunnel/cloudflared logged a line with a credential-shaped key=value. alloy counts those lines per log stream in loki_process_custom_credential_lines_redacted_total and drops a series once 5m pass without a matching line (max_idle_duration), so a live series means a hit within about the last 5m. This fires while any is live. The latest reading was 1: lines counted since alloy created the live series, not a count over a fixed window. The alert stays firing until 6h pass with no live series. alloy redacts pattern-matched segments before Loki ingestion. Raw pod stdout can retain the original value, visible via `kubectl logs`. Unknown credential formats can still leak into Loki. The alloy chart's ServiceMonitor sets honorLabels, so namespace/pod/container name the offending app, not alloy (#911 was the exported_* shape under promtail, #1381). Known sources: sonarr/radarr/prowlarr restarting and logging their Postgres connection string (#634), traefik access lines carrying jellyfin's query-string ApiKey (#702), cloudflared logging Jellyfin request URLs with an ApiKey query parameter, and sonarr logging Prowlarr Torznab feed URLs with an apikey parameter. If it is a new offender treat that credential as exposed and rotate it. Do NOT grep Loki for the literal value."
+      # Series stale from 16m; the 6h hold keeps the alert.
+      - eval_time: 30m
+        alertname: CredentialRedactedFromLogs
+        exp_alerts: *credential_first_hit
+      - eval_time: 375m
+        alertname: CredentialRedactedFromLogs
+        exp_alerts: *credential_first_hit
+      # Last live sample 15m: resolved at 376m.
+      - eval_time: 376m
+        alertname: CredentialRedactedFromLogs
+        exp_alerts: []
+
+  # Several flat samples precede the first rule evaluation.
+  - interval: 15s
+    input_series:
+      - series: 'loki_process_custom_credential_lines_redacted_total{namespace="cloudflare-tunnel",container="cloudflared",pod="cloudflared-8fcb9c9b5-bbbbb",job="cloudflare-tunnel/cloudflared-8fcb9c9b5-bbbbb",component_id="loki.process.pods",component_path="/",filename="/var/log/pods/x/0.log",stream="stdout",instance="10.42.0.10:12345"}'
+        values: "_x42 1x20 stale"
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: CredentialRedactedFromLogs
+        exp_alerts:
+          - exp_labels:
+              namespace: cloudflare-tunnel
+              container: cloudflared
+              severity: warning
+              component: security
+            exp_annotations:
+              summary: "Credential-shaped log content detected in cloudflare-tunnel"
+              description: "cloudflare-tunnel/cloudflared logged a line with a credential-shaped key=value. alloy counts those lines per log stream in loki_process_custom_credential_lines_redacted_total and drops a series once 5m pass without a matching line (max_idle_duration), so a live series means a hit within about the last 5m. This fires while any is live. The latest reading was 1: lines counted since alloy created the live series, not a count over a fixed window. The alert stays firing until 6h pass with no live series. alloy redacts pattern-matched segments before Loki ingestion. Raw pod stdout can retain the original value, visible via `kubectl logs`. Unknown credential formats can still leak into Loki. The alloy chart's ServiceMonitor sets honorLabels, so namespace/pod/container name the offending app, not alloy (#911 was the exported_* shape under promtail, #1381). Known sources: sonarr/radarr/prowlarr restarting and logging their Postgres connection string (#634), traefik access lines carrying jellyfin's query-string ApiKey (#702), cloudflared logging Jellyfin request URLs with an ApiKey query parameter, and sonarr logging Prowlarr Torznab feed URLs with an apikey parameter. If it is a new offender treat that credential as exposed and rotate it. Do NOT grep Loki for the literal value."
+
+  # First sample above 1 (several lines before the first scrape) counts in full.
+  - interval: 1m
+    input_series:
+      - series: 'loki_process_custom_credential_lines_redacted_total{namespace="servarr",container="sonarr",pod="sonarr-79d7c796fc-ccccc",job="servarr/sonarr-79d7c796fc-ccccc",component_id="loki.process.pods",component_path="/",filename="/var/log/pods/x/0.log",stream="stdout",instance="10.42.0.10:12345"}'
+        values: "_x10 9x5 stale"
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: CredentialRedactedFromLogs
+        exp_alerts:
+          - exp_labels:
+              namespace: servarr
+              container: sonarr
+              severity: warning
+              component: security
+            exp_annotations:
+              summary: "Credential-shaped log content detected in servarr"
+              description: "servarr/sonarr logged a line with a credential-shaped key=value. alloy counts those lines per log stream in loki_process_custom_credential_lines_redacted_total and drops a series once 5m pass without a matching line (max_idle_duration), so a live series means a hit within about the last 5m. This fires while any is live. The latest reading was 9: lines counted since alloy created the live series, not a count over a fixed window. The alert stays firing until 6h pass with no live series. alloy redacts pattern-matched segments before Loki ingestion. Raw pod stdout can retain the original value, visible via `kubectl logs`. Unknown credential formats can still leak into Loki. The alloy chart's ServiceMonitor sets honorLabels, so namespace/pod/container name the offending app, not alloy (#911 was the exported_* shape under promtail, #1381). Known sources: sonarr/radarr/prowlarr restarting and logging their Postgres connection string (#634), traefik access lines carrying jellyfin's query-string ApiKey (#702), cloudflared logging Jellyfin request URLs with an ApiKey query parameter, and sonarr logging Prowlarr Torznab feed URLs with an apikey parameter. If it is a new offender treat that credential as exposed and rotate it. Do NOT grep Loki for the literal value."
+
+  # A zero-valued series must not fire.
+  - interval: 1m
+    input_series:
+      - series: 'loki_process_custom_credential_lines_redacted_total{namespace="servarr",container="sonarr",pod="sonarr-79d7c796fc-ddddd",job="servarr/sonarr-79d7c796fc-ddddd",component_id="loki.process.pods",component_path="/",filename="/var/log/pods/x/0.log",stream="stdout",instance="10.42.0.10:12345"}'
+        values: "_x10 0x30"
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: CredentialRedactedFromLogs
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: CredentialRedactedFromLogs
+        exp_alerts: []
+
+  # Sum sonarr streams without merging the cloudflared namespace.
+  - interval: 1m
+    input_series:
+      - series: 'loki_process_custom_credential_lines_redacted_total{namespace="servarr",container="sonarr",pod="sonarr-79d7c796fc-eeeee",job="servarr/sonarr-79d7c796fc-eeeee",component_id="loki.process.pods",component_path="/",filename="/var/log/pods/x/0.log",stream="stdout",instance="10.42.0.10:12345"}'
+        values: "_x20 1+1x20"
+      - series: 'loki_process_custom_credential_lines_redacted_total{namespace="servarr",container="sonarr",pod="sonarr-79d7c796fc-fffff",job="servarr/sonarr-79d7c796fc-fffff",component_id="loki.process.pods",component_path="/",filename="/var/log/pods/x/0.log",stream="stdout",instance="10.42.0.10:12345"}'
+        values: "_x25 1x5 stale"
+      - series: 'loki_process_custom_credential_lines_redacted_total{namespace="servarr",container="sonarr",pod="sonarr-79d7c796fc-ggggg",job="servarr/sonarr-79d7c796fc-ggggg",component_id="loki.process.pods",component_path="/",filename="/var/log/pods/x/0.log",stream="stdout",instance="10.42.0.10:12345"}'
+        values: "_x25 2x5 stale"
+      - series: 'loki_process_custom_credential_lines_redacted_total{namespace="cloudflare-tunnel",container="cloudflared",pod="cloudflared-8fcb9c9b5-hhhhh",job="cloudflare-tunnel/cloudflared-8fcb9c9b5-hhhhh",component_id="loki.process.pods",component_path="/",filename="/var/log/pods/x/0.log",stream="stdout",instance="10.42.0.10:12345"}'
+        values: "_x25 1x5 stale"
+    alert_rule_test:
+      - eval_time: 27m
+        alertname: CredentialRedactedFromLogs
+        exp_alerts:
+          - exp_labels:
+              namespace: servarr
+              container: sonarr
+              severity: warning
+              component: security
+            exp_annotations:
+              summary: "Credential-shaped log content detected in servarr"
+              description: "servarr/sonarr logged a line with a credential-shaped key=value. alloy counts those lines per log stream in loki_process_custom_credential_lines_redacted_total and drops a series once 5m pass without a matching line (max_idle_duration), so a live series means a hit within about the last 5m. This fires while any is live. The latest reading was 11: lines counted since alloy created the live series, not a count over a fixed window. The alert stays firing until 6h pass with no live series. alloy redacts pattern-matched segments before Loki ingestion. Raw pod stdout can retain the original value, visible via `kubectl logs`. Unknown credential formats can still leak into Loki. The alloy chart's ServiceMonitor sets honorLabels, so namespace/pod/container name the offending app, not alloy (#911 was the exported_* shape under promtail, #1381). Known sources: sonarr/radarr/prowlarr restarting and logging their Postgres connection string (#634), traefik access lines carrying jellyfin's query-string ApiKey (#702), cloudflared logging Jellyfin request URLs with an ApiKey query parameter, and sonarr logging Prowlarr Torznab feed URLs with an apikey parameter. If it is a new offender treat that credential as exposed and rotate it. Do NOT grep Loki for the literal value."
+          - exp_labels:
+              namespace: cloudflare-tunnel
+              container: cloudflared
+              severity: warning
+              component: security
+            exp_annotations:
+              summary: "Credential-shaped log content detected in cloudflare-tunnel"
+              description: "cloudflare-tunnel/cloudflared logged a line with a credential-shaped key=value. alloy counts those lines per log stream in loki_process_custom_credential_lines_redacted_total and drops a series once 5m pass without a matching line (max_idle_duration), so a live series means a hit within about the last 5m. This fires while any is live. The latest reading was 1: lines counted since alloy created the live series, not a count over a fixed window. The alert stays firing until 6h pass with no live series. alloy redacts pattern-matched segments before Loki ingestion. Raw pod stdout can retain the original value, visible via `kubectl logs`. Unknown credential formats can still leak into Loki. The alloy chart's ServiceMonitor sets honorLabels, so namespace/pod/container name the offending app, not alloy (#911 was the exported_* shape under promtail, #1381). Known sources: sonarr/radarr/prowlarr restarting and logging their Postgres connection string (#634), traefik access lines carrying jellyfin's query-string ApiKey (#702), cloudflared logging Jellyfin request URLs with an ApiKey query parameter, and sonarr logging Prowlarr Torznab feed URLs with an apikey parameter. If it is a new offender treat that credential as exposed and rotate it. Do NOT grep Loki for the literal value."
+
+  # Bridge a failed scrape and a 10m outage, then hold 6h after the last live sample.
+  - interval: 1m
+    input_series:
+      - series: 'loki_process_custom_credential_lines_redacted_total{namespace="remote-pi",container="transcripts",pod="cliproxy-5648fff7c5-sssss",job="remote-pi/cliproxy-5648fff7c5-sssss",component_id="loki.process.pods",component_path="/",filename="/var/log/pods/x/0.log",stream="stdout",instance="10.42.9.22:12345"}'
+        values: "1+1x29 stale 32+1x13 stale _x9 56+1x10 stale"
+    alert_rule_test:
+      - eval_time: 425m
         alertname: CredentialRedactedFromLogs
         exp_alerts:
           - exp_labels:
@@ -72,18 +271,204 @@ tests:
               severity: warning
               component: security
             exp_annotations:
-              summary: "An app logged a credential in remote-pi (redacted before Loki)"
-              description: "1.0714285714285714 log line(s) from remote-pi/transcripts contained a credential-shaped key=value in the last 15m (the alert stays firing until 6h pass with no new hit). alloy redacted the value before pushing, so it is NOT in Loki - but it IS in the pod's own stdout and visible via `kubectl logs`. The alloy chart's ServiceMonitor sets honorLabels, so namespace/pod/container name the offending app, not alloy (#911 was the exported_* shape under promtail, #1381). Most likely causes: sonarr/radarr/prowlarr restarting and logging their Postgres connection string (#634), or traefik access lines carrying jellyfin's query-string ApiKey (#702). If it is a new offender treat that credential as exposed and rotate it. Do NOT grep Loki for the literal value."
-      - eval_time: 580m
+              summary: "Credential-shaped log content detected in remote-pi"
+              description: "remote-pi/transcripts logged a line with a credential-shaped key=value. alloy counts those lines per log stream in loki_process_custom_credential_lines_redacted_total and drops a series once 5m pass without a matching line (max_idle_duration), so a live series means a hit within about the last 5m. This fires while any is live. The latest reading was 66: lines counted since alloy created the live series, not a count over a fixed window. The alert stays firing until 6h pass with no live series. alloy redacts pattern-matched segments before Loki ingestion. Raw pod stdout can retain the original value, visible via `kubectl logs`. Unknown credential formats can still leak into Loki. The alloy chart's ServiceMonitor sets honorLabels, so namespace/pod/container name the offending app, not alloy (#911 was the exported_* shape under promtail, #1381). Known sources: sonarr/radarr/prowlarr restarting and logging their Postgres connection string (#634), traefik access lines carrying jellyfin's query-string ApiKey (#702), cloudflared logging Jellyfin request URLs with an ApiKey query parameter, and sonarr logging Prowlarr Torznab feed URLs with an apikey parameter. If it is a new offender treat that credential as exposed and rotate it. Do NOT grep Loki for the literal value."
+      - eval_time: 426m
         alertname: CredentialRedactedFromLogs
         exp_alerts: []
     promql_expr_test:
-      # Firing at every evaluation from 11m to 570m: one alert, no resolve gap.
-      - expr: count_over_time(ALERTS{alertname="CredentialRedactedFromLogs",alertstate="firing"}[560m])
-        eval_time: 570m
+      - expr: count_over_time(ALERTS{alertname="CredentialRedactedFromLogs",alertstate="firing"}[426m])
+        eval_time: 425m
         exp_samples:
           - labels: '{alertname="CredentialRedactedFromLogs",alertstate="firing",namespace="remote-pi",container="transcripts",severity="warning",component="security"}'
-            value: 560
+            value: 426
+
+  # Flat-1 lives every 6m must extend the hold; each ends one scrape before the next.
+  - interval: 30s
+    input_series:
+      - series: 'loki_process_custom_credential_lines_redacted_total{namespace="cloudflare-tunnel",container="cloudflared",pod="cloudflared-8fcb9c9b5-p6666",job="cloudflare-tunnel/cloudflared-8fcb9c9b5-p6666",component_id="loki.process.pods",component_path="/",filename="/var/log/pods/x/0.log",stream="stdout",instance="10.42.0.10:12345"}'
+        values: >-
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+          1x10 stale
+    alert_rule_test:
+      - eval_time: 762m
+        alertname: CredentialRedactedFromLogs
+        exp_alerts: []
+    promql_expr_test:
+      - expr: count_over_time(ALERTS{alertname="CredentialRedactedFromLogs",alertstate="firing"}[762m])
+        eval_time: 761m
+        exp_samples:
+          - labels: '{alertname="CredentialRedactedFromLogs",alertstate="firing",namespace="cloudflare-tunnel",container="cloudflared",severity="warning",component="security"}'
+            value: 762
+
+  # Flat-1 lives every 15m must extend the hold beyond 6h.
+  - interval: 30s
+    input_series:
+      - series: 'loki_process_custom_credential_lines_redacted_total{namespace="servarr",container="sonarr",pod="sonarr-79d7c796fc-p1515",job="servarr/sonarr-79d7c796fc-p1515",component_id="loki.process.pods",component_path="/",filename="/var/log/pods/x/0.log",stream="stdout",instance="10.42.0.10:12345"}'
+        values: >-
+          1x10 stale _x18
+          1x10 stale _x18
+          1x10 stale _x18
+          1x10 stale _x18
+          1x10 stale _x18
+          1x10 stale _x18
+          1x10 stale _x18
+          1x10 stale _x18
+          1x10 stale _x18
+          1x10 stale _x18
+          1x10 stale _x18
+          1x10 stale _x18
+          1x10 stale _x18
+          1x10 stale _x18
+          1x10 stale _x18
+          1x10 stale _x18
+          1x10 stale _x18
+          1x10 stale _x18
+          1x10 stale _x18
+          1x10 stale _x18
+          1x10 stale _x18
+          1x10 stale _x18
+          1x10 stale _x18
+          1x10 stale _x18
+          1x10 stale _x18
+          1x10 stale _x18
+          1x10 stale
+    alert_rule_test:
+      - eval_time: 756m
+        alertname: CredentialRedactedFromLogs
+        exp_alerts: []
+    promql_expr_test:
+      - expr: count_over_time(ALERTS{alertname="CredentialRedactedFromLogs",alertstate="firing"}[756m])
+        eval_time: 755m
+        exp_samples:
+          - labels: '{alertname="CredentialRedactedFromLogs",alertstate="firing",namespace="servarr",container="sonarr",severity="warning",component="security"}'
+            value: 756
+
+  # Flat-1 lives every 19m must extend the hold beyond 6h.
+  - interval: 30s
+    input_series:
+      - series: 'loki_process_custom_credential_lines_redacted_total{namespace="servarr",container="sonarr",pod="sonarr-79d7c796fc-p1919",job="servarr/sonarr-79d7c796fc-p1919",component_id="loki.process.pods",component_path="/",filename="/var/log/pods/x/0.log",stream="stdout",instance="10.42.0.10:12345"}'
+        values: >-
+          1x10 stale _x26
+          1x10 stale _x26
+          1x10 stale _x26
+          1x10 stale _x26
+          1x10 stale _x26
+          1x10 stale _x26
+          1x10 stale _x26
+          1x10 stale _x26
+          1x10 stale _x26
+          1x10 stale _x26
+          1x10 stale _x26
+          1x10 stale _x26
+          1x10 stale _x26
+          1x10 stale _x26
+          1x10 stale _x26
+          1x10 stale _x26
+          1x10 stale _x26
+          1x10 stale _x26
+          1x10 stale _x26
+          1x10 stale _x26
+          1x10 stale _x26
+          1x10 stale
+    alert_rule_test:
+      - eval_time: 765m
+        alertname: CredentialRedactedFromLogs
+        exp_alerts: []
+    promql_expr_test:
+      - expr: count_over_time(ALERTS{alertname="CredentialRedactedFromLogs",alertstate="firing"}[765m])
+        eval_time: 764m
+        exp_samples:
+          - labels: '{alertname="CredentialRedactedFromLogs",alertstate="firing",namespace="servarr",container="sonarr",severity="warning",component="security"}'
+            value: 765
+
+  # Flat-1 lives every 61m must extend the hold beyond 6h.
+  - interval: 30s
+    input_series:
+      - series: 'loki_process_custom_credential_lines_redacted_total{namespace="cloudflare-tunnel",container="cloudflared",pod="cloudflared-8fcb9c9b5-p6161",job="cloudflare-tunnel/cloudflared-8fcb9c9b5-p6161",component_id="loki.process.pods",component_path="/",filename="/var/log/pods/x/0.log",stream="stdout",instance="10.42.0.10:12345"}'
+        values: >-
+          1x10 stale _x110
+          1x10 stale _x110
+          1x10 stale _x110
+          1x10 stale _x110
+          1x10 stale _x110
+          1x10 stale _x110
+          1x10 stale
+    alert_rule_test:
+      - eval_time: 732m
+        alertname: CredentialRedactedFromLogs
+        exp_alerts: []
+    promql_expr_test:
+      - expr: count_over_time(ALERTS{alertname="CredentialRedactedFromLogs",alertstate="firing"}[732m])
+        eval_time: 731m
+        exp_samples:
+          - labels: '{alertname="CredentialRedactedFromLogs",alertstate="firing",namespace="cloudflare-tunnel",container="cloudflared",severity="warning",component="security"}'
+            value: 732
 
   - interval: 1m
     input_series:
@@ -328,6 +713,187 @@ tests:
                   to give memory back under pressure, which is the condition the driver hit
                   NV_ERR_NO_MEMORY under on 2026-08-09. Find what is asking for the memory (ollama model
                   load, a large transcode) and check nvidia-smi still sees the card.
+
+  # Pool1 recovers at 20m; another job's degraded pool is out of scope.
+  - interval: 1m
+    input_series:
+      - series: 'node_zfs_zpool_state{endpoint="http-metrics",instance="192.168.10.200",job="truenas-node-exporter",namespace="observability",service="truenas-node-exporter",state="degraded",zpool="pool1"}'
+        values: "1x19 0x20"
+      - series: 'node_zfs_zpool_state{endpoint="http-metrics",instance="192.168.10.200",job="truenas-node-exporter",namespace="observability",service="truenas-node-exporter",state="online",zpool="pool1"}'
+        values: "0x19 1x20"
+      - series: 'node_zfs_zpool_state{endpoint="http-metrics",instance="192.168.10.200",job="truenas-node-exporter",namespace="observability",service="truenas-node-exporter",state="faulted",zpool="pool1"}'
+        values: "0x39"
+      - series: 'node_zfs_zpool_state{endpoint="http-metrics",instance="192.168.10.200",job="truenas-node-exporter",namespace="observability",service="truenas-node-exporter",state="online",zpool="apps"}'
+        values: "1x39"
+      - series: 'node_zfs_zpool_state{endpoint="http-metrics",instance="192.168.10.200",job="truenas-node-exporter",namespace="observability",service="truenas-node-exporter",state="degraded",zpool="apps"}'
+        values: "0x39"
+      - series: 'node_zfs_zpool_state{endpoint="http-metrics",instance="192.168.10.200",job="truenas-node-exporter",namespace="observability",service="truenas-node-exporter",state="online",zpool="boot-pool"}'
+        values: "1x39"
+      - series: 'node_zfs_zpool_state{endpoint="http-metrics",instance="192.168.10.200",job="truenas-node-exporter",namespace="observability",service="truenas-node-exporter",state="faulted",zpool="tank-a"}'
+        values: "1x39"
+      - series: 'node_zfs_zpool_state{endpoint="http-metrics",instance="192.168.10.200",job="truenas-node-exporter",namespace="observability",service="truenas-node-exporter",state="unavail",zpool="tank-b"}'
+        values: "1x39"
+      - series: 'node_zfs_zpool_state{endpoint="http-metrics",instance="192.168.10.200",job="truenas-node-exporter",namespace="observability",service="truenas-node-exporter",state="offline",zpool="tank-c"}'
+        values: "1x39"
+      - series: 'node_zfs_zpool_state{endpoint="http-metrics",instance="192.168.10.200",job="truenas-node-exporter",namespace="observability",service="truenas-node-exporter",state="removed",zpool="tank-d"}'
+        values: "1x39"
+      - series: 'node_zfs_zpool_state{endpoint="http-metrics",instance="192.168.10.200",job="truenas-node-exporter",namespace="observability",service="truenas-node-exporter",state="suspended",zpool="tank-e"}'
+        values: "1x39"
+      - series: 'node_zfs_zpool_state{endpoint="http-metrics",instance="192.168.10.200",job="node-exporter",namespace="observability",service="node-exporter",state="degraded",zpool="rpool"}'
+        values: "1x39"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: TruenasPoolUnhealthy
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: TruenasPoolUnhealthy
+        exp_alerts:
+          - exp_labels:
+              endpoint: http-metrics
+              instance: 192.168.10.200
+              job: truenas-node-exporter
+              namespace: observability
+              service: truenas-node-exporter
+              state: degraded
+              zpool: pool1
+              severity: critical
+              component: truenas-storage
+            exp_annotations:
+              summary: "TrueNAS zpool pool1 is degraded"
+              description: "node_zfs_zpool_state on 192.168.10.200 has reported zpool pool1 as degraded (anything but online) for 5m. Run `zpool status -v pool1` on TrueNAS (read-only) to see which device is affected and whether its read/write/checksum error counts are still climbing, and check the latest backups of that pool's data before changing anything. Do not zpool clear, replace or online a device from this alert alone. Do not assume redundancy: pool1 is a stripe with none, and zpool status shows the layout of the others. If the exporter stops answering, this alert resolves without the pool being healthy; TargetDown covers that."
+          - exp_labels:
+              endpoint: http-metrics
+              instance: 192.168.10.200
+              job: truenas-node-exporter
+              namespace: observability
+              service: truenas-node-exporter
+              state: faulted
+              zpool: tank-a
+              severity: critical
+              component: truenas-storage
+            exp_annotations:
+              summary: "TrueNAS zpool tank-a is faulted"
+              description: "node_zfs_zpool_state on 192.168.10.200 has reported zpool tank-a as faulted (anything but online) for 5m. Run `zpool status -v tank-a` on TrueNAS (read-only) to see which device is affected and whether its read/write/checksum error counts are still climbing, and check the latest backups of that pool's data before changing anything. Do not zpool clear, replace or online a device from this alert alone. Do not assume redundancy: pool1 is a stripe with none, and zpool status shows the layout of the others. If the exporter stops answering, this alert resolves without the pool being healthy; TargetDown covers that."
+          - exp_labels:
+              endpoint: http-metrics
+              instance: 192.168.10.200
+              job: truenas-node-exporter
+              namespace: observability
+              service: truenas-node-exporter
+              state: unavail
+              zpool: tank-b
+              severity: critical
+              component: truenas-storage
+            exp_annotations:
+              summary: "TrueNAS zpool tank-b is unavail"
+              description: "node_zfs_zpool_state on 192.168.10.200 has reported zpool tank-b as unavail (anything but online) for 5m. Run `zpool status -v tank-b` on TrueNAS (read-only) to see which device is affected and whether its read/write/checksum error counts are still climbing, and check the latest backups of that pool's data before changing anything. Do not zpool clear, replace or online a device from this alert alone. Do not assume redundancy: pool1 is a stripe with none, and zpool status shows the layout of the others. If the exporter stops answering, this alert resolves without the pool being healthy; TargetDown covers that."
+          - exp_labels:
+              endpoint: http-metrics
+              instance: 192.168.10.200
+              job: truenas-node-exporter
+              namespace: observability
+              service: truenas-node-exporter
+              state: offline
+              zpool: tank-c
+              severity: critical
+              component: truenas-storage
+            exp_annotations:
+              summary: "TrueNAS zpool tank-c is offline"
+              description: "node_zfs_zpool_state on 192.168.10.200 has reported zpool tank-c as offline (anything but online) for 5m. Run `zpool status -v tank-c` on TrueNAS (read-only) to see which device is affected and whether its read/write/checksum error counts are still climbing, and check the latest backups of that pool's data before changing anything. Do not zpool clear, replace or online a device from this alert alone. Do not assume redundancy: pool1 is a stripe with none, and zpool status shows the layout of the others. If the exporter stops answering, this alert resolves without the pool being healthy; TargetDown covers that."
+          - exp_labels:
+              endpoint: http-metrics
+              instance: 192.168.10.200
+              job: truenas-node-exporter
+              namespace: observability
+              service: truenas-node-exporter
+              state: removed
+              zpool: tank-d
+              severity: critical
+              component: truenas-storage
+            exp_annotations:
+              summary: "TrueNAS zpool tank-d is removed"
+              description: "node_zfs_zpool_state on 192.168.10.200 has reported zpool tank-d as removed (anything but online) for 5m. Run `zpool status -v tank-d` on TrueNAS (read-only) to see which device is affected and whether its read/write/checksum error counts are still climbing, and check the latest backups of that pool's data before changing anything. Do not zpool clear, replace or online a device from this alert alone. Do not assume redundancy: pool1 is a stripe with none, and zpool status shows the layout of the others. If the exporter stops answering, this alert resolves without the pool being healthy; TargetDown covers that."
+          - exp_labels:
+              endpoint: http-metrics
+              instance: 192.168.10.200
+              job: truenas-node-exporter
+              namespace: observability
+              service: truenas-node-exporter
+              state: suspended
+              zpool: tank-e
+              severity: critical
+              component: truenas-storage
+            exp_annotations:
+              summary: "TrueNAS zpool tank-e is suspended"
+              description: "node_zfs_zpool_state on 192.168.10.200 has reported zpool tank-e as suspended (anything but online) for 5m. Run `zpool status -v tank-e` on TrueNAS (read-only) to see which device is affected and whether its read/write/checksum error counts are still climbing, and check the latest backups of that pool's data before changing anything. Do not zpool clear, replace or online a device from this alert alone. Do not assume redundancy: pool1 is a stripe with none, and zpool status shows the layout of the others. If the exporter stops answering, this alert resolves without the pool being healthy; TargetDown covers that."
+      - eval_time: 25m
+        alertname: TruenasPoolUnhealthy
+        exp_alerts:
+          - exp_labels:
+              endpoint: http-metrics
+              instance: 192.168.10.200
+              job: truenas-node-exporter
+              namespace: observability
+              service: truenas-node-exporter
+              state: faulted
+              zpool: tank-a
+              severity: critical
+              component: truenas-storage
+            exp_annotations:
+              summary: "TrueNAS zpool tank-a is faulted"
+              description: "node_zfs_zpool_state on 192.168.10.200 has reported zpool tank-a as faulted (anything but online) for 5m. Run `zpool status -v tank-a` on TrueNAS (read-only) to see which device is affected and whether its read/write/checksum error counts are still climbing, and check the latest backups of that pool's data before changing anything. Do not zpool clear, replace or online a device from this alert alone. Do not assume redundancy: pool1 is a stripe with none, and zpool status shows the layout of the others. If the exporter stops answering, this alert resolves without the pool being healthy; TargetDown covers that."
+          - exp_labels:
+              endpoint: http-metrics
+              instance: 192.168.10.200
+              job: truenas-node-exporter
+              namespace: observability
+              service: truenas-node-exporter
+              state: unavail
+              zpool: tank-b
+              severity: critical
+              component: truenas-storage
+            exp_annotations:
+              summary: "TrueNAS zpool tank-b is unavail"
+              description: "node_zfs_zpool_state on 192.168.10.200 has reported zpool tank-b as unavail (anything but online) for 5m. Run `zpool status -v tank-b` on TrueNAS (read-only) to see which device is affected and whether its read/write/checksum error counts are still climbing, and check the latest backups of that pool's data before changing anything. Do not zpool clear, replace or online a device from this alert alone. Do not assume redundancy: pool1 is a stripe with none, and zpool status shows the layout of the others. If the exporter stops answering, this alert resolves without the pool being healthy; TargetDown covers that."
+          - exp_labels:
+              endpoint: http-metrics
+              instance: 192.168.10.200
+              job: truenas-node-exporter
+              namespace: observability
+              service: truenas-node-exporter
+              state: offline
+              zpool: tank-c
+              severity: critical
+              component: truenas-storage
+            exp_annotations:
+              summary: "TrueNAS zpool tank-c is offline"
+              description: "node_zfs_zpool_state on 192.168.10.200 has reported zpool tank-c as offline (anything but online) for 5m. Run `zpool status -v tank-c` on TrueNAS (read-only) to see which device is affected and whether its read/write/checksum error counts are still climbing, and check the latest backups of that pool's data before changing anything. Do not zpool clear, replace or online a device from this alert alone. Do not assume redundancy: pool1 is a stripe with none, and zpool status shows the layout of the others. If the exporter stops answering, this alert resolves without the pool being healthy; TargetDown covers that."
+          - exp_labels:
+              endpoint: http-metrics
+              instance: 192.168.10.200
+              job: truenas-node-exporter
+              namespace: observability
+              service: truenas-node-exporter
+              state: removed
+              zpool: tank-d
+              severity: critical
+              component: truenas-storage
+            exp_annotations:
+              summary: "TrueNAS zpool tank-d is removed"
+              description: "node_zfs_zpool_state on 192.168.10.200 has reported zpool tank-d as removed (anything but online) for 5m. Run `zpool status -v tank-d` on TrueNAS (read-only) to see which device is affected and whether its read/write/checksum error counts are still climbing, and check the latest backups of that pool's data before changing anything. Do not zpool clear, replace or online a device from this alert alone. Do not assume redundancy: pool1 is a stripe with none, and zpool status shows the layout of the others. If the exporter stops answering, this alert resolves without the pool being healthy; TargetDown covers that."
+          - exp_labels:
+              endpoint: http-metrics
+              instance: 192.168.10.200
+              job: truenas-node-exporter
+              namespace: observability
+              service: truenas-node-exporter
+              state: suspended
+              zpool: tank-e
+              severity: critical
+              component: truenas-storage
+            exp_annotations:
+              summary: "TrueNAS zpool tank-e is suspended"
+              description: "node_zfs_zpool_state on 192.168.10.200 has reported zpool tank-e as suspended (anything but online) for 5m. Run `zpool status -v tank-e` on TrueNAS (read-only) to see which device is affected and whether its read/write/checksum error counts are still climbing, and check the latest backups of that pool's data before changing anything. Do not zpool clear, replace or online a device from this alert alone. Do not assume redundancy: pool1 is a stripe with none, and zpool status shows the layout of the others. If the exporter stops answering, this alert resolves without the pool being healthy; TargetDown covers that."
 
   - interval: 1m
     input_series:

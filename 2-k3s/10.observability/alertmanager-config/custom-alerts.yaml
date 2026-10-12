@@ -709,39 +709,46 @@ spec:
 
     - name: credential-redaction
       rules:
+        # Requires credential_lines_redacted max_idle_duration = "5m" in alloy-values.yaml.
         - alert: CredentialRedactedFromLogs
           expr: |
-            sum by (namespace, container) (
-              increase(loki_process_custom_credential_lines_redacted_total[15m])
-            ) > 0
+            sum by (namespace, container) (loki_process_custom_credential_lines_redacted_total) > 0
           for: 0m
-          # ntfy spam fix: one redacted line holds the 15m increase() above 0
-          # for exactly 15m, so every hit was a fire plus a resolve 15m later,
+          # ntfy spam fix: one redacted line held the old 15m increase() above
+          # 0 for exactly 15m, so every hit was a fire plus a resolve 15m later,
           # and a repeat offender (remote-pi/transcripts, 21 hits in the week
           # to 2026-10-11) sent both several times a day. A longer for: would
           # drop the one-line hits entirely, and a pod restart logging its
           # connection string once (#634) is exactly that shape. Instead the
           # alert fires on the first line and stays firing until 6h pass with
-          # no new hit. Measured over that week, 6h cuts 26 fire/resolve
+          # no live series. Measured over that week, 6h cuts 26 fire/resolve
           # pairs to 10; 12h or 24h only get to 9 and 7.
           keep_firing_for: 6h
           labels:
             severity: warning
             component: security
           annotations:
-            summary: "An app logged a credential in {{ $labels.namespace }} (redacted before Loki)"
+            summary: "Credential-shaped log content detected in {{ $labels.namespace }}"
             description: >-
-              {{ $value }} log line(s) from {{ $labels.namespace }}/{{ $labels.container }}
-              contained a credential-shaped key=value in the last 15m (the
-              alert stays firing until 6h pass with no new hit). alloy
-              redacted the value before pushing, so it is NOT in Loki - but it IS
-              in the pod's own stdout and visible via `kubectl logs`. The alloy
-              chart's ServiceMonitor sets honorLabels, so namespace/pod/container
-              name the offending app, not alloy (#911 was the exported_* shape
-              under promtail, #1381). Most likely causes: sonarr/radarr/prowlarr
-              restarting and logging their Postgres connection string (#634), or
-              traefik access lines carrying jellyfin's query-string ApiKey (#702).
-              If it is a new offender treat that credential as exposed and rotate
+              {{ $labels.namespace }}/{{ $labels.container }} logged a line with a
+              credential-shaped key=value. alloy counts those lines per log stream
+              in loki_process_custom_credential_lines_redacted_total and drops a
+              series once 5m pass without a matching line (max_idle_duration), so
+              a live series means a hit within about the last 5m. This fires
+              while any is live. The latest reading was {{ $value }}: lines
+              counted since alloy created the live series, not a count over a
+              fixed window. The alert stays firing until 6h pass with no live
+              series. alloy redacts pattern-matched segments before Loki ingestion.
+              Raw pod stdout can retain the original value, visible via `kubectl logs`.
+              Unknown credential formats can still leak into Loki.
+              The alloy chart's ServiceMonitor sets honorLabels, so
+              namespace/pod/container name the offending app, not alloy (#911
+              was the exported_* shape under promtail, #1381). Known sources:
+              sonarr/radarr/prowlarr restarting and logging their Postgres
+              connection string (#634), traefik access lines carrying jellyfin's
+              query-string ApiKey (#702), cloudflared logging Jellyfin request
+              URLs with an ApiKey query parameter, and sonarr logging Prowlarr
+              Torznab feed URLs with an apikey parameter. If it is a new offender treat that credential as exposed and rotate
               it. Do NOT grep Loki for the literal value.
 
     - name: kube-job-failed-last-run
@@ -1025,3 +1032,26 @@ spec:
               (the #609 download reclaim and #968 snapshot paths are the catalogued
               candidates; dapc-backup is a permanent keep per #807) and treat every write to
               pool1 as at-risk until free space is back above 1 TiB.
+
+    - name: truenas-pool-health
+      interval: 60s
+      rules:
+        - alert: TruenasPoolUnhealthy
+          expr: node_zfs_zpool_state{job="truenas-node-exporter", state!="online"} == 1
+          for: 5m
+          labels:
+            severity: critical
+            component: truenas-storage
+          annotations:
+            summary: "TrueNAS zpool {{ $labels.zpool }} is {{ $labels.state }}"
+            description: >-
+              node_zfs_zpool_state on {{ $labels.instance }} has reported zpool
+              {{ $labels.zpool }} as {{ $labels.state }} (anything but online) for 5m.
+              Run `zpool status -v {{ $labels.zpool }}` on TrueNAS (read-only) to see
+              which device is affected and whether its read/write/checksum error
+              counts are still climbing, and check the latest backups of that
+              pool's data before changing anything. Do not zpool clear, replace or
+              online a device from this alert alone. Do not assume redundancy:
+              pool1 is a stripe with none, and zpool status shows the layout of
+              the others. If the exporter stops answering, this alert resolves
+              without the pool being healthy; TargetDown covers that.
