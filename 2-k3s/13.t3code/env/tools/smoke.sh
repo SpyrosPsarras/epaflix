@@ -3,6 +3,9 @@
 # Outer mode uses Docker; --inner expects /src, /tools, /scripts and writable /tmp.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+if [[ ${T3_RUNTIME_VARIANT:-mixed} == homelab ]]; then
+  exec bash "$ROOT/env/tools/homelab-smoke.sh" "$@"
+fi
 if [[ ${1:-} != --inner ]]; then
   image=${T3_RUNTIME_IMAGE:-t3-runtime:dev}
   if [[ -z ${T3_RUNTIME_IMAGE:-} ]]; then
@@ -43,22 +46,7 @@ install -m 0555 /src/one/files/pi-setup.py /src/one/files/hub_clients.py /src/on
 install -m 0555 /src/one/files/cc-safety-net-install.py /src/one/files/cc-safety-net.patch \
   /src/one/files/cc-safety-net-hashes.json /scripts/
 python3 /src/env/tools/private-config.test.py fixture /private-agent-config/bundle.json
-for tool in tree kubectl az gh helm kustomize argocd sops git curl ssh python3; do
-  command -v "$tool" >/dev/null || fail "missing $tool"
-done
-[[ -x /usr/sbin/sshd ]] || fail 'missing sshd'
-! compgen -G '/etc/ssh/ssh_host_*' >/dev/null || fail 'image ships SSH host keys'
-kubectl version --client >/dev/null
-az version >/dev/null
-gh_want=$(source /src/versions.env && echo "$GH_VERSION")
-[[ $(gh --version | head -1) == "gh version $gh_want "* ]] || fail "gh is not the pinned $gh_want"
-pin() { node -p "require('/tools/package.json').dependencies['$1']"; }
-ver() { timeout 60 "$1" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?' | head -1; }
-for p in t3:t3 @anthropic-ai/claude-code:claude @openai/codex:codex @earendil-works/pi-coding-agent:pi; do
-  want=$(pin "${p%%:*}"); got=$(ver "/tools/node_modules/.bin/${p##*:}")
-  [[ $got == "$want" ]] || fail "${p##*:} reports $got; expected $want"
-done
-echo 'smoke: all four CLI versions match'
+bash /src/env/tools/inventory.sh || fail 'runtime inventory'
 node -e 'require("node:http").createServer((q,s)=>{s.writeHead(200,{"content-type":"application/json"});
 s.end(JSON.stringify({data:["codex/gpt-6-sol","claude/claude-opus-5-5"].map(id=>({id,context_window:200000}))}));}).listen(18317,"127.0.0.1")' &
 pids+=("$!")

@@ -6,7 +6,9 @@ The `t3code` pod in `../one/` runs the image built from this directory.
 - Pi, Claude Code, Codex, T3 and Pi extension pins live in `tools/package.json` and its npm lockfile.
 - Helm, Kustomize, Argo CD, SOPS and GitHub CLI versions live in `../versions.env`.
 
-After changing image inputs, run `bash tools/sync-runtime-image.sh` here and include the `one/statefulset.yaml` change. `runtime-tag.sh` hashes the public image inputs, including the single npm lockfile. CI checks the image reference, builds and tests the image, and publishes it on main. The PreSync image-prepull Job waits for that image before ArgoCD replaces the pod. The old pod keeps serving while it waits. The pod has no self-update path, and manual package installs do not survive a restart.
+The Dockerfile defaults to `mixed`. `--build-arg T3_RUNTIME_VARIANT=homelab` omits Azure CLI and Bitwarden CLI. Both variants keep the pinned T3, Pi, Claude Code, Codex and cluster tools. The homelab backend is documented in [`../../13.t3code-homelab/README.md`](../../13.t3code-homelab/README.md).
+
+After changing image inputs, run `bash tools/sync-runtime-image.sh` here and include both StatefulSet image changes. `runtime-tag.sh [mixed|homelab]` hashes the public image inputs and variant, including the single npm lockfile. Mixed tags retain `inputs-<hash>` and `latest`; homelab tags use `homelab-inputs-<hash>` and `homelab-latest`. CI checks both image references, builds and tests both variants, and publishes only tested images on main. The PreSync image-prepull Job waits for that image before ArgoCD replaces the pod. The old pod keeps serving while it waits. The pod has no self-update path, and manual package installs do not survive a restart.
 
 Credentials arrive at runtime and are never baked into the image. MCP servers come from `2-k3s/23.mcp-hub`; the pod entrypoint registers Pi, Claude Code and Codex against the hub using environment references.
 
