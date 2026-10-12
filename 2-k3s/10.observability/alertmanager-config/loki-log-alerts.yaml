@@ -26,16 +26,24 @@ data:
       - name: servarr-app-errors
         rules:
           - alert: ServarrErrorSpike
-            # The |~ also takes a word glued to an ANSI colour code (seerr's
-            # coloured [error] level), where \b cannot match. The !~ drops
-            # debug/trace lines by their level prefix: seerr's [debug]
-            # DNS-cache retries carry an "error" field (30 per 5m), radarr
-            # writes [Debug]. Optional seerr timestamp, any ANSI colour codes
-            # inside the brackets. Keep the Explore example below in sync
-            # (.github/hooks/test-log-pipeline-regexes.sh checks it).
+            # Read the entry's severity, not error fields or exception text in
+            # debug entries. Console severity belongs to the first line only.
+            # Python dash headers require " - " after the level; a bare space
+            # or colon can otherwise mistake a low-level entry's message for severity.
+            # Console entries fail JSON parsing; clear that error after filtering.
             expr: |
               sum by (namespace, container) (
-                count_over_time({namespace="servarr"} |~ `(?i)(\b(error|fatal|panic)\b|\x1b\[[0-9;]*m(error|fatal|panic)\b)` !~ `^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z )?\[(\x1b\[[0-9;]*m)*(?i:debug|trace)(\x1b\[[0-9;]*m)*\]` [5m])
+                count_over_time(
+                  {namespace="servarr"}
+                  | decolorize
+                  | json json_level="level"
+                  | regexp `(?i)^(?:\[?\d{4}[-/]\d{2}[-/]\d{2}[T ][0-9:.,]+(?:Z|[+-]\d{2}:\d{2})?(?:\]?[ |]+| - [A-Za-z0-9_.]+ +\([0-9a-f]+\) : +))?\[?(?P<console_level>error|fatal|panic|critical|err|ftl|erro|fata)(?:\]|\||:| )`
+                  | regexp `(?i)^\d{4}-\d{2}-\d{2}[T ][0-9:.,]+(?:Z|[+-]\d{2}:\d{2})? - (?:[A-Za-z0-9_.]+ - )?(?P<python_level>error|fatal|panic|critical) - `
+                  | regexp `^time="\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})" level=(?P<logrus_level>error|fatal|panic|critical)(?: |$)`
+                  | json_level=~"(?i)error|fatal|panic|critical" or console_level!="" or python_level!="" or logrus_level!=""
+                  | drop __error__, __error_details__
+                  [5m]
+                )
               ) > 25
             for: 10m
             labels:
@@ -44,10 +52,18 @@ data:
             annotations:
               summary: "Elevated error log rate in servarr/{{ $labels.container }}"
               description: >-
-                {{ $labels.container }} logged {{ $value }} error/fatal/panic
-                lines in the last 5m (threshold 25). Inspect in Grafana →
-                Explore → Loki:
-                {namespace="servarr", container="{{ $labels.container }}"} |~ `(?i)(\b(error|fatal|panic)\b|\x1b\[[0-9;]*m(error|fatal|panic)\b)` !~ `^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z )?\[(\x1b\[[0-9;]*m)*(?i:debug|trace)(\x1b\[[0-9;]*m)*\]`
+                {{ $labels.container }} logged {{ $value }} entries with
+                error/fatal/panic/critical severity in the last 5m (threshold 25).
+                Debug entries with nested error fields do not count.
+                Inspect in Grafana → Explore → Loki:
+                {namespace="servarr", container="{{ $labels.container }}"}
+                | decolorize
+                | json json_level="level"
+                | regexp `(?i)^(?:\[?\d{4}[-/]\d{2}[-/]\d{2}[T ][0-9:.,]+(?:Z|[+-]\d{2}:\d{2})?(?:\]?[ |]+| - [A-Za-z0-9_.]+ +\([0-9a-f]+\) : +))?\[?(?P<console_level>error|fatal|panic|critical|err|ftl|erro|fata)(?:\]|\||:| )`
+                | regexp `(?i)^\d{4}-\d{2}-\d{2}[T ][0-9:.,]+(?:Z|[+-]\d{2}:\d{2})? - (?:[A-Za-z0-9_.]+ - )?(?P<python_level>error|fatal|panic|critical) - `
+                | regexp `^time="\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})" level=(?P<logrus_level>error|fatal|panic|critical)(?: |$)`
+                | json_level=~"(?i)error|fatal|panic|critical" or console_level!="" or python_level!="" or logrus_level!=""
+                | drop __error__, __error_details__
 
       - name: cluster-fatal
         rules:

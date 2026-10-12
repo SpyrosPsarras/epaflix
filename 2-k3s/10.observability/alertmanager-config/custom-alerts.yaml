@@ -710,9 +710,15 @@ spec:
     - name: credential-redaction
       rules:
         # Requires credential_lines_redacted max_idle_duration = "5m" in alloy-values.yaml.
+        # Agent conversations are not app leaks. Exclude only the exact
+        # transcript pair; Alloy still counts and redacts every log line.
         - alert: CredentialRedactedFromLogs
           expr: |
-            sum by (namespace, container) (loki_process_custom_credential_lines_redacted_total) > 0
+            sum by (namespace, container) (
+              loki_process_custom_credential_lines_redacted_total
+              unless on (namespace, container)
+              loki_process_custom_credential_lines_redacted_total{namespace="remote-pi",container="transcripts"}
+            ) > 0
           for: 0m
           # ntfy spam fix: one redacted line held the old 15m increase() above
           # 0 for exactly 15m, so every hit was a fire plus a resolve 15m later,
