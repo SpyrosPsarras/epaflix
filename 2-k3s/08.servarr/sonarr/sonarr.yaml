@@ -5,6 +5,8 @@ metadata:
   name: sonarr
   annotations:
     secret.reloader.stakater.com/reload: "servarr-postgres"
+    # SSA retains the legacy password Secret reference owned by kubectl-replace.
+    argocd.argoproj.io/sync-options: ServerSideApply=false
   namespace: servarr
   labels:
     app: sonarr
@@ -65,6 +67,8 @@ spec:
             # Empty Password serializes without a value; Npgsql then uses the passfile.
             - name: SONARR__POSTGRES__PASSWORD
               value: ""
+              # Client-side apply uses null to remove the legacy Secret reference.
+              valueFrom: null
             - name: PGPASSFILE
               value: /run/sonarr-postgres/pgpass
           ports:
