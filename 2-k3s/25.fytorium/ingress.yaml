@@ -1,0 +1,23 @@
+---
+# Internal entry point only (192.168.10.102): reachable from the LAN, 404 from the internet.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: fytorium-internal
+  namespace: fytorium
+spec:
+  entryPoints:
+    - internal
+  routes:
+    # Metrics are cluster-internal; Prometheus scrapes them through the Service.
+    - match: Host(`fytorium.epaflix.com`) && !PathPrefix(`/metrics`)
+      kind: Rule
+      services:
+        - name: fytorium
+          port: 3000
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans:
+          - "*.epaflix.com"
