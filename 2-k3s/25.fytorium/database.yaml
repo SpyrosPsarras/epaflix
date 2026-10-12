@@ -1,0 +1,46 @@
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: DatabaseRole
+metadata:
+  name: fytorium
+  namespace: postgres-system
+  labels:
+    app.kubernetes.io/name: fytorium
+    app.kubernetes.io/component: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  cluster:
+    name: postgres-cluster
+  name: fytorium
+  ensure: present
+  login: true
+  passwordSecret:
+    name: fytorium-db-role
+  databaseRoleReclaimPolicy: retain
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: fytorium
+  namespace: postgres-system
+  labels:
+    app.kubernetes.io/name: fytorium
+    app.kubernetes.io/component: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  cluster:
+    name: postgres-cluster
+  name: fytorium
+  owner: fytorium
+  ensure: present
+  databaseReclaimPolicy: retain
+  # App migrations also run CREATE EXTENSION IF NOT EXISTS, which becomes a no-op.
+  extensions:
+    - name: pg_trgm
+      ensure: present
+    - name: unaccent
+      ensure: present
+    - name: btree_gist
+      ensure: present
