@@ -1,0 +1,216 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: t3code
+  labels:
+    app.kubernetes.io/name: t3code
+spec:
+  serviceName: t3code
+  replicas: 1
+  updateStrategy:
+    type: OnDelete
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: t3code
+  template:
+    metadata:
+      annotations:
+        t3code.epaflix.com/inputs-grants-revision: "unprovisioned"
+      labels:
+        app.kubernetes.io/name: t3code
+    spec:
+      serviceAccountName: t3code
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      shareProcessNamespace: true
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: DoesNotExist
+      initContainers:
+        - name: runtime-state
+          image: t3-runtime-from-t3-container
+          command: [touch, /runtime-state/server-runtime.json]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: runtime-state
+              mountPath: /runtime-state
+      containers:
+        - name: t3
+          image: ghcr.io/spyrospsarras/t3-runtime:homelab-inputs-375962b208e6a82d777e10c74fe290c4
+          imagePullPolicy: IfNotPresent
+          command: [bash, /scripts/entrypoint.sh]
+          env:
+            - name: HOME
+              value: /home/t3
+            - name: T3CODE_HOME
+              value: /home/t3/.t3
+            - name: MCP_HUB_INSTANCE
+              value: homelab
+            - name: T3_STATE_DB
+              value: /home/t3/.t3/userdata/statev2.sqlite
+            - name: ANTHROPIC_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: t3-runtime-grants
+                  key: model-token
+            - name: MCP_HUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: t3-runtime-grants
+                  key: hub-token
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: t3-runtime-grants
+                  key: github-token
+                  optional: true
+          ports:
+            - name: http
+              containerPort: 3773
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: home
+              mountPath: /home/t3
+            - name: runtime-state
+              mountPath: /home/t3/.t3/userdata/server-runtime.json
+              subPath: server-runtime.json
+            - name: inputs
+              mountPath: /run/t3-inputs
+              readOnly: true
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            failureThreshold: 1080
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              memory: 12Gi
+        - name: sshd
+          image: t3-runtime-from-t3-container
+          imagePullPolicy: IfNotPresent
+          command: [bash, /scripts/sshd.sh]
+          env:
+            - name: HOME
+              value: /home/t3
+            - name: T3_STATE_DB
+              value: /home/t3/.t3/userdata/statev2.sqlite
+          ports:
+            - name: ssh
+              containerPort: 2222
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: home
+              mountPath: /home/t3
+            - name: runtime-state
+              mountPath: /home/t3/.t3/userdata/server-runtime.json
+              subPath: server-runtime.json
+              readOnly: true
+            - name: login
+              mountPath: /run/t3-login
+              readOnly: true
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          livenessProbe:
+            exec:
+              command: [bash, /scripts/sshd.sh, check]
+            periodSeconds: 15
+            timeoutSeconds: 10
+            failureThreshold: 2
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 8Gi
+      volumes:
+        - name: home
+          persistentVolumeClaim:
+            claimName: t3code-home
+        - name: inputs
+          secret:
+            secretName: t3-runtime-inputs
+            defaultMode: 0440
+            items:
+              - key: runtime.json
+                path: runtime.json
+              - key: bundle.json
+                path: bundle.json
+              - key: policies.json
+                path: policies.json
+              - key: services.json
+                path: services.json
+              - key: kubeconfig
+                path: kubeconfig
+              - key: authorized_keys
+                path: authorized_keys
+        - name: login
+          secret:
+            secretName: t3-runtime-inputs
+            defaultMode: 0440
+            items:
+              - key: authorized_keys
+                path: authorized_keys
+        - name: scripts
+          configMap:
+            name: t3code-scripts
+            defaultMode: 0555
+        - name: tmp
+          emptyDir: {}
+        - name: runtime-state
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: t3code
+automountServiceAccountToken: false
