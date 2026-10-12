@@ -97,6 +97,7 @@ def write(home, safety_entry, ssh_path=Path('/scripts/homelab-ssh.md')):
     settings['packages'] = [str(Path('/tools/node_modules') / name) for name in PACKAGES] + [safety_entry]
     settings['skills'] = ['!**/.agents/skills/ponytail/**']
     settings.setdefault('pi-cliproxyapi-provider', {})['gpt56ContextWindow'] = 'canonical'
+    settings.setdefault('retry', {})['maxRetries'] = 8
     write_json(settings_path, settings)
     write_json(agent / 'extensions/pi-permission-system/config.json', permissions())
     (agent / 'pi-permissions.jsonc').unlink(missing_ok=True)
