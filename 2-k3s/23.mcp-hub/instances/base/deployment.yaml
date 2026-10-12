@@ -1,0 +1,107 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-hub
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: mcp-hub
+  template:
+    metadata:
+      labels:
+        app: mcp-hub
+    spec:
+      serviceAccountName: mcp-hub
+      automountServiceAccountToken: true
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 10
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: hub
+          image: docker.io/library/python:3.13-alpine
+          command:
+            - sh
+            - -c
+            - >-
+              pip install -q --no-cache-dir --disable-pip-version-check
+              --target /opt/py mcp==2.2.0 &&
+              exec python /app/mcp_hub.py
+          env:
+            - name: HOME
+              value: /tmp
+            - name: PYTHONPATH
+              value: /opt/py
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            - name: HUB_INSTANCE
+              valueFrom:
+                configMapKeyRef:
+                  name: mcp-hub-instance-settings
+                  key: environment
+            - name: HUB_SERVICES_FILE
+              value: /instance/services.json
+            - name: HUB_CREDENTIALS_FILE
+              value: /instance/credentials.json
+          ports:
+            - containerPort: 8000
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 10m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: app
+              mountPath: /app
+              readOnly: true
+            - name: instance
+              mountPath: /instance
+              readOnly: true
+            - name: py
+              mountPath: /opt/py
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: app
+          configMap:
+            name: mcp-hub-app
+        - name: instance
+          secret:
+            secretName: mcp-hub-instance
+            defaultMode: 0440
+            items:
+              - key: services.json
+                path: services.json
+              - key: credentials.json
+                path: credentials.json
+        - name: py
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}

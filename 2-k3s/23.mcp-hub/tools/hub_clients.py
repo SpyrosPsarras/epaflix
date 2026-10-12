@@ -8,6 +8,11 @@ tools/add-client.py (PCs) and the t3code pod entrypoint (a byte copy in
   hub_clients.py codex    <CODEX_HOME>    <hub url> <token env var>
   hub_clients.py pi       <mcp.json>      <hub url> <token env var>
 
+An optional final services.json argument, or MCP_HUB_SERVICES_FILE, selects
+only an instance's allowlist and removes other maintained hub entries.
+MCP_HUB_INSTANCE, when set, must match that file. Without either option the
+legacy complete server set is preserved.
+
 Idempotent: a file is rewritten only when an entry differs. Existing entries
 with a hub server's name are replaced (they were the stdio or hosted copies
 the hub supersedes), and so is any entry still pointing at a removed stdio
@@ -23,8 +28,9 @@ import subprocess
 import sys
 import tempfile
 
-SERVERS = {"gmail": "/gmail", "searxng": "/searxng", "notion": "/notion", "vaultwarden": "/vaultwarden",
-           "kubernetes-epaflix": "/kubernetes", "drive": "/drive"}
+import hub_services
+
+SERVERS = hub_services.client_servers()
 # These tools ask in OpenCode (<server>_<tool>).
 # The kubernetes and drive names are those of the images pinned in
 # 23.mcp-hub/kubernetes-mcp.yaml and workspace-mcp.yaml; recheck them when bumping.
@@ -64,14 +70,17 @@ def _load(path):
         return json.load(f)
 
 
-def opencode(config, hub, authorization):
+def opencode(config, hub, authorization, services=None):
+    selected = hub_services.client_servers(services)
     hub = hub.rstrip("/")
     mcp = config.setdefault("mcp", {})
+    for name in SERVERS.keys() - selected.keys():
+        mcp.pop(name, None)
     for name in [n for n, e in mcp.items() if n not in SERVERS and isinstance(e, dict) and _legacy(e)]:
         del mcp[name]
     for name in RETIRED:
         mcp.pop(name, None)
-    for name, path in SERVERS.items():
+    for name, path in selected.items():
         old = mcp.get(name, {})
         mcp[name] = {"type": "remote", "url": hub + path, "enabled": old.get("enabled", True) if
                      old.get("type") == "remote" else True, "timeout": 30000,
@@ -82,19 +91,23 @@ def opencode(config, hub, authorization):
     for key in [k for k in perms if k.startswith(tuple(r + "_" for r in RETIRED))]:
         del perms[key]
     for server, tools in ASK.items():
-        for tool in tools:
-            perms.setdefault(f"{server}_{tool}", "ask")
+        if server in selected:
+            for tool in tools:
+                perms.setdefault(f"{server}_{tool}", "ask")
     return config
 
 
-def claude(config, hub, authorization):
+def claude(config, hub, authorization, services=None):
+    selected = hub_services.client_servers(services)
     hub = hub.rstrip("/")
     servers = config.setdefault("mcpServers", {})
+    for name in SERVERS.keys() - selected.keys():
+        servers.pop(name, None)
     for name in [n for n, e in servers.items() if n not in SERVERS and isinstance(e, dict) and _legacy(e)]:
         del servers[name]
     for name in RETIRED:
         servers.pop(name, None)
-    for name, path in SERVERS.items():
+    for name, path in selected.items():
         entry = {"type": "http", "url": hub + path}
         if authorization.startswith("helper:"):
             entry["headersHelper"] = authorization[len("helper:"):]
@@ -104,22 +117,26 @@ def claude(config, hub, authorization):
     return config
 
 
-def pi(config, hub, env_var):
+def pi(config, hub, env_var, services=None):
+    selected = hub_services.client_servers(services)
     servers = config.setdefault("mcpServers", {})
+    for name in SERVERS.keys() - selected.keys():
+        servers.pop(name, None)
     for name in [n for n, e in servers.items() if n not in SERVERS and isinstance(e, dict) and _legacy(e)]:
         del servers[name]
     for name in RETIRED:
         servers.pop(name, None)
-    for name, path in SERVERS.items():
+    for name, path in selected.items():
         servers[name] = {"url": hub.rstrip("/") + path,
                          "headers": {"Authorization": "Bearer ${" + env_var + "}"}}
     return config
 
 
-def codex(codex_home, hub, env_var, run=subprocess.run):
+def codex(codex_home, hub, env_var, run=subprocess.run, services=None):
     """Codex has no TOML writer we can rely on, so go through its CLI, only for entries that differ."""
     import tomllib
 
+    selected = hub_services.client_servers(services)
     hub = hub.rstrip("/")
     path = os.path.join(codex_home, "config.toml")
     current = {}
@@ -132,10 +149,10 @@ def codex(codex_home, hub, env_var, run=subprocess.run):
     for name in [n for n, e in current.items() if n not in SERVERS and n not in RETIRED and _legacy(e)]:
         run(["codex", "mcp", "remove", name], env=env, check=True, capture_output=True)
         changed.append(name)
-    for name in [n for n in RETIRED if n in current]:
+    for name in [n for n in current if n in RETIRED or n in SERVERS.keys() - selected.keys()]:
         run(["codex", "mcp", "remove", name], env=env, check=True, capture_output=True)
         changed.append(name)
-    for name, p in SERVERS.items():
+    for name, p in selected.items():
         e = current.get(name)
         if e and e.get("url") == hub + p and e.get("bearer_token_env_var") == env_var and "command" not in e:
             continue
@@ -148,14 +165,20 @@ def codex(codex_home, hub, env_var, run=subprocess.run):
 
 
 def main(argv):
-    if len(argv) != 5 or argv[1] not in ("opencode", "claude", "codex", "pi"):
+    if len(argv) not in (5, 6) or argv[1] not in ("opencode", "claude", "codex", "pi"):
         sys.exit(__doc__)
-    kind, target, hub, auth = argv[1:]
+    kind, target, hub, auth = argv[1:5]
+    services_file = argv[5] if len(argv) == 6 else os.environ.get("MCP_HUB_SERVICES_FILE")
+    environment = os.environ.get("MCP_HUB_INSTANCE")
+    if environment is not None and not services_file:
+        raise ValueError("MCP_HUB_INSTANCE requires MCP_HUB_SERVICES_FILE")
+    services = hub_services.load_services(services_file, environment) if services_file is not None else None
     if kind == "codex":
-        changed = codex(target, hub, auth)
+        changed = codex(target, hub, auth, services=services)
     else:
         before = _load(target)
-        after = {"opencode": opencode, "claude": claude, "pi": pi}[kind](json.loads(json.dumps(before)), hub, auth)
+        after = {"opencode": opencode, "claude": claude, "pi": pi}[kind](
+            json.loads(json.dumps(before)), hub, auth, services=services)
         changed = after != before
         if changed:
             _write_json(target, after)

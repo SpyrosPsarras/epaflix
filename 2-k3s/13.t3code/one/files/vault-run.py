@@ -29,6 +29,8 @@ class NotFound(Exception):
 
 
 def fetch(path):
+    if "MCP_HUB_INSTANCE" in os.environ or "MCP_HUB_SERVICES_FILE" in os.environ:
+        raise RuntimeError("vault is disabled for homelab and work hubs")
     token = os.environ.get("MCP_HUB_TOKEN") or open(os.path.expanduser("~/.config/opencode/mcp-hub.key")).read().strip()
     request = urllib.request.Request(
         os.environ.get("MCP_HUB_URL", "https://mcp.epaflix.com").rstrip("/") + "/vault-secret",

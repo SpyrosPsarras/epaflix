@@ -1,8 +1,11 @@
 # mcp-hub
 
-The one MCP endpoint every agent client in the homelab talks to. Clients know
-one URL and their own hub token; everything behind a path is the hub's
-business.
+The legacy MCP endpoint remains available while clients deliberately migrate.
+Clients know one URL and their own hub token; the hub owns each connection.
+
+[Homelab and work instances](instances/README.md) run the same maintained code
+with independent configuration and credentials. They require private
+provisioning and manual deployment approval. Neither exposes vault routes.
 
 ## Vocabulary
 
@@ -229,7 +232,7 @@ A module: write `files/<name>_mcp.py` exposing `server() -> MCPServer` (see
 other exception text from the model), add it to `MODULES` in `mcp_hub.py`
 and to the `configMapGenerator`, add its env to `deployment.yaml` (plus a
 revision replacement if it gets a Secret). An upstream: add an `Upstream` to
-`upstreams()` with its credential. Then add the name to `SERVERS` (and any
-OpenCode approval-gated tools to `ASK`) in `tools/hub_clients.py`, run
+`upstreams()` with its credential. Then add the service to `files/hub_services.py` (and any
+OpenCode approval-gated tools to `ASK` in `tools/hub_clients.py`), run
 `13.t3code/one/tools/sync-shared.sh`, extend the selftest, and re-run
 `add-client.py <pc> --reuse` on each PC.
