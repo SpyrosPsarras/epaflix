@@ -30,7 +30,7 @@ from upstream import UpstreamError
 SA = "/var/run/secrets/kubernetes.io/serviceaccount"
 FLUSH_EVERY = 30
 EXPIRED = ("Notion grant expired or revoked (consented {consented}; grants last at most 180 days, "
-           "30 without use). Re-run 2-k3s/23.mcp-hub/tools/bootstrap-notion.py.")
+           "30 without use). Re-run {bootstrap}.")
 
 
 class SecretStore:
@@ -38,6 +38,9 @@ class SecretStore:
 
     def __init__(self, namespace, name, api="https://kubernetes.default.svc"):
         self.url = f"{api}/api/v1/namespaces/{namespace}/secrets/{name}"
+        self.bootstrap = "2-k3s/23.mcp-hub/tools/bootstrap-notion.py"
+        if namespace in ("mcp-hub-homelab", "mcp-hub-work"):
+            self.bootstrap += " --instance " + namespace.removeprefix("mcp-hub-") + " --context <approved-context>"
 
     def _call(self, method, body=None):
         import ssl
@@ -58,7 +61,7 @@ class SecretStore:
             return data, s["metadata"]["resourceVersion"]
         except urllib.error.HTTPError as e:
             if e.code == 404:
-                raise UpstreamError("no Notion grant yet: run 2-k3s/23.mcp-hub/tools/bootstrap-notion.py") from None
+                raise UpstreamError("no Notion grant yet: run " + self.bootstrap) from None
             raise UpstreamError(f"cannot read the Notion grant Secret (HTTP {e.code})") from None
         except (OSError, KeyError, ValueError) as e:  # URLError is an OSError; no SA token also lands here
             raise UpstreamError(f"cannot read the Notion grant Secret: {type(e).__name__}: {e}") from None
@@ -89,6 +92,7 @@ def post_form(url, form):
 class Grant:
     def __init__(self, store, post=post_form, clock=time.time):
         self.store, self.post, self.clock = store, post, clock
+        self.bootstrap = getattr(store, "bootstrap", "2-k3s/23.mcp-hub/tools/bootstrap-notion.py")
         self._lock = threading.Lock()
         self._token, self._expires, self._rejected = None, 0.0, None
         self._unsaved = None  # (refresh token still in the Secret, rotated pair not yet written back)
@@ -136,16 +140,16 @@ class Grant:
 
     def _refresh(self, data, rv):
         if not data.get("refresh_token"):
-            raise UpstreamError(EXPIRED.format(consented=data.get("consented_at", "?")))
+            raise UpstreamError(EXPIRED.format(consented=data.get("consented_at", "?"), bootstrap=self.bootstrap))
         if not (data.get("client_id") and data.get("token_endpoint")):
-            raise UpstreamError("the Notion grant Secret is incomplete; re-run 2-k3s/23.mcp-hub/tools/bootstrap-notion.py")
+            raise UpstreamError("the Notion grant Secret is incomplete; re-run " + self.bootstrap)
         form = {"grant_type": "refresh_token", "refresh_token": data["refresh_token"], "client_id": data["client_id"]}
         if data.get("client_secret"):
             form["client_secret"] = data["client_secret"]
         status, body = self.post(data["token_endpoint"], form)
         if status != 200 or "access_token" not in body:
             if body.get("error") == "invalid_grant":
-                raise UpstreamError(EXPIRED.format(consented=data.get("consented_at", "?")))
+                raise UpstreamError(EXPIRED.format(consented=data.get("consented_at", "?"), bootstrap=self.bootstrap))
             raise UpstreamError(f"Notion token refresh failed (HTTP {status}): {json.dumps(body)[:300]}")
         new = {"access_token": body["access_token"],
                "expires_at": str(int(self.clock() + int(body.get("expires_in", 3600)))),

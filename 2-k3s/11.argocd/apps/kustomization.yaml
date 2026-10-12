@@ -15,6 +15,8 @@ resources:
   - app-kube-vip-cloud-provider.yaml
   - app-maintenance.yaml
   - app-mcp-hub.yaml
+  - app-mcp-hub-homelab.yaml
+  - app-mcp-hub-work.yaml
   - app-observability.yaml
   - app-postgres.yaml
   - app-reloader.yaml

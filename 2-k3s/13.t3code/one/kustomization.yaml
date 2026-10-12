@@ -35,6 +35,7 @@ configMapGenerator:
       - files/private-config.py
       - files/git-credential-github.sh
       - files/hub_clients.py
+      - files/hub_services.py
       - files/ssh-policy.py
       - files/vault-ssh-agent.py
       - files/vault-run.py

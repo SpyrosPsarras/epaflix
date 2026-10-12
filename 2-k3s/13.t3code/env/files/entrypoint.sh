@@ -2,6 +2,16 @@
 # CI smoke entrypoint (tools/smoke.sh); the pod runs ../one/files/entrypoint.sh.
 set -euo pipefail
 
+hub_config_failure() {
+  echo "$*" >&2
+  if [[ ${MCP_HUB_INSTANCE+x} || ${MCP_HUB_SERVICES_FILE+x} ]]; then exit 1; fi
+}
+
+if [[ ${MCP_HUB_INSTANCE+x} || ${MCP_HUB_SERVICES_FILE+x} ]] &&
+   [[ -z ${MCP_HUB_TOKEN:-} || -z ${MCP_HUB_URL:-} ]]; then
+  hub_config_failure "t3env: instance hub requires its own MCP_HUB_TOKEN and MCP_HUB_URL"
+fi
+
 T3_PROJECT_REPO=${T3_PROJECT_REPO:-https://github.com/SpyrosPsarras/epaflix.git}
 PROJECT_DIR=$HOME/projects/$(basename "$T3_PROJECT_REPO" .git)
 export PATH=/tools/node_modules/.bin:$PATH
@@ -14,7 +24,7 @@ fi
 
 if [[ -n ${MCP_HUB_TOKEN:-} && -n ${MCP_HUB_URL:-} ]]; then
   python3 /scripts/hub_clients.py pi "$HOME/.pi/agent/mcp.json" "$MCP_HUB_URL" MCP_HUB_TOKEN || \
-    echo "t3env: hub pi config failed" >&2
+    hub_config_failure "t3env: hub pi config failed"
 fi
 
 T3_HOME=$HOME/.t3

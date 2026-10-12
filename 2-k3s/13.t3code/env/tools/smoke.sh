@@ -38,7 +38,7 @@ mkdir -p "$HOME"
 install -m 0555 /src/env/files/entrypoint.sh /src/env/files/git-credential-github.sh /scripts/
 install -m 0555 /src/env/files/private-config.py /scripts/
 install -m 0755 /src/one/files/pi.sh /scripts/
-install -m 0555 /src/one/files/pi-setup.py /src/one/files/hub_clients.py \
+install -m 0555 /src/one/files/pi-setup.py /src/one/files/hub_clients.py /src/one/files/hub_services.py \
   /src/one/files/t3-pi-settings.py /src/one/files/homelab-ssh.md /scripts/
 install -m 0555 /src/one/files/cc-safety-net-install.py /src/one/files/cc-safety-net.patch \
   /src/one/files/cc-safety-net-hashes.json /scripts/
