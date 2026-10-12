@@ -8,12 +8,12 @@
     "@dietrichgebert/ponytail": "5.1.0",
     "@earendil-works/pi-coding-agent": "1.1.0",
     "@gotgenes/pi-permission-system": "40.1.4",
-    "@juicesharp/rpiv-ask-user-question": "2.13.3",
-    "@juicesharp/rpiv-todo": "2.13.3",
+    "@juicesharp/rpiv-ask-user-question": "2.13.5",
+    "@juicesharp/rpiv-todo": "2.13.5",
     "@openai/codex": "0.162.1",
     "@spences10/pi-redact": "0.0.15",
     "pi-cliproxyapi-provider": "0.15.58",
     "superpowers": "github:obra/superpowers#v7.0.0",
-    "t3": "0.0.46-nightly.20261011.2980"
+    "t3": "0.0.46-nightly.20261011.2994"
   }
 }
