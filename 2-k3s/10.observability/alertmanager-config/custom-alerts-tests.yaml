@@ -98,6 +98,56 @@ tests:
         alertname: CredentialRedactedFromLogs
         exp_alerts: []
 
+  # Only the exact transcript pair is excluded. Its counter still increments.
+  - interval: 1m
+    input_series:
+      - series: 'loki_process_custom_credential_lines_redacted_total{namespace="remote-pi",container="transcripts"}'
+        values: "1+1x600"
+    alert_rule_test:
+      - eval_time: 0m
+        alertname: CredentialRedactedFromLogs
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: CredentialRedactedFromLogs
+        exp_alerts: []
+      - eval_time: 590m
+        alertname: CredentialRedactedFromLogs
+        exp_alerts: []
+
+  # The exclusion must survive a transcript pod disappearing from scrapes.
+  - interval: 1m
+    input_series:
+      - series: 'loki_process_custom_credential_lines_redacted_total{namespace="remote-pi",container="transcripts"}'
+        values: "1+1x20 stale"
+    alert_rule_test:
+      - eval_time: 0m
+        alertname: CredentialRedactedFromLogs
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: CredentialRedactedFromLogs
+        exp_alerts: []
+      - eval_time: 390m
+        alertname: CredentialRedactedFromLogs
+        exp_alerts: []
+
+  # A transcripts container in another namespace must still alert.
+  - interval: 1m
+    input_series:
+      - series: 'loki_process_custom_credential_lines_redacted_total{namespace="servarr",container="transcripts"}'
+        values: "1+1x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: CredentialRedactedFromLogs
+        exp_alerts:
+          - exp_labels:
+              namespace: servarr
+              container: transcripts
+              severity: warning
+              component: security
+            exp_annotations:
+              summary: "Credential-shaped log content detected in servarr"
+              description: "servarr/transcripts logged a line with a credential-shaped key=value. alloy counts those lines per log stream in loki_process_custom_credential_lines_redacted_total and drops a series once 5m pass without a matching line (max_idle_duration), so a live series means a hit within about the last 5m. This fires while any is live. The latest reading was 21: lines counted since alloy created the live series, not a count over a fixed window. The alert stays firing until 6h pass with no live series. alloy redacts pattern-matched segments before Loki ingestion. Raw pod stdout can retain the original value, visible via `kubectl logs`. Unknown credential formats can still leak into Loki. The alloy chart's ServiceMonitor sets honorLabels, so namespace/pod/container name the offending app, not alloy (#911 was the exported_* shape under promtail, #1381). Known sources: sonarr/radarr/prowlarr restarting and logging their Postgres connection string (#634), traefik access lines carrying jellyfin's query-string ApiKey (#702), cloudflared logging Jellyfin request URLs with an ApiKey query parameter, and sonarr logging Prowlarr Torznab feed URLs with an apikey parameter. If it is a new offender treat that credential as exposed and rotate it. Do NOT grep Loki for the literal value."
+
   # ntfy spam fix: one redacted line fires at once (a pod restart logging
   # its connection string once is the #634 shape), and a second hit inside
   # the 6h keep_firing_for extends the same alert instead of a resolve
@@ -105,7 +155,7 @@ tests:
   # life at 1); resolves 6h after the second life goes (last sample 205m).
   - interval: 1m
     input_series:
-      - series: 'loki_process_custom_credential_lines_redacted_total{namespace="remote-pi",container="transcripts",pod="cliproxy-5648fff7c5-qgs4q",job="remote-pi/cliproxy-5648fff7c5-qgs4q",component_id="loki.process.pods",component_path="/",filename="/var/log/pods/x/0.log",stream="stdout",instance="10.42.9.22:12345"}'
+      - series: 'loki_process_custom_credential_lines_redacted_total{namespace="remote-pi",container="cliproxy",pod="cliproxy-5648fff7c5-qgs4q",job="remote-pi/cliproxy-5648fff7c5-qgs4q",component_id="loki.process.pods",component_path="/",filename="/var/log/pods/x/0.log",stream="stdout",instance="10.42.9.22:12345"}'
         values: "_x11 1x5 stale _x182 1x5 stale"
     alert_rule_test:
       - eval_time: 12m
@@ -113,12 +163,12 @@ tests:
         exp_alerts: &credential_one_line
           - exp_labels:
               namespace: remote-pi
-              container: transcripts
+              container: cliproxy
               severity: warning
               component: security
             exp_annotations:
               summary: "Credential-shaped log content detected in remote-pi"
-              description: "remote-pi/transcripts logged a line with a credential-shaped key=value. alloy counts those lines per log stream in loki_process_custom_credential_lines_redacted_total and drops a series once 5m pass without a matching line (max_idle_duration), so a live series means a hit within about the last 5m. This fires while any is live. The latest reading was 1: lines counted since alloy created the live series, not a count over a fixed window. The alert stays firing until 6h pass with no live series. alloy redacts pattern-matched segments before Loki ingestion. Raw pod stdout can retain the original value, visible via `kubectl logs`. Unknown credential formats can still leak into Loki. The alloy chart's ServiceMonitor sets honorLabels, so namespace/pod/container name the offending app, not alloy (#911 was the exported_* shape under promtail, #1381). Known sources: sonarr/radarr/prowlarr restarting and logging their Postgres connection string (#634), traefik access lines carrying jellyfin's query-string ApiKey (#702), cloudflared logging Jellyfin request URLs with an ApiKey query parameter, and sonarr logging Prowlarr Torznab feed URLs with an apikey parameter. If it is a new offender treat that credential as exposed and rotate it. Do NOT grep Loki for the literal value."
+              description: "remote-pi/cliproxy logged a line with a credential-shaped key=value. alloy counts those lines per log stream in loki_process_custom_credential_lines_redacted_total and drops a series once 5m pass without a matching line (max_idle_duration), so a live series means a hit within about the last 5m. This fires while any is live. The latest reading was 1: lines counted since alloy created the live series, not a count over a fixed window. The alert stays firing until 6h pass with no live series. alloy redacts pattern-matched segments before Loki ingestion. Raw pod stdout can retain the original value, visible via `kubectl logs`. Unknown credential formats can still leak into Loki. The alloy chart's ServiceMonitor sets honorLabels, so namespace/pod/container name the offending app, not alloy (#911 was the exported_* shape under promtail, #1381). Known sources: sonarr/radarr/prowlarr restarting and logging their Postgres connection string (#634), traefik access lines carrying jellyfin's query-string ApiKey (#702), cloudflared logging Jellyfin request URLs with an ApiKey query parameter, and sonarr logging Prowlarr Torznab feed URLs with an apikey parameter. If it is a new offender treat that credential as exposed and rotate it. Do NOT grep Loki for the literal value."
       # The series is gone from 17m; the alert remains held.
       - eval_time: 30m
         alertname: CredentialRedactedFromLogs
@@ -140,7 +190,7 @@ tests:
       - expr: count_over_time(ALERTS{alertname="CredentialRedactedFromLogs",alertstate="firing"}[560m])
         eval_time: 565m
         exp_samples:
-          - labels: '{alertname="CredentialRedactedFromLogs",alertstate="firing",namespace="remote-pi",container="transcripts",severity="warning",component="security"}'
+          - labels: '{alertname="CredentialRedactedFromLogs",alertstate="firing",namespace="remote-pi",container="cliproxy",severity="warning",component="security"}'
             value: 555
 
   # A single line creates a flat-1 series that expires after 5m.
@@ -259,7 +309,7 @@ tests:
   # Bridge a failed scrape and a 10m outage, then hold 6h after the last live sample.
   - interval: 1m
     input_series:
-      - series: 'loki_process_custom_credential_lines_redacted_total{namespace="remote-pi",container="transcripts",pod="cliproxy-5648fff7c5-sssss",job="remote-pi/cliproxy-5648fff7c5-sssss",component_id="loki.process.pods",component_path="/",filename="/var/log/pods/x/0.log",stream="stdout",instance="10.42.9.22:12345"}'
+      - series: 'loki_process_custom_credential_lines_redacted_total{namespace="remote-pi",container="cliproxy",pod="cliproxy-5648fff7c5-sssss",job="remote-pi/cliproxy-5648fff7c5-sssss",component_id="loki.process.pods",component_path="/",filename="/var/log/pods/x/0.log",stream="stdout",instance="10.42.9.22:12345"}'
         values: "1+1x29 stale 32+1x13 stale _x9 56+1x10 stale"
     alert_rule_test:
       - eval_time: 425m
@@ -267,12 +317,12 @@ tests:
         exp_alerts:
           - exp_labels:
               namespace: remote-pi
-              container: transcripts
+              container: cliproxy
               severity: warning
               component: security
             exp_annotations:
               summary: "Credential-shaped log content detected in remote-pi"
-              description: "remote-pi/transcripts logged a line with a credential-shaped key=value. alloy counts those lines per log stream in loki_process_custom_credential_lines_redacted_total and drops a series once 5m pass without a matching line (max_idle_duration), so a live series means a hit within about the last 5m. This fires while any is live. The latest reading was 66: lines counted since alloy created the live series, not a count over a fixed window. The alert stays firing until 6h pass with no live series. alloy redacts pattern-matched segments before Loki ingestion. Raw pod stdout can retain the original value, visible via `kubectl logs`. Unknown credential formats can still leak into Loki. The alloy chart's ServiceMonitor sets honorLabels, so namespace/pod/container name the offending app, not alloy (#911 was the exported_* shape under promtail, #1381). Known sources: sonarr/radarr/prowlarr restarting and logging their Postgres connection string (#634), traefik access lines carrying jellyfin's query-string ApiKey (#702), cloudflared logging Jellyfin request URLs with an ApiKey query parameter, and sonarr logging Prowlarr Torznab feed URLs with an apikey parameter. If it is a new offender treat that credential as exposed and rotate it. Do NOT grep Loki for the literal value."
+              description: "remote-pi/cliproxy logged a line with a credential-shaped key=value. alloy counts those lines per log stream in loki_process_custom_credential_lines_redacted_total and drops a series once 5m pass without a matching line (max_idle_duration), so a live series means a hit within about the last 5m. This fires while any is live. The latest reading was 66: lines counted since alloy created the live series, not a count over a fixed window. The alert stays firing until 6h pass with no live series. alloy redacts pattern-matched segments before Loki ingestion. Raw pod stdout can retain the original value, visible via `kubectl logs`. Unknown credential formats can still leak into Loki. The alloy chart's ServiceMonitor sets honorLabels, so namespace/pod/container name the offending app, not alloy (#911 was the exported_* shape under promtail, #1381). Known sources: sonarr/radarr/prowlarr restarting and logging their Postgres connection string (#634), traefik access lines carrying jellyfin's query-string ApiKey (#702), cloudflared logging Jellyfin request URLs with an ApiKey query parameter, and sonarr logging Prowlarr Torznab feed URLs with an apikey parameter. If it is a new offender treat that credential as exposed and rotate it. Do NOT grep Loki for the literal value."
       - eval_time: 426m
         alertname: CredentialRedactedFromLogs
         exp_alerts: []
@@ -280,7 +330,7 @@ tests:
       - expr: count_over_time(ALERTS{alertname="CredentialRedactedFromLogs",alertstate="firing"}[426m])
         eval_time: 425m
         exp_samples:
-          - labels: '{alertname="CredentialRedactedFromLogs",alertstate="firing",namespace="remote-pi",container="transcripts",severity="warning",component="security"}'
+          - labels: '{alertname="CredentialRedactedFromLogs",alertstate="firing",namespace="remote-pi",container="cliproxy",severity="warning",component="security"}'
             value: 426
 
   # Flat-1 lives every 6m must extend the hold; each ends one scrape before the next.

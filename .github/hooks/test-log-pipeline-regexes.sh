@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Synthetic fixtures for the committed log regexes: alloy's credential
-# self-mask/count/redact stages and the ServarrErrorSpike LogQL line filters.
+# self-mask/count/redact stages and the ServarrErrorSpike LogQL pipeline.
 # Runs them with Go's regexp, the RE2 engine Alloy and Loki use. Go ships on
 # the ubuntu-latest runner image; nothing is downloaded. Not a full Alloy or
 # Loki run: stage.replace is a copy of Alloy v1.20.1 getReplacedEntry, and
@@ -142,59 +142,30 @@ func main() {
 			fmt.Sprintf("counted=%v out=%s", counted, out))
 	}
 
-	// ServarrErrorSpike: every |~ must match and no !~ may match. The
-	// description's Explore example must use the same filters.
-	filt := regexp.MustCompile("(\\|~|!~) `([^`]*)`")
-	var expr5m, example []string
-	for _, l := range strings.Split(rules, "\n") {
-		if strings.Contains(l, `count_over_time({namespace="servarr"}`) {
-			expr5m = filt.FindAllString(l, -1)
-		} else if strings.Contains(l, `{namespace="servarr", container=`) {
-			example = filt.FindAllString(l, -1)
-		}
-	}
-	check("servarr Explore example uses the alert's filters", strings.Join(expr5m, " ") == strings.Join(example, " "), strings.Join(example, " "))
-	counts := func(line string) bool {
-		for _, f := range filt.FindAllStringSubmatch(strings.Join(expr5m, " "), -1) {
-			if regexp.MustCompile(f[2]).MatchString(line) != (f[1] == "|~") {
-				return false
+	// The real Alloy/Loki fixture suite checks severity matching. Here verify
+	// that the Explore example is identical and every shipped regexp is RE2.
+	severityPipeline := func(block string) string {
+		var steps []string
+		for _, l := range strings.Split(block, "\n") {
+			l = strings.TrimSpace(l)
+			if strings.HasPrefix(l, "| ") {
+				steps = append(steps, l)
 			}
 		}
-		return true
+		return strings.Join(steps, "\n")
 	}
-	const ts = "2026-01-01T00:00:00.000Z "
-	for _, c := range []struct {
-		name, in string
-		counted  bool
-	}{
-		{"seerr plain debug with error field", ts + `[debug][DnsCache]: Lookup retry {"error":"synthetic"}`, false},
-		{"seerr ANSI debug with error field", ts + "[\x1b[34mdebug\x1b[39m][DnsCache]: Lookup retry {\"error\":\"synthetic\"}", false},
-		{"seerr ANSI trace with error word", ts + "[\x1b[90mtrace\x1b[39m][Api]: error path taken", false},
-		{"radarr plain debug", `[Debug] Api: request error, retrying`, false},
-		{"radarr plain trace", `[Trace] Http: error body follows`, false},
-		{"seerr ANSI error with error word", ts + "[\x1b[31merror\x1b[39m][Api]: Request error", true},
-		{"seerr ANSI error level only", ts + "[\x1b[31merror\x1b[39m][Api]: Request failed", true},
-		{"seerr ANSI fatal level only", ts + "[\x1b[35mfatal\x1b[39m][Server]: shutting down", true},
-		{"ANSI panic level only, two SGRs", "[\x1b[1m\x1b[31mPANIC\x1b[39m\x1b[22m][Main]: aborting", true},
-		{"ANSI error level mentioning [debug]", ts + "[\x1b[31merror\x1b[39m][Settings]: cannot parse [debug] section", true},
-		{"radarr plain fatal level only", `[Fatal] Host: startup aborted`, true},
-		{"plain panic level only", `[panic][Main]: aborting`, true},
-		{"seerr two-SGR debug with error field", ts + "[\x1b[1m\x1b[34mdebug\x1b[39m\x1b[22m][DnsCache]: Lookup retry {\"error\":\"synthetic\"}", false},
-		{"two-SGR trace with error word", "[\x1b[2m\x1b[90mTRACE\x1b[39m\x1b[22m][Api]: error path taken", false},
-		{"terror is not error", ts + `[info][Jobs]: added terror movie`, false},
-		{"ANSI terror is not error", ts + "[\x1b[32minfo\x1b[39m][Jobs]: \x1b[31mterror\x1b[39m added", false},
-		{"ANSI errors/panicked are not words", ts + "[\x1b[32minfo\x1b[39m][Jobs]: \x1b[31merrors\x1b[39m \x1b[31mpanicked\x1b[39m", false},
-		{"seerr plain error", ts + `[error][Api]: Request failed`, true},
-		{"radarr fatal", `[Fatal] Host: fatal startup failure`, true},
-		{"go panic", `panic: synthetic nil map write`, true},
-		{"error mentioning [debug]", ts + `[error][Settings]: cannot parse [debug] section`, true},
-		{"error mentioning trace", `[Error] Api: trace id 42 failed with error`, true},
-		{"untimestamped error prefix then [debug]", `ERROR [debug] section unreadable`, true},
-		{"info with error word kept", `[Info] Api: 0 error(s) in last sync`, true},
-		{"seerr ANSI info with error word kept", ts + "[\x1b[32minfo\x1b[39m][Jobs]: finished with error count 1", true},
-		{"info without error word", ts + `[info][Jobs]: finished`, false},
-	} {
-		check("servarr: "+c.name, counts(c.in) == c.counted, c.in)
+	serv := strings.SplitN(strings.SplitN(rules, "- alert: ServarrErrorSpike", 2)[1], "- name: cluster-fatal", 2)[0]
+	parts := strings.SplitN(serv, "Inspect in Grafana → Explore → Loki:", 2)
+	check("servarr Explore example exists", len(parts) == 2, serv)
+	if len(parts) == 2 {
+		alert, example := severityPipeline(parts[0]), severityPipeline(parts[1])
+		check("servarr Explore example uses the alert's severity pipeline", alert != "" && alert == example, example)
+		regexes := regexp.MustCompile("\\| regexp \x60([^\x60]*)\x60").FindAllStringSubmatch(alert, -1)
+		check("servarr severity pipeline has three RE2 extractors", len(regexes) == 3, alert)
+		for _, r := range regexes {
+			_, err := regexp.Compile(r[1])
+			check("servarr severity extractor compiles as RE2", err == nil, r[1])
+		}
 	}
 
 	if fails > 0 {

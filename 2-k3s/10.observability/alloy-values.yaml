@@ -107,14 +107,24 @@ alloy:
 
         stage.cri { }
 
-        // radarr v6 writes its console format without a timestamp:
-        // [Debug] Api: ... (#976). Without the bracket alternative every
-        // radarr burst glues into one Loki entry under the burst-start
-        // timestamp. Exception blocks ([v6.x.y] ... / at ...) must stay
-        // continuations, hence the explicit level list.
-        stage.multiline {
-          firstline     = `^\d{4}-\d{2}-\d{2}|^[A-Z]{1}\d{4}|^\[(Trace|Debug|Info|Warn|Error|Fatal)\]`
-          max_wait_time = "3s"
+        // Servarr mixes bracketed timestamps, JSON, Python and logrus logs.
+        // Split each record header, but keep indented payloads and exception
+        // blocks ([v6.x.y] ... / at ...) attached to their original severity.
+        stage.match {
+          selector = `{namespace="servarr"}`
+          stage.multiline {
+            firstline     = `^\[?\d{4}[-/]\d{2}[-/]\d{2}|^[A-Z]{1}\d{4}|^\[(?i:Trace|Debug|Info|Information|Warn|Warning|Error|Critical|Fatal)\]|^\{|^(TRACE|DEBUG|INFO|WARNING|WARN|ERROR|CRITICAL|FATAL):|^panic:|^time="\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})" `
+            max_wait_time = "3s"
+          }
+        }
+
+        // Preserve the existing multiline boundaries in other namespaces.
+        stage.match {
+          selector = `{namespace!="servarr"}`
+          stage.multiline {
+            firstline     = `^\d{4}-\d{2}-\d{2}|^[A-Z]{1}\d{4}|^\[(Trace|Debug|Info|Warn|Error|Fatal)\]`
+            max_wait_time = "3s"
+          }
         }
 
         // kube-vip lives for weeks without its log file rotating (#1006).

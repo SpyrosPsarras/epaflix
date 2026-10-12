@@ -1,0 +1,292 @@
+# Synthetic messages with observed console layouts, never copied credentials.
+# Each line/block is written as raw CRI records through the shipped Alloy process.
+# `before` is a separate event immediately preceding each block in the same stream.
+- name: seerr-debug-dns-retry
+  matches: false
+  line: "2026-10-11T12:00:00.000Z [\e[34mdebug\e[39m][DNS]: Retry lookup {\"error\":{\"code\":\"EAI_AGAIN\"}}"
+- name: json-debug-error-field
+  matches: false
+  line: '{"level":"debug","message":"DNS retry","error":{"code":"EAI_AGAIN"}}'
+- name: json-info-nested-fatal-level
+  matches: false
+  line: '{"level":"info","error":{"level":"fatal","message":"previous error"}}'
+- name: json-missing-level
+  matches: false
+  line: '{"error":"fatal panic","message":"diagnostic payload"}'
+- name: json-debug-multiline
+  matches: false
+  line: |
+    {
+      "level": "debug",
+      "error": {"level": "fatal", "message": "panic"}
+    }
+- name: console-debug-multiline
+  matches: false
+  line: |
+    [Debug] DNS: Retrying after an error
+      {"error":{"level":"fatal","message":"panic"}}
+      [Error] quoted diagnostic, not the entry's severity
+      2026-10-11 12:00:00.000|Fatal|quoted diagnostic
+- name: console-debug-followed-by-error-records
+  matches: true
+  expected_matches: 52
+  entries:
+    - '[Debug] Worker: Reading diagnostics'
+    - '[Error] Worker: Lookup failed'
+    - '2026-10-11 12:00:00.000|Fatal|Worker|Worker stopped'
+  line: |
+    [Debug] Worker: Reading diagnostics
+    [Error] Worker: Lookup failed
+    2026-10-11 12:00:00.000|Fatal|Worker|Worker stopped
+- name: console-info-error-text
+  matches: false
+  line: '[Info] Worker: Previous fatal error recovered'
+- name: json-error
+  matches: true
+  before: '{"level":"info","message":"Starting lookup"}'
+  line: '{"level":"error","message":"Lookup failed"}'
+- name: json-fatal
+  matches: true
+  line: '{"message":"Worker stopped","level":"fatal"}'
+- name: json-panic
+  matches: true
+  line: '{"level":"panic","message":"Worker stopped"}'
+- name: json-critical
+  matches: true
+  line: '{"level":"CRITICAL","message":"Worker stopped"}'
+- name: json-info-nested-critical-level
+  matches: false
+  line: '{"level":"info","error":{"level":"critical","message":"previous error"}}'
+# Reloader 1.4.22 defaults to logrus text, with time and level before msg.
+- name: reloader-logrus-error
+  matches: true
+  before: 'time="2026-10-11T12:00:00Z" level=info msg="Starting lookup"'
+  line: 'time="2026-10-11T12:00:00Z" level=error msg="Lookup failed"'
+- name: reloader-logrus-fatal
+  matches: true
+  line: 'time="2026-10-11T12:00:00Z" level=fatal msg="Worker stopped"'
+- name: reloader-logrus-panic
+  matches: true
+  line: 'time="2026-10-11T12:00:00Z" level=panic msg="Worker stopped"'
+- name: reloader-logrus-critical
+  matches: true
+  line: 'time="2026-10-11T12:00:00.123+02:00" level=critical msg="Worker stopped"'
+- name: reloader-logrus-debug-nested-error-level
+  matches: false
+  line: 'time="2026-10-11T12:00:00Z" level=debug msg="Previous level=error failure recovered"'
+- name: reloader-logrus-info-error-text
+  matches: false
+  line: 'time="2026-10-11T12:00:00Z" level=info msg="Previous fatal error recovered"'
+- name: dotnet-bracket-critical
+  matches: true
+  before: '[Information] Worker: Starting lookup'
+  line: '[Critical] Worker: Worker stopped'
+- name: dotnet-bracket-information-error-text
+  matches: false
+  line: '[Information] Worker: Previous critical error recovered'
+- name: json-uppercase-error
+  matches: true
+  line: '{"level":"ERROR","message":"Lookup failed"}'
+- name: json-error-multiline
+  matches: true
+  before: '{"level":"info","message":"Starting lookup"}'
+  line: |
+    {
+      "message": "Lookup failed",
+      "error": {"message": "connection closed"},
+      "level": "error"
+    }
+- name: radarr-error-multiline
+  matches: true
+  line: |
+    [Error] Worker: Lookup failed
+    [v6.0.0] System.Exception: connection closed
+       at Worker.Run()
+- name: radarr-fatal
+  matches: true
+  line: '[Fatal] Worker: Worker stopped'
+- name: nlog-timestamp-error
+  matches: true
+  line: '2026-10-11 12:00:00.123|Error|Worker|Lookup failed'
+- name: nlog-timestamp-fatal-multiline
+  matches: true
+  line: |
+    2026-10-11 12:00:00.123|Fatal|Worker|Worker stopped
+    System.Exception: connection closed
+       at Worker.Run()
+- name: seerr-colored-error
+  matches: true
+  line: "2026-10-11T12:00:00.000Z [\e[31merror\e[39m][DNS]: Lookup failed {\"error\":{\"code\":\"EAI_AGAIN\"}}"
+- name: seerr-timestamp-panic
+  matches: true
+  line: '2026-10-11T12:00:00.000Z [panic][Worker]: Worker stopped'
+- name: lingarr-timestamp-error-multiline
+  matches: true
+  before: '[2026-10-11 12:00:00] [Information] Worker: Starting lookup'
+  line: |
+    [2026-10-11 12:00:00] [Error] Worker: Lookup failed
+    System.Exception: connection closed
+       at Worker.Run()
+- name: lingarr-timestamp-critical
+  matches: true
+  before: '[2026-10-11 12:00:00] [Information] Worker: Starting lookup'
+  line: '[2026-10-11 12:00:00] [Critical] Worker: Worker stopped'
+- name: lingarr-timestamp-information-error-text
+  matches: false
+  line: '[2026-10-11 12:00:00] [Information] Worker: Previous critical error recovered'
+- name: cleanuparr-timestamp-err
+  matches: true
+  before: '[2026-10-11 12:00:00.123 INF] [Worker] Starting lookup'
+  line: '[2026-10-11 12:00:00.123 ERR] [Worker] Lookup failed'
+- name: cleanuparr-timestamp-ftl
+  matches: true
+  line: '[2026-10-11 12:00:00.123 FTL] [Worker] Worker stopped'
+- name: python-timestamp-error
+  matches: true
+  line: '2026-10-11 12:00:00,123 - worker.task - ERROR - Lookup failed'
+# The Python dash layout requires the message delimiter after the declared level.
+- name: python-no-logger-debug-error-first-word
+  matches: false
+  line: '2026-10-11 12:00:00,123 - DEBUG - Error while parsing release'
+- name: python-no-logger-info-error-colon
+  matches: false
+  line: '2026-10-11 12:00:00,123 - INFO - error: retry scheduled'
+- name: python-no-logger-warning-fatal-first-word
+  matches: false
+  line: '2026-10-11 12:00:00,123 - WARNING - Fatal flag ignored'
+- name: python-logger-error-space-without-dash
+  matches: false
+  line: '2026-10-11 12:00:00,123 - worker.task - ERROR Lookup failed'
+- name: python-logger-error-colon-without-dash
+  matches: false
+  line: '2026-10-11 12:00:00,123 - worker.task - ERROR: Lookup failed'
+- name: python-logger-debug-error-first-word
+  matches: false
+  line: '2026-10-11 12:00:00,123 - worker.task - DEBUG - Error while parsing release'
+- name: python-low-level-logger-name-error
+  matches: true
+  line: '2026-10-11 12:00:00,123 - DEBUG - ERROR - Lookup failed'
+- name: python-low-level-logger-name-info
+  matches: false
+  line: '2026-10-11 12:00:00,123 - DEBUG - INFO - Error while parsing release'
+- name: python-no-logger-error-space-without-dash
+  matches: false
+  line: '2026-10-11 12:00:00,123 - ERROR Lookup failed'
+- name: python-no-logger-error-colon-without-dash
+  matches: false
+  line: '2026-10-11 12:00:00,123 - ERROR: Lookup failed'
+# Bazarr 1.6.2 app/logger.py console formatter includes a padded logger and hex thread ID.
+- name: bazarr-error-multiline
+  matches: true
+  before: '2026-10-11 12:00:00,123 - root                             (7f12ab345678) :  INFO (get_providers:88) - Starting lookup'
+  line: |
+    2026-10-11 12:00:00,123 - root                             (7f12ab345678) :  ERROR (get_providers:88) - Lookup failed
+    Traceback (most recent call last):
+      File "worker.py", line 88, in get_providers
+        raise RuntimeError("connection closed")
+    RuntimeError: connection closed
+- name: bazarr-debug-multiline
+  matches: false
+  line: |
+    2026-10-11 12:00:00,123 - bazarr.providers                 (7f12ab345678) :  DEBUG (get_providers:88) - Previous ERROR recovered
+    Traceback (most recent call last):
+      File "worker.py", line 88, in get_providers
+        raise RuntimeError("fatal error")
+    RuntimeError: fatal error
+- name: bazarr-info-error-text
+  matches: false
+  line: '2026-10-11 12:00:00,123 - root                             (7f12ab345678) :  INFO (get_providers:88) - Previous ERROR recovered'
+- name: bazarr-critical
+  matches: true
+  before: '2026-10-11 12:00:00,123 - root                             (7f12ab345678) :  INFO (get_providers:88) - Starting lookup'
+  line: '2026-10-11 12:00:00,123 - root                             (7f12ab345678) :  CRITICAL (get_providers:88) - Worker stopped'
+# bazarr-autotranslate's timestamp-only formatter is file-only, not confirmed stdout.
+# Keep these synthetic cases for the generic Python timestamp-level delimiter.
+- name: bazarr-autotranslate-error
+  matches: true
+  before: '2026-10-11 12:00:00,123 - INFO - Starting lookup'
+  line: '2026-10-11 12:00:00,123 - ERROR - Lookup failed'
+- name: bazarr-autotranslate-debug-multiline
+  matches: false
+  line: |
+    2026-10-11 12:00:00,123 - DEBUG - Previous ERROR recovered
+    Traceback (most recent call last):
+      RuntimeError: fatal error
+- name: bazarr-autotranslate-info-error-text
+  matches: false
+  line: '2026-10-11 12:00:00,123 - INFO - Previous ERROR recovered'
+# Jellysweep v0.16.1 uses charmbracelet/log v1.0.0's slash date and four-letter levels.
+- name: jellysweep-erro-multiline
+  matches: true
+  before: '2026/10/11 12:00:00 INFO Starting lookup'
+  line: |
+    2026/10/11 12:00:00 ERRO failed to query sonarr err="connection refused"
+      connection closed
+      ERRO quoted diagnostic, not another record
+- name: jellysweep-fata
+  matches: true
+  before: '2026/10/11 12:00:00 DEBU Starting lookup err="previous failure"'
+  line: '2026/10/11 12:00:00 FATA worker stopped err="connection refused"'
+- name: jellysweep-debug-multiline
+  matches: false
+  line: |
+    2026/10/11 12:00:00 DEBU Retrying lookup err="connection refused"
+      ERRO quoted diagnostic, not the entry's severity
+      panic: quoted diagnostic
+- name: jellysweep-info-error-field
+  matches: false
+  line: '2026/10/11 12:00:00 INFO Retrying lookup err="fatal error"'
+- name: unpackerr-prefix-error
+  matches: true
+  before: '[Info] 2026/10/11 12:00:00 Starting lookup'
+  line: '[ERROR] 2026/10/11 12:00:00 Lookup failed'
+- name: outside-servarr-slashdate-boundaries-unchanged
+  namespace: elsewhere
+  matches: false
+  line: |
+    2026/10/11 12:00:00 INFO Starting lookup
+    2026/10/11 12:00:00 ERRO Lookup failed
+  expected_entries: 1
+- name: vpn-picker-timestamp-error
+  matches: true
+  before: '2026-10-11 12:00:00,123 INFO Starting lookup'
+  line: '2026-10-11 12:00:00,123 ERROR Lookup failed'
+- name: vpn-picker-timestamp-info
+  matches: false
+  line: '2026-10-11 12:00:00,123 INFO Previous fatal error recovered'
+- name: python-prefix-error
+  matches: true
+  before: 'INFO:worker.task:Starting lookup'
+  line: 'ERROR:worker.task:Lookup failed'
+- name: python-prefix-critical
+  matches: true
+  before: 'INFO:worker.task:Starting lookup'
+  line: 'CRITICAL:worker.task:Worker stopped'
+- name: runtime-panic
+  matches: true
+  before: '2026-10-11 12:00:00 INFO Worker starting'
+  line: |
+    panic: worker stopped
+    goroutine 1 [running]:
+      main.run()
+- name: mixed-json-console
+  matches: true
+  lines:
+    - '{"level":"error","message":"Lookup failed"}'
+    - '[Error] Worker: Lookup failed'
+- name: threshold-25
+  matches: false
+  expected_runbook_matches: 25
+  count: 25
+  line: '[Error] Worker: Lookup failed'
+- name: outside-servarr
+  namespace: elsewhere
+  matches: false
+  line: '[Error] Worker: Lookup failed'
+- name: outside-servarr-boundaries-unchanged
+  namespace: elsewhere
+  matches: false
+  line: |
+    [2026-10-11 12:00:00] [INFO] Worker: Starting lookup
+    [2026-10-11 12:00:00] [ERROR] Worker: Lookup failed
+  expected_entries: 1
