@@ -8,6 +8,16 @@
 # T3_PROJECT_DIR (checkout path; the merged t3code server keeps $HOME/epaflix).
 set -euo pipefail
 
+hub_config_failure() {
+  echo "$*" >&2
+  if [[ ${MCP_HUB_INSTANCE+x} || ${MCP_HUB_SERVICES_FILE+x} ]]; then exit 1; fi
+}
+
+if [[ ${MCP_HUB_INSTANCE+x} || ${MCP_HUB_SERVICES_FILE+x} ]] &&
+   [[ -z ${MCP_HUB_TOKEN:-} || -z ${MCP_HUB_URL:-} ]]; then
+  hub_config_failure "t3env: instance hub requires its own MCP_HUB_TOKEN and MCP_HUB_URL"
+fi
+
 T3_PROJECT_REPO=${T3_PROJECT_REPO:-https://github.com/SpyrosPsarras/epaflix.git}
 PROJECT_DIR=${T3_PROJECT_DIR:-$HOME/projects/$(basename "$T3_PROJECT_REPO" .git)}
 export PATH=/tools/node_modules/.bin:$PATH
@@ -58,13 +68,13 @@ if [[ -n ${MCP_HUB_TOKEN:-} && -n ${MCP_HUB_URL:-} ]]; then
   for h in "$HOME"; do
     [[ -d $h ]] || continue
     python3 /scripts/hub_clients.py pi "$h/.pi/agent/mcp.json" "$MCP_HUB_URL" MCP_HUB_TOKEN || \
-      echo "t3env: hub pi config failed in $h" >&2
+      hub_config_failure "t3env: hub pi config failed in $h"
     for cfg in "$h/.claude/.claude.json" "$h/.claude.json"; do
       python3 /scripts/hub_clients.py claude "$cfg" "$MCP_HUB_URL" 'Bearer ${MCP_HUB_TOKEN}' || \
-        echo "t3env: hub claude config failed for $cfg" >&2
+        hub_config_failure "t3env: hub claude config failed for $cfg"
     done
     python3 /scripts/hub_clients.py codex "$h/.codex" "$MCP_HUB_URL" MCP_HUB_TOKEN || \
-      echo "t3env: hub codex config failed in $h" >&2
+      hub_config_failure "t3env: hub codex config failed in $h"
   done
 fi
 

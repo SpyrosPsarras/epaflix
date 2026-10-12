@@ -3,6 +3,7 @@
 workstation with a browser and kubectl access to the cluster.
 
   bootstrap-notion.py [--context epaflix]
+  bootstrap-notion.py --instance homelab|work --context <approved-context>
 
 Hosted Notion MCP is OAuth-only. This script:
   1. reads the authorization-server metadata of https://mcp.notion.com;
@@ -14,6 +15,9 @@ Hosted Notion MCP is OAuth-only. This script:
   4. writes access and refresh token straight into the Secret with kubectl
      (not git: the hub rotates the refresh token itself on every refresh).
 The hub picks the new grant up on its next request; no restart, no commit.
+--instance selects only that instance's namespace and registration. It never
+reads the legacy namespace. A new instance requires an explicit context.
+Run only after approval of the account, inventory and live provisioning.
 
 Run it again when Notion tools answer "Notion grant expired": grants last at
 most 180 days from consent (30 days without use). Nothing secret is printed.
@@ -59,21 +63,21 @@ def _json(url, data=None, form=False):
         sys.exit(f"{url} -> HTTP {e.code}: {e.read().decode(errors='replace')[:300]}")
 
 
-def _kubectl(ctx, *args, stdin=None):
-    return subprocess.run(["kubectl", "--context", ctx, "-n", NS, *args], input=stdin, capture_output=True,
+def _kubectl(ctx, *args, stdin=None, namespace=NS):
+    return subprocess.run(["kubectl", "--context", ctx, "-n", namespace, *args], input=stdin, capture_output=True,
                           text=True)
 
 
-def _existing(ctx):
-    r = _kubectl(ctx, "get", "secret", NAME, "-o", "json")
+def _existing(ctx, namespace=NS):
+    r = _kubectl(ctx, "get", "secret", NAME, "-o", "json", namespace=namespace)
     if r.returncode != 0:
         return None
     return {k: base64.b64decode(v).decode() for k, v in json.loads(r.stdout).get("data", {}).items()}
 
 
-def _register(meta):
+def _register(meta, client_name="epaflix mcp-hub"):
     reg = _json(meta["registration_endpoint"], {
-        "client_name": "epaflix mcp-hub", "redirect_uris": [REDIRECT],
+        "client_name": client_name, "redirect_uris": [REDIRECT],
         "grant_types": ["authorization_code", "refresh_token"], "response_types": ["code"],
         "token_endpoint_auth_method": "none",
     })
@@ -116,17 +120,23 @@ def _authorize(meta, client_id):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--context", default="epaflix", help="kubectl context of the cluster running the hub")
+    p.add_argument("--context", help="kubectl context of the cluster running the hub")
+    p.add_argument("--instance", choices=("homelab", "work"))
     a = p.parse_args()
+    if a.instance and not a.context:
+        p.error("--instance requires an explicit --context")
+    context = a.context or "epaflix"
+    namespace = "mcp-hub-" + a.instance if a.instance else NS
 
     meta = _json(ISSUER + "/.well-known/oauth-authorization-server")
-    old = _existing(a.context)
+    old = _existing(context, namespace=namespace)
     exists, old = old is not None, old or {}
     if old.get("client_id"):
         client_id, client_secret = old["client_id"], old.get("client_secret", "")
         print("reusing the registered Notion OAuth client")
     else:
-        client_id, client_secret = _register(meta)
+        client_name = "mcp-hub " + a.instance if a.instance else "epaflix mcp-hub"
+        client_id, client_secret = _register(meta, client_name=client_name)
         print("registered a new Notion OAuth client")
     code, verifier = _authorize(meta, client_id)
     form = {"grant_type": "authorization_code", "code": code, "redirect_uri": REDIRECT, "client_id": client_id,
@@ -143,14 +153,14 @@ def main():
             "expires_at": str(int(time.time() + int(tokens.get("expires_in", 3600)))),
             "consented_at": today.isoformat()}
     secret = {"apiVersion": "v1", "kind": "Secret", "type": "Opaque",
-              "metadata": {"name": NAME, "namespace": NS, "labels": {"app": "mcp-hub"}},
+              "metadata": {"name": NAME, "namespace": namespace, "labels": {"app": "mcp-hub"}},
               "data": {k: base64.b64encode(v.encode()).decode() for k, v in data.items()}}
     # replace/create, not apply: apply would copy the tokens into its last-applied annotation.
     verb = "replace" if exists else "create"
-    r = _kubectl(a.context, verb, "-f", "-", stdin=json.dumps(secret))
+    r = _kubectl(context, verb, "-f", "-", stdin=json.dumps(secret), namespace=namespace)
     if r.returncode != 0:
         sys.exit(f"kubectl {verb} failed: {r.stderr.strip()}")
-    print(f"wrote Secret {NS}/{NAME}. Hard expiry: {today + datetime.timedelta(days=180)} "
+    print(f"wrote Secret {namespace}/{NAME}. Hard expiry: {today + datetime.timedelta(days=180)} "
           "(earlier after 30 days without use). Re-run this script before then.")
 
 
