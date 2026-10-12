@@ -39,6 +39,34 @@ spec:
               value: "568"
             - name: TZ
               value: "Europe/Oslo"
+            - name: SONARR__POSTGRES__HOST
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: sonarr-host
+            - name: SONARR__POSTGRES__PORT
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: sonarr-port
+            - name: SONARR__POSTGRES__MAINDB
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: sonarr-database
+            - name: SONARR__POSTGRES__LOGDB
+              value: "sonarr-log"
+            - name: SONARR__POSTGRES__USER
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: sonarr-user
+            # Sonarr v4 logs this connection string before console cleansing.
+            # Empty Password serializes without a value; Npgsql then uses the passfile.
+            - name: SONARR__POSTGRES__PASSWORD
+              value: ""
+            - name: PGPASSFILE
+              value: /run/sonarr-postgres/pgpass
           ports:
             - containerPort: 8989
               name: http
@@ -47,6 +75,9 @@ spec:
               mountPath: /config
             - name: media
               mountPath: /media
+            - name: postgres-passfile
+              mountPath: /run/sonarr-postgres
+              readOnly: true
           livenessProbe:
             httpGet:
               path: /
@@ -81,6 +112,14 @@ spec:
         - name: media
           persistentVolumeClaim:
             claimName: servarr-media
+        - name: postgres-passfile
+          secret:
+            secretName: servarr-postgres
+            # root:fsGroup 568, readable by Sonarr but not other pod users.
+            defaultMode: 0440
+            items:
+              - key: sonarr-pgpass
+                path: pgpass
 ---
 apiVersion: v1
 kind: Service

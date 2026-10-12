@@ -48,6 +48,7 @@ jobs:
           ./.github/hooks/test-print-age-key-backup.sh
           ./.github/hooks/test-render-tier.sh
           ./.github/hooks/test-log-pipeline-regexes.sh  # go: runner image default
+          python3 .github/hooks/test-sonarr-passfile.py
           ./.github/hooks/check-sops-encrypted.sh --full-tree
 
       - name: Install tools
@@ -108,6 +109,9 @@ jobs:
             promtool check rules "$tmp/$name-rules.yaml"
             ( cd "$tmp" && promtool test rules "$name-tests.yaml" )
           done
+
+      - name: Alloy pipeline and Loki LogQL regression tests (isolated fixtures)
+        run: python3 .github/hooks/test-loki-log-alerts.py
 
       - name: YAML parse check (syntax only, no style)
         run: |
