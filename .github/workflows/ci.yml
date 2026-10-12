@@ -30,6 +30,22 @@ jobs:
           fi
           echo "No tracked file matches .gitignore."
 
+      - name: No placeholder image digests
+        run: |
+          python3 - <<'PY'
+          import pathlib, re, subprocess, sys
+          paths = subprocess.check_output([
+              "git", "ls-files", "-z", "--", "kustomization.yaml", "**/kustomization.yaml"
+          ]).decode().split("\0")
+          placeholder = re.compile(r'digest:\s*["\']?sha256:0{64}(?![0-9a-fA-F])')
+          bad = [path for path in paths if path and placeholder.search(pathlib.Path(path).read_text())]
+          if bad:
+              print("ERROR: replace placeholder image digests before merging:", file=sys.stderr)
+              print("\n".join(bad), file=sys.stderr)
+              sys.exit(1)
+          print("No placeholder image digests.")
+          PY
+
       - name: Hook fixture suites + plaintext Secret guard
         run: |
           set -euo pipefail
