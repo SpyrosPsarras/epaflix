@@ -65,12 +65,14 @@ class SetupTests(unittest.TestCase):
     def test_settings_preserve_user_keys_and_rewrite_owned_resources(self):
         (self.agent / 'settings.json').write_text(json.dumps({
             'theme': 'light', 'packages': ['stale'], 'skills': ['stale'],
-            'pi-cliproxyapi-provider': {'userKey': True, 'gpt56ContextWindow': 'stale'}}))
+            'pi-cliproxyapi-provider': {'userKey': True, 'gpt56ContextWindow': 'stale'},
+            'retry': {'baseDelayMs': 1000, 'maxRetries': 3}}))
         self.write()
         settings = json.loads((self.agent / 'settings.json').read_text())
         self.assertEqual(settings['theme'], 'light')
         self.assertEqual(settings['skills'], ['!**/.agents/skills/ponytail/**'])
         self.assertEqual(settings['pi-cliproxyapi-provider'], {'userKey': True, 'gpt56ContextWindow': 'canonical'})
+        self.assertEqual(settings['retry'], {'baseDelayMs': 1000, 'maxRetries': 8})
         self.assertEqual(settings['packages'], [
             '/tools/node_modules/pi-cliproxyapi-provider',
             '/tools/node_modules/@gotgenes/pi-permission-system',
