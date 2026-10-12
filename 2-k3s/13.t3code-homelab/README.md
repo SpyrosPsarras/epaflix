@@ -104,13 +104,16 @@ export. T3's state and credentials are not bundle entries.
 base64 entry format. Required targets are:
 
 - `.cc-safety-net/policy.json`
-- `.pi/agent/extensions/pi-permission-system/config.json`
 - `.claude/settings.json`
 
-Additional hook files may live under `.config/t3-policy/`. Required Pi
-command denies must be retained. Secret-protection overrides cannot disable
-checks. Claude hooks must be present and enabled. Startup retains the approved
-policy files, adds the runtime's credential paths to the secret deny list,
+Additional hook files may live under `.config/t3-policy/`. Legacy
+`.pi/agent/extensions/pi-permission-system/config.json` entries are accepted
+under the same input digest and base64 validation but are not installed.
+Existing policy files remain inert for rollback. Remove legacy acceptance
+checks that require that extension before rollout; startup still runs every
+approved check. Update the policies input digest after those reviewed changes.
+Secret-protection overrides cannot disable checks. Claude hooks must be present
+and enabled. Startup retains the approved policy files, adds the runtime's credential paths to the secret deny list,
 and runs each approved harmless acceptance check with no credential-bearing
 environment. A check is `{ "argv": ["python3", "${HOME}/.config/t3-policy/check.py"],
 "exit": 0 }`. Checks must exercise the actual required policy or hook, with
@@ -119,9 +122,11 @@ Every command has a 30-second limit; captured output is not printed.
 The fixture suite demonstrates a retained private rule and a hook that denies
 a synthetic Git push without making one.
 
-The reviewed cc-safety-net extension, permission-system package and output
-redaction remain installed. Pi package registration must pass before T3
-starts. Startup also requires usable model discovery at the approved endpoint
+The reviewed cc-safety-net extension and output redaction remain installed.
+The pi-permission-system package is removed and its policy is no longer
+generated. Its environment-dump, destructive Kubernetes/Helm and Proxmox
+command denies are no longer enforced. cc-safety-net does not replace these
+denies. Pi package registration must pass before T3 starts. Startup also requires usable model discovery at the approved endpoint
 on first boot and rejects a retained provider configuration for a different
 endpoint. These are application safety layers, not protection against an
 infrastructure administrator or a user editing their own runtime files.
