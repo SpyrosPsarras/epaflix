@@ -9,7 +9,7 @@ import tempfile
 from urllib.request import Request, urlopen
 
 
-PACKAGES = ['pi-cliproxyapi-provider', '@gotgenes/pi-permission-system',
+PACKAGES = ['pi-cliproxyapi-provider',
             '@spences10/pi-redact', '@juicesharp/rpiv-todo',
             '@juicesharp/rpiv-ask-user-question',
             'superpowers', '@dietrichgebert/ponytail']
@@ -48,26 +48,6 @@ def fetch_models(base_url, key):
     return models
 
 
-def permissions():
-    commands = ['mkfs*', 'dd *of=/dev/*', 'kubectl *delete *', 'kubectl *drain *',
-                'kubectl *cordon *', 'helm *uninstall *', 'reboot*', 'shutdown*',
-                'poweroff*', 'qm *stop *', 'qm *shutdown *', 'env', 'env *',
-                'printenv*', 'set', 'set -o', 'set +o', 'export', 'export -p',
-                'declare*', 'typeset*', '*/proc/*/environ*']
-    bash = {'*': 'allow'}
-    for prefix in ['ps', '/bin/ps', '/usr/bin/ps']:
-        bash[f'{prefix} *e*'] = 'deny'
-        for length in range(8, 0, -1):
-            bash[f'{prefix} ' + '?' * length + ' *'] = 'allow'
-            for position in range(length):
-                bash[f'{prefix} ' + '?' * position + 'e' + '?' * (length - position - 1) + ' *'] = 'deny'
-        bash[f'{prefix} -*'] = 'allow'
-    bash.update(dict.fromkeys(commands, 'deny'))
-    policy = {'*': 'allow', 'bash': bash,
-              'path': {'*': 'allow'}, 'mcp': {'*': 'allow'}}
-    return {'permission': policy}
-
-
 def write_aliases(home):
     base_url = os.environ.get('ANTHROPIC_BASE_URL', '').rstrip('/') + '/v1'
     try:
@@ -99,8 +79,6 @@ def write(home, safety_entry, ssh_path=Path('/scripts/homelab-ssh.md')):
     settings.setdefault('pi-cliproxyapi-provider', {})['gpt56ContextWindow'] = 'canonical'
     settings.setdefault('retry', {})['maxRetries'] = 8
     write_json(settings_path, settings)
-    write_json(agent / 'extensions/pi-permission-system/config.json', permissions())
-    (agent / 'pi-permissions.jsonc').unlink(missing_ok=True)
     write_aliases(home)
     try:
         instructions = (home / '.claude/AGENTS.md').read_text() + '\n' + ssh_path.read_text()

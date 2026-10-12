@@ -17,15 +17,14 @@ from urllib.parse import urlsplit
 import hub_clients
 import hub_services
 
-pi_setup = importlib.import_module('pi-setup')
 private_config = importlib.import_module('private-config')
 t3_pi_settings = importlib.import_module('t3-pi-settings')
 
 INPUTS = {'bundle.json', 'policies.json', 'services.json', 'kubeconfig', 'authorized_keys'}
 APPROVALS = {'git', 'models', 'policies', 'kubeconfig', 'hub', 'laptop', 'routing'}
 CODEX_REQUIREMENTS = Path('/etc/codex/requirements.toml')
-POLICY_PATHS = {'.cc-safety-net/policy.json',
-                '.pi/agent/extensions/pi-permission-system/config.json', '.claude/settings.json'}
+POLICY_PATHS = {'.cc-safety-net/policy.json', '.claude/settings.json'}
+LEGACY_PERMISSION_PATH = '.pi/agent/extensions/pi-permission-system/config.json'
 
 
 class InputError(ValueError):
@@ -42,7 +41,7 @@ def url(value):
 def safe_policy_path(name):
     path = PurePosixPath(name)
     return not path.is_absolute() and '..' not in path.parts and str(path) == name and (
-        name in POLICY_PATHS or name.startswith('.config/t3-policy/'))
+        name in POLICY_PATHS or name == LEGACY_PERMISSION_PATH or name.startswith('.config/t3-policy/'))
 
 
 def validate(inputs, home, environment):
@@ -98,11 +97,6 @@ def validate(inputs, home, environment):
         if not safe_policy_path(name):
             raise InputError('Unsafe policy target')
         base64.b64decode(entry['data'], validate=True)
-    permission = json.loads(base64.b64decode(policies['files'][
-        '.pi/agent/extensions/pi-permission-system/config.json']['data']))
-    baseline = pi_setup.permissions()['permission']['bash']
-    if any(permission['permission']['bash'].get(key) != 'deny' for key, value in baseline.items() if value == 'deny'):
-        raise InputError('Required permission denies must be preserved')
     safety = json.loads(base64.b64decode(policies['files']['.cc-safety-net/policy.json']['data']))
     if safety.get('version') != 1 or any(value == 'off' for value in safety.get('secret_protection', {}).get('overrides', {}).values()):
         raise InputError('Secret protections must not be disabled')
@@ -186,6 +180,8 @@ def apply(inputs, home, environment):
     if aliases.get('providerName') != 'cliproxy' or aliases.get('baseUrl') != url(config['modelUrl']) + '/v1' or not aliases.get('modelAliases'):
         raise InputError('Approved model configuration was not installed')
     for name, entry in policies['files'].items():
+        if name == LEGACY_PERMISSION_PATH:
+            continue
         target = home / name
         if target.is_symlink() or any(parent.is_symlink() for parent in target.parents if parent.is_relative_to(home)):
             raise InputError('Policy target must not be a symlink')

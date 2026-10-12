@@ -9,7 +9,6 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import os
 from pathlib import Path
-import re
 import subprocess
 import sys
 import tempfile
@@ -26,17 +25,6 @@ def load(name):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
-
-
-def decision(rules, value):
-    result = 'allow'
-    for pattern, action in rules.items():
-        regex = re.escape(pattern).replace(r'\ ', ' ').replace(r'\*', '.*').replace(r'\?', '.')
-        if regex.endswith(' .*'):
-            regex = regex[:-3] + '( .*)?'
-        if re.fullmatch(regex, value, re.S):
-            result = action
-    return result
 
 
 class SetupTests(unittest.TestCase):
@@ -64,7 +52,7 @@ class SetupTests(unittest.TestCase):
 
     def test_settings_preserve_user_keys_and_rewrite_owned_resources(self):
         (self.agent / 'settings.json').write_text(json.dumps({
-            'theme': 'light', 'packages': ['stale'], 'skills': ['stale'],
+            'theme': 'light', 'packages': ['/tools/node_modules/@gotgenes/pi-permission-system'], 'skills': ['stale'],
             'pi-cliproxyapi-provider': {'userKey': True, 'gpt56ContextWindow': 'stale'},
             'retry': {'baseDelayMs': 1000, 'maxRetries': 3}}))
         self.write()
@@ -75,7 +63,6 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(settings['retry'], {'baseDelayMs': 1000, 'maxRetries': 8})
         self.assertEqual(settings['packages'], [
             '/tools/node_modules/pi-cliproxyapi-provider',
-            '/tools/node_modules/@gotgenes/pi-permission-system',
             '/tools/node_modules/@spences10/pi-redact',
             '/tools/node_modules/@juicesharp/rpiv-todo',
             '/tools/node_modules/@juicesharp/rpiv-ask-user-question',
@@ -85,51 +72,25 @@ class SetupTests(unittest.TestCase):
         self.write()
         self.assertEqual(before, {p.relative_to(self.agent): p.read_bytes() for p in self.agent.rglob('*') if p.is_file()})
 
-    def test_policy_blocks_commands(self):
+    def test_setup_does_not_create_permission_policy(self):
         self.write()
-        policy = json.loads((self.agent / 'extensions/pi-permission-system/config.json').read_text())['permission']
-        for command in ['printenv HOME', 'cat /proc/1/environ', 'env', 'env HOME', 'set', 'set -o',
-                        'set +o', 'export', 'export -p', 'declare -p', 'typeset -p',
-                        'mkfs.ext4 /dev/sda', 'dd if=x of=/dev/sda',
-                        'kubectl delete pod x', 'kubectl drain node', 'kubectl cordon node',
-                        'helm uninstall release', 'reboot', 'shutdown now', 'poweroff',
-                        'qm stop 100', 'qm shutdown 100', 'kubectl -n a delete pod x',
-                        'kubectl --context prod drain node', 'kubectl -n a cordon node',
-                        'helm -n a uninstall release', 'qm --skiplock stop 100',
-                        'qm --skiplock shutdown 100', 'ps ewwwwwwww',
-                        '/bin/ps eauxwwwww', '/usr/bin/ps exxxxxxxxx'] + [
-                            f'{prefix} {args}' for prefix in ['ps', '/bin/ps', '/usr/bin/ps']
-                            for args in ['e', 'auxe', 'eww', 'axe', 'auxwwe', 'auxwwwwwe', 'e -o pid']
-                        ]:
-            with self.subTest(command=command):
-                self.assertEqual(decision(policy['bash'], command), 'deny')
-        for command in ['git status', 'kubectl get pods', 'helm list', 'qm status 100',
-                        'set -euo pipefail', 'set -- arg', 'export NAME=value',
-                        ] + [f'{prefix}{args}' for prefix in ['ps', '/bin/ps', '/usr/bin/ps']
-                             for args in ['', ' aux', ' -ef', ' -eo pid,cmd', ' -o pid,cmd',
-                                          ' auxf', ' axo pid,comm', ' aux --sort=-%mem',
-                                          ' x -o pid,etime', ' -A e', ' -ef e']
-                        ]:
-            self.assertEqual(decision(policy['bash'], command), 'allow', command)
-        self.assertEqual(policy['*'], 'allow')
-        self.assertEqual(decision(policy['path'], '/workspace/README.md'), 'allow')
+        self.assertFalse((self.agent / 'extensions/pi-permission-system/config.json').exists())
+        self.assertFalse((self.agent / 'pi-permissions.jsonc').exists())
 
-    def test_policy_uses_global_config_path_and_removes_legacy_file(self):
-        legacy = self.agent / 'pi-permissions.jsonc'
-        legacy.write_text('{"permission": "ask"}')
-        self.write()
-        self.assertTrue((self.agent / 'extensions/pi-permission-system/config.json').is_file())
-        self.assertFalse(legacy.exists())
-
-    def test_mcp_policy_allows_every_tool(self):
-        self.write()
-        policy = json.loads((self.agent / 'extensions/pi-permission-system/config.json').read_text())['permission']
-        self.assertFalse(any(name.startswith('mcp__') for name in policy))
-        mcp = policy['mcp']
-        self.assertEqual(mcp, {'*': 'allow'})
-        for name in ['mcp__gmail__gmail_send', 'mcp__kubernetes_epaflix__pods_delete',
-                     'mcp__vaultwarden__vault_trash']:
-            self.assertEqual(decision(mcp, name), 'allow')
+    def test_stale_permission_policies_remain_inert_across_restarts(self):
+        paths = [self.agent / 'extensions/pi-permission-system/config.json',
+                 self.agent / 'pi-permissions.jsonc']
+        for path in paths:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('{"permission": "ask"}')
+        for boot in range(3):
+            self.write()
+            settings = json.loads((self.agent / 'settings.json').read_text())
+            self.assertFalse(any('pi-permission-system' in package for package in settings['packages']))
+            self.assertIn('/tools/node_modules/@spences10/pi-redact', settings['packages'])
+            self.assertIn(self.safety, settings['packages'])
+            for path in paths:
+                self.assertEqual(path.read_text(), '{"permission": "ask"}')
 
     def test_aliases_and_fetch_failure_preserve_previous_file(self):
         self.write()
