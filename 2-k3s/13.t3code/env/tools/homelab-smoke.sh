@@ -100,7 +100,7 @@ assert {server['name'] for server in servers} == {'searxng'}
 print('homelab smoke: pinned Codex parses managed MCP configuration PASS')
 PY
 python3 /src/env/tools/isolated-runtime.test.py codex-projects
-timeout 90 node /src/env/tools/pi-parity.mjs /scripts/pi.sh "$HOME" >/tmp/pi-parity.log 2>&1 || { tail -80 /tmp/pi-parity.log; fail 'Pi parity and policy enforcement'; }
+timeout 90 node /src/env/tools/pi-parity.mjs /scripts/pi.sh "$HOME" >/tmp/pi-parity.log 2>&1 || { tail -80 /tmp/pi-parity.log; fail 'Pi parity and extension loading'; }
 grep '^parity:' /tmp/pi-parity.log
 node /src/env/tools/pi-models.mjs /scripts/pi.sh
 python3 - <<'PY'

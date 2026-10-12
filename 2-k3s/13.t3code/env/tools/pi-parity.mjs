@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { readFileSync, realpathSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
-import { checkEnforcement } from './pi-enforcement.mjs'
 
-const [binary, home, modules] = process.argv.slice(2)
+const [binary, home, modules = '/tools/node_modules'] = process.argv.slice(2)
 assert.ok(binary && home, 'usage: pi-parity.mjs <pi launcher> <home>')
 const settings = JSON.parse(readFileSync(join(home, '.pi/agent/settings.json')))
-await checkEnforcement(home, modules)
+assert.ok(!existsSync(join(modules, '@gotgenes/pi-permission-system')), 'removed permission package is installed')
+assert.ok(!settings.packages.some(path => path.includes('pi-permission-system')), 'removed permission package is registered')
 const child = spawn(resolve(binary), ['--mode', 'rpc', '--no-session'], {
   cwd: home, env: { ...process.env, HOME: home }, stdio: ['pipe', 'pipe', 'pipe'],
 })
@@ -29,7 +29,8 @@ try {
   assert.ok(response?.success, JSON.stringify(response) + '\n' + stderr)
   const commands = response.data.commands
   assert.ok(Array.isArray(commands), 'get_commands response missing commands')
-  for (const name of ['cliproxyapi', 'ponytail', 'permission-system', 'todos', 'redact-stats', 'cc-safety-net', 'skill:using-superpowers']) {
+  assert.ok(!commands.some(command => command.name === 'permission-system'), 'removed permission extension loaded')
+  for (const name of ['cliproxyapi', 'ponytail', 'todos', 'redact-stats', 'cc-safety-net', 'skill:using-superpowers']) {
     assert.ok(commands.some(command => command.name === name), `missing ${name}: ${JSON.stringify(commands)}`)
   }
   const ponytail = commands.find(command => command.name === 'skill:ponytail')
@@ -40,7 +41,7 @@ try {
   const ask = settings.packages.find(path => path.endsWith('/@juicesharp/rpiv-ask-user-question'))
   assert.ok(ask, 'rpiv-ask-user-question package missing')
   assert.ok(readFileSync(join(ask, 'index.ts')).length, 'rpiv-ask-user-question extension missing')
-  console.log('parity: Pi commands, package skills, permission policy and extension loading PASS')
+  console.log('parity: Pi commands, package skills, permission-system absence and extension loading PASS')
 } finally {
   clearTimeout(timer)
   lines.close()

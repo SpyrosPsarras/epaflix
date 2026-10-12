@@ -7,7 +7,6 @@
     "@bitwarden/cli": "2026.8.0",
     "@dietrichgebert/ponytail": "5.1.0",
     "@earendil-works/pi-coding-agent": "1.1.0",
-    "@gotgenes/pi-permission-system": "40.2.0",
     "@juicesharp/rpiv-ask-user-question": "2.13.5",
     "@juicesharp/rpiv-todo": "2.13.5",
     "@openai/codex": "0.162.1",
