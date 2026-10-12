@@ -16,5 +16,4 @@ generators:
 images:
   # built by github.com/SpyrosPsarras/epaflix-fytorium CI; bump the digest to roll out a new version
   - name: ghcr.io/spyrospsarras/epaflix-fytorium
-    # TODO(#21): replace with the digest CI reports after the first push to main; do not merge with this placeholder
-    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    digest: sha256:d964dbac864b7c77e73a7d46ec384ed43fbaf3067c32228d7a8e044737181bb4

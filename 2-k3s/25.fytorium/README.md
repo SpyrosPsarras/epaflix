@@ -37,8 +37,8 @@ insecure OIDC HTTP in this deployment.
 
 ## First deploy
 
-Before merging, replace the all-zero image digest in `kustomization.yaml` with
-the first digest reported by source CI. Repository CI blocks all-zero digests.
+`kustomization.yaml` pins the image by the digest that source CI reports.
+Repository CI blocks all-zero placeholder digests.
 
 1. From a LAN PC, run `./2-k3s/25.fytorium/minio-setup.sh --dry-run`, then
    `./2-k3s/25.fytorium/minio-setup.sh`. Requires Docker, Python 3 and the existing
