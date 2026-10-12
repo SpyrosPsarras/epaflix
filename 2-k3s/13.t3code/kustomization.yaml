@@ -1,0 +1,67 @@
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+resources:
+  - one/image-prepull.yaml
+  - one/idle-rollout.yaml
+
+configMapGenerator:
+  - name: t3code-idle-rollout
+    files:
+      - one/files/idle-rollout.sh
+      - one/files/t3-idle.py
+  - name: t3code-scripts
+    files:
+      - entrypoint.sh=env/files/isolated-entrypoint.sh
+      - env/files/isolated-config.py
+      - pi.sh=env/files/isolated-pi.sh
+      - sshd.sh=env/files/isolated-sshd.sh
+      - homelab-ssh.md=env/files/isolated-ssh.md
+      - one/files/ssh-command.sh
+      - one/files/pi-setup.py
+      - one/files/t3-pi-settings.py
+      - one/files/cc-safety-net-install.py
+      - one/files/cc-safety-net.patch
+      - one/files/cc-safety-net-hashes.json
+      - one/files/private-config.py
+      - one/files/git-credential-github.sh
+      - one/files/hub_clients.py
+      - one/files/hub_services.py
+
+replacements:
+  - source:
+      kind: StatefulSet
+      name: t3code
+      fieldPath: spec.template.spec.containers.[name=t3].image
+    targets:
+      - select:
+          kind: Job
+          name: t3code-image-prepull
+        fieldPaths:
+          - spec.template.spec.containers.[name=pull].image
+      - select:
+          kind: CronJob
+          name: t3code-idle-rollout
+        fieldPaths:
+          - spec.jobTemplate.spec.template.spec.containers.[name=rollout].image
+      - select:
+          kind: StatefulSet
+          name: t3code
+        fieldPaths:
+          - spec.template.spec.initContainers.[name=runtime-state].image
+          - spec.template.spec.containers.[name=sshd].image
+  - source:
+      kind: StatefulSet
+      name: t3code
+      fieldPath: spec.template.spec.affinity
+    targets:
+      - select:
+          kind: Job
+          name: t3code-image-prepull
+        fieldPaths:
+          - spec.template.spec.affinity
+      - select:
+          kind: CronJob
+          name: t3code-idle-rollout
+        fieldPaths:
+          - spec.jobTemplate.spec.template.spec.affinity

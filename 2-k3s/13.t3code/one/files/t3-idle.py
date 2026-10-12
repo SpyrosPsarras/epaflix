@@ -6,7 +6,7 @@ import sqlite3
 import time
 from datetime import datetime
 
-DB = os.environ.get("T3_STATE_DB", "/home/spyros/.t3/userdata/statev2.sqlite")
+DB = os.environ.get("T3_STATE_DB", os.path.expanduser("~/.t3/userdata/statev2.sqlite"))
 TTYS = os.environ.get("T3_IDLE_TTYS", "/dev/pts/[0-9]*")
 LATEST = """
 SELECT max(t) FROM (
