@@ -49,7 +49,6 @@ sys.exit(2 if command.startswith('git push') else 0)
 '''
     policies = {'environment': 'homelab', 'files': {
         '.cc-safety-net/policy.json': encoded({'version': 1, 'secret_protection': {'deny_paths': ['/fixture/restricted']}}),
-        '.pi/agent/extensions/pi-permission-system/config.json': encoded(runtime.pi_setup.permissions()),
         '.claude/settings.json': encoded({'hooks': {'PreToolUse': [{'matcher': 'Bash', 'hooks': [
             {'type': 'command', 'command': 'python3 "$HOME/.config/t3-policy/guard.py"'}]}]}}),
         '.config/t3-policy/guard.py': encoded(guard, executable=True)},
@@ -145,6 +144,47 @@ class RuntimeTests(unittest.TestCase):
         hook = self.home / '.config/t3-policy/guard.py'
         result = subprocess.run(['python3', str(hook)], input=json.dumps({'tool_input': {'command': 'git push'}}), text=True)
         self.assertEqual(result.returncode, 2)
+        self.assertFalse((self.home / runtime.LEGACY_PERMISSION_PATH).exists())
+
+    def test_legacy_permission_input_is_reviewed_but_not_installed(self):
+        self.change('policies.json', lambda obj: obj['files'].update({
+            runtime.LEGACY_PERMISSION_PATH: encoded({'permission': 'ask'})}))
+        self.validate()
+        self.prepare()
+        runtime.apply(self.inputs, self.home, 'homelab')
+        policy = self.home / runtime.LEGACY_PERMISSION_PATH
+        self.assertFalse(policy.exists())
+        policy.parent.mkdir(parents=True)
+        policy.write_text('stale rollback policy')
+        runtime.apply(self.inputs, self.home, 'homelab')
+        self.assertEqual(policy.read_text(), 'stale rollback policy')
+        path = self.inputs / 'policies.json'
+        path.write_text(path.read_text() + '\n')
+        with self.assertRaisesRegex(ValueError, 'digest mismatch'):
+            self.validate()
+
+    def test_legacy_permission_acceptance_checks_are_not_silently_skipped(self):
+        self.change('policies.json', lambda obj: obj['files'].update({
+            runtime.LEGACY_PERMISSION_PATH: encoded({'permission': 'ask'})}))
+        self.change('policies.json', lambda obj: obj['checks'].append({
+            'argv': ['python3', '-c', 'from pathlib import Path; import sys; assert Path(sys.argv[1]).exists()',
+                     '${HOME}/' + runtime.LEGACY_PERMISSION_PATH], 'exit': 0}))
+        self.prepare()
+        with self.assertRaisesRegex(ValueError, 'policy acceptance check failed'):
+            runtime.apply(self.inputs, self.home, 'homelab')
+
+    def test_legacy_permission_input_still_requires_valid_encoding(self):
+        self.change('policies.json', lambda obj: obj['files'].update({
+            runtime.LEGACY_PERMISSION_PATH: {'data': '!invalid-base64!'}}))
+        with self.assertRaises(ValueError):
+            self.validate()
+
+    def test_required_safety_and_hook_inputs_cannot_be_omitted(self):
+        for path in runtime.POLICY_PATHS:
+            fixture(self.inputs)
+            self.change('policies.json', lambda obj: obj['files'].pop(path))
+            with self.subTest(path=path), self.assertRaises(ValueError):
+                self.validate()
 
     def test_compliant_project_files_are_preserved_byte_for_byte(self):
         self.prepare()
@@ -406,10 +446,9 @@ nested = {"🏠" = ["fixture", {enabled = false}]}
         self.change('kubeconfig', lambda obj: obj['contexts'].append(copy.deepcopy(obj['contexts'][0])))
         with self.assertRaises(ValueError): self.validate()
 
-    def test_policy_must_keep_hooks_and_baseline_denies(self):
+    def test_policy_must_keep_hooks_and_secret_protection(self):
         for path, replacement in [('.claude/settings.json', {'disableAllHooks': True}),
-                                 ('.cc-safety-net/policy.json', {'version': 1, 'secret_protection': {'overrides': {'x': 'off'}}}),
-                                 ('.pi/agent/extensions/pi-permission-system/config.json', {'permission': {'bash': {'*': 'allow'}}})]:
+                                 ('.cc-safety-net/policy.json', {'version': 1, 'secret_protection': {'overrides': {'x': 'off'}}})]:
             fixture(self.inputs)
             self.change('policies.json', lambda obj: obj['files'].update({path: encoded(replacement)}))
             with self.subTest(path=path), self.assertRaises(ValueError): self.validate()
