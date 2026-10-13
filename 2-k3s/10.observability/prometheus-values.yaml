@@ -240,15 +240,7 @@ prometheus-node-exporter:
       memory: 200Mi
 
 kube-state-metrics:
-  replicas: 2
-
-  topologySpreadConstraints:
-    - maxSkew: 1
-      topologyKey: kubernetes.io/hostname
-      whenUnsatisfiable: DoNotSchedule
-      labelSelector:
-        matchLabels:
-          app.kubernetes.io/name: kube-state-metrics
+  replicas: 1
 
   resources:
     requests:
