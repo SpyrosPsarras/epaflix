@@ -41,9 +41,14 @@ class SetupTests(unittest.TestCase):
         self.ssh = self.home / 'ssh.md'
         self.ssh.write_text('SSH instructions\n')
         self.safety = '/opt/safety/dist/pi/index.js'
+        environment = patch.dict(os.environ, {'ANTHROPIC_BASE_URL': 'http://proxy.test',
+                                             'ANTHROPIC_AUTH_TOKEN': 'fake-key',
+                                             'CLIPROXYAPI_API_KEY': 'fake-key'})
+        environment.start()
+        self.addCleanup(environment.stop)
 
-    def write(self):
-        with patch.dict(os.environ, {'ANTHROPIC_BASE_URL': 'http://proxy.test',
+    def write(self, base_url='http://proxy.test'):
+        with patch.dict(os.environ, {'ANTHROPIC_BASE_URL': base_url,
                                      'ANTHROPIC_AUTH_TOKEN': 'synthetic'}, clear=False):
             with patch.object(self.setup, 'fetch_models', return_value=[
                     {'id': 'claude/claude-opus-5-5'}, {'id': 'codex/gpt-6.1-sol'},
@@ -71,6 +76,68 @@ class SetupTests(unittest.TestCase):
         before = {p.relative_to(self.agent): p.read_bytes() for p in self.agent.rglob('*') if p.is_file()}
         self.write()
         self.assertEqual(before, {p.relative_to(self.agent): p.read_bytes() for p in self.agent.rglob('*') if p.is_file()})
+
+    def test_textgen_provider_uses_anthropic_root_and_environment_key(self):
+        self.write('http://proxy.test///')
+        path = self.agent / 'models.json'
+        self.assertTrue(path.exists(), 'Text generation provider is missing')
+        self.assertEqual(json.loads(path.read_text()), {'providers': {'cliproxy-textgen': {
+            'baseUrl': 'http://proxy.test', 'api': 'anthropic-messages',
+            'apiKey': '$CLIPROXYAPI_API_KEY', 'models': [{
+                'id': 'claude/claude-haiku-5-5', 'name': 'Claude Haiku 5.5 (text generation)',
+                'reasoning': True, 'input': ['text'], 'contextWindow': 1000000,
+                'maxTokens': 128000, 'compat': {'forceAdaptiveThinking': True}}]}}})
+        self.assertNotIn('fake-key', path.read_text())
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
+    def test_textgen_replaces_only_owned_provider(self):
+        path = self.agent / 'models.json'
+        other = {'baseUrl': 'http://other.test', 'models': [{'id': 'user-model'}]}
+        path.write_text(json.dumps({'userKey': ['keep'], 'providers': {
+            'other': other, 'cliproxy-textgen': {'models': [{'id': 'stale'}]}}}))
+        self.write()
+        data = json.loads(path.read_text())
+        self.assertEqual(data['userKey'], ['keep'])
+        self.assertEqual(set(data['providers']), {'other', 'cliproxy-textgen'})
+        self.assertEqual(data['providers']['other'], other)
+        self.assertEqual(data['providers']['cliproxy-textgen']['models'][0]['id'], 'claude/claude-haiku-5-5')
+        before = path.read_bytes()
+        self.write()
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_textgen_atomic_write_replaces_symlink_without_changing_target(self):
+        target = self.home / 'user-models.json'
+        original = '{"userKey": "keep"}\n'
+        target.write_text(original)
+        path = self.agent / 'models.json'
+        path.symlink_to(target)
+        self.write()
+        self.assertFalse(path.is_symlink())
+        self.assertEqual(target.read_text(), original)
+        self.assertIn('cliproxy-textgen', json.loads(path.read_text())['providers'])
+        self.assertFalse(list(self.agent.glob('.pi-setup-*')))
+
+    def test_empty_or_unset_base_url_warns_and_does_not_touch_models(self):
+        path = self.agent / 'models.json'
+        for base_url in ['', None]:
+            for existing in [False, True]:
+                with self.subTest(base_url=base_url, existing=existing):
+                    path.unlink(missing_ok=True)
+                    if existing:
+                        path.write_text('{"userKey": "keep"}\n')
+                        before = path.stat()
+                    environment = {} if base_url is None else {'ANTHROPIC_BASE_URL': base_url}
+                    with patch.dict(os.environ, environment, clear=True):
+                        with patch.object(self.setup, 'fetch_models', side_effect=OSError('synthetic outage')):
+                            with contextlib.redirect_stderr(io.StringIO()) as errors:
+                                self.setup.write(self.home, self.safety, self.ssh)
+                    self.assertIn('pi-setup: ANTHROPIC_BASE_URL is empty; previous models.json kept', errors.getvalue())
+                    self.assertEqual(path.exists(), existing)
+                    if existing:
+                        self.assertEqual(path.read_text(), '{"userKey": "keep"}\n')
+                        self.assertEqual(path.stat(), before)
+                    self.assertTrue((self.agent / 'settings.json').exists())
+                    self.assertTrue((self.agent / 'AGENTS.md').exists())
 
     def test_setup_does_not_create_permission_policy(self):
         self.write()

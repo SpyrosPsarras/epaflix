@@ -99,9 +99,9 @@ node -e '
 const d=require(process.argv[1]);
 if(Object.keys(d.providerInstances).sort().join(",")!=="claudeAgent,codex,pi")throw Error("provider instances");
 if(d.providerInstances.pi.driver!=="pi" || d.providerInstances.pi.config?.binaryPath!=="/scripts/pi.sh")throw Error("Pi launcher");
-for(const [key,level] of [["defaultModelSelection","high"],["textGenerationModelSelection","low"]]) {
+for(const [key,model,level] of [["defaultModelSelection","cliproxy/claude/claude-opus-5-5","high"],["textGenerationModelSelection","cliproxy-textgen/claude/claude-haiku-5-5","low"]]) {
 const selection=d[key];
-if(selection.instanceId!=="pi" || selection.model!=="cliproxy/claude/claude-opus-5-5" || JSON.stringify(selection.options)!==JSON.stringify([{id:"thinking",value:level}]))throw Error("migration selection");
+if(selection.instanceId!=="pi" || selection.model!==model || JSON.stringify(selection.options)!==JSON.stringify([{id:"thinking",value:level}]))throw Error("migration selection");
 }
 const fs=require("node:fs"),backup=process.argv[1]+".before-pi";
 if((fs.statSync(backup).mode&0o777)!==0o600 || !JSON.parse(fs.readFileSync(backup)).providerInstances.opencode)throw Error("migration backup");
