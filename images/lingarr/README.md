@@ -1,7 +1,9 @@
 # Lingarr batch-contract build
 
-Upstream `ghcr.io/lingarr-translate/lingarr:main` at commit `28f6a19` with one
+Upstream `ghcr.io/lingarr-translate/lingarr:1.4.0` at commit `9fba9f7` with one
 patch, `batch-contract.patch`, republished as `ghcr.io/spyrospsarras/lingarr`.
+Release 1.4.0 fixes the anonymous onboarding/signup auth bypass
+GHSA-256g-xxrf-xfpf but ships none of the six behaviours below.
 
 ## What the patch changes
 
@@ -50,10 +52,12 @@ made big files untranslatable through Bazarr:
    (`CarryOverPriorLinesAsync`), stores them on the new request, and sends only
    the rest to the provider.
 
-Generate-API (non-chat) batches and per-line translation are unchanged. The
-upstream test asserting behaviour 3 is deleted; the rest of the suite (234
-tests) passes with the patch, plus the new TranslationRequestServiceTests for
-behaviours 4 and 6 and the rate-limit retry tests for behaviour 5.
+Generate-API (non-chat) batches and per-line translation internals are unchanged
+by the overlay. Upstream's individual-line content path and translated context
+remain intact. The upstream test asserting behaviour 3 is deleted; the controller
+tests for active duplicates and cancellation are adapted to behaviour 4.
+The patched suite passes all 302 tests, including TranslationRequestServiceTests
+for behaviours 4 and 6 and the rate-limit retry tests for behaviour 5.
 
 ## Measured need
 
@@ -77,5 +81,5 @@ and go back to `ghcr.io/lingarr-translate/lingarr:main`. Tracked in
 `.github/workflows/upstream-release-watch.yml`.
 
 Moving `UPSTREAM_COMMIT` means re-checking `git apply --check` and picking the
-matching upstream image digest for `BASE_IMAGE` (its assembly
-InformationalVersion is `0.0.0-dev+<commit>`).
+matching upstream image digest for `BASE_IMAGE` (its
+`org.opencontainers.image.revision` label must equal `UPSTREAM_COMMIT`).
