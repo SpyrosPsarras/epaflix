@@ -4,6 +4,7 @@
 kubectl() { command kubectl --context "$KUBECTL_CONTEXT" "$@"; }
 
 set -e
+set -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SHARED_DIR="$(dirname "$SCRIPT_DIR")"
@@ -67,17 +68,8 @@ echo ""
 echo "Step 2: Creating secrets..."
 echo ""
 
-if [ -f "$SHARED_DIR/secrets/postgres-secret-generated.yaml" ]; then
-    kubectl apply -f "$SHARED_DIR/secrets/postgres-secret-generated.yaml"
-    info "PostgreSQL secret applied"
-else
-    warn "PostgreSQL secret not found. Run _shared/scripts/01-setup-postgres.sh first"
-    read -p "Continue anyway? (y/N) " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        exit 1
-    fi
-fi
+sops decrypt "$SHARED_DIR/secrets/servarr-postgres.enc.yaml" | kubectl apply -f -
+info "Canonical PostgreSQL secret applied"
 
 echo ""
 
