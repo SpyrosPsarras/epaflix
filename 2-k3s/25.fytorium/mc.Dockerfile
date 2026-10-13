@@ -1,4 +1,4 @@
-FROM golang:1.24-bookworm AS client-build
+FROM golang:1.27-bookworm AS client-build
 RUN git clone --depth 1 --branch RELEASE.2025-04-16T18-13-26Z https://github.com/minio/mc.git /src
 WORKDIR /src
 RUN CGO_ENABLED=0 go build -o /mc .
