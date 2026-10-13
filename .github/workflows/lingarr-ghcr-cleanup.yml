@@ -24,7 +24,7 @@ on:
       protected_tag_prefix:
         description: "Refuse versions whose tags start with this prefix."
         required: false
-        default: "28f6a19-batch-contract-"
+        default: "9fba9f7-batch-contract-"
 
 permissions:
   contents: read
