@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import re
+import stat
 import subprocess
 import sys
 import tempfile
@@ -124,7 +125,10 @@ def validate(inputs, home, environment):
     if result.returncode:
         raise InputError('Invalid public login key')
     marker = home / '.config/t3-runtime/environment'
-    if marker.exists():
+    if marker.exists() or marker.is_symlink():
+        info = marker.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+            raise InputError('Persistent home marker must be owned and private')
         if marker.read_text() != environment + '\n':
             raise InputError('Persistent home belongs to another environment')
     else:
@@ -150,12 +154,28 @@ def validate_homelab_kubeconfig(kube):
         raise InputError('Exec, cloud authentication and external credential files are forbidden')
 
 
+def clear_services_snapshot(home, environment):
+    if environment != 'homelab':
+        return
+    path = home / '.config/t3-runtime/services.json'
+    if path.exists() or path.is_symlink():
+        directory = path.parent.lstat()
+        info = path.lstat()
+        if not stat.S_ISDIR(directory.st_mode) or directory.st_uid != os.getuid() or directory.st_mode & 0o077 or (
+                not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077):
+            raise InputError('Managed service snapshot must be owned and private')
+        path.unlink()
+
+
 def prepare(inputs, home, environment):
-    validate(inputs, home, environment)
+    clear_services_snapshot(home, environment)
+    _, services, _ = validate(inputs, home, environment)
     marker = home / '.config/t3-runtime/environment'
     marker.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     write_private(marker, (environment + '\n').encode())
     private_config.install((inputs / 'bundle.json').read_bytes(), home)
+    if environment == 'homelab':
+        write_private(marker.parent / 'services.json', json.dumps(services).encode())
 
 
 def write_private(path, data, mode=0o600):
@@ -195,6 +215,7 @@ def write_toml(path, values):
 
 
 def apply(inputs, home, environment):
+    clear_services_snapshot(home, environment)
     config, services, policies = validate(inputs, home, environment)
     aliases_path = home / '.pi/agent/pi-cliproxyapi-provider/config.json'
     aliases = json.loads(aliases_path.read_text())
@@ -293,6 +314,8 @@ def apply(inputs, home, environment):
         if not prefix or not current.get('model', '').startswith(prefix) or len(current['model']) <= len(prefix):
             settings[key] = canonical[key]
     hub_clients._write_json(str(settings_path), settings)
+    if environment == 'homelab':
+        write_private(home / '.config/t3-runtime/services.json', json.dumps(services).encode())
     print('isolated-config: reviewed policies and restricted hub installed')
 
 

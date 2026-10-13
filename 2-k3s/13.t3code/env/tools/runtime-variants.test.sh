@@ -14,7 +14,8 @@ work=$(bash "$tools/runtime-tag.sh" work)
 [[ $mixed == "$(bash "$tools/runtime-tag.sh" mixed)" && $mixed != "$homelab" && $work != "$mixed" && $work != "$homelab" ]]
 if bash "$tools/runtime-tag.sh" invalid; then exit 1; fi
 for input in env/Dockerfile env/Dockerfile.dockerignore env/tools/os-packages.txt \
-    env/tools/install-cluster-tools.sh env/tools/package.json env/tools/package-lock.json versions.env; do
+    env/tools/install-cluster-tools.sh env/tools/package.json env/tools/package-lock.json \
+    one/files/vault-restricted.py one/files/hub_services.py env/files/vault-restricted.sh versions.env; do
   printf '\n' >>"$tmp/2-k3s/13.t3code/$input"
   next_mixed=$(bash "$tools/runtime-tag.sh" mixed)
   next_homelab=$(bash "$tools/runtime-tag.sh" homelab)

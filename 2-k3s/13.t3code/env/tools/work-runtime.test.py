@@ -315,7 +315,9 @@ class WorkRuntimeTests(unittest.TestCase):
         allowed = {line[1:] for line in (ROOT / 'env/Dockerfile.dockerignore').read_text().splitlines() if line.startswith('!')}
         self.assertEqual(allowed, {'versions.env', 'env/', 'env/Dockerfile', 'env/tools/',
             'env/tools/os-packages.txt', 'env/tools/install-cluster-tools.sh',
-            'env/tools/package.json', 'env/tools/package-lock.json'})
+            'env/tools/package.json', 'env/tools/package-lock.json',
+            'env/files/', 'env/files/vault-restricted.sh', 'one/', 'one/files/',
+            'one/files/vault-restricted.py', 'one/files/hub_services.py'})
 
     def test_gitops_work_overlay_and_jobs_are_independent_and_revision_tracked(self):
         import yaml
