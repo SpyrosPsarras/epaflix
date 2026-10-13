@@ -134,9 +134,14 @@ input change cannot trigger a liveness restart loop. In-flight operations
 remain bounded; this is not a transaction against simultaneous grant/input
 changes. Only deliberate restart stages new authority. For every approved
 input rotation, update `vault-reader.epaflix.com/inputs-revision` in
-`homelab/deployment.yaml` and manually sync/recreate the sole reader. Coordinate
-hub bearer/service changes with its own tracked pod-template revision and
-restart. Coordinate runtime allowlist/token digest changes with the existing
+`homelab/deployment.yaml`. Hub `services.json` or `credentials.json` changes
+require `mcp-hub.epaflix.com/inputs-revision` in
+`../instances/homelab/kustomization.yaml`. Shared bearer rotation requires
+both revisions and matching private Secrets. Follow the
+[coordinated homelab input procedure](../instances/README.md#coordinated-homelab-input-changes)
+for opaque revisions and ordered manual sync. Both defaults remain
+`unprovisioned` until approved private inputs are staged. Coordinate runtime
+allowlist/token digest changes with the existing
 `t3code.epaflix.com/inputs-grants-revision` and OnDelete/manual rollout. Stop
 old consumers before changing authority; do not run two reader Pods during
 credential/session changes. Removing vault services must also regenerate

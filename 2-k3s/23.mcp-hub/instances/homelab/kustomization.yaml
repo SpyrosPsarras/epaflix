@@ -10,3 +10,15 @@ configMapGenerator:
   - name: mcp-hub-instance-settings
     literals:
       - environment=homelab
+
+patches:
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: mcp-hub
+      spec:
+        template:
+          metadata:
+            annotations:
+              mcp-hub.epaflix.com/inputs-revision: "unprovisioned"
