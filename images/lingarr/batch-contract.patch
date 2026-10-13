@@ -1,8 +1,78 @@
+diff --git a/Lingarr.Server.Tests/Controllers/TranslateControllerContentTests.cs b/Lingarr.Server.Tests/Controllers/TranslateControllerContentTests.cs
+index 23b287e..38e01eb 100644
+--- a/Lingarr.Server.Tests/Controllers/TranslateControllerContentTests.cs
++++ b/Lingarr.Server.Tests/Controllers/TranslateControllerContentTests.cs
+@@ -558,7 +558,7 @@ public class TranslateControllerContentTests : IDisposable
+     }
+ 
+     [Fact]
+-    public async Task TranslateContent_DuplicateActiveRequest_ReturnsEmptyWithoutTranslating()
++    public async Task TranslateContent_DuplicateActiveRequest_DisconnectedCallerLeavesOriginalRunning()
+     {
+         _context.TranslationRequests.Add(new TranslationRequest
+         {
+@@ -572,13 +572,20 @@ public class TranslateControllerContentTests : IDisposable
+         });
+         await _context.SaveChangesAsync();
+ 
+-        var response = await _controller.TranslateContent(
++        using var disconnected = new CancellationTokenSource();
++        var pendingResponse = _controller.TranslateContent(
+             NewContent("First line", "Second line"),
+-            CancellationToken.None);
++            disconnected.Token);
++
++        Assert.False(pendingResponse.IsCompleted);
++        disconnected.Cancel();
++        var response = await pendingResponse;
+ 
+-        Assert.Empty(AssertOk(response));
++        var errorResult = Assert.IsType<ObjectResult>(response.Result);
++        Assert.Equal(500, errorResult.StatusCode);
+         VerifyNoBatchCall();
+-        Assert.Equal(1, await _context.TranslationRequests.CountAsync());
++        var originalRequest = await _context.TranslationRequests.SingleAsync();
++        Assert.Equal(TranslationStatus.InProgress, originalRequest.Status);
+     }
+ 
+     [Fact]
+@@ -622,25 +629,25 @@ public class TranslateControllerContentTests : IDisposable
+     }
+ 
+     [Fact]
+-    public async Task TranslateContent_CancelledToken_ReturnsServerErrorAndMarksRequestCancelled()
++    public async Task TranslateContent_ApiCancellation_ReturnsServerErrorAndMarksRequestCancelled()
+     {
+-        using var cancellationTokenSource = new CancellationTokenSource();
+         _batchTranslationServiceMock
+             .Setup(batchService => batchService.TranslateBatchAsync(
+                 It.IsAny<List<BatchSubtitleItem>>(),
+                 It.IsAny<string>(),
+                 It.IsAny<string>(),
+                 It.IsAny<CancellationToken>()))
+-            .Returns(async () =>
++            .Returns(async (List<BatchSubtitleItem> _, string _, string _, CancellationToken token) =>
+             {
+-                await cancellationTokenSource.CancelAsync();
+-                cancellationTokenSource.Token.ThrowIfCancellationRequested();
++                var request = await _context.TranslationRequests.SingleAsync();
++                await _translationRequestService.CancelTranslationRequest(request);
++                token.ThrowIfCancellationRequested();
+                 return new Dictionary<int, string>();
+             });
+ 
+         var response = await _controller.TranslateContent(
+             NewContent("First line", "Second line"),
+-            cancellationTokenSource.Token);
++            CancellationToken.None);
+ 
+         var errorResult = Assert.IsType<ObjectResult>(response.Result);
+         Assert.Equal(500, errorResult.StatusCode);
 diff --git a/Lingarr.Server.Tests/Services/SubtitleTranslationServiceTests.cs b/Lingarr.Server.Tests/Services/SubtitleTranslationServiceTests.cs
-index 5d9af34..913efae 100644
+index c003f43..79f4102 100644
 --- a/Lingarr.Server.Tests/Services/SubtitleTranslationServiceTests.cs
 +++ b/Lingarr.Server.Tests/Services/SubtitleTranslationServiceTests.cs
-@@ -406,6 +406,30 @@ public class SubtitleTranslationServiceTests
+@@ -681,6 +681,30 @@ public class SubtitleTranslationServiceTests
  
      #region ProcessSubtitleBatch Tests
  
@@ -33,7 +103,7 @@ index 5d9af34..913efae 100644
      [Fact]
      public async Task ProcessSubtitleBatch_PreserveOff_JoinsWithSpaceAndReturnsSingleLine()
      {
-@@ -494,24 +518,6 @@ public class SubtitleTranslationServiceTests
+@@ -769,24 +793,6 @@ public class SubtitleTranslationServiceTests
          Assert.All(translated, line => Assert.True(line.Length <= 42, $"Line exceeded max length: '{line}'"));
      }
  
@@ -810,10 +880,10 @@ index 37060e2..732c4b7 100644
      <PackageReference Include="BCrypt.Net-Next" />
      <PackageReference Include="DeepL.net" />
 diff --git a/Lingarr.Server/Services/SubtitleTranslationService.cs b/Lingarr.Server/Services/SubtitleTranslationService.cs
-index d0081ec..7c57a83 100644
+index fd5a36a..606785b 100644
 --- a/Lingarr.Server/Services/SubtitleTranslationService.cs
 +++ b/Lingarr.Server/Services/SubtitleTranslationService.cs
-@@ -438,9 +438,11 @@ public class SubtitleTranslationService
+@@ -491,9 +491,11 @@ public class SubtitleTranslationService
              var contentLines = stripSubtitleFormatting ? subtitle.PlaintextLines : subtitle.Lines;
              if (!batchResults.TryGetValue(subtitle.Position, out var translated))
              {
@@ -1036,10 +1106,10 @@ index a474c20..c533755 100644
  
      private async Task<Dictionary<int, string>> TranslateBatchWithGenerateApi(
 diff --git a/Lingarr.Server/Services/TranslationRequestService.cs b/Lingarr.Server/Services/TranslationRequestService.cs
-index 2a4dbbf..c00c650 100644
+index 264d1b6..f69a692 100644
 --- a/Lingarr.Server/Services/TranslationRequestService.cs
 +++ b/Lingarr.Server/Services/TranslationRequestService.cs
-@@ -760,9 +760,14 @@ public class TranslationRequestService : ITranslationRequestService
+@@ -761,9 +761,14 @@ public class TranslationRequestService : ITranslationRequestService
              JobType = TranslationJobType.Translation
          };
  
@@ -1057,7 +1127,7 @@ index 2a4dbbf..c00c650 100644
          var cancellationToken = cancellationTokenSource.Token;
  
          try
-@@ -787,25 +792,19 @@ public class TranslationRequestService : ITranslationRequestService
+@@ -792,25 +797,19 @@ public class TranslationRequestService : ITranslationRequestService
              }
              var translationService = services[0].Service;
  
@@ -1095,16 +1165,16 @@ index 2a4dbbf..c00c650 100644
              }
  
              // Add TranslationRequest
-@@ -843,6 +842,8 @@ public class TranslationRequestService : ITranslationRequestService
-                     PlaintextLines = new List<string> { item.Line }
-                 }).ToList();
+@@ -847,6 +846,8 @@ public class TranslationRequestService : ITranslationRequestService
+                 _logger.LogDebug("Batch translation configuration: maxSize={maxSize}, stripFormatting={stripFormatting}, totalLines={totalLines}",
+                     maxSize, stripSubtitleFormatting, totalSize);
  
 +                await CarryOverPriorLinesAsync(translationRequest, subtitleItems, cancellationToken);
 +
                  await subtitleTranslator.TranslateSubtitlesBatch(
                      subtitleItems,
                      translationRequest,
-@@ -917,6 +918,14 @@ public class TranslationRequestService : ITranslationRequestService
+@@ -923,6 +924,14 @@ public class TranslationRequestService : ITranslationRequestService
          }
          catch (OperationCanceledException ex)
          {
@@ -1119,7 +1189,7 @@ index 2a4dbbf..c00c650 100644
              // ExecuteUpdateAsync bypasses change-tracking so a concurrent write cannot abort this save.
              var now = DateTimeOffset.UtcNow;
              await _dbContext.TranslationRequests
-@@ -962,6 +971,191 @@ public class TranslationRequestService : ITranslationRequestService
+@@ -968,6 +977,191 @@ public class TranslationRequestService : ITranslationRequestService
          }
      }
  
