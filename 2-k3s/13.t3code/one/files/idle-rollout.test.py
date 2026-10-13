@@ -18,9 +18,22 @@ case "$args" in
   *controller-revision-hash*) printf %s "$FAKE_HAVE" ;;
   *waiting.reason*) printf %s "$FAKE_WAITING" ;;
   *Ready*) printf %s "$FAKE_READY" ;;
+  *metadata.uid*)
+    uid=pod-1; deleting=
+    if [[ -e $FAKE_LOG.exec ]]; then
+      case "$FAKE_POD_AFTER_EXEC" in
+        gone) [[ $args == *--ignore-not-found* ]] && exit 0; echo 'Error from server (NotFound): pods "t3code-0" not found' >&2; exit 1 ;;
+        apierror) echo 'Error from server (Forbidden)' >&2; exit 1 ;;
+        terminating) deleting=2026-10-09T12:00:00Z ;;
+        replaced) uid=pod-2 ;;
+      esac
+    fi
+    printf %s "$uid"
+    [[ $args == *deletionTimestamp* ]] && printf ' %s' "$deleting"
+    exit 0 ;;
   exec*) cat >/dev/null
     c=$(sed -E 's/.* -c ([a-z0-9]+) .*/\1/' <<<"$args")
-    v=FAKE_IDLE_$c; [[ ${!v} == fail ]] && exit 1; printf '%s\n' "${!v}" ;;
+    v=FAKE_IDLE_$c; [[ ${!v} == fail ]] && touch "$FAKE_LOG.exec" && exit "$FAKE_EXEC_CODE"; printf '%s\n' "${!v}" ;;
   delete*) echo "$args" >>"$FAKE_LOG" ;;
   *) echo "unexpected kubectl $args" >&2; exit 2 ;;
 esac
@@ -87,7 +100,8 @@ def rollout(**fake):
     log = TMP / f"delete-{time.monotonic_ns()}.log"
     env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "FAKE_LOG": str(log),
            "FAKE_WANT": "rev2", "FAKE_HAVE": "rev1", "FAKE_WAITING": "", "FAKE_READY": "True",
-           "FAKE_IDLE_t3": "2000", "FAKE_IDLE_sshd": "2000"}
+           "FAKE_IDLE_t3": "2000", "FAKE_IDLE_sshd": "2000",
+           "FAKE_POD_AFTER_EXEC": "same", "FAKE_EXEC_CODE": "1"}
     env.update(fake)
     out = subprocess.run(["bash", HERE / "idle-rollout.sh"], env=env, capture_output=True, text=True)
     return out, log.exists()
@@ -110,5 +124,14 @@ for name, fake, code, deleted in cases:
     out, did_delete = rollout(**fake)
     assert out.returncode == code, (name, out.returncode, out.stdout, out.stderr)
     assert did_delete == deleted, (name, out.stdout, out.stderr)
+
+for container in ("t3", "sshd"):
+    for state in ("terminating", "gone", "replaced"):
+        out, did_delete = rollout(**{f"FAKE_IDLE_{container}": "fail", "FAKE_POD_AFTER_EXEC": state,
+                                    "FAKE_EXEC_CODE": "137"})
+        assert out.returncode == 0 and not did_delete and "went away" in out.stdout, (container, state, out.stdout, out.stderr)
+    out, did_delete = rollout(**{f"FAKE_IDLE_{container}": "fail", "FAKE_POD_AFTER_EXEC": "apierror",
+                                "FAKE_EXEC_CODE": "137"})
+    assert out.returncode == 137 and not did_delete and "went away" not in out.stdout, (container, "apierror", out.returncode, out.stdout, out.stderr)
 
 print("idle-rollout tests passed")
