@@ -27,8 +27,10 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(data['providerInstances']['pi'], {
             'driver': 'pi', 'displayName': 'Pi', 'enabled': True,
             'config': {'binaryPath': '/scripts/pi.sh'}})
-        for key in ['defaultModelSelection', 'textGenerationModelSelection']:
-            self.assertEqual(data[key], {'instanceId': 'pi', 'model': 'cliproxy/claude/claude-opus-5-5'})
+        self.assertEqual(data['defaultModelSelection'], {
+            'instanceId': 'pi', 'model': 'cliproxy/claude/claude-opus-5-5'})
+        self.assertEqual(data['textGenerationModelSelection'], {
+            'instanceId': 'pi', 'model': 'cliproxy-textgen/claude/claude-haiku-5-5'})
         codex = data['providerInstances']['codex']
         self.assertTrue(codex['enabled'])
         self.assertEqual(codex['config']['customModels'], ['codex/codex-auto-review'])
@@ -80,8 +82,10 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(data['providerInstances']['pi'], {
             'driver': 'pi', 'enabled': True, 'displayName': 'Pi',
             'config': {'binaryPath': '/scripts/pi.sh'}})
-        for key in ['defaultModelSelection', 'textGenerationModelSelection']:
-            self.assertEqual(data[key], {'instanceId': 'pi', 'model': 'cliproxy/claude/claude-opus-5-5'})
+        self.assertEqual(data['defaultModelSelection'], {
+            'instanceId': 'pi', 'model': 'cliproxy/claude/claude-opus-5-5'})
+        self.assertEqual(data['textGenerationModelSelection'], {
+            'instanceId': 'pi', 'model': 'cliproxy-textgen/claude/claude-haiku-5-5'})
         data['providerInstances']['pi'].update(enabled=False, displayName='My Pi', driver='old')
         data['providerInstances']['pi']['config']['binaryPath'] = '/other/pi'
         self.path.write_text(json.dumps(data))
@@ -142,11 +146,49 @@ class SettingsTests(unittest.TestCase):
         self.assertTrue((self.home / 'userdata/.pi-cache-reset').is_file())
         selection = json.loads(self.path.read_text())['textGenerationModelSelection']
         self.assertEqual(selection['instanceId'], 'pi')
-        self.assertEqual(selection['model'], 'cliproxy/claude/claude-opus-5-5')
+        self.assertEqual(selection['model'], 'cliproxy-textgen/claude/claude-haiku-5-5')
         self.assertEqual(selection['options'], [{'id': 'thinking', 'value': 'low'}])
         cache.write_text('new')
         self.settings.migrate(self.home, '')
         self.assertEqual(cache.read_text(), 'new')
+
+    def test_pi_extension_text_models_migrate_and_keep_options(self):
+        self.path.parent.mkdir()
+        for model in ['cliproxy/claude/claude-opus-5-5', 'cliproxy/codex/gpt-6.1-sol']:
+            with self.subTest(model=model):
+                options = [{'id': 'thinking', 'value': 'high'}, {'id': 'custom', 'value': True}]
+                default = {'instanceId': 'pi', 'model': model}
+                self.path.write_text(json.dumps({
+                    'defaultModelSelection': default,
+                    'textGenerationModelSelection': {'instanceId': 'pi', 'model': model, 'options': options}}))
+                self.settings.migrate(self.home, 'http://proxy.test')
+                data = json.loads(self.path.read_text())
+                self.assertEqual(data['defaultModelSelection'], default)
+                self.assertEqual(data['textGenerationModelSelection'], {
+                    'instanceId': 'pi', 'model': 'cliproxy-textgen/claude/claude-haiku-5-5', 'options': options})
+                before = self.path.stat()
+                self.settings.migrate(self.home, 'http://proxy.test')
+                self.assertEqual(self.path.stat(), before)
+
+    def test_non_extension_text_selections_are_untouched_without_rewrite(self):
+        self.settings.migrate(self.home, 'http://proxy.test')
+        data = json.loads(self.path.read_text())
+        for selection in [
+                {'instanceId': 'codex', 'model': 'cliproxy/claude/claude-opus-5-5'},
+                {'instanceId': 'pi', 'model': 'cliproxy-textgen/claude/claude-haiku-5-5'},
+                {'instanceId': 'pi', 'model': 'cliproxy-textgen/claude/custom', 'options': []},
+                {'instanceId': 'pi', 'model': 'other/model'},
+                {'instanceId': 'pi', 'model': 'cliproxy'},
+                {'instanceId': 'pi'}, {'instanceId': 'pi', 'model': None},
+                {'instanceId': 'pi', 'model': 7}, {}, None]:
+            with self.subTest(selection=selection):
+                data['textGenerationModelSelection'] = selection
+                self.path.write_text(json.dumps(data))
+                before = self.path.stat()
+                original = self.path.read_bytes()
+                self.settings.migrate(self.home, 'http://proxy.test')
+                self.assertEqual(self.path.read_bytes(), original)
+                self.assertEqual(self.path.stat(), before)
 
     def test_variant_maps_only_pi_levels_and_keeps_other_options(self):
         self.path.parent.mkdir()

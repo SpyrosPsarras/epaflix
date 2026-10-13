@@ -133,6 +133,35 @@ class WorkRuntimeTests(unittest.TestCase):
         self.assertEqual(subprocess.run(['python3', str(self.home / '.config/t3-policy/guard.py'), 'git push']).returncode, 2)
         self.assertFalse((self.home / runtime.LEGACY_PERMISSION_PATH).exists())
 
+    def test_pi_text_generation_selections_and_options_survive_restart(self):
+        self.prepare()
+        path = self.home / '.t3/userdata/settings.json'
+        path.parent.mkdir(parents=True)
+        canonical = {'instanceId': 'pi', 'model': 'cliproxy-textgen/claude/claude-haiku-5-5'}
+        options = [{'id': 'thinking', 'value': 'high'}]
+        cases = [
+            ({'instanceId': 'pi', 'model': 'cliproxy/claude/fixture', 'options': options},
+             {**canonical, 'options': options}),
+            ({'instanceId': 'pi', 'model': 'cliproxy-textgen/'}, canonical),
+            ({'instanceId': 'pi', 'model': 'cliproxy-textgen/claude/fixture', 'options': options}, None),
+            ({'instanceId': 'codex', 'model': 'codex/fixture', 'options': options}, None)]
+        default = {'instanceId': 'codex', 'model': 'codex/fixture', 'options': options}
+        for selection, expected in cases:
+            with self.subTest(selection=selection):
+                path.write_text(json.dumps({'defaultModelSelection': default,
+                                            'textGenerationModelSelection': selection}))
+                for restart in range(2):
+                    with self.subTest(restart=restart):
+                        runtime.apply(self.inputs, self.home, 'work')
+                        settings = json.loads(path.read_text())
+                        self.assertEqual(settings['textGenerationModelSelection'],
+                                         selection if expected is None else expected)
+                        self.assertEqual(settings['defaultModelSelection'], default)
+                        if restart == 0:
+                            first = path.read_bytes()
+                        else:
+                            self.assertEqual(path.read_bytes(), first)
+
     def test_legacy_permission_input_is_reviewed_but_not_installed(self):
         self.change('policies.json', lambda obj: obj['files'].update({
             runtime.LEGACY_PERMISSION_PATH: common.encoded({'permission': 'ask'})}))

@@ -311,8 +311,12 @@ def apply(inputs, home, environment):
         current = settings.get(key, {})
         name = current.get('instanceId')
         prefix = {'pi': 'cliproxy/', 'codex': 'codex/'}.get(name)
+        if key == 'textGenerationModelSelection' and name == 'pi':
+            prefix = 'cliproxy-textgen/'
         if not prefix or not current.get('model', '').startswith(prefix) or len(current['model']) <= len(prefix):
             settings[key] = canonical[key]
+            if key == 'textGenerationModelSelection' and name == 'pi' and isinstance(current.get('options'), list):
+                settings[key]['options'] = current['options']
     hub_clients._write_json(str(settings_path), settings)
     if environment == 'homelab':
         write_private(home / '.config/t3-runtime/services.json', json.dumps(services).encode())

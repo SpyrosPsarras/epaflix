@@ -8,6 +8,7 @@ import tempfile
 
 
 MODEL = 'cliproxy/claude/claude-opus-5-5'
+TEXT_MODEL = 'cliproxy-textgen/claude/claude-haiku-5-5'
 
 
 def migrate(home, base_url):
@@ -28,7 +29,7 @@ def migrate(home, base_url):
                                             '-c model_provider="cliproxy"',
                               'customModels': ['codex/codex-auto-review']}}},
             'defaultModelSelection': {'instanceId': 'pi', 'model': MODEL},
-            'textGenerationModelSelection': {'instanceId': 'pi', 'model': MODEL}}
+            'textGenerationModelSelection': {'instanceId': 'pi', 'model': TEXT_MODEL}}
     before = json.dumps(settings, sort_keys=True)
     instances = settings.setdefault('providerInstances', {})
     migrating = 'opencode' in instances
@@ -58,6 +59,10 @@ def migrate(home, base_url):
                     for option in selection['options']
                     if not isinstance(option, dict) or option.get('id') != 'variant' or option.get('value') in
                     ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']]
+    selection = settings.get('textGenerationModelSelection')
+    if isinstance(selection, dict) and selection.get('instanceId') == 'pi' and (
+            isinstance(selection.get('model'), str) and selection['model'].startswith('cliproxy/')):
+        selection['model'] = TEXT_MODEL
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists() or json.dumps(settings, sort_keys=True) != before:
         fd, tmp = tempfile.mkstemp(dir=path.parent, prefix='.t3-pi-settings-')
