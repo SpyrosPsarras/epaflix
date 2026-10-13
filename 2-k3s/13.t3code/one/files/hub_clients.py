@@ -31,6 +31,7 @@ import tempfile
 import hub_services
 
 SERVERS = hub_services.client_servers()
+MANAGED = set(SERVERS) | {"vault-secret", "vault-attachment"}
 # These tools ask in OpenCode (<server>_<tool>).
 # The kubernetes and drive names are those of the images pinned in
 # 23.mcp-hub/kubernetes-mcp.yaml and workspace-mcp.yaml; recheck them when bumping.
@@ -74,7 +75,7 @@ def opencode(config, hub, authorization, services=None):
     selected = hub_services.client_servers(services)
     hub = hub.rstrip("/")
     mcp = config.setdefault("mcp", {})
-    for name in SERVERS.keys() - selected.keys():
+    for name in MANAGED - selected.keys():
         mcp.pop(name, None)
     for name in [n for n, e in mcp.items() if n not in SERVERS and isinstance(e, dict) and _legacy(e)]:
         del mcp[name]
@@ -101,7 +102,7 @@ def claude(config, hub, authorization, services=None):
     selected = hub_services.client_servers(services)
     hub = hub.rstrip("/")
     servers = config.setdefault("mcpServers", {})
-    for name in SERVERS.keys() - selected.keys():
+    for name in MANAGED - selected.keys():
         servers.pop(name, None)
     for name in [n for n, e in servers.items() if n not in SERVERS and isinstance(e, dict) and _legacy(e)]:
         del servers[name]
@@ -120,7 +121,7 @@ def claude(config, hub, authorization, services=None):
 def pi(config, hub, env_var, services=None):
     selected = hub_services.client_servers(services)
     servers = config.setdefault("mcpServers", {})
-    for name in SERVERS.keys() - selected.keys():
+    for name in MANAGED - selected.keys():
         servers.pop(name, None)
     for name in [n for n, e in servers.items() if n not in SERVERS and isinstance(e, dict) and _legacy(e)]:
         del servers[name]
@@ -149,7 +150,7 @@ def codex(codex_home, hub, env_var, run=subprocess.run, services=None):
     for name in [n for n, e in current.items() if n not in SERVERS and n not in RETIRED and _legacy(e)]:
         run(["codex", "mcp", "remove", name], env=env, check=True, capture_output=True)
         changed.append(name)
-    for name in [n for n in current if n in RETIRED or n in SERVERS.keys() - selected.keys()]:
+    for name in [n for n in current if n in RETIRED or n in MANAGED - selected.keys()]:
         run(["codex", "mcp", "remove", name], env=env, check=True, capture_output=True)
         changed.append(name)
     for name, p in selected.items():

@@ -7,3 +7,9 @@
 !env/tools/install-cluster-tools.sh
 !env/tools/package.json
 !env/tools/package-lock.json
+!env/files/
+!env/files/vault-restricted.sh
+!one/
+!one/files/
+!one/files/vault-restricted.py
+!one/files/hub_services.py

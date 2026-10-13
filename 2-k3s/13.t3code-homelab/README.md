@@ -78,7 +78,9 @@ Only this namespace's homelab hub URL is accepted; there is no legacy fallback.
 
 `services.json` is the approved homelab hub client inventory described in
 [`../23.mcp-hub/instances/README.md`](../23.mcp-hub/instances/README.md).
-Unknown, empty, duplicate, work or vault inventories fail closed. Startup
+Unknown, empty, duplicate and work inventories fail closed. Vault routes
+require the explicit `vault_reader: restricted-v1` marker and separate owner
+approval described in the hub docs. Startup
 rebuilds the Pi, Claude and Codex MCP lists from that inventory, dropping
 unrelated servers as well as retired hub servers. Approved Claude settings
 cannot auto-enable project servers. Startup clears project MCP maps and their
@@ -89,6 +91,21 @@ project's `.mcp.json`. Already-compliant project files keep their original bytes
 startup writes them only when a managed value changes. Required hooks cannot
 be disabled by those retained settings. The hub remains the application
 authentication boundary; config generation is not a firewall.
+
+The image installs only the narrow `vault-restricted` quiet command/download
+helper. It has no raw vault CLI or connector login inputs. Startup derives an
+owned 0600 service snapshot at `$HOME/.config/t3-runtime/services.json` from
+the digest-validated root-owned Secret projection and exports it as
+`MCP_HUB_SERVICES_FILE`. It recreates the snapshot on startup, removes it on
+failed validation and regenerates metadata clients when vault routes change.
+The private environment marker must also be owned and inaccessible to others.
+The [reader package](../23.mcp-hub/reader/README.md) has separate private inputs,
+state and a manual Application. Work and mixed runtimes cannot select its
+broker. Quiet execution discards all child diagnostics; retained downloads
+require explicit deletion after use. This does not prevent deliberate
+exfiltration or users rewriting their own runtime. Commands execute in the
+selected remote backend, so laptop preparation does not install this helper
+or any vault credential/CLI. Vault-backed SSH loading stays disabled.
 
 The kubeconfig must contain exactly one context, cluster and user. It needs
 HTTPS, an inline CA and an inline token or client certificate/key. Exec
@@ -295,6 +312,8 @@ and does not block offline tests.
   then confirm health, SSH discovery, project and history persistence. Check
   the homelab image-prepull and idle-rollout jobs and continued mixed health.
 
-Issue #1776 is not live-accepted until those checks pass. Vault integration
-and vault-backed SSH keys remain in their dependent tickets. Infrastructure
+Issue #1776 is not live-accepted until those checks pass. Restricted reader
+code and offline packaging do not accept #1778; its owner/grant/private-input
+gates and dummy-item live canary remain missing. Vault-backed SSH keys remain
+in their dependent ticket. Infrastructure
 firewall, VM hardening and administrator/cross-cluster isolation are deferred.

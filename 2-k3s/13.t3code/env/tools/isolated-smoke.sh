@@ -10,8 +10,18 @@ if [[ ${1:-} != --inner ]]; then
   fi
   name=t3-$variant-smoke-$$
   volume=$name-home
-  trap 'docker rm -f "$name" >/dev/null 2>&1 || :; docker volume rm "$volume" >/dev/null 2>&1 || :' EXIT
+  projection=$name-projection
+  trap 'docker rm -f "$name" >/dev/null 2>&1 || :; docker volume rm "$volume" "$projection" >/dev/null 2>&1 || :' EXIT
   docker volume create "$volume" >/dev/null
+  docker volume create "$projection" >/dev/null
+  docker run --rm --network none --user 0:0 -v "$projection:/projection" "$image" python3 -c '
+import json, os
+from pathlib import Path
+p=Path("/projection/services.json")
+p.write_text(json.dumps({"environment": os.environ["T3_RUNTIME_VARIANT"], "services": ["searxng"]}))
+os.chown(p, 0, 1000)
+p.chmod(0o440)
+'
   docker run --rm --network none --user 0:0 -v "$volume:/home/t3" "$image" chown 1000:1000 /home/t3
   for round in first restart; do
     timeout 1800 docker run --rm --name "$name" --user 1000:1000 \
@@ -19,7 +29,7 @@ if [[ ${1:-} != --inner ]]; then
       --add-host "mcp-hub.mcp-hub-$variant.svc.cluster.local:127.0.0.1" \
       --tmpfs /scripts:uid=1000,gid=1000,exec --tmpfs /tmp:uid=1000,gid=1000,exec \
       --tmpfs /run/t3-inputs:uid=1000,gid=1000 --tmpfs /run/t3-login:uid=1000,gid=1000 \
-      -v "$root:/src:ro" -v "$volume:/home/t3" -e HOME=/home/t3 \
+      -v "$root:/src:ro" -v "$volume:/home/t3" -v "$projection:/projection:ro" -e HOME=/home/t3 \
       -e T3CODE_HOME=/home/t3/.t3 -e MCP_HUB_INSTANCE="$variant" \
       "$image" bash /src/env/tools/isolated-smoke.sh --inner "$round"
   done
@@ -64,6 +74,8 @@ else
   python3 /src/env/tools/work-runtime.test.py fixture /run/t3-inputs
   python3 /src/env/tools/work-aks-auth.test.py -v
 fi
+rm /run/t3-inputs/services.json
+ln -s /projection/services.json /run/t3-inputs/services.json
 mkdir -m 0700 /tmp/laptop
 ssh-keygen -q -t ed25519 -N '' -C synthetic-laptop -f /tmp/laptop/id_ed25519
 printf '%s\n' "$variant" >/tmp/laptop/environment
@@ -106,6 +118,20 @@ for ((i=0; i<600; i++)); do
 done
 curl -fsS --max-time 5 http://127.0.0.1:3773/health >/dev/null || fail 'health did not pass'
 grep -q '^pi-setup: all registered packages listed$' /tmp/entrypoint.log || fail 'package registration check'
+if [[ $variant == homelab ]]; then
+  python3 - <<'PY'
+import os
+from pathlib import Path
+source=Path('/run/t3-inputs/services.json')
+target=Path.home()/'.config/t3-runtime/services.json'
+assert source.stat().st_uid == 0 and source.stat().st_mode & 0o777 == 0o440
+assert target.stat().st_uid == os.getuid() and target.stat().st_mode & 0o777 == 0o600
+assert target.read_bytes() == source.read_bytes()
+marker=target.parent/'environment'
+assert marker.stat().st_uid == os.getuid() and marker.stat().st_mode & 0o777 == 0o600
+print('isolated smoke: actual root-owned projected services become a reviewed owned private snapshot PASS')
+PY
+fi
 codex mcp list --json >/tmp/codex-mcp.json 2>/tmp/codex-mcp.log || fail 'Codex rejected the generated TOML'
 python3 - <<'PY'
 import json

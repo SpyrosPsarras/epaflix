@@ -294,6 +294,9 @@ jobs:
             2-k3s/12.renovate
             2-k3s/13.t3code-homelab
             2-k3s/13.t3code-work
+            2-k3s/23.mcp-hub/instances/homelab
+            2-k3s/23.mcp-hub/instances/work
+            2-k3s/23.mcp-hub/reader/homelab
             2-k3s/20.bread
             2-k3s/21.tailscale
             2-k3s/21.vidar-edge
@@ -338,9 +341,15 @@ jobs:
           /tmp/mcp-hub/bin/python 2-k3s/23.mcp-hub/files/mcp_hub.py --selftest
           /tmp/mcp-hub/bin/python 2-k3s/23.mcp-hub/files/vaultwarden_mcp.py --selftest
           python3 2-k3s/23.mcp-hub/tools/hub_clients.py --selftest
-          /tmp/mcp-hub/bin/python 2-k3s/23.mcp-hub/tests/test_instances.py -v
+          /tmp/mcp-hub/bin/python -m unittest discover -s 2-k3s/23.mcp-hub/tests -v
+          bash 2-k3s/23.mcp-hub/reader/sync-image.sh
+          git diff --exit-code -- 2-k3s/23.mcp-hub/reader/homelab/deployment.yaml
           # The t3code pod's copy of hub_clients.py (and the other shared inputs) must not drift.
           bash 2-k3s/13.t3code/one/tools/sync-shared.sh --check
+
+      - name: Restricted reader image, Node 22 native proof and private startup
+        timeout-minutes: 15
+        run: bash 2-k3s/23.mcp-hub/reader/smoke.sh
 
       - name: T3 install and runtime smoke
         timeout-minutes: 75
