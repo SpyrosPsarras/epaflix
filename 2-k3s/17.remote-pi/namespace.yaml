@@ -5,3 +5,5 @@ metadata:
   name: remote-pi
   labels:
     app.kubernetes.io/name: remote-pi
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
