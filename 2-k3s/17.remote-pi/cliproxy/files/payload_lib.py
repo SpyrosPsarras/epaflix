@@ -21,6 +21,9 @@ internal/logging/request_logger_format.go:
     === API RESPONSE 1 ===   upstream response, SSE frames when streaming
     === RESPONSE ===         what was streamed back to the client
 
+Upstream stream failures can accompany HTTP 200. Keep their details for Loki
+before CLIProxyAPI deletes the request logs.
+
 Nothing here guesses. A section that will not parse is reported as missing, so a
 format change upstream surfaces as an empty field rather than as invented text.
 """
@@ -184,6 +187,51 @@ def assistant_turn(raw):
     return "", [], ""
 
 
+def upstream_details(raw):
+    responses = re.findall(r"^=== API RESPONSE(?: \d+)? ===\n(.*?)(?=^=== |\Z)",
+                           raw, re.S | re.M)
+    errors = []
+    events = []
+    for response in responses:
+        events = []
+        for line in response.splitlines():
+            error = None
+            if line.startswith("Error:"):
+                error = line[len("Error:"):]
+            elif line.startswith("event:"):
+                event = line[len("event:"):].strip()
+                name, separator, message = event.partition("Error:")
+                if separator and re.fullmatch(r"\S+", name):
+                    event = name
+                    error = message
+                events.append(event)
+            elif line.startswith("data:") and "Error:" in line:
+                payload = line[len("data:"):].lstrip()
+                try:
+                    obj, end = json.JSONDecoder().raw_decode(payload)
+                except (json.JSONDecodeError, RecursionError):
+                    continue
+                suffix = payload[end:]
+                if isinstance(obj, dict) and suffix.startswith("Error:"):
+                    error = suffix[len("Error:"):]
+            if error is not None and len(errors) < 5:
+                errors.append(redact(error.strip())[:500])
+
+    headers = {}
+    if responses:
+        for line in responses[-1].split("\nBody:", 1)[0].splitlines():
+            key, _, value = line.partition(":")
+            headers[key.strip().lower()] = value.strip()
+    return {
+        "upstream_attempts": len(responses),
+        "upstream_errors": errors,
+        "upstream_event_count": len(events),
+        "upstream_last_events": events[-3:],
+        "upstream_cf_ray": headers.get("cf-ray", ""),
+        "upstream_request_id": headers.get("x-oai-request-id", ""),
+    }
+
+
 def parse(raw):
     """Payload text -> dict. Raises ValueError if this is not a payload file."""
     if "=== REQUEST INFO ===" not in raw:
@@ -215,6 +263,7 @@ def parse(raw):
         "reply": reply,
         "reply_tools": reply_tools,
         "reply_source": reply_source,
+        **upstream_details(raw),
     }
 
 
