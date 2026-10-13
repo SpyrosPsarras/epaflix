@@ -3,7 +3,8 @@ set -euo pipefail
 
 wrapper=$(cd "$(dirname "$0")" && pwd)/ssh-command.sh
 sandbox=$(mktemp -d)
-trap 'rm -rf "$sandbox"' EXIT
+servers=()
+trap 'kill "${servers[@]}" 2>/dev/null; rm -rf "$sandbox"' EXIT
 fail() { echo "FAIL: $*" >&2; exit 1; }
 run() { HOME="$sandbox/home" SHELL=/bin/bash SSH_ORIGINAL_COMMAND="$1" "$wrapper"; }
 check_launch_home() {
@@ -163,3 +164,45 @@ PROBE
 done
 diff -r "$sandbox/before" "$sandbox/home/.t3"
 echo 'PASS: near-miss commands keep real HOME; live .t3 remains byte-identical'
+
+start_reparented_fake_t3_server() {
+  (bash -c 'while :; do sleep 1; done' "$1/t3" serve --host 127.0.0.1 --port "$2" --base-dir "$3" &
+    echo $! >"$sandbox/server.pid")
+  servers+=("$(<"$sandbox/server.pid")")
+}
+wait_until_process_stops() {
+  for _ in {1..30}; do
+    kill -0 "$1" 2>/dev/null || return 0
+    sleep 0.1
+  done
+  return 1
+}
+printf '%s\n' '{"version":1,"pid":123,"host":"0.0.0.0","port":3773,"origin":"http://127.0.0.1:3773"}' \
+  >"$sandbox/home/.t3/userdata/server-runtime.json"
+state_dir=$launch_home/.t3/ssh-launch/0123456789abcdef
+mkdir -p "$state_dir"
+printf '%s\n' 4242 >"$state_dir/pid"
+printf '%s\n' 3779 >"$state_dir/port"
+printf 'managed\n' >"$state_dir/managed"
+start_reparented_fake_t3_server "$launch_home/.t3/runtime/versions/0.0.0" 3779 "$launch_home/.t3"
+stale=${servers[-1]}
+start_reparented_fake_t3_server "$sandbox/home/.t3/runtime/versions/0.0.0" 3773 "$sandbox/home/.t3"
+live=${servers[-1]}
+
+run 'sh -l -s -- 0123456789abcdeg' <<<'exit 0' >/dev/null
+kill -0 "$stale" 2>/dev/null || fail 'near-miss command stopped a launch server'
+[[ $(<"$state_dir/managed") == managed && -f $state_dir/pid ]] || fail 'near-miss command changed launch state'
+
+run 'sh -l -s -- 0123456789abcdef' <<<'exit 0'
+wait_until_process_stops "$stale" || fail 'stale launch server is still running'
+kill -0 "$live" 2>/dev/null || fail 'server with the real base dir was stopped'
+[[ $(<"$state_dir/port") == 3773 ]] || fail 'launch state does not name the runtime port'
+[[ $(<"$state_dir/managed") == external ]] || fail 'launch state is not external'
+[[ ! -e $state_dir/pid ]] || fail 'stale launch pid was kept'
+[[ -z $(find "$state_dir" -name '*.??????') ]] || fail 'temporary state files were left behind'
+echo 'PASS: launch stops stale launch servers and points launch state at the running T3 server'
+
+rm "$sandbox/home/.t3/userdata/server-runtime.json"
+run 'sh -l -s -- fedcba9876543210' <<<'exit 0'
+[[ ! -e $launch_home/.t3/ssh-launch/fedcba9876543210 ]] || fail 'launch state was written without runtime state'
+echo 'PASS: launch without runtime state leaves launch state to the launcher'

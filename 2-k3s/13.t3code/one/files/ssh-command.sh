@@ -2,6 +2,25 @@
 # Workaround for pingdotgg/t3code #5749 and #14115.
 set -euo pipefail
 
+stop_launch_servers_sshd_cannot_forward_to() {
+  pkill -f -- "/t3 serve .* --base-dir ${launch_home//./\\.}/\\.t3\$" || :
+}
+
+point_launch_state_at_running_t3_server() {
+  launch_runtime=$launch_home/.t3/userdata/server-runtime.json
+  if [[ -f $launch_runtime && $(<"$launch_runtime") =~ \"port\":[[:space:]]*([0-9]+) ]]; then
+    state_dir=$launch_home/.t3/ssh-launch/${command##* }
+    mkdir -p "$state_dir"
+    rm -f "$state_dir/pid"
+    state_copy=$(mktemp "$state_dir/port.XXXXXX")
+    printf '%s\n' "${BASH_REMATCH[1]}" >"$state_copy"
+    mv -f "$state_copy" "$state_dir/port"
+    state_copy=$(mktemp "$state_dir/managed.XXXXXX")
+    printf 'external\n' >"$state_copy"
+    mv -f "$state_copy" "$state_dir/managed"
+  fi
+}
+
 shell=${SHELL:-/bin/sh}
 command=${SSH_ORIGINAL_COMMAND:-}
 if [[ $command =~ ^sh\ -l\ -s\ --\ [0-9a-f]{16}$ ]]; then
@@ -28,6 +47,8 @@ if [[ $command =~ ^sh\ -l\ -s\ --\ [0-9a-f]{16}$ ]]; then
   if [[ ! -L $launch_home/.t3/runtime || $(readlink "$launch_home/.t3/runtime") != "$HOME/.t3/runtime" ]]; then
     ln -sfnT "$HOME/.t3/runtime" "$launch_home/.t3/runtime"
   fi
+  stop_launch_servers_sshd_cannot_forward_to
+  point_launch_state_at_running_t3_server
   export HOME=$launch_home
 fi
 if [[ -z $command ]]; then
