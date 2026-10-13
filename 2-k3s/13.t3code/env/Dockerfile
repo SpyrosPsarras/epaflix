@@ -28,6 +28,12 @@ RUN cd /tools && npx --yes npm@10.9.4 ci --no-fund --no-audit \
 # Run the native server directly so container TERM reaches it without a CLI shim.
 RUN ln -sf "../@t3code/t3-$(node -p process.platform)-$(node -p process.arch)/t3" /tools/node_modules/.bin/t3
 ENV PATH="/tools/node_modules/.bin:${PATH}"
+COPY one/files/vault-restricted.py one/files/hub_services.py env/files/vault-restricted.sh /tmp/restricted-helper/
+RUN if [ "$T3_RUNTIME_VARIANT" = homelab ]; then \
+      mkdir -p /usr/local/lib/t3-vault-restricted \
+      && install -m 0444 /tmp/restricted-helper/*.py /usr/local/lib/t3-vault-restricted/ \
+      && install -m 0555 /tmp/restricted-helper/vault-restricted.sh /usr/local/bin/vault-restricted; \
+    fi && rm -rf /tmp/restricted-helper
 ENV HOME=/home/t3
 RUN mkdir -p /home/t3 && chown 1000:1000 /home/t3 \
     && if [ "$T3_RUNTIME_VARIANT" != mixed ]; then mkdir -m 0700 /etc/codex && chown 1000:1000 /etc/codex; fi

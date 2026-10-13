@@ -1,0 +1,7 @@
+{
+  "name": "homelab-vault-reader",
+  "private": true,
+  "version": "1.0.0",
+  "engines": {"node": "~22"},
+  "dependencies": {"@bitwarden/cli": "2026.8.0"}
+}

@@ -40,9 +40,11 @@ invalid client digests, so this example cannot start a deployment:
 For work, `environment` must be `work`. Service names are `gmail`,
 `searxng`, `drive`, `kubernetes` and `notion`. An empty list, unknown or
 duplicate name, environment mismatch, malformed client digest, missing
-connection or extra connection prevents startup. `vaultwarden` and
-`vault-secret` are rejected even if explicitly listed. Vault access waits
-for the restricted connector tickets.
+connection or extra connection prevents startup. Work rejects `vaultwarden`,
+`vault-secret` and `vault-attachment`. Homelab source can select these routes
+only with the explicit `vault_reader: restricted-v1` marker below. The
+dedicated reader has its own manual Application. The narrow helper is
+installed only in the homelab runtime. Neither is live-approved.
 
 The new hubs expose exactly the listed routes, plus unauthenticated
 `GET /healthz`. They forward to explicitly configured MCP endpoints rather
@@ -113,11 +115,143 @@ behavior. No live consumer is changed until its deliberate cutover.
 
 Generation removes stale maintained hub entries outside the allowlist. It
 preserves unrelated servers and existing OpenCode approval choices. It
-never advertises the command-time secret route. That route remains tested
-and available only on the legacy hub while vault is disabled on both new
-hubs. `vault-run.py` also refuses instance settings before reading a legacy
-key file or making a request. This is not a replacement for organizational
-agent policies.
+never advertises command-time secret or attachment routes as model tools.
+`vault-run.py` remains the legacy runner and refuses instance settings before
+reading a legacy key file or making a request. The separate restricted
+helper below does not change its behavior. Neither helper replaces
+organizational agent policies.
+
+## Restricted homelab command-time helper
+
+`vault-restricted` is installed only in the homelab runtime image from
+`2-k3s/13.t3code/one/files/vault-restricted.py`. No real account or grants
+are implied by these synthetic examples. Owner approval, private provisioning,
+manual first sync and the dummy-item live canary are still required before
+activation. See [reader package and private inputs](../reader/README.md).
+The laptop selects the remote backend through the existing connection path.
+Commands execute there. No laptop helper, vault CLI, connector credential or
+SSH-agent forwarding is added.
+
+The helper requires `MCP_HUB_INSTANCE=homelab`, explicit `MCP_HUB_URL`, an
+independent `homelab.` client token in `MCP_HUB_TOKEN`, and an absolute
+`MCP_HUB_SERVICES_FILE`. The service file must be an owned regular file with
+no group/other permissions, contain at most 16 KiB and select each requested
+route with this marker:
+
+```json
+{"environment":"homelab","services":["vaultwarden","vault-secret","vault-attachment"],"vault_reader":"restricted-v1"}
+```
+
+A declared `T3_RUNTIME_VARIANT` or existing private home environment marker
+must also be homelab. Work, mixed, missing configuration and legacy tokens
+refuse before HTTP. There is no legacy URL, key-file, path-reference or
+connector fallback. Use HTTPS outside loopback. The explicit in-cluster
+homelab Service hostname also permits HTTP, as required by the existing
+isolated runtime contract. Proxy environment settings are ignored.
+
+On the hub, each selected vault upstream requires `protocol: restricted-v1`
+and its exact connector path. `/vault-secret` maps to `/secret` and
+`/vault-attachment` to `/attachment`. These two routes share the connector's
+broker bearer, separate from metadata's bearer on `/vaultwarden`. All three
+must select the same explicit connector origin. Only the hub holds those
+connector bearers. The helper holds its ordinary homelab client token, never
+the account's login credentials or CLI session. No raw vault CLI is needed
+in T3.
+
+References contain a canonical collection UUID and exactly one canonical
+item UUID or exact title. A folder or path never authorizes access. Duplicate
+titles require an item UUID. The connector refreshes and checks approved
+visible grants for each request. Failed refresh or missing/revoked grants
+fail closed rather than use an older password. Actual effective permissions
+and hidden assignments still require owner review and the live canary.
+Already delivered values cannot be revoked.
+
+After private configuration is supplied, these examples use synthetic IDs
+and names only. A command gets only explicitly mapped values:
+
+```sh
+python3 2-k3s/13.t3code/one/files/vault-restricted.py run \
+  --collection-id 00000000-0000-4000-8000-000000000003 \
+  --item-id 00000000-0000-4000-8000-000000000005 \
+  --password-env VAULT_PASSWORD --field 'api token=VAULT_API_TOKEN' \
+  -- python3 /path/to/approved-consumer.py
+```
+
+Use `--username-env VAULT_USER` when needed. Targets must match
+`VAULT_[A-Z][A-Z0-9_]{0,63}`. Duplicate targets, including collisions with an
+attachment target, refuse. Field names are exact, with the final `=`
+separating the source name from the target. Empty strings remain empty;
+missing or null requested values refuse. Outer `VAULT_*`, `BW_*` and
+`MCP_HUB_*` variables are removed before the child starts. No automatic
+field-name normalization or broker-auth inheritance occurs.
+
+A command-scoped attachment is a private file whose path, not content,
+enters the requested environment variable:
+
+```sh
+python3 2-k3s/13.t3code/one/files/vault-restricted.py run \
+  --collection-id 00000000-0000-4000-8000-000000000003 --title demo \
+  --attachment demo.txt --attachment-env VAULT_INPUT_FILE \
+  -- python3 /path/to/approved-file-consumer.py
+```
+
+Secret mappings and one attachment can be combined. The helper creates a
+0700 directory under `/tmp` and a 0600 file, then removes them when the
+command completes, times out or receives SIGINT/SIGTERM. Attachment IDs or
+filenames must be exact and unambiguous. The helper accepts only bounded
+ASCII basenames containing letters, digits, dot, underscore or hyphen,
+starting with a letter or digit and not ending with a dot.
+
+To retain a download, explicitly choose a new absolute destination in an
+owned private directory. The helper does not create destination directories:
+
+```sh
+python3 2-k3s/13.t3code/one/files/vault-restricted.py download \
+  --collection-id 00000000-0000-4000-8000-000000000003 --title demo \
+  --attachment demo.txt --destination /private/downloads/demo.txt
+```
+
+Existing files, symlinks at any path component, traversal segments and
+public destination directories refuse. Creation is exclusive, with mode
+0600. Download output contains only status, destination and byte count.
+The caller owns cleanup of retained downloads. File removal is not secure
+erasure.
+
+### Quiet execution and bounds
+
+The helper runs argv directly, without an implicit shell. Put `--` before
+the command. Child stdin is closed; stdout and stderr go to `/dev/null`.
+The helper returns only a fixed completion status and the child's exit code.
+Timeout returns 124; SIGINT/SIGTERM returns 130; refusal returns 1 with a
+fixed message. There is no raw-output switch. Normal diagnostics are lost
+as well as secrets. Validate a consumer with synthetic values before using
+it here. Exact-string redaction cannot safely handle encoded, split or
+partial output, so the helper deliberately does not try it.
+
+Each request has a 130-second total deadline, a 12 MiB response cap, strict
+status/JSON/schema validation and no redirects or compressed responses.
+Attachments are capped at 8 MiB. Individual secret strings are capped at
+16 KiB and mapped values total at most 64 KiB. `--timeout` can reduce the
+120-second child lifetime, never increase it. The helper disables core dumps
+and sets a CPU limit tied to the timeout. It leaves address-space, file-size
+and descriptor budgets inherited. Node and Go reserve large virtual address
+ranges; RLIMIT_AS is not a resident-memory budget. The runtime's cgroup memory
+limit remains the aggregate budget. Process-group descendants
+are killed on timeout/cancellation and after the direct child exits,
+including when the child closes its output descriptors early.
+
+These are per-command safeguards, not a sandbox or aggregate cgroup quota.
+A deliberate consumer can write secret files, send data elsewhere or escape
+its process group. A caller that edits or bypasses its runtime can also
+bypass this policy. SIGKILL, host failure and escaped descendants are not
+covered by graceful cleanup. The reader package has its own bounded memory
+scratch and startup orphan cleanup; this does not erase files a deliberate
+consumer retains elsewhere. Its pinned Node 22/native checks and the three
+runtime smokes run in CI. Private provisioning and live acceptance remain
+blocked. The removed
+pi-permission-system stays removed; cc-safety-net does not replace its old
+environment-dump or infrastructure deny rules. Keep the remaining guards
+and organizational policy checks.
 
 ## Approval-dependent provisioning and rollout
 
@@ -153,7 +287,7 @@ contact infrastructure, and do not decrypt existing Secrets:
 ```sh
 python3 -m venv /tmp/hub-fixture-venv
 /tmp/hub-fixture-venv/bin/pip install mcp==2.2.0 -r .github/hooks/requirements.txt
-/tmp/hub-fixture-venv/bin/python 2-k3s/23.mcp-hub/tests/test_instances.py -v
+/tmp/hub-fixture-venv/bin/python -m unittest discover -s 2-k3s/23.mcp-hub/tests -v
 /tmp/hub-fixture-venv/bin/python 2-k3s/23.mcp-hub/files/mcp_hub.py --selftest
 python3 2-k3s/23.mcp-hub/tools/hub_clients.py --selftest
 bash 2-k3s/13.t3code/one/tools/sync-shared.sh --check
