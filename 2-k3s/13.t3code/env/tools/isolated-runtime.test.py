@@ -110,6 +110,40 @@ class RuntimeTests(unittest.TestCase):
         path.write_text(json.dumps(obj))
         refresh(self.inputs)
 
+    def test_reviewed_services_private_snapshot_and_vault_removal_on_restart(self):
+        self.change('services.json', lambda obj: obj.update(
+            services=['searxng', 'vaultwarden', 'vault-secret', 'vault-attachment'],
+            vault_reader='restricted-v1'))
+        (self.inputs / 'services.json').chmod(0o440)
+        self.prepare()
+        runtime.apply(self.inputs, self.home, 'homelab')
+        snapshot = self.home / '.config/t3-runtime/services.json'
+        self.assertEqual(snapshot.read_bytes(), (self.inputs / 'services.json').read_bytes())
+        self.assertEqual(snapshot.stat().st_uid, os.getuid())
+        self.assertEqual(snapshot.stat().st_mode & 0o777, 0o600)
+        helper = importlib.import_module('vault-restricted')
+        with patch.dict(os.environ, {'HOME': str(self.home), 'MCP_HUB_INSTANCE': 'homelab',
+                'MCP_HUB_URL': 'http://mcp-hub.mcp-hub-homelab.svc.cluster.local:8000',
+                'MCP_HUB_SERVICES_FILE': str(snapshot)}):
+            helper.configuration('vault-secret')
+            self.assertEqual(set(json.loads((self.home / '.pi/agent/mcp.json').read_text())['mcpServers']),
+                             {'searxng', 'vaultwarden'})
+            (self.inputs / 'services.json').chmod(0o600)
+            self.change('services.json', lambda obj: (obj.update(services=['searxng']), obj.pop('vault_reader')))
+            runtime.prepare(self.inputs, self.home, 'homelab')
+            runtime.apply(self.inputs, self.home, 'homelab')
+            with self.assertRaises(helper.Refused):
+                helper.configuration('vault-secret')
+            for name in ('.pi/agent/mcp.json', '.claude.json', '.claude/.claude.json'):
+                self.assertEqual(set(json.loads((self.home / name).read_text())['mcpServers']), {'searxng'})
+            self.assertNotIn('vaultwarden', (self.home / '.codex/config.toml').read_text())
+            self.assertEqual(snapshot.read_bytes(), (self.inputs / 'services.json').read_bytes())
+            (self.inputs / 'services.json').chmod(0o600)
+            (self.inputs / 'services.json').write_text('{}')
+            with self.assertRaises(ValueError):
+                runtime.prepare(self.inputs, self.home, 'homelab')
+            self.assertFalse(snapshot.exists())
+
     def test_clean_home_policies_hub_and_provider_state_survive_restart(self):
         self.validate()
         self.prepare()

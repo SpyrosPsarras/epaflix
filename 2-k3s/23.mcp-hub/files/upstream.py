@@ -11,12 +11,17 @@ reaches the client, which would otherwise start its own OAuth dance).
 """
 
 import json
+import threading
 
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
 FORWARD = ("accept", "content-type", "mcp-session-id", "mcp-protocol-version", "last-event-id")
 RETURN = ("content-type", "mcp-session-id", "cache-control")
+READER_BODY_LIMIT = 16384
+READER_RESPONSE_LIMIT = 12 * 1024 * 1024
+READER_BODY_TIMEOUT = 10
+READER_REQUEST_TIMEOUT = 125
 
 
 class UpstreamError(Exception):
@@ -24,11 +29,13 @@ class UpstreamError(Exception):
 
 
 class Upstream:
-    def __init__(self, name, url, credential=lambda: {}, on_unauthorized=None, transport=None):
+    def __init__(self, name, url, credential=lambda: {}, on_unauthorized=None, transport=None, restricted=False):
         """credential() -> extra headers (may block; runs in a thread). on_unauthorized() is called once
         after an upstream 401 before a single retry, e.g. to force a token refresh."""
         self.name, self.url, self.credential, self.on_unauthorized = name, url, credential, on_unauthorized
         self.transport = transport
+        self.restricted = restricted
+        self.requests = threading.BoundedSemaphore(8)
         self._client = None
 
     def client(self):
@@ -54,9 +61,59 @@ def _error(body, message, status=502):
     return Response(message, status_code=status, media_type="text/plain")
 
 
+def restricted_route(path, upstream):
+    import anyio
+
+    def failed(body, message, status=502):
+        response = _error(body, message, status)
+        response.headers["cache-control"] = "no-store"
+        return response
+
+    async def forward(request):
+        if request.url.query:
+            return Response("query parameters are not supported", status_code=400)
+        if not upstream.requests.acquire(blocking=False):
+            return Response("restricted reader busy", status_code=503)
+        body = bytearray()
+        try:
+            with anyio.fail_after(READER_BODY_TIMEOUT):
+                async for chunk in request.stream():
+                    if len(body) + len(chunk) > READER_BODY_LIMIT:
+                        return Response("request body too large", status_code=413)
+                    body.extend(chunk)
+            with anyio.fail_after(READER_REQUEST_TIMEOUT):
+                extra = await anyio.to_thread.run_sync(upstream.credential)
+                headers = {k: v for k, v in request.headers.items() if k in FORWARD} | {"accept-encoding": "identity", **extra}
+                async with upstream.client().stream(request.method, upstream.url, headers=headers, content=bytes(body)) as resp:
+                    if resp.status_code in (401, 403) or 300 <= resp.status_code < 400:
+                        return failed(body, "restricted reader rejected connector authentication")
+                    if resp.status_code >= 400:
+                        return failed(body, "restricted reader unavailable or reference rejected", status=resp.status_code)
+                    if resp.headers.get("content-encoding", "identity").lower() != "identity":
+                        return failed(body, "restricted reader returned unsupported encoding")
+                    result = bytearray()
+                    async for chunk in resp.aiter_raw(chunk_size=65536):
+                        if len(result) + len(chunk) > READER_RESPONSE_LIMIT:
+                            return failed(body, "restricted reader response limit exceeded")
+                        result.extend(chunk)
+                    out = {k: v for k, v in resp.headers.items() if k in RETURN}
+                    out["cache-control"] = "no-store"
+                    return Response(bytes(result), status_code=resp.status_code, headers=out)
+        except Exception:
+            return failed(body, "restricted reader unavailable")
+        finally:
+            upstream.requests.release()
+
+    methods = ["GET", "POST", "DELETE"] if path == "/vaultwarden" else ["POST"]
+    return Route(path, forward, methods=methods)
+
+
 def route(path, upstream):
     import anyio
     import httpx2
+
+    if upstream.restricted:
+        return restricted_route(path, upstream)
 
     async def forward(request):
         body = await request.body()
