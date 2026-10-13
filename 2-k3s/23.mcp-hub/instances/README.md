@@ -266,14 +266,61 @@ and organizational policy checks.
    content-hashed name. Kustomize rewrites the mounted Secret reference,
    causing an independent rollout on configuration or credential changes.
    CI exercises this composition with synthetic Secret data. If an external
-   provisioner uses a stable Secret name instead, it must update a revision
-   annotation on that Deployment's pod template as part of the approved
-   rollout. Mounted files alone do not reload this process's in-memory
+   provisioner uses a stable Secret name instead, it must update a tracked
+   pod-template revision as part of the approved rollout. Homelab provides
+   `mcp-hub.epaflix.com/inputs-revision` in `homelab/kustomization.yaml` for
+   the stable `mcp-hub-instance` Secret. Follow the coordinated procedure
+   below. Work requires its own approved revision mechanism for stable-name
+   Secrets. Mounted files alone do not reload this process's in-memory
    configuration. Do not assume Reloader watches these namespaces.
 4. A4: Approve the ArgoCD source for the private composition and manual sync.
    Verify direct backend rejection without credentials, wrong-hub and
    legacy-client rejection, one accepted end-to-end request per hub, and
    continued legacy availability before any client cutover.
+
+### Coordinated homelab input changes
+
+The hub revision defaults to `unprovisioned`, like the reader revision.
+Leave both unchanged until approved private inputs are staged. Use a new
+opaque operator revision for each approved change, never a password/token
+hash, private identifier or secret-derived value. A revision is a rollout
+marker, not approval or evidence of valid grants. It changes only the
+homelab hub pod template, not the namespace, stable Secret name or auth rules.
+
+1. R1: Obtain approval for the exact private change, downtime and manual sync.
+   Stop old homelab consumers through the approved procedure before changing
+   authority. Do not force a running runtime restart or enable automatic sync.
+   Workload startup must not create accounts or log in. Secret staging/rotation
+   must not implicitly enroll accounts or log in. Owner API enrollment requires
+   separate explicit authorization and is outside Secret staging/rotation.
+2. R2: Stage `vault-reader-inputs` only in `vault-reader-homelab` and
+   `mcp-hub-instance` only in `mcp-hub-homelab` through the approved private
+   secret workflow. Change only the inputs covered by that approval. Shared
+   metadata/broker bearer changes require matching values in both Secrets.
+   The reader latches changed projections closed; the hub retains its old
+   in-memory configuration until rollout. Treat this interval as downtime.
+3. R3: For reader input changes, update
+   `vault-reader.epaflix.com/inputs-revision` in
+   `../reader/homelab/deployment.yaml`. For hub `services.json` or
+   `credentials.json` changes, update `mcp-hub.epaflix.com/inputs-revision` in
+   `homelab/kustomization.yaml`. A shared bearer rotation requires both;
+   use the same new opaque revision for that coordinated change. Review the
+   rendered pod templates and stable Secret references before manual sync.
+4. R4: After the approved tracked revisions reach the Applications' source,
+   manually sync `vault-reader-homelab` first if its inputs changed, then
+   `mcp-hub-homelab` if its inputs changed. Wait for each single-replica
+   `Recreate` rollout to finish before proceeding; never run two reader Pods
+   or two hub refresh owners. Health alone is not authority acceptance.
+   Perform the approved dummy-item and auth-rejection canaries before
+   resuming consumers. Keep work and legacy Applications/Secrets unchanged.
+
+If the runtime's private allowlist or ordinary client-token digest changes,
+coordinate its existing `t3code.epaflix.com/inputs-grants-revision` and
+OnDelete/manual rollout separately. Service removal also requires regenerated
+client metadata and the private helper snapshot. Manual Application sync does
+not authorize deletion or forced restart of an existing runtime. No revision
+change or offline test authorizes first activation; the reader's
+[first-sync gates](../reader/README.md#first-sync-gate-still-missing) still apply.
 
 Infrastructure-administrator and cross-cluster isolation remain deferred.
 These deployments separate application configuration and credentials; they

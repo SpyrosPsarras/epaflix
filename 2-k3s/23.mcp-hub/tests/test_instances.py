@@ -328,6 +328,55 @@ class InstanceTests(unittest.TestCase):
 
 
 class RenderTests(unittest.TestCase):
+    def test_homelab_stable_secret_requires_tracked_input_revision(self):
+        annotation = "mcp-hub.epaflix.com/inputs-revision"
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            shutil.copytree(HUB / "files", root / "files", ignore=shutil.ignore_patterns("__pycache__", "clients.json"))
+            shutil.copytree(HUB / "instances", root / "instances")
+            overlay = root / "fixture-homelab"
+            fixture(overlay, "homelab")
+            config = {"apiVersion": "kustomize.config.k8s.io/v1beta1", "kind": "Kustomization",
+                      "resources": ["../instances/homelab"],
+                      "secretGenerator": [{"name": "mcp-hub-instance", "namespace": "mcp-hub-homelab",
+                                           "files": ["services.json", "credentials.json"],
+                                           "options": {"disableNameSuffixHash": True}}]}
+            (overlay / "kustomization.yaml").write_text(yaml.safe_dump(config))
+
+            def render(path):
+                return list(yaml.safe_load_all(subprocess.check_output(["kustomize", "build", str(path)])))
+
+            documents = render(overlay)
+            deployment = next(doc for doc in documents if doc["kind"] == "Deployment")
+            template = deployment["spec"]["template"]
+            self.assertEqual(deployment["metadata"]["namespace"], "mcp-hub-homelab")
+            self.assertEqual(template["metadata"]["annotations"][annotation], "unprovisioned")
+            volume = next(volume for volume in template["spec"]["volumes"] if volume["name"] == "instance")
+            self.assertEqual(volume["secret"]["secretName"], "mcp-hub-instance")
+            secret = next(doc for doc in documents if doc["kind"] == "Secret")
+            self.assertEqual(secret["metadata"]["name"], "mcp-hub-instance")
+            self.assertEqual(secret["metadata"]["namespace"], "mcp-hub-homelab")
+            work = render(root / "instances/work")
+            self.assertNotIn(annotation, json.dumps(work))
+
+            credentials = json.loads((overlay / "credentials.json").read_text())
+            credentials["upstreams"]["searxng"]["token"] = "synthetic-rotated-upstream"
+            (overlay / "credentials.json").write_text(json.dumps(credentials))
+            rotated = render(overlay)
+            rotated_secret = next(doc for doc in rotated if doc["kind"] == "Secret")
+            self.assertNotEqual(rotated_secret["data"], secret["data"])
+            self.assertEqual(next(doc for doc in rotated if doc["kind"] == "Deployment"), deployment)
+
+            path = root / "instances/homelab/kustomization.yaml"
+            path.write_text(path.read_text().replace('"unprovisioned"', '"synthetic-r2"'))
+            revised = render(overlay)
+            rolled = next(doc for doc in revised if doc["kind"] == "Deployment")
+            self.assertNotEqual(rolled["spec"]["template"], template)
+            self.assertEqual(rolled["spec"]["template"]["metadata"]["annotations"][annotation], "synthetic-r2")
+            rolled["spec"]["template"]["metadata"]["annotations"][annotation] = "unprovisioned"
+            self.assertEqual(revised, rotated)
+            self.assertEqual(render(root / "instances/work"), work)
+
     def test_synthetic_secret_injection_and_independent_rollouts(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -393,6 +442,7 @@ class RenderTests(unittest.TestCase):
             self.assertIn("clients.json", app["data"])
             self.assertIn("hub_services.py", app["data"])
             self.assertEqual(sum(doc["kind"] == "Deployment" for doc in documents), 4)
+            self.assertNotIn("mcp-hub.epaflix.com/inputs-revision", json.dumps(documents))
 
     def test_argocd_requires_manual_approval_for_new_hubs(self):
         result = subprocess.run(["kustomize", "build", str(ROOT / "2-k3s/11.argocd/apps")],
@@ -402,6 +452,8 @@ class RenderTests(unittest.TestCase):
             app = apps["mcp-hub-" + environment]
             self.assertNotIn("automated", app["spec"]["syncPolicy"])
             self.assertEqual(app["spec"]["destination"]["namespace"], "mcp-hub-" + environment)
+            self.assertNotIn("automated", apps["t3code-" + environment]["spec"]["syncPolicy"])
+        self.assertNotIn("automated", apps["vault-reader-homelab"]["spec"]["syncPolicy"])
         self.assertIn("automated", apps["mcp-hub"]["spec"]["syncPolicy"])
 
 
