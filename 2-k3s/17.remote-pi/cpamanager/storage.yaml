@@ -7,6 +7,8 @@ metadata:
   labels:
     app.kubernetes.io/name: cpa-manager-plus
     app.kubernetes.io/component: storage
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
 spec:
   accessModes:
     - ReadWriteOnce
