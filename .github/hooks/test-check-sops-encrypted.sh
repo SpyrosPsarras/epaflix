@@ -99,7 +99,6 @@ plaintext_templates=(
   "2-k3s/06.postgres/operator-kustomization/barman-manifest.yaml"
   "2-k3s/07.authentik-deployment/secret-app.yaml"
   "2-k3s/08.servarr/seerr/authentik-oidc-secret.yaml"
-  "2-k3s/08.servarr/_shared/secrets/postgres-secret.yaml"
   "2-k3s/10.observability/grafana-admin-secret.yaml"
   "2-k3s/10.observability/grafana-config/oauth-secret.yaml"
   "2-k3s/10.observability/grafana-db-secret.yaml"
@@ -124,7 +123,7 @@ for path in "${plaintext_templates[@]}"; do
   printf '\n# fixture: comment-only edit\n' >>"$tmp/$path"
 done
 git -C "$tmp" add "${plaintext_templates[@]}"
-expect_pass "comment-only edits to all 12 plaintext Secret files pass"
+expect_pass "comment-only edits to all 11 plaintext Secret files pass"
 
 reset_repo
 barman="2-k3s/06.postgres/operator-kustomization/barman-manifest.yaml"
@@ -221,9 +220,17 @@ git -C "$tmp" add fixtures/short-mixed-class.yaml
 expect_fail "short mixed-class value under a non-sensitive key fails"
 
 reset_repo
-servarr="2-k3s/08.servarr/_shared/secrets/postgres-secret.yaml"
-printf '  optional-database: "jellyseerr"\n  optional-user: "prowlarr"\n  optional-instance: "radarr-database"\n' >>"$tmp/$servarr"
-git -C "$tmp" add "$servarr"
+cat >"$tmp/fixtures/short-lowercase.yaml" <<'YAML'
+apiVersion: v1
+kind: Secret
+metadata:
+  name: short-lowercase-fixture
+stringData:
+  optional-database: "jellyseerr"
+  optional-user: "prowlarr"
+  optional-instance: "radarr-database"
+YAML
+git -C "$tmp" add fixtures/short-lowercase.yaml
 expect_pass "short lowercase template identifiers still pass the new band"
 
 reset_repo
