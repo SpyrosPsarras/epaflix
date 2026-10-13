@@ -2,25 +2,25 @@
 #
 # Two stages. `build` publishes upstream Lingarr.Server at the pinned commit
 # with the patch applied, using upstream's own restore/publish flags. `final`
-# is the exact upstream image the cluster already runs, with the published
+# is the matching upstream image, with the published
 # backend copied over /app. wwwroot (the Vue client) is not touched: it is
 # not part of the backend publish, and the base image already carries the
 # build for this same commit. Entrypoint, user, env and everything else come
 # from the base unchanged.
 #
 # UPSTREAM_COMMIT and the base digest must describe the same source: the base
-# image's assembly InformationalVersion is 0.0.0-dev+<UPSTREAM_COMMIT>, and the
-# base carries the wwwroot build for that same commit. UPSTREAM_COMMIT is main
-# 28f6a19, seven commits past release 1.3.0 (the 5eadc933 build), so it keeps
-# the upstream #432 Npgsql UTC fix; its matching base digest is the ghcr :main
+# image's org.opencontainers.image.revision must equal UPSTREAM_COMMIT, and the
+# base carries the wwwroot build for that same commit. UPSTREAM_COMMIT is
+# release 1.4.0 (9fba9f7), which keeps the upstream #432 Npgsql UTC fix and
+# fixes GHSA-256g-xxrf-xfpf; its matching base digest is the ghcr :1.4.0
 # build of that commit. Renovate no longer tracks this FROM line: :main has
 # been re-pushed backwards twice (PR #1368, then re-raised as #1434 on
 # 2026-09-17), and a digest bump without moving UPSTREAM_COMMIT first is always
 # wrong. Base digest moves go through upstream-release-watch row #270: move
 # UPSTREAM_COMMIT, pick the digest whose org.opencontainers.image.revision
 # label equals it, and build-lingarr.yml fails the build when the two disagree.
-ARG UPSTREAM_COMMIT=28f6a190529187c70fddb2b1435157ed1635dccb
-ARG BASE_IMAGE=ghcr.io/lingarr-translate/lingarr@sha256:c20a50283a3bf67cea84fc661aec5f5721ee248ceea1504da4f5c47880ee3e65
+ARG UPSTREAM_COMMIT=9fba9f7cc862e1d4af83794c39c8511058f722ae
+ARG BASE_IMAGE=ghcr.io/lingarr-translate/lingarr@sha256:8f392cf1efe718e0fcbc735d6d82df0b0bf86594bf64998aad85e8f306263774
 
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG UPSTREAM_COMMIT
