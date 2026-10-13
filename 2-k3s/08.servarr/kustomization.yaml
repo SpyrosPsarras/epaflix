@@ -89,12 +89,11 @@ images:
   - name: lscr.io/linuxserver/bazarr
     newTag: 1.6.2@sha256:c1673816321156b904af9b7e6415ea547ae9622e4acc375358f1e1eb9ed1e904
   # TEMP OVERRIDE (batch-contract, see images/lingarr/README.md): overlay source is upstream
-  # release 1.4.0 (9fba9f7) + images/lingarr/batch-contract.patch; the image pin follows
-  # in a separate PR after publishing. Upstream's chat batch path published
-  # untranslated subtitles as translated (522 positions kept in English in 3h, 2026-09-13),
-  # and its schema-less fallback crashed with NullReferenceException on null model content
-  # (98 "All configured batch translation services failed." deaths 09-12..09-15, the signal
-  # behind the lingarr-drain-watch failures that kept the maintenance App Degraded). The
+  # release 1.4.0 (9fba9f7) + images/lingarr/batch-contract.patch. Upstream's chat batch path
+  # published untranslated subtitles as translated (522 positions kept in English in 3h,
+  # 2026-09-13), and its schema-less fallback crashed with NullReferenceException on null
+  # model content (98 "All configured batch translation services failed." deaths 09-12..09-15,
+  # the signal behind the lingarr-drain-watch failures that kept the maintenance App Degraded). The
   # content-translation API also cancelled work whenever the caller disconnected (Bazarr's
   # 1920s HTTP timeout), an endless retry loop on big files - the patch detaches the
   # translation from the request token and converges retries onto the running request
@@ -110,7 +109,7 @@ images:
   # Renovate must not track this image (disabled in .github/renovate.json).
   - name: ghcr.io/lingarr-translate/lingarr
     newName: ghcr.io/spyrospsarras/lingarr
-    digest: sha256:44cb79bfa47acfdf9ac3a4818e22a38dbee9db40d7e2e40f20961ee3201e8f93
+    digest: sha256:1188eef4d72878e607cecd21942540ee8a1cd72f8c6920211132afa182dcc29e
   - name: iampuid0/neutarr
     newTag: 1.11.1@sha256:c3df05a854c93aac640708e002e8fe85193f73da8406c8a230a5484a342a1107
   - name: qbittorrentofficial/qbittorrent-nox
