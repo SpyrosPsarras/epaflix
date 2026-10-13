@@ -320,6 +320,39 @@ nested = {"🏠" = ["fixture", {enabled = false}]}
         encoded = '\n'.join(runtime.toml_value(key) + ' = ' + runtime.toml_value(value) for key, value in values.items())
         self.assertEqual(tomllib.loads(encoded), values)
 
+    def test_pi_text_generation_selections_and_options_survive_restart(self):
+        self.prepare()
+        path = self.home / '.t3/userdata/settings.json'
+        path.parent.mkdir(parents=True)
+        canonical = {'instanceId': 'pi', 'model': 'cliproxy-textgen/claude/claude-haiku-5-5'}
+        options = [{'id': 'thinking', 'value': 'high'}]
+        cases = [
+            ({'instanceId': 'pi', 'model': 'cliproxy/claude/fixture', 'options': options},
+             {**canonical, 'options': options}),
+            ({'instanceId': 'pi', 'model': 'other/fixture', 'options': []},
+             {**canonical, 'options': []}),
+            ({'instanceId': 'pi', 'model': 'cliproxy-textgen/'}, canonical),
+            ({'instanceId': 'pi', 'model': 'other/fixture', 'options': 'invalid'}, canonical),
+            ({'instanceId': 'pi'}, canonical),
+            ({'instanceId': 'pi', 'model': 'cliproxy-textgen/claude/fixture', 'options': options}, None),
+            ({'instanceId': 'codex', 'model': 'codex/fixture', 'options': options}, None)]
+        default = {'instanceId': 'pi', 'model': 'cliproxy/claude/fixture', 'options': options}
+        for selection, expected in cases:
+            with self.subTest(selection=selection):
+                path.write_text(json.dumps({'defaultModelSelection': default,
+                                            'textGenerationModelSelection': selection}))
+                for restart in range(2):
+                    with self.subTest(restart=restart):
+                        runtime.apply(self.inputs, self.home, 'homelab')
+                        settings = json.loads(path.read_text())
+                        self.assertEqual(settings['textGenerationModelSelection'],
+                                         selection if expected is None else expected)
+                        self.assertEqual(settings['defaultModelSelection'], default)
+                        if restart == 0:
+                            first = path.read_bytes()
+                        else:
+                            self.assertEqual(path.read_bytes(), first)
+
     def test_provider_preferences_and_codex_trust_survive_managed_configuration(self):
         self.prepare()
         state = self.home / '.t3/userdata'

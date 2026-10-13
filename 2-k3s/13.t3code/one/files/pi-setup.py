@@ -68,6 +68,21 @@ def write_aliases(home):
             'providerName': 'cliproxy', 'baseUrl': base_url, 'modelAliases': aliases})
 
 
+def write_models(home):
+    base_url = os.environ.get('ANTHROPIC_BASE_URL', '').rstrip('/')
+    if not base_url:
+        print('pi-setup: ANTHROPIC_BASE_URL is empty; previous models.json kept', file=sys.stderr)
+        return
+    path = home / '.pi/agent/models.json'
+    models = json.loads(path.read_text()) if path.exists() else {}
+    models.setdefault('providers', {})['cliproxy-textgen'] = {
+        'baseUrl': base_url, 'api': 'anthropic-messages', 'apiKey': '$CLIPROXYAPI_API_KEY',
+        'models': [{'id': 'claude/claude-haiku-5-5', 'name': 'Claude Haiku 5.5 (text generation)',
+                    'reasoning': True, 'input': ['text'], 'contextWindow': 1000000,
+                    'maxTokens': 128000, 'compat': {'forceAdaptiveThinking': True}}]}
+    write_json(path, models)
+
+
 def write(home, safety_entry, ssh_path=Path('/scripts/homelab-ssh.md')):
     if not Path(safety_entry).is_absolute():
         raise ValueError('Safety extension entry must be an absolute path')
@@ -79,6 +94,7 @@ def write(home, safety_entry, ssh_path=Path('/scripts/homelab-ssh.md')):
     settings.setdefault('pi-cliproxyapi-provider', {})['gpt56ContextWindow'] = 'canonical'
     settings.setdefault('retry', {})['maxRetries'] = 8
     write_json(settings_path, settings)
+    write_models(home)
     write_aliases(home)
     try:
         instructions = (home / '.claude/AGENTS.md').read_text() + '\n' + ssh_path.read_text()
