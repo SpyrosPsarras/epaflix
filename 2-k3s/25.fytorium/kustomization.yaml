@@ -14,6 +14,6 @@ generators:
   - ksops-generator.yaml
 
 images:
-  # built by github.com/SpyrosPsarras/epaflix-fytorium CI; bump the digest to roll out a new version
+  # Built by source CI; bump SERVER_VERSION in deployment.yaml with this digest.
   - name: ghcr.io/spyrospsarras/epaflix-fytorium
-    digest: sha256:d964dbac864b7c77e73a7d46ec384ed43fbaf3067c32228d7a8e044737181bb4
+    digest: sha256:9aa09b45a666fc12ae0d2b109414dba6109cf28a282b5a4a9afd690a1d550395

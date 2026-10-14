@@ -36,6 +36,10 @@ spec:
             capabilities:
               drop: ["ALL"]
           env:
+            - name: MIN_APP_VERSION
+              value: "1.0.0"
+            - name: SERVER_VERSION
+              value: "7cc52b9"
             - name: ORIGIN
               value: https://fytorium.epaflix.com
             - name: OIDC_ISSUER
