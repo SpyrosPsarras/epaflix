@@ -1438,3 +1438,224 @@ tests:
             exp_annotations:
               summary: "Job t3code/t3code-image-prepull failed"
               description: "Job t3code/t3code-image-prepull (no CronJob owner) failed. For the servarr reporter CronJobs a non-zero exit is a FINDING, not a crash - read the Job log for the report before touching anything. This alert clears by itself 90m after a later run starts, unless that run fails too; deleting the failed Job object is not required and is not a fix."
+
+  - name: Vaultwarden backup exceeds 30 hours with duplicate KSM series
+    interval: 1m
+    input_series:
+      - series: 'kube_cronjob_status_last_successful_time{namespace="vaultwarden",cronjob="vaultwarden-backup",instance="ksm-1",pod="ksm-1"}'
+        values: "-107940x10"
+      - series: 'kube_cronjob_status_last_successful_time{namespace="vaultwarden",cronjob="vaultwarden-backup",instance="ksm-2",pod="ksm-2"}'
+        values: "-107940x10"
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: VaultwardenBackupOverdue
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: VaultwardenBackupOverdue
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: VaultwardenBackupOverdue
+        exp_alerts: &vaultwarden_backup_overdue
+          - exp_labels:
+              namespace: vaultwarden
+              cronjob: vaultwarden-backup
+              severity: critical
+              component: vaultwarden
+            exp_annotations:
+              summary: "Vaultwarden backup is overdue"
+              description: "No successful Vaultwarden backup in over 30 hours, or the CronJob has never succeeded. Check vaultwarden-backup Job logs and the vaultwarden.epaflix.com/backup-paused Deployment annotation. Restore runbook: 2-k3s/26.vaultwarden/OPERATIONS.md."
+
+  - name: Vaultwarden CronJob exists but has never succeeded
+    interval: 1m
+    input_series:
+      - series: 'kube_cronjob_info{namespace="vaultwarden",cronjob="vaultwarden-backup",instance="ksm-1",pod="ksm-1",schedule="30 2 * * *"}'
+        values: "1x10"
+      - series: 'kube_cronjob_info{namespace="vaultwarden",cronjob="vaultwarden-backup",instance="ksm-2",pod="ksm-2",schedule="30 2 * * *"}'
+        values: "1x10"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: VaultwardenBackupOverdue
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: VaultwardenBackupOverdue
+        exp_alerts: *vaultwarden_backup_overdue
+
+  - name: Vaultwarden zero success timestamp also means never succeeded
+    interval: 1m
+    input_series:
+      - series: 'kube_cronjob_info{namespace="vaultwarden",cronjob="vaultwarden-backup"}'
+        values: "1x10"
+      - series: 'kube_cronjob_status_last_successful_time{namespace="vaultwarden",cronjob="vaultwarden-backup"}'
+        values: "0x10"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: VaultwardenBackupOverdue
+        exp_alerts: *vaultwarden_backup_overdue
+
+  - name: Vaultwarden recent backup is not overdue
+    interval: 1m
+    input_series:
+      - series: 'kube_cronjob_info{namespace="vaultwarden",cronjob="vaultwarden-backup"}'
+        values: "1x20"
+      - series: 'kube_cronjob_status_last_successful_time{namespace="vaultwarden",cronjob="vaultwarden-backup"}'
+        values: "60x20"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: VaultwardenBackupOverdue
+        exp_alerts: []
+
+  - name: Missing Vaultwarden CronJob does not imply it has never succeeded
+    interval: 1m
+    input_series: []
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: VaultwardenBackupOverdue
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: VaultwardenBackupFailed
+        exp_alerts: []
+
+  - name: Only the latest failed Vaultwarden Job alerts once across KSM replicas
+    interval: 1m
+    input_series:
+      - series: 'kube_job_status_start_time{namespace="vaultwarden",job_name="vaultwarden-backup-100",instance="ksm-1",pod="ksm-1"}'
+        values: "100x20"
+      - series: 'kube_job_status_start_time{namespace="vaultwarden",job_name="vaultwarden-backup-100",instance="ksm-2",pod="ksm-2"}'
+        values: "100x20"
+      - series: 'kube_job_failed{condition="true",namespace="vaultwarden",job_name="vaultwarden-backup-100",instance="ksm-1",pod="ksm-1"}'
+        values: "1x20"
+      - series: 'kube_job_failed{condition="true",namespace="vaultwarden",job_name="vaultwarden-backup-100",instance="ksm-2",pod="ksm-2"}'
+        values: "1x20"
+      - series: 'kube_job_status_start_time{namespace="vaultwarden",job_name="vaultwarden-backup-200",instance="ksm-1",pod="ksm-1"}'
+        values: "200x20"
+      - series: 'kube_job_status_start_time{namespace="vaultwarden",job_name="vaultwarden-backup-200",instance="ksm-2",pod="ksm-2"}'
+        values: "200x20"
+      - series: 'kube_job_failed{condition="true",namespace="vaultwarden",job_name="vaultwarden-backup-200",instance="ksm-1",pod="ksm-1"}'
+        values: "1x20"
+      - series: 'kube_job_failed{condition="true",namespace="vaultwarden",job_name="vaultwarden-backup-200",instance="ksm-2",pod="ksm-2"}'
+        values: "1x20"
+      - series: 'kube_job_owner{namespace="vaultwarden",job_name="vaultwarden-backup-100",owner_kind="CronJob",owner_name="vaultwarden-backup",instance="ksm-1",pod="ksm-1"}'
+        values: "1x20"
+      - series: 'kube_job_owner{namespace="vaultwarden",job_name="vaultwarden-backup-100",owner_kind="CronJob",owner_name="vaultwarden-backup",instance="ksm-2",pod="ksm-2"}'
+        values: "1x20"
+      - series: 'kube_job_owner{namespace="vaultwarden",job_name="vaultwarden-backup-200",owner_kind="CronJob",owner_name="vaultwarden-backup",instance="ksm-1",pod="ksm-1"}'
+        values: "1x20"
+      - series: 'kube_job_owner{namespace="vaultwarden",job_name="vaultwarden-backup-200",owner_kind="CronJob",owner_name="vaultwarden-backup",instance="ksm-2",pod="ksm-2"}'
+        values: "1x20"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: VaultwardenBackupFailed
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: VaultwardenBackupFailed
+        exp_alerts: &vaultwarden_backup_failed
+          - exp_labels:
+              namespace: vaultwarden
+              job_name: vaultwarden-backup-200
+              severity: critical
+              component: vaultwarden
+            exp_annotations:
+              summary: "Latest Vaultwarden backup failed"
+              description: "Vaultwarden backup Job vaultwarden-backup-200 failed. Check its Job logs and the vaultwarden.epaflix.com/backup-paused Deployment annotation if Vaultwarden stayed at zero replicas. Restore runbook: 2-k3s/26.vaultwarden/OPERATIONS.md."
+
+      - eval_time: 20m
+        alertname: VaultwardenBackupFailed
+        exp_alerts: *vaultwarden_backup_failed
+      - eval_time: 20m
+        alertname: KubeJobFailedLastRun
+        exp_alerts: []
+
+  - name: Old failed Vaultwarden Job does not alert after a newer run starts
+    interval: 1m
+    input_series:
+      - series: 'kube_job_status_start_time{namespace="vaultwarden",job_name="vaultwarden-backup-100"}'
+        values: "100x15"
+      - series: 'kube_job_failed{condition="true",namespace="vaultwarden",job_name="vaultwarden-backup-100"}'
+        values: "1x15"
+      - series: 'kube_job_status_start_time{namespace="vaultwarden",job_name="vaultwarden-backup-200"}'
+        values: "_x5 360x9"
+      - series: 'kube_job_failed{condition="true",namespace="vaultwarden",job_name="vaultwarden-backup-200"}'
+        values: "_x5 0x9"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: VaultwardenBackupFailed
+        exp_alerts: []
+
+  - name: Vaultwarden failed HTTP probe fires after 15 minutes despite healthy replicas
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="vaultwarden-probe",instance="https://vaultwarden.epaflix.com/alive"}'
+        values: "0x20"
+      - series: 'kube_deployment_status_replicas_available{namespace="vaultwarden",deployment="vaultwarden"}'
+        values: "1x20"
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: VaultwardenDown
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: VaultwardenDown
+        exp_alerts: &vaultwarden_down
+          - exp_labels:
+              severity: critical
+              component: vaultwarden
+            exp_annotations:
+              summary: "Vaultwarden is unavailable"
+              description: "Vaultwarden /alive is unreachable or no replica has been available for 15 minutes. Check the Deployment and backup Job logs, including the vaultwarden.epaflix.com/backup-paused Deployment annotation if a backup left it at zero replicas. Restore runbook: 2-k3s/26.vaultwarden/OPERATIONS.md."
+
+  - name: Vaultwarden zero replicas fires once despite duplicated KSM and a healthy probe
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="vaultwarden-probe",instance="https://vaultwarden.epaflix.com/alive"}'
+        values: "1x20"
+      - series: 'kube_deployment_status_replicas_available{namespace="vaultwarden",deployment="vaultwarden",instance="ksm-1",pod="ksm-1"}'
+        values: "0x20"
+      - series: 'kube_deployment_status_replicas_available{namespace="vaultwarden",deployment="vaultwarden",instance="ksm-2",pod="ksm-2"}'
+        values: "0x20"
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: VaultwardenDown
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: VaultwardenDown
+        exp_alerts: *vaultwarden_down
+
+  - name: Vaultwarden simultaneous probe and replica failures yield one alert
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="vaultwarden-probe",instance="https://vaultwarden.epaflix.com/alive"}'
+        values: "0x20"
+      - series: 'kube_deployment_status_replicas_available{namespace="vaultwarden",deployment="vaultwarden"}'
+        values: "0x20"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: VaultwardenDown
+        exp_alerts: *vaultwarden_down
+
+  - name: Vaultwarden brief backup scale-down does not alert
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="vaultwarden-probe",instance="https://vaultwarden.epaflix.com/alive"}'
+        values: "1x5 0 1x20"
+      - series: 'kube_deployment_status_replicas_available{namespace="vaultwarden",deployment="vaultwarden"}'
+        values: "1x5 0 1x20"
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: VaultwardenDown
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: VaultwardenDown
+        exp_alerts: []
+
+  - name: Vaultwarden healthy service and unrelated TLS failure do not alert
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="vaultwarden-probe",instance="https://vaultwarden.epaflix.com/alive"}'
+        values: "1x20"
+      - series: 'probe_success{job="tls-probe",instance="https://truenas.epaflix.com"}'
+        values: "0x20"
+      - series: 'kube_deployment_status_replicas_available{namespace="vaultwarden",deployment="vaultwarden"}'
+        values: "1x20"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: VaultwardenDown
+        exp_alerts: []
