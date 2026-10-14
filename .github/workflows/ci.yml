@@ -298,6 +298,7 @@ jobs:
             2-k3s/23.mcp-hub/instances/homelab
             2-k3s/23.mcp-hub/instances/work
             2-k3s/23.mcp-hub/reader/homelab
+            2-k3s/23.mcp-hub/reader/canary
             2-k3s/20.bread
             2-k3s/21.tailscale
             2-k3s/21.vidar-edge
@@ -343,6 +344,7 @@ jobs:
           /tmp/mcp-hub/bin/python 2-k3s/23.mcp-hub/files/vaultwarden_mcp.py --selftest
           python3 2-k3s/23.mcp-hub/tools/hub_clients.py --selftest
           /tmp/mcp-hub/bin/python -m unittest discover -s 2-k3s/23.mcp-hub/tests -v
+          bash -n 2-k3s/23.mcp-hub/reader/provision-homelab.sh
           bash 2-k3s/23.mcp-hub/reader/sync-image.sh
           git diff --exit-code -- 2-k3s/23.mcp-hub/reader/homelab/deployment.yaml
           # The t3code pod's copy of hub_clients.py (and the other shared inputs) must not drift.
