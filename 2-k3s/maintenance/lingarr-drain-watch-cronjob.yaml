@@ -22,8 +22,8 @@ data:
     judged (unknown statuses, untimestamped terminal requests, or
     pending/active work with zero terminal events - a stuck pipeline).
     Known faults: cancels pinned at ~1800s are Lingarr's 30-min job-queue
-    invisibility timeout (#1239); upstream 404s can mean an OpenRouter ZDR
-    guardrail or a dropped model. 503s can outlast the retry backoff.
+    invisibility timeout (#1239); upstream 404s can mean an unavailable
+    Antigravity model on main cliproxy. 503s can outlast the retry backoff.
     request_timeout is minutes (floor 30) and does not bind.
 
     Run with --selftest to exercise bucketing/ETA against synthetic payloads
@@ -283,18 +283,20 @@ data:
         if pending and counts["done_starvation"] == 0:
             print("\nFAIL: starvation - 0 completions in %.0fh with pending or active "
                   "work; quota is being spent but nothing completes. ACTION: check "
-                  "per-batch token waste and other consumers of the cliproxy 'or-free' pool."
+                  "per-batch token waste and other consumers of Antigravity "
+                  "gemini-3.8-flash-high on main cliproxy (deployment cliproxy "
+                  "in namespace remote-pi)."
                   % starvation_hours)
             return 1
         if fault_rate >= threshold:
             print("\nFAIL: fault rate %.1f%% >= %.0f%% - non-quota translations are "
                   "being canceled or erroring. ACTION: inspect the dominant fault; "
-                  "re-run batch-repro.sh to check the provider path. Upstream 404s "
-                  "can mean OpenRouter ZDR guardrails or a dropped model; check "
-                  "GET /api/v1/models/user with the sk-or-v1 upstream key from "
-                  "cliproxy-free-config. For 503s, compare retry_delay and "
-                  "max_retries floors in lingarr.yaml with the 'cooldown remaining=' "
-                  "values in the cliproxy-free log. "
+                  "Upstream 404s "
+                  "can mean an unavailable Antigravity model; check main cliproxy's "
+                  "GET /v1/models for gemini-3.8-flash-high. For 503s, compare "
+                  "retry_delay and max_retries floors in lingarr.yaml with the "
+                  "'cooldown remaining=' values in the main cliproxy log "
+                  "(kubectl -n remote-pi logs deploy/cliproxy). "
                   "Cancels pinned at ~1800s are Lingarr's 30-min job-queue "
                   "invisibility timeout (#1239). request_timeout is minutes "
                   "(floor 30) and does not bind. HTTP 429 / "
