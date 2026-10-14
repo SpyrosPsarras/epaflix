@@ -4,9 +4,10 @@ This is a separate manual-sync Application, `vault-reader-homelab`, in
 namespace `vault-reader-homelab`. Its ClusterIP is
 `http://vault-reader.vault-reader-homelab.svc.cluster.local:8000`.
 The ordinary hub, mixed connector and work tools do not depend on it.
-Work reader routes remain disabled. No account, grants or private inputs
-have been approved. Keep #1778 open. Do not sync or activate it on the
-strength of offline fixtures.
+Work reader routes remain disabled. The owner approved the fixture-only
+scope in #1778. Follow the provisioner, manual sync and canary procedure
+below for activation. Keep #1778 open until the live checks certify G1
+through G3.
 
 ## Private inputs and configuration
 
@@ -212,7 +213,9 @@ SDK/WASM or server internals, crypto interoperability, or live feature flags.
 Fixture composition tests core/HTTP failure latching with synthetic failed CLI
 commands, not real account maintenance.
 
-## First-sync gate still missing
+<a id="first-sync-gate-still-missing"></a>
+
+## Provisioner, manual sync and canary gates
 
 1. G1: Owner approves the dedicated non-administrator account, complete item
    and collection inventory, disjoint homelab-only grants, readOnly=true,
@@ -221,11 +224,42 @@ commands, not real account maintenance.
    effective readOnly/manage/group/all-collections authority.
 2. G2: Owner supplies reviewed private input/account/bearer values through the
    secret workflow and approves the independent Application/manual first sync.
-   Public `unprovisioned` revisions are not approval.
+   Public revision annotations are not approval.
 3. G3: An explicitly authorized live canary uses dummy items only on the
    existing server. Verify metadata, password/custom fields, attachment reads,
    denied writes/out-of-scope access, actual grants, token/burst behavior,
    absence of automatic account-maintenance writes and continued legacy service. No real-item migration or account mutation is
    part of these offline tests.
 
-None of G1 through G3 has been supplied or performed here.
+For authorized activation, follow the
+[coordinated homelab input procedure](../instances/README.md#coordinated-homelab-input-changes)
+in this order:
+
+1. P1: The operator first manually syncs `vault-reader-homelab` and
+   `mcp-hub-homelab` to create the namespaces. With the required Secrets
+   missing, pods wait for their mounts and containers cannot start or log in.
+   The reader also validates and stages inputs before serving requests;
+   startup, health and schema discovery do not log in.
+2. P2: Run `bash 2-k3s/23.mcp-hub/reader/provision-homelab.sh` on the
+   owner's desktop, outside T3. The wizard stages `vault-reader-inputs`,
+   `mcp-hub-instance` and `vault-canary-client`. After staging, kubelet retries
+   the mounts and both pods start on their own at `unprovisioned` in no set
+   order without logging in, then the R4 sync recreates them with the new
+   revision.
+3. P3: Apply R3: one tracked change sets both inputs revisions to the same
+   new revision.
+4. P4: Apply R4.
+5. P5: Apply the separate bounded canary Job, which no Application manages:
+
+```sh
+kubectl --context epaflix apply -k 2-k3s/23.mcp-hub/reader/canary
+kubectl --context epaflix -n mcp-hub-homelab logs job/vault-reader-canary
+```
+
+Each check prints only `PASS C1` through `PASS C11`, or
+`FAIL C<number>: <non-secret reason>`. Any failure exits nonzero. Inspect
+the Job status as well as all eleven lines; a deadline or killed pod is
+not acceptance. Delete the finished Job before a deliberate rerun. The
+wizard then compares the reader account's before/after KDF settings.
+This comparison is not proof that no other account maintenance occurred.
+These offline artifacts do not certify G1 through G3.
