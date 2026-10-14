@@ -12,7 +12,7 @@ from urllib.request import Request, urlopen
 PACKAGES = ['pi-cliproxyapi-provider',
             '@spences10/pi-redact', '@juicesharp/rpiv-todo',
             '@juicesharp/rpiv-ask-user-question',
-            'superpowers', '@dietrichgebert/ponytail']
+            'superpowers', '@dietrichgebert/ponytail', 'not-enough-retry']
 ALIASES = {
     'openrouter/or-glm-5.3-flash': 'openrouter/z-ai/glm-5.3-flash',
     'openrouter/or-deepseek-v4-flash': 'openrouter/deepseek/deepseek-v4-flash',
