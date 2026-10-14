@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: Secret
+type: Opaque
+metadata:
+    name: vaultwarden-db
+    namespace: vaultwarden
+    annotations:
+        mcp-hub.epaflix.com/revision: 20260929T221146Z
+        argocd.argoproj.io/sync-options: Delete=false
+stringData:
+    password: ENC[AES256_GCM,data:0FugsVQwPqRDW1IJe50nX5ZtPlvf1CcDB1w2BwwucRnZJGIWPpOFcetOcnnRyWY5fa1pUVgfmHIxdVFMpcb0iA==,iv:M3C/qwCa1uptO8ruJZl8ZLR2593uUIKKfsLSXG0ZM6o=,tag:UBZuFz8+DLK5VcbZUSQ7ng==,type:str]
+    DATABASE_URL: ENC[AES256_GCM,data:R/unBvfTwpbM5fxXLhfLGwy7R9bcQVMXe88UUvdwPH0NeROr0xUh+nL9QJC/F8GP6cE1qyh4UeYCAc6pqfxn7N9nX4eNzG/sx50oQ3vkJFuz4DRdRmWZAoKt6b2pNkoPHTm+puOBGC7Qehcg1sopfvSUd0/LIH+7R1FLCz7v0IvxS6ifHejW+DRQZAT1eN4DumxhqrOEaewW2/oYKCd3KYKl,iv:+BdBoS1DZVB6h+Kzg/rdht7vmsU45/TeQFhRwDhTqjY=,tag:MiwE/VVwkhTinSS4Bq45ww==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBqcjl2dzFrV2RzVmdFYzlG
+            b3lJelZzUjJHeFh5UCtXSnR5RHZ0aU5QODBVCjMydmd3T0dMUjAxS3BRZVhrOW9L
+            UWVwbkZ0NitabS8yOERodnJ6MHhMWlUKLS0tIEFDOTFZOGF3cVd5M2RqL2Z4TlZv
+            VEJ0QnZmeUdHN3p1aTZyazJyaVJUUEUKWsGbCz97u+LS0VDPciW+SCgY865eXu1p
+            /YdoxmJ0dZXYv/eXwMpY1sGkL/VGkPmbqLIZNuizqil80dmdQ4iLJA==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1586thf5vkcdf5lcn3zwjpu8ltkwyq8efrhj8lr0vdrrt9k5f3qgsxeg7gx
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-10-14T14:50:29Z"
+    mac: ENC[AES256_GCM,data:ne+bXTg70tkQrY9O+bpsKp7OFHnhDGllc5FlWOgear6zuWGB0ThXlDUhF4SLMA4FRG2vAhv2/P1+1NgJ/cARYmQqu9dw1ATvKjV/kxaHGJMBNiJbdD5n1FNbZdI9F4C9LrYuvouEpTVbQWO5AiJ7xmr0NN3BHE8Iybbv+IAwaBw=,iv:thm/8pR0DImsK6UwLWUMHQ+2w0m/tyb2UqZGUr1uZwg=,tag:NwYx31UtH4aT8d1PdTE3BA==,type:str]
+    version: 3.13.3
