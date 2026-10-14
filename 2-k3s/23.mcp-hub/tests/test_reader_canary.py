@@ -210,6 +210,9 @@ class CanaryTests(unittest.TestCase):
                 self.assert_quiet(output, errors)
                 self.assertEqual(code, 0, output)
                 self.assertEqual(output.splitlines(), ['PASS C' + str(n) for n in range(1, 12)])
+                self.assertEqual(self.requests.count('/vaultwarden'), 22)
+                self.assertEqual(self.requests.count('/vault-secret'), 14)
+                self.assertEqual(self.requests.count('/vault-attachment'), 2)
 
     def test_unavailable_reader_is_not_duplicate_refusal(self):
         code, output, errors = self.run_canary(refusal_status=503)
@@ -266,6 +269,19 @@ class CanaryTests(unittest.TestCase):
         self.assertIn('FAIL C3:', output)
         self.assertIn('FAIL C10:', output)
 
+    def test_timeout_budgets_cover_reader_and_helper_operations(self):
+        spec = importlib.util.spec_from_file_location('canary_timeouts', SCRIPT)
+        canary = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(canary)
+        self.assertGreater(canary.HTTP_TIMEOUT, 125)
+        with patch.object(canary.subprocess, 'run') as run:
+            canary.helper({'collection_id': IDS[0], 'item_id': IDS[1]}, 'pass', attachment=True)
+        command = run.call_args.args[0]
+        child_timeout = float(command[command.index('--timeout') + 1])
+        self.assertGreaterEqual(child_timeout, 0.1)
+        self.assertLessEqual(child_timeout, 120)
+        self.assertGreater(run.call_args.kwargs['timeout'], 2 * 130 + child_timeout)
+
     def test_http_calls_have_total_deadlines(self):
         spec = importlib.util.spec_from_file_location('canary_timeouts', SCRIPT)
         canary = importlib.util.module_from_spec(spec)
@@ -302,8 +318,12 @@ class CanaryTests(unittest.TestCase):
         self.assertEqual(job['metadata']['name'], 'vault-reader-canary')
         self.assertEqual(job['metadata']['namespace'], 'mcp-hub-homelab')
         self.assertEqual(job['spec']['backoffLimit'], 0)
-        self.assertGreater(job['spec']['activeDeadlineSeconds'], 8 * 65 + 28 * 30 + 3)
-        self.assertLessEqual(job['spec']['activeDeadlineSeconds'], 1800)
+        spec = importlib.util.spec_from_file_location('canary_timeouts', SCRIPT)
+        canary = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(canary)
+        self.assertGreater(job['spec']['activeDeadlineSeconds'],
+                           8 * canary.HELPER_TIMEOUT + 28 * canary.HTTP_TIMEOUT + 3)
+        self.assertLessEqual(job['spec']['activeDeadlineSeconds'], 6600)
         self.assertGreater(job['spec']['ttlSecondsAfterFinished'], 0)
         template = job['spec']['template']
         self.assertEqual(template['metadata']['labels']['app'], 'vault-reader-canary')
