@@ -1,0 +1,13 @@
+apiVersion: viaduct.ai/v1
+kind: ksops
+metadata:
+  name: vaultwarden-secrets
+  annotations:
+    config.kubernetes.io/function: |
+      exec:
+        path: ksops
+files:
+  - vaultwarden-db-role.enc.yaml
+  - vaultwarden-db.enc.yaml
+  - vaultwarden-smtp.enc.yaml
+  - vaultwarden-backup.enc.yaml
