@@ -213,6 +213,8 @@ SDK/WASM or server internals, crypto interoperability, or live feature flags.
 Fixture composition tests core/HTTP failure latching with synthetic failed CLI
 commands, not real account maintenance.
 
+<a id="first-sync-gate-still-missing"></a>
+
 ## Provisioner, manual sync and canary gates
 
 1. G1: Owner approves the dedicated non-administrator account, complete item
@@ -229,12 +231,25 @@ commands, not real account maintenance.
    absence of automatic account-maintenance writes and continued legacy service. No real-item migration or account mutation is
    part of these offline tests.
 
-For authorized activation, run `bash 2-k3s/23.mcp-hub/reader/provision-homelab.sh`
-on the owner's desktop, outside T3. The agent first manually syncs
-`vault-reader-homelab` and `mcp-hub-homelab` to create the namespaces; pods
-wait for the private Secrets. After the owner reports "secrets applied",
-the agent manually syncs both Applications and checks pod readiness.
-Then apply the separate bounded Job, which no Application manages:
+For authorized activation, follow the
+[coordinated homelab input procedure](../instances/README.md#coordinated-homelab-input-changes)
+in this order:
+
+1. P1: The operator first manually syncs `vault-reader-homelab` and
+   `mcp-hub-homelab` to create the namespaces. With the required Secrets
+   missing, pods wait for their mounts and containers cannot start or log in.
+   The reader also validates and stages inputs before serving requests;
+   startup, health and schema discovery do not log in.
+2. P2: Run `bash 2-k3s/23.mcp-hub/reader/provision-homelab.sh` on the
+   owner's desktop, outside T3. The wizard stages `vault-reader-inputs`,
+   `mcp-hub-instance` and `vault-canary-client`. After staging, kubelet retries
+   the mounts and both pods start on their own at `unprovisioned` in no set
+   order without logging in, then the R4 sync recreates them with the new
+   revision.
+3. P3: Apply R3: one tracked change sets both inputs revisions to the same
+   new revision.
+4. P4: Apply R4.
+5. P5: Apply the separate bounded canary Job, which no Application manages:
 
 ```sh
 kubectl --context epaflix apply -k 2-k3s/23.mcp-hub/reader/canary
