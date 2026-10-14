@@ -280,12 +280,12 @@ and organizational policy checks.
 
 ### Coordinated homelab input changes
 
-The hub revision defaults to `unprovisioned`, like the reader revision.
-Leave both unchanged until approved private inputs are staged. Use a new
-opaque operator revision for each approved change, never a password/token
-hash, private identifier or secret-derived value. A revision is a rollout
-marker, not approval or evidence of valid grants. It changes only the
-homelab hub pod template, not the namespace, stable Secret name or auth rules.
+Stage the approved private inputs a revision covers before changing it.
+Use a new opaque operator revision for each approved change, never a
+password/token hash, private identifier or secret-derived value. A revision
+is a rollout marker, not approval or evidence of valid grants. It changes
+only the homelab hub pod template, not the namespace, stable Secret name or
+auth rules.
 
 1. R1: Obtain approval for the exact private change, downtime and manual sync.
    Stop old homelab consumers through the approved procedure before changing

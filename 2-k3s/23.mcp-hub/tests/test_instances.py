@@ -350,7 +350,7 @@ class RenderTests(unittest.TestCase):
             deployment = next(doc for doc in documents if doc["kind"] == "Deployment")
             template = deployment["spec"]["template"]
             self.assertEqual(deployment["metadata"]["namespace"], "mcp-hub-homelab")
-            self.assertEqual(template["metadata"]["annotations"][annotation], "unprovisioned")
+            self.assertEqual(template["metadata"]["annotations"][annotation], "r1")
             volume = next(volume for volume in template["spec"]["volumes"] if volume["name"] == "instance")
             self.assertEqual(volume["secret"]["secretName"], "mcp-hub-instance")
             secret = next(doc for doc in documents if doc["kind"] == "Secret")
@@ -368,12 +368,12 @@ class RenderTests(unittest.TestCase):
             self.assertEqual(next(doc for doc in rotated if doc["kind"] == "Deployment"), deployment)
 
             path = root / "instances/homelab/kustomization.yaml"
-            path.write_text(path.read_text().replace('"unprovisioned"', '"synthetic-r2"'))
+            path.write_text(path.read_text().replace('"r1"', '"synthetic-r2"'))
             revised = render(overlay)
             rolled = next(doc for doc in revised if doc["kind"] == "Deployment")
             self.assertNotEqual(rolled["spec"]["template"], template)
             self.assertEqual(rolled["spec"]["template"]["metadata"]["annotations"][annotation], "synthetic-r2")
-            rolled["spec"]["template"]["metadata"]["annotations"][annotation] = "unprovisioned"
+            rolled["spec"]["template"]["metadata"]["annotations"][annotation] = "r1"
             self.assertEqual(revised, rotated)
             self.assertEqual(render(root / "instances/work"), work)
 
