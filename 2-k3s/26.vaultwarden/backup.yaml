@@ -1,0 +1,140 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vaultwarden-backup
+  namespace: vaultwarden
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: vaultwarden-backup
+  namespace: vaultwarden
+rules:
+  - apiGroups: [apps]
+    resources: [deployments, deployments/scale]
+    resourceNames: [vaultwarden]
+    verbs: [get, patch, update]
+  - apiGroups: ['']
+    resources: [pods]
+    verbs: [list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: vaultwarden-backup
+  namespace: vaultwarden
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: vaultwarden-backup
+subjects:
+  - kind: ServiceAccount
+    name: vaultwarden-backup
+    namespace: vaultwarden
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: vaultwarden-backup
+  namespace: vaultwarden
+spec:
+  schedule: '30 2 * * *'
+  timeZone: Etc/UTC
+  suspend: false
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 3600
+      template:
+        metadata:
+          labels: {app: vaultwarden-backup}
+        spec:
+          serviceAccountName: vaultwarden-backup
+          restartPolicy: Never
+          terminationGracePeriodSeconds: 120
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            fsGroup: 10001
+            seccompProfile: {type: RuntimeDefault}
+          # local-path RWO: the bound PVC schedules this Job to its storage node.
+          initContainers:
+            - name: restic
+              image: restic/restic
+              command: [sh, -ec, 'cp "$(command -v restic)" /tools/restic; cp /etc/ssl/certs/ca-certificates.crt /tools/ca-certificates.crt']
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: {drop: [ALL]}
+              volumeMounts:
+                - {name: tools, mountPath: /tools}
+            - name: kubectl
+              # The copy command needs a shell; rancher/kubectl is scratch-only.
+              image: alpine/kubectl
+              command: [sh, -ec, 'cp "$(command -v kubectl)" /tools/kubectl']
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: {drop: [ALL]}
+              volumeMounts:
+                - {name: tools, mountPath: /tools}
+          containers:
+            - name: backup
+              image: postgres
+              command: [bash, /scripts/backup.sh]
+              env:
+                - {name: HOME, value: /work/private}
+                - {name: TMPDIR, value: /work/private}
+                - {name: PGHOST, value: postgres-cluster-rw.postgres-system.svc}
+                - {name: PGPORT, value: '5432'}
+                - {name: PGDATABASE, value: vaultwarden}
+                - {name: PGUSER, value: vaultwarden}
+                - {name: PGSSLMODE, value: require}
+                - {name: PGCONNECT_TIMEOUT, value: '10'}
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef: {name: vaultwarden-db, key: password}
+                - {name: RESTIC_REPOSITORY, value: 's3:https://minio.epaflix.com/vaultwarden-backups'}
+                - {name: RESTIC_PASSWORD_FILE, value: /run/restic/password}
+                - {name: RESTIC_CACHE_DIR, value: /work/private/cache}
+                - {name: SERVER_IMAGE, value: replaced-by-kustomize}
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef: {name: vaultwarden-backup, key: access-key}
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef: {name: vaultwarden-backup, key: secret-key}
+                - {name: SSL_CERT_FILE, value: /tools/ca-certificates.crt}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: {drop: [ALL]}
+              resources:
+                requests: {cpu: 100m, memory: 256Mi}
+                limits: {memory: 3Gi}
+              volumeMounts:
+                - {name: data, mountPath: /data, readOnly: true}
+                - {name: work, mountPath: /work}
+                - {name: tools, mountPath: /tools, readOnly: true}
+                - {name: scripts, mountPath: /scripts, readOnly: true}
+                - {name: restic-password, mountPath: /run/restic, readOnly: true}
+          volumes:
+            - name: data
+              persistentVolumeClaim: {claimName: vaultwarden-data}
+            - name: work
+              emptyDir: {medium: Memory, sizeLimit: 2Gi}
+            - name: tools
+              emptyDir: {sizeLimit: 128Mi}
+            - name: scripts
+              configMap: {name: vaultwarden-recovery-scripts-57ddc75dbc}
+            - name: restic-password
+              secret:
+                secretName: vaultwarden-backup
+                defaultMode: 0440
+                items:
+                  - {key: password, path: password}

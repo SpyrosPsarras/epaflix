@@ -1,0 +1,32 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: DatabaseRole
+metadata:
+  name: vaultwarden
+  namespace: postgres-system
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+    argocd.argoproj.io/sync-options: Delete=false
+spec:
+  cluster:
+    name: postgres-cluster
+  name: vaultwarden
+  ensure: present
+  login: true
+  passwordSecret:
+    name: vaultwarden-db-role
+  databaseRoleReclaimPolicy: retain
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: vaultwarden
+  namespace: postgres-system
+  annotations:
+    argocd.argoproj.io/sync-options: Delete=false
+spec:
+  cluster:
+    name: postgres-cluster
+  name: vaultwarden
+  owner: vaultwarden
+  ensure: present
+  databaseReclaimPolicy: retain

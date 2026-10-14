@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: Secret
+type: Opaque
+metadata:
+    name: vaultwarden-smtp
+    namespace: vaultwarden
+    annotations:
+        mcp-hub.epaflix.com/revision: 20260929T225128Z
+        argocd.argoproj.io/sync-options: Delete=false
+stringData:
+    SMTP_HOST: ENC[AES256_GCM,data:th9qvUHN4utRzqXeoBZfFTc=,iv:HBOyz0PodODUYiZj+HVj+yeCqcN8JeYbwMyqpXLaWTg=,tag:whTpeppWhTJZTMQOwJ4/KQ==,type:str]
+    SMTP_USERNAME: ENC[AES256_GCM,data:fhceYm+XtSTa0R8VeWZijA==,iv:utjhAu5td1aC2UWmkLA9sGZCY5bYKP43/ABPVnwW1Yg=,tag:42Qrale0ioPMP6wBnNYf/g==,type:str]
+    SMTP_PASSWORD: ENC[AES256_GCM,data:iuxp8YRLxp4a5a5avjt2j0IXITMLeMRA8Q==,iv:nXL9BAToLGCGPWpYztDiCSfGf7nkttWpFBlIznwewn4=,tag:PLhmFApRkIQUumO3O00D5A==,type:str]
+    SMTP_FROM: ENC[AES256_GCM,data:vXA08yQkFC3itqoEzKexnA==,iv:3u89lkjA3BGCnfTBAN5RseSPfDLNRRueGLeYjIPE/n0=,tag:P804v13fuhnB/cG3Z2vobw==,type:str]
+    SMTP_PORT: ENC[AES256_GCM,data:kJPc,iv:zT0QuTBj9wrq6QIIpQF/Meaduoc41cxQWKnao7YnA6I=,tag:NbF2PjYQgkYIdyZR0KcxWQ==,type:str]
+    SMTP_SECURITY: ENC[AES256_GCM,data:WFJ0t5JpExI=,iv:2D8TyI7yUGelt07iZr/4NcUY2vwjSYukWoRFiV8kII0=,tag:d+GV/q2e2d/x2Ty+Fsrrlw==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBsTGxXWnlPeWtUamw1S3Rq
+            a3EvQ0xENHBqdWgrbXJiRDRXcW5KVTVJamlzCnYwTU5uNE5TUDR3OFlUT1FpRSsx
+            QnNuMjlxTE9qMzkzR2VpcEhBbU0rUmcKLS0tIFlQR09Lcng1eDNtQVNjZ1ViL0Ns
+            aWZucm1JdXhkVFlvMnVZM1czSEhRQVEKMfMCDG7q7fqN/JWoZHj4TmAV1YUm6COq
+            E/Et7MXfoXVxBlV38xsZ69XeOmF/YkmZlme8ySkim6f9EeMi47R23g==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1586thf5vkcdf5lcn3zwjpu8ltkwyq8efrhj8lr0vdrrt9k5f3qgsxeg7gx
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-10-14T14:50:29Z"
+    mac: ENC[AES256_GCM,data:JYNpHwcZWfyhqN/1VAKewXIpeaW1x1NFqfclGG7g+xL7uNNNdz3nGO1C5qb0rDE8PZUjS5r+ayKzYRAbqrXHMlAIx1k6sLeRrjkgQf5d8UpKp3yynYysRrEKAt1+Mw+5/G4mIlv+uGgbNXI6rkNxfnHj6n8bhIodg5Y+FuCDN60=,iv:h53N+IXpLLnNa4zKYO0TPoyH7PiAaKYcVqYuJqGYuXo=,tag:Wo+Pm4BQsW4P20AXEfAsmg==,type:str]
+    version: 3.13.3
