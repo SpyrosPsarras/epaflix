@@ -36,6 +36,10 @@ spec:
             capabilities:
               drop: ["ALL"]
           env:
+            - name: MIN_APP_VERSION
+              value: "1.0.0"
+            - name: SERVER_VERSION
+              value: "7cc52b9"
             - name: ORIGIN
               value: https://fytorium.epaflix.com
             - name: OIDC_ISSUER
@@ -51,6 +55,8 @@ spec:
           envFrom:
             - secretRef:
                 name: fytorium-secrets
+            - secretRef:
+                name: fytorium-fcm
           ports:
             - containerPort: 3000
               name: http

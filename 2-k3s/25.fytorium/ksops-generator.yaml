@@ -9,3 +9,4 @@ metadata:
         path: ksops
 files:
   - fytorium-secrets.enc.yaml
+  - fytorium-fcm.enc.yaml
