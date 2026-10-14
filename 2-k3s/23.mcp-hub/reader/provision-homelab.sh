@@ -213,6 +213,8 @@ kdf_snapshot() {
 stage "S1: desktop preflight"
 say "Run on homePC, outside T3, from a trusted checkout. No account credentials are saved by this wizard."
 say "Secret entry is one line, hidden, and preserves spaces. Do not run through a recorder or shell tracing."
+say "The operator must first manually sync vault-reader-homelab and mcp-hub-homelab to create the namespaces."
+say "Missing required Secrets block pod mounts and container startup, so nothing logs in without inputs."
 for tool in kubectl python3 curl; do
   command -v "$tool" >/dev/null || refuse "Missing required tool: $tool"
 done
@@ -220,7 +222,7 @@ done
 [[ $(kubectl --context epaflix config get-contexts epaflix -o name) == epaflix ]] || refuse "Context epaflix is missing."
 for namespace in vault-reader-homelab mcp-hub-homelab; do
   kubectl --context epaflix get namespace "$namespace" -o name >/dev/null ||
-    refuse "Ask the T3 thread to manually sync the Applications to create both namespaces first."
+    refuse "Ask the operator to manually sync vault-reader-homelab and mcp-hub-homelab to create both namespaces first."
 done
 for target in vault-reader-homelab/vault-reader-inputs mcp-hub-homelab/mcp-hub-instance mcp-hub-homelab/vault-canary-client; do
   existing=$(kubectl --context epaflix -n "${target%/*}" get secret "${target#*/}" --ignore-not-found -o name) ||
@@ -344,7 +346,9 @@ say "vault-canary-client: token, services.json, canary.json"
 
 stage "S12: hand back to the T3 thread"
 say "Tell the T3 thread: secrets applied"
-say "The agent manually syncs vault-reader-homelab and mcp-hub-homelab, observes the waiting pods, then runs the bounded canary."
+say "The initial manual sync created both namespaces before this wizard staged the three Secrets."
+say "Follow 2-k3s/23.mcp-hub/instances/README.md#coordinated-homelab-input-changes."
+say "Next apply R3, then R4, then apply reader/canary as the separate bounded Job."
 say "Keep this wizard open until the agent reports all PASS/FAIL canary lines. Do not enroll other accounts or rotate keys."
 pause "Press Enter only after the agent has reported the canary result."
 
