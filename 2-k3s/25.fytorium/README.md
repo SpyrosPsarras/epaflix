@@ -20,6 +20,7 @@ Keep credentials out of git, command arguments and logs.
 | `/Fytorium/fytorium - authentik oidc` | Username = `OIDC_CLIENT_ID`, password = `OIDC_CLIENT_SECRET`. Also supplies the client id and secret in the Authentik blueprint. |
 | `/Fytorium/fytorium - minio` | Username = access key `fytorium-app`, password = secret key. Used for `MINIO_ACCESS_KEY` and `MINIO_SECRET_KEY`. |
 | `/Fytorium/fytorium - vapid` | Password = `VAPID_PRIVATE_KEY`, custom field `public key` = `VAPID_PUBLIC_KEY`, custom field `subject` = `VAPID_SUBJECT`, set to `https://fytorium.epaflix.com`. |
+| `/Fytorium/fytorium - firebase` | Attachment `fcm-service-account.json` becomes `FCM_SERVICE_ACCOUNT_JSON` in the SOPS secret; the project ID becomes `FCM_PROJECT_ID`. |
 | `/Personal/plantnet - api key` | Password = `PLANTNET_API_KEY` |
 | `/perenual - api key` | Password = `PERENUAL_API_KEY` |
 | `/Personal/MinIO Object Store` | MinIO admin username/password, setup only; never added to app Secrets |
@@ -32,8 +33,19 @@ binding to that group.
 
 Generate the VAPID pair once and keep it across deployments. Changing it means
 phones must subscribe again. `OPEN_PLANTBOOK_API_KEY` is intentionally absent.
+FCM is optional. Without it, the server skips app devices and logs this once.
+Until the owner creates the Firebase project, the secret has no FCM keys.
+
 Do not enable the test clock, synthetic push transport, test image origin or
-insecure OIDC HTTP in this deployment.
+insecure OIDC HTTP in this deployment. `FCM_BASE_URL` and
+`FCM_OAUTH_TOKEN_URL` must stay unset in production.
+
+## App compatibility
+
+`MIN_APP_VERSION` is `1.0.0`, matching the first release `android-v1.0.0`.
+Older apps receive HTTP 426. Raise it only when an app release is required.
+`SERVER_VERSION` is `7cc52b9`, the source commit shown in `/api/meta`.
+Bump it whenever the image digest changes.
 
 ## First deploy
 
@@ -97,7 +109,8 @@ and network afterward. Keep the `fytorium-mc` image for later setup runs.
 ## Updates and smoke check
 
 After source CI publishes a new image, bump its immutable digest in
-`kustomization.yaml` and merge the homelab change. ArgoCD recreates the pod;
+`kustomization.yaml`, bump `SERVER_VERSION` in `deployment.yaml` to the source
+commit, and merge the homelab change. ArgoCD recreates the pod;
 migrations run again before readiness. No mutable tag rollout or manual restart
 is needed.
 
