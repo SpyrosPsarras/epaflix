@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: Secret
+type: Opaque
+metadata:
+    name: vaultwarden-db-role
+    namespace: postgres-system
+    annotations:
+        mcp-hub.epaflix.com/revision: 20260929T221146Z
+        argocd.argoproj.io/sync-wave: "-2"
+        argocd.argoproj.io/sync-options: Delete=false
+    labels:
+        cnpg.io/reload: "true"
+stringData:
+    username: ENC[AES256_GCM,data:USOS9HrAe3G+mNE=,iv:3ePhybAlYrKNEgjY2WVvugchEiaAKjnQtT7m6d8VJmU=,tag:xBW9VBX6NzPjuWSQUoyzoQ==,type:str]
+    password: ENC[AES256_GCM,data:0gGgZfAfgWlaVKX8XMP29oSdK2G1O2ijdsmsXCLNxyk9IiJByTZRolcUW7KlKtfb5XvUoaEhMrDPFQ6Ozjv+eA==,iv:0VUy/yEqL1KkAsviBuGMUsH1kTXhpP/5iCb8z0snDoQ=,tag:wm5aaEE2hDaoY/THysGxrA==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBkSk5rRUUrSzNsRDBkdU1G
+            Ylhtc1RPTTQ2V1lDeFRxZGo1eHh0aS94a1ZjClBrSEtDSG83WnlmSFFKSXE0THBO
+            cDVEQXdERjdyZElRK0dqQUV6Wm51V28KLS0tIENKR0lsVzZmVURxOUQydzk2Y1Nx
+            Vk82RjNtM0x5UnNKR2hDZDYvT1J1WVUK4tPBNSxwTYyTXiYO6/s6HYz/+UziRwK3
+            uTi+kTxdG1MGvGBs5TRHfjdwemMfY+I6aafENVG/650cIlEhmtRzrg==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1586thf5vkcdf5lcn3zwjpu8ltkwyq8efrhj8lr0vdrrt9k5f3qgsxeg7gx
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-10-14T14:50:29Z"
+    mac: ENC[AES256_GCM,data:JTMk5+rPBdm2KVU/T3OmTsFdDmwnYLQSbY8zhn9kBET+0cwvJqbkTLMjOrelCN4vItz2ALo04j1+VLZpO29F6S2wKqxfG4Mr5S0NgKCuba1MTuLxjJcXH7O9MmAUKNpGv/RGjGxtiFk91x0zkgHh8+Ur/otXe3ihaQFo34ds2lE=,iv:GL4CpoWDujQesrOjeP1dJChvFcuFsX3XwnVoAHfwCm4=,tag:vK0J5ow14PgbzYbI/xWnpg==,type:str]
+    version: 3.13.3

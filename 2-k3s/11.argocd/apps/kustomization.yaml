@@ -33,5 +33,6 @@ resources:
   - app-t3code-homelab.yaml
   - app-t3code-work.yaml
   - app-traefik.yaml
+  - app-vaultwarden.yaml
   - app-vidar-edge.yaml
   - app-gh-runner.yaml

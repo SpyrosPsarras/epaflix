@@ -1,0 +1,18 @@
+# Existing Traefik wildcard resolver; no TLS keys are copied or managed here.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: vaultwarden-internal
+  namespace: vaultwarden
+spec:
+  entryPoints: [internal]
+  routes:
+    - match: Host(`vaultwarden.epaflix.com`)
+      kind: Rule
+      services:
+        - {name: vaultwarden, port: 80}
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans: ['*.epaflix.com']

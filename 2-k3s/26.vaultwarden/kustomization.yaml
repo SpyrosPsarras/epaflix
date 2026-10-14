@@ -1,0 +1,52 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Database objects and the role credential stay in postgres-system.
+resources:
+  - namespace.yaml
+  - database.yaml
+  - storage.yaml
+  - server.yaml
+  - ingress.yaml
+  - network-policy.yaml
+  - backup.yaml
+generators:
+  - ksops-generator.yaml
+configMapGenerator:
+  - name: vaultwarden-recovery-scripts-57ddc75dbc
+    namespace: vaultwarden
+    options:
+      disableNameSuffixHash: true
+    files:
+      - backup.sh=scripts/backup.sh
+      - restore-check.sh=scripts/restore-check.sh
+replacements:
+  - source:
+      kind: Deployment
+      name: vaultwarden
+      fieldPath: spec.template.spec.containers.[name=vaultwarden].image
+    targets:
+      - select: {kind: CronJob, name: vaultwarden-backup}
+        fieldPaths:
+          - spec.jobTemplate.spec.template.spec.containers.[name=backup].env.[name=SERVER_IMAGE].value
+  - source:
+      kind: Secret
+      name: vaultwarden-db
+      fieldPath: metadata.annotations.[mcp-hub.epaflix.com/revision]
+    targets:
+      - select: {kind: Deployment, name: vaultwarden}
+        fieldPaths:
+          - spec.template.metadata.annotations.[vaultwarden.epaflix.com/db-revision]
+        options: {create: true}
+images:
+  - name: vaultwarden/server
+    newTag: 1.37.3
+    digest: sha256:1587c45feaa479f1f5e8af3b00eded36bff77bcf1880cf8dbf0541706dd470e0
+  - name: restic/restic
+    newTag: 0.18.1
+    digest: sha256:39d9072fb5651c80d75c7a811612eb60b4c06b32ffe87c2e9f3c7222e1797e76
+  - name: alpine/kubectl
+    newTag: 1.35.0
+    digest: sha256:862d86046bbcad03c252bbc10ab8bf893e7aa50aa7a20de8bfc46727dd645883
+  - name: postgres
+    newTag: 16.10-bookworm
+    digest: sha256:38471f330eb885e04de130b768d6db4e10469e2311879c7e5c699f6d2d8a1c74
