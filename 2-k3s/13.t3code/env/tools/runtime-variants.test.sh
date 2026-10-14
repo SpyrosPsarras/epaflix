@@ -7,6 +7,8 @@ mkdir "$tmp/2-k3s"
 for name in 13.t3code 13.t3code-homelab 13.t3code-work; do
   cp -r "$root/../$name" "$tmp/2-k3s/$name"
 done
+mkdir -p "$tmp/2-k3s/23.mcp-hub/reader"
+cp -r "$root/../23.mcp-hub/reader/canary" "$tmp/2-k3s/23.mcp-hub/reader/canary"
 tools=$tmp/2-k3s/13.t3code/env/tools
 mixed=$(bash "$tools/runtime-tag.sh")
 homelab=$(bash "$tools/runtime-tag.sh" homelab)
@@ -25,6 +27,7 @@ for input in env/Dockerfile env/Dockerfile.dockerignore env/tools/os-packages.tx
   bash "$tools/sync-runtime-image.sh"
   grep -q "t3-runtime:inputs-$mixed" "$tmp/2-k3s/13.t3code/one/statefulset.yaml"
   grep -q "t3-runtime:homelab-inputs-$homelab" "$tmp/2-k3s/13.t3code-homelab/statefulset.yaml"
+  grep -q "t3-runtime:homelab-inputs-$homelab" "$tmp/2-k3s/23.mcp-hub/reader/canary/job.yaml"
   grep -q "t3-runtime:work-inputs-$work" "$tmp/2-k3s/13.t3code-work/statefulset.yaml"
 done
 bash "$tools/sync-runtime-image.sh"
