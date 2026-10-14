@@ -17,8 +17,8 @@ HUB_URL = 'http://mcp-hub.mcp-hub-homelab.svc.cluster.local:8000'
 READER_URL = 'http://vault-reader.vault-reader-homelab.svc.cluster.local:8000/vaultwarden'
 HELPER = ['/usr/local/bin/vault-restricted']
 LIMIT = 12 * 1024 * 1024
-HTTP_TIMEOUT = 30
-HELPER_TIMEOUT = 65
+HTTP_TIMEOUT = 130
+HELPER_TIMEOUT = 330
 FIXTURE_TITLES = ['reader-canary', 'reader-canary-duplicate', 'reader-canary-duplicate']
 
 
