@@ -21,4 +21,4 @@ patches:
         template:
           metadata:
             annotations:
-              mcp-hub.epaflix.com/inputs-revision: "unprovisioned"
+              mcp-hub.epaflix.com/inputs-revision: "r1"

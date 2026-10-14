@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class PackageTests(unittest.TestCase):
-    def test_manual_reader_is_independent_and_unprovisioned(self):
+    def test_manual_reader_is_independent_with_tracked_input_revision(self):
         documents = list(yaml.safe_load_all(subprocess.check_output([
             'kustomize', 'build', str(ROOT / 'reader/homelab')])))
         self.assertFalse(any(doc['kind'] == 'Secret' for doc in documents))
@@ -17,7 +17,7 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(deployment['spec']['replicas'], 1)
         self.assertEqual(deployment['spec']['strategy']['type'], 'Recreate')
         template = deployment['spec']['template']
-        self.assertEqual(template['metadata']['annotations']['vault-reader.epaflix.com/inputs-revision'], 'unprovisioned')
+        self.assertEqual(template['metadata']['annotations']['vault-reader.epaflix.com/inputs-revision'], 'r1')
         spec = template['spec']
         self.assertFalse(spec['automountServiceAccountToken'])
         self.assertEqual(len(spec['containers']), 1)
