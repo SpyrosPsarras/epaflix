@@ -22,7 +22,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: canary
-          image: ghcr.io/spyrospsarras/t3-runtime:homelab-inputs-404c889760a5766df07b6e4f089df0e9
+          image: ghcr.io/spyrospsarras/t3-runtime:homelab-inputs-9d4b693e43202df827d9174567fab10d
           imagePullPolicy: IfNotPresent
           command: [python3, /canary/canary.py]
           env:
