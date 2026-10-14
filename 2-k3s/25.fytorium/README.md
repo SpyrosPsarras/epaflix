@@ -20,7 +20,7 @@ Keep credentials out of git, command arguments and logs.
 | `/Fytorium/fytorium - authentik oidc` | Username = `OIDC_CLIENT_ID`, password = `OIDC_CLIENT_SECRET`. Also supplies the client id and secret in the Authentik blueprint. |
 | `/Fytorium/fytorium - minio` | Username = access key `fytorium-app`, password = secret key. Used for `MINIO_ACCESS_KEY` and `MINIO_SECRET_KEY`. |
 | `/Fytorium/fytorium - vapid` | Password = `VAPID_PRIVATE_KEY`, custom field `public key` = `VAPID_PUBLIC_KEY`, custom field `subject` = `VAPID_SUBJECT`, set to `https://fytorium.epaflix.com`. |
-| `/Fytorium/fytorium - firebase` | Attachment `fcm-service-account.json` becomes `FCM_SERVICE_ACCOUNT_JSON` in the SOPS secret; the project ID becomes `FCM_PROJECT_ID`. |
+| `/Fytorium/fytorium - firebase` | Optional backup copy of the Firebase files. The live server key is only in `fytorium-fcm.enc.yaml` (see below). A lost key is replaced by generating a new one in Firebase: Project settings → Service accounts. |
 | `/Personal/plantnet - api key` | Password = `PLANTNET_API_KEY` |
 | `/perenual - api key` | Password = `PERENUAL_API_KEY` |
 | `/Personal/MinIO Object Store` | MinIO admin username/password, setup only; never added to app Secrets |
@@ -34,7 +34,12 @@ binding to that group.
 Generate the VAPID pair once and keep it across deployments. Changing it means
 phones must subscribe again. `OPEN_PLANTBOOK_API_KEY` is intentionally absent.
 FCM is optional. Without it, the server skips app devices and logs this once.
-Until the owner creates the Firebase project, the secret has no FCM keys.
+`fytorium-fcm.enc.yaml` holds the Secret `fytorium-fcm` with `FCM_PROJECT_ID`
+(`fytorium`) and `FCM_SERVICE_ACCOUNT_JSON` (the Firebase Admin SDK service
+account JSON, compact). To rotate it, generate a new key in Firebase, build the
+Secret in memory and pipe it into
+`sops --encrypt --input-type yaml --output-type yaml --filename-override 2-k3s/25.fytorium/fytorium-fcm.enc.yaml /dev/stdin`,
+then delete the downloaded key.
 
 Do not enable the test clock, synthetic push transport, test image origin or
 insecure OIDC HTTP in this deployment. `FCM_BASE_URL` and

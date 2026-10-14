@@ -55,6 +55,8 @@ spec:
           envFrom:
             - secretRef:
                 name: fytorium-secrets
+            - secretRef:
+                name: fytorium-fcm
           ports:
             - containerPort: 3000
               name: http
