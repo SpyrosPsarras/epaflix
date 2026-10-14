@@ -23,6 +23,17 @@ config:
           # IP targets and private CAs must still expose dates after expiry.
           # This monitors expiry and reachability, not CA/hostname validity.
           insecure_skip_verify: true
+    http_2xx_verified:
+      prober: http
+      timeout: 10s
+      http:
+        preferred_ip_protocol: ip4
+        ip_protocol_fallback: false
+        fail_if_not_ssl: true
+        follow_redirects: false
+        valid_status_codes: [200]
+        tls_config:
+          insecure_skip_verify: false
 
 serviceMonitor:
   enabled: true
@@ -39,6 +50,11 @@ serviceMonitor:
       - sourceLabels: [__param_target]
         action: replace
         targetLabel: instance
+      - sourceLabels: [__param_target]
+        regex: 'https://vaultwarden\.epaflix\.com/alive'
+        action: replace
+        targetLabel: job
+        replacement: vaultwarden-probe
   targets:
     - name: takaros
       url: https://192.168.10.10:8006
@@ -55,3 +71,6 @@ serviceMonitor:
     - name: truenas-ui
       url: https://192.168.10.200:8443
       hostname: truenas.epaflix.com
+    - name: vaultwarden
+      url: https://vaultwarden.epaflix.com/alive
+      module: http_2xx_verified
