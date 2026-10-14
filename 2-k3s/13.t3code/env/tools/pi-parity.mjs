@@ -41,6 +41,9 @@ try {
   const ask = settings.packages.find(path => path.endsWith('/@juicesharp/rpiv-ask-user-question'))
   assert.ok(ask, 'rpiv-ask-user-question package missing')
   assert.ok(readFileSync(join(ask, 'index.ts')).length, 'rpiv-ask-user-question extension missing')
+  const retry = settings.packages.find(path => path.endsWith('/not-enough-retry'))
+  assert.ok(retry, 'not-enough-retry package missing')
+  assert.ok(readFileSync(join(retry, 'extensions/not-enough-retry.ts')).length, 'not-enough-retry extension missing')
   console.log('parity: Pi commands, package skills, permission-system absence and extension loading PASS')
 } finally {
   clearTimeout(timer)
