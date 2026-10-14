@@ -794,6 +794,8 @@ spec:
                 kube_job_owner{namespace="servarr", owner_kind="CronJob", owner_name=~"cleanuparr-blocklist-drift|neutarr-config-drift|orphan-census|prowlarr-indexer-health|prowlarr-appsync-drift|cleanuparr-queuecleaner-health|blind-queue-check|qbt-stuck-torrent-check"}
                 or
                 kube_job_owner{namespace="observability", owner_kind="CronJob", owner_name="ntfy-canary-check"}
+                or
+                kube_job_owner{namespace="vaultwarden", owner_kind="CronJob", owner_name="vaultwarden-backup"}
               )
             )
             or
@@ -1061,3 +1063,53 @@ spec:
               pool1 is a stripe with none, and zpool status shows the layout of
               the others. If the exporter stops answering, this alert resolves
               without the pool being healthy; TargetDown covers that.
+
+    - name: vaultwarden
+      interval: 60s
+      rules:
+        - alert: VaultwardenBackupOverdue
+          expr: |
+            time() - max by (namespace, cronjob) (
+              kube_cronjob_status_last_successful_time{namespace="vaultwarden", cronjob="vaultwarden-backup"}
+            ) > 30 * 3600
+            or (
+              max by (namespace, cronjob) (kube_cronjob_info{namespace="vaultwarden", cronjob="vaultwarden-backup"})
+              unless on (namespace, cronjob)
+              max by (namespace, cronjob) (kube_cronjob_status_last_successful_time{namespace="vaultwarden", cronjob="vaultwarden-backup"}) > 0
+            )
+          for: 5m
+          labels:
+            severity: critical
+            component: vaultwarden
+          annotations:
+            summary: "Vaultwarden backup is overdue"
+            description: "No successful Vaultwarden backup in over 30 hours, or the CronJob has never succeeded. Check vaultwarden-backup Job logs and the vaultwarden.epaflix.com/backup-paused Deployment annotation. Restore runbook: 2-k3s/26.vaultwarden/OPERATIONS.md."
+
+        - alert: VaultwardenBackupFailed
+          expr: |
+            max by (namespace, job_name) (
+              kube_job_failed{namespace="vaultwarden", job_name=~"vaultwarden-backup-.*"} > 0
+              and on (namespace, job_name) (
+                max by (namespace, job_name) (kube_job_status_start_time{namespace="vaultwarden", job_name=~"vaultwarden-backup-.*"})
+                  >= scalar(max(kube_job_status_start_time{namespace="vaultwarden", job_name=~"vaultwarden-backup-.*"}))
+              )
+            )
+          for: 5m
+          labels:
+            severity: critical
+            component: vaultwarden
+          annotations:
+            summary: "Latest Vaultwarden backup failed"
+            description: "Vaultwarden backup Job {{ $labels.job_name }} failed. Check its Job logs and the vaultwarden.epaflix.com/backup-paused Deployment annotation if Vaultwarden stayed at zero replicas. Restore runbook: 2-k3s/26.vaultwarden/OPERATIONS.md."
+
+        - alert: VaultwardenDown
+          expr: |
+            max(probe_success{job="vaultwarden-probe", instance="https://vaultwarden.epaflix.com/alive"}) == 0
+            or max(kube_deployment_status_replicas_available{namespace="vaultwarden", deployment="vaultwarden"}) == 0
+          for: 15m
+          labels:
+            severity: critical
+            component: vaultwarden
+          annotations:
+            summary: "Vaultwarden is unavailable"
+            description: "Vaultwarden /alive is unreachable or no replica has been available for 15 minutes. Check the Deployment and backup Job logs, including the vaultwarden.epaflix.com/backup-paused Deployment annotation if a backup left it at zero replicas. Restore runbook: 2-k3s/26.vaultwarden/OPERATIONS.md."
