@@ -140,8 +140,7 @@ require `mcp-hub.epaflix.com/inputs-revision` in
 `../instances/homelab/kustomization.yaml`. Shared bearer rotation requires
 both revisions and matching private Secrets. Follow the
 [coordinated homelab input procedure](../instances/README.md#coordinated-homelab-input-changes)
-for opaque revisions and ordered manual sync. Both defaults remain
-`unprovisioned` until approved private inputs are staged. Coordinate runtime
+for opaque revisions and ordered manual sync. Coordinate runtime
 allowlist/token digest changes with the existing
 `t3code.epaflix.com/inputs-grants-revision` and OnDelete/manual rollout. Stop
 old consumers before changing authority; do not run two reader Pods during
@@ -243,8 +242,8 @@ in this order:
 2. P2: Run `bash 2-k3s/23.mcp-hub/reader/provision-homelab.sh` on the
    owner's desktop, outside T3. The wizard stages `vault-reader-inputs`,
    `mcp-hub-instance` and `vault-canary-client`. After staging, kubelet retries
-   the mounts and both pods start on their own at `unprovisioned` in no set
-   order without logging in, then the R4 sync recreates them with the new
+   the mounts and both pods start on their own at the tracked revision in no
+   set order without logging in, then the R4 sync recreates them with the new
    revision.
 3. P3: Apply R3: one tracked change sets both inputs revisions to the same
    new revision.
