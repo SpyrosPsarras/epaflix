@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Prove the free-only policy against the LIVE cliproxy-free service. Exit 1 on
+# Prove the no-per-request-cost policy against LIVE cliproxy-free. Exit 1 on
 # the first failed check.
 #
 # The client key never appears in any argv, env, or on this shell's stdout. One
@@ -8,8 +8,8 @@
 # the key from the mounted file, makes the calls with urllib, parses JSON
 # properly, and prints only the asserted fields (key redacted).
 #
-#   ./verify.sh                 # all checks, one real OpenRouter call
-#   ./verify.sh --no-upstream   # skip the call that reaches OpenRouter
+#   ./verify.sh                 # all checks, one real upstream call
+#   ./verify.sh --no-upstream   # skip the call that reaches an upstream
 set -euo pipefail
 
 call_upstream=1; [[ "${1:-}" == "--no-upstream" ]] && call_upstream=0
@@ -57,7 +57,8 @@ KEY = keys[0]
 # The explicit upstreams the config declares, checked against a zero-cost
 # allowlist per provider. The policy is "no money can move", not a suffix:
 # OpenRouter free models carry the :free suffix, Groq free-plan models and
-# Google AI Studio free-tier flash models are pinned by name. The answering
+# Google AI Studio free-tier flash models are pinned by name. Antigravity's
+# flat-rate subscription model is allowed only under its own provider. The answering
 # model must be one of the configured upstreams, not merely some free model
 # anywhere - that is the policy this instance exists for.
 #
@@ -84,7 +85,8 @@ def _zero_cost(u):
              "qwen/qwen3.8-27b"): return True          # Groq free-plan chat models (policy permit list)
     if re.fullmatch(r"gemini-[0-9.]+-flash", u): return True  # AI Studio free-tier flash
     return False
-_outside = [u for u in UPSTREAMS if not _zero_cost(u)]
+_outside = [u for provider, u in pairs if not (
+    u == "gemini-3.8-flash-high" if provider == "antigravity" else _zero_cost(u))]
 assert not _outside, f"upstream(s) outside the zero-cost allowlist: {_outside}"
 assert "openrouter/free" not in UPSTREAMS, "openrouter/free (random router) is banned; pin explicit free models"
 
@@ -111,22 +113,22 @@ ids = sorted(m["id"] for m in models.get("data", []))
 if st != 200 or ids != ["or-free"]: fail(f"catalog -> {st} {ids}")
 ok("catalog -> ['or-free'] only")
 
-# 2. paid / prefixed / bare-upstream IDs refused before OpenRouter
+# 2. paid / prefixed / bare-upstream IDs refused before any upstream
 for m in ["or-glm-5.3", "openrouter/or-free", "minimax/minimax-m3", "anthropic/claude-sonnet-4.5", "openrouter/free", "gpt-oss-120b", "gemini-3.5-flash"] + UPSTREAMS:
     st, body = call(FREE, "/v1/chat/completions", {"model": m, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1})
     code = (body.get("error") or {}).get("code")
     if st not in (400, 404) or code != "model_not_found": fail(f"reject model={m} -> {st} {body}")
     ok(f"reject model={m} -> {st} {code}")
 
-# 3. the main instance does not know this key
+# 3. the main instance accepts this key as the Antigravity upstream credential
 st, body = call(MAIN, "/v1/models")
-if st != 401: fail(f"main instance -> {st} {body}")
-ok(f"main instance -> 401 {body}")
+if st != 200: fail(f"main instance -> {st} {body}")
+ok("main instance -> 200, Antigravity upstream key accepted")
 
 # 4. one translation-shaped call carrying an escape attempt: OpenRouter
 #    `models` fallback array and `provider.order`. Both must be stripped by
 #    payload.filter, the answering model must be a configured upstream from the
-#    zero-cost pool, and the content must be a non-empty translation.
+#    no-per-request-cost pool, and the content must be a non-empty translation.
 if call_upstream:
     st, body = call(FREE, "/v1/chat/completions", {
         "model": "or-free",
@@ -136,7 +138,7 @@ if call_upstream:
         "max_tokens": 60})
     if st != 200: fail(f"upstream -> {st} {body}")
     answered = body.get("model", "")
-    if answered not in UPSTREAMS: fail(f"upstream answered by {answered!r}, not one of the configured free upstreams {UPSTREAMS}")
+    if answered not in UPSTREAMS: fail(f"upstream answered by {answered!r}, not one of the configured upstreams {UPSTREAMS}")
     content = ((body.get("choices") or [{}])[0].get("message") or {}).get("content")
     if not isinstance(content, str) or not content.strip(): fail(f"empty content from {answered}: {body}")
     if not re.search(r"[\u0370-\u03FF]", content): fail(f"content has no Greek letters: {content!r}")
