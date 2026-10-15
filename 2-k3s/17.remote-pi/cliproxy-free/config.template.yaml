@@ -101,8 +101,9 @@ payload:
 # (gemini), 102-118s (nex). To add a model: pass batch-repro.sh 3/3 first, then
 # add it as an entry with the same alias (CLIProxyAPI pools the alias).
 openai-compatibility:
-  # Pool tiers: antigravity at 20, groq and gemini at 10 (round-robin within
-  # a tier; observed split shifts with cooldown events), disabled openrouter at 0.
+  # Pool tiers: antigravity at 40, antigravity-opus at 30, antigravity-sonnet at 20,
+  # groq and gemini at 10 (round-robin within a tier), disabled openrouter at 0.
+  # Each Antigravity model has its own entry so a quota 429 does not bench the others.
   #
   # nex is disabled as of 2026-09-21: during cooldown windows it served
   # malformed batches (OpenRouter 400 json_validate_failed - bare array,
@@ -143,7 +144,7 @@ openai-compatibility:
         max-context-length: 262144
 
   - name: "antigravity"
-    priority: 20
+    priority: 40
     request-retry: 3
     base-url: "http://cliproxy.remote-pi.svc.cluster.local:8317/v1"
     api-key-entries:
@@ -153,6 +154,30 @@ openai-compatibility:
         alias: "or-free"
         display-name: "Antigravity Gemini 3.8 Flash high (lingarr)"
         max-context-length: 1048576
+
+  - name: "antigravity-opus"
+    priority: 30
+    request-retry: 3
+    base-url: "http://cliproxy.remote-pi.svc.cluster.local:8317/v1"
+    api-key-entries:
+      - api-key: "__LINGARR_API_KEY__"
+    models:
+      - name: "claude-opus-4-6-thinking"
+        alias: "or-free"
+        display-name: "Antigravity Claude Opus 4.6 thinking (lingarr)"
+        max-context-length: 200000
+
+  - name: "antigravity-sonnet"
+    priority: 20
+    request-retry: 3
+    base-url: "http://cliproxy.remote-pi.svc.cluster.local:8317/v1"
+    api-key-entries:
+      - api-key: "__LINGARR_API_KEY__"
+    models:
+      - name: "claude-sonnet-4-6"
+        alias: "or-free"
+        display-name: "Antigravity Claude Sonnet 4.6 (lingarr)"
+        max-context-length: 200000
 
   # Groq free plan.
   - name: "groq"
