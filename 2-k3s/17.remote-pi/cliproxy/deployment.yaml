@@ -96,8 +96,8 @@ spec:
             # Offered upstream as abix5/pi-cliproxyapi-bridge#3.
             # The # renovate: marker is deliberately absent: renovate would "downgrade" the fork to
             # upstream v0.9.1.
-            - "0.10.2"
-            - 5c577408e9d0ffe9e6671598626ec78e2eec822a36f2e48b2a348c99427402e4
+            - "0.11.0"
+            - 5c97040d92465148f47b40e9c866301af2242d01d28483ec18fd56da685b887e
             - SpyrosPsarras/pi-cliproxyapi-bridge
           securityContext:
             allowPrivilegeEscalation: false
