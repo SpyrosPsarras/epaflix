@@ -236,7 +236,7 @@ def apply(inputs, home, environment):
     for path in (str(home / '.ssh'), str(home / '.config/t3-sshd'), str(inputs), '/run/t3-grants', str(home / '.azure')):
         if path not in denied:
             denied.append(path)
-    hub_clients._write_json(str(safety_path), safety)
+    hub_clients.write_json(str(safety_path), safety)
     for check in policies['checks']:
         args = [arg.replace('${HOME}', str(home)) for arg in check['argv']]
         result = subprocess.run(args, cwd=home, capture_output=True, timeout=30,
@@ -253,7 +253,7 @@ def apply(inputs, home, environment):
                 state['enableAllProjectMcpServers'] = False
                 state['enabledMcpjsonServers'] = []
         after = hub_clients.pi(before, config['hubUrl'], 'MCP_HUB_TOKEN', services) if relative.startswith('.pi') else hub_clients.claude(before, config['hubUrl'], 'Bearer ${MCP_HUB_TOKEN}', services)
-        hub_clients._write_json(str(path), after)
+        hub_clients.write_json(str(path), after)
     project = home / 'projects' / environment
     for path in (home / '.claude/settings.local.json', project / '.claude/settings.json',
                  project / '.claude/settings.local.json', project / '.mcp.json'):
@@ -267,7 +267,7 @@ def apply(inputs, home, environment):
                 if key in settings:
                     settings[key] = value
             if settings != before:
-                hub_clients._write_json(str(path), settings)
+                hub_clients.write_json(str(path), settings)
     path = home / '.codex/config.toml'
     codex = tomllib.loads(path.read_text()) if path.exists() else {}
     codex['model_provider'] = 'cliproxy'
@@ -317,7 +317,7 @@ def apply(inputs, home, environment):
             settings[key] = canonical[key]
             if key == 'textGenerationModelSelection' and name == 'pi' and isinstance(current.get('options'), list):
                 settings[key]['options'] = current['options']
-    hub_clients._write_json(str(settings_path), settings)
+    hub_clients.write_json(str(settings_path), settings)
     if environment == 'homelab':
         write_private(home / '.config/t3-runtime/services.json', json.dumps(services).encode())
     print('isolated-config: reviewed policies and restricted hub installed')

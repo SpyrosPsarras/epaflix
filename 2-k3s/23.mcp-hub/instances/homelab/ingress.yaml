@@ -1,0 +1,17 @@
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: mcp-hub-internal
+spec:
+  entryPoints: [internal]
+  routes:
+    - match: Host(`mcp-homelab.epaflix.com`)
+      kind: Rule
+      services:
+        - name: mcp-hub
+          port: 8000
+  tls:
+    certResolver: cloudflare
+    domains:
+      - main: epaflix.com
+        sans: ['*.epaflix.com']

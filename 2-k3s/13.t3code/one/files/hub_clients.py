@@ -22,6 +22,7 @@ removed. Everything else in the file is left alone, including a user's
 set. Pi replaces hub entries whole, including their user-set keys.
 """
 
+import copy
 import json
 import os
 import subprocess
@@ -54,7 +55,7 @@ def _legacy(entry):
     return any(marker in blob for marker in LEGACY)
 
 
-def _write_json(path, data):
+def write_json(path, data):
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path) or ".", prefix=".hub-clients-")
     with os.fdopen(fd, "w") as f:
@@ -64,7 +65,7 @@ def _write_json(path, data):
     os.replace(tmp, path)
 
 
-def _load(path):
+def load_json(path):
     if not os.path.exists(path):
         return {}
     with open(path) as f:
@@ -177,12 +178,12 @@ def main(argv):
     if kind == "codex":
         changed = codex(target, hub, auth, services=services)
     else:
-        before = _load(target)
+        before = load_json(target)
         after = {"opencode": opencode, "claude": claude, "pi": pi}[kind](
-            json.loads(json.dumps(before)), hub, auth, services=services)
+            copy.deepcopy(before), hub, auth, services=services)
         changed = after != before
         if changed:
-            _write_json(target, after)
+            write_json(target, after)
     if changed:
         print(f"hub_clients: updated {kind} config {target}")
 
@@ -206,7 +207,7 @@ def _selftest():
     assert out["permission"]["*"] == "allow" and "keepass" not in out["mcp"]
     assert not [k for k in out["permission"] if k.startswith("keepass_")], out["permission"]
     assert out["permission"]["vaultwarden_vault_trash"] == "ask" and out["mcp"]["vaultwarden"]["url"] == "https://hub/vaultwarden"
-    assert opencode(json.loads(json.dumps(out)), "https://hub", "Bearer {env:T}") == out, "idempotent"
+    assert opencode(copy.deepcopy(out), "https://hub", "Bearer {env:T}") == out, "idempotent"
     cl = claude({"mcpServers": {"keepass": {"type": "http", "url": "http://h/keepass"},
                                 "old": {"command": "bash", "args": ["/scripts/keepass-remote.sh"]}}, "x": 1},
                 "http://h", "helper:cat key")
@@ -220,7 +221,7 @@ def _selftest():
     assert set(p["mcpServers"]) == set(SERVERS) | {"mine"}, p
     assert p["mcpServers"]["vaultwarden"] == {"url": "https://hub/vaultwarden",
         "headers": {"Authorization": "Bearer ${MCP_HUB_TOKEN}"}}, p
-    assert pi(json.loads(json.dumps(p)), "https://hub", "MCP_HUB_TOKEN") == p
+    assert pi(copy.deepcopy(p), "https://hub", "MCP_HUB_TOKEN") == p
 
     calls = []
     with tempfile.TemporaryDirectory() as home:

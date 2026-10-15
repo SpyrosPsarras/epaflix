@@ -5,6 +5,7 @@ namespace: mcp-hub-homelab
 resources:
   - ../base
   - namespace.yaml
+  - ingress.yaml
 
 configMapGenerator:
   - name: mcp-hub-instance-settings
@@ -21,4 +22,4 @@ patches:
         template:
           metadata:
             annotations:
-              mcp-hub.epaflix.com/inputs-revision: "r1"
+              mcp-hub.epaflix.com/inputs-revision: "r2"
