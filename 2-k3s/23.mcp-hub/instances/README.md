@@ -6,9 +6,9 @@ ServiceAccounts, client grants and upstream credentials. The legacy hub
 remains available with its existing clients and routes. No consumer is
 switched by this change.
 
-The approved initial work inventory is `searxng` only. Its authenticated
-`work/searxng.yaml` backend reuses the maintained search module with a separate
-upstream Secret. Provisioning, the dedicated work client and owner enrollment
+The approved homelab and work inventories are `searxng` only. Both include
+the shared authenticated backend in `searxng/`, with an independent upstream
+Secret in each namespace. Provisioning, the dedicated work client and owner enrollment
 are documented in [the work backend](../../13.t3code-work/README.md#first-deployment-for-1837).
 Other work services remain owner-added later. No work data source is configured.
 
@@ -47,11 +47,11 @@ invalid client digests, so this example cannot start a deployment:
 For work, `environment` must be `work`. Service names are `gmail`,
 `searxng`, `drive`, `kubernetes` and `notion`. An empty list, unknown or
 duplicate name, environment mismatch, malformed client digest, missing
-connection or extra connection prevents startup. Work rejects `vaultwarden`,
-`vault-secret` and `vault-attachment`. Homelab source can select these routes
-only with the explicit `vault_reader: restricted-v1` marker below. The
-dedicated reader has its own manual Application. The narrow helper is
-installed only in the homelab runtime. Neither is live-approved.
+connection or extra connection prevents startup. Both instances reject
+`vaultwarden`, `vault-secret`, `vault-attachment` and the retired reader
+marker. Both T3 pods read secrets through their own stock `vault` client
+and UID-1001 sidecar, not through a hub route. The legacy mixed hub retains
+its own `vaultwarden-mcp` and `vault-run.py` until #1848.
 
 The new hubs expose exactly the listed routes, plus unauthenticated
 `GET /healthz`. They forward to explicitly configured MCP endpoints rather
@@ -128,141 +128,8 @@ Generation removes stale maintained hub entries outside the allowlist. It
 preserves unrelated servers and existing OpenCode approval choices. It
 never advertises command-time secret or attachment routes as model tools.
 `vault-run.py` remains the legacy runner and refuses instance settings before
-reading a legacy key file or making a request. The separate restricted
-helper below does not change its behavior. Neither helper replaces
-organizational agent policies.
-
-## Restricted homelab command-time helper
-
-`vault-restricted` is installed only in the homelab runtime image from
-`2-k3s/13.t3code/one/files/vault-restricted.py`. No real account or grants
-are implied by these synthetic examples. Owner approval, private provisioning,
-manual first sync and the dummy-item live canary are still required before
-activation. See [reader package and private inputs](../reader/README.md).
-The laptop selects the remote backend through the existing connection path.
-Commands execute there. No laptop helper, vault CLI, connector credential or
-SSH-agent forwarding is added.
-
-The helper requires `MCP_HUB_INSTANCE=homelab`, explicit `MCP_HUB_URL`, an
-independent `homelab.` client token in `MCP_HUB_TOKEN`, and an absolute
-`MCP_HUB_SERVICES_FILE`. The service file must be an owned regular file with
-no group/other permissions, contain at most 16 KiB and select each requested
-route with this marker:
-
-```json
-{"environment":"homelab","services":["vaultwarden","vault-secret","vault-attachment"],"vault_reader":"restricted-v1"}
-```
-
-A declared `T3_RUNTIME_VARIANT` or existing private home environment marker
-must also be homelab. Work, mixed, missing configuration and legacy tokens
-refuse before HTTP. There is no legacy URL, key-file, path-reference or
-connector fallback. Use HTTPS outside loopback. The explicit in-cluster
-homelab Service hostname also permits HTTP, as required by the existing
-isolated runtime contract. Proxy environment settings are ignored.
-
-On the hub, each selected vault upstream requires `protocol: restricted-v1`
-and its exact connector path. `/vault-secret` maps to `/secret` and
-`/vault-attachment` to `/attachment`. These two routes share the connector's
-broker bearer, separate from metadata's bearer on `/vaultwarden`. All three
-must select the same explicit connector origin. Only the hub holds those
-connector bearers. The helper holds its ordinary homelab client token, never
-the account's login credentials or CLI session. No raw vault CLI is needed
-in T3.
-
-References contain a canonical collection UUID and exactly one canonical
-item UUID or exact title. A folder or path never authorizes access. Duplicate
-titles require an item UUID. The connector refreshes and checks approved
-visible grants for each request. Failed refresh or missing/revoked grants
-fail closed rather than use an older password. Actual effective permissions
-and hidden assignments still require owner review and the live canary.
-Already delivered values cannot be revoked.
-
-After private configuration is supplied, these examples use synthetic IDs
-and names only. A command gets only explicitly mapped values:
-
-```sh
-python3 2-k3s/13.t3code/one/files/vault-restricted.py run \
-  --collection-id 00000000-0000-4000-8000-000000000003 \
-  --item-id 00000000-0000-4000-8000-000000000005 \
-  --password-env VAULT_PASSWORD --field 'api token=VAULT_API_TOKEN' \
-  -- python3 /path/to/approved-consumer.py
-```
-
-Use `--username-env VAULT_USER` when needed. Targets must match
-`VAULT_[A-Z][A-Z0-9_]{0,63}`. Duplicate targets, including collisions with an
-attachment target, refuse. Field names are exact, with the final `=`
-separating the source name from the target. Empty strings remain empty;
-missing or null requested values refuse. Outer `VAULT_*`, `BW_*` and
-`MCP_HUB_*` variables are removed before the child starts. No automatic
-field-name normalization or broker-auth inheritance occurs.
-
-A command-scoped attachment is a private file whose path, not content,
-enters the requested environment variable:
-
-```sh
-python3 2-k3s/13.t3code/one/files/vault-restricted.py run \
-  --collection-id 00000000-0000-4000-8000-000000000003 --title demo \
-  --attachment demo.txt --attachment-env VAULT_INPUT_FILE \
-  -- python3 /path/to/approved-file-consumer.py
-```
-
-Secret mappings and one attachment can be combined. The helper creates a
-0700 directory under `/tmp` and a 0600 file, then removes them when the
-command completes, times out or receives SIGINT/SIGTERM. Attachment IDs or
-filenames must be exact and unambiguous. The helper accepts only bounded
-ASCII basenames containing letters, digits, dot, underscore or hyphen,
-starting with a letter or digit and not ending with a dot.
-
-To retain a download, explicitly choose a new absolute destination in an
-owned private directory. The helper does not create destination directories:
-
-```sh
-python3 2-k3s/13.t3code/one/files/vault-restricted.py download \
-  --collection-id 00000000-0000-4000-8000-000000000003 --title demo \
-  --attachment demo.txt --destination /private/downloads/demo.txt
-```
-
-Existing files, symlinks at any path component, traversal segments and
-public destination directories refuse. Creation is exclusive, with mode
-0600. Download output contains only status, destination and byte count.
-The caller owns cleanup of retained downloads. File removal is not secure
-erasure.
-
-### Quiet execution and bounds
-
-The helper runs argv directly, without an implicit shell. Put `--` before
-the command. Child stdin is closed; stdout and stderr go to `/dev/null`.
-The helper returns only a fixed completion status and the child's exit code.
-Timeout returns 124; SIGINT/SIGTERM returns 130; refusal returns 1 with a
-fixed message. There is no raw-output switch. Normal diagnostics are lost
-as well as secrets. Validate a consumer with synthetic values before using
-it here. Exact-string redaction cannot safely handle encoded, split or
-partial output, so the helper deliberately does not try it.
-
-Each request has a 130-second total deadline, a 12 MiB response cap, strict
-status/JSON/schema validation and no redirects or compressed responses.
-Attachments are capped at 8 MiB. Individual secret strings are capped at
-16 KiB and mapped values total at most 64 KiB. `--timeout` can reduce the
-120-second child lifetime, never increase it. The helper disables core dumps
-and sets a CPU limit tied to the timeout. It leaves address-space, file-size
-and descriptor budgets inherited. Node and Go reserve large virtual address
-ranges; RLIMIT_AS is not a resident-memory budget. The runtime's cgroup memory
-limit remains the aggregate budget. Process-group descendants
-are killed on timeout/cancellation and after the direct child exits,
-including when the child closes its output descriptors early.
-
-These are per-command safeguards, not a sandbox or aggregate cgroup quota.
-A deliberate consumer can write secret files, send data elsewhere or escape
-its process group. A caller that edits or bypasses its runtime can also
-bypass this policy. SIGKILL, host failure and escaped descendants are not
-covered by graceful cleanup. The reader package has its own bounded memory
-scratch and startup orphan cleanup; this does not erase files a deliberate
-consumer retains elsewhere. Its pinned Node 22/native checks and the three
-runtime smokes run in CI. Private provisioning and live acceptance remain
-blocked. The removed
-pi-permission-system stays removed; cc-safety-net does not replace its old
-environment-dump or infrastructure deny rules. Keep the remaining guards
-and organizational policy checks.
+reading a legacy key file or making a request. Neither hub configuration nor
+its legacy runner replaces organizational agent policies.
 
 ## Approval-dependent provisioning and rollout
 
@@ -281,9 +148,10 @@ and organizational policy checks.
    pod-template revision as part of the approved rollout. Both overlays
    provide `mcp-hub.epaflix.com/inputs-revision` in their own
    `kustomization.yaml` for the stable `mcp-hub-instance` Secret. Work also
-   uses that annotation in `work/searxng.yaml` when its upstream credential
-   changes. Coordinate Secret updates, downtime, tracked revisions and manual
-   sync. Homelab reader changes follow the coordinated procedure below.
+   uses that annotation on its search Deployment when its upstream credential
+   changes. Use an environment-only patch for search bearer rotations.
+   Coordinate Secret updates, downtime, tracked revisions and manual sync.
+   Homelab input changes follow the coordinated procedure below.
    Mounted files alone do not reload this process's in-memory configuration.
    Do not assume Reloader watches these namespaces.
 4. A4: Approve the ArgoCD source for the private composition and manual sync.
@@ -306,34 +174,116 @@ auth rules.
    Workload startup must not create accounts or log in. Secret staging/rotation
    must not implicitly enroll accounts or log in. Owner API enrollment requires
    separate explicit authorization and is outside Secret staging/rotation.
-2. R2: Stage `vault-reader-inputs` only in `vault-reader-homelab` and
-   `mcp-hub-instance` only in `mcp-hub-homelab` through the approved private
-   secret workflow. Change only the inputs covered by that approval. Shared
-   metadata/broker bearer changes require matching values in both Secrets.
-   The reader latches changed projections closed; the hub retains its old
-   in-memory configuration until rollout. Treat this interval as downtime.
-3. R3: For reader input changes, update
-   `vault-reader.epaflix.com/inputs-revision` in
-   `../reader/homelab/deployment.yaml`. For hub `services.json` or
-   `credentials.json` changes, update `mcp-hub.epaflix.com/inputs-revision` in
-   `homelab/kustomization.yaml`. A shared bearer rotation requires both;
-   use the same new opaque revision for that coordinated change. Review the
-   rendered pod templates and stable Secret references before manual sync.
-4. R4: After the approved tracked revisions reach the Applications' source,
-   manually sync `vault-reader-homelab` first if its inputs changed, then
-   `mcp-hub-homelab` if its inputs changed. Wait for each single-replica
-   `Recreate` rollout to finish before proceeding; never run two reader Pods
-   or two hub refresh owners. Health alone is not authority acceptance.
-   Perform the approved dummy-item and auth-rejection canaries before
-   resuming consumers. Keep work and legacy Applications/Secrets unchanged.
+2. R2: Stage only approved `mcp-hub-instance` changes in
+   `mcp-hub-homelab` through the private secret workflow. The hub retains
+   its old in-memory configuration until rollout. Treat this interval as downtime.
+3. R3: For hub `services.json` or `credentials.json` changes, update
+   `mcp-hub.epaflix.com/inputs-revision` in `homelab/kustomization.yaml`.
+   Review the rendered pod template and stable Secret reference before sync.
+4. R4: After the approved revision reaches the Application's source, manually
+   sync `mcp-hub-homelab`. Wait for its single-replica `Recreate` rollout
+   to finish. Verify authorized requests and auth rejection before resuming
+   consumers. Keep work and legacy Applications and Secrets unchanged.
 
-If the runtime's private allowlist or ordinary client-token digest changes,
-coordinate its existing `t3code.epaflix.com/inputs-grants-revision` and
-OnDelete/manual rollout separately. Service removal also requires regenerated
-client metadata and the private helper snapshot. Manual Application sync does
-not authorize deletion or forced restart of an existing runtime. No revision
-change or offline test authorizes first activation; the reader's
-[first-sync gates](../reader/README.md#first-sync-gate-still-missing) still apply.
+Runtime allowlist or client-token changes require a separate reviewed input
+revision and OnDelete/manual rollout. Regenerate client metadata and private
+service snapshots. Manual hub sync does not authorize restarting a runtime.
+
+## Restricted reader retirement after merge
+
+The approved replacement homelab inventory is `searxng` only. Both hubs use
+`../searxng/`, with separate namespace-local upstream bearer Secrets. The
+live homelab inventory checked for #1845 still contained only `vaultwarden`,
+`vault-secret` and `vault-attachment`. Do not sync new hub code against
+those old inputs. The following steps require approved maintenance after merge;
+none were performed by this implementation.
+
+1. P1: Pause homelab consumers first. Close homePC/laptop homelab sessions and
+   stop new requests. Stop the homelab T3 backend through its approved maintenance
+   procedure before replacing its reviewed inputs. Keep it stopped until P4.
+   Do not restart pods, scale workloads or sync Applications without approval.
+   Keep the reader available until all consumers have moved. Do not change work
+   or the mixed hub, and do not rerun account enrollment or first provisioning.
+2. P2: In an approved in-cluster administrative process, mint a fresh independent
+   `search_token = secrets.token_urlsafe(48)`. Create the Opaque Secret
+   `mcp-hub-homelab/mcp-hub-searxng` with exactly the key `token`.
+   Keep the value in memory, never print it, pass it on argv, log it, put it in
+   a public manifest or reuse the work bearer. If the Secret already exists,
+   verify the approved private source rather than silently rotating it.
+   In the same private process, read `mcp-hub-homelab/mcp-hub-instance`
+   without displaying its data. Require all three existing client digests,
+   preserve them byte-for-byte, then construct the replacements below:
+
+   ```python
+   services = {"environment": "homelab", "services": ["searxng"]}
+   credentials["clients"] = {
+       name: credentials["clients"][name]
+       for name in ("homepc", "laptop", "t3code-homelab")
+   }
+   credentials["upstreams"] = {"searxng": {
+       "url": "http://searxng-mcp.mcp-hub-homelab.svc.cluster.local:8000/mcp",
+       "token": search_token,
+   }}
+   ```
+
+   Serialize `services` into `data["services.json"]` and `credentials`
+   into `data["credentials.json"]` using Kubernetes base64 encoding. Replace
+   the Secret with its current `resourceVersion` so a concurrent update fails
+   instead of being overwritten. Keep only those two data keys. This removes
+   `vault_reader`, all vault upstreams and every canary client digest while
+   retaining the three ordinary clients. Store the same approved changes in
+   the private provisioning source. Suppress Secret output and API error bodies.
+3. P3: Once P2 is staged, change the homelab hub's
+   `mcp-hub.epaflix.com/inputs-revision` from `r2` to a new opaque revision
+   such as `r3` in `homelab/kustomization.yaml`. Publish that reviewed
+   revision before manually syncing only `mcp-hub-homelab`. Its sync creates
+   the authenticated search backend and rolls the hub with the new allowlist.
+   Wait for both Deployments to become ready. Verify direct `/mcp` requests
+   without a bearer or with an ordinary hub token return 401; verify a request
+   through the hub's `/searxng` succeeds using an existing homelab client.
+   Require authorized requests to all three removed hub routes to return 404.
+   No query or credential belongs in public evidence. No hub NetworkPolicy was
+   present in the tracked overlay or live namespace when this change was checked.
+4. P4: While the homelab T3 backend is still stopped, replace only
+   `t3code-homelab/t3-runtime-inputs`'s `services.json` with the exact
+   `services` object above. Recompute
+   `runtime.json.sha256["services.json"]` over the exact serialized bytes
+   stored in that key, and record the approved #1845 hub change in
+   `runtime.json.approvals.hub`. Preserve every other input, digest, approval
+   and `grantSha256` value. Preserve `t3-runtime-grants` and both
+   `vaultwarden-agent` Secrets unchanged. Update the private source and replace
+   the runtime-input Secret with its current `resourceVersion`, without output.
+   Bump `t3code.epaflix.com/inputs-grants-revision` from `r3` to a new
+   opaque revision such as `r4` in
+   `2-k3s/13.t3code-homelab/statefulset.yaml`. After the reviewed revision and
+   runtime image are published, manually sync only the approved homelab runtime
+   and resume it through the approved OnDelete maintenance procedure. Startup
+   regenerates its private service snapshot and Pi/Claude/Codex registrations.
+   Verify they advertise `searxng` and none of the retired vault routes.
+   Update the paused desktop clients' private homelab allowlists and regenerate
+   their registrations before resuming their sessions. Keep ordinary tokens.
+5. P5: Verify both T3 pods consume synthetic secrets through `vault run` in
+   their own organization and collection, including cross-environment rejection.
+   Permanently delete every synthetic probe in a `finally` cleanup and verify
+   absence from active items and trash. Do not read real items or restart work.
+6. P6: Only after consumers are migrated and P3-P5 pass, explicitly delete the
+   manual Argo CD Application `vault-reader-homelab` and namespace
+   `vault-reader-homelab`, including `vault-reader-inputs` and remaining
+   reader/canary resources. Remove the obsolete `vault-canary-client` Secret
+   from `mcp-hub-homelab` and reader bearers from private provisioning sources.
+   Preserve `mcp-hub-instance`, `mcp-hub-searxng`, `t3-runtime-grants`
+   and both `vaultwarden-agent` Secrets. Manually prune the obsolete namespace's
+   read RoleBinding through `t3code-homelab-access` if it still exists.
+   Obtain separate owner approval to delete the reader's Vaultwarden account and
+   revoke its access. Do not delete stock-client accounts, organizations or
+   collections. Manifest removal alone does not authorize live deletion.
+
+The tracked hub and runtime revisions remain unchanged here because the new
+private inputs have not been staged. Future homelab bearer rotations must also
+bump the search Deployment's input annotation through a homelab-only patch,
+not by changing the shared base and rolling work. Moving the work backend to
+the shared base preserves its immutable selector but changes its runner
+ConfigMap reference. Work remains manual-sync; do not sync it during this cutover.
 
 Infrastructure-administrator and cross-cluster isolation remain deferred.
 These deployments separate application configuration and credentials; they

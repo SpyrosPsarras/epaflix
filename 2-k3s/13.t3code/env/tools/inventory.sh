@@ -10,16 +10,11 @@ if compgen -G '/etc/ssh/ssh_host_*' >/dev/null; then exit 1; fi
 kubectl version --client >/dev/null
 case "$variant" in
   mixed)
-    [[ ! -e /usr/local/bin/vault-restricted ]]
     command -v az >/dev/null
     az version >/dev/null
     command -v bw >/dev/null
     ;;
   homelab)
-    [[ -x /usr/local/bin/vault-restricted ]]
-    cmp "$root/one/files/vault-restricted.py" /usr/local/lib/t3-vault-restricted/vault-restricted.py
-    cmp "$root/one/files/hub_services.py" /usr/local/lib/t3-vault-restricted/hub_services.py
-    python3 "$root/env/tools/restricted-consumers.test.py" -v
     command -v bw >/dev/null
     [[ -x /usr/local/bin/vault ]]
     cmp "$root/env/files/vault-client.py" /usr/local/bin/vault
@@ -31,7 +26,6 @@ case "$variant" in
     done
     ;;
   work)
-    [[ ! -e /usr/local/bin/vault-restricted ]]
     command -v az >/dev/null
     az version >/dev/null
     [[ -d /etc/codex && -x /scripts/work-aks-auth.py ]]

@@ -4,6 +4,7 @@ namespace: mcp-hub-homelab
 
 resources:
   - ../base
+  - ../searxng
   - namespace.yaml
   - ingress.yaml
 

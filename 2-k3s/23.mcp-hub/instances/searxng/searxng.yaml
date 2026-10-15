@@ -8,13 +8,13 @@ spec:
     type: Recreate
   selector:
     matchLabels:
-      app: work-searxng-mcp
+      app: searxng-mcp
   template:
     metadata:
       annotations:
         mcp-hub.epaflix.com/inputs-revision: r1
       labels:
-        app: work-searxng-mcp
+        app: searxng-mcp
     spec:
       automountServiceAccountToken: false
       enableServiceLinks: false
@@ -90,7 +90,7 @@ spec:
             name: mcp-hub-app
         - name: runner
           configMap:
-            name: work-searxng-runner
+            name: searxng-runner
         - name: py
           emptyDir: {}
         - name: tmp
@@ -102,7 +102,7 @@ metadata:
   name: searxng-mcp
 spec:
   selector:
-    app: work-searxng-mcp
+    app: searxng-mcp
   ports:
     - name: http
       port: 8000
