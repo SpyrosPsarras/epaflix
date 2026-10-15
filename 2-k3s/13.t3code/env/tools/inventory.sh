@@ -35,7 +35,10 @@ case "$variant" in
     command -v az >/dev/null
     az version >/dev/null
     [[ -d /etc/codex && -x /scripts/work-aks-auth.py ]]
-    if command -v bw >/dev/null || command -v kubelogin >/dev/null; then exit 1; fi
+    command -v bw >/dev/null
+    [[ -x /usr/local/bin/vault ]]
+    cmp "$root/env/files/vault-client.py" /usr/local/bin/vault
+    if command -v kubelogin >/dev/null; then exit 1; fi
     for file in /scripts/aks-auth.sh /scripts/aks-auth-central.sh /scripts/vault-run.py /scripts/vault-ssh-agent.py; do
       [[ ! -e $file ]]
     done
@@ -46,9 +49,7 @@ source "$root/versions.env"
 [[ $(gh --version | head -1) == "gh version $GH_VERSION "* ]]
 pin() { node -p "require('/tools/package.json').dependencies['$1']"; }
 ver() { timeout 60 "$1" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?' | head -1; }
-if [[ $variant != work ]]; then
-  [[ $(ver /tools/node_modules/.bin/bw) == "$(pin @bitwarden/cli)" ]] || { echo "inventory: bw version mismatch" >&2; exit 1; }
-fi
+[[ $(ver /tools/node_modules/.bin/bw) == "$(pin @bitwarden/cli)" ]] || { echo "inventory: bw version mismatch" >&2; exit 1; }
 for pair in t3:t3 @anthropic-ai/claude-code:claude @openai/codex:codex @earendil-works/pi-coding-agent:pi; do
   want=$(pin "${pair%%:*}"); got=$(ver "/tools/node_modules/.bin/${pair##*:}")
   [[ $got == "$want" ]] || { echo "inventory: ${pair##*:} version mismatch" >&2; exit 1; }
