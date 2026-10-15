@@ -70,6 +70,11 @@ def canary_items(client, item_name):
             urlencode({'search': item_name, 'trash': trash}))['data'] if item.get('name') == item_name]
 
 
+def synced_canary_items(client, item_name):
+    client.fetch('/sync?force=true', method='POST', timeout=45)
+    return canary_items(client, item_name)
+
+
 def exercise(client, variant):
     require(variant in ('homelab', 'work') and os.environ['T3_RUNTIME_VARIANT'] == variant)
     organization, collection = client.scope()
@@ -85,6 +90,7 @@ def exercise(client, variant):
         document.write_text(json.dumps({'type': 1, 'name': item_name,
             'login': {'username': 'synthetic-user', 'password': value},
             'fields': [{'name': 'api', 'value': field, 'type': 1}]}))
+        failure = None
         try:
             result = invoke(client, ['create', '--input-file', str(document)])
             item_id = client.checked_uuid(result['itemId'])
@@ -119,12 +125,24 @@ def exercise(client, variant):
             invoke(client, ['trash', '--item', item_id])
             require(client.fetch('/object/item/' + item_id).get('deletedDate') is not None)
             invoke(client, arguments, expected=1)
+        except BaseException as error:
+            failure = error
+            raise
         finally:
-            item_ids = {item_id} if item_id is not None else {
-                client.checked_uuid(item['id']) for item in canary_items(client, item_name)}
-            for cleanup_id in item_ids:
-                client.fetch('/object/item/' + cleanup_id + '?permanent=true', method='DELETE', timeout=45)
-            require(not canary_items(client, item_name))
+            try:
+                item_ids = {item_id} if item_id is not None else {
+                    client.checked_uuid(item['id']) for item in client.wait_for_cache(lambda: synced_canary_items(client, item_name))}
+                for cleanup_id in item_ids:
+                    client.wait_for_cache(lambda: client.fetch('/object/item/' + cleanup_id))
+                    client.fetch('/object/item/' + cleanup_id + '?permanent=true', method='DELETE', timeout=45)
+                client.wait_for_cache(lambda: not synced_canary_items(client, item_name))
+            except BaseException as cleanup_error:
+                if failure is not None:
+                    print('vault canary: lifecycle failed: ' + type(failure).__name__, file=sys.stderr)
+                print('vault canary: cleanup failed: ' + type(cleanup_error).__name__, file=sys.stderr)
+                if failure is not None:
+                    raise failure from None
+                raise
 
 
 def main():
