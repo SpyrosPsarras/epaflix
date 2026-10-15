@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -9,27 +10,38 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import call, patch
 
 SOURCE = Path(__file__).resolve().parents[2] / 'env/files/vault-client.py'
 FAKE = '''#!/usr/bin/env python3
-import json,os,pathlib,sys
+import json,os,pathlib,sys,time
 from http.server import BaseHTTPRequestHandler,HTTPServer
 home=pathlib.Path.home()
 config=json.loads((home/'fixture.json').read_text())
 args=sys.argv[1:]
+logged_in=(config['cached'] and not config.get('logged_out')) or (home/'logged-in').exists()
+(pathlib.Path(os.environ['BITWARDENCLI_APPDATA_DIR'])/'data.json').touch()
 with (home/'calls').open('a') as output:
     output.write(json.dumps({'args':args,'password':os.environ.get('BW_PASSWORD'),
                             'session':os.environ.get('BW_SESSION'),
                             'data':os.environ.get('BITWARDENCLI_APPDATA_DIR')})+'\\n')
+def state():
+    authenticated=logged_in and not (config.get('unauthenticated_response') and not (home/'logged-in').exists())
+    status='locked' if authenticated else 'unauthenticated'
+    if authenticated and not (home/'lock').exists() and (os.environ.get('BW_SESSION') or (home/'unlocked').exists()):
+        status='unlocked'
+    return {'status':status,
+            'userEmail':config.get('email','agent@homelab.example.test') if authenticated else None,
+            'serverUrl':config.get('server','https://vault.homelab.example.test')}
 if args == ['status']:
-    print(json.dumps({'status':'locked' if config['cached'] or (home/'logged-in').exists() else 'unauthenticated',
-                      'userEmail':config.get('email','agent@homelab.example.test'),
-                      'serverUrl':'https://vault.homelab.example.test'}))
+    print(json.dumps(state()))
 elif args[:2] == ['config','server']:
     assert args == ['config','server','https://vault.homelab.example.test']
 elif args[0] in ('login','unlock'):
     assert args == (['login','agent@homelab.example.test'] if args[0]=='login' else ['unlock'])+['--passwordenv','BW_PASSWORD','--raw']
     assert os.environ['BW_PASSWORD']=='synthetic-login-password'
+    if args[0]=='login' and (home/'server-pid').exists():
+        assert not pathlib.Path('/proc/'+(home/'server-pid').read_text()).exists()
     if config.get('fail'):
         print('synthetic-login-password',file=sys.stderr)
         sys.exit(1)
@@ -39,14 +51,61 @@ elif args == ['sync']:
     assert os.environ['BW_SESSION']=='synthetic-session'
 elif args == ['serve','--hostname','127.0.0.1','--port','8087']:
     assert 'BW_PASSWORD' not in os.environ
-    assert os.environ['BW_SESSION']=='synthetic-session'
     (home/'server-pid').write_text(str(os.getpid()))
+    if not logged_in:
+        sys.exit(1)
+    def write_listener(uid):
+        address=config.get('listener_address','0100007F')
+        table='tcp6' if len(address)==32 else 'tcp'
+        inode=config.get('listener_inode',12345)
+        (home/'proc/net'/table).write_text('sl local_address rem_address st tx_queue rx_queue tr uid timeout inode\\n'+
+            f'0: {address}:{config["port"]:04X} {"0"*len(address)}:0000 0A 0:0 00:0 0 {uid} 0 {inode}\\n')
     class Handler(BaseHTTPRequestHandler):
         requests=0
         def log_message(self,*args): pass
+        def do_POST(self):
+            with (home/'http-posts').open('a') as output:
+                output.write(self.path+'\\n')
+            if self.path=='/unlock':
+                assert self.headers['Content-Type']=='application/json'
+                assert json.loads(self.rfile.read(int(self.headers['Content-Length'])))=={'password':'synthetic-login-password'}
+                if config.get('fail'):
+                    print('synthetic-login-password',file=sys.stderr,flush=True)
+                    self.send_response(400)
+                    self.end_headers()
+                    return
+                (home/'unlocked').touch()
+                data=json.dumps({'success':True,'data':{'object':'message','noColor':False,
+                    'title':'Your vault is now unlocked!','message':'Set BW_SESSION=synthetic-session',
+                    'raw':'synthetic-session'}}).encode()
+                self.send_response(200)
+                self.send_header('Content-Type','application/json')
+                self.end_headers()
+                self.wfile.write(data)
+                return
+            assert self.path=='/sync'
+            (home/'sync-started').touch()
+            while config.get('block_sync') and not (home/'sync-release').exists():
+                time.sleep(0.01)
+            time.sleep(config.get('sync_delay',0))
+            if config.get('sync_fail'):
+                self.send_response(503)
+                self.end_headers()
+                return
+            if config.get('sync_lock'):
+                (home/'lock').touch()
+            data=json.dumps({'success':True,'data':{'object':'message','noColor':False,
+                'title':'Syncing complete.','message':None}}).encode()
+            self.send_response(200)
+            self.send_header('Content-Type','application/json')
+            self.end_headers()
+            self.wfile.write(data)
         def do_GET(self):
+            status=state()
             responses=config.get('responses',[])
             selected=responses[Handler.requests] if Handler.requests<len(responses) else 'ok'
+            if status['status']=='unauthenticated':
+                selected='unauthenticated'
             Handler.requests+=1
             with (home/'http-calls').open('a') as output:
                 output.write(selected+'\\n')
@@ -54,18 +113,79 @@ elif args == ['serve','--hostname','127.0.0.1','--port','8087']:
                 self.send_response(503)
                 self.end_headers()
                 return
-            data=json.dumps({'success':True,'data':{'object':'template','template':{
-                'status':'locked' if (home/'lock').exists() else 'unlocked',
-                'serverUrl':'https://vault.homelab.example.test',
-                'userEmail':'other@work.example.test' if selected=='foreign' else 'agent@homelab.example.test'}}}).encode()
+            if selected=='foreign':
+                status['userEmail']='other@work.example.test'
+            data=json.dumps({'success':True,'data':{'object':'template',
+                'template':[] if selected=='malformed' else status}}).encode()
+            if config.get('swap_listener'):
+                write_listener(os.getuid()+1)
             self.send_response(200)
             self.send_header('Content-Type','application/json')
             self.end_headers()
             self.wfile.write(data)
-    HTTPServer(('127.0.0.1',config['port']),Handler).serve_forever()
+    server=HTTPServer(('127.0.0.1',config['port']),Handler)
+    if 'listener_uid' in config:
+        descriptors=home/'proc'/str(os.getpid())/'fd'
+        descriptors.mkdir(parents=True)
+        (descriptors/'3').symlink_to('socket:[12345]')
+        write_listener(config['listener_uid'])
+    if config.get('listener_exit'):
+        sys.exit(1)
+    server.serve_forever()
 else:
     sys.exit(2)
 '''
+
+
+class RetryTests(unittest.TestCase):
+    def setUp(self):
+        spec = importlib.util.spec_from_file_location('vault', SOURCE)
+        self.vault = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.vault)
+
+    def test_retry_returns_the_action_result_after_transient_failures(self):
+        attempts = []
+
+        def action():
+            attempts.append(None)
+            if len(attempts) < 3:
+                raise self.vault.Refused
+            return 'ready'
+
+        with patch.object(self.vault.time, 'sleep') as sleep:
+            self.assertEqual(self.vault.retry(action), 'ready')
+        self.assertEqual(len(attempts), 3)
+        self.assertEqual(sleep.call_args_list, [call(2), call(2)])
+
+    def test_retry_uses_three_attempts_for_expected_and_unexpected_failures(self):
+        for error in (self.vault.Refused, RuntimeError):
+            with self.subTest(error=error):
+                attempts = []
+
+                def action():
+                    attempts.append(None)
+                    raise error
+
+                with patch.object(self.vault.time, 'sleep') as sleep:
+                    with self.assertRaises(error):
+                        self.vault.retry(action)
+                self.assertEqual(len(attempts), 3)
+                self.assertEqual(sleep.call_args_list, [call(2), call(2)])
+
+    def test_retry_never_retries_cancellation_or_listener_failures(self):
+        for error in (self.vault.Cancelled, self.vault.UnsafeListener):
+            with self.subTest(error=error):
+                attempts = []
+
+                def action():
+                    attempts.append(None)
+                    raise error
+
+                with patch.object(self.vault.time, 'sleep') as sleep:
+                    with self.assertRaises(error):
+                        self.vault.retry(action)
+                self.assertEqual(len(attempts), 1)
+                sleep.assert_not_called()
 
 
 class StartupTests(unittest.TestCase):
@@ -97,12 +217,29 @@ class StartupTests(unittest.TestCase):
 
     def fixture(self, **changes):
         (self.home / 'fixture.json').write_text(json.dumps({'cached': False, 'port': self.port, **changes}))
+        data = self.home / 'client'
+        data.mkdir(mode=0o700, exist_ok=True)
+        if changes.get('cached'):
+            (data / 'data.json').write_text('{}')
+        else:
+            (data / 'data.json').unlink(missing_ok=True)
+        if 'listener_uid' in changes:
+            net = self.home / 'proc/net'
+            net.mkdir(parents=True, exist_ok=True)
+            for name in ('tcp', 'tcp6'):
+                (net / name).write_text('sl local_address rem_address st tx_queue rx_queue tr uid timeout inode\n')
+
+    def proc_prefix(self):
+        prefix = self.prefix.copy()
+        prefix[2] = prefix[2].replace('m.ADDRESS=sys.argv[2];',
+            'm.PROC=m.Path(sys.argv[3]).parent/"proc"; m.ADDRESS=sys.argv[2];')
+        return prefix
 
     def calls(self):
         return [json.loads(line) for line in (self.home / 'calls').read_text().splitlines()]
 
-    def wait_ready(self, process):
-        deadline = time.monotonic() + 10
+    def wait_ready(self, process, timeout=10):
+        deadline = time.monotonic() + timeout
         while not self.scope.exists() and process.poll() is None and time.monotonic() < deadline:
             time.sleep(0.01)
         self.assertTrue(self.scope.exists())
@@ -128,12 +265,147 @@ class StartupTests(unittest.TestCase):
                 self.assert_quiet(stdout, stderr)
             calls = self.calls()
             self.assertEqual([call['args'][0] for call in calls],
-                             ['status', 'unlock', 'sync', 'serve'] if cached else ['status', 'config', 'login', 'sync', 'serve'])
+                             ['serve'] if cached else ['status', 'config', 'login', 'serve'])
             self.assertIsNone(calls[-1]['password'])
+            self.assertEqual(calls[-1]['session'], None if cached else 'synthetic-session')
             self.assertEqual(calls[-1]['data'], str(self.home / 'client'))
             self.assertEqual((self.home / 'client').stat().st_mode & 0o777, 0o700)
             self.assertFalse(self.scope.exists())
             self.assertFalse(Path('/proc/' + (self.home / 'server-pid').read_text()).exists())
+
+    def test_cached_restart_starts_serve_before_sync_and_publishes_only_after_sync(self):
+        self.fixture(cached=True, block_sync=True)
+        with subprocess.Popen(self.prefix, env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
+            try:
+                deadline = time.monotonic() + 5
+                while not (self.home / 'sync-started').exists() and not self.scope.exists() and (
+                        process.poll() is None and time.monotonic() < deadline):
+                    time.sleep(0.01)
+                self.assertTrue((self.home / 'sync-started').exists())
+                self.assertEqual([call['args'][0] for call in self.calls()], ['serve'])
+                self.assertEqual((self.home / 'http-posts').read_text().splitlines(), ['/unlock', '/sync'])
+                self.assertFalse(self.scope.exists())
+                (self.home / 'sync-release').touch()
+                self.wait_ready(process)
+                self.assertGreaterEqual(len((self.home / 'http-calls').read_text().splitlines()), 2)
+            finally:
+                process.send_signal(signal.SIGTERM)
+                stdout, stderr = process.communicate(timeout=5)
+                self.assert_quiet(stdout, stderr)
+
+    def test_foreign_listener_is_refused_without_any_http_request_or_login_fallback(self):
+        changes = [
+            {'listener_uid': os.getuid() + 1},
+            {'listener_uid': os.getuid() + 1, 'listener_exit': True},
+            {'listener_uid': os.getuid(), 'listener_inode': 99999},
+            {'listener_uid': os.getuid(), 'listener_inode': 99999, 'listener_address': '00000000'},
+            {'listener_uid': os.getuid(), 'listener_inode': 99999,
+             'listener_address': '0000000000000000FFFF00000100007F'},
+            {'listener_uid': os.getuid(), 'listener_inode': 99999,
+             'listener_address': '00000000000000000000000000000000'}]
+        for change in changes:
+            with self.subTest(change=change):
+                self.fixture(cached=True, **change)
+                for name in ('calls', 'http-calls', 'http-posts', 'unlocked'):
+                    (self.home / name).unlink(missing_ok=True)
+                with subprocess.Popen(self.proc_prefix(), env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
+                    try:
+                        deadline = time.monotonic() + 5
+                        while process.poll() is None and not self.scope.exists() and time.monotonic() < deadline:
+                            time.sleep(0.01)
+                    finally:
+                        if process.poll() is None:
+                            process.send_signal(signal.SIGTERM)
+                        stdout, stderr = process.communicate(timeout=5)
+                        self.assert_quiet(stdout, stderr)
+                self.assertFalse((self.home / 'http-posts').exists())
+                self.assertFalse((self.home / 'http-calls').exists())
+                self.assertEqual(process.returncode, 1)
+                self.assertEqual([call['args'][0] for call in self.calls()], ['serve'])
+                self.assertFalse(self.scope.exists())
+                self.assertFalse(Path('/proc/' + (self.home / 'server-pid').read_text()).exists())
+
+    def test_owned_listener_proceeds_to_unlock_and_sync(self):
+        self.fixture(cached=True, listener_uid=os.getuid())
+        with subprocess.Popen(self.proc_prefix(), env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
+            try:
+                self.wait_ready(process)
+                self.assertEqual((self.home / 'http-posts').read_text().splitlines(), ['/unlock', '/sync'])
+            finally:
+                process.send_signal(signal.SIGTERM)
+                stdout, stderr = process.communicate(timeout=5)
+                self.assert_quiet(stdout, stderr)
+
+    def test_listener_ownership_is_rechecked_before_sending_the_password(self):
+        self.fixture(cached=True, listener_uid=os.getuid(), swap_listener=True)
+        with subprocess.Popen(self.proc_prefix(), env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
+            try:
+                deadline = time.monotonic() + 5
+                while process.poll() is None and not self.scope.exists() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+            finally:
+                if process.poll() is None:
+                    process.send_signal(signal.SIGTERM)
+                stdout, stderr = process.communicate(timeout=5)
+                self.assert_quiet(stdout, stderr)
+        self.assertEqual(process.returncode, 1)
+        self.assertEqual((self.home / 'http-calls').read_text().splitlines(), ['ok'])
+        self.assertFalse((self.home / 'http-posts').exists())
+        self.assertEqual([call['args'][0] for call in self.calls()], ['serve'])
+        self.assertFalse(self.scope.exists())
+
+    def test_sync_can_take_longer_than_the_normal_http_deadline(self):
+        self.fixture(cached=True, sync_delay=11)
+        with subprocess.Popen(self.prefix, env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
+            try:
+                self.wait_ready(process, timeout=15)
+            finally:
+                process.send_signal(signal.SIGTERM)
+                stdout, stderr = process.communicate(timeout=5)
+                self.assert_quiet(stdout, stderr)
+        self.assertEqual(process.returncode, 130)
+        self.assertIn(b'vault: local client ready', stdout)
+
+    def test_failed_sync_or_relocked_account_never_publishes_scope(self):
+        for change in ({'sync_fail': True}, {'sync_lock': True}):
+            with self.subTest(change=change):
+                self.fixture(cached=True, **change)
+                (self.home / 'lock').unlink(missing_ok=True)
+                result = subprocess.run(self.prefix, env=self.env, capture_output=True, timeout=15)
+                self.assertEqual(result.returncode, 1)
+                self.assertTrue((self.home / 'sync-started').exists())
+                self.assertFalse(self.scope.exists())
+                self.assertNotIn(b'vault: local client ready', result.stdout)
+                self.assertFalse(Path('/proc/' + (self.home / 'server-pid').read_text()).exists())
+                self.assert_quiet(result.stdout, result.stderr)
+
+    def test_failed_cached_unlock_does_not_fall_back_to_login(self):
+        self.fixture(cached=True, fail=True)
+        result = subprocess.run(self.prefix, env=self.env, capture_output=True, timeout=15)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual([call['args'][0] for call in self.calls()], ['serve'])
+        self.assertEqual((self.home / 'http-posts').read_text().splitlines(), ['/unlock'] * 3)
+        self.assertFalse(self.scope.exists())
+        self.assert_quiet(result.stdout, result.stderr)
+
+    def test_unauthenticated_cached_data_stops_serve_before_fresh_login(self):
+        for change in ({'logged_out': True}, {'unauthenticated_response': True}):
+            with self.subTest(change=change):
+                self.fixture(cached=True, **change)
+                for name in ('logged-in', 'calls', 'http-posts'):
+                    (self.home / name).unlink(missing_ok=True)
+                with subprocess.Popen(self.prefix, env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
+                    try:
+                        self.wait_ready(process)
+                    finally:
+                        process.send_signal(signal.SIGTERM)
+                        stdout, stderr = process.communicate(timeout=5)
+                        self.assert_quiet(stdout, stderr)
+                self.assertEqual([call['args'][0] for call in self.calls()],
+                                 ['serve', 'status', 'config', 'login', 'serve'])
+                self.assertEqual((self.home / 'http-posts').read_text().splitlines(), ['/sync'])
+                self.assertFalse(self.scope.exists())
+                self.assertFalse(Path('/proc/' + (self.home / 'server-pid').read_text()).exists())
 
     def test_failed_login_is_bounded_quiet_and_clears_stale_scope(self):
         self.fixture(fail=True)
@@ -144,16 +416,41 @@ class StartupTests(unittest.TestCase):
         self.assertFalse(self.scope.exists())
         self.assert_quiet(result.stdout, result.stderr)
 
-    def test_foreign_cached_account_is_not_unlocked(self):
-        self.fixture(cached=True, email='other@work.example.test')
-        result = subprocess.run(self.prefix, env=self.env, capture_output=True, timeout=15)
+    def test_foreign_cached_account_or_server_is_not_unlocked(self):
+        for change in ({'email': 'other@work.example.test'}, {'server': 'https://vault.work.example.test'}):
+            with self.subTest(change=change):
+                self.fixture(cached=True, **change)
+                (self.home / 'calls').unlink(missing_ok=True)
+                result = subprocess.run(self.prefix, env=self.env, capture_output=True, timeout=15)
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual([call['args'][0] for call in self.calls()], ['serve'])
+                self.assertFalse((self.home / 'http-posts').exists())
+                self.assertFalse(Path('/proc/' + (self.home / 'server-pid').read_text()).exists())
+                self.assertFalse(self.scope.exists())
+                self.assert_quiet(result.stdout, result.stderr)
+
+    def test_foreign_resident_account_is_not_unlocked(self):
+        self.fixture(cached=True, responses=['foreign'] * 100)
+        result = subprocess.run(self.prefix, env=self.env, capture_output=True, timeout=20)
         self.assertEqual(result.returncode, 1)
-        self.assertEqual([call['args'] for call in self.calls()], [['status'], ['status'], ['status']])
+        self.assertEqual([call['args'][0] for call in self.calls()], ['serve'])
+        self.assertFalse((self.home / 'http-posts').exists())
         self.assertFalse(self.scope.exists())
+        self.assertFalse(Path('/proc/' + (self.home / 'server-pid').read_text()).exists())
         self.assert_quiet(result.stdout, result.stderr)
 
     def test_health_failures_reset_after_success_and_stop_after_three_consecutive_failures(self):
-        responses = ['ok', 'error', 'error', 'ok', 'error', 'error', 'ok', 'error', 'error', 'error']
+        responses = ['ok', 'ok', 'error', 'error', 'ok', 'error', 'error', 'ok', 'error', 'error', 'error']
+        self.fixture(cached=True, responses=responses)
+        result = subprocess.run(self.prefix, env=self.env, capture_output=True, timeout=15)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual((self.home / 'http-calls').read_text().splitlines(), responses)
+        self.assertFalse(self.scope.exists())
+        self.assertFalse(Path('/proc/' + (self.home / 'server-pid').read_text()).exists())
+        self.assert_quiet(result.stdout, result.stderr)
+
+    def test_malformed_or_foreign_status_uses_the_same_three_failure_tolerance(self):
+        responses = ['ok', 'ok', 'malformed', 'foreign', 'ok', 'malformed', 'foreign', 'malformed']
         self.fixture(cached=True, responses=responses)
         result = subprocess.run(self.prefix, env=self.env, capture_output=True, timeout=15)
         self.assertEqual(result.returncode, 1)
@@ -163,7 +460,7 @@ class StartupTests(unittest.TestCase):
         self.assert_quiet(result.stdout, result.stderr)
 
     def test_two_transient_failures_do_not_restart_the_client(self):
-        responses = ['ok', 'error', 'error', 'ok', 'error', 'error', 'ok']
+        responses = ['ok', 'ok', 'error', 'error', 'ok', 'error', 'error', 'ok']
         self.fixture(cached=True, responses=responses)
         with subprocess.Popen(self.prefix, env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
             self.wait_ready(process)
