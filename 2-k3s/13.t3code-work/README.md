@@ -38,8 +38,9 @@ public Git, issue comments and logs.
    `work.`-prefixed `hub-token`. Add a reviewed `github-token` only with
    `gitAuth: github-token`. Public Git mode rejects a supplied Git grant.
 3. I3: Review SSH routing, the LoadBalancer pool and worker placement BEFORE
-   the first manual sync. Sync allocates an address even if startup refuses
-   inputs. Put required affinity in the tracked overlay first. Both jobs
+   the first manual sync. Sync exposes the pinned SSH address `192.168.10.114`
+   at `t3code-work.epaflix.lan` even if startup refuses inputs. Put required
+   affinity in the tracked overlay first. Both jobs
    inherit that affinity.
 
 Use the private input formats documented in
