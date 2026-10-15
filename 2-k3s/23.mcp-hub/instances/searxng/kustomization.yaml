@@ -1,9 +1,10 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-namespace: mcp-hub-homelab
+
 resources:
-  - job.yaml
+  - searxng.yaml
+
 configMapGenerator:
-  - name: vault-reader-canary
+  - name: searxng-runner
     files:
-      - canary.py
+      - searxng.py

@@ -324,20 +324,6 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: homelab-agent-read
-  namespace: vault-reader-homelab
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: view
-subjects:
-- kind: ServiceAccount
-  name: homelab-agent
-  namespace: t3code-homelab
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: homelab-agent-read
   namespace: vidar-edge
 roleRef:
   apiGroup: rbac.authorization.k8s.io

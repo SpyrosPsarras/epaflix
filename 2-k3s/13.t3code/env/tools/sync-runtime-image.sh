@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # Run after changing the shared inventory or image inputs, before committing.
-# Rewrites each runtime StatefulSet and the homelab reader canary Job.
 set -euo pipefail
 dir=$(cd "$(dirname "$0")" && pwd)
 for variant in mixed homelab work; do
@@ -10,9 +9,6 @@ for variant in mixed homelab work; do
   prefix=inputs
   [[ $variant == mixed ]] || prefix=$variant-inputs
   paths=("$dir/../../$overlay/statefulset.yaml")
-  if [[ $variant == homelab ]]; then
-    paths+=("$dir/../../../23.mcp-hub/reader/canary/job.yaml")
-  fi
 python3 - "$prefix-$tag" "${paths[@]}" <<'PY'
 import pathlib, re, sys
 for arg in sys.argv[2:]:

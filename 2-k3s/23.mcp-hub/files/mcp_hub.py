@@ -106,8 +106,6 @@ def instance_app(environment, services_file, credentials_file):
     for name in config["services"]:
         connection = connections[name]
         keys = {"url"} if name == "notion" else {"url", "token"}
-        if name in hub_services.VAULT_SERVICES:
-            keys.add("protocol")
         if not isinstance(connection, dict) or set(connection) != keys:
             raise ValueError("each upstream requires an explicit URL and its own credential")
         url = connection["url"]
@@ -121,9 +119,6 @@ def instance_app(environment, services_file, credentials_file):
         if parsed.scheme not in ("http", "https") or not parsed.hostname or port == 0 or (
                 parsed.username is not None or parsed.password is not None or parsed.query or parsed.fragment):
             raise ValueError("upstream URL must be HTTP or HTTPS without embedded credentials")
-        if name in hub_services.VAULT_SERVICES:
-            if connection["protocol"] != hub_services.READER_PROTOCOL or parsed.path != hub_services.READER_PATHS[name]:
-                raise ValueError("vault upstream requires the restricted-v1 connector path")
         if name == "notion":
             if url != "https://mcp.notion.com/mcp":
                 raise ValueError("notion must use the hosted MCP endpoint")
@@ -134,16 +129,6 @@ def instance_app(environment, services_file, credentials_file):
             if token.startswith(tuple(name + "." for name in hub_services.ENVIRONMENTS)) or (
                     hashlib.sha256(token.encode()).hexdigest() in credentials["clients"].values()):
                 raise ValueError("upstream and ordinary client credentials must be separate")
-    vault = {name: connection for name, connection in connections.items() if name in hub_services.VAULT_SERVICES}
-    if vault:
-        if any(len(connection["token"]) < 32 or len(connection["token"]) > 4096 for connection in vault.values()):
-            raise ValueError("restricted connector tokens must contain 32 to 4096 characters")
-        origins = {urllib.parse.urlsplit(connection["url"])[:2] for connection in vault.values()}
-        if len(origins) != 1:
-            raise ValueError("vault routes must use one restricted connector")
-        broker_tokens = {connection["token"] for name, connection in vault.items() if name != "vaultwarden"}
-        if len(broker_tokens) > 1 or vault.get("vaultwarden", {}).get("token") in broker_tokens:
-            raise ValueError("vault broker and metadata credentials must be separate and consistent")
     ups = []
     for name in config["services"]:
         connection = connections[name]
@@ -159,11 +144,9 @@ def instance_app(environment, services_file, credentials_file):
             up = Upstream(name, connection["url"], grant.headers, on_unauthorized=grant.invalidate)
         else:
             up = Upstream(name, connection["url"], lambda token=connection["token"]:
-                          {"Authorization": "Bearer " + token}, restricted=name in hub_services.VAULT_SERVICES)
+                          {"Authorization": "Bearer " + token})
         ups.append((hub_services.PATHS[name], up))
-    app = build_app(credentials["clients"], modules=(), ups=ups, environment=environment)
-    app.state.restricted_reader = bool(vault)
-    return app
+    return build_app(credentials["clients"], modules=(), ups=ups, environment=environment)
 
 
 class BearerAuth:
@@ -364,8 +347,7 @@ def main():
     import uvicorn
 
     app = configured_app()
-    uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="info",
-                access_log=not getattr(app.state, "restricted_reader", False))
+    uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="info")
 
 
 def configured_app():
