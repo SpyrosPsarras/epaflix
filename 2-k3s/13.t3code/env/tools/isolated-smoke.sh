@@ -29,7 +29,8 @@ p.chmod(0o440)
       --add-host "mcp-hub.mcp-hub-$variant.svc.cluster.local:127.0.0.1" \
       --tmpfs /scripts:uid=1000,gid=1000,exec --tmpfs /tmp:uid=1000,gid=1000,exec \
       --tmpfs /run/t3-inputs:uid=1000,gid=1000 --tmpfs /run/t3-login:uid=1000,gid=1000 \
-      -v "$root:/src:ro" -v "$volume:/home/t3" -v "$projection:/projection:ro" -e HOME=/home/t3 \
+      --tmpfs /run/t3-vault:uid=1000,gid=1000 \
+      -v "$root/../13.t3code-homelab:/homelab-src:ro" -v "$root:/src:ro" -v "$volume:/home/t3" -v "$projection:/projection:ro" -e HOME=/home/t3 \
       -e T3CODE_HOME=/home/t3/.t3 -e MCP_HUB_INSTANCE="$variant" \
       "$image" bash /src/env/tools/isolated-smoke.sh --inner "$round"
   done
@@ -48,9 +49,16 @@ config = yaml.safe_load((root / 'kustomization.yaml').read_text())
 files = next(item['files'] for item in config['configMapGenerator'] if item['name'] == 't3code-scripts')
 for spec in files:
     name, source = spec.split('=', 1) if '=' in spec else (Path(spec).name, spec)
+    if os.environ['MCP_HUB_INSTANCE'] == 'homelab' and name == 'homelab-ssh.md':
+        continue
     destination = Path('/scripts') / name
     destination.write_bytes((root / source).read_bytes())
     destination.chmod(0o555)
+if os.environ['MCP_HUB_INSTANCE'] == 'homelab':
+    for source in Path('/homelab-src/files').iterdir():
+        destination = Path('/scripts') / source.name
+        destination.write_bytes(source.read_bytes())
+        destination.chmod(0o555)
 if os.environ['MCP_HUB_INSTANCE'] == 'work':
     destination = Path('/scripts/work-aks-auth.py')
     destination.write_bytes((root / 'env/files/work-aks-auth.py').read_bytes())
@@ -90,6 +98,15 @@ config['grantSha256']['model-token'] = hashlib.sha256(b'tok-fixture-model').hexd
 path.write_text(json.dumps(config))
 PY
 cp /run/t3-inputs/authorized_keys /run/t3-login/authorized_keys
+if [[ $variant == homelab ]]; then
+  ssh-agent -D -a /run/t3-vault/ssh-agent.sock >/tmp/outbound-agent.log 2>&1 &
+  pids+=("$!")
+  for ((i=0; i<10; i++)); do [[ -S /run/t3-vault/ssh-agent.sock ]] && break; sleep 1; done
+  if [[ $round == restart ]]; then
+    SSH_AUTH_SOCK=/run/t3-vault/ssh-agent.sock ssh-add /tmp/laptop/id_ed25519 >/tmp/outbound-add.log 2>&1
+  fi
+  touch /run/t3-vault/scope.json
+fi
 MCP_HUB_TOKEN=$variant.$(printf 'h%.0s' {1..43})
 export MCP_HUB_TOKEN
 export ANTHROPIC_AUTH_TOKEN=tok-fixture-model ANTHROPIC_BASE_URL=http://127.0.0.1:18317
@@ -118,6 +135,13 @@ for ((i=0; i<600; i++)); do
 done
 curl -fsS --max-time 5 http://127.0.0.1:3773/health >/dev/null || fail 'health did not pass'
 grep -q '^pi-setup: all registered packages listed$' /tmp/entrypoint.log || fail 'package registration check'
+python3 - "$sup" <<'PY'
+from pathlib import Path
+import sys
+names = [entry.partition(b'=')[0] for entry in Path('/proc', sys.argv[1], 'environ').read_bytes().split(b'\0')]
+assert b'SSH_AUTH_SOCK' not in names
+print('isolated smoke: T3 has no default SSH agent environment PASS')
+PY
 if [[ $variant == homelab ]]; then
   python3 - <<'PY'
 import os
@@ -158,7 +182,7 @@ for command, expected in cases:
     assert json.loads(result.stdout)['result'] == expected, command
 print('isolated smoke: retained organizational deny and runtime secret protections PASS')
 PY
-/usr/bin/env -i HOME="$HOME" PATH=/tools/node_modules/.bin:/usr/local/bin:/usr/bin:/bin \
+/usr/bin/env -i HOME="$HOME" T3_RUNTIME_VARIANT="$variant" PATH=/tools/node_modules/.bin:/usr/local/bin:/usr/bin:/bin \
   bash /scripts/sshd.sh >/tmp/sshd.log 2>&1 &
 pids+=("$!")
 for ((i=0; i<30; i++)); do

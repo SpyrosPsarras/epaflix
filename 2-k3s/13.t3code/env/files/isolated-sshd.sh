@@ -8,6 +8,9 @@ if [[ ${1:-} == check ]]; then
 fi
 while ! curl -fs --max-time 5 -o /dev/null http://127.0.0.1:3773/health ||
       [[ ! -s $HOME/.t3/userdata/server-runtime.json ]]; do sleep 1; done
+if [[ ${T3_RUNTIME_VARIANT:-} == homelab ]]; then
+  bash /scripts/ssh-config.sh
+fi
 login=$(getent passwd "$(id -u)" | cut -d: -f6)/.ssh
 state=$HOME/.config/t3-sshd
 mkdir -p "$login" "$state"

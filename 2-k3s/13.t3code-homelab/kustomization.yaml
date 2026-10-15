@@ -11,6 +11,22 @@ resources:
   - service.yaml
   - network-policy.yaml
 
+configMapGenerator:
+  - name: t3code-homelab-ssh
+    files:
+      - files/homelab-ssh.conf
+      - files/homelab-ssh.md
+      - files/ssh-config.sh
+      - files/ssh-agent-ready.sh
+
+patches:
+  - target:
+      kind: ConfigMap
+      name: t3code-scripts
+    patch: |-
+      - op: remove
+        path: /data/homelab-ssh.md
+
 replacements:
   - source:
       kind: StatefulSet
