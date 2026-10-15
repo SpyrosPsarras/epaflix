@@ -5,7 +5,12 @@ idle_needed=${IDLE_SECONDS:-1800}
 here=$(dirname "$0")
 
 want=$(kubectl get statefulset t3code -o jsonpath='{.status.updateRevision}')
-have=$(kubectl get pod "$pod" -o jsonpath='{.metadata.labels.controller-revision-hash}')
+current=$(kubectl get pod "$pod" --ignore-not-found -o jsonpath='{.metadata.name}{" "}{.metadata.labels.controller-revision-hash}')
+read -r name have <<<"$current"
+if [[ -z $name ]]; then
+  echo "idle-rollout: $pod does not exist; nothing to roll out"
+  exit 0
+fi
 if [[ -z $want || $want == "$have" ]]; then
   echo "idle-rollout: $pod is on $have"
   exit 0
