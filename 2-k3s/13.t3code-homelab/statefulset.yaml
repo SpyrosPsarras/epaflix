@@ -18,7 +18,7 @@ spec:
   template:
     metadata:
       annotations:
-        t3code.epaflix.com/inputs-grants-revision: "unprovisioned"
+        t3code.epaflix.com/inputs-grants-revision: "r2"
       labels:
         app.kubernetes.io/name: t3code
     spec:
@@ -45,12 +45,14 @@ spec:
       initContainers:
         - name: runtime-state
           image: t3-runtime-from-t3-container
-          command: [touch, /runtime-state/server-runtime.json]
+          command: [bash, -c, "mkdir -p /home/t3/.t3/userdata && touch /runtime-state/server-runtime.json"]
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
               drop: [ALL]
           volumeMounts:
+            - name: home
+              mountPath: /home/t3
             - name: runtime-state
               mountPath: /runtime-state
       containers:

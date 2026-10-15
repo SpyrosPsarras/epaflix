@@ -10,6 +10,8 @@ The Dockerfile defaults to `mixed`. `--build-arg T3_RUNTIME_VARIANT=homelab` omi
 
 After changing image inputs, run `bash tools/sync-runtime-image.sh` here and include all three StatefulSet image changes. `runtime-tag.sh [mixed|homelab|work]` hashes the public image inputs and variant, including the single npm lockfile. Mixed tags retain `inputs-<hash>` and `latest`; homelab tags use `homelab-inputs-<hash>` and `homelab-latest`; work tags use `work-inputs-<hash>` and `work-latest`. CI checks all image references, builds and tests all variants, and publishes only tested images on main. The PreSync image-prepull Job waits for that image before ArgoCD updates the StatefulSet. The StatefulSet uses `OnDelete`, so the running pod keeps serving: the `t3code-idle-rollout` CronJob deletes `t3code-0` once T3 and terminal input have been idle for 30 minutes, or sooner if it is crash-looping, and the StatefulSet recreates it on the new image. Deleting the pod by hand, after checking for active sessions, applies the update immediately. The pod has no self-update path, and manual package installs do not survive a restart.
 
+The [isolated runtime contract](isolated-runtime.md) defines private policy inputs, homelab kubeconfig constraints, provider retention, Codex requirements and stopped input rotation.
+
 Credentials arrive at runtime and are never baked into the image. MCP servers come from `2-k3s/23.mcp-hub`; the pod entrypoint registers Pi, Claude Code and Codex against the hub using environment references.
 
 ## Pi

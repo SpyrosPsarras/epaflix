@@ -294,6 +294,7 @@ jobs:
             2-k3s/11.argocd/apps
             2-k3s/12.renovate
             2-k3s/13.t3code-homelab
+            2-k3s/13.t3code-homelab/rbac
             2-k3s/13.t3code-work
             2-k3s/23.mcp-hub/instances/homelab
             2-k3s/23.mcp-hub/instances/work
@@ -321,8 +322,11 @@ jobs:
           python3 2-k3s/13.t3code/env/tools/isolated-runtime.test.py -v
           python3 2-k3s/13.t3code/env/tools/work-runtime.test.py -v
           python3 2-k3s/13.t3code/env/tools/work-aks-auth.test.py -v
+          python3 2-k3s/13.t3code-homelab/tools/inputs.test.py -v
+          python3 2-k3s/13.t3code-homelab/tools/rbac.test.py -v
+          python3 2-k3s/13.t3code-homelab/tools/github-scope.test.py -v
           python3 2-k3s/13.t3code-work/tools/provision.test.py -v
-          python3 2-k3s/13.t3code-work/tools/startup.test.py -v
+          python3 2-k3s/13.t3code/env/tools/startup.test.py -v
           bash -n 2-k3s/13.t3code-work/tools/owner-login.sh
           python3 2-k3s/17.remote-pi/cliproxy/tools/client-backend.test.py -v
           bash 1-proxmox/t3env/pin-vm-host.test.sh
