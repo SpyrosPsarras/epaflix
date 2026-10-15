@@ -32,6 +32,7 @@ import json
 import re
 
 _REDACTIONS = [
+    (re.compile(r"\b(t3-work-[A-Za-z0-9_-]{40,})"), "t3-work-<REDACTED>"),
     (re.compile(r"\b(sk-ant-[A-Za-z0-9_\-]{8,})"), "sk-ant-<REDACTED>"),
     (re.compile(r"\b(sk-[A-Za-z0-9]{20,})"), "sk-<REDACTED>"),
     (re.compile(r"\b(ghp_[A-Za-z0-9]{20,})"), "ghp_<REDACTED>"),
@@ -62,6 +63,20 @@ def section(raw, name):
     match = re.search(r"^=== " + re.escape(name) + r"[^=\n]*===\n(.*?)(?=^=== |\Z)",
                       raw, re.S | re.M)
     return match.group(1) if match else ""
+
+
+CLIENT_BACKENDS = {"t3-w": "work"}
+
+
+def client_backend(raw):
+    for line in section(raw, "HEADERS").splitlines():
+        name, _, value = line.partition(":")
+        if name.lower() not in {"authorization", "x-api-key", "api-key"}:
+            continue
+        masked = re.fullmatch(r"(?:Bearer )?(.{4})\.\.\.[A-Za-z0-9_-]{4}", value.strip())
+        if masked and masked[1] in CLIENT_BACKENDS:
+            return CLIENT_BACKENDS[masked[1]]
+    return ""
 
 
 def first_json(text):
@@ -251,6 +266,7 @@ def parse(raw):
         "requested_at": field(raw, "REQUEST INFO", "Timestamp"),
         "version": field(raw, "REQUEST INFO", "Version"),
         "model": request.get("model"),
+        "client_backend": client_backend(raw),
         "stream": request.get("stream"),
         "upstream_url": field(raw, "API REQUEST 1", "Upstream URL"),
         "upstream_auth": field(raw, "API REQUEST 1", "Auth"),
