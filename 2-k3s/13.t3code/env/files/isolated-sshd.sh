@@ -32,7 +32,6 @@ PermitOpen 127.0.0.1:3773 localhost:3773
 X11Forwarding no
 PermitTunnel no
 PrintMotd no
-ForceCommand /scripts/ssh-command.sh
 SetEnv HOME=$HOME PATH=/tools/node_modules/.bin:/usr/local/bin:/usr/bin:/bin
 EOF
 /usr/sbin/sshd -t -f "$state/sshd_config"
