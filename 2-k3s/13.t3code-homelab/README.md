@@ -192,6 +192,8 @@ unavailable vault must leave no ready scope or working agent socket. Do not
 remove the owner's real keys merely to exercise that failure case on the live
 backend.
 
+See [scoped vault writes](../13.t3code/env/vault-writes.md).
+
 ## Scoped Kubernetes access
 
 The manual `t3code-homelab-access` Application tracks `rbac/` separately so
