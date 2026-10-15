@@ -70,6 +70,7 @@ class ImageCommandTests(unittest.TestCase):
         smoke = (ROOT / 'env/tools/isolated-smoke.sh').read_text()
         staging = smoke.split("python3 - <<'PY'\n", 1)[1].split('\nPY\n', 1)[0]
         homelab = ROOT.parent / '13.t3code-homelab/files'
+        work = ROOT.parent / '13.t3code-work/files'
         for variant, guide in (('homelab', homelab / 'homelab-ssh.md'),
                                ('work', ROOT / 'env/files/isolated-ssh.md')):
             with self.subTest(variant=variant), tempfile.TemporaryDirectory() as temporary:
@@ -77,12 +78,15 @@ class ImageCommandTests(unittest.TestCase):
                 code = staging
                 for source, destination in (('/src', ROOT), ('/scripts', scripts),
                                             ('/homelab-src/files', homelab),
+                                            ('/work-src/files', work),
                                             ('/scripts/work-aks-auth.py', scripts / 'work-aks-auth.py')):
                     code = code.replace(repr(source), repr(str(destination)))
                 result = subprocess.run([sys.executable, '-c', code],
                     env={**os.environ, 'MCP_HUB_INSTANCE': variant}, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual((scripts / 'homelab-ssh.md').read_bytes(), guide.read_bytes())
+                self.assertEqual((scripts / 'ssh-agent-ready.sh').read_bytes(),
+                                 (ROOT / 'env/files/ssh-agent-ready.sh').read_bytes())
                 for script in scripts.iterdir():
                     self.assertEqual(script.stat().st_mode & 0o777, 0o555, script.name)
                 if variant == 'homelab':
@@ -91,6 +95,8 @@ class ImageCommandTests(unittest.TestCase):
                     self.assertTrue((scripts / 'ssh-agent-ready.sh').is_file())
                     self.assertFalse((scripts / 'work-aks-auth.py').exists())
                 else:
+                    for name in ('work-ssh.md', 'work-ssh.py'):
+                        self.assertEqual((scripts / name).read_bytes(), (work / name).read_bytes())
                     self.assertEqual((scripts / 'work-aks-auth.py').read_bytes(),
                                      (ROOT / 'env/files/work-aks-auth.py').read_bytes())
                     self.assertFalse((scripts / 'ssh-config.sh').exists())

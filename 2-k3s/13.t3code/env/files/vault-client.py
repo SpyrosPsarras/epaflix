@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import re
 import resource
+import runpy
 import signal
 import socket
 import socketserver
@@ -29,6 +30,7 @@ MAX_VALUE_BYTES = 16 * 1024
 MAX_AGENT_MESSAGE_BYTES = 256 * 1024
 SSH_KEY_ITEM_TYPE = 5
 SCOPE_FILE = Path('/run/t3-vault/scope.json')
+WORK_SSH_INPUTS = Path('/run/t3-work-ssh')
 PROC = Path('/proc')
 HEALTH_INTERVAL = 2
 HTTP_REQUEST_TIMEOUT_SECONDS = 10
@@ -543,14 +545,16 @@ class AgentRequest(socketserver.StreamRequestHandler):
 
 @contextlib.contextmanager
 def ssh_agent(selected, server):
-    if selected['environment'] != 'homelab':
+    if selected['environment'] not in ('homelab', 'work'):
         raise Refused
     public_socket = SCOPE_FILE.with_name('ssh-agent.sock')
     public_socket.unlink(missing_ok=True)
+    load_keys = selected['environment'] != 'work' or bool(
+        runpy.run_path(str(WORK_SSH_INPUTS / 'work-ssh.py'))['hosts'](WORK_SSH_INPUTS / 'hosts.json'))
     if not owns_listener(server):
         raise UnsafeListener
     items = fetch('/list/object/items?' + urlencode({'organizationid': selected['organizationId'],
-                                                   'collectionid': selected['collectionId']}))['data']
+                                                   'collectionid': selected['collectionId']}))['data'] if load_keys else []
     keys = [item for item in items if item.get('type') == SSH_KEY_ITEM_TYPE and
             item.get('organizationId') == selected['organizationId'] and
             selected['collectionId'] in item.get('collectionIds', [])]
@@ -586,7 +590,7 @@ def ssh_agent(selected, server):
                     thread = threading.Thread(target=proxy.serve_forever, kwargs={'poll_interval': PROXY_POLL_SECONDS}, daemon=True)
                     thread.start()
                     try:
-                        if not keys:
+                        if not keys and load_keys:
                             print('vault: no scoped SSH keys; agent is empty', flush=True)
                         yield agent
                     finally:

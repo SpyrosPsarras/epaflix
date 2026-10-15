@@ -17,7 +17,6 @@ configMapGenerator:
       - files/homelab-ssh.conf
       - files/homelab-ssh.md
       - files/ssh-config.sh
-      - files/ssh-agent-ready.sh
 
 patches:
   - target:

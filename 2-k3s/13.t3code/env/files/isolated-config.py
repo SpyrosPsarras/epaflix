@@ -235,7 +235,7 @@ def apply(inputs, home, environment):
     safety_path = home / '.cc-safety-net/policy.json'
     safety = json.loads(safety_path.read_text())
     denied = safety.setdefault('secret_protection', {}).setdefault('deny_paths', [])
-    for path in (str(home / '.ssh'), str(home / '.config/t3-sshd'), str(inputs), '/run/t3-grants', str(home / '.azure')):
+    for path in (str(home / '.ssh'), str(home / '.config/t3-sshd'), str(inputs), '/run/t3-grants', '/run/t3-work-ssh', str(home / '.azure')):
         if path not in denied:
             denied.append(path)
     hub_clients.write_json(str(safety_path), safety)
