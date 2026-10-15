@@ -51,8 +51,10 @@ The API binds only `127.0.0.1:8087`, with no Service or container port. It has
 no authentication within the pod. `vault run` checks both organization and
 collection and suppresses output, but cannot prevent deliberate exfiltration
 through direct API access. Cross-organization isolation also depends on the
-separate agent accounts established in #1838. Trashed-item filtering belongs
-to #1846 and is not changed here.
+separate agent accounts established in #1838.
+
+[Scoped vault writes](../13.t3code/env/vault-writes.md) covers write commands,
+trashed-item reads and post-merge checks for both runtimes.
 
 ### Post-merge vault acceptance for #1843
 

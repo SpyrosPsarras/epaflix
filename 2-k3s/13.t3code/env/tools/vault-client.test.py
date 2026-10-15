@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 import copy
+from email.parser import BytesParser
+from email.policy import default
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -8,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 from threading import Thread
+from types import SimpleNamespace
 import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -43,6 +47,15 @@ class VaultTests(unittest.TestCase):
                      'attachments': [{'id': 'syntheticattachment', 'fileName': 'fixture.bin', 'size': str(len(CONTENT))}]}
         self.extra_items = []
         self.paths = []
+        self.writes = []
+        self.upload_error = False
+        self.corrupt_upload = False
+        self.bad_upload_response = False
+        self.create_changes = {}
+        self.create_delay = 0
+        self.omit_read_data = False
+        self.uploads = {'syntheticattachment': CONTENT}
+        self.next_attachment = 0
         test = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -52,16 +65,21 @@ class VaultTests(unittest.TestCase):
             def do_GET(self):
                 test.paths.append(self.path)
                 parsed = urlsplit(self.path)
-                if parsed.path == '/object/attachment/syntheticattachment':
+                if parsed.path.startswith('/object/attachment/'):
                     if parse_qs(parsed.query) != {'itemid': [ITEM]}:
                         self.send_error(400)
                         return
-                    data = CONTENT
+                    data = test.uploads[parsed.path.rsplit('/', 1)[1]]
                     content_type = 'application/octet-stream'
                 else:
                     content_type = 'application/json'
                     if parsed.path == '/list/object/items':
-                        data = {'object': 'list', 'data': [test.item, *test.extra_items]}
+                        query = parse_qs(parsed.query)
+                        items = ([test.item] if test.item is not None else []) + test.extra_items
+                        trashed = query.get('trash') == ['true']
+                        items = [item for item in items if (item.get('deletedDate') is not None) == trashed]
+                        search = query.get('search', [''])[0]
+                        data = {'object': 'list', 'data': [item for item in items if search in item.get('name', '')]}
                     elif parsed.path == '/object/item/' + ITEM:
                         data = test.item
                     elif parsed.path == '/object/item/' + FOREIGN:
@@ -69,12 +87,71 @@ class VaultTests(unittest.TestCase):
                     else:
                         self.send_error(400)
                         return
-                    data = json.dumps({'success': True, 'data': data}).encode()
+                    data = json.dumps({'success': True, **({} if test.omit_read_data else {'data': data})}).encode()
                 self.send_response(200)
                 self.send_header('Content-Type', content_type)
                 self.send_header('Content-Length', str(len(data)))
                 self.end_headers()
                 self.wfile.write(data)
+
+            def reply(self, data=None, status=200):
+                body = json.dumps({'success': status == 200, **({} if data is None else {'data': data})}).encode()
+                self.send_response(status)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                try:
+                    self.wfile.write(body)
+                except BrokenPipeError:
+                    pass
+
+            def do_POST(self):
+                body = self.rfile.read(int(self.headers['Content-Length']))
+                test.writes.append(('POST', self.path, body))
+                if self.path == '/object/item':
+                    test.item = {**json.loads(body), 'id': ITEM, **test.create_changes}
+                    time.sleep(test.create_delay)
+                    self.reply(test.item)
+                elif self.path == '/attachment?itemid=' + ITEM:
+                    if test.upload_error:
+                        self.reply({'message': VALUE}, 400)
+                        return
+                    message = BytesParser(policy=default).parsebytes(
+                        b'Content-Type: ' + self.headers['Content-Type'].encode() + b'\r\n\r\n' + body)
+                    part, = message.iter_parts()
+                    test.next_attachment += 1
+                    attachment_id = 'uploaded' + str(test.next_attachment)
+                    test.uploads[attachment_id] = b'corrupt' if test.corrupt_upload else part.get_payload(decode=True)
+                    test.item.setdefault('attachments', []).append({'id': attachment_id, 'fileName': part.get_filename()})
+                    self.reply({**test.item, 'id': FOREIGN} if test.bad_upload_response else test.item)
+                else:
+                    self.reply(status=400)
+
+            def do_PUT(self):
+                body = self.rfile.read(int(self.headers['Content-Length']))
+                test.writes.append(('PUT', self.path, body))
+                if self.path != '/object/item/' + ITEM:
+                    self.reply(status=400)
+                    return
+                test.item = json.loads(body)
+                self.reply(test.item)
+
+            def do_DELETE(self):
+                test.writes.append(('DELETE', self.path, None))
+                parsed = urlsplit(self.path)
+                if parsed.path == '/object/item/' + ITEM:
+                    if parse_qs(parsed.query) == {'permanent': ['true']}:
+                        test.item = None
+                    else:
+                        test.item['deletedDate'] = '2026-01-01T00:00:00Z'
+                elif parsed.path.startswith('/object/attachment/') and parse_qs(parsed.query) == {'itemid': [ITEM]}:
+                    attachment_id = parsed.path.rsplit('/', 1)[1]
+                    test.item['attachments'] = [entry for entry in test.item['attachments'] if entry['id'] != attachment_id]
+                    del test.uploads[attachment_id]
+                else:
+                    self.reply(status=400)
+                    return
+                self.reply()
 
         self.server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
         self.thread = Thread(target=self.server.serve_forever, daemon=True)
@@ -166,8 +243,8 @@ class VaultTests(unittest.TestCase):
 
     def test_foreign_nonexistent_and_wrong_collection_refused_before_child(self):
         record = self.home / 'ran'
-        for identity in (FOREIGN, '55555555-5555-4555-8555-555555555555'):
-            result = self.command(['--item', identity, '--password-env', 'VAULT_PASSWORD'],
+        for item_id in (FOREIGN, '55555555-5555-4555-8555-555555555555'):
+            result = self.command(['--item', item_id, '--password-env', 'VAULT_PASSWORD'],
                                   f'open({str(record)!r},"w").close()')
             self.assertEqual(result.returncode, 1)
             self.assertFalse(record.exists())
@@ -210,6 +287,243 @@ class VaultTests(unittest.TestCase):
             self.assert_quiet(result)
         self.item['fields'].append(copy.deepcopy(self.item['fields'][0]))
         self.assertEqual(self.command(['--item', ITEM, '--field', 'api=VAULT_API'], 'pass').returncode, 1)
+
+
+    def write_command(self, command, options=(), document=None):
+        if document is not None:
+            self.env['VAULT_DOCUMENT'] = json.dumps(document)
+            options = [*options, '--input-env', 'VAULT_DOCUMENT']
+        return subprocess.run(self.prefix + [command, *options], env=self.env, capture_output=True)
+
+    def test_create_forces_scope_from_env_or_file_without_printing_values(self):
+        document = {'type': 1, 'name': VALUE, 'login': {'password': VALUE},
+                    'fields': [{'name': 'api', 'value': FIELD, 'type': 1}]}
+        for variant in ('homelab', 'work'):
+            self.env['T3_RUNTIME_VARIANT'] = variant
+            (self.home / '.config/t3-runtime/environment').write_text(variant + '\n')
+            self.scope.chmod(0o600)
+            self.scope.write_text(json.dumps({'environment': variant, 'organizationId': ORG, 'collectionId': COLLECTION}))
+            self.scope.chmod(0o444)
+            for use_file in (False, True):
+                if use_file:
+                    path = self.home / 'document.json'
+                    path.write_text(json.dumps(document))
+                    result = self.write_command('create', ['--input-file', str(path)])
+                else:
+                    result = self.write_command('create', document=document)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout), {'status': 'created', 'itemId': ITEM})
+                self.assertEqual(self.item['organizationId'], ORG)
+                self.assertEqual(self.item['collectionIds'], [COLLECTION])
+                self.assert_quiet(result)
+
+    def test_create_rejects_ownership_overrides_and_invalid_input_before_request(self):
+        base = {'name': 'synthetic', 'type': 1}
+        for key, value in (('organizationId', FOREIGN), ('collectionIds', [FOREIGN]), ('id', FOREIGN),
+                           ('deletedDate', None), ('folderId', FOREIGN)):
+            result = self.write_command('create', document={**base, key: value})
+            self.assertEqual(result.returncode, 1)
+            self.assert_quiet(result)
+        for document in ([], {}, {'name': '', 'type': 1}, {'name': 'synthetic', 'type': True}):
+            self.assertEqual(self.write_command('create', document=document).returncode, 1)
+        self.assertEqual(self.write_command('create', ['--input-env', 'BW_PASSWORD']).returncode, 1)
+        self.assertEqual(self.write_command('create', ['--input-file', str(self.home)]).returncode, 1)
+        self.assertEqual(self.writes, [])
+
+    def test_update_preserves_scope_and_unmodified_fields(self):
+        result = self.write_command('update', ['--item', ITEM], {'login': {'password': FIELD}})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), {'status': 'updated', 'itemId': ITEM})
+        self.assertEqual(self.item['name'], 'synthetic-item')
+        self.assertEqual(self.item['login'], {'password': FIELD})
+        self.assertEqual(self.item['organizationId'], ORG)
+        self.assertEqual(self.item['collectionIds'], [COLLECTION])
+        self.assertEqual(self.item['fields'][0]['value'], FIELD)
+        self.assert_quiet(result)
+        for key, value in (('organizationId', FOREIGN), ('collectionIds', [FOREIGN]), ('id', FOREIGN)):
+            count = len(self.writes)
+            self.assertEqual(self.write_command('update', ['--item', ITEM], {key: value}).returncode, 1)
+            self.assertEqual(len(self.writes), count)
+
+    def test_foreign_wrong_collection_and_trashed_items_refused_for_all_operations(self):
+        path = self.home / 'fixture.bin'
+        path.write_bytes(CONTENT)
+        original = copy.deepcopy(self.item)
+        for change in ({'organizationId': FOREIGN}, {'collectionIds': []}, {'deletedDate': '2026-01-01T00:00:00Z'}):
+            self.item = {**original, **change}
+            for command, options, document in (
+                    ('update', [], {'notes': FIELD}), ('trash', [], None), ('attach', ['--file', str(path)], None)):
+                result = self.write_command(command, ['--item', ITEM, *options], document)
+                self.assertEqual(result.returncode, 1)
+                self.assert_quiet(result)
+            for selection in (['--item', ITEM], ['--name', 'synthetic-item']):
+                result = self.command([*selection, '--password-env', 'VAULT_PASSWORD'], 'raise Exception("ran")')
+                self.assertEqual(result.returncode, 1)
+                self.assertNotIn(b'command finished', result.stdout)
+            self.assertEqual(self.writes, [])
+
+    def test_trash_and_then_read_refusal(self):
+        result = self.write_command('trash', ['--item', ITEM])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), {'status': 'trashed', 'itemId': ITEM})
+        self.assertIsNotNone(self.item.get('deletedDate'))
+        self.assertEqual(self.command(['--item', ITEM, '--password-env', 'VAULT_PASSWORD'], 'pass').returncode, 1)
+        self.assert_quiet(result)
+
+    def test_attachment_upload_verified_before_old_delete(self):
+        path = self.home / 'fixture.bin'
+        replacement = b'synthetic-replacement-content'
+        path.write_bytes(replacement)
+        result = self.write_command('attach', ['--item', ITEM, '--file', str(path)])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), {'status': 'attached', 'itemId': ITEM, 'attachmentId': 'uploaded1'})
+        self.assertEqual(self.item['attachments'], [{'id': 'uploaded1', 'fileName': 'fixture.bin'}])
+        self.assertEqual(self.uploads['uploaded1'], replacement)
+        self.assertIn('/object/attachment/uploaded1?itemid=' + ITEM, self.paths)
+        self.assertEqual([entry[0] for entry in self.writes], ['POST', 'DELETE'])
+        self.assertNotIn(replacement, result.stdout + result.stderr)
+        self.assert_quiet(result)
+
+    def test_failed_upload_bad_response_or_corrupt_download_keeps_previous_attachment(self):
+        path = self.home / 'fixture.bin'
+        path.write_bytes(b'synthetic-new-content')
+        for failure in ('upload_error', 'bad_upload_response', 'corrupt_upload'):
+            with self.subTest(failure=failure):
+                self.item['attachments'] = [{'id': 'syntheticattachment', 'fileName': 'fixture.bin'}]
+                self.writes.clear()
+                setattr(self, failure, True)
+                try:
+                    result = self.write_command('attach', ['--item', ITEM, '--file', str(path)])
+                    self.assertEqual(result.returncode, 1)
+                    self.assertTrue(any(entry['id'] == 'syntheticattachment' for entry in self.item['attachments']))
+                    self.assertFalse(any(entry[0] == 'DELETE' and 'syntheticattachment?' in entry[1] for entry in self.writes))
+                    self.assertEqual(self.uploads['syntheticattachment'], CONTENT)
+                    self.assert_quiet(result)
+                finally:
+                    setattr(self, failure, False)
+
+    def test_write_files_reject_symlinks_fifos_oversize_and_unsafe_filenames(self):
+        path = self.home / 'source.json'
+        path.write_text(json.dumps({'type': 1, 'name': VALUE}))
+        link = self.home / 'link.json'
+        link.symlink_to(path)
+        fifo = self.home / 'fifo'
+        os.mkfifo(fifo)
+        oversized = self.home / 'large'
+        with oversized.open('wb') as output:
+            output.truncate(12 * 1024 * 1024 + 1)
+        for source in (link, fifo, oversized):
+            result = self.write_command('create', ['--input-file', str(source)])
+            self.assertEqual(result.returncode, 1)
+            self.assert_quiet(result)
+        for name in ('bad"name', 'bad\\name', 'bad\nname'):
+            source = self.home / name
+            source.write_bytes(CONTENT)
+            result = self.write_command('attach', ['--item', ITEM, '--file', str(source)])
+            self.assertEqual(result.returncode, 1)
+            self.assert_quiet(result)
+        self.assertEqual(self.writes, [])
+
+    def test_fetch_requires_data_for_reads_but_accepts_empty_write_success(self):
+        spec = importlib.util.spec_from_file_location('vault_client', SOURCE)
+        client = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(client)
+        client.ADDRESS = f'http://127.0.0.1:{self.server.server_port}'
+        self.omit_read_data = True
+        with self.assertRaises(KeyError):
+            client.fetch('/object/item/' + ITEM)
+        self.assertIsNone(client.fetch('/object/item/' + ITEM, method='DELETE'))
+
+    def test_canary_recovery_searches_active_and_trashed_items_with_exact_name_only(self):
+        spec = importlib.util.spec_from_file_location('canary', ROOT / 'env/tools/vault-write-canary.py')
+        canary = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(canary)
+        name = 'synthetic-vault-write-fixture'
+        paths = []
+
+        def fetch(path):
+            paths.append(path)
+            item_id = FOREIGN if parse_qs(urlsplit(path).query)['trash'] == ['true'] else ITEM
+            return {'data': [{'id': item_id, 'name': name}, {'id': item_id, 'name': name + '-extra'}]}
+
+        items = canary.canary_items(SimpleNamespace(fetch=fetch), name)
+        self.assertEqual([item['id'] for item in items], [ITEM, FOREIGN])
+        self.assertEqual([parse_qs(urlsplit(path).query) for path in paths], [
+            {'search': [name], 'trash': ['false']}, {'search': [name], 'trash': ['true']}])
+
+    def canary(self, variant, setup=''):
+        canary = ROOT / 'env/tools/vault-write-canary.py'
+        code = ('import importlib.util,sys; '
+            's=importlib.util.spec_from_file_location("vault",sys.argv[1]); '
+            'm=importlib.util.module_from_spec(s); s.loader.exec_module(m); '
+            'm.ADDRESS=sys.argv[2]; m.SCOPE_FILE=m.Path(sys.argv[3]); '
+            's=importlib.util.spec_from_file_location("canary",sys.argv[4]); '
+            'c=importlib.util.module_from_spec(s); s.loader.exec_module(c);\n')
+        code += setup + '\ntry:\n c.exercise(m,sys.argv[5])\nexcept BaseException:\n sys.exit(1)\n'
+        return subprocess.run([sys.executable, '-c', code, str(SOURCE),
+            f'http://127.0.0.1:{self.server.server_port}', str(self.scope), str(canary), variant],
+            env=self.env, capture_output=True, timeout=30)
+
+    def test_canary_cleans_out_of_scope_create_without_id_including_personal_trash(self):
+        for changes in ({'organizationId': FOREIGN}, {'organizationId': None, 'collectionIds': []},
+                        {'organizationId': None, 'collectionIds': [], 'deletedDate': '2026-01-01T00:00:00Z'}):
+            with self.subTest(changes=changes):
+                self.create_changes = changes
+                self.paths.clear()
+                self.extra_items = [{**copy.deepcopy(self.item or {}), 'id': FOREIGN, 'name': 'unrelated-synthetic-item'}]
+                result = self.canary('homelab')
+                self.assertEqual(result.returncode, 1)
+                self.assertTrue(self.item is None)
+                self.assertEqual(len(self.extra_items), 1)
+                self.assert_quiet(result)
+                queries = [parse_qs(urlsplit(path).query) for path in self.paths if path.startswith('/list/object/items?')]
+                self.assertTrue(any(query.get('trash') == ['false'] for query in queries))
+                self.assertTrue(any(query.get('trash') == ['true'] for query in queries))
+                self.assertTrue(all(set(query) == {'search', 'trash'} for query in queries))
+
+    def test_canary_cleans_create_that_times_out_after_server_stores_item(self):
+        self.create_delay = 0.3
+        self.create_changes = {'organizationId': None, 'collectionIds': [], 'deletedDate': '2026-01-01T00:00:00Z'}
+        setup = ('original_fetch=m.fetch\n'
+            'def fetch(path, **kwargs):\n'
+            ' if path=="/object/item" and kwargs.get("method")=="POST":\n'
+            '  kwargs["timeout"]=0.1\n'
+            ' return original_fetch(path, **kwargs)\n'
+            'm.fetch=fetch\n')
+        result = self.canary('homelab', setup)
+        self.assertEqual(result.returncode, 1)
+        self.assertTrue(self.item is None)
+        self.assert_quiet(result)
+        self.assertTrue(any(method == 'POST' and path == '/object/item' for method, path, _ in self.writes))
+        self.assertTrue(any(method == 'DELETE' and path.endswith('?permanent=true') for method, path, _ in self.writes))
+
+    def test_canary_complete_and_cleanup_after_failed_read_for_both_orgs(self):
+        for variant, fail in (('homelab', False), ('work', False), ('homelab', True)):
+            self.env['T3_RUNTIME_VARIANT'] = variant
+            (self.home / '.config/t3-runtime/environment').write_text(variant + '\n')
+            self.scope.chmod(0o600)
+            self.scope.write_text(json.dumps({'environment': variant, 'organizationId': ORG, 'collectionId': COLLECTION}))
+            self.scope.chmod(0o444)
+            self.item = None
+            self.writes.clear()
+            result = self.canary(variant, 'm.run=lambda argv: 99' if fail else '')
+            self.assertEqual(result.returncode, 1 if fail else 0, result.stderr)
+            self.assertTrue(self.item is None)
+            self.assert_quiet(result)
+            self.assertTrue(any(method == 'DELETE' and path.endswith('?permanent=true') for method, path, _ in self.writes))
+
+    def test_attachment_without_previous_and_ambiguous_names(self):
+        path = self.home / 'new.bin'
+        path.write_bytes(CONTENT)
+        result = self.write_command('attach', ['--item', ITEM, '--file', str(path)])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([entry[0] for entry in self.writes], ['POST'])
+        self.assertEqual(len(self.item['attachments']), 2)
+        self.assert_quiet(result)
+        self.item['attachments'].append({'id': 'duplicate', 'fileName': 'new.bin'})
+        self.writes.clear()
+        self.assertEqual(self.write_command('attach', ['--item', ITEM, '--file', str(path)]).returncode, 1)
+        self.assertEqual(self.writes, [])
 
 
 if __name__ == '__main__':
