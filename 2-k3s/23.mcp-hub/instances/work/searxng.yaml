@@ -1,0 +1,109 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: searxng-mcp
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: work-searxng-mcp
+  template:
+    metadata:
+      annotations:
+        mcp-hub.epaflix.com/inputs-revision: r1
+      labels:
+        app: work-searxng-mcp
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: search
+          image: docker.io/library/python:3.13-alpine
+          command:
+            - sh
+            - -c
+            - >-
+              pip install -q --no-cache-dir --disable-pip-version-check
+              --target /opt/py mcp==2.2.0 &&
+              exec python /runner/searxng.py
+          env:
+            - name: SEARCH_UPSTREAM_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-hub-searxng
+                  key: token
+            - name: SEARXNG_URL
+              value: http://searxng.searxng.svc.cluster.local:8080
+            - name: PYTHONPATH
+              value: /app:/opt/py
+            - name: HOME
+              value: /tmp
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+          ports:
+            - name: http
+              containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 60
+          resources:
+            requests:
+              cpu: 10m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: app
+              mountPath: /app
+              readOnly: true
+            - name: runner
+              mountPath: /runner
+              readOnly: true
+            - name: py
+              mountPath: /opt/py
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: app
+          configMap:
+            name: mcp-hub-app
+        - name: runner
+          configMap:
+            name: work-searxng-runner
+        - name: py
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: searxng-mcp
+spec:
+  selector:
+    app: work-searxng-mcp
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

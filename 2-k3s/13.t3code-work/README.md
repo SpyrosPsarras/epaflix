@@ -1,8 +1,9 @@
 # Work T3 backend
 
-This is a separate backend, not a deployment claim. Issue #1776 still needs
-homelab live acceptance, and #1777 still needs work live acceptance. Mixed and
-homelab keep their Applications and homes.
+This is a separate backend, not a deployment claim. Issue #1837 tracks its
+first deployment and live acceptance. Mixed and homelab keep their Applications
+and homes. Employer approval is confirmed. Azure enrollment, the dedicated
+organization GitHub PAT and device pairing remain owner steps.
 
 The work namespace `t3code-work` has its own PVC, clean home, T3 identity,
 provider grants, histories, SSH host key and `projects/work` checkout. The
@@ -54,11 +55,13 @@ explicit work differences:
 - `runtime.json.approvals` requires `git`, `models`, `policies`, `kubeconfig`,
   `hub`, `laptop`, `routing` and `workAuth`. The last review covers the exact
   tenant, audience, subscription, account and Kubernetes scope together.
-- `runtime.json.sha256` covers the five common reviewed input files and `work-auth.json`.
-  `grantSha256` covers the supplied model, hub and optional Git grants.
-- `services.json` is the reviewed work hub inventory from #1775. Vault,
-  unknown, empty, duplicate or foreign-environment inventories fail closed.
-  The synthetic `searxng` fixture is not a deployable work inventory.
+- `runtime.json.sha256` covers the five common reviewed input files and
+  `work-auth.json`. `grantSha256` covers the supplied model, hub and optional
+  Git grants.
+- The approved initial `services.json` is
+  `{"environment":"work","services":["searxng"]}`. Other services are
+  owner-added later. Vault, unknown, empty, duplicate or foreign-environment
+  inventories fail closed.
 
 `work-auth.json` has exactly these fields. Placeholders are non-deployable;
 provide reviewed private values instead:
@@ -82,11 +85,13 @@ provide reviewed private values instead:
 }
 ```
 
-Multiple contexts may be approved. The kubeconfig must contain exactly the
-reviewed context/cluster/user sets, with consistent references and an approved
-current context. Each API needs the exact reviewed HTTPS endpoint and inline
-CA. Arbitrary exec plugins, plugin environment variables, cloud auth-provider
-entries, static foreign credentials and external credential files are rejected.
+The authentication helper supports multiple reviewed contexts, but this
+backend's first provisioning accepts exactly one AKS dev context. The
+kubeconfig must contain exactly the reviewed context/cluster/user sets, with
+consistent references and the approved current context. Each API needs the
+exact reviewed HTTPS endpoint and inline CA. Arbitrary exec plugins, plugin
+environment variables, cloud auth-provider entries, static foreign credentials
+and external credential files are rejected.
 Changing a homelab entry's display name does not make it eligible.
 
 Each work user has only this exec configuration:
@@ -108,14 +113,14 @@ rechecks the private authentication and kubeconfig digests before running Azure.
 It uses the fixed `/usr/bin/az` binary with a clean environment, selects the
 reviewed subscription and audience, and verifies the session's exact
 tenant/subscription/user before requesting a token. Azure CLI rejects combining
-`--tenant` and `--subscription` on token requests. The helper selects the reviewed
-subscription and verifies the returned token's tenant and subscription, then
-converts it into a Kubernetes ExecCredential. Token
-expiry must be in the future. Refresh and explicit enrollment share a lock.
+`--tenant` and `--subscription` on token requests. The helper selects the
+reviewed subscription and verifies the returned token's tenant and
+subscription, then
+converts it into a Kubernetes ExecCredential. Token expiry must be in the
+future. Refresh and explicit enrollment share a lock.
 Lock waits and enrollment are limited to 15 minutes; token commands to two
-minutes. Azure errors, partial tokens and account output are never printed.
-Authentication-required and expired sessions return a generic refusal. Network
-and permission failures do not start login.
+minutes. Authentication-required and expired sessions return a generic
+refusal. Network and permission failures do not start login.
 
 ## Enrollment and session persistence
 
@@ -127,11 +132,12 @@ No personal desktop, mixed or homelab cache is cloned or mounted.
 Only after a separately approved non-production target and account are
 available, an operator may run `/scripts/work-aks-auth.py login` in a private
 interactive administrative terminal in the `t3` container, which mounts the
-reviewed inputs. The inbound SSH sidecar deliberately does not mount those inputs. Enrollment output goes directly to
-`/dev/tty`, not process stdout/stderr or pod logs. Non-interactive enrollment
+reviewed inputs. The inbound SSH sidecar deliberately does not mount those
+inputs. Enrollment output goes directly to `/dev/tty`, not process
+stdout/stderr or pod logs. Non-interactive enrollment
 refuses to run. The helper verifies the reviewed account after login. Retry
 the token request after enrollment. No live enrollment is part of the offline
-checks, and none was authorized for this implementation.
+checks. Only the owner runs enrollment after reviewed merge and manual sync.
 
 There is no direct vault login, vault CLI, inherited general SSH agent or
 legacy authentication fallback. Required organizational instructions, Claude
@@ -187,6 +193,122 @@ idle check waits for 30 minutes without T3/terminal activity. Image builds,
 smokes and publication cover distinct mixed, homelab and work input-derived
 tags under the existing public `ghcr.io/spyrospsarras/t3-runtime` repository.
 
+## First deployment for #1837
+
+Run provisioning from a clean checkout in a private administrative terminal.
+The tools use only `kubectl --context epaflix`, never a work Azure cache or an
+existing GitHub login. They suppress private command/API diagnostics and never
+sync Applications. Do not run with Python tracing or shell recording enabled.
+
+1. B1: Stage independent grants from an in-cluster administrative environment:
+
+   ```sh
+   python3 2-k3s/13.t3code-work/tools/provision.py grants
+   ```
+
+   This creates `t3code-work` and `mcp-hub-work` if absent, then external
+   Secrets `t3-runtime-grants`, `mcp-hub-instance` and `mcp-hub-searxng` in
+   their respective namespaces. The model key has the reserved `t3-work-`
+   prefix. The proxy management API appends it without replacing another
+   client's keys. Registration refuses another key with the same masked
+   four-character prefix. Re-running reuses grants and verifies model
+   discovery. It checks only the `t3code-work` client digest and the searxng
+   upstream, refusing changes to either owned entry. Other clients, upstreams
+   and service inventory remain unchanged and do not block a rerun.
+2. B2: The owner creates the org-scoped GitHub grant before first boot:
+
+   ```sh
+   bash 2-k3s/13.t3code-work/tools/owner-login.sh github
+   ```
+
+   Personal and work use the same GitHub identity. Use a new fine-grained PAT,
+   select the organization as resource owner, and select only approved org
+   repositories. Start with Metadata read and Contents read. Wait for org
+   approval if required. The script rejects classic PATs, verifies the shared
+   account and access to a selected private organization repository, then
+   asks for explicit confirmation of the PAT resource owner. GitHub's
+   user/repository APIs do not prove the complete PAT scope, so this last check
+   is the owner's
+   responsibility. Public repositories remain publicly readable regardless of
+   token scope. No personal/private homelab repository authority is permitted.
+   Hidden entry goes straight into `t3-runtime-grants.github-token` with a
+   resource-version check. Model and hub grants stay unchanged. No `gh auth
+   login` or GitHub credential cache is used.
+3. B3: Prepare the seven private files listed in I1 in a dedicated private
+   directory. Keep required organizational instructions, skills, hooks and
+   actual allow/deny checks. Do not export a mixed home or use test fixtures.
+   Pin the work AKS dev context only, use `gitAuth: github-token`, set
+   `modelUrl` to `http://cliproxy.remote-pi.svc.cluster.local:8317`, and
+   include the approved public login keys from both homePC and laptop.
+
+   ```sh
+   python3 2-k3s/13.t3code-work/tools/provision.py inputs \
+     --directory /private/reviewed-work-inputs
+   ```
+
+   This binds only `runtime.json.grantSha256` to this backend's staged grants,
+   validates the complete bundle with the existing runtime validator, then
+   creates external `t3-runtime-inputs`. It preserves input hashes, approval
+   references, policy files and policy checks. It cannot replace existing
+   inputs or stage them while a work pod exists. Required private inputs are
+   not supplied by this repo; missing input or policy reviews block startup.
+4. B4: Review and merge the work manifests and proxy transcript change. Once
+   B2/B3 and routing review pass, advance the tracked work StatefulSet revision
+   from `unprovisioned` to `r1` through a reviewed change. Do not hand-patch it.
+   From an authenticated Argo administrative terminal, after the merge:
+
+   ```sh
+   argocd app sync remote-pi
+   kubectl --context epaflix -n remote-pi rollout status \
+     deployment/cliproxy --timeout=300s
+   argocd app sync mcp-hub-work
+   kubectl --context epaflix -n mcp-hub-work rollout status \
+     deployment/searxng-mcp --timeout=300s
+   kubectl --context epaflix -n mcp-hub-work rollout status \
+     deployment/mcp-hub --timeout=300s
+   argocd app sync t3code-work
+   kubectl --context epaflix -n t3code-work wait --for=condition=Ready \
+     pod/t3code-0 --timeout=1800s
+   ```
+
+   The proxy transcript field `client_backend: work` maps the reserved key
+   prefix after CLIProxyAPI masks the credential as four prefix characters,
+   `...`, then four suffix characters. This is request attribution, not an
+   authorization decision.
+   Verify a harmless model call with the private work grant, then query Loki
+   with this filter:
+
+   ```logql
+   {namespace="remote-pi",container="transcripts"}
+     |= `"client_backend": "work"`
+   ```
+
+   Do not query by raw key or publish raw payloads.
+5. B5: Only after work startup passes, the owner enrolls Azure in the new home:
+
+   ```sh
+   bash 2-k3s/13.t3code-work/tools/owner-login.sh azure
+   ```
+
+   The helper's device code appears only in the owner's private terminal.
+   Azure session files remain in the work PVC, not a Kubernetes Secret or the
+   mixed home. Do not run `az aks get-credentials` or select another cluster.
+   Pair homePC and laptop separately using the connection procedure below.
+   Complete one harmless thread on each, verify instructions/hooks, discovery,
+   read-only dev access and restart persistence before accepting #1837.
+
+`mcp-hub-work` exposes only `/searxng` initially. Its separate `searxng-mcp`
+Deployment reuses the maintained public search module, with its own bearer
+credential and no Kubernetes ServiceAccount token. Ordinary work, homelab and
+legacy client grants cannot call that upstream directly. Only the hub holds
+the upstream credential. It sends public search queries to the existing
+SearXNG service, never to a work data source. Treat search results as untrusted.
+
+For hub Secret changes, follow
+[hub provisioning A3](../23.mcp-hub/instances/README.md).
+Runtime grant/input rotations still require the stop/change/revision/start
+procedure above; these first-setup tools refuse rotation.
+
 ## Dedicated laptop connection
 
 Use a separate directory, file-backed identity, config and tunnel port. The
@@ -196,7 +318,8 @@ change `~/.ssh/config`, import a keyring or use a general SSH agent.
 1. A1: Approve routing and obtain the backend's Ed25519 host public key through
    an authenticated administrative channel. Verify its fingerprint separately,
    not through unauthenticated `ssh-keyscan`.
-2. A2: Prepare the dedicated work config offline. The hostname below is synthetic:
+2. A2: Prepare the dedicated work config offline. The hostname below is
+   synthetic:
 
    ```sh
    python3 2-k3s/13.t3code/env/tools/prepare-laptop.py \
@@ -230,6 +353,11 @@ Vault-backed keys and outbound SSH integration remain deferred.
 ## Offline evidence and remaining acceptance
 
 ```sh
+python3 2-k3s/13.t3code-work/tools/provision.test.py -v
+python3 2-k3s/13.t3code-work/tools/startup.test.py -v
+python3 2-k3s/17.remote-pi/cliproxy/tools/client-backend.test.py -v
+bash -n 2-k3s/13.t3code-work/tools/owner-login.sh
+shellcheck 2-k3s/13.t3code-work/tools/owner-login.sh
 python3 2-k3s/13.t3code/env/tools/isolated-runtime.test.py -v
 python3 2-k3s/13.t3code/env/tools/work-runtime.test.py -v
 python3 2-k3s/13.t3code/env/tools/work-aks-auth.test.py -v
@@ -244,10 +372,10 @@ DOCKER_HOST=unix:///var/run/docker.sock T3_RUNTIME_VARIANT=work \
 The shared isolated smoke boots twice on a temporary PVC-like Docker volume.
 It checks inventory, retained organizational hooks and cc-safety-net rules,
 provider/config persistence, real Codex requirements, health, SSH discovery,
-rejected agent/unrelated-port
-forwarding and tunnel access. Authentication fixtures replace Azure CLI with
-an offline executable and test success, expired/auth-required sessions,
-non-auth failures, account mismatch, serialization, timeouts and private
+rejected agent/unrelated-port forwarding and tunnel access. Authentication
+fixtures replace Azure CLI with an offline executable and test success,
+expired/auth-required sessions, non-auth failures, account mismatch,
+serialization, timeouts and private
 explicit enrollment. They do not contact Azure or make model calls. Pi parity
 checks reject permission-system installation, registration and its command
 while requiring the remaining extensions to load. The former 242 permission

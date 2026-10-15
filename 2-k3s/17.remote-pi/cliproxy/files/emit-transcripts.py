@@ -123,6 +123,7 @@ def emit(name, path):
         "request_id": request_id(name),
         "url": parsed.get("url"),
         "model": parsed.get("model"),
+        "client_backend": parsed.get("client_backend"),
         "stream": parsed.get("stream"),
         "upstream_status": parsed.get("upstream_status"),
         "upstream_attempts": parsed.get("upstream_attempts"),
