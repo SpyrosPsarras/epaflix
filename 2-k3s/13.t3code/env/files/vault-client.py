@@ -20,10 +20,15 @@ from uuid import UUID
 ADDRESS = 'http://127.0.0.1:8087'
 LIMIT = 12 * 1024 * 1024
 SCOPE_FILE = Path('/run/t3-vault/scope.json')
+PROC = Path('/proc')
 HEALTH_INTERVAL = 2
 
 
 class Refused(Exception):
+    pass
+
+
+class UnsafeListener(Refused):
     pass
 
 
@@ -67,14 +72,17 @@ def scope():
     return checked_uuid(selected['organizationId']), checked_uuid(selected['collectionId'])
 
 
-def fetch(path, binary=False):
+def fetch(path, binary=False, method='GET', payload=None, timeout=10):
     def expired(*_):
         raise Refused
     previous = signal.signal(signal.SIGALRM, expired)
-    signal.setitimer(signal.ITIMER_REAL, 10)
+    signal.setitimer(signal.ITIMER_REAL, timeout)
     try:
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
-        with opener.open(ADDRESS + path, timeout=10) as response:
+        request = urllib.request.Request(ADDRESS + path, method=method,
+            data=None if payload is None else json.dumps(payload).encode(),
+            headers={} if payload is None else {'Content-Type': 'application/json'})
+        with opener.open(request, timeout=timeout) as response:
             if response.status != 200 or response.headers.get_content_type() != (
                     'application/octet-stream' if binary else 'application/json'):
                 raise Refused
@@ -206,8 +214,20 @@ def bw(arguments, client_env):
 
 
 def matches_agent(status):
-    return status.get('userEmail') == os.environ['BW_EMAIL'] and (
-        status.get('serverUrl', '').rstrip('/') == os.environ['BW_SERVER'].rstrip('/'))
+    return status.get('userEmail') == os.environ['BW_EMAIL'] and isinstance(status.get('serverUrl'), str) and (
+        status['serverUrl'].rstrip('/') == os.environ['BW_SERVER'].rstrip('/'))
+
+
+def retry(action):
+    for attempt in range(3):
+        try:
+            return action()
+        except (Cancelled, UnsafeListener):
+            raise
+        except Exception:
+            if attempt == 2:
+                raise
+            time.sleep(2)
 
 
 def open_session(client_env):
@@ -215,25 +235,79 @@ def open_session(client_env):
     if status['status'] == 'unauthenticated':
         bw(['config', 'server', os.environ['BW_SERVER']], client_env)
         session = bw(['login', os.environ['BW_EMAIL'], '--passwordenv', 'BW_PASSWORD', '--raw'], client_env)
-    else:
-        if not matches_agent(status):
+        if not session or '\n' in session:
             raise Refused
-        session = bw(['unlock', '--passwordenv', 'BW_PASSWORD', '--raw'], client_env)
-    if not session or '\n' in session:
+        client_env['BW_SESSION'] = session
+    elif not matches_agent(status):
         raise Refused
-    client_env['BW_SESSION'] = session
-    bw(['sync'], client_env)
     return client_env
 
 
-def client_ready():
+def owns_listener(server):
+    addresses = {host + f':{urlsplit(ADDRESS).port:04X}' for host in (
+        '0100007F', '00000000', '00000000000000000000000001000000',
+        '0000000000000000FFFF00000100007F', '0000000000000000FFFF000000000000',
+        '00000000000000000000000000000000')}
+    listeners = []
+    for name in ('tcp', 'tcp6'):
+        try:
+            rows = (PROC / 'net' / name).read_text().splitlines()[1:]
+        except FileNotFoundError:
+            if name == 'tcp6':
+                continue
+            raise Refused
+        for row in rows:
+            fields = row.split()
+            if fields[3] == '0A' and fields[1] in addresses:
+                if int(fields[7]) != os.getuid():
+                    raise Refused
+                listeners.append('socket:[' + fields[9] + ']')
+    if not listeners:
+        return False
+    sockets = set()
+    for descriptor in (PROC / str(server.pid) / 'fd').iterdir():
+        with contextlib.suppress(FileNotFoundError):
+            sockets.add(os.readlink(descriptor))
+    if not set(listeners).issubset(sockets):
+        raise Refused
+    return True
+
+
+def client_status(server):
+    if not owns_listener(server):
+        return {}
     try:
         status = fetch('/status')['template']
-        return status.get('status') == 'unlocked' and matches_agent(status)
+        return status if isinstance(status, dict) else {}
     except Cancelled:
         raise
     except Exception:
-        return False
+        return {}
+
+
+def client_ready(server):
+    status = client_status(server)
+    return status.get('status') == 'unlocked' and matches_agent(status)
+
+
+def wait_for_status(server):
+    for _ in range(100):
+        status = client_status(server)
+        if server.poll() is not None or status:
+            return status
+        time.sleep(0.1)
+    raise Refused
+
+
+def unlock(server, password):
+    try:
+        if not owns_listener(server):
+            raise Refused
+    except Cancelled:
+        raise
+    except Exception as error:
+        raise UnsafeListener from error
+    return fetch('/unlock', method='POST', payload={'password': password})
 
 
 def agent_scope():
@@ -258,6 +332,18 @@ def publish_scope(selected):
             os.unlink(temporary)
 
 
+@contextlib.contextmanager
+def running_client(client_env):
+    with subprocess.Popen(['bw', 'serve', '--hostname', '127.0.0.1', '--port', '8087'], env=client_env,
+                          stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                          start_new_session=True) as server:
+        try:
+            yield server
+        finally:
+            SCOPE_FILE.unlink(missing_ok=True)
+            stop(server)
+
+
 def serve():
     SCOPE_FILE.unlink(missing_ok=True)
     selected = agent_scope()
@@ -266,42 +352,38 @@ def serve():
     info = data.lstat()
     if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
         raise Refused
-    client_env = {key: os.environ[key] for key in ('HOME', 'PATH', 'BW_PASSWORD')}
+    password = os.environ['BW_PASSWORD']
+    client_env = {key: os.environ[key] for key in ('HOME', 'PATH')}
     client_env.update(BITWARDENCLI_APPDATA_DIR=str(data), BW_NOINTERACTION='true')
-    for attempt in range(3):
-        try:
-            client_env = open_session(client_env)
-            break
-        except Refused:
-            if attempt == 2:
-                raise
-            client_env.pop('BW_SESSION', None)
-            time.sleep(2)
-    client_env.pop('BW_PASSWORD')
-    with subprocess.Popen(['bw', 'serve', '--hostname', '127.0.0.1', '--port', '8087'], env=client_env,
-                          stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                          start_new_session=True) as server:
-        try:
-            for _ in range(100):
-                if server.poll() is not None:
-                    raise Refused
-                if client_ready():
-                    break
-                time.sleep(0.1)
-            else:
+    cached = (data / 'data.json').is_file()
+    while True:
+        if not cached:
+            client_env['BW_PASSWORD'] = password
+            try:
+                client_env = retry(lambda: open_session(client_env))
+            finally:
+                client_env.pop('BW_PASSWORD', None)
+        with running_client(client_env) as server:
+            status = wait_for_status(server)
+            if cached and (server.poll() is not None or status.get('status') == 'unauthenticated'):
+                cached = False
+                continue
+            if server.poll() is not None or status.get('status') not in ('locked', 'unlocked') or not matches_agent(status):
+                raise Refused
+            if status['status'] == 'locked':
+                retry(lambda: unlock(server, password))
+            fetch('/sync', method='POST', timeout=45)
+            if not client_ready(server):
                 raise Refused
             publish_scope(selected)
             print('vault: local client ready', flush=True)
             failures = 0
             while server.poll() is None:
-                failures = 0 if client_ready() else failures + 1
+                failures = 0 if client_ready(server) else failures + 1
                 if failures >= 3:
                     raise Refused
                 time.sleep(HEALTH_INTERVAL)
             return exit_code(server.returncode) or 1
-        finally:
-            SCOPE_FILE.unlink(missing_ok=True)
-            stop(server)
 
 
 def main(argv):
