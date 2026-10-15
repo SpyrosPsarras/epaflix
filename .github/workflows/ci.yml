@@ -312,6 +312,14 @@ jobs:
           done
           echo "All sops-free overlays build."
 
+      - name: Vault organization setup tests
+        run: |
+          set -euo pipefail
+          npm test --prefix 2-k3s/26.vaultwarden/org-setup
+          python3 2-k3s/26.vaultwarden/org-setup/tests/render.py
+          bash -n 2-k3s/26.vaultwarden/org-setup/run-job.sh
+          python3 -m py_compile 2-k3s/26.vaultwarden/org-setup/prepare.py 2-k3s/26.vaultwarden/org-setup/render-job.py 2-k3s/26.vaultwarden/org-setup/tests/*.py
+
       - name: T3 config and placement tests
         run: |
           set -euo pipefail
