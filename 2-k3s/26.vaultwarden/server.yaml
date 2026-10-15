@@ -35,8 +35,9 @@ spec:
             - {name: ROCKET_PORT, value: "8080"}
             - {name: DB_CONNECTION_RETRIES, value: "0"}
             - {name: SIGNUPS_ALLOWED, value: "false"}
-            - {name: SIGNUPS_VERIFY, value: "true"}
+            - {name: SIGNUPS_VERIFY, value: "false"}
             - {name: INVITATIONS_ALLOWED, value: "true"}
+            - {name: EMERGENCY_ACCESS_ALLOWED, value: "false"}
             - {name: ORG_CREATION_USERS, value: spypsarras@gmail.com}
             - {name: PUSH_ENABLED, value: "false"}
             - {name: SMTP_DEBUG, value: "false"}

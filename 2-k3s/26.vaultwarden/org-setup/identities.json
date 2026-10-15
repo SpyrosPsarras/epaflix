@@ -1,0 +1,15 @@
+{
+  "vaultNamespace": "vaultwarden",
+  "setupEmail": "vault-setup@localhost.invalid",
+  "agentEmail": "vault-agent-{name}@localhost.invalid",
+  "organizations": [
+    {"name": "homelab", "namespace": "t3code-homelab"},
+    {"name": "work", "namespace": "t3code-work"}
+  ],
+  "checkpoints": {
+    "prepared": "prepared",
+    "waitingForOwner": "waiting-for-owner",
+    "deleting": "deleting",
+    "finalized": "finalized"
+  }
+}
