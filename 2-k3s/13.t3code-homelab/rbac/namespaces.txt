@@ -21,5 +21,4 @@ system-upgrade
 t3code-homelab
 tailscale
 traefik-system
-vault-reader-homelab
 vidar-edge

@@ -6,17 +6,35 @@ resources:
   - ../base
   - namespace.yaml
   - ingress.yaml
-  - searxng.yaml
+  - ../searxng
 
 configMapGenerator:
-  - name: work-searxng-runner
-    files:
-      - searxng.py
   - name: mcp-hub-instance-settings
     literals:
       - environment=work
 
 patches:
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: searxng-mcp
+      spec:
+        selector:
+          matchLabels:
+            app: work-searxng-mcp
+        template:
+          metadata:
+            labels:
+              app: work-searxng-mcp
+  - patch: |-
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: searxng-mcp
+      spec:
+        selector:
+          app: work-searxng-mcp
   - patch: |-
       apiVersion: apps/v1
       kind: Deployment

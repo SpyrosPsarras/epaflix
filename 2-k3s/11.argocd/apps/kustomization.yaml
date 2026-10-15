@@ -18,7 +18,6 @@ resources:
   - app-mcp-hub.yaml
   - app-mcp-hub-homelab.yaml
   - app-mcp-hub-work.yaml
-  - app-vault-reader-homelab.yaml
   - app-observability.yaml
   - app-postgres.yaml
   - app-reloader.yaml

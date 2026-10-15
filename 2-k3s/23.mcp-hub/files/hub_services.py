@@ -3,13 +3,10 @@
 import json
 
 PATHS = {name: "/" + name for name in
-         ("gmail", "searxng", "notion", "vaultwarden", "vault-secret", "vault-attachment", "kubernetes", "drive")}
-CLIENT_NAMES = {name: name for name in PATHS if name not in {"vault-secret", "vault-attachment"}}
+         ("gmail", "searxng", "notion", "vaultwarden", "kubernetes", "drive")}
+CLIENT_NAMES = {name: name for name in PATHS}
 CLIENT_NAMES["kubernetes"] = "kubernetes-epaflix"
 ENVIRONMENTS = ("homelab", "work")
-VAULT_SERVICES = {"vaultwarden", "vault-secret", "vault-attachment"}
-READER_PATHS = {"vaultwarden": "/vaultwarden", "vault-secret": "/secret", "vault-attachment": "/attachment"}
-READER_PROTOCOL = "restricted-v1"
 
 
 def load_services(path, environment=None):
@@ -19,27 +16,20 @@ def load_services(path, environment=None):
 
 
 def validate_services(config, environment=None):
-    if not isinstance(config, dict) or set(config) not in (
-            {"environment", "services"}, {"environment", "services", "vault_reader"}):
+    if not isinstance(config, dict) or set(config) != {"environment", "services"}:
         raise ValueError("service config requires environment and services")
     if config["environment"] not in ENVIRONMENTS or (
             environment is not None and config["environment"] != environment):
         raise ValueError("service config environment does not match this instance")
     services = config["services"]
     if not isinstance(services, list) or not services or any(
-            not isinstance(name, str) or name not in PATHS for name in services):
-        raise ValueError("services must be a nonempty list of known service names")
+            not isinstance(name, str) or name not in PATHS or name == "vaultwarden" for name in services):
+        raise ValueError("services must be a nonempty list of known instance service names")
     if len(set(services)) != len(services):
         raise ValueError("services must not contain duplicates")
-    vault = VAULT_SERVICES.intersection(services)
-    if vault:
-        if config["environment"] != "homelab" or config.get("vault_reader") != READER_PROTOCOL:
-            raise ValueError("vault services require explicit homelab restricted-v1 configuration")
-    elif "vault_reader" in config:
-        raise ValueError("vault_reader requires a vault service")
     return config
 
 
 def client_servers(config=None):
     names = PATHS if config is None else validate_services(config)["services"]
-    return {CLIENT_NAMES[name]: PATHS[name] for name in names if name in CLIENT_NAMES}
+    return {CLIENT_NAMES[name]: PATHS[name] for name in names}
