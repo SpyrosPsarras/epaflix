@@ -350,14 +350,15 @@ class RenderTests(unittest.TestCase):
             deployment = next(doc for doc in documents if doc["kind"] == "Deployment")
             template = deployment["spec"]["template"]
             self.assertEqual(deployment["metadata"]["namespace"], "mcp-hub-homelab")
-            self.assertEqual(template["metadata"]["annotations"][annotation], "r1")
+            self.assertEqual(template["metadata"]["annotations"][annotation], "r2")
             volume = next(volume for volume in template["spec"]["volumes"] if volume["name"] == "instance")
             self.assertEqual(volume["secret"]["secretName"], "mcp-hub-instance")
             secret = next(doc for doc in documents if doc["kind"] == "Secret")
             self.assertEqual(secret["metadata"]["name"], "mcp-hub-instance")
             self.assertEqual(secret["metadata"]["namespace"], "mcp-hub-homelab")
             work = render(root / "instances/work")
-            self.assertNotIn(annotation, json.dumps(work))
+            work_deployment = next(doc for doc in work if doc["kind"] == "Deployment")
+            self.assertEqual(work_deployment["spec"]["template"]["metadata"]["annotations"][annotation], "r2")
 
             credentials = json.loads((overlay / "credentials.json").read_text())
             credentials["upstreams"]["searxng"]["token"] = "synthetic-rotated-upstream"
@@ -368,12 +369,12 @@ class RenderTests(unittest.TestCase):
             self.assertEqual(next(doc for doc in rotated if doc["kind"] == "Deployment"), deployment)
 
             path = root / "instances/homelab/kustomization.yaml"
-            path.write_text(path.read_text().replace('"r1"', '"synthetic-r2"'))
+            path.write_text(path.read_text().replace('"r2"', '"synthetic-r3"'))
             revised = render(overlay)
             rolled = next(doc for doc in revised if doc["kind"] == "Deployment")
             self.assertNotEqual(rolled["spec"]["template"], template)
-            self.assertEqual(rolled["spec"]["template"]["metadata"]["annotations"][annotation], "synthetic-r2")
-            rolled["spec"]["template"]["metadata"]["annotations"][annotation] = "r1"
+            self.assertEqual(rolled["spec"]["template"]["metadata"]["annotations"][annotation], "synthetic-r3")
+            rolled["spec"]["template"]["metadata"]["annotations"][annotation] = "r2"
             self.assertEqual(revised, rotated)
             self.assertEqual(render(root / "instances/work"), work)
 

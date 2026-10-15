@@ -7,9 +7,10 @@ remains available with its existing clients and routes. No consumer is
 switched by this change.
 
 The two new ArgoCD Applications require manual sync. Their public overlays
-contain no Secret, approved service inventory, ingress hostname or account
-identity. Without private configuration their pods cannot start. Rendering
-an overlay is not approval to sync it.
+contain no Secret, approved service inventory or account identity. Each has
+an internal-only Traefik route with a generic homelab/work hostname. Without
+private configuration their pods cannot start. Rendering an overlay is not
+approval to sync it.
 
 ## Configuration
 
@@ -94,6 +95,10 @@ account, not silently reuse a personal browser session. Account verification
 and consent are human checkpoints.
 
 ## Client configuration
+
+For homePC and laptop access to both hubs, follow
+[local client provisioning and owner steps](local-clients.md). The local
+wrapper uses prefixed Pi server names without changing isolated T3 clients.
 
 Distribute only `services.json`, the chosen hub URL and the client's own
 token reference to an isolated agent home. Do not distribute
@@ -267,12 +272,12 @@ and organizational policy checks.
    causing an independent rollout on configuration or credential changes.
    CI exercises this composition with synthetic Secret data. If an external
    provisioner uses a stable Secret name instead, it must update a tracked
-   pod-template revision as part of the approved rollout. Homelab provides
-   `mcp-hub.epaflix.com/inputs-revision` in `homelab/kustomization.yaml` for
-   the stable `mcp-hub-instance` Secret. Follow the coordinated procedure
-   below. Work requires its own approved revision mechanism for stable-name
-   Secrets. Mounted files alone do not reload this process's in-memory
-   configuration. Do not assume Reloader watches these namespaces.
+   pod-template revision as part of the approved rollout. Both overlays
+   provide `mcp-hub.epaflix.com/inputs-revision` in their own
+   `kustomization.yaml` for the stable `mcp-hub-instance` Secret. Homelab
+   reader changes follow the coordinated procedure below. Mounted files
+   alone do not reload this process's in-memory configuration. Do not assume
+   Reloader watches these namespaces.
 4. A4: Approve the ArgoCD source for the private composition and manual sync.
    Verify direct backend rejection without credentials, wrong-hub and
    legacy-client rejection, one accepted end-to-end request per hub, and
