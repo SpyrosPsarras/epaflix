@@ -4,8 +4,9 @@
 -- settings are live-only DB state otherwise, and a rebuild or a stray UI edit
 -- silently repoints translations at whatever the UI last left behind.
 --
--- cliproxy-free serves or-free: Antigravity (gemini-3.8-flash-high via main
--- cliproxy) first, Groq and Gemini free as fallback. lingarr retries 429s
+-- cliproxy-free serves or-free: Antigravity via main cliproxy, in order:
+-- gemini-3.8-flash-high, claude-opus-4-6-thinking, claude-sonnet-4-6,
+-- then Groq and Gemini free as fallback. lingarr retries 429s
 -- client-side (max_retries, retry_delay), keeping ONE service, endpoint and model.
 -- The Lingarr key must be in main cliproxy's live api-keys list via the
 -- management API (not git-durable); if missing, Antigravity 401s and free tiers serve.
@@ -97,6 +98,6 @@ BEGIN
     RAISE EXCEPTION 'AI provider pins incomplete: % of 5 settings hold the wanted values', n;
   END IF;
 
-  RAISE NOTICE 'AI provider pinned: cliproxy-free or-free -> Antigravity (gemini-3.8-flash-high via main cliproxy), Groq and Gemini free fallback; Lingarr retries 429s client-side';
+  RAISE NOTICE 'AI provider pinned: or-free -> Antigravity gemini-3.8-flash-high, claude-opus-4-6-thinking, claude-sonnet-4-6; Groq/Gemini free fallback';
 END
 $$;

@@ -32,3 +32,9 @@ helmCharts:
     releaseName: reloader-observability
     namespace: observability
     valuesFile: values/reloader-observability-values.yaml
+  - name: reloader
+    repo: https://stakater.github.io/stakater-charts
+    version: "2.2.18"
+    releaseName: reloader-remote-pi
+    namespace: remote-pi
+    valuesFile: values/reloader-remote-pi-values.yaml
