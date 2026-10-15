@@ -17,8 +17,9 @@ costs: an unusable endpoint turned a nightly run into a pile of failures that
 nothing retried, and the fake-Greek metric could not even see the damage. A
 controlled, observed re-queue beats a nightly blind one here.
 
-Re-queuing is done explicitly (this runbook) and watched by the
-`lingarr-drain-watch` CronJob in `2-k3s/maintenance/`.
+Re-queuing is done explicitly (this runbook). Verify the results with the
+scans below. The owner removed the automated drain check because free-tier
+AI quota failures are expected.
 
 ## Finding victims
 
