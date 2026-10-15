@@ -335,6 +335,7 @@ jobs:
           python3 2-k3s/13.t3code/env/tools/vault-org-denial.test.py -v
           python3 2-k3s/13.t3code/env/tools/vault-startup.test.py -v
           python3 2-k3s/13.t3code/env/tools/homelab-ssh.test.py -v
+          python3 2-k3s/13.t3code/env/tools/work-ssh.test.py -v
           python3 2-k3s/13.t3code-homelab/tools/rbac.test.py -v
           python3 2-k3s/13.t3code-homelab/tools/github-scope.test.py -v
           python3 2-k3s/13.t3code-work/tools/provision.test.py -v
@@ -359,6 +360,8 @@ jobs:
           sudo -n env "PYTHONPATH=$(python3 -c 'import pathlib, yaml; print(pathlib.Path(yaml.__file__).resolve().parent.parent)')" \
             "$(command -v python3)" 2-k3s/13.t3code/env/tools/startup.test.py \
             StartupTest.test_uid_1000_cannot_read_uid_1001_environ_or_persistent_data -v
+          sudo -n "$(command -v python3)" 2-k3s/13.t3code/env/tools/work-ssh.test.py \
+            WorkAgentTests.test_uid_1000_signs_through_uid_1001_proxy_but_not_direct_agent -v
           sudo -n "$(command -v python3)" 2-k3s/13.t3code/env/tools/homelab-ssh.test.py \
             AgentTests.test_uid_1000_signs_through_uid_1001_proxy_but_not_direct_agent -v
 

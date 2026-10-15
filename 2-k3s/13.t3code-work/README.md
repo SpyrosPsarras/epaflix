@@ -429,12 +429,118 @@ change `~/.ssh/config`, import a keyring or use a general SSH agent.
    No pairing token is minted by these tests.
 
 This login is inbound backend access, not an outbound work SSH grant.
-Vault-backed keys and outbound SSH integration remain deferred.
+
+## Outbound work SSH
+
+The work vault sidecar uses the shared stock vault client's SSH agent and
+UID-1001 socket proxy from #1842. It loads only SSH key items in its configured
+work organization and collection. Approved aliases select
+`IdentityAgent /run/t3-vault/ssh-agent.sock`, which permits listing and signing,
+not key mutation. T3 processes and SSH login sessions do not receive
+`SSH_AUTH_SOCK`. No homelab config or key material is mounted. Private keys
+pass to `ssh-add` over stdin with output suppressed, not through files or logs.
+An empty collection starts an empty agent without a fallback. With no approved
+hosts, the agent stays empty and does not fetch SSH key items, even if the work
+collection contains them. Invalid SSH key items refuse startup when SSH is enabled. Every restart creates a fresh agent and discards the old
+key set; changing vault items does not hot-reload a running agent.
+
+The owner must supply these private inputs before enabling outbound work SSH.
+They are not required to start or use the work pod:
+
+- S1: The exact approved non-production work hosts, login users and SSH ports,
+  plus their verified public host keys. Use literal fixed IP addresses, not
+  DNS names or subnets, so SSH and egress use the same targets. Obtain host keys
+  over an authenticated administrative channel, not `ssh-keyscan`.
+- S2: Which SSH key items belong in the configured work organization and
+  collection. Every type-5 SSH key item in that scope loads. Move only approved
+  work SSH keys there and authorize their public keys on the approved hosts.
+  Homelab items must remain in the homelab organization. Existing `vaultwarden-agent`
+  scope IDs select the organization and collection; do not copy credentials
+  from the homelab Secret or put item names/IDs in this public repository.
+- S3: Approval to add the exact target/port egress rules below and to perform
+  one harmless `true` check. The tracked work NetworkPolicy still denies
+  general LAN access. The generated private policy adds only the approved
+  destinations, not a LAN CIDR or a general SSH rule.
+
+Keep the host list outside Git. A private JSON array has this shape, using
+synthetic, non-deployable values here:
+
+```json
+[
+  {
+    "alias": "work-dev",
+    "address": "192.0.2.10",
+    "user": "node",
+    "port": 22,
+    "hostKey": "ssh-ed25519 <verified-base64-public-host-key>"
+  }
+]
+```
+
+The parser accepts up to 32 unique literal aliases, fixed IPv4/IPv6 addresses and
+Ed25519, RSA or NIST P-256 host keys. It rejects wildcard aliases, unknown
+fields and SSH directives. Loopback, multicast, unspecified and link-local
+addresses are not work targets. The owner, not the parser, confirms that each
+target is non-production and work-only.
+
+Run these commands in a private administrative terminal after review and merge.
+Do not capture the JSON, generated SSH config or policy in model-visible
+output. No Argo sync or pod restart is performed by the implementation.
+
+```sh
+umask 077
+kubectl --context epaflix -n t3code-work create secret generic t3-work-ssh \
+  --from-file=hosts.json=/private/work-ssh.json
+python3 2-k3s/13.t3code-work/files/work-ssh.py policy \
+  /private/work-ssh.json /private/work-ssh-policy.json
+kubectl --context epaflix apply -f /private/work-ssh-policy.json
+```
+
+`t3-work-ssh` is a separate private Secret rather than an addition to the
+seven-file, digest-checked `t3-runtime-inputs` contract. Its projection is
+optional. A missing Secret or missing, zero-byte, whitespace-only or `[]`
+`hosts.json` keeps startup usable, replaces any previous work host config with
+an empty one, and starts an empty agent. The config installer logs exactly
+`work SSH: no approved hosts; SSH disabled`. No work SSH egress policy is added.
+A present nonempty invalid input still refuses startup.
+
+The `t3` and vault containers mount the same read-only input and public parser.
+Both use that parser, so invalid input prevents the agent from loading keys.
+Startup replaces both the runtime and login user's SSH config and pins the
+supplied host keys only for approved aliases at their approved IP addresses.
+Overriding an alias's hostname to another address also disables the agent and
+pinned trust. Unknown aliases use
+`IdentityAgent none`, strict host key checking, no known-host trust file and
+`ProxyCommand false`.
+Passwords, local identity files, agent forwarding and unpinned host keys are
+disabled. The AKS helper continues to refuse inherited SSH agent environments.
+The inbound
+SSH sidecar uses the generated config in the shared home without mounting the
+private host input or vault data.
+
+For rotation, stop the work pod under the existing approved stop/change/start
+procedure. Replace `t3-work-ssh` privately, regenerate and apply the same named
+policy from the new host list, update vault SSH items as approved, then start
+work. For an empty host list, applying the generated policy removes its old
+SSH allow rules. Removing the Secret does not remove a previously applied
+private policy, so revoke those rules as part of the same change. Do not leave
+the old policy under another name. Both config and known
+hosts are replaced, not appended, and the new agent cannot sign with removed
+keys. An OnDelete rollout needs the owner's explicit pod replacement after
+manual sync.
+
+After rollout, run `ssh <approved-alias> true` in work and record only success
+or failure privately. Confirm an unapproved alias is refused, the agent has
+only the expected work public-key fingerprints, and no homelab aliases or keys
+are present. Repeat after replacing a synthetic work key and restarting to
+prove the old key is gone, then permanently delete any synthetic vault item.
+No real work target or vault key has been exercised by offline tests.
 
 ## Offline evidence and remaining acceptance
 
 ```sh
 python3 2-k3s/13.t3code-work/tools/provision.test.py -v
+python3 2-k3s/13.t3code/env/tools/work-ssh.test.py -v
 python3 2-k3s/13.t3code/env/tools/vault-client.test.py -v
 python3 2-k3s/13.t3code/env/tools/vault-startup.test.py -v
 python3 2-k3s/13.t3code/env/tools/startup.test.py -v

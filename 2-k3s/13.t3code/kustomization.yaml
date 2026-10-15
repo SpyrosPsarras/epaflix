@@ -14,6 +14,7 @@ configMapGenerator:
     files:
       - entrypoint.sh=env/files/isolated-entrypoint.sh
       - env/files/isolated-config.py
+      - env/files/ssh-agent-ready.sh
       - pi.sh=env/files/isolated-pi.sh
       - sshd.sh=env/files/isolated-sshd.sh
       - homelab-ssh.md=env/files/isolated-ssh.md

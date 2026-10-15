@@ -216,6 +216,12 @@ class WorkAuthTests(unittest.TestCase):
         with patch.dict(os.environ, {'T3_VAULT_CLIENT': '1', 'VAULT_PASSWORD': 'synthetic-work-password'}):
             self.assertEqual(self.run_token()['kind'], 'ExecCredential')
 
+    def test_local_work_ssh_agent_environment_is_refused_before_azure(self):
+        with patch.dict(os.environ, {'SSH_AUTH_SOCK': '/run/t3-vault/ssh-agent.sock'}):
+            with self.assertRaises(auth.AuthError):
+                self.run_token()
+        self.assertEqual(self.calls(), [])
+
     def test_every_vault_client_variable_is_refused_including_empty_values(self):
         for name in ('BW_EMAIL', 'BW_PASSWORD', 'BW_SERVER', 'BW_ORGANIZATION_ID', 'BW_COLLECTION_ID',
                      'BW_SESSION', 'BW_CLIENTID', 'BW_CLIENTSECRET', 'BW_UNKNOWN', 'BITWARDENCLI_APPDATA_DIR'):

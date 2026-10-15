@@ -228,6 +228,7 @@ class StartupTests(unittest.TestCase):
             'import importlib.util,sys; s=importlib.util.spec_from_file_location("vault",sys.argv[1]); '
             'm=importlib.util.module_from_spec(s); s.loader.exec_module(m); '
             'm.ADDRESS=sys.argv[2]; m.SCOPE_FILE=m.Path(sys.argv[3]); m.HEALTH_INTERVAL=0.05; m.SSH_CLIENT_UID=m.os.getuid(); '
+            'm.WORK_SSH_INPUTS=m.SCOPE_FILE.parent/"work-inputs"; '
             'sys.exit(m.main(sys.argv[4:]))', str(SOURCE), f'http://127.0.0.1:{self.port}', str(self.scope), 'serve']
 
     def tearDown(self):
@@ -577,6 +578,55 @@ class StartupTests(unittest.TestCase):
             self.assertFalse(self.scope.exists())
             self.assertFalse(Path('/proc/' + (self.home / 'server-pid').read_text()).exists())
             self.assert_quiet(stdout, stderr)
+
+    def work_ssh_inputs(self):
+        inputs = self.home / 'work-inputs'
+        inputs.mkdir(exist_ok=True)
+        (inputs / 'work-ssh.py').write_bytes((SOURCE.parents[3] / '13.t3code-work/files/work-ssh.py').read_bytes())
+        self.env.update(T3_RUNTIME_VARIANT='work', T3_VAULT_SSH_AGENT='1')
+        return inputs / 'hosts.json'
+
+    def test_work_missing_or_empty_hosts_publish_ready_with_an_empty_agent(self):
+        path = self.work_ssh_inputs()
+        for content in (None, '', '[]'):
+            with self.subTest(content=content):
+                if content is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    path.write_text(content)
+                self.fixture(cached=True, items=[{'type': 5}])
+                with subprocess.Popen(self.prefix, env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
+                    try:
+                        self.wait_ready(process)
+                        result = subprocess.run(['ssh-add', '-L'],
+                            env={**os.environ, 'SSH_AUTH_SOCK': str(self.home / 'ssh-agent.sock')},
+                            capture_output=True, timeout=5)
+                        self.assertEqual(result.returncode, 1)
+                        self.assertFalse((self.home / 'ssh-items-read').exists())
+                        self.assertEqual(json.loads(self.scope.read_text())['environment'], 'work')
+                    finally:
+                        process.send_signal(signal.SIGTERM)
+                        stdout, stderr = process.communicate(timeout=5)
+                        self.assert_quiet(stdout, stderr)
+                    self.assertEqual(process.returncode, 130)
+                    self.assertIn(b'vault: local client ready', stdout)
+                    self.assertNotIn(b'vault: no scoped SSH keys', stdout)
+                    self.assertFalse(self.scope.exists())
+                    self.assertFalse((self.home / 'ssh-agent.sock').exists())
+
+    def test_work_invalid_hosts_never_publish_scope_or_fetch_keys(self):
+        path = self.work_ssh_inputs()
+        for content in ('not-json', '{}', '[{}]'):
+            with self.subTest(content=content):
+                path.write_text(content)
+                self.fixture(cached=True)
+                result = subprocess.run(self.prefix, env=self.env, capture_output=True, timeout=10)
+                self.assertEqual(result.returncode, 1)
+                self.assertFalse(self.scope.exists())
+                self.assertFalse((self.home / 'ssh-agent.sock').exists())
+                self.assertFalse((self.home / 'ssh-items-read').exists())
+                self.assertNotIn(b'vault: local client ready', result.stdout)
+                self.assert_quiet(result.stdout, result.stderr)
 
     def test_work_sidecar_scope_and_https_login_validation(self):
         self.fixture(cached=True)
