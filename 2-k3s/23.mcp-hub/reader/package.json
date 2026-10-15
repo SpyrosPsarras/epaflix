@@ -3,5 +3,5 @@
   "private": true,
   "version": "1.0.0",
   "engines": {"node": "~22"},
-  "dependencies": {"@bitwarden/cli": "2026.8.0"}
+  "dependencies": {"@bitwarden/cli": "2026.10.0"}
 }
