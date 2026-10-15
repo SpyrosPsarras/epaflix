@@ -75,6 +75,8 @@ elif args == ['serve','--hostname','127.0.0.1','--port','8087']:
                     self.end_headers()
                     return
                 (home/'unlocked').touch()
+                if config.get('swap_before_sync'):
+                    write_listener(os.getuid()+1)
                 data=json.dumps({'success':True,'data':{'object':'message','noColor':False,
                     'title':'Your vault is now unlocked!','message':'Set BW_SESSION=synthetic-session',
                     'raw':'synthetic-session'}}).encode()
@@ -351,6 +353,16 @@ class StartupTests(unittest.TestCase):
                 process.send_signal(signal.SIGTERM)
                 stdout, stderr = process.communicate(timeout=5)
                 self.assert_quiet(stdout, stderr)
+
+    def test_listener_ownership_is_rechecked_before_sync_post(self):
+        self.fixture(cached=True, listener_uid=os.getuid(), swap_before_sync=True)
+        result = subprocess.run(self.proc_prefix(), env=self.env, capture_output=True, timeout=5)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual((self.home / 'http-posts').read_text().splitlines(), ['/unlock'])
+        self.assertEqual([call['args'][0] for call in self.calls()], ['serve'])
+        self.assertFalse((self.home / 'sync-started').exists())
+        self.assertFalse(self.scope.exists())
+        self.assert_quiet(result.stdout, result.stderr)
 
     def test_listener_ownership_is_rechecked_before_sending_the_password(self):
         self.fixture(cached=True, listener_uid=os.getuid(), swap_listener=True)
