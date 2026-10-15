@@ -763,9 +763,9 @@ spec:
         # ntfy spam fix: CronJob runs are keyed on (namespace, owner_name),
         # not job_name. With job_name in the labels every run was a new alert,
         # so a CronJob that kept failing resolved when the next run started
-        # and fired again 15m after that run failed: two pings an hour from
-        # lingarr-drain-watch (5 * * * *) on 2026-10-11. keep_firing_for bridges
-        # runs up to 90m; a fixed CronJob resolves 90m after a good run starts.
+        # and fired again 15m after that run failed: two pings an hour for an
+        # hourly CronJob. keep_firing_for bridges runs up to 90m; a fixed
+        # CronJob resolves 90m after a good run starts.
         # shortcut: gntm-star-download and first-dates-star-download allow 6h,
         # so longer runs can resolve and re-fire; reassess the hold if needed.
         # Jobs without a CronJob owner keep the job_name key.

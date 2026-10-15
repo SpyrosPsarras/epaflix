@@ -1282,34 +1282,34 @@ tests:
         alertname: AaaaTripwireCheckFailed
         exp_alerts: []
 
-  # KubeJobFailedLastRun, ntfy spam fix: lingarr-drain-watch fails every hourly
-  # run. Each new run makes the previous failure "not latest" while it is still
+  # KubeJobFailedLastRun, ntfy spam fix: an hourly reporter keeps failing.
+  # Each new run makes the previous failure "not latest" while it is still
   # running; keyed on job_name, the alert resolved then and re-fired 15m after
   # the new run failed. Keyed on the CronJob with keep_firing_for 90m, it fires
   # once and stays firing through every later failed run.
   - interval: 1m
     input_series:
-      - series: 'kube_job_status_start_time{namespace="servarr",job_name="lingarr-drain-watch-29862365"}'
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="example-reporter-29862365"}'
         values: "1750000000x190"
-      - series: 'kube_job_owner{namespace="servarr",job_name="lingarr-drain-watch-29862365",owner_kind="CronJob",owner_name="lingarr-drain-watch",owner_is_controller="true"}'
+      - series: 'kube_job_owner{namespace="servarr",job_name="example-reporter-29862365",owner_kind="CronJob",owner_name="example-reporter",owner_is_controller="true"}'
         values: "1x190"
-      - series: 'kube_job_failed{namespace="servarr",job_name="lingarr-drain-watch-29862365",condition="true"}'
+      - series: 'kube_job_failed{namespace="servarr",job_name="example-reporter-29862365",condition="true"}'
         values: "1x190"
-      - series: 'kube_job_failed{namespace="servarr",job_name="lingarr-drain-watch-29862365",condition="false"}'
+      - series: 'kube_job_failed{namespace="servarr",job_name="example-reporter-29862365",condition="false"}'
         values: "0x190"
       # Next run starts at 60m and fails 6m later.
-      - series: 'kube_job_status_start_time{namespace="servarr",job_name="lingarr-drain-watch-29862425"}'
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="example-reporter-29862425"}'
         values: "_x60 1750003600x130"
-      - series: 'kube_job_owner{namespace="servarr",job_name="lingarr-drain-watch-29862425",owner_kind="CronJob",owner_name="lingarr-drain-watch",owner_is_controller="true"}'
+      - series: 'kube_job_owner{namespace="servarr",job_name="example-reporter-29862425",owner_kind="CronJob",owner_name="example-reporter",owner_is_controller="true"}'
         values: "_x60 1x130"
-      - series: 'kube_job_failed{namespace="servarr",job_name="lingarr-drain-watch-29862425",condition="true"}'
+      - series: 'kube_job_failed{namespace="servarr",job_name="example-reporter-29862425",condition="true"}'
         values: "_x66 1x124"
       # And the one after that at 120m, failing 6m later again.
-      - series: 'kube_job_status_start_time{namespace="servarr",job_name="lingarr-drain-watch-29862485"}'
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="example-reporter-29862485"}'
         values: "_x120 1750007200x70"
-      - series: 'kube_job_owner{namespace="servarr",job_name="lingarr-drain-watch-29862485",owner_kind="CronJob",owner_name="lingarr-drain-watch",owner_is_controller="true"}'
+      - series: 'kube_job_owner{namespace="servarr",job_name="example-reporter-29862485",owner_kind="CronJob",owner_name="example-reporter",owner_is_controller="true"}'
         values: "_x120 1x70"
-      - series: 'kube_job_failed{namespace="servarr",job_name="lingarr-drain-watch-29862485",condition="true"}'
+      - series: 'kube_job_failed{namespace="servarr",job_name="example-reporter-29862485",condition="true"}'
         values: "_x126 1x64"
     alert_rule_test:
       - eval_time: 10m
@@ -1317,89 +1317,89 @@ tests:
         exp_alerts: []
       - eval_time: 16m
         alertname: KubeJobFailedLastRun
-        exp_alerts: &kjflr_lingarr
+        exp_alerts: &kjflr_reporter
           - exp_labels:
               namespace: servarr
-              owner_name: lingarr-drain-watch
+              owner_name: example-reporter
               severity: warning
               component: kubernetes
             exp_annotations:
-              summary: "The latest run of CronJob servarr/lingarr-drain-watch failed"
-              description: "The latest Job of CronJob servarr/lingarr-drain-watch failed and no later run has succeeded, so this is the CURRENT state rather than a retained old failure (newest Job: kubectl -n servarr get jobs --sort-by=.status.startTime | grep lingarr-drain-watch). The alert is keyed on the CronJob and stays firing while the next run is in flight, so a CronJob that keeps failing is one long alert, not one per run. For the servarr reporter CronJobs a non-zero exit is a FINDING, not a crash - read the Job log for the report before touching anything. This alert clears by itself 90m after a later run starts, unless that run fails too; deleting the failed Job object is not required and is not a fix."
+              summary: "The latest run of CronJob servarr/example-reporter failed"
+              description: "The latest Job of CronJob servarr/example-reporter failed and no later run has succeeded, so this is the CURRENT state rather than a retained old failure (newest Job: kubectl -n servarr get jobs --sort-by=.status.startTime | grep example-reporter). The alert is keyed on the CronJob and stays firing while the next run is in flight, so a CronJob that keeps failing is one long alert, not one per run. For the servarr reporter CronJobs a non-zero exit is a FINDING, not a crash - read the Job log for the report before touching anything. This alert clears by itself 90m after a later run starts, unless that run fails too; deleting the failed Job object is not required and is not a fix."
       # Run 2 in flight: the old rule resolved here (the :06 ping).
       - eval_time: 63m
         alertname: KubeJobFailedLastRun
-        exp_alerts: *kjflr_lingarr
+        exp_alerts: *kjflr_reporter
       # Run 2 failed under 15m ago: the old rule was pending here and re-fired
       # at 81m (the :21 ping).
       - eval_time: 75m
         alertname: KubeJobFailedLastRun
-        exp_alerts: *kjflr_lingarr
+        exp_alerts: *kjflr_reporter
       - eval_time: 123m
         alertname: KubeJobFailedLastRun
-        exp_alerts: *kjflr_lingarr
+        exp_alerts: *kjflr_reporter
       - eval_time: 185m
         alertname: KubeJobFailedLastRun
-        exp_alerts: *kjflr_lingarr
+        exp_alerts: *kjflr_reporter
     promql_expr_test:
       # Firing at every evaluation from 15m to 185m, with one label set.
       - expr: count_over_time(ALERTS{alertname="KubeJobFailedLastRun",alertstate="firing"}[170m])
         eval_time: 185m
         exp_samples:
-          - labels: '{alertname="KubeJobFailedLastRun",alertstate="firing",namespace="servarr",owner_name="lingarr-drain-watch",severity="warning",component="kubernetes"}'
+          - labels: '{alertname="KubeJobFailedLastRun",alertstate="firing",namespace="servarr",owner_name="example-reporter",severity="warning",component="kubernetes"}'
             value: 170
 
   # A failed run followed by a successful one: the alert resolves 90m
   # (keep_firing_for) after the good run starts at 60m.
   - interval: 1m
     input_series:
-      - series: 'kube_job_status_start_time{namespace="servarr",job_name="lingarr-drain-watch-29862365"}'
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="example-reporter-29862365"}'
         values: "1750000000x160"
-      - series: 'kube_job_owner{namespace="servarr",job_name="lingarr-drain-watch-29862365",owner_kind="CronJob",owner_name="lingarr-drain-watch",owner_is_controller="true"}'
+      - series: 'kube_job_owner{namespace="servarr",job_name="example-reporter-29862365",owner_kind="CronJob",owner_name="example-reporter",owner_is_controller="true"}'
         values: "1x160"
-      - series: 'kube_job_failed{namespace="servarr",job_name="lingarr-drain-watch-29862365",condition="true"}'
+      - series: 'kube_job_failed{namespace="servarr",job_name="example-reporter-29862365",condition="true"}'
         values: "1x160"
-      - series: 'kube_job_status_start_time{namespace="servarr",job_name="lingarr-drain-watch-29862425"}'
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="example-reporter-29862425"}'
         values: "_x60 1750003600x100"
-      - series: 'kube_job_owner{namespace="servarr",job_name="lingarr-drain-watch-29862425",owner_kind="CronJob",owner_name="lingarr-drain-watch",owner_is_controller="true"}'
+      - series: 'kube_job_owner{namespace="servarr",job_name="example-reporter-29862425",owner_kind="CronJob",owner_name="example-reporter",owner_is_controller="true"}'
         values: "_x60 1x100"
-      - series: 'kube_job_succeeded{namespace="servarr",job_name="lingarr-drain-watch-29862425"}'
+      - series: 'kube_job_succeeded{namespace="servarr",job_name="example-reporter-29862425"}'
         values: "_x61 1x99"
     alert_rule_test:
       - eval_time: 16m
         alertname: KubeJobFailedLastRun
-        exp_alerts: *kjflr_lingarr
+        exp_alerts: *kjflr_reporter
       - eval_time: 145m
         alertname: KubeJobFailedLastRun
-        exp_alerts: *kjflr_lingarr
+        exp_alerts: *kjflr_reporter
       - eval_time: 151m
         alertname: KubeJobFailedLastRun
         exp_alerts: []
 
   # A run allowed by the Star download CronJobs' 6h deadlines can outlast
-  # the 90m hold. Reuse the lingarr labels to isolate this duration limit:
+  # the 90m hold. Reuse the reporter labels to isolate this duration limit:
   # start at 60m, resolve at 151m, fail at 200m, fire again after the 15m wait.
   - interval: 1m
     input_series:
-      - series: 'kube_job_status_start_time{namespace="servarr",job_name="lingarr-drain-watch-29862365"}'
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="example-reporter-29862365"}'
         values: "1750000000x220"
-      - series: 'kube_job_owner{namespace="servarr",job_name="lingarr-drain-watch-29862365",owner_kind="CronJob",owner_name="lingarr-drain-watch",owner_is_controller="true"}'
+      - series: 'kube_job_owner{namespace="servarr",job_name="example-reporter-29862365",owner_kind="CronJob",owner_name="example-reporter",owner_is_controller="true"}'
         values: "1x220"
-      - series: 'kube_job_failed{namespace="servarr",job_name="lingarr-drain-watch-29862365",condition="true"}'
+      - series: 'kube_job_failed{namespace="servarr",job_name="example-reporter-29862365",condition="true"}'
         values: "1x220"
-      - series: 'kube_job_status_start_time{namespace="servarr",job_name="lingarr-drain-watch-29862425"}'
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="example-reporter-29862425"}'
         values: "_x60 1750003600x160"
-      - series: 'kube_job_owner{namespace="servarr",job_name="lingarr-drain-watch-29862425",owner_kind="CronJob",owner_name="lingarr-drain-watch",owner_is_controller="true"}'
+      - series: 'kube_job_owner{namespace="servarr",job_name="example-reporter-29862425",owner_kind="CronJob",owner_name="example-reporter",owner_is_controller="true"}'
         values: "_x60 1x160"
-      - series: 'kube_job_failed{namespace="servarr",job_name="lingarr-drain-watch-29862425",condition="true"}'
+      - series: 'kube_job_failed{namespace="servarr",job_name="example-reporter-29862425",condition="true"}'
         values: "_x200 1x20"
     alert_rule_test:
       - eval_time: 16m
         alertname: KubeJobFailedLastRun
-        exp_alerts: *kjflr_lingarr
+        exp_alerts: *kjflr_reporter
       - eval_time: 145m
         alertname: KubeJobFailedLastRun
-        exp_alerts: *kjflr_lingarr
+        exp_alerts: *kjflr_reporter
       - eval_time: 151m
         alertname: KubeJobFailedLastRun
         exp_alerts: []
@@ -1408,7 +1408,7 @@ tests:
         exp_alerts: []
       - eval_time: 216m
         alertname: KubeJobFailedLastRun
-        exp_alerts: *kjflr_lingarr
+        exp_alerts: *kjflr_reporter
 
   # The CronJobs with a dedicated alert stay excluded after the regrouping,
   # and a failed Job with no CronJob owner still alerts under its own name.
