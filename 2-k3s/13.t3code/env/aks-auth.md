@@ -1,13 +1,13 @@
 # AKS authentication
 
 The `t3code` pod uses the Azure CLI session of `spyros` in its own home.
-Refresh tokens stay in `/home/spyros/.azure`. Each DavidHorn kubeconfig exec
+Refresh tokens stay in `/home/spyros/.azure`. Each work kubeconfig exec
 entry calls `~/.local/bin/aks-auth token`, which runs
-`~/.local/bin/aks-auth-central` locally. That helper pins the DavidHorn tenant
+`~/.local/bin/aks-auth-central` locally. That helper pins the work tenant
 and AKS audience and serializes authentication with `flock`.
 
 ```sh
-kubectl --kubeconfig ~/.kube/davidhornkubeconfig --context aks-dev-context get namespaces
+kubectl --kubeconfig ~/.kube/work-kubeconfig --context '<aks-dev-context>' get namespaces
 ```
 
 When Azure reports that reauthentication is required, the token helper starts
@@ -22,6 +22,8 @@ arbitrary Azure CLI commands.
 `files/aks-auth-central.sh` is `~/.local/bin/aks-auth-central` and
 `files/aks-auth.sh` is `~/.local/bin/aks-auth` in the pod home. Both live on the
 home PVC, not in the image, so copy them by hand after editing.
+
+`AKS_TENANT_ID` comes from `stringData.aks-tenant-id` in `one/cliproxy-secrets.enc.yaml` through the mixed pod's Secret environment reference.
 
 Check the helpers with `python3 env/tools/aks-auth.test.py` from
 `2-k3s/13.t3code`.
