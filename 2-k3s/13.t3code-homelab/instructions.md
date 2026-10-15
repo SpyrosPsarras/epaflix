@@ -20,4 +20,14 @@ This backend is for homelab and personal repositories. Use the homelab MCP hub, 
 
 Use the installed ponytail skill for coding. Make the smallest complete change, reuse existing code and test changed behavior. Keep prose plain and concise. Code should explain itself without comments. Report exact test results, remaining checks and live changes by resource name. Do not add a co-author to commit messages. Before an authorized commit, check that the branch is rebased onto origin main/master.
 
-Before homelab SSH, read `/scripts/homelab-ssh.md`. Use the configured host names. SSH credentials belong in the approved agent or dedicated client identity, never in model context. Vault-backed outbound SSH is unavailable here until separately provisioned.
+Before homelab SSH, read `/scripts/homelab-ssh.md`. Run `ssh <name>` for
+inventory hosts. OpenSSH reaches the vault-backed agent through the
+inventory-only `IdentityAgent` setting. T3 processes do not receive
+`SSH_AUTH_SOCK`. Set it only per command for diagnostics:
+
+```sh
+SSH_AUTH_SOCK=/run/t3-vault/ssh-agent.sock ssh-add -l >/dev/null
+```
+
+Keep SSH credentials out of model context. Report agent failures without
+fetching private keys or trying another environment's credentials.

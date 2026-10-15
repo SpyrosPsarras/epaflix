@@ -101,6 +101,22 @@ elif args == ['serve','--hostname','127.0.0.1','--port','8087']:
             self.end_headers()
             self.wfile.write(data)
         def do_GET(self):
+            if self.path.startswith('/list/object/items?'):
+                assert state()['status']=='unlocked'
+                assert (home/'sync-started').exists()
+                assert len((home/'http-calls').read_text().splitlines())>=2
+                (home/'ssh-items-read').touch()
+                items=config.get('items',[])
+                if config.get('ssh_key_path'):
+                    items=[{'type':5,'organizationId':'11111111-1111-4111-8111-111111111111',
+                            'collectionIds':['22222222-2222-4222-8222-222222222222'],
+                            'sshKey':{'privateKey':pathlib.Path(config['ssh_key_path']).read_text()}}]
+                data=json.dumps({'success':True,'data':{'data':items}}).encode()
+                self.send_response(200)
+                self.send_header('Content-Type','application/json')
+                self.end_headers()
+                self.wfile.write(data)
+                return
             status=state()
             responses=config.get('responses',[])
             selected=responses[Handler.requests] if Handler.requests<len(responses) else 'ok'
@@ -117,7 +133,7 @@ elif args == ['serve','--hostname','127.0.0.1','--port','8087']:
                 status['userEmail']='other@work.example.test'
             data=json.dumps({'success':True,'data':{'object':'template',
                 'template':[] if selected=='malformed' else status}}).encode()
-            if config.get('swap_listener'):
+            if config.get('swap_listener') or (config.get('swap_before_keys') and (home/'sync-started').exists()):
                 write_listener(os.getuid()+1)
             self.send_response(200)
             self.send_header('Content-Type','application/json')
@@ -209,7 +225,7 @@ class StartupTests(unittest.TestCase):
         self.prefix = [sys.executable, '-c',
             'import importlib.util,sys; s=importlib.util.spec_from_file_location("vault",sys.argv[1]); '
             'm=importlib.util.module_from_spec(s); s.loader.exec_module(m); '
-            'm.ADDRESS=sys.argv[2]; m.SCOPE_FILE=m.Path(sys.argv[3]); m.HEALTH_INTERVAL=0.05; '
+            'm.ADDRESS=sys.argv[2]; m.SCOPE_FILE=m.Path(sys.argv[3]); m.HEALTH_INTERVAL=0.05; m.SSH_CLIENT_UID=m.os.getuid(); '
             'sys.exit(m.main(sys.argv[4:]))', str(SOURCE), f'http://127.0.0.1:{self.port}', str(self.scope), 'serve']
 
     def tearDown(self):
@@ -406,6 +422,70 @@ class StartupTests(unittest.TestCase):
                 self.assertEqual((self.home / 'http-posts').read_text().splitlines(), ['/sync'])
                 self.assertFalse(self.scope.exists())
                 self.assertFalse(Path('/proc/' + (self.home / 'server-pid').read_text()).exists())
+
+    def test_ssh_keys_are_ready_before_scope_and_removed_when_vault_fails(self):
+        self.env['T3_VAULT_SSH_AGENT'] = '1'
+        with tempfile.TemporaryDirectory(prefix='startup-ssh-test-', dir='/dev/shm') as directory:
+            key = Path(directory) / 'key'
+            subprocess.run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', str(key)], check=True)
+            self.fixture(ssh_key_path=str(key))
+            with subprocess.Popen(self.prefix, env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
+                try:
+                    self.wait_ready(process)
+                    sock = self.home / 'ssh-agent.sock'
+                    self.assertTrue(sock.is_socket())
+                    env = {**os.environ, 'SSH_AUTH_SOCK': str(sock)}
+                    result = subprocess.run(['ssh-add', '-T', str(key.with_suffix('.pub'))], env=env,
+                                            capture_output=True, timeout=5)
+                    self.assertEqual(result.returncode, 0)
+                    (self.home / 'lock').touch()
+                    stdout, stderr = process.communicate(timeout=5)
+                    self.assertEqual(process.returncode, 1)
+                    self.assert_quiet(stdout, stderr)
+                    self.assertNotIn(b'PRIVATE KEY', stdout + stderr)
+                    self.assertFalse(self.scope.exists())
+                    self.assertFalse(sock.exists())
+                    self.assertFalse(Path('/proc/' + (self.home / 'server-pid').read_text()).exists())
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                        process.wait()
+
+    def test_empty_ssh_scope_keeps_cached_and_fresh_clients_usable(self):
+        self.env['T3_VAULT_SSH_AGENT'] = '1'
+        for cached in (True, False):
+            with self.subTest(cached=cached):
+                self.fixture(cached=cached, items=[])
+                with subprocess.Popen(self.prefix, env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
+                    try:
+                        self.wait_ready(process)
+                        sock = self.home / 'ssh-agent.sock'
+                        self.assertTrue(sock.is_socket())
+                        result = subprocess.run(['ssh-add', '-L'], env={**os.environ, 'SSH_AUTH_SOCK': str(sock)},
+                                                capture_output=True, timeout=5)
+                        self.assertEqual(result.returncode, 1)
+                        self.assertTrue((self.home / 'ssh-items-read').exists())
+                        self.assertIsNone(process.poll())
+                    finally:
+                        process.send_signal(signal.SIGTERM)
+                        stdout, stderr = process.communicate(timeout=5)
+                        self.assert_quiet(stdout, stderr)
+                    self.assertEqual(process.returncode, 130)
+                    self.assertIn(b'vault: no scoped SSH keys; agent is empty', stdout)
+                    self.assertFalse(self.scope.exists())
+                    self.assertFalse(sock.exists())
+
+    def test_ssh_key_fetch_rechecks_listener_after_sync_and_account_check(self):
+        self.env['T3_VAULT_SSH_AGENT'] = '1'
+        self.fixture(cached=True, listener_uid=os.getuid(), swap_before_keys=True)
+        result = subprocess.run(self.proc_prefix(), env=self.env, capture_output=True, timeout=15)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual([call['args'][0] for call in self.calls()], ['serve'])
+        self.assertEqual((self.home / 'http-posts').read_text().splitlines(), ['/unlock', '/sync'])
+        self.assertFalse((self.home / 'ssh-items-read').exists())
+        self.assertFalse(self.scope.exists())
+        self.assertFalse((self.home / 'ssh-agent.sock').exists())
+        self.assert_quiet(result.stdout, result.stderr)
 
     def test_failed_login_is_bounded_quiet_and_clears_stale_scope(self):
         self.fixture(fail=True)

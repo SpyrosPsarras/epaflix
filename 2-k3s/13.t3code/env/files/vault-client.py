@@ -8,20 +8,44 @@ from pathlib import Path
 import re
 import resource
 import signal
+import socket
+import socketserver
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.request
 from urllib.parse import quote, urlencode, urlsplit
 from uuid import UUID
 
 ADDRESS = 'http://127.0.0.1:8087'
-LIMIT = 12 * 1024 * 1024
+MAX_RESPONSE_BYTES = 12 * 1024 * 1024
+MAX_SCOPE_BYTES = 1024
+MAX_VALUE_BYTES = 16 * 1024
+MAX_AGENT_MESSAGE_BYTES = 256 * 1024
+SSH_KEY_ITEM_TYPE = 5
 SCOPE_FILE = Path('/run/t3-vault/scope.json')
 PROC = Path('/proc')
 HEALTH_INTERVAL = 2
+HTTP_REQUEST_TIMEOUT_SECONDS = 10
+VAULT_OPERATION_TIMEOUT_SECONDS = 45
+CHILD_TIMEOUT_MIN_SECONDS = 0.1
+CHILD_TIMEOUT_MAX_SECONDS = 120
+RETRY_ATTEMPTS = 3
+RETRY_DELAY_SECONDS = 2
+CLIENT_START_ATTEMPTS = 100
+CLIENT_START_POLL_SECONDS = 0.1
+SSH_REQUEST_TIMEOUT_SECONDS = 10
+AGENT_START_ATTEMPTS = 100
+AGENT_START_POLL_SECONDS = 0.02
+PROXY_POLL_SECONDS = 0.1
+SSH_CLIENT_UID = 1000
+AGENT_REQUEST_IDENTITIES = 11
+AGENT_SIGN_REQUEST = 13
+AGENT_FAILURE = b'\x00\x00\x00\x01\x05'
 
 
 class Refused(Exception):
@@ -64,7 +88,7 @@ def scope():
     if not stat.S_ISREG(SCOPE_FILE.lstat().st_mode):
         raise Refused
     data = SCOPE_FILE.read_bytes()
-    if len(data) > 1024:
+    if len(data) > MAX_SCOPE_BYTES:
         raise Refused
     selected = json.loads(data)
     if selected['environment'] != variant:
@@ -72,7 +96,7 @@ def scope():
     return checked_uuid(selected['organizationId']), checked_uuid(selected['collectionId'])
 
 
-def fetch(path, binary=False, method='GET', payload=None, timeout=10):
+def fetch(path, binary=False, method='GET', payload=None, timeout=HTTP_REQUEST_TIMEOUT_SECONDS):
     def expired(*_):
         raise Refused
     previous = signal.signal(signal.SIGALRM, expired)
@@ -86,8 +110,8 @@ def fetch(path, binary=False, method='GET', payload=None, timeout=10):
             if response.status != 200 or response.headers.get_content_type() != (
                     'application/octet-stream' if binary else 'application/json'):
                 raise Refused
-            data = response.read(LIMIT + 1)
-            if len(data) > LIMIT:
+            data = response.read(MAX_RESPONSE_BYTES + 1)
+            if len(data) > MAX_RESPONSE_BYTES:
                 raise Refused
         if binary:
             return data
@@ -151,7 +175,7 @@ def run(argv):
     parser.add_argument('--field', action='append', default=[])
     parser.add_argument('--attachment')
     parser.add_argument('--attachment-env')
-    parser.add_argument('--timeout', type=float, default=120)
+    parser.add_argument('--timeout', type=float, default=CHILD_TIMEOUT_MAX_SECONDS)
     boundary = argv.index('--')
     args = parser.parse_args(argv[:boundary])
     command = argv[boundary + 1:]
@@ -168,14 +192,14 @@ def run(argv):
         targets.append(environment_name(args.attachment_env))
     if not command or not targets or len(targets) != len(set(targets)) or (
             (args.attachment is None) != (args.attachment_env is None)) or (
-            not math.isfinite(args.timeout) or not 0.1 <= args.timeout <= 120):
+            not math.isfinite(args.timeout) or not CHILD_TIMEOUT_MIN_SECONDS <= args.timeout <= CHILD_TIMEOUT_MAX_SECONDS):
         raise Refused
     item = selected_item(args)
     additions = {}
     for field, target in mappings:
         values = [item.get('login', {}).get('password')] if field is None else [
             entry.get('value') for entry in item.get('fields') or [] if entry.get('name') == field]
-        if len(values) != 1 or not isinstance(values[0], str) or '\0' in values[0] or len(values[0].encode()) > 16384:
+        if len(values) != 1 or not isinstance(values[0], str) or '\0' in values[0] or len(values[0].encode()) > MAX_VALUE_BYTES:
             raise Refused
         additions[target] = values[0]
     with tempfile.TemporaryDirectory(prefix='vault-client-', dir='/tmp') as directory:
@@ -205,7 +229,7 @@ def bw(arguments, client_env):
     with subprocess.Popen(['bw', *arguments], env=client_env, stdin=subprocess.DEVNULL,
                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True) as child:
         try:
-            output, _ = child.communicate(timeout=45)
+            output, _ = child.communicate(timeout=VAULT_OPERATION_TIMEOUT_SECONDS)
             if child.returncode:
                 raise Refused
             return output.decode().strip()
@@ -219,15 +243,15 @@ def matches_agent(status):
 
 
 def retry(action):
-    for attempt in range(3):
+    for attempt in range(RETRY_ATTEMPTS):
         try:
             return action()
         except (Cancelled, UnsafeListener):
             raise
         except Exception:
-            if attempt == 2:
+            if attempt == RETRY_ATTEMPTS - 1:
                 raise
-            time.sleep(2)
+            time.sleep(RETRY_DELAY_SECONDS)
 
 
 def open_session(client_env):
@@ -291,11 +315,11 @@ def client_ready(server):
 
 
 def wait_for_status(server):
-    for _ in range(100):
+    for _ in range(CLIENT_START_ATTEMPTS):
         status = client_status(server)
         if server.poll() is not None or status:
             return status
-        time.sleep(0.1)
+        time.sleep(CLIENT_START_POLL_SECONDS)
     raise Refused
 
 
@@ -344,6 +368,119 @@ def running_client(client_env):
             stop(server)
 
 
+def log_agent_refusal():
+    print('vault: SSH agent proxy request refused', file=sys.stderr, flush=True)
+
+
+def agent_message(stream):
+    header = stream.read(4)
+    if not header:
+        return None
+    if len(header) != 4:
+        raise Refused
+    length, = struct.unpack('!I', header)
+    if not 1 <= length <= MAX_AGENT_MESSAGE_BYTES:
+        raise Refused
+    message = stream.read(length)
+    if len(message) != length:
+        raise Refused
+    return header + message
+
+
+class AgentProxy(socketserver.ThreadingUnixStreamServer):
+    daemon_threads = True
+
+    def handle_error(self, request, client_address):
+        log_agent_refusal()
+
+
+class AgentRequest(socketserver.StreamRequestHandler):
+    timeout = SSH_REQUEST_TIMEOUT_SECONDS
+
+    def handle(self):
+        try:
+            _, uid, _ = struct.unpack('3i', self.request.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+            if uid != SSH_CLIENT_UID:
+                log_agent_refusal()
+                return
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as upstream:
+                upstream.settimeout(SSH_REQUEST_TIMEOUT_SECONDS)
+                upstream.connect(self.server.agent_socket)
+                with upstream.makefile('rb') as stream:
+                    while True:
+                        message = agent_message(self.rfile)
+                        if message is None:
+                            return
+                        if message[4] not in (AGENT_REQUEST_IDENTITIES, AGENT_SIGN_REQUEST):
+                            self.wfile.write(AGENT_FAILURE)
+                            log_agent_refusal()
+                            continue
+                        upstream.sendall(message)
+                        reply = agent_message(stream)
+                        if reply is None:
+                            raise Refused
+                        self.wfile.write(reply)
+        except (OSError, Refused):
+            log_agent_refusal()
+
+
+@contextlib.contextmanager
+def ssh_agent(selected, server):
+    if selected['environment'] != 'homelab':
+        raise Refused
+    public_socket = SCOPE_FILE.with_name('ssh-agent.sock')
+    public_socket.unlink(missing_ok=True)
+    if not owns_listener(server):
+        raise UnsafeListener
+    items = fetch('/list/object/items?' + urlencode({'organizationid': selected['organizationId'],
+                                                   'collectionid': selected['collectionId']}))['data']
+    keys = [item for item in items if item.get('type') == SSH_KEY_ITEM_TYPE and
+            item.get('organizationId') == selected['organizationId'] and
+            selected['collectionId'] in item.get('collectionIds', [])]
+    with tempfile.TemporaryDirectory(prefix='vault-agent-', dir='/tmp') as directory:
+        os.chmod(directory, 0o700)
+        private_socket = str(Path(directory) / 'agent.sock')
+        env = {'HOME': directory, 'PATH': os.environ['PATH'], 'SSH_AUTH_SOCK': private_socket,
+               'SSH_ASKPASS_REQUIRE': 'never'}
+        with subprocess.Popen(['ssh-agent', '-D', '-a', private_socket], env=env,
+                              stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                              start_new_session=True) as agent:
+            try:
+                for _ in range(AGENT_START_ATTEMPTS):
+                    if agent.poll() is not None:
+                        raise Refused
+                    if Path(private_socket).is_socket():
+                        break
+                    time.sleep(AGENT_START_POLL_SECONDS)
+                else:
+                    raise Refused
+                for item in keys:
+                    key = (item.get('sshKey') or {}).get('privateKey')
+                    if not isinstance(key, str) or not key or len(key.encode()) > MAX_VALUE_BYTES:
+                        raise Refused
+                    result = subprocess.run(['ssh-add', '-q', '-'], input=(key.strip() + '\n').encode(),
+                                            env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                            timeout=SSH_REQUEST_TIMEOUT_SECONDS)
+                    if result.returncode:
+                        raise Refused
+                with AgentProxy(str(public_socket), AgentRequest) as proxy:
+                    proxy.agent_socket = private_socket
+                    os.chmod(public_socket, 0o666)
+                    thread = threading.Thread(target=proxy.serve_forever, kwargs={'poll_interval': PROXY_POLL_SECONDS}, daemon=True)
+                    thread.start()
+                    try:
+                        if not keys:
+                            print('vault: no scoped SSH keys; agent is empty', flush=True)
+                        yield agent
+                    finally:
+                        public_socket.unlink(missing_ok=True)
+                        proxy.shutdown()
+                        thread.join()
+            finally:
+                public_socket.unlink(missing_ok=True)
+                stop(agent)
+
+
 def serve():
     SCOPE_FILE.unlink(missing_ok=True)
     selected = agent_scope()
@@ -372,18 +509,20 @@ def serve():
                 raise Refused
             if status['status'] == 'locked':
                 retry(lambda: unlock(server, password))
-            fetch('/sync', method='POST', timeout=45)
+            fetch('/sync', method='POST', timeout=VAULT_OPERATION_TIMEOUT_SECONDS)
             if not client_ready(server):
                 raise Refused
-            publish_scope(selected)
-            print('vault: local client ready', flush=True)
-            failures = 0
-            while server.poll() is None:
-                failures = 0 if client_ready(server) else failures + 1
-                if failures >= 3:
-                    raise Refused
-                time.sleep(HEALTH_INTERVAL)
-            return exit_code(server.returncode) or 1
+            ssh = os.environ.get('T3_VAULT_SSH_AGENT') == '1'
+            with ssh_agent(selected, server) if ssh else contextlib.nullcontext() as agent:
+                publish_scope(selected)
+                print('vault: local client ready', flush=True)
+                failures = 0
+                while server.poll() is None:
+                    failures = 0 if client_ready(server) else failures + 1
+                    if failures >= 3 or (agent is not None and agent.poll() is not None):
+                        raise Refused
+                    time.sleep(HEALTH_INTERVAL)
+                return exit_code(server.returncode) or 1
 
 
 def main(argv):

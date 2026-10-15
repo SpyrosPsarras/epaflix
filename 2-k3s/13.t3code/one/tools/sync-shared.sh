@@ -17,6 +17,7 @@ pairs=(
   "$here/../../23.mcp-hub/files/hub_services.py:$here/../../23.mcp-hub/tools/hub_services.py"
   "$here/../../23.mcp-hub/files/hub_services.py:$here/files/hub_services.py"
   "$here/../../../1-proxmox/ssh/homelab.conf:$here/files/homelab-ssh.conf"
+  "$here/../../../1-proxmox/ssh/homelab.conf:$here/../../13.t3code-homelab/files/homelab-ssh.conf"
   "$here/../../../1-proxmox/ssh/homelab-ssh.md:$here/files/homelab-ssh.md"
 )
 rc=0
