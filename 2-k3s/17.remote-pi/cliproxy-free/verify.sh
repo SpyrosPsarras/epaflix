@@ -58,7 +58,7 @@ KEY = keys[0]
 # allowlist per provider. The policy is "no money can move", not a suffix:
 # OpenRouter free models carry the :free suffix, Groq free-plan models and
 # Google AI Studio free-tier flash models are pinned by name. Antigravity's
-# flat-rate subscription model is allowed only under its own provider. The answering
+# flat-rate subscription models are pinned one per Antigravity provider. The answering
 # model must be one of the configured upstreams, not merely some free model
 # anywhere - that is the policy this instance exists for.
 #
@@ -85,8 +85,14 @@ def _zero_cost(u):
              "qwen/qwen3.8-27b"): return True          # Groq free-plan chat models (policy permit list)
     if re.fullmatch(r"gemini-[0-9.]+-flash", u): return True  # AI Studio free-tier flash
     return False
+ANTIGRAVITY = {
+    "antigravity": "gemini-3.8-flash-high",
+    "antigravity-opus": "claude-opus-4-6-thinking",
+    "antigravity-sonnet": "claude-sonnet-4-6",
+}
 _outside = [u for provider, u in pairs if not (
-    u == "gemini-3.8-flash-high" if provider == "antigravity" else _zero_cost(u))]
+    u == ANTIGRAVITY[provider] if provider in ANTIGRAVITY
+    else u not in ANTIGRAVITY.values() and _zero_cost(u))]
 assert not _outside, f"upstream(s) outside the zero-cost allowlist: {_outside}"
 assert "openrouter/free" not in UPSTREAMS, "openrouter/free (random router) is banned; pin explicit free models"
 
