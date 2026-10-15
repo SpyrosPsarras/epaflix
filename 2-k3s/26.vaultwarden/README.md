@@ -8,14 +8,32 @@ NetworkPolicy, 1Gi local-path PVC, recovery scripts and backup CronJob in
 The server runs one rootless writer with `Recreate` and pinned image digests.
 `https://vaultwarden.epaflix.com` uses Traefik's internal entrypoint and wildcard
 certificate. Pi-hole resolves it to `192.168.10.102`; Unbound blocks public AAAA
-lookups. Registration and push are disabled. Invitations are enabled, and
-`ORG_CREATION_USERS` restricts organization creation to the configured account.
+lookups. Push is disabled. `ORG_CREATION_USERS` restricts organization creation
+to the configured account.
 
 ArgoCD self-heals with pruning disabled. It ignores the writer's replica count
 and backup pause annotation so a sync cannot resume it during capture. The
 namespace and PVC have prune and deletion protection. The four Secrets,
 Database and DatabaseRole have deletion protection; CNPG also retains the
 database and role.
+
+## Account policy
+
+`SIGNUPS_VERIFY=false` permanently lets invited accounts log in without proving
+control of their email address. Agent accounts created by the organization setup
+Job have no inbox to verify. `SIGNUPS_ALLOWED=false` keeps public sign-ups closed.
+`EMERGENCY_ACCESS_ALLOWED=false` prevents ordinary users from inviting new
+accounts through emergency access. Invitations can come only from organization
+owners/admins and the admin page. The residual risk is that an org owner or admin
+can still invite a new address, and that account need not prove control of its
+mailbox. Revisit this decision before opening sign-ups or broadening invitation
+permissions.
+
+## Organization setup
+
+[org-setup/README.md](org-setup/README.md) documents the one-off homelab/work
+organization Job, backend Secret contract, disposable rehearsal and temporary
+GitOps config changes. Merging it does not run the Job or enable admin access.
 
 ## Backup
 
