@@ -13,17 +13,23 @@ TMP = Path(TMP_DIR.name)
 
 FAKE_KUBECTL = r"""#!/usr/bin/env bash
 args="$*"
+if [[ $args == "get pod "* ]]; then
+  state=${FAKE_POD_BEFORE_EXEC:-same}
+  [[ -e $FAKE_LOG.exec ]] && state=$FAKE_POD_AFTER_EXEC
+  case "$state" in
+    gone) [[ $args == *--ignore-not-found* ]] && exit 0; echo 'Error from server (NotFound): pods "t3code-0" not found' >&2; exit 1 ;;
+    apierror) echo 'Error from server (Forbidden)' >&2; exit 1 ;;
+  esac
+fi
 case "$args" in
   "get statefulset"*) printf %s "$FAKE_WANT" ;;
-  *controller-revision-hash*) printf %s "$FAKE_HAVE" ;;
+  *controller-revision-hash*) printf 't3code-0 %s' "$FAKE_HAVE" ;;
   *waiting.reason*) printf %s "$FAKE_WAITING" ;;
   *Ready*) printf %s "$FAKE_READY" ;;
   *metadata.uid*)
     uid=pod-1; deleting=
     if [[ -e $FAKE_LOG.exec ]]; then
       case "$FAKE_POD_AFTER_EXEC" in
-        gone) [[ $args == *--ignore-not-found* ]] && exit 0; echo 'Error from server (NotFound): pods "t3code-0" not found' >&2; exit 1 ;;
-        apierror) echo 'Error from server (Forbidden)' >&2; exit 1 ;;
         terminating) deleting=2026-10-09T12:00:00Z ;;
         replaced) uid=pod-2 ;;
       esac
@@ -110,7 +116,10 @@ def rollout(**fake):
 cases = [
     ("up to date", {"FAKE_HAVE": "rev2"}, 0, False),
     ("no update revision yet", {"FAKE_WANT": ""}, 0, False),
+    ("initial pod lookup fails", {"FAKE_POD_BEFORE_EXEC": "apierror"}, 1, False),
     ("pending and idle", {}, 0, True),
+    ("missing revision label and idle", {"FAKE_HAVE": ""}, 0, True),
+    ("missing revision label and active", {"FAKE_HAVE": "", "FAKE_IDLE_t3": "100"}, 0, False),
     ("exactly 30 minutes", {"FAKE_IDLE_t3": "1800", "FAKE_IDLE_sshd": "1800"}, 0, True),
     ("agent or app active", {"FAKE_IDLE_t3": "100"}, 0, False),
     ("ssh shell active", {"FAKE_IDLE_sshd": "1799"}, 0, False),
@@ -124,6 +133,9 @@ for name, fake, code, deleted in cases:
     out, did_delete = rollout(**fake)
     assert out.returncode == code, (name, out.returncode, out.stdout, out.stderr)
     assert did_delete == deleted, (name, out.stdout, out.stderr)
+
+out, did_delete = rollout(FAKE_POD_BEFORE_EXEC="gone")
+assert out.returncode == 0 and not did_delete and "nothing to roll out" in out.stdout, (out.returncode, out.stdout, out.stderr)
 
 for container in ("t3", "sshd"):
     for state in ("terminating", "gone", "replaced"):
