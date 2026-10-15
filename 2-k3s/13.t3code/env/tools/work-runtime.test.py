@@ -393,10 +393,14 @@ class WorkRuntimeTests(unittest.TestCase):
             manifest = overlay / 'statefulset.yaml'
             annotation = 't3code.epaflix.com/inputs-grants-revision'
             before = sts['spec']['template']
-            self.assertEqual(before['metadata']['annotations'][annotation], 'unprovisioned')
-            manifest.write_text(manifest.read_text().replace('"unprovisioned"', '"r1"'))
+            source = next(doc for doc in yaml.safe_load_all(manifest.read_text()) if doc['kind'] == 'StatefulSet')
+            revision = source['spec']['template']['metadata']['annotations'][annotation]
+            self.assertEqual(before['metadata']['annotations'][annotation], revision)
+            next_revision = revision + '-next'
+            manifest.write_text(manifest.read_text().replace('"' + revision + '"', '"' + next_revision + '"'))
             after = next(doc for doc in render() if doc['kind'] == 'StatefulSet')['spec']['template']
             self.assertNotEqual(before, after)
+            self.assertEqual(after['metadata']['annotations'][annotation], next_revision)
             self.assertEqual(before['spec'], after['spec'])
             app = yaml.safe_load((ROOT.parent / '11.argocd/apps/app-t3code-work.yaml').read_text())
             self.assertNotIn('automated', app['spec']['syncPolicy'])
