@@ -580,6 +580,27 @@ nested = {"🏠" = ["fixture", {enabled = false}]}
         self.assertIn('ForwardAgent=no', args)
         self.assertIn('127.0.0.1:13773:127.0.0.1:3773', args)
 
+    def test_gitops_ssh_services_have_distinct_pinned_addresses(self):
+        import yaml
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Path(tmp)
+            for name in ('13.t3code', '13.t3code-homelab', '13.t3code-work'):
+                shutil.copytree(ROOT.parent / name, tree / name, ignore=shutil.ignore_patterns('__pycache__'))
+            private_fixture.overlay(tree / '13.t3code/one')
+            addresses = []
+            for overlay, expected in (('13.t3code/one', '192.168.10.112'),
+                                      ('13.t3code-homelab', '192.168.10.113'),
+                                      ('13.t3code-work', '192.168.10.114')):
+                with self.subTest(overlay=overlay):
+                    docs = yaml.safe_load_all(subprocess.check_output(['kustomize', 'build', str(tree / overlay)]))
+                    service = next(doc for doc in docs if doc and doc['kind'] == 'Service'
+                                   and doc['metadata']['name'] == 't3code-ssh')
+                    self.assertEqual(service['spec']['type'], 'LoadBalancer')
+                    address = service['spec'].get('loadBalancerIP')
+                    self.assertEqual(address, expected)
+                    addresses.append(address)
+            self.assertEqual(len(set(addresses)), 3)
+
     def test_gitops_render_uses_stable_external_secrets_and_tracked_rollout_revision(self):
         with tempfile.TemporaryDirectory() as tmp:
             tree = Path(tmp) / '2-k3s'

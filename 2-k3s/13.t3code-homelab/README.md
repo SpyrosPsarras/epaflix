@@ -145,7 +145,8 @@ kubectl --context epaflix -n t3code-homelab wait --for=condition=Ready pod/t3cod
 The hub reload is required because its client digest map loads at startup.
 Before the first sync, confirm that the LoadBalancer pool and reachable network
 are suitable for this homelab SSH endpoint. No public HTTP ingress is added.
-Get the assigned SSH address with:
+The SSH address is pinned to `192.168.10.113` at `t3code-homelab.epaflix.lan`.
+Confirm the Service address with:
 
 ```sh
 kubectl --context epaflix -n t3code-homelab get service t3code-ssh
