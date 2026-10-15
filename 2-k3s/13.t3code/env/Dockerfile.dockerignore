@@ -9,6 +9,7 @@
 !env/tools/package-lock.json
 !env/files/
 !env/files/vault-restricted.sh
+!env/files/vault-client.py
 !one/
 !one/files/
 !one/files/vault-restricted.py

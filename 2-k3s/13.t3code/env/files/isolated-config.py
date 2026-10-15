@@ -79,8 +79,10 @@ def validate(inputs, home, environment):
         grants['github-token'] = os.environ['GITHUB_TOKEN']
     if config['grantSha256'] != {name: hashlib.sha256(value.encode()).hexdigest() for name, value in grants.items()}:
         raise InputError('Credential grants do not match their reviews')
-    if any(os.environ.get(name) for name in ('SSH_AUTH_SOCK', 'GH_TOKEN', 'AZURE_CONFIG_DIR', 'BW_SESSION', 'BW_CLIENTID', 'BW_CLIENTSECRET')):
+    if any(os.environ.get(name) for name in ('SSH_AUTH_SOCK', 'GH_TOKEN', 'AZURE_CONFIG_DIR')):
         raise InputError('Legacy credential environment is forbidden')
+    if any(name.startswith(('BW_', 'BITWARDENCLI_')) for name in os.environ):
+        raise InputError('Vault client environment belongs only in the separate-uid sidecar')
     services = hub_services.load_services(inputs / 'services.json', environment)
     bundle = json.loads((inputs / 'bundle.json').read_text())
     if not bundle.get('sourceHome') or not bundle.get('files') or 'instructions.md' not in bundle['files']:

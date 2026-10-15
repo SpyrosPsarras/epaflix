@@ -9,3 +9,16 @@ resources:
   - statefulset.yaml
   - storage.yaml
   - service.yaml
+
+replacements:
+  - source:
+      kind: StatefulSet
+      name: t3code
+      fieldPath: spec.template.spec.containers.[name=t3].image
+    targets:
+      - select:
+          kind: StatefulSet
+          name: t3code
+        fieldPaths:
+          - spec.template.spec.initContainers.[name=vault-storage].image
+          - spec.template.spec.containers.[name=vault].image
