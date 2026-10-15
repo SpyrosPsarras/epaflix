@@ -127,6 +127,30 @@ class VaultTests(unittest.TestCase):
         self.scope.unlink()
         self.assertEqual(self.command(['--item', ITEM, '--password-env', 'VAULT_PASSWORD'], 'pass').returncode, 1)
 
+    def test_work_scope_refuses_homelab_item_before_child_and_runs_work_values_quietly(self):
+        (self.home / '.config/t3-runtime/environment').write_text('work\n')
+        self.env['T3_RUNTIME_VARIANT'] = 'work'
+        self.scope.chmod(0o600)
+        self.scope.write_text(json.dumps({'environment': 'work', 'organizationId': FOREIGN, 'collectionId': FOREIGN}))
+        self.scope.chmod(0o444)
+        record = self.home / 'ran'
+        result = self.command(['--item', ITEM, '--password-env', 'VAULT_PASSWORD'],
+                              f'open({str(record)!r},"w").close()')
+        self.assertEqual(result.returncode, 1)
+        self.assertFalse(record.exists())
+        self.assert_quiet(result)
+        self.item.update(organizationId=FOREIGN, collectionIds=[FOREIGN])
+        result = self.command(['--item', ITEM, '--password-env', 'VAULT_PASSWORD', '--field', 'api=VAULT_API',
+                               '--attachment', 'fixture.bin', '--attachment-env', 'VAULT_FILE'],
+            f'import os,pathlib; assert os.environ["VAULT_PASSWORD"]=={VALUE!r}; '
+            f'assert os.environ["VAULT_API"]=={FIELD!r}; '
+            'p=pathlib.Path(os.environ["VAULT_FILE"]); '
+            f'assert p.read_bytes()=={CONTENT!r}; pathlib.Path({str(record)!r}).write_text(str(p)); '
+            'print(os.environ["VAULT_PASSWORD"]); print(os.environ["VAULT_API"],file=__import__("sys").stderr)')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(Path(record.read_text()).parent.exists())
+        self.assert_quiet(result)
+
     def test_exact_name_and_ambiguous_missing_or_foreign_names(self):
         result = self.command(['--name', 'synthetic-item', '--password-env', 'VAULT_PASSWORD'], 'pass')
         self.assertEqual(result.returncode, 0, result.stderr)

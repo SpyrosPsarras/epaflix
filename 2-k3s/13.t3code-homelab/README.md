@@ -358,6 +358,7 @@ python3 2-k3s/13.t3code-homelab/tools/inputs.test.py -v
 python3 2-k3s/13.t3code/env/tools/vault-client.test.py -v
 python3 2-k3s/13.t3code/env/tools/vault-startup.test.py -v
 python3 2-k3s/13.t3code/env/tools/startup.test.py -v
+python3 2-k3s/13.t3code/env/tools/image-commands.test.py -v
 python3 2-k3s/13.t3code-homelab/tools/rbac.test.py -v
 python3 2-k3s/13.t3code-homelab/tools/github-scope.test.py -v
 python3 2-k3s/17.remote-pi/cliproxy/tools/client-backend.test.py -v

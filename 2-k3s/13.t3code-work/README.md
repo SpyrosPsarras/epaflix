@@ -13,9 +13,88 @@ the pinned authentication helper. Its maintained source is
 `../13.t3code/env/files/work-aks-auth.py`; `sync-shared.sh` copies it into
 `auth/` for Kustomize's file loader.
 
-The work image includes Azure CLI. Neither isolated image includes the vault
-CLI. Homelab still has no Azure CLI, work helper, Azure cache or work grants.
-No image contains private instructions, service inventories or credentials.
+The work image includes Azure CLI and the shared vault client. Homelab still
+has no Azure CLI, work helper, Azure cache or work grants. No image contains
+private instructions, service inventories or credentials.
+
+## Runtime vault reads
+
+The work overlay uses the same [`vault run` client and sidecar](../13.t3code-homelab/README.md#runtime-vault-reads)
+as homelab, including its timeouts, warm-read path, attachment cleanup and
+suppression of child stdin, stdout and stderr. The unpatched `@bitwarden/cli`
+is pinned to 2026.8.0. Commands consume work passwords, custom fields and
+attachments without printing their values:
+
+```sh
+vault run --item "$ITEM_ID" --password-env VAULT_PASSWORD \
+  --field api-key=VAULT_API_KEY --attachment credentials.json \
+  --attachment-env VAULT_FILE -- python3 /private/consume.py
+```
+
+Only the UID-1001 `vault` sidecar receives the five `BW_*` keys from the work
+namespace's existing `vaultwarden-agent` Secret. It must contain the work agent
+login and work organization/collection scope, never the owner's login or the
+homelab grant. Argo does not manage this Secret. The retained 1 GiB
+`t3code-vault` PVC is separate from the work home and homelab's same-named PVC
+in its own namespace. The storage init restores UID-1001 ownership and mode
+0700 before each start. T3 and sshd stay UID 1000 without the login environment
+or client-data mount. T3 reads only the sidecar's published scope metadata.
+
+Startup and the work AKS helper reject every `BW_*` and `BITWARDENCLI_*`
+variable, including empty values. `T3_VAULT_CLIENT=1` enables the runner without
+relaxing either guard. The AKS helper still uses only the reviewed work inputs
+and this home's Azure cache; it does not forward `VAULT_*` values to Azure CLI.
+Organizational instructions, hooks, policy checks and hub inventory stay intact.
+The vault sidecar is independent of T3 startup and never starts Azure login.
+
+The API binds only `127.0.0.1:8087`, with no Service or container port. It has
+no authentication within the pod. `vault run` checks both organization and
+collection and suppresses output, but cannot prevent deliberate exfiltration
+through direct API access. Cross-organization isolation also depends on the
+separate agent accounts established in #1838. Trashed-item filtering belongs
+to #1846 and is not changed here.
+
+### Post-merge vault acceptance for #1843
+
+Do not run these steps from an unmerged implementation or move the owner's
+real items for testing.
+
+1. V1: Wait for the work runtime image referenced by the merged overlay to be
+   published. Check for active work and arrange maintenance. Manually sync
+   `t3code-work`, then let the idle-rollout job replace the `OnDelete` pod, or
+   approve one pod replacement during maintenance. Wait for all three
+   containers to be ready. Do not sync or restart homelab or shared services.
+2. V2: Check only the work Secret's key names, not its data. Confirm the new
+   work vault PVC is Bound, the `vault` container runs as UID 1001, and only
+   that container references `vaultwarden-agent`. Check scope readiness without
+   printing scope IDs, login environments, client cache, kubeconfig or logs
+   that could contain credentials. Verify work T3 health and retained policy
+   checks before testing reads.
+3. V3: Through the homelab agent's existing local API, create one synthetic
+   item in its published organization and collection. Give it a synthetic
+   password, custom field and attachment. Keep its returned item ID only in
+   the private administrative process. Sync that agent and prove a positive
+   `vault run` read in homelab, checking values in the child with assertions
+   and recording only status and elapsed time.
+4. V4: Sync the work agent, then request that exact homelab probe ID through
+   `vault run` in the work `t3` container. Use `--password-env VAULT_PASSWORD`
+   and a child that would create a temporary sentinel. Require runner exit
+   code 1 and no sentinel. A missing-item refusal is expected when the work
+   account cannot see the item. The homelab positive control proves this was
+   an existing item, not a random nonexistent ID.
+5. V5: Create a separate synthetic item through the work agent in its own
+   scope. Sync and check password, custom field and attachment consumption
+   through work `vault run`. Assert the expected values only inside the child.
+   Make the child print them to both output streams and verify the runner
+   still emits only status. Record cold and warm elapsed times without values;
+   reads reuse the resident client rather than logging in per command. Check
+   attachment cleanup after success, failure and timeout. Recheck work AKS
+   read-only access and organizational hooks without reenrolling Azure.
+6. V6: In a `finally` cleanup, permanently delete both synthetic items through
+   the agents that created them, not just move them to trash. Sync both agents
+   and confirm the probe IDs no longer resolve. Record only pass/fail and
+   timings. Leave both organizations free of test items and confirm homelab
+   and work remain healthy.
 
 ## Network isolation
 
@@ -144,7 +223,7 @@ refuses to run. The helper verifies the reviewed account after login. Retry
 the token request after enrollment. No live enrollment is part of the offline
 checks. Only the owner runs enrollment after reviewed merge and manual sync.
 
-There is no direct vault login, vault CLI, inherited general SSH agent or
+There is no vault login environment in T3, inherited general SSH agent or
 legacy authentication fallback. Required organizational instructions, Claude
 hooks, cc-safety-net and output redaction stay active. Policy checks use a
 credential-free environment and suppress captured output. The Azure cache,
@@ -354,7 +433,10 @@ Vault-backed keys and outbound SSH integration remain deferred.
 
 ```sh
 python3 2-k3s/13.t3code-work/tools/provision.test.py -v
+python3 2-k3s/13.t3code/env/tools/vault-client.test.py -v
+python3 2-k3s/13.t3code/env/tools/vault-startup.test.py -v
 python3 2-k3s/13.t3code/env/tools/startup.test.py -v
+python3 2-k3s/13.t3code/env/tools/image-commands.test.py -v
 python3 2-k3s/17.remote-pi/cliproxy/tools/client-backend.test.py -v
 bash -n 2-k3s/13.t3code-work/tools/owner-login.sh
 shellcheck 2-k3s/13.t3code-work/tools/owner-login.sh

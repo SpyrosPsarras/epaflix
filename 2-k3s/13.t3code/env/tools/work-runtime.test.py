@@ -103,6 +103,7 @@ class WorkRuntimeTests(unittest.TestCase):
         refresh(self.inputs)
 
     def test_work_only_hub_policies_settings_history_and_azure_persist(self):
+        os.environ['T3_VAULT_CLIENT'] = '1'
         self.prepare()
         state = self.home / '.t3/userdata'
         state.mkdir(parents=True)
@@ -264,6 +265,16 @@ class WorkRuntimeTests(unittest.TestCase):
         (self.inputs / 'work-auth.json').write_text('{}')
         with self.assertRaises(ValueError): self.validate()
 
+    def test_work_startup_rejects_every_vault_client_variable_including_empty_values(self):
+        with patch.dict(os.environ, {'T3_VAULT_CLIENT': '1'}):
+            self.validate()
+            for name in ('BW_EMAIL', 'BW_PASSWORD', 'BW_SERVER', 'BW_ORGANIZATION_ID', 'BW_COLLECTION_ID',
+                         'BW_SESSION', 'BW_CLIENTID', 'BW_CLIENTSECRET', 'BW_UNKNOWN', 'BITWARDENCLI_APPDATA_DIR'):
+                for value in ('synthetic-unapproved', ''):
+                    with self.subTest(name=name, present=bool(value)), patch.dict(os.environ, {name: value}):
+                        with self.assertRaises(ValueError):
+                            self.validate()
+
     def test_imported_home_or_azure_cache_refused_and_homelab_gate_unchanged(self):
         cache = self.home / '.azure'
         cache.mkdir()
@@ -367,7 +378,7 @@ class WorkRuntimeTests(unittest.TestCase):
             self.assertEqual(sts['spec']['persistentVolumeClaimRetentionPolicy'], {'whenDeleted': 'Retain', 'whenScaled': 'Retain'})
             self.assertFalse(pod['automountServiceAccountToken'])
             self.assertNotIn('hostPath', json.dumps(pod))
-            self.assertEqual([v['persistentVolumeClaim']['claimName'] for v in pod['volumes'] if 'persistentVolumeClaim' in v], ['t3code-home'])
+            self.assertEqual({v['persistentVolumeClaim']['claimName'] for v in pod['volumes'] if 'persistentVolumeClaim' in v}, {'t3code-home', 't3code-vault'})
             self.assertEqual({v['secret']['secretName'] for v in pod['volumes'] if 'secret' in v}, {'t3-runtime-inputs'})
             inputs = next(v for v in pod['volumes'] if v['name'] == 'inputs')
             self.assertIn({'key': 'work-auth.json', 'path': 'work-auth.json'}, inputs['secret']['items'])
