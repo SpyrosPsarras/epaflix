@@ -9,8 +9,6 @@ resources:
   - ingress.yaml
   - network-policy.yaml
   - backup.yaml
-components:
-  - org-setup
 generators:
   - ksops-generator.yaml
 configMapGenerator:
