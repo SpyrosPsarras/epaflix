@@ -1105,7 +1105,7 @@ tests:
 
   - interval: 1m
     input_series:
-      - series: 'argocd_app_info{name="argocd",namespace="argocd",project="default",repo="https://github.com/SpyrosPsarras/epaflix.git",sync_status="OutOfSync",health_status="Healthy",autosync_enabled="false"}'
+      - series: 'argocd_app_info{name="argocd",namespace="argocd",project="default",repo="https://github.com/SpyrosPsarras/epaflix.git",sync_status="OutOfSync",health_status="Healthy",autosync_enabled="true"}'
         values: "1x40"
       - series: 'argocd_app_info{name="servarr",namespace="argocd",project="default",repo="https://github.com/SpyrosPsarras/epaflix.git",sync_status="Synced",health_status="Healthy",autosync_enabled="true"}'
         values: "1x40"
@@ -1120,16 +1120,23 @@ tests:
               repo: https://github.com/SpyrosPsarras/epaflix.git
               sync_status: OutOfSync
               health_status: Healthy
-              autosync_enabled: "false"
+              autosync_enabled: "true"
               severity: warning
               component: gitops
             exp_annotations:
               summary: "ArgoCD application argocd has been OutOfSync for 30m"
-              description: "Application argocd has disagreed with git for 30m. For manual-sync Applications (argocd, system-upgrade-controller) every merged change to their git path is INERT until a human triggers the sync: kubectl --context epaflix -n argocd patch application argocd --type merge -p '{\"operation\":{\"initiatedBy\":{\"username\":\"<you>-manual\"},\"sync\":{\"revision\":\"main\",\"syncStrategy\":{\"apply\":{}}}}}'. This is how the argocd Application sat OutOfSync since 2026-06-24 while nine chart bumps and the #715/#1039 values never went live (#1050). For automated apps, selfHeal is not converging - read the app status conditions (ComparisonError) before acting."
+              description: >-
+                Application argocd has disagreed with git for 30m.
+                Automated Applications, including argocd, should self-heal.
+                Read the app status conditions (ComparisonError) and last sync
+                operation's message before acting. Manual-sync Applications
+                (no syncPolicy.automated) stay OutOfSync until someone syncs them:
+                kubectl --context epaflix -n argocd patch application argocd --type merge -p
+                '{"operation":{"initiatedBy":{"username":"<you>-manual"},"sync":{"revision":"main","syncStrategy":{"apply":{}}}}}'.
 
   - interval: 1m
     input_series:
-      - series: 'argocd_app_info{name="argocd",namespace="argocd",project="default",repo="https://github.com/SpyrosPsarras/epaflix.git",sync_status="OutOfSync",health_status="Healthy",autosync_enabled="false"}'
+      - series: 'argocd_app_info{name="argocd",namespace="argocd",project="default",repo="https://github.com/SpyrosPsarras/epaflix.git",sync_status="OutOfSync",health_status="Healthy",autosync_enabled="true"}'
         values: "1 0 1x45"  # OutOfSync at t=0, one Synced sample at t=1, OutOfSync from t=2 - the blip resets the 30m timer
     alert_rule_test:
       - eval_time: 30m
@@ -1145,12 +1152,19 @@ tests:
               repo: https://github.com/SpyrosPsarras/epaflix.git
               sync_status: OutOfSync
               health_status: Healthy
-              autosync_enabled: "false"
+              autosync_enabled: "true"
               severity: warning
               component: gitops
             exp_annotations:
               summary: "ArgoCD application argocd has been OutOfSync for 30m"
-              description: "Application argocd has disagreed with git for 30m. For manual-sync Applications (argocd, system-upgrade-controller) every merged change to their git path is INERT until a human triggers the sync: kubectl --context epaflix -n argocd patch application argocd --type merge -p '{\"operation\":{\"initiatedBy\":{\"username\":\"<you>-manual\"},\"sync\":{\"revision\":\"main\",\"syncStrategy\":{\"apply\":{}}}}}'. This is how the argocd Application sat OutOfSync since 2026-06-24 while nine chart bumps and the #715/#1039 values never went live (#1050). For automated apps, selfHeal is not converging - read the app status conditions (ComparisonError) before acting."
+              description: >-
+                Application argocd has disagreed with git for 30m.
+                Automated Applications, including argocd, should self-heal.
+                Read the app status conditions (ComparisonError) and last sync
+                operation's message before acting. Manual-sync Applications
+                (no syncPolicy.automated) stay OutOfSync until someone syncs them:
+                kubectl --context epaflix -n argocd patch application argocd --type merge -p
+                '{"operation":{"initiatedBy":{"username":"<you>-manual"},"sync":{"revision":"main","syncStrategy":{"apply":{}}}}}'.
 
   - interval: 1m
     input_series:
