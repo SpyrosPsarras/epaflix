@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -63,6 +64,37 @@ class ImageCommandTests(unittest.TestCase):
                                         f'{variant} image lacks vault required by {container["name"]}')
                         self.assertTrue((image / 'bw').is_file(),
                                         f'{variant} image lacks bw required by vault serve')
+
+    @unittest.skipIf(os.geteuid() == 0, 'Smoke staging permission check needs an unprivileged user')
+    def test_isolated_smoke_stages_each_variants_guide_without_overwriting_readonly_files(self):
+        smoke = (ROOT / 'env/tools/isolated-smoke.sh').read_text()
+        staging = smoke.split("python3 - <<'PY'\n", 1)[1].split('\nPY\n', 1)[0]
+        homelab = ROOT.parent / '13.t3code-homelab/files'
+        for variant, guide in (('homelab', homelab / 'homelab-ssh.md'),
+                               ('work', ROOT / 'env/files/isolated-ssh.md')):
+            with self.subTest(variant=variant), tempfile.TemporaryDirectory() as temporary:
+                scripts = Path(temporary)
+                code = staging
+                for source, destination in (('/src', ROOT), ('/scripts', scripts),
+                                            ('/homelab-src/files', homelab),
+                                            ('/scripts/work-aks-auth.py', scripts / 'work-aks-auth.py')):
+                    code = code.replace(repr(source), repr(str(destination)))
+                result = subprocess.run([sys.executable, '-c', code],
+                    env={**os.environ, 'MCP_HUB_INSTANCE': variant}, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual((scripts / 'homelab-ssh.md').read_bytes(), guide.read_bytes())
+                for script in scripts.iterdir():
+                    self.assertEqual(script.stat().st_mode & 0o777, 0o555, script.name)
+                if variant == 'homelab':
+                    self.assertEqual((scripts / 'ssh-config.sh').read_bytes(),
+                                     (homelab / 'ssh-config.sh').read_bytes())
+                    self.assertTrue((scripts / 'ssh-agent-ready.sh').is_file())
+                    self.assertFalse((scripts / 'work-aks-auth.py').exists())
+                else:
+                    self.assertEqual((scripts / 'work-aks-auth.py').read_bytes(),
+                                     (ROOT / 'env/files/work-aks-auth.py').read_bytes())
+                    self.assertFalse((scripts / 'ssh-config.sh').exists())
+                    self.assertFalse((scripts / 'homelab-ssh.conf').exists())
 
 
 if __name__ == '__main__':
