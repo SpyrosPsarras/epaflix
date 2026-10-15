@@ -96,8 +96,7 @@ python3 2-k3s/13.t3code-homelab/tools/sync-rbac.py
 kustomize build 2-k3s/13.t3code-homelab/rbac >/dev/null
 ```
 
-The kubeconfig grants no network isolation. Do not use other services to bypass
-its read boundary.
+See [network policies and post-merge checks](../13.t3code/env/network-isolation.md).
 
 ## Provisioning
 
@@ -143,7 +142,7 @@ is no manual digest-copying or separate approval-reference ceremony. Startup
 still rejects wrong environments, extra inputs, changed grants, unsafe
 kubeconfigs, missing policies, foreign homes and cloud caches. The instructions
 in `instructions.md` retain the public-repository and organizational rules.
-This configuration does not claim administrator or network isolation.
+Input validation does not replace API RBAC or network policy.
 
 Secret changes alone do not restart this `OnDelete` StatefulSet. Follow the
 shared [input rotation procedure](../13.t3code/env/isolated-runtime.md#input-rotation)
