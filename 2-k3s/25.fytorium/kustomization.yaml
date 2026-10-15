@@ -16,4 +16,4 @@ generators:
 images:
   # Built by source CI; bump SERVER_VERSION in deployment.yaml with this digest.
   - name: ghcr.io/spyrospsarras/epaflix-fytorium
-    digest: sha256:9aa09b45a666fc12ae0d2b109414dba6109cf28a282b5a4a9afd690a1d550395
+    digest: sha256:771bdbffee00b514e76a3c7d5a80decac649a129cc5284d79085f24c188a0bae
