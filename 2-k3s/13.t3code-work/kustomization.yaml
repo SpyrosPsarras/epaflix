@@ -10,3 +10,4 @@ resources:
   - statefulset.yaml
   - storage.yaml
   - service.yaml
+  - network-policy.yaml

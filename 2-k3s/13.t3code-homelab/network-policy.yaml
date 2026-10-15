@@ -1,0 +1,112 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress: []
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: t3code-control-plane
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - to:
+        - ipBlock: {cidr: 10.0.0.51/32}
+        - ipBlock: {cidr: 10.0.0.52/32}
+        - ipBlock: {cidr: 10.0.0.53/32}
+      ports:
+        - {protocol: TCP, port: 6443}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: t3code-runtime
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: t3code
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - {protocol: TCP, port: 2222}
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: remote-pi
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: cliproxy
+      ports:
+        - {protocol: TCP, port: 8317}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: mcp-hub-homelab
+          podSelector:
+            matchLabels:
+              app: mcp-hub
+      ports:
+        - {protocol: TCP, port: 8000}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - {protocol: TCP, port: 8443}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 0.0.0.0/8
+              - 10.0.0.0/8
+              - 100.64.0.0/10
+              - 127.0.0.0/8
+              - 169.254.0.0/16
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 224.0.0.0/4
+              - 240.0.0.0/4
+    - to:
+        - ipBlock: {cidr: 192.168.10.10/32}
+        - ipBlock: {cidr: 192.168.10.11/32}
+        - ipBlock: {cidr: 192.168.10.21/32}
+        - ipBlock: {cidr: 192.168.10.30/32}
+        - ipBlock: {cidr: 192.168.10.31/32}
+        - ipBlock: {cidr: 192.168.10.40/32}
+        - ipBlock: {cidr: 192.168.10.41/32}
+        - ipBlock: {cidr: 192.168.10.51/32}
+        - ipBlock: {cidr: 192.168.10.52/32}
+        - ipBlock: {cidr: 192.168.10.53/32}
+        - ipBlock: {cidr: 192.168.10.61/32}
+        - ipBlock: {cidr: 192.168.10.62/32}
+        - ipBlock: {cidr: 192.168.10.63/32}
+        - ipBlock: {cidr: 192.168.10.65/32}
+        - ipBlock: {cidr: 192.168.10.109/32}
+        - ipBlock: {cidr: 192.168.10.112/32}
+        - ipBlock: {cidr: 192.168.10.177/32}
+        - ipBlock: {cidr: 192.168.10.200/32}
+      ports:
+        - {protocol: TCP, port: 22}
