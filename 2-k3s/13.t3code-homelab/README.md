@@ -8,7 +8,7 @@ requires manual sync and cannot start without approved private inputs.
 The sibling layout lets this overlay consume the `13.t3code` Kustomize
 component without copying shared scripts or relaxing Kustomize's file loader.
 The component shares the maintained safety installer, package setup, hub
-client generator, SSH launcher workaround and update jobs. Its entrypoint,
+client generator and update jobs. Its entrypoint,
 Pi launcher and SSH server use the isolated-runtime paths. This is the small
 pattern also used by the sibling [work backend](../13.t3code-work/README.md),
 without adding its authentication helper or credentials to homelab.
@@ -264,7 +264,7 @@ keys stay on the laptop. Vault-backed key integration remains disabled.
    `t3 pair --help`; repeated `--scope` flags replace the default scope set. Enter it privately in the application, never in
    issue evidence. Name the environment `homelab`; retain the mixed entry.
    Selecting this URL connects to this backend's own state. The SSH launcher
-   workaround and discovery record also remain available for an approved
+   discovery record also remains available for an approved
    T3 SSH-target connection, but this helper deliberately uses `ssh -F` so
    the laptop's broader SSH configuration cannot override it.
 
