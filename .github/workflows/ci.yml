@@ -331,6 +331,8 @@ jobs:
           python3 2-k3s/13.t3code/env/tools/work-runtime.test.py -v
           python3 2-k3s/13.t3code/env/tools/work-aks-auth.test.py -v
           python3 2-k3s/13.t3code-homelab/tools/inputs.test.py -v
+          python3 2-k3s/13.t3code/env/tools/vault-client.test.py -v
+          python3 2-k3s/13.t3code/env/tools/vault-startup.test.py -v
           python3 2-k3s/13.t3code-homelab/tools/rbac.test.py -v
           python3 2-k3s/13.t3code-homelab/tools/github-scope.test.py -v
           python3 2-k3s/13.t3code-work/tools/provision.test.py -v
@@ -349,6 +351,12 @@ jobs:
           python3 2-k3s/13.t3code/one/files/vault-run.test.py
           python3 2-k3s/13.t3code/one/files/idle-rollout.test.py
           python3 1-proxmox/ssh/gen-homelab-ssh.test.py
+
+      - name: T3 vault UID isolation (root)
+        run: |
+          sudo -n env "PYTHONPATH=$(python3 -c 'import pathlib, yaml; print(pathlib.Path(yaml.__file__).resolve().parent.parent)')" \
+            "$(command -v python3)" 2-k3s/13.t3code/env/tools/startup.test.py \
+            StartupTest.test_uid_1000_cannot_read_uid_1001_environ_or_persistent_data -v
 
       - name: MCP hub selftest
         run: |
