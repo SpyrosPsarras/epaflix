@@ -18,8 +18,6 @@ class StartupTest(unittest.TestCase):
             spec = sts['spec']['template']['spec']
             containers = {container['name']: container for container in spec['containers']}
             self.assertEqual(containers['t3']['command'], ['bash', '/scripts/entrypoint.sh'])
-            if variant == 'work':
-                self.assertNotIn('vault', containers)
             for name, container in containers.items():
                 env = {entry['name']: entry for entry in container.get('env', [])}
                 bw = {key: entry for key, entry in env.items() if key.startswith(('BW_', 'BITWARDENCLI_'))}
@@ -55,21 +53,23 @@ class StartupTest(unittest.TestCase):
                 for entry in init.get('env', []):
                     self.assertFalse(entry['name'].startswith(('BW_', 'BITWARDENCLI_')))
                     self.assertNotEqual(entry.get('valueFrom', {}).get('secretKeyRef', {}).get('name'), 'vaultwarden-agent')
-            if variant == 'homelab':
-                self.assertIn('vault', containers)
-                scope = next(mount for mount in containers['t3']['volumeMounts'] if mount['name'] == 'vault-scope')
-                self.assertTrue(scope['readOnly'])
-                self.assertNotIn('vault-scope', {mount['name'] for mount in containers['sshd']['volumeMounts']})
-                vault_volume = next(volume for volume in spec['volumes'] if volume['name'] == 'vault-data')
-                self.assertEqual(vault_volume['persistentVolumeClaim']['claimName'], 't3code-vault')
-                pvc = next(doc for doc in docs if doc and doc['kind'] == 'PersistentVolumeClaim' and doc['metadata']['name'] == 't3code-vault')
-                self.assertEqual(pvc['metadata']['annotations']['argocd.argoproj.io/sync-options'], 'Prune=false,Delete=false')
-                init = next(container for container in spec['initContainers'] if container['name'] == 'vault-storage')
-                self.assertEqual(init['securityContext']['runAsUser'], 0)
-                self.assertEqual(set(init['securityContext']['capabilities']['add']), {'CHOWN'})
-                self.assertEqual(init['image'], containers['vault']['image'])
-                self.assertEqual(containers['vault']['image'], containers['t3']['image'])
-                self.assertFalse(any(volume.get('secret', {}).get('secretName') == 'vaultwarden-agent' for volume in spec['volumes']))
+            self.assertIn('vault', containers)
+            self.assertIn({'name': 'T3_VAULT_CLIENT', 'value': '1'}, containers['t3']['env'])
+            scope = next(mount for mount in containers['t3']['volumeMounts'] if mount['name'] == 'vault-scope')
+            self.assertTrue(scope['readOnly'])
+            self.assertNotIn('vault-scope', {mount['name'] for mount in containers['sshd']['volumeMounts']})
+            vault_volume = next(volume for volume in spec['volumes'] if volume['name'] == 'vault-data')
+            self.assertEqual(vault_volume['persistentVolumeClaim']['claimName'], 't3code-vault')
+            pvc = next(doc for doc in docs if doc and doc['kind'] == 'PersistentVolumeClaim' and doc['metadata']['name'] == 't3code-vault')
+            self.assertEqual(pvc['metadata']['namespace'], f't3code-{variant}')
+            self.assertEqual(pvc['spec']['resources']['requests']['storage'], '1Gi')
+            self.assertEqual(pvc['metadata']['annotations']['argocd.argoproj.io/sync-options'], 'Prune=false,Delete=false')
+            init = next(container for container in spec['initContainers'] if container['name'] == 'vault-storage')
+            self.assertEqual(init['securityContext']['runAsUser'], 0)
+            self.assertEqual(set(init['securityContext']['capabilities']['add']), {'CHOWN'})
+            self.assertEqual(init['image'], containers['vault']['image'])
+            self.assertEqual(containers['vault']['image'], containers['t3']['image'])
+            self.assertFalse(any(volume.get('secret', {}).get('secretName') == 'vaultwarden-agent' for volume in spec['volumes']))
 
     @unittest.skipUnless(os.geteuid() == 0, 'Two-UID check needs root; non-root runs still verify the rendered isolation')
     def test_uid_1000_cannot_read_uid_1001_environ_or_persistent_data(self):

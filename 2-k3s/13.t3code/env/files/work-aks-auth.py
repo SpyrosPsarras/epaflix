@@ -98,7 +98,8 @@ def validate(inputs, kube=None):
 
 
 def environment(home):
-    if any(os.environ.get(name) for name in ('AZURE_CONFIG_DIR', 'SSH_AUTH_SOCK', 'BW_SESSION', 'BW_CLIENTID', 'BW_CLIENTSECRET')):
+    if any(os.environ.get(name) for name in ('AZURE_CONFIG_DIR', 'SSH_AUTH_SOCK')) or any(
+            name.startswith(('BW_', 'BITWARDENCLI_')) for name in os.environ):
         raise AuthError('Inherited credential environments are forbidden')
     marker = home / '.config/t3-runtime/environment'
     if not marker.is_file() or marker.read_text() != 'work\n':

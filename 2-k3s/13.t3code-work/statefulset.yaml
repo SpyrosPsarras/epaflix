@@ -55,9 +55,26 @@ spec:
               mountPath: /home/t3
             - name: runtime-state
               mountPath: /runtime-state
+        - name: vault-storage
+          image: t3-runtime-from-t3-container
+          command: [bash, -ec, "chown 0:0 /vault /run/t3-vault; chmod 00700 /vault; mkdir -p /vault/client; chown 0:0 /vault/client; chmod 00700 /vault/client; chmod 00755 /run/t3-vault; chown 1001:1001 /vault/client /run/t3-vault; chown 1001:1001 /vault"]
+          securityContext:
+            runAsNonRoot: false
+            runAsUser: 0
+            runAsGroup: 0
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+              add: [CHOWN]
+          volumeMounts:
+            - name: vault-data
+              mountPath: /vault
+            - name: vault-scope
+              mountPath: /run/t3-vault
       containers:
         - name: t3
-          image: ghcr.io/spyrospsarras/t3-runtime:work-inputs-9b0a1e0d731939e37cefa6ec5a25d22f
+          image: ghcr.io/spyrospsarras/t3-runtime:work-inputs-30f860a8118e766c1776ac232f482105
           imagePullPolicy: IfNotPresent
           command: [bash, /scripts/entrypoint.sh]
           env:
@@ -79,6 +96,8 @@ spec:
                 secretKeyRef:
                   name: t3-runtime-grants
                   key: hub-token
+            - name: T3_VAULT_CLIENT
+              value: "1"
             - name: GITHUB_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -106,6 +125,9 @@ spec:
               readOnly: true
             - name: tmp
               mountPath: /tmp
+            - name: vault-scope
+              mountPath: /run/t3-vault
+              readOnly: true
           startupProbe:
             httpGet:
               path: /health
@@ -172,7 +194,77 @@ spec:
               memory: 32Mi
             limits:
               memory: 8Gi
+        - name: vault
+          image: t3-runtime-from-t3-container
+          imagePullPolicy: IfNotPresent
+          command: [vault, serve]
+          workingDir: /vault
+          env:
+            - name: HOME
+              value: /vault
+            - name: BW_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: vaultwarden-agent
+                  key: BW_EMAIL
+            - name: BW_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: vaultwarden-agent
+                  key: BW_PASSWORD
+            - name: BW_SERVER
+              valueFrom:
+                secretKeyRef:
+                  name: vaultwarden-agent
+                  key: BW_SERVER
+            - name: BW_ORGANIZATION_ID
+              valueFrom:
+                secretKeyRef:
+                  name: vaultwarden-agent
+                  key: BW_ORGANIZATION_ID
+            - name: BW_COLLECTION_ID
+              valueFrom:
+                secretKeyRef:
+                  name: vaultwarden-agent
+                  key: BW_COLLECTION_ID
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 1001
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: vault-data
+              mountPath: /vault
+            - name: vault-scope
+              mountPath: /run/t3-vault
+            - name: vault-tmp
+              mountPath: /tmp
+          startupProbe:
+            exec:
+              command: [test, -f, /run/t3-vault/scope.json]
+            periodSeconds: 5
+            failureThreshold: 120
+          readinessProbe:
+            exec:
+              command: [test, -f, /run/t3-vault/scope.json]
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 768Mi
       volumes:
+        - name: vault-data
+          persistentVolumeClaim:
+            claimName: t3code-vault
+        - name: vault-scope
+          emptyDir: {}
+        - name: vault-tmp
+          emptyDir: {}
         - name: home
           persistentVolumeClaim:
             claimName: t3code-home

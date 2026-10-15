@@ -23,7 +23,6 @@ RUN bash /tmp/cluster-tools/install-cluster-tools.sh
 COPY env/tools/package.json env/tools/package-lock.json /tools/
 # npm 11 drops T3's bundled native package on glibc; npm 10 installs it correctly.
 RUN cd /tools && npx --yes npm@10.9.4 ci --no-fund --no-audit \
-    && if [ "$T3_RUNTIME_VARIANT" = work ]; then npx --yes npm@10.9.4 uninstall --ignore-scripts --no-fund --no-audit @bitwarden/cli; fi \
     && npm cache clean --force
 # Run the native server directly so container TERM reaches it without a CLI shim.
 RUN ln -sf "../@t3code/t3-$(node -p process.platform)-$(node -p process.arch)/t3" /tools/node_modules/.bin/t3
@@ -35,7 +34,7 @@ RUN if [ "$T3_RUNTIME_VARIANT" = homelab ]; then \
       && install -m 0555 /tmp/restricted-helper/vault-restricted.sh /usr/local/bin/vault-restricted; \
     fi && rm -rf /tmp/restricted-helper
 COPY env/files/vault-client.py /tmp/vault-client.py
-RUN if [ "$T3_RUNTIME_VARIANT" = homelab ]; then install -m 0555 /tmp/vault-client.py /usr/local/bin/vault; fi \
+RUN if [ "$T3_RUNTIME_VARIANT" = homelab ] || [ "$T3_RUNTIME_VARIANT" = work ]; then install -m 0555 /tmp/vault-client.py /usr/local/bin/vault; fi \
     && rm /tmp/vault-client.py
 ENV HOME=/home/t3
 RUN mkdir -p /home/t3 && chown 1000:1000 /home/t3 \

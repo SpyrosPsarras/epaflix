@@ -59,7 +59,7 @@ PY
 mkdir -p /tmp/inventory-home
 HOME=/tmp/inventory-home bash /src/env/tools/inventory.sh
 mkdir -p /tmp/forbidden-bin
-if [[ $variant == homelab ]]; then forbidden_tools=(az kubelogin); else forbidden_tools=(bw kubelogin); fi
+if [[ $variant == homelab ]]; then forbidden_tools=(az kubelogin); else forbidden_tools=(kubelogin); fi
 for tool in "${forbidden_tools[@]}"; do
   printf '#!/bin/sh\nexit 0\n' >"/tmp/forbidden-bin/$tool"
   chmod 0755 "/tmp/forbidden-bin/$tool"

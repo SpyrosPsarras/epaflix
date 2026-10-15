@@ -21,6 +21,7 @@ import json, os, pathlib, sys, time
 home = pathlib.Path(os.environ['HOME'])
 assert os.environ['AZURE_CONFIG_DIR'] == str(home / '.azure')
 assert not any(name in os.environ for name in ('MCP_HUB_TOKEN', 'ANTHROPIC_AUTH_TOKEN', 'SSH_AUTH_SOCK', 'AZURE_CLIENT_SECRET'))
+assert not any(name.startswith(('BW_', 'BITWARDENCLI_', 'VAULT_')) for name in os.environ)
 args = sys.argv[1:]
 with (home / 'calls').open('a') as stream:
     stream.write(json.dumps(args) + '\\n')
@@ -209,6 +210,19 @@ class WorkAuthTests(unittest.TestCase):
         with self.assertRaises(auth.AuthError): self.run_token()
         (self.inputs / 'work-auth.json').unlink()
         with self.assertRaises(FileNotFoundError): self.run_token()
+        self.assertEqual(self.calls(), [])
+
+    def test_vault_runner_environment_keeps_work_auth_without_forwarding_values(self):
+        with patch.dict(os.environ, {'T3_VAULT_CLIENT': '1', 'VAULT_PASSWORD': 'synthetic-work-password'}):
+            self.assertEqual(self.run_token()['kind'], 'ExecCredential')
+
+    def test_every_vault_client_variable_is_refused_including_empty_values(self):
+        for name in ('BW_EMAIL', 'BW_PASSWORD', 'BW_SERVER', 'BW_ORGANIZATION_ID', 'BW_COLLECTION_ID',
+                     'BW_SESSION', 'BW_CLIENTID', 'BW_CLIENTSECRET', 'BW_UNKNOWN', 'BITWARDENCLI_APPDATA_DIR'):
+            for value in ('synthetic-unapproved', ''):
+                with self.subTest(name=name, present=bool(value)), patch.dict(os.environ, {name: value}):
+                    with self.assertRaises(auth.AuthError):
+                        self.run_token()
         self.assertEqual(self.calls(), [])
 
     def test_foreign_home_cache_environment_and_actions_refused(self):
