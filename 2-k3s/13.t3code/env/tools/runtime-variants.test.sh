@@ -17,7 +17,7 @@ work=$(bash "$tools/runtime-tag.sh" work)
 if bash "$tools/runtime-tag.sh" invalid; then exit 1; fi
 for input in env/Dockerfile env/Dockerfile.dockerignore env/tools/os-packages.txt \
     env/tools/install-cluster-tools.sh env/tools/package.json env/tools/package-lock.json \
-    one/files/vault-restricted.py one/files/hub_services.py env/files/vault-restricted.sh versions.env; do
+    one/files/vault-restricted.py one/files/hub_services.py env/files/vault-restricted.sh env/files/vault-client.py versions.env; do
   printf '\n' >>"$tmp/2-k3s/13.t3code/$input"
   next_mixed=$(bash "$tools/runtime-tag.sh" mixed)
   next_homelab=$(bash "$tools/runtime-tag.sh" homelab)

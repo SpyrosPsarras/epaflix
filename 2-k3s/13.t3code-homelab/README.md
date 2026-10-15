@@ -7,10 +7,73 @@ cloud caches are imported.
 
 The shared `13.t3code` component supplies the maintained installer, provider
 setup, hub clients, image-prepull and idle-rollout jobs. The
-homelab image excludes Azure CLI, kubelogin and the raw vault CLI. The runtime
-uses only the homelab hub. Its restricted vault helper holds an ordinary hub
-client token, not a vault login. See the
-[hub private-input contract](../23.mcp-hub/instances/README.md).
+homelab image excludes Azure CLI and kubelogin. Its MCP clients use only the
+homelab hub. See the [hub private-input contract](../23.mcp-hub/instances/README.md).
+
+## Runtime vault reads
+
+Use the image's `vault` runner to read a password, custom field or attachment
+without exposing its value to the model:
+
+```sh
+vault run --name "$ITEM_NAME" --password-env VAULT_PASSWORD \
+  --field 'api-key=VAULT_API_KEY' --attachment credentials.json \
+  --attachment-env VAULT_FILE -- python3 /private/consume.py
+```
+
+Use `--item "$ITEM_ID"` instead of `--name` for an exact ID. Names and attachment
+names must match exactly and be unique in the approved scope. Target environment
+names must start with `VAULT_`. `--timeout` defaults to 120 seconds and accepts
+0.1 through 120 seconds. The child receives the selected values and an attachment
+path, never the vault login or session. Attachments use a 0600 file in a 0700
+temporary directory. Success, failure, timeout and SIGTERM remove the directory
+and kill remaining child processes. The runner discards child stdin, stdout and
+stderr and prints only status and an exit code. Exact-value redaction would miss
+encoded or transformed secrets, so use child exit codes rather than logs to
+check success.
+
+The unpatched `@bitwarden/cli` is pinned to 2026.8.0. `bw serve` supports
+attachments and organization writes needed by later provisioning, unlike `rbw`.
+Disposable Vaultwarden 1.37.3 measurements were 23 ms for a warm password,
+18 ms for a field and 103 ms for an attachment. Start, unlock and first read took
+9.8 s with cached login data, versus 25.0 s from a fresh home. RSS was about
+195 MiB. These are client measurements, not a live deployment acceptance result.
+
+Only the UID-1001 `vault` sidecar receives the five `BW_*` keys from the
+namespace's `vaultwarden-agent` Secret. T3 and sshd remain UID 1000 with no vault
+Secret or client-data mount, so they cannot read the sidecar's process
+environments or cache through `/proc`. T3 startup rejects every `BW_*` and
+`BITWARDENCLI_*` variable, including empty ones. The sidecar uses a read-only
+root filesystem and its own temporary volume. A storage init container restores
+UID-1001 ownership and mode 0700 on the retained 1 GiB PVC root and client
+directory before each pod start, explicitly clearing setgid after fsGroup
+permission changes. It takes ownership as root before chmod, then transfers it
+to UID 1001, so its only added capability is CHOWN. CI runs the two-UID process
+and cache permission test as root through sudo. Encrypted client data persists
+under `/vault/client`; it is not part of the T3 home.
+
+The sidecar refuses a cached account or server mismatch. The owner login must
+never be provisioned here. Login and unlock use `--passwordenv`; the session
+stays in the separate-UID client's environment. Startup makes at most three
+attempts and bounds each CLI command to 45 seconds. After the client is ready,
+three consecutive status failures remove its published scope and stop the
+sidecar for a kubelet restart. A successful check resets the count. T3 keeps
+running independently and its normal input preparation runs only once. CLI
+diagnostics never enter pod logs.
+
+The sidecar publishes only the runtime variant, organization ID and collection
+ID in `/run/t3-vault/scope.json`, mounted read-only in T3. The runner requires
+both IDs to match each selected item. Foreign and nonexistent IDs fail without
+running the child. Requests bypass HTTP proxies and redirects. The API binds
+only `127.0.0.1:8087`; there is no Service or container port for it, and sshd
+permits forwarding only to 3773.
+
+The local API has no authentication. A deliberate command in any pod container
+can read homelab items through it. `vault run` is the sanctioned path that
+suppresses secret output; like the old restricted helper, it does not prevent
+deliberate exfiltration. Work-organization isolation relies on the agent-account
+setup in #1838. The old restricted helper and reader remain unchanged until
+their separate retirement.
 
 ## Scoped Kubernetes access
 
@@ -293,6 +356,8 @@ Run these offline checks from the repository root:
 
 ```sh
 python3 2-k3s/13.t3code-homelab/tools/inputs.test.py -v
+python3 2-k3s/13.t3code/env/tools/vault-client.test.py -v
+python3 2-k3s/13.t3code/env/tools/vault-startup.test.py -v
 python3 2-k3s/13.t3code/env/tools/startup.test.py -v
 python3 2-k3s/13.t3code-homelab/tools/rbac.test.py -v
 python3 2-k3s/13.t3code-homelab/tools/github-scope.test.py -v

@@ -144,6 +144,16 @@ class RuntimeTests(unittest.TestCase):
                 runtime.prepare(self.inputs, self.home, 'homelab')
             self.assertFalse(snapshot.exists())
 
+    def test_t3_rejects_every_vault_client_variable_including_empty_values(self):
+        with patch.dict(os.environ, {'T3_VAULT_CLIENT': '1'}):
+            self.validate()
+            for name in ('BW_EMAIL', 'BW_PASSWORD', 'BW_SERVER', 'BW_ORGANIZATION_ID', 'BW_COLLECTION_ID',
+                         'BW_SESSION', 'BW_CLIENTID', 'BW_CLIENTSECRET', 'BW_UNKNOWN', 'BITWARDENCLI_APPDATA_DIR'):
+                for value in ('synthetic-unapproved', ''):
+                    with self.subTest(name=name, present=bool(value)), patch.dict(os.environ, {name: value}):
+                        with self.assertRaises(ValueError):
+                            self.validate()
+
     def test_clean_home_policies_hub_and_provider_state_survive_restart(self):
         self.validate()
         self.prepare()
@@ -617,7 +627,7 @@ nested = {"🏠" = ["fixture", {enabled = false}]}
             spec = sts['spec']['template']['spec']
             self.assertEqual(sts['spec']['updateStrategy']['type'], 'OnDelete')
             self.assertFalse(spec['automountServiceAccountToken'])
-            self.assertEqual([v['persistentVolumeClaim']['claimName'] for v in spec['volumes'] if 'persistentVolumeClaim' in v], ['t3code-home'])
+            self.assertEqual({v['persistentVolumeClaim']['claimName'] for v in spec['volumes'] if 'persistentVolumeClaim' in v}, {'t3code-home', 't3code-vault'})
             self.assertNotIn('hostPath', json.dumps(spec))
             self.assertEqual({v['secret']['secretName'] for v in spec['volumes'] if 'secret' in v}, {'t3-runtime-inputs'})
             image = spec['containers'][0]['image']
