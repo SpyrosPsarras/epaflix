@@ -757,6 +757,39 @@ spec:
               Torznab feed URLs with an apikey parameter. If it is a new offender treat that credential as exposed and rotate
               it. Do NOT grep Loki for the literal value.
 
+    - name: kube-statefulset-rollout
+      rules:
+        # t3code uses OnDelete; its idle-rollout CronJob waits for 30 idle minutes.
+        # Keep the chart 92.3.1 rule unchanged except for those StatefulSets.
+        - alert: KubeStatefulSetUpdateNotRolledOut
+          expr: |
+            (
+              max by (namespace, statefulset, job, cluster) (
+                kube_statefulset_status_current_revision{job="kube-state-metrics", namespace=~".*"}
+                  unless
+                kube_statefulset_status_update_revision{job="kube-state-metrics", namespace=~".*"}
+              )
+                * on (namespace, statefulset, job, cluster)
+              (
+                kube_statefulset_replicas{job="kube-state-metrics", namespace=~".*"}
+                  !=
+                kube_statefulset_status_replicas_updated{job="kube-state-metrics", namespace=~".*"}
+              )
+            )  and on (namespace, statefulset, job, cluster) (
+              changes(kube_statefulset_status_replicas_updated{job="kube-state-metrics", namespace=~".*"}[5m])
+                ==
+              0
+            )
+            unless on (namespace, statefulset)
+            kube_statefulset_replicas{namespace=~"t3code|t3code-homelab|t3code-work", statefulset="t3code"}
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            description: "StatefulSet {{ $labels.namespace }}/{{ $labels.statefulset }} update has not been rolled out on cluster {{ $labels.cluster }}."
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubestatefulsetupdatenotrolledout
+            summary: "StatefulSet update has not been rolled out."
+
     - name: kube-job-failed-last-run
       interval: 60s
       rules:
