@@ -1,14 +1,16 @@
--- Boot guard: pin lingarr's AI provider to cliproxy-free -> OpenRouter's free
--- router. Runs from the enforce-db-invariants initContainer psql flow (see
--- lingarr.yaml); same rationale as #925 - these
+-- Boot guard: pin lingarr's AI provider to the main cliproxy's Antigravity
+-- OAuth account (Google AI Plus). Runs from the enforce-db-invariants
+-- initContainer psql flow (see lingarr.yaml); same rationale as #925 - these
 -- settings are live-only DB state otherwise, and a rebuild or a stray UI edit
 -- silently repoints translations at whatever the UI last left behind.
 --
--- cliproxy-free (17.remote-pi/cliproxy-free) is a dedicated proxy whose whole
--- catalog is one alias for openrouter/free. There is NO failover to ollama or
--- to any paid model: a free-tier 429 is a failed translation that lingarr
--- retries client-side (max_retries, retry_delay). That is the requirement, not
--- a gap. lingarr keeps ONE service, endpoint and model.
+-- lingarr uses only gemini-3.8-flash-high from the main cliproxy's Antigravity
+-- account, with no fallback. Quota exhaustion returns 429s that lingarr retries
+-- client-side (max_retries, retry_delay). lingarr keeps ONE service, endpoint
+-- and model.
+-- The Lingarr key must be in main cliproxy's live api-keys list via the
+-- management API (not git-durable); a 401 on every translation means the key
+-- is missing.
 --
 -- Secret handling copies reconcile-config.psql in 17.remote-pi/cliproxy: the
 -- key is read from the environment and echoed nowhere, so a failing statement
@@ -48,14 +50,11 @@ BEGIN
   -- directly and treats a trailing ".../completions" as its chat-API switch.
   -- Cluster-internal name, not the traefik one: no TLS hop, no ingress
   -- dependency, and it still works when the LAN-facing path does not.
-  INSERT INTO settings (key, value) VALUES ('local_ai_endpoint', 'http://cliproxy-free.remote-pi.svc.cluster.local:8317/v1/chat/completions')
+  INSERT INTO settings (key, value) VALUES ('local_ai_endpoint', 'http://cliproxy.remote-pi.svc.cluster.local:8317/v1/chat/completions')
    ON CONFLICT (key) DO UPDATE SET value = excluded.value;
 
-  -- The one model lingarr may use, and the only one cliproxy-free serves:
-  -- or-free, OpenRouter's free router (openrouter/free). OpenRouter picks a
-  -- currently-available free model per request. 429 bursts from the shared
-  -- free tier are normal and lingarr retries them client-side.
-  INSERT INTO settings (key, value) VALUES ('local_ai_model', 'or-free')
+  -- The one model lingarr may use, served by the Antigravity OAuth account.
+  INSERT INTO settings (key, value) VALUES ('local_ai_model', 'gemini-3.8-flash-high')
    ON CONFLICT (key) DO UPDATE SET value = excluded.value;
 
   -- The previous ollama-era template carried ollama-only body fields
@@ -90,8 +89,8 @@ BEGIN
   SELECT count(*) INTO n
     FROM settings
    WHERE (key = 'local_ai_endpoint'
-          AND value = 'http://cliproxy-free.remote-pi.svc.cluster.local:8317/v1/chat/completions')
-      OR (key = 'local_ai_model'    AND value = 'or-free')
+          AND value = 'http://cliproxy.remote-pi.svc.cluster.local:8317/v1/chat/completions')
+      OR (key = 'local_ai_model'    AND value = 'gemini-3.8-flash-high')
       OR (key = 'local_ai_chat_request_template' AND value = '')
       OR (key = 'service_type'      AND value = '["localai"]')
       OR (key = 'local_ai_api_key'  AND value = current_setting('lingarr.cliproxy_key'));
@@ -100,6 +99,6 @@ BEGIN
     RAISE EXCEPTION 'AI provider pins incomplete: % of 5 settings hold the wanted values', n;
   END IF;
 
-  RAISE NOTICE 'AI provider pinned: cliproxy-free -> OpenRouter free router (or-free)';
+  RAISE NOTICE 'AI provider pinned: main cliproxy -> Antigravity (gemini-3.8-flash-high)';
 END
 $$;
