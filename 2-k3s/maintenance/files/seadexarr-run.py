@@ -17,6 +17,7 @@ import logging
 import os
 import sys
 
+from seadex import SeaDexEntry
 from seadexarr import SeaDexSonarr
 
 WORK = "/work"
@@ -60,11 +61,14 @@ def main():
         json.dump(config, f)
 
     sds = SeaDexSonarr(config="config.yml", cache="cache.json")
+    sds.seadex = SeaDexEntry(base_url="https://seadex.moe")
     errors = ErrorCount()
     sds.logger.addHandler(errors)
 
-    # ponytail: relies on SeaDexArr 1.0.0 internals (get_all_sonarr_series,
-    # torrent_tags, torrents_added); the CronJob pins that version.
+    # ponytail: relies on SeaDexArr 1.0.0 internals (seadex,
+    # get_all_sonarr_series, torrent_tags, torrents_added); the CronJob pins it.
+    # SeaDex moved to seadex.moe; seadex 0.7.2 hardcodes releases.moe.
+    # Drop the client override once upstream ships the new domain.
     series = [s for s in sds.get_all_sonarr_series() if wanted(s)]
     print("%d ended anime series with missing episodes: %s"
           % (len(series), ", ".join(s.title for s in series) or "-"))
