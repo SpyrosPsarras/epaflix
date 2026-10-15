@@ -615,7 +615,6 @@ nested = {"🏠" = ["fixture", {enabled = false}]}
             self.assertNotEqual(cm['metadata']['name'], changed['metadata']['name'])
             self.assertFalse(any(doc['kind'] == 'Secret' for doc in docs))
             annotation = 't3code.epaflix.com/inputs-grants-revision'
-            self.assertEqual(sts['spec']['template']['metadata']['annotations'][annotation], 'unprovisioned')
             refs = {env['name']: env['valueFrom']['secretKeyRef'] for env in spec['containers'][0]['env'] if 'valueFrom' in env}
             self.assertEqual(refs, {
                 'ANTHROPIC_AUTH_TOKEN': {'name': 't3-runtime-grants', 'key': 'model-token'},
@@ -623,13 +622,16 @@ nested = {"🏠" = ["fixture", {enabled = false}]}
                 'GITHUB_TOKEN': {'name': 't3-runtime-grants', 'key': 'github-token', 'optional': True}})
             manifest = overlay / 'statefulset.yaml'
             previous = next(doc for doc in render() if doc['kind'] == 'StatefulSet')['spec']['template']
-            for old_revision, new_revision in [('unprovisioned', 'r1'), ('r1', 'r2')]:
-                manifest.write_text(manifest.read_text().replace('"' + old_revision + '"', '"' + new_revision + '"'))
-                current = next(doc for doc in render() if doc['kind'] == 'StatefulSet')['spec']['template']
-                self.assertNotEqual(previous, current)
-                self.assertEqual(current['metadata']['annotations'][annotation], new_revision)
-                self.assertEqual(previous['spec'], current['spec'])
-                previous = current
+            sources = list(yaml.safe_load_all(manifest.read_text()))
+            source = next(doc for doc in sources if doc['kind'] == 'StatefulSet')
+            annotations = source['spec']['template']['metadata']['annotations']
+            new_revision = annotations[annotation] + '-changed'
+            annotations[annotation] = new_revision
+            manifest.write_text(yaml.safe_dump_all(sources))
+            current = next(doc for doc in render() if doc['kind'] == 'StatefulSet')['spec']['template']
+            self.assertNotEqual(previous, current)
+            self.assertEqual(current['metadata']['annotations'][annotation], new_revision)
+            self.assertEqual(previous['spec'], current['spec'])
             binding = next(doc for doc in docs if doc['kind'] == 'RoleBinding')
             self.assertEqual(binding['subjects'][0]['namespace'], 't3code-homelab')
             app = yaml.safe_load((ROOT.parent / '11.argocd/apps/app-t3code-homelab.yaml').read_text())

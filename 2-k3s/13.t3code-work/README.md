@@ -349,7 +349,7 @@ Vault-backed keys and outbound SSH integration remain deferred.
 
 ```sh
 python3 2-k3s/13.t3code-work/tools/provision.test.py -v
-python3 2-k3s/13.t3code-work/tools/startup.test.py -v
+python3 2-k3s/13.t3code/env/tools/startup.test.py -v
 python3 2-k3s/17.remote-pi/cliproxy/tools/client-backend.test.py -v
 bash -n 2-k3s/13.t3code-work/tools/owner-login.sh
 shellcheck 2-k3s/13.t3code-work/tools/owner-login.sh
