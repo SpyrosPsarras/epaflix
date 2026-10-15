@@ -13,15 +13,12 @@ case "${1:-}" in
     printf '%s\n' \
       'Stage 1/2: Create this backend a dedicated fine-grained GitHub PAT.' \
       'Open https://github.com/settings/personal-access-tokens/new in your browser.' \
-      'Use your existing shared GitHub identity. Do not create another account.' \
-      'Resource owner: select the work organization, NOT your personal account.' \
-      'Repository access: select only the approved organization repositories.' \
-      'Start with Metadata read and Contents read. Set a short expiry.' \
-      'Do not use a classic PAT or reuse any other backend token.' \
-      'Request organization approval if required, and wait until it is approved.' \
-      'Never paste the token into chat, a command line, a file, or a GitHub issue.'
-    read -r -p 'Press Enter after creating and approving the organization-scoped PAT. ' _
-    printf '%s\n' 'Stage 2/2: Verify identity and a private org repository, then store the GitHub grant.'
+      'Resource owner: the work organization.' \
+      'Repository access: only needed organization repos, including a private repo.' \
+      'Permissions: Metadata read + Contents read.' \
+      'Expiration: short.' \
+      'If GitHub asks, approve the token request in the organization settings.'
+    printf '%s\n' 'Stage 2/2: Check the token and save it to the work grants Secret.'
     python3 "$TOOLS/provision.py" github
     ;;
   azure)

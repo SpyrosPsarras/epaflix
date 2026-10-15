@@ -197,8 +197,9 @@ tags under the existing public `ghcr.io/spyrospsarras/t3-runtime` repository.
 
 Run provisioning from a clean checkout in a private administrative terminal.
 The tools use only `kubectl --context epaflix`, never a work Azure cache or an
-existing GitHub login. They suppress private command/API diagnostics and never
-sync Applications. Do not run with Python tracing or shell recording enabled.
+existing GitHub login. They report the failed check without exposing private
+command/API diagnostics and never sync Applications. Do not run with Python
+tracing or shell recording enabled.
 
 1. B1: Stage independent grants from an in-cluster administrative environment:
 
@@ -221,19 +222,13 @@ sync Applications. Do not run with Python tracing or shell recording enabled.
    bash 2-k3s/13.t3code-work/tools/owner-login.sh github
    ```
 
-   Personal and work use the same GitHub identity. Use a new fine-grained PAT,
-   select the organization as resource owner, and select only approved org
-   repositories. Start with Metadata read and Contents read. Wait for org
-   approval if required. The script rejects classic PATs, verifies the shared
-   account and access to a selected private organization repository, then
-   asks for explicit confirmation of the PAT resource owner. GitHub's
-   user/repository APIs do not prove the complete PAT scope, so this last check
-   is the owner's
-   responsibility. Public repositories remain publicly readable regardless of
-   token scope. No personal/private homelab repository authority is permitted.
-   Hidden entry goes straight into `t3-runtime-grants.github-token` with a
-   resource-version check. Model and hub grants stay unchanged. No `gh auth
-   login` or GitHub credential cache is used.
+   On the GitHub PAT page, create a dedicated fine-grained PAT with the
+   organization as resource owner, only the needed org repositories including
+   at least one private repository, Metadata read + Contents read, and a short
+   expiry. Approve the request in the organization settings if GitHub requires it.
+
+   The script asks only for the token, hidden. An existing grant is never
+   overwritten.
 3. B3: Prepare the seven private files listed in I1 in a dedicated private
    directory. Keep required organizational instructions, skills, hooks and
    actual allow/deny checks. Do not export a mixed home or use test fixtures.

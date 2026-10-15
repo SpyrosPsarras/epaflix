@@ -25,16 +25,40 @@ MODEL_KEY_PREFIX = 't3-work-'
 SEARXNG_ORIGIN = 'http://searxng-mcp.mcp-hub-work.svc.cluster.local:8000'
 
 
+class ProvisionError(ValueError):
+    pass
+
+
 def digest(value):
     return hashlib.sha256(value).hexdigest()
 
 
 def kubectl(*args, payload=None):
-    result = subprocess.run(['kubectl', '--context', CONTEXT, *args], input=payload,
-                            capture_output=True, timeout=60)
+    try:
+        result = subprocess.run(['kubectl', '--context', CONTEXT, *args], input=payload,
+                                capture_output=True, timeout=60)
+    except FileNotFoundError:
+        raise ProvisionError('kubectl is not installed: install it and check context epaflix') from None
+    except (OSError, subprocess.TimeoutExpired):
+        raise ProvisionError('Cluster unreachable: check kubectl context epaflix') from None
     if result.returncode:
-        raise ValueError('Cluster operation failed; private output suppressed')
-    return json.loads(result.stdout) if result.stdout.strip() else None
+        diagnostic = result.stderr.decode(errors='replace').lower()
+        if any(text in diagnostic for text in ('test failed', 'test operation', 'conflict', 'object has been modified')):
+            message = 'Cluster state changed: rerun the command; no existing grant was overwritten'
+        elif 'forbidden' in diagnostic:
+            message = 'Cluster access denied: check permissions for kubectl context epaflix'
+        elif 'unauthorized' in diagnostic or 'must be logged in' in diagnostic:
+            message = 'Cluster authentication failed: refresh access for kubectl context epaflix'
+        elif any(text in diagnostic for text in ('unable to connect', 'connection refused', 'no such host',
+                                                 'timeout', 'timed out', 'context "epaflix" does not exist')):
+            message = 'Cluster unreachable: check kubectl context epaflix'
+        else:
+            message = 'Cluster request failed: check kubectl context epaflix and permissions'
+        raise ProvisionError(message)
+    try:
+        return json.loads(result.stdout) if result.stdout.strip() else None
+    except ValueError:
+        raise ProvisionError('Cluster returned an unreadable response: check kubectl context epaflix') from None
 
 
 def namespace(name):
@@ -119,29 +143,110 @@ def grants():
 
 def require_stopped():
     if kubectl('-n', 't3code-work', 'get', 'pods', '-l', 'app.kubernetes.io/name=t3code', '-o', 'json')['items']:
-        raise ValueError('Stop work consumers through the reviewed GitOps procedure first')
+        raise ProvisionError('Work pod is running: stop it first')
+
+
+def github_request(endpoint, token, check='token', optional=False):
+    try:
+        result = request('https://api.github.com/' + endpoint, token)
+    except urllib.error.HTTPError as error:
+        if optional and error.code in (403, 404, 422):
+            return None
+        raise ProvisionError(f'GitHub rejected the {check} (HTTP {error.code})') from None
+    except (OSError, urllib.error.URLError):
+        raise ProvisionError('Cannot reach GitHub: check your network connection') from None
+    except ValueError:
+        raise ProvisionError('GitHub returned an unreadable response: retry later') from None
+    if result is None:
+        raise ProvisionError('GitHub returned an unreadable response: retry later')
+    return result
+
+
+def github_items(endpoint, token, check, optional=False):
+    items, page = [], 1
+    while True:
+        separator = '&' if '?' in endpoint else '?'
+        result = github_request(f'{endpoint}{separator}per_page=100&page={page}', token, check, optional)
+        if result is None:
+            return items or None
+        if not isinstance(result, list):
+            raise ProvisionError(f'GitHub returned an unexpected {check} response: retry later')
+        items.extend(result)
+        if len(result) < 100:
+            return items
+        page += 1
+
+
+def valid_repo(repo):
+    return (isinstance(repo, dict) and isinstance(repo.get('owner'), dict) and
+            isinstance(repo.get('private'), bool) and repo['owner'].get('type') in ('User', 'Organization') and
+            isinstance(repo['owner'].get('login'), str))
+
+
+def github_repos(endpoint, token, check, optional=False):
+    repos = github_items(endpoint, token, check, optional)
+    if repos is not None and not all(valid_repo(repo) for repo in repos):
+        raise ProvisionError('GitHub returned incomplete repository details: retry later')
+    return repos
+
+
+def reject_private_personal_repos(repos, login):
+    if any(repo['private'] and repo['owner']['type'] == 'User' and
+           repo['owner']['login'].casefold() == login.casefold() for repo in repos):
+        raise ProvisionError('Private personal repository access is readable: create the token with the organization as resource owner')
+
+
+def require_private_organization(token, login):
+    memberships = github_items('user/orgs', token, 'organization lookup', optional=True)
+    if memberships is None:
+        visible = github_repos('user/repos?affiliation=owner,collaborator,organization_member', token, 'visible repository lookup')
+        reject_private_personal_repos(visible, login)
+        names = [repo['owner']['login'] for repo in visible if repo['owner']['type'] == 'Organization']
+    else:
+        names = [membership.get('login') if isinstance(membership, dict) else None for membership in memberships]
+    if any(not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9-]+', name) for name in names):
+        raise ProvisionError('GitHub returned incomplete organization details: retry later')
+    organizations = sorted({name.casefold() for name in names})
+    if not organizations:
+        raise ProvisionError('Token organization could not be determined: check organization access and token approval')
+    qualified = []
+    for organization in organizations:
+        private = github_repos(f'orgs/{organization}/repos?type=private', token,
+                               'private organization repository check', optional=len(organizations) > 1)
+        if private and any(repo['private'] and repo['owner']['type'] == 'Organization' and
+                           repo['owner']['login'].casefold() == organization for repo in private):
+            qualified.append(organization)
+    if len(qualified) > 1:
+        raise ProvisionError('Token organization is ambiguous: use a token for one organization')
+    if not qualified:
+        raise ProvisionError('Private organization repository access is empty: approve the token request or select a private organization repository')
 
 
 def github():
     if not sys.stdin.isatty() or not sys.stdout.isatty():
-        raise ValueError('Owner enrollment requires a private interactive terminal')
+        raise ProvisionError('Owner enrollment requires a private interactive terminal')
     require_stopped()
-    expected = getpass.getpass('Approved shared GitHub login, hidden: ')
-    repository = getpass.getpass('Selected private work repository as org/repo, hidden: ')
-    token = getpass.getpass('Dedicated organization fine-grained PAT, hidden: ').encode()
-    if not GITHUB_PAT.fullmatch(token) or not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repository):
-        raise ValueError('A fine-grained PAT and selected organization repository are required')
-    if not expected or request('https://api.github.com/user', token).get('login', '').casefold() != expected.casefold():
-        raise ValueError('GitHub identity does not match the approved shared login')
-    repo = request('https://api.github.com/repos/' + repository, token)
-    if repo.get('private') is not True or repo.get('owner', {}).get('type') != 'Organization' or (
-            repo.get('full_name', '').casefold() != repository.casefold()):
-        raise ValueError('Selected repository must be private and belong to the approved organization')
-    if input('Confirm PAT resource owner is this organization, with selected org repos only [yes/no]: ') != 'yes':
-        raise ValueError('Organization-only resource owner confirmation is required')
-    obj = kubectl('-n', RUNTIME_GRANTS[0], 'get', 'secret', RUNTIME_GRANTS[1], '-o', 'json')
-    if 'github-token' in obj['data']:
-        raise ValueError('Work GitHub grant already exists; refusing rotation')
+    obj = kubectl('-n', RUNTIME_GRANTS[0], 'get', 'secret', RUNTIME_GRANTS[1], '--ignore-not-found', '-o', 'json')
+    if obj is None:
+        raise ProvisionError('Work grants Secret is missing: run provision.py grants first')
+    data = obj.get('data', {})
+    if 'github-token' in data:
+        raise ProvisionError('Work GitHub grant already exists: refusing to overwrite it')
+    if not {'model-token', 'hub-token'}.issubset(data) or not obj.get('metadata', {}).get('resourceVersion'):
+        raise ProvisionError('Work grants Secret is incomplete: provision the model and hub grants first')
+    token = getpass.getpass('Fine-grained GitHub PAT, hidden: ').encode()
+    if not GITHUB_PAT.fullmatch(token):
+        raise ProvisionError('Token is not a fine-grained PAT (must start with github_pat_)')
+    user = github_request('user', token)
+    if not isinstance(user, dict) or not isinstance(user.get('login'), str) or not user['login']:
+        raise ProvisionError('GitHub did not return a user for this token')
+    require_private_organization(token, user['login'])
+    personal = github_repos('user/repos?visibility=private&affiliation=owner', token,
+                            'private personal repository check', optional=True)
+    if personal is None:
+        print("Private personal repository check unavailable: not verified. Check the token's resource owner on the PAT page.")
+    else:
+        reject_private_personal_repos(personal, user['login'])
     operations = [{'op': 'test', 'path': '/metadata/resourceVersion', 'value': obj['metadata']['resourceVersion']},
                   {'op': 'add', 'path': '/data/github-token', 'value': base64.b64encode(token).decode()}]
     kubectl('-n', RUNTIME_GRANTS[0], 'patch', 'secret', RUNTIME_GRANTS[1], '--type=json', '--patch-file=/dev/stdin', '-o', 'json',
@@ -206,6 +311,9 @@ def main():
             inputs(args.directory)
         else:
             {'grants': grants, 'github': github}[args.action]()
+    except ProvisionError as error:
+        print(str(error), file=sys.stderr)
+        return 1
     except Exception:
         print('Work provisioning refused or failed. Private diagnostics suppressed.', file=sys.stderr)
         return 1
