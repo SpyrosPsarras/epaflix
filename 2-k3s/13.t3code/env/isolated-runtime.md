@@ -1,0 +1,87 @@
+# Isolated runtime input contract
+
+The homelab and work overlays use `env/files/isolated-config.py` to validate
+private inputs before installing agent configuration. Each home has its own
+environment marker, state and checkout. First boot requires a clean home.
+Cloud caches, legacy vault or SSH-agent environment variables, mismatched
+input digests and credential-bearing endpoint URLs fail validation.
+
+## Private input files
+
+`runtime.json` selects the environment, its exact in-cluster hub URL, approved
+model endpoint, GitHub HTTPS project and Git authentication mode. Its `sha256`
+map binds every projected input file. `grantSha256` binds every selected grant.
+The homelab provisioner computes these fields rather than requiring manual
+fingerprint copying. The namespace's ordinary client hub token must have its
+own environment prefix. `public` Git mode rejects a supplied GitHub token.
+
+`bundle.json` contains `sourceHome` and a `files` map. Each entry is
+`{"data":"<base64>","executable":false}`. The installer rewrites source-home
+references in Markdown. Required entries are `instructions.md` and at least
+one `skills/.../SKILL.md`. Other home files, histories, T3 state and login
+credentials are not bundle entries.
+
+`services.json` follows the [hub inventory contract](../../23.mcp-hub/instances/README.md).
+Startup replaces managed MCP lists with that environment's allowlist and
+clears unrelated project MCP entries and cached auto-enable choices. A hub
+configuration is an application boundary, not a network firewall.
+
+## Policy input
+
+`policies.json` has `environment`, `files` and nonempty `checks` fields.
+Files use the bundle's base64 entry shape. Required targets are
+`.cc-safety-net/policy.json` and `.claude/settings.json`. Additional hook files
+may live under `.config/t3-policy/`. Secret-protection overrides cannot disable
+checks. Claude hooks must remain enabled and cannot add or auto-enable project
+MCP servers.
+
+The homelab safety check includes its installed CLI path:
+
+```json
+{
+  "argv": ["python3", "${HOME}/.config/t3-policy/check.py",
+           ".local/share/pi/cc-safety-net/2.6.4/dist/bin/cc-safety-net.js"],
+  "exit": 0
+}
+```
+
+Checks must exercise the required policy with harmless allow/deny payloads.
+Startup runs them with a credential-free environment and a 30-second limit;
+child diagnostics are captured rather than printed. A failed check stops startup.
+Legacy pi-permission-system inputs remain accepted but are not installed.
+Their acceptance checks are still run and cannot be silently removed.
+See [the shared safety layers](../one/pi-safety.md) for the rules the installed
+extensions do and do not enforce.
+
+## Homelab kubeconfig
+
+The homelab kubeconfig must contain exactly one context, cluster and user,
+with consistent references, an HTTPS API URL, an inline trusted CA and an
+inline token or client certificate/key. Exec plugins, cloud auth providers,
+external credential files and insecure TLS are rejected. `KUBECONFIG` selects
+the read-only Secret projection. Actual resource permissions come from the
+separately tracked homelab RBAC, not the file's mount mode.
+
+## Provider preferences and Codex requirements
+
+Startup retains supported Pi and Codex display names and enabled preferences.
+Custom model IDs and selections must use `cliproxy/` for Pi or `codex/` for
+Codex. Pi title-generation selections use `cliproxy-textgen/`. It resets
+driver identities, executable paths and launch arguments. Extra provider
+instances, legacy provider maps, unsupported selections and Claude's direct
+provider are removed. Endpoint and credential configuration comes from private
+inputs, not application preferences.
+
+Codex retains unmanaged TOML values and trust entries confined to this
+environment's project and subdirectories. Startup replaces its provider and
+MCP maps, removes alternate profiles, and atomically writes the result.
+`/etc/codex/requirements.toml` enforces the approved provider definition and
+exact allowed hub server URLs, including in trusted project directories and
+T3 worktrees. Preferences cannot bypass those managed requirements.
+
+## Input rotation
+
+Scale the StatefulSet to zero and wait for its pod to disappear before updating
+Secrets. Update inputs, grants and their digests together, advance the tracked
+input revision, review, merge and sync, then restore one replica. Otherwise an
+old grant environment can run against newly projected input files.

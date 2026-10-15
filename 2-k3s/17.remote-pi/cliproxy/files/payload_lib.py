@@ -33,6 +33,7 @@ import re
 
 _REDACTIONS = [
     (re.compile(r"\b(t3-work-[A-Za-z0-9_-]{40,})"), "t3-work-<REDACTED>"),
+    (re.compile(r"\b(t3-homelab-[A-Za-z0-9_-]{40,})"), "t3-homelab-<REDACTED>"),
     (re.compile(r"\b(sk-ant-[A-Za-z0-9_\-]{8,})"), "sk-ant-<REDACTED>"),
     (re.compile(r"\b(sk-[A-Za-z0-9]{20,})"), "sk-<REDACTED>"),
     (re.compile(r"\b(ghp_[A-Za-z0-9]{20,})"), "ghp_<REDACTED>"),
@@ -65,7 +66,7 @@ def section(raw, name):
     return match.group(1) if match else ""
 
 
-CLIENT_BACKENDS = {"t3-w": "work"}
+CLIENT_BACKENDS = {"t3-w": "work", "t3-h": "homelab"}
 
 
 def client_backend(raw):
