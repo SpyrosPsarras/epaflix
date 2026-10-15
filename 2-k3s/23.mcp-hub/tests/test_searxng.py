@@ -12,12 +12,12 @@ import yaml
 
 HUB = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(HUB / "files"))
-SPEC = importlib.util.spec_from_file_location("work_searxng", HUB / "instances/work/searxng.py")
+SPEC = importlib.util.spec_from_file_location("searxng", HUB / "instances/searxng/searxng.py")
 search = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(search)
 
 
-class WorkSearchTests(unittest.TestCase):
+class SearchTests(unittest.TestCase):
     def test_authenticated_search_only_and_no_legacy_defaults(self):
         token = "upstream-fixture"
         with TestClient(search.app(token)) as client:
@@ -46,19 +46,34 @@ class WorkSearchTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 search.app(token)
 
-    def test_work_render_has_independent_authenticated_backend_and_revision(self):
-        docs = list(yaml.safe_load_all(subprocess.check_output(["kustomize", "build", str(HUB / "instances/work")])))
-        deployments = {doc["metadata"]["name"]: doc for doc in docs if doc["kind"] == "Deployment"}
-        self.assertEqual(set(deployments), {"mcp-hub", "searxng-mcp"})
-        pod = deployments["searxng-mcp"]["spec"]["template"]["spec"]
-        self.assertFalse(pod["automountServiceAccountToken"])
-        self.assertEqual(pod["containers"][0]["env"][0]["valueFrom"]["secretKeyRef"]["name"], "mcp-hub-searxng")
-        self.assertEqual(deployments["mcp-hub"]["spec"]["template"]["metadata"]["annotations"][
-            "mcp-hub.epaflix.com/inputs-revision"], "r2")
-        for doc in docs:
-            self.assertNotEqual(doc["kind"], "Secret")
-            if doc["kind"] != "Namespace":
-                self.assertEqual(doc["metadata"].get("namespace"), "mcp-hub-work")
+    def test_both_hubs_render_independent_authenticated_search_backends(self):
+        for environment in ("homelab", "work"):
+            with self.subTest(environment=environment):
+                docs = list(yaml.safe_load_all(subprocess.check_output([
+                    "kustomize", "build", str(HUB / "instances" / environment)])))
+                deployments = {doc["metadata"]["name"]: doc for doc in docs if doc["kind"] == "Deployment"}
+                self.assertEqual(set(deployments), {"mcp-hub", "searxng-mcp"})
+                search_deployment = deployments["searxng-mcp"]
+                template = search_deployment["spec"]["template"]
+                pod = template["spec"]
+                self.assertFalse(pod["automountServiceAccountToken"])
+                self.assertEqual(pod["containers"][0]["env"][0]["valueFrom"]["secretKeyRef"],
+                                 {"name": "mcp-hub-searxng", "key": "token"})
+                self.assertEqual(template["metadata"]["annotations"]["mcp-hub.epaflix.com/inputs-revision"], "r1")
+                self.assertEqual(deployments["mcp-hub"]["spec"]["template"]["metadata"]["annotations"][
+                    "mcp-hub.epaflix.com/inputs-revision"], "r2")
+                selector = search_deployment["spec"]["selector"]["matchLabels"]
+                self.assertEqual(selector, {"app": "work-searxng-mcp" if environment == "work" else "searxng-mcp"})
+                self.assertEqual(template["metadata"]["labels"], selector)
+                service = next(doc for doc in docs if doc["kind"] == "Service" and doc["metadata"]["name"] == "searxng-mcp")
+                self.assertEqual(service["spec"]["selector"], selector)
+                runner = next(volume["configMap"]["name"] for volume in pod["volumes"] if volume["name"] == "runner")
+                config = next(doc for doc in docs if doc["kind"] == "ConfigMap" and doc["metadata"]["name"] == runner)
+                self.assertIn("searxng.py", config["data"])
+                for doc in docs:
+                    self.assertNotEqual(doc["kind"], "Secret")
+                    if doc["kind"] != "Namespace":
+                        self.assertEqual(doc["metadata"].get("namespace"), "mcp-hub-" + environment)
 
 
 if __name__ == "__main__":

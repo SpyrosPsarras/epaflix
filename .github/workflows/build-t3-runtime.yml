@@ -30,7 +30,7 @@ jobs:
       - name: Build and boot without production credentials
         run: |
           bash 2-k3s/13.t3code/env/tools/sync-runtime-image.sh
-          git diff --exit-code -- 2-k3s/13.t3code/one/statefulset.yaml 2-k3s/13.t3code-homelab/statefulset.yaml 2-k3s/13.t3code-work/statefulset.yaml 2-k3s/23.mcp-hub/reader/canary/job.yaml
+          git diff --exit-code -- 2-k3s/13.t3code/one/statefulset.yaml 2-k3s/13.t3code-homelab/statefulset.yaml 2-k3s/13.t3code-work/statefulset.yaml
           bash 2-k3s/13.t3code/one/tools/sync-shared.sh --check
           bash 2-k3s/13.t3code/env/tools/smoke.sh
       - name: Log in to GHCR

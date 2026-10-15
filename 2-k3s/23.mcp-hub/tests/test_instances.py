@@ -165,6 +165,15 @@ class InstanceTests(unittest.TestCase):
                     patch.object(mcp_hub, "load_clients", side_effect=AssertionError):
                 mcp_hub.configured_app()
 
+    def test_instances_reject_retired_vault_routes_even_with_reader_marker(self):
+        for environment in ("homelab", "work"):
+            for name in ("vaultwarden", "vault-secret", "vault-attachment"):
+                for marker in ({}, {"vault_reader": "restricted-v1"}):
+                    config = {"environment": environment, "services": [name], **marker}
+                    with self.subTest(environment=environment, service=name, marker=bool(marker)):
+                        with self.assertRaises(ValueError):
+                            hub_services.validate_services(config, environment)
+
     def test_client_cli_uses_same_allowlist_and_removes_stale_servers(self):
         for environment in hub_services.ENVIRONMENTS:
             path = self.home / environment
@@ -347,7 +356,7 @@ class RenderTests(unittest.TestCase):
                 return list(yaml.safe_load_all(subprocess.check_output(["kustomize", "build", str(path)])))
 
             documents = render(overlay)
-            deployment = next(doc for doc in documents if doc["kind"] == "Deployment")
+            deployment = next(doc for doc in documents if doc["kind"] == "Deployment" and doc["metadata"]["name"] == "mcp-hub")
             template = deployment["spec"]["template"]
             self.assertEqual(deployment["metadata"]["namespace"], "mcp-hub-homelab")
             self.assertEqual(template["metadata"]["annotations"][annotation], "r2")
@@ -366,12 +375,12 @@ class RenderTests(unittest.TestCase):
             rotated = render(overlay)
             rotated_secret = next(doc for doc in rotated if doc["kind"] == "Secret")
             self.assertNotEqual(rotated_secret["data"], secret["data"])
-            self.assertEqual(next(doc for doc in rotated if doc["kind"] == "Deployment"), deployment)
+            self.assertEqual(next(doc for doc in rotated if doc["kind"] == "Deployment" and doc["metadata"]["name"] == "mcp-hub"), deployment)
 
             path = root / "instances/homelab/kustomization.yaml"
             path.write_text(path.read_text().replace('"r2"', '"synthetic-r3"'))
             revised = render(overlay)
-            rolled = next(doc for doc in revised if doc["kind"] == "Deployment")
+            rolled = next(doc for doc in revised if doc["kind"] == "Deployment" and doc["metadata"]["name"] == "mcp-hub")
             self.assertNotEqual(rolled["spec"]["template"], template)
             self.assertEqual(rolled["spec"]["template"]["metadata"]["annotations"][annotation], "synthetic-r3")
             rolled["spec"]["template"]["metadata"]["annotations"][annotation] = "r2"
@@ -398,7 +407,7 @@ class RenderTests(unittest.TestCase):
                     return list(yaml.safe_load_all(result.stdout))
 
                 documents = render()
-                deployment = next(doc for doc in documents if doc["kind"] == "Deployment")
+                deployment = next(doc for doc in documents if doc["kind"] == "Deployment" and doc["metadata"]["name"] == "mcp-hub")
                 pod = deployment["spec"]["template"]["spec"]
                 self.assertEqual(deployment["metadata"]["namespace"], "mcp-hub-" + environment)
                 self.assertEqual(deployment["spec"]["strategy"]["type"], "Recreate")
@@ -420,7 +429,7 @@ class RenderTests(unittest.TestCase):
                 credentials = json.loads((overlay / "credentials.json").read_text())
                 credentials["clients"]["fixture"] = digest(environment + ".rotated-fixture")
                 (overlay / "credentials.json").write_text(json.dumps(credentials))
-                rolled = next(doc for doc in render() if doc["kind"] == "Deployment")
+                rolled = next(doc for doc in render() if doc["kind"] == "Deployment" and doc["metadata"]["name"] == "mcp-hub")
                 self.assertNotEqual(rolled["spec"]["template"], deployment["spec"]["template"])
             self.assertEqual(len(set(code_hashes)), 1)
 
@@ -454,7 +463,7 @@ class RenderTests(unittest.TestCase):
             self.assertNotIn("automated", app["spec"]["syncPolicy"])
             self.assertEqual(app["spec"]["destination"]["namespace"], "mcp-hub-" + environment)
             self.assertNotIn("automated", apps["t3code-" + environment]["spec"]["syncPolicy"])
-        self.assertNotIn("automated", apps["vault-reader-homelab"]["spec"]["syncPolicy"])
+        self.assertNotIn("vault-reader-homelab", apps)
         self.assertIn("automated", apps["mcp-hub"]["spec"]["syncPolicy"])
 
 

@@ -6,8 +6,6 @@ tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 cp -r "$ROOT/env" "$tmp/"
 cp -r "$ROOT/one" "$tmp/k"
 cp "$ROOT/versions.env" "$tmp/"
-mkdir -p "$tmp/one/files"
-cp "$ROOT/one/files/vault-restricted.py" "$ROOT/one/files/hub_services.py" "$tmp/one/files/"
 python3 "$ROOT/env/tools/private-config.test.py" overlay "$tmp/k"
 render() { kustomize build "$1" | python3 -c '
 import sys, yaml

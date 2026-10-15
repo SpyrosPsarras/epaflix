@@ -81,10 +81,11 @@ permits forwarding only to 3773.
 
 The local API has no authentication. A deliberate command in any pod container
 can read homelab items through it. `vault run` is the sanctioned path that
-suppresses secret output; like the old restricted helper, it does not prevent
-deliberate exfiltration. Work-organization isolation relies on the agent-account
-setup in #1838. The old restricted helper and reader remain unchanged until
-their separate retirement.
+suppresses secret output; it does not prevent deliberate exfiltration.
+Work-organization isolation relies on the agent-account setup in #1838.
+The restricted helper and reader have been removed. See the
+[post-merge retirement steps](../23.mcp-hub/instances/README.md#restricted-reader-retirement-after-merge)
+for live resource and owner-approved account cleanup.
 
 ## Scoped Kubernetes access
 
