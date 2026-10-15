@@ -49,7 +49,7 @@ insecure OIDC HTTP in this deployment. `FCM_BASE_URL` and
 
 `MIN_APP_VERSION` is `1.0.0`, matching the first release `android-v1.0.0`.
 Older apps receive HTTP 426. Raise it only when an app release is required.
-`SERVER_VERSION` is `7cc52b9`, the source commit shown in `/api/meta`.
+`SERVER_VERSION` is `81e15a2`, the source commit shown in `/api/meta`.
 Bump it whenever the image digest changes.
 
 ## First deploy
