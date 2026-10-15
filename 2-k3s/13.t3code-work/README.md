@@ -17,6 +17,10 @@ The work image includes Azure CLI. Neither isolated image includes the vault
 CLI. Homelab still has no Azure CLI, work helper, Azure cache or work grants.
 No image contains private instructions, service inventories or credentials.
 
+## Network isolation
+
+See [network policies and post-merge checks](../13.t3code/env/network-isolation.md).
+
 ## Required private provisioning
 
 Review exact inputs and grants for work use. A context name, hostname or
