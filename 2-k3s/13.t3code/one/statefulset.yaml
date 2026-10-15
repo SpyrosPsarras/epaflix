@@ -102,6 +102,12 @@ spec:
                   key: github-token
             - name: GH_TOKEN
               value: $(GITHUB_TOKEN)
+            - name: AKS_TENANT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: cliproxy-secrets
+                  key: aks-tenant-id
+                  optional: true
             # This pod's hub token (client "t3code", 2-k3s/23.mcp-hub); the
             # entrypoint registers every hub path for Pi, Claude and
             # Codex in the active home, as an env reference.
