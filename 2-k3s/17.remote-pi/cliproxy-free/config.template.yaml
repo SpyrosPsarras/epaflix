@@ -15,7 +15,8 @@ remote-management:
   secret-key: ""
 
 # The one client. lingarr reads it from the lingarr-cliproxy-api-key secret in
-# 08.servarr; the main cliproxy never sees this key, so it 401s there.
+# 08.servarr; it also authenticates the Antigravity tier to the main cliproxy.
+# If missing from main cliproxy's live api-keys, that tier 401s and free tiers serve.
 api-keys:
   - "__LINGARR_API_KEY__"
 
@@ -41,16 +42,18 @@ payload:
         - "plugins"
         - "transforms"
 
-# The free-provider pool: every entry exposes its model under the ONE alias
-# or-free, and CLIProxyAPI rotates requests across the pool (RoundRobinSelector,
-# per-alias pool rotation). Rotation is the point: OpenRouter's shared free tier
+# The tiered pool: every entry exposes its model under the ONE alias or-free.
+# CLIProxyAPI selects the highest available tier and rotates within it
+# (RoundRobinSelector, per-alias pool rotation). OpenRouter's shared free tier
 # holds requests up to ~30 min at peak (#1239), so one upstream alone set the
 # drain rate. openrouter/free (the random free router) stays banned: it hands
 # lingarr's batches to non-translators (safety classifiers, 2.6B models
 # answering in Arabic, reasoning models running for minutes), and lingarr then
 # logs "Failed to parse JSON response" and keeps the original lines.
 #
-# Every upstream here is zero-cost by policy; verify.sh enforces the allowlist.
+# No per-request cost: Antigravity uses the owner's flat-rate Google AI Plus
+# subscription; the other upstreams use free plans. verify.sh enforces the allowlist.
+# Antigravity's quota window is ~6.5 days, measured 2026-10-15 at ~21 files.
 #
 # Model history, 2026-09-13, all on lingarr's exact 25-line structured request:
 #   nvidia/nemotron-3-super-120b-a12b:free  structurally 25/25 but rejected on
@@ -98,9 +101,8 @@ payload:
 # (gemini), 102-118s (nex). To add a model: pass batch-repro.sh 3/3 first, then
 # add it as an entry with the same alias (CLIProxyAPI pools the alias).
 openai-compatibility:
-  # Pool tiers: groq and gemini share tier 10 (the selector round-robins within
-  # a tier; observed split shifts with cooldown events); nex sits at the
-  # default 0 and would serve only while both higher tiers are cooling.
+  # Pool tiers: antigravity at 20, groq and gemini at 10 (round-robin within
+  # a tier; observed split shifts with cooldown events), disabled openrouter at 0.
   #
   # nex is disabled as of 2026-09-21: during cooldown windows it served
   # malformed batches (OpenRouter 400 json_validate_failed - bare array,
@@ -118,7 +120,7 @@ openai-compatibility:
   # until the window closed. In a pool the cooldown is the failover: a saturated
   # entry cools, the selector drops to the healthy tier, and the synthetic 503
   # fires only when every upstream is cooling at once. With cooling disabled a
-  # 429-exhausted entry would keep receiving half the traffic and failing it.
+  # 429-exhausted entry would keep receiving traffic and failing it.
   #
   # request-retry: up to 3 extra upstream attempts INSIDE one client call for
   # 403/408/429/500/502/503/504 (config.example.yaml), absorbing transient blips
@@ -139,6 +141,18 @@ openai-compatibility:
         display-name: "Nex N2.5 Pro free (lingarr)"
         # context_length from openrouter.ai/api/v1/models, 2026-09-13
         max-context-length: 262144
+
+  - name: "antigravity"
+    priority: 20
+    request-retry: 3
+    base-url: "http://cliproxy.remote-pi.svc.cluster.local:8317/v1"
+    api-key-entries:
+      - api-key: "__LINGARR_API_KEY__"
+    models:
+      - name: "gemini-3.8-flash-high"
+        alias: "or-free"
+        display-name: "Antigravity Gemini 3.8 Flash high (lingarr)"
+        max-context-length: 1048576
 
   # Groq free plan.
   - name: "groq"
