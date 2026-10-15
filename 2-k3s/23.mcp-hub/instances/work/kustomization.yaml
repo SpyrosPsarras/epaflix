@@ -5,8 +5,21 @@ namespace: mcp-hub-work
 resources:
   - ../base
   - namespace.yaml
+  - ingress.yaml
 
 configMapGenerator:
   - name: mcp-hub-instance-settings
     literals:
       - environment=work
+
+patches:
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: mcp-hub
+      spec:
+        template:
+          metadata:
+            annotations:
+              mcp-hub.epaflix.com/inputs-revision: "r2"
