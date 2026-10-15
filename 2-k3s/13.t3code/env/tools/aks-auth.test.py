@@ -17,7 +17,18 @@ with tempfile.TemporaryDirectory() as tmp:
         p = bin_dir / name
         p.write_text(text)
         p.chmod(0o700)
-    env = dict(os.environ, HOME=tmp, PATH=str(bin_dir) + ':' + os.environ['PATH'])
+    env = dict(os.environ, HOME=tmp, PATH=str(bin_dir) + ':' + os.environ['PATH'],
+               AKS_TENANT_ID='11111111-1111-4111-8111-111111111111')
+    for missing in (None, ''):
+        missing_env = dict(env)
+        if missing is None:
+            missing_env.pop('AKS_TENANT_ID')
+        else:
+            missing_env['AKS_TENANT_ID'] = missing
+        r = subprocess.run(['bash', str(scripts / 'aks-auth-central.sh'), 'token'],
+                           env=missing_env, capture_output=True, text=True)
+        assert r.returncode == 1 and not r.stdout and 'AKS_TENANT_ID is required' in r.stderr, r
+        assert not (home / '.azure').exists()
     def central(command):
         return subprocess.run(['bash', str(scripts / 'aks-auth-central.sh')],
                               env=dict(env, SSH_ORIGINAL_COMMAND=command), capture_output=True, text=True)
@@ -25,7 +36,7 @@ with tempfile.TemporaryDirectory() as tmp:
     assert r.returncode == 0 and r.stdout == '{"kind":"ExecCredential"}\n', r
     r = central('login')
     assert r.returncode == 0 and not r.stdout and '--use-device-code' in r.stderr, r
-    assert '--tenant AKS_TENANT_ID_REDACTED' in r.stderr
+    assert '--tenant ' + env['AKS_TENANT_ID'] in r.stderr
     for command in ['id', 'token; touch /tmp/aks-auth-injected', 'login extra']:
         assert central(command).returncode == 2
     (bin_dir / 'kubelogin').write_text('#!/bin/sh\nexit 1\n')

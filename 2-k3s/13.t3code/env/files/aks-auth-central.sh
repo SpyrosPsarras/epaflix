@@ -4,7 +4,11 @@
 set -euo pipefail
 umask 077
 export AZURE_CONFIG_DIR="$HOME/.azure"
-tenant=AKS_TENANT_ID_REDACTED
+tenant=${AKS_TENANT_ID:-}
+if [[ -z $tenant ]]; then
+  echo 'AKS_TENANT_ID is required; set aks-tenant-id in the t3code cliproxy-secrets Secret.' >&2
+  exit 1
+fi
 mkdir -p "$AZURE_CONFIG_DIR"
 login() {
   AZURE_CORE_LOGIN_EXPERIENCE_V2=off az login --tenant "$tenant" \
