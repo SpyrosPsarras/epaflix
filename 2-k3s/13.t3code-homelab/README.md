@@ -53,13 +53,24 @@ and cache permission test as root through sudo. Encrypted client data persists
 under `/vault/client`; it is not part of the T3 home.
 
 The sidecar refuses a cached account or server mismatch. The owner login must
-never be provisioned here. Login and unlock use `--passwordenv`; the session
-stays in the separate-UID client's environment. Startup makes at most three
-attempts and bounds each CLI command to 45 seconds. After the client is ready,
-three consecutive status failures remove its published scope and stop the
-sidecar for a kubelet restart. A successful check resets the count. T3 keeps
-running independently and its normal input preparation runs only once. CLI
-diagnostics never enter pod logs.
+never be provisioned here. Fresh-volume login uses `--passwordenv`. Cached
+restarts with persisted `client/data.json` start `bw serve` directly, without
+a password or session in its environment. Its HTTP `/status` must match the
+agent account and server before unlock through the stock loopback API. Before
+reading status and again before sending the password, the sidecar checks the
+kernel's TCP listener UID and socket inode against the serve child's file
+descriptors. Foreign listeners stop startup without a login fallback, including
+IPv4 wildcard and IPv6 listeners that could intercept the loopback address.
+The password stays in the POST body, never argv or logs. An unauthenticated
+cache stops serve before taking the existing fresh-login path. Login and unlock
+each make at most three attempts. The sidecar bounds CLI commands and resident
+`/sync` requests to 45 seconds. Other local HTTP requests use 10 seconds.
+The sidecar publishes scope only after sync succeeds and the account is still
+unlocked. After
+the client is ready, three consecutive status failures remove its published
+scope and stop the sidecar for a kubelet restart. A successful check resets the
+count. T3 keeps running independently and its normal input preparation runs only
+once. CLI diagnostics never enter pod logs.
 
 The sidecar publishes only the runtime variant, organization ID and collection
 ID in `/run/t3-vault/scope.json`, mounted read-only in T3. The runner requires
