@@ -74,7 +74,7 @@ spec:
               mountPath: /run/t3-vault
       containers:
         - name: t3
-          image: ghcr.io/spyrospsarras/t3-runtime:work-inputs-24f77b0139e80460dc4a0bb53714a485
+          image: ghcr.io/spyrospsarras/t3-runtime:work-inputs-1854ada7b0fe48d696e50fd20f46888b
           imagePullPolicy: IfNotPresent
           command: [bash, /scripts/entrypoint.sh]
           env:
@@ -119,6 +119,9 @@ spec:
               subPath: server-runtime.json
             - name: inputs
               mountPath: /run/t3-inputs
+              readOnly: true
+            - name: work-ssh
+              mountPath: /run/t3-work-ssh
               readOnly: true
             - name: scripts
               mountPath: /scripts
@@ -174,6 +177,9 @@ spec:
               mountPath: /home/t3/.t3/userdata/server-runtime.json
               subPath: server-runtime.json
               readOnly: true
+            - name: vault-scope
+              mountPath: /run/t3-vault
+              readOnly: true
             - name: login
               mountPath: /run/t3-login
               readOnly: true
@@ -202,6 +208,8 @@ spec:
           env:
             - name: HOME
               value: /vault
+            - name: T3_VAULT_SSH_AGENT
+              value: "1"
             - name: BW_EMAIL
               valueFrom:
                 secretKeyRef:
@@ -240,6 +248,9 @@ spec:
               mountPath: /vault
             - name: vault-scope
               mountPath: /run/t3-vault
+            - name: work-ssh
+              mountPath: /run/t3-work-ssh
+              readOnly: true
             - name: vault-tmp
               mountPath: /tmp
           startupProbe:
@@ -258,6 +269,21 @@ spec:
             limits:
               memory: 768Mi
       volumes:
+        - name: work-ssh
+          projected:
+            defaultMode: 0440
+            sources:
+              - secret:
+                  name: t3-work-ssh
+                  optional: true
+                  items:
+                    - key: hosts.json
+                      path: hosts.json
+              - configMap:
+                  name: t3code-work-ssh
+                  items:
+                    - key: work-ssh.py
+                      path: work-ssh.py
         - name: vault-data
           persistentVolumeClaim:
             claimName: t3code-vault
@@ -295,9 +321,13 @@ spec:
               - key: authorized_keys
                 path: authorized_keys
         - name: scripts
-          configMap:
-            name: t3code-scripts
+          projected:
             defaultMode: 0555
+            sources:
+              - configMap:
+                  name: t3code-scripts
+              - configMap:
+                  name: t3code-work-ssh
         - name: tmp
           emptyDir: {}
         - name: runtime-state

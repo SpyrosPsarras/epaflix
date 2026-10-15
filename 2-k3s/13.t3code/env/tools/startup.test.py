@@ -35,7 +35,10 @@ class StartupTest(unittest.TestCase):
                     for key, entry in bw.items():
                         self.assertEqual(entry['valueFrom']['secretKeyRef'], {'name': 'vaultwarden-agent', 'key': key})
                     mounts = {mount['name']: mount for mount in container['volumeMounts']}
-                    self.assertEqual(set(mounts), {'vault-data', 'vault-scope', 'vault-tmp'})
+                    self.assertEqual(set(mounts), {'vault-data', 'vault-scope', 'vault-tmp'} |
+                                     ({'work-ssh'} if variant == 'work' else set()))
+                    if variant == 'work':
+                        self.assertTrue(mounts['work-ssh']['readOnly'])
                     self.assertEqual(mounts['vault-data']['mountPath'], '/vault')
                     self.assertNotIn('ports', container)
                 else:
@@ -57,11 +60,8 @@ class StartupTest(unittest.TestCase):
             self.assertIn({'name': 'T3_VAULT_CLIENT', 'value': '1'}, containers['t3']['env'])
             scope = next(mount for mount in containers['t3']['volumeMounts'] if mount['name'] == 'vault-scope')
             self.assertTrue(scope['readOnly'])
-            if variant == 'homelab':
-                self.assertTrue(next(mount for mount in containers['sshd']['volumeMounts']
-                                     if mount['name'] == 'vault-scope')['readOnly'])
-            else:
-                self.assertNotIn('vault-scope', {mount['name'] for mount in containers['sshd']['volumeMounts']})
+            self.assertTrue(next(mount for mount in containers['sshd']['volumeMounts']
+                                 if mount['name'] == 'vault-scope')['readOnly'])
             vault_volume = next(volume for volume in spec['volumes'] if volume['name'] == 'vault-data')
             self.assertEqual(vault_volume['persistentVolumeClaim']['claimName'], 't3code-vault')
             pvc = next(doc for doc in docs if doc and doc['kind'] == 'PersistentVolumeClaim' and doc['metadata']['name'] == 't3code-vault')

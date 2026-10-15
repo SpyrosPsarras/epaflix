@@ -12,6 +12,12 @@ resources:
   - service.yaml
   - network-policy.yaml
 
+configMapGenerator:
+  - name: t3code-work-ssh
+    files:
+      - files/work-ssh.py
+      - files/work-ssh.md
+
 replacements:
   - source:
       kind: StatefulSet

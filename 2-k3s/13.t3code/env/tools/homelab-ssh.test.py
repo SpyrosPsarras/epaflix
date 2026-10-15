@@ -25,6 +25,7 @@ SCOPE = {'environment': 'homelab', 'organizationId': '11111111-1111-4111-8111-11
 
 class AgentTests(unittest.TestCase):
     def setUp(self):
+        self.scope = SCOPE.copy()
         self.tmp = tempfile.TemporaryDirectory(prefix='vault-ssh-test-', dir='/dev/shm')
         self.root = Path(self.tmp.name)
         self.key = self.root / 'key'
@@ -55,7 +56,7 @@ class AgentTests(unittest.TestCase):
         wrong_collection = copy.deepcopy(self.item)
         wrong_collection['collectionIds'] = []
         with patch.object(vault, 'fetch', return_value={'data': [self.item, foreign, wrong_collection, {'type': 1}]}), \
-                vault.ssh_agent(SCOPE, self.server):
+                vault.ssh_agent(self.scope, self.server):
             listed = self.add('-L')
             self.assertEqual(listed.returncode, 0)
             self.assertEqual(len(listed.stdout.splitlines()), 1)
@@ -70,7 +71,7 @@ class AgentTests(unittest.TestCase):
     def test_empty_scope_runs_an_empty_agent_without_signing_or_fallback(self):
         output = io.StringIO()
         with patch.object(vault, 'fetch', return_value={'data': []}), redirect_stdout(output), \
-                vault.ssh_agent(SCOPE, self.server) as agent:
+                vault.ssh_agent(self.scope, self.server) as agent:
             self.assertIsNone(agent.poll())
             self.assertTrue(self.socket.is_socket())
             self.assertEqual(self.add('-L').returncode, 1)
@@ -79,14 +80,14 @@ class AgentTests(unittest.TestCase):
         self.assertFalse(self.socket.exists())
 
     def test_readiness_accepts_an_empty_agent_but_requires_scope_and_socket(self):
-        source = SOURCE.parents[3] / '13.t3code-homelab/files/ssh-agent-ready.sh'
+        source = SOURCE.parent / 'ssh-agent-ready.sh'
         helper = self.root / 'ssh-agent-ready.sh'
         helper.write_text(source.read_text().replace('/run/t3-vault', str(self.root)))
         command = ['bash', '-c', 'sleep() { return 1; }; source "$1"', 'fixture', str(helper)]
         environment = {name: value for name, value in self.env.items() if name != 'SSH_AUTH_SOCK'}
         (self.root / 'scope.json').touch()
         with patch.object(vault, 'fetch', return_value={'data': []}), redirect_stdout(io.StringIO()), \
-                vault.ssh_agent(SCOPE, self.server):
+                vault.ssh_agent(self.scope, self.server):
             result = subprocess.run(command, env=environment, capture_output=True, timeout=5)
             self.assertEqual(result.returncode, 0)
             (self.root / 'scope.json').unlink()
@@ -97,7 +98,7 @@ class AgentTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
 
     def test_foreign_variant_is_rejected_before_listener_or_item_access(self):
-        selected = {**SCOPE, 'environment': 'work'}
+        selected = {**self.scope, 'environment': 'mixed'}
         self.socket.write_text('existing socket marker')
         with patch.object(vault, 'owns_listener', side_effect=AssertionError('Listener accessed')), \
                 patch.object(vault, 'fetch', side_effect=AssertionError('Items fetched')):
@@ -109,7 +110,7 @@ class AgentTests(unittest.TestCase):
         denied = (17, 25, 18, 19, 22, 23, 27, 255)
         output = io.StringIO()
         with patch.object(vault, 'fetch', return_value={'data': [self.item]}), redirect_stderr(output), \
-                vault.ssh_agent(SCOPE, self.server):
+                vault.ssh_agent(self.scope, self.server):
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
                 client.settimeout(2)
                 client.connect(str(self.socket))
@@ -133,7 +134,7 @@ class AgentTests(unittest.TestCase):
             with self.subTest(result=result), patch.object(vault, 'owns_listener',
                     **({'return_value': False} if result is False else {'side_effect': result})), \
                     patch.object(vault, 'fetch', side_effect=AssertionError('Untrusted listener received a request')):
-                with self.assertRaises(vault.Refused), vault.ssh_agent(SCOPE, self.server):
+                with self.assertRaises(vault.Refused), vault.ssh_agent(self.scope, self.server):
                     self.fail('Untrusted listener was accepted')
                 self.assertFalse(self.socket.exists())
 
@@ -144,11 +145,11 @@ class AgentTests(unittest.TestCase):
         missing['sshKey'] = {}
         for items in ([missing], [self.item, invalid]):
             with self.subTest(count=len(items)), patch.object(vault, 'fetch', return_value={'data': items}):
-                with self.assertRaises(vault.Refused), vault.ssh_agent(SCOPE, self.server):
+                with self.assertRaises(vault.Refused), vault.ssh_agent(self.scope, self.server):
                     self.fail('Invalid key set was accepted')
                 self.assertFalse(self.socket.exists())
         with patch.object(vault, 'fetch', side_effect=OSError):
-            with self.assertRaises(OSError), vault.ssh_agent(SCOPE, self.server):
+            with self.assertRaises(OSError), vault.ssh_agent(self.scope, self.server):
                 self.fail('Unavailable vault was accepted')
         self.assertFalse(self.socket.exists())
 
@@ -182,7 +183,7 @@ class AgentTests(unittest.TestCase):
                     except OSError:
                         time.sleep(0.02)
                 self.assertIsNone(server.poll(), 'Synthetic SSH server failed to start')
-                with patch.object(vault, 'fetch', return_value={'data': [self.item]}), vault.ssh_agent(SCOPE, self.server):
+                with patch.object(vault, 'fetch', return_value={'data': [self.item]}), vault.ssh_agent(self.scope, self.server):
                     result = subprocess.run(command, env=environment, capture_output=True, timeout=5)
                     self.assertEqual(result.returncode, 0, result.stderr)
                 result = subprocess.run(command, env=environment, capture_output=True, timeout=5)
@@ -192,12 +193,12 @@ class AgentTests(unittest.TestCase):
                 server.wait(timeout=5)
 
     def test_restart_replaces_keys_instead_of_keeping_old_agent(self):
-        with patch.object(vault, 'fetch', return_value={'data': [self.item]}), vault.ssh_agent(SCOPE, self.server):
+        with patch.object(vault, 'fetch', return_value={'data': [self.item]}), vault.ssh_agent(self.scope, self.server):
             self.assertEqual(self.add('-T', str(self.key.with_suffix('.pub'))).returncode, 0)
         other = self.root / 'other'
         subprocess.run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', str(other)], check=True)
         self.item['sshKey']['privateKey'] = other.read_text()
-        with patch.object(vault, 'fetch', return_value={'data': [self.item]}), vault.ssh_agent(SCOPE, self.server):
+        with patch.object(vault, 'fetch', return_value={'data': [self.item]}), vault.ssh_agent(self.scope, self.server):
             self.assertNotEqual(self.add('-T', str(self.key.with_suffix('.pub'))).returncode, 0)
             self.assertEqual(self.add('-T', str(other.with_suffix('.pub'))).returncode, 0)
 
@@ -282,7 +283,7 @@ class AgentTests(unittest.TestCase):
     def test_malformed_messages_are_closed_without_breaking_other_clients(self):
         output = io.StringIO()
         with patch.object(vault, 'fetch', return_value={'data': [self.item]}), redirect_stderr(output), \
-                vault.ssh_agent(SCOPE, self.server):
+                vault.ssh_agent(self.scope, self.server):
             for length in (0, 262145):
                 with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
                     client.settimeout(2)
@@ -295,7 +296,7 @@ class AgentTests(unittest.TestCase):
     def test_unapproved_peer_uid_cannot_list_keys(self):
         output = io.StringIO()
         with patch.object(vault, 'SSH_CLIENT_UID', os.getuid() + 1), redirect_stderr(output), \
-                patch.object(vault, 'fetch', return_value={'data': [self.item]}), vault.ssh_agent(SCOPE, self.server):
+                patch.object(vault, 'fetch', return_value={'data': [self.item]}), vault.ssh_agent(self.scope, self.server):
             self.assertNotEqual(self.add('-L').returncode, 0)
         self.assertEqual(output.getvalue().splitlines(), ['vault: SSH agent proxy request refused'])
 
@@ -311,6 +312,7 @@ class AgentTests(unittest.TestCase):
 from pathlib import Path
 s=importlib.util.spec_from_file_location('vault',sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m)
 m.SCOPE_FILE=Path(sys.argv[2])/'scope.json'
+m.WORK_SSH_INPUTS=Path(sys.argv[2])/'work-inputs'
 item=json.loads((Path(sys.argv[2])/'fixture.json').read_text())
 m.fetch=lambda _: {'data':[item]}
 m.owns_listener=lambda _: True
@@ -324,7 +326,7 @@ with m.ssh_agent(json.loads(sys.argv[3]), object()) as agent:
     print(str(private),flush=True)
     time.sleep(30)
 '''
-        with subprocess.Popen(['python3', '-c', code, str(SOURCE), str(self.root), json.dumps(SCOPE)],
+        with subprocess.Popen(['python3', '-c', code, str(SOURCE), str(self.root), json.dumps(self.scope)],
                               user=1001, group=1001, extra_groups=[], stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE) as process:
             try:

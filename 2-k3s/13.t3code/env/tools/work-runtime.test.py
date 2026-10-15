@@ -131,6 +131,7 @@ class WorkRuntimeTests(unittest.TestCase):
             'url': 'http://mcp-hub.mcp-hub-work.svc.cluster.local:8000/searxng'}}})
         safety = json.loads((self.home / '.cc-safety-net/policy.json').read_text())
         self.assertIn(str(cache), safety['secret_protection']['deny_paths'])
+        self.assertIn('/run/t3-work-ssh', safety['secret_protection']['deny_paths'])
         self.assertEqual(subprocess.run(['python3', str(self.home / '.config/t3-policy/guard.py'), 'git push']).returncode, 2)
         self.assertFalse((self.home / runtime.LEGACY_PERMISSION_PATH).exists())
 
@@ -378,7 +379,10 @@ class WorkRuntimeTests(unittest.TestCase):
             self.assertFalse(pod['automountServiceAccountToken'])
             self.assertNotIn('hostPath', json.dumps(pod))
             self.assertEqual({v['persistentVolumeClaim']['claimName'] for v in pod['volumes'] if 'persistentVolumeClaim' in v}, {'t3code-home', 't3code-vault'})
-            self.assertEqual({v['secret']['secretName'] for v in pod['volumes'] if 'secret' in v}, {'t3-runtime-inputs'})
+            secret_names = {v['secret']['secretName'] for v in pod['volumes'] if 'secret' in v}
+            secret_names.update(source['secret']['name'] for v in pod['volumes']
+                                for source in v.get('projected', {}).get('sources', []) if 'secret' in source)
+            self.assertEqual(secret_names, {'t3-runtime-inputs', 't3-work-ssh'})
             inputs = next(v for v in pod['volumes'] if v['name'] == 'inputs')
             self.assertIn({'key': 'work-auth.json', 'path': 'work-auth.json'}, inputs['secret']['items'])
             image = pod['containers'][0]['image']

@@ -32,9 +32,13 @@ python3 /scripts/isolated-config.py apply "$inputs" "$HOME" "$MCP_HUB_INSTANCE"
 /scripts/pi.sh list | python3 /scripts/pi-setup.py check-packages "$HOME"
 if [[ $MCP_HUB_INSTANCE == homelab ]]; then
   bash /scripts/ssh-config.sh
-  bash /scripts/ssh-agent-ready.sh
+else
+  python3 /scripts/work-ssh.py install
 fi
-cat "$HOME/.codex/AGENTS.md" /scripts/homelab-ssh.md >"$HOME/.codex/AGENTS.override.md"
+bash /scripts/ssh-agent-ready.sh
+ssh_instructions=/scripts/homelab-ssh.md
+if [[ $MCP_HUB_INSTANCE == work ]]; then ssh_instructions=/scripts/work-ssh.md; fi
+cat "$HOME/.codex/AGENTS.md" "$ssh_instructions" >"$HOME/.codex/AGENTS.override.md"
 : >"$T3CODE_HOME/userdata/server-runtime.json"
 (
   until curl -fs --max-time 5 -o /dev/null http://127.0.0.1:3773/health; do sleep 1; done
