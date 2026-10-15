@@ -30,6 +30,10 @@ python3 /scripts/pi-setup.py write "$HOME" "$SAFETY_ENTRY"
 [[ -s $HOME/.pi/agent/pi-cliproxyapi-provider/config.json ]]
 python3 /scripts/isolated-config.py apply "$inputs" "$HOME" "$MCP_HUB_INSTANCE"
 /scripts/pi.sh list | python3 /scripts/pi-setup.py check-packages "$HOME"
+if [[ $MCP_HUB_INSTANCE == homelab ]]; then
+  bash /scripts/ssh-config.sh
+  bash /scripts/ssh-agent-ready.sh
+fi
 cat "$HOME/.codex/AGENTS.md" /scripts/homelab-ssh.md >"$HOME/.codex/AGENTS.override.md"
 : >"$T3CODE_HOME/userdata/server-runtime.json"
 (

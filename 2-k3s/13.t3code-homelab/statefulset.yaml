@@ -74,7 +74,7 @@ spec:
               mountPath: /run/t3-vault
       containers:
         - name: t3
-          image: ghcr.io/spyrospsarras/t3-runtime:homelab-inputs-0e9bca73a4c7cd73212676a12d63f4c2
+          image: ghcr.io/spyrospsarras/t3-runtime:homelab-inputs-9a2dd8ee5724c19ba46fd4e1ef76f92c
           imagePullPolicy: IfNotPresent
           command: [bash, /scripts/entrypoint.sh]
           env:
@@ -182,6 +182,9 @@ spec:
               readOnly: true
             - name: tmp
               mountPath: /tmp
+            - name: vault-scope
+              mountPath: /run/t3-vault
+              readOnly: true
           livenessProbe:
             exec:
               command: [bash, /scripts/sshd.sh, check]
@@ -202,6 +205,8 @@ spec:
           env:
             - name: HOME
               value: /vault
+            - name: T3_VAULT_SSH_AGENT
+              value: "1"
             - name: BW_EMAIL
               valueFrom:
                 secretKeyRef:
@@ -293,9 +298,13 @@ spec:
               - key: authorized_keys
                 path: authorized_keys
         - name: scripts
-          configMap:
-            name: t3code-scripts
+          projected:
             defaultMode: 0555
+            sources:
+              - configMap:
+                  name: t3code-scripts
+              - configMap:
+                  name: t3code-homelab-ssh
         - name: tmp
           emptyDir: {}
         - name: runtime-state

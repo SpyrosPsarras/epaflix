@@ -87,6 +87,111 @@ The restricted helper and reader have been removed. See the
 [post-merge retirement steps](../23.mcp-hub/instances/README.md#restricted-reader-retirement-after-merge)
 for live resource and owner-approved account cleanup.
 
+## Vault-backed outbound SSH
+
+The owner marks a key for this pod by storing it as a Bitwarden SSH-key item,
+type 5, in the approved homelab organization and collection. Names and custom
+fields do not select keys. Every SSH-key item in that scope must contain an
+unencrypted private key that OpenSSH can load. With zero scoped SSH-key items,
+the sidecar starts an empty agent and logs only
+`vault: no scoped SSH keys; agent is empty`. T3 and vault reads remain usable,
+but outbound SSH cannot authenticate until the owner moves the intended keys
+into scope and restarts the pod or vault sidecar. A key item with a missing,
+invalid or passphrase-protected private key still rejects the entire key set.
+An unreachable vault prevents startup. The loader never tries the owner's
+login, attachments, other collections or identity files. Ordinary non-SSH items
+are ignored.
+
+After the account check, unlock, sync and post-sync account/status check, the
+UID-1001 vault sidecar rechecks that the local HTTP listener belongs to the
+`bw serve` child. Only then does it fetch the scoped items through that API
+and pipe each private key to `ssh-add` on stdin.
+It starts a fresh foreground `ssh-agent` as UID 1001. Key bytes remain in the
+UID-1001 loader, ssh-add and agent memory, never in UID-1000 processes, files,
+environment variables or logs during startup. Core dumps are disabled. The
+agent's private socket is in a UID-1001-only temporary directory. Any failed
+key load destroys the entire agent, including keys loaded earlier in that run.
+
+OpenSSH checks the Unix peer UID and refuses a different non-root UID even
+when the socket is writable. See the peer-UID check in [OpenSSH's agent
+source][openssh-agent]. A UID-1001 Python socket proxy therefore accepts
+UID-1000 clients at `/run/t3-vault/ssh-agent.sock`. The directory is owned by
+UID 1001 and mounted read-only in T3 and sshd. The proxy permits only agent
+protocol messages for listing public identities and signing. It denies key
+addition, removal and other operations. Each proxy refusal logs one fixed line
+without request data. T3 cannot use the private socket directly. No
+private-key export exists in the allowed protocol. This adds a small proxy
+rather than putting private keys in a UID-1000 agent's memory.
+
+The sidecar publishes its ready scope only after all keys load and the proxy
+starts. T3 waits up to 600 seconds for that scope and a reachable agent,
+including an empty one, before starting the backend. A dead agent or three
+consecutive vault status failures stop the sidecar and remove the socket. A
+full pod restart, or a vault-sidecar restart, syncs the vault and replaces the
+complete agent key set. Restarting only the T3 container does not reload keys.
+The key set is not hot-reloaded.
+
+The existing local vault API is unauthenticated and reachable by every pod
+container. This design keeps automatic key loading out of UID-1000 memory; it
+does not stop a deliberate command from reading vault items through that API.
+Treat pod command execution as trusted, as documented above.
+
+The homelab-only script projection includes the generated SSH config from
+`1-proxmox/ssh/homelab.conf`. `sync-shared.sh` keeps the copy current. Only
+inventory hosts select this agent and the existing `accept-new` host-key
+policy through the generated final-match identity include. Other hosts select
+no agent and require strict host-key checking, even when `SSH_AUTH_SOCK`
+points to the homelab agent. All hosts use public-key authentication without
+fallback identity files or password prompts. Inventory host keys persist in
+the homelab home PVC's known_hosts. A changed host key fails. First contact is
+not independently pinned. Work receives neither the homelab config nor its
+agent socket. The projected SSH guide has one ConfigMap source.
+
+[openssh-agent]:
+  https://github.com/openssh/openssh-portable/blob/V_9_2_P1/ssh-agent.c
+
+### Post-merge SSH acceptance
+
+An empty collection does not block deployment, but real SSH acceptance must
+wait until the owner moves the intended SSH-key items into scope. Wait for the
+new runtime image to build, sync the homelab Application, and replace the pod
+only in an approved idle window. This StatefulSet uses `OnDelete`; syncing the
+manifest alone does not replace the current pod. No work-pod restart is needed
+for this feature. Updating `instructions.md` does not rewrite an already
+provisioned instruction bundle. Refresh that bundle through the normal reviewed
+input rotation so it no longer describes outbound SSH as unavailable. The
+runtime SSH guide is projected independently.
+
+After the intended keys are in scope and the replacement is Ready, run these
+checks without printing vault data:
+
+```sh
+kubectl --context epaflix -n t3code-homelab exec t3code-0 -c t3 -- bash -ec '
+  SSH_AUTH_SOCK=/run/t3-vault/ssh-agent.sock ssh-add -l >/dev/null
+  ssh homepc true
+  ssh k3s-master-51 true
+  ssh laptop true
+'
+```
+
+T3 processes and SSH login sessions do not receive `SSH_AUTH_SOCK`. OpenSSH
+selects the agent only through the inventory's `IdentityAgent` setting.
+Readiness checks and explicit `ssh-add` diagnostics set the variable for that
+command only. Non-OpenSSH clients do not see the agent by default. If the
+laptop is away from home, its LAN alias times out and exits 255 after the
+configured 10-second connect timeout. This is a conditional acceptance result,
+not a key failure. Run the laptop check again when it is home. Adding a reverse
+Tailscale route is outside this change.
+
+In an approved follow-up window, change the scoped key set and replace the
+pod. Check only expected public fingerprints or signing results to confirm
+removed keys are gone. Use synthetic keys for failure checks, and permanently
+delete any synthetic vault items afterwards. An empty set must leave a ready
+but empty agent that cannot authenticate SSH. An invalid key item or
+unavailable vault must leave no ready scope or working agent socket. Do not
+remove the owner's real keys merely to exercise that failure case on the live
+backend.
+
 ## Scoped Kubernetes access
 
 The manual `t3code-homelab-access` Application tracks `rbac/` separately so
@@ -240,7 +345,9 @@ kubectl --context epaflix -n t3code-homelab exec t3code-0 -c t3 -- bash -c '
   kubectl get namespaces -o name >/dev/null
   ! command -v az >/dev/null
   test ! -e "$HOME/.azure"
-  test -z "${SSH_AUTH_SOCK:-}"
+  agent_status=0
+  SSH_AUTH_SOCK=/run/t3-vault/ssh-agent.sock ssh-add -l >/dev/null || agent_status=$?
+  test "$agent_status" -le 1
   test "$(gh api user --jq .login)" = SpyrosPsarras
   gh api repos/SpyrosPsarras/epaflix --silent
   python3 "$HOME/.config/t3-policy/check.py" .local/share/pi/cc-safety-net/2.6.4/dist/bin/cc-safety-net.js
@@ -369,6 +476,7 @@ Run these offline checks from the repository root:
 python3 2-k3s/13.t3code-homelab/tools/inputs.test.py -v
 python3 2-k3s/13.t3code/env/tools/vault-client.test.py -v
 python3 2-k3s/13.t3code/env/tools/vault-startup.test.py -v
+python3 2-k3s/13.t3code/env/tools/homelab-ssh.test.py -v
 python3 2-k3s/13.t3code/env/tools/startup.test.py -v
 python3 2-k3s/13.t3code/env/tools/image-commands.test.py -v
 python3 2-k3s/13.t3code-homelab/tools/rbac.test.py -v
