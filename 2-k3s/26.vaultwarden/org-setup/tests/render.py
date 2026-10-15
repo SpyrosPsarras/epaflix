@@ -17,6 +17,7 @@ with tempfile.TemporaryDirectory() as temporary:
     file = directory / 'kustomization.yaml'
     base = yaml.safe_load(file.read_text())
     base.pop('generators')
+    base.pop('components', None)
     generator = yaml.safe_load((root / 'ksops-generator.yaml').read_text())
     metadata = []
     for name in generator['files']:
