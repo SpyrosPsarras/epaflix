@@ -7,6 +7,85 @@ rule_files:
 evaluation_interval: 1m
 
 tests:
+  # OnDelete updates wait for idle users in all three t3code environments.
+  - interval: 1m
+    input_series:
+      - series: 'kube_statefulset_status_current_revision{namespace="t3code",statefulset="t3code",job="kube-state-metrics",cluster="epaflix",revision="old"}'
+        values: "1+0x30"
+      - series: 'kube_statefulset_status_update_revision{namespace="t3code",statefulset="t3code",job="kube-state-metrics",cluster="epaflix",revision="new"}'
+        values: "1+0x30"
+      - series: 'kube_statefulset_replicas{namespace="t3code",statefulset="t3code",job="kube-state-metrics",cluster="epaflix"}'
+        values: "1+0x30"
+      - series: 'kube_statefulset_status_replicas_updated{namespace="t3code",statefulset="t3code",job="kube-state-metrics",cluster="epaflix"}'
+        values: "0+0x30"
+      - series: 'kube_statefulset_status_current_revision{namespace="t3code-homelab",statefulset="t3code",job="kube-state-metrics",cluster="epaflix",revision="old"}'
+        values: "1+0x30"
+      - series: 'kube_statefulset_status_update_revision{namespace="t3code-homelab",statefulset="t3code",job="kube-state-metrics",cluster="epaflix",revision="new"}'
+        values: "1+0x30"
+      - series: 'kube_statefulset_replicas{namespace="t3code-homelab",statefulset="t3code",job="kube-state-metrics",cluster="epaflix"}'
+        values: "1+0x30"
+      - series: 'kube_statefulset_status_replicas_updated{namespace="t3code-homelab",statefulset="t3code",job="kube-state-metrics",cluster="epaflix"}'
+        values: "0+0x30"
+      - series: 'kube_statefulset_status_current_revision{namespace="t3code-work",statefulset="t3code",job="kube-state-metrics",cluster="epaflix",revision="old"}'
+        values: "1+0x30"
+      - series: 'kube_statefulset_status_update_revision{namespace="t3code-work",statefulset="t3code",job="kube-state-metrics",cluster="epaflix",revision="new"}'
+        values: "1+0x30"
+      - series: 'kube_statefulset_replicas{namespace="t3code-work",statefulset="t3code",job="kube-state-metrics",cluster="epaflix"}'
+        values: "1+0x30"
+      - series: 'kube_statefulset_status_replicas_updated{namespace="t3code-work",statefulset="t3code",job="kube-state-metrics",cluster="epaflix"}'
+        values: "0+0x30"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: KubeStatefulSetUpdateNotRolledOut
+        exp_alerts: []
+
+  # Other StatefulSets in t3code namespaces and t3code elsewhere still alert.
+  - interval: 1m
+    input_series:
+      - series: 'kube_statefulset_status_current_revision{namespace="t3code-work",statefulset="other",job="kube-state-metrics",cluster="epaflix",revision="old"}'
+        values: "1+0x30"
+      - series: 'kube_statefulset_status_update_revision{namespace="t3code-work",statefulset="other",job="kube-state-metrics",cluster="epaflix",revision="new"}'
+        values: "1+0x30"
+      - series: 'kube_statefulset_replicas{namespace="t3code-work",statefulset="other",job="kube-state-metrics",cluster="epaflix"}'
+        values: "1+0x30"
+      - series: 'kube_statefulset_status_replicas_updated{namespace="t3code-work",statefulset="other",job="kube-state-metrics",cluster="epaflix"}'
+        values: "0+0x30"
+      - series: 'kube_statefulset_status_current_revision{namespace="other",statefulset="t3code",job="kube-state-metrics",cluster="epaflix",revision="old"}'
+        values: "1+0x30"
+      - series: 'kube_statefulset_status_update_revision{namespace="other",statefulset="t3code",job="kube-state-metrics",cluster="epaflix",revision="new"}'
+        values: "1+0x30"
+      - series: 'kube_statefulset_replicas{namespace="other",statefulset="t3code",job="kube-state-metrics",cluster="epaflix"}'
+        values: "1+0x30"
+      - series: 'kube_statefulset_status_replicas_updated{namespace="other",statefulset="t3code",job="kube-state-metrics",cluster="epaflix"}'
+        values: "0+0x30"
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: KubeStatefulSetUpdateNotRolledOut
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: KubeStatefulSetUpdateNotRolledOut
+        exp_alerts:
+          - exp_labels:
+              namespace: t3code-work
+              statefulset: other
+              job: kube-state-metrics
+              cluster: epaflix
+              severity: warning
+            exp_annotations:
+              description: "StatefulSet t3code-work/other update has not been rolled out on cluster epaflix."
+              runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubestatefulsetupdatenotrolledout
+              summary: "StatefulSet update has not been rolled out."
+          - exp_labels:
+              namespace: other
+              statefulset: t3code
+              job: kube-state-metrics
+              cluster: epaflix
+              severity: warning
+            exp_annotations:
+              description: "StatefulSet other/t3code update has not been rolled out on cluster epaflix."
+              runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubestatefulsetupdatenotrolledout
+              summary: "StatefulSet update has not been rolled out."
+
   # Match the credential_lines_redacted 5m idle TTL in alloy-values.yaml.
 
   # A logger still matching every minute: the live counter is the total.
