@@ -357,8 +357,8 @@ class RenderTests(unittest.TestCase):
             self.assertEqual(secret["metadata"]["name"], "mcp-hub-instance")
             self.assertEqual(secret["metadata"]["namespace"], "mcp-hub-homelab")
             work = render(root / "instances/work")
-            work_deployment = next(doc for doc in work if doc["kind"] == "Deployment")
-            self.assertEqual(work_deployment["spec"]["template"]["metadata"]["annotations"][annotation], "r2")
+            work_hub = next(doc for doc in work if doc["kind"] == "Deployment" and doc["metadata"]["name"] == "mcp-hub")
+            self.assertEqual(work_hub["spec"]["template"]["metadata"]["annotations"][annotation], "r2")
 
             credentials = json.loads((overlay / "credentials.json").read_text())
             credentials["upstreams"]["searxng"]["token"] = "synthetic-rotated-upstream"
