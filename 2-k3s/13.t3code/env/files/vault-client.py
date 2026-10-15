@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import contextlib
+import fcntl
 import json
 import math
 import os
@@ -19,7 +20,7 @@ import threading
 import time
 import urllib.request
 from urllib.parse import quote, urlencode, urlsplit
-from uuid import UUID
+from uuid import UUID, uuid4
 
 ADDRESS = 'http://127.0.0.1:8087'
 MAX_RESPONSE_BYTES = 12 * 1024 * 1024
@@ -96,16 +97,18 @@ def scope():
     return checked_uuid(selected['organizationId']), checked_uuid(selected['collectionId'])
 
 
-def fetch(path, binary=False, method='GET', payload=None, timeout=HTTP_REQUEST_TIMEOUT_SECONDS):
+def fetch(path, binary=False, method='GET', payload=None, timeout=HTTP_REQUEST_TIMEOUT_SECONDS,
+          content_type='application/json'):
     def expired(*_):
         raise Refused
+
     previous = signal.signal(signal.SIGALRM, expired)
     signal.setitimer(signal.ITIMER_REAL, timeout)
     try:
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
         request = urllib.request.Request(ADDRESS + path, method=method,
-            data=None if payload is None else json.dumps(payload).encode(),
-            headers={} if payload is None else {'Content-Type': 'application/json'})
+            data=payload if isinstance(payload, bytes) else None if payload is None else json.dumps(payload).encode(),
+            headers={} if payload is None else {'Content-Type': content_type})
         with opener.open(request, timeout=timeout) as response:
             if response.status != 200 or response.headers.get_content_type() != (
                     'application/octet-stream' if binary else 'application/json'):
@@ -118,30 +121,38 @@ def fetch(path, binary=False, method='GET', payload=None, timeout=HTTP_REQUEST_T
         result = json.loads(data)
         if result.get('success') is not True:
             raise Refused
-        return result['data']
+        return result.get('data') if method in ('POST', 'PUT', 'DELETE') else result['data']
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)
         signal.signal(signal.SIGALRM, previous)
 
 
-def selected_item(args):
+def scoped_item(item, organization, collection, item_id=None):
+    if not isinstance(item, dict) or item.get('organizationId') != organization or (
+            collection not in (item.get('collectionIds') or [])) or item.get('deletedDate') is not None:
+        raise Refused
+    checked_uuid(item['id'])
+    if item_id is not None and item['id'] != item_id:
+        raise Refused
+    return item
+
+
+def selected_item(item_id, name=None):
     organization, collection = scope()
-    if args.item:
-        item = fetch('/object/item/' + checked_uuid(args.item))
-        if item.get('id') != args.item:
+    if item_id:
+        item = fetch('/object/item/' + checked_uuid(item_id))
+        if item.get('id') != item_id:
             raise Refused
     else:
-        items = fetch('/list/object/items?' + urlencode({'search': args.name, 'organizationid': organization,
+        items = fetch('/list/object/items?' + urlencode({'search': name, 'organizationid': organization,
                                                        'collectionid': collection}))['data']
-        matches = [item for item in items if item.get('name') == args.name and
-                   item.get('organizationId') == organization and collection in item.get('collectionIds', [])]
+        matches = [item for item in items if item.get('name') == name and
+                   item.get('organizationId') == organization and collection in (item.get('collectionIds') or []) and
+                   item.get('deletedDate') is None]
         if len(matches) != 1:
             raise Refused
         item = matches[0]
-    if item.get('organizationId') != organization or collection not in item.get('collectionIds', []):
-        raise Refused
-    checked_uuid(item['id'])
-    return item
+    return scoped_item(item, organization, collection)
 
 
 def environment_name(value):
@@ -194,7 +205,7 @@ def run(argv):
             (args.attachment is None) != (args.attachment_env is None)) or (
             not math.isfinite(args.timeout) or not CHILD_TIMEOUT_MIN_SECONDS <= args.timeout <= CHILD_TIMEOUT_MAX_SECONDS):
         raise Refused
-    item = selected_item(args)
+    item = selected_item(args.item, args.name)
     additions = {}
     for field, target in mappings:
         values = [item.get('login', {}).get('password')] if field is None else [
@@ -223,6 +234,112 @@ def run(argv):
     code = exit_code(code)
     print('vault: command finished; exit code ' + str(code))
     return code
+
+
+def read_file(path):
+    with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), 'rb') as source:
+        if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+            raise Refused
+        data = source.read(MAX_RESPONSE_BYTES + 1)
+    if len(data) > MAX_RESPONSE_BYTES:
+        raise Refused
+    return data
+
+
+def input_document(args, creating):
+    data = os.environ[environment_name(args.input_env)].encode() if args.input_env else read_file(args.input_file)
+    if len(data) > MAX_RESPONSE_BYTES:
+        raise Refused
+    document = json.loads(data)
+    allowed = {'name', 'type', 'notes', 'login', 'fields', 'secureNote', 'card', 'identity', 'sshKey', 'favorite', 'reprompt'}
+    if not isinstance(document, dict) or not document or document.keys() - allowed:
+        raise Refused
+    if creating and not {'name', 'type'}.issubset(document):
+        raise Refused
+    if 'name' in document and (not isinstance(document['name'], str) or not document['name'].strip()):
+        raise Refused
+    if 'type' in document and (type(document['type']) is not int or document['type'] not in (1, 2, 3, 4, 5)):
+        raise Refused
+    return document
+
+
+@contextlib.contextmanager
+def write_lock():
+    path = Path.home() / '.vault-write.lock'
+    with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600), 'w') as lock:
+        info = os.fstat(lock.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+            raise Refused
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+
+
+def attach(item, path, organization, collection):
+    name = Path(path).name
+    if not name or len(name) > 255 or any(ord(char) < 32 or ord(char) > 126 or char in ('"', '\\') for char in name):
+        raise Refused
+    data = read_file(path)
+    previous = [entry for entry in item.get('attachments') or [] if entry.get('fileName') == name]
+    if len(previous) > 1:
+        raise Refused
+    boundary = 'vault-' + uuid4().hex
+    body = ('--' + boundary + '\r\nContent-Disposition: form-data; name="file"; filename="' + name +
+            '"\r\nContent-Type: application/octet-stream\r\n\r\n').encode() + data + ('\r\n--' + boundary + '--\r\n').encode()
+    updated = scoped_item(fetch('/attachment?' + urlencode({'itemid': item['id']}), method='POST', payload=body,
+        content_type='multipart/form-data; boundary=' + boundary, timeout=VAULT_OPERATION_TIMEOUT_SECONDS), organization, collection, item['id'])
+    existing = {entry['id'] for entry in item.get('attachments') or []}
+    added = [entry for entry in updated.get('attachments') or [] if entry.get('fileName') == name and entry['id'] not in existing]
+    if len(added) != 1 or not isinstance(added[0]['id'], str) or not re.fullmatch(r'[A-Za-z0-9-]{1,128}', added[0]['id']):
+        raise Refused
+    attachment_id = added[0]['id']
+    suffix = '?' + urlencode({'itemid': item['id']})
+    attachment_path = '/object/attachment/' + quote(attachment_id, safe='') + suffix
+    try:
+        if fetch(attachment_path, binary=True, timeout=VAULT_OPERATION_TIMEOUT_SECONDS) != data:
+            raise Refused
+    except Exception:
+        with contextlib.suppress(Exception):
+            fetch(attachment_path, method='DELETE', timeout=VAULT_OPERATION_TIMEOUT_SECONDS)
+        raise
+    if previous:
+        fetch('/object/attachment/' + quote(previous[0]['id'], safe='') + suffix, method='DELETE',
+              timeout=VAULT_OPERATION_TIMEOUT_SECONDS)
+    return attachment_id
+
+
+def write(command, argv):
+    parser = Parser(description='Write organization-scoped vault items from private files or VAULT_ environment variables.')
+    if command != 'create':
+        parser.add_argument('--item', required=True)
+    if command in ('create', 'update'):
+        source = parser.add_mutually_exclusive_group(required=True)
+        source.add_argument('--input-env')
+        source.add_argument('--input-file')
+    if command == 'attach':
+        parser.add_argument('--file', required=True)
+    args = parser.parse_args(argv)
+    organization, collection = scope()
+    document = input_document(args, command == 'create') if command in ('create', 'update') else None
+    with write_lock():
+        if command == 'create':
+            item = scoped_item(fetch('/object/item', method='POST', payload={**document,
+                'organizationId': organization, 'collectionIds': [collection], 'folderId': None},
+                timeout=VAULT_OPERATION_TIMEOUT_SECONDS),
+                organization, collection)
+        else:
+            item = selected_item(args.item)
+        result = {'status': {'create': 'created', 'update': 'updated', 'trash': 'trashed', 'attach': 'attached'}[command],
+                  'itemId': item['id']}
+        if command == 'update':
+            scoped_item(fetch('/object/item/' + item['id'], method='PUT', payload={**item, **document},
+                              timeout=VAULT_OPERATION_TIMEOUT_SECONDS),
+                        organization, collection, item['id'])
+        elif command == 'trash':
+            fetch('/object/item/' + item['id'], method='DELETE', timeout=VAULT_OPERATION_TIMEOUT_SECONDS)
+        elif command == 'attach':
+            result['attachmentId'] = attach(item, args.file, organization, collection)
+    print(json.dumps(result))
+    return 0
 
 
 def bw(arguments, client_env):
@@ -509,6 +626,8 @@ def serve():
                 raise Refused
             if status['status'] == 'locked':
                 retry(lambda: unlock(server, password))
+            if not owns_listener(server):
+                raise UnsafeListener
             fetch('/sync', method='POST', timeout=VAULT_OPERATION_TIMEOUT_SECONDS)
             if not client_ready(server):
                 raise Refused
@@ -528,6 +647,7 @@ def serve():
 def main(argv):
     def cancel(*_):
         raise Cancelled
+
     signal.signal(signal.SIGTERM, cancel)
     signal.signal(signal.SIGINT, cancel)
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
@@ -537,6 +657,8 @@ def main(argv):
             return run(argv[1:])
         if argv == ['serve']:
             return serve()
+        if argv and argv[0] in ('create', 'update', 'trash', 'attach'):
+            return write(argv[0], argv[1:])
         raise Refused
     except subprocess.TimeoutExpired:
         print('vault: timed out; exit code 124')

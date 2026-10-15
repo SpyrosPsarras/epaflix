@@ -12,6 +12,8 @@ After changing image inputs, run `bash tools/sync-runtime-image.sh` here and inc
 
 The [isolated runtime contract](isolated-runtime.md) defines private policy inputs, homelab kubeconfig constraints, provider retention, Codex requirements and stopped input rotation.
 
+The isolated clients also support [scoped item writes and attachment replacement](vault-writes.md), with synthetic post-merge canaries for both orgs.
+
 Credentials arrive at runtime and are never baked into the image. MCP servers come from `2-k3s/23.mcp-hub`; the pod entrypoint registers Pi, Claude Code and Codex against the hub using environment references.
 
 ## Pi
