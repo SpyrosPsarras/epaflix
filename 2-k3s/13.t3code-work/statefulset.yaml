@@ -57,7 +57,7 @@ spec:
               mountPath: /runtime-state
       containers:
         - name: t3
-          image: ghcr.io/spyrospsarras/t3-runtime:work-inputs-4d108313fdcbb932da3238970a54ee72
+          image: ghcr.io/spyrospsarras/t3-runtime:work-inputs-9b0a1e0d731939e37cefa6ec5a25d22f
           imagePullPolicy: IfNotPresent
           command: [bash, /scripts/entrypoint.sh]
           env:
