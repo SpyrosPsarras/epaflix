@@ -12,6 +12,9 @@ resources:
   - network-policy.yaml
 
 configMapGenerator:
+  - name: t3code-machine-info
+    literals:
+      - 'machine-info=PRETTY_HOSTNAME="homelab"'
   - name: t3code-homelab-ssh
     files:
       - files/homelab-ssh.conf
