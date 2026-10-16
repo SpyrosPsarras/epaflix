@@ -90,6 +90,15 @@ if __name__ == '__main__':
             updated['files']['skills/implement/SKILL.md']['data'] = base64.b64encode(b'changed').decode()
             module.install(json.dumps(updated).encode(), home)
             assert (home / '.claude/skills/implement/SKILL.md').read_text() == 'changed'
+            original = (home / '.claude/AGENTS.md').read_bytes()
+            for guidance in (b'\nSynthetic runtime guidance.\n', b'\nRevised runtime guidance.\n'):
+                for _ in range(2):
+                    module.install(json.dumps(updated).encode(), home, guidance)
+                    for name in ('.claude/AGENTS.md', '.codex/AGENTS.md'):
+                        assert (home / name).read_bytes() == original + guidance
+            module.install(json.dumps(updated).encode(), home)
+            assert (home / '.claude/AGENTS.md').read_bytes() == original
+            assert json.loads(payload) == fixture()
             bad = fixture()
             bad['files']['../escape'] = bad['files']['instructions.md']
             try:

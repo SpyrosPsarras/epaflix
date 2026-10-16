@@ -79,8 +79,11 @@ class WorkRuntimeTests(unittest.TestCase):
         self.requirements = self.root / 'etc/codex/requirements.toml'
         self.requirements_patch = patch.object(runtime, 'CODEX_REQUIREMENTS', self.requirements)
         self.requirements_patch.start()
+        self.guidance_patch = patch.object(runtime, 'GUIDANCE', ROOT / 'env/files/isolated-guidance.md')
+        self.guidance_patch.start()
 
     def tearDown(self):
+        self.guidance_patch.stop()
         self.requirements_patch.stop()
         self.env.stop()
         self.tmp.cleanup()
@@ -102,6 +105,23 @@ class WorkRuntimeTests(unittest.TestCase):
         path.write_text(json.dumps(obj))
         refresh(self.inputs)
 
+    def test_image_guidance_reaches_all_instruction_files_without_input_rotation(self):
+        payload = (self.inputs / 'bundle.json').read_bytes()
+        guidance = (ROOT / 'env/files/isolated-guidance.md').read_text()
+        source = base64.b64decode(json.loads(payload)['files']['instructions.md']['data']).decode()
+        expected = source.replace('/fixture/', str(self.home) + '/') + guidance
+        setup = importlib.import_module('pi-setup')
+        ssh = ROOT / 'env/files/isolated-ssh.md'
+        for _ in range(2):
+            self.prepare()
+            with patch.dict(os.environ, {'ANTHROPIC_BASE_URL': 'http://127.0.0.1:18317'}), \
+                    patch.object(setup, 'fetch_models', return_value=[{'id': 'codex/fixture'}]):
+                setup.write(self.home, '/fixture/safety', ssh)
+            for name in ('.claude/AGENTS.md', '.codex/AGENTS.md'):
+                self.assertEqual((self.home / name).read_text(), expected)
+            self.assertEqual((self.home / '.pi/agent/AGENTS.md').read_text(), expected + '\n' + ssh.read_text())
+            self.assertEqual((self.inputs / 'bundle.json').read_bytes(), payload)
+
     def test_work_only_hub_policies_settings_history_and_azure_persist(self):
         os.environ['T3_VAULT_CLIENT'] = '1'
         self.prepare()
@@ -119,6 +139,7 @@ class WorkRuntimeTests(unittest.TestCase):
         settings = json.loads((state / 'settings.json').read_text())
         self.assertEqual(settings['theme'], 'fixture')
         self.assertEqual(settings['providerInstances']['pi']['displayName'], 'Work fixture')
+        self.assertFalse(settings['providerInstances']['codex']['enabled'])
         self.assertEqual((state / 'history-fixture').read_text(), 'work-only')
         self.assertEqual((cache / 'session-fixture').read_text(), 'synthetic-work-session')
         for name in ('.pi/agent/mcp.json', '.claude.json', '.claude/.claude.json'):
@@ -146,7 +167,7 @@ class WorkRuntimeTests(unittest.TestCase):
              {**canonical, 'options': options}),
             ({'instanceId': 'pi', 'model': 'cliproxy-textgen/'}, canonical),
             ({'instanceId': 'pi', 'model': 'cliproxy-textgen/claude/fixture', 'options': options}, None),
-            ({'instanceId': 'codex', 'model': 'codex/fixture', 'options': options}, None)]
+            ({'instanceId': 'codex', 'model': 'codex/fixture', 'options': options}, canonical)]
         default = {'instanceId': 'codex', 'model': 'codex/fixture', 'options': options}
         for selection, expected in cases:
             with self.subTest(selection=selection):
@@ -158,7 +179,8 @@ class WorkRuntimeTests(unittest.TestCase):
                         settings = json.loads(path.read_text())
                         self.assertEqual(settings['textGenerationModelSelection'],
                                          selection if expected is None else expected)
-                        self.assertEqual(settings['defaultModelSelection'], default)
+                        self.assertEqual(settings['defaultModelSelection'],
+                                         {'instanceId': 'pi', 'model': 'cliproxy/claude/claude-opus-5-5'})
                         if restart == 0:
                             first = path.read_bytes()
                         else:
@@ -357,7 +379,7 @@ class WorkRuntimeTests(unittest.TestCase):
         self.assertEqual(allowed, {'versions.env', 'env/', 'env/Dockerfile', 'env/tools/',
             'env/tools/os-packages.txt', 'env/tools/install-cluster-tools.sh',
             'env/tools/package.json', 'env/tools/package-lock.json',
-            'env/files/', 'env/files/vault-client.py'})
+            'env/files/', 'env/files/vault-client.py', 'env/files/isolated-guidance.md'})
 
     def test_gitops_work_overlay_and_jobs_are_independent_and_revision_tracked(self):
         import yaml

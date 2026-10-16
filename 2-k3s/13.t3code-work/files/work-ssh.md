@@ -1,8 +1,19 @@
 # Work SSH
 
-Use only the owner-approved aliases in the generated SSH config. The private
-host list is `/run/t3-work-ssh/hosts.json`. Do not print it, the generated
-config, pinned host keys or addresses into model-visible output.
+Outbound SSH works only for owner-approved hosts in this pod's generated SSH
+config. The private host list is `/run/t3-work-ssh/hosts.json`. Do not print it,
+the generated config, pinned host keys or addresses into model-visible output.
+
+For an alias stored in `SSH_TARGET`, check without connecting by filtering
+`ssh -G` to the agent setting:
+
+```sh
+ssh -G "$SSH_TARGET" 2>/dev/null | awk '$1 == "identityagent" {print $2}'
+```
+
+An unapproved host reports `none`; an approved alias selects this pod's work
+agent. The [work README](https://github.com/SpyrosPsarras/epaflix/blob/main/2-k3s/13.t3code-work/README.md#outbound-work-ssh)
+describes host approval.
 
 OpenSSH selects this pod's work-only agent through the approved alias config.
 T3 processes and SSH login sessions do not receive `SSH_AUTH_SOCK`.

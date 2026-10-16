@@ -279,11 +279,15 @@ home = Path.home()
 settings_path = home / '.t3/userdata/settings.json'
 codex_path = home / '.codex/config.toml'
 settings = json.loads(settings_path.read_text())
+guidance = Path('/opt/t3/isolated-guidance.md').read_text()
+for name in ('.claude/AGENTS.md', '.codex/AGENTS.md', '.pi/agent/AGENTS.md', '.codex/AGENTS.override.md'):
+    assert (home / name).read_text().count(guidance) == 1
+assert settings['providerInstances']['codex']['enabled'] is False
 codex = tomllib.loads(codex_path.read_text())
 project = str(home / 'projects' / os.environ['MCP_HUB_INSTANCE'])
 if sys.argv[1] == 'first':
     settings['providerInstances']['pi']['displayName'] = 'Isolated preference fixture'
-    settings['providerInstances']['codex']['enabled'] = False
+    settings['providerInstances']['codex']['enabled'] = True
     settings['providerInstances']['codex']['config']['customModels'] = ['codex/fixture']
     settings['providerInstances']['work'] = {'driver': 'codex', 'enabled': True}
     settings_path.write_text(json.dumps(settings))

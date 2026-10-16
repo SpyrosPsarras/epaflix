@@ -29,7 +29,7 @@ def bundle(home):
     return {'sourceHome': str(home), 'files': files}
 
 
-def install(payload, home):
+def install(payload, home, instructions=b''):
     obj = json.loads(payload)
     decoded = {}
     for name, item in obj['files'].items():
@@ -44,9 +44,11 @@ def install(payload, home):
         decoded[name] = (data, 0o700 if item['executable'] else 0o600)
     if 'instructions.md' not in decoded or not any(p.endswith('/SKILL.md') for p in decoded):
         raise ValueError('Incomplete private configuration')
+    data, mode = decoded['instructions.md']
+    decoded['instructions.md'] = (data + instructions, mode)
     root = home / '.local/share/t3-private-config'
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    target = root / hashlib.sha256(payload).hexdigest()
+    target = root / hashlib.sha256(payload + instructions).hexdigest()
     if not target.exists():
         stage = Path(tempfile.mkdtemp(dir=root))
         try:
