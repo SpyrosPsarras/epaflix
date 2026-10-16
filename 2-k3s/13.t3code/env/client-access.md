@@ -15,13 +15,14 @@ window because the StatefulSet uses `OnDelete` updates. Set `namespace` to
 
 ```sh
 namespace=t3code-homelab
-kubectl --context epaflix -n "$namespace" delete pod t3code-0
+pod=${namespace#t3code-}-0
+kubectl --context epaflix -n "$namespace" delete pod "$pod"
 ```
 
 After the replacement pod is ready, check status:
 
 ```sh
-kubectl --context epaflix -n "$namespace" exec t3code-0 -c t3 -- \
+kubectl --context epaflix -n "$namespace" exec "$pod" -c t3 -- \
   t3 connect status --base-dir /home/t3/.t3
 ```
 

@@ -93,7 +93,7 @@ These are operator steps, not implementation-time cluster changes.
 
    ```sh
    for ns in t3code-homelab t3code-work; do
-     kubectl --context epaflix -n "$ns" exec -i t3code-0 -c t3 -- python3 - <<'PY'
+     kubectl --context epaflix -n "$ns" exec -i "${ns#t3code-}-0" -c t3 -- python3 - <<'PY'
    import socket
    import urllib.error
    import urllib.parse
@@ -123,9 +123,9 @@ These are operator steps, not implementation-time cluster changes.
 
    ```sh
    for ns in t3code-homelab t3code-work; do
-     kubectl --context epaflix -n "$ns" exec t3code-0 -c t3 -- \
+     kubectl --context epaflix -n "$ns" exec "${ns#t3code-}-0" -c t3 -- \
        curl -fsS --max-time 5 -o /dev/null http://127.0.0.1:3773/health
-     kubectl --context epaflix -n "$ns" exec t3code-0 -c sshd -- \
+     kubectl --context epaflix -n "$ns" exec "${ns#t3code-}-0" -c sshd -- \
        bash /scripts/sshd.sh check
    done
    ```

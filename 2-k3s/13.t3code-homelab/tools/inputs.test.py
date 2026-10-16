@@ -112,9 +112,11 @@ class InputsTest(unittest.TestCase):
                 self.replicas, self.pod = replicas, pod
 
             def get(self, kind, namespace, name):
-                if kind == 'statefulset':
+                if namespace != 't3code-homelab':
+                    raise AssertionError('Unexpected namespace')
+                if (kind, name) == ('statefulset', 'homelab'):
                     return {'spec': {'replicas': self.replicas}}
-                if kind == 'pod':
+                if (kind, name) == ('pod', 'homelab-0'):
                     return self.pod
                 raise AssertionError('Unexpected resource read')
 

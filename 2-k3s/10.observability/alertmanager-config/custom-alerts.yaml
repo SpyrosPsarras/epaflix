@@ -781,7 +781,11 @@ spec:
               0
             )
             unless on (namespace, statefulset)
-            kube_statefulset_replicas{namespace=~"t3code|t3code-homelab|t3code-work", statefulset="t3code"}
+            (
+              kube_statefulset_replicas{namespace="t3code", statefulset="t3code"}
+              or kube_statefulset_replicas{namespace="t3code-homelab", statefulset="homelab"}
+              or kube_statefulset_replicas{namespace="t3code-work", statefulset="work"}
+            )
           for: 15m
           labels:
             severity: warning

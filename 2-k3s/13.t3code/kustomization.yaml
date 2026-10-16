@@ -31,7 +31,29 @@ configMapGenerator:
 replacements:
   - source:
       kind: StatefulSet
-      name: t3code
+      fieldPath: metadata.name
+    targets:
+      - select:
+          kind: CronJob
+          name: t3code-idle-rollout
+        fieldPaths:
+          - spec.jobTemplate.spec.template.spec.containers.[name=rollout].env.[name=STATEFULSET_NAME].value
+      - select:
+          kind: Role
+          name: t3code-idle-rollout
+        fieldPaths:
+          - rules.0.resourceNames.0
+      - select:
+          kind: Role
+          name: t3code-idle-rollout
+        fieldPaths:
+          - rules.1.resourceNames.0
+          - rules.2.resourceNames.0
+        options:
+          delimiter: "-"
+          index: 0
+  - source:
+      kind: StatefulSet
       fieldPath: spec.template.spec.containers.[name=t3].image
     targets:
       - select:
@@ -46,13 +68,11 @@ replacements:
           - spec.jobTemplate.spec.template.spec.containers.[name=rollout].image
       - select:
           kind: StatefulSet
-          name: t3code
         fieldPaths:
           - spec.template.spec.initContainers.[name=runtime-state].image
           - spec.template.spec.containers.[name=sshd].image
   - source:
       kind: StatefulSet
-      name: t3code
       fieldPath: spec.template.spec.affinity
     targets:
       - select:

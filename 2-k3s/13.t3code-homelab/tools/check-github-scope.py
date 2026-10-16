@@ -31,7 +31,7 @@ def owner_check():
     if result.returncode or not targets:
         raise ValueError('Owner GitHub access must identify a private organization repository')
     result = subprocess.run(['kubectl', '--context', CONTEXT, '-n', 't3code-homelab',
-        'exec', '-i', 't3code-0', '-c', 't3', '--', 'python3', '-c', Path(__file__).read_text(), '--backend'],
+        'exec', '-i', 'homelab-0', '-c', 't3', '--', 'python3', '-c', Path(__file__).read_text(), '--backend'],
         input=targets[0], text=True, capture_output=True)
     if result.returncode:
         raise ValueError('Backend GitHub scope check failed')

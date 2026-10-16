@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: t3code
+  name: work
   labels:
     app.kubernetes.io/name: t3code
 spec:

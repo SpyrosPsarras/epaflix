@@ -30,7 +30,7 @@ case "${1:-}" in
     read -r -p 'Type dev to begin device-code login inside the work pod: ' target
     [[ "$target" == dev ]] || exit 1
     printf '%s\n' 'Stage 2/2: Follow the device-code instructions in this private terminal.'
-    kubectl --context epaflix -n t3code-work exec -it t3code-0 -c t3 -- \
+    kubectl --context epaflix -n t3code-work exec -it work-0 -c t3 -- \
       env -u SSH_AUTH_SOCK -u AZURE_CONFIG_DIR /scripts/work-aks-auth.py login
     ;;
   *)
