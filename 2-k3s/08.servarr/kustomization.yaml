@@ -116,4 +116,4 @@ images:
   - name: ghcr.io/spyrospsarras/airvpn-bluetit
     digest: sha256:f058ad66716923332981035636f2ebbffc48eca097acb8cb88a6b422341cab41
   - name: ghcr.io/spyrospsarras/vpn-picker
-    digest: sha256:087fbb635ef4c335361df32caf011a32e2b3ecf06c48b6095da333cc1e2d747a
+    digest: sha256:25b0480f78d74eb18a8033488140c8279be34de3d16b705b79c767cfe84033f9
