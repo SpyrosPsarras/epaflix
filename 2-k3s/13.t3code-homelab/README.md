@@ -389,7 +389,21 @@ or provider environments. Every configured MCP server URL must start with
 hub token or work/cloud login cache. Check that the mixed backend remains
 healthy, without reading its home or histories.
 
+### T3 Connect
+
+This pod is live on T3 Connect. Follow the shared
+[T3 Connect and Zed SSH procedure](../13.t3code/env/client-access.md).
+The one-time owner link command for this pod is:
+
+```sh
+kubectl --context epaflix -n t3code-homelab exec -it t3code-0 -c t3 -- \
+  t3 connect link --headless --base-dir /home/t3/.t3
+```
+
 ### homePC and laptop acceptance
+
+The SSH tunnel below is an acceptance and diagnostic check, not the normal
+client connection. Use T3 Connect for app access.
 
 Prepare a dedicated identity on each client and provision only its public key
 in the stopped input-rotation window. Never share a private key between clients.
@@ -417,11 +431,8 @@ bash 2-k3s/13.t3code/env/tools/connect-laptop.sh \
 
 Keep the tunnel running. From another homePC terminal, check
 `http://127.0.0.1:13773/health` and
-`http://127.0.0.1:13773/.well-known/t3/environment`. Select this backend in T3,
-using the supported SSH target or private headless pairing flow. If pairing
-is needed, run `t3 pair --base-dir /home/t3/.t3 --ttl 5m` only in an owner's
-private terminal in this backend. Its output contains a credential and must
-not enter agent logs or issue evidence. Keep the mixed environment entry.
+`http://127.0.0.1:13773/.well-known/t3/environment`. Select this backend in T3
+through the owner's T3 account. Keep the mixed environment entry.
 
 Create a T3 thread in the homelab project with the Pi provider and an enabled
 `cliproxy/` model. Send exactly:
