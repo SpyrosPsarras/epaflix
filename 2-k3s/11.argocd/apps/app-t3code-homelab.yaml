@@ -13,6 +13,8 @@ spec:
     server: https://kubernetes.default.svc
     namespace: t3code-homelab
   syncPolicy:
+    automated:
+      prune: true
     syncOptions:
       - ServerSideApply=true
   ignoreDifferences:

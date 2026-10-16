@@ -13,6 +13,8 @@ spec:
     server: https://kubernetes.default.svc
     namespace: t3code-work
   syncPolicy:
+    automated:
+      prune: true
     syncOptions:
       - ServerSideApply=true
   ignoreDifferences:

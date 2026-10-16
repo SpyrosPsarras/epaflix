@@ -5,6 +5,13 @@ with a fresh PVC, T3 identity, histories and personal project checkout. The
 mixed backend stays running. No mixed-home files, histories, credentials or
 cloud caches are imported.
 
+The runtime Application automatically syncs merged revisions with pruning,
+without self-healing. `OnDelete` keeps the running pod until the idle-rollout
+job replaces it after 30 idle minutes. For input rotation, pause both
+`app-of-apps` and this Application before scaling down, as described in the
+[shared procedure](../13.t3code/env/isolated-runtime.md#input-rotation).
+The separate access Application remains manual-sync.
+
 The shared `13.t3code` component supplies the maintained installer, provider
 setup, hub clients, image-prepull and idle-rollout jobs. The
 homelab image excludes Azure CLI and kubelogin. Its MCP clients use only the
@@ -154,13 +161,14 @@ agent socket. The projected SSH guide has one ConfigMap source.
 
 An empty collection does not block deployment, but real SSH acceptance must
 wait until the owner moves the intended SSH-key items into scope. Wait for the
-new runtime image to build, sync the homelab Application, and replace the pod
-only in an approved idle window. This StatefulSet uses `OnDelete`; syncing the
-manifest alone does not replace the current pod. No work-pod restart is needed
-for this feature. Updating `instructions.md` does not rewrite an already
-provisioned instruction bundle. Refresh that bundle through the normal reviewed
-input rotation so it no longer describes outbound SSH as unavailable. The
-runtime SSH guide is projected independently.
+new runtime image to build and the homelab Application to sync automatically.
+Let the idle-rollout job replace the pod, or replace it in an approved idle
+window. This StatefulSet uses `OnDelete`; syncing the manifest alone does not
+replace the current pod. No work-pod restart is needed for this feature.
+Updating `instructions.md` does not rewrite an already provisioned instruction
+bundle. Refresh that bundle through the normal reviewed input rotation so it
+no longer describes outbound SSH as unavailable. The runtime SSH guide is
+projected independently.
 
 After the intended keys are in scope and the replacement is Ready, run these
 checks without printing vault data:
@@ -306,7 +314,11 @@ unauthenticated. Complete the rotation procedure before restoring the backend.
 
 These are orchestrator steps, not commands for an unmerged implementation.
 For a first install, provision the private inputs and owner GitHub grant after
-the access Application is healthy and before syncing the runtime Application.
+the access Application is healthy. Complete provisioning and routing review
+before merging the runtime revision, which syncs automatically. After staging
+hub client digest changes, advance the homelab hub's tracked input revision
+through review and merge. The hub syncs automatically with pruning and
+self-healing, and the new pod loads its client digest map at startup.
 Check for active shared-proxy requests before the `remote-pi` sync because
 its transcript ConfigMap change rolls that shared Deployment. The existing
 mixed client keys remain registered.
@@ -316,16 +328,15 @@ argocd app sync t3code-homelab-access
 argocd app wait t3code-homelab-access --sync --health --timeout 300
 argocd app sync remote-pi
 argocd app wait remote-pi --sync --health --timeout 600
-kubectl --context epaflix -n mcp-hub-homelab rollout restart deployment/mcp-hub
+argocd app wait mcp-hub-homelab --sync --health --timeout 300
 kubectl --context epaflix -n mcp-hub-homelab rollout status deployment/mcp-hub --timeout=180s
-argocd app sync t3code-homelab
 argocd app wait t3code-homelab --sync --health --timeout 1200
 kubectl --context epaflix -n t3code-homelab wait --for=condition=Ready pod/homelab-0 --timeout=300s
 ```
 
-The hub reload is required because its client digest map loads at startup.
-Before the first sync, confirm that the LoadBalancer pool and reachable network
-are suitable for this homelab SSH endpoint. No public HTTP ingress is added.
+Before merging the first runtime revision, confirm that the LoadBalancer pool
+and reachable network are suitable for this homelab SSH endpoint. No public
+HTTP ingress is added.
 The SSH address is pinned to `192.168.10.113` at `t3code-homelab.epaflix.lan`.
 Confirm the Service address with:
 

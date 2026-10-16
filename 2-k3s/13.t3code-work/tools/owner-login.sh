@@ -24,7 +24,7 @@ case "${1:-}" in
   azure)
     printf '%s\n' \
       'Stage 1/2: Confirm the reviewed inputs pin exactly the AKS dev cluster.' \
-      'The work pod must already be healthy after reviewed merge and manual sync.' \
+      'The work pod must already be healthy after reviewed merge and automatic sync.' \
       'Use the approved work Azure identity. Never select a production subscription or cluster.' \
       'No Azure credentials are copied from this terminal or from the mixed pod.'
     read -r -p 'Type dev to begin device-code login inside the work pod: ' target

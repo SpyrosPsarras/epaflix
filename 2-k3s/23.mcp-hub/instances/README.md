@@ -12,11 +12,14 @@ Secret in each namespace. Provisioning, the dedicated work client and owner enro
 are documented in [the work backend](../../13.t3code-work/README.md#first-deployment-for-1837).
 Other work services remain owner-added later. No work data source is configured.
 
-The two new ArgoCD Applications require manual sync. Their public overlays
-contain no Secret, approved service inventory or account identity. Each has
-an internal-only Traefik route with a generic homelab/work hostname. Without
-private configuration their pods cannot start. Rendering an overlay is not
-approval to sync it.
+Both hub Applications automatically sync merged revisions with pruning and
+self-healing. Their Deployments can roll immediately after merge; unlike
+the runtimes, the hubs have no manual stop procedure. Stage approved private
+inputs before merging manifests or advancing input revisions. Their public
+overlays contain no Secret, approved service inventory or account identity.
+Each has an internal-only Traefik route with a generic homelab/work hostname.
+Without private configuration their pods cannot start. Rendering an overlay
+is not approval to deploy it.
 
 ## Configuration
 
@@ -150,13 +153,15 @@ its legacy runner replaces organizational agent policies.
    `kustomization.yaml` for the stable `mcp-hub-instance` Secret. Work also
    uses that annotation on its search Deployment when its upstream credential
    changes. Use an environment-only patch for search bearer rotations.
-   Coordinate Secret updates, downtime, tracked revisions and manual sync.
+   Stage approved Secret updates and arrange downtime before merging tracked
+   revisions for automatic sync.
    Homelab input changes follow the coordinated procedure below.
    Mounted files alone do not reload this process's in-memory configuration.
    Do not assume Reloader watches these namespaces.
-4. A4: Approve the ArgoCD source for the private composition and manual sync.
-   Verify direct backend rejection without credentials, wrong-hub and
-   legacy-client rejection, one accepted end-to-end request per hub, and
+4. A4: Approve the ArgoCD source for the private composition before merge.
+   Wait for automatic sync and rollout, then verify direct backend rejection
+   without credentials, wrong-hub and legacy-client rejection, one accepted
+   end-to-end request per hub, and
    continued legacy availability before any client cutover.
 
 ### Coordinated homelab input changes
@@ -168,9 +173,10 @@ is a rollout marker, not approval or evidence of valid grants. It changes
 only the homelab hub pod template, not the namespace, stable Secret name or
 auth rules.
 
-1. R1: Obtain approval for the exact private change, downtime and manual sync.
+1. R1: Obtain approval for the exact private change, downtime and merge.
    Stop old homelab consumers through the approved procedure before changing
-   authority. Do not force a running runtime restart or enable automatic sync.
+   authority. The hub keeps running and automatically rolls on merged changes.
+   Do not force a running runtime restart.
    Workload startup must not create accounts or log in. Secret staging/rotation
    must not implicitly enroll accounts or log in. Owner API enrollment requires
    separate explicit authorization and is outside Secret staging/rotation.
@@ -179,24 +185,26 @@ auth rules.
    its old in-memory configuration until rollout. Treat this interval as downtime.
 3. R3: For hub `services.json` or `credentials.json` changes, update
    `mcp-hub.epaflix.com/inputs-revision` in `homelab/kustomization.yaml`.
-   Review the rendered pod template and stable Secret reference before sync.
-4. R4: After the approved revision reaches the Application's source, manually
-   sync `mcp-hub-homelab`. Wait for its single-replica `Recreate` rollout
-   to finish. Verify authorized requests and auth rejection before resuming
+   Review the rendered pod template and stable Secret reference before merge.
+4. R4: Merge the approved revision after private inputs are staged. Wait for
+   `mcp-hub-homelab` to sync automatically and finish its single-replica
+   `Recreate` rollout. Verify authorized requests and auth rejection before resuming
    consumers. Keep work and legacy Applications and Secrets unchanged.
 
 Runtime allowlist or client-token changes require a separate reviewed input
-revision and OnDelete/manual rollout. Regenerate client metadata and private
-service snapshots. Manual hub sync does not authorize restarting a runtime.
+revision through the [runtime input rotation procedure](../../13.t3code/env/isolated-runtime.md#input-rotation).
+Regenerate client metadata and private service snapshots. Automatic hub sync
+does not authorize restarting a runtime.
 
 ## Restricted reader retirement after merge
 
 The approved replacement homelab inventory is `searxng` only. Both hubs use
 `../searxng/`, with separate namespace-local upstream bearer Secrets. The
 live homelab inventory checked for #1845 still contained only `vaultwarden`,
-`vault-secret` and `vault-attachment`. Do not sync new hub code against
-those old inputs. The following steps require approved maintenance after merge;
-none were performed by this implementation.
+`vault-secret` and `vault-attachment`. Stage compatible private inputs before
+merging new hub code, because automatic sync can roll it immediately. The
+following steps require approved maintenance; none were performed by this
+implementation.
 
 1. P1: Pause homelab consumers first. Close homePC/laptop homelab sessions and
    stop new requests. Stop the homelab T3 backend through its approved maintenance
@@ -235,9 +243,9 @@ none were performed by this implementation.
    the private provisioning source. Suppress Secret output and API error bodies.
 3. P3: Once P2 is staged, change the homelab hub's
    `mcp-hub.epaflix.com/inputs-revision` from `r2` to a new opaque revision
-   such as `r3` in `homelab/kustomization.yaml`. Publish that reviewed
-   revision before manually syncing only `mcp-hub-homelab`. Its sync creates
-   the authenticated search backend and rolls the hub with the new allowlist.
+   such as `r3` in `homelab/kustomization.yaml`. Review and merge that
+   revision only after P2 is staged. Automatic sync creates the authenticated
+   search backend and rolls the hub with the new allowlist.
    Wait for both Deployments to become ready. Verify direct `/mcp` requests
    without a bearer or with an ordinary hub token return 401; verify a request
    through the hub's `/searxng` succeeds using an existing homelab client.
@@ -256,9 +264,9 @@ none were performed by this implementation.
    Bump `t3code.epaflix.com/inputs-grants-revision` from `r3` to a new
    opaque revision such as `r4` in
    `2-k3s/13.t3code-homelab/statefulset.yaml`. After the reviewed revision and
-   runtime image are published, manually sync only the approved homelab runtime
-   and resume it through the approved OnDelete maintenance procedure. Startup
-   regenerates its private service snapshot and Pi/Claude/Codex registrations.
+   runtime image are published, resume parent and runtime automation through
+   the shared [input rotation procedure](../../13.t3code/env/isolated-runtime.md#input-rotation).
+   Startup regenerates its private service snapshot and Pi/Claude/Codex registrations.
    Verify they advertise `searxng` and none of the retired vault routes.
    Update the paused desktop clients' private homelab allowlists and regenerate
    their registrations before resuming their sessions. Keep ordinary tokens.
@@ -283,7 +291,11 @@ private inputs have not been staged. Future homelab bearer rotations must also
 bump the search Deployment's input annotation through a homelab-only patch,
 not by changing the shared base and rolling work. Moving the work backend to
 the shared base preserves its immutable selector but changes its runner
-ConfigMap reference. Work remains manual-sync; do not sync it during this cutover.
+ConfigMap reference. Both hubs sync automatically with pruning and self-healing.
+Both runtimes sync automatically without self-healing. For this stopped cutover,
+pause parent and homelab runtime automation through the shared input rotation
+procedure; the hubs' own automation remains active. Leave the work hub and
+runtime manifests unchanged.
 
 Infrastructure-administrator and cross-cluster isolation remain deferred.
 These deployments separate application configuration and credentials; they
@@ -308,4 +320,6 @@ forwarder, SDK HTTP servers and backend authentication middleware. The
 legacy vault fixture uses its real HTTP app with only the vault data lookup
 replaced by synthetic data. Render fixtures cover both new overlays,
 content-hashed secret rollouts, independent Notion RBAC, legacy ConfigMap
-merging and manual-sync ArgoCD Applications. No fixture prints credentials.
+merging and automated ArgoCD sync policies. Hub tests require pruning and
+self-healing; runtime tests require pruning without self-healing. No fixture
+prints credentials.

@@ -4,8 +4,10 @@ The legacy MCP endpoint remains available while clients deliberately migrate.
 Clients know one URL and their own hub token; the hub owns each connection.
 
 [Homelab and work instances](instances/README.md) run the same maintained code
-with independent configuration and credentials. They require private
-provisioning and manual deployment approval. Neither exposes vault routes.
+with independent configuration and credentials. Provision approved private
+inputs before merging their manifests. Both Applications sync automatically
+with pruning and self-healing; merged changes can roll their Deployments
+immediately. Neither exposes vault routes.
 
 ## Vocabulary
 

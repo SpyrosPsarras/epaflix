@@ -81,7 +81,58 @@ T3 worktrees. Preferences cannot bypass those managed requirements.
 
 ## Input rotation
 
-Scale the StatefulSet to zero and wait for its pod to disappear before updating
-Secrets. Update inputs, grants and their digests together, advance the tracked
-input revision, review, merge and sync, then restore one replica. Otherwise an
-old grant environment can run against newly projected input files.
+The homelab and work Applications automatically sync merged revisions with
+pruning, but without self-healing. Their StatefulSets use `OnDelete`; the
+namespace's `t3code-idle-rollout` CronJob replaces a pending runtime pod after
+30 idle minutes. Automatic sync can still restore a scaled-down StatefulSet
+on a new Git revision, so pause it for the entire rotation.
+
+`app-of-apps` renders `2-k3s/11.argocd/apps`, including itself and both runtime
+Applications, with self-healing enabled. It would undo a child-only pause.
+The `argocd` Application renders `2-k3s/11.argocd`, whose kustomization does
+not include `apps/`, so pause `app-of-apps` first. This temporarily stops
+reconciliation of all Application definitions, not the other children's own
+automatic sync. Both hubs continue their own automated sync and self-healing.
+Coordinate this window with other operators.
+
+1. A1: Check active sessions and arrange maintenance. Select `t3code-homelab`
+   or `t3code-work`, then disable the parent's and selected child's automation:
+
+   ```sh
+   app=t3code-homelab
+   namespace=$app
+   statefulset=${app#t3code-}
+   kubectl --context epaflix -n argocd patch application app-of-apps --type json \
+     -p '[{"op":"remove","path":"/spec/syncPolicy/automated"}]'
+   kubectl --context epaflix -n argocd patch application "$app" --type json \
+     -p '[{"op":"remove","path":"/spec/syncPolicy/automated"}]'
+   ```
+
+   Confirm both policies remain disabled and any in-flight sync has completed
+   before scaling. Do not manually sync either Application during rotation.
+2. A2: Scale down and wait for the pod to disappear before changing Secrets:
+
+   ```sh
+   kubectl --context epaflix -n "$namespace" scale statefulset "$statefulset" --replicas=0
+   kubectl --context epaflix -n "$namespace" wait --for=delete "pod/$statefulset-0" --timeout=300s
+   ```
+
+3. A3: Update inputs, grants and their digests together. Advance the tracked
+   input revision, review and merge, keeping the tracked replica count at one.
+   Keep both Applications paused until all private inputs are consistent and
+   the merged runtime image is published. Otherwise an old grant environment
+   can run against newly projected input files.
+4. A4: Sync `app-of-apps` to the merged revision. Its manifests restore its own
+   self-healing policy and the child's automated pruning policy. The child's
+   automatic sync applies the merged runtime revision and restores one replica:
+
+   ```sh
+   revision=MERGED_COMMIT_SHA
+   argocd app sync app-of-apps --revision "$revision"
+   argocd app wait "$app" --sync --health --timeout 1200
+   kubectl --context epaflix -n "$namespace" wait --for=condition=Ready "pod/$statefulset-0" --timeout=300s
+   ```
+
+   Verify both automation policies are restored, runtime self-healing remains
+   off, and the expected input revision is running. If rotation fails, leave
+   both Applications paused and the pod stopped until inputs are consistent.

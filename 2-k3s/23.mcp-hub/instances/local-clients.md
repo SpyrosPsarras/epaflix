@@ -30,9 +30,10 @@ the token in key `token`. Only SHA-256 digests enter
 retry, refuses a different existing grant, and preserves parallel writes
 through resource-version checks and fresh reads.
 
-Stage all four grants before syncing. Each overlay's
+Stage all four grants before merging the input revision. Both hub
+Applications sync automatically with pruning and self-healing. Each overlay's
 `mcp-hub.epaflix.com/inputs-revision: r2` loads its updated credentials during
-the reviewed manual rollout. Later input changes require another revision.
+the rollout after merge. Later input changes require another reviewed revision.
 
 ## Stage homePC configuration
 
@@ -58,8 +59,9 @@ happens in O3 below.
 
 ## After review and merge
 
-Coordinate with each hub's backend rollout and required owner inputs.
-Do not bypass ArgoCD or sync an unready instance.
+Stage required owner inputs and coordinate downtime before merge, because
+automatic sync can roll each hub immediately. After merge, wait for ArgoCD
+rather than applying manifests directly.
 
 1. A1: Follow [the Pi-hole procedure](../../../1-proxmox/pihole/README.md).
    Copy the reviewed dnsmasq file:
@@ -91,11 +93,11 @@ Do not bypass ArgoCD or sync an unready instance.
    A must answer `192.168.10.102`; AAAA must be empty. Restarting Pi-hole
    briefly interrupts LAN DNS.
 
-2. A2: Load the reviewed routes and grants:
+2. A2: Wait for automatic sync to load the reviewed routes and grants:
 
    ```sh
    for instance in homelab work; do
-     argocd app sync mcp-hub-$instance
+     argocd app wait mcp-hub-$instance --sync --health --timeout=300
      kubectl --context epaflix -n mcp-hub-$instance rollout status deployment/mcp-hub --timeout=300s
      kubectl --context epaflix -n mcp-hub-$instance get ingressroute mcp-hub-internal -o 'jsonpath={.spec.entryPoints}'
    done

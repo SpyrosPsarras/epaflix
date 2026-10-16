@@ -9,8 +9,15 @@ terminal. On first use, accept the offer to install the managed relay client,
 `cloudflared`, into the pod's persistent T3 home. The owner approves the
 device code with the owner's T3 account.
 
-The link takes effect at the next server start. Replace the pod in an idle
-window because the StatefulSet uses `OnDelete` updates. Set `namespace` to
+The link takes effect at the next server start. Both runtime Applications
+automatically sync merged revisions with pruning and without self-healing.
+For pending GitOps updates, `OnDelete` keeps the current pod running until
+the idle-rollout job replaces it after 30 idle minutes, or an operator
+approves an earlier replacement.
+For input or grant changes, follow [input rotation](isolated-runtime.md#input-rotation)
+and pause both `app-of-apps` and the runtime Application before scaling down.
+
+For linking alone, replace the pod in an idle window. Set `namespace` to
 `t3code-homelab` or `t3code-work` for the pod being linked:
 
 ```sh

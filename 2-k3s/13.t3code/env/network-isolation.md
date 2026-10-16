@@ -70,17 +70,23 @@ no vault sidecar; its deployment and acceptance remain separate.
 These are operator steps, not implementation-time cluster changes.
 
 1. A1: Record health and discovery identity from the existing homePC and laptop
-   SSH connections. Check active work, then manually sync the two applications.
-   Policies affect existing pods immediately. Keep external administrative
-   kubectl access available. If SSH or health drops, run
+   SSH connections before merging. Both runtime Applications sync automatically
+   after merge, and policies affect existing pods immediately. Check active work
+   and keep external administrative kubectl access available. If SSH or health
+   drops, pause `app-of-apps` first, then the affected runtime Application,
+   using the automation patches in
+   [input rotation](isolated-runtime.md#input-rotation).
+   Confirm both policies remain disabled and any in-flight sync has completed.
+   Only then run
    `kubectl --context epaflix -n <ns> delete networkpolicy t3code-runtime default-deny t3code-control-plane`
-   for the affected namespace, stop syncing and revert before another sync.
-   Removing only `t3code-runtime` leaves the default deny and does not restore SSH.
+   for the affected namespace. Removing only `t3code-runtime` leaves the default
+   deny and does not restore SSH. Review and merge the policy rollback, then
+   sync `app-of-apps` to that merged revision to restore parent and runtime
+   automation, as in the input rotation procedure. Verify automatic sync and
+   SSH health after the rollback.
 
    ```sh
-   argocd app sync t3code-homelab
    argocd app wait t3code-homelab --sync --health --timeout 1200
-   argocd app sync t3code-work
    argocd app wait t3code-work --sync --health --timeout 1200
    ```
 
