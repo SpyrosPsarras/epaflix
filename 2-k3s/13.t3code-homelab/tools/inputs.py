@@ -111,8 +111,8 @@ def secret_resource(namespace, name, data):
 
 
 def require_stopped(cluster):
-    workload = cluster.get('statefulset', NAMESPACE, 't3code')
-    pod = cluster.get('pod', NAMESPACE, 't3code-0')
+    workload = cluster.get('statefulset', NAMESPACE, 'homelab')
+    pod = cluster.get('pod', NAMESPACE, 'homelab-0')
     if pod or (workload and workload['spec'].get('replicas', 1) != 0):
         raise ValueError('The homelab backend must be stopped and scaled to zero before updating Secrets')
 

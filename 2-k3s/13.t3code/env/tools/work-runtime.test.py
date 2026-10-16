@@ -374,6 +374,10 @@ class WorkRuntimeTests(unittest.TestCase):
             self.assertFalse(any(doc['kind'] == 'Secret' for doc in docs))
             sts = next(doc for doc in docs if doc['kind'] == 'StatefulSet')
             pod = sts['spec']['template']['spec']
+            self.assertEqual(sts['metadata']['name'], 'work')
+            rollout = next(doc for doc in docs if doc['kind'] == 'CronJob')
+            self.assertEqual(rollout['spec']['jobTemplate']['spec']['template']['spec']['containers'][0]['env'],
+                             [{'name': 'STATEFULSET_NAME', 'value': 'work'}])
             self.assertEqual(sts['spec']['updateStrategy']['type'], 'OnDelete')
             self.assertEqual(sts['spec']['persistentVolumeClaimRetentionPolicy'], {'whenDeleted': 'Retain', 'whenScaled': 'Retain'})
             self.assertFalse(pod['automountServiceAccountToken'])
@@ -395,7 +399,7 @@ class WorkRuntimeTests(unittest.TestCase):
                     self.assertEqual(job['template']['spec']['containers'][0]['image'], image)
                     self.assertEqual(job['template']['spec']['affinity'], pod['affinity'])
             role = next(doc for doc in docs if doc['kind'] == 'Role')
-            self.assertTrue(all(set(rule['resourceNames']).issubset({'t3code', 't3code-0'}) for rule in role['rules']))
+            self.assertEqual([rule['resourceNames'] for rule in role['rules']], [['work'], ['work-0'], ['work-0']])
             binding = next(doc for doc in docs if doc['kind'] == 'RoleBinding')
             self.assertEqual(binding['subjects'][0]['namespace'], 't3code-work')
             scripts = next(doc for doc in docs if doc['kind'] == 'ConfigMap' and 'entrypoint.sh' in doc['data'])

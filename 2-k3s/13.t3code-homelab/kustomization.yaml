@@ -32,12 +32,12 @@ patches:
 replacements:
   - source:
       kind: StatefulSet
-      name: t3code
+      name: homelab
       fieldPath: spec.template.spec.containers.[name=t3].image
     targets:
       - select:
           kind: StatefulSet
-          name: t3code
+          name: homelab
         fieldPaths:
           - spec.template.spec.initContainers.[name=vault-storage].image
           - spec.template.spec.containers.[name=vault].image

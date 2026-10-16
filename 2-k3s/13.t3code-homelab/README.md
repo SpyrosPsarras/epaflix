@@ -166,7 +166,7 @@ After the intended keys are in scope and the replacement is Ready, run these
 checks without printing vault data:
 
 ```sh
-kubectl --context epaflix -n t3code-homelab exec t3code-0 -c t3 -- bash -ec '
+kubectl --context epaflix -n t3code-homelab exec homelab-0 -c t3 -- bash -ec '
   SSH_AUTH_SOCK=/run/t3-vault/ssh-agent.sock ssh-add -l >/dev/null
   ssh homepc true
   ssh k3s-master-51 true
@@ -320,7 +320,7 @@ kubectl --context epaflix -n mcp-hub-homelab rollout restart deployment/mcp-hub
 kubectl --context epaflix -n mcp-hub-homelab rollout status deployment/mcp-hub --timeout=180s
 argocd app sync t3code-homelab
 argocd app wait t3code-homelab --sync --health --timeout 1200
-kubectl --context epaflix -n t3code-homelab wait --for=condition=Ready pod/t3code-0 --timeout=300s
+kubectl --context epaflix -n t3code-homelab wait --for=condition=Ready pod/homelab-0 --timeout=300s
 ```
 
 The hub reload is required because its client digest map loads at startup.
@@ -339,7 +339,7 @@ kubectl --context epaflix -n t3code-homelab get service t3code-ssh
 Set the kubeconfig explicitly for these administrative checks.
 
 ```sh
-kubectl --context epaflix -n t3code-homelab exec t3code-0 -c t3 -- bash -c '
+kubectl --context epaflix -n t3code-homelab exec homelab-0 -c t3 -- bash -c '
   set -eu
   export KUBECONFIG=/run/t3-inputs/kubeconfig
   curl -fsS -o /dev/null http://127.0.0.1:3773/health
@@ -354,7 +354,7 @@ kubectl --context epaflix -n t3code-homelab exec t3code-0 -c t3 -- bash -c '
   gh api repos/SpyrosPsarras/epaflix --silent
   python3 "$HOME/.config/t3-policy/check.py" .local/share/pi/cc-safety-net/2.6.4/dist/bin/cc-safety-net.js
 '
-kubectl --context epaflix -n t3code-homelab exec t3code-0 -c sshd -- bash /scripts/sshd.sh check
+kubectl --context epaflix -n t3code-homelab exec homelab-0 -c sshd -- bash /scripts/sshd.sh check
 ```
 
 After the positive personal-account check, the owner runs this from homePC or
@@ -396,7 +396,7 @@ This pod is live on T3 Connect. Follow the shared
 The one-time owner link command for this pod is:
 
 ```sh
-kubectl --context epaflix -n t3code-homelab exec -it t3code-0 -c t3 -- \
+kubectl --context epaflix -n t3code-homelab exec -it homelab-0 -c t3 -- \
   t3 connect link --headless --base-dir /home/t3/.t3
 ```
 
@@ -412,7 +412,7 @@ Obtain the backend's public host key through authenticated kubectl, not
 unauthenticated `ssh-keyscan`. The following command returns only a public key:
 
 ```sh
-kubectl --context epaflix -n t3code-homelab exec t3code-0 -c sshd -- \
+kubectl --context epaflix -n t3code-homelab exec homelab-0 -c sshd -- \
   python3 -c 'import pathlib; print((pathlib.Path.home()/".config/t3-sshd/ssh_host_ed25519_key.pub").read_text(), end="")' \
   > /tmp/verified-homelab-host-key.pub
 ```
@@ -464,9 +464,9 @@ After the harmless thread and while the homelab backend has no active work,
 record its discovery environment ID and thread ID, then run:
 
 ```sh
-kubectl --context epaflix -n t3code-homelab delete pod t3code-0
-kubectl --context epaflix -n t3code-homelab wait --for=create pod/t3code-0 --timeout=120s
-kubectl --context epaflix -n t3code-homelab wait --for=condition=Ready pod/t3code-0 --timeout=600s
+kubectl --context epaflix -n t3code-homelab delete pod homelab-0
+kubectl --context epaflix -n t3code-homelab wait --for=create pod/homelab-0 --timeout=120s
+kubectl --context epaflix -n t3code-homelab wait --for=condition=Ready pod/homelab-0 --timeout=600s
 kubectl --context epaflix -n t3code-homelab get jobs
 kubectl --context epaflix -n t3code-homelab create job \
   --from=cronjob/t3code-idle-rollout t3code-idle-rollout-acceptance

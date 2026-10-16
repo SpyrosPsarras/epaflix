@@ -42,6 +42,9 @@ spec:
               command:
                 - bash
                 - /idle-rollout/idle-rollout.sh
+              env:
+                - name: STATEFULSET_NAME
+                  value: t3code
               securityContext:
                 allowPrivilegeEscalation: false
                 capabilities:

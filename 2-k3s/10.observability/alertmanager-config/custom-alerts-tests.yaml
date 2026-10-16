@@ -18,21 +18,21 @@ tests:
         values: "1+0x30"
       - series: 'kube_statefulset_status_replicas_updated{namespace="t3code",statefulset="t3code",job="kube-state-metrics",cluster="epaflix"}'
         values: "0+0x30"
-      - series: 'kube_statefulset_status_current_revision{namespace="t3code-homelab",statefulset="t3code",job="kube-state-metrics",cluster="epaflix",revision="old"}'
+      - series: 'kube_statefulset_status_current_revision{namespace="t3code-homelab",statefulset="homelab",job="kube-state-metrics",cluster="epaflix",revision="old"}'
         values: "1+0x30"
-      - series: 'kube_statefulset_status_update_revision{namespace="t3code-homelab",statefulset="t3code",job="kube-state-metrics",cluster="epaflix",revision="new"}'
+      - series: 'kube_statefulset_status_update_revision{namespace="t3code-homelab",statefulset="homelab",job="kube-state-metrics",cluster="epaflix",revision="new"}'
         values: "1+0x30"
-      - series: 'kube_statefulset_replicas{namespace="t3code-homelab",statefulset="t3code",job="kube-state-metrics",cluster="epaflix"}'
+      - series: 'kube_statefulset_replicas{namespace="t3code-homelab",statefulset="homelab",job="kube-state-metrics",cluster="epaflix"}'
         values: "1+0x30"
-      - series: 'kube_statefulset_status_replicas_updated{namespace="t3code-homelab",statefulset="t3code",job="kube-state-metrics",cluster="epaflix"}'
+      - series: 'kube_statefulset_status_replicas_updated{namespace="t3code-homelab",statefulset="homelab",job="kube-state-metrics",cluster="epaflix"}'
         values: "0+0x30"
-      - series: 'kube_statefulset_status_current_revision{namespace="t3code-work",statefulset="t3code",job="kube-state-metrics",cluster="epaflix",revision="old"}'
+      - series: 'kube_statefulset_status_current_revision{namespace="t3code-work",statefulset="work",job="kube-state-metrics",cluster="epaflix",revision="old"}'
         values: "1+0x30"
-      - series: 'kube_statefulset_status_update_revision{namespace="t3code-work",statefulset="t3code",job="kube-state-metrics",cluster="epaflix",revision="new"}'
+      - series: 'kube_statefulset_status_update_revision{namespace="t3code-work",statefulset="work",job="kube-state-metrics",cluster="epaflix",revision="new"}'
         values: "1+0x30"
-      - series: 'kube_statefulset_replicas{namespace="t3code-work",statefulset="t3code",job="kube-state-metrics",cluster="epaflix"}'
+      - series: 'kube_statefulset_replicas{namespace="t3code-work",statefulset="work",job="kube-state-metrics",cluster="epaflix"}'
         values: "1+0x30"
-      - series: 'kube_statefulset_status_replicas_updated{namespace="t3code-work",statefulset="t3code",job="kube-state-metrics",cluster="epaflix"}'
+      - series: 'kube_statefulset_status_replicas_updated{namespace="t3code-work",statefulset="work",job="kube-state-metrics",cluster="epaflix"}'
         values: "0+0x30"
     alert_rule_test:
       - eval_time: 30m

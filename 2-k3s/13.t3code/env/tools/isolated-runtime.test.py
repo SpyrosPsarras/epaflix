@@ -592,7 +592,13 @@ nested = {"🏠" = ["fixture", {enabled = false}]}
                                       ('13.t3code-homelab', '192.168.10.113'),
                                       ('13.t3code-work', '192.168.10.114')):
                 with self.subTest(overlay=overlay):
-                    docs = yaml.safe_load_all(subprocess.check_output(['kustomize', 'build', str(tree / overlay)]))
+                    docs = list(yaml.safe_load_all(subprocess.check_output(['kustomize', 'build', str(tree / overlay)])))
+                    if overlay == '13.t3code/one':
+                        sts = next(doc for doc in docs if doc['kind'] == 'StatefulSet')
+                        self.assertEqual(sts['metadata']['name'], 't3code')
+                        role = next(doc for doc in docs if doc['kind'] == 'Role')
+                        self.assertEqual([rule['resourceNames'] for rule in role['rules']],
+                                         [['t3code'], ['t3code-0'], ['t3code-0']])
                     service = next(doc for doc in docs if doc and doc['kind'] == 'Service'
                                    and doc['metadata']['name'] == 't3code-ssh')
                     self.assertEqual(service['spec']['type'], 'LoadBalancer')
@@ -651,6 +657,13 @@ nested = {"🏠" = ["fixture", {enabled = false}]}
             self.assertTrue(all(doc['metadata'].get('namespace', 't3code-homelab') == 't3code-homelab' for doc in docs))
             sts = next(doc for doc in docs if doc['kind'] == 'StatefulSet')
             spec = sts['spec']['template']['spec']
+            self.assertEqual(sts['metadata']['name'], 'homelab')
+            rollout = next(doc for doc in docs if doc['kind'] == 'CronJob')
+            self.assertEqual(rollout['spec']['jobTemplate']['spec']['template']['spec']['containers'][0]['env'],
+                             [{'name': 'STATEFULSET_NAME', 'value': 'homelab'}])
+            role = next(doc for doc in docs if doc['kind'] == 'Role')
+            self.assertEqual([rule['resourceNames'] for rule in role['rules']],
+                             [['homelab'], ['homelab-0'], ['homelab-0']])
             self.assertEqual(sts['spec']['updateStrategy']['type'], 'OnDelete')
             self.assertFalse(spec['automountServiceAccountToken'])
             self.assertEqual({v['persistentVolumeClaim']['claimName'] for v in spec['volumes'] if 'persistentVolumeClaim' in v}, {'t3code-home', 't3code-vault'})

@@ -349,7 +349,7 @@ tracing or shell recording enabled.
      deployment/mcp-hub --timeout=300s
    argocd app sync t3code-work
    kubectl --context epaflix -n t3code-work wait --for=condition=Ready \
-     pod/t3code-0 --timeout=1800s
+     pod/work-0 --timeout=1800s
    ```
 
    The proxy transcript field `client_backend: work` maps the reserved key
@@ -397,7 +397,7 @@ This pod is live on T3 Connect. Follow the shared
 The one-time owner link command for this pod is:
 
 ```sh
-kubectl --context epaflix -n t3code-work exec -it t3code-0 -c t3 -- \
+kubectl --context epaflix -n t3code-work exec -it work-0 -c t3 -- \
   t3 connect link --headless --base-dir /home/t3/.t3
 ```
 

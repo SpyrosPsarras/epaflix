@@ -13,17 +13,22 @@ TMP = Path(TMP_DIR.name)
 
 FAKE_KUBECTL = r"""#!/usr/bin/env bash
 args="$*"
+case "$1 $2" in
+  "get statefulset") [[ $3 == "$FAKE_STATEFULSET" ]] || exit 2 ;;
+  "get pod"|"delete pod") [[ $3 == "$FAKE_STATEFULSET-0" ]] || exit 2 ;;
+  "exec -i") [[ $3 == "$FAKE_STATEFULSET-0" ]] || exit 2 ;;
+esac
 if [[ $args == "get pod "* ]]; then
   state=${FAKE_POD_BEFORE_EXEC:-same}
   [[ -e $FAKE_LOG.exec ]] && state=$FAKE_POD_AFTER_EXEC
   case "$state" in
-    gone) [[ $args == *--ignore-not-found* ]] && exit 0; echo 'Error from server (NotFound): pods "t3code-0" not found' >&2; exit 1 ;;
+    gone) [[ $args == *--ignore-not-found* ]] && exit 0; printf 'Error from server (NotFound): pods "%s-0" not found\n' "$FAKE_STATEFULSET" >&2; exit 1 ;;
     apierror) echo 'Error from server (Forbidden)' >&2; exit 1 ;;
   esac
 fi
 case "$args" in
   "get statefulset"*) printf %s "$FAKE_WANT" ;;
-  *controller-revision-hash*) printf 't3code-0 %s' "$FAKE_HAVE" ;;
+  *controller-revision-hash*) printf '%s-0 %s' "$FAKE_STATEFULSET" "$FAKE_HAVE" ;;
   *waiting.reason*) printf %s "$FAKE_WAITING" ;;
   *Ready*) printf %s "$FAKE_READY" ;;
   *metadata.uid*)
@@ -102,12 +107,13 @@ bin_dir.mkdir()
 (bin_dir / "kubectl").chmod(0o755)
 
 
-def rollout(**fake):
+def rollout(runtime="t3code", **fake):
     log = TMP / f"delete-{time.monotonic_ns()}.log"
     env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "FAKE_LOG": str(log),
            "FAKE_WANT": "rev2", "FAKE_HAVE": "rev1", "FAKE_WAITING": "", "FAKE_READY": "True",
            "FAKE_IDLE_t3": "2000", "FAKE_IDLE_sshd": "2000",
-           "FAKE_POD_AFTER_EXEC": "same", "FAKE_EXEC_CODE": "1"}
+           "FAKE_POD_AFTER_EXEC": "same", "FAKE_EXEC_CODE": "1",
+           "STATEFULSET_NAME": runtime, "FAKE_STATEFULSET": runtime}
     env.update(fake)
     out = subprocess.run(["bash", HERE / "idle-rollout.sh"], env=env, capture_output=True, text=True)
     return out, log.exists()
@@ -129,10 +135,14 @@ cases = [
                        "FAKE_IDLE_t3": "fail", "FAKE_IDLE_sshd": "fail"}, 0, True),
     ("exec fails", {"FAKE_IDLE_sshd": "fail"}, 1, False),
 ]
-for name, fake, code, deleted in cases:
-    out, did_delete = rollout(**fake)
-    assert out.returncode == code, (name, out.returncode, out.stdout, out.stderr)
-    assert did_delete == deleted, (name, out.stdout, out.stderr)
+for runtime in ("t3code", "homelab", "work"):
+    for name, fake, code, deleted in cases:
+        out, did_delete = rollout(runtime, **fake)
+        assert out.returncode == code, (runtime, name, out.returncode, out.stdout, out.stderr)
+        assert did_delete == deleted, (runtime, name, out.stdout, out.stderr)
+
+out, did_delete = rollout(STATEFULSET_NAME="")
+assert out.returncode == 0 and did_delete, (out.returncode, out.stdout, out.stderr)
 
 out, did_delete = rollout(FAKE_POD_BEFORE_EXEC="gone")
 assert out.returncode == 0 and not did_delete and "nothing to roll out" in out.stdout, (out.returncode, out.stdout, out.stderr)

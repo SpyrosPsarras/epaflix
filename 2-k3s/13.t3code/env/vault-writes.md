@@ -117,7 +117,7 @@ Secret data, CLI diagnostics, HTTP bodies, tokens or account IDs.
    set -euo pipefail
    set +x
    for variant in homelab work; do
-     kubectl --context epaflix -n "t3code-$variant" exec -i t3code-0 -c t3 -- \
+     kubectl --context epaflix -n "t3code-$variant" exec -i "$variant-0" -c t3 -- \
        python3 - "$variant" < 2-k3s/13.t3code/env/tools/vault-write-canary.py
    done
    ```
@@ -137,9 +137,9 @@ Secret data, CLI diagnostics, HTTP bodies, tokens or account IDs.
    ```sh
    set -euo pipefail
    set +x
-   work_scope=$(kubectl --context epaflix -n t3code-work exec t3code-0 -c vault -- \
+   work_scope=$(kubectl --context epaflix -n t3code-work exec work-0 -c vault -- \
      python3 -c 'from pathlib import Path; print(Path("/run/t3-vault/scope.json").read_text())')
-   kubectl --context epaflix -n t3code-homelab exec -i t3code-0 -c vault -- \
+   kubectl --context epaflix -n t3code-homelab exec -i homelab-0 -c vault -- \
      env VAULT_DENIED_SCOPE="$work_scope" python3 - \
      < 2-k3s/13.t3code/env/tools/vault-org-denial.py
    unset work_scope

@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
-pod=t3code-0
+statefulset=${STATEFULSET_NAME:-t3code}
+pod=$statefulset-0
 idle_needed=${IDLE_SECONDS:-1800}
 here=$(dirname "$0")
 
-want=$(kubectl get statefulset t3code -o jsonpath='{.status.updateRevision}')
+want=$(kubectl get statefulset "$statefulset" -o jsonpath='{.status.updateRevision}')
 current=$(kubectl get pod "$pod" --ignore-not-found -o jsonpath='{.metadata.name}{" "}{.metadata.labels.controller-revision-hash}')
 read -r name have <<<"$current"
 if [[ -z $name ]]; then
