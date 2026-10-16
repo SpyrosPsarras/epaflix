@@ -10,6 +10,9 @@ Service CIDR `10.43.0.0/16`, node network `10.0.0.0/24` and LAN
 `192.168.10.0/24`. Zero, loopback, link-local, shared address, multicast and
 reserved high address ranges are also excluded. The public work AKS API uses
 this rule; no work endpoint is published. There is no IPv6 allow rule.
+The public IPv4 rule has no port restriction, so it also permits T3 Connect
+egress to `relay.t3.codes` over HTTPS and Cloudflare tunnel endpoints on
+TCP/UDP 7844.
 
 Only homelab gets LAN SSH egress, on TCP 22 to the exact addresses in the
 tracked generated `one/files/homelab-ssh.conf`. The render test compares address

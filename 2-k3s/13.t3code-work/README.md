@@ -3,7 +3,7 @@
 This is a separate backend, not a deployment claim. Issue #1837 tracks its
 first deployment and live acceptance. Mixed and homelab keep their Applications
 and homes. Employer approval is confirmed. Azure enrollment, the dedicated
-organization GitHub PAT and device pairing remain owner steps.
+organization GitHub PAT and T3 Connect linking remain owner steps.
 
 The work namespace `t3code-work` has its own PVC, clean home, T3 identity,
 provider grants, histories, SSH host key and `projects/work` checkout. The
@@ -374,7 +374,7 @@ tracing or shell recording enabled.
    The helper's device code appears only in the owner's private terminal.
    Azure session files remain in the work PVC, not a Kubernetes Secret or the
    mixed home. Do not run `az aks get-credentials` or select another cluster.
-   Pair homePC and laptop separately using the connection procedure below.
+   Connect homePC and laptop through the owner's T3 account as described below.
    Complete one harmless thread on each, verify instructions/hooks, discovery,
    read-only dev access and restart persistence before accepting #1837.
 
@@ -390,7 +390,24 @@ For hub Secret changes, follow
 Runtime grant/input rotations still require the stop/change/revision/start
 procedure above; these first-setup tools refuse rotation.
 
-## Dedicated laptop connection
+## T3 Connect
+
+This pod is live on T3 Connect. Follow the shared
+[T3 Connect and Zed SSH procedure](../13.t3code/env/client-access.md).
+The one-time owner link command for this pod is:
+
+```sh
+kubectl --context epaflix -n t3code-work exec -it t3code-0 -c t3 -- \
+  t3 connect link --headless --base-dir /home/t3/.t3
+```
+
+Work sessions then pass through T3's relay, which the owner's employer
+approval must cover.
+
+## Dedicated laptop diagnostic connection
+
+The SSH tunnel below is an acceptance and diagnostic check, not the normal
+client connection.
 
 Use a separate directory, file-backed identity, config and tunnel port. The
 helper cannot reuse a directory marked for the other environment and does not
@@ -421,12 +438,9 @@ change `~/.ssh/config`, import a keyring or use a general SSH agent.
    Homelab's default remains port 13773 and alias `t3-homelab`; work uses alias
    `t3-work`. Both use `ssh -F`, pinned host keys, `IdentityAgent none` and no
    agent forwarding. The server permits forwarding only to T3 on port 3773.
-4. A4: Check loopback health/discovery, then use the supported T3 pairing flow.
-   Review `t3 pair --help` offline. Later, mint a short-lived pairing token
-   through a private approved administrative channel with
-   `t3 pair --base-dir /home/t3/.t3 --ttl 5m`. Do not put the token in public
-   evidence. Select/name the new environment `work`; retain homelab and mixed.
-   No pairing token is minted by these tests.
+4. A4: Check `http://127.0.0.1:23773/health` and
+   `http://127.0.0.1:23773/.well-known/t3/environment`. For app access, select
+   work through the owner's T3 account; retain homelab and mixed.
 
 This login is inbound backend access, not an outbound work SSH grant.
 
@@ -577,9 +591,10 @@ pipeline assertions no longer run.
 - L2: With a separately approved non-production work target, enroll privately,
   exercise the required policy checks and make one harmless read-only API
   request. No production access is required.
-- L3: Pair/select work from the laptop and finish a harmless agent thread and
-  provider-delegated task. Confirm environment-specific thread access, record
-  identity/history privately, restart and verify persistence and discovery.
+- L3: Select work through T3 Connect from the laptop and finish a harmless
+  agent thread and provider-delegated task. Confirm environment-specific
+  thread access, record identity/history privately, restart and verify
+  persistence and discovery.
 
 Infrastructure/admin and cross-cluster isolation are outside #1777. These
 changes separate application configuration and credential access; they do not
