@@ -34,6 +34,7 @@ RUN native="/tools/node_modules/@t3code/t3-$(node -p process.platform)-$(node -p
     && test -x "$native" \
     && ln -sf "$native" /tools/node_modules/.bin/t3
 ENV PATH="/tools/node_modules/.bin:${PATH}"
+COPY env/files/isolated-guidance.md /opt/t3/isolated-guidance.md
 COPY env/files/vault-client.py /tmp/vault-client.py
 RUN if [ "$T3_RUNTIME_VARIANT" = homelab ] || [ "$T3_RUNTIME_VARIANT" = work ]; then install -m 0555 /tmp/vault-client.py /usr/local/bin/vault; fi \
     && rm /tmp/vault-client.py

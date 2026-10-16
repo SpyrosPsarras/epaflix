@@ -24,6 +24,7 @@ t3_pi_settings = importlib.import_module('t3-pi-settings')
 INPUTS = {'bundle.json', 'policies.json', 'services.json', 'kubeconfig', 'authorized_keys'}
 APPROVALS = {'git', 'models', 'policies', 'kubeconfig', 'hub', 'laptop', 'routing'}
 CODEX_REQUIREMENTS = Path('/etc/codex/requirements.toml')
+GUIDANCE = Path('/opt/t3/isolated-guidance.md')
 POLICY_PATHS = {'.cc-safety-net/policy.json', '.claude/settings.json'}
 LEGACY_PERMISSION_PATH = '.pi/agent/extensions/pi-permission-system/config.json'
 
@@ -175,7 +176,7 @@ def prepare(inputs, home, environment):
     marker = home / '.config/t3-runtime/environment'
     marker.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     write_private(marker, (environment + '\n').encode())
-    private_config.install((inputs / 'bundle.json').read_bytes(), home)
+    private_config.install((inputs / 'bundle.json').read_bytes(), home, GUIDANCE.read_bytes())
     if environment == 'homelab':
         write_private(marker.parent / 'services.json', json.dumps(services).encode())
 
@@ -295,13 +296,14 @@ def apply(inputs, home, environment):
     settings = json.loads(settings_path.read_text()) if settings_path.exists() else {}
     previous = settings.get('providerInstances', {})
     settings['providerInstances'] = canonical['providerInstances']
+    settings['providerInstances']['codex']['enabled'] = False
     for name, instance in settings['providerInstances'].items():
         retained = previous.get(name, {})
         if retained.get('driver') != instance['driver']:
             continue
         if isinstance(retained.get('displayName'), str):
             instance['displayName'] = retained['displayName']
-        if name != 'claudeAgent' and isinstance(retained.get('enabled'), bool):
+        if name == 'pi' and isinstance(retained.get('enabled'), bool):
             instance['enabled'] = retained['enabled']
         prefix = 'cliproxy/' if name == 'pi' else 'codex/'
         models = retained.get('config', {}).get('customModels')
@@ -312,7 +314,7 @@ def apply(inputs, home, environment):
     for key in ('defaultModelSelection', 'textGenerationModelSelection'):
         current = settings.get(key, {})
         name = current.get('instanceId')
-        prefix = {'pi': 'cliproxy/', 'codex': 'codex/'}.get(name)
+        prefix = 'cliproxy/' if name == 'pi' else None
         if key == 'textGenerationModelSelection' and name == 'pi':
             prefix = 'cliproxy-textgen/'
         if not prefix or not current.get('model', '').startswith(prefix) or len(current['model']) <= len(prefix):

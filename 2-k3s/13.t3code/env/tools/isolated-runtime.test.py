@@ -87,8 +87,11 @@ class RuntimeTests(unittest.TestCase):
         self.requirements = self.root / 'etc/codex/requirements.toml'
         self.requirements_patch = patch.object(runtime, 'CODEX_REQUIREMENTS', self.requirements, create=True)
         self.requirements_patch.start()
+        self.guidance_patch = patch.object(runtime, 'GUIDANCE', ROOT / 'env/files/isolated-guidance.md')
+        self.guidance_patch.start()
 
     def tearDown(self):
+        self.guidance_patch.stop()
         self.requirements_patch.stop()
         self.env.stop()
         self.tmp.cleanup()
@@ -109,6 +112,23 @@ class RuntimeTests(unittest.TestCase):
         transform(obj)
         path.write_text(json.dumps(obj))
         refresh(self.inputs)
+
+    def test_image_guidance_reaches_all_instruction_files_without_input_rotation(self):
+        payload = (self.inputs / 'bundle.json').read_bytes()
+        guidance = (ROOT / 'env/files/isolated-guidance.md').read_text()
+        source = base64.b64decode(json.loads(payload)['files']['instructions.md']['data']).decode()
+        expected = source.replace('/fixture/', str(self.home) + '/') + guidance
+        setup = importlib.import_module('pi-setup')
+        ssh = ROOT.parent / '13.t3code-homelab/files/homelab-ssh.md'
+        for _ in range(2):
+            self.prepare()
+            with patch.dict(os.environ, {'ANTHROPIC_BASE_URL': 'http://127.0.0.1:18317'}), \
+                    patch.object(setup, 'fetch_models', return_value=[{'id': 'codex/fixture'}]):
+                setup.write(self.home, '/fixture/safety', ssh)
+            for name in ('.claude/AGENTS.md', '.codex/AGENTS.md'):
+                self.assertEqual((self.home / name).read_text(), expected)
+            self.assertEqual((self.home / '.pi/agent/AGENTS.md').read_text(), expected + '\n' + ssh.read_text())
+            self.assertEqual((self.inputs / 'bundle.json').read_bytes(), payload)
 
     def test_reviewed_services_snapshot_and_removed_client_cleanup_on_restart(self):
         self.change('services.json', lambda obj: obj.update(services=['searxng', 'drive']))
@@ -335,7 +355,7 @@ nested = {"🏠" = ["fixture", {enabled = false}]}
             ({'instanceId': 'pi', 'model': 'other/fixture', 'options': 'invalid'}, canonical),
             ({'instanceId': 'pi'}, canonical),
             ({'instanceId': 'pi', 'model': 'cliproxy-textgen/claude/fixture', 'options': options}, None),
-            ({'instanceId': 'codex', 'model': 'codex/fixture', 'options': options}, None)]
+            ({'instanceId': 'codex', 'model': 'codex/fixture', 'options': options}, canonical)]
         default = {'instanceId': 'pi', 'model': 'cliproxy/claude/fixture', 'options': options}
         for selection, expected in cases:
             with self.subTest(selection=selection):
@@ -393,14 +413,15 @@ nested = {"🏠" = ["fixture", {enabled = false}]}
                 self.assertEqual(set(instances), {'pi', 'codex', 'claudeAgent'})
                 self.assertEqual(instances['pi']['displayName'], 'Homelab Pi')
                 self.assertFalse(instances['pi']['enabled'])
-                self.assertTrue(instances['codex']['enabled'])
+                self.assertFalse(instances['codex']['enabled'])
                 self.assertFalse(instances['claudeAgent']['enabled'])
                 self.assertEqual(instances['pi']['config'], {'binaryPath': '/scripts/pi.sh',
                                                            'customModels': ['cliproxy/claude/fixture']})
                 self.assertEqual(instances['codex']['config']['customModels'], ['codex/fixture'])
                 self.assertIn('http://127.0.0.1:18317/v1', instances['codex']['config']['launchArgs'])
                 self.assertNotIn('work', instances['codex']['config']['launchArgs'])
-                self.assertEqual(retained['defaultModelSelection'], settings['defaultModelSelection'])
+                self.assertEqual(retained['defaultModelSelection'],
+                                 {'instanceId': 'pi', 'model': 'cliproxy/claude/claude-opus-5-5'})
                 self.assertEqual(retained['textGenerationModelSelection']['instanceId'], 'pi')
                 self.assertNotIn('providers', retained)
                 self.assertEqual(retained['theme'], 'fixture')

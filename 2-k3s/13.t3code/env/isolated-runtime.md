@@ -26,6 +26,26 @@ Startup replaces managed MCP lists with that environment's allowlist and
 clears unrelated project MCP entries and cached auto-enable choices. A hub
 configuration is an application boundary, not a network firewall.
 
+## Image-shipped runtime facts
+
+Both isolated images ship `env/files/isolated-guidance.md` at
+`/opt/t3/isolated-guidance.md`. Startup appends it to the installed private
+instructions shared by `~/.claude/AGENTS.md` and `~/.codex/AGENTS.md`.
+Pi copies those instructions to `~/.pi/agent/AGENTS.md` and adds its SSH guide.
+Codex's override includes the same instructions plus the variant's SSH guide.
+The installed cache includes the guidance in its content hash, so image updates
+replace the block rather than repeat it. Private bundles stay unchanged;
+updating these runtime facts needs no private-input rotation.
+
+The block covers the stock vault client's syntax, `VAULT_` target-variable
+restriction, exact item-name matching, discarded child output, unavailable agent
+`bw` and Vaultwarden MCP tools, and model routing. Non-secret results must be
+written by the child to a file in a private temp directory and read afterwards.
+Personal instructions and skills remain private bundle inputs. SSH guidance
+stays in each variant's own guide, with access determined by its generated SSH
+config rather than image-baked approval state. Homelab keeps its existing guide;
+work's placeholder points to its work guide and host approval procedure.
+
 ## Policy input
 
 `policies.json` has `environment`, `files` and nonempty `checks` fields.
@@ -64,13 +84,22 @@ separately tracked homelab RBAC, not the file's mount mode.
 
 ## Provider preferences and Codex requirements
 
-Startup retains supported Pi and Codex display names and enabled preferences.
-Custom model IDs and selections must use `cliproxy/` for Pi or `codex/` for
-Codex. Pi title-generation selections use `cliproxy-textgen/`. It resets
+Startup retains Pi and Codex display names and Pi's enabled preference.
+Custom model IDs use `cliproxy/` for Pi or `codex/` for Codex. Only Pi selections
+are retained; title-generation selections use `cliproxy-textgen/`. Startup resets
 driver identities, executable paths and launch arguments. Extra provider
-instances, legacy provider maps, unsupported selections and Claude's direct
-provider are removed. Endpoint and credential configuration comes from private
-inputs, not application preferences.
+instances, legacy provider maps and unsupported selections are removed.
+Endpoint and credential configuration comes from private inputs, not application
+preferences.
+
+The Codex and Claude direct instances stay disabled in isolated runtimes.
+The work pod's Codex model API and T3 catalog expose bare IDs. Minimal
+non-streaming requests to its configured Responses endpoint returned HTTP 400
+for `gpt-6.1-sol` and HTTP 200 for `codex/gpt-6.1-sol`. Adding custom model IDs
+does not replace discovered bare IDs, and T3's Codex settings have no route-prefix
+mapping. Startup therefore disables that instance and resets its selections to
+Pi. Use T3 `delegate_task` with instance `pi` and `cliproxy/<route>/<model>`.
+Mixed-runtime provider settings are unchanged.
 
 Codex retains unmanaged TOML values and trust entries confined to this
 environment's project and subdirectories. Startup replaces its provider and

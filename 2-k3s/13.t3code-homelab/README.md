@@ -277,6 +277,9 @@ before changing either Secret. PVC deletion, pruning and scaling retain the home
 The shared contract also documents [policy inputs](../13.t3code/env/isolated-runtime.md#policy-input),
 [homelab kubeconfig constraints](../13.t3code/env/isolated-runtime.md#homelab-kubeconfig)
 and [provider retention and Codex requirements](../13.t3code/env/isolated-runtime.md#provider-preferences-and-codex-requirements).
+Both isolated images append [runtime facts](../13.t3code/env/isolated-runtime.md#image-shipped-runtime-facts)
+without private-input rotation. The direct Codex instance is disabled; use Pi
+with `cliproxy/<route>/<model>` IDs.
 
 The init container creates `.t3/userdata` as the runtime user before Kubernetes
 mounts `server-runtime.json`. Otherwise Kubernetes creates a root-owned parent

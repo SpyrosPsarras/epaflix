@@ -1,10 +1,5 @@
-# SSH in this isolated runtime
+# Work SSH
 
-This home has no forwarded laptop agent, copied private keys or vault login.
-Vault-backed SSH access is disabled pending its separate integration ticket.
-Do not try legacy credential files or another environment's agent socket.
-
-The laptop's public login key authenticates to this backend's SSH server. It
-does not grant agents outbound SSH access. Use only an explicitly approved
-environment target when that separate access has been provisioned. A connection
-timeout is a routing or availability result, not evidence of a bad credential.
+Outbound SSH works only for owner-approved hosts in this pod's generated SSH
+config. Read `/scripts/work-ssh.md` before connecting; it explains how to check
+an alias and links the host approval procedure.
