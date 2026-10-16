@@ -18,7 +18,7 @@ spec:
   template:
     metadata:
       annotations:
-        t3code.epaflix.com/inputs-grants-revision: "r2"
+        t3code.epaflix.com/inputs-grants-revision: "r3"
       labels:
         app.kubernetes.io/name: t3code
     spec:
