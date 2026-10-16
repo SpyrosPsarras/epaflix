@@ -19,6 +19,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.error
 import urllib.request
 from urllib.parse import quote, urlencode, urlsplit
 from uuid import UUID, uuid4
@@ -39,6 +40,8 @@ CHILD_TIMEOUT_MIN_SECONDS = 0.1
 CHILD_TIMEOUT_MAX_SECONDS = 120
 RETRY_ATTEMPTS = 3
 RETRY_DELAY_SECONDS = 2
+CACHE_WAIT_SECONDS = 5
+CACHE_POLL_SECONDS = 0.1
 CLIENT_START_ATTEMPTS = 100
 CLIENT_START_POLL_SECONDS = 0.1
 SSH_REQUEST_TIMEOUT_SECONDS = 10
@@ -53,6 +56,12 @@ AGENT_FAILURE = b'\x00\x00\x00\x01\x05'
 
 class Refused(Exception):
     pass
+
+
+class WriteUnconfirmed(Exception):
+    def __init__(self, item_id, attachment_id=None):
+        self.item_id = item_id
+        self.attachment_id = attachment_id
 
 
 class UnsafeListener(Refused):
@@ -129,9 +138,41 @@ def fetch(path, binary=False, method='GET', payload=None, timeout=HTTP_REQUEST_T
         signal.signal(signal.SIGALRM, previous)
 
 
-def scoped_item(item, organization, collection, item_id=None):
+@contextlib.contextmanager
+def confirming_write(item_id, attachment_id=None):
+    try:
+        yield
+    except Cancelled:
+        raise
+    except Exception as error:
+        raise WriteUnconfirmed(item_id, attachment_id) from error
+
+
+def wait_for_cache(check):
+    deadline = time.monotonic() + CACHE_WAIT_SECONDS
+    while True:
+        try:
+            result = check()
+            if result:
+                return result
+        except urllib.error.HTTPError as error:
+            if error.code != 400:
+                raise
+            try:
+                body = json.loads(error.read(MAX_RESPONSE_BYTES + 1))
+            except ValueError:
+                raise error from None
+            if not isinstance(body, dict) or body.get('message') != 'Not found.':
+                raise
+        if time.monotonic() >= deadline:
+            raise Refused
+        time.sleep(CACHE_POLL_SECONDS)
+
+
+def scoped_item(item, organization, collection, item_id=None, *, allow_trashed=False):
     if not isinstance(item, dict) or item.get('organizationId') != organization or (
-            collection not in (item.get('collectionIds') or [])) or item.get('deletedDate') is not None:
+            collection not in (item.get('collectionIds') or [])) or (
+            not allow_trashed and item.get('deletedDate') is not None):
         raise Refused
     checked_uuid(item['id'])
     if item_id is not None and item['id'] != item_id:
@@ -139,13 +180,19 @@ def scoped_item(item, organization, collection, item_id=None):
     return item
 
 
+def matches_fields(actual, expected):
+    if isinstance(expected, dict):
+        return isinstance(actual, dict) and all(
+            key in actual and matches_fields(actual[key], value) for key, value in expected.items())
+    if isinstance(expected, list):
+        return isinstance(actual, list) and len(actual) == len(expected) and all(
+            matches_fields(value, wanted) for value, wanted in zip(actual, expected))
+    return actual == expected
+
+
 def selected_item(item_id, name=None):
     organization, collection = scope()
-    if item_id:
-        item = fetch('/object/item/' + checked_uuid(item_id))
-        if item.get('id') != item_id:
-            raise Refused
-    else:
+    if not item_id:
         items = fetch('/list/object/items?' + urlencode({'search': name, 'organizationid': organization,
                                                        'collectionid': collection}))['data']
         matches = [item for item in items if item.get('name') == name and
@@ -153,8 +200,11 @@ def selected_item(item_id, name=None):
                    item.get('deletedDate') is None]
         if len(matches) != 1:
             raise Refused
-        item = matches[0]
-    return scoped_item(item, organization, collection)
+        item_id = matches[0]['id']
+    item = scoped_item(fetch('/object/item/' + checked_uuid(item_id)), organization, collection, item_id)
+    if name is not None and item.get('name') != name:
+        raise Refused
+    return item
 
 
 def environment_name(value):
@@ -287,25 +337,39 @@ def attach(item, path, organization, collection):
     boundary = 'vault-' + uuid4().hex
     body = ('--' + boundary + '\r\nContent-Disposition: form-data; name="file"; filename="' + name +
             '"\r\nContent-Type: application/octet-stream\r\n\r\n').encode() + data + ('\r\n--' + boundary + '--\r\n').encode()
-    updated = scoped_item(fetch('/attachment?' + urlencode({'itemid': item['id']}), method='POST', payload=body,
-        content_type='multipart/form-data; boundary=' + boundary, timeout=VAULT_OPERATION_TIMEOUT_SECONDS), organization, collection, item['id'])
-    existing = {entry['id'] for entry in item.get('attachments') or []}
-    added = [entry for entry in updated.get('attachments') or [] if entry.get('fileName') == name and entry['id'] not in existing]
-    if len(added) != 1 or not isinstance(added[0]['id'], str) or not re.fullmatch(r'[A-Za-z0-9-]{1,128}', added[0]['id']):
-        raise Refused
-    attachment_id = added[0]['id']
-    suffix = '?' + urlencode({'itemid': item['id']})
-    attachment_path = '/object/attachment/' + quote(attachment_id, safe='') + suffix
-    try:
-        if fetch(attachment_path, binary=True, timeout=VAULT_OPERATION_TIMEOUT_SECONDS) != data:
+    updated = fetch('/attachment?' + urlencode({'itemid': item['id']}), method='POST', payload=body,
+        content_type='multipart/form-data; boundary=' + boundary, timeout=VAULT_OPERATION_TIMEOUT_SECONDS)
+    with confirming_write(item['id']):
+        updated = scoped_item(updated, organization, collection, item['id'])
+        existing = {entry['id'] for entry in item.get('attachments') or []}
+        added = [entry for entry in updated.get('attachments') or [] if entry.get('fileName') == name and entry['id'] not in existing]
+        if len(added) != 1 or not isinstance(added[0]['id'], str) or not re.fullmatch(r'[A-Za-z0-9-]{1,128}', added[0]['id']):
             raise Refused
-    except Exception:
-        with contextlib.suppress(Exception):
-            fetch(attachment_path, method='DELETE', timeout=VAULT_OPERATION_TIMEOUT_SECONDS)
-        raise
-    if previous:
-        fetch('/object/attachment/' + quote(previous[0]['id'], safe='') + suffix, method='DELETE',
-              timeout=VAULT_OPERATION_TIMEOUT_SECONDS)
+        attachment_id = added[0]['id']
+    with confirming_write(item['id'], attachment_id):
+        expected_attachment = {key: added[0][key] for key in ('id', 'fileName', 'size')}
+
+        def attachment_ready(removed_id=None):
+            current = scoped_item(fetch('/object/item/' + item['id']), organization, collection, item['id'])
+            attachments = current.get('attachments') or []
+            matches = [entry for entry in attachments if entry.get('id') == attachment_id]
+            return len(matches) == 1 and matches_fields(matches[0], expected_attachment) and (
+                removed_id is None or not any(entry.get('id') == removed_id for entry in attachments))
+
+        wait_for_cache(attachment_ready)
+        suffix = '?' + urlencode({'itemid': item['id']})
+        attachment_path = '/object/attachment/' + quote(attachment_id, safe='') + suffix
+        try:
+            if fetch(attachment_path, binary=True, timeout=VAULT_OPERATION_TIMEOUT_SECONDS) != data:
+                raise Refused
+        except Exception:
+            with contextlib.suppress(Exception):
+                fetch(attachment_path, method='DELETE', timeout=VAULT_OPERATION_TIMEOUT_SECONDS)
+            raise
+        if previous:
+            fetch('/object/attachment/' + quote(previous[0]['id'], safe='') + suffix, method='DELETE',
+                  timeout=VAULT_OPERATION_TIMEOUT_SECONDS)
+            wait_for_cache(lambda: attachment_ready(previous[0]['id']))
     return attachment_id
 
 
@@ -324,20 +388,30 @@ def write(command, argv):
     document = input_document(args, command == 'create') if command in ('create', 'update') else None
     with write_lock():
         if command == 'create':
-            item = scoped_item(fetch('/object/item', method='POST', payload={**document,
+            created = fetch('/object/item', method='POST', payload={**document,
                 'organizationId': organization, 'collectionIds': [collection], 'folderId': None},
-                timeout=VAULT_OPERATION_TIMEOUT_SECONDS),
-                organization, collection)
+                timeout=VAULT_OPERATION_TIMEOUT_SECONDS)
+            item_id = checked_uuid(created['id'])
+            with confirming_write(item_id):
+                item = scoped_item(created, organization, collection, item_id)
+                wait_for_cache(lambda: scoped_item(fetch('/object/item/' + item_id),
+                    organization, collection, item_id))
         else:
             item = selected_item(args.item)
         result = {'status': {'create': 'created', 'update': 'updated', 'trash': 'trashed', 'attach': 'attached'}[command],
                   'itemId': item['id']}
         if command == 'update':
-            scoped_item(fetch('/object/item/' + item['id'], method='PUT', payload={**item, **document},
-                              timeout=VAULT_OPERATION_TIMEOUT_SECONDS),
-                        organization, collection, item['id'])
+            updated = fetch('/object/item/' + item['id'], method='PUT', payload={**item, **document},
+                            timeout=VAULT_OPERATION_TIMEOUT_SECONDS)
+            with confirming_write(item['id']):
+                scoped_item(updated, organization, collection, item['id'])
+                wait_for_cache(lambda: matches_fields(scoped_item(fetch('/object/item/' + item['id']),
+                    organization, collection, item['id']), document))
         elif command == 'trash':
             fetch('/object/item/' + item['id'], method='DELETE', timeout=VAULT_OPERATION_TIMEOUT_SECONDS)
+            with confirming_write(item['id']):
+                wait_for_cache(lambda: scoped_item(fetch('/object/item/' + item['id']), organization, collection,
+                    item['id'], allow_trashed=True).get('deletedDate') is not None)
         elif command == 'attach':
             result['attachmentId'] = attach(item, args.file, organization, collection)
     print(json.dumps(result))
@@ -664,6 +738,12 @@ def main(argv):
         if argv and argv[0] in ('create', 'update', 'trash', 'attach'):
             return write(argv[0], argv[1:])
         raise Refused
+    except WriteUnconfirmed as error:
+        message = 'vault: write sent, local cache not confirmed; item ' + error.item_id + ' may exist'
+        if error.attachment_id is not None:
+            message += '; attachment ' + error.attachment_id + ' may exist'
+        print(message + '; inspect before retrying', file=sys.stderr)
+        return 2
     except subprocess.TimeoutExpired:
         print('vault: timed out; exit code 124')
         return 124

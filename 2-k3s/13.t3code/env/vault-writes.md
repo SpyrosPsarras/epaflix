@@ -4,7 +4,7 @@ Both isolated runtimes use the same `vault` client and their own `bw serve`
 sidecar. The scope comes from `/run/t3-vault/scope.json`, not caller arguments.
 `vault run`, `update`, `trash` and `attach` refuse items outside that org and
 collection, and items with a non-null `deletedDate`. Exact-name reads ignore
-trashed matches.
+trashed matches, then re-fetch the selected item by ID before using its values.
 
 ## Commands
 
@@ -35,6 +35,23 @@ collection and a null folder. Update retains the selected item's ownership.
 Writes serialize through a private home-directory lock. Other stock-client
 sessions and owner applications do not use that lock.
 
+`bw serve` can acknowledge a write before its local cipher cache reflects it.
+The client polls that cache for the expected item state before reporting success,
+including attachment upload and deletion and the item's trash marker.
+Confirmation validates item ID and scope. Update checks the submitted fields,
+attachment confirmation checks ID, filename and size, and trash checks that
+`deletedDate` is set. Replacement also checks that the old attachment ID is
+absent. Unrelated server metadata does not prevent confirmation. Repeated
+polling stops after five seconds; each HTTP request retains its own timeout.
+Only reads are retried, including the CLI's HTTP 400 `Not found.` cache miss.
+The client never replays a write. Once a write is acknowledged and a usable item
+ID is known, any validation or confirmation failure exits with code `2`. This
+includes read timeouts, connection failures, HTTP errors, scope mismatches and
+missing attachment metadata, not just expiry of the polling deadline. It prints
+`write sent, local cache not confirmed`, the known item ID and any known
+attachment ID. This differs from refusal code `1`. Cancellation still exits with
+code `130`. Inspect the item privately before retrying.
+
 Files must be regular, non-symlink files, at most 12 MiB. The local API can
 impose a smaller request limit. Attachment names come from the file basename
 and must be printable ASCII without quotes or backslashes, at most 255
@@ -51,16 +68,18 @@ Inspect and resolve these privately before retrying.
 
 Successful writes print JSON containing only `status`, `itemId` and, for
 attachments, `attachmentId`. Errors print a fixed refusal, cancellation or
-timeout status. The client does not print item names, JSON, file contents, API
-responses or tracebacks. `vault trash` is reversible. There is no general
-permanent-delete command in the agent client.
+timeout status, or an uncertain-write status with the known IDs. The client does
+not print item names, JSON, file contents, API responses or tracebacks.
+`vault trash` is reversible. There is no general permanent-delete command in
+the agent client.
 
 ## Uncertain create recovery
 
 Use a unique name for each create. `vault create` validates the returned scope
-after the API call. An out-of-scope response makes it refuse the request and
-print no ID, but the item may already exist, even in the agent's personal vault.
-A timeout or malformed response can leave the same uncertain result.
+after the API call. A validation or confirmation failure reports an uncertain
+write with the known item ID. The item may already exist, even in the agent's
+personal vault. A timeout or malformed response before a usable ID is returned
+can leave the same uncertain result without an ID.
 
 Before retrying, use a private operator session to search the account for that
 unique name across all orgs, collections, the personal vault and trash.
@@ -86,7 +105,13 @@ Secret data, CLI diagnostics, HTTP bodies, tokens or account IDs.
    password, field and attachment reads through a quiet child, trashes the
    item, checks read refusal, and permanently deletes its own synthetic item in
    a `finally` block. It verifies the canary disappeared from active and trash
-   lists.
+   lists. Cleanup waits for the item to become locally visible before permanent
+   deletion, then forces a sync while checking both lists. Bitwarden's decrypted
+   list cache can otherwise retain a permanently deleted item. Permanent deletion
+   does not require trash first, so failed lifecycle steps can clean active items.
+   If lifecycle and cleanup both fail, the canary reports both exception types,
+   lifecycle first, and preserves the original lifecycle failure without printing
+   exception messages or values.
 
    ```sh
    set -euo pipefail
@@ -157,4 +182,6 @@ bash 2-k3s/13.t3code/one/tools/sync-shared.sh --check
 ```
 
 The fixture runs both lifecycle variants, including failure cleanup, against a
-local HTTP API. It does not establish live Vaultwarden account permissions.
+local HTTP API. It covers delayed local-cache visibility, stale decrypted lists,
+read-only polling limits, and cleanup without replaying writes. It does not
+establish live Vaultwarden account permissions.

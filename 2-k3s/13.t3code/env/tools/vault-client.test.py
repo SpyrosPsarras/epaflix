@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
+import contextlib
 import copy
 from email.parser import BytesParser
 from email.policy import default
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -14,6 +17,7 @@ from threading import Thread
 from types import SimpleNamespace
 import time
 import unittest
+from unittest.mock import patch
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
@@ -51,21 +55,68 @@ class VaultTests(unittest.TestCase):
         self.upload_error = False
         self.corrupt_upload = False
         self.bad_upload_response = False
+        self.omit_upload_size = False
+        self.confirmation_failure = None
         self.create_changes = {}
         self.create_delay = 0
         self.omit_read_data = False
+        self.read_error = None
+        self.read_error_html = False
+        self.get_item = lambda item: item
         self.uploads = {'syntheticattachment': CONTENT}
         self.next_attachment = 0
+        self.cache_lag_reads = 0
+        self.attachment_delete_lag_reads = 0
+        self.cache_reads = 0
+        self.cached_item = None
+        self.list_override = None
+        self.stale_list_after_delete = False
         test = self
 
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *args):
                 pass
 
+            def cached(self):
+                if test.cache_reads:
+                    test.cache_reads -= 1
+                    return copy.deepcopy(test.cached_item)
+                return copy.deepcopy(test.item)
+
+            def defer_cache(self):
+                test.cached_item = copy.deepcopy(test.item)
+                test.cache_reads = test.cache_lag_reads
+
             def do_GET(self):
                 test.paths.append(self.path)
+                if test.writes:
+                    if test.confirmation_failure == 'http500':
+                        self.reply(status=500, message=VALUE)
+                        return
+                    if test.confirmation_failure == 'connection':
+                        self.connection.shutdown(socket.SHUT_RDWR)
+                        self.connection.close()
+                        return
+                    if test.confirmation_failure == 'timeout':
+                        time.sleep(0.3)
+                        self.close_connection = True
+                        return
+                    if test.confirmation_failure == 'unsuccessful':
+                        self.reply(success=False, message=VALUE)
+                        return
+                if test.read_error is not None:
+                    if test.read_error_html:
+                        self.send_error(test.read_error[0])
+                        return
+                    self.reply(status=test.read_error[0], message=test.read_error[1])
+                    return
                 parsed = urlsplit(self.path)
+                item = self.cached()
                 if parsed.path.startswith('/object/attachment/'):
+                    if test.cache_lag_reads and not any(entry['id'] == parsed.path.rsplit('/', 1)[1]
+                            for entry in (item or {}).get('attachments', [])):
+                        self.reply(status=400, message='No attachments available for this item.')
+                        return
                     if parse_qs(parsed.query) != {'itemid': [ITEM]}:
                         self.send_error(400)
                         return
@@ -75,13 +126,18 @@ class VaultTests(unittest.TestCase):
                     content_type = 'application/json'
                     if parsed.path == '/list/object/items':
                         query = parse_qs(parsed.query)
-                        items = ([test.item] if test.item is not None else []) + test.extra_items
+                        if test.list_override is not None:
+                            item = copy.deepcopy(test.list_override)
+                        items = ([item] if item is not None else []) + test.extra_items
                         trashed = query.get('trash') == ['true']
                         items = [item for item in items if (item.get('deletedDate') is not None) == trashed]
                         search = query.get('search', [''])[0]
                         data = {'object': 'list', 'data': [item for item in items if search in item.get('name', '')]}
                     elif parsed.path == '/object/item/' + ITEM:
-                        data = test.item
+                        if item is None:
+                            self.reply(status=400, message='Not found.')
+                            return
+                        data = test.get_item(item)
                     elif parsed.path == '/object/item/' + FOREIGN:
                         data = {**test.item, 'id': FOREIGN, 'organizationId': FOREIGN}
                     else:
@@ -94,8 +150,9 @@ class VaultTests(unittest.TestCase):
                 self.end_headers()
                 self.wfile.write(data)
 
-            def reply(self, data=None, status=200):
-                body = json.dumps({'success': status == 200, **({} if data is None else {'data': data})}).encode()
+            def reply(self, data=None, status=200, message=None, success=None):
+                body = json.dumps({'success': status == 200 if success is None else success, **({} if data is None else {'data': data}),
+                    **({} if message is None else {'message': message})}).encode()
                 self.send_response(status)
                 self.send_header('Content-Type', 'application/json')
                 self.send_header('Content-Length', str(len(body)))
@@ -108,7 +165,11 @@ class VaultTests(unittest.TestCase):
             def do_POST(self):
                 body = self.rfile.read(int(self.headers['Content-Length']))
                 test.writes.append(('POST', self.path, body))
-                if self.path == '/object/item':
+                if self.path == '/sync?force=true':
+                    test.list_override = None
+                    self.reply()
+                elif self.path == '/object/item':
+                    self.defer_cache()
                     test.item = {**json.loads(body), 'id': ITEM, **test.create_changes}
                     time.sleep(test.create_delay)
                     self.reply(test.item)
@@ -122,8 +183,13 @@ class VaultTests(unittest.TestCase):
                     test.next_attachment += 1
                     attachment_id = 'uploaded' + str(test.next_attachment)
                     test.uploads[attachment_id] = b'corrupt' if test.corrupt_upload else part.get_payload(decode=True)
-                    test.item.setdefault('attachments', []).append({'id': attachment_id, 'fileName': part.get_filename()})
-                    self.reply({**test.item, 'id': FOREIGN} if test.bad_upload_response else test.item)
+                    self.defer_cache()
+                    test.item.setdefault('attachments', []).append({'id': attachment_id, 'fileName': part.get_filename(),
+                        'size': str(len(part.get_payload(decode=True)))})
+                    response = copy.deepcopy(test.item)
+                    if test.omit_upload_size:
+                        del response['attachments'][-1]['size']
+                    self.reply({**response, 'id': FOREIGN} if test.bad_upload_response else response)
                 else:
                     self.reply(status=400)
 
@@ -133,18 +199,26 @@ class VaultTests(unittest.TestCase):
                 if self.path != '/object/item/' + ITEM:
                     self.reply(status=400)
                     return
+                self.defer_cache()
                 test.item = json.loads(body)
                 self.reply(test.item)
 
             def do_DELETE(self):
                 test.writes.append(('DELETE', self.path, None))
                 parsed = urlsplit(self.path)
+                if test.cache_lag_reads and self.cached() is None:
+                    self.reply(status=400, message='Not found.')
+                    return
+                self.defer_cache()
                 if parsed.path == '/object/item/' + ITEM:
                     if parse_qs(parsed.query) == {'permanent': ['true']}:
+                        if test.stale_list_after_delete:
+                            test.list_override = copy.deepcopy(test.item)
                         test.item = None
                     else:
                         test.item['deletedDate'] = '2026-01-01T00:00:00Z'
                 elif parsed.path.startswith('/object/attachment/') and parse_qs(parsed.query) == {'itemid': [ITEM]}:
+                    test.cache_reads = max(test.cache_reads, test.attachment_delete_lag_reads)
                     attachment_id = parsed.path.rsplit('/', 1)[1]
                     test.item['attachments'] = [entry for entry in test.item['attachments'] if entry['id'] != attachment_id]
                     del test.uploads[attachment_id]
@@ -228,6 +302,17 @@ class VaultTests(unittest.TestCase):
         self.assertFalse(Path(record.read_text()).parent.exists())
         self.assert_quiet(result)
 
+    def test_name_selection_rechecks_item_instead_of_using_stale_decrypted_list(self):
+        self.list_override = copy.deepcopy(self.item)
+        self.item['login']['password'] = FIELD
+        result = self.command(['--name', 'synthetic-item', '--password-env', 'VAULT_PASSWORD'],
+            f'import os; assert os.environ["VAULT_PASSWORD"] == {FIELD!r}')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.item['deletedDate'] = '2026-01-01T00:00:00Z'
+        result = self.command(['--name', 'synthetic-item', '--password-env', 'VAULT_PASSWORD'], 'pass')
+        self.assertEqual(result.returncode, 1)
+        self.assert_quiet(result)
+
     def test_exact_name_and_ambiguous_missing_or_foreign_names(self):
         result = self.command(['--name', 'synthetic-item', '--password-env', 'VAULT_PASSWORD'], 'pass')
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -294,6 +379,186 @@ class VaultTests(unittest.TestCase):
             self.env['VAULT_DOCUMENT'] = json.dumps(document)
             options = [*options, '--input-env', 'VAULT_DOCUMENT']
         return subprocess.run(self.prefix + [command, *options], env=self.env, capture_output=True)
+
+    def shorten_cache_wait(self):
+        self.prefix[2] = self.prefix[2].replace('m.ADDRESS=',
+            'm.CACHE_WAIT_SECONDS=0.05; m.CACHE_POLL_SECONDS=0.01; m.ADDRESS=')
+
+    def test_write_confirmation_ignores_unrelated_get_metadata(self):
+        self.shorten_cache_wait()
+
+        def with_metadata(item):
+            result = copy.deepcopy(item)
+            result.update(revisionDate='2026-01-01T00:00:00.000000Z', serverMetadata='synthetic-metadata')
+            result.setdefault('login', {})['serverMetadata'] = 'synthetic-login-metadata'
+            for entry in result.get('attachments', []) + result.get('fields', []):
+                entry['serverMetadata'] = 'synthetic-entry-metadata'
+            return result
+
+        self.get_item = with_metadata
+        original = copy.deepcopy(self.item)
+        path = self.home / 'fixture.bin'
+        path.write_bytes(CONTENT)
+        for command, options, document in (
+                ('create', [], {'type': 1, 'name': 'synthetic-created', 'login': {'password': VALUE}}),
+                ('update', ['--item', ITEM], {'login': {'password': FIELD},
+                    'fields': [{'name': 'api', 'value': VALUE, 'type': 1}]}),
+                ('attach', ['--item', ITEM, '--file', str(path)], None),
+                ('trash', ['--item', ITEM], None)):
+            with self.subTest(command=command):
+                self.item = None if command == 'create' else copy.deepcopy(original)
+                self.cache_reads = 0
+                self.next_attachment = 0
+                self.writes.clear()
+                result = self.write_command(command, options, document)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout)['itemId'], ITEM)
+                self.assertEqual(len(self.writes), 2 if command == 'attach' else 1)
+                self.assert_quiet(result)
+
+    def test_trash_confirmation_rejects_wrong_id_or_scope(self):
+        original = copy.deepcopy(self.item)
+        for change in ({'id': FOREIGN}, {'organizationId': FOREIGN}, {'collectionIds': [FOREIGN]}):
+            with self.subTest(change=change):
+                self.item = copy.deepcopy(original)
+                self.writes.clear()
+                self.get_item = lambda item: {**item, **change} if self.writes else item
+                result = self.write_command('trash', ['--item', ITEM])
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(len(self.writes), 1)
+                self.assert_quiet(result)
+
+    def test_attachment_confirmation_requires_uploaded_identity_name_and_size(self):
+        self.shorten_cache_wait()
+        original = copy.deepcopy(self.item)
+        path = self.home / 'fixture.bin'
+        path.write_bytes(CONTENT)
+        for change in ({'id': 'different-id'}, {'fileName': 'different.bin'}, {'size': '999999'}):
+            with self.subTest(change=change):
+                self.item = copy.deepcopy(original)
+                self.next_attachment = 0
+                self.writes.clear()
+
+                def changed_attachment(item):
+                    return {**item, 'attachments': [
+                        {**entry, **change} if entry['id'] == 'uploaded1' else entry
+                        for entry in item.get('attachments', [])]}
+
+                self.get_item = changed_attachment
+                result = self.write_command('attach', ['--item', ITEM, '--file', str(path)])
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertEqual([method for method, _, _ in self.writes], ['POST'])
+                self.assert_quiet(result)
+
+    def test_cli_reports_all_acknowledged_confirmation_failures_without_replay(self):
+        self.prefix[2] = self.prefix[2].replace('m.ADDRESS=',
+            'm.fetch=__import__("functools").partial(m.fetch, timeout=0.1); m.ADDRESS=')
+        original = copy.deepcopy(self.item)
+        path = self.home / 'fixture.bin'
+        path.write_bytes(CONTENT)
+        for command, options, document in (
+                ('create', [], {'type': 1, 'name': 'synthetic-created', 'login': {'password': VALUE}}),
+                ('update', ['--item', ITEM], {'login': {'password': FIELD}}),
+                ('attach', ['--item', ITEM, '--file', str(path)], None),
+                ('trash', ['--item', ITEM], None)):
+            for failure in ('http500', 'connection', 'timeout', 'unsuccessful', 'scope', 'id'):
+                with self.subTest(command=command, failure=failure):
+                    self.item = None if command == 'create' else copy.deepcopy(original)
+                    self.next_attachment = 0
+                    self.writes.clear()
+                    self.confirmation_failure = failure
+                    change = {'organizationId': FOREIGN} if failure == 'scope' else {'id': FOREIGN}
+                    self.get_item = lambda item: {**item, **change} if self.writes and failure in ('scope', 'id') else item
+                    result = self.write_command(command, options, document)
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    self.assertEqual(result.stdout, b'')
+                    self.assertIn(('item ' + ITEM + ' may exist').encode(), result.stderr)
+                    self.assertIn(b'inspect before retrying', result.stderr)
+                    self.assertNotIn(b'request or startup refused', result.stderr)
+                    if command == 'attach':
+                        self.assertIn(b'attachment uploaded1 may exist', result.stderr)
+                    self.assertEqual(len(self.writes), 1)
+                    self.assertIsNotNone(self.item)
+                    self.assert_quiet(result)
+
+    def test_cli_reports_known_attachment_when_upload_response_omits_size(self):
+        self.omit_upload_size = True
+        path = self.home / 'fixture.bin'
+        path.write_bytes(CONTENT)
+        result = self.write_command('attach', ['--item', ITEM, '--file', str(path)])
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertEqual(result.stdout, b'')
+        self.assertIn(('item ' + ITEM + ' may exist').encode(), result.stderr)
+        self.assertIn(b'attachment uploaded1 may exist', result.stderr)
+        self.assertIn(b'inspect before retrying', result.stderr)
+        self.assertEqual([method for method, _, _ in self.writes], ['POST'])
+        self.assertEqual(len(self.item['attachments']), 2)
+        self.assert_quiet(result)
+
+    def test_cli_keeps_confirmation_cancellation_distinct(self):
+        self.prefix[2] = self.prefix[2].replace('sys.exit(m.main(sys.argv[4:]))',
+            '\ndef cancelled(*args, **kwargs):\n raise m.Cancelled\n'
+            'm.wait_for_cache=cancelled\nsys.exit(m.main(sys.argv[4:]))')
+        original = copy.deepcopy(self.item)
+        path = self.home / 'fixture.bin'
+        path.write_bytes(CONTENT)
+        for command, options, document in (
+                ('create', [], {'type': 1, 'name': 'synthetic-created'}),
+                ('update', ['--item', ITEM], {'notes': FIELD}),
+                ('attach', ['--item', ITEM, '--file', str(path)], None),
+                ('trash', ['--item', ITEM], None)):
+            with self.subTest(command=command):
+                self.item = None if command == 'create' else copy.deepcopy(original)
+                self.next_attachment = 0
+                self.writes.clear()
+                result = self.write_command(command, options, document)
+                self.assertEqual(result.returncode, 130, result.stderr)
+                self.assertNotIn(b'write sent', result.stdout + result.stderr)
+                self.assertEqual(len(self.writes), 1)
+                self.assert_quiet(result)
+
+    def test_cli_reports_uncertain_cache_confirmation_for_each_write_without_replay(self):
+        self.shorten_cache_wait()
+        original = copy.deepcopy(self.item)
+        path = self.home / 'fixture.bin'
+        path.write_bytes(CONTENT)
+        for command, options, document in (
+                ('create', [], {'type': 1, 'name': 'synthetic-created', 'login': {'password': VALUE}}),
+                ('update', ['--item', ITEM], {'login': {'password': FIELD}}),
+                ('attach', ['--item', ITEM, '--file', str(path)], None),
+                ('trash', ['--item', ITEM], None)):
+            with self.subTest(command=command):
+                self.item = None if command == 'create' else copy.deepcopy(original)
+                self.cache_lag_reads = 1000000
+                self.cache_reads = 0
+                self.next_attachment = 0
+                self.writes.clear()
+                result = self.write_command(command, options, document)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertEqual(result.stdout, b'')
+                self.assertIn(b'write sent, local cache not confirmed', result.stderr)
+                self.assertIn(('item ' + ITEM + ' may exist').encode(), result.stderr)
+                self.assertNotIn(b'request or startup refused', result.stderr)
+                if command == 'attach':
+                    self.assertIn(b'attachment uploaded1 may exist', result.stderr)
+                    self.assertEqual(len(self.item['attachments']), 2)
+                self.assertEqual(len(self.writes), 1)
+                self.assertIsNotNone(self.item)
+                self.assert_quiet(result)
+
+    def test_cli_reports_attachment_id_when_old_delete_cache_does_not_confirm(self):
+        self.shorten_cache_wait()
+        self.attachment_delete_lag_reads = 1000000
+        path = self.home / 'fixture.bin'
+        path.write_bytes(CONTENT)
+        result = self.write_command('attach', ['--item', ITEM, '--file', str(path)])
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn(('item ' + ITEM + ' may exist').encode(), result.stderr)
+        self.assertIn(b'attachment uploaded1 may exist', result.stderr)
+        self.assertEqual(result.stdout, b'')
+        self.assertEqual(self.item['attachments'], [{'id': 'uploaded1', 'fileName': 'fixture.bin', 'size': str(len(CONTENT))}])
+        self.assertEqual([method for method, _, _ in self.writes], ['POST', 'DELETE'])
+        self.assert_quiet(result)
 
     def test_create_forces_scope_from_env_or_file_without_printing_values(self):
         document = {'type': 1, 'name': VALUE, 'login': {'password': VALUE},
@@ -377,7 +642,7 @@ class VaultTests(unittest.TestCase):
         result = self.write_command('attach', ['--item', ITEM, '--file', str(path)])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), {'status': 'attached', 'itemId': ITEM, 'attachmentId': 'uploaded1'})
-        self.assertEqual(self.item['attachments'], [{'id': 'uploaded1', 'fileName': 'fixture.bin'}])
+        self.assertEqual(self.item['attachments'], [{'id': 'uploaded1', 'fileName': 'fixture.bin', 'size': str(len(replacement))}])
         self.assertEqual(self.uploads['uploaded1'], replacement)
         self.assertIn('/object/attachment/uploaded1?itemid=' + ITEM, self.paths)
         self.assertEqual([entry[0] for entry in self.writes], ['POST', 'DELETE'])
@@ -394,7 +659,10 @@ class VaultTests(unittest.TestCase):
                 setattr(self, failure, True)
                 try:
                     result = self.write_command('attach', ['--item', ITEM, '--file', str(path)])
-                    self.assertEqual(result.returncode, 1)
+                    self.assertEqual(result.returncode, 1 if failure == 'upload_error' else 2)
+                    if failure != 'upload_error':
+                        self.assertIn(('item ' + ITEM + ' may exist').encode(), result.stderr)
+                        self.assertIn(b'inspect before retrying', result.stderr)
                     self.assertTrue(any(entry['id'] == 'syntheticattachment' for entry in self.item['attachments']))
                     self.assertFalse(any(entry[0] == 'DELETE' and 'syntheticattachment?' in entry[1] for entry in self.writes))
                     self.assertEqual(self.uploads['syntheticattachment'], CONTENT)
@@ -433,6 +701,63 @@ class VaultTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             client.fetch('/object/item/' + ITEM)
         self.assertIsNone(client.fetch('/object/item/' + ITEM, method='DELETE'))
+
+    def test_cache_wait_is_bounded_and_only_retries_local_not_found(self):
+        spec = importlib.util.spec_from_file_location('vault_client', SOURCE)
+        client = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(client)
+        client.ADDRESS = f'http://127.0.0.1:{self.server.server_port}'
+        client.CACHE_WAIT_SECONDS = 0.05
+        client.CACHE_POLL_SECONDS = 0.01
+        self.read_error = (400, 'Not found.')
+        with self.assertRaises(client.Refused):
+            client.wait_for_cache(lambda: client.fetch('/object/item/' + ITEM))
+        self.assertGreater(len(self.paths), 1)
+        for error in ((403, 'Not found.'), (400, 'Permission denied.'), (500, 'Not found.')):
+            self.paths.clear()
+            self.read_error = error
+            with self.assertRaises(client.urllib.error.HTTPError):
+                client.wait_for_cache(lambda: client.fetch('/object/item/' + ITEM))
+            self.assertEqual(len(self.paths), 1)
+        self.read_error = None
+        self.paths.clear()
+        with self.assertRaises(client.Refused):
+            client.wait_for_cache(lambda: client.fetch('/object/item/' + ITEM) == {})
+        self.assertGreater(len(self.paths), 1)
+
+    def test_cache_wait_preserves_http_error_for_non_json_400(self):
+        spec = importlib.util.spec_from_file_location('vault_client', SOURCE)
+        client = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(client)
+        client.ADDRESS = f'http://127.0.0.1:{self.server.server_port}'
+        self.read_error = (400, 'unused')
+        self.read_error_html = True
+        with self.assertRaises(client.urllib.error.HTTPError) as raised:
+            client.wait_for_cache(lambda: client.fetch('/object/item/' + ITEM))
+        self.assertEqual(raised.exception.code, 400)
+        self.assertEqual(len(self.paths), 1)
+
+    def test_canary_preserves_original_failure_and_reports_both_errors_without_values(self):
+        spec = importlib.util.spec_from_file_location('canary', ROOT / 'env/tools/vault-write-canary.py')
+        canary = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(canary)
+        primary = ValueError(VALUE)
+
+        def fail_main(arguments):
+            raise primary
+
+        def fail_cleanup(check):
+            raise TimeoutError(FIELD)
+
+        client = SimpleNamespace(scope=lambda: (ORG, COLLECTION), main=fail_main, wait_for_cache=fail_cleanup)
+        with patch.dict(os.environ, self.env), contextlib.redirect_stderr(io.StringIO()) as output:
+            with self.assertRaises(ValueError) as raised:
+                canary.exercise(client, 'homelab')
+        self.assertIs(raised.exception, primary)
+        messages = output.getvalue()
+        self.assertLess(messages.index('lifecycle failed: ValueError'), messages.index('cleanup failed: TimeoutError'))
+        self.assertNotIn(VALUE, messages)
+        self.assertNotIn(FIELD, messages)
 
     def test_canary_recovery_searches_active_and_trashed_items_with_exact_name_only(self):
         spec = importlib.util.spec_from_file_location('canary', ROOT / 'env/tools/vault-write-canary.py')
@@ -481,6 +806,18 @@ class VaultTests(unittest.TestCase):
                 self.assertTrue(any(query.get('trash') == ['true'] for query in queries))
                 self.assertTrue(all(set(query) == {'search', 'trash'} for query in queries))
 
+    def test_canary_recovers_uncertain_create_before_cache_lists_item(self):
+        self.item = None
+        self.cache_lag_reads = 2
+        self.stale_list_after_delete = True
+        self.create_changes = {'organizationId': None, 'collectionIds': []}
+        result = self.canary('homelab')
+        self.assertEqual(result.returncode, 1)
+        self.assertIsNone(self.item)
+        self.assert_quiet(result)
+        self.assertEqual(sum(method == 'POST' and path == '/object/item' for method, path, _ in self.writes), 1)
+        self.assertEqual(sum(method == 'DELETE' for method, _, _ in self.writes), 1)
+
     def test_canary_cleans_create_that_times_out_after_server_stores_item(self):
         self.create_delay = 0.3
         self.create_changes = {'organizationId': None, 'collectionIds': [], 'deletedDate': '2026-01-01T00:00:00Z'}
@@ -496,6 +833,31 @@ class VaultTests(unittest.TestCase):
         self.assert_quiet(result)
         self.assertTrue(any(method == 'POST' and path == '/object/item' for method, path, _ in self.writes))
         self.assertTrue(any(method == 'DELETE' and path.endswith('?permanent=true') for method, path, _ in self.writes))
+
+    def test_canary_waits_for_eventually_consistent_bw_cache_without_replaying_writes(self):
+        self.cache_lag_reads = 2
+        self.stale_list_after_delete = True
+        for variant in ('homelab', 'work'):
+            with self.subTest(variant=variant):
+                self.env['T3_RUNTIME_VARIANT'] = variant
+                (self.home / '.config/t3-runtime/environment').write_text(variant + '\n')
+                self.scope.chmod(0o600)
+                self.scope.write_text(json.dumps({'environment': variant, 'organizationId': ORG, 'collectionId': COLLECTION}))
+                self.scope.chmod(0o444)
+                self.item = None
+                self.cache_reads = 0
+                self.next_attachment = 0
+                self.writes.clear()
+                result = self.canary(variant)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIsNone(self.item)
+                self.assertEqual([(method, urlsplit(path).path) for method, path, _ in self.writes
+                    if urlsplit(path).path != '/sync'], [
+                    ('POST', '/object/item'), ('PUT', '/object/item/' + ITEM),
+                    ('POST', '/attachment'), ('POST', '/attachment'),
+                    ('DELETE', '/object/attachment/uploaded1'),
+                    ('DELETE', '/object/item/' + ITEM), ('DELETE', '/object/item/' + ITEM)])
+                self.assert_quiet(result)
 
     def test_canary_complete_and_cleanup_after_failed_read_for_both_orgs(self):
         for variant, fail in (('homelab', False), ('work', False), ('homelab', True)):
