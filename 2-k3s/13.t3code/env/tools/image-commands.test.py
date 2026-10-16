@@ -37,6 +37,63 @@ rm() { test "$*" = /tmp/vault-client.py; }
 
 
 class ImageCommandTests(unittest.TestCase):
+    def test_t3_image_installs_a_direct_executable_for_bundled_and_release_layouts(self):
+        self.check_t3_image_layouts()
+
+    @unittest.skipUnless(os.geteuid() == 0, 'Non-owner executable check needs root; permission bits are always checked')
+    def test_t3_image_executable_runs_as_uid_1000(self):
+        self.check_t3_image_layouts(non_owner=True)
+
+    def check_t3_image_layouts(self, non_owner=False):
+        dockerfile = (ROOT / 'env/Dockerfile').read_text().replace('\\\n', ' ')
+        instruction = next(line[4:] for line in dockerfile.splitlines()
+                           if line.startswith('RUN ') and 'ln -sf' in line)
+        for layout in ('bundled', 'release', 'download-failed'):
+            with self.subTest(layout=layout), tempfile.TemporaryDirectory() as temporary:
+                image = Path(temporary)
+                image.chmod(0o755)
+                tools = image / 'tools'
+                cli = tools / 'node_modules/.bin/t3'
+                cli.parent.mkdir(parents=True)
+                (tools / 'package.json').write_text(json.dumps({'dependencies': {'t3': '^0.1.1-test'}}))
+                package = tools / 'node_modules/t3/package.json'
+                package.parent.mkdir()
+                package.write_text(json.dumps({'version': '0.1.1-test'}))
+                bundled = tools / 'node_modules/@t3code/t3-linux-x64/t3'
+                release = image / 'opt/t3/runtime/versions/0.1.1-test/t3'
+                native = bundled if layout == 'bundled' else release
+                if layout == 'bundled':
+                    bundled.parent.mkdir(parents=True)
+                    bundled.write_text('#!/bin/sh\necho 0.1.1-test\n')
+                    bundled.chmod(0o755)
+                cli.write_text('''#!/bin/sh
+set -eu
+test "$1" = --version
+if [ "$LAYOUT" = download-failed ]; then exit 23; fi
+mkdir -p "$T3CODE_HOME/runtime/versions/0.1.1-test"
+printf '#!/bin/sh\\necho 0.1.1-test\\n' > "$T3CODE_HOME/runtime/versions/0.1.1-test/t3"
+chmod 700 "$T3CODE_HOME/runtime/versions/0.1.1-test" "$T3CODE_HOME/runtime/versions/0.1.1-test/t3"
+''')
+                cli.chmod(0o755)
+                command = instruction.replace('/tools', str(tools)).replace('/opt/t3', str(image / 'opt/t3'))
+                result = subprocess.run(['/bin/sh', '-ec', command], capture_output=True, text=True,
+                    env={**os.environ, 'LAYOUT': layout})
+                if layout == 'download-failed':
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertFalse(cli.is_symlink())
+                    continue
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertTrue(cli.is_symlink())
+                self.assertEqual(cli.resolve(), native)
+                directory = native.parent
+                while directory != image:
+                    self.assertEqual(directory.stat().st_mode & 0o005, 0o005, str(directory))
+                    directory = directory.parent
+                self.assertEqual(native.stat().st_mode & 0o005, 0o005, str(native))
+                runtime_user = {'user': 1000, 'group': 1000, 'extra_groups': []} if non_owner else {}
+                self.assertEqual(subprocess.check_output([str(cli), '--version'], text=True,
+                                                        **runtime_user).strip(), '0.1.1-test')
+
     def test_rendered_vault_commands_have_runner_and_cli_in_their_image_variant(self):
         dockerfile = (ROOT / 'env/Dockerfile').read_text().replace('\\\n', ' ')
         instructions = [line[4:] for line in dockerfile.splitlines() if line.startswith('RUN ') and
