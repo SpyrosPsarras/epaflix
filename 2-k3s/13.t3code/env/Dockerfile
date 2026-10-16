@@ -25,7 +25,14 @@ COPY env/tools/package.json env/tools/package-lock.json /tools/
 RUN cd /tools && npx --yes npm@10.9.4 ci --no-fund --no-audit \
     && npm cache clean --force
 # Run the native server directly so container TERM reaches it without a CLI shim.
-RUN ln -sf "../@t3code/t3-$(node -p process.platform)-$(node -p process.arch)/t3" /tools/node_modules/.bin/t3
+RUN native="/tools/node_modules/@t3code/t3-$(node -p process.platform)-$(node -p process.arch)/t3"; \
+    if [ ! -x "$native" ]; then \
+      T3CODE_HOME=/opt/t3 /tools/node_modules/.bin/t3 --version \
+      && chmod -R a+rX /opt/t3 \
+      && native="/opt/t3/runtime/versions/$(node -p "require('/tools/node_modules/t3/package.json').version")/t3"; \
+    fi \
+    && test -x "$native" \
+    && ln -sf "$native" /tools/node_modules/.bin/t3
 ENV PATH="/tools/node_modules/.bin:${PATH}"
 COPY env/files/vault-client.py /tmp/vault-client.py
 RUN if [ "$T3_RUNTIME_VARIANT" = homelab ] || [ "$T3_RUNTIME_VARIANT" = work ]; then install -m 0555 /tmp/vault-client.py /usr/local/bin/vault; fi \

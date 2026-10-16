@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+trap 'status=$?; if (( status != 0 )); then echo "inventory: line $LINENO failed ($status): $BASH_COMMAND" >&2; fi' EXIT
 root=$(cd "$(dirname "$0")/../.." && pwd)
 variant=${T3_RUNTIME_VARIANT:-mixed}
 for tool in tree kubectl gh helm kustomize argocd sops git curl ssh python3; do
