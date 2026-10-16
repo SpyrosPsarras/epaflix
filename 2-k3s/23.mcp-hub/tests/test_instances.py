@@ -454,15 +454,17 @@ class RenderTests(unittest.TestCase):
             self.assertEqual(sum(doc["kind"] == "Deployment" for doc in documents), 4)
             self.assertNotIn("mcp-hub.epaflix.com/inputs-revision", json.dumps(documents))
 
-    def test_argocd_requires_manual_approval_for_new_hubs(self):
+    def test_argocd_automates_hubs_and_runtimes_with_distinct_self_heal_policies(self):
         result = subprocess.run(["kustomize", "build", str(ROOT / "2-k3s/11.argocd/apps")],
                                 check=True, capture_output=True, text=True)
         apps = {doc["metadata"]["name"]: doc for doc in yaml.safe_load_all(result.stdout)}
         for environment in hub_services.ENVIRONMENTS:
             app = apps["mcp-hub-" + environment]
-            self.assertNotIn("automated", app["spec"]["syncPolicy"])
+            self.assertEqual(app["spec"]["syncPolicy"]["automated"], {"selfHeal": True, "prune": True})
             self.assertEqual(app["spec"]["destination"]["namespace"], "mcp-hub-" + environment)
-            self.assertNotIn("automated", apps["t3code-" + environment]["spec"]["syncPolicy"])
+            runtime_sync = apps["t3code-" + environment]["spec"]["syncPolicy"]["automated"]
+            self.assertTrue(runtime_sync["prune"])
+            self.assertFalse(runtime_sync.get("selfHeal", False))
         self.assertNotIn("vault-reader-homelab", apps)
         self.assertIn("automated", apps["mcp-hub"]["spec"]["syncPolicy"])
 

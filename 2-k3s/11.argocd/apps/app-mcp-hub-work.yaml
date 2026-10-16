@@ -13,6 +13,9 @@ spec:
     server: https://kubernetes.default.svc
     namespace: mcp-hub-work
   syncPolicy:
+    automated:
+      selfHeal: true
+      prune: true
     syncOptions:
       - ServerSideApply=true
   ignoreDifferences:

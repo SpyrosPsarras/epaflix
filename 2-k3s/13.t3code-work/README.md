@@ -62,10 +62,11 @@ Do not run these steps from an unmerged implementation or move the owner's
 real items for testing.
 
 1. V1: Wait for the work runtime image referenced by the merged overlay to be
-   published. Check for active work and arrange maintenance. Manually sync
-   `t3code-work`, then let the idle-rollout job replace the `OnDelete` pod, or
-   approve one pod replacement during maintenance. Wait for all three
-   containers to be ready. Do not sync or restart homelab or shared services.
+   published. Check for active work and arrange maintenance. Wait for
+   `t3code-work` to sync automatically, then let the idle-rollout job replace
+   the `OnDelete` pod, or approve one pod replacement during maintenance. Wait
+   for all three containers to be ready. Do not sync or restart homelab or
+   shared services.
 2. V2: Check only the work Secret's key names, not its data. Confirm the new
    work vault PVC is Bound, the `vault` container runs as UID 1001, and only
    that container references `vaultwarden-agent`. Check scope readiness without
@@ -123,10 +124,10 @@ public Git, issue comments and logs.
    `work.`-prefixed `hub-token`. Add a reviewed `github-token` only with
    `gitAuth: github-token`. Public Git mode rejects a supplied Git grant.
 3. I3: Review SSH routing, the LoadBalancer pool and worker placement BEFORE
-   the first manual sync. Sync exposes the pinned SSH address `192.168.10.114`
-   at `t3code-work.epaflix.lan` even if startup refuses inputs. Put required
-   affinity in the tracked overlay first. Both jobs
-   inherit that affinity.
+   merging the first runtime revision. Automatic sync exposes the pinned SSH
+   address `192.168.10.114` at `t3code-work.epaflix.lan` even if startup
+   refuses inputs. Put required affinity in the tracked overlay first. Both
+   jobs inherit that affinity.
 
 Use the private input formats documented in
 [`../13.t3code-homelab/README.md`](../13.t3code-homelab/README.md), with these
@@ -223,7 +224,7 @@ inputs. Enrollment output goes directly to `/dev/tty`, not process
 stdout/stderr or pod logs. Non-interactive enrollment
 refuses to run. The helper verifies the reviewed account after login. Retry
 the token request after enrollment. No live enrollment is part of the offline
-checks. Only the owner runs enrollment after reviewed merge and manual sync.
+checks. Only the owner runs enrollment after reviewed merge and automatic sync.
 
 There is no vault login environment in T3, inherited general SSH agent or
 legacy authentication fallback. Required organizational instructions, Claude
@@ -253,20 +254,24 @@ rewriting benign checkout config. Config replacements are atomic.
 
 ## GitOps rotation and rollout
 
-The app-of-apps keeps self-healing its source. The work child Application stays
-manual and points at `2-k3s/13.t3code-work`. Do not change the parent source,
-hand-apply a different composition or attach Argo ownership to external Secrets.
+The app-of-apps keeps self-healing its Application definitions. The work child
+Application automatically syncs merged revisions with pruning, without
+self-healing, and points at `2-k3s/13.t3code-work`. Do not change the parent
+source, hand-apply a different composition or attach Argo ownership to external
+Secrets.
 
 1. P1: After private input/grant and routing reviews, provision the stable
    Secrets. Advance the tracked pod annotation
    `t3code.epaflix.com/inputs-grants-revision` from `unprovisioned` to a public
-   counter such as `r1`, then manually sync. The counter is not a private digest
-   or proof of approval. Missing Secrets block the pod; invalid inputs refuse
+   counter such as `r1`, then review and merge for automatic sync. The counter
+   is not a private digest or proof of approval. Missing Secrets block the pod; invalid inputs refuse
    startup.
-2. P2: For each rotation, check active sessions and arrange maintenance. Set
-   tracked replicas to `0`, manually sync and wait for termination. Update the
-   reviewed Secret files, grants and matching private hashes together. Advance
-   the tracked revision, restore replicas to `1`, manually sync and verify.
+2. P2: For each rotation, follow the shared
+   [input rotation procedure](../13.t3code/env/isolated-runtime.md#input-rotation).
+   Pause `app-of-apps` first, then `t3code-work`, before scaling the StatefulSet
+   to zero. Update reviewed inputs, grants and matching hashes together, then
+   advance the tracked revision. Resume from the merged revision only after
+   private inputs are consistent. The parent would undo a child-only pause.
    This prevents an old grant environment from using newly projected files.
 3. P3: Roll back by restoring the old reviewed Secrets and advancing the
    tracked counter again. Mounted Secret updates or hand-patched annotations
@@ -342,12 +347,12 @@ tracing or shell recording enabled.
    argocd app sync remote-pi
    kubectl --context epaflix -n remote-pi rollout status \
      deployment/cliproxy --timeout=300s
-   argocd app sync mcp-hub-work
+   argocd app wait mcp-hub-work --sync --health --timeout 300
    kubectl --context epaflix -n mcp-hub-work rollout status \
      deployment/searxng-mcp --timeout=300s
    kubectl --context epaflix -n mcp-hub-work rollout status \
      deployment/mcp-hub --timeout=300s
-   argocd app sync t3code-work
+   argocd app wait t3code-work --sync --health --timeout 1800
    kubectl --context epaflix -n t3code-work wait --for=condition=Ready \
      pod/work-0 --timeout=1800s
    ```
@@ -540,8 +545,9 @@ SSH allow rules. Removing the Secret does not remove a previously applied
 private policy, so revoke those rules as part of the same change. Do not leave
 the old policy under another name. Both config and known
 hosts are replaced, not appended, and the new agent cannot sign with removed
-keys. An OnDelete rollout needs the owner's explicit pod replacement after
-manual sync.
+keys. A stopped input rotation resumes through the shared procedure. For an
+image-only `OnDelete` update, automatic sync leaves replacement to the
+idle-rollout job or an owner-approved earlier pod replacement.
 
 After rollout, run `ssh <approved-alias> true` in work and record only success
 or failure privately. Confirm an unapproved alias is refused, the agent has
@@ -586,8 +592,9 @@ while requiring the remaining extensions to load. The former 242 permission
 pipeline assertions no longer run.
 
 - L1: Provide exact private inputs/grants and routing approval, then provision
-  and manually sync work. Verify the work jobs and continued mixed/homelab
-  health. Neither backend is claimed live-accepted by offline tests.
+  before merging the runtime revision and wait for automatic sync. Verify the
+  work jobs and continued mixed/homelab health. Neither backend is claimed
+  live-accepted by offline tests.
 - L2: With a separately approved non-production work target, enroll privately,
   exercise the required policy checks and make one harmless read-only API
   request. No production access is required.
