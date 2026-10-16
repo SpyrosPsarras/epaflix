@@ -128,6 +128,10 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: machine-info
+              mountPath: /etc/machine-info
+              subPath: machine-info
+              readOnly: true
             - name: home-spyros
               mountPath: /home/spyros
             # Only the entrypoint writes it; see files/entrypoint.sh.
@@ -225,6 +229,9 @@ spec:
             limits:
               memory: 8Gi
       volumes:
+        - name: machine-info
+          configMap:
+            name: t3code-machine-info
         - name: home-spyros
           persistentVolumeClaim:
             claimName: home-spyros

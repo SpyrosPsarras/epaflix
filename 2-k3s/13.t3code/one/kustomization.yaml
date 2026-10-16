@@ -17,6 +17,9 @@ resources:
   - idle-rollout.yaml
 
 configMapGenerator:
+  - name: t3code-machine-info
+    literals:
+      - 'machine-info=PRETTY_HOSTNAME="mixed (legacy)"'
   # Not in t3code-scripts: the job pipes t3-idle.py into the running pod, which
   # may predate it, and a new file there would itself wait for a rollout.
   - name: t3code-idle-rollout

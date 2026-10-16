@@ -13,6 +13,9 @@ resources:
   - network-policy.yaml
 
 configMapGenerator:
+  - name: t3code-machine-info
+    literals:
+      - 'machine-info=PRETTY_HOSTNAME="work"'
   - name: t3code-work-ssh
     files:
       - files/work-ssh.py

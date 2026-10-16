@@ -131,6 +131,10 @@ spec:
             - name: vault-scope
               mountPath: /run/t3-vault
               readOnly: true
+            - name: machine-info
+              mountPath: /etc/machine-info
+              subPath: machine-info
+              readOnly: true
           startupProbe:
             httpGet:
               path: /health
@@ -269,6 +273,9 @@ spec:
             limits:
               memory: 768Mi
       volumes:
+        - name: machine-info
+          configMap:
+            name: t3code-machine-info
         - name: work-ssh
           projected:
             defaultMode: 0440

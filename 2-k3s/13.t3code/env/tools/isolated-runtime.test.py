@@ -601,6 +601,42 @@ nested = {"🏠" = ["fixture", {enabled = false}]}
                     addresses.append(address)
             self.assertEqual(len(set(addresses)), 3)
 
+    def test_gitops_environment_labels_are_t3_only_and_content_hashed(self):
+        import yaml
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Path(tmp)
+            for name in ('13.t3code', '13.t3code-homelab', '13.t3code-work'):
+                shutil.copytree(ROOT.parent / name, tree / name, ignore=shutil.ignore_patterns('__pycache__'))
+            private_fixture.overlay(tree / '13.t3code/one')
+            for overlay, label in (('13.t3code/one', 'mixed (legacy)'),
+                                   ('13.t3code-homelab', 'homelab'), ('13.t3code-work', 'work')):
+                with self.subTest(overlay=overlay):
+                    directory = tree / overlay
+                    docs = list(yaml.safe_load_all(subprocess.check_output(['kustomize', 'build', str(directory)])))
+                    pod = next(doc for doc in docs if doc and doc['kind'] == 'StatefulSet')['spec']['template']['spec']
+                    t3 = next(container for container in pod['containers'] if container['name'] == 't3')
+                    mount = next(mount for mount in t3['volumeMounts'] if mount['mountPath'] == '/etc/machine-info')
+                    self.assertEqual(mount, {'name': 'machine-info', 'mountPath': '/etc/machine-info',
+                                             'subPath': 'machine-info', 'readOnly': True})
+                    volume = next(volume for volume in pod['volumes'] if volume['name'] == mount['name'])
+                    reference = volume['configMap']['name']
+                    config = next(doc for doc in docs if doc and doc['kind'] == 'ConfigMap'
+                                  and doc['metadata']['name'] == reference)
+                    self.assertEqual(config['data'], {'machine-info': f'PRETTY_HOSTNAME="{label}"'})
+                    for container in pod['containers'] + pod['initContainers']:
+                        if container['name'] != 't3':
+                            self.assertFalse(any(mount['name'] == 'machine-info' or mount['mountPath'] == '/etc/machine-info'
+                                                 for mount in container['volumeMounts']))
+                    manifest = directory / 'kustomization.yaml'
+                    before = manifest.read_text()
+                    manifest.write_text(before.replace(f'PRETTY_HOSTNAME="{label}"', 'PRETTY_HOSTNAME="changed"'))
+                    changed = list(yaml.safe_load_all(subprocess.check_output(['kustomize', 'build', str(directory)])))
+                    current = next(doc for doc in changed if doc and doc['kind'] == 'StatefulSet')['spec']['template']['spec']
+                    updated = next(volume for volume in current['volumes'] if volume['name'] == 'machine-info')
+                    self.assertNotEqual(reference, updated['configMap']['name'])
+                    self.assertEqual(t3['image'], next(container for container in current['containers']
+                                                       if container['name'] == 't3')['image'])
+
     def test_gitops_render_uses_stable_external_secrets_and_tracked_rollout_revision(self):
         with tempfile.TemporaryDirectory() as tmp:
             tree = Path(tmp) / '2-k3s'
