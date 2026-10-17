@@ -178,6 +178,8 @@ class InputsTest(unittest.TestCase):
         self.assertEqual(config['current-context'], 'homelab')
         self.assertEqual(config['users'][0]['user'], {'token': 'synthetic'})
         self.assertEqual(config['clusters'][0]['cluster']['server'], 'https://kubernetes.default.svc')
+        self.module.validator.validate_homelab_kubeconfig(config)
+        self.assertEqual(config, json.loads(self.module.agent_kubeconfig(Cluster())))
 
     def test_registration_refuses_masked_prefix_collision_and_retains_other_clients(self):
         state = {'keys': ['t3-homelab-' + 'a' * 43], 'writes': 0}

@@ -271,6 +271,7 @@ class AgentTests(unittest.TestCase):
             self.assertIn('ssh-config.sh', scripts)
             self.assertIn('ssh-agent-ready.sh', scripts)
             self.assertIn('SSH_AUTH_SOCK', scripts['homelab-ssh.md'])
+            self.assertEqual(scripts['homelab-ssh.md'], (overlay / 'files/homelab-ssh.md').read_text())
             env = {entry['name']: entry for entry in containers['vault']['env']}
             self.assertEqual(env['T3_VAULT_SSH_AGENT']['value'], '1')
             for name in ('t3', 'sshd'):
