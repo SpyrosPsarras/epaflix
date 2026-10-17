@@ -1,4 +1,30 @@
-# Homelab SSH
+# Homelab SSH and cluster access
+
+This agent has cluster-admin and full homelab SSH access. The work boundary is
+an operating rule, not a technical restriction, just as in the legacy mixed pod.
+Never read, exec, log, port-forward or copy anything in namespaces `t3code-work`
+and `mcp-hub-work`, the legacy `t3code` pod's home, or node paths holding their
+volumes. Never use an Azure or Entra login or any work credential. Confirm
+with the owner before deleting data.
+
+The owner or an admin performs the first access-app sync, only after confirming
+this guide is mounted in the replacement pod. The homelab agent cannot patch
+Applications before receiving the grant. Once granted, request post-merge Argo
+sync at the merged SHA through the Kubernetes API.
+Select only the reviewed resources in `resources`, including obsolete resources
+that need pruning. Dry-run first by adding `"dryRun":true` inside `sync`, inspect
+the result, then submit the same operation without `dryRun`:
+
+```sh
+kubectl -n argocd patch application <app> --type merge -p '{"operation":{"initiatedBy":{"username":"homelab-agent"},"sync":{"revision":"<merged sha>","prune":true,"dryRun":true,"resources":[...]}}}'
+kubectl -n argocd patch application <app> --type merge -p '{"operation":{"initiatedBy":{"username":"homelab-agent"},"sync":{"revision":"<merged sha>","prune":true,"resources":[...]}}}'
+```
+
+Wait for the dry-run operation to finish and inspect its resource results before
+submitting the real sync. Replace the placeholders with the reviewed Application,
+merged SHA and Argo resource selectors. Never sync an unmerged working tree.
+
+## SSH
 
 Run `ssh homepc true`, `ssh laptop true` or `ssh k3s-master-51 true` before
 working on a host. Use the same aliases with scp and rsync. Other configured

@@ -2,8 +2,9 @@
 
 The `t3code-homelab` Application deploys this overlay into its own namespace,
 with a fresh PVC, T3 identity, histories and personal project checkout. The
-mixed backend stays running. No mixed-home files, histories, credentials or
-cloud caches are imported.
+homelab backend will replace the legacy mixed backend. The mixed backend stays
+running until the owner approves retirement. No mixed-home files, histories,
+credentials or cloud caches are imported.
 
 The runtime Application automatically syncs merged revisions with pruning,
 without self-healing. `OnDelete` keeps the running pod until the idle-rollout
@@ -202,27 +203,39 @@ backend.
 
 See [scoped vault writes](../13.t3code/env/vault-writes.md).
 
-## Scoped Kubernetes access
+## Kubernetes administration
 
-The manual `t3code-homelab-access` Application tracks `rbac/` separately so
-namespace transformation in the runtime overlay cannot redirect cross-namespace
-RoleBindings. Sync it before provisioning. Its cluster grant permits inventory
-reads for namespaces, nodes, persistent volumes, storage/CSI kinds, ingress
-classes and CRDs. It does not grant cluster-wide namespaced-resource access.
+The manual `t3code-homelab-access` Application tracks `rbac/` separately from
+the runtime overlay. It binds `system:serviceaccount:t3code-homelab:homelab-agent`
+to the built-in `cluster-admin` ClusterRole, matching the mixed pod's Kubernetes
+access. The former inventory ClusterRole and namespace `view` bindings are
+removed. The new binding has its own name because a binding's `roleRef` is
+immutable.
 
-`rbac/namespaces.txt` is the explicit homelab namespace allowlist. Each entry
-gets a RoleBinding to built-in `view`, which excludes Secrets. Work hubs and
-pods, the mixed pod and legacy hub, shared proxy and vault login namespaces
-are excluded. The shared search namespace is excluded because its logs can
-contain work queries. Temporary vault setup namespaces are not eligible.
-Adding a namespace requires editing this sorted list, regenerating and
-reviewing the bindings:
+The existing kubeconfig still uses the same ServiceAccount token, inline CA
+and HTTPS API endpoint. Neither `inputs.py` nor startup validation restricts
+the token's RBAC grants. No input rotation or token replacement is needed.
 
-```sh
-python3 2-k3s/13.t3code-homelab/tools/sync-rbac.py
-kustomize build 2-k3s/13.t3code-homelab/rbac >/dev/null
-```
+Cluster-admin can access work resources too. The work boundary is now a written
+rule, not RBAC enforcement. The independently projected
+[`/scripts/homelab-ssh.md`](files/homelab-ssh.md) prohibits work access, Azure/Entra
+logins and work credentials, and documents resource-scoped Argo sync with a
+dry run at the merged SHA. It also requires owner confirmation before deleting
+data. Updating this ConfigMap does not require private-bundle rotation, but
+its hash-suffixed name changes. The existing pod keeps the old ConfigMap.
 
+Before granting cluster-admin, the owner or an admin must wait for the runtime
+Application to sync the merged SHA and for an approved idle pod replacement.
+`OnDelete` does not replace the pod on sync. Confirm the replacement is Ready
+and compare its `/scripts/homelab-ssh.md` with the merged guide. Only after
+the new guide is confirmed inside the pod may the owner or an admin dry-run
+and sync `t3code-homelab-access` at that SHA with pruning. The homelab agent
+cannot patch Applications before this first grant.
+
+Homelab runtime egress permits the cluster, LAN, Argo CD and inventory SSH.
+Direct pod traffic to `t3code-work` and `mcp-hub-work` remains excluded by a
+namespace `NotIn` selector. API access, SSH and shared proxies can bypass that
+network filter and must never be used to cross the written work boundary.
 See [network policies and post-merge checks](../13.t3code/env/network-isolation.md).
 
 ## Provisioning
@@ -260,8 +273,8 @@ The helper creates these external inputs, not an alternate deployment path:
   this client's token digest, preserving its existing clients and upstreams.
 - I3: `homelab-agent-kubeconfig` supplies a token for the ServiceAccount owned
   by the tracked access Application. The provisioner creates no RBAC. The pod's
-  ordinary ServiceAccount remains unmounted. Broader access requires a separate
-  reviewed grant change.
+  ordinary ServiceAccount remains unmounted. The tracked access Application
+  grants this token cluster-admin without changing its input bytes.
 
 `runtime.json` binds the exact input and grant bytes with digests. The helper
 calculates them and records issue #1836 as the provisioning reference. There
@@ -384,16 +397,18 @@ and requires an HTTP 404 from a HEAD request using the homelab PAT. It prints
 neither the repository name nor credentials. It does not fetch repository
 content or copy the owner's credential into the pod.
 
-The administrative RBAC checks must return `no`, `no`, `no`, `no`, `no`, `yes`, `yes`:
+After the access Application sync, every administrative RBAC check below must
+return `yes`. These are authorization checks only. Do not actually access the
+work namespaces or the legacy pod's home:
 
 ```sh
 identity=system:serviceaccount:t3code-homelab:homelab-agent
-kubectl --context epaflix auth can-i get pods/log -n remote-pi --as="$identity"
-kubectl --context epaflix auth can-i get pods/log -n mcp-hub --as="$identity"
-kubectl --context epaflix auth can-i get pods --subresource=log -n searxng --as="$identity"
-kubectl --context epaflix auth can-i get configmaps -n t3code-work --as="$identity"
+kubectl --context epaflix auth can-i '*' '*' --all-namespaces --as="$identity"
+kubectl --context epaflix auth can-i patch applications.argoproj.io -n argocd --as="$identity"
+kubectl --context epaflix auth can-i create pods/exec -n servarr --as="$identity"
 kubectl --context epaflix auth can-i get secrets --all-namespaces --as="$identity"
-kubectl --context epaflix auth can-i list pods -n servarr --as="$identity"
+kubectl --context epaflix auth can-i get configmaps -n t3code-work --as="$identity"
+kubectl --context epaflix auth can-i get configmaps -n mcp-hub-work --as="$identity"
 kubectl --context epaflix auth can-i list namespaces --as="$identity"
 ```
 

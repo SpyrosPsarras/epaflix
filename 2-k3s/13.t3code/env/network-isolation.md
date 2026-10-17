@@ -1,22 +1,40 @@
 # Isolated backend network policies
 
-The homelab and work overlays default-deny ingress and egress. Runtime pods
-can use CoreDNS in `kube-system` on UDP/TCP 53, the Kubernetes API, `cliproxy`
-in `remote-pi` on TCP 8317, their own hub on TCP 8000, the vault HTTPS path
-and public IPv4 destinations. Namespace and pod selectors are combined.
+The homelab backend is replacing the legacy mixed backend. Read-only inspection
+of the mixed namespace `t3code` found no NetworkPolicies, and its kubeconfig
+answered `yes` to `kubectl auth can-i '*' '*' --all-namespaces`. Homelab now
+uses the same cluster-admin access and broad runtime egress. Work keeps the
+restricted policy introduced in #1851.
 
-Public egress excludes RFC1918 space, including pod CIDR `10.42.0.0/16`,
-Service CIDR `10.43.0.0/16`, node network `10.0.0.0/24` and LAN
-`192.168.10.0/24`. Zero, loopback, link-local, shared address, multicast and
-reserved high address ranges are also excluded. The public work AKS API uses
-this rule; no work endpoint is published. There is no IPv6 allow rule.
-The public IPv4 rule has no port restriction, so it also permits T3 Connect
-egress to `relay.t3.codes` over HTTPS and Cloudflare tunnel endpoints on
-TCP/UDP 7844.
+Both overlays default-deny ingress and egress. Every pod can use CoreDNS in
+`kube-system` on UDP/TCP 53 and the Kubernetes API on the three master IPs,
+TCP 6443. Idle-rollout keeps only these grants.
 
-Only homelab gets LAN SSH egress, on TCP 22 to the exact addresses in the
-tracked generated `one/files/homelab-ssh.conf`. The render test compares address
-sets for equality so missing and stale targets fail. Update both files together.
+Homelab runtime pods can reach pods in every namespace except `t3code-work`
+and `mcp-hub-work`, using a namespace-selector `NotIn` expression without a
+port restriction. A separate IPv4 rule permits LAN, node, Tailscale and public
+destinations, excluding pod CIDR `10.42.0.0/16` and Service CIDR `10.43.0.0/16`
+so it cannot bypass namespace selection for direct cluster destinations.
+This permits SSH to every inventory host, the Argo CD server and homelab
+observability. The exact-inventory SSH IP list is no longer needed.
+
+The #1851 Loki, private-network and nonessential cluster-service restrictions
+no longer apply to homelab. Direct work-namespace pod traffic remains excluded.
+The [mounted homelab guide](../../13.t3code-homelab/files/homelab-ssh.md) is the
+authoritative operating rule for work resources, the legacy pod's home, node
+volume paths, Azure/Entra logins and work credentials. Cluster-admin, SSH,
+node traffic and shared proxies can bypass NetworkPolicy. These are policy
+boundaries, not technical isolation. Do not query work logs through shared
+observability or use a proxy to reach work resources.
+
+Work runtime pods can reach `cliproxy` in `remote-pi` on TCP 8317, their own
+hub on TCP 8000, Traefik's vault HTTPS backend on TCP 8443 and public IPv4
+destinations. Namespace and pod selectors are combined. Its public rule
+excludes RFC1918, zero, loopback, link-local, shared-address, multicast and
+reserved high address ranges. The public work AKS API uses this rule.
+No work endpoint is published. Neither overlay adds an IPv6 allow rule.
+Public IPv4 egress has no port restriction and permits T3 Connect HTTPS
+and Cloudflare tunnel TCP/UDP 7844.
 
 TCP 2222 accepts ingress from any IPv4 source; direct ports 3773 and 8087 stay
 closed. Both SSH LoadBalancers use `externalTrafficPolicy: Cluster`. Owner LAN
@@ -31,7 +49,11 @@ DNS and API rules cover every pod so idle-rollout can use Kubernetes exec
 without a direct runtime HTTP connection. Image-prepull runs `true`; node image
 pulls do not use pod egress. No mixed-backend or observability policy is changed.
 
-## Read-only evidence and accepted boundary
+## Historical #1851 evidence and accepted boundary
+
+The evidence below records the original restricted policies. It is not a
+claim that homelab still blocks observability or non-work services. Work
+retains those restrictions. Recheck live enforcement after the merged sync.
 
 On 2026-10-15, an instant Loki query from each `t3` container reached the gateway:
 `sum(count_over_time({namespace="remote-pi", container="transcripts"}[5m]))`
@@ -67,7 +89,9 @@ no vault sidecar; its deployment and acceptance remain separate.
 
 ## Post-merge checks
 
-These are operator steps, not implementation-time cluster changes.
+These are operator steps, not implementation-time cluster changes. Work-pod
+checks must run from an authorized work or owner admin session, never from
+the homelab agent.
 
 1. A1: Record health and discovery identity from the existing homePC and laptop
    SSH connections before merging. Both runtime Applications sync automatically
@@ -90,15 +114,16 @@ These are operator steps, not implementation-time cluster changes.
    argocd app wait t3code-work --sync --health --timeout 1200
    ```
 
-2. A2: Require network refusal from each pod to Loki. Any HTTP response fails
-   this check. The script resolves DNS before testing, so a DNS outage fails
-   rather than passing as isolation. Repeat using the gateway's current numeric
-   Service and pod addresses, and probe the foreign hub's Service and pod IP
-   on 8000 with a bounded TCP connect. Obtain addresses through administrative
-   kubectl. Use fresh connections because conntrack accepts established ones.
+2. A2: Require network refusal from the work pod to Loki. Any HTTP response
+   fails this check. The script resolves DNS before testing, so a DNS outage
+   fails rather than passing as isolation. Repeat using the gateway's current
+   numeric Service and pod addresses. Homelab may reach Loki, Grafana, Argo CD
+   and other non-work cluster services. Verify homelab namespace exclusion in
+   the rendered policy and CNI rules without probing either work namespace.
+   Use fresh connections because conntrack accepts established ones.
 
    ```sh
-   for ns in t3code-homelab t3code-work; do
+   for ns in t3code-work; do
      kubectl --context epaflix -n "$ns" exec -i "${ns#t3code-}-0" -c t3 -- python3 - <<'PY'
    import socket
    import urllib.error
@@ -137,9 +162,9 @@ These are operator steps, not implementation-time cluster changes.
    ```
 
 4. A4: Create a no-tool Pi model thread in each backend and require exactly
-   `NETWORK_OK`. Invoke a harmless own-hub tool. With that backend's existing
-   token, confirm foreign-hub initialization is rejected without printing the
-   token or response body. From homelab, run `kubectl get namespaces` with
+   `NETWORK_OK`. Invoke a harmless own-hub tool without printing its token.
+   Do not probe the work hub from homelab. From homelab, run
+   `kubectl auth can-i '*' '*' --all-namespaces` and `kubectl get namespaces` with
    `KUBECONFIG=/run/t3-inputs/kubeconfig` and `ssh <name> true` for approved LAN
    targets. From work, perform a permitted inventory read in the already
    enrolled AKS context. Report pass/fail only, not endpoints or authentication
@@ -183,3 +208,18 @@ kustomize build 2-k3s/13.t3code-work >/dev/null
 
 Render tests check policy decisions, not live NAT, conntrack, node exemptions
 or application authentication. Live acceptance remains required.
+
+For the homelab replacement, the owner or an admin must first wait for the
+runtime Application to sync the merged SHA and for an approved idle pod
+replacement. The guide ConfigMap is hash-suffixed, so the existing pod keeps
+the old guide. `OnDelete` does not replace it on sync. Confirm the replacement
+is Ready and compare its `/scripts/homelab-ssh.md` with the merged guide before
+syncing the access Application.
+
+Only after confirming the new guide inside the pod may the owner or an admin
+dry-run and sync `t3code-homelab-access` at the merged SHA with pruning. This
+adds cluster-admin and removes obsolete read grants. The homelab agent cannot
+patch Applications before this first grant. Follow the guide's resource-scoped
+Kubernetes API patch, dry-run first, then run the README's `auth can-i` checks.
+Neither the service-account token nor its kubeconfig input needs rotation.
+Retiring the mixed pod or deleting its home requires a separate owner decision.
