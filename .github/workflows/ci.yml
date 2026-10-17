@@ -347,6 +347,7 @@ jobs:
           bash 2-k3s/maintenance/aaaa-tripwire-cronjob.test.sh
           bash 2-k3s/28.kured/kured.test.sh
           bash 2-k3s/28.kured/node-apt/apply.test.sh
+          bash 2-k3s/maintenance/containerd-cleanup-removed.test.sh
           python3 2-k3s/13.t3code/one/files/pi-setup.test.py
           python3 2-k3s/13.t3code/one/files/t3-pi-settings.test.py
           npm install --prefix /tmp/ssh-policy-check --ignore-scripts --no-audit --no-fund cc-safety-net@2.6.4
