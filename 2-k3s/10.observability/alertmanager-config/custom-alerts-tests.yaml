@@ -1118,10 +1118,9 @@ tests:
                 strand of k3s-master-52 sat unnoticed for 6h (#1087). Two automations cordon
                 nodes and are supposed to uncordon within minutes: system-upgrade-controller
                 plan jobs, whose uncordon is applied only when the controller processes the job
-                completion (a Failed job leaves the node cordoned), and the node-os-updater
-                CronJob (Saturdays 02:00, 2-k3s/maintenance/node-os-updater-cronjob.yaml),
-                whose safe_reboot cordons before drain and reboot, so any failed step in
-                between strands the node until Phase 0 of the next run. If no roll is in
+                completion (a Failed job leaves the node cordoned), and kured (Saturdays
+                02:00-05:00 UTC, 2-k3s/28.kured), which cordons and drains before each
+                reboot; kured also holds further reboots while this alert fires. If no roll is in
                 progress, confirm with
                 kubectl --context epaflix get node k3s-master-52 -o jsonpath='{.spec.unschedulable}',
                 check the latest jobs in -n system-upgrade and -n kube-system, then

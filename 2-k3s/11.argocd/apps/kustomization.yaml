@@ -13,6 +13,7 @@ resources:
   - app-deal-finder.yaml
   - app-fytorium.yaml
   - app-kube-vip.yaml
+  - app-kured.yaml
   - app-kube-vip-cloud-provider.yaml
   - app-maintenance.yaml
   - app-mcp-hub.yaml
