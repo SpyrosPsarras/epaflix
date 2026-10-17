@@ -167,6 +167,9 @@ class RuntimeTests(unittest.TestCase):
     def test_clean_home_policies_hub_and_provider_state_survive_restart(self):
         self.validate()
         self.prepare()
+        gitconfig = self.home / '.gitconfig'
+        identity = '[user]\n\tname = Spyros Psarras\n\temail = 13405649+SpyrosPsarras@users.noreply.github.com\n'
+        gitconfig.write_text(identity)
         pi = self.home / '.pi/agent/mcp.json'
         pi.parent.mkdir(parents=True, exist_ok=True)
         pi.write_text(json.dumps({'mcpServers': {'unapproved': {'url': 'https://work.example.test'}}}))
@@ -179,6 +182,7 @@ class RuntimeTests(unittest.TestCase):
         runtime.prepare(self.inputs, self.home, 'homelab')
         runtime.apply(self.inputs, self.home, 'homelab')
         self.assertEqual((state / 'history-fixture').read_text(), 'homelab-only-history')
+        self.assertEqual(gitconfig.read_text(), identity)
         settings = json.loads((state / 'settings.json').read_text())
         self.assertEqual(set(settings['providerInstances']), {'pi', 'codex', 'claudeAgent'})
         self.assertEqual(settings['theme'], 'fixture')
