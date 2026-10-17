@@ -6,6 +6,14 @@ sidecar. The scope comes from `/run/t3-vault/scope.json`, not caller arguments.
 collection, and items with a non-null `deletedDate`. Exact-name reads ignore
 trashed matches, then re-fetch the selected item by ID before using its values.
 
+`vault list [filter]` discovers active items in that same org and collection.
+The optional filter matches item names by case-insensitive substring. Output is
+one JSON array sorted by case-insensitive name, then exact name. Each object
+contains `name`, numeric `type`, `password` indicating whether a login password
+exists, sorted `fields` names and sorted `attachments` filenames. It prints no
+values, usernames, URIs, notes or TOTP. No matches returns `[]` with exit code
+`0`; invalid arguments, scope or API failures use the usual refusal code `1`.
+
 ## Commands
 
 Supply item JSON through a private regular file or a `VAULT_` environment
