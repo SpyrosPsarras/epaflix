@@ -2,6 +2,7 @@
 """Migrate T3 provider settings to Pi while preserving a rollback copy."""
 import json
 from pathlib import Path
+import shlex
 import sys
 import os
 import tempfile
@@ -9,6 +10,35 @@ import tempfile
 
 MODEL = 'cliproxy/claude/claude-opus-5-5'
 TEXT_MODEL = 'cliproxy-textgen/claude/claude-haiku-5-5'
+DIRECT_TOOLS = ('mcp__t3-code__orchestrator_capabilities', 'mcp__t3-code__delegate_task', 'mcp__t3-code__task_status')
+DIRECT_TOOL_ARGS = '--tools=' + ','.join('+' + name for name in DIRECT_TOOLS)
+
+
+def direct_tool_launch_args(launch_args):
+    args, tools = [], []
+    try:
+        tokens = iter(shlex.split(launch_args))
+    except ValueError:
+        return DIRECT_TOOL_ARGS
+    for arg in tokens:
+        if arg in ('--tools', '-t'):
+            value = next(tokens, None)
+            if value is None:
+                return DIRECT_TOOL_ARGS
+        elif arg.startswith(('--tools=', '-t=')):
+            value = arg.split('=', 1)[1]
+        else:
+            args.append(arg)
+            continue
+        tools = [name.strip() for name in value.split(',') if name.strip()]
+    if all(name.startswith(('+', '-')) for name in tools):
+        tools = [name for name in tools if name[1:] not in DIRECT_TOOLS]
+        tools.extend('+' + name for name in DIRECT_TOOLS)
+    else:
+        if not any(name.startswith('mcp__') for name in tools):
+            tools.append('mcp__*')
+        tools.extend(name for name in DIRECT_TOOLS if name not in tools)
+    return shlex.join([*args, '--tools=' + ','.join(tools)])
 
 
 def migrate(home, base_url):
@@ -48,7 +78,9 @@ def migrate(home, base_url):
     if migrating:
         instance.update(enabled=True, displayName='Pi')
     instance['driver'] = 'pi'
-    instance.setdefault('config', {})['binaryPath'] = '/scripts/pi.sh'
+    config = instance.setdefault('config', {})
+    config['binaryPath'] = '/scripts/pi.sh'
+    config['launchArgs'] = direct_tool_launch_args(config.get('launchArgs', ''))
     for key in ['defaultModelSelection', 'textGenerationModelSelection']:
         selection = settings.get(key)
         if isinstance(selection, dict) and selection.get('instanceId') == 'opencode':

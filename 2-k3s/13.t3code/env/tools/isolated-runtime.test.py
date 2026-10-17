@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import select
+import shlex
 import shutil
 import subprocess
 import sys
@@ -389,6 +390,25 @@ nested = {"🏠" = ["fixture", {enabled = false}]}
                         else:
                             self.assertEqual(path.read_bytes(), first)
 
+    def test_pi_launch_args_reset_to_canonical_direct_tools_on_restart(self):
+        self.prepare()
+        path = self.home / '.t3/userdata/settings.json'
+        path.parent.mkdir(parents=True)
+        for original in ('--unapproved', '--extension /fixture/unapproved.ts',
+                         '--provider fixture --model fixture --api-key synthetic-fixture',
+                         '--no-extensions', '--thinking high --tools=+codemode,-write',
+                         '--extension "unterminated'):
+            with self.subTest(launch_args=original):
+                path.write_text(json.dumps({'providerInstances': {'pi': {'driver': 'pi', 'config': {
+                    'launchArgs': original}}}}))
+                for _ in range(2):
+                    runtime.prepare(self.inputs, self.home, 'homelab')
+                    runtime.apply(self.inputs, self.home, 'homelab')
+                    args = json.loads(path.read_text())['providerInstances']['pi']['config'].get('launchArgs', '')
+                    self.assertEqual(shlex.split(args), [
+                        '--tools=+mcp__t3-code__orchestrator_capabilities,'
+                        '+mcp__t3-code__delegate_task,+mcp__t3-code__task_status'])
+
     def test_provider_preferences_and_codex_trust_survive_managed_configuration(self):
         self.prepare()
         state = self.home / '.t3/userdata'
@@ -432,7 +452,9 @@ nested = {"🏠" = ["fixture", {enabled = false}]}
                 self.assertFalse(instances['codex']['enabled'])
                 self.assertFalse(instances['claudeAgent']['enabled'])
                 self.assertEqual(instances['pi']['config'], {'binaryPath': '/scripts/pi.sh',
-                                                           'customModels': ['cliproxy/claude/fixture']})
+                    'launchArgs': '--tools=+mcp__t3-code__orchestrator_capabilities,'
+                                  '+mcp__t3-code__delegate_task,+mcp__t3-code__task_status',
+                    'customModels': ['cliproxy/claude/fixture']})
                 self.assertEqual(instances['codex']['config']['customModels'], ['codex/fixture'])
                 self.assertIn('http://127.0.0.1:18317/v1', instances['codex']['config']['launchArgs'])
                 self.assertNotIn('work', instances['codex']['config']['launchArgs'])
