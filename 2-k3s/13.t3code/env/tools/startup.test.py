@@ -10,6 +10,26 @@ import yaml
 
 
 class StartupTest(unittest.TestCase):
+    def test_isolated_startup_sets_git_identity_for_both_auth_modes(self):
+        for variant in ('homelab', 'work'):
+            overlay = Path(__file__).resolve().parents[3] / f'13.t3code-{variant}'
+            docs = list(yaml.safe_load_all(subprocess.check_output(['kustomize', 'build', str(overlay)])))
+            config = next(doc for doc in docs if doc and doc['kind'] == 'ConfigMap' and 'entrypoint.sh' in doc['data'])
+            startup = config['data']['entrypoint.sh']
+            git_setup = startup.split('export GIT_TERMINAL_PROMPT=0\n', 1)[1].split('mkdir -p "$HOME/projects"', 1)[0]
+            for auth in ('public', 'github-token'):
+                with self.subTest(variant=variant, auth=auth), tempfile.TemporaryDirectory() as home:
+                    env = {'HOME': home, 'PATH': os.environ['PATH'], 'GIT_CONFIG_NOSYSTEM': '1'}
+                    command = f'set -euo pipefail\nread_config() {{ echo {auth}; }}\n' + git_setup
+                    for _ in range(2):
+                        subprocess.run(['bash', '-c', command], env=env, check=True)
+                        for key, expected in (
+                                ('user.name', 'Spyros Psarras'),
+                                ('user.email', '13405649+SpyrosPsarras@users.noreply.github.com'),
+                                ('credential.helper', '/scripts/git-credential-github.sh' if auth == 'github-token' else '')):
+                            actual = subprocess.check_output(['git', 'config', '--global', '--get', key], env=env, text=True)
+                            self.assertEqual(actual.rstrip('\n'), expected)
+
     def test_vault_credentials_and_storage_are_isolated_from_t3_and_sshd(self):
         for variant in ('homelab', 'work'):
             overlay = Path(__file__).resolve().parents[3] / f'13.t3code-{variant}'
