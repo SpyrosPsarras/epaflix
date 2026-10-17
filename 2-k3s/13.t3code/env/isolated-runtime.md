@@ -46,6 +46,42 @@ stays in each variant's own guide, with access determined by its generated SSH
 config rather than image-baked approval state. Homelab keeps its existing guide;
 work's placeholder points to its work guide and host approval procedure.
 
+## Personal instructions and skills
+
+The mixed backend's `env/files/private-config.py` and its synchronized `one/`
+copy read `agent/AGENTS.md` and `.agents/skills/` below `--home`. The owner
+runs `python3 env/files/private-config.py pack one/private-agent-config.enc.yaml`
+from the `13.t3code` directory on homePC after updating that source. Only SOPS
+ciphertext belongs in Git. `sourceHome` records the source home; installation
+rewrites its absolute Markdown references for the destination home.
+
+Isolated backends accept the same instruction and skill file format. The
+homelab provisioner supplies tracked instructions and ponytail for first
+provisioning; the work provisioner accepts a complete private input directory.
+Neither needs a new bundle format for additional personal skills. Use the
+shared `private-config.py` `bundle(home)` function with a private staged home
+containing `agent/AGENTS.md` and `.agents/skills/`, not an imported backend home.
+Preserve executable flags and set `sourceHome` to the home referenced by the
+staged Markdown. Keep all private staging and backups outside the repository.
+
+Keep environment instructions first, unchanged, with personal preferences
+appended. Organizational and environment rules override personal preferences
+and skills. Homelab instructions retain the personal-only GitHub and data
+boundaries and inventory-only SSH agent. Work instructions retain all
+organizational rules and must not add outbound SSH access. Exclude remote-thread
+handoff skills and replace legacy vault integrations with this environment's
+scoped `vault run` client. Read exact-name and environment-variable rules in
+`env/files/vault-client.py`, and write rules in [vault-writes.md](vault-writes.md).
+
+For an existing backend, rotate only `bundle.json` and its `runtime.json`
+`sha256` entry. Preserve every other input, approval and grant digest. Run the
+real `isolated-config.py` validation against the complete proposed inputs
+with that backend's grants, capturing private diagnostics. During the stopped
+window below, take a private mode-0600 Secret backup, recheck parent and child
+automation and pod absence, and use a resourceVersion-tested JSON patch.
+Advance the tracked input revision for each changed backend. A validation-only
+run must never patch resources, pause Applications or scale a workload.
+
 ## Policy input
 
 `policies.json` has `environment`, `files` and nonempty `checks` fields.
