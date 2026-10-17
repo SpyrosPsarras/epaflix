@@ -74,12 +74,14 @@ spec:
               mountPath: /run/t3-vault
       containers:
         - name: t3
-          image: ghcr.io/spyrospsarras/t3-runtime:homelab-inputs-b2391193173954ca9b0b03e95d35aa21
+          image: ghcr.io/spyrospsarras/t3-runtime:homelab-inputs-4dcc36fe8c4777ea5fb2b759f3961b5f
           imagePullPolicy: IfNotPresent
           command: [bash, /scripts/entrypoint.sh]
           env:
             - name: HOME
               value: /home/t3
+            - name: PATH
+              value: /tools/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/t3/.local/bin
             - name: T3CODE_HOME
               value: /home/t3/.t3
             - name: MCP_HUB_INSTANCE

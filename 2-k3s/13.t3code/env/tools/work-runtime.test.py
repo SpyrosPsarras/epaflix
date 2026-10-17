@@ -125,6 +125,14 @@ class WorkRuntimeTests(unittest.TestCase):
     def test_work_only_hub_policies_settings_history_and_azure_persist(self):
         os.environ['T3_VAULT_CLIENT'] = '1'
         self.prepare()
+        tool = self.home / '.local/bin/installed-tool'
+        tool.parent.mkdir(parents=True)
+        tool.write_text('#!/bin/sh\nexit 0\n')
+        tool.chmod(0o755)
+        planted_python = tool.with_name('python3')
+        planted_python.write_text('#!/bin/sh\nexit 97\n')
+        planted_python.chmod(0o755)
+        os.environ['PATH'] = '/tools/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:' + str(tool.parent)
         state = self.home / '.t3/userdata'
         state.mkdir(parents=True)
         (state / 'settings.json').write_text(json.dumps({'theme': 'fixture', 'providerInstances': {
@@ -140,6 +148,10 @@ class WorkRuntimeTests(unittest.TestCase):
         self.assertEqual(settings['theme'], 'fixture')
         self.assertEqual(settings['providerInstances']['pi']['displayName'], 'Work fixture')
         self.assertFalse(settings['providerInstances']['codex']['enabled'])
+        self.assertEqual(subprocess.check_output(['bash', '-c', 'command -v installed-tool'], text=True).strip(), str(tool))
+        self.assertEqual(subprocess.run(['installed-tool']).returncode, 0)
+        self.assertEqual(subprocess.check_output(['bash', '-c', 'command -v python3'], text=True).strip(), '/usr/bin/python3')
+        self.assertEqual(subprocess.check_output(['python3', '-c', 'import sys; print(sys.executable)'], text=True).strip(), '/usr/bin/python3')
         self.assertEqual((state / 'history-fixture').read_text(), 'work-only')
         self.assertEqual((cache / 'session-fixture').read_text(), 'synthetic-work-session')
         for name in ('.pi/agent/mcp.json', '.claude.json', '.claude/.claude.json'):

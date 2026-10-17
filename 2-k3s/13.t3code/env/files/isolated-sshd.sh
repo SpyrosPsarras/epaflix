@@ -35,7 +35,7 @@ PermitOpen 127.0.0.1:3773 localhost:3773
 X11Forwarding no
 PermitTunnel no
 PrintMotd no
-SetEnv HOME=$HOME PATH=/tools/node_modules/.bin:/usr/local/bin:/usr/bin:/bin
+SetEnv HOME=$HOME PATH=/tools/node_modules/.bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin
 EOF
 /usr/sbin/sshd -t -f "$state/sshd_config"
 trap 'pkill -x "sshd|sshd-session" || :' EXIT

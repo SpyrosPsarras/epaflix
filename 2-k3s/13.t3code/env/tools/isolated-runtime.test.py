@@ -167,6 +167,14 @@ class RuntimeTests(unittest.TestCase):
     def test_clean_home_policies_hub_and_provider_state_survive_restart(self):
         self.validate()
         self.prepare()
+        tool = self.home / '.local/bin/installed-tool'
+        tool.parent.mkdir(parents=True)
+        tool.write_text('#!/bin/sh\nexit 0\n')
+        tool.chmod(0o755)
+        planted_python = tool.with_name('python3')
+        planted_python.write_text('#!/bin/sh\nexit 97\n')
+        planted_python.chmod(0o755)
+        os.environ['PATH'] = '/tools/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:' + str(tool.parent)
         gitconfig = self.home / '.gitconfig'
         identity = '[user]\n\tname = Spyros Psarras\n\temail = 13405649+SpyrosPsarras@users.noreply.github.com\n'
         gitconfig.write_text(identity)
@@ -181,6 +189,10 @@ class RuntimeTests(unittest.TestCase):
         (state / 'history-fixture').write_text('homelab-only-history')
         runtime.prepare(self.inputs, self.home, 'homelab')
         runtime.apply(self.inputs, self.home, 'homelab')
+        self.assertEqual(subprocess.check_output(['bash', '-c', 'command -v installed-tool'], text=True).strip(), str(tool))
+        self.assertEqual(subprocess.run(['installed-tool']).returncode, 0)
+        self.assertEqual(subprocess.check_output(['bash', '-c', 'command -v python3'], text=True).strip(), '/usr/bin/python3')
+        self.assertEqual(subprocess.check_output(['python3', '-c', 'import sys; print(sys.executable)'], text=True).strip(), '/usr/bin/python3')
         self.assertEqual((state / 'history-fixture').read_text(), 'homelab-only-history')
         self.assertEqual(gitconfig.read_text(), identity)
         settings = json.loads((state / 'settings.json').read_text())
