@@ -17,7 +17,7 @@ FROM debian:13-slim
 # a manual package-settings change.
 LABEL org.opencontainers.image.source=https://github.com/SpyrosPsarras/epaflix
 
-ARG AIRVPN_SUITE_VERSION=2.1.0
+ARG AIRVPN_SUITE_VERSION=2.2.0
 ARG AIRVPN_SUITE_SHA512=e17add5769b50683a4d2e480995fbe83d9f4b05b9738de58de9ce922ea80b13317b502ad4a49ee01bd23bcf10b8df96a3242fa3e5f9d20138665373c2445720d
 
 # libsystemd0 and libcap2 are NOT in the README's dependency list but both
