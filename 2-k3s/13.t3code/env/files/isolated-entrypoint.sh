@@ -4,7 +4,7 @@ inputs=/run/t3-inputs
 [[ ${T3_RUNTIME_VARIANT:-} == "${MCP_HUB_INSTANCE:-}" ]]
 [[ $MCP_HUB_INSTANCE == homelab || $MCP_HUB_INSTANCE == work ]]
 [[ $HOME == /home/t3 && ${T3CODE_HOME:-} == "$HOME/.t3" ]]
-export PATH=/tools/node_modules/.bin:$PATH
+export PATH=/tools/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export KUBECONFIG=$inputs/kubeconfig MCP_HUB_SERVICES_FILE=$inputs/services.json
 if [[ $MCP_HUB_INSTANCE == homelab ]]; then
   export MCP_HUB_SERVICES_FILE=$HOME/.config/t3-runtime/services.json
@@ -48,5 +48,6 @@ cat "$HOME/.codex/AGENTS.md" "$ssh_instructions" >"$HOME/.codex/AGENTS.override.
     "$$" "$(date -u +%FT%T.000Z)" >"$T3CODE_HOME/userdata/server-runtime.json"
 ) &
 rm -f "$T3CODE_HOME"/ssh-launch/*/pid "$T3CODE_HOME"/ssh-launch/*/port "$T3CODE_HOME"/ssh-launch/*/managed
+export PATH=$PATH:$HOME/.local/bin
 exec t3 start --no-browser --host 0.0.0.0 --port 3773 --base-dir "$T3CODE_HOME" \
   --auto-bootstrap-project-from-cwd "$project"

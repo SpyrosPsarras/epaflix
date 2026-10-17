@@ -10,6 +10,49 @@ import yaml
 
 
 class StartupTest(unittest.TestCase):
+    def test_isolated_server_and_ssh_shells_resolve_user_installed_tools(self):
+        for variant in ('homelab', 'work'):
+            overlay = Path(__file__).resolve().parents[3] / f'13.t3code-{variant}'
+            docs = list(yaml.safe_load_all(subprocess.check_output(['kustomize', 'build', str(overlay)])))
+            config = next(doc for doc in docs if doc and doc['kind'] == 'ConfigMap' and 'entrypoint.sh' in doc['data'])
+            sts = next(doc for doc in docs if doc and doc['kind'] == 'StatefulSet')
+            server = next(container for container in sts['spec']['template']['spec']['containers'] if container['name'] == 't3')
+            server_env = {entry['name']: entry.get('value') for entry in server['env']}
+            self.assertTrue(server_env.get('PATH', '').endswith('/bin:/home/t3/.local/bin'))
+            self.assertTrue(server_env['PATH'].startswith('/tools/node_modules/.bin:'))
+            with self.subTest(variant=variant), tempfile.TemporaryDirectory() as home:
+                binary = Path(home) / '.local/bin/isolated-path-probe'
+                binary.parent.mkdir(parents=True)
+                binary.write_text('#!/bin/sh\nprintf user-tool')
+                binary.chmod(0o755)
+                planted_python = binary.with_name('python3')
+                planted_python.write_text('#!/bin/sh\nexit 97\n')
+                planted_python.chmod(0o755)
+                env = {'HOME': home, 'PATH': server_env['PATH'].replace('/home/t3', home)}
+                path_exports = [line for line in config['data']['entrypoint.sh'].splitlines() if line.startswith('export PATH=')]
+                startup = '\n'.join(path_exports) + '\n'
+                pre_agent = path_exports[0] + '\n'
+                safe_path = subprocess.check_output(['bash', '-c', pre_agent + 'printf %s "$PATH"'], env=env, text=True)
+                self.assertNotIn(str(binary.parent), safe_path.split(':'))
+                self.assertEqual(subprocess.check_output(['bash', '-c', pre_agent + 'python3 -c "import sys; print(sys.executable)"'],
+                                                        env=env, text=True).strip(), '/usr/bin/python3')
+                ssh_config = config['data']['sshd.sh'].split('<<EOF\n', 1)[1].split('\nEOF', 1)[0]
+                rendered = subprocess.check_output(['bash', '-c', 'cat <<EOF\n' + ssh_config + '\nEOF'], env=env, text=True)
+                ssh_path = next(line.split(' PATH=', 1)[1] for line in rendered.splitlines() if line.startswith('SetEnv '))
+                for source, command, path in (('server', 'isolated-path-probe', env['PATH']),
+                                               ('startup', startup + 'isolated-path-probe', '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'),
+                                               ('ssh', 'isolated-path-probe', ssh_path)):
+                    with self.subTest(source=source):
+                        result = subprocess.check_output(['bash', '-c', command], env={**env, 'PATH': path}, text=True)
+                        self.assertEqual(result, 'user-tool')
+                        resolved = subprocess.check_output(['bash', '-c', startup + 'printf %s "$PATH"'] if source == 'startup'
+                                                           else ['bash', '-c', 'printf %s "$PATH"'],
+                                                           env={**env, 'PATH': path}, text=True).split(':')
+                        self.assertEqual(resolved[0], '/tools/node_modules/.bin')
+                        self.assertEqual(resolved[-2:], ['/bin', str(binary.parent)])
+                        self.assertEqual(subprocess.check_output(['bash', '-c', 'command -v python3'],
+                                                                env={**env, 'PATH': ':'.join(resolved)}, text=True).strip(), '/usr/bin/python3')
+
     def test_isolated_startup_sets_git_identity_for_both_auth_modes(self):
         for variant in ('homelab', 'work'):
             overlay = Path(__file__).resolve().parents[3] / f'13.t3code-{variant}'
