@@ -2,11 +2,14 @@
 import importlib.util
 import json
 from pathlib import Path
+import shlex
 import tempfile
 import unittest
 
 
 ROOT = Path(__file__).resolve().parent
+DIRECT_TOOLS = ('mcp__t3-code__orchestrator_capabilities', 'mcp__t3-code__delegate_task', 'mcp__t3-code__task_status')
+DIRECT_ARGS = '--tools=' + ','.join('+' + name for name in DIRECT_TOOLS)
 
 
 class SettingsTests(unittest.TestCase):
@@ -26,7 +29,7 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(set(data['providerInstances']), {'pi', 'codex', 'claudeAgent'})
         self.assertEqual(data['providerInstances']['pi'], {
             'driver': 'pi', 'displayName': 'Pi', 'enabled': True,
-            'config': {'binaryPath': '/scripts/pi.sh'}})
+            'config': {'binaryPath': '/scripts/pi.sh', 'launchArgs': DIRECT_ARGS}})
         self.assertEqual(data['defaultModelSelection'], {
             'instanceId': 'pi', 'model': 'cliproxy/claude/claude-opus-5-5'})
         self.assertEqual(data['textGenerationModelSelection'], {
@@ -58,7 +61,7 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(data['providerInstances']['pi']['config']['userKey'], 1)
         self.assertEqual(data['providerInstances']['pi'], {
             'driver': 'pi', 'enabled': True, 'displayName': 'Pi',
-            'config': {'userKey': 1, 'binaryPath': '/scripts/pi.sh'}})
+            'config': {'userKey': 1, 'binaryPath': '/scripts/pi.sh', 'launchArgs': DIRECT_ARGS}})
         self.assertEqual(data['defaultModelSelection'], {
             'instanceId': 'pi', 'model': 'cliproxy/claude/claude-opus-5-5',
             'options': [{'id': 'thinking', 'value': 'high'}]})
@@ -81,7 +84,7 @@ class SettingsTests(unittest.TestCase):
         self.assertNotIn('opencode', data['providerInstances'])
         self.assertEqual(data['providerInstances']['pi'], {
             'driver': 'pi', 'enabled': True, 'displayName': 'Pi',
-            'config': {'binaryPath': '/scripts/pi.sh'}})
+            'config': {'binaryPath': '/scripts/pi.sh', 'launchArgs': DIRECT_ARGS}})
         self.assertEqual(data['defaultModelSelection'], {
             'instanceId': 'pi', 'model': 'cliproxy/claude/claude-opus-5-5'})
         self.assertEqual(data['textGenerationModelSelection'], {
@@ -93,7 +96,7 @@ class SettingsTests(unittest.TestCase):
         data = json.loads(self.path.read_text())
         self.assertEqual(data['providerInstances']['pi'], {
             'driver': 'pi', 'enabled': False, 'displayName': 'My Pi',
-            'config': {'binaryPath': '/scripts/pi.sh'}})
+            'config': {'binaryPath': '/scripts/pi.sh', 'launchArgs': DIRECT_ARGS}})
 
     def test_without_opencode_preserves_existing_pi_choices(self):
         self.path.parent.mkdir()
@@ -104,7 +107,44 @@ class SettingsTests(unittest.TestCase):
         data = json.loads(self.path.read_text())
         self.assertEqual(data['providerInstances']['pi'], {
             'driver': 'pi', 'enabled': False, 'displayName': 'My Pi',
-            'config': {'binaryPath': '/scripts/pi.sh', 'userKey': 1}})
+            'config': {'binaryPath': '/scripts/pi.sh', 'userKey': 1, 'launchArgs': DIRECT_ARGS}})
+
+    def test_launch_args_preserve_flags_and_merge_tool_selections_once(self):
+        self.path.parent.mkdir()
+        direct = ','.join(DIRECT_TOOLS)
+        cases = [
+            ('--thinking high --extension "/fixture/my extension.ts"',
+             ['--thinking', 'high', '--extension', '/fixture/my extension.ts', DIRECT_ARGS]),
+            ('--tools=+codemode,-write', ['--tools=+codemode,-write,' + DIRECT_ARGS.removeprefix('--tools=')]),
+            ('--tools +mcp__t3-code__delegate_task,-bash',
+             ['--tools=-bash,' + DIRECT_ARGS.removeprefix('--tools=')]),
+            ('-t=read,bash', ['--tools=read,bash,mcp__*,' + direct]),
+            ('--tools read,mcp__other__*', ['--tools=read,mcp__other__*,' + direct]),
+            ('--tools=+grep --tools=-bash', ['--tools=-bash,' + DIRECT_ARGS.removeprefix('--tools=')]),
+            (DIRECT_ARGS, [DIRECT_ARGS])]
+        for original, expected in cases:
+            with self.subTest(original=original):
+                self.path.write_text(json.dumps({'providerInstances': {
+                    'pi': {'driver': 'pi', 'config': {'launchArgs': original}}}}))
+                self.settings.migrate(self.home, '')
+                data = json.loads(self.path.read_text())
+                self.assertEqual(shlex.split(data['providerInstances']['pi']['config']['launchArgs']), expected)
+                content, before = self.path.read_bytes(), self.path.stat()
+                self.settings.migrate(self.home, '')
+                self.assertEqual(self.path.read_bytes(), content)
+                after = self.path.stat()
+                self.assertEqual((after.st_ino, after.st_mtime_ns), (before.st_ino, before.st_mtime_ns))
+
+    def test_malformed_launch_args_fall_back_to_canonical_tools(self):
+        self.path.parent.mkdir()
+        for original in ('--extension "unterminated', '--thinking high --tools', '-t'):
+            with self.subTest(launch_args=original):
+                self.path.write_text(json.dumps({'providerInstances': {
+                    'pi': {'driver': 'pi', 'config': {'launchArgs': original}}}}))
+                for _ in range(2):
+                    self.settings.migrate(self.home, '')
+                    data = json.loads(self.path.read_text())
+                    self.assertEqual(data['providerInstances']['pi']['config']['launchArgs'], DIRECT_ARGS)
 
     def test_backup_is_private_exact_original_and_never_overwritten(self):
         self.path.parent.mkdir()
@@ -168,7 +208,8 @@ class SettingsTests(unittest.TestCase):
                     'instanceId': 'pi', 'model': 'cliproxy-textgen/claude/claude-haiku-5-5', 'options': options})
                 before = self.path.stat()
                 self.settings.migrate(self.home, 'http://proxy.test')
-                self.assertEqual(self.path.stat(), before)
+                after = self.path.stat()
+                self.assertEqual((after.st_ino, after.st_mtime_ns), (before.st_ino, before.st_mtime_ns))
 
     def test_non_extension_text_selections_are_untouched_without_rewrite(self):
         self.settings.migrate(self.home, 'http://proxy.test')
@@ -188,7 +229,8 @@ class SettingsTests(unittest.TestCase):
                 original = self.path.read_bytes()
                 self.settings.migrate(self.home, 'http://proxy.test')
                 self.assertEqual(self.path.read_bytes(), original)
-                self.assertEqual(self.path.stat(), before)
+                after = self.path.stat()
+                self.assertEqual((after.st_ino, after.st_mtime_ns), (before.st_ino, before.st_mtime_ns))
 
     def test_variant_maps_only_pi_levels_and_keeps_other_options(self):
         self.path.parent.mkdir()

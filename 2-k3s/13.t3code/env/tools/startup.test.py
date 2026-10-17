@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
+import json
 import os
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -52,6 +54,27 @@ class StartupTest(unittest.TestCase):
                         self.assertEqual(resolved[-2:], ['/bin', str(binary.parent)])
                         self.assertEqual(subprocess.check_output(['bash', '-c', 'command -v python3'],
                                                                 env={**env, 'PATH': ':'.join(resolved)}, text=True).strip(), '/usr/bin/python3')
+
+    def test_rendered_pi_settings_enable_direct_tools_without_duplicate_restart_args(self):
+        for variant in ('homelab', 'work'):
+            overlay = Path(__file__).resolve().parents[3] / f'13.t3code-{variant}'
+            docs = list(yaml.safe_load_all(subprocess.check_output(['kustomize', 'build', str(overlay)])))
+            config = next(doc for doc in docs if doc and doc['kind'] == 'ConfigMap' and 'entrypoint.sh' in doc['data'])
+            with self.subTest(variant=variant), tempfile.TemporaryDirectory() as directory:
+                home = Path(directory)
+                script = home / 't3-pi-settings.py'
+                script.write_text(config['data']['t3-pi-settings.py'])
+                path = home / 'userdata/settings.json'
+                path.parent.mkdir()
+                path.write_text(json.dumps({'providerInstances': {'pi': {'driver': 'pi', 'config': {
+                    'launchArgs': '--thinking high'}}}}))
+                for _ in range(2):
+                    subprocess.run([sys.executable, str(script), str(home), 'http://proxy.test'], check=True)
+                    settings = json.loads(path.read_text())
+                    args = settings['providerInstances']['pi']['config']['launchArgs']
+                    self.assertEqual(shlex.split(args), ['--thinking', 'high',
+                        '--tools=+mcp__t3-code__orchestrator_capabilities,'
+                        '+mcp__t3-code__delegate_task,+mcp__t3-code__task_status'])
 
     def test_isolated_startup_sets_git_identity_for_both_auth_modes(self):
         for variant in ('homelab', 'work'):
