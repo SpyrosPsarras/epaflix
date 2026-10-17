@@ -28,6 +28,10 @@ match exactly one item. Writes use `vault create/update/trash/attach`; read
 before writing. Agent `bw` is intentionally unavailable and not logged in;
 there are no Vaultwarden MCP tools. Use only this environment's vault.
 
+## Python packages
+
+There is no system pip. For Python packages, create a virtual environment with `python3 -m venv <dir>` and use `<dir>/bin/pip` and `<dir>/bin/python`, or install a tool into `~/.local/bin`. Do not use sudo or system package managers.
+
 ## Model routing
 
 A thread resumed after a pod restart may lack T3 delegation tools such as `delegate_task`, `task_status`, and `orchestrator_capabilities`; if so, write a handoff file and ask the owner to continue in a new thread instead of working without subagents.
