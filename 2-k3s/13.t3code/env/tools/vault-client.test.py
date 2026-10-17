@@ -70,6 +70,7 @@ class VaultTests(unittest.TestCase):
         self.cache_reads = 0
         self.cached_item = None
         self.list_override = None
+        self.list_includes_trashed = False
         self.stale_list_after_delete = False
         test = self
 
@@ -130,7 +131,8 @@ class VaultTests(unittest.TestCase):
                             item = copy.deepcopy(test.list_override)
                         items = ([item] if item is not None else []) + test.extra_items
                         trashed = query.get('trash') == ['true']
-                        items = [item for item in items if (item.get('deletedDate') is not None) == trashed]
+                        if not test.list_includes_trashed:
+                            items = [item for item in items if (item.get('deletedDate') is not None) == trashed]
                         search = query.get('search', [''])[0]
                         data = {'object': 'list', 'data': [item for item in items if search in item.get('name', '')]}
                     elif parsed.path == '/object/item/' + ITEM:
@@ -249,6 +251,72 @@ class VaultTests(unittest.TestCase):
     def assert_quiet(self, result):
         for secret in (VALUE.encode(), FIELD.encode(), CONTENT, b'synthetic-login-password', b'synthetic-session'):
             self.assertNotIn(secret, result.stdout + result.stderr)
+
+    def test_list_returns_only_scoped_active_metadata_for_both_runtimes(self):
+        self.item.update(type=1, notes='synthetic-notes')
+        self.item['login'].update(uris=[{'uri': 'https://synthetic-uri.invalid'}], totp='synthetic-totp')
+        self.item['fields'].append({'name': 'account', 'value': 'synthetic-account', 'type': 0})
+        self.extra_items = [
+            {**self.item, 'name': 'foreign-org', 'organizationId': FOREIGN},
+            {**self.item, 'name': 'foreign-collection', 'collectionIds': [FOREIGN]},
+            {**self.item, 'name': 'personal', 'organizationId': None},
+            {**self.item, 'name': 'trashed', 'deletedDate': '2026-01-01T00:00:00Z'},
+            {**self.item, 'name': 'Alpha', 'type': 2, 'login': None, 'fields': None, 'attachments': None},
+        ]
+        self.list_includes_trashed = True
+        for variant in ('homelab', 'work'):
+            with self.subTest(variant=variant):
+                self.env['T3_RUNTIME_VARIANT'] = variant
+                (self.home / '.config/t3-runtime/environment').write_text(variant + '\n')
+                self.scope.chmod(0o600)
+                self.scope.write_text(json.dumps({'environment': variant, 'organizationId': ORG,
+                                                 'collectionId': COLLECTION}))
+                self.scope.chmod(0o444)
+                result = subprocess.run(self.prefix + ['list'], env=self.env, capture_output=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout), [
+                    {'name': 'Alpha', 'type': 2, 'password': False, 'fields': [], 'attachments': []},
+                    {'name': 'synthetic-item', 'type': 1, 'password': True,
+                     'fields': ['account', 'api'], 'attachments': ['fixture.bin']},
+                ])
+                self.assertEqual(result.stderr, b'')
+                self.assert_quiet(result)
+                for private in ('synthetic-user', 'synthetic-notes', 'synthetic-uri', 'synthetic-totp',
+                                'synthetic-account'):
+                    self.assertNotIn(private.encode(), result.stdout + result.stderr)
+                query = parse_qs(urlsplit(self.paths[-1]).query)
+                self.assertEqual(query, {'organizationid': [ORG], 'collectionid': [COLLECTION]})
+
+    def test_list_filter_is_case_insensitive_and_matches_only_item_names(self):
+        self.item['type'] = 1
+        self.extra_items = [{**self.item, 'name': 'zeta'}, {**self.item, 'name': 'alpha'}]
+        for term, names in (('ThEtIc', ['synthetic-item']), ('api', []), ('missing', []),
+                            ('', ['alpha', 'synthetic-item', 'zeta'])):
+            with self.subTest(term=term):
+                result = subprocess.run(self.prefix + ['list', term], env=self.env, capture_output=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual([item['name'] for item in json.loads(result.stdout)], names)
+                self.assert_quiet(result)
+
+    def test_list_refuses_invalid_arguments_scope_and_api_errors_without_metadata(self):
+        for arguments in (['list', 'one', 'two'], ['list', '--unknown']):
+            result = subprocess.run(self.prefix + arguments, env=self.env, capture_output=True)
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(result.stdout, b'')
+            self.assertEqual(result.stderr, b'vault: request or startup refused\n')
+        self.assertEqual(self.paths, [])
+        self.read_error = (500, VALUE)
+        result = subprocess.run(self.prefix + ['list'], env=self.env, capture_output=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, b'')
+        self.assert_quiet(result)
+        self.paths.clear()
+        self.scope.unlink()
+        result = subprocess.run(self.prefix + ['list'], env=self.env, capture_output=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, b'')
+        self.assertEqual(self.paths, [])
+        self.assert_quiet(result)
 
     def test_password_field_private_attachment_and_output_suppression(self):
         record = self.home / 'path'

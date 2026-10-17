@@ -18,8 +18,8 @@ exit code. To retrieve a non-secret result, create a private temp directory with
 file afterwards. Never write the secret value itself.
 `--name` must match exactly one item in this pod's collection, case-sensitive,
 without a folder prefix. Legacy mixed-pod paths like `/Folder/name` do not apply.
-There is no list command; ask the owner for exact item names. A refusal without
-detail usually means an invalid target variable or an item name that does not
+Use `vault list [filter]` to discover scoped item names, types and available value-source names without values.
+A refusal without detail usually means an invalid target variable or an item name that does not
 match exactly one item. Writes use `vault create/update/trash/attach`; read
 [the write contract](https://github.com/SpyrosPsarras/epaflix/blob/main/2-k3s/13.t3code/env/vault-writes.md)
 before writing. Agent `bw` is intentionally unavailable and not logged in;

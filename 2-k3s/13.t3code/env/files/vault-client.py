@@ -207,6 +207,34 @@ def selected_item(item_id, name=None):
     return item
 
 
+def list_items(argv):
+    parser = Parser(description='List metadata for items in this pod\'s vault scope.')
+    parser.add_argument('filter', nargs='?', default='')
+    args = parser.parse_args(argv)
+    organization, collection = scope()
+    items = fetch('/list/object/items?' + urlencode({'organizationid': organization,
+                                                   'collectionid': collection}))['data']
+    metadata = []
+    for item in items:
+        try:
+            scoped_item(item, organization, collection)
+        except Refused:
+            continue
+        if args.filter.casefold() not in item['name'].casefold():
+            continue
+        metadata.append({
+            'name': item['name'],
+            'type': item['type'],
+            'password': isinstance((item.get('login') or {}).get('password'), str),
+            'fields': sorted(entry['name'] for entry in item.get('fields') or []
+                             if isinstance(entry.get('name'), str)),
+            'attachments': sorted(entry['fileName'] for entry in item.get('attachments') or []
+                                  if isinstance(entry.get('fileName'), str)),
+        })
+    print(json.dumps(sorted(metadata, key=lambda item: (item['name'].casefold(), item['name']))))
+    return 0
+
+
 def environment_name(value):
     if not re.fullmatch(r'VAULT_[A-Z][A-Z0-9_]{0,63}', value):
         raise Refused
@@ -733,6 +761,8 @@ def main(argv):
     try:
         if argv and argv[0] == 'run':
             return run(argv[1:])
+        if argv and argv[0] == 'list':
+            return list_items(argv[1:])
         if argv == ['serve']:
             return serve()
         if argv and argv[0] in ('create', 'update', 'trash', 'attach'):
