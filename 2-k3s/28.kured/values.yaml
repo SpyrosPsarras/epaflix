@@ -1,0 +1,20 @@
+configuration:
+  rebootDays: [sat]
+  startTime: "02:00"
+  endTime: "05:00"
+  timeZone: UTC
+  concurrency: 1
+  forceReboot: false
+  drainTimeout: 5m
+  drainGracePeriod: "60"
+  prometheusUrl: http://kube-prometheus-stack-prometheus.observability.svc.cluster.local:9090
+  alertFilterMatchOnly: true
+  alertFilterRegexp: ^(K3sUpgradeJobActive|K3sNodeCordoned|KubeNodeNotReady|KubeNodeUnreachable|etcdMembersDown|etcdInsufficientMembers|etcdNoLeader)$
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 32Mi
+  limits:
+    cpu: 100m
+    memory: 128Mi

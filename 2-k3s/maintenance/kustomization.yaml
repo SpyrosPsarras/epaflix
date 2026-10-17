@@ -4,7 +4,6 @@ kind: Kustomization
 
 resources:
   - image-cleanup-cronjob.yaml
-  - node-os-updater-cronjob.yaml
   - aaaa-tripwire-cronjob.yaml
   - postgres-sequence-audit-cronjob.yaml
   - cleanuparr-blocklist-drift-cronjob.yaml
