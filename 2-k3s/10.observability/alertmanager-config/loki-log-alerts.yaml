@@ -174,14 +174,14 @@ data:
                 the log agent redacts credential-shaped values before Loki, this can
                 no longer be the sonarr/radarr/prowlarr Postgres-password shape
                 (#634, see the group header, #755); it means either a caller went
-                back to a public hostname / a new ?apikey= integration (check
+                back to a public hostname / a new apikey query parameter (check
                 container=traefik), or the redaction regex has a gap for whatever
                 key/value shape this is (any other container). Find the caller or
                 the regex gap, fix it, then treat the exposed
                 credential as compromised and rotate it (#730 is the precedent).
                 Do NOT grep Loki for the literal value - that writes it into a
                 query and widens the exposure. Locate by route/container:
-                {namespace="{{ $labels.namespace }}"} |~ `apikey=`
+                {namespace="{{ $labels.namespace }}"} |~ `(?i)apikey`
 
       # Renovate GitHub-token write failures (#957). Renovate logs a refused
       # issue write as WARN "Could not ensure issue" and still completes the

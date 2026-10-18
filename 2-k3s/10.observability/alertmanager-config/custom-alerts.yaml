@@ -749,11 +749,12 @@ spec:
               The alloy chart's ServiceMonitor sets honorLabels, so
               namespace/pod/container name the offending app, not alloy (#911
               was the exported_* shape under promtail, #1381). Known sources:
-              sonarr/radarr/prowlarr restarting and logging their Postgres
-              connection string (#634), traefik access lines carrying jellyfin's
-              query-string ApiKey (#702), and sonarr logging Prowlarr
-              Torznab feed URLs with an apikey parameter. If it is a new offender treat that credential as exposed and rotate
-              it. Do NOT grep Loki for the literal value.
+              radarr/prowlarr restarting and logging their Postgres connection
+              string (#634), and traefik access lines carrying jellyfin's
+              query-string ApiKey (#702). Sonarr's empty-password startup line is
+              self-masked; Prowlarr indexer URL queries in servarr are stripped
+              before counting. If it is a new offender treat that credential as
+              exposed and rotate it. Do NOT grep Loki for the literal value.
 
     - name: kube-statefulset-rollout
       rules:
