@@ -175,6 +175,16 @@ alloy:
           replace    = "<self-masked>"
         }
 
+        // Jellyfin clients put API keys in streaming URLs by design.
+        // Strip cloudflared's dest query before counting, keeping host/path.
+        stage.match {
+          selector = `{namespace="cloudflare-tunnel"}`
+          stage.replace {
+            expression = `(?:^|\s)dest=["']?https?://[^\s?"']+(\?[^\s"']*)`
+            replace    = "?<query-stripped>"
+          }
+        }
+
         // Exposed as loki_process_custom_credential_lines_redacted_total,
         // read by the CredentialRedactedFromLogs alert.
         stage.match {

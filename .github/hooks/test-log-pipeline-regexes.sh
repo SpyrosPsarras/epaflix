@@ -4,7 +4,7 @@
 # Runs them with Go's regexp, the RE2 engine Alloy and Loki use. Go ships on
 # the ubuntu-latest runner image; nothing is downloaded. Not a full Alloy or
 # Loki run: stage.replace is a copy of Alloy v1.20.1 getReplacedEntry, and
-# stage.match is reduced to its |~ line filter.
+# stage.match models exact namespace selectors and the credential |~ filter.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -50,8 +50,9 @@ func replace(re *regexp.Regexp, line, with string) string {
 }
 
 type stage struct {
-	re   *regexp.Regexp
-	with string // "" means stage.match: count the line
+	re        *regexp.Regexp
+	namespace string
+	with      string // "" means stage.match: count the line
 }
 
 func main() {
@@ -69,12 +70,25 @@ func main() {
 	expr := regexp.MustCompile("^\\s*expression\\s*=\\s*`(.*)`$")
 	repl := regexp.MustCompile(`^\s*replace\s*=\s*"(.*)"$`)
 	sel := regexp.MustCompile("^\\s*selector\\s*=\\s*`\\{namespace=~\"\\.\\+\"\\} \\|~ (\".*\")`$")
+	match := regexp.MustCompile(`^(\s*)stage\.match \{$`)
+	nsSel := regexp.MustCompile("^\\s*selector\\s*=\\s*`\\{namespace=\"([^\"]+)\"\\}`$")
+	namespace, matchIndent := "", ""
 	keys := map[string]bool{}
 	keyAlt := regexp.MustCompile(`\((?:\?:)?(password\|[^)]*)\)`)
 	for _, l := range strings.Split(alloy, "\n") {
-		if m := expr.FindStringSubmatch(l); m != nil {
-			stages = append(stages, stage{re: regexp.MustCompile(m[1])})
-			keys[keyAlt.FindStringSubmatch(m[1])[1]] = true
+		if m := match.FindStringSubmatch(l); m != nil {
+			namespace, matchIndent = "", m[1]
+		} else if l == matchIndent+"}" {
+			namespace = ""
+		} else if m := nsSel.FindStringSubmatch(l); m != nil {
+			namespace = m[1]
+		} else if m := expr.FindStringSubmatch(l); m != nil {
+			stages = append(stages, stage{re: regexp.MustCompile(m[1]), namespace: namespace})
+			if k := keyAlt.FindStringSubmatch(m[1]); k != nil {
+				keys[k[1]] = true
+			} else {
+				check("non-credential replacement is scoped to cloudflare-tunnel", namespace == "cloudflare-tunnel", m[1])
+			}
 		} else if m := repl.FindStringSubmatch(l); m != nil {
 			stages[len(stages)-1].with = m[1]
 		} else if m := sel.FindStringSubmatch(l); m != nil {
@@ -105,9 +119,12 @@ func main() {
 	check("credential counter: once, under the selector, inc on match, 5m idle expiry", len(counters) == 1 &&
 		counters[0]["in selector's stage.match"] == "true" && counters[0]["action"] == `"inc"` &&
 		counters[0]["match_all"] == "true" && counters[0]["max_idle_duration"] == `"5m"`, fmt.Sprint(counters))
-	pipeline := func(line string) (string, bool) {
+	pipeline := func(line, namespace string) (string, bool) {
 		counted := false
 		for _, s := range stages {
+			if s.namespace != "" && s.namespace != namespace {
+				continue
+			}
 			if s.with == "" {
 				counted = s.re.MatchString(line)
 			} else {
@@ -137,8 +154,26 @@ func main() {
 		{"cliproxy first4...last4", `api_key=abcd...wxyz, cooling down`, false, `<self-masked>, cooling down`, "wxyz"},
 		{"cliproxy shape glued to more text", `api_key=abcd...wxyz*SECRETX`, true, `<REDACTED>`, "SECRETX"},
 	} {
-		out, counted := pipeline(c.in)
+		out, counted := pipeline(c.in, "elsewhere")
 		check("credential: "+c.name, counted == c.counted && strings.Contains(out, c.want) && !strings.Contains(out, c.absent),
+			fmt.Sprintf("counted=%v out=%s", counted, out))
+	}
+
+	for _, c := range []struct {
+		name, namespace, in, want string
+		counted                  bool
+	}{
+		{"mkv canceled stream", "cloudflare-tunnel", `2026-10-15T12:00:00Z ERR Request failed error="stream 1234 canceled by remote with error code 0" connIndex=1 dest=https://jellyfin.example.com/Videos/abc123/stream.mkv?Static=true&mediaSourceId=abc&deviceId=xyz&api_key=SYNTHETICKEY123&Tag=t ip=198.51.100.1 type=http`, `2026-10-15T12:00:00Z ERR Request failed error="stream 1234 canceled by remote with error code 0" connIndex=1 dest=https://jellyfin.example.com/Videos/abc123/stream.mkv?<query-stripped> ip=198.51.100.1 type=http`, false},
+		{"hls segment", "cloudflare-tunnel", `ERR dest=https://jellyfin.example.com/videos/abc123/hls1/main/0.ts?DeviceId=xyz&api_key=SYNTHETICKEY123`, `ERR dest=https://jellyfin.example.com/videos/abc123/hls1/main/0.ts?<query-stripped>`, false},
+		{"quoted dest", "cloudflare-tunnel", `ERR dest="https://jellyfin.example.com/videos/abc123?api_key=SYNTHETICKEY123" type=http`, `ERR dest="https://jellyfin.example.com/videos/abc123?<query-stripped>" type=http`, false},
+		{"credential outside dest", "cloudflare-tunnel", `ERR dest=https://jellyfin.example.com/videos/abc123?api_key=SYNTHETICKEY123 client_secret=SYNTHETICOUTSIDE`, `ERR dest=https://jellyfin.example.com/videos/abc123?<query-stripped> <REDACTED>`, true},
+		{"credential without dest", "cloudflare-tunnel", `ERR api_key=SYNTHETICOUTSIDE`, `ERR <REDACTED>`, true},
+		{"dest without query", "cloudflare-tunnel", `ERR dest=https://jellyfin.example.com/videos/abc123 type=http`, `ERR dest=https://jellyfin.example.com/videos/abc123 type=http`, false},
+		{"different field", "cloudflare-tunnel", `ERR otherdest=https://jellyfin.example.com/videos/abc123?api_key=SYNTHETICKEY123`, `ERR otherdest=https://jellyfin.example.com/videos/abc123?<REDACTED>`, true},
+		{"other namespace", "elsewhere", `ERR dest=https://jellyfin.example.com/videos/abc123?DeviceId=xyz&api_key=SYNTHETICKEY123`, `ERR dest=https://jellyfin.example.com/videos/abc123?DeviceId=xyz&<REDACTED>`, true},
+	} {
+		out, counted := pipeline(c.in, c.namespace)
+		check("cloudflared: "+c.name, counted == c.counted && out == c.want,
 			fmt.Sprintf("counted=%v out=%s", counted, out))
 	}
 
