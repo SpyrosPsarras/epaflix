@@ -7,9 +7,9 @@ spec:
   selector:
     app.kubernetes.io/name: t3code
   ports:
-    - name: http
-      port: 3773
-      targetPort: http
+    - name: ssh
+      port: 2222
+      targetPort: ssh
 ---
 apiVersion: v1
 kind: Service

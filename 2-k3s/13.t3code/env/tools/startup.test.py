@@ -12,6 +12,30 @@ import yaml
 
 
 class StartupTest(unittest.TestCase):
+    def test_isolated_server_binds_loopback_and_probes_use_local_health(self):
+        for variant in ('homelab', 'work'):
+            with self.subTest(variant=variant):
+                overlay = Path(__file__).resolve().parents[3] / f'13.t3code-{variant}'
+                docs = list(yaml.safe_load_all(subprocess.check_output(['kustomize', 'build', str(overlay)])))
+                config = next(doc for doc in docs if doc and doc['kind'] == 'ConfigMap' and 'entrypoint.sh' in doc['data'])
+                startup = config['data']['entrypoint.sh']
+                args = shlex.split(startup.split('exec t3 ', 1)[1])
+                self.assertEqual(args[args.index('--host') + 1], '127.0.0.1')
+                self.assertIn('"host":"127.0.0.1","port":3773,"origin":"http://127.0.0.1:3773"', startup)
+                sts = next(doc for doc in docs if doc and doc['kind'] == 'StatefulSet')
+                server = next(container for container in sts['spec']['template']['spec']['containers'] if container['name'] == 't3')
+                self.assertNotIn('ports', server)
+                for probe, period, failures in (('startupProbe', 5, 1080), ('readinessProbe', 10, 3), ('livenessProbe', 30, 3)):
+                    self.assertEqual(server[probe], {
+                        'exec': {'command': ['curl', '-fsS', '-m', '1', 'http://127.0.0.1:3773/health']},
+                        'periodSeconds': period,
+                        **({'failureThreshold': failures} if probe != 'readinessProbe' else {})})
+                service = next(doc for doc in docs if doc and doc['kind'] == 'Service'
+                               and doc['metadata']['name'] == sts['spec']['serviceName'])
+                self.assertEqual(service['spec']['ports'], [{'name': 'ssh', 'port': 2222, 'targetPort': 'ssh'}])
+                self.assertFalse(any(port['port'] == 3773 for doc in docs if doc and doc['kind'] == 'Service'
+                                     for port in doc['spec']['ports']))
+
     def test_isolated_server_and_ssh_shells_resolve_user_installed_tools(self):
         for variant in ('homelab', 'work'):
             overlay = Path(__file__).resolve().parents[3] / f'13.t3code-{variant}'
