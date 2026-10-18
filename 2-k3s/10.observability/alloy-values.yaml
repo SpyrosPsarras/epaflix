@@ -175,6 +175,21 @@ alloy:
           replace    = "<self-masked>"
         }
 
+        // Passfile-backed connection strings have no password to protect.
+        stage.replace {
+          expression = `(?i)((?:password|passwd|apikey|api_key|api-key|client_secret)=)(?:[;&]|$)`
+          replace    = "<self-masked>"
+        }
+
+        // Prowlarr indexer URLs carry API keys by design; keep host/path.
+        stage.match {
+          selector = `{namespace="servarr"}`
+          stage.replace {
+            expression = `https?://[^\s/?"']+/[0-9]+/api(\?[^\s"']*)`
+            replace    = "?<query-stripped>"
+          }
+        }
+
         // Jellyfin clients put API keys in streaming URLs by design.
         // Strip cloudflared's dest query before counting, keeping host/path.
         stage.match {

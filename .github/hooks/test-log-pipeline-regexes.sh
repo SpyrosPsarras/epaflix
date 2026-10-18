@@ -87,7 +87,7 @@ func main() {
 			if k := keyAlt.FindStringSubmatch(m[1]); k != nil {
 				keys[k[1]] = true
 			} else {
-				check("non-credential replacement is scoped to cloudflare-tunnel", namespace == "cloudflare-tunnel", m[1])
+				check("non-credential replacement requires an exact namespace stage.match selector", namespace != "", m[1])
 			}
 		} else if m := repl.FindStringSubmatch(l); m != nil {
 			stages[len(stages)-1].with = m[1]
@@ -176,6 +176,31 @@ func main() {
 		check("cloudflared: "+c.name, counted == c.counted && out == c.want,
 			fmt.Sprintf("counted=%v out=%s", counted, out))
 	}
+
+	for _, c := range []struct {
+		name, namespace, in, want string
+		counted                  bool
+	}{
+		{"empty startup password", "servarr", `[Info] MigrationController: *** Migrating Database=sonarr-main;Host=pg.example;Username=sonarr;Password=;Port=5432 ***`, `[Info] MigrationController: *** Migrating Database=sonarr-main;Host=pg.example;Username=sonarr;<self-masked>;Port=5432 ***`, false},
+		{"empty query value", "servarr", `apikey=&offset=0`, `<self-masked>&offset=0`, false},
+		{"empty value at end of line", "servarr", `password=`, `<self-masked>`, false},
+		{"space is not empty", "servarr", `password= x`, `<REDACTED> x`, true},
+		{"quote is not empty", "servarr", `password="x"`, `<REDACTED>"x"`, true},
+		{"empty then nonempty password", "servarr", `password=;password=real`, `<self-masked>;<REDACTED>`, true},
+		{"Prowlarr feed URL", "servarr", `[Error] Torznab: An error occurred while processing feed. http://prowlarr.example:9696/17/api?t=tvsearch&cat=5000&extended=1&apikey=SYNTHKEY0123456&offset=0&limit=100`, `[Error] Torznab: An error occurred while processing feed. http://prowlarr.example:9696/17/api?<query-stripped>`, false},
+		{"Prowlarr HTTP error URL", "servarr", `[Warn] HttpClient: HTTP Error - Res: HTTP/1.1 [GET] http://prowlarr.example:9696/2/api?t=search&cat=5000&extended=1&apikey=SYNTHKEY0123456&offset=0&limit=100&q=x 429.TooManyRequests (142 ms)`, `[Warn] HttpClient: HTTP Error - Res: HTTP/1.1 [GET] http://prowlarr.example:9696/2/api?<query-stripped> 429.TooManyRequests (142 ms)`, false},
+		{"credential outside indexer URL", "servarr", `GET https://prowlarr.example/17/api?apikey=SYNTHKEY0123456 apikey=SYNTHOTHER0123456`, `GET https://prowlarr.example/17/api?<query-stripped> <REDACTED>`, true},
+		{"credential without indexer URL", "servarr", `apikey=SYNTHKEY0123456`, `<REDACTED>`, true},
+		{"indexer URL in other namespace", "elsewhere", `GET http://prowlarr.example:9696/17/api?apikey=SYNTHKEY0123456`, `GET http://prowlarr.example:9696/17/api?<REDACTED>`, true},
+		{"non-indexer URL", "servarr", `GET http://prowlarr.example:9696/not-an-id/api?apikey=SYNTHKEY0123456`, `GET http://prowlarr.example:9696/not-an-id/api?<REDACTED>`, true},
+	} {
+		out, counted := pipeline(c.in, c.namespace)
+		check("servarr: "+c.name, counted == c.counted && out == c.want,
+			fmt.Sprintf("counted=%v out=%s", counted, out))
+	}
+
+	check("Loki rule text contains no literal credential key= sequence",
+		!regexp.MustCompile(`(?i)(password|passwd|apikey|api_key|api-key|client_secret)=`).MatchString(rules), "ruler logs echo rule text")
 
 	// The real Alloy/Loki fixture suite checks severity matching. Here verify
 	// that the Explore example is identical and every shipped regexp is RE2.
