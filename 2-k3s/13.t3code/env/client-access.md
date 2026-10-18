@@ -2,6 +2,23 @@
 
 ## T3 Connect
 
+The isolated homelab and work servers bind only `127.0.0.1:3773`. The app
+connects through T3 Connect or an SSH tunnel, never the pod IP or a cluster
+HTTP Service. Loopback binding prevents T3 from advertising an unreachable
+pod IP as a direct LAN endpoint. T3 Connect registers the loopback HTTP origin
+for its managed `cloudflared` tunnel, so it does not need inbound port 3773.
+
+Kubelet probes run `curl` inside the T3 container against the loopback health
+URL. The `t3code` ClusterIP Service remains the StatefulSet
+`serviceName` to avoid changing that immutable field, but exposes only SSH on
+2222. Client SSH uses the separate `t3code-ssh` LoadBalancer. Idle-rollout uses
+Kubernetes exec, image-prepull runs `true`, and hub/model calls are outbound;
+none needs an HTTP Service or pod-IP access to 3773.
+
+After both replacement pods pass T3 Connect and SSH acceptance, remove any
+operator-created `t3code-direct-endpoint-temporary` NetworkPolicy from their
+namespaces. The tracked policies continue to allow only SSH ingress on 2222.
+
 Linking is a one-time owner step. Run the namespace-specific link command in
 the [homelab README](../../13.t3code-homelab/README.md#t3-connect) or
 [work README](../../13.t3code-work/README.md#t3-connect) in the owner's private

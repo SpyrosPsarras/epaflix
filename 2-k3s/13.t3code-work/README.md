@@ -17,6 +17,11 @@ The work image includes Azure CLI and the shared vault client. Homelab still
 has no Azure CLI, work helper, Azure cache or work grants. No image contains
 private instructions, service inventories or credentials.
 
+T3 binds only `127.0.0.1:3773` and advertises no direct LAN endpoint. App
+access uses T3 Connect or SSH only, not the pod IP. The `t3code` Service retains
+the StatefulSet identity with SSH only on 2222; it no longer exposes HTTP.
+See [client access](../13.t3code/env/client-access.md) for relay and SSH checks.
+
 ## Runtime vault reads
 
 The work overlay uses the same [`vault run` client and sidecar](../13.t3code-homelab/README.md#runtime-vault-reads)

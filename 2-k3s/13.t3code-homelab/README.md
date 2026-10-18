@@ -420,7 +420,10 @@ healthy, without reading its home or histories.
 
 ### T3 Connect
 
-This pod is live on T3 Connect. Follow the shared
+This pod is live on T3 Connect. T3 binds only `127.0.0.1:3773` and advertises
+no direct LAN endpoint. App access uses T3 Connect or SSH only, not the pod IP.
+The `t3code` Service retains the StatefulSet identity with SSH only on 2222;
+it no longer exposes HTTP. Follow the shared
 [T3 Connect and Zed SSH procedure](../13.t3code/env/client-access.md).
 The one-time owner link command for this pod is:
 

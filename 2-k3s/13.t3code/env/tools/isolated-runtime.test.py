@@ -658,6 +658,13 @@ nested = {"🏠" = ["fixture", {enabled = false}]}
                         role = next(doc for doc in docs if doc['kind'] == 'Role')
                         self.assertEqual([rule['resourceNames'] for rule in role['rules']],
                                          [['t3code'], ['t3code-0'], ['t3code-0']])
+                    if overlay != '13.t3code/one':
+                        sts = next(doc for doc in docs if doc['kind'] == 'StatefulSet')
+                        governing = next(doc for doc in docs if doc['kind'] == 'Service'
+                                         and doc['metadata']['name'] == sts['spec']['serviceName'])
+                        self.assertEqual(governing['spec']['ports'], [{'name': 'ssh', 'port': 2222, 'targetPort': 'ssh'}])
+                        self.assertFalse(any(port['port'] == 3773 for doc in docs if doc['kind'] == 'Service'
+                                             for port in doc['spec']['ports']))
                     service = next(doc for doc in docs if doc and doc['kind'] == 'Service'
                                    and doc['metadata']['name'] == 't3code-ssh')
                     self.assertEqual(service['spec']['type'], 'LoadBalancer')

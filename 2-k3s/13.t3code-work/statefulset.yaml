@@ -106,9 +106,6 @@ spec:
                   name: t3-runtime-grants
                   key: github-token
                   optional: true
-          ports:
-            - name: http
-              containerPort: 3773
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -138,20 +135,17 @@ spec:
               subPath: machine-info
               readOnly: true
           startupProbe:
-            httpGet:
-              path: /health
-              port: http
+            exec:
+              command: [curl, -fsS, -m, "1", "http://127.0.0.1:3773/health"]
             periodSeconds: 5
             failureThreshold: 1080
           readinessProbe:
-            httpGet:
-              path: /health
-              port: http
+            exec:
+              command: [curl, -fsS, -m, "1", "http://127.0.0.1:3773/health"]
             periodSeconds: 10
           livenessProbe:
-            httpGet:
-              path: /health
-              port: http
+            exec:
+              command: [curl, -fsS, -m, "1", "http://127.0.0.1:3773/health"]
             periodSeconds: 30
             failureThreshold: 3
           resources:

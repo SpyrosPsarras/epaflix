@@ -215,7 +215,7 @@ ssh -F /tmp/laptop/ssh_config -o IdentityAgent=/tmp/synthetic-agent.sock -A "t3-
 ssh -F /tmp/laptop/ssh_config "t3-$variant" 'sh -l -s -- 0123456789abcdef' > /tmp/discovery.json <<'SH'
 cat "$HOME/.t3/userdata/server-runtime.json"
 SH
-node -e 'const j=require("/tmp/discovery.json");if(j.port!==3773||j.origin!=="http://127.0.0.1:3773")process.exit(1)' || fail 'SSH launcher discovery'
+node -e 'const j=require("/tmp/discovery.json");if(j.host!=="127.0.0.1"||j.port!==3773||j.origin!=="http://127.0.0.1:3773")process.exit(1)' || fail 'SSH launcher discovery'
 tunnel_port=13773
 [[ $variant != work ]] || tunnel_port=23773
 bash /src/env/tools/connect-laptop.sh /tmp/laptop/ssh_config "$tunnel_port" "$variant" >/tmp/tunnel.log 2>&1 &

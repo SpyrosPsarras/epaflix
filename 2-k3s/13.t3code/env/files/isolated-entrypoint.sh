@@ -44,10 +44,10 @@ cat "$HOME/.codex/AGENTS.md" "$ssh_instructions" >"$HOME/.codex/AGENTS.override.
 : >"$T3CODE_HOME/userdata/server-runtime.json"
 (
   until curl -fs --max-time 5 -o /dev/null http://127.0.0.1:3773/health; do sleep 1; done
-  printf '{"version":1,"pid":%s,"host":"0.0.0.0","port":3773,"origin":"http://127.0.0.1:3773","startedAt":"%s"}\n' \
+  printf '{"version":1,"pid":%s,"host":"127.0.0.1","port":3773,"origin":"http://127.0.0.1:3773","startedAt":"%s"}\n' \
     "$$" "$(date -u +%FT%T.000Z)" >"$T3CODE_HOME/userdata/server-runtime.json"
 ) &
 rm -f "$T3CODE_HOME"/ssh-launch/*/pid "$T3CODE_HOME"/ssh-launch/*/port "$T3CODE_HOME"/ssh-launch/*/managed
 export PATH=$PATH:$HOME/.local/bin
-exec t3 start --no-browser --host 0.0.0.0 --port 3773 --base-dir "$T3CODE_HOME" \
+exec t3 start --no-browser --host 127.0.0.1 --port 3773 --base-dir "$T3CODE_HOME" \
   --auto-bootstrap-project-from-cwd "$project"

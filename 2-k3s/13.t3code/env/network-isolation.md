@@ -37,8 +37,11 @@ Public IPv4 egress has no port restriction and permits T3 Connect HTTPS
 and Cloudflare tunnel TCP/UDP 7844.
 
 TCP 2222 accepts ingress from any IPv4 source; direct ports 3773 and 8087 stay
-closed. Both SSH LoadBalancers use `externalTrafficPolicy: Cluster`. Owner LAN
-traffic crossing from the kube-vip holder on master-51 to the runtime on
+closed. T3 binds only `127.0.0.1:3773`, advertises no direct LAN endpoint and
+accepts app access through T3 Connect or SSH. Its probes use in-container
+loopback HTTP, not the pod IP. Both SSH LoadBalancers use
+`externalTrafficPolicy: Cluster`. Owner LAN traffic crossing from the kube-vip
+holder on master-51 to the runtime on
 worker-61 arrives masqueraded as `10.42.0.0`. The userspace Tailscale subnet
 router also originates traffic in the pod range, so excluding that range cuts
 owner SSH. Dedicated per-machine SSH keys and sshd's forwarding restriction to
