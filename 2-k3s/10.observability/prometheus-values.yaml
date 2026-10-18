@@ -251,6 +251,8 @@ kube-state-metrics:
 
 defaultRules:
   create: true
+  node:
+    fsSelector: 'fstype!="",fstype!~"nfs.*|cifs|smb.*|fuse.sshfs"'
   rules:
     alertmanager: true
     etcd: true
@@ -277,6 +279,8 @@ defaultRules:
     prometheus: true
     prometheusOperator: true
   disabled:
+    KubePersistentVolumeFillingUp: true
+    KubePersistentVolumeInodesFillingUp: true
     KubeJobFailed: true
     KubeStatefulSetUpdateNotRolledOut: true
 
