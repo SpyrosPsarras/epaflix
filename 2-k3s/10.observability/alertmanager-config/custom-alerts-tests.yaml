@@ -7,6 +7,189 @@ rule_files:
 evaluation_interval: 1m
 
 tests:
+  - interval: 1m
+    input_series:
+      - series: kubelet_volume_stats_available_bytes{namespace="storage-test",persistentvolumeclaim="local",job="kubelet",metrics_path="/metrics"}
+        values: 2x120
+      - series: kubelet_volume_stats_capacity_bytes{namespace="storage-test",persistentvolumeclaim="local",job="kubelet",metrics_path="/metrics"}
+        values: 100x120
+      - series: kubelet_volume_stats_used_bytes{namespace="storage-test",persistentvolumeclaim="local",job="kubelet",metrics_path="/metrics"}
+        values: 98x120
+      - series: kubelet_volume_stats_inodes_free{namespace="storage-test",persistentvolumeclaim="local",job="kubelet",metrics_path="/metrics"}
+        values: 2x120
+      - series: kubelet_volume_stats_inodes{namespace="storage-test",persistentvolumeclaim="local",job="kubelet",metrics_path="/metrics"}
+        values: 100x120
+      - series: kubelet_volume_stats_inodes_used{namespace="storage-test",persistentvolumeclaim="local",job="kubelet",metrics_path="/metrics"}
+        values: 98x120
+      - series: kube_persistentvolumeclaim_info{namespace="storage-test",persistentvolumeclaim="local",storageclass="local-path"}
+        values: 1x120
+      - series: kubelet_volume_stats_available_bytes{namespace="storage-test",persistentvolumeclaim="media",job="kubelet",metrics_path="/metrics"}
+        values: 2x120
+      - series: kubelet_volume_stats_capacity_bytes{namespace="storage-test",persistentvolumeclaim="media",job="kubelet",metrics_path="/metrics"}
+        values: 100x120
+      - series: kubelet_volume_stats_used_bytes{namespace="storage-test",persistentvolumeclaim="media",job="kubelet",metrics_path="/metrics"}
+        values: 98x120
+      - series: kubelet_volume_stats_inodes_free{namespace="storage-test",persistentvolumeclaim="media",job="kubelet",metrics_path="/metrics"}
+        values: 2x120
+      - series: kubelet_volume_stats_inodes{namespace="storage-test",persistentvolumeclaim="media",job="kubelet",metrics_path="/metrics"}
+        values: 100x120
+      - series: kubelet_volume_stats_inodes_used{namespace="storage-test",persistentvolumeclaim="media",job="kubelet",metrics_path="/metrics"}
+        values: 98x120
+      - series: kube_persistentvolumeclaim_info{namespace="storage-test",persistentvolumeclaim="media",storageclass="media-storage"}
+        values: 1x120
+      - series: kubelet_volume_stats_available_bytes{namespace="storage-test",persistentvolumeclaim="data",job="kubelet",metrics_path="/metrics"}
+        values: 2x120
+      - series: kubelet_volume_stats_capacity_bytes{namespace="storage-test",persistentvolumeclaim="data",job="kubelet",metrics_path="/metrics"}
+        values: 100x120
+      - series: kubelet_volume_stats_used_bytes{namespace="storage-test",persistentvolumeclaim="data",job="kubelet",metrics_path="/metrics"}
+        values: 98x120
+      - series: kubelet_volume_stats_inodes_free{namespace="storage-test",persistentvolumeclaim="data",job="kubelet",metrics_path="/metrics"}
+        values: 2x120
+      - series: kubelet_volume_stats_inodes{namespace="storage-test",persistentvolumeclaim="data",job="kubelet",metrics_path="/metrics"}
+        values: 100x120
+      - series: kubelet_volume_stats_inodes_used{namespace="storage-test",persistentvolumeclaim="data",job="kubelet",metrics_path="/metrics"}
+        values: 98x120
+      - series: kube_persistentvolumeclaim_info{namespace="storage-test",persistentvolumeclaim="data",storageclass="syncthing-local"}
+        values: 1x120
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: KubePersistentVolumeFillingUp
+        exp_alerts:
+          - exp_labels:
+              namespace: storage-test
+              persistentvolumeclaim: media
+              job: kubelet
+              metrics_path: /metrics
+              severity: critical
+            exp_annotations:
+              description: The PersistentVolume claimed by media in Namespace storage-test  is only 2% free.
+              runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubepersistentvolumefillingup
+              summary: PersistentVolume is filling up.
+          - exp_labels:
+              namespace: storage-test
+              persistentvolumeclaim: data
+              job: kubelet
+              metrics_path: /metrics
+              severity: critical
+            exp_annotations:
+              description: The PersistentVolume claimed by data in Namespace storage-test  is only 2% free.
+              runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubepersistentvolumefillingup
+              summary: PersistentVolume is filling up.
+      - eval_time: 2m
+        alertname: KubePersistentVolumeInodesFillingUp
+        exp_alerts:
+          - exp_labels:
+              namespace: storage-test
+              persistentvolumeclaim: media
+              job: kubelet
+              metrics_path: /metrics
+              severity: critical
+            exp_annotations:
+              description: The PersistentVolume claimed by media in Namespace storage-test  only has 2% free inodes.
+              runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubepersistentvolumeinodesfillingup
+              summary: PersistentVolumeInodes are filling up.
+          - exp_labels:
+              namespace: storage-test
+              persistentvolumeclaim: data
+              job: kubelet
+              metrics_path: /metrics
+              severity: critical
+            exp_annotations:
+              description: The PersistentVolume claimed by data in Namespace storage-test  only has 2% free inodes.
+              runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubepersistentvolumeinodesfillingup
+              summary: PersistentVolumeInodes are filling up.
+  - interval: 1m
+    input_series:
+      - series: kubelet_volume_stats_available_bytes{namespace="storage-test",persistentvolumeclaim="local",job="kubelet",metrics_path="/metrics"}
+        values: 14-0.01x120
+      - series: kubelet_volume_stats_capacity_bytes{namespace="storage-test",persistentvolumeclaim="local",job="kubelet",metrics_path="/metrics"}
+        values: 100x120
+      - series: kubelet_volume_stats_used_bytes{namespace="storage-test",persistentvolumeclaim="local",job="kubelet",metrics_path="/metrics"}
+        values: 98x120
+      - series: kubelet_volume_stats_inodes_free{namespace="storage-test",persistentvolumeclaim="local",job="kubelet",metrics_path="/metrics"}
+        values: 14-0.01x120
+      - series: kubelet_volume_stats_inodes{namespace="storage-test",persistentvolumeclaim="local",job="kubelet",metrics_path="/metrics"}
+        values: 100x120
+      - series: kubelet_volume_stats_inodes_used{namespace="storage-test",persistentvolumeclaim="local",job="kubelet",metrics_path="/metrics"}
+        values: 98x120
+      - series: kube_persistentvolumeclaim_info{namespace="storage-test",persistentvolumeclaim="local",storageclass="local-path"}
+        values: 1x120
+      - series: kubelet_volume_stats_available_bytes{namespace="storage-test",persistentvolumeclaim="media",job="kubelet",metrics_path="/metrics"}
+        values: 14-0.01x120
+      - series: kubelet_volume_stats_capacity_bytes{namespace="storage-test",persistentvolumeclaim="media",job="kubelet",metrics_path="/metrics"}
+        values: 100x120
+      - series: kubelet_volume_stats_used_bytes{namespace="storage-test",persistentvolumeclaim="media",job="kubelet",metrics_path="/metrics"}
+        values: 98x120
+      - series: kubelet_volume_stats_inodes_free{namespace="storage-test",persistentvolumeclaim="media",job="kubelet",metrics_path="/metrics"}
+        values: 14-0.01x120
+      - series: kubelet_volume_stats_inodes{namespace="storage-test",persistentvolumeclaim="media",job="kubelet",metrics_path="/metrics"}
+        values: 100x120
+      - series: kubelet_volume_stats_inodes_used{namespace="storage-test",persistentvolumeclaim="media",job="kubelet",metrics_path="/metrics"}
+        values: 98x120
+      - series: kube_persistentvolumeclaim_info{namespace="storage-test",persistentvolumeclaim="media",storageclass="media-storage"}
+        values: 1x120
+      - series: kubelet_volume_stats_available_bytes{namespace="storage-test",persistentvolumeclaim="data",job="kubelet",metrics_path="/metrics"}
+        values: 14-0.01x120
+      - series: kubelet_volume_stats_capacity_bytes{namespace="storage-test",persistentvolumeclaim="data",job="kubelet",metrics_path="/metrics"}
+        values: 100x120
+      - series: kubelet_volume_stats_used_bytes{namespace="storage-test",persistentvolumeclaim="data",job="kubelet",metrics_path="/metrics"}
+        values: 98x120
+      - series: kubelet_volume_stats_inodes_free{namespace="storage-test",persistentvolumeclaim="data",job="kubelet",metrics_path="/metrics"}
+        values: 14-0.01x120
+      - series: kubelet_volume_stats_inodes{namespace="storage-test",persistentvolumeclaim="data",job="kubelet",metrics_path="/metrics"}
+        values: 100x120
+      - series: kubelet_volume_stats_inodes_used{namespace="storage-test",persistentvolumeclaim="data",job="kubelet",metrics_path="/metrics"}
+        values: 98x120
+      - series: kube_persistentvolumeclaim_info{namespace="storage-test",persistentvolumeclaim="data",storageclass="syncthing-local"}
+        values: 1x120
+    alert_rule_test:
+      - eval_time: 120m
+        alertname: KubePersistentVolumeFillingUp
+        exp_alerts:
+          - exp_labels:
+              namespace: storage-test
+              persistentvolumeclaim: media
+              job: kubelet
+              metrics_path: /metrics
+              severity: warning
+            exp_annotations:
+              description: Based on recent sampling, the PersistentVolume claimed by media in Namespace storage-test  is expected to fill up within four days. Currently 12.8% is available.
+              runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubepersistentvolumefillingup
+              summary: PersistentVolume is filling up.
+          - exp_labels:
+              namespace: storage-test
+              persistentvolumeclaim: data
+              job: kubelet
+              metrics_path: /metrics
+              severity: warning
+            exp_annotations:
+              description: Based on recent sampling, the PersistentVolume claimed by data in Namespace storage-test  is expected to fill up within four days. Currently 12.8% is available.
+              runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubepersistentvolumefillingup
+              summary: PersistentVolume is filling up.
+      - eval_time: 120m
+        alertname: KubePersistentVolumeInodesFillingUp
+        exp_alerts:
+          - exp_labels:
+              namespace: storage-test
+              persistentvolumeclaim: media
+              job: kubelet
+              metrics_path: /metrics
+              severity: warning
+            exp_annotations:
+              description: Based on recent sampling, the PersistentVolume claimed by media in Namespace storage-test  is expected to run out of inodes within four days. Currently 12.8% of its inodes are free.
+              runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubepersistentvolumeinodesfillingup
+              summary: PersistentVolumeInodes are filling up.
+          - exp_labels:
+              namespace: storage-test
+              persistentvolumeclaim: data
+              job: kubelet
+              metrics_path: /metrics
+              severity: warning
+            exp_annotations:
+              description: Based on recent sampling, the PersistentVolume claimed by data in Namespace storage-test  is expected to run out of inodes within four days. Currently 12.8% of its inodes are free.
+              runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubepersistentvolumeinodesfillingup
+              summary: PersistentVolumeInodes are filling up.
+
   # OnDelete updates wait for idle users in all three t3code environments.
   - interval: 1m
     input_series:
