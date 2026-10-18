@@ -751,8 +751,7 @@ spec:
               was the exported_* shape under promtail, #1381). Known sources:
               sonarr/radarr/prowlarr restarting and logging their Postgres
               connection string (#634), traefik access lines carrying jellyfin's
-              query-string ApiKey (#702), cloudflared logging Jellyfin request
-              URLs with an ApiKey query parameter, and sonarr logging Prowlarr
+              query-string ApiKey (#702), and sonarr logging Prowlarr
               Torznab feed URLs with an apikey parameter. If it is a new offender treat that credential as exposed and rotate
               it. Do NOT grep Loki for the literal value.
 
