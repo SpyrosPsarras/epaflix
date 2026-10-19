@@ -206,10 +206,9 @@ class SeedTests(unittest.TestCase):
 @unittest.skipIf(RAW_TEST, "rendering runs on the host")
 class RenderTests(unittest.TestCase):
     def test_homelab_only_render(self):
-        with tempfile.TemporaryDirectory(dir=HUB / "instances") as directory:
-            Path(directory, "kustomization.yaml").write_text(
-                "resources:\n  - ../base\n  - ../google\nnamespace: mcp-hub-homelab\n")
-            docs = list(yaml.safe_load_all(subprocess.check_output(["kustomize", "build", directory])))
+        docs = list(yaml.safe_load_all(subprocess.check_output([
+            "kustomize", "build", str(HUB / "instances/homelab")])))
+        self.assertTrue(any(d["kind"] == "Deployment" and d["metadata"]["name"] == "workspace-mcp" for d in docs))
         deployment = next(d for d in docs if d["kind"] == "Deployment" and d["metadata"]["name"] == "workspace-mcp")
         self.assertEqual(deployment["spec"]["replicas"], 1)
         self.assertEqual(deployment["spec"]["strategy"]["type"], "Recreate")
@@ -270,10 +269,35 @@ class RenderTests(unittest.TestCase):
         service_ports = [p["port"] for p in service["spec"]["ports"]]
         self.assertEqual(service_ports, [8000])
         self.assertEqual(service["spec"]["ports"][0]["targetPort"], "http")
-        self.assertFalse(any(d["kind"] in ("Secret", "Ingress", "IngressRoute") for d in docs))
-        for environment in ("homelab", "work"):
-            existing = list(yaml.safe_load_all(subprocess.check_output(["kustomize", "build", str(HUB / "instances" / environment)])))
-            self.assertFalse(any(d["kind"] == "Deployment" and d["metadata"]["name"] == "workspace-mcp" for d in existing))
+        self.assertFalse(any(d["kind"] == "Secret" for d in docs))
+        grant_consumers = set()
+        for doc in docs:
+            if doc["kind"] != "Deployment":
+                continue
+            pod_spec = doc["spec"]["template"]["spec"]
+            for container in pod_spec.get("initContainers", []) + pod_spec["containers"]:
+                for item in container.get("env", []):
+                    if item.get("valueFrom", {}).get("secretKeyRef", {}).get("name") == "mcp-hub-gmail":
+                        grant_consumers.add((doc["metadata"]["name"], container["name"]))
+                self.assertFalse(any(item.get("secretRef", {}).get("name") == "mcp-hub-gmail"
+                                     for item in container.get("envFrom", [])))
+            self.assertFalse(any(volume.get("secret", {}).get("secretName") == "mcp-hub-gmail"
+                                 for volume in pod_spec.get("volumes", [])))
+        self.assertEqual(grant_consumers, {("workspace-mcp", "raw")})
+        work_render_after = list(yaml.safe_load_all(subprocess.check_output([
+            "kustomize", "build", str(HUB / "instances/work")])))
+        self.assertFalse(any(d["metadata"]["name"] == "workspace-mcp" for d in work_render_after))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            shutil.copytree(HUB / "files", root / "files", ignore=shutil.ignore_patterns("__pycache__", "clients.json"))
+            shutil.copytree(HUB / "instances", root / "instances")
+            path = root / "instances/homelab/kustomization.yaml"
+            config = yaml.safe_load(path.read_text())
+            config["resources"].remove("../google")
+            path.write_text(yaml.safe_dump(config))
+            work_render_before = list(yaml.safe_load_all(subprocess.check_output([
+                "kustomize", "build", str(root / "instances/work")])))
+        self.assertEqual(work_render_after, work_render_before)
 
 
 @unittest.skipUnless(RAW_TEST, "raw FastMCP tests run in the pinned source/image environment")
