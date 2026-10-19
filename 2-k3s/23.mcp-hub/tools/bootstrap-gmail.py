@@ -289,7 +289,7 @@ def main():
                 sys.exit("Google account mismatch")
             _write_instance_secret(args.context, {"client-id": client_id, "client-secret": client_secret,
                                                   "refresh-token": tokens["refresh_token"], "email": mailbox})
-        except (Exception, SystemExit):
+        except Exception:
             sys.exit("homelab Google consent or staging failed; no automatic retry")
         print("homelab Google grant staged; rollout still required")
         return

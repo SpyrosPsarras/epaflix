@@ -148,10 +148,10 @@ class BootstrapGmailTests(unittest.TestCase):
         for value in (EMAIL, CLIENT, CLIENT_SECRET, REFRESH, ACCESS, "synthetic-sensitive", "synthetic-code", bootstrap.AUTH_URL):
             self.assertNotIn(value, output)
 
-    def assert_failed(self):
+    def assert_failed(self, message):
         with self.assertRaises(SystemExit) as error:
             self.run_main()
-        self.assertNotIn("synthetic", str(error.exception))
+        self.assertEqual(str(error.exception), message)
         self.assertEqual(self.mutations(), [])
         self.assert_private()
 
@@ -199,8 +199,18 @@ class BootstrapGmailTests(unittest.TestCase):
         self.assertEqual(self.requests[1].get_header("Authorization"), "Bearer " + ACCESS)
 
     def test_instance_consent_failures_write_nothing(self):
-        cases = ["denied", "timeout", "wrong-state", "missing-refresh", "empty-refresh", "partial", "broader", "wrong-account", "http"]
-        for case in cases:
+        cases = {
+            "denied": "Google consent failed or timed out; nothing written",
+            "timeout": "Google consent failed or timed out; nothing written",
+            "wrong-state": "Google consent failed or timed out; nothing written",
+            "missing-refresh": "Google returned an incomplete grant; nothing written",
+            "empty-refresh": "Google returned an incomplete grant; nothing written",
+            "partial": "Google grant scopes differ from the requested set; nothing written",
+            "broader": "Google grant scopes differ from the requested set; nothing written",
+            "wrong-account": "Google account mismatch",
+            "http": "homelab Google consent or staging failed; no automatic retry",
+        }
+        for case, message in cases.items():
             with self.subTest(case=case):
                 self.callback, self.traffic, self.clock = "valid", ["callback"], 0
                 self.tokens = {"access_token": ACCESS, "refresh_token": REFRESH, "scope": " ".join(sorted(complete_scope_set))}
@@ -221,11 +231,11 @@ class BootstrapGmailTests(unittest.TestCase):
                     self.profile = "other@example.test"
                 else:
                     self.http_error = True
-                self.assert_failed()
+                self.assert_failed(message)
 
     def test_instance_browser_failure_closes_server(self):
         self.opened = False
-        self.assert_failed()
+        self.assert_failed("a local browser is required; nothing written")
         self.assertTrue(self.closed)
         self.assertEqual(self.requests, [])
 
@@ -235,13 +245,13 @@ class BootstrapGmailTests(unittest.TestCase):
             return EMAIL
 
         self.prompt.side_effect = unavailable
-        self.assert_failed()
+        self.assert_failed("homelab Google consent or staging failed; no automatic retry")
         self.assertEqual(self.urls, [])
 
     def test_instance_wrong_desktop_json(self):
         for data in ({"web": {"client_id": CLIENT, "client_secret": CLIENT_SECRET}}, {"installed": {}}, {"installed": {"client_id": CLIENT, "client_secret": ""}}):
             self.client_json.write_text(json.dumps(data))
-            self.assert_failed()
+            self.assert_failed("a Desktop OAuth client JSON is required; nothing written")
             self.assertEqual(self.urls + self.requests + self.calls, [])
 
     def test_favicon_then_valid_callback(self):
@@ -253,7 +263,7 @@ class BootstrapGmailTests(unittest.TestCase):
 
     def test_favicon_only_times_out(self):
         self.traffic = ["favicon"]
-        self.assert_failed()
+        self.assert_failed("Google consent failed or timed out; nothing written")
         self.assertEqual(self.requests, [])
         self.assertTrue(self.closed)
 
@@ -267,12 +277,12 @@ class BootstrapGmailTests(unittest.TestCase):
         args, kwargs = mutations[0]
         self.assertEqual(args[5:], ["replace", "-f", "-"])
         self.assertEqual(json.loads(kwargs["input"])["metadata"]["resourceVersion"], "42")
-        self.assertNotIn("synthetic", str(error.exception))
+        self.assertEqual(str(error.exception), "Google Secret staging failed; no retry performed")
         self.assert_private()
 
     def test_instance_read_failure_does_not_create(self):
         self.get_error = True
-        self.assert_failed()
+        self.assert_failed("Google Secret read failed; nothing written")
 
     def test_reuse_only_selected_client_fields(self):
         self.existing = {"metadata": {"resourceVersion": "42"}, "data": {
