@@ -188,6 +188,101 @@ class InstanceTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 200)
                 self.assertEqual(response.json()["result"]["serverInfo"]["name"], environment)
 
+    def test_google_homelab_registration_only(self):
+        from starlette.applications import Starlette
+        from starlette.responses import JSONResponse
+        from starlette.routing import Route
+
+        spec = importlib.util.spec_from_file_location("google_gateway", HUB / "instances/google/gateway.py")
+        gateway = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gateway)
+        upstream_token = "synthetic-google-upstream-fixture"
+        raw_requests = []
+        gateway_requests = []
+
+        async def raw(request):
+            raw_requests.append(dict(request.headers))
+            message = await request.json()
+            if message["method"] == "initialize":
+                result = {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
+                          "serverInfo": {"name": "synthetic-google", "version": "0"}}
+            elif message["method"] == "tools/list":
+                result = {"tools": [{"name": name, "inputSchema": {"type": "object"}}
+                                    for name in ("search_gmail_messages", "search_drive_files")]}
+            else:
+                self.assertEqual(message["method"], "tools/call")
+                self.assertIn(message["params"]["name"], ("search_gmail_messages", "search_drive_files"))
+                self.assertEqual(message["params"]["arguments"], {"query": "synthetic"})
+                result = {"content": [{"type": "text", "text": "synthetic read result"}], "isError": False}
+            return JSONResponse({"jsonrpc": "2.0", "id": message["id"], "result": result})
+
+        raw_app = Starlette(routes=[Route("/mcp", raw, methods=["POST"])])
+        google_app = gateway.app(upstream_token, transport=httpx2.ASGITransport(app=raw_app))
+
+        async def observe_gateway(scope, receive, send):
+            gateway_requests.append(dict(scope["headers"]))
+            await google_app(scope, receive, send)
+
+        with contextlib.ExitStack() as stack:
+            direct = stack.enter_context(TestClient(google_app))
+            search_app = backend("homelab")
+            work_app = backend("work")
+            stack.enter_context(TestClient(search_app))
+            stack.enter_context(TestClient(work_app))
+            homelab_path, work_path = self.home / "homelab", self.home / "work"
+            _, credentials = fixture(homelab_path, "homelab", names=("searxng", "gmail", "drive"))
+            for name in ("gmail", "drive"):
+                credentials["upstreams"][name] = {
+                    "url": "http://workspace-mcp.mcp-hub-homelab.svc.cluster.local:8000/mcp",
+                    "token": upstream_token}
+            (homelab_path / "credentials.json").write_text(json.dumps(credentials))
+            fixture(work_path, "work", names=("searxng",))
+
+            def upstream(name, *args, **kwargs):
+                app = observe_gateway if name in ("gmail", "drive") else search_app
+                return Upstream(name, *args, transport=httpx2.ASGITransport(app=app), **kwargs)
+
+            with patch.object(mcp_hub, "Upstream", side_effect=upstream):
+                homelab = stack.enter_context(TestClient(mcp_hub.instance_app(
+                    "homelab", homelab_path / "services.json", homelab_path / "credentials.json")))
+            with patch.object(mcp_hub, "Upstream", side_effect=lambda *args, **kwargs:
+                              Upstream(*args, transport=httpx2.ASGITransport(app=work_app), **kwargs)):
+                work = stack.enter_context(TestClient(mcp_hub.instance_app(
+                    "work", work_path / "services.json", work_path / "credentials.json")))
+            for route in ("/gmail", "/drive"):
+                before = len(raw_requests)
+                for token in (None, "wrong", "work.fixture-client", "legacy-fixture"):
+                    headers = HEADERS if token is None else auth(token)
+                    self.assertEqual(homelab.post(route, json=INIT, headers=headers).status_code, 401)
+                self.assertEqual(len(raw_requests), before)
+                self.assertEqual(work.post(route, json=INIT, headers=auth("work.fixture-client")).status_code, 404)
+                reply = homelab.post(route, json=INIT, headers=auth("homelab.fixture-client"))
+                self.assertEqual(reply.status_code, 200)
+                self.assertEqual(reply.json()["result"]["serverInfo"]["name"], "synthetic-google")
+                reply = homelab.post(route, headers=auth("homelab.fixture-client"), json={
+                    "jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+                self.assertEqual({tool["name"] for tool in reply.json()["result"]["tools"]},
+                                 {"search_gmail_messages", "search_drive_files"})
+                for name in ("search_gmail_messages", "search_drive_files"):
+                    reply = homelab.post(route, headers=auth("homelab.fixture-client"), json={
+                        "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                        "params": {"name": name, "arguments": {"query": "synthetic"}}})
+                    self.assertEqual(reply.json()["result"]["content"][0]["text"], "synthetic read result")
+            for token in (None, "homelab.fixture-client", "work.fixture-client", "legacy-fixture"):
+                before = len(raw_requests)
+                headers = HEADERS if token is None else auth(token)
+                self.assertEqual(direct.post("/mcp", json=INIT, headers=headers).status_code, 401)
+                self.assertEqual(len(raw_requests), before)
+            self.assertTrue(raw_requests)
+            self.assertTrue(gateway_requests)
+            self.assertTrue(all(headers.get(b"authorization") == ("Bearer " + upstream_token).encode()
+                                for headers in gateway_requests))
+            self.assertTrue(all("authorization" not in headers for headers in raw_requests))
+            for client, environment in ((homelab, "homelab"), (work, "work")):
+                reply = client.post("/searxng", json=INIT, headers=auth(environment + ".fixture-client"))
+                self.assertEqual(reply.status_code, 200)
+                self.assertEqual(reply.json()["result"]["serverInfo"]["name"], environment)
+
     def test_invalid_instance_configuration_never_uses_legacy_defaults(self):
         path = self.home / "config"
         services, credentials = fixture(path, "homelab")
@@ -237,9 +332,19 @@ class InstanceTests(unittest.TestCase):
                             hub_services.validate_services(config, environment)
 
     def test_client_cli_uses_same_allowlist_and_removes_stale_servers(self):
+        homelab_config = hub_clients.pi({}, "https://homelab.example.test", "HOMELAB_MCP_TOKEN",
+                                       services={"environment": "homelab", "services": ["searxng", "gmail", "drive"]})
+        work_config = hub_clients.pi({}, "https://work.example.test", "WORK_MCP_TOKEN",
+                                    services={"environment": "work", "services": ["searxng"]})
+        self.assertEqual(set(homelab_config["mcpServers"]), {"searxng", "gmail", "drive"})
+        self.assertFalse({"gmail", "drive"} & set(work_config["mcpServers"]))
+        for config, env_var in ((homelab_config, "HOMELAB_MCP_TOKEN"), (work_config, "WORK_MCP_TOKEN")):
+            for entry in config["mcpServers"].values():
+                self.assertEqual(entry["headers"], {"Authorization": "Bearer ${" + env_var + "}"})
         for environment in hub_services.ENVIRONMENTS:
             path = self.home / environment
-            services, _ = fixture(path, environment, names=("searxng", "drive"))
+            names = ("searxng", "gmail", "drive") if environment == "homelab" else ("searxng",)
+            services, _ = fixture(path, environment, names=names)
             for kind, register, key in (("pi", hub_clients.pi, "mcpServers"),
                                         ("claude", hub_clients.claude, "mcpServers"),
                                         ("opencode", hub_clients.opencode, "mcp")):
@@ -252,7 +357,10 @@ class InstanceTests(unittest.TestCase):
                 env = {**os.environ, "MCP_HUB_INSTANCE": environment}
                 subprocess.run(cmd, env=env, check=True, capture_output=True)
                 generated = json.loads(target.read_text())
-                self.assertEqual(set(generated[key]), {"searxng", "drive", "unrelated"})
+                self.assertEqual(set(generated[key]), set(names) | {"unrelated"})
+                if kind == "pi":
+                    for name in names:
+                        self.assertEqual(generated[key][name]["headers"], {"Authorization": "Bearer ${FIXTURE_TOKEN}"})
                 for name in services["services"]:
                     self.assertEqual(generated[key][name]["url"],
                                      "https://" + environment + ".example.test" + hub_services.PATHS[name])
@@ -264,12 +372,19 @@ class InstanceTests(unittest.TestCase):
                 self.assertEqual(target.stat().st_mtime_ns, before)
             codex = path / "codex"
             codex.mkdir()
-            (codex / "config.toml").write_text('[mcp_servers.vaultwarden]\nurl="https://legacy.example.test/vaultwarden"\n')
+            (codex / "config.toml").write_text(''.join(
+                '[mcp_servers.' + name + ']\nurl="https://legacy.example.test/' + name + '"\n'
+                for name in ("vaultwarden", "gmail", "drive")))
             calls = []
             hub_clients.codex(str(codex), "https://hub.example.test", "FIXTURE_TOKEN",
                               run=lambda cmd, **kwargs: calls.append(cmd), services=services)
             self.assertTrue(["codex", "mcp", "remove", "vaultwarden"] in calls)
-            self.assertEqual({cmd[3] for cmd in calls if cmd[2] == "add"}, {"searxng", "drive"})
+            self.assertEqual({cmd[3] for cmd in calls if cmd[2] == "add"}, set(names))
+            for name in {"gmail", "drive"} - set(names):
+                self.assertIn(["codex", "mcp", "remove", name], calls)
+            for cmd in calls:
+                if cmd[2] == "add":
+                    self.assertEqual(cmd[-2:], ["--bearer-token-env-var", "FIXTURE_TOKEN"])
 
     def test_instance_entrypoints_fail_closed_before_starting_agents(self):
         for location in ("one", "env"):

@@ -6,8 +6,9 @@ ServiceAccounts, client grants and upstream credentials. The legacy hub
 remains available with its existing clients and routes. No consumer is
 switched by this change.
 
-The approved homelab and work inventories are `searxng` only. Both include
-the shared authenticated backend in `searxng/`, with an independent upstream
+The current approved homelab and work inventories are `searxng` only.
+The proposed homelab Gmail and Drive inventory below is pending owner rollout.
+Both include the shared authenticated backend in `searxng/`, with an independent upstream
 Secret in each namespace. Provisioning, the dedicated work client and owner enrollment
 are documented in [the work backend](../../13.t3code-work/README.md#first-deployment-for-1837).
 Other work services remain owner-added later. No work data source is configured.
@@ -15,7 +16,10 @@ Other work services remain owner-added later. No work data source is configured.
 Both hub Applications automatically sync merged revisions with pruning and
 self-healing. Their Deployments can roll immediately after merge; unlike
 the runtimes, the hubs have no manual stop procedure. Stage approved private
-inputs before merging manifests or advancing input revisions. Their public
+hub inventories, runtime allowlists and matching inputs before merging their
+own revision bumps. The Google backend can merge before its Secret staging;
+until the Secrets exist it stays not-ready with `CreateContainerConfigError`,
+while the hub and searxng remain unaffected. Their public
 overlays contain no Secret, approved service inventory or account identity.
 Each has an internal-only Traefik route with a generic homelab/work hostname.
 Without private configuration their pods cannot start. Rendering an overlay
@@ -79,6 +83,128 @@ Use a fresh random value for each client and environment. Tokens must never
 be printed or committed. The other new hub rejects the prefix, and the
 legacy hub reserves both prefixes and rejects them even if their digest
 was accidentally registered there. Existing legacy tokens keep working.
+
+## Homelab Gmail and Drive, pending owner rollout
+
+The proposed private inventory is
+`{"environment":"homelab","services":["searxng","gmail","drive"]}`
+in both hub and runtime. It remains pending until owner-run staging,
+verification and revision selection succeed. Work stays
+`{"environment":"work","services":["searxng"]}`. Preserve the existing
+searxng connection, all ordinary client digests and the homelab/work boundary.
+
+Only homelab includes `../google`. Both added connections use
+`http://workspace-mcp.mcp-hub-homelab.svc.cluster.local:8000/mcp` and the same
+fresh, independently minted Workspace bearer. `/gmail` and `/drive` are
+aliases for one combined upstream, not per-service authorization boundaries.
+Agents register exactly `searxng`, `gmail` and `drive`, with token environment
+references. There is no separate send-draft registration. The legacy
+`files/gmail_mcp.py` endpoint and Drive-only `workspace-mcp.yaml` remain
+unchanged; reusing the send-draft helper does not reuse their grant.
+
+The exact served union is 31 tools, 15 Gmail and 16 Drive, including our
+`gmail_send_draft` extension. Both aliases return this same list. The
+pinned image's complete tier supplies the other 30 names:
+
+```text
+search_gmail_messages, get_gmail_message_content, get_gmail_messages_content_batch,
+send_gmail_message, get_gmail_attachment_content, get_gmail_thread_content,
+modify_gmail_message_labels, list_gmail_labels, manage_gmail_label, draft_gmail_message,
+list_gmail_filters, manage_gmail_filter, get_gmail_threads_content_batch,
+batch_modify_gmail_message_labels, gmail_send_draft,
+search_drive_files, get_drive_file_content, get_drive_file_download_url,
+create_drive_file, create_drive_folder, import_to_google_doc, import_to_google_slides,
+import_to_google_sheets, get_drive_shareable_link, list_drive_items, copy_drive_file,
+update_drive_file, manage_drive_access, set_drive_file_permissions,
+get_drive_file_permissions, check_drive_file_public_access
+```
+
+Consent and seed require exactly this complete scope set, including entries
+implied by broader scopes:
+
+```text
+https://www.googleapis.com/auth/drive
+https://www.googleapis.com/auth/drive.file
+https://www.googleapis.com/auth/drive.readonly
+https://www.googleapis.com/auth/gmail.compose
+https://www.googleapis.com/auth/gmail.labels
+https://www.googleapis.com/auth/gmail.modify
+https://www.googleapis.com/auth/gmail.readonly
+https://www.googleapis.com/auth/gmail.send
+https://www.googleapis.com/auth/gmail.settings.basic
+https://www.googleapis.com/auth/userinfo.email
+https://www.googleapis.com/auth/userinfo.profile
+openid
+```
+
+`start_google_auth` stays disabled. CI's required pinned-image check verifies
+the exact union and the startup extension. An unknown tool or incompatible
+image blocks rollout rather than expanding the approved inventory.
+
+The raw Workspace server listens only on `127.0.0.1:8001`. Only the
+authenticated gateway listens on port 8000, and the `workspace-mcp` Service
+exposes only that gateway. Every MCP request needs the independent bearer
+from `mcp-hub-google-upstream/token`; ordinary client bearers are rejected.
+NetworkPolicy alone is not the boundary. The hub replaces the client's
+bearer with the Workspace bearer; the gateway strips it before forwarding
+to loopback. No Google grant or upstream bearer belongs in client config.
+
+Only the raw container consumes `mcp-hub-gmail`. It seeds a writable,
+memory-backed temporary credential file under `/creds`. After seeding, the
+Workspace process is the only credentials-file writer. Its send-draft
+helper refreshes access tokens in memory only, never writes the shared file
+and never retries a send. A restart seeds again from the private grant;
+startup never enrolls an account. A revoked grant requires fresh owner
+consent, not a restart loop. Notion refresh ownership stays unchanged.
+Workspace and FastMCP log at `CRITICAL` because upstream INFO, WARNING and
+ERROR messages can include the account email. File logs use
+`/tmp/.google_workspace_mcp/logs`; CI checks them and container output for
+synthetic identity and credential leaks after failed HTTP tool calls.
+
+Writes run directly by owner decision, including send-draft, trash through
+label modification with `TRASH`, and sharing. There is no hub-side gate,
+no gate in the homelab pod's clients, and desktop OpenCode keeps the legacy
+ask table until #1946. The legacy `ASK` table stays unchanged and is not
+extended. The homelab pod generates Pi, Claude and Codex config, not OpenCode.
+
+### Owner enrollment and stopped rollout
+
+1. G1: Stop homelab consumers through the approved input-rotation procedure.
+   The owner obtains a fresh OAuth client and runs
+   `tools/bootstrap-gmail.py --instance homelab --context <approved-context> --client-json <private-client-file>`.
+   The owner signs in through the browser, verifies the account before
+   consent and approves the exact scope set above. Copy no legacy token or
+   refresh token. Keep identities, grant material and evidence outside this
+   public repo. No public Secret manifest is created.
+2. G2: Stage the grant in `mcp-hub-homelab/mcp-hub-gmail` through the bootstrap
+   tool. Separately mint the upstream bearer inside the private provisioning
+   process and stage it in `mcp-hub-google-upstream/token` and both Google
+   connections in `mcp-hub-instance/credentials.json`. Preserve clients and
+   searxng. Update both private service inventories. Recompute only
+   `runtime.json.sha256["services.json"]` over its exact stored bytes; preserve
+   other inputs, approvals and grant digests. Use resource-version checks and
+   suppress Secret command output. Do not enroll during ordinary staging.
+3. G3: The owner selects reviewed rollout revisions after staging. Hub inventory
+   or connection changes need `mcp-hub.epaflix.com/inputs-revision` on the hub;
+   Google grant or gateway-bearer rotations separately need that annotation
+   on the homelab `workspace-mcp` Deployment. A bearer rotation changes both
+   backend and hub inputs, so roll both. Use homelab-only patches, never the
+   shared base or work. Runtime input changes separately need
+   `t3code.epaflix.com/inputs-grants-revision` through the
+   [runtime input rotation procedure](../../13.t3code/env/isolated-runtime.md#input-rotation).
+   The backend starts with revision `r1` and may merge before its Secrets
+   are staged. It stays not-ready with `CreateContainerConfigError` until
+   they exist, without affecting the hub or searxng. Hub and runtime
+   revisions stay unchanged here. Stage the private inventory, runtime
+   allowlist and matching inputs before their own revision commit merges
+   and enables `gmail`/`drive`. Do not resume stopped consumers before
+   verification.
+4. G4: After owner approval and rollout, verify the exact tool union, both
+   aliases, synthetic reads, direct-backend rejection of ordinary credentials,
+   wrong-environment and legacy-token rejection, unchanged work services and
+   legacy availability. Regenerate client configs and remove stale managed
+   entries. Resume homelab consumers only after these checks pass. Live
+   send-draft, trash and sharing checks remain owner-run.
 
 ## Notion refresh ownership
 

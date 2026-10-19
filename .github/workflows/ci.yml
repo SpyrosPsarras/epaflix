@@ -379,6 +379,13 @@ jobs:
           # The t3code pod's copy of hub_clients.py (and the other shared inputs) must not drift.
           bash 2-k3s/13.t3code/one/tools/sync-shared.sh --check
 
+      - name: Google Workspace pinned-image contract
+        env:
+          WORKSPACE_MCP_IMAGE_TEST: "1"
+        run: |
+          set -euo pipefail
+          /tmp/mcp-hub/bin/python -m unittest discover -s 2-k3s/23.mcp-hub/tests -p test_google.py -v
+
       - name: T3 install and runtime smoke
         timeout-minutes: 75
         run: |

@@ -52,7 +52,8 @@ class SearchTests(unittest.TestCase):
                 docs = list(yaml.safe_load_all(subprocess.check_output([
                     "kustomize", "build", str(HUB / "instances" / environment)])))
                 deployments = {doc["metadata"]["name"]: doc for doc in docs if doc["kind"] == "Deployment"}
-                self.assertEqual(set(deployments), {"mcp-hub", "searxng-mcp"})
+                self.assertEqual(set(deployments), {"mcp-hub", "searxng-mcp", "workspace-mcp"}
+                                 if environment == "homelab" else {"mcp-hub", "searxng-mcp"})
                 search_deployment = deployments["searxng-mcp"]
                 template = search_deployment["spec"]["template"]
                 pod = template["spec"]

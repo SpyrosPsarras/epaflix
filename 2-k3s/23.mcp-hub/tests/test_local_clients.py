@@ -39,7 +39,7 @@ class IngressTests(unittest.TestCase):
             self.assertEqual(route["spec"]["routes"], [{"kind": "Rule", "match": "Host(`" + host + "`)",
                 "services": [{"name": "mcp-hub", "port": 8000}]}])
             self.assertNotIn("Ingress", [doc["kind"] for doc in documents])
-            deployment = next(doc for doc in documents if doc["kind"] == "Deployment")
+            deployment = next(doc for doc in documents if doc["kind"] == "Deployment" and doc["metadata"]["name"] == "mcp-hub")
             annotations = deployment["spec"]["template"]["metadata"]["annotations"]
             self.assertEqual(annotations["mcp-hub.epaflix.com/inputs-revision"],
                              "r3" if environment == "homelab" else "r2")

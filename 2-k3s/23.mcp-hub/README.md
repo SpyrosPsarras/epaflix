@@ -4,10 +4,12 @@ The legacy MCP endpoint remains available while clients deliberately migrate.
 Clients know one URL and their own hub token; the hub owns each connection.
 
 [Homelab and work instances](instances/README.md) run the same maintained code
-with independent configuration and credentials. Provision approved private
-inputs before merging their manifests. Both Applications sync automatically
-with pruning and self-healing; merged changes can roll their Deployments
-immediately. Neither exposes vault routes.
+with independent configuration and credentials. Both Applications sync
+automatically with pruning and self-healing. Stage private hub inventories,
+runtime allowlists and their matching inputs before merging their own revision
+bumps. The Google backend can merge first; without its Secrets it stays
+not-ready with `CreateContainerConfigError`, while the hub and searxng remain
+unaffected. Neither hub exposes vault routes.
 
 ## Vocabulary
 
@@ -41,6 +43,22 @@ PC needs the VPN plus the LAN resolver.
 Upstream failures (unreachable, credential rejected, Notion grant expired)
 come back as a JSON-RPC error carrying the reason, never as the upstream's
 own 401, so clients do not start an OAuth flow against the hub.
+
+## Homelab Gmail and Drive, pending owner rollout
+
+The path table and setup sections describe the unchanged legacy hub. Homelab
+adds the pinned Workspace complete tier and our `gmail_send_draft` extension
+behind an authenticated gateway, using a fresh owner grant. Work and existing
+searxng connections stay unchanged. The backend can merge before Secret
+staging and remains not-ready with `CreateContainerConfigError` until its
+Secrets exist; this does not affect the hub or searxng. Stage the private hub
+inventory and runtime allowlist changes before merging their own revision
+bumps that enable `gmail` and `drive`.
+
+See [Homelab Gmail and Drive](instances/README.md#homelab-gmail-and-drive-pending-owner-rollout)
+for the full tool and scope inventory, gateway boundary, approval policy,
+owner enrollment and stopped rollout procedure. Keep account identifiers,
+credentials, Google content and private evidence outside this public repo.
 
 ## Clients
 

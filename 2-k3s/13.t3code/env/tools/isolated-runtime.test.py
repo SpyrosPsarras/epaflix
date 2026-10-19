@@ -131,8 +131,40 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual((self.home / '.pi/agent/AGENTS.md').read_text(), expected + '\n' + ssh.read_text())
             self.assertEqual((self.inputs / 'bundle.json').read_bytes(), payload)
 
+    def test_google_inventory_digest_mismatch_stops_startup(self):
+        before = json.loads((self.inputs / 'runtime.json').read_text())
+        other_inputs = {name: (self.inputs / name).read_bytes() for name in runtime.INPUTS if name != 'services.json'}
+        stored_services_bytes = b'{"environment":"homelab","services":["searxng","gmail","drive"]}\n'
+        (self.inputs / 'services.json').write_bytes(stored_services_bytes)
+        with self.assertRaisesRegex(ValueError, 'digest mismatch'):
+            runtime.prepare(self.inputs, self.home, 'homelab')
+        self.assertFalse((self.home / '.config/t3-runtime/services.json').exists())
+        self.assertFalse((self.home / '.pi/agent/mcp.json').exists())
+        reviewed = copy.deepcopy(before)
+        reviewed['sha256']['services.json'] = hashlib.sha256(stored_services_bytes).hexdigest()
+        (self.inputs / 'runtime.json').write_text(json.dumps(reviewed))
+        self.validate()
+        self.prepare()
+        runtime.apply(self.inputs, self.home, 'homelab')
+        after = json.loads((self.inputs / 'runtime.json').read_text())
+        runtime_sha256 = after['sha256']
+        self.assertEqual(runtime_sha256['services.json'], hashlib.sha256(stored_services_bytes).hexdigest())
+        self.assertEqual(after['approvals'], before['approvals'])
+        self.assertEqual(after['grantSha256'], before['grantSha256'])
+        self.assertEqual({key: value for key, value in runtime_sha256.items() if key != 'services.json'},
+                         {key: value for key, value in before['sha256'].items() if key != 'services.json'})
+        self.assertEqual({name: (self.inputs / name).read_bytes() for name in other_inputs}, other_inputs)
+        self.assertEqual((self.inputs / 'services.json').read_bytes(), stored_services_bytes)
+        self.assertEqual(json.loads((self.home / '.config/t3-runtime/services.json').read_text()),
+                         {'environment': 'homelab', 'services': ['searxng', 'gmail', 'drive']})
+        homelab_config = json.loads((self.home / '.pi/agent/mcp.json').read_text())
+        self.assertEqual(set(homelab_config['mcpServers']), {'searxng', 'gmail', 'drive'})
+        for name, entry in homelab_config['mcpServers'].items():
+            self.assertEqual(entry['url'], 'http://mcp-hub.mcp-hub-homelab.svc.cluster.local:8000/' + name)
+            self.assertEqual(entry['headers'], {'Authorization': 'Bearer ${MCP_HUB_TOKEN}'})
+
     def test_reviewed_services_snapshot_and_removed_client_cleanup_on_restart(self):
-        self.change('services.json', lambda obj: obj.update(services=['searxng', 'drive']))
+        self.change('services.json', lambda obj: obj.update(services=['searxng', 'gmail', 'drive']))
         (self.inputs / 'services.json').chmod(0o440)
         self.prepare()
         runtime.apply(self.inputs, self.home, 'homelab')
@@ -141,14 +173,15 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(snapshot.stat().st_uid, os.getuid())
         self.assertEqual(snapshot.stat().st_mode & 0o777, 0o600)
         self.assertEqual(set(json.loads((self.home / '.pi/agent/mcp.json').read_text())['mcpServers']),
-                         {'searxng', 'drive'})
+                         {'searxng', 'gmail', 'drive'})
         (self.inputs / 'services.json').chmod(0o600)
         self.change('services.json', lambda obj: obj.update(services=['searxng']))
         runtime.prepare(self.inputs, self.home, 'homelab')
         runtime.apply(self.inputs, self.home, 'homelab')
         for name in ('.pi/agent/mcp.json', '.claude.json', '.claude/.claude.json'):
             self.assertEqual(set(json.loads((self.home / name).read_text())['mcpServers']), {'searxng'})
-        self.assertNotIn('drive', (self.home / '.codex/config.toml').read_text())
+        codex = tomllib.loads((self.home / '.codex/config.toml').read_text())
+        self.assertEqual(set(codex['mcp_servers']), {'searxng'})
         self.assertEqual(snapshot.read_bytes(), (self.inputs / 'services.json').read_bytes())
         (self.inputs / 'services.json').write_text('{}')
         with self.assertRaises(ValueError):
@@ -287,14 +320,21 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns, path.stat().st_ino), before)
 
     def test_codex_requirements_match_reviewed_provider_and_hub_inventory(self):
+        self.change('services.json', lambda obj: obj.update(services=['searxng', 'gmail', 'drive']))
         self.prepare()
         runtime.apply(self.inputs, self.home, 'homelab')
         codex = tomllib.loads((self.home / '.codex/config.toml').read_text())
         requirements = tomllib.loads(self.requirements.read_text())
         self.assertEqual(requirements['model_provider'], codex['model_provider'])
         self.assertEqual(requirements['model_providers'], codex['model_providers'])
-        self.assertEqual(requirements['mcp_servers'], {'searxng': {'identity': {
-            'url': 'http://mcp-hub.mcp-hub-homelab.svc.cluster.local:8000/searxng'}}})
+        self.assertEqual(requirements['mcp_servers'], {
+            'searxng': {'identity': {'url': 'http://mcp-hub.mcp-hub-homelab.svc.cluster.local:8000/searxng'}},
+            'gmail': {'identity': {'url': 'http://mcp-hub.mcp-hub-homelab.svc.cluster.local:8000/gmail'}},
+            'drive': {'identity': {'url': 'http://mcp-hub.mcp-hub-homelab.svc.cluster.local:8000/drive'}}})
+        self.assertEqual(set(codex['mcp_servers']), {'searxng', 'gmail', 'drive'})
+        for name, server in codex['mcp_servers'].items():
+            self.assertEqual(server['url'], requirements['mcp_servers'][name]['identity']['url'])
+            self.assertEqual(server['bearer_token_env_var'], 'MCP_HUB_TOKEN')
         self.assertEqual(self.requirements.stat().st_mode & 0o777, 0o600)
         self.assertNotIn(os.environ['MCP_HUB_TOKEN'], self.requirements.read_text())
 
