@@ -1,0 +1,198 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: workspace-mcp
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: workspace-mcp
+  template:
+    metadata:
+      labels:
+        app: workspace-mcp
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 10
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: raw
+          image: ghcr.io/taylorwilsdon/google_workspace_mcp:2.0.1
+          workingDir: /app
+          command:
+            - sh
+            - -c
+            - >-
+              /app/.venv/bin/python /runner/seed.py &&
+              unset GOOGLE_REFRESH_TOKEN &&
+              exec /app/.venv/bin/python /runner/workspace.py
+              --transport streamable-http --single-user --tools gmail drive
+              --tool-tier complete --disabled-tools start_google_auth
+          env:
+            - name: HOME
+              value: /tmp
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+            - name: PYTHONPATH
+              value: /app:/legacy
+            - name: WORKSPACE_MCP_HOST
+              value: 127.0.0.1
+            - name: WORKSPACE_MCP_PORT
+              value: "8001"
+            - name: WORKSPACE_MCP_CREDENTIALS_DIR
+              value: /creds
+            - name: WORKSPACE_MCP_DISABLE_LOCAL_FILES
+              value: "true"
+            - name: USER_GOOGLE_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-hub-gmail
+                  key: email
+            - name: GOOGLE_OAUTH_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-hub-gmail
+                  key: client-id
+            - name: GOOGLE_OAUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-hub-gmail
+                  key: client-secret
+            - name: GOOGLE_REFRESH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-hub-gmail
+                  key: refresh-token
+          readinessProbe:
+            exec:
+              command: [curl, -fsS, -o, /dev/null, http://127.0.0.1:8001/health]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: [curl, -fsS, -o, /dev/null, http://127.0.0.1:8001/health]
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 10m
+              memory: 160Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: runner
+              mountPath: /runner/seed.py
+              subPath: seed.py
+              readOnly: true
+            - name: runner
+              mountPath: /runner/workspace.py
+              subPath: workspace.py
+              readOnly: true
+            - name: app
+              mountPath: /legacy/gmail_mcp.py
+              subPath: gmail_mcp.py
+              readOnly: true
+            - name: creds
+              mountPath: /creds
+            - name: raw-tmp
+              mountPath: /tmp
+        - name: gateway
+          image: docker.io/library/python:3.13-alpine
+          command:
+            - sh
+            - -c
+            - >-
+              pip install -q --no-cache-dir --disable-pip-version-check
+              --target /opt/py mcp==2.2.0 &&
+              exec python /runner/gateway.py
+          env:
+            - name: GOOGLE_UPSTREAM_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-hub-google-upstream
+                  key: token
+            - name: PYTHONPATH
+              value: /app:/opt/py
+            - name: HOME
+              value: /tmp
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+          ports:
+            - name: http
+              containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 60
+          resources:
+            requests:
+              cpu: 10m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: app
+              mountPath: /app
+              readOnly: true
+            - name: runner
+              mountPath: /runner/gateway.py
+              subPath: gateway.py
+              readOnly: true
+            - name: py
+              mountPath: /opt/py
+            - name: gateway-tmp
+              mountPath: /tmp
+      volumes:
+        - name: app
+          configMap:
+            name: mcp-hub-app
+        - name: runner
+          configMap:
+            name: google-runner
+        - name: creds
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+        - name: raw-tmp
+          emptyDir: {}
+        - name: gateway-tmp
+          emptyDir: {}
+        - name: py
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: workspace-mcp
+spec:
+  selector:
+    app: workspace-mcp
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
