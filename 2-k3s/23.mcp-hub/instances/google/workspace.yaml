@@ -11,6 +11,8 @@ spec:
       app: workspace-mcp
   template:
     metadata:
+      annotations:
+        mcp-hub.epaflix.com/inputs-revision: "r1"
       labels:
         app: workspace-mcp
     spec:
@@ -50,6 +52,12 @@ spec:
               value: "8001"
             - name: WORKSPACE_MCP_CREDENTIALS_DIR
               value: /creds
+            - name: WORKSPACE_MCP_LOG_LEVEL
+              value: CRITICAL
+            - name: FASTMCP_LOG_LEVEL
+              value: CRITICAL
+            - name: WORKSPACE_MCP_LOG_DIR
+              value: /tmp/.google_workspace_mcp/logs
             - name: WORKSPACE_MCP_DISABLE_LOCAL_FILES
               value: "true"
             - name: USER_GOOGLE_EMAIL

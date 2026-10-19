@@ -171,7 +171,11 @@ def _authorize_instance(client_id, client_secret):
             "prompt": "select_account consent", "state": state,
             "code_challenge": challenge, "code_challenge_method": "S256",
         })
-        if not webbrowser.open(url):
+        browser = subprocess.run(
+            [sys.executable, "-c", "import sys, webbrowser; sys.exit(not webbrowser.open(sys.stdin.read()))"],
+            input=url, text=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        if browser.returncode != 0:
             sys.exit("a local browser is required; nothing written")
         deadline = time.monotonic() + 300
         while not got:

@@ -7,7 +7,7 @@ remains available with its existing clients and routes. No consumer is
 switched by this change.
 
 The current approved homelab and work inventories are `searxng` only.
-The proposed homelab Gmail and Drive inventory below is pending Task 4.
+The proposed homelab Gmail and Drive inventory below is pending owner rollout.
 Both include the shared authenticated backend in `searxng/`, with an independent upstream
 Secret in each namespace. Provisioning, the dedicated work client and owner enrollment
 are documented in [the work backend](../../13.t3code-work/README.md#first-deployment-for-1837).
@@ -16,7 +16,10 @@ Other work services remain owner-added later. No work data source is configured.
 Both hub Applications automatically sync merged revisions with pruning and
 self-healing. Their Deployments can roll immediately after merge; unlike
 the runtimes, the hubs have no manual stop procedure. Stage approved private
-inputs before merging manifests or advancing input revisions. Their public
+hub inventories, runtime allowlists and matching inputs before merging their
+own revision bumps. The Google backend can merge before its Secret staging;
+until the Secrets exist it stays not-ready with `CreateContainerConfigError`,
+while the hub and searxng remain unaffected. Their public
 overlays contain no Secret, approved service inventory or account identity.
 Each has an internal-only Traefik route with a generic homelab/work hostname.
 Without private configuration their pods cannot start. Rendering an overlay
@@ -81,12 +84,12 @@ be printed or committed. The other new hub rejects the prefix, and the
 legacy hub reserves both prefixes and rejects them even if their digest
 was accidentally registered there. Existing legacy tokens keep working.
 
-## Homelab Gmail and Drive, pending Task 4
+## Homelab Gmail and Drive, pending owner rollout
 
 The proposed private inventory is
 `{"environment":"homelab","services":["searxng","gmail","drive"]}`
-in both hub and runtime. It remains pending until Task 4's owner-run
-staging, verification and revision selection succeed. Work stays
+in both hub and runtime. It remains pending until owner-run staging,
+verification and revision selection succeed. Work stays
 `{"environment":"work","services":["searxng"]}`. Preserve the existing
 searxng connection, all ordinary client digests and the homelab/work boundary.
 
@@ -153,6 +156,10 @@ helper refreshes access tokens in memory only, never writes the shared file
 and never retries a send. A restart seeds again from the private grant;
 startup never enrolls an account. A revoked grant requires fresh owner
 consent, not a restart loop. Notion refresh ownership stays unchanged.
+Workspace and FastMCP log at `CRITICAL` because upstream INFO, WARNING and
+ERROR messages can include the account email. File logs use
+`/tmp/.google_workspace_mcp/logs`; CI checks them and container output for
+synthetic identity and credential leaks after failed HTTP tool calls.
 
 Writes run directly by owner decision, including send-draft, trash through
 label modification with `TRASH`, and sharing. There is no hub-side gate,
@@ -177,7 +184,7 @@ extended. The homelab pod generates Pi, Claude and Codex config, not OpenCode.
    `runtime.json.sha256["services.json"]` over its exact stored bytes; preserve
    other inputs, approvals and grant digests. Use resource-version checks and
    suppress Secret command output. Do not enroll during ordinary staging.
-3. G3: Task 4 selects reviewed rollout revisions after staging. Hub inventory
+3. G3: The owner selects reviewed rollout revisions after staging. Hub inventory
    or connection changes need `mcp-hub.epaflix.com/inputs-revision` on the hub;
    Google grant or gateway-bearer rotations separately need that annotation
    on the homelab `workspace-mcp` Deployment. A bearer rotation changes both
@@ -185,8 +192,13 @@ extended. The homelab pod generates Pi, Claude and Codex config, not OpenCode.
    shared base or work. Runtime input changes separately need
    `t3code.epaflix.com/inputs-grants-revision` through the
    [runtime input rotation procedure](../../13.t3code/env/isolated-runtime.md#input-rotation).
-   This task leaves all revisions unchanged. Hubs sync automatically, so
-   stage before merge; do not resume stopped consumers before verification.
+   The backend starts with revision `r1` and may merge before its Secrets
+   are staged. It stays not-ready with `CreateContainerConfigError` until
+   they exist, without affecting the hub or searxng. Hub and runtime
+   revisions stay unchanged here. Stage the private inventory, runtime
+   allowlist and matching inputs before their own revision commit merges
+   and enables `gmail`/`drive`. Do not resume stopped consumers before
+   verification.
 4. G4: After owner approval and rollout, verify the exact tool union, both
    aliases, synthetic reads, direct-backend rejection of ordinary credentials,
    wrong-environment and legacy-token rejection, unchanged work services and

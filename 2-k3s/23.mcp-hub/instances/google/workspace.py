@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from pathlib import Path
 from urllib.parse import quote
@@ -45,6 +46,7 @@ def main() -> None:
         credential_path = Path(directory) / (quote(email, safe="@._-") + ".json")
     except (KeyError, ValueError):
         raise SystemExit("Google draft credentials unavailable") from None
+    logging.basicConfig(level=logging.CRITICAL)
     import main as pinned_main
 
     original_filter = pinned_main.filter_server_tools

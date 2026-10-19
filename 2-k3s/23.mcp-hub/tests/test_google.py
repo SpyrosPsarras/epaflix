@@ -194,6 +194,20 @@ class SeedTests(unittest.TestCase):
                 for private in (EMAIL, CLIENT_ID, CLIENT_SECRET, REFRESH_TOKEN):
                     self.assertNotIn(private, result.stdout + result.stderr)
 
+    def test_startup_hides_identity_before_upstream_logging_configuration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory, "main.py").write_text(
+                'import logging, os\nlogging.basicConfig(level=logging.INFO)\n'
+                'logging.info(os.environ["USER_GOOGLE_EMAIL"])\n'
+                'def filter_server_tools(server): pass\ndef main(): pass\n')
+            env = {**os.environ, "USER_GOOGLE_EMAIL": EMAIL, "WORKSPACE_MCP_CREDENTIALS_DIR": directory,
+                   "WORKSPACE_MCP_LOG_LEVEL": "CRITICAL", "FASTMCP_LOG_LEVEL": "CRITICAL",
+                   "PYTHONPATH": directory + os.pathsep + str(HUB / "files")}
+            result = subprocess.run([sys.executable, str(RUNNER / "workspace.py")], env=env,
+                                    capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout + result.stderr, "")
+
     def test_legacy_gmail_selftest(self):
         sys.path.insert(0, str(HUB / "files"))
         import gmail_mcp
@@ -210,6 +224,7 @@ class RenderTests(unittest.TestCase):
             "kustomize", "build", str(HUB / "instances/homelab")])))
         self.assertTrue(any(d["kind"] == "Deployment" and d["metadata"]["name"] == "workspace-mcp" for d in docs))
         deployment = next(d for d in docs if d["kind"] == "Deployment" and d["metadata"]["name"] == "workspace-mcp")
+        self.assertEqual(deployment["spec"]["template"]["metadata"]["annotations"]["mcp-hub.epaflix.com/inputs-revision"], "r1")
         self.assertEqual(deployment["spec"]["replicas"], 1)
         self.assertEqual(deployment["spec"]["strategy"]["type"], "Recreate")
         pod = deployment["spec"]["template"]["spec"]
@@ -221,7 +236,8 @@ class RenderTests(unittest.TestCase):
         env = {e["name"]: e.get("value", e.get("valueFrom")) for e in raw["env"]}
         for key, value in {"WORKSPACE_MCP_HOST": "127.0.0.1", "WORKSPACE_MCP_PORT": "8001", "HOME": "/tmp",
                            "WORKSPACE_MCP_DISABLE_LOCAL_FILES": "true", "WORKSPACE_MCP_CREDENTIALS_DIR": "/creds",
-                           "PYTHONPATH": "/app:/legacy"}.items():
+                           "PYTHONPATH": "/app:/legacy", "WORKSPACE_MCP_LOG_LEVEL": "CRITICAL", "FASTMCP_LOG_LEVEL": "CRITICAL",
+                           "WORKSPACE_MCP_LOG_DIR": "/tmp/.google_workspace_mcp/logs"}.items():
             self.assertEqual(env[key], value)
         self.assertNotIn("PORT", env)
         self.assertEqual(raw["workingDir"], "/app")
@@ -468,33 +484,71 @@ class ImageTests(unittest.TestCase):
                        "--volume", str(HUB / "files/gmail_mcp.py") + ":/legacy/gmail_mcp.py:ro",
                        "--volume", str(Path(__file__).resolve()) + ":/fixtures/tests/test_google.py:ro",
                        "--entrypoint", raw["command"][0], raw["image"], *raw["command"][1:]]
+            def diagnostics(stderr):
+                logs = subprocess.run(["docker", "logs", name], capture_output=True, text=True, timeout=30)
+                return f"stderr:\n{stderr}\ndocker logs:\n{logs.stdout}{logs.stderr}"
+
             try:
-                subprocess.run(command, check=True, capture_output=True, text=True, timeout=300)
+                try:
+                    started = subprocess.run(command, capture_output=True, text=True, timeout=300)
+                except subprocess.TimeoutExpired as error:
+                    self.fail("docker run timed out\n" + diagnostics(error.stderr))
+                if started.returncode != 0:
+                    self.fail("docker run failed\n" + diagnostics(started.stderr))
                 probe = "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=2).read()"
                 for attempt in range(90):
-                    ready = subprocess.run(["docker", "exec", name, "/app/.venv/bin/python", "-c", probe], capture_output=True, timeout=10)
+                    try:
+                        ready = subprocess.run(["docker", "exec", name, "/app/.venv/bin/python", "-c", probe], capture_output=True, text=True, timeout=10)
+                    except subprocess.TimeoutExpired as error:
+                        self.fail("Pinned image readiness probe timed out\n" + diagnostics(error.stderr))
                     if ready.returncode == 0:
                         break
                     time.sleep(1)
                 else:
-                    self.fail("Pinned image did not become healthy on loopback port 8001")
+                    self.fail("Pinned image did not become healthy on loopback port 8001\n" + diagnostics(ready.stderr))
                 inventory = '''import asyncio, json
+from pathlib import Path
 from fastmcp import Client
 async def main():
-    async with Client("http://127.0.0.1:8001/mcp") as client:
-        print(json.dumps(sorted(t.name for t in await client.list_tools())))
+    listeners = [fields[1] for path in ("/proc/net/tcp", "/proc/net/tcp6")
+                 for line in Path(path).read_text().splitlines()[1:]
+                 if (fields := line.split())[3] == "0A" and fields[1].endswith(":1F41")]
+    async with Client("http://127.0.0.1:8001/mcp", timeout=120) as client:
+        tools = sorted(t.name for t in await client.list_tools())
+        upstream = await client.call_tool("list_gmail_labels", {}, raise_on_error=False)
+        draft = await client.call_tool("gmail_send_draft", {"draft_id": "draft-fixture"}, raise_on_error=False)
+        print(json.dumps({"tools": tools, "listeners": listeners, "upstreamError": upstream.is_error,
+                          "draftError": draft.is_error, "draftContent": [c.text for c in draft.content]}))
 asyncio.run(main())
 '''
                 result = subprocess.run(["docker", "exec", name, "/app/.venv/bin/python", "-c", inventory],
-                                        capture_output=True, text=True, check=True, timeout=60)
-                served_tool_names = set(json.loads(result.stdout))
+                                        capture_output=True, text=True, check=True, timeout=180)
+                contract = json.loads(result.stdout)
+                served_tool_names = set(contract["tools"])
                 self.assertEqual(served_tool_names, expected_tool_names)
-                self.assertEqual(len(json.loads(result.stdout)), 31)
+                self.assertEqual(len(contract["tools"]), 31)
                 self.assertNotIn("start_google_auth", served_tool_names)
+                self.assertEqual(contract["listeners"], ["0100007F:1F41"])
+                self.assertTrue(contract["upstreamError"])
+                self.assertTrue(contract["draftError"])
+                self.assertEqual(contract["draftContent"], ["Google draft send failed"])
                 tests = subprocess.run(["docker", "exec", name, "/app/.venv/bin/python",
                                         "/fixtures/tests/test_google.py", "RawTests", "-v"],
                                        capture_output=True, text=True, timeout=180)
                 self.assertEqual(tests.returncode, 0, tests.stdout + tests.stderr)
+                log_files = '''import json, os
+from pathlib import Path
+root = Path(os.environ["WORKSPACE_MCP_LOG_DIR"])
+print(json.dumps({str(p.relative_to(root)): p.read_text() for p in root.rglob("*") if p.is_file()}))
+'''
+                files = subprocess.run(["docker", "exec", name, "/app/.venv/bin/python", "-c", log_files],
+                                       capture_output=True, text=True, check=True, timeout=30)
+                logs = subprocess.run(["docker", "logs", name], capture_output=True, text=True, check=True, timeout=30)
+                contents = json.loads(files.stdout)
+                self.assertIn("mcp_server_debug.log", contents)
+                for source, content in {"docker logs": logs.stdout + logs.stderr, **contents}.items():
+                    for private in (EMAIL, CLIENT_ID, CLIENT_SECRET, REFRESH_TOKEN):
+                        self.assertNotIn(private, content, source)
             finally:
                 subprocess.run(["docker", "rm", "--force", name], capture_output=True, timeout=30)
 

@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -128,6 +129,8 @@ class BootstrapGmailTests(unittest.TestCase):
         return io.StringIO(json.dumps(result))
 
     def kubectl(self, args, **kwargs):
+        if args[0] == sys.executable:
+            return subprocess.CompletedProcess(args, int(not self.browser(kwargs["input"])))
         self.calls.append((args, kwargs))
         if "get" in args:
             if self.get_error:
@@ -238,6 +241,22 @@ class BootstrapGmailTests(unittest.TestCase):
         self.assert_failed("a local browser is required; nothing written")
         self.assertTrue(self.closed)
         self.assertEqual(self.requests, [])
+
+    def test_instance_failed_browser_never_echoes_auth_url(self):
+        launcher = Path(self.temp, "failing-browser")
+        launcher.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\nprintf "%s\\n" "$@" >&2\nexit 1\n')
+        launcher.chmod(0o700)
+        code = ("import runpy; bootstrap = runpy.run_path(" + repr(str(HUB / "tools/bootstrap-gmail.py"))
+                + "); bootstrap['_authorize_instance']('synthetic-desktop-client', 'synthetic-desktop-secret')")
+        env = {**os.environ, "BROWSER": str(launcher) + " %s", "PATH": self.temp,
+               "DISPLAY": "", "WAYLAND_DISPLAY": "", "TERM": "", "HOME": self.temp}
+        result = subprocess.Popen([sys.executable, "-c", code], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdout, stderr = result.communicate(timeout=15)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(stdout, b"")
+        self.assertEqual(stderr, b"a local browser is required; nothing written\n")
+        for private in (bootstrap.AUTH_URL, CLIENT, CLIENT_SECRET, "synthetic-desktop-secret"):
+            self.assertNotIn(private, (stdout + stderr).decode())
 
     def test_instance_requires_non_echoing_prompt(self):
         def unavailable(*args):

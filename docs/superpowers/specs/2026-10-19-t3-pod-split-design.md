@@ -223,5 +223,4 @@ These outcomes are failures even if the services work:
 ## Left to the builder
 
 - Q1: How far should the manager's CPU, memory requests and PVC shrink?
-- Q2: Which Google Workspace MCP Gmail tools are enabled? Should sending
-  and trashing mail retain the legacy `/gmail` write-tool approval limits?
+- Q2: Resolved by owner decision: all Gmail and Drive tools plus our own `gmail_send_draft`, with no approval gates.
