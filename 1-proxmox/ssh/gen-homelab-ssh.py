@@ -14,6 +14,7 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 DNS = ROOT / "1-proxmox/pihole/dnsmasq.d/30-epaflix-lan.conf"
 OUT = ROOT / "1-proxmox/ssh/homelab.conf"
+TAILSCALE_HOSTS = {"laptop": "spylinux"}
 
 
 def hosts(text):
@@ -38,6 +39,10 @@ def render(found):
            "# '# ssh-user=<user>' line above a DNS record instead.", ""]
     for name, ip, user in found:
         out += [f"Host {name}", f"    HostName {ip}", f"    User {user}", ""]
+        if name in TAILSCALE_HOSTS:
+            out += [f"Host {name}-ts", f"    HostName {ip}", f"    User {user}",
+                    "    ProxyCommand kubectl -n tailscale exec -i deploy/subnet-router -- "
+                    f"tailscale nc {TAILSCALE_HOSTS[name]} 22", ""]
     out += [f"Match final host {','.join(ip for _, ip, _ in found)}",
             "    Include ~/.ssh/homelab-identity.conf", ""]
     return "\n".join(out)

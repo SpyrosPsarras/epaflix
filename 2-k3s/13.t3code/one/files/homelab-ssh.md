@@ -5,6 +5,7 @@ To reach a homelab machine, run `ssh <name>`. You already have access; do not as
 - The names are the `Host` lines of the generated homelab SSH config (`homepc`, `laptop`, `k3s-master-51`, `truenas`, ...):
   - t3code pod: `/scripts/homelab-ssh.conf`
   - homePC and laptop: `~/Documents/Epaflix/k3s-swarm-proxmox/1-proxmox/ssh/homelab.conf`
+- Use `laptop-ts` when the laptop is away from home; it needs kubectl access that can exec in the `tailscale` namespace.
 - Check access first with `ssh <name> true`. Copy files with `scp`/`rsync` using the same names.
 - Keys come from an SSH agent backed by Vaultwarden:
   - In the isolated homelab pod, OpenSSH selects the agent through inventory-only

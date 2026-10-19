@@ -50,6 +50,5 @@ inventory host keys on the homelab home PVC and rejects a changed key. First
 contact uses trust on first use, not an independently verified host key. Do
 not delete known_hosts or weaken host-key checking to bypass a mismatch.
 
-The laptop must be on the home LAN for the cluster to reach it. When it is
-away, a connection timeout is a routing or availability result. Tailscale's
-current device-to-LAN routes do not provide a cluster-to-laptop route.
+`laptop` needs the home LAN. When away, use `laptop-ts`, which goes through
+the cluster's Tailscale router.

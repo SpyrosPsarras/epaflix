@@ -219,7 +219,7 @@ class AgentTests(unittest.TestCase):
                'PATH': binaries.name + ':' + os.environ['PATH']}
         subprocess.run(['bash', '-c', script], env=env, check=True, capture_output=True)
         env['SSH_AUTH_SOCK'] = '/run/t3-vault/ssh-agent.sock'
-        inventory = ('homepc', 'laptop', 'k3s-master-51')
+        inventory = ('homepc', 'laptop', 'laptop-ts', 'k3s-master-51')
         inventory_ip = next(line.split()[1] for line in config.splitlines() if line.strip().startswith('HostName '))
         cases = [(host, [], True) for host in inventory] + [
             (inventory_ip, [], True), ('work-host.example.com', [], False), ('203.0.113.9', [], False),
@@ -230,6 +230,16 @@ class AgentTests(unittest.TestCase):
                     result = subprocess.run(['ssh', '-G', '-F', str(directory / '.ssh/config'), *options, host],
                                             env=env, capture_output=True, text=True, check=True)
                     settings = dict(line.split(' ', 1) for line in result.stdout.splitlines())
+                    if host == 'laptop-ts':
+                        direct = subprocess.check_output(
+                            ['ssh', '-G', '-F', str(directory / '.ssh/config'), 'laptop'], env=env, text=True)
+                        direct_settings = dict(line.split(' ', 1) for line in direct.splitlines())
+                        self.assertEqual(settings['hostname'], direct_settings['hostname'])
+                        self.assertEqual(settings['user'], direct_settings['user'])
+                        self.assertEqual(settings['proxycommand'],
+                                         'kubectl -n tailscale exec -i deploy/subnet-router -- tailscale nc spylinux 22')
+                    else:
+                        self.assertNotIn('proxycommand', settings)
                     if options:
                         self.assertEqual(settings['hostname'], '203.0.113.9')
                     elif host not in inventory:
