@@ -168,6 +168,63 @@ class WorkRuntimeTests(unittest.TestCase):
         self.assertEqual(subprocess.run(['python3', str(self.home / '.config/t3-policy/guard.py'), 'git push']).returncode, 2)
         self.assertFalse((self.home / runtime.LEGACY_PERMISSION_PATH).exists())
 
+    def test_work_notion_allowlist_rotation_preserves_boundaries(self):
+        self.prepare()
+        runtime.apply(self.inputs, self.home, 'work')
+        retained = [self.inputs / name for name in ('policies.json', 'work-auth.json', 'kubeconfig', 'bundle.json')]
+        policies = json.loads((self.inputs / 'policies.json').read_text())
+        retained.extend(self.home / name for name in policies['files'] if name != runtime.LEGACY_PERMISSION_PATH)
+        for name, value in (('.t3/userdata/history-fixture', 'synthetic-work-history'),
+                            ('.azure/session-fixture', 'synthetic-enrolled-session')):
+            path = self.home / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(value)
+            retained.append(path)
+        retained_state_before = {path: path.read_bytes() for path in retained}
+        grant_digests = json.loads((self.inputs / 'runtime.json').read_text())['grantSha256']
+        services = self.inputs / 'services.json'
+        services.write_text(json.dumps({'environment': 'work', 'services': ['searxng', 'notion']}))
+        with self.assertRaises(ValueError):
+            self.validate()
+        refresh(self.inputs)
+        registrations = [self.home / name for name in ('.pi/agent/mcp.json', '.claude.json', '.claude/.claude.json')]
+        for path in registrations:
+            path.write_text(json.dumps({'mcpServers': {'drive': {'url': 'https://stale.example.test/mcp'}}}))
+        codex_path = self.home / '.codex/config.toml'
+        codex_path.write_text('[mcp_servers.drive]\nurl = "https://stale.example.test/mcp"\n')
+        work_hub_url = 'http://mcp-hub.mcp-hub-work.svc.cluster.local:8000'
+        first_apply_snapshot = None
+        for _ in range(2):
+            self.prepare()
+            runtime.apply(self.inputs, self.home, 'work')
+            self.assertFalse((self.home / '.config/t3-runtime/services.json').exists())
+            for path in registrations:
+                servers = json.loads(path.read_text())['mcpServers']
+                self.assertEqual(set(servers), {'searxng', 'notion'})
+                for name, server in servers.items():
+                    self.assertEqual(server['url'], work_hub_url + '/' + name)
+                    self.assertEqual(server['headers'], {'Authorization': 'Bearer ${MCP_HUB_TOKEN}'})
+            codex = tomllib.loads(codex_path.read_text())['mcp_servers']
+            requirements = tomllib.loads(self.requirements.read_text())['mcp_servers']
+            self.assertEqual(set(codex), {'searxng', 'notion'})
+            self.assertEqual(set(requirements), {'searxng', 'notion'})
+            for name in ('searxng', 'notion'):
+                self.assertEqual(codex[name], {'url': work_hub_url + '/' + name,
+                                             'bearer_token_env_var': 'MCP_HUB_TOKEN'})
+                self.assertEqual(requirements[name], {'identity': {'url': work_hub_url + '/' + name}})
+            for path in [*registrations, codex_path, self.requirements]:
+                for variable in ('MCP_HUB_TOKEN', 'ANTHROPIC_AUTH_TOKEN'):
+                    self.assertNotIn(os.environ[variable], path.read_text())
+            self.assertEqual({path: path.read_bytes() for path in retained}, retained_state_before)
+            self.assertEqual(json.loads((self.inputs / 'runtime.json').read_text())['grantSha256'], grant_digests)
+            snapshot = {path.relative_to(self.home): path.read_bytes()
+                        for path in self.home.rglob('*') if path.is_file()}
+            snapshot['requirements'] = self.requirements.read_bytes()
+            if first_apply_snapshot is None:
+                first_apply_snapshot = snapshot
+            else:
+                self.assertEqual(snapshot, first_apply_snapshot)
+
     def test_pi_text_generation_selections_and_options_survive_restart(self):
         self.prepare()
         path = self.home / '.t3/userdata/settings.json'
