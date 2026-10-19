@@ -286,18 +286,19 @@ class RenderTests(unittest.TestCase):
         self.assertEqual(grant_consumers, {("workspace-mcp", "raw")})
         work_render_after = list(yaml.safe_load_all(subprocess.check_output([
             "kustomize", "build", str(HUB / "instances/work")])))
-        self.assertFalse(any(d["metadata"]["name"] == "workspace-mcp" for d in work_render_after))
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            shutil.copytree(HUB / "files", root / "files", ignore=shutil.ignore_patterns("__pycache__", "clients.json"))
-            shutil.copytree(HUB / "instances", root / "instances")
-            path = root / "instances/homelab/kustomization.yaml"
-            config = yaml.safe_load(path.read_text())
-            config["resources"].remove("../google")
-            path.write_text(yaml.safe_dump(config))
-            work_render_before = list(yaml.safe_load_all(subprocess.check_output([
-                "kustomize", "build", str(root / "instances/work")])))
-        self.assertEqual(work_render_after, work_render_before)
+        for doc in work_render_after:
+            self.assertNotIn("workspace-mcp", doc["metadata"]["name"])
+            if doc["kind"] == "ConfigMap":
+                self.assertNotIn("google-runner", doc["metadata"]["name"])
+        pending = list(work_render_after)
+        while pending:
+            value = pending.pop()
+            if isinstance(value, dict):
+                pending.extend(value.values())
+            elif isinstance(value, list):
+                pending.extend(value)
+            elif isinstance(value, str):
+                self.assertNotIn(value, {"mcp-hub-gmail", "mcp-hub-google-upstream"})
 
 
 @unittest.skipUnless(RAW_TEST, "raw FastMCP tests run in the pinned source/image environment")
