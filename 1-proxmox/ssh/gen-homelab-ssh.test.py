@@ -21,6 +21,13 @@ assert gen.hosts(dns) == [("k3s-master-51", "192.168.10.51", "ubuntu"), ("homepc
 out = gen.render(gen.hosts(dns))
 assert "Host k3s-master-51\n    HostName 192.168.10.51\n    User ubuntu\n" in out
 assert out.endswith("Match final host 192.168.10.51,192.168.10.177\n    Include ~/.ssh/homelab-identity.conf\n")
+assert "Host laptop-ts\n" not in out
+laptop_dns = dns + "# ssh-user=traveler\naddress=/laptop.epaflix.lan/192.168.10.88\n"
+out = gen.render(gen.hosts(laptop_dns))
+assert ("Host laptop\n    HostName 192.168.10.88\n    User traveler\n\n"
+        "Host laptop-ts\n    HostName 192.168.10.88\n    User traveler\n"
+        "    ProxyCommand kubectl -n tailscale exec -i deploy/subnet-router -- tailscale nc spylinux 22\n\n") in out
+assert out.endswith("Match final host 192.168.10.51,192.168.10.177,192.168.10.88\n    Include ~/.ssh/homelab-identity.conf\n")
 try:
     gen.hosts(dns + "# ssh-user=x\naddress=/homepc.epaflix.lan/192.168.10.2\n")
     raise AssertionError("duplicate accepted")
