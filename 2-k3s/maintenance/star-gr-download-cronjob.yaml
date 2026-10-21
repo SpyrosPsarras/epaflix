@@ -5,7 +5,7 @@
 #
 # The star.gr player hides the video outside GR/CY, but that check is only a
 # cookie in the browser. The HLS stream itself plays from any country, so the
-# job reads the stream URL from each episode page and copies it with ffmpeg
+# job gets the stream URL from each episode page and copies it with ffmpeg
 # (no re-encode, highest variant, 1080p at the time of writing).
 #
 # The job asks Sonarr which episode aired on each date and names the file
@@ -88,7 +88,12 @@ data:
 
     def stream_url(html):
         m = re.search(r'https?://[^"\s]+\.m3u8\?key=[^"\s]+', html)
-        return m.group(0) if m else None
+        if m:
+            return m.group(0)
+        if re.search(r'"LivestreamModeStr"\s*:\s*"Kaltura"', html):
+            return None
+        m = re.search(r'"VideoID"\s*:\s*"([^"\s]+)"', html)
+        return "https://deliver2.siliconweb.com/kwik/star.m3u8?key=" + m.group(1) if m else None
 
 
     def air_date(html):
@@ -119,6 +124,9 @@ data:
         assert air_date(ep) == "2026-10-01"
         assert air_date('"PlayerTitle":"24.9.2026 - First Dates"') == "2026-09-24"
         assert stream_url(ep) == "https://a.b/k/s.m3u8?key=Ab_1"
+        custom = '"LivestreamModeStr":"Custom","VideoID":"n0z3nOXvwtbeJgkkq9l14A"'
+        assert stream_url(custom) == "https://deliver2.siliconweb.com/kwik/star.m3u8?key=n0z3nOXvwtbeJgkkq9l14A"
+        assert stream_url('"LivestreamModeStr":"Kaltura","VideoID":"Ab_1"') is None
         assert air_date("no title") is None and stream_url("none") is None
         eps = episodes_by_date([
             {"seasonNumber": 9, "episodeNumber": 4, "airDate": "2026-09-29"},
