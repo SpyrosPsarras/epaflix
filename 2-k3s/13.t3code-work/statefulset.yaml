@@ -74,7 +74,7 @@ spec:
               mountPath: /run/t3-vault
       containers:
         - name: t3
-          image: ghcr.io/spyrospsarras/t3-runtime:work-inputs-a5e96e96288fb866cadca8c0d304575f
+          image: ghcr.io/spyrospsarras/t3-runtime:work-inputs-00f37f2e898506f1005d9cc8c9786301
           imagePullPolicy: IfNotPresent
           command: [bash, /scripts/entrypoint.sh]
           env:
