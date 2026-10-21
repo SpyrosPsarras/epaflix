@@ -198,10 +198,9 @@ extended. The homelab pod generates Pi, Claude and Codex config, not OpenCode.
    shared base or work. Runtime input changes separately need
    `t3code.epaflix.com/inputs-grants-revision` through the
    [runtime input rotation procedure](../../13.t3code/env/isolated-runtime.md#input-rotation).
-   The backend starts with revision `r1` and may merge before its Secrets
-   are staged. It stays not-ready with `CreateContainerConfigError` until
-   they exist, without affecting the hub or searxng. Hub and runtime
-   revisions stay unchanged here. Stage the private inventory, runtime
+   The backend may merge before its Secrets are staged. Until they exist,
+   it stays not-ready with `CreateContainerConfigError`, without affecting
+   the hub or searxng. Stage the private inventory, runtime
    allowlist and matching inputs before their own revision commit merges
    and enables `gmail`/`drive`. Do not resume stopped consumers before
    verification.
