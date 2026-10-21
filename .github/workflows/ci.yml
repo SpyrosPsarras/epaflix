@@ -295,6 +295,7 @@ jobs:
             2-k3s/12.renovate
             2-k3s/13.t3code-homelab
             2-k3s/13.t3code-homelab/rbac
+            2-k3s/13.t3code/manager-access
             2-k3s/13.t3code-work
             2-k3s/23.mcp-hub/instances/homelab
             2-k3s/23.mcp-hub/instances/work
@@ -337,6 +338,7 @@ jobs:
           python3 2-k3s/13.t3code/env/tools/homelab-ssh.test.py -v
           python3 2-k3s/13.t3code/env/tools/work-ssh.test.py -v
           python3 2-k3s/13.t3code-homelab/tools/rbac.test.py -v
+          python3 2-k3s/13.t3code/one/tools/manager-rbac.test.py -v
           python3 2-k3s/13.t3code-homelab/tools/github-scope.test.py -v
           python3 2-k3s/13.t3code-work/tools/provision.test.py -v
           python3 2-k3s/13.t3code/env/tools/startup.test.py -v

@@ -33,6 +33,7 @@ resources:
   - app-t3code.yaml
   - app-t3code-homelab.yaml
   - app-t3code-homelab-access.yaml
+  - app-t3code-manager-access.yaml
   - app-t3code-work.yaml
   - app-traefik.yaml
   - app-vaultwarden.yaml
