@@ -287,7 +287,8 @@ Secrets.
 
 The work hub inventory is `searxng` and `notion`. The owner adds Notion with
 fresh work-account consent through
-`2-k3s/23.mcp-hub/tools/bootstrap-notion.py --instance work`, then stages the
+`2-k3s/23.mcp-hub/tools/bootstrap-notion.py --instance work --context <approved-context>`,
+then stages the
 matching hub inventory and runtime allowlist. The work hub's
 `mcp-hub.epaflix.com/inputs-revision` and this StatefulSet's
 `t3code.epaflix.com/inputs-grants-revision` counters roll the change out.
