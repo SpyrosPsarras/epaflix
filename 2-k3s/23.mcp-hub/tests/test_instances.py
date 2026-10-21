@@ -581,7 +581,7 @@ class RenderTests(unittest.TestCase):
             self.assertEqual(secret["metadata"]["namespace"], "mcp-hub-homelab")
             work = render(root / "instances/work")
             work_hub = next(doc for doc in work if doc["kind"] == "Deployment" and doc["metadata"]["name"] == "mcp-hub")
-            self.assertEqual(work_hub["spec"]["template"]["metadata"]["annotations"][annotation], "r2")
+            self.assertEqual(work_hub["spec"]["template"]["metadata"]["annotations"][annotation], "r3")
 
             credentials = json.loads((overlay / "credentials.json").read_text())
             credentials["upstreams"]["searxng"]["token"] = "synthetic-rotated-upstream"
@@ -624,13 +624,13 @@ class RenderTests(unittest.TestCase):
             self.assertNotEqual(rotated_work_secret["data"], original_work_secret["data"])
             self.assertEqual(rotated_work_template, original_work_template)
             path = root / "instances/work/kustomization.yaml"
-            path.write_text(path.read_text().replace('"r2"', '"synthetic-r3"'))
+            path.write_text(path.read_text().replace('"r3"', '"synthetic-r4"'))
             revised_work = render(work_overlay)
             revised_work_template = next(doc for doc in revised_work if doc["kind"] == "Deployment"
                                          and doc["metadata"]["name"] == "mcp-hub")["spec"]["template"]
             self.assertNotEqual(revised_work_template, original_work_template)
-            self.assertEqual(revised_work_template["metadata"]["annotations"][annotation], "synthetic-r3")
-            revised_work_template["metadata"]["annotations"][annotation] = "r2"
+            self.assertEqual(revised_work_template["metadata"]["annotations"][annotation], "synthetic-r4")
+            revised_work_template["metadata"]["annotations"][annotation] = "r3"
             self.assertEqual(revised_work, rotated_work)
             self.assertEqual(render(root / "instances/searxng"), original_search)
             self.assertEqual(render(overlay), original_homelab)

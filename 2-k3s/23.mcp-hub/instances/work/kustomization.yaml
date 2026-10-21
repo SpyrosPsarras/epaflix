@@ -44,4 +44,4 @@ patches:
         template:
           metadata:
             annotations:
-              mcp-hub.epaflix.com/inputs-revision: "r2"
+              mcp-hub.epaflix.com/inputs-revision: "r3"
