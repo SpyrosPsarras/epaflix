@@ -62,7 +62,7 @@ class SearchTests(unittest.TestCase):
                                  {"name": "mcp-hub-searxng", "key": "token"})
                 self.assertEqual(template["metadata"]["annotations"]["mcp-hub.epaflix.com/inputs-revision"], "r1")
                 self.assertEqual(deployments["mcp-hub"]["spec"]["template"]["metadata"]["annotations"][
-                    "mcp-hub.epaflix.com/inputs-revision"], "r3" if environment == "homelab" else "r2")
+                    "mcp-hub.epaflix.com/inputs-revision"], "r3")
                 selector = search_deployment["spec"]["selector"]["matchLabels"]
                 self.assertEqual(selector, {"app": "work-searxng-mcp" if environment == "work" else "searxng-mcp"})
                 self.assertEqual(template["metadata"]["labels"], selector)

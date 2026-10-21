@@ -6,7 +6,10 @@ ServiceAccounts, client grants and upstream credentials. The legacy hub
 remains available with its existing clients and routes. No consumer is
 switched by this change.
 
-The current approved homelab and work inventories are `searxng` only.
+The current approved homelab inventory is `searxng` only. The work inventory
+is `searxng` and `notion`. The owner stages Notion with fresh work-account
+consent through `bootstrap-notion.py --instance work`; the work hub and runtime
+counters roll it out.
 The proposed homelab Gmail and Drive inventory below is pending owner rollout.
 Both include the shared authenticated backend in `searxng/`, with an independent upstream
 Secret in each namespace. Provisioning, the dedicated work client and owner enrollment
