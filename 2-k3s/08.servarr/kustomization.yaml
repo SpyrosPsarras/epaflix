@@ -112,7 +112,7 @@ images:
   - name: iampuid0/neutarr
     newTag: 1.11.1@sha256:c3df05a854c93aac640708e002e8fe85193f73da8406c8a230a5484a342a1107
   - name: qbittorrentofficial/qbittorrent-nox
-    newTag: 5.2.4-1@sha256:92bfd78d731e254ba64f62b77b0696add6447a33642ee5feda106a26b285aa7f
+    newTag: 5.3.0-2@sha256:43b2d352cf76330a7ca34c7320b9b74227d6f31e662e0e123d0457206b09a7ea
   - name: ghcr.io/spyrospsarras/airvpn-bluetit
     digest: sha256:f058ad66716923332981035636f2ebbffc48eca097acb8cb88a6b422341cab41
   - name: ghcr.io/spyrospsarras/vpn-picker
