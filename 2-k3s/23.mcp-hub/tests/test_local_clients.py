@@ -41,7 +41,7 @@ class IngressTests(unittest.TestCase):
             self.assertNotIn("Ingress", [doc["kind"] for doc in documents])
             deployment = next(doc for doc in documents if doc["kind"] == "Deployment" and doc["metadata"]["name"] == "mcp-hub")
             annotations = deployment["spec"]["template"]["metadata"]["annotations"]
-            self.assertEqual(annotations["mcp-hub.epaflix.com/inputs-revision"], "r3")
+            self.assertEqual(annotations["mcp-hub.epaflix.com/inputs-revision"], "r4" if environment == "homelab" else "r3")
             self.assertNotIn("mcp-hub.epaflix.com/local-clients-revision", annotations)
             dns = ROOT / "1-proxmox/pihole"
             self.assertIn("address=/" + host + "/192.168.10.102", (dns / "dnsmasq.d/10-epaflix.conf").read_text())
