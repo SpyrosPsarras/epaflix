@@ -224,7 +224,7 @@ class RenderTests(unittest.TestCase):
             "kustomize", "build", str(HUB / "instances/homelab")])))
         self.assertTrue(any(d["kind"] == "Deployment" and d["metadata"]["name"] == "workspace-mcp" for d in docs))
         deployment = next(d for d in docs if d["kind"] == "Deployment" and d["metadata"]["name"] == "workspace-mcp")
-        self.assertEqual(deployment["spec"]["template"]["metadata"]["annotations"]["mcp-hub.epaflix.com/inputs-revision"], "r1")
+        self.assertEqual(deployment["spec"]["template"]["metadata"]["annotations"]["mcp-hub.epaflix.com/inputs-revision"], "r2")
         self.assertEqual(deployment["spec"]["replicas"], 1)
         self.assertEqual(deployment["spec"]["strategy"]["type"], "Recreate")
         pod = deployment["spec"]["template"]["spec"]

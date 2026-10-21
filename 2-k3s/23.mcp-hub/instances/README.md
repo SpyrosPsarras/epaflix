@@ -6,12 +6,13 @@ ServiceAccounts, client grants and upstream credentials. The legacy hub
 remains available with its existing clients and routes. No consumer is
 switched by this change.
 
-The current approved homelab inventory is `searxng` only. The work inventory
-is `searxng` and `notion`. The owner stages Notion with fresh work-account
-consent through `bootstrap-notion.py --instance work --context <approved-context>`;
+The active approved homelab inventory is `searxng`, `gmail` and `drive`.
+The owner stages Gmail and Drive with fresh consent through
+`bootstrap-gmail.py --instance homelab --context <approved-context>`.
+The work inventory is `searxng` and `notion`. The owner stages Notion with
+fresh work-account consent through `bootstrap-notion.py --instance work --context <approved-context>`;
 the work hub and runtime
 counters roll it out.
-The proposed homelab Gmail and Drive inventory below is pending owner rollout.
 Both include the shared authenticated backend in `searxng/`, with an independent upstream
 Secret in each namespace. Provisioning, the dedicated work client and owner enrollment
 are documented in [the work backend](../../13.t3code-work/README.md#first-deployment-for-1837).
@@ -88,14 +89,15 @@ be printed or committed. The other new hub rejects the prefix, and the
 legacy hub reserves both prefixes and rejects them even if their digest
 was accidentally registered there. Existing legacy tokens keep working.
 
-## Homelab Gmail and Drive, pending owner rollout
+## Homelab Gmail and Drive
 
-The proposed private inventory is
+The active private inventory is
 `{"environment":"homelab","services":["searxng","gmail","drive"]}`
-in both hub and runtime. It remains pending until owner-run staging,
-verification and revision selection succeed. Work stays
-`{"environment":"work","services":["searxng"]}`. Preserve the existing
-searxng connection, all ordinary client digests and the homelab/work boundary.
+in both hub and runtime, staged by the owner with fresh consent through
+`bootstrap-gmail.py --instance homelab --context <approved-context>`.
+Work stays `{"environment":"work","services":["searxng","notion"]}`.
+Preserve the existing searxng connection, all ordinary client digests and
+the homelab/work boundary.
 
 Only homelab includes `../google`. Both added connections use
 `http://workspace-mcp.mcp-hub-homelab.svc.cluster.local:8000/mcp` and the same

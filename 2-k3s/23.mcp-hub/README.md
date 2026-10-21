@@ -44,18 +44,16 @@ Upstream failures (unreachable, credential rejected, Notion grant expired)
 come back as a JSON-RPC error carrying the reason, never as the upstream's
 own 401, so clients do not start an OAuth flow against the hub.
 
-## Homelab Gmail and Drive, pending owner rollout
+## Homelab Gmail and Drive
 
 The path table and setup sections describe the unchanged legacy hub. Homelab
 adds the pinned Workspace complete tier and our `gmail_send_draft` extension
-behind an authenticated gateway, using a fresh owner grant. Work and existing
-searxng connections stay unchanged. The backend can merge before Secret
-staging and remains not-ready with `CreateContainerConfigError` until its
-Secrets exist; this does not affect the hub or searxng. Stage the private hub
-inventory and runtime allowlist changes before merging their own revision
-bumps that enable `gmail` and `drive`.
+behind an authenticated gateway. The active homelab inventory is `searxng`,
+`gmail` and `drive`, staged by the owner with fresh consent through
+`bootstrap-gmail.py --instance homelab --context <approved-context>`.
+Work and existing searxng connections stay unchanged.
 
-See [Homelab Gmail and Drive](instances/README.md#homelab-gmail-and-drive-pending-owner-rollout)
+See [Homelab Gmail and Drive](instances/README.md#homelab-gmail-and-drive)
 for the full tool and scope inventory, gateway boundary, approval policy,
 owner enrollment and stopped rollout procedure. Keep account identifiers,
 credentials, Google content and private evidence outside this public repo.
