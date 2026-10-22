@@ -23,7 +23,10 @@ assert pod["containers"][0]["image"].split(":")[-1].startswith("inputs-")
 assert all(container["image"] == pod["containers"][0]["image"] for container in pod["containers"] + pod["initContainers"])
 assert next(entry["value"] for entry in pod["containers"][0]["env"] if entry["name"] == "HOME") == "/home/spyros"
 secrets = {volume["secret"]["secretName"] for volume in pod["volumes"] if "secret" in volume}
-assert secrets == {"t3code-private-config", "t3code-github-ssh", "t3code-vaultwarden"}
+assert secrets == {"t3code-private-config", "manager-kubeconfig"}
+for container in pod["containers"]:
+    mount = next(m for m in container["volumeMounts"] if m["name"] == "manager-kubeconfig")
+    assert mount["readOnly"] and mount["mountPath"] == "/run/t3-manager"
 assert not secrets.intersection({"t3-runtime-inputs", "t3-runtime-grants"})
 assert sts["spec"]["persistentVolumeClaimRetentionPolicy"] == {"whenDeleted": "Retain", "whenScaled": "Retain"}
 for job in (next(d for d in docs if d["kind"] == "Job")["spec"]["template"]["spec"], rollout):
@@ -47,7 +50,3 @@ sed -i 's/synthetic-v1/synthetic-v2/' "$tmp/k/synthetic-private.yaml"
 after=$(kustomize build "$tmp/k" | python3 -c 'import yaml,sys;print(next(d for d in yaml.safe_load_all(sys.stdin) if d["kind"]=="StatefulSet")["spec"]["template"]["metadata"]["annotations"])')
 [[ $before != "$after" ]]
 echo 'ok: private configuration updates trigger rollout'
-sed -i 's/hub-v1/hub-v2/' "$tmp/k/synthetic-private.yaml"
-rotated=$(kustomize build "$tmp/k" | python3 -c 'import yaml,sys;print(next(d for d in yaml.safe_load_all(sys.stdin) if d["kind"]=="StatefulSet")["spec"]["template"]["metadata"]["annotations"])')
-[[ $rotated != "$after" && $rotated == *hub-v2* ]]
-echo 'ok: MCP hub token rotation triggers rollout'

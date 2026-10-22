@@ -339,6 +339,8 @@ jobs:
           python3 2-k3s/13.t3code/env/tools/work-ssh.test.py -v
           python3 2-k3s/13.t3code-homelab/tools/rbac.test.py -v
           python3 2-k3s/13.t3code/one/tools/manager-rbac.test.py -v
+          python3 2-k3s/13.t3code/one/tools/manager-kubeconfig.test.py -v
+          python3 2-k3s/13.t3code/one/tools/manager-runtime.test.py -v
           python3 2-k3s/13.t3code-homelab/tools/github-scope.test.py -v
           python3 2-k3s/13.t3code-work/tools/provision.test.py -v
           python3 2-k3s/13.t3code/env/tools/startup.test.py -v
