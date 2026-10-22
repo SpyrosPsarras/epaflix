@@ -82,7 +82,9 @@ class SetupTests(unittest.TestCase):
         self.write('http://proxy.test///')
         path = self.agent / 'models.json'
         self.assertTrue(path.exists(), 'Text generation provider is missing')
-        self.assertEqual(json.loads(path.read_text()), {'providers': {'cliproxy-textgen': {
+        self.assertEqual(json.loads(path.read_text()), {'providers': {
+            'cliproxy': {'modelOverrides': {'claude/claude-haiku-5-5': {'contextWindow': 100000}}},
+            'cliproxy-textgen': {
             'baseUrl': 'http://proxy.test', 'api': 'anthropic-messages',
             'apiKey': '$CLIPROXYAPI_API_KEY', 'models': [{
                 'id': 'claude/claude-haiku-5-5', 'name': 'Claude Haiku 5.5 (text generation)',
@@ -99,9 +101,24 @@ class SetupTests(unittest.TestCase):
         self.write()
         data = json.loads(path.read_text())
         self.assertEqual(data['userKey'], ['keep'])
-        self.assertEqual(set(data['providers']), {'other', 'cliproxy-textgen'})
+        self.assertEqual(set(data['providers']), {'other', 'cliproxy', 'cliproxy-textgen'})
         self.assertEqual(data['providers']['other'], other)
         self.assertEqual(data['providers']['cliproxy-textgen']['models'][0]['id'], 'claude/claude-haiku-5-5')
+        before = path.read_bytes()
+        self.write()
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_haiku_override_preserves_other_cliproxy_settings(self):
+        path = self.agent / 'models.json'
+        path.write_text(json.dumps({'providers': {'cliproxy': {
+            'baseUrl': 'http://custom.test', 'userKey': ['keep'], 'modelOverrides': {
+                'claude/claude-opus-5-5': {'contextWindow': 512000},
+                'claude/claude-haiku-5-5': {'contextWindow': 1000000}}}}}))
+        self.write()
+        self.assertEqual(json.loads(path.read_text())['providers']['cliproxy'], {
+            'baseUrl': 'http://custom.test', 'userKey': ['keep'], 'modelOverrides': {
+                'claude/claude-opus-5-5': {'contextWindow': 512000},
+                'claude/claude-haiku-5-5': {'contextWindow': 100000}}})
         before = path.read_bytes()
         self.write()
         self.assertEqual(path.read_bytes(), before)
