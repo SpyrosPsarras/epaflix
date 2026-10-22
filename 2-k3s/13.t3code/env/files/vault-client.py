@@ -191,8 +191,14 @@ def matches_fields(actual, expected):
     return actual == expected
 
 
-def selected_item(item_id, name=None):
+def synced_scope():
     organization, collection = scope()
+    fetch('/sync', method='POST', timeout=VAULT_OPERATION_TIMEOUT_SECONDS)
+    return organization, collection
+
+
+def selected_item(item_id, name=None):
+    organization, collection = synced_scope()
     if not item_id:
         items = fetch('/list/object/items?' + urlencode({'search': name, 'organizationid': organization,
                                                        'collectionid': collection}))['data']
@@ -212,7 +218,7 @@ def list_items(argv):
     parser = Parser(description='List metadata for items in this pod\'s vault scope.')
     parser.add_argument('filter', nargs='?', default='')
     args = parser.parse_args(argv)
-    organization, collection = scope()
+    organization, collection = synced_scope()
     items = fetch('/list/object/items?' + urlencode({'organizationid': organization,
                                                    'collectionid': collection}))['data']
     metadata = []

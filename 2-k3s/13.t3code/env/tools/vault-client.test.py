@@ -52,6 +52,8 @@ class VaultTests(unittest.TestCase):
         self.extra_items = []
         self.paths = []
         self.writes = []
+        self.syncs = []
+        self.sync_failure = False
         self.upload_error = False
         self.corrupt_upload = False
         self.bad_upload_response = False
@@ -166,6 +168,10 @@ class VaultTests(unittest.TestCase):
 
             def do_POST(self):
                 body = self.rfile.read(int(self.headers['Content-Length']))
+                if self.path == '/sync':
+                    test.syncs.append(len(test.paths))
+                    self.reply(status=500 if test.sync_failure else 200)
+                    return
                 test.writes.append(('POST', self.path, body))
                 if self.path == '/sync?force=true':
                     test.list_override = None
@@ -373,6 +379,22 @@ class VaultTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(Path(record.read_text()).parent.exists())
         self.assert_quiet(result)
+
+    def test_run_and_list_sync_the_local_cache_before_reading(self):
+        self.item['type'] = 1
+        result = self.command(['--name', 'synthetic-item', '--password-env', 'VAULT_PASSWORD'], 'pass')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.syncs, [0])
+        result = subprocess.run(self.prefix + ['list'], env=self.env, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.syncs, [0, len(self.paths) - 1])
+        self.sync_failure = True
+        self.paths.clear()
+        for argv in (['run', '--name', 'synthetic-item', '--password-env', 'VAULT_PASSWORD', '--', 'true'], ['list']):
+            result = subprocess.run(self.prefix + argv, env=self.env, capture_output=True)
+            self.assertEqual(result.returncode, 1)
+            self.assert_quiet(result)
+        self.assertEqual(self.paths, [])
 
     def test_name_selection_rechecks_item_instead_of_using_stale_decrypted_list(self):
         self.list_override = copy.deepcopy(self.item)
