@@ -10,7 +10,7 @@ if [[ ! -d $PROJECT_DIR/.git ]]; then
   git clone -q "$T3_PROJECT_REPO" "$PROJECT_DIR"
 fi
 
-python3 /scripts/manager-setup.py "$HOME" "$PROJECT_DIR" /scripts/manager-guidance.md
+python3 /scripts/manager-setup.py "$HOME" "$PROJECT_DIR" /scripts/manager-guidance.md /private-agent-config/bundle.json
 bash /scripts/ssh-config.sh
 python3 /scripts/ssh-policy.py "$HOME/.cc-safety-net/policy.json" \
   "$HOME" "$(getent passwd "$(id -u)" | cut -d: -f6)" /root

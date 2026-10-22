@@ -300,16 +300,19 @@ path.write_text(text)
             binary.write_text('#!/bin/sh\nprintf "%s\\n" "' + name + ' $*" >>"$CALL_LOG"\n')
             binary.chmod(0o700)
         python = shim / 'python3'
-        python.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >>"$CALL_LOG"\ncase "$*" in *check-packages*) exit 0;; esac\nexec ' + sys.executable + ' "$@"\n')
+        python.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >>"$CALL_LOG"\ncase "$*" in *check-packages*) exit 0;; *manager-setup.py*) [ "$5" = "$MANAGER_TEST_BUNDLE" ] || exit 99;; esac\nexec ' + sys.executable + ' "$@"\n')
         python.chmod(0o700)
         (scripts / 'ssh-config.sh').write_text('#!/bin/sh\nexit 0\n')
         env = {**os.environ, 'HOME': str(self.home), 'T3_PROJECT_DIR': str(self.project),
-               'PATH': str(shim) + ':/usr/bin:/bin', 'CALL_LOG': str(log), 'ANTHROPIC_BASE_URL': ''}
+               'PATH': str(shim) + ':/usr/bin:/bin', 'CALL_LOG': str(log), 'ANTHROPIC_BASE_URL': '', 'MANAGER_TEST_BUNDLE': str(self.bundle)}
         startup = script.read_text().replace('export PATH=/tools/node_modules/.bin:$PATH', 'export PATH="$PATH"')
         script.write_text(startup)
         result = real_run(['bash', str(script)], env=env, capture_output=True, text=True)
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         calls = log.read_text().splitlines()
+        manager_calls = [call for call in calls if 'manager-setup.py' in call]
+        self.assertEqual(manager_calls, [f'{scripts / "manager-setup.py"} {self.home} {self.project} {scripts / "manager-guidance.md"} {self.bundle}'])
+        self.assertFalse(any('/private-agent-config' in call for call in manager_calls))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue(any('ssh-policy.py' in call for call in calls))
         for forbidden in ('hub_clients.py', 'git-credential-github', 'vault-ssh-agent', 'vault-run'):
             self.assertFalse(any(forbidden in call for call in calls))
