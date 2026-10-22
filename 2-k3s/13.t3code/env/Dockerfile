@@ -22,7 +22,7 @@ COPY versions.env env/tools/install-cluster-tools.sh /tmp/cluster-tools/
 RUN bash /tmp/cluster-tools/install-cluster-tools.sh
 COPY env/tools/package.json env/tools/package-lock.json /tools/
 # npm 11 drops T3's bundled native package on glibc; npm 10 installs it correctly.
-RUN cd /tools && npx --yes npm@10.9.4 ci --no-fund --no-audit \
+RUN cd /tools && npx --no-audit --yes npm@10.9.4 ci --no-fund --no-audit \
     && npm cache clean --force
 COPY one/files/cc-safety-net-install.py one/files/cc-safety-net.patch one/files/cc-safety-net-hashes.json /tmp/safety-net-build/
 RUN /usr/bin/python3 -I -S /tmp/safety-net-build/cc-safety-net-install.py --image-build \
