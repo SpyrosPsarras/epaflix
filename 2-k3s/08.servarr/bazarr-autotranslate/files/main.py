@@ -1,35 +1,20 @@
-"""Bazarr -> Lingarr glue with search-first policy.
+"""Bazarr -> Lingarr glue with serial, shortest-first translation.
 
-Rewrite of zelak312/bazarr_autotranslate main.py. Per scan cycle, for every
-wanted item missing a target language that already has a base-language
-subtitle:
-
-  1. Ask Bazarr's providers for the missing language
-     (PATCH /api/{movies,episodes}/subtitles -> full provider search, best
-     result scored and downloaded by Bazarr itself).
-  2. Only after SEARCH_ROUNDS_BEFORE_TRANSLATE search rounds came back with
-     no subtitle, queue a Lingarr translation of the base-language subtitle.
-  3. A search whose request fails is not counted, so provider/API errors
-     never shortcut the policy: the item is re-searched next scan.
-  4. Once a translation is queued the item is left alone for
-     TRANSLATE_GRACE_HOURS; if it is still wanted after that (Lingarr
-     failed or dropped it), the search rounds restart from zero.
-  5. Search rounds are spaced ROUND_SPACING_HOURS apart: a search request
-     is only enqueued into Bazarr's job queue, so spacing gives the queue
-     time to execute it before the next round counts.
-
-Bazarr's own scheduled wanted search (every 6h) keeps running underneath;
-the rounds here are extra on top of it.
+New items get SEARCH_ROUNDS_BEFORE_TRANSLATE provider search rounds spaced
+ROUND_SPACING_HOURS apart. Failed search requests do not count. Ready items
+translate one at a time, smallest source subtitle first, while the worker
+waits for Bazarr's translation jobs to end. Still-wanted items retry after
+TRANSLATE_GRACE_HOURS from attempt end without new search rounds. A failed
+attempt pauses all sends for FAILURE_PAUSE_MINUTES.
+Bazarr's own six-hourly wanted search keeps running.
 """
 
 import asyncio
 import json
 import logging
 import os
-import queue
 import signal
 import sys
-import threading
 import time
 from logging.handlers import TimedRotatingFileHandler
 from typing import List
@@ -37,22 +22,12 @@ from typing import List
 import httpx
 from dotenv import load_dotenv
 
-from class_types import Movie, Serie, SubtitleTranslate
-from unique_queue import UniqueQueue
+from class_types import Movie, Serie
 
 
 def get_env_or_default(env, default):
     val = os.getenv(env)
     return val if val is not None else default
-
-
-def get_attr_or_key(obj, name):
-    if hasattr(obj, name):
-        return getattr(obj, name)
-    elif isinstance(obj, dict) and name in obj:
-        return obj[name]
-    else:
-        raise AttributeError(f"Missing attribute or key '{name}'")
 
 
 def env_flag(env, default):
@@ -65,12 +40,13 @@ api_key = os.getenv("BAZARR_API_KEY")
 base_languages = [lang.strip() for lang in os.getenv("BASE_LANGUAGES", "").split(",") if lang.strip()]
 to_languages = [lang.strip() for lang in os.getenv("TO_LANGUAGES", "").split(",") if lang.strip()]
 
-translation_request_timeout = float(get_env_or_default("TRANSLATION_REQUEST_TIMEOUT", 15 * 60))
+JOB_POLL_SECONDS = 30
+translation_job_timeout_seconds = float(get_env_or_default("TRANSLATION_JOB_TIMEOUT_HOURS", 4)) * 3600
+failure_pause_seconds = float(get_env_or_default("FAILURE_PAUSE_MINUTES", 60)) * 60
 http_timeout = httpx.Timeout(float(get_env_or_default("REQUEST_TIMEOUT", 300)))
 search_rounds = int(get_env_or_default("SEARCH_ROUNDS_BEFORE_TRANSLATE", 3))
 round_spacing_seconds = float(get_env_or_default("ROUND_SPACING_HOURS", 8)) * 3600
-translate_grace_seconds = float(get_env_or_default("TRANSLATE_GRACE_HOURS", 216)) * 3600
-num_workers = int(get_env_or_default("NUM_WORKERS", 1))
+translate_grace_seconds = float(get_env_or_default("TRANSLATE_GRACE_HOURS", 24)) * 3600
 interval_between_scans = int(get_env_or_default("INTERVAL_BETWEEN_SCANS", 5 * 60))
 log_level = get_env_or_default("LOG_LEVEL", "INFO")
 log_directory = get_env_or_default("LOG_DIRECTORY", "logs/")
@@ -79,7 +55,6 @@ movies_scan = env_flag("MOVIES_SCAN", True)
 state_path = os.path.join(log_directory, "state.json")
 
 logger = logging.getLogger("bazarr_lingarr")
-task_queue = UniqueQueue(key_fn=lambda x: f" {'s' if get_attr_or_key(x, 'is_serie') else 'm'} {get_attr_or_key(x, 'video_id')}_{get_attr_or_key(x, 'to_language')}")
 shutdown_event = asyncio.Event()
 
 
@@ -113,6 +88,9 @@ def save_state(state):
     with open(tmp, "w") as f:
         json.dump(state, f)
     os.replace(tmp, state_path)
+
+
+state = load_state()
 
 
 async def get_wanted_episodes(base_url, api_key, start: int = 0, length: int = -1):
@@ -232,8 +210,7 @@ async def request_search(client: httpx.AsyncClient, item: Candidate) -> bool:
 
 
 async def process(client: httpx.AsyncClient, videos: List, kind: str):
-    is_serie = isinstance(videos[0], Serie)
-    state = load_state()
+    is_serie = kind == "episodes"
 
     kind_prefix = "s" if is_serie else "m"
     wanted_keys = set()
@@ -245,24 +222,21 @@ async def process(client: httpx.AsyncClient, videos: List, kind: str):
     for key in [k for k in state if k.startswith(kind_prefix) and k not in wanted_keys]:
         state.pop(key)
 
-    candidates = await find_translatable(base_url, api_key, videos)
+    candidates = await find_translatable(base_url, api_key, videos) if videos else []
     now = time.time()
-    searched = translated = 0
+    searched = 0
 
     for cand in candidates:
         key = item_key(cand.is_serie, cand.video_id, cand.to_language)
-        # ts=0 for fresh items so the first search fires immediately; later searches
-        # are spaced out because a PATCH only enqueues the search - Bazarr's job
-        # queue executes it later, and a round must not count before that happened
         entry = state.get(key) or {"phase": "search", "rounds": 0, "ts": 0}
 
         if entry["phase"] == "translate":
             if now - entry["ts"] < translate_grace_seconds:
                 continue
-            logger.info(f"[translate] {kind} id {cand.video_id} still wanted after grace period, restarting search rounds")
-            entry = {"phase": "search", "rounds": 0, "ts": 0}
+            logger.info(f"[translate] {kind} id {cand.video_id} still wanted after grace period, ready for translation")
+            entry = {"phase": "ready", "rounds": entry["rounds"], "ts": now}
 
-        if entry["rounds"] < search_rounds:
+        if entry["phase"] == "search" and entry["rounds"] < search_rounds:
             if now - entry["ts"] < round_spacing_seconds:
                 continue
             if await request_search(client, cand):
@@ -273,23 +247,31 @@ async def process(client: httpx.AsyncClient, videos: List, kind: str):
             else:
                 logger.info(f"[search] {kind} id {cand.video_id} not counted, will re-search next scan")
         else:
-            task_queue.put(cand)
-            entry["phase"] = "translate"
-            entry["ts"] = now
-            translated += 1
-            logger.info(f"[translate] {kind} id {cand.video_id}: {search_rounds} search rounds found nothing, queueing translation of '{cand.base_subtitle.path}'")
+            entry = {
+                "phase": "ready", "rounds": entry["rounds"], "ts": now,
+                "size": cand.base_subtitle.file_size,
+                "job": {
+                    "language": cand.to_language,
+                    "path": cand.base_subtitle.path,
+                    "type": "episode" if cand.is_serie else "movie",
+                    "id": cand.video_id,
+                    "forced": cand.base_subtitle.forced,
+                    "hi": cand.base_subtitle.hi,
+                    "original_format": True,
+                },
+            }
 
         state[key] = entry
 
     save_state(state)
-    logger.info(f"[{kind}] search requests: {searched}, queued for translation: {translated}")
+    ready_count = sum(entry["phase"] == "ready" for entry in state.values())
+    logger.info(f"[{kind}] search requests: {searched}, ready for translation: {ready_count}")
 
 
 async def scan_and_process_series(base_url, api_key):
     logger.info("Scanning for episodes")
     series = await get_wanted_episodes(base_url, api_key)
-    if not series:
-        logger.info("Found no wanted episodes")
+    if series is None:
         return
     logger.info(f"Found {len(series)} wanted episodes")
     async with httpx.AsyncClient(timeout=http_timeout) as client:
@@ -299,64 +281,100 @@ async def scan_and_process_series(base_url, api_key):
 async def scan_and_process_movies(base_url, api_key):
     logger.info("Scanning for movies")
     movies = await get_wanted_movies(base_url, api_key)
-    if not movies:
-        logger.info("Found no wanted movies")
+    if movies is None:
         return
     logger.info(f"Found {len(movies)} wanted movies")
     async with httpx.AsyncClient(timeout=http_timeout) as client:
         await process(client, movies, "movies")
 
 
-def translation_worker(worker_id, base_url, api_key):
-    endpoint = f"{base_url}/api/subtitles"
-    headers = {"X-API-KEY": api_key}
-    with httpx.Client(timeout=translation_request_timeout) as client:
-        while True:
-            sub = None
+async def get_idle_translation_jobs(client, base_url, api_key):
+    try:
+        response = await client.get(f"{base_url}/api/system/jobs", headers={"X-API-KEY": api_key})
+        response.raise_for_status()
+        jobs = response.json()["data"]
+        translations = [job for job in jobs if "translat" in job["job_name"].lower()]
+        if any(job["status"] in ("pending", "running") for job in translations):
+            return None
+        return translations, max((job["job_id"] for job in jobs), default=0)
+    except Exception as e:
+        logger.error(f"[translate] Getting jobs failed: {type(e).__name__}: {e}")
+        return None
+
+
+async def translation_worker(base_url, api_key):
+    async with httpx.AsyncClient(timeout=http_timeout) as client:
+        while not shutdown_event.is_set():
+            key = None
             try:
-                sub = task_queue.get()
-                if sub is None:
+                ready = [(key, entry) for key, entry in state.items() if entry["phase"] == "ready"]
+                if not ready:
+                    await asyncio.sleep(JOB_POLL_SECONDS)
                     continue
-                logger.info(f"[Worker: {worker_id}] Translating: {sub.base_subtitle.path} to: {sub.to_language}")
+                key, entry = min(ready, key=lambda item: item[1]["size"])
+                snapshot = await get_idle_translation_jobs(client, base_url, api_key)
+                if snapshot is None:
+                    await asyncio.sleep(JOB_POLL_SECONDS)
+                    continue
+                jobs, highest_job_id = snapshot
+                if key not in state or state[key]["phase"] != "ready":
+                    continue
 
-                params = {
-                    "action": "translate",
-                    "language": sub.to_language,
-                    "path": sub.base_subtitle.path,
-                    "type": "episode" if sub.is_serie else "movie",
-                    "id": sub.video_id,
-                    "forced": sub.base_subtitle.forced,
-                    "hi": sub.base_subtitle.hi,
-                    "original_format": True,
-                }
+                entry = state[key]
+                params = {"action": "translate", **entry["job"]}
+                size = entry["size"]
+                started = time.monotonic()
+                result = "failed"
+                logger.info(f"[translate] Sending {key} path='{params['path']}' size={size}")
+                try:
+                    response = await client.patch(f"{base_url}/api/subtitles",
+                                                  headers={"X-API-KEY": api_key}, params=params)
+                    response.raise_for_status()
+                    while time.monotonic() - started < translation_job_timeout_seconds:
+                        await asyncio.sleep(JOB_POLL_SECONDS)
+                        snapshot = await get_idle_translation_jobs(client, base_url, api_key)
+                        if time.monotonic() - started >= translation_job_timeout_seconds:
+                            break
+                        if snapshot is None:
+                            continue
+                        jobs, _ = snapshot
+                        new_jobs = [job for job in jobs if job["job_id"] > highest_job_id]
+                        if new_jobs and max(new_jobs, key=lambda job: job["job_id"])["status"] == "completed":
+                            result = "completed"
+                        break
+                except Exception as e:
+                    logger.error(f"[translate] {key} request failed: {type(e).__name__}: {e}")
 
-                response = client.patch(endpoint, headers=headers, params=params)
-                response.raise_for_status()
-
-                logger.info(f"[Worker: {worker_id}] Translation finished")
-            except queue.Empty:
-                continue
+                if key in state:
+                    state[key] = {"phase": "translate", "rounds": entry["rounds"],
+                                  "ts": time.time(), "result": result}
+                    save_state(state)
+                minutes = (time.monotonic() - started) / 60
+                logger.info(f"[translate] {key} path='{params['path']}' size={size} result={result} minutes={minutes:.1f}")
+                if result == "failed":
+                    logger.info(f"[translate] Pausing sends for {failure_pause_seconds / 60:g} minutes after failure")
+                    await asyncio.sleep(failure_pause_seconds)
             except Exception as e:
-                logger.error(f"[Worker: {worker_id}] Error while translating: {type(e).__name__}: {e}")
-
-            if sub is not None:
-                task_queue.done(sub)
+                logger.error(f"[translate] {key or 'worker'} iteration failed: {type(e).__name__}: {e}")
+                await asyncio.sleep(JOB_POLL_SECONDS)
 
 
 async def main(base_url, api_key):
-    for i in range(num_workers):
-        threading.Thread(target=translation_worker, args=(i, base_url, api_key), daemon=True).start()
+    worker = asyncio.create_task(translation_worker(base_url, api_key))
+    try:
+        while not shutdown_event.is_set():
+            try:
+                if series_scan:
+                    await scan_and_process_series(base_url, api_key)
+                if movies_scan:
+                    await scan_and_process_movies(base_url, api_key)
+            except Exception as e:
+                logger.error(f"Uncaught exception: {type(e).__name__}: {e}")
 
-    while not shutdown_event.is_set():
-        try:
-            if series_scan:
-                await scan_and_process_series(base_url, api_key)
-            if movies_scan:
-                await scan_and_process_movies(base_url, api_key)
-        except Exception as e:
-            logger.error(f"Uncaught exception: {type(e).__name__}: {e}")
-
-        await asyncio.sleep(interval_between_scans)
+            await asyncio.sleep(interval_between_scans)
+    finally:
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
 
 
 def handle_shutdown():
@@ -415,7 +433,8 @@ if __name__ == "__main__":
             logger.debug(f"search_rounds: {search_rounds}")
             logger.debug(f"round_spacing_hours: {round_spacing_seconds / 3600}")
             logger.debug(f"translate_grace_hours: {translate_grace_seconds / 3600}")
-            logger.debug(f"translation_request_timeout: {translation_request_timeout}")
+            logger.debug(f"translation_job_timeout_hours: {translation_job_timeout_seconds / 3600}")
+            logger.debug(f"failure_pause_minutes: {failure_pause_seconds / 60}")
             logger.debug(f"http_timeout: {http_timeout}")
             logger.debug(f"interval_between_scans: {interval_between_scans}")
             logger.debug(f"state_path: {state_path}")
