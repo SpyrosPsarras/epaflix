@@ -99,10 +99,6 @@ plaintext_templates=(
   "2-k3s/06.postgres/operator-kustomization/barman-manifest.yaml"
   "2-k3s/07.authentik-deployment/secret-app.yaml"
   "2-k3s/08.servarr/seerr/authentik-oidc-secret.yaml"
-  "2-k3s/10.observability/grafana-admin-secret.yaml"
-  "2-k3s/10.observability/grafana-config/oauth-secret.yaml"
-  "2-k3s/10.observability/grafana-db-secret.yaml"
-  "2-k3s/10.observability/pve-exporter/secret.yaml"
   "2-k3s/11.argocd/oidc-secret.yaml"
   "2-k3s/12.renovate/secret-app.yaml"
 )
@@ -115,15 +111,82 @@ for path in "${plaintext_templates[@]}"; do
   mkdir -p "$tmp/$(dirname "$path")"
   cp "$repo_root/$path" "$tmp/$path"
 done
+mkdir -p "$tmp/synthetic/observability"
+cat >"$tmp/synthetic/observability/admin-secret.yaml" <<'YAML'
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: synthetic-admin
+  namespace: synthetic
+type: Opaque
+stringData:
+  admin-user: admin
+  admin-password: "<GRAFANA_ADMIN_PASSWORD>"
+YAML
+cat >"$tmp/synthetic/observability/oauth-secret.yaml" <<'YAML'
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: synthetic-oauth
+  namespace: synthetic
+type: Opaque
+stringData:
+  client-id: "REPLACE_WITH_AUTHENTIK_CLIENT_ID"
+  client-secret: "REPLACE_WITH_AUTHENTIK_CLIENT_SECRET"
+YAML
+cat >"$tmp/synthetic/observability/two-document-secret.yaml" <<'YAML'
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: synthetic-database
+  namespace: synthetic
+type: Opaque
+stringData:
+  password: "<POSTGRES_PASSWORD>"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: synthetic-secondary-oauth
+  namespace: synthetic
+type: Opaque
+stringData:
+  client_secret: "<GRAFANA_OAUTH_CLIENT_SECRET>"
+YAML
+cat >"$tmp/synthetic/observability/pve-secret.yaml" <<'YAML'
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: synthetic-pve
+  namespace: synthetic
+type: Opaque
+stringData:
+  pve.yml: |
+    default:
+      user: root@pam
+      token_name: grafana
+      token_value: <PROXMOX_API_TOKEN_VALUE>
+      verify_ssl: false
+YAML
+synthetic_templates=(
+  "synthetic/observability/admin-secret.yaml"
+  "synthetic/observability/oauth-secret.yaml"
+  "synthetic/observability/two-document-secret.yaml"
+  "synthetic/observability/pve-secret.yaml"
+)
 git -C "$tmp" add .
 git -C "$tmp" commit -q --no-verify -m "fixture baseline"
 baseline="$(git -C "$tmp" rev-parse HEAD)"
 
-for path in "${plaintext_templates[@]}"; do
+for path in "${plaintext_templates[@]}" "${synthetic_templates[@]}"; do
   printf '\n# fixture: comment-only edit\n' >>"$tmp/$path"
 done
-git -C "$tmp" add "${plaintext_templates[@]}"
-expect_pass "comment-only edits to all 11 plaintext Secret files pass"
+git -C "$tmp" add "${plaintext_templates[@]}" "${synthetic_templates[@]}"
+expect_pass "comment-only edits to all $((${#plaintext_templates[@]} + ${#synthetic_templates[@]})) plaintext Secret files pass"
 
 reset_repo
 barman="2-k3s/06.postgres/operator-kustomization/barman-manifest.yaml"
@@ -364,7 +427,7 @@ git -C "$tmp" add fixtures/passphrase-placeholder.yaml
 expect_fail "passphrase-shaped angle-bracket value is not a placeholder"
 
 reset_repo
-pve="2-k3s/10.observability/pve-exporter/secret.yaml"
+pve="synthetic/observability/pve-secret.yaml"
 python3 - "$tmp/$pve" <<'PY'
 from pathlib import Path
 import sys
