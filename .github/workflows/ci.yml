@@ -384,6 +384,7 @@ jobs:
         env:
           VARIANT: ${{ matrix.variant }}
         run: |
+          [[ $VARIANT != work ]] || exit 1
           if [[ $VARIANT == mixed ]]; then
             bash 2-k3s/13.t3code/env/tools/smoke.sh
           else
