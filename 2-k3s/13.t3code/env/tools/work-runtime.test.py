@@ -443,13 +443,14 @@ class WorkRuntimeTests(unittest.TestCase):
         self.assertIn('ghcr.io/spyrospsarras/t3-runtime', publish)
         self.assertIn('source=t3-runtime:$variant-dev; prefix=$variant-', publish)
         ci = yaml.load((ROOT.parents[1] / '.github/workflows/ci.yml').read_text(), Loader=yaml.BaseLoader)
-        ci_steps = {step.get('name'): step for step in ci['jobs']['validate']['steps'] if 'name' in step}
+        ci_steps = {step.get('name'): step for job in ci['jobs'].values()
+                    for step in job['steps'] if 'name' in step}
         self.assertIn('2-k3s/13.t3code-work', ci_steps['Kustomize build (sops-free dirs)']['run'])
         for suite in ('work-runtime.test.py', 'work-aks-auth.test.py'):
             self.assertIn(suite, ci_steps['T3 config and placement tests']['run'])
         smoke = ci_steps['T3 install and runtime smoke']['run']
-        for variant in ('homelab', 'work'):
-            self.assertIn(f'T3_RUNTIME_VARIANT={variant}', smoke)
+        self.assertEqual(ci['jobs']['smoke']['strategy']['matrix']['variant'], ['mixed', 'homelab', 'work'])
+        self.assertIn('T3_RUNTIME_VARIANT="$VARIANT"', smoke)
         allowed = {line[1:] for line in (ROOT / 'env/Dockerfile.dockerignore').read_text().splitlines() if line.startswith('!')}
         self.assertEqual(allowed, {'versions.env', 'env/', 'env/Dockerfile', 'env/tools/',
             'env/tools/os-packages.txt', 'env/tools/install-cluster-tools.sh',

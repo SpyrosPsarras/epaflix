@@ -153,7 +153,8 @@ class SetupTests(unittest.TestCase):
                     self.assertEqual(path.exists(), existing)
                     if existing:
                         self.assertEqual(path.read_text(), '{"userKey": "keep"}\n')
-                        self.assertEqual(path.stat(), before)
+                        after = path.stat()
+                        self.assertEqual((after.st_ino, after.st_mtime_ns), (before.st_ino, before.st_mtime_ns))
                     self.assertTrue((self.agent / 'settings.json').exists())
                     self.assertTrue((self.agent / 'AGENTS.md').exists())
 
