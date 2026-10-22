@@ -143,9 +143,8 @@ by system authentication, and `gh auth status`, `ssh homepc true` and
 - `2-k3s/13.t3code`: update `hub_clients.py`, jev-guard and its tests,
   `ssh-policy.test.py`, the then-current Jev Auto documentation, `env/README.md` and
   `v2/readiness.md`.
-- Fix the KeePassXC hints in `10.observability/deploy.sh`, the authentik
-  blueprint hook, and the "never look in KeePass" lines in `homelab-ssh.md`
-  (both copies).
+- Fix the KeePassXC hints in the authentik blueprint hook and the "never look
+  in KeePass" lines in `homelab-ssh.md` (both copies).
 - Skill: replace `keepassxc-secrets` (`vault.py`, `kpx.sh`) with
   `vaultwarden-secrets`. The pod path uses the hub tools. The desktop path
   uses `secret-tool` for app tokens and the hub for vault items. Rebuild
