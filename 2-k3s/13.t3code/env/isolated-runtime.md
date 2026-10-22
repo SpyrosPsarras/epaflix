@@ -179,9 +179,9 @@ and `0.9Gi` memory sample is not a peak measurement. Keep existing limits and th
 ### Owner preparation
 
 Before merge, privately edit `one/cliproxy-secrets.enc.yaml` with SOPS. Remove
-`github-token` and `aks-tenant-id`, keeping only `omp-api-key`. Set the unencrypted
-`t3code.epaflix.com/model-revision` annotation to the SHA-256 of the model key's
-ciphertext field. Update it on each model rotation. Never display plaintext.
+`github-token` and `aks-tenant-id`, keeping only `omp-api-key`. Never display
+plaintext. After a model-key rotation, the owner restarts the manager from a
+desktop by running `kubectl --context epaflix -n t3code delete pod t3code-0`.
 The encrypted-key inventory test remains failing until this owner step is done.
 The conversion cannot be accepted or cut over while it fails.
 

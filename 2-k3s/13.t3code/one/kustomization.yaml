@@ -60,18 +60,6 @@ replacements:
         options:
           create: true
   - source:
-      kind: Secret
-      name: cliproxy-secrets
-      fieldPath: metadata.annotations.[t3code.epaflix.com/model-revision]
-    targets:
-      - select:
-          kind: StatefulSet
-          name: t3code
-        fieldPaths:
-          - spec.template.metadata.annotations.[t3code.epaflix.com/model-revision]
-        options:
-          create: true
-  - source:
       kind: StatefulSet
       name: t3code
       fieldPath: spec.template.spec.containers.[name=t3].image

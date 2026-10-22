@@ -50,7 +50,3 @@ sed -i 's/synthetic-v1/synthetic-v2/' "$tmp/k/synthetic-private.yaml"
 after=$(kustomize build "$tmp/k" | python3 -c 'import yaml,sys;print(next(d for d in yaml.safe_load_all(sys.stdin) if d["kind"]=="StatefulSet")["spec"]["template"]["metadata"]["annotations"])')
 [[ $before != "$after" ]]
 echo 'ok: private configuration updates trigger rollout'
-sed -i 's/model-v1/model-v2/' "$tmp/k/synthetic-private.yaml"
-rotated=$(kustomize build "$tmp/k" | python3 -c 'import yaml,sys;print(next(d for d in yaml.safe_load_all(sys.stdin) if d["kind"]=="StatefulSet")["spec"]["template"]["metadata"]["annotations"])')
-[[ $rotated != "$after" && $rotated == *model-v2* ]]
-echo 'ok: model Secret revision rotation triggers rollout'

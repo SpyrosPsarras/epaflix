@@ -115,8 +115,7 @@ path.write_text(text)
         config = yaml.safe_load((ROOT / 'one/kustomization.yaml').read_text())
         sources = [r['source'] for r in config['replacements']]
         self.assertFalse(any(s.get('name') == 'mcp-hub-client' for s in sources))
-        self.assertIn({'kind': 'Secret', 'name': 'cliproxy-secrets',
-                       'fieldPath': 'metadata.annotations.[t3code.epaflix.com/model-revision]'}, sources)
+        self.assertFalse(any(s.get('name') == 'cliproxy-secrets' for s in sources))
         clients = json.loads((ROOT.parent / '23.mcp-hub/files/clients.json').read_text())
         self.assertEqual(clients, {
             'homepc': '3767dfca79cc19f447c8322c5096554bcc88047a3236d810e42ed2540ec717aa',
@@ -131,9 +130,6 @@ path.write_text(text)
         self.assertEqual(set(secret.get('stringData', secret.get('data', {}))), {'omp-api-key'})
         ciphertext = secret.get('stringData', secret.get('data', {}))['omp-api-key']
         self.assertTrue(ciphertext.startswith('ENC['))
-        import hashlib
-        self.assertEqual(secret['metadata']['annotations']['t3code.epaflix.com/model-revision'],
-                         hashlib.sha256(ciphertext.encode()).hexdigest())
 
     def test_stale_agent_and_project_mcp_maps_are_empty_after_two_boots(self):
         manager = self.manager()
