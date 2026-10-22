@@ -2,7 +2,7 @@
 
 The entrypoint installs these layers before T3 starts Pi through `/scripts/pi.sh`.
 
-1. `cc-safety-net-install.py` builds and hash-checks the reviewed cc-safety-net 2.6.4 Pi extension. It blocks destructive Git and filesystem commands and secret-file access. `ssh-policy.py` protects SSH keys and the vault login while permitting attachment identifiers and public host-key snapshots.
+1. The image builds the reviewed cc-safety-net 2.6.4 artifact. At startup, `cc-safety-net-install.py` verifies and copies the image artifact into a fresh home offline, or verifies the existing home copy, before enabling the Pi extension. It blocks destructive Git and filesystem commands and secret-file access. `ssh-policy.py` protects SSH keys and the vault login while permitting attachment identifiers and public host-key snapshots.
 2. `pi-redact` masks credentials in tool output before the model sees them.
 
 CI runs the Pi setup and T3 settings Python tests. The image smoke starts Pi in RPC mode, checks registered extension commands and package skills, rejects extension load errors, and rejects pi-permission-system installation, registration and its extension command. It also checks that `--list-models` lists only `cliproxy` rows plus exactly one `cliproxy-textgen` row for `claude/claude-haiku-5-5`, requires both mock model IDs, and migrates OpenCode-era T3 settings with a private rollback backup. It does not test model-driven tool execution.

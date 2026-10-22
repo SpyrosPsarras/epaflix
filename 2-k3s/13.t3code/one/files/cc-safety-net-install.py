@@ -1,5 +1,5 @@
 #!/usr/bin/python3 -I
-"""Build and verify the reviewed cc-safety-net package, then print its absolute Pi entry path."""
+"""Verify and install the reviewed cc-safety-net artifact, then print its absolute Pi entry path."""
 import argparse
 import base64
 import hashlib
@@ -16,6 +16,7 @@ import urllib.request
 
 COMMIT = "2171126797a158f8c5e93296ffd1dec770223984"
 VERSION = "2.6.4"
+IMAGE_ARTIFACT = Path("/opt/cc-safety-net") / VERSION
 BUN_URL = "https://registry.npmjs.org/@oven/bun-linux-x64/-/bun-linux-x64-1.4.2.tgz"
 BUN_INTEGRITY = "9/E/UXOTpSo3YsV5g+FhtTd/qTpiWoKuxS12cqtuYA1ssu9fRAoPQnipFgGyck3tWO63iUdxBiygq+kELFawng=="
 HERE = Path(__file__).resolve().parent
@@ -115,20 +116,45 @@ def verify(root, hashes):
             raise ValueError(f"Hash mismatch: {name}")
 
 
-def install(destination):
+def verify_artifact(root, hashes, trusted=False):
+    if root.is_symlink() or not root.is_dir():
+        raise ValueError(f"Missing or symlink artifact: {root}")
+    paths = [root, *root.rglob("*")]
+    for path in paths:
+        if path.is_symlink() or not (path.is_dir() or path.is_file()):
+            raise ValueError(f"Unexpected artifact entry: {path}")
+        if trusted:
+            trusted_path(path)
+    if {p.relative_to(root).as_posix() for p in paths if p.is_file()} != set(hashes):
+        raise ValueError("Unexpected artifact files")
+    verify(root, hashes)
+
+
+def install(destination, image_build=False):
     tools = trusted_tools()
+    if destination.is_symlink():
+        raise ValueError("Installation must not be a symlink")
     destination = destination.resolve()
     if destination == Path("/tmp") or Path("/tmp") in destination.parents:
         raise ValueError("Installation must be outside /tmp")
     manifest = json.loads((HERE / "cc-safety-net-hashes.json").read_text())
-    dist_files = {name for name in manifest["artifact"] if name.startswith("dist/")}
     verify(HERE, {"cc-safety-net.patch": manifest["patch"]})
+    if image_build and os.geteuid() != 0:
+        raise ValueError("Image build requires root")
     if destination.exists():
-        verify(destination, manifest["artifact"])
-        if {p.relative_to(destination).as_posix() for p in (destination / "dist").rglob("*") if p.is_file()} != dist_files:
-            raise ValueError("Unexpected dist files")
+        verify_artifact(destination, manifest["artifact"], trusted=image_build)
+        return destination / "dist/pi/index.js"
+    if not image_build:
+        verify_artifact(IMAGE_ARTIFACT, manifest["artifact"], trusted=True)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=destination.parent, prefix=".safety-install-") as work:
+            package = Path(work) / "package"
+            shutil.copytree(IMAGE_ARTIFACT, package)
+            verify_artifact(package, manifest["artifact"])
+            os.rename(package, destination)
         return destination / "dist/pi/index.js"
     destination.parent.mkdir(parents=True, exist_ok=True)
+    trusted_path(destination.parent)
     with tempfile.TemporaryDirectory(dir=destination.parent, prefix=".safety-build-") as work:
         home = Path(work) / "home"
         home.mkdir()
@@ -144,13 +170,14 @@ def install(destination):
         runner = bun_runner(Path(work))
         build(root, runner, tools["node"], env)
         verify(root, manifest["artifact"])
-        if {p.relative_to(root).as_posix() for p in (root / "dist").rglob("*") if p.is_file()} != dist_files:
-            raise ValueError("Unexpected dist files")
         package = Path(work) / "package"
         package.mkdir()
         shutil.copytree(root / "dist", package / "dist")
         for name in ("package.json", "LICENSE"):
             shutil.copy2(root / name, package / name)
+        for path in (package, *package.rglob("*")):
+            path.chmod(0o755 if path.is_dir() or path.stat().st_mode & 0o111 else 0o644)
+        verify_artifact(package, manifest["artifact"], trusted=True)
         run(tools["node"], "--input-type=module", "-e",
             "const p=await import(process.argv[1]); if(typeof p.default !== 'function') throw Error('Missing Pi extension export')",
             (package / "dist/pi/index.js").as_uri(), env=env)
@@ -160,10 +187,12 @@ def install(destination):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("destination", type=Path, nargs="?",
-                        default=Path.home() / ".local/share/pi/cc-safety-net" / VERSION)
+    parser.add_argument("destination", type=Path, nargs="?")
+    parser.add_argument("--image-build", action="store_true", help="Construct the reviewed image artifact as root")
     args = parser.parse_args()
-    entry = install(args.destination)
+    destination = args.destination or (IMAGE_ARTIFACT if args.image_build else
+                                       Path.home() / ".local/share/pi/cc-safety-net" / VERSION)
+    entry = install(destination, image_build=args.image_build)
     print(entry)
 
 

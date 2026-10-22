@@ -5,6 +5,7 @@ ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 cp -r "$ROOT/env" "$tmp/"
 cp -r "$ROOT/one" "$tmp/k"
+ln -s k "$tmp/one"
 cp "$ROOT/versions.env" "$tmp/"
 python3 "$ROOT/env/tools/private-config.test.py" overlay "$tmp/k"
 render() { kustomize build "$1" | python3 -c '

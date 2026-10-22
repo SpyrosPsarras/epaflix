@@ -24,7 +24,7 @@ p.chmod(0o440)
 '
   docker run --rm --network none --user 0:0 -v "$volume:/home/t3" "$image" chown 1000:1000 /home/t3
   for round in first restart; do
-    timeout 1800 docker run --rm --name "$name" --user 1000:1000 \
+    timeout 1800 docker run --rm --network none --name "$name" --user 1000:1000 \
       --cap-drop ALL --security-opt no-new-privileges \
       --add-host "mcp-hub.mcp-hub-$variant.svc.cluster.local:127.0.0.1" \
       --tmpfs /scripts:uid=1000,gid=1000,exec --tmpfs /tmp:uid=1000,gid=1000,exec \

@@ -7,6 +7,8 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import pwd
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -18,7 +20,7 @@ installer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(installer)
 tools = installer.trusted_tools()
 print("Validated trusted executable paths: " + json.dumps(tools), flush=True)
-with tempfile.TemporaryDirectory(dir=Path.cwd(), prefix=".safety-cache-test-") as tmp:
+with tempfile.TemporaryDirectory(dir=Path(pwd.getpwuid(os.getuid()).pw_dir), prefix=".safety-cache-test-") as tmp:
     root = Path(tmp)
     package = root / "package"
     entry = package / "dist/pi/index.js"
@@ -28,7 +30,82 @@ with tempfile.TemporaryDirectory(dir=Path.cwd(), prefix=".safety-cache-test-") a
     manifest = {"patch": hashlib.sha256(b"fixture").hexdigest(),
                 "artifact": {"dist/pi/index.js": hashlib.sha256(entry.read_bytes()).hexdigest()}}
     (root / "cc-safety-net-hashes.json").write_text(json.dumps(manifest))
+    real_lstat = Path.lstat
+    def image_ownership(path):
+        info = real_lstat(path)
+        if path == root or root in path.parents or path in root.parents:
+            values = list(info)
+            values[4] = 0
+            return os.stat_result(values)
+        return info
     with patch.object(installer, "HERE", root):
+        destination = root / "fresh-home" / "package"
+        with patch.object(installer, "IMAGE_ARTIFACT", package), \
+                patch.object(Path, "lstat", image_ownership), \
+                patch.object(installer.subprocess, "run", side_effect=AssertionError("startup must not spawn network/build tools")), \
+                patch.object(installer.urllib.request, "build_opener", side_effect=AssertionError("startup must not download")):
+            assert installer.install(destination) == destination / "dist/pi/index.js"
+            assert (destination / "dist/pi/index.js").read_bytes() == entry.read_bytes()
+            with patch.object(installer, "IMAGE_ARTIFACT", root / "missing-image"):
+                assert installer.install(destination) == destination / "dist/pi/index.js"
+            for case in ("missing", "changed", "extra", "symlink", "directory-symlink", "artifact-symlink",
+                         "owner", "file-owner", "writable", "writable-file"):
+                source = root / case
+                if case != "missing":
+                    shutil.copytree(package, source)
+                if case == "changed":
+                    (source / "dist/pi/index.js").write_text("tampered")
+                if case == "extra":
+                    (source / "unreviewed.js").write_text("tampered")
+                if case == "symlink":
+                    (source / "dist/pi/index.js").unlink()
+                    (source / "dist/pi/index.js").symlink_to(entry)
+                if case == "directory-symlink":
+                    shutil.rmtree(source / "dist")
+                    (source / "dist").symlink_to(package / "dist", target_is_directory=True)
+                if case == "artifact-symlink":
+                    shutil.rmtree(source)
+                    source.symlink_to(package, target_is_directory=True)
+                if case == "writable":
+                    source.chmod(0o777)
+                if case == "writable-file":
+                    (source / "dist/pi/index.js").chmod(0o666)
+                def case_ownership(path):
+                    info = image_ownership(path)
+                    if (case == "owner" and path == source) or (case == "file-owner" and path == source / "dist/pi/index.js"):
+                        values = list(info)
+                        values[4] = 1000
+                        return os.stat_result(values)
+                    return info
+                rejected = root / (case + "-home") / "package"
+                with patch.object(installer, "IMAGE_ARTIFACT", source), patch.object(Path, "lstat", case_ownership):
+                    try:
+                        installer.install(rejected)
+                    except ValueError:
+                        pass
+                    else:
+                        raise AssertionError(f"Accepted {case} image artifact")
+                assert not rejected.parent.exists(), f"{case} image wrote destination state"
+            unprivileged = root / "unprivileged-build" / "package"
+            with patch.object(os, "geteuid", return_value=1000):
+                try:
+                    installer.install(unprivileged, image_build=True)
+                except ValueError as error:
+                    assert str(error) == "Image build requires root"
+                else:
+                    raise AssertionError("Accepted unprivileged image build")
+            assert not unprivileged.parent.exists()
+            def clone_only(*args, **kwargs):
+                assert args[0][:3] == (tools["git"], "clone", "--quiet")
+                raise RuntimeError("image-build reached clone")
+            with patch.object(os, "geteuid", return_value=0), patch.object(installer.subprocess, "run", clone_only):
+                try:
+                    installer.install(root / "image-build", image_build=True)
+                except RuntimeError as error:
+                    assert str(error) == "image-build reached clone"
+                else:
+                    raise AssertionError("Image build did not construct the artifact")
+        print("PASS: offline fresh home and restart; missing, changed, extra, symlink, owner and writable image artifacts fail before destination writes; only image-build reaches clone", flush=True)
         assert installer.install(package) == entry, "cached installation must return the Pi entry"
         output = io.StringIO()
         with patch.object(sys, "argv", ["installer", str(package)]), contextlib.redirect_stdout(output):
@@ -39,6 +116,11 @@ with tempfile.TemporaryDirectory(dir=Path.cwd(), prefix=".safety-cache-test-") a
             with patch.object(sys, "argv", ["installer"]), contextlib.redirect_stdout(io.StringIO()):
                 installer.main()
             assert build.call_args.args[0] == root / ".local/share/pi/cc-safety-net" / installer.VERSION
+        with patch.object(installer, "install", return_value=entry) as build:
+            with patch.object(sys, "argv", ["installer", "--image-build"]), contextlib.redirect_stdout(io.StringIO()):
+                installer.main()
+            assert build.call_args.args[0] == installer.IMAGE_ARTIFACT
+            assert build.call_args.kwargs == {"image_build": True}
         with patch.object(sys, "argv", ["installer", str(package), "--config", str(root / "opencode.json")]), contextlib.redirect_stderr(io.StringIO()):
             try:
                 installer.main()
@@ -46,15 +128,22 @@ with tempfile.TemporaryDirectory(dir=Path.cwd(), prefix=".safety-cache-test-") a
                 assert error.code == 2
             else:
                 raise AssertionError("Accepted removed --config argument")
-        (entry.parent / "unexpected.js").write_text("tampered")
+        (package / "unexpected.js").write_text("tampered")
         try:
             installer.install(package)
         except ValueError:
             pass
         else:
-            raise AssertionError("Accepted unreviewed dist file")
+            raise AssertionError("Accepted unreviewed artifact file")
 with tempfile.TemporaryDirectory() as tmp:
     root = Path(tmp)
+    try:
+        installer.install(root / "must-not-install")
+    except ValueError as error:
+        assert str(error) == "Installation must be outside /tmp"
+    else:
+        raise AssertionError("Accepted destination under /tmp")
+    assert not (root / "must-not-install").exists()
     (root / "file").write_text("original")
     hashes = {"file": hashlib.sha256(b"original").hexdigest()}
     installer.verify(root, hashes)
@@ -119,11 +208,11 @@ with tempfile.TemporaryDirectory() as tmp:
         assert not (root / "bun").exists()
 print("PASS: runner archive integrity mismatch rejected before executable creation", flush=True)
 print("PASS: trusted missing/user-owned tools fail before spawn; unsafe parent ownership/mode rejected; build env is an explicit allowlist", flush=True)
-print("PASS: cached Pi entry, absolute CLI path, default Pi destination, removed --config, no OpenCode wrapper, hash/symlink and unexpected-dist rejection", flush=True)
+print("PASS: cached Pi entry, absolute CLI path, default Pi destination, removed --config, no OpenCode wrapper, hash/symlink and whole-artifact unexpected-file rejection", flush=True)
 if len(sys.argv) > 1:
     assert sys.argv[1] == "--build"
-    # Test under this repository, outside /tmp, and remove staging on exit.
-    with tempfile.TemporaryDirectory(dir=Path.cwd(), prefix=".safety-install-test-") as tmp:
+    assert os.geteuid() == 0, "--build requires root"
+    with tempfile.TemporaryDirectory(dir=Path("/opt"), prefix=".safety-install-test-") as tmp:
         destination = Path(tmp) / "package"
         config = Path(tmp) / "config.json"
         config.write_text('{"plugin": ["untouched@1"]}\n')
@@ -149,7 +238,7 @@ if len(sys.argv) > 1:
                         NPM_CONFIG_USERCONFIG="/nonexistent/poison.npmrc",
                         GIT_CONFIG_GLOBAL="/nonexistent/poison.gitconfig",
                         ANTHROPIC_AUTH_TOKEN="test-only-never-inherited")
-        result = subprocess.run([tools["python"], "-I", "-S", str(FILES / "cc-safety-net-install.py"), str(destination)],
+        result = subprocess.run([tools["python"], "-I", "-S", str(FILES / "cc-safety-net-install.py"), "--image-build", str(destination)],
                                 env=poisoned, check=True, text=True, stdout=subprocess.PIPE)
         print(result.stdout, end="")
         assert result.stdout.splitlines()[-1] == str(destination / "dist/pi/index.js")
