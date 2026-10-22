@@ -36,8 +36,6 @@ spec:
               value: "en,no"
             - name: TO_LANGUAGES
               value: "el"
-            - name: TRANSLATION_REQUEST_TIMEOUT
-              value: "900"
             - name: REQUEST_TIMEOUT
               value: "300"
             - name: SEARCH_ROUNDS_BEFORE_TRANSLATE
@@ -45,7 +43,9 @@ spec:
             - name: ROUND_SPACING_HOURS
               value: "8"
             - name: TRANSLATE_GRACE_HOURS
-              value: "216"
+              value: "24"
+            - name: FAILURE_PAUSE_MINUTES
+              value: "60"
             - name: INTERVAL_BETWEEN_SCANS
               value: "3600"
             - name: LOG_LEVEL

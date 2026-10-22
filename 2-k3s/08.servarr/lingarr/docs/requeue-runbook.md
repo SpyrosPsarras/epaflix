@@ -134,12 +134,13 @@ were recovered from `hangfire.job` instead. State on 2026-09-12:
 
 ## Coverage decision (owner)
 
-Decided in #1345 on 2026-09-25: no bulk run. The English-only backlog drains
-on its own through `bazarr-autotranslate` in `2-k3s/08.servarr/`. It scans
-every hour. For each item missing Greek it runs three provider search rounds,
-8h apart, and queues a Lingarr translation when all three find nothing. After
-queueing it leaves the item alone for 216h, then starts the search rounds
-again if Greek is still missing.
+Decided in #1345 on 2026-09-25: no bulk run. `bazarr-autotranslate` in
+`2-k3s/08.servarr/` scans every hour. New items missing Greek get three
+provider search rounds, 8h apart. If all three find nothing, they become
+ready for translation. The worker translates one file at a time, shortest
+base-language subtitle first. Still-wanted items retry translation 24h after
+the attempt ends, whether it completed or failed, without new search rounds.
+After a failure, the worker pauses all sends for 1h.
 
 Between 2026-09-20 and 2026-09-25 Lingarr completed about 930 file
 translations. The scan on 2026-09-25 still counted 469 English-only files,
