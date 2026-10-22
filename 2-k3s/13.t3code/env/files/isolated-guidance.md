@@ -6,7 +6,7 @@
 Read secrets only with the stock client:
 
 ```sh
-vault run --name '<exact item name>' [--password-env VAR] [--field NAME=VAR] [--attachment NAME --attachment-env VAR] -- <command>
+vault run --name '<exact item name>' [--password-env VAR] [--username-env VAR] [--field NAME=VAR] [--attachment NAME --attachment-env VAR] -- <command>
 ```
 
 Target variables must match `VAULT_[A-Z][A-Z0-9_]{0,63}`, for example

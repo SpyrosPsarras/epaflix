@@ -330,12 +330,13 @@ class VaultTests(unittest.TestCase):
 
     def test_password_field_private_attachment_and_output_suppression(self):
         record = self.home / 'path'
-        result = self.command(['--item', ITEM, '--password-env', 'VAULT_PASSWORD', '--field', 'api=VAULT_API',
-                               '--attachment', 'fixture.bin', '--attachment-env', 'VAULT_FILE'],
+        result = self.command(['--item', ITEM, '--password-env', 'VAULT_PASSWORD', '--username-env', 'VAULT_USER',
+                               '--field', 'api=VAULT_API', '--attachment', 'fixture.bin', '--attachment-env', 'VAULT_FILE'],
             f'import os,pathlib,stat; p=pathlib.Path(os.environ["VAULT_FILE"]); '
             f'assert p.read_bytes()=={CONTENT!r}; assert stat.S_IMODE(p.stat().st_mode)==0o600; '
             'assert stat.S_IMODE(p.parent.stat().st_mode)==0o700; '
             f'assert os.environ["VAULT_PASSWORD"]=={VALUE!r}; assert os.environ["VAULT_API"]=={FIELD!r}; '
+            'assert os.environ["VAULT_USER"]=="synthetic-user"; '
             'assert not any(k.startswith("BW_") for k in os.environ); '
             f'pathlib.Path({str(record)!r}).write_text(str(p)); '
             'print(os.environ["VAULT_PASSWORD"]); print(os.environ["VAULT_API"],file=__import__("sys").stderr)')
@@ -459,11 +460,18 @@ class VaultTests(unittest.TestCase):
         options = [
             ['--password-env', 'PATH'], ['--password-env', 'BW_PASSWORD'],
             ['--field', 'missing=VAULT_API'], ['--password-env', 'VAULT_X', '--field', 'api=VAULT_X'],
-            ['--attachment', 'fixture.bin', '--attachment-env', 'VAULT_X', '--password-env', 'VAULT_X']]
+            ['--attachment', 'fixture.bin', '--attachment-env', 'VAULT_X', '--password-env', 'VAULT_X'],
+            ['--username-env', 'VAULT_X', '--password-env', 'VAULT_X'], ['--username-env', 'PATH']]
         for args in options:
             result = self.command(['--item', ITEM, *args], 'pass')
             self.assertEqual(result.returncode, 1)
             self.assert_quiet(result)
+        self.item['login'].pop('username')
+        result = self.command(['--item', ITEM, '--username-env', 'VAULT_USER'], 'pass')
+        self.assertEqual(result.returncode, 1)
+        self.assertRegex(result.stderr, rb'refused \(Refused at main:\d+ > run:\d+\)')  # the value check, not the parser
+        self.assertIn('/object/item/' + ITEM, self.paths)
+        self.assert_quiet(result)
         self.item['fields'].append(copy.deepcopy(self.item['fields'][0]))
         self.assertEqual(self.command(['--item', ITEM, '--field', 'api=VAULT_API'], 'pass').returncode, 1)
 

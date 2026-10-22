@@ -272,6 +272,7 @@ def run(argv):
     selection.add_argument('--item')
     selection.add_argument('--name')
     parser.add_argument('--password-env')
+    parser.add_argument('--username-env')
     parser.add_argument('--field', action='append', default=[])
     parser.add_argument('--attachment')
     parser.add_argument('--attachment-env')
@@ -280,8 +281,9 @@ def run(argv):
     args = parser.parse_args(argv[:boundary])
     command = argv[boundary + 1:]
     mappings = []
-    if args.password_env:
-        mappings.append((None, environment_name(args.password_env)))
+    for login_key, target in (('password', args.password_env), ('username', args.username_env)):
+        if target:
+            mappings.append(((login_key,), environment_name(target)))
     for field in args.field:
         name, separator, target = field.rpartition('=')
         if not separator or not name:
@@ -297,7 +299,7 @@ def run(argv):
     item = selected_item(args.item, args.name)
     additions = {}
     for field, target in mappings:
-        values = [item.get('login', {}).get('password')] if field is None else [
+        values = [(item.get('login') or {}).get(field[0])] if isinstance(field, tuple) else [
             entry.get('value') for entry in item.get('fields') or [] if entry.get('name') == field]
         if len(values) != 1 or not isinstance(values[0], str) or '\0' in values[0] or len(values[0].encode()) > MAX_VALUE_BYTES:
             raise Refused
