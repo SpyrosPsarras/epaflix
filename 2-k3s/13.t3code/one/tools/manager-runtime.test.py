@@ -272,6 +272,8 @@ path.write_text(text)
         blank.write_text(' \n')
         with self.assertRaises(Exception):
             self.manager().configure(self.home, self.project, blank, self.bundle)
+        self.bundle.unlink()
+        self.assertIn(self.bundle.name, self.run_setup().stderr)
 
     def test_startup_and_ssh_do_not_restore_credentials(self):
         self.manager()

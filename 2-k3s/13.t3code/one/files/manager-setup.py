@@ -131,4 +131,8 @@ if __name__ == '__main__':
         configure(*(Path(arg) for arg in sys.argv[1:]))
     except Exception as error:
         detail = f'; {error}' if isinstance(error, ConfigurationError) else ''
+        if isinstance(error, OSError) and error.filename is not None:
+            path = Path(os.path.abspath(os.fsdecode(error.filename)))
+            home = Path(os.path.abspath(sys.argv[1]))
+            detail = f'; {path.relative_to(home) if path.is_relative_to(home) else path}'
         sys.exit(f'manager-setup: {type(error).__name__}{detail}; startup refused')
