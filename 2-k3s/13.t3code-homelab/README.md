@@ -29,6 +29,10 @@ vault run --name "$ITEM_NAME" --password-env VAULT_PASSWORD \
   --attachment-env VAULT_FILE -- python3 /private/consume.py
 ```
 
+Every command that reads an item (`run`, `list`, `update`, `trash`, `attach`)
+syncs the sidecar's local cache first, so an item edited in the Bitwarden apps
+is visible on the next call. `bw serve` does
+not sync by itself; before this, the cache was only refreshed at sidecar start.
 Use `--item "$ITEM_ID"` instead of `--name` for an exact ID. Names and attachment
 names must match exactly and be unique in the approved scope. Target environment
 names must start with `VAULT_`. `--timeout` defaults to 120 seconds and accepts
