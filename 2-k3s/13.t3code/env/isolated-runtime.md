@@ -128,6 +128,10 @@ instances, legacy provider maps and unsupported selections are removed.
 Endpoint and credential configuration comes from private inputs, not application
 preferences.
 
+Pi caps `cliproxy/claude/claude-haiku-5-5` at 100K tokens to avoid the
+[price step above 100,000 prompt tokens](https://platform.claude.com/docs/en/about-claude/pricing#long-context-pricing).
+With the default 16,384-token reserve, Pi auto-compacts near 84K tokens.
+
 The Codex and Claude direct instances stay disabled in isolated runtimes.
 The work pod's Codex model API and T3 catalog expose bare IDs. Minimal
 non-streaming requests to its configured Responses endpoint returned HTTP 400

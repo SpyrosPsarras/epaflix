@@ -75,7 +75,10 @@ def write_models(home):
         return
     path = home / '.pi/agent/models.json'
     models = json.loads(path.read_text()) if path.exists() else {}
-    models.setdefault('providers', {})['cliproxy-textgen'] = {
+    providers = models.setdefault('providers', {})
+    providers.setdefault('cliproxy', {}).setdefault('modelOverrides', {})['claude/claude-haiku-5-5'] = {
+        'contextWindow': 100000}
+    providers['cliproxy-textgen'] = {
         'baseUrl': base_url, 'api': 'anthropic-messages', 'apiKey': '$CLIPROXYAPI_API_KEY',
         'models': [{'id': 'claude/claude-haiku-5-5', 'name': 'Claude Haiku 5.5 (text generation)',
                     'reasoning': True, 'input': ['text'], 'contextWindow': 1000000,
