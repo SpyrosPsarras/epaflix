@@ -202,12 +202,46 @@ desktop. The manager cannot push, merge, sync or recover its own namespace.
    Application get, denied Application list/watch/patch/other-name get, denied
    work exec/logs/port-forward/Secrets, own namespace and cluster resources.
    These are authorization requests, not real work-output requests.
+   Use `--subresource`, never the `pods/exec` form or other slash forms here.
+   `auth can-i` parses `pods/exec` as a pod named `exec`, not the exec subresource.
+   Run these exact subresource checks for both runtime and hub namespaces:
+
+   ```sh
+   for namespace in t3code-homelab mcp-hub-homelab t3code-work mcp-hub-work; do
+     printf '%s\n' "$namespace"
+     kubectl --context epaflix --as=system:serviceaccount:t3code:manager-agent --as-group=system:authenticated --as-group=system:serviceaccounts --as-group=system:serviceaccounts:t3code auth can-i create pods --subresource=exec -n "$namespace"
+     kubectl --context epaflix --as=system:serviceaccount:t3code:manager-agent --as-group=system:authenticated --as-group=system:serviceaccounts --as-group=system:serviceaccounts:t3code auth can-i get pods --subresource=log -n "$namespace"
+     kubectl --context epaflix --as=system:serviceaccount:t3code:manager-agent --as-group=system:authenticated --as-group=system:serviceaccounts --as-group=system:serviceaccounts:t3code auth can-i create pods --subresource=portforward -n "$namespace"
+     kubectl --context epaflix --as=system:serviceaccount:t3code:manager-agent --as-group=system:authenticated --as-group=system:serviceaccounts --as-group=system:serviceaccounts:t3code auth can-i patch statefulsets.apps --subresource=scale -n "$namespace"
+     kubectl --context epaflix --as=system:serviceaccount:t3code:manager-agent --as-group=system:authenticated --as-group=system:serviceaccounts --as-group=system:serviceaccounts:t3code auth can-i patch deployments.apps --subresource=scale -n "$namespace"
+   done
+   ```
+
+   Expect exec/log `yes` in both homelab namespaces and `no` in both work
+   namespaces. Expect portforward and both scale checks `no` everywhere.
+   A denied check exits nonzero; do not run this loop with `set -e`.
 3. M3: Run the reviewed kubeconfig helper with `--context epaflix`. Privately
    test the real grant from a mode-0600 file outside the repository, without
    impersonation. Expect context `manager` and the same full matrix results.
    If needed, select the same cluster's desktop-reachable API with `--server`,
    retaining the manager user and trusted CA. Never copy desktop user credentials
-   into the test config. Remove the private file afterwards. Stop on a mismatch.
+   into the test config. With `manager_config` pointing to that private file,
+   repeat M2's subresource checks without impersonation:
+
+   ```sh
+   for namespace in t3code-homelab mcp-hub-homelab t3code-work mcp-hub-work; do
+     printf '%s\n' "$namespace"
+     kubectl --kubeconfig "$manager_config" --context manager auth can-i create pods --subresource=exec -n "$namespace"
+     kubectl --kubeconfig "$manager_config" --context manager auth can-i get pods --subresource=log -n "$namespace"
+     kubectl --kubeconfig "$manager_config" --context manager auth can-i create pods --subresource=portforward -n "$namespace"
+     kubectl --kubeconfig "$manager_config" --context manager auth can-i patch statefulsets.apps --subresource=scale -n "$namespace"
+     kubectl --kubeconfig "$manager_config" --context manager auth can-i patch deployments.apps --subresource=scale -n "$namespace"
+   done
+   ```
+
+   Expect the same homelab exec/log `yes`, work exec/log `no`, and portforward
+   and scale `no` everywhere. Do not use `pods/exec` or other slash forms.
+   Remove the private file afterwards. Stop on a mismatch.
 4. M4: Pause `app-of-apps` automation first, then `t3code`, following the
    [parent-first pause procedure](#input-rotation). Suspend `t3code-idle-rollout`
    in `t3code`. Verify both policies stay disabled, no sync is running and no
@@ -217,7 +251,9 @@ desktop. The manager cannot push, merge, sync or recover its own namespace.
    `MERGED_COMMIT_SHA`. Confirm runtime reconciliation remains paused.
 6. M6: Privately inventory and remove home admin kubeconfigs and duplicates,
    cloud caches, outbound Git/SSH keys, GitHub CLI/login and credential-helper
-   stores, and shell/profile token exports in both the PVC and passwd homes.
+   stores, stale `~/.gitconfig` `credential.helper` and `user` entries,
+   `~/.pi/agent/mcp-auth.json` MCP OAuth tokens, and shell/profile token exports
+   in both the PVC and passwd homes.
    Do not display their contents. Keep inbound public login keys, server host
    keys, the non-credential instruction bundle and model setup. The explicit
    known-file removal, performed only by the owner, is:

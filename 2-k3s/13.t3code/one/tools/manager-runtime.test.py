@@ -94,6 +94,11 @@ path.write_text(text)
                 mount = next(m for m in container['volumeMounts'] if m['name'] == 'manager-kubeconfig')
                 self.assertEqual(mount['mountPath'], '/run/t3-manager')
                 self.assertTrue(mount['readOnly'])
+        refs = {(ref['name'], ref['key'])
+                for container in pod['containers'] + pod.get('initContainers', [])
+                for env in container.get('env', [])
+                if (ref := env.get('valueFrom', {}).get('secretKeyRef'))}
+        self.assertEqual(refs, {('cliproxy-secrets', 'omp-api-key')})
         t3 = next(c for c in pod['containers'] if c['name'] == 't3')
         self.assertIn({'name': 'KUBECONFIG', 'value': '/run/t3-manager/kubeconfig'}, t3['env'])
         self.assertFalse(any(d['kind'] == 'ServiceAccount' and d['metadata']['name'] == 't3code' for d in docs))
@@ -136,7 +141,8 @@ path.write_text(text)
         paths = [self.home / p for p in ('.pi/agent/mcp.json', '.claude.json', '.claude/.claude.json',
                  '.claude/settings.json', '.claude/settings.local.json')]
         for project in (self.project, self.home / '.t3/worktrees/fixture', self.project / 'nested'):
-            paths += [project / '.mcp.json', project / '.claude/settings.json', project / '.claude/settings.local.json']
+            paths += [project / '.mcp.json', project / '.pi/mcp.json',
+                      project / '.claude/settings.json', project / '.claude/settings.local.json']
         for path in paths:
             self.put(path, {'mcpServers': servers, 'enableAllProjectMcpServers': True,
                            'enabledMcpjsonServers': ['legacy'], 'disabledMcpjsonServers': ['custom'],
@@ -191,6 +197,8 @@ path.write_text(text)
                 result = self.run_setup()
                 self.assertNotEqual(result.returncode, 0)
                 self.assertNotIn(marker, result.stdout + result.stderr)
+                self.assertIn(name, result.stderr)
+                self.assertNotIn(str(self.home), result.stderr)
                 self.assertEqual(path.read_text(), data)
                 path.unlink()
         outside = self.root / 'outside.json'
@@ -202,6 +210,32 @@ path.write_text(text)
         self.assertNotIn(marker, result.stdout + result.stderr)
         self.assertTrue(path.is_symlink())
         self.assertIn(marker, outside.read_text())
+
+    def test_in_home_directory_link_is_allowed(self):
+        target = self.home / 'shared'
+        target.mkdir()
+        (self.project / 'shared').symlink_to(target, target_is_directory=True)
+        for _ in range(2):
+            self.configure()
+        self.assertTrue((self.project / 'shared').is_symlink())
+
+    def test_config_named_and_escaping_directory_links_are_refused(self):
+        inside = self.home / 'shared'
+        outside = self.root / 'outside'
+        inside.mkdir()
+        outside.mkdir()
+        for name, target in [('.claude', inside), ('.codex', inside), ('.pi', inside),
+                             ('.mcp.json', inside), ('opencode.json', inside),
+                             ('opencode.jsonc', inside), ('shared', outside)]:
+            with self.subTest(name=name):
+                link = self.project / name
+                link.symlink_to(target, target_is_directory=True)
+                result = self.run_setup()
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(f'project/{name}', result.stderr)
+                self.assertNotIn(str(self.home), result.stderr)
+                self.assertTrue(link.is_symlink())
+                link.unlink()
 
     def run_setup(self):
         return subprocess.run([sys.executable, str(FILES / 'manager-setup.py'), str(self.home), str(self.project),

@@ -42,7 +42,6 @@ if open(os.path.join(here, "mode")).read().strip() == "hang-ssh-add" and sys.arg
     time.sleep(30)
 os.execv("/usr/bin/ssh-add", ["ssh-add", *sys.argv[1:]])
 '''
-ONE = Path(__file__).resolve().parents[1]
 
 
 class VaultSshAgent(unittest.TestCase):
