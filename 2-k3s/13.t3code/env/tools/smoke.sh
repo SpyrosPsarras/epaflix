@@ -116,26 +116,28 @@ const fs=require("node:fs"),backup=process.argv[1]+".before-pi";
 if((fs.statSync(backup).mode&0o777)!==0o600 || !JSON.parse(fs.readFileSync(backup)).providerInstances.opencode)throw Error("migration backup");
 console.log("smoke: project bootstrap, migrated provider selections and private rollback backup verified");' "$T3CODE_HOME/userdata/settings.json"
 python3 - <<'PY'
-import json, os, sys, tomllib
+import json, os, pwd, tomllib
 from pathlib import Path
-sys.path.insert(0, '/scripts')
-import hub_services
 home = Path.home()
-hub = os.environ['MCP_HUB_URL']
 for name in ('.pi/agent/mcp.json', '.claude/.claude.json', '.claude.json', '.codex/config.toml'):
-    text = (home / name).read_text()
-    assert os.environ['MCP_HUB_TOKEN'] not in text, name
+    path = home / name
     codex = name.endswith('.toml')
+    text = path.read_text() if path.exists() else ('' if codex else '{}')
+    assert os.environ['MCP_HUB_TOKEN'] not in text, name
     config = tomllib.loads(text) if codex else json.loads(text)
-    servers = config['mcp_servers' if codex else 'mcpServers']
-    for service, path in hub_services.client_servers().items():
-        entry = servers[service]
-        assert entry['url'] == hub + path, name
-        if codex:
-            assert entry['bearer_token_env_var'] == 'MCP_HUB_TOKEN', name
-        else:
-            assert entry['headers'] == {'Authorization': 'Bearer ${MCP_HUB_TOKEN}'}, name
-print('smoke: Pi, Claude and Codex synthetic MCP hub env references PASS')
+    assert not config.get('mcp_servers' if codex else 'mcpServers'), name
+for name in ('.claude/AGENTS.md', '.codex/AGENTS.md', '.codex/AGENTS.override.md', '.pi/agent/AGENTS.md'):
+    instructions = (home / name).read_text()
+    assert instructions.count('## Manager pod') == 1, name
+    assert '## Homelab SSH' not in instructions, name
+assert (home / '.claude/AGENTS.md').is_symlink()
+assert (home / '.codex/AGENTS.md').is_symlink()
+policy = json.loads((home / '.cc-safety-net/policy.json').read_text())
+denied = policy['secret_protection']['deny_paths']
+for directory in (str(home / '.ssh'), str(Path(pwd.getpwuid(os.getuid()).pw_dir) / '.ssh'),
+                  '/root/.ssh', '/run/t3-github-ssh', '/run/t3-vaultwarden', '/run/t3-bw'):
+    assert directory in denied, directory
+print('smoke: manager MCP maps empty, guidance once and SSH deny paths PASS')
 PY
 }
 check_settings

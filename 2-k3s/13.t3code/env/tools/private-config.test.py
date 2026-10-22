@@ -30,10 +30,10 @@ def overlay(root):
     secret = {'apiVersion': 'v1', 'kind': 'Secret', 'metadata': {
         'name': 't3code-private-config', 'annotations': {'t3code.epaflix.com/private-revision': 'synthetic-v1'}},
         'type': 'Opaque', 'data': {'bundle.json': base64.b64encode(json.dumps(fixture()).encode()).decode()}}
-    hub = {'apiVersion': 'v1', 'kind': 'Secret', 'metadata': {
-        'name': 'mcp-hub-client', 'annotations': {'mcp-hub.epaflix.com/revision': 'hub-v1'}},
-        'type': 'Opaque', 'stringData': {'token': 'synthetic'}}
-    (root / 'synthetic-private.yaml').write_text(yaml.safe_dump_all([secret, hub]))
+    model = {'apiVersion': 'v1', 'kind': 'Secret', 'metadata': {
+        'name': 'cliproxy-secrets', 'annotations': {'t3code.epaflix.com/model-revision': 'model-v1'}},
+        'type': 'Opaque', 'stringData': {'omp-api-key': 'synthetic'}}
+    (root / 'synthetic-private.yaml').write_text(yaml.safe_dump_all([secret, model]))
 
 
 if __name__ == '__main__':

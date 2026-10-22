@@ -38,7 +38,7 @@ PermitOpen 127.0.0.1:3773 localhost:3773
 X11Forwarding no
 PermitTunnel no
 PrintMotd no
-SetEnv HOME=$HOME SSH_AUTH_SOCK=/tmp/t3-ssh-agent/agent.sock PATH=/tools/node_modules/.bin:/usr/local/bin:/usr/bin:/bin
+SetEnv HOME=$HOME KUBECONFIG=/run/t3-manager/kubeconfig PATH=/tools/node_modules/.bin:/usr/local/bin:/usr/bin:/bin
 EOF
   # /etc/profile resets PATH in login shells (`ssh t3code`), dropping the image CLIs.
   printf '%s\n' 'PATH=/tools/node_modules/.bin:$PATH' '[ -r "$HOME/.profile" ] && . "$HOME/.profile"' \

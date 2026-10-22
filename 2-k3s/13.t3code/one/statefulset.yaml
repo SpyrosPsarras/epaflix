@@ -32,9 +32,7 @@ spec:
       annotations:
         kubectl.kubernetes.io/restartedAt: "2026-09-29T19:54:28+02:00"
     spec:
-      # No API token: the vault is reached through the MCP hub now, and the
-      # agents' kubectl uses the kubeconfig in $HOME.
-      serviceAccountName: t3code
+      serviceAccountName: manager-agent
       automountServiceAccountToken: false
       enableServiceLinks: false
       shareProcessNamespace: true
@@ -95,29 +93,8 @@ spec:
                 secretKeyRef:
                   name: cliproxy-secrets
                   key: omp-api-key
-            - name: GITHUB_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: cliproxy-secrets
-                  key: github-token
-            - name: GH_TOKEN
-              value: $(GITHUB_TOKEN)
-            - name: AKS_TENANT_ID
-              valueFrom:
-                secretKeyRef:
-                  name: cliproxy-secrets
-                  key: aks-tenant-id
-                  optional: true
-            # This pod's hub token (client "t3code", 2-k3s/23.mcp-hub); the
-            # entrypoint registers every hub path for Pi, Claude and
-            # Codex in the active home, as an env reference.
-            - name: MCP_HUB_URL
-              value: http://mcp-hub.mcp-hub.svc.cluster.local:8000
-            - name: MCP_HUB_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: mcp-hub-client
-                  key: token
+            - name: KUBECONFIG
+              value: /run/t3-manager/kubeconfig
           ports:
             - name: http
               containerPort: 3773
@@ -141,14 +118,9 @@ spec:
             - name: private-config
               mountPath: /private-agent-config
               readOnly: true
-            - name: github-ssh
-              mountPath: /run/t3-github-ssh
+            - name: manager-kubeconfig
+              mountPath: /run/t3-manager
               readOnly: true
-            - name: vaultwarden
-              mountPath: /run/t3-vaultwarden
-              readOnly: true
-            - name: bw-scratch
-              mountPath: /run/t3-bw
             - name: scripts
               mountPath: /scripts
               readOnly: true
@@ -171,8 +143,8 @@ spec:
             failureThreshold: 3
           resources:
             requests:
-              cpu: "1"
-              memory: "2Gi"
+              cpu: "500m"
+              memory: "1536Mi"
             limits:
               memory: "12Gi"
         # `ssh t3code` and the T3 app's tunnel. Its own container, so a failed
@@ -204,13 +176,12 @@ spec:
               mountPath: /home/spyros/.t3/userdata/server-runtime.json
               subPath: server-runtime.json
               readOnly: true
-            - name: github-ssh
-              mountPath: /run/t3-github-ssh
+            - name: manager-kubeconfig
+              mountPath: /run/t3-manager
               readOnly: true
             - name: scripts
               mountPath: /scripts
               readOnly: true
-            # The vault SSH agent's socket (entrypoint.sh) lives here.
             - name: tmp
               mountPath: /tmp
           # No startup or readiness probe: a not-ready container would take T3
@@ -239,24 +210,13 @@ spec:
           secret:
             secretName: t3code-private-config
             defaultMode: 0440
-        - name: github-ssh
+        - name: manager-kubeconfig
           secret:
-            secretName: t3code-github-ssh
+            secretName: manager-kubeconfig
             defaultMode: 0440
-        # Vaultwarden login for the SSH key agent (files/vault-ssh-agent.py):
-        # client-id, client-secret, password (vaultwarden.enc.yaml). No
-        # password file means no vault keys. Keys load at container start, so restart
-        # the pod after `sops edit` or a key change. bw saves the login in its data dir, so
-        # that goes to memory, never to the node disk.
-        - name: vaultwarden
-          secret:
-            secretName: t3code-vaultwarden
-            defaultMode: 0440
-            optional: true
-        - name: bw-scratch
-          emptyDir:
-            medium: Memory
-            sizeLimit: 16Mi
+            items:
+              - key: kubeconfig
+                path: kubeconfig
         - name: scripts
           configMap:
             name: t3code-scripts
@@ -267,10 +227,3 @@ spec:
           emptyDir:
             medium: Memory
             sizeLimit: 1Mi
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: t3code
-  namespace: t3code
-automountServiceAccountToken: false

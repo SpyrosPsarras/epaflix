@@ -154,6 +154,126 @@ recovery before retrying; do not restore a desktop admin kubeconfig to the
 manager. This helper belongs to the conversion PR, not a separate live rollout.
 The isolated-runtime input rotation procedure below remains unchanged.
 
+## Manager conversion and owner cutover
+
+The manager keeps its existing home, checkout, T3 state, inbound SSH and model
+access. Startup requires `manager-guidance.md`, installs it through the private
+bundle installer, and atomically replaces Codex's override with the same combined
+instructions. Pi uses those instructions without the homelab SSH guide. Manager
+rules override personal preferences. Known agent and project MCP maps and cached
+auto-enable choices are cleared on every boot, including T3 worktrees. Invalid,
+escaping or unsupported alternate configuration stops startup with no config
+contents in diagnostics. Resolve those files privately before retrying.
+
+`KUBECONFIG=/run/t3-manager/kubeconfig` selects the read-only `kubeconfig` key of
+Opaque Secret `manager-kubeconfig` in both T3 and SSH shells. Automatic token
+mounting stays off. The model grant is `cliproxy-secrets/omp-api-key`. There are
+no manager hub registrations, GitHub credentials, vault login or outbound SSH
+identity setup. Removing mounts does not remove old files from the persistent
+home. The owner must establish credential absence before starting the manager.
+
+The approved requests are `500m` CPU and `1536Mi` memory. The observed `0.44` CPU
+and `0.9Gi` memory sample is not a peak measurement. Keep existing limits and the
+`40Gi` PVC, then observe normal use after cutover. PVC shrinking is not in place.
+
+### Owner preparation
+
+Before merge, privately edit `one/cliproxy-secrets.enc.yaml` with SOPS. Remove
+`github-token` and `aks-tenant-id`, keeping only `omp-api-key`. Set the unencrypted
+`t3code.epaflix.com/model-revision` annotation to the SHA-256 of the model key's
+ciphertext field. Update it on each model rotation. Never display plaintext.
+The encrypted-key inventory test remains failing until this owner step is done.
+The conversion cannot be accepted or cut over while it fails.
+
+Record PR and commit references, the pre-cutover revision, replica counts,
+automation policies and idle-rollout suspension state privately outside this
+conversation. Perform every following step from an independently authenticated
+desktop. The manager cannot push, merge, sync or recover its own namespace.
+
+1. M1: Confirm #1946 is accepted, manager access is merged and synced, and the
+   conversion PR passes independent review and CI. Confirm desktop Git merge,
+   Argo sync and `kubectl --context epaflix auth can-i patch statefulsets.apps
+   -n t3code` access. Expect `yes`. Arrange maintenance and end manager sessions.
+   Stop if any independent recovery access is missing.
+2. M2: Verify the full allow/deny matrix from `one/tools/manager-rbac.test.py`
+   through desktop impersonation with ServiceAccount
+   `system:serviceaccount:t3code:manager-agent` and groups `system:authenticated`,
+   `system:serviceaccounts` and `system:serviceaccounts:t3code`. Check named
+   Application get, denied Application list/watch/patch/other-name get, denied
+   work exec/logs/port-forward/Secrets, own namespace and cluster resources.
+   These are authorization requests, not real work-output requests.
+3. M3: Run the reviewed kubeconfig helper with `--context epaflix`. Privately
+   test the real grant from a mode-0600 file outside the repository, without
+   impersonation. Expect context `manager` and the same full matrix results.
+   If needed, select the same cluster's desktop-reachable API with `--server`,
+   retaining the manager user and trusted CA. Never copy desktop user credentials
+   into the test config. Remove the private file afterwards. Stop on a mismatch.
+4. M4: Pause `app-of-apps` automation first, then `t3code`, following the
+   [parent-first pause procedure](#input-rotation). Suspend `t3code-idle-rollout`
+   in `t3code`. Verify both policies stay disabled, no sync is running and no
+   rollout Job is active. Wait for any existing Job to finish. Leave the four
+   managed Applications unchanged.
+5. M5: Merge the reviewed conversion from the desktop and record
+   `MERGED_COMMIT_SHA`. Confirm runtime reconciliation remains paused.
+6. M6: Privately inventory and remove home admin kubeconfigs and duplicates,
+   cloud caches, outbound Git/SSH keys, GitHub CLI/login and credential-helper
+   stores, and shell/profile token exports in both the PVC and passwd homes.
+   Do not display their contents. Keep inbound public login keys, server host
+   keys, the non-credential instruction bundle and model setup. The explicit
+   known-file removal, performed only by the owner, is:
+
+   ```sh
+   kubectl --context epaflix -n t3code exec t3code-0 -c t3 -- sh -c 'rm -f "$HOME/.kube/config"'
+   kubectl --context epaflix -n t3code scale statefulset t3code --replicas=0
+   kubectl --context epaflix -n t3code wait --for=delete pod/t3code-0 --timeout=300s
+   ```
+
+   Stop if private inventory cannot establish credential absence. Selecting a
+   different `KUBECONFIG` does not make a surviving admin file safe.
+7. M7: Wait for merged CI and required image publication, then run:
+
+   ```sh
+   argocd app sync app-of-apps --revision "$MERGED_COMMIT_SHA"
+   argocd app wait t3code --sync --timeout 1200
+   kubectl --context epaflix -n t3code scale statefulset t3code --replicas=1
+   kubectl --context epaflix -n t3code wait --for=condition=Ready pod/t3code-0 --timeout=1200s
+   ```
+
+   Parent sync restores the tracked parent/child policies; child auto-sync
+   applies the conversion and prunes obsolete Secrets. Explicit scale-up is
+   required because the Application ignores `spec.replicas`. Verify the reviewed
+   controller revision. Confirm the legacy hub removes only the manager client
+   and retains its other clients, without displaying inventory values.
+8. M8: Privately confirm the mounted context, repeat the full real-credential
+   authorization matrix, and check only names, modes and env names for grant
+   absence. Verify a harmless model prompt, empty external MCP inventory,
+   manager instructions, inbound SSH/T3 reconnect and the separate idle-rollout
+   account. Check the named Application's automation before any recovery and
+   again immediately before deletion. Missing, disabled or unreadable automation
+   requires an owner decision. Do not pause work Applications or delete real
+   work pods for a smoke test. Instructions are not technical enforcement.
+9. M9: Restore the recorded idle-rollout state. Confirm parent and `t3code`
+   self-heal, then observe `kubectl --context epaflix -n t3code top pod t3code-0
+   --containers` during normal use. Keep sanitized acceptance evidence only.
+
+### Owner rollback
+
+Use desktop context `epaflix`, never credentials found through homelab exec.
+Pause the parent and manager Applications, suspend idle rollout and stop the
+manager before repairing inputs. Keep the home admin credential removed.
+
+For bad access rules, use a reviewed access PR and manually sync
+`t3code-manager-access`; include `--prune` when removing a Role. For a bad
+generated kubeconfig grant, privately repair the mismatch and rerun the helper,
+then repeat real-credential authorization checks. Do not add a temporary broad
+Role or ClusterRoleBinding.
+
+For a runtime regression, use a reviewed revert or forward fix that preserves
+credential removal. Do not restore the mixed manifest or its old mounts. Merge
+from the desktop and use the controlled sync/start sequence above. Restore
+parent/child automation and idle state only after acceptance. Desktop recovery
+must work even when homelab is unavailable.
+
 ## Provider preferences and Codex requirements
 
 Startup retains Pi and Codex display names and Pi's enabled preference.

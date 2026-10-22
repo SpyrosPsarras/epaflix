@@ -45,23 +45,6 @@ os.execv("/usr/bin/ssh-add", ["ssh-add", *sys.argv[1:]])
 ONE = Path(__file__).resolve().parents[1]
 
 
-class Deployment(unittest.TestCase):
-    """The script's file arguments in the entrypoint match the pod's volumes."""
-
-    def test_scratch_is_memory_and_login_is_optional(self):
-        import yaml
-        call = re.search(r"python3 /scripts/vault-ssh-agent.py (\S+) (\S+) (\S+);", (ONE / "files/entrypoint.sh").read_text())
-        creds, sock, scratch = call.groups()
-        self.assertTrue(sock.startswith("/tmp/"))
-        pod = next(d for d in yaml.safe_load_all((ONE / "statefulset.yaml").read_text()) if d["kind"] == "StatefulSet")
-        spec = pod["spec"]["template"]["spec"]
-        mounts = {m["mountPath"]: m["name"] for m in spec["containers"][0]["volumeMounts"]}
-        volumes = {v["name"]: v for v in spec["volumes"]}
-        self.assertEqual(volumes[mounts[scratch]]["emptyDir"]["medium"], "Memory", "bw saves the API secret here")
-        secret = volumes[mounts[creds]]["secret"]
-        self.assertEqual((secret["secretName"], secret.get("optional")), ("t3code-vaultwarden", True))
-
-
 class VaultSshAgent(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

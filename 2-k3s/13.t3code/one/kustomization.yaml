@@ -19,7 +19,7 @@ resources:
 configMapGenerator:
   - name: t3code-machine-info
     literals:
-      - 'machine-info=PRETTY_HOSTNAME="mixed (legacy)"'
+      - 'machine-info=PRETTY_HOSTNAME="manager"'
   # Not in t3code-scripts: the job pipes t3-idle.py into the running pod, which
   # may predate it, and a new file there would itself wait for a rollout.
   - name: t3code-idle-rollout
@@ -36,14 +36,9 @@ configMapGenerator:
       - files/cc-safety-net.patch
       - files/cc-safety-net-hashes.json
       - files/private-config.py
-      - files/git-credential-github.sh
-      - files/hub_clients.py
-      - files/hub_services.py
+      - files/manager-setup.py
+      - files/manager-guidance.md
       - files/ssh-policy.py
-      - files/vault-ssh-agent.py
-      - files/vault-run.py
-      - files/homelab-ssh.conf
-      - files/homelab-ssh.md
       - files/sshd-authorized-keys
       - files/sshd.sh
       - files/ssh-config.sh
@@ -64,17 +59,16 @@ replacements:
           - spec.template.metadata.annotations.[t3code.epaflix.com/private-revision]
         options:
           create: true
-  # MCP_HUB_TOKEN is env; a new pod token (23.mcp-hub/tools/add-client.py t3code) rolls T3.
   - source:
       kind: Secret
-      name: mcp-hub-client
-      fieldPath: metadata.annotations.[mcp-hub.epaflix.com/revision]
+      name: cliproxy-secrets
+      fieldPath: metadata.annotations.[t3code.epaflix.com/model-revision]
     targets:
       - select:
           kind: StatefulSet
           name: t3code
         fieldPaths:
-          - spec.template.metadata.annotations.[mcp-hub.epaflix.com/token-revision]
+          - spec.template.metadata.annotations.[t3code.epaflix.com/model-revision]
         options:
           create: true
   - source:

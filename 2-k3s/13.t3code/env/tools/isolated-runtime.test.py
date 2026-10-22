@@ -114,7 +114,7 @@ class RuntimeTests(unittest.TestCase):
         path.write_text(json.dumps(obj))
         refresh(self.inputs)
 
-    def test_image_guidance_reaches_all_instruction_files_without_input_rotation(self):
+    def test_isolated_instructions_keep_their_ssh_guides(self):
         payload = (self.inputs / 'bundle.json').read_bytes()
         guidance = (ROOT / 'env/files/isolated-guidance.md').read_text()
         source = base64.b64decode(json.loads(payload)['files']['instructions.md']['data']).decode()
@@ -129,6 +129,12 @@ class RuntimeTests(unittest.TestCase):
             for name in ('.claude/AGENTS.md', '.codex/AGENTS.md'):
                 self.assertEqual((self.home / name).read_text(), expected)
             self.assertEqual((self.home / '.pi/agent/AGENTS.md').read_text(), expected + '\n' + ssh.read_text())
+            self.assertIn(ssh.read_text(), (self.home / '.pi/agent/AGENTS.md').read_text())
+            append = next(line for line in (ROOT / 'env/files/isolated-entrypoint.sh').read_text().splitlines()
+                          if line.startswith('cat ') and 'AGENTS.override.md' in line)
+            subprocess.run(['bash', '-eu', '-c', append], check=True,
+                           env={**os.environ, 'HOME': str(self.home), 'ssh_instructions': str(ssh)})
+            self.assertIn(ssh.read_text(), (self.home / '.codex/AGENTS.override.md').read_text())
             self.assertEqual((self.inputs / 'bundle.json').read_bytes(), payload)
 
     def test_google_inventory_digest_mismatch_stops_startup(self):
@@ -720,7 +726,7 @@ nested = {"🏠" = ["fixture", {enabled = false}]}
             for name in ('13.t3code', '13.t3code-homelab', '13.t3code-work'):
                 shutil.copytree(ROOT.parent / name, tree / name, ignore=shutil.ignore_patterns('__pycache__'))
             private_fixture.overlay(tree / '13.t3code/one')
-            for overlay, label in (('13.t3code/one', 'mixed (legacy)'),
+            for overlay, label in (('13.t3code/one', 'manager'),
                                    ('13.t3code-homelab', 'homelab'), ('13.t3code-work', 'work')):
                 with self.subTest(overlay=overlay):
                     directory = tree / overlay
