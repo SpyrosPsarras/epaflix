@@ -9,8 +9,13 @@ on:
 permissions:
   contents: read
 
+env:
+  KUSTOMIZE_VERSION: 5.8.3  # renovate: datasource=github-releases depName=kubernetes-sigs/kustomize
+  HELM_VERSION: 4.3.1  # renovate: datasource=github-releases depName=helm/helm
+  PROMTOOL_VERSION: 3.15.1  # renovate: datasource=github-releases depName=prometheus/prometheus
+
 jobs:
-  validate:
+  checks:
     if: >-
       github.event_name == 'push' ||
       github.event.pull_request.head.repo.full_name == github.repository
@@ -69,49 +74,7 @@ jobs:
           ./.github/hooks/check-sops-encrypted.sh --full-tree
 
       - name: Install tools
-        run: |
-          set -euo pipefail
-          KUSTOMIZE_VERSION=5.8.3  # renovate: datasource=github-releases depName=kubernetes-sigs/kustomize
-          HELM_VERSION=4.3.1      # renovate: datasource=github-releases depName=helm/helm
-          PROMTOOL_VERSION=3.15.1  # renovate: datasource=github-releases depName=prometheus/prometheus
-
-          dl() {
-            url=$1; out=$2; n=0
-            until curl -fsSL -o "$out" "$url"; do
-              n=$((n+1))
-              if [ "$n" -ge 3 ]; then
-                echo "download failed after 3 attempts: $url" >&2
-                return 1
-              fi
-              sleep $((n*5))
-            done
-          }
-
-          tmp=$(mktemp -d)
-
-          helm_tgz="helm-v${HELM_VERSION}-linux-amd64.tar.gz"
-          dl "https://get.helm.sh/${helm_tgz}" "$tmp/${helm_tgz}"
-          dl "https://get.helm.sh/${helm_tgz}.sha256sum" "$tmp/${helm_tgz}.sha256sum"
-          ( cd "$tmp" && sha256sum -c "${helm_tgz}.sha256sum" )
-          tar -xzf "$tmp/${helm_tgz}" -C "$tmp"
-          sudo mv "$tmp/linux-amd64/helm" /usr/local/bin/helm
-
-          dl "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv${KUSTOMIZE_VERSION}/kustomize_v${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" "$tmp/kustomize.tar.gz"
-          tar -xzf "$tmp/kustomize.tar.gz" -C "$tmp"
-          sudo mv "$tmp/kustomize" /usr/local/bin/kustomize
-
-          prom_tgz="prometheus-${PROMTOOL_VERSION}.linux-amd64.tar.gz"
-          prom_url="https://github.com/prometheus/prometheus/releases/download/v${PROMTOOL_VERSION}"
-          dl "${prom_url}/${prom_tgz}" "$tmp/${prom_tgz}"
-          dl "${prom_url}/sha256sums.txt" "$tmp/prom-sha256sums.txt"
-          ( cd "$tmp" && grep " ${prom_tgz}\$" prom-sha256sums.txt | sha256sum -c - )
-          tar -xzf "$tmp/${prom_tgz}" -C "$tmp" "prometheus-${PROMTOOL_VERSION}.linux-amd64/promtool"
-          sudo mv "$tmp/prometheus-${PROMTOOL_VERSION}.linux-amd64/promtool" /usr/local/bin/promtool
-
-          rm -rf "$tmp"
-          helm version
-          kustomize version
-          promtool --version
+        run: bash .github/scripts/install-ci-tools.sh helm kustomize promtool
 
       - name: Alert rule tests (promtool)
         run: |
@@ -319,6 +282,39 @@ jobs:
           bash -n 2-k3s/26.vaultwarden/org-setup/run-job.sh
           python3 -m py_compile 2-k3s/26.vaultwarden/org-setup/prepare.py 2-k3s/26.vaultwarden/org-setup/render-job.py 2-k3s/26.vaultwarden/org-setup/tests/*.py
 
+      - name: MCP hub selftest
+        run: |
+          set -euo pipefail
+          # Same pin as 2-k3s/23.mcp-hub/deployment.yaml and vaultwarden-mcp.yaml.
+          python3 -m venv /tmp/mcp-hub && /tmp/mcp-hub/bin/pip install -q --disable-pip-version-check mcp==2.2.0 -r .github/hooks/requirements.txt
+          /tmp/mcp-hub/bin/python 2-k3s/23.mcp-hub/files/mcp_hub.py --selftest
+          /tmp/mcp-hub/bin/python 2-k3s/23.mcp-hub/files/vaultwarden_mcp.py --selftest
+          python3 2-k3s/23.mcp-hub/tools/hub_clients.py --selftest
+          /tmp/mcp-hub/bin/python -m unittest discover -s 2-k3s/23.mcp-hub/tests -v
+          # The t3code pod's copy of hub_clients.py (and the other shared inputs) must not drift.
+          bash 2-k3s/13.t3code/one/tools/sync-shared.sh --check
+
+      - name: Google Workspace pinned-image contract
+        env:
+          WORKSPACE_MCP_IMAGE_TEST: "1"
+        run: |
+          set -euo pipefail
+          /tmp/mcp-hub/bin/python -m unittest discover -s 2-k3s/23.mcp-hub/tests -p test_google.py -v
+
+  t3-tests:
+    if: >-
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install test dependencies
+        run: |
+          python3 -m pip install --disable-pip-version-check \
+            -r .github/hooks/requirements.txt
+          bash .github/scripts/install-ci-tools.sh helm kustomize
+
       - name: T3 config and placement tests
         run: |
           set -euo pipefail
@@ -371,28 +367,44 @@ jobs:
           sudo -n "$(command -v python3)" 2-k3s/13.t3code/env/tools/homelab-ssh.test.py \
             AgentTests.test_uid_1000_signs_through_uid_1001_proxy_but_not_direct_agent -v
 
-      - name: MCP hub selftest
-        run: |
-          set -euo pipefail
-          # Same pin as 2-k3s/23.mcp-hub/deployment.yaml and vaultwarden-mcp.yaml.
-          python3 -m venv /tmp/mcp-hub && /tmp/mcp-hub/bin/pip install -q --disable-pip-version-check mcp==2.2.0 -r .github/hooks/requirements.txt
-          /tmp/mcp-hub/bin/python 2-k3s/23.mcp-hub/files/mcp_hub.py --selftest
-          /tmp/mcp-hub/bin/python 2-k3s/23.mcp-hub/files/vaultwarden_mcp.py --selftest
-          python3 2-k3s/23.mcp-hub/tools/hub_clients.py --selftest
-          /tmp/mcp-hub/bin/python -m unittest discover -s 2-k3s/23.mcp-hub/tests -v
-          # The t3code pod's copy of hub_clients.py (and the other shared inputs) must not drift.
-          bash 2-k3s/13.t3code/one/tools/sync-shared.sh --check
-
-      - name: Google Workspace pinned-image contract
-        env:
-          WORKSPACE_MCP_IMAGE_TEST: "1"
-        run: |
-          set -euo pipefail
-          /tmp/mcp-hub/bin/python -m unittest discover -s 2-k3s/23.mcp-hub/tests -p test_google.py -v
+  smoke:
+    if: >-
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [mixed, homelab, work]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: T3 install and runtime smoke
         timeout-minutes: 75
+        env:
+          VARIANT: ${{ matrix.variant }}
         run: |
-          bash 2-k3s/13.t3code/env/tools/smoke.sh
-          T3_RUNTIME_VARIANT=homelab bash 2-k3s/13.t3code/env/tools/smoke.sh
-          T3_RUNTIME_VARIANT=work bash 2-k3s/13.t3code/env/tools/smoke.sh
+          if [[ $VARIANT == mixed ]]; then
+            bash 2-k3s/13.t3code/env/tools/smoke.sh
+          else
+            T3_RUNTIME_VARIANT="$VARIANT" bash 2-k3s/13.t3code/env/tools/smoke.sh
+          fi
+
+  validate:
+    needs: [checks, t3-tests, smoke]
+    if: >-
+      always() &&
+      (github.event_name == 'push' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all validation jobs to succeed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json, os, sys
+          results = {name: job['result'] for name, job in json.loads(os.environ['NEEDS']).items()}
+          print(results)
+          sys.exit(not all(result == 'success' for result in results.values()))
+          PY
