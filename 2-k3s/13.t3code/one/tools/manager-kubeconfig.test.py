@@ -39,6 +39,7 @@ class FakeKubectl:
             'metadata': {'name': 'manager-agent', 'namespace': 't3code'},
             'automountServiceAccountToken': False}}
         self.calls = []
+        self.violations = []
         self.created = []
         self.populate = True
         self.delay = 0
@@ -49,8 +50,10 @@ class FakeKubectl:
 
     def __call__(self, argv, *, input=None, capture_output=False, timeout=None):
         if argv[:5] != ['kubectl', '--context', 'epaflix', '-n', 't3code']:
+            self.violations.append('Unexpected context or namespace')
             raise AssertionError('Unexpected context or namespace')
         if not capture_output or not timeout or timeout > 30:
+            self.violations.append('Subprocess must capture output and have a bounded timeout')
             raise AssertionError('Subprocess must capture output and have a bounded timeout')
         self.calls.append(argv)
         args = argv[5:]
@@ -61,8 +64,10 @@ class FakeKubectl:
         if args[0] == 'get':
             if args[1:3] not in (['serviceaccount', 'manager-agent'],
                                   ['secret', 'manager-agent-kubeconfig'], ['secret', 'manager-kubeconfig']):
+                self.violations.append('Unexpected resource read')
                 raise AssertionError('Unexpected resource read')
             if args[3:] != ['--ignore-not-found', '-o', 'json']:
+                self.violations.append('Unexpected get arguments')
                 raise AssertionError('Unexpected get arguments')
             resource = self.resources.get(tuple(args[1:3]))
             if args[1:3] == ['secret', 'manager-agent-kubeconfig'] and resource:
@@ -76,6 +81,7 @@ class FakeKubectl:
                 return subprocess.CompletedProcess(argv, 1, DIAGNOSTIC, TOKEN + CA)
             resource = json.loads(input)
             if resource['kind'] != 'Secret' or resource['metadata']['namespace'] != 't3code':
+                self.violations.append('Only t3code Secrets may be created')
                 raise AssertionError('Only t3code Secrets may be created')
             key = ('secret', resource['metadata']['name'])
             if key in self.resources:
@@ -83,6 +89,7 @@ class FakeKubectl:
             self.created.append(copy.deepcopy(resource))
             self.resources[key] = resource
             return subprocess.CompletedProcess(argv, 0, DIAGNOSTIC, DIAGNOSTIC)
+        self.violations.append('Unexpected mutation')
         raise AssertionError('Unexpected mutation')
 
 
@@ -91,6 +98,9 @@ class ManagerKubeconfigTest(unittest.TestCase):
         self.module = importlib.util.module_from_spec(SPEC)
         SPEC.loader.exec_module(self.module)
         self.cluster = FakeKubectl()
+
+    def tearDown(self):
+        self.assertEqual(self.cluster.violations, [])
 
     def existing_grant(self):
         self.cluster.resources[('secret', 'manager-kubeconfig')] = {
@@ -208,6 +218,7 @@ class ManagerKubeconfigTest(unittest.TestCase):
                         grant['data']['kubeconfig'] = encoded(b'not json')
                 before = copy.deepcopy(self.cluster.resources[('secret', 'manager-kubeconfig')])
                 code, stdout, stderr, sleep = self.invoke_cli()
+                self.assertEqual(self.cluster.violations, [])
                 self.assertNotEqual(code, 0)
                 self.assertEqual(stdout, '')
                 self.assertTrue(stderr)
@@ -228,6 +239,7 @@ class ManagerKubeconfigTest(unittest.TestCase):
         for args in ([], ['--context', ''], ['--context', '   ']):
             with self.subTest(args=args):
                 code, stdout, _, _ = self.invoke_cli(args)
+                self.assertEqual(self.cluster.violations, [])
                 self.assertNotEqual(code, 0)
                 self.assertEqual(stdout, '')
                 self.assertEqual(self.cluster.calls, [])
