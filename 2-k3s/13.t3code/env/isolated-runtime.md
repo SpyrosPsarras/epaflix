@@ -151,8 +151,7 @@ never print or paste Secret values into agent sessions or public evidence.
 There is no automatic rotation or replacement. Leave the manager stopped if
 provisioning fails. Resolve any mismatched grant through an owner-reviewed
 recovery before retrying; do not restore a desktop admin kubeconfig to the
-manager. This helper belongs to the conversion PR, not a separate live rollout.
-The isolated-runtime input rotation procedure below remains unchanged.
+manager.
 
 ## Manager conversion and owner cutover
 
@@ -178,19 +177,17 @@ and `0.9Gi` memory sample is not a peak measurement. Keep existing limits and th
 
 ### Owner preparation
 
-Before merge, privately edit `one/cliproxy-secrets.enc.yaml` with SOPS. Remove
-`github-token` and `aks-tenant-id`, keeping only `omp-api-key`. Never display
-plaintext. After a model-key rotation, the owner restarts the manager from a
-desktop by running `kubectl --context epaflix -n t3code delete pod t3code-0`.
-The encrypted-key inventory test remains failing until this owner step is done.
-The conversion cannot be accepted or cut over while it fails.
+The owner completed the SOPS edit. `one/cliproxy-secrets.enc.yaml` now holds
+only `omp-api-key`. Never display plaintext. After a model-key rotation, the
+owner restarts the manager from a desktop by running
+`kubectl --context epaflix -n t3code delete pod t3code-0`.
 
 Record PR and commit references, the pre-cutover revision, replica counts,
 automation policies and idle-rollout suspension state privately outside this
 conversation. Perform every following step from an independently authenticated
 desktop. The manager cannot push, merge, sync or recover its own namespace.
 
-1. M1: Confirm #1946 is accepted, manager access is merged and synced, and the
+1. M1: Confirm manager access is merged and synced, and the
    conversion PR passes independent review and CI. Confirm desktop Git merge,
    Argo sync and `kubectl --context epaflix auth can-i patch statefulsets.apps
    -n t3code` access. Expect `yes`. Arrange maintenance and end manager sessions.
@@ -219,7 +216,34 @@ desktop. The manager cannot push, merge, sync or recover its own namespace.
 
    Expect exec/log `yes` in both homelab namespaces and `no` in both work
    namespaces. Expect portforward and both scale checks `no` everywhere.
-   A denied check exits nonzero; do not run this loop with `set -e`.
+   A denied check exits nonzero; do not run these loops with `set -e`.
+   Run the remaining resource checks below. Each `printf` gives the expected
+   answer for the following command:
+
+   ```sh
+   for namespace in t3code-homelab mcp-hub-homelab t3code-work mcp-hub-work; do
+     printf '%s get secrets: expect no\n' "$namespace"
+     kubectl --context epaflix --as=system:serviceaccount:t3code:manager-agent --as-group=system:authenticated --as-group=system:serviceaccounts --as-group=system:serviceaccounts:t3code auth can-i get secrets -n "$namespace"
+   done
+   for namespace in t3code default kube-system; do
+     printf '%s delete pods: expect no\n' "$namespace"
+     kubectl --context epaflix --as=system:serviceaccount:t3code:manager-agent --as-group=system:authenticated --as-group=system:serviceaccounts --as-group=system:serviceaccounts:t3code auth can-i delete pods -n "$namespace"
+   done
+   printf 'list nodes: expect no\n'
+   kubectl --context epaflix --as=system:serviceaccount:t3code:manager-agent --as-group=system:authenticated --as-group=system:serviceaccounts --as-group=system:serviceaccounts:t3code auth can-i list nodes
+   for application in t3code-homelab mcp-hub-homelab t3code-work mcp-hub-work; do
+     printf '%s get Application: expect yes\n' "$application"
+     kubectl --context epaflix --as=system:serviceaccount:t3code:manager-agent --as-group=system:authenticated --as-group=system:serviceaccounts --as-group=system:serviceaccounts:t3code auth can-i get "applications.argoproj.io/$application" -n argocd
+   done
+   for application in app-of-apps t3code; do
+     printf '%s get Application: expect no\n' "$application"
+     kubectl --context epaflix --as=system:serviceaccount:t3code:manager-agent --as-group=system:authenticated --as-group=system:serviceaccounts --as-group=system:serviceaccounts:t3code auth can-i get "applications.argoproj.io/$application" -n argocd
+   done
+   printf 'list Applications: expect no\n'
+   kubectl --context epaflix --as=system:serviceaccount:t3code:manager-agent --as-group=system:authenticated --as-group=system:serviceaccounts --as-group=system:serviceaccounts:t3code auth can-i list applications.argoproj.io -n argocd
+   printf 't3code-work delete pods: expect yes\n'
+   kubectl --context epaflix --as=system:serviceaccount:t3code:manager-agent --as-group=system:authenticated --as-group=system:serviceaccounts --as-group=system:serviceaccounts:t3code auth can-i delete pods -n t3code-work
+   ```
 3. M3: Run the reviewed kubeconfig helper with `--context epaflix`. Privately
    test the real grant from a mode-0600 file outside the repository, without
    impersonation. Expect context `manager` and the same full matrix results.

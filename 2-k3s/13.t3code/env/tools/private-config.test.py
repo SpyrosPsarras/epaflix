@@ -31,7 +31,7 @@ def overlay(root):
         'name': 't3code-private-config', 'annotations': {'t3code.epaflix.com/private-revision': 'synthetic-v1'}},
         'type': 'Opaque', 'data': {'bundle.json': base64.b64encode(json.dumps(fixture()).encode()).decode()}}
     model = {'apiVersion': 'v1', 'kind': 'Secret', 'metadata': {
-        'name': 'cliproxy-secrets', 'annotations': {'t3code.epaflix.com/model-revision': 'model-v1'}},
+        'name': 'cliproxy-secrets'},
         'type': 'Opaque', 'stringData': {'omp-api-key': 'synthetic'}}
     (root / 'synthetic-private.yaml').write_text(yaml.safe_dump_all([secret, model]))
 
