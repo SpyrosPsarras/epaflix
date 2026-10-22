@@ -37,6 +37,8 @@ There is no system pip. For Python packages, create a virtual environment with `
 A thread resumed after a pod restart may lack T3 delegation tools such as `delegate_task`, `task_status`, and `orchestrator_capabilities`; if so, write a handoff file and ask the owner to continue in a new thread instead of working without subagents.
 
 T3 `delegate_task` works with `providerInstanceId: pi` and model IDs
-`cliproxy/<route>/<model>`, such as `cliproxy/codex/gpt-6.1-sol` or
-`cliproxy/claude/claude-opus-5-5`; the Codex instance is disabled here because
-its discovered bare model IDs fail CLIProxy routing.
+`cliproxy/<route>/<model>`. Call `orchestrator_capabilities` before the first
+delegation and pass a model ID exactly as that list prints it. Do not guess
+public Anthropic or OpenAI names from memory; the catalogue is served by
+CLIProxy and its names and set change often. The Codex instance is disabled
+here because its discovered bare model IDs fail CLIProxy routing.
