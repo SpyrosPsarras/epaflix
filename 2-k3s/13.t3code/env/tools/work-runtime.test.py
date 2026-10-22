@@ -448,7 +448,9 @@ class WorkRuntimeTests(unittest.TestCase):
         self.assertEqual(allowed, {'versions.env', 'env/', 'env/Dockerfile', 'env/tools/',
             'env/tools/os-packages.txt', 'env/tools/install-cluster-tools.sh',
             'env/tools/package.json', 'env/tools/package-lock.json',
-            'env/files/', 'env/files/vault-client.py', 'env/files/isolated-guidance.md'})
+            'env/files/', 'env/files/vault-client.py', 'env/files/isolated-guidance.md',
+            'one/', 'one/files/', 'one/files/cc-safety-net-install.py',
+            'one/files/cc-safety-net.patch', 'one/files/cc-safety-net-hashes.json'})
 
     def test_gitops_work_overlay_and_jobs_are_independent_and_revision_tracked(self):
         import yaml

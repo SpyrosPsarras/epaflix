@@ -387,27 +387,26 @@ class InstanceTests(unittest.TestCase):
                     self.assertEqual(cmd[-2:], ["--bearer-token-env-var", "FIXTURE_TOKEN"])
 
     def test_instance_entrypoints_fail_closed_before_starting_agents(self):
-        for location in ("one", "env"):
-            source = (ROOT / "2-k3s/13.t3code" / location / "files/entrypoint.sh").read_text()
-            prefix = source[:source.index("T3_PROJECT_REPO=${")]
-            start = source.index('if [[ -n ${MCP_HUB_TOKEN:-}')
-            block = source[start:source.index("T3_HOME=$HOME/.t3", start)]
-            block = block.replace("python3 /scripts/hub_clients.py", sys.executable + " " + str(HUB / "tools/hub_clients.py"))
-            script = prefix + block + '\nprintf "agents-started"\n'
-            for options in ({"MCP_HUB_INSTANCE": "work"},
-                            {"MCP_HUB_SERVICES_FILE": str(self.home / "missing")},
-                            {"MCP_HUB_INSTANCE": "work", "MCP_HUB_TOKEN": "work.fixture-client",
-                             "MCP_HUB_URL": "https://work.example.test"},
-                            {"MCP_HUB_SERVICES_FILE": str(self.home / "missing"),
-                             "MCP_HUB_TOKEN": "work.fixture-client", "MCP_HUB_URL": "https://work.example.test"}):
-                result = subprocess.run(["bash", "-c", script], capture_output=True, text=True,
-                                        env={"PATH": os.environ["PATH"], "HOME": str(self.home), **options})
-                self.assertNotEqual(result.returncode, 0)
-                self.assertNotIn("agents-started", result.stdout)
+        source = (ROOT / "2-k3s/13.t3code/one/files/entrypoint.sh").read_text()
+        prefix = source[:source.index("T3_PROJECT_REPO=${")]
+        start = source.index('if [[ -n ${MCP_HUB_TOKEN:-}')
+        block = source[start:source.index("T3_HOME=$HOME/.t3", start)]
+        block = block.replace("python3 /scripts/hub_clients.py", sys.executable + " " + str(HUB / "tools/hub_clients.py"))
+        script = prefix + block + '\nprintf "agents-started"\n'
+        for options in ({"MCP_HUB_INSTANCE": "work"},
+                        {"MCP_HUB_SERVICES_FILE": str(self.home / "missing")},
+                        {"MCP_HUB_INSTANCE": "work", "MCP_HUB_TOKEN": "work.fixture-client",
+                         "MCP_HUB_URL": "https://work.example.test"},
+                        {"MCP_HUB_SERVICES_FILE": str(self.home / "missing"),
+                         "MCP_HUB_TOKEN": "work.fixture-client", "MCP_HUB_URL": "https://work.example.test"}):
             result = subprocess.run(["bash", "-c", script], capture_output=True, text=True,
-                                    env={"PATH": os.environ["PATH"], "HOME": str(self.home)})
-            self.assertEqual(result.returncode, 0)
-            self.assertIn("agents-started", result.stdout)
+                                    env={"PATH": os.environ["PATH"], "HOME": str(self.home), **options})
+            self.assertNotEqual(result.returncode, 0)
+            self.assertNotIn("agents-started", result.stdout)
+        result = subprocess.run(["bash", "-c", script], capture_output=True, text=True,
+                                env={"PATH": os.environ["PATH"], "HOME": str(self.home)})
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("agents-started", result.stdout)
 
     def test_instance_vault_runner_never_reads_legacy_key_or_calls_vault(self):
         spec = importlib.util.spec_from_file_location("vault_run", ROOT / "2-k3s/13.t3code/one/files/vault-run.py")

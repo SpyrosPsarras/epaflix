@@ -1,5 +1,10 @@
 **
 !versions.env
+!one/
+!one/files/
+!one/files/cc-safety-net-install.py
+!one/files/cc-safety-net.patch
+!one/files/cc-safety-net-hashes.json
 !env/
 !env/Dockerfile
 !env/tools/
