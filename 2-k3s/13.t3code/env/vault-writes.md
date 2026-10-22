@@ -75,9 +75,11 @@ deletion error can leave duplicate attachments or an uncertain deletion result.
 Inspect and resolve these privately before retrying.
 
 Successful writes print JSON containing only `status`, `itemId` and, for
-attachments, `attachmentId`. Errors print a fixed refusal, cancellation or
-timeout status, or an uncertain-write status with the known IDs. The client does
-not print item names, JSON, file contents, API responses or tracebacks.
+attachments, `attachmentId`. Errors print a refusal naming only the exception
+type and the chain of client functions and lines it came through, a cancellation or timeout
+status, or an uncertain-write status with the known IDs. The client does not
+print item names, JSON, file contents, API responses, exception messages or
+tracebacks.
 `vault trash` is reversible. There is no general permanent-delete command in
 the agent client.
 

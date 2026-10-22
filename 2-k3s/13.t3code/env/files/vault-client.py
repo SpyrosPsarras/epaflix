@@ -19,6 +19,7 @@ import sys
 import tempfile
 import threading
 import time
+import traceback
 import urllib.error
 import urllib.request
 from urllib.parse import quote, urlencode, urlsplit
@@ -780,8 +781,11 @@ def main(argv):
     except Cancelled:
         print('vault: cancelled; exit code 130')
         return 130
-    except Exception:
-        print('vault: request or startup refused', file=sys.stderr)
+    except Exception as error:
+        # Type and own-file call chain only: no exception text, which could carry vault data.
+        chain = ' > '.join(f'{f.name}:{f.lineno}' for f in traceback.extract_tb(error.__traceback__)
+                           if f.filename == __file__)
+        print(f'vault: request or startup refused ({type(error).__name__} at {chain})', file=sys.stderr)
         return 1
 
 
