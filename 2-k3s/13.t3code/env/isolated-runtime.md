@@ -118,6 +118,42 @@ external credential files and insecure TLS are rejected. `KUBECONFIG` selects
 the read-only Secret projection. Actual resource permissions come from the
 separately tracked homelab RBAC, not the file's mount mode.
 
+## Manager kubeconfig
+
+The manager uses only the tracked `t3code/manager-agent` ServiceAccount and its
+separately synced manager access Roles. It does not create RBAC or change the
+homelab or work grants. Its kubeconfig has one `manager` context, the
+`manager-agent` user, an inline token and CA, and the in-cluster Kubernetes
+HTTPS service address. It has no exec plugin, external credential path or
+insecure TLS setting. The file format does not grant permissions; the tracked
+manager RBAC does.
+
+OWNER: after syncing the tracked manager access Application and before
+restarting the manager, run the reviewed helper from the desktop, from the
+repository root:
+
+```sh
+python3 2-k3s/13.t3code/one/tools/manager-kubeconfig.py --context epaflix
+```
+
+`epaflix` selects the owner's desktop admin context, not the manager's new
+context. The helper requires an explicit context and never falls back to the
+current context. It creates `manager-agent-kubeconfig` as a ServiceAccount token
+Secret, waits at most 30 attempts with one-second intervals for its token and
+CA, and creates Opaque Secret `manager-kubeconfig` with only the `kubeconfig`
+key. All Secret values stay in memory and captured subprocess input/output.
+Successful output is only `Manager kubeconfig prepared.`
+
+An identical existing grant is left unchanged. A different grant, missing
+account, missing token-controller data or Kubernetes failure stops provisioning
+with a generic error. Check resource presence and any existing grant privately;
+never print or paste Secret values into agent sessions or public evidence.
+There is no automatic rotation or replacement. Leave the manager stopped if
+provisioning fails. Resolve any mismatched grant through an owner-reviewed
+recovery before retrying; do not restore a desktop admin kubeconfig to the
+manager. This helper belongs to the conversion PR, not a separate live rollout.
+The isolated-runtime input rotation procedure below remains unchanged.
+
 ## Provider preferences and Codex requirements
 
 Startup retains Pi and Codex display names and Pi's enabled preference.
