@@ -41,6 +41,8 @@ COPY env/files/isolated-guidance.md /opt/t3/isolated-guidance.md
 COPY env/files/vault-client.py /tmp/vault-client.py
 RUN if [ "$T3_RUNTIME_VARIANT" = homelab ] || [ "$T3_RUNTIME_VARIANT" = work ]; then install -m 0555 /tmp/vault-client.py /usr/local/bin/vault; fi \
     && rm /tmp/vault-client.py
+# The vault sidecar runs as uid 1001. OpenSSH tools (ssh-keygen validates work host keys) refuse a uid without a passwd entry.
+RUN if [ "$T3_RUNTIME_VARIANT" != mixed ]; then groupadd -g 1001 vault && useradd -u 1001 -g 1001 -M -d /vault -s /usr/sbin/nologin vault; fi
 ENV HOME=/home/t3
 RUN mkdir -p /home/t3 && chown 1000:1000 /home/t3 \
     && if [ "$T3_RUNTIME_VARIANT" != mixed ]; then mkdir -m 0700 /etc/codex && chown 1000:1000 /etc/codex; fi
