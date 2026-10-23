@@ -5,9 +5,11 @@ import io
 import json
 import os
 from pathlib import Path
+import signal
 import subprocess
 import tarfile
 import tempfile
+import time
 import unittest
 
 import yaml
@@ -15,30 +17,37 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 BUILD = ROOT / 'env/files/t3-build.py'
 RUN = ROOT / 'env/files/t3-run.sh'
-TEMPLATE = ROOT.parent / '29.t3-build/files/kaniko-job.yaml'
+TEMPLATE = ROOT.parent / '29.t3-build/base/files/kaniko-job.yaml'
 DOCKER_CONFIG = '{"auths": {"registry.example": {"auth": "c3ludGhldGljLWNyZWRlbnRpYWw="}}}'
 
 FAKE = r'''#!/usr/bin/env python3
-import json, os, sys
+import json, os, sys, time
 state = os.environ['FAKE_DIR']
 argv = sys.argv[1:]
 data = sys.stdin.buffer.read() if '-f' in argv or 'run' in argv else b''
 with open(os.path.join(state, 'calls.jsonl'), 'a') as calls:
     calls.write(json.dumps({'argv': argv, 'stdin': data.decode(errors='replace')}) + '\n')
-args = argv[4:]
+args = argv[2:]
 if args[:3] == ['get', 'configmap', 'kaniko-job']:
     sys.stdout.write(open(os.environ['FAKE_TEMPLATE']).read())
 elif args[:3] == ['create', '-f', '-']:
     if os.environ.get('FAKE_FAIL_CREATE') and os.environ['FAKE_FAIL_CREATE'] in data.decode():
         sys.exit('synthetic create failure')
+    if '-o' in args:
+        sys.stdout.write('synthetic-uid')
 elif args[:1] == ['logs']:
     print('synthetic kaniko log')
 elif args[:2] == ['get', 'job']:
-    sys.stdout.write(os.environ.get('FAKE_STATUS', '1,'))
+    sys.stdout.write(os.environ.get('FAKE_STATUS', 'Complete'))
 elif args[:1] == ['run']:
+    if os.environ.get('FAKE_RUN_HANG'):
+        time.sleep(60)
     sys.stdout.buffer.write(data)
     sys.exit(int(os.environ.get('FAKE_RUN_CODE', '0')))
+elif args[:1] == ['delete'] and os.environ.get('FAKE_FAIL_DELETE'):
+    sys.exit('synthetic delete failure')
 '''
+OWNER = {'apiVersion': 'batch/v1', 'kind': 'Job', 'uid': 'synthetic-uid'}
 
 
 class Fixture(unittest.TestCase):
@@ -61,18 +70,23 @@ class Fixture(unittest.TestCase):
     def tearDown(self):
         subprocess.run(['rm', '-rf', str(self.tmp)], check=True)
 
+    def env(self, **env):
+        return {**os.environ, 'PATH': f'{self.tmp / "bin"}{os.pathsep}{os.environ["PATH"]}',
+                'FAKE_DIR': str(self.tmp), 'FAKE_TEMPLATE': str(TEMPLATE),
+                'T3_BUILD_KUBECONFIG': str(self.kubeconfig), **env}
+
     def run_tool(self, argv, stdin=b'', **env):
-        return subprocess.run(argv, input=stdin, capture_output=True, timeout=30, env={
-            **os.environ, 'PATH': f'{self.tmp / "bin"}{os.pathsep}{os.environ["PATH"]}',
-            'FAKE_DIR': str(self.tmp), 'FAKE_TEMPLATE': str(TEMPLATE),
-            'T3_BUILD_KUBECONFIG': str(self.kubeconfig), **env})
+        return subprocess.run(argv, input=stdin, capture_output=True, timeout=30, env=self.env(**env))
 
     def calls(self):
         path = self.tmp / 'calls.jsonl'
         return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
     def created(self):
-        return [yaml.safe_load(call['stdin']) for call in self.calls() if call['argv'][4:7] == ['create', '-f', '-']]
+        return [yaml.safe_load(call['stdin']) for call in self.calls() if call['argv'][2:5] == ['create', '-f', '-']]
+
+    def deletes(self):
+        return [call['argv'][2:] for call in self.calls() if call['argv'][2] == 'delete']
 
 
 class T3BuildTest(Fixture):
@@ -85,11 +99,15 @@ class T3BuildTest(Fixture):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(b'synthetic kaniko log', result.stdout)
         for call in self.calls():
-            self.assertEqual(call['argv'][:4], ['--kubeconfig', str(self.kubeconfig), '-n', 't3-build'])
-        configmap, secret, job = self.created()
+            # The namespace comes from the kubeconfig's context: t3-build-homelab or t3-build-work.
+            self.assertEqual(call['argv'][:2], ['--kubeconfig', str(self.kubeconfig)])
+            self.assertNotIn('-n', call['argv'])
+        job, secret, configmap = self.created()
         name = job['metadata']['name']
         self.assertRegex(name, r'^t3-build-[0-9a-f]{8}$')
         self.assertEqual((configmap['kind'], configmap['metadata']['name']), ('ConfigMap', name))
+        for owned in (configmap, secret):
+            self.assertEqual(owned['metadata']['ownerReferences'], [{**OWNER, 'name': name}])
         with tarfile.open(fileobj=io.BytesIO(base64.b64decode(configmap['binaryData']['context.tar.gz']))) as tar:
             names = tar.getnames()
         self.assertIn('./Dockerfile', names)
@@ -105,22 +123,42 @@ class T3BuildTest(Fixture):
         volumes = {v['name']: v for v in job['spec']['template']['spec']['volumes']}
         self.assertEqual(volumes['context']['configMap']['name'], name)
         self.assertEqual(volumes['docker-config']['secret']['secretName'], name)
-        self.assertEqual(self.calls()[-1]['argv'][4:], ['delete', f'job/{name}', f'configmap/{name}',
-                                                        f'secret/{name}', '--ignore-not-found', '--wait=false'])
+        self.assertEqual(self.deletes(), [['delete', f'job/{name}', f'configmap/{name}',
+                                           f'secret/{name}', '--ignore-not-found', '--wait=false']])
+        self.assertEqual(job['spec']['activeDeadlineSeconds'], 1800)
         for private in (DOCKER_CONFIG.encode(), b'c3ludGhldGljLWNyZWRlbnRpYWw='):
             self.assertNotIn(private, result.stdout + result.stderr)
 
     def test_failed_job_exits_nonzero_and_still_cleans_up(self):
-        result = self.build(FAKE_STATUS=',1')
+        for status in ('Failed', 'FailureTarget Failed'):
+            with self.subTest(status=status):
+                (self.tmp / 'calls.jsonl').unlink(missing_ok=True)
+                result = self.build(FAKE_STATUS=status)
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual([c['kind'] for c in self.created()], ['Job', 'ConfigMap'])
+                self.assertEqual(self.calls()[-1]['argv'][2], 'delete')
+                self.assertEqual(sum(c['argv'][2:4] == ['get', 'job'] for c in self.calls()), 1)
+
+    def test_times_out_when_the_job_never_finishes(self):
+        result = self.build(FAKE_STATUS='', T3_BUILD_TIMEOUT='0')
         self.assertEqual(result.returncode, 1)
-        self.assertEqual([c['kind'] for c in self.created()], ['ConfigMap', 'Job'])
-        self.assertEqual(self.calls()[-1]['argv'][4], 'delete')
+        self.assertIn(b'timed out', result.stderr)
+        self.assertEqual(len(self.deletes()), 1)
+
+    def test_failed_cleanup_is_reported_retried_and_exits_nonzero(self):
+        for status, code in (('Complete', 2), ('Failed', 1)):
+            with self.subTest(status=status):
+                (self.tmp / 'calls.jsonl').unlink(missing_ok=True)
+                result = self.build(FAKE_STATUS=status, FAKE_FAIL_DELETE='1')
+                self.assertEqual(result.returncode, code)
+                self.assertEqual(len(self.deletes()), 2)
+                self.assertIn(b'synthetic delete failure', result.stderr)
 
     def test_create_failure_cleans_up_without_echoing_secret(self):
         result = self.build('--docker-config', str(self.docker_config), FAKE_FAIL_CREATE='"Secret"')
         self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(self.calls()[-1]['argv'][4], 'delete')
-        self.assertFalse(any(c['argv'][4] == 'logs' for c in self.calls()))
+        self.assertEqual(self.calls()[-1]['argv'][2], 'delete')
+        self.assertFalse(any(c['argv'][2] == 'logs' for c in self.calls()))
         self.assertNotIn(b'c3ludGhldGljLWNyZWRlbnRpYWw=', result.stdout + result.stderr)
 
     def test_refuses_without_kubeconfig(self):
@@ -156,18 +194,34 @@ class T3RunTest(Fixture):
         result = self.run_tool([str(RUN), 'alpine:3', '--', 'sh', '-c', 'cat'], stdin=b'synthetic input')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, b'synthetic input')
-        (call,) = self.calls()
-        argv = call['argv']
-        self.assertEqual(argv[:5], ['--kubeconfig', str(self.kubeconfig), '-n', 't3-build', 'run'])
-        self.assertRegex(argv[5], r'^t3-run-[0-9]+-[0-9]+$')
-        self.assertEqual(argv[6:], ['--rm', '-i', '-q', '--restart=Never', '--image=alpine:3',
-                                    '--overrides={"spec":{"automountServiceAccountToken":false,"enableServiceLinks":false}}',
-                                    '--', 'sh', '-c', 'cat'])
+        run, delete = (call['argv'] for call in self.calls())
+        self.assertEqual(run[:3], ['--kubeconfig', str(self.kubeconfig), 'run'])
+        self.assertRegex(run[3], r'^t3-run-[0-9a-f]{8}$')
+        self.assertEqual(run[4:], ['--rm', '-i', '-q', '--restart=Never', '--image=alpine:3',
+                                   '--overrides={"spec":{"automountServiceAccountToken":false,"enableServiceLinks":false}}',
+                                   '--', 'sh', '-c', 'cat'])
+        self.assertEqual(delete[2:], ['delete', 'pod', run[3], '--ignore-not-found', '--wait=false'])
 
     def test_exit_code_and_no_command(self):
         result = self.run_tool([str(RUN), 'alpine:3'], FAKE_RUN_CODE='3')
         self.assertEqual(result.returncode, 3)
-        self.assertNotIn('--', self.calls()[0]['argv'][6:])
+        self.assertNotIn('--', self.calls()[0]['argv'][4:])
+
+    def test_interrupt_deletes_the_pod(self):
+        process = subprocess.Popen([str(RUN), 'alpine:3', '--', 'sleep', '600'], stdin=subprocess.DEVNULL,
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                   env=self.env(FAKE_RUN_HANG='1'))
+        try:
+            for _ in range(100):
+                if self.calls():
+                    break
+                time.sleep(0.1)
+            process.send_signal(signal.SIGINT)
+            self.assertEqual(process.wait(timeout=10), 130)
+        finally:
+            process.kill()
+        run, *rest = (call['argv'] for call in self.calls())
+        self.assertEqual([argv[2:] for argv in rest], [['delete', 'pod', run[3], '--ignore-not-found', '--wait=false']])
 
     def test_refuses_without_kubeconfig_or_image(self):
         self.kubeconfig.unlink()

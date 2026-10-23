@@ -29,15 +29,15 @@ def expected_config(pod):
     return {'apiVersion': 'v1', 'kind': 'Config', 'current-context': 't3-build',
             'clusters': [{'name': 't3-build', 'cluster': {
                 'server': 'https://kubernetes.default.svc', 'certificate-authority-data': encoded(CA)}}],
-            'users': [{'name': f'builder-{pod}', 'user': {'token': TOKEN.decode()}}],
+            'users': [{'name': 'builder', 'user': {'token': TOKEN.decode()}}],
             'contexts': [{'name': 't3-build', 'context': {
-                'cluster': 't3-build', 'user': f'builder-{pod}', 'namespace': 't3-build'}}]}
+                'cluster': 't3-build', 'user': 'builder', 'namespace': f't3-build-{pod}'}}]}
 
 
 class FakeKubectl:
     def __init__(self, pod):
-        self.pod = pod
-        self.resources = {('t3-build', 'serviceaccount', f'builder-{pod}'): {'kind': 'ServiceAccount'}}
+        self.pod, self.builder = pod, f't3-build-{pod}'
+        self.resources = {(self.builder, 'serviceaccount', 'builder'): {'kind': 'ServiceAccount'}}
         self.calls, self.created, self.violations = [], [], []
         self.populate, self.delay, self.polls = True, 0, 0
         self.fail = False
@@ -50,9 +50,9 @@ class FakeKubectl:
         self.calls.append(argv)
         if self.fail:
             return subprocess.CompletedProcess(argv, 1, DIAGNOSTIC, TOKEN + CA)
-        token = f'builder-{self.pod}-token'
+        token = 'builder-token'
         if args[0] == 'get':
-            allowed = {('t3-build', 'serviceaccount', f'builder-{self.pod}'), ('t3-build', 'secret', token),
+            allowed = {(self.builder, 'serviceaccount', 'builder'), (self.builder, 'secret', token),
                        (TARGET[self.pod], 'secret', 't3-build-kubeconfig')}
             if (namespace, *args[1:3]) not in allowed or args[3:] != ['--ignore-not-found', '-o', 'json']:
                 self.violations.append(argv)
@@ -67,7 +67,7 @@ class FakeKubectl:
             resource = json.loads(input)
             name = resource['metadata']['name']
             if resource['kind'] != 'Secret' or resource['metadata']['namespace'] != namespace or (namespace, name) not in (
-                    ('t3-build', token), (TARGET[self.pod], 't3-build-kubeconfig')):
+                    (self.builder, token), (TARGET[self.pod], 't3-build-kubeconfig')):
                 self.violations.append(argv)
                 raise AssertionError('Unexpected create')
             self.created.append(copy.deepcopy(resource))
@@ -109,8 +109,8 @@ class BuildKubeconfigTest(unittest.TestCase):
                 self.assertEqual((code, stdout, stderr), (0, f't3-build kubeconfig prepared for {pod}.\n', ''))
                 self.assertEqual(sleep.call_count, 2)
                 account, grant = cluster.created
-                self.assertEqual(account['metadata'], {'name': f'builder-{pod}-token', 'namespace': 't3-build',
-                    'annotations': {'kubernetes.io/service-account.name': f'builder-{pod}'}})
+                self.assertEqual(account['metadata'], {'name': 'builder-token', 'namespace': f't3-build-{pod}',
+                    'annotations': {'kubernetes.io/service-account.name': 'builder'}})
                 self.assertEqual(account['type'], 'kubernetes.io/service-account-token')
                 self.assertEqual(grant['metadata'], {'name': 't3-build-kubeconfig', 'namespace': TARGET[pod]})
                 self.assertEqual((grant['type'], set(grant['data'])), ('Opaque', {'kubeconfig'}))

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Owner-only: give one T3 pod a kubeconfig scoped to the t3-build namespace.
+"""Owner-only: give one T3 pod a kubeconfig scoped to its t3-build-<pod> namespace.
 
 Modelled on 13.t3code/one/tools/manager-kubeconfig.py. Creates the
-builder-<pod>-token Secret in t3-build, waits for the token controller, and
-writes Secret t3-build-kubeconfig into t3code-<pod>. Never prints values.
+builder-token Secret in t3-build-<pod>, waits for the token controller, and
+writes Secret t3-build-kubeconfig into t3code-<pod>. The context's namespace is
+how the pod's helpers find their namespace. Never prints values.
 """
 import argparse
 import base64
@@ -12,12 +13,11 @@ import subprocess
 import sys
 import time
 
-NAMESPACE = 't3-build'
 PODS = {'homelab': 't3code-homelab', 'work': 't3code-work'}
 GRANT = 't3-build-kubeconfig'
 
 
-def kubeconfig(token: bytes, ca: bytes, user: str) -> bytes:
+def kubeconfig(token: bytes, ca: bytes, user: str, namespace: str) -> bytes:
     if not token or not ca:
         raise ValueError('Missing account data')
     return json.dumps({'apiVersion': 'v1', 'kind': 'Config', 'current-context': 't3-build',
@@ -25,15 +25,15 @@ def kubeconfig(token: bytes, ca: bytes, user: str) -> bytes:
             'certificate-authority-data': base64.b64encode(ca).decode()}}],
         'users': [{'name': user, 'user': {'token': token.decode()}}],
         'contexts': [{'name': 't3-build', 'context': {'cluster': 't3-build', 'user': user,
-                                                      'namespace': NAMESPACE}}]},
+                                                      'namespace': namespace}}]},
         sort_keys=True).encode()
 
 
 def provision(context: str, pod: str, run=subprocess.run) -> None:
     if not context.strip():
         raise ValueError('Explicit owner context required')
-    target = PODS[pod]
-    account, token_secret = f'builder-{pod}', f'builder-{pod}-token'
+    target, builder = PODS[pod], f't3-build-{pod}'
+    account, token_secret = 'builder', 'builder-token'
 
     def command(namespace, *args, resource=None):
         result = run(['kubectl', '--context', context, '-n', namespace, *args],
@@ -55,15 +55,15 @@ def provision(context: str, pod: str, run=subprocess.run) -> None:
             'apiVersion': 'v1', 'kind': 'Secret', 'metadata': metadata,
             'type': secret_type, 'data': data})
 
-    if not get(NAMESPACE, 'serviceaccount', account):
+    if not get(builder, 'serviceaccount', account):
         raise ValueError('Tracked account required')
-    secret = get(NAMESPACE, 'secret', token_secret)
+    secret = get(builder, 'secret', token_secret)
     if secret is None:
-        create(NAMESPACE, token_secret, 'kubernetes.io/service-account-token', {},
+        create(builder, token_secret, 'kubernetes.io/service-account-token', {},
                {'kubernetes.io/service-account.name': account})
     for attempt in range(30):
         if attempt or secret is None:
-            secret = get(NAMESPACE, 'secret', token_secret)
+            secret = get(builder, 'secret', token_secret)
         if (not secret or secret.get('type') != 'kubernetes.io/service-account-token'
                 or secret.get('metadata', {}).get('annotations', {}).get(
                     'kubernetes.io/service-account.name') != account):
@@ -71,7 +71,7 @@ def provision(context: str, pod: str, run=subprocess.run) -> None:
         data = secret.get('data', {})
         if data.get('token') and data.get('ca.crt'):
             config = kubeconfig(base64.b64decode(data['token'], validate=True),
-                                base64.b64decode(data['ca.crt'], validate=True), account)
+                                base64.b64decode(data['ca.crt'], validate=True), account, builder)
             break
         if attempt < 29:
             time.sleep(1)

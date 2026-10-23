@@ -9,9 +9,9 @@ spec:
     repoURL: https://github.com/SpyrosPsarras/epaflix.git
     targetRevision: main
     path: 2-k3s/29.t3-build
+  # Renders both builder namespaces (t3-build-homelab, t3-build-work); each object sets its own.
   destination:
     server: https://kubernetes.default.svc
-    namespace: t3-build
   syncPolicy:
     automated:
       prune: true

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# t3-run <image> [-- cmd...]: run a one-shot pod in the t3-build namespace with
-# stdin and stdout attached; the pod is deleted when the command exits.
+# t3-run <image> [-- cmd...]: run a one-shot pod in this pod's builder namespace
+# (the kubeconfig's context) with stdin and stdout attached. The pod is deleted
+# when the command exits or t3-run is interrupted.
 set -euo pipefail
 kubeconfig=${T3_BUILD_KUBECONFIG:-/run/t3-build/kubeconfig}
 if [[ ! -f $kubeconfig ]]; then
@@ -19,7 +20,23 @@ if [[ $# -gt 0 ]]; then
 fi
 tty=()
 if [[ -t 0 && -t 1 ]]; then tty=(-t); fi
-exec kubectl --kubeconfig "$kubeconfig" -n t3-build run "t3-run-$(date +%s)-$RANDOM" \
+name=t3-run-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')
+child=
+cleanup() {
+  [[ -z $child ]] || kill "$child" 2>/dev/null || true
+  kubectl --kubeconfig "$kubeconfig" delete pod "$name" --ignore-not-found --wait=false >/dev/null 2>&1 ||
+    echo "t3-run: could not delete pod $name" >&2
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+# In the background so the traps fire while kubectl waits; <&0 keeps stdin attached.
+kubectl --kubeconfig "$kubeconfig" run "$name" \
   --rm -i "${tty[@]}" -q --restart=Never --image="$image" \
   --overrides='{"spec":{"automountServiceAccountToken":false,"enableServiceLinks":false}}' \
-  "${command[@]}"
+  "${command[@]}" <&0 &
+child=$!
+status=0
+wait "$child" || status=$?
+child=
+exit "$status"
