@@ -300,10 +300,14 @@ desktop. The manager cannot push, merge, sync or recover its own namespace.
    ```
 
    Parent sync restores the tracked parent/child policies; child auto-sync
-   applies the conversion and prunes obsolete Secrets. Explicit scale-up is
-   required because the Application ignores `spec.replicas`. Verify the reviewed
-   controller revision. Confirm the legacy hub removes only the manager client
-   and retains its other clients, without displaying inventory values.
+   applies the conversion, prunes obsolete Secrets and restores the tracked
+   `replicas: 1`, as in A4. The Application ignores `/spec/replicas` drift on
+   its own, but the merged revision makes the child OutOfSync, and that sync
+   applies the full StatefulSet. The explicit scale-up is not required; it is
+   a harmless no-op when the pod is already back, and the Ready wait is the
+   real check. Verify the reviewed controller revision. Confirm the legacy hub
+   removes only the manager client and retains its other clients, without
+   displaying inventory values.
 8. M8: Privately confirm the mounted context, repeat the full real-credential
    authorization matrix, and check only names, modes and env names for grant
    absence. Verify a harmless model prompt, empty external MCP inventory,
