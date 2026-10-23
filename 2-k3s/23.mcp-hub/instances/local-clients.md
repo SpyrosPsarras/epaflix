@@ -51,9 +51,11 @@ ssh homepc 'for instance in homelab work; do
 done'
 ```
 
-The private staging config contains environment references, not token values.
-`configure` reads only the approved service allowlist and uses
-`hub_clients.py` to generate Pi entries, without downloading upstream
+The private staging config contains no token values. Each Pi entry's
+`Authorization` is `!echo Bearer $(secret-tool lookup service mcp-hub key <instance>)`,
+which Pi runs itself at connect time, so Pi needs no `MCP_HUB_*` export
+however it is launched. `configure` reads only the approved service allowlist
+and uses `hub_clients.py` to generate Pi entries, without downloading upstream
 credentials. Repeat on the laptop by changing the SSH target. Activation
 happens in O3 below.
 
@@ -154,34 +156,36 @@ mixed pod. It requires homelab kubectl and the Bitwarden CLI installed as
    Values pass into `bw encode` and `bw create item` over stdin, with command
    output captured rather than displayed.
 
-3. O3: On each machine, set `machine` to `homepc` or `laptop`, then activate
-   Pi configuration and launch with ordinary client tokens. The snippet works
-   in both zsh and bash. It reads the O2 items by title, takes the cliproxy
-   model key from the desktop keyring, prints only `ok` or `missing` per
-   variable, and starts `/usr/bin/pi` without the `BW_*` session variables.
-   Keep shell tracing disabled and do not dump the environment:
+3. O3: On each machine, set `machine` to `homepc` or `laptop`, then copy
+   the O2 items into the desktop keyring, activate Pi configuration and
+   launch. The snippet works in both zsh and bash. Pi reads the hub tokens
+   from the keyring itself; only the cliproxy model key is exported. It prints
+   only `ok` or `missing` per value and starts `/usr/bin/pi` without the
+   `BW_*` session variables. Keep shell tracing disabled and do not dump the
+   environment:
 
    ```sh
    machine=homepc
    bw sync >/dev/null
-   MCP_HUB_HOMELAB_TOKEN="$(bw get password "mcp-hub homelab $machine")"
-   MCP_HUB_WORK_TOKEN="$(bw get password "mcp-hub work $machine")"
-   CLIPROXYAPI_API_KEY="$(secret-tool lookup service cliproxy key api)"
-   export MCP_HUB_HOMELAB_TOKEN MCP_HUB_WORK_TOKEN CLIPROXYAPI_API_KEY
-   for name in MCP_HUB_HOMELAB_TOKEN MCP_HUB_WORK_TOKEN CLIPROXYAPI_API_KEY; do
-     if [ -n "$(printenv "$name")" ]; then echo "$name ok"; else echo "$name missing"; fi
-   done
    for instance in homelab work; do
+     token="$(bw get password "mcp-hub $instance $machine")" && [ -n "$token" ] &&
+       printf %s "$token" | secret-tool store --label "mcp-hub $instance" service mcp-hub key "$instance"
+     if [ -n "$(secret-tool lookup service mcp-hub key "$instance")" ]; then echo "$instance ok"; else echo "$instance missing"; fi
      python3 ~/.local/share/mcp-hub-client/local-clients.py configure \
        --context epaflix --instance "$instance"
    done
+   CLIPROXYAPI_API_KEY="$(secret-tool lookup service cliproxy key api)"
+   export CLIPROXYAPI_API_KEY
+   if [ -n "$CLIPROXYAPI_API_KEY" ]; then echo "CLIPROXYAPI_API_KEY ok"; else echo "CLIPROXYAPI_API_KEY missing"; fi
    python3 -c 'import os; os.execve("/usr/bin/pi", ["pi"], {k: v for k, v in os.environ.items() if not k.startswith("BW_")})'
-   unset MCP_HUB_HOMELAB_TOKEN MCP_HUB_WORK_TOKEN CLIPROXYAPI_API_KEY
+   unset token CLIPROXYAPI_API_KEY
    ```
 
-   The launcher strips the vault session from the agent environment. Complete
-   one approved harmless tool call through each hub without reading work
-   customer data; a handshake alone does not meet that acceptance check.
+   Later launches need only Pi, from any shell or program, since the keyring
+   items stay. The launcher strips the vault session from the agent
+   environment. Complete one approved harmless tool call through each hub
+   without reading work customer data; a handshake alone does not meet that
+   acceptance check.
 
 4. O4: After O2, O3 and A3 succeed for both machines, delete only the temporary
    token staging Secrets:

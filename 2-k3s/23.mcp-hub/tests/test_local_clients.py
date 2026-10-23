@@ -287,7 +287,8 @@ class LocalClientTests(unittest.TestCase):
             for environment in ("homelab", "work"):
                 entry = config[environment + "-searxng"]
                 self.assertEqual(entry["url"], "https://mcp-" + environment + ".epaflix.com/searxng")
-                self.assertEqual(entry["headers"], {"Authorization": "Bearer ${MCP_HUB_" + environment.upper() + "_TOKEN}"})
+                self.assertEqual(entry["headers"], {"Authorization":
+                    "!echo Bearer $(secret-tool lookup service mcp-hub key " + environment + ")"})
             self.assertEqual(target.stat().st_mode & 0o777, 0o600)
 
 
