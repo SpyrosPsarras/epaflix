@@ -1,5 +1,5 @@
 # Template for /scripts/t3-build (13.t3code/env/files/t3-build.py). The script
-# replaces the quoted @NAME@, @DOCKERFILE@ and @DESTINATION@ placeholders and
+# replaces the quoted @NAME@, @DOCKERFILE@, @DESTINATION@ and @SECRET_OPTIONAL@ placeholders and
 # creates ConfigMap and Secret @NAME@ next to the Job. Renovate watches the image.
 apiVersion: batch/v1
 kind: Job
@@ -52,4 +52,4 @@ spec:
         - name: docker-config
           secret:
             secretName: "@NAME@"
-            optional: true
+            optional: "@SECRET_OPTIONAL@"

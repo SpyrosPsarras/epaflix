@@ -123,11 +123,20 @@ class T3BuildTest(Fixture):
         volumes = {v['name']: v for v in job['spec']['template']['spec']['volumes']}
         self.assertEqual(volumes['context']['configMap']['name'], name)
         self.assertEqual(volumes['docker-config']['secret']['secretName'], name)
+        # The Secret is created after the Job, so the pod must wait for it, not mount it empty.
+        self.assertIs(volumes['docker-config']['secret']['optional'], False)
         self.assertEqual(self.deletes(), [['delete', f'job/{name}', f'configmap/{name}',
                                            f'secret/{name}', '--ignore-not-found', '--wait=false']])
         self.assertEqual(job['spec']['activeDeadlineSeconds'], 1800)
         for private in (DOCKER_CONFIG.encode(), b'c3ludGhldGljLWNyZWRlbnRpYWw='):
             self.assertNotIn(private, result.stdout + result.stderr)
+
+    def test_unauthenticated_build_keeps_the_secret_mount_optional(self):
+        result = self.build()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        job, configmap = self.created()
+        volumes = {v['name']: v for v in job['spec']['template']['spec']['volumes']}
+        self.assertIs(volumes['docker-config']['secret']['optional'], True)
 
     def test_failed_job_exits_nonzero_and_still_cleans_up(self):
         for status in ('Failed', 'FailureTarget Failed'):

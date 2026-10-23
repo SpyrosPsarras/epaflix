@@ -88,7 +88,9 @@ def main(argv=None):
     name = 't3-build-' + secrets.token_hex(4)
     template = kubectl('get', 'configmap', 'kaniko-job', '-o', r'jsonpath={.data.kaniko-job\.yaml}').stdout.decode()
     for placeholder, value in (('@NAME@', name), ('@DOCKERFILE@', str(dockerfile)),
-                               ('@DESTINATION@', args.destination)):
+                               ('@DESTINATION@', args.destination),
+                               # The Secret follows the Job, so an authenticated pod must wait for it.
+                               ('@SECRET_OPTIONAL@', docker_config is None)):
         if f'"{placeholder}"' not in template:
             sys.exit('t3-build: the kaniko-job template lacks ' + placeholder)
         template = template.replace(f'"{placeholder}"', json.dumps(value))
@@ -105,8 +107,8 @@ def build(name, template, context, docker_config, destination):
         uid = kubectl('create', '-f', '-', '-o', 'jsonpath={.metadata.uid}', data=template.encode()).stdout.decode()
     except subprocess.CalledProcessError as error:
         sys.exit('t3-build: creating Job failed: ' + error.stderr.decode(errors='replace').strip())
-    # Owned by the Job, so its TTL collects them. The Secret goes first: the pod waits for
-    # the (non-optional) context ConfigMap, so it never starts without its registry auth.
+    # Owned by the Job, so its TTL collects them. The pod waits for the context ConfigMap,
+    # and for the Secret when --docker-config makes its mount non-optional.
     metadata = {'name': name, 'labels': LABELS, 'ownerReferences': [
         {'apiVersion': 'batch/v1', 'kind': 'Job', 'name': name, 'uid': uid}]}
     if docker_config is not None:
