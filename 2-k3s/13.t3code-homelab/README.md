@@ -108,8 +108,8 @@ unencrypted private key that OpenSSH can load. With zero scoped SSH-key items,
 the sidecar starts an empty agent and logs only
 `vault: no scoped SSH keys; agent is empty`. T3 and vault reads remain usable,
 but outbound SSH cannot authenticate until the owner moves the intended keys
-into scope and restarts the pod or vault sidecar. A key item with a missing,
-invalid or passphrase-protected private key still rejects the entire key set.
+into scope. The sidecar loads them on its next 10-second sync. A key item
+with a missing, invalid or passphrase-protected private key still rejects the entire key set.
 An unreachable vault prevents startup. The loader never tries the owner's
 login, attachments, other collections or identity files. Ordinary non-SSH items
 are ignored.
@@ -138,10 +138,12 @@ rather than putting private keys in a UID-1000 agent's memory.
 The sidecar publishes its ready scope only after all keys load and the proxy
 starts. T3 waits up to 600 seconds for that scope and a reachable agent,
 including an empty one, before starting the backend. A dead agent or three
-consecutive vault status failures stop the sidecar and remove the socket. A
-full pod restart, or a vault-sidecar restart, syncs the vault and replaces the
-complete agent key set. Restarting only the T3 container does not reload keys.
-The key set is not hot-reloaded.
+consecutive vault status failures stop the sidecar and remove the socket.
+Every 10 seconds the sidecar syncs the vault. When the scoped SSH key set
+changes, it loads a complete replacement agent, swaps it in and logs
+`vault: SSH agent reloaded; N scoped keys`. A failed sync or a bad key keeps
+the running agent. Agent connections opened before a reload fail once and
+must reconnect.
 
 The existing local vault API is unauthenticated and reachable by every pod
 container. This design keeps automatic key loading out of UID-1000 memory; it
@@ -149,11 +151,13 @@ does not stop a deliberate command from reading vault items through that API.
 Treat pod command execution as trusted, as documented above.
 
 The homelab-only script projection includes the generated SSH config from
-`1-proxmox/ssh/homelab.conf`. `sync-shared.sh` keeps the copy current. Only
-inventory hosts select this agent and the existing `accept-new` host-key
-policy through the generated final-match identity include. Other hosts select
-no agent and require strict host-key checking, even when `SSH_AUTH_SOCK`
-points to the homelab agent. All hosts use public-key authentication without
+`1-proxmox/ssh/homelab.conf`. `sync-shared.sh` keeps the copy current.
+Inventory hosts select this agent and the existing `accept-new` host-key
+policy through the generated final-match identity include. `github.com`
+selects the same agent with GitHub's published host keys pinned and
+`StrictHostKeyChecking yes`. Every other host selects no agent and requires
+strict host-key checking, even when `SSH_AUTH_SOCK` points to the homelab
+agent. All hosts use public-key authentication without
 fallback identity files or password prompts. Inventory host keys persist in
 the homelab home PVC's known_hosts. A changed host key fails. First contact is
 not independently pinned. Work receives neither the homelab config nor its
@@ -196,12 +200,14 @@ configured 10-second connect timeout. This is a conditional acceptance result,
 not a key failure. Run the laptop check again when it is home. Adding a reverse
 Tailscale route is outside this change.
 
-In an approved follow-up window, change the scoped key set and replace the
-pod. Check only expected public fingerprints or signing results to confirm
+In an approved follow-up window, change the scoped key set and wait for the
+sidecar's `vault: SSH agent reloaded` log line. Check only expected public
+fingerprints or signing results to confirm
 removed keys are gone. Use synthetic keys for failure checks, and permanently
 delete any synthetic vault items afterwards. An empty set must leave a ready
-but empty agent that cannot authenticate SSH. An invalid key item or
-unavailable vault must leave no ready scope or working agent socket. Do not
+but empty agent that cannot authenticate SSH. At pod start, an invalid key item
+or unavailable vault must leave no ready scope or working agent socket. On a
+running pod, the same failures must keep the loaded keys. Do not
 remove the owner's real keys merely to exercise that failure case on the live
 backend.
 

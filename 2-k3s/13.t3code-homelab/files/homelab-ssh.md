@@ -38,14 +38,17 @@ vault sidecar loads the approved collection's SSH-key items into a UID-1001
 agent.
 With no SSH-key items, the pod stays usable but the agent is empty and
 outbound SSH cannot authenticate. The owner must move the intended keys into
-scope and restart the pod or vault sidecar. There are no fallback identity
+scope. The sidecar picks up key changes within about 10 seconds, without a
+restart. An SSH command that was authenticating while the agent reloaded can
+fail once; run it again. There are no fallback identity
 files, forwarded agents or owner vault logins. Do not read `~/.ssh` or fetch
 SSH keys from the vault yourself. If the agent fails, report the failure from
 `ssh -v <name> true` without dumping environments or vault responses.
 
-Only inventory hosts use the homelab agent and accept a new host key on first
-contact. Other hosts use no agent and require strict host-key checking, even
-when `SSH_AUTH_SOCK` points to the homelab agent. The config remembers
+Inventory hosts use the homelab agent and accept a new host key on first
+contact. `github.com` uses the same agent with pinned host keys, described
+below. Every other host uses no agent and requires strict host-key checking,
+even when `SSH_AUTH_SOCK` points to the homelab agent. The config remembers
 inventory host keys on the homelab home PVC and rejects a changed key. First
 contact uses trust on first use, not an independently verified host key. Do
 not delete known_hosts or weaken host-key checking to bypass a mismatch.

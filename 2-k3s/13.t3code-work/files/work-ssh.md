@@ -34,5 +34,6 @@ and closes the session.
 Check an approved non-production alias with `ssh <alias> true`. Report only the
 exit status. A failure requires checking the private host approval, pinned host
 key, target-only egress policy and work collection membership. Do not disable
-host key checks or add a general LAN rule. Key-set changes require an
-owner-approved pod restart and replace the old agent.
+host key checks or add a general LAN rule. The agent picks up key-set changes
+within about 10 seconds and drops removed keys. An SSH command that was
+authenticating while the agent reloaded can fail once; run it again.

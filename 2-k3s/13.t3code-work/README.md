@@ -476,8 +476,9 @@ not key mutation. T3 processes and SSH login sessions do not receive
 pass to `ssh-add` over stdin with output suppressed, not through files or logs.
 An empty collection starts an empty agent without a fallback. With no approved
 hosts, the agent stays empty and does not fetch SSH key items, even if the work
-collection contains them. Invalid SSH key items refuse startup when SSH is enabled. Every restart creates a fresh agent and discards the old
-key set; changing vault items does not hot-reload a running agent.
+collection contains them. The sidecar reads `hosts.json` when it starts, so approving the first host takes effect at the next sidecar start.
+Invalid SSH key items refuse startup when SSH is enabled. Every 10 seconds the sidecar syncs the vault and reloads the agent when the scoped SSH key set changes.
+A failed sync or a bad key keeps the running agent. Agent connections opened before a reload fail once and must reconnect.
 
 `github.com` is the one hostname target. The generated config sends it
 to the same agent with `User git`, port 22 and GitHub's published host keys
@@ -576,8 +577,9 @@ idle-rollout job or an owner-approved earlier pod replacement.
 After rollout, run `ssh <approved-alias> true` in work and record only success
 or failure privately. Confirm an unapproved alias is refused, the agent has
 only the expected work public-key fingerprints, and no homelab aliases or keys
-are present. Repeat after replacing a synthetic work key and restarting to
-prove the old key is gone, then permanently delete any synthetic vault item.
+are present. Repeat after replacing a synthetic work key and waiting for the
+sidecar's `vault: SSH agent reloaded` log line to prove the old key is gone,
+then permanently delete any synthetic vault item.
 No real work target or vault key has been exercised by offline tests.
 
 ## Offline evidence and remaining acceptance
