@@ -34,7 +34,8 @@ excludes RFC1918, zero, loopback, link-local, shared-address, multicast and
 reserved high address ranges. The public work AKS API uses this rule.
 No work endpoint is published. Neither overlay adds an IPv6 allow rule.
 Public IPv4 egress has no port restriction and permits T3 Connect HTTPS
-and Cloudflare tunnel TCP/UDP 7844.
+and Cloudflare tunnel TCP/UDP 7844. It also carries SSH to GitHub on TCP 22.
+The generated SSH config, not the policy, limits outbound SSH to approved work IPs and `github.com`.
 
 TCP 2222 accepts ingress from any IPv4 source; direct ports 3773 and 8087 stay
 closed. T3 binds only `127.0.0.1:3773`, advertises no direct LAN endpoint and

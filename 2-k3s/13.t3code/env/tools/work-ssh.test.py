@@ -147,6 +147,17 @@ class WorkAgentTests(shared.AgentTests):
         self.assertNotIn('work-dev', (self.root / '.ssh/config').read_text())
         self.assertNotIn('192.0.2.10', (self.root / '.ssh/work_known_hosts').read_text())
 
+    def test_github_is_the_only_hostname_and_host_keys_are_pinned(self):
+        login = self.root / 'login'
+        for entries in ([], work.hosts(self.host_input()[1])):
+            work.install(entries, [self.root, login])
+            for home in (self.root, login):
+                with self.subTest(hosts=len(entries), home=home):
+                    config = home / '.ssh/config'
+                    shared.assert_github_pinned(self, config, home / '.ssh/github_known_hosts')
+                    blocks = [line for line in config.read_text().splitlines() if line.startswith(('Host ', 'Match '))]
+                    self.assertEqual(blocks[-1], 'Host *')
+
     def test_policy_uses_the_same_private_exact_addresses_and_ports(self):
         entry, path = self.host_input()
         entries = work.hosts(path)
@@ -168,7 +179,8 @@ class WorkAgentTests(shared.AgentTests):
     def test_private_input_rejects_injection_wildcards_duplicates_and_unpinned_hosts(self):
         entry, path = self.host_input()
         invalid = [{}, [entry, entry], [{**entry, 'alias': '*'}],
-                   [{**entry, 'address': 'work.example.test'}], [{**entry, 'address': '127.0.0.1'}],
+                   [{**entry, 'address': 'work.example.test'}], [{**entry, 'address': 'github.com'}],
+                   [{**entry, 'alias': 'github.com'}], [{**entry, 'address': '127.0.0.1'}],
                    [{**entry, 'address': '169.254.1.1'}], [{**entry, 'address': '0.0.0.0'}],
                    [{**entry, 'address': '192.0.2.0/24'}], [{**entry, 'address': '2001:db8::1%eth0'}],
                    [{**entry, 'port': True}],

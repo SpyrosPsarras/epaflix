@@ -20,6 +20,39 @@ SOURCE = Path(__file__).resolve().parents[1] / 'files/vault-client.py'
 spec = importlib.util.spec_from_file_location('vault', SOURCE)
 vault = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(vault)
+# Published at https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints
+GITHUB_FINGERPRINTS = {'SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU', 'SHA256:p2QAMXNIC1TJYWeIOttrVc98/R1BUFWu3/LiyKgUfQM',
+                       'SHA256:uNiVztksCsDhcc0u9e8BujQXVUpKZIDTMczCvj3tD2s'}
+
+
+def ssh_settings(config, host, *options, env=None):
+    result = subprocess.run(['ssh', '-G', '-F', str(config), *options, host], env=env,
+                            capture_output=True, text=True, check=True)
+    return dict(line.split(' ', 1) for line in result.stdout.splitlines())
+
+
+def assert_github_pinned(test, config, known, agent='/run/t3-vault/ssh-agent.sock', env=None):
+    settings = ssh_settings(config, 'github.com', env=env)
+    for name, value in {'hostname': 'github.com', 'port': '22', 'user': 'git', 'identityagent': agent,
+                        'identitiesonly': 'no', 'stricthostkeychecking': 'true', 'identityfile': 'none',
+                        'userknownhostsfile': str(known), 'passwordauthentication': 'no',
+                        'kbdinteractiveauthentication': 'no', 'forwardagent': 'no', 'batchmode': 'yes'}.items():
+        test.assertEqual(settings[name], value, name)
+    test.assertNotIn('proxycommand', settings)
+    test.assertEqual(known.stat().st_mode & 0o777, 0o600)
+    lines = known.read_text().splitlines()
+    test.assertEqual([line.split()[:2] for line in lines], [['github.com', 'ssh-ed25519'],
+                     ['github.com', 'ecdsa-sha2-nistp256'], ['github.com', 'ssh-rsa']])
+    listed = subprocess.run(['ssh-keygen', '-l', '-f', str(known)], capture_output=True, text=True, check=True)
+    test.assertEqual({line.split()[1] for line in listed.stdout.splitlines()}, GITHUB_FINGERPRINTS)
+    for host, options in (('github.com', ['-o', 'HostName=203.0.113.9']), ('gist.github.com', []),
+                          ('api.github.com', []), ('github.com.example.test', [])):
+        settings = ssh_settings(config, host, *options, env=env)
+        test.assertEqual(settings['identityagent'], 'none', host)
+        test.assertEqual(settings['stricthostkeychecking'], 'true', host)
+        test.assertNotEqual(settings['userknownhostsfile'], str(known), host)
+
+
 SCOPE = {'environment': 'homelab', 'organizationId': '11111111-1111-4111-8111-111111111111',
          'collectionId': '22222222-2222-4222-8222-222222222222'}
 
@@ -203,7 +236,7 @@ class AgentTests(unittest.TestCase):
             self.assertNotEqual(self.add('-T', str(self.key.with_suffix('.pub'))).returncode, 0)
             self.assertEqual(self.add('-T', str(other.with_suffix('.pub'))).returncode, 0)
 
-    def test_homelab_config_resolves_aliases_without_identity_files_or_password_fallback(self):
+    def homelab_config(self):
         overlay = SOURCE.parents[3] / '13.t3code-homelab'
         scripts = self.root / 'scripts'
         scripts.mkdir()
@@ -220,6 +253,19 @@ class AgentTests(unittest.TestCase):
                'PATH': binaries.name + ':' + os.environ['PATH']}
         subprocess.run(['bash', '-c', script], env=env, check=True, capture_output=True)
         env['SSH_AUTH_SOCK'] = '/run/t3-vault/ssh-agent.sock'
+        return config, login, env
+
+    def test_homelab_github_uses_the_agent_with_pinned_host_keys(self):
+        _, login, env = self.homelab_config()
+        for directory in (login, self.root):
+            with self.subTest(directory=directory):
+                config = directory / '.ssh/config'
+                assert_github_pinned(self, config, directory / '.ssh/github_known_hosts', env=env)
+                blocks = [line for line in config.read_text().splitlines() if line.startswith(('Host ', 'Match '))]
+                self.assertEqual(blocks[-1], 'Match final all')
+
+    def test_homelab_config_resolves_aliases_without_identity_files_or_password_fallback(self):
+        config, login, env = self.homelab_config()
         inventory = ('homepc', 'laptop', 'laptop-ts', 'k3s-master-51')
         inventory_ip = next(line.split()[1] for line in config.splitlines() if line.strip().startswith('HostName '))
         cases = [(host, [], True) for host in inventory] + [
