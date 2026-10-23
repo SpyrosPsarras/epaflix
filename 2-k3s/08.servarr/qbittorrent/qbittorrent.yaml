@@ -20,6 +20,7 @@ spec:
       labels:
         app: qbittorrent
     spec:
+      terminationGracePeriodSeconds: 120
       dnsPolicy: None
       dnsConfig:
         nameservers:
@@ -243,6 +244,17 @@ spec:
       containers:
         - name: qbittorrent
           image: qbittorrentofficial/qbittorrent-nox
+          # Killed qBittorrent leaves a QLockFile on PVC. Same-pod PID/hostname reuse
+          # sees itself as holder and exits; clear only this pod's lock.
+          command:
+            - /sbin/tini
+            - -g
+            - --
+            - /bin/sh
+            - -c
+            - >-
+              [ "$(sed -n '3p' /config/qBittorrent/config/lockfile 2>/dev/null)" = "$(hostname)" ]
+              && rm -f /config/qBittorrent/config/lockfile; exec /entrypoint.sh
           env:
             - { name: PUID, value: "568" }
             - { name: PGID, value: "568" }
@@ -260,12 +272,14 @@ spec:
               name: bt-udp
               protocol: UDP
           livenessProbe:
+            # Allow ~3 min of web UI stalls under NFS load before a restart.
             httpGet:
               path: /
               port: webui
             initialDelaySeconds: 120
             periodSeconds: 30
-            timeoutSeconds: 10
+            timeoutSeconds: 30
+            failureThreshold: 6
           readinessProbe:
             httpGet:
               path: /
