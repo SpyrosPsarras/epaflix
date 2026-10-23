@@ -190,8 +190,8 @@ path.write_text(text)
                  ('.codex/config.toml', '[bad ' + marker),
                  ('.codex/config.toml', '[profiles.alt.mcp_servers.custom]\ncommand = "' + marker + '"\n'),
                  ('.config/opencode/opencode.json', '{"mcp": []}'),
-                 ('project/.opencode/opencode.jsonc', '{}'),
-                 ('project/opencode.json', '{"mcp": []}')]
+                 ('project/.opencode/opencode.jsonc', '{"theme": "' + marker + '"}'),
+                 ('project/opencode.json', '{"mcp": [], "theme": "' + marker + '"}')]
         for name, data in cases:
             with self.subTest(name=name, data_type=data[:1]):
                 path = self.home / name
