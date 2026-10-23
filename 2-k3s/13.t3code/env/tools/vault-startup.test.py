@@ -90,12 +90,14 @@ elif args == ['serve','--hostname','127.0.0.1','--port','8087']:
             while config.get('block_sync') and not (home/'sync-release').exists():
                 time.sleep(0.01)
             time.sleep(config.get('sync_delay',0))
-            if config.get('sync_fail'):
+            if config.get('sync_fail') or (home/'sync-fail').exists():
                 self.send_response(503)
                 self.end_headers()
                 return
             if config.get('sync_lock'):
                 (home/'lock').touch()
+            if (home/'ssh-key-path').exists():
+                (home/'ssh-key-path-synced').write_text((home/'ssh-key-path').read_text())
             data=json.dumps({'success':True,'data':{'object':'message','noColor':False,
                 'title':'Syncing complete.','message':None}}).encode()
             self.send_response(200)
@@ -109,10 +111,11 @@ elif args == ['serve','--hostname','127.0.0.1','--port','8087']:
                 assert len((home/'http-calls').read_text().splitlines())>=2
                 (home/'ssh-items-read').touch()
                 items=config.get('items',[])
-                if config.get('ssh_key_path'):
+                key_path=(home/'ssh-key-path-synced').read_text() if (home/'ssh-key-path-synced').exists() else config.get('ssh_key_path')
+                if key_path:
                     items=[{'type':5,'organizationId':'11111111-1111-4111-8111-111111111111',
                             'collectionIds':['22222222-2222-4222-8222-222222222222'],
-                            'sshKey':{'privateKey':pathlib.Path(config['ssh_key_path']).read_text()}}]
+                            'sshKey':{'privateKey':pathlib.Path(key_path).read_text()}}]
                 data=json.dumps({'success':True,'data':{'data':items}}).encode()
                 self.send_response(200)
                 self.send_header('Content-Type','application/json')
@@ -227,7 +230,7 @@ class StartupTests(unittest.TestCase):
         self.prefix = [sys.executable, '-c',
             'import importlib.util,sys; s=importlib.util.spec_from_file_location("vault",sys.argv[1]); '
             'm=importlib.util.module_from_spec(s); s.loader.exec_module(m); '
-            'm.ADDRESS=sys.argv[2]; m.SCOPE_FILE=m.Path(sys.argv[3]); m.HEALTH_INTERVAL=0.05; m.SSH_CLIENT_UID=m.os.getuid(); '
+            'm.ADDRESS=sys.argv[2]; m.SCOPE_FILE=m.Path(sys.argv[3]); m.HEALTH_INTERVAL=0.05; m.SSH_KEY_REFRESH_SECONDS=0.2; m.SSH_CLIENT_UID=m.os.getuid(); '
             'm.WORK_SSH_INPUTS=m.SCOPE_FILE.parent/"work-inputs"; '
             'sys.exit(m.main(sys.argv[4:]))', str(SOURCE), f'http://127.0.0.1:{self.port}', str(self.scope), 'serve']
 
@@ -463,6 +466,57 @@ class StartupTests(unittest.TestCase):
                     if process.poll() is None:
                         process.kill()
                         process.wait()
+
+    def test_ssh_keys_changed_on_the_server_reach_the_agent_without_restart(self):
+        self.env['T3_VAULT_SSH_AGENT'] = '1'
+        with tempfile.TemporaryDirectory(prefix='startup-ssh-test-', dir='/dev/shm') as directory:
+            old, new, broken = (Path(directory) / name for name in ('old', 'new', 'broken'))
+            for key in (old, new):
+                subprocess.run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', str(key)], check=True)
+            broken.write_text('-----BEGIN OPENSSH PRIVATE KEY-----\nc3ludGhldGljLW5vdC1hLWtleQ==\n-----END OPENSSH PRIVATE KEY-----\n')
+            env = {**os.environ, 'SSH_AUTH_SOCK': str(self.home / 'ssh-agent.sock')}
+
+            def loaded(key):
+                return subprocess.run(['ssh-add', '-T', str(key.with_suffix('.pub'))], env=env,
+                                      capture_output=True, timeout=5).returncode == 0
+
+            def wait_until(check):
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    if check():
+                        return
+                    time.sleep(0.05)
+                self.fail('condition not met within 5 seconds')
+
+            self.fixture(cached=True, ssh_key_path=str(old))
+            with subprocess.Popen(self.prefix, env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
+                try:
+                    self.wait_ready(process)
+                    self.assertTrue(loaded(old))
+                    (self.home / 'ssh-key-path').write_text(str(new))
+                    wait_until(lambda: loaded(new) and not loaded(old))
+
+                    def posts_after(count):
+                        start = len((self.home / 'http-posts').read_text().splitlines())
+                        wait_until(lambda: len((self.home / 'http-posts').read_text().splitlines()) >= start + count)
+
+                    (self.home / 'ssh-key-path').write_text(str(broken))
+                    posts_after(2)
+                    self.assertIsNone(process.poll())
+                    self.assertTrue(loaded(new))
+                    (self.home / 'sync-fail').touch()
+                    posts_after(2)
+                    self.assertIsNone(process.poll())
+                    self.assertTrue(loaded(new))
+                finally:
+                    process.send_signal(signal.SIGTERM)
+                    stdout, stderr = process.communicate(timeout=5)
+            self.assertEqual(process.returncode, 130)
+            self.assertIn(b'vault: SSH agent reloaded; 1 scoped keys', stdout)
+            self.assertIn(b'vault: SSH key refresh failed (Refused); keeping loaded keys', stderr)
+            self.assertIn(b'vault: SSH key refresh failed (HTTPError); keeping loaded keys', stderr)
+            self.assert_quiet(stdout, stderr)
+            self.assertNotIn(b'PRIVATE KEY', stdout + stderr)
 
     def test_empty_ssh_scope_keeps_cached_and_fresh_clients_usable(self):
         self.env['T3_VAULT_SSH_AGENT'] = '1'

@@ -20,6 +20,7 @@ import tempfile
 import threading
 import time
 import traceback
+from types import SimpleNamespace
 import urllib.error
 import urllib.request
 from urllib.parse import quote, urlencode, urlsplit
@@ -46,6 +47,7 @@ CACHE_POLL_SECONDS = 0.1
 CLIENT_START_ATTEMPTS = 100
 CLIENT_START_POLL_SECONDS = 0.1
 SSH_REQUEST_TIMEOUT_SECONDS = 10
+SSH_KEY_REFRESH_SECONDS = 10
 AGENT_START_ATTEMPTS = 100
 AGENT_START_POLL_SECONDS = 0.02
 PROXY_POLL_SECONDS = 0.1
@@ -270,6 +272,7 @@ def run(argv):
     selection.add_argument('--item')
     selection.add_argument('--name')
     parser.add_argument('--password-env')
+    parser.add_argument('--username-env')
     parser.add_argument('--field', action='append', default=[])
     parser.add_argument('--attachment')
     parser.add_argument('--attachment-env')
@@ -278,8 +281,9 @@ def run(argv):
     args = parser.parse_args(argv[:boundary])
     command = argv[boundary + 1:]
     mappings = []
-    if args.password_env:
-        mappings.append((None, environment_name(args.password_env)))
+    for login_key, target in (('password', args.password_env), ('username', args.username_env)):
+        if target:
+            mappings.append(((login_key,), environment_name(target)))
     for field in args.field:
         name, separator, target = field.rpartition('=')
         if not separator or not name:
@@ -295,7 +299,7 @@ def run(argv):
     item = selected_item(args.item, args.name)
     additions = {}
     for field, target in mappings:
-        values = [item.get('login', {}).get('password')] if field is None else [
+        values = [(item.get('login') or {}).get(field[0])] if isinstance(field, tuple) else [
             entry.get('value') for entry in item.get('fields') or [] if entry.get('name') == field]
         if len(values) != 1 or not isinstance(values[0], str) or '\0' in values[0] or len(values[0].encode()) > MAX_VALUE_BYTES:
             raise Refused
@@ -551,7 +555,7 @@ def wait_for_status(server):
     raise Refused
 
 
-def unlock(server, password):
+def require_listener(server):
     try:
         if not owns_listener(server):
             raise Refused
@@ -559,6 +563,10 @@ def unlock(server, password):
         raise
     except Exception as error:
         raise UnsafeListener from error
+
+
+def unlock(server, password):
+    require_listener(server)
     return fetch('/unlock', method='POST', payload={'password': password})
 
 
@@ -652,63 +660,105 @@ class AgentRequest(socketserver.StreamRequestHandler):
             log_agent_refusal()
 
 
+def scoped_keys(selected, server, wanted):
+    require_listener(server)
+    items = fetch('/list/object/items?' + urlencode({'organizationid': selected['organizationId'],
+                                                   'collectionid': selected['collectionId']}))['data'] if wanted else []
+    keys = []
+    for item in items:
+        if item.get('type') != SSH_KEY_ITEM_TYPE or item.get('organizationId') != selected['organizationId'] or (
+                selected['collectionId'] not in item.get('collectionIds', [])):
+            continue
+        key = (item.get('sshKey') or {}).get('privateKey')
+        if not isinstance(key, str) or not key or len(key.encode()) > MAX_VALUE_BYTES:
+            raise Refused
+        keys.append(key.strip() + '\n')
+    return keys
+
+
+def loaded_agent(env, path, keys):
+    env = {**env, 'SSH_AUTH_SOCK': path}
+    Path(path).unlink(missing_ok=True)
+    agent = subprocess.Popen(['ssh-agent', '-D', '-a', path], env=env, stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    try:
+        for _ in range(AGENT_START_ATTEMPTS):
+            if agent.poll() is not None:
+                raise Refused
+            if Path(path).is_socket():
+                break
+            time.sleep(AGENT_START_POLL_SECONDS)
+        else:
+            raise Refused
+        for key in keys:
+            result = subprocess.run(['ssh-add', '-q', '-'], input=key.encode(), env=env, stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL, timeout=SSH_REQUEST_TIMEOUT_SECONDS)
+            if result.returncode:
+                raise Refused
+    except BaseException:
+        stop(agent)
+        raise
+    return agent
+
+
 @contextlib.contextmanager
 def ssh_agent(selected, server):
     if selected['environment'] not in ('homelab', 'work'):
         raise Refused
     public_socket = SCOPE_FILE.with_name('ssh-agent.sock')
     public_socket.unlink(missing_ok=True)
-    load_keys = selected['environment'] != 'work' or bool(
+    wanted = selected['environment'] != 'work' or bool(
         runpy.run_path(str(WORK_SSH_INPUTS / 'work-ssh.py'))['hosts'](WORK_SSH_INPUTS / 'hosts.json'))
-    if not owns_listener(server):
-        raise UnsafeListener
-    items = fetch('/list/object/items?' + urlencode({'organizationid': selected['organizationId'],
-                                                   'collectionid': selected['collectionId']}))['data'] if load_keys else []
-    keys = [item for item in items if item.get('type') == SSH_KEY_ITEM_TYPE and
-            item.get('organizationId') == selected['organizationId'] and
-            selected['collectionId'] in item.get('collectionIds', [])]
+    keys = scoped_keys(selected, server, wanted)
     with tempfile.TemporaryDirectory(prefix='vault-agent-', dir='/tmp') as directory:
         os.chmod(directory, 0o700)
         private_socket = str(Path(directory) / 'agent.sock')
-        env = {'HOME': directory, 'PATH': os.environ['PATH'], 'SSH_AUTH_SOCK': private_socket,
-               'SSH_ASKPASS_REQUIRE': 'never'}
-        with subprocess.Popen(['ssh-agent', '-D', '-a', private_socket], env=env,
-                              stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                              start_new_session=True) as agent:
-            try:
-                for _ in range(AGENT_START_ATTEMPTS):
-                    if agent.poll() is not None:
-                        raise Refused
-                    if Path(private_socket).is_socket():
-                        break
-                    time.sleep(AGENT_START_POLL_SECONDS)
-                else:
-                    raise Refused
-                for item in keys:
-                    key = (item.get('sshKey') or {}).get('privateKey')
-                    if not isinstance(key, str) or not key or len(key.encode()) > MAX_VALUE_BYTES:
-                        raise Refused
-                    result = subprocess.run(['ssh-add', '-q', '-'], input=(key.strip() + '\n').encode(),
-                                            env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                            timeout=SSH_REQUEST_TIMEOUT_SECONDS)
-                    if result.returncode:
-                        raise Refused
-                with AgentProxy(str(public_socket), AgentRequest) as proxy:
-                    proxy.agent_socket = private_socket
-                    os.chmod(public_socket, 0o666)
-                    thread = threading.Thread(target=proxy.serve_forever, kwargs={'poll_interval': PROXY_POLL_SECONDS}, daemon=True)
-                    thread.start()
-                    try:
-                        if not keys and load_keys:
-                            print('vault: no scoped SSH keys; agent is empty', flush=True)
-                        yield agent
-                    finally:
-                        public_socket.unlink(missing_ok=True)
-                        proxy.shutdown()
-                        thread.join()
-            finally:
-                public_socket.unlink(missing_ok=True)
-                stop(agent)
+        env = {'HOME': directory, 'PATH': os.environ['PATH'], 'SSH_ASKPASS_REQUIRE': 'never'}
+        agent = loaded_agent(env, private_socket, keys)
+        try:
+            def refresh():
+                nonlocal agent, keys
+                fetch('/sync', method='POST', timeout=VAULT_OPERATION_TIMEOUT_SECONDS)
+                current = scoped_keys(selected, server, wanted)
+                if set(current) == set(keys):
+                    return
+                # A fully loaded replacement takes over the proxied path in one rename, so no request sees a
+                # partial key set. stop() uses SIGKILL, so the old agent never unlinks the shared path on exit.
+                # Proxied connections opened before the swap still point at the old agent and fail; clients reconnect.
+                replacement = loaded_agent(env, str(Path(directory) / 'next.sock'), current)
+                try:
+                    os.replace(Path(directory) / 'next.sock', private_socket)
+                    agent, replacement, keys = replacement, agent, current
+                finally:
+                    stop(replacement)  # the old agent after a swap, the new one if the rename failed or was cancelled
+                print('vault: SSH agent reloaded; ' + str(len(keys)) + ' scoped keys', flush=True)
+
+            with AgentProxy(str(public_socket), AgentRequest) as proxy:
+                proxy.agent_socket = private_socket
+                os.chmod(public_socket, 0o666)
+                thread = threading.Thread(target=proxy.serve_forever, kwargs={'poll_interval': PROXY_POLL_SECONDS}, daemon=True)
+                thread.start()
+                try:
+                    if not keys and wanted:
+                        print('vault: no scoped SSH keys; agent is empty', flush=True)
+                    yield SimpleNamespace(poll=lambda: agent.poll(), refresh=refresh)
+                finally:
+                    public_socket.unlink(missing_ok=True)
+                    proxy.shutdown()
+                    thread.join()
+        finally:
+            public_socket.unlink(missing_ok=True)
+            stop(agent)
+
+
+def refresh_keys(agent):
+    try:
+        agent.refresh()
+    except (Cancelled, UnsafeListener):
+        raise
+    except Exception as error:
+        print('vault: SSH key refresh failed (' + type(error).__name__ + '); keeping loaded keys',
+              file=sys.stderr, flush=True)
 
 
 def serve():
@@ -749,10 +799,14 @@ def serve():
                 publish_scope(selected)
                 print('vault: local client ready', flush=True)
                 failures = 0
+                due = time.monotonic() + SSH_KEY_REFRESH_SECONDS
                 while server.poll() is None:
                     failures = 0 if client_ready(server) else failures + 1
                     if failures >= 3 or (agent is not None and agent.poll() is not None):
                         raise Refused
+                    if agent is not None and time.monotonic() >= due:
+                        refresh_keys(agent)
+                        due = time.monotonic() + SSH_KEY_REFRESH_SECONDS
                     time.sleep(HEALTH_INTERVAL)
                 return exit_code(server.returncode) or 1
 

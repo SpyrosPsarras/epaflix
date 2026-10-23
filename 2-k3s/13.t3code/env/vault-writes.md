@@ -5,6 +5,10 @@ sidecar. The scope comes from `/run/t3-vault/scope.json`, not caller arguments.
 `vault run`, `update`, `trash` and `attach` refuse items outside that org and
 collection, and items with a non-null `deletedDate`. Exact-name reads ignore
 trashed matches, then re-fetch the selected item by ID before using its values.
+The sidecar re-syncs every 10 seconds and, when the scoped SSH-key items
+changed, loads them into a fresh ssh-agent and swaps it in; a failed refresh
+logs and keeps the loaded keys. Item reads sync on their own (see the homelab
+README).
 
 `vault list [filter]` discovers active items in that same org and collection.
 The optional filter matches item names by case-insensitive substring. Output is

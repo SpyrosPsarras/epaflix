@@ -24,7 +24,7 @@ Use the image's `vault` runner to read a password, custom field or attachment
 without exposing its value to the model:
 
 ```sh
-vault run --name "$ITEM_NAME" --password-env VAULT_PASSWORD \
+vault run --name "$ITEM_NAME" --password-env VAULT_PASSWORD --username-env VAULT_USER \
   --field 'api-key=VAULT_API_KEY' --attachment credentials.json \
   --attachment-env VAULT_FILE -- python3 /private/consume.py
 ```

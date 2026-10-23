@@ -12,6 +12,7 @@ import subprocess
 import tempfile
 import time
 import unittest
+import contextlib
 from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import patch
 
@@ -311,6 +312,47 @@ class AgentTests(unittest.TestCase):
             self.assertNotEqual(self.add('-L').returncode, 0)
         self.assertEqual(output.getvalue().splitlines(), ['vault: SSH agent proxy request refused'])
 
+    def test_refresh_stops_on_an_unowned_listener(self):
+        for result in (False, vault.Refused):
+            output = io.StringIO()
+            with self.subTest(result=result), redirect_stderr(output), \
+                    patch.object(vault, 'fetch', return_value={'data': [self.item]}), \
+                    vault.ssh_agent(self.scope, self.server) as agent, patch.object(vault, 'owns_listener',
+                    **({'return_value': False} if result is False else {'side_effect': result})):
+                with self.assertRaises(vault.UnsafeListener):
+                    vault.refresh_keys(agent)
+            self.assertEqual(output.getvalue(), '')
+
+    def test_reordered_identical_keys_do_not_reload_the_agent(self):
+        other = self.root / 'other'
+        subprocess.run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', str(other)], check=True)
+        second = {**self.item, 'sshKey': {'privateKey': other.read_text()}}
+        with patch.object(vault, 'fetch', return_value={'data': [self.item, second]}) as fetch, \
+                vault.ssh_agent(self.scope, self.server) as agent:
+            fetch.return_value = {'data': [second, self.item]}
+            with patch.object(vault, 'loaded_agent', side_effect=AssertionError('Agent reloaded')):
+                agent.refresh()
+
+    def test_reload_breaks_proxied_connections_opened_before_the_swap(self):
+        other = self.root / 'other'
+        subprocess.run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', str(other)], check=True)
+        request = struct.pack('!I', 1) + bytes([11])  # SSH2_AGENTC_REQUEST_IDENTITIES
+        with patch.object(vault, 'fetch', return_value={'data': [self.item]}) as fetch, redirect_stdout(io.StringIO()), \
+                redirect_stderr(io.StringIO()), vault.ssh_agent(self.scope, self.server) as agent, \
+                socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(2)
+            client.connect(str(self.socket))
+            client.sendall(request)
+            self.assertEqual(client.recv(5)[4], 12)
+            client.recv(65536)
+            fetch.return_value = {'data': [{**self.item, 'sshKey': {'privateKey': other.read_text()}}]}
+            agent.refresh()
+            with contextlib.suppress(OSError):
+                client.sendall(request)
+            with contextlib.suppress(ConnectionResetError):
+                self.assertEqual(client.recv(5), b'')
+            self.assertEqual(self.add('-T', str(other.with_suffix('.pub'))).returncode, 0)
+
     @unittest.skipUnless(os.geteuid() == 0, 'Two-UID signing check needs root')
     def test_uid_1000_signs_through_uid_1001_proxy_but_not_direct_agent(self):
         self.root.chmod(0o755)
@@ -327,10 +369,13 @@ m.WORK_SSH_INPUTS=Path(sys.argv[2])/'work-inputs'
 item=json.loads((Path(sys.argv[2])/'fixture.json').read_text())
 m.fetch=lambda _: {'data':[item]}
 m.owns_listener=lambda _: True
+sockets=[]
+loaded=m.loaded_agent
+m.loaded_agent=lambda env,path,keys: sockets.append(path) or loaded(env,path,keys)
 def stop(*_): raise SystemExit(0)
 signal.signal(signal.SIGTERM,stop)
 with m.ssh_agent(json.loads(sys.argv[3]), object()) as agent:
-    private=Path(agent.args[-1])
+    private=Path(sockets[-1])
     private.parent.chmod(0o755)
     private.chmod(0o666)
     print('ready',flush=True)
