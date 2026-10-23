@@ -32,6 +32,20 @@ there are no Vaultwarden MCP tools. Use only this environment's vault.
 
 There is no system pip. For Python packages, create a virtual environment with `python3 -m venv <dir>` and use `<dir>/bin/pip` and `<dir>/bin/python`, or install a tool into `~/.local/bin`. Do not use sudo or system package managers.
 
+## Builds and one-shot containers
+
+There is no Docker here. Use `/scripts/t3-build <context-dir> --destination <registry/repo:tag> [--dockerfile path] [--docker-config file]`
+to build and push an image with kaniko, and `/scripts/t3-run <image> [-- cmd...]` for a one-shot
+container with stdin and stdout attached. Both run in this pod's own namespace (`t3-build-homelab` or `t3-build-work`) through
+`/run/t3-build/kubeconfig`, with public internet only and no LAN. The gzipped context must stay under 1 MB.
+If the kubeconfig is missing, tell the owner instead of working around it. Details:
+[t3-build](https://github.com/SpyrosPsarras/epaflix/blob/main/2-k3s/29.t3-build/README.md).
+
+## Handoffs
+
+Write files meant for the owner's desktops to `~/handoffs/`. The desktops pull them over SSH.
+Never try to push, upload or send them anywhere yourself.
+
 ## Model routing
 
 A thread resumed after a pod restart may lack T3 delegation tools such as `delegate_task`, `task_status`, and `orchestrator_capabilities`; if so, write a handoff file and ask the owner to continue in a new thread instead of working without subagents.

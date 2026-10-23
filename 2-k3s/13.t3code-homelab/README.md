@@ -18,6 +18,8 @@ setup, hub clients, image-prepull and idle-rollout jobs. The
 homelab image excludes Azure CLI and kubelogin. Its MCP clients use only the
 homelab hub. See the [hub private-input contract](../23.mcp-hub/instances/README.md).
 
+Files for the owner's desktops go in `~/handoffs/`, where the desktops pull them over SSH; the pod never pushes them ([handoffs and builds](../29.t3-build/README.md#handoffs)).
+
 ## Runtime vault reads
 
 Use the image's `vault` runner to read a password, custom field or attachment

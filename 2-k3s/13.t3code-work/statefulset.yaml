@@ -74,7 +74,7 @@ spec:
               mountPath: /run/t3-vault
       containers:
         - name: t3
-          image: ghcr.io/spyrospsarras/t3-runtime:work-inputs-ed02446697c101eced3adc316ae3c36b
+          image: ghcr.io/spyrospsarras/t3-runtime:work-inputs-1f594554d484a7ae3ec5aeaccb4a17eb
           imagePullPolicy: IfNotPresent
           command: [bash, /scripts/entrypoint.sh]
           env:
@@ -100,6 +100,8 @@ spec:
                   key: hub-token
             - name: T3_VAULT_CLIENT
               value: "1"
+            - name: T3_BUILD_KUBECONFIG
+              value: /run/t3-build/kubeconfig
             - name: GITHUB_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -124,6 +126,9 @@ spec:
               readOnly: true
             - name: scripts
               mountPath: /scripts
+              readOnly: true
+            - name: t3-build-kubeconfig
+              mountPath: /run/t3-build
               readOnly: true
             - name: tmp
               mountPath: /tmp
@@ -185,6 +190,9 @@ spec:
               readOnly: true
             - name: scripts
               mountPath: /scripts
+              readOnly: true
+            - name: t3-build-kubeconfig
+              mountPath: /run/t3-build
               readOnly: true
             - name: tmp
               mountPath: /tmp
@@ -331,6 +339,15 @@ spec:
                   name: t3code-scripts
               - configMap:
                   name: t3code-work-ssh
+        # Optional: the pod starts before the owner runs 29.t3-build/tools/build-kubeconfig.py.
+        - name: t3-build-kubeconfig
+          secret:
+            secretName: t3-build-kubeconfig
+            optional: true
+            defaultMode: 0440
+            items:
+              - key: kubeconfig
+                path: kubeconfig
         - name: tmp
           emptyDir: {}
         - name: runtime-state

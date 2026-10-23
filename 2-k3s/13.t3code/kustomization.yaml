@@ -18,6 +18,8 @@ configMapGenerator:
       - pi.sh=env/files/isolated-pi.sh
       - sshd.sh=env/files/isolated-sshd.sh
       - homelab-ssh.md=env/files/isolated-ssh.md
+      - t3-build=env/files/t3-build.py
+      - t3-run=env/files/t3-run.sh
       - one/files/pi-setup.py
       - one/files/t3-pi-settings.py
       - one/files/cc-safety-net-install.py

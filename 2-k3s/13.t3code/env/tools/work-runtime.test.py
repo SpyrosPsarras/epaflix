@@ -486,7 +486,15 @@ class WorkRuntimeTests(unittest.TestCase):
             secret_names = {v['secret']['secretName'] for v in pod['volumes'] if 'secret' in v}
             secret_names.update(source['secret']['name'] for v in pod['volumes']
                                 for source in v.get('projected', {}).get('sources', []) if 'secret' in source)
-            self.assertEqual(secret_names, {'t3-runtime-inputs', 't3-work-ssh'})
+            self.assertEqual(secret_names, {'t3-runtime-inputs', 't3-work-ssh', 't3-build-kubeconfig'})
+            build = next(v['secret'] for v in pod['volumes'] if v['name'] == 't3-build-kubeconfig')
+            self.assertEqual((build['optional'], build['items']), (True, [{'key': 'kubeconfig', 'path': 'kubeconfig'}]))
+            for container in pod['containers'][:2]:
+                self.assertIn({'name': 't3-build-kubeconfig', 'mountPath': '/run/t3-build', 'readOnly': True},
+                              container['volumeMounts'])
+            self.assertNotIn('t3-build-kubeconfig', {m['name'] for m in pod['containers'][2]['volumeMounts']})
+            self.assertIn({'name': 'T3_BUILD_KUBECONFIG', 'value': '/run/t3-build/kubeconfig'}, pod['containers'][0]['env'])
+            self.assertNotIn('KUBECONFIG', {e['name'] for e in pod['containers'][0]['env']})
             inputs = next(v for v in pod['volumes'] if v['name'] == 'inputs')
             self.assertIn({'key': 'work-auth.json', 'path': 'work-auth.json'}, inputs['secret']['items'])
             image = pod['containers'][0]['image']
@@ -504,6 +512,7 @@ class WorkRuntimeTests(unittest.TestCase):
             self.assertEqual(binding['subjects'][0]['namespace'], 't3code-work')
             scripts = next(doc for doc in docs if doc['kind'] == 'ConfigMap' and 'entrypoint.sh' in doc['data'])
             self.assertIn('work-aks-auth.py', scripts['data'])
+            self.assertTrue({'t3-build', 't3-run'} <= set(scripts['data']))
             self.assertNotIn('vault-run.py', scripts['data'])
             self.assertNotIn('aks-auth-central.sh', scripts['data'])
             homelab = list(yaml.safe_load_all(subprocess.check_output(['kustomize', 'build', str(tree / '13.t3code-homelab')])) )

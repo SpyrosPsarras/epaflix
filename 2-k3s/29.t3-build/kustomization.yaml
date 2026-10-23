@@ -1,0 +1,7 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Builds and one-shot containers for the homelab and work T3 pods, one namespace each. See README.md.
+resources:
+  - homelab
+  - work

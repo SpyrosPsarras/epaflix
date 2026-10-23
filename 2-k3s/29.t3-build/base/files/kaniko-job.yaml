@@ -1,0 +1,55 @@
+# Template for /scripts/t3-build (13.t3code/env/files/t3-build.py). The script
+# replaces the quoted @NAME@, @DOCKERFILE@, @DESTINATION@ and @SECRET_OPTIONAL@ placeholders and
+# creates ConfigMap and Secret @NAME@ next to the Job. Renovate watches the image.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: "@NAME@"
+  labels:
+    app.kubernetes.io/name: t3-build
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 1800
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: t3-build
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      containers:
+        - name: kaniko
+          image: gcr.io/kaniko-project/executor:v1.24.0@sha256:4e7a52dd1f14872430652bb3b027405b8dfd17c4538751c620ac005741ef9698
+          args:
+            - --context
+            - tar:///context/context.tar.gz
+            - --dockerfile
+            - "@DOCKERFILE@"
+            - --destination
+            - "@DESTINATION@"
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+              ephemeral-storage: 2Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+              ephemeral-storage: 20Gi
+          volumeMounts:
+            - name: context
+              mountPath: /context
+              readOnly: true
+            - name: docker-config
+              mountPath: /kaniko/.docker
+              readOnly: true
+      volumes:
+        - name: context
+          configMap:
+            name: "@NAME@"
+        - name: docker-config
+          secret:
+            secretName: "@NAME@"
+            optional: "@SECRET_OPTIONAL@"
