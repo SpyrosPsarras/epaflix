@@ -780,7 +780,16 @@ nested = {"🏠" = ["fixture", {enabled = false}]}
             self.assertFalse(spec['automountServiceAccountToken'])
             self.assertEqual({v['persistentVolumeClaim']['claimName'] for v in spec['volumes'] if 'persistentVolumeClaim' in v}, {'t3code-home', 't3code-vault'})
             self.assertNotIn('hostPath', json.dumps(spec))
-            self.assertEqual({v['secret']['secretName'] for v in spec['volumes'] if 'secret' in v}, {'t3-runtime-inputs'})
+            self.assertEqual({v['secret']['secretName'] for v in spec['volumes'] if 'secret' in v},
+                             {'t3-runtime-inputs', 't3-build-kubeconfig'})
+            build = next(v['secret'] for v in spec['volumes'] if v['name'] == 't3-build-kubeconfig')
+            self.assertEqual((build['secretName'], build['optional'], build['items']),
+                             ('t3-build-kubeconfig', True, [{'key': 'kubeconfig', 'path': 'kubeconfig'}]))
+            for container in spec['containers'][:2]:
+                self.assertIn({'name': 't3-build-kubeconfig', 'mountPath': '/run/t3-build', 'readOnly': True},
+                              container['volumeMounts'])
+            self.assertIn({'name': 'T3_BUILD_KUBECONFIG', 'value': '/run/t3-build/kubeconfig'}, spec['containers'][0]['env'])
+            self.assertNotIn('KUBECONFIG', {e['name'] for e in spec['containers'][0]['env']})
             image = spec['containers'][0]['image']
             self.assertIn(':homelab-inputs-', image)
             self.assertEqual(spec['containers'][1]['image'], image)

@@ -22,6 +22,8 @@ access uses T3 Connect or SSH only, not the pod IP. The `t3code` Service retains
 the StatefulSet identity with SSH only on 2222; it no longer exposes HTTP.
 See [client access](../13.t3code/env/client-access.md) for relay and SSH checks.
 
+Files for the owner's desktops go in `~/handoffs/`, where the desktops pull them over SSH; the pod never pushes them ([handoffs and builds](../29.t3-build/README.md#handoffs)).
+
 ## Runtime vault reads
 
 The work overlay uses the same [`vault run` client and sidecar](../13.t3code-homelab/README.md#runtime-vault-reads)

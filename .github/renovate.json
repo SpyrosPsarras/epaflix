@@ -6,7 +6,7 @@
     ":semanticCommits"
   ],
   "kubernetes": {
-    "managerFilePatterns": ["/^2-k3s/26\\.vaultwarden/org-setup/job\\.yaml$/"]
+    "managerFilePatterns": ["/^2-k3s/26\\.vaultwarden/org-setup/job\\.yaml$/", "/^2-k3s/29\\.t3-build/files/kaniko-job\\.yaml$/"]
   },
   "timezone": "Europe/Athens",
   "schedule": ["after 2am and before 6am"],

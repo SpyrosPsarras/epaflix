@@ -1,0 +1,42 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: builder-homelab
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: builder-work
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: builder
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "pods/attach", "configmaps", "secrets"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: builder
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: builder
+subjects:
+  - kind: ServiceAccount
+    name: builder-homelab
+    namespace: t3-build
+  - kind: ServiceAccount
+    name: builder-work
+    namespace: t3-build

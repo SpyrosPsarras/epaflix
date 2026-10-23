@@ -30,6 +30,7 @@ resources:
   - app-syncthing.yaml
   - app-system-upgrade-controller.yaml
   - app-system-upgrade-plans.yaml
+  - app-t3-build.yaml
   - app-t3code.yaml
   - app-t3code-homelab.yaml
   - app-t3code-homelab-access.yaml
