@@ -192,7 +192,7 @@ kubectl --context epaflix -n t3code-homelab exec homelab-0 -c t3 -- bash -ec '
 ```
 
 T3 processes and SSH login sessions do not receive `SSH_AUTH_SOCK`. OpenSSH
-selects the agent only through the inventory's `IdentityAgent` setting.
+selects the agent only through the generated SSH config's `IdentityAgent` setting.
 Readiness checks and explicit `ssh-add` diagnostics set the variable for that
 command only. Non-OpenSSH clients do not see the agent by default. If the
 laptop is away from home, its LAN alias times out and exits 255 after the
