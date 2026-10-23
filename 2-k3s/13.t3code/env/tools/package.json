@@ -9,7 +9,7 @@
     "@earendil-works/pi-coding-agent": "1.4.0",
     "@juicesharp/rpiv-ask-user-question": "2.13.9",
     "@juicesharp/rpiv-todo": "2.13.9",
-    "@openai/codex": "0.163.0",
+    "@openai/codex": "0.164.0",
     "@spences10/pi-redact": "0.0.15",
     "not-enough-retry": "0.4.0",
     "pi-cliproxyapi-provider": "0.15.58",
