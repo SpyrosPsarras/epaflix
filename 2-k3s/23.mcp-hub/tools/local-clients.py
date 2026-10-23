@@ -120,6 +120,9 @@ def configure(context, environment, target):
         servers.pop(prefix + name, None)
     entries = hub_clients.pi({}, hub_url(environment),
                              "MCP_HUB_" + environment.upper() + "_TOKEN", services=selected)["mcpServers"]
+    # Pi runs the !command itself, so desktop Pi needs no exported token wherever it is launched from.
+    for entry in entries.values():
+        entry["headers"]["Authorization"] = "!echo Bearer $(secret-tool lookup service mcp-hub key " + environment + ")"
     servers.update({prefix + name: entry for name, entry in entries.items()})
     if after != before:
         hub_clients.write_json(str(target), after)
