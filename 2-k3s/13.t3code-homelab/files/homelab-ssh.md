@@ -50,5 +50,13 @@ inventory host keys on the homelab home PVC and rejects a changed key. First
 contact uses trust on first use, not an independently verified host key. Do
 not delete known_hosts or weaken host-key checking to bypass a mismatch.
 
+`github.com` is the only non-inventory hostname that uses the homelab agent,
+so `git@github.com:` remotes fetch and push over SSH. GitHub must know the
+public key of a homelab collection SSH key item. Its host keys are pinned from
+GitHub's published keys in `~/.ssh/github_known_hosts`; never use `ssh-keyscan`
+or accept a new GitHub host key. Check with `ssh -T git@github.com` and report
+only the exit code: 1 is success, because GitHub prints a greeting and closes
+the session.
+
 `laptop` needs the home LAN. When away, use `laptop-ts`, which goes through
 the cluster's Tailscale router.

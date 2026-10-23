@@ -479,6 +479,14 @@ hosts, the agent stays empty and does not fetch SSH key items, even if the work
 collection contains them. Invalid SSH key items refuse startup when SSH is enabled. Every restart creates a fresh agent and discards the old
 key set; changing vault items does not hot-reload a running agent.
 
+`github.com` is the one hostname target. The generated config sends it
+to the same agent with `User git`, port 22 and GitHub's published host keys
+pinned in `github_known_hosts`; a `HostName` override falls to the deny block.
+The public IPv4 egress rule already reaches GitHub on TCP 22, so no policy
+change is needed. GitHub must know a key from the work collection. Because the
+agent loads keys only while approved hosts exist, GitHub SSH also needs at least
+one approved host. Check with `ssh -T git@github.com`: exit code 1 is success.
+
 The owner must supply these private inputs before enabling outbound work SSH.
 They are not required to start or use the work pod:
 
