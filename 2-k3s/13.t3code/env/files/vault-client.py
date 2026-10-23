@@ -555,7 +555,7 @@ def wait_for_status(server):
     raise Refused
 
 
-def unlock(server, password):
+def require_listener(server):
     try:
         if not owns_listener(server):
             raise Refused
@@ -563,6 +563,10 @@ def unlock(server, password):
         raise
     except Exception as error:
         raise UnsafeListener from error
+
+
+def unlock(server, password):
+    require_listener(server)
     return fetch('/unlock', method='POST', payload={'password': password})
 
 
@@ -657,8 +661,7 @@ class AgentRequest(socketserver.StreamRequestHandler):
 
 
 def scoped_keys(selected, server, wanted):
-    if not owns_listener(server):
-        raise UnsafeListener
+    require_listener(server)
     items = fetch('/list/object/items?' + urlencode({'organizationid': selected['organizationId'],
                                                    'collectionid': selected['collectionId']}))['data'] if wanted else []
     keys = []
@@ -717,10 +720,11 @@ def ssh_agent(selected, server):
                 nonlocal agent, keys
                 fetch('/sync', method='POST', timeout=VAULT_OPERATION_TIMEOUT_SECONDS)
                 current = scoped_keys(selected, server, wanted)
-                if current == keys:
+                if set(current) == set(keys):
                     return
                 # A fully loaded replacement takes over the proxied path in one rename, so no request sees a
                 # partial key set. stop() uses SIGKILL, so the old agent never unlinks the shared path on exit.
+                # Proxied connections opened before the swap still point at the old agent and fail; clients reconnect.
                 replacement = loaded_agent(env, str(Path(directory) / 'next.sock'), current)
                 try:
                     os.replace(Path(directory) / 'next.sock', private_socket)
