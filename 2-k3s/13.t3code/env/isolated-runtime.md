@@ -160,9 +160,11 @@ access. Startup requires `manager-guidance.md`, installs it through the private
 bundle installer, and atomically replaces Codex's override with the same combined
 instructions. Pi uses those instructions without the homelab SSH guide. Manager
 rules override personal preferences. Known agent and project MCP maps and cached
-auto-enable choices are cleared on every boot, including T3 worktrees. Invalid,
-escaping or unsupported alternate configuration stops startup with no config
-contents in diagnostics. Resolve those files privately before retrying.
+auto-enable choices are cleared on every boot, including T3 worktrees. This
+includes the `mcp` map of any project `opencode.json`, also under `.opencode/`.
+The tracked file then shows as modified in that checkout. A project or home
+`opencode.jsonc` still stops startup. Invalid, escaping or unsupported alternate
+configuration stops startup with no config contents in diagnostics. Resolve those files privately before retrying.
 
 `KUBECONFIG=/run/t3-manager/kubeconfig` selects the read-only `kubeconfig` key of
 Opaque Secret `manager-kubeconfig` in both T3 and SSH shells. Automatic token

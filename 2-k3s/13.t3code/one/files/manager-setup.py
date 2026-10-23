@@ -92,9 +92,10 @@ def configure(home: Path, project: Path, guidance: Path,
                 with configuration(alternate, home):
                     if has_mcp(tomllib.loads(alternate.read_text())):
                         raise ValueError('Unsupported project MCP configuration')
-            for name in ('opencode.json', 'opencode.jsonc'):
-                if name in names:
-                    raise ConfigurationError(parent / name, home)
+            if 'opencode.json' in names:
+                paths.add(parent / 'opencode.json')
+            if 'opencode.jsonc' in names:
+                raise ConfigurationError(parent / 'opencode.jsonc', home)
     alternate = safe(home / '.config/opencode/opencode.jsonc', home)
     if alternate.exists():
         raise ConfigurationError(alternate, home)

@@ -147,6 +147,10 @@ path.write_text(text)
                                                    'enabledMcpjsonServers': ['custom'], 'trust': True}}})
         opencode = self.home / '.config/opencode/opencode.json'
         self.put(opencode, {'mcp': servers, 'theme': 'dark'})
+        project_opencode = [project / name for project in (self.project, self.home / '.t3/worktrees/jbod-fixture/t3-x')
+                            for name in ('opencode.json', '.opencode/opencode.json')]
+        for path in project_opencode:
+            self.put(path, {'$schema': 'x', 'mcp': servers, 'theme': 'dark'})
         codex = self.home / '.codex/config.toml'
         codex.parent.mkdir()
         codex.write_text('model = "fixture"\n[mcp_servers.legacy]\ncommand = "old"\n[mcp_servers.custom]\nurl = "https://mcp.example.test"\n')
@@ -170,6 +174,8 @@ path.write_text(text)
                 self.assertEqual(obj['theme'], 'dark')
                 self.assertTrue(obj['projects']['nested']['trust'])
             self.assertEqual(json.loads(opencode.read_text()), {'mcp': {}, 'theme': 'dark'})
+            for path in project_opencode:
+                self.assertEqual(json.loads(path.read_text()), {'$schema': 'x', 'mcp': {}, 'theme': 'dark'})
             self.assertFalse(tomllib.loads(codex.read_text()).get('mcp_servers'))
             self.assertEqual(tomllib.loads(codex.read_text())['model'], 'fixture')
             for path, data in preserved.items():
@@ -183,7 +189,9 @@ path.write_text(text)
         cases = [('.pi/agent/mcp.json', '{' + marker),
                  ('.codex/config.toml', '[bad ' + marker),
                  ('.codex/config.toml', '[profiles.alt.mcp_servers.custom]\ncommand = "' + marker + '"\n'),
-                 ('.config/opencode/opencode.json', '{"mcp": []}')]
+                 ('.config/opencode/opencode.json', '{"mcp": []}'),
+                 ('project/.opencode/opencode.jsonc', '{}'),
+                 ('project/opencode.json', '{"mcp": []}')]
         for name, data in cases:
             with self.subTest(name=name, data_type=data[:1]):
                 path = self.home / name
