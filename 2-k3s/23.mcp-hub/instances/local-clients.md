@@ -112,6 +112,8 @@ rather than applying manifests directly.
    ssh homepc 'python3 ~/.local/share/mcp-hub-client/local-clients.py check --context epaflix --machine homepc'
    ```
 
+   Run `check` before O4 only: it reads the `mcp-hub-client-<machine>`
+   staging Secrets, which O4 deletes, so it fails after a completed hand-off.
    `check` uses that machine's staged tokens to initialize one approved
    model-facing route per hub and requires HTTP 401 for the other hub's token.
    It disables redirects and environment proxies and prints only fixed status
@@ -135,7 +137,9 @@ mixed pod. It requires homelab kubectl and the Bitwarden CLI installed as
    cache or session.
 
 2. O2: Copy the four tokens into separate vault items. Each invocation asks
-   for a title, which must not be recorded in git. Run once because `vault`
+   for a title; enter `mcp-hub <instance> <machine>`, for example
+   `mcp-hub homelab homepc`, because O3 reads the items by that title. Run
+   once because `vault`
    creates items rather than updating them:
 
    ```sh
@@ -150,21 +154,29 @@ mixed pod. It requires homelab kubectl and the Bitwarden CLI installed as
    Values pass into `bw encode` and `bw create item` over stdin, with command
    output captured rather than displayed.
 
-3. O3: On each machine, obtain its two item IDs from the owner's vault UI,
-   activate Pi configuration and launch with ordinary client tokens. Keep
-   shell tracing disabled and do not dump the environment:
+3. O3: On each machine, set `machine` to `homepc` or `laptop`, then activate
+   Pi configuration and launch with ordinary client tokens. The snippet works
+   in both zsh and bash. It reads the O2 items by title, takes the cliproxy
+   model key from the desktop keyring, prints only `ok` or `missing` per
+   variable, and starts `/usr/bin/pi` without the `BW_*` session variables.
+   Keep shell tracing disabled and do not dump the environment:
 
    ```sh
-   read -r -p 'Homelab item ID for this machine: ' homelab_item
-   read -r -p 'Work item ID for this machine: ' work_item
-   export MCP_HUB_HOMELAB_TOKEN="$(bw get password "$homelab_item")"
-   export MCP_HUB_WORK_TOKEN="$(bw get password "$work_item")"
+   machine=homepc
+   bw sync >/dev/null
+   MCP_HUB_HOMELAB_TOKEN="$(bw get password "mcp-hub homelab $machine")"
+   MCP_HUB_WORK_TOKEN="$(bw get password "mcp-hub work $machine")"
+   CLIPROXYAPI_API_KEY="$(secret-tool lookup service cliproxy key api)"
+   export MCP_HUB_HOMELAB_TOKEN MCP_HUB_WORK_TOKEN CLIPROXYAPI_API_KEY
+   for name in MCP_HUB_HOMELAB_TOKEN MCP_HUB_WORK_TOKEN CLIPROXYAPI_API_KEY; do
+     if [ -n "$(printenv "$name")" ]; then echo "$name ok"; else echo "$name missing"; fi
+   done
    for instance in homelab work; do
      python3 ~/.local/share/mcp-hub-client/local-clients.py configure \
        --context epaflix --instance "$instance"
    done
-   python3 -c 'import os; os.execvpe("pi", ["pi"], {k: v for k, v in os.environ.items() if not k.startswith("BW_")})'
-   unset MCP_HUB_HOMELAB_TOKEN MCP_HUB_WORK_TOKEN
+   python3 -c 'import os; os.execve("/usr/bin/pi", ["pi"], {k: v for k, v in os.environ.items() if not k.startswith("BW_")})'
+   unset MCP_HUB_HOMELAB_TOKEN MCP_HUB_WORK_TOKEN CLIPROXYAPI_API_KEY
    ```
 
    The launcher strips the vault session from the agent environment. Complete
