@@ -39,30 +39,11 @@ spec:
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
-  name: minio-http
-  namespace: traefik-system
-spec:
-  entryPoints:
-    - web
-  routes:
-    - match: Host(`minio.epaflix.com`)
-      kind: Rule
-      middlewares:
-        - name: redirect-https
-          namespace: traefik-system
-      services:
-        - name: minio-external
-          port: 9000
-
----
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
-metadata:
   name: minio-https
   namespace: traefik-system
 spec:
   entryPoints:
-    - websecure
+    - internal
   routes:
     - match: Host(`minio.epaflix.com`)
       kind: Rule
@@ -78,25 +59,6 @@ spec:
       - main: epaflix.com
         sans:
           - "*.epaflix.com"
-
----
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
-metadata:
-  name: minio-console-http
-  namespace: traefik-system
-spec:
-  entryPoints:
-    - web
-  routes:
-    - match: Host(`minio-console.epaflix.com`)
-      kind: Rule
-      middlewares:
-        - name: redirect-https
-          namespace: traefik-system
-      services:
-        - name: minio-external
-          port: 9001
 
 ---
 apiVersion: traefik.io/v1alpha1
@@ -106,43 +68,16 @@ metadata:
   namespace: traefik-system
 spec:
   entryPoints:
-    - websecure
+    - internal
   routes:
     - match: Host(`minio-console.epaflix.com`)
       kind: Rule
-      priority: 10
       middlewares:
         - name: security-headers
-          namespace: traefik-system
-        - name: authentik-forwardauth
           namespace: traefik-system
       services:
         - name: minio-external
           port: 9001
-  tls:
-    certResolver: cloudflare
-    domains:
-      - main: epaflix.com
-        sans:
-          - "*.epaflix.com"
-
----
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
-metadata:
-  name: minio-console-outpost-https
-  namespace: traefik-system
-spec:
-  entryPoints:
-    - websecure
-  routes:
-    - match: Host(`minio-console.epaflix.com`) && PathPrefix(`/outpost.goauthentik.io/`)
-      kind: Rule
-      priority: 15
-      services:
-        - name: authentik-server
-          namespace: app-authentik
-          port: 80
   tls:
     certResolver: cloudflare
     domains:
