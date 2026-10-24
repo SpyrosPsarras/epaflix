@@ -9,7 +9,8 @@ metadata:
   annotations:
     secret.reloader.stakater.com/reload: "jellysweep-config"
 spec:
-  replicas: 1
+  # TEMP: paused for Jellyfin 12; v0.16.1 lacks jon4hz/jellysweep#440 and runs cleanup on startup. Once the kustomization pin is on a release with #440: replicas 1, review the queue, then remove JELLYSWEEP_DRY_RUN
+  replicas: 0
   selector:
     matchLabels:
       app: jellysweep
@@ -32,6 +33,9 @@ spec:
       containers:
         - name: jellysweep
           image: ghcr.io/jon4hz/jellysweep:v0.16.0
+          env:
+            - name: JELLYSWEEP_DRY_RUN
+              value: "true"
           ports:
             - containerPort: 3002
               name: http
