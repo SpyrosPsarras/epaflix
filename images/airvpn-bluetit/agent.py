@@ -31,6 +31,7 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -54,6 +55,9 @@ RANKING_SERVER_KEYS = frozenset((
 _IDENTITY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}$")
 
 MIN_THROUGHPUT_INTERVAL_SECONDS = 1.0
+LAN_INTERFACE = "eth0"
+LAN_DISCOVERY_HOP = 2
+LAN_DISCOVERY_TARGET = "1.1.1.1"
 
 FULL_COOLDOWN_REASONS = ("degradation",)
 
@@ -162,6 +166,7 @@ class Config:
 
 _SENT_RECV = re.compile(r"(\d+) packets transmitted, (\d+) (?:packets )?received")
 _RTT = re.compile(r"(?:rtt|round-trip) min/avg/max(?:/mdev)? = [\d.]+/([\d.]+)/")
+_ROUTER = re.compile(r"^From ([\d.]+) icmp_seq=\d+ Time to live exceeded", re.MULTILINE)
 
 _CONNECTED = re.compile(r"Connected to AirVPN server (\S+)")
 
@@ -182,6 +187,17 @@ def parse_ping(text):
     rtt = _RTT.search(text)
     rtt_ms = round(float(rtt.group(1)), 2) if rtt else float("inf")
     return loss_pct, rtt_ms
+
+
+def parse_router(text):
+    """Return the router's IPv4 address from the TTL-exceeded reply."""
+    match = _ROUTER.search(text)
+    if match:
+        try:
+            return str(ipaddress.IPv4Address(match.group(1)))
+        except ValueError:
+            pass
+    return None
 
 
 def parse_status(text):
@@ -1058,6 +1074,10 @@ class Agent:
             self.verdict_publisher = VerdictPublisher(self._write_bad_server)
         self.current_server = None
         self.current_loss_pct = None
+        self.lan_router = None
+        self.lan_loss_pct = None
+        self.home_side_windows_total = 0
+        self._lan_discovery_logged = False
         self.throughput_bps = None
         self.consecutive_bad = 0
         self.consecutive_bad_server = None
@@ -1586,8 +1606,26 @@ class Agent:
         self.switch(names, "boot_upgrade", mandatory=False)
 
 
-    def probe(self, count=None):
-        """50 ICMP packets to the in-tunnel gateway. Returns loss percent.
+    def discover_router(self):
+        """Cache hop 2 through eth0; discovery failures leave the LAN unmeasured."""
+        if self.lan_router is not None:
+            return self.lan_router
+        try:
+            result = subprocess.run(
+                ["ping", "-n", "-c1", "-W2", "-t%d" % LAN_DISCOVERY_HOP,
+                 "-I", LAN_INTERFACE, LAN_DISCOVERY_TARGET],
+                capture_output=True, text=True, timeout=5,
+            )
+            self.lan_router = parse_router(result.stdout + result.stderr)
+        except Exception:
+            pass
+        if self.lan_router is None and not self._lan_discovery_logged:
+            log.info("LAN router discovery unavailable - retrying in later windows")
+            self._lan_discovery_logged = True
+        return self.lan_router
+
+    def probe(self, count=None, target=None, interface=None):
+        """50 ICMP packets to the gateway or an explicit target. Returns loss percent.
 
         `count` overrides the degradation window's packet count. The
         post-connect verification (#627 fix 1) passes a short burst, because it
@@ -1596,10 +1634,14 @@ class Agent:
         """
         count = self.cfg.probe_count if count is None else count
         interval = 1.0 / self.cfg.probe_rate
+        args = ["ping", "-n", "-q", "-c", str(count),
+                "-i", "%g" % interval, "-W", "2"]
+        if interface is not None:
+            args += ["-I", interface]
+        args.append(self.cfg.probe_target if target is None else target)
         try:
             result = subprocess.run(
-                ["ping", "-n", "-q", "-c", str(count),
-                 "-i", "%g" % interval, "-W", "2", self.cfg.probe_target],
+                args,
                 capture_output=True, text=True,
                 timeout=count * interval + 60,
             )
@@ -1639,11 +1681,19 @@ class Agent:
 
     def watch_once(self):
         """One degradation window. Returns True if it triggered a switch."""
+        router = self.discover_router()
         server_before = self.bluetit.status()
         generation_before = self.bluetit.tun_generation()
 
         before, started = self.bluetit.tun_bytes(), self.clock()
-        loss = self.probe()
+        lan_loss = None
+        if router is not None:
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                lan_probe = pool.submit(self.probe, target=router, interface=LAN_INTERFACE)
+                loss = self.probe()
+                lan_loss = lan_probe.result()
+        else:
+            loss = self.probe()
         throughput = self.throughput_since(before, started)
         current = self.bluetit.status()
         generation_after = self.bluetit.tun_generation()
@@ -1661,6 +1711,7 @@ class Agent:
             self.current_server = current
             self.throughput_bps = throughput if same_session else None
             self.current_loss_pct = loss if same_session and loss is not None else None
+            self.lan_loss_pct = lan_loss if same_session else None
             if not same_session:
                 self.consecutive_bad = 0
                 self.consecutive_bad_server = None
@@ -1683,6 +1734,13 @@ class Agent:
                 self.consecutive_bad = 0
                 self.consecutive_bad_server = None
                 self.consecutive_bad_generation = None
+            return False
+
+        if lan_loss is not None and lan_loss >= self.cfg.bad_loss_pct:
+            with self.lock:
+                self.home_side_windows_total += 1
+            log.warning("home-side loss tunnel=%.2f%% lan=%.2f%% via %s - not counted against %s",
+                        loss, lan_loss, router, current)
             return False
 
         if not current:
@@ -1755,6 +1813,8 @@ def render_metrics(agent):
     with agent.lock:
         server = agent.current_server
         loss = agent.current_loss_pct
+        lan_loss = agent.lan_loss_pct
+        home_side_windows = agent.home_side_windows_total
         bad = agent.consecutive_bad
         switching = agent.switching
         switches = dict(agent.switches)
@@ -1786,7 +1846,10 @@ def render_metrics(agent):
         "# HELP vpn_agent_switch_escapes_used Escape slots spent inside the enforced rolling 24 h window (#1031): degradation switches allowed past the cooldown and the daily cap because the server they escape was placed within VPN_AGENT_ESCAPE_WINDOW_SECONDS and then tripped. At most one per window; the switch itself also counts in vpn_agent_switches_total, as reason=\"degradation\" when it lands on a ranked server and reason=\"fallback\" when it ends on quick.",
         "# TYPE vpn_agent_switch_escapes_used gauge",
         "vpn_agent_switch_escapes_used %d" % escapes_used,
-        "# HELP vpn_agent_consecutive_bad_windows Consecutive probe windows with ICMP loss to the in-tunnel gateway at or over VPN_AGENT_BAD_LOSS_PCT. Resets on the first window under it.",
+        "# HELP vpn_agent_home_side_windows_total Probe windows with tunnel and LAN loss at or over VPN_AGENT_BAD_LOSS_PCT, not counted against the server.",
+        "# TYPE vpn_agent_home_side_windows_total counter",
+        "vpn_agent_home_side_windows_total %d" % home_side_windows,
+        "# HELP vpn_agent_consecutive_bad_windows Consecutive probe windows with ICMP loss to the in-tunnel gateway at or over VPN_AGENT_BAD_LOSS_PCT. Home-side windows leave it unchanged. Resets on the first window under it.",
         "# TYPE vpn_agent_consecutive_bad_windows gauge",
         "vpn_agent_consecutive_bad_windows %d" % bad,
         "# HELP vpn_agent_tunnel_device_ok Whether the device qBittorrent is bound to exists, read from /sys/class/net at scrape time. Read it together with vpn_agent_switch_in_progress: 0 during a switch is the normal teardown, not a failure.",
@@ -1819,6 +1882,12 @@ def render_metrics(agent):
             "# HELP vpn_agent_current_loss_pct Last measured ICMP loss to the in-tunnel gateway.",
             "# TYPE vpn_agent_current_loss_pct gauge",
             "vpn_agent_current_loss_pct %s" % loss,
+        ]
+    if lan_loss is not None:
+        lines += [
+            "# HELP vpn_agent_lan_loss_pct Last measured ICMP loss to the home router through eth0. Absent when the window produced no honest number.",
+            "# TYPE vpn_agent_lan_loss_pct gauge",
+            "vpn_agent_lan_loss_pct %s" % lan_loss,
         ]
     if age is not None:
         lines += [
