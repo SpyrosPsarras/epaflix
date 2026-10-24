@@ -7,19 +7,23 @@ metadata:
 data:
   check.py: |
     #!/usr/bin/env python3
-    """Prowlarr indexer-backoff health check (#607). Python stdlib only.
+    """Check Prowlarr backoff and banned indexers using BANNED_DEFINITIONS.
 
-    Run with --selftest to exercise the classifier against synthetic health
+    Delete banned indexers in Prowlarr. Python stdlib only.
+    Run with --selftest to exercise the classifiers against synthetic
     payloads without touching the network.
     """
+    import http.client
     import json
     import os
     import sys
-    import urllib.error
     import urllib.request
 
     TIMEOUT = 15
     WATCHED_SOURCE = "IndexerLongTermStatusCheck"
+    BANNED_DEFINITIONS = {
+        "limetorrents": "fake archive releases (removed 2026-10-24)",
+    }
 
     PROWLARR_URL = os.environ.get(
         "PROWLARR_URL", "http://prowlarr.servarr.svc.cluster.local:9696"
@@ -42,13 +46,31 @@ data:
         return (len(hits) == 0, hits)
 
 
-    def fetch_health():
+    def classify_banned(indexers):
+        hits = []
+        for item in indexers:
+            if not isinstance(item, dict):
+                continue
+            definition = item.get("definitionName")
+            if not isinstance(definition, str):
+                continue
+            reason = BANNED_DEFINITIONS.get(definition.lower())
+            if reason:
+                hits.append(f"{item.get('name', '(no name)')} (id={item.get('id', '?')}): {reason}")
+        return (len(hits) == 0, hits)
+
+
+    def fetch(path):
         req = urllib.request.Request(
-            f"{PROWLARR_URL}/api/v1/health",
+            f"{PROWLARR_URL}{path}",
             headers={"X-Api-Key": API_KEY},
         )
         with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
-            return json.loads(resp.read().decode())
+            items = json.loads(resp.read().decode())
+        if not isinstance(items, list):
+            kind = "an indexer" if path == "/api/v1/indexer" else "a health"
+            raise ValueError(f"expected {kind} list")
+        return items
 
 
     def selftest():
@@ -78,6 +100,27 @@ data:
         ok, hits = classify([{}, {"source": None}, "not-a-dict", 42])
         assert ok and hits == [], "malformed entries must not crash or false-positive"
 
+        ok, hits = classify_banned([])
+        assert ok and hits == [], "empty indexer list must be OK"
+
+        ok, hits = classify_banned([{"definitionName": "other", "name": "Other", "id": 1}])
+        assert ok and hits == [], "non-banned indexer must not fail the check"
+
+        for definition in ("limetorrents", "LimeTorrents"):
+            ok, hits = classify_banned(
+                [{"definitionName": definition, "name": "LimeTorrents", "id": 2}]
+            )
+            assert not ok, "banned definition must fail regardless of case"
+            assert hits == [
+                "LimeTorrents (id=2): fake archive releases (removed 2026-10-24)"
+            ]
+
+        ok, hits = classify_banned(
+            [{}, {"definitionName": None}, {"definitionName": 42},
+             {"definitionName": []}, {"definitionName": {}}, "not-a-dict", 42, None]
+        )
+        assert ok and hits == [], "malformed indexers must not crash or false-positive"
+
         print("selftest OK")
         return 0
 
@@ -90,25 +133,44 @@ data:
             print("ERROR: PROWLARR_API_KEY is empty", file=sys.stderr)
             return 1
 
-        try:
-            health_items = fetch_health()
-        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as exc:
-            print(f"ERROR: could not reach {PROWLARR_URL}/api/v1/health: {exc}", file=sys.stderr)
-            return 1
-        except (json.JSONDecodeError, ValueError) as exc:
-            print(f"ERROR: unparseable response from Prowlarr health endpoint: {exc}", file=sys.stderr)
-            return 1
+        failed = False
+        for endpoint, classifier, ok_message, fail_header, action in (
+            (
+                "health",
+                classify,
+                f"OK: no {WATCHED_SOURCE} warning (checked {{}} health entries).",
+                f"FAIL: Prowlarr raised {WATCHED_SOURCE}:",
+                "ACTION: check indexer credentials/rate-limits in the Prowlarr UI; see #471/#477.",
+            ),
+            (
+                "indexer",
+                classify_banned,
+                "OK: no banned indexers (checked {} indexers).",
+                "FAIL: banned Prowlarr indexers configured:",
+                "ACTION: delete these indexers in Prowlarr; ban list: BANNED_DEFINITIONS in this script.",
+            ),
+        ):
+            path = f"/api/v1/{endpoint}"
+            try:
+                items = fetch(path)
+            except (OSError, http.client.HTTPException) as exc:
+                print(f"ERROR: could not reach {PROWLARR_URL}{path}: {exc}", file=sys.stderr)
+                failed = True
+            except ValueError as exc:
+                print(f"ERROR: unparseable response from Prowlarr {endpoint} endpoint: {exc}", file=sys.stderr)
+                failed = True
+            else:
+                ok, hits = classifier(items)
+                if ok:
+                    print(ok_message.format(len(items)))
+                else:
+                    failed = True
+                    print(fail_header)
+                    for msg in hits:
+                        print(f"  - {msg}")
+                    print(action)
 
-        ok, hits = classify(health_items)
-        if ok:
-            print(f"OK: no {WATCHED_SOURCE} warning (checked {len(health_items)} health entries).")
-            return 0
-
-        print(f"FAIL: Prowlarr raised {WATCHED_SOURCE}:")
-        for msg in hits:
-            print(f"  - {msg}")
-        print("ACTION: check indexer credentials/rate-limits in the Prowlarr UI; see #471/#477.")
-        return 1
+        return 1 if failed else 0
 
 
     if __name__ == "__main__":
