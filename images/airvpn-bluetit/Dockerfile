@@ -18,7 +18,7 @@ FROM debian:13-slim
 LABEL org.opencontainers.image.source=https://github.com/SpyrosPsarras/epaflix
 
 ARG AIRVPN_SUITE_VERSION=2.2.0
-ARG AIRVPN_SUITE_SHA512=e17add5769b50683a4d2e480995fbe83d9f4b05b9738de58de9ce922ea80b13317b502ad4a49ee01bd23bcf10b8df96a3242fa3e5f9d20138665373c2445720d
+ARG AIRVPN_SUITE_SHA512=41aef64ed24185862d3e34d09242e9eb396785b20e4468efa72abd0e3d471cb09a642c698317aa401c4bd1ce6d210bb3362bccc88927ea94ed60cdbcf89c89a9
 
 # libsystemd0 and libcap2 are NOT in the README's dependency list but both
 # binaries link them - verified with ldd. busybox provides the syslogd that

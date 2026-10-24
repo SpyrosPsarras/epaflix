@@ -22,6 +22,7 @@ import sys
 import tempfile
 import threading
 import time
+from unittest.mock import patch
 
 import agent as ag
 
@@ -145,6 +146,7 @@ def build(tmp, ranking=RANKING, server="Aspidiske", refused=(), silent=(), dead=
                      wallclock=lambda: GENERATED_EPOCH + 60 + (clock() - 1000.0))
     _TEST_AGENTS.append(agent)
 
+    agent.discover_router = lambda: None
     dead_names = {n.lower() for n in dead}
     agent.probe = lambda count=None: (
         100.0 if (fake.server or "").lower() in dead_names else 0.0
@@ -669,6 +671,144 @@ def test_degradation_counting(tmp):
     assert agent2.consecutive_bad == 0, "counted a window under the threshold"
     assert fake2.connects() == []
     print("ok  degradation: 3 consecutive trips, a good window resets, 4.99% is clean")
+
+
+@with_tmp
+def test_home_side_windows_do_not_blame_the_server(tmp):
+    """Shared tunnel/LAN loss must neither spend the budget nor eject a server."""
+    agent, fake, _ = build(tmp, server="Aspidiske")
+    agent.lan_router = "192.168.10.1"
+    agent.discover_router = lambda: agent.lan_router
+    lan_loss = [5.0]
+    tunnel_loss = [9.0]
+    agent.probe = lambda count=None, target=None, interface=None: (
+        lan_loss[0] if target else tunnel_loss[0])
+    publications = []
+    agent.publish_bad_server = lambda *args: publications.append(args)
+
+    with CaptureLog() as caught:
+        for _ in range(3):
+            assert agent.watch_once() is False, "home-side loss triggered a switch"
+            assert agent.consecutive_bad == 0, "home-side loss counted against the server"
+    assert len([r for r in caught.records
+                if r.levelno == logging.WARNING and "home-side loss" in r.getMessage()]) == 3
+    assert metric(agent, "vpn_agent_home_side_windows_total") == 3.0
+    assert metric(agent, "vpn_agent_lan_loss_pct") == 5.0
+    assert metric(agent, "vpn_agent_current_loss_pct") == 9.0
+    assert publications == [] and fake.connects() == []
+    assert agent.budget.history == []
+
+    lan_loss[0] = 0.0
+    assert agent.watch_once() is False
+    assert agent.watch_once() is False
+    assert agent.consecutive_bad == 2, "good LAN suppressed real tunnel loss"
+    attribution = (agent.consecutive_bad_server, agent.consecutive_bad_generation)
+    lan_loss[0] = 16.0
+    for _ in range(3):
+        assert agent.watch_once() is False
+        assert agent.consecutive_bad == 2, "home-side window changed the existing streak"
+        assert (agent.consecutive_bad_server, agent.consecutive_bad_generation) == attribution
+    assert publications == [] and fake.connects() == []
+    assert metric(agent, "vpn_agent_home_side_windows_total") == 6.0
+
+    agent.consecutive_bad = 0
+    lan_loss[0] = None
+    assert agent.watch_once() is False
+    assert agent.consecutive_bad == 1, "unavailable LAN suppressed tunnel loss"
+    assert metric(agent, "vpn_agent_lan_loss_pct") is None, "stale LAN loss was exported"
+    agent.discover_router = lambda: None
+    assert agent.watch_once() is False
+    assert agent.consecutive_bad == 2, "undiscovered router suppressed tunnel loss"
+    assert metric(agent, "vpn_agent_home_side_windows_total") == 6.0
+    agent.discover_router = lambda: agent.lan_router
+    tunnel_loss[0], lan_loss[0] = 0.0, 16.0
+    assert agent.watch_once() is False
+    assert agent.consecutive_bad == 0, "bad LAN prevented a clean tunnel window resetting the streak"
+    assert metric(agent, "vpn_agent_home_side_windows_total") == 6.0
+    print("ok  home-side loss: no streak change, verdict or switch; clean/unavailable LAN counts normally")
+
+
+@with_tmp
+def test_router_discovery_retries_until_cached(tmp):
+    agent, _, _ = build(tmp)
+    discover = lambda: ag.Agent.discover_router(agent)
+    ttl = "From 192.168.10.1 icmp_seq=1 Time to live exceeded\n"
+    attempts = []
+
+    def ping(args, **kwargs):
+        attempts.append(args)
+        assert args == ["ping", "-n", "-c1", "-W2", "-t2", "-I", "eth0", "1.1.1.1"], args
+        if len(attempts) == 1:
+            raise OSError("ping unavailable")
+        output = "no reply" if len(attempts) == 2 else ttl
+        return ag.subprocess.CompletedProcess(args, 1, output, "")
+
+    level = ag.log.level
+    ag.log.setLevel(logging.INFO)
+    try:
+        with patch.object(ag.subprocess, "run", side_effect=ping), CaptureLog() as caught:
+            assert discover() is None
+            assert discover() is None
+            assert len(caught.records) == 1 and caught.records[0].levelno == logging.INFO
+            assert discover() == "192.168.10.1"
+            assert discover() == "192.168.10.1"
+            assert len(attempts) == 3, "cached router was rediscovered"
+    finally:
+        ag.log.setLevel(level)
+    print("ok  router discovery: eth0 TTL probe, retry on failure, one info log, cached success")
+
+
+@with_tmp
+def test_lan_and_tunnel_probes_share_a_window(tmp):
+    agent, _, _ = build(tmp, server="Aspidiske")
+    assert metric(agent, "vpn_agent_lan_loss_pct") is None
+    assert metric(agent, "vpn_agent_home_side_windows_total") == 0.0
+    agent.lan_router = "192.168.10.1"
+    agent.discover_router = lambda: agent.lan_router
+    agent.probe = lambda *args, **kwargs: ag.Agent.probe(agent, *args, **kwargs)
+    entered = {agent.cfg.probe_target: threading.Event(), agent.lan_router: threading.Event()}
+    calls = []
+    fail_lan = [False]
+
+    def ping(args, **kwargs):
+        target = args[-1]
+        if target == agent.lan_router and fail_lan[0]:
+            raise OSError("LAN ping failed")
+        calls.append(args)
+        expected = ["ping", "-n", "-q", "-c", "50", "-i", "0.2", "-W", "2"]
+        if target == agent.lan_router:
+            expected += ["-I", "eth0"]
+        assert args == expected + [target], args
+        assert kwargs["timeout"] == 70.0, kwargs
+        entered[target].set()
+        other = agent.lan_router if target == agent.cfg.probe_target else agent.cfg.probe_target
+        assert entered[other].wait(1.0), "LAN and tunnel probes ran sequentially"
+        return ag.subprocess.CompletedProcess(
+            args, 1, "50 packets transmitted, 45 received, 10% packet loss\n", "")
+
+    with patch.object(ag.subprocess, "run", side_effect=ping):
+        assert agent.watch_once() is False
+    assert len(calls) == 2
+    assert metric(agent, "vpn_agent_lan_loss_pct") == 10.0
+    assert metric(agent, "vpn_agent_home_side_windows_total") == 1.0
+    assert agent.consecutive_bad == 0
+    fail_lan[0] = True
+    with patch.object(ag.subprocess, "run", side_effect=ping):
+        assert agent.watch_once() is False
+    assert metric(agent, "vpn_agent_lan_loss_pct") is None
+    assert metric(agent, "vpn_agent_current_loss_pct") == 10.0
+    assert agent.consecutive_bad == 1, "failed LAN ping suppressed bad tunnel loss"
+
+    fail_lan[0] = False
+    generations = iter([41, 42])
+    agent.bluetit.tun_generation = lambda: next(generations)
+    with patch.object(ag.subprocess, "run", side_effect=ping):
+        assert agent.watch_once() is False
+    assert agent.consecutive_bad == 0, "home-side loss bypassed session-change discard"
+    assert metric(agent, "vpn_agent_lan_loss_pct") is None
+    assert metric(agent, "vpn_agent_current_loss_pct") is None
+    assert metric(agent, "vpn_agent_home_side_windows_total") == 1.0
+    print("ok  LAN probe: concurrent window, eth0 binding, shared settings, failures absent, session changes discarded")
 
 
 @with_tmp
@@ -2829,6 +2969,14 @@ def test_parse_status():
     print("ok  parse_status: exact name out, 'is not connected' is not a match")
 
 
+def test_parse_router():
+    assert ag.parse_router("From 192.168.10.1 icmp_seq=1 Time to live exceeded\n") == "192.168.10.1"
+    assert ag.parse_router("From 192.168.10.1 icmp_seq=1 Destination Host Unreachable\n") is None
+    assert ag.parse_router("From 999.168.10.1 icmp_seq=1 Time to live exceeded\n") is None
+    assert ag.parse_router("") is None
+    print("ok  parse_router: only a valid TTL-exceeded IPv4 router is accepted")
+
+
 def test_parse_ping():
     text = """--- 10.128.0.1 ping statistics ---
 50 packets transmitted, 47 received, 6% packet loss, time 9800ms
@@ -2863,6 +3011,10 @@ if __name__ == "__main__":
     test_boot_out_of_band_upgrades()
     test_boot_without_a_ranking_stays_on_quick()
     test_degradation_counting()
+    test_home_side_windows_do_not_blame_the_server()
+    test_parse_router()
+    test_router_discovery_retries_until_cached()
+    test_lan_and_tunnel_probes_share_a_window()
     test_high_loss_counts_on_a_busy_tunnel_too()
     test_throughput_is_measured_not_assumed()
     test_a_window_too_short_to_measure_is_no_measurement()
