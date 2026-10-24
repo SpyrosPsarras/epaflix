@@ -470,8 +470,8 @@ spec:
             severity: warning
             component: servarr
           annotations:
-            summary: "Prowlarr indexer(s) in long-term backoff (or the health check failed)"
-            description: "The hourly prowlarr-indexer-health Job ({{ $labels.job_name }}) failed — either Prowlarr raised IndexerLongTermStatusCheck (an indexer has been failing for more than 6 hours), or the health-endpoint fetch itself failed. Inspect the Job logs for which indexer(s), then check credentials/rate-limits in the Prowlarr UI. Closes the #471/#477 silent-backoff gap (#607)."
+            summary: "Prowlarr indexer backoff, banned indexer (delete in Prowlarr), or check failure"
+            description: "The hourly prowlarr-indexer-health Job ({{ $labels.job_name }}) failed because Prowlarr raised IndexerLongTermStatusCheck (an indexer has been failing for more than 6 hours), a banned indexer is configured, or a health/indexer endpoint fetch failed. Inspect the Job logs. For backoff, check credentials/rate-limits in the Prowlarr UI. Delete any banned indexers in Prowlarr; the ban list is BANNED_DEFINITIONS in check.py in 2-k3s/maintenance/prowlarr-indexer-health-cronjob.yaml. Closes the #471/#477 silent-backoff gap (#607)."
 
     - name: prowlarr-appsync-drift
       interval: 60s
