@@ -98,7 +98,7 @@ server:
 worker:
   enabled: true
   name: worker
-  replicas: 3
+  replicas: 1
 
   deploymentStrategy:
     type: Recreate
