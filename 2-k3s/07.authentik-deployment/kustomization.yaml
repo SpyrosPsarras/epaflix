@@ -24,6 +24,3 @@ configMapGenerator:
   - name: authentik-blueprint-check-script
     files:
       - files/check_authentik_blueprint.py
-  - name: authentik-migrate-media
-    files:
-      - migrate-local-path.sh=files/migrate-local-path.sh
