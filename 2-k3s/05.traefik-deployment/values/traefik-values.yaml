@@ -54,8 +54,7 @@ ingressRoute:
     enabled: false
     matchRule: Host(`traefik.epaflix.com`)
     entryPoints: ["websecure"]
-    tls:
-      certResolver: cloudflare
+    tls: {}
 
 tlsStore:
   default:
@@ -83,45 +82,33 @@ metrics:
       enabled: true
 
 
-env:
-  - name: CF_DNS_API_TOKEN
-    valueFrom:
-      secretKeyRef:
-        name: cloudflare-api-token
-        key: api-token
-
-persistence:
-  enabled: true
-  storageClass: local-path
-  accessMode: ReadWriteOnce
-  size: 128Mi
-
 deployment:
-  replicas: 1 # ACME requires single replica for certificate management
-  annotations:
-    secret.reloader.stakater.com/reload: "cloudflare-api-token"
-  initContainers:
-    - name: fix-acme-permissions
-      image: busybox:latest
-      command:
-        ["sh", "-c", "touch /data/acme.json && chmod 600 /data/acme.json"]
-      securityContext:
-        runAsUser: 986
-        runAsGroup: 986
-      volumeMounts:
-        - name: data
-          mountPath: /data
+  replicas: 2
+
+topologySpreadConstraints:
+  - topologyKey: topology.kubernetes.io/zone
+    maxSkew: 1
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: traefik
+        app.kubernetes.io/instance: traefik-traefik-system
+  - topologyKey: kubernetes.io/hostname
+    maxSkew: 1
+    whenUnsatisfiable: DoNotSchedule
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: traefik
+        app.kubernetes.io/instance: traefik-traefik-system
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
 
 additionalArguments:
   - "--providers.kubernetesingress.ingressclass=traefik"
   - "--providers.kubernetescrd"
   - "--providers.kubernetescrd.allowCrossNamespace=true"
-  - "--certificatesresolvers.cloudflare.acme.email=admin@epaflix.com"
-  - "--certificatesresolvers.cloudflare.acme.storage=/data/acme.json"
-  - "--certificatesresolvers.cloudflare.acme.dnschallenge=true"
-  - "--certificatesresolvers.cloudflare.acme.dnschallenge.provider=cloudflare"
-  - "--certificatesresolvers.cloudflare.acme.dnschallenge.resolvers=1.1.1.1:53,1.0.0.1:53"
-  - "--certificatesresolvers.cloudflare.acme.dnschallenge.delaybeforecheck=30"
 
 resources:
   requests:

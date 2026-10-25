@@ -13,9 +13,4 @@ spec:
       services:
         - name: lingarr
           port: 9876
-  tls:
-    certResolver: cloudflare
-    domains:
-      - main: epaflix.com
-        sans:
-          - "*.epaflix.com"
+  tls: {}

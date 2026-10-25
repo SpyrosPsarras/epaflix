@@ -81,12 +81,7 @@ spec:
           port: 8443
           scheme: https
           serversTransport: truenas-insecure
-  tls:
-    certResolver: cloudflare
-    domains:
-      - main: epaflix.com
-        sans:
-          - "*.epaflix.com"
+  tls: {}
 
 ---
 # LAN DNS points at 192.168.10.102, which exposes only the internal listener.
@@ -109,12 +104,7 @@ spec:
           port: 8443
           scheme: https
           serversTransport: truenas-insecure
-  tls:
-    certResolver: cloudflare
-    domains:
-      - main: epaflix.com
-        sans:
-          - "*.epaflix.com"
+  tls: {}
 
 ---
 apiVersion: traefik.io/v1alpha1
@@ -133,9 +123,4 @@ spec:
         - name: authentik-server
           namespace: app-authentik
           port: 80
-  tls:
-    certResolver: cloudflare
-    domains:
-      - main: epaflix.com
-        sans:
-          - "*.epaflix.com"
+  tls: {}

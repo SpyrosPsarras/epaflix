@@ -49,12 +49,7 @@ spec:
       services:
         - name: jellyfin-truenas
           port: 30013
-  tls:
-    certResolver: cloudflare
-    domains:
-      - main: epaflix.com
-        sans:
-          - "*.epaflix.com"
+  tls: {}
 ---
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute

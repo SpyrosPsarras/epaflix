@@ -11,8 +11,4 @@ spec:
       kind: Rule
       services:
         - {name: vaultwarden, port: 80}
-  tls:
-    certResolver: cloudflare
-    domains:
-      - main: epaflix.com
-        sans: ['*.epaflix.com']
+  tls: {}

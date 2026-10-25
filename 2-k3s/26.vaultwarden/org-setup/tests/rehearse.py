@@ -151,8 +151,7 @@ def main():
         apply({'apiVersion': 'v1', 'kind': 'Namespace', 'metadata': {'name': NAMESPACE, 'labels': {'purpose': 'vault-org-rehearsal'}}})
         apply({'apiVersion': 'v1', 'kind': 'PersistentVolumeClaim', 'metadata': {'name': 'scratch-data', 'namespace': NAMESPACE}, 'spec': {'accessModes': ['ReadWriteOnce'], 'storageClassName': 'local-path', 'resources': {'requests': {'storage': '1Gi'}}}})
         apply(remap(list(yaml.safe_load_all((ROOT.parent / 'server.yaml').read_text()))[1]))
-        domain = HOST.split('.', 1)[1]
-        apply({'apiVersion': 'traefik.io/v1alpha1', 'kind': 'IngressRoute', 'metadata': {'name': 'vault-rehearsal', 'namespace': NAMESPACE}, 'spec': {'entryPoints': ['internal'], 'routes': [{'match': 'Host(`' + HOST + '`)', 'kind': 'Rule', 'services': [{'name': 'vaultwarden', 'port': 80}]}], 'tls': {'certResolver': 'cloudflare', 'domains': [{'main': domain, 'sans': ['*.' + domain]}]}}})
+        apply({'apiVersion': 'traefik.io/v1alpha1', 'kind': 'IngressRoute', 'metadata': {'name': 'vault-rehearsal', 'namespace': NAMESPACE}, 'spec': {'entryPoints': ['internal'], 'routes': [{'match': 'Host(`' + HOST + '`)', 'kind': 'Rule', 'services': [{'name': 'vaultwarden', 'port': 80}]}], 'tls': {}}})
         apply({'apiVersion': 'networking.k8s.io/v1', 'kind': 'NetworkPolicy', 'metadata': {'name': 'server', 'namespace': NAMESPACE}, 'spec': {'podSelector': {'matchLabels': {'app': 'vaultwarden'}}, 'policyTypes': ['Ingress'], 'ingress': [{'from': [{'namespaceSelector': {'matchLabels': {'kubernetes.io/metadata.name': 'traefik-system'}}}], 'ports': [{'port': 8080}]}]}})
         apply({'apiVersion': 'v1', 'kind': 'Secret', 'metadata': {'name': 'rehearsal-owner', 'namespace': NAMESPACE}, 'stringData': {'BW_EMAIL': OWNER, 'BW_PASSWORD': secrets.token_urlsafe(48)}})
         image = renderer.render_job()['spec']['template']['spec']['containers'][0]['image']

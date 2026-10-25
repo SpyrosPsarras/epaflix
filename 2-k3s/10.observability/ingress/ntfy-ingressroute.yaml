@@ -16,9 +16,4 @@ spec:
       services:
         - name: ntfy
           port: 8091
-  tls:
-    certResolver: cloudflare
-    domains:
-      - main: epaflix.com
-        sans:
-          - "*.epaflix.com"
+  tls: {}
