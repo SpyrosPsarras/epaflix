@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Secret
+metadata:
+    name: truenas-api-key
+    namespace: democratic-csi
+type: Opaque
+stringData:
+    TRUENAS_API_KEY: ENC[AES256_GCM,data:qMs09UyC8LfezC3lJKxLbaA1CLb9oVpfSP60wKbo2W7SN5irUfLEB0cOucOnMFoXCRzJaSloDXWC9sxv+r6Ssfhf,iv:iXK8ha1dw0bTUi77Mw0a5deThvSNoCK5P7jN8uvBBD0=,tag:V81szymyyj+CIifJvZFj/Q==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBkaXVWanhYVWJIQU1iM1FN
+            Y2JjZE5IM2hWTkVkRXRiN1huSms5WjJUbGtnCkc3SHlRRlRPM1ZlZk5DVERxMDBz
+            NURGUW5qME9hNHh1VXlUeGpXWEh5eTQKLS0tIGczVVAvZmduTjl1NHVOVHJtZ3Ex
+            b1k3S2NhZVVxUFFpeTJjak1vL1VNMVkKGNL4lqguiQeoNyOYF1TyBkJR+TlOgttW
+            S9NTl8equqied6915bibBASUUQmmYB8qbaLen2L2Bz9Lyw5AK0Mb0A==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1586thf5vkcdf5lcn3zwjpu8ltkwyq8efrhj8lr0vdrrt9k5f3qgsxeg7gx
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-10-25T08:17:38Z"
+    mac: ENC[AES256_GCM,data:/UvjRrx/hbcUiWsTAm+IarXsBtVGzJZ106RElEFAcBeb7tizYVMc0OeqPxMFsqSzngSNg9lDbZkemZJGlcSoOkpX40A85JWscozOP6KYVeDOUk2WbMYNbmx+hZ66gWQJPGyBceg/oT2m9q8kBt05/YW+APSIwOAnHv/5ft2iNEo=,iv:Xx9tNjjG1EAD+gmN8Gsc3hvc4ZEbg450q0bi7yhYa/U=,tag:hGblxI5Q04AoC+mp0+Bg6w==,type:str]
+    version: 3.13.3

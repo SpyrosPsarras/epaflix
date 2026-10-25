@@ -1,0 +1,41 @@
+csiDriver:
+  name: org.democratic-csi.iscsi
+driver:
+  config:
+    driver: freenas-api-iscsi
+    httpConnection:
+      protocol: https
+      host: 192.168.10.200
+      port: 8443
+      apiKey: ${TRUENAS_API_KEY}
+      allowInsecure: true
+    zfs:
+      datasetParentName: apps/k8s/iscsi/vols
+      detachedSnapshotsDatasetParentName: apps/k8s/iscsi/snaps
+    iscsi:
+      targetPortal: "192.168.10.200:3260"
+      namePrefix: k8s-
+      extentCommentTemplate: "{{ parameters.[csi.storage.k8s.io/pvc/namespace] }}/{{ parameters.[csi.storage.k8s.io/pvc/name] }}"
+      targetGroups:
+        - targetGroupPortalGroup: 1
+          targetGroupInitiatorGroup: 12
+          targetGroupAuthType: None
+      extentBlocksize: 4096
+controller:
+  driver:
+    extraEnv:
+      - name: TRUENAS_API_KEY
+        valueFrom:
+          secretKeyRef:
+            name: truenas-api-key
+            key: TRUENAS_API_KEY
+  externalSnapshotter:
+    enabled: false
+storageClasses:
+  - name: truenas-iscsi
+    defaultClass: false
+    reclaimPolicy: Retain
+    volumeBindingMode: WaitForFirstConsumer
+    allowVolumeExpansion: true
+    parameters:
+      fsType: ext4
