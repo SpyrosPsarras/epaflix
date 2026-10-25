@@ -100,6 +100,12 @@ worker:
   name: worker
   replicas: 3
 
+  deploymentStrategy:
+    type: Recreate
+
+  deploymentAnnotations:
+    secret.reloader.stakater.com/reload: "authentik-app-secrets,authentik-iac-blueprint"
+
   resources:
     requests:
       memory: "1024Mi"
@@ -138,11 +144,18 @@ worker:
   volumeMounts:
     - name: media
       mountPath: /media
+    - name: blueprints-secret-authentik-iac-blueprint
+      mountPath: /blueprints/mounted/secret-authentik-iac-blueprint/iac-service-account.yaml
+      subPath: iac-service-account.yaml
+      readOnly: true
 
   volumes:
     - name: media
       persistentVolumeClaim:
         claimName: authentik-media-pvc
+    - name: blueprints-secret-authentik-iac-blueprint
+      secret:
+        secretName: authentik-iac-blueprint
 
   affinity:
     podAffinity:
@@ -154,10 +167,6 @@ worker:
                 values:
                   - authentik
           topologyKey: kubernetes.io/hostname
-
-blueprints:
-  secrets:
-    - authentik-iac-blueprint
 
 postgresql:
   enabled: false
