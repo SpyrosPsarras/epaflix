@@ -1,0 +1,13 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: epaflix-wildcard
+  namespace: traefik-system
+spec:
+  secretName: epaflix-wildcard-tls
+  issuerRef:
+    name: letsencrypt-dns
+    kind: ClusterIssuer
+  dnsNames:
+    - epaflix.com
+    - "*.epaflix.com"

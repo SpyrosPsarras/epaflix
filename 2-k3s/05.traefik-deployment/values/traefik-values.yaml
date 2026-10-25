@@ -57,6 +57,11 @@ ingressRoute:
     tls:
       certResolver: cloudflare
 
+tlsStore:
+  default:
+    defaultCertificate:
+      secretName: epaflix-wildcard-tls
+
 log:
   level: INFO
 accessLog:
