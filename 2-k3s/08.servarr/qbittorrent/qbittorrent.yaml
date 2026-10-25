@@ -26,6 +26,64 @@ spec:
         nameservers:
           - 1.1.1.1
       initContainers:
+        - name: migrate-config
+          image: busybox:1.36
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              add:
+                - CHOWN
+                - DAC_OVERRIDE
+                - FOWNER
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              marker=/config/.migrated-from-local-path
+              if [ -e "$marker" ]; then
+                echo "config already migrated: $(cat "$marker")"
+                exit 0
+              fi
+              if [ -n "$(find /config -mindepth 1 -maxdepth 1 ! -name lost+found)" ]; then
+                echo "refusing to migrate: /config has data but no $marker" >&2
+                exit 1
+              fi
+              cp -a /old/. /config/
+              chown "$(stat -c %u:%g /old)" /config
+              chmod "$(stat -c %a /old)" /config
+              manifest() {
+                cd "$1"
+                find . ! -path ./lost+found ! -path './lost+found/*' -exec stat -c '%n %F %u:%g %a' {} + | sort
+              }
+              bytes() {
+                cd "$1"
+                find . -type f ! -path './lost+found/*' -exec stat -c %s {} + | awk '{s += $1} END {print s + 0}'
+              }
+              old_manifest=$(manifest /old)
+              new_manifest=$(manifest /config)
+              old_bytes=$(bytes /old)
+              new_bytes=$(bytes /config)
+              old_count=$(printf '%s\n' "$old_manifest" | wc -l)
+              new_count=$(printf '%s\n' "$new_manifest" | wc -l)
+              echo "entries old=$old_count new=$new_count bytes old=$old_bytes new=$new_bytes"
+              if [ "$old_manifest" != "$new_manifest" ] || [ "$old_bytes" != "$new_bytes" ]; then
+                echo "copy check failed; /config left without marker" >&2
+                exit 1
+              fi
+              sync
+              date -u +%Y-%m-%dT%H:%M:%SZ > "$marker"
+              sync
+              echo "migrated $new_count entries, $new_bytes bytes"
+          volumeMounts:
+            - name: config-local-path
+              mountPath: /old
+              readOnly: true
+            - name: config
+              mountPath: /config
         - name: init-sysctls
           image: busybox:latest
           command:
@@ -362,6 +420,9 @@ spec:
             runAsUser: 0
       volumes:
         - name: config
+          persistentVolumeClaim:
+            claimName: qbittorrent-config-iscsi
+        - name: config-local-path
           persistentVolumeClaim:
             claimName: qbittorrent-config
         - name: webapi-key-seed
