@@ -1,0 +1,108 @@
+services:
+  ollama:
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 16384M
+        reservations:
+          devices:
+            - capabilities:
+                - gpu
+              device_ids:
+                - GPU-4d588edf-ae80-174a-1f40-0f05771b06c0
+              driver: nvidia
+    environment:
+      NVIDIA_DRIVER_CAPABILITIES: all
+      NVIDIA_VISIBLE_DEVICES: GPU-4d588edf-ae80-174a-1f40-0f05771b06c0
+      OLLAMA_CONTEXT_LENGTH: '8192'
+      OLLAMA_FLASH_ATTENTION: '1'
+      OLLAMA_HOST: 0.0.0.0:30068
+      OLLAMA_KV_CACHE_TYPE: q8_0
+      OLLAMA_NUM_PARALLEL: '2'
+      OLLAMA_ORIGINS: '*'
+      TZ: Etc/UTC
+      UMASK: '002'
+      UMASK_SET: '002'
+    group_add:
+      - 44
+      - 107
+      - 568
+    healthcheck:
+      interval: 30s
+      retries: 5
+      start_interval: 2s
+      start_period: 15s
+      test:
+        - CMD
+        - timeout
+        - '1'
+        - bash
+        - -c
+        - cat < /dev/null > /dev/tcp/127.0.0.1/30068
+      timeout: 5s
+    image: ollama/ollama:0.40.10@sha256:4c5b27871a3239a717048f9b93057680a51b60c8119a7016aebb57f938e25e35
+    platform: linux/amd64
+    ports:
+      - mode: ingress
+        protocol: tcp
+        published: 30068
+        target: 30068
+    privileged: false
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges=true
+    stdin_open: false
+    tty: false
+    user: 0:0
+    volumes:
+      - bind:
+          create_host_path: false
+          propagation: rprivate
+        read_only: false
+        source: /mnt/pool1/ollama
+        target: /root/.ollama
+        type: bind
+volumes: {}
+x-action-required: false
+x-notes: '# Ollama
+
+
+  ## Security
+
+
+  **Read the following security precautions to ensure that you wish to continue using
+  this application.**
+
+
+  ---
+
+
+  ### Container: [ollama]
+
+
+  #### Running user/group(s)
+
+
+  - User: root
+
+  - Group: root
+
+  - Supplementary Groups: apps
+
+
+  ---
+
+
+  ## Bug Reports and Feature Requests
+
+
+  If you find a bug in this app or have an idea for a new feature, please file an
+  issue at
+
+  https://github.com/truenas/apps
+
+  '
+x-portals: []
