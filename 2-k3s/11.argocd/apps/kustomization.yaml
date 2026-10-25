@@ -11,6 +11,7 @@ resources:
   - app-cert-manager.yaml
   - app-coredns.yaml
   - app-deal-finder.yaml
+  - app-democratic-csi.yaml
   - app-fytorium.yaml
   - app-kube-vip.yaml
   - app-kured.yaml
