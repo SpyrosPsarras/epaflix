@@ -1,8 +1,8 @@
 # Lets Moonlight's "Wake PC" work over Tailscale. The subnet router forwards the
 # unicast magic packet to homePC's LAN IP, but a sleeping PC answers no ARP, so
 # the node drops it. A permanent neighbour entry makes the node send the frame
-# to homePC's MAC anyway. Runs on every node because the router follows its
-# local-path PVC, which only moves if the claim is recreated elsewhere.
+# to homePC's MAC anyway. Runs on every node because the router's state lives
+# in a Kubernetes Secret, so the router can run on any node.
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
