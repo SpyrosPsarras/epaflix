@@ -12,16 +12,10 @@ echo ""
 
 cd "$(dirname "$0")"
 
-echo "[1/5] Creating traefik namespace..."
+echo "[1/4] Creating traefik namespace..."
 kubectl apply -f namespace.yaml
 
-echo "[2/5] Creating Cloudflare API token secret..."
-kubectl create secret generic cloudflare-api-token \
-  --namespace=traefik-system \
-  --from-literal=api-token=<CLOUDFLARE_API_TOKEN> \
-  --dry-run=client -o yaml | kubectl apply -f -
-
-echo "[3/5] Deploying Traefik (initially with 1 replica)..."
+echo "[2/4] Deploying Traefik (initially with 1 replica)..."
 helm repo add traefik https://traefik.github.io/charts
 helm repo update
 helm upgrade --install traefik traefik/traefik \
@@ -29,12 +23,12 @@ helm upgrade --install traefik traefik/traefik \
   -f values/traefik-values.yaml \
   --wait
 
-echo "[4/5] Waiting for LoadBalancer IP assignment..."
+echo "[3/4] Waiting for LoadBalancer IP assignment..."
 kubectl -n traefik-system wait --for=condition=ready pod -l app.kubernetes.io/name=traefik --timeout=120s
 TRAEFIK_IP=$(kubectl -n traefik-system get svc traefik -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
 echo "Traefik LoadBalancer IP: $TRAEFIK_IP"
 
-echo "[5/5] Applying middleware..."
+echo "[4/4] Applying middleware..."
 kubectl apply -f middleware/
 
 echo ""

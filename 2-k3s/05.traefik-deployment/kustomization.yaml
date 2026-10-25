@@ -15,8 +15,6 @@ resources:
   - ingress/minio-proxy.yaml
   - ingress/t3code-proxy.yaml
   - servicemonitor.yaml
-generators:
-  - ksops-generator.yaml
 helmCharts:
   - name: traefik
     repo: https://traefik.github.io/charts

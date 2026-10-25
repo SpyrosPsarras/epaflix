@@ -1,7 +1,7 @@
 # Vaultwarden
 
 ArgoCD manages the server, Service, internal Traefik route, ingress
-NetworkPolicy, 1Gi local-path PVC, recovery scripts and backup CronJob in
+NetworkPolicy, 1Gi iSCSI PVC `vaultwarden-data-iscsi`, recovery scripts and backup CronJob in
 `vaultwarden`. The CNPG Database and DatabaseRole use `postgres-cluster` in
 `postgres-system`. KSOPS decrypts the four SOPS-encrypted credentials.
 
