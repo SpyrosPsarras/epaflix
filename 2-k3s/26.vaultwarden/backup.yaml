@@ -62,7 +62,12 @@ spec:
             runAsGroup: 10001
             fsGroup: 10001
             seccompProfile: {type: RuntimeDefault}
-          # local-path RWO: the bound PVC schedules this Job to its storage node.
+          affinity:
+            podAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchLabels: {app: vaultwarden}
+                  topologyKey: kubernetes.io/hostname
           initContainers:
             - name: restic
               image: restic/restic
@@ -125,7 +130,7 @@ spec:
                 - {name: restic-password, mountPath: /run/restic, readOnly: true}
           volumes:
             - name: data
-              persistentVolumeClaim: {claimName: vaultwarden-data}
+              persistentVolumeClaim: {claimName: vaultwarden-data-iscsi}
             - name: work
               emptyDir: {medium: Memory, sizeLimit: 2Gi}
             - name: tools
