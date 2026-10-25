@@ -31,29 +31,6 @@ spec:
         runAsUser: 568
         runAsGroup: 568
         fsGroup: 568
-      initContainers:
-        - name: migrate-config
-          image: busybox:1.36
-          securityContext:
-            runAsUser: 0
-            runAsGroup: 0
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop: ["ALL"]
-              add:
-                - CHOWN
-                - DAC_OVERRIDE
-                - FOWNER
-          command: ["sh", "/migrate/migrate-local-path.sh", "/old", "/config"]
-          volumeMounts:
-            - name: prowlarr-config-local-path
-              mountPath: /old
-              readOnly: true
-            - name: config
-              mountPath: /config
-            - name: migrate-local-path
-              mountPath: /migrate
-              readOnly: true
       containers:
         - name: prowlarr
           image: lscr.io/linuxserver/prowlarr:latest
@@ -121,13 +98,6 @@ spec:
         - name: config
           persistentVolumeClaim:
             claimName: prowlarr-config-iscsi
-        - name: prowlarr-config-local-path
-          persistentVolumeClaim:
-            claimName: prowlarr-config
-            readOnly: true
-        - name: migrate-local-path
-          configMap:
-            name: migrate-local-path
       hostAliases:
         - ip: "192.168.10.1" # Replace with actual host-gateway IP if needed
           hostnames:

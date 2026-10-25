@@ -31,29 +31,6 @@ spec:
         runAsUser: 568
         runAsGroup: 568
         fsGroup: 568
-      initContainers:
-        - name: migrate-config
-          image: busybox:1.36
-          securityContext:
-            runAsUser: 0
-            runAsGroup: 0
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop: ["ALL"]
-              add:
-                - CHOWN
-                - DAC_OVERRIDE
-                - FOWNER
-          command: ["sh", "/migrate/migrate-local-path.sh", "/old", "/config"]
-          volumeMounts:
-            - name: bazarr-config-local-path
-              mountPath: /old
-              readOnly: true
-            - name: config
-              mountPath: /config
-            - name: migrate-local-path
-              mountPath: /migrate
-              readOnly: true
       containers:
         - name: bazarr
           image: lscr.io/linuxserver/bazarr:latest
@@ -129,13 +106,6 @@ spec:
         - name: config
           persistentVolumeClaim:
             claimName: bazarr-config-iscsi
-        - name: bazarr-config-local-path
-          persistentVolumeClaim:
-            claimName: bazarr-config
-            readOnly: true
-        - name: migrate-local-path
-          configMap:
-            name: migrate-local-path
         - name: media
           persistentVolumeClaim:
             claimName: servarr-media
