@@ -11,6 +11,8 @@ metadata:
 spec:
   # TEMP: paused for Jellyfin 12; v0.16.1 lacks jon4hz/jellysweep#440 and runs cleanup on startup. Once the kustomization pin is on a release with #440: replicas 1, review the queue, then remove JELLYSWEEP_DRY_RUN
   replicas: 0
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: jellysweep
@@ -73,7 +75,7 @@ spec:
             secretName: jellysweep-config
         - name: cache
           persistentVolumeClaim:
-            claimName: jellysweep-cache
+            claimName: jellysweep-cache-iscsi
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -87,6 +89,19 @@ spec:
     requests:
       storage: 2Gi
   storageClassName: local-path
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jellysweep-cache-iscsi
+  namespace: servarr
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+  storageClassName: truenas-iscsi
 ---
 apiVersion: v1
 kind: Service

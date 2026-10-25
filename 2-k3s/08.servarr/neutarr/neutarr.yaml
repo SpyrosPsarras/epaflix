@@ -8,6 +8,8 @@ metadata:
     app: neutarr
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: neutarr
@@ -24,6 +26,28 @@ spec:
             matchLabels:
               app: neutarr
       initContainers:
+        - name: migrate-config
+          image: busybox:1.36
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              add:
+                - CHOWN
+                - DAC_OVERRIDE
+                - FOWNER
+          command: ["sh", "/migrate/migrate-local-path.sh", "/old", "/config"]
+          volumeMounts:
+            - name: neutarr-config-local-path
+              mountPath: /old
+              readOnly: true
+            - name: config
+              mountPath: /config
+            - name: migrate-local-path
+              mountPath: /migrate
+              readOnly: true
         - name: seed-config
           image: busybox:1.36
           securityContext:
@@ -124,7 +148,14 @@ spec:
       volumes:
         - name: config
           persistentVolumeClaim:
+            claimName: neutarr-config-iscsi
+        - name: neutarr-config-local-path
+          persistentVolumeClaim:
             claimName: neutarr-config
+            readOnly: true
+        - name: migrate-local-path
+          configMap:
+            name: migrate-local-path
         - name: seed
           secret:
             secretName: neutarr-config-seed
@@ -169,3 +200,16 @@ spec:
     requests:
       storage: 1Gi
   storageClassName: local-path
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: neutarr-config-iscsi
+  namespace: servarr
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: truenas-iscsi

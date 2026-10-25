@@ -50,6 +50,9 @@ resources:
 generators:
   - _shared/secrets/ksops-generator.yaml
 configMapGenerator:
+  - name: migrate-local-path
+    files:
+      - migrate-local-path.sh=_shared/files/migrate-local-path.sh
   - name: cleanuparr-seeding-guard
     files:
       - enforce-private-seeding.py=cleanuparr/files/enforce-private-seeding.py

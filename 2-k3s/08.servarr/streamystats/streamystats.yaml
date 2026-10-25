@@ -29,6 +29,29 @@ spec:
               app: streamystats
       securityContext:
         fsGroup: 999
+      initContainers:
+        - name: migrate-config
+          image: busybox:1.36
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              add:
+                - CHOWN
+                - DAC_OVERRIDE
+                - FOWNER
+          command: ["sh", "/migrate/migrate-local-path.sh", "/old", "/var/lib/postgresql/data"]
+          volumeMounts:
+            - name: streamystats-data-local-path
+              mountPath: /old
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: migrate-local-path
+              mountPath: /migrate
+              readOnly: true
       containers:
         - name: streamystats
           image: ghcr.io/fredrikburmester/streamystats-aio:latest
@@ -89,7 +112,14 @@ spec:
       volumes:
         - name: data
           persistentVolumeClaim:
+            claimName: streamystats-data-iscsi
+        - name: streamystats-data-local-path
+          persistentVolumeClaim:
             claimName: streamystats-data
+            readOnly: true
+        - name: migrate-local-path
+          configMap:
+            name: migrate-local-path
 ---
 apiVersion: v1
 kind: Service
@@ -119,3 +149,16 @@ spec:
     requests:
       storage: 5Gi
   storageClassName: local-path
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: streamystats-data-iscsi
+  namespace: servarr
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: truenas-iscsi

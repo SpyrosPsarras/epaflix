@@ -15,12 +15,38 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
+  name: sonarr-config-iscsi
+  namespace: servarr
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: truenas-iscsi
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
   name: radarr-config
   namespace: servarr
 spec:
   accessModes:
     - ReadWriteOnce
   storageClassName: local-path
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: radarr-config-iscsi
+  namespace: servarr
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: truenas-iscsi
   resources:
     requests:
       storage: 5Gi
@@ -41,6 +67,19 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
+  name: prowlarr-config-iscsi
+  namespace: servarr
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: truenas-iscsi
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
   name: bazarr-config
   namespace: servarr
 spec:
@@ -54,12 +93,38 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
+  name: bazarr-config-iscsi
+  namespace: servarr
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: truenas-iscsi
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
   name: lingarr-config
   namespace: servarr
 spec:
   accessModes:
     - ReadWriteOnce
   storageClassName: local-path
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: lingarr-config-iscsi
+  namespace: servarr
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: truenas-iscsi
   resources:
     requests:
       storage: 1Gi
