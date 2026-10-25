@@ -30,8 +30,9 @@ data:
     whatever that file is called.
 
     Exits non-zero if the tag page yields no episodes, an episode page has no
-    stream URL or date, two pages share a date, or a download fails or comes
-    out shorter than the source, so problems fail the Job loudly.
+    date, a missing episode has no star.gr stream, two pages share a date,
+    Sonarr has multiple episodes on a date, or a download fails or comes out
+    shorter than the source, so problems fail the Job loudly.
     """
     import os
     import re
@@ -99,7 +100,8 @@ data:
     def air_date(html):
         # PlayerTitle holds the air date as day.month.year, e.g.
         # "GNTM 2026 - 22.9.2026" or "24.9.2026 - First Dates".
-        m = re.search(r'"PlayerTitle":"[^"]*?(\d{1,2})\.(\d{1,2})\.(\d{4})', html)
+        m = (re.search(r'"PlayerTitle":"[^"]*?(\d{1,2})\.(\d{1,2})\.(\d{4})', html)
+             or re.search(r'"name"\s*:\s*"[^"]*?(\d{1,2})\.(\d{1,2})\.(\d{4})', html))
         return "%s-%02d-%02d" % (m.group(3), int(m.group(2)), int(m.group(1))) if m else None
 
 
@@ -123,6 +125,11 @@ data:
         ep = '"PlayerTitle":"GNTM 2026 - 1.10.2026 - X","Url":"https://a.b/k/s.m3u8?key=Ab_1"'
         assert air_date(ep) == "2026-10-01"
         assert air_date('"PlayerTitle":"24.9.2026 - First Dates"') == "2026-09-24"
+        video = '{"@type": "VideoObject", "name": "23.9.2026 - First Dates - Πρεμιέρα!"}'
+        assert air_date('"name": "Star TV",' + video) == "2026-09-23"
+        assert air_date('"name": "Star TV"') is None
+        assert air_date(video + ',"PlayerTitle":"24.9.2026 - First Dates"') == "2026-09-24"
+        assert download(None, "2026-09-23", {"hasFile": True}) == "skip"
         assert stream_url(ep) == "https://a.b/k/s.m3u8?key=Ab_1"
         custom = '"LivestreamModeStr":"Custom","VideoID":"n0z3nOXvwtbeJgkkq9l14A"'
         assert stream_url(custom) == "https://deliver2.siliconweb.com/kwik/star.m3u8?key=n0z3nOXvwtbeJgkkq9l14A"
@@ -136,10 +143,24 @@ data:
             {"seasonNumber": 9, "episodeNumber": 7}])
         assert sorted(eps) == ["2026-09-29", "2026-10-05"]
         assert eps["2026-09-29"][0]["episodeNumber"] == 4 and len(eps["2026-10-05"]) == 2
+        import contextlib
+        import io
+        import tempfile
+        global SERIES_DIR
+        series_dir = SERIES_DIR
+        try:
+            with tempfile.TemporaryDirectory() as SERIES_DIR:
+                errors = io.StringIO()
+                link = BASE + "/tv/x/show/ep-2392026"
+                with contextlib.redirect_stderr(errors):
+                    assert download(None, "2026-09-23", None, link) is None
+                assert "FAIL: %s: no star.gr stream" % link in errors.getvalue()
+        finally:
+            SERIES_DIR = series_dir
         print("selftest ok")
 
 
-    def download(url, date, ep):
+    def download(url, date, ep, page_url=None):
         """Return "skip", "renamed" or "done", or None after reporting a failure."""
         dated = os.path.join(SERIES_DIR, "%s - %s.mp4" % (SERIES_TITLE, date))
         out = dated
@@ -156,6 +177,9 @@ data:
         if os.path.exists(out):
             print("skip  %s (on disk)" % date)
             return "skip"
+        if url is None:
+            fail("%s: no star.gr stream" % (page_url or date))
+            return None
         expected = duration(url)
         if not expected:
             fail("%s: cannot read source duration" % date)
@@ -209,7 +233,7 @@ data:
         for link in links:
             html = fetch(link)
             url, date = stream_url(html), air_date(html)
-            if not (url and date):
+            if not date:
                 fail("%s stream=%s date=%s" % (link, bool(url), date))
                 failed += 1
             elif date in seen:
@@ -221,7 +245,7 @@ data:
                 failed += 1
             else:
                 seen[date] = link
-                result = download(url, date, (eps.get(date) or [None])[0])
+                result = download(url, date, (eps.get(date) or [None])[0], link)
                 if result is None:
                     failed += 1
                 elif result != "skip":
