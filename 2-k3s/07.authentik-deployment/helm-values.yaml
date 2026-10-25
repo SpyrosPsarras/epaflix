@@ -44,6 +44,9 @@ server:
   name: server
   replicas: 1 # Single replica due to ReadWriteOnce storage
 
+  deploymentStrategy:
+    type: Recreate
+
   ingress:
     enabled: false
 
@@ -82,7 +85,7 @@ server:
   volumes:
     - name: media
       persistentVolumeClaim:
-        claimName: authentik-media-pvc
+        claimName: authentik-media-pvc-iscsi
 
   affinity:
     podAffinity:
@@ -152,7 +155,7 @@ worker:
   volumes:
     - name: media
       persistentVolumeClaim:
-        claimName: authentik-media-pvc
+        claimName: authentik-media-pvc-iscsi
     - name: blueprints-secret-authentik-iac-blueprint
       secret:
         secretName: authentik-iac-blueprint
