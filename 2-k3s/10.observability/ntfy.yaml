@@ -62,8 +62,8 @@ spec:
             timeoutSeconds: 10
       volumes:
         - name: cache
-          persistentVolumeClaim:
-            claimName: ntfy-cache
+          emptyDir:
+            sizeLimit: 1Gi
 ---
 apiVersion: v1
 kind: Service
