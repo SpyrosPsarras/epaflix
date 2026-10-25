@@ -81,12 +81,7 @@ spec:
           port: 5000
           scheme: https
           serversTransport: pegaprox-insecure
-  tls:
-    certResolver: cloudflare
-    domains:
-      - main: epaflix.com
-        sans:
-          - "*.epaflix.com"
+  tls: {}
 
 ---
 apiVersion: traefik.io/v1alpha1
@@ -105,9 +100,4 @@ spec:
         - name: authentik-server
           namespace: app-authentik
           port: 80
-  tls:
-    certResolver: cloudflare
-    domains:
-      - main: epaflix.com
-        sans:
-          - "*.epaflix.com"
+  tls: {}

@@ -16,9 +16,4 @@ spec:
       services:
         - name: mcp-hub
           port: 8000
-  tls:
-    certResolver: cloudflare
-    domains:
-      - main: epaflix.com
-        sans:
-          - "*.epaflix.com"
+  tls: {}

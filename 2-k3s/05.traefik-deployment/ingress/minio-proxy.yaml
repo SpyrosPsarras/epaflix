@@ -53,12 +53,7 @@ spec:
       services:
         - name: minio-external
           port: 9000
-  tls:
-    certResolver: cloudflare
-    domains:
-      - main: epaflix.com
-        sans:
-          - "*.epaflix.com"
+  tls: {}
 
 ---
 apiVersion: traefik.io/v1alpha1
@@ -78,9 +73,4 @@ spec:
       services:
         - name: minio-external
           port: 9001
-  tls:
-    certResolver: cloudflare
-    domains:
-      - main: epaflix.com
-        sans:
-          - "*.epaflix.com"
+  tls: {}

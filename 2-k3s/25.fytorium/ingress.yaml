@@ -15,9 +15,4 @@ spec:
       services:
         - name: fytorium
           port: 3000
-  tls:
-    certResolver: cloudflare
-    domains:
-      - main: epaflix.com
-        sans:
-          - "*.epaflix.com"
+  tls: {}

@@ -44,9 +44,6 @@ server:
   name: server
   replicas: 1 # Single replica due to ReadWriteOnce storage
 
-  deploymentStrategy:
-    type: Recreate
-
   ingress:
     enabled: false
 
@@ -85,7 +82,7 @@ server:
   volumes:
     - name: media
       persistentVolumeClaim:
-        claimName: authentik-media-pvc-iscsi
+        claimName: authentik-media-pvc
 
   affinity:
     podAffinity:
@@ -155,7 +152,7 @@ worker:
   volumes:
     - name: media
       persistentVolumeClaim:
-        claimName: authentik-media-pvc-iscsi
+        claimName: authentik-media-pvc
     - name: blueprints-secret-authentik-iac-blueprint
       secret:
         secretName: authentik-iac-blueprint
@@ -214,9 +211,4 @@ additionalObjects:
           services:
             - name: authentik-server
               port: 80
-      tls:
-        certResolver: cloudflare
-        domains:
-          - main: epaflix.com
-            sans:
-              - "*.epaflix.com"
+      tls: {}

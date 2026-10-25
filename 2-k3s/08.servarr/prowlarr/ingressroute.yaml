@@ -13,9 +13,4 @@ spec:
       services:
         - name: prowlarr
           port: 9696
-  tls:
-    certResolver: cloudflare
-    domains:
-      - main: epaflix.com
-        sans:
-          - "*.epaflix.com"
+  tls: {}

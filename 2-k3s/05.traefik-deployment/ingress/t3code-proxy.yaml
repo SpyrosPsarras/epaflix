@@ -14,9 +14,4 @@ spec:
         - name: t3code
           namespace: t3code
           port: 3773
-  tls:
-    certResolver: cloudflare
-    domains:
-      - main: epaflix.com
-        sans:
-          - "*.epaflix.com"
+  tls: {}

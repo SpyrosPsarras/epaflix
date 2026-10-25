@@ -14,9 +14,4 @@ spec:
       services:
         - name: deal-finder
           port: 8080
-  tls:
-    certResolver: cloudflare
-    domains:
-      - main: epaflix.com
-        sans:
-          - "*.epaflix.com"
+  tls: {}
