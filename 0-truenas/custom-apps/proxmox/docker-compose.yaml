@@ -1,0 +1,28 @@
+networks:
+  vlan:
+    driver: macvlan
+    driver_opts:
+      parent: enp8s0
+    ipam:
+      config:
+        - gateway: 192.168.10.1
+          ip_range: 192.168.10.9/32
+          subnet: 192.168.10.0/24
+      driver: default
+services:
+  qnetd:
+    container_name: proxmox-qdevice
+    hostname: proxmox-qdevice
+    image: bcleonard/proxmox-qdevice:v2.0
+    networks:
+      vlan:
+        ipv4_address: 192.168.10.9
+    ports:
+      - '22:22'
+      - 5403:5403
+    restart: unless-stopped
+    volumes:
+      - /run/sshd
+      - /mnt/apps/proxmox/corosync:/etc/corosync
+    env_file:
+      - /mnt/apps/proxmox/proxmox.env

@@ -1,0 +1,62 @@
+services:
+  jellyfin:
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities:
+                - gpu
+              count: all
+              driver: nvidia
+    environment:
+      GID: 568
+      GROUP_ID: 568
+      JELLYFIN_CACHE_DIR: /cache
+      JELLYFIN_PublishedServerUrl: jellyfin.epavli
+      NVIDIA_DRIVER_CAPABILITIES: all
+      NVIDIA_VISIBLE_DEVICES: all
+      PGID: 568
+      PUID: 568
+      TZ: Europe/Oslo
+      UID: 568
+      UMASK: 2
+      UMASK_SET: 2
+      USER_ID: 568
+    expose:
+      - 7359/udp
+    group_add:
+      - 44
+      - 107
+      - 568
+    healthcheck:
+      interval: 30s
+      retries: 5
+      start_interval: 2s
+      start_period: 15s
+      test:
+        - CMD-SHELL
+        - curl --request GET --silent --output /dev/null --show-error --fail http://127.0.0.1:8096/health
+      timeout: 5s
+    image: jellyfin/jellyfin:12.3
+    platform: linux/amd64
+    ports:
+      - 30013:8096
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges=true
+    stdin_open: false
+    tty: false
+    user: 568:568
+    volumes:
+      - /mnt/pool1/dataset01/animes:/animes
+      - /mnt/pool1/jellyfin-cache:/cache
+      - /mnt/pool1/jellyfin-transcode-storage:/cache/transcodes
+      - /mnt/apps/jellyfin/config:/config
+      - /mnt/pool1/jellyfin-transcode-storage:/config/transcodes
+      - /mnt/apps/jellyfin/custom-cont-init.d:/custom-cont-init.d
+      - /mnt/pool1/dataset01/movies:/movies
+      - /mnt/pool1/dataset01/tvshows:/tvshows
+      - /home/truenas_admin/tdarr-input-test:/tdarr-input-test
+      - /home/truenas_admin/tdarr-output-test:/tdarr-output-test
