@@ -1,0 +1,102 @@
+name: build-jellysweep
+
+on:
+  push:
+    branches: [main]
+    paths: ['images/jellysweep/**', '.github/workflows/build-jellysweep.yml']
+  pull_request:
+    paths: ['images/jellysweep/**', '.github/workflows/build-jellysweep.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Read the upstream source pin
+        id: source
+        run: |
+          UPSTREAM_COMMIT=$(awk -F'=' '/^ARG UPSTREAM_COMMIT=/ {print $2}' images/jellysweep/Dockerfile)
+          [[ "$UPSTREAM_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+          echo "upstream_commit=$UPSTREAM_COMMIT" >> "$GITHUB_OUTPUT"
+          echo "short_commit=${UPSTREAM_COMMIT:0:7}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and smoke-test the overlay before publishing anything
+        env:
+          UPSTREAM_COMMIT: ${{ steps.source.outputs.upstream_commit }}
+        run: |
+          set -euo pipefail
+          docker build -t jellysweep:dev images/jellysweep
+          smoke=$(mktemp -d)
+          server_pid=
+          cleanup() {
+            status=$?
+            if [ -n "$server_pid" ]; then kill "$server_pid" 2>/dev/null || true; fi
+            docker rm -f jellysweep-smoke >/dev/null 2>&1 || true
+            rm -rf "$smoke"
+            exit "$status"
+          }
+          trap cleanup EXIT
+
+          docker run --rm jellysweep:dev --help > "$smoke/help"
+          grep -q 'serve' "$smoke/help"
+          docker run --rm jellysweep:dev healthcheck --help > "$smoke/healthcheck-help"
+          grep -q -- '--url' "$smoke/healthcheck-help"
+          docker create --name jellysweep-smoke jellysweep:dev >/dev/null
+          docker cp jellysweep-smoke:/usr/local/bin/jellysweep "$smoke/jellysweep"
+          grep -aFq "0.16.1+${UPSTREAM_COMMIT}.collection-direct-members" "$smoke/jellysweep"
+          docker image inspect jellysweep:dev | jq -e --arg revision "$UPSTREAM_COMMIT" '
+            .[0].Config |
+            .Labels["org.opencontainers.image.revision"] == $revision and
+            .Entrypoint == ["/usr/local/bin/jellysweep"] and
+            .Cmd == ["serve"] and
+            .Healthcheck.Test == ["CMD", "/usr/local/bin/jellysweep", "healthcheck"] and
+            (.Volumes | has("/app/data")) and
+            (.ExposedPorts | has("3002/tcp"))' >/dev/null
+
+          printf 'ok\n' > "$smoke/health"
+          python3 -m http.server 3002 --bind 127.0.0.1 --directory "$smoke" > "$smoke/http.log" 2>&1 &
+          server_pid=$!
+          ready=0
+          for _ in $(seq 1 30); do
+            if curl -sf -m 1 http://127.0.0.1:3002/health >/dev/null; then ready=1; break; fi
+            sleep 1
+          done
+          [ "$ready" -eq 1 ]
+          docker run --rm --network host jellysweep:dev healthcheck
+          if docker run --rm --network host jellysweep:dev healthcheck \
+              --url http://127.0.0.1:3002/missing > "$smoke/unhealthy" 2>&1; then
+            echo 'healthcheck incorrectly accepted HTTP 404'
+            exit 1
+          fi
+          grep -q 'healthcheck failed: status 404' "$smoke/unhealthy"
+          echo 'Patched binary, inherited runtime configuration, CLI and healthcheck smoke passed'
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: images/jellysweep
+          push: true
+          tags: |
+            ghcr.io/spyrospsarras/jellysweep:${{ steps.source.outputs.short_commit }}-collection-direct-members-${{ github.sha }}
+
+      - name: Print the digest to pin
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        run: docker buildx imagetools inspect ghcr.io/spyrospsarras/jellysweep:${{ steps.source.outputs.short_commit }}-collection-direct-members-${{ github.sha }} --format '{{.Manifest.Digest}}'

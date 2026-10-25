@@ -1,0 +1,70 @@
+From 924bcfc1e429b67f3bb8c78e6146bdd82028d4a8 Mon Sep 17 00:00:00 2001
+From: Homelab agent <homelab-agent@users.noreply.github.com>
+Date: Sun, 25 Oct 2026 10:19:43 +0000
+Subject: [PATCH] fix(jellyfin): exclude series descendants from collection
+ items
+
+Restrict collection reads to Movie and Series, matching the media types
+used in leaving collections. Keep recursive lookup for linked members on
+Jellyfin 10.11 and 12, without returning Season and Episode descendants.
+
+Assert the parent, recursion and type filter on the outgoing request.
+---
+ internal/engine/jellyfin/jellyfin.go      |  6 +++++-
+ internal/engine/jellyfin/jellyfin_test.go | 18 ++++++++++++++++++
+ 2 files changed, 23 insertions(+), 1 deletion(-)
+
+diff --git a/internal/engine/jellyfin/jellyfin.go b/internal/engine/jellyfin/jellyfin.go
+index 86156d3..46970b3 100644
+--- a/internal/engine/jellyfin/jellyfin.go
++++ b/internal/engine/jellyfin/jellyfin.go
+@@ -323,12 +323,16 @@ func (c *Client) FindCollectionByName(ctx context.Context, name string) (string,
+ 	return "", nil // Collection not found
+ }
+ 
+-// GetCollectionItems returns a map of item IDs currently in the collection.
++// GetCollectionItems returns the IDs of the Movie and Series members of the collection.
+ func (c *Client) GetCollectionItems(ctx context.Context, collectionID string) (map[string]bool, error) {
+ 	// Get items in the collection
+ 	result, resp, err := c.jellyfin.ItemsAPI.GetItems(ctx).
+ 		ParentId(collectionID).
+ 		Recursive(true).
++		IncludeItemTypes([]jellyfin.BaseItemKind{
++			jellyfin.BASEITEMKIND_MOVIE,
++			jellyfin.BASEITEMKIND_SERIES,
++		}).
+ 		Execute()
+ 	if err != nil {
+ 		return nil, fmt.Errorf("failed to get collection items: %w", err)
+diff --git a/internal/engine/jellyfin/jellyfin_test.go b/internal/engine/jellyfin/jellyfin_test.go
+index b936743..19cced9 100644
+--- a/internal/engine/jellyfin/jellyfin_test.go
++++ b/internal/engine/jellyfin/jellyfin_test.go
+@@ -298,6 +298,24 @@ func TestCollections(t *testing.T) {
+ 	require.Equal(t, []string{"m1"}, removes[0].Query["ids"])
+ }
+ 
++func TestGetCollectionItemsRequestsMoviesAndSeries(t *testing.T) {
++	c, server := newTestClient(t)
++	server.JSON("GET /Items", queryResult([]jellyfinAPI.BaseItemDto{
++		item("m1", "Movie 1", jellyfinAPI.BASEITEMKIND_MOVIE),
++		item("s1", "Series 1", jellyfinAPI.BASEITEMKIND_SERIES),
++	}, 2))
++
++	items, err := c.GetCollectionItems(t.Context(), "col-1")
++	require.NoError(t, err)
++	require.Equal(t, map[string]bool{"m1": true, "s1": true}, items)
++
++	itemCalls := server.Requests(http.MethodGet, "/Items")
++	require.Len(t, itemCalls, 1)
++	require.Equal(t, "col-1", itemCalls[0].Query.Get("parentId"))
++	require.Equal(t, "true", itemCalls[0].Query.Get("recursive"))
++	require.ElementsMatch(t, []string{"Movie", "Series"}, itemCalls[0].Query["includeItemTypes"])
++}
++
+ func TestCreateCollectionBatchesLargeItemLists(t *testing.T) {
+ 	c, server := newTestClient(t)
+ 	created := jellyfinAPI.NewCollectionCreationResult()
+-- 
+2.39.5
+

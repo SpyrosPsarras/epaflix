@@ -26,6 +26,7 @@ const manual = new Set([
 // .github/renovate.json, so extraction must see exactly these names disabled.
 const disabled = new Set([
   'ghcr.io/spyrospsarras/lingarr',
+  'ghcr.io/spyrospsarras/jellysweep',
 ]);
 for (const dep of deps) {
   assert(!dep.skipReason, `${dep.depName}: ${dep.skipReason}`);
@@ -66,3 +67,19 @@ for (const [name, current, next, expected] of [
 }
 assert(!get('docker').isCompatible('5.0.0.1-ls400', '4.0.19.2979-ls324'));
 console.log('PASS LinuxServer build suffix regression: use clean version tags');
+assert(!get('docker').isCompatible('1.26.10', '1.26'));
+console.log('PASS golang two-part tag regression: patch tags are incompatible');
+
+for (const [name, file, enabled, updateType] of [
+  ['ghcr.io/spyrospsarras/jellysweep', packageFile, false],
+  ['ghcr.io/jon4hz/jellysweep', 'images/jellysweep/Dockerfile', false],
+  ['ghcr.io/jon4hz/jellysweep', packageFile, true],
+  ['golang', 'images/jellysweep/Dockerfile', false, 'minor'],
+  ['golang', 'images/jellysweep/Dockerfile', false, 'major'],
+]) {
+  const config = await applyPackageRules({
+    depName: name, packageName: name, datasource: 'docker', packageFile: file, packageRules, updateType,
+  }, 'test');
+  assert.equal(config.enabled !== false, enabled, `${name} in ${file}: ${updateType ?? 'all'} update policy`);
+  console.log(`PASS ${name} in ${file}${updateType ? ` ${updateType}` : ''}: updates ${enabled ? 'enabled' : 'disabled'}`);
+}
