@@ -26,7 +26,7 @@ jobs:
             pinnedVersion: "v0.16.1"
             whatToDoWhenItMoves: >-
               Temporary Jellysweep overlay in images/jellysweep/, tracked in #2060.
-              The initial build PR leaves the deployment on upstream; a follow-up pins the published overlay.
+              The deployment pins the published overlay by digest with replicas 1 and JELLYSWEEP_DRY_RUN=true.
               For a new release, run `gh api repos/jon4hz/jellysweep/compare/da58d64...<tag> --jq .status`:
               only ahead or identical proves #440 shipped. Verify the collection-members fix with the same
               comparison from its upstream PR merge commit once it exists; otherwise read GetCollectionItems
@@ -46,7 +46,7 @@ jobs:
               the matching binary-marker grep in build-jellysweep.yml, the Dockerfile header comment,
               the Jellysweep base and Go-builder rule descriptions in .github/renovate.json, and the
               Jellysweep row in docs/servarr-image-pins.md. Also update images/jellysweep/README.md:
-              the introduction's upstream-image pin, the Go-builder tag explanation, the Build section's
+              the introduction's deployed-image description, the Go-builder tag explanation, the Build section's
               source-commit literal and base-image digest, its
               "exactly one query-and-test commit after v0.16.1" statement and
               "This intentional source/base difference is not Lingarr's same-revision pairing" sentence.
@@ -56,7 +56,8 @@ jobs:
               close the signal until another release appears. Otherwise (neither fix, or only the
               collection-members fix), keep the overlay, record the assessment, move pinnedVersion to the
               assessed release, and close the signal.
-              Jellysweep stays at replicas 0 and JELLYSWEEP_DRY_RUN=true until the owner unpauses it.
+              Leave replicas and dry-run unchanged. Remove dry-run in a separate PR only after the owner
+              compares the first runs against the pre-upgrade baseline.
           - issue: "1114"
             upstreamRepo: "utkuozdemir/nvidia_gpu_exporter"
             probe: "nvidia-gpu-alert-rules"
