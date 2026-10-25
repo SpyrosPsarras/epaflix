@@ -2,9 +2,10 @@
 
 Temporary `ghcr.io/spyrospsarras/jellysweep` overlay, tracked in
 [epaflix#2060](https://github.com/SpyrosPsarras/epaflix/issues/2060).
-The deployment still pins the upstream v0.16.1 image. Once the main-branch
-build publishes this overlay, a separate PR will pin its digest. Jellysweep
-stays at `replicas: 0` and `JELLYSWEEP_DRY_RUN=true` until the owner unpauses it.
+The deployment pins the published overlay by digest in
+`2-k3s/08.servarr/kustomization.yaml` and requests `replicas: 1` with
+`JELLYSWEEP_DRY_RUN=true`. Keep dry-run until the owner compares first runs
+with the pre-upgrade baseline; remove it in a separate PR.
 
 ## Included fixes
 
@@ -56,7 +57,7 @@ the embedded patch marker, inherited image configuration, CLI help, and both
 successful and failed healthchecks against a local fixture HTTP server. It does
 not start Jellysweep's server or connect to media services. Only main can push
 `<short-upstream>-collection-direct-members-<github.sha>` to GHCR and print the
-digest for the follow-up pin. Renovate does not move the `golang:1.26` builder;
+digest for the deployment pin. Renovate does not move the `golang:1.26` builder;
 Go patch releases come through the moving `1.26` tag at build time. Minor and
 major versions follow upstream's `go.mod` and move by hand with `UPSTREAM_COMMIT`.
 The overlay image and upstream base cannot move independently.
@@ -91,7 +92,7 @@ In the same change, update the hardcoded `0.16.1` in the Dockerfile's ldflags
 and OCI version label, the matching binary-marker grep in `build-jellysweep.yml`,
 the Dockerfile header comment, the Jellysweep base and Go-builder rule descriptions
 in `.github/renovate.json`, and the Jellysweep row in `docs/servarr-image-pins.md`.
-Also update `images/jellysweep/README.md`: the introduction's upstream-image pin,
+Also update `images/jellysweep/README.md`: the introduction's deployed-image description,
 the Go-builder tag explanation, the Build section's source-commit literal and
 base-image digest, and its
 "exactly one query-and-test commit after v0.16.1" statement and
