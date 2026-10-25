@@ -12,10 +12,6 @@ resources:
 generators:
   - ksops-generator.yaml
 configMapGenerator:
-  - name: vaultwarden-migrate
-    namespace: vaultwarden
-    files:
-      - migrate-local-path.sh=files/migrate-local-path.sh
   - name: vaultwarden-recovery-scripts-57ddc75dbc
     namespace: vaultwarden
     options:
