@@ -16,3 +16,21 @@ spec:
   resources:
     requests:
       storage: 2Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cpa-manager-plus-data-iscsi
+  namespace: remote-pi
+  labels:
+    app.kubernetes.io/name: cpa-manager-plus
+    app.kubernetes.io/component: storage
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: truenas-iscsi
+  resources:
+    requests:
+      storage: 5Gi
