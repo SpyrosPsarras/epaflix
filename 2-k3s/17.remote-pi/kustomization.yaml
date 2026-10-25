@@ -44,7 +44,3 @@ configMapGenerator:
     namespace: remote-pi
     files:
       - cliproxy/files/heartbeat.py
-  - name: cpa-manager-migrate
-    namespace: remote-pi
-    files:
-      - migrate-local-path.sh=cpamanager/files/migrate-local-path.sh
