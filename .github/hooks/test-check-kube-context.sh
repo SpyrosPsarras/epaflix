@@ -71,11 +71,17 @@ if command -v kubectl >/dev/null 2>&1; then
   write_kubeconfig "$tmp/only-epaflix" epaflix
   expect_pass "epaflix-only kubeconfig passes" "$tmp/only-epaflix"
 
+  write_kubeconfig "$tmp/only-homelab" homelab
+  expect_pass "homelab-only kubeconfig passes" "$tmp/only-homelab"
+
+  write_kubeconfig "$tmp/both-allowed" epaflix homelab
+  expect_fail "epaflix plus homelab is refused (exactly one context required)" "$tmp/both-allowed"
+
   write_kubeconfig "$tmp/multi" epaflix other-cluster-a other-cluster-b
   expect_fail "epaflix plus two other contexts is refused" "$tmp/multi"
 
   write_kubeconfig "$tmp/single-other" other-cluster-a
-  expect_fail "a single non-epaflix context is refused (allowlist, not count-only)" "$tmp/single-other"
+  expect_fail "a single unknown context is refused (allowlist, not count-only)" "$tmp/single-other"
 
   printf 'apiVersion: v1\nkind: Config\npreferences: {}\nclusters: []\nusers: []\ncontexts: []\n' \
     >"$tmp/no-contexts"

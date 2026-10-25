@@ -9,14 +9,14 @@ fi
 contexts="$(kubectl config get-contexts -o name 2>/dev/null || true)"
 count="$(printf '%s\n' "$contexts" | grep -c . || true)"
 
-if [ "$count" = "1" ] && printf '%s\n' "$contexts" | grep -qx epaflix; then
-  echo "kube context guard: resolved kubeconfig exposes 1 context (epaflix)."
+if [ "$count" = "1" ] && printf '%s\n' "$contexts" | grep -qxE 'epaflix|homelab'; then
+  echo "kube context guard: resolved kubeconfig exposes 1 context ($contexts)."
   exit 0
 fi
 
-echo "ERROR: resolved kubeconfig exposes $count context(s); expected exactly 1 (epaflix)." >&2
+echo "ERROR: resolved kubeconfig exposes $count context(s); expected exactly 1 (epaflix or homelab)." >&2
 if [ "$count" = "1" ]; then
-  echo "       The one context it exposes is not epaflix (name withheld: public repo, #856)." >&2
+  echo "       The one context it exposes is neither epaflix nor homelab (name withheld: public repo, #856)." >&2
 fi
 echo "       A wrong context here reaches clusters owned by another team, so this" >&2
 echo "       commit is refused rather than made from a shell that can hit them." >&2
