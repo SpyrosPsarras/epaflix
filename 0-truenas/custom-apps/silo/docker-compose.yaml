@@ -1,0 +1,32 @@
+services:
+  silo:
+    image: docker.io/pgsty/silo:RELEASE.2026-10-18T00-00-00Z@sha256:2636fc4155d9a7e41ff58cdb65ddd13ba9304e67184e13c25bc5cb34016269d7
+    restart: unless-stopped
+    user: "568:568"
+    command:
+      - server
+      - --address
+      - :9000
+      - --console-address
+      - :9001
+    env_file:
+      - /mnt/apps/silo/silo.env
+    environment:
+      TZ: Etc/UTC
+      MINIO_VOLUMES: /data1
+    ports:
+      - 192.168.10.200:9000:9000
+      - 192.168.10.200:9001:9001
+    volumes:
+      - /mnt/pool1/minio:/data1
+    healthcheck:
+      test: ["CMD", "silo", "healthcheck", "ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
