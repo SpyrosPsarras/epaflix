@@ -29,6 +29,30 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       initContainers:
+        - name: migrate-config
+          image: busybox:1.36
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            runAsNonRoot: false
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - CHOWN
+                - DAC_OVERRIDE
+                - FOWNER
+          command: ["sh", "/migrate/migrate-local-path.sh", "/old", "/data"]
+          volumeMounts:
+            - name: gh-runner-data-local-path
+              mountPath: /old
+              readOnly: true
+            - name: state
+              mountPath: /data
+            - name: migrate-local-path
+              mountPath: /migrate
+              readOnly: true
         - name: register
           image: ghcr.io/actions/actions-runner:2.329.0
           env:
@@ -81,7 +105,14 @@ spec:
       volumes:
         - name: state
           persistentVolumeClaim:
+            claimName: gh-runner-data-iscsi
+        - name: gh-runner-data-local-path
+          persistentVolumeClaim:
             claimName: gh-runner-data
+            readOnly: true
+        - name: migrate-local-path
+          configMap:
+            name: gh-runner-migrate
         - name: ssh-key
           secret:
             secretName: gh-runner-secrets

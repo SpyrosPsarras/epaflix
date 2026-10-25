@@ -32,6 +32,31 @@ spec:
         fsGroupChangePolicy: OnRootMismatch
         seccompProfile:
           type: RuntimeDefault
+      initContainers:
+        - name: migrate-config
+          image: busybox:1.36
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            runAsNonRoot: false
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - CHOWN
+                - DAC_OVERRIDE
+                - FOWNER
+          command: ["sh", "/migrate/migrate-local-path.sh", "/old", "/data"]
+          volumeMounts:
+            - name: cpa-manager-plus-data-local-path
+              mountPath: /old
+              readOnly: true
+            - name: data
+              mountPath: /data
+            - name: migrate-local-path
+              mountPath: /migrate
+              readOnly: true
       containers:
         - name: cpa-manager-plus
           image: docker.io/seakee/cpa-manager-plus:v1.12.6
@@ -88,7 +113,14 @@ spec:
       volumes:
         - name: data
           persistentVolumeClaim:
+            claimName: cpa-manager-plus-data-iscsi
+        - name: cpa-manager-plus-data-local-path
+          persistentVolumeClaim:
             claimName: cpa-manager-plus-data
+            readOnly: true
+        - name: migrate-local-path
+          configMap:
+            name: cpa-manager-migrate
         - name: tmp
           emptyDir:
             sizeLimit: 64Mi

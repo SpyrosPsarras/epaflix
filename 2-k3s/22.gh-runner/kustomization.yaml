@@ -12,3 +12,9 @@ generators:
 images:
   - name: ghcr.io/actions/actions-runner
     newTag: 2.338.1@sha256:e275409999c37162649aa050ca573f03eab2eabcb3a1e7fcc47548de6b4f9690
+
+configMapGenerator:
+  - name: gh-runner-migrate
+    namespace: gh-runner
+    files:
+      - migrate-local-path.sh=files/migrate-local-path.sh
