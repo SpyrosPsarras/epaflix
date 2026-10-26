@@ -2,6 +2,8 @@ apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
   name: mcp-hub-internal
+  annotations:
+    argocd.argoproj.io/sync-options: Replace=true
 spec:
   entryPoints: [internal]
   routes:
