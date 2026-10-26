@@ -21,6 +21,7 @@ spec:
 
   affinity:
     podAntiAffinityType: preferred
+  priorityClassName: postgres-database
   enablePDB: true
   enableSuperuserAccess: true
   ephemeralVolumesSizeLimit:
