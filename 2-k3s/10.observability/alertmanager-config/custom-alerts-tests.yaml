@@ -1394,6 +1394,10 @@ tests:
                 (no syncPolicy.automated) stay OutOfSync until someone syncs them:
                 kubectl --context epaflix -n argocd patch application argocd --type merge -p
                 '{"operation":{"initiatedBy":{"username":"<you>-manual"},"sync":{"revision":"main","syncStrategy":{"apply":{}}}}}'.
+                If the last sync operation's message says '<field> in body must be of type object: "null"',
+                git replaced a populated map with an empty one, such as tls: {}, on a resource Argo syncs with ServerSideApply.
+                Add the annotation argocd.argoproj.io/sync-options: Replace=true to that resource,
+                merge, sync it (manual-sync apps need the command above), then remove the annotation in a follow-up PR.
 
   - interval: 1m
     input_series:
@@ -1426,6 +1430,10 @@ tests:
                 (no syncPolicy.automated) stay OutOfSync until someone syncs them:
                 kubectl --context epaflix -n argocd patch application argocd --type merge -p
                 '{"operation":{"initiatedBy":{"username":"<you>-manual"},"sync":{"revision":"main","syncStrategy":{"apply":{}}}}}'.
+                If the last sync operation's message says '<field> in body must be of type object: "null"',
+                git replaced a populated map with an empty one, such as tls: {}, on a resource Argo syncs with ServerSideApply.
+                Add the annotation argocd.argoproj.io/sync-options: Replace=true to that resource,
+                merge, sync it (manual-sync apps need the command above), then remove the annotation in a follow-up PR.
 
   - interval: 1m
     input_series:

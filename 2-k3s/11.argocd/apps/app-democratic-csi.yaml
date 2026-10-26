@@ -15,4 +15,5 @@ spec:
     server: https://kubernetes.default.svc
     namespace: democratic-csi
   syncPolicy:
+    automated: { selfHeal: true, prune: true }
     syncOptions: [ServerSideApply=true]
