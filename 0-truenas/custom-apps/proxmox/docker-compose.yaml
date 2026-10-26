@@ -13,7 +13,7 @@ services:
   qnetd:
     container_name: proxmox-qdevice
     hostname: proxmox-qdevice
-    image: bcleonard/proxmox-qdevice:v2.0
+    image: bcleonard/proxmox-qdevice:v2.1
     networks:
       vlan:
         ipv4_address: 192.168.10.9
