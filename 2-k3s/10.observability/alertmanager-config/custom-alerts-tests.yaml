@@ -1397,7 +1397,8 @@ tests:
                 If the last sync operation's message says '<field> in body must be of type object: "null"',
                 git replaced a populated map with an empty one, such as tls: {}, on a resource Argo syncs with ServerSideApply.
                 Add the annotation argocd.argoproj.io/sync-options: Replace=true to that resource,
-                merge, sync it (manual-sync apps need the command above), then remove the annotation in a follow-up PR.
+                merge and sync it (manual-sync apps need the command above). Then remove the annotation in a follow-up PR
+                and sync the resource again. Argo still sees the live annotation, so that sync is a replace and drops it.
 
   - interval: 1m
     input_series:
@@ -1433,7 +1434,8 @@ tests:
                 If the last sync operation's message says '<field> in body must be of type object: "null"',
                 git replaced a populated map with an empty one, such as tls: {}, on a resource Argo syncs with ServerSideApply.
                 Add the annotation argocd.argoproj.io/sync-options: Replace=true to that resource,
-                merge, sync it (manual-sync apps need the command above), then remove the annotation in a follow-up PR.
+                merge and sync it (manual-sync apps need the command above). Then remove the annotation in a follow-up PR
+                and sync the resource again. Argo still sees the live annotation, so that sync is a replace and drops it.
 
   - interval: 1m
     input_series:
