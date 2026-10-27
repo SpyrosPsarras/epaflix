@@ -51,9 +51,6 @@ resources:
 generators:
   - _shared/secrets/ksops-generator.yaml
 configMapGenerator:
-  - name: configarr-config
-    files:
-      - config.yml=configarr/files/config.yml
   - name: cleanuparr-seeding-guard
     files:
       - enforce-private-seeding.py=cleanuparr/files/enforce-private-seeding.py

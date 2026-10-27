@@ -47,7 +47,7 @@ tests:
               component: servarr
             exp_annotations:
               summary: Configarr run failed
-              description: "The hourly Configarr Job (configarr-101) exited non-zero while syncing TRaSH Guides into Sonarr or Radarr. Check the Job log for the failed instance or repository fetch. Config: 2-k3s/08.servarr/configarr/files/config.yml."
+              description: "The hourly Configarr Job (configarr-101) exited non-zero while syncing TRaSH Guides into Sonarr or Radarr. Check the Job log for the failed instance or repository fetch. Config: 2-k3s/08.servarr/configarr/configarr.yaml."
       - eval_time: 10m
         alertname: ConfigarrFailed
         exp_alerts: []
