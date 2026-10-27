@@ -33,7 +33,7 @@ spec:
         fsGroup: 568
       containers:
         - name: prowlarr
-          image: lscr.io/linuxserver/prowlarr:latest
+          image: ghcr.io/linuxserver/prowlarr:latest
           env:
             - name: PUID
               value: "568"

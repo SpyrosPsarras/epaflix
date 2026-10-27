@@ -50,9 +50,9 @@ for (const dep of deps) {
 }
 
 for (const [name, current, next, expected] of [
-  ['lscr.io/linuxserver/sonarr', '4.0.19', '5.0.0', 'major'],
-  ['lscr.io/linuxserver/sonarr', '4.0.19', '4.1.0', 'minor'],
-  ['lscr.io/linuxserver/sonarr', '4.0.19', '4.0.20', 'patch'],
+  ['ghcr.io/linuxserver/sonarr', '4.0.19', '5.0.0', 'major'],
+  ['ghcr.io/linuxserver/sonarr', '4.0.19', '4.1.0', 'minor'],
+  ['ghcr.io/linuxserver/sonarr', '4.0.19', '4.0.20', 'patch'],
   ['ghcr.io/hotio/unpackerr', 'release-0.15.2', 'release-0.15.3', 'patch'],
   ['ghcr.io/hotio/unpackerr', 'release-0.15.2', 'release-1.0.0', 'major'],
   ['qbittorrentofficial/qbittorrent-nox', '5.2.3-1', '5.2.3-2', 'patch'],

@@ -19,6 +19,8 @@ Registry checks on 2026-09-15 resolved each tag below to the existing digest in 
 
 LinuxServer publishes clean three-component tags alongside build tags. Docker versioning treats `-ls324` as a compatibility suffix, so `4.0.19.2979-ls324` would reject a candidate ending in `-ls400`. Clean tags avoid that filter and allow same-version rebuild digests. Unpackerr needs regex versioning for `release-`; qBittorrent needs it to treat its numeric image-build suffix as a patch instead of a fixed compatibility suffix. The regex excludes qBittorrent's separate `lt2` variant.
 
+The LinuxServer images come from ghcr.io/linuxserver, not lscr.io. Renovate's lookups of the lscr.io names failed on the Dependency Dashboard (issue #31), and its logs showed lscr.io answering tag-list and blob requests with HTTP 429. ghcr.io serves the same digests.
+
 Minor and major releases require review throughout this images block. Patch releases and same-tag digest rebuilds still auto-merge, except for the manual-review images below. A patch can still contain an application migration; this policy preserves the patch behavior requested in #1129, rather than promising that patches are migration-free.
 
 ## Scope and exceptions

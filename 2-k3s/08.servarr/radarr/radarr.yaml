@@ -33,7 +33,7 @@ spec:
         fsGroup: 568
       containers:
         - name: radarr
-          image: lscr.io/linuxserver/radarr:latest
+          image: ghcr.io/linuxserver/radarr:latest
           env:
             - name: PUID
               value: "568"
