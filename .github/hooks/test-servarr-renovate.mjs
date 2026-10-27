@@ -1,4 +1,4 @@
-// Run with RENOVATE_ROOT pointing to the installed renovate package, version 43.33.2.
+// Run with RENOVATE_ROOT pointing to the installed renovate package, at the newTag in 2-k3s/12.renovate/kustomization.yaml.
 // Uses Renovate's actual extraction, versioning and rule application, without network access.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -10,7 +10,7 @@ const load = (path) => import(pathToFileURL(resolve(process.env.RENOVATE_ROOT, `
 const { extractPackageFile } = await load('modules/manager/kustomize/extract');
 const { applyPackageRules } = await load('util/package-rules/index');
 const { get } = await load('modules/versioning/index');
-const { getUpdateType } = await load('workers/repository/process/lookup/update-type');
+const { classifyRelease } = await load('workers/repository/process/lookup/update-type');
 const packageFile = '2-k3s/08.servarr/kustomization.yaml';
 const { packageRules } = JSON.parse(readFileSync('.github/renovate.json', 'utf8'));
 const { deps } = extractPackageFile(readFileSync(packageFile, 'utf8'), packageFile, {});
@@ -62,7 +62,7 @@ for (const [name, current, next, expected] of [
   const api = get(config.versioning ?? 'docker');
   assert(api.isCompatible(next, current), `${name}: ${next} is filtered out`);
   assert(api.isGreaterThan(next, current));
-  assert.equal(getUpdateType(config, api, current, next), expected);
+  assert.equal(classifyRelease(api, current, next), expected);
   console.log(`PASS ${name}: ${current} -> ${next} = ${expected}`);
 }
 assert(!get('docker').isCompatible('5.0.0.1-ls400', '4.0.19.2979-ls324'));

@@ -45,7 +45,7 @@ Paths in the table are relative to `2-k3s/08.servarr/` unless they start with `i
 Install the deployed Renovate version in a temporary directory, then run from the repository root:
 
 ```sh
-npm install --prefix /tmp/servarr-renovate --ignore-scripts --no-audit --no-fund renovate@43.33.2
+npm install --prefix /tmp/servarr-renovate --ignore-scripts --no-audit --no-fund "renovate@$(sed -n 's/^ *newTag: //p' 2-k3s/12.renovate/kustomization.yaml)"
 RENOVATE_ROOT=/tmp/servarr-renovate/node_modules/renovate node .github/hooks/test-servarr-renovate.mjs
 ```
 
