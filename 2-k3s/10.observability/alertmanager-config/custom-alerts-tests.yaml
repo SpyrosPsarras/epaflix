@@ -7,6 +7,50 @@ rule_files:
 evaluation_interval: 1m
 
 tests:
+  - name: Configarr latest failure alerts once and clears after the next successful run
+    interval: 1m
+    input_series:
+      - series: 'kube_job_failed{namespace="servarr",job_name="configarr-100",instance="ksm-1"}'
+        values: '1x20'
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="configarr-100",instance="ksm-1"}'
+        values: '100x20'
+      - series: 'kube_job_failed{namespace="servarr",job_name="configarr-101",instance="ksm-1"}'
+        values: '1x20'
+      - series: 'kube_job_failed{namespace="servarr",job_name="configarr-101",instance="ksm-2"}'
+        values: '1x20'
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="configarr-101",instance="ksm-1"}'
+        values: '150x20'
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="configarr-101",instance="ksm-2"}'
+        values: '150x20'
+      - series: 'kube_job_failed{namespace="servarr",job_name="configarr-102"}'
+        values: '_x9 0x10'
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="configarr-102"}'
+        values: '_x9 200x10'
+      - series: 'kube_job_failed{namespace="servarr",job_name="configarr-dryrun-1"}'
+        values: '1x20'
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="configarr-dryrun-1"}'
+        values: '9999x20'
+      - series: 'kube_job_failed{namespace="unrelated",job_name="configarr-999"}'
+        values: '1x20'
+      - series: 'kube_job_status_start_time{namespace="unrelated",job_name="configarr-999"}'
+        values: '9999x20'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: ConfigarrFailed
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: ConfigarrFailed
+        exp_alerts:
+          - exp_labels:
+              job_name: configarr-101
+              severity: warning
+              component: servarr
+            exp_annotations:
+              summary: Configarr run failed
+              description: "The hourly Configarr Job (configarr-101) exited non-zero while syncing TRaSH Guides into Sonarr or Radarr. Check the Job log for the failed instance or repository fetch. Config: 2-k3s/08.servarr/configarr/configarr.yaml."
+      - eval_time: 10m
+        alertname: ConfigarrFailed
+        exp_alerts: []
   - interval: 1m
     input_series:
       - series: kubelet_volume_stats_available_bytes{namespace="storage-test",persistentvolumeclaim="local",job="kubelet",metrics_path="/metrics"}
