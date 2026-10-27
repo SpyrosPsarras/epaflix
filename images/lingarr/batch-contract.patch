@@ -1,34 +1,56 @@
 diff --git a/Lingarr.Server.Tests/Controllers/TranslateControllerContentTests.cs b/Lingarr.Server.Tests/Controllers/TranslateControllerContentTests.cs
-index 23b287e..38e01eb 100644
+index 2db1fc0..802a4b3 100644
 --- a/Lingarr.Server.Tests/Controllers/TranslateControllerContentTests.cs
 +++ b/Lingarr.Server.Tests/Controllers/TranslateControllerContentTests.cs
-@@ -558,7 +558,7 @@ public class TranslateControllerContentTests : IDisposable
+@@ -53,7 +53,7 @@ public class TranslateControllerContentTests : IDisposable
+
+     public TranslateControllerContentTests()
+     {
+-        _connection = new SqliteConnection("DataSource=:memory:");
++        _connection = new SqliteConnection($"DataSource=file:controller_{Guid.NewGuid():N}?mode=memory&cache=shared");
+         _connection.Open();
+
+         var options = new DbContextOptionsBuilder<LingarrDbContext>()
+@@ -207,7 +207,11 @@ public class TranslateControllerContentTests : IDisposable
+             _translationRequestService,
+             _settingServiceMock.Object,
+             new LanguageCodeService(),
+-            NullLogger<TranslateController>.Instance);
++            NullLogger<TranslateController>.Instance)
++        {
++            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
++        };
++        TranslationRequestService.DuplicatePollInterval = TimeSpan.FromMilliseconds(1);
+     }
+
+     public void Dispose()
+@@ -588,7 +592,7 @@ public class TranslateControllerContentTests : IDisposable
      }
  
      [Fact]
--    public async Task TranslateContent_DuplicateActiveRequest_ReturnsEmptyWithoutTranslating()
+-    public async Task TranslateContent_DuplicateActiveRequest_ReturnsConflictWithoutTranslating()
 +    public async Task TranslateContent_DuplicateActiveRequest_DisconnectedCallerLeavesOriginalRunning()
      {
          _context.TranslationRequests.Add(new TranslationRequest
          {
-@@ -572,13 +572,20 @@ public class TranslateControllerContentTests : IDisposable
+@@ -602,13 +606,20 @@ public class TranslateControllerContentTests : IDisposable
          });
          await _context.SaveChangesAsync();
  
 -        var response = await _controller.TranslateContent(
+-            NewContent("First line", "Second line"));
 +        using var disconnected = new CancellationTokenSource();
-+        var pendingResponse = _controller.TranslateContent(
-             NewContent("First line", "Second line"),
--            CancellationToken.None);
-+            disconnected.Token);
++        _controller.HttpContext.RequestAborted = disconnected.Token;
++        var pendingResponse = _controller.TranslateContent(NewContent("First line", "Second line"));
 +
 +        Assert.False(pendingResponse.IsCompleted);
 +        disconnected.Cancel();
-+        var response = await pendingResponse;
++        var response = await pendingResponse.WaitAsync(TimeSpan.FromSeconds(5));
  
--        Assert.Empty(AssertOk(response));
+-        Assert.Equal(StatusCodes.Status409Conflict, Assert.IsType<ConflictObjectResult>(response.Result).StatusCode);
 +        var errorResult = Assert.IsType<ObjectResult>(response.Result);
 +        Assert.Equal(500, errorResult.StatusCode);
+         VerifyNoLineCall();
          VerifyNoBatchCall();
 -        Assert.Equal(1, await _context.TranslationRequests.CountAsync());
 +        var originalRequest = await _context.TranslationRequests.SingleAsync();
@@ -36,38 +58,90 @@ index 23b287e..38e01eb 100644
      }
  
      [Fact]
-@@ -622,25 +629,25 @@ public class TranslateControllerContentTests : IDisposable
+@@ -682,14 +693,22 @@ public class TranslateControllerContentTests : IDisposable
+     [Theory]
+     [InlineData(TranslationStatus.Pending)]
+     [InlineData(TranslationStatus.InProgress)]
+-    public async Task TranslateContent_ActiveDuplicateWithCompletedRequest_ReturnsConflict(TranslationStatus status)
++    public async Task TranslateContent_ActiveDuplicateWithCompletedRequest_WaitsForNewestStoredLines(TranslationStatus status)
+     {
+-        SeedRequest(TranslationStatus.Completed);
+-        SeedRequest(status);
++        SeedRequest(TranslationStatus.Completed, "older");
++        var running = SeedRequest(status);
+
+-        var response = await _controller.TranslateContent(NewContent("First line", "Second line"));
++        var pendingResponse = _controller.TranslateContent(NewContent("First line", "Second line"));
++        Assert.False(pendingResponse.IsCompleted);
++        var options = new DbContextOptionsBuilder<LingarrDbContext>()
++            .UseSqlite(_connection.ConnectionString)
++            .Options;
++        await using var other = new LingarrDbContext(options);
++        await other.TranslationRequests.Where(request => request.Id == running.Id)
++            .ExecuteUpdateAsync(setters => setters.SetProperty(request => request.Status, TranslationStatus.Completed));
++        var results = AssertOk(await pendingResponse.WaitAsync(TimeSpan.FromSeconds(5)));
+
+-        Assert.Equal(StatusCodes.Status409Conflict, Assert.IsType<ConflictObjectResult>(response.Result).StatusCode);
++        Assert.Equal(new[] { "stored 0", "stored 1" }, results.Select(line => line.Line));
+         Assert.Equal(2, await _context.TranslationRequests.CountAsync());
+         VerifyNoLineCall();
+         VerifyNoBatchCall();
+@@ -776,7 +795,10 @@ public class TranslateControllerContentTests : IDisposable
+             _createTranslationRequestService(_progressService),
+             _settingServiceMock.Object,
+             new LanguageCodeService(),
+-            NullLogger<TranslateController>.Instance);
++            NullLogger<TranslateController>.Instance)
++        {
++            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
++        };
+         var content = NewContent("First line", "Second line");
+         content.Lines.Reverse();
+
+@@ -803,7 +825,10 @@ public class TranslateControllerContentTests : IDisposable
+             _createTranslationRequestService(_progressService),
+             _settingServiceMock.Object,
+             new LanguageCodeService(),
+-            NullLogger<TranslateController>.Instance);
++            NullLogger<TranslateController>.Instance)
++        {
++            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
++        };
+         var content = NewContent("First line", "First line");
+         content.Lines[1].Position = 0;
+
+@@ -895,6 +920,31 @@ public class TranslateControllerContentTests : IDisposable
+         Assert.NotNull(translationRequest.CompletedAt);
      }
  
-     [Fact]
--    public async Task TranslateContent_CancelledToken_ReturnsServerErrorAndMarksRequestCancelled()
++    [Fact]
 +    public async Task TranslateContent_ApiCancellation_ReturnsServerErrorAndMarksRequestCancelled()
-     {
--        using var cancellationTokenSource = new CancellationTokenSource();
-         _batchTranslationServiceMock
-             .Setup(batchService => batchService.TranslateBatchAsync(
-                 It.IsAny<List<BatchSubtitleItem>>(),
-                 It.IsAny<string>(),
-                 It.IsAny<string>(),
-                 It.IsAny<CancellationToken>()))
--            .Returns(async () =>
++    {
++        _batchTranslationServiceMock
++            .Setup(batchService => batchService.TranslateBatchAsync(
++                It.IsAny<List<BatchSubtitleItem>>(),
++                It.IsAny<string>(),
++                It.IsAny<string>(),
++                It.IsAny<CancellationToken>()))
 +            .Returns(async (List<BatchSubtitleItem> _, string _, string _, CancellationToken token) =>
-             {
--                await cancellationTokenSource.CancelAsync();
--                cancellationTokenSource.Token.ThrowIfCancellationRequested();
++            {
 +                var request = await _context.TranslationRequests.SingleAsync();
 +                await _translationRequestService.CancelTranslationRequest(request);
 +                token.ThrowIfCancellationRequested();
-                 return new Dictionary<int, string>();
-             });
- 
-         var response = await _controller.TranslateContent(
-             NewContent("First line", "Second line"),
--            cancellationTokenSource.Token);
-+            CancellationToken.None);
- 
-         var errorResult = Assert.IsType<ObjectResult>(response.Result);
-         Assert.Equal(500, errorResult.StatusCode);
++                return new Dictionary<int, string>();
++            });
++
++        var response = await _controller.TranslateContent(NewContent("First line", "Second line"));
++
++        var errorResult = Assert.IsType<ObjectResult>(response.Result);
++        Assert.Equal(500, errorResult.StatusCode);
++        var translationRequest = await _context.TranslationRequests.SingleAsync();
++        Assert.Equal(TranslationStatus.Cancelled, translationRequest.Status);
++    }
++
+     [Fact]
+     public async Task TranslateContent_UnsupportedLanguagePair_ReturnsServerErrorAndMarksRequestFailed()
+     {
 diff --git a/Lingarr.Server.Tests/Services/SubtitleTranslationServiceTests.cs b/Lingarr.Server.Tests/Services/SubtitleTranslationServiceTests.cs
 index c003f43..79f4102 100644
 --- a/Lingarr.Server.Tests/Services/SubtitleTranslationServiceTests.cs
@@ -129,7 +203,7 @@ index c003f43..79f4102 100644
  
      #region Chain-wide best-match resolution
 diff --git a/Lingarr.Server.Tests/Services/Translation/LocalAiServiceTests.cs b/Lingarr.Server.Tests/Services/Translation/LocalAiServiceTests.cs
-index 43ca0d8..59cf52c 100644
+index 3355617..864db0b 100644
 --- a/Lingarr.Server.Tests/Services/Translation/LocalAiServiceTests.cs
 +++ b/Lingarr.Server.Tests/Services/Translation/LocalAiServiceTests.cs
 @@ -39,6 +39,7 @@ public class LocalAiServiceTests
@@ -195,8 +269,9 @@ index 43ca0d8..59cf52c 100644
 +    [Theory]
 +    [MemberData(nameof(MalformedEnvelopes))]
 +    public async Task TranslateBatchAsync_ShouldRetryStructured_WhenEnvelopeIsMalformed(string rawBody, string _)
-+    {
-+        UseSettings(ChatEndpoint);
+     {
+-        // Arrange
+         UseSettings(ChatEndpoint);
 +        SetupResponseSequence(RawResponse(rawBody), ChatResponse(ValidWrapper));
 +
 +        var result = await _service.TranslateBatchAsync(Batch(), "en", "es", CancellationToken.None);
@@ -207,7 +282,9 @@ index 43ca0d8..59cf52c 100644
 +        VerifyAllRequestsCarriedResponseFormat();
 +        VerifyWarningLogged("returned an unparsable response", Times.Once());
 +    }
-+
+
+-        // The chat endpoint tries structured output first and falls back to plain JSON parsing,
+-        // so a failing attempt sends two requests before the retry kicks in.
 +    [Theory]
 +    [MemberData(nameof(MalformedEnvelopes))]
 +    public async Task TranslateBatchAsync_ShouldFailClosedAfterMaxRetries_WhenEnvelopeStaysMalformed(string rawBody, string _)
@@ -242,7 +319,10 @@ index 43ca0d8..59cf52c 100644
 +    public async Task TranslateBatchAsync_ShouldRetry_WhenStructuredResponseMissesAPosition()
 +    {
 +        UseSettings(ChatEndpoint);
-+        SetupResponseSequence(
+         SetupResponseSequence(
+-            ChatResponse(MalformedJson),
+-            ChatResponse(MalformedJson),
+-            ChatResponse("{\"translations\":" + ValidJson + "}"));
 +            ChatResponse("{\"translations\":[{\"position\":1,\"line\":\"Hola\"}]}"),
 +            ChatResponse(ValidWrapper));
 +
@@ -274,9 +354,8 @@ index 43ca0d8..59cf52c 100644
 +
 +    [Fact]
 +    public async Task TranslateBatchAsync_ShouldAcceptEmptyLine_WhenSourceLineWasEmpty()
-     {
--        // Arrange
-         UseSettings(ChatEndpoint);
++    {
++        UseSettings(ChatEndpoint);
 +        var batch = new List<BatchSubtitleItem>
 +        {
 +            new() { Position = 1, Line = "Hello" },
@@ -314,9 +393,7 @@ index 43ca0d8..59cf52c 100644
 +        SetupResponseSequence(ChatResponse("Hola mundo"));
 +
 +        var result = await _service.TranslateAsync("Hello world", "en", "es", null, null, CancellationToken.None);
- 
--        // The chat endpoint tries structured output first and falls back to plain JSON parsing,
--        // so a failing attempt sends two requests before the retry kicks in.
++
 +        Assert.Equal("Hola mundo", result);
 +        VerifyRequestsSent(1);
 +    }
@@ -329,10 +406,7 @@ index 43ca0d8..59cf52c 100644
 +        // 429 was surfaced as HttpRequestException, the retry loop never saw
 +        // it and the batch died on attempt 1.
 +        UseSettings(ChatEndpoint);
-         SetupResponseSequence(
--            ChatResponse(MalformedJson),
--            ChatResponse(MalformedJson),
--            ChatResponse("{\"translations\":" + ValidJson + "}"));
++        SetupResponseSequence(
 +            RateLimitedResponse(),
 +            ChatResponse(ValidWrapper));
  
@@ -365,7 +439,7 @@ index 43ca0d8..59cf52c 100644
      }
  
      [Fact]
-@@ -144,9 +333,23 @@ public class LocalAiServiceTests
+@@ -187,9 +376,23 @@ public class LocalAiServiceTests
      private static HttpResponseMessage GenerateResponse(string translatedJson) =>
          JsonResponse(new { model = "gemma4:e4b", response = translatedJson, done = true });
  
@@ -389,7 +463,7 @@ index 43ca0d8..59cf52c 100644
      private static HttpResponseMessage JsonResponse(object body) => new()
      {
          StatusCode = HttpStatusCode.OK,
-@@ -185,21 +388,37 @@ public class LocalAiServiceTests
+@@ -229,7 +432,11 @@ public class LocalAiServiceTests
                  "SendAsync",
                  ItExpr.IsAny<HttpRequestMessage>(),
                  ItExpr.IsAny<CancellationToken>())
@@ -401,6 +475,9 @@ index 43ca0d8..59cf52c 100644
 +            });
      }
  
+     private List<string> CaptureRequestBodies(Func<HttpResponseMessage> responseFactory)
+@@ -248,16 +455,28 @@ public class LocalAiServiceTests
+
      private void SetupResponseSequence(params HttpResponseMessage[] responses)
      {
 -        var sequence = _httpMessageHandlerMock.Protected()
@@ -437,10 +514,10 @@ index 43ca0d8..59cf52c 100644
      private void VerifyRequestsSent(int count)
 diff --git a/Lingarr.Server.Tests/Services/TranslationRequestServiceTests.cs b/Lingarr.Server.Tests/Services/TranslationRequestServiceTests.cs
 new file mode 100644
-index 0000000..b0d3bdd
+index 0000000..fec67a7
 --- /dev/null
 +++ b/Lingarr.Server.Tests/Services/TranslationRequestServiceTests.cs
-@@ -0,0 +1,421 @@
+@@ -0,0 +1,492 @@
 +using System;
 +using System.Collections.Generic;
 +using System.Linq;
@@ -625,7 +702,7 @@ index 0000000..b0d3bdd
 +            {
 +                TranslationRequestId = requestId,
 +                Position = position,
-+                Source = $"source {position}",
++                Source = $"line {position}",
 +                Target = target
 +            });
 +        }
@@ -691,13 +768,15 @@ index 0000000..b0d3bdd
 +        Assert.Equal(2, await harness.DbContext.TranslationRequests.CountAsync());
 +    }
 +
-+    [Fact]
-+    public async Task TranslateContentAsync_RunningDuplicateEventuallyDeliversStoredLines()
++    [Theory]
++    [InlineData(TranslationStatus.Pending)]
++    [InlineData(TranslationStatus.InProgress)]
++    public async Task TranslateContentAsync_RunningDuplicateEventuallyDeliversStoredLines(TranslationStatus status)
 +    {
 +        // Arrange: the first attempt is still running (detached). The retry
 +        // waits; a background completion lets the wait deliver the lines.
 +        var harness = CreateHarness();
-+        harness.DbContext.TranslationRequests.Add(StoredRequest(1, TranslationStatus.InProgress));
++        harness.DbContext.TranslationRequests.Add(StoredRequest(1, status, DateTimeOffset.UtcNow.AddHours(-2)));
 +        SeedLines(harness.DbContext, 1, (1, "η γάτα"), (2, "ο σκύλος"));
 +        harness.DbContext.SaveChanges();
 +
@@ -726,15 +805,79 @@ index 0000000..b0d3bdd
 +        Assert.Equal(1, await harness.DbContext.TranslationRequests.CountAsync());
 +    }
 +
++    [Theory]
++    [InlineData(TranslationStatus.Failed)]
++    [InlineData(TranslationStatus.Cancelled)]
++    public async Task TranslateContentAsync_NewerTerminalRequest_DoesNotHideOlderRunningDuplicate(TranslationStatus newerStatus)
++    {
++        var harness = CreateHarness(items => items.ToDictionary(i => i.Position, _ => "fresh"));
++        harness.DbContext.TranslationRequests.AddRange(
++            StoredRequest(1, TranslationStatus.InProgress, DateTimeOffset.UtcNow.AddMinutes(-1)),
++            StoredRequest(2, newerStatus));
++        await harness.DbContext.SaveChangesAsync();
++        var options = new DbContextOptionsBuilder<LingarrDbContext>()
++            .UseSqlite(harness.ConnectionString)
++            .Options;
++        await using var other = new LingarrDbContext(options);
++        using var waitingClient = new CancellationTokenSource(TimeSpan.FromSeconds(15));
++
++        var pending = harness.Service.TranslateContentAsync(Content(2), waitingClient.Token);
++
++        Assert.False(pending.IsCompleted);
++        Assert.Equal(2, await other.TranslationRequests.CountAsync());
++        harness.BatchServiceMock.Verify(service => service.TranslateBatchAsync(
++            It.IsAny<List<BatchSubtitleItem>>(), It.IsAny<string>(), It.IsAny<string>(),
++            It.IsAny<CancellationToken>()), Times.Never);
++
++        await other.TranslationRequests.Where(request => request.Id == 1)
++            .ExecuteUpdateAsync(setters => setters.SetProperty(request => request.Status, TranslationStatus.Completed));
++        var results = await pending.WaitAsync(TimeSpan.FromSeconds(15));
++
++        Assert.All(results, line => Assert.Equal("fresh", line.Line));
++        Assert.Equal(3, await other.TranslationRequests.CountAsync());
++    }
++
 +    [Fact]
-+    public async Task TranslateContentAsync_StaleRunningDuplicate_ReapedAndFreshTranslationRuns()
++    public async Task TranslateContentAsync_NewestActiveRequestFails_KeepsWaitingForOlderActiveRequest()
++    {
++        var harness = CreateHarness(items => items.ToDictionary(i => i.Position, _ => "fresh"));
++        harness.DbContext.TranslationRequests.AddRange(
++            StoredRequest(1, TranslationStatus.InProgress, DateTimeOffset.UtcNow.AddMinutes(-1)),
++            StoredRequest(2, TranslationStatus.InProgress));
++        await harness.DbContext.SaveChangesAsync();
++        var options = new DbContextOptionsBuilder<LingarrDbContext>()
++            .UseSqlite(harness.ConnectionString)
++            .Options;
++        await using var other = new LingarrDbContext(options);
++        using var waitingClient = new CancellationTokenSource();
++
++        var pending = harness.Service.TranslateContentAsync(Content(2), waitingClient.Token);
++        Assert.False(pending.IsCompleted);
++        await other.TranslationRequests.Where(request => request.Id == 2)
++            .ExecuteUpdateAsync(setters => setters.SetProperty(request => request.Status, TranslationStatus.Failed));
++        waitingClient.CancelAfter(TimeSpan.FromSeconds(1));
++
++        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending.WaitAsync(TimeSpan.FromSeconds(15)));
++
++        Assert.Equal(2, await other.TranslationRequests.CountAsync());
++        Assert.Equal(TranslationStatus.InProgress,
++            (await other.TranslationRequests.SingleAsync(request => request.Id == 1)).Status);
++        harness.BatchServiceMock.Verify(service => service.TranslateBatchAsync(
++            It.IsAny<List<BatchSubtitleItem>>(), It.IsAny<string>(), It.IsAny<string>(),
++            It.IsAny<CancellationToken>()), Times.Never);
++    }
++
++    [Theory]
++    [InlineData(TranslationStatus.Pending)]
++    [InlineData(TranslationStatus.InProgress)]
++    public async Task TranslateContentAsync_StaleRunningDuplicate_ReapedAndFreshTranslationRuns(TranslationStatus status)
 +    {
 +        // Arrange: an InProgress row with no line activity for over an hour -
 +        // a restart or crash left it behind. The wait must not hang on it:
 +        // reap it as Interrupted, then translate fresh in this request.
 +        var harness = CreateHarness(items => items.ToDictionary(i => i.Position, i => "φρέσκο"));
 +        harness.DbContext.TranslationRequests.Add(
-+            StoredRequest(1, TranslationStatus.InProgress, DateTimeOffset.UtcNow.AddHours(-2)));
++            StoredRequest(1, status, DateTimeOffset.UtcNow.AddHours(-2)));
 +        harness.DbContext.SaveChanges();
 +
 +        // Act
@@ -749,15 +892,18 @@ index 0000000..b0d3bdd
 +        Assert.Equal(2, await harness.DbContext.TranslationRequests.CountAsync());
 +    }
 +
-+    [Fact]
-+    public async Task TranslateContentAsync_RunningDuplicateFails_RetryFallsThroughToFreshTranslation()
++    [Theory]
++    [InlineData(TranslationStatus.Failed)]
++    [InlineData(TranslationStatus.Completed)]
++    public async Task TranslateContentAsync_RunningDuplicateWithChangedSource_RetryFallsThroughToFreshTranslation(TranslationStatus terminalStatus)
 +    {
-+        // Arrange: the first attempt is running but dies with Failed. The
-+        // waiting retry must not deliver the failed request's lines: it falls
-+        // through to a fresh translation (a new row).
 +        var harness = CreateHarness(items => items.ToDictionary(i => i.Position, i => "φρέσκο"));
 +        harness.DbContext.TranslationRequests.Add(StoredRequest(1, TranslationStatus.InProgress));
 +        SeedLines(harness.DbContext, 1, (1, "η γάτα"), (2, "ο σκύλος"));
++        foreach (var line in harness.DbContext.TranslationRequestLines)
++        {
++            line.Source = $"changed {line.Position}";
++        }
 +        harness.DbContext.SaveChanges();
 +
 +        var flip = Task.Run(async () =>
@@ -768,7 +914,7 @@ index 0000000..b0d3bdd
 +                .Options;
 +            await using var other = new LingarrDbContext(options);
 +            var row = await other.TranslationRequests.SingleAsync(r => r.Id == 1);
-+            row.Status = TranslationStatus.Failed;
++            row.Status = terminalStatus;
 +            row.CompletedAt = DateTimeOffset.UtcNow;
 +            await other.SaveChangesAsync();
 +        });
@@ -777,7 +923,6 @@ index 0000000..b0d3bdd
 +        var results = await harness.Service.TranslateContentAsync(Content(2), CancellationToken.None);
 +        await flip;
 +
-+        // Assert: fresh lines delivered; the failed attempt is preserved as history.
 +        Assert.Equal(2, results.Length);
 +        Assert.Equal("φρέσκο", results[0].Line);
 +        Assert.Equal(2, await harness.DbContext.TranslationRequests.CountAsync());
@@ -804,8 +949,11 @@ index 0000000..b0d3bdd
 +        Assert.Equal(TranslationStatus.InProgress, stillRunning.Status);
 +    }
 +
-+    [Fact]
-+    public async Task TranslateContentAsync_FailedPriorAttempt_CarriesOverMatchingLinesAndTranslatesOnlyTheRest()
++    [Theory]
++    [InlineData(TranslationStatus.Failed)]
++    [InlineData(TranslationStatus.Interrupted)]
++    [InlineData(TranslationStatus.Cancelled)]
++    public async Task TranslateContentAsync_FailedPriorAttempt_CarriesOverMatchingLinesAndTranslatesOnlyTheRest(TranslationStatus status)
 +    {
 +        var sent = new List<int>();
 +        var harness = CreateHarness(items =>
@@ -813,7 +961,7 @@ index 0000000..b0d3bdd
 +            sent.AddRange(items.Select(i => i.Position));
 +            return items.ToDictionary(i => i.Position, i => $"νέο {i.Position}");
 +        });
-+        harness.DbContext.TranslationRequests.Add(StoredRequest(1, TranslationStatus.Failed));
++        harness.DbContext.TranslationRequests.Add(StoredRequest(1, status));
 +        harness.DbContext.TranslationRequestLines.AddRange(
 +            new TranslationRequestLine { TranslationRequestId = 1, Position = 1, Source = "line 1", Target = "παλιό 1" },
 +            new TranslationRequestLine { TranslationRequestId = 1, Position = 2, Source = "changed 2", Target = "παλιό 2" },
@@ -862,6 +1010,49 @@ index 0000000..b0d3bdd
 +        return await other.TranslationRequests.SingleAsync(r => r.Id == id);
 +    }
 +}
+diff --git a/Lingarr.Server/Controllers/TranslateController.cs b/Lingarr.Server/Controllers/TranslateController.cs
+index e448a72..712d370 100644
+--- a/Lingarr.Server/Controllers/TranslateController.cs
++++ b/Lingarr.Server/Controllers/TranslateController.cs
+@@ -103,18 +103,15 @@ public class TranslateController : ControllerBase
+     /// Translates subtitle content, supporting both single line and batch translation.
+     /// </summary>
+     /// <param name="translateAbleSubtitleContent">The translation request containing one or more subtitle items</param>
+-    /// <returns>Translated subtitle content, or 409 for an active duplicate.</returns>
++    /// <returns>Translated subtitle content</returns>
+     [HttpPost("content")]
+     public async Task<ActionResult<BatchTranslatedLine[]>> TranslateContent(
+         [FromBody] TranslateAbleSubtitleContent translateAbleSubtitleContent)
+     {
+         try
+         {
+-            var results = await _translationRequestService.TranslateContentAsync(translateAbleSubtitleContent);
+-            if (results == null)
+-            {
+-                return Conflict(new { message = "A translation request for this content is already active" });
+-            }
++            var results = await _translationRequestService.TranslateContentAsync(
++                translateAbleSubtitleContent, HttpContext.RequestAborted);
+             return Ok(results);
+         }
+         catch (Exception ex)
+diff --git a/Lingarr.Server/Interfaces/Services/ITranslationRequestService.cs b/Lingarr.Server/Interfaces/Services/ITranslationRequestService.cs
+index 4b6f7db..4e99280 100644
+--- a/Lingarr.Server/Interfaces/Services/ITranslationRequestService.cs
++++ b/Lingarr.Server/Interfaces/Services/ITranslationRequestService.cs
+@@ -183,7 +183,8 @@ public interface ITranslationRequestService
+     /// Translate subtitle content without using jobs, Used for other Apps API Intergration (ex. Bazarr).
+     /// </summary>
+     /// <param name="translateAbleContent">The translation to translate</param>
+-    /// <returns>The translated lines, or null for an active duplicate.</returns>
+-    Task<BatchTranslatedLine[]?> TranslateContentAsync(
+-        TranslateAbleSubtitleContent translateAbleContent);
++    /// <returns>The translated lines</returns>
++    Task<BatchTranslatedLine[]> TranslateContentAsync(
++        TranslateAbleSubtitleContent translateAbleContent,
++        CancellationToken pollCancellationToken = default);
+ }
+\ No newline at end of file
 diff --git a/Lingarr.Server/Lingarr.Server.csproj b/Lingarr.Server/Lingarr.Server.csproj
 index 37060e2..732c4b7 100644
 --- a/Lingarr.Server/Lingarr.Server.csproj
@@ -899,11 +1090,11 @@ index fd5a36a..606785b 100644
  
              if (stripSubtitleFormatting)
 diff --git a/Lingarr.Server/Services/Translation/LocalAiService.cs b/Lingarr.Server/Services/Translation/LocalAiService.cs
-index a474c20..c533755 100644
+index 8a09288..e542a96 100644
 --- a/Lingarr.Server/Services/Translation/LocalAiService.cs
 +++ b/Lingarr.Server/Services/Translation/LocalAiService.cs
-@@ -323,16 +323,12 @@ public class LocalAiService : BaseLanguageService, ITranslationService, IBatchTr
-             return await TranslateBatchWithGenerateApi(subtitleBatch, cancellationToken);
+@@ -331,16 +331,7 @@ public class LocalAiService : BaseLanguageService, ITranslationService, IBatchTr
+             return await TranslateBatchWithJsonParsing(subtitleBatch, cancellationToken);
          }
  
 -        // Try structured output first (OpenAI-compatible format)
@@ -916,16 +1107,11 @@ index a474c20..c533755 100644
 -            _logger.LogWarning(ex, "Structured output failed, falling back to JSON parsing");
 -            return await TranslateBatchWithJsonParsing(subtitleBatch, cancellationToken);
 -        }
-+        // Structured output only. The previous schema-less fallback
-+        // (TranslateBatchWithJsonParsing) sent the batch with no response_format
-+        // and no JSON instruction, so models answered with prose and the whole
-+        // batch was lost; a parse failure here is retried by TranslateBatchAsync
-+        // with the same structured request instead.
 +        return await TranslateBatchWithStructuredOutput(subtitleBatch, cancellationToken);
      }
  
      private async Task<Dictionary<int, string>> TranslateBatchWithStructuredOutput(
-@@ -401,106 +397,106 @@ public class LocalAiService : BaseLanguageService, ITranslationService, IBatchTr
+@@ -409,45 +400,108 @@ public class LocalAiService : BaseLanguageService, ITranslationService, IBatchTr
                  "LocalAI structured output batch request failed with status {StatusCode}: {ResponseContent}",
                  response.StatusCode, 
                  responseContent);
@@ -1007,7 +1193,6 @@ index a474c20..c533755 100644
          }
      }
  
--    private async Task<Dictionary<int, string>> TranslateBatchWithJsonParsing(
 +    /// <summary>
 +    /// A structured batch response is only accepted when it covers exactly the requested
 +    /// positions: nothing missing, nothing extra, no duplicates, and no empty line where the
@@ -1015,20 +1200,9 @@ index a474c20..c533755 100644
 +    /// retries the same structured request instead of silently keeping original lines.
 +    /// </summary>
 +    private static void ValidateBatchCoverage(
-         List<BatchSubtitleItem> subtitleBatch,
--        CancellationToken cancellationToken)
++        List<BatchSubtitleItem> subtitleBatch,
 +        List<StructuredBatchResponse> translatedItems)
-     {
--        var replacements = GetBatchReplacements(_model!, JsonSerializer.Serialize(subtitleBatch));
--        var bodyJson = _requestTemplateService.BuildRequestBody(_chatRequestTemplate!, replacements);
--
--        var requestContent = new StringContent(
--            bodyJson,
--            Encoding.UTF8,
--            "application/json");
--
--        var response = await _httpClient.PostAsync(_endpoint, requestContent, cancellationToken);
--        if (!response.IsSuccessStatusCode)
++    {
 +        var requested = subtitleBatch.Select(item => item.Position).ToHashSet();
 +        var returned = translatedItems.Select(item => item.Position).ToList();
 +        var returnedSet = returned.ToHashSet();
@@ -1050,122 +1224,59 @@ index a474c20..c533755 100644
 +            .ToList();
 +
 +        if (missing.Count == 0 && extra.Count == 0 && duplicates.Count == 0 && empty.Count == 0)
-         {
--            var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
--            _logger.LogError(
--                "LocalAI JSON parsing batch request failed with status {StatusCode}: {ResponseContent}",
--                response.StatusCode, 
--                responseContent);
--            throw new TranslationException(
--                $"LocalAI JSON parsing batch request failed with status {response.StatusCode}: {responseContent}");
--        }
--
--        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
--        var chatResponse = JsonSerializer.Deserialize<ChatResponse>(responseBody);
--
--        if (chatResponse?.Choices == null || chatResponse.Choices.Count == 0)
--        {
--            throw new TranslationException("No completion choices returned from LocalAI");
--        }
--
--        // Try to extract JSON
--        var translatedJson = chatResponse.Choices[0].Message.Content;
--        var jsonStart = translatedJson.IndexOf('[');
--        var jsonEnd = translatedJson.LastIndexOf(']');
--        if (jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart)
--        {
--            translatedJson = translatedJson.Substring(jsonStart, jsonEnd - jsonStart + 1);
++        {
 +            return;
-         }
- 
--        try
--        {
--            var translatedItems = JsonSerializer.Deserialize<List<StructuredBatchResponse>>(translatedJson,
--                new JsonSerializerOptions
--                {
--                    PropertyNameCaseInsensitive = true
--                });
--
--            if (translatedItems == null)
--            {
--                throw new TranslationParseException("Failed to deserialize translated subtitles from JSON parsing");
--            }
--
--            return MergeByPosition(translatedItems);
--        }
--        catch (JsonException ex)
--        {
--            _logger.LogError(ex, "Failed to parse JSON response: {Json}", translatedJson);
--            throw new TranslationParseException("Failed to parse JSON translated subtitles", ex);
--        }
++        }
++
 +        throw new TranslationParseException(
 +            $"Structured batch response did not cover the requested positions " +
 +            $"(missing: [{string.Join(",", missing)}], extra: [{string.Join(",", extra)}], " +
 +            $"duplicate: [{string.Join(",", duplicates)}], empty: [{string.Join(",", empty)}])");
-     }
- 
-     private async Task<Dictionary<int, string>> TranslateBatchWithGenerateApi(
++    }
++
+     private async Task<Dictionary<int, string>> TranslateBatchWithJsonParsing(
+         List<BatchSubtitleItem> subtitleBatch,
+         CancellationToken cancellationToken)
 diff --git a/Lingarr.Server/Services/TranslationRequestService.cs b/Lingarr.Server/Services/TranslationRequestService.cs
-index 264d1b6..f69a692 100644
+index 092bdc4..e1229ee 100644
 --- a/Lingarr.Server/Services/TranslationRequestService.cs
 +++ b/Lingarr.Server/Services/TranslationRequestService.cs
-@@ -761,9 +761,14 @@ public class TranslationRequestService : ITranslationRequestService
-             JobType = TranslationJobType.Translation
-         };
+@@ -741,8 +741,9 @@ public class TranslationRequestService : ITranslationRequestService
+     }
  
--        // Link cancel token with new source to be able to cancel the async translation
--        var asyncTranslationCancellationTokenSource = new CancellationTokenSource();
--        var cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(parentCancellationToken, asyncTranslationCancellationTokenSource.Token);
-+        // A disconnecting client is not a cancel (upstream #542, option 3): the
-+        // request-aborted token must not reach the translation work, so a
-+        // caller with an HTTP timeout shorter than the translation leaves the
-+        // request InProgress instead of Cancelled. Only the UI/API cancel
-+        // source can stop it; the next POST for the same content then awaits
-+        // this request in ReuseOrAwaitExistingAsync and delivers its stored
-+        // lines.
-+        var cancellationTokenSource = new CancellationTokenSource();
-         var cancellationToken = cancellationTokenSource.Token;
- 
-         try
-@@ -792,25 +797,19 @@ public class TranslationRequestService : ITranslationRequestService
-             }
-             var translationService = services[0].Service;
+     /// <inheritdoc />
+-    public async Task<BatchTranslatedLine[]?> TranslateContentAsync(
+-        TranslateAbleSubtitleContent translateAbleContent)
++    public async Task<BatchTranslatedLine[]> TranslateContentAsync(
++        TranslateAbleSubtitleContent translateAbleContent,
++        CancellationToken pollCancellationToken = default)
+     {
+         // Resolve internal media id from the client's ArrMediaId
+         var mediaId = await GetMediaId(translateAbleContent.ArrMediaId, translateAbleContent.MediaType);
+@@ -803,21 +804,7 @@ public class TranslationRequestService : ITranslationRequestService
+                          && r.SourceLanguage == translationRequest.SourceLanguage
+                          && r.TargetLanguage == translationRequest.TargetLanguage);
  
 -            // Skip if an active content-translation row for this media+target already exists.
--            var existingId = await _dbContext.TranslationRequests
--                .Where(r => r.MediaId == translationRequest.MediaId
--                         && r.MediaType == translationRequest.MediaType
--                         && r.Title == translationRequest.Title
--                         && r.SourceLanguage == translationRequest.SourceLanguage
--                         && r.TargetLanguage == translationRequest.TargetLanguage
--                         && (r.Status == TranslationStatus.Pending || r.Status == TranslationStatus.InProgress))
+-            var existingId = await matchingRequests
+-                .Where(r => r.Status == TranslationStatus.Pending || r.Status == TranslationStatus.InProgress)
 -                .Select(r => (int?)r.Id)
 -                .FirstOrDefaultAsync(cancellationToken);
 -
 -            if (existingId != null)
-+            // Reuse an existing translation for this content when one is
-+            // alive (wait for it) or already finished (deliver its stored
-+            // lines). A client disconnect is not a cancel - see the detached
-+            // token above - so the caller's retry after its own HTTP timeout
-+            // must converge here instead of starting a second translation
-+            // (upstream #542, option 3). null means nothing reusable: fall
-+            // through and translate fresh.
-+            var reuse = await ReuseOrAwaitExistingAsync(
-+                translationRequest, translateAbleContent.Lines.Count,
-+                cancellationToken, parentCancellationToken);
-+            if (reuse != null)
-             {
+-            {
 -                _logger.LogInformation(
 -                    "Duplicate content-translation request skipped for mediaId {MediaId} ({MediaType}) '{Title}' {Src}->{Tgt} (existing id {Id}).",
 -                    translationRequest.MediaId, translationRequest.MediaType,
 -                    translationRequest.Title,
 -                    translationRequest.SourceLanguage, translationRequest.TargetLanguage, existingId.Value);
--                return Array.Empty<BatchTranslatedLine>();
-+                return reuse;
-             }
+-                return null;
+-            }
++            await AwaitDuplicateRequestAsync(matchingRequests, cancellationToken, pollCancellationToken);
  
-             // Add TranslationRequest
-@@ -847,6 +846,8 @@ public class TranslationRequestService : ITranslationRequestService
+             var latestRequest = await matchingRequests
+                 .OrderByDescending(r => r.CreatedAt)
+@@ -888,6 +875,8 @@ public class TranslationRequestService : ITranslationRequestService
                  _logger.LogDebug("Batch translation configuration: maxSize={maxSize}, stripFormatting={stripFormatting}, totalLines={totalLines}",
                      maxSize, stripSubtitleFormatting, totalSize);
  
@@ -1174,14 +1285,10 @@ index 264d1b6..f69a692 100644
                  await subtitleTranslator.TranslateSubtitlesBatch(
                      subtitleItems,
                      translationRequest,
-@@ -923,6 +924,14 @@ public class TranslationRequestService : ITranslationRequestService
+@@ -964,6 +953,10 @@ public class TranslationRequestService : ITranslationRequestService
          }
          catch (OperationCanceledException ex)
          {
-+            // Nothing was persisted yet (the caller disconnected while the
-+            // reuse-wait was polling): there is no row to cancel, and logging
-+            // against id 0 would write junk. The detached work, if any, is
-+            // untouched.
 +            if (translationRequest.Id == 0)
 +            {
 +                throw;
@@ -1189,119 +1296,54 @@ index 264d1b6..f69a692 100644
              // ExecuteUpdateAsync bypasses change-tracking so a concurrent write cannot abort this save.
              var now = DateTimeOffset.UtcNow;
              await _dbContext.TranslationRequests
-@@ -968,6 +977,191 @@ public class TranslationRequestService : ITranslationRequestService
+@@ -1009,6 +1002,126 @@ public class TranslationRequestService : ITranslationRequestService
          }
      }
  
-+    /// <summary>
-+    /// Finds a reusable translation for the incoming content and either
-+    /// delivers its stored lines or waits for the running request to finish:
-+    /// a client disconnect is not a cancel (the translation runs detached
-+    /// from the request-aborted token), so the caller's retry after its own
-+    /// HTTP timeout must converge on the running request instead of starting
-+    /// a second one. A completed request is reused by delivering its stored
-+    /// lines; a line count mismatch (the source file changed between
-+    /// attempts) falls through to a fresh translation.
-+    /// A Pending/InProgress request with no line activity for
-+    /// <see cref="StaleRequestAfter"/> is a zombie left behind by a restart
-+    /// or a crashed run: it is reaped as Interrupted so the next POST starts
-+    /// fresh. The threshold must sit above the longest normal silent stretch
-+    /// of one batch, not above the whole translation.
-+    /// Returns null when nothing is reusable (translate fresh). A client
-+    /// disconnect while waiting rethrows: falling through would start a
-+    /// second translation of content that is already running.
-+    /// </summary>
 +    private static readonly TimeSpan StaleRequestAfter = TimeSpan.FromMinutes(60);
 +    internal static TimeSpan DuplicatePollInterval = TimeSpan.FromSeconds(15);
 +
-+    private async Task<BatchTranslatedLine[]?> ReuseOrAwaitExistingAsync(
-+        TranslationRequest translationRequest,
-+        int expectedLineCount,
++    private async Task AwaitDuplicateRequestAsync(
++        IQueryable<TranslationRequest> matchingRequests,
 +        CancellationToken dbCancellationToken,
 +        CancellationToken pollCancellationToken)
 +    {
-+        var existing = await _dbContext.TranslationRequests
-+            .Where(r => r.MediaId == translationRequest.MediaId
-+                     && r.MediaType == translationRequest.MediaType
-+                     && r.Title == translationRequest.Title
-+                     && r.SourceLanguage == translationRequest.SourceLanguage
-+                     && r.TargetLanguage == translationRequest.TargetLanguage
-+                     && (r.Status == TranslationStatus.Pending
-+                         || r.Status == TranslationStatus.InProgress
-+                         || r.Status == TranslationStatus.Completed))
-+            .OrderByDescending(r => r.Id)
-+            .Select(r => new { r.Id, r.Status, r.CreatedAt })
-+            .FirstOrDefaultAsync(dbCancellationToken);
-+        if (existing == null)
++        while (true)
 +        {
-+            return null;
-+        }
-+
-+        _logger.LogInformation(
-+            "Content-translation request for mediaId {MediaId} ({MediaType}) '{Title}' {Src}->{Tgt} reuses request {Id} in status {Status}.",
-+            translationRequest.MediaId, translationRequest.MediaType, translationRequest.Title,
-+            translationRequest.SourceLanguage, translationRequest.TargetLanguage, existing.Id, existing.Status);
-+
-+        try
-+        {
-+            var status = existing.Status;
-+            while (status is TranslationStatus.Pending or TranslationStatus.InProgress)
++            var existing = await matchingRequests
++                .Where(r => r.Status == TranslationStatus.Pending || r.Status == TranslationStatus.InProgress)
++                .OrderByDescending(r => r.CreatedAt)
++                .ThenByDescending(r => r.Id)
++                .Select(r => new { r.Id, r.Status, r.CreatedAt })
++                .FirstOrDefaultAsync(dbCancellationToken);
++            if (existing == null)
 +            {
-+                var lastActivity = await _dbContext.TranslationRequestLines
-+                    .Where(l => l.TranslationRequestId == existing.Id)
-+                    .OrderByDescending(l => l.CreatedAt)
-+                    .Select(l => (DateTimeOffset?)l.CreatedAt)
-+                    .FirstOrDefaultAsync(dbCancellationToken);
-+                if ((lastActivity ?? existing.CreatedAt) < DateTimeOffset.UtcNow - StaleRequestAfter)
-+                {
-+                    _logger.LogWarning(
-+                        "Content-translation request {Id} is {Status} but shows no line activity for {Hours:0}h - marking it Interrupted so the next request starts fresh.",
-+                        existing.Id, status, StaleRequestAfter.TotalHours);
-+                    var now = DateTimeOffset.UtcNow;
-+                    // CancellationToken.None: the reap must finish even if the
-+                    // waiting client hangs up mid-call.
-+                    await _dbContext.TranslationRequests
-+                        .Where(r => r.Id == existing.Id)
-+                        .ExecuteUpdateAsync(s => s
-+                            .SetProperty(r => r.Status, TranslationStatus.Interrupted)
-+                            .SetProperty(r => r.ErrorMessage, $"stale: no line activity for {StaleRequestAfter.TotalHours:0}h")
-+                            .SetProperty(r => r.CompletedAt, now)
-+                            .SetProperty(r => r.UpdatedAt, now), CancellationToken.None);
-+                    await _eventService.LogEvent(existing.Id, TranslationStatus.Interrupted, "stale: no line activity");
-+                    await UpdateActiveCount();
-+                    return null;
-+                }
-+                await Task.Delay(DuplicatePollInterval, pollCancellationToken);
-+                var row = await _dbContext.TranslationRequests
-+                    .Where(r => r.Id == existing.Id)
-+                    .Select(r => (TranslationStatus?)r.Status)
-+                    .FirstOrDefaultAsync(dbCancellationToken);
-+                if (row == null)
-+                {
-+                    // Row vanished between polls; nothing to reuse.
-+                    return null;
-+                }
-+                status = row.Value;
++                return;
 +            }
-+            if (status != TranslationStatus.Completed)
-+            {
-+                return null;
-+            }
-+            var stored = await _dbContext.TranslationRequestLines
++
++            var lastActivity = await _dbContext.TranslationRequestLines
 +                .Where(l => l.TranslationRequestId == existing.Id)
-+                .OrderBy(l => l.Position)
-+                .Select(l => new BatchTranslatedLine { Position = l.Position, Line = l.Target })
-+                .ToListAsync(dbCancellationToken);
-+            return stored.Count == expectedLineCount ? stored.ToArray() : null;
-+        }
-+        catch (OperationCanceledException)
-+        {
-+            // The waiting client went away. The running translation is
-+            // detached from this token and keeps going; the caller's next
-+            // attempt will find it terminal and reuse or fall through.
-+            // Rethrow instead of returning null: falling through would start
-+            // a second translation of content that is already running.
-+            throw;
++                .OrderByDescending(l => l.CreatedAt)
++                .Select(l => (DateTimeOffset?)l.CreatedAt)
++                .FirstOrDefaultAsync(dbCancellationToken);
++            if ((lastActivity ?? existing.CreatedAt) < DateTimeOffset.UtcNow - StaleRequestAfter)
++            {
++                _logger.LogWarning(
++                    "Content-translation request {Id} is {Status} but shows no line activity for {Hours:0}h - marking it Interrupted so the next request starts fresh.",
++                    existing.Id, existing.Status, StaleRequestAfter.TotalHours);
++                var now = DateTimeOffset.UtcNow;
++                await _dbContext.TranslationRequests
++                    .Where(r => r.Id == existing.Id)
++                    .ExecuteUpdateAsync(s => s
++                        .SetProperty(r => r.Status, TranslationStatus.Interrupted)
++                        .SetProperty(r => r.ErrorMessage, $"stale: no line activity for {StaleRequestAfter.TotalHours:0}h")
++                        .SetProperty(r => r.CompletedAt, now)
++                        .SetProperty(r => r.UpdatedAt, now), CancellationToken.None);
++                await _eventService.LogEvent(existing.Id, TranslationStatus.Interrupted, "stale: no line activity");
++                await UpdateActiveCount();
++                continue;
++            }
++            await Task.Delay(DuplicatePollInterval, pollCancellationToken);
 +        }
 +    }
 +
