@@ -93,9 +93,8 @@ images:
   - name: lscr.io/linuxserver/bazarr
     newTag: 1.6.2@sha256:946dc8c5bb5331418eac60050cf40a63cb8f66ac039841dda493870e3559799c
   # TEMP OVERRIDE (batch-contract, see images/lingarr/README.md): overlay source is upstream
-  # release 1.4.1 (f31ddbb) + images/lingarr/batch-contract.patch; the image pin follows
-  # in a separate PR after publishing. Upstream's chat batch path published untranslated
-  # subtitles as translated (522 positions kept in English in 3h,
+  # release 1.4.1 (f31ddbb) + images/lingarr/batch-contract.patch. Upstream's chat batch path
+  # published untranslated subtitles as translated (522 positions kept in English in 3h,
   # 2026-09-13), and its schema-less fallback crashed with NullReferenceException on null
   # model content (98 "All configured batch translation services failed." deaths 09-12..09-15). The
   # content-translation API returns 409 for an active duplicate, which Bazarr treats as
@@ -109,12 +108,13 @@ images:
   # falls back to a schema-less request, validates returned positions against the batch,
   # RunBatch throws instead of filling original lines, /api/translate/content waits for
   # an active duplicate instead of returning 409 and reaps a request with no line activity
-  # for 60 minutes, and 429/503 on the structured batch request is retried
+  # for 60 minutes, 429/503 on the structured batch request is retried, and matching
+  # translated lines carry over from a failed, interrupted or cancelled attempt
   # (watched by upstream-release-watch).
   # Renovate must not track this image (disabled in .github/renovate.json).
   - name: ghcr.io/lingarr-translate/lingarr
     newName: ghcr.io/spyrospsarras/lingarr
-    digest: sha256:1188eef4d72878e607cecd21942540ee8a1cd72f8c6920211132afa182dcc29e
+    digest: sha256:49a3049e604408838999e37e72ab39fcd2409524cf406537e1fb8716a1bbb98e
   - name: iampuid0/neutarr
     newTag: 1.11.1@sha256:c3df05a854c93aac640708e002e8fe85193f73da8406c8a230a5484a342a1107
   - name: qbittorrentofficial/qbittorrent-nox
