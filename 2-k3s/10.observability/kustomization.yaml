@@ -18,6 +18,16 @@ resources:
 generators:
   - secrets/ksops-generator.yaml
 
+patches:
+  - target:
+      group: apiextensions.k8s.io
+      kind: CustomResourceDefinition
+      name: .*\.monitoring\.coreos\.com
+    patch: |-
+      - op: add
+        path: /metadata/annotations/argocd.argoproj.io~1sync-options
+        value: Prune=false,Delete=false,ServerSideApply=true
+
 helmCharts:
   - name: prometheus-blackbox-exporter
     repo: oci://ghcr.io/prometheus-community/charts
@@ -32,7 +42,7 @@ helmCharts:
     releaseName: kube-prometheus-stack
     namespace: observability
     valuesFile: prometheus-values.yaml
-    includeCRDs: false
+    includeCRDs: true
   - name: loki
     repo: oci://ghcr.io/grafana/helm-charts
     version: "7.5.0"
