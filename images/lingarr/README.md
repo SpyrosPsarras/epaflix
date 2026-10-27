@@ -1,9 +1,9 @@
 # Lingarr batch-contract build
 
-Upstream `ghcr.io/lingarr-translate/lingarr:1.4.0` at commit `9fba9f7` with one
+Upstream `ghcr.io/lingarr-translate/lingarr:1.4.1` at commit `f31ddbb` with one
 patch, `batch-contract.patch`, republished as `ghcr.io/spyrospsarras/lingarr`.
-Release 1.4.0 fixes the anonymous onboarding/signup auth bypass
-GHSA-256g-xxrf-xfpf but ships none of the six behaviours below.
+Release 1.4.1 ships part of behaviour 4 via lingarr-translate/lingarr#556.
+Behaviours 1, 2, 3, 5 and 6 still need the overlay.
 
 ## What the patch changes
 
@@ -25,16 +25,18 @@ made big files untranslatable through Bazarr:
    did not return with the English source and logged a warning. It now throws,
    which fails the job (both callers already set `Failed` before writing
    anything: `TranslationJob` and `TranslateContentAsync`).
-4. `TranslateContentAsync` tied the translation to `HttpContext.RequestAborted`:
-   a caller whose HTTP timeout is shorter than the translation (Bazarr blocks
-   1920s) disconnected, the request got cancelled, and the file never
-   translated - an infinite retry loop on big files. The translation now runs
-   detached from the request token (only the UI/API cancel can stop it), and a
-   re-POST for content that is still translating waits for the running request
-   and delivers its stored lines (`AwaitDuplicateRequestAsync`). A running
-   request with no line activity for 60 minutes is a restart zombie: it is
-   reaped as Interrupted so the next POST starts fresh. Endorsed upstream
-   (lingarr-translate/lingarr#542, maintainer option 3).
+4. Upstream 1.4.1 lingarr-translate/lingarr#556 detaches `TranslateContentAsync`
+   from the request token and reuses completed requests only when every
+   position and source line matches. The overlay keeps both. Upstream returns
+   409 for an active duplicate, which Bazarr treats as failure after its
+   1920s HTTP timeout.
+   The overlay instead waits for the running request
+   (`AwaitDuplicateRequestAsync`), then uses upstream's completed-request
+   check or starts fresh. A disconnecting waiter stops polling without
+   cancelling the running translation. A Pending/InProgress request with no
+   line activity for 60 minutes is reaped as Interrupted so the next POST
+   starts fresh. This completes the retry convergence endorsed in
+   lingarr-translate/lingarr#542, maintainer option 3.
 5. `TranslateBatchWithStructuredOutput` wrapped every non-200 as
    `TranslationException`, which `TranslateBatchAsync`'s retry catch filters
    out (it matches on `HttpRequestException.StatusCode`) - so a provider 429
@@ -55,9 +57,13 @@ made big files untranslatable through Bazarr:
 Generate-API (non-chat) batches and per-line translation internals are unchanged
 by the overlay. Upstream's individual-line content path and translated context
 remain intact. The upstream test asserting behaviour 3 is deleted; the controller
-tests for active duplicates and cancellation are adapted to behaviour 4.
-The patched suite passes all 302 tests, including TranslationRequestServiceTests
+tests for active duplicates are adapted to behaviour 4; upstream disconnect
+and API cancellation tests remain.
+The patched suite passes all 335 tests, including TranslationRequestServiceTests
 for behaviours 4 and 6 and the rate-limit retry tests for behaviour 5.
+
+M0022 seeds `local_ai_structured_output=true`; the init container resets existing
+rows to true so lingarr-translate/lingarr#574 cannot bypass the batch contract.
 
 ## Measured need
 
@@ -72,12 +78,11 @@ Pin the printed digest in `2-k3s/08.servarr/kustomization.yaml`.
 
 ## Retire when
 
-Upstream `Lingarr.Server/Services/Translation/LocalAiService.cs` no longer
-falls back from `TranslateBatchWithStructuredOutput` to a schema-less request,
-validates returned positions against the batch, and
-`SubtitleTranslationService.RunBatch` throws instead of using original lines
-(or an equivalent). Then drop this directory, the workflow, and the image pin,
-and go back to `ghcr.io/lingarr-translate/lingarr:main`. Tracked in
+Retire only when upstream ships all six behaviours above. Behaviour 4 requires
+both waiting for an active duplicate instead of returning 409 and reaping a
+request with no line activity for 60 minutes. Then drop this directory, the
+workflow, and the overlay image pin, and pin `ghcr.io/lingarr-translate/lingarr`
+to the new release tag with its GHCR digest. Tracked in
 `.github/workflows/upstream-release-watch.yml`.
 
 Moving `UPSTREAM_COMMIT` means re-checking `git apply --check` and picking the

@@ -11,16 +11,16 @@
 # UPSTREAM_COMMIT and the base digest must describe the same source: the base
 # image's org.opencontainers.image.revision must equal UPSTREAM_COMMIT, and the
 # base carries the wwwroot build for that same commit. UPSTREAM_COMMIT is
-# release 1.4.0 (9fba9f7), which keeps the upstream #432 Npgsql UTC fix and
-# fixes GHSA-256g-xxrf-xfpf; its matching base digest is the ghcr :1.4.0
+# release 1.4.1 (f31ddbb), which keeps the upstream #432 Npgsql UTC fix and
+# fixes GHSA-256g-xxrf-xfpf; its matching base digest is the ghcr :1.4.1
 # build of that commit. Renovate no longer tracks this FROM line: :main has
 # been re-pushed backwards twice (PR #1368, then re-raised as #1434 on
 # 2026-09-17), and a digest bump without moving UPSTREAM_COMMIT first is always
 # wrong. Base digest moves go through upstream-release-watch row #270: move
 # UPSTREAM_COMMIT, pick the digest whose org.opencontainers.image.revision
 # label equals it, and build-lingarr.yml fails the build when the two disagree.
-ARG UPSTREAM_COMMIT=9fba9f7cc862e1d4af83794c39c8511058f722ae
-ARG BASE_IMAGE=ghcr.io/lingarr-translate/lingarr@sha256:8f392cf1efe718e0fcbc735d6d82df0b0bf86594bf64998aad85e8f306263774
+ARG UPSTREAM_COMMIT=f31ddbbfeb5972d5678f2f69af1c93b6f8d0876c
+ARG BASE_IMAGE=ghcr.io/lingarr-translate/lingarr@sha256:38592c3f6156d519a131aeeda3245f0a7765e7c541b801a7b527b7d731efdfce
 
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG UPSTREAM_COMMIT

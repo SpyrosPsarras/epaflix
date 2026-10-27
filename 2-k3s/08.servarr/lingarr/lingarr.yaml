@@ -56,6 +56,8 @@ spec:
                        AND (value ~ '^[0-9]+\$' AND value::int > 60);
                     INSERT INTO settings (key, value) VALUES ('use_batch_translation', 'true')
                     ON CONFLICT (key) DO UPDATE SET value = 'true';
+                    -- M0022 seeds this row; keep structured output enabled (lingarr-translate/lingarr#574).
+                    UPDATE settings SET value = 'true' WHERE key = 'local_ai_structured_output';
                     INSERT INTO settings (key, value) VALUES ('max_batch_size', '25')
                     ON CONFLICT (key) DO UPDATE SET value = '25'
                      WHERE settings.value ~ '^[0-9]+\$' AND settings.value::int < 25;
