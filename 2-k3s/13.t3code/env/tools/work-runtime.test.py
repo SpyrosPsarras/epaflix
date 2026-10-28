@@ -156,8 +156,8 @@ class WorkRuntimeTests(unittest.TestCase):
         self.assertFalse(settings['providerInstances']['codex']['enabled'])
         self.assertEqual(subprocess.check_output(['bash', '-c', 'command -v installed-tool'], text=True).strip(), str(tool))
         self.assertEqual(subprocess.run(['installed-tool']).returncode, 0)
-        self.assertEqual(subprocess.check_output(['bash', '-c', 'command -v python3'], text=True).strip(), '/usr/bin/python3')
-        self.assertEqual(subprocess.check_output(['python3', '-c', 'import sys; print(sys.executable)'], text=True).strip(), '/usr/bin/python3')
+        self.assertEqual(Path(subprocess.check_output(['bash', '-c', 'command -v python3'], text=True).strip()).resolve(), Path('/usr/bin/python3').resolve())
+        self.assertEqual(Path(subprocess.check_output(['python3', '-c', 'import sys; print(sys.executable)'], text=True).strip()).resolve(), Path('/usr/bin/python3').resolve())
         self.assertEqual((state / 'history-fixture').read_text(), 'work-only')
         self.assertEqual((cache / 'session-fixture').read_text(), 'synthetic-work-session')
         for name in ('.pi/agent/mcp.json', '.claude.json', '.claude/.claude.json'):

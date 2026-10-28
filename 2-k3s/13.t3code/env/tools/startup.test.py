@@ -60,8 +60,8 @@ class StartupTest(unittest.TestCase):
                 pre_agent = path_exports[0] + '\n'
                 safe_path = subprocess.check_output(['bash', '-c', pre_agent + 'printf %s "$PATH"'], env=env, text=True)
                 self.assertNotIn(str(binary.parent), safe_path.split(':'))
-                self.assertEqual(subprocess.check_output(['bash', '-c', pre_agent + 'python3 -c "import sys; print(sys.executable)"'],
-                                                        env=env, text=True).strip(), '/usr/bin/python3')
+                self.assertEqual(Path(subprocess.check_output(['bash', '-c', pre_agent + 'python3 -c "import sys; print(sys.executable)"'],
+                                                             env=env, text=True).strip()).resolve(), Path('/usr/bin/python3').resolve())
                 ssh_config = config['data']['sshd.sh'].split('<<EOF\n', 1)[1].split('\nEOF', 1)[0]
                 rendered = subprocess.check_output(['bash', '-c', 'cat <<EOF\n' + ssh_config + '\nEOF'], env=env, text=True)
                 ssh_path = next(line.split(' PATH=', 1)[1] for line in rendered.splitlines() if line.startswith('SetEnv '))
@@ -76,8 +76,8 @@ class StartupTest(unittest.TestCase):
                                                            env={**env, 'PATH': path}, text=True).split(':')
                         self.assertEqual(resolved[0], '/tools/node_modules/.bin')
                         self.assertEqual(resolved[-2:], ['/bin', str(binary.parent)])
-                        self.assertEqual(subprocess.check_output(['bash', '-c', 'command -v python3'],
-                                                                env={**env, 'PATH': ':'.join(resolved)}, text=True).strip(), '/usr/bin/python3')
+                        self.assertEqual(Path(subprocess.check_output(['bash', '-c', 'command -v python3'],
+                                                                     env={**env, 'PATH': ':'.join(resolved)}, text=True).strip()).resolve(), Path('/usr/bin/python3').resolve())
 
     def test_rendered_pi_settings_enable_direct_tools_without_duplicate_restart_args(self):
         for variant in ('homelab', 'work'):

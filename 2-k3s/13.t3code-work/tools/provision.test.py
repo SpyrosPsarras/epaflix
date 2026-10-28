@@ -22,7 +22,7 @@ class ProvisionTests(unittest.TestCase):
         self.enterContext(patch.object(provision.sys.stdout, 'isatty', return_value=True))
 
     def test_proxy_reload_gets_a_bounded_discovery_retry(self):
-        delayed = provision.urllib.error.HTTPError(provision.MODEL_URL + '/v1/models', 401, 'reload', {}, None)
+        delayed = self.enterContext(provision.urllib.error.HTTPError(provision.MODEL_URL + '/v1/models', 401, 'reload', {}, None))
         with patch.object(provision, 'read_secret', return_value={'management-password': b'fixture'}), \
                 patch.object(provision, 'request', side_effect=[{'api-keys': []}, {}, delayed, {'data': []}]) as request, \
                 patch.object(provision.time, 'sleep') as sleep:
@@ -182,8 +182,8 @@ class ProvisionTests(unittest.TestCase):
     def test_github_http_failures_show_status_without_response_details(self):
         for code in (401, 403, 429):
             with self.subTest(code=code):
-                failure = provision.urllib.error.HTTPError('https://api.github.com/private-org-name', code,
-                    'private-repository-name', {}, None)
+                failure = self.enterContext(provision.urllib.error.HTTPError('https://api.github.com/private-org-name', code,
+                    'private-repository-name', {}, None))
                 self.assertEqual(self.enroll(responses=[failure]),
                                  (1, f'GitHub rejected the token (HTTP {code})'))
                 self.assertEqual(self.cluster.call_count, 2)
@@ -212,7 +212,7 @@ class ProvisionTests(unittest.TestCase):
 
     def test_real_response_shape_allows_public_personal_repos_and_separate_private_org_listing(self):
         user, orgs, visible, private = self.github_fixture()
-        unavailable = provision.urllib.error.HTTPError('https://api.github.com/user/orgs', 403, 'fixture', {}, None)
+        unavailable = self.enterContext(provision.urllib.error.HTTPError('https://api.github.com/user/orgs', 403, 'fixture', {}, None))
         self.assertEqual(self.enroll(responses=[user, unavailable, visible, private, []]), (0, ''))
         self.assertIn('affiliation=owner,collaborator,organization_member', self.api.call_args_list[2].args[0])
         self.assertIn('/orgs/private-org-name/repos?type=private', self.api.call_args_list[3].args[0])
@@ -223,8 +223,8 @@ class ProvisionTests(unittest.TestCase):
         user, orgs, visible, private = self.github_fixture()
         for code in (403, 404, 422):
             with self.subTest(code=code):
-                unavailable = provision.urllib.error.HTTPError('https://api.github.com/private-org-name', code,
-                    'private-repository-name', {}, None)
+                unavailable = self.enterContext(provision.urllib.error.HTTPError('https://api.github.com/private-org-name', code,
+                    'private-repository-name', {}, None))
                 self.assertEqual(self.enroll(responses=[user, orgs, private, unavailable]), (0, ''))
                 self.assertIn("Private personal repository check unavailable: not verified. Check the token's resource owner on the PAT page.", self.output)
 
@@ -236,9 +236,9 @@ class ProvisionTests(unittest.TestCase):
         self.assertEqual(self.cluster.call_count, 2)
         self.assertEqual(self.enroll(responses=[user, orgs, private, visible * 4 + visible[:4], personal]), (1, message))
         self.assertTrue(self.api.call_args_list[-1].args[0].endswith('page=2'))
-        unavailable = provision.urllib.error.HTTPError('https://api.github.com/user/orgs', 403, 'fixture', {}, None)
+        unavailable = self.enterContext(provision.urllib.error.HTTPError('https://api.github.com/user/orgs', 403, 'fixture', {}, None))
         self.assertEqual(self.enroll(responses=[user, unavailable, personal]), (1, message))
-        unavailable = provision.urllib.error.HTTPError('https://api.github.com/user/repos', 403, 'fixture', {}, None)
+        unavailable = self.enterContext(provision.urllib.error.HTTPError('https://api.github.com/user/repos', 403, 'fixture', {}, None))
         self.assertEqual(self.enroll(responses=[user, orgs, private, personal * 100, unavailable]), (1, message))
 
     def test_empty_readable_membership_list_does_not_fall_back_to_visible_repos(self):
@@ -254,8 +254,8 @@ class ProvisionTests(unittest.TestCase):
         self.assertEqual(self.enroll(responses=[user, memberships, [], private, []]), (0, ''))
         for code in (403, 404, 422):
             with self.subTest(code=code):
-                unavailable = provision.urllib.error.HTTPError('https://api.github.com/private-org-name', code,
-                                                              'private-repository-name', {}, None)
+                unavailable = self.enterContext(provision.urllib.error.HTTPError('https://api.github.com/private-org-name', code,
+                                                              'private-repository-name', {}, None))
                 self.assertEqual(self.enroll(responses=[user, memberships, unavailable, private, []]), (0, ''))
         self.assertEqual(self.enroll(responses=[user, orgs * 100, memberships[:1], [], private, []]), (0, ''))
         self.assertIn('user/orgs?per_page=100&page=2', self.api.call_args_list[2].args[0])
@@ -273,13 +273,13 @@ class ProvisionTests(unittest.TestCase):
 
     def test_failed_membership_lookup_uses_visible_orgs_and_checks_private_access(self):
         user, orgs, visible, private = self.github_fixture()
-        unavailable = provision.urllib.error.HTTPError('https://api.github.com/user/orgs', 403, 'fixture', {}, None)
+        unavailable = self.enterContext(provision.urllib.error.HTTPError('https://api.github.com/user/orgs', 403, 'fixture', {}, None))
         other_visible = {**visible[-1], 'owner': {'type': 'Organization', 'login': 'another-org'}}
         self.assertEqual(self.enroll(responses=[user, unavailable, [*visible, other_visible], [], private, []]), (0, ''))
 
     def test_org_lookup_empty_and_malformed_responses(self):
         user, orgs, visible, private = self.github_fixture()
-        unavailable = provision.urllib.error.HTTPError('https://api.github.com/user/orgs', 403, 'fixture', {}, None)
+        unavailable = self.enterContext(provision.urllib.error.HTTPError('https://api.github.com/user/orgs', 403, 'fixture', {}, None))
         cases = [([user, unavailable, []], 'Token organization could not be determined: check organization access and token approval'),
                  ([user, [{}]], 'GitHub returned incomplete organization details: retry later'),
                  ([user, [{'login': 'invalid/org'}]], 'GitHub returned incomplete organization details: retry later'),
@@ -301,11 +301,11 @@ class ProvisionTests(unittest.TestCase):
         for repos in ([], [visible[-1]]):
             with self.subTest(repos=repos):
                 self.assertEqual(self.enroll(responses=[user, orgs, repos]), (1, message))
-        failure = provision.urllib.error.HTTPError('https://api.github.com/private-org-name', 403,
-                                                  'private-repository-name', {}, None)
+        failure = self.enterContext(provision.urllib.error.HTTPError('https://api.github.com/private-org-name', 403,
+                                                  'private-repository-name', {}, None))
         self.assertEqual(self.enroll(responses=[user, orgs, failure]),
                          (1, 'GitHub rejected the private organization repository check (HTTP 403)'))
-        failure = provision.urllib.error.HTTPError('https://api.github.com/user/repos', 429, 'fixture', {}, None)
+        failure = self.enterContext(provision.urllib.error.HTTPError('https://api.github.com/user/repos', 429, 'fixture', {}, None))
         self.assertEqual(self.enroll(responses=[user, orgs, private, failure]),
                          (1, 'GitHub rejected the private personal repository check (HTTP 429)'))
 
