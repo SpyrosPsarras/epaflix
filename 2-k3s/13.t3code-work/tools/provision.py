@@ -265,9 +265,8 @@ def inputs(directory):
         raise ValueError('Supply only the seven reviewed work input files')
     data = {name: (directory / name).read_bytes() for name in names}
     config = json.loads(data['runtime.json'])
-    auth = json.loads(data['work-auth.json'])
-    if config['modelUrl'] != MODEL_URL or config['gitAuth'] != 'github-token' or len(auth['contexts']) != 1:
-        raise ValueError('Work requires the shared proxy, work GitHub grant and one reviewed AKS dev context')
+    if config['modelUrl'] != MODEL_URL or config['gitAuth'] != 'github-token':
+        raise ValueError('Work requires the shared proxy, work GitHub grant and reviewed AKS contexts')
     if json.loads(data['services.json']) != SERVICES:
         raise ValueError('Initial work service inventory must contain searxng only')
     runtime_grants = read_secret(*RUNTIME_GRANTS)

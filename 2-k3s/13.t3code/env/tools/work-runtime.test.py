@@ -45,6 +45,13 @@ def fixture(directory):
             obj['grantSha256']['hub-token'] = hashlib.sha256(('work.' + 'h' * 43).encode()).hexdigest()
             obj['grantSha256']['model-token'] = hashlib.sha256(b'tok-fixture-model').hexdigest()
         path.write_text(json.dumps(obj))
+    bundle_path = directory / 'bundle.json'
+    bundle = json.loads(bundle_path.read_text())
+    instructions = bundle['files']['instructions.md']
+    text = base64.b64decode(instructions['data']).decode()
+    text += '\nEnvironment: this is the work backend. Kubernetes access is the AKS dev cluster only. Never request or use a production context.\n'
+    instructions['data'] = base64.b64encode(text.encode()).decode()
+    bundle_path.write_text(json.dumps(bundle))
     kube = {'apiVersion': 'v1', 'kind': 'Config', 'current-context': 'work-first',
             'clusters': [], 'users': [], 'contexts': []}
     pins = []
@@ -64,6 +71,24 @@ def fixture(directory):
         'subscriptionId': '33333333-3333-3333-3333-333333333333',
         'account': {'name': 'fixture@work.example.test', 'type': 'user'}, 'contexts': pins}))
     refresh(directory)
+
+
+def multitenant(directory):
+    path = directory / 'work-auth.json'
+    reviewed = json.loads(path.read_text())
+    scope = {key: copy.deepcopy(reviewed[key]) for key in auth.SCOPE_FIELDS}
+    scope.update(tenantId='44444444-4444-4444-4444-444444444444',
+                 audience='77777777-7777-7777-7777-777777777777',
+                 subscriptionId='55555555-5555-5555-5555-555555555555',
+                 account={'name': 'sales@work.example.test', 'type': 'user'})
+    reviewed['contexts'][1]['authentication'] = scope
+    path.write_text(json.dumps(reviewed))
+    path = directory / 'kubeconfig'
+    kube = json.loads(path.read_text())
+    kube['users'][1]['user']['exec']['args'] = ['token', 'work-second']
+    path.write_text(json.dumps(kube))
+    refresh(directory)
+    return scope
 
 
 class WorkRuntimeTests(unittest.TestCase):
@@ -127,6 +152,50 @@ class WorkRuntimeTests(unittest.TestCase):
                            env={**os.environ, 'HOME': str(self.home), 'ssh_instructions': str(ssh)})
             self.assertIn(ssh.read_text(), (self.home / '.codex/AGENTS.override.md').read_text())
             self.assertEqual((self.inputs / 'bundle.json').read_bytes(), payload)
+
+    def test_private_separate_kubeconfigs_pin_their_context_without_changing_defaults(self):
+        multitenant(self.inputs)
+        original = (self.inputs / 'kubeconfig').read_bytes()
+        (self.home / '.kube').mkdir(mode=0o755)
+        self.prepare()
+        self.assertEqual((self.home / '.kube').stat().st_mode & 0o777, 0o755)
+        directory = self.home / '.kube/work'
+        self.assertEqual(directory.stat().st_mode & 0o777, 0o700)
+        for name in ('work-first', 'work-second'):
+            path = directory / (name + '.json')
+            kube = json.loads(path.read_bytes())
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(kube['current-context'], name)
+            self.assertEqual([entry['name'] for entry in kube['contexts']], [name])
+            self.assertEqual(kube['users'][0]['user']['exec']['args'], ['token', name])
+            result = subprocess.run(['kubectl', '--kubeconfig', str(path), 'config', 'current-context'], capture_output=True, check=True)
+            self.assertEqual(result.stdout.decode().strip(), name)
+        self.assertFalse((self.home / '.kube/config').exists())
+        self.assertEqual((self.inputs / 'kubeconfig').read_bytes(), original)
+        for name in ('removed.json', '.isolated-policy-interrupted'):
+            (directory / name).write_text('{}')
+            (directory / name).chmod(0o600)
+        runtime.apply(self.inputs, self.home, 'work')
+        self.assertEqual({path.name for path in directory.iterdir()}, {'work-first.json', 'work-second.json'})
+        self.assertEqual((self.inputs / 'kubeconfig').read_bytes(), original)
+
+    def test_private_kubeconfig_symlinks_and_nonprivate_directories_are_refused(self):
+        self.prepare()
+        directory = self.home / '.kube/work'
+        path = directory / 'work-first.json'
+        path.unlink()
+        path.symlink_to(self.inputs / 'kubeconfig')
+        with self.assertRaisesRegex(runtime.InputError, 'owned and private'):
+            runtime.install_work_kubeconfigs(self.inputs, self.home)
+        path.unlink()
+        temporary = directory / '.isolated-policy-interrupted'
+        temporary.symlink_to(self.inputs / 'kubeconfig')
+        with self.assertRaisesRegex(runtime.InputError, 'owned and private'):
+            runtime.install_work_kubeconfigs(self.inputs, self.home)
+        temporary.unlink()
+        directory.chmod(0o755)
+        with self.assertRaisesRegex(runtime.InputError, 'owned and private'):
+            runtime.install_work_kubeconfigs(self.inputs, self.home)
 
     def test_work_only_hub_policies_settings_history_and_azure_persist(self):
         os.environ['T3_VAULT_CLIENT'] = '1'

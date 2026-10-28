@@ -2,6 +2,7 @@
 """Offline Azure CLI fixtures. The production binary is never invoked."""
 from concurrent.futures import ThreadPoolExecutor
 import fcntl
+import hashlib
 import importlib.util
 import json
 import os
@@ -17,9 +18,11 @@ spec.loader.exec_module(fixture)
 auth = fixture.auth
 
 FAKE_AZ = '''#!/usr/bin/python3
-import json, os, pathlib, sys, time
+import hashlib, json, os, pathlib, sys, time
 home = pathlib.Path(os.environ['HOME'])
-assert os.environ['AZURE_CONFIG_DIR'] == str(home / '.azure')
+cache = pathlib.Path(os.environ['AZURE_CONFIG_DIR'])
+identity_hash = hashlib.sha256(b'sales@work.example.test').hexdigest()
+assert cache == home / '.azure' or cache in {home / '.azure/tenants' / tenant / identity_hash for tenant in ('11111111-1111-1111-1111-111111111111', '44444444-4444-4444-4444-444444444444')}
 assert not any(name in os.environ for name in ('MCP_HUB_TOKEN', 'ANTHROPIC_AUTH_TOKEN', 'SSH_AUTH_SOCK', 'AZURE_CLIENT_SECRET'))
 assert not any(name.startswith(('BW_', 'BITWARDENCLI_', 'VAULT_')) for name in os.environ)
 args = sys.argv[1:]
@@ -28,7 +31,18 @@ with (home / 'calls').open('a') as stream:
 if '--tenant' in args and '--subscription' in args:
     sys.stderr.write('Please specify only one of subscription and tenant, not both')
     sys.exit(1)
-busy = home / '.azure/busy'
+other_account = cache != home / '.azure'
+tenant = cache.parent.name if other_account else '11111111-1111-1111-1111-111111111111'
+sales = tenant == '44444444-4444-4444-4444-444444444444'
+subscription = '55555555-5555-5555-5555-555555555555' if sales else '33333333-3333-3333-3333-333333333333'
+identity = 'sales@work.example.test' if other_account else 'fixture@work.example.test'
+if '--subscription' in args:
+    assert args[args.index('--subscription') + 1] == subscription
+if '--tenant' in args:
+    assert args[args.index('--tenant') + 1] == tenant
+if '--resource' in args:
+    assert args[args.index('--resource') + 1] == ('77777777-7777-7777-7777-777777777777' if sales else '22222222-2222-2222-2222-222222222222')
+busy = cache / 'busy'
 try:
     busy.mkdir()
 except FileExistsError:
@@ -49,19 +63,18 @@ try:
         sys.stderr.write('private device-code fixture')
         sys.exit(1 if mode == 'login-denied' else 0)
     if args[:2] == ['account', 'show']:
-        result = {'tenantId': '11111111-1111-1111-1111-111111111111',
-            'id': '33333333-3333-3333-3333-333333333333',
-            'user': {'name': 'fixture@work.example.test', 'type': 'user'}}
+        result = {'tenantId': tenant, 'id': subscription, 'user': {'name': identity, 'type': 'user'}}
+        if mode == 'foreign-tenant':
+            result['tenantId'] = '99999999-9999-9999-9999-999999999999'
         if mode == 'foreign-account':
             result['user']['name'] = 'foreign@example.test'
     else:
-        result = {'tenant': '11111111-1111-1111-1111-111111111111',
-            'subscription': '33333333-3333-3333-3333-333333333333',
+        result = {'tenant': tenant, 'subscription': subscription,
             'accessToken': 'synthetic-work-access-token', 'expires_on': int(time.time()) + 600}
         if mode == 'expired':
             result['expires_on'] = 1
         if mode == 'foreign-token':
-            result['tenant'] = '44444444-4444-4444-4444-444444444444'
+            result['tenant'] = '99999999-9999-9999-9999-999999999999'
     print(json.dumps(result))
 finally:
     busy.rmdir()
@@ -139,6 +152,102 @@ class WorkAuthTests(unittest.TestCase):
             self.mode(mode)
             with self.assertRaises(auth.AuthError): self.run_token()
         self.assertTrue(all(args[0] != 'login' for args in self.calls()))
+
+    def test_context_scopes_and_different_tenant_refreshes_are_isolated_concurrently(self):
+        fixture.multitenant(self.inputs)
+        (self.home / 'delay').write_text('0.05')
+        default = self.home / '.azure'
+        default.mkdir(mode=0o700)
+        (default / 'preserved-session').write_text('synthetic-dev-session')
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            credentials = list(pool.map(lambda name: auth.run('token', self.inputs, self.home, name),
+                                        ['work-first', 'work-second'] * 2))
+        self.assertEqual(len(credentials), 4)
+        self.assertEqual(len(self.calls()), 8)
+        self.assertEqual((default / 'preserved-session').read_text(), 'synthetic-dev-session')
+        sales = default / 'tenants/44444444-4444-4444-4444-444444444444' / hashlib.sha256(b'sales@work.example.test').hexdigest()
+        self.assertEqual(sales.stat().st_mode & 0o777, 0o700)
+        self.assertEqual((sales / 't3-work-auth.lock').stat().st_mode & 0o777, 0o600)
+        self.assertFalse(list(default.rglob('busy')))
+        self.assertFalse(any(args[:2] == ['account', 'set'] or args[0] == 'login' for args in self.calls()))
+
+    def test_same_tenant_different_account_login_does_not_share_the_dev_cache(self):
+        fixture.multitenant(self.inputs)
+        path = self.inputs / 'work-auth.json'
+        reviewed = json.loads(path.read_text())
+        for key in ('tenantId', 'subscriptionId', 'audience'):
+            reviewed['contexts'][1]['authentication'][key] = reviewed[key]
+        path.write_text(json.dumps(reviewed))
+        fixture.refresh(self.inputs)
+        default = self.home / '.azure'
+        default.mkdir(mode=0o700)
+        (default / 'preserved-session').write_text('synthetic-dev-session')
+        with tempfile.TemporaryFile() as terminal, patch.object(auth, 'open', return_value=terminal, create=True):
+            self.assertIsNone(auth.run('login', self.inputs, self.home, 'work-second'))
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            credentials = list(pool.map(lambda name: auth.run('token', self.inputs, self.home, name),
+                                        ['work-first', 'work-second']))
+        self.assertEqual(len(credentials), 2)
+        self.assertEqual((default / 'preserved-session').read_text(), 'synthetic-dev-session')
+        other = default / 'tenants' / reviewed['tenantId'] / hashlib.sha256(b'sales@work.example.test').hexdigest()
+        self.assertTrue((other / 't3-work-auth.lock').is_file())
+        self.assertTrue((default / 't3-work-auth.lock').is_file())
+
+    def test_selected_scope_refuses_wrong_account_session_tenant_and_token_tenant(self):
+        fixture.multitenant(self.inputs)
+        for mode in ('foreign-account', 'foreign-tenant', 'foreign-token'):
+            self.mode(mode)
+            with self.assertRaises(auth.AuthError):
+                auth.run('token', self.inputs, self.home, 'work-second')
+        self.assertTrue(all(args[0] != 'login' for args in self.calls()))
+
+    def test_unknown_context_and_ambiguous_or_unscoped_exec_refuse_before_azure(self):
+        fixture.multitenant(self.inputs)
+        with self.assertRaisesRegex(auth.AuthError, 'exactly one approved'):
+            auth.run('token', self.inputs, self.home, 'unknown')
+        path = self.inputs / 'kubeconfig'
+        kube = json.loads(path.read_text())
+        kube['users'][1]['user']['exec']['args'] = ['token']
+        path.write_text(json.dumps(kube))
+        fixture.refresh(self.inputs)
+        with self.assertRaises(auth.AuthError):
+            auth.run('token', self.inputs, self.home, 'work-second')
+        fixture.fixture(self.inputs)
+        path = self.inputs / 'work-auth.json'
+        reviewed = json.loads(path.read_text())
+        reviewed['contexts'].append(reviewed['contexts'][0])
+        path.write_text(json.dumps(reviewed))
+        fixture.refresh(self.inputs)
+        with self.assertRaises(auth.AuthError):
+            auth.run('token', self.inputs, self.home, 'work-first')
+        self.assertEqual(self.calls(), [])
+
+    def test_incomplete_context_authentication_and_foreign_selector_are_refused(self):
+        fixture.multitenant(self.inputs)
+        path = self.inputs / 'work-auth.json'
+        reviewed = json.loads(path.read_text())
+        reviewed['contexts'][1]['authentication'].pop('account')
+        path.write_text(json.dumps(reviewed))
+        fixture.refresh(self.inputs)
+        with self.assertRaises(auth.AuthError):
+            self.run_token()
+        fixture.fixture(self.inputs)
+        path = self.inputs / 'kubeconfig'
+        kube = json.loads(path.read_text())
+        kube['users'][0]['user']['exec']['args'] = ['token', 'work-second']
+        path.write_text(json.dumps(kube))
+        fixture.refresh(self.inputs)
+        with self.assertRaises(auth.AuthError):
+            self.run_token()
+        self.assertEqual(self.calls(), [])
+
+    def test_explicit_context_login_uses_its_tenant_and_private_cache(self):
+        fixture.multitenant(self.inputs)
+        with tempfile.TemporaryFile() as terminal, patch.object(auth, 'open', return_value=terminal, create=True):
+            self.assertIsNone(auth.run('login', self.inputs, self.home, 'work-second'))
+        self.assertEqual(self.calls()[0][self.calls()[0].index('--tenant') + 1],
+                         '44444444-4444-4444-4444-444444444444')
+        self.assertEqual(len(self.calls()), 2)
 
     def test_parallel_refreshes_are_serialized(self):
         (self.home / 'delay').write_text('0.08')
