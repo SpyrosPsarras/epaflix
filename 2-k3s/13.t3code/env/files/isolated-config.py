@@ -13,7 +13,7 @@ import sys
 import tempfile
 import tomllib
 
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 import hub_clients
 import hub_services
@@ -179,6 +179,41 @@ def prepare(inputs, home, environment):
     private_config.install((inputs / 'bundle.json').read_bytes(), home, GUIDANCE.read_bytes())
     if environment == 'homelab':
         write_private(marker.parent / 'services.json', json.dumps(services).encode())
+    else:
+        install_work_kubeconfigs(inputs, home)
+
+
+def install_work_kubeconfigs(inputs, home):
+    auth = importlib.import_module('work-aks-auth')
+    kube = auth.load_kube(inputs / 'kubeconfig')
+    reviewed = auth.validate(inputs, kube)
+    directory = home / '.kube/work'
+    for path in (home / '.kube', directory):
+        if path.is_symlink() or any(parent.is_symlink() for parent in path.parents):
+            raise InputError('Managed work kubeconfig directory must not be a symlink')
+        path.mkdir(mode=0o700, exist_ok=True)
+        info = path.stat()
+        forbidden = 0o077 if path == directory else 0o022
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & forbidden:
+            raise InputError('Managed work kubeconfig directory must be owned and private')
+    for path in directory.iterdir():
+        info = path.lstat()
+        managed = path.name.endswith('.json') or path.name.startswith('.isolated-policy-')
+        if not managed or not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+            raise InputError('Managed work kubeconfig files must be owned and private')
+    names = set()
+    for pin in reviewed['contexts']:
+        name = quote(pin['name'], safe='') + '.json'
+        names.add(name)
+        config = {'apiVersion': 'v1', 'kind': 'Config', 'current-context': pin['name']}
+        for group, key in (('clusters', 'cluster'), ('users', 'user'), ('contexts', 'name')):
+            config[group] = [entry for entry in kube[group] if entry['name'] == pin[key]]
+        config['users'] = [{'name': pin['user'], 'user': {'exec': {
+            **auth.EXEC, 'args': ['token', pin['name']]}}}]
+        write_private(directory / name, json.dumps(config).encode())
+    for path in directory.iterdir():
+        if path.name not in names:
+            path.unlink()
 
 
 def write_private(path, data, mode=0o600):
@@ -324,6 +359,8 @@ def apply(inputs, home, environment):
     hub_clients.write_json(str(settings_path), settings)
     if environment == 'homelab':
         write_private(home / '.config/t3-runtime/services.json', json.dumps(services).encode())
+    else:
+        install_work_kubeconfigs(inputs, home)
     print('isolated-config: reviewed policies and restricted hub installed')
 
 

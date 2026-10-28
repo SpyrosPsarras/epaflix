@@ -5,7 +5,9 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
+import pty
 import tempfile
 import subprocess
 import unittest
@@ -22,7 +24,7 @@ class ProvisionTests(unittest.TestCase):
         self.enterContext(patch.object(provision.sys.stdout, 'isatty', return_value=True))
 
     def test_proxy_reload_gets_a_bounded_discovery_retry(self):
-        delayed = provision.urllib.error.HTTPError(provision.MODEL_URL + '/v1/models', 401, 'reload', {}, None)
+        delayed = self.enterContext(provision.urllib.error.HTTPError(provision.MODEL_URL + '/v1/models', 401, 'reload', {}, None))
         with patch.object(provision, 'read_secret', return_value={'management-password': b'fixture'}), \
                 patch.object(provision, 'request', side_effect=[{'api-keys': []}, {}, delayed, {'data': []}]) as request, \
                 patch.object(provision.time, 'sleep') as sleep:
@@ -182,8 +184,8 @@ class ProvisionTests(unittest.TestCase):
     def test_github_http_failures_show_status_without_response_details(self):
         for code in (401, 403, 429):
             with self.subTest(code=code):
-                failure = provision.urllib.error.HTTPError('https://api.github.com/private-org-name', code,
-                    'private-repository-name', {}, None)
+                failure = self.enterContext(provision.urllib.error.HTTPError('https://api.github.com/private-org-name', code,
+                    'private-repository-name', {}, None))
                 self.assertEqual(self.enroll(responses=[failure]),
                                  (1, f'GitHub rejected the token (HTTP {code})'))
                 self.assertEqual(self.cluster.call_count, 2)
@@ -212,7 +214,7 @@ class ProvisionTests(unittest.TestCase):
 
     def test_real_response_shape_allows_public_personal_repos_and_separate_private_org_listing(self):
         user, orgs, visible, private = self.github_fixture()
-        unavailable = provision.urllib.error.HTTPError('https://api.github.com/user/orgs', 403, 'fixture', {}, None)
+        unavailable = self.enterContext(provision.urllib.error.HTTPError('https://api.github.com/user/orgs', 403, 'fixture', {}, None))
         self.assertEqual(self.enroll(responses=[user, unavailable, visible, private, []]), (0, ''))
         self.assertIn('affiliation=owner,collaborator,organization_member', self.api.call_args_list[2].args[0])
         self.assertIn('/orgs/private-org-name/repos?type=private', self.api.call_args_list[3].args[0])
@@ -223,8 +225,8 @@ class ProvisionTests(unittest.TestCase):
         user, orgs, visible, private = self.github_fixture()
         for code in (403, 404, 422):
             with self.subTest(code=code):
-                unavailable = provision.urllib.error.HTTPError('https://api.github.com/private-org-name', code,
-                    'private-repository-name', {}, None)
+                unavailable = self.enterContext(provision.urllib.error.HTTPError('https://api.github.com/private-org-name', code,
+                    'private-repository-name', {}, None))
                 self.assertEqual(self.enroll(responses=[user, orgs, private, unavailable]), (0, ''))
                 self.assertIn("Private personal repository check unavailable: not verified. Check the token's resource owner on the PAT page.", self.output)
 
@@ -236,9 +238,9 @@ class ProvisionTests(unittest.TestCase):
         self.assertEqual(self.cluster.call_count, 2)
         self.assertEqual(self.enroll(responses=[user, orgs, private, visible * 4 + visible[:4], personal]), (1, message))
         self.assertTrue(self.api.call_args_list[-1].args[0].endswith('page=2'))
-        unavailable = provision.urllib.error.HTTPError('https://api.github.com/user/orgs', 403, 'fixture', {}, None)
+        unavailable = self.enterContext(provision.urllib.error.HTTPError('https://api.github.com/user/orgs', 403, 'fixture', {}, None))
         self.assertEqual(self.enroll(responses=[user, unavailable, personal]), (1, message))
-        unavailable = provision.urllib.error.HTTPError('https://api.github.com/user/repos', 403, 'fixture', {}, None)
+        unavailable = self.enterContext(provision.urllib.error.HTTPError('https://api.github.com/user/repos', 403, 'fixture', {}, None))
         self.assertEqual(self.enroll(responses=[user, orgs, private, personal * 100, unavailable]), (1, message))
 
     def test_empty_readable_membership_list_does_not_fall_back_to_visible_repos(self):
@@ -254,8 +256,8 @@ class ProvisionTests(unittest.TestCase):
         self.assertEqual(self.enroll(responses=[user, memberships, [], private, []]), (0, ''))
         for code in (403, 404, 422):
             with self.subTest(code=code):
-                unavailable = provision.urllib.error.HTTPError('https://api.github.com/private-org-name', code,
-                                                              'private-repository-name', {}, None)
+                unavailable = self.enterContext(provision.urllib.error.HTTPError('https://api.github.com/private-org-name', code,
+                                                              'private-repository-name', {}, None))
                 self.assertEqual(self.enroll(responses=[user, memberships, unavailable, private, []]), (0, ''))
         self.assertEqual(self.enroll(responses=[user, orgs * 100, memberships[:1], [], private, []]), (0, ''))
         self.assertIn('user/orgs?per_page=100&page=2', self.api.call_args_list[2].args[0])
@@ -273,13 +275,13 @@ class ProvisionTests(unittest.TestCase):
 
     def test_failed_membership_lookup_uses_visible_orgs_and_checks_private_access(self):
         user, orgs, visible, private = self.github_fixture()
-        unavailable = provision.urllib.error.HTTPError('https://api.github.com/user/orgs', 403, 'fixture', {}, None)
+        unavailable = self.enterContext(provision.urllib.error.HTTPError('https://api.github.com/user/orgs', 403, 'fixture', {}, None))
         other_visible = {**visible[-1], 'owner': {'type': 'Organization', 'login': 'another-org'}}
         self.assertEqual(self.enroll(responses=[user, unavailable, [*visible, other_visible], [], private, []]), (0, ''))
 
     def test_org_lookup_empty_and_malformed_responses(self):
         user, orgs, visible, private = self.github_fixture()
-        unavailable = provision.urllib.error.HTTPError('https://api.github.com/user/orgs', 403, 'fixture', {}, None)
+        unavailable = self.enterContext(provision.urllib.error.HTTPError('https://api.github.com/user/orgs', 403, 'fixture', {}, None))
         cases = [([user, unavailable, []], 'Token organization could not be determined: check organization access and token approval'),
                  ([user, [{}]], 'GitHub returned incomplete organization details: retry later'),
                  ([user, [{'login': 'invalid/org'}]], 'GitHub returned incomplete organization details: retry later'),
@@ -301,11 +303,11 @@ class ProvisionTests(unittest.TestCase):
         for repos in ([], [visible[-1]]):
             with self.subTest(repos=repos):
                 self.assertEqual(self.enroll(responses=[user, orgs, repos]), (1, message))
-        failure = provision.urllib.error.HTTPError('https://api.github.com/private-org-name', 403,
-                                                  'private-repository-name', {}, None)
+        failure = self.enterContext(provision.urllib.error.HTTPError('https://api.github.com/private-org-name', 403,
+                                                  'private-repository-name', {}, None))
         self.assertEqual(self.enroll(responses=[user, orgs, failure]),
                          (1, 'GitHub rejected the private organization repository check (HTTP 403)'))
-        failure = provision.urllib.error.HTTPError('https://api.github.com/user/repos', 429, 'fixture', {}, None)
+        failure = self.enterContext(provision.urllib.error.HTTPError('https://api.github.com/user/repos', 429, 'fixture', {}, None))
         self.assertEqual(self.enroll(responses=[user, orgs, private, failure]),
                          (1, 'GitHub rejected the private personal repository check (HTTP 429)'))
 
@@ -380,13 +382,8 @@ class ProvisionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary) / 'inputs'
             fixture.fixture(directory)
-            kube = json.loads((directory / 'kubeconfig').read_bytes())
-            for group in ('clusters', 'contexts', 'users'):
-                kube[group] = kube[group][:1]
-            (directory / 'kubeconfig').write_text(json.dumps(kube))
+            fixture.multitenant(directory)
             auth = json.loads((directory / 'work-auth.json').read_bytes())
-            auth['contexts'] = auth['contexts'][:1]
-            (directory / 'work-auth.json').write_text(json.dumps(auth))
             config = json.loads((directory / 'runtime.json').read_bytes())
             config.update(modelUrl=provision.MODEL_URL, gitAuth='github-token')
             (directory / 'runtime.json').write_text(json.dumps(config))
@@ -400,6 +397,8 @@ class ProvisionTests(unittest.TestCase):
             stored = create.call_args.args[2]
             self.assertEqual(stored['policies.json'], (directory / 'policies.json').read_bytes())
             self.assertEqual(stored['bundle.json'], (directory / 'bundle.json').read_bytes())
+            self.assertEqual(len(json.loads(stored['work-auth.json'])['contexts']), 2)
+            self.assertEqual(stored['work-auth.json'], (directory / 'work-auth.json').read_bytes())
             self.assertEqual(json.loads(stored['runtime.json'])['grantSha256'],
                              {name: provision.digest(value) for name, value in runtime_grants.items()})
             config = json.loads((directory / 'runtime.json').read_bytes())
@@ -412,9 +411,38 @@ class ProvisionTests(unittest.TestCase):
             (directory / 'runtime.json').write_text(json.dumps(config))
             auth['contexts'].append(auth['contexts'][0])
             (directory / 'work-auth.json').write_text(json.dumps(auth))
-            with patch.object(provision, 'require_stopped'), patch.object(provision, 'create_secret') as create, self.assertRaises(ValueError):
+            with patch.object(provision, 'require_stopped'), patch.object(provision, 'create_secret') as create, \
+                    patch.object(provision, 'read_secret', return_value=runtime_grants), self.assertRaises(ValueError):
                 provision.inputs(directory)
             create.assert_not_called()
+
+    def test_owner_azure_login_passes_only_the_explicit_context_or_legacy_default(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            binary = home / 'kubectl'
+            binary.write_text('#!/usr/bin/python3\nimport json, os, pathlib, sys\n'
+                              'pathlib.Path(os.environ["HOME"], "call").write_text(json.dumps(sys.argv[1:]))\n')
+            binary.chmod(0o700)
+            for selector in ([], ['work-second']):
+                master, slave = pty.openpty()
+                try:
+                    with subprocess.Popen(['bash', str(Path(__file__).with_name('owner-login.sh')), 'azure', *selector],
+                                          stdin=slave, stdout=slave, stderr=slave,
+                                          env={'HOME': str(home), 'PATH': str(home) + ':/usr/bin:/bin'}) as process:
+                        try:
+                            os.write(master, ((selector[0] if selector else 'default') + '\n').encode())
+                            self.assertEqual(process.wait(timeout=5), 0)
+                        finally:
+                            if process.poll() is None:
+                                process.kill()
+                                process.wait()
+                finally:
+                    os.close(master)
+                    os.close(slave)
+                call = json.loads((home / 'call').read_text())
+                self.assertEqual(call, ['--context', 'epaflix', '-n', 't3code-work', 'exec', '-it', 'work-0', '-c', 't3',
+                                       '--', 'env', '-u', 'SSH_AUTH_SOCK', '-u', 'AZURE_CONFIG_DIR',
+                                       '/scripts/work-aks-auth.py', 'login', *selector])
 
     def test_secret_writer_uses_stdin_and_create_not_apply(self):
         with patch.object(provision, 'kubectl', return_value={}) as kubectl:

@@ -179,8 +179,13 @@ provide reviewed private values instead:
 }
 ```
 
-The authentication helper supports multiple reviewed contexts, but this
-backend's first provisioning accepts exactly one AKS dev context. The
+The top-level tenant, audience, subscription and account remain the defaults
+for existing dev inputs. Each context may add an `authentication` object with
+all four fields, using the same validation as the defaults. Partial overrides
+are rejected. This supports clusters in different tenants without migrating
+the existing dev input or its login session.
+
+Provisioning and runtime validation accept multiple reviewed contexts. The
 kubeconfig must contain exactly the reviewed context/cluster/user sets, with
 consistent references and the approved current context. Each API needs the
 exact reviewed HTTPS endpoint and inline CA. Arbitrary exec plugins, plugin
@@ -188,19 +193,23 @@ environment variables, cloud auth-provider entries, static foreign credentials
 and external credential files are rejected.
 Changing a homelab entry's display name does not make it eligible.
 
-Each work user has only this exec configuration:
+New work users have only this exec configuration, with their own context name:
 
 ```json
 {
   "exec": {
     "apiVersion": "client.authentication.k8s.io/v1",
     "command": "/scripts/work-aks-auth.py",
-    "args": ["token"],
+    "args": ["token", "<approved-context>"],
     "interactiveMode": "Never",
     "provideClusterInfo": false
   }
 }
 ```
+
+Legacy `["token"]` arguments remain valid only for users whose context uses
+the top-level default authentication. Missing selectors use those defaults,
+never the first context. Unknown or ambiguous selectors fail closed.
 
 Homelab's one-context, no-exec validation remains unchanged. Work's helper
 rechecks the private authentication and kubeconfig digests before running Azure.
@@ -211,7 +220,8 @@ tenant/subscription/user before requesting a token. Azure CLI rejects combining
 reviewed subscription and verifies the returned token's tenant and
 subscription, then
 converts it into a Kubernetes ExecCredential. Token expiry must be in the
-future. Refresh and explicit enrollment share a lock.
+future. It never changes Azure's default subscription. Refresh and explicit
+enrollment share a lock in each tenant/account's private cache.
 Lock waits and enrollment are limited to 15 minutes; token commands to two
 minutes. Authentication-required and expired sessions return a generic
 refusal. Network and permission failures do not start login.
@@ -221,10 +231,16 @@ refusal. Network and permission failures do not start login.
 Startup never requests a token or starts device-code login. The first boot
 refuses an imported home or even an empty pre-existing Azure cache. After clean
 work enrollment, Azure sessions persist only under this home's `.azure`.
-No personal desktop, mixed or homelab cache is cloned or mounted.
+The default tenant/account keeps the existing `.azure` cache. Other
+tenant/account pairs use `.azure/tenants/<tenant-UUID>/<account-name-SHA256>`,
+each with its own lock. Contexts using the same tenant/account share that
+cache and must pass the exact account check for their selected subscription.
+A login with another account cannot replace the existing dev session.
+A wrong cached account is refused, not replaced by an automatic login. No personal desktop, mixed or homelab cache is cloned
+or mounted.
 
 Only after a separately approved non-production target and account are
-available, an operator may run `/scripts/work-aks-auth.py login` in a private
+available, an operator may run `/scripts/work-aks-auth.py login <approved-context>` in a private
 interactive administrative terminal in the `t3` container, which mounts the
 reviewed inputs. The inbound SSH sidecar deliberately does not mount those
 inputs. Enrollment output goes directly to `/dev/tty`, not process
@@ -261,6 +277,90 @@ rewriting benign checkout config. Config replacements are atomic. The direct
 Codex instance is disabled; use Pi with `cliproxy/<route>/<model>` IDs. See
 [the image-shipped runtime facts](../13.t3code/env/isolated-runtime.md#image-shipped-runtime-facts)
 for the instruction block appended without private-input rotation.
+
+## Add an approved work cluster offline
+
+Keep `dev-aks-ft4-uk-south` approved as before. The first additional approved
+cluster is `k8s-dh-sales-uksouth`, internal sales, non-production, without
+customer data. Approval comes from the owner and exact endpoint/CA/account
+pins, not a name containing `dev` or `sales`. Production remains prohibited.
+
+Give the owner-side importer the kubeconfig file produced by
+`az aks get-credentials --file <private-file>` for the approved cluster. Do
+not run `az aks get-credentials` inside the pod. The importer only calls local
+`kubectl config view`; it never executes source authentication plugins, logs
+in, contacts a cluster or changes Azure/Kubernetes defaults.
+
+From the repository root, in a private administrative terminal:
+
+```sh
+umask 077
+python3 2-k3s/13.t3code-work/tools/add-cluster.py \
+  --directory /private/current-reviewed-work-inputs \
+  --kubeconfig /private/k8s-dh-sales-uksouth.yaml \
+  --name k8s-dh-sales-uksouth \
+  --subscription "$SALES_SUBSCRIPTION_ID" \
+  --account "$SALES_ACCOUNT" \
+  --output /private/work-inputs-with-sales
+```
+
+Use `--source-context <source-name>` when the supplied file's current context
+is not the intended one. Tenant and audience are read from the AKS kubelogin
+arguments or legacy Azure provider metadata. Supply `--tenant <UUID>` and
+`--audience <UUID-or-HTTPS-resource>` if absent. Subscription and exact user
+account normally need the flags above. Conflicting metadata is refused.
+Source static credentials, external CA/key files, TLS overrides, plugin
+environments and unsupported plugins are refused rather than copied.
+
+The output must not exist. It contains the seven input files, with directory
+mode 0700 and files mode 0600. Keep it, the source and any backups outside Git
+and model-visible output. The importer preserves existing entries, grants,
+approvals, policy checks and the complete service inventory, including later
+services such as Notion. It adds namespaced cluster/user/context references
+using `--name`, so source names may overlap between files. Existing target
+names are safely refused, including repeated imports. For the next approved
+cluster, repeat this one command with the last reviewed output as `--directory`
+and another new `--output`; no manual input editing is needed.
+
+Only `work-auth.json`, `kubeconfig`, the exact old dev-only environment
+sentence in `bundle.json`, and their `runtime.json.sha256` values change.
+Every other instruction and skill stays intact. The replacement names the
+reviewed work-cluster inventory and requires per-command selection. A missing
+or repeated expected sentence fails closed. Later imports recognize exactly
+one instance of the replacement sentence and leave it unchanged.
+
+Staging does not require a stopped pod and performs no Secret mutation or
+rollout. Privately review the new pins and run the full isolated-input
+validator with the backend's existing grants before activation. Then follow
+P2 below, including a private Secret backup, resourceVersion-tested input
+replacement, matching digests and a reviewed input-revision merge. Preserve
+all existing grant digests and service inventories. Obtain the owner's
+explicit restart approval before the stop/change/start window. Do not use
+`provision.py inputs` for rotation; it creates first-deployment Secrets only
+and still requires the initial searxng-only inventory.
+
+Startup derives private, single-context kubeconfigs under
+`/home/t3/.kube/work/<context>.json`, with directory mode 0700 and file mode
+0600. Legacy names with special characters are URL-percent-encoded in file
+names. These files are refreshed at prepare/apply and stale managed files are
+removed. Private temporary files left by an interrupted refresh are cleaned
+on the next successful refresh. The combined read-only `KUBECONFIG` keeps its old current context for
+compatibility. Select each cluster explicitly without `config use-context`:
+
+```sh
+kubectl --context dev-aks-ft4-uk-south get namespaces
+kubectl --context k8s-dh-sales-uksouth get namespaces
+kubectl --kubeconfig /home/t3/.kube/work/k8s-dh-sales-uksouth.json get namespaces
+```
+
+Use the existing reviewed dev context name if it differs from the cluster
+name. Both `--context` on the combined config and `--kubeconfig` on a separate
+file select the pinned authentication scope without a global current-context
+race. After approved rollout, enroll only a missing tenant session with
+`bash 2-k3s/13.t3code-work/tools/owner-login.sh azure k8s-dh-sales-uksouth`.
+Verify harmless read-only requests separately for dev and sales, and confirm
+the existing dev session still works. Offline tests do not establish live
+Azure permissions or cluster reachability.
 
 ## GitOps rotation and rollout
 
@@ -341,7 +441,7 @@ tracing or shell recording enabled.
 3. B3: Prepare the seven private files listed in I1 in a dedicated private
    directory. Keep required organizational instructions, skills, hooks and
    actual allow/deny checks. Do not export a mixed home or use test fixtures.
-   Pin the work AKS dev context only, use `gitAuth: github-token`, set
+   Pin only approved non-production work contexts, use `gitAuth: github-token`, set
    `modelUrl` to `http://cliproxy.remote-pi.svc.cluster.local:8317`, and
    include the approved public login keys from both homePC and laptop.
 
@@ -391,12 +491,13 @@ tracing or shell recording enabled.
 5. B5: Only after work startup passes, the owner enrolls Azure in the new home:
 
    ```sh
-   bash 2-k3s/13.t3code-work/tools/owner-login.sh azure
+   bash 2-k3s/13.t3code-work/tools/owner-login.sh azure dev-aks-ft4-uk-south
    ```
 
    The helper's device code appears only in the owner's private terminal.
    Azure session files remain in the work PVC, not a Kubernetes Secret or the
-   mixed home. Do not run `az aks get-credentials` or select another cluster.
+   mixed home. Use the exact reviewed context name. Additional clusters enter
+   through the offline importer and approved input rotation above.
    Connect homePC and laptop through the owner's T3 account as described below.
    Complete one harmless thread on each, verify instructions/hooks, discovery,
    read-only dev access and restart persistence before accepting #1837.
@@ -588,6 +689,7 @@ No real work target or vault key has been exercised by offline tests.
 
 ```sh
 python3 2-k3s/13.t3code-work/tools/provision.test.py -v
+python3 2-k3s/13.t3code-work/tools/add-cluster.test.py -v
 python3 2-k3s/13.t3code/env/tools/work-ssh.test.py -v
 python3 2-k3s/13.t3code/env/tools/vault-client.test.py -v
 python3 2-k3s/13.t3code/env/tools/vault-startup.test.py -v

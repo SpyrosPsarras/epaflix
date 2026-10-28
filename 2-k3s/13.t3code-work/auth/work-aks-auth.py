@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -30,6 +31,52 @@ class AuthError(ValueError):
     pass
 
 
+SCOPE_FIELDS = {'tenantId', 'audience', 'subscriptionId', 'account'}
+PIN_FIELDS = {'name', 'cluster', 'user', 'server', 'certificateAuthoritySha256'}
+
+
+def validate_scope(scope):
+    if not isinstance(scope, dict) or set(scope) != SCOPE_FIELDS:
+        raise AuthError('A complete authentication scope is required')
+    for name in ('tenantId', 'subscriptionId'):
+        if not isinstance(scope[name], str) or not re.fullmatch(r'[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}', scope[name]):
+            raise AuthError('Explicit tenant and subscription are required')
+    audience = scope['audience']
+    if not isinstance(audience, str):
+        raise AuthError('Explicit approved audience is required')
+    parsed = urlsplit(audience)
+    if not re.fullmatch(r'[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}', audience) and not (
+            parsed.scheme == 'https' and parsed.hostname and not parsed.username and not parsed.password
+            and not parsed.query and not parsed.fragment):
+        raise AuthError('Explicit approved audience is required')
+    account = scope['account']
+    if not isinstance(account, dict) or set(account) != {'name', 'type'} or account['type'] != 'user' or not (
+            isinstance(account['name'], str) and account['name'].strip() == account['name'] and account['name']):
+        raise AuthError('An exact reviewed work account is required')
+
+
+def scope_for(auth, context=None):
+    defaults = {name: auth[name] for name in SCOPE_FIELDS}
+    if context is None:
+        return defaults
+    matches = [entry for entry in auth['contexts'] if entry['name'] == context]
+    if len(matches) != 1:
+        raise AuthError('Select exactly one approved work context')
+    return matches[0].get('authentication', defaults)
+
+
+def load_kube(path):
+    binary = shutil.which('kubectl', path='/usr/bin:/bin:/usr/local/bin')
+    if binary is None:
+        raise AuthError('kubectl is required to read work kubeconfigs')
+    result = subprocess.run([binary, '--kubeconfig', str(path),
+                             'config', 'view', '--raw', '-o', 'json'], capture_output=True,
+                            timeout=30, env={'PATH': '/usr/bin:/bin'})
+    if result.returncode:
+        raise AuthError('Invalid work kubeconfig')
+    return json.loads(result.stdout)
+
+
 def validate(inputs, kube=None):
     config = json.loads((inputs / 'runtime.json').read_text())
     if config['environment'] != 'work' or config['hubUrl'] != 'http://mcp-hub.mcp-hub-work.svc.cluster.local:8000':
@@ -43,28 +90,17 @@ def validate(inputs, kube=None):
     auth = json.loads((inputs / 'work-auth.json').read_text())
     if set(auth) != {'environment', 'tenantId', 'audience', 'subscriptionId', 'account', 'contexts'} or auth['environment'] != 'work':
         raise AuthError('Invalid work authentication configuration')
-    for name in ('tenantId', 'subscriptionId'):
-        if not re.fullmatch(r'[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}', auth[name]):
-            raise AuthError('Explicit tenant and subscription are required')
-    audience = auth['audience']
-    parsed = urlsplit(audience)
-    if not re.fullmatch(r'[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}', audience) and not (
-            parsed.scheme == 'https' and parsed.hostname and not parsed.username and not parsed.password
-            and not parsed.query and not parsed.fragment):
-        raise AuthError('Explicit approved audience is required')
-    if set(auth['account']) != {'name', 'type'} or auth['account']['type'] != 'user' or not auth['account']['name']:
-        raise AuthError('An exact reviewed work account is required')
+    validate_scope(scope_for(auth))
     contexts = auth['contexts']
-    if not isinstance(contexts, list) or not contexts or any(set(entry) != {
-            'name', 'cluster', 'user', 'server', 'certificateAuthoritySha256'} for entry in contexts):
+    if not isinstance(contexts, list) or not contexts or any(
+            not isinstance(entry, dict) or set(entry) not in (PIN_FIELDS, PIN_FIELDS | {'authentication'}) or
+            any(not isinstance(entry[key], str) or not entry[key] for key in PIN_FIELDS) for entry in contexts):
         raise AuthError('Exact approved work context pins are required')
+    for entry in contexts:
+        if 'authentication' in entry:
+            validate_scope(entry['authentication'])
     if kube is None:
-        result = subprocess.run(['/usr/bin/kubectl', '--kubeconfig', str(inputs / 'kubeconfig'),
-                                 'config', 'view', '--raw', '-o', 'json'], capture_output=True,
-                                timeout=30, env={'PATH': '/usr/bin:/bin'})
-        if result.returncode:
-            raise AuthError('Invalid work kubeconfig')
-        kube = json.loads(result.stdout)
+        kube = load_kube(inputs / 'kubeconfig')
     maps = {}
     for group in ('clusters', 'users', 'contexts'):
         entries = kube.get(group, [])
@@ -91,13 +127,15 @@ def validate(inputs, kube=None):
         if not ca or hashlib.sha256(ca).hexdigest() != entry['certificateAuthoritySha256']:
             raise AuthError('Work API CA differs from its review')
         user = maps['users'][entry['user']]
-        expected = {'exec': EXEC}
-        if user != expected and user != {'exec': {**EXEC, 'env': None}}:
-            raise AuthError('Only the pinned work authentication helper without exec environment is supported')
+        allowed = [{**EXEC, 'args': ['token', entry['name']]}]
+        if scope_for(auth, entry['name']) == scope_for(auth):
+            allowed.append(EXEC)
+        if not any(user in ({'exec': command}, {'exec': {**command, 'env': None}}) for command in allowed):
+            raise AuthError('Only the context-pinned work authentication helper without exec environment is supported')
     return auth
 
 
-def environment(home):
+def environment(home, scope=None, defaults=None):
     if any(os.environ.get(name) for name in ('AZURE_CONFIG_DIR', 'SSH_AUTH_SOCK')) or any(
             name.startswith(('BW_', 'BITWARDENCLI_')) for name in os.environ):
         raise AuthError('Inherited credential environments are forbidden')
@@ -105,10 +143,15 @@ def environment(home):
     if not marker.is_file() or marker.read_text() != 'work\n':
         raise AuthError('Work authentication requires an enrolled clean work home')
     cache = home / '.azure'
+    if scope is not None and (scope['tenantId'].lower() != defaults['tenantId'].lower() or scope['account'] != defaults['account']):
+        identity = hashlib.sha256(scope['account']['name'].encode()).hexdigest()
+        cache = cache / 'tenants' / scope['tenantId'].lower() / identity
     if cache.is_symlink() or any(parent.is_symlink() for parent in cache.parents):
         raise AuthError('Work Azure session directory must not be a symlink')
-    cache.mkdir(mode=0o700, exist_ok=True)
-    cache.chmod(0o700)
+    for directory in reversed([cache, *cache.parents]):
+        if directory.is_relative_to(home / '.azure'):
+            directory.mkdir(mode=0o700, exist_ok=True)
+            directory.chmod(0o700)
     return {'HOME': str(home), 'PATH': '/usr/bin:/bin', 'AZURE_CONFIG_DIR': str(cache),
             'AZURE_CORE_LOGIN_EXPERIENCE_V2': 'off', 'AZURE_CORE_COLLECT_TELEMETRY': 'no'}
 
@@ -149,11 +192,12 @@ def account(auth, env):
         raise AuthError('Azure session does not match the reviewed work account')
 
 
-def run(action, inputs=INPUTS, home=HOME):
+def run(action, inputs=INPUTS, home=HOME, context=None):
     if action not in {'token', 'login'}:
         raise AuthError('Only token and explicit private login are supported')
-    auth = validate(inputs)
-    env = environment(home)
+    reviewed = validate(inputs)
+    auth = scope_for(reviewed, context)
+    env = environment(home, auth, scope_for(reviewed))
     with locked(env):
         if action == 'login':
             with open('/dev/tty', 'r+b', buffering=0) as terminal:
@@ -181,9 +225,10 @@ def run(action, inputs=INPUTS, home=HOME):
 
 if __name__ == '__main__':
     try:
-        if len(sys.argv) > 2:
-            raise AuthError('Only one authentication action is supported')
-        result = run(sys.argv[1] if len(sys.argv) == 2 else 'token')
+        if len(sys.argv) > 3:
+            raise AuthError('Supply an authentication action and optional approved context name')
+        result = run(sys.argv[1] if len(sys.argv) >= 2 else 'token',
+                     context=sys.argv[2] if len(sys.argv) == 3 else None)
         if result is not None:
             print(json.dumps(result))
     except AuthError as error:

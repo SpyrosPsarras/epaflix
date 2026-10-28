@@ -344,6 +344,7 @@ jobs:
           python3 2-k3s/13.t3code/one/tools/manager-runtime.test.py -v
           python3 2-k3s/13.t3code-homelab/tools/github-scope.test.py -v
           python3 2-k3s/13.t3code-work/tools/provision.test.py -v
+          python3 2-k3s/13.t3code-work/tools/add-cluster.test.py -v
           python3 2-k3s/13.t3code/env/tools/startup.test.py -v
           bash -n 2-k3s/13.t3code-work/tools/owner-login.sh
           python3 2-k3s/17.remote-pi/cliproxy/tools/client-backend.test.py -v
