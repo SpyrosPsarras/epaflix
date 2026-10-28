@@ -32,6 +32,8 @@ ports:
   websecure:
     port: 443
     exposedPort: 443
+    forwardedHeaders:
+      trustedIPs: ["10.42.0.0/16"]
     transport:
       respondingTimeouts:
         readTimeout: 0s
