@@ -144,11 +144,11 @@ spec:
           readinessProbe:
             exec:
               command: [curl, -fsS, -m, "1", "http://127.0.0.1:3773/health"]
-            periodSeconds: 10
+            periodSeconds: 30
           livenessProbe:
             exec:
               command: [curl, -fsS, -m, "1", "http://127.0.0.1:3773/health"]
-            periodSeconds: 30
+            periodSeconds: 60
             failureThreshold: 3
           resources:
             requests:
@@ -196,7 +196,7 @@ spec:
           livenessProbe:
             exec:
               command: [bash, /scripts/sshd.sh, check]
-            periodSeconds: 15
+            periodSeconds: 60
             timeoutSeconds: 10
             failureThreshold: 2
           resources:
@@ -263,7 +263,7 @@ spec:
           readinessProbe:
             exec:
               command: [test, -f, /run/t3-vault/scope.json]
-            periodSeconds: 5
+            periodSeconds: 30
           resources:
             requests:
               cpu: 100m

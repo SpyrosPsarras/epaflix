@@ -120,9 +120,9 @@ worker:
         - ak
         - healthcheck
     initialDelaySeconds: 20
-    periodSeconds: 30
+    periodSeconds: 60
     timeoutSeconds: 10
-    failureThreshold: 5
+    failureThreshold: 3
 
   readinessProbe:
     exec:
