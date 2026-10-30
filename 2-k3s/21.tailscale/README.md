@@ -39,25 +39,13 @@ sudo tailscale set --accept-routes=true --accept-dns=true
 
 On Android, keep JetBird disconnected, install the official Tailscale app, approve VPN access, and enroll under the same account. Enable Tailscale DNS and select no exit node. Enable Android's Always-on VPN for Tailscale and allow it through battery optimization. Leave Android's "Block connections without VPN" off because ordinary internet traffic uses split routing. Disable Android Private DNS and Chrome Secure DNS. Other apps with their own DNS-over-HTTPS settings must also use the system resolver.
 
-For Android 1.102.3, open App split tunneling, open its menu, choose "Switch to including", and leave the selection empty. Despite the "Included apps (0)" label, this version routes every app through the VPN's configured routes and DNS. Android reports the complete primary-user UID range `0-99999`. The default exclusion mode instead bypasses Messages, Android Auto, Google Home, Sonos and Adaptive Connectivity Services on this phone, including their DNS. The empty inclusion behavior follows [the installed version's VPN builder](https://github.com/tailscale/tailscale-android/blob/aea8f60c0/android/src/main/java/com/tailscale/ipn/IPNService.kt#L185). It is version-dependent and contradicts the UI wording, so verify the UID range after upgrades. Selecting even one app changes this to an allowlist and excludes every unselected app. The regression script checks the complete UID range on every probe. The upstream exclusions address app compatibility problems; RCS, casting, Sonos and Android Auto functionality still need normal-use validation.
+For Android 1.102.3, open App split tunneling, open its menu, choose "Switch to including", and leave the selection empty. Despite the "Included apps (0)" label, this version routes every app through the VPN's configured routes and DNS. Android reports the complete primary-user UID range `0-99999`. The default exclusion mode instead bypasses Messages, Android Auto, Google Home, Sonos and Adaptive Connectivity Services on this phone, including their DNS. The empty inclusion behavior follows [the installed version's VPN builder](https://github.com/tailscale/tailscale-android/blob/aea8f60c0/android/src/main/java/com/tailscale/ipn/IPNService.kt#L185). It is version-dependent and contradicts the UI wording, so verify the UID range after upgrades. Selecting even one app changes this to an allowlist and excludes every unselected app. The completed regression test checked the complete UID range on every probe. The upstream exclusions address app compatibility problems; RCS, casting, Sonos and Android Auto functionality still need normal-use validation.
 
 Linux and the subnet router have `TS_DISABLE_PORTMAPPER=true`. The home Archer AX90 already had UPnP off, and its NAT-PMP/PCP port refused discovery probes. No router settings or port forwards were changed. Android has no configured equivalent of that environment flag: the attempted `only-tcp-443` tailnet attribute was rejected by this account and is not deployed. Automatic mappings are prevented at the home router, not proven disabled inside Android on arbitrary Wi-Fi networks. Keep automatic mappings disabled on any other router you administer.
 
 ## Wake-on-LAN for homePC
 
 Moonlight's "Wake PC" sends a unicast magic packet to homePC's LAN IP `192.168.10.177`. The router forwards it from worker-65, but a sleeping PC answers no ARP, so the node dropped the packet. `wol-neigh.yaml` runs on every node and pins a permanent neighbour entry for that IP to homePC's MAC every 60 seconds, so the frame reaches the network card. It runs everywhere because the router's state lives in a Kubernetes Secret and the router can run on any node. homePC must keep the IP: reserve it for `d8:43:ae:20:7d:23` in the Archer's DHCP. The pin also applies while homePC is awake, so if it joins the LAN with another network card, update `WOL_MAC` or no node can reach it. Each pod logs `pinned ...` once; check one node with `kubectl -n tailscale logs $(kubectl -n tailscale get pod -l app=homepc-wol-neigh --field-selector spec.nodeName=k3s-worker-65 -o name)`.
-
-## Phone regression test
-
-The USB connection runs through the existing `adbbox` container on spylinux. Preserve that container and its ADB authorization. Copy `phone-roam-test.py` to spylinux and run:
-
-```sh
-python3 /tmp/phone-roam-test.py | tee phone-roam.jsonl
-```
-
-Start with Wi-Fi enabled, Tailscale connected, and working mobile data. The script checks ten Wi-Fi-off/on cycles, requires the expected validated Wi-Fi or cellular VPN underlay, polls fresh DNS and private HTTP access every five seconds, and requires recovery within 30 seconds. It checks the connection again five seconds after recovery and restores Wi-Fi in `finally`. It never enables roaming or mobile data. A blocked domain is checked by its resolved address; successful loopback ping does not mean an ad bypass.
-
-Correlate each `probe_domain` with `/var/log/pihole/pihole.log`. A returned public wildcard address alone does not prove which resolver handled the query. A and AAAA and DNS-failure tests require the additional checks recorded below.
 
 ## Validation on 2026-09-09
 
