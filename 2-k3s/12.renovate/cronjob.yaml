@@ -15,7 +15,7 @@ metadata:
 spec:
   # Scratch lives in RAM, not the node's root disk, which PBS re-uploaded nightly
   # (#1075 follow-up).
-  schedule: "*/30 * * * *"
+  schedule: "0 * * * *"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 3
