@@ -1,9 +1,0 @@
-
-LOAD DATABASE
-  FROM sqlite:///tmp/lingarr.db
-  INTO postgresql://lingarr:<PG_PASSWORD>@192.168.10.105:5432/lingarr-main
-
-  WITH include no drop, truncate, data only, reset sequences
-
-  EXCLUDING TABLE NAMES LIKE 'sqlite_%', '__EFMigrationsLock', 'version_info'
-;
