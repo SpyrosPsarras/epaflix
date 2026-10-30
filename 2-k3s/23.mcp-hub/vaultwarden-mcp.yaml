@@ -88,12 +88,12 @@ spec:
             exec:
               command: [sh, -c, 'wget -q -O- http://127.0.0.1:8087/status | grep -q "\"status\":\"unlocked\""']
             initialDelaySeconds: 20
-            periodSeconds: 10
+            periodSeconds: 30
           livenessProbe:
             exec:
               command: [sh, -c, 'wget -q -O- http://127.0.0.1:8087/status | grep -q "\"status\":\"unlocked\""']
             initialDelaySeconds: 120
-            periodSeconds: 30
+            periodSeconds: 60
           resources:
             requests:
               cpu: 10m
@@ -145,12 +145,12 @@ spec:
             exec:
               command: [wget, -q, -O, /dev/null, http://127.0.0.1:8000/healthz]
             initialDelaySeconds: 15
-            periodSeconds: 10
+            periodSeconds: 30
           livenessProbe:
             exec:
               command: [wget, -q, -O, /dev/null, http://127.0.0.1:8000/healthz]
             initialDelaySeconds: 90
-            periodSeconds: 30
+            periodSeconds: 60
           resources:
             requests:
               cpu: 10m

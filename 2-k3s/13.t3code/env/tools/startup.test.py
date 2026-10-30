@@ -25,7 +25,8 @@ class StartupTest(unittest.TestCase):
                 sts = next(doc for doc in docs if doc and doc['kind'] == 'StatefulSet')
                 server = next(container for container in sts['spec']['template']['spec']['containers'] if container['name'] == 't3')
                 self.assertNotIn('ports', server)
-                for probe, period, failures in (('startupProbe', 5, 1080), ('readinessProbe', 10, 3), ('livenessProbe', 30, 3)):
+                readiness_period, liveness_period = (30, 60) if variant == 'homelab' else (10, 30)
+                for probe, period, failures in (('startupProbe', 5, 1080), ('readinessProbe', readiness_period, 3), ('livenessProbe', liveness_period, 3)):
                     self.assertEqual(server[probe], {
                         'exec': {'command': ['curl', '-fsS', '-m', '1', 'http://127.0.0.1:3773/health']},
                         'periodSeconds': period,

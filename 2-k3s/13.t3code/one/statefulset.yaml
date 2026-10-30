@@ -189,7 +189,7 @@ spec:
           livenessProbe:
             exec:
               command: [bash, /scripts/sshd.sh, check]
-            periodSeconds: 15
+            periodSeconds: 60
             timeoutSeconds: 10
             failureThreshold: 2
           resources:
