@@ -1,4 +1,4 @@
-FROM docker.io/library/node:24-bookworm@sha256:6449e19d8184d84062525b6a7524def03146c2cb04a7f08b076680d0e8e4240a
+FROM docker.io/library/node:24-bookworm@sha256:e7add2a490bb17d97b485b8641bd88455fff7839ade0f5eba493c3508124d413
 LABEL org.opencontainers.image.source="https://github.com/SpyrosPsarras/epaflix"
 ARG T3_RUNTIME_VARIANT=mixed
 RUN case "$T3_RUNTIME_VARIANT" in mixed|homelab|work) ;; *) exit 1 ;; esac
