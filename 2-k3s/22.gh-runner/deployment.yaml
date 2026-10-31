@@ -62,7 +62,7 @@ spec:
               set -euo pipefail
               install -d -m 700 "$HOME/.ssh"
               install -m 600 /keys/id_ed25519 "$HOME/.ssh/id_ed25519"
-              ssh-keyscan -H 192.168.10.30 192.168.10.10 192.168.10.11 >> "$HOME/.ssh/known_hosts" 2>/dev/null || true
+              ssh-keyscan -H 192.168.10.30 192.168.10.10 192.168.10.11 192.168.10.12 >> "$HOME/.ssh/known_hosts" 2>/dev/null || true
               cd /data
               exec ./run.sh
           volumeMounts:
