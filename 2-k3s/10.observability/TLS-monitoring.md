@@ -15,6 +15,7 @@ after five minutes. Both expiry alerts can fire below three days.
 | --- | --- |
 | `192.168.10.10:8006` | takaros PVE certificate |
 | `192.168.10.11:8006` | evanthoulaki PVE certificate |
+| `192.168.10.12:8006` | patroklos PVE certificate |
 | `192.168.10.101:443` | External Traefik wildcard, SNI `grafana.epaflix.com` |
 | `192.168.10.102:443` | Internal Traefik wildcard, same SNI, separate listener |
 | `192.168.10.200:8443` | TrueNAS UI certificate, bypasses Traefik |
