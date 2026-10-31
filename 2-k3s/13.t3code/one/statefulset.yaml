@@ -74,7 +74,7 @@ spec:
               mountPath: /runtime-state
       containers:
         - name: t3
-          image: ghcr.io/spyrospsarras/t3-runtime:inputs-c92f3032e8819c5a52ebc1f3b0ea724d
+          image: ghcr.io/spyrospsarras/t3-runtime:inputs-adaa2201d6df428f27557dc16bec425b
           imagePullPolicy: Always
           command:
             - bash
