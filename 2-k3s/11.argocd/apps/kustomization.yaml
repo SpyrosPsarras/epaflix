@@ -28,7 +28,6 @@ resources:
   - app-searxng.yaml
   - app-servarr.yaml
   - app-speedtest.yaml
-  - app-syncthing.yaml
   - app-system-upgrade-controller.yaml
   - app-system-upgrade-plans.yaml
   - app-t3-build.yaml
