@@ -341,6 +341,7 @@ jobs:
           bash -n 2-k3s/13.t3code-work/tools/owner-login.sh
           python3 2-k3s/17.remote-pi/cliproxy/tools/client-backend.test.py -v
           bash 1-proxmox/t3env/pin-vm-host.test.sh
+          bash 1-proxmox/pegaprox/pegaprox-auto-update.test.sh
           python3 2-k3s/17.remote-pi/search-guard/search-guard.test.py
           bash 2-k3s/maintenance/aaaa-tripwire-cronjob.test.sh
           bash 2-k3s/28.kured/kured.test.sh
