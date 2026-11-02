@@ -6,7 +6,7 @@
     "@anthropic-ai/claude-code": "2.1.316",
     "@bitwarden/cli": "2026.8.0",
     "@dietrichgebert/ponytail": "5.3.3",
-    "@earendil-works/pi-coding-agent": "1.4.0",
+    "@earendil-works/pi-coding-agent": "1.5.0",
     "@juicesharp/rpiv-ask-user-question": "2.15.0",
     "@juicesharp/rpiv-todo": "2.15.0",
     "@openai/codex": "0.166.0",
