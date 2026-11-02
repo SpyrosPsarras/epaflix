@@ -47,13 +47,19 @@ class SetupTests(unittest.TestCase):
         environment.start()
         self.addCleanup(environment.stop)
 
-    def write(self, base_url='http://proxy.test'):
-        with patch.dict(os.environ, {'ANTHROPIC_BASE_URL': base_url,
+    def write(self, base_url='http://proxy.test', instance='homelab'):
+        with patch.dict(os.environ, {'ANTHROPIC_BASE_URL': base_url, 'MCP_HUB_INSTANCE': instance,
                                      'ANTHROPIC_AUTH_TOKEN': 'synthetic'}, clear=False):
             with patch.object(self.setup, 'fetch_models', return_value=[
                     {'id': 'claude/claude-opus-5-5'}, {'id': 'codex/gpt-6.1-sol'},
                     {'id': 'unrelated/model'}]):
                 self.setup.write(self.home, self.safety, self.ssh)
+
+    def test_work_settings_load_davidhorn_skills_from_clone(self):
+        self.write(instance='work')
+        settings = json.loads((self.agent / 'settings.json').read_text())
+        self.assertEqual(settings['skills'], [
+            '!**/.agents/skills/ponytail/**', str(self.home / 'Davidhorn/ai-skills/plugins')])
 
     def test_settings_preserve_user_keys_and_rewrite_owned_resources(self):
         (self.agent / 'settings.json').write_text(json.dumps({

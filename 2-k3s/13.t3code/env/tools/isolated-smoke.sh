@@ -154,6 +154,11 @@ print('isolated smoke: T3 has no default SSH agent environment PASS')
 PY
 if [[ $variant == work && $round == first ]]; then
   [[ $(grep -Fxc 'work SSH: no approved hosts; SSH disabled' /tmp/entrypoint.log) == 1 ]] || fail 'missing work host input did not leave SSH disabled'
+  grep -Fxq 'work skills: ai-skills clone failed; Davidhorn skills unavailable' /tmp/entrypoint.log ||
+    fail 'offline ai-skills clone did not fail softly'
+fi
+if [[ $variant == homelab ]] && grep -Fq 'ai-skills' /tmp/entrypoint.log; then
+  fail 'homelab attempted the ai-skills clone'
 fi
 if [[ $variant == homelab ]]; then
   python3 - <<'PY'

@@ -26,6 +26,12 @@ fi
 mkdir -p "$HOME/projects"
 if [[ ! -d $project/.git ]]; then git clone -q "$repo" "$project"; fi
 [[ $(git -C "$project" remote get-url origin) == "$repo" ]]
+ai_skills=$HOME/Davidhorn/ai-skills
+if [[ $MCP_HUB_INSTANCE == work && ! -d $ai_skills/.git ]]; then
+  # pi-setup.py loads the Davidhorn skills from this clone; a failed clone must not block startup.
+  timeout 120 git clone -q https://github.com/IndicoSystems/ai-skills.git "$ai_skills" ||
+    echo 'work skills: ai-skills clone failed; Davidhorn skills unavailable' >&2
+fi
 SAFETY_ENTRY=$(/usr/bin/env -i HOME="$HOME" PATH=/usr/local/bin:/usr/bin:/bin \
   /usr/bin/python3 -I -S /scripts/cc-safety-net-install.py | tail -n 1)
 python3 /scripts/pi-setup.py write "$HOME" "$SAFETY_ENTRY"
