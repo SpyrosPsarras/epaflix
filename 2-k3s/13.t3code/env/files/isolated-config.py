@@ -46,6 +46,19 @@ def safe_policy_path(name):
         name in POLICY_PATHS or name == LEGACY_PERMISSION_PATH or name.startswith('.config/t3-policy/'))
 
 
+def validate_bundle(bundle):
+    if not bundle.get('sourceHome') or not bundle.get('files') or 'instructions.md' not in bundle['files']:
+        raise InputError('Required instructions are missing')
+    for name, entry in bundle['files'].items():
+        path = PurePosixPath(name)
+        if path.is_absolute() or '..' in path.parts or str(path) != name or (
+                name != 'instructions.md' and not name.startswith('skills/')):
+            raise InputError('Unsafe instruction bundle')
+        base64.b64decode(entry['data'], validate=True)
+    if not any(name.endswith('/SKILL.md') for name in bundle['files']):
+        raise InputError('Required skills are missing')
+
+
 def validate(inputs, home, environment):
     reviewed_inputs = INPUTS | ({'work-auth.json'} if environment == 'work' else set())
     approvals = APPROVALS | ({'workAuth'} if environment == 'work' else set())
@@ -85,17 +98,7 @@ def validate(inputs, home, environment):
     if any(name.startswith(('BW_', 'BITWARDENCLI_')) for name in os.environ):
         raise InputError('Vault client environment belongs only in the separate-uid sidecar')
     services = hub_services.load_services(inputs / 'services.json', environment)
-    bundle = json.loads((inputs / 'bundle.json').read_text())
-    if not bundle.get('sourceHome') or not bundle.get('files') or 'instructions.md' not in bundle['files']:
-        raise InputError('Required instructions are missing')
-    for name, entry in bundle['files'].items():
-        path = PurePosixPath(name)
-        if path.is_absolute() or '..' in path.parts or str(path) != name or (
-                name != 'instructions.md' and not name.startswith('skills/')):
-            raise InputError('Unsafe instruction bundle')
-        base64.b64decode(entry['data'], validate=True)
-    if not any(name.endswith('/SKILL.md') for name in bundle['files']):
-        raise InputError('Required skills are missing')
+    validate_bundle(json.loads((inputs / 'bundle.json').read_text()))
     policies = json.loads((inputs / 'policies.json').read_text())
     if policies['environment'] != environment or not POLICY_PATHS.issubset(policies['files']) or not policies['checks']:
         raise InputError('Required organizational policy inputs and checks are missing')

@@ -377,9 +377,10 @@ Secrets.
    is not a private digest or proof of approval. Missing Secrets block the pod; invalid inputs refuse
    startup.
 2. P2: For each rotation, follow the shared
-   [input rotation procedure](../13.t3code/env/isolated-runtime.md#input-rotation).
-   Pause `app-of-apps` first, then `t3code-work`, before scaling the StatefulSet
-   to zero. Update reviewed inputs, grants and matching hashes together, then
+   [input rotation procedure](../13.t3code/env/isolated-runtime.md#input-rotation),
+   except for [skills-only changes](../13.t3code/env/isolated-runtime.md#skills-only-rotation).
+   Otherwise, pause `app-of-apps` first, then `t3code-work`, before scaling the
+   StatefulSet to zero. Update reviewed inputs, grants and matching hashes together, then
    advance the tracked revision. Resume from the merged revision only after
    private inputs are consistent. The parent would undo a child-only pause.
    This prevents an old grant environment from using newly projected files.
