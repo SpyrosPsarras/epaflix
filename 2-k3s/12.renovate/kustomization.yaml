@@ -6,4 +6,4 @@ resources:
   - cronjob.yaml
 images:
   - name: ghcr.io/renovatebot/renovate
-    newTag: 44.188.2
+    newTag: 44.199.2
