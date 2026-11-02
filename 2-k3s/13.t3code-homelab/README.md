@@ -298,7 +298,9 @@ Input validation does not replace API RBAC or network policy.
 
 Secret changes alone do not restart this `OnDelete` StatefulSet. Follow the
 shared [input rotation procedure](../13.t3code/env/isolated-runtime.md#input-rotation)
-before changing either Secret. PVC deletion, pruning and scaling retain the home.
+before changing either Secret, except for the reviewed
+[skills-only rotation](../13.t3code/env/isolated-runtime.md#skills-only-rotation).
+PVC deletion, pruning and scaling retain the home.
 The shared contract also documents [policy inputs](../13.t3code/env/isolated-runtime.md#policy-input),
 [homelab kubeconfig constraints](../13.t3code/env/isolated-runtime.md#homelab-kubeconfig)
 and [provider retention and Codex requirements](../13.t3code/env/isolated-runtime.md#provider-preferences-and-codex-requirements).

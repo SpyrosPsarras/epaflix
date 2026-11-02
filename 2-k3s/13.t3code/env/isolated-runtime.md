@@ -73,14 +73,74 @@ handoff skills and replace legacy vault integrations with this environment's
 scoped `vault run` client. Read exact-name and environment-variable rules in
 `env/files/vault-client.py`, and write rules in [vault-writes.md](vault-writes.md).
 
-For an existing backend, rotate only `bundle.json` and its `runtime.json`
-`sha256` entry. Preserve every other input, approval and grant digest. Run the
-real `isolated-config.py` validation against the complete proposed inputs
-with that backend's grants, capturing private diagnostics. During the stopped
-window below, take a private mode-0600 Secret backup, recheck parent and child
-automation and pod absence, and use a resourceVersion-tested JSON patch.
-Advance the tracked input revision for each changed backend. A validation-only
-run must never patch resources, pause Applications or scale a workload.
+For an existing backend, use [skills-only rotation](#skills-only-rotation)
+when only bundle skills change. Changes to `instructions.md`, `sourceHome`,
+grants, policies or any other input still require the full
+[input rotation](#input-rotation). For full bundle changes, rotate only
+`bundle.json` and its `runtime.json` sha256 entry. Preserve every unrelated
+input, approval and grant digest. Run the real `isolated-config.py` validation
+against the complete proposed inputs with that backend's grants, capturing
+private diagnostics. During the stopped window, take a private mode-0600
+Secret backup, recheck parent and child automation and pod absence, and use
+a resourceVersion-tested JSON patch. Advance the tracked input revision for
+each changed backend. A validation-only run must never patch resources,
+pause Applications or scale a workload.
+
+### Skills-only rotation
+
+This exception applies only to skills in `bundle.json`, for either isolated
+backend. Argo does not manage `t3-runtime-inputs`. One atomic Secret patch
+updates `bundle.json` and its `runtime.json` digest. Grants remain untouched
+in `t3-runtime-grants`. Skills are installed at startup. Work's kubectl
+helper rereads `runtime.json` but checks only the unchanged work-auth and
+kubeconfig digests. This path needs no Argo pause or scale-down.
+
+1. S1: Stage one directory per changed skill, each with `SKILL.md`, outside
+   the repository. Each directory replaces that whole skill, including removal
+   of old files. Symlinks are rejected. From an authorized desktop, select an
+   explicit admin context and `homelab` or `work`, then validate:
+
+   ```sh
+   context=epaflix
+   environment=homelab
+   python3 2-k3s/13.t3code/env/tools/rotate-skills.py \
+     --context "$context" --environment "$environment" \
+     --skills "$HOME/private/staged-skills" --check
+   ```
+
+   Add `--remove NAME` for each skill to delete, in both commands. Check the
+   added, replaced and removed names and unchanged count. The helper uses the
+   startup bundle validator. It preserves either backend's `runtime.json`
+   serialization, with insertion-order or sorted keys and default JSON spacing.
+   Other formats are refused rather than reformatted. It does not read grants.
+2. S2: Apply with a new backup path outside the repository:
+
+   ```sh
+   python3 2-k3s/13.t3code/env/tools/rotate-skills.py \
+     --context "$context" --environment "$environment" \
+     --skills "$HOME/private/staged-skills" \
+     --backup "$HOME/private/t3-runtime-inputs-backup.json"
+   ```
+
+   The backup contains the full current Secret, with mode 0600. Keep it private.
+   The patch tests `metadata.resourceVersion` and changes only the two input
+   keys. A conflict fails without retrying or overwriting the backup.
+3. S3: Complete S1 and S2 before merging the revision-bump PR. The merge
+   triggers the idle-rollout restart. Advance
+   `t3code.epaflix.com/inputs-grants-revision` in the selected StatefulSet
+   through a reviewed PR and merge. Leave replicas at one. After Argo syncs,
+   let `t3code-idle-rollout` replace the `OnDelete` pod after 30
+   idle minutes, or obtain approval for a pod delete. Do not hand-patch the
+   annotation or restart from an unmerged revision.
+4. S4: Confirm the replacement pod is Ready, runs the expected revision and
+   has the changed skills. Check names and executable modes, not private file
+   contents. Work checks require an authorized work operator.
+
+For rollback, confirm all other input bytes still match the backup. Restore
+its `bundle.json` and `runtime.json` with one resourceVersion-tested JSON
+patch, advance the tracked revision again and repeat the restart and Ready
+checks. Pass patch values through stdin or a private file and capture command
+output. If any other input changed, use the full rotation instead.
 
 ## Policy input
 
@@ -371,6 +431,10 @@ exact allowed hub server URLs, including in trusted project directories and
 T3 worktrees. Preferences cannot bypass those managed requirements.
 
 ## Input rotation
+
+[Skills-only rotation](#skills-only-rotation) is the only exception to the
+pause and scale-down below. Instructions, grants, policies and all other
+input changes use this full procedure.
 
 The homelab and work Applications automatically sync merged revisions with
 pruning, but without self-healing. Their StatefulSets use `OnDelete`; the

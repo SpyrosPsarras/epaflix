@@ -314,6 +314,7 @@ jobs:
           set -euo pipefail
           bash 2-k3s/13.t3code/env/files/selftest.sh
           python3 2-k3s/13.t3code/env/tools/private-config.test.py
+          python3 2-k3s/13.t3code/env/tools/rotate-skills.test.py -v
           bash 2-k3s/13.t3code/env/tools/rollout-hash.test.sh
           bash 2-k3s/13.t3code/env/tools/runtime-variants.test.sh
           python3 2-k3s/13.t3code/env/tools/network-policy.test.py -v
