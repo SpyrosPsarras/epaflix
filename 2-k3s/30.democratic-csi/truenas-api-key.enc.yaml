@@ -5,7 +5,7 @@ metadata:
     namespace: democratic-csi
 type: Opaque
 stringData:
-    TRUENAS_API_KEY: ENC[AES256_GCM,data:qMs09UyC8LfezC3lJKxLbaA1CLb9oVpfSP60wKbo2W7SN5irUfLEB0cOucOnMFoXCRzJaSloDXWC9sxv+r6Ssfhf,iv:iXK8ha1dw0bTUi77Mw0a5deThvSNoCK5P7jN8uvBBD0=,tag:V81szymyyj+CIifJvZFj/Q==,type:str]
+    TRUENAS_API_KEY: ENC[AES256_GCM,data:72SBrav1aIhTutbgFc016IP8faGjiTmbWx5381oARV1SHAdb9wKY/RdzDR+hE+nvuRODVEBn/PBGTiEdBHpHLLGg,iv:W6a9a+3iXraxrbaSyFjXNJ2SW0astyn5xFJM/cPLk3U=,tag:6d0j4zUfTLMNCiv8hLeMBA==,type:str]
 sops:
     age:
         - enc: |
@@ -18,6 +18,6 @@ sops:
             -----END AGE ENCRYPTED FILE-----
           recipient: age1586thf5vkcdf5lcn3zwjpu8ltkwyq8efrhj8lr0vdrrt9k5f3qgsxeg7gx
     encrypted_regex: ^(data|stringData)$
-    lastmodified: "2026-10-25T08:17:38Z"
-    mac: ENC[AES256_GCM,data:/UvjRrx/hbcUiWsTAm+IarXsBtVGzJZ106RElEFAcBeb7tizYVMc0OeqPxMFsqSzngSNg9lDbZkemZJGlcSoOkpX40A85JWscozOP6KYVeDOUk2WbMYNbmx+hZ66gWQJPGyBceg/oT2m9q8kBt05/YW+APSIwOAnHv/5ft2iNEo=,iv:Xx9tNjjG1EAD+gmN8Gsc3hvc4ZEbg450q0bi7yhYa/U=,tag:hGblxI5Q04AoC+mp0+Bg6w==,type:str]
+    lastmodified: "2026-11-03T12:38:21Z"
+    mac: ENC[AES256_GCM,data:JI3ogxgey5fP0j8Uz1MPYoLniqjpKzDIxlWTdI5ED+O8SyaIUeEiwXbmpt1DyXWadcsMUhvwxToll2tQMYeY6nDIyIrqHgxjgytu3xkkiCr68EmR6Ro7f6BEbLJiDzSGVGtm6N+ULXKIhwDOm5n5VIL9KThhxzc1+GKLA+eN9hI=,iv:yUsqK9RF9QJEhE/YdwFaUMfvHjN1WJdINkZk2X0TpG8=,tag:BdMQ/Sz6/HADseOyxT5P0g==,type:str]
     version: 3.13.3
