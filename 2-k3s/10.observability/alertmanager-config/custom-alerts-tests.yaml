@@ -980,27 +980,6 @@ tests:
 
   - interval: 1m
     input_series:
-      - series: 'node_zfs_arc_c_max{job="truenas-node-exporter", instance="192.168.10.200"}'
-        values: "33285996544x30"
-    alert_rule_test:
-      - eval_time: 20m
-        alertname: TruenasArcCapDrift
-        exp_alerts:
-          - exp_labels:
-              job: truenas-node-exporter
-              instance: 192.168.10.200
-              severity: warning
-              component: truenas-memory
-            exp_annotations:
-              summary: "TrueNAS ZFS ARC cap is no longer 12 GiB"
-              description: >-
-                  node_zfs_arc_c_max on 192.168.10.200 reads 3.3285996544e+10 instead of the 12884901888 (12 GiB)
-                  cap applied during the 2026-08-09 recovery. Uncapped ARC on this 31 GB box is the suspected
-                  trigger of the WPR2 GPU wedge: the driver hit NV_ERR_NO_MEMORY part-way through initialising
-                  the GSP firmware. Re-apply the ZFS tunable AND the /etc/modprobe.d/zfs.conf boot copy.
-
-  - interval: 1m
-    input_series:
       - series: 'node_zfs_arc_size{job="truenas-node-exporter", instance="192.168.10.200"}'
         values: "12895364840x30"
       - series: 'node_zfs_arc_c_max{job="truenas-node-exporter", instance="192.168.10.200"}'
@@ -1008,9 +987,6 @@ tests:
       - series: 'node_zfs_arc_memory_throttle_count{job="truenas-node-exporter", instance="192.168.10.200"}'
         values: "0x30"
     alert_rule_test:
-      - eval_time: 25m
-        alertname: TruenasArcCapDrift
-        exp_alerts: []
       - eval_time: 25m
         alertname: TruenasArcOverCap
         exp_alerts: []

@@ -11,6 +11,15 @@ configuration:
   alertFilterMatchOnly: true
   alertFilterRegexp: ^(K3sUpgradeJobActive|K3sNodeCordoned|KubeNodeNotReady|KubeNodeUnreachable|etcdMembersDown|etcdInsufficientMembers|etcdNoLeader)$
 
+tolerations:
+  - key: node-role.kubernetes.io/control-plane
+    effect: NoSchedule
+  - key: node-role.kubernetes.io/master
+    effect: NoSchedule
+  - key: nvidia.com/gpu
+    operator: Exists
+    effect: NoSchedule
+
 resources:
   requests:
     cpu: 10m

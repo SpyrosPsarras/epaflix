@@ -31,6 +31,11 @@ controller:
             key: TRUENAS_API_KEY
   externalSnapshotter:
     enabled: false
+node:
+  tolerations:
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
 storageClasses:
   - name: truenas-iscsi
     defaultClass: false
