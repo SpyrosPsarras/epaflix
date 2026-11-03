@@ -1,11 +1,11 @@
 # Node settings
 
-These settings were applied by hand and verified live on 2026-11-01. Restore them when rebuilding a node.
+The existing node settings were verified live on 2026-11-01. Worker-64 was added on 2026-11-03. Restore these settings when rebuilding a node.
 
 | Role | Nodes |
 | --- | --- |
 | Masters | k3s-master-51, k3s-master-52, k3s-master-53 |
-| Workers | k3s-worker-61, k3s-worker-62, k3s-worker-63, k3s-worker-65 |
+| Workers | k3s-worker-61, k3s-worker-62, k3s-worker-63, k3s-worker-64, k3s-worker-65 |
 
 ## Kubelet image cleanup
 
@@ -50,14 +50,15 @@ Logs had used 2.9 GB on k3s-master-51 and on k3s-master-52.
 
 ## VM disk discard
 
-The k3s VM disks use `scsi0` on the `local-raid` LVM-thin pool. Set `discard=on,ssd=1` so Ubuntu's weekly `fstrim.timer`, enabled by default, returns freed blocks to the thin pool.
+The k3s VM disks use `scsi0` on the `local-raid` LVM-thin pool on takaros and evanthoulaki, and on `local-zfs` on patroklos and shypowder (k3s-master-52, k3s-worker-63, k3s-worker-64). Set `discard=on,ssd=1` so Ubuntu's weekly `fstrim.timer`, enabled by default, returns freed blocks to the pool.
 
-| Nodes | Discard status on 2026-11-01 |
+| Nodes | Discard status on 2026-11-03 |
 | --- | --- |
 | k3s-master-51, k3s-master-52, k3s-master-53 | Enabled |
 | k3s-worker-62, k3s-worker-65 | Already enabled |
-| k3s-worker-61 | Not yet enabled. Planned for retirement. |
-| k3s-worker-63 | Not yet enabled. Enable when it moves host. |
+| k3s-worker-61 | Enabled |
+| k3s-worker-63 | Enabled with the move to patroklos |
+| k3s-worker-64 | Enabled at creation |
 
 Changing discard needs a full VM stop and start. A reboot inside the guest is not enough.
 
@@ -75,6 +76,23 @@ Change one master at a time. Etcd keeps quorum with 2 of 3 masters. Before chang
 kubectl get --raw='/readyz?verbose'
 kubectl get nodes
 ```
+
+## GPU worker
+
+`k3s-worker-64` is VM 1064 on shypowder, with 4 vCPU, 20 GiB RAM, no balloon and a 100 GB disk. It runs Ubuntu 24.04 and k3s agent `v1.36.5+k3s1` with `--node-ip 10.0.0.64 --flannel-iface eth1`. Its kubelet, registry, resolver, sysctl, journal and multipath settings match worker-63.
+
+Restore its labels and taint after rebuilding:
+
+```sh
+kubectl label node k3s-worker-64 gpu=nvidia topology.kubernetes.io/zone=shypowder --overwrite
+kubectl taint node k3s-worker-64 nvidia.com/gpu=present:NoSchedule --overwrite
+```
+
+Install the NVIDIA 580-server driver with `ubuntu-drivers install --gpgpu nvidia:580-server`, plus `nvidia-utils-580-server`, `libnvidia-encode-580-server` and `libnvidia-decode-580-server`. Install `nvidia-container-toolkit` before starting k3s so containerd detects the `nvidia` runtime. GPU pods use the existing `nvidia` RuntimeClass.
+
+Add the guest iSCSI IQN to the democratic-csi TrueNAS initiator group. Allow `192.168.10.64` on the TrueNAS NFS media share and mount it at `/mnt/k3s-media`, as on worker-63.
+
+The Argo CD app in `2-k3s/31.nvidia-device-plugin` exposes four time-sliced GPU allocations. These share the same 8 GB of VRAM without memory isolation. The exporter in `2-k3s/10.observability/nvidia-gpu-exporter` consumes one allocation.
 
 ## Existing alerts
 

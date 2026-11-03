@@ -1010,91 +1010,84 @@ spec:
               merge and sync it (manual-sync apps need the command above). Then remove the annotation in a follow-up PR
               and sync the resource again. Argo still sees the live annotation, so that sync is a replace and drops it.
 
-    - name: truenas-gpu
+    - name: nvidia-gpu
       interval: 60s
       rules:
         - alert: NvidiaGpuExporterCollectionFailing
-          expr: nvidia_smi_last_collect_success{job="truenas-gpu-exporter"} == 0
+          expr: nvidia_smi_last_collect_success{job="nvidia-gpu-exporter"} == 0
           for: 10m
           labels:
             severity: warning
-            component: truenas-gpu
+            component: nvidia-gpu
           annotations:
             summary: "GPU metric collection is failing on {{ $labels.instance }}"
             description: >-
-              The exporter on {{ $labels.instance }} cannot collect GPU metrics.
-              Run nvidia-smi on the host by hand and check dmesg for NVRM/Xid messages. The most
-              common cause is a driver/library mismatch after a driver upgrade. THIS IS THE
-              2026-08-09 SIGNATURE: exporter serving, card gone, every application still
-              answering on CPU. Never silence this one.
+              The exporter on {{ $labels.instance }} cannot collect GPU metrics. Run nvidia-smi inside
+              the k3s guest and check its dmesg for NVRM/Xid messages. Check for a driver/library
+              mismatch after a driver upgrade. An answering exporter does not prove the GPU is
+              available.
 
         - alert: NvidiaGpuMissing
           expr: |
             (
-              count by (job, instance) (nvidia_smi_gpu_info{job="truenas-gpu-exporter"})
+              count by (job, instance) (nvidia_smi_gpu_info{job="nvidia-gpu-exporter"})
               or
-              0 * sum by (job, instance) (nvidia_smi_last_collect_success{job="truenas-gpu-exporter"})
+              0 * sum by (job, instance) (nvidia_smi_last_collect_success{job="nvidia-gpu-exporter"})
             )
-            < max_over_time((count by (job, instance) (nvidia_smi_gpu_info{job="truenas-gpu-exporter"}))[6h:5m])
-            and on (job, instance) nvidia_smi_last_collect_success{job="truenas-gpu-exporter"} == 1
+            < max_over_time((count by (job, instance) (nvidia_smi_gpu_info{job="nvidia-gpu-exporter"}))[6h:5m])
+            and on (job, instance) nvidia_smi_last_collect_success{job="nvidia-gpu-exporter"} == 1
           for: 10m
           labels:
             severity: warning
-            component: truenas-gpu
+            component: nvidia-gpu
           annotations:
             summary: "A GPU disappeared on {{ $labels.instance }}"
             description: >-
-              nvidia-smi reports fewer GPUs on {{ $labels.instance }} than the maximum seen in
-              the last 6 hours while collection stays healthy. There is exactly ONE card in this
-              box (RTX 2070 SUPER at 01:00.0), so this means it is gone while the driver still
-              answers - the 2026-08-09 WPR2 wedge, and the condition that went unnoticed for
-              ~23 hours. Check dmesg for "unexpected WPR2 already up" and "RmInitAdapter failed",
-              then follow the no-reboot recovery procedure. Never silence this one.
+              nvidia-smi reports fewer GPUs on {{ $labels.instance }} than the maximum seen in the last
+              6 hours while collection stays healthy. The guest should see one RTX 2070 SUPER. Check
+              guest dmesg for NVRM/Xid messages and verify PCI passthrough on shypowder before
+              attempting recovery.
 
         - alert: NvidiaGpuRecoveryActionNeeded
-          expr: nvidia_smi_gpu_recovery_action{job="truenas-gpu-exporter"} > 0
+          expr: nvidia_smi_gpu_recovery_action{job="nvidia-gpu-exporter"} > 0
           labels:
             severity: critical
-            component: truenas-gpu
+            component: nvidia-gpu
           annotations:
             summary: "A GPU on {{ $labels.instance }} needs a recovery action"
             description: >-
-              The NVIDIA driver itself reports that GPU {{ $labels.uuid }} needs recovery. The
-              value names the action: 1 = reset the GPU, 2 = reboot the node, 3 = drain
-              peer-to-peer workloads, 4 = drain and reset (current value: {{ $value }}). Stop
-              ollama and Jellyfin first - nothing may hold /dev/nvidia* during a reset.
+              The NVIDIA driver reports that GPU {{ $labels.uuid }} on {{ $labels.instance }} needs
+              recovery. The value names the action: 1 = reset the GPU, 2 = reboot the node, 3 = drain
+              peer-to-peer workloads, 4 = drain and reset, current value: {{ $value }}. Stop all GPU
+              pods on the node, including the exporter, before a reset. Nothing may hold /dev/nvidia*.
 
         - alert: NvidiaGpuXidCritical
           expr: |
-            time() - nvidia_smi_xid_last_timestamp_seconds{job="truenas-gpu-exporter", xid=~"48|62|64|74|79|95|119|120"} < 600
+            time() - nvidia_smi_xid_last_timestamp_seconds{job="nvidia-gpu-exporter", xid=~"48|62|64|74|79|95|119|120"} < 600
           labels:
             severity: critical
-            component: truenas-gpu
+            component: nvidia-gpu
           annotations:
             summary: "Critical GPU Xid error on {{ $labels.instance }}"
             description: >-
-              GPU {{ $labels.uuid }} reported Xid {{ $labels.xid }}, a critical error, in the last
-              10 minutes. Among the default codes, 48/62/64/95/119/120 mean an uncorrectable
-              memory, microcontroller or GSP fault: reset the GPU. Xid 79 means the GPU fell off
-              the PCIe bus. Xid 74 is an NVLink fault. Check dmesg for the matching NVRM Xid line.
-              REQUIRES THE NVML BACKEND - the exporter must run the `-nvml` image flavor or this
-              series does not exist.
+              GPU {{ $labels.uuid }} reported Xid {{ $labels.xid }}, a critical error, in the last 10
+              minutes. Among the default codes, 48/62/64/95/119/120 mean an uncorrectable memory,
+              microcontroller or GSP fault: reset the GPU. Xid 79 means the GPU fell off the PCIe bus.
+              Xid 74 is an NVLink fault. Check guest dmesg for the matching NVRM Xid line. The exporter
+              must use the `-nvml` image flavor for this series to exist.
 
         - alert: NvidiaGpuExporterCollectionSlow
-          expr: nvidia_smi_last_collect_duration_seconds{job="truenas-gpu-exporter"} > 5
+          expr: nvidia_smi_last_collect_duration_seconds{job="nvidia-gpu-exporter"} > 5
           for: 10m
           labels:
             severity: warning
-            component: truenas-gpu
+            component: nvidia-gpu
           annotations:
             summary: "GPU metric collection is slow on {{ $labels.instance }}"
             description: >-
-              Collecting GPU metrics on {{ $labels.instance }} takes longer than 5 seconds. A
-              healthy collection answers well under a second when the persistence daemon runs.
-              Check that nvidia-persistenced is up (0-truenas/scripts/gpu-persistenced.sh) and
-              read dmesg for Xid messages: sustained slowness often precedes a wedged driver.
-              Collections that hang entirely are caught by NvidiaGpuExporterCollectionFailing
-              instead of this one.
+              Collecting GPU metrics on {{ $labels.instance }} takes longer than 5 seconds. Check
+              nvidia-persistenced in the k3s guest and read guest dmesg for Xid messages. Collections
+              that hang entirely are caught by NvidiaGpuExporterCollectionFailing instead of this one.
 
     - name: truenas-memory
       interval: 60s

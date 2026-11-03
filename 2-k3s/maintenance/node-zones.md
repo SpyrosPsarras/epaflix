@@ -7,11 +7,13 @@ Each k3s node carries `topology.kubernetes.io/zone` set to the Proxmox host that
 | takaros | k3s-master-51, k3s-worker-61, k3s-worker-62 |
 | evanthoulaki | k3s-master-53, k3s-worker-65 |
 | patroklos | k3s-master-52, k3s-worker-63 |
+| shypowder | k3s-worker-64 |
 
 ```sh
 kubectl label node k3s-master-51 k3s-worker-61 k3s-worker-62 topology.kubernetes.io/zone=takaros --overwrite
 kubectl label node k3s-master-53 k3s-worker-65 topology.kubernetes.io/zone=evanthoulaki --overwrite
 kubectl label node k3s-master-52 k3s-worker-63 topology.kubernetes.io/zone=patroklos --overwrite
+kubectl label node k3s-worker-64 topology.kubernetes.io/zone=shypowder --overwrite
 kubectl get nodes -L topology.kubernetes.io/zone
 ```
 

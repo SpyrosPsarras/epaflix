@@ -14,6 +14,13 @@ resources:
   - ingress/ntfy-ingressroute.yaml
   - control-plane-endpointslices.yaml
   - truenas-exporters.yaml
+  - nvidia-gpu-exporter/deployment.yaml
+  - nvidia-gpu-exporter/service.yaml
+  - nvidia-gpu-exporter/servicemonitor.yaml
+
+images:
+  - name: docker.io/utkuozdemir/nvidia_gpu_exporter
+    newTag: 1.17.0-nvml
 
 generators:
   - secrets/ksops-generator.yaml
