@@ -61,6 +61,9 @@ for name in ("K3sUpgradeJobActive", "K3sNodeCordoned"):
         fail.append(f"blocking alert {name} no longer exists in custom-alerts.yaml")
 
 tolerations = pod.get("tolerations", [])
+if not any(t.get("key") == "nvidia.com/gpu" and t.get("operator") == "Exists" and t.get("effect") == "NoSchedule"
+           for t in tolerations):
+    fail.append("kured must tolerate the GPU taint so GPU workers get rebooted")
 if not any(t.get("key") == "node-role.kubernetes.io/control-plane" or t.get("operator") == "Exists" and "key" not in t
            for t in tolerations):
     fail.append("kured must tolerate the control-plane taint so masters get rebooted")
