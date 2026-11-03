@@ -1,0 +1,17 @@
+runtimeClassName: nvidia
+nodeSelector:
+  gpu: nvidia
+affinity: null
+tolerations:
+  - key: nvidia.com/gpu
+    operator: Exists
+    effect: NoSchedule
+config:
+  map:
+    default: |-
+      version: v1
+      sharing:
+        timeSlicing:
+          resources:
+            - name: nvidia.com/gpu
+              replicas: 4

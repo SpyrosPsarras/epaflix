@@ -55,6 +55,7 @@ check_ipv6_host "$PIHOLE"
 check_ipv6_host 192.168.10.10
 check_ipv6_host 192.168.10.11
 check_ipv6_host 192.168.10.12
+check_ipv6_host 192.168.10.13
 
 do_ip6=$("${SSH[@]}" "root@${PIHOLE}" \
     "awk '/^[[:space:]]*do-ip6:/ {print \$2; exit}' /etc/unbound/unbound.conf.d/pi-hole.conf" 2>/dev/null)

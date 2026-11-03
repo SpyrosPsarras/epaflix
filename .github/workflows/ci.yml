@@ -160,6 +160,8 @@ jobs:
                       pulled.add(key)
                   vf = c.get("valuesFile")
                   tcmd = ["helm", "template", name, f"/tmp/charts/{name}"]
+                  if c.get("namespace"):
+                      tcmd += ["--namespace", c["namespace"]]
                   if vf:
                       tcmd += ["-f", os.path.join(os.path.dirname(f), vf)]
                   t = subprocess.run(tcmd, capture_output=True, text=True)

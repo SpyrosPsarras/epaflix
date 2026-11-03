@@ -1,0 +1,46 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nvidia-gpu-exporter
+  namespace: observability
+  labels:
+    app: nvidia-gpu-exporter
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: nvidia-gpu-exporter
+  template:
+    metadata:
+      labels:
+        app: nvidia-gpu-exporter
+    spec:
+      runtimeClassName: nvidia
+      nodeSelector:
+        gpu: nvidia
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: nvidia-gpu-exporter
+          image: docker.io/utkuozdemir/nvidia_gpu_exporter:latest
+          args:
+            - --web.listen-address=:9835
+          env:
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: utility
+          ports:
+            - name: metrics
+              containerPort: 9835
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+              nvidia.com/gpu: 1

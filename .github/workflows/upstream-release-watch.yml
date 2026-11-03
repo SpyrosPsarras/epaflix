@@ -62,7 +62,7 @@ jobs:
             upstreamRepo: "utkuozdemir/nvidia_gpu_exporter"
             probe: "nvidia-gpu-alert-rules"
             pinnedVersion: "v1.14.0"
-            whatToDoWhenItMoves: "The `truenas-gpu` group in `2-k3s/10.observability/alertmanager-config/custom-alerts.yaml` vendors five expressions (NvidiaGpuExporterCollectionFailing, NvidiaGpuMissing, NvidiaGpuRecoveryActionNeeded, NvidiaGpuXidCritical, NvidiaGpuExporterCollectionSlow) copied from upstream's chart rule template at the pinned ref (#916). The vendored copies are adapted on purpose - `job=\"truenas-gpu-exporter\"` selector, this repo's severity/component labels, incident notes - so judge drift semantically, not byte-wise. Run the diff in the verify command, port every changed expression, threshold or Xid code into the vendored group, then re-point `pinnedVersion` in this row at the new tag. Rules upstream adds that the repo does not vendor are optional: decide each and say so in the PR. The exporter image pin in `0-truenas/custom-apps/nvidia-gpu-exporter/docker-compose.yaml` is a plain docker tag renovate bumps - this watch only covers the vendored expressions."
+            whatToDoWhenItMoves: "The `nvidia-gpu` group in `2-k3s/10.observability/alertmanager-config/custom-alerts.yaml` vendors five expressions (NvidiaGpuExporterCollectionFailing, NvidiaGpuMissing, NvidiaGpuRecoveryActionNeeded, NvidiaGpuXidCritical, NvidiaGpuExporterCollectionSlow) copied from upstream's chart rule template at the pinned ref (#916). The vendored copies are adapted on purpose - `job=\"nvidia-gpu-exporter\"` selector, this repo's severity/component labels, incident notes - so judge drift semantically, not byte-wise. Run the diff in the verify command, port every changed expression, threshold or Xid code into the vendored group, then re-point `pinnedVersion` in this row at the new tag. Rules upstream adds that the repo does not vendor are optional: decide each and say so in the PR. The exporter image pin is the `images:` entry in `2-k3s/10.observability/kustomization.yaml`, which renovate bumps - this watch only covers the vendored expressions."
           - issue: "290"
             upstreamRepo: "prometheus-community/helm-charts"
             probe: "kps-control-plane-endpointslice"
@@ -211,7 +211,7 @@ jobs:
                 echo "latest=$LATEST" >> "$GITHUB_OUTPUT"
                 {
                   echo 'headline<<DETECTOR_EOF'
-                  echo "The \`truenas-gpu\` alert group vendors five expressions copied from \`$UPSTREAM\` at \`$PINNED\` (#916). Upstream no longer ships \`$RULE_FILE\` at **\`$LATEST\`**, so the vendored expressions are now an unmanaged fork."
+                  echo "The \`nvidia-gpu\` alert group vendors five expressions copied from \`$UPSTREAM\` at \`$PINNED\` (#916). Upstream no longer ships \`$RULE_FILE\` at **\`$LATEST\`**, so the vendored expressions are now an unmanaged fork."
                   echo 'DETECTOR_EOF'
                   echo 'verify<<DETECTOR_EOF'
                   echo "gh api repos/$UPSTREAM/git/trees/$LATEST?recursive=1 --jq '.tree[].path' | grep prometheusrule"
@@ -228,7 +228,7 @@ jobs:
 
             if cmp -s rule-pinned.yaml rule-latest.yaml; then
               echo "signal=unchanged" >> "$GITHUB_OUTPUT"
-              echo "observed=the alert-rule template $RULE_FILE is still identical between the pinned ref $PINNED and latest stable $LATEST - the vendored truenas-gpu expressions have not drifted." >> "$GITHUB_OUTPUT"
+              echo "observed=the alert-rule template $RULE_FILE is still identical between the pinned ref $PINNED and latest stable $LATEST - the vendored nvidia-gpu expressions have not drifted." >> "$GITHUB_OUTPUT"
               exit 0
             fi
 
@@ -236,7 +236,7 @@ jobs:
             echo "latest=$LATEST" >> "$GITHUB_OUTPUT"
             {
               echo 'headline<<DETECTOR_EOF'
-              echo "The \`truenas-gpu\` alert group vendors five expressions copied from \`$UPSTREAM\` at \`$PINNED\` (#916). Upstream's alert-rule template \`$RULE_FILE\` has changed by **\`$LATEST\`**, so the vendored expressions have drifted."
+              echo "The \`nvidia-gpu\` alert group vendors five expressions copied from \`$UPSTREAM\` at \`$PINNED\` (#916). Upstream's alert-rule template \`$RULE_FILE\` has changed by **\`$LATEST\`**, so the vendored expressions have drifted."
               echo 'DETECTOR_EOF'
               echo 'verify<<DETECTOR_EOF'
               echo "diff <(gh api 'repos/$UPSTREAM/contents/$RULE_FILE?ref=$PINNED' --jq .content | base64 -d) \\"

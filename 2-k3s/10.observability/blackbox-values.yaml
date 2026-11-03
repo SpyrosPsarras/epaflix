@@ -65,6 +65,9 @@ serviceMonitor:
     - name: patroklos
       url: https://192.168.10.12:8006
       hostname: patroklos.epaflix.com
+    - name: shypowder
+      url: https://192.168.10.13:8006
+      hostname: shypowder.epaflix.com
     - name: traefik-external
       url: https://192.168.10.101
       hostname: grafana.epaflix.com
