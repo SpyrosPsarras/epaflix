@@ -1,0 +1,103 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ollama
+  namespace: ai
+  labels:
+    app: ollama
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: ollama
+  template:
+    metadata:
+      labels:
+        app: ollama
+    spec:
+      runtimeClassName: nvidia
+      nodeSelector:
+        gpu: nvidia
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+        supplementalGroups: [44, 107, 568]
+      containers:
+        - name: ollama
+          image: ollama/ollama:0.40.13
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          env:
+            - {name: NVIDIA_DRIVER_CAPABILITIES, value: all}
+            - {name: NVIDIA_VISIBLE_DEVICES, value: all}
+            - {name: OLLAMA_CONTEXT_LENGTH, value: "8192"}
+            - {name: OLLAMA_FLASH_ATTENTION, value: "1"}
+            - {name: OLLAMA_HOST, value: "0.0.0.0:30068"}
+            - {name: OLLAMA_KV_CACHE_TYPE, value: q8_0}
+            - {name: OLLAMA_NUM_PARALLEL, value: "2"}
+            - {name: OLLAMA_ORIGINS, value: "*"}
+            - {name: TZ, value: Etc/UTC}
+            - {name: UMASK, value: "002"}
+            - {name: UMASK_SET, value: "002"}
+          ports:
+            - name: http
+              containerPort: 30068
+          resources:
+            requests:
+              cpu: 500m
+              memory: 2Gi
+              nvidia.com/gpu: 1
+            limits:
+              cpu: "4"
+              memory: 8Gi
+              nvidia.com/gpu: 1
+          startupProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+          volumeMounts:
+            - name: models
+              mountPath: /root/.ollama
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: ollama-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ollama
+  namespace: ai
+  labels:
+    app: ollama
+spec:
+  type: ClusterIP
+  selector:
+    app: ollama
+  ports:
+    - name: http
+      port: 30068
+      targetPort: http

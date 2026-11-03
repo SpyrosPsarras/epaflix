@@ -27,7 +27,7 @@ Minor and major releases require review throughout this images block. Patch rele
 
 ## Scope and exceptions
 
-All twelve originally listed digest-only entries were assessed. CleanUparr and Jellyfin had persistent application config, so they were pinned rather than assumed safe. The k3s Jellyfin Deployment was later removed; Jellyfin runs on TrueNAS. Unpackerr, Bazarr Autotranslate and qBittorrent are also pinned without relying on an absence-of-migrations claim. Neutarr already has a release pin. Homarr and Sonarr2 are no longer in this checkout.
+All twelve originally listed digest-only entries were assessed. CleanUparr and Jellyfin had persistent application config, so they were pinned rather than assumed safe. Jellyfin's k3s Deployment is pinned to k3s-worker-64 and keeps the same 12.4 image tag as its former TrueNAS compose. The registry resolved that tag to `sha256:fea863d0cd9ec445985d9c75fc6ed64e38a1d2766cf0c250a33d553f4fc1b771` on 2026-11-03; the kustomization pins it alongside the tag. Unpackerr, Bazarr Autotranslate and qBittorrent are also pinned without relying on an absence-of-migrations claim. Neutarr already has a release pin. Homarr and Sonarr2 are no longer in this checkout.
 
 | Entry with a special update policy | Evidence and policy |
 | --- | --- |

@@ -1,0 +1,134 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jellyfin
+  namespace: servarr
+  labels:
+    app: jellyfin
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: jellyfin
+  template:
+    metadata:
+      labels:
+        app: jellyfin
+    spec:
+      runtimeClassName: nvidia
+      nodeSelector:
+        gpu: nvidia
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      securityContext:
+        runAsUser: 568
+        runAsGroup: 568
+        fsGroup: 568
+        supplementalGroups: [44, 107, 568]
+      containers:
+        - name: jellyfin
+          image: jellyfin/jellyfin:12.4
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          env:
+            - {name: GID, value: "568"}
+            - {name: GROUP_ID, value: "568"}
+            - {name: JELLYFIN_CACHE_DIR, value: /cache}
+            - {name: JELLYFIN_PublishedServerUrl, value: jellyfin.epavli}
+            - {name: NVIDIA_DRIVER_CAPABILITIES, value: all}
+            - {name: NVIDIA_VISIBLE_DEVICES, value: all}
+            - {name: PGID, value: "568"}
+            - {name: PUID, value: "568"}
+            - {name: TZ, value: Europe/Oslo}
+            - {name: UID, value: "568"}
+            - {name: UMASK, value: "2"}
+            - {name: UMASK_SET, value: "2"}
+            - {name: USER_ID, value: "568"}
+          ports:
+            - name: http
+              containerPort: 8096
+            - name: discovery
+              containerPort: 7359
+              protocol: UDP
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+              nvidia.com/gpu: 1
+            limits:
+              cpu: "2"
+              memory: 4Gi
+              nvidia.com/gpu: 1
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: cache
+              mountPath: /cache
+            - name: transcodes
+              mountPath: /cache/transcodes
+            - name: transcodes
+              mountPath: /config/transcodes
+            - name: media
+              mountPath: /movies
+              subPath: movies
+            - name: media
+              mountPath: /tvshows
+              subPath: tvshows
+            - name: media
+              mountPath: /animes
+              subPath: animes
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: jellyfin-config
+        - name: cache
+          emptyDir: {}
+        - name: transcodes
+          emptyDir: {}
+        - name: media
+          persistentVolumeClaim:
+            claimName: servarr-media
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jellyfin
+  namespace: servarr
+  labels:
+    app: jellyfin
+spec:
+  type: ClusterIP
+  selector:
+    app: jellyfin
+  ports:
+    - name: http
+      port: 8096
+      targetPort: http

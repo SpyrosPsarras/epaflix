@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: Secret
+metadata:
+    name: open-webui-env
+    namespace: ai
+type: Opaque
+data:
+    WEBUI_SECRET_KEY: ENC[AES256_GCM,data:Pm1npvuTvwgQpDtXS5TL9Q==,iv:63Pje0dd8FyMRrHFeoy1qKZwA/ZJMcHHEDyCutWIzWE=,tag:gTn7JuUjJYH5Wj3WXISRlA==,type:str]
+    REDIS_URL: ENC[AES256_GCM,data:lDogSOH1AfJerHzQep8px+SwMPOKQM2kmAhplJ15EXh7D0MOg1iNTR4r04uHem+PDEW6Vw==,iv:00EAcCtHZSaIVeGubFQ4mRrUvjyIFVf6DK0E32VIyHg=,tag:Eoap90M7uRB0qO7NFLGngg==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSB6d01LVnc3c2NEZXA4ZVVR
+            UWkxeWRENnFobk1YNEJyL2VmUnZzbWgralRvCk84elFHSEtTZzhZam9kUERuRUFa
+            SjhuV1lFRUpmRTlFMWIxRmdpMFRrUUUKLS0tIEMxdzdia1dXN2NQWmdWUnRzNzBt
+            emlXRUNCQXAvbEhmd3J1M0pub2N2ZlEKuzANvAR0N2x1rXDGl8Z6TmsTdqjI83Kj
+            xD0hr8TVW6lUCRjfhScR5txwxoxnvFiCMLEQiP0oaDHn69lhqlNZ/w==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1586thf5vkcdf5lcn3zwjpu8ltkwyq8efrhj8lr0vdrrt9k5f3qgsxeg7gx
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-11-03T16:55:16Z"
+    mac: ENC[AES256_GCM,data:aWV1tEfjnTXgGl08d00m6yy2GXvjpvvBqBXN49iJEWVgR6cSWAkUFM6oU/5iU7BaqsqJoUWuL+Xk1hdEu9Z5E/ur/Mp2eKfYJGc+0XwRv+J8DwvPmUbVVtPwt2ZAscA6eKQeMeQwvzibAhe3kTQarV2lUnZPiB6Fivs+NIRRyPk=,iv:GZ3wZ1SM3etX3cFs4wKdWgErsSY7BxQVBIr+r0mlg5A=,tag:tYyjol3r34hzfnvsH/HXOQ==,type:str]
+    version: 3.13.3

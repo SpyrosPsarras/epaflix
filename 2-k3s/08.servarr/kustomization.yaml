@@ -37,7 +37,9 @@ resources:
   - lingarr/lingarr.yaml
   - lingarr/pdb.yaml
   - lingarr/ingress.yaml
-  - jellyfin/jellyfin-truenas-redirect.yaml
+  - jellyfin/storage.yaml
+  - jellyfin/jellyfin.yaml
+  - jellyfin/ingressroute.yaml
   - seerr/seerr.yaml
   - seerr/pdb.yaml
   - qbittorrent/qbittorrent.yaml
@@ -69,6 +71,8 @@ configMapGenerator:
 images:
   # Version tags make release changes typed Renovate updates (#1129).
   # Keep digests alongside tags. Exceptions and registry evidence: docs/servarr-image-pins.md.
+  - name: jellyfin/jellyfin
+    newTag: 12.4@sha256:fea863d0cd9ec445985d9c75fc6ed64e38a1d2766cf0c250a33d553f4fc1b771
   - name: ghcr.io/raydak-labs/configarr
     newTag: 1.38.0@sha256:36d15adcc815557409a9437bc51468edfd1ac05ef6b46336dff650a56d2cc6a3
   - name: ghcr.io/linuxserver/sonarr
