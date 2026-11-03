@@ -75,6 +75,7 @@ echo ""
 
 echo "Step 3: Creating storage (PV/PVC)..."
 kubectl apply -f "$SHARED_DIR/storage/"
+kubectl apply -f "$BASE_DIR/jellyfin/storage.yaml"
 info "Storage resources created"
 
 echo "Waiting for PVCs to bind..."
@@ -127,10 +128,11 @@ wait_for_pods servarr "app in (sonarr,radarr,bazarr)" 300
 echo ""
 
 echo "Step 7: Deploying media applications..."
-kubectl apply -f "$BASE_DIR/jellyfin/jellyfin-truenas-redirect.yaml"
+kubectl apply -f "$BASE_DIR/jellyfin/jellyfin.yaml"
+kubectl apply -f "$BASE_DIR/jellyfin/ingressroute.yaml"
 kubectl apply -f "$BASE_DIR/seerr/seerr.yaml"
 kubectl apply -f "$BASE_DIR/seerr/pdb.yaml"
-info "Jellyfin (TrueNAS redirect) and Seerr deployed"
+info "Jellyfin and Seerr deployed"
 
 wait_for_pods servarr "app=seerr" 300
 echo ""

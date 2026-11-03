@@ -68,12 +68,6 @@ BEGIN
   RAISE NOTICE 'reconciled';
 END $$;
 
--- Register the LAN Ollama on TrueNAS as an openai-compatibility upstream, so one
--- endpoint serves both the Claude account and the local models. Append-only and
--- idempotent: openai-compatibility is a top-level key that the seeded config does
--- not define, and YAML does not care about top-level key order, so appending is
--- safe and needs no YAML parser.
---
 -- The api-key is a placeholder. Ollama does not authenticate, and the field is
 -- required by the schema, so this is deliberately not a secret and belongs in git.
 --
@@ -104,6 +98,10 @@ BEGIN
   SELECT content INTO c FROM public.config_store WHERE id = 'config';
   IF c IS NULL THEN RETURN; END IF;
 
+  c := replace(c, 'http://192.168.10.200:30068/v1', 'http://ollama.ai.svc.cluster.local:30068/v1');
+  UPDATE public.config_store SET content = c, updated_at = now()
+   WHERE id = 'config' AND content IS DISTINCT FROM c;
+
   IF EXISTS (SELECT 1 FROM regexp_matches(c, '^openai-compatibility:', 'n')) THEN
     RAISE NOTICE 'openai-compatibility already present - leaving it alone';
     RETURN;
@@ -113,7 +111,7 @@ BEGIN
      SET content = rtrim(c, E' \n') || E'\n' || $ollama$
 openai-compatibility:
   - name: "ollama"
-    base-url: "http://192.168.10.200:30068/v1"
+    base-url: "http://ollama.ai.svc.cluster.local:30068/v1"
     api-key-entries:
       - api-key: "ollama-no-auth-required"
     models:

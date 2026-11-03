@@ -72,6 +72,7 @@ jobs:
           python3 .github/hooks/test-sonarr-passfile.py
           python3 .github/hooks/test-sonarr-rotation-sources.py
           python3 .github/hooks/test-bazarr-autotranslate.py
+          python3 .github/hooks/test-gpu-apps.py
           ./.github/hooks/check-sops-encrypted.sh --full-tree
 
       - name: Install tools
