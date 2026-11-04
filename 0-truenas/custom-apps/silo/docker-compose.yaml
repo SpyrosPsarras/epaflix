@@ -18,7 +18,7 @@ services:
       - 192.168.10.200:9000:9000
       - 192.168.10.200:9001:9001
     volumes:
-      - /mnt/pool1/minio:/data1
+      - /mnt/mpara-tank-lan/minio:/data1
     healthcheck:
       test: ["CMD", "silo", "healthcheck", "ready"]
       interval: 30s

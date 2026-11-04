@@ -8,35 +8,33 @@ Silo keeps the S3 API, `.minio.sys` data format and `MINIO_*` settings. See [com
 ## What runs
 
 TrueNAS custom app `silo` uses [docker-compose.yaml](docker-compose.yaml). The image is pinned by tag and digest there.
-Dataset `pool1/minio`, at host path `/mnt/pool1/minio`, is bind-mounted into the container and uses on-disk format `xl-single`.
+Dataset `mpara-tank-lan/minio`, at host path `/mnt/mpara-tank-lan/minio`, is bind-mounted into the container and uses on-disk format `xl-single`.
 CNPG barman-cloud ObjectStore `postgres-minio-store`, Vaultwarden restic backups and Fytorium all use `minio.epaflix.com` through Traefik's internal entry point.
 
 ## Credentials
 
 Silo reads `/mnt/apps/silo/silo.env` on TrueNAS, owned by `root:root`, mode `0600`, directory mode `0700`.
-The stopped catalog app `minio` still holds the root credentials in its app config, which is the source they were copied from.
+The file is the only copy of the root credentials. The catalog app `minio` they were copied from was removed with the old TrueNAS.
 
 ```sh
 sudo install -d -m 0700 -o root -g root /mnt/apps/silo
-sudo sh -c 'umask 077; midclt call app.config minio | jq -r ".minio.credentials | \"MINIO_ROOT_USER=\(.access_key)\nMINIO_ROOT_PASSWORD=\(.secret_key)\"" > /mnt/apps/silo/silo.env'
 ```
 
-Add `MINIO_SERVER_URL` and `MINIO_BROWSER_REDIRECT_URL` lines with the values of SOPS keys `minio_api_endpoint` and `minio_console_endpoint`, respectively, using a root editor such as `sudo nano /mnt/apps/silo/silo.env`, not `echo` or shell tracing.
-Never print `app.config minio` output or the file, use shell tracing or commit the file.
+The file holds `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`, `MINIO_SERVER_URL` and `MINIO_BROWSER_REDIRECT_URL`. Set the last two with the values of SOPS keys `minio_api_endpoint` and `minio_console_endpoint`, respectively, using a root editor such as `sudo nano /mnt/apps/silo/silo.env`, not `echo` or shell tracing.
+Never print the file, use shell tracing or commit it.
 
 ## Deploy or update
 
 Renovate's docker-compose manager updates the image tag and digest in this compose. The compose is applied to TrueNAS by hand; a merged Renovate PR does not deploy it. Snapshot first, then `app.update`.
 Run `docker`, `midclt` and `zfs` commands with `sudo` in a TrueNAS shell.
-`pool1/minio@pre-silo-2026-10-25` is the snapshot taken before the MinIO to Silo cutover.
-For later upgrades, run `sudo zfs snapshot pool1/minio@pre-<tag>`, replacing `<tag>` with the target tag.
+Before an upgrade, run `sudo zfs snapshot mpara-tank-lan/minio@pre-<tag>`, replacing `<tag>` with the target tag.
 Create uses `{"app_name": "silo", "custom_app": true, "custom_compose_config_string": "<compose>"}`. With this compose file in the shell's current directory:
 
 ```sh
 sudo midclt call -j app.create "$(jq -n --rawfile compose docker-compose.yaml '{app_name: "silo", custom_app: true, custom_compose_config_string: $compose}')"
 sudo midclt call -j app.update silo "$(jq -n --rawfile compose docker-compose.yaml '{custom_compose_config_string: $compose}')"
 ```
-Choose create for a new app or update for the existing app. Do not run MinIO and Silo against the dataset at the same time.
+Choose create for a new app or update for the existing app.
 
 ## Checks after any change
 
@@ -95,10 +93,10 @@ JS
 
 ## Rollback
 
-In the TrueNAS shell, first list snapshots with `sudo zfs list -t snapshot -o name,creation -s creation pool1/minio`.
+Rolling back to MinIO is no longer possible: the cutover snapshot and the catalog app `minio` were on the old TrueNAS.
+To undo an upgrade, first list snapshots with `sudo zfs list -t snapshot -o name,creation -s creation mpara-tank-lan/minio`.
 Stop `silo` with `sudo midclt call -j app.stop silo`.
-If no snapshot is newer than `pool1/minio@pre-silo-2026-10-25`, run `sudo zfs rollback pool1/minio@pre-silo-2026-10-25`.
-If newer snapshots exist, plain rollback refuses to run. Use `sudo zfs rollback -r pool1/minio@pre-silo-2026-10-25` only after owner approval to destroy all listed newer snapshots.
-After rollback, start `minio` with `sudo midclt call -j app.start minio`.
-Rollback drops all writes made after the snapshot. For a later upgrade, use its pre-upgrade snapshot and matching previous image/configuration.
-While Silo runs, the catalog app `minio` stays installed and stopped for rollback until the owner removes it.
+If no snapshot is newer than `mpara-tank-lan/minio@pre-<tag>`, run `sudo zfs rollback mpara-tank-lan/minio@pre-<tag>`.
+If newer snapshots exist, plain rollback refuses to run. Use `sudo zfs rollback -r mpara-tank-lan/minio@pre-<tag>` only after owner approval to destroy all listed newer snapshots.
+Then run `app.update` with the previous compose and start `silo` with `sudo midclt call -j app.start silo`.
+Rollback drops all writes made after the snapshot.
