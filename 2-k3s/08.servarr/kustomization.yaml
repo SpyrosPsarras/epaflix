@@ -16,6 +16,7 @@ resources:
   - lidarr/lidarr.yaml
   - lidarr/network-policy.yaml
   - lidarr/ingressroute.yaml
+  - lidarr/pdb.yaml
   - radarr/radarr.yaml
   - radarr/pdb.yaml
   - radarr/ingressroute.yaml
