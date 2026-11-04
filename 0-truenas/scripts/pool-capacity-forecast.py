@@ -104,7 +104,7 @@ def fmt_date(date, now):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--pool", default="pool1")
+    p.add_argument("--pool", default="mpara-tank-lan")
     p.add_argument("--history", default="/var/db/pool-capacity/history.jsonl")
     p.add_argument("--horizon-days", type=int, default=180,
                    help="exit 1 when the 95%% date is within this many days")

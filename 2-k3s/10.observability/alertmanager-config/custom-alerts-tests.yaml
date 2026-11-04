@@ -1090,7 +1090,7 @@ tests:
               component: truenas-storage
             exp_annotations:
               summary: "TrueNAS zpool pool1 is degraded"
-              description: "node_zfs_zpool_state on 192.168.10.200 has reported zpool pool1 as degraded (anything but online) for 5m. Run `zpool status -v pool1` on TrueNAS (read-only) to see which device is affected and whether its read/write/checksum error counts are still climbing, and check the latest backups of that pool's data before changing anything. Do not zpool clear, replace or online a device from this alert alone. Do not assume redundancy: pool1 is a stripe with none, and zpool status shows the layout of the others. If the exporter stops answering, this alert resolves without the pool being healthy; TargetDown covers that."
+              description: "node_zfs_zpool_state on 192.168.10.200 has reported zpool pool1 as degraded (anything but online) for 5m. Run `zpool status -v pool1` on TrueNAS (read-only) to see which device is affected and whether its read/write/checksum error counts are still climbing, and check the latest backups of that pool's data before changing anything. Do not zpool clear, replace or online a device from this alert alone. Do not assume redundancy: mpara-tank-lan is raidz2, apps is one virtual disk with no ZFS redundancy, and zpool status shows the layout of the others. If the exporter stops answering, this alert resolves without the pool being healthy; TargetDown covers that."
           - exp_labels:
               endpoint: http-metrics
               instance: 192.168.10.200
@@ -1103,7 +1103,7 @@ tests:
               component: truenas-storage
             exp_annotations:
               summary: "TrueNAS zpool tank-a is faulted"
-              description: "node_zfs_zpool_state on 192.168.10.200 has reported zpool tank-a as faulted (anything but online) for 5m. Run `zpool status -v tank-a` on TrueNAS (read-only) to see which device is affected and whether its read/write/checksum error counts are still climbing, and check the latest backups of that pool's data before changing anything. Do not zpool clear, replace or online a device from this alert alone. Do not assume redundancy: pool1 is a stripe with none, and zpool status shows the layout of the others. If the exporter stops answering, this alert resolves without the pool being healthy; TargetDown covers that."
+              description: "node_zfs_zpool_state on 192.168.10.200 has reported zpool tank-a as faulted (anything but online) for 5m. Run `zpool status -v tank-a` on TrueNAS (read-only) to see which device is affected and whether its read/write/checksum error counts are still climbing, and check the latest backups of that pool's data before changing anything. Do not zpool clear, replace or online a device from this alert alone. Do not assume redundancy: mpara-tank-lan is raidz2, apps is one virtual disk with no ZFS redundancy, and zpool status shows the layout of the others. If the exporter stops answering, this alert resolves without the pool being healthy; TargetDown covers that."
           - exp_labels:
               endpoint: http-metrics
               instance: 192.168.10.200
@@ -1116,7 +1116,7 @@ tests:
               component: truenas-storage
             exp_annotations:
               summary: "TrueNAS zpool tank-b is unavail"
-              description: "node_zfs_zpool_state on 192.168.10.200 has reported zpool tank-b as unavail (anything but online) for 5m. Run `zpool status -v tank-b` on TrueNAS (read-only) to see which device is affected and whether its read/write/checksum error counts are still climbing, and check the latest backups of that pool's data before changing anything. Do not zpool clear, replace or online a device from this alert alone. Do not assume redundancy: pool1 is a stripe with none, and zpool status shows the layout of the others. If the exporter stops answering, this alert resolves without the pool being healthy; TargetDown covers that."
+              description: "node_zfs_zpool_state on 192.168.10.200 has reported zpool tank-b as unavail (anything but online) for 5m. Run `zpool status -v tank-b` on TrueNAS (read-only) to see which device is affected and whether its read/write/checksum error counts are still climbing, and check the latest backups of that pool's data before changing anything. Do not zpool clear, replace or online a device from this alert alone. Do not assume redundancy: mpara-tank-lan is raidz2, apps is one virtual disk with no ZFS redundancy, and zpool status shows the layout of the others. If the exporter stops answering, this alert resolves without the pool being healthy; TargetDown covers that."
           - exp_labels:
               endpoint: http-metrics
               instance: 192.168.10.200
@@ -1129,7 +1129,7 @@ tests:
               component: truenas-storage
             exp_annotations:
               summary: "TrueNAS zpool tank-c is offline"
-              description: "node_zfs_zpool_state on 192.168.10.200 has reported zpool tank-c as offline (anything but online) for 5m. Run `zpool status -v tank-c` on TrueNAS (read-only) to see which device is affected and whether its read/write/checksum error counts are still climbing, and check the latest backups of that pool's data before changing anything. Do not zpool clear, replace or online a device from this alert alone. Do not assume redundancy: pool1 is a stripe with none, and zpool status shows the layout of the others. If the exporter stops answering, this alert resolves without the pool being healthy; TargetDown covers that."
+              description: "node_zfs_zpool_state on 192.168.10.200 has reported zpool tank-c as offline (anything but online) for 5m. Run `zpool status -v tank-c` on TrueNAS (read-only) to see which device is affected and whether its read/write/checksum error counts are still climbing, and check the latest backups of that pool's data before changing anything. Do not zpool clear, replace or online a device from this alert alone. Do not assume redundancy: mpara-tank-lan is raidz2, apps is one virtual disk with no ZFS redundancy, and zpool status shows the layout of the others. If the exporter stops answering, this alert resolves without the pool being healthy; TargetDown covers that."
           - exp_labels:
               endpoint: http-metrics
               instance: 192.168.10.200
@@ -1142,7 +1142,7 @@ tests:
               component: truenas-storage
             exp_annotations:
               summary: "TrueNAS zpool tank-d is removed"
-              description: "node_zfs_zpool_state on 192.168.10.200 has reported zpool tank-d as removed (anything but online) for 5m. Run `zpool status -v tank-d` on TrueNAS (read-only) to see which device is affected and whether its read/write/checksum error counts are still climbing, and check the latest backups of that pool's data before changing anything. Do not zpool clear, replace or online a device from this alert alone. Do not assume redundancy: pool1 is a stripe with none, and zpool status shows the layout of the others. If the exporter stops answering, this alert resolves without the pool being healthy; TargetDown covers that."
+              description: "node_zfs_zpool_state on 192.168.10.200 has reported zpool tank-d as removed (anything but online) for 5m. Run `zpool status -v tank-d` on TrueNAS (read-only) to see which device is affected and whether its read/write/checksum error counts are still climbing, and check the latest backups of that pool's data before changing anything. Do not zpool clear, replace or online a device from this alert alone. Do not assume redundancy: mpara-tank-lan is raidz2, apps is one virtual disk with no ZFS redundancy, and zpool status shows the layout of the others. If the exporter stops answering, this alert resolves without the pool being healthy; TargetDown covers that."
           - exp_labels:
               endpoint: http-metrics
               instance: 192.168.10.200
@@ -1155,7 +1155,7 @@ tests:
               component: truenas-storage
             exp_annotations:
               summary: "TrueNAS zpool tank-e is suspended"
-              description: "node_zfs_zpool_state on 192.168.10.200 has reported zpool tank-e as suspended (anything but online) for 5m. Run `zpool status -v tank-e` on TrueNAS (read-only) to see which device is affected and whether its read/write/checksum error counts are still climbing, and check the latest backups of that pool's data before changing anything. Do not zpool clear, replace or online a device from this alert alone. Do not assume redundancy: pool1 is a stripe with none, and zpool status shows the layout of the others. If the exporter stops answering, this alert resolves without the pool being healthy; TargetDown covers that."
+              description: "node_zfs_zpool_state on 192.168.10.200 has reported zpool tank-e as suspended (anything but online) for 5m. Run `zpool status -v tank-e` on TrueNAS (read-only) to see which device is affected and whether its read/write/checksum error counts are still climbing, and check the latest backups of that pool's data before changing anything. Do not zpool clear, replace or online a device from this alert alone. Do not assume redundancy: mpara-tank-lan is raidz2, apps is one virtual disk with no ZFS redundancy, and zpool status shows the layout of the others. If the exporter stops answering, this alert resolves without the pool being healthy; TargetDown covers that."
       - eval_time: 25m
         alertname: TruenasPoolUnhealthy
         exp_alerts:
@@ -1171,7 +1171,7 @@ tests:
               component: truenas-storage
             exp_annotations:
               summary: "TrueNAS zpool tank-a is faulted"
-              description: "node_zfs_zpool_state on 192.168.10.200 has reported zpool tank-a as faulted (anything but online) for 5m. Run `zpool status -v tank-a` on TrueNAS (read-only) to see which device is affected and whether its read/write/checksum error counts are still climbing, and check the latest backups of that pool's data before changing anything. Do not zpool clear, replace or online a device from this alert alone. Do not assume redundancy: pool1 is a stripe with none, and zpool status shows the layout of the others. If the exporter stops answering, this alert resolves without the pool being healthy; TargetDown covers that."
+              description: "node_zfs_zpool_state on 192.168.10.200 has reported zpool tank-a as faulted (anything but online) for 5m. Run `zpool status -v tank-a` on TrueNAS (read-only) to see which device is affected and whether its read/write/checksum error counts are still climbing, and check the latest backups of that pool's data before changing anything. Do not zpool clear, replace or online a device from this alert alone. Do not assume redundancy: mpara-tank-lan is raidz2, apps is one virtual disk with no ZFS redundancy, and zpool status shows the layout of the others. If the exporter stops answering, this alert resolves without the pool being healthy; TargetDown covers that."
           - exp_labels:
               endpoint: http-metrics
               instance: 192.168.10.200
@@ -1184,7 +1184,7 @@ tests:
               component: truenas-storage
             exp_annotations:
               summary: "TrueNAS zpool tank-b is unavail"
-              description: "node_zfs_zpool_state on 192.168.10.200 has reported zpool tank-b as unavail (anything but online) for 5m. Run `zpool status -v tank-b` on TrueNAS (read-only) to see which device is affected and whether its read/write/checksum error counts are still climbing, and check the latest backups of that pool's data before changing anything. Do not zpool clear, replace or online a device from this alert alone. Do not assume redundancy: pool1 is a stripe with none, and zpool status shows the layout of the others. If the exporter stops answering, this alert resolves without the pool being healthy; TargetDown covers that."
+              description: "node_zfs_zpool_state on 192.168.10.200 has reported zpool tank-b as unavail (anything but online) for 5m. Run `zpool status -v tank-b` on TrueNAS (read-only) to see which device is affected and whether its read/write/checksum error counts are still climbing, and check the latest backups of that pool's data before changing anything. Do not zpool clear, replace or online a device from this alert alone. Do not assume redundancy: mpara-tank-lan is raidz2, apps is one virtual disk with no ZFS redundancy, and zpool status shows the layout of the others. If the exporter stops answering, this alert resolves without the pool being healthy; TargetDown covers that."
           - exp_labels:
               endpoint: http-metrics
               instance: 192.168.10.200
@@ -1197,7 +1197,7 @@ tests:
               component: truenas-storage
             exp_annotations:
               summary: "TrueNAS zpool tank-c is offline"
-              description: "node_zfs_zpool_state on 192.168.10.200 has reported zpool tank-c as offline (anything but online) for 5m. Run `zpool status -v tank-c` on TrueNAS (read-only) to see which device is affected and whether its read/write/checksum error counts are still climbing, and check the latest backups of that pool's data before changing anything. Do not zpool clear, replace or online a device from this alert alone. Do not assume redundancy: pool1 is a stripe with none, and zpool status shows the layout of the others. If the exporter stops answering, this alert resolves without the pool being healthy; TargetDown covers that."
+              description: "node_zfs_zpool_state on 192.168.10.200 has reported zpool tank-c as offline (anything but online) for 5m. Run `zpool status -v tank-c` on TrueNAS (read-only) to see which device is affected and whether its read/write/checksum error counts are still climbing, and check the latest backups of that pool's data before changing anything. Do not zpool clear, replace or online a device from this alert alone. Do not assume redundancy: mpara-tank-lan is raidz2, apps is one virtual disk with no ZFS redundancy, and zpool status shows the layout of the others. If the exporter stops answering, this alert resolves without the pool being healthy; TargetDown covers that."
           - exp_labels:
               endpoint: http-metrics
               instance: 192.168.10.200
@@ -1210,7 +1210,7 @@ tests:
               component: truenas-storage
             exp_annotations:
               summary: "TrueNAS zpool tank-d is removed"
-              description: "node_zfs_zpool_state on 192.168.10.200 has reported zpool tank-d as removed (anything but online) for 5m. Run `zpool status -v tank-d` on TrueNAS (read-only) to see which device is affected and whether its read/write/checksum error counts are still climbing, and check the latest backups of that pool's data before changing anything. Do not zpool clear, replace or online a device from this alert alone. Do not assume redundancy: pool1 is a stripe with none, and zpool status shows the layout of the others. If the exporter stops answering, this alert resolves without the pool being healthy; TargetDown covers that."
+              description: "node_zfs_zpool_state on 192.168.10.200 has reported zpool tank-d as removed (anything but online) for 5m. Run `zpool status -v tank-d` on TrueNAS (read-only) to see which device is affected and whether its read/write/checksum error counts are still climbing, and check the latest backups of that pool's data before changing anything. Do not zpool clear, replace or online a device from this alert alone. Do not assume redundancy: mpara-tank-lan is raidz2, apps is one virtual disk with no ZFS redundancy, and zpool status shows the layout of the others. If the exporter stops answering, this alert resolves without the pool being healthy; TargetDown covers that."
           - exp_labels:
               endpoint: http-metrics
               instance: 192.168.10.200
@@ -1223,72 +1223,100 @@ tests:
               component: truenas-storage
             exp_annotations:
               summary: "TrueNAS zpool tank-e is suspended"
-              description: "node_zfs_zpool_state on 192.168.10.200 has reported zpool tank-e as suspended (anything but online) for 5m. Run `zpool status -v tank-e` on TrueNAS (read-only) to see which device is affected and whether its read/write/checksum error counts are still climbing, and check the latest backups of that pool's data before changing anything. Do not zpool clear, replace or online a device from this alert alone. Do not assume redundancy: pool1 is a stripe with none, and zpool status shows the layout of the others. If the exporter stops answering, this alert resolves without the pool being healthy; TargetDown covers that."
+              description: "node_zfs_zpool_state on 192.168.10.200 has reported zpool tank-e as suspended (anything but online) for 5m. Run `zpool status -v tank-e` on TrueNAS (read-only) to see which device is affected and whether its read/write/checksum error counts are still climbing, and check the latest backups of that pool's data before changing anything. Do not zpool clear, replace or online a device from this alert alone. Do not assume redundancy: mpara-tank-lan is raidz2, apps is one virtual disk with no ZFS redundancy, and zpool status shows the layout of the others. If the exporter stops answering, this alert resolves without the pool being healthy; TargetDown covers that."
 
   - interval: 1m
     input_series:
-      - series: 'node_filesystem_avail_bytes{device="pool1",device_error="",fstype="zfs",instance="192.168.10.200",job="truenas-node-exporter",mountpoint="/mnt/pool1"}'
-        values: "429496729599x90"  # 400 GiB - 1, below both pool1 thresholds
+      - series: 'node_filesystem_avail_bytes{device="mpara-tank-lan",device_error="",fstype="zfs",instance="192.168.10.200",job="truenas-node-exporter",mountpoint="/mnt/mpara-tank-lan"}'
+        values: "1099511627775x90"  # 1 TiB - 1, below both thresholds
     alert_rule_test:
       - eval_time: 70m
-        alertname: TruenasPool1FreeLow
+        alertname: TruenasMediaPoolFreeLow
         exp_alerts:
           - exp_labels:
               job: truenas-node-exporter
               instance: 192.168.10.200
-              device: pool1
+              device: mpara-tank-lan
               fstype: zfs
-              mountpoint: /mnt/pool1
+              mountpoint: /mnt/mpara-tank-lan
               severity: warning
               component: truenas-storage
             exp_annotations:
-              summary: "pool1 free space is under 1 TiB (~92% used)"
+              summary: "mpara-tank-lan free space is under 2 TiB"
               description: >-
-                  The pool1 root dataset's node_filesystem_avail_bytes has been under 1 TiB for an hour. That
-                  metric is the POOL-WIDE free space, not the root dataset's own: every pool1 dataset reports the
-                  same value because none of them is quota-bound for statfs purposes (verified against all 8
-                  pool1 datasets, 2026-09-05). It is statfs avail, so it reads lower than `zpool list free` by
-                  the ZFS slop reservation (~3% of the pool, ~0.7 TiB here). Never build a used% from
-                  node_filesystem_size_bytes on pool1: the root dataset is quota-bounded, so its size label is
-                  2.25 TiB against a 21.8 TiB pool - take used% from `zpool list` or
-                  0-truenas/scripts/pool-capacity-forecast.py. pool1 has sat near 88% since August 2026; with no
-                  disk budget until ~2027-02 the headroom plan is the media deletion service (owner decision in
-                  #805, 2026-08-21), and the weekly growth measurement and runway forecast live in
-                  0-truenas/scripts/pool-capacity-forecast.py (#805). This alert is the floor between the weekly
-                  runs: check what grew (`zfs list -o space -r pool1` sorted by used) before deleting anything,
-                  and remember dapc-backup is a permanent keep (#807).
+                  The mpara-tank-lan root dataset's node_filesystem_avail_bytes has been under 2 TiB for an
+                  hour. The root dataset has no quota, so this is the pool-wide space ZFS can still give out;
+                  datasets with their own quota, such as nick-torrents, report less. It is usable space after
+                  raidz2 parity, so it reads far lower than `zpool list free`, which counts raw space. Never
+                  build a used% from node_filesystem_size_bytes here: on the root dataset it is avail plus the
+                  root's own few hundred KiB, not the pool size. Take used% from `zpool list` or
+                  0-truenas/scripts/pool-capacity-forecast.py (#805). 2 TiB is about 90% of the 21 TiB usable
+                  before the 2026-11-04 RAIDZ expansion. Check what grew (`zfs list -o space -r
+                  mpara-tank-lan` sorted by used) before deleting anything.
       - eval_time: 70m
-        alertname: TruenasPool1FreeCritical
+        alertname: TruenasMediaPoolFreeCritical
         exp_alerts:
           - exp_labels:
               job: truenas-node-exporter
               instance: 192.168.10.200
-              device: pool1
+              device: mpara-tank-lan
               fstype: zfs
-              mountpoint: /mnt/pool1
+              mountpoint: /mnt/mpara-tank-lan
               severity: critical
               component: truenas-storage
             exp_annotations:
-              summary: "pool1 free space is under 400 GiB (~95% used) - the ZFS floor"
+              summary: "mpara-tank-lan free space is under 1 TiB - near the ZFS floor"
               description: >-
-                  Pool-wide free space on pool1 (same metric semantics and size-label caveat as
-                  TruenasPool1FreeLow) has been under 400 GiB for 30 minutes. 95% used is the practical ZFS
+                  Pool-wide free space on mpara-tank-lan (same metric semantics and size-label caveat as
+                  TruenasMediaPoolFreeLow) has been under 1 TiB for 30 minutes. 95% used is the practical ZFS
                   floor: CoW has no room to write, fragmentation climbs and writes start failing before the pool
-                  reads as technically full. This is the "stops being enough" date the #805 forecast tracks,
-                  arrived early. Reclaim space now (the #609 download reclaim and #968 snapshot paths are the
-                  catalogued candidates; dapc-backup is a permanent keep per #807) and treat every write to pool1
-                  as at-risk until free space is back above 1 TiB.
+                  reads as technically full. Reclaim space now and treat every write to mpara-tank-lan as
+                  at-risk until free space is back above 2 TiB.
 
   - interval: 1m
     input_series:
-      - series: 'node_filesystem_avail_bytes{device="pool1",device_error="",fstype="zfs",instance="192.168.10.200",job="truenas-node-exporter",mountpoint="/mnt/pool1"}'
-        values: "2199023255552x90"  # 2 TiB, above both thresholds (live 2026-09-05: 1.72 TiB)
+      - series: 'node_filesystem_avail_bytes{device="mpara-tank-lan",device_error="",fstype="zfs",instance="192.168.10.200",job="truenas-node-exporter",mountpoint="/mnt/mpara-tank-lan"}'
+        values: "2946710503424x90"  # live 2026-11-04: 2.68 TiB, above both thresholds
+      - series: 'node_filesystem_avail_bytes{device="mpara-tank-lan/nick-torrents",device_error="",fstype="zfs",instance="192.168.10.200",job="truenas-node-exporter",mountpoint="/mnt/mpara-tank-lan/nick-torrents"}'
+        values: "289964329024x90"  # a quota-bound dataset under 1 TiB must not fire
     alert_rule_test:
       - eval_time: 70m
-        alertname: TruenasPool1FreeLow
+        alertname: TruenasMediaPoolFreeLow
         exp_alerts: []
       - eval_time: 70m
-        alertname: TruenasPool1FreeCritical
+        alertname: TruenasMediaPoolFreeCritical
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'node_filesystem_avail_bytes{device="mpara-tank-lan",device_error="",fstype="zfs",instance="192.168.10.200",job="truenas-node-exporter",mountpoint="/mnt/mpara-tank-lan"}'
+        values: "1649267441664x90"  # 1.5 TiB: warning only
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: TruenasMediaPoolFreeLow
+        exp_alerts:
+          - exp_labels:
+              job: truenas-node-exporter
+              instance: 192.168.10.200
+              device: mpara-tank-lan
+              fstype: zfs
+              mountpoint: /mnt/mpara-tank-lan
+              severity: warning
+              component: truenas-storage
+            exp_annotations:
+              summary: "mpara-tank-lan free space is under 2 TiB"
+              description: >-
+                  The mpara-tank-lan root dataset's node_filesystem_avail_bytes has been under 2 TiB for an
+                  hour. The root dataset has no quota, so this is the pool-wide space ZFS can still give out;
+                  datasets with their own quota, such as nick-torrents, report less. It is usable space after
+                  raidz2 parity, so it reads far lower than `zpool list free`, which counts raw space. Never
+                  build a used% from node_filesystem_size_bytes here: on the root dataset it is avail plus the
+                  root's own few hundred KiB, not the pool size. Take used% from `zpool list` or
+                  0-truenas/scripts/pool-capacity-forecast.py (#805). 2 TiB is about 90% of the 21 TiB usable
+                  before the 2026-11-04 RAIDZ expansion. Check what grew (`zfs list -o space -r
+                  mpara-tank-lan` sorted by used) before deleting anything.
+      - eval_time: 70m
+        alertname: TruenasMediaPoolFreeCritical
         exp_alerts: []
 
   - interval: 1m
