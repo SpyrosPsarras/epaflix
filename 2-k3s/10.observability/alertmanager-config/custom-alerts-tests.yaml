@@ -7,6 +7,105 @@ rule_files:
 evaluation_interval: 1m
 
 tests:
+  - name: Lidarr unavailable deployment fires after 15 minutes
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="servarr",deployment="lidarr"}'
+        values: '0x20'
+      - series: 'up{job="lidarr"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: LidarrDown
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: LidarrDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: servarr
+            exp_annotations:
+              summary: Lidarr is unavailable
+              description: "Lidarr has no available replica or Prometheus cannot scrape its exportarr target. Check the lidarr Deployment, ServiceMonitor and exportarr sidecar in servarr."
+  - name: Lidarr failed scrape fires after 15 minutes
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="servarr",deployment="lidarr"}'
+        values: '1x20'
+      - series: 'up{job="lidarr"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: LidarrDown
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: LidarrDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: servarr
+            exp_annotations:
+              summary: Lidarr is unavailable
+              description: "Lidarr has no available replica or Prometheus cannot scrape its exportarr target. Check the lidarr Deployment, ServiceMonitor and exportarr sidecar in servarr."
+  - name: Lidarr missing scrape fires after 15 minutes
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="servarr",deployment="lidarr"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: LidarrDown
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: LidarrDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: servarr
+            exp_annotations:
+              summary: Lidarr is unavailable
+              description: "Lidarr has no available replica or Prometheus cannot scrape its exportarr target. Check the lidarr Deployment, ServiceMonitor and exportarr sidecar in servarr."
+  - name: Lidarr healthy deployment and health checks stay silent
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="servarr",deployment="lidarr"}'
+        values: '1x90'
+      - series: 'up{job="lidarr"}'
+        values: '1x90'
+      - series: 'lidarr_system_health_issues{job="lidarr"}'
+        values: '0x90'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: LidarrDown
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: LidarrHealthIssue
+        exp_alerts: []
+  - name: Lidarr health issues fire after one hour and clear on recovery
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="servarr",deployment="lidarr"}'
+        values: '1x70'
+      - series: 'up{job="lidarr"}'
+        values: '1x70'
+      - series: 'lidarr_system_health_issues{job="lidarr"}'
+        values: '1x60 0x10'
+    alert_rule_test:
+      - eval_time: 59m
+        alertname: LidarrHealthIssue
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: LidarrHealthIssue
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: servarr
+            exp_annotations:
+              summary: Lidarr reports a health issue
+              description: "Lidarr has reported a system health issue for at least one hour. Check System > Status in Lidarr before changing download or indexer settings."
+      - eval_time: 61m
+        alertname: LidarrHealthIssue
+        exp_alerts: []
   - name: Configarr latest failure alerts once and clears after the next successful run
     interval: 1m
     input_series:
