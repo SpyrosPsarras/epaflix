@@ -9,6 +9,8 @@ Registry checks on 2026-09-15 resolved each tag below to the existing digest in 
 | Image | Tag | Existing digest prefix |
 | --- | --- | --- |
 | linuxserver/sonarr | 4.0.19 | 82172b363f9e |
+| linuxserver/lidarr | 3.1.6 | d5707cfe084d |
+| onedr0p/exportarr | v2.3.0 | af535d94061c |
 | linuxserver/radarr | 6.3.0 | fe051413dfd9 |
 | linuxserver/prowlarr | 2.5.2 | c7502a75b021 |
 | linuxserver/bazarr | 1.6.1 | d24bd0048c75 |
@@ -16,6 +18,8 @@ Registry checks on 2026-09-15 resolved each tag below to the existing digest in 
 | hotio/unpackerr | release-0.15.2 | 724c702e8172 |
 | zelak312/bazarr_autotranslate | v1.0.0 | 5388463f8e45 |
 | qbittorrentofficial/qbittorrent-nox | 5.2.3-1 | 9ebb534fe30ba |
+
+Lidarr `3.1.6` and exportarr `v2.3.0` were resolved from ghcr.io on 2026-11-04. Their pins use the multi-arch OCI index digests, not a platform manifest. Lidarr uses the LinuxServer clean tag described below.
 
 Configarr was added with release `1.38.0`, verified against ghcr.io as `sha256:36d15adcc815557409a9437bc51468edfd1ac05ef6b46336dff650a56d2cc6a3`. Its `version@sha256` pin uses the existing servarr rules in `.github/renovate.json`: patch and digest updates auto-merge; minor and major updates require review.
 
