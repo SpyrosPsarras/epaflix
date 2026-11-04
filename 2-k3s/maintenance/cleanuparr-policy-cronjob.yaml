@@ -73,6 +73,7 @@ data:
             "deleteIfAnyFileBlocked": True,
             "sonarr": ARR_LIST,
             "radarr": ARR_LIST,
+            "lidarr": ARR_LIST,
         },
     }
 
@@ -133,14 +134,17 @@ data:
                            "blocklistPath": "/config/custom-blocklist-sonarr.txt"},
                 "radarr": {"enabled": True, "blocklistType": "Blacklist",
                            "blocklistPath": "https://raw.githubusercontent.com/x/blacklist"},
-                "lidarr": {"enabled": False, "blocklistType": "Blacklist", "blocklistPath": None}}
+                "lidarr": {"enabled": False, "blocklistType": "Blacklist", "blocklistPath": None},
+                "readarr": {"enabled": False, "blocklistType": "Blacklist", "blocklistPath": None}}
         cfg, changes = reconcile("malware_blocker", live)
         assert cfg["ignorePrivate"] and cfg["deleteIfAnyFileBlocked"], cfg
         assert cfg["sonarr"]["blocklistPath"] == BLOCKLIST
         assert cfg["radarr"]["blocklistPath"] == BLOCKLIST
         assert cfg["cronExpression"] == live["cronExpression"], "unlisted keys must survive"
-        assert cfg["lidarr"] == live["lidarr"], "unlisted arrs must survive"
-        assert len(changes) == 4, changes
+        assert cfg["lidarr"]["blocklistPath"] == BLOCKLIST
+        assert cfg["lidarr"]["enabled"] is True
+        assert cfg["readarr"] == live["readarr"], "unlisted arrs must survive"
+        assert len(changes) == 6, changes
         assert live["sonarr"]["blocklistPath"] != BLOCKLIST, "input must not be mutated"
         assert reconcile("malware_blocker", cfg)[1] == [], "second pass must be a no-op"
 
