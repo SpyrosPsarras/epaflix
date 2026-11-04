@@ -1321,6 +1321,83 @@ tests:
 
   - interval: 1m
     input_series:
+      - series: 'node_filesystem_avail_bytes{device="apps",device_error="",fstype="zfs",instance="192.168.10.200",job="truenas-node-exporter",mountpoint="/mnt/apps"}'
+        values: "6442450943x90"  # 6 GiB - 1, below both thresholds
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: TruenasAppsPoolFreeCritical
+        exp_alerts: []
+      - eval_time: 50m
+        alertname: TruenasAppsPoolFreeLow
+        exp_alerts: []
+      - eval_time: 70m
+        alertname: TruenasAppsPoolFreeLow
+        exp_alerts:
+          - exp_labels:
+              job: truenas-node-exporter
+              instance: 192.168.10.200
+              device: apps
+              fstype: zfs
+              mountpoint: /mnt/apps
+              component: truenas-storage
+              severity: warning
+            exp_annotations:
+              summary: "apps pool free space is under 12 GiB"
+              description: "The apps root dataset's node_filesystem_avail_bytes has been under 12 GiB for an hour. The root dataset has no quota, so this is the pool-wide space left. apps holds all democratic-csi iSCSI zvols under apps/k8s/iscsi. They are sparse, so a full pool makes writes to every iSCSI PVC fail at once. 12 GiB is about 80% of the 57 GiB usable. The pool is one 60G virtual disk (vm-1200-disk-2 on patroklos rpool), so growing it means resizing that disk, and rpool has little free space. Check what grew (`zfs list -o space -r apps` sorted by used) first."
+      - eval_time: 70m
+        alertname: TruenasAppsPoolFreeCritical
+        exp_alerts:
+          - exp_labels:
+              job: truenas-node-exporter
+              instance: 192.168.10.200
+              device: apps
+              fstype: zfs
+              mountpoint: /mnt/apps
+              component: truenas-storage
+              severity: critical
+            exp_annotations:
+              summary: "apps pool free space is under 6 GiB - iSCSI PVC writes at risk"
+              description: "Pool-wide free space on apps (same metric semantics as TruenasAppsPoolFreeLow) has been under 6 GiB for 15 minutes, about 90% used. When it reaches zero, writes to the sparse iSCSI zvols fail and pods see I/O errors on their PVCs. Free space on apps now; do not grow a PVC until free space is back above 12 GiB."
+
+  - interval: 1m
+    input_series:
+      - series: 'node_filesystem_avail_bytes{device="apps",device_error="",fstype="zfs",instance="192.168.10.200",job="truenas-node-exporter",mountpoint="/mnt/apps"}'
+        values: "10737418240x90"  # 10 GiB: warning only
+      - series: 'node_filesystem_avail_bytes{device="apps/k8s/iscsi",device_error="",fstype="zfs",instance="192.168.10.200",job="truenas-node-exporter",mountpoint="/mnt/apps/k8s/iscsi"}'
+        values: "1073741824x90"  # a child dataset series must not fire
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: TruenasAppsPoolFreeLow
+        exp_alerts:
+          - exp_labels:
+              job: truenas-node-exporter
+              instance: 192.168.10.200
+              device: apps
+              fstype: zfs
+              mountpoint: /mnt/apps
+              component: truenas-storage
+              severity: warning
+            exp_annotations:
+              summary: "apps pool free space is under 12 GiB"
+              description: "The apps root dataset's node_filesystem_avail_bytes has been under 12 GiB for an hour. The root dataset has no quota, so this is the pool-wide space left. apps holds all democratic-csi iSCSI zvols under apps/k8s/iscsi. They are sparse, so a full pool makes writes to every iSCSI PVC fail at once. 12 GiB is about 80% of the 57 GiB usable. The pool is one 60G virtual disk (vm-1200-disk-2 on patroklos rpool), so growing it means resizing that disk, and rpool has little free space. Check what grew (`zfs list -o space -r apps` sorted by used) first."
+      - eval_time: 70m
+        alertname: TruenasAppsPoolFreeCritical
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'node_filesystem_avail_bytes{device="apps",device_error="",fstype="zfs",instance="192.168.10.200",job="truenas-node-exporter",mountpoint="/mnt/apps"}'
+        values: "49796759552x90"  # live 2026-11-04: 46.4 GiB, above both thresholds
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: TruenasAppsPoolFreeLow
+        exp_alerts: []
+      - eval_time: 70m
+        alertname: TruenasAppsPoolFreeCritical
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
       - series: 'kube_node_spec_unschedulable{node="k3s-master-52"}'
         values: "1x25"
       - series: 'kube_node_spec_unschedulable{node="k3s-worker-61"}'
