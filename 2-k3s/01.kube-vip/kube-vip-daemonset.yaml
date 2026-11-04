@@ -56,7 +56,7 @@ spec:
         node-role.kubernetes.io/control-plane: "true"
       containers:
         - name: kube-vip
-          image: ghcr.io/kube-vip/kube-vip:v0.8.7@sha256:32829cc6f8630eba4e1b5e4df5bcbc34c767e70703d26e64a0f7317951c7b517
+          image: ghcr.io/kube-vip/kube-vip
           imagePullPolicy: IfNotPresent
           args:
             - manager
@@ -67,7 +67,7 @@ spec:
               value: "true"
             - name: address
               value: "192.168.10.100"
-            - name: vip_cidr
+            - name: vip_subnet
               value: "24"
             - name: port
               value: "6443"
@@ -77,6 +77,10 @@ spec:
               value: "kube-system"
             - name: svc_enable
               value: "true"
+            - name: svc_election
+              value: "true"
+            - name: health_check_port
+              value: "2113"
             - name: vip_leaderelection
               value: "true"
             - name: vip_leaseduration
@@ -85,6 +89,13 @@ spec:
               value: "20"
             - name: vip_retryperiod
               value: "5"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 2113
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
           securityContext:
             capabilities:
               add:

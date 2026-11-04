@@ -41,9 +41,10 @@ TCP 2222 accepts ingress from any IPv4 source; direct ports 3773 and 8087 stay
 closed. T3 binds only `127.0.0.1:3773`, advertises no direct LAN endpoint and
 accepts app access through T3 Connect or SSH. Its probes use in-container
 loopback HTTP, not the pod IP. Both SSH LoadBalancers use
-`externalTrafficPolicy: Cluster`. Owner LAN traffic crossing from the kube-vip
-holder on master-51 to the runtime on
-worker-61 arrives masqueraded as `10.42.0.0`. The userspace Tailscale subnet
+`externalTrafficPolicy: Cluster`. Owner LAN traffic crossing from the master
+that holds the Service VIP to the runtime on
+worker-61 arrives masqueraded as that master's pod-range address, such as
+`10.42.0.0` from master-51. The userspace Tailscale subnet
 router also originates traffic in the pod range, so excluding that range cuts
 owner SSH. Dedicated per-machine SSH keys and sshd's forwarding restriction to
 3773 remain the control. Same-pod loopback needs no rule. Standard NetworkPolicy
