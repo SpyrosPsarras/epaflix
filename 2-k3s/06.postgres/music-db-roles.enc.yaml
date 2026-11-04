@@ -1,0 +1,59 @@
+apiVersion: v1
+kind: Secret
+metadata:
+    name: lidarr-db-role
+    namespace: postgres-system
+    labels:
+        app.kubernetes.io/name: lidarr
+        app.kubernetes.io/component: database
+    annotations:
+        argocd.argoproj.io/sync-wave: "-2"
+type: kubernetes.io/basic-auth
+stringData:
+    username: ENC[AES256_GCM,data:gpbf5w+E,iv:5Cjp7UuoNM29FvpYyuntUan9uFxthviGZu4idjoglWA=,tag:dJupMwLtEkMcPkfga2waBQ==,type:str]
+    password: ENC[AES256_GCM,data:mvZMovAQ4WI8xrdzqb2rR97p0/zDao1DL+N9cxTBazrgzYANuo4GJ+Q16zauYGMgv4FmvYj8YBi7PgUEog+yHg==,iv:QomXvGxxAqdaxoRJYYKextcP6ypEIi7k+L5vabZRqCA=,tag:KEuzFrB61Q1/+YG7GveGeQ==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBpM21yQmlSdFNyZGVZVEdn
+            aGFuQUUrcFh4elNMNEFSbkhUbDNFZGdjVTFjClQyWHk4dWJnK01yT2xEVmNBb0Rt
+            MHV0b3lMYndWME9MMllmdG5ReGc3dm8KLS0tIDhzbzBWYzcyZ1F5MVJDZWpPTlpJ
+            b2ZPMDhRMzFJaGh1UExJdVZhSktsaEUKAATMAWBM8GR5fCc+umWxnef77PXR3LIE
+            PUmoyOZ/2IGJ1JXgzL58HCnALQQxyaYlaMy1J7fxTlSRsFRX3fM3gg==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1586thf5vkcdf5lcn3zwjpu8ltkwyq8efrhj8lr0vdrrt9k5f3qgsxeg7gx
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-11-04T16:44:11Z"
+    mac: ENC[AES256_GCM,data:ZZ//XL0r570GDHZttOAEb8chyjgwibbM8g3ehHMqnznYNKMFQ4bP8WMpAvbGtK++5obEcKBbv1D5zaCvU/aVMtYG3QDWlEZJ1TAQBJUpcFcLag0Tw5EqR0+9LzmcGwOyY3HVHU31QgviWFN22sWaEHxquN8stVTil0z8rl3WRg4=,iv:iIV7hKZADzjBsIYujUPYUp/UleLefIQuBUAudA0jhas=,tag:sJIsxgEdrQHy4zR0eEfI/w==,type:str]
+    version: 3.13.3
+---
+apiVersion: v1
+kind: Secret
+metadata:
+    name: digarr-db-role
+    namespace: postgres-system
+    labels:
+        app.kubernetes.io/name: digarr
+        app.kubernetes.io/component: database
+    annotations:
+        argocd.argoproj.io/sync-wave: "-2"
+type: kubernetes.io/basic-auth
+stringData:
+    username: ENC[AES256_GCM,data:BDt0qE8h,iv:bMujRsMX41uVNWwIjwQY05fl5tmgGSE2G6SpVQ7XPxM=,tag:OhDh+lrcpvrjnDNJMP9RTQ==,type:str]
+    password: ENC[AES256_GCM,data:Xc0Igm+QAr5qKrGMjHxyRk/dqcAxGk5fFweqEJ+J/lV2KorvmHDSINwMrk+KxYWrAJOv00WKGOJpcFbxWvxHLg==,iv:0bs/LD0yKEIutMUodrLZZKPlQerjJlFTj01wCugv1TY=,tag:9/fOMZU49gf6BwJ3b3UKjg==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBpM21yQmlSdFNyZGVZVEdn
+            aGFuQUUrcFh4elNMNEFSbkhUbDNFZGdjVTFjClQyWHk4dWJnK01yT2xEVmNBb0Rt
+            MHV0b3lMYndWME9MMllmdG5ReGc3dm8KLS0tIDhzbzBWYzcyZ1F5MVJDZWpPTlpJ
+            b2ZPMDhRMzFJaGh1UExJdVZhSktsaEUKAATMAWBM8GR5fCc+umWxnef77PXR3LIE
+            PUmoyOZ/2IGJ1JXgzL58HCnALQQxyaYlaMy1J7fxTlSRsFRX3fM3gg==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1586thf5vkcdf5lcn3zwjpu8ltkwyq8efrhj8lr0vdrrt9k5f3qgsxeg7gx
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-11-04T16:44:11Z"
+    mac: ENC[AES256_GCM,data:ZZ//XL0r570GDHZttOAEb8chyjgwibbM8g3ehHMqnznYNKMFQ4bP8WMpAvbGtK++5obEcKBbv1D5zaCvU/aVMtYG3QDWlEZJ1TAQBJUpcFcLag0Tw5EqR0+9LzmcGwOyY3HVHU31QgviWFN22sWaEHxquN8stVTil0z8rl3WRg4=,iv:iIV7hKZADzjBsIYujUPYUp/UleLefIQuBUAudA0jhas=,tag:sJIsxgEdrQHy4zR0eEfI/w==,type:str]
+    version: 3.13.3

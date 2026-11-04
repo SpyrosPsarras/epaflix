@@ -1,0 +1,190 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lidarr
+  annotations:
+    secret.reloader.stakater.com/reload: "servarr-postgres,music-stack"
+  namespace: servarr
+  labels:
+    app: lidarr
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: lidarr
+  template:
+    metadata:
+      labels:
+        app: lidarr
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: lidarr
+      securityContext:
+        runAsUser: 568
+        runAsGroup: 568
+        fsGroup: 568
+      containers:
+        - name: lidarr
+          image: ghcr.io/linuxserver/lidarr:latest
+          env:
+            - name: PUID
+              value: "568"
+            - name: PGID
+              value: "568"
+            - name: TZ
+              value: "Europe/Oslo"
+            - name: LIDARR__POSTGRES__HOST
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: lidarr-host
+            - name: LIDARR__POSTGRES__PORT
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: lidarr-port
+            - name: LIDARR__POSTGRES__MAINDB
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: lidarr-database
+            - name: LIDARR__POSTGRES__LOGDB
+              value: "lidarr-log"
+            - name: LIDARR__POSTGRES__USER
+              valueFrom:
+                secretKeyRef:
+                  name: servarr-postgres
+                  key: lidarr-user
+            - name: LIDARR__POSTGRES__PASSWORD
+              value: ""
+            - name: PGPASSFILE
+              value: /run/lidarr-postgres/pgpass
+            - name: LIDARR__AUTH__METHOD
+              value: External
+            - name: LIDARR__AUTH__APIKEY
+              valueFrom:
+                secretKeyRef:
+                  name: music-stack
+                  key: lidarr-api-key
+          ports:
+            - containerPort: 8686
+              name: http
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: media
+              mountPath: /media
+            - name: postgres-passfile
+              mountPath: /run/lidarr-postgres
+              readOnly: true
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: http
+              httpHeaders:
+                - name: Host
+                  value: localhost
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: http
+              httpHeaders:
+                - name: Host
+                  value: localhost
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "200m"
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"
+        - name: exportarr
+          image: ghcr.io/onedr0p/exportarr:v2.3.0
+          args: [lidarr]
+          env:
+            - name: PORT
+              value: "9708"
+            - name: URL
+              value: http://localhost:8686
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: music-stack
+                  key: lidarr-api-key
+          ports:
+            - containerPort: 9708
+              name: metrics
+          resources:
+            requests:
+              memory: "32Mi"
+              cpu: "10m"
+            limits:
+              memory: "128Mi"
+              cpu: "100m"
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: lidarr-config-iscsi
+        - name: media
+          persistentVolumeClaim:
+            claimName: servarr-media
+        - name: postgres-passfile
+          secret:
+            secretName: servarr-postgres
+            defaultMode: 0440
+            items:
+              - key: lidarr-pgpass
+                path: pgpass
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lidarr
+  namespace: servarr
+  labels:
+    app: lidarr
+spec:
+  type: ClusterIP
+  selector:
+    app: lidarr
+  ports:
+    - name: http
+      port: 8686
+      targetPort: http
+    - name: metrics
+      port: 9708
+      targetPort: metrics
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: lidarr
+  namespace: servarr
+  labels:
+    app: lidarr
+spec:
+  jobLabel: app
+  namespaceSelector:
+    matchNames:
+      - servarr
+  selector:
+    matchLabels:
+      app: lidarr
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 60s

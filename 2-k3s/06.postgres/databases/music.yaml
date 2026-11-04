@@ -1,0 +1,94 @@
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: DatabaseRole
+metadata:
+  name: lidarr
+  namespace: postgres-system
+  labels:
+    app.kubernetes.io/name: lidarr
+    app.kubernetes.io/component: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  cluster:
+    name: postgres-cluster
+  name: lidarr
+  ensure: present
+  login: true
+  passwordSecret:
+    name: lidarr-db-role
+  databaseRoleReclaimPolicy: retain
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: DatabaseRole
+metadata:
+  name: digarr
+  namespace: postgres-system
+  labels:
+    app.kubernetes.io/name: digarr
+    app.kubernetes.io/component: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  cluster:
+    name: postgres-cluster
+  name: digarr
+  ensure: present
+  login: true
+  passwordSecret:
+    name: digarr-db-role
+  databaseRoleReclaimPolicy: retain
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: lidarr-main
+  namespace: postgres-system
+  labels:
+    app.kubernetes.io/name: lidarr
+    app.kubernetes.io/component: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  cluster:
+    name: postgres-cluster
+  name: lidarr-main
+  owner: lidarr
+  ensure: present
+  databaseReclaimPolicy: retain
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: lidarr-log
+  namespace: postgres-system
+  labels:
+    app.kubernetes.io/name: lidarr
+    app.kubernetes.io/component: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  cluster:
+    name: postgres-cluster
+  name: lidarr-log
+  owner: lidarr
+  ensure: present
+  databaseReclaimPolicy: retain
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: digarr
+  namespace: postgres-system
+  labels:
+    app.kubernetes.io/name: digarr
+    app.kubernetes.io/component: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  cluster:
+    name: postgres-cluster
+  name: digarr
+  owner: digarr
+  ensure: present
+  databaseReclaimPolicy: retain
