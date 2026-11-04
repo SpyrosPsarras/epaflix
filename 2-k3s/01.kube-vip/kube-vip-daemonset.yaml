@@ -79,6 +79,73 @@ spec:
               value: "true"
             - name: svc_election
               value: "true"
+            - name: lb_class_name
+              value: "kube-vip.io/control-plane-only"
+            - name: health_check_port
+              value: "2113"
+            - name: vip_leaderelection
+              value: "true"
+            - name: vip_leaseduration
+              value: "30"
+            - name: vip_renewdeadline
+              value: "20"
+            - name: vip_retryperiod
+              value: "5"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 2113
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+                - NET_RAW
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: kube-vip-services
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      name: kube-vip-services
+  template:
+    metadata:
+      labels:
+        name: kube-vip-services
+    spec:
+      serviceAccountName: kube-vip
+      hostNetwork: true
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: DoesNotExist
+      containers:
+        - name: kube-vip
+          image: ghcr.io/kube-vip/kube-vip
+          imagePullPolicy: IfNotPresent
+          args:
+            - manager
+          env:
+            - name: vip_interface
+              value: "eth0"
+            - name: vip_arp
+              value: "true"
+            - name: vip_subnet
+              value: "24"
+            - name: cp_enable
+              value: "false"
+            - name: svc_enable
+              value: "true"
+            - name: svc_election
+              value: "true"
             - name: health_check_port
               value: "2113"
             - name: vip_leaderelection
