@@ -51,3 +51,11 @@ spec:
       name: postgres-daily-backup
       jsonPointers:
         - /status
+    - group: postgresql.cnpg.io
+      kind: Database
+      jsonPointers:
+        - /status
+    - group: postgresql.cnpg.io
+      kind: DatabaseRole
+      jsonPointers:
+        - /status
