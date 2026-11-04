@@ -12,6 +12,7 @@ resources:
   - cluster/postgres-cluster.yaml
   - cluster/postgres-pooler.yaml
   - backup/backup-schedule.yaml
+  - databases/music.yaml
 
 generators:
   - ksops-generator.yaml
