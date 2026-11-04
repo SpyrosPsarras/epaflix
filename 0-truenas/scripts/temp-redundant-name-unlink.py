@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Unlink the redundant second name under the qBittorrent temp directory (#969).
 
-699.7 G under /mnt/pool1/dataset01/downloads/temp is a second name for inodes
+In 2026-09, 699.7 G under the old pool1/dataset01/downloads/temp was a second name for inodes
 the library already holds. Unlinking those names frees 0 bytes, and that is the
 point: `du` on temp stops lying (703 G -> ~2.4 G) and the library stops
 depending on paths under a directory called `temp` (#842, closed by PR #967).
@@ -56,7 +56,7 @@ TIMEOUT = 30
 
 BAD_STATES = {"missingFiles", "error"}
 
-DATASET_ROOT = os.environ.get("DATASET_ROOT", "/mnt/pool1/dataset01")
+DATASET_ROOT = os.environ.get("DATASET_ROOT", "/mnt/mpara-tank-lan/media")
 
 TEMP_DIR = os.environ.get("TEMP_DIR", DATASET_ROOT + "/downloads/temp")
 
@@ -134,7 +134,7 @@ def held_paths(torrents):
     /torrents/files call per hash.
 
     qBittorrent sees the pool through the container mount (/media), the box
-    sees /mnt/pool1/dataset01. A translation that silently matches nothing
+    sees /mnt/mpara-tank-lan/media. A translation that silently matches nothing
     would disable the guard while looking like it passed, so a torrent list
     where nothing maps is a hard failure, not an empty set.
     """
