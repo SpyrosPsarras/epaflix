@@ -27,8 +27,11 @@ mkdir -p "$HOME/projects"
 if [[ ! -d $project/.git ]]; then git clone -q "$repo" "$project"; fi
 [[ $(git -C "$project" remote get-url origin) == "$repo" ]]
 ai_skills=$HOME/Davidhorn/ai-skills
-if [[ $MCP_HUB_INSTANCE == work && ! -d $ai_skills/.git ]]; then
-  # pi-setup.py loads the Davidhorn skills from this clone; a failed clone must not block startup.
+# pi-setup.py loads the Davidhorn skills from this clone; a failed clone or pull must not block startup.
+if [[ $MCP_HUB_INSTANCE == work && -d $ai_skills/.git ]]; then
+  timeout 120 git -C "$ai_skills" pull -q --ff-only ||
+    echo 'work skills: ai-skills update failed; keeping the current Davidhorn skills' >&2
+elif [[ $MCP_HUB_INSTANCE == work ]]; then
   timeout 120 git clone -q https://github.com/IndicoSystems/ai-skills.git "$ai_skills" ||
     echo 'work skills: ai-skills clone failed; Davidhorn skills unavailable' >&2
 fi
