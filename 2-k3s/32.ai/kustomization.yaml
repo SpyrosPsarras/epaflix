@@ -11,7 +11,7 @@ generators:
   - ksops-generator.yaml
 images:
   - name: ollama/ollama
-    newTag: 0.40.13@sha256:b2f0122c476bc9fe7ce679d8bb4bd555351e25e2554eefb156f61cb0a89cf429
+    newTag: 0.40.14@sha256:ebaef4f4c5d93660e1f25f8ad085a112f51ccfb0e8458073e71793959dba91c9
   - name: ghcr.io/open-webui/open-webui
     newTag: v0.12.5-ollama@sha256:4157f2f3a40048d2968610085e4f6e2415c760521014dbd8517e891b6122b818
   - name: ghcr.io/valkey-io/valkey
