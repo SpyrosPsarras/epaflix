@@ -81,6 +81,8 @@ spec:
               value: "true"
             - name: lb_class_name
               value: "kube-vip.io/control-plane-only"
+            - name: lb_class_only
+              value: "true"
             - name: health_check_port
               value: "2113"
             - name: vip_leaderelection
