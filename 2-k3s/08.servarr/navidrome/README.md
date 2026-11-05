@@ -1,6 +1,6 @@
 # Navidrome
 
-Navidrome serves Lidarr's music library from `/media/music` on `servarr-media`, mounted read-only at `/music`. It runs as UID/GID 568 with a 5Gi `truenas-iscsi` data PVC. Backups go to `/media/backups/navidrome` through the `/backups` mount, daily at 04:00 Europe/Oslo, retaining seven copies.
+Navidrome serves Lidarr's music library from `/media/music` on `servarr-media`, mounted read-only at `/music`. It runs as UID/GID 568 with a 5Gi `truenas-iscsi` data PVC. Backups go to `/media/backups/navidrome` through the `/backups` mount, daily at 04:00 container time, retaining seven copies. The image may lack time zone data, so 04:00 can be UTC; confirm from the first backup file.
 
 `https://navidrome.epaflix.com` uses Authentik forward auth and permits `authentik Admins` or `Music users`. The `/rest/` and `/jellyfin/` routes use native app authentication instead. Their middleware removes `X-authentik-username`, `True-Client-IP` and `X-Real-IP` from incoming requests.
 
