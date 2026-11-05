@@ -131,7 +131,7 @@ images:
   # Renovate must not track this image (disabled in .github/renovate.json).
   - name: ghcr.io/lingarr-translate/lingarr
     newName: ghcr.io/spyrospsarras/lingarr
-    digest: sha256:49a3049e604408838999e37e72ab39fcd2409524cf406537e1fb8716a1bbb98e
+    digest: sha256:aadf06b6cffe9c7d4fd19baeaaceec84c8a07d4f245d1b92bb6542edaeeb0020
   - name: iampuid0/neutarr
     newTag: 1.11.1@sha256:c3df05a854c93aac640708e002e8fe85193f73da8406c8a230a5484a342a1107
   - name: qbittorrentofficial/qbittorrent-nox
