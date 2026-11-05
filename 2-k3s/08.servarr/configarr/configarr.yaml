@@ -356,6 +356,7 @@ data:
           quality_sort: top
           qualities:
           - name: '320'
+            # quality_sort: top reverses group members; this order matches Lidarr.
             qualities:
             - AAC-320
             - MP3-320
