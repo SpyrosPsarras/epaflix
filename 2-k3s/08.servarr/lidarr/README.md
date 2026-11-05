@@ -8,19 +8,37 @@ The app reads PostgreSQL settings and a read-only passfile from `servarr-postgre
 
 Kube-router still permits traffic from a pod's own node, including host-network pods on that node. This accepted cluster limit also applies here. Other Servarr apps are unchanged.
 
-## Live steps still to do
-
-All live changes need owner confirmation. This PR declares resources only. Do not use these steps as permission to apply manifests or call write APIs.
-
-- A1. After review and merge, sync the reviewed resources through Argo CD. PR 1 spans `postgres`, `servarr`, `authentik`, `maintenance`, `observability` and `app-of-apps`. Wait for the CNPG databases and Secrets before starting Lidarr. Verify `/ping`, exportarr metrics, the ServiceMonitor target and Authentik access. Confirm a non-admin cannot enter.
-- A2. The owner applies Pi-hole and Unbound changes on CT 1030 using `1-proxmox/pihole/README.md`. Verify that `lidarr.epaflix.com` resolves to `192.168.10.101` and does not leak AAAA lookups upstream.
-- A3. Test the NetworkPolicy after deployment. From a scratch pod in another namespace, `curl -m 5 http://lidarr.servarr:8686/initialize.json` must time out. Do not print response bodies or keys if the request unexpectedly succeeds. Prowlarr's Lidarr application test must pass after A6.
-- A4. Create quality profile `MP3-AAC` using names from `GET /api/v1/qualitydefinition`. Enable upgrades. Put MP3-320 and AAC-320 in a top group named `320`, also the cutoff. Below it, allow MP3-VBR-V0, MP3-256 and AAC-256 as separate items. Disable AAC-VBR, everything below 256 kbps and all lossless formats. Do not reuse the default High Quality Lossy group, which groups V0 with 320 and prevents that upgrade. Create metadata profile `Studio` with primary type Album only.
-- A5. Add root folder `/media/music` with monitoring `None` and new albums `None`. Enable Write Audio Tags for new files with MusicBrainz IDs. Read the existing Sonarr and Radarr qBittorrent category paths, then add category `music` next to them under `/media/downloads` and configure Lidarr's download client.
-- A6. Add an untagged Prowlarr application `Lidarr` using its default Lidarr categories. Immediately run `prowlarr-appsync-drift` once. Its SQL ignores categories, so indexers without music categories can produce false findings. If needed, tag Lidarr to route only music indexers or review a category filter for that SQL before the next scheduled run.
-- A7. Confirm Cleanuparr's malware blocker has a `lidarr` key, then add the Lidarr instance and a public `music` seeding rule. Restart Cleanuparr after confirmation. Expect `1 private rule(s) created` and `music (private) | private | ratio<=5.0 | seed<=720.0h`. The policy CronJob now covers Lidarr's executable-only blocklist while preserving unrelated settings.
-- A8. Add one artist with `monitorNewItems: none` and one monitored album. After `RefreshArtist`, verify exactly one album is monitored. After import, verify `MUSICBRAINZ_TRACKID` with `ffprobe` on a file.
+## Setup rules
 
 Read API keys from Kubernetes Secrets inside each consuming command. Record API calls below using only method, path, non-secret fields and HTTP status. Never include keys, passwords, credential-bearing request bodies or response bodies that may expose them. Configarr-managed Lidarr profiles are a later PR, not part of this setup.
 
 ## Live changes
+
+All done 2026-11-04 and 2026-11-05 after owner confirmation, at merge `f3e03858` (#2199).
+
+Argo CD: `app-of-apps`, `postgres`, `servarr`, `authentik` and `observability` synced as dry run, then for real, listing only this PR's resources. `maintenance` auto-synced to the same revision. The CNPG roles first reported `secrets ... forbidden`; CNPG retried and all five objects reported `APPLIED true`. The `servarr-postgres` change made Reloader restart Sonarr, Radarr, Prowlarr, Bazarr, Lingarr and Seerr. The first `cleanuparr-policy` run exited 1 while it enabled Lidarr in the malware blocker; later runs exit 0.
+
+Checks: Lidarr 3.1.6.5079 on `postgreSQL` with `authentication: external`. `/api/v1/system/status` returns 200 with the key and 401 without. exportarr publishes `lidarr_system_health_issues`. From Prowlarr, `/ping` returns 200; a scratch `curlimages/curl` pod in `default` gets connection refused. `https://lidarr.epaflix.com/` redirects to Authentik.
+
+Pi-hole on CT 1030: backup `10-epaflix.conf.bak-20261104-lidarr` and `/root/no-aaaa-leak.conf.bak-20261104-lidarr`. Copied `dnsmasq.d/10-epaflix.conf` (live equals repo), inserted the `lidarr.epaflix.com.` local-zone after `prowlarr`, `unbound-checkconf` clean, `unbound-control reload`, `systemctl restart pihole-FTL`. `lidarr.epaflix.com` A is `192.168.10.101`, AAAA empty.
+
+| App | Method and path | Non-secret fields | Status |
+| --- | --- | --- | --- |
+| Lidarr pod | `mkdir -p /media/music` | owner and group 568, mode `drwxrwxrwx+` like the other media folders | ok |
+| Lidarr | `POST /api/v1/qualityprofile` | `MP3-AAC` id 4, upgrades on, cutoff group `320` (MP3-320, AAC-320); also allowed MP3-256, AAC-256, MP3-VBR-V0 | 201 |
+| Lidarr | `POST /api/v1/metadataprofile` | `Studio` id 3: Album; secondary Studio; Official | 201 |
+| Lidarr | `POST /api/v1/downloadclient` | `qBittorrent` id 1, host `qbittorrent:8080`, Web API key auth, category `music`, remove failed | 201 |
+| Lidarr | `POST /api/v1/rootfolder` | `/media/music` id 1, quality 4, metadata 3, monitor `none`, new items `none` | 201 |
+| Lidarr | `PUT /api/v1/config/metadataprovider/1` | `writeAudioTags: newFiles` | 202 |
+| Lidarr | `PUT /api/v1/config/naming/1` | `renameTracks: true` (standard format puts each album in its own folder) | 202 |
+| qBittorrent | `POST /api/v2/torrents/createCategory` | `music`, empty save path like `tv-sonarr` and `radarr` | 200 |
+| Prowlarr | `POST /api/v1/applications` | `Lidarr` id 2, `fullSync`, `http://lidarr:8686`, categories 3000, 3010, 3030, 3040, 3050, 3060. First try 500 (`PK_Applications`) | 201 |
+| Postgres `prowlarr-main` | `setval` to `max("Id")` | `ApplicationIndexerMapping` 37, `IndexerStatus` 17, `ApplicationStatus` 3, `Applications` 3. Sequences lagged before this work; audit `drift_count=0` after | SQL ok |
+| Prowlarr | `POST /api/v1/tag`, `PUT /api/v1/indexer/bulk`, `PUT /api/v1/applications/bulk` | tag `music` id 36 on IPTorrents, Mpellas, Nyaa.si, The Pirate Bay, TorrentDay, TorrentDownload; Lidarr app tags `[36]`. AvistaZ has no music categories and stays out | 201, 202, 202 |
+| Prowlarr | `POST /api/v1/command` | `ApplicationIndexerSync`; Lidarr has 6 indexers; `prowlarr-appsync-drift` (manual Jobs from the CronJob, deleted afterwards) reports converged | 201 |
+| Cleanuparr | `POST /api/configuration/lidarr/instances` | `Lidarr`, `http://lidarr.servarr.svc.cluster.local:8686/`, version 3 (test 200) | 201 |
+| Cleanuparr | `POST /api/seeding-rules/<qbittorrent client>` | `music`, Public, priority 4, ratio 1, max 400 h; restart created `music (private)` priority 14, ratio 5, max 720 h | 201 |
+| Lidarr | `POST /api/v1/artist`, `PUT /api/v1/artist/editor`, `PUT /api/v1/album/monitor` | test: Daft Punk, monitor `none`, new items `none`; only *Discovery* monitored; after `RefreshArtist` 1 of 4 monitored, queue empty | 201, 202, 202 |
+| Lidarr | `POST /api/v1/command` | `AlbumSearch` grabbed an MP3 320 release; 14 tracks imported with MusicBrainz album, artist, release group, track and recording (UFID) IDs; `RenameFiles` moved them to `Daft Punk/Discovery (2001)/` | 201 |
+
+New music indexers in Prowlarr need the `music` tag to reach Lidarr.
