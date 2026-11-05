@@ -56,6 +56,3 @@ delegation and pass a model ID exactly as that list prints it. Do not guess
 public Anthropic or OpenAI names from memory; the catalogue is served by
 CLIProxy and its names and set change often. The Codex instance is disabled
 here because its discovered bare model IDs fail CLIProxy routing.
-
-Never use Sol 6.1 (`gpt-6.1-sol` on any route) for a subagent, a reviewer or a
-thread, even when a review rule needs a model other than the author's.
