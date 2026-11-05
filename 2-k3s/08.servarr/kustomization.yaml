@@ -118,13 +118,15 @@ images:
   # And the batch path treated provider
   # 429/503 as file-fatal (groq's shared TPM window 429s at ~8s intervals) where the
   # patch surfaces them to the retry loop. A re-POST after a failed attempt also carries
-  # over the lines that attempt already translated instead of starting from line 1.
+  # over the lines that attempt already translated instead of starting from line 1, and
+  # batch translation sends each repeated source text once instead of once per subtitle.
   # Revert to ghcr.io/lingarr-translate/lingarr when upstream LocalAiService no longer
   # falls back to a schema-less request, validates returned positions against the batch,
   # RunBatch throws instead of filling original lines, /api/translate/content waits for
   # an active duplicate instead of returning 409 and reaps a request with no line activity
-  # for 60 minutes, 429/503 on the structured batch request is retried, and matching
-  # translated lines carry over from a failed, interrupted or cancelled attempt
+  # for 60 minutes, 429/503 on the structured batch request is retried, matching
+  # translated lines carry over from a failed, interrupted or cancelled attempt, and
+  # batch translation sends each repeated source text once per request
   # (watched by upstream-release-watch).
   # Renovate must not track this image (disabled in .github/renovate.json).
   - name: ghcr.io/lingarr-translate/lingarr

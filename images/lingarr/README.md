@@ -3,7 +3,7 @@
 Upstream `ghcr.io/lingarr-translate/lingarr:1.4.1` at commit `f31ddbb` with one
 patch, `batch-contract.patch`, republished as `ghcr.io/spyrospsarras/lingarr`.
 Release 1.4.1 ships part of behaviour 4 via lingarr-translate/lingarr#556.
-Behaviours 1, 2, 3, 5 and 6 still need the overlay.
+Behaviours 1, 2, 3, 5, 6 and 7 still need the overlay.
 
 ## What the patch changes
 
@@ -53,14 +53,22 @@ made big files untranslatable through Bazarr:
    and whose target is neither empty nor the source copied through
    (`CarryOverPriorLinesAsync`), stores them on the new request, and sends only
    the rest to the provider.
+7. `TranslateSubtitlesBatch` sent every untranslated subtitle, so a sign or
+   karaoke track paid for the same text thousands of times. It now sends each
+   distinct source text once per request and gives every repeat the same
+   translation, stored as its own line. Batches count distinct texts. Measured
+   on 2026-11-05 samples of the Greek backlog: dialogue-size files send 76% of
+   their lines, large sign and karaoke tracks 19%. The cost is one Greek form
+   per repeated English line within a file, chosen by the owner.
 
 Generate-API (non-chat) batches and per-line translation internals are unchanged
 by the overlay. Upstream's individual-line content path and translated context
 remain intact. The upstream test asserting behaviour 3 is deleted; the controller
 tests for active duplicates are adapted to behaviour 4; upstream disconnect
 and API cancellation tests remain.
-The patched suite passes all 335 tests, including TranslationRequestServiceTests
-for behaviours 4 and 6 and the rate-limit retry tests for behaviour 5.
+The patched suite passes all 341 tests, including TranslationRequestServiceTests
+for behaviours 4 and 6, the rate-limit retry tests for behaviour 5 and the
+`TranslateSubtitlesBatch_*` tests for behaviour 7.
 
 M0022 seeds `local_ai_structured_output=true`; the init container resets existing
 rows to true so lingarr-translate/lingarr#574 cannot bypass the batch contract.
@@ -78,7 +86,7 @@ Pin the printed digest in `2-k3s/08.servarr/kustomization.yaml`.
 
 ## Retire when
 
-Retire only when upstream ships all six behaviours above. Behaviour 4 requires
+Retire only when upstream ships all seven behaviours above. Behaviour 4 requires
 both waiting for an active duplicate instead of returning 409 and reaping a
 request with no line activity for 60 minutes. Then drop this directory, the
 workflow, and the overlay image pin, and pin `ghcr.io/lingarr-translate/lingarr`

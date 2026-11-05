@@ -143,7 +143,7 @@ index 2db1fc0..802a4b3 100644
      public async Task TranslateContent_UnsupportedLanguagePair_ReturnsServerErrorAndMarksRequestFailed()
      {
 diff --git a/Lingarr.Server.Tests/Services/SubtitleTranslationServiceTests.cs b/Lingarr.Server.Tests/Services/SubtitleTranslationServiceTests.cs
-index c003f43..79f4102 100644
+index c003f43..62d2cae 100644
 --- a/Lingarr.Server.Tests/Services/SubtitleTranslationServiceTests.cs
 +++ b/Lingarr.Server.Tests/Services/SubtitleTranslationServiceTests.cs
 @@ -681,6 +681,30 @@ public class SubtitleTranslationServiceTests
@@ -177,31 +177,165 @@ index c003f43..79f4102 100644
      [Fact]
      public async Task ProcessSubtitleBatch_PreserveOff_JoinsWithSpaceAndReturnsSingleLine()
      {
-@@ -769,24 +793,6 @@ public class SubtitleTranslationServiceTests
+@@ -769,22 +793,152 @@ public class SubtitleTranslationServiceTests
          Assert.All(translated, line => Assert.True(line.Length <= 42, $"Line exceeded max length: '{line}'"));
      }
  
--    [Fact]
++    #endregion
++
++    #region TranslateSubtitlesBatch Tests
++
+     [Fact]
 -    public async Task ProcessSubtitleBatch_MissingTranslation_FallsBackToOriginalLines()
--    {
--        // Arrange
++    public async Task TranslateSubtitlesBatch_RepeatedSourceText_SendsOnceAndTranslatesEveryRepeat()
+     {
+         // Arrange
 -        var harness = CreateBatchHarness(_ => new Dictionary<int, string>());
 -        var subtitles = new List<SubtitleItem> { Subtitle(1, "hello", "world") };
--
--        // Act
++        var sentBatches = new List<List<string>>();
++        var harness = CreateBatchHarness(items =>
++        {
++            sentBatches.Add(items.Select(i => i.Line).ToList());
++            return items.ToDictionary(i => i.Position, i => $"tr:{i.Line}");
++        });
++        var emitted = new List<TranslatedLineData>();
++        harness.ProgressServiceMock
++            .Setup(p => p.EmitLines(It.IsAny<TranslationRequest>(), It.IsAny<List<TranslatedLineData>>()))
++            .Callback((TranslationRequest _, List<TranslatedLineData> lines) => emitted.AddRange(lines))
++            .Returns(Task.CompletedTask);
++        var subtitles = new List<SubtitleItem>
++        {
++            ContentLine(1, "La la la"), ContentLine(2, "Hello"), ContentLine(3, "La la la"),
++            ContentLine(4, "Bye"), ContentLine(5, "La la la"), ContentLine(6, "Hello")
++        };
+ 
+         // Act
 -        await harness.Service.ProcessSubtitleBatch(subtitles,
 -            "en", "es",
--            stripSubtitleFormatting: false,
--            preserveLineBreaks: false,
--            CancellationToken.None);
--
--        // Assert
--        Assert.Equal(["hello", "world"], subtitles[0].TranslatedLines);
--    }
--
-     #endregion
++        await harness.Service.TranslateSubtitlesBatch(subtitles, NewRequest(),
+             stripSubtitleFormatting: false,
+             preserveLineBreaks: false,
++            batchSize: 2,
+             CancellationToken.None);
  
-     #region Chain-wide best-match resolution
++        // Assert: three unique texts fill batches of two; every position is translated and emitted once.
++        Assert.Equal([["La la la", "Hello"], ["Bye"]], sentBatches);
++        Assert.Equal(
++            ["tr:La la la", "tr:Hello", "tr:La la la", "tr:Bye", "tr:La la la", "tr:Hello"],
++            subtitles.Select(s => string.Join(" ", s.TranslatedLines)));
++        Assert.Equal([1, 2, 3, 4, 5, 6], emitted.Select(l => l.Position).Order());
++        Assert.All(emitted, line => Assert.Equal("test", line.Service));
++    }
++
++    [Fact]
++    public async Task TranslateSubtitlesBatch_AlreadyTranslatedSubtitles_AreNotSentOrEmitted()
++    {
++        // Arrange
++        var sent = new List<int>();
++        var harness = CreateBatchHarness(items =>
++        {
++            sent.AddRange(items.Select(i => i.Position));
++            return items.ToDictionary(i => i.Position, i => $"tr:{i.Line}");
++        });
++        var emitted = new List<TranslatedLineData>();
++        harness.ProgressServiceMock
++            .Setup(p => p.EmitLines(It.IsAny<TranslationRequest>(), It.IsAny<List<TranslatedLineData>>()))
++            .Callback((TranslationRequest _, List<TranslatedLineData> lines) => emitted.AddRange(lines))
++            .Returns(Task.CompletedTask);
++        var carried = ContentLine(1, "Hello");
++        carried.TranslatedLines = ["carried"];
++        var subtitles = new List<SubtitleItem> { carried, ContentLine(2, "Bye"), ContentLine(3, "Bye") };
++
++        // Act
++        await harness.Service.TranslateSubtitlesBatch(subtitles, NewRequest(),
++            stripSubtitleFormatting: false,
++            preserveLineBreaks: false,
++            batchSize: 25,
++            CancellationToken.None);
++
++        // Assert
++        Assert.Equal([2], sent);
++        Assert.Equal(["carried"], carried.TranslatedLines);
++        Assert.Equal([2, 3], emitted.Select(l => l.Position).Order());
++    }
++
++    [Fact]
++    public async Task TranslateSubtitlesBatch_SameTextDifferentLineSplit_IsSentSeparately()
++    {
++        // Arrange
++        var sent = new List<int>();
++        var harness = CreateBatchHarness(items =>
++        {
++            sent.AddRange(items.Select(i => i.Position));
++            return items.ToDictionary(i => i.Position, _ => "hola mundo");
++        });
++        var subtitles = new List<SubtitleItem> { Subtitle(1, "hello", "world"), Subtitle(2, "hello world") };
++
++        // Act
++        await harness.Service.TranslateSubtitlesBatch(subtitles, NewRequest(),
++            stripSubtitleFormatting: false,
++            preserveLineBreaks: false,
++            batchSize: 25,
++            CancellationToken.None);
++
++        // Assert
++        Assert.Equal([1, 2], sent);
++    }
++
++    [Theory]
++    [InlineData(true, new[] { 1 })]
++    [InlineData(false, new[] { 1, 2 })]
++    public async Task TranslateSubtitlesBatch_MarkupOnlyDifference_IsRepeatOnlyWhenFormattingIsStripped(
++        bool stripSubtitleFormatting, int[] expectedSent)
++    {
++        // Arrange
++        var sent = new List<int>();
++        var harness = CreateBatchHarness(items =>
++        {
++            sent.AddRange(items.Select(i => i.Position));
++            return items.ToDictionary(i => i.Position, _ => "hola");
++        });
++        var subtitles = new List<SubtitleItem>
++        {
++            new() { Position = 1, Lines = ["<i>Hello</i>"], PlaintextLines = ["Hello"] },
++            new() { Position = 2, Lines = ["Hello"], PlaintextLines = ["Hello"] }
++        };
++
++        // Act
++        await harness.Service.TranslateSubtitlesBatch(subtitles, NewRequest(),
++            stripSubtitleFormatting,
++            preserveLineBreaks: false,
++            batchSize: 25,
++            CancellationToken.None);
++
++        // Assert
++        Assert.Equal(expectedSent, sent);
++        Assert.All(subtitles, subtitle => Assert.Equal(["hola"], subtitle.TranslatedLines));
++    }
++
++    [Fact]
++    public async Task TranslateSubtitlesBatch_BatchFails_RepeatsStayUntranslated()
++    {
++        // Arrange
++        var harness = CreateBatchHarness(_ => throw new InvalidOperationException("quota"));
++        var subtitles = new List<SubtitleItem> { ContentLine(1, "Hello"), ContentLine(2, "Hello") };
++
++        // Act
++        await Assert.ThrowsAsync<TranslationException>(() =>
++            harness.Service.TranslateSubtitlesBatch(subtitles, NewRequest(),
++                stripSubtitleFormatting: false,
++                preserveLineBreaks: false,
++                batchSize: 25,
++                CancellationToken.None));
++
+         // Assert
+-        Assert.Equal(["hello", "world"], subtitles[0].TranslatedLines);
++        Assert.All(subtitles, subtitle => Assert.Empty(subtitle.TranslatedLines));
++        harness.ProgressServiceMock.Verify(
++            p => p.EmitLines(It.IsAny<TranslationRequest>(), It.IsAny<List<TranslatedLineData>>()), Times.Never);
+     }
+ 
+     #endregion
 diff --git a/Lingarr.Server.Tests/Services/Translation/LocalAiServiceTests.cs b/Lingarr.Server.Tests/Services/Translation/LocalAiServiceTests.cs
 index 3355617..864db0b 100644
 --- a/Lingarr.Server.Tests/Services/Translation/LocalAiServiceTests.cs
@@ -1071,10 +1205,91 @@ index 37060e2..732c4b7 100644
      <PackageReference Include="BCrypt.Net-Next" />
      <PackageReference Include="DeepL.net" />
 diff --git a/Lingarr.Server/Services/SubtitleTranslationService.cs b/Lingarr.Server/Services/SubtitleTranslationService.cs
-index fd5a36a..606785b 100644
+index fd5a36a..0a75f5c 100644
 --- a/Lingarr.Server/Services/SubtitleTranslationService.cs
 +++ b/Lingarr.Server/Services/SubtitleTranslationService.cs
-@@ -491,9 +491,11 @@ public class SubtitleTranslationService
+@@ -332,7 +332,8 @@ public class SubtitleTranslationService
+     }
+ 
+     /// <summary>
+-    /// Translates subtitles in batch mode.
++    /// Translates subtitles in batch mode. Untranslated subtitles with identical source text are
++    /// sent once; every repeat receives the same translation and is emitted as its own line.
+     /// </summary>
+     public async Task<List<SubtitleItem>> TranslateSubtitlesBatch(
+         List<SubtitleItem> subtitles,
+@@ -347,13 +348,24 @@ public class SubtitleTranslationService
+             throw new TranslationException("Subtitle translator could not be initialized, progress service is null.");
+         }
+ 
++        var pending = subtitles.Where(subtitle => subtitle.TranslatedLines.Count == 0).ToList();
++        var sameSourceGroups = pending
++            .GroupBy(subtitle => string.Join("\n", stripSubtitleFormatting ? subtitle.PlaintextLines : subtitle.Lines))
++            .ToList();
++        if (sameSourceGroups.Count < pending.Count)
++        {
++            _logger.LogInformation(
++                "Batch translation sends {Unique} unique source texts for {Pending} untranslated subtitles.",
++                sameSourceGroups.Count, pending.Count);
++        }
++
+         if (batchSize <= 0)
+         {
+-            batchSize = subtitles.Count;
++            batchSize = Math.Max(sameSourceGroups.Count, 1);
+         }
+ 
+-        var totalBatches = (int)Math.Ceiling((double)subtitles.Count / batchSize);
+-        var processedSubtitles = 0;
++        var totalBatches = (int)Math.Ceiling((double)sameSourceGroups.Count / batchSize);
++        var processedSubtitles = subtitles.Count - pending.Count;
+ 
+         for (var batchIndex = 0; batchIndex < totalBatches; batchIndex++)
+         {
+@@ -363,19 +375,30 @@ public class SubtitleTranslationService
+                 break;
+             }
+ 
+-            var currentBatch = subtitles
++            var currentGroups = sameSourceGroups
+                 .Skip(batchIndex * batchSize)
+                 .Take(batchSize)
+                 .ToList();
+ 
+-            var newlyTranslated = await ProcessSubtitleBatch(
+-                currentBatch,
++            await ProcessSubtitleBatch(
++                currentGroups.Select(group => group.First()).ToList(),
+                 translationRequest.SourceLanguage,
+                 translationRequest.TargetLanguage,
+                 stripSubtitleFormatting,
+                 preserveLineBreaks,
+                 cancellationToken);
+ 
++            foreach (var group in currentGroups)
++            {
++                var first = group.First();
++                foreach (var repeat in group.Skip(1))
++                {
++                    repeat.TranslatedLines = [..first.TranslatedLines];
++                    _translationByPosition[repeat.Position] = _translationByPosition[first.Position];
++                }
++            }
++
++            var newlyTranslated = currentGroups.SelectMany(group => group).OrderBy(subtitle => subtitle.Position).ToList();
+             if (newlyTranslated.Count > 0)
+             {
+                 var lineData = newlyTranslated.Select(subtitle =>
+@@ -393,7 +416,7 @@ public class SubtitleTranslationService
+                 await _progressService!.EmitLines(translationRequest, lineData);
+             }
+ 
+-            processedSubtitles += currentBatch.Count;
++            processedSubtitles += newlyTranslated.Count;
+             await EmitProgress(translationRequest, processedSubtitles, subtitles.Count);
+         }
+ 
+@@ -491,9 +514,11 @@ public class SubtitleTranslationService
              var contentLines = stripSubtitleFormatting ? subtitle.PlaintextLines : subtitle.Lines;
              if (!batchResults.TryGetValue(subtitle.Position, out var translated))
              {
