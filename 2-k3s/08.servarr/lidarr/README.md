@@ -24,6 +24,7 @@ Pi-hole on CT 1030: backup `10-epaflix.conf.bak-20261104-lidarr` and `/root/no-a
 
 | App | Method and path | Non-secret fields | Status |
 | --- | --- | --- | --- |
+| Lidarr pod | `mkdir -p /media/music` | owner and group 568, inherits the share ACL | ok |
 | Lidarr | `POST /api/v1/qualityprofile` | `MP3-AAC` id 4, upgrades on, cutoff group `320` (MP3-320, AAC-320); also allowed MP3-256, AAC-256, MP3-VBR-V0 | 201 |
 | Lidarr | `POST /api/v1/metadataprofile` | `Studio` id 3: Album; secondary Studio; Official | 201 |
 | Lidarr | `POST /api/v1/downloadclient` | `qBittorrent` id 1, host `qbittorrent:8080`, Web API key auth, category `music`, remove failed | 201 |
@@ -32,9 +33,9 @@ Pi-hole on CT 1030: backup `10-epaflix.conf.bak-20261104-lidarr` and `/root/no-a
 | Lidarr | `PUT /api/v1/config/naming/1` | `renameTracks: true` (standard format puts each album in its own folder) | 202 |
 | qBittorrent | `POST /api/v2/torrents/createCategory` | `music`, empty save path like `tv-sonarr` and `radarr` | 200 |
 | Prowlarr | `POST /api/v1/applications` | `Lidarr` id 2, `fullSync`, `http://lidarr:8686`, categories 3000-3060. First try 500 (`PK_Applications`) | 201 |
-| Postgres `prowlarr-main` | `setval` to `max("Id")` | `ApplicationIndexerMapping` 37, `IndexerStatus` 17, `ApplicationStatus` 3, `Applications` 3. Sequences lagged before this work; audit `drift_count=0` after | ok |
+| Postgres `prowlarr-main` | `setval` to `max("Id")` | `ApplicationIndexerMapping` 37, `IndexerStatus` 17, `ApplicationStatus` 3, `Applications` 3. Sequences lagged before this work; audit `drift_count=0` after | SQL ok |
 | Prowlarr | `POST /api/v1/tag`, `PUT /api/v1/indexer/bulk`, `PUT /api/v1/applications/bulk` | tag `music` id 36 on IPTorrents, Mpellas, Nyaa.si, The Pirate Bay, TorrentDay, TorrentDownload; Lidarr app tags `[36]`. AvistaZ has no music categories and stays out | 201, 202, 202 |
-| Prowlarr | `POST /api/v1/command` | `ApplicationIndexerSync`; Lidarr has 6 indexers; `prowlarr-appsync-drift` reports converged | 201 |
+| Prowlarr | `POST /api/v1/command` | `ApplicationIndexerSync`; Lidarr has 6 indexers; `prowlarr-appsync-drift` (manual Jobs from the CronJob, deleted afterwards) reports converged | 201 |
 | Cleanuparr | `POST /api/configuration/lidarr/instances` | `Lidarr`, `http://lidarr.servarr.svc.cluster.local:8686/`, version 3 (test 200) | 201 |
 | Cleanuparr | `POST /api/seeding-rules/<qbittorrent client>` | `music`, Public, priority 4, ratio 1, max 400 h; restart created `music (private)` priority 14, ratio 5, max 720 h | 201 |
 | Lidarr | `POST /api/v1/artist`, `PUT /api/v1/artist/editor`, `PUT /api/v1/album/monitor` | test: Daft Punk, monitor `none`, new items `none`; only *Discovery* monitored; after `RefreshArtist` 1 of 4 monitored, queue empty | 201, 202, 202 |
