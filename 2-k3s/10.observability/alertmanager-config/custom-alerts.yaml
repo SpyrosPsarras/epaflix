@@ -440,6 +440,21 @@ spec:
             summary: "Lidarr reports a health issue"
             description: "Lidarr has reported a system health issue for at least one hour. Check System > Status in Lidarr before changing download or indexer settings."
 
+    - name: navidrome
+      interval: 60s
+      rules:
+        - alert: NavidromeDown
+          expr: |
+            max(kube_deployment_status_replicas_available{namespace="servarr",deployment="navidrome"}) == 0
+              or absent(up{job="navidrome"} == 1)
+          for: 15m
+          labels:
+            severity: warning
+            component: servarr
+          annotations:
+            summary: "Navidrome is unavailable"
+            description: "Navidrome has no available replica or Prometheus cannot scrape its metrics target. Check the navidrome Deployment and ServiceMonitor in servarr."
+
     - name: configarr
       interval: 60s
       rules:

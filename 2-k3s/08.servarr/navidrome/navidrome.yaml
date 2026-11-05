@@ -1,0 +1,136 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: navidrome
+  namespace: servarr
+  labels:
+    app: navidrome
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: navidrome
+  template:
+    metadata:
+      labels:
+        app: navidrome
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: navidrome
+      securityContext:
+        runAsUser: 568
+        runAsGroup: 568
+        fsGroup: 568
+      containers:
+        - name: navidrome
+          image: navidrome/navidrome:0.64.2
+          env:
+            - name: TZ
+              value: Europe/Oslo
+            - name: ND_MUSICFOLDER
+              value: /music
+            - name: ND_EXTAUTH_USERHEADER
+              value: X-authentik-username
+            - name: ND_EXTAUTH_TRUSTEDSOURCES
+              value: 10.42.0.0/16
+            - name: ND_PROMETHEUS_ENABLED
+              value: "true"
+            - name: ND_JELLYFIN_ENABLED
+              value: "true"
+            - name: ND_BACKUP_PATH
+              value: /backups
+            - name: ND_BACKUP_SCHEDULE
+              value: "0 4 * * *"
+            - name: ND_BACKUP_COUNT
+              value: "7"
+            - name: ND_ENABLEINSIGHTSCOLLECTOR
+              value: "false"
+            - name: ND_LASTFM_ENABLED
+              value: "false"
+            - name: ND_SCANNER_SCHEDULE
+              value: 1h
+          ports:
+            - containerPort: 4533
+              name: http
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: media
+              mountPath: /music
+              subPath: music
+              readOnly: true
+            - name: media
+              mountPath: /backups
+              subPath: backups/navidrome
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: navidrome-data-iscsi
+        - name: media
+          persistentVolumeClaim:
+            claimName: servarr-media
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: navidrome
+  namespace: servarr
+  labels:
+    app: navidrome
+spec:
+  type: ClusterIP
+  selector:
+    app: navidrome
+  ports:
+    - name: http
+      port: 4533
+      targetPort: http
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: navidrome
+  namespace: servarr
+  labels:
+    app: navidrome
+spec:
+  jobLabel: app
+  namespaceSelector:
+    matchNames:
+      - servarr
+  selector:
+    matchLabels:
+      app: navidrome
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 60s

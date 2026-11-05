@@ -19,6 +19,8 @@ Registry checks on 2026-09-15 resolved each tag below to the existing digest in 
 
 Lidarr `3.1.6` (`d5707cfe084d`) and exportarr `v2.3.0` (`af535d94061c`) were resolved from ghcr.io on 2026-11-04. Their pins use the multi-arch OCI index digests, not a platform manifest. Lidarr uses the LinuxServer clean tag described below.
 
+Navidrome `0.64.2` was resolved from Docker Hub on 2026-11-05 as `sha256:38dc2727bfcfd5ede290f8ada114fc90368146f265ae4701ddddbcbe2a44ee52`. The `navidrome/navidrome` pin uses the multi-arch OCI index digest, not a platform manifest.
+
 Configarr was added with release `1.38.0`, verified against ghcr.io as `sha256:36d15adcc815557409a9437bc51468edfd1ac05ef6b46336dff650a56d2cc6a3`. Its `version@sha256` pin uses the existing servarr rules in `.github/renovate.json`: patch and digest updates auto-merge; minor and major updates require review.
 
 LinuxServer publishes clean three-component tags alongside build tags. Docker versioning treats `-ls324` as a compatibility suffix, so `4.0.19.2979-ls324` would reject a candidate ending in `-ls400`. Clean tags avoid that filter and allow same-version rebuild digests. Unpackerr needs regex versioning for `release-`; qBittorrent needs it to treat its numeric image-build suffix as a patch instead of a fixed compatibility suffix. The regex excludes qBittorrent's separate `lt2` variant.
