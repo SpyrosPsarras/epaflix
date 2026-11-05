@@ -16,7 +16,7 @@ Read API keys from Kubernetes Secrets inside each consuming command. Record API 
 
 All done 2026-11-04 and 2026-11-05 after owner confirmation, at merge `f3e03858` (#2199).
 
-Argo CD: `app-of-apps`, `postgres`, `servarr`, `authentik` and `observability` synced as dry run, then for real, listing only this PR's resources. `maintenance` auto-synced to the same revision. The CNPG roles failed once with `secrets ... forbidden` until the operator added the new role Secrets to its Role, then all five objects reported `APPLIED true`. The `servarr-postgres` change made Reloader restart Sonarr, Radarr, Prowlarr, Bazarr, Lingarr and Seerr. The first `cleanuparr-policy` run exited 1 while it enabled Lidarr in the malware blocker; later runs exit 0.
+Argo CD: `app-of-apps`, `postgres`, `servarr`, `authentik` and `observability` synced as dry run, then for real, listing only this PR's resources. `maintenance` auto-synced to the same revision. The CNPG roles first reported `secrets ... forbidden`; CNPG retried within a minute and all five objects reported `APPLIED true`. The `servarr-postgres` change made Reloader restart Sonarr, Radarr, Prowlarr, Bazarr, Lingarr and Seerr. The first `cleanuparr-policy` run exited 1 while it enabled Lidarr in the malware blocker; later runs exit 0.
 
 Checks: Lidarr 3.1.6.5079 on `postgreSQL` with `authentication: external`. `/api/v1/system/status` returns 200 with the key and 401 without. exportarr publishes `lidarr_system_health_issues`. From Prowlarr, `/ping` returns 200; a scratch `curlimages/curl` pod in `default` gets connection refused. `https://lidarr.epaflix.com/` redirects to Authentik.
 
