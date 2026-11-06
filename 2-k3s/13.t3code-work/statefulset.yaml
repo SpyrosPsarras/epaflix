@@ -72,9 +72,24 @@ spec:
               mountPath: /vault
             - name: vault-scope
               mountPath: /run/t3-vault
+        - name: keeper-storage
+          image: t3-runtime-from-t3-container
+          command: [bash, -ec, "chown 0:0 /keeper; chmod 00700 /keeper; chown 1002:1002 /keeper"]
+          securityContext:
+            runAsNonRoot: false
+            runAsUser: 0
+            runAsGroup: 0
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+              add: [CHOWN]
+          volumeMounts:
+            - name: keeper-data
+              mountPath: /keeper
       containers:
         - name: t3
-          image: ghcr.io/spyrospsarras/t3-runtime:work-inputs-2486ecd2fcd16840ef23ddf7a5cf4e54
+          image: ghcr.io/spyrospsarras/t3-runtime:work-inputs-bcf9bdf80b98267b73ceb4f7385c19ee
           imagePullPolicy: IfNotPresent
           command: [bash, /scripts/entrypoint.sh]
           env:
@@ -276,6 +291,40 @@ spec:
               memory: 256Mi
             limits:
               memory: 768Mi
+        # Owner's Keeper session; the agent reaches the whole vault through `keeper serve`. No probes: an idle,
+        # not-yet-logged-in sidecar must not hold the pod NotReady.
+        - name: keeper
+          image: t3-runtime-from-t3-container
+          imagePullPolicy: IfNotPresent
+          command: [/opt/keeper/bin/python, -I, /usr/local/bin/keeper, serve]
+          workingDir: /keeper
+          env:
+            - name: HOME
+              value: /keeper
+            - name: KEEPER_SERVER
+              value: keepersecurity.eu
+            # Session in /keeper/config.json, never an OS keyring (Commander's dependencies are not pinned).
+            - name: KEEPER_CONFIG_STORAGE
+              value: file
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1002
+            runAsGroup: 1002
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: keeper-data
+              mountPath: /keeper
+            - name: keeper-tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 20m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
       volumes:
         - name: machine-info
           configMap:
@@ -301,6 +350,11 @@ spec:
         - name: vault-scope
           emptyDir: {}
         - name: vault-tmp
+          emptyDir: {}
+        - name: keeper-data
+          persistentVolumeClaim:
+            claimName: t3code-keeper
+        - name: keeper-tmp
           emptyDir: {}
         - name: home
           persistentVolumeClaim:

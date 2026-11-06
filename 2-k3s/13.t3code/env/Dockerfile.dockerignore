@@ -14,4 +14,5 @@
 !env/tools/package-lock.json
 !env/files/
 !env/files/vault-client.py
+!env/files/keeper-client.py
 !env/files/isolated-guidance.md

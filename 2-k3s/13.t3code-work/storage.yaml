@@ -23,3 +23,17 @@ spec:
   resources:
     requests:
       storage: 1Gi
+---
+# Keeper Commander's persistent-login config.json (owner session); only the keeper sidecar mounts it.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: t3code-keeper
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 1Gi

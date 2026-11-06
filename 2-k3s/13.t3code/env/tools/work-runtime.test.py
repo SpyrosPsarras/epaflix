@@ -524,7 +524,7 @@ class WorkRuntimeTests(unittest.TestCase):
         self.assertEqual(allowed, {'versions.env', 'env/', 'env/Dockerfile', 'env/tools/',
             'env/tools/os-packages.txt', 'env/tools/install-cluster-tools.sh',
             'env/tools/package.json', 'env/tools/package-lock.json',
-            'env/files/', 'env/files/vault-client.py', 'env/files/isolated-guidance.md',
+            'env/files/', 'env/files/vault-client.py', 'env/files/keeper-client.py', 'env/files/isolated-guidance.md',
             'one/', 'one/files/', 'one/files/cc-safety-net-install.py',
             'one/files/cc-safety-net.patch', 'one/files/cc-safety-net-hashes.json'})
 
@@ -551,7 +551,7 @@ class WorkRuntimeTests(unittest.TestCase):
             self.assertEqual(sts['spec']['persistentVolumeClaimRetentionPolicy'], {'whenDeleted': 'Retain', 'whenScaled': 'Retain'})
             self.assertFalse(pod['automountServiceAccountToken'])
             self.assertNotIn('hostPath', json.dumps(pod))
-            self.assertEqual({v['persistentVolumeClaim']['claimName'] for v in pod['volumes'] if 'persistentVolumeClaim' in v}, {'t3code-home', 't3code-vault'})
+            self.assertEqual({v['persistentVolumeClaim']['claimName'] for v in pod['volumes'] if 'persistentVolumeClaim' in v}, {'t3code-home', 't3code-vault', 't3code-keeper'})
             secret_names = {v['secret']['secretName'] for v in pod['volumes'] if 'secret' in v}
             secret_names.update(source['secret']['name'] for v in pod['volumes']
                                 for source in v.get('projected', {}).get('sources', []) if 'secret' in source)

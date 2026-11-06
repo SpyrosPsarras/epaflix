@@ -152,6 +152,19 @@ class StartupTest(unittest.TestCase):
                         self.assertTrue(mounts['work-ssh']['readOnly'])
                     self.assertEqual(mounts['vault-data']['mountPath'], '/vault')
                     self.assertNotIn('ports', container)
+                elif name == 'keeper':
+                    # Work only: the owner's Keeper session lives on its own PVC under its own uid.
+                    self.assertEqual(variant, 'work')
+                    self.assertEqual((uid, container['securityContext']['runAsGroup']), (1002, 1002))
+                    self.assertTrue(container['securityContext']['runAsNonRoot'])
+                    self.assertTrue(container['securityContext']['readOnlyRootFilesystem'])
+                    self.assertFalse(container['securityContext']['allowPrivilegeEscalation'])
+                    self.assertEqual(container['securityContext']['capabilities']['drop'], ['ALL'])
+                    self.assertEqual(container['command'], ['/opt/keeper/bin/python', '-I', '/usr/local/bin/keeper', 'serve'])
+                    self.assertEqual({mount['name'] for mount in container['volumeMounts']}, {'keeper-data', 'keeper-tmp'})
+                    self.assertFalse(bw)
+                    self.assertFalse(any('valueFrom' in entry for entry in env.values()))
+                    self.assertNotIn('ports', container)
                 else:
                     self.assertEqual(uid, 1000)
                     self.assertFalse(container['securityContext']['allowPrivilegeEscalation'])
@@ -161,7 +174,8 @@ class StartupTest(unittest.TestCase):
                     self.assertNotIn('envFrom', container)
                     self.assertFalse(any(entry.get('valueFrom', {}).get('secretKeyRef', {}).get('name') == 'vaultwarden-agent'
                                          for entry in env.values()))
-                    self.assertFalse(any(mount['name'] in ('vault-data', 'vault-tmp') for mount in container['volumeMounts']))
+                    self.assertFalse(any(mount['name'] in ('vault-data', 'vault-tmp', 'keeper-data', 'keeper-tmp')
+                                         for mount in container['volumeMounts']))
             for init in spec['initContainers']:
                 self.assertNotIn('envFrom', init)
                 for entry in init.get('env', []):
