@@ -65,6 +65,37 @@ Use the same layout as the other two cluster hosts:
 
 The onboard 1G I350 ports are unused. This host is a member of the `e-pavli` cluster, with three nodes and no QDevice. Storage `local-zfs`, backed by `rpool/data`, is restricted to `patroklos`.
 
+## Keep etcd responsive on rpool
+
+`rpool` holds the disks of VM 1052 (k3s-master-52, an etcd member), VM 1063 (k3s-worker-63) and two disks of VM 1200 (TrueNAS, `scsi0` and `scsi5`). The two SSDs are `VK0120GEYJP`.
+
+On 2026-11-06, two Prometheus queries over the data kept since 2026-11-01 counted 21 and 18 episodes in which master-52's etcd WAL fsync p99 exceeded 0.5 s. The worst episodes reached 8 s, the histogram's top bucket. master-51 had 2 such episodes and master-53 had 3. In 16 of the 18 episodes in the 7-day query, worker-63's writes peaked at 43-128 MB/s, for example while `t3code-image-prepull` pulled the t3code image. Its normal rate is under 7 MB/s in 99% of minutes. On 2026-11-05 and 2026-11-06, etcd changed leader during these stalls, and kube-vip failed to renew its `plndr-cp-lock` lease, which holds the API VIP. In the other 2 episodes worker-63 was idle and pve-exporter has no data, so their cause is unknown. TrueNAS's `scsi5` disk on `rpool` is not capped and is one candidate.
+
+`zpool iostat -w rpool` was read on 2026-11-06 before any test and covers about 5.4 days since boot. It showed no disk write slower than its 268 ms bucket. Over a million sync writes waited in the ZFS sync queue for 1 s or more, some for 17-34 s. The likely mechanism: guest flushes turn worker-63's bulk writes into sync writes, and those queue ahead of etcd's fdatasync. With `zfs_dirty_data_max` at 256 MiB in both runs, setting `sync=disabled` on worker-63's disk cut the test's worst fsync from 28 s to 3.6 s, which supports this.
+
+These commands fix the worker-63 case. The one-off trim matters on an aged pool (FRAG was 68%), because `autotrim` only trims blocks freed after it is enabled:
+
+```sh
+zpool trim -w -r 64M rpool
+zpool set autotrim=on rpool
+qm set 1063 --scsi0 local-zfs:vm-1063-disk-0,discard=on,format=raw,size=50G,ssd=1,mbps_wr=25
+```
+
+The 25 MB/s write cap applies only to worker-63's disk. It slows that VM's write bursts, including image pulls and any write burst from the Postgres instance there. Keep `sync=standard` on worker-63, because CNPG instance `postgres-cluster-11` runs there on a local-path volume. In November 2026 it was the primary. `sync=disabled` could lose committed transactions on a host crash.
+
+Test with two commands at once. On master-52, run a loop that writes 4 KB with `fdatasync` every 100 ms for 120 s and records the worst latency. On worker-63, run `sudo dd if=/dev/urandom of=/var/tmp/burst.dat bs=1M count=3072 conv=fdatasync`, then delete the file. Results on 2026-11-06, one 120 s run per row except the range, which covers two runs:
+
+| State | p99 | Worst |
+| --- | --- | --- |
+| No burst | 2 ms | 3 ms |
+| Defaults | 26.9 s | 44.5 s |
+| Trim, `mbps_wr=25` | 198-247 ms | 0.46-0.53 s |
+| Final: trim, `autotrim=on`, `mbps_wr=25` | 178 ms | 0.67 s |
+
+The final worst case is above etcd's 500 ms heartbeat interval, so a leader can send a heartbeat late. It stays below etcd's 1 s slow-fdatasync warning and well inside the 5 s election timeout. That timeout and the heartbeat are k3s defaults (`pkg/etcd/etcd.go` in v1.36.5+k3s1). All three masters' `etcd-arg` entries set only compaction and quota, so they keep these defaults. The warning threshold is `warnSyncDuration` in `server/storage/wal/wal.go` of k3s-io/etcd v3.6.14-k3s3.
+
+These made no consistent difference beyond run-to-run noise: lowering `zfs_dirty_data_max` or `zfs_vdev_async_write_max_active` once the cap was in place, `logbias=throughput` with a 50 MB/s cap, and the `none` I/O scheduler.
+
 ## Re-sector used SAS drives
 
 Used SAS drives from storage arrays can have 4160- or 520-byte sectors. The PERC in HBA mode does not expose these drives to Linux, so there is no `/dev/sdX`. The HGST HC520 `HUH721212AL4200` drives here arrived with 4160-byte sectors.
