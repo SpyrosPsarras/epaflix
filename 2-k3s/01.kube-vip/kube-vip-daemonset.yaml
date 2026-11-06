@@ -65,6 +65,10 @@ spec:
               value: "eth0"
             - name: vip_arp
               value: "true"
+            - name: KUBERNETES_SERVICE_HOST
+              value: "127.0.0.1"
+            - name: KUBERNETES_SERVICE_PORT
+              value: "6443"
             - name: address
               value: "192.168.10.100"
             - name: vip_subnet
@@ -83,8 +87,6 @@ spec:
               value: "kube-vip.io/control-plane-only"
             - name: lb_class_only
               value: "true"
-            - name: health_check_port
-              value: "2113"
             - name: vip_leaderelection
               value: "true"
             - name: vip_leaseduration
@@ -93,13 +95,6 @@ spec:
               value: "20"
             - name: vip_retryperiod
               value: "5"
-          livenessProbe:
-            httpGet:
-              path: /healthz
-              port: 2113
-            periodSeconds: 10
-            timeoutSeconds: 2
-            failureThreshold: 3
           securityContext:
             capabilities:
               add:
@@ -148,8 +143,6 @@ spec:
               value: "true"
             - name: svc_election
               value: "true"
-            - name: health_check_port
-              value: "2113"
             - name: vip_leaderelection
               value: "true"
             - name: vip_leaseduration
@@ -158,13 +151,6 @@ spec:
               value: "20"
             - name: vip_retryperiod
               value: "5"
-          livenessProbe:
-            httpGet:
-              path: /healthz
-              port: 2113
-            periodSeconds: 10
-            timeoutSeconds: 2
-            failureThreshold: 3
           securityContext:
             capabilities:
               add:
