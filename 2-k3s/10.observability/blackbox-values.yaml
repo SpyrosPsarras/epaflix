@@ -55,6 +55,11 @@ serviceMonitor:
         action: replace
         targetLabel: job
         replacement: vaultwarden-probe
+      - sourceLabels: [__param_target]
+        regex: 'https://192\.168\.10\.100:6443/readyz'
+        action: replace
+        targetLabel: job
+        replacement: kube-api-vip-probe
   targets:
     - name: takaros
       url: https://192.168.10.10:8006
@@ -74,6 +79,8 @@ serviceMonitor:
     - name: traefik-internal
       url: https://192.168.10.102
       hostname: grafana.epaflix.com
+    - name: k3s-api-vip
+      url: https://192.168.10.100:6443/readyz
     - name: truenas-ui
       url: https://192.168.10.200:8443
       hostname: truenas.epaflix.com

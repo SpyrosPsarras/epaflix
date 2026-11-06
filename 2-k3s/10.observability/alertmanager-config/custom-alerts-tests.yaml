@@ -2235,3 +2235,42 @@ tests:
       - eval_time: 20m
         alertname: VaultwardenDown
         exp_alerts: []
+
+  - name: k3s API VIP down fires after 2 minutes
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="kube-api-vip-probe",instance="https://192.168.10.100:6443/readyz"}'
+        values: "1x3 0x10"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: KubeApiVipDown
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: KubeApiVipDown
+        exp_alerts: &kube_api_vip_down
+          - exp_labels:
+              severity: critical
+              component: kube-vip
+            exp_annotations:
+              summary: "k3s API VIP 192.168.10.100:6443 is not answering"
+              description: "No TLS answer from the API VIP for 2 minutes, so kubectl and anything else using the VIP is down. Reach a master directly with kubectl --context epaflix --server https://192.168.10.51:6443 -n kube-system get pods -l name=kube-vip, check the holder of lease plndr-cp-lock, and restart the kube-vip DaemonSet if no pod holds it."
+
+  - name: k3s API VIP failover blip does not alert
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="kube-api-vip-probe",instance="https://192.168.10.100:6443/readyz"}'
+        values: "1x3 0 1x10"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: KubeApiVipDown
+        exp_alerts: []
+
+  - name: k3s API VIP alert fires when the probe disappears
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="tls-probe",instance="https://192.168.10.101"}'
+        values: "1x10"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: KubeApiVipDown
+        exp_alerts: *kube_api_vip_down

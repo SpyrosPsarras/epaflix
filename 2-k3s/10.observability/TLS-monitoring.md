@@ -21,6 +21,10 @@ after five minutes. Both expiry alerts can fire below three days.
 | `192.168.10.102:443` | Internal Traefik wildcard, same SNI, separate listener |
 | `192.168.10.200:8443` | TrueNAS UI certificate, bypasses Traefik |
 
+The k3s API VIP `192.168.10.100:6443` and Vaultwarden use the same exporter
+under their own jobs, `kube-api-vip-probe` and `vaultwarden-probe`. They feed
+`KubeApiVipDown` and `VaultwardenDown`, not the TLS alerts.
+
 PBS on port 8007 is excluded for now. Neither the tracked configuration nor the
 vault inventory identified its address during implementation. Add its direct
 URL to `blackbox-values.yaml` once the PBS address is confirmed.

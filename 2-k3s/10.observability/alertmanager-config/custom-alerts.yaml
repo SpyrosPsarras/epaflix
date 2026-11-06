@@ -1311,3 +1311,15 @@ spec:
           annotations:
             summary: "Vaultwarden is unavailable"
             description: "Vaultwarden /alive is unreachable or no replica has been available for 15 minutes. Check the Deployment and backup Job logs, including the vaultwarden.epaflix.com/backup-paused Deployment annotation if a backup left it at zero replicas. Restore runbook: 2-k3s/26.vaultwarden/OPERATIONS.md."
+
+    - name: k3s-api-vip
+      rules:
+        - alert: KubeApiVipDown
+          expr: (max(probe_success{job="kube-api-vip-probe"}) or vector(0)) == 0
+          for: 2m
+          labels:
+            severity: critical
+            component: kube-vip
+          annotations:
+            summary: "k3s API VIP 192.168.10.100:6443 is not answering"
+            description: "No TLS answer from the API VIP for 2 minutes, so kubectl and anything else using the VIP is down. Reach a master directly with kubectl --context epaflix --server https://192.168.10.51:6443 -n kube-system get pods -l name=kube-vip, check the holder of lease plndr-cp-lock, and restart the kube-vip DaemonSet if no pod holds it."

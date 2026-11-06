@@ -394,8 +394,26 @@ jobs:
             T3_RUNTIME_VARIANT="$VARIANT" bash 2-k3s/13.t3code/env/tools/smoke.sh
           fi
 
+  kube-vip:
+    if: >-
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install test dependencies
+        run: |
+          python3 -m pip install --disable-pip-version-check \
+            -r .github/hooks/requirements.txt
+          bash .github/scripts/install-ci-tools.sh kustomize
+
+      - name: kube-vip failover against k3s in Docker
+        timeout-minutes: 15
+        run: python3 2-k3s/01.kube-vip/tools/failover.test.py -v
+
   validate:
-    needs: [checks, t3-tests, smoke]
+    needs: [checks, t3-tests, smoke, kube-vip]
     if: >-
       always() &&
       (github.event_name == 'push' ||
