@@ -40,6 +40,11 @@ spec:
                     secretKeyRef:
                       name: unpackerr-secret
                       key: UN_RADARR_0_API_KEY
+                - name: LIDARR_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: music-stack
+                      key: lidarr-api-key
               volumeMounts:
                 - name: config
                   mountPath: /app/config
@@ -335,3 +340,34 @@ data:
           assign_scores_to:
           - name: UHD Bluray + WEB
             score: -500
+    lidarr:
+      main:
+        base_url: http://lidarr.servarr.svc.cluster.local:8686
+        api_key: !env LIDARR_API_KEY
+        quality_profiles:
+        - name: MP3-AAC
+          reset_unmatched_scores:
+            enabled: true
+          upgrade:
+            allowed: true
+            until_quality: '320'
+            until_score: 0
+          min_format_score: 0
+          quality_sort: top
+          qualities:
+          - name: '320'
+            # quality_sort: top reverses group members; this order matches Lidarr.
+            qualities:
+            - AAC-320
+            - MP3-320
+          - name: MP3-VBR-V0
+          - name: AAC-256
+          - name: MP3-256
+        metadata_profiles:
+        - name: Studio
+          primary_types:
+          - Album
+          secondary_types:
+          - Studio
+          release_statuses:
+          - Official
