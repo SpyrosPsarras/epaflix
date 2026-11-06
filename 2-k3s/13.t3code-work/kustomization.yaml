@@ -33,3 +33,5 @@ replacements:
         fieldPaths:
           - spec.template.spec.initContainers.[name=vault-storage].image
           - spec.template.spec.containers.[name=vault].image
+          - spec.template.spec.initContainers.[name=keeper-storage].image
+          - spec.template.spec.containers.[name=keeper].image

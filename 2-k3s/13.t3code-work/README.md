@@ -106,6 +106,116 @@ real items for testing.
    timings. Leave both organizations free of test items and confirm homelab
    and work remain healthy.
 
+## Keeper
+
+The work pod can also read and write the owner's Keeper vault
+(`keepersecurity.eu`), alongside Vaultwarden. The tenant has no Keeper
+Secrets Manager, so the `keeper` sidecar holds the **owner's own** Commander
+session through persistent login ("stay logged in"). By the owner's choice
+the agent reaches every record that login can see: the owner's own folders
+and everything shared with the owner, now or later. Only typed records are
+served: legacy (v2) and Secrets Manager application (v5) records never are,
+and file records only as attachments of a typed record. The owner keeps no production credentials in it.
+
+- Image: Commander `KEEPERCOMMANDER_VERSION` (`../13.t3code/versions.env`) in
+  `/opt/keeper`, plus `../13.t3code/env/files/keeper-client.py` installed as
+  `/usr/local/bin/keeper`. Work variant only.
+- Sidecar: UID 1002, with Commander's `config.json` on its own retained 1 GiB
+  PVC `t3code-keeper` (`KEEPER_CONFIG_STORAGE=file`, never an OS keyring). No
+  other container mounts that PVC. The sidecar has no Secret, probes or
+  container port. It binds its port at start; while it is not logged in it
+  refuses requests (between login attempts, at once) and never holds the pod
+  NotReady.
+- API: plain HTTP on `127.0.0.1:8088`, unauthenticated inside the pod, like
+  `bw serve`. A process in the pod that calls `/record` directly can read any
+  value in the vault; `keeper run` only stops accidental leaks.
+
+### One-time login
+
+From an admin shell:
+
+```sh
+kubectl --context epaflix -n t3code-work exec -it work-0 -c keeper -- keeper login
+```
+
+In the Commander shell, run `login <email>` and complete MFA. Then run
+`this-device register`, `this-device persistent-login on`,
+`this-device 2fa_expiration forever` and `this-device timeout 30d` (or your
+enterprise maximum). Leave with `quit`, not `logout`: `logout` ends the
+persistent login. The sidecar should pick up the session within a minute and
+log `keeper: ready` (not yet observed on the live tenant). If the account uses
+SSO and persistent login cannot resume without a browser step, the sidecar
+logs `keeper: persistent login failed (KeyboardInterrupt)` and keeps waiting.
+
+Persistent login applies to the whole account, so the web, desktop and mobile
+apps also stay logged in ([Commander docs][keeper-persistent]). Commander
+stores a new clone code in `config.json` after every login
+(`post_login_processing` in Commander's `loginv3.py`). Never copy
+`config.json` to another machine: the same docs say using one config on two
+devices revokes both. `keeper login` and the sidecar's own re-logins share a
+file lock, so they never overlap.
+
+Every request syncs at most once per 10 seconds, and an idle sidecar syncs
+every 5 minutes. That should keep the inactivity timer from running out, but
+it has not been observed on the live tenant yet. If Keeper still ends the
+device session (policy, timeout or revocation), the sidecar logs
+`keeper: not logged in; run keeper login ...`; repeat the login above. If
+Keeper no longer recognises the device at all, Commander registers a new one
+and overwrites `config.json`, so the login also has to be repeated.
+
+SIGTERM sets a flag: the sidecar finishes the request or login in progress,
+then exits. The sidecar turns off Commander's throttle back-off
+(`fail_on_throttle`), but a slow read can still block for minutes, so 45 s
+after the signal the sidecar exits regardless, before the pod's 60 s grace
+period ends. A cut-off that lands exactly while a login writes
+`config.json` could leave it unreadable; if the sidecar then reports
+`not logged in`, repeat the login above.
+
+[keeper-persistent]: https://docs.keeper.io/en/keeperpam/commander-cli/commander-installation-setup/logging-in#persistent-login-sessions-stay-logged-in
+
+### Agent commands
+
+```sh
+keeper list [filter]                        # metadata only: uid, title, type, field names, attachment names
+keeper run (--uid UID | --title TITLE) [--password-env KEEPER_X] [--login-env KEEPER_X] \
+  [--field NAME=KEEPER_X] [--attachment NAME --attachment-env KEEPER_X] -- <command>
+keeper create --input-file /tmp/private.json   # or --input-env KEEPER_DOC
+keeper update --uid UID --input-file /tmp/private.json
+keeper attach --uid UID --file /tmp/private/cred.bin
+keeper trash --uid UID
+```
+
+- `run` works like `vault run`. Values reach only the child process. The
+  child gets no stdin, its output is discarded, and inherited `KEEPER_*` and
+  `KSM_*` variables are removed. `--field` matches a field's label, or its
+  type if it has no label.
+- Documents use Keeper's record JSON:
+  `{"type": "login", "title": "...", "notes": "...", "fields": [{"type": "password", "value": ["..."]}], "custom": [{"type": "text", "label": "api", "value": ["..."]}]}`.
+  `create` needs `type` and `title`. `update` replaces each top-level key you
+  supply and keeps attachments and record links. Documents cannot contain
+  folder keys or link fields (`fileRef`, `addressRef`, `cardRef`,
+  `recordRef`, `script`); `attach` manages files. New records go to the root
+  of My Vault.
+- `attach` replaces an attachment with the same file name: the new file is
+  linked and the old link removed in a single record update.
+- `trash` runs Commander's own `rm` on the record, which unlinks it from every
+  folder that holds it. That should send it to Deleted Items, but this has not
+  been tested against the live tenant. For a record in a shared folder,
+  Commander unlinks it from that shared folder itself
+  (`commands/record.py`, `RecordRemoveCommand`), which likely removes it for
+  every member of the folder; this is untested too. If the enterprise
+  enforces master-password re-entry for record changes, `trash` fails before
+  any change is sent, but reports exit `2` because the sidecar cannot tell.
+- While the sidecar is not logged in, every command exits `1` with
+  `keeper: the keeper sidecar is not logged in; ask the owner to run ...`.
+- Refusals print only the exception type and the client's own call chain.
+  Exit code `2` means a write was sent but not confirmed: check the record in
+  the web vault before you retry.
+
+Offline checks: `python3 2-k3s/13.t3code/env/tools/keeper-client.test.py -v`.
+They run against fake Commander objects. Nothing here has been run against a
+live Keeper tenant yet.
+
 ## Network isolation
 
 See [network policies and post-merge checks](../13.t3code/env/network-isolation.md).

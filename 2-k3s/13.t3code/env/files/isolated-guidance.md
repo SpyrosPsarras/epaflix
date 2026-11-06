@@ -28,6 +28,13 @@ match exactly one item. Writes use `vault create/update/trash/attach`; read
 before writing. Agent `bw` is intentionally unavailable and not logged in;
 there are no Vaultwarden MCP tools. Use only this environment's vault.
 
+Work pods also have `keeper` for the owner's whole Keeper vault, with the same rules as `vault`:
+`keeper list [filter]`, then `keeper run --title '<exact title>' [--password-env KEEPER_X] [--login-env KEEPER_X] [--field NAME=KEEPER_X] [--attachment NAME --attachment-env KEEPER_X] -- <command>`.
+Target variables must match `KEEPER_[A-Z][A-Z0-9_]{0,63}`. Writes use `keeper create/update/attach/trash`; read
+[the Keeper section](https://github.com/SpyrosPsarras/epaflix/blob/main/2-k3s/13.t3code-work/README.md#keeper)
+before writing. Do not use or install Commander or `ksm` yourself. If `keeper` prints
+`the keeper sidecar is not logged in`, tell the owner instead of retrying.
+
 ## Python packages
 
 There is no system pip. For Python packages, create a virtual environment with `python3 -m venv <dir>` and use `<dir>/bin/pip` and `<dir>/bin/python`, or install a tool into `~/.local/bin`. Do not use sudo or system package managers.

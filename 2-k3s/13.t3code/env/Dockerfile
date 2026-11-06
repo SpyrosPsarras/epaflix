@@ -41,6 +41,17 @@ COPY env/files/isolated-guidance.md /opt/t3/isolated-guidance.md
 COPY env/files/vault-client.py /tmp/vault-client.py
 RUN if [ "$T3_RUNTIME_VARIANT" = homelab ] || [ "$T3_RUNTIME_VARIANT" = work ]; then install -m 0555 /tmp/vault-client.py /usr/local/bin/vault; fi \
     && rm /tmp/vault-client.py
+# Work only: Keeper Commander for the keeper sidecar (uid 1002) and its client.
+# shortcut: only keepercommander itself is pinned, its dependencies float; add a hashed constraints file if a dependency release breaks the build.
+COPY env/files/keeper-client.py /tmp/keeper-client.py
+RUN if [ "$T3_RUNTIME_VARIANT" = work ]; then \
+      . /tmp/cluster-tools/versions.env \
+      && python3 -m venv /opt/keeper \
+      && /opt/keeper/bin/pip install --no-cache-dir --disable-pip-version-check "keepercommander==$KEEPERCOMMANDER_VERSION" \
+      && install -m 0555 /tmp/keeper-client.py /usr/local/bin/keeper \
+      && groupadd -g 1002 keeper && useradd -u 1002 -g 1002 -M -d /keeper -s /usr/sbin/nologin keeper; \
+    fi \
+    && rm /tmp/keeper-client.py
 # The vault sidecar runs as uid 1001. OpenSSH tools (ssh-keygen validates work host keys) refuse a uid without a passwd entry.
 RUN if [ "$T3_RUNTIME_VARIANT" != mixed ]; then groupadd -g 1001 vault && useradd -u 1001 -g 1001 -M -d /vault -s /usr/sbin/nologin vault; fi
 ENV HOME=/home/t3

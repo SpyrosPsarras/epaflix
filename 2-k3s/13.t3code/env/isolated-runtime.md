@@ -39,7 +39,8 @@ updating these runtime facts needs no private-input rotation.
 
 The block covers the stock vault client's syntax, `VAULT_` target-variable
 restriction, exact item-name matching, discarded child output, unavailable agent
-`bw` and Vaultwarden MCP tools, and model routing. Non-secret results must be
+`bw` and Vaultwarden MCP tools, the work pod's `keeper` client (`KEEPER_`
+target variables, exact titles, its not-logged-in message), and model routing. Non-secret results must be
 written by the child to a file in a private temp directory and read afterwards.
 Personal instructions and skills remain private bundle inputs. SSH guidance
 stays in each variant's own guide, with access determined by its generated SSH
