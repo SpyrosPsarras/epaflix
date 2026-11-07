@@ -112,7 +112,7 @@ After restoring these files, run `update-initramfs -u -k all` and `proxmox-boot-
 | Machine and CPU | `q35`, `host`, 1 socket, 4 cores |
 | Memory | `20480` MiB, `balloon: 0`. 24 GiB ran the 31 GiB host out of memory, because passthrough pins all guest RAM. |
 | GPU | `hostpci0: 0000:01:00,pcie=1`, all four functions |
-| Disk | `scsi0: local-zfs:vm-1064-disk-0,discard=on,size=100G,ssd=1` |
+| Disk | `scsi0: ssd-raid:vm-1064-disk-0,discard=on,size=100G,ssd=1`, on the evanthoulaki SSD RAID 5 over iSCSI ([TrueNAS apps disk](../patroklos/README.md#truenas-apps-disk)) |
 | SCSI controller | `virtio-scsi-pci` |
 | Cloud-init disk | `ide2: local-zfs:vm-1064-cloudinit,media=cdrom` |
 | LAN NIC | VirtIO `net0`, `bridge=vmbr0`, `192.168.10.64/24`, gateway `192.168.10.1` |

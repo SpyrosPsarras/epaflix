@@ -67,9 +67,9 @@ The onboard 1G I350 ports are unused. This host is a member of the `e-pavli` clu
 
 ## Keep etcd responsive on rpool
 
-`rpool` holds the disks of VM 1052 (k3s-master-52, an etcd member), VM 1063 (k3s-worker-63) and two disks of VM 1200 (TrueNAS, `scsi0` and `scsi5`). The two SSDs are `VK0120GEYJP`.
+`rpool` holds the disks of VM 1052 (k3s-master-52, an etcd member), VM 1063 (k3s-worker-63) and the TrueNAS boot disk (VM 1200 `scsi0`). The two SSDs are `VK0120GEYJP`. Until 2026-11-07 it also held the TrueNAS `apps` disk (`scsi5`); see [TrueNAS apps disk](#truenas-apps-disk).
 
-On 2026-11-06, two Prometheus queries over the data kept since 2026-11-01 counted 21 and 18 episodes in which master-52's etcd WAL fsync p99 exceeded 0.5 s. The worst episodes reached 8 s, the histogram's top bucket. master-51 had 2 such episodes and master-53 had 3. In 16 of the 18 episodes in the 7-day query, worker-63's writes peaked at 43-128 MB/s, for example while `t3code-image-prepull` pulled the t3code image. Its normal rate is under 7 MB/s in 99% of minutes. On 2026-11-05 and 2026-11-06, etcd changed leader during these stalls, and kube-vip failed to renew its `plndr-cp-lock` lease, which holds the API VIP. In the other 2 episodes worker-63 was idle and pve-exporter has no data, so their cause is unknown. TrueNAS's `scsi5` disk on `rpool` is not capped and is one candidate.
+On 2026-11-06, two Prometheus queries over the data kept since 2026-11-01 counted 21 and 18 episodes in which master-52's etcd WAL fsync p99 exceeded 0.5 s. The worst episodes reached 8 s, the histogram's top bucket. master-51 had 2 such episodes and master-53 had 3. In 16 of the 18 episodes in the 7-day query, worker-63's writes peaked at 43-128 MB/s, for example while `t3code-image-prepull` pulled the t3code image. Its normal rate is under 7 MB/s in 99% of minutes. On 2026-11-05 and 2026-11-06, etcd changed leader during these stalls, and kube-vip failed to renew its `plndr-cp-lock` lease, which holds the API VIP. In the other 2 episodes worker-63 was idle and pve-exporter has no data, so their cause is unknown. TrueNAS's `scsi5` disk, then on `rpool`, was not capped and was one candidate. It moved off `rpool` on 2026-11-07.
 
 `zpool iostat -w rpool` was read on 2026-11-06 before any test and covers about 5.4 days since boot. It showed no disk write slower than its 268 ms bucket. Over a million sync writes waited in the ZFS sync queue for 1 s or more, some for 17-34 s. The likely mechanism: guest flushes turn worker-63's bulk writes into sync writes, and those queue ahead of etcd's fdatasync. With `zfs_dirty_data_max` at 256 MiB in both runs, setting `sync=disabled` on worker-63's disk cut the test's worst fsync from 28 s to 3.6 s, which supports this.
 
@@ -95,6 +95,24 @@ Test with two commands at once. On master-52, run a loop that writes 4 KB with `
 The final worst case is above etcd's 500 ms heartbeat interval, so a leader can send a heartbeat late. It stays below etcd's 1 s slow-fdatasync warning and well inside the 5 s election timeout. That timeout and the heartbeat are k3s defaults (`pkg/etcd/etcd.go` in v1.36.5+k3s1). All three masters' `etcd-arg` entries set only compaction and quota, so they keep these defaults. The warning threshold is `warnSyncDuration` in `server/storage/wal/wal.go` of k3s-io/etcd v3.6.14-k3s3.
 
 These made no consistent difference beyond run-to-run noise: lowering `zfs_dirty_data_max` or `zfs_vdev_async_write_max_active` once the cap was in place, `logbias=throughput` with a 50 MB/s cap, and the `none` I/O scheduler.
+
+## TrueNAS apps disk
+
+The TrueNAS `apps` pool, which holds every democratic-csi iSCSI zvol, is one virtual disk: VM 1200 `scsi5`, serial `APPSSSD0`, 100G. It lives on storage `ssd-raid`, an LVM volume group on the evanthoulaki SSD RAID 5 (3 × 240 GB, P440ar logical drive 1). evanthoulaki shares that drive over iSCSI as `iqn.2026-11.com.epaflix:evanthoulaki.ssd-raid5` on `10.0.0.11:3260`. Its LIO ACL lists the initiators of shypowder and patroklos. `ssd-iscsi` and `ssd-raid` are enabled on those two nodes, and `ssd-raid` has `shared 1`. shypowder uses the same volume group for the k3s-worker-64 disk.
+
+While evanthoulaki or the 10G link is down, the `apps` pool and every iSCSI PVC are offline. If patroklos boots while the target is unreachable, Proxmox cannot activate `scsi5`, so expect VM 1200 to stay stopped until it is back.
+
+On 2026-11-07 the disk moved off `rpool` with `qm disk move 1200 scsi5 ssd-raid --delete 1` while TrueNAS was running. The 60G copy took 18 minutes. `rpool` went from 82.8G to 42.0G allocated.
+
+To grow the disk:
+
+```sh
+qm disk resize 1200 scsi5 <size>     # on patroklos
+sgdisk -e /dev/<dev>                 # on TrueNAS: move the backup GPT header to the new end
+midclt call -j pool.expand <pool-id> # on TrueNAS: grow partition 1 and the pool
+```
+
+Replace `<dev>` with the disk whose serial is `APPSSSD0` in `lsblk -o NAME,SERIAL` (`sdf` on 2026-11-07), and `<pool-id>` with the `apps` ID from `midclt call pool.query` (`2`). Without `sgdisk -e`, `pool.expand` fails with "Could not change partition 1's type code to BF01!" and writes nothing.
 
 ## Re-sector used SAS drives
 
