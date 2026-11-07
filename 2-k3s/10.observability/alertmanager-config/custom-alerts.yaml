@@ -1208,35 +1208,36 @@ spec:
               treat every write to mpara-tank-lan as at-risk until free space is back above 2 TiB.
 
         - alert: TruenasAppsPoolFreeLow
-          expr: node_filesystem_avail_bytes{job="truenas-node-exporter", device="apps", fstype="zfs"} < 12884901888  # 12 GiB
+          expr: node_filesystem_avail_bytes{job="truenas-node-exporter", device="apps", fstype="zfs"} < 21474836480  # 20 GiB
           for: 1h
           labels:
             severity: warning
             component: truenas-storage
           annotations:
-            summary: "apps pool free space is under 12 GiB"
+            summary: "apps pool free space is under 20 GiB"
             description: >-
-              The apps root dataset's node_filesystem_avail_bytes has been under 12 GiB for an
+              The apps root dataset's node_filesystem_avail_bytes has been under 20 GiB for an
               hour. The root dataset has no quota, so this is the pool-wide space left. apps
               holds all democratic-csi iSCSI zvols under apps/k8s/iscsi. They are sparse, so
-              a full pool makes writes to every iSCSI PVC fail at once. 12 GiB is about 80% of
-              the 57 GiB usable. The pool is one 60G virtual disk (vm-1200-disk-2 on patroklos
-              rpool), so growing it means resizing that disk, and rpool has little free space.
-              Check what grew (`zfs list -o space -r apps` sorted by used) first.
+              a full pool makes writes to every iSCSI PVC fail at once. 20 GiB free is about 80%
+              used of the 95 GiB usable. The pool is one 100G virtual disk on the shared
+              ssd-raid storage, the evanthoulaki SSD RAID 5 over iSCSI. To grow it, follow
+              "TrueNAS apps disk" in 1-proxmox/patroklos/README.md. Check what grew
+              (`zfs list -o space -r apps` sorted by used) first.
 
         - alert: TruenasAppsPoolFreeCritical
-          expr: node_filesystem_avail_bytes{job="truenas-node-exporter", device="apps", fstype="zfs"} < 6442450944  # 6 GiB
+          expr: node_filesystem_avail_bytes{job="truenas-node-exporter", device="apps", fstype="zfs"} < 10737418240  # 10 GiB
           for: 15m
           labels:
             severity: critical
             component: truenas-storage
           annotations:
-            summary: "apps pool free space is under 6 GiB - iSCSI PVC writes at risk"
+            summary: "apps pool free space is under 10 GiB - iSCSI PVC writes at risk"
             description: >-
               Pool-wide free space on apps (same metric semantics as TruenasAppsPoolFreeLow) has
-              been under 6 GiB for 15 minutes, about 90% used. When it reaches zero, writes to
+              been under 10 GiB for 15 minutes, about 90% used. When it reaches zero, writes to
               the sparse iSCSI zvols fail and pods see I/O errors on their PVCs. Free space on
-              apps now; do not grow a PVC until free space is back above 12 GiB.
+              apps now; do not grow a PVC until free space is back above 20 GiB.
 
     - name: truenas-pool-health
       interval: 60s
