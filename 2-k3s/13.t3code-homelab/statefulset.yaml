@@ -42,6 +42,26 @@ spec:
               - matchExpressions:
                   - key: node-role.kubernetes.io/control-plane
                     operator: DoesNotExist
+                  # Moved off worker-61 (shared with work-0) on 2026-11-07; worker-65 had the most
+                  # free local-path disk (62 and 63 have 47G root disks). local-path pins the
+                  # PVCs to this node after first bind; moving them is a copy.
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values:
+                      - k3s-worker-65
+        # Never share a node with the work runtime: either one at full CPU starves the other.
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - topologyKey: kubernetes.io/hostname
+              namespaceSelector:
+                matchLabels:
+                  kubernetes.io/metadata.name: t3code-work
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: t3code
+                matchExpressions:
+                  - key: app.kubernetes.io/component
+                    operator: DoesNotExist
       initContainers:
         - name: runtime-state
           image: t3-runtime-from-t3-container

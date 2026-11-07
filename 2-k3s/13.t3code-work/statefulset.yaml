@@ -42,6 +42,19 @@ spec:
               - matchExpressions:
                   - key: node-role.kubernetes.io/control-plane
                     operator: DoesNotExist
+        # Never share a node with the homelab runtime: either one at full CPU starves the other.
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - topologyKey: kubernetes.io/hostname
+              namespaceSelector:
+                matchLabels:
+                  kubernetes.io/metadata.name: t3code-homelab
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: t3code
+                matchExpressions:
+                  - key: app.kubernetes.io/component
+                    operator: DoesNotExist
       initContainers:
         - name: runtime-state
           image: t3-runtime-from-t3-container
