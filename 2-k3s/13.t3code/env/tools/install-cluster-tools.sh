@@ -5,6 +5,8 @@ source "${T3_VERSIONS_FILE:-$(dirname "$0")/versions.env}"
 [[ $(dpkg --print-architecture) == amd64 ]]
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
+# GitHub release downloads intermittently 504 or reset the connection (CI exit codes 22 and 56).
+curl() { command curl --retry 5 --retry-all-errors --retry-delay 5 "$@"; }
 helm_tgz="helm-v${HELM_VERSION}-linux-amd64.tar.gz"
 curl -fsSL -o "$tmp/$helm_tgz" "https://get.helm.sh/$helm_tgz"
 curl -fsSL -o "$tmp/$helm_tgz.sha256sum" "https://get.helm.sh/$helm_tgz.sha256sum"

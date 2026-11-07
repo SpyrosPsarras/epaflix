@@ -5,11 +5,11 @@ dl() {
   url=$1; out=$2; n=0
   until curl -fsSL -o "$out" "$url"; do
     n=$((n+1))
-    if [ "$n" -ge 3 ]; then
-      echo "download failed after 3 attempts: $url" >&2
+    if [ "$n" -ge 6 ]; then
+      echo "download failed after 6 attempts: $url" >&2
       return 1
     fi
-    sleep $((n*5))
+    sleep $((n*10))
   done
 }
 

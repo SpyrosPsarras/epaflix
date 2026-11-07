@@ -107,7 +107,7 @@ def auth_test(dotnet, app, mode, password, expected):
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         listener.listen()
-        listener.settimeout(10)
+        listener.settimeout(50)
         port = listener.getsockname()[1]
         results = []
 
@@ -145,10 +145,10 @@ def auth_test(dotnet, app, mode, password, expected):
             if mode == "passfile":
                 env["PGPASSFILE"] = "/nonexistent/passfile-to-test-explicit-precedence"
             result = subprocess.run([dotnet, str(app), mode, str(port)], env=env,
-                                    pass_fds=(fd,), capture_output=True, timeout=20)
+                                    pass_fds=(fd,), capture_output=True, timeout=60)  # cold dotnet start overran 20s on runners
         finally:
             os.close(fd)
-            thread.join(12)
+            thread.join(52)
         assert results == [True] and result.returncode == 0, f"Authentication failed: {mode}"
     print(f"PASS Npgsql 7.0.9 authentication and pre-auth log safety: {mode}")
 
