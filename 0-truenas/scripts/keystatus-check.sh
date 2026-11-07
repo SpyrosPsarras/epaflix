@@ -3,7 +3,7 @@ set -euo pipefail
 
 NTFY_URL="https://ntfy.epaflix.com/truenas-alerts"
 STATE_FILE="${STATE_FILE:-/var/tmp/keystatus-check.failing}"
-DATASET="apps/encrypted-backups"
+DATASET="mpara-tank-lan/encrypted-backups"
 
 notify() {
     local title="$1" priority="$2" body="$3"

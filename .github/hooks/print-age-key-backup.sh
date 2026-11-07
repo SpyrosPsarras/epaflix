@@ -6,8 +6,8 @@ set -euo pipefail
 # Copies that exist today, all estate-dependent:
 #   1. workstation ~/.config/sops/age/k3s-cluster.txt
 #   2. in-cluster Secret argocd/sops-age
-#   3. TrueNAS /mnt/apps/encrypted-backups/sops-age-backup/ — on a dataset that
-#      comes up locked, and its unlock passphrase lives INSIDE the SOPS store
+#   3. TrueNAS /mnt/mpara-tank-lan/encrypted-backups/sops-age/k3s-cluster.txt — on a dataset
+#      that comes up locked, and its unlock passphrase lives INSIDE the SOPS store
 #      this key decrypts. Lose copies 1+2 and copy 3 is unreachable.
 #
 # This script writes a printable HTML page (key text, SHA256, QR, restore
@@ -86,7 +86,7 @@ HTML
   cat <<'HTML'
 <p>This key decrypts every SOPS-encrypted file in the epaflix repo, including
 <code>.github/instructions/secrets.enc.yaml</code>, which holds the TrueNAS
-<code>apps/encrypted-backups</code> unlock passphrase and every other estate
+<code>mpara-tank-lan/encrypted-backups</code> unlock passphrase and every other estate
 credential. Store this page somewhere a total loss of the homelab cannot
 touch: not on TrueNAS, not in the cluster, not only inside the repo clone.</p>
 <p>Restore:</p>
@@ -94,7 +94,7 @@ touch: not on TrueNAS, not in the cluster, not only inside the repo clone.</p>
   <li>Scan the QR (or copy the text) into <code>~/.config/sops/age/k3s-cluster.txt</code>, mode 600.</li>
   <li><code>sha256sum</code> the file and compare against the hash above.</li>
   <li>From the repo: <code>SOPS_AGE_KEY_FILE=~/.config/sops/age/k3s-cluster.txt sops -d .github/instructions/secrets.enc.yaml &gt;/dev/null &amp;&amp; echo OK</code></li>
-  <li>Re-derive the other copies: in-cluster Secret <code>argocd/sops-age</code>, TrueNAS mirror on <code>apps/encrypted-backups</code>.</li>
+  <li>Re-derive the other copies: in-cluster Secret <code>argocd/sops-age</code>, TrueNAS mirror on <code>mpara-tank-lan/encrypted-backups</code>.</li>
 </ol>
 HTML
   echo "$qr_block"

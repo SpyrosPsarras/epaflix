@@ -64,7 +64,7 @@ rm -f "$state_file"
 rc=0; run_check unavailable || rc=$?
 if [ "$rc" -eq 1 ] \
   && [ "$(records)" -eq 1 ] \
-  && grep -q 'Title: TrueNAS apps/encrypted-backups is LOCKED' "$ntfy_log" \
+  && grep -q 'Title: TrueNAS mpara-tank-lan/encrypted-backups is LOCKED' "$ntfy_log" \
   && grep -q 'Priority: high' "$ntfy_log" \
   && grep -q 'zfs load-key' "$ntfy_log" \
   && [ -f "$state_file" ]; then
@@ -83,7 +83,7 @@ fi
 rc=0; run_check available || rc=$?
 if [ "$rc" -eq 0 ] \
   && [ "$(records)" -eq 1 ] \
-  && grep -q 'Title: TrueNAS apps/encrypted-backups unlocked' "$ntfy_log" \
+  && grep -q 'Title: TrueNAS mpara-tank-lan/encrypted-backups unlocked' "$ntfy_log" \
   && [ ! -e "$state_file" ]; then
   pass "unlocked dataset clears the state file and sends the recovery notification"
 else
@@ -116,10 +116,10 @@ else
   fail "notifications post to the truenas-alerts ntfy topic"
 fi
 
-if [ "$(xargs <"$zfs_log")" = "get -H -o value keystatus apps/encrypted-backups" ]; then
-  pass "script queries keystatus of apps/encrypted-backups via zfs get"
+if [ "$(xargs <"$zfs_log")" = "get -H -o value keystatus mpara-tank-lan/encrypted-backups" ]; then
+  pass "script queries keystatus of mpara-tank-lan/encrypted-backups via zfs get"
 else
-  fail "script queries keystatus of apps/encrypted-backups via zfs get (got: $(xargs <"$zfs_log"))"
+  fail "script queries keystatus of mpara-tank-lan/encrypted-backups via zfs get (got: $(xargs <"$zfs_log"))"
 fi
 
 if [ -x "$script" ]; then
