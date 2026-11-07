@@ -50,7 +50,7 @@ Logs had used 2.9 GB on k3s-master-51 and on k3s-master-52.
 
 ## VM disk discard
 
-The k3s VM disks use `scsi0` on the `local-raid` LVM-thin pool on takaros and evanthoulaki, and on `local-zfs` on patroklos and shypowder (k3s-master-52, k3s-worker-63, k3s-worker-64). Set `discard=on,ssd=1` so Ubuntu's weekly `fstrim.timer`, enabled by default, returns freed blocks to the pool.
+The k3s VM disks use `scsi0` on the `local-raid` LVM-thin pool on takaros and evanthoulaki, on `local-zfs` on patroklos (k3s-master-52, k3s-worker-63), and on the shared `ssd-raid` LVM storage on shypowder (k3s-worker-64). Set `discard=on,ssd=1` so Ubuntu's weekly `fstrim.timer`, enabled by default, returns freed blocks to the pool. `ssd-raid` is thick LVM, so on k3s-worker-64 the discards only reach the evanthoulaki backstore.
 
 | Nodes | Discard status on 2026-11-03 |
 | --- | --- |
