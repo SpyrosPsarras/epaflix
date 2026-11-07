@@ -17,11 +17,13 @@
   "commitMessagePrefix": "[renovate]",
   "packageRules": [
     {
-      "description": "Keep the shared runtime image reference aligned with updated tool and base-image inputs.",
+      "description": "Keep the lock and the shared runtime image reference aligned with updated tool and base-image inputs. sync-lock.sh rebuilds the lock with the image's npm 10.9.4: Renovate's own lock update left PR #2187 with a stale lock after a git dependency (superpowers) bump, which failed npm ci and the image tag check on every rebase.",
       "matchFileNames": ["2-k3s/13.t3code/env/tools/package.json", "2-k3s/13.t3code/versions.env", "2-k3s/13.t3code/env/Dockerfile"],
+      "constraints": {"node": "24"},
       "postUpgradeTasks": {
-        "commands": ["bash 2-k3s/13.t3code/env/tools/sync-runtime-image.sh"],
-        "fileFilters": ["2-k3s/13.t3code/one/statefulset.yaml", "2-k3s/13.t3code-homelab/statefulset.yaml", "2-k3s/13.t3code-work/statefulset.yaml"],
+        "installTools": {"node": {}},
+        "commands": ["bash 2-k3s/13.t3code/env/tools/sync-lock.sh", "bash 2-k3s/13.t3code/env/tools/sync-runtime-image.sh"],
+        "fileFilters": ["2-k3s/13.t3code/env/tools/package-lock.json", "2-k3s/13.t3code/one/statefulset.yaml", "2-k3s/13.t3code-homelab/statefulset.yaml", "2-k3s/13.t3code-work/statefulset.yaml"],
         "executionMode": "branch"
       }
     },
