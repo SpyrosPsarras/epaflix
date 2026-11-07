@@ -42,9 +42,9 @@ spec:
               - matchExpressions:
                   - key: node-role.kubernetes.io/control-plane
                     operator: DoesNotExist
-                  # Moved off worker-61 (shared with work-0) on 2026-11-07; worker-65 had the most
-                  # free local-path disk (62 and 63 have 47G root disks). local-path pins the
-                  # PVCs to this node after first bind; moving them is a copy.
+                  # Moved off worker-61 (shared with work-0) on 2026-11-07. worker-65 had
+                  # the most free local-path disk (53G; 62 had 4G, 63 had 15G). local-path
+                  # pins the PVCs to this node after first bind; moving them is a copy.
                   - key: kubernetes.io/hostname
                     operator: In
                     values:
