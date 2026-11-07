@@ -24,6 +24,6 @@ images:
   - name: registry.k8s.io/sig-storage/csi-node-driver-registrar
     newTag: v2.18.0@sha256:b7fefd08651f00ac4df1a196ed4c621c2451fbb899297fe9fad9e36c667af0c0
   - name: docker.io/busybox
-    newTag: 1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e
+    newTag: 1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4
   - name: ghcr.io/democratic-csi/csi-grpc-proxy
     newTag: v0.5.7@sha256:0240d0fba3cedd598036766b1865e88aa2eac9c16822df03d5d912a81128ebb6
