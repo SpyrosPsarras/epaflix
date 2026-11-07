@@ -48,6 +48,16 @@ container with stdin and stdout attached. Both run in this pod's own namespace (
 If the kubeconfig is missing, tell the owner instead of working around it. Details:
 [t3-build](https://github.com/SpyrosPsarras/epaflix/blob/main/2-k3s/29.t3-build/README.md).
 
+## Disk space
+
+This pod's home and `/tmp` sit on a node disk that other pods share. The home has no quota.
+`/tmp` holds at most 20 GiB. Writing more evicts the whole pod and ends the running turn.
+A full node disk evicts other pods on that node too.
+
+Before work that may write more than 5 GiB in total, such as a clone, a download, a build
+or a batch of them, run `df -h ~ /tmp`. Tell the owner the expected size and wait for approval.
+Update existing checkouts with `git fetch` instead of cloning them again.
+
 ## Handoffs
 
 Write files meant for the owner's desktops to `~/handoffs/`. The desktops pull them over SSH.

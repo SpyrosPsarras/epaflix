@@ -249,6 +249,29 @@ spec:
               the PBS datastore volume vm-1031-disk-1 (93.6% full on 2026-09-06 Athens), or extend the VG
               per #564. Metadata usage is invisible to this metric - see ProxmoxThinPoolDataNearFull.
 
+    # The chart's NodeFilesystem* rules wait 30m-1h and KubeNodeEviction is info (null route).
+    # A runaway write into an unquota'd local-path volume fills a node in minutes.
+    - name: node-disk
+      interval: 60s
+      rules:
+        - alert: NodeRootDiskLow
+          expr: |
+            (
+              node_filesystem_avail_bytes{job="node-exporter", mountpoint="/", fstype!=""}
+              /
+              node_filesystem_size_bytes{job="node-exporter", mountpoint="/", fstype!=""}
+            ) < 0.10
+          for: 1m
+          labels:
+            severity: warning
+            component: infrastructure
+          annotations:
+            summary: "Node root disk below 10% free"
+            description: >-
+              {{ $labels.instance }} has {{ $value | humanizePercentage }} of / free. Kubelet starts
+              evicting pods at 5%. local-path volumes share this disk without a quota, so check
+              du -xsh /var/lib/rancher/k3s/storage/* on the node first.
+
     - name: cilium
       interval: 60s
       rules:

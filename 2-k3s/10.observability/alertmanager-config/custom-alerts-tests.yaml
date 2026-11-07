@@ -2274,3 +2274,48 @@ tests:
       - eval_time: 3m
         alertname: KubeApiVipDown
         exp_alerts: *kube_api_vip_down
+
+  - name: Node root disk below 10% free fires after 1 minute
+    interval: 1m
+    input_series:
+      - series: 'node_filesystem_avail_bytes{job="node-exporter",instance="10.0.0.61:9100",device="/dev/sda1",fstype="ext4",mountpoint="/"}'
+        values: "9x10"
+      - series: 'node_filesystem_size_bytes{job="node-exporter",instance="10.0.0.61:9100",device="/dev/sda1",fstype="ext4",mountpoint="/"}'
+        values: "100x10"
+      - series: 'node_filesystem_avail_bytes{job="node-exporter",instance="10.0.0.62:9100",device="/dev/sda1",fstype="ext4",mountpoint="/"}'
+        values: "11x10"
+      - series: 'node_filesystem_size_bytes{job="node-exporter",instance="10.0.0.62:9100",device="/dev/sda1",fstype="ext4",mountpoint="/"}'
+        values: "100x10"
+    alert_rule_test:
+      - eval_time: 0m
+        alertname: NodeRootDiskLow
+        exp_alerts: []
+      - eval_time: 1m
+        alertname: NodeRootDiskLow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: infrastructure
+              job: node-exporter
+              instance: "10.0.0.61:9100"
+              device: /dev/sda1
+              fstype: ext4
+              mountpoint: /
+            exp_annotations:
+              summary: "Node root disk below 10% free"
+              description: "10.0.0.61:9100 has 9% of / free. Kubelet starts evicting pods at 5%. local-path volumes share this disk without a quota, so check du -xsh /var/lib/rancher/k3s/storage/* on the node first."
+
+  - name: Node root disk dip shorter than 1 minute does not alert
+    interval: 1m
+    input_series:
+      - series: 'node_filesystem_avail_bytes{job="node-exporter",instance="10.0.0.61:9100",device="/dev/sda1",fstype="ext4",mountpoint="/"}'
+        values: "50 9 50x10"
+      - series: 'node_filesystem_size_bytes{job="node-exporter",instance="10.0.0.61:9100",device="/dev/sda1",fstype="ext4",mountpoint="/"}'
+        values: "100x12"
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: NodeRootDiskLow
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: NodeRootDiskLow
+        exp_alerts: []

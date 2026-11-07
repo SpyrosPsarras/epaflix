@@ -74,7 +74,7 @@ spec:
               mountPath: /run/t3-vault
       containers:
         - name: t3
-          image: ghcr.io/spyrospsarras/t3-runtime:homelab-inputs-aa37eeb7e5776959a91372061bd13ccd
+          image: ghcr.io/spyrospsarras/t3-runtime:homelab-inputs-5b5992df5a1e58b5cda6830a1bebb863
           imagePullPolicy: IfNotPresent
           command: [bash, /scripts/entrypoint.sh]
           env:
@@ -326,7 +326,8 @@ spec:
               - key: kubeconfig
                 path: kubeconfig
         - name: tmp
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: 20Gi
         - name: runtime-state
           emptyDir:
             medium: Memory

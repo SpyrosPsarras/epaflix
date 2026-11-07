@@ -89,7 +89,7 @@ spec:
               mountPath: /keeper
       containers:
         - name: t3
-          image: ghcr.io/spyrospsarras/t3-runtime:work-inputs-ce4278aa9e582a9a3f81b351da31ff24
+          image: ghcr.io/spyrospsarras/t3-runtime:work-inputs-d397f20b3f842fc45a4fedf1e54e4da7
           imagePullPolicy: IfNotPresent
           command: [bash, /scripts/entrypoint.sh]
           env:
@@ -403,7 +403,8 @@ spec:
               - key: kubeconfig
                 path: kubeconfig
         - name: tmp
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: 20Gi
         - name: runtime-state
           emptyDir:
             medium: Memory
