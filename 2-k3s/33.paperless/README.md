@@ -10,6 +10,7 @@ Hostname https://paperless.epaflix.com on Traefik `websecure` at `192.168.10.101
 - The Authentik application `paperless` binds `authentik Admins` and `Servarr users`. Authentik denies everyone else, so Paperless never creates an account for them.
 - Paperless creates the account on the first SSO login. Password login in the web UI is off and the login page redirects to Authentik.
 - Traefik answers 403 to every request for `/admin/`. `PAPERLESS_DISABLE_REGULAR_LOGIN` leaves the Django admin login open, so the route stays blocked.
+- `PAPERLESS_COOKIE_PREFIX=paperless_` renames the CSRF, session and language cookies. Without it, a browser that also holds a domain-wide `csrftoken` cookie from another `*.epaflix.com` app failed the SSO start with "CSRF token from POST incorrect".
 - Phones use an API token. The user logs in to the web UI once, creates the token under My Profile and pastes it into Paperless Go.
 - After the owner's first login, an owner-confirmed `manage.py shell` sets `is_superuser` and `is_staff` on his user.
 
