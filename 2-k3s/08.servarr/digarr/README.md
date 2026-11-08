@@ -57,6 +57,6 @@ Members are Request only and have no targets. Approving a member's request uses 
 
 ## Fallback if header mapping fails
 
-Do not widen network access or trust a client header. In a reviewed follow-up change, remove the custom scope mapping from the provider and blueprint, set `PROXY_AUTH_ENABLED=false`, and replace `digarr-forwardauth` on `digarr-https` with the standard `authentik-forwardauth` in `traefik-system`. Remove the unused custom middleware. Keep the Authentik group gate, security headers, NetworkPolicy and owner-only target settings. Users then sign in locally to Digarr behind Authentik. Record this fallback in the PR and repeat the identity and D1 checks after the owner-approved sync.
+Do not widen network access or trust a client header. In a reviewed follow-up change, remove the custom scope mapping from the provider and blueprint, set `PROXY_AUTH_ENABLED=false`, and replace `digarr-forwardauth` on `digarr-https` with the standard `authentik-forwardauth` in `traefik-system`. Remove the unused custom middleware. Keep the Authentik group gate, security headers, NetworkPolicy and owner-only target settings. Users then sign in locally to Digarr behind Authentik. Self-registration is off by default, so the owner creates member accounts in Settings > Users. Record this fallback in the PR and repeat the identity and D1 checks after the owner-approved sync.
 
 ## Live changes

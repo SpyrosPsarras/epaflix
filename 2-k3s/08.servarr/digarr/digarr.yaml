@@ -20,6 +20,7 @@ spec:
       labels:
         app: digarr
     spec:
+      terminationGracePeriodSeconds: 45
       securityContext:
         runAsUser: 10001
         runAsGroup: 10001
