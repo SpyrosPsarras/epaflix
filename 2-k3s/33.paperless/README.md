@@ -21,7 +21,7 @@ Created once with an owner-confirmed `manage.py shell` script that uses `get_or_
 
 | Object | Name | Id | Details |
 |---|---|---|---|
-| Group | `receipts` | 1 | view, add, change and delete on Document, Note, SavedView and UISettings; view, add and change on Tag, Correspondent, DocumentType and CustomField (28 permissions) |
+| Group | `receipts` | 1 | view, add, change and delete on Document, Note, SavedView and UISettings; view, add and change on Tag, Correspondent, DocumentType and CustomField, 28 permissions in total |
 | Custom field | `Total` | 1 | type monetary, `extra_data` empty, so no default currency |
 | Tag | `paperless-gpt-auto` | 1 | matching algorithm None, so Paperless never assigns it on its own |
 | Workflow | `Tag new receipts for AI` | 1 | trigger 1 Document Added from every source, action 1 assigns tag `paperless-gpt-auto` |
@@ -37,9 +37,9 @@ Removing someone from `Servarr users` stops new web logins only. Their API token
 
 Deployment `paperless-gpt`, image `icereed/paperless-gpt`, reads Paperless OCR text and asks Ollama `qwen3.5:9b` at `http://ollama.ai.svc.cluster.local:30068` with thinking off. LLM OCR stays off. It calls `http://paperless:8000` with the API token of user `paperless-gpt`.
 
-Workflow `Tag new receipts for AI` tags every new document `paperless-gpt-auto`. paperless-gpt polls that tag and sets the title, shop (correspondent), tags, document type, created date and `Total`. Then it removes `paperless-gpt-auto` and adds `paperless-gpt-auto-complete`, or `paperless-gpt-failed` when Paperless rejects a value. It creates those two tags at startup. It picks only existing tags and document types and may create new shops.
+Workflow `Tag new receipts for AI` tags every new document `paperless-gpt-auto`. paperless-gpt polls that tag and sets the title, the shop as correspondent, tags, document type, created date and `Total`. Then it removes `paperless-gpt-auto` and adds `paperless-gpt-auto-complete`, or `paperless-gpt-failed` when Paperless rejects a value. It creates those two tags at startup. It picks only existing tags and document types and may create new shops.
 
-It runs as 1000:1000. The entrypoint skips its user setup when not root. Its files live on `paperless-data`: `gpt/config` (`settings.json`), `gpt/prompts` and `gpt/db` (SQLite undo history). On first start it copies the image's `default_prompts` into the empty `gpt/prompts`, and on later starts it updates every prompt nobody edited.
+It runs as 1000:1000. The entrypoint skips its user setup when not root. Its files live on `paperless-data`: `gpt/config` with `settings.json`, `gpt/prompts`, and `gpt/db` with the SQLite undo history. On first start it copies the image's `default_prompts` into the empty `gpt/prompts`, and on later starts it updates every prompt nobody edited.
 
 ### Access
 
@@ -76,7 +76,7 @@ On a receipt this is the purchase date as printed. Receipts here print the day f
 `custom_field_prompt.tmpl`, instruction 3 replaced, so a receipt without a currency gets an empty currency instead of a guess:
 
 ```text
-3.  For fields of type `monetary`, the value must be a number with two decimal places and a period as the decimal separator. Remove thousands separators and convert the decimal comma to a period. Put a three-letter currency code (e.g., NOK, EUR, USD) at the beginning of the value only when the document prints a currency code or symbol, such as `kr`, `NOK`, `€` or `EUR`. If it prints none, return the number alone and never guess a currency from the shop, country or language. Format: an amount printed as `X.XXX,XX €` becomes `EURXXXX.XX`, and an amount printed as `X.XXX,XX` becomes `XXXX.XX`.
+3.  For fields of type `monetary`, the value must be a number with two decimal places and a period as the decimal separator. Remove thousands separators and convert the decimal comma to a period. Put a three-letter currency code such as NOK, EUR or USD at the beginning of the value only when the document prints a currency code or symbol, such as `kr`, `NOK`, `€` or `EUR`. If it prints none, return the number alone and never guess a currency from the shop, country or language. Format: an amount printed as `X.XXX,XX €` becomes `EURXXXX.XX`, and an amount printed as `X.XXX,XX` becomes `XXXX.XX`.
 ```
 
 An edited prompt no longer follows upstream defaults. After an image update, compare it with the new `default_prompts`.
