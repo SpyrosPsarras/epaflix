@@ -30,7 +30,7 @@ spec:
                 name: paperless-secrets
           env:
             - {name: PAPERLESS_URL, value: "https://paperless.epaflix.com"}
-            # Another *.epaflix.com app can set a domain-wide csrftoken cookie that Django would read instead.
+            # Keeps Paperless cookies apart from other *.epaflix.com apps on the same parent domain.
             - {name: PAPERLESS_COOKIE_PREFIX, value: "paperless_"}
             - {name: PAPERLESS_REDIS, value: "redis://127.0.0.1:6379"}
             - {name: PAPERLESS_DBENGINE, value: postgresql}
