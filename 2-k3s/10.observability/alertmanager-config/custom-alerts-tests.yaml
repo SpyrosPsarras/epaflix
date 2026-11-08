@@ -424,6 +424,42 @@ tests:
       - eval_time: 61m
         alertname: LidarrHealthIssue
         exp_alerts: []
+  - name: Paperless share-lists latest failure alerts once and clears after the next successful run
+    interval: 1m
+    input_series:
+      - series: 'kube_job_failed{namespace="paperless",job_name="paperless-share-lists-100"}'
+        values: '1x20'
+      - series: 'kube_job_status_start_time{namespace="paperless",job_name="paperless-share-lists-100"}'
+        values: '100x20'
+      - series: 'kube_job_failed{namespace="paperless",job_name="paperless-share-lists-101"}'
+        values: '1x20'
+      - series: 'kube_job_status_start_time{namespace="paperless",job_name="paperless-share-lists-101"}'
+        values: '150x20'
+      - series: 'kube_job_failed{namespace="paperless",job_name="paperless-share-lists-102"}'
+        values: '_x9 0x10'
+      - series: 'kube_job_status_start_time{namespace="paperless",job_name="paperless-share-lists-102"}'
+        values: '_x9 200x10'
+      - series: 'kube_job_failed{namespace="unrelated",job_name="paperless-share-lists-999"}'
+        values: '1x20'
+      - series: 'kube_job_status_start_time{namespace="unrelated",job_name="paperless-share-lists-999"}'
+        values: '9999x20'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: PaperlessShareListsFailed
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: PaperlessShareListsFailed
+        exp_alerts:
+          - exp_labels:
+              job_name: paperless-share-lists-101
+              severity: warning
+              component: paperless
+            exp_annotations:
+              summary: Paperless share-lists run failed
+              description: "The paperless-share-lists Job (paperless-share-lists-101) failed, so new shops, tags and document types stay visible only to the user who created them. Check the Job log for a database or Secret error. Manifest: 2-k3s/33.paperless/share-lists-cronjob.yaml."
+      - eval_time: 10m
+        alertname: PaperlessShareListsFailed
+        exp_alerts: []
   - name: Configarr latest failure alerts once and clears after the next successful run
     interval: 1m
     input_series:

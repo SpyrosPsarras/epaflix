@@ -24,7 +24,7 @@ spec:
         - port: 8000
           protocol: TCP
 ---
-# No ingress rule denies all. kubectl port-forward goes through the API server and still works.
+# kubectl port-forward goes through the API server and still reaches the UI.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

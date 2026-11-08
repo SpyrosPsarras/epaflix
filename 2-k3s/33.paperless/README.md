@@ -11,13 +11,13 @@ Hostname https://paperless.epaflix.com on Traefik `websecure` at `192.168.10.101
 - Paperless creates the account on the first SSO login and adds it to group `receipts` through `PAPERLESS_SOCIAL_ACCOUNT_DEFAULT_GROUPS`. Password login in the web UI is off and the login page redirects to Authentik.
 - The REST API still accepts basic auth. No user has a usable password, so do not set one with `manage.py`.
 - Traefik answers 403 to every request for `/admin/`. `PAPERLESS_DISABLE_REGULAR_LOGIN` leaves the Django admin login open, so the route stays blocked.
-- `PAPERLESS_COOKIE_PREFIX=paperless_` renames the CSRF, session and language cookies. The prefix keeps Paperless cookies apart from other `*.epaflix.com` apps.
+- `PAPERLESS_COOKIE_PREFIX=paperless_` renames the CSRF, session and language cookies. It was added for a suspected clash with another `*.epaflix.com` cookie. The real cause of the first-login 403 was a repeated login POST after a successful login. The prefix stays, because renaming the cookies logs every browser out.
 - Phones use an API token. The user logs in to the web UI once, creates the token under My Profile and pastes it into Paperless Go.
 - After the owner's first login, an owner-confirmed `manage.py shell` sets `is_superuser` and `is_staff` on his user.
 
 ### In-app objects
 
-Created once with an owner-confirmed `manage.py shell` script that uses `get_or_create`. None of them has an owner, so every user sees them.
+With the owner's approval, the agent ran a `manage.py shell` script with `get_or_create` once. None of them has an owner, so every user sees them.
 
 | Object | Name | Id | Details |
 |---|---|---|---|
@@ -127,5 +127,6 @@ Public DNS resolves through the Cloudflare wildcard and tunnel. The LAN needs `p
 
 - `PaperlessDown` fires when the Deployment has no available replica for 15 minutes or is absent.
 - `PaperlessGptDown` does the same for Deployment `paperless-gpt`. It reads kube-state-metrics, so Prometheus needs no access to the pod.
+- `PaperlessShareListsFailed` fires 5 minutes after the newest `paperless-share-lists` Job fails and clears when the next run succeeds.
 - Blackbox target `paperless` probes `https://192.168.10.101` with host `paperless.epaflix.com`.
 - Logs reach Loki through Alloy.

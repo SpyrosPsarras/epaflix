@@ -30,7 +30,7 @@ spec:
                 name: paperless-secrets
           env:
             - {name: PAPERLESS_URL, value: "https://paperless.epaflix.com"}
-            # Keeps Paperless cookies apart from other *.epaflix.com apps on the same parent domain.
+            # Renaming the cookies logs every browser out, so keep the prefix even though no clash was found.
             - {name: PAPERLESS_COOKIE_PREFIX, value: "paperless_"}
             - {name: PAPERLESS_REDIS, value: "redis://127.0.0.1:6379"}
             - {name: PAPERLESS_DBENGINE, value: postgresql}

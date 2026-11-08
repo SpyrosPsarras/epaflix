@@ -39,9 +39,6 @@ spec:
                 - secretRef:
                     name: paperless-secrets
               env:
-                - {name: PAPERLESS_URL, value: "https://paperless.epaflix.com"}
-                - {name: PAPERLESS_COOKIE_PREFIX, value: "paperless_"}
-                - {name: PAPERLESS_REDIS, value: "redis://127.0.0.1:6379"}
                 - {name: PAPERLESS_DBENGINE, value: postgresql}
                 - {name: PAPERLESS_DBHOST, value: postgres-cluster-rw.postgres-system.svc}
                 - {name: PAPERLESS_DBNAME, value: paperless}
@@ -49,16 +46,6 @@ spec:
                 - {name: PAPERLESS_DATA_DIR, value: /srv/paperless/data}
                 - {name: PAPERLESS_MEDIA_ROOT, value: /srv/paperless/media}
                 - {name: PAPERLESS_TIME_ZONE, value: Europe/Oslo}
-                - {name: PAPERLESS_OCR_LANGUAGE, value: "nor+eng+deu+ell"}
-                - {name: PAPERLESS_OCR_LANGUAGES, value: "nor ell"}
-                - {name: USERMAP_UID, value: "1000"}
-                - {name: USERMAP_GID, value: "1000"}
-                - {name: PAPERLESS_APPS, value: allauth.socialaccount.providers.openid_connect}
-                - {name: PAPERLESS_DISABLE_REGULAR_LOGIN, value: "true"}
-                - {name: PAPERLESS_REDIRECT_LOGIN_TO_SSO, value: "true"}
-                - {name: PAPERLESS_SOCIAL_AUTO_SIGNUP, value: "true"}
-                - {name: PAPERLESS_ACCOUNT_ALLOW_SIGNUPS, value: "false"}
-                - {name: PAPERLESS_SOCIAL_ACCOUNT_DEFAULT_GROUPS, value: receipts}
               securityContext:
                 runAsUser: 1000
                 runAsGroup: 1000
