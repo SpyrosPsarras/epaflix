@@ -1,0 +1,138 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: paperless
+  namespace: paperless
+  labels:
+    app: paperless
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: paperless
+  template:
+    metadata:
+      labels:
+        app: paperless
+    spec:
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+      containers:
+        # Starts as root to install the extra OCR packs, then drops to USERMAP_UID.
+        - name: paperless
+          image: ghcr.io/paperless-ngx/paperless-ngx:3.4.2
+          envFrom:
+            - secretRef:
+                name: paperless-secrets
+          env:
+            - {name: PAPERLESS_URL, value: "https://paperless.epaflix.com"}
+            - {name: PAPERLESS_REDIS, value: "redis://127.0.0.1:6379"}
+            - {name: PAPERLESS_DBENGINE, value: postgresql}
+            - {name: PAPERLESS_DBHOST, value: postgres-cluster-rw.postgres-system.svc}
+            - {name: PAPERLESS_DBNAME, value: paperless}
+            - {name: PAPERLESS_DBUSER, value: paperless}
+            - {name: PAPERLESS_DATA_DIR, value: /srv/paperless/data}
+            - {name: PAPERLESS_MEDIA_ROOT, value: /srv/paperless/media}
+            - {name: PAPERLESS_TIME_ZONE, value: Europe/Oslo}
+            - {name: PAPERLESS_OCR_LANGUAGE, value: "nor+eng+deu+ell"}
+            - {name: PAPERLESS_OCR_LANGUAGES, value: "nor ell"}
+            - {name: USERMAP_UID, value: "1000"}
+            - {name: USERMAP_GID, value: "1000"}
+            - {name: PAPERLESS_APPS, value: allauth.socialaccount.providers.openid_connect}
+            - {name: PAPERLESS_DISABLE_REGULAR_LOGIN, value: "true"}
+            - {name: PAPERLESS_REDIRECT_LOGIN_TO_SSO, value: "true"}
+            - {name: PAPERLESS_SOCIAL_AUTO_SIGNUP, value: "true"}
+            - {name: PAPERLESS_ACCOUNT_ALLOW_SIGNUPS, value: "false"}
+          ports:
+            - name: http
+              containerPort: 8000
+          # First boot runs migrations and installs the OCR packs before the server listens.
+          startupProbe:
+            httpGet:
+              path: /accounts/login/
+              port: http
+            periodSeconds: 10
+            failureThreshold: 90
+          readinessProbe:
+            httpGet:
+              path: /accounts/login/
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 5
+          # TCP only, so a long OCR job that slows HTTP answers does not restart the pod.
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 60
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 250m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 3Gi
+          volumeMounts:
+            - name: data
+              mountPath: /srv/paperless
+            - name: consume
+              mountPath: /usr/src/paperless/consume
+        - name: valkey
+          image: ghcr.io/valkey-io/valkey:9.1.3
+          args: ["--bind", "127.0.0.1", "--port", "6379"]
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          ports:
+            - name: redis
+              containerPort: 6379
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              memory: 256Mi
+          readinessProbe:
+            exec:
+              command: [valkey-cli, -h, "127.0.0.1", -p, "6379", ping]
+            periodSeconds: 30
+            timeoutSeconds: 5
+          livenessProbe:
+            exec:
+              command: [valkey-cli, -h, "127.0.0.1", -p, "6379", ping]
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+          volumeMounts:
+            - name: valkey-data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: paperless-data
+        - name: consume
+          emptyDir: {}
+        - name: valkey-data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: paperless
+  namespace: paperless
+  labels:
+    app: paperless
+spec:
+  selector:
+    app: paperless
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

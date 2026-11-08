@@ -84,6 +84,9 @@ serviceMonitor:
     - name: truenas-ui
       url: https://192.168.10.200:8443
       hostname: truenas.epaflix.com
+    - name: paperless
+      url: https://192.168.10.101
+      hostname: paperless.epaflix.com
     - name: vaultwarden
       url: https://vaultwarden.epaflix.com/alive
       module: http_2xx_verified

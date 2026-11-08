@@ -1,0 +1,11 @@
+---
+apiVersion: viaduct.ai/v1
+kind: ksops
+metadata:
+  name: paperless-secrets
+  annotations:
+    config.kubernetes.io/function: |
+      exec:
+        path: ksops
+files:
+  - paperless-secrets.enc.yaml

@@ -1,0 +1,36 @@
+---
+# The export squashes every client to 1000:1000, so the pod needs no fsGroup or chown.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: paperless-data-shypowder
+spec:
+  capacity:
+    storage: 100Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  mountOptions:
+    - nfsvers=4.2
+    - hard
+  claimRef:
+    namespace: paperless
+    name: paperless-data
+  nfs:
+    server: 192.168.10.13
+    path: /hdd/paperless
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: paperless-data
+  namespace: paperless
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: ""
+  volumeName: paperless-data-shypowder
+  resources:
+    requests:
+      storage: 100Gi
