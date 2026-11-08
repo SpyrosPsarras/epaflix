@@ -199,6 +199,63 @@ tests:
       - eval_time: 90m
         alertname: WindmillWorkersDown
         exp_alerts: []
+  - name: paperless-gpt unavailable deployment fires after 15 minutes
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="paperless",deployment="paperless-gpt"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: PaperlessGptDown
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: PaperlessGptDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: paperless
+            exp_annotations:
+              summary: paperless-gpt is unavailable
+              description: "paperless-gpt has no available replica or its Deployment is absent. Receipts keep their paperless-gpt-auto tag until it returns. Check the paperless-gpt Deployment, Ollama in ai and the Paperless API token."
+  - name: paperless-gpt missing deployment fires after 15 minutes
+    interval: 1m
+    input_series: []
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: PaperlessGptDown
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: PaperlessGptDown
+        exp_alerts:
+          - exp_labels:
+              namespace: paperless
+              deployment: paperless-gpt
+              severity: warning
+              component: paperless
+            exp_annotations:
+              summary: paperless-gpt is unavailable
+              description: "paperless-gpt has no available replica or its Deployment is absent. Receipts keep their paperless-gpt-auto tag until it returns. Check the paperless-gpt Deployment, Ollama in ai and the Paperless API token."
+  - name: paperless-gpt healthy deployment stays silent
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="paperless",deployment="paperless-gpt"}'
+        values: '1x90'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: PaperlessGptDown
+        exp_alerts: []
+  - name: paperless-gpt recovers before the alert hold expires
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="paperless",deployment="paperless-gpt"}'
+        values: '0x10 1x20'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: PaperlessGptDown
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: PaperlessGptDown
+        exp_alerts: []
   - name: Navidrome unavailable deployment fires after 15 minutes
     interval: 1m
     input_series:

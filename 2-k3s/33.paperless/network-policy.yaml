@@ -18,8 +18,21 @@ spec:
           podSelector:
             matchLabels:
               app.kubernetes.io/name: traefik
-        # paperless-gpt and the share-lists CronJob in this namespace call the API.
+        # paperless-gpt in this namespace calls the API.
         - podSelector: {}
       ports:
         - port: 8000
           protocol: TCP
+---
+# No ingress rule denies all. kubectl port-forward goes through the API server and still works.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: paperless-gpt-ingress
+  namespace: paperless
+spec:
+  podSelector:
+    matchLabels:
+      app: paperless-gpt
+  policyTypes:
+    - Ingress
