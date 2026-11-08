@@ -1452,6 +1452,73 @@ tests:
 
   - interval: 1m
     input_series:
+      - series: 'node_zfs_zpool_state{endpoint="http-metrics",instance="192.168.10.13",job="shypowder-node-exporter",namespace="observability",service="shypowder-node-exporter",state="degraded",zpool="hdd"}'
+        values: "1x10"
+      - series: 'node_zfs_zpool_state{endpoint="http-metrics",instance="192.168.10.13",job="shypowder-node-exporter",namespace="observability",service="shypowder-node-exporter",state="online",zpool="hdd"}'
+        values: "0x10"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: ShypowderPoolUnhealthy
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: ShypowderPoolUnhealthy
+        exp_alerts:
+          - exp_labels:
+              endpoint: http-metrics
+              instance: 192.168.10.13
+              job: shypowder-node-exporter
+              namespace: observability
+              service: shypowder-node-exporter
+              state: degraded
+              zpool: hdd
+              severity: critical
+              component: shypowder-storage
+            exp_annotations:
+              summary: "shypowder zpool hdd is degraded"
+              description: "node_zfs_zpool_state on 192.168.10.13 has reported zpool hdd as degraded (anything but online) for 5m. Pool hdd is one disk with no redundancy and holds the only copy of the Paperless receipts. Run `zpool status -v hdd` on shypowder (read-only) to see the device's read/write/checksum error counts and whether they are still climbing before changing anything. Do not zpool clear, replace or online the device from this alert alone. If the exporter stops answering, this alert resolves without the pool being healthy; ShypowderExporterDown covers that."
+
+  - interval: 1m
+    input_series:
+      - series: 'up{endpoint="http-metrics",instance="192.168.10.13",job="shypowder-node-exporter",namespace="observability",service="shypowder-node-exporter"}'
+        values: "0x20"
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: ShypowderExporterDown
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: ShypowderExporterDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: shypowder-storage
+            exp_annotations:
+              summary: "Prometheus cannot scrape the shypowder node exporter"
+              description: "Prometheus has had no successful scrape of shypowder-node-exporter (192.168.10.13:9100) for 15 minutes, so ShypowderPoolUnhealthy cannot see pool hdd, the one disk holding the only copy of the Paperless receipts. Check that prometheus-node-exporter runs on shypowder and that 192.168.10.13:9100 answers from the cluster."
+
+  - interval: 1m
+    input_series:
+      - series: 'node_zfs_zpool_state{endpoint="http-metrics",instance="192.168.10.13",job="shypowder-node-exporter",namespace="observability",service="shypowder-node-exporter",state="online",zpool="hdd"}'
+        values: "1x90"
+      - series: 'node_zfs_zpool_state{endpoint="http-metrics",instance="192.168.10.13",job="shypowder-node-exporter",namespace="observability",service="shypowder-node-exporter",state="degraded",zpool="hdd"}'
+        values: "0x90"
+      - series: 'up{endpoint="http-metrics",instance="192.168.10.13",job="shypowder-node-exporter",namespace="observability",service="shypowder-node-exporter"}'
+        values: "1x90"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: ShypowderPoolUnhealthy
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: ShypowderExporterDown
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: ShypowderPoolUnhealthy
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: ShypowderExporterDown
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
       - series: 'node_filesystem_avail_bytes{device="mpara-tank-lan",device_error="",fstype="zfs",instance="192.168.10.200",job="truenas-node-exporter",mountpoint="/mnt/mpara-tank-lan"}'
         values: "1099511627775x90"  # 1 TiB - 1, below both thresholds
     alert_rule_test:

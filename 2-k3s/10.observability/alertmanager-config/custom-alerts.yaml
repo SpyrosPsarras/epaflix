@@ -1301,6 +1301,43 @@ spec:
               the exporter stops answering, this alert resolves without the pool
               being healthy; TargetDown covers that.
 
+    - name: shypowder-pool-health
+      interval: 60s
+      rules:
+        - alert: ShypowderPoolUnhealthy
+          expr: node_zfs_zpool_state{job="shypowder-node-exporter",state!="online"} == 1
+          for: 5m
+          labels:
+            severity: critical
+            component: shypowder-storage
+          annotations:
+            summary: "shypowder zpool {{ $labels.zpool }} is {{ $labels.state }}"
+            description: >-
+              node_zfs_zpool_state on {{ $labels.instance }} has reported zpool
+              {{ $labels.zpool }} as {{ $labels.state }} (anything but online) for 5m.
+              Pool hdd is one disk with no redundancy and holds the only copy of
+              the Paperless receipts. Run `zpool status -v {{ $labels.zpool }}` on
+              shypowder (read-only) to see the device's read/write/checksum error
+              counts and whether they are still climbing before changing anything.
+              Do not zpool clear, replace or online the device from this alert
+              alone. If the exporter stops answering, this alert resolves without
+              the pool being healthy; ShypowderExporterDown covers that.
+
+        - alert: ShypowderExporterDown
+          expr: absent(up{job="shypowder-node-exporter"} == 1)
+          for: 15m
+          labels:
+            severity: warning
+            component: shypowder-storage
+          annotations:
+            summary: "Prometheus cannot scrape the shypowder node exporter"
+            description: >-
+              Prometheus has had no successful scrape of shypowder-node-exporter
+              (192.168.10.13:9100) for 15 minutes, so ShypowderPoolUnhealthy cannot
+              see pool hdd, the one disk holding the only copy of the Paperless
+              receipts. Check that prometheus-node-exporter runs on shypowder and
+              that 192.168.10.13:9100 answers from the cluster.
+
     - name: vaultwarden
       interval: 60s
       rules:
