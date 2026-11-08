@@ -1,0 +1,55 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: shypowder-node-exporter
+  namespace: observability
+  labels:
+    app: shypowder-node-exporter
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - name: http-metrics
+      port: 9100
+      protocol: TCP
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: shypowder-node-exporter
+  namespace: observability
+  labels:
+    kubernetes.io/service-name: shypowder-node-exporter
+addressType: IPv4
+ports:
+  - name: http-metrics
+    port: 9100
+    protocol: TCP
+endpoints:
+  - addresses:
+      - 192.168.10.13
+    conditions:
+      ready: true
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: shypowder-node-exporter
+  namespace: observability
+  labels:
+    app: shypowder-node-exporter
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app: shypowder-node-exporter
+  endpoints:
+    - port: http-metrics
+      interval: 60s
+      scrapeTimeout: 30s
+      path: /metrics
+      relabelings:
+        - action: replace
+          targetLabel: instance
+          replacement: "192.168.10.13"
