@@ -117,6 +117,7 @@ class StartupTest(unittest.TestCase):
                         for key, expected in (
                                 ('user.name', 'Spyros Psarras'),
                                 ('user.email', '13405649+SpyrosPsarras@users.noreply.github.com'),
+                                ('init.defaultBranch', 'main'),
                                 ('credential.helper', '/scripts/git-credential-github.sh' if auth == 'github-token' else '')):
                             actual = subprocess.check_output(['git', 'config', '--global', '--get', key], env=env, text=True)
                             self.assertEqual(actual.rstrip('\n'), expected)
