@@ -187,8 +187,8 @@ The owner picked O4.
   say so and ask for the date as printed on the receipt.
 - It uses an API token of a Paperless service user that can edit all
   documents.
-- No ingress. paperless-gpt has no login. A NetworkPolicy allows ingress
-  only from Prometheus, and the owner reaches the UI with
+- No ingress. paperless-gpt has no login. A NetworkPolicy denies all ingress,
+  because nothing scrapes it, and the owner reaches the UI with
   `kubectl port-forward`.
 
 ### Storage
@@ -257,8 +257,8 @@ or chat.
 - R3. Paperless Go has 6 stars and is young. If it stalls, PaperNext
   talks to the same server.
 - R4. Ollama is shared. A busy GPU delays field extraction, not uploads.
-- R5. paperless-gpt can edit every document. Only Prometheus and a
-  port-forward reach it.
+- R5. paperless-gpt can edit every document. Only a port-forward
+  reaches it.
 - R6. Paperless is reachable from the internet. Login is only through
   Authentik, and `/admin/` is blocked from outside.
 

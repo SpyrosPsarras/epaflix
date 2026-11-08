@@ -1,0 +1,95 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: paperless-gpt
+  namespace: paperless
+  labels:
+    app: paperless-gpt
+spec:
+  replicas: 1
+  # One SQLite writer on the shared volume.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: paperless-gpt
+  template:
+    metadata:
+      labels:
+        app: paperless-gpt
+    spec:
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      containers:
+        - name: paperless-gpt
+          image: icereed/paperless-gpt:v0.31.0
+          envFrom:
+            - secretRef:
+                name: paperless-gpt-secrets
+          env:
+            - {name: PAPERLESS_BASE_URL, value: "http://paperless:8000"}
+            - {name: PAPERLESS_PUBLIC_URL, value: "https://paperless.epaflix.com"}
+            - {name: LLM_PROVIDER, value: ollama}
+            - {name: LLM_MODEL, value: "qwen3.5:9b"}
+            - {name: OLLAMA_HOST, value: "http://ollama.ai.svc.cluster.local:30068"}
+            - {name: OLLAMA_THINK, value: "false"}
+            - {name: LLM_LANGUAGE, value: "Norwegian, English, German or Greek"}
+            - {name: AUTO_TAG, value: paperless-gpt-auto}
+          # The entrypoint skips its chown and su-exec when not root; the NFS export squashes to 1000 anyway.
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /api/version
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 60
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            - name: data
+              mountPath: /app/config
+              subPath: gpt/config
+            - name: data
+              mountPath: /app/prompts
+              subPath: gpt/prompts
+            - name: data
+              mountPath: /app/db
+              subPath: gpt/db
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: paperless-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: paperless-gpt
+  namespace: paperless
+  labels:
+    app: paperless-gpt
+spec:
+  selector:
+    app: paperless-gpt
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

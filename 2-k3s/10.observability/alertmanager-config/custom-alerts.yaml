@@ -507,6 +507,33 @@ spec:
           annotations:
             summary: "Paperless is unavailable"
             description: "Paperless has no available replica or its Deployment is absent. Check the paperless Deployment, its NFS volume and database connection in paperless."
+        - alert: PaperlessGptDown
+          expr: |
+            max(kube_deployment_status_replicas_available{namespace="paperless",deployment="paperless-gpt"}) == 0
+              or absent(kube_deployment_status_replicas_available{namespace="paperless",deployment="paperless-gpt"})
+          for: 15m
+          labels:
+            severity: warning
+            component: paperless
+          annotations:
+            summary: "paperless-gpt is unavailable"
+            description: "paperless-gpt has no available replica or its Deployment is absent. Receipts keep their paperless-gpt-auto tag until it returns. Check the paperless-gpt Deployment, Ollama in ai and the Paperless API token."
+        - alert: PaperlessShareListsFailed
+          expr: |
+            max by (job_name) (
+              kube_job_failed{namespace="paperless", job_name=~"paperless-share-lists-[0-9]+"} > 0
+              and on (job_name) (
+                max by (job_name) (kube_job_status_start_time{namespace="paperless", job_name=~"paperless-share-lists-[0-9]+"})
+                  >= scalar(max(kube_job_status_start_time{namespace="paperless", job_name=~"paperless-share-lists-[0-9]+"}))
+              )
+            )
+          for: 5m
+          labels:
+            severity: warning
+            component: paperless
+          annotations:
+            summary: "Paperless share-lists run failed"
+            description: "The paperless-share-lists Job ({{ $labels.job_name }}) failed, so new shops, tags and document types stay visible only to the user who created them. Check the Job log for a database or Secret error. Manifest: 2-k3s/33.paperless/share-lists-cronjob.yaml."
 
     - name: windmill
       interval: 60s

@@ -30,7 +30,7 @@ spec:
                 name: paperless-secrets
           env:
             - {name: PAPERLESS_URL, value: "https://paperless.epaflix.com"}
-            # Another *.epaflix.com app can set a domain-wide csrftoken cookie that Django would read instead.
+            # Renaming the cookies logs every browser out, so keep the prefix even though no clash was found.
             - {name: PAPERLESS_COOKIE_PREFIX, value: "paperless_"}
             - {name: PAPERLESS_REDIS, value: "redis://127.0.0.1:6379"}
             - {name: PAPERLESS_DBENGINE, value: postgresql}
@@ -49,6 +49,7 @@ spec:
             - {name: PAPERLESS_REDIRECT_LOGIN_TO_SSO, value: "true"}
             - {name: PAPERLESS_SOCIAL_AUTO_SIGNUP, value: "true"}
             - {name: PAPERLESS_ACCOUNT_ALLOW_SIGNUPS, value: "false"}
+            - {name: PAPERLESS_SOCIAL_ACCOUNT_DEFAULT_GROUPS, value: receipts}
           ports:
             - name: http
               containerPort: 8000
