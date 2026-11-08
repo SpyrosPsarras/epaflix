@@ -21,6 +21,46 @@ spec:
       enableServiceLinks: false
       automountServiceAccountToken: false
       terminationGracePeriodSeconds: 60
+      # A native sidecar starts and passes its startup probe before Paperless, which gives up after a few failed Redis pings.
+      initContainers:
+        - name: valkey
+          image: ghcr.io/valkey-io/valkey:9.1.3
+          args: ["--bind", "127.0.0.1", "--port", "6379"]
+          restartPolicy: Always
+          startupProbe:
+            exec:
+              command: [valkey-cli, -h, "127.0.0.1", -p, "6379", ping]
+            periodSeconds: 2
+            failureThreshold: 30
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          ports:
+            - name: redis
+              containerPort: 6379
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              memory: 256Mi
+          readinessProbe:
+            exec:
+              command: [valkey-cli, -h, "127.0.0.1", -p, "6379", ping]
+            periodSeconds: 30
+            timeoutSeconds: 5
+          livenessProbe:
+            exec:
+              command: [valkey-cli, -h, "127.0.0.1", -p, "6379", ping]
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+          volumeMounts:
+            - name: valkey-data
+              mountPath: /data
       containers:
         # Starts as root to install the extra OCR packs, then drops to USERMAP_UID.
         - name: paperless
@@ -84,38 +124,6 @@ spec:
               mountPath: /srv/paperless
             - name: consume
               mountPath: /usr/src/paperless/consume
-        - name: valkey
-          image: ghcr.io/valkey-io/valkey:9.1.3
-          args: ["--bind", "127.0.0.1", "--port", "6379"]
-          securityContext:
-            runAsUser: 1000
-            runAsGroup: 1000
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop: [ALL]
-          ports:
-            - name: redis
-              containerPort: 6379
-          resources:
-            requests:
-              cpu: 25m
-              memory: 32Mi
-            limits:
-              memory: 256Mi
-          readinessProbe:
-            exec:
-              command: [valkey-cli, -h, "127.0.0.1", -p, "6379", ping]
-            periodSeconds: 30
-            timeoutSeconds: 5
-          livenessProbe:
-            exec:
-              command: [valkey-cli, -h, "127.0.0.1", -p, "6379", ping]
-            periodSeconds: 30
-            timeoutSeconds: 5
-            failureThreshold: 5
-          volumeMounts:
-            - name: valkey-data
-              mountPath: /data
       volumes:
         - name: data
           persistentVolumeClaim:
