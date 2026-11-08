@@ -87,6 +87,9 @@ serviceMonitor:
     - name: paperless
       url: https://192.168.10.101
       hostname: paperless.epaflix.com
+    - name: windmill
+      url: https://192.168.10.101
+      hostname: windmill.epaflix.com
     - name: vaultwarden
       url: https://vaultwarden.epaflix.com/alive
       module: http_2xx_verified

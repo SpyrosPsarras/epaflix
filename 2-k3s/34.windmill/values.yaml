@@ -1,0 +1,42 @@
+postgresql:
+  enabled: false
+
+ingress:
+  enabled: false
+
+windmill:
+  tag: 1.864.1@sha256:4ec428ad7e4e970e2e38b791fc9aaca658fa0b9142cd94b88c3112c0577e2836
+  imagePullPolicy: IfNotPresent
+  appReplicas: 1
+  extraReplicas: 0
+  baseDomain: windmill.epaflix.com
+  baseProtocol: https
+  databaseUrlSecretName: windmill-database
+  databaseUrlAsFile: true
+  workerGroupsRequireServiceAccount: true
+
+  workerGroups:
+    default:
+      replicas: 2
+      isolationSecurity: capabilities
+      serviceAccountName: windmill-worker
+      # The chart's 7-day grace period would hold a node drain for a week.
+      terminationGracePeriodSeconds: 600
+      resources:
+        requests:
+          cpu: 100m
+          memory: 512Mi
+        limits:
+          memory: 2Gi
+
+  app:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 1Gi
+
+  indexer:
+    enabled: false
+

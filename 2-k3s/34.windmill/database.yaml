@@ -1,0 +1,80 @@
+---
+# windmill_user and windmill_admin replace the roles Windmill creates itself when it runs as a superuser.
+apiVersion: postgresql.cnpg.io/v1
+kind: DatabaseRole
+metadata:
+  name: windmill-user
+  namespace: postgres-system
+  labels:
+    app.kubernetes.io/name: windmill
+    app.kubernetes.io/component: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  cluster:
+    name: postgres-cluster
+  name: windmill_user
+  ensure: present
+  login: false
+  databaseRoleReclaimPolicy: retain
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: DatabaseRole
+metadata:
+  name: windmill-admin
+  namespace: postgres-system
+  labels:
+    app.kubernetes.io/name: windmill
+    app.kubernetes.io/component: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  cluster:
+    name: postgres-cluster
+  name: windmill_admin
+  ensure: present
+  login: false
+  bypassrls: true
+  inRoles:
+    - windmill_user
+  databaseRoleReclaimPolicy: retain
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: DatabaseRole
+metadata:
+  name: windmill
+  namespace: postgres-system
+  labels:
+    app.kubernetes.io/name: windmill
+    app.kubernetes.io/component: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  cluster:
+    name: postgres-cluster
+  name: windmill
+  ensure: present
+  login: true
+  inRoles:
+    - windmill_admin
+  passwordSecret:
+    name: windmill-db-role
+  databaseRoleReclaimPolicy: retain
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: windmill
+  namespace: postgres-system
+  labels:
+    app.kubernetes.io/name: windmill
+    app.kubernetes.io/component: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  cluster:
+    name: postgres-cluster
+  name: windmill
+  owner: windmill
+  ensure: present
+  databaseReclaimPolicy: retain
