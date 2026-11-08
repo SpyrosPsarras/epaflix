@@ -508,6 +508,32 @@ spec:
             summary: "Paperless is unavailable"
             description: "Paperless has no available replica or its Deployment is absent. Check the paperless Deployment, its NFS volume and database connection in paperless."
 
+    - name: windmill
+      interval: 60s
+      rules:
+        - alert: WindmillDown
+          expr: |
+            max(kube_deployment_status_replicas_available{namespace="windmill",deployment="windmill-app"}) == 0
+              or absent(kube_deployment_status_replicas_available{namespace="windmill",deployment="windmill-app"})
+          for: 15m
+          labels:
+            severity: warning
+            component: windmill
+          annotations:
+            summary: "Windmill is unavailable"
+            description: "Windmill has no available app replica or its Deployment is absent. Users cannot open Windmill. Check the windmill-app Deployment and its database connection in windmill."
+        - alert: WindmillWorkersDown
+          expr: |
+            max(kube_deployment_status_replicas_available{namespace="windmill",deployment="windmill-workers-default"}) == 0
+              or absent(kube_deployment_status_replicas_available{namespace="windmill",deployment="windmill-workers-default"})
+          for: 15m
+          labels:
+            severity: warning
+            component: windmill
+          annotations:
+            summary: "Windmill workers are unavailable"
+            description: "Windmill has no available worker or the worker Deployment is absent. Scheduled screens do not run. Check the windmill-workers-default Deployment in windmill."
+
     - name: configarr
       interval: 60s
       rules:

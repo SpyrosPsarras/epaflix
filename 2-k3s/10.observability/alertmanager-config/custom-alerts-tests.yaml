@@ -109,6 +109,96 @@ tests:
       - eval_time: 90m
         alertname: PaperlessDown
         exp_alerts: []
+  - name: WindmillDown unavailable deployment fires after 15 minutes
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="windmill",deployment="windmill-app"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: WindmillDown
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: WindmillDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: windmill
+            exp_annotations:
+              summary: Windmill is unavailable
+              description: "Windmill has no available app replica or its Deployment is absent. Users cannot open Windmill. Check the windmill-app Deployment and its database connection in windmill."
+  - name: WindmillDown missing deployment fires after 15 minutes
+    interval: 1m
+    input_series: []
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: WindmillDown
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: WindmillDown
+        exp_alerts:
+          - exp_labels:
+              namespace: windmill
+              deployment: windmill-app
+              severity: warning
+              component: windmill
+            exp_annotations:
+              summary: Windmill is unavailable
+              description: "Windmill has no available app replica or its Deployment is absent. Users cannot open Windmill. Check the windmill-app Deployment and its database connection in windmill."
+  - name: WindmillDown healthy deployment stays silent
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="windmill",deployment="windmill-app"}'
+        values: '1x90'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: WindmillDown
+        exp_alerts: []
+  - name: WindmillWorkersDown unavailable deployment fires after 15 minutes
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="windmill",deployment="windmill-workers-default"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: WindmillWorkersDown
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: WindmillWorkersDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: windmill
+            exp_annotations:
+              summary: Windmill workers are unavailable
+              description: "Windmill has no available worker or the worker Deployment is absent. Scheduled screens do not run. Check the windmill-workers-default Deployment in windmill."
+  - name: WindmillWorkersDown missing deployment fires after 15 minutes
+    interval: 1m
+    input_series: []
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: WindmillWorkersDown
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: WindmillWorkersDown
+        exp_alerts:
+          - exp_labels:
+              namespace: windmill
+              deployment: windmill-workers-default
+              severity: warning
+              component: windmill
+            exp_annotations:
+              summary: Windmill workers are unavailable
+              description: "Windmill has no available worker or the worker Deployment is absent. Scheduled screens do not run. Check the windmill-workers-default Deployment in windmill."
+  - name: WindmillWorkersDown healthy deployment stays silent
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="windmill",deployment="windmill-workers-default"}'
+        values: '1x90'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: WindmillWorkersDown
+        exp_alerts: []
   - name: Navidrome unavailable deployment fires after 15 minutes
     interval: 1m
     input_series:
