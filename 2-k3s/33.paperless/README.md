@@ -53,6 +53,8 @@ Then open http://localhost:8080. Anyone who can port-forward in `paperless` can 
 
 ### Custom field `Total`
 
+This setting and the two prompt edits below run once after the PR 3 sync, and Task 4 Step 6 of the plan checks them. Until then paperless-gpt fills title, shop, date and tags but not `Total`.
+
 v0.31.0 has no environment variable for custom fields. The setting lives in `gpt/config/settings.json`. With the port-forward running, turn it on for field id 1 in append mode, which never overwrites a value already on the document:
 
 ```sh
@@ -76,10 +78,10 @@ On a receipt this is the purchase date as printed. Receipts here print the day f
 `custom_field_prompt.tmpl`, instruction 3 replaced, so a receipt without a currency gets an empty currency instead of a guess:
 
 ```text
-3.  For fields of type `monetary`, the value must be a number with two decimal places and a period as the decimal separator. Remove thousands separators and convert the decimal comma to a period. Put a three-letter currency code such as NOK, EUR or USD at the beginning of the value only when the document prints a currency code or symbol, such as `kr`, `NOK`, `€` or `EUR`. If it prints none, return the number alone and never guess a currency from the shop, country or language. Format: an amount printed as `X.XXX,XX €` becomes `EURXXXX.XX`, and an amount printed as `X.XXX,XX` becomes `XXXX.XX`.
+3.  For fields of type `monetary`, the value must be a number with two decimal places and a period as the decimal separator. Remove thousands separators and convert the decimal comma to a period. Put a three-letter currency code such as NOK, EUR or USD at the beginning of the value only when the document prints a currency code or symbol, such as `NOK`, `€` or `EUR`, or `kr` on a Norwegian receipt. If it prints none, return the number alone and never guess a currency from the shop, country or language. Format: an amount printed as `X.XXX,XX €` becomes `EURXXXX.XX`, and an amount printed as `X.XXX,XX` becomes `XXXX.XX`.
 ```
 
-An edited prompt no longer follows upstream defaults. After an image update, compare it with the new `default_prompts`.
+Known limits: a US receipt that prints the month first gets the wrong date, and `kr` on a Swedish or Danish receipt may become NOK. Fix those by hand. An edited prompt no longer follows upstream defaults. After an image update, compare it with the new `default_prompts`.
 
 ## Shared lists
 

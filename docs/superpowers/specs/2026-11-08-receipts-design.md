@@ -257,8 +257,8 @@ or chat.
 - R3. Paperless Go has 6 stars and is young. If it stalls, PaperNext
   talks to the same server.
 - R4. Ollama is shared. A busy GPU delays field extraction, not uploads.
-- R5. paperless-gpt can edit every document. Only Prometheus and a
-  port-forward reach it.
+- R5. paperless-gpt can edit every document. Only a port-forward
+  reaches it.
 - R6. Paperless is reachable from the internet. Login is only through
   Authentik, and `/admin/` is blocked from outside.
 
