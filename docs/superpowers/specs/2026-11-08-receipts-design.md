@@ -28,7 +28,7 @@ them. Use existing open-source apps and write no new app.
 
 - Splitting costs between people, "who owes whom". The owner picked O1,
   which leaves this out.
-- An off-site copy. Storage is temporary (see Storage).
+- An off-site copy. Storage is temporary, as the Storage section says.
 - Email ingestion, a watched folder on a PC, and document chat (RAG).
 - An iPhone app. The owner chose an Android app only. iPhone users
   can use the web UI.
@@ -55,7 +55,7 @@ them. Use existing open-source apps and write no new app.
 - Ollama runs at `http://ollama.ai.svc.cluster.local:30068` on the GPU
   node k3s-worker-64. It already has `qwen3.5:9b`, `gemma4:e4b`,
   `lfm2.5:8b` and `aya-expanse:8b`. Lingarr and Open WebUI share it.
-- Storage lives on shypowder for now (see Storage). shypowder has 4 CPU
+- Storage lives on shypowder for now. shypowder has 4 CPU
   cores and about 3 GB free RAM, so it takes no new VM.
 - The `truenas-iscsi` storage class sits on the TrueNAS `apps` pool, a
   100 GB virtual disk. It is not for receipt files.
@@ -170,8 +170,8 @@ The owner picked O4.
   login.
 - Removing someone from `Servarr users` stops new web logins only. Their
   API token keeps working. The README gets an owner step: deactivate the
-  Paperless user, which also stops the token. (Agent's call: a manual
-  step, no sync job.)
+  Paperless user, which also stops the token. A manual step with no
+  sync job is the agent's call.
 
 ### paperless-gpt
 
@@ -237,7 +237,8 @@ The move gets its own short plan when the pool exists.
 - Logs reach Loki through the existing Alloy collection.
 - shypowder runs `prometheus-node-exporter` with the ZFS collector.
   Prometheus scrapes it, and an alert fires when pool `hdd` is not
-  online, like the TrueNAS zpool alert.
+  online or no longer reported, like the TrueNAS zpool alert. Clients
+  mount NFS from `192.168.10.13`.
 
 ### Secrets
 
@@ -264,8 +265,6 @@ or chat.
 ## Left to the builder
 
 - Exact image versions and digests.
-- Whether to export NFS on the 192.168.10.0/24 or 10.0.0.0/24 address of
-  shypowder.
 - Valkey and Paperless resource requests and limits.
 - The paperless-gpt prompts for receipts.
 - Which Traefik middlewares and DNS records copy Navidrome's public

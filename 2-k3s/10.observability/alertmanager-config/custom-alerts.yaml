@@ -1314,14 +1314,32 @@ spec:
             summary: "shypowder zpool {{ $labels.zpool }} is {{ $labels.state }}"
             description: >-
               node_zfs_zpool_state on {{ $labels.instance }} has reported zpool
-              {{ $labels.zpool }} as {{ $labels.state }} (anything but online) for 5m.
-              Pool hdd is one disk holding the only copy of the Paperless receipts,
-              and rpool is the single-disk boot pool. Neither has redundancy. Run `zpool status -v {{ $labels.zpool }}` on
-              shypowder (read-only) to see the device's read/write/checksum error
-              counts and whether they are still climbing before changing anything.
-              Do not zpool clear, replace or online the device from this alert
-              alone. If the exporter stops answering, this alert resolves without
-              the pool being healthy; ShypowderExporterDown covers that.
+              {{ $labels.zpool }} as {{ $labels.state }} for 5m. Pool hdd is one
+              disk holding the only copy of the Paperless receipts, and rpool is
+              the single-disk boot pool. Neither has redundancy. Run
+              `zpool status -v {{ $labels.zpool }}` on shypowder, read-only, to see
+              the device's read/write/checksum error counts and whether they are
+              still climbing before changing anything. Do not zpool clear, replace
+              or online the device from this alert alone. If the exporter stops
+              answering, this alert resolves without the pool being healthy;
+              ShypowderExporterDown covers that.
+
+        - alert: ShypowderPoolMissing
+          expr: |
+            absent(node_zfs_zpool_state{job="shypowder-node-exporter",zpool="hdd",state="online"} == 1)
+              and on() (up{job="shypowder-node-exporter"} == 1)
+          for: 5m
+          labels:
+            severity: critical
+            component: shypowder-storage
+          annotations:
+            summary: "shypowder pool hdd is missing"
+            description: >-
+              node_zfs_zpool_state on shypowder has not reported pool hdd as
+              online for 5m while the exporter answers. Pool hdd is not imported,
+              so the Paperless NFS export has no data behind it. Run
+              `zpool status hdd` and `zpool import` on shypowder, read-only, before
+              changing anything. Do not import with -f from this alert alone.
 
         - alert: ShypowderExporterDown
           expr: absent(up{job="shypowder-node-exporter"} == 1)
@@ -1333,10 +1351,11 @@ spec:
             summary: "Prometheus cannot scrape the shypowder node exporter"
             description: >-
               Prometheus has had no successful scrape of shypowder-node-exporter
-              (192.168.10.13:9100) for 15 minutes, so ShypowderPoolUnhealthy cannot
-              see pool hdd, the one disk holding the only copy of the Paperless
-              receipts. Check that prometheus-node-exporter runs on shypowder and
-              that 192.168.10.13:9100 answers from the cluster.
+              at 192.168.10.13:9100 for 15 minutes, so ShypowderPoolUnhealthy and
+              ShypowderPoolMissing cannot see pool hdd, the one disk holding the
+              only copy of the Paperless receipts. Check that
+              prometheus-node-exporter runs on shypowder and that
+              192.168.10.13:9100 answers from the cluster.
 
     - name: vaultwarden
       interval: 60s
