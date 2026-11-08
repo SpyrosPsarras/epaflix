@@ -40,11 +40,14 @@ Configure the following in the UI after owner-first login. Read credentials priv
 | Lidarr target assigned user | Owner only |
 | Lidarr target Monitor new albums | None, `monitorNewItems: None` |
 | Lidarr quality / metadata profiles | `MP3-AAC` / `Studio` |
+| Your Lidarr preferences (root folder) | `/media/music` |
+| Approve dialog monitoring for artist picks | None. Never All: only All starts an immediate missing-album search (`docs/OPERATIONS.md`, v2.2.1) |
+| AI provider | None configured |
 | Settings > Recommendations | Auto-approve off; auto-approve monitoring `None` |
 | Every other member's policy | Request only |
 | Every other member's targets | None |
 | Scheduled modes | Similar Users (Deep) and Release Radar weekly on Tuesday |
-| Optional connection | TIDAL, only while the subscription is active |
+| Optional connection | TIDAL, only while the subscription is active; Show experimental integrations must be on |
 
 Members are Request only and have no targets. Approving a member's request uses that member's targets, not the reviewing admin's, so it cannot download anything. Only picks the owner approves through the owner's own target reach Lidarr. Release Radar results wait in the review queue.
 
@@ -53,7 +56,11 @@ Members are Request only and have no targets. Approving a member's request uses 
 | D1a | Owner approves one artist pick | Lidarr has the artist with 0 monitored albums, no queued search, and `qualityProfileId` matching `MP3-AAC` |
 | D1b | Owner approves one album pick | Exactly 1 monitored album |
 | D1c | Test member submits an approval, then the owner reviews that request | Lidarr's artist list and queue remain unchanged |
-| D1d | Let one scheduled run finish | Lidarr's artist count and queue remain unchanged |
+| D1d | Let one scheduled Similar Users (Deep) run and one Release Radar run finish | Lidarr's artist count and queue remain unchanged; new picks wait in the review queue |
+
+## Tidal import
+
+If Tidal is still active, connect it, import Favorite Artists into the review queue and approve them as artist picks with monitoring None. Each artist lands in Lidarr with nothing monitored; the owner picks albums in Lidarr. If the connection fails, add the artists from the Soundiiz transfer results by hand in digarr's artist search, with the same approval settings.
 
 ## Fallback if header mapping fails
 
