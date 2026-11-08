@@ -58,7 +58,8 @@ jobs:
             -r .github/hooks/requirements.txt
           ./.github/hooks/test-check-sops-encrypted.sh
           ./.github/hooks/test-check-authentik-blueprint.sh
-          ./.github/hooks/test-check-kube-context.sh
+          ./.github/hooks/test-install-kubeconfig-epaflix.sh
+          ./.github/hooks/test-kubectl-guard.sh
           ./.github/hooks/test-check-no-plaintext-store-values.sh
           ./.github/hooks/test-check-credential-reuse.sh
           ./.github/hooks/test-keystatus-check.sh

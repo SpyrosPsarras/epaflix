@@ -2,7 +2,6 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-hook="$repo_root/.github/hooks/check-kube-context.sh"
 installer="$repo_root/.github/hooks/install-kubeconfig-epaflix.sh"
 tmp="$(mktemp -d)"
 output="$(mktemp)"
@@ -23,96 +22,6 @@ fail() {
     sed 's/^/  /' "$output" >&2
   fi
 }
-
-expect_pass() {
-  : >"$output"
-  if KUBECONFIG="$2" bash "$hook" >"$output" 2>&1; then
-    pass "$1"
-  else
-    fail "$1"
-  fi
-}
-
-expect_fail() {
-  : >"$output"
-  if KUBECONFIG="$2" bash "$hook" >"$output" 2>&1; then
-    fail "$1"
-  else
-    pass "$1"
-  fi
-}
-
-write_kubeconfig() {
-  local path=$1
-  shift
-  {
-    printf 'apiVersion: v1\nkind: Config\npreferences: {}\nclusters:\n'
-    for name in "$@"; do
-      printf -- '- name: %s-cluster\n  cluster:\n    server: https://127.0.0.1:6443\n' "$name"
-    done
-    printf 'users:\n'
-    for name in "$@"; do
-      printf -- '- name: %s-user\n  user:\n    token: not-a-real-token\n' "$name"
-    done
-    printf 'contexts:\n'
-    for name in "$@"; do
-      printf -- '- name: %s\n  context:\n    cluster: %s-cluster\n    user: %s-user\n' "$name" "$name" "$name"
-    done
-    printf 'current-context: %s\n' "$1"
-  } >"$path"
-}
-
-if ! command -v kubectl >/dev/null 2>&1; then
-  echo "SKIP: kubectl is not on PATH, so the kubeconfig cases cannot run." >&2
-  echo "SKIP: this leaves check-kube-context.sh unexercised on this machine." >&2
-fi
-
-if command -v kubectl >/dev/null 2>&1; then
-  write_kubeconfig "$tmp/only-epaflix" epaflix
-  expect_pass "epaflix-only kubeconfig passes" "$tmp/only-epaflix"
-
-  write_kubeconfig "$tmp/only-homelab" homelab
-  expect_pass "homelab-only kubeconfig passes" "$tmp/only-homelab"
-
-  write_kubeconfig "$tmp/both-allowed" epaflix homelab
-  expect_fail "epaflix plus homelab is refused (exactly one context required)" "$tmp/both-allowed"
-
-  write_kubeconfig "$tmp/multi" epaflix other-cluster-a other-cluster-b
-  expect_fail "epaflix plus two other contexts is refused" "$tmp/multi"
-
-  write_kubeconfig "$tmp/single-other" other-cluster-a
-  expect_fail "a single unknown context is refused (allowlist, not count-only)" "$tmp/single-other"
-
-  printf 'apiVersion: v1\nkind: Config\npreferences: {}\nclusters: []\nusers: []\ncontexts: []\n' \
-    >"$tmp/no-contexts"
-  expect_fail "a kubeconfig with zero contexts is refused" "$tmp/no-contexts"
-
-  : >"$output"
-  KUBECONFIG="$tmp/multi" bash "$hook" >"$output" 2>&1 || true
-  leaked=0
-  for name in other-cluster-a other-cluster-b; do
-    if grep -qF -- "$name" "$output"; then
-      leaked=1
-    fi
-  done
-  if [ "$leaked" -eq 0 ]; then
-    pass "leak control: rejection output names no context (counts only)"
-  else
-    fail "leak control: rejection output named a context it rejected"
-  fi
-fi
-
-bash_bin="$(command -v bash)"
-: >"$output"
-if PATH=/nonexistent-for-fixture "$bash_bin" "$hook" >"$output" 2>&1; then
-  if grep -q '^SKIP: kubectl is not on PATH' "$output"; then
-    pass "kubectl absent from PATH passes with a printed SKIP line"
-  else
-    fail "kubectl absent from PATH passed but printed no SKIP line"
-  fi
-else
-  fail "kubectl absent from PATH must pass, not fail"
-fi
 
 stub="$tmp/stub-bin"
 mkdir -p "$stub"
@@ -186,14 +95,6 @@ if run_installer && [ -f "$generated" ] \
   pass "installer accepts a verified single-context product and writes it mode 600"
 else
   fail "installer accepts a verified single-context product and writes it mode 600"
-fi
-
-discovered="$(cd "$repo_root/.github/hooks" && echo check-*.sh)"
-if printf '%s\n' "$discovered" | grep -qw 'check-kube-context.sh' \
-  && ! printf '%s\n' "$discovered" | grep -q 'test-'; then
-  pass "pre-commit dispatcher glob discovers this check and not this suite"
-else
-  fail "pre-commit dispatcher glob discovers this check and not this suite"
 fi
 
 printf '%s\n' "1..$((pass_count + fail_count))"

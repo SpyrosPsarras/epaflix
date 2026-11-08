@@ -57,4 +57,4 @@ echo '  esac'
 echo
 echo "Residual gap, stated not hidden: a shell where neither activation ran still"
 echo "sees the full kubeconfig, so --context epaflix on the command itself stays"
-echo "mandatory. check-kube-context.sh refuses the next commit from such a shell."
+echo "mandatory. kubectl-guard.sh, installed by install-hooks.sh, refuses kubectl calls in this repo without it."
