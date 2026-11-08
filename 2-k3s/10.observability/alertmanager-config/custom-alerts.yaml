@@ -1315,8 +1315,8 @@ spec:
             description: >-
               node_zfs_zpool_state on {{ $labels.instance }} has reported zpool
               {{ $labels.zpool }} as {{ $labels.state }} (anything but online) for 5m.
-              Pool hdd is one disk with no redundancy and holds the only copy of
-              the Paperless receipts. Run `zpool status -v {{ $labels.zpool }}` on
+              Pool hdd is one disk holding the only copy of the Paperless receipts,
+              and rpool is the single-disk boot pool. Neither has redundancy. Run `zpool status -v {{ $labels.zpool }}` on
               shypowder (read-only) to see the device's read/write/checksum error
               counts and whether they are still climbing before changing anything.
               Do not zpool clear, replace or online the device from this alert

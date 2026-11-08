@@ -1475,7 +1475,34 @@ tests:
               component: shypowder-storage
             exp_annotations:
               summary: "shypowder zpool hdd is degraded"
-              description: "node_zfs_zpool_state on 192.168.10.13 has reported zpool hdd as degraded (anything but online) for 5m. Pool hdd is one disk with no redundancy and holds the only copy of the Paperless receipts. Run `zpool status -v hdd` on shypowder (read-only) to see the device's read/write/checksum error counts and whether they are still climbing before changing anything. Do not zpool clear, replace or online the device from this alert alone. If the exporter stops answering, this alert resolves without the pool being healthy; ShypowderExporterDown covers that."
+              description: "node_zfs_zpool_state on 192.168.10.13 has reported zpool hdd as degraded (anything but online) for 5m. Pool hdd is one disk holding the only copy of the Paperless receipts, and rpool is the single-disk boot pool. Neither has redundancy. Run `zpool status -v hdd` on shypowder (read-only) to see the device's read/write/checksum error counts and whether they are still climbing before changing anything. Do not zpool clear, replace or online the device from this alert alone. If the exporter stops answering, this alert resolves without the pool being healthy; ShypowderExporterDown covers that."
+
+  - interval: 1m
+    input_series:
+      - series: 'node_zfs_zpool_state{endpoint="http-metrics",instance="192.168.10.13",job="shypowder-node-exporter",namespace="observability",service="shypowder-node-exporter",state="degraded",zpool="rpool"}'
+        values: "1x10"
+      - series: 'node_zfs_zpool_state{endpoint="http-metrics",instance="192.168.10.13",job="shypowder-node-exporter",namespace="observability",service="shypowder-node-exporter",state="online",zpool="rpool"}'
+        values: "0x10"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: ShypowderPoolUnhealthy
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: ShypowderPoolUnhealthy
+        exp_alerts:
+          - exp_labels:
+              endpoint: http-metrics
+              instance: 192.168.10.13
+              job: shypowder-node-exporter
+              namespace: observability
+              service: shypowder-node-exporter
+              state: degraded
+              zpool: rpool
+              severity: critical
+              component: shypowder-storage
+            exp_annotations:
+              summary: "shypowder zpool rpool is degraded"
+              description: "node_zfs_zpool_state on 192.168.10.13 has reported zpool rpool as degraded (anything but online) for 5m. Pool hdd is one disk holding the only copy of the Paperless receipts, and rpool is the single-disk boot pool. Neither has redundancy. Run `zpool status -v rpool` on shypowder (read-only) to see the device's read/write/checksum error counts and whether they are still climbing before changing anything. Do not zpool clear, replace or online the device from this alert alone. If the exporter stops answering, this alert resolves without the pool being healthy; ShypowderExporterDown covers that."
 
   - interval: 1m
     input_series:
