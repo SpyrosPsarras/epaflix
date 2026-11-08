@@ -478,6 +478,21 @@ spec:
             summary: "Navidrome is unavailable"
             description: "Navidrome has no available replica or Prometheus cannot scrape its metrics target. Check the navidrome Deployment and ServiceMonitor in servarr."
 
+    - name: digarr
+      interval: 60s
+      rules:
+        - alert: DigarrDown
+          expr: |
+            max(kube_deployment_status_replicas_available{namespace="servarr",deployment="digarr"}) == 0
+              or absent(kube_deployment_status_replicas_available{namespace="servarr",deployment="digarr"})
+          for: 15m
+          labels:
+            severity: warning
+            component: servarr
+          annotations:
+            summary: "Digarr is unavailable"
+            description: "Digarr has no available replica or its Deployment is absent. Check the digarr Deployment and database connection in servarr."
+
     - name: configarr
       interval: 60s
       rules:

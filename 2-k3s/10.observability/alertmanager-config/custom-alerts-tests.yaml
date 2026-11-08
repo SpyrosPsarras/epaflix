@@ -7,6 +7,63 @@ rule_files:
 evaluation_interval: 1m
 
 tests:
+  - name: Digarr unavailable deployment fires after 15 minutes
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="servarr",deployment="digarr"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: DigarrDown
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: DigarrDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: servarr
+            exp_annotations:
+              summary: Digarr is unavailable
+              description: "Digarr has no available replica or its Deployment is absent. Check the digarr Deployment and database connection in servarr."
+  - name: Digarr missing deployment fires after 15 minutes
+    interval: 1m
+    input_series: []
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: DigarrDown
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: DigarrDown
+        exp_alerts:
+          - exp_labels:
+              namespace: servarr
+              deployment: digarr
+              severity: warning
+              component: servarr
+            exp_annotations:
+              summary: Digarr is unavailable
+              description: "Digarr has no available replica or its Deployment is absent. Check the digarr Deployment and database connection in servarr."
+  - name: Digarr healthy deployment stays silent
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="servarr",deployment="digarr"}'
+        values: '1x90'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: DigarrDown
+        exp_alerts: []
+  - name: Digarr recovers before the alert hold expires
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="servarr",deployment="digarr"}'
+        values: '0x10 1x20'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: DigarrDown
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: DigarrDown
+        exp_alerts: []
   - name: Navidrome unavailable deployment fires after 15 minutes
     interval: 1m
     input_series:

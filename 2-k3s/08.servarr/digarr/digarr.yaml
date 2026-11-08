@@ -1,0 +1,115 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: digarr
+  namespace: servarr
+  annotations:
+    secret.reloader.stakater.com/reload: "music-stack"
+  labels:
+    app: digarr
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: digarr
+  template:
+    metadata:
+      labels:
+        app: digarr
+    spec:
+      terminationGracePeriodSeconds: 45
+      securityContext:
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        runAsNonRoot: true
+      containers:
+        - name: digarr
+          image: ghcr.io/iuliandita/digarr:2.2.1
+          env:
+            - name: PORT
+              value: "3000"
+            - name: ALLOWED_ORIGIN
+              value: https://digarr.epaflix.com
+            - name: DB_HOST
+              value: postgres-cluster-rw.postgres-system.svc.cluster.local
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_USER
+              value: digarr
+            - name: DB_NAME
+              value: digarr
+            - name: DB_PASS_FILE
+              value: /run/digarr-postgres/password
+            - name: DIGARR_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: music-stack
+                  key: digarr-encryption-key
+            - name: PROXY_AUTH_ENABLED
+              value: "true"
+            - name: PROXY_AUTH_TRUSTED_PROXIES
+              value: 10.42.0.0/16
+          ports:
+            - containerPort: 3000
+              name: http
+          volumeMounts:
+            - name: postgres-password
+              mountPath: /run/digarr-postgres
+              readOnly: true
+            - name: backups
+              mountPath: /app/backups
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: 3000
+            periodSeconds: 30
+            timeoutSeconds: 5
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+      volumes:
+        - name: postgres-password
+          secret:
+            secretName: music-stack
+            defaultMode: 0440
+            items:
+              - key: digarr-db-password
+                path: password
+        - name: backups
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: digarr
+  namespace: servarr
+  labels:
+    app: digarr
+spec:
+  type: ClusterIP
+  selector:
+    app: digarr
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
