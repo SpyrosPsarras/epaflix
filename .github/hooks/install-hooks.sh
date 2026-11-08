@@ -19,3 +19,15 @@ chmod +x "$src_dir"/check-*.sh "$src_dir/run-pre-commit.sh"
 
 echo "Installed pre-commit hook: $hooks_dir/pre-commit -> $src_dir/run-pre-commit.sh"
 echo "  runs: $(cd "$src_dir" && echo check-*.sh)"
+
+# Link the main checkout's copy: T3 worktrees, and their copies, get deleted.
+main_checkout="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+chmod +x "$src_dir/kubectl-guard.sh"
+mkdir -p "$HOME/.local/bin"
+ln -sfn "$main_checkout/$src_dir/kubectl-guard.sh" "$HOME/.local/bin/kubectl"
+echo "Installed kubectl guard: $HOME/.local/bin/kubectl -> $main_checkout/$src_dir/kubectl-guard.sh"
+echo "  ~/.local/bin must come before the real kubectl on PATH."
+if [ ! -e "$main_checkout/$src_dir/kubectl-guard.sh" ]; then
+  echo "WARNING: the main checkout has no $src_dir/kubectl-guard.sh yet, so kubectl is unguarded." >&2
+  echo "         Pull the change into $main_checkout." >&2
+fi
