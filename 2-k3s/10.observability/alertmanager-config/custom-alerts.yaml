@@ -493,6 +493,21 @@ spec:
             summary: "Digarr is unavailable"
             description: "Digarr has no available replica or its Deployment is absent. Check the digarr Deployment and database connection in servarr."
 
+    - name: paperless
+      interval: 60s
+      rules:
+        - alert: PaperlessDown
+          expr: |
+            max(kube_deployment_status_replicas_available{namespace="paperless",deployment="paperless"}) == 0
+              or absent(kube_deployment_status_replicas_available{namespace="paperless",deployment="paperless"})
+          for: 15m
+          labels:
+            severity: warning
+            component: paperless
+          annotations:
+            summary: "Paperless is unavailable"
+            description: "Paperless has no available replica or its Deployment is absent. Check the paperless Deployment, its NFS volume and database connection in paperless."
+
     - name: configarr
       interval: 60s
       rules:

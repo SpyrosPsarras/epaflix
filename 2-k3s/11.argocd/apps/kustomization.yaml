@@ -23,6 +23,7 @@ resources:
   - app-mcp-hub-work.yaml
   - app-nvidia-device-plugin.yaml
   - app-observability.yaml
+  - app-paperless.yaml
   - app-postgres.yaml
   - app-reloader.yaml
   - app-remote-pi.yaml

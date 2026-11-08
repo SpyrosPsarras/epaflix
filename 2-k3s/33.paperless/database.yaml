@@ -1,0 +1,38 @@
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: DatabaseRole
+metadata:
+  name: paperless
+  namespace: postgres-system
+  labels:
+    app.kubernetes.io/name: paperless
+    app.kubernetes.io/component: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  cluster:
+    name: postgres-cluster
+  name: paperless
+  ensure: present
+  login: true
+  passwordSecret:
+    name: paperless-db-role
+  databaseRoleReclaimPolicy: retain
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: paperless
+  namespace: postgres-system
+  labels:
+    app.kubernetes.io/name: paperless
+    app.kubernetes.io/component: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  cluster:
+    name: postgres-cluster
+  name: paperless
+  owner: paperless
+  ensure: present
+  databaseReclaimPolicy: retain

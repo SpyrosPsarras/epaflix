@@ -1,0 +1,68 @@
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: paperless-https
+  namespace: paperless
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`paperless.epaflix.com`)
+      kind: Rule
+      priority: 10
+      middlewares:
+        - name: security-headers
+          namespace: traefik-system
+      services:
+        - name: paperless
+          port: 8000
+  tls: {}
+---
+# PAPERLESS_DISABLE_REGULAR_LOGIN leaves the Django admin login open, so no client gets /admin/.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: paperless-block-admin
+  namespace: paperless
+spec:
+  ipAllowList:
+    sourceRange:
+      - 127.0.0.1/32
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: paperless-admin-https
+  namespace: paperless
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`paperless.epaflix.com`) && PathPrefix(`/admin/`)
+      kind: Rule
+      priority: 20
+      middlewares:
+        - name: paperless-block-admin
+      services:
+        - name: paperless
+          port: 8000
+  tls: {}
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: paperless-http
+  namespace: paperless
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`paperless.epaflix.com`)
+      kind: Rule
+      middlewares:
+        - name: redirect-https
+          namespace: traefik-system
+      services:
+        - name: paperless
+          port: 8000
