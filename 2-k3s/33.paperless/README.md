@@ -2,7 +2,7 @@
 
 Receipts archive with OCR. Design: `docs/superpowers/specs/2026-11-08-receipts-design.md`.
 
-Hostname https://paperless.epaflix.com on Traefik `websecure` at `192.168.10.101`, so phones can upload from the internet. The pod runs Paperless on port 8000 and Valkey on `127.0.0.1:6379` with `emptyDir` storage. The database is `paperless` in `postgres-cluster`.
+Hostname https://paperless.epaflix.com on Traefik `websecure` at `192.168.10.101`, so phones can upload from the internet. The pod runs Paperless on port 8000 and Valkey on `127.0.0.1:6379` with `emptyDir` storage. Valkey is a native sidecar, so it answers before Paperless starts. Without that, Paperless gave up after a few Redis pings and the Paperless container restarted once on every pod start. The database is `paperless` in `postgres-cluster`.
 
 ## Access
 
@@ -12,7 +12,7 @@ Hostname https://paperless.epaflix.com on Traefik `websecure` at `192.168.10.101
 - The REST API still accepts basic auth. No user has a usable password, so do not set one with `manage.py`.
 - Traefik answers 403 to every request for `/admin/`. `PAPERLESS_DISABLE_REGULAR_LOGIN` leaves the Django admin login open, so the route stays blocked.
 - `PAPERLESS_COOKIE_PREFIX=paperless_` renames the CSRF, session and language cookies. It was added for a suspected clash with another `*.epaflix.com` cookie. The real cause of the first-login 403 was a repeated login POST after a successful login. The prefix stays, because renaming the cookies logs every browser out.
-- Phones use an API token. The user logs in to the web UI once, creates the token under My Profile and pastes it into Paperless Go.
+- Phones use an API token, as described in Phone setup.
 - After the owner's first login, an owner-confirmed `manage.py shell` sets `is_superuser` and `is_staff` on his user.
 
 ### In-app objects
@@ -32,6 +32,16 @@ The owner is superuser and does not need the group.
 ### Removing a user
 
 Removing someone from `Servarr users` stops new web logins only. Their API token keeps working. In Paperless, open Users & Groups, edit the user and clear Active. That blocks the web session and the API token.
+
+## Phone setup
+
+1. Install Paperless Go from F-Droid, package `com.ventouxlabs.paperlessgo.nogoogle`, or from its GitHub Releases. The Play Store app with the same name has a different package id, `com.github.iweinzierl.paperlessgo`.
+2. Open https://paperless.epaflix.com in a browser and log in through Authentik.
+3. Open My Profile, create an API token and copy it.
+4. In Paperless Go, choose "Login with API token", enter server `https://paperless.epaflix.com` and paste the token.
+5. Scan receipts with the camera's Receipt preset, or share a photo or PDF to Paperless Go. paperless-gpt fills in the title, shop, date and `Total` within a few minutes.
+
+Browser login inside the app is requested upstream in Paperless Go issue #51. It needs the Authentik provider `paperless` to become a public client with the app's redirect URI.
 
 ## paperless-gpt
 
@@ -53,7 +63,7 @@ Then open http://localhost:8080. Anyone who can port-forward in `paperless` can 
 
 ### Custom field `Total`
 
-This setting and the two prompt edits below run once after the PR 3 sync, and Task 4 Step 6 of the plan checks them. Until then paperless-gpt fills title, shop, date and tags but not `Total`.
+The setting and the two prompt edits below were applied on 2026-11-08 after the PR 3 sync. They live on the NFS volume, so a new pod keeps them. Prompt files can also be edited directly in `/hdd/paperless/gpt/prompts` on shypowder, followed by a restart of `paperless-gpt`.
 
 v0.31.0 has no environment variable for custom fields. The setting lives in `gpt/config/settings.json`. With the port-forward running, turn it on for field id 1 in append mode, which never overwrites a value already on the document:
 
@@ -78,7 +88,7 @@ On a receipt this is the purchase date as printed. Receipts here print the day f
 `custom_field_prompt.tmpl`, instruction 3 replaced, so a receipt without a currency gets an empty currency instead of a guess:
 
 ```text
-3.  For fields of type `monetary`, the value must be a number with two decimal places and a period as the decimal separator. Remove thousands separators and convert the decimal comma to a period. Put a three-letter currency code such as NOK, EUR or USD at the beginning of the value only when the document prints a currency code or symbol, such as `NOK`, `€` or `EUR`, or `kr` on a Norwegian receipt. If it prints none, return the number alone and never guess a currency from the shop, country or language. Format: an amount printed as `X.XXX,XX €` becomes `EURXXXX.XX`, and an amount printed as `X.XXX,XX` becomes `XXXX.XX`.
+3.  For fields of type `monetary`, the value must be a number with two decimal places and a period as the decimal separator. Remove thousands separators and convert the decimal comma to a period. Put a three-letter currency code such as NOK, EUR or USD at the beginning of the value only when the document prints a currency code or symbol, such as `NOK`, `€` or `EUR`, or `kr` on a Norwegian receipt. If it prints none, return the number alone and never guess a currency from the shop, country or language. Format: an amount printed as `X.XXX,XX €` becomes `EURXXXX.XX`, an amount printed as `kr 1.234,50` on a Norwegian receipt becomes `NOK1234.50`, and an amount printed as `X.XXX,XX` with no currency becomes `XXXX.XX`.
 ```
 
 Known limits: a US receipt that prints the month first gets the wrong date, and `kr` on a Swedish or Danish receipt may become NOK. Fix those by hand. An edited prompt no longer follows upstream defaults. After an image update, compare it with the new `default_prompts`.
