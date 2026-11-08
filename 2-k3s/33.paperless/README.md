@@ -2,7 +2,7 @@
 
 Receipts archive with OCR. Design: `docs/superpowers/specs/2026-11-08-receipts-design.md`.
 
-Hostname https://paperless.epaflix.com on Traefik `websecure` at `192.168.10.101`, so phones can upload from the internet. The pod runs Paperless on port 8000 and Valkey on `127.0.0.1:6379` with `emptyDir` storage. Valkey is a native sidecar, so it answers before Paperless starts. Without that, Paperless gave up after a few Redis pings and the pod restarted once on every start. The database is `paperless` in `postgres-cluster`.
+Hostname https://paperless.epaflix.com on Traefik `websecure` at `192.168.10.101`, so phones can upload from the internet. The pod runs Paperless on port 8000 and Valkey on `127.0.0.1:6379` with `emptyDir` storage. Valkey is a native sidecar, so it answers before Paperless starts. Without that, Paperless gave up after a few Redis pings and the Paperless container restarted once on every pod start. The database is `paperless` in `postgres-cluster`.
 
 ## Access
 
