@@ -19,10 +19,13 @@ jobs:
   tripwire:
     if: >-
       github.event_name == 'push' || github.event_name == 'workflow_dispatch' ||
-      github.event.pull_request.head.repo.full_name == github.repository
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+       !startsWith(github.head_ref, 'renovate/'))
     # One run at a time across all refs: every run touches the same live Pi-hole.
+    # Renovate branches skip it: a cancelled queued run stalls Renovate's automerge,
+    # and their skipped job gets its own group so it cannot be cancelled either.
     concurrency:
-      group: dns-tripwire
+      group: ${{ startsWith(github.head_ref, 'renovate/') && github.run_id || 'dns-tripwire' }}
       cancel-in-progress: false
     runs-on: [self-hosted, epaflix]
     timeout-minutes: 15

@@ -1,0 +1,33 @@
+# Renovate automerges most updates on green checks. This check holds a Renovate
+# PR whose release notes flag a breaking change. It is not a required check, so
+# the owner can still merge a held PR by hand.
+# shortcut: Renovate checks automerge in the same pass as a body-only edit, so
+# notes that gain a breaking heading without a push can merge on the previous
+# green run. No body edit changed the flag in the last 300 Renovate PRs; gate
+# merges differently if that ever happens.
+name: renovate-breaking-change
+
+on:
+  pull_request:
+    # edited: Renovate can rewrite the release notes without pushing.
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  renovate-breaking-change:
+    if: >-
+      startsWith(github.head_ref, 'renovate/') &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Hold Renovate automerge when release notes flag a breaking change
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if grep -qiE '^#+ .*breaking' <<<"$BODY" || grep -qE 'BREAKING[ _-]CHANGE' <<<"$BODY"; then
+            echo "::error::Release notes flag a breaking change. Renovate will not automerge; review and merge by hand."
+            exit 1
+          fi
+          echo "Release notes flag no breaking change."

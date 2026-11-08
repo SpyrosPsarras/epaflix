@@ -12,7 +12,7 @@ const { applyPackageRules } = await load('util/package-rules/index');
 const { get } = await load('modules/versioning/index');
 const { classifyRelease } = await load('workers/repository/process/lookup/update-type');
 const packageFile = '2-k3s/08.servarr/kustomization.yaml';
-const { packageRules } = JSON.parse(readFileSync('.github/renovate.json', 'utf8'));
+const { packageRules, automerge, platformAutomerge } = JSON.parse(readFileSync('.github/renovate.json', 'utf8'));
 const { deps } = extractPackageFile(readFileSync(packageFile, 'utf8'), packageFile, {});
 const moving = new Set([
   'ghcr.io/thephaseless/byparr',
@@ -31,7 +31,7 @@ const disabled = new Set([
 for (const dep of deps) {
   assert(!dep.skipReason, `${dep.depName}: ${dep.skipReason}`);
   assert.match(dep.currentDigest, /^sha256:[a-f0-9]{64}$/);
-  const base = { ...dep, packageFile, manager: 'kustomize', packageRules, automerge: false };
+  const base = { ...dep, packageFile, manager: 'kustomize', packageRules, automerge, platformAutomerge };
   const configured = await applyPackageRules(base, 'test');
   if (configured.enabled === false) {
     assert(disabled.has(dep.depName), `${dep.depName}: unexpectedly disabled`);
@@ -43,8 +43,9 @@ for (const dep of deps) {
   }
   for (const updateType of ['digest', 'patch', 'minor', 'major']) {
     const result = await applyPackageRules({ ...base, updateType }, 'test');
-    const expected = !manual.has(dep.depName) && ['digest', 'patch'].includes(updateType);
+    const expected = !manual.has(dep.depName);
     assert.equal(result.automerge, expected, `${dep.depName}: ${updateType}`);
+    assert.equal(result.platformAutomerge, false, `${dep.depName}: ${updateType} must wait for the breaking-change check`);
   }
   console.log(`PASS ${dep.depName}: extraction and digest/patch/minor/major policy`);
 }
