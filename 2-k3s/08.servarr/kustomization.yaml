@@ -21,6 +21,10 @@ resources:
   - navidrome/network-policy.yaml
   - navidrome/ingressroute.yaml
   - navidrome/pdb.yaml
+  - digarr/digarr.yaml
+  - digarr/network-policy.yaml
+  - digarr/ingressroute.yaml
+  - digarr/pdb.yaml
   - radarr/radarr.yaml
   - radarr/pdb.yaml
   - radarr/ingressroute.yaml
@@ -87,6 +91,8 @@ images:
     newTag: 4.0.20@sha256:386c962ee6e260e3a5656b25df2ed056bcc9b6410e197d075f9547fd14c23bca
   - name: ghcr.io/linuxserver/lidarr
     newTag: 3.1.6@sha256:d5707cfe084da21a3864c7ef0edd9c0543b5e26c79c551f84dad5ef8683af8c7
+  - name: ghcr.io/iuliandita/digarr
+    newTag: 2.2.1@sha256:6192ceaea41065d36d05a29d643da0787cd1479da930d4502eca94e602d09889
   - name: navidrome/navidrome
     newTag: 0.64.2@sha256:38dc2727bfcfd5ede290f8ada114fc90368146f265ae4701ddddbcbe2a44ee52
   - name: ghcr.io/onedr0p/exportarr
