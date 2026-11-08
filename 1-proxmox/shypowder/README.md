@@ -8,7 +8,7 @@ Reinstall notes for `shypowder.epaflix.com`, `192.168.10.13`.
 - NVIDIA RTX 2070 SUPER with 8 GB VRAM, PCI functions `01:00.0` through `01:00.3`.
 - Mellanox ConnectX MT26448, one 10G port `enp8s0` with `mlx4_en`. The Realtek 1G port is unused.
 - Intenso 512 GB SATA SSD for Proxmox, single-disk ZFS `rpool`.
-- Seagate 10 TB disk stays installed but unused.
+- Seagate 10 TB disk with single-disk ZFS pool `hdd`. It holds `hdd/data`, the Proxmox storage `local-hdd`, and [`hdd/paperless`](#paperless-storage).
 
 ## Unattended install and boot
 
@@ -58,6 +58,44 @@ This is the fourth host in the `e-pavli` cluster. It has only one 10G port, so b
 `/etc/network/interfaces` assigns both addresses to `vmbr0`, with `bridge-ports enp8s0`, `bridge-stp off` and `bridge-fd 0`. Both corosync links share the same physical port and do not provide link redundancy.
 
 Storage `local-zfs`, backed by `rpool/data`, allows `patroklos,shypowder`. The boot pool has no disk redundancy. ACME uses the cluster plugin `cloudflare-dns`.
+
+## Paperless storage
+
+Dataset `hdd/paperless`, created with `atime=off`, holds `data` and `media` subdirectories owned by `1000:1000`. Packages: `nfs-kernel-server`, `sanoid` and `prometheus-node-exporter`.
+
+`/etc/exports.d/paperless.exports` exports it to the five k3s workers only:
+
+```text
+/hdd/paperless 192.168.10.61(rw,sync,no_subtree_check,all_squash,anonuid=1000,anongid=1000)
+/hdd/paperless 192.168.10.62(rw,sync,no_subtree_check,all_squash,anonuid=1000,anongid=1000)
+/hdd/paperless 192.168.10.63(rw,sync,no_subtree_check,all_squash,anonuid=1000,anongid=1000)
+/hdd/paperless 192.168.10.64(rw,sync,no_subtree_check,all_squash,anonuid=1000,anongid=1000)
+/hdd/paperless 192.168.10.65(rw,sync,no_subtree_check,all_squash,anonuid=1000,anongid=1000)
+```
+
+`all_squash` maps every client user, root included, to `1000:1000`. Apply changes with `exportfs -ra`.
+
+`/etc/sanoid/sanoid.conf`:
+
+```ini
+[hdd/paperless]
+  hourly = 24
+  daily = 30
+  monthly = 6
+  autosnap = yes
+  autoprune = yes
+```
+
+`sanoid.timer` is enabled and runs every 15 minutes.
+
+The node exporter listens on `192.168.10.13:9100` and reports pool health as `node_zfs_zpool_state`. The PVE firewall is disabled, so there are no firewall rules for NFS or the exporter.
+
+Verified on 2026-11-08:
+
+- `k3s-worker-61` mounted the export with `nfsvers=4.2`. A file created as root in `data` got owner `1000`.
+- `k3s-master-51` got `access denied by server`.
+- `sanoid --cron` created `autosnap_` hourly, daily and monthly snapshots.
+- `node_zfs_zpool_state{state="online",zpool="hdd"}` returned `1`.
 
 ## GPU passthrough
 
