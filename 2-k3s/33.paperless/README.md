@@ -2,7 +2,7 @@
 
 Receipts archive with OCR. Design: `docs/superpowers/specs/2026-11-08-receipts-design.md`.
 
-Hostname https://paperless.epaflix.com on Traefik `websecure` (192.168.10.101), so phones can upload from the internet. The pod runs Paperless on port 8000 and Valkey on `127.0.0.1:6379` with `emptyDir` storage. The database is `paperless` in `postgres-cluster`.
+Hostname https://paperless.epaflix.com on Traefik `websecure` at `192.168.10.101`, so phones can upload from the internet. The pod runs Paperless on port 8000 and Valkey on `127.0.0.1:6379` with `emptyDir` storage. The database is `paperless` in `postgres-cluster`.
 
 ## Access
 
@@ -19,15 +19,15 @@ Removing someone from `Servarr users` stops new web logins only. Their API token
 
 ## Storage
 
-PV `paperless-data-shypowder` mounts NFS `192.168.10.13:/hdd/paperless` (ZFS dataset `hdd/paperless` on shypowder, see `1-proxmox/shypowder/README.md`). The export squashes every client to 1000:1000, which matches `USERMAP_UID`/`USERMAP_GID`. `PAPERLESS_DATA_DIR` is `data/` and `PAPERLESS_MEDIA_ROOT` is `media/` on that volume. The consume folder is `emptyDir`, because uploads through the API and web UI skip it.
+PV `paperless-data-shypowder` mounts NFS `192.168.10.13:/hdd/paperless`, the ZFS dataset `hdd/paperless` on shypowder described in `1-proxmox/shypowder/README.md`. The export squashes every client to 1000:1000, which matches `USERMAP_UID`/`USERMAP_GID`. `PAPERLESS_DATA_DIR` is `data/` and `PAPERLESS_MEDIA_ROOT` is `media/` on that volume. The consume folder is `emptyDir`, because uploads through the API and web UI skip it.
 
-Files are backed up only by sanoid snapshots on shypowder, one disk. The database uses the CNPG backups to MinIO.
+Only sanoid snapshots on shypowder, one disk, back up the files. The database uses the CNPG backups to MinIO.
 
 ### Move to TrueNAS
 
 When the 6×14 TB pool exists on TrueNAS:
 
-1. Scale Paperless (and paperless-gpt) to zero.
+1. Scale Paperless and paperless-gpt to zero.
 2. `syncoid hdd/paperless` to a dataset on the new pool, snapshots included.
 3. Export that dataset over NFS from TrueNAS to the k3s workers, squashed to 1000:1000.
 4. In a PR, replace the PV with one pointing at TrueNAS, then scale up.
@@ -43,7 +43,7 @@ The values were generated at random when the files were encrypted and exist only
 
 ## DNS
 
-Public DNS resolves through the Cloudflare wildcard and tunnel. The LAN needs `paperless.epaflix.com` in `1-proxmox/pihole/dnsmasq.d/10-epaflix.conf` (A `192.168.10.101`) and in `1-proxmox/pihole/unbound-no-aaaa-leak.conf`. Apply them on the Pi-hole the way `2-k3s/08.servarr/navidrome/README.md` records.
+Public DNS resolves through the Cloudflare wildcard and tunnel. The LAN needs `paperless.epaflix.com` in `1-proxmox/pihole/dnsmasq.d/10-epaflix.conf` as A `192.168.10.101` and in `1-proxmox/pihole/unbound-no-aaaa-leak.conf`. Apply them on the Pi-hole the way `2-k3s/08.servarr/navidrome/README.md` records.
 
 ## Observability
 

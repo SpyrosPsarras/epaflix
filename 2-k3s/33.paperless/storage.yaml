@@ -1,5 +1,5 @@
 ---
-# shypowder exports hdd/paperless with every client squashed to 1000:1000.
+# The export squashes every client to 1000:1000, so the pod needs no fsGroup or chown.
 apiVersion: v1
 kind: PersistentVolume
 metadata:

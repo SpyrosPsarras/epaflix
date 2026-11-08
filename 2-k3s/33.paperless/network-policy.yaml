@@ -18,6 +18,7 @@ spec:
           podSelector:
             matchLabels:
               app.kubernetes.io/name: traefik
+        # paperless-gpt and the share-lists CronJob in this namespace call the API.
         - podSelector: {}
       ports:
         - port: 8000
