@@ -12,10 +12,10 @@ const { ProviderCatalog } = await jiti.import(join(provider, 'src/catalog.ts'))
 const catalog = new ProviderCatalog({
   config: loadConfig(process.cwd()),
   bundledModelsDevPath: join(provider, 'data/models-dev-fallback.json'),
-  getApiKey: async () => process.env.ANTHROPIC_AUTH_TOKEN,
 })
 // Pi --list-models reads the provider snapshot without refreshing it from the network.
-const refreshed = await catalog.refresh('models', 'manual')
+// The key goes to refresh(): pi-cliproxyapi-provider 0.16.6 dropped the constructor's getApiKey.
+const refreshed = await catalog.refresh('models', 'manual', async () => process.env.ANTHROPIC_AUTH_TOKEN)
 assert.ok(refreshed.models.updated, String(refreshed.models.error))
 
 const result = spawnSync(process.argv[2], ['--list-models'], { encoding: 'utf8', timeout: 60000 })
