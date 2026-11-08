@@ -1561,11 +1561,13 @@ tests:
         alertname: ShypowderPoolMissing
         exp_alerts:
           - exp_labels:
+              job: shypowder-node-exporter
+              zpool: hdd
               severity: critical
               component: shypowder-storage
             exp_annotations:
               summary: "shypowder pool hdd is missing"
-              description: "node_zfs_zpool_state on shypowder has not reported pool hdd as online for 5m while the exporter answers. Pool hdd is not imported, so the Paperless NFS export has no data behind it. Run `zpool status hdd` and `zpool import` on shypowder, read-only, before changing anything. Do not import with -f from this alert alone."
+              description: "node_zfs_zpool_state on shypowder has not reported pool hdd at all for 5m while the exporter answers. Pool hdd is not imported, so the Paperless NFS export has no data behind it. Run `zpool status hdd` and `zpool import` on shypowder, read-only, before changing anything. Do not import with -f from this alert alone."
 
   - interval: 1m
     input_series:
@@ -1573,6 +1575,19 @@ tests:
         values: "0x20"
     alert_rule_test:
       - eval_time: 15m
+        alertname: ShypowderPoolMissing
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'node_zfs_zpool_state{endpoint="http-metrics",instance="192.168.10.13",job="shypowder-node-exporter",namespace="observability",service="shypowder-node-exporter",state="degraded",zpool="hdd"}'
+        values: "1x10"
+      - series: 'node_zfs_zpool_state{endpoint="http-metrics",instance="192.168.10.13",job="shypowder-node-exporter",namespace="observability",service="shypowder-node-exporter",state="online",zpool="hdd"}'
+        values: "0x10"
+      - series: 'up{endpoint="http-metrics",instance="192.168.10.13",job="shypowder-node-exporter",namespace="observability",service="shypowder-node-exporter"}'
+        values: "1x10"
+    alert_rule_test:
+      - eval_time: 5m
         alertname: ShypowderPoolMissing
         exp_alerts: []
 

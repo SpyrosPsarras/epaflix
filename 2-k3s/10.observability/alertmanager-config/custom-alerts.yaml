@@ -1326,7 +1326,7 @@ spec:
 
         - alert: ShypowderPoolMissing
           expr: |
-            absent(node_zfs_zpool_state{job="shypowder-node-exporter",zpool="hdd",state="online"} == 1)
+            absent(node_zfs_zpool_state{job="shypowder-node-exporter",zpool="hdd"})
               and on() (up{job="shypowder-node-exporter"} == 1)
           for: 5m
           labels:
@@ -1335,8 +1335,8 @@ spec:
           annotations:
             summary: "shypowder pool hdd is missing"
             description: >-
-              node_zfs_zpool_state on shypowder has not reported pool hdd as
-              online for 5m while the exporter answers. Pool hdd is not imported,
+              node_zfs_zpool_state on shypowder has not reported pool hdd at all
+              for 5m while the exporter answers. Pool hdd is not imported,
               so the Paperless NFS export has no data behind it. Run
               `zpool status hdd` and `zpool import` on shypowder, read-only, before
               changing anything. Do not import with -f from this alert alone.
