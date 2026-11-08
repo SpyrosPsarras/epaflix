@@ -20,6 +20,8 @@ export GIT_TERMINAL_PROMPT=0
 git config --global credential.helper ''
 git config --global user.name "Spyros Psarras"
 git config --global user.email 13405649+SpyrosPsarras@users.noreply.github.com
+# T3 reads a project's branch while `git clone` runs, when HEAD is still the init default; it must match GitHub's.
+git config --global init.defaultBranch main
 if [[ $(read_config gitAuth) == github-token ]]; then
   git config --global credential.helper /scripts/git-credential-github.sh
 fi
