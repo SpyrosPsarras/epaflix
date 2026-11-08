@@ -15,6 +15,8 @@
   "rebaseWhen": "behind-base-branch",
   "labels": ["renovate"],
   "commitMessagePrefix": "[renovate]",
+  "automerge": true,
+  "platformAutomerge": false,
   "packageRules": [
     {
       "description": "Keep the lock and the shared runtime image reference aligned with updated tool and base-image inputs. sync-lock.sh rebuilds the lock with the image's npm 10.9.4: Renovate's own lock update left PR #2187 with a stale lock after a git dependency (superpowers) bump, which failed npm ci and the image tag check on every rebase.",
@@ -28,7 +30,7 @@
       }
     },
     {
-      "description": "T3 pod CLI pins. Native npm updates the package and lock together; ArgoCD rolls merged updates. Automerge is set by the two t3code runtime inputs rules at the end of this list.",
+      "description": "T3 pod CLI pins. Native npm updates the package and lock together; ArgoCD rolls merged updates. Majors wait for review under the t3code runtime inputs majors rule at the end of this list.",
       "matchManagers": ["npm"],
       "matchFileNames": ["2-k3s/13.t3code/env/tools/package.json"],
       "rangeStrategy": "pin"
@@ -53,30 +55,6 @@
       "commitMessageTopic": "authentik"
     },
     {
-      "description": "Auto-merge minor and patch updates across the repo. Renovate now owns all docker digest + patch bumps for the servarr stack end-to-end (Image Updater retired — #192); this rule covers minor and patch bumps repo-wide (incl. chart-only updates), with the dedicated servarr-digest rule below handling digest re-rolls.",
-      "matchUpdateTypes": ["minor", "patch"],
-      "automerge": true,
-      "automergeType": "pr",
-      "platformAutomerge": true
-    },
-    {
-      "description": "Servarr digest rebuilds auto-merge. Release tags make minor/major changes typed updates (#1129). Moving-tag exceptions and registry evidence are in docs/servarr-image-pins.md; later rules require review for development images.",
-      "matchFileNames": ["2-k3s/08.servarr/kustomization.yaml"],
-      "matchDatasources": ["docker"],
-      "matchUpdateTypes": ["digest"],
-      "automerge": true,
-      "automergeType": "pr",
-      "platformAutomerge": true
-    },
-    {
-      "description": "Servarr minor and major releases require review for migrations and breaking changes (#1129). Patch updates and same-tag digest rebuilds retain their earlier automerge rules.",
-      "matchFileNames": ["2-k3s/08.servarr/kustomization.yaml"],
-      "matchDatasources": ["docker"],
-      "matchUpdateTypes": ["minor", "major"],
-      "automerge": false,
-      "platformAutomerge": false
-    },
-    {
       "description": "Hotio release tags have a release- prefix. Parse the numeric version so patch/minor/major updates remain discoverable (#1129).",
       "matchFileNames": ["2-k3s/08.servarr/kustomization.yaml"],
       "matchPackageNames": ["ghcr.io/hotio/unpackerr"],
@@ -89,27 +67,16 @@
       "versioning": "regex:^(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-(?<build>\\d+)$"
     },
     {
-      "description": "Streamystats' pinned build has no matching release tag (#1129). These moving tags can carry unreleased migrations, so every update needs review. Keep this after the digest and minor/patch automerge rules. Lingarr left this rule with the batch-contract override: the kustomization entry now carries newName ghcr.io/spyrospsarras/lingarr (disabled by the overlay rule below), so the upstream name no longer extracts as a dependency - the build-lingarr.yml invariant guard covers the upstream base digest instead.",
+      "description": "Streamystats' pinned build has no matching release tag (#1129). These moving tags can carry unreleased migrations, so every update needs review. Lingarr left this rule with the batch-contract override: the kustomization entry now carries newName ghcr.io/spyrospsarras/lingarr (disabled by the overlay rule below), so the upstream name no longer extracts as a dependency - the build-lingarr.yml invariant guard covers the upstream base digest instead.",
       "matchFileNames": ["2-k3s/08.servarr/kustomization.yaml"],
       "matchDatasources": ["docker"],
       "matchPackageNames": ["ghcr.io/fredrikburmester/streamystats-aio"],
-      "automerge": false,
-      "platformAutomerge": false
+      "automerge": false
     },
     {
-      "description": "CLIProxyAPI: never auto-merge, any update type (#1221). Tracking resumed when the pr-5411 fork was retired and the pin went back to this tag stream, so the repo-wide minor/patch automerge at the top of this list would otherwise own it. Two reasons it must not: this image is the gateway every agent session talks to, so a bad bump stops all coding work at once, and upstream ships fast - 27 releases in the 20 days from v7.2.148 (2026-09-03) to v7.3.15 (2026-09-23), including the v7.3.0 minor. The binary also impersonates a pinned Claude Code version (claude_device_profile.go, 2.1.280 at v7.3.15), so a release can change which Anthropic models are accepted, in both directions. PR opens, you merge it when you are not mid-task.",
+      "description": "CLIProxyAPI: never auto-merge, any update type (#1221). Tracking resumed when the pr-5411 fork was retired and the pin went back to this tag stream, so the repo-wide automerge would otherwise own it. Two reasons it must not: this image is the gateway every agent session talks to, so a bad bump stops all coding work at once, and upstream ships fast - 27 releases in the 20 days from v7.2.148 (2026-09-03) to v7.3.15 (2026-09-23), including the v7.3.0 minor. The binary also impersonates a pinned Claude Code version (claude_device_profile.go, 2.1.280 at v7.3.15), so a release can change which Anthropic models are accepted, in both directions. PR opens, you merge it when you are not mid-task.",
       "matchManagers": ["kustomize"],
       "matchPackageNames": ["docker.io/eceasy/cli-proxy-api"],
-      "automerge": false,
-      "platformAutomerge": false
-    },
-    {
-      "description": "Authentik MINOR/MAJOR: never auto-merge — release notes can carry DB migrations and breaking changes. PR opens, you review, you click merge.",
-      "matchPackageNames": [
-        "authentik",
-        "ghcr.io/goauthentik/server"
-      ],
-      "matchUpdateTypes": ["minor", "major"],
       "automerge": false
     },
     {
@@ -121,13 +88,10 @@
       "enabled": false
     },
     {
-      "description": "Update the self-hosted Renovate image weekly and automerge all update types, including majors, on green CI per the owner decision. Disable changelog fetching because the #595 in-window hang was inferred to come from fetching release notes across thousands of releases. Re-enabled together with the hand upgrade from 43.33.2 to 44.188.2 on 2026-10-27.",
+      "description": "Update the self-hosted Renovate image weekly. Disable changelog fetching because the #595 in-window hang was inferred to come from fetching release notes across thousands of releases. Re-enabled together with the hand upgrade from 43.33.2 to 44.188.2 on 2026-10-27.",
       "matchManagers": ["kustomize"],
       "matchPackageNames": ["ghcr.io/renovatebot/renovate"],
       "schedule": ["after 2am and before 6am on monday"],
-      "automerge": true,
-      "automergeType": "pr",
-      "platformAutomerge": true,
       "fetchChangeLogs": "off"
     },
     {
@@ -165,7 +129,7 @@
       "enabled": false
     },
     {
-      "description": "CLIProxyAPI plugin pins (#997): NEVER auto-merge, and this rule MUST stay after the repo-wide minor/patch rule above, because later packageRules win. Renovate cannot compute the sha256 of a release zip, so it bumps the version and leaves the checksum stale. The fetch script fails CLOSED on a mismatch with exit 1, which fails the initContainer, which means an auto-merged patch bump would take cliproxy.epaflix.com down at the next sync rather than merely skipping a plugin. A plugin 0.9.1 -> 0.9.2 IS a patch, so the generic automerge rule would have caught these. The ci.yml step 'CLIProxyAPI plugin pins match upstream checksums' turns that stale checksum into a red gate instead of an outage, but this rule is the first line: a human updates the checksum from the release's own checksums.txt and pushes it to the Renovate branch before merging.",
+      "description": "CLIProxyAPI plugin pins (#997): NEVER auto-merge, and this rule overrides the repo-wide automerge. Renovate cannot compute the sha256 of a release zip, so it bumps the version and leaves the checksum stale. The fetch script fails CLOSED on a mismatch with exit 1, which fails the initContainer, which means an auto-merged patch bump would take cliproxy.epaflix.com down at the next sync rather than merely skipping a plugin. The ci.yml step 'CLIProxyAPI plugin pins match upstream checksums' turns that stale checksum into a red gate instead of an outage, but this rule is the first line: a human updates the checksum from the release's own checksums.txt and pushes it to the Renovate branch before merging.",
       "matchManagers": ["custom.regex"],
       "matchPackageNames": [
         "abix5/pi-cliproxyapi-bridge",
@@ -188,31 +152,18 @@
       "allowedVersions": "<6"
     },
     {
-      "description": "t3 follows the npm nightly dist-tag. The desktop app on the laptop runs nightly and shows every server on an older version as behind. Automerge comes from the group rule below.",
+      "description": "t3 follows the npm nightly dist-tag. The desktop app on the laptop runs nightly and shows every server on an older version as behind. Its updates join the group below.",
       "matchManagers": ["npm"],
       "matchFileNames": ["2-k3s/13.t3code/env/tools/package.json"],
       "matchPackageNames": ["t3"],
       "followTag": "nightly"
     },
     {
-      "description": "Automerge major updates of the four observability charts per the owner's decision on 2026-10-27. All four use includeCRDs: false, and nothing in the repo applies the prometheus-operator CRDs. On 2026-10-27 the cluster CRDs were at operator 0.89.0 while kube-prometheus-stack 92.13.1 shipped operator v0.94.1, so a major that needs new CRD fields can merge and break until the CRDs are updated by hand. Matches on depName, the chart name: the three OCI charts have the registry path as packageName.",
-      "matchManagers": ["kustomize"],
-      "matchFileNames": ["2-k3s/10.observability/kustomization.yaml"],
-      "matchDepNames": ["kube-prometheus-stack", "prometheus-blackbox-exporter", "loki", "alloy"],
-      "matchUpdateTypes": ["major"],
-      "automerge": true,
-      "automergeType": "pr",
-      "platformAutomerge": true
-    },
-    {
-      "description": "Group non-major runtime input updates so the npm CLI and Pi extension pins, versions.env and Node base-image changes rewrite one inputs-<hash> image tag together. Renovate waits for CI's runtime smoke before merging because the repo has no required checks. Helm and Kustomize remain separate to match the CI renderer; majors require review under the next rule. Keep these rules last so platformAutomerge stays false. Runs at any time; the pod switches after 30 idle minutes.",
+      "description": "Group non-major runtime input updates so the npm CLI and Pi extension pins, versions.env and Node base-image changes rewrite one inputs-<hash> image tag together. Helm and Kustomize remain separate to match the CI renderer; majors require review under the next rule. Runs at any time; the pod switches after 30 idle minutes.",
       "matchFileNames": ["2-k3s/13.t3code/env/tools/package.json", "2-k3s/13.t3code/versions.env", "2-k3s/13.t3code/env/Dockerfile"],
       "matchPackageNames": ["!helm/helm", "!kubernetes-sigs/kustomize"],
       "schedule": ["at any time"],
-      "groupName": "t3code runtime inputs",
-      "automerge": true,
-      "automergeType": "pr",
-      "platformAutomerge": false
+      "groupName": "t3code runtime inputs"
     },
     {
       "description": "t3code runtime inputs majors: review by hand (a node base-image or CLI major can change the runtime under every agent session). They land in the separate major- group branch, so this does not block the minor/patch group.",

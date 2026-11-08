@@ -23,13 +23,13 @@ Navidrome `0.64.2` was resolved from Docker Hub on 2026-11-05 as `sha256:38dc272
 
 Digarr `2.2.1` was resolved from ghcr.io on 2026-11-08 as `sha256:6192ceaea41065d36d05a29d643da0787cd1479da930d4502eca94e602d09889`. The `ghcr.io/iuliandita/digarr` pin uses the multi-arch OCI index digest, covering Linux amd64 and arm64, not a platform manifest. The v2.2.1 upgrade notes add no database migrations or proxy-auth changes; media-server connections to private LAN and Kubernetes service addresses remain allowed. Loopback and Tailscale addresses now require `DIGARR_MEDIA_SERVER_ALLOW_LOCAL=true`, which this deployment does not need.
 
-Configarr was added with release `1.38.0`, verified against ghcr.io as `sha256:36d15adcc815557409a9437bc51468edfd1ac05ef6b46336dff650a56d2cc6a3`. Its `version@sha256` pin uses the existing servarr rules in `.github/renovate.json`: patch and digest updates auto-merge; minor and major updates require review.
+Configarr was added with release `1.38.0`, verified against ghcr.io as `sha256:36d15adcc815557409a9437bc51468edfd1ac05ef6b46336dff650a56d2cc6a3`. Its `version@sha256` pin follows the repo-wide automerge policy in `.github/renovate.json`.
 
 LinuxServer publishes clean three-component tags alongside build tags. Docker versioning treats `-ls324` as a compatibility suffix, so `4.0.19.2979-ls324` would reject a candidate ending in `-ls400`. Clean tags avoid that filter and allow same-version rebuild digests. Unpackerr needs regex versioning for `release-`; qBittorrent needs it to treat its numeric image-build suffix as a patch instead of a fixed compatibility suffix. The regex excludes qBittorrent's separate `lt2` variant.
 
 The LinuxServer images come from ghcr.io/linuxserver, not lscr.io. Renovate's lookups of the lscr.io names failed on the Dependency Dashboard (issue #31), and its logs showed lscr.io answering tag-list and blob requests with HTTP 429. ghcr.io serves the same digests.
 
-Minor and major releases require review throughout this images block. Patch releases and same-tag digest rebuilds still auto-merge, except for the manual-review images below. A patch can still contain an application migration; this policy preserves the patch behavior requested in #1129, rather than promising that patches are migration-free.
+Every update type in this images block auto-merges on green CI, except for the manual-review images below. The `renovate-breaking-change` workflow holds any Renovate PR whose release notes carry a breaking-change heading or `BREAKING CHANGE`. A release that ships a migration without flagging it in its notes still merges.
 
 ## Scope and exceptions
 
@@ -55,6 +55,6 @@ npm install --prefix /tmp/servarr-renovate --ignore-scripts --no-audit --no-fund
 RENOVATE_ROOT=/tmp/servarr-renovate/node_modules/renovate node .github/hooks/test-servarr-renovate.mjs
 ```
 
-The check invokes Renovate's actual Kustomize extractor, versioning APIs, update classifier and ordered package rules. It checks valid digest-bearing dependencies, Sonarr 4 to 5 classification, patch discovery, digest automerge, manual minor/major updates, and the development-image exceptions. Registry tag-to-digest checks are separate because tags can legitimately be rebuilt after this change.
+The check invokes Renovate's actual Kustomize extractor, versioning APIs, update classifier and ordered package rules. It checks valid digest-bearing dependencies, Sonarr 4 to 5 classification, patch discovery, automerge for every update type, and the development-image exceptions. Registry tag-to-digest checks are separate because tags can legitimately be rebuilt after this change.
 
 The issue's withdrawn `imagePullPolicy` item does not require a manifest change. A changed digest changes the pod template and starts a rollout regardless of pull policy.
