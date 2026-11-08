@@ -195,9 +195,10 @@ The owner picked O4.
 
 - shypowder: ZFS dataset `hdd/paperless` on the existing single-disk
   pool `hdd` (Seagate ST10000NE0008). Checked live on 2026-11-08: the
-  pool exists, is online and empty. Proxmox storage `local-hdd` points
-  at `hdd/data` and holds no VM disks. No disk wipe is needed. The
-  README line "stays installed but unused" changes with this work.
+  pool exists and is online. Proxmox storage `local-hdd` points at
+  `hdd/data`, which holds the disks of VMs 1041 and 1042. They stay
+  untouched, and `hdd/paperless` sits beside them. No disk wipe is
+  needed.
 - Install `nfs-kernel-server` on shypowder. Export only `hdd/paperless`,
   only to the k3s worker IPs.
 - Install `sanoid` on shypowder. Keep 24 hourly, 30 daily and 6 monthly

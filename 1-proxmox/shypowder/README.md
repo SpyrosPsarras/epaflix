@@ -61,7 +61,7 @@ Storage `local-zfs`, backed by `rpool/data`, allows `patroklos,shypowder`. The b
 
 ## Paperless storage
 
-Dataset `hdd/paperless`, created with `atime=off`, holds `data` and `media` subdirectories owned by `1000:1000`. Packages: `nfs-kernel-server`, `sanoid` and `prometheus-node-exporter`.
+Dataset `hdd/paperless`, created with `atime=off`, holds `data` and `media` subdirectories owned by `1000:1000`. Packages: `nfs-kernel-server`, `sanoid` and `prometheus-node-exporter`, installed with their recommends, which add `prometheus-node-exporter-collectors` and its smartmon and nvme timers.
 
 `/etc/exports.d/paperless.exports` exports it to the five k3s workers only:
 
@@ -73,7 +73,7 @@ Dataset `hdd/paperless`, created with `atime=off`, holds `data` and `media` subd
 /hdd/paperless 192.168.10.65(rw,sync,no_subtree_check,all_squash,anonuid=1000,anongid=1000)
 ```
 
-`all_squash` maps every client user, root included, to `1000:1000`. Apply changes with `exportfs -ra`.
+`all_squash` maps every client user, root included, to `1000:1000`. Apply changes with `exportfs -ra`. Clients must mount `192.168.10.13`. A mount of `10.0.0.13` arrives from the workers' `10.0.0.6x` addresses and is refused.
 
 `/etc/sanoid/sanoid.conf`:
 
@@ -88,7 +88,7 @@ Dataset `hdd/paperless`, created with `atime=off`, holds `data` and `media` subd
 
 `sanoid.timer` is enabled and runs every 15 minutes.
 
-The node exporter listens on `192.168.10.13:9100` and reports pool health as `node_zfs_zpool_state`. The PVE firewall is disabled, so there are no firewall rules for NFS or the exporter.
+The node exporter listens on port 9100 on all addresses and reports pool health as `node_zfs_zpool_state`. The PVE firewall is disabled, so there are no firewall rules for NFS or the exporter.
 
 Verified on 2026-11-08:
 
