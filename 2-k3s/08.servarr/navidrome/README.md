@@ -2,7 +2,7 @@
 
 Navidrome serves Lidarr's music library from `/media/music` on `servarr-media`, mounted read-only at `/music`. It runs as UID/GID 568 with a 5Gi `truenas-iscsi` data PVC. Backups go to `/media/backups/navidrome` through the `/backups` mount, daily at 04:00 UTC, retaining seven copies. The image has no time zone data, so `TZ=Europe/Oslo` has no effect. No volume-level backup covers the `truenas-iscsi` app PVCs, so these files are the only copy of users, playlists and play counts.
 
-`https://navidrome.epaflix.com` uses Authentik forward auth and permits `authentik Admins` or `Music users`. The `/rest/` and `/jellyfin/` routes use native app authentication instead. Their middleware removes `X-authentik-username`, `True-Client-IP` and `X-Real-IP` from incoming requests.
+`https://navidrome.epaflix.com` and `https://music.epaflix.com` serve the same Navidrome. Both use Authentik forward auth, each through its own proxy provider (`navidrome`, `navidrome-music`), and permit `authentik Admins` or `Music users`. The `/rest/` and `/jellyfin/` routes use native app authentication instead. Their middleware removes `X-authentik-username`, `True-Client-IP` and `X-Real-IP` from incoming requests.
 
 `navidrome-ingress` permits TCP 4533 only from Traefik, Prometheus and same-namespace digarr pods. External auth trusts the pod CIDR `10.42.0.0/16`. Kube-router still permits a pod's own node, including host-network pods on that node. This accepted cluster limit also applies here. The ServiceMonitor sets `jobLabel: app`, yielding `job="navidrome"` for `NavidromeDown`.
 

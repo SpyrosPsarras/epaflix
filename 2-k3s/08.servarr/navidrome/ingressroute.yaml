@@ -8,7 +8,7 @@ spec:
   entryPoints:
     - websecure
   routes:
-    - match: Host(`navidrome.epaflix.com`)
+    - match: (Host(`navidrome.epaflix.com`) || Host(`music.epaflix.com`))
       kind: Rule
       priority: 10
       middlewares:
@@ -30,7 +30,7 @@ spec:
   entryPoints:
     - websecure
   routes:
-    - match: Host(`navidrome.epaflix.com`) && PathPrefix(`/outpost.goauthentik.io/`)
+    - match: (Host(`navidrome.epaflix.com`) || Host(`music.epaflix.com`)) && PathPrefix(`/outpost.goauthentik.io/`)
       kind: Rule
       priority: 15
       services:
@@ -48,7 +48,7 @@ spec:
   entryPoints:
     - web
   routes:
-    - match: Host(`navidrome.epaflix.com`)
+    - match: (Host(`navidrome.epaflix.com`) || Host(`music.epaflix.com`))
       kind: Rule
       middlewares:
         - name: redirect-https
@@ -78,7 +78,7 @@ spec:
   entryPoints:
     - websecure
   routes:
-    - match: Host(`navidrome.epaflix.com`) && (PathPrefix(`/rest/`) || PathPrefix(`/jellyfin/`))
+    - match: (Host(`navidrome.epaflix.com`) || Host(`music.epaflix.com`)) && (PathPrefix(`/rest/`) || PathPrefix(`/jellyfin/`))
       kind: Rule
       priority: 20
       middlewares:
