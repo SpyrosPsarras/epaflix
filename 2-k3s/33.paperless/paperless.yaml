@@ -30,7 +30,7 @@ spec:
                 name: paperless-secrets
           env:
             - {name: PAPERLESS_URL, value: "https://paperless.epaflix.com"}
-            - {name: PAPERLESS_REDIS, value: "redis://localhost:6379"}
+            - {name: PAPERLESS_REDIS, value: "redis://127.0.0.1:6379"}
             - {name: PAPERLESS_DBENGINE, value: postgresql}
             - {name: PAPERLESS_DBHOST, value: postgres-cluster-rw.postgres-system.svc}
             - {name: PAPERLESS_DBNAME, value: paperless}
