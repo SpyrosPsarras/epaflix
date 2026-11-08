@@ -17,7 +17,7 @@ Hostname https://paperless.epaflix.com on Traefik `websecure` at `192.168.10.101
 
 ### In-app objects
 
-With the owner's approval, the agent ran a `manage.py shell` script with `get_or_create` once. None of them has an owner, so every user sees them.
+With the owner's approval, the agent ran a `manage.py shell` script with `get_or_create` once. None of these objects has an owner, so every user sees them.
 
 | Object | Name | Id | Details |
 |---|---|---|---|
