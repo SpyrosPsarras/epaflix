@@ -1,0 +1,245 @@
+# Discord agents for the family
+
+## Intent
+
+Family members who have an Authentik account want to ask for things in
+plain language instead of opening several apps or waiting for Spyros. A
+private Discord server holds one channel per job. In each channel an AI
+agent acts with only the rights that channel needs: media requests and
+deletes in `#media`, changes to the Windmill workspace in `#windmill`.
+
+We reuse OpenClaw for the Discord side, CLIProxy for the models, Authentik
+for who may do what, GitHub CI and Argo CD for what reaches the cluster,
+and Alloy and Loki for logs. The new code is the job that copies
+Authentik groups to Discord roles, the CI path check and the post-merge
+Windmill push.
+
+Research and sources: `docs/research/2026-11-09-discord-agent.md`.
+
+## Goals
+
+- G1. A private Discord server with two locked channels. Only people with
+  an Authentik account join. Spyros owns the server.
+- G2. `#media`: members of `Servarr users` ask the agent to request, add,
+  find and delete movies, TV, anime and music, through the apps' HTTP
+  APIs: Seerr, Radarr, Sonarr, Lidarr, Bazarr, Jellyfin, Navidrome.
+  Deletes run without asking Spyros.
+- G3. `#windmill`: members of `Screener users` ask the agent to change or
+  extend the Windmill workspace. The agent opens a PR. It merges on its
+  own when CI passes and reaches Windmill without Spyros.
+- G4. Authentik decides access. Removing someone from a group removes
+  their Discord channel within one sync run.
+- G5. Every request is traceable in Grafana through Loki: who asked, in
+  which channel, which model, which commands and API calls ran, and the
+  result.
+
+## Non-goals
+
+- No ops or admin agent. No agent gets Kubernetes API rights.
+- No public server and no open channels.
+- No changes to bread, deal-finder or any other app from Discord.
+- No infra changes from `#windmill`: no manifests, Secrets, RBAC, CI
+  workflows, network policies or Argo Applications.
+- No repo or Kubernetes changes from `#media`.
+- No third-party OpenClaw skills or plugins beyond the first-party SearXNG
+  search plugin.
+- No access to Gmail, Drive or any MCP hub path.
+- No voice channels, no Discord Activities.
+
+## Anti-goals
+
+These would make it a failure even if it works:
+
+- A1. One agent, token or pod that serves both channels. A prompt
+  injection in `#media` must not reach GitHub.
+- A2. Any agent that can reach the Kubernetes API, the work namespaces or
+  another app's credentials.
+- A3. A `#windmill` change that edits files outside its allowlist and
+  still merges.
+- A4. Secrets in the public repo, in Discord messages or in logs.
+- A5. Discord roles that grant access Authentik does not.
+
+## Constraints
+
+- The repo is public. Bot PRs, branch names and commit text are public.
+- No Docker in the cluster. OpenClaw's sandbox backends all need Docker,
+  Podman, SSH, OpenShell or Crabbox, so sandbox stays off and the pod is
+  the boundary.
+- OpenClaw's trust model says approvals "are guardrails for operator
+  intent, not hostile multi-tenant isolation", and it has hundreds of
+  published advisories, many of them approval and allowlist bypasses.
+  Every limit that matters must hold even if OpenClaw's checks fail:
+  credentials held, no ServiceAccount token, NetworkPolicy, GitHub rules
+  and CI.
+- OpenClaw needs one Discord bot token per Gateway, `replicas: 1`,
+  `Recreate`, and a PVC on block storage with a local filesystem.
+  `truenas-iscsi` fits.
+- OpenClaw seeds `openclaw.json` from a ConfigMap only when the file is
+  missing; after that the PVC copy wins.
+- In-cluster *arr APIs use plain HTTP. OpenClaw's secret proxy fills in
+  secrets on HTTPS calls only, so the media agent can read its API keys.
+- Radarr, Sonarr and Lidarr web pages allow only `authentik Admins` today.
+  The media agent deliberately gives `Servarr users` request and delete
+  rights there through Discord.
+- Lidarr's NetworkPolicy admits only Traefik and named servarr pods. Each
+  media app's ingress policy must admit the media agent's pod.
+- GitHub ruleset `owner-only` blocks creating any branch except `main` for
+  everyone but the repo Admin role. Ruleset `PR required` allows only merge
+  commits and requires 0 reviews.
+- Windmill's NetworkPolicy lets only Traefik reach `windmill-app`, behind
+  Authentik forward auth.
+- Secrets reach the cluster as SOPS files loaded through ksops. Tokens are
+  created by Spyros and stored in the vault first.
+- Argo CD owns the manifests. Changes reach the cluster by merged PR.
+
+## Approaches
+
+- Chosen: OpenClaw, one Gateway per channel, each in its own namespace
+  with its own Discord application, Secrets and NetworkPolicy, and no
+  ServiceAccount token. OpenClaw gives Discord allowlists, conversation
+  history and an audit ledger. Kubernetes and GitHub give the real limits.
+- Rejected: a small Discord bot of our own in front of pi in RPC mode.
+  Same limits, but we would write and maintain the Discord gating,
+  history and audit ourselves.
+- Rejected: one shared OpenClaw for both channels, by A1.
+- Rejected: Hermes Agent (no Kubernetes guide), NanoClaw (Docker only),
+  Botkube (not an AI agent, last release 2024-11).
+
+## Design
+
+### Shape
+
+| | media | windmill |
+| --- | --- | --- |
+| Namespace | `discord-media` | `discord-windmill` |
+| Discord channel | `#media` | `#windmill` |
+| Authentik group | `Servarr users` | `Screener users` |
+| Model via CLIProxy | Claude Haiku 5.5 | Claude Opus 5.5 |
+| Holds | Seerr, Radarr, Sonarr, Lidarr, Bazarr, Jellyfin, Navidrome API keys | GitHub App key, installed on epaflix only |
+| Egress | DNS, Discord, CLIProxy, SearXNG, the media apps | DNS, Discord, CLIProxy, SearXNG, GitHub |
+
+Both: OpenClaw image pinned by version tag, sandbox off,
+`automountServiceAccountToken: false`, the first-party SearXNG plugin
+pointed at in-cluster SearXNG, no other plugins or skills, Discord
+`groupPolicy: allowlist` with one channel entry keyed by channel ID that
+also allows only the channel's role ID, DMs off, role and moderation
+actions off, `requireMention: false` in its own channel, no exec
+approvals. Neither Discord bot has Manage Roles or Administrator.
+
+### Models
+
+Each Gateway gets its own CLIProxy client key, so cost and usage show per
+channel. CLIProxy supports several client keys through its management API
+(`2-k3s/13.t3code-work/tools/provision.py`). Model IDs come from the
+CLIProxy catalogue at build time. Provider format is Anthropic messages
+against `http://cliproxy.remote-pi.svc.cluster.local:8317`. No usage cap
+at first; a Grafana alert fires when one key passes a daily threshold.
+
+### Access from Authentik
+
+- Each person links Discord to Authentik through an Authentik Discord
+  social login source, which gives Authentik their Discord user ID.
+- A CronJob in its own namespace `discord-sync`, every 10 minutes, reads
+  members of `Servarr users` and `Screener users` and their linked Discord
+  IDs, then adds and removes the `media` and `windmill` Discord roles. It
+  removes a mapped role from anyone not in the group and leaves unmapped
+  roles alone.
+- The CronJob uses a third Discord application with Manage Roles only and
+  no gateway connection, so neither agent pod holds a token that can grant
+  roles.
+- It logs Discord members with no linked Authentik account and Loki
+  alerts on them. It does not kick anyone.
+
+### Media
+
+- The agent calls the apps' APIs with `curl` through OpenClaw's exec tool.
+  The workspace `AGENTS.md` lists each app's base URL and the calls the
+  agent may use. API keys come from env vars set from the namespace
+  Secret.
+- NetworkPolicy egress allows only the targets in the table. Each media
+  app's ingress policy admits the `discord-media` pod on its API port.
+- Seerr requests go through one Seerr bot user. Who asked is in the audit
+  log.
+- Radarr, Sonarr and Lidarr get the Recycling Bin on, with 7 days of
+  cleanup, so a wrong delete can be undone for a week.
+
+### Windmill
+
+- A GitHub App, `homelab-windmill-bot`, installed on epaflix only, with
+  contents and pull requests permissions and no workflows permission, so
+  GitHub rejects any push from it that changes `.github/workflows/`. Its
+  PRs carry its own author, so CI knows a PR came from the bot.
+- OpenClaw's GitHub App support only reads. A sidecar container holds the
+  App key, mints a 1-hour installation token for epaflix every 30 minutes
+  and shares only the token with the agent container.
+- Ruleset `owner-only` excludes `bots/**`. The App gets no bypass, so it
+  can push only `bots/...` branches and reaches `main` only through a PR.
+- The agent works in a clone on its PVC, pushes a `bots/windmill/...`
+  branch, opens a PR and turns on auto-merge.
+- A job inside `ci.yml`, part of the required `validate` check, fails a
+  bot PR if any changed path, old or new name, is outside
+  `2-k3s/34.windmill/workspace/**`. It reads the file list from the GitHub
+  API without checking out PR code, and the bot cannot edit `ci.yml`.
+- After merge, a CI job pushes changed scripts under
+  `2-k3s/34.windmill/workspace/f/` to workspace `screener` with the
+  Windmill CLI. This replaces today's manual API update.
+- A Windmill change that needs a new resource, secret or network access
+  touches files outside the allowlist, so CI blocks the merge. The agent
+  says so in the channel and leaves the PR for Spyros.
+
+### Config ownership
+
+The ConfigMap in Git is the source of truth. The init container copies
+`openclaw.json` and `AGENTS.md` from the ConfigMap on every start,
+overwriting the PVC copy, so changes made in OpenClaw's Control UI do not
+survive a restart. Reloader restarts the pod when the ConfigMap or Secret
+changes. The Control UI is not exposed outside the pod.
+
+### Audit and logs
+
+- OpenClaw audit ledger on with `logging.audit.messages` on, so it records
+  who asked as well as what ran.
+- Logs to stdout as JSON. Alloy ships them to Loki, labelled by namespace.
+- Loki alerts: a Windmill bot PR blocked by the path check, Gateway
+  restarts, unlinked Discord members, and the CLIProxy usage threshold.
+
+### Owner steps
+
+Spyros does these himself, from a list in the plan, no script:
+
+1. Create the Discord server.
+2. Create three Discord applications: `media` and `windmill` bots with
+   Message Content Intent, and `role-sync` with Manage Roles. Invite each
+   to the server and store each token in the vault.
+3. Create the GitHub App `homelab-windmill-bot`, install it on epaflix and
+   store its private key in the vault.
+4. Add the Discord social login source in Authentik and link his own
+   account.
+5. Create a Windmill token for the post-merge job and store it as a GitHub
+   Actions secret.
+6. Invite family members and send them the link.
+
+Spyros also creates the two roles and two channels by hand, so the
+role-sync bot needs Manage Roles only. The agent then encrypts the tokens
+into SOPS files and opens the PRs. The ruleset
+change in C1 is a PR-free GitHub setting, done after Spyros confirms.
+
+## Calls made in this design
+
+- C1. `bots/**` excluded from `owner-only`; no bypass for the App.
+- C2. Seerr requests through one bot user.
+- C3. No CLIProxy cap at first; usage alert instead.
+- C4. Unlinked Discord members are logged and alerted, not kicked.
+- C5. A third Discord application for role sync, so agent pods hold no
+  role-granting token.
+- C6. `#media` maps to `Servarr users` with deletes (Q8, assumed O12).
+
+## Left to the builder
+
+- Exact OpenClaw config keys, version and resource limits.
+- The `AGENTS.md` text per channel, including the allowed API calls.
+- The role sync code, its language and its test, following the repo's
+  Python tooling pattern.
+- How the post-merge Windmill job reaches Windmill past forward auth and
+  the NetworkPolicy, for example from the in-cluster `gh-runner`.
+- Alert thresholds.
