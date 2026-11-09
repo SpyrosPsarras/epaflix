@@ -140,23 +140,3 @@ options zfs zfs_arc_max=2147483648
 ```
 
 After restoring these files, run `update-initramfs -u -k all` and `proxmox-boot-tool refresh`, then reboot before starting the GPU guest.
-
-## VM 1064
-
-`k3s-worker-64` uses the Ubuntu 24.04 cloud image and cloud-init user `ubuntu`.
-
-| Setting | Value |
-| --- | --- |
-| Machine and CPU | `q35`, `host`, 1 socket, 4 cores |
-| Memory | `20480` MiB, `balloon: 0`. 24 GiB ran the 31 GiB host out of memory, because passthrough pins all guest RAM. |
-| GPU | `hostpci0: 0000:01:00,pcie=1`, all four functions |
-| Disk | `scsi0: ssd-raid:vm-1064-disk-0,discard=on,size=100G,ssd=1`, on the evanthoulaki SSD RAID 5 over iSCSI ([TrueNAS apps disk](../patroklos/README.md#truenas-apps-disk)) |
-| SCSI controller | `virtio-scsi-pci` |
-| Cloud-init disk | `ide2: local-zfs:vm-1064-cloudinit,media=cdrom` |
-| LAN NIC | VirtIO `net0`, `bridge=vmbr0`, `192.168.10.64/24`, gateway `192.168.10.1` |
-| Cluster NIC | VirtIO `net1`, `bridge=vmbr0`, `10.0.0.64/24` |
-| DNS | `192.168.10.30` |
-| Boot | `order=scsi0`, `onboot: 1` |
-| Console and agent | `serial0: socket`, `vga: serial0`, `agent: 1` |
-
-The guest's driver, container runtime, storage access and Kubernetes labels are in [node settings](../../2-k3s/maintenance/node-settings.md#gpu-worker). Zone labels are in [node zones](../../2-k3s/maintenance/node-zones.md).
