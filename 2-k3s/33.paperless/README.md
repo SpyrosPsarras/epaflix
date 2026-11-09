@@ -41,6 +41,8 @@ Removing someone from `Servarr users` stops new web logins only. Their API token
 4. In Paperless Go, choose "Login with API token", enter server `https://paperless.epaflix.com` and paste the token.
 5. Scan receipts with the camera's Receipt preset, or share a photo or PDF to Paperless Go. paperless-gpt fills in the title, shop, date and `Total` within a few minutes.
 
+Owner check on 2026-11-09: one real receipt scanned in Paperless Go reached Paperless as a PDF with OCR text. paperless-gpt set the title, shop, date and `Total` in 2 minutes 12 seconds, and the next share-lists run made the shop visible to everyone. `Total` got no currency code; whether the receipt printed one was not checked.
+
 Browser login inside the app is requested upstream in Paperless Go issue #51. For it, Authentik provider `paperless` is a public client and allows the strict redirect URI `com.ventouxlabs.paperlessgo:/oidc-callback`. Authentik skips the secret check for public clients, so the web login, which still sends the secret, keeps working. Authentik does not force PKCE on public clients; the strict redirect URIs limit where Authentik sends login codes. Until a Paperless Go release has "Sign in with Authentik", use the API token steps above.
 
 ## paperless-gpt
