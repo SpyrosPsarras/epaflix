@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: discord-sync
+
+resources:
+  - namespace.yaml
+  - cronjob.yaml
+  - network-policy.yaml
+
+generators:
+  - ksops-generator.yaml
+
+configMapGenerator:
+  - name: role-sync-script
+    files:
+      - role_sync.py
