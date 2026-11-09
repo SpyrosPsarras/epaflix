@@ -292,6 +292,13 @@ jobs:
           # The t3code pod's copy of hub_clients.py (and the other shared inputs) must not drift.
           bash 2-k3s/13.t3code/one/tools/sync-shared.sh --check
 
+      - name: Windmill screener tests
+        run: |
+          set -euo pipefail
+          python3 -m venv /tmp/screener
+          /tmp/screener/bin/pip install -q --disable-pip-version-check -r 2-k3s/34.windmill/workspace/requirements-test.txt
+          /tmp/screener/bin/python -m pytest -q 2-k3s/34.windmill/workspace/tests
+
       - name: Google Workspace pinned-image contract
         env:
           WORKSPACE_MCP_IMAGE_TEST: "1"

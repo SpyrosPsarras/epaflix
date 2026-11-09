@@ -20,8 +20,10 @@ run history. The owner adds one shared screening script.
 - G2. After each scheduled run the user gets an email with one row per
   match: ticker, the Finviz columns, entry, stop and target. A day with no
   matches still sends an email that says so.
-- G3. A failed run emails the user who owns the schedule and shows in
-  Windmill's run history.
+- G3. A failed run emails the address in the screen's `email` field and
+  shows in Windmill's run history. Some failures show only in the run
+  history: a run that Windmill kills for a timeout or out of memory, a
+  failed dependency install, and a run whose email cannot be sent.
 - G4. Only members of the new Authentik group `Screener users`, plus
   `authentik Admins`, reach Windmill.
 - G5. Each user's schedules and settings live in their own `u/<user>/`
@@ -103,7 +105,8 @@ run history. The owner adds one shared screening script.
   Windmill user can read that SMTP password. The owner accepts this.
 - D9. One workspace `screener`. The shared script lives at
   `f/screener/run_screen`, its source in Git under
-  `2-k3s/34.windmill/workspace/`, pushed with the `wmill` CLI.
+  `2-k3s/34.windmill/workspace/`. After each merge that changes it,
+  the owner's agent updates it through the Windmill API.
 - D10. Rules are small expressions over the Finviz columns, column names
   in brackets: `[Price] * 1.01`, `[Price] - 2 * [ATR]`, `[RSI] < 30`.
   Only numbers, column references, `+ - * /`, comparisons, `and`, `or`,
