@@ -112,7 +112,7 @@ images:
   - name: ghcr.io/fredrikburmester/streamystats-aio
     newTag: latest@sha256:9bc68f6301cc2ae749da950121d6efcbaa63335d458dad1d5967265af8e49382
   - name: ghcr.io/thephaseless/byparr
-    digest: sha256:874f719518f617d03a60e03411fc5d090647e1a877041e81f8dc965927c7deb6
+    digest: sha256:c66fa161187b8fa527bfad7eefa2647ea1c553f77df68cbffd6fe83366d1787b
   - name: ghcr.io/hotio/unpackerr
     newTag: release-0.15.2@sha256:724c702e81727e3d90c42cf2b3d900674203906a6d135ba07416c9a3f9f67fbb
   - name: ghcr.io/zelak312/bazarr_autotranslate
