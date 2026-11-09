@@ -22,7 +22,8 @@ Research and sources: `docs/research/2026-11-09-discord-agent.md`.
   an Authentik account join. Spyros owns the server.
 - G2. `#media`: members of `Servarr users` ask the agent to request, add,
   find and delete movies, TV, anime and music, through the apps' HTTP
-  APIs: Seerr, Radarr, Sonarr, Lidarr, Bazarr, Jellyfin, Navidrome.
+  APIs: Seerr, Radarr, Sonarr, Lidarr, Bazarr, Jellyfin. Lidarr covers
+  music; Navidrome is out (no admin access to create its user).
   Deletes run without asking Spyros.
 - G3. `#windmill`: members of `Screener users` ask the agent to change or
   extend the Windmill workspace. The agent opens a PR. It merges on its
@@ -41,8 +42,9 @@ Research and sources: `docs/research/2026-11-09-discord-agent.md`.
 - No infra changes from `#windmill`: no manifests, Secrets, RBAC, CI
   workflows, network policies or Argo Applications.
 - No repo or Kubernetes changes from `#media`.
-- No third-party OpenClaw skills or plugins beyond the first-party SearXNG
-  search plugin.
+- No third-party OpenClaw skills or plugins. Only the first-party Discord
+  and SearXNG plugins load (`plugins.allow`), with the skill the Discord
+  plugin ships.
 - No access to Gmail, Drive or any MCP hub path.
 - No voice channels, no Discord Activities.
 
@@ -115,12 +117,13 @@ These would make it a failure even if it works:
 | Discord channel | `#media` | `#windmill` |
 | Authentik group | `Servarr users` | `Screener users` |
 | Model via CLIProxy | Claude Haiku 5.5 | Claude Opus 5.5 |
-| Holds | Seerr, Radarr, Sonarr, Lidarr, Bazarr, Jellyfin, Navidrome API keys | GitHub App key, installed on epaflix only |
+| Holds | Seerr, Radarr, Sonarr, Lidarr, Bazarr, Jellyfin API keys | GitHub App key, installed on epaflix only |
 | Egress | DNS, Discord, CLIProxy, SearXNG, the media apps | DNS, Discord, CLIProxy, SearXNG, GitHub |
 
-Both: OpenClaw image pinned by version tag, sandbox off,
-`automountServiceAccountToken: false`, the first-party SearXNG plugin
-pointed at in-cluster SearXNG, no other plugins or skills, Discord
+Both: our image built on the official OpenClaw image, pinned by digest,
+sandbox off, `automountServiceAccountToken: false`, only the first-party
+Discord and SearXNG plugins (`plugins.allow`), SearXNG pointed at
+in-cluster SearXNG, Discord
 `groupPolicy: allowlist` with one channel entry keyed by channel ID that
 also allows only the channel's role ID, DMs off, role and moderation
 actions off, `requireMention: false` in its own channel, no exec
@@ -197,9 +200,14 @@ changes. The Control UI is not exposed outside the pod.
 
 ### Audit and logs
 
-- OpenClaw audit ledger on with `logging.audit.messages` on, so it records
-  who asked as well as what ran.
+- OpenClaw audit ledger on with `logging.audit.messages` on. It records
+  metadata (who asked, which run) in the pod's state database, read with
+  `openclaw audit`; it does not reach Loki and holds no tool arguments.
 - Logs to stdout as JSON. Alloy ships them to Loki, labelled by namespace.
+  The build confirms which log lines carry the sender and the tool calls;
+  if they do not, G5 in Loki narrows to what they carry and the README
+  says so. CLIProxy's transcript sidecar already ships the model
+  conversations, including tool calls, to Loki.
 - Loki alerts: a Windmill bot PR blocked by the path check, Gateway
   restarts, unlinked Discord members, and the CLIProxy usage threshold.
 

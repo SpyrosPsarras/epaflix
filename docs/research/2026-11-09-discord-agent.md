@@ -104,3 +104,58 @@ Maturity and advisories:
 5. Q5: Whether bubblewrap (nanobot) or any user-namespace sandbox runs in the k3s pods without extra privileges. Not tested.
 6. Q6: The VentureBeat article (2026-08-31) was not read. Rules required primary sources, and NanoClaw was assessed from its repo.
 7. Q7: SearXNG worked but was degraded: brave, duckduckgo and startpage reported rate limits or CAPTCHA, and results were noisy. Repos were located by exact name through the GitHub API.
+
+## 5. Spike results
+
+Run on 2026-11-09 with `npx -y openclaw@2026.11.2` (build `b556fdf`) in a scratch home, and one-shot pods of `ghcr.io/openclaw/openclaw:2026.11.2`. Only dummy IDs and keys were used. No Gateway was started and no Discord connection was made.
+
+### S1. Inference through the cluster model proxy
+
+Passed. `openclaw@2026.11.2 infer model run` with provider `cliproxy` (`api: "anthropic-messages"`, base URL `http://cliproxy.remote-pi.svc.cluster.local:8317` with no `/v1`) returned the expected reply for both `claude/claude-haiku-5-5` and `claude/claude-opus-5-5`, using the new media client key. The model IDs are exactly as the proxy's `/v1/models` lists them; the OpenClaw model ref is `cliproxy/<id>`, for example `cliproxy/claude/claude-haiku-5-5`.
+
+### S2. `${VAR}` substitution
+
+- Works in string values: `roles: ["${DISCORD_ROLE_ID}"]` resolved in `openclaw config get` ([environment variables](https://docs.openclaw.ai/gateway/configuration/environment-variables)). `${VAR:-default}` also works.
+- Object keys are not substituted. `guilds."${DISCORD_GUILD_ID}"` and `channels."${DISCORD_CHANNEL_ID}"` stayed literal. The loader copies keys unchanged (`resolveConfigEnvVars` in package file `dist/config-doctor/subsystem-CkEsEQPK.js`).
+- `config validate` still passes with literal `${...}` keys and with missing env vars, which only produce a warning.
+- So Tasks 3 and 4 must render the guild and channel IDs before start. Neither the OpenClaw image nor `busybox:1.38` ships `envsubst`. Use `sed` on fixed placeholders, or `node` in the OpenClaw image. Role ID, bot token and model key can stay `${VAR}`.
+
+### S3. Config keys
+
+Validated with `openclaw config validate` in the official image, with both plugins loaded:
+
+| Need | Key | Source |
+|---|---|---|
+| Model provider | `models.providers.cliproxy: { baseUrl, api: "anthropic-messages", apiKey: "${CLIPROXY_API_KEY}", models: [{ id, name, input }] }` | [custom providers](https://docs.openclaw.ai/gateway/config-tools/custom-providers) |
+| Model choice | `agents.defaults.model.primary: "cliproxy/<model id>"` | [agent models](https://docs.openclaw.ai/gateway/config-agents/models) |
+| Guild allowlist | `channels.discord.groupPolicy: "allowlist"`, `channels.discord.guilds.<guildId>` | [Discord access control](https://docs.openclaw.ai/channels/discord/access-control) |
+| Channel and role | `guilds.<guildId>.channels.<channelId>: { enabled: true, requireMention: false, roles: ["<roleId>"] }`. One channel entry makes the map an allowlist | same |
+| DMs off | `channels.discord.dmPolicy: "disabled"` | same |
+| Role, moderation, presence actions off | `channels.discord.actions: { roles: false, moderation: false, presence: false }` (all three default to off) | same |
+| Bot token | `channels.discord.token: "${DISCORD_BOT_TOKEN}"` | same |
+| Sandbox off | `agents.defaults.sandbox.mode: "off"` (default) | [agent sandboxing](https://docs.openclaw.ai/gateway/config-agents/sandbox) |
+| Web search | `tools.web.search.provider: "searxng"`, `plugins.entries.searxng.config.webSearch.baseUrl: "http://searxng.searxng.svc.cluster.local:8080"`. SearXNG needs `json` in `search.formats` | [SearXNG search](https://docs.openclaw.ai/tools/searxng-search) |
+| Audit | `logging.audit.enabled: true`, `logging.audit.messages: "all"` | [observability config](https://docs.openclaw.ai/gateway/config-observability) |
+| JSON logs | `logging.consoleStyle: "json"` (console goes to stdout and stderr) | [logging](https://docs.openclaw.ai/logging) |
+| Exec with no approvals | `tools.profile: "coding"` (includes exec and web), `tools.exec.host: "gateway"`, `tools.exec.mode: "full"`. With no host approvals record the effective policy is full, ask off | [exec approvals](https://docs.openclaw.ai/tools/exec-approvals), [tool policy](https://docs.openclaw.ai/gateway/config-tools/tool-policy) |
+| Control UI off | `gateway.controlUi.enabled: false`, `gateway.bind: "loopback"` | [gateway config](https://docs.openclaw.ai/gateway/config-gateway) |
+| Config owned by Git | Container env `OPENCLAW_CONFIG_READONLY=1` blocks config writes by Doctor, the Control UI and plugin install | [config CLI](https://docs.openclaw.ai/cli/config) |
+
+Plugins:
+
+- Discord is a plugin too. The 2026.11.2 image bundles neither `discord` nor `searxng`. They are npm packages `@openclaw/discord` and `@openclaw/searxng-plugin`, both at 2026.11.2 ([Discord plugin](https://docs.openclaw.ai/plugins/reference/discord), [SearXNG plugin](https://docs.openclaw.ai/plugins/reference/searxng)). There is no `plugins: [...]` list key. A plugin is configured under `plugins.entries.<id>`.
+- Bare package names install from ClawHub. The `npm:` prefix selects npm ([plugin install](https://docs.openclaw.ai/cli/plugins/install)).
+- Tested route without ClawHub: `npm install --ignore-scripts --legacy-peer-deps` of both packages into a fixed directory, a symlink `node_modules/openclaw -> /app`, and `plugins.load.paths` listing both package directories. It takes 69 MB and works with `OPENCLAW_CONFIG_READONLY=1`. Done in a derived image, the pod needs no registry access. Done in an init container, it needs npm registry egress.
+- `openclaw plugins install npm:...` also works, but it rewrites `openclaw.json`, so it does not fit a read-only, Git-owned config.
+- Without the discord plugin loaded, `config validate` accepts any `channels.discord` content. With it loaded, unknown keys and bad values are rejected.
+
+### S4. Image
+
+- `ghcr.io/openclaw/openclaw:2026.11.2` has `git` 2.39.5, `curl`, `node` v24.22.1, `npm` and `python3`. It has no `gh` and no `envsubst`. It runs as UID/GID 1000 on Debian 12.
+- `2026.11.2` and `2026.11.2-slim` have the same index digest, `sha256:55294524dac01370288fb4beb16714b60f75cec0e96e07e662054cf29900965a` (linux/amd64 `sha256:c764f17ed94b725599043f0548ece6297f1fe4409e6dd1133b1d2fb1f8d2b599`). Read anonymously from the ghcr.io v2 API.
+- The official manifests at tag v2026.11.2 still pin `ghcr.io/openclaw/openclaw:2026.7.1-2-slim` ([manifests](https://github.com/openclaw/openclaw/tree/v2026.11.2/scripts/k8s/manifests)).
+- Kubernetes manifests at that tag: `kustomization.yaml`, `configmap.yaml`, `deployment.yaml`, `pvc.yaml`, `service.yaml`. The busybox init container copies `openclaw.json` and `AGENTS.md` only if missing. The gateway runs `node /app/dist/index.js gateway run`, which skips the image's Doctor entrypoint. The `main` branch also prepares a sticky `gateway-tmp` dir for `/tmp`. OpenClaw refuses temp workspaces under a world-writable `/tmp` without the sticky bit, and I hit that error in this pod. Task 3 should take that change.
+
+### S5. Offline validation
+
+`openclaw config validate --json` checks the config without a Gateway ([config CLI](https://docs.openclaw.ai/cli/config)). It returns `valid`, `warnings` and `issues`. It cannot catch unrendered keys, it treats missing env vars as warnings, and it checks channel keys only when the channel plugin is loaded. Run it in the pinned image with the plugins on `plugins.load.paths`, after rendering, and separately check that no `${DISCORD_GUILD_ID}` or `${DISCORD_CHANNEL_ID}` text remains.
