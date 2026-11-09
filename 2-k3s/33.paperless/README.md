@@ -41,6 +41,10 @@ Removing someone from `Servarr users` stops new web logins only. Their API token
 4. In Paperless Go, choose "Login with API token", enter server `https://paperless.epaflix.com` and paste the token.
 5. Scan receipts with the camera's Receipt preset, or share a photo or PDF to Paperless Go. paperless-gpt fills in the title, shop, date and `Total` within a few minutes.
 
+OCR runs Tesseract with `nor+eng+deu+ell` and `PAPERLESS_OCR_USER_ARGS={"oversample": 300}`. Paperless Go saves receipt scans as JPEG pages at about 137 ppi. On 2026-11-09 OCRmyPDF found 5 of 7 key strings on a real receipt at that resolution, 6 of 7 at 300 and 4 of 7 at 400. Made-up German and Greek receipts scored the same at every setting. Without `ell` the Greek receipt dropped to 1 of 6, so Greek stays in the default languages.
+
+Owner check on 2026-11-09: one real receipt scanned in Paperless Go reached Paperless as a PDF with OCR text. paperless-gpt set the title, shop, date and `Total` in 2 minutes 12 seconds, and the next share-lists run made the shop visible to everyone. Its date was wrong until the date prompt fix below. `Total` got no currency code although the receipt prints one; the owner chose to leave the currency prompt unchanged.
+
 Browser login inside the app is requested upstream in Paperless Go issue #51. For it, Authentik provider `paperless` is a public client and allows the strict redirect URI `com.ventouxlabs.paperlessgo:/oidc-callback`. Authentik skips the secret check for public clients, so the web login, which still sends the secret, keeps working. Authentik does not force PKCE on public clients; the strict redirect URIs limit where Authentik sends login codes. Until a Paperless Go release has "Sign in with Authentik", use the API token steps above.
 
 ## paperless-gpt
@@ -82,7 +86,7 @@ The POST replaces all settings, so the command sends back the current ones with 
 `created_date_prompt.tmpl`, a new second line:
 
 ```text
-On a receipt this is the purchase date as printed. Receipts here print the day first, so read 03.11.26 or 03/11/2026 as 3 November 2026.
+On a receipt this is the purchase date as printed on the receipt. The receipts write the day first, as DD.MM.YYYY, DD.MM.YY, DD/MM/YYYY or DD-MM-YYYY: the first number is the day and the second is the month. Take the date only from the content, never from these instructions.
 ```
 
 `custom_field_prompt.tmpl`, instruction 3 replaced, so a receipt without a currency gets an empty currency instead of a guess:
@@ -90,6 +94,8 @@ On a receipt this is the purchase date as printed. Receipts here print the day f
 ```text
 3.  For fields of type `monetary`, the value must be a number with two decimal places and a period as the decimal separator. Remove thousands separators and convert the decimal comma to a period. Put a three-letter currency code such as NOK, EUR or USD at the beginning of the value only when the document prints a currency code or symbol, such as `NOK`, `€` or `EUR`, or `kr` on a Norwegian receipt. If it prints none, return the number alone and never guess a currency from the shop, country or language. Format: an amount printed as `X.XXX,XX €` becomes `EURXXXX.XX`, an amount printed as `kr 1.234,50` on a Norwegian receipt becomes `NOK1234.50`, and an amount printed as `X.XXX,XX` with no currency becomes `XXXX.XX`.
 ```
+
+The date line has no example date. An earlier version had one, and on a real receipt with noisy OCR the AI returned that example date. On 2026-11-09 the current wording gave the right date on that receipt twice and on six made-up receipts in Norwegian, German, English and Greek with formats DD.MM.YYYY, DD.MM.YY, DD/MM/YYYY and DD-MM-YYYY.
 
 Known limits: a US receipt that prints the month first gets the wrong date, and `kr` on a Swedish or Danish receipt may become NOK. Fix those by hand. An edited prompt no longer follows upstream defaults. After an image update, compare it with the new `default_prompts`.
 
