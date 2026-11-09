@@ -41,6 +41,8 @@ Removing someone from `Servarr users` stops new web logins only. Their API token
 4. In Paperless Go, choose "Login with API token", enter server `https://paperless.epaflix.com` and paste the token.
 5. Scan receipts with the camera's Receipt preset, or share a photo or PDF to Paperless Go. paperless-gpt fills in the title, shop, date and `Total` within a few minutes.
 
+OCR runs Tesseract with `nor+eng+deu+ell` and `PAPERLESS_OCR_USER_ARGS={"oversample": 300}`. Paperless Go saves receipt scans as JPEG pages at about 137 ppi. On 2026-11-09 OCRmyPDF found 5 of 7 key strings on a real receipt at that resolution, 6 of 7 at 300 and 4 of 7 at 400. Made-up German and Greek receipts scored the same at every setting. Without `ell` the Greek receipt dropped to 1 of 6, so Greek stays in the default languages.
+
 Owner check on 2026-11-09: one real receipt scanned in Paperless Go reached Paperless as a PDF with OCR text. paperless-gpt set the title, shop, date and `Total` in 2 minutes 12 seconds, and the next share-lists run made the shop visible to everyone. Its date was wrong until the date prompt fix below. `Total` got no currency code although the receipt prints one; the owner chose to leave the currency prompt unchanged.
 
 Browser login inside the app is requested upstream in Paperless Go issue #51. For it, Authentik provider `paperless` is a public client and allows the strict redirect URI `com.ventouxlabs.paperlessgo:/oidc-callback`. Authentik skips the secret check for public clients, so the web login, which still sends the secret, keeps working. Authentik does not force PKCE on public clients; the strict redirect URIs limit where Authentik sends login codes. Until a Paperless Go release has "Sign in with Authentik", use the API token steps above.
