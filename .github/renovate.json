@@ -195,6 +195,13 @@
   ],
   "customManagers": [
     {
+      "description": "Windmill script requirement headers (#pkg==version) must match workspace/requirements-test.txt (test_ci_pins_match_windmill_requirements_header). pip_requirements bumps only the txt file, which failed every rebase of renovate/wmill-1.x (#2247); this puts both bumps on the same branch.",
+      "customType": "regex",
+      "managerFilePatterns": ["/^2-k3s/34\\.windmill/workspace/f/.+\\.py$/"],
+      "matchStrings": ["\\n#(?<depName>[A-Za-z0-9_.-]+)==(?<currentValue>\\S+)"],
+      "datasourceTemplate": "pypi"
+    },
+    {
       "description": "Keep GH_VERSION in images/openclaw-discord/Dockerfile fresh. The marker sits on the line above the ARG because a Dockerfile ARG line cannot carry a trailing comment.",
       "customType": "regex",
       "managerFilePatterns": [
