@@ -75,6 +75,7 @@ jobs:
           python3 .github/hooks/test-bazarr-autotranslate.py
           python3 .github/hooks/test-gpu-apps.py
           python3 2-k3s/35.discord/role-sync/role_sync.test.py -v
+          python3 2-k3s/35.discord/tools/manifests.test.py -v
           ./.github/hooks/check-sops-encrypted.sh --full-tree
 
       - name: Install tools
