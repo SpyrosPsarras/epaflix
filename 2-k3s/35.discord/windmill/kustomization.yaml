@@ -30,6 +30,6 @@ configMapGenerator:
       - gitconfig
 
 images:
-  # Built by build-openclaw-discord.yml; set the published digest before merging.
+  # Built by build-openclaw-discord.yml from images/openclaw-discord; pin the digest it prints.
   - name: ghcr.io/spyrospsarras/openclaw-discord
-    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    digest: sha256:4358f91e35885b3ff475e900645e517a30f4cebbd1fc63643393565ef07ff38d
