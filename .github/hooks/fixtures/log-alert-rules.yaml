@@ -1,4 +1,6 @@
 # Each case gets its own stream and 20-minute slot so cases in one namespace never add up.
+# 24h-window cases take 25-hour slots, so no other case's lines fall inside their window.
+# count repeats lines in order up to that many lines.
 - name: agent-five-errors
   alert: DiscordAgentErrors
   namespace: discord-media
@@ -77,4 +79,57 @@
   lines:
     - 'Computing the files to update on the remote to match local'
     - '{"commit":"0123456789abcdef0123456789abcdef01234567","outcome":"deployed"}'
+  fires: false
+- name: usage-media-301
+  alert: DiscordModelUsageHigh
+  namespace: remote-pi
+  container: transcripts
+  slot_minutes: 1500
+  count: 301
+  entries: 301
+  lines:
+    - '2026-11-09T12:00:00Z {"kind": "transcript", "request_id": "0a1b2c3d", "model": "claude-sonnet", "client_backend": "discord-media", "stream": true, "account": "synthetic", "turn_role": "user", "turn": "add the new film to the watchlist", "reply": "Done."}'
+  fires: true
+- name: usage-media-300
+  alert: DiscordModelUsageHigh
+  namespace: remote-pi
+  container: transcripts
+  slot_minutes: 1500
+  count: 300
+  entries: 300
+  lines:
+    - '2026-11-09T12:00:00Z {"kind": "transcript", "request_id": "0a1b2c3d", "model": "claude-sonnet", "client_backend": "discord-media", "stream": true, "account": "synthetic", "turn_role": "user", "turn": "add the new film to the watchlist", "reply": "Done."}'
+  fires: false
+- name: usage-split-301
+  alert: DiscordModelUsageHigh
+  namespace: remote-pi
+  container: transcripts
+  slot_minutes: 1500
+  count: 301
+  entries: 301
+  lines:
+    - '2026-11-09T12:00:00Z {"kind": "transcript", "request_id": "0a1b2c3d", "model": "claude-sonnet", "client_backend": "discord-media", "stream": true, "account": "synthetic", "turn_role": "user", "turn": "add the new film to the watchlist", "reply": "Done."}'
+    - '2026-11-09T12:00:00Z {"kind": "transcript", "request_id": "0a1b2c3d", "model": "claude-sonnet", "client_backend": "discord-windmill", "stream": true, "account": "synthetic", "turn_role": "user", "turn": "add the new film to the watchlist", "reply": "Done."}'
+  fires: false
+- name: usage-chat-mentions-key
+  alert: DiscordModelUsageHigh
+  namespace: remote-pi
+  container: transcripts
+  slot_minutes: 1500
+  count: 301
+  entries: 301
+  lines:
+    - '2026-11-09T12:00:00Z {"kind": "transcript", "request_id": "0a1b2c3d", "model": "claude-sonnet", "client_backend": "", "stream": true, "account": "synthetic", "turn_role": "user", "turn": "why does \"client_backend\": \"discord-media\" show up? discord-media discord-windmill", "reply": "Done."}'
+  fires: false
+- name: usage-other-backends
+  alert: DiscordModelUsageHigh
+  namespace: remote-pi
+  container: transcripts
+  slot_minutes: 1500
+  count: 903
+  entries: 903
+  lines:
+    - '2026-11-09T12:00:00Z {"kind": "transcript", "request_id": "0a1b2c3d", "model": "claude-sonnet", "client_backend": "work", "stream": true, "account": "synthetic", "turn_role": "user", "turn": "add the new film to the watchlist", "reply": "Done."}'
+    - '2026-11-09T12:00:00Z {"kind": "transcript", "request_id": "0a1b2c3d", "model": "claude-sonnet", "client_backend": "homelab", "stream": true, "account": "synthetic", "turn_role": "user", "turn": "add the new film to the watchlist", "reply": "Done."}'
+    - '2026-11-09T12:00:00Z [emit-transcripts] watching /var/lib/cliproxy/logs'
   fires: false

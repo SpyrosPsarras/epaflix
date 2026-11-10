@@ -143,8 +143,8 @@ channel. CLIProxy supports several client keys through its management API
 (`2-k3s/13.t3code-work/tools/provision.py`). Model IDs come from the
 CLIProxy catalogue at build time. Provider format is Anthropic messages
 against `http://cliproxy.remote-pi.svc.cluster.local:8317`. No usage cap
-at first; a per-key daily usage alert follows once the keys have
-distinct prefixes (see Audit and logs).
+at first; `DiscordModelUsageHigh` fires when one key passes 300 requests
+in 24 hours (see Audit and logs).
 
 ### Access
 
@@ -215,11 +215,14 @@ changes. The Control UI is not exposed outside the pod.
   if they do not, G5 in Loki narrows to what they carry and the README
   says so. CLIProxy's transcript sidecar already ships the model
   conversations, including tool calls, to Loki.
-- Loki alerts: `DiscordAgentErrors` and `WindmillDeployFailed`. Crash
-  loops raise the cluster-wide `KubePodCrashLooping`. A bot PR blocked
-  by the path check shows as a failed GitHub check.
-- No per-key CLIProxy usage alert yet: it needs the two Discord keys
-  reissued with distinct key prefixes, pending the owner's decision.
+- Loki alerts: `DiscordAgentErrors`, `DiscordModelUsageHigh` and
+  `WindmillDeployFailed`. Crash loops raise the cluster-wide
+  `KubePodCrashLooping`. A bot PR blocked by the path check shows as a
+  failed GitHub check.
+- The two Discord keys have distinct prefixes listed in `CLIENT_BACKENDS`,
+  so each transcript carries `client_backend` `discord-media` or
+  `discord-windmill`. `DiscordModelUsageHigh` counts that parsed field per
+  key over 24 hours and fires above 300.
 
 ### Owner steps
 
@@ -246,7 +249,7 @@ change in C1 is a PR-free GitHub setting, done after Spyros confirms.
 
 - C1. `bots/**` excluded from `owner-only`; no bypass for the App.
 - C2. Seerr requests use Seerr's admin API key (accepted risk).
-- C3. No CLIProxy cap at first; a per-key usage alert later instead.
+- C3. No CLIProxy cap at first; the per-key usage alert `DiscordModelUsageHigh` instead.
 - C4. No sync from Authentik; Spyros assigns Discord roles by hand (see
   Approaches).
 - C5. Neither agent bot can grant roles.

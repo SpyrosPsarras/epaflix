@@ -25,10 +25,10 @@ On every start the `render-config` init container copies `openclaw.json` and `AG
 ## Logs and audit
 
 - Gateways: `{namespace="discord-media"}` and `{namespace="discord-windmill"}`. OpenClaw prints one JSON object per line; add `| json`.
-- Model conversations, including tool calls: CLIProxy transcripts, `{namespace="remote-pi", container="transcripts"}`.
+- Model conversations, including tool calls: CLIProxy transcripts. Each line is a timestamp and a JSON record, so strip the timestamp before `| json`. One agent's requests: ``{namespace="remote-pi", container="transcripts"} | pattern `<_> <record>` | line_format `{{.record}}` | json | client_backend="discord-media"``, or `discord-windmill`. The labels come from the key prefixes `dc-media-` and `dc-windmill-` (`CLIENT_BACKENDS` in `2-k3s/17.remote-pi/cliproxy/files/payload_lib.py`), so a new key must keep its prefix.
 - Audit ledger: `kubectl -n discord-media exec deploy/openclaw -c gateway -- openclaw audit`. In `discord-windmill`, use `-c openclaw`. It records who asked and which run, as metadata only, in the pod's state database. It does not reach Loki.
 
-Alerts: `DiscordAgentErrors` at 5 or more error lines in 15 minutes, and `WindmillDeployFailed` in `2-k3s/10.observability/alertmanager-config/loki-log-alerts.yaml`. Crash loops raise the cluster-wide `KubePodCrashLooping`. A bot PR blocked by the path check shows as a failed `validate` check on GitHub, which notifies the owner; it raises no Loki alert, because that CI job runs on GitHub's runners.
+Alerts: `DiscordAgentErrors` at 5 or more error lines in 15 minutes, `DiscordModelUsageHigh` when one agent's CLIProxy key makes more than 300 requests in 24 hours, and `WindmillDeployFailed` in `2-k3s/10.observability/alertmanager-config/loki-log-alerts.yaml`. Crash loops raise the cluster-wide `KubePodCrashLooping`. A bot PR blocked by the path check shows as a failed `validate` check on GitHub, which notifies the owner; it raises no Loki alert, because that CI job runs on GitHub's runners.
 
 ## Accepted risks
 
@@ -74,5 +74,4 @@ Renovate opens one PR, group `openclaw-discord image`, that moves the base image
 
 ## Follow-ups
 
-- No per-key model usage alert yet. CLIProxy's own log does not say which client key made a request, and the transcripts label only keys whose first 4 characters are listed in `CLIENT_BACKENDS` in `2-k3s/17.remote-pi/cliproxy/files/payload_lib.py`. Both Discord keys start with `disc`, so their masked headers look the same. The fix is to reissue the two keys with distinct 4-character prefixes, add both to `CLIENT_BACKENDS`, then alert at more than 300 requests per key per day.
 - After the first rollout, check which Gateway JSON lines carry the Discord sender and the tool calls, and update the Logs section.

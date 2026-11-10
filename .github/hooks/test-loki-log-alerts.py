@@ -39,9 +39,9 @@ common:
   ring:
     kvstore:
       store: inmemory
-# Rule cases sit up to 5h back; keep them in the ingester and query it there.
+# Rule cases sit up to 6 days back; keep them in the ingester and query it there.
 ingester:
-  max_chunk_age: 24h
+  max_chunk_age: 168h
   lifecycler:
     min_ready_duration: 0
 querier:
@@ -105,12 +105,15 @@ def main():
             (directory / f"{name}.log").write_text("".join(cri_lines))
             targets.append('{__path__ = "/fixtures/' + name + '.log", namespace = ' +
                            json.dumps(case.get("namespace", "servarr")) + ', container = ' + json.dumps(name) + '}')
-        slot = 20 * 60 * 1_000_000_000
-        for index, case in enumerate(rule_cases):
-            case["at"] = now - (index + 1) * slot
+        at = now
+        for case in rule_cases:
+            at -= case.get("slot_minutes", 20) * 60 * 1_000_000_000
+            case["at"] = at
+            lines = [case["lines"][i % len(case["lines"])] for i in range(case.get("count", len(case["lines"])))]
+            step = min(1_000_000_000, 600_000_000_000 // len(lines))
             cri_lines = []
-            for i, line in enumerate(case["lines"]):
-                stamp = case["at"] - 10 * 60 * 1_000_000_000 + i * 1_000_000_000
+            for i, line in enumerate(lines):
+                stamp = case["at"] - 10 * 60 * 1_000_000_000 + i * step
                 date = datetime.fromtimestamp(stamp // 1_000_000_000, timezone.utc)
                 cri_lines.append(date.strftime("%Y-%m-%dT%H:%M:%S") + f".{stamp % 1_000_000_000:09d}Z stdout F {line}\n")
             (directory / f"rule-{case['name']}.log").write_text("".join(cri_lines))

@@ -215,7 +215,8 @@ data:
                 {namespace="renovate"} |= "Could not ensure issue"
 
       # Discord agents and the Windmill deploy (2-k3s/35.discord, 34.windmill).
-      # Namespace-scoped selectors, so the ruler echo and transcripts cannot match.
+      # Namespace-scoped selectors, so the ruler echo cannot match. DiscordModelUsageHigh
+      # reads the transcripts but counts the parsed client_backend field, never chat text.
       - name: discord
         rules:
           - alert: DiscordAgentErrors
@@ -259,3 +260,32 @@ data:
                 main to Windmill, so merged changes are not live. The failed
                 line carries the commit and error:
                 {namespace="windmill", container="windmill-deploy"} |= "outcome"
+          - alert: DiscordModelUsageHigh
+            # Each transcript line is "<timestamp> <JSON record>"; strip the timestamp so json can parse it.
+            expr: |
+              sum by (client_backend) (
+                count_over_time(
+                  {namespace="remote-pi", container="transcripts"}
+                  | pattern `<_> <record>`
+                  | line_format `{{.record}}`
+                  | json client_backend="client_backend"
+                  | client_backend=~"discord-media|discord-windmill"
+                  | drop __error__, __error_details__
+                  [24h]
+                )
+              ) > 300
+            for: 0m
+            labels:
+              severity: warning
+              component: discord
+            annotations:
+              summary: "Discord agent {{ $labels.client_backend }} made over 300 CLIProxy requests in 24h"
+              description: >-
+                The {{ $labels.client_backend }} CLIProxy key made {{ $value }}
+                requests through CLIProxy in the last 24h (threshold 300). There is no
+                usage cap; the fix is to look at what the agent is doing in
+                its Discord channel.
+                Inspect its requests in Grafana → Explore → Loki:
+                {namespace="remote-pi", container="transcripts"}
+                | pattern `<_> <record>` | line_format `{{ "{{.record}}" }}`
+                | json | client_backend="{{ $labels.client_backend }}"
