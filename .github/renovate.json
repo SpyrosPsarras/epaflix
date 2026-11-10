@@ -134,14 +134,14 @@
       "enabled": false
     },
     {
-      "description": "Jellysweep upstream base and UPSTREAM_COMMIT move together through upstream-release-watch issue #2060. The initial base is v0.16.1 and the source is its next query-and-test commit da58d64 for #440. Later moves select the release commit and matching image digest, retaining the patch until both fixes ship. UPSTREAM_COMMIT has no Renovate marker. The Go builder follows upstream go.mod; remove this rule with images/jellysweep/.",
+      "description": "Jellysweep upstream base and UPSTREAM_COMMIT move together through upstream-release-watch issue #2060. The base is v0.16.2 and the source is its release commit 0dc52d3, which includes #440. Each move selects the release commit and matching image digest, retaining the patch until both fixes ship. UPSTREAM_COMMIT has no Renovate marker. The Go builder follows upstream go.mod; remove this rule with images/jellysweep/.",
       "matchDatasources": ["docker"],
       "matchPackageNames": ["ghcr.io/jon4hz/jellysweep"],
       "matchFileNames": ["images/jellysweep/Dockerfile"],
       "enabled": false
     },
     {
-      "description": "Jellysweep build SDK follows upstream go.mod and moves by hand with UPSTREAM_COMMIT. Remove this rule with images/jellysweep/. Minor and major updates are disabled; the two-part tag receives no patch updates, Go patches arrive through the moving tag at build time.",
+      "description": "Jellysweep build SDK follows upstream go.mod (go 1.26.10 at v0.16.2) and moves by hand with UPSTREAM_COMMIT. Remove this rule with images/jellysweep/. Minor and major updates are disabled; the two-part tag receives no patch updates, Go patches arrive through the moving tag at build time.",
       "matchDatasources": ["docker"],
       "matchPackageNames": ["golang"],
       "matchFileNames": ["images/jellysweep/Dockerfile"],

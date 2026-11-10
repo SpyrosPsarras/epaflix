@@ -236,6 +236,27 @@
 - name: jellysweep-info-error-field
   matches: false
   line: '2026/10/11 12:00:00 INFO Retrying lookup err="fatal error"'
+# Jellysweep v0.16.2 uses charm.land/log/v2, which pads full level names to five characters.
+- name: jellysweep-v2-error-multiline
+  matches: true
+  before: '2026/10/11 12:00:00 INFO  Starting lookup'
+  line: |
+    2026/10/11 12:00:00 ERROR failed to query sonarr err="connection refused"
+      connection closed
+      ERROR quoted diagnostic, not another record
+- name: jellysweep-v2-fatal
+  matches: true
+  before: '2026/10/11 12:00:00 DEBUG Starting lookup err="previous failure"'
+  line: '2026/10/11 12:00:00 FATAL worker stopped err="connection refused"'
+- name: jellysweep-v2-debug-multiline
+  matches: false
+  line: |
+    2026/10/11 12:00:00 DEBUG Retrying lookup err="connection refused"
+      ERROR quoted diagnostic, not the entry's severity
+      panic: quoted diagnostic
+- name: jellysweep-v2-info-error-field
+  matches: false
+  line: '2026/10/11 12:00:00 INFO  Retrying lookup err="fatal error"'
 - name: unpackerr-prefix-error
   matches: true
   before: '[Info] 2026/10/11 12:00:00 Starting lookup'

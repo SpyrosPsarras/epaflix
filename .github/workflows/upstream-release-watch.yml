@@ -23,7 +23,7 @@ jobs:
             whatToDoWhenItMoves: "The cluster runs the temporary batch-contract overlay build (TEMP OVERRIDE comment in 2-k3s/08.servarr/kustomization.yaml; patch and README in images/lingarr/, which lists the seven replaced behaviours: no schema-less fallback in LocalAiService batch translation, returned positions validated against the batch, RunBatch throwing instead of filling original lines, the content API waiting for an active duplicate request instead of returning 409 and reaping a request with no line activity for 60 minutes (the disconnect-retry convergence endorsed in lingarr-translate/lingarr#542), provider 429/503 on the structured batch request retried instead of file-fatal, matching translated lines carried over from a failed/interrupted/cancelled attempt, and batch translation sending each repeated source text once per request). Check the release notes (or its git log) for all seven equivalents. If ALL are in: execute the revert checklist - drop the newName/digest pin in 2-k3s/08.servarr/kustomization.yaml and pin ghcr.io/lingarr-translate/lingarr at the new release tag with its GHCR digest, drop the TEMP OVERRIDE comment, drop the ghcr.io/spyrospsarras/lingarr disable rule from .github/renovate.json together with the upstream base-digest disable rule (matchPackageNames ghcr.io/lingarr-translate/lingarr) and the Lingarr build SDK rule (#1372, matchFileNames images/lingarr/Dockerfile - both die with the directory), update the Lingarr row in docs/servarr-image-pins.md, drop the images/lingarr overlay and the build-lingarr workflow, delete this watch row - all in one PR, then reopen/close #270 accordingly. If only SOME are in: move UPSTREAM_COMMIT in images/lingarr/Dockerfile to the new commit, pick the base digest whose org.opencontainers.image.revision label equals the commit (build-lingarr.yml's guard enforces it), re-check git apply --check, and let the workflow republish - the digest pin then gets updated in the same PR. Baseline re-based 1.4.0 -> 1.4.1 on 2026-10-27: 1.4.1 was assessed; behaviours 1, 2, 3, 5 and 6 are absent, and behaviour 4 ships partly via lingarr-translate/lingarr#556 with detached translation tokens and completed-request reuse; the overlay moved onto f31ddbb and still adds active-duplicate waiting and 60-minute stale-request cleanup. The original #270 blocker (upstream #432 `6f9d879d` Npgsql UTC fix) is an ancestor of 9fba9f7, so it is inside every overlay build and no longer gates anything. Restarting lingarr rolls the pod - check the open soak/timeout issues first."
           - issue: "2060"
             upstreamRepo: "jon4hz/jellysweep"
-            pinnedVersion: "v0.16.1"
+            pinnedVersion: "v0.16.2"
             whatToDoWhenItMoves: >-
               Temporary Jellysweep overlay in images/jellysweep/, tracked in #2060.
               The deployment pins the published overlay by digest with replicas 1 and JELLYSWEEP_DRY_RUN=true.
@@ -42,15 +42,14 @@ jobs:
               If ONLY #440 is in, move UPSTREAM_COMMIT and BASE_IMAGE together to the release commit
               and its matching digest. Confirm the new base digest's org.opencontainers.image.revision label
               equals the release commit. Move the golang builder to the new release's go.mod version.
-              In the same change, update the hardcoded 0.16.1 in the Dockerfile's ldflags and OCI version label,
+              In the same change, update the hardcoded release version (0.16.2) in the Dockerfile's ldflags and OCI version label,
               the matching binary-marker grep in build-jellysweep.yml, the Dockerfile header comment,
               the Jellysweep base and Go-builder rule descriptions in .github/renovate.json, and the
               Jellysweep row in docs/servarr-image-pins.md. Also update images/jellysweep/README.md:
-              the introduction's deployed-image description, the Go-builder tag explanation, the Build section's
-              source-commit literal and base-image digest, its
-              "exactly one query-and-test commit after v0.16.1" statement and
-              "This intentional source/base difference is not Lingarr's same-revision pairing" sentence.
-              Update the #2060 body's source commit and "over the pinned upstream v0.16.1 image" line.
+              the introduction's built and deployed image description, F1's release, the Go-builder go.mod
+              version, the Build section's source-commit literal, base-image digest and
+              "source pin is the v0.16.2 release commit" statement.
+              Update the #2060 body's source commit and "over the pinned upstream v0.16.2 image" line.
               Keep the collection-members patch, check git apply --check, rebuild, then pin the published
               overlay digest in a follow-up PR. Move pinnedVersion in this row to the assessed release and
               close the signal until another release appears. Otherwise (neither fix, or only the
@@ -58,6 +57,9 @@ jobs:
               assessed release, and close the signal.
               Leave replicas and dry-run unchanged. Remove dry-run in a separate PR only after the owner
               compares the first runs against the pre-upgrade baseline.
+              Assessed v0.16.2 on 2026-11-10: #440 shipped (compare status ahead); GetCollectionItems still
+              reads recursively with no type filter, so the collection-members patch stays, refreshed for
+              upstream's ItemsAPI to LibraryAPI rename. Source and base moved to release commit 0dc52d3.
           - issue: "1114"
             upstreamRepo: "utkuozdemir/nvidia_gpu_exporter"
             probe: "nvidia-gpu-alert-rules"

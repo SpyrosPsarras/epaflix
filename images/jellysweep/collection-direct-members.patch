@@ -1,4 +1,4 @@
-From 924bcfc1e429b67f3bb8c78e6146bdd82028d4a8 Mon Sep 17 00:00:00 2001
+From cbfcbe57fab0f32b32a0172c121e8e63f49f87d3 Mon Sep 17 00:00:00 2001
 From: Homelab agent <homelab-agent@users.noreply.github.com>
 Date: Sun, 25 Oct 2026 10:19:43 +0000
 Subject: [PATCH] fix(jellyfin): exclude series descendants from collection
@@ -15,7 +15,7 @@ Assert the parent, recursion and type filter on the outgoing request.
  2 files changed, 23 insertions(+), 1 deletion(-)
 
 diff --git a/internal/engine/jellyfin/jellyfin.go b/internal/engine/jellyfin/jellyfin.go
-index 86156d3..46970b3 100644
+index 86b4469..a587bbc 100644
 --- a/internal/engine/jellyfin/jellyfin.go
 +++ b/internal/engine/jellyfin/jellyfin.go
 @@ -323,12 +323,16 @@ func (c *Client) FindCollectionByName(ctx context.Context, name string) (string,
@@ -26,7 +26,7 @@ index 86156d3..46970b3 100644
 +// GetCollectionItems returns the IDs of the Movie and Series members of the collection.
  func (c *Client) GetCollectionItems(ctx context.Context, collectionID string) (map[string]bool, error) {
  	// Get items in the collection
- 	result, resp, err := c.jellyfin.ItemsAPI.GetItems(ctx).
+ 	result, resp, err := c.jellyfin.LibraryAPI.GetItems(ctx).
  		ParentId(collectionID).
  		Recursive(true).
 +		IncludeItemTypes([]jellyfin.BaseItemKind{
@@ -37,7 +37,7 @@ index 86156d3..46970b3 100644
  	if err != nil {
  		return nil, fmt.Errorf("failed to get collection items: %w", err)
 diff --git a/internal/engine/jellyfin/jellyfin_test.go b/internal/engine/jellyfin/jellyfin_test.go
-index b936743..19cced9 100644
+index ac9fb87..9a2a5c6 100644
 --- a/internal/engine/jellyfin/jellyfin_test.go
 +++ b/internal/engine/jellyfin/jellyfin_test.go
 @@ -298,6 +298,24 @@ func TestCollections(t *testing.T) {
