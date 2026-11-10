@@ -54,7 +54,7 @@ jobs:
           grep -q -- '--url' "$smoke/healthcheck-help"
           docker create --name jellysweep-smoke jellysweep:dev >/dev/null
           docker cp jellysweep-smoke:/usr/local/bin/jellysweep "$smoke/jellysweep"
-          grep -aFq "0.16.1+${UPSTREAM_COMMIT}.collection-direct-members" "$smoke/jellysweep"
+          grep -aFq "0.16.2+${UPSTREAM_COMMIT}.collection-direct-members" "$smoke/jellysweep"
           docker image inspect jellysweep:dev | jq -e --arg revision "$UPSTREAM_COMMIT" '
             .[0].Config |
             .Labels["org.opencontainers.image.revision"] == $revision and
