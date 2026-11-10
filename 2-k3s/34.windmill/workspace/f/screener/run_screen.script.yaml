@@ -17,22 +17,32 @@ schema:
       type: string
       description: Optional filter, e.g. [RSI] < 30
       default: ''
+      originalType: string
     email:
       type: string
       description: Where the results go
+      default: null
+      originalType: string
     entry:
       type: string
       description: Entry rule, e.g. [Price] * 1.01
+      default: null
+      originalType: string
     finviz_url:
       type: string
       description: Finviz screener address, https://finviz.com/screener.ashx?...
+      default: null
+      originalType: string
     stop:
       type: string
       description: Stop loss rule, e.g. [Price] - 2 * [ATR]
+      default: null
+      originalType: string
     target:
       type: string
       description: Optional take profit rule
       default: ''
+      originalType: string
   required:
     - finviz_url
     - email
