@@ -98,7 +98,7 @@ images:
   - name: ghcr.io/onedr0p/exportarr
     newTag: v2.3.0@sha256:af535d94061cf97a52e1661945ffba78c03f9443eae7c0da1a80a5a4be56b520
   - name: ghcr.io/linuxserver/radarr
-    newTag: 6.4.4@sha256:084b3b2ab1d0ef930660727259546a241f2bdf67c9ed085d54bf1486a6887c9b
+    newTag: 6.4.4@sha256:51a9ac2a9eb47afc833541e5fd6c11b86eb9f810694c22fa2429e3078e9194b2
   - name: ghcr.io/linuxserver/prowlarr
     newTag: 2.6.5@sha256:b3b00047ed20f6ce2b16780145cb6a0acb51c9e28ea6aa6f5dcd33c7034f1797
   - name: ghcr.io/cleanuparr/cleanuparr
