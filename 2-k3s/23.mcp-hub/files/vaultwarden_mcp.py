@@ -28,7 +28,7 @@ import uuid
 
 BW = os.environ.get("BW_SERVE_URL", "http://127.0.0.1:8087").rstrip("/")
 SYNC_EVERY = 60  # seconds; reads pull edits made in Bitwarden Desktop at most this often
-_last_sync = 0.0
+_last_sync = float("-inf")
 
 
 def _bw(method, path, body=None, file=None, raw=False):
@@ -357,7 +357,7 @@ def _selftest():
         fake.item("rootitem", None, "r")
 
         # test_sync_rate_limited
-        _last_sync = 0.0
+        _last_sync = float("-inf")
         _list_tool()
         _list_tool()
         assert fake.syncs == 1, fake.syncs
@@ -454,7 +454,7 @@ def _selftest():
         # test_bw_unreachable_error
         srv.shutdown()
         srv.server_close()
-        _last_sync = 0.0
+        _last_sync = float("-inf")
         _raises(RuntimeError, _list_tool, contains="bw serve")
 
         _http_selftest()
