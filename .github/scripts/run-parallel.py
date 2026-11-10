@@ -28,6 +28,8 @@ def run(cmd):
 
 
 cmds = [line.strip() for line in sys.stdin if line.strip() and not line.lstrip().startswith("#")]
+if not cmds:
+    sys.exit("::error::no commands to run")
 failed = []
 with ThreadPoolExecutor(os.cpu_count()) as pool:
     for future in as_completed([pool.submit(run, cmd) for cmd in cmds]):
