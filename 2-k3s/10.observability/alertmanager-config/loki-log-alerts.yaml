@@ -218,40 +218,6 @@ data:
       # Namespace-scoped selectors, so the ruler echo and transcripts cannot match.
       - name: discord
         rules:
-          - alert: DiscordUnlinkedMember
-            expr: |
-              sum (
-                count_over_time({namespace="discord-sync"} |~ `"event": ?"unlinked_member"` [15m])
-              ) > 0
-            for: 0m
-            labels:
-              severity: warning
-              component: discord
-            annotations:
-              summary: "Discord member without a linked Authentik account"
-              description: >-
-                The role sync found a Discord server member who has not linked
-                Discord in Authentik. It kicks nobody and gives them no role.
-                Ask them to link their account, or remove them from the server.
-                The log line names the Discord user ID:
-                {namespace="discord-sync"} |= "unlinked_member"
-          - alert: DiscordRoleSyncAborted
-            expr: |
-              sum (
-                count_over_time({namespace="discord-sync"} |~ `"event": ?"(aborted|group_not_found)"` [15m])
-              ) > 0
-            for: 0m
-            labels:
-              severity: warning
-              component: discord
-            annotations:
-              summary: "Discord role sync stopped without changing roles"
-              description: >-
-                The role sync found no Discord links in Authentik, or could not
-                find a mapped Authentik group, and changed nothing. Roles stay
-                as they were until it succeeds. Check the Authentik Discord
-                source and the group names in ROLE_MAP:
-                {namespace="discord-sync"} |~ `aborted|group_not_found`
           - alert: DiscordAgentErrors
             # Counts OpenClaw's JSON level, plus the GitHub token sidecar's failure lines.
             expr: |

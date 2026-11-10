@@ -2,34 +2,34 @@
 
 ## Intent
 
-Family members who have an Authentik account want to ask for things in
+Family members want to ask for things in
 plain language instead of opening several apps or waiting for Spyros. A
 private Discord server holds one channel per job. In each channel an AI
 agent acts with only the rights that channel needs: media requests and
 deletes in `#media`, changes to the Windmill workspace in `#windmill`.
 
-We reuse OpenClaw for the Discord side, CLIProxy for the models, Authentik
-for who may do what, GitHub CI and Argo CD for what reaches the cluster,
-and Alloy and Loki for logs. The new code is the job that copies
-Authentik groups to Discord roles, the CI path check and the post-merge
-Windmill push.
+We reuse OpenClaw for the Discord side, CLIProxy for the models, Discord
+roles that Spyros assigns for who may do what, GitHub CI and Argo CD for
+what reaches the cluster, and Alloy and Loki for logs. The new code is
+the CI path check and the post-merge Windmill push.
 
 Research and sources: `docs/research/2026-11-09-discord-agent.md`.
 
 ## Goals
 
-- G1. A private Discord server with two locked channels. Only people with
-  an Authentik account join. Spyros owns the server.
-- G2. `#media`: members of `Servarr users` ask the agent to request, add,
+- G1. A private Discord server with two locked channels. Only people
+  Spyros invites join. Spyros owns the server.
+- G2. `#media`: people with the `media` role ask the agent to request, add,
   find and delete movies, TV, anime and music, through the apps' HTTP
   APIs: Seerr, Radarr, Sonarr, Lidarr, Bazarr, Jellyfin. Lidarr covers
   music; Navidrome is out (no admin access to create its user).
   Deletes run without asking Spyros.
-- G3. `#windmill`: members of `Screener users` ask the agent to change or
+- G3. `#windmill`: people with the `windmill` role ask the agent to change or
   extend the Windmill workspace. The agent opens a PR. It merges on its
   own when CI passes and reaches Windmill without Spyros.
-- G4. Authentik decides access. Removing someone from a group removes
-  their Discord channel within one sync run.
+- G4. Spyros assigns the `media` and `windmill` roles in Discord.
+  Removing a role removes access at once, because each Gateway checks the
+  role ID on every message.
 - G5. Every request is traceable in Grafana through Loki: who asked, in
   which channel, which model, which commands and API calls ran, and the
   result.
@@ -59,7 +59,8 @@ These would make it a failure even if it works:
 - A3. A `#windmill` change that edits files outside its allowlist and
   still merges.
 - A4. Secrets in the public repo, in Discord messages or in logs.
-- A5. Discord roles that grant access Authentik does not.
+- A5. Anyone but Spyros assigning a channel role. A Discord role is the
+  only gate, so only Spyros assigns them.
 
 ## Constraints
 
@@ -81,8 +82,8 @@ These would make it a failure even if it works:
 - In-cluster *arr APIs use plain HTTP. OpenClaw's secret proxy fills in
   secrets on HTTPS calls only, so the media agent can read its API keys.
 - Radarr, Sonarr and Lidarr web pages allow only `authentik Admins` today.
-  The media agent deliberately gives `Servarr users` request and delete
-  rights there through Discord.
+  The media agent deliberately gives holders of the `media` role request
+  and delete rights there through Discord.
 - Lidarr's NetworkPolicy admits only Traefik and named servarr pods. Each
   media app's ingress policy must admit the media agent's pod.
 - GitHub ruleset `owner-only` blocks creating any branch except `main` for
@@ -106,6 +107,9 @@ These would make it a failure even if it works:
 - Rejected: one shared OpenClaw for both channels, by A1.
 - Rejected: Hermes Agent (no Kubernetes guide), NanoClaw (Docker only),
   Botkube (not an AI agent, last release 2024-11).
+- Dropped: role sync from Authentik groups to Discord roles was built,
+  then removed by Spyros's choice. It was simpler for him to assign the
+  roles himself.
 
 ## Design
 
@@ -115,7 +119,7 @@ These would make it a failure even if it works:
 | --- | --- | --- |
 | Namespace | `discord-media` | `discord-windmill` |
 | Discord channel | `#media` | `#windmill` |
-| Authentik group | `Servarr users` | `Screener users` |
+| Discord role | `media` | `windmill` |
 | Model via CLIProxy | Claude Haiku 5.5 | Claude Opus 5.5 |
 | Holds | Seerr, Radarr, Sonarr, Lidarr, Bazarr, Jellyfin API keys | GitHub App key, installed on epaflix only |
 | Egress | DNS, CLIProxy, SearXNG, the media apps, public 443 | DNS, CLIProxy, SearXNG, public 443 |
@@ -142,21 +146,12 @@ against `http://cliproxy.remote-pi.svc.cluster.local:8317`. No usage cap
 at first; a per-key daily usage alert follows once the keys have
 distinct prefixes (see Audit and logs).
 
-### Access from Authentik
+### Access
 
-- Each person links Discord to Authentik through an Authentik Discord
-  social login source, which gives Authentik their Discord user ID.
-- A CronJob in its own namespace `discord-sync`, every 10 minutes, reads
-  members of `Servarr users` and `Screener users` and their linked Discord
-  IDs, then adds and removes the `media` and `windmill` Discord roles. It
-  removes a mapped role from anyone not in the group and leaves unmapped
-  roles alone.
-- The CronJob uses a third Discord application with Manage Roles and,
-  only for the one-time setup, Manage Channels (removed afterwards), and
-  no gateway connection, so neither agent pod holds a token that can grant
-  roles.
-- It logs Discord members with no linked Authentik account and Loki
-  alerts on them. It does not kick anyone.
+Spyros gives the `media` or `windmill` role by hand in Discord and
+removes it to revoke access. Each Gateway allows only its channel's role
+ID. Authentik does not control the bots: removing someone from Authentik
+does not remove their Discord access.
 
 ### Media
 
@@ -220,11 +215,9 @@ changes. The Control UI is not exposed outside the pod.
   if they do not, G5 in Loki narrows to what they carry and the README
   says so. CLIProxy's transcript sidecar already ships the model
   conversations, including tool calls, to Loki.
-- Loki alerts: `DiscordUnlinkedMember`, `DiscordRoleSyncAborted`,
-  `DiscordAgentErrors` and `WindmillDeployFailed`. Crash loops and failed
-  role-sync Jobs raise the cluster-wide `KubePodCrashLooping` and
-  `KubeJobFailedLastRun`. A bot PR blocked by the path check shows as a
-  failed GitHub check.
+- Loki alerts: `DiscordAgentErrors` and `WindmillDeployFailed`. Crash
+  loops raise the cluster-wide `KubePodCrashLooping`. A bot PR blocked
+  by the path check shows as a failed GitHub check.
 - No per-key CLIProxy usage alert yet: it needs the two Discord keys
   reissued with distinct key prefixes, pending the owner's decision.
 
@@ -232,22 +225,20 @@ changes. The Control UI is not exposed outside the pod.
 
 Spyros does these himself, from a list in the plan, no script:
 
-1. Create the Discord server.
-2. Create three Discord applications: `media` and `windmill` bots with
-   Message Content Intent, and `role-sync` with Server Members Intent,
-   Manage Roles and, for the one-time setup only, Manage Channels. Invite each
-   to the server and store each token in the vault.
+1. Create the Discord server, the roles `media` and `windmill`, and the
+   channels `#media` and `#windmill`, each visible only to its role, with
+   View Channel denied for @everyone.
+2. Create two Discord applications, the `media` and `windmill` bots, with
+   Message Content Intent. Invite each to the server and store each token
+   in the vault. Send the controller the two channel IDs and two role IDs.
 3. Create the GitHub App `homelab-windmill-bot`, install it on epaflix and
    store its private key in the vault.
-4. Add the Discord social login source in Authentik and link his own
-   account.
+4. Give himself both roles.
 5. Create a Windmill token for the post-merge job and store it in the
    vault. The agent encrypts it into `2-k3s/34.windmill/windmill-secrets.enc.yaml`.
-6. Invite family members and send them the link.
+6. Invite family members and give each the roles they need.
 
-The controller creates the two roles and two channels with the
-role-sync token, then Spyros removes Manage Channels from the role-sync
-bot's role. The agent then encrypts the tokens
+The agent then encrypts the tokens
 into SOPS files and opens the PRs. The ruleset
 change in C1 is a PR-free GitHub setting, done after Spyros confirms.
 
@@ -256,17 +247,15 @@ change in C1 is a PR-free GitHub setting, done after Spyros confirms.
 - C1. `bots/**` excluded from `owner-only`; no bypass for the App.
 - C2. Seerr requests use Seerr's admin API key (accepted risk).
 - C3. No CLIProxy cap at first; a per-key usage alert later instead.
-- C4. Unlinked Discord members are logged and alerted, not kicked.
-- C5. A third Discord application for role sync, so agent pods hold no
-  role-granting token.
-- C6. `#media` maps to `Servarr users` with deletes (Q8, assumed O12).
+- C4. No sync from Authentik; Spyros assigns Discord roles by hand (see
+  Approaches).
+- C5. Neither agent bot can grant roles.
+- C6. `#media` role holders get deletes (Q8, assumed O12).
 
 ## Left to the builder
 
 - Exact OpenClaw config keys, version and resource limits.
 - The `AGENTS.md` text per channel, including the allowed API calls.
-- The role sync code, its language and its test, following the repo's
-  Python tooling pattern.
 - How the post-merge Windmill job reaches Windmill past forward auth and
   the NetworkPolicy, for example from the in-cluster `gh-runner`.
 - Alert thresholds.

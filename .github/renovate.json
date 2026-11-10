@@ -6,7 +6,7 @@
     ":semanticCommits"
   ],
   "kubernetes": {
-    "managerFilePatterns": ["/^2-k3s/29\\.t3-build/base/files/kaniko-job\\.yaml$/", "/^2-k3s/34\\.windmill/deploy-cronjob\\.yaml$/", "/^2-k3s/35\\.discord/role-sync/cronjob\\.yaml$/"]
+    "managerFilePatterns": ["/^2-k3s/29\\.t3-build/base/files/kaniko-job\\.yaml$/", "/^2-k3s/34\\.windmill/deploy-cronjob\\.yaml$/"]
   },
   "timezone": "Europe/Athens",
   "schedule": ["after 2am and before 6am"],
