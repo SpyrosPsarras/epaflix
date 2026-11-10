@@ -3,9 +3,8 @@
 Temporary `ghcr.io/spyrospsarras/jellysweep` overlay, tracked in
 [epaflix#2060](https://github.com/SpyrosPsarras/epaflix/issues/2060).
 This directory builds upstream release v0.16.2 plus the collection-members patch.
-The deployment pins a published overlay by digest in
-`2-k3s/08.servarr/kustomization.yaml`. Until the v0.16.2 build's digest is
-pinned in a follow-up PR, that pin is the earlier `da58d64` build.
+The deployment pins the published overlay by digest in
+`2-k3s/08.servarr/kustomization.yaml`.
 The deployment requests `replicas: 1` with `JELLYSWEEP_DRY_RUN=true`. Keep dry-run until the owner compares first runs
 with the pre-upgrade baseline; remove it in a separate PR.
 
