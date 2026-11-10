@@ -7,22 +7,12 @@ on:
       - '2-k3s/13.t3code-homelab/**'
       - '2-k3s/13.t3code-work/**'
       - '.github/workflows/build-t3-runtime.yml'
-  pull_request:
-    paths:
-      - '2-k3s/13.t3code/**'
-      - '2-k3s/13.t3code-homelab/**'
-      - '2-k3s/13.t3code-work/**'
-      - '.github/workflows/build-t3-runtime.yml'
   workflow_dispatch:
 permissions:
   contents: read
   packages: write
 jobs:
   build:
-    if: >-
-      github.event_name != 'pull_request' ||
-      (github.event.pull_request.user.login != 'homelab-windmill-bot[bot]' &&
-       !startsWith(github.head_ref, 'bots/'))
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -38,14 +28,12 @@ jobs:
           bash 2-k3s/13.t3code/one/tools/sync-shared.sh --check
           bash 2-k3s/13.t3code/env/tools/smoke.sh
       - name: Log in to GHCR
-        if: github.event_name != 'pull_request'
         uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Publish the tested image
-        if: github.event_name != 'pull_request'
         run: |
           image=ghcr.io/spyrospsarras/t3-runtime
           variant=${{ matrix.variant }}

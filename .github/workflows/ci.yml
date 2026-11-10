@@ -56,7 +56,12 @@ jobs:
           set -euo pipefail
           python3 -m pip install --disable-pip-version-check \
             -r .github/hooks/requirements.txt
+          python3 .github/scripts/run-parallel.py <<'EOF'
+          python3 .github/hooks/test-loki-log-alerts.py
+          ./.github/hooks/check-sops-encrypted.sh --full-tree
           ./.github/hooks/test-check-sops-encrypted.sh
+          ./.github/hooks/test-log-pipeline-regexes.sh  # go: runner image default
+          python3 .github/hooks/test-sonarr-rotation-sources.py
           ./.github/hooks/test-check-authentik-blueprint.sh
           ./.github/hooks/test-install-kubeconfig-epaflix.sh
           ./.github/hooks/test-kubectl-guard.sh
@@ -69,34 +74,17 @@ jobs:
           ./.github/hooks/test-temp-redundant-name-unlink.sh
           ./.github/hooks/test-print-age-key-backup.sh
           ./.github/hooks/test-render-tier.sh
-          ./.github/hooks/test-log-pipeline-regexes.sh  # go: runner image default
           python3 .github/hooks/test-sonarr-passfile.py
-          python3 .github/hooks/test-sonarr-rotation-sources.py
           python3 .github/hooks/test-bazarr-autotranslate.py
           python3 .github/hooks/test-gpu-apps.py
           python3 2-k3s/35.discord/tools/manifests.test.py -v
           node --test 2-k3s/35.discord/windmill/gh-token.test.mjs
-          ./.github/hooks/check-sops-encrypted.sh --full-tree
+          ./.github/hooks/test-run-parallel.sh
+          ./.github/hooks/test-unittest-shard.sh
+          EOF
 
       - name: Install tools
-        run: bash .github/scripts/install-ci-tools.sh helm kustomize promtool
-
-      - name: Alert rule tests (promtool)
-        run: |
-          set -euo pipefail
-          tmp=$(mktemp -d)
-          cd 2-k3s/10.observability/alertmanager-config
-          # promtool cannot read the PrometheusRule CR; test its bare spec.
-          for name in custom-alerts tls-alerts; do
-            python3 -c "import sys,yaml;yaml.safe_dump(yaml.safe_load(open(sys.argv[1]))['spec'],open(sys.argv[2],'w'))" \
-              "$name.yaml" "$tmp/$name-rules.yaml"
-            cp "$name-tests.yaml" "$tmp/"
-            promtool check rules "$tmp/$name-rules.yaml"
-            ( cd "$tmp" && promtool test rules "$name-tests.yaml" )
-          done
-
-      - name: Alloy pipeline and Loki LogQL regression tests (isolated fixtures)
-        run: python3 .github/hooks/test-loki-log-alerts.py
+        run: bash .github/scripts/install-ci-tools.sh helm kustomize
 
       - name: YAML parse check (syntax only, no style)
         run: |
@@ -282,35 +270,48 @@ jobs:
           done
           echo "All sops-free overlays build."
 
-      - name: MCP hub selftest
+  alerts:
+    if: >-
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1]
+    env:
+      SHARD: ${{ matrix.shard }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install tools
         run: |
           set -euo pipefail
-          # Same pin as 2-k3s/23.mcp-hub/deployment.yaml and vaultwarden-mcp.yaml.
-          python3 -m venv /tmp/mcp-hub && /tmp/mcp-hub/bin/pip install -q --disable-pip-version-check mcp==2.2.0 -r .github/hooks/requirements.txt
-          /tmp/mcp-hub/bin/python 2-k3s/23.mcp-hub/files/mcp_hub.py --selftest
-          /tmp/mcp-hub/bin/python 2-k3s/23.mcp-hub/files/vaultwarden_mcp.py --selftest
-          python3 2-k3s/23.mcp-hub/tools/hub_clients.py --selftest
-          /tmp/mcp-hub/bin/python -m unittest discover -s 2-k3s/23.mcp-hub/tests -v
-          # The t3code pod's copy of hub_clients.py (and the other shared inputs) must not drift.
-          bash 2-k3s/13.t3code/one/tools/sync-shared.sh --check
+          python3 -m pip install --disable-pip-version-check \
+            -r .github/hooks/requirements.txt
+          bash .github/scripts/install-ci-tools.sh promtool
 
-      - name: Windmill screener tests
+      - name: Alert rule tests (promtool)
         run: |
           set -euo pipefail
-          python3 -m venv /tmp/screener
-          /tmp/screener/bin/pip install -q --disable-pip-version-check -r 2-k3s/34.windmill/workspace/requirements-test.txt
-          /tmp/screener/bin/python -m pytest -q 2-k3s/34.windmill/workspace/tests
-          python3 2-k3s/34.windmill/deploy.test.py -v
-          node --test 2-k3s/34.windmill/deploy.test.mjs
+          tmp=$(mktemp -d)
+          cd 2-k3s/10.observability/alertmanager-config
+          # promtool cannot read the PrometheusRule CR, so test its bare spec. One file per test group lets the groups run in parallel.
+          python3 - "$tmp" <<'PY'
+          import pathlib, sys, yaml
+          tmp = pathlib.Path(sys.argv[1])
+          for name in ("custom-alerts", "tls-alerts"):
+              spec = yaml.safe_load(pathlib.Path(f"{name}.yaml").read_text())["spec"]
+              (tmp / f"{name}-rules.yaml").write_text(yaml.safe_dump(spec))
+              tests = yaml.safe_load(pathlib.Path(f"{name}-tests.yaml").read_text())
+              for i, group in enumerate(tests.pop("tests")):
+                  (tmp / f"{name}-tests-{i:03}.yaml").write_text(yaml.safe_dump({**tests, "tests": [group]}))
+          PY
+          promtool check rules "$tmp"/*-rules.yaml
+          cd "$tmp"
+          ls *-tests-*.yaml | awk -v shard="$SHARD" 'NR % 2 == shard' | xargs -P "$(nproc)" -n 1 promtool test rules
 
-      - name: Google Workspace pinned-image contract
-        env:
-          WORKSPACE_MCP_IMAGE_TEST: "1"
-        run: |
-          set -euo pipefail
-          /tmp/mcp-hub/bin/python -m unittest discover -s 2-k3s/23.mcp-hub/tests -p test_google.py -v
-
-  t3-tests:
+  hub-and-windmill:
     if: >-
       github.event_name == 'push' ||
       github.event.pull_request.head.repo.full_name == github.repository
@@ -320,60 +321,119 @@ jobs:
 
       - name: Install test dependencies
         run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check \
+            -r .github/hooks/requirements.txt
+          bash .github/scripts/install-ci-tools.sh kustomize
+          # Same pin as 2-k3s/23.mcp-hub/deployment.yaml and vaultwarden-mcp.yaml.
+          python3 -m venv /tmp/mcp-hub && /tmp/mcp-hub/bin/pip install -q --disable-pip-version-check mcp==2.2.0 -r .github/hooks/requirements.txt
+          python3 -m venv /tmp/screener
+          /tmp/screener/bin/pip install -q --disable-pip-version-check -r 2-k3s/34.windmill/workspace/requirements-test.txt
+
+      - name: MCP hub selftest, Windmill screener tests and Google Workspace pinned-image contract
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/run-parallel.py <<'EOF'
+          WORKSPACE_MCP_IMAGE_TEST=1 /tmp/mcp-hub/bin/python -m unittest discover -s 2-k3s/23.mcp-hub/tests -p test_google.py -v
+          /tmp/mcp-hub/bin/python -m unittest discover -s 2-k3s/23.mcp-hub/tests -v
+          /tmp/screener/bin/python -m pytest -q 2-k3s/34.windmill/workspace/tests
+          /tmp/mcp-hub/bin/python 2-k3s/23.mcp-hub/files/mcp_hub.py --selftest
+          /tmp/mcp-hub/bin/python 2-k3s/23.mcp-hub/files/vaultwarden_mcp.py --selftest
+          python3 2-k3s/23.mcp-hub/tools/hub_clients.py --selftest
+          # The t3code pod's copy of hub_clients.py (and the other shared inputs) must not drift.
+          bash 2-k3s/13.t3code/one/tools/sync-shared.sh --check
+          python3 2-k3s/34.windmill/deploy.test.py -v
+          node --test 2-k3s/34.windmill/deploy.test.mjs
+          EOF
+
+  t3-tests:
+    if: >-
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1]
+    env:
+      SHARD: ${{ matrix.shard }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install test dependencies
+        run: |
           python3 -m pip install --disable-pip-version-check \
             -r .github/hooks/requirements.txt
           bash .github/scripts/install-ci-tools.sh helm kustomize
+          npm install --prefix /tmp/ssh-policy-check --ignore-scripts --no-audit --no-fund cc-safety-net@2.6.4
 
-      - name: T3 config and placement tests
+      - name: Runtime image pins match their inputs
+        if: matrix.shard == 0
         run: |
           set -euo pipefail
-          bash 2-k3s/13.t3code/env/files/selftest.sh
-          python3 2-k3s/13.t3code/env/tools/private-config.test.py
-          python3 2-k3s/13.t3code/env/tools/rotate-skills.test.py -v
-          bash 2-k3s/13.t3code/env/tools/rollout-hash.test.sh
-          bash 2-k3s/13.t3code/env/tools/runtime-variants.test.sh
-          python3 2-k3s/13.t3code/env/tools/network-policy.test.py -v
-          python3 2-k3s/13.t3code/env/tools/image-commands.test.py -v
+          bash 2-k3s/13.t3code/env/tools/sync-runtime-image.sh
+          git diff --exit-code -- 2-k3s/13.t3code/one/statefulset.yaml 2-k3s/13.t3code-homelab/statefulset.yaml 2-k3s/13.t3code-work/statefulset.yaml
+
+      - name: T3 config and placement tests
+        timeout-minutes: 10
+        env:
+          # Suites copy source folders while others run, so no .pyc files may appear mid-copy.
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          set -euo pipefail
+          # Slowest first, dealt alternately to the two shards.
+          grep -vE '^\s*(#|$)' <<'EOF' | awk -v shard="$SHARD" 'NR % 2 == shard' | python3 .github/scripts/run-parallel.py
           python3 2-k3s/13.t3code/env/tools/isolated-runtime.test.py -v
+          python3 .github/scripts/unittest-shard.py 2-k3s/13.t3code/env/tools/vault-client.test.py 0 3
+          python3 .github/scripts/unittest-shard.py 2-k3s/13.t3code/env/tools/vault-client.test.py 1 3
+          python3 .github/scripts/unittest-shard.py 2-k3s/13.t3code/env/tools/vault-client.test.py 2 3
+          python3 .github/scripts/unittest-shard.py 2-k3s/13.t3code/env/tools/vault-startup.test.py 0 2
+          python3 .github/scripts/unittest-shard.py 2-k3s/13.t3code/env/tools/vault-startup.test.py 1 2
           python3 2-k3s/13.t3code/env/tools/work-runtime.test.py -v
           python3 2-k3s/13.t3code/env/tools/work-aks-auth.test.py -v
-          python3 2-k3s/13.t3code-homelab/tools/inputs.test.py -v
-          python3 2-k3s/13.t3code/env/tools/vault-client.test.py -v
           python3 2-k3s/13.t3code/env/tools/keeper-client.test.py -v
-          python3 2-k3s/13.t3code/env/tools/vault-org-denial.test.py -v
-          python3 2-k3s/13.t3code/env/tools/vault-startup.test.py -v
-          python3 2-k3s/13.t3code/env/tools/homelab-ssh.test.py -v
           python3 2-k3s/13.t3code/env/tools/work-ssh.test.py -v
-          python3 2-k3s/13.t3code-homelab/tools/rbac.test.py -v
-          python3 2-k3s/13.t3code/one/tools/manager-rbac.test.py -v
-          python3 2-k3s/13.t3code/one/tools/manager-kubeconfig.test.py -v
-          python3 2-k3s/13.t3code/env/tools/t3-build.test.py -v
-          python3 2-k3s/29.t3-build/tools/rbac.test.py -v
-          python3 2-k3s/29.t3-build/tools/build-kubeconfig.test.py -v
-          python3 2-k3s/13.t3code/one/tools/manager-runtime.test.py -v
-          python3 2-k3s/13.t3code-homelab/tools/github-scope.test.py -v
-          python3 2-k3s/13.t3code-work/tools/provision.test.py -v
           python3 2-k3s/13.t3code-work/tools/add-cluster.test.py -v
-          python3 2-k3s/13.t3code/env/tools/startup.test.py -v
-          bash -n 2-k3s/13.t3code-work/tools/owner-login.sh
-          python3 2-k3s/17.remote-pi/cliproxy/tools/client-backend.test.py -v
-          bash 1-proxmox/t3env/pin-vm-host.test.sh
-          bash 1-proxmox/pegaprox/pegaprox-auto-update.test.sh
-          python3 2-k3s/17.remote-pi/search-guard/search-guard.test.py
-          bash 2-k3s/maintenance/aaaa-tripwire-cronjob.test.sh
-          bash 2-k3s/28.kured/kured.test.sh
-          bash 2-k3s/28.kured/node-apt/apply.test.sh
-          bash 2-k3s/maintenance/containerd-cleanup-removed.test.sh
-          python3 2-k3s/13.t3code/one/files/pi-setup.test.py
-          python3 2-k3s/13.t3code/one/files/t3-pi-settings.test.py
-          npm install --prefix /tmp/ssh-policy-check --ignore-scripts --no-audit --no-fund cc-safety-net@2.6.4
-          SAFETY_NET_CLI=/tmp/ssh-policy-check/node_modules/.bin/cc-safety-net python3 2-k3s/13.t3code/one/files/ssh-policy.test.py
           python3 2-k3s/13.t3code/one/files/vault-ssh-agent.test.py
-          python3 2-k3s/13.t3code/one/files/vault-run.test.py
+          python3 2-k3s/13.t3code/env/tools/startup.test.py -v
+          python3 2-k3s/13.t3code/env/tools/homelab-ssh.test.py -v
+          python3 2-k3s/13.t3code/env/tools/t3-build.test.py -v
+          bash 2-k3s/13.t3code/env/tools/runtime-variants.test.sh
+          python3 2-k3s/13.t3code/one/tools/manager-runtime.test.py -v
           python3 2-k3s/13.t3code/one/files/idle-rollout.test.py
+          python3 2-k3s/13.t3code/one/files/pi-setup.test.py
+          bash 1-proxmox/pegaprox/pegaprox-auto-update.test.sh
+          SAFETY_NET_CLI=/tmp/ssh-policy-check/node_modules/.bin/cc-safety-net python3 2-k3s/13.t3code/one/files/ssh-policy.test.py
+          python3 2-k3s/13.t3code-homelab/tools/inputs.test.py -v
+          python3 2-k3s/13.t3code/one/files/vault-run.test.py
+          python3 2-k3s/13.t3code/env/tools/image-commands.test.py -v
+          bash 2-k3s/13.t3code/env/tools/rollout-hash.test.sh
+          bash 2-k3s/28.kured/kured.test.sh
+          python3 2-k3s/13.t3code/one/tools/manager-rbac.test.py -v
+          python3 2-k3s/13.t3code/env/tools/network-policy.test.py -v
+          python3 2-k3s/13.t3code-work/tools/provision.test.py -v
+          bash 2-k3s/28.kured/node-apt/apply.test.sh
+          python3 2-k3s/13.t3code-homelab/tools/github-scope.test.py -v
+          python3 2-k3s/13.t3code/env/tools/rotate-skills.test.py -v
+          python3 2-k3s/13.t3code/one/tools/manager-kubeconfig.test.py -v
+          python3 2-k3s/29.t3-build/tools/build-kubeconfig.test.py -v
+          python3 2-k3s/29.t3-build/tools/rbac.test.py -v
+          python3 2-k3s/13.t3code/env/tools/vault-org-denial.test.py -v
+          bash 2-k3s/maintenance/containerd-cleanup-removed.test.sh
+          python3 2-k3s/17.remote-pi/search-guard/search-guard.test.py
+          python3 2-k3s/13.t3code/one/files/t3-pi-settings.test.py
+          python3 2-k3s/17.remote-pi/cliproxy/tools/client-backend.test.py -v
+          python3 2-k3s/13.t3code-homelab/tools/rbac.test.py -v
           python3 1-proxmox/ssh/gen-homelab-ssh.test.py
+          python3 2-k3s/13.t3code/env/tools/private-config.test.py
+          bash 2-k3s/13.t3code/env/files/selftest.sh
+          bash 1-proxmox/t3env/pin-vm-host.test.sh
+          bash 2-k3s/maintenance/aaaa-tripwire-cronjob.test.sh
+          bash -n 2-k3s/13.t3code-work/tools/owner-login.sh
+          EOF
 
       - name: T3 vault UID isolation (root)
+        if: matrix.shard == 0
         run: |
           sudo -n env "PYTHONPATH=$(python3 -c 'import pathlib, yaml; print(pathlib.Path(yaml.__file__).resolve().parent.parent)')" \
             "$(command -v python3)" 2-k3s/13.t3code/env/tools/startup.test.py \
@@ -394,17 +454,32 @@ jobs:
         variant: [mixed, homelab, work]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
 
       - name: T3 install and runtime smoke
         timeout-minutes: 75
         env:
           VARIANT: ${{ matrix.variant }}
+          EVENT: ${{ github.event_name }}
         run: |
-          if [[ $VARIANT == mixed ]]; then
-            bash 2-k3s/13.t3code/env/tools/smoke.sh
-          else
-            T3_RUNTIME_VARIANT="$VARIANT" bash 2-k3s/13.t3code/env/tools/smoke.sh
+          set -euo pipefail
+          # A pull_request checkout is the merge commit, so HEAD^1 is the base branch.
+          if [[ $EVENT == pull_request ]] && git diff --quiet HEAD^1 HEAD -- \
+            2-k3s/13.t3code 2-k3s/13.t3code-homelab 2-k3s/13.t3code-work .github/workflows/ci.yml .github/workflows/build-t3-runtime.yml; then
+            echo "No T3 runtime input changed, so the smoke is skipped."
+            exit 0
           fi
+          prefix=
+          [[ $VARIANT == mixed ]] || prefix=$VARIANT-
+          image=ghcr.io/spyrospsarras/t3-runtime:${prefix}inputs-$(bash 2-k3s/13.t3code/env/tools/runtime-tag.sh "$VARIANT")
+          # The tag hashes every image input, so a published image with it was built from these files.
+          if docker pull -q "$image"; then
+            export T3_RUNTIME_IMAGE=$image
+          else
+            echo "No published $image, so smoke.sh builds it."
+          fi
+          T3_RUNTIME_VARIANT="$VARIANT" bash 2-k3s/13.t3code/env/tools/smoke.sh
 
   kube-vip:
     if: >-
@@ -458,7 +533,7 @@ jobs:
           echo "All changed paths are inside 2-k3s/34.windmill/workspace/."
 
   validate:
-    needs: [checks, t3-tests, smoke, kube-vip, bot-paths]
+    needs: [checks, alerts, hub-and-windmill, t3-tests, smoke, kube-vip, bot-paths]
     if: >-
       always() &&
       (github.event_name == 'push' ||
