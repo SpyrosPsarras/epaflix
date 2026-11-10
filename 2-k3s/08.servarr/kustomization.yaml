@@ -108,7 +108,7 @@ images:
   # Watched by upstream-release-watch #2060; Renovate is disabled for the overlay.
   - name: ghcr.io/jon4hz/jellysweep
     newName: ghcr.io/spyrospsarras/jellysweep
-    newTag: da58d64-collection-direct-members-88ba5d11666bd05a0e8f120f00c457c2c4af0042@sha256:ed13bd5e7916a8b78b21b2ee3aa5bee8fd6a3a9cd02773de0f18c1449fcc3467
+    newTag: 0dc52d3-collection-direct-members-e6203e1604a9b7b86a95a09d4afd8093498d1c84@sha256:3f2cbe8cef80883a264d0e2e6d56b62813672fd59b6de238231f0f051e087b70
   - name: ghcr.io/fredrikburmester/streamystats-aio
     newTag: latest@sha256:9bc68f6301cc2ae749da950121d6efcbaa63335d458dad1d5967265af8e49382
   - name: ghcr.io/thephaseless/byparr
