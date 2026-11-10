@@ -18,6 +18,7 @@ jobs:
       UPSTREAM_PR: "2715"
       TRACKING_ISSUE: "218"
       GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
     steps:
       - name: Resolve upstream OIDC state
         id: resolve
@@ -89,7 +90,7 @@ jobs:
           case "$SIGNAL" in
             shipped)
               HEAD="Stable release \`$STABLE\` now contains OIDC source code ($OIDC_HITS matching path(s))."
-              NEXT="Do the migration. It is destructive and owner-gated: back up the Postgres \`jellyseerr\` DB and the \`jellyseerr-config\` PVC first, then swap \`2-k3s/08.servarr/seerr/seerr.yaml\` to \`ghcr.io/seerr-team/seerr:$STABLE\`, chown UID 568 -> 1000, remap the \`settings.json\` OIDC keys, and handle the one-way v3.0.0 data migration. Add a Renovate rule for the new tag so it is tracked instead of being an untracked mutable pin. Smoke test with #253."
+              NEXT="Move Seerr from the \`preview-new-oidc\` pin to \`ghcr.io/seerr-team/seerr:$STABLE\` in the images block of \`2-k3s/08.servarr/kustomization.yaml\`, with its digest. Take a \`pg_dump\` of the \`jellyseerr\` database first, as in PR #2259, because a release can add migrations without a rollback. Update the comment above that entry, the Seerr rule description in \`.github/renovate.json\` (keep \`automerge: false\`, releases can add migrations too) and the Seerr row in \`docs/servarr-image-pins.md\`, then test the Authentik login."
               ;;
             merged)
               HEAD="Upstream PR #$UPSTREAM_PR is **merged** into \`$PR_BASE\`. Latest stable \`$STABLE\` does not carry the code yet."
@@ -97,11 +98,18 @@ jobs:
               ;;
             abandoned)
               HEAD="Upstream PR #$UPSTREAM_PR is **closed without being merged**. The lineage this issue tracks is dead."
-              NEXT="Re-triage. Find whether native OIDC moved to another PR or discussion upstream, repoint this issue at it, and update the watch condition in \`.github/workflows/seerr-oidc-watch.yml\`. If upstream dropped OIDC for good, decide whether we stay on the fork image permanently and close this."
+              NEXT="Re-triage. Find whether native OIDC moved to another PR or discussion upstream, repoint this issue at it, and update the watch condition in \`.github/workflows/seerr-oidc-watch.yml\`. The pinned \`preview-new-oidc\` image keeps working but gets no more updates. Decide whether to stay on it or change the login method."
               ;;
           esac
 
+          MARKER="<!-- seerr-oidc-watch signal=$SIGNAL -->"
+          if gh api "repos/$GITHUB_REPOSITORY/issues/$TRACKING_ISSUE/comments" --paginate --jq '.[].body' | grep -qF "$MARKER"; then
+            echo "#$TRACKING_ISSUE already has a $SIGNAL comment - not commenting again"
+            exit 0
+          fi
+
           BODY=$(cat <<EOF
+          $MARKER
 
           $HEAD
 
@@ -130,7 +138,8 @@ jobs:
             gh issue reopen "$TRACKING_ISSUE" --comment "$BODY"
             echo "Reopened #$TRACKING_ISSUE (signal=$SIGNAL)"
           else
-            echo "#$TRACKING_ISSUE is already open - not commenting again (signal=$SIGNAL)"
+            gh issue comment "$TRACKING_ISSUE" --body "$BODY"
+            echo "Commented on open #$TRACKING_ISSUE (signal=$SIGNAL)"
           fi
 
       - name: Still blocked - nothing to do
