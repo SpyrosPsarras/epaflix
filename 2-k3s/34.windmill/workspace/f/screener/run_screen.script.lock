@@ -22,5 +22,5 @@ tenacity==9.2.1
 tqdm==4.70.1
 typing-extensions==4.16.0
 urllib3==2.8.0
-wmill==1.864.1
+wmill==1.866.0
 yarl==1.25.1
