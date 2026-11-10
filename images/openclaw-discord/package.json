@@ -1,0 +1,8 @@
+{
+  "name": "openclaw-plugins",
+  "private": true,
+  "dependencies": {
+    "@openclaw/discord": "2026.11.2",
+    "@openclaw/searxng-plugin": "2026.11.2"
+  }
+}
