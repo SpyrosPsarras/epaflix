@@ -22,6 +22,14 @@ spec:
       ports:
         - port: 8000
           protocol: TCP
+    # The deploy CronJob skips forward auth and authenticates with a Windmill API token.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: windmill-deploy
+      ports:
+        - port: 8000
+          protocol: TCP
 ---
 # Workers run user code, which must not reach the LAN or cluster services.
 # The public egress exceptions match 29.t3-build/base/network-policy.yaml.
@@ -71,3 +79,49 @@ spec:
               - 192.168.0.0/16
               - 224.0.0.0/4
               - 240.0.0.0/4
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: windmill-deploy
+  namespace: windmill
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: windmill-deploy
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress: []
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - to:
+        - podSelector:
+            matchLabels:
+              app: windmill-app
+      ports:
+        - {protocol: TCP, port: 8000}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 0.0.0.0/8
+              - 10.0.0.0/8
+              - 100.64.0.0/10
+              - 127.0.0.0/8
+              - 169.254.0.0/16
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 224.0.0.0/4
+              - 240.0.0.0/4
+      ports:
+        - {protocol: TCP, port: 443}

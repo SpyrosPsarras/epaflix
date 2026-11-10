@@ -1,0 +1,74 @@
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: windmill-deploy
+  namespace: windmill
+  labels:
+    app.kubernetes.io/name: windmill-deploy
+spec:
+  schedule: "*/10 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 300
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: windmill-deploy
+        spec:
+          automountServiceAccountToken: false
+          enableServiceLinks: false
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: windmill-deploy
+              image: docker.io/library/node:24.22.2-trixie-slim@sha256:0820eaa85e07d0490446dd01d14707e17e6108a36988cf374899cd057eb3812d
+              command:
+                - node
+                - /scripts/deploy.mjs
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
+              env:
+                - name: HOME
+                  value: /tmp
+                - name: BASE_INTERNAL_URL
+                  value: http://windmill-app.windmill.svc.cluster.local:8000
+                - name: WM_WORKSPACE
+                  value: screener
+                - name: WM_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: windmill-deploy
+                      key: WINDMILL_TOKEN
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "128Mi"
+                limits:
+                  memory: "512Mi"
+          volumes:
+            - name: scripts
+              configMap:
+                name: windmill-deploy-script
+            - name: tmp
+              emptyDir:
+                sizeLimit: 512Mi

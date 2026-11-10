@@ -1,0 +1,3 @@
+#!/bin/sh
+t=$(cat /run/gh/token) || exit 1
+GH_TOKEN="$t" exec /usr/local/bin/gh "$@"

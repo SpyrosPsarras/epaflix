@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Secret
+metadata:
+    name: windmill-deploy
+    namespace: windmill
+type: Opaque
+stringData:
+    WINDMILL_TOKEN: ENC[AES256_GCM,data:6NssFgjexc3nfI36SLlluDmqxEDEq/7GxD8ZHOYrmwY=,iv:htTsWpB4Iq80Yss3altj34mUhSkfh//X5Dmk9lb9QjY=,tag:qi+iwMRkaVp0mJfMvIG9EA==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBaaTc0TXdPZUJlS2hsTlo1
+            NGVwTndvdmRRZy9JZ3BUVXdOSlhnbDNPSHpnCnJtUjB0NmJiMC9YN1RGZU1rYmMx
+            K2VWTDBERDdBQjMzWVZOL2Y5UW9nMk0KLS0tIGljZno2NkYrd3hqTVc2TFlJOVdT
+            cDdrbnQveHlOa1VKd1oxRFliWG9Sa1kKp1/XvvOscb8yykYoxsPrwhdVSUPacfA/
+            EyYhuehmFxpt95XAB5Y0hRZLMP88j6fXPmSoXt/h24+6jY1rfLkQWw==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1586thf5vkcdf5lcn3zwjpu8ltkwyq8efrhj8lr0vdrrt9k5f3qgsxeg7gx
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-11-10T11:25:50Z"
+    mac: ENC[AES256_GCM,data:jINAOaMM8TZgQt/Qxq+65e6+ru3CGEj6qmo0gfHJvRjvERtTxFSkh+BwkK9SPzoMMZF2hu5oUOjk2pUDqoCxdhrmybfSm4mwfqI8FxunVaDTqK0LS8uoPYzVKOG1XykeahgsDtl40N5rKOpfrFiaY9jIgV8OYKIWt7sPQ6SSSCs=,iv:35BCwnBDBXoijy1P5EDG4AMTGsg9AsAtVAvqJ7et5u8=,tag:73Bdb9Wt2Trt6tJttU8g7w==,type:str]
+    version: 3.13.3

@@ -1,0 +1,40 @@
+summary: Finviz screener with entry and stop levels
+description: See 2-k3s/34.windmill/README.md in the homelab repo.
+lock: '!inline f/screener/run_screen.script.lock'
+kind: script
+schema:
+  $schema: https://json-schema.org/draft/2020-12/schema
+  type: object
+  order:
+    - finviz_url
+    - email
+    - entry
+    - stop
+    - target
+    - condition
+  properties:
+    condition:
+      type: string
+      description: Optional filter, e.g. [RSI] < 30
+      default: ''
+    email:
+      type: string
+      description: Where the results go
+    entry:
+      type: string
+      description: Entry rule, e.g. [Price] * 1.01
+    finviz_url:
+      type: string
+      description: Finviz screener address, https://finviz.com/screener.ashx?...
+    stop:
+      type: string
+      description: Stop loss rule, e.g. [Price] - 2 * [ATR]
+    target:
+      type: string
+      description: Optional take profit rule
+      default: ''
+  required:
+    - finviz_url
+    - email
+    - entry
+    - stop

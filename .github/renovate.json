@@ -6,7 +6,7 @@
     ":semanticCommits"
   ],
   "kubernetes": {
-    "managerFilePatterns": ["/^2-k3s/29\\.t3-build/base/files/kaniko-job\\.yaml$/"]
+    "managerFilePatterns": ["/^2-k3s/29\\.t3-build/base/files/kaniko-job\\.yaml$/", "/^2-k3s/34\\.windmill/deploy-cronjob\\.yaml$/"]
   },
   "timezone": "Europe/Athens",
   "schedule": ["after 2am and before 6am"],
@@ -18,6 +18,18 @@
   "automerge": true,
   "platformAutomerge": false,
   "packageRules": [
+    {
+      "description": "Node majors for the Windmill deploy CronJob: review by hand, since no CI job runs windmill-cli on that image.",
+      "matchFileNames": ["2-k3s/34.windmill/deploy-cronjob.yaml"],
+      "matchUpdateTypes": ["major"],
+      "automerge": false
+    },
+    {
+      "description": "windmill-cli for the deploy CronJob must equal the Windmill server tag in 2-k3s/34.windmill/values.yaml (deploy.test.py fails otherwise). The server tag has no Renovate manager, so bump both by hand in one PR; never automerge the CLI alone.",
+      "matchFileNames": ["2-k3s/34.windmill/deploy-cli/**"],
+      "matchPackageNames": ["windmill-cli"],
+      "automerge": false
+    },
     {
       "description": "The openclaw-discord image: the OpenClaw base image and its @openclaw/discord and @openclaw/searxng-plugin pins must move together (the plugins declare a peer on the matching openclaw), so one group, reviewed by hand.",
       "matchFileNames": [

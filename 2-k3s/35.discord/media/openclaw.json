@@ -1,0 +1,64 @@
+{
+  "gateway": {
+    "mode": "local",
+    "bind": "loopback",
+    "port": 18789,
+    "auth": { "mode": "none" },
+    "controlUi": { "enabled": false }
+  },
+  "models": {
+    "providers": {
+      "cliproxy": {
+        "baseUrl": "http://cliproxy.remote-pi.svc.cluster.local:8317",
+        "api": "anthropic-messages",
+        "apiKey": "${CLIPROXY_API_KEY}",
+        "models": [{ "id": "claude/claude-haiku-5-5", "name": "Claude Haiku 5.5", "input": ["text"] }]
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": { "primary": "cliproxy/claude/claude-haiku-5-5" },
+      "sandbox": { "mode": "off" },
+      "skipBootstrap": true
+    }
+  },
+  "tools": {
+    "profile": "coding",
+    "exec": { "host": "gateway", "mode": "full" },
+    "web": { "search": { "provider": "searxng" } }
+  },
+  "plugins": {
+    "allow": ["discord", "searxng"],
+    "load": {
+      "paths": [
+        "/opt/openclaw-plugins/node_modules/@openclaw/discord",
+        "/opt/openclaw-plugins/node_modules/@openclaw/searxng-plugin"
+      ]
+    },
+    "entries": {
+      "searxng": { "config": { "webSearch": { "baseUrl": "http://searxng.searxng.svc.cluster.local:8080" } } }
+    }
+  },
+  "channels": {
+    "discord": {
+      "enabled": true,
+      "token": "${DISCORD_BOT_TOKEN}",
+      "dmPolicy": "disabled",
+      "groupPolicy": "allowlist",
+      "actions": { "roles": false, "moderation": false, "presence": false },
+      "guilds": {
+        "__DISCORD_GUILD_ID__": {
+          "channels": {
+            "__DISCORD_CHANNEL_ID__": { "enabled": true, "requireMention": false, "roles": ["${DISCORD_ROLE_ID}"] }
+          }
+        }
+      }
+    }
+  },
+  "logging": {
+    "consoleStyle": "json",
+    "audit": { "enabled": true, "messages": "all" }
+  },
+  "cron": { "enabled": false }
+}

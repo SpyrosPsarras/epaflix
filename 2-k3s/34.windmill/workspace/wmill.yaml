@@ -1,0 +1,18 @@
+includes:
+  - f/**
+excludes: []
+skipVariables: true
+skipSecrets: true
+skipResources: true
+skipResourceTypes: true
+skipFolders: true
+skipWorkspaceDependencies: true
+skipDatatableMigrations: true
+includeSchedules: false
+includeTriggers: false
+includeUsers: false
+includeGroups: false
+includeSettings: false
+includeKey: false
+nonDottedPaths: true
+syncBehavior: v1

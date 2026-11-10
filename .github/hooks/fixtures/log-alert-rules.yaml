@@ -1,0 +1,135 @@
+# Each case gets its own stream and 20-minute slot so cases in one namespace never add up.
+# 24h-window cases take 25-hour slots, so no other case's lines fall inside their window.
+# count repeats lines in order up to that many lines.
+- name: agent-five-errors
+  alert: DiscordAgentErrors
+  namespace: discord-media
+  container: openclaw
+  entries: 9
+  lines:
+    - '{"time":"2026-11-09T12:00:00.000+00:00","level":"info","subsystem":"gateway","message":"ready"}'
+    - '{"time":"2026-11-09T12:00:01.000+00:00","level":"error","subsystem":"gateway/channels/discord","message":"send failed"}'
+    - '{"time":"2026-11-09T12:00:02.000+00:00","level":"info","subsystem":"agent","message":"run started"}'
+    - '{"time":"2026-11-09T12:00:03.000+00:00","level":"error","subsystem":"agent","message":"model call failed"}'
+    - '{"time":"2026-11-09T12:00:04.000+00:00","level":"error","subsystem":"agent","message":"model call failed"}'
+    - '{"time":"2026-11-09T12:00:05.000+00:00","level":"warn","subsystem":"agent","message":"retrying"}'
+    - '{"time":"2026-11-09T12:00:06.000+00:00","level":"fatal","subsystem":"gateway","message":"stopped"}'
+    - '{"time":"2026-11-09T12:00:07.000+00:00","level":"info","subsystem":"gateway","message":"ready"}'
+    - '{"time":"2026-11-09T12:00:08.000+00:00","level":"error","subsystem":"gateway/channels/discord","message":"send failed"}'
+  fires: true
+- name: agent-four-errors
+  alert: DiscordAgentErrors
+  namespace: discord-windmill
+  container: openclaw
+  entries: 6
+  lines:
+    - '{"time":"2026-11-09T12:00:00.000+00:00","level":"error","subsystem":"agent","message":"model call failed"}'
+    - '{"time":"2026-11-09T12:00:01.000+00:00","level":"error","subsystem":"agent","message":"model call failed"}'
+    - '{"time":"2026-11-09T12:00:02.000+00:00","level":"error","subsystem":"agent","message":"model call failed"}'
+    - '{"time":"2026-11-09T12:00:03.000+00:00","level":"error","subsystem":"agent","message":"model call failed"}'
+    - '{"time":"2026-11-09T12:00:04.000+00:00","level":"info","subsystem":"agent","message":"previous error recovered"}'
+    - '{"time":"2026-11-09T12:00:05.000+00:00","level":"warn","subsystem":"agent","message":"error rate high"}'
+  fires: false
+- name: agent-error-text-not-level
+  alert: DiscordAgentErrors
+  namespace: discord-media
+  container: openclaw
+  entries: 5
+  lines:
+    - '{"time":"2026-11-09T12:00:00.000+00:00","level":"info","subsystem":"agent","message":"tool returned an error"}'
+    - '{"time":"2026-11-09T12:00:01.000+00:00","level":"debug","error":{"level":"error"},"subsystem":"agent","message":"retry"}'
+    - '{"time":"2026-11-09T12:00:02.000+00:00","level":"info","subsystem":"agent","message":"fatal: not a git repository"}'
+    - '{"time":"2026-11-09T12:00:03.000+00:00","level":"warn","subsystem":"agent","message":"level error"}'
+    - 'Error: plain text without a level'
+  fires: false
+- name: token-sidecar-failing
+  alert: DiscordAgentErrors
+  namespace: discord-windmill
+  container: gh-token
+  lines:
+    - 'gh-token: fetch failed ECONNRESET'
+    - 'gh-token: fetch failed ECONNRESET'
+    - 'gh-token: GitHub returned 401 '
+    - 'gh-token: GitHub returned 401 '
+    - 'gh-token: GitHub returned 401 '
+  fires: true
+- name: token-sidecar-healthy
+  alert: DiscordAgentErrors
+  namespace: discord-windmill
+  container: gh-token
+  lines:
+    - 'gh-token: refreshed'
+    - 'gh-token: refreshed'
+    - 'gh-token: refreshed'
+    - 'gh-token: refreshed'
+    - 'gh-token: refreshed'
+  fires: false
+- name: deploy-failed
+  alert: WindmillDeployFailed
+  namespace: windmill
+  container: windmill-deploy
+  lines:
+    - 'Computing the files to update on the remote to match local'
+    - '{"commit":"0123456789abcdef0123456789abcdef01234567","outcome":"failed","error":"wmill exited with 1"}'
+  fires: true
+- name: deploy-ok
+  alert: WindmillDeployFailed
+  namespace: windmill
+  container: windmill-deploy
+  lines:
+    - 'Computing the files to update on the remote to match local'
+    - '{"commit":"0123456789abcdef0123456789abcdef01234567","outcome":"deployed"}'
+  fires: false
+- name: usage-media-301
+  alert: DiscordModelUsageHigh
+  namespace: remote-pi
+  container: transcripts
+  slot_minutes: 1500
+  count: 301
+  entries: 301
+  lines:
+    - '2026-11-09T12:00:00Z {"kind": "transcript", "request_id": "0a1b2c3d", "model": "claude-sonnet", "client_backend": "discord-media", "stream": true, "account": "synthetic", "turn_role": "user", "turn": "add the new film to the watchlist", "reply": "Done."}'
+  fires: true
+- name: usage-media-300
+  alert: DiscordModelUsageHigh
+  namespace: remote-pi
+  container: transcripts
+  slot_minutes: 1500
+  count: 300
+  entries: 300
+  lines:
+    - '2026-11-09T12:00:00Z {"kind": "transcript", "request_id": "0a1b2c3d", "model": "claude-sonnet", "client_backend": "discord-media", "stream": true, "account": "synthetic", "turn_role": "user", "turn": "add the new film to the watchlist", "reply": "Done."}'
+  fires: false
+- name: usage-split-301
+  alert: DiscordModelUsageHigh
+  namespace: remote-pi
+  container: transcripts
+  slot_minutes: 1500
+  count: 301
+  entries: 301
+  lines:
+    - '2026-11-09T12:00:00Z {"kind": "transcript", "request_id": "0a1b2c3d", "model": "claude-sonnet", "client_backend": "discord-media", "stream": true, "account": "synthetic", "turn_role": "user", "turn": "add the new film to the watchlist", "reply": "Done."}'
+    - '2026-11-09T12:00:00Z {"kind": "transcript", "request_id": "0a1b2c3d", "model": "claude-sonnet", "client_backend": "discord-windmill", "stream": true, "account": "synthetic", "turn_role": "user", "turn": "add the new film to the watchlist", "reply": "Done."}'
+  fires: false
+- name: usage-chat-mentions-key
+  alert: DiscordModelUsageHigh
+  namespace: remote-pi
+  container: transcripts
+  slot_minutes: 1500
+  count: 301
+  entries: 301
+  lines:
+    - '2026-11-09T12:00:00Z {"kind": "transcript", "request_id": "0a1b2c3d", "model": "claude-sonnet", "client_backend": "", "stream": true, "account": "synthetic", "turn_role": "user", "turn": "why does \"client_backend\": \"discord-media\" show up? discord-media discord-windmill", "reply": "Done."}'
+  fires: false
+- name: usage-other-backends
+  alert: DiscordModelUsageHigh
+  namespace: remote-pi
+  container: transcripts
+  slot_minutes: 1500
+  count: 903
+  entries: 903
+  lines:
+    - '2026-11-09T12:00:00Z {"kind": "transcript", "request_id": "0a1b2c3d", "model": "claude-sonnet", "client_backend": "work", "stream": true, "account": "synthetic", "turn_role": "user", "turn": "add the new film to the watchlist", "reply": "Done."}'
+    - '2026-11-09T12:00:00Z {"kind": "transcript", "request_id": "0a1b2c3d", "model": "claude-sonnet", "client_backend": "homelab", "stream": true, "account": "synthetic", "turn_role": "user", "turn": "add the new film to the watchlist", "reply": "Done."}'
+    - '2026-11-09T12:00:00Z [emit-transcripts] watching /var/lib/cliproxy/logs'
+  fires: false
