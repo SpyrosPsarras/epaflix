@@ -238,7 +238,7 @@ Spyros does these himself, from a list in the plan, no script:
    store its private key in the vault.
 4. Give himself both roles.
 5. Create a Windmill token for the post-merge job and store it in the
-   vault. The agent encrypts it into `2-k3s/34.windmill/windmill-secrets.enc.yaml`.
+   vault. The agent encrypts it into `2-k3s/34.windmill/windmill-deploy.enc.yaml`.
 6. Invite family members and give each the roles they need.
 
 The agent then encrypts the tokens

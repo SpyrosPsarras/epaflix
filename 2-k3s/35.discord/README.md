@@ -46,7 +46,7 @@ Store the new value in the vault first. Write it into the SOPS file with `sops s
 | `discord-media/openclaw` | `media/secrets.enc.yaml` | `DISCORD_BOT_TOKEN`, `CLIPROXY_API_KEY`, `SEERR_API_KEY`, `RADARR_API_KEY`, `SONARR_API_KEY`, `LIDARR_API_KEY`, `BAZARR_API_KEY`, `JELLYFIN_API_KEY`, plus the Discord IDs |
 | `discord-windmill/openclaw` | `windmill/secrets.enc.yaml` | `DISCORD_BOT_TOKEN`, `CLIPROXY_API_KEY`, plus the Discord IDs |
 | `discord-windmill/github-app` | `windmill/github-app.enc.yaml` | `app-id`, `installation-id`, `private-key` |
-| `windmill/windmill-deploy` | `2-k3s/34.windmill/windmill-secrets.enc.yaml` | `WINDMILL_TOKEN` |
+| `windmill/windmill-deploy` | `2-k3s/34.windmill/windmill-deploy.enc.yaml` | `WINDMILL_TOKEN` |
 
 A new `CLIPROXY_API_KEY` must be added to CLIProxy's client key list (a live change through its management API) before the SOPS edit, and the old one removed after the pod restarts.
 
