@@ -34,10 +34,6 @@ spec:
       containers:
         - name: jellysweep
           image: ghcr.io/jon4hz/jellysweep:v0.16.0
-          env:
-            # TEMP: keep dry-run until the owner compares first runs with the pre-upgrade baseline; remove in a separate PR.
-            - name: JELLYSWEEP_DRY_RUN
-              value: "true"
           ports:
             - containerPort: 3002
               name: http
