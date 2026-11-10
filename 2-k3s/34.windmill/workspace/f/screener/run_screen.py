@@ -1,6 +1,6 @@
 #requirements:
 #finviz==2.1.0
-#wmill==1.864.1
+#wmill==1.866.0
 
 import ast
 import csv
