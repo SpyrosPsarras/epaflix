@@ -19,6 +19,14 @@
   "platformAutomerge": false,
   "packageRules": [
     {
+      "description": "The openclaw-discord image: the OpenClaw base image and its @openclaw/discord and @openclaw/searxng-plugin pins must move together (the plugins declare a peer on the matching openclaw), so one group, reviewed by hand.",
+      "matchFileNames": [
+        "images/openclaw-discord/**"
+      ],
+      "groupName": "openclaw-discord image",
+      "automerge": false
+    },
+    {
       "description": "Keep the lock and the shared runtime image reference aligned with updated tool and base-image inputs. sync-lock.sh rebuilds the lock with the image's npm 10.9.4: Renovate's own lock update left PR #2187 with a stale lock after a git dependency (superpowers) bump, which failed npm ci and the image tag check on every rebase.",
       "matchFileNames": ["2-k3s/13.t3code/env/tools/package.json", "2-k3s/13.t3code/versions.env", "2-k3s/13.t3code/env/Dockerfile"],
       "constraints": {"node": "24"},
@@ -174,6 +182,18 @@
     }
   ],
   "customManagers": [
+    {
+      "description": "Keep GH_VERSION in images/openclaw-discord/Dockerfile fresh. The marker sits on the line above the ARG because a Dockerfile ARG line cannot carry a trailing comment.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^images/openclaw-discord/Dockerfile$/"
+      ],
+      "matchStrings": [
+        "#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)\\s*\\nARG GH_VERSION=(?<currentValue>\\S+)"
+      ],
+      "versioningTemplate": "semver",
+      "extractVersionTemplate": "^v?(?<version>.+)$"
+    },
     {
       "description": "Keep the pinned PROMTOOL_VERSION in ci.yml (the validate job's alert rule tests) fresh. Marker is an inline trailing comment '# renovate: datasource=... depName=...' on the PROMTOOL_VERSION= line. prometheus/prometheus github-releases tags are vX.Y.Z and the leading v is stripped automatically, as for helm. Like the HELM_VERSION manager, the branch it computes cannot be pushed until the PAT gets workflow scope (#486).",
       "customType": "regex",
