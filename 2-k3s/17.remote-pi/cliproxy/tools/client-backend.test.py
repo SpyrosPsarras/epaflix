@@ -16,7 +16,8 @@ import payload_lib
 SPEC = importlib.util.spec_from_file_location("emitter", FILES / "emit-transcripts.py")
 emitter = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(emitter)
-BACKENDS = (("t3-w", "t3-work-", "work"), ("t3-h", "t3-homelab-", "homelab"))
+BACKENDS = (("t3-w", "t3-work-", "work"), ("t3-h", "t3-homelab-", "homelab"),
+            ("dc-m", "dc-media-", "discord-media"), ("dc-w", "dc-windmill-", "discord-windmill"))
 
 
 class BackendTests(unittest.TestCase):
