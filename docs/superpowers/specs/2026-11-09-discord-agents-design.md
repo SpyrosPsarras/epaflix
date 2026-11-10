@@ -169,7 +169,8 @@ at first; a Grafana alert fires when one key passes a daily threshold.
 ### Windmill
 
 - A GitHub App, `homelab-windmill-bot`, installed on epaflix only, with
-  contents and pull requests permissions and no workflows permission, so
+  contents and pull requests write, checks, commit statuses and actions
+  read (to see why CI failed), and no workflows permission, so
   GitHub rejects any push from it that changes `.github/workflows/`. Its
   PRs carry its own author, so CI knows a PR came from the bot.
 - OpenClaw's GitHub App support only reads. A sidecar container holds the

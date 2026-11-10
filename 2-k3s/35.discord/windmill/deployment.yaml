@@ -1,0 +1,281 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openclaw
+  labels:
+    app.kubernetes.io/name: openclaw
+  annotations:
+    secret.reloader.stakater.com/reload: "openclaw,github-app"
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: openclaw
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: openclaw
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: prepare-tmp
+          image: ghcr.io/spyrospsarras/openclaw-discord
+          command:
+            - sh
+            - -c
+            # fsGroup leaves the emptyDir root non-sticky; OpenClaw refuses temp dirs under a world-writable /tmp without the sticky bit.
+            - mkdir -p /tmp-volume/gateway-tmp && chmod 1777 /tmp-volume/gateway-tmp
+          securityContext: &container-security
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+          volumeMounts:
+            - name: tmp-volume
+              mountPath: /tmp-volume
+        - name: render-config
+          image: ghcr.io/spyrospsarras/openclaw-discord
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              node /opt/openclaw-discord/render.mjs /config /home/node/.openclaw
+              result=$(openclaw config validate --json) || true
+              echo "$result" | node -e 'process.exit(JSON.parse(require("fs").readFileSync(0,"utf8")).valid===true?0:1)' || { echo "$result" >&2; exit 1; }
+          env: &openclaw-env
+            - name: HOME
+              value: /home/node
+            - name: XDG_CACHE_HOME
+              value: /home/node/.openclaw/.cache
+            - name: NODE_ENV
+              value: production
+            - name: OPENCLAW_CONFIG_READONLY
+              value: "1"
+            - name: PATH
+              value: /scripts:/home/node/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+            - name: GIT_CONFIG_GLOBAL
+              value: /scripts/gitconfig
+            - name: GH_NO_UPDATE_NOTIFIER
+              value: "1"
+            - name: GH_PROMPT_DISABLED
+              value: "1"
+            - name: DISCORD_BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: openclaw
+                  key: DISCORD_BOT_TOKEN
+            - name: DISCORD_GUILD_ID
+              valueFrom:
+                secretKeyRef:
+                  name: openclaw
+                  key: DISCORD_GUILD_ID
+            - name: DISCORD_CHANNEL_ID
+              valueFrom:
+                secretKeyRef:
+                  name: openclaw
+                  key: DISCORD_CHANNEL_ID
+            - name: DISCORD_ROLE_ID
+              valueFrom:
+                secretKeyRef:
+                  name: openclaw
+                  key: DISCORD_ROLE_ID
+          envFrom:
+            - secretRef:
+                name: openclaw
+          securityContext: *container-security
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+          volumeMounts:
+            - name: state
+              mountPath: /home/node/.openclaw
+              subPath: openclaw
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: tmp-volume
+              mountPath: /tmp
+              subPath: gateway-tmp
+        - name: clone-repo
+          image: ghcr.io/spyrospsarras/openclaw-discord
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              repo=/home/node/work/epaflix
+              if [ ! -e "$repo" ]; then
+                rm -rf "$repo.partial"
+                git clone https://github.com/SpyrosPsarras/epaflix.git "$repo.partial"
+                mv "$repo.partial" "$repo"
+              fi
+              # GitHub links bot commits by the bot user ID, which differs from the App ID and is public.
+              if ! git -C "$repo" config user.email >/dev/null; then
+                email=$(node -e 'fetch("https://api.github.com/users/homelab-windmill-bot%5Bbot%5D").then(async r => { if (!r.ok) throw new Error(`GitHub users API returned ${r.status}`); const u = await r.json(); console.log(`${u.id}+${u.login}@users.noreply.github.com`); })')
+                git -C "$repo" config user.email "$email"
+              fi
+          securityContext: *container-security
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            - name: state
+              mountPath: /home/node/work
+              subPath: work
+            - name: tmp-volume
+              mountPath: /tmp
+              subPath: gateway-tmp
+      containers:
+        - name: openclaw
+          image: ghcr.io/spyrospsarras/openclaw-discord
+          command:
+            - node
+            - /app/dist/index.js
+            - gateway
+            - run
+          env: *openclaw-env
+          envFrom:
+            - secretRef:
+                name: openclaw
+          securityContext: *container-security
+          resources:
+            requests:
+              cpu: 250m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          startupProbe:
+            exec:
+              command: &startup-check
+                - node
+                - -e
+                - "require('http').get('http://127.0.0.1:18789/startupz', r => { let b = ''; r.on('data', d => b += d); r.on('end', () => { try { process.exit(r.statusCode < 400 && JSON.parse(b).status === 'started' ? 0 : 1); } catch { process.exit(1); } }); }).on('error', () => process.exit(1))"
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            exec:
+              command: *startup-check
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            exec:
+              command:
+                - node
+                - -e
+                - "require('http').get('http://127.0.0.1:18789/healthz', r => { let b = ''; r.on('data', d => b += d); r.on('end', () => { try { process.exit(r.statusCode < 400 && JSON.parse(b).ok === true ? 0 : 1); } catch { process.exit(1); } }); }).on('error', () => process.exit(1))"
+            periodSeconds: 30
+            timeoutSeconds: 10
+          volumeMounts:
+            - name: state
+              mountPath: /home/node/.openclaw
+              subPath: openclaw
+            - name: state
+              mountPath: /home/node/work
+              subPath: work
+            - name: tmp-volume
+              mountPath: /tmp
+              subPath: gateway-tmp
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+            - name: gh-token
+              mountPath: /run/gh
+              readOnly: true
+        - name: gh-token
+          image: ghcr.io/spyrospsarras/openclaw-discord
+          command:
+            - node
+            - /scripts/gh-token.mjs
+          env:
+            - name: GITHUB_APP_ID
+              valueFrom:
+                secretKeyRef:
+                  name: github-app
+                  key: app-id
+            - name: GITHUB_INSTALLATION_ID
+              valueFrom:
+                secretKeyRef:
+                  name: github-app
+                  key: installation-id
+            - name: GITHUB_APP_KEY_FILE
+              value: /var/run/secrets/github-app/private-key.pem
+          securityContext: *container-security
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          readinessProbe:
+            exec:
+              command:
+                - node
+                - -e
+                - "process.exit(Date.now() - require('fs').statSync('/run/gh/token').mtimeMs < 45 * 60000 ? 0 : 1)"
+            periodSeconds: 60
+            timeoutSeconds: 10
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+            - name: gh-token
+              mountPath: /run/gh
+            - name: github-app
+              mountPath: /var/run/secrets/github-app
+              readOnly: true
+      volumes:
+        - name: state
+          persistentVolumeClaim:
+            claimName: openclaw-state
+        - name: config
+          configMap:
+            name: openclaw-config
+        - name: scripts
+          configMap:
+            name: openclaw-config
+            defaultMode: 0555
+            items:
+              - {key: gh, path: gh}
+              - {key: git-credential-gh-token, path: git-credential-gh-token}
+              - {key: gitconfig, path: gitconfig}
+              - {key: gh-token.mjs, path: gh-token.mjs}
+        - name: github-app
+          secret:
+            secretName: github-app
+            defaultMode: 0440
+            items:
+              - {key: private-key.pem, path: private-key.pem}
+        - name: gh-token
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+        - name: tmp-volume
+          emptyDir: {}

@@ -24,7 +24,6 @@ configMapGenerator:
     files:
       - openclaw.json
       - AGENTS.md
-      - render.mjs
 
 images:
   # Built by build-openclaw-discord.yml; set the published digest before merging.

@@ -59,7 +59,7 @@ spec:
             - -c
             - |
               set -eu
-              node /config/render.mjs /config /home/node/.openclaw
+              node /opt/openclaw-discord/render.mjs /config /home/node/.openclaw
               result=$(openclaw config validate --json) || true
               echo "$result" | node -e 'process.exit(JSON.parse(require("fs").readFileSync(0,"utf8")).valid===true?0:1)' || { echo "$result" >&2; exit 1; }
           env: &openclaw-env
