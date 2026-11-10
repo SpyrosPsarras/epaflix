@@ -26,7 +26,7 @@ jobs:
             pinnedVersion: "v0.16.2"
             whatToDoWhenItMoves: >-
               Temporary Jellysweep overlay in images/jellysweep/, tracked in #2060.
-              The deployment pins the published overlay by digest with replicas 1 and JELLYSWEEP_DRY_RUN=true.
+              The deployment pins the published overlay by digest with replicas 1, without dry-run.
               For a new release, run `gh api repos/jon4hz/jellysweep/compare/da58d64...<tag> --jq .status`:
               only ahead or identical proves #440 shipped. Verify the collection-members fix with the same
               comparison from its upstream PR merge commit once it exists; otherwise read GetCollectionItems
@@ -55,8 +55,7 @@ jobs:
               close the signal until another release appears. Otherwise (neither fix, or only the
               collection-members fix), keep the overlay, record the assessment, move pinnedVersion to the
               assessed release, and close the signal.
-              Leave replicas and dry-run unchanged. Remove dry-run in a separate PR only after the owner
-              compares the first runs against the pre-upgrade baseline.
+              Leave replicas and dry-run unchanged.
               Assessed v0.16.2 on 2026-11-10: #440 shipped (compare status ahead); GetCollectionItems still
               reads recursively with no type filter, so the collection-members patch stays, refreshed for
               upstream's ItemsAPI to LibraryAPI rename. Source and base moved to release commit 0dc52d3.
