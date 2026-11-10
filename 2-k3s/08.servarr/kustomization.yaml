@@ -109,6 +109,9 @@ images:
   - name: ghcr.io/jon4hz/jellysweep
     newName: ghcr.io/spyrospsarras/jellysweep
     newTag: 0dc52d3-collection-direct-members-e6203e1604a9b7b86a95a09d4afd8093498d1c84@sha256:3f2cbe8cef80883a264d0e2e6d56b62813672fd59b6de238231f0f051e087b70
+  # OIDC login is only in the seerr-team/seerr#2715 preview. Move to a release tag once a release ships it.
+  - name: ghcr.io/seerr-team/seerr
+    newTag: preview-new-oidc@sha256:6970dc3fbfa1d335583937f1bc85794266a8d8a4c5b348716fede906085fc540
   - name: ghcr.io/fredrikburmester/streamystats-aio
     newTag: latest@sha256:9bc68f6301cc2ae749da950121d6efcbaa63335d458dad1d5967265af8e49382
   - name: ghcr.io/thephaseless/byparr

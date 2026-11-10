@@ -21,6 +21,7 @@ const moving = new Set([
 ]);
 const manual = new Set([
   'ghcr.io/fredrikburmester/streamystats-aio',
+  'ghcr.io/seerr-team/seerr',
 ]);
 // Self-built overlay images (TEMP OVERRIDE entries): excluded from Renovate in
 // .github/renovate.json, so extraction must see exactly these names disabled.
