@@ -184,9 +184,15 @@ at first; a Grafana alert fires when one key passes a daily threshold.
   bot PR if any changed path, old or new name, is outside
   `2-k3s/34.windmill/workspace/**`. It reads the file list from the GitHub
   API without checking out PR code, and the bot cannot edit `ci.yml`.
-- After merge, a CI job pushes changed scripts under
-  `2-k3s/34.windmill/workspace/f/` to workspace `screener` with the
-  Windmill CLI. This replaces today's manual API update.
+- A CronJob `windmill-deploy` in namespace `windmill`, every 10 minutes,
+  downloads `main` and runs `wmill sync push --keep-deleted` for
+  `2-k3s/34.windmill/workspace/f/` into workspace `screener`. It holds only
+  the Windmill token, has no ServiceAccount token, and reaches only
+  `windmill-app`, GitHub and npm. The Windmill CLI can run code and read
+  files from what it pushes, so it must not run where other secrets live:
+  the in-cluster GitHub runner holds homelab SSH keys. Code it runs reaches
+  only the Windmill workspace, which the bot already controls through the
+  scripts it merges. This replaces today's manual API update.
 - A Windmill change that needs a new resource, secret or network access
   touches files outside the allowlist, so CI blocks the merge. The agent
   says so in the channel and leaves the PR for Spyros.

@@ -7,9 +7,18 @@ resources:
   - database.yaml
   - ingressroute.yaml
   - network-policy.yaml
+  - deploy-cronjob.yaml
 
 generators:
   - ksops-generator.yaml
+
+configMapGenerator:
+  - name: windmill-deploy-script
+    namespace: windmill
+    files:
+      - deploy.mjs
+      - package.json=deploy-cli/package.json
+      - package-lock.json=deploy-cli/package-lock.json
 
 helmCharts:
   - name: windmill

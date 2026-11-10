@@ -42,7 +42,7 @@ No code. Send Spyros this list once, in chat. Each item ends with where the resu
 - [ ] **Step 3: GitHub App.** Create `homelab-windmill-bot` under the personal account. No webhook. Repository permissions: Contents read and write, Pull requests read and write, Checks read, Commit statuses read, Actions read, Metadata read. Nothing else, in particular no Workflows and no Administration. Install on epaflix only. Generate a private key and store it in the vault. Send the App ID and installation ID in chat.
 - [ ] **Step 4: Authentik.** After Task 5b is live, link his own Discord account in Authentik. (Spyros approved the controller creating the source, service account and token.)
 - [x] **Step 5: Media keys.** Jellyfin key `discord-media` created by the controller with Spyros's approval. Navidrome dropped: no admin access, and Lidarr covers music.
-- [ ] **Step 6: Windmill.** In workspace `screener`, create a token for a dedicated admin user `ci-deploy`, and store it as GitHub Actions secret `WINDMILL_TOKEN` on epaflix.
+- [ ] **Step 6: Windmill.** In workspace `screener`, create a token for a dedicated non-admin (developer) user `ci-deploy` with write access to folder `f/screener` only, and store it in the vault.
 
 ---
 

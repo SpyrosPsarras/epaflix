@@ -11,7 +11,7 @@ Two Authentik gates:
 1. Traefik forward auth with the Authentik proxy provider `windmill`. Anyone outside `Screener users` and `authentik Admins` gets Authentik's login or denial and never reaches Windmill. This also hides Windmill's own password login and API from the internet.
 2. Windmill's built-in `authentik` login provider with the Authentik OAuth2 provider `windmill-sso`. Windmill creates the user on the first login.
 
-Both Authentik applications bind `Screener users` and `authentik Admins`. The NetworkPolicy lets only Traefik reach `windmill-app`, so no request skips forward auth.
+Both Authentik applications bind `Screener users` and `authentik Admins`. The NetworkPolicy lets only Traefik and the `windmill-deploy` CronJob below reach `windmill-app`. Every other request passes forward auth. The CronJob skips it and authenticates with a Windmill API token.
 
 CE allows 10 users with SSO, 50 users, 3 workspaces and 4 groups (https://www.windmill.dev/pricing).
 
@@ -32,7 +32,9 @@ Removing someone from `Screener users` stops forward auth at their next Authenti
 
 ## Screener
 
-Script `f/screener/run_screen` in workspace `screener`. Its source and tests are in `workspace/`. CI runs the tests. After a merge that changes the script, update it in Windmill through the API with the merged file.
+Script `f/screener/run_screen` in workspace `screener`. Its source and tests are in `workspace/`. CI runs the tests. The CronJob in [Deploy](#deploy) pushes it to Windmill.
+
+The Discord agent in `#windmill` (GitHub App `homelab-windmill-bot`) changes the screener for members. It pushes a branch under `bots/windmill/`, opens a PR and turns on auto-merge. The CI job `bot-paths`, part of the required check `validate`, fails any such PR that changes a path outside `2-k3s/34.windmill/workspace/` or changes `workspace/wmill.yaml`. The check reads file names, not file contents. The job lives in `ci.yml`, which the App cannot change because it has no Workflows permission. Within 10 minutes of the merge, `windmill-deploy` pushes the change to Windmill.
 
 The script reads the Finviz screener URL, scrapes the matching rows with the `finviz` package, works out the levels and sends one email with a table of the matches and a CSV file. With no matches the email says so. A failed run sends an email with the error and also shows as failed in Windmill's run history. Three failures show only in the run history: a run that Windmill kills for a timeout or out of memory, a failed dependency install, and a run whose email cannot be sent. SMTP settings come from resource `f/screener/smtp`, so every workspace member can read that password.
 
@@ -59,6 +61,16 @@ The column names are the headers of the Finviz view in the URL. View `v=171` (Te
 4. To run it every trading day, add a schedule for `f/screener/run_screen` with cron `0 30 22 * * Mon-Fri` and time zone `Europe/Oslo`, with the same arguments. Windmill's cron starts with a seconds field. Check that the next runs Windmill shows fall on Monday to Friday. 22:30 Oslo time is after the US close all year, also in the weeks when US and European daylight saving time differ.
 
 Finviz has no free API, so the script reads its public pages. It can break when Finviz changes them. The free data is delayed, which is fine after the close.
+
+## Deploy
+
+CronJob `windmill-deploy` runs `deploy.mjs` every 10 minutes. It downloads `main` from GitHub, installs `windmill-cli` with `npm ci --ignore-scripts` from the lock in `deploy-cli/`, and runs `wmill sync push --yes --auto-metadata --keep-deleted` from `workspace/` into workspace `screener`. `workspace/wmill.yaml` limits the push to scripts, flows and apps under `f/`. It leaves variables, secrets, resources, schedules, folders, users' `u/` folders and workspace settings alone. `--keep-deleted` means the push never removes anything from Windmill. Add and change shared scripts through Git, not in the Windmill editor. To retire one, delete it in Git and archive it in Windmill by hand.
+
+The pod holds only the Windmill token: key `WINDMILL_TOKEN` of Secret `windmill-deploy`, passed to the CLI as `WM_TOKEN`, so it never appears in a command line. It has no ServiceAccount token, and its NetworkPolicy allows only DNS, `windmill-app` on 8000 and public addresses on 443. It does not run on the GitHub runner because the CLI can run code and read files from what it pushes, and the runner holds homelab SSH keys. Until the Secret exists, each run waits with `secret "windmill-deploy" not found` in the pod events and fails after 5 minutes.
+
+Each run ends with one JSON line, for example `{"commit":"<sha>","outcome":"deployed"}`, or `"outcome":"failed"` with an `error`. Read it in Loki with `{namespace="windmill", container="windmill-deploy"}`, or with `kubectl -n windmill logs job/<job name>`. To deploy now, run `kubectl -n windmill create job --from=cronjob/windmill-deploy windmill-deploy-manual-$(date +%s)` right after a scheduled run has finished: a manual Job does not wait for a running one.
+
+`deploy-cli/package.json` and its lock pin `windmill-cli` to the server version. When you bump the Windmill image in `values.yaml`, set the same version in `deploy-cli/package.json` and run `npm install --package-lock-only --ignore-scripts` in `deploy-cli/`. `deploy.test.py` fails while they differ. Renovate updates the `node` image digest in `deploy-cronjob.yaml`.
 
 ## Jobs
 

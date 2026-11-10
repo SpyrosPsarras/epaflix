@@ -301,6 +301,8 @@ jobs:
           python3 -m venv /tmp/screener
           /tmp/screener/bin/pip install -q --disable-pip-version-check -r 2-k3s/34.windmill/workspace/requirements-test.txt
           /tmp/screener/bin/python -m pytest -q 2-k3s/34.windmill/workspace/tests
+          python3 2-k3s/34.windmill/deploy.test.py -v
+          node --test 2-k3s/34.windmill/deploy.test.mjs
 
       - name: Google Workspace pinned-image contract
         env:
@@ -423,12 +425,47 @@ jobs:
         timeout-minutes: 15
         run: python3 2-k3s/01.kube-vip/tools/failover.test.py -v
 
+  bot-paths:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    steps:
+      - name: Bot PRs change only the Windmill workspace
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BOT_PR: >-
+            ${{ github.event_name == 'pull_request' &&
+            (github.event.pull_request.user.login == 'homelab-windmill-bot[bot]' ||
+            startsWith(github.head_ref, 'bots/')) }}
+          PR: ${{ github.event.pull_request.number }}
+          CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
+          REPO: ${{ github.repository }}
+          BASE: ${{ github.base_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          set -euo pipefail
+          if [ "$BOT_PR" != true ]; then echo "Not a bot PR."; exit 0; fi
+          # A base switched to main later keeps this commit's result, so any other base fails now.
+          if [ "$BASE" != main ]; then echo "ERROR: a bot PR must target main, not $BASE." >&2; exit 1; fi
+          if [ "$HEAD_REPO" != "$REPO" ]; then echo "ERROR: a bot PR must come from a branch of $REPO, not a fork." >&2; exit 1; fi
+          # The files API lists at most 3000 files, so a bigger PR could hide a path.
+          if [ "$CHANGED_FILES" -gt 3000 ]; then echo "ERROR: $CHANGED_FILES files, more than the API lists." >&2; exit 1; fi
+          bad=$(gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[] | .filename, (.previous_filename // empty) | select(startswith("2-k3s/34.windmill/workspace/") and . != "2-k3s/34.windmill/workspace/wmill.yaml" | not)')
+          if [ -n "$bad" ]; then
+            echo "ERROR: a bot PR may change only 2-k3s/34.windmill/workspace/, except wmill.yaml:" >&2
+            echo "$bad" >&2
+            exit 1
+          fi
+          echo "All changed paths are inside 2-k3s/34.windmill/workspace/."
+
   validate:
-    needs: [checks, t3-tests, smoke, kube-vip]
+    needs: [checks, t3-tests, smoke, kube-vip, bot-paths]
     if: >-
       always() &&
       (github.event_name == 'push' ||
-       github.event.pull_request.head.repo.full_name == github.repository)
+       github.event.pull_request.head.repo.full_name == github.repository ||
+       github.event.pull_request.user.login == 'homelab-windmill-bot[bot]' ||
+       startsWith(github.head_ref, 'bots/'))
     runs-on: ubuntu-latest
     steps:
       - name: Require all validation jobs to succeed
