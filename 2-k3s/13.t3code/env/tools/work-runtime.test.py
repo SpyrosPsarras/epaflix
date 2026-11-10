@@ -496,18 +496,16 @@ class WorkRuntimeTests(unittest.TestCase):
     def test_ci_covers_work_paths_variants_and_only_public_image_inputs(self):
         import yaml
         workflow = yaml.load((ROOT.parents[1] / '.github/workflows/build-t3-runtime.yml').read_text(), Loader=yaml.BaseLoader)
-        for event in ('push', 'pull_request'):
-            paths = workflow['on'][event]['paths']
-            for name in ('13.t3code', '13.t3code-homelab', '13.t3code-work'):
-                self.assertIn(f'2-k3s/{name}/**', paths)
+        self.assertNotIn('pull_request', workflow['on'])
+        paths = workflow['on']['push']['paths']
+        for name in ('13.t3code', '13.t3code-homelab', '13.t3code-work'):
+            self.assertIn(f'2-k3s/{name}/**', paths)
         build = workflow['jobs']['build']
         self.assertEqual(build['strategy']['matrix']['variant'], ['mixed', 'homelab', 'work'])
         steps = {step.get('name'): step for step in build['steps'] if 'name' in step}
         verification = steps['Build and boot without production credentials']['run']
         for name in ('13.t3code/one', '13.t3code-homelab', '13.t3code-work'):
             self.assertIn(f'2-k3s/{name}/statefulset.yaml', verification)
-        for name in ('Log in to GHCR', 'Publish the tested image'):
-            self.assertEqual(steps[name]['if'], "github.event_name != 'pull_request'")
         publish = steps['Publish the tested image']['run']
         self.assertIn('ghcr.io/spyrospsarras/t3-runtime', publish)
         self.assertIn('source=t3-runtime:$variant-dev; prefix=$variant-', publish)
@@ -520,6 +518,10 @@ class WorkRuntimeTests(unittest.TestCase):
         smoke = ci_steps['T3 install and runtime smoke']['run']
         self.assertEqual(ci['jobs']['smoke']['strategy']['matrix']['variant'], ['mixed', 'homelab', 'work'])
         self.assertIn('T3_RUNTIME_VARIANT="$VARIANT"', smoke)
+        self.assertIn('2-k3s/13.t3code 2-k3s/13.t3code-homelab 2-k3s/13.t3code-work', smoke)
+        pins = ci_steps['Runtime image pins match their inputs']['run']
+        for name in ('13.t3code/one', '13.t3code-homelab', '13.t3code-work'):
+            self.assertIn(f'2-k3s/{name}/statefulset.yaml', pins)
         allowed = {line[1:] for line in (ROOT / 'env/Dockerfile.dockerignore').read_text().splitlines() if line.startswith('!')}
         self.assertEqual(allowed, {'versions.env', 'env/', 'env/Dockerfile', 'env/tools/',
             'env/tools/os-packages.txt', 'env/tools/install-cluster-tools.sh',
