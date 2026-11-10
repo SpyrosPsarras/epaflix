@@ -256,7 +256,7 @@ class WindmillTests(AgentChecks, unittest.TestCase):
         self.assertEqual([name for name, volume in volumes.items() if "projected" in volume], [])
         self.assertEqual(secret_volumes, ["github-app"])
         self.assertEqual(volumes["github-app"]["secret"]["secretName"], "github-app")
-        self.assertEqual(volumes["github-app"]["secret"]["items"], [{"key": "private-key.pem", "path": "private-key.pem"}])
+        self.assertEqual(volumes["github-app"]["secret"]["items"], [{"key": "private-key", "path": "private-key.pem"}])
         self.assertEqual([(name, mount["mountPath"]) for name, mount in self.mounts("github-app")], [("gh-token", "/var/run/secrets/github-app")])
         for name, container in {**self.containers, **self.inits}.items():
             refs = [entry["valueFrom"]["secretKeyRef"]["name"] for entry in container.get("env", []) if "secretKeyRef" in entry.get("valueFrom", {})]

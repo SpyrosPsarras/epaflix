@@ -272,7 +272,7 @@ spec:
             secretName: github-app
             defaultMode: 0440
             items:
-              - {key: private-key.pem, path: private-key.pem}
+              - {key: private-key, path: private-key.pem}
         - name: gh-token
           emptyDir:
             medium: Memory

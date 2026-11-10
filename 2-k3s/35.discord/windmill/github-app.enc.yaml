@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: Secret
+metadata:
+    name: github-app
+    namespace: discord-windmill
+type: Opaque
+stringData:
+    app-id: ENC[AES256_GCM,data:/w5OKShQIw==,iv:LgwBP4rdcPV3fsXaJj5hB1YJdJ9KR70+3BK6W2FmYwQ=,tag:Dwk+q53pC2CE98SDRcw6ow==,type:str]
+    installation-id: ENC[AES256_GCM,data:b3jcH0rixeiH,iv:yGPH9YJQnQRDY1OFVqk0XnI/Nla3eBhabZWvOQlV1zU=,tag:nkVx6g92IecHk4pBd/XllA==,type:str]
+    private-key: ENC[AES256_GCM,data:GLfHWZ2qh9BVpOUY10vXF0BY6gr/QN1SVCTeJGyxO14w2nKyBac1w0ErXHG9sNhhyQGGbeJ7bCenLiuqhzbjD77Cjh8A64D+MBiD0KCKcC/PFrnPJ9yAvLan1t/aynG8P0PgeOxBXOjXh6BnGRwIng2Eck8YtsxdnzV0oJo+cKQ3D5chW2QFVM6rBk0xaVAhsHap2FNRILNf5l9Sbj8mqCSqEqqyUxFDmGaOKgwvQ6GKibt5tV1f9XNzfE0trFxiIzsLaM2FxhEsCRoLFoPbA8WYfYcZhTZPwNHxjMoOUwBEMbYmnBiWqPA9dmSiIowRbTeJT4fm6DT6T3dmHiFjVqCEZX3n7J6ZAnxrcn1mDX9HdaiP6ebmi/IxKLFI8b//CM/Bo+FOE+CMza6o9lmBxtZGrfqqfgQhlIRJnDEI8IEX+r8CRMTVCHgMP0878GAnNs4aK2Pm2ZKXwXZ1rjDY6Ob1Ba96XUtcFq87r7Dd1JpR2YplLGYp1YPdBvKqnPuAjeuBob/O7i8c1fx5z10CEUE4vGdOKg0zDRkbE7kT6Nv/YfhNjzp8/B9b8fQcBtD/F+fXLFTqhi1ARjXiDnyD+6QN1X24SLAxdPV3NycqQnZea7VUKr5VUTostlFJFOG93gFtflv3Ce1DPN3TUEPCMU/6lbkBHbB2WqJ1ZMHsoBQmkgBVwuVtpCRvtY5ftzih+0L20AHKR1D65Ftq/WBQOmWSwOVhWQc2/g7ehsitG9hF4VeOL6Us3I0mjCS1Kgl8eUY/KMdzNSnhQgQySRqQ+iOscGbXD9n48Akmzn25POsX6yuMPFrN7ymaWrndbTMrsfliMTUhDDzvt0Eqvprv74sKFmJduiSCf5XMACf9ip8JID8AFCn/Ernef19L/41mgw3/eUwVKu5H4ugold8lD3zURv58VSW/opqe+U38UerKMivU0vVjnXhxtUATHVOu5/gP5JYsSTo+Odpq3V/9+pZy4vnMrD1dRlYMLe1Idq/bA2Ki+j5YCBbxDvvlxAQI2mReY+tp4eiDanfbXCv6FPEKg+5GBVMtjqD5zfz2Lf7yfRSns0JTwouNKYCOkzQKSo6AeRmCxkfM5GllPsjgJorrdk99M6i7zV8++kTtT3+OXzTAKGx196Is4BHw83r8B8P3+ug0fpoaJF9RK6t0n4M7/JF+ZaBgPLcrhDQNA9ED08NxesFurot60rZq5Ox24kqhApUFACe6yDzSVIcYKSLncLwaFVqFRvqG8g7koBBRE3Mz+2ABcJx+VhapNDlR8+EcwCFXxhHiqSjaMrJ9QwuOYohRignyxDYsv+AT7pa+qamWe6FIRHS2X38zm2Hh3aNVDRhQNjWkzi8CXvL195himaVEv4iYYCIogcPhikYaVWewHt7wPOlEbmrs2LxNMB2zR8reF9hayqDCmbDH8J1FfvsddJC1ahr5footyimn57G23ZUfi3CkzFEYVynM9BGSCKDBe3EHKYfNwjnMZIN68mQFrggapaZIq4/njUlqFWl/mlGTPY+D/O5hohb4bDZDBcMES87FM/styP6/wuu2Z2//Zx+LZH5cfP8DZQVhLszXNack/tADDEYZMxdgTilkEDUSdHswHmBns2DRr92jg9AzSieMr94HxiBTi7dkmOepbJrv35PSlLe4uyTCUJdngJQ0663R7RXDnmi4irqgc3htr/2w39T1BdZCb0ntNUaX2+pPa8+6FQ3QxCFG5XHAkzUiLl3XzQOq1J4F1Ez3sG2nrnJrk11y7/HnrE3Lh1FyuMTflF8BzYzCJm/2hE/v2W42h3iSlOVLEHpiL9XDabjXyCp32cp41DAHxgzhtUtbKjTRzIajVbVmICQqDbtl3AJxic84NQC37N1zEu/kAG/PjBKpvrpkkzbqWsLxznBxHREUFxgYZGPDwbXkzx7GRc0JE0N7JBwxt0q69FiR05kHdOx2ZmM0a5mjyvYkQlX5L1h0IdVRJLLzfAdCJ71EiRXEgi0j1Mayd71KfamXXQwUsfrCnscSRN004ETOT0BwSRAawu09/sMZi9VxV6HW+scta6FyKyL3rISmAx91dC+fhdFML33sNrjSYCnRmWk0EutYR5JCtHTfNpTcS/CEeyAds1JtLp3A/iuowENgufEo8x5pWYv4JnxzbXmRTltD6rFar7qvTPHVUy/h1xRUWSoQAImtfkZwOKbDlI/vLm7KakxOnVf4+iYMZSQC6jloyaBUb00s96joETA=,iv:tE0KCdfHSmqB0U3HP0+9s+pebDrSB/pycW3u7w0iGz0=,tag:1wZ6GJz7B9hXvTiJP5WMqg==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSAyQ08yN2pHcmRnWGloWWVh
+            aWZWL3phWXFpeVdOaTJSV3RTb3BiZHJyTndjCi9QWkFKVGNEb2dvbFphQ1NqcGNp
+            NUxiRlY4WGl5R2FnMkpaREl0VTZ4SGMKLS0tIC8xWUVPd1FCTGFnbTJTSldDaHVq
+            QUZia1Yxak9wOTc4Mms0SDhIT0JJZjQKc9q8JNQzPbaZ3spXnmJ6I1jdNpLFT0mv
+            KNBtgWCNynySQ3tClGHIl9MMFYvsqzX4pNN6qBHIZpALsVICAppjUg==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1586thf5vkcdf5lcn3zwjpu8ltkwyq8efrhj8lr0vdrrt9k5f3qgsxeg7gx
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-11-10T10:42:44Z"
+    mac: ENC[AES256_GCM,data:zFAgVcUp7wfF5JaJallmyDe+5cSimX024fOCfA1xRFiGjKkUaI0PQK92HHl+3HVBRJ8R7+iBmJO3qeRxTwSYReJKiLWqkSzG1Pyw4ZWHY4gj40UYHBdSeiOqYyY7FJqwl/3ZlxpWGzaK0z841E/CKBx21/P3Jheh00ho2jPurnE=,iv:HuBNan3ACG0GjLQRGfTwk0sZH6Qg1OokneOyEbftvuw=,tag:1FItLQxzdltm+ks/ROQnYg==,type:str]
+    version: 3.13.3
