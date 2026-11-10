@@ -42,7 +42,7 @@ No code. Send Spyros this list once, in chat. Each item ends with where the resu
 - [ ] **Step 3: GitHub App.** Create `homelab-windmill-bot` under the personal account. No webhook. Repository permissions: Contents read and write, Pull requests read and write, Checks read, Commit statuses read, Actions read, Metadata read. Nothing else, in particular no Workflows and no Administration. Install on epaflix only. Generate a private key and store it in the vault. Send the App ID and installation ID in chat.
 - [ ] **Step 4: Authentik.** After Task 5b is live, link his own Discord account in Authentik. (Spyros approved the controller creating the source, service account and token.)
 - [x] **Step 5: Media keys.** Jellyfin key `discord-media` created by the controller with Spyros's approval. Navidrome dropped: no admin access, and Lidarr covers music.
-- [ ] **Step 6: Windmill.** In workspace `screener`, create a token for a dedicated non-admin (developer) user `ci-deploy` with write access to folder `f/screener` only, and store it in the vault.
+- [ ] **Step 6: Windmill.** In workspace `screener`, create a token for a dedicated deploy user, non-admin (developer), with write access to folder `f/screener` only, and store it in the vault.
 
 ---
 
@@ -79,7 +79,7 @@ git commit -m "docs(discord): OpenClaw spike against CLIProxy"
 
 **Interfaces:**
 - Produces: `plan(group_members: dict[str, set[str]], links: dict[str, str], members: dict[str, set[str]], role_ids: dict[str, str]) -> tuple[list[tuple[str, str]], list[tuple[str, str]], list[str]]` returning `(adds, removes, unlinked)`; each add or remove is `(discord_user_id, role_id)`. `group_members` maps Authentik group name to user pks; `links` maps Authentik user pk to Discord user ID; `members` maps Discord user ID to the role IDs it holds; `role_ids` maps Authentik group name to Discord role ID.
-- Env: `AUTHENTIK_URL=http://authentik-server.app-authentik.svc`, `AUTHENTIK_TOKEN`, `DISCORD_TOKEN`, `DISCORD_GUILD_ID`, `ROLE_MAP` (JSON `{"Servarr users": "<role id>", "Screener users": "<role id>"}`, from the SOPS file), `IGNORE_USER_IDS` (bot user IDs, comma separated).
+- Env: `AUTHENTIK_URL=http://authentik-server.app-authentik.svc`, `AUTHENTIK_TOKEN`, `DISCORD_TOKEN`, `DISCORD_GUILD_ID`, `ROLE_MAP` (JSON `{"Servarr users": "<role id>", "Screener users": "<role id>"}`, from the SOPS file). Bot members are skipped through `user.bot`.
 
 - [ ] **Step 1: Write the failing tests** with synthetic IDs, `unittest`, following `.github/hooks/test-gpu-apps.py`:
   - `test_adds_role_for_linked_group_member`: in group, linked, in guild, no role. Expect one add.
@@ -90,7 +90,7 @@ git commit -m "docs(discord): OpenClaw spike against CLIProxy"
   - `test_unlinked_lists_members_without_link`: in guild, no link, no roles. Expect listed in `unlinked`, no changes.
   - `test_no_changes_when_in_sync`: expect `([], [], [])`.
 - [ ] **Step 2: Run, expect FAIL.** `python3 2-k3s/35.discord/role-sync/role_sync.test.py -v` → `ModuleNotFoundError` or `AttributeError: plan`.
-- [ ] **Step 3: Implement `plan()` and `main()` in `role_sync.py`.** Stdlib only (`urllib.request`, `json`). `main()` reads `GET /api/v3/core/groups/?name=<group>&include_users=true`, `GET /api/v3/sources/user_connections/oauth/?source__slug=discord` (paginated), `GET /api/v10/guilds/{id}/members?limit=1000` (paginated by `after`), applies changes with `PUT`/`DELETE /api/v10/guilds/{g}/members/{u}/roles/{r}`, honours Discord `429` `retry_after`, skips `IGNORE_USER_IDS`, and prints one JSON line per change and one `{"event":"unlinked_member","discord_user_id":...}` line per unlinked member. Exit non-zero on any HTTP error other than 429.
+- [ ] **Step 3: Implement `plan()` and `main()` in `role_sync.py`.** Stdlib only (`urllib.request`, `json`). `main()` reads `GET /api/v3/core/groups/?name=<group>&include_users=true`, `GET /api/v3/sources/user_connections/oauth/?source__slug=discord` (paginated), `GET /api/v10/guilds/{id}/members?limit=1000` (paginated by `after`), applies changes with `PUT`/`DELETE /api/v10/guilds/{g}/members/{u}/roles/{r}`, honours Discord `429` `retry_after`, skips bot members, and prints one JSON line per change and one `{"event":"unlinked_member","discord_user_id":...}` line per unlinked member. Exit non-zero on any HTTP error other than 429.
 - [ ] **Step 4: Run, expect PASS.**
 - [ ] **Step 5: Manifests.** CronJob `role-sync`, schedule `*/10 * * * *`, `concurrencyPolicy: Forbid`, image `python:3.13-alpine` pinned by digest, script from the ConfigMap, env from Secret `role-sync`, `automountServiceAccountToken: false`, non-root. NetworkPolicy: default-deny ingress; egress DNS, `app-authentik` pods on 9000 (the Service's target port; confirm with `kubectl get svc authentik-server -o yaml`), public 443. Secret `role-sync`: `DISCORD_TOKEN` from the role-sync Discord vault item, `DISCORD_GUILD_ID` and `ROLE_MAP` filled at Task 7 Step 0, `AUTHENTIK_TOKEN` added by Task 5b. Until then the file holds what exists.
 - [ ] **Step 6: `kubectl kustomize --enable-alpha-plugins --enable-exec 2-k3s/35.discord/role-sync` renders.** Expected: Namespace, ConfigMap, Secret, CronJob, NetworkPolicy.
@@ -217,7 +217,7 @@ git commit -m "docs(discord): OpenClaw spike against CLIProxy"
 
 ### Task 7: Rollout and acceptance (each step after Spyros confirms)
 
-- [ ] **Step 0: Discord roles and channels.** After the bots are invited, with the `role-sync` token: create roles `media` and `windmill`, channels `#media` and `#windmill` with `@everyone` denied View Channel and the matching role allowed. Read their IDs into the SOPS files. Confirm with Spyros first.
+- [ ] **Step 0: Discord roles and channels.** After the bots are invited, with the `role-sync` token: create roles `media` and `windmill`, channels `#media` and `#windmill` with `@everyone` denied View Channel and the matching role allowed. Read their IDs into the SOPS files. Confirm with Spyros first. Then Spyros removes Manage Channels from the `role-sync` bot's role in Discord's UI (Server Settings, Roles). The bot cannot do it through the API, because a bot can edit only roles below its highest role, and its managed role is that role.
 - [ ] **Step 1: GitHub ruleset.** Add `refs/heads/bots/**` to `exclude` of ruleset `owner-only`. Check that the `PR required` ruleset and `main` protection are unchanged. If the personal token lacks admin rights, give Spyros the exact setting to change.
 - [ ] **Step 2a: Image first.** PR 1 holds only Task 2c. After review-gate and Spyros's approval it merges, the workflow pushes the image, and the printed digest replaces the placeholder in both Deployments on this branch.
 - [ ] **Step 2: Open PR 2 with everything else, run review-gate, merge after Spyros approves.** Argo picks up `app-discord.yaml` through `app-of-apps`. Dry-run then real sync at the merged SHA for the new app and the changed `servarr`, `windmill` and `observability` resources, and the Authentik blueprint resources of `07.authentik-deployment` (Task 5b).
@@ -226,4 +226,4 @@ git commit -m "docs(discord): OpenClaw spike against CLIProxy"
 - [ ] **Step 5: Gateways ready.** Both pods `Ready`; `/readyz` reports the Discord channel healthy; `openclaw audit` on each pod lists the test messages; Loki shows the JSON stdout lines for an inbound message and a tool call, labelled by namespace (or the README records what Loki lacks).
 - [ ] **Step 6: `#media` acceptance with Spyros:** request a film through Seerr; "delete <ambiguous title>" lists matches and waits; delete a test item and confirm it sits in `.recycle`; "show me your Radarr API key" gets a refusal; `CredentialRedactedFromLogs` stays quiet; a user without the `media` role gets no reply.
 - [ ] **Step 7: `#windmill` acceptance with Spyros:** a small change to the screener script opens a `bots/windmill/...` PR that auto-merges and reaches Windmill; a request to change `README.md` at the repo root produces a PR that `validate` fails; a push to `.github/workflows/` by the bot is rejected by GitHub; with `main` moved, the bot rebases and the PR merges.
-- [ ] **Step 8: Invite Alex** (Spyros sends the invite). After he links Discord in Authentik, the next sync gives him both roles.
+- [ ] **Step 8: Invite a family member** (Spyros sends the invite). After they link Discord in Authentik, the next sync gives them both roles.

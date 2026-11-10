@@ -118,7 +118,10 @@ These would make it a failure even if it works:
 | Authentik group | `Servarr users` | `Screener users` |
 | Model via CLIProxy | Claude Haiku 5.5 | Claude Opus 5.5 |
 | Holds | Seerr, Radarr, Sonarr, Lidarr, Bazarr, Jellyfin API keys | GitHub App key, installed on epaflix only |
-| Egress | DNS, Discord, CLIProxy, SearXNG, the media apps | DNS, Discord, CLIProxy, SearXNG, GitHub |
+| Egress | DNS, CLIProxy, SearXNG, the media apps, public 443 | DNS, CLIProxy, SearXNG, public 443 |
+
+Each Gateway reaches Discord and GitHub through public internet on 443
+(private ranges excluded); NetworkPolicy cannot filter by hostname.
 
 Both: our image built on the official OpenClaw image, pinned by digest,
 sandbox off, `automountServiceAccountToken: false`, only the first-party
@@ -136,7 +139,8 @@ channel. CLIProxy supports several client keys through its management API
 (`2-k3s/13.t3code-work/tools/provision.py`). Model IDs come from the
 CLIProxy catalogue at build time. Provider format is Anthropic messages
 against `http://cliproxy.remote-pi.svc.cluster.local:8317`. No usage cap
-at first; a Grafana alert fires when one key passes a daily threshold.
+at first; a per-key daily usage alert follows once the keys have
+distinct prefixes (see Audit and logs).
 
 ### Access from Authentik
 
@@ -147,7 +151,8 @@ at first; a Grafana alert fires when one key passes a daily threshold.
   IDs, then adds and removes the `media` and `windmill` Discord roles. It
   removes a mapped role from anyone not in the group and leaves unmapped
   roles alone.
-- The CronJob uses a third Discord application with Manage Roles only and
+- The CronJob uses a third Discord application with Manage Roles and,
+  only for the one-time setup, Manage Channels (removed afterwards), and
   no gateway connection, so neither agent pod holds a token that can grant
   roles.
 - It logs Discord members with no linked Authentik account and Loki
@@ -161,8 +166,8 @@ at first; a Grafana alert fires when one key passes a daily threshold.
   Secret.
 - NetworkPolicy egress allows only the targets in the table. Each media
   app's ingress policy admits the `discord-media` pod on its API port.
-- Seerr requests go through one Seerr bot user. Who asked is in the audit
-  log.
+- Seerr requests use Seerr's admin API key, an accepted risk: the agent
+  could change Seerr settings. Who asked is in the audit log.
 - Radarr, Sonarr and Lidarr get the Recycling Bin on, with 7 days of
   cleanup, so a wrong delete can be undone for a week.
 
@@ -215,8 +220,13 @@ changes. The Control UI is not exposed outside the pod.
   if they do not, G5 in Loki narrows to what they carry and the README
   says so. CLIProxy's transcript sidecar already ships the model
   conversations, including tool calls, to Loki.
-- Loki alerts: a Windmill bot PR blocked by the path check, Gateway
-  restarts, unlinked Discord members, and the CLIProxy usage threshold.
+- Loki alerts: `DiscordUnlinkedMember`, `DiscordRoleSyncAborted`,
+  `DiscordAgentErrors` and `WindmillDeployFailed`. Crash loops and failed
+  role-sync Jobs raise the cluster-wide `KubePodCrashLooping` and
+  `KubeJobFailedLastRun`. A bot PR blocked by the path check shows as a
+  failed GitHub check.
+- No per-key CLIProxy usage alert yet: it needs the two Discord keys
+  reissued with distinct key prefixes, pending the owner's decision.
 
 ### Owner steps
 
@@ -224,26 +234,28 @@ Spyros does these himself, from a list in the plan, no script:
 
 1. Create the Discord server.
 2. Create three Discord applications: `media` and `windmill` bots with
-   Message Content Intent, and `role-sync` with Manage Roles. Invite each
+   Message Content Intent, and `role-sync` with Server Members Intent,
+   Manage Roles and, for the one-time setup only, Manage Channels. Invite each
    to the server and store each token in the vault.
 3. Create the GitHub App `homelab-windmill-bot`, install it on epaflix and
    store its private key in the vault.
 4. Add the Discord social login source in Authentik and link his own
    account.
-5. Create a Windmill token for the post-merge job and store it as a GitHub
-   Actions secret.
+5. Create a Windmill token for the post-merge job and store it in the
+   vault. The agent encrypts it into `2-k3s/34.windmill/windmill-secrets.enc.yaml`.
 6. Invite family members and send them the link.
 
-Spyros also creates the two roles and two channels by hand, so the
-role-sync bot needs Manage Roles only. The agent then encrypts the tokens
+The controller creates the two roles and two channels with the
+role-sync token, then Spyros removes Manage Channels from the role-sync
+bot's role. The agent then encrypts the tokens
 into SOPS files and opens the PRs. The ruleset
 change in C1 is a PR-free GitHub setting, done after Spyros confirms.
 
 ## Calls made in this design
 
 - C1. `bots/**` excluded from `owner-only`; no bypass for the App.
-- C2. Seerr requests through one bot user.
-- C3. No CLIProxy cap at first; usage alert instead.
+- C2. Seerr requests use Seerr's admin API key (accepted risk).
+- C3. No CLIProxy cap at first; a per-key usage alert later instead.
 - C4. Unlinked Discord members are logged and alerted, not kicked.
 - C5. A third Discord application for role sync, so agent pods hold no
   role-granting token.

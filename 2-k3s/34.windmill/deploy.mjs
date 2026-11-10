@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gunzipSync } from "node:zlib";
 
-export const SOURCE = "https://codeload.github.com/SpyrosPsarras/epaflix/tar.gz/refs/heads/main";
+const SOURCE = "https://codeload.github.com/SpyrosPsarras/epaflix/tar.gz/refs/heads/main";
 const TOP = "epaflix-main";
 const WORKSPACE = "2-k3s/34.windmill/workspace";
 

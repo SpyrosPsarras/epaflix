@@ -1,6 +1,4 @@
-# Synthetic lines for the Discord and Windmill rules in loki-log-alerts.yaml.
-# Each case is its own stream in its own 20-minute slot, so cases in one
-# namespace never add up. `entries` pins how many Loki entries Alloy emits.
+# Each case gets its own stream and 20-minute slot so cases in one namespace never add up.
 - name: unlinked-member
   alert: DiscordUnlinkedMember
   namespace: discord-sync

@@ -99,7 +99,6 @@ def main():
     base = os.environ["AUTHENTIK_URL"].rstrip("/")
     guild = os.environ["DISCORD_GUILD_ID"]
     role_ids = json.loads(os.environ["ROLE_MAP"])
-    ignored = {user.strip() for user in os.environ.get("IGNORE_USER_IDS", "").split(",") if user.strip()}
     authentik_headers = {"Authorization": f"Bearer {os.environ['AUTHENTIK_TOKEN']}", "Accept": "application/json"}
     discord_headers = {
         "Authorization": f"Bot {os.environ['DISCORD_TOKEN']}",
@@ -111,7 +110,7 @@ def main():
         str(connection["user"]): connection["identifier"]
         for connection in authentik_list(base, authentik_headers, "sources/user_connections/oauth/", {"source__slug": "discord"})
     }
-    members = {user: roles for user, roles in guild_members(guild, discord_headers).items() if user not in ignored}
+    members = guild_members(guild, discord_headers)
 
     adds, removes, unlinked = plan(group_members, links, members, role_ids)
     for event, method, changes in [("role_added", "PUT", adds), ("role_removed", "DELETE", removes)]:
