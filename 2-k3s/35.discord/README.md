@@ -4,7 +4,7 @@ A private Discord server with one AI agent per channel. Argo CD app `discord` de
 
 | Channel | Who sees it | What the agent does |
 | --- | --- | --- |
-| `#media` | Discord role `media` | Finds, requests, adds and deletes movies, series and music, and fetches subtitles, through the Seerr, Radarr, Sonarr, Lidarr, Bazarr and Jellyfin APIs. Deletes run without the owner's approval. Radarr, Sonarr and Lidarr keep deleted files in their recycling bin for 7 days. |
+| `#media` | Discord role `media` | Uses the Seerr, Radarr, Sonarr, Lidarr, Bazarr and Jellyfin APIs. Finds and deletes movies, series and music, and fetches subtitles. Requests movies and series only through Seerr. Adds music in Lidarr. Deletes run without the owner's approval. Radarr, Sonarr and Lidarr keep deleted files in their recycling bin for 7 days. |
 | `#windmill` | Discord role `windmill` | Changes the Windmill workspace. It pushes a `bots/windmill/...` branch, opens a PR and turns on auto-merge. CI fails any bot PR that touches files outside `2-k3s/34.windmill/workspace/`. After the merge, `windmill-deploy` pushes it to Windmill. `2-k3s/34.windmill/README.md` has the details. |
 
 ## Access

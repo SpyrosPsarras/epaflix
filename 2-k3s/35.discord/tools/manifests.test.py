@@ -220,6 +220,11 @@ class MediaTests(AgentChecks, unittest.TestCase):
         for key in ["SEERR", "RADARR", "SONARR", "LIDARR", "BAZARR", "JELLYFIN"]:
             self.assertIn(f"${key}_API_KEY", text)
 
+    def test_agents_md_requests_only_through_seerr(self):
+        text = (DISCORD / "media/AGENTS.md").read_text()
+        self.assertIn("only through Seerr. Never add them in Radarr or Sonarr.", text)
+        self.assertIsNone(re.search(r"(POST|PUT) /(api/v3/)?(movie|series)\b|/(movie|series)/lookup|--data-urlencode \"query=|\badd\b[^.]*\bmovies\b", text))
+
     def test_no_discord_ids_in_plaintext(self):
         for path in DISCORD.rglob("*"):
             if path.is_file() and not path.name.endswith(".enc.yaml") and "__pycache__" not in path.parts:
