@@ -94,6 +94,13 @@
       "automerge": false
     },
     {
+      "description": "Seerr runs the ghcr.io/seerr-team/seerr preview-new-oidc build of PR seerr-team/seerr#2715, because no release has OIDC login and OIDC is the only login method. Each preview push can carry database migrations that cannot be rolled back, so every update needs review and a jellyseerr database dump before merge. Move to a release tag once a release contains OIDC.",
+      "matchFileNames": ["2-k3s/08.servarr/kustomization.yaml"],
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["ghcr.io/seerr-team/seerr"],
+      "automerge": false
+    },
+    {
       "description": "CLIProxyAPI: never auto-merge, any update type (#1221). Tracking resumed when the pr-5411 fork was retired and the pin went back to this tag stream, so the repo-wide automerge would otherwise own it. Two reasons it must not: this image is the gateway every agent session talks to, so a bad bump stops all coding work at once, and upstream ships fast - 27 releases in the 20 days from v7.2.148 (2026-09-03) to v7.3.15 (2026-09-23), including the v7.3.0 minor. The binary also impersonates a pinned Claude Code version (claude_device_profile.go, 2.1.280 at v7.3.15), so a release can change which Anthropic models are accepted, in both directions. PR opens, you merge it when you are not mid-task.",
       "matchManagers": ["kustomize"],
       "matchPackageNames": ["docker.io/eceasy/cli-proxy-api"],

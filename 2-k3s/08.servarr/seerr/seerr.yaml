@@ -58,8 +58,7 @@ spec:
               readOnly: true
       containers:
         - name: seerr
-          image: fallenbagel/jellyseerr:preview-OIDC
-          imagePullPolicy: Always
+          image: ghcr.io/seerr-team/seerr
           env:
             - name: PUID
               value: "568"
