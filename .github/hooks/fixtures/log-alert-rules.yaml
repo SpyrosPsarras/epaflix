@@ -1,0 +1,128 @@
+# Synthetic lines for the Discord and Windmill rules in loki-log-alerts.yaml.
+# Each case is its own stream in its own 20-minute slot, so cases in one
+# namespace never add up. `entries` pins how many Loki entries Alloy emits.
+- name: unlinked-member
+  alert: DiscordUnlinkedMember
+  namespace: discord-sync
+  container: role-sync
+  entries: 2
+  lines:
+    - '{"event": "role_added", "discord_user_id": "1001", "role_id": "2001"}'
+    - '{"event": "unlinked_member", "discord_user_id": "1002"}'
+  fires: true
+- name: role-changes-only
+  alert: DiscordUnlinkedMember
+  namespace: discord-sync
+  container: role-sync
+  lines:
+    - '{"event": "role_added", "discord_user_id": "1001", "role_id": "2001"}'
+    - '{"event": "role_removed", "discord_user_id": "1003", "role_id": "2001"}'
+  fires: false
+- name: unlinked-member-ruler-echo
+  alert: DiscordUnlinkedMember
+  namespace: observability
+  container: loki
+  lines:
+    - 'level=info caller=engine.go msg="executing query" query="sum(count_over_time({namespace=\"discord-sync\"} |~ `\"event\": ?\"unlinked_member\"` [15m])) > 0"'
+  fires: false
+- name: sync-aborted
+  alert: DiscordRoleSyncAborted
+  namespace: discord-sync
+  container: role-sync
+  lines:
+    - '{"event": "aborted", "reason": "Authentik returned no Discord links"}'
+  fires: true
+- name: sync-group-not-found
+  alert: DiscordRoleSyncAborted
+  namespace: discord-sync
+  container: role-sync
+  lines:
+    - '{"event": "group_not_found", "group": "Example users"}'
+  fires: true
+- name: sync-normal-run
+  alert: DiscordRoleSyncAborted
+  namespace: discord-sync
+  container: role-sync
+  lines:
+    - '{"event": "role_added", "discord_user_id": "1001", "role_id": "2001"}'
+    - '{"event": "unlinked_member", "discord_user_id": "1002"}'
+  fires: false
+- name: agent-five-errors
+  alert: DiscordAgentErrors
+  namespace: discord-media
+  container: openclaw
+  entries: 9
+  lines:
+    - '{"time":"2026-11-09T12:00:00.000+00:00","level":"info","subsystem":"gateway","message":"ready"}'
+    - '{"time":"2026-11-09T12:00:01.000+00:00","level":"error","subsystem":"gateway/channels/discord","message":"send failed"}'
+    - '{"time":"2026-11-09T12:00:02.000+00:00","level":"info","subsystem":"agent","message":"run started"}'
+    - '{"time":"2026-11-09T12:00:03.000+00:00","level":"error","subsystem":"agent","message":"model call failed"}'
+    - '{"time":"2026-11-09T12:00:04.000+00:00","level":"error","subsystem":"agent","message":"model call failed"}'
+    - '{"time":"2026-11-09T12:00:05.000+00:00","level":"warn","subsystem":"agent","message":"retrying"}'
+    - '{"time":"2026-11-09T12:00:06.000+00:00","level":"fatal","subsystem":"gateway","message":"stopped"}'
+    - '{"time":"2026-11-09T12:00:07.000+00:00","level":"info","subsystem":"gateway","message":"ready"}'
+    - '{"time":"2026-11-09T12:00:08.000+00:00","level":"error","subsystem":"gateway/channels/discord","message":"send failed"}'
+  fires: true
+- name: agent-four-errors
+  alert: DiscordAgentErrors
+  namespace: discord-windmill
+  container: openclaw
+  entries: 6
+  lines:
+    - '{"time":"2026-11-09T12:00:00.000+00:00","level":"error","subsystem":"agent","message":"model call failed"}'
+    - '{"time":"2026-11-09T12:00:01.000+00:00","level":"error","subsystem":"agent","message":"model call failed"}'
+    - '{"time":"2026-11-09T12:00:02.000+00:00","level":"error","subsystem":"agent","message":"model call failed"}'
+    - '{"time":"2026-11-09T12:00:03.000+00:00","level":"error","subsystem":"agent","message":"model call failed"}'
+    - '{"time":"2026-11-09T12:00:04.000+00:00","level":"info","subsystem":"agent","message":"previous error recovered"}'
+    - '{"time":"2026-11-09T12:00:05.000+00:00","level":"warn","subsystem":"agent","message":"error rate high"}'
+  fires: false
+- name: agent-error-text-not-level
+  alert: DiscordAgentErrors
+  namespace: discord-media
+  container: openclaw
+  entries: 5
+  lines:
+    - '{"time":"2026-11-09T12:00:00.000+00:00","level":"info","subsystem":"agent","message":"tool returned an error"}'
+    - '{"time":"2026-11-09T12:00:01.000+00:00","level":"debug","error":{"level":"error"},"subsystem":"agent","message":"retry"}'
+    - '{"time":"2026-11-09T12:00:02.000+00:00","level":"info","subsystem":"agent","message":"fatal: not a git repository"}'
+    - '{"time":"2026-11-09T12:00:03.000+00:00","level":"warn","subsystem":"agent","message":"level error"}'
+    - 'Error: plain text without a level'
+  fires: false
+- name: token-sidecar-failing
+  alert: DiscordAgentErrors
+  namespace: discord-windmill
+  container: gh-token
+  lines:
+    - 'gh-token: fetch failed ECONNRESET'
+    - 'gh-token: fetch failed ECONNRESET'
+    - 'gh-token: GitHub returned 401 '
+    - 'gh-token: GitHub returned 401 '
+    - 'gh-token: GitHub returned 401 '
+  fires: true
+- name: token-sidecar-healthy
+  alert: DiscordAgentErrors
+  namespace: discord-windmill
+  container: gh-token
+  lines:
+    - 'gh-token: refreshed'
+    - 'gh-token: refreshed'
+    - 'gh-token: refreshed'
+    - 'gh-token: refreshed'
+    - 'gh-token: refreshed'
+  fires: false
+- name: deploy-failed
+  alert: WindmillDeployFailed
+  namespace: windmill
+  container: windmill-deploy
+  lines:
+    - 'Computing the files to update on the remote to match local'
+    - '{"commit":"0123456789abcdef0123456789abcdef01234567","outcome":"failed","error":"wmill exited with 1"}'
+  fires: true
+- name: deploy-ok
+  alert: WindmillDeployFailed
+  namespace: windmill
+  container: windmill-deploy
+  lines:
+    - 'Computing the files to update on the remote to match local'
+    - '{"commit":"0123456789abcdef0123456789abcdef01234567","outcome":"deployed"}'
+  fires: false

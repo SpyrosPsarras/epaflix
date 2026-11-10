@@ -39,9 +39,13 @@ common:
   ring:
     kvstore:
       store: inmemory
+# Rule cases sit up to 5h back; keep them in the ingester and query it there.
 ingester:
+  max_chunk_age: 24h
   lifecycler:
     min_ready_duration: 0
+querier:
+  query_ingesters_within: 0
 schema_config:
   configs:
     - from: "2024-01-01"
@@ -62,8 +66,10 @@ def main():
     rule_path = Path(sys.argv[1]) if len(sys.argv) > 1 else OBSERVABILITY / "alertmanager-config/loki-log-alerts.yaml"
     alloy_path = Path(sys.argv[2]) if len(sys.argv) > 2 else OBSERVABILITY / "alloy-values.yaml"
     rules = yaml.safe_load(yaml.safe_load(rule_path.read_text())["data"]["log-alerts.yaml"])
-    rule = next(r for g in rules["groups"] for r in g["rules"] if r["alert"] == "ServarrErrorSpike")
+    by_name = {r["alert"]: r for g in rules["groups"] for r in g["rules"]}
+    rule = by_name["ServarrErrorSpike"]
     cases = yaml.safe_load((ROOT / ".github/hooks/fixtures/servarr-log-levels.yaml").read_text())
+    rule_cases = yaml.safe_load((ROOT / ".github/hooks/fixtures/log-alert-rules.yaml").read_text())
     shipped = yaml.safe_load(alloy_path.read_text())["alloy"]["configMap"]["content"]
     # Keep every shipped process stage, substituting only discovery and the sink.
     process = 'loki.process "pods" {' + shipped.split('loki.process "pods" {', 1)[1].split('\nloki.write "default"', 1)[0]
@@ -99,6 +105,17 @@ def main():
             (directory / f"{name}.log").write_text("".join(cri_lines))
             targets.append('{__path__ = "/fixtures/' + name + '.log", namespace = ' +
                            json.dumps(case.get("namespace", "servarr")) + ', container = ' + json.dumps(name) + '}')
+        slot = 20 * 60 * 1_000_000_000
+        for index, case in enumerate(rule_cases):
+            case["at"] = now - (index + 1) * slot
+            cri_lines = []
+            for i, line in enumerate(case["lines"]):
+                stamp = case["at"] - 10 * 60 * 1_000_000_000 + i * 1_000_000_000
+                date = datetime.fromtimestamp(stamp // 1_000_000_000, timezone.utc)
+                cri_lines.append(date.strftime("%Y-%m-%dT%H:%M:%S") + f".{stamp % 1_000_000_000:09d}Z stdout F {line}\n")
+            (directory / f"rule-{case['name']}.log").write_text("".join(cri_lines))
+            targets.append('{__path__ = "/fixtures/rule-' + case["name"] + '.log", namespace = ' + json.dumps(case["namespace"]) +
+                           ', container = ' + json.dumps(case["container"]) + ', pod = ' + json.dumps(case["name"]) + '}')
         source = 'loki.source.file "fixtures" {\n targets = [' + ',\n'.join(targets) + ',]\n forward_to = [loki.process.pods.receiver]\n}\n'
         sink = 'loki.write "default" {\n endpoint {\n url = "http://loki:3100/loki/api/v1/push"\n }\n}\n'
         (directory / "config.alloy").write_text(source + process + sink)
@@ -183,6 +200,30 @@ def main():
             assert not (set(actual) - set(expected_lines)), "Unexpected alert labels"
             assert not failed, f"{len(failed)} Alloy/LogQL regression cases failed"
             print(f"PASS: {len(cases)} raw CRI cases, shipped Alloy v1.20.1 process, Loki 3.6.11 LogQL")
+
+            def query_at(expr, at):
+                params = urllib.parse.urlencode({"query": expr, "time": str(at)})
+                result = json.loads(request("/loki/api/v1/query?" + params))
+                assert result["status"] == "success", f"Local Loki query failed: {expr}"
+                return sum(float(r["value"][1]) for r in result["data"]["result"])
+
+            for case in rule_cases:
+                stream = f'{{pod="{case["name"]}"}}'
+                entries, previous = 0, None
+                for _ in range(40):
+                    entries = query_at(f"sum(count_over_time({stream}[15m]))", case["at"])
+                    if entries and entries == case.get("entries", previous):
+                        break
+                    previous = entries
+                    time.sleep(0.25)
+                fired = bool(query_at(by_name[case["alert"]]["expr"], case["at"]))
+                ok = fired == case["fires"] and entries == case.get("entries", entries) and entries > 0
+                print(f"{'PASS' if ok else 'FAIL'} {case['alert']}/{case['name']}: fires expected={case['fires']}, "
+                      f"actual={fired}; entries expected={case.get('entries', 'any')}, actual={entries:g}")
+                if not ok:
+                    failed.append(case["name"])
+            assert not failed, f"{len(failed)} rule cases failed"
+            print(f"PASS: {len(rule_cases)} Discord and Windmill rule cases")
         except Exception:
             for container in containers:
                 print(docker("logs", container)[-4000:])
