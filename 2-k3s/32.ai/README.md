@@ -20,7 +20,7 @@ Jellyfin mounts `servarr-media` subdirectories for `/movies`, `/tvshows`, and `/
 
 Jellyfin and Ollama each request one NVIDIA time-sliced GPU allocation and require the `nvidia` RuntimeClass. Merge and deploy the separate GPU-node/device-plugin change first. It also makes Alloy and node-exporter tolerate the GPU taint and moves GPU monitoring off TrueNAS. Open WebUI requests no GPU and disables its image's embedded Ollama process.
 
-Memory limits total 16.5 GiB: Jellyfin 4 GiB, Ollama 8 GiB, Open WebUI 4 GiB, and Valkey 512 MiB. This leaves about 3 GiB of node-allocatable memory for daemonsets and the OS on the 20 GiB VM. Ollama's former 16 GiB and Valkey's former 4 GiB compose limits do not fit together here. CPU limits remain 4 for Ollama and 2 each for Open WebUI and Valkey.
+Memory limits total 16.5 GiB: Jellyfin 4 GiB, Ollama 8 GiB, Open WebUI 4 GiB, and Valkey 512 MiB. Ollama's former 16 GiB and Valkey's former 4 GiB compose limits were cut to these values. CPU limits remain 4 for Ollama and 2 each for Open WebUI and Valkey.
 
 ## Endpoints and cutover checks
 
