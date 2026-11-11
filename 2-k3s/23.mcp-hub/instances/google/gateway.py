@@ -4,16 +4,17 @@ import re
 
 import mcp_hub
 from starlette.applications import Starlette
-from upstream import Upstream
+from upstream import Upstream, attachment_route
 import uvicorn
 
 
 def app(token: str, *, transport=None) -> Starlette:
     if not re.fullmatch(r"[A-Za-z0-9_-]+", token) or len(token) < 16:
         raise ValueError("An independent Google upstream credential is required")
+    up = Upstream("google", "http://127.0.0.1:8001/mcp", transport=transport)
     return mcp_hub.build_app(
         {"google": hashlib.sha256(token.encode()).hexdigest()}, modules=(),
-        ups=[("/mcp", Upstream("google", "http://127.0.0.1:8001/mcp", transport=transport))],
+        ups=[("/mcp", up)], extra_routes=[attachment_route("/attachments/{file_id}", up)],
     )
 
 

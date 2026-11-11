@@ -130,6 +130,7 @@ def instance_app(environment, services_file, credentials_file):
                     hashlib.sha256(token.encode()).hexdigest() in credentials["clients"].values()):
                 raise ValueError("upstream and ordinary client credentials must be separate")
     ups = []
+    extra_routes = []
     for name in config["services"]:
         connection = connections[name]
         if name == "notion":
@@ -146,7 +147,9 @@ def instance_app(environment, services_file, credentials_file):
             up = Upstream(name, connection["url"], lambda token=connection["token"]:
                           {"Authorization": "Bearer " + token})
         ups.append((hub_services.PATHS[name], up))
-    return build_app(credentials["clients"], modules=(), ups=ups, environment=environment)
+        if name == "drive":
+            extra_routes.append(upstream.attachment_route("/drive/attachments/{file_id}", up))
+    return build_app(credentials["clients"], modules=(), ups=ups, environment=environment, extra_routes=extra_routes)
 
 
 class BearerAuth:
@@ -172,7 +175,7 @@ class BearerAuth:
         await self.app(scope, receive, send)
 
 
-def build_app(clients, modules=MODULES, ups=None, environment=None):
+def build_app(clients, modules=MODULES, ups=None, environment=None, extra_routes=()):
     if not clients:
         raise SystemExit("no clients: CLIENTS_FILE lists none (run 2-k3s/23.mcp-hub/tools/add-client.py)")
     ups = upstreams() if ups is None else ups
@@ -185,6 +188,7 @@ def build_app(clients, modules=MODULES, ups=None, environment=None):
             streamable_http_path=path, host="0.0.0.0", stateless_http=True, json_response=True
         ).routes
     routes += [upstream.route(path, up) for path, up in ups]
+    routes += list(extra_routes)
 
     @contextlib.asynccontextmanager
     async def lifespan(app):

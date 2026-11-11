@@ -30,6 +30,8 @@ them. Use existing open-source apps and write no new app.
   which leaves this out.
 - An off-site copy. Storage is temporary, as the Storage section says.
 - Email ingestion, a watched folder on a PC, and document chat (RAG).
+  Email and Drive import later moved in scope, see
+  `2026-11-10-paperless-ingest-design.md`.
 - An iPhone app. The owner chose an Android app only. iPhone users
   can use the web UI.
 - Paperless-ngx's built-in AI. Its "Apply AI Suggestions" workflow

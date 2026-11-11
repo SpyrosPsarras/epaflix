@@ -50,6 +50,8 @@ spec:
               value: 127.0.0.1
             - name: WORKSPACE_MCP_PORT
               value: "8001"
+            - name: WORKSPACE_EXTERNAL_URL
+              value: http://mcp-hub.mcp-hub-homelab.svc.cluster.local:8000/drive
             - name: WORKSPACE_MCP_CREDENTIALS_DIR
               value: /creds
             - name: WORKSPACE_MCP_LOG_LEVEL
@@ -187,7 +189,7 @@ spec:
             medium: Memory
             sizeLimit: 1Mi
         - name: raw-tmp
-          emptyDir: {}
+          emptyDir: {sizeLimit: 2Gi}
         - name: gateway-tmp
           emptyDir: {}
         - name: py
