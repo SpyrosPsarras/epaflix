@@ -113,9 +113,10 @@
 **Files:**
 - Create: `1-proxmox/pbs/server/notifications.cfg` (repo copy of `/etc/proxmox-backup/notifications.cfg`, no secrets)
 - Create: `1-proxmox/pbs/server/notification-templates/verify-err-body.txt.hbs`
+- Create: `1-proxmox/pbs/server/notification-templates/package-updates-body.txt.hbs`
 
 - [ ] **Step 1: Write the repo copy.** Same matcher as live (`default-matcher`, invert prune/info), target `discord-pbs`, same body shape as Task 4 with `"username":"PBS"`, no node line (PBS bodies already link to `#pbsServerAdministration:tasks`).
-- [ ] **Step 2: Write the verify-err override.** Job ID, datastore, the number of failed snapshots instead of the list, and the stock tasks link. Every other PBS body is short; keep the stock ones.
+- [ ] **Step 2: Write the verify-err override.** Job ID, datastore, the number of failed snapshots instead of the list, and the stock tasks link. Add a package-updates override that prints the number of updates and the updates link. Keep the other stock bodies.
 - [ ] **Step 3: Commit.** `feat(pbs): PBS notifications to Discord`
 
 ### Task 6: Docs in PR 1
