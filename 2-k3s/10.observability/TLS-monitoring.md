@@ -40,9 +40,10 @@ as reachable endpoints. This checks certificate dates, not trust-chain validity.
 Before closing #1122, deploy the chart and rules, confirm all five
 `probe_success{job="tls-probe"}` values are 1 and certificate dates exist, then
 temporarily raise an expiry threshold on a uniquely named test rule. Observe
-Prometheus firing and ntfy `k8s-alertmanager` receiving FIRING. Restore the
-expression, observe RESOLVED on ntfy, then remove the test rule. Record timestamps
-and notification IDs in the issue. Never expire a real certificate for this test.
+Prometheus firing and the Discord `#notifications` channel receiving FIRING.
+Restore the expression, observe RESOLVED in `#notifications`, then remove the
+test rule. Record timestamps and notification IDs in the issue. Never expire a
+real certificate for this test.
 
 Verified on 2026-09-15 with `TLSCertificateExpiryCriticalTest1122`, a 365-day
 threshold on the live takaros metric. ntfy recorded FIRING at 14:59:49 UTC,

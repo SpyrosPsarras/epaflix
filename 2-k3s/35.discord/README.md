@@ -7,6 +7,27 @@ A private Discord server with one AI agent per channel. Argo CD app `discord` de
 | `#media` | Discord role `media` | Uses the Seerr, Radarr, Sonarr, Lidarr, Bazarr and Jellyfin APIs. Finds and deletes movies, series and music, and fetches subtitles. Requests movies and series only through Seerr. Adds music in Lidarr. Deletes run without the owner's approval. Radarr, Sonarr and Lidarr keep deleted files in their recycling bin for 7 days. |
 | `#windmill` | Discord role `windmill` | Changes the Windmill workspace. It pushes a `bots/windmill/...` branch, opens a PR and turns on auto-merge. CI fails any bot PR that touches files outside `2-k3s/34.windmill/workspace/`. After the merge, `windmill-deploy` pushes it to Windmill. `2-k3s/34.windmill/README.md` has the details. |
 
+## Notifications channel
+
+`#notifications` receives homelab alerts through one Discord webhook. No agent reads it. The notifications vault item holds the webhook URL as its password and the `@notifications` role ID in field `roleID`.
+
+Loud messages mention `@notifications`: Alertmanager alerts firing with severity critical, every PVE notification, PBS notifications with severity warning, error or unknown, and script messages with priority `high` or `urgent`. Everything else posts without a mention. Members set the channel to "only @mentions".
+
+Each sender keeps its own copy of the URL:
+
+| Sender | Where the URL lives |
+| --- | --- |
+| Alertmanager | SOPS `2-k3s/10.observability/secrets/alertmanager-config-secret.enc.yaml`, receiver `discord`, with the role ID |
+| Unpackerr | SOPS `2-k3s/08.servarr/_shared/secrets/unpackerr-secret.enc.yaml`, key `UN_WEBHOOK_0_URL` |
+| PVE | Target `discord-pve` in `1-proxmox/pbs/notifications.cfg`. Secrets `id`, `token` and `role` in `/etc/pve/priv/notifications.cfg`. The vzdump body override `1-proxmox/pbs/notification-templates/vzdump-body.txt.hbs` goes to `/etc/pve/notification-templates/default/` |
+| PBS | Targets `discord-pbs` (loud) and `discord-pbs-quiet` in `1-proxmox/pbs/server/notifications.cfg`. Secrets `id` and `token`, plus `role` on `discord-pbs`, in `/etc/proxmox-backup/notifications-priv.cfg`. The overrides `verify-err-body.txt.hbs` and `package-updates-body.txt.hbs` in `1-proxmox/pbs/server/notification-templates/` go to `/etc/proxmox-backup/notification-templates/default/` |
+| TrueNAS | `0-truenas/scripts/keystatus-check.sh` reads the env file named by `DISCORD_ENV_FILE` (default `/root/.config/discord-webhook.env`). A root TrueNAS cron job (`midclt call cronjob.create`) runs it every 15 minutes with `DISCORD_ENV_FILE` set. Keep the script and env file on a non-encrypted pool path, because TrueNAS replaces the boot pool on upgrade |
+| PBS guest | `1-proxmox/pbs/datastore-usage-alert.sh` reads `/root/.config/discord-webhook.env` |
+
+Both env files are mode 600 and set `DISCORD_WEBHOOK_URL` and `DISCORD_ROLE_ID`.
+
+Jellysweep still posts to ntfy.
+
 ## Access
 
 The owner gives the `media` or `windmill` Discord role by hand in Discord, and removes it to revoke access. Each Gateway checks the role ID on every message, so removal takes effect at once. Authentik does not control the bots: removing someone from Authentik does not remove their Discord access.
@@ -47,6 +68,7 @@ Store the new value in the vault first. Write it into the SOPS file with `sops s
 | `discord-windmill/openclaw` | `windmill/secrets.enc.yaml` | `DISCORD_BOT_TOKEN`, `CLIPROXY_API_KEY`, plus the Discord IDs |
 | `discord-windmill/github-app` | `windmill/github-app.enc.yaml` | `app-id`, `installation-id`, `private-key` |
 | `windmill/windmill-deploy` | `2-k3s/34.windmill/windmill-deploy.enc.yaml` | `WINDMILL_TOKEN` |
+| `#notifications` webhook | Every place in the sender table above | Webhook URL and role ID |
 
 A new `CLIPROXY_API_KEY` must be added to CLIProxy's client key list (a live change through its management API) before the SOPS edit, and the old one removed after the pod restarts.
 

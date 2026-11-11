@@ -6,11 +6,15 @@ set -euo pipefail
 # The #1075 incident: the datastore sat at 100% for ~12 days while every nightly
 # backup on evanthoulaki failed with ENOSPC, and the PVE notification path was
 # dead (#1076, #1108). This script runs on the PBS guest (LXC 1031), which owns
-# /mnt/VMs, and posts straight to ntfy, bypassing PVE's broken webhook entirely.
+# /mnt/VMs, and posts straight to a Discord webhook, bypassing PVE's
+# notification path entirely.
 #
 # Install on LXC 1031:
 #   scp datastore-usage-alert.sh root@<lxc-1031-ip>:/usr/local/sbin/
 #   chmod +x /usr/local/sbin/datastore-usage-alert.sh
+#   write /root/.config/discord-webhook.env (mode 600) with two lines:
+#     DISCORD_WEBHOOK_URL=...  and  DISCORD_ROLE_ID=...
+#   (DISCORD_ENV_FILE overrides the path)
 #   echo '*/15 * * * * root /usr/local/sbin/datastore-usage-alert.sh' \
 #     > /etc/cron.d/pbs-datastore-usage
 #
@@ -30,27 +34,38 @@ set -euo pipefail
 # water mark; a nightly urgent page at 00:00 is a real sizing problem, not
 # noise.
 #
-# ponytail: cron+ntfy alert, not a Prometheus exporter - if this guest itself
-# is down nothing fires here, but then backups fail loudly elsewhere. Promote
-# to an exporter + PrometheusRule if the metric is wanted in dashboards.
+# shortcut: cron and Discord alert, not a Prometheus exporter, so nothing fires
+# here when this guest is down (backups then fail loudly elsewhere), promote to
+# an exporter and PrometheusRule if the metric is wanted in dashboards.
 #
 # Exit codes: 0 measured and quiet, 1 a notification was sent, 2 a notification
-# was attempted but delivery failed.
+# was attempted but delivery failed, or the env file is missing or incomplete.
 
 DATASTORE_NAME="${DATASTORE_NAME:-VMs-NFS}"
 DATASTORE_PATH="${DATASTORE_PATH:-/mnt/VMs}"
-NTFY_URL="${NTFY_URL:-https://ntfy.epaflix.com/pve-backups}"
 STATE_FILE="${STATE_FILE:-/var/tmp/pbs-datastore-usage.level}"
 WARN_PCT="${WARN_PCT:-85}"
 CRIT_PCT="${CRIT_PCT:-95}"
+DISCORD_ENV_FILE="${DISCORD_ENV_FILE:-/root/.config/discord-webhook.env}"
+# shellcheck source=/dev/null
+if [ ! -r "${DISCORD_ENV_FILE}" ] || ! . "${DISCORD_ENV_FILE}" \
+    || [ -z "${DISCORD_WEBHOOK_URL:-}" ] || [ -z "${DISCORD_ROLE_ID:-}" ]; then
+    echo "${DISCORD_ENV_FILE} is missing or does not set DISCORD_WEBHOOK_URL and DISCORD_ROLE_ID" >&2
+    exit 2
+fi
 
 notify() {
-    local title="$1" priority="$2" body="$3"
+    local title="$1" priority="$2" body="$3" json
+    json="$(jq -n --arg username 'PBS datastore' --arg title "${title}" --arg priority "${priority}" \
+        --arg body "${body}" --arg role "${DISCORD_ROLE_ID}" '
+        ($priority == "high" or $priority == "urgent") as $loud
+        | {username: $username,
+           content: ((if $loud then "<@&\($role)> " else "" end) + "**\($title)**\n\($body)")}
+        + {allowed_mentions: (if $loud then {roles: [$role]} else {parse: []} end)}')" || return
     curl -fsS -4 -m 10 \
-        -H "Title: ${title}" \
-        -H "Priority: ${priority}" \
-        -d "${body}" \
-        "${NTFY_URL}" >/dev/null
+        -H 'Content-Type: application/json' \
+        --data-binary "${json}" \
+        "${DISCORD_WEBHOOK_URL}" >/dev/null
 }
 
 level_of() {

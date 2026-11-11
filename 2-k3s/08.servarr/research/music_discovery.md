@@ -144,7 +144,7 @@ Left out on purpose: [Cmdarr](https://github.com/DeviantEng/Cmdarr) and [navispo
 4. Recommend: ListenBrainz builds Weekly Exploration and Weekly Jams on Monday. `similar-users` gives the people. Their public `createdfor` and own playlists can be imported by ID through Explo's ListenBrainz playlist import.
 5. Download: Explo runs Tuesday and asks Lidarr for the albums. Use a separate Lidarr root folder and quality profile for discovery, so you can prune it. Lidarr fetches through the existing Prowlarr and qBittorrent setup. slskd + Soularr or Tubifarry are optional extra sources.
 6. Playlist: Explo creates the weekly playlist in Jellyfin. The LB plugin also syncs LB-generated playlists for tracks already in the library.
-7. Observe: Jellyfin `EnableMetrics` and exportarr for Lidarr go into the existing Prometheus in `2-k3s/10.observability`. Send Explo notifications to the existing ntfy through its HTTP webhook. If you add multi-scrobbler, scrape its `/api/metrics` and alert on `/api/health`.
+7. Observe: Jellyfin `EnableMetrics` and exportarr for Lidarr go into the existing Prometheus in `2-k3s/10.observability`. Send Explo notifications to the Discord `#notifications` channel through its webhook. If you add multi-scrobbler, scrape its `/api/metrics` and alert on `/api/health`.
 
 ### D3. Why
 
