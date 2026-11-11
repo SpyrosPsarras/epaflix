@@ -63,6 +63,23 @@ Update existing checkouts with `git fetch` instead of cloning them again.
 Write files meant for the owner's desktops to `~/handoffs/`. The desktops pull them over SSH.
 Never try to push, upload or send them anywhere yourself.
 
+## GitHub (homelab pod only)
+
+Work pods: this section does not apply. The homelab GitHub token covers only the owner's personal repositories. It cannot
+create issues or pull requests on repositories owned by anyone else. For those, prepare a
+pre-filled link and let the owner submit it:
+
+- Issue: `gh issue create -R OWNER/REPO --web -t '<title>' -F <body-file>`
+- Pull request: once the owner approves the push, push the branch to the owner's fork (`https://github.com/<owner-login>/REPO.git`;
+  `gh api user --jq .login` prints the login), then
+  `gh pr create -R OWNER/REPO --web --head <owner-login>:<branch> -B <base> -t '<title>' -F <body-file>`
+
+`GH_BROWSER=echo` is set, so `--web` prints the URL and posts nothing. Give the owner the URL.
+`--draft` does not work with `--web`; say so if a draft was wanted. If the owner has no fork or the
+push is refused, ask the owner to fork the repository and add the fork to the GitHub grant.
+If the URL is over about 8 KB, give a title-only URL and write the body to `~/handoffs/`.
+Do not look for other credentials or ways to post.
+
 ## Model routing
 
 A thread resumed after a pod restart may lack T3 delegation tools such as `delegate_task`, `task_status`, and `orchestrator_capabilities`; if so, write a handoff file and ask the owner to continue in a new thread instead of working without subagents.
