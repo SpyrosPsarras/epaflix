@@ -23,7 +23,7 @@ configMapGenerator:
 helmCharts:
   - name: windmill
     repo: https://windmill-labs.github.io/windmill-helm-charts
-    version: "4.0.313"
+    version: "4.0.314"
     releaseName: windmill
     namespace: windmill
     valuesFile: values.yaml
