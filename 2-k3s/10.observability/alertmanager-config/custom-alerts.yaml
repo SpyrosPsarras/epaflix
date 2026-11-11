@@ -723,7 +723,7 @@ spec:
       interval: 60s
       rules:
         - alert: AlertmanagerWebhookDeliveryFailing
-          expr: increase(alertmanager_notifications_failed_total{integration="webhook"}[30m]) > 0
+          expr: increase(alertmanager_notifications_failed_total{integration=~"webhook|discord"}[30m]) > 0
           for: 0m
           labels:
             severity: critical
@@ -732,18 +732,15 @@ spec:
             summary: "Alertmanager failed to deliver to a webhook receiver ({{ $labels.pod }})"
             description: >-
               alertmanager_notifications_failed_total rose on {{ $labels.pod }} in the last 30m:
-              Alertmanager attempted a webhook delivery and it FAILED. This fires only on
+              Alertmanager attempted a delivery and it FAILED. This fires only on
               attempted-and-failed delivery, so it never confuses "no alerts fired" with "no
-              delivery" (#1108). The k8s-alertmanager leg to cover is the `ntfy` receiver
-              (posts in-cluster to http://ntfy.observability.svc.cluster.local:8091), but
-              Alertmanager does not label notification metrics per receiver, so the `deadman`
-              webhook (Watchdog -> hc-ping) counts here too — check the Alertmanager logs to
-              tell them apart. If ntfy delivery is what broke, you are likely NOT seeing this
-              on the phone: read it in the Alertmanager UI or Grafana, and expect
-              NtfyCanaryPublishFailing to be failing for the same window. Start with
-              `kubectl logs -n observability -l app.kubernetes.io/name=alertmanager --tail=100`
-              and `kubectl get pods -n observability -l app=ntfy`. Self-clears 30m after the
-              last failed attempt.
+              delivery" (#1108). It covers the `discord` receiver (integration discord, posts
+              to the Discord channel webhook) and the `deadman` webhook (integration webhook,
+              Watchdog -> hc-ping); the integration label tells them apart. If Discord delivery
+              is what broke, you are NOT seeing this in Discord: read it in Grafana or the
+              Alertmanager UI. Start with
+              `kubectl logs -n observability -l app.kubernetes.io/name=alertmanager --tail=100`.
+              Self-clears 30m after the last failed attempt.
 
     - name: ntfy-canary
       interval: 60s
