@@ -1,0 +1,6 @@
+{{error}}
+{{#each guest-table.data}}{{#if (ne status "ok")}}{{vmid}} {{name}}: {{status}}
+{{/if}}{{/each}}
+Total running time: {{duration total-time}}
+Total size: {{human-bytes total-size}}
+Full log: Task History on the node linked below.
