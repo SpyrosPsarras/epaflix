@@ -94,7 +94,7 @@ spec:
               mountPath: /run/t3-vault
       containers:
         - name: t3
-          image: ghcr.io/spyrospsarras/t3-runtime:homelab-inputs-f0589f85dfd53b2aa233094d1255c885
+          image: ghcr.io/spyrospsarras/t3-runtime:homelab-inputs-da550174cc40ab070150f5ee4c298d87
           imagePullPolicy: IfNotPresent
           command: [bash, /scripts/entrypoint.sh]
           env:
@@ -126,6 +126,8 @@ spec:
             # the pod is the boundary for T3's headless browser instead.
             - name: T3CODE_SERVER_BROWSER_SANDBOX
               value: "0"
+            - name: GH_BROWSER
+              value: echo
             - name: GITHUB_TOKEN
               valueFrom:
                 secretKeyRef:

@@ -322,6 +322,11 @@ Do not reuse a classic PAT, a work-resource-owner PAT or the mixed token.
 The GitHub login can be the same account used elsewhere. The resource owner
 and selected repositories define this grant's boundary.
 
+The grant cannot create issues or pull requests on other owners' repositories.
+The agent prints a pre-filled `gh ... --web` link instead (`GH_BROWSER=echo`)
+and the owner submits it. For pull requests, fork the upstream repository and
+add the fork to this grant so the agent can push its branch.
+
 During the stopped rotation window, use an interactive terminal with this
 checkout and the `epaflix` kubeconfig:
 
