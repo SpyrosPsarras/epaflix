@@ -128,19 +128,22 @@ For paperless-gpt the owner picked O9.
 
 ### Tika and Gotenberg
 
-- Two more containers in the `paperless` pod, reached on `localhost`
-  like Valkey: `apache/tika` and `gotenberg/gotenberg`, versions from
-  the upstream `docker-compose.sqlite-tika.yml` at v3.4.2, pinned by tag
-  and digest.
+- A separate Deployment `paperless-converters` in namespace
+  `paperless` runs `apache/tika` and `gotenberg/gotenberg`, versions
+  from the upstream `docker-compose.sqlite-tika.yml` at v3.4.2, pinned
+  by tag and digest. A Service of the same name exposes both. A
+  NetworkPolicy lets only the Paperless pod reach them. They are not
+  containers in the Paperless pod, because a crashing container makes
+  the whole pod not ready.
 - Gotenberg runs with `--chromium-disable-javascript=true` and
   `--chromium-allow-list=^file:///tmp/.*`, as upstream does, so tracking
   pixels and scripts in emails do not load.
 - `PAPERLESS_TIKA_ENABLED=true`, `PAPERLESS_TIKA_ENDPOINT` and
-  `PAPERLESS_TIKA_GOTENBERG_ENDPOINT` point at the two containers.
+  `PAPERLESS_TIKA_GOTENBERG_ENDPOINT` point at the Service.
 - This also lets Paperless read Office files from Gmail and Drive.
 
-Tika and Gotenberg have liveness probes and no readiness probes, so a
-failure in either does not take the web UI or uploads offline.
+Tika and Gotenberg have liveness probes. A failure in either does not
+take the Paperless web UI or uploads offline.
 
 ### Gmail account
 

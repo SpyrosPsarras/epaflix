@@ -1,0 +1,114 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: paperless-converters
+  namespace: paperless
+  labels:
+    app: paperless-converters
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: paperless-converters
+  template:
+    metadata:
+      labels:
+        app: paperless-converters
+    spec:
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      containers:
+        - name: tika
+          image: docker.io/apache/tika:3.3.1.0
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 35002
+            runAsGroup: 35002
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          ports:
+            - name: tika
+              containerPort: 9998
+          readinessProbe:
+            tcpSocket:
+              port: tika
+            periodSeconds: 30
+            timeoutSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: tika
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+        - name: gotenberg
+          image: docker.io/gotenberg/gotenberg:8.38
+          args:
+            - gotenberg
+            - --chromium-disable-javascript=true
+            - --chromium-allow-list=^file:///tmp/.*
+            - --api-port=3000
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 1001
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          ports:
+            - name: gotenberg
+              containerPort: 3000
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: gotenberg
+            periodSeconds: 30
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: gotenberg
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          volumeMounts:
+            - name: gotenberg-tmp
+              mountPath: /tmp
+      volumes:
+        - name: gotenberg-tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: paperless-converters
+  namespace: paperless
+  labels:
+    app: paperless-converters
+spec:
+  selector:
+    app: paperless-converters
+  ports:
+    - name: tika
+      port: 9998
+      targetPort: tika
+    - name: gotenberg
+      port: 3000
+      targetPort: gotenberg

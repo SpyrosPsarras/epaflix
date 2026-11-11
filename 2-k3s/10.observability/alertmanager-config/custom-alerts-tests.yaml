@@ -100,6 +100,60 @@ tests:
             exp_annotations:
               summary: Paperless is unavailable
               description: "Paperless has no available replica or its Deployment is absent. Check the paperless Deployment, its NFS volume and database connection in paperless."
+  - name: Paperless Tika fires after three restarts within 15 minutes
+    interval: 1m
+    input_series:
+      - series: 'kube_pod_container_status_restarts_total{namespace="paperless",container="tika"}'
+        values: '0x4 1x4 2x4 3x5'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: PaperlessConverterRestarting
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: PaperlessConverterRestarting
+        exp_alerts:
+          - exp_labels:
+              namespace: paperless
+              container: tika
+              severity: warning
+              component: paperless
+            exp_annotations:
+              summary: "Paperless tika keeps restarting"
+              description: "tika restarted 3 times in 15 minutes. Emails and Office files wait in the Paperless task list until it recovers. Check the paperless-converters Deployment in namespace paperless."
+  - name: Paperless Gotenberg fires after three restarts within 15 minutes
+    interval: 1m
+    input_series:
+      - series: 'kube_pod_container_status_restarts_total{namespace="paperless",container="gotenberg"}'
+        values: '0x4 1x4 2x4 3x5'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: PaperlessConverterRestarting
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: PaperlessConverterRestarting
+        exp_alerts:
+          - exp_labels:
+              namespace: paperless
+              container: gotenberg
+              severity: warning
+              component: paperless
+            exp_annotations:
+              summary: "Paperless gotenberg keeps restarting"
+              description: "gotenberg restarted 3 times in 15 minutes. Emails and Office files wait in the Paperless task list until it recovers. Check the paperless-converters Deployment in namespace paperless."
+  - name: Paperless converters with flat restart counters stay silent
+    interval: 1m
+    input_series:
+      - series: 'kube_pod_container_status_restarts_total{namespace="paperless",container="tika"}'
+        values: '3x30'
+      - series: 'kube_pod_container_status_restarts_total{namespace="paperless",container="gotenberg"}'
+        values: '3x30'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: PaperlessConverterRestarting
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: PaperlessConverterRestarting
+        exp_alerts: []
   - name: Paperless healthy deployment stays silent
     interval: 1m
     input_series:
