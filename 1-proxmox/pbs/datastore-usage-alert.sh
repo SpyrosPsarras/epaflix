@@ -34,9 +34,9 @@ set -euo pipefail
 # water mark; a nightly urgent page at 00:00 is a real sizing problem, not
 # noise.
 #
-# ponytail: cron+Discord alert, not a Prometheus exporter - if this guest itself
-# is down nothing fires here, but then backups fail loudly elsewhere. Promote
-# to an exporter + PrometheusRule if the metric is wanted in dashboards.
+# shortcut: cron and Discord alert, not a Prometheus exporter, so nothing fires
+# here when this guest is down (backups then fail loudly elsewhere), promote to
+# an exporter and PrometheusRule if the metric is wanted in dashboards.
 #
 # Exit codes: 0 measured and quiet, 1 a notification was sent, 2 a notification
 # was attempted but delivery failed, or the env file is missing or incomplete.

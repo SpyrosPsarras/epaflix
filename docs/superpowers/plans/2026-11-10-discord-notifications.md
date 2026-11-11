@@ -1,4 +1,4 @@
-# Discord notifications Implementation Plan
+# Discord notifications implementation plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -10,9 +10,9 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-10-discord-notifications-design.md`
 
-## Global Constraints
+## Global constraints
 
-- The webhook URL and the role ID never appear in Git in plain text, in logs, or in chat. Read them only inside `vault run --name 'discord epaflix notifications'`: password = URL, field `roleID` = role ID.
+- The webhook URL and the role ID never appear in Git in plain text, in logs, or in chat. Read them only inside `vault run` on the notifications vault item (password: webhook URL, field `roleID`).
 - Mention text is `<@&ROLE_ID>`. Loud = Alertmanager firing with severity critical, every PVE and PBS notification, script messages with priority `high` or `urgent`. Everything else has no mention.
 - Discord limits: content 2000 characters, embed title 256, embed description 4096.
 - Webhook display names: `Alertmanager`, `Unpackerr`, `PVE`, `PBS`, `TrueNAS`, `PBS datastore`.
@@ -21,7 +21,7 @@
 - Live host and vault changes need Spyros's go-ahead first (AGENTS.md S8).
 - Before any commit, the branch is rebased onto `origin/main`. No co-author line.
 
-## Review Focus
+## Review focus
 
 1. Alert text with quotes, backslashes, newlines or emoji must produce valid JSON in every sender. Owned by Tasks 1 and 3 (test with a title holding `"` and `\` and a newline).
 2. A missing or empty webhook env file on TrueNAS or the PBS guest must fail loudly and not write state. Owned by Task 3.
@@ -133,9 +133,9 @@
 
 - [ ] **Step 1: Argo sync** `observability` and `servarr` at the merged SHA (dry-run first, per `/scripts/homelab-ssh.md`). Check: Alertmanager pods ready, `kubectl -n observability logs` shows no config error; Unpackerr pod ready.
 - [ ] **Step 2: PVE.** Verify the node link form in a browser-free way (curl the UI hash is not possible; pick `https://<node>.epaflix.com:8006/` unless DNS lacks those names, then use the IP from inventory). Install the template to `/etc/pve/notification-templates/default/vzdump-body.txt.hbs`. Create target `discord-pve` and its secrets `id`, `token` (split from the vault URL) and `role` with `pvesh` inside `vault run`, then the matcher, then delete `ntfy-pve` and `ntfy-failures`. `diff` live `/etc/pve/notifications.cfg` against the repo copy: equal.
-- [ ] **Step 3: PBS.** Same for targets `discord-pbs` (secrets `id`, `token`, `role`) and `discord-pbs-quiet` (secrets `id`, `token`) and matchers `default-matcher` and `quiet-matcher` from `1-proxmox/pbs/server/notifications.cfg`, with `proxmox-backup-manager notification` commands, the verify-err override in `/etc/proxmox-backup/notification-templates/default/`, delete `ntfy-pbs`. `diff` against the repo copy.
+- [ ] **Step 3: PBS.** Same for targets `discord-pbs` (secrets `id`, `token`, `role`) and `discord-pbs-quiet` (secrets `id`, `token`) and matchers `default-matcher` and `quiet-matcher` from `1-proxmox/pbs/server/notifications.cfg`, with `proxmox-backup-manager notification` commands, the verify-err and package-updates overrides in `/etc/proxmox-backup/notification-templates/default/`, delete `ntfy-pbs`. `diff` against the repo copy.
 - [ ] **Step 4: PBS guest script.** Write `/root/.config/discord-webhook.env` (mode 600) inside `vault run`, copy the new `datastore-usage-alert.sh` to `/usr/local/sbin/`.
-- [ ] **Step 5: TrueNAS.** Put the script and env file on a non-encrypted pool path that survives TrueNAS updates (the boot pool is replaced on upgrade). Create a cron job with `midclt call cronjob.create`: user root, every 15 minutes, the script with `DISCORD_ENV_FILE` set. Because the dataset is locked today, the first run posts a loud LOCKED message; tell Spyros before enabling.
+- [ ] **Step 5: TrueNAS.** Put the script and env file on a non-encrypted pool path that survives TrueNAS updates (the boot pool is replaced on upgrade). Create a cron job with `midclt call cronjob.create`: user root, every 15 minutes, the script with `DISCORD_ENV_FILE` set. Do not hide the job's stdout or stderr, so a missing env file shows up. Because the dataset is locked today, the first run posts a loud LOCKED message; tell Spyros before enabling.
 - [ ] **Step 6: One test per sender, confirmed in `#notifications` by Spyros:** Alertmanager (a temporary critical test alert via `amtool alert add` against the live Alertmanager, then expire it), Unpackerr (Spyros confirms when one occurs, or skip with his OK), PVE (`pvesh create /cluster/notifications/targets/discord-pve/test`), PBS (`proxmox-backup-manager notification target test discord-pbs` and `discord-pbs-quiet`), PBS datastore script (`DATASTORE_PATH=/nonexistent` run, expect the loud "cannot be measured" post, then delete the state file), TrueNAS (first cron run). Check the role mention pings; if not, Spyros enables "Allow anyone to @mention this role".
 
 ### Task 8: Remove ntfy (PR 2)

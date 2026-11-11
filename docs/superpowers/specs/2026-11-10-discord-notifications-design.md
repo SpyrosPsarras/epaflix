@@ -82,7 +82,7 @@ full log lives.
 - The current matcher routes only severity warning and error. vzdump is the only
   notification type with a long body; fencing and replication bodies are short.
 - ntfy stores only an emptyDir cache. Removing it deletes no persistent data.
-- The vault item `discord epaflix notifications` holds the webhook URL as its
+- The notifications vault item holds the webhook URL as its
   password, Spyros's user ID in field `userID` (unused), and the
   `@notifications` role ID in field `roleID`. A read-only GET to the URL
   returned HTTP 200 on 2026-11-10.
@@ -108,8 +108,8 @@ For the PVE log link:
 
 ### Secrets
 
-- One Discord webhook for `#notifications`. Its URL lives in the vault item
-  `discord epaflix notifications`. The `@notifications` role ID is in the same item,
+- One Discord webhook for `#notifications`. Its URL lives in the notifications vault item.
+  The `@notifications` role ID is in the same item,
   field `roleID`, because it is an account identifier.
 - `alertmanager-config-secret` (SOPS) gets the Discord receiver with the URL
   and the role ID. Alertmanager reads them from its config.

@@ -1,19 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# keystatus-check.sh - post to Discord when a reboot leaves the encrypted backup
-# dataset locked, and again when it is unlocked.
-#
-# Reads DISCORD_WEBHOOK_URL and DISCORD_ROLE_ID from DISCORD_ENV_FILE (default
-# /root/.config/discord-webhook.env, mode 600). Keep the script and env file on
-# a non-encrypted pool path: TrueNAS replaces the boot pool on upgrade. Run it
-# as root every 15 minutes from a TrueNAS cron job (midclt call cronjob.create)
-# with DISCORD_ENV_FILE set to that path.
-#
-# Exit codes: 0 unlocked, 1 locked or unreadable, 2 env file missing or
-# incomplete. A failed post exits non-zero and writes no state, so the next run
-# retries.
-
 STATE_FILE="${STATE_FILE:-/var/tmp/keystatus-check.failing}"
 DATASET="mpara-tank-lan/encrypted-backups"
 DISCORD_ENV_FILE="${DISCORD_ENV_FILE:-/root/.config/discord-webhook.env}"

@@ -9,9 +9,9 @@ A private Discord server with one AI agent per channel. Argo CD app `discord` de
 
 ## Notifications channel
 
-`#notifications` receives homelab alerts through one Discord webhook. No agent reads it. The vault item `discord epaflix notifications` holds the webhook URL as its password and the `@notifications` role ID in field `roleID`.
+`#notifications` receives homelab alerts through one Discord webhook. No agent reads it. The notifications vault item holds the webhook URL as its password and the `@notifications` role ID in field `roleID`.
 
-Loud messages mention `@notifications`: Alertmanager alerts firing with severity critical, every PVE notification, PBS warnings and errors, and script messages with priority `high` or `urgent`. Everything else posts without a mention. Members set the channel to "only @mentions".
+Loud messages mention `@notifications`: Alertmanager alerts firing with severity critical, every PVE notification, PBS notifications with severity warning, error or unknown, and script messages with priority `high` or `urgent`. Everything else posts without a mention. Members set the channel to "only @mentions".
 
 Each sender keeps its own copy of the URL:
 
@@ -20,8 +20,8 @@ Each sender keeps its own copy of the URL:
 | Alertmanager | SOPS `2-k3s/10.observability/secrets/alertmanager-config-secret.enc.yaml`, receiver `discord`, with the role ID |
 | Unpackerr | SOPS `2-k3s/08.servarr/_shared/secrets/unpackerr-secret.enc.yaml`, key `UN_WEBHOOK_0_URL` |
 | PVE | Target `discord-pve` in `1-proxmox/pbs/notifications.cfg`. Secrets `id`, `token` and `role` in `/etc/pve/priv/notifications.cfg`. The vzdump body override `1-proxmox/pbs/notification-templates/vzdump-body.txt.hbs` goes to `/etc/pve/notification-templates/default/` |
-| PBS | Targets `discord-pbs` (loud) and `discord-pbs-quiet` in `1-proxmox/pbs/server/notifications.cfg`. Secrets `id` and `token`, plus `role` on `discord-pbs`, in `/etc/proxmox-backup/notifications-priv.cfg`. The override `verify-err-body.txt.hbs` goes to `/etc/proxmox-backup/notification-templates/default/` |
-| TrueNAS | `0-truenas/scripts/keystatus-check.sh`, run by a TrueNAS cron job every 15 minutes, reads `/root/.config/discord-webhook.env` |
+| PBS | Targets `discord-pbs` (loud) and `discord-pbs-quiet` in `1-proxmox/pbs/server/notifications.cfg`. Secrets `id` and `token`, plus `role` on `discord-pbs`, in `/etc/proxmox-backup/notifications-priv.cfg`. The overrides `verify-err-body.txt.hbs` and `package-updates-body.txt.hbs` in `1-proxmox/pbs/server/notification-templates/` go to `/etc/proxmox-backup/notification-templates/default/` |
+| TrueNAS | `0-truenas/scripts/keystatus-check.sh` reads the env file named by `DISCORD_ENV_FILE` (default `/root/.config/discord-webhook.env`). A root TrueNAS cron job (`midclt call cronjob.create`) runs it every 15 minutes with `DISCORD_ENV_FILE` set. Keep the script and env file on a non-encrypted pool path, because TrueNAS replaces the boot pool on upgrade |
 | PBS guest | `1-proxmox/pbs/datastore-usage-alert.sh` reads `/root/.config/discord-webhook.env` |
 
 Both env files are mode 600 and set `DISCORD_WEBHOOK_URL` and `DISCORD_ROLE_ID`.

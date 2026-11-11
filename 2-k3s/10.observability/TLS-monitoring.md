@@ -42,8 +42,8 @@ Before closing #1122, deploy the chart and rules, confirm all five
 temporarily raise an expiry threshold on a uniquely named test rule. Observe
 Prometheus firing and the Discord `#notifications` channel receiving FIRING.
 Restore the expression, observe RESOLVED in `#notifications`, then remove the
-test rule. Record timestamps
-and notification IDs in the issue. Never expire a real certificate for this test.
+test rule. Record timestamps and notification IDs in the issue. Never expire a
+real certificate for this test.
 
 Verified on 2026-09-15 with `TLSCertificateExpiryCriticalTest1122`, a 365-day
 threshold on the live takaros metric. ntfy recorded FIRING at 14:59:49 UTC,
