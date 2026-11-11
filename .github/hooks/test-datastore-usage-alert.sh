@@ -36,8 +36,15 @@ chmod +x "$stub/findmnt"
 cat >"$stub/curl" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-# one log line per post: multiline bodies are flattened
-printf '%s\n' "${*//$'\n'/ | }" >>"$CURL_LOG"
+url="" data=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -d|--data|--data-binary) data="$2"; shift ;;
+    http*) url="$1" ;;
+  esac
+  shift
+done
+printf '%s\t%s\n' "$url" "$(jq -c . <<<"$data" 2>/dev/null || echo INVALID_JSON)" >>"$POST_LOG"
 if [ "${STUB_CURL_FAIL:-0}" = "1" ]; then
   echo "stub curl: connection refused" >&2
   exit 7
@@ -45,9 +52,12 @@ fi
 SH
 chmod +x "$stub/curl"
 
-curl_log="$tmp/curl.log"
+post_log="$tmp/post.log"
 state="$tmp/state.level"
-export CURL_LOG="$curl_log"
+export POST_LOG="$post_log"
+env_file="$tmp/discord-webhook.env"
+printf '%s\n' 'DISCORD_WEBHOOK_URL=https://discord.test/api/webhooks/1/abc' 'DISCORD_ROLE_ID=42' >"$env_file"
+export DISCORD_ENV_FILE="$env_file"
 
 pass_count=0
 fail_count=0
@@ -66,33 +76,36 @@ fail() {
 }
 
 run_alert() {
-  : >"$curl_log"
+  : >"$post_log"
   local rc=0
   DF_PCT="${DF_PCT:-80}" WARN_PCT="${WARN_PCT:-85}" CRIT_PCT="${CRIT_PCT:-95}" \
-    STATE_FILE="$state" CURL_LOG="$curl_log" \
+    STATE_FILE="$state" \
     PATH="$stub:$PATH" bash "$script" >"$tmp/out" 2>&1 || rc=$?
   return "$rc"
 }
 
-curl_count() { wc -l <"$curl_log" | tr -d ' '; }
-last_post()  { tail -1 "$curl_log"; }
+curl_count() { wc -l <"$post_log" | tr -d ' '; }
+last_post()  { tail -1 "$post_log"; }
+post_is()    { tail -1 "$post_log" | cut -f2- | jq -e "$@" >/dev/null 2>&1; }
+loud()       { post_is '(.content | startswith("<@&42> **")) and .allowed_mentions.roles == ["42"]'; }
 
 rm -f "$state"
 rc=0; run_alert || rc=$?
 if [ "$rc" -eq 0 ] && [ "$(curl_count)" -eq 0 ] && [ ! -e "$state" ]; then
-  pass "healthy datastore stays silent: exit 0, no ntfy post, no state file"
+  pass "healthy datastore stays silent: exit 0, no post, no state file"
 else
-  fail "healthy datastore stays silent: exit 0, no ntfy post, no state file (rc=$rc, posts=$(curl_count))"
+  fail "healthy datastore stays silent: exit 0, no post, no state file (rc=$rc, posts=$(curl_count))"
 fi
 
 rm -f "$state"
 rc=0; DF_PCT=87 run_alert || rc=$?
 post="$(last_post)"
 if [ "$rc" -eq 1 ] && [ "$(curl_count)" -eq 1 ] \
-  && grep -q "https://ntfy.epaflix.com/pve-backups" <<<"$post" \
-  && grep -q "87%" <<<"$post" && grep -q "127 GiB free" <<<"$post" \
-  && grep -q "VMs-NFS" <<<"$post" \
-  && grep -q "Priority: high" <<<"$post"; then
+  && [ "$(cut -f1 <<<"$post")" = "https://discord.test/api/webhooks/1/abc" ] \
+  && post_is '.username == "PBS datastore"' \
+  && post_is '.content | contains("**PBS datastore VMs-NFS is 87% full**\n")' \
+  && post_is '.content | contains("127 GiB free") and contains("ENOSPC")' \
+  && loud; then
   pass "85%+ posts a high-priority warn with percent, free space and datastore name"
 else
   fail "85%+ posts a high-priority warn with percent, free space and datastore name (rc=$rc, post=$post)"
@@ -113,7 +126,7 @@ fi
 rc=0; DF_PCT=96 run_alert || rc=$?
 post="$(last_post)"
 if [ "$rc" -eq 1 ] && [ "$(curl_count)" -eq 1 ] \
-  && grep -q "Priority: urgent" <<<"$post"; then
+  && loud; then
   pass "95%+ escalates to an urgent critical post"
 else
   fail "95%+ escalates to an urgent critical post (rc=$rc, post=$post)"
@@ -141,7 +154,7 @@ fi
 rc=0; DF_PCT=96 run_alert || rc=$?
 post="$(last_post)"
 if [ "$rc" -eq 1 ] && [ "$(curl_count)" -eq 1 ] \
-  && grep -q "Priority: urgent" <<<"$post" && [ "$(cat "$state")" = "2" ]; then
+  && loud && [ "$(cat "$state")" = "2" ]; then
   pass "re-peak into critical after de-escalation pages again"
 else
   fail "re-peak into critical after de-escalation pages again (rc=$rc, post=$post)"
@@ -150,7 +163,9 @@ fi
 rc=0; DF_PCT=80 run_alert || rc=$?
 post="$(last_post)"
 if [ "$rc" -eq 1 ] && [ "$(curl_count)" -eq 1 ] \
-  && grep -q "recovered" <<<"$post" && [ ! -e "$state" ]; then
+  && post_is '.content | startswith("**PBS datastore VMs-NFS recovered**\n")' \
+  && post_is '(.content | contains("<@&") | not) and .username == "PBS datastore"' \
+  && [ ! -e "$state" ]; then
   pass "drop below 85% posts a recovery and clears the state file"
 else
   fail "drop below 85% posts a recovery and clears the state file (rc=$rc, post=$post)"
@@ -163,17 +178,17 @@ else
   fail "healthy store after recovery stays silent (rc=$rc, posts=$(curl_count))"
 fi
 
-: >"$curl_log"
+: >"$post_log"
 rc=0; DF_PCT=90 STUB_DF_FAIL=1 STATE_FILE="$state" PATH="$stub:$PATH" \
   bash "$script" >"$tmp/out" 2>&1 || rc=$?
 if [ "$rc" -eq 1 ] && [ "$(curl_count)" -eq 1 ] \
-  && grep -q "Priority: urgent" <<<"$(last_post)"; then
+  && loud; then
   pass "unmeasurable datastore posts an urgent alert"
 else
   fail "unmeasurable datastore posts an urgent alert (rc=$rc)"
 fi
 
-: >"$curl_log"
+: >"$post_log"
 rc=0; STUB_DF_FAIL=1 STATE_FILE="$state" PATH="$stub:$PATH" \
   bash "$script" >"$tmp/out" 2>&1 || rc=$?
 if [ "$rc" -eq 1 ] && [ "$(curl_count)" -eq 1 ]; then
@@ -182,19 +197,19 @@ else
   fail "unmeasurable datastore notifies on every run, no state dedup (rc=$rc)"
 fi
 
-: >"$curl_log"
+: >"$post_log"
 rc=0; DF_PCT=35 STUB_FINDMNT_FAIL=1 STATE_FILE="$state" PATH="$stub:$PATH" \
   bash "$script" >"$tmp/out" 2>&1 || rc=$?
 post="$(last_post)"
 if [ "$rc" -eq 1 ] && [ "$(curl_count)" -eq 1 ] \
-  && grep -q "Priority: urgent" <<<"$post" \
+  && loud \
   && grep -q "not a mountpoint" <<<"$post"; then
   pass "unmounted datastore (df reads the root fs) posts an urgent alert naming the mountpoint"
 else
   fail "unmounted datastore (df reads the root fs) posts an urgent alert (rc=$rc, post=$post)"
 fi
 
-: >"$curl_log"
+: >"$post_log"
 rc=0; DF_PCT=35 STUB_FINDMNT_FAIL=1 STATE_FILE="$state" PATH="$stub:$PATH" \
   bash "$script" >"$tmp/out" 2>&1 || rc=$?
 if [ "$rc" -eq 1 ] && [ "$(curl_count)" -eq 1 ]; then
@@ -206,18 +221,43 @@ fi
 rm -f "$state"
 rc=0; DF_PCT=87 STUB_CURL_FAIL=1 run_alert || rc=$?
 if [ "$rc" -eq 2 ] && [ ! -e "$state" ]; then
-  pass "failed ntfy delivery exits 2 and leaves no state, so the next run retries"
+  pass "failed delivery exits 2 and leaves no state, so the next run retries"
 else
-  fail "failed ntfy delivery exits 2 and leaves no state, so the next run retries (rc=$rc)"
+  fail "failed delivery exits 2 and leaves no state, so the next run retries (rc=$rc)"
 fi
 
 rm -f "$state"
 rc=0; DF_PCT=25 WARN_PCT=10 CRIT_PCT=20 run_alert || rc=$?
 post="$(last_post)"
-if [ "$rc" -eq 1 ] && grep -q "Priority: urgent" <<<"$post"; then
+if [ "$rc" -eq 1 ] && loud; then
   pass "thresholds are overridable through the environment"
 else
   fail "thresholds are overridable through the environment (rc=$rc, post=$post)"
+fi
+
+rm -f "$state"
+rc=0; DF_PCT=87 DATASTORE_NAME=$'bad"quote\\back\nslash' run_alert || rc=$?
+if [ "$rc" -eq 1 ] && post_is '.content | contains("**PBS datastore bad\"quote\\back\nslash is 87% full**")'; then
+  pass "quotes, backslashes and newlines in the title still make valid JSON"
+else
+  fail "quotes, backslashes and newlines in the title still make valid JSON (rc=$rc, post=$(last_post))"
+fi
+
+rm -f "$state"
+rc=0; DF_PCT=87 DISCORD_ENV_FILE="$tmp/missing.env" run_alert || rc=$?
+if [ "$rc" -eq 2 ] && [ "$(curl_count)" -eq 0 ] && [ ! -e "$state" ]; then
+  pass "missing env file exits 2 without posting or writing state"
+else
+  fail "missing env file exits 2 without posting or writing state (rc=$rc, posts=$(curl_count))"
+fi
+
+printf 'DISCORD_WEBHOOK_URL=https://discord.test/api/webhooks/1/abc\nDISCORD_ROLE_ID=\n' >"$tmp/empty.env"
+rm -f "$state"
+rc=0; DF_PCT=87 DISCORD_ENV_FILE="$tmp/empty.env" run_alert || rc=$?
+if [ "$rc" -eq 2 ] && [ "$(curl_count)" -eq 0 ] && [ ! -e "$state" ]; then
+  pass "empty role ID exits 2 without posting or writing state"
+else
+  fail "empty role ID exits 2 without posting or writing state (rc=$rc, posts=$(curl_count))"
 fi
 
 if [ -x "$script" ]; then

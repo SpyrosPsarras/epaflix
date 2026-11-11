@@ -22,13 +22,27 @@ SH
 cat >"$stub/curl" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-printf -- '---\n' >>"$NTFY_LOG"
-printf '%s\n' "$@" >>"$NTFY_LOG"
+url="" data=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -d|--data|--data-binary) data="$2"; shift ;;
+    http*) url="$1" ;;
+  esac
+  shift
+done
+printf '%s\t%s\n' "$url" "$(jq -c . <<<"$data" 2>/dev/null || echo INVALID_JSON)" >>"$POST_LOG"
+if [ "${STUB_CURL_FAIL:-0}" = "1" ]; then
+  echo "stub curl: connection refused" >&2
+  exit 7
+fi
 SH
 chmod +x "$stub/zfs" "$stub/curl"
 
 state_file="$tmp/keystatus-check.failing"
-ntfy_log="$tmp/ntfy.log"
+post_log="$tmp/post.log"
+env_file="$tmp/discord-webhook.env"
+printf '%s\n' 'DISCORD_WEBHOOK_URL=https://discord.test/api/webhooks/1/abc' 'DISCORD_ROLE_ID=42' >"$env_file"
+export DISCORD_ENV_FILE="$env_file"
 zfs_log="$tmp/zfs.log"
 
 pass_count=0
@@ -48,13 +62,21 @@ fail() {
 }
 
 records() {
-  grep -c '^---$' "$ntfy_log" || true
+  wc -l <"$post_log" | tr -d ' '
+}
+
+post_json() {
+  tail -1 "$post_log" | cut -f2-
+}
+
+post_is() {
+  post_json | jq -e "$@" >/dev/null 2>&1
 }
 
 run_check() {
-  : >"$ntfy_log"
+  : >"$post_log"
   : >"$zfs_log"
-  NTFY_LOG="$ntfy_log" ZFS_LOG="$zfs_log" STUB_KEYSTATUS="$1" STUB_ZFS_FAIL="${2:-0}" \
+  POST_LOG="$post_log" ZFS_LOG="$zfs_log" STUB_KEYSTATUS="$1" STUB_ZFS_FAIL="${2:-0}" \
     PATH="$stub:$PATH" \
     STATE_FILE="$state_file" \
     bash "$script" >"$output" 2>&1
@@ -64,9 +86,10 @@ rm -f "$state_file"
 rc=0; run_check unavailable || rc=$?
 if [ "$rc" -eq 1 ] \
   && [ "$(records)" -eq 1 ] \
-  && grep -q 'Title: TrueNAS mpara-tank-lan/encrypted-backups is LOCKED' "$ntfy_log" \
-  && grep -q 'Priority: high' "$ntfy_log" \
-  && grep -q 'zfs load-key' "$ntfy_log" \
+  && post_is '.content | startswith("<@&42> **TrueNAS mpara-tank-lan/encrypted-backups is LOCKED**\n")' \
+  && post_is '.allowed_mentions.roles == ["42"]' \
+  && post_is '.username == "TrueNAS"' \
+  && post_is '.content | contains("zfs load-key")' \
   && [ -f "$state_file" ]; then
   pass "locked dataset with no state file notifies once at high priority and leaves the state file"
 else
@@ -83,7 +106,9 @@ fi
 rc=0; run_check available || rc=$?
 if [ "$rc" -eq 0 ] \
   && [ "$(records)" -eq 1 ] \
-  && grep -q 'Title: TrueNAS mpara-tank-lan/encrypted-backups unlocked' "$ntfy_log" \
+  && post_is '.content | startswith("**TrueNAS mpara-tank-lan/encrypted-backups unlocked**\n")' \
+  && post_is '.content | contains("<@&") | not' \
+  && post_is '.username == "TrueNAS"' \
   && [ ! -e "$state_file" ]; then
   pass "unlocked dataset clears the state file and sends the recovery notification"
 else
@@ -101,7 +126,7 @@ rm -f "$state_file"
 rc=0; run_check "" 1 || rc=$?
 if [ "$rc" -eq 1 ] \
   && [ "$(records)" -eq 1 ] \
-  && grep -q 'cannot read keystatus' "$ntfy_log" \
+  && post_is '.content | startswith("<@&42> ") and contains("cannot read keystatus")' \
   && [ -f "$state_file" ]; then
   pass "zfs failure notifies that the check itself is broken and leaves the state file"
 else
@@ -110,10 +135,43 @@ fi
 
 rm -f "$state_file"
 rc=0; run_check unavailable || rc=$?
-if grep -q '^https://ntfy.epaflix.com/truenas-alerts$' "$ntfy_log"; then
-  pass "notifications post to the truenas-alerts ntfy topic"
+if [ "$(tail -1 "$post_log" | cut -f1)" = "https://discord.test/api/webhooks/1/abc" ]; then
+  pass "notifications post to the Discord webhook from the env file"
 else
-  fail "notifications post to the truenas-alerts ntfy topic"
+  fail "notifications post to the Discord webhook from the env file"
+fi
+
+rm -f "$state_file"
+rc=0; run_check $'bad"quote\\back\nslash' || rc=$?
+if [ "$(records)" -eq 1 ] && post_is '.content | contains("bad\"quote\\back\nslash")'; then
+  pass "quotes, backslashes and newlines in the message still make valid JSON"
+else
+  fail "quotes, backslashes and newlines in the message still make valid JSON (post=$(post_json))"
+fi
+
+rm -f "$state_file"
+rc=0; DISCORD_ENV_FILE="$tmp/missing.env" run_check unavailable || rc=$?
+if [ "$rc" -ne 0 ] && [ "$(records)" -eq 0 ] && [ ! -e "$state_file" ]; then
+  pass "missing env file fails without posting or writing state"
+else
+  fail "missing env file fails without posting or writing state (rc=$rc, records=$(records))"
+fi
+
+printf 'DISCORD_WEBHOOK_URL=\nDISCORD_ROLE_ID=42\n' >"$tmp/empty.env"
+rm -f "$state_file"
+rc=0; DISCORD_ENV_FILE="$tmp/empty.env" run_check unavailable || rc=$?
+if [ "$rc" -ne 0 ] && [ "$(records)" -eq 0 ] && [ ! -e "$state_file" ]; then
+  pass "empty webhook URL fails without posting or writing state"
+else
+  fail "empty webhook URL fails without posting or writing state (rc=$rc, records=$(records))"
+fi
+
+rm -f "$state_file"
+rc=0; STUB_CURL_FAIL=1 run_check unavailable || rc=$?
+if [ "$rc" -ne 0 ] && [ ! -e "$state_file" ]; then
+  pass "failed delivery leaves no state, so the next run retries"
+else
+  fail "failed delivery leaves no state, so the next run retries (rc=$rc)"
 fi
 
 if [ "$(xargs <"$zfs_log")" = "get -H -o value keystatus mpara-tank-lan/encrypted-backups" ]; then

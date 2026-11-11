@@ -1,17 +1,40 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-NTFY_URL="https://ntfy.epaflix.com/truenas-alerts"
+# keystatus-check.sh - post to Discord when a reboot leaves the encrypted backup
+# dataset locked, and again when it is unlocked.
+#
+# Reads DISCORD_WEBHOOK_URL and DISCORD_ROLE_ID from DISCORD_ENV_FILE (default
+# /root/.config/discord-webhook.env, mode 600). Keep the script and env file on
+# a non-encrypted pool path: TrueNAS replaces the boot pool on upgrade. Run it
+# as root every 15 minutes from a TrueNAS cron job (midclt call cronjob.create)
+# with DISCORD_ENV_FILE set to that path.
+#
+# Exit codes: 0 unlocked, 1 locked or unreadable, 2 env file missing or
+# incomplete. A failed post exits non-zero and writes no state, so the next run
+# retries.
+
 STATE_FILE="${STATE_FILE:-/var/tmp/keystatus-check.failing}"
 DATASET="mpara-tank-lan/encrypted-backups"
+DISCORD_ENV_FILE="${DISCORD_ENV_FILE:-/root/.config/discord-webhook.env}"
+if [ ! -r "${DISCORD_ENV_FILE}" ] || ! . "${DISCORD_ENV_FILE}" \
+    || [ -z "${DISCORD_WEBHOOK_URL:-}" ] || [ -z "${DISCORD_ROLE_ID:-}" ]; then
+    echo "${DISCORD_ENV_FILE} is missing or does not set DISCORD_WEBHOOK_URL and DISCORD_ROLE_ID" >&2
+    exit 2
+fi
 
 notify() {
-    local title="$1" priority="$2" body="$3"
+    local title="$1" priority="$2" body="$3" json
+    json="$(jq -n --arg username 'TrueNAS' --arg title "${title}" --arg priority "${priority}" \
+        --arg body "${body}" --arg role "${DISCORD_ROLE_ID}" '
+        ($priority == "high" or $priority == "urgent") as $loud
+        | {username: $username,
+           content: ((if $loud then "<@&\($role)> " else "" end) + "**\($title)**\n\($body)")}
+        + (if $loud then {allowed_mentions: {roles: [$role]}} else {} end)')" || return
     curl -fsS -4 -m 10 \
-        -H "Title: ${title}" \
-        -H "Priority: ${priority}" \
-        -d "${body}" \
-        "${NTFY_URL}" >/dev/null
+        -H 'Content-Type: application/json' \
+        --data-binary "${json}" \
+        "${DISCORD_WEBHOOK_URL}" >/dev/null
 }
 
 if keystatus="$(zfs get -H -o value keystatus "${DATASET}" 2>/dev/null)"; then
