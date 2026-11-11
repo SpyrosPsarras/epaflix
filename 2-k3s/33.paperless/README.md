@@ -24,7 +24,7 @@ With the owner's approval, the agent ran a `manage.py shell` script with `get_or
 | Group | `receipts` | 1 | view, add, change and delete on Document, Note, SavedView and UISettings; view, add and change on Tag, Correspondent, DocumentType and CustomField, 28 permissions in total |
 | Custom field | `Total` | 1 | type monetary, `extra_data` empty, so no default currency |
 | Tag | `paperless-gpt-auto` | 1 | matching algorithm None, so Paperless never assigns it on its own |
-| Workflow | `Tag new receipts for AI` | 1 | trigger 1 Document Added from every source, action 1 assigns tag `paperless-gpt-auto` |
+| Workflow | `Tag new receipts for AI` | 1 | trigger 1 Document Added excluding `source:gmail` and `source:drive`, action 1 assigns tag `paperless-gpt-auto` |
 | User | `paperless-gpt` | 3 | superuser, unusable password, API token in `paperless-gpt-secrets` |
 
 The owner is superuser and does not need the group.
@@ -51,7 +51,7 @@ Browser login inside the app is requested upstream in Paperless Go issue #51. Fo
 
 Deployment `paperless-gpt`, image `icereed/paperless-gpt`, reads Paperless OCR text and asks Ollama `qwen3.5:9b` at `http://ollama.ai.svc.cluster.local:30068` with thinking off. LLM OCR stays off. It calls `http://paperless:8000` with the API token of user `paperless-gpt`.
 
-Workflow `Tag new receipts for AI` tags every new document `paperless-gpt-auto`. paperless-gpt polls that tag and sets the title, the shop as correspondent, tags, document type, created date and `Total`. Then it removes `paperless-gpt-auto` and adds `paperless-gpt-auto-complete`, or `paperless-gpt-failed` when Paperless rejects a value. It creates those two tags at startup. It picks only existing tags and document types and may create new shops.
+Workflow `Tag new receipts for AI` tags new documents `paperless-gpt-auto`, except those tagged `source:gmail` or `source:drive`. paperless-gpt polls that tag and sets the title, the shop as correspondent, tags, document type, created date and `Total`. Then it removes `paperless-gpt-auto` and adds `paperless-gpt-auto-complete`, or `paperless-gpt-failed` when Paperless rejects a value. It creates those two tags at startup. It picks only existing tags and document types and may create new shops.
 
 It runs as 1000:1000. The entrypoint skips its user setup when not root. Its files live on `paperless-data`: `gpt/config` with `settings.json`, `gpt/prompts`, and `gpt/db` with the SQLite undo history. On first start it copies the image's `default_prompts` into the empty `gpt/prompts`, and on later starts it updates every prompt nobody edited.
 
@@ -98,6 +98,87 @@ On a receipt this is the purchase date as printed on the receipt. The receipts w
 The date line has no example date. An earlier version had one, and on a real receipt with noisy OCR the AI returned that example date. On 2026-11-09 the current wording gave the right date on that receipt twice and on six made-up receipts in Norwegian, German, English and Greek with formats DD.MM.YYYY, DD.MM.YY, DD/MM/YYYY and DD-MM-YYYY.
 
 Known limits: a US receipt that prints the month first gets the wrong date, and `kr` on a Swedish or Danish receipt may become NOK. Fix those by hand. An edited prompt no longer follows upstream defaults. After an image update, compare it with the new `default_prompts`.
+
+## Email and Drive import
+
+The [import design](../../docs/superpowers/specs/2026-11-10-paperless-ingest-design.md) covers scope and limits. Gmail imports run every 10 minutes. Drive import is a one-off copy, not a sync. Both keep the originals and assign imported documents to the owner, not other Paperless users.
+
+Deployment and Service `paperless-converters` run Tika on port 9998 and Gotenberg on port 3000 for email PDFs and Office files. NetworkPolicy `paperless-converters-ingress` admits only Paperless pods. Gotenberg disables JavaScript and allows only local files under `/tmp`, so email scripts and tracking pixels cannot load. Converter failures do not take the Paperless pod offline. `PaperlessConverterRestarting` warns when either converter restarts at least three times in 15 minutes.
+
+### Owner setup
+
+The owner enables Gmail 2-Step Verification and IMAP, creates an app password and stores it in a vault item holding the Gmail app password, `<gmail-imap-item>`. He creates his own Paperless API token under My Profile and stores it in a vault item holding the owner's Paperless API token, `<paperless-token-item>`. Never put either value in Git, shell arguments or logs.
+
+With owner approval, create Gmail label `paperless-receipt` and a receipt-word filter, preview the matches, then apply it to existing mail. Add this label by hand when the filter misses a receipt. The design records the filter query.
+
+### Mail rules
+
+`ingest/configure.py` creates or updates mail account `gmail` and these rules. Both have no age limit, use the email subject as title, assign no correspondent and tag documents `source:gmail`.
+
+| Order | Rule | Folder | Import | Gmail label after import |
+|---|---|---|---|---|
+| 1 | `gmail-receipt-bodies` | `paperless-receipt` | Email body as PDF | `paperless-done-eml` |
+| 2 | `gmail-attachments` | Discovered IMAP All Mail folder | Attachments, not inline images | `paperless-done-att` |
+
+The separate done labels let both rules process the same message. A receipt with an attachment can produce both an email PDF and an attachment document. Rule 1 also assigns `paperless-gpt-auto`. The receipts workflow uses `filter_has_not_tags` to skip `source:gmail` and `source:drive`, so only receipt emails enter AI processing through the rule. Phone and web uploads keep their existing behavior.
+
+To re-import one message, delete its entry under Mail > Processed Mails and remove the matching done label in Gmail. Leave `paperless-receipt` in place for a receipt body. Re-importing creates a second document if the first still exists. Use the Duplicates filter in Paperless to find duplicates.
+
+### Configure Gmail
+
+Run from the repository root after the reviewed manifests sync and the owner approves. Replace the placeholders with the Paperless pod name, the owner's Paperless username from `/api/profile/` and his Gmail address. Keep profile output private.
+
+```sh
+umask 077
+export D="$(mktemp -d)"
+export POD='<paperless-pod>' OWNER='<paperless-username>' EMAIL='<gmail-address>'
+kubectl -n paperless cp 2-k3s/33.paperless/ingest/configure.py "$POD":/tmp/configure.py -c paperless
+vault run --name '<gmail-imap-item>' --password-env VAULT_IMAP_PW -- sh -c '
+  python3 -c "import json, os; print(json.dumps(dict(owner=os.environ[\"OWNER\"], email=os.environ[\"EMAIL\"], password=os.environ[\"VAULT_IMAP_PW\"])))" |
+    kubectl -n paperless exec -i "$POD" -c paperless -- sh -c "cd /usr/src/paperless/src && python3 manage.py shell -c \"exec(open(\\\"/tmp/configure.py\\\").read())\"" > "$D/configure.out" 2>&1
+'
+```
+
+Read the private `$D/configure.out`. Run the vault command again to check that setup remains idempotent. The script reports created or updated object names, not separate creation counts. Then remove the copied script:
+
+```sh
+kubectl -n paperless exec "$POD" -c paperless -- rm /tmp/configure.py
+```
+
+Check Mail > Processed Mails and the Paperless task list after the next mail check. To rotate the app password, the owner updates the vault item, then rerun this setup with the same owner and email. Mail account credentials live in the Paperless database, not a Kubernetes Secret.
+
+### Import Drive
+
+Use the existing homelab client credential in `MCP_HUB_TOKEN`. Do not print it or substitute a Google upstream bearer. Downloads use the authenticated [hub attachment path](../23.mcp-hub/instances/README.md), `/drive/attachments/<uuid>`.
+
+From the repository root, create a private output directory and a venv with the same dependencies as CI:
+
+```sh
+umask 077
+export D="$(mktemp -d)"
+python3 -m venv "$D/venv"
+"$D/venv/bin/pip" install mcp==2.2.0 -r .github/hooks/requirements.txt
+kubectl -n paperless port-forward svc/paperless 18000:8000
+```
+
+Leave the port-forward running. In another shell, set `D` to that same private directory and run the plan:
+
+```sh
+export D='<private-output-directory>'
+vault run --name '<paperless-token-item>' --password-env VAULT_PL_TOKEN -- \
+  "$D/venv/bin/python" 2-k3s/33.paperless/ingest/drive_import.py --out "$D" --plan-only
+```
+
+`--plan-only` lists owned files and writes `report.json` without downloading or uploading documents. Review that private report with the owner. After approval, run:
+
+```sh
+vault run --name '<paperless-token-item>' --password-env VAULT_PL_TOKEN -- \
+  "$D/venv/bin/python" 2-k3s/33.paperless/ingest/drive_import.py --out "$D"
+```
+
+The script defaults to Paperless at `http://127.0.0.1:18000` and the homelab hub's `/drive` endpoint. It tags uploads `source:drive`, uses the Drive name as title and exports Google Docs, Sheets and Slides as PDFs. Unsupported types appear as skipped in the manifest. It downloads one file at a time, removes the local copy after each attempt and limits downloads to 1 GiB per rolling hour.
+
+Rerun with the same `--out` directory to resume from `manifest.jsonl` and skip already uploaded file IDs. If an upload response was lost, a rerun can create a second document. Use the Duplicates filter to find it. Keep that directory private and retain it between runs. `report.json` contains cumulative counts and `failed_ids`, not a per-run upload count. Compare runs until no new uploads occur, check `stopped` and the failed list, and verify upload tasks in Paperless. An accepted upload is not proof that Paperless finished processing it.
 
 ## Shared lists
 
