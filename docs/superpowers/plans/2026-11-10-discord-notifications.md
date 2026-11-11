@@ -13,7 +13,7 @@
 ## Global constraints
 
 - The webhook URL and the role ID never appear in Git in plain text, in logs, or in chat. Read them only inside `vault run` on the notifications vault item (password: webhook URL, field `roleID`).
-- Mention text is `<@&ROLE_ID>`. Loud = Alertmanager firing with severity critical, every PVE and PBS notification, script messages with priority `high` or `urgent`. Everything else has no mention.
+- Mention text is `<@&ROLE_ID>`. Loud = Alertmanager firing with severity critical, every PVE notification, PBS notifications with severity warning, error or unknown, script messages with priority `high` or `urgent`. Everything else has no mention.
 - Discord limits: content 2000 characters, embed title 256, embed description 4096.
 - Webhook display names: `Alertmanager`, `Unpackerr`, `PVE`, `PBS`, `TrueNAS`, `PBS datastore`.
 - A failed post must stay visible: scripts keep exit code 2 and do not write state; Alertmanager failures count in `AlertmanagerWebhookDeliveryFailing`.
