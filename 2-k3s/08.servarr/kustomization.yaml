@@ -71,9 +71,6 @@ configMapGenerator:
   - name: cleanuparr-malware-blocklist
     files:
       - malware-blocklist.txt=cleanuparr/files/malware-blocklist.txt
-  - name: unpackerr-ntfy-template
-    files:
-      - ntfy.json.tmpl=unpackerr/files/ntfy.json.tmpl
   - name: lingarr-jobqueue-guard
     files:
       - reconcile-ai-provider.sql=lingarr/files/reconcile-ai-provider.sql
