@@ -102,7 +102,7 @@ spec:
               mountPath: /keeper
       containers:
         - name: t3
-          image: ghcr.io/spyrospsarras/t3-runtime:work-inputs-02cba9062333743238e9ee46a542342c
+          image: ghcr.io/spyrospsarras/t3-runtime:work-inputs-9094ad532e82590202c654376045d8f0
           imagePullPolicy: IfNotPresent
           command: [bash, /scripts/entrypoint.sh]
           env:
@@ -130,6 +130,10 @@ spec:
               value: "1"
             - name: T3_BUILD_KUBECONFIG
               value: /run/t3-build/kubeconfig
+            # Chrome's sandbox needs user namespaces, which RuntimeDefault seccomp and the nodes' AppArmor block;
+            # the pod is the boundary for T3's headless browser instead.
+            - name: T3CODE_SERVER_BROWSER_SANDBOX
+              value: "0"
             - name: GITHUB_TOKEN
               valueFrom:
                 secretKeyRef:
