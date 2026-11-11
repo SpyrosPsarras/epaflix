@@ -3,17 +3,17 @@
   "private": true,
   "description": "T3 pod CLI pins; Renovate maintains the package and lock together.",
   "dependencies": {
-    "@anthropic-ai/claude-code": "2.1.321",
+    "@anthropic-ai/claude-code": "2.1.322",
     "@bitwarden/cli": "2026.8.0",
     "@dietrichgebert/ponytail": "5.3.3",
-    "@earendil-works/pi-coding-agent": "1.5.0",
+    "@earendil-works/pi-coding-agent": "1.5.2",
     "@juicesharp/rpiv-ask-user-question": "2.15.0",
     "@juicesharp/rpiv-todo": "2.15.0",
-    "@openai/codex": "0.167.0",
+    "@openai/codex": "0.167.1",
     "@spences10/pi-redact": "0.0.16",
     "not-enough-retry": "0.4.0",
-    "pi-cliproxyapi-provider": "0.16.8",
+    "pi-cliproxyapi-provider": "0.16.9",
     "superpowers": "github:obra/superpowers#v7.0.2",
-    "t3": "0.1.8-nightly.20261109.4433"
+    "t3": "0.1.9-nightly.20261111.4515"
   }
 }
