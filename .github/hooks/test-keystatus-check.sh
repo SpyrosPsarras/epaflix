@@ -107,7 +107,7 @@ rc=0; run_check available || rc=$?
 if [ "$rc" -eq 0 ] \
   && [ "$(records)" -eq 1 ] \
   && post_is '.content | startswith("**TrueNAS mpara-tank-lan/encrypted-backups unlocked**\n")' \
-  && post_is '.content | contains("<@&") | not' \
+  && post_is '(.content | contains("<@&") | not) and .allowed_mentions == {parse: []}' \
   && post_is '.username == "TrueNAS"' \
   && [ ! -e "$state_file" ]; then
   pass "unlocked dataset clears the state file and sends the recovery notification"

@@ -47,6 +47,7 @@ STATE_FILE="${STATE_FILE:-/var/tmp/pbs-datastore-usage.level}"
 WARN_PCT="${WARN_PCT:-85}"
 CRIT_PCT="${CRIT_PCT:-95}"
 DISCORD_ENV_FILE="${DISCORD_ENV_FILE:-/root/.config/discord-webhook.env}"
+# shellcheck source=/dev/null
 if [ ! -r "${DISCORD_ENV_FILE}" ] || ! . "${DISCORD_ENV_FILE}" \
     || [ -z "${DISCORD_WEBHOOK_URL:-}" ] || [ -z "${DISCORD_ROLE_ID:-}" ]; then
     echo "${DISCORD_ENV_FILE} is missing or does not set DISCORD_WEBHOOK_URL and DISCORD_ROLE_ID" >&2
@@ -60,7 +61,7 @@ notify() {
         ($priority == "high" or $priority == "urgent") as $loud
         | {username: $username,
            content: ((if $loud then "<@&\($role)> " else "" end) + "**\($title)**\n\($body)")}
-        + (if $loud then {allowed_mentions: {roles: [$role]}} else {} end)')" || return
+        + {allowed_mentions: (if $loud then {roles: [$role]} else {parse: []} end)}')" || return
     curl -fsS -4 -m 10 \
         -H 'Content-Type: application/json' \
         --data-binary "${json}" \

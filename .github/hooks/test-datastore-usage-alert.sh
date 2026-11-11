@@ -164,7 +164,7 @@ rc=0; DF_PCT=80 run_alert || rc=$?
 post="$(last_post)"
 if [ "$rc" -eq 1 ] && [ "$(curl_count)" -eq 1 ] \
   && post_is '.content | startswith("**PBS datastore VMs-NFS recovered**\n")' \
-  && post_is '(.content | contains("<@&") | not) and .username == "PBS datastore"' \
+  && post_is '(.content | contains("<@&") | not) and .allowed_mentions == {parse: []} and .username == "PBS datastore"' \
   && [ ! -e "$state" ]; then
   pass "drop below 85% posts a recovery and clears the state file"
 else
