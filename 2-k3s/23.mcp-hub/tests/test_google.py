@@ -68,6 +68,106 @@ def seeded(directory):
 
 @unittest.skipIf(RAW_TEST, "gateway SDK runs in the host fixture environment")
 class GatewayTests(unittest.TestCase):
+    def test_attachment_forward(self):
+        import httpx2
+        from starlette.applications import Starlette
+        from starlette.responses import Response
+        from starlette.routing import Route
+        from starlette.testclient import TestClient
+
+        sys.path.insert(0, str(HUB / "files"))
+        gateway = load("gateway")
+        raw_requests = []
+
+        async def raw(request):
+            raw_requests.append((request.url.path, dict(request.headers)))
+            return Response(b"%PDF-fixture", media_type="application/pdf", headers={
+                "content-disposition": 'attachment; filename="x.pdf"', "x-internal": "hidden"})
+
+        transport = httpx2.ASGITransport(app=Starlette(routes=[Route("/attachments/{file_id}", raw)]))
+        path = "/attachments/0f8fc6d3-2f5e-4c1a-9b7e-3d2a1c0b9e8f"
+        with TestClient(gateway.app(TOKEN, transport=transport)) as client:
+            for bearer in (None, "Bearer wrong", TOKEN, "Basic " + TOKEN, "Bearer ",
+                           b"Bearer non-ascii-\xff", "Bearer homelab.fixture",
+                           "Bearer work.fixture", "Bearer legacy.fixture"):
+                headers = {} if bearer is None else {"Authorization": bearer}
+                self.assertEqual(client.get(path, headers=headers).status_code, 401)
+                self.assertEqual(raw_requests, [])
+            headers = {"Authorization": "Bearer " + TOKEN, "Cookie": "private=fixture",
+                       "mcp-session-id": "private-session", "x-client": "hidden"}
+            response = client.get(path, headers=headers)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.content, b"%PDF-fixture")
+            self.assertEqual(response.headers["content-type"], "application/pdf")
+            self.assertEqual(response.headers["content-length"], "12")
+            self.assertEqual(response.headers["content-disposition"], 'attachment; filename="x.pdf"')
+            self.assertNotIn("x-internal", response.headers)
+            self.assertEqual(len(raw_requests), 1)
+            forwarded_path, forwarded = raw_requests[0]
+            self.assertEqual(forwarded_path, path)
+            for name in ("authorization", "cookie", "mcp-session-id", "x-client"):
+                self.assertNotIn(name, forwarded)
+            for method in ("POST", "HEAD", "DELETE"):
+                self.assertEqual(client.request(method, path, headers=headers).status_code, 405)
+            self.assertEqual(len(raw_requests), 1)
+
+    def test_attachment_rejects_non_uuid(self):
+        import httpx2
+        from starlette.applications import Starlette
+        from starlette.responses import Response
+        from starlette.routing import Route
+        from starlette.testclient import TestClient
+
+        sys.path.insert(0, str(HUB / "files"))
+        gateway = load("gateway")
+        raw_requests = []
+
+        async def raw(request):
+            raw_requests.append(request.url.path)
+            return Response(b"unexpected")
+
+        transport = httpx2.ASGITransport(app=Starlette(routes=[Route("/{path:path}", raw)]))
+        file_id = "0f8fc6d3-2f5e-4c1a-9b7e-3d2a1c0b9e8f"
+        with TestClient(gateway.app(TOKEN, transport=transport)) as client:
+            for invalid in ("..%2fmcp", "x", file_id.upper(), file_id + "a", file_id.replace("-", "")):
+                with self.subTest(file_id=invalid):
+                    response = client.get("/attachments/" + invalid, headers={"Authorization": "Bearer " + TOKEN})
+                    self.assertEqual(response.status_code, 404)
+                    self.assertEqual(raw_requests, [])
+
+    def test_attachment_upstream_errors(self):
+        import httpx2
+        from starlette.applications import Starlette
+        from starlette.responses import Response
+        from starlette.routing import Route
+        from starlette.testclient import TestClient
+
+        sys.path.insert(0, str(HUB / "files"))
+        gateway = load("gateway")
+        status = 404
+        raw_requests = []
+
+        async def raw(request):
+            raw_requests.append(request.url.path)
+            if status == "network":
+                raise httpx2.ConnectError("synthetic-private-detail")
+            return Response(b"synthetic-private-detail", status_code=status,
+                            headers={"location": "https://private.example.test", "www-authenticate": "Bearer"})
+
+        transport = httpx2.ASGITransport(app=Starlette(routes=[Route("/attachments/{file_id}", raw)]))
+        path = "/attachments/0f8fc6d3-2f5e-4c1a-9b7e-3d2a1c0b9e8f"
+        with TestClient(gateway.app(TOKEN, transport=transport)) as client:
+            for status in (404, 401, 403, 302, 500, "network"):
+                with self.subTest(status=status):
+                    response = client.get(path, headers={"Authorization": "Bearer " + TOKEN})
+                    self.assertEqual(response.status_code, 404 if status == 404 else 502)
+                    if status != 404:
+                        self.assertIn("text/plain", response.headers["content-type"])
+                        self.assertNotIn("synthetic-private-detail", response.text)
+                    self.assertNotIn("www-authenticate", response.headers)
+                    self.assertNotIn("location", response.headers)
+            self.assertEqual(len(raw_requests), 6)
+
     def test_direct_auth_all_methods(self):
         import httpx2
         from starlette.applications import Starlette

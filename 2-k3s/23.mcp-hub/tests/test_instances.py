@@ -17,8 +17,10 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+import anyio
 import httpx2
 from mcp.server.mcpserver import MCPServer
+from starlette.requests import ClientDisconnect
 from starlette.testclient import TestClient
 import yaml
 
@@ -30,9 +32,9 @@ import hub_services
 import mcp_hub
 import notion_grant
 import vaultwarden_mcp
-from upstream import Upstream, UpstreamError
+from upstream import Upstream, UpstreamError, attachment_route
 from starlette.applications import Starlette
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, StreamingResponse
 from starlette.routing import Route
 
 logging.disable(logging.CRITICAL)
@@ -282,6 +284,266 @@ class InstanceTests(unittest.TestCase):
                 reply = client.post("/searxng", json=INIT, headers=auth(environment + ".fixture-client"))
                 self.assertEqual(reply.status_code, 200)
                 self.assertEqual(reply.json()["result"]["serverInfo"]["name"], environment)
+
+    def test_drive_attachment_auth(self):
+        gateway_requests = []
+
+        async def download(request):
+            gateway_requests.append((request.url.path, dict(request.headers)))
+
+            async def chunks():
+                yield b"%PDF-"
+                yield b"fixture"
+
+            return StreamingResponse(chunks(), media_type="application/pdf", headers={
+                "content-disposition": 'attachment; filename="x.pdf"'})
+
+        gateway = Starlette(routes=[Route("/attachments/{file_id}", download)])
+        transport = httpx2.ASGITransport(app=gateway)
+        homelab_path, work_path = self.home / "homelab", self.home / "work"
+        fixture(homelab_path, "homelab", names=("searxng", "gmail", "drive"))
+        _, credentials = fixture(work_path, "work", names=("searxng", "notion"))
+        credentials["upstreams"]["notion"] = {"url": "https://mcp.notion.com/mcp"}
+        (work_path / "credentials.json").write_text(json.dumps(credentials))
+        grant_data = {"client_id": "synthetic-work-client", "refresh_token": "synthetic-refresh",
+                      "token_endpoint": "https://notion.example.test/token",
+                      "access_token": "synthetic-access", "expires_at": "9999999999"}
+        with patch.object(mcp_hub, "Upstream", side_effect=lambda *args, **kwargs:
+                          Upstream(*args, transport=transport, **kwargs)), \
+                patch.object(notion_grant.SecretStore, "read", return_value=(grant_data, "1")), \
+                patch.object(notion_grant, "post_form", side_effect=AssertionError):
+            homelab = mcp_hub.instance_app("homelab", homelab_path / "services.json", homelab_path / "credentials.json")
+            work = mcp_hub.instance_app("work", work_path / "services.json", work_path / "credentials.json")
+        path = "/drive/attachments/0f8fc6d3-2f5e-4c1a-9b7e-3d2a1c0b9e8f"
+        with TestClient(homelab) as client, TestClient(work) as work_client:
+            for token in (None, "work.fixture-client", "wrong"):
+                headers = {} if token is None else auth(token)
+                self.assertEqual(client.get(path, headers=headers).status_code, 401)
+                self.assertEqual(gateway_requests, [])
+            response = client.get(path, headers={**auth("homelab.fixture-client"), "Cookie": "private=fixture"})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.content, b"%PDF-fixture")
+            self.assertEqual(response.headers["content-type"], "application/pdf")
+            self.assertEqual(response.headers["content-disposition"], 'attachment; filename="x.pdf"')
+            self.assertEqual(len(gateway_requests), 1)
+            forwarded_path, forwarded = gateway_requests[0]
+            self.assertEqual(forwarded_path, "/attachments/0f8fc6d3-2f5e-4c1a-9b7e-3d2a1c0b9e8f")
+            self.assertEqual(forwarded["authorization"], "Bearer homelab-backend-fixture")
+            self.assertNotIn("cookie", forwarded)
+            for invalid in ("x", "0F8FC6D3-2F5E-4C1A-9B7E-3D2A1C0B9E8F"):
+                self.assertEqual(client.get("/drive/attachments/" + invalid,
+                                           headers=auth("homelab.fixture-client")).status_code, 404)
+            self.assertEqual(client.get(path.replace("/drive/", "/gmail/"),
+                                       headers=auth("homelab.fixture-client")).status_code, 404)
+            self.assertEqual(work_client.get(path, headers=auth("work.fixture-client")).status_code, 404)
+            self.assertEqual(len(gateway_requests), 1)
+        legacy = mcp_hub.build_app({"fixture": digest("legacy-fixture")}, modules=(), ups=[
+            ("/drive", Upstream("drive", "http://legacy.example.test/mcp", transport=transport))])
+        with TestClient(legacy) as client:
+            self.assertEqual(client.get(path, headers=auth("legacy-fixture")).status_code, 404)
+        self.assertEqual(len(gateway_requests), 1)
+
+    def test_attachment_stream_lifecycle(self):
+        spec = importlib.util.spec_from_file_location("google_gateway", HUB / "instances/google/gateway.py")
+        gateway = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gateway)
+        file_id = "0f8fc6d3-2f5e-4c1a-9b7e-3d2a1c0b9e8f"
+        gateway_token = "synthetic-google-stream-token"
+
+        for level in ("gateway", "hub"):
+            for case in ("timeout-before", "error-before", "timeout-after", "empty", "mcp"):
+                with self.subTest(level=level, case=case):
+                    class Body(httpx2.AsyncByteStream):
+                        closed = False
+                        reads = 0
+
+                        async def __aiter__(self):
+                            self.reads += 1
+                            if case == "mcp":
+                                yield b"%PDF-fixture"
+                                return
+                            if case == "timeout-after":
+                                yield b"%PDF-"
+                            if case == "error-before":
+                                raise RuntimeError("synthetic-private-detail")
+                            if case != "empty":
+                                raise httpx2.ReadTimeout("synthetic-private-detail")
+
+                        async def aclose(self):
+                            await anyio.lowlevel.checkpoint()
+                            self.closed = True
+
+                    body = Body()
+
+                    async def download(request):
+                        return httpx2.Response(200, headers={
+                            "content-type": "application/pdf",
+                            "content-length": "0" if case == "empty" else "12",
+                        }, stream=body)
+
+                    transport = httpx2.MockTransport(download)
+                    if level == "gateway":
+                        app = gateway.app(gateway_token, transport=transport)
+                        token = gateway_token
+                        path = "/mcp" if case == "mcp" else "/attachments/" + file_id
+                    else:
+                        root = self.home / "homelab"
+                        fixture(root, "homelab", names=("drive",))
+                        with patch.object(mcp_hub, "Upstream", side_effect=lambda *args, **kwargs:
+                                          Upstream(*args, transport=transport, **kwargs)):
+                            app = mcp_hub.instance_app("homelab", root / "services.json", root / "credentials.json")
+                        token = "homelab.fixture-client"
+                        path = "/drive" if case == "mcp" else "/drive/attachments/" + file_id
+                    messages = []
+                    reads_at_start = []
+
+                    async def observe(scope, receive, send):
+                        async def record(message):
+                            messages.append(message.copy())
+                            if message["type"] == "http.response.start":
+                                reads_at_start.append(body.reads)
+                            await send(message)
+
+                        await app(scope, receive, record)
+
+                    with TestClient(observe, raise_server_exceptions=case == "timeout-after") as client:
+                        if case == "timeout-after":
+                            with self.assertRaises(httpx2.ReadTimeout):
+                                client.get(path, headers=auth(token))
+                            start = next(m for m in messages if m["type"] == "http.response.start")
+                            self.assertEqual(start["status"], 200)
+                            self.assertIn((b"content-length", b"12"), start["headers"])
+                            chunks = [m for m in messages if m["type"] == "http.response.body"]
+                            self.assertEqual(b"".join(m["body"] for m in chunks), b"%PDF-")
+                            self.assertTrue(all(m.get("more_body", False) for m in chunks))
+                        else:
+                            response = client.get(path, headers=auth(token))
+                            if case.endswith("before"):
+                                self.assertEqual(response.status_code, 502)
+                                self.assertEqual(response.headers["content-type"], "text/plain; charset=utf-8")
+                                self.assertEqual(response.text, "upstream unavailable")
+                            else:
+                                self.assertEqual(response.status_code, 200)
+                                self.assertEqual(response.content, b"" if case == "empty" else b"%PDF-fixture")
+                                if case == "mcp":
+                                    self.assertEqual(reads_at_start, [0])
+                        self.assertTrue(body.closed)
+
+    def test_attachment_cancellation_closes_upstream(self):
+        for phase in ("first-read", "streaming"):
+            with self.subTest(phase=phase):
+                async def exercise():
+                    reading = anyio.Event()
+                    cancelled = False
+                    messages = []
+
+                    class Body(httpx2.AsyncByteStream):
+                        closed = False
+
+                        async def __aiter__(self):
+                            if phase == "streaming":
+                                yield b"%PDF-"
+                            reading.set()
+                            await anyio.sleep_forever()
+
+                        async def aclose(self):
+                            await anyio.lowlevel.checkpoint()
+                            self.closed = True
+
+                    body = Body()
+
+                    async def download(request):
+                        return httpx2.Response(200, stream=body)
+
+                    up = Upstream("drive", "http://drive.example.test/mcp",
+                                  transport=httpx2.MockTransport(download))
+                    app = Starlette(routes=[attachment_route("/attachments/{file_id}", up)])
+
+                    async def receive():
+                        await anyio.sleep_forever()
+
+                    async def send(message):
+                        messages.append(message.copy())
+
+                    async def request():
+                        nonlocal cancelled
+                        try:
+                            await app({"type": "http", "asgi": {"version": "3.0", "spec_version": "2.4"},
+                                       "http_version": "1.1", "method": "GET", "scheme": "http",
+                                       "path": "/attachments/0f8fc6d3-2f5e-4c1a-9b7e-3d2a1c0b9e8f",
+                                       "query_string": b"", "headers": []}, receive, send)
+                        except anyio.get_cancelled_exc_class():
+                            cancelled = True
+                            raise
+
+                    try:
+                        with anyio.fail_after(2):
+                            async with anyio.create_task_group() as group:
+                                group.start_soon(request)
+                                await reading.wait()
+                                group.cancel_scope.cancel()
+                        self.assertTrue(cancelled)
+                        self.assertTrue(body.closed)
+                        if phase == "first-read":
+                            self.assertEqual(messages, [])
+                        else:
+                            self.assertEqual(messages[0]["status"], 200)
+                            chunks = messages[1:]
+                            self.assertEqual(b"".join(m["body"] for m in chunks), b"%PDF-")
+                            self.assertTrue(all(m.get("more_body", False) for m in chunks))
+                    finally:
+                        await up.aclose()
+
+                anyio.run(exercise)
+
+    def test_attachment_disconnect_closes_upstream(self):
+        for phase in ("http.response.start", "http.response.body"):
+            for error in (OSError, ClientDisconnect):
+                with self.subTest(phase=phase, error=error.__name__):
+                    async def exercise():
+                        messages = []
+
+                        class Body(httpx2.AsyncByteStream):
+                            closed = False
+
+                            async def __aiter__(self):
+                                yield b"%PDF-"
+                                yield b"fixture"
+
+                            async def aclose(self):
+                                await anyio.lowlevel.checkpoint()
+                                self.closed = True
+
+                        body = Body()
+
+                        async def download(request):
+                            return httpx2.Response(200, stream=body)
+
+                        up = Upstream("drive", "http://drive.example.test/mcp",
+                                      transport=httpx2.MockTransport(download))
+                        app = Starlette(routes=[attachment_route("/attachments/{file_id}", up)])
+
+                        async def receive():
+                            await anyio.sleep_forever()
+
+                        async def send(message):
+                            messages.append(message.copy())
+                            if message["type"] == phase:
+                                raise error()
+
+                        try:
+                            with anyio.fail_after(2), self.assertRaises(ClientDisconnect):
+                                await app({"type": "http", "asgi": {"version": "3.0", "spec_version": "2.4"},
+                                           "http_version": "1.1", "method": "GET", "scheme": "http",
+                                           "path": "/attachments/0f8fc6d3-2f5e-4c1a-9b7e-3d2a1c0b9e8f",
+                                           "query_string": b"", "headers": []}, receive, send)
+                            self.assertEqual(messages[-1]["type"], phase)
+                            self.assertEqual(messages[0]["status"], 200)
+                            self.assertTrue(body.closed)
+                        finally:
+                            await up.aclose()
+
+                    anyio.run(exercise)
 
     def test_invalid_instance_configuration_never_uses_legacy_defaults(self):
         path = self.home / "config"

@@ -11,6 +11,7 @@ reaches the client, which would otherwise start its own OAuth dance).
 """
 
 import json
+import uuid
 
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
@@ -52,6 +53,63 @@ def _error(body, message, status=502):
     if isinstance(req, dict) and "id" in req:
         return JSONResponse({"jsonrpc": "2.0", "id": req["id"], "error": {"code": -32000, "message": message}})
     return Response(message, status_code=status, media_type="text/plain")
+
+
+def attachment_route(path: str, upstream: Upstream) -> Route:
+    import anyio
+
+    async def forward(request):
+        if request.method != "GET":
+            return Response(status_code=405, headers={"allow": "GET"})
+        file_id = request.path_params["file_id"]
+        try:
+            if str(uuid.UUID(file_id)) != file_id:
+                return Response(status_code=404)
+        except ValueError:
+            return Response(status_code=404)
+        try:
+            extra = await anyio.to_thread.run_sync(upstream.credential)
+            client = upstream.client()
+            req = client.build_request("GET", upstream.url.removesuffix("/mcp") + "/attachments/" + file_id,
+                                       headers={**extra, "accept-encoding": "identity"})
+            resp = await client.send(req, stream=True)
+        except Exception:
+            return Response("upstream unavailable", status_code=502, media_type="text/plain")
+        if resp.status_code not in (200, 404):
+            with anyio.CancelScope(shield=True):
+                await resp.aclose()
+            return Response("upstream unavailable", status_code=502, media_type="text/plain")
+
+        chunks = resp.stream.__aiter__()
+        try:
+            first = await anext(chunks, b"")
+        except Exception:
+            with anyio.CancelScope(shield=True):
+                await resp.aclose()
+            return Response("upstream unavailable", status_code=502, media_type="text/plain")
+        except BaseException:
+            with anyio.CancelScope(shield=True):
+                await resp.aclose()
+            raise
+
+        async def stream():
+            yield first
+            async for chunk in chunks:
+                yield chunk
+
+        out = {k: v for k, v in resp.headers.items()
+               if k in ("content-type", "content-disposition", "content-length")}
+
+        async def respond(scope, receive, send):
+            try:
+                await StreamingResponse(stream(), status_code=resp.status_code, headers=out)(scope, receive, send)
+            finally:
+                with anyio.CancelScope(shield=True):
+                    await resp.aclose()
+
+        return respond
+
+    return Route(path, forward, methods=["GET"])
 
 
 def route(path, upstream):

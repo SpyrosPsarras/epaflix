@@ -73,6 +73,9 @@ spec:
             # Renaming the cookies logs every browser out, so keep the prefix even though no clash was found.
             - {name: PAPERLESS_COOKIE_PREFIX, value: "paperless_"}
             - {name: PAPERLESS_REDIS, value: "redis://127.0.0.1:6379"}
+            - {name: PAPERLESS_TIKA_ENABLED, value: "true"}
+            - {name: PAPERLESS_TIKA_ENDPOINT, value: "http://paperless-converters:9998"}
+            - {name: PAPERLESS_TIKA_GOTENBERG_ENDPOINT, value: "http://paperless-converters:3000"}
             - {name: PAPERLESS_DBENGINE, value: postgresql}
             - {name: PAPERLESS_DBHOST, value: postgres-cluster-rw.postgres-system.svc}
             - {name: PAPERLESS_DBNAME, value: paperless}

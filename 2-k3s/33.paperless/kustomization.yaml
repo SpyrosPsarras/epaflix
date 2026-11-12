@@ -7,6 +7,7 @@ resources:
   - database.yaml
   - storage.yaml
   - paperless.yaml
+  - converters.yaml
   - paperless-gpt.yaml
   - share-lists-cronjob.yaml
   - ingressroute.yaml
@@ -16,6 +17,10 @@ generators:
   - ksops-generator.yaml
 
 images:
+  - name: docker.io/apache/tika
+    newTag: 3.3.1.0@sha256:90b7fa1dc018434075fce9e1d9b88b1e3d0ea6979d0cf86e116c79a8073ae973
+  - name: docker.io/gotenberg/gotenberg
+    newTag: 8.38@sha256:aa552cc115db488e0f0bcb07446aac13071ad51505b642c84bb894500907b42b
   - name: ghcr.io/paperless-ngx/paperless-ngx
     newTag: 3.4.2@sha256:d704e84f88300eb6ab001ab15720a2330ff99169cf9f94d6b8fcc44b63a84c84
   - name: icereed/paperless-gpt

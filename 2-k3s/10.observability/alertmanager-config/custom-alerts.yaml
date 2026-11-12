@@ -507,6 +507,15 @@ spec:
           annotations:
             summary: "Paperless is unavailable"
             description: "Paperless has no available replica or its Deployment is absent. Check the paperless Deployment, its NFS volume and database connection in paperless."
+        - alert: PaperlessConverterRestarting
+          expr: increase(kube_pod_container_status_restarts_total{namespace="paperless",container=~"tika|gotenberg"}[15m]) >= 3
+          for: 0m
+          labels:
+            severity: warning
+            component: paperless
+          annotations:
+            summary: "Paperless {{ $labels.container }} keeps restarting"
+            description: "{{ $labels.container }} restarted 3 times in 15 minutes. Emails and Office files wait in the Paperless task list until it recovers. Check the paperless-converters Deployment in namespace paperless."
         - alert: PaperlessGptDown
           expr: |
             max(kube_deployment_status_replicas_available{namespace="paperless",deployment="paperless-gpt"}) == 0

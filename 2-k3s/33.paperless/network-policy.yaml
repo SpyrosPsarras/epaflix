@@ -36,3 +36,25 @@ spec:
       app: paperless-gpt
   policyTypes:
     - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: paperless-converters-ingress
+  namespace: paperless
+spec:
+  podSelector:
+    matchLabels:
+      app: paperless-converters
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: paperless
+      ports:
+        - port: 9998
+          protocol: TCP
+        - port: 3000
+          protocol: TCP

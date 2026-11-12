@@ -155,6 +155,12 @@ NetworkPolicy alone is not the boundary. The hub replaces the client's
 bearer with the Workspace bearer; the gateway strips it before forwarding
 to loopback. No Google grant or upstream bearer belongs in client config.
 
+Drive and Gmail download links use `/drive/attachments/<uuid>` on the homelab hub and
+require an ordinary homelab client bearer. The hub replaces it with the
+independent Workspace bearer for the gateway, which strips it before
+forwarding `/attachments/<uuid>` to loopback. Links expire after one hour.
+The raw container's temporary download storage is capped at 2 GiB.
+
 Only the raw container consumes `mcp-hub-gmail`. It seeds a writable,
 memory-backed temporary credential file under `/creds`. After seeding, the
 Workspace process is the only credentials-file writer. Its send-draft
