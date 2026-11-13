@@ -65,6 +65,7 @@ class ManifestTests(unittest.TestCase):
         self.assertIn("ghcr.io/home-assistant/home-assistant", names)
         self.assertIn("ghcr.io/stakater/reloader", names)
         self.assertIn("ghcr.io/esphome/esphome", names)
+        self.assertIn({"name": "ghcr.io/python-roborock/local_roborock_server", "newTag": "1.2.1@sha256:0f3d0dd05f14315273df5622d43008b2665c24b2fed79277822d4c9184eab158"}, images)
         for image in images:
             self.assertRegex(image["newTag"], r"^[^@]+@sha256:[0-9a-f]{64}$")
 
@@ -133,6 +134,65 @@ class ManifestTests(unittest.TestCase):
             }],
             "ports": [{"port": 6052, "protocol": "TCP"}],
         }])
+
+    def test_roborock_service(self):
+        service = resource("roborock.yaml", "Service", "roborock")
+        self.assertEqual(service["spec"]["type"], "LoadBalancer")
+        self.assertEqual(service["spec"]["loadBalancerIP"], "192.168.10.116")
+        self.assertEqual(service["spec"]["externalTrafficPolicy"], "Local")
+        self.assertEqual(service["spec"]["selector"], {"app": "roborock"})
+        self.assertEqual([(p["port"], p["targetPort"], p["protocol"]) for p in service["spec"]["ports"]], [(555, 555, "TCP"), (8881, 8881, "TCP")])
+
+    def test_roborock_certificate(self):
+        certificate = resource("roborock.yaml", "Certificate", "api-rr")
+        self.assertEqual(certificate["metadata"]["namespace"], "home-assistant")
+        self.assertEqual(certificate["spec"], {
+            "secretName": "api-rr-tls",
+            "issuerRef": {"name": "letsencrypt-dns", "kind": "ClusterIssuer"},
+            "dnsNames": ["api-rr.epaflix.com"],
+        })
+
+    def test_roborock_deployment(self):
+        deployment = resource("roborock.yaml", "Deployment", "roborock")
+        pod = deployment["spec"]["template"]["spec"]
+        [container] = pod["containers"]
+        self.assertEqual(deployment["spec"]["replicas"], 1)
+        self.assertEqual(deployment["spec"]["strategy"], {"type": "Recreate"})
+        self.assertEqual(deployment["spec"]["template"]["metadata"]["labels"], {"app": "roborock"})
+        self.assertIs(pod["automountServiceAccountToken"], False)
+        self.assertIs(pod["enableServiceLinks"], False)
+        self.assertEqual(deployment["metadata"]["annotations"]["secret.reloader.stakater.com/reload"], "api-rr-tls,roborock-config")
+        self.assertEqual(container["image"], "ghcr.io/python-roborock/local_roborock_server")
+        volumes = {v["name"]: v for v in pod["volumes"]}
+        mounts = {m["mountPath"]: m for m in container["volumeMounts"]}
+        self.assertEqual(set(mounts), {"/app/config.toml", "/run/certs", "/data"})
+        config = mounts["/app/config.toml"]
+        self.assertEqual((config["subPath"], config["readOnly"]), ("config.toml", True))
+        self.assertEqual(volumes[config["name"]]["secret"], {"secretName": "roborock-config", "items": [{"key": "config.toml", "path": "config.toml"}]})
+        self.assertIs(mounts["/run/certs"]["readOnly"], True)
+        self.assertNotIn("subPath", mounts["/run/certs"])
+        self.assertIn(mounts["/data"].get("readOnly"), (None, False))
+        service = resource("roborock.yaml", "Service", "roborock")
+        self.assertEqual(
+            sorted((p["name"], p["containerPort"]) for p in container["ports"]),
+            sorted((p["name"], p["targetPort"]) for p in service["spec"]["ports"]),
+        )
+        self.assertEqual(volumes[mounts["/run/certs"]["name"]]["secret"], {"secretName": "api-rr-tls"})
+        self.assertEqual(volumes[mounts["/data"]["name"]]["persistentVolumeClaim"], {"claimName": "roborock-data"})
+        pvc = resource("roborock.yaml", "PersistentVolumeClaim", "roborock-data")
+        self.assertEqual(pvc["spec"]["storageClassName"], "truenas-iscsi")
+        self.assertEqual(pvc["spec"]["accessModes"], ["ReadWriteOnce"])
+        self.assertEqual(pvc["spec"]["resources"]["requests"]["storage"], "2Gi")
+        self.assertEqual(container["resources"]["requests"], {"cpu": "1", "memory": "1Gi"})
+        self.assertEqual(container["readinessProbe"]["httpGet"], {"path": "/admin", "port": 555, "scheme": "HTTPS"})
+
+    def test_roborock_network_policy(self):
+        policy = resource("network-policy.yaml", "NetworkPolicy", "roborock-ingress")
+        self.assertEqual(policy["spec"], {
+            "podSelector": {"matchLabels": {"app": "roborock"}},
+            "policyTypes": ["Ingress"],
+            "ingress": [{"ports": [{"port": 555, "protocol": "TCP"}, {"port": 8881, "protocol": "TCP"}]}],
+        })
 
     def test_no_host_network_and_recreate(self):
         deployments = [doc for doc in manifests() if doc.get("kind") == "Deployment"]
@@ -234,7 +294,8 @@ class ManifestTests(unittest.TestCase):
 
     def test_secrets_encrypted(self):
         secrets = {(doc["metadata"]["namespace"], doc["metadata"]["name"]): doc for doc in documents("secrets.enc.yaml")}
-        self.assertLessEqual({("postgres-system", "homeassistant-db-role"), ("home-assistant", "home-assistant-secrets"), ("home-assistant", "esphome-auth")}, set(secrets))
+        self.assertLessEqual({("postgres-system", "homeassistant-db-role"), ("home-assistant", "home-assistant-secrets"), ("home-assistant", "esphome-auth"), ("home-assistant", "roborock-config")}, set(secrets))
+        self.assertEqual(set(secrets[("home-assistant", "roborock-config")]["stringData"]), {"config.toml"})
         self.assertEqual(set(secrets[("home-assistant", "esphome-auth")]["stringData"]), {"ESPHOME_USERNAME", "ESPHOME_PASSWORD"})
         self.assertEqual(secrets[("postgres-system", "homeassistant-db-role")]["type"], "kubernetes.io/basic-auth")
         self.assertEqual(set(secrets[("postgres-system", "homeassistant-db-role")]["stringData"]), {"username", "password"})

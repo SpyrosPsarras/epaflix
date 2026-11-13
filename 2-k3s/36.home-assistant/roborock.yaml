@@ -1,0 +1,117 @@
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: roborock-data
+  namespace: home-assistant
+spec:
+  storageClassName: truenas-iscsi
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: api-rr
+  namespace: home-assistant
+spec:
+  secretName: api-rr-tls
+  issuerRef:
+    name: letsencrypt-dns
+    kind: ClusterIssuer
+  dnsNames:
+    - api-rr.epaflix.com
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: roborock
+  namespace: home-assistant
+  labels:
+    app: roborock
+  annotations:
+    secret.reloader.stakater.com/reload: api-rr-tls,roborock-config
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: roborock
+  template:
+    metadata:
+      labels:
+        app: roborock
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      containers:
+        - name: roborock
+          image: ghcr.io/python-roborock/local_roborock_server
+          ports:
+            - name: https
+              containerPort: 555
+              protocol: TCP
+            - name: mqtts
+              containerPort: 8881
+              protocol: TCP
+          volumeMounts:
+            - name: config
+              mountPath: /app/config.toml
+              subPath: config.toml
+              readOnly: true
+            - name: certs
+              mountPath: /run/certs
+              readOnly: true
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /admin
+              port: 555
+              scheme: HTTPS
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "1"
+              memory: 1Gi
+            limits:
+              memory: 2Gi
+      volumes:
+        - name: config
+          secret:
+            secretName: roborock-config
+            items:
+              - key: config.toml
+                path: config.toml
+        - name: certs
+          secret:
+            secretName: api-rr-tls
+        - name: data
+          persistentVolumeClaim:
+            claimName: roborock-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: roborock
+  namespace: home-assistant
+spec:
+  type: LoadBalancer
+  loadBalancerIP: 192.168.10.116
+  externalTrafficPolicy: Local
+  selector:
+    app: roborock
+  ports:
+    - name: https
+      port: 555
+      targetPort: 555
+      protocol: TCP
+    - name: mqtts
+      port: 8881
+      targetPort: 8881
+      protocol: TCP

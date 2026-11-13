@@ -48,6 +48,24 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
+  name: roborock-ingress
+  namespace: home-assistant
+spec:
+  podSelector:
+    matchLabels:
+      app: roborock
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - port: 555
+          protocol: TCP
+        - port: 8881
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
   name: reloader
   namespace: home-assistant
 spec:
