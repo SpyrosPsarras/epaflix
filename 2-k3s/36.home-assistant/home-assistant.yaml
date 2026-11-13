@@ -28,7 +28,7 @@ data:
     automation: !include automations.yaml
     script: !include scripts.yaml
     scene: !include scenes.yaml
-  # Home Assistant 2026.11 keeps http settings in .storage/http and ignores the http: YAML after a one-time, UI-confirmed import.
+  # Seeds .storage/http once: Home Assistant 2026.11 ignores http: YAML after a one-time import that must be confirmed in the UI.
   http.json: |
     {
       "version": 3,
@@ -87,7 +87,7 @@ spec:
               set -e
               cp /defaults/configuration.yaml /config/configuration.yaml
               mkdir -p /config/.storage
-              cp /defaults/http.json /config/.storage/http
+              [ -e /config/.storage/http ] || cp /defaults/http.json /config/.storage/http
               [ -e /config/automations.yaml ] || echo '[]' > /config/automations.yaml
               [ -e /config/scripts.yaml ] || echo '{}' > /config/scripts.yaml
               [ -e /config/scenes.yaml ] || echo '[]' > /config/scenes.yaml

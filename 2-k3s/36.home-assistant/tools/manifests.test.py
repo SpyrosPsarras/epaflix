@@ -289,7 +289,7 @@ class ManifestTests(unittest.TestCase):
             "set -e",
             "cp /defaults/configuration.yaml /config/configuration.yaml",
             "mkdir -p /config/.storage",
-            "cp /defaults/http.json /config/.storage/http",
+            "[ -e /config/.storage/http ] || cp /defaults/http.json /config/.storage/http",
             "[ -e /config/automations.yaml ] || echo '[]' > /config/automations.yaml",
             "[ -e /config/scripts.yaml ] || echo '{}' > /config/scripts.yaml",
             "[ -e /config/scenes.yaml ] || echo '[]' > /config/scenes.yaml",
