@@ -2,7 +2,7 @@
 
 Home Assistant for the home devices. Design: `docs/superpowers/specs/2026-11-13-home-assistant-design.md`.
 
-Hostname https://ha.epaflix.com on the Traefik `internal` entrypoint at `192.168.10.102`, so it answers on the LAN and over Tailscale only. No route uses `websecure`, `web` or Authentik forward auth; Home Assistant has its own login.
+Hostnames https://ha.epaflix.com and https://esphome.epaflix.com on the Traefik `internal` entrypoint at `192.168.10.102`, so they answer on the LAN and over Tailscale only. No route uses `websecure`, `web` or Authentik forward auth; Home Assistant and ESPHome have their own logins.
 
 ## What runs
 
@@ -10,7 +10,8 @@ Hostname https://ha.epaflix.com on the Traefik `internal` entrypoint at `192.168
 - PVC `home-assistant-config`, 5Gi `truenas-iscsi`, mounted at `/config`. It holds `.storage`, the UI-made automations, scripts and scenes, and the integration settings.
 - ConfigMap `home-assistant-configuration` holds `configuration.yaml`. Init container `configuration` copies it into `/config` on every start. It creates `automations.yaml`, `scripts.yaml` and `scenes.yaml` only when they are missing, so a restart keeps what was made in the UI.
 - Traefik reaches the pod through the pod network, so `http.trusted_proxies` is the pod CIDR `10.42.0.0/16`. NetworkPolicy `home-assistant-ingress` lets only Traefik pods reach port 8123.
-- Reloader release `reloader-home-assistant` watches only this namespace and restarts Home Assistant when Secret `home-assistant-secrets` or ConfigMap `home-assistant-configuration` changes. The releases in `16.reloader` watch only their own namespaces.
+- Deployment `esphome`, image `ghcr.io/esphome/esphome`, one replica with `strategy: Recreate`, serves the ESPHome dashboard on port 6052 through Service `esphome`. PVC `esphome-config`, 5Gi `truenas-iscsi`, at `/config` holds the device YAML and build caches. The login comes from `ESPHOME_USERNAME` and `ESPHOME_PASSWORD` in Secret `esphome-auth`. NetworkPolicy `esphome-ingress` lets only Traefik pods reach port 6052.
+- Reloader release `reloader-home-assistant` watches only this namespace and restarts Home Assistant when Secret `home-assistant-secrets` or ConfigMap `home-assistant-configuration` changes, and ESPHome when Secret `esphome-auth` changes. The releases in `16.reloader` watch only their own namespaces.
 
 ## Database
 
@@ -20,14 +21,16 @@ History goes to database `homeassistant`, owned by role `homeassistant`, in `pos
 
 ## Secrets
 
-`secrets.enc.yaml` (SOPS) holds both Secrets. The role password is also stored as a login item in the homelab Vaultwarden collection. To change it, update the vault item, re-encrypt both Secrets with the same password and let Argo CD sync; CNPG sets the new password and Reloader restarts Home Assistant.
+`secrets.enc.yaml` (SOPS) holds the three Secrets. The role password and the ESPHome login (user `admin`) are also stored as login items in the homelab Vaultwarden collection. To change the role password, update its vault item, re-encrypt both Secrets that hold it with the same password and let Argo CD sync; CNPG sets the new password and Reloader restarts Home Assistant. To change the ESPHome password, update its vault item, re-encrypt `esphome-auth` and let Argo CD sync; Reloader restarts ESPHome.
 
 ## Recovery
 
 - History: restore `postgres-cluster` from its CNPG backup.
 - Configuration and UI-made objects: the `home-assistant-config` PVC. `configuration.yaml` comes back from Git on every start.
 - Home Assistant's own backups (Settings, System, Backups) land in `/config/backups` on the same PVC. They do not include the Postgres history.
+- ESPHome device YAML: the `esphome-config` PVC.
 
 ## Known limits
 
 - Samsung TV power-on uses a Wake-on-LAN broadcast. The broadcast does not leave the pod network, so Home Assistant cannot turn the TV on.
+- The ESPHome dashboard finds devices through mDNS, which does not reach a pod, so device online status may show unknown. Flashing over the air works by IP: each device YAML sets `wifi: use_address: <reserved IP>`.

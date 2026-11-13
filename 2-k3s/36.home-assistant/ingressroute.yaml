@@ -17,3 +17,22 @@ spec:
         - name: home-assistant
           port: 8123
   tls: {}
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: esphome
+  namespace: home-assistant
+spec:
+  entryPoints:
+    - internal
+  routes:
+    - match: Host(`esphome.epaflix.com`)
+      kind: Rule
+      middlewares:
+        - name: security-headers
+          namespace: traefik-system
+      services:
+        - name: esphome
+          port: 6052
+  tls: {}

@@ -64,6 +64,7 @@ class ManifestTests(unittest.TestCase):
         names = [image["name"] for image in images]
         self.assertIn("ghcr.io/home-assistant/home-assistant", names)
         self.assertIn("ghcr.io/stakater/reloader", names)
+        self.assertIn("ghcr.io/esphome/esphome", names)
         for image in images:
             self.assertRegex(image["newTag"], r"^[^@]+@sha256:[0-9a-f]{64}$")
 
@@ -85,6 +86,53 @@ class ManifestTests(unittest.TestCase):
         service = resource("home-assistant.yaml", "Service", "home-assistant")
         self.assertEqual(service["spec"]["selector"], {"app": "home-assistant"})
         self.assertEqual([port["port"] for port in service["spec"]["ports"]], [8123])
+
+    def test_esphome_route(self):
+        route = resource("ingressroute.yaml", "IngressRoute", "esphome")
+        [rule] = route["spec"]["routes"]
+        self.assertEqual(rule["match"], "Host(`esphome.epaflix.com`)")
+        self.assertEqual(rule["services"], [{"name": "esphome", "port": 6052}])
+        self.assertEqual(rule["middlewares"], [{"name": "security-headers", "namespace": "traefik-system"}])
+        self.assertEqual(route["spec"]["tls"], {})
+        service = resource("esphome.yaml", "Service", "esphome")
+        self.assertEqual(service["spec"]["selector"], {"app": "esphome"})
+        self.assertEqual([port["port"] for port in service["spec"]["ports"]], [6052])
+
+    def test_esphome_deployment(self):
+        deployment = resource("esphome.yaml", "Deployment", "esphome")
+        pod = deployment["spec"]["template"]["spec"]
+        [container] = pod["containers"]
+        self.assertEqual(deployment["spec"]["replicas"], 1)
+        self.assertEqual(deployment["spec"]["template"]["metadata"]["labels"], {"app": "esphome"})
+        self.assertIs(pod["automountServiceAccountToken"], False)
+        self.assertIs(pod["enableServiceLinks"], False)
+        self.assertEqual(deployment["metadata"]["annotations"]["secret.reloader.stakater.com/reload"], "esphome-auth")
+        self.assertEqual(container["image"], "ghcr.io/esphome/esphome")
+        env = {e["name"]: e for e in container["env"]}
+        self.assertNotIn("PASSWORD", env)
+        self.assertNotIn("USERNAME", env)
+        for name in ("ESPHOME_USERNAME", "ESPHOME_PASSWORD"):
+            self.assertEqual(env[name]["valueFrom"], {"secretKeyRef": {"name": "esphome-auth", "key": name}})
+        volumes = {v["name"]: v for v in pod["volumes"]}
+        mount = next(m for m in container["volumeMounts"] if m["mountPath"] == "/config")
+        self.assertEqual(volumes[mount["name"]]["persistentVolumeClaim"]["claimName"], "esphome-config")
+        pvc = resource("esphome.yaml", "PersistentVolumeClaim", "esphome-config")
+        self.assertEqual(pvc["spec"]["storageClassName"], "truenas-iscsi")
+        self.assertEqual(pvc["spec"]["accessModes"], ["ReadWriteOnce"])
+        self.assertEqual(pvc["spec"]["resources"]["requests"]["storage"], "5Gi")
+        probe = container["readinessProbe"]["httpGet"]
+        self.assertEqual((probe["path"], probe["port"]), ("/version", 6052))
+
+    def test_esphome_network_policy(self):
+        policy = next(d for d in documents("network-policy.yaml") if d["spec"]["podSelector"] == {"matchLabels": {"app": "esphome"}})
+        self.assertEqual(policy["spec"]["policyTypes"], ["Ingress"])
+        self.assertEqual(policy["spec"]["ingress"], [{
+            "from": [{
+                "namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "traefik-system"}},
+                "podSelector": {"matchLabels": {"app.kubernetes.io/name": "traefik"}},
+            }],
+            "ports": [{"port": 6052, "protocol": "TCP"}],
+        }])
 
     def test_no_host_network_and_recreate(self):
         deployments = [doc for doc in manifests() if doc.get("kind") == "Deployment"]
@@ -186,7 +234,8 @@ class ManifestTests(unittest.TestCase):
 
     def test_secrets_encrypted(self):
         secrets = {(doc["metadata"]["namespace"], doc["metadata"]["name"]): doc for doc in documents("secrets.enc.yaml")}
-        self.assertLessEqual({("postgres-system", "homeassistant-db-role"), ("home-assistant", "home-assistant-secrets")}, set(secrets))
+        self.assertLessEqual({("postgres-system", "homeassistant-db-role"), ("home-assistant", "home-assistant-secrets"), ("home-assistant", "esphome-auth")}, set(secrets))
+        self.assertEqual(set(secrets[("home-assistant", "esphome-auth")]["stringData"]), {"ESPHOME_USERNAME", "ESPHOME_PASSWORD"})
         self.assertEqual(secrets[("postgres-system", "homeassistant-db-role")]["type"], "kubernetes.io/basic-auth")
         self.assertEqual(set(secrets[("postgres-system", "homeassistant-db-role")]["stringData"]), {"username", "password"})
         self.assertEqual(set(secrets[("home-assistant", "home-assistant-secrets")]["stringData"]), {"secrets.yaml"})

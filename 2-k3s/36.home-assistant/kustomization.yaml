@@ -6,6 +6,7 @@ resources:
   - namespace.yaml
   - database.yaml
   - home-assistant.yaml
+  - esphome.yaml
   - ingressroute.yaml
   - network-policy.yaml
 
@@ -25,3 +26,5 @@ images:
     newTag: 2026.11.1@sha256:6785d1eca68747a524c156faae1b139ed415c07357386ae6fe17291986e59e82
   - name: ghcr.io/stakater/reloader
     newTag: v1.4.24@sha256:3ab43d3eb96c59798644bf826b0444a846c0197d22ab4b6c101c4da3e1d6ef23
+  - name: ghcr.io/esphome/esphome
+    newTag: 2026.10.2@sha256:4a918585150e95e7675be84a347384ff308fde1bd32d0e4472666e1252cc0e8f
