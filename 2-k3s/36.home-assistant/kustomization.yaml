@@ -1,0 +1,33 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# No top-level namespace: the DatabaseRole, Database and role Secret must land in postgres-system.
+resources:
+  - namespace.yaml
+  - database.yaml
+  - home-assistant.yaml
+  - esphome.yaml
+  - roborock.yaml
+  - ingressroute.yaml
+  - network-policy.yaml
+
+helmCharts:
+  - name: reloader
+    repo: https://stakater.github.io/stakater-charts
+    version: "2.2.20"
+    releaseName: reloader-home-assistant
+    namespace: home-assistant
+    valuesFile: reloader-values.yaml
+
+generators:
+  - ksops-generator.yaml
+
+images:
+  - name: ghcr.io/home-assistant/home-assistant
+    newTag: 2026.11.1@sha256:6785d1eca68747a524c156faae1b139ed415c07357386ae6fe17291986e59e82
+  - name: ghcr.io/stakater/reloader
+    newTag: v1.4.24@sha256:3ab43d3eb96c59798644bf826b0444a846c0197d22ab4b6c101c4da3e1d6ef23
+  - name: ghcr.io/esphome/esphome
+    newTag: 2026.10.2@sha256:4a918585150e95e7675be84a347384ff308fde1bd32d0e4472666e1252cc0e8f
+  - name: ghcr.io/python-roborock/local_roborock_server
+    newTag: 1.2.1@sha256:0f3d0dd05f14315273df5622d43008b2665c24b2fed79277822d4c9184eab158

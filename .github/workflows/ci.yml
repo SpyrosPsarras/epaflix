@@ -79,6 +79,7 @@ jobs:
           python3 .github/hooks/test-gpu-apps.py
           python3 2-k3s/33.paperless/ingest/ingest.test.py -v
           python3 2-k3s/35.discord/tools/manifests.test.py -v
+          python3 2-k3s/36.home-assistant/tools/manifests.test.py -v
           node --test 2-k3s/35.discord/windmill/gh-token.test.mjs
           ./.github/hooks/test-run-parallel.sh
           ./.github/hooks/test-unittest-shard.sh

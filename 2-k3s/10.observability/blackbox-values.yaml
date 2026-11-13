@@ -90,6 +90,15 @@ serviceMonitor:
     - name: windmill
       url: https://192.168.10.101
       hostname: windmill.epaflix.com
+    - name: home-assistant
+      url: https://192.168.10.102
+      hostname: ha.epaflix.com
+    - name: esphome
+      url: https://192.168.10.102
+      hostname: esphome.epaflix.com
+    - name: roborock
+      url: https://192.168.10.116:555/admin
+      hostname: api-rr.epaflix.com
     - name: vaultwarden
       url: https://vaultwarden.epaflix.com/alive
       module: http_2xx_verified

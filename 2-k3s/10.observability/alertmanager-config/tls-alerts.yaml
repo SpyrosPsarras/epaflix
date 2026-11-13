@@ -19,7 +19,7 @@ spec:
             component: infrastructure
           annotations:
             summary: "TLS certificate expires within 14 days"
-            description: "Certificate on {{ $labels.instance }} expires in {{ $value | humanizeDuration }}. Check the endpoint's ACME renewal task and DNS credentials."
+            description: "Certificate on {{ $labels.target }} ({{ $labels.instance }}) expires in {{ $value | humanizeDuration }}. Check the endpoint's ACME renewal task and DNS credentials."
         - alert: TLSCertificateExpiryCritical
           expr: probe_ssl_earliest_cert_expiry{job="tls-probe"} - time() < 3 * 86400
           for: 5m
@@ -28,7 +28,7 @@ spec:
             component: infrastructure
           annotations:
             summary: "TLS certificate expires within 3 days"
-            description: "Certificate on {{ $labels.instance }} expires in {{ $value | humanizeDuration }}. Renew the endpoint certificate now and verify its live expiry date."
+            description: "Certificate on {{ $labels.target }} ({{ $labels.instance }}) expires in {{ $value | humanizeDuration }}. Renew the endpoint certificate now and verify its live expiry date."
         - alert: TLSProbeFailed
           expr: |
             probe_success{job="tls-probe"} == 0
@@ -40,4 +40,4 @@ spec:
             component: infrastructure
           annotations:
             summary: "TLS endpoint probe failed"
-            description: "Cannot read a TLS certificate from {{ $labels.instance }}. Check endpoint connectivity and the blackbox-exporter pod."
+            description: "Cannot read a TLS certificate from {{ $labels.target }} ({{ $labels.instance }}). Check endpoint connectivity and the blackbox-exporter pod."
