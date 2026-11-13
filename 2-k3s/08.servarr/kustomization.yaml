@@ -110,7 +110,7 @@ images:
   - name: ghcr.io/seerr-team/seerr
     newTag: preview-new-oidc@sha256:6970dc3fbfa1d335583937f1bc85794266a8d8a4c5b348716fede906085fc540
   - name: ghcr.io/fredrikburmester/streamystats-aio
-    newTag: latest@sha256:9bc68f6301cc2ae749da950121d6efcbaa63335d458dad1d5967265af8e49382
+    newTag: latest@sha256:eac0942581bd813ef93c9926bc954baee43e316daa6de7fde422f5e53839f2d3
   - name: ghcr.io/thephaseless/byparr
     digest: sha256:c66fa161187b8fa527bfad7eefa2647ea1c553f77df68cbffd6fe83366d1787b
   - name: ghcr.io/hotio/unpackerr
