@@ -15,6 +15,7 @@ resources:
   - app-discord.yaml
   - app-democratic-csi.yaml
   - app-fytorium.yaml
+  - app-home-assistant.yaml
   - app-kube-vip.yaml
   - app-kured.yaml
   - app-kube-vip-cloud-provider.yaml

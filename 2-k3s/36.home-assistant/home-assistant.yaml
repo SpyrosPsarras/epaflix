@@ -1,0 +1,129 @@
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: home-assistant-config
+  namespace: home-assistant
+spec:
+  storageClassName: truenas-iscsi
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: home-assistant-configuration
+  namespace: home-assistant
+data:
+  configuration.yaml: |
+    default_config:
+
+    http:
+      use_x_forwarded_for: true
+      trusted_proxies:
+        - 10.42.0.0/16
+
+    recorder:
+      db_url: !secret recorder_db_url
+      db_max_retries: 100
+
+    automation: !include automations.yaml
+    script: !include scripts.yaml
+    scene: !include scenes.yaml
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: home-assistant
+  namespace: home-assistant
+  labels:
+    app: home-assistant
+  annotations:
+    secret.reloader.stakater.com/reload: home-assistant-secrets
+    configmap.reloader.stakater.com/reload: home-assistant-configuration
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: home-assistant
+  template:
+    metadata:
+      labels:
+        app: home-assistant
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      initContainers:
+        - name: configuration
+          image: ghcr.io/home-assistant/home-assistant
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              cp /defaults/configuration.yaml /config/configuration.yaml
+              [ -e /config/automations.yaml ] || echo '[]' > /config/automations.yaml
+              [ -e /config/scripts.yaml ] || echo '{}' > /config/scripts.yaml
+              [ -e /config/scenes.yaml ] || echo '[]' > /config/scenes.yaml
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: configuration
+              mountPath: /defaults
+              readOnly: true
+      containers:
+        - name: home-assistant
+          image: ghcr.io/home-assistant/home-assistant
+          ports:
+            - name: http
+              containerPort: 8123
+              protocol: TCP
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: secrets
+              mountPath: /config/secrets.yaml
+              subPath: secrets.yaml
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8123
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              memory: 2Gi
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: home-assistant-config
+        - name: configuration
+          configMap:
+            name: home-assistant-configuration
+        - name: secrets
+          secret:
+            secretName: home-assistant-secrets
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: home-assistant
+  namespace: home-assistant
+spec:
+  type: ClusterIP
+  selector:
+    app: home-assistant
+  ports:
+    - name: http
+      port: 8123
+      targetPort: 8123
+      protocol: TCP
