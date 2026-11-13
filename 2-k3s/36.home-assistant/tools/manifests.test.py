@@ -305,6 +305,25 @@ class ManifestTests(unittest.TestCase):
             for value in {**secret.get("data", {}), **secret.get("stringData", {})}.values():
                 self.assertRegex(value, r"^ENC\[")
 
+    def test_probes_and_dns(self):
+        targets = yaml.safe_load((ROOT / "2-k3s/10.observability/blackbox-values.yaml").read_text())["serviceMonitor"]["targets"]
+        for target in (
+            {"name": "home-assistant", "url": "https://192.168.10.102", "hostname": "ha.epaflix.com"},
+            {"name": "esphome", "url": "https://192.168.10.102", "hostname": "esphome.epaflix.com"},
+            {"name": "roborock", "url": "https://192.168.10.116:555/admin", "hostname": "api-rr.epaflix.com"},
+        ):
+            self.assertIn(target, targets)
+        pihole = ROOT / "1-proxmox/pihole"
+        dnsmasq = (pihole / "dnsmasq.d/10-epaflix.conf").read_text().splitlines()
+        unbound = [line.strip() for line in (pihole / "unbound-no-aaaa-leak.conf").read_text().splitlines()]
+        for host, ip in (("ha.epaflix.com", "192.168.10.102"), ("esphome.epaflix.com", "192.168.10.102"), ("api-rr.epaflix.com", "192.168.10.116")):
+            self.assertIn(f"address=/{host}/{ip}", dnsmasq)
+            self.assertIn(f'local-zone: "{host}." static', unbound)
+        rules = yaml.safe_load((ROOT / "2-k3s/10.observability/alertmanager-config/tls-alerts.yaml").read_text())["spec"]["groups"][0]["rules"]
+        self.assertEqual(len(rules), 3)
+        for rule in rules:
+            self.assertIn("{{ $labels.target }}", rule["annotations"]["description"])
+
 
 if __name__ == "__main__":
     unittest.main()
