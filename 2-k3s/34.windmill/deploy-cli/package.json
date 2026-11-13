@@ -2,6 +2,6 @@
   "name": "windmill-deploy-cli",
   "private": true,
   "dependencies": {
-    "windmill-cli": "1.864.1"
+    "windmill-cli": "1.871.1"
   }
 }
