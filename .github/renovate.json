@@ -30,9 +30,10 @@
       "automerge": false
     },
     {
-      "description": "windmill-cli for the deploy CronJob must equal the Windmill server tag in 2-k3s/34.windmill/values.yaml (deploy.test.py fails otherwise). The server tag has no Renovate manager, so bump both by hand in one PR; never automerge the CLI alone.",
-      "matchFileNames": ["2-k3s/34.windmill/deploy-cli/**"],
-      "matchPackageNames": ["windmill-cli"],
+      "description": "windmill-cli for the deploy CronJob must equal the Windmill server tag in 2-k3s/34.windmill/values.yaml (deploy.test.py fails otherwise), so both move in one PR. A server bump runs database migrations: review by hand. Alone, the CLI bump failed every rebase of #2291.",
+      "matchFileNames": ["2-k3s/34.windmill/deploy-cli/**", "2-k3s/34.windmill/values.yaml"],
+      "matchPackageNames": ["windmill-cli", "ghcr.io/windmill-labs/windmill"],
+      "groupName": "windmill server and cli",
       "automerge": false
     },
     {
@@ -206,6 +207,14 @@
     }
   ],
   "customManagers": [
+    {
+      "description": "Windmill server image tag in the Helm values (windmill.tag: <version>@<digest>), grouped with windmill-cli.",
+      "customType": "regex",
+      "managerFilePatterns": ["/^2-k3s/34\\.windmill/values\\.yaml$/"],
+      "matchStrings": ["\\nwindmill:\\n  tag: (?<currentValue>\\d+\\.\\d+\\.\\d+)@(?<currentDigest>sha256:[a-f0-9]{64})"],
+      "depNameTemplate": "ghcr.io/windmill-labs/windmill",
+      "datasourceTemplate": "docker"
+    },
     {
       "description": "Windmill script requirement headers (#pkg==version) must match workspace/requirements-test.txt (test_ci_pins_match_windmill_requirements_header). pip_requirements bumps only the txt file, which failed every rebase of renovate/wmill-1.x (#2247); this puts both bumps on the same branch.",
       "customType": "regex",
