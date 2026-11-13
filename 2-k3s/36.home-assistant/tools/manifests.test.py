@@ -70,7 +70,9 @@ class ManifestTests(unittest.TestCase):
             self.assertRegex(image["newTag"], r"^[^@]+@sha256:[0-9a-f]{64}$")
 
     def test_routes_internal_only(self):
-        routes = [doc for doc in documents("ingressroute.yaml") if doc["kind"] == "IngressRoute"]
+        docs = manifests()
+        self.assertNotIn("Ingress", [doc.get("kind") for doc in docs])
+        routes = [doc for doc in docs if doc.get("kind", "").startswith("IngressRoute")]
         self.assertTrue(routes)
         for route in routes:
             self.assertEqual(route["spec"]["entryPoints"], ["internal"])
@@ -180,6 +182,7 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(volumes[mounts["/run/certs"]["name"]]["secret"], {"secretName": "api-rr-tls"})
         self.assertEqual(volumes[mounts["/data"]["name"]]["persistentVolumeClaim"], {"claimName": "roborock-data"})
         pvc = resource("roborock.yaml", "PersistentVolumeClaim", "roborock-data")
+        self.assertEqual(pvc["metadata"]["annotations"], {"argocd.argoproj.io/sync-options": "Prune=false,Delete=false"})
         self.assertEqual(pvc["spec"]["storageClassName"], "truenas-iscsi")
         self.assertEqual(pvc["spec"]["accessModes"], ["ReadWriteOnce"])
         self.assertEqual(pvc["spec"]["resources"]["requests"]["storage"], "2Gi")

@@ -4,6 +4,8 @@ kind: PersistentVolumeClaim
 metadata:
   name: roborock-data
   namespace: home-assistant
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
 spec:
   storageClassName: truenas-iscsi
   accessModes:
