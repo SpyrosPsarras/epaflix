@@ -436,14 +436,15 @@ class VaultTests(unittest.TestCase):
         for terminate in (False, True):
             record = self.home / ('signal' if terminate else 'timeout')
             options = ['run', '--item', ITEM, '--attachment', 'fixture.bin', '--attachment-env', 'VAULT_FILE',
-                       '--timeout', '10' if terminate else '0.5', '--', sys.executable, '-c',
+                       '--timeout', '10' if terminate else '2', '--', sys.executable, '-c',
                        'import os,pathlib,subprocess,time; '
                        'p=subprocess.Popen(["sleep","30"]); '
                        f'pathlib.Path({str(record)!r}).write_text(os.environ["VAULT_FILE"]+"\\n"+str(p.pid)); '
                        'time.sleep(30)']
             with subprocess.Popen(self.prefix + options, env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
                 deadline = time.monotonic() + 5
-                while not record.exists() and process.poll() is None and time.monotonic() < deadline:
+                # write_text creates the file before writing it, so wait for both lines, not just the file.
+                while (not record.exists() or '\n' not in record.read_text()) and process.poll() is None and time.monotonic() < deadline:
                     time.sleep(0.01)
                 self.assertTrue(record.exists())
                 path, pid = record.read_text().splitlines()
