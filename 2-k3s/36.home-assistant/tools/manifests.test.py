@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import json
 import unittest
 from pathlib import Path
 
@@ -208,13 +209,32 @@ class ManifestTests(unittest.TestCase):
         configmap = resource("home-assistant.yaml", "ConfigMap", "home-assistant-configuration")
         config = yaml.load(configmap["data"]["configuration.yaml"], Loader=HomeAssistantLoader)
         self.assertIn("default_config", config)
-        self.assertIs(config["http"]["use_x_forwarded_for"], True)
-        self.assertEqual(config["http"]["trusted_proxies"], ["10.42.0.0/16"])
+        self.assertNotIn("http", config)
         self.assertEqual(config["recorder"]["db_url"], ("secret", "recorder_db_url"))
         self.assertIsInstance(config["recorder"]["db_url"], Tagged)
         self.assertEqual(config["recorder"]["db_max_retries"], 100)
         for key, name in {"automation": "automations.yaml", "script": "scripts.yaml", "scene": "scenes.yaml"}.items():
             self.assertEqual(config[key], ("include", name))
+
+    def test_ha_http_storage(self):
+        configmap = resource("home-assistant.yaml", "ConfigMap", "home-assistant-configuration")
+        store = json.loads(configmap["data"]["http.json"])
+        self.assertEqual((store["version"], store["minor_version"], store["key"]), (3, 1, "http"))
+        self.assertIsNone(store["data"]["pending"])
+        self.assertIs(store["data"]["yaml_migration_done"], True)
+        self.assertEqual(store["data"]["stable"], {
+            "server_port": 8123,
+            "use_x_forwarded_for": True,
+            "trusted_proxies": ["10.42.0.0/16"],
+            "cors_allowed_origins": ["https://cast.home-assistant.io"],
+            "login_attempts_threshold": -1,
+            "ip_ban_enabled": True,
+            "ssl_profile": "intermediate_v6",
+            "use_x_frame_options": True,
+            "created_at": "2026-11-13T00:00:00+00:00",
+            "error": None,
+            "error_message": None,
+        })
 
     def test_ha_deployment(self):
         self.assertEqual(self.deployment["spec"]["replicas"], 1)
@@ -268,6 +288,8 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(init["command"], ["sh", "-c", "\n".join([
             "set -e",
             "cp /defaults/configuration.yaml /config/configuration.yaml",
+            "mkdir -p /config/.storage",
+            "cp /defaults/http.json /config/.storage/http",
             "[ -e /config/automations.yaml ] || echo '[]' > /config/automations.yaml",
             "[ -e /config/scripts.yaml ] || echo '{}' > /config/scripts.yaml",
             "[ -e /config/scenes.yaml ] || echo '[]' > /config/scenes.yaml",
