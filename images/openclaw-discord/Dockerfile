@@ -1,10 +1,10 @@
-FROM ghcr.io/openclaw/openclaw:2026.11.2@sha256:55294524dac01370288fb4beb16714b60f75cec0e96e07e662054cf29900965a
+FROM ghcr.io/openclaw/openclaw:2026.11.3@sha256:e73f689d663567f0fe3c5a85c54beb3e102dc21f0814bf375e9039ee2d2df51b
 
 # Links the GHCR package to this repo, so GITHUB_TOKEN may publish it.
 LABEL org.opencontainers.image.source=https://github.com/SpyrosPsarras/epaflix
 
 # renovate: datasource=github-releases depName=cli/cli
-ARG GH_VERSION=2.103.3
+ARG GH_VERSION=2.104.0
 
 USER root
 
