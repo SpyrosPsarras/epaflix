@@ -99,7 +99,7 @@ images:
   - name: ghcr.io/linuxserver/prowlarr
     newTag: 2.6.5@sha256:b3b00047ed20f6ce2b16780145cb6a0acb51c9e28ea6aa6f5dcd33c7034f1797
   - name: ghcr.io/cleanuparr/cleanuparr
-    newTag: 2.10.12@sha256:d0212e4c66bd0522e23c5e5da5d3006bd5ff0e0de1e3ecfcf892e039d55721e2
+    newTag: 2.11.0@sha256:1898c3219e7e7ecaf9fcb8474691b6d67d56d0798b01b85690975bae14df11b5
   # TEMP OVERRIDE (collection-members, see images/jellysweep/README.md): return to
   # ghcr.io/jon4hz/jellysweep once a release contains both #440 and the collection-members fix.
   # Watched by upstream-release-watch #2060; Renovate is disabled for the overlay.
