@@ -12,8 +12,8 @@
     "@openai/codex": "0.169.0",
     "@spences10/pi-redact": "0.0.16",
     "not-enough-retry": "0.4.0",
-    "pi-cliproxyapi-provider": "0.16.12",
+    "pi-cliproxyapi-provider": "0.16.13",
     "superpowers": "github:obra/superpowers#v7.0.2",
-    "t3": "0.1.10-nightly.20261114.4669"
+    "t3": "0.1.10-nightly.20261114.4682"
   }
 }
