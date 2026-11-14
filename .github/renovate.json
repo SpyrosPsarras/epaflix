@@ -180,6 +180,13 @@
       "labels": ["renovate", "needs-checksum"]
     },
     {
+      "description": "Home Assistant custom integration tibber_pulse_mqtt: NEVER auto-merge. Renovate cannot compute the sha256 of the release zip, and the home-assistant init container fails closed on a mismatch, so an auto-merged bump would stop Home Assistant at the next sync. A human copies the release asset's sha256 into TIBBER_PULSE_MQTT_SHA256 on the Renovate branch before merging.",
+      "matchManagers": ["custom.regex"],
+      "matchPackageNames": ["mrhedstrom/ha-tibber-pulse-mqtt"],
+      "automerge": false,
+      "labels": ["renovate", "needs-checksum"]
+    },
+    {
       "description": "Pin the CI validate-gate helm to 4.x. This gate's only job is to predict whether ArgoCD's repo-server can render this repo, so its helm MAJOR must match the repo-server's. The repo-server bundles helm 4.2.1 (argo-cd chart 10.9.2 / ArgoCD v3.5.3, observed 2026-09-25). A gate rendering with a different helm major than the thing that actually deploys is a false green: it passes on templating/OCI semantics ArgoCD then rejects. #384/#386 are exactly that failure, already survived once, with a chart major instead of a helm major. The rule stays mechanical, not a soak: when the ArgoCD repo-server image ships helm 5.x, raise this cap to <6 in the same PR as the argo-cd chart bump. Check with `helm version --short` inside the running repo-server pod. Within-major drift is fine and expected, only the major has to match. #221/#164/#331.",
       "matchDatasources": ["github-releases"],
       "matchPackageNames": ["helm/helm"],
@@ -214,6 +221,16 @@
     }
   ],
   "customManagers": [
+    {
+      "description": "Keep the tibber_pulse_mqtt custom integration version in 2-k3s/36.home-assistant/home-assistant.yaml fresh. The init container downloads the release zip by version, which the kustomize and docker managers cannot see. Marker is a '# renovate: datasource=... depName=...' comment on the line above the quoted env value, as for the CLIProxyAPI plugins. Renovate cannot update TIBBER_PULSE_MQTT_SHA256; see the matching packageRule.",
+      "customType": "regex",
+      "managerFilePatterns": ["/^2-k3s/36\\.home-assistant/home-assistant\\.yaml$/"],
+      "matchStrings": [
+        "#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)\\s*\\n\\s*value:\\s*\"(?<currentValue>[^\"]+)\""
+      ],
+      "versioningTemplate": "semver",
+      "extractVersionTemplate": "^v?(?<version>.+)$"
+    },
     {
       "description": "Windmill server image tag in the Helm values (windmill.tag: <version>@<digest>), grouped with windmill-cli.",
       "customType": "regex",

@@ -1492,3 +1492,15 @@ spec:
           annotations:
             summary: "k3s API VIP 192.168.10.100:6443 is not answering"
             description: "No TLS answer from the API VIP for 2 minutes, so kubectl and anything else using the VIP is down. Reach a master directly with kubectl --context epaflix --server https://192.168.10.51:6443 -n kube-system get pods -l name=kube-vip, check the holder of lease plndr-cp-lock, and restart the kube-vip DaemonSet if no pod holds it."
+
+    - name: home-assistant
+      rules:
+        - alert: MosquittoProbeFailed
+          expr: (max(probe_success{job="mosquitto-probe"}) or vector(0)) == 0
+          for: 5m
+          labels:
+            severity: critical
+            component: home-assistant
+          annotations:
+            summary: "Mosquitto 192.168.10.117:1883 is not answering"
+            description: "The blackbox TCP probe has not reached Mosquitto for 5 minutes. Home Assistant gets no local Tibber Pulse data, and Tibber gets no Pulse data through the bridge, so the Tibber app and the e-Golf smart charging lose it too. Check kubectl -n home-assistant logs deploy/mosquitto. To hand the Pulse back to Tibber, follow the rollback in 2-k3s/36.home-assistant/README.md."

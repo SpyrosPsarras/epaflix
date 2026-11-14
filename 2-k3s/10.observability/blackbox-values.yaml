@@ -34,6 +34,12 @@ config:
         valid_status_codes: [200]
         tls_config:
           insecure_skip_verify: false
+    tcp_connect:
+      prober: tcp
+      timeout: 5s
+      tcp:
+        preferred_ip_protocol: ip4
+        ip_protocol_fallback: false
 
 serviceMonitor:
   enabled: true
@@ -60,6 +66,11 @@ serviceMonitor:
         action: replace
         targetLabel: job
         replacement: kube-api-vip-probe
+      - sourceLabels: [__param_target]
+        regex: '192\.168\.10\.117:1883'
+        action: replace
+        targetLabel: job
+        replacement: mosquitto-probe
   targets:
     - name: takaros
       url: https://192.168.10.10:8006
@@ -99,6 +110,9 @@ serviceMonitor:
     - name: roborock
       url: https://192.168.10.116:555/admin
       hostname: api-rr.epaflix.com
+    - name: mosquitto
+      url: 192.168.10.117:1883
+      module: tcp_connect
     - name: vaultwarden
       url: https://vaultwarden.epaflix.com/alive
       module: http_2xx_verified

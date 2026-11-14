@@ -2816,3 +2816,42 @@ tests:
       - eval_time: 2m
         alertname: NodeRootDiskLow
         exp_alerts: []
+
+  - name: Mosquitto probe failing for 5 minutes fires
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="mosquitto-probe",instance="192.168.10.117:1883"}'
+        values: "0x10"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: MosquittoProbeFailed
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: MosquittoProbeFailed
+        exp_alerts: &mosquitto_probe_failed
+          - exp_labels:
+              severity: critical
+              component: home-assistant
+            exp_annotations:
+              summary: "Mosquitto 192.168.10.117:1883 is not answering"
+              description: "The blackbox TCP probe has not reached Mosquitto for 5 minutes. Home Assistant gets no local Tibber Pulse data, and Tibber gets no Pulse data through the bridge, so the Tibber app and the e-Golf smart charging lose it too. Check kubectl -n home-assistant logs deploy/mosquitto. To hand the Pulse back to Tibber, follow the rollback in 2-k3s/36.home-assistant/README.md."
+
+  - name: Mosquitto probe succeeding stays silent
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="mosquitto-probe",instance="192.168.10.117:1883"}'
+        values: "1x10"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MosquittoProbeFailed
+        exp_alerts: []
+
+  - name: Mosquitto probe series missing fires
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="tls-probe",instance="https://192.168.10.116:555/admin"}'
+        values: "1x10"
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: MosquittoProbeFailed
+        exp_alerts: *mosquitto_probe_failed

@@ -11,7 +11,7 @@ Hostnames https://ha.epaflix.com and https://esphome.epaflix.com on the Traefik 
 - ConfigMap `home-assistant-configuration` holds `configuration.yaml` and `http.json`. Init container `configuration` copies `configuration.yaml` into `/config` on every start. It creates `/config/.storage/http` from `http.json`, and `automations.yaml`, `scripts.yaml` and `scenes.yaml`, only when each is missing, so a restart keeps what was made in the UI.
 - Traefik reaches the pod through the pod network, so the trusted proxy is the pod CIDR `10.42.0.0/16`. Home Assistant 2026.11 keeps its HTTP settings in `.storage/http` and ignores `http:` in `configuration.yaml` after a one-time import that must be confirmed in the UI within 5 minutes. `http.json` seeds that file on a fresh volume, so Home Assistant starts with the proxy settings and no trial. After that Home Assistant owns the file: change HTTP settings in the UI, not in Git. NetworkPolicy `home-assistant-ingress` lets only Traefik pods reach port 8123.
 - Deployment `esphome`, image `ghcr.io/esphome/esphome`, one replica with `strategy: Recreate`, serves the ESPHome dashboard on port 6052 through Service `esphome`. PVC `esphome-config`, 5Gi `truenas-iscsi`, at `/config` holds the device YAML and build caches. The login comes from `ESPHOME_USERNAME` and `ESPHOME_PASSWORD` in Secret `esphome-auth`. NetworkPolicy `esphome-ingress` lets only Traefik pods reach port 6052.
-- Reloader release `reloader-home-assistant` watches only this namespace and restarts Home Assistant when Secret `home-assistant-secrets` or ConfigMap `home-assistant-configuration` changes, ESPHome when Secret `esphome-auth` changes, and the Roborock server when Secret `roborock-config` or `api-rr-tls` changes. The releases in `16.reloader` watch only their own namespaces.
+- Reloader release `reloader-home-assistant` watches only this namespace and restarts Home Assistant when Secret `home-assistant-secrets` or ConfigMap `home-assistant-configuration` changes, ESPHome when Secret `esphome-auth` changes, the Roborock server when Secret `roborock-config` or `api-rr-tls` changes, and Mosquitto when Secret `mosquitto-config` changes. The releases in `16.reloader` watch only their own namespaces.
 
 ## Roborock server
 
@@ -23,6 +23,24 @@ Deployment `roborock` runs [local_roborock_server](https://github.com/Python-rob
 - PVC `roborock-data`, 2Gi `truenas-iscsi`, at `/data`. `/data/runtime/` and `/data/state/` hold the device keys and credentials. Never delete either; the vacuum would need onboarding again.
 - Requests 1 CPU and 1Gi, which onboarding needs.
 - NetworkPolicy `roborock-ingress` allows TCP 555 and 8881 from any source (the vacuum, Home Assistant, the laptop during onboarding). Egress stays open for the dashboard's cloud import.
+
+## Tibber Pulse broker
+
+Design: `docs/superpowers/specs/2026-11-14-tibber-pulse-local-design.md`. The Tibber Pulse on the meter publishes to our own Mosquitto instead of Tibber's cloud. Home Assistant reads it locally, and a bridge forwards the Pulse topics to Tibber, so the Tibber app and the e-Golf smart charging keep working.
+
+- Deployment `mosquitto`, image `eclipse-mosquitto`, one replica with `strategy: Recreate`, no volume: Pulse messages are live readings.
+- Service `mosquitto` is a LoadBalancer on `192.168.10.117:1883` with `externalTrafficPolicy: Local`, so the Pulse's own IP reaches the pod. Plain MQTT with a login, no TLS (shortcut: plain MQTT on the LAN, move to 8883 with a cert-manager certificate if the Pulse accepts a custom CA).
+- Secret `mosquitto-config` (SOPS) holds `mosquitto.conf` with the bridge, the password file, the ACL and the Pulse's certificate, key and CA. It also holds the Pulse device ID, which stays out of plain Git. Users: `tibber_pulse` (the Pulse) and `home_assistant`. Their passwords are login items in the homelab vault.
+- The bridge `tibber` connects to Tibber's AWS IoT endpoint on 8883 with the Pulse's certificate and reports its state on `homelab/tibber-bridge/state` (1 connected, 0 not). Home Assistant shows it as `binary_sensor.tibber_bridge`.
+- NetworkPolicy `mosquitto` allows 1883 only from the Pulse (`192.168.10.230`, a DHCP reservation in the router), Home Assistant and the blackbox exporter, and egress only to DNS and TCP 8883 on public addresses.
+- Home Assistant reads the Pulse through the custom integration `tibber_pulse_mqtt` ([mrhedstrom/ha-tibber-pulse-mqtt](https://github.com/mrhedstrom/ha-tibber-pulse-mqtt)). The `configuration` init container installs the release pinned in `TIBBER_PULSE_MQTT_VERSION` into `/config/custom_components` when the installed version differs, and checks it against `TIBBER_PULSE_MQTT_SHA256`. A failed download keeps the installed copy, so Home Assistant starts without internet. A wrong checksum stops the init container. Renovate bumps the version but cannot update the checksum, so its PR waits with the `needs-checksum` label until someone copies the release asset's sha256.
+- Blackbox probe job `mosquitto-probe` raises `MosquittoProbeFailed` when the broker stops answering.
+
+If the broker or the cluster is down, Tibber gets no Pulse data and the e-Golf charging loses it too.
+
+Rollback: reset the Pulse (hold its button 5 seconds) and run the normal Pulse setup in the Tibber app, so it talks to Tibber directly again. Then revert the broker in Git. Scaling `mosquitto` to zero by hand does not stick, because `app-home-assistant` self-heals.
+
+The Pulse certificate, key and topics come from the Pulse's setup page at `http://10.133.70.1`, reached on its own Wi-Fi after a reset. The upstream README of `mrhedstrom/ha-tibber-pulse-mqtt` describes the procedure. If Tibber rotates the device certificate, the bridge fails and the files must be extracted again.
 
 ## Database
 
