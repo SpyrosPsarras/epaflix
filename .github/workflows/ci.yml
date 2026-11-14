@@ -11,7 +11,7 @@ permissions:
 
 env:
   KUSTOMIZE_VERSION: 5.8.3  # renovate: datasource=github-releases depName=kubernetes-sigs/kustomize
-  HELM_VERSION: 4.3.1  # renovate: datasource=github-releases depName=helm/helm
+  HELM_VERSION: 4.3.2  # renovate: datasource=github-releases depName=helm/helm
   PROMTOOL_VERSION: 3.16.0  # renovate: datasource=github-releases depName=prometheus/prometheus
 
 jobs:
