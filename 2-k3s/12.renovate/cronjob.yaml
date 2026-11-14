@@ -38,7 +38,7 @@ spec:
                 - "SpyrosPsarras/epaflix"
               env:
                 - name: RENOVATE_ALLOWED_COMMANDS
-                  value: '["^bash 2-k3s/13\\.t3code/env/tools/sync-lock\\.sh$", "^bash 2-k3s/13\\.t3code/env/tools/sync-runtime-image\\.sh$", "^bash 2-k3s/13\\.t3code/one/tools/sync-shared\\.sh$"]'
+                  value: '["^bash 2-k3s/13\\.t3code/env/tools/sync-lock\\.sh$", "^bash 2-k3s/13\\.t3code/env/tools/sync-runtime-image\\.sh$", "^bash 2-k3s/13\\.t3code/one/tools/sync-shared\\.sh$", "^bash images/openclaw-discord/sync-lock\\.sh$"]'
                 - name: RENOVATE_PLATFORM
                   value: github
                 - name: RENOVATE_TOKEN
