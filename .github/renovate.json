@@ -37,12 +37,19 @@
       "automerge": false
     },
     {
-      "description": "The openclaw-discord image: the OpenClaw base image and its @openclaw/discord and @openclaw/searxng-plugin pins must move together (the plugins declare a peer on the matching openclaw), so one group, reviewed by hand.",
+      "description": "The openclaw-discord image: the OpenClaw base image and its @openclaw/discord and @openclaw/searxng-plugin pins must move together (the plugins declare a peer on the matching openclaw), so one group, reviewed by hand. sync-lock.sh rebuilds the lock with the base image's npm 12.2.2: Renovate left #2290's lock stale, which failed the build's lock check on every rebase.",
       "matchFileNames": [
         "images/openclaw-discord/**"
       ],
       "groupName": "openclaw-discord image",
-      "automerge": false
+      "automerge": false,
+      "constraints": {"node": "24"},
+      "postUpgradeTasks": {
+        "installTools": {"node": {}},
+        "commands": ["bash images/openclaw-discord/sync-lock.sh"],
+        "fileFilters": ["images/openclaw-discord/package-lock.json"],
+        "executionMode": "branch"
+      }
     },
     {
       "description": "Keep the lock and the shared runtime image reference aligned with updated tool and base-image inputs. sync-lock.sh rebuilds the lock with the image's npm 10.9.4: Renovate's own lock update left PR #2187 with a stale lock after a git dependency (superpowers) bump, which failed npm ci and the image tag check on every rebase.",
