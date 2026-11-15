@@ -1,0 +1,34 @@
+# Sonarr trusts the login Traefik's forward auth did, so a request that skips Traefik skips the login.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sonarr-ingress
+  namespace: servarr
+spec:
+  podSelector:
+    matchLabels:
+      app: sonarr
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+        - podSelector: {}
+      ports:
+        - port: 8989
+          protocol: TCP
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: discord-media
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: openclaw
+      ports:
+        - port: 8989
+          protocol: TCP

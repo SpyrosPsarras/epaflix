@@ -195,10 +195,13 @@ class MediaTests(AgentChecks, unittest.TestCase):
         for app, port in {"seerr": 5055, "radarr": 7878, "sonarr": 8989, "lidarr": 8686, "bazarr": 6767, "jellyfin": 8096}.items()
     }
 
-    def test_lidarr_admits_media_agent(self):
-        policy = yaml.safe_load((ROOT / "2-k3s/08.servarr/lidarr/network-policy.yaml").read_text())
-        rule = {"from": [{"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "discord-media"}}, "podSelector": {"matchLabels": self.pod_labels}}], "ports": [{"port": 8686, "protocol": "TCP"}]}
-        self.assertIn(rule, policy["spec"]["ingress"])
+    def test_servarr_admits_media_agent(self):
+        for _, pod_labels, ports in self.EXTRA_EGRESS:
+            app, port = dict(pod_labels)["app"], dict(ports)["TCP"]
+            with self.subTest(app=app):
+                policy = yaml.safe_load((ROOT / f"2-k3s/08.servarr/{app}/network-policy.yaml").read_text())
+                rule = {"from": [{"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "discord-media"}}, "podSelector": {"matchLabels": self.pod_labels}}], "ports": [{"port": port, "protocol": "TCP"}]}
+                self.assertIn(rule, policy["spec"]["ingress"])
 
     def test_agents_md_order(self):
         text = (DISCORD / "media/AGENTS.md").read_text()
