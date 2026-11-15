@@ -1,0 +1,33 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: seerr-ingress
+  namespace: servarr
+spec:
+  podSelector:
+    matchLabels:
+      app: seerr
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+        - podSelector: {}
+      ports:
+        - port: 5055
+          protocol: TCP
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: discord-media
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: openclaw
+      ports:
+        - port: 5055
+          protocol: TCP

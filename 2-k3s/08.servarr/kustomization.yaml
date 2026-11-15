@@ -11,6 +11,7 @@ resources:
   - _shared/storage/media-storageclass.yaml
   - _shared/storage/utility-configs.yaml
   - sonarr/sonarr.yaml
+  - sonarr/network-policy.yaml
   - sonarr/pdb.yaml
   - sonarr/ingressroute.yaml
   - lidarr/lidarr.yaml
@@ -26,35 +27,47 @@ resources:
   - digarr/ingressroute.yaml
   - digarr/pdb.yaml
   - radarr/radarr.yaml
+  - radarr/network-policy.yaml
   - radarr/pdb.yaml
   - radarr/ingressroute.yaml
   - prowlarr/prowlarr.yaml
+  - prowlarr/network-policy.yaml
   - prowlarr/pdb.yaml
   - prowlarr/ingressroute.yaml
   - bazarr/bazarr.yaml
+  - bazarr/network-policy.yaml
   - bazarr/pdb.yaml
   - bazarr/ingressroute.yaml
   - bazarr-autotranslate/bazarr-autotranslate.yaml
   - neutarr/neutarr.yaml
+  - neutarr/network-policy.yaml
   - neutarr/pdb.yaml
   - neutarr/ingressroute.yaml
   - cleanuparr/cleanuparr.yaml
+  - cleanuparr/network-policy.yaml
   - cleanuparr/pdb.yaml
   - cleanuparr/ingressroute.yaml
   - jellysweep/jellysweep.yaml
+  - jellysweep/network-policy.yaml
   - jellysweep/ingressroute.yaml
   - streamystats/streamystats.yaml
+  - streamystats/network-policy.yaml
   - byparr/byparr.yaml
+  - byparr/network-policy.yaml
   - byparr/pdb.yaml
   - lingarr/lingarr.yaml
+  - lingarr/network-policy.yaml
   - lingarr/pdb.yaml
   - lingarr/ingress.yaml
   - jellyfin/storage.yaml
   - jellyfin/jellyfin.yaml
+  - jellyfin/network-policy.yaml
   - jellyfin/ingressroute.yaml
   - seerr/seerr.yaml
+  - seerr/network-policy.yaml
   - seerr/pdb.yaml
   - qbittorrent/qbittorrent.yaml
+  - qbittorrent/network-policy.yaml
   - qbittorrent/pdb.yaml
   - qbittorrent/ingressroute.yaml
   - qbittorrent/priority-class.yaml

@@ -6,7 +6,6 @@ resources:
   - services/postgres-lb-rw.yaml
   - services/postgres-lb-ro.yaml
   - services/postgres-lb-r.yaml
-  - services/postgres-pooler-lb.yaml
   - cluster/postgres-object-store.yaml
   - cluster/postgres-priority-class.yaml
   - cluster/postgres-cluster.yaml

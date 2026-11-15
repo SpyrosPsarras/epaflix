@@ -1,0 +1,17 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: byparr-ingress
+  namespace: servarr
+spec:
+  podSelector:
+    matchLabels:
+      app: byparr
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+      ports:
+        - port: 8191
+          protocol: TCP

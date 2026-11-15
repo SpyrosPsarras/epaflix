@@ -1,0 +1,17 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: streamystats-ingress
+  namespace: servarr
+spec:
+  podSelector:
+    matchLabels:
+      app: streamystats
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+      ports:
+        - port: 3000
+          protocol: TCP

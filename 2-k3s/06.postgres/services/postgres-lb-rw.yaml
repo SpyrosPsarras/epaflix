@@ -10,6 +10,12 @@ metadata:
 spec:
   type: LoadBalancer
   loadBalancerIP: 192.168.10.105
+  allocateLoadBalancerNodePorts: false
+  # kube-proxy applies the ranges to pod traffic too, and the servarr pods connect to this address.
+  loadBalancerSourceRanges:
+    - 10.42.0.0/16
+    - 192.168.10.177/32
+    - 192.168.10.191/32
   selector:
     cnpg.io/cluster: postgres-cluster
     role: primary
