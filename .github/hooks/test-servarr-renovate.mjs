@@ -44,7 +44,7 @@ for (const dep of deps) {
   }
   for (const updateType of ['digest', 'patch', 'minor', 'major']) {
     const result = await applyPackageRules({ ...base, updateType }, 'test');
-    const expected = !manual.has(dep.depName);
+    const expected = !manual.has(dep.depName) && updateType !== 'major';
     assert.equal(result.automerge, expected, `${dep.depName}: ${updateType}`);
     assert.equal(result.platformAutomerge, false, `${dep.depName}: ${updateType} must wait for the breaking-change check`);
   }

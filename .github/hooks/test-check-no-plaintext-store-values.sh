@@ -10,6 +10,9 @@ trap 'rm -rf "$tmp"; rm -f "$output"' EXIT
 pass_count=0
 fail_count=0
 
+unset SOPS_AGE_KEY SOPS_AGE_KEY_FILE
+throwaway_key="AGE-SECRET-KEY-1$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' | tr a-f A-F)"
+
 pass() {
   pass_count=$((pass_count + 1))
   printf 'ok - %s\n' "$1"
@@ -47,6 +50,14 @@ cat >"$tmp/bin/sops" <<'FAKE'
 set -euo pipefail
 if [ "${SOPS_FAKE_FAIL:-0}" = "1" ]; then
   echo "fake sops: decryption failure" >&2
+  exit 1
+fi
+if [ -n "${SOPS_AGE_KEY_FILE:-}" ] && [ ! -f "$SOPS_AGE_KEY_FILE" ]; then
+  echo "fake sops: cannot open the age key file" >&2
+  exit 1
+fi
+if [ -z "${SOPS_AGE_KEY_FILE:-}" ] && [ -z "${SOPS_AGE_KEY:-}" ]; then
+  echo "fake sops: no age identity" >&2
   exit 1
 fi
 mode=""
@@ -221,6 +232,25 @@ if (cd "$tmp/repo" && KEY_FILE="$tmp/absent-key.txt" bash "$hook") >"$output" 2>
 else
   fail "missing age key skips the guard (hook failed)"
 fi
+
+stage_content env-key.txt <<EOF
+The admin password is $SECRET_PASS.
+EOF
+: >"$output"
+if (cd "$tmp/repo" && PATH="$tmp/bin:$PATH" KEY_FILE="$tmp/absent-key.txt" \
+  SOPS_AGE_KEY="$throwaway_key" STORE="$tmp/repo/store.enc.yaml" bash "$hook") >"$output" 2>&1; then
+  fail "SOPS_AGE_KEY runs the guard without a key file (leak passed)"
+elif grep -q "truenas_admin_password" "$output" && ! grep -q "SKIP" "$output"; then
+  pass "SOPS_AGE_KEY runs the guard without a key file"
+else
+  fail "SOPS_AGE_KEY runs the guard without a key file (no finding)"
+fi
+if grep -q "$throwaway_key" "$output"; then
+  fail "the SOPS_AGE_KEY value is never printed"
+else
+  pass "the SOPS_AGE_KEY value is never printed"
+fi
+reset_staged
 
 : >"$output"
 if (cd "$tmp/repo" && SOPS_FAKE_FAIL=1 PATH="$tmp/bin:$PATH" bash "$hook") >"$output" 2>&1; then

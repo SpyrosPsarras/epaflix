@@ -25,7 +25,7 @@ jobs:
         run: |
           set -euo pipefail
           PINNED=$(grep -oP 'version:\s*\K\S+' "$PLANS_FILE" | sort -u | head -1 || true)
-          STABLE=$(curl -fsS -o /dev/null -w '%{url_effective}' -L \
+          STABLE=$(curl -fsS --retry 5 --retry-all-errors --max-time 30 -o /dev/null -w '%{url_effective}' -L \
             https://update.k3s.io/v1-release/channels/stable | sed 's#.*/tag/##')
           echo "pinned=$PINNED" >> "$GITHUB_OUTPUT"
           echo "stable=$STABLE" >> "$GITHUB_OUTPUT"
