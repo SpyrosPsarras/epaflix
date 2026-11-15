@@ -33,8 +33,8 @@ def want(flag, value):
         fail.append(f"--{flag} must be {value!r}, got {args.get(flag)!r}")
 
 want("reboot-days", "sat")
-want("start-time", "02:00")
-want("end-time", "05:00")
+want("start-time", "07:00")
+want("end-time", "10:00")
 want("time-zone", "UTC")
 want("concurrency", "1")
 want("drain-timeout", "5m")

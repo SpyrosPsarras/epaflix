@@ -351,7 +351,7 @@ spec:
               nodes and are supposed to uncordon within minutes: system-upgrade-controller
               plan jobs, whose uncordon is applied only when the controller processes the job
               completion (a Failed job leaves the node cordoned), and kured (Saturdays
-              02:00-05:00 UTC, 2-k3s/28.kured), which cordons and drains before each
+              07:00-10:00 UTC, 2-k3s/28.kured), which cordons and drains before each
               reboot; kured also holds further reboots while this alert fires. If no roll is in
               progress, confirm with
               kubectl --context epaflix get node {{ $labels.node }} -o jsonpath='{.spec.unschedulable}',

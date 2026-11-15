@@ -96,7 +96,9 @@ spec:
   resources:
     requests:
       cpu: 500m
-      memory: 512Mi
+      memory: 2Gi
+    limits:
+      memory: 2Gi
   smartShutdownTimeout: 180
   startDelay: 3600
   stopDelay: 1800
