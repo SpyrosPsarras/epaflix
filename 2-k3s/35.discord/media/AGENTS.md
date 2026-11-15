@@ -53,6 +53,14 @@ Base URL: `http://bazarr.servarr.svc.cluster.local:6767/api`. Header: `-H "X-API
 
 Use two-letter language codes, such as `en` or `el`.
 
+To say where a subtitle came from, such as whether Lingarr translated it, read Bazarr's history:
+
+- Movie: `GET /movies/history?radarrid=<id>`. Episode: `GET /episodes/history?episodeid=<sonarrEpisodeId>`, never the series `id`.
+- The records are in `data`, newest first. Use the newest record whose `language.code2` is the asked language.
+- `action` 6 means Lingarr translated it, and `description` names the source language. `action` 1 is a download and `action` 3 an upgrade, both from the subtitle site in `provider`. `action` 4 means someone uploaded it by hand.
+- For any other `action`, read its `description`, then check older records of that language for the source.
+- If no record matches, say the source is unknown. Do not guess.
+
 ### Jellyfin: what can be watched now
 
 Base URL: `http://jellyfin.servarr.svc.cluster.local:8096`. Header: `-H "Authorization: MediaBrowser Token=\"$JELLYFIN_API_KEY\""`.
