@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: Secret
+metadata:
+    name: paperless-backup
+    namespace: paperless
+    labels:
+        app: paperless-backup
+    annotations:
+        argocd.argoproj.io/sync-wave: "-2"
+type: Opaque
+stringData:
+    password: ENC[AES256_GCM,data:cIH5Jxxic1ojuKKvypHNS41dVI2iU1at9CvXAsOR7WeT+m/hC6e1vf0SpKo=,iv:fjZxkGHSXHqM2w4wuBpwdXNAxLpsXHJIekjgrI9CEqw=,tag:I9UKhZjpaCZeLeo66rveMA==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBpZnVqWVk5emEwVURJd0hF
+            RjhORjJ3ZXNuSlhtVUVMYW1rYmFqSWU3RG1RCnJVN1FLK2NYOEVsM3MyekFIdmV6
+            RDNRYko4TFVjaUNaeXZWOTVueVBIdHMKLS0tIDlNMWNxRXhXUDRjclJmaVVYZjc3
+            dXRteHVJc2NSamdxNnRKblkvQ2w0a28KDZeIESLrKnn3DKhLVjdkKwGIJZmaz0iT
+            Fi+G537/yVnaPCE1dJzSqfMHvxWKllUqgyU2NcfVfqDzyT5JEdy/QQ==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1586thf5vkcdf5lcn3zwjpu8ltkwyq8efrhj8lr0vdrrt9k5f3qgsxeg7gx
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-11-15T11:32:49Z"
+    mac: ENC[AES256_GCM,data:YjRBbD1MTVJV7kllHGzqrKk0eS4yERJBjm3XAsPregzUZR+o+mWOiGq2VGSGMh3hPgt89A+iPlWgSKdPzvzxqDNZRQIVqatPAgcbpNJpXlLheIuV1WEqlFBUVnVlDRSN4aunKXvcwVe0uQanGcG17XaS83WqUXr4jUPc3nNQxGI=,iv:xU+OJBmD3a8MdyVafwKLb7Zw1tP9AF34J+zlES70haw=,tag:GTsUg1FFUpZP6rihjE98EQ==,type:str]
+    version: 3.13.3

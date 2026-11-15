@@ -514,6 +514,88 @@ tests:
       - eval_time: 10m
         alertname: PaperlessShareListsFailed
         exp_alerts: []
+  - name: Paperless backup exceeds 30 hours with duplicate KSM series
+    interval: 1m
+    input_series:
+      - series: 'kube_cronjob_status_last_successful_time{namespace="paperless",cronjob="paperless-backup",instance="ksm-1"}'
+        values: '-107940x10'
+      - series: 'kube_cronjob_status_last_successful_time{namespace="paperless",cronjob="paperless-backup",instance="ksm-2"}'
+        values: '-107940x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: PaperlessBackupOverdue
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: PaperlessBackupOverdue
+        exp_alerts: &paperless_backup_overdue
+          - exp_labels:
+              namespace: paperless
+              cronjob: paperless-backup
+              severity: warning
+              component: paperless
+            exp_annotations:
+              summary: Paperless file backup is overdue
+              description: "No successful Paperless file backup in over 30 hours, or the CronJob has never succeeded. Check that CronJob paperless-backup is not suspended, then its Job logs. Runbook: 2-k3s/33.paperless/README.md, section Backup."
+  - name: Paperless backup CronJob that never succeeded is overdue
+    interval: 1m
+    input_series:
+      - series: 'kube_cronjob_info{namespace="paperless",cronjob="paperless-backup"}'
+        values: '1x10'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: PaperlessBackupOverdue
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: PaperlessBackupOverdue
+        exp_alerts: *paperless_backup_overdue
+  - name: Paperless recent backup is not overdue
+    interval: 1m
+    input_series:
+      - series: 'kube_cronjob_info{namespace="paperless",cronjob="paperless-backup"}'
+        values: '1x20'
+      - series: 'kube_cronjob_status_last_successful_time{namespace="paperless",cronjob="paperless-backup"}'
+        values: '60x20'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: PaperlessBackupOverdue
+        exp_alerts: []
+  - name: Only the latest failed Paperless backup Job alerts, and only through its own rule
+    interval: 1m
+    input_series:
+      - series: 'kube_job_status_start_time{namespace="paperless",job_name="paperless-backup-100"}'
+        values: '100x20'
+      - series: 'kube_job_failed{condition="true",namespace="paperless",job_name="paperless-backup-100"}'
+        values: '1x20'
+      - series: 'kube_job_owner{namespace="paperless",job_name="paperless-backup-100",owner_kind="CronJob",owner_name="paperless-backup"}'
+        values: '1x20'
+      - series: 'kube_job_status_start_time{namespace="paperless",job_name="paperless-backup-200",instance="ksm-1"}'
+        values: '200x20'
+      - series: 'kube_job_status_start_time{namespace="paperless",job_name="paperless-backup-200",instance="ksm-2"}'
+        values: '200x20'
+      - series: 'kube_job_failed{condition="true",namespace="paperless",job_name="paperless-backup-200",instance="ksm-1"}'
+        values: '1x20'
+      - series: 'kube_job_failed{condition="true",namespace="paperless",job_name="paperless-backup-200",instance="ksm-2"}'
+        values: '1x20'
+      - series: 'kube_job_owner{namespace="paperless",job_name="paperless-backup-200",owner_kind="CronJob",owner_name="paperless-backup"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: PaperlessBackupFailed
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: PaperlessBackupFailed
+        exp_alerts:
+          - exp_labels:
+              namespace: paperless
+              job_name: paperless-backup-200
+              severity: warning
+              component: paperless
+            exp_annotations:
+              summary: Latest Paperless file backup failed
+              description: "Paperless backup Job paperless-backup-200 failed. Check its Job logs for an S3, repository lock or unreadable file error. Runbook: 2-k3s/33.paperless/README.md, section Backup."
+      - eval_time: 20m
+        alertname: KubeJobFailedLastRun
+        exp_alerts: []
   - name: Configarr latest failure alerts once and clears after the next successful run
     interval: 1m
     input_series:

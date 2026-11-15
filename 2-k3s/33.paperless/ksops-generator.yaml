@@ -10,3 +10,4 @@ metadata:
 files:
   - paperless-secrets.enc.yaml
   - paperless-gpt-secrets.enc.yaml
+  - paperless-backup.enc.yaml

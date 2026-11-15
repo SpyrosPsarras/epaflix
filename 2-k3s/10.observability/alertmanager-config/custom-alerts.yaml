@@ -543,6 +543,39 @@ spec:
           annotations:
             summary: "Paperless share-lists run failed"
             description: "The paperless-share-lists Job ({{ $labels.job_name }}) failed, so new shops, tags and document types stay visible only to the user who created them. Check the Job log for a database or Secret error. Manifest: 2-k3s/33.paperless/share-lists-cronjob.yaml."
+        - alert: PaperlessBackupOverdue
+          expr: |
+            time() - max by (namespace, cronjob) (
+              kube_cronjob_status_last_successful_time{namespace="paperless", cronjob="paperless-backup"}
+            ) > 30 * 3600
+            or (
+              max by (namespace, cronjob) (kube_cronjob_info{namespace="paperless", cronjob="paperless-backup"})
+              unless on (namespace, cronjob)
+              max by (namespace, cronjob) (kube_cronjob_status_last_successful_time{namespace="paperless", cronjob="paperless-backup"}) > 0
+            )
+          for: 5m
+          labels:
+            severity: warning
+            component: paperless
+          annotations:
+            summary: "Paperless file backup is overdue"
+            description: "No successful Paperless file backup in over 30 hours, or the CronJob has never succeeded. Check that CronJob paperless-backup is not suspended, then its Job logs. Runbook: 2-k3s/33.paperless/README.md, section Backup."
+        - alert: PaperlessBackupFailed
+          expr: |
+            max by (namespace, job_name) (
+              kube_job_failed{namespace="paperless", job_name=~"paperless-backup-.*"} > 0
+              and on (namespace, job_name) (
+                max by (namespace, job_name) (kube_job_status_start_time{namespace="paperless", job_name=~"paperless-backup-.*"})
+                  >= scalar(max(kube_job_status_start_time{namespace="paperless", job_name=~"paperless-backup-.*"}))
+              )
+            )
+          for: 5m
+          labels:
+            severity: warning
+            component: paperless
+          annotations:
+            summary: "Latest Paperless file backup failed"
+            description: "Paperless backup Job {{ $labels.job_name }} failed. Check its Job logs for an S3, repository lock or unreadable file error. Runbook: 2-k3s/33.paperless/README.md, section Backup."
 
     - name: windmill
       interval: 60s
@@ -1104,6 +1137,8 @@ spec:
                 kube_job_owner{namespace="observability", owner_kind="CronJob", owner_name="ntfy-canary-check"}
                 or
                 kube_job_owner{namespace="vaultwarden", owner_kind="CronJob", owner_name="vaultwarden-backup"}
+                or
+                kube_job_owner{namespace="paperless", owner_kind="CronJob", owner_name="paperless-backup"}
               )
             )
             or
