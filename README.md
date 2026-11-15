@@ -7,6 +7,7 @@ A homelab as code. Four Proxmox hosts run the VMs: TrueNAS for storage and eight
 | `0-truenas` | TrueNAS apps and scripts |
 | `1-proxmox` | Host reinstall notes, Proxmox Backup Server config, Pi-hole DNS, SSH inventory |
 | `2-k3s` | One folder per cluster app, numbered in install order |
+| `3-devices` | Firmware for home devices outside the cluster, such as ESPHome boards |
 | `images` | Container images built by CI |
 
 All commands run from the repo root and need `kubectl`, `helm`, `kustomize`, `sops`, `ksops`, `openssl` and the age key. sops reads only `keys.txt` by default, so run `export SOPS_AGE_KEY_FILE=~/.config/sops/age/k3s-cluster.txt` first.

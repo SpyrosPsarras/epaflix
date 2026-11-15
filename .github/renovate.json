@@ -187,9 +187,9 @@
       "labels": ["renovate", "needs-checksum"]
     },
     {
-      "description": "Home Assistant custom integration tibber_pulse_mqtt: NEVER auto-merge. Renovate cannot compute the sha256 of the release zip, and the home-assistant init container fails closed on a mismatch, so an auto-merged bump would stop Home Assistant at the next sync. A human copies the release asset's sha256 into TIBBER_PULSE_MQTT_SHA256 on the Renovate branch before merging.",
+      "description": "Home Assistant custom integrations tibber_pulse_mqtt and zaptec: NEVER auto-merge. Renovate cannot compute the sha256 of the release zip, and the home-assistant init container fails closed on a mismatch, so an auto-merged bump would stop Home Assistant at the next sync. A human copies the release asset's sha256 into the matching *_SHA256 env (TIBBER_PULSE_MQTT_SHA256 or ZAPTEC_SHA256) on the Renovate branch before merging.",
       "matchManagers": ["custom.regex"],
-      "matchPackageNames": ["mrhedstrom/ha-tibber-pulse-mqtt"],
+      "matchPackageNames": ["mrhedstrom/ha-tibber-pulse-mqtt", "custom-components/zaptec"],
       "automerge": false,
       "labels": ["renovate", "needs-checksum"]
     },
@@ -230,7 +230,7 @@
   ],
   "customManagers": [
     {
-      "description": "Keep the tibber_pulse_mqtt custom integration version in 2-k3s/36.home-assistant/home-assistant.yaml fresh. The init container downloads the release zip by version, which the kustomize and docker managers cannot see. Marker is a '# renovate: datasource=... depName=...' comment on the line above the quoted env value, as for the CLIProxyAPI plugins. Renovate cannot update TIBBER_PULSE_MQTT_SHA256; see the matching packageRule.",
+      "description": "Keep the custom integration versions (tibber_pulse_mqtt, zaptec) in 2-k3s/36.home-assistant/home-assistant.yaml fresh. The init container downloads the release zip by version, which the kustomize and docker managers cannot see. Marker is a '# renovate: datasource=... depName=...' comment on the line above the quoted env value, as for the CLIProxyAPI plugins. Renovate cannot update the *_SHA256 values; see the matching packageRule.",
       "customType": "regex",
       "managerFilePatterns": ["/^2-k3s/36\\.home-assistant/home-assistant\\.yaml$/"],
       "matchStrings": [

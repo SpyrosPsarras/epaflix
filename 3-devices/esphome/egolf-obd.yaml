@@ -1,0 +1,161 @@
+esphome:
+  name: egolf-obd
+  friendly_name: Garage sensors
+  area: Garage
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+logger:
+  level: INFO
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  use_address: 192.168.10.205
+
+api:
+  encryption:
+    key: !secret egolf_api_key
+
+ota:
+  - platform: esphome
+    password: !secret egolf_ota_password
+
+time:
+  - platform: homeassistant
+    id: ha_time
+
+i2c:
+  sda: GPIO21
+  scl: GPIO22
+
+one_wire:
+  - platform: gpio
+    pin: GPIO4
+
+globals:
+  - id: linked
+    type: bool
+    initial_value: "false"
+  - id: vbat
+    type: float
+    initial_value: "0"
+  - id: last_read_ms
+    type: uint32_t
+    initial_value: "0"
+  - id: ever_read
+    type: bool
+    initial_value: "false"
+
+esp32_ble_tracker:
+
+ble_client:
+  - mac_address: !secret vlinker_mac
+    id: vlink
+    auto_connect: true
+    on_connect:
+      - delay: 2s
+      - script.execute: init_elm
+    on_disconnect:
+      - lambda: id(linked) = false;
+
+sensor:
+  - platform: bme280_i2c
+    address: 0x76
+    update_interval: 60s
+    temperature:
+      name: Temperature
+    humidity:
+      name: Humidity
+    pressure:
+      name: Pressure
+  - platform: dallas_temp
+    name: Probe temperature
+    update_interval: 60s
+  - platform: template
+    id: egolf_battery
+    name: e-Golf battery
+    unit_of_measurement: "%"
+    device_class: battery
+    state_class: measurement
+    accuracy_decimals: 1
+  - platform: template
+    id: egolf_12v
+    name: e-Golf 12V
+    unit_of_measurement: V
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 1
+
+text_sensor:
+  - platform: ble_client
+    ble_client_id: vlink
+    id: obd_rx
+    internal: true
+    service_uuid: "18F0"
+    characteristic_uuid: "2AF0"
+    notify: true
+    on_value:
+      - lambda: |-
+          float volts;
+          char unit;
+          if (sscanf(x.c_str(), "%f%c", &volts, &unit) == 2 && unit == 'V') {
+            id(vbat) = volts;
+            id(egolf_12v).publish_state(volts);
+          }
+          auto at = x.find("62 02 8C ");
+          if (at != std::string::npos && x.size() >= at + 11) {
+            int raw = strtol(x.substr(at + 9, 2).c_str(), nullptr, 16);
+            id(egolf_battery).publish_state(raw / 2.5f * 51.0f / 46.0f - 6.4f);
+            id(last_read_ms) = millis();
+            id(ever_read) = true;
+            auto now = id(ha_time).utcnow();
+            if (now.is_valid()) id(egolf_battery_read_at).publish_state(now.strftime("%Y-%m-%dT%H:%M:%S+00:00"));
+          }
+  - platform: template
+    id: egolf_battery_read_at
+    name: e-Golf battery read at
+    device_class: timestamp
+
+script:
+  - id: obd_send
+    mode: queued
+    max_runs: 20
+    parameters:
+      cmd: string
+    then:
+      - ble_client.ble_write:
+          id: vlink
+          service_uuid: "18F0"
+          characteristic_uuid: "2AF1"
+          value: !lambda |-
+            std::string s = cmd + "\r";
+            return std::vector<uint8_t>(s.begin(), s.end());
+      - delay: 1500ms
+  - id: init_elm
+    then:
+      - script.execute: {id: obd_send, cmd: "ATZ"}
+      - script.execute: {id: obd_send, cmd: "ATE0"}
+      - script.execute: {id: obd_send, cmd: "ATSP6"}
+      - script.execute: {id: obd_send, cmd: "ATH1"}
+      - script.execute: {id: obd_send, cmd: "ATCRA 7ED"}
+      - script.execute: {id: obd_send, cmd: "ATSH 7E5"}
+      - lambda: id(linked) = true;
+
+interval:
+  - interval: 60s
+    then:
+      - if:
+          condition:
+            lambda: return id(linked);
+          then:
+            - script.execute: {id: obd_send, cmd: "ATRV"}
+            - delay: 3s
+            - if:
+                condition:
+                  lambda: return id(vbat) > 12.7 && (!id(ever_read) || millis() - id(last_read_ms) > 600000);
+                then:
+                  - script.execute: {id: obd_send, cmd: "22028C"}

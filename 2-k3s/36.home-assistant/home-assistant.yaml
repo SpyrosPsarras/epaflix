@@ -25,6 +25,10 @@ data:
       db_url: !secret recorder_db_url
       db_max_retries: 100
 
+    homeassistant:
+      packages:
+        egolf: !include egolf.yaml
+
     automation: !include automations.yaml
     script: !include scripts.yaml
     scene: !include scenes.yaml
@@ -37,6 +41,156 @@ data:
           payload_on: "1"
           payload_off: "0"
           device_class: connectivity
+  egolf.yaml: |
+    logger:
+      filters:
+        homeassistant.components.rest_command:
+          - 'app\.tibber\.com/login\.credentials'
+          - 'Bearer '
+
+    input_datetime:
+      egolf_tibber_last_push:
+        name: e-Golf Tibber last push
+        has_date: true
+        has_time: true
+
+    input_text:
+      egolf_tibber_last_result:
+        name: e-Golf Tibber last result
+        max: 255
+
+    rest_command:
+      tibber_app_login:
+        url: https://app.tibber.com/login.credentials
+        method: post
+        content_type: application/x-www-form-urlencoded
+        payload: !secret tibber_login_body
+        timeout: 30
+      tibber_set_battery_level:
+        url: https://app.tibber.com/v4/gql
+        method: post
+        content_type: application/json
+        headers:
+          Authorization: "Bearer {{ token }}"
+        payload: >-
+          {{ {"query": "mutation SetVehicleSettings($vehicleId: String!, $homeId: String!, $settings: [SettingsItemInput!]) { me { setVehicleSettings(id: $vehicleId, homeId: $homeId, settings: $settings) { __typename } } }",
+              "variables": {"vehicleId": vehicle_id, "homeId": home_id,
+                            "settings": [{"key": "offline.vehicle.batteryLevel", "value": level | int}]}} | to_json }}
+        timeout: 30
+
+    script:
+      egolf_push_to_tibber:
+        alias: Push e-Golf battery level to Tibber
+        mode: queued
+        trace:
+          stored_traces: 1
+        variables:
+          vehicle_id: !secret tibber_vehicle_id
+          home_id: !secret tibber_home_id
+          level: "{{ states('sensor.egolf_battery') | float(-1) | round(0) | int }}"
+        sequence:
+          - condition: template
+            value_template: "{{ 0 <= level <= 100 }}"
+          - action: rest_command.tibber_app_login
+            response_variable: login
+            continue_on_error: true
+          - variables:
+              token: "{{ login.content.token if login is defined and login.status == 200 and login.content is mapping and 'token' in login.content else '' }}"
+          - if: "{{ token == '' }}"
+            then:
+              - action: input_text.set_value
+                target:
+                  entity_id: input_text.egolf_tibber_last_result
+                data:
+                  value: "login failed (HTTP {{ login.status if login is defined else 'no response' }})"
+              - action: persistent_notification.create
+                data:
+                  notification_id: egolf_tibber_push
+                  title: e-Golf battery not sent to Tibber
+                  message: "Tibber login failed (HTTP {{ login.status if login is defined else 'no response' }}). Tibber keeps its last battery level."
+              - stop: Tibber login failed
+          - action: rest_command.tibber_set_battery_level
+            data:
+              token: "{{ token }}"
+              vehicle_id: "{{ vehicle_id }}"
+              home_id: "{{ home_id }}"
+              level: "{{ level }}"
+            response_variable: result
+            continue_on_error: true
+          - variables:
+              ok: "{{ result is defined and result.status == 200 and result.content is mapping and 'errors' not in result.content }}"
+          - action: input_datetime.set_datetime
+            target:
+              entity_id: input_datetime.egolf_tibber_last_push
+            data:
+              timestamp: "{{ now().timestamp() }}"
+          - action: input_text.set_value
+            target:
+              entity_id: input_text.egolf_tibber_last_result
+            data:
+              value: "{{ 'ok ' ~ level ~ '%' if ok else 'failed (HTTP ' ~ (result.status if result is defined else 'no response') ~ ')' }}"
+          - if: "{{ not ok }}"
+            then:
+              - action: persistent_notification.create
+                data:
+                  notification_id: egolf_tibber_push
+                  title: e-Golf battery not sent to Tibber
+                  message: "Tibber rejected the battery level ({{ result.status if result is defined else 'no response' }}). Tibber keeps its last battery level."
+
+    automation:
+      - id: egolf_push_to_tibber
+        alias: e-Golf battery to Tibber
+        mode: queued
+        triggers:
+          - trigger: state
+            entity_id: sensor.egolf_battery_read_at
+            not_from: [unavailable]
+          - trigger: state
+            entity_id: binary_sensor.e_pavli_plug
+            to: "on"
+        conditions:
+          - condition: state
+            entity_id: binary_sensor.e_pavli_plug
+            state: "on"
+          - condition: template
+            value_template: >-
+              {% set read = states('sensor.egolf_battery_read_at') | as_datetime %}
+              {{ read is not none and read >= states.binary_sensor.e_pavli_plug.last_changed - timedelta(minutes=30) }}
+        actions:
+          - action: script.egolf_push_to_tibber
+
+      - id: egolf_battery_stale
+        alias: e-Golf battery not read while charging
+        triggers:
+          - trigger: state
+            entity_id: binary_sensor.e_pavli_charging
+            to: "on"
+            for: "00:30:00"
+        conditions:
+          - condition: template
+            value_template: >-
+              {% set read = states('sensor.egolf_battery_read_at') | as_datetime %}
+              {{ read is none or read < now() - timedelta(minutes=30) }}
+        actions:
+          - action: persistent_notification.create
+            data:
+              notification_id: egolf_battery_stale
+              title: e-Golf battery level is stale
+              message: The car has been charging for 30 minutes without a fresh battery reading from the garage ESP32. Check the ESP32 and that no phone is connected to the vLinker.
+
+      - id: egolf_12v_low
+        alias: e-Golf 12 V battery low
+        triggers:
+          - trigger: numeric_state
+            entity_id: sensor.egolf_12v
+            below: 12.0
+            for: "00:10:00"
+        actions:
+          - action: persistent_notification.create
+            data:
+              notification_id: egolf_12v_low
+              title: e-Golf 12 V battery low
+              message: "The car's 12 V battery reads {{ states('sensor.egolf_12v') }} V. Drive or charge the car, or unplug the vLinker if it stands for long."
   # Seeds .storage/http once: Home Assistant 2026.11 ignores http: YAML after a one-time import that must be confirmed in the UI.
   http.json: |
     {
@@ -95,31 +249,40 @@ spec:
             - |
               set -e
               cp /defaults/configuration.yaml /config/configuration.yaml
+              cp /defaults/egolf.yaml /config/egolf.yaml
               mkdir -p /config/.storage
               [ -e /config/.storage/http ] || cp /defaults/http.json /config/.storage/http
               [ -e /config/automations.yaml ] || echo '[]' > /config/automations.yaml
               [ -e /config/scripts.yaml ] || echo '{}' > /config/scripts.yaml
               [ -e /config/scenes.yaml ] || echo '[]' > /config/scenes.yaml
-              target=/config/custom_components/tibber_pulse_mqtt
-              if ! grep -q "\"version\": \"$TIBBER_PULSE_MQTT_VERSION\"" "$target/manifest.json" 2>/dev/null; then
-                zip=/tmp/tibber_pulse_mqtt.zip
-                if wget -q -T 30 -O "$zip" "https://github.com/mrhedstrom/ha-tibber-pulse-mqtt/releases/download/v$TIBBER_PULSE_MQTT_VERSION/tibber_pulse_mqtt.zip"; then
-                  echo "$TIBBER_PULSE_MQTT_SHA256  $zip" | sha256sum -c -
-                  rm -rf /config/.tibber_pulse_mqtt.new
-                  unzip -q "$zip" -d /config/.tibber_pulse_mqtt.new
-                  mkdir -p /config/custom_components
-                  rm -rf "$target"
-                  mv /config/.tibber_pulse_mqtt.new "$target"
-                else
-                  echo "WARNING: could not download tibber_pulse_mqtt $TIBBER_PULSE_MQTT_VERSION, starting with the installed copy if any"
+              install_component() {
+                target=/config/custom_components/$1
+                grep -q "\"version\": \"$4\"" "$target/manifest.json" 2>/dev/null && return 0
+                zip=/tmp/$3
+                if ! wget -q -T 30 -O "$zip" "https://github.com/$2/releases/download/v$4/$3"; then
+                  echo "WARNING: could not download $1 $4, starting with the installed copy if any"
+                  return 0
                 fi
-              fi
+                echo "$5  $zip" | sha256sum -c -
+                rm -rf "/config/.$1.new"
+                unzip -q "$zip" -d "/config/.$1.new"
+                mkdir -p /config/custom_components
+                rm -rf "$target"
+                mv "/config/.$1.new" "$target"
+              }
+              install_component tibber_pulse_mqtt mrhedstrom/ha-tibber-pulse-mqtt tibber_pulse_mqtt.zip "$TIBBER_PULSE_MQTT_VERSION" "$TIBBER_PULSE_MQTT_SHA256"
+              install_component zaptec custom-components/zaptec zaptec.zip "$ZAPTEC_VERSION" "$ZAPTEC_SHA256"
           env:
             - name: TIBBER_PULSE_MQTT_VERSION
               # renovate: datasource=github-releases depName=mrhedstrom/ha-tibber-pulse-mqtt
               value: "0.4.7"
             - name: TIBBER_PULSE_MQTT_SHA256
               value: "a3b5daf5eaf14cdcf5b82699b549f3eea0c6470e68ea9c5977d65e283b3f8a55"
+            - name: ZAPTEC_VERSION
+              # renovate: datasource=github-releases depName=custom-components/zaptec
+              value: "0.8.8"
+            - name: ZAPTEC_SHA256
+              value: "965646f226358707954e611cc0b4b0bc9db7ab21189b3b6c650c7e1e5addcb29"
           volumeMounts:
             - name: config
               mountPath: /config

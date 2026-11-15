@@ -128,6 +128,9 @@ def _construct_mapping(loader: UniqueKeyLoader, node: yaml.MappingNode, deep: bo
 UniqueKeyLoader.add_constructor(
     yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_mapping
 )
+# ESPHome configs (3-devices/esphome) use these scalar tags; as plain strings their values are still checked.
+for _esphome_tag in ("!secret", "!lambda"):
+    UniqueKeyLoader.add_constructor(_esphome_tag, yaml.SafeLoader.construct_scalar)
 
 
 def approved_placeholder(value: Any) -> bool:

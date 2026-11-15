@@ -80,6 +80,7 @@ jobs:
           python3 2-k3s/33.paperless/ingest/ingest.test.py -v
           python3 2-k3s/35.discord/tools/manifests.test.py -v
           python3 2-k3s/36.home-assistant/tools/manifests.test.py -v
+          python3 3-devices/esphome/tools/devices.test.py -v
           node --test 2-k3s/35.discord/windmill/gh-token.test.mjs
           ./.github/hooks/test-run-parallel.sh
           ./.github/hooks/test-unittest-shard.sh
@@ -95,6 +96,8 @@ jobs:
           bad = []
           for f in glob.glob("**/*.yaml", recursive=True) + glob.glob("**/*.yml", recursive=True):
               if "/charts/" in f:  # vendored chart caches, if any
+                  continue
+              if f.startswith("3-devices/esphome/"):  # ESPHome tags (!secret, !lambda); devices.test.py parses these
                   continue
               try:
                   list(yaml.safe_load_all(open(f)))
