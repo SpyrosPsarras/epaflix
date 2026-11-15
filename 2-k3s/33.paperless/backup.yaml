@@ -9,8 +9,6 @@ metadata:
 spec:
   schedule: "30 3 * * *"
   timeZone: Etc/UTC
-  # Stays suspended until Secret paperless-backup holds access-key and secret-key. See README "Backup".
-  suspend: true
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 3600
   successfulJobsHistoryLimit: 2

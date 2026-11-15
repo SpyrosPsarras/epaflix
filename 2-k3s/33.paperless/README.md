@@ -206,9 +206,9 @@ NetworkPolicy `paperless-backup` lets the pod reach DNS and Traefik's internal l
 
 MinIO shares the TrueNAS host. This backup survives the loss of the shypowder disk, not the loss of TrueNAS.
 
-### Enable the backup
+### Recreate the bucket and keys
 
-The CronJob ships with `suspend: true`, and Secret `paperless-backup` has no `access-key` or `secret-key`, so no container can start. `PaperlessBackupOverdue` fires until the first run succeeds. The owner runs these steps on a LAN machine with `mc`, `sops`, `openssl` and the cluster age key, from the repository root:
+Bucket `paperless-backups`, user `paperless-backup` and policy `paperless-backups-rw` exist on the S3 store, and Secret `paperless-backup` holds the keys. After a loss of the S3 store, recreate them on a LAN machine with `mc`, `sops`, `openssl` and the cluster age key, from the repository root:
 
 ```sh
 mc alias set homelab https://minio.epaflix.com
@@ -245,11 +245,11 @@ printf '"%s"' "$S3_SECRET" | sops set --value-stdin "$f" '["stringData"]["secret
 unset S3_SECRET
 ```
 
-The S3 secret key stays in a shell variable and reaches `mc` and `sops` on stdin. Then set `suspend: false` in `backup.yaml`, delete the comment above it, and merge both files. After the sync, start the first run and read its log:
+The S3 secret key stays in a shell variable and reaches `mc` and `sops` on stdin. Merge the changed file. After the sync, start a run and read its log:
 
 ```sh
-kubectl -n paperless create job --from=cronjob/paperless-backup paperless-backup-first
-kubectl -n paperless logs -f job/paperless-backup-first
+kubectl -n paperless create job --from=cronjob/paperless-backup paperless-backup-manual
+kubectl -n paperless logs -f job/paperless-backup-manual
 ```
 
 Do not start a manual Job while another backup runs. A Sunday run also checks and prunes the repository, so it takes longer.
@@ -287,7 +287,7 @@ The values were generated at random when the files were encrypted and exist only
 
 `paperless-gpt-secrets.enc.yaml` holds Secret `paperless-gpt-secrets` with `PAPERLESS_API_TOKEN`, the DRF token of user `paperless-gpt`. `manage.py drf_create_token paperless-gpt` ran inside the `vault run` command that encrypted the file, so the token was never printed. To rotate it, run the same command with `-r` the same way, then restart `paperless-gpt`.
 
-`paperless-backup.enc.yaml` holds Secret `paperless-backup` with the restic repository `password`, generated at random inside the command that encrypted the file. It exists only in that SOPS file, and without it the repository cannot be read. `access-key` and `secret-key` for the bucket are added by the steps in Enable the backup.
+`paperless-backup.enc.yaml` holds Secret `paperless-backup` with the restic repository `password`, generated at random inside the command that encrypted the file. It exists only in that SOPS file, and without it the repository cannot be read. `access-key` and `secret-key` are the S3 keys of user `paperless-backup`.
 
 ## DNS
 
