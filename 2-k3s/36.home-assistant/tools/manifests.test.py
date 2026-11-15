@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
+import hashlib
 import json
+import os
+import re
+import subprocess
+import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 import yaml
@@ -198,6 +204,73 @@ class ManifestTests(unittest.TestCase):
             "ingress": [{"ports": [{"port": 555, "protocol": "TCP"}, {"port": 8881, "protocol": "TCP"}]}],
         })
 
+    def test_mosquitto_deployment(self):
+        deployment = resource("mosquitto.yaml", "Deployment", "mosquitto")
+        pod = deployment["spec"]["template"]["spec"]
+        [container] = pod["containers"]
+        self.assertEqual(deployment["spec"]["replicas"], 1)
+        self.assertEqual(deployment["spec"]["template"]["metadata"]["labels"], {"app": "mosquitto"})
+        self.assertIs(pod["automountServiceAccountToken"], False)
+        self.assertIs(pod["enableServiceLinks"], False)
+        self.assertEqual(pod["securityContext"], {"runAsUser": 1883, "runAsGroup": 1883, "fsGroup": 1883, "runAsNonRoot": True})
+        self.assertEqual(deployment["metadata"]["annotations"]["secret.reloader.stakater.com/reload"], "mosquitto-config")
+        self.assertEqual(container["image"], "eclipse-mosquitto")
+        self.assertEqual(container["command"], ["mosquitto", "-c", "/mosquitto/config/mosquitto.conf"])
+        self.assertEqual([(p["containerPort"], p["protocol"]) for p in container["ports"]], [(1883, "TCP")])
+        self.assertEqual(container["readinessProbe"]["tcpSocket"], {"port": 1883})
+        [mount] = container["volumeMounts"]
+        self.assertEqual((mount["mountPath"], mount["readOnly"]), ("/mosquitto/config", True))
+        volumes = {v["name"]: v for v in pod["volumes"]}
+        self.assertEqual(volumes[mount["name"]]["secret"], {"secretName": "mosquitto-config", "defaultMode": 0o440})
+        image = next(i for i in documents("kustomization.yaml")[0]["images"] if i["name"] == "eclipse-mosquitto")
+        self.assertRegex(image["newTag"], r"^2\.[0-9.]+-alpine@sha256:[0-9a-f]{64}$")
+        self.assertIn("mosquitto.yaml", documents("kustomization.yaml")[0]["resources"])
+
+    def test_mosquitto_service(self):
+        service = resource("mosquitto.yaml", "Service", "mosquitto")
+        self.assertEqual(service["spec"]["type"], "LoadBalancer")
+        self.assertEqual(service["spec"]["loadBalancerIP"], "192.168.10.117")
+        self.assertEqual(service["spec"]["externalTrafficPolicy"], "Local")
+        self.assertEqual(service["spec"]["selector"], {"app": "mosquitto"})
+        self.assertEqual([(p["port"], p["targetPort"], p["protocol"]) for p in service["spec"]["ports"]], [(1883, 1883, "TCP")])
+
+    def test_mosquitto_network_policy(self):
+        policy = resource("network-policy.yaml", "NetworkPolicy", "mosquitto")
+        self.assertEqual(policy["spec"], {
+            "podSelector": {"matchLabels": {"app": "mosquitto"}},
+            "policyTypes": ["Ingress", "Egress"],
+            "ingress": [{
+                "from": [
+                    {"ipBlock": {"cidr": "192.168.10.230/32"}},
+                    {"podSelector": {"matchLabels": {"app": "home-assistant"}}},
+                    {
+                        "namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "observability"}},
+                        "podSelector": {"matchLabels": {"app.kubernetes.io/name": "prometheus-blackbox-exporter"}},
+                    },
+                ],
+                "ports": [{"port": 1883, "protocol": "TCP"}],
+            }],
+            "egress": [
+                {
+                    "to": [{
+                        "namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "kube-system"}},
+                        "podSelector": {"matchLabels": {"k8s-app": "kube-dns"}},
+                    }],
+                    "ports": [{"protocol": "UDP", "port": 53}, {"protocol": "TCP", "port": 53}],
+                },
+                {
+                    "to": [{"ipBlock": {"cidr": "0.0.0.0/0", "except": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]}}],
+                    "ports": [{"protocol": "TCP", "port": 8883}],
+                },
+            ],
+        })
+
+    def test_no_device_id_in_plain_files(self):
+        plain = [path for path in HA.rglob("*") if path.is_file() and not path.name.endswith(".enc.yaml")]
+        self.assertTrue(plain)
+        for path in plain:
+            self.assertNotRegex(path.read_text(errors="ignore"), r"tibber-pulse-[0-9a-f]{8,}", path)
+
     def test_no_host_network_and_recreate(self):
         deployments = [doc for doc in manifests() if doc.get("kind") == "Deployment"]
         self.assertTrue(deployments)
@@ -285,7 +358,8 @@ class ManifestTests(unittest.TestCase):
 
     def test_ha_init_keeps_ui_files(self):
         init = self.pod["initContainers"][0]
-        self.assertEqual(init["command"], ["sh", "-c", "\n".join([
+        self.assertEqual(init["command"][:2], ["sh", "-c"])
+        self.assertTrue(init["command"][2].startswith("\n".join([
             "set -e",
             "cp /defaults/configuration.yaml /config/configuration.yaml",
             "mkdir -p /config/.storage",
@@ -293,11 +367,87 @@ class ManifestTests(unittest.TestCase):
             "[ -e /config/automations.yaml ] || echo '[]' > /config/automations.yaml",
             "[ -e /config/scripts.yaml ] || echo '{}' > /config/scripts.yaml",
             "[ -e /config/scenes.yaml ] || echo '[]' > /config/scenes.yaml",
-        ]) + "\n"])
+        ]) + "\n"))
         mounts = {m["mountPath"]: m for m in init["volumeMounts"]}
         self.assertEqual(mounts["/config"]["name"], "config")
         volumes = {v["name"]: v for v in self.pod["volumes"]}
         self.assertEqual(volumes[mounts["/defaults"]["name"]]["configMap"]["name"], "home-assistant-configuration")
+
+    def test_custom_integration_pin(self):
+        init = self.pod["initContainers"][0]
+        env = {e["name"]: e["value"] for e in init["env"]}
+        self.assertRegex(env["TIBBER_PULSE_MQTT_VERSION"], r"^[0-9]+\.[0-9]+\.[0-9]+$")
+        self.assertRegex(env["TIBBER_PULSE_MQTT_SHA256"], r"^[0-9a-f]{64}$")
+        lines = (HA / "home-assistant.yaml").read_text().splitlines()
+        name = lines.index("            - name: TIBBER_PULSE_MQTT_VERSION")
+        self.assertEqual(lines[name + 1].strip(), "# renovate: datasource=github-releases depName=mrhedstrom/ha-tibber-pulse-mqtt")
+        self.assertEqual(lines[name + 2].strip(), f'value: "{env["TIBBER_PULSE_MQTT_VERSION"]}"')
+        script = init["command"][2]
+        self.assertIn("https://github.com/mrhedstrom/ha-tibber-pulse-mqtt/releases/download/v$TIBBER_PULSE_MQTT_VERSION/tibber_pulse_mqtt.zip", script)
+        self.assertNotRegex(script, r"sha256sum -c[^\n]*\|\|")
+
+    def run_init(self, root, sha, wget_fails=False):
+        script = re.sub(r"(?<![\w/])/(config|defaults|tmp)\b", lambda m: f"{root}/{m[1]}", self.pod["initContainers"][0]["command"][2])
+        wget = root / "bin/wget"
+        wget.write_text(f"#!/bin/sh\ntouch {root}/wget-called\n" + ("exit 4\n" if wget_fails else f'while [ "$1" != -O ]; do shift; done\ncp {root}/fixture.zip "$2"\n'))
+        wget.chmod(0o755)
+        env = {**os.environ, "PATH": f"{root}/bin:{os.environ['PATH']}", "TIBBER_PULSE_MQTT_VERSION": "0.4.7", "TIBBER_PULSE_MQTT_SHA256": sha}
+        return subprocess.run(["sh", "-c", script], env=env, capture_output=True, text=True).returncode
+
+    def test_custom_integration_install(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for directory in ("bin", "defaults", "tmp", "config"):
+                (root / directory).mkdir()
+            (root / "defaults/configuration.yaml").write_text("default_config:\n")
+            (root / "defaults/http.json").write_text("{}")
+            with zipfile.ZipFile(root / "fixture.zip", "w") as archive:
+                archive.writestr("manifest.json", '{\n  "domain": "tibber_pulse_mqtt",\n  "version": "0.4.7"\n}\n')
+                archive.writestr("__init__.py", "")
+            sha = hashlib.sha256((root / "fixture.zip").read_bytes()).hexdigest()
+            target = root / "config/custom_components/tibber_pulse_mqtt"
+
+            target.mkdir(parents=True)
+            (target / "manifest.json").write_text('{"version": "0.4.6"}')
+            self.assertNotEqual(self.run_init(root, "0" * 64), 0)
+            self.assertIn('"0.4.6"', (target / "manifest.json").read_text())
+
+            self.assertEqual(self.run_init(root, sha, wget_fails=True), 0)
+            self.assertIn('"0.4.6"', (target / "manifest.json").read_text())
+
+            self.assertEqual(self.run_init(root, sha), 0)
+            self.assertIn('"version": "0.4.7"', (target / "manifest.json").read_text())
+            self.assertTrue((target / "__init__.py").exists())
+            self.assertEqual(sorted(p.name for p in target.parent.iterdir()), ["tibber_pulse_mqtt"])
+
+            (root / "wget-called").unlink()
+            self.assertEqual(self.run_init(root, sha, wget_fails=True), 0)
+            self.assertFalse((root / "wget-called").exists())
+
+            for path in (root / "config/custom_components", root / "config/configuration.yaml"):
+                subprocess.run(["rm", "-rf", str(path)], check=True)
+            self.assertEqual(self.run_init(root, sha, wget_fails=True), 0)
+            self.assertTrue((root / "config/configuration.yaml").exists())
+
+    def test_bridge_binary_sensor(self):
+        configmap = resource("home-assistant.yaml", "ConfigMap", "home-assistant-configuration")
+        config = yaml.load(configmap["data"]["configuration.yaml"], Loader=HomeAssistantLoader)
+        self.assertEqual(config["mqtt"], {"binary_sensor": [{
+            "name": "Tibber bridge",
+            "unique_id": "tibber_bridge",
+            "state_topic": "homelab/tibber-bridge/state",
+            "payload_on": "1",
+            "payload_off": "0",
+            "device_class": "connectivity",
+        }]})
+
+    def test_renovate_tibber_pulse_mqtt(self):
+        renovate = json.loads((ROOT / ".github/renovate.json").read_text())
+        manager = next(m for m in renovate["customManagers"] if any("36\\.home-assistant/home-assistant" in p for p in m["managerFilePatterns"]))
+        self.assertEqual(manager["customType"], "regex")
+        rule = next(r for r in renovate["packageRules"] if "mrhedstrom/ha-tibber-pulse-mqtt" in r.get("matchPackageNames", []))
+        self.assertIs(rule["automerge"], False)
+        self.assertEqual(rule["labels"], ["renovate", "needs-checksum"])
 
     def test_ha_network_policy(self):
         policy = next(d for d in documents("network-policy.yaml") if d["spec"]["podSelector"] == {"matchLabels": {"app": "home-assistant"}})
@@ -319,7 +469,10 @@ class ManifestTests(unittest.TestCase):
 
     def test_secrets_encrypted(self):
         secrets = {(doc["metadata"]["namespace"], doc["metadata"]["name"]): doc for doc in documents("secrets.enc.yaml")}
-        self.assertLessEqual({("postgres-system", "homeassistant-db-role"), ("home-assistant", "home-assistant-secrets"), ("home-assistant", "esphome-auth"), ("home-assistant", "roborock-config")}, set(secrets))
+        self.assertLessEqual({("postgres-system", "homeassistant-db-role"), ("home-assistant", "home-assistant-secrets"), ("home-assistant", "esphome-auth"), ("home-assistant", "roborock-config"), ("home-assistant", "mosquitto-config")}, set(secrets))
+        self.assertEqual(set(secrets[("home-assistant", "mosquitto-config")]["stringData"]), {"mosquitto.conf", "passwd", "acl", "ca.crt", "client.crt", "client.key"})
+        self.assertEqual(secrets[("home-assistant", "mosquitto-config")]["metadata"]["labels"], {"app": "mosquitto"})
+        self.assertEqual(secrets[("home-assistant", "mosquitto-config")]["metadata"]["annotations"], {"argocd.argoproj.io/sync-wave": "-2"})
         self.assertEqual(set(secrets[("home-assistant", "roborock-config")]["stringData"]), {"config.toml"})
         self.assertEqual(set(secrets[("home-assistant", "esphome-auth")]["stringData"]), {"ESPHOME_USERNAME", "ESPHOME_PASSWORD"})
         self.assertEqual(secrets[("postgres-system", "homeassistant-db-role")]["type"], "kubernetes.io/basic-auth")
@@ -329,6 +482,15 @@ class ManifestTests(unittest.TestCase):
             self.assertIn("sops", secret)
             for value in {**secret.get("data", {}), **secret.get("stringData", {})}.values():
                 self.assertRegex(value, r"^ENC\[")
+
+    def test_mosquitto_probe(self):
+        values = yaml.safe_load((ROOT / "2-k3s/10.observability/blackbox-values.yaml").read_text())
+        self.assertEqual(values["config"]["modules"]["tcp_connect"]["prober"], "tcp")
+        self.assertIn({"name": "mosquitto", "url": "192.168.10.117:1883", "module": "tcp_connect"}, values["serviceMonitor"]["targets"])
+        relabels = values["serviceMonitor"]["defaults"]["additionalRelabeling"]
+        rule = {"sourceLabels": ["__param_target"], "regex": r"192\.168\.10\.117:1883", "action": "replace", "targetLabel": "job", "replacement": "mosquitto-probe"}
+        self.assertIn(rule, relabels)
+        self.assertGreater(relabels.index(rule), relabels.index({"targetLabel": "job", "action": "replace", "replacement": "tls-probe"}))
 
     def test_probes_and_dns(self):
         targets = yaml.safe_load((ROOT / "2-k3s/10.observability/blackbox-values.yaml").read_text())["serviceMonitor"]["targets"]

@@ -28,6 +28,15 @@ data:
     automation: !include automations.yaml
     script: !include scripts.yaml
     scene: !include scenes.yaml
+
+    mqtt:
+      binary_sensor:
+        - name: Tibber bridge
+          unique_id: tibber_bridge
+          state_topic: homelab/tibber-bridge/state
+          payload_on: "1"
+          payload_off: "0"
+          device_class: connectivity
   # Seeds .storage/http once: Home Assistant 2026.11 ignores http: YAML after a one-time import that must be confirmed in the UI.
   http.json: |
     {
@@ -91,6 +100,26 @@ spec:
               [ -e /config/automations.yaml ] || echo '[]' > /config/automations.yaml
               [ -e /config/scripts.yaml ] || echo '{}' > /config/scripts.yaml
               [ -e /config/scenes.yaml ] || echo '[]' > /config/scenes.yaml
+              target=/config/custom_components/tibber_pulse_mqtt
+              if ! grep -q "\"version\": \"$TIBBER_PULSE_MQTT_VERSION\"" "$target/manifest.json" 2>/dev/null; then
+                zip=/tmp/tibber_pulse_mqtt.zip
+                if wget -q -T 30 -O "$zip" "https://github.com/mrhedstrom/ha-tibber-pulse-mqtt/releases/download/v$TIBBER_PULSE_MQTT_VERSION/tibber_pulse_mqtt.zip"; then
+                  echo "$TIBBER_PULSE_MQTT_SHA256  $zip" | sha256sum -c -
+                  rm -rf /config/.tibber_pulse_mqtt.new
+                  unzip -q "$zip" -d /config/.tibber_pulse_mqtt.new
+                  mkdir -p /config/custom_components
+                  rm -rf "$target"
+                  mv /config/.tibber_pulse_mqtt.new "$target"
+                else
+                  echo "WARNING: could not download tibber_pulse_mqtt $TIBBER_PULSE_MQTT_VERSION, starting with the installed copy if any"
+                fi
+              fi
+          env:
+            - name: TIBBER_PULSE_MQTT_VERSION
+              # renovate: datasource=github-releases depName=mrhedstrom/ha-tibber-pulse-mqtt
+              value: "0.4.7"
+            - name: TIBBER_PULSE_MQTT_SHA256
+              value: "a3b5daf5eaf14cdcf5b82699b549f3eea0c6470e68ea9c5977d65e283b3f8a55"
           volumeMounts:
             - name: config
               mountPath: /config

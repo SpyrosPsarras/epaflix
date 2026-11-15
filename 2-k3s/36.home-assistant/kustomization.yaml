@@ -8,6 +8,7 @@ resources:
   - home-assistant.yaml
   - esphome.yaml
   - roborock.yaml
+  - mosquitto.yaml
   - ingressroute.yaml
   - network-policy.yaml
 
@@ -31,3 +32,5 @@ images:
     newTag: 2026.10.2@sha256:4a918585150e95e7675be84a347384ff308fde1bd32d0e4472666e1252cc0e8f
   - name: ghcr.io/python-roborock/local_roborock_server
     newTag: 1.2.1@sha256:0f3d0dd05f14315273df5622d43008b2665c24b2fed79277822d4c9184eab158
+  - name: eclipse-mosquitto
+    newTag: 2.1.2-alpine@sha256:75d6662dee52c947dc9dd9c29f1d8d7ffef78ddaf38001caa09755681e8bbc98
