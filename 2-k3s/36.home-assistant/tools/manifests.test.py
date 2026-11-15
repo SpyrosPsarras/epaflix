@@ -469,7 +469,10 @@ class ManifestTests(unittest.TestCase):
 
     def test_secrets_encrypted(self):
         secrets = {(doc["metadata"]["namespace"], doc["metadata"]["name"]): doc for doc in documents("secrets.enc.yaml")}
-        self.assertLessEqual({("postgres-system", "homeassistant-db-role"), ("home-assistant", "home-assistant-secrets"), ("home-assistant", "esphome-auth"), ("home-assistant", "roborock-config")}, set(secrets))
+        self.assertLessEqual({("postgres-system", "homeassistant-db-role"), ("home-assistant", "home-assistant-secrets"), ("home-assistant", "esphome-auth"), ("home-assistant", "roborock-config"), ("home-assistant", "mosquitto-config")}, set(secrets))
+        self.assertEqual(set(secrets[("home-assistant", "mosquitto-config")]["stringData"]), {"mosquitto.conf", "passwd", "acl", "ca.crt", "client.crt", "client.key"})
+        self.assertEqual(secrets[("home-assistant", "mosquitto-config")]["metadata"]["labels"], {"app": "mosquitto"})
+        self.assertEqual(secrets[("home-assistant", "mosquitto-config")]["metadata"]["annotations"], {"argocd.argoproj.io/sync-wave": "-2"})
         self.assertEqual(set(secrets[("home-assistant", "roborock-config")]["stringData"]), {"config.toml"})
         self.assertEqual(set(secrets[("home-assistant", "esphome-auth")]["stringData"]), {"ESPHOME_USERNAME", "ESPHOME_PASSWORD"})
         self.assertEqual(secrets[("postgres-system", "homeassistant-db-role")]["type"], "kubernetes.io/basic-auth")

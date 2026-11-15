@@ -26,7 +26,7 @@ Deployment `roborock` runs [local_roborock_server](https://github.com/Python-rob
 
 ## Tibber Pulse broker
 
-Design: `docs/superpowers/specs/2026-11-14-tibber-pulse-local-design.md`. The Tibber Pulse on the meter publishes to our own Mosquitto instead of Tibber's cloud. Home Assistant reads it locally, and a bridge forwards the Pulse topics to Tibber, so the Tibber app and the e-Golf smart charging keep working.
+Design: `docs/superpowers/specs/2026-11-14-tibber-pulse-local-design.md`. The Tibber Pulse on the meter publishes to our own Mosquitto instead of Tibber's cloud. Home Assistant reads it locally, and a bridge forwards the Pulse topics to Tibber, renaming the local `tibber-pulse-<id>/publish` to the Pulse's AWS IoT topic `$aws/rules/push_to_kinesis/tibber-pulse-<id>/publish`, so the Tibber app and the e-Golf smart charging keep working.
 
 - Deployment `mosquitto`, image `eclipse-mosquitto`, one replica with `strategy: Recreate`, no volume: Pulse messages are live readings.
 - Service `mosquitto` is a LoadBalancer on `192.168.10.117:1883` with `externalTrafficPolicy: Local`, so the Pulse's own IP reaches the pod. Plain MQTT with a login, no TLS (shortcut: plain MQTT on the LAN, move to 8883 with a cert-manager certificate if the Pulse accepts a custom CA).
@@ -50,7 +50,7 @@ History goes to database `homeassistant`, owned by role `homeassistant`, in `pos
 
 ## Secrets
 
-`secrets.enc.yaml` (SOPS) holds the four Secrets. The role password, the ESPHome login (user `admin`) and the Roborock admin password, protocol PIN and session secret are also stored as login items in the homelab Vaultwarden collection. To change a Roborock value, update its vault item, hash it with upstream's `roborock_local_server.security.hash_password`, re-encrypt `roborock-config` and let Argo CD sync; Reloader restarts the server. To change the role password, update its vault item, re-encrypt both Secrets that hold it with the same password and let Argo CD sync; CNPG sets the new password and Reloader restarts Home Assistant. To change the ESPHome password, update its vault item, re-encrypt `esphome-auth` and let Argo CD sync; Reloader restarts ESPHome.
+`secrets.enc.yaml` (SOPS) holds the five Secrets. The role password, the ESPHome login (user `admin`) and the Roborock admin password, protocol PIN and session secret are also stored as login items in the homelab Vaultwarden collection. To change a Roborock value, update its vault item, hash it with upstream's `roborock_local_server.security.hash_password`, re-encrypt `roborock-config` and let Argo CD sync; Reloader restarts the server. To change the role password, update its vault item, re-encrypt both Secrets that hold it with the same password and let Argo CD sync; CNPG sets the new password and Reloader restarts Home Assistant. To change the ESPHome password, update its vault item, re-encrypt `esphome-auth` and let Argo CD sync; Reloader restarts ESPHome. To change a Mosquitto password, update its vault item, regenerate its line in `passwd` inside `mosquitto-config` (Mosquitto `$7$` PBKDF2-SHA512), re-encrypt and let Argo CD sync; Reloader restarts Mosquitto. The Pulse password must then also be set on the Pulse's setup page.
 
 ## Recovery
 

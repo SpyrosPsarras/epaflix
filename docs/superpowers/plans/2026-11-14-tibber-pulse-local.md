@@ -60,8 +60,6 @@ A homelab T3 thread. Branch `t3/tibber-home-assistant-integration`. Review-gate 
 
 ### Task 2: Secret `mosquitto-config`
 
-Blocked on Spyros: the Pulse vault item from spec "Secrets and owner steps" step 1, and its name.
-
 **Files:**
 - Modify: `2-k3s/36.home-assistant/secrets.enc.yaml` (new Secret `mosquitto-config`, namespace `home-assistant`)
 
@@ -70,10 +68,10 @@ Blocked on Spyros: the Pulse vault item from spec "Secrets and owner steps" step
 - Produces: Secret keys `mosquitto.conf`, `passwd`, `acl`, `ca.crt`, `client.crt`, `client.key`. Two new homelab vault items holding the `tibber_pulse` and `home_assistant` passwords.
 
 - [ ] **Step 1: Generate passwords** inside `vault create` commands (skill `vaultwarden-secrets`, write contract first). Never print them.
-- [ ] **Step 2: Build the Secret** in one `vault run` that reads the Pulse item and both password items, writes a private temp file and runs `sops set` or `sops -e -i` on `secrets.enc.yaml`. Contents:
+- [ ] **Step 2: Build the Secret**, one `vault run` per vault value (the client passes one attachment per call), into a private temp dir, then one `vault run` with the SOPS key that decrypts `secrets.enc.yaml`, appends the Secret (labels `app: mosquitto`, annotation `argocd.argoproj.io/sync-wave: "-2"`, as the other Secrets) and re-encrypts it. Contents:
   - `passwd`: Mosquitto 2 `$7$` PBKDF2-SHA512 hashes for both users, made with Python `hashlib`.
   - `acl`: `user tibber_pulse` → `topic write tibber-pulse-<id>/publish`, `topic read tibber-pulse-<id>/receive`; `user home_assistant` → `topic read tibber-pulse-<id>/publish`, `topic read homelab/tibber-bridge/state`.
-  - `mosquitto.conf`: `listener 1883`, `allow_anonymous false`, `password_file`, `acl_file`, `persistence false`, `log_dest stdout`, and the bridge block from the spec's "Broker" section, with `address` from the Pulse's `mqtt_url`, `bridge_cafile /mosquitto/config/ca.crt`, `bridge_certfile /mosquitto/config/client.crt`, `bridge_keyfile /mosquitto/config/client.key`.
+  - `mosquitto.conf`: `listener 1883`, `allow_anonymous false`, `password_file`, `acl_file`, `persistence false`, `log_dest stdout`, and the bridge block from the spec's "Broker" section, with `address` from the Pulse's `mqtt_url`, the topic renaming from the spec's "Broker" section (local `tibber-pulse-<id>/publish` out to `$aws/rules/push_to_kinesis/tibber-pulse-<id>/publish`), `bridge_cafile /mosquitto/config/ca.crt`, `bridge_certfile /mosquitto/config/client.crt`, `bridge_keyfile /mosquitto/config/client.key`.
   - The three certificate files from the Pulse item.
 - [ ] **Step 3: Verify** `vault run --name sops-age-k3s-cluster ... kustomize build --enable-alpha-plugins --enable-exec 2-k3s/36.home-assistant` writes to a private temp file; check with Python that Secret `mosquitto-config` has exactly the six keys and that `mosquitto.conf` contains `notifications_local_only true` and `notification_topic homelab/tibber-bridge/state`. Print only pass or fail. Delete the temp file.
 
