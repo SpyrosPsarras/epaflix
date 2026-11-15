@@ -1,7 +1,7 @@
 configuration:
   rebootDays: [sat]
-  startTime: "02:00"
-  endTime: "05:00"
+  startTime: "07:00"
+  endTime: "10:00"
   timeZone: UTC
   concurrency: 1
   forceReboot: false
