@@ -295,6 +295,75 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(config["recorder"]["db_max_retries"], 100)
         for key, name in {"automation": "automations.yaml", "script": "scripts.yaml", "scene": "scenes.yaml"}.items():
             self.assertEqual(config[key], ("include", name))
+        self.assertEqual(config["homeassistant"]["packages"], {"egolf": ("include", "egolf.yaml")})
+
+    def egolf(self):
+        configmap = resource("home-assistant.yaml", "ConfigMap", "home-assistant-configuration")
+        return yaml.load(configmap["data"]["egolf.yaml"], Loader=HomeAssistantLoader)
+
+    def test_egolf_rest_commands(self):
+        rest = self.egolf()["rest_command"]
+        login = rest["tibber_app_login"]
+        self.assertEqual((login["url"], login["method"], login["content_type"]), ("https://app.tibber.com/login.credentials", "post", "application/x-www-form-urlencoded"))
+        self.assertEqual(login["payload"], ("secret", "tibber_login_body"))
+        push = rest["tibber_set_battery_level"]
+        self.assertEqual((push["url"], push["method"], push["content_type"]), ("https://app.tibber.com/v4/gql", "post", "application/json"))
+        self.assertEqual(push["headers"]["Authorization"], "Bearer {{ token }}")
+        self.assertIn("mutation SetVehicleSettings($vehicleId: String!, $homeId: String!, $settings: [SettingsItemInput!]) { me { setVehicleSettings(id: $vehicleId, homeId: $homeId, settings: $settings) { __typename } } }", push["payload"])
+        self.assertIn("offline.vehicle.batteryLevel", push["payload"])
+
+    def test_egolf_script(self):
+        script = self.egolf()["script"]["egolf_push_to_tibber"]
+        self.assertEqual(script["trace"], {"stored_traces": 1})
+        self.assertEqual(script["variables"]["vehicle_id"], ("secret", "tibber_vehicle_id"))
+        self.assertEqual(script["variables"]["home_id"], ("secret", "tibber_home_id"))
+        self.assertIn("sensor.egolf_battery", script["variables"]["level"])
+        actions = [step.get("action") for step in script["sequence"]]
+        self.assertLess(actions.index("rest_command.tibber_app_login"), actions.index("rest_command.tibber_set_battery_level"))
+        steps = {step.get("action"): step for step in script["sequence"]}
+        self.assertEqual(steps["rest_command.tibber_app_login"]["response_variable"], "login")
+        self.assertEqual(steps["rest_command.tibber_set_battery_level"]["response_variable"], "result")
+        text = str(script)
+        self.assertIn("input_text.egolf_tibber_last_result", text)
+        self.assertIn("persistent_notification.create", text)
+        self.assertIn("errors", text)
+
+    def test_egolf_login_never_logged(self):
+        patterns = [re.compile(p) for p in self.egolf()["logger"]["filters"]["homeassistant.components.rest_command"]]
+        dropped = [
+            "Error. Url: https://app.tibber.com/login.credentials. Status code 401. Payload: email=a%40b.c&password=x",
+            "Calling post https://app.tibber.com/login.credentials with headers: {} and payload: email=a%40b.c&password=x",
+            "Calling post https://app.tibber.com/v4/gql with headers: {'Authorization': 'Bearer abc'} and payload: {}",
+        ]
+        kept = "Error. Url: https://app.tibber.com/v4/gql. Status code 400. Payload: {}"
+        for message in dropped:
+            self.assertTrue(any(p.search(message) for p in patterns), message)
+        self.assertFalse(any(p.search(kept) for p in patterns))
+
+    def test_egolf_automation_freshness(self):
+        automation = next(a for a in self.egolf()["automation"] if a["id"] == "egolf_push_to_tibber")
+        entities = {t["entity_id"] for t in automation["triggers"]}
+        self.assertEqual(entities, {"sensor.egolf_battery_read_at", "binary_sensor.e_pavli_plug"})
+        read_trigger = next(t for t in automation["triggers"] if t["entity_id"] == "sensor.egolf_battery_read_at")
+        self.assertEqual(read_trigger["not_from"], ["unavailable"])
+        conditions = str(automation["conditions"])
+        self.assertIn("binary_sensor.e_pavli_plug", conditions)
+        self.assertIn("timedelta(minutes=30)", conditions)
+        self.assertIn("last_changed", conditions)
+        self.assertEqual(automation["actions"], [{"action": "script.egolf_push_to_tibber"}])
+
+    def test_egolf_alerts(self):
+        automations = {a["id"]: a for a in self.egolf()["automation"]}
+        stale = automations["egolf_battery_stale"]
+        self.assertEqual(stale["triggers"], [{"trigger": "state", "entity_id": "binary_sensor.e_pavli_charging", "to": "on", "for": "00:30:00"}])
+        self.assertIn("sensor.egolf_battery_read_at", str(stale["conditions"]))
+        low = automations["egolf_12v_low"]
+        self.assertEqual(low["triggers"], [{"trigger": "numeric_state", "entity_id": "sensor.egolf_12v", "below": 12.0, "for": "00:10:00"}])
+        for alert in (stale, low):
+            self.assertIn("persistent_notification.create", str(alert["actions"]))
+        helpers = self.egolf()
+        self.assertIn("egolf_tibber_last_push", helpers["input_datetime"])
+        self.assertIn("egolf_tibber_last_result", helpers["input_text"])
 
     def test_ha_http_storage(self):
         configmap = resource("home-assistant.yaml", "ConfigMap", "home-assistant-configuration")
@@ -369,6 +438,7 @@ class ManifestTests(unittest.TestCase):
         self.assertTrue(init["command"][2].startswith("\n".join([
             "set -e",
             "cp /defaults/configuration.yaml /config/configuration.yaml",
+            "cp /defaults/egolf.yaml /config/egolf.yaml",
             "mkdir -p /config/.storage",
             "[ -e /config/.storage/http ] || cp /defaults/http.json /config/.storage/http",
             "[ -e /config/automations.yaml ] || echo '[]' > /config/automations.yaml",
@@ -380,60 +450,84 @@ class ManifestTests(unittest.TestCase):
         volumes = {v["name"]: v for v in self.pod["volumes"]}
         self.assertEqual(volumes[mounts["/defaults"]["name"]]["configMap"]["name"], "home-assistant-configuration")
 
+    COMPONENTS = (
+        ("tibber_pulse_mqtt", "TIBBER_PULSE_MQTT", "mrhedstrom/ha-tibber-pulse-mqtt", "tibber_pulse_mqtt.zip"),
+        ("zaptec", "ZAPTEC", "custom-components/zaptec", "zaptec.zip"),
+    )
+
     def test_custom_integration_pin(self):
         init = self.pod["initContainers"][0]
         env = {e["name"]: e["value"] for e in init["env"]}
-        self.assertRegex(env["TIBBER_PULSE_MQTT_VERSION"], r"^[0-9]+\.[0-9]+\.[0-9]+$")
-        self.assertRegex(env["TIBBER_PULSE_MQTT_SHA256"], r"^[0-9a-f]{64}$")
         lines = (HA / "home-assistant.yaml").read_text().splitlines()
-        name = lines.index("            - name: TIBBER_PULSE_MQTT_VERSION")
-        self.assertEqual(lines[name + 1].strip(), "# renovate: datasource=github-releases depName=mrhedstrom/ha-tibber-pulse-mqtt")
-        self.assertEqual(lines[name + 2].strip(), f'value: "{env["TIBBER_PULSE_MQTT_VERSION"]}"')
         script = init["command"][2]
-        self.assertIn("https://github.com/mrhedstrom/ha-tibber-pulse-mqtt/releases/download/v$TIBBER_PULSE_MQTT_VERSION/tibber_pulse_mqtt.zip", script)
+        for domain, prefix, repo, asset in self.COMPONENTS:
+            with self.subTest(domain):
+                self.assertRegex(env[f"{prefix}_VERSION"], r"^[0-9]+\.[0-9]+\.[0-9]+$")
+                self.assertRegex(env[f"{prefix}_SHA256"], r"^[0-9a-f]{64}$")
+                name = lines.index(f"            - name: {prefix}_VERSION")
+                self.assertEqual(lines[name + 1].strip(), f"# renovate: datasource=github-releases depName={repo}")
+                self.assertEqual(lines[name + 2].strip(), f'value: "{env[f"{prefix}_VERSION"]}"')
+                self.assertIn(f'install_component {domain} {repo} {asset} "${prefix}_VERSION" "${prefix}_SHA256"', script)
+        self.assertIn("https://github.com/$2/releases/download/v$4/$3", script)
         self.assertNotRegex(script, r"sha256sum -c[^\n]*\|\|")
 
-    def run_init(self, root, sha, wget_fails=False):
+    def run_init(self, root, shas, wget_fails=False):
         script = re.sub(r"(?<![\w/])/(config|defaults|tmp)\b", lambda m: f"{root}/{m[1]}", self.pod["initContainers"][0]["command"][2])
         wget = root / "bin/wget"
-        wget.write_text(f"#!/bin/sh\ntouch {root}/wget-called\n" + ("exit 4\n" if wget_fails else f'while [ "$1" != -O ]; do shift; done\ncp {root}/fixture.zip "$2"\n'))
+        wget.write_text(f"#!/bin/sh\ntouch {root}/wget-called\n" + ("exit 4\n" if wget_fails else f'while [ "$1" != -O ]; do shift; done\ncp {root}/fixtures/$(basename "$2") "$2"\n'))
         wget.chmod(0o755)
-        env = {**os.environ, "PATH": f"{root}/bin:{os.environ['PATH']}", "TIBBER_PULSE_MQTT_VERSION": "0.4.7", "TIBBER_PULSE_MQTT_SHA256": sha}
+        env = {**os.environ, "PATH": f"{root}/bin:{os.environ['PATH']}"}
+        for domain, prefix, _, _ in self.COMPONENTS:
+            env[f"{prefix}_VERSION"] = "9.9.9"
+            env[f"{prefix}_SHA256"] = shas[domain]
         return subprocess.run(["sh", "-c", script], env=env, capture_output=True, text=True).returncode
 
     def test_custom_integration_install(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            for directory in ("bin", "defaults", "tmp", "config"):
+            for directory in ("bin", "defaults", "tmp", "config", "fixtures"):
                 (root / directory).mkdir()
             (root / "defaults/configuration.yaml").write_text("default_config:\n")
             (root / "defaults/http.json").write_text("{}")
-            with zipfile.ZipFile(root / "fixture.zip", "w") as archive:
-                archive.writestr("manifest.json", '{\n  "domain": "tibber_pulse_mqtt",\n  "version": "0.4.7"\n}\n')
-                archive.writestr("__init__.py", "")
-            sha = hashlib.sha256((root / "fixture.zip").read_bytes()).hexdigest()
-            target = root / "config/custom_components/tibber_pulse_mqtt"
+            (root / "defaults/egolf.yaml").write_text("{}\n")
+            shas = {}
+            for domain, _, _, asset in self.COMPONENTS:
+                with zipfile.ZipFile(root / "fixtures" / asset, "w") as archive:
+                    archive.writestr("manifest.json", '{\n  "domain": "%s",\n  "version": "9.9.9"\n}\n' % domain)
+                    archive.writestr("__init__.py", "")
+                shas[domain] = hashlib.sha256((root / "fixtures" / asset).read_bytes()).hexdigest()
+            targets = {domain: root / "config/custom_components" / domain for domain, *_ in self.COMPONENTS}
 
-            target.mkdir(parents=True)
-            (target / "manifest.json").write_text('{"version": "0.4.6"}')
-            self.assertNotEqual(self.run_init(root, "0" * 64), 0)
-            self.assertIn('"0.4.6"', (target / "manifest.json").read_text())
+            def installed_old():
+                for target in targets.values():
+                    target.mkdir(parents=True, exist_ok=True)
+                    (target / "manifest.json").write_text('{"version": "9.9.8"}')
 
-            self.assertEqual(self.run_init(root, sha, wget_fails=True), 0)
-            self.assertIn('"0.4.6"', (target / "manifest.json").read_text())
+            for domain in targets:
+                installed_old()
+                with self.subTest(f"{domain} checksum mismatch fails and keeps the old copy"):
+                    self.assertNotEqual(self.run_init(root, {**shas, domain: "0" * 64}), 0)
+                    self.assertIn('"9.9.8"', (targets[domain] / "manifest.json").read_text())
 
-            self.assertEqual(self.run_init(root, sha), 0)
-            self.assertIn('"version": "0.4.7"', (target / "manifest.json").read_text())
-            self.assertTrue((target / "__init__.py").exists())
-            self.assertEqual(sorted(p.name for p in target.parent.iterdir()), ["tibber_pulse_mqtt"])
+            installed_old()
+
+            self.assertEqual(self.run_init(root, shas, wget_fails=True), 0)
+            for target in targets.values():
+                self.assertIn('"9.9.8"', (target / "manifest.json").read_text())
+
+            self.assertEqual(self.run_init(root, shas), 0)
+            for target in targets.values():
+                self.assertIn('"version": "9.9.9"', (target / "manifest.json").read_text())
+                self.assertTrue((target / "__init__.py").exists())
+            self.assertEqual(sorted(p.name for p in (root / "config/custom_components").iterdir()), sorted(targets))
 
             (root / "wget-called").unlink()
-            self.assertEqual(self.run_init(root, sha, wget_fails=True), 0)
+            self.assertEqual(self.run_init(root, shas, wget_fails=True), 0)
             self.assertFalse((root / "wget-called").exists())
 
             for path in (root / "config/custom_components", root / "config/configuration.yaml"):
                 subprocess.run(["rm", "-rf", str(path)], check=True)
-            self.assertEqual(self.run_init(root, sha, wget_fails=True), 0)
+            self.assertEqual(self.run_init(root, shas, wget_fails=True), 0)
             self.assertTrue((root / "config/configuration.yaml").exists())
 
     def test_bridge_binary_sensor(self):
@@ -448,13 +542,14 @@ class ManifestTests(unittest.TestCase):
             "device_class": "connectivity",
         }]})
 
-    def test_renovate_tibber_pulse_mqtt(self):
+    def test_renovate_custom_integrations(self):
         renovate = json.loads((ROOT / ".github/renovate.json").read_text())
         manager = next(m for m in renovate["customManagers"] if any("36\\.home-assistant/home-assistant" in p for p in m["managerFilePatterns"]))
         self.assertEqual(manager["customType"], "regex")
-        rule = next(r for r in renovate["packageRules"] if "mrhedstrom/ha-tibber-pulse-mqtt" in r.get("matchPackageNames", []))
-        self.assertIs(rule["automerge"], False)
-        self.assertEqual(rule["labels"], ["renovate", "needs-checksum"])
+        for repo in ("mrhedstrom/ha-tibber-pulse-mqtt", "custom-components/zaptec"):
+            rule = next(r for r in renovate["packageRules"] if repo in r.get("matchPackageNames", []))
+            self.assertIs(rule["automerge"], False)
+            self.assertEqual(rule["labels"], ["renovate", "needs-checksum"])
 
     def test_ha_network_policy(self):
         policy = next(d for d in documents("network-policy.yaml") if d["spec"]["podSelector"] == {"matchLabels": {"app": "home-assistant"}})

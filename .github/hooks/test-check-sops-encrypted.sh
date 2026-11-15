@@ -557,6 +557,40 @@ git -C "$tmp" commit -q --no-verify -m "synthetic bypass fixture"
 expect_pass "cached mode ignores unchanged tracked files"
 expect_fail "full-tree mode catches a bypassed plaintext Secret" --full-tree
 
+reset_repo
+cat >"$tmp/fixtures/esphome-device.yaml" <<'YAML'
+esphome:
+  name: synthetic-device
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+interval:
+  - interval: 60s
+    then:
+      - lambda: !lambda return true;
+YAML
+git -C "$tmp" add fixtures/esphome-device.yaml
+expect_pass "ESPHome !secret and !lambda tags parse as plain strings"
+
+reset_repo
+cat >"$tmp/fixtures/tagged-secret.yaml" <<'YAML'
+apiVersion: v1
+kind: Secret
+metadata:
+  name: synthetic-tagged
+stringData:
+  username: !lambda 'V7!mQ2@xR9#kL4$zN8%pT6^w'
+YAML
+git -C "$tmp" add fixtures/tagged-secret.yaml
+expect_fail_with "an ESPHome tag does not exempt a plaintext Secret value" "credential-like shape"
+
+reset_repo
+cat >"$tmp/fixtures/other-tag.yaml" <<'YAML'
+config: !include other.yaml
+YAML
+git -C "$tmp" add fixtures/other-tag.yaml
+expect_fail_with "other unknown YAML tags still fail to parse" "could not be safely parsed"
+
 printf '%s\n' "1..$((pass_count + fail_count))"
 if [ "$fail_count" -ne 0 ]; then
   printf '%s fixture test(s) failed\n' "$fail_count" >&2
