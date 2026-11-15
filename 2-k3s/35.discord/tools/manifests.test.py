@@ -220,6 +220,11 @@ class MediaTests(AgentChecks, unittest.TestCase):
         for key in ["SEERR", "RADARR", "SONARR", "LIDARR", "BAZARR", "JELLYFIN"]:
             self.assertIn(f"${key}_API_KEY", text)
 
+    def test_agents_md_subtitle_source(self):
+        text = (DISCORD / "media/AGENTS.md").read_text()
+        for marker in ["GET /movies/history?radarrid=<id>", "GET /episodes/history?episodeid=<sonarrEpisodeId>", "`action` 6", "any other `action`"]:
+            self.assertIn(marker, text)
+
     def test_agents_md_requests_only_through_seerr(self):
         text = (DISCORD / "media/AGENTS.md").read_text()
         self.assertIn("only through Seerr. Never add them in Radarr or Sonarr.", text)
