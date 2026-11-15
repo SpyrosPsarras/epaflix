@@ -28,8 +28,9 @@ Deployment `roborock` runs [local_roborock_server](https://github.com/Python-rob
 
 Design: `docs/superpowers/specs/2026-11-14-tibber-pulse-local-design.md`. The Tibber Pulse on the meter publishes to our own Mosquitto instead of Tibber's cloud. Home Assistant reads it locally, and a bridge forwards the Pulse topics to Tibber, renaming the local `tibber-pulse-<id>/publish` to the Pulse's AWS IoT topic `$aws/rules/push_to_kinesis/tibber-pulse-<id>/publish`, so the Tibber app and the e-Golf smart charging keep working.
 
-- Deployment `mosquitto`, image `eclipse-mosquitto`, one replica with `strategy: Recreate`, no volume: Pulse messages are live readings.
+- Deployment `mosquitto`, image `eclipse-mosquitto`, one replica with `strategy: Recreate`, no persistent volume: Pulse messages are live readings.
 - Service `mosquitto` is a LoadBalancer on `192.168.10.117:1883` with `externalTrafficPolicy: Local`, so the Pulse's own IP reaches the pod. Plain MQTT with a login, no TLS (shortcut: plain MQTT on the LAN, move to 8883 with a cert-manager certificate if the Pulse accepts a custom CA).
+- Init container `config` copies Secret `mosquitto-config` into an in-memory `/mosquitto/config` as regular files owned by `mosquitto`, mode 0400, because Mosquitto 2.1 refuses a symlinked password file and Secret volume files are symlinks.
 - Secret `mosquitto-config` (SOPS) holds `mosquitto.conf` with the bridge, the password file, the ACL and the Pulse's certificate, key and CA. It also holds the Pulse device ID, which stays out of plain Git. Users: `tibber_pulse` (the Pulse) and `home_assistant`. Their passwords are login items in the homelab vault.
 - The bridge `tibber` connects to Tibber's AWS IoT endpoint on 8883 with the Pulse's certificate and reports its state on `homelab/tibber-bridge/state` (1 connected, 0 not). Home Assistant shows it as `binary_sensor.tibber_bridge`.
 - NetworkPolicy `mosquitto` allows 1883 only from the Pulse (`192.168.10.230`, a DHCP reservation in the router), Home Assistant and the blackbox exporter, and egress only to DNS and TCP 8883 on public addresses.

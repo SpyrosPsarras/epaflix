@@ -27,6 +27,17 @@ spec:
         runAsGroup: 1883
         fsGroup: 1883
         runAsNonRoot: true
+      initContainers:
+        # Mosquitto 2.1 refuses symlinked password files, and Secret volume files are symlinks.
+        - name: config
+          image: eclipse-mosquitto
+          command: ["sh", "-c", "cp -L /secret/* /mosquitto/config/ && chmod 0400 /mosquitto/config/*"]
+          volumeMounts:
+            - name: secret
+              mountPath: /secret
+              readOnly: true
+            - name: config
+              mountPath: /mosquitto/config
       containers:
         - name: mosquitto
           image: eclipse-mosquitto
@@ -51,10 +62,12 @@ spec:
             limits:
               memory: 128Mi
       volumes:
-        - name: config
+        - name: secret
           secret:
             secretName: mosquitto-config
-            defaultMode: 0440
+        - name: config
+          emptyDir:
+            medium: Memory
 ---
 apiVersion: v1
 kind: Service
