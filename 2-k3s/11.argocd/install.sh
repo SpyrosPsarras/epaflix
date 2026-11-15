@@ -5,41 +5,30 @@ kubectl() { command kubectl --context "$KUBECTL_CONTEXT" "$@"; }
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CHART_VERSION="9.5.14"   # app v3.4.2 — pin to avoid surprise upgrades.
+cd "$(dirname "${BASH_SOURCE[0]}")"
+KEY_FILE="${KEY_FILE:-$HOME/.config/sops/age/k3s-cluster.txt}"
+CHART_VERSION="$(sed -n 's/^ *version: "\(.*\)"$/\1/p' kustomization.yaml)"
+[[ -n $CHART_VERSION ]] || { echo "no chart version in kustomization.yaml" >&2; exit 1; }
 
-echo ">>> 1/4  apply namespace"
-kubectl apply -f "${SCRIPT_DIR}/namespace.yaml"
+command -v openssl >/dev/null
+kubectl apply -f namespace.yaml
 
-echo ">>> 2/4  helm upgrade --install argocd (chart ${CHART_VERSION})"
-helm repo add argo https://argoproj.github.io/argo-helm 2>/dev/null || true
-helm repo update argo
-helm upgrade --install argocd argo/argo-cd \
-  --namespace argocd \
-  --version "${CHART_VERSION}" \
-  -f "${SCRIPT_DIR}/helm-values.yaml" \
-  --wait --timeout 5m
+kubectl -n argocd get secret sops-age >/dev/null 2>&1 ||
+  kubectl -n argocd create secret generic sops-age --from-file=keys.txt="$KEY_FILE"
+kubectl -n argocd get secret argocd-redis >/dev/null 2>&1 ||
+  kubectl -n argocd create secret generic argocd-redis --from-file=auth=<(openssl rand -hex 32 | tr -d '\n')
 
-echo ">>> 3/4  apply Traefik IngressRoute"
-kubectl apply -f "${SCRIPT_DIR}/ingress.yaml"
+# The kustomization renders no CRDs (crds.install: false), so they come from the same chart here.
+helm template argocd argo-cd --repo https://argoproj.github.io/argo-helm \
+  --version "$CHART_VERSION" --namespace argocd --set crds.install=true \
+  -s templates/crds/crd-application.yaml \
+  -s templates/crds/crd-applicationset.yaml \
+  -s templates/crds/crd-appproject.yaml |
+  kubectl apply --server-side -f -
+kubectl wait --for=condition=Established --timeout=60s \
+  crd/applications.argoproj.io crd/applicationsets.argoproj.io crd/appprojects.argoproj.io
 
-echo ">>> 4/4  done. Next steps:"
-cat <<EOF
+kustomize build --enable-helm . | kubectl apply -f -
+kubectl -n argocd rollout status deploy/argocd-repo-server --timeout=5m
 
-  • Add DNS:  argocd.epaflix.com → 192.168.10.101  (Pi-hole dnsmasq.d)
-  • Create the Authentik OIDC provider + group + binding per
-    2-k3s/05.traefik-deployment/examples/app-with-native-oidc-authentik.md
-  • Merge-patch OIDC client-id/secret into argocd-secret (do NOT apply
-    oidc-secret.yaml — that would clobber the helm-managed server.secretkey).
-    Replace VALUES below with real ones from .github/instructions/secrets.enc.yaml:
-        kubectl -n argocd patch secret argocd-secret --type=merge \\
-          -p '{"stringData":{"oidc.authentik.clientId":"<CID>","oidc.authentik.clientSecret":"<CSEC>"}}'
-        kubectl -n argocd rollout restart deploy/argocd-server
-  • Image bumps are delivered by Renovate (2-k3s/12.renovate/), not
-    Image Updater — nothing to install here (retired in #192/#265).
-  • Get the initial admin password (only valid before OIDC works).
-    Capture, never print in a recorded shell (#602):
-        PW=\$(kubectl --context epaflix -n argocd get secret argocd-initial-admin-secret \\
-          -o jsonpath='{.data.password}' | base64 -d)
-
-EOF
+kubectl apply -k apps
