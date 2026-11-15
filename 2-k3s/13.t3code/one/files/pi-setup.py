@@ -108,8 +108,8 @@ def write(home, safety_entry, ssh_path=Path('/scripts/homelab-ssh.md')):
     settings['packages'] = [str(Path('/tools/node_modules') / name) for name in PACKAGES] + [safety_entry]
     settings['skills'] = ['!**/.agents/skills/ponytail/**']
     if os.environ.get('MCP_HUB_INSTANCE') == 'work':
-        # Davidhorn skills load from the owner's ai-skills clone; `git pull` there updates them.
-        settings['skills'].append(str(home / 'Davidhorn/ai-skills/plugins'))
+        # Work skills load from the owner's ai-skills clone; `git pull` there updates them.
+        settings['skills'].append(str(home / 'work/ai-skills/plugins'))
     settings.setdefault('pi-cliproxyapi-provider', {})['gpt56ContextWindow'] = 'canonical'
     settings.setdefault('retry', {})['maxRetries'] = 8
     write_json(settings_path, settings)
