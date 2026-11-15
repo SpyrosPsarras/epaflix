@@ -71,7 +71,7 @@ def public_inputs(skill_file=DEFAULT_SKILL_FILE):
         'instructions.md': encoded((ROOT / 'instructions.md').read_bytes()),
         'skills/ponytail/SKILL.md': encoded(skill)}}
     policies = {'environment': 'homelab', 'files': {
-        '.cc-safety-net/policy.json': encoded({'version': 1}),
+        '.cc-safety-net/policy.json': encoded({'version': 1, 'secret_protection': {'allow_paths': ['client.key']}}),
         '.claude/settings.json': encoded({'hooks': {'PreToolUse': [{'hooks': [
             {'type': 'command', 'command': f'node "$HOME/{cli}" hook --coding-cli'}]}]}}),
         '.config/t3-policy/check.py': encoded((ROOT / 'tools/policy-check.py').read_bytes())},

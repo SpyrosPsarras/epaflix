@@ -278,6 +278,10 @@ The helper creates these external inputs, not an alternate deployment path:
   skill. It does not export any agent home. The policy acceptance checks invoke
   the installed, hash-verified cc-safety-net CLI with harmless allow/deny
   payloads. They never execute the dangerous commands in those payloads.
+  The cc-safety-net policy keeps every secret rule on and allows one path,
+  `client.key` relative to the working folder (cc-safety-net also treats it as a
+  folder prefix), so the agent can read the Tibber Pulse bridge key from the
+  vault into a SOPS Secret. Other key file names and other folders stay blocked.
 - I2: `t3-runtime-grants` holds a new model client key and a fresh homelab hub
   token. The model key has a reserved `t3-homelab-` prefix and is registered through
   cliproxy's management API without replacing other keys. Its authoritative

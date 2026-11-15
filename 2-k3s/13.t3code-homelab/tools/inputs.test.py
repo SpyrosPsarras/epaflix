@@ -82,6 +82,11 @@ class InputsTest(unittest.TestCase):
         self.assertIn('instructions.md', bundle['files'])
         self.assertEqual(base64.b64decode(bundle['files']['skills/ponytail/SKILL.md']['data']), b'# Synthetic skill\n')
 
+    def test_safety_policy_allows_only_the_bridge_client_key(self):
+        policies = json.loads(self.module.public_inputs(skill_file=self.skill_file)['policies.json'])
+        safety = json.loads(base64.b64decode(policies['files']['.cc-safety-net/policy.json']['data']))
+        self.assertEqual(safety, {'version': 1, 'secret_protection': {'allow_paths': ['client.key']}})
+
     def test_policy_check_accepts_both_deny_protocols_and_refuses_wrong_decisions(self):
         policies = json.loads(self.module.public_inputs(skill_file=self.skill_file)['policies.json'])
         checker = base64.b64decode(policies['files']['.config/t3-policy/check.py']['data'])
