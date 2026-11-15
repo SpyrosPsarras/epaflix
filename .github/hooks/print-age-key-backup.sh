@@ -7,8 +7,8 @@ set -euo pipefail
 #   1. workstation ~/.config/sops/age/k3s-cluster.txt
 #   2. in-cluster Secret argocd/sops-age
 #   3. TrueNAS /mnt/mpara-tank-lan/encrypted-backups/sops-age/k3s-cluster.txt — on a dataset
-#      that comes up locked, and its unlock passphrase lives INSIDE the SOPS store
-#      this key decrypts. Lose copies 1+2 and copy 3 is unreachable.
+#      that comes up locked. Its unlock passphrase is in the password vault and in the
+#      SOPS store this key decrypts, so copy 3 needs the vault when copies 1+2 are lost.
 #
 # This script writes a printable HTML page (key text, SHA256, QR, restore
 # steps) into git-ignored artifacts/. Printed and stored off-site, the paper
