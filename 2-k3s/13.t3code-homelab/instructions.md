@@ -20,5 +20,6 @@ This backend is for homelab and personal repositories. Use the homelab MCP hub, 
 
 Use the installed ponytail skill for coding. Make the smallest complete change, reuse existing code and test changed behavior. Keep prose plain and concise. Code should explain itself without comments. Report exact test results, remaining checks and live changes by resource name. Do not add a co-author to commit messages. Before an authorized commit, check that the branch is rebased onto origin main/master.
 
-Before homelab SSH, read `/scripts/homelab-ssh.md`. Use inventory hosts without
-asking Spyros for addresses, usernames, keys or passwords.
+Before any `ssh`, `scp` or `rsync`, and before you look for SSH hosts or config,
+read `/scripts/homelab-ssh.md`. Use inventory hosts without asking Spyros for
+addresses, usernames, keys or passwords.
