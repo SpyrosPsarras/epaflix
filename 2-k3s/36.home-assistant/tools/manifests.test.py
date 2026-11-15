@@ -218,10 +218,17 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(container["command"], ["mosquitto", "-c", "/mosquitto/config/mosquitto.conf"])
         self.assertEqual([(p["containerPort"], p["protocol"]) for p in container["ports"]], [(1883, "TCP")])
         self.assertEqual(container["readinessProbe"]["tcpSocket"], {"port": 1883})
+        volumes = {v["name"]: v for v in pod["volumes"]}
         [mount] = container["volumeMounts"]
         self.assertEqual((mount["mountPath"], mount["readOnly"]), ("/mosquitto/config", True))
-        volumes = {v["name"]: v for v in pod["volumes"]}
-        self.assertEqual(volumes[mount["name"]]["secret"], {"secretName": "mosquitto-config", "defaultMode": 0o440})
+        self.assertEqual(volumes[mount["name"]]["emptyDir"], {"medium": "Memory"})
+        [init] = pod["initContainers"]
+        self.assertEqual(init["image"], "eclipse-mosquitto")
+        self.assertEqual(init["command"], ["sh", "-c", "cp -L /secret/* /mosquitto/config/ && chmod 0400 /mosquitto/config/*"])
+        init_mounts = {m["mountPath"]: m for m in init["volumeMounts"]}
+        self.assertEqual(init_mounts["/mosquitto/config"]["name"], mount["name"])
+        self.assertIs(init_mounts["/secret"]["readOnly"], True)
+        self.assertEqual(volumes[init_mounts["/secret"]["name"]]["secret"], {"secretName": "mosquitto-config"})
         image = next(i for i in documents("kustomization.yaml")[0]["images"] if i["name"] == "eclipse-mosquitto")
         self.assertRegex(image["newTag"], r"^2\.[0-9.]+-alpine@sha256:[0-9a-f]{64}$")
         self.assertIn("mosquitto.yaml", documents("kustomization.yaml")[0]["resources"])
