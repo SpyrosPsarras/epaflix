@@ -29,7 +29,7 @@ LinuxServer publishes clean three-component tags alongside build tags. Docker ve
 
 The LinuxServer images come from ghcr.io/linuxserver, not lscr.io. Renovate's lookups of the lscr.io names failed on the Dependency Dashboard (issue #31), and its logs showed lscr.io answering tag-list and blob requests with HTTP 429. ghcr.io serves the same digests.
 
-Every update type in this images block auto-merges on green CI, except for the manual-review images below. The `renovate-breaking-change` workflow holds any Renovate PR whose release notes carry a breaking-change heading or `BREAKING CHANGE`. A release that ships a migration without flagging it in its notes still merges.
+Digest, patch and minor updates in this images block auto-merge on green CI, except for the manual-review images below. Major updates wait for review. The `renovate-breaking-change` workflow holds any Renovate PR whose release notes carry a breaking-change heading or `BREAKING CHANGE`. A release that ships a migration without flagging it in its notes still merges.
 
 ## Scope and exceptions
 
@@ -56,6 +56,6 @@ npm install --prefix /tmp/servarr-renovate --ignore-scripts --no-audit --no-fund
 RENOVATE_ROOT=/tmp/servarr-renovate/node_modules/renovate node .github/hooks/test-servarr-renovate.mjs
 ```
 
-The check invokes Renovate's actual Kustomize extractor, versioning APIs, update classifier and ordered package rules. It checks valid digest-bearing dependencies, Sonarr 4 to 5 classification, patch discovery, automerge for every update type, and the development-image exceptions. Registry tag-to-digest checks are separate because tags can legitimately be rebuilt after this change.
+The check invokes Renovate's actual Kustomize extractor, versioning APIs, update classifier and ordered package rules. It checks valid digest-bearing dependencies, Sonarr 4 to 5 classification, patch discovery, automerge for digest, patch and minor updates but not majors, and the development-image exceptions. Registry tag-to-digest checks are separate because tags can legitimately be rebuilt after this change.
 
 The issue's withdrawn `imagePullPolicy` item does not require a manifest change. A changed digest changes the pod template and starts a rollout regardless of pull policy.

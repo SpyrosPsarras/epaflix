@@ -21,6 +21,9 @@ set -euo pipefail
 # a hard stop. Encrypted files are skipped as scan targets: staged ciphertext
 # can contain a value-shaped substring by chance.
 #
+# The age key comes from KEY_FILE when that file exists, else from the
+# SOPS_AGE_KEY environment variable, for machines that keep it in a vault.
+#
 # Test overrides: STORE, KEY_FILE, and GIT_BIN (defaults to git) so the suite
 # can point them at fixtures.
 
@@ -33,8 +36,10 @@ if ! command -v sops >/dev/null 2>&1; then
   echo "SKIP: sops is not on PATH; cannot compare staged files against the store."
   exit 0
 fi
-if [ ! -f "$KEY_FILE" ]; then
-  echo "SKIP: no age key at $KEY_FILE; cannot decrypt the store to compare."
+if [ -f "$KEY_FILE" ]; then
+  export SOPS_AGE_KEY_FILE="$KEY_FILE"
+elif [ -z "${SOPS_AGE_KEY:-}" ]; then
+  echo "SKIP: no age key at $KEY_FILE or in SOPS_AGE_KEY; cannot decrypt the store to compare."
   exit 0
 fi
 if [ ! -f "$STORE" ]; then
@@ -46,7 +51,7 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 umask 077
 
-if ! SOPS_AGE_KEY_FILE="$KEY_FILE" sops -d "$STORE" > "$work/store.yaml" 2>/dev/null; then
+if ! sops -d "$STORE" > "$work/store.yaml" 2>/dev/null; then
   echo "SKIP: the store did not decrypt with the available key; guard cannot run."
   exit 0
 fi

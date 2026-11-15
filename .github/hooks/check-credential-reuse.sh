@@ -46,6 +46,9 @@ set -euo pipefail
 # SSH keys share their BEGIN/END armor lines, and line-by-line hashing would
 # flag them as reused.
 #
+# The age key comes from KEY_FILE when that file exists, else from the
+# SOPS_AGE_KEY environment variable, for machines that keep it in a vault.
+#
 # Test overrides: STORE, KEY_FILE, ACCEPTED_REUSE and REPORT_KEYS.
 # ACCEPTED_REUSE unset selects the recorded default; set but empty disables
 # every acceptance.
@@ -58,8 +61,10 @@ if ! command -v sops >/dev/null 2>&1; then
   echo "SKIP: sops is not on PATH; cannot hash the store for reuse checks."
   exit 0
 fi
-if [ ! -f "$KEY_FILE" ]; then
-  echo "SKIP: no age key at $KEY_FILE; cannot decrypt the store for reuse checks."
+if [ -f "$KEY_FILE" ]; then
+  export SOPS_AGE_KEY_FILE="$KEY_FILE"
+elif [ -z "${SOPS_AGE_KEY:-}" ]; then
+  echo "SKIP: no age key at $KEY_FILE or in SOPS_AGE_KEY; cannot decrypt the store for reuse checks."
   exit 0
 fi
 if [ ! -f "$STORE" ]; then
@@ -71,7 +76,7 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 umask 077
 
-if ! SOPS_AGE_KEY_FILE="$KEY_FILE" sops -d "$STORE" > "$work/store.yaml" 2>/dev/null; then
+if ! sops -d "$STORE" > "$work/store.yaml" 2>/dev/null; then
   echo "SKIP: the store did not decrypt with the available key; reuse check cannot run."
   exit 0
 fi

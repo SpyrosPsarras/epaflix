@@ -17,7 +17,14 @@
   "commitMessagePrefix": "[renovate]",
   "automerge": true,
   "platformAutomerge": false,
+  "minimumReleaseAge": "3 days",
+  "minimumReleaseAgeBehaviour": "timestamp-optional",
   "packageRules": [
+    {
+      "description": "Majors wait for review. First in the list, so the rules below still override it.",
+      "matchUpdateTypes": ["major"],
+      "automerge": false
+    },
     {
       "description": "Windmill script requirement headers (2-k3s/34.windmill/workspace/f/**): a bump changes the script, so Windmill re-resolves its lock and the committed run_screen.script.lock/.script.yaml/wmill-lock.yaml go stale, which makes windmill-deploy push a new script version every 10 minutes. Merge by hand, then refresh those files with wmill sync pull (2-k3s/34.windmill/README.md, Deploy).",
       "matchFileNames": ["2-k3s/34.windmill/workspace/**"],
@@ -199,11 +206,12 @@
       "allowedVersions": "<6"
     },
     {
-      "description": "t3 follows the npm nightly dist-tag. The desktop app on the laptop runs nightly and shows every server on an older version as behind. Its updates join the group below.",
+      "description": "t3 follows the npm nightly dist-tag. The desktop app on the laptop runs nightly and shows every server on an older version as behind. Its updates join the group below. A nightly is never 3 days old, so it skips the release age wait.",
       "matchManagers": ["npm"],
       "matchFileNames": ["2-k3s/13.t3code/env/tools/package.json"],
       "matchPackageNames": ["t3"],
-      "followTag": "nightly"
+      "followTag": "nightly",
+      "minimumReleaseAge": null
     },
     {
       "description": "Group non-major runtime input updates so the npm CLI and Pi extension pins, versions.env and Node base-image changes rewrite one inputs-<hash> image tag together. Helm and Kustomize remain separate to match the CI renderer; majors require review under the next rule. Runs at any time; the pod switches after 30 idle minutes.",
