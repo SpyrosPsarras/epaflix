@@ -1,0 +1,84 @@
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: paperless-backup
+  namespace: paperless
+  labels:
+    app: paperless-backup
+spec:
+  schedule: "30 3 * * *"
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 3600
+      template:
+        metadata:
+          labels:
+            app: paperless-backup
+        spec:
+          restartPolicy: Never
+          enableServiceLinks: false
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            seccompProfile: {type: RuntimeDefault}
+          containers:
+            - name: backup
+              image: restic/restic:0.18.1
+              command:
+                - sh
+                - -ec
+                - |
+                  restic cat config >/dev/null 2>&1 || restic init
+                  # The search index is rebuilt with document_index reindex and the logs are in Loki.
+                  restic backup /srv/paperless --exclude /srv/paperless/data/index --exclude /srv/paperless/data/log \
+                    --host paperless --tag files --quiet
+                  restic snapshots --host paperless --tag files --latest 1 --compact
+                  if [ "$(date -u +%u)" = 7 ]; then
+                    restic check --read-data
+                    restic forget --host paperless --tag files --group-by host,paths,tags \
+                      --keep-daily 14 --keep-weekly 8 --keep-monthly 12 --prune --quiet
+                  fi
+              env:
+                - {name: RESTIC_REPOSITORY, value: "s3:https://minio.epaflix.com/paperless-backups"}
+                - {name: RESTIC_CACHE_DIR, value: /work/cache}
+                - {name: TMPDIR, value: /work}
+                - name: RESTIC_PASSWORD
+                  valueFrom:
+                    secretKeyRef: {name: paperless-backup, key: password}
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef: {name: paperless-backup, key: access-key}
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef: {name: paperless-backup, key: secret-key}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  memory: 1Gi
+              volumeMounts:
+                - {name: data, mountPath: /srv/paperless, readOnly: true}
+                - {name: work, mountPath: /work}
+          volumes:
+            - name: data
+              persistentVolumeClaim:
+                claimName: paperless-data
+                readOnly: true
+            - name: work
+              emptyDir:
+                sizeLimit: 2Gi

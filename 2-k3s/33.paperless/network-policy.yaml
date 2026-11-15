@@ -58,3 +58,38 @@ spec:
           protocol: TCP
         - port: 3000
           protocol: TCP
+---
+# minio.epaflix.com is Traefik's internal listener. Node NAT turns 192.168.10.102:443 into Traefik TCP 8443 before policy filtering.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: paperless-backup
+  namespace: paperless
+spec:
+  podSelector:
+    matchLabels:
+      app: paperless-backup
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress: []
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - {protocol: TCP, port: 8443}

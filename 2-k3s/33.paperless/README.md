@@ -194,7 +194,78 @@ kubectl -n paperless create job --from=cronjob/paperless-share-lists share-lists
 
 PV `paperless-data-shypowder` mounts NFS `192.168.10.13:/hdd/paperless`, the ZFS dataset `hdd/paperless` on shypowder described in `1-proxmox/shypowder/README.md`. The export squashes every client to 1000:1000, which matches `USERMAP_UID`/`USERMAP_GID`. `PAPERLESS_DATA_DIR` is `data/`, `PAPERLESS_MEDIA_ROOT` is `media/` and paperless-gpt uses `gpt/` on that volume. The consume folder is `emptyDir`, because uploads through the API and web UI skip it.
 
-Only sanoid snapshots on shypowder, one disk, back up the files. The database uses the CNPG backups to MinIO.
+Sanoid snapshots on shypowder protect the files against deletion, but they sit on the same single disk. CronJob `paperless-backup` copies the files to MinIO, as described in Backup. The database uses the CNPG backups to MinIO.
+
+## Backup
+
+CronJob `paperless-backup` runs daily at 03:30 UTC. It mounts the volume read-only and uploads it with restic to `s3:https://minio.epaflix.com/paperless-backups`, host `paperless`, tag `files`. It skips `data/index`, which `manage.py document_index reindex` rebuilds, and `data/log`, which Loki already holds. The first run creates the repository. Sunday runs read back all repository data with `restic check --read-data`, then keep 14 daily, 8 weekly and 12 monthly snapshots. A failed upload or check skips retention.
+
+Paperless keeps running during the backup, so a snapshot can hold a document that the database backup of the same night does not, or the reverse. `gpt/db` is copied while paperless-gpt may write to it.
+
+NetworkPolicy `paperless-backup` lets the pod reach DNS and Traefik's internal listener on TCP 8443, which serves `minio.epaflix.com`. A NetworkPolicy cannot filter by hostname, so the pod can also reach the other apps on that listener.
+
+MinIO shares the TrueNAS host. This backup survives the loss of the shypowder disk, not the loss of TrueNAS.
+
+### Recreate the bucket and keys
+
+Bucket `paperless-backups`, user `paperless-backup` and policy `paperless-backups-rw` exist on the S3 store, and Secret `paperless-backup` holds the keys. After a loss of the S3 store, recreate them on a LAN machine with `mc`, `sops`, `openssl` and the cluster age key, from the repository root:
+
+```sh
+mc alias set homelab https://minio.epaflix.com
+```
+
+It asks for the MinIO admin keys. Run it alone, then the rest:
+
+```sh
+mc mb --ignore-existing homelab/paperless-backups
+mc anonymous set none homelab/paperless-backups
+mc admin policy create homelab paperless-backups-rw /dev/stdin <<'JSON'
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+      "Resource": ["arn:aws:s3:::paperless-backups/*"]
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["s3:ListBucket", "s3:GetBucketLocation"],
+      "Resource": ["arn:aws:s3:::paperless-backups"]
+    }
+  ]
+}
+JSON
+S3_SECRET=$(openssl rand -hex 32)
+printf '%s\n%s\n' paperless-backup "$S3_SECRET" | mc admin user add homelab
+mc admin policy attach homelab paperless-backups-rw --user paperless-backup
+f=2-k3s/33.paperless/paperless-backup.enc.yaml
+printf '"%s"' paperless-backup | sops set --value-stdin "$f" '["stringData"]["access-key"]'
+printf '"%s"' "$S3_SECRET" | sops set --value-stdin "$f" '["stringData"]["secret-key"]'
+unset S3_SECRET
+```
+
+The S3 secret key stays in a shell variable and reaches `mc` and `sops` on stdin. Merge the changed file. After the sync, start a run and read its log:
+
+```sh
+kubectl -n paperless create job --from=cronjob/paperless-backup paperless-backup-manual
+kubectl -n paperless logs -f job/paperless-backup-manual
+```
+
+Do not start a manual Job while another backup runs. A Sunday run also checks and prunes the repository, so it takes longer.
+
+### Restore
+
+No restore script exists. Restore a chosen snapshot into an empty directory, never onto the live volume, from a pod with the same image, environment and Secret as the CronJob and a writable target:
+
+```sh
+restic snapshots --host paperless --tag files
+restic restore <snapshot-id> --target /restore --verify
+```
+
+The files land under `/restore/srv/paperless`. Restore the database to the same point in time with CNPG, copy `media` and `gpt` back with Paperless and paperless-gpt at zero replicas, then run `manage.py document_index reindex` and `manage.py document_sanity_checker`, which lists files and database rows that do not match.
+
+A killed Job can leave a repository lock that fails the next Sunday run. Check that no backup Job is running, then run `restic unlock` from such a pod.
 
 ### Move to TrueNAS
 
@@ -216,6 +287,8 @@ The values were generated at random when the files were encrypted and exist only
 
 `paperless-gpt-secrets.enc.yaml` holds Secret `paperless-gpt-secrets` with `PAPERLESS_API_TOKEN`, the DRF token of user `paperless-gpt`. `manage.py drf_create_token paperless-gpt` ran inside the `vault run` command that encrypted the file, so the token was never printed. To rotate it, run the same command with `-r` the same way, then restart `paperless-gpt`.
 
+`paperless-backup.enc.yaml` holds Secret `paperless-backup` with the restic repository `password`, generated at random inside the command that encrypted the file. It exists only in that SOPS file, and without it the repository cannot be read. `access-key` and `secret-key` are the S3 keys of user `paperless-backup`.
+
 ## DNS
 
 Public DNS resolves through the Cloudflare wildcard and tunnel. The LAN needs `paperless.epaflix.com` in `1-proxmox/pihole/dnsmasq.d/10-epaflix.conf` as A `192.168.10.101` and in `1-proxmox/pihole/unbound-no-aaaa-leak.conf`. Apply them on the Pi-hole the way `2-k3s/08.servarr/navidrome/README.md` records.
@@ -225,5 +298,7 @@ Public DNS resolves through the Cloudflare wildcard and tunnel. The LAN needs `p
 - `PaperlessDown` fires when the Deployment has no available replica for 15 minutes or is absent.
 - `PaperlessGptDown` does the same for Deployment `paperless-gpt`. It reads kube-state-metrics, so Prometheus needs no access to the pod.
 - `PaperlessShareListsFailed` fires 5 minutes after the newest `paperless-share-lists` Job fails and clears when the next run succeeds.
+- `PaperlessBackupOverdue` fires when `paperless-backup` has had no successful run for 30 hours or has never succeeded, which includes a suspended CronJob.
+- `PaperlessBackupFailed` fires 5 minutes after the newest `paperless-backup` Job fails. `KubeJobFailedLastRun` skips this CronJob.
 - Blackbox target `paperless` probes `https://192.168.10.101` with host `paperless.epaflix.com`.
 - Logs reach Loki through Alloy.
