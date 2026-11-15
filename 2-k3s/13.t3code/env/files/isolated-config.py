@@ -76,6 +76,9 @@ def validate(inputs, home, environment):
     project = url(config['projectUrl'])
     if not project.startswith('https://github.com/') or not project.endswith('.git'):
         raise InputError('Project must be an explicitly approved GitHub HTTPS repository')
+    skills = config.get('skillsUrl')
+    if skills and (not url(skills).startswith('https://github.com/') or not skills.endswith('.git')):
+        raise InputError('Skills must come from an explicitly approved GitHub HTTPS repository')
     if config['gitAuth'] not in {'public', 'github-token'} or set(config['approvals']) != approvals or any(
             not isinstance(reference, str) or not reference.strip() for reference in config['approvals'].values()):
         raise InputError('Explicit grant and policy reviews are required')

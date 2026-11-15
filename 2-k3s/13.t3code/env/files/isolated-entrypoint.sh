@@ -29,13 +29,18 @@ mkdir -p "$HOME/projects"
 if [[ ! -d $project/.git ]]; then git clone -q "$repo" "$project"; fi
 [[ $(git -C "$project" remote get-url origin) == "$repo" ]]
 ai_skills=$HOME/work/ai-skills
-# pi-setup.py loads the work skills from this clone; a failed clone or pull must not block startup.
-if [[ $MCP_HUB_INSTANCE == work && -d $ai_skills/.git ]]; then
-  timeout 120 git -C "$ai_skills" pull -q --ff-only ||
-    echo 'work skills: ai-skills update failed; keeping the current clone' >&2
-elif [[ $MCP_HUB_INSTANCE == work ]]; then
-  timeout 120 git clone -q https://github.com/IndicoSystems/ai-skills.git "$ai_skills" ||
-    echo 'work skills: ai-skills clone failed; skills unavailable' >&2
+# pi-setup.py loads the work skills from this clone; a missing URL or a failed clone or pull must not block startup.
+if [[ $MCP_HUB_INSTANCE == work ]]; then
+  skills_repo=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("skillsUrl") or "")' "$inputs/runtime.json")
+  if [[ -z $skills_repo ]]; then
+    echo 'work skills: runtime.json has no skillsUrl; ai-skills clone and update skipped' >&2
+  elif [[ -d $ai_skills/.git ]]; then
+    timeout 120 git -C "$ai_skills" pull -q --ff-only ||
+      echo 'work skills: ai-skills update failed; keeping the current clone' >&2
+  else
+    timeout 120 git clone -q "$skills_repo" "$ai_skills" ||
+      echo 'work skills: ai-skills clone failed; skills unavailable' >&2
+  fi
 fi
 SAFETY_ENTRY=$(/usr/bin/env -i HOME="$HOME" PATH=/usr/local/bin:/usr/bin:/bin \
   /usr/bin/python3 -I -S /scripts/cc-safety-net-install.py | tail -n 1)

@@ -41,6 +41,7 @@ def fixture(directory):
             obj['hubUrl'] = 'http://mcp-hub.mcp-hub-work.svc.cluster.local:8000'
             obj['projectUrl'] = 'https://github.com/work/fixture.git'
             del obj['approvals']['kubeconfig']
+            obj['skillsUrl'] = 'https://github.com/work/skills-fixture.git'
             obj['grantSha256']['hub-token'] = hashlib.sha256(('work.' + 'h' * 43).encode()).hexdigest()
             obj['grantSha256']['model-token'] = hashlib.sha256(b'tok-fixture-model').hexdigest()
         path.write_text(json.dumps(obj))
@@ -109,6 +110,36 @@ class WorkRuntimeTests(unittest.TestCase):
                            env={**os.environ, 'HOME': str(self.home), 'ssh_instructions': str(ssh)})
             self.assertIn(ssh.read_text(), (self.home / '.codex/AGENTS.override.md').read_text())
             self.assertEqual((self.inputs / 'bundle.json').read_bytes(), payload)
+
+    def test_skills_clone_uses_the_private_url_and_is_skipped_without_one(self):
+        lines = (ROOT / 'env/files/isolated-entrypoint.sh').read_text().splitlines()
+        start = next(i for i, line in enumerate(lines) if line.startswith('ai_skills='))
+        block = '\n'.join(lines[start:lines.index('fi', start) + 1])
+        fake = self.root / 'bin'
+        fake.mkdir()
+        (fake / 'git').write_text('#!/bin/sh\necho "$@" >>"$GIT_LOG"\n')
+        (fake / 'git').chmod(0o755)
+        log = self.root / 'git.log'
+
+        def run():
+            log.write_text('')
+            result = subprocess.run(['bash', '-eu', '-c', block], capture_output=True, text=True, env={
+                'PATH': f'{fake}:{os.environ["PATH"]}', 'HOME': str(self.home), 'GIT_LOG': str(log),
+                'MCP_HUB_INSTANCE': 'work', 'inputs': str(self.inputs)})
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return result.stderr, log.read_text()
+
+        self.validate()
+        clone = self.home / 'work/ai-skills'
+        self.assertEqual(run(), ('', f'clone -q https://github.com/work/skills-fixture.git {clone}\n'))
+        (clone / '.git').mkdir(parents=True)
+        self.assertEqual(run(), ('', f'-C {clone} pull -q --ff-only\n'))
+        skipped = 'work skills: runtime.json has no skillsUrl; ai-skills clone and update skipped\n'
+        for transform in (lambda obj: obj.pop('skillsUrl'), lambda obj: obj.update(skillsUrl='')):
+            fixture(self.inputs)
+            self.change('runtime.json', transform)
+            self.validate()
+            self.assertEqual(run(), (skipped, ''))
 
     def test_home_kubeconfig_persists_and_no_kubeconfig_input_is_accepted(self):
         self.prepare()
@@ -331,6 +362,7 @@ class WorkRuntimeTests(unittest.TestCase):
     def test_inventory_grants_and_reviews_fail_closed(self):
         for name, transform in [('runtime.json', lambda obj: obj['approvals'].update(kubeconfig='stale-review')),
             ('runtime.json', lambda obj: obj['approvals'].pop('hub')),
+            ('runtime.json', lambda obj: obj.update(skillsUrl='https://example.test/skills.git')),
             ('services.json', lambda obj: obj.update(environment='homelab')),
             ('services.json', lambda obj: obj.update(services=['vaultwarden'])),
             ('runtime.json', lambda obj: obj.update(hubUrl='http://mcp-hub.mcp-hub-homelab.svc.cluster.local:8000'))]:
