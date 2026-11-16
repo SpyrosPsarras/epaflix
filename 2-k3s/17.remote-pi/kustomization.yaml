@@ -4,6 +4,7 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - cliproxy/database.yaml
+  - cliproxy/storage.yaml
   - cliproxy/deployment.yaml
   - cliproxy/service.yaml
   - cliproxy/ingress.yaml

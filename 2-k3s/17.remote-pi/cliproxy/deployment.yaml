@@ -241,6 +241,8 @@ spec:
               mountPath: /tmp
             - name: plugins
               mountPath: /CLIProxyAPI/plugins
+            - name: plugin-state
+              mountPath: /var/lib/cliproxy-plugins
           readinessProbe:
             tcpSocket:
               port: 8317
@@ -273,6 +275,9 @@ spec:
         - name: plugins
           emptyDir:
             sizeLimit: 256Mi
+        - name: plugin-state
+          persistentVolumeClaim:
+            claimName: cliproxy-plugin-state-iscsi
         - name: scripts
           configMap:
             name: cliproxy-scripts
