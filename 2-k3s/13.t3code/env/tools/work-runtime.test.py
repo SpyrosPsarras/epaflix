@@ -121,7 +121,7 @@ class WorkRuntimeTests(unittest.TestCase):
         path = self.home / '.pi/agent/pi-cliproxyapi-provider/config.json'
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({'providerName': 'cliproxy', 'baseUrl': 'http://127.0.0.1:18317/v1',
-                                    'modelAliases': {'claude/fixture': 'anthropic/fixture'}}))
+                                    'modelAliases': {'claude-fixture': 'anthropic/claude-fixture'}}))
 
     def change(self, name, transform):
         path = self.inputs / name
@@ -140,7 +140,7 @@ class WorkRuntimeTests(unittest.TestCase):
         for _ in range(2):
             self.prepare()
             with patch.dict(os.environ, {'ANTHROPIC_BASE_URL': 'http://127.0.0.1:18317'}), \
-                    patch.object(setup, 'fetch_models', return_value=[{'id': 'codex/fixture'}]):
+                    patch.object(setup, 'fetch_models', return_value=[{'id': 'gpt-fixture'}]):
                 setup.write(self.home, '/fixture/safety', ssh)
             for name in ('.claude/AGENTS.md', '.codex/AGENTS.md'):
                 self.assertEqual((self.home / name).read_text(), expected)
@@ -304,13 +304,14 @@ class WorkRuntimeTests(unittest.TestCase):
         self.prepare()
         path = self.home / '.t3/userdata/settings.json'
         path.parent.mkdir(parents=True)
-        canonical = {'instanceId': 'pi', 'model': 'cliproxy-textgen/claude/claude-haiku-5-5'}
+        canonical = {'instanceId': 'pi', 'model': 'cliproxy-textgen/claude-haiku-5-5'}
         options = [{'id': 'thinking', 'value': 'high'}]
         cases = [
             ({'instanceId': 'pi', 'model': 'cliproxy/claude/fixture', 'options': options},
              {**canonical, 'options': options}),
             ({'instanceId': 'pi', 'model': 'cliproxy-textgen/'}, canonical),
-            ({'instanceId': 'pi', 'model': 'cliproxy-textgen/claude/fixture', 'options': options}, None),
+            ({'instanceId': 'pi', 'model': 'cliproxy-textgen/claude/fixture', 'options': options},
+             {'instanceId': 'pi', 'model': 'cliproxy-textgen/fixture', 'options': options}),
             ({'instanceId': 'codex', 'model': 'codex/fixture', 'options': options}, canonical)]
         default = {'instanceId': 'codex', 'model': 'codex/fixture', 'options': options}
         for selection, expected in cases:
@@ -324,7 +325,7 @@ class WorkRuntimeTests(unittest.TestCase):
                         self.assertEqual(settings['textGenerationModelSelection'],
                                          selection if expected is None else expected)
                         self.assertEqual(settings['defaultModelSelection'],
-                                         {'instanceId': 'pi', 'model': 'cliproxy/claude/claude-opus-5-5'})
+                                         {'instanceId': 'pi', 'model': 'cliproxy/claude-opus-5-5'})
                         if restart == 0:
                             first = path.read_bytes()
                         else:

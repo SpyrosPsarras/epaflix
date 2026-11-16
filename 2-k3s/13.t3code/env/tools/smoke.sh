@@ -55,7 +55,7 @@ python3 /src/one/tools/test-cc-safety-net-install.py || fail 'Safety Net install
 python3 /src/env/tools/private-config.test.py fixture /private-agent-config/bundle.json
 bash /src/env/tools/inventory.sh || fail 'runtime inventory'
 node -e 'require("node:http").createServer((q,s)=>{s.writeHead(200,{"content-type":"application/json"});
-s.end(JSON.stringify({data:["codex/gpt-6-sol","claude/claude-opus-5-5"].map(id=>({id,context_window:200000}))}));}).listen(18317,"127.0.0.1")' &
+s.end(JSON.stringify({data:["gpt-6-sol","claude-opus-5-5"].map(id=>({id,context_window:200000}))}));}).listen(18317,"127.0.0.1")' &
 pids+=("$!")
 git init -q --bare --initial-branch=main /tmp/remote.git
 git init -q --initial-branch=main /tmp/seed
@@ -108,7 +108,7 @@ node -e '
 const d=require(process.argv[1]);
 if(Object.keys(d.providerInstances).sort().join(",")!=="claudeAgent,codex,pi")throw Error("provider instances");
 if(d.providerInstances.pi.driver!=="pi" || d.providerInstances.pi.config?.binaryPath!=="/scripts/pi.sh")throw Error("Pi launcher");
-for(const [key,model,level] of [["defaultModelSelection","cliproxy/claude/claude-opus-5-5","high"],["textGenerationModelSelection","cliproxy-textgen/claude/claude-haiku-5-5","low"]]) {
+for(const [key,model,level] of [["defaultModelSelection","cliproxy/claude-opus-5-5","high"],["textGenerationModelSelection","cliproxy-textgen/claude-haiku-5-5","low"]]) {
 const selection=d[key];
 if(selection.instanceId!=="pi" || selection.model!==model || JSON.stringify(selection.options)!==JSON.stringify([{id:"thinking",value:level}]))throw Error("migration selection");
 }

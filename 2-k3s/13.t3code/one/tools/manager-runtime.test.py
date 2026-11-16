@@ -258,7 +258,7 @@ path.write_text(text)
             self.bundle.write_text(json.dumps(payload))
             private.install(self.bundle.read_bytes(), self.home)
             self.configure()
-            with patch.object(setup, 'fetch_models', return_value=[{'id': 'codex/fixture'}]):
+            with patch.object(setup, 'fetch_models', return_value=[{'id': 'gpt-fixture'}]):
                 setup.write(self.home, '/fixture/safety', Path('/dev/null'))
             self.assertFalse(retired.is_symlink())
             for name in ('.claude/AGENTS.md', '.codex/AGENTS.md', '.codex/AGENTS.override.md', '.pi/agent/AGENTS.md'):

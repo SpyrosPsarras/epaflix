@@ -105,7 +105,7 @@ class RuntimeTests(unittest.TestCase):
         path = self.home / '.pi/agent/pi-cliproxyapi-provider/config.json'
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({'providerName': 'cliproxy', 'baseUrl': 'http://127.0.0.1:18317/v1',
-                                    'modelAliases': {'claude/fixture': 'anthropic/fixture'}}))
+                                    'modelAliases': {'claude-fixture': 'anthropic/claude-fixture'}}))
 
     def change(self, name, transform):
         path = self.inputs / name
@@ -124,7 +124,7 @@ class RuntimeTests(unittest.TestCase):
         for _ in range(2):
             self.prepare()
             with patch.dict(os.environ, {'ANTHROPIC_BASE_URL': 'http://127.0.0.1:18317'}), \
-                    patch.object(setup, 'fetch_models', return_value=[{'id': 'codex/fixture'}]):
+                    patch.object(setup, 'fetch_models', return_value=[{'id': 'gpt-fixture'}]):
                 setup.write(self.home, '/fixture/safety', ssh)
             for name in ('.claude/AGENTS.md', '.codex/AGENTS.md'):
                 self.assertEqual((self.home / name).read_text(), expected)
@@ -407,7 +407,7 @@ nested = {"🏠" = ["fixture", {enabled = false}]}
         self.prepare()
         path = self.home / '.t3/userdata/settings.json'
         path.parent.mkdir(parents=True)
-        canonical = {'instanceId': 'pi', 'model': 'cliproxy-textgen/claude/claude-haiku-5-5'}
+        canonical = {'instanceId': 'pi', 'model': 'cliproxy-textgen/claude-haiku-5-5'}
         options = [{'id': 'thinking', 'value': 'high'}]
         cases = [
             ({'instanceId': 'pi', 'model': 'cliproxy/claude/fixture', 'options': options},
@@ -417,9 +417,10 @@ nested = {"🏠" = ["fixture", {enabled = false}]}
             ({'instanceId': 'pi', 'model': 'cliproxy-textgen/'}, canonical),
             ({'instanceId': 'pi', 'model': 'other/fixture', 'options': 'invalid'}, canonical),
             ({'instanceId': 'pi'}, canonical),
-            ({'instanceId': 'pi', 'model': 'cliproxy-textgen/claude/fixture', 'options': options}, None),
+            ({'instanceId': 'pi', 'model': 'cliproxy-textgen/claude/fixture', 'options': options},
+             {'instanceId': 'pi', 'model': 'cliproxy-textgen/fixture', 'options': options}),
             ({'instanceId': 'codex', 'model': 'codex/fixture', 'options': options}, canonical)]
-        default = {'instanceId': 'pi', 'model': 'cliproxy/claude/fixture', 'options': options}
+        default = {'instanceId': 'pi', 'model': 'cliproxy/fixture', 'options': options}
         for selection, expected in cases:
             with self.subTest(selection=selection):
                 path.write_text(json.dumps({'defaultModelSelection': default,
@@ -462,7 +463,8 @@ nested = {"🏠" = ["fixture", {enabled = false}]}
         settings = {'providerInstances': {
             'pi': {'driver': 'pi', 'displayName': 'Homelab Pi', 'enabled': False,
                    'config': {'binaryPath': '/unapproved/pi', 'launchArgs': '--unapproved',
-                              'customModels': ['cliproxy/claude/fixture', 'work/fixture']}},
+                              'customModels': ['cliproxy/claude/fixture', 'work/fixture', 'cliproxy/fixture',
+                                               'cliproxy/z-ai/fixture']}},
             'codex': {'driver': 'codex', 'displayName': 'Homelab Codex', 'enabled': True,
                       'config': {'launchArgs': '-c model_provider="work"',
                                  'customModels': ['codex/fixture', 'work/fixture']}},
@@ -500,12 +502,12 @@ nested = {"🏠" = ["fixture", {enabled = false}]}
                 self.assertEqual(instances['pi']['config'], {'binaryPath': '/scripts/pi.sh',
                     'launchArgs': '--tools=+mcp__t3-code__orchestrator_capabilities,'
                                   '+mcp__t3-code__delegate_task,+mcp__t3-code__task_status',
-                    'customModels': ['cliproxy/claude/fixture']})
-                self.assertEqual(instances['codex']['config']['customModels'], ['codex/fixture'])
+                    'customModels': ['cliproxy/fixture', 'cliproxy/z-ai/fixture']})
+                self.assertEqual(instances['codex']['config']['customModels'], ['fixture'])
                 self.assertIn('http://127.0.0.1:18317/v1', instances['codex']['config']['launchArgs'])
                 self.assertNotIn('work', instances['codex']['config']['launchArgs'])
                 self.assertEqual(retained['defaultModelSelection'],
-                                 {'instanceId': 'pi', 'model': 'cliproxy/claude/claude-opus-5-5'})
+                                 {'instanceId': 'pi', 'model': 'cliproxy/claude-opus-5-5'})
                 self.assertEqual(retained['textGenerationModelSelection']['instanceId'], 'pi')
                 self.assertNotIn('providers', retained)
                 self.assertEqual(retained['theme'], 'fixture')

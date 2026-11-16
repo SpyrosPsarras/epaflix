@@ -404,25 +404,24 @@ must work even when homelab is unavailable.
 ## Provider preferences and Codex requirements
 
 Startup retains Pi and Codex display names and Pi's enabled preference.
-Custom model IDs use `cliproxy/` for Pi or `codex/` for Codex. Only Pi selections
+Custom model IDs use `cliproxy/` for Pi and bare IDs for Codex. Only Pi selections
 are retained; title-generation selections use `cliproxy-textgen/`. Startup resets
 driver identities, executable paths and launch arguments. Extra provider
 instances, legacy provider maps and unsupported selections are removed.
 Endpoint and credential configuration comes from private inputs, not application
 preferences.
 
-Pi caps `cliproxy/claude/claude-haiku-5-5` at 100K tokens to avoid the
+Pi caps `cliproxy/claude-haiku-5-5` at 100K tokens to avoid the
 [price step above 100,000 prompt tokens](https://platform.claude.com/docs/en/about-claude/pricing#long-context-pricing).
 With the default 16,384-token reserve, Pi auto-compacts near 84K tokens.
 
 The Codex and Claude direct instances stay disabled in isolated runtimes.
-The work pod's Codex model API and T3 catalog expose bare IDs. Minimal
-non-streaming requests to its configured Responses endpoint returned HTTP 400
-for `gpt-6.1-sol` and HTTP 200 for `codex/gpt-6.1-sol`. Adding custom model IDs
-does not replace discovered bare IDs, and T3's Codex settings have no route-prefix
-mapping. Startup therefore disables that instance and resets its selections to
-Pi. Use T3 `delegate_task` with instance `pi` and `cliproxy/<route>/<model>`.
-Mixed-runtime provider settings are unchanged.
+Startup disables the Codex instance and resets its selections to Pi. Use T3
+`delegate_task` with instance `pi` and `cliproxy/<model>`. Startup rewrites
+stored route-prefixed IDs such as `cliproxy/claude/<model>` and
+`codex/<model>` to bare IDs, the names CLIProxy serves.
+Mixed-runtime startup rewrites the same stored IDs and otherwise keeps its
+provider settings.
 
 Codex retains unmanaged TOML values and trust entries confined to this
 environment's project and subdirectories. Startup replaces its provider and

@@ -12,13 +12,13 @@
         "baseUrl": "http://cliproxy.remote-pi.svc.cluster.local:8317",
         "api": "anthropic-messages",
         "apiKey": "${CLIPROXY_API_KEY}",
-        "models": [{ "id": "claude/claude-haiku-5-5", "name": "Claude Haiku 5.5", "input": ["text"] }]
+        "models": [{ "id": "claude-haiku-5-5", "name": "Claude Haiku 5.5", "input": ["text"] }]
       }
     }
   },
   "agents": {
     "defaults": {
-      "model": { "primary": "cliproxy/claude/claude-haiku-5-5" },
+      "model": { "primary": "cliproxy/claude-haiku-5-5" },
       "sandbox": { "mode": "off" },
       "skipBootstrap": true
     }
