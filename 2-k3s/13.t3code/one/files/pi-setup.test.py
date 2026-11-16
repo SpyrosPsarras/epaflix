@@ -2,17 +2,13 @@
 import base64
 import contextlib
 import copy
-from http.client import HTTPException
 import io
 import importlib.util
-from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import os
 from pathlib import Path
 import subprocess
-import sys
 import tempfile
-import threading
 import unittest
 from unittest.mock import patch
 
@@ -50,10 +46,15 @@ class SetupTests(unittest.TestCase):
     def write(self, base_url='http://proxy.test', instance='homelab'):
         with patch.dict(os.environ, {'ANTHROPIC_BASE_URL': base_url, 'MCP_HUB_INSTANCE': instance,
                                      'ANTHROPIC_AUTH_TOKEN': 'synthetic'}, clear=False):
-            with patch.object(self.setup, 'fetch_models', return_value=[
-                    {'id': 'claude-opus-5-5'}, {'id': 'gpt-6.1-sol'}, {'id': 'codex-auto-review'},
-                    {'id': 'unrelated/model'}]):
-                self.setup.write(self.home, self.safety, self.ssh)
+            self.setup.write(self.home, self.safety, self.ssh)
+
+    def test_provider_config_names_proxy_and_openrouter_aliases(self):
+        self.write('http://proxy.test///')
+        self.assertEqual(json.loads((self.agent / 'pi-cliproxyapi-provider/config.json').read_text()), {
+            'providerName': 'cliproxy', 'baseUrl': 'http://proxy.test/v1', 'modelAliases': {
+                'or-glm-5.3-flash': 'openrouter/z-ai/glm-5.3-flash',
+                'or-deepseek-v4-flash': 'openrouter/deepseek/deepseek-v4-flash',
+                'or-minimax-m3:free': 'openrouter/minimax/minimax-m3'}})
 
     def test_work_settings_load_davidhorn_skills_from_clone(self):
         self.write(instance='work')
@@ -143,21 +144,27 @@ class SetupTests(unittest.TestCase):
 
     def test_empty_or_unset_base_url_warns_and_does_not_touch_models(self):
         path = self.agent / 'models.json'
+        provider = self.agent / 'pi-cliproxyapi-provider/config.json'
         for base_url in ['', None]:
             for existing in [False, True]:
                 with self.subTest(base_url=base_url, existing=existing):
                     path.unlink(missing_ok=True)
+                    provider.unlink(missing_ok=True)
                     if existing:
                         path.write_text('{"userKey": "keep"}\n')
                         before = path.stat()
+                        provider.parent.mkdir(parents=True, exist_ok=True)
+                        provider.write_text('{"previous": true}\n')
                     environment = {} if base_url is None else {'ANTHROPIC_BASE_URL': base_url}
                     with patch.dict(os.environ, environment, clear=True):
-                        with patch.object(self.setup, 'fetch_models', side_effect=OSError('synthetic outage')):
-                            with contextlib.redirect_stderr(io.StringIO()) as errors:
-                                self.setup.write(self.home, self.safety, self.ssh)
+                        with contextlib.redirect_stderr(io.StringIO()) as errors:
+                            self.setup.write(self.home, self.safety, self.ssh)
                     self.assertIn('pi-setup: ANTHROPIC_BASE_URL is empty; previous models.json kept', errors.getvalue())
+                    self.assertIn('pi-setup: ANTHROPIC_BASE_URL is empty; previous provider config kept', errors.getvalue())
                     self.assertEqual(path.exists(), existing)
+                    self.assertEqual(provider.exists(), existing)
                     if existing:
+                        self.assertEqual(provider.read_text(), '{"previous": true}\n')
                         self.assertEqual(path.read_text(), '{"userKey": "keep"}\n')
                         after = path.stat()
                         self.assertEqual((after.st_ino, after.st_mtime_ns), (before.st_ino, before.st_mtime_ns))
@@ -184,43 +191,6 @@ class SetupTests(unittest.TestCase):
             for path in paths:
                 self.assertEqual(path.read_text(), '{"permission": "ask"}')
 
-    def test_aliases_and_fetch_failure_preserve_previous_file(self):
-        self.write()
-        path = self.agent / 'pi-cliproxyapi-provider/config.json'
-        config = json.loads(path.read_text())
-        self.assertEqual(config['baseUrl'], 'http://proxy.test/v1')
-        self.assertEqual(config['providerName'], 'cliproxy')
-        self.assertEqual(config['modelAliases'], {
-            'claude-opus-5-5': 'anthropic/claude-opus-5-5',
-            'codex-auto-review': 'openai/codex-auto-review',
-            'gpt-6.1-sol': 'openai/gpt-6.1-sol',
-            'or-glm-5.3-flash': 'openrouter/z-ai/glm-5.3-flash',
-            'or-deepseek-v4-flash': 'openrouter/deepseek/deepseek-v4-flash',
-            'or-minimax-m3:free': 'openrouter/minimax/minimax-m3'})
-        before = path.read_bytes()
-        with patch.object(self.setup, 'fetch_models', side_effect=OSError('synthetic outage')):
-            with contextlib.redirect_stderr(io.StringIO()) as errors:
-                self.setup.write(self.home, self.safety, self.ssh)
-        self.assertIn('previous provider config kept', errors.getvalue())
-        self.assertEqual(path.read_bytes(), before)
-
-    def test_aliases_action_refreshes_only_provider_config(self):
-        self.write()
-        before = {p.relative_to(self.agent): p.read_bytes() for p in self.agent.rglob('*') if p.is_file()}
-        provider = Path('pi-cliproxyapi-provider/config.json')
-        with patch.dict(os.environ, {'ANTHROPIC_BASE_URL': 'http://proxy.test',
-                                     'ANTHROPIC_AUTH_TOKEN': 'dummy'}):
-            with patch.object(self.setup, 'fetch_models', return_value=[{'id': 'gpt-new-model'}]) as fetch:
-                with patch.object(sys, 'argv', ['pi-setup.py', 'aliases', str(self.home)]):
-                    self.setup.main()
-        fetch.assert_called_once_with('http://proxy.test/v1', 'dummy')
-        config = json.loads((self.agent / provider).read_text())
-        self.assertEqual(config['modelAliases']['gpt-new-model'], 'openai/gpt-new-model')
-        self.assertNotIn('gpt-6.1-sol', config['modelAliases'])
-        self.assertEqual({p.relative_to(self.agent): p.read_bytes() for p in self.agent.rglob('*')
-                          if p.is_file() and p.relative_to(self.agent) != provider},
-                         {p: data for p, data in before.items() if p != provider})
-
     def test_instructions_replace_symlink_without_changing_bundle(self):
         source = self.home / '.claude/AGENTS.md'
         (self.agent / 'AGENTS.md').symlink_to(source)
@@ -232,121 +202,6 @@ class SetupTests(unittest.TestCase):
             self.write()
         self.assertIn('previous AGENTS.md kept', errors.getvalue())
         self.assertEqual((self.agent / 'AGENTS.md').read_text(), 'Bundle instructions\n\nSSH instructions\n')
-
-    def test_all_discovery_exceptions_keep_aliases_and_finish_instructions(self):
-        self.write()
-        path = self.agent / 'pi-cliproxyapi-provider/config.json'
-        before = path.read_bytes()
-        for error in [OSError('outage'), TypeError('shape'), HTTPException('truncated'),
-                      RuntimeError('unexpected'), Exception('unknown')]:
-            with self.subTest(error=type(error).__name__):
-                (self.agent / 'AGENTS.md').unlink(missing_ok=True)
-                with patch.object(self.setup, 'fetch_models', side_effect=error):
-                    with contextlib.redirect_stderr(io.StringIO()) as errors:
-                        self.setup.write(self.home, self.safety, self.ssh)
-                self.assertEqual(path.read_bytes(), before)
-                self.assertIn('previous provider config kept', errors.getvalue())
-                self.assertEqual((self.agent / 'AGENTS.md').read_text(), 'Bundle instructions\n\nSSH instructions\n')
-
-    def test_discovery_without_supported_models_keeps_previous_aliases(self):
-        self.write()
-        path = self.agent / 'pi-cliproxyapi-provider/config.json'
-        before = path.read_bytes()
-        for models in [[], [{'id': 'unrelated/model'}]]:
-            with self.subTest(models=models):
-                with patch.object(self.setup, 'fetch_models', return_value=models):
-                    with contextlib.redirect_stderr(io.StringIO()) as errors:
-                        self.setup.write(self.home, self.safety, self.ssh)
-                self.assertEqual(path.read_bytes(), before)
-                self.assertIn('previous provider config kept', errors.getvalue())
-
-    def test_fetch_uses_authenticated_model_endpoint_and_rejects_invalid_data(self):
-        response = {'data': [{'id': 'claude-opus-5-5'}]}
-        truncated = False
-        requests = []
-
-        class Handler(BaseHTTPRequestHandler):
-            def do_GET(self):
-                requests.append((self.path, self.headers.get('Authorization')))
-                self.send_response(200)
-                if truncated:
-                    self.send_header('Content-Length', '1000')
-                self.end_headers()
-                self.wfile.write(json.dumps(response).encode())
-
-            def log_message(self, *args):
-                pass
-
-        server = HTTPServer(('127.0.0.1', 0), Handler)
-        worker = threading.Thread(target=server.serve_forever, daemon=True)
-        worker.start()
-        try:
-            url = f'http://127.0.0.1:{server.server_port}/v1'
-            self.assertEqual(self.setup.fetch_models(url, 'fake-key'), [{'id': 'claude-opus-5-5'}])
-            self.assertEqual(requests, [('/v1/models', 'Bearer fake-key')])
-            for response in [{'data': [{'id': 1}]}, [], None, {}]:
-                with self.subTest(response=response):
-                    with self.assertRaises(ValueError):
-                        self.setup.fetch_models(url, 'fake-key')
-            self.write()
-            path = self.agent / 'pi-cliproxyapi-provider/config.json'
-            before = path.read_bytes()
-            with patch.dict(os.environ, {'ANTHROPIC_BASE_URL': url.removesuffix('/v1'),
-                                         'ANTHROPIC_AUTH_TOKEN': 'fake-key'}):
-                for response in [[], None, {}, {'data': []}, {'data': [{'id': 'other/model'}]}]:
-                    with contextlib.redirect_stderr(io.StringIO()):
-                        self.setup.write(self.home, self.safety, self.ssh)
-                    self.assertEqual(path.read_bytes(), before)
-                response = {'data': [{'id': 'gpt-different'}]}
-                truncated = True
-                (self.agent / 'AGENTS.md').unlink()
-                with contextlib.redirect_stderr(io.StringIO()):
-                    self.setup.write(self.home, self.safety, self.ssh)
-                self.assertEqual(path.read_bytes(), before)
-                self.assertEqual((self.agent / 'AGENTS.md').read_text(), 'Bundle instructions\n\nSSH instructions\n')
-        finally:
-            server.shutdown()
-            server.server_close()
-            worker.join()
-
-    def test_wrapper_refreshes_aliases_with_authentication_before_starting_pi(self):
-        requests = []
-
-        class Handler(BaseHTTPRequestHandler):
-            def do_GET(self):
-                requests.append((self.path, self.headers.get('Authorization')))
-                self.send_response(200)
-                self.end_headers()
-                self.wfile.write(json.dumps({'data': [{'id': 'gpt-new-model'}]}).encode())
-
-            def log_message(self, *args):
-                pass
-
-        binary = self.home / 'fake-pi'
-        binary.write_text("#!/usr/bin/env python3\nprint('wrapper OK')\n")
-        binary.chmod(0o700)
-        wrapper = self.home / 'pi.sh'
-        wrapper.write_text((ROOT / 'pi.sh').read_text()
-                           .replace('/tools/node_modules/.bin/pi', str(binary))
-                           .replace('/scripts/pi-setup.py', str(ROOT / 'pi-setup.py')))
-        server = HTTPServer(('127.0.0.1', 0), Handler)
-        worker = threading.Thread(target=server.serve_forever, daemon=True)
-        worker.start()
-        try:
-            result = subprocess.run(['bash', str(wrapper)],
-                                    env={**os.environ, 'ANTHROPIC_AUTH_TOKEN': 'fake-key',
-                                         'ANTHROPIC_BASE_URL': f'http://127.0.0.1:{server.server_port}/',
-                                         'HOME': str(self.home)},
-                                    capture_output=True, text=True, timeout=10)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(result.stdout, 'wrapper OK\n')
-            self.assertEqual(requests, [('/v1/models', 'Bearer fake-key')])
-            config = json.loads((self.agent / 'pi-cliproxyapi-provider/config.json').read_text())
-            self.assertEqual(config['modelAliases']['gpt-new-model'], 'openai/gpt-new-model')
-        finally:
-            server.shutdown()
-            server.server_close()
-            worker.join()
 
     def test_wrapper_transfers_credentials_unsets_direct_auth_and_forwards_args(self):
         binary = self.home / 'fake-pi'
@@ -362,15 +217,13 @@ print('wrapper OK')
         binary.chmod(0o700)
         wrapper = self.home / 'pi.sh'
         wrapper.write_text((ROOT / 'pi.sh').read_text()
-                           .replace('/tools/node_modules/.bin/pi', str(binary))
-                           .replace('/scripts/pi-setup.py', str(ROOT / 'pi-setup.py')))
+                           .replace('/tools/node_modules/.bin/pi', str(binary)))
         result = subprocess.run(['bash', str(wrapper), '--mode', 'rpc', 'argument with spaces'],
                                 env={**os.environ, 'ANTHROPIC_AUTH_TOKEN': 'fake-key',
                                      'ANTHROPIC_BASE_URL': 'http://127.0.0.1:9/', 'HOME': str(self.home)},
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, 'wrapper OK\n')
-        self.assertIn('pi-setup: model discovery failed; previous provider config kept', result.stderr)
         environment = {**os.environ, 'ANTHROPIC_AUTH_TOKEN': 'fake-key',
                        'ANTHROPIC_BASE_URL': 'http://127.0.0.1:9/'}
         environment.pop('HOME', None)
@@ -415,8 +268,7 @@ print('wrapper OK')
                     backup.write_text('Previous migration backup')
                 for boot in range(3):
                     private.install(payload.encode(), home)
-                    with patch.object(self.setup, 'fetch_models', return_value=[{'id': 'gpt-model'}]):
-                        self.setup.write(home, self.safety, self.ssh)
+                    self.setup.write(home, self.safety, self.ssh)
                     self.assertFalse(instructions.is_symlink(), (initial, boot))
                     self.assertEqual(instructions.read_text(), 'Fixture instructions\nSSH instructions\n')
                     if initial in ['file-and-backup', 'backup-only']:

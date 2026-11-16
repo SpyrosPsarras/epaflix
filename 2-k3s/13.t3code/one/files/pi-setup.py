@@ -6,7 +6,6 @@ import os
 from pathlib import Path
 import sys
 import tempfile
-from urllib.request import Request, urlopen
 
 
 PACKAGES = ['pi-cliproxyapi-provider',
@@ -17,7 +16,6 @@ ALIASES = {
     'or-glm-5.3-flash': 'openrouter/z-ai/glm-5.3-flash',
     'or-deepseek-v4-flash': 'openrouter/deepseek/deepseek-v4-flash',
     'or-minimax-m3:free': 'openrouter/minimax/minimax-m3'}
-OWNERS = [('claude-', 'anthropic/'), ('gpt-', 'openai/'), ('codex-', 'openai/')]
 
 
 def atomic_write(path, content):
@@ -35,37 +33,13 @@ def write_json(path, data):
     atomic_write(path, json.dumps(data, indent=2) + '\n')
 
 
-def fetch_models(base_url, key):
-    request = Request(base_url + '/models', headers={'Authorization': 'Bearer ' + key})
-    with urlopen(request, timeout=15) as response:
-        data = json.load(response)
-    if not isinstance(data, dict):
-        raise ValueError('Invalid model response')
-    models = data.get('data')
-    if not isinstance(models, list) or any(not isinstance(model, dict) or
-                                          not isinstance(model.get('id'), str) for model in models):
-        raise ValueError('Invalid model list')
-    return models
-
-
-def write_aliases(home):
-    base_url = os.environ.get('ANTHROPIC_BASE_URL', '').rstrip('/') + '/v1'
-    try:
-        models = fetch_models(base_url, os.environ.get('ANTHROPIC_AUTH_TOKEN', ''))
-        aliases = {}
-        for model in sorted(models, key=lambda model: model['id']):
-            ident = model['id']
-            for start, owner in OWNERS:
-                if ident.startswith(start):
-                    aliases[ident] = owner + ident
-        if not aliases:
-            raise ValueError('No supported models discovered')
-        aliases.update(ALIASES)
-    except Exception:
-        print('pi-setup: model discovery failed; previous provider config kept', file=sys.stderr)
-    else:
-        write_json(home / '.pi/agent/pi-cliproxyapi-provider/config.json', {
-            'providerName': 'cliproxy', 'baseUrl': base_url, 'modelAliases': aliases})
+def write_provider(home):
+    base_url = os.environ.get('ANTHROPIC_BASE_URL', '').rstrip('/')
+    if not base_url:
+        print('pi-setup: ANTHROPIC_BASE_URL is empty; previous provider config kept', file=sys.stderr)
+        return
+    write_json(home / '.pi/agent/pi-cliproxyapi-provider/config.json', {
+        'providerName': 'cliproxy', 'baseUrl': base_url + '/v1', 'modelAliases': ALIASES})
 
 
 def write_models(home):
@@ -101,7 +75,7 @@ def write(home, safety_entry, ssh_path=Path('/scripts/homelab-ssh.md')):
     settings.setdefault('retry', {})['maxRetries'] = 8
     write_json(settings_path, settings)
     write_models(home)
-    write_aliases(home)
+    write_provider(home)
     try:
         instructions = (home / '.claude/AGENTS.md').read_text() + '\n' + ssh_path.read_text()
     except OSError:
@@ -127,16 +101,12 @@ def main():
     setup = commands.add_parser('write')
     setup.add_argument('home', type=Path)
     setup.add_argument('safety_entry')
-    aliases = commands.add_parser('aliases')
-    aliases.add_argument('home', type=Path)
     check = commands.add_parser('check-packages')
     check.add_argument('home', type=Path)
     args = parser.parse_args()
     try:
         if args.action == 'write':
             write(args.home, args.safety_entry)
-        elif args.action == 'aliases':
-            write_aliases(args.home)
         else:
             check_packages(args.home, sys.stdin.read())
     except (OSError, ValueError, TypeError) as error:

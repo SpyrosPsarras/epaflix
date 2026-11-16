@@ -123,8 +123,7 @@ class RuntimeTests(unittest.TestCase):
         ssh = ROOT.parent / '13.t3code-homelab/files/homelab-ssh.md'
         for _ in range(2):
             self.prepare()
-            with patch.dict(os.environ, {'ANTHROPIC_BASE_URL': 'http://127.0.0.1:18317'}), \
-                    patch.object(setup, 'fetch_models', return_value=[{'id': 'gpt-fixture'}]):
+            with patch.dict(os.environ, {'ANTHROPIC_BASE_URL': 'http://127.0.0.1:18317'}):
                 setup.write(self.home, '/fixture/safety', ssh)
             for name in ('.claude/AGENTS.md', '.codex/AGENTS.md'):
                 self.assertEqual((self.home / name).read_text(), expected)
@@ -410,16 +409,15 @@ nested = {"🏠" = ["fixture", {enabled = false}]}
         canonical = {'instanceId': 'pi', 'model': 'cliproxy-textgen/claude-haiku-5-5'}
         options = [{'id': 'thinking', 'value': 'high'}]
         cases = [
-            ({'instanceId': 'pi', 'model': 'cliproxy/claude/fixture', 'options': options},
+            ({'instanceId': 'pi', 'model': 'cliproxy/fixture', 'options': options},
              {**canonical, 'options': options}),
             ({'instanceId': 'pi', 'model': 'other/fixture', 'options': []},
              {**canonical, 'options': []}),
             ({'instanceId': 'pi', 'model': 'cliproxy-textgen/'}, canonical),
             ({'instanceId': 'pi', 'model': 'other/fixture', 'options': 'invalid'}, canonical),
             ({'instanceId': 'pi'}, canonical),
-            ({'instanceId': 'pi', 'model': 'cliproxy-textgen/claude/fixture', 'options': options},
-             {'instanceId': 'pi', 'model': 'cliproxy-textgen/fixture', 'options': options}),
-            ({'instanceId': 'codex', 'model': 'codex/fixture', 'options': options}, canonical)]
+            ({'instanceId': 'pi', 'model': 'cliproxy-textgen/fixture', 'options': options}, None),
+            ({'instanceId': 'codex', 'model': 'fixture', 'options': options}, canonical)]
         default = {'instanceId': 'pi', 'model': 'cliproxy/fixture', 'options': options}
         for selection, expected in cases:
             with self.subTest(selection=selection):
@@ -463,11 +461,10 @@ nested = {"🏠" = ["fixture", {enabled = false}]}
         settings = {'providerInstances': {
             'pi': {'driver': 'pi', 'displayName': 'Homelab Pi', 'enabled': False,
                    'config': {'binaryPath': '/unapproved/pi', 'launchArgs': '--unapproved',
-                              'customModels': ['cliproxy/claude/fixture', 'work/fixture', 'cliproxy/fixture',
-                                               'cliproxy/z-ai/fixture']}},
+                              'customModels': ['cliproxy/fixture', 'work/fixture', 'cliproxy/z-ai/fixture']}},
             'codex': {'driver': 'codex', 'displayName': 'Homelab Codex', 'enabled': True,
                       'config': {'launchArgs': '-c model_provider="work"',
-                                 'customModels': ['codex/fixture', 'work/fixture']}},
+                                 'customModels': ['fixture', 'work/fixture']}},
             'claudeAgent': {'driver': 'claudeAgent', 'enabled': True},
             'work': {'driver': 'codex', 'enabled': True}},
             'providers': {'work': {}}, 'theme': 'fixture',

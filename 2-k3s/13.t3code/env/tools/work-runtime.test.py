@@ -139,8 +139,7 @@ class WorkRuntimeTests(unittest.TestCase):
         ssh = ROOT / 'env/files/isolated-ssh.md'
         for _ in range(2):
             self.prepare()
-            with patch.dict(os.environ, {'ANTHROPIC_BASE_URL': 'http://127.0.0.1:18317'}), \
-                    patch.object(setup, 'fetch_models', return_value=[{'id': 'gpt-fixture'}]):
+            with patch.dict(os.environ, {'ANTHROPIC_BASE_URL': 'http://127.0.0.1:18317'}):
                 setup.write(self.home, '/fixture/safety', ssh)
             for name in ('.claude/AGENTS.md', '.codex/AGENTS.md'):
                 self.assertEqual((self.home / name).read_text(), expected)
@@ -307,13 +306,12 @@ class WorkRuntimeTests(unittest.TestCase):
         canonical = {'instanceId': 'pi', 'model': 'cliproxy-textgen/claude-haiku-5-5'}
         options = [{'id': 'thinking', 'value': 'high'}]
         cases = [
-            ({'instanceId': 'pi', 'model': 'cliproxy/claude/fixture', 'options': options},
+            ({'instanceId': 'pi', 'model': 'cliproxy/fixture', 'options': options},
              {**canonical, 'options': options}),
             ({'instanceId': 'pi', 'model': 'cliproxy-textgen/'}, canonical),
-            ({'instanceId': 'pi', 'model': 'cliproxy-textgen/claude/fixture', 'options': options},
-             {'instanceId': 'pi', 'model': 'cliproxy-textgen/fixture', 'options': options}),
-            ({'instanceId': 'codex', 'model': 'codex/fixture', 'options': options}, canonical)]
-        default = {'instanceId': 'codex', 'model': 'codex/fixture', 'options': options}
+            ({'instanceId': 'pi', 'model': 'cliproxy-textgen/fixture', 'options': options}, None),
+            ({'instanceId': 'codex', 'model': 'fixture', 'options': options}, canonical)]
+        default = {'instanceId': 'codex', 'model': 'fixture', 'options': options}
         for selection, expected in cases:
             with self.subTest(selection=selection):
                 path.write_text(json.dumps({'defaultModelSelection': default,
