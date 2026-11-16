@@ -317,7 +317,12 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(script["trace"], {"stored_traces": 1})
         self.assertEqual(script["variables"]["vehicle_id"], ("secret", "tibber_vehicle_id"))
         self.assertEqual(script["variables"]["home_id"], ("secret", "tibber_home_id"))
-        self.assertIn("sensor.egolf_battery", script["variables"]["level"])
+        self.assertEqual(script["variables"]["car_charge_limit"], 80)
+        level = script["variables"]["level"]
+        self.assertIn("sensor.egolf_battery", level)
+        self.assertIn("100 - car_charge_limit", level)
+        self.assertIn("-1 if real < 0", level)
+        self.assertIn("| min", level)
         actions = [step.get("action") for step in script["sequence"]]
         self.assertLess(actions.index("rest_command.tibber_app_login"), actions.index("rest_command.tibber_set_battery_level"))
         steps = {step.get("action"): step for step in script["sequence"]}

@@ -87,6 +87,6 @@ Owner steps: plug one ESP32 into the laptop by USB, later carry it to the charge
 ### Task 5: Review, merge, live check
 
 - [ ] **Step 1:** Review-gate on the branch; PR; CI green; merge.
-- [ ] **Step 2:** After sync, with the car plugged in and charging: `input_text.egolf_tibber_last_result` reads success, and the Tibber app shows the car's level equal to `sensor.egolf_battery` (rounded).
+- [ ] **Step 2:** After sync, with the car plugged in and charging: `input_text.egolf_tibber_last_result` reads success, and the Tibber app shows `sensor.egolf_battery` rounded + 20, capped at 100.
 - [ ] **Step 3:** Spyros adds the Zaptec integration in the UI with his Zaptec login; its entities appear; no automation references them.
-- [ ] **Step 4:** Spyros sets the 80% target once in the Tibber app.
+- [ ] **Step 4:** Tibber's target stays 100%; the script sends the real level + (100 - 80), capped at 100 (the car stops at 80% by itself).

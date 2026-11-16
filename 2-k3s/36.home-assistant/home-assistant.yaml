@@ -87,7 +87,10 @@ data:
         variables:
           vehicle_id: !secret tibber_vehicle_id
           home_id: !secret tibber_home_id
-          level: "{{ states('sensor.egolf_battery') | float(-1) | round(0) | int }}"
+          car_charge_limit: 80
+          level: >-
+            {% set real = states('sensor.egolf_battery') | float(-1) %}
+            {{ -1 if real < 0 else [(real | round(0) | int) + 100 - car_charge_limit, 100] | min }}
         sequence:
           - condition: template
             value_template: "{{ 0 <= level <= 100 }}"
