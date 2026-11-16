@@ -134,7 +134,7 @@ if [[ $round == first ]]; then
   git -C "$HOME/projects/$variant" remote add origin "https://github.com/$variant/fixture.git"
 fi
 node -e 'require("node:http").createServer((q,s)=>{s.writeHead(200,{"content-type":"application/json"});
-s.end(JSON.stringify({data:["codex/gpt-6-sol","claude/claude-opus-5-5"].map(id=>({id,context_window:200000}))}));}).listen(18317,"127.0.0.1")' &
+s.end(JSON.stringify({data:["gpt-6-sol","claude-opus-5-5"].map(id=>({id,context_window:200000}))}));}).listen(18317,"127.0.0.1")' &
 pids+=("$!")
 bash /scripts/entrypoint.sh >/tmp/entrypoint.log 2>&1 &
 sup=$!; pids+=("$sup")
@@ -293,7 +293,7 @@ project = str(home / 'projects' / os.environ['MCP_HUB_INSTANCE'])
 if sys.argv[1] == 'first':
     settings['providerInstances']['pi']['displayName'] = 'Isolated preference fixture'
     settings['providerInstances']['codex']['enabled'] = True
-    settings['providerInstances']['codex']['config']['customModels'] = ['codex/fixture']
+    settings['providerInstances']['codex']['config']['customModels'] = ['gpt-fixture']
     settings['providerInstances']['work'] = {'driver': 'codex', 'enabled': True}
     settings_path.write_text(json.dumps(settings))
     codex['model_reasoning_effort'] = 'high'
@@ -303,7 +303,7 @@ if sys.argv[1] == 'first':
 else:
     assert settings['providerInstances']['pi']['displayName'] == 'Isolated preference fixture'
     assert settings['providerInstances']['codex']['enabled'] is False
-    assert settings['providerInstances']['codex']['config']['customModels'] == ['codex/fixture']
+    assert settings['providerInstances']['codex']['config']['customModels'] == ['gpt-fixture']
     assert 'work' not in settings['providerInstances']
     assert codex['model_reasoning_effort'] == 'high'
     assert codex['projects'][project]['trust_level'] == 'trusted'

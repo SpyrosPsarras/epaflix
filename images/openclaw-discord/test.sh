@@ -26,9 +26,9 @@ const c = {
   gateway: { mode: "local", bind: "loopback", controlUi: { enabled: false } },
   models: { providers: { cliproxy: {
     baseUrl: "http://127.0.0.1:1", api: "anthropic-messages", apiKey: "dummy-key",
-    models: [{ id: "claude/claude-haiku-5-5", name: "Haiku", input: ["text"] }],
+    models: [{ id: "claude-haiku-5-5", name: "Haiku", input: ["text"] }],
   } } },
-  agents: { defaults: { model: { primary: "cliproxy/claude/claude-haiku-5-5" }, sandbox: { mode: "off" } } },
+  agents: { defaults: { model: { primary: "cliproxy/claude-haiku-5-5" }, sandbox: { mode: "off" } } },
   tools: { web: { search: { provider: "searxng" } } },
   plugins: {
     load: { paths: [

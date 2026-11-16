@@ -51,7 +51,7 @@ class SetupTests(unittest.TestCase):
         with patch.dict(os.environ, {'ANTHROPIC_BASE_URL': base_url, 'MCP_HUB_INSTANCE': instance,
                                      'ANTHROPIC_AUTH_TOKEN': 'synthetic'}, clear=False):
             with patch.object(self.setup, 'fetch_models', return_value=[
-                    {'id': 'claude/claude-opus-5-5'}, {'id': 'codex/gpt-6.1-sol'},
+                    {'id': 'claude-opus-5-5'}, {'id': 'gpt-6.1-sol'}, {'id': 'codex-auto-review'},
                     {'id': 'unrelated/model'}]):
                 self.setup.write(self.home, self.safety, self.ssh)
 
@@ -89,11 +89,11 @@ class SetupTests(unittest.TestCase):
         path = self.agent / 'models.json'
         self.assertTrue(path.exists(), 'Text generation provider is missing')
         self.assertEqual(json.loads(path.read_text()), {'providers': {
-            'cliproxy': {'modelOverrides': {'claude/claude-haiku-5-5': {'contextWindow': 100000}}},
+            'cliproxy': {'modelOverrides': {'claude-haiku-5-5': {'contextWindow': 100000}}},
             'cliproxy-textgen': {
             'baseUrl': 'http://proxy.test', 'api': 'anthropic-messages',
             'apiKey': '$CLIPROXYAPI_API_KEY', 'models': [{
-                'id': 'claude/claude-haiku-5-5', 'name': 'Claude Haiku 5.5 (text generation)',
+                'id': 'claude-haiku-5-5', 'name': 'Claude Haiku 5.5 (text generation)',
                 'reasoning': True, 'input': ['text'], 'contextWindow': 1000000,
                 'maxTokens': 128000, 'compat': {'forceAdaptiveThinking': True}}]}}})
         self.assertNotIn('fake-key', path.read_text())
@@ -109,7 +109,7 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(data['userKey'], ['keep'])
         self.assertEqual(set(data['providers']), {'other', 'cliproxy', 'cliproxy-textgen'})
         self.assertEqual(data['providers']['other'], other)
-        self.assertEqual(data['providers']['cliproxy-textgen']['models'][0]['id'], 'claude/claude-haiku-5-5')
+        self.assertEqual(data['providers']['cliproxy-textgen']['models'][0]['id'], 'claude-haiku-5-5')
         before = path.read_bytes()
         self.write()
         self.assertEqual(path.read_bytes(), before)
@@ -118,13 +118,13 @@ class SetupTests(unittest.TestCase):
         path = self.agent / 'models.json'
         path.write_text(json.dumps({'providers': {'cliproxy': {
             'baseUrl': 'http://custom.test', 'userKey': ['keep'], 'modelOverrides': {
-                'claude/claude-opus-5-5': {'contextWindow': 512000},
-                'claude/claude-haiku-5-5': {'contextWindow': 1000000}}}}}))
+                'claude-opus-5-5': {'contextWindow': 512000},
+                'claude-haiku-5-5': {'contextWindow': 1000000}}}}}))
         self.write()
         self.assertEqual(json.loads(path.read_text())['providers']['cliproxy'], {
             'baseUrl': 'http://custom.test', 'userKey': ['keep'], 'modelOverrides': {
-                'claude/claude-opus-5-5': {'contextWindow': 512000},
-                'claude/claude-haiku-5-5': {'contextWindow': 100000}}})
+                'claude-opus-5-5': {'contextWindow': 512000},
+                'claude-haiku-5-5': {'contextWindow': 100000}}})
         before = path.read_bytes()
         self.write()
         self.assertEqual(path.read_bytes(), before)
@@ -191,11 +191,11 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(config['baseUrl'], 'http://proxy.test/v1')
         self.assertEqual(config['providerName'], 'cliproxy')
         self.assertEqual(config['modelAliases'], {
-            'claude/claude-opus-5-5': 'anthropic/claude-opus-5-5',
-            'codex/gpt-6.1-sol': 'openai/gpt-6.1-sol',
-            'openrouter/or-glm-5.3-flash': 'openrouter/z-ai/glm-5.3-flash',
-            'openrouter/or-deepseek-v4-flash': 'openrouter/deepseek/deepseek-v4-flash',
-            'openrouter/or-minimax-m3:free': 'openrouter/minimax/minimax-m3',
+            'claude-opus-5-5': 'anthropic/claude-opus-5-5',
+            'codex-auto-review': 'openai/codex-auto-review',
+            'gpt-6.1-sol': 'openai/gpt-6.1-sol',
+            'or-glm-5.3-flash': 'openrouter/z-ai/glm-5.3-flash',
+            'or-deepseek-v4-flash': 'openrouter/deepseek/deepseek-v4-flash',
             'or-minimax-m3:free': 'openrouter/minimax/minimax-m3'})
         before = path.read_bytes()
         with patch.object(self.setup, 'fetch_models', side_effect=OSError('synthetic outage')):
@@ -210,13 +210,13 @@ class SetupTests(unittest.TestCase):
         provider = Path('pi-cliproxyapi-provider/config.json')
         with patch.dict(os.environ, {'ANTHROPIC_BASE_URL': 'http://proxy.test',
                                      'ANTHROPIC_AUTH_TOKEN': 'dummy'}):
-            with patch.object(self.setup, 'fetch_models', return_value=[{'id': 'codex/new-model'}]) as fetch:
+            with patch.object(self.setup, 'fetch_models', return_value=[{'id': 'gpt-new-model'}]) as fetch:
                 with patch.object(sys, 'argv', ['pi-setup.py', 'aliases', str(self.home)]):
                     self.setup.main()
         fetch.assert_called_once_with('http://proxy.test/v1', 'dummy')
         config = json.loads((self.agent / provider).read_text())
-        self.assertEqual(config['modelAliases']['codex/new-model'], 'openai/new-model')
-        self.assertNotIn('codex/gpt-6.1-sol', config['modelAliases'])
+        self.assertEqual(config['modelAliases']['gpt-new-model'], 'openai/gpt-new-model')
+        self.assertNotIn('gpt-6.1-sol', config['modelAliases'])
         self.assertEqual({p.relative_to(self.agent): p.read_bytes() for p in self.agent.rglob('*')
                           if p.is_file() and p.relative_to(self.agent) != provider},
                          {p: data for p, data in before.items() if p != provider})
@@ -261,7 +261,7 @@ class SetupTests(unittest.TestCase):
                 self.assertIn('previous provider config kept', errors.getvalue())
 
     def test_fetch_uses_authenticated_model_endpoint_and_rejects_invalid_data(self):
-        response = {'data': [{'id': 'claude/claude-opus-5-5'}]}
+        response = {'data': [{'id': 'claude-opus-5-5'}]}
         truncated = False
         requests = []
 
@@ -282,7 +282,7 @@ class SetupTests(unittest.TestCase):
         worker.start()
         try:
             url = f'http://127.0.0.1:{server.server_port}/v1'
-            self.assertEqual(self.setup.fetch_models(url, 'fake-key'), [{'id': 'claude/claude-opus-5-5'}])
+            self.assertEqual(self.setup.fetch_models(url, 'fake-key'), [{'id': 'claude-opus-5-5'}])
             self.assertEqual(requests, [('/v1/models', 'Bearer fake-key')])
             for response in [{'data': [{'id': 1}]}, [], None, {}]:
                 with self.subTest(response=response):
@@ -297,7 +297,7 @@ class SetupTests(unittest.TestCase):
                     with contextlib.redirect_stderr(io.StringIO()):
                         self.setup.write(self.home, self.safety, self.ssh)
                     self.assertEqual(path.read_bytes(), before)
-                response = {'data': [{'id': 'codex/different'}]}
+                response = {'data': [{'id': 'gpt-different'}]}
                 truncated = True
                 (self.agent / 'AGENTS.md').unlink()
                 with contextlib.redirect_stderr(io.StringIO()):
@@ -317,7 +317,7 @@ class SetupTests(unittest.TestCase):
                 requests.append((self.path, self.headers.get('Authorization')))
                 self.send_response(200)
                 self.end_headers()
-                self.wfile.write(json.dumps({'data': [{'id': 'codex/new-model'}]}).encode())
+                self.wfile.write(json.dumps({'data': [{'id': 'gpt-new-model'}]}).encode())
 
             def log_message(self, *args):
                 pass
@@ -342,7 +342,7 @@ class SetupTests(unittest.TestCase):
             self.assertEqual(result.stdout, 'wrapper OK\n')
             self.assertEqual(requests, [('/v1/models', 'Bearer fake-key')])
             config = json.loads((self.agent / 'pi-cliproxyapi-provider/config.json').read_text())
-            self.assertEqual(config['modelAliases']['codex/new-model'], 'openai/new-model')
+            self.assertEqual(config['modelAliases']['gpt-new-model'], 'openai/gpt-new-model')
         finally:
             server.shutdown()
             server.server_close()
@@ -415,7 +415,7 @@ print('wrapper OK')
                     backup.write_text('Previous migration backup')
                 for boot in range(3):
                     private.install(payload.encode(), home)
-                    with patch.object(self.setup, 'fetch_models', return_value=[{'id': 'codex/model'}]):
+                    with patch.object(self.setup, 'fetch_models', return_value=[{'id': 'gpt-model'}]):
                         self.setup.write(home, self.safety, self.ssh)
                     self.assertFalse(instructions.is_symlink(), (initial, boot))
                     self.assertEqual(instructions.read_text(), 'Fixture instructions\nSSH instructions\n')

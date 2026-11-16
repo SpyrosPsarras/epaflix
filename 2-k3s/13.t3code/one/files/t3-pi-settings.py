@@ -5,11 +5,12 @@ from pathlib import Path
 import shlex
 import sys
 import os
+import re
 import tempfile
 
 
-MODEL = 'cliproxy/claude/claude-opus-5-5'
-TEXT_MODEL = 'cliproxy-textgen/claude/claude-haiku-5-5'
+MODEL = 'cliproxy/claude-opus-5-5'
+TEXT_MODEL = 'cliproxy-textgen/claude-haiku-5-5'
 DIRECT_TOOLS = ('mcp__t3-code__orchestrator_capabilities', 'mcp__t3-code__delegate_task', 'mcp__t3-code__task_status')
 DIRECT_TOOL_ARGS = '--tools=' + ','.join('+' + name for name in DIRECT_TOOLS)
 
@@ -41,6 +42,10 @@ def direct_tool_launch_args(launch_args):
     return shlex.join([*args, '--tools=' + ','.join(tools)])
 
 
+def bare(model):
+    return re.sub(r'^(cliproxy/|cliproxy-textgen/)?(?:(?:claude|codex|openrouter)/)+', r'\1', model)
+
+
 def migrate(home, base_url):
     path = home / 'userdata/settings.json'
     if path.exists():
@@ -48,7 +53,6 @@ def migrate(home, base_url):
     else:
         settings = {
             'providerInstances': {
-                # cliproxy force-model-prefix rejects Claude Code's bare model names.
                 'claudeAgent': {'driver': 'claudeAgent', 'displayName': 'Claude (via cliproxy)', 'enabled': False},
                 'codex': {'driver': 'codex', 'displayName': 'Codex (via cliproxy)', 'enabled': True,
                           'config': {
@@ -57,7 +61,7 @@ def migrate(home, base_url):
                                             '-c model_providers.cliproxy.env_key="ANTHROPIC_AUTH_TOKEN" '
                                             '-c model_providers.cliproxy.wire_api="responses" '
                                             '-c model_provider="cliproxy"',
-                              'customModels': ['codex/codex-auto-review']}}},
+                              'customModels': ['codex-auto-review']}}},
             'defaultModelSelection': {'instanceId': 'pi', 'model': MODEL},
             'textGenerationModelSelection': {'instanceId': 'pi', 'model': TEXT_MODEL}}
     before = json.dumps(settings, sort_keys=True)
@@ -91,6 +95,20 @@ def migrate(home, base_url):
                     for option in selection['options']
                     if not isinstance(option, dict) or option.get('id') != 'variant' or option.get('value') in
                     ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']]
+    for key in ['defaultModelSelection', 'textGenerationModelSelection']:
+        selection = settings.get(key)
+        if isinstance(selection, dict) and isinstance(selection.get('model'), str):
+            selection['model'] = bare(selection['model'])
+    for provider in instances.values():
+        provider_config = provider.get('config') if isinstance(provider, dict) else None
+        models = provider_config.get('customModels') if isinstance(provider_config, dict) else None
+        if isinstance(models, list):
+            renamed = []
+            for model in models:
+                model = bare(model) if isinstance(model, str) else model
+                if not isinstance(model, str) or model not in renamed:
+                    renamed.append(model)
+            provider_config['customModels'] = renamed
     selection = settings.get('textGenerationModelSelection')
     if isinstance(selection, dict) and selection.get('instanceId') == 'pi' and (
             isinstance(selection.get('model'), str) and selection['model'].startswith('cliproxy/')):

@@ -24,10 +24,10 @@ const rows = result.stdout.replace(/\u001b\[[0-9;]*m/g, '').split('\n').map(line
   .filter(row => row.length > 1 && row[0] !== 'provider')
 assert.ok(rows.length, result.stdout)
 assert.ok(rows.every(row => row[0] === 'cliproxy' ||
-  (row[0] === 'cliproxy-textgen' && row[1] === 'claude/claude-haiku-5-5')), result.stdout)
-assert.equal(rows.filter(row => row[0] === 'cliproxy-textgen' && row[1] === 'claude/claude-haiku-5-5').length, 1,
-  `expected exactly one cliproxy-textgen/claude/claude-haiku-5-5: ${result.stdout}`)
-for (const model of ['codex/gpt-6-sol', 'claude/claude-opus-5-5']) {
+  (row[0] === 'cliproxy-textgen' && row[1] === 'claude-haiku-5-5')), result.stdout)
+assert.equal(rows.filter(row => row[0] === 'cliproxy-textgen' && row[1] === 'claude-haiku-5-5').length, 1,
+  `expected exactly one cliproxy-textgen/claude-haiku-5-5: ${result.stdout}`)
+for (const model of ['gpt-6-sol', 'claude-opus-5-5']) {
   assert.ok(rows.some(row => row[1] === model), `missing ${model}: ${result.stdout}`)
 }
 console.log('smoke: --list-models lists only cliproxy and the single cliproxy-textgen Haiku model, with both mock models PASS')

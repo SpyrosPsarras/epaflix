@@ -188,7 +188,7 @@ class AgentChecks:
 
 class MediaTests(AgentChecks, unittest.TestCase):
     APP, NAMESPACE, CONTAINER, RELOAD = "media", "discord-media", "gateway", "openclaw"
-    MODEL = "cliproxy/claude/claude-haiku-5-5"
+    MODEL = "cliproxy/claude-haiku-5-5"
     CONFIG_FILES = ["AGENTS.md", "openclaw.json"]
     EXTRA_EGRESS = {
         ("servarr", (("app", app),), (("TCP", port),))
@@ -241,7 +241,7 @@ class MediaTests(AgentChecks, unittest.TestCase):
 
 class WindmillTests(AgentChecks, unittest.TestCase):
     APP, NAMESPACE, CONTAINER, RELOAD = "windmill", "discord-windmill", "openclaw", "openclaw,github-app"
-    MODEL = "cliproxy/claude/claude-opus-5-5"
+    MODEL = "cliproxy/claude-opus-5-5"
     CONFIG_FILES = ["AGENTS.md", "gh", "gh-token.mjs", "git-credential-gh-token", "gitconfig", "openclaw.json"]
     EXTRA_EGRESS = set()
 

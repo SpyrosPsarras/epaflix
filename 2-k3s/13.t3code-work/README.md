@@ -384,7 +384,7 @@ providers, endpoints, launch arguments and MCP servers are rebuilt from the
 reviewed inputs. Codex `/etc/codex/requirements.toml` enforces the provider and
 exact hub inventory for trusted projects and newly created worktrees, without
 rewriting benign checkout config. Config replacements are atomic. The direct
-Codex instance is disabled; use Pi with `cliproxy/<route>/<model>` IDs. See
+Codex instance is disabled; use Pi with `cliproxy/<model>` IDs. See
 [the image-shipped runtime facts](../13.t3code/env/isolated-runtime.md#image-shipped-runtime-facts)
 for the instruction block appended without private-input rotation.
 

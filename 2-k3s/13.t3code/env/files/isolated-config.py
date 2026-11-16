@@ -343,14 +343,17 @@ def apply(inputs, home, environment):
             instance['displayName'] = retained['displayName']
         if name == 'pi' and isinstance(retained.get('enabled'), bool):
             instance['enabled'] = retained['enabled']
-        prefix = 'cliproxy/' if name == 'pi' else 'codex/'
+        prefix = 'cliproxy/' if name == 'pi' else ''
         models = retained.get('config', {}).get('customModels')
         if name != 'claudeAgent' and isinstance(models, list):
+            models = dict.fromkeys(t3_pi_settings.bare(model) for model in models if isinstance(model, str))
             instance.setdefault('config', {})['customModels'] = [model for model in models
-                if isinstance(model, str) and model.startswith(prefix) and len(model) > len(prefix)]
+                if model.startswith(prefix) and model[len(prefix):] and (prefix or '/' not in model)]
     settings.pop('providers', None)
     for key in ('defaultModelSelection', 'textGenerationModelSelection'):
         current = settings.get(key, {})
+        if isinstance(current.get('model'), str):
+            current['model'] = t3_pi_settings.bare(current['model'])
         name = current.get('instanceId')
         prefix = 'cliproxy/' if name == 'pi' else None
         if key == 'textGenerationModelSelection' and name == 'pi':

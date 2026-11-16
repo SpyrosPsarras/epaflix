@@ -14,10 +14,10 @@ PACKAGES = ['pi-cliproxyapi-provider',
             '@juicesharp/rpiv-ask-user-question',
             'superpowers', '@dietrichgebert/ponytail', 'not-enough-retry']
 ALIASES = {
-    'openrouter/or-glm-5.3-flash': 'openrouter/z-ai/glm-5.3-flash',
-    'openrouter/or-deepseek-v4-flash': 'openrouter/deepseek/deepseek-v4-flash',
-    'openrouter/or-minimax-m3:free': 'openrouter/minimax/minimax-m3',
+    'or-glm-5.3-flash': 'openrouter/z-ai/glm-5.3-flash',
+    'or-deepseek-v4-flash': 'openrouter/deepseek/deepseek-v4-flash',
     'or-minimax-m3:free': 'openrouter/minimax/minimax-m3'}
+OWNERS = [('claude-', 'anthropic/'), ('gpt-', 'openai/'), ('codex-', 'openai/')]
 
 
 def atomic_write(path, content):
@@ -55,9 +55,9 @@ def write_aliases(home):
         aliases = {}
         for model in sorted(models, key=lambda model: model['id']):
             ident = model['id']
-            for source, target in [('claude/', 'anthropic/'), ('codex/', 'openai/')]:
-                if ident.startswith(source):
-                    aliases[ident] = target + ident[len(source):]
+            for start, owner in OWNERS:
+                if ident.startswith(start):
+                    aliases[ident] = owner + ident
         if not aliases:
             raise ValueError('No supported models discovered')
         aliases.update(ALIASES)
@@ -76,11 +76,11 @@ def write_models(home):
     path = home / '.pi/agent/models.json'
     models = json.loads(path.read_text()) if path.exists() else {}
     providers = models.setdefault('providers', {})
-    providers.setdefault('cliproxy', {}).setdefault('modelOverrides', {})['claude/claude-haiku-5-5'] = {
+    providers.setdefault('cliproxy', {}).setdefault('modelOverrides', {})['claude-haiku-5-5'] = {
         'contextWindow': 100000}
     providers['cliproxy-textgen'] = {
         'baseUrl': base_url, 'api': 'anthropic-messages', 'apiKey': '$CLIPROXYAPI_API_KEY',
-        'models': [{'id': 'claude/claude-haiku-5-5', 'name': 'Claude Haiku 5.5 (text generation)',
+        'models': [{'id': 'claude-haiku-5-5', 'name': 'Claude Haiku 5.5 (text generation)',
                     'reasoning': True, 'input': ['text'], 'contextWindow': 1000000,
                     'maxTokens': 128000, 'compat': {'forceAdaptiveThinking': True}}]}
     write_json(path, models)
