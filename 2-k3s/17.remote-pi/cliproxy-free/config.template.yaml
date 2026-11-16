@@ -96,13 +96,31 @@ payload:
 #   qwen3.8-27b:free (OpenRouter)  the only other guardrail-legal structured
 #     model; upstream-429 saturated for 4h+ on 2026-09-20. Superseded by the
 #     Groq entry of the same model family.
+# Plugin Store free-model plugins, 2026-11-16, each loaded alone into a scratch
+# v8.0.70 and run once per listed model on lingarr's 25-line request:
+#   oc2cpa, free-model-hub, cpa-freetier-plugin, our-free-model. OpenCode Zen
+#   free models answered 429 FreeUsageLimitError ("Free models work in
+#   OpenCode") or 403 RegionError. Every 200 from our-free-model was plain
+#   lines, fenced JSON or a bare array, never the schema's wrapper object.
+#   Every pass in the other two used a Kilo gateway model ID, and both
+#   plugins call api.kilo.ai/api/gateway, which a plain entry below reaches
+#   without in-process plugin code. reflection/beam-free: 10/10 runs passed
+#   batch_verdict (25 lines each), 10-25s per run, no invented words in two
+#   full reads (one slip: "You should be scared" -> "Πρέπει να
+#   τρομάζεις"). Of the 10: 2 through plugins, 4 direct to Kilo, 4 through
+#   this file's entry in a scratch proxy with the other tiers disabled.
+#   particle-ai/particle-1:free read the same but
+#   hit an upstream 429 on its third call. The nemotron models invented words
+#   again; kilo-auto/free "rotates through available free models" (Kilo's
+#   model listing), the openrouter/free failure class.
 # Canary rotation check (2026-09-21): 9/9 structurally OK across the pool with
 # strict gemini -> groq -> nex rotation; per-batch 2.4-4.9s (groq), 10.8-13.5s
 # (gemini), 102-118s (nex). To add a model: pass batch-repro.sh 3/3 first, then
 # add it as an entry with the same alias (CLIProxyAPI pools the alias).
 openai-compatibility:
   # Pool tiers: antigravity at 40, antigravity-opus at 30, antigravity-sonnet at 20,
-  # groq and gemini at 10 (round-robin within a tier), disabled openrouter at 0.
+  # groq and gemini at 10 (round-robin within a tier), kilo at 5, disabled
+  # openrouter at 0.
   # Each Antigravity model has its own entry so a quota 429 does not bench the others.
   #
   # nex is disabled as of 2026-09-21: during cooldown windows it served
@@ -205,4 +223,21 @@ openai-compatibility:
         alias: "or-free"
         display-name: "Gemini 3.5 Flash free (lingarr)"
         # Google's documented 1M-token flash context
+        max-context-length: 1048576
+
+  # Kilo's keyless free pool: no account, so nothing can be billed. Last resort
+  # below groq and gemini because it is slower: 10-25s per batch against
+  # groq's 2-5s. No api-key-entries: the gateway rejected a dummy bearer
+  # (401 INVALID_TOKEN). No request-retry: on v8.0.70 a keyless entry
+  # with request-retry sends the alias "or-free" upstream from the second call
+  # on (404, then the entry cools). Reproduced with a local mock; keyed entries
+  # with request-retry are unaffected.
+  - name: "kilo"
+    priority: 5
+    base-url: "https://api.kilo.ai/api/gateway"
+    models:
+      - name: "reflection/beam-free"
+        alias: "or-free"
+        display-name: "Kilo Beam 1.0 free (lingarr)"
+        # api.kilo.ai/api/gateway/models, 2026-11-16
         max-context-length: 1048576

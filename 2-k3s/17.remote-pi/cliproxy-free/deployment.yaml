@@ -1,6 +1,6 @@
 ---
 # Dedicated CLIProxyAPI for lingarr: one client key, a pool of free upstreams
-# (OpenRouter, Groq, Google AI Studio) rotating under one model alias. Nothing
+# (OpenRouter, Groq, Google AI Studio, Kilo) rotating under one model alias. Nothing
 # else.
 #
 # Why a second instance and not a second key on the main proxy: CLIProxyAPI's

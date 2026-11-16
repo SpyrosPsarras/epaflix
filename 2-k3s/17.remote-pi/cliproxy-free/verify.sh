@@ -56,9 +56,10 @@ assert len(keys) == 1, f"expected exactly one omp- api-key in config, found {len
 KEY = keys[0]
 # The explicit upstreams the config declares, checked against a zero-cost
 # allowlist per provider. The policy is "no money can move", not a suffix:
-# OpenRouter free models carry the :free suffix, Groq free-plan models and
-# Google AI Studio free-tier flash models are pinned by name. Antigravity's
-# flat-rate subscription models are pinned one per Antigravity provider. The answering
+# OpenRouter free models carry the :free suffix, Groq free-plan models,
+# Google AI Studio free-tier flash models and the keyless Kilo model are
+# pinned by name. Antigravity's flat-rate subscription models are pinned one
+# per Antigravity provider. The answering
 # model must be one of the configured upstreams, not merely some free model
 # anywhere - that is the policy this instance exists for.
 #
@@ -84,6 +85,7 @@ def _zero_cost(u):
     if u in ("openai/gpt-oss-120b", "openai/gpt-oss-20b",
              "qwen/qwen3.8-27b"): return True          # Groq free-plan chat models (policy permit list)
     if re.fullmatch(r"gemini-[0-9.]+-flash", u): return True  # AI Studio free-tier flash
+    if u == "reflection/beam-free": return True       # Kilo keyless gateway, no account
     return False
 ANTIGRAVITY = {
     "antigravity": "gemini-3.8-flash-high",
