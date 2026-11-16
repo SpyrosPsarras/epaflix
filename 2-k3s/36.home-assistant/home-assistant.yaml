@@ -28,6 +28,10 @@ data:
     homeassistant:
       packages:
         egolf: !include egolf.yaml
+      customize:
+        binary_sensor.garage_e_pavli_installation:
+          latitude: !secret home_latitude
+          longitude: !secret home_longitude
 
     automation: !include automations.yaml
     script: !include scripts.yaml
