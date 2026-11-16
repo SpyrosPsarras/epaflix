@@ -417,11 +417,8 @@ With the default 16,384-token reserve, Pi auto-compacts near 84K tokens.
 
 The Codex and Claude direct instances stay disabled in isolated runtimes.
 Startup disables the Codex instance and resets its selections to Pi. Use T3
-`delegate_task` with instance `pi` and `cliproxy/<model>`. Startup rewrites
-stored route-prefixed IDs such as `cliproxy/claude/<model>` and
-`codex/<model>` to bare IDs, the names CLIProxy serves.
-Mixed-runtime startup rewrites the same stored IDs and otherwise keeps its
-provider settings.
+`delegate_task` with instance `pi` and `cliproxy/<model>`.
+Mixed-runtime provider settings are unchanged.
 
 Codex retains unmanaged TOML values and trust entries confined to this
 environment's project and subdirectories. Startup replaces its provider and

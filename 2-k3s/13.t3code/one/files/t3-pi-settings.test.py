@@ -211,38 +211,6 @@ class SettingsTests(unittest.TestCase):
                 after = self.path.stat()
                 self.assertEqual((after.st_ino, after.st_mtime_ns), (before.st_ino, before.st_mtime_ns))
 
-    def test_routed_model_names_become_bare(self):
-        self.path.parent.mkdir()
-        self.path.write_text(json.dumps({
-            'providerInstances': {
-                'pi': {'driver': 'pi', 'config': {'customModels': [
-                    'cliproxy/claude/claude-opus-5-5', 'cliproxy/openrouter/or-glm-5.3-flash', 7,
-                    'cliproxy/claude-opus-5-5', 'cliproxy/z-ai/glm', 'cliproxy/claudeX/y', {'a': 1}, ['b']]}},
-                'codex': {'driver': 'codex', 'config': {'customModels': [
-                    'codex/codex-auto-review', 'claude/claude-haiku-5-5', 'openrouter/or-x', 'codex/claude/stacked',
-                    'mine']}},
-                'nullConfig': {'driver': 'x', 'config': None}, 'listConfig': {'driver': 'x', 'config': []},
-                'textConfig': 'x'},
-            'defaultModelSelection': {'instanceId': 'pi', 'model': 'cliproxy/codex/gpt-6.1-sol',
-                                      'options': [{'id': 'thinking', 'value': 'high'}]},
-            'textGenerationModelSelection': {'instanceId': 'pi',
-                                             'model': 'cliproxy-textgen/claude/claude-haiku-5-5'}}))
-        self.settings.migrate(self.home, '')
-        data = json.loads(self.path.read_text())
-        self.assertEqual(data['providerInstances']['pi']['config']['customModels'],
-                         ['cliproxy/claude-opus-5-5', 'cliproxy/or-glm-5.3-flash', 7,
-                          'cliproxy/z-ai/glm', 'cliproxy/claudeX/y', {'a': 1}, ['b']])
-        self.assertEqual(data['providerInstances']['codex']['config']['customModels'],
-                         ['codex-auto-review', 'claude-haiku-5-5', 'or-x', 'stacked', 'mine'])
-        self.assertEqual(data['providerInstances']['nullConfig'], {'driver': 'x', 'config': None})
-        self.assertEqual(data['defaultModelSelection'], {
-            'instanceId': 'pi', 'model': 'cliproxy/gpt-6.1-sol', 'options': [{'id': 'thinking', 'value': 'high'}]})
-        self.assertEqual(data['textGenerationModelSelection'], {
-            'instanceId': 'pi', 'model': 'cliproxy-textgen/claude-haiku-5-5'})
-        before = self.path.read_bytes()
-        self.settings.migrate(self.home, '')
-        self.assertEqual(self.path.read_bytes(), before)
-
     def test_non_extension_text_selections_are_untouched_without_rewrite(self):
         self.settings.migrate(self.home, 'http://proxy.test')
         data = json.loads(self.path.read_text())

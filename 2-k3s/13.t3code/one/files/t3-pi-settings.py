@@ -5,7 +5,6 @@ from pathlib import Path
 import shlex
 import sys
 import os
-import re
 import tempfile
 
 
@@ -40,10 +39,6 @@ def direct_tool_launch_args(launch_args):
             tools.append('mcp__*')
         tools.extend(name for name in DIRECT_TOOLS if name not in tools)
     return shlex.join([*args, '--tools=' + ','.join(tools)])
-
-
-def bare(model):
-    return re.sub(r'^(cliproxy/|cliproxy-textgen/)?(?:(?:claude|codex|openrouter)/)+', r'\1', model)
 
 
 def migrate(home, base_url):
@@ -95,20 +90,6 @@ def migrate(home, base_url):
                     for option in selection['options']
                     if not isinstance(option, dict) or option.get('id') != 'variant' or option.get('value') in
                     ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']]
-    for key in ['defaultModelSelection', 'textGenerationModelSelection']:
-        selection = settings.get(key)
-        if isinstance(selection, dict) and isinstance(selection.get('model'), str):
-            selection['model'] = bare(selection['model'])
-    for provider in instances.values():
-        provider_config = provider.get('config') if isinstance(provider, dict) else None
-        models = provider_config.get('customModels') if isinstance(provider_config, dict) else None
-        if isinstance(models, list):
-            renamed = []
-            for model in models:
-                model = bare(model) if isinstance(model, str) else model
-                if not isinstance(model, str) or model not in renamed:
-                    renamed.append(model)
-            provider_config['customModels'] = renamed
     selection = settings.get('textGenerationModelSelection')
     if isinstance(selection, dict) and selection.get('instanceId') == 'pi' and (
             isinstance(selection.get('model'), str) and selection['model'].startswith('cliproxy/')):
