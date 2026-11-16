@@ -7,7 +7,7 @@ Tibber plans the e-Golf's charging on the Zaptec charger, but it does not know t
 ## Goals
 
 - HA has a sensor with the e-Golf's battery level in percent, read from the car through the Vgate vLinker MC+ OBD dongle.
-- While the car is plugged in, HA sends that level to Tibber, so Tibber's charging plan uses the real value.
+- HA sends every new level to Tibber, including the one read when I park after a drive, so Tibber's charging plan uses the real value. (Changed 2026-11-16 at my request: the routine is park, then plug in later.)
 - The Zaptec charger is in HA for monitoring.
 - Failures are visible: HA shows when the car level is stale or a Tibber update failed.
 - The same ESP32 reports the garage climate (added 2026-11-15): a GY-BME280-3.3V on I2C (temperature, humidity, pressure; if the chip turns out to be a BMP280, no humidity) and a DS18B20 probe on OneWire, both inside the garage. Modules from Spyros's AliExpress order of 2026-01-17.
@@ -16,7 +16,7 @@ Tibber plans the e-Golf's charging on the Zaptec charger, but it does not know t
 
 - HA planning or controlling the charging. Tibber does that; nothing in HA starts, stops or limits the Zaptec.
 - Changing Tibber's charge target. The car itself stops charging at 80%, and Tibber does not know that. The Tibber app only lets Spyros set the current level for this car, not a target, so the target stays at 100% and HA sends the real level plus (100 - 80) points, capped at 100: car at 50% -> Tibber 70% -> Tibber plans 30%, exactly what the car takes. This automates what Spyros did by hand. The Tibber app therefore shows the car 20 points higher than it is; HA shows the real level. (Decided 2026-11-15, replacing the earlier 80%-target plan.)
-- Reading the car while it is not plugged in.
+- Reading the car while it is parked and asleep, apart from the one read on arrival.
 - A phone as the Bluetooth bridge.
 
 ## Anti-goals
@@ -58,7 +58,8 @@ The build starts with three checks on the real car, and stops for a decision if 
 
 - One ESP32-WROOM-32D by the charger socket, powered by USB, on the garage Wi-Fi, adopted in the ESPHome dashboard.
 - ESPHome `ble_client` to the vLinker MC+. On connect it sends `ATZ`, `ATE0`, `ATSP6`, `ATH1`, `ATCRA 7ED`, `ATSH 7E5`; then `22028C` on each poll, and parses the reply into the sensor `e-Golf battery` (%, one decimal, `state_class: measurement`).
-- Never wakes the car (my call). Every minute it sends only `ATRV`, which the dongle answers itself from the OBD port's 12 V pin without touching the car's network. It sends `22028C` only when that voltage shows the car awake (above 12.7 V: measured 13.0-13.1 V with the car on, 12.2-12.3 V a minute after switching off, on 2026-11-15) and the last good read is older than 10 minutes. So the car is read on arrival with the ignition on, and every 10 minutes while it charges; while it sleeps plugged in, nothing reaches its network.
+- Never wakes the car (my call). Every minute it sends only `ATRV`, which the dongle answers itself from the OBD port's 12 V pin without touching the car's network. It sends `22028C` only when that voltage shows the car awake (above 12.7 V: measured 13.0-13.1 V with the car on, 12.2-12.3 V a minute after switching off, on 2026-11-15) and the last good read is older than 10 minutes. So the car is read every 10 minutes while it is on or charging; while it sleeps plugged in, nothing reaches its network.
+- On arrival (my call, 2026-11-16): that evening the ESP32 reconnected about a minute after I parked, with the car already off, so the voltage gate never read it. When the dongle comes back after more than 10 minutes out of reach, the ESP32 sends `22028C` once right after connecting, whatever the voltage. Not yet confirmed that the car answers just after switch-off; if not, the dongle replies `NO DATA` and nothing is sent.
 - The sensor keeps its last value with the time of the read (`e-Golf battery read at`), so HA knows how fresh it is.
 - The device YAML is kept in Git at `3-devices/esphome/egolf-obd.yaml` without secrets. `3-devices/` is a new top-level layer for firmware on home devices, next to `0-truenas`, `1-proxmox` and `2-k3s`; the ESP32 is not part of the cluster. Wi-Fi and API keys come from ESPHome's own `secrets.yaml` on the `esphome-config` PVC; the file is copied into the ESPHome dashboard for compiling. First flash over USB from the laptop; later updates over the air.
 - The dongle's BLE service and characteristic UUIDs are read with an ESPHome BLE scan before the config is final.
@@ -76,7 +77,7 @@ The build starts with three checks on the real car, and stops for a decision if 
   - `rest_command.tibber_app_login`: form POST to `login.credentials` with `payload: !secret tibber_login_body`, the form body stored already URL-encoded as one secret, because `!secret` cannot sit inside a template and script variables end up in traces.
   - `rest_command.tibber_set_battery_level`: GraphQL POST with `Authorization: Bearer <token>` and the mutation above.
   - `script.egolf_push_to_tibber`: logs in, sends the level rounded to an integer, records the result.
-  - An automation that runs the script when `binary_sensor.e_pavli_plug` is on and a fresh read arrives (read time after the plug-in time, or within 30 minutes before it, which covers reading on arrival). A level read more than 30 minutes before the plug-in is never sent, so the previous session's value does not reach Tibber. (Unplugging and plugging back in within 30 minutes of a read can resend that read; the level has not changed meanwhile.)
+  - An automation that runs the script on every fresh read, plugged in or not, and again at plug-in with the last read, in case Tibber ignores a level sent while unplugged (the `tibber_soc_updater` README says so). The last read is the level Tibber already has, so resending it changes nothing else, except a level set by hand in the Tibber app since then.
 - Logging in on each push is fine at this rate (at most every 10 minutes while charging); no token cache. The token appears in the script's `response_variable` and so in its saved trace on the config PVC; the script keeps `trace: stored_traces: 1`. Accepted: the token is short-lived (about 18 hours per the source) and the PVC already holds HA's own credentials.
 
 ### Zaptec
@@ -94,7 +95,7 @@ The build starts with three checks on the real car, and stops for a decision if 
 - R5. Tibber changes the private API or blocks the login. Pushes fail, the notification shows it, and Tibber keeps the last value.
 - R6. Tibber's terms may not allow automated use of the app API. Not checked.
 - R7. The battery request or scaling is wrong for this car. The build checks the value against the car's display before the automation is turned on.
-- R8. Querying wakes the car and drains the 12 V battery. The `ATRV` gate keeps requests off the car's network while it sleeps; the dongle itself still draws a little from the OBD port, as it does today.
+- R8. Querying wakes the car and drains the 12 V battery. The `ATRV` gate keeps requests off the car's network while it sleeps, apart from one request per arrival; the dongle itself still draws a little from the OBD port, as it does today.
 - R9. Bluetooth through the car body is weak. The ESP32 can move closer; it only needs a socket.
 
 ## Left to the builder

@@ -53,13 +53,16 @@ class EgolfObdTests(unittest.TestCase):
         for command in ("ATZ", "ATE0", "ATSP6", "ATH1", "ATCRA 7ED", "ATSH 7E5"):
             self.assertIn(f'cmd: "{command}"', self.text)
 
-    def test_reads_battery_only_while_awake(self):
+    def test_reads_battery_when_awake_or_on_arrival(self):
         [poll] = self.config["interval"]
         self.assertEqual(poll["interval"], "60s")
         self.assertIn('"ATRV"', self.text)
         self.assertIn('"22028C"', self.text)
         self.assertRegex(self.text, r"id\(vbat\) > 12\.7")
         self.assertRegex(self.text, r"600000")
+        self.assertIn("id(arrived) = id(arrived) || millis() - id(gone_since_ms) > 600000;", self.text)
+        self.assertIn("if (id(linked)) id(gone_since_ms) = millis();", self.text)
+        self.assertIn("return id(linked) && (id(arrived) || (id(vbat) > 12.7", self.text)
         self.assertEqual(((self.config["esp32_ble_tracker"] or {}).get("scan_parameters") or {}).get("window", "30ms"), "30ms")
 
     def test_voltage_only_from_atrv_replies(self):

@@ -352,9 +352,7 @@ class ManifestTests(unittest.TestCase):
         read_trigger = next(t for t in automation["triggers"] if t["entity_id"] == "sensor.egolf_battery_read_at")
         self.assertEqual(read_trigger["not_from"], ["unavailable"])
         conditions = str(automation["conditions"])
-        self.assertIn("binary_sensor.e_pavli_plug", conditions)
-        self.assertIn("timedelta(minutes=30)", conditions)
-        self.assertIn("last_changed", conditions)
+        self.assertEqual(conditions, str([{"condition": "template", "value_template": "{{ states('sensor.egolf_battery_read_at') | as_datetime is not none }}"}]))
         self.assertEqual(automation["actions"], [{"action": "script.egolf_push_to_tibber"}])
 
     def test_egolf_alerts(self):
