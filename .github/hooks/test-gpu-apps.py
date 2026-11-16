@@ -97,13 +97,6 @@ class GpuAppsTests(unittest.TestCase):
                 total_mib += int(memory[:-2]) * (1024 if memory.endswith("Gi") else 1)
         self.assertLessEqual(total_mib, 17 * 1024)
 
-    def test_cliproxy_migrates_existing_config_before_seed_guard(self):
-        source = (ROOT / "2-k3s/17.remote-pi/cliproxy/files/reconcile-config.psql").read_text()
-        replacement = "c := replace(c, 'http://192.168.10.200:30068/v1', 'http://ollama.ai.svc.cluster.local:30068/v1');"
-        self.assertTrue(replacement in source)
-        self.assertLess(source.index(replacement), source.index("RAISE NOTICE 'openai-compatibility already present"))
-        self.assertIn('base-url: "http://ollama.ai.svc.cluster.local:30068/v1"', source)
-
     def test_secret_envelopes_and_app_wiring(self):
         for name in ["open-webui-env", "open-webui-redis-env"]:
             secret = documents("2-k3s/32.ai/" + name + ".enc.yaml")[0]

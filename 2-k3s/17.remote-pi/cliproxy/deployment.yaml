@@ -33,54 +33,6 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       initContainers:
-        - name: reconcile-config
-          image: docker.io/library/postgres:16
-          command:
-            - psql
-          args:
-            - --no-psqlrc
-            - --set=ON_ERROR_STOP=1
-            - --file=/scripts/reconcile-config.psql
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities:
-              drop:
-                - ALL
-          env:
-            - name: PG_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: cliproxy-secrets
-                  key: pg-password
-            - name: PGPASSWORD
-              value: $(PG_PASSWORD)
-            - name: PGHOST
-              value: postgres-rw.postgres-system.svc.cluster.local
-            - name: PGPORT
-              value: "5432"
-            - name: PGUSER
-              value: cliproxy
-            - name: PGDATABASE
-              value: cliproxy
-            - name: PGSSLMODE
-              value: require
-            - name: OPENROUTER_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: cliproxy-secrets
-                  key: openrouter-api-key
-          volumeMounts:
-            - name: scripts
-              mountPath: /scripts
-            - name: tmp
-              mountPath: /tmp
-          resources:
-            requests:
-              cpu: "10m"
-              memory: "32Mi"
-            limits:
-              memory: "128Mi"
         - name: fetch-pi-bridge
           image: docker.io/library/alpine:3.21
           command:
@@ -159,6 +111,36 @@ spec:
             - "0.2.3"
             - 199537e3c216f4ffb5e7fa137e527e6315285c03cb74fcccd70cda3322905da4
             - conversun/cliproxy-plugin-opencode-cloak
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+            - name: plugins
+              mountPath: /plugins
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "32Mi"
+            limits:
+              memory: "128Mi"
+        - name: fetch-quota-router
+          image: docker.io/library/alpine:3.21
+          command:
+            - sh
+            - /scripts/fetch-plugin.sh
+          args:
+            - kpatdev-quota-router
+            # renovate: datasource=github-releases depName=kpatdev/quota-router
+            - "1.1.0"
+            - fd672946ba17ff79257154b6373ee20b04477dc0c2ae112dbee7a1fcf08d9f4b
+            - kpatdev/quota-router
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -290,7 +272,7 @@ spec:
             sizeLimit: 64Mi
         - name: plugins
           emptyDir:
-            sizeLimit: 128Mi
+            sizeLimit: 256Mi
         - name: scripts
           configMap:
             name: cliproxy-scripts
