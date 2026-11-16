@@ -32,7 +32,6 @@ configMapGenerator:
   - name: cliproxy-scripts
     namespace: remote-pi
     files:
-      - cliproxy/files/reconcile-config.psql
       - cliproxy/files/fetch-plugin.sh
       - cliproxy/files/emit-transcripts.py
       - cliproxy/files/payload_lib.py

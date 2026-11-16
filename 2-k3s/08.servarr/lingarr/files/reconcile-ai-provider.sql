@@ -11,9 +11,9 @@
 -- The Lingarr key must be in main cliproxy's live api-keys list via the
 -- management API (not git-durable); if missing, Antigravity 401s and free tiers serve.
 --
--- Secret handling copies reconcile-config.psql in 17.remote-pi/cliproxy: the
--- key is read from the environment and echoed nowhere, so a failing statement
--- cannot leak it into pod logs and on to Loki (#634, #702, #824, #911).
+-- Secret handling: the key is read from the environment and echoed nowhere,
+-- so a failing statement cannot leak it into pod logs and on to Loki (#634,
+-- #702, #824, #911).
 \set cliproxy_key `printenv CLIPROXY_API_KEY`
 \o /dev/null
 SELECT set_config('lingarr.cliproxy_key', :'cliproxy_key', false);
