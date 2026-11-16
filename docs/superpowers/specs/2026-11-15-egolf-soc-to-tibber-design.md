@@ -15,7 +15,7 @@ Tibber plans the e-Golf's charging on the Zaptec charger, but it does not know t
 ## Non-goals
 
 - HA planning or controlling the charging. Tibber does that; nothing in HA starts, stops or limits the Zaptec.
-- Changing the 80% target automatically. Spyros sets it once in the Tibber app. The car itself stops charging at 80%, and Tibber does not know that; with Tibber's target at the same 80% and the real level pushed, Tibber plans exactly the energy the car takes (before, Spyros entered the level +20 against a 100% target to get the same plan).
+- Changing Tibber's charge target. The car itself stops charging at 80%, and Tibber does not know that. The Tibber app only lets Spyros set the current level for this car, not a target, so the target stays at 100% and HA sends the real level plus (100 - 80) points, capped at 100: car at 50% -> Tibber 70% -> Tibber plans 30%, exactly what the car takes. This automates what Spyros did by hand. The Tibber app therefore shows the car 20 points higher than it is; HA shows the real level. (Decided 2026-11-15, replacing the earlier 80%-target plan.)
 - Reading the car while it is not plugged in.
 - A phone as the Bluetooth bridge.
 
