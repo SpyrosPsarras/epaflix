@@ -153,8 +153,8 @@ script:
       - script.execute: {id: obd_send, cmd: "ATCRA 7ED"}
       - script.execute: {id: obd_send, cmd: "ATSH 7E5"}
       - lambda: id(linked) = true;
-      - script.execute: poll
-  - id: poll
+      - script.execute: obd_poll
+  - id: obd_poll
     then:
       - script.execute: {id: obd_send, cmd: "ATRV"}
       - script.wait: obd_send
@@ -172,4 +172,4 @@ interval:
           condition:
             lambda: return id(linked);
           then:
-            - script.execute: poll
+            - script.execute: obd_poll
