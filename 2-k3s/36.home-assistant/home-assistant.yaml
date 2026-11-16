@@ -152,13 +152,9 @@ data:
             entity_id: binary_sensor.e_pavli_plug
             to: "on"
         conditions:
-          - condition: state
-            entity_id: binary_sensor.e_pavli_plug
-            state: "on"
           - condition: template
             value_template: >-
-              {% set read = states('sensor.egolf_battery_read_at') | as_datetime %}
-              {{ read is not none and read >= states.binary_sensor.e_pavli_plug.last_changed - timedelta(minutes=30) }}
+              {{ states('sensor.egolf_battery_read_at') | as_datetime is not none }}
         actions:
           - action: script.egolf_push_to_tibber
 

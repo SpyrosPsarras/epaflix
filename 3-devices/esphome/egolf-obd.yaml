@@ -49,6 +49,12 @@ globals:
   - id: ever_read
     type: bool
     initial_value: "false"
+  - id: gone_since_ms
+    type: uint32_t
+    initial_value: "0"
+  - id: arrived
+    type: bool
+    initial_value: "false"
 
 esp32_ble_tracker:
 
@@ -57,10 +63,13 @@ ble_client:
     id: vlink
     auto_connect: true
     on_connect:
+      - lambda: id(arrived) = id(arrived) || millis() - id(gone_since_ms) > 600000;
       - delay: 2s
       - script.execute: init_elm
     on_disconnect:
-      - lambda: id(linked) = false;
+      - lambda: |-
+          if (id(linked)) id(gone_since_ms) = millis();
+          id(linked) = false;
 
 sensor:
   - platform: bme280_i2c
@@ -144,6 +153,17 @@ script:
       - script.execute: {id: obd_send, cmd: "ATCRA 7ED"}
       - script.execute: {id: obd_send, cmd: "ATSH 7E5"}
       - lambda: id(linked) = true;
+      - script.execute: poll
+  - id: poll
+    then:
+      - script.execute: {id: obd_send, cmd: "ATRV"}
+      - script.wait: obd_send
+      - if:
+          condition:
+            lambda: return id(linked) && (id(arrived) || (id(vbat) > 12.7 && (!id(ever_read) || millis() - id(last_read_ms) > 600000)));
+          then:
+            - lambda: id(arrived) = false;
+            - script.execute: {id: obd_send, cmd: "22028C"}
 
 interval:
   - interval: 60s
@@ -152,10 +172,4 @@ interval:
           condition:
             lambda: return id(linked);
           then:
-            - script.execute: {id: obd_send, cmd: "ATRV"}
-            - delay: 3s
-            - if:
-                condition:
-                  lambda: return id(vbat) > 12.7 && (!id(ever_read) || millis() - id(last_read_ms) > 600000);
-                then:
-                  - script.execute: {id: obd_send, cmd: "22028C"}
+            - script.execute: poll
