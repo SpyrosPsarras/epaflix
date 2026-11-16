@@ -296,6 +296,10 @@ class ManifestTests(unittest.TestCase):
         for key, name in {"automation": "automations.yaml", "script": "scripts.yaml", "scene": "scenes.yaml"}.items():
             self.assertEqual(config[key], ("include", name))
         self.assertEqual(config["homeassistant"]["packages"], {"egolf": ("include", "egolf.yaml")})
+        self.assertEqual(
+            config["homeassistant"]["customize"],
+            {"binary_sensor.garage_e_pavli_installation": {"latitude": ("secret", "home_latitude"), "longitude": ("secret", "home_longitude")}},
+        )
 
     def egolf(self):
         configmap = resource("home-assistant.yaml", "ConfigMap", "home-assistant-configuration")
