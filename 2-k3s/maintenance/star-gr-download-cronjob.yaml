@@ -1,7 +1,7 @@
 ---
-# Downloads new episodes of Greek shows from star.gr into their Sonarr series
-# folders, because no indexer carries them. One CronJob per show, all sharing
-# the script below.
+# Downloads Greek shows from star.gr and MEGA into their Sonarr folders,
+# because no indexer carries them. MEGA needs a Greek PPTP VPN for geo-blocking
+# and a node conntrack helper so GRE replies reach the pod.
 #
 # The star.gr player hides the video outside GR/CY, but that check is only a
 # cookie in the browser. The HLS stream itself plays from any country, so the
@@ -12,7 +12,7 @@
 # S09E04 style, so Sonarr (standard series type) and Jellyfin both match it.
 #
 # SEASONAL: when a show's season ends, delete its CronJob. For a later season,
-# point its TAG_URL at that season's tag page (and SERIES_DIR if it changes).
+# update TAG_URL, or SHOW_URL and SEASON for MEGA (and SERIES_DIR if it changes).
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -155,6 +155,18 @@ data:
                 with contextlib.redirect_stderr(errors):
                     assert download(None, "2026-09-23", None, link) is None
                 assert "FAIL: %s: no star.gr stream" % link in errors.getvalue()
+                assert download(None, None, {"hasFile": True}) == "skip"
+                ep = {"seasonNumber": 1, "episodeNumber": 1}
+                out = os.path.join(SERIES_DIR, "%s - S01E01.mp4" % SERIES_TITLE)
+                with open(out, "w"):
+                    pass
+                assert download(None, None, ep) == "skip"
+                os.remove(out)
+                from unittest.mock import patch
+                with contextlib.redirect_stderr(errors), patch(__name__ + ".duration", return_value=None) as probe:
+                    assert download("https://example.test/video.m3u8", None, ep, link) is None
+                    probe.assert_not_called()
+                assert "FAIL: %s: no air date" % link in errors.getvalue()
         finally:
             SERIES_DIR = series_dir
         print("selftest ok")
@@ -177,6 +189,9 @@ data:
         if os.path.exists(out):
             print("skip  %s (on disk)" % date)
             return "skip"
+        if not date:
+            fail("%s: no air date" % (page_url or date))
+            return None
         if url is None:
             fail("%s: no star.gr stream" % (page_url or date))
             return None
@@ -211,10 +226,7 @@ data:
         return "done"
 
 
-    def main():
-        if not (TAG_URL and SERIES_DIR and SERIES_TITLE and SONARR_SERIES_ID and SONARR_API_KEY):
-            fail("TAG_URL, SERIES_DIR, SERIES_TITLE, SONARR_SERIES_ID, SONARR_API_KEY must be set")
-            return 2
+    def prepare_directory():
         # Started as root only to apk-add ffmpeg; write files as the *arr user.
         os.setgroups([])
         os.setgid(568)
@@ -222,6 +234,17 @@ data:
         os.umask(0o002)
         os.makedirs(SERIES_DIR, exist_ok=True)
 
+
+    def rescan():
+        sonarr("command", {"name": "RescanSeries", "seriesId": int(SONARR_SERIES_ID)})
+        print("asked Sonarr to rescan series %s" % SONARR_SERIES_ID)
+
+
+    def main():
+        if not (TAG_URL and SERIES_DIR and SERIES_TITLE and SONARR_SERIES_ID and SONARR_API_KEY):
+            fail("TAG_URL, SERIES_DIR, SERIES_TITLE, SONARR_SERIES_ID, SONARR_API_KEY must be set")
+            return 2
+        prepare_directory()
         links = episode_links(fetch(TAG_URL), TAG_URL)
         print("tag page: %d episode link(s)" % len(links))
         if not links:
@@ -252,8 +275,7 @@ data:
                     changed = True
 
         if changed:  # import new files now instead of at Sonarr's next refresh
-            sonarr("command", {"name": "RescanSeries", "seriesId": int(SONARR_SERIES_ID)})
-            print("asked Sonarr to rescan series %s" % SONARR_SERIES_ID)
+            rescan()
         return 1 if failed else 0
 
 
@@ -262,6 +284,358 @@ data:
             selftest()
             sys.exit(0)
         sys.exit(main())
+  megatv.py: |
+    #!/usr/bin/env python3
+    import os
+    import re
+    import sys
+    from http.client import HTTPException
+    from html.parser import HTMLParser
+    from urllib.parse import urljoin, urlsplit
+
+    import download as shared
+
+    SHOW_URL = os.environ.get("SHOW_URL", "")
+    SHOW_LABEL = os.environ.get("SHOW_LABEL", "")
+    SEASON = os.environ.get("SEASON", "")
+
+
+    class Page(HTMLParser):
+        def __init__(self, html):
+            super().__init__(convert_charrefs=True)
+            self.tags = []
+            self.feed(html)
+
+        def handle_starttag(self, tag, attrs):
+            self.tags.append(dict(attrs))
+
+
+    def episode_links(html, show_url):
+        links = set()
+        for attrs in Page(html).tags:
+            link = urljoin(show_url, attrs.get("href") or "")
+            parts = urlsplit(link)
+            if (parts.scheme in ("http", "https") and parts.netloc == urlsplit(show_url).netloc
+                    and re.fullmatch(r"/tvshows/\d+/epeisodio-\d+-[^/]+/?", parts.path)):
+                links.add(link)
+        return sorted(links)
+
+
+    def episode_data(html, show_label):
+        for attrs in Page(html).tags:
+            match = re.match(r"^%s: Επεισόδιο (\d+)(?:\s|$)" % re.escape(show_label),
+                             attrs.get("data-kwik_label") or "")
+            if match:
+                return (int(match.group(1)), attrs.get("data-kwik_source") or None,
+                        attrs.get("data-kwik_pudate") or None)
+        return None
+
+
+    def selftest():
+        show = "https://www.megatv.com/ekpompes/2427394/kampingk/"
+        page = ('<a href="/tvshows/123/epeisodio-21-a/">'
+                '<a href="https://www.megatv.com/tvshows/123/epeisodio-21-a/">'
+                "<a href='/tvshows/124/epeisodio-20-b/'>"
+                '<a href="https://other.test/tvshows/125/epeisodio-19-c/">'
+                '<a href="/ekpompes/2427394/kampingk/">')
+        assert episode_links(page, show) == [
+            "https://www.megatv.com/tvshows/123/epeisodio-21-a/",
+            "https://www.megatv.com/tvshows/124/epeisodio-20-b/"]
+        player = ('<div data-kwik_source="https://a.msvdn.net/vod/123/PK6/playlist.m3u8?a=1&amp;b=2" '
+                  'data-kwik_label="Κάμπινγκ: Επεισόδιο 21 " data-kwik_pudate="2026-11-17">')
+        assert episode_data(player, "Κάμπινγκ") == (
+            21, "https://a.msvdn.net/vod/123/PK6/playlist.m3u8?a=1&b=2", "2026-11-17")
+        assert episode_data(player.replace("Κάμπινγκ", "Άλλη σειρά"), "Κάμπινγκ") is None
+        assert episode_data(player.replace("21 ", "21extra"), "Κάμπινγκ") is None
+        assert episode_data(player.replace("Κάμπινγκ", "Κ&#940;μπινγκ"), "Κάμπινγκ")[0] == 21
+        assert episode_data('<div data-kwik_label="Κάμπινγκ: Επεισόδιο 1">', "Κάμπινγκ") == (1, None, None)
+        assert episode_data("no player", "Κάμπινγκ") is None
+        import contextlib
+        import http.client
+        import io
+        import tempfile
+        from unittest.mock import patch
+        links = ["https://www.megatv.com/tvshows/123/epeisodio-1-a/",
+                 "https://www.megatv.com/tvshows/124/epeisodio-2-b/"]
+        listing = "".join('<a href="%s">' % link for link in links)
+        ep = {"seasonNumber": 1, "episodeNumber": 1, "hasFile": True}
+        second = ('<div data-kwik_label="Κάμπινγκ: Επεισόδιο 2" '
+                  'data-kwik_source="https://example.test/v.m3u8" data-kwik_pudate="2026-11-17">')
+        cases = [
+            ("no player", True, False, 1, "no Κάμπινγκ episode label"),
+            ('<div data-kwik_label="Κάμπινγκ: Επεισόδιο 1">', True, False, 0, ""),
+            ('<div data-kwik_label="Κάμπινγκ: Επεισόδιο 1">', False, True, 0, ""),
+            ('<div data-kwik_label="Κάμπινγκ: Επεισόδιο 1" data-kwik_source="https://example.test/v.m3u8">',
+             False, False, 1, "no air date"),
+            (http.client.IncompleteRead(b"", 10), True, False, 1, "IncompleteRead"),
+        ]
+        for first, has_file, on_disk, status, error in cases:
+            with tempfile.TemporaryDirectory() as directory:
+                ep["hasFile"] = has_file
+                if on_disk:
+                    with open(os.path.join(directory, "Test - S01E01.mp4"), "w"):
+                        pass
+                pages = iter([listing, first, second])
+                def fetch(url):
+                    page = next(pages)
+                    if isinstance(page, Exception):
+                        raise page
+                    return page
+                output, errors = io.StringIO(), io.StringIO()
+                with (patch.multiple(sys.modules[__name__], SHOW_URL=show, SHOW_LABEL="Κάμπινγκ", SEASON="1"),
+                      patch.multiple(shared, SERIES_DIR=directory, SERIES_TITLE="Test",
+                                     SONARR_SERIES_ID="1", SONARR_API_KEY="test"),
+                      patch.object(shared, "prepare_directory"), patch.object(shared, "fetch", fetch),
+                      patch.object(shared, "sonarr", return_value=[ep, {"seasonNumber": 1, "episodeNumber": 2, "hasFile": True}]),
+                      contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors)):
+                    assert main() == status, (first, errors.getvalue())
+                assert "Sonarr has a file" in output.getvalue(), output.getvalue()
+                assert next(pages, None) is None
+                assert ("FAIL:" in errors.getvalue()) == bool(status), errors.getvalue()
+                assert error in errors.getvalue(), errors.getvalue()
+        print("selftest ok")
+
+
+    def main():
+        if not (SHOW_URL and SHOW_LABEL and SEASON and shared.SERIES_DIR and shared.SERIES_TITLE
+                and shared.SONARR_SERIES_ID and shared.SONARR_API_KEY):
+            shared.fail("SHOW_URL, SHOW_LABEL, SEASON, SERIES_DIR, SERIES_TITLE, SONARR_SERIES_ID, SONARR_API_KEY must be set")
+            return 2
+        season = int(SEASON)
+        if season < 1:
+            shared.fail("SEASON must be positive")
+            return 2
+        shared.prepare_directory()
+        links = episode_links(shared.fetch(SHOW_URL), SHOW_URL)
+        print("show page: %d episode link(s)" % len(links))
+        if not links:
+            shared.fail("no episode links on %s, MEGA layout changed?" % SHOW_URL)
+            return 1
+        eps = {(ep["seasonNumber"], ep["episodeNumber"]): ep
+               for ep in shared.sonarr("episode?seriesId=" + shared.SONARR_SERIES_ID)}
+        failed, changed, seen = 0, False, {}
+        for link in links:
+            try:
+                data = episode_data(shared.fetch(link), SHOW_LABEL)
+                if data is None:
+                    shared.fail("%s: no %s episode label" % (link, SHOW_LABEL))
+                    failed += 1
+                    continue
+                number, url, date = data
+                if number in seen:
+                    shared.fail("%s and %s both episode %d" % (seen[number], link, number))
+                    failed += 1
+                    continue
+                seen[number] = link
+                ep = eps.get((season, number))
+                if ep is None:
+                    shared.fail("%s: Sonarr has no S%02dE%02d" % (link, season, number))
+                    failed += 1
+                else:
+                    result = shared.download(url, date, ep, link)
+                    if result is None:
+                        failed += 1
+                    elif result != "skip":
+                        changed = True
+            except (OSError, ValueError, HTTPException) as exc:
+                shared.fail("%s: %s" % (link, exc))
+                failed += 1
+        if not seen:
+            shared.fail("zero matching %s episodes on %s" % (SHOW_LABEL, SHOW_URL))
+            failed += 1
+        if changed:
+            shared.rescan()
+        return 1 if failed else 0
+
+
+    if __name__ == "__main__":
+        if sys.argv[1:] == ["--selftest"]:
+            selftest()
+            sys.exit(0)
+        try:
+            sys.exit(main())
+        except (OSError, ValueError, HTTPException) as exc:
+            shared.fail(str(exc))
+            sys.exit(1)
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: camping-megatv-download
+  namespace: servarr
+  labels:
+    app: camping-megatv-download
+spec:
+  schedule: "38 */3 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 6
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 21600
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app: camping-megatv-download
+        spec:
+          restartPolicy: Never
+          nodeSelector:  # the one node approved for the PPTP conntrack helper below
+            kubernetes.io/hostname: k3s-worker-62
+          hostPID: true
+          initContainers:
+            - name: pptp-nat-helper
+              image: debian:trixie-slim
+              imagePullPolicy: IfNotPresent
+              securityContext:
+                privileged: true
+              command:
+                - nsenter
+                - -t
+                - "1"
+                - -m
+                - -n
+                - --
+                - sh
+                - -ec
+                - |
+                  modprobe nf_conntrack_pptp
+                  modprobe nf_nat_pptp
+                  R='PREROUTING -s 10.42.0.0/16 -p tcp --dport 1723 -j CT --helper pptp'
+                  iptables -t raw -C $R 2>/dev/null || iptables -t raw -A $R
+              resources:
+                requests:
+                  cpu: "10m"
+                  memory: "16Mi"
+                limits:
+                  cpu: "100m"
+                  memory: "64Mi"
+            - name: vpn
+              image: debian:trixie-slim
+              imagePullPolicy: IfNotPresent
+              restartPolicy: Always
+              securityContext:
+                privileged: true
+              env:
+                - name: VPN_USERNAME
+                  valueFrom:
+                    secretKeyRef:
+                      name: hcn-libero-vpn
+                      key: username
+                - name: VPN_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: hcn-libero-vpn
+                      key: password
+                - name: VPN_GATEWAY
+                  valueFrom:
+                    secretKeyRef:
+                      name: hcn-libero-vpn
+                      key: gateway
+              command:
+                - sh
+                - -ec
+                - |
+                  if ! { apt-get update && apt-get install -y --no-install-recommends ppp pptp-linux iproute2; } >/dev/null 2>&1; then
+                    echo "VPN package installation failed" >&2
+                    exit 1
+                  fi
+                  umask 077
+                  printf '"%s" PPTP "%s" *\n' "$VPN_USERNAME" "$VPN_PASSWORD" > /etc/ppp/chap-secrets
+                  chmod 600 /etc/ppp/chap-secrets
+                  GW_IP=$(getent ahostsv4 "$VPN_GATEWAY" | awk '{print $1; exit}')
+                  ETH_GW=$(ip route show 10.42.0.0/16 | awk '$1 == "10.42.0.0/16" {for (i=2; i<NF; i++) if ($i == "via") {print $(i+1); exit}}')
+                  test -n "$GW_IP" || { echo "VPN gateway resolution failed" >&2; exit 1; }
+                  test -n "$ETH_GW" || { echo "Pod eth0 gateway not found" >&2; exit 1; }
+                  ip route replace "$GW_IP/32" via "$ETH_GW" dev eth0
+                  pppd pty "pptp $GW_IP --nolaunchpppd" name "$VPN_USERNAME" remotename PPTP \
+                    require-mppe-128 refuse-eap refuse-pap refuse-chap noauth nobsdcomp nodeflate \
+                    nodefaultroute nodetach lcp-echo-interval 10 lcp-echo-failure 3 >/dev/null 2>&1 &
+                  PPP_PID=$!
+                  trap 'exit 0' TERM INT
+                  for attempt in $(seq 1 60); do
+                    if ip -4 addr show dev ppp0 2>/dev/null | grep -q 'inet '; then
+                      break
+                    fi
+                    if ! kill -0 "$PPP_PID" 2>/dev/null || [ "$attempt" -eq 60 ]; then
+                      echo "VPN tunnel startup failed" >&2
+                      exit 1
+                    fi
+                    sleep 1
+                  done
+                  ip route replace 10.42.0.0/16 via "$ETH_GW" dev eth0
+                  ip route replace 10.43.0.0/16 via "$ETH_GW" dev eth0
+                  trap 'ip route replace unreachable default; kill "$PPP_PID" 2>/dev/null || true' EXIT
+                  ip route replace default dev ppp0
+                  echo "VPN tunnel ready"
+                  wait "$PPP_PID" || true
+                  echo "VPN tunnel exited" >&2
+                  exit 1
+              startupProbe:
+                exec:
+                  command:
+                    - sh
+                    - -ec
+                    - ip route show default | grep -q '^default dev ppp0'
+                periodSeconds: 5
+                timeoutSeconds: 2
+                failureThreshold: 60
+              resources:
+                requests:
+                  cpu: "25m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "250m"
+                  memory: "192Mi"
+          containers:
+            - name: camping-megatv-download
+              image: python:3.13-alpine
+              imagePullPolicy: IfNotPresent
+              command:
+                - sh
+                - -c
+                - apk add --no-cache ffmpeg >/dev/null && exec python3 -u /script/megatv.py
+              env:
+                - name: SHOW_URL
+                  value: "https://www.megatv.com/ekpompes/2427394/kampingk/"
+                - name: SHOW_LABEL
+                  value: "Κάμπινγκ"
+                - name: SEASON
+                  value: "1"
+                - name: SERIES_DIR
+                  value: "/media/tvshows/Camping (2026) [tvdbid-481762]"
+                - name: SERIES_TITLE
+                  value: "Camping"
+                - name: SONARR_SERIES_ID
+                  value: "424"
+                - name: SONARR_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: unpackerr-secret
+                      key: UN_SONARR_0_API_KEY
+              volumeMounts:
+                - name: script
+                  mountPath: /script
+                  readOnly: true
+                - name: media
+                  mountPath: /media
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "128Mi"
+                limits:
+                  cpu: "500m"
+                  memory: "256Mi"
+          volumes:
+            - name: script
+              configMap:
+                name: star-gr-download-script
+                defaultMode: 0555
+            - name: media
+              persistentVolumeClaim:
+                claimName: servarr-media
 ---
 apiVersion: batch/v1
 kind: CronJob
