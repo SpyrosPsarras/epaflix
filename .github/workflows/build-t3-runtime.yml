@@ -43,5 +43,5 @@ jobs:
           if [[ $variant != mixed ]]; then source=t3-runtime:$variant-dev; prefix=$variant-; fi
           for target in "${prefix}inputs-$tag" "${prefix}${{ github.sha }}" "${prefix}latest"; do
             docker tag "$source" "$image:$target"
-            docker push "$image:$target"
+            for attempt in 1 2 3; do docker push "$image:$target" && break; [[ $attempt == 3 ]] && exit 1; sleep $((attempt * 15)); done
           done

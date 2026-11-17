@@ -47,7 +47,17 @@ esac
 source "$root/versions.env"
 [[ $(gh --version | head -1) == "gh version $GH_VERSION "* ]]
 pin() { node -p "require('/tools/package.json').dependencies['$1']"; }
-ver() { timeout 60 "$1" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?' | head -1; }
+ver() {
+  local out status attempt err
+  err=$(mktemp)
+  for attempt in 1 2; do
+    status=0; out=$(timeout 60 "$1" --version 2>"$err") || status=$?
+    if (( status == 0 )) && [[ $out =~ [0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)? ]]; then rm -f "$err"; echo "${BASH_REMATCH[0]}"; return; fi
+    echo "inventory: $1 --version attempt $attempt exited $status; stdout: ${out:0:200}; stderr: $(head -c 300 "$err")" >&2
+  done
+  rm -f "$err"
+  return 1
+}
 [[ $(ver /tools/node_modules/.bin/bw) == "$(pin @bitwarden/cli)" ]] || { echo "inventory: bw version mismatch" >&2; exit 1; }
 for pair in t3:t3 @anthropic-ai/claude-code:claude @openai/codex:codex @earendil-works/pi-coding-agent:pi; do
   want=$(pin "${pair%%:*}"); got=$(ver "/tools/node_modules/.bin/${pair##*:}")
