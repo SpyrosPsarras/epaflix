@@ -1107,8 +1107,8 @@ spec:
         # and fired again 15m after that run failed: two pings an hour for an
         # hourly CronJob. keep_firing_for bridges runs up to 90m; a fixed
         # CronJob resolves 90m after a good run starts.
-        # shortcut: gntm-star-download and first-dates-star-download allow 6h,
-        # so longer runs can resolve and re-fire; reassess the hold if needed.
+        # shortcut: gntm-star-download, first-dates-star-download and camping-megatv-download
+        # allow 6h, so longer runs can resolve and re-fire; reassess the hold if needed.
         # Jobs without a CronJob owner keep the job_name key.
         - alert: KubeJobFailedLastRun
           expr: |
