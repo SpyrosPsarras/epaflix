@@ -2,9 +2,7 @@
 
 `homelab/` and `work/` run the same maintained gateway from `../files/`.
 They have separate namespaces, Services, Deployments, health probes,
-ServiceAccounts, client grants and upstream credentials. The legacy hub
-remains available with its existing clients and routes. No consumer is
-switched by this change.
+ServiceAccounts, client grants and upstream credentials.
 
 The active approved homelab inventory is `searxng`, `gmail` and `drive`.
 The owner stages Gmail and Drive with fresh consent through
@@ -60,23 +58,20 @@ For work, `environment` must be `work`. Service names are `gmail`,
 `searxng`, `drive`, `kubernetes` and `notion`. An empty list, unknown or
 duplicate name, environment mismatch, malformed client digest, missing
 connection or extra connection prevents startup. Both instances reject
-`vaultwarden`, `vault-secret`, `vault-attachment` and the retired reader
-marker. Both T3 pods read secrets through their own stock `vault` client
-and UID-1001 sidecar, not through a hub route. The legacy mixed hub retains
-its own `vaultwarden-mcp` and `vault-run.py` until #1848.
+retired vault route names and the retired reader marker. Both T3 pods read
+secrets through their own stock `vault` client and UID-1001 sidecar, not
+through a hub route.
 
-The new hubs expose exactly the listed routes, plus unauthenticated
-`GET /healthz`. They forward to explicitly configured MCP endpoints rather
-than instantiate the legacy modules or use their default upstreams. Every
+The hubs expose exactly the listed routes, plus unauthenticated
+`GET /healthz`. They forward only to explicitly configured MCP endpoints. Every
 non-Notion connection needs its own bearer token, distinct from ordinary
 client credentials. URLs cannot contain
 credentials, query parameters or fragments. The client's bearer never
 leaves the hub.
 
 These endpoints must enforce application authentication on direct requests,
-not just rely on tool discovery or NetworkPolicy. The legacy unauthenticated
-Drive and Kubernetes backends are not suitable new connections. Approval
-must identify separately authenticated endpoints with separate upstream
+not just rely on tool discovery or NetworkPolicy. Approval must identify
+separately authenticated endpoints with separate upstream
 identities. If a backend does not support authentication, its approved
 connection needs an authenticated gateway and ordinary clients must not
 reach its raw port. No legacy upstream credentials or personal vault login
@@ -85,9 +80,7 @@ may be copied into either new namespace.
 A newly minted ordinary client token is `homelab.` or `work.` followed by
 `secrets.token_urlsafe(32)`. Store only its SHA-256 digest under `clients`.
 Use a fresh random value for each client and environment. Tokens must never
-be printed or committed. The other new hub rejects the prefix, and the
-legacy hub reserves both prefixes and rejects them even if their digest
-was accidentally registered there. Existing legacy tokens keep working.
+be printed or committed. The other hub rejects the prefix.
 
 ## Homelab Gmail and Drive
 
@@ -104,9 +97,8 @@ Only homelab includes `../google`. Both added connections use
 fresh, independently minted Workspace bearer. `/gmail` and `/drive` are
 aliases for one combined upstream, not per-service authorization boundaries.
 Agents register exactly `searxng`, `gmail` and `drive`, with token environment
-references. There is no separate send-draft registration. The legacy
-`files/gmail_mcp.py` endpoint and Drive-only `workspace-mcp.yaml` remain
-unchanged; reusing the send-draft helper does not reuse their grant.
+references. There is no separate send-draft registration. Reusing the
+send-draft helper from `files/gmail_mcp.py` does not reuse an old grant.
 
 The exact served union is 31 tools, 15 Gmail and 16 Drive, including our
 `gmail_send_draft` extension. Both aliases return this same list. The
@@ -175,9 +167,9 @@ synthetic identity and credential leaks after failed HTTP tool calls.
 
 Writes run directly by owner decision, including send-draft, trash through
 label modification with `TRASH`, and sharing. There is no hub-side gate,
-no gate in the homelab pod's clients, and desktop OpenCode keeps the legacy
-ask table until #1946. The legacy `ASK` table stays unchanged and is not
-extended. The homelab pod generates Pi, Claude and Codex config, not OpenCode.
+no gate in the homelab pod's clients, and desktop OpenCode keeps the shared
+`ASK` table. The homelab pod generates Pi, Claude and Codex config, not
+OpenCode.
 
 ### Owner enrollment and stopped rollout
 
@@ -212,9 +204,9 @@ extended. The homelab pod generates Pi, Claude and Codex config, not OpenCode.
    verification.
 4. G4: After owner approval and rollout, verify the exact tool union, both
    aliases, synthetic reads, direct-backend rejection of ordinary credentials,
-   wrong-environment and legacy-token rejection, unchanged work services and
-   legacy availability. Regenerate client configs and remove stale managed
-   entries. Resume homelab consumers only after these checks pass. Live
+   wrong-environment and legacy-token rejection and unchanged work services.
+   Regenerate client configs and remove stale managed entries. Resume homelab
+   consumers only after these checks pass. Live
    send-draft, trash and sharing checks remain owner-run.
 
 ## Notion refresh ownership
@@ -235,10 +227,9 @@ The single replica and `Recreate` rollout are intentional. Do not scale a
 hub or run two refresh owners against one Notion grant. Never copy the
 legacy refresh token. After account and live-operation approval, the
 bootstrap tool's `--instance homelab|work` option selects only that
-namespace and requires an explicit `--context`. Without `--instance` its
-legacy behavior remains unchanged. The browser must consent as the approved
-account, not silently reuse a personal browser session. Account verification
-and consent are human checkpoints.
+namespace and requires an explicit `--context`. Both options are required.
+The browser must consent as the approved account, not silently reuse a
+personal browser session. Account verification and consent are human checkpoints.
 
 ## Client configuration
 
@@ -255,21 +246,17 @@ python3 tools/hub_clients.py pi /tmp/agent-home/mcp.json \
   https://homelab.example.test HOMELAB_MCP_TOKEN /tmp/approved-services.json
 ```
 
-The same final argument works for OpenCode, Claude Code and Codex. The
-existing call shape is unchanged for legacy clients. Alternatively set
-`MCP_HUB_SERVICES_FILE` and optionally `MCP_HUB_INSTANCE` in the agent
+The same final argument works for OpenCode, Claude Code and Codex. Alternatively
+set `MCP_HUB_SERVICES_FILE` and optionally `MCP_HUB_INSTANCE` in the agent
 process; the latter requires a matching allowlist file. The existing T3
 entrypoints inherit these options. Instance registration failures, or
 missing instance URL/token settings, stop startup rather than retain a
-stale broad configuration. Legacy registration warnings retain their old
-behavior. No live consumer is changed until its deliberate cutover.
+stale broad configuration.
 
 Generation removes stale maintained hub entries outside the allowlist. It
 preserves unrelated servers and existing OpenCode approval choices. It
 never advertises command-time secret or attachment routes as model tools.
-`vault-run.py` remains the legacy runner and refuses instance settings before
-reading a legacy key file or making a request. Neither hub configuration nor
-its legacy runner replaces organizational agent policies.
+Hub configuration does not replace organizational agent policies.
 
 ## Approval-dependent provisioning and rollout
 
@@ -278,8 +265,7 @@ its legacy runner replaces organizational agent policies.
    actual endpoints, account identifiers and vault data out of this repo's
    public examples and evidence.
 2. A2: Provision independent Secrets through approved private configuration.
-   Mount only the two required keys. Do not reuse the legacy `add-client.py`
-   workflow, which deliberately writes legacy grants and consumers.
+   Mount only the two required keys.
 3. A3: For a private Kustomize overlay, generate `mcp-hub-instance` with a
    content-hashed name. Kustomize rewrites the mounted Secret reference,
    causing an independent rollout on configuration or credential changes.
@@ -298,8 +284,7 @@ its legacy runner replaces organizational agent policies.
 4. A4: Approve the ArgoCD source for the private composition before merge.
    Wait for automatic sync and rollout, then verify direct backend rejection
    without credentials, wrong-hub and legacy-client rejection, one accepted
-   end-to-end request per hub, and
-   continued legacy availability before any client cutover.
+   end-to-end request per hub before any client cutover.
 
 ### Coordinated homelab input changes
 
@@ -326,19 +311,19 @@ auth rules.
 4. R4: Merge the approved revision after private inputs are staged. Wait for
    `mcp-hub-homelab` to sync automatically and finish its single-replica
    `Recreate` rollout. Verify authorized requests and auth rejection before resuming
-   consumers. Keep work and legacy Applications and Secrets unchanged.
+   consumers. Keep work Applications and Secrets unchanged.
 
 Runtime allowlist or client-token changes require a separate reviewed input
 revision through the [runtime input rotation procedure](../../13.t3code/env/isolated-runtime.md#input-rotation).
 Regenerate client metadata and private service snapshots. Automatic hub sync
 does not authorize restarting a runtime.
 
-## Restricted reader retirement after merge
+## Historical #1845 restricted reader retirement
 
-The approved replacement homelab inventory is `searxng` only. Both hubs use
+The replacement homelab inventory for #1845 was `searxng` only. Both hubs use
 `../searxng/`, with separate namespace-local upstream bearer Secrets. The
-live homelab inventory checked for #1845 still contained only `vaultwarden`,
-`vault-secret` and `vault-attachment`. Stage compatible private inputs before
+live homelab inventory checked for #1845 still contained only retired vault
+route names. Stage compatible private inputs before
 merging new hub code, because automatic sync can roll it immediately. The
 following steps require approved maintenance; none were performed by this
 implementation.
@@ -453,10 +438,8 @@ bash 2-k3s/13.t3code/one/tools/sync-shared.sh --check
 ```
 
 CI runs these fixture and render checks. The requests use the real gateway,
-forwarder, SDK HTTP servers and backend authentication middleware. The
-legacy vault fixture uses its real HTTP app with only the vault data lookup
-replaced by synthetic data. Render fixtures cover both new overlays,
-content-hashed secret rollouts, independent Notion RBAC, legacy ConfigMap
-merging and automated ArgoCD sync policies. Hub tests require pruning and
+forwarder, SDK HTTP servers and backend authentication middleware. Render
+fixtures cover both overlays, content-hashed secret rollouts, independent
+Notion RBAC and automated ArgoCD sync policies. Hub tests require pruning and
 self-healing; runtime tests require pruning without self-healing. No fixture
 prints credentials.

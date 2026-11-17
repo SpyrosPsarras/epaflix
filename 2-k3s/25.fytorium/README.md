@@ -58,8 +58,9 @@ Bump it whenever the image digest changes.
 Repository CI blocks all-zero placeholder digests.
 
 1. From a LAN PC, run `./2-k3s/25.fytorium/minio-setup.sh --dry-run`, then
-   `./2-k3s/25.fytorium/minio-setup.sh`. Requires Docker, Python 3 and the existing
-   vault-run hub access. On first use, the script builds and caches
+   `./2-k3s/25.fytorium/minio-setup.sh`. Requires Docker, Python 3 and the owner's
+   installed, unlocked Bitwarden CLI with `BW_SESSION` already exported. The
+   script never logs in or uses a service login or API key. On first use, the script builds and caches
    `fytorium-mc:RELEASE.2025-04-16T18-13-26Z` from `mc.Dockerfile`, using
    Go 1.24 and Alpine 3.21. The build needs internet access to fetch the base
    images, pinned mc source and Go modules, but no credentials. Later runs
@@ -72,7 +73,9 @@ Repository CI blocks all-zero placeholder digests.
    `FYTORIUM_MINIO_URL` overrides the endpoint for isolated local tests; fake
    `MINIO_ADMIN_USERNAME`, `MINIO_ADMIN_PASSWORD`, `VAULT_USERNAME` and
    `VAULT_PASSWORD` can exercise `--apply` without vault access. The normal
-   invocation always obtains both credential pairs through vault-run.
+   invocation reads both login items by exact folder and name from the owner's
+   Bitwarden session, passing credentials to `--apply` only through its environment.
+   Silo replaced MinIO but keeps the same endpoint and compatible admin API.
 2. Apply both tracked Pi-hole DNS changes using `1-proxmox/pihole/README.md`.
    The dnsmasq A record points at `192.168.10.102`; the matching Unbound static
    zone stops AAAA queries leaking upstream. A static zone without the A record

@@ -331,7 +331,7 @@ jobs:
           python3 -m pip install --disable-pip-version-check \
             -r .github/hooks/requirements.txt
           bash .github/scripts/install-ci-tools.sh kustomize
-          # Same pin as 2-k3s/23.mcp-hub/deployment.yaml and vaultwarden-mcp.yaml.
+          # Same pin as instances/{base/deployment,google/workspace,searxng/searxng}.yaml in 23.mcp-hub.
           python3 -m venv /tmp/mcp-hub && /tmp/mcp-hub/bin/pip install -q --disable-pip-version-check mcp==2.2.0 -r .github/hooks/requirements.txt
           python3 -m venv /tmp/screener
           /tmp/screener/bin/pip install -q --disable-pip-version-check -r 2-k3s/34.windmill/workspace/requirements-test.txt
@@ -344,7 +344,6 @@ jobs:
           /tmp/mcp-hub/bin/python -m unittest discover -s 2-k3s/23.mcp-hub/tests -v
           /tmp/screener/bin/python -m pytest -q 2-k3s/34.windmill/workspace/tests
           /tmp/mcp-hub/bin/python 2-k3s/23.mcp-hub/files/mcp_hub.py --selftest
-          /tmp/mcp-hub/bin/python 2-k3s/23.mcp-hub/files/vaultwarden_mcp.py --selftest
           python3 2-k3s/23.mcp-hub/tools/hub_clients.py --selftest
           # The t3code pod's copy of hub_clients.py (and the other shared inputs) must not drift.
           bash 2-k3s/13.t3code/one/tools/sync-shared.sh --check
@@ -399,6 +398,7 @@ jobs:
           python3 2-k3s/13.t3code/env/tools/keeper-client.test.py -v
           python3 2-k3s/13.t3code/env/tools/work-ssh.test.py -v
           python3 2-k3s/13.t3code/one/files/vault-ssh-agent.test.py
+          python3 2-k3s/25.fytorium/minio-credentials.test.py -v
           python3 2-k3s/13.t3code/env/tools/startup.test.py -v
           python3 2-k3s/13.t3code/env/tools/homelab-ssh.test.py -v
           python3 2-k3s/13.t3code/env/tools/t3-build.test.py -v
@@ -409,7 +409,6 @@ jobs:
           bash 1-proxmox/pegaprox/pegaprox-auto-update.test.sh
           SAFETY_NET_CLI=/tmp/ssh-policy-check/node_modules/.bin/cc-safety-net python3 2-k3s/13.t3code/one/files/ssh-policy.test.py
           python3 2-k3s/13.t3code-homelab/tools/inputs.test.py -v
-          python3 2-k3s/13.t3code/one/files/vault-run.test.py
           python3 2-k3s/13.t3code/env/tools/image-commands.test.py -v
           bash 2-k3s/13.t3code/env/tools/rollout-hash.test.sh
           bash 2-k3s/28.kured/kured.test.sh

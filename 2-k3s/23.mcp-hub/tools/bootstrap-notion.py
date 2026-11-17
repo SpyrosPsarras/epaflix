@@ -2,12 +2,11 @@
 """Create or renew the hub's Notion grant (../docs/adr/0001-*.md), on a
 workstation with a browser and kubectl access to the cluster.
 
-  bootstrap-notion.py [--context epaflix]
   bootstrap-notion.py --instance homelab|work --context <approved-context>
 
 Hosted Notion MCP is OAuth-only. This script:
   1. reads the authorization-server metadata of https://mcp.notion.com;
-  2. reuses the client_id already in Secret mcp-hub/mcp-hub-notion-grant, or
+  2. reuses the client_id in the selected instance's Notion grant Secret, or
      registers a new public client (dynamic client registration) whose
      redirect URI is a fixed loopback port;
   3. runs the PKCE authorization-code flow in your browser: log in with the
@@ -43,7 +42,7 @@ ISSUER = "https://mcp.notion.com"
 RESOURCE = "https://mcp.notion.com/mcp"
 PORT = 53682  # fixed so the registered redirect URI, and with it the client_id, stays reusable
 REDIRECT = f"http://127.0.0.1:{PORT}/callback"
-NS, NAME = "mcp-hub", "mcp-hub-notion-grant"
+NAME = "mcp-hub-notion-grant"
 
 
 def _json(url, data=None, form=False):
@@ -63,19 +62,19 @@ def _json(url, data=None, form=False):
         sys.exit(f"{url} -> HTTP {e.code}: {e.read().decode(errors='replace')[:300]}")
 
 
-def _kubectl(ctx, *args, stdin=None, namespace=NS):
+def _kubectl(ctx, *args, stdin=None, namespace):
     return subprocess.run(["kubectl", "--context", ctx, "-n", namespace, *args], input=stdin, capture_output=True,
                           text=True)
 
 
-def _existing(ctx, namespace=NS):
+def _existing(ctx, *, namespace):
     r = _kubectl(ctx, "get", "secret", NAME, "-o", "json", namespace=namespace)
     if r.returncode != 0:
         return None
     return {k: base64.b64decode(v).decode() for k, v in json.loads(r.stdout).get("data", {}).items()}
 
 
-def _register(meta, client_name="epaflix mcp-hub"):
+def _register(meta, *, client_name):
     reg = _json(meta["registration_endpoint"], {
         "client_name": client_name, "redirect_uris": [REDIRECT],
         "grant_types": ["authorization_code", "refresh_token"], "response_types": ["code"],
@@ -121,12 +120,12 @@ def _authorize(meta, client_id):
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--context", help="kubectl context of the cluster running the hub")
-    p.add_argument("--instance", choices=("homelab", "work"))
+    p.add_argument("--instance", choices=("homelab", "work"), required=True)
     a = p.parse_args()
-    if a.instance and not a.context:
+    if not a.context:
         p.error("--instance requires an explicit --context")
-    context = a.context or "epaflix"
-    namespace = "mcp-hub-" + a.instance if a.instance else NS
+    context = a.context
+    namespace = "mcp-hub-" + a.instance
 
     meta = _json(ISSUER + "/.well-known/oauth-authorization-server")
     old = _existing(context, namespace=namespace)
@@ -135,7 +134,7 @@ def main():
         client_id, client_secret = old["client_id"], old.get("client_secret", "")
         print("reusing the registered Notion OAuth client")
     else:
-        client_name = "mcp-hub " + a.instance if a.instance else "epaflix mcp-hub"
+        client_name = "mcp-hub " + a.instance
         client_id, client_secret = _register(meta, client_name=client_name)
         print("registered a new Notion OAuth client")
     code, verifier = _authorize(meta, client_id)

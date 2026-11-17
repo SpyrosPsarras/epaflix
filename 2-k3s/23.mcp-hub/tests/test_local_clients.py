@@ -270,7 +270,7 @@ class LocalClientTests(unittest.TestCase):
             target = Path(temp) / "mcp.json"
             initial = {"mcpServers": {"mine": {"command": "example"},
                 "homelab-drive": {"url": "https://old.example.test/drive"},
-                "vaultwarden": {"url": "https://legacy.example.test/vaultwarden"}}}
+                "unrelated": {"url": "https://unrelated.example.test/mcp"}}}
             target.write_text(json.dumps(initial))
             with patch.object(self.clients.subprocess, "run", side_effect=self.kubectl):
                 self.clients.configure("epaflix", "homelab", target)
@@ -283,7 +283,7 @@ class LocalClientTests(unittest.TestCase):
                 self.clients.configure("epaflix", "work", target)
                 self.assertEqual(before, target.stat().st_mtime_ns)
             config = json.loads(target.read_text())["mcpServers"]
-            self.assertEqual(set(config), {"mine", "vaultwarden", "homelab-searxng", "work-searxng", "work-kubernetes-epaflix"})
+            self.assertEqual(set(config), {"mine", "unrelated", "homelab-searxng", "work-searxng", "work-kubernetes-epaflix"})
             for environment in ("homelab", "work"):
                 entry = config[environment + "-searxng"]
                 self.assertEqual(entry["url"], "https://mcp-" + environment + ".epaflix.com/searxng")

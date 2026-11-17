@@ -71,13 +71,11 @@ class BootstrapGmailTests(unittest.TestCase):
         self.get_error = False
         self.http_error = False
         self.stack.enter_context(patch.object(bootstrap.http.server, "HTTPServer", self.server))
-        self.stack.enter_context(patch.object(bootstrap.webbrowser, "open", self.browser))
         self.stack.enter_context(patch.object(bootstrap.urllib.request, "urlopen", self.urlopen))
         self.stack.enter_context(patch.object(bootstrap.subprocess, "run", self.kubectl))
         self.prompt = self.stack.enter_context(patch("getpass.getpass", return_value=EMAIL))
         self.stack.enter_context(patch("time.monotonic", self.monotonic))
-        self.sops = self.stack.enter_context(patch.object(bootstrap, "_write_secret"))
-        self.file_output = self.stack.enter_context(patch.object(bootstrap.tempfile, "mkstemp", side_effect=AssertionError("no output files")))
+        self.file_output = self.stack.enter_context(patch.object(tempfile, "mkstemp", side_effect=AssertionError("no output files")))
 
     def monotonic(self):
         self.clock += 1 if self.traffic else 301
@@ -159,7 +157,7 @@ class BootstrapGmailTests(unittest.TestCase):
         self.assert_private()
 
     def test_instance_requires_context_and_rejects_work(self):
-        for args in (["--instance", "homelab", "--reuse"], ["--instance", "work", "--context", "fixture"],
+        for args in (["--context", "fixture", "--reuse"], ["--instance", "homelab", "--reuse"], ["--instance", "work", "--context", "fixture"],
                      ["--instance", "homelab", "--context", "fixture", "--out", "ignored"],
                      ["--instance", "homelab", "--context", "fixture", "--client-id", CLIENT, "--client-secret", CLIENT_SECRET]):
             with self.subTest(args=args), self.assertRaises(SystemExit):
@@ -183,7 +181,6 @@ class BootstrapGmailTests(unittest.TestCase):
         data = {key: base64.b64decode(value).decode() for key, value in document["data"].items()}
         self.assertEqual(data, {"client-id": CLIENT, "client-secret": CLIENT_SECRET, "refresh-token": REFRESH, "email": EMAIL})
         self.assertNotIn(ACCESS, kwargs["input"])
-        self.sops.assert_not_called()
         self.file_output.assert_not_called()
         self.assertEqual(self.stdout.getvalue(), "homelab Google grant staged; rollout still required\n")
         self.assert_private()
@@ -227,7 +224,7 @@ class BootstrapGmailTests(unittest.TestCase):
                 elif case == "empty-refresh":
                     self.tokens["refresh_token"] = ""
                 elif case == "partial":
-                    self.tokens["scope"] = bootstrap.SCOPE
+                    self.tokens["scope"] = "https://www.googleapis.com/auth/gmail.modify"
                 elif case == "broader":
                     self.tokens["scope"] += " https://www.googleapis.com/auth/calendar"
                 elif case == "wrong-account":
@@ -313,35 +310,6 @@ class BootstrapGmailTests(unittest.TestCase):
         proposed = json.loads(self.mutations()[0][1]["input"])
         self.assertEqual(base64.b64decode(proposed["data"]["refresh-token"]).decode(), REFRESH)
         self.assertEqual(len(self.urls), 1)
-
-    def test_legacy_authorization_keeps_original_request(self):
-        self.tokens["scope"] = bootstrap.SCOPE
-        result = bootstrap._authorize(CLIENT, CLIENT_SECRET)
-        query = urllib.parse.parse_qs(urllib.parse.urlparse(self.urls[0]).query)
-        self.assertEqual(query["scope"], [bootstrap.SCOPE])
-        self.assertEqual(query["prompt"], ["consent"])
-        self.assertEqual(result, self.tokens)
-        self.assertIn(self.urls[0], self.stdout.getvalue())
-        self.assertTrue(self.closed)
-
-    def test_legacy_explicit_empty_context_is_not_replaced(self):
-        self.tokens["scope"] = bootstrap.SCOPE
-        self.existing = {"data": {key: base64.b64encode(value.encode()).decode() for key, value in {
-            "client-id": CLIENT, "client-secret": CLIENT_SECRET}.items()}}
-        with patch.object(bootstrap, "_authorize", return_value=self.tokens):
-            self.run_main(["--reuse", "--context", ""])
-        self.assertEqual(self.calls[0][0][2], "")
-
-    def test_legacy_default_unchanged(self):
-        self.tokens["scope"] = bootstrap.SCOPE
-        self.existing = {"data": {key: base64.b64encode(value.encode()).decode() for key, value in {
-            "client-id": CLIENT, "client-secret": CLIENT_SECRET}.items()}}
-        with patch.object(bootstrap, "_authorize", return_value=self.tokens) as authorize:
-            self.run_main(["--reuse"])
-        self.assertEqual(self.calls[0][0][:5], ["kubectl", "--context", "epaflix", "-n", "mcp-hub"])
-        authorize.assert_called_once_with(CLIENT, CLIENT_SECRET)
-        self.assertEqual(bootstrap.SCOPE, "https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/drive")
-        self.sops.assert_called_once_with(bootstrap.OUT, CLIENT, CLIENT_SECRET, REFRESH, EMAIL)
 
 
 if __name__ == "__main__":

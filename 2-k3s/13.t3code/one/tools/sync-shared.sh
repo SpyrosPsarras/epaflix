@@ -5,8 +5,8 @@
 # 23.mcp-hub/files/hub_services.py. `--check`
 # exits 1 on drift.
 #
-# Owned by this overlay, NOT synced: files/entrypoint.sh (PVC home, MCP hub
-# registration, T3_PROJECT_DIR).
+# Owned by this overlay, NOT synced: files/entrypoint.sh (project checkout,
+# manager setup, SSH policy, Pi settings and T3 startup).
 set -euo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd)
 pairs=(
