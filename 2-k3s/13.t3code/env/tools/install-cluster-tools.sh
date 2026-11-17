@@ -35,3 +35,11 @@ curl -fsSL -o "$tmp/gh-checksums.txt" "$gh_url/gh_${GH_VERSION}_checksums.txt"
 (cd "$tmp" && sha256sum --check --ignore-missing gh-checksums.txt)
 tar -xzf "$tmp/$gh_tgz" -C "$tmp"
 install -m 0755 "$tmp/gh_${GH_VERSION}_linux_amd64/bin/gh" /usr/local/bin/gh
+if [[ ${T3_RUNTIME_VARIANT:-} == work ]]; then
+  kubelogin_url="https://github.com/Azure/kubelogin/releases/download/v${KUBELOGIN_VERSION}"
+  curl -fsSL -o "$tmp/kubelogin-linux-amd64.zip" "$kubelogin_url/kubelogin-linux-amd64.zip"
+  curl -fsSL -o "$tmp/kubelogin-linux-amd64.zip.sha256" "$kubelogin_url/kubelogin-linux-amd64.zip.sha256"
+  (cd "$tmp" && sha256sum -c kubelogin-linux-amd64.zip.sha256)
+  unzip -q "$tmp/kubelogin-linux-amd64.zip" -d "$tmp/kubelogin"
+  install -m 0755 "$tmp/kubelogin/bin/linux_amd64/kubelogin" /usr/local/bin/kubelogin
+fi

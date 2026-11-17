@@ -3,7 +3,7 @@
 
 usage: t3-build <context-dir> --destination <registry/repo:tag> [--dockerfile path] [--docker-config file]
 
-The namespace is the kubeconfig context's (t3-build-homelab or t3-build-work).
+The namespace is the kubeconfig context's (t3-build-homelab).
 The Job template is the kaniko-job ConfigMap from 2-k3s/29.t3-build. The Job owns
 its context ConfigMap and registry-auth Secret; all three are deleted when the
 build ends. Exit 0 pushed, 1 failed, 2 pushed but cleanup failed.

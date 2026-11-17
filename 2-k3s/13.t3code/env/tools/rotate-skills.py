@@ -82,7 +82,7 @@ def rotate(cluster, environment, directory, remove, backup=None, check=False):
     data = secret['data']
     runtime_raw = base64.b64decode(data['runtime.json'], validate=True)
     runtime = json.loads(runtime_raw)
-    inputs = validator.INPUTS | ({'work-auth.json'} if environment == 'work' else set())
+    inputs = validator.INPUTS if environment == 'homelab' else validator.WORK_INPUTS
     sort_keys = json_bytes(runtime) == runtime_raw
     if runtime['environment'] != environment or (
             not sort_keys and json_bytes(runtime, sort_keys=False) != runtime_raw) or set(runtime['sha256']) != inputs:

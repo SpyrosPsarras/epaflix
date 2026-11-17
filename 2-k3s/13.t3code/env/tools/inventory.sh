@@ -21,7 +21,7 @@ case "$variant" in
     [[ -x /usr/local/bin/vault ]]
     cmp "$root/env/files/vault-client.py" /usr/local/bin/vault
     if command -v az >/dev/null || command -v kubelogin >/dev/null; then exit 1; fi
-    [[ -d /etc/codex && ! -e /scripts/work-aks-auth.py && ! -e /usr/local/bin/keeper && ! -e /opt/keeper ]]
+    [[ -d /etc/codex && ! -e /usr/local/bin/keeper && ! -e /opt/keeper ]]
     [[ ! -e /etc/apt/sources.list.d/azure-cli.list && ! -e /usr/share/keyrings/microsoft.gpg ]]
     for file in /scripts/aks-auth.sh /scripts/aks-auth-central.sh /scripts/vault-run.py /scripts/vault-ssh-agent.py; do
       [[ ! -e $file ]]
@@ -30,14 +30,14 @@ case "$variant" in
   work)
     command -v az >/dev/null
     az version >/dev/null
-    [[ -d /etc/codex && -x /scripts/work-aks-auth.py ]]
+    [[ -d /etc/codex ]]
     command -v bw >/dev/null
     [[ -x /usr/local/bin/vault ]]
     cmp "$root/env/files/vault-client.py" /usr/local/bin/vault
     cmp "$root/env/files/keeper-client.py" /usr/local/bin/keeper
     [[ $(/opt/keeper/bin/pip show keepercommander | sed -n 's/^Version: //p') == "$(sed -n 's/^KEEPERCOMMANDER_VERSION=\([^ ]*\).*/\1/p' "$root/versions.env")" ]]
     /opt/keeper/bin/python -c 'import keepercommander.__main__, keepercommander.record_management, keepercommander.attachment'
-    if command -v kubelogin >/dev/null; then exit 1; fi
+    [[ $(kubelogin --version) == *"v$(sed -n 's/^KUBELOGIN_VERSION=\([^ ]*\).*/\1/p' "$root/versions.env")"* ]]
     for file in /scripts/aks-auth.sh /scripts/aks-auth-central.sh /scripts/vault-run.py /scripts/vault-ssh-agent.py; do
       [[ ! -e $file ]]
     done

@@ -382,8 +382,6 @@ class ProvisionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary) / 'inputs'
             fixture.fixture(directory)
-            fixture.multitenant(directory)
-            auth = json.loads((directory / 'work-auth.json').read_bytes())
             config = json.loads((directory / 'runtime.json').read_bytes())
             config.update(modelUrl=provision.MODEL_URL, gitAuth='github-token')
             (directory / 'runtime.json').write_text(json.dumps(config))
@@ -397,8 +395,7 @@ class ProvisionTests(unittest.TestCase):
             stored = create.call_args.args[2]
             self.assertEqual(stored['policies.json'], (directory / 'policies.json').read_bytes())
             self.assertEqual(stored['bundle.json'], (directory / 'bundle.json').read_bytes())
-            self.assertEqual(len(json.loads(stored['work-auth.json'])['contexts']), 2)
-            self.assertEqual(stored['work-auth.json'], (directory / 'work-auth.json').read_bytes())
+            self.assertEqual(set(stored), {'runtime.json', 'bundle.json', 'policies.json', 'services.json', 'authorized_keys'})
             self.assertEqual(json.loads(stored['runtime.json'])['grantSha256'],
                              {name: provision.digest(value) for name, value in runtime_grants.items()})
             config = json.loads((directory / 'runtime.json').read_bytes())
@@ -409,28 +406,26 @@ class ProvisionTests(unittest.TestCase):
             create.assert_not_called()
             config['modelUrl'] = provision.MODEL_URL
             (directory / 'runtime.json').write_text(json.dumps(config))
-            auth['contexts'].append(auth['contexts'][0])
-            (directory / 'work-auth.json').write_text(json.dumps(auth))
+            (directory / 'kubeconfig').write_text('{}')
             with patch.object(provision, 'require_stopped'), patch.object(provision, 'create_secret') as create, \
                     patch.object(provision, 'read_secret', return_value=runtime_grants), self.assertRaises(ValueError):
                 provision.inputs(directory)
             create.assert_not_called()
 
-    def test_owner_azure_login_passes_only_the_explicit_context_or_legacy_default(self):
+    def test_owner_azure_login_runs_device_code_login_with_extra_flags(self):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary)
             binary = home / 'kubectl'
             binary.write_text('#!/usr/bin/python3\nimport json, os, pathlib, sys\n'
                               'pathlib.Path(os.environ["HOME"], "call").write_text(json.dumps(sys.argv[1:]))\n')
             binary.chmod(0o700)
-            for selector in ([], ['work-second']):
+            for selector in ([], ['--tenant', 'fixture-tenant']):
                 master, slave = pty.openpty()
                 try:
                     with subprocess.Popen(['bash', str(Path(__file__).with_name('owner-login.sh')), 'azure', *selector],
                                           stdin=slave, stdout=slave, stderr=slave,
                                           env={'HOME': str(home), 'PATH': str(home) + ':/usr/bin:/bin'}) as process:
                         try:
-                            os.write(master, ((selector[0] if selector else 'default') + '\n').encode())
                             self.assertEqual(process.wait(timeout=5), 0)
                         finally:
                             if process.poll() is None:
@@ -441,8 +436,7 @@ class ProvisionTests(unittest.TestCase):
                     os.close(slave)
                 call = json.loads((home / 'call').read_text())
                 self.assertEqual(call, ['--context', 'epaflix', '-n', 't3code-work', 'exec', '-it', 'work-0', '-c', 't3',
-                                       '--', 'env', '-u', 'SSH_AUTH_SOCK', '-u', 'AZURE_CONFIG_DIR',
-                                       '/scripts/work-aks-auth.py', 'login', *selector])
+                                       '--', 'az', 'login', '--use-device-code', *selector])
 
     def test_secret_writer_uses_stdin_and_create_not_apply(self):
         with patch.object(provision, 'kubectl', return_value={}) as kubectl:

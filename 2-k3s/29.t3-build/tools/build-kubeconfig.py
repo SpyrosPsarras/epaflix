@@ -13,7 +13,7 @@ import subprocess
 import sys
 import time
 
-PODS = {'homelab': 't3code-homelab', 'work': 't3code-work'}
+PODS = {'homelab': 't3code-homelab'}
 GRANT = 't3-build-kubeconfig'
 
 

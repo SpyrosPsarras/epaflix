@@ -588,9 +588,10 @@ nested = {"🏠" = ["fixture", {enabled = false}]}
         with self.assertRaises(ValueError): self.validate()
         shutil.rmtree(self.home / '.t3')
         runtime.prepare(self.inputs, self.home, 'homelab')
-        (self.home / '.azure').mkdir()
-        with self.assertRaises(ValueError): self.validate()
-        (self.home / '.azure').rmdir()
+        for cache in ('.azure', '.aws', '.config/gcloud'):
+            (self.home / cache).mkdir()
+            with self.subTest(cache=cache), self.assertRaises(ValueError): self.validate()
+            (self.home / cache).rmdir()
         (self.home / '.config/t3-runtime/environment').write_text('work\n')
         with self.assertRaises(ValueError): self.validate()
 

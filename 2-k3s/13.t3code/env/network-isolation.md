@@ -7,8 +7,11 @@ uses the same cluster-admin access and broad runtime egress. Work keeps the
 restricted policy introduced in #1851.
 
 Both overlays default-deny ingress and egress. Every pod can use CoreDNS in
-`kube-system` on UDP/TCP 53 and the Kubernetes API on the three master IPs,
-TCP 6443. Idle-rollout keeps only these grants.
+`kube-system` on UDP/TCP 53. The Kubernetes API on the three master IPs, TCP
+6443, is open to every homelab pod but only to idle-rollout in work
+(`t3code-kube-api`). The work runtime is denied the epaflix cluster; its
+private-range block also closes the API VIP `192.168.10.100` and the masters.
+Idle-rollout keeps only DNS and API grants.
 
 Homelab runtime pods can reach pods in every namespace except `t3code-work`
 and `mcp-hub-work`, using a namespace-selector `NotIn` expression without a
@@ -31,7 +34,7 @@ Work runtime pods can reach `cliproxy` in `remote-pi` on TCP 8317, their own
 hub on TCP 8000, Traefik's vault HTTPS backend on TCP 8443 and public IPv4
 destinations. Namespace and pod selectors are combined. Its public rule
 excludes RFC1918, zero, loopback, link-local, shared-address, multicast and
-reserved high address ranges. The public work AKS API uses this rule.
+reserved high address ranges. Public work cluster APIs, such as AKS, use this rule.
 No work endpoint is published. Neither overlay adds an IPv6 allow rule.
 Public IPv4 egress has no port restriction and permits T3 Connect HTTPS
 and Cloudflare tunnel TCP/UDP 7844. It also carries SSH to GitHub on TCP 22.
@@ -107,6 +110,7 @@ the homelab agent.
    Confirm both policies remain disabled and any in-flight sync has completed.
    Only then run
    `kubectl --context epaflix -n <ns> delete networkpolicy t3code-runtime default-deny t3code-control-plane`
+   (in work, also `t3code-kube-api`)
    for the affected namespace. Removing only `t3code-runtime` leaves the default
    deny and does not restore SSH. Review and merge the policy rollback, then
    sync `app-of-apps` to that merged revision to restore parent and runtime
@@ -170,8 +174,8 @@ the homelab agent.
    Do not probe the work hub from homelab. From homelab, run
    `kubectl auth can-i '*' '*' --all-namespaces` and `kubectl get namespaces` with
    `KUBECONFIG=/run/t3-inputs/kubeconfig` and `ssh <name> true` for approved LAN
-   targets. From work, perform a permitted inventory read in the already
-   enrolled AKS context. Report pass/fail only, not endpoints or authentication
+   targets. From work, perform a permitted inventory read in an already
+   configured work cluster context. Report pass/fail only, not endpoints or authentication
    output. Record unavailable targets as incomplete checks.
 
 5. A5: Once each backend has its own accepted vault sidecar, use an authorized

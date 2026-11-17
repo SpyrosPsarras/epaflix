@@ -92,9 +92,8 @@ pause Applications or scale a workload.
 This exception applies only to skills in `bundle.json`, for either isolated
 backend. Argo does not manage `t3-runtime-inputs`. One atomic Secret patch
 updates `bundle.json` and its `runtime.json` digest. Grants remain untouched
-in `t3-runtime-grants`. Skills are installed at startup. Work's kubectl
-helper rereads `runtime.json` but checks only the unchanged work-auth and
-kubeconfig digests. This path needs no Argo pause or scale-down.
+in `t3-runtime-grants`. Skills are installed at startup. This path needs no
+Argo pause or scale-down.
 
 1. S1: Stage one directory per changed skill, each with `SKILL.md`, outside
    the repository. Each directory replaces that whole skill, including removal

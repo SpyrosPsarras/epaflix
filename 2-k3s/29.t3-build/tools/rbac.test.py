@@ -9,7 +9,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 APPS = ROOT.parent / '11.argocd/apps'
-BUILDERS = ('t3-build-homelab', 't3-build-work')
+BUILDERS = ('t3-build-homelab',)
 ACCOUNT = 'builder'
 VERBS = ('get', 'list', 'watch', 'create', 'update', 'patch', 'delete', 'deletecollection')
 # Exactly what kubectl needs for t3-build (create, logs -f job/, get job, delete) and t3-run (run --rm -i).
@@ -94,7 +94,7 @@ class BuilderRbacTest(unittest.TestCase):
                                          ('ServiceAccount', ACCOUNT)])
                 (account,) = (doc for doc in docs if doc['kind'] == 'ServiceAccount')
                 self.assertIs(account['automountServiceAccountToken'], False)
-        self.assertEqual(len(self.docs), 2 * 9)
+        self.assertEqual(len(self.docs), 9)
 
     def test_namespaces_enforce_baseline_pod_security(self):
         namespaces = {doc['metadata']['name']: doc['metadata'].get('labels', {})
