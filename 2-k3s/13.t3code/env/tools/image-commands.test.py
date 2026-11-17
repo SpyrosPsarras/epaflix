@@ -135,8 +135,7 @@ chmod 700 "$T3CODE_HOME/runtime/versions/0.1.1-test" "$T3CODE_HOME/runtime/versi
                 code = staging
                 for source, destination in (('/src', ROOT), ('/scripts', scripts),
                                             ('/homelab-src/files', homelab),
-                                            ('/work-src/files', work),
-                                            ('/scripts/work-aks-auth.py', scripts / 'work-aks-auth.py')):
+                                            ('/work-src/files', work)):
                     code = code.replace(repr(source), repr(str(destination)))
                 result = subprocess.run([sys.executable, '-c', code],
                     env={**os.environ, 'MCP_HUB_INSTANCE': variant}, capture_output=True, text=True)
@@ -150,12 +149,9 @@ chmod 700 "$T3CODE_HOME/runtime/versions/0.1.1-test" "$T3CODE_HOME/runtime/versi
                     self.assertEqual((scripts / 'ssh-config.sh').read_bytes(),
                                      (homelab / 'ssh-config.sh').read_bytes())
                     self.assertTrue((scripts / 'ssh-agent-ready.sh').is_file())
-                    self.assertFalse((scripts / 'work-aks-auth.py').exists())
                 else:
                     for name in ('work-ssh.md', 'work-ssh.py'):
                         self.assertEqual((scripts / name).read_bytes(), (work / name).read_bytes())
-                    self.assertEqual((scripts / 'work-aks-auth.py').read_bytes(),
-                                     (ROOT / 'env/files/work-aks-auth.py').read_bytes())
                     self.assertFalse((scripts / 'ssh-config.sh').exists())
                     self.assertFalse((scripts / 'homelab-ssh.conf').exists())
 

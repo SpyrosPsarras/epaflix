@@ -18,7 +18,7 @@ spec:
   template:
     metadata:
       annotations:
-        t3code.epaflix.com/inputs-grants-revision: "r8"
+        t3code.epaflix.com/inputs-grants-revision: "r9"
       labels:
         app.kubernetes.io/name: t3code
     spec:
@@ -102,7 +102,7 @@ spec:
               mountPath: /keeper
       containers:
         - name: t3
-          image: ghcr.io/spyrospsarras/t3-runtime:work-inputs-00bfb0b9438b423b8156be3cdffa7e45
+          image: ghcr.io/spyrospsarras/t3-runtime:work-inputs-6f686805ae4beb51eabd07245034dfba
           imagePullPolicy: IfNotPresent
           command: [bash, /scripts/entrypoint.sh]
           env:
@@ -128,8 +128,6 @@ spec:
                   key: hub-token
             - name: T3_VAULT_CLIENT
               value: "1"
-            - name: T3_BUILD_KUBECONFIG
-              value: /run/t3-build/kubeconfig
             # Chrome's sandbox needs user namespaces, which RuntimeDefault seccomp and the nodes' AppArmor block;
             # the pod is the boundary for T3's headless browser instead.
             - name: T3CODE_SERVER_BROWSER_SANDBOX
@@ -158,9 +156,6 @@ spec:
               readOnly: true
             - name: scripts
               mountPath: /scripts
-              readOnly: true
-            - name: t3-build-kubeconfig
-              mountPath: /run/t3-build
               readOnly: true
             - name: tmp
               mountPath: /tmp
@@ -222,9 +217,6 @@ spec:
               readOnly: true
             - name: scripts
               mountPath: /scripts
-              readOnly: true
-            - name: t3-build-kubeconfig
-              mountPath: /run/t3-build
               readOnly: true
             - name: tmp
               mountPath: /tmp
@@ -389,12 +381,8 @@ spec:
                 path: policies.json
               - key: services.json
                 path: services.json
-              - key: kubeconfig
-                path: kubeconfig
               - key: authorized_keys
                 path: authorized_keys
-              - key: work-auth.json
-                path: work-auth.json
         - name: login
           secret:
             secretName: t3-runtime-inputs
@@ -410,15 +398,6 @@ spec:
                   name: t3code-scripts
               - configMap:
                   name: t3code-work-ssh
-        # Optional: the pod starts before the owner runs 29.t3-build/tools/build-kubeconfig.py.
-        - name: t3-build-kubeconfig
-          secret:
-            secretName: t3-build-kubeconfig
-            optional: true
-            defaultMode: 0440
-            items:
-              - key: kubeconfig
-                path: kubeconfig
         - name: tmp
           emptyDir:
             sizeLimit: 20Gi

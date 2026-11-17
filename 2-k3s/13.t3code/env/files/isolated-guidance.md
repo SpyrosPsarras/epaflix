@@ -39,14 +39,22 @@ before writing. Do not use or install Commander or `ksm` yourself. If `keeper` p
 
 There is no system pip. For Python packages, create a virtual environment with `python3 -m venv <dir>` and use `<dir>/bin/pip` and `<dir>/bin/python`, or install a tool into `~/.local/bin`. Do not use sudo or system package managers.
 
-## Builds and one-shot containers
+## Builds and one-shot containers (homelab pod only)
 
 There is no Docker here. Use `/scripts/t3-build <context-dir> --destination <registry/repo:tag> [--dockerfile path] [--docker-config file]`
 to build and push an image with kaniko, and `/scripts/t3-run <image> [-- cmd...]` for a one-shot
-container with stdin and stdout attached. Both run in this pod's own namespace (`t3-build-homelab` or `t3-build-work`) through
+container with stdin and stdout attached. Both run in `t3-build-homelab` through
 `/run/t3-build/kubeconfig`, with public internet only and no LAN. The gzipped context must stay under 1 MB.
 If the kubeconfig is missing, tell the owner instead of working around it. Details:
 [t3-build](https://github.com/SpyrosPsarras/epaflix/blob/main/2-k3s/29.t3-build/README.md).
+
+## Kubernetes clusters (work pod only)
+
+Use any cluster except epaflix, the owner's homelab cluster.
+Never use epaflix from here; its API is blocked on purpose. Keep kubeconfigs in `~/.kube/` (the default
+`~/.kube/config` or separate files); the home is persistent. Add an AKS cluster with
+`az aks get-credentials -g <group> -n <cluster>` then `kubelogin convert-kubeconfig -l azurecli`, or write a kubeconfig
+the owner gives you as text. If `az` is not logged in, run `az login --use-device-code` and give the owner the code.
 
 ## Disk space
 

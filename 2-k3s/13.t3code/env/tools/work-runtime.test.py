@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Synthetic reviewed work inputs. No live accounts or endpoints are read."""
 import base64
-import copy
 import hashlib
 import importlib
 import json
@@ -20,7 +19,6 @@ spec = importlib.util.spec_from_file_location('isolated_fixture', Path(__file__)
 common = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(common)
 runtime = common.runtime
-auth = importlib.import_module('work-aks-auth')
 ROOT = common.ROOT
 
 
@@ -28,7 +26,7 @@ def refresh(directory):
     path = directory / 'runtime.json'
     config = json.loads(path.read_text())
     config['sha256'] = {name: hashlib.sha256((directory / name).read_bytes()).hexdigest()
-                        for name in runtime.INPUTS | {'work-auth.json'}}
+                        for name in runtime.WORK_INPUTS}
     path.write_text(json.dumps(config))
 
 
@@ -41,54 +39,12 @@ def fixture(directory):
         if name == 'runtime.json':
             obj['hubUrl'] = 'http://mcp-hub.mcp-hub-work.svc.cluster.local:8000'
             obj['projectUrl'] = 'https://github.com/work/fixture.git'
-            obj['approvals']['workAuth'] = 'synthetic-work-account-and-scope-review'
+            del obj['approvals']['kubeconfig']
             obj['grantSha256']['hub-token'] = hashlib.sha256(('work.' + 'h' * 43).encode()).hexdigest()
             obj['grantSha256']['model-token'] = hashlib.sha256(b'tok-fixture-model').hexdigest()
         path.write_text(json.dumps(obj))
-    bundle_path = directory / 'bundle.json'
-    bundle = json.loads(bundle_path.read_text())
-    instructions = bundle['files']['instructions.md']
-    text = base64.b64decode(instructions['data']).decode()
-    text += '\nEnvironment: this is the work backend. Kubernetes access is the AKS dev cluster only. Never request or use a production context.\n'
-    instructions['data'] = base64.b64encode(text.encode()).decode()
-    bundle_path.write_text(json.dumps(bundle))
-    kube = {'apiVersion': 'v1', 'kind': 'Config', 'current-context': 'work-first',
-            'clusters': [], 'users': [], 'contexts': []}
-    pins = []
-    for name in ('work-first', 'work-second'):
-        ca = ('synthetic-ca-' + name).encode()
-        server = f'https://{name}.example.test:6443'
-        kube['clusters'].append({'name': name, 'cluster': {
-            'server': server, 'certificate-authority-data': base64.b64encode(ca).decode()}})
-        kube['users'].append({'name': name, 'user': {'exec': copy.deepcopy(auth.EXEC)}})
-        kube['contexts'].append({'name': name, 'context': {'cluster': name, 'user': name}})
-        pins.append({'name': name, 'cluster': name, 'user': name, 'server': server,
-                     'certificateAuthoritySha256': hashlib.sha256(ca).hexdigest()})
-    (directory / 'kubeconfig').write_text(json.dumps(kube))
-    (directory / 'work-auth.json').write_text(json.dumps({'environment': 'work',
-        'tenantId': '11111111-1111-1111-1111-111111111111',
-        'audience': '22222222-2222-2222-2222-222222222222',
-        'subscriptionId': '33333333-3333-3333-3333-333333333333',
-        'account': {'name': 'fixture@work.example.test', 'type': 'user'}, 'contexts': pins}))
+    (directory / 'kubeconfig').unlink()
     refresh(directory)
-
-
-def multitenant(directory):
-    path = directory / 'work-auth.json'
-    reviewed = json.loads(path.read_text())
-    scope = {key: copy.deepcopy(reviewed[key]) for key in auth.SCOPE_FIELDS}
-    scope.update(tenantId='44444444-4444-4444-4444-444444444444',
-                 audience='77777777-7777-7777-7777-777777777777',
-                 subscriptionId='55555555-5555-5555-5555-555555555555',
-                 account={'name': 'sales@work.example.test', 'type': 'user'})
-    reviewed['contexts'][1]['authentication'] = scope
-    path.write_text(json.dumps(reviewed))
-    path = directory / 'kubeconfig'
-    kube = json.loads(path.read_text())
-    kube['users'][1]['user']['exec']['args'] = ['token', 'work-second']
-    path.write_text(json.dumps(kube))
-    refresh(directory)
-    return scope
 
 
 class WorkRuntimeTests(unittest.TestCase):
@@ -152,49 +108,24 @@ class WorkRuntimeTests(unittest.TestCase):
             self.assertIn(ssh.read_text(), (self.home / '.codex/AGENTS.override.md').read_text())
             self.assertEqual((self.inputs / 'bundle.json').read_bytes(), payload)
 
-    def test_private_separate_kubeconfigs_pin_their_context_without_changing_defaults(self):
-        multitenant(self.inputs)
-        original = (self.inputs / 'kubeconfig').read_bytes()
-        (self.home / '.kube').mkdir(mode=0o755)
+    def test_home_kubeconfig_persists_and_no_kubeconfig_input_is_accepted(self):
         self.prepare()
-        self.assertEqual((self.home / '.kube').stat().st_mode & 0o777, 0o755)
-        directory = self.home / '.kube/work'
-        self.assertEqual(directory.stat().st_mode & 0o777, 0o700)
-        for name in ('work-first', 'work-second'):
-            path = directory / (name + '.json')
-            kube = json.loads(path.read_bytes())
-            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
-            self.assertEqual(kube['current-context'], name)
-            self.assertEqual([entry['name'] for entry in kube['contexts']], [name])
-            self.assertEqual(kube['users'][0]['user']['exec']['args'], ['token', name])
-            result = subprocess.run(['kubectl', '--kubeconfig', str(path), 'config', 'current-context'], capture_output=True, check=True)
-            self.assertEqual(result.stdout.decode().strip(), name)
-        self.assertFalse((self.home / '.kube/config').exists())
-        self.assertEqual((self.inputs / 'kubeconfig').read_bytes(), original)
-        for name in ('removed.json', '.isolated-policy-interrupted'):
-            (directory / name).write_text('{}')
-            (directory / name).chmod(0o600)
-        runtime.apply(self.inputs, self.home, 'work')
-        self.assertEqual({path.name for path in directory.iterdir()}, {'work-first.json', 'work-second.json'})
-        self.assertEqual((self.inputs / 'kubeconfig').read_bytes(), original)
-
-    def test_private_kubeconfig_symlinks_and_nonprivate_directories_are_refused(self):
-        self.prepare()
-        directory = self.home / '.kube/work'
-        path = directory / 'work-first.json'
-        path.unlink()
-        path.symlink_to(self.inputs / 'kubeconfig')
-        with self.assertRaisesRegex(runtime.InputError, 'owned and private'):
-            runtime.install_work_kubeconfigs(self.inputs, self.home)
-        path.unlink()
-        temporary = directory / '.isolated-policy-interrupted'
-        temporary.symlink_to(self.inputs / 'kubeconfig')
-        with self.assertRaisesRegex(runtime.InputError, 'owned and private'):
-            runtime.install_work_kubeconfigs(self.inputs, self.home)
-        temporary.unlink()
-        directory.chmod(0o755)
-        with self.assertRaisesRegex(runtime.InputError, 'owned and private'):
-            runtime.install_work_kubeconfigs(self.inputs, self.home)
+        config = self.home / '.kube/config'
+        config.parent.mkdir()
+        config.write_text('synthetic-any-cluster')
+        for cache in ('.aws', '.config/gcloud'):
+            (self.home / cache).mkdir()
+        for _ in range(2):
+            runtime.apply(self.inputs, self.home, 'work')
+            runtime.prepare(self.inputs, self.home, 'work')
+        self.assertEqual(config.read_text(), 'synthetic-any-cluster')
+        self.assertEqual(os.listdir(config.parent), ['config'])
+        entrypoint = (ROOT / 'env/files/isolated-entrypoint.sh').read_text()
+        self.assertIn('if [[ $MCP_HUB_INSTANCE == homelab ]]; then\n  export KUBECONFIG=', entrypoint)
+        self.assertEqual(entrypoint.count('KUBECONFIG='), 1)
+        (self.inputs / 'kubeconfig').write_text('{}')
+        with self.assertRaisesRegex(ValueError, 'only the reviewed files'):
+            self.validate()
 
     def test_work_only_hub_policies_settings_history_and_azure_persist(self):
         os.environ['T3_VAULT_CLIENT'] = '1'
@@ -245,7 +176,7 @@ class WorkRuntimeTests(unittest.TestCase):
     def test_work_notion_allowlist_rotation_preserves_boundaries(self):
         self.prepare()
         runtime.apply(self.inputs, self.home, 'work')
-        retained = [self.inputs / name for name in ('policies.json', 'work-auth.json', 'kubeconfig', 'bundle.json')]
+        retained = [self.inputs / name for name in ('policies.json', 'bundle.json')]
         policies = json.loads((self.inputs / 'policies.json').read_text())
         retained.extend(self.home / name for name in policies['files'] if name != runtime.LEGACY_PERMISSION_PATH)
         for name, value in (('.t3/userdata/history-fixture', 'synthetic-work-history'),
@@ -395,29 +326,9 @@ class WorkRuntimeTests(unittest.TestCase):
         self.assertEqual(actual['model_reasoning_effort'], 'high')
         self.assertEqual(actual['model_provider'], 'cliproxy')
 
-    def test_work_multiple_contexts_are_pinned_not_classified_by_names(self):
-        self.validate()
-        mutations = [lambda obj: obj['users'][0].update(user={'token': 'synthetic-homelab-token'}),
-            lambda obj: obj['users'][0]['user']['exec'].update(command='/bin/true'),
-            lambda obj: obj['users'][0]['user']['exec'].update(env=[{'name': 'AZURE_CONFIG_DIR', 'value': '/foreign'}]),
-            lambda obj: obj['users'][0]['user']['exec'].update(args=['login']),
-            lambda obj: obj['contexts'][0]['context'].update(user='work-second'),
-            lambda obj: obj['contexts'][0].update(name='homelab'),
-            lambda obj: obj['contexts'].append(copy.deepcopy(obj['contexts'][0])),
-            lambda obj: obj['clusters'][0]['cluster'].update(server='https://homelab.example.test'),
-            lambda obj: obj['clusters'][0]['cluster'].update(**{'certificate-authority': '/foreign/ca'}),
-            lambda obj: obj.update(**{'current-context': 'unapproved'})]
-        for mutation in mutations:
-            fixture(self.inputs)
-            self.change('kubeconfig', mutation)
-            with self.assertRaises(ValueError): self.validate()
-
-    def test_auth_scope_inventory_grants_and_reviews_fail_closed(self):
-        for name, transform in [('work-auth.json', lambda obj: obj.update(environment='homelab')),
-            ('work-auth.json', lambda obj: obj.pop('tenantId')),
-            ('work-auth.json', lambda obj: obj.update(audience='')),
-            ('work-auth.json', lambda obj: obj.update(contexts=[])),
-            ('runtime.json', lambda obj: obj['approvals'].pop('workAuth')),
+    def test_inventory_grants_and_reviews_fail_closed(self):
+        for name, transform in [('runtime.json', lambda obj: obj['approvals'].update(kubeconfig='stale-review')),
+            ('runtime.json', lambda obj: obj['approvals'].pop('hub')),
             ('services.json', lambda obj: obj.update(environment='homelab')),
             ('services.json', lambda obj: obj.update(services=['vaultwarden'])),
             ('runtime.json', lambda obj: obj.update(hubUrl='http://mcp-hub.mcp-hub-homelab.svc.cluster.local:8000'))]:
@@ -429,7 +340,7 @@ class WorkRuntimeTests(unittest.TestCase):
                             ('SSH_AUTH_SOCK', '/foreign/agent'), ('AZURE_CONFIG_DIR', '/foreign/cache'), ('BW_SESSION', 'foreign')]:
             with patch.dict(os.environ, {name: value}), self.assertRaises(ValueError): self.validate()
         (self.inputs / 'work-auth.json').write_text('{}')
-        with self.assertRaises(ValueError): self.validate()
+        with self.assertRaisesRegex(ValueError, 'only the reviewed files'): self.validate()
 
     def test_work_startup_rejects_every_vault_client_variable_including_empty_values(self):
         with patch.dict(os.environ, {'T3_VAULT_CLIENT': '1'}):
@@ -450,8 +361,11 @@ class WorkRuntimeTests(unittest.TestCase):
         (self.home / '.config/t3-runtime').mkdir(parents=True)
         (self.home / '.config/t3-runtime/environment').write_text('homelab\n')
         with self.assertRaises(ValueError): self.validate()
-        for kube in (json.loads((self.inputs / 'kubeconfig').read_text()),):
-            with self.assertRaises(ValueError): runtime.validate_homelab_kubeconfig(kube)
+        kube = {'current-context': 'any', 'clusters': [{'name': 'any', 'cluster': {
+                    'server': 'https://any.example.test', 'certificate-authority-data': 'Y2E='}}],
+                'users': [{'name': 'any', 'user': {'exec': {'command': 'kubelogin'}}}],
+                'contexts': [{'name': 'any', 'context': {'cluster': 'any', 'user': 'any'}}]}
+        with self.assertRaises(ValueError): runtime.validate_homelab_kubeconfig(kube)
 
     def test_laptop_environments_have_distinct_keys_configs_and_ports(self):
         for environment, port in [('homelab', 2222), ('work', 2223)]:
@@ -512,8 +426,7 @@ class WorkRuntimeTests(unittest.TestCase):
         ci_steps = {step.get('name'): step for job in ci['jobs'].values()
                     for step in job['steps'] if 'name' in step}
         self.assertIn('2-k3s/13.t3code-work', ci_steps['Kustomize build (sops-free dirs)']['run'])
-        for suite in ('work-runtime.test.py', 'work-aks-auth.test.py'):
-            self.assertIn(suite, ci_steps['T3 config and placement tests']['run'])
+        self.assertIn('work-runtime.test.py', ci_steps['T3 config and placement tests']['run'])
         smoke = ci_steps['T3 install and runtime smoke']['run']
         self.assertEqual(ci['jobs']['smoke']['strategy']['matrix']['variant'], ['mixed', 'homelab', 'work'])
         self.assertIn('T3_RUNTIME_VARIANT="$VARIANT"', smoke)
@@ -556,17 +469,11 @@ class WorkRuntimeTests(unittest.TestCase):
             secret_names = {v['secret']['secretName'] for v in pod['volumes'] if 'secret' in v}
             secret_names.update(source['secret']['name'] for v in pod['volumes']
                                 for source in v.get('projected', {}).get('sources', []) if 'secret' in source)
-            self.assertEqual(secret_names, {'t3-runtime-inputs', 't3-work-ssh', 't3-build-kubeconfig'})
-            build = next(v['secret'] for v in pod['volumes'] if v['name'] == 't3-build-kubeconfig')
-            self.assertEqual((build['optional'], build['items']), (True, [{'key': 'kubeconfig', 'path': 'kubeconfig'}]))
-            for container in pod['containers'][:2]:
-                self.assertIn({'name': 't3-build-kubeconfig', 'mountPath': '/run/t3-build', 'readOnly': True},
-                              container['volumeMounts'])
-            self.assertNotIn('t3-build-kubeconfig', {m['name'] for m in pod['containers'][2]['volumeMounts']})
-            self.assertIn({'name': 'T3_BUILD_KUBECONFIG', 'value': '/run/t3-build/kubeconfig'}, pod['containers'][0]['env'])
-            self.assertNotIn('KUBECONFIG', {e['name'] for e in pod['containers'][0]['env']})
+            self.assertEqual(secret_names, {'t3-runtime-inputs', 't3-work-ssh'})
+            self.assertNotIn('/run/t3-build', json.dumps(pod))
+            self.assertFalse({'KUBECONFIG', 'T3_BUILD_KUBECONFIG'} & {e['name'] for e in pod['containers'][0]['env']})
             inputs = next(v for v in pod['volumes'] if v['name'] == 'inputs')
-            self.assertIn({'key': 'work-auth.json', 'path': 'work-auth.json'}, inputs['secret']['items'])
+            self.assertEqual({item['key'] for item in inputs['secret']['items']}, runtime.WORK_INPUTS | {'runtime.json'})
             image = pod['containers'][0]['image']
             self.assertIn(':work-inputs-', image)
             self.assertTrue(all(c['image'] == image for c in pod['containers'] + pod['initContainers']))
@@ -581,12 +488,9 @@ class WorkRuntimeTests(unittest.TestCase):
             binding = next(doc for doc in docs if doc['kind'] == 'RoleBinding')
             self.assertEqual(binding['subjects'][0]['namespace'], 't3code-work')
             scripts = next(doc for doc in docs if doc['kind'] == 'ConfigMap' and 'entrypoint.sh' in doc['data'])
-            self.assertIn('work-aks-auth.py', scripts['data'])
-            self.assertTrue({'t3-build', 't3-run'} <= set(scripts['data']))
+            self.assertNotIn('work-aks-auth.py', scripts['data'])
             self.assertNotIn('vault-run.py', scripts['data'])
             self.assertNotIn('aks-auth-central.sh', scripts['data'])
-            homelab = list(yaml.safe_load_all(subprocess.check_output(['kustomize', 'build', str(tree / '13.t3code-homelab')])) )
-            self.assertFalse(any('work-aks-auth.py' in doc.get('data', {}) for doc in homelab))
             manifest = overlay / 'statefulset.yaml'
             annotation = 't3code.epaflix.com/inputs-grants-revision'
             before = sts['spec']['template']

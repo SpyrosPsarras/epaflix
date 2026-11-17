@@ -260,13 +260,13 @@ def inputs(directory):
     for path in (root / '13.t3code/env/files', root / '13.t3code/one/files'):
         sys.path.insert(0, str(path))
     validator = importlib.import_module('isolated-config')
-    names = validator.INPUTS | {'runtime.json', 'work-auth.json'}
+    names = validator.WORK_INPUTS | {'runtime.json'}
     if {path.name for path in directory.iterdir() if not path.name.startswith('.')} != names:
-        raise ValueError('Supply only the seven reviewed work input files')
+        raise ValueError('Supply only the five reviewed work input files')
     data = {name: (directory / name).read_bytes() for name in names}
     config = json.loads(data['runtime.json'])
     if config['modelUrl'] != MODEL_URL or config['gitAuth'] != 'github-token':
-        raise ValueError('Work requires the shared proxy, work GitHub grant and reviewed AKS contexts')
+        raise ValueError('Work requires the shared proxy and work GitHub grant')
     if json.loads(data['services.json']) != SERVICES:
         raise ValueError('Initial work service inventory must contain searxng only')
     runtime_grants = read_secret(*RUNTIME_GRANTS)

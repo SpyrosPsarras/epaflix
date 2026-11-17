@@ -25,12 +25,9 @@ home PVC, not in the image, so copy them by hand after editing.
 
 The mixed `t3code` pod is no longer an AKS authentication path. The helpers
 above describe its legacy setup; `AKS_TENANT_ID` is no longer supplied by
-`cliproxy-secrets`. The work pod's `/scripts/work-aks-auth.py` reads `tenantId`
-from the reviewed `/run/t3-inputs/work-auth.json`, mounted from
-`t3-runtime-inputs` in `t3code-work`, and verifies its digest against
-`runtime.json` before authentication. See
-[`../../13.t3code-work/README.md`](../../13.t3code-work/README.md) for the
-current work authentication procedure.
+`cliproxy-secrets`. The work pod uses plain `az login` and `kubelogin`
+with kubeconfigs in its persistent home. See
+[`../../13.t3code-work/README.md#kubernetes-clusters`](../../13.t3code-work/README.md#kubernetes-clusters).
 
 Check the helpers with `python3 env/tools/aks-auth.test.py` from
 `2-k3s/13.t3code`.

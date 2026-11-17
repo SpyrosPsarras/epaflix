@@ -18,7 +18,7 @@ SPEC = importlib.util.spec_from_file_location('build_kubeconfig', Path(__file__)
 TOKEN = b'synthetic-builder-credential'
 CA = b'synthetic-builder-certificate'
 DIAGNOSTIC = b'synthetic-private-kubectl-diagnostic'
-TARGET = {'homelab': 't3code-homelab', 'work': 't3code-work'}
+TARGET = {'homelab': 't3code-homelab'}
 
 
 def encoded(value):
@@ -100,40 +100,39 @@ class BuildKubeconfigTest(unittest.TestCase):
         self.assertEqual(cluster.violations, [])
         return code, stdout.getvalue(), stderr.getvalue(), sleep
 
-    def test_each_pod_gets_its_own_scoped_grant_in_its_namespace(self):
-        for pod in ('homelab', 'work'):
-            with self.subTest(pod=pod):
-                cluster = FakeKubectl(pod)
-                cluster.delay = 2
-                code, stdout, stderr, sleep = self.invoke(cluster, ['--context', 'epaflix', '--pod', pod])
-                self.assertEqual((code, stdout, stderr), (0, f't3-build kubeconfig prepared for {pod}.\n', ''))
-                self.assertEqual(sleep.call_count, 2)
-                account, grant = cluster.created
-                self.assertEqual(account['metadata'], {'name': 'builder-token', 'namespace': f't3-build-{pod}',
-                    'annotations': {'kubernetes.io/service-account.name': 'builder'}})
-                self.assertEqual(account['type'], 'kubernetes.io/service-account-token')
-                self.assertEqual(grant['metadata'], {'name': 't3-build-kubeconfig', 'namespace': TARGET[pod]})
-                self.assertEqual((grant['type'], set(grant['data'])), ('Opaque', {'kubeconfig'}))
-                self.assertEqual(json.loads(base64.b64decode(grant['data']['kubeconfig'])), expected_config(pod))
-                before = copy.deepcopy(cluster.resources)
-                self.assertEqual(self.invoke(cluster, ['--context', 'epaflix', '--pod', pod])[0], 0)
-                self.assertEqual(cluster.resources, before)
-                self.assertEqual(len(cluster.created), 2)
+    def test_homelab_gets_its_scoped_grant_in_its_namespace(self):
+        pod = 'homelab'
+        cluster = FakeKubectl(pod)
+        cluster.delay = 2
+        code, stdout, stderr, sleep = self.invoke(cluster, ['--context', 'epaflix', '--pod', pod])
+        self.assertEqual((code, stdout, stderr), (0, f't3-build kubeconfig prepared for {pod}.\n', ''))
+        self.assertEqual(sleep.call_count, 2)
+        account, grant = cluster.created
+        self.assertEqual(account['metadata'], {'name': 'builder-token', 'namespace': f't3-build-{pod}',
+            'annotations': {'kubernetes.io/service-account.name': 'builder'}})
+        self.assertEqual(account['type'], 'kubernetes.io/service-account-token')
+        self.assertEqual(grant['metadata'], {'name': 't3-build-kubeconfig', 'namespace': TARGET[pod]})
+        self.assertEqual((grant['type'], set(grant['data'])), ('Opaque', {'kubeconfig'}))
+        self.assertEqual(json.loads(base64.b64decode(grant['data']['kubeconfig'])), expected_config(pod))
+        before = copy.deepcopy(cluster.resources)
+        self.assertEqual(self.invoke(cluster, ['--context', 'epaflix', '--pod', pod])[0], 0)
+        self.assertEqual(cluster.resources, before)
+        self.assertEqual(len(cluster.created), 2)
 
     def test_failures_are_quiet_and_leave_existing_grant(self):
         for scenario in ('account', 'unpopulated', 'mismatch', 'kubectl'):
             with self.subTest(scenario=scenario):
-                cluster = FakeKubectl('work')
+                cluster = FakeKubectl('homelab')
                 grant = {'type': 'Opaque', 'data': {'kubeconfig': encoded(b'{"current-context":"other"}')}}
                 if scenario == 'account':
                     cluster.resources.clear()
                 elif scenario == 'unpopulated':
                     cluster.populate = False
                 elif scenario == 'mismatch':
-                    cluster.resources[('t3code-work', 'secret', 't3-build-kubeconfig')] = grant
+                    cluster.resources[('t3code-homelab', 'secret', 't3-build-kubeconfig')] = grant
                 else:
                     cluster.fail = True
-                code, stdout, stderr, sleep = self.invoke(cluster, ['--context', 'epaflix', '--pod', 'work'])
+                code, stdout, stderr, sleep = self.invoke(cluster, ['--context', 'epaflix', '--pod', 'homelab'])
                 self.assertNotEqual(code, 0)
                 self.assertEqual(stdout, '')
                 for private in (TOKEN, CA, DIAGNOSTIC):
@@ -144,10 +143,10 @@ class BuildKubeconfigTest(unittest.TestCase):
                 self.assertLessEqual(sleep.call_count, 30)
 
     def test_context_and_pod_are_required_before_any_kubectl_call(self):
-        for args in ([], ['--context', 'epaflix'], ['--pod', 'work'], ['--context', ' ', '--pod', 'work'],
-                     ['--context', 'epaflix', '--pod', 'manager']):
+        for args in ([], ['--context', 'epaflix'], ['--pod', 'homelab'], ['--context', ' ', '--pod', 'homelab'],
+                     ['--context', 'epaflix', '--pod', 'work'], ['--context', 'epaflix', '--pod', 'manager']):
             with self.subTest(args=args):
-                cluster = FakeKubectl('work')
+                cluster = FakeKubectl('homelab')
                 code, stdout, _, _ = self.invoke(cluster, args)
                 self.assertNotEqual(code, 0)
                 self.assertEqual((stdout, cluster.calls), ('', []))

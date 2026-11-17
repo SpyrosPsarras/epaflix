@@ -13,7 +13,7 @@ import sys
 import tempfile
 import tomllib
 
-from urllib.parse import quote, urlsplit
+from urllib.parse import urlsplit
 
 import hub_clients
 import hub_services
@@ -23,6 +23,8 @@ t3_pi_settings = importlib.import_module('t3-pi-settings')
 
 INPUTS = {'bundle.json', 'policies.json', 'services.json', 'kubeconfig', 'authorized_keys'}
 APPROVALS = {'git', 'models', 'policies', 'kubeconfig', 'hub', 'laptop', 'routing'}
+WORK_INPUTS = INPUTS - {'kubeconfig'}
+WORK_APPROVALS = APPROVALS - {'kubeconfig'}
 CODEX_REQUIREMENTS = Path('/etc/codex/requirements.toml')
 GUIDANCE = Path('/opt/t3/isolated-guidance.md')
 POLICY_PATHS = {'.cc-safety-net/policy.json', '.claude/settings.json'}
@@ -60,8 +62,8 @@ def validate_bundle(bundle):
 
 
 def validate(inputs, home, environment):
-    reviewed_inputs = INPUTS | ({'work-auth.json'} if environment == 'work' else set())
-    approvals = APPROVALS | ({'workAuth'} if environment == 'work' else set())
+    reviewed_inputs = INPUTS if environment == 'homelab' else WORK_INPUTS
+    approvals = APPROVALS if environment == 'homelab' else WORK_APPROVALS
     if {path.name for path in inputs.iterdir() if not path.name.startswith('.')} != reviewed_inputs | {'runtime.json'}:
         raise InputError('Runtime inputs must contain only the reviewed files')
     config = json.loads((inputs / 'runtime.json').read_text())
@@ -116,14 +118,11 @@ def validate(inputs, home, environment):
     for check in policies['checks']:
         if not isinstance(check['argv'], list) or not check['argv'] or any(not isinstance(arg, str) for arg in check['argv']) or not isinstance(check['exit'], int):
             raise InputError('Invalid policy acceptance check')
-    result = subprocess.run(['kubectl', '--kubeconfig', str(inputs / 'kubeconfig'), 'config', 'view', '--raw', '-o', 'json'], capture_output=True)
-    if result.returncode:
-        raise InputError('Invalid isolated kubeconfig')
-    kube = json.loads(result.stdout)
-    if environment == 'work':
-        importlib.import_module('work-aks-auth').validate(inputs, kube)
-    else:
-        validate_homelab_kubeconfig(kube)
+    if environment == 'homelab':
+        result = subprocess.run(['kubectl', '--kubeconfig', str(inputs / 'kubeconfig'), 'config', 'view', '--raw', '-o', 'json'], capture_output=True)
+        if result.returncode:
+            raise InputError('Invalid isolated kubeconfig')
+        validate_homelab_kubeconfig(json.loads(result.stdout))
     keys = (inputs / 'authorized_keys').read_text().splitlines()
     if not keys or any(not re.fullmatch(r'ssh-ed25519 [A-Za-z0-9+/]+={0,2}( [^\r\n]+)?', key) for key in keys):
         raise InputError('Only approved option-free Ed25519 public login keys are supported')
@@ -142,7 +141,7 @@ def validate(inputs, home, environment):
         allowed = home / '.t3/userdata/server-runtime.json'
         if (home / '.azure').exists() or any(path != allowed or path.is_symlink() or path.stat().st_size for path in files):
             raise InputError('First boot requires a clean home, not imported state')
-    forbidden = ('.aws', '.config/gcloud') + (('.azure',) if environment == 'homelab' else ())
+    forbidden = ('.aws', '.config/gcloud', '.azure') if environment == 'homelab' else ()
     if any((home / name).exists() or (home / name).is_symlink() for name in forbidden) or (home / '.azure').is_symlink():
         raise InputError('Cloud credential caches are forbidden')
     return config, services, policies
@@ -182,41 +181,6 @@ def prepare(inputs, home, environment):
     private_config.install((inputs / 'bundle.json').read_bytes(), home, GUIDANCE.read_bytes())
     if environment == 'homelab':
         write_private(marker.parent / 'services.json', json.dumps(services).encode())
-    else:
-        install_work_kubeconfigs(inputs, home)
-
-
-def install_work_kubeconfigs(inputs, home):
-    auth = importlib.import_module('work-aks-auth')
-    kube = auth.load_kube(inputs / 'kubeconfig')
-    reviewed = auth.validate(inputs, kube)
-    directory = home / '.kube/work'
-    for path in (home / '.kube', directory):
-        if path.is_symlink() or any(parent.is_symlink() for parent in path.parents):
-            raise InputError('Managed work kubeconfig directory must not be a symlink')
-        path.mkdir(mode=0o700, exist_ok=True)
-        info = path.stat()
-        forbidden = 0o077 if path == directory else 0o022
-        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & forbidden:
-            raise InputError('Managed work kubeconfig directory must be owned and private')
-    for path in directory.iterdir():
-        info = path.lstat()
-        managed = path.name.endswith('.json') or path.name.startswith('.isolated-policy-')
-        if not managed or not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
-            raise InputError('Managed work kubeconfig files must be owned and private')
-    names = set()
-    for pin in reviewed['contexts']:
-        name = quote(pin['name'], safe='') + '.json'
-        names.add(name)
-        config = {'apiVersion': 'v1', 'kind': 'Config', 'current-context': pin['name']}
-        for group, key in (('clusters', 'cluster'), ('users', 'user'), ('contexts', 'name')):
-            config[group] = [entry for entry in kube[group] if entry['name'] == pin[key]]
-        config['users'] = [{'name': pin['user'], 'user': {'exec': {
-            **auth.EXEC, 'args': ['token', pin['name']]}}}]
-        write_private(directory / name, json.dumps(config).encode())
-    for path in directory.iterdir():
-        if path.name not in names:
-            path.unlink()
 
 
 def write_private(path, data, mode=0o600):
@@ -363,8 +327,6 @@ def apply(inputs, home, environment):
     hub_clients.write_json(str(settings_path), settings)
     if environment == 'homelab':
         write_private(home / '.config/t3-runtime/services.json', json.dumps(services).encode())
-    else:
-        install_work_kubeconfigs(inputs, home)
     print('isolated-config: reviewed policies and restricted hub installed')
 
 

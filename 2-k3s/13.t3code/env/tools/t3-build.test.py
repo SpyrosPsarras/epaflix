@@ -99,7 +99,7 @@ class T3BuildTest(Fixture):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(b'synthetic kaniko log', result.stdout)
         for call in self.calls():
-            # The namespace comes from the kubeconfig's context: t3-build-homelab or t3-build-work.
+            # The namespace comes from the kubeconfig's context: t3-build-homelab.
             self.assertEqual(call['argv'][:2], ['--kubeconfig', str(self.kubeconfig)])
             self.assertNotIn('-n', call['argv'])
         job, secret, configmap = self.created()

@@ -62,15 +62,12 @@ if os.environ['MCP_HUB_INSTANCE'] in ('homelab', 'work'):
         destination = Path('/scripts') / source.name
         destination.write_bytes(source.read_bytes())
         destination.chmod(0o555)
-if os.environ['MCP_HUB_INSTANCE'] == 'work':
-    destination = Path('/scripts/work-aks-auth.py')
-    destination.write_bytes((root / 'env/files/work-aks-auth.py').read_bytes())
-    destination.chmod(0o555)
 PY
 mkdir -p /tmp/inventory-home
 HOME=/tmp/inventory-home bash /src/env/tools/inventory.sh
 mkdir -p /tmp/forbidden-bin
-if [[ $variant == homelab ]]; then forbidden_tools=(az kubelogin); else forbidden_tools=(kubelogin); fi
+forbidden_tools=()
+if [[ $variant == homelab ]]; then forbidden_tools=(az kubelogin); fi
 for tool in "${forbidden_tools[@]}"; do
   printf '#!/bin/sh\nexit 0\n' >"/tmp/forbidden-bin/$tool"
   chmod 0755 "/tmp/forbidden-bin/$tool"
@@ -83,7 +80,6 @@ if [[ $variant == homelab ]]; then
   python3 /src/env/tools/isolated-runtime.test.py fixture /run/t3-inputs
 else
   python3 /src/env/tools/work-runtime.test.py fixture /run/t3-inputs
-  python3 /src/env/tools/work-aks-auth.test.py -v
 fi
 rm /run/t3-inputs/services.json
 ln -s /projection/services.json /run/t3-inputs/services.json

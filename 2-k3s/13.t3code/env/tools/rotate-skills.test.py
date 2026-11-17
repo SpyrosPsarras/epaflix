@@ -38,10 +38,9 @@ def fixture(environment, sort_keys=True):
         'skills/replace/old.txt': entry('Remove stale files'),
         'skills/remove/SKILL.md': entry('Remove this skill')}}
     inputs = {'bundle.json': json_bytes(bundle), 'policies.json': b'synthetic policies',
-              'services.json': b'synthetic services', 'kubeconfig': b'synthetic kubeconfig',
-              'authorized_keys': b'synthetic login keys'}
-    if environment == 'work':
-        inputs['work-auth.json'] = b'synthetic work authentication'
+              'services.json': b'synthetic services', 'authorized_keys': b'synthetic login keys'}
+    if environment == 'homelab':
+        inputs['kubeconfig'] = b'synthetic kubeconfig'
     runtime = {'environment': environment, 'approvals': {'policies': 'synthetic-review'},
                'grantSha256': {'model-token': 'synthetic-grant-digest'},
                'sha256': {name: hashlib.sha256(value).hexdigest() for name, value in inputs.items()}}

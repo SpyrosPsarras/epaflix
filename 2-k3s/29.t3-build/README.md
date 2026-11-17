@@ -1,13 +1,14 @@
 # t3-build
 
-The homelab and work T3 pods have no Docker and no route to the owner's
-desktops. These namespaces let them build images and run one-shot containers
-anyway. Owner decision of 2026-10-23, options A and D.
+The homelab T3 pod has no Docker and no route to the owner's desktops. This
+namespace lets it build images and run one-shot containers anyway. Owner
+decision of 2026-10-23, options A and D. The work pod has no access since
+2026-11-17: it is denied the epaflix cluster.
 
 ## What is here
 
-`base/` holds one builder namespace; the `homelab/` and `work/` overlays name
-it `t3-build-homelab` and `t3-build-work`. Each namespace has its own copy of:
+`base/` holds the builder namespace; the `homelab/` overlay names it
+`t3-build-homelab`. It contains:
 
 - Pod Security `baseline` (enforce, warn and audit), so no privileged,
   hostPath or host-network pods. Kaniko needs none of these.
@@ -15,7 +16,7 @@ it `t3-build-homelab` and `t3-build-work`. Each namespace has its own copy of:
   helpers' kubectl calls need: pods (create, get, list, watch, delete),
   pods/log (get), pods/attach (create), configmaps (create, get, delete),
   secrets (create, delete) and jobs (create, get, delete). It grants nothing
-  in the other builder namespace or anywhere else. `tools/rbac.test.py` pins
+  anywhere else. `tools/rbac.test.py` pins
   the matrix.
 - NetworkPolicies `default-deny` and `public-egress`. Pods get DNS and public
   IPv4 only. The LAN and cluster ranges are closed with the same except list as
@@ -28,17 +29,17 @@ it `t3-build-homelab` and `t3-build-work`. Each namespace has its own copy of:
   manager watches the file. The upstream kaniko repository was archived in
   2025 and v1.24.0 is its last release.
 
-Argo CD Application `t3-build` syncs this directory (both overlays) with pruning.
+Argo CD Application `t3-build` syncs this directory with pruning.
 
 ## How the pods use it
 
-Each pod mounts Secret `t3-build-kubeconfig` at `/run/t3-build/kubeconfig`
+The homelab pod mounts Secret `t3-build-kubeconfig` at `/run/t3-build/kubeconfig`
 (`optional: true`) and sets `T3_BUILD_KUBECONFIG` to that path. `KUBECONFIG`
-is untouched. The kubeconfig's context names the pod's builder namespace, and
-the helpers use it; they never pass `-n`. The homelab pod is cluster-admin but builds through the same
-scoped path, so the work boundary stays an RBAC fact.
+is untouched. The kubeconfig's context names the builder namespace, and
+the helpers use it; they never pass `-n`. The homelab pod is cluster-admin but
+builds through the same scoped path.
 
-Two helpers ship in the pods' `/scripts` (sources in `13.t3code/env/files/`):
+Two helpers ship in `/scripts` (sources in `13.t3code/env/files/`):
 
 ```sh
 /scripts/t3-build <context-dir> --destination <registry/repo:tag> [--dockerfile path] [--docker-config file]
@@ -82,17 +83,20 @@ context:
 
 ```sh
 python3 2-k3s/29.t3-build/tools/build-kubeconfig.py --context epaflix --pod homelab
-python3 2-k3s/29.t3-build/tools/build-kubeconfig.py --context epaflix --pod work
 ```
 
-Each run creates `builder-token` in `t3-build-<pod>` and writes
-`t3-build-kubeconfig` into `t3code-<pod>`, with `t3-build-<pod>` as the
+The run creates `builder-token` in `t3-build-homelab` and writes
+`t3-build-kubeconfig` into `t3code-homelab`, with `t3-build-homelab` as the
 context's namespace. It prints only
-`t3-build kubeconfig prepared for <pod>.` A pod picks the Secret up at its
+`t3-build kubeconfig prepared for homelab.` The pod picks the Secret up at its
 next restart. Re-running is a no-op. A differing existing grant stops the
 script; delete it by hand first.
 
-To revoke a pod, delete `builder-token` in its `t3-build-<pod>` namespace.
+To revoke, delete `builder-token` in `t3-build-homelab`.
+
+Argo prunes the former `t3-build-work` namespace with its `builder-token`. The
+work pod's leftover grant is removed in
+[K2](../13.t3code-work/README.md#moving-from-pinned-contexts).
 
 ## Limits
 

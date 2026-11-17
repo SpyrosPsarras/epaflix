@@ -5,9 +5,9 @@ inputs=/run/t3-inputs
 [[ $MCP_HUB_INSTANCE == homelab || $MCP_HUB_INSTANCE == work ]]
 [[ $HOME == /home/t3 && ${T3CODE_HOME:-} == "$HOME/.t3" ]]
 export PATH=/tools/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-export KUBECONFIG=$inputs/kubeconfig MCP_HUB_SERVICES_FILE=$inputs/services.json
+export MCP_HUB_SERVICES_FILE=$inputs/services.json
 if [[ $MCP_HUB_INSTANCE == homelab ]]; then
-  export MCP_HUB_SERVICES_FILE=$HOME/.config/t3-runtime/services.json
+  export KUBECONFIG=$inputs/kubeconfig MCP_HUB_SERVICES_FILE=$HOME/.config/t3-runtime/services.json
 fi
 python3 /scripts/isolated-config.py prepare "$inputs" "$HOME" "$MCP_HUB_INSTANCE"
 read_config() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$inputs/runtime.json" "$1"; }

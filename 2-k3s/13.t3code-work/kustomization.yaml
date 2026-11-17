@@ -4,7 +4,6 @@ namespace: t3code-work
 
 components:
   - ../13.t3code
-  - auth
 resources:
   - namespace.yaml
   - statefulset.yaml

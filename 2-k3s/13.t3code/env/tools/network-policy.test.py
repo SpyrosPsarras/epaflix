@@ -105,6 +105,13 @@ class NetworkPolicyTest(unittest.TestCase):
             with self.subTest(environment=environment, address=address, port=port, namespace=namespace):
                 self.assertEqual(self.allowed(environment, 'Egress', address, port, namespace, labels, protocol), expected)
 
+    def test_work_runtime_cannot_reach_the_epaflix_api(self):
+        for address in ('10.0.0.51', '10.0.0.52', '10.0.0.53', '192.168.10.100', '192.168.10.51', '10.43.0.1'):
+            for port in (443, 6443):
+                with self.subTest(address=address, port=port):
+                    self.assertFalse(self.allowed('work', 'Egress', address, port))
+        self.assertTrue(self.allowed('work', 'Egress', '10.42.0.10', 53, 'kube-system', {'k8s-app': 'kube-dns'}, 'UDP'))
+
     def test_work_public_internet_does_not_include_private_or_special_networks(self):
         environment = 'work'
         for address in ('1.1.1.1', '140.82.112.3', '20.50.1.1'):
@@ -122,7 +129,8 @@ class NetworkPolicyTest(unittest.TestCase):
             for pod in (RUNTIME, ROLLOUT):
                 for address in ('10.0.0.51', '10.0.0.52', '10.0.0.53'):
                     with self.subTest(environment=environment, pod=pod, api=address):
-                        self.assertTrue(self.allowed(environment, 'Egress', address, 6443, pod=pod))
+                        self.assertEqual(self.allowed(environment, 'Egress', address, 6443, pod=pod),
+                                         environment == 'homelab' or pod == ROLLOUT)
                         self.assertEqual(self.allowed(environment, 'Egress', address, 443, pod=pod),
                                          environment == 'homelab' and pod == RUNTIME)
                 self.assertEqual(self.allowed(environment, 'Egress', '10.0.0.61', 6443, pod=pod),
