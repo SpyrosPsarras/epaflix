@@ -1,3 +1,4 @@
+import re
 import sys
 from pathlib import Path
 
@@ -255,3 +256,9 @@ def test_main_rejects_non_finviz_url(monkeypatch, outbox, url):
     monkeypatch.setattr(rs, "fetch_rows", lambda u: pytest.fail("accepted a non-Finviz URL"))
     with pytest.raises(ValueError, match="Finviz"):
         rs.main(url, "user@example.com", "[Price]", "[Price]")
+
+
+def test_main_prints_run_summary(monkeypatch, outbox, capsys):
+    monkeypatch.setattr(rs, "fetch_rows", lambda url: ROWS)
+    rs.main(URL, "user@example.com", "[Price]", "[Price] - [ATR]", condition="[RSI] < 30")
+    assert re.fullmatch(r"Summary: 3 fetched from Finviz, 1 passed, \d+\.\d\ds\n", capsys.readouterr().out)
