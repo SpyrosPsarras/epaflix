@@ -9,6 +9,7 @@ schema:
     - tickers
     - strategy
     - max_tickers
+    - track_days
     - validation_days
     - settings
   properties:
@@ -32,6 +33,10 @@ schema:
       type: integer
       description: Most tickers to fetch and screen, 1 to 200
       default: 50
+    track_days:
+      type: integer
+      description: Also report the status of the signals of this many previous sessions, 0 to 60
+      default: 10
     validation_days:
       type: integer
       description: Walk-forward validation over this many past sessions, 0 to skip

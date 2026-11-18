@@ -8,6 +8,11 @@ Finviz finds the candidates. Daily OHLCV comes from the Finviz chart endpoint
 (split adjusted, same host as the screener, no API key). Every indicator is
 computed here from completed daily bars only, so a signal on day t uses no data
 after day t. The script sends no email and changes nothing; it returns JSON.
+
+Every LONG setup carries its entry, stop, target, reward/risk, score, relative strength vs QQQ and
+its sector ETF, and the market regime (bullish / neutral / bearish from QQQ's trend and sector-ETF
+breadth), which turns it into an action: long, watch or no_trade. `track_days` adds the status of the
+signals of the previous sessions (open, target, stopped, time exit, not triggered).
 """
 
 import bisect
@@ -32,9 +37,16 @@ STRATEGIES = ("pullback", "breakout")
 SESSION_FINAL_AFTER = (16, 20)
 MAX_TICKERS = 200
 MAX_VALIDATION_DAYS = 750
+MAX_TRACK_DAYS = 60
+# Finviz sector -> SPDR sector ETF, used for relative strength vs sector and for market breadth.
+SECTOR_ETFS = {"Technology": "XLK", "Financial": "XLF", "Healthcare": "XLV", "Industrials": "XLI", "Consumer Cyclical": "XLY",
+               "Consumer Defensive": "XLP", "Energy": "XLE", "Utilities": "XLU", "Basic Materials": "XLB",
+               "Real Estate": "XLRE", "Communication Services": "XLC"}
+# What a LONG setup means in each market regime. Short setups are not screened yet.
+ACTIONS = {"bullish": "long", "neutral": "watch", "bearish": "no_trade", "unknown": "watch"}
 
 DEFAULTS = {
-    "benchmarks": ["QQQ", "SMH"],
+    "benchmarks": ["QQQ"],
     "min_bars": 260,
     "min_price": 5.0,
     "min_dollar_volume": 10_000_000.0,
@@ -58,7 +70,11 @@ DEFAULTS = {
     "min_rel_volume": 1.5,
     "breakout_stop_atr": 0.5,
     "breakout_min_rr": 2.0,
-    # Validation
+    # Market regime: QQQ vs its SMA200 and the SMA200 slope, plus breadth = share of sector ETFs above their SMA200
+    "regime_slope_bars": 20,
+    "breadth_bullish": 0.6,
+    "breadth_bearish": 0.4,
+    # Validation and tracking
     "validation_horizon": 20,
     "request_pause": 0.4,
 }
@@ -120,6 +136,16 @@ def parse_earnings(html):
     events, _ = json.JSONDecoder().raw_decode(html[start + len(marker):])
     return sorted(datetime.fromtimestamp(e["dateTimestamp"], timezone.utc) for e in events
                   if isinstance(e, dict) and e.get("eventType") == "chartEvent/earnings" and isinstance(e.get("dateTimestamp"), (int, float)))
+
+
+def parse_sector(html):
+    """Finviz sector name from a quote page, or None."""
+    match = re.search(r'f=sec_[a-z]+"[^>]*>([^<]+)<', html)
+    return match.group(1).strip() if match and match.group(1).strip() in SECTOR_ETFS else None
+
+
+def fetch_sector(ticker):
+    return parse_sector(_get(QUOTE_URL, {"t": ticker, "p": "d"}).text)
 
 
 def fetch_earnings(ticker):
@@ -281,11 +307,30 @@ def _points(scores, name, points, earned, detail):
     scores.append({"name": name, "points": points, "earned": points if earned else 0, "detail": detail})
 
 
-def _rs_score(scores, series, t, benchmarks, points):
-    for name, value in zip(benchmarks, points):
-        rs = series.get(f"rs_{name}", [None] * (t + 1))[t]
-        _points(scores, f"outperforms_{name}", value, rs is not None and rs > 0,
-                "no aligned benchmark data" if rs is None else f"{rs * 100:+.1f}% vs {name} over the lookback")
+def relative_strength_at(series, t, cfg):
+    """Change of the price ratio vs the market benchmark and vs the sector ETF over rs_lookback bars."""
+    market = cfg["benchmarks"][0] if cfg["benchmarks"] else None
+    out = {}
+    for key, label in ((market, market), ("sector", series.get("sector_etf"))):
+        if key is None:
+            continue
+        value = series.get(f"rs_{key}", [None] * (t + 1))[t] if label else None
+        out["market" if key == market else "sector"] = {"benchmark": label, "change": None if value is None else round(value, 4)}
+    return out
+
+
+def _rs_score(scores, series, t, cfg, points):
+    rs = relative_strength_at(series, t, cfg)
+    for key, value in zip(("market", "sector"), points):
+        item = rs.get(key, {"benchmark": None, "change": None})
+        change = item["change"]
+        if change is not None:
+            detail = f"{change * 100:+.1f}% vs {item['benchmark']} over {cfg['rs_lookback']} bars"
+        elif key == "sector" and not item["benchmark"]:
+            detail = "sector unknown or no sector ETF data"
+        else:
+            detail = "no aligned benchmark data"
+        _points(scores, f"outperforms_{key}", value, change is not None and change > 0, detail)
 
 
 def _context(bars, series, t, cfg):
@@ -317,6 +362,11 @@ def _result(strategy, bars, t, checks, scores, levels, ctx):
         "levels": levels,
         "indicators": {k: round(v, 4) for k, v in (ctx or {}).items()},
     }
+
+
+def _with_rs(result, series, t, cfg):
+    result["relative_strength"] = relative_strength_at(series, t, cfg) if result["indicators"] else {}
+    return result
 
 
 def _levels(entry, stop, target):
@@ -357,8 +407,7 @@ def evaluate_pullback(bars, series, t, cfg):
     _check(checks, "risk_size", 0 < risk <= cfg["max_risk_atr"] * a, f"risk {risk:.2f} = {risk / a:.2f} ATR, maximum {cfg['max_risk_atr']:g}")
     _check(checks, "reward_risk", levels["reward_risk"] is not None and levels["reward_risk"] >= cfg["pullback_min_rr"],
            f"reward/risk {levels['reward_risk']} to the 20-day high, minimum {cfg['pullback_min_rr']:g}")
-    benchmarks = cfg["benchmarks"]
-    _rs_score(scores, series, t, benchmarks[:2], (20, 10))
+    _rs_score(scores, series, t, cfg, (20, 10))
     _points(scores, "healthy_rsi", 15, 40 <= ctx["rsi14"] <= 60, f"RSI14 {ctx['rsi14']:.1f}, best 40-60")
     quiet = sum(v[t - 5:t]) / 5
     _points(scores, "volume_dry_up", 15, quiet < ctx["volume_avg50"], f"pullback volume {quiet / ctx['volume_avg50']:.2f}x the 50-day average")
@@ -366,7 +415,7 @@ def evaluate_pullback(bars, series, t, cfg):
     _points(scores, "closes_above_prior_high", 10, c[t] > h[t - 1], f"close {c[t]:.2f} vs previous high {h[t - 1]:.2f}")
     _points(scores, "ema_stack", 10, c[t] > e20 > e50 > m200, "close > EMA20 > EMA50 > SMA200")
     _points(scores, "reward_risk_3", 10, (levels["reward_risk"] or 0) >= 2.5, f"reward/risk {levels['reward_risk']}, best 2.5 or more")
-    return _result("pullback", bars, t, checks, scores, levels, ctx)
+    return _with_rs(_result("pullback", bars, t, checks, scores, levels, ctx), series, t, cfg)
 
 
 def resistance(bars, end, lookback, tolerance):
@@ -418,7 +467,7 @@ def evaluate_breakout(bars, series, t, cfg):
            f"reward/risk {levels['reward_risk']} to the measured move, minimum {cfg['breakout_min_rr']:g}")
     benchmarks = cfg["benchmarks"]
     _points(scores, "strong_volume", 20, rel_volume >= 2, f"relative volume {rel_volume:.2f}, best 2 or more")
-    _rs_score(scores, series, t, benchmarks[:2], (15, 10))
+    _rs_score(scores, series, t, cfg, (15, 10))
     line = series.get(f"rs_line_{benchmarks[0]}", [None] * (t + 1)) if benchmarks else [None] * (t + 1)
     window = [x for x in line[t - 49:t + 1] if x is not None]
     _points(scores, "rs_line_high", 15, line[t] is not None and line[t] >= max(window),
@@ -431,7 +480,7 @@ def evaluate_breakout(bars, series, t, cfg):
     year_high = max(h[t - 251:t + 1])
     _points(scores, "near_52w_high", 10, c[t] >= 0.9 * year_high, f"close {c[t] / year_high:.0%} of the 52-week high {year_high:.2f}")
     _points(scores, "reward_risk_3", 10, (levels["reward_risk"] or 0) >= 3, f"reward/risk {levels['reward_risk']}, best 3 or more")
-    return _result("breakout", bars, t, checks, scores, levels, ctx)
+    return _with_rs(_result("breakout", bars, t, checks, scores, levels, ctx), series, t, cfg)
 
 
 EVALUATORS = {"pullback": evaluate_pullback, "breakout": evaluate_breakout}
@@ -467,6 +516,38 @@ ASSUMPTIONS = [
 ]
 
 
+def _fill(bars, i, signal):
+    """Fill price on bar i, or (None, reason)."""
+    levels = signal["levels"]
+    if signal["strategy"] == "pullback":
+        if bars.high[i] < levels["entry"]:
+            return None, "not_filled"
+        fill = max(bars.open[i], levels["entry"])
+    else:
+        fill = bars.open[i]
+    if fill <= levels["stop"]:
+        return None, "opened below the stop"
+    return fill, None
+
+
+def _walk(bars, i, fill, stop, target, end):
+    """Bars i..end-1 in time order. Returns (j, price, outcome, gap, low, high); j is None if nothing was hit."""
+    low = high = fill
+    for j in range(i, end):
+        opening = fill if j == i else bars.open[j]
+        if opening >= target:
+            return j, opening, "target", True, low, high
+        if opening <= stop:  # only on later bars, the fill is above the stop
+            return j, opening, "stop", True, low, high
+        if bars.low[j] <= stop:
+            return j, stop, "stop", False, low, high
+        low = min(low, bars.low[j])
+        if bars.high[j] >= target:
+            return j, target, "target", False, low, high
+        high = max(high, bars.high[j])
+    return None, None, None, False, low, high
+
+
 def simulate(bars, t, signal, horizon):
     """Outcome of a signal on bar t, using only bars after t."""
     levels = signal["levels"]
@@ -474,53 +555,145 @@ def simulate(bars, t, signal, horizon):
     i = t + 1
     if i + horizon > len(bars):
         return {"outcome": "open"}
-    if signal["strategy"] == "pullback":
-        if bars.high[i] < levels["entry"]:
-            return {"outcome": "not_filled"}
-        fill = max(bars.open[i], levels["entry"])
-    else:
-        fill = bars.open[i]
-    if fill <= stop:
-        return {"outcome": "not_filled", "detail": "opened below the stop"}
+    fill, reason = _fill(bars, i, signal)
+    if fill is None:
+        return {"outcome": "not_filled"} if reason == "not_filled" else {"outcome": "not_filled", "detail": reason}
     risk = fill - stop
     atr = (signal.get("indicators") or {}).get("atr14") or risk
-    low = high = fill
-
-    def finish(j, price, outcome, gap):
-        return {"outcome": outcome, "gap": gap, "fill": round(fill, 4), "fill_date": bars.dates[i].isoformat(),
-                "exit": round(price, 4), "exit_date": bars.dates[j].isoformat(), "risk": round(risk, 4),
-                "r": round((price - fill) / risk, 4), "bars_held": j - t,
-                "mae_r": round((fill - min(low, price)) / risk, 3), "mfe_r": round((max(high, price) - fill) / risk, 3),
-                "mae_atr": round((fill - min(low, price)) / atr, 3), "mfe_atr": round((max(high, price) - fill) / atr, 3)}
-
-    for j in range(i, i + horizon):
-        opening = fill if j == i else bars.open[j]
-        if opening >= target:
-            return finish(j, opening, "target", True)
-        if opening <= stop:  # only on later bars, the fill is above the stop
-            return finish(j, opening, "stop", True)
-        if bars.low[j] <= stop:
-            return finish(j, stop, "stop", False)
-        low = min(low, bars.low[j])
-        if bars.high[j] >= target:
-            return finish(j, target, "target", False)
-        high = max(high, bars.high[j])
-    j = i + horizon - 1
-    return finish(j, bars.close[j], "timeout", False)
+    j, price, outcome, gap, low, high = _walk(bars, i, fill, stop, target, i + horizon)
+    if j is None:
+        j, price, outcome = i + horizon - 1, bars.close[i + horizon - 1], "timeout"
+    return {"outcome": outcome, "gap": gap, "fill": round(fill, 4), "fill_date": bars.dates[i].isoformat(),
+            "exit": round(price, 4), "exit_date": bars.dates[j].isoformat(), "risk": round(risk, 4),
+            "r": round((price - fill) / risk, 4), "bars_held": j - t,
+            "mae_r": round((fill - min(low, price)) / risk, 3), "mfe_r": round((max(high, price) - fill) / risk, 3),
+            "mae_atr": round((fill - min(low, price)) / atr, 3), "mfe_atr": round((max(high, price) - fill) / atr, 3)}
 
 
-def market_regime(dates, closes):
-    """Benchmark regime per date, from benchmark closes up to that date."""
-    sma200, ema20, ema50 = sma(closes, 200), ema(closes, 20), ema(closes, 50)
+def signal_warnings(signal):
+    """Practical cautions that do not change qualification."""
+    levels, atr = signal["levels"], (signal.get("indicators") or {}).get("atr14")
+    risk, out = levels["risk_per_share"], []
+    if atr and risk < 0.5 * atr:
+        out.append(f"tight stop: risk {risk:.2f} is {risk / atr:.2f} ATR, inside normal daily noise")
+    if risk > 0 and 10 / 1e4 * levels["entry"] / risk > 0.1:
+        out.append(f"costs: a 10 bp round trip costs {10 / 1e4 * levels['entry'] / risk:.2f} R")
+    return out
+
+
+def track(bars, t, signal, horizon):
+    """Status today of a past signal on bar t < len(bars) - 1, with the same execution rules as simulate.
+
+    not_triggered: the pullback buy stop was not reached on the next bar; skipped: opened below the stop;
+    stopped / target: exit hit; time_exit: still open after `horizon` bars, closed at that bar's close;
+    open: still running, valued at the last close."""
+    levels = signal["levels"]
+    i = t + 1
+    fill, reason = _fill(bars, i, signal)
+    if fill is None:
+        return {"status": "not_triggered" if reason == "not_filled" else "skipped", "detail": reason}
+    risk = fill - levels["stop"]
+    base = {"fill_date": bars.dates[i].isoformat(), "fill": round(fill, 4)}
+    end = min(i + horizon, len(bars))
+    j, price, outcome, gap, _, _ = _walk(bars, i, fill, levels["stop"], levels["target"], end)
+    if j is None and i + horizon <= len(bars):
+        j, price, outcome = i + horizon - 1, bars.close[i + horizon - 1], "time_exit"
+    if j is not None:
+        return {"status": {"stop": "stopped"}.get(outcome, outcome), **base, "gap": gap, "exit_date": bars.dates[j].isoformat(),
+                "exit": round(price, 4), "r": round((price - fill) / risk, 3), "bars_held": j - t}
+    last = len(bars) - 1
+    return {"status": "open", **base, "last_close": round(bars.close[last], 4), "r_now": round((bars.close[last] - fill) / risk, 3),
+            "bars_held": last - t, "bars_left": horizon - (last - t)}
+
+
+def track_signals(bars, series, strategies, days, cfg, regime=None):
+    """Signals of the last `days` completed sessions before the latest, one active signal per ticker and strategy."""
+    horizon, last = cfg["validation_horizon"], len(bars) - 1
+    regime = regime or {}
+    out = []
+    for strategy in strategies:
+        busy_until = -1
+        for t in range(max(cfg["min_bars"] - 1, last - days), last):
+            if t <= busy_until:
+                continue
+            signal = EVALUATORS[strategy](bars, series, t, cfg)
+            if not signal["qualified"]:
+                continue
+            status = track(bars, t, signal, horizon)
+            label = regime.get(bars.dates[t], "unknown")
+            out.append({"strategy": strategy, "ticker": bars.ticker, "signal_date": signal["signal_date"], "score": signal["score"],
+                        "regime": label, "action": ACTIONS[label], **signal["levels"], **status})
+            if status["status"] not in ("not_triggered", "skipped"):
+                busy_until = t + status["bars_held"]
+    return out
+
+
+def tracking_summary(rows):
+    closed = [x["r"] for x in rows if "r" in x]
+    return {"signals": len(rows), "status": {k: sum(x["status"] == k for x in rows)
+                                             for k in ("open", "target", "stopped", "time_exit", "not_triggered", "skipped")},
+            "closed_trades": len(closed), "closed_average_r": round(statistics.fmean(closed), 3) if closed else None,
+            "open_average_r_now": round(statistics.fmean(x["r_now"] for x in rows if x["status"] == "open"), 3)
+            if any(x["status"] == "open" for x in rows) else None}
+
+
+def breadth(sector_bars):
+    """Per date: (number of sector ETFs above their SMA200, number with an SMA200)."""
+    above = {}
+    for bars in sector_bars.values():
+        for d, c, m in zip(bars.dates, bars.close, sma(bars.close, 200)):
+            if m is not None:
+                count = above.setdefault(d, [0, 0])
+                count[0] += c > m
+                count[1] += 1
+    return {d: tuple(v) for d, v in above.items()}
+
+
+def market_regime(dates, closes, breadth_by_date=None, cfg=None):
+    """Regime per date from data up to that date.
+
+    bullish: benchmark above its SMA200, the SMA200 rising over regime_slope_bars, and breadth (share of sector ETFs above
+    their SMA200) at least breadth_bullish. bearish: below the SMA200 and either the SMA200 falling or breadth at most
+    breadth_bearish. neutral: anything else. Breadth needs at least 6 sector ETFs; without it only the trend decides."""
+    cfg = cfg or DEFAULTS
+    slope, m200 = cfg["regime_slope_bars"], sma(closes, 200)
+    breadth_by_date = breadth_by_date or {}
     regime = {}
-    for d, c, m, fast, slow in zip(dates, closes, sma200, ema20, ema50):
-        if m is None or slow is None:
+    for i, (d, c) in enumerate(zip(dates, closes)):
+        if m200[i] is None or i < 199 + slope:
             regime[d] = "unknown"
-        elif c < m:
-            regime[d] = "bear: below SMA200"
+            continue
+        above, rising = c > m200[i], m200[i] > m200[i - slope]
+        count = breadth_by_date.get(d)
+        share = count[0] / count[1] if count and count[1] >= 6 else None
+        if above and rising and (share is None or share >= cfg["breadth_bullish"]):
+            regime[d] = "bullish"
+        elif not above and (not rising or (share is not None and share <= cfg["breadth_bearish"])):
+            regime[d] = "bearish"
         else:
-            regime[d] = "uptrend: above SMA200, EMA20 > EMA50" if fast > slow else "correction: above SMA200, EMA20 < EMA50"
+            regime[d] = "neutral"
     return regime
+
+
+def market_summary(name, bars, breadth_by_date, regime, sector_bars, cfg):
+    """The latest regime and the inputs behind it."""
+    d, i, slope = bars.dates[-1], len(bars) - 1, cfg["regime_slope_bars"]
+    m200 = sma(bars.close, 200)
+    count = breadth_by_date.get(d)
+    etfs = {}
+    for etf, b in sorted(sector_bars.items()):
+        m = sma(b.close, 200)[-1]
+        if m is not None and b.dates[-1] == d:
+            etfs[etf] = {"close": round(b.close[-1], 2), "sma200": round(m, 2), "above": b.close[-1] > m}
+    label = regime.get(d, "unknown")
+    return {"as_of": d.isoformat(), "regime": label, "long_setups": ACTIONS[label],
+            "benchmark": {"ticker": name, "close": round(bars.close[i], 2),
+                          "sma200": None if m200[i] is None else round(m200[i], 2),
+                          "sma200_rising": None if m200[i] is None or i < slope or m200[i - slope] is None else m200[i] > m200[i - slope]},
+            "breadth": {"above_sma200": count[0] if count else None, "sector_etfs": count[1] if count else 0, "etfs": etfs},
+            "rules": "bullish: benchmark above a rising SMA200 and breadth >= {:g}; bearish: below the SMA200 and the SMA200 falling or "
+                     "breadth <= {:g}; otherwise neutral. LONG setups: bullish -> long, neutral -> watch, bearish -> no_trade."
+                     .format(cfg["breadth_bullish"], cfg["breadth_bearish"])}
 
 
 def forward_returns(bars, t, market=None):
@@ -681,11 +854,11 @@ def settings_with_defaults(settings):
             raise ValueError(f"unknown setting {key!r}. Settings: {', '.join(DEFAULTS)}")
         if key == "benchmarks":
             if not isinstance(value, list) or not value or not all(isinstance(x, str) and TICKER.match(x) for x in value):
-                raise ValueError("benchmarks must be a list of tickers, e.g. [\"QQQ\", \"SMH\"]")
+                raise ValueError("benchmarks must be a list of tickers, e.g. [\"QQQ\"]; the first one is the market benchmark")
         elif isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
             raise ValueError(f"setting {key} must be a number of 0 or more")
         cfg[key] = value
-    for key in ("min_bars", "breakout_lookback", "min_base_bars", "min_touches", "validation_horizon", "rs_lookback"):
+    for key in ("min_bars", "breakout_lookback", "min_base_bars", "min_touches", "validation_horizon", "rs_lookback", "regime_slope_bars"):
         cfg[key] = int(cfg[key])
         if cfg[key] < 1:
             raise ValueError(f"setting {key} must be 1 or more")
@@ -699,7 +872,7 @@ def discover(finviz_url, tickers, max_tickers):
         bad = [x for x in names if not TICKER.match(x)]
         if bad:
             raise ValueError(f"not tickers: {', '.join(bad)}")
-        return list(dict.fromkeys(names))[:max_tickers], "tickers"
+        return list(dict.fromkeys(names))[:max_tickers], "tickers", {}
     url = urlparse(finviz_url)
     if url.scheme != "https" or url.hostname not in FINVIZ_HOSTS:
         raise ValueError(f"not a Finviz screener URL: {finviz_url}")
@@ -707,10 +880,12 @@ def discover(finviz_url, tickers, max_tickers):
         rows = list(Screener.init_from_url(finviz_url, rows=max_tickers))
     except NoResults:
         rows = []
-    return list(dict.fromkeys(r["Ticker"] for r in rows if TICKER.match(r.get("Ticker", ""))))[:max_tickers], "finviz"
+    rows = [r for r in rows if TICKER.match(r.get("Ticker", ""))]
+    sectors = {r["Ticker"]: r["Sector"] for r in rows if r.get("Sector") in SECTOR_ETFS}
+    return list(dict.fromkeys(r["Ticker"] for r in rows))[:max_tickers], "finviz", sectors
 
 
-def main(finviz_url: str = "", tickers: str = "", strategy: str = "both", max_tickers: int = 50,
+def main(finviz_url: str = "", tickers: str = "", strategy: str = "both", max_tickers: int = 50, track_days: int = 10,
          validation_days: int = 0, settings: dict | None = None) -> dict:
     started = time.monotonic()
     now = datetime.now(timezone.utc)
@@ -723,10 +898,12 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "both", max_ti
         raise ValueError(f"max_tickers must be 1 to {MAX_TICKERS}")
     if not 0 <= validation_days <= MAX_VALIDATION_DAYS:
         raise ValueError(f"validation_days must be 0 to {MAX_VALIDATION_DAYS}")
+    if not 0 <= track_days <= MAX_TRACK_DAYS:
+        raise ValueError(f"track_days must be 0 to {MAX_TRACK_DAYS}")
     cfg = settings_with_defaults(settings)
-    count = cfg["min_bars"] + validation_days + cfg["validation_horizon"] + 60
+    count = cfg["min_bars"] + max(validation_days + cfg["validation_horizon"], track_days) + 60
 
-    names, source = discover(finviz_url, tickers, max_tickers)
+    names, source, sectors = discover(finviz_url, tickers, max_tickers)
     benchmarks, benchmark_bars, benchmark_info, data_errors = {}, {}, {}, []
     for name in cfg["benchmarks"]:
         try:
@@ -742,11 +919,24 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "both", max_ti
     calendar = sorted(set().union(*benchmarks.values()))
     rs_benchmarks = [b for b in cfg["benchmarks"] if b in benchmarks]
     reference = benchmark_bars[rs_benchmarks[0]]
+    sector_bars, sector_closes = {}, {}
+    for etf in sorted(set(SECTOR_ETFS.values())):
+        try:
+            bars = completed_bars(fetch_bars(etf, count), now)
+            sector_bars[etf] = bars
+            sector_closes[etf] = {d: c for d, c in zip(bars.dates, bars.close) if math.isfinite(c) and c > 0}
+        except (requests.RequestException, ValueError) as error:
+            data_errors.append({"ticker": etf, "reason": f"sector ETF: {error}"})
+        time.sleep(cfg["request_pause"])
+    breadth_by_date = breadth(sector_bars)
+    regime = market_regime(reference.dates, reference.close, breadth_by_date, cfg)
     market = {"name": rs_benchmarks[0], "open": dict(zip(reference.dates, reference.open)),
-              "close": dict(zip(reference.dates, reference.close)), "regime": market_regime(reference.dates, reference.close)}
+              "close": dict(zip(reference.dates, reference.close)), "regime": regime}
+    market_info = market_summary(rs_benchmarks[0], reference, breadth_by_date, regime, sector_bars, cfg)
+    run_cfg = {**cfg, "benchmarks": rs_benchmarks}
 
     results = {s: {"qualified": [], "rejected": []} for s in strategies}
-    trades, signals, base, without_earnings, screened = [], [], [], [], 0
+    trades, signals, base, without_earnings, screened, tracked = [], [], [], [], 0, []
     for name in names:
         try:
             bars = completed_bars(fetch_bars(name, count), now)
@@ -758,13 +948,31 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "both", max_ti
             data_errors.append({"ticker": name, "reason": "; ".join(problems)})
             continue
         screened += 1
-        series = compute(bars, {b: benchmarks[b] for b in rs_benchmarks}, cfg)
+        sector = sectors.get(name)
+        if sector is None and source == "tickers":
+            try:
+                sector = fetch_sector(name)
+            except (requests.RequestException, ValueError):
+                sector = None
+            time.sleep(cfg["request_pause"])
+        etf = SECTOR_ETFS.get(sector)
+        closes = {b: benchmarks[b] for b in rs_benchmarks}
+        if etf in sector_closes:
+            closes["sector"] = sector_closes[etf]
+        series = compute(bars, closes, cfg)
+        series["sector_etf"] = etf if etf in sector_closes else None
+        label = regime.get(bars.dates[-1], "unknown")
         for s in strategies:
-            signal = EVALUATORS[s](bars, series, len(bars) - 1, {**cfg, "benchmarks": rs_benchmarks})
+            signal = EVALUATORS[s](bars, series, len(bars) - 1, run_cfg)
             if signal["qualified"]:
-                results[s]["qualified"].append({k: signal[k] for k in ("ticker", "signal_date", "score", "levels", "checks", "scoring", "indicators")})
+                results[s]["qualified"].append({
+                    **{k: signal[k] for k in ("ticker", "signal_date", "score")}, "direction": "long", "regime": label,
+                    "action": ACTIONS[label], "sector": sector, "warnings": signal_warnings(signal),
+                    **{k: signal[k] for k in ("levels", "relative_strength", "checks", "scoring", "indicators")}})
             else:
                 results[s]["rejected"].append({"ticker": name, "failed": [c for c in signal["checks"] if not c["passed"]]})
+        if track_days:
+            tracked += track_signals(bars, series, strategies, track_days, run_cfg, regime)
         if validation_days:
             info = None
             try:
@@ -774,7 +982,7 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "both", max_ti
             if not info or not info["since"]:
                 without_earnings.append(name)
             time.sleep(cfg["request_pause"])
-            more = validate(bars, series, strategies, validation_days, {**cfg, "benchmarks": rs_benchmarks}, market, info)
+            more = validate(bars, series, strategies, validation_days, run_cfg, market, info)
             trades += more[0]
             signals += more[1]
             base += more[2]
@@ -783,13 +991,23 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "both", max_ti
 
     duration = time.monotonic() - started
     counts = ", ".join(f"{s} {len(results[s]['qualified'])}" for s in strategies)
-    print(f"Summary: {len(names)} tickers, {len(data_errors)} data errors, qualified: {counts}, {duration:.1f}s")
+    print(f"Summary: {len(names)} tickers, {len(data_errors)} data errors, regime {market_info['regime']}, qualified: {counts}, {duration:.1f}s")
+    tracked.sort(key=lambda x: (x["signal_date"], x["strategy"], x["ticker"]), reverse=True)
     return {
         "generated_at": now.isoformat(timespec="seconds"),
         "as_of": calendar[-1].isoformat(),
         "universe": {"source": source, "tickers": len(names), "data_errors": len(data_errors)},
+        "market": market_info,
         "benchmarks": benchmark_info,
         "results": results,
+        "tracking": None if not track_days else {
+            "days": track_days,
+            "horizon_bars": cfg["validation_horizon"],
+            "note": "Signals of the previous sessions, recomputed from today's data with the execution rules of the validation. "
+                    "Only tickers in today's universe are tracked; one active signal per ticker and strategy.",
+            "summary": {s: tracking_summary([x for x in tracked if x["strategy"] == s]) for s in strategies},
+            "signals": tracked,
+        },
         "data_errors": data_errors,
         "validation": None if not validation_days else {
             "days": validation_days,

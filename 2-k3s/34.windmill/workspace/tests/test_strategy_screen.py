@@ -55,10 +55,11 @@ def breakout_rows():
     return rows
 
 
-def run(evaluator, rows, cfg=CFG, benchmarks=None):
+def run(evaluator, rows, cfg=CFG, benchmarks=None, sector_etf=None):
     bars = make_bars(rows)
     assert ss.quality_problems(bars, bars.dates, cfg) == []
     series = ss.compute(bars, benchmarks or {}, cfg)
+    series["sector_etf"] = sector_etf
     return evaluator(bars, series, len(bars) - 1, cfg)
 
 
@@ -311,8 +312,17 @@ def test_relative_strength_scoring_uses_benchmarks():
     dates = sessions(len(rows))
     flat = {d: 100.0 for d in dates}
     soaring = {d: 100.0 * 1.02 ** i for i, d in enumerate(dates)}
-    scores = {s["name"]: s["earned"] for s in run(ss.evaluate_pullback, rows, benchmarks={"QQQ": flat, "SMH": soaring})["scoring"]}
-    assert scores["outperforms_QQQ"] == 20 and scores["outperforms_SMH"] == 0
+    result = run(ss.evaluate_pullback, rows, benchmarks={"QQQ": flat, "sector": soaring}, sector_etf="XLK")
+    scores = {s["name"]: s for s in result["scoring"]}
+    assert scores["outperforms_market"]["earned"] == 20 and scores["outperforms_sector"]["earned"] == 0
+    assert "vs XLK over 63 bars" in scores["outperforms_sector"]["detail"]
+    rs = result["relative_strength"]
+    assert rs["market"]["benchmark"] == "QQQ" and rs["market"]["change"] > 0
+    assert rs["sector"]["benchmark"] == "XLK" and rs["sector"]["change"] < 0
+    unknown = run(ss.evaluate_pullback, rows, benchmarks={"QQQ": flat})
+    sector = {s["name"]: s for s in unknown["scoring"]}["outperforms_sector"]
+    assert sector["earned"] == 0 and sector["detail"] == "sector unknown or no sector ETF data"
+    assert unknown["relative_strength"]["sector"] == {"benchmark": None, "change": None}
 
 
 # ---------------------------------------------------------------- validation
@@ -469,14 +479,93 @@ def test_summarize_empty():
     assert s["closed"] == 0 and s["gross"] == {"trades": 0}
 
 
-def test_market_regime():
-    closes = [100 + i for i in range(250)] + [349 - 3 * i for i in range(40)]
+def test_market_regime_from_trend():
+    closes = [100 + i for i in range(260)] + [359 - 2 * i for i in range(160)]
     dates = sessions(len(closes))
     regime = ss.market_regime(dates, closes)
-    assert regime[dates[100]] == "unknown"
-    labels = [regime[d].split(":")[0] for d in dates[199:]]
+    assert regime[dates[100]] == "unknown" and regime[dates[218]] == "unknown" and regime[dates[219]] == "bullish"
+    labels = [regime[d] for d in dates[219:]]
     order = [label for i, label in enumerate(labels) if i == 0 or label != labels[i - 1]]
-    assert order == ["uptrend", "correction", "bear"]
+    assert order == ["bullish", "neutral", "bearish"]  # below a still-rising SMA200 is only neutral
+
+
+def test_market_regime_uses_breadth():
+    closes = [100 + i for i in range(300)]
+    dates = sessions(len(closes))
+    weak = {d: (3, 9) for d in dates}
+    assert ss.market_regime(dates, closes, weak)[dates[-1]] == "neutral"
+    assert ss.market_regime(dates, closes, {d: (6, 9) for d in dates})[dates[-1]] == "bullish"
+    assert ss.market_regime(dates, closes, {d: (2, 5) for d in dates})[dates[-1]] == "bullish"  # too few ETFs: trend only
+    dip = closes[:280] + [closes[279] - 150] * 20  # below a still-rising SMA200
+    assert ss.market_regime(dates, dip)[dates[-1]] == "neutral"
+    assert ss.market_regime(dates, dip, weak)[dates[-1]] == "bearish"
+
+
+def test_breadth_counts_sector_etfs_above_sma200():
+    up = make_bars(uptrend(210), "XLK")
+    down = make_bars(uptrend(210, 300, -0.5), "XLE")
+    counts = ss.breadth({"XLK": up, "XLE": down})
+    assert counts[up.dates[-1]] == (1, 2) and up.dates[100] not in counts
+
+
+def test_parse_sector():
+    page = '<a href="screener.ashx?v=111&f=sec_technology" class="tab-link">Technology</a>'
+    assert ss.parse_sector(page) == "Technology"
+    assert ss.parse_sector('<a href="screener.ashx?f=sec_x">Nonsense</a>') is None
+    assert ss.parse_sector("<html></html>") is None
+
+
+# ---------------------------------------------------------------- tracking
+
+
+def pullback_signal(entry=10.0, stop=9.0, target=12.0, strategy="pullback"):
+    return {"strategy": strategy, "levels": {"entry": entry, "stop": stop, "target": target}}
+
+
+def test_track_statuses():
+    flat = [(10, 10, 10, 10, 1)] * 3
+    not_triggered = make_bars(flat + [(9.8, 9.9, 9.6, 9.7, 1)])
+    assert ss.track(not_triggered, 2, pullback_signal(), 20)["status"] == "not_triggered"
+    gap_down = make_bars(flat + [(8.5, 8.6, 8.0, 8.2, 1)])
+    assert ss.track(gap_down, 2, pullback_signal(strategy="breakout"), 20)["status"] == "skipped"
+    stopped = make_bars(flat + [(10.0, 10.5, 9.9, 10.2, 1), (10.1, 10.2, 8.8, 9.0, 1)])
+    result = ss.track(stopped, 2, pullback_signal(), 20)
+    assert result["status"] == "stopped" and result["r"] == -1.0 and result["exit_date"] == stopped.dates[4].isoformat()
+    target = make_bars(flat + [(10.0, 10.5, 9.9, 10.2, 1), (12.4, 12.6, 12.2, 12.5, 1)])
+    result = ss.track(target, 2, pullback_signal(), 20)
+    assert result["status"] == "target" and result["gap"] and result["exit"] == 12.4
+    running = make_bars(flat + [(10.0, 10.5, 9.9, 10.2, 1), (10.2, 11.0, 10.1, 10.8, 1)])
+    result = ss.track(running, 2, pullback_signal(), 20)
+    assert result["status"] == "open" and result["r_now"] == 0.8 and result["bars_held"] == 2 and result["bars_left"] == 18
+    timed = make_bars(flat + [(10.0, 10.5, 9.9, 10.2, 1), (10.2, 11.0, 10.1, 10.8, 1), (10.8, 11.0, 10.5, 10.9, 1)])
+    result = ss.track(timed, 2, pullback_signal(), 2)
+    assert result["status"] == "time_exit" and result["exit"] == 10.8 and result["bars_held"] == 2
+
+
+def test_signal_warnings():
+    def signal(entry, stop, atr):
+        return {"levels": {"entry": entry, "risk_per_share": round(entry - stop, 2)}, "indicators": {"atr14": atr}}
+    assert ss.signal_warnings(signal(100.0, 97.0, 3.0)) == []
+    tight = ss.signal_warnings(signal(15.0, 14.9, 0.3))
+    assert len(tight) == 2 and tight[0].startswith("tight stop") and "0.15 R" in tight[1]
+
+
+def test_track_signals_reports_past_signals_with_regime_and_action():
+    rows = pullback_rows()
+    signal_bar = rows[-1]
+    o, h, l, c, v = signal_bar
+    rows = rows + [(c, h + 1.0, c - 0.1, h + 0.5, 1_200_000)] * 2  # triggers the buy stop above h, stays above the stop
+    bars = make_bars(rows)
+    series = ss.compute(bars, {}, CFG)
+    t = len(rows) - 3
+    regime = {bars.dates[t]: "neutral"}
+    tracked = ss.track_signals(bars, series, ["pullback"], 5, CFG, regime)
+    assert [x["signal_date"] for x in tracked] == [bars.dates[t].isoformat()]
+    row = tracked[0]
+    assert row["regime"] == "neutral" and row["action"] == "watch" and row["status"] == "open" and row["bars_held"] == 2
+    summary = ss.tracking_summary(tracked)
+    assert summary["signals"] == 1 and summary["status"]["open"] == 1 and summary["open_average_r_now"] == row["r_now"]
+    assert ss.track_signals(bars, series, ["pullback"], 1, CFG) == []  # t = len - 2 only
 
 
 # ---------------------------------------------------------------- earnings
@@ -527,11 +616,11 @@ def test_settings_overrides_and_validation():
                          ({"min_rel_volume": True}, "number"), ({"breakout_lookback": 0}, "1 or more")]:
         with pytest.raises(ValueError, match=message):
             ss.settings_with_defaults(bad)
-    assert ss.DEFAULTS["benchmarks"] == ["QQQ", "SMH"]
+    assert ss.DEFAULTS["benchmarks"] == ["QQQ"]
 
 
 def test_discover_tickers_and_finviz(monkeypatch):
-    assert ss.discover("", "aapl, msft,AAPL", 5) == (["AAPL", "MSFT"], "tickers")
+    assert ss.discover("", "aapl, msft,AAPL", 5) == (["AAPL", "MSFT"], "tickers", {})
     with pytest.raises(ValueError, match="not tickers"):
         ss.discover("", "AAPL,rm -rf", 5)
     with pytest.raises(ValueError, match="Finviz"):
@@ -540,16 +629,19 @@ def test_discover_tickers_and_finviz(monkeypatch):
 
     def screen(url, rows=None):
         seen["rows"] = rows
-        return iter([{"Ticker": "AAA"}, {"Ticker": "BBB"}])
+        return iter([{"Ticker": "AAA", "Sector": "Technology"}, {"Ticker": "BBB", "Sector": "Unknown"}])
 
     monkeypatch.setattr(ss.Screener, "init_from_url", screen)
-    assert ss.discover("https://finviz.com/screener.ashx?v=171", "", 2) == (["AAA", "BBB"], "finviz") and seen["rows"] == 2
+    assert ss.discover("https://finviz.com/screener.ashx?v=171", "", 2) == (["AAA", "BBB"], "finviz", {"AAA": "Technology"})
+    assert seen["rows"] == 2
 
 
 @pytest.fixture
 def offline(monkeypatch):
-    rows = {"PULL": pullback_rows(), "BRK": breakout_rows(), "QQQ": uptrend(301, 300, 0.1), "SMH": uptrend(301, 200, 0.1)}
+    rows = {"PULL": pullback_rows(), "BRK": breakout_rows(), "QQQ": uptrend(301, 300, 0.1)}
     rows["PULL"] = uptrend(4) + rows["PULL"]  # same length as the others
+    for k, etf in enumerate(sorted(set(ss.SECTOR_ETFS.values()))):
+        rows[etf] = uptrend(301, 50 + k, 0.05 if etf != "XLE" else -0.02)
     monkeypatch.setattr(ss.time, "sleep", lambda s: None)
 
     def fetch(ticker, count):
@@ -565,6 +657,13 @@ def offline(monkeypatch):
         return [datetime(2025, 12, 1, 21, 30, tzinfo=timezone.utc)]
 
     monkeypatch.setattr(ss, "fetch_earnings", earnings)
+
+    def sector(ticker):
+        if ticker == "BRK":
+            raise ValueError("no sector")
+        return "Technology"
+
+    monkeypatch.setattr(ss, "fetch_sector", sector)
     return rows
 
 
@@ -575,9 +674,21 @@ def test_main_returns_structured_results(offline, capsys):
     assert {r["ticker"] for r in result["results"]["pullback"]["rejected"]} == {"BRK"}
     assert all(r["failed"] for r in result["results"]["breakout"]["rejected"])
     assert result["data_errors"] == [{"ticker": "NOPE", "reason": "chart data is for another ticker"}]
-    assert set(result["benchmarks"]) == {"QQQ", "SMH"} and result["validation"] is None
+    assert set(result["benchmarks"]) == {"QQQ"} and result["validation"] is None
     assert result["as_of"] == sessions(301)[-1].isoformat()
-    assert "Summary: 3 tickers, 1 data errors, qualified: pullback 1, breakout 1" in capsys.readouterr().out
+    market = result["market"]
+    assert market["regime"] == "bullish" and market["long_setups"] == "long"
+    assert market["breadth"]["above_sma200"] == 10 and market["breadth"]["sector_etfs"] == 11 and not market["breadth"]["etfs"]["XLE"]["above"]
+    pull = result["results"]["pullback"]["qualified"][0]
+    assert pull["direction"] == "long" and pull["action"] == "long" and pull["regime"] == "bullish" and pull["sector"] == "Technology"
+    assert pull["relative_strength"]["sector"]["benchmark"] == "XLK" and pull["relative_strength"]["market"]["benchmark"] == "QQQ"
+    assert set(pull["levels"]) >= {"entry", "stop", "target", "reward_risk"} and pull["score"] > 0
+    assert isinstance(pull["warnings"], list)
+    brk = result["results"]["breakout"]["qualified"][0]
+    assert brk["sector"] is None and brk["relative_strength"]["sector"] == {"benchmark": None, "change": None}
+    tracking = result["tracking"]
+    assert tracking["days"] == 10 and set(tracking["summary"]) == {"pullback", "breakout"} and isinstance(tracking["signals"], list)
+    assert "Summary: 3 tickers, 1 data errors, regime bullish, qualified: pullback 1, breakout 1" in capsys.readouterr().out
 
 
 def test_main_single_strategy_and_validation(offline):
@@ -605,6 +716,7 @@ def test_main_without_benchmarks_fails(offline, monkeypatch):
     ({"tickers": "AAPL", "strategy": "scalp"}, "strategy"),
     ({"tickers": "AAPL", "max_tickers": 0}, "max_tickers"),
     ({"tickers": "AAPL", "validation_days": 5000}, "validation_days"),
+    ({"tickers": "AAPL", "track_days": 61}, "track_days"),
 ])
 def test_main_rejects_bad_inputs(offline, kwargs, message):
     with pytest.raises(ValueError, match=message):
