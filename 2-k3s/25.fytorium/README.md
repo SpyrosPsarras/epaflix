@@ -18,7 +18,7 @@ Keep credentials out of git, command arguments and logs.
 | --- | --- |
 | `/Fytorium/fytorium - postgres` | Username `fytorium`, password. Used for `fytorium-db-role` and `DATABASE_URL`: `postgresql://fytorium:<urlencoded pw>@postgres-cluster-rw.postgres-system.svc:5432/fytorium` |
 | `/Fytorium/fytorium - authentik oidc` | Username = `OIDC_CLIENT_ID`, password = `OIDC_CLIENT_SECRET`. Also supplies the client id and secret in the Authentik blueprint. |
-| `/Fytorium/fytorium - minio` | Username = access key `fytorium-app`, password = secret key. Used for `MINIO_ACCESS_KEY` and `MINIO_SECRET_KEY`. |
+| Collection `homelab`, `fytorium - minio` | Username = access key `fytorium-app`, password = secret key. Used for `MINIO_ACCESS_KEY` and `MINIO_SECRET_KEY`. |
 | `/Fytorium/fytorium - vapid` | Password = `VAPID_PRIVATE_KEY`, custom field `public key` = `VAPID_PUBLIC_KEY`, custom field `subject` = `VAPID_SUBJECT`, set to `https://fytorium.epaflix.com`. |
 | `/Fytorium/fytorium - firebase` | Optional backup copy of the Firebase files. The live server key is only in `fytorium-fcm.enc.yaml` (see below). A lost key is replaced by generating a new one in Firebase: Project settings → Service accounts. |
 | `/Personal/plantnet - api key` | Password = `PLANTNET_API_KEY` |
@@ -58,8 +58,9 @@ Bump it whenever the image digest changes.
 Repository CI blocks all-zero placeholder digests.
 
 1. From a LAN PC, run `./2-k3s/25.fytorium/minio-setup.sh --dry-run`, then
-   `./2-k3s/25.fytorium/minio-setup.sh`. Requires Docker, Python 3 and the existing
-   vault-run hub access. On first use, the script builds and caches
+   `./2-k3s/25.fytorium/minio-setup.sh`. Requires Docker, Python 3 and the owner's
+   installed, unlocked Bitwarden CLI with `BW_SESSION` already exported. The
+   script never logs in or uses a service login or API key. On first use, the script builds and caches
    `fytorium-mc:RELEASE.2025-04-16T18-13-26Z` from `mc.Dockerfile`, using
    Go 1.24 and Alpine 3.21. The build needs internet access to fetch the base
    images, pinned mc source and Go modules, but no credentials. Later runs
@@ -72,7 +73,11 @@ Repository CI blocks all-zero placeholder digests.
    `FYTORIUM_MINIO_URL` overrides the endpoint for isolated local tests; fake
    `MINIO_ADMIN_USERNAME`, `MINIO_ADMIN_PASSWORD`, `VAULT_USERNAME` and
    `VAULT_PASSWORD` can exercise `--apply` without vault access. The normal
-   invocation always obtains both credential pairs through vault-run.
+   invocation reads the admin login `MinIO Object Store` from folder `Personal`
+   and the app login `fytorium - minio` from collection `homelab`, matching container
+   and item names exactly in the owner's Bitwarden session. It passes credentials
+   to `--apply` only through its environment.
+   Silo replaced MinIO but keeps the same endpoint and compatible admin API.
 2. Apply both tracked Pi-hole DNS changes using `1-proxmox/pihole/README.md`.
    The dnsmasq A record points at `192.168.10.102`; the matching Unbound static
    zone stops AAAA queries leaking upstream. A static zone without the A record

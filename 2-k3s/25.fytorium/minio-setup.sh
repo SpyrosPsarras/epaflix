@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
-# Run from a LAN PC; vault-run injects credentials without putting them in host argv.
 set +x
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 self="$here/minio-setup.sh"
-vault_runner="$here/../13.t3code/one/files/vault-run.py"
 mc_image='fytorium-mc:RELEASE.2025-04-16T18-13-26Z'
 
 policy() {
@@ -77,8 +75,8 @@ case "${1:-}" in
     printf 'Docker image: %s; built from mc.Dockerfile if not cached locally\n' "$mc_image"
     printf 'Admin credentials in environment, app keys on stdin\n'
     cat <<'COMMANDS'
-Vault admin: /Personal/MinIO Object Store
-Vault app: /Fytorium/fytorium - minio
+Bitwarden admin login: folder Personal / MinIO Object Store
+Bitwarden app login: collection homelab / fytorium - minio
 MinIO URL: https://minio.epaflix.com (FYTORIUM_MINIO_URL overrides for local tests)
 mc mb --ignore-existing fytorium/fytorium-photos
 mc version suspend fytorium/fytorium-photos
@@ -93,15 +91,50 @@ COMMANDS
     exit 0
     ;;
   '')
-    exec python3 "$vault_runner" '/Personal/MinIO Object Store' "$self" --admin
-    ;;
-  --admin)
-    : "${VAULT_USERNAME:?vault item needs a username}" "${VAULT_PASSWORD:?vault item needs a password}"
-    # The nested vault-run overwrites VAULT_*; retain the admin item under different names.
-    export MINIO_ADMIN_USERNAME="$VAULT_USERNAME"
-    export MINIO_ADMIN_PASSWORD="$VAULT_PASSWORD"
-    unset VAULT_USERNAME VAULT_PASSWORD
-    exec python3 "$vault_runner" '/Fytorium/fytorium - minio' "$self" --apply
+    exec python3 - "$self" <<'PY'
+import json
+import os
+import shutil
+import subprocess
+import sys
+
+if not shutil.which("bw") or not os.environ.get("BW_SESSION"):
+    sys.exit("Bitwarden CLI must be installed and unlocked with BW_SESSION exported.")
+
+
+def bw(*args):
+    result = subprocess.run(["bw", "--nointeraction", *args], stdin=subprocess.DEVNULL, capture_output=True,
+                            text=True, check=True, timeout=30)
+    return json.loads(result.stdout)
+
+
+try:
+    if bw("status").get("status") != "unlocked":
+        sys.exit("Bitwarden CLI must be installed and unlocked with BW_SESSION exported.")
+    env = os.environ.copy()
+    for kind, container, name, prefix in (("folder", "Personal", "MinIO Object Store", "MINIO_ADMIN"),
+                                          ("collection", "homelab", "fytorium - minio", "VAULT")):
+        containers = bw("list", "folders" if kind == "folder" else "collections")
+        matches = [entry for entry in containers if entry.get("name") == container]
+        if len(matches) != 1 or not matches[0].get("id"):
+            raise ValueError()
+        container_id = matches[0]["id"]
+        items = bw("list", "items", "--" + kind + "id", container_id, "--search", name)
+        matches = [entry for entry in items if entry.get("name") == name
+                   and (entry.get("folderId") == container_id if kind == "folder" else
+                        container_id in (entry.get("collectionIds") or []))]
+        if len(matches) != 1 or matches[0].get("type") != 1:
+            raise ValueError()
+        login = matches[0]["login"]
+        for field in ("username", "password"):
+            value = login[field]
+            if not isinstance(value, str) or not value or "\u0000" in value:
+                raise ValueError()
+            env[prefix + "_" + field.upper()] = value
+    os.execve(sys.argv[1], [sys.argv[1], "--apply"], env)
+except Exception:
+    sys.exit("Bitwarden credential lookup failed; expected one login per folder or collection and item.")
+PY
     ;;
   --apply)
     : "${MINIO_ADMIN_USERNAME:?missing admin username}" "${MINIO_ADMIN_PASSWORD:?missing admin password}"

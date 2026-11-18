@@ -6,8 +6,8 @@ Vaultwarden's TLS resolver, without Authentik redirects. LAN DNS suppresses
 public AAAA fallback. Away from home, use the VPN and LAN resolver.
 
 Pi server names have `homelab-` and `work-` prefixes. Registration replaces
-only that instance's maintained entries and preserves unrelated servers,
-including the legacy hub. T3 runtimes keep their own in-cluster hub addresses
+only that instance's maintained entries and preserves unrelated servers.
+T3 runtimes keep their own in-cluster hub addresses
 and tokens.
 
 ## Stage client credentials

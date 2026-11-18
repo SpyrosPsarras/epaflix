@@ -308,14 +308,6 @@ class SeedTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout + result.stderr, "")
 
-    def test_legacy_gmail_selftest(self):
-        sys.path.insert(0, str(HUB / "files"))
-        import gmail_mcp
-        output = io.StringIO()
-        with patch.object(gmail_mcp.urllib.request, "urlopen", side_effect=AssertionError("HTTP forbidden")), contextlib.redirect_stdout(output):
-            gmail_mcp._selftest()
-        self.assertEqual(output.getvalue().strip(), "gmail selftest OK")
-
 
 @unittest.skipIf(RAW_TEST, "rendering runs on the host")
 class RenderTests(unittest.TestCase):

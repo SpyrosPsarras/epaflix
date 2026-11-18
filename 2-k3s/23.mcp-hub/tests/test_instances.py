@@ -31,7 +31,6 @@ import hub_clients
 import hub_services
 import mcp_hub
 import notion_grant
-import vaultwarden_mcp
 from upstream import Upstream, UpstreamError, attachment_route
 from starlette.applications import Starlette
 from starlette.responses import JSONResponse, StreamingResponse
@@ -88,10 +87,17 @@ class InstanceTests(unittest.TestCase):
         fixture(path, environment, names=("searxng" if environment == "homelab" else "drive",))
         env = {"HUB_INSTANCE": environment, "HUB_SERVICES_FILE": str(path / "services.json"),
                "HUB_CREDENTIALS_FILE": str(path / "credentials.json")}
-        with patch.dict(os.environ, env, clear=True), patch.object(mcp_hub, "upstreams", side_effect=AssertionError), \
+        with patch.dict(os.environ, env, clear=True), \
                 patch.object(mcp_hub, "Upstream", side_effect=lambda *args, **kwargs:
                              Upstream(*args, transport=transport, **kwargs)):
             return mcp_hub.configured_app()
+
+    def test_no_legacy_mode(self):
+        for name in ("load_clients", "upstreams", "CLIENTS_FILE"):
+            with self.subTest(name=name):
+                self.assertFalse(hasattr(mcp_hub, name))
+        with patch.dict(os.environ, {}, clear=True), self.assertRaisesRegex(ValueError, "HUB_INSTANCE"):
+            mcp_hub.configured_app()
 
     def test_requests_through_both_hubs_and_direct_backend_auth(self):
         with contextlib.ExitStack() as stack:
@@ -102,9 +108,6 @@ class InstanceTests(unittest.TestCase):
                 direct[environment] = stack.enter_context(TestClient(app))
                 clients[environment] = stack.enter_context(TestClient(
                     self.app(environment, httpx2.ASGITransport(app=app))))
-            legacy = stack.enter_context(TestClient(mcp_hub.build_app(
-                {"fixture": digest("legacy-fixture"), "accidental-copy": digest("homelab.fixture-client")},
-                modules=(), ups=[])))
             for environment, client in clients.items():
                 own = environment + ".fixture-client"
                 selected_path = "/searxng" if environment == "homelab" else "/drive"
@@ -123,8 +126,6 @@ class InstanceTests(unittest.TestCase):
                 for path in set(hub_services.PATHS.values()) - {selected_path}:
                     for method in ("get", "post", "delete"):
                         self.assertEqual(getattr(client, method)(path, headers=auth(own)).status_code, 404)
-                self.assertEqual(legacy.get("/absent", headers=auth(own)).status_code, 401)
-                self.assertEqual(legacy.get("/absent", headers=auth("legacy-fixture")).status_code, 404)
                 for token in (None, own, other + "-backend-fixture", "legacy-fixture"):
                     headers = HEADERS if token is None else auth(token)
                     self.assertEqual(direct[environment].post("/mcp", json=INIT, headers=headers).status_code, 401)
@@ -161,7 +162,6 @@ class InstanceTests(unittest.TestCase):
                 (path / "credentials.json").write_text(json.dumps(credentials))
                 with patch.object(notion_grant.SecretStore, "read", return_value=(grant_data, "1")), \
                         patch.object(notion_grant, "post_form", side_effect=AssertionError), \
-                        patch.object(mcp_hub, "upstreams", side_effect=AssertionError), \
                         patch.object(notion_grant, "SecretStore", wraps=notion_grant.SecretStore) as store, \
                         patch.object(mcp_hub, "Upstream", side_effect=lambda name, *args, **kwargs:
                             Upstream(name, *args, transport=httpx2.ASGITransport(
@@ -574,14 +574,13 @@ class InstanceTests(unittest.TestCase):
             bad_credentials.append({**credentials, "upstreams": {"searxng": connection}})
         for value in bad_credentials:
             (path / "credentials.json").write_text(json.dumps(value))
-            with self.assertRaises(ValueError), patch.object(mcp_hub, "upstreams", side_effect=AssertionError):
+            with self.assertRaises(ValueError):
                 mcp_hub.instance_app("homelab", path / "services.json", path / "credentials.json")
         with self.assertRaises(FileNotFoundError):
             mcp_hub.instance_app("homelab", path / "missing", path / "credentials.json")
         for env in ({"HUB_INSTANCE": "homelab"}, {"HUB_SERVICES_FILE": str(path)},
                     {"HUB_CREDENTIALS_FILE": str(path)}, {"HUB_INSTANCE": ""}):
-            with patch.dict(os.environ, env, clear=True), self.assertRaises(ValueError), \
-                    patch.object(mcp_hub, "load_clients", side_effect=AssertionError):
+            with patch.dict(os.environ, env, clear=True), self.assertRaises(ValueError):
                 mcp_hub.configured_app()
 
     def test_instances_reject_retired_vault_routes_even_with_reader_marker(self):
@@ -648,40 +647,6 @@ class InstanceTests(unittest.TestCase):
                 if cmd[2] == "add":
                     self.assertEqual(cmd[-2:], ["--bearer-token-env-var", "FIXTURE_TOKEN"])
 
-    def test_instance_vault_runner_never_reads_legacy_key_or_calls_vault(self):
-        spec = importlib.util.spec_from_file_location("vault_run", ROOT / "2-k3s/13.t3code/one/files/vault-run.py")
-        runner = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(runner)
-        for options in ({"MCP_HUB_INSTANCE": "homelab"}, {"MCP_HUB_INSTANCE": "work"},
-                        {"MCP_HUB_SERVICES_FILE": "missing"}):
-            with patch.dict(os.environ, options, clear=True), patch("builtins.open", side_effect=AssertionError), \
-                    patch.object(runner.urllib.request, "urlopen", side_effect=AssertionError):
-                with self.assertRaises(RuntimeError):
-                    runner.fetch("/fixture/item")
-
-    def test_legacy_vault_and_command_time_secret_auth(self):
-        secret = "backend-vault-fixture"
-        app = vaultwarden_mcp.http_app(secret)
-        with patch.object(vaultwarden_mcp, "_secret", return_value={"password": "synthetic-only", "fields": {}}), \
-                TestClient(app) as direct:
-            ups = [(path, Upstream(path, "https://vault.example.test" + target,
-                    lambda: {"x-hub-secret": secret}, transport=httpx2.ASGITransport(app=app)))
-                    for path, target in (("/vaultwarden", "/vaultwarden"), ("/vault-secret", "/secret"))]
-            with TestClient(mcp_hub.build_app({"fixture": digest("legacy-fixture")}, modules=(), ups=ups)) as legacy:
-                for path in ("/vaultwarden", "/vault-secret"):
-                    self.assertEqual(legacy.post(path, headers=HEADERS).status_code, 401)
-                    self.assertEqual(legacy.post(path, headers=auth("work.fixture-client")).status_code, 401)
-                response = legacy.post("/vaultwarden", json=INIT, headers=auth("legacy-fixture"))
-                self.assertEqual(response.json()["result"]["serverInfo"]["name"], "vaultwarden")
-                response = legacy.post("/vault-secret", json={"path": "/fixture/item"}, headers=auth("legacy-fixture"))
-                self.assertEqual(response.status_code, 200)
-                self.assertTrue(response.json()["password"] == "synthetic-only")
-            for path in ("/vaultwarden", "/secret"):
-                for headers in ({}, {"x-hub-secret": "wrong"}, auth("legacy-fixture")):
-                    self.assertEqual(direct.post(path, headers=headers).status_code, 401)
-            self.assertEqual(direct.post("/secret", json={"path": "/fixture/item"},
-                                        headers={"x-hub-secret": secret}).status_code, 200)
-
     def test_notion_refresh_owns_only_each_instances_grant(self):
         writes = []
         refreshes = []
@@ -720,26 +685,24 @@ class InstanceTests(unittest.TestCase):
         valid = {"client_id": "work", "token_endpoint": "https://notion.example.test/token",
                  "refresh_token": "synthetic-work-refresh", "expires_at": "0"}
         missing = notion_grant.urllib.error.HTTPError("https://kubernetes.example.test", 404, "missing", {}, None)
-        with patch.object(mcp_hub, "upstreams", side_effect=AssertionError) as legacy_upstream:
-            with patch.object(notion_grant.SecretStore, "_call", side_effect=missing), \
-                    self.assertRaises(UpstreamError):
+        with patch.object(notion_grant.SecretStore, "_call", side_effect=missing), \
+                self.assertRaises(UpstreamError):
+            mcp_hub.instance_app("work", path / "services.json", path / "credentials.json")
+        with patch.object(notion_grant.SecretStore, "read", return_value=({"client_id": "work"}, "1")), \
+                self.assertRaises(ValueError):
+            mcp_hub.instance_app("work", path / "services.json", path / "credentials.json")
+        with patch.object(notion_grant.SecretStore, "read", return_value=(valid, "1")), \
+                patch.object(notion_grant, "Grant", side_effect=lambda store: real_grant(
+                    store, post=lambda url, form: (400, {"error": "invalid_grant"}))), \
+                self.assertRaises(UpstreamError):
+            mcp_hub.instance_app("work", path / "services.json", path / "credentials.json")
+        credentials = json.loads((path / "credentials.json").read_text())
+        for override in ({"token": "synthetic-static-token"}, {"namespace": "mcp-hub-homelab"}):
+            credentials["upstreams"]["notion"] = {"url": "https://mcp.notion.com/mcp", **override}
+            (path / "credentials.json").write_text(json.dumps(credentials))
+            with self.assertRaises(ValueError), \
+                    patch.object(notion_grant.SecretStore, "read", side_effect=AssertionError):
                 mcp_hub.instance_app("work", path / "services.json", path / "credentials.json")
-            with patch.object(notion_grant.SecretStore, "read", return_value=({"client_id": "work"}, "1")), \
-                    self.assertRaises(ValueError):
-                mcp_hub.instance_app("work", path / "services.json", path / "credentials.json")
-            with patch.object(notion_grant.SecretStore, "read", return_value=(valid, "1")), \
-                    patch.object(notion_grant, "Grant", side_effect=lambda store: real_grant(
-                        store, post=lambda url, form: (400, {"error": "invalid_grant"}))), \
-                    self.assertRaises(UpstreamError):
-                mcp_hub.instance_app("work", path / "services.json", path / "credentials.json")
-            credentials = json.loads((path / "credentials.json").read_text())
-            for override in ({"token": "synthetic-static-token"}, {"namespace": "mcp-hub-homelab"}):
-                credentials["upstreams"]["notion"] = {"url": "https://mcp.notion.com/mcp", **override}
-                (path / "credentials.json").write_text(json.dumps(credentials))
-                with self.assertRaises(ValueError), \
-                        patch.object(notion_grant.SecretStore, "read", side_effect=AssertionError):
-                    mcp_hub.instance_app("work", path / "services.json", path / "credentials.json")
-            self.assertEqual(legacy_upstream.call_count, 0)
 
     def test_bootstrap_targets_only_selected_namespace_without_auth_flows(self):
         spec = importlib.util.spec_from_file_location("bootstrap_notion", HUB / "tools/bootstrap-notion.py")
@@ -785,8 +748,13 @@ class InstanceTests(unittest.TestCase):
                 self.assertTrue(all(token not in repr(kubectl_args) for token in synthetic_tokens))
                 self.assertTrue(all(token not in output.getvalue() + errors.getvalue() for token in synthetic_tokens))
             with patch.object(bootstrap.subprocess, "run") as run:
-                bootstrap._kubectl("fixture-context", "get", "secret", bootstrap.NAME)
-                self.assertEqual(run.call_args.args[0][3:5], ["-n", "mcp-hub"])
+                with self.assertRaises(TypeError):
+                    bootstrap._kubectl("fixture-context", "get", "secret", bootstrap.NAME)
+                run.assert_not_called()
+        with patch.object(sys, "argv", ["bootstrap-notion.py", "--context", "fixture-context"]), \
+                contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as missing_instance:
+            bootstrap.main()
+        self.assertEqual(missing_instance.exception.code, 2)
 
 
 class RenderTests(unittest.TestCase):
@@ -794,7 +762,7 @@ class RenderTests(unittest.TestCase):
         annotation = "mcp-hub.epaflix.com/inputs-revision"
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            shutil.copytree(HUB / "files", root / "files", ignore=shutil.ignore_patterns("__pycache__", "clients.json"))
+            shutil.copytree(HUB / "files", root / "files", ignore=shutil.ignore_patterns("__pycache__"))
             shutil.copytree(HUB / "instances", root / "instances")
             overlay = root / "fixture-homelab"
             fixture(overlay, "homelab")
@@ -877,7 +845,7 @@ class RenderTests(unittest.TestCase):
     def test_synthetic_secret_injection_and_independent_rollouts(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            shutil.copytree(HUB / "files", root / "files", ignore=shutil.ignore_patterns("__pycache__", "clients.json"))
+            shutil.copytree(HUB / "files", root / "files", ignore=shutil.ignore_patterns("__pycache__"))
             shutil.copytree(HUB / "instances", root / "instances")
             code_hashes = []
             for environment in hub_services.ENVIRONMENTS:
@@ -920,27 +888,6 @@ class RenderTests(unittest.TestCase):
                 self.assertNotEqual(rolled["spec"]["template"], deployment["spec"]["template"])
             self.assertEqual(len(set(code_hashes)), 1)
 
-    def test_legacy_render_without_decrypting_secrets(self):
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp) / "hub"
-            shutil.copytree(HUB, root, ignore=shutil.ignore_patterns("*.enc.yaml", "__pycache__", "tests"))
-            config = yaml.safe_load((root / "kustomization.yaml").read_text())
-            config.pop("generators")
-            config["resources"].append("fixture-secrets.yaml")
-            secrets = [{"apiVersion": "v1", "kind": "Secret", "metadata": {
-                        "name": "mcp-hub-" + name, "namespace": "mcp-hub",
-                        "annotations": {"mcp-hub.epaflix.com/revision": "synthetic"}},
-                        "stringData": {"fixture": "synthetic-only"}} for name in ("gmail", "vaultwarden")]
-            (root / "fixture-secrets.yaml").write_text(yaml.safe_dump_all(secrets))
-            (root / "kustomization.yaml").write_text(yaml.safe_dump(config))
-            result = subprocess.run(["kustomize", "build", str(root)], check=True, capture_output=True, text=True)
-            documents = list(yaml.safe_load_all(result.stdout))
-            app = next(doc for doc in documents if doc["kind"] == "ConfigMap" and "mcp_hub.py" in doc["data"])
-            self.assertIn("clients.json", app["data"])
-            self.assertIn("hub_services.py", app["data"])
-            self.assertEqual(sum(doc["kind"] == "Deployment" for doc in documents), 4)
-            self.assertNotIn("mcp-hub.epaflix.com/inputs-revision", json.dumps(documents))
-
     def test_argocd_automates_hubs_and_runtimes_with_distinct_self_heal_policies(self):
         result = subprocess.run(["kustomize", "build", str(ROOT / "2-k3s/11.argocd/apps")],
                                 check=True, capture_output=True, text=True)
@@ -953,7 +900,7 @@ class RenderTests(unittest.TestCase):
             self.assertTrue(runtime_sync["prune"])
             self.assertFalse(runtime_sync.get("selfHeal", False))
         self.assertNotIn("vault-reader-homelab", apps)
-        self.assertIn("automated", apps["mcp-hub"]["spec"]["syncPolicy"])
+        self.assertNotIn("mcp-hub", apps)
 
 
 if __name__ == "__main__":

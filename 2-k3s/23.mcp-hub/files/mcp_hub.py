@@ -1,26 +1,12 @@
 #!/usr/bin/env python3
-"""The MCP hub: one long-lived streamable-HTTP gateway, one path per MCP server
-(vocabulary in ../README.md). A path is either a module served in-process
-(MODULES) or an upstream the hub forwards to with a credential only it holds
-(upstreams()). ../README.md lists the other steps for adding one.
+"""The MCP hub: one authenticated streamable-HTTP gateway per environment.
 
-Legacy clients.json maps client name to the SHA-256 of its token
-(../tools/add-client.py writes it). Those tokens open every legacy path.
-Homelab/work instances instead require HUB_INSTANCE, HUB_SERVICES_FILE and
-HUB_CREDENTIALS_FILE; only their explicit allowlist is mounted and no legacy
-module, upstream or credential is used. Their token prefixes are reserved
-and rejected by the legacy hub. See ../instances/README.md.
-GET /healthz is the only unauthenticated route. Modules
-use stateless JSON transport, so a pod restart costs a client one retry.
+HUB_INSTANCE, HUB_SERVICES_FILE and HUB_CREDENTIALS_FILE are required. Only
+the explicit instance allowlist is mounted. See ../instances/README.md.
+GET /healthz is the only unauthenticated route.
 
-Env: CLIENTS_FILE (default /app/clients.json) plus whatever the mounted
-servers need: GMAIL_*, SEARXNG_URL,
-VAULTWARDEN_URL + VAULTWARDEN_HUB_SECRET,
-KUBERNETES_MCP_URL, DRIVE_MCP_URL, NOTION_MCP_URL.
-
-Self-test: --selftest runs each module's selftest, then boots the ASGI app
-in-process against fake upstreams and checks auth, the MCP handshake and
-the forwarding rules.
+Self-test: --selftest checks the modules, auth, MCP handshake and forwarding
+rules in-process against fake upstreams.
 """
 
 import contextlib
@@ -45,41 +31,6 @@ from upstream import Upstream, UpstreamError
 
 MODULES = [("/gmail", gmail_mcp.server), ("/searxng", searxng_mcp.server)]
 PORT = int(os.environ.get("PORT", "8000"))
-
-
-def upstreams():
-    import notion_grant
-
-    def vaultwarden_secret():
-        secret = os.environ.get("VAULTWARDEN_HUB_SECRET", "")
-        if not secret:
-            raise UpstreamError("VAULTWARDEN_HUB_SECRET is not set (Secret mcp-hub-vaultwarden)")
-        return {"x-hub-secret": secret}
-
-    grant = notion_grant.Grant(notion_grant.SecretStore("mcp-hub", "mcp-hub-notion-grant"))
-    return [
-        ("/vaultwarden", Upstream("vaultwarden", os.environ.get(
-            "VAULTWARDEN_URL", "http://vaultwarden-mcp.mcp-hub.svc.cluster.local:8000/vaultwarden"),
-            vaultwarden_secret)),
-        # Plain JSON, not MCP: vault-run.py fetches a password here so it never enters a tool result.
-        ("/vault-secret", Upstream("vault-secret", os.environ.get(
-            "VAULT_SECRET_URL", "http://vaultwarden-mcp.mcp-hub.svc.cluster.local:8000/secret"),
-            vaultwarden_secret)),
-        ("/kubernetes", Upstream("kubernetes", os.environ.get(
-            "KUBERNETES_MCP_URL", "http://kubernetes-mcp.mcp-hub.svc.cluster.local:8080/mcp"))),
-        ("/drive", Upstream("drive", os.environ.get(
-            "DRIVE_MCP_URL", "http://workspace-mcp.mcp-hub.svc.cluster.local:8000/mcp"))),
-        ("/notion", Upstream("notion", os.environ.get("NOTION_MCP_URL", "https://mcp.notion.com/mcp"),
-                             grant.headers, on_unauthorized=grant.invalidate)),
-    ]
-
-
-def load_clients(path):
-    """{client name: sha256 hex of its hub token}."""
-    with open(path) as f:
-        clients = json.load(f)
-    validate_clients(clients)
-    return clients
 
 
 def validate_clients(clients):
@@ -166,19 +117,15 @@ class BearerAuth:
             matches = any([hmac.compare_digest(got, d) for d in self.digests])
             prefix = "Bearer " if self.environment is None else "Bearer " + self.environment + "."
             ok = header.startswith(prefix) and matches
-            if self.environment is None and header.startswith(tuple(
-                    "Bearer " + name + "." for name in hub_services.ENVIRONMENTS)):
-                ok = False
             if not ok:
                 await PlainTextResponse("unauthorized", status_code=401)(scope, receive, send)
                 return
         await self.app(scope, receive, send)
 
 
-def build_app(clients, modules=MODULES, ups=None, environment=None, extra_routes=()):
+def build_app(clients, modules=MODULES, ups=(), environment=None, extra_routes=()):
     if not clients:
-        raise SystemExit("no clients: CLIENTS_FILE lists none (run 2-k3s/23.mcp-hub/tools/add-client.py)")
-    ups = upstreams() if ups is None else ups
+        raise SystemExit("no clients configured")
     mounted = [(path, make()) for path, make in modules]
     routes = [Route("/healthz", lambda request: PlainTextResponse("ok"))]
     for path, server in mounted:
@@ -216,8 +163,7 @@ def _selftest():
     for k in ("GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN"):
         os.environ.setdefault(k, "selftest")
     clients = {"laptop": hashlib.sha256(b"t0k3n").hexdigest(), "t3code": hashlib.sha256(b"p0d").hexdigest()}
-    # Format only: deleting a client's line (revocation) must not fail the pod's startup selftest.
-    load_clients(os.path.join(os.path.dirname(os.path.abspath(__file__)), "clients.json"))
+    validate_clients(clients)
 
     # Fake upstream MCP server: echoes what it received, or misbehaves on demand.
     seen = []
@@ -324,23 +270,6 @@ def _selftest():
         assert c.get("/down", headers=auth).status_code == 502
         assert c.post("/nope", json=init, headers=auth).status_code == 404
 
-    assert "/keepass" not in dict(upstreams()), "the keepass route is retired"
-    drive = dict(upstreams())["/drive"]
-    assert drive.url == "http://workspace-mcp.mcp-hub.svc.cluster.local:8000/mcp", drive.url
-    vw = dict(upstreams())["/vaultwarden"]
-    assert vw.url == "http://vaultwarden-mcp.mcp-hub.svc.cluster.local:8000/vaultwarden", vw.url
-    table = dict(upstreams())
-    vs = table["/vault-secret"]
-    assert vs.url == "http://vaultwarden-mcp.mcp-hub.svc.cluster.local:8000/secret", vs.url
-    assert vs.credential is table["/vaultwarden"].credential
-    os.environ["VAULTWARDEN_HUB_SECRET"] = "vw"
-    assert vw.credential() == {"x-hub-secret": "vw"}
-    os.environ["VAULTWARDEN_HUB_SECRET"] = ""
-    try:
-        vw.credential()
-        raise AssertionError("an unset VAULTWARDEN_HUB_SECRET must fail")
-    except UpstreamError as e:
-        assert "mcp-hub-vaultwarden" in str(e)
     print("hub selftest OK")
 
 
@@ -358,12 +287,9 @@ def configured_app():
     environment = os.environ.get("HUB_INSTANCE")
     services_file = os.environ.get("HUB_SERVICES_FILE")
     credentials_file = os.environ.get("HUB_CREDENTIALS_FILE")
-    if any(value is not None for value in (environment, services_file, credentials_file)):
-        if not all((environment, services_file, credentials_file)):
-            raise ValueError("HUB_INSTANCE, HUB_SERVICES_FILE and HUB_CREDENTIALS_FILE are all required")
-        return instance_app(environment, services_file, credentials_file)
-    clients = load_clients(os.environ.get("CLIENTS_FILE", "/app/clients.json"))
-    return build_app(clients)
+    if not all((environment, services_file, credentials_file)):
+        raise ValueError("HUB_INSTANCE, HUB_SERVICES_FILE and HUB_CREDENTIALS_FILE are all required")
+    return instance_app(environment, services_file, credentials_file)
 
 
 if __name__ == "__main__":

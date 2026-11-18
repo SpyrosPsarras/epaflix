@@ -367,9 +367,7 @@ desktop. The manager cannot push, merge, sync or recover its own namespace.
    its own, but the merged revision makes the child OutOfSync, and that sync
    applies the full StatefulSet. The explicit scale-up is not required; it is
    a harmless no-op when the pod is already back, and the Ready wait is the
-   real check. Verify the reviewed controller revision. Confirm the legacy hub
-   removes only the manager client and retains its other clients, without
-   displaying inventory values.
+   real check. Verify the reviewed controller revision.
 8. M8: Privately confirm the mounted context, repeat the full real-credential
    authorization matrix, and check only names, modes and env names for grant
    absence. Verify a harmless model prompt, empty external MCP inventory,

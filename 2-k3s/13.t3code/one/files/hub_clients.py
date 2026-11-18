@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Register every hub path in one home's agent configs. Shared by
-tools/add-client.py (PCs) and the t3code pod entrypoint (a byte copy in
+tools/local-clients.py and isolated runtime setup (a byte copy in
 13.t3code/one/files, kept in sync by 13.t3code/one/tools/sync-shared.sh).
 
   hub_clients.py opencode <opencode.json> <hub url> <Authorization value>
@@ -32,10 +32,9 @@ import tempfile
 import hub_services
 
 SERVERS = hub_services.client_servers()
-MANAGED = set(SERVERS) | {"vault-secret", "vault-attachment"}
+MANAGED = set(SERVERS)
 # These tools ask in OpenCode (<server>_<tool>).
-# The kubernetes and drive names are those of the images pinned in
-# 23.mcp-hub/kubernetes-mcp.yaml and workspace-mcp.yaml; recheck them when bumping.
+# Drive names follow the Workspace image pinned in instances/google/workspace.yaml.
 ASK = {
     "gmail": ["gmail_send", "gmail_send_draft", "gmail_trash"],
     "drive": ["create_drive_file", "create_drive_folder", "copy_drive_file", "import_to_google_doc",

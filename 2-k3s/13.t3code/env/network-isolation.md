@@ -75,8 +75,8 @@ from both pods, confirming enforcement. Source-node NAT translates
 selects that backend port. Kubernetes Service `10.43.0.1:443` similarly becomes
 `10.0.0.51`, `.52` or `.53` on 6443. Recheck after CNI, kube-proxy or endpoint changes.
 
-R3: The internal HTTPS listener also exposes both environment hubs, the mixed
-`mcp-hub` route and `traefik-system/t3code-https`, which forwards to the mixed
+R3: The internal HTTPS listener also exposes both environment hubs and
+`traefik-system/t3code-https`, which forwards to the mixed
 T3 backend on 3773, plus other configured internal apps. NetworkPolicy cannot
 filter TLS hostnames or Host headers. Pod traffic to `.102` is masqueraded,
 so a Traefik ipAllowList cannot distinguish those sources either. Foreign-hub

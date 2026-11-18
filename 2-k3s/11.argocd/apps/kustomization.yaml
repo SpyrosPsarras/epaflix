@@ -20,7 +20,6 @@ resources:
   - app-kured.yaml
   - app-kube-vip-cloud-provider.yaml
   - app-maintenance.yaml
-  - app-mcp-hub.yaml
   - app-mcp-hub-homelab.yaml
   - app-mcp-hub-work.yaml
   - app-nvidia-device-plugin.yaml
