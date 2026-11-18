@@ -395,6 +395,14 @@ class WindmillTests(AgentChecks, unittest.TestCase):
             "Never print, echo",
             "/run/gh/token",
             "Never edit `.github/`",
+            "## Replies",
+            "`O1`",
+            "## Doing what was asked",
+            "A change they want to check before it merges",
+            "## Long jobs and memory",
+            "/sys/fs/cgroup/memory.current",
+            "ulimit -v 1500000",
+            "one long job at a time",
         ]:
             self.assertIn(marker, text)
 
