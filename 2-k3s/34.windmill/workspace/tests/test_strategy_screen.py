@@ -350,18 +350,171 @@ def test_simulate_breakout_gap_below_stop_is_skipped():
     assert ss.simulate(future([(8, 8.5, 7, 8, 1)] * 2), 0, signal("breakout", 0, 9, 12), 2)["outcome"] == "not_filled"
 
 
+def test_simulate_fill_above_target_exits_at_the_open():
+    # Regression: a breakout opening above its target used to exit at the lower target price.
+    out = ss.simulate(future([(12.6, 13, 12.2, 12.8, 1)] * 3), 0, signal("breakout", 0, 9, 12), 2)
+    assert out["outcome"] == "target" and out["gap"] and out["fill"] == out["exit"] == 12.6 and out["r"] == 0 and out["bars_held"] == 1
+
+
+def test_simulate_pullback_gap_above_target_exits_at_the_open():
+    out = ss.simulate(future([(12.4, 12.9, 11.9, 12.5, 1)] * 3), 0, signal("pullback", 10.6, 9, 12), 2)
+    assert (out["outcome"], out["fill"], out["exit"], out["r"]) == ("target", 12.4, 12.4, 0)
+
+
+def test_simulate_open_comes_before_the_range():
+    # Opens above the target, then trades down through the stop: the open happens first.
+    up = ss.simulate(future([(10, 10.5, 9.6, 10.2, 1), (12.5, 12.6, 8.5, 9, 1)]), 0, signal("breakout", 0, 9, 12), 2)
+    assert (up["outcome"], up["exit"], up["gap"]) == ("target", 12.5, True)
+    # Opens below the stop: exits at the open, worse than the stop.
+    down = ss.simulate(future([(10, 10.5, 9.6, 10.2, 1), (8, 12.5, 7.5, 12, 1)]), 0, signal("breakout", 0, 9, 12), 2)
+    assert (down["outcome"], down["exit"], down["r"], down["gap"]) == ("stop", 8, -2.0, True)
+
+
+def test_simulate_intrabar_stop_and_target_exits():
+    stop = ss.simulate(future([(10, 10.5, 9.6, 10.2, 1), (10, 10.2, 8.9, 9.5, 1)]), 0, signal("breakout", 0, 9, 12), 2)
+    assert (stop["outcome"], stop["exit"], stop["gap"]) == ("stop", 9, False)
+    target = ss.simulate(future([(10, 10.5, 9.6, 10.2, 1), (10.5, 12.3, 10.4, 12.1, 1)]), 0, signal("breakout", 0, 9, 12), 2)
+    assert (target["outcome"], target["exit"], target["r"], target["gap"]) == ("target", 12, 2.0, False)
+
+
+def test_simulate_mae_and_mfe():
+    sig = {**signal("breakout", 0, 8, 20), "indicators": {"atr14": 0.5}}
+    out = ss.simulate(future([(10, 11, 9.5, 10.5, 1), (10.5, 12, 9, 11, 1), (11, 11.5, 10, 10.8, 1)]), 0, sig, 3)
+    assert out["outcome"] == "timeout" and out["exit"] == 10.8
+    assert (out["mae_r"], out["mfe_r"], out["mae_atr"], out["mfe_atr"]) == (0.5, 1.0, 2.0, 4.0)
+    stopped = ss.simulate(future([(10, 11, 9.5, 10.5, 1), (10.5, 12, 7, 11, 1)]), 0, sig, 2)
+    assert stopped["mae_r"] == 1.0 and stopped["mfe_r"] == 0.5  # the stop bar's high is not counted
+
+
 def test_validate_walks_forward_without_overlap():
     rows = breakout_rows() + [(192 + i, 193.5 + i, 191.5 + i, 193 + i, 1_000_000) for i in range(25)]
     bars = make_bars(rows)
-    trades = ss.validate(bars, ss.compute(bars, {}, CFG), ["breakout"], 40, CFG)
+    trades, signals, base = ss.validate(bars, ss.compute(bars, {}, CFG), ["breakout"], 40, CFG)
     assert [t["signal_date"] for t in trades] == [bars.dates[300].isoformat()]
-    assert trades[0]["outcome"] == "target" and trades[0]["fill"] == 192
-    summary = ss.summarize(trades)
-    assert summary["closed"] == 1 and summary["win_rate"] == 1 and summary["average_r"] > 0
+    assert trades[0]["outcome"] == "target" and trades[0]["fill"] == 192 and trades[0]["regime"] == "unknown"
+    assert trades[0]["earnings"] == {"known": False}
+    assert [s["signal_date"] for s in signals] == [bars.dates[300].isoformat()] and not signals[0]["overlaps"]
+    assert len(base) == 40 and all("fwd_20" in x for x in base)
+    summary = ss.summarize(trades, signals)
+    assert summary["closed"] == 1 and summary["gross"]["win_rate"] == 1 and summary["gross"]["expectancy_r"] > 0
+    assert summary["forward_returns"]["all_signals"]["5d"]["n"] == 1
+
+
+def test_forward_returns_start_at_the_next_open_and_never_run_past_the_data():
+    bars = make_bars([(10, 10, 10, 10, 1)] + [(20, 22, 19, 21 + k, 1) for k in range(20)])
+    out = ss.forward_returns(bars, 0)
+    assert out["fwd_5"] == pytest.approx((21 + 4) / 20 - 1) and out["fwd_20"] == pytest.approx((21 + 19) / 20 - 1)
+    assert set(ss.forward_returns(bars, 10)) == {"fwd_5", "fwd_10"}
+    assert ss.forward_returns(bars, 20) == {}
+    market = {"open": {bars.dates[1]: 100}, "close": {bars.dates[5]: 110}}
+    assert ss.forward_returns(bars, 0, market)["excess_5"] == pytest.approx(0.25 - 0.10)
+
+
+def test_validation_window_leaves_room_for_every_forward_return():
+    rows = uptrend(330)
+    bars = make_bars(rows)
+    _, _, base = ss.validate(bars, ss.compute(bars, {}, CFG), ["pullback"], 500, CFG)
+    assert base and all(set(x) == {"fwd_5", "fwd_10", "fwd_20"} for x in base)
+
+
+def test_overlapping_signals_are_flagged():
+    rows = breakout_rows()
+    bars = make_bars(rows + [(192, 193, 191, 192.5, 1_000_000)] * 30)
+    def fake(b, s, t, cfg):
+        return {"qualified": t in (265, 280, 305), "signal_date": b.dates[t].isoformat(), "score": 1,
+                "levels": {"entry": 0, "stop": 1, "target": 2}, "strategy": "breakout"}
+
+    original = ss.EVALUATORS["breakout"]
+    ss.EVALUATORS["breakout"] = fake
+    try:
+        _, signals, _ = ss.validate(bars, ss.compute(bars, {}, CFG), ["breakout"], 60, CFG)
+    finally:
+        ss.EVALUATORS["breakout"] = original
+    assert [s["overlaps"] for s in signals] == [False, True, False]
+
+
+def test_metrics_drawdown_and_costs():
+    m = ss.metrics([1.0, -1.0, -1.0, 2.0, -0.5])
+    assert m == {"trades": 5, "expectancy_r": 0.1, "median_r": -0.5, "win_rate": 0.4, "profit_factor": 1.2,
+                 "total_r": 0.5, "max_drawdown_r": 2.0, "largest_loss_r": -1.0}
+    trade = {"r": 1.0, "fill": 100.0, "risk": 2.0}
+    assert ss.net_r(trade, 0) == 1.0 and ss.net_r(trade, 10) == pytest.approx(0.95) and ss.net_r(trade, 50) == pytest.approx(0.75)
+    assert ss.metrics([]) == {"trades": 0}
+
+
+def closed_trade(r, outcome="stop", regime="uptrend", gap=False, exit_date="2026-01-05", earnings=None):
+    return {"ticker": "X", "signal_date": "2026-01-01", "exit_date": exit_date, "outcome": outcome, "gap": gap, "r": r,
+            "fill": 100.0, "risk": 2.0, "regime": regime, "mae_r": 1, "mfe_r": 0.5, "mae_atr": 1, "mfe_atr": 0.5,
+            "earnings": earnings or {"known": False}}
+
+
+def test_summarize_reports_every_diagnostic():
+    trades = [closed_trade(-1.0), closed_trade(-2.5, gap=True, exit_date="2026-01-06"),
+              closed_trade(2.0, "target", regime="bear", exit_date="2026-01-07", earnings={"known": True, "held_through": True, "reaction_at_entry": False}),
+              closed_trade(0.4, "timeout", exit_date="2026-01-08", earnings={"known": True, "held_through": False, "reaction_at_entry": True}),
+              {"ticker": "X", "signal_date": "2026-01-02", "outcome": "not_filled", "regime": "uptrend"}]
+    s = ss.summarize(trades)
+    assert (s["trades"], s["not_filled"], s["closed"], s["exits"]) == (5, 1, 4, {"stop": 2, "target": 1, "timeout": 1})
+    assert s["gross"] == s["costs"]["0bp"] and s["gross"]["max_drawdown_r"] == 3.5 and s["gross"]["largest_loss_r"] == -2.5
+    assert s["costs"]["50bp"]["expectancy_r"] == pytest.approx(s["gross"]["expectancy_r"] - 0.25, abs=1e-3)
+    assert s["gaps"] == {"stop_exits_through_gap": 1, "extra_loss_beyond_stop_r": 1.5, "worst_gap_stop_r": -2.5, "target_exits_at_open": 0}
+    assert set(s["by_regime"]) == {"bear", "uptrend"} and s["by_regime"]["bear"]["gross"]["trades"] == 1
+    assert s["earnings"]["trades_with_known_dates"] == 2 and s["earnings"]["held_through_report"]["expectancy_r"] == 2.0
+    assert s["earnings"]["report_at_signal_or_entry"]["trades"] == 1
+    assert s["mae_mfe"]["stop"]["trades"] == 2
 
 
 def test_summarize_empty():
-    assert ss.summarize([])["win_rate"] is None
+    s = ss.summarize([])
+    assert s["closed"] == 0 and s["gross"] == {"trades": 0}
+
+
+def test_market_regime():
+    closes = [100 + i for i in range(250)] + [349 - 3 * i for i in range(40)]
+    dates = sessions(len(closes))
+    regime = ss.market_regime(dates, closes)
+    assert regime[dates[100]] == "unknown"
+    labels = [regime[d].split(":")[0] for d in dates[199:]]
+    order = [label for i, label in enumerate(labels) if i == 0 or label != labels[i - 1]]
+    assert order == ["uptrend", "correction", "bear"]
+
+
+# ---------------------------------------------------------------- earnings
+
+
+def quote_page(events):
+    import json
+    return '<html><script>var data = {"ticker":"AAPL","chartEvents":' + json.dumps(events) + ',"other":[1]}</script></html>'
+
+
+def test_parse_earnings_keeps_only_earnings_events():
+    events = [{"eventType": "chartEvent/earnings", "dateTimestamp": 1761856200},
+              {"eventType": "chartEvent/dividends", "dateTimestamp": 1762732800},
+              {"eventType": "chartEvent/earnings", "dateTimestamp": 1753993800}]
+    assert ss.parse_earnings(quote_page(events)) == [datetime(2025, 7, 31, 20, 30, tzinfo=timezone.utc),
+                                                     datetime(2025, 10, 30, 20, 30, tzinfo=timezone.utc)]
+    with pytest.raises(ValueError, match="no chart events"):
+        ss.parse_earnings("<html>nothing</html>")
+
+
+def test_reaction_session_depends_on_report_time():
+    calendar = sessions(10, date(2026, 1, 5))  # Mon 5 Jan to Fri 16 Jan
+    before_open = datetime(2026, 1, 6, 12, 0, tzinfo=timezone.utc)  # 07:00 New York, Tue
+    after_close = datetime(2026, 1, 8, 21, 30, tzinfo=timezone.utc)  # 16:30 New York, Thu
+    friday_close = datetime(2026, 1, 9, 21, 30, tzinfo=timezone.utc)  # reacts on Monday
+    info = ss.reaction_sessions([before_open, after_close, friday_close], calendar)
+    assert info["sessions"] == {date(2026, 1, 6), date(2026, 1, 9), date(2026, 1, 12)} and info["since"] == date(2026, 1, 6)
+    assert ss.reaction_sessions([], calendar) == {"since": None, "sessions": set()}
+
+
+def test_earnings_flags():
+    info = {"since": date(2026, 1, 1), "sessions": {date(2026, 2, 10)}}
+    trade = {"signal_date": "2026-02-05", "fill_date": "2026-02-06", "exit_date": "2026-02-12"}
+    assert ss.earnings_flags(trade, info) == {"known": True, "held_through": True, "reaction_at_entry": False}
+    entry = {"signal_date": "2026-02-10", "fill_date": "2026-02-11", "exit_date": "2026-02-20"}
+    assert ss.earnings_flags(entry, info) == {"known": True, "held_through": False, "reaction_at_entry": True}
+    assert ss.earnings_flags({**trade, "signal_date": "2025-12-01"}, info) == {"known": False}
+    assert ss.earnings_flags(trade, None) == {"known": False}
 
 
 # ---------------------------------------------------------------- inputs and main
@@ -405,6 +558,13 @@ def offline(monkeypatch):
         return make_bars(rows[ticker], ticker)
 
     monkeypatch.setattr(ss, "fetch_bars", fetch)
+
+    def earnings(ticker):
+        if ticker != "BRK":
+            raise ValueError("the quote page has no chart events")
+        return [datetime(2025, 12, 1, 21, 30, tzinfo=timezone.utc)]
+
+    monkeypatch.setattr(ss, "fetch_earnings", earnings)
     return rows
 
 
@@ -423,6 +583,16 @@ def test_main_returns_structured_results(offline, capsys):
 def test_main_single_strategy_and_validation(offline):
     result = ss.main(tickers="BRK", strategy="breakout", validation_days=20)
     assert list(result["results"]) == ["breakout"] and set(result["validation"]["summary"]) == {"breakout"}
+    validation = result["validation"]
+    assert validation["cost_scenarios_bps"] == [0, 10, 25, 50] and validation["forward_days"] == [5, 10, 20]
+    assert validation["earnings_data"]["tickers_with_dates"] == 1 and validation["earnings_data"]["tickers_without_dates"] == []
+    assert validation["universe_base_rate"]["20d"]["n"] == 20 and validation["market_regime_benchmark"] == "QQQ"
+    assert any("Survivorship" in a for a in validation["assumptions"])
+
+
+def test_main_reports_missing_earnings_data(offline):
+    result = ss.main(tickers="PULL", strategy="pullback", validation_days=10)
+    assert result["validation"]["earnings_data"]["tickers_without_dates"] == ["PULL"]
 
 
 def test_main_without_benchmarks_fails(offline, monkeypatch):

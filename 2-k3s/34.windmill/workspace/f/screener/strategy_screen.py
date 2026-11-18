@@ -10,8 +10,11 @@ computed here from completed daily bars only, so a signal on day t uses no data
 after day t. The script sends no email and changes nothing; it returns JSON.
 """
 
+import bisect
+import json
 import math
 import re
+import statistics
 import time
 from datetime import date, datetime, timedelta, timezone
 from urllib.parse import urlparse
@@ -21,6 +24,7 @@ from finviz.screener import NoResults, Screener
 
 FINVIZ_HOSTS = {"finviz.com", "www.finviz.com"}
 CHART_URL = "https://finviz.com/api/quote"
+QUOTE_URL = "https://finviz.com/quote.ashx"
 USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
 TICKER = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
 STRATEGIES = ("pullback", "breakout")
@@ -92,19 +96,35 @@ def parse_chart(payload, ticker):
     return Bars(ticker, dates, *numbers)
 
 
-def fetch_bars(ticker, count, retries=3):
+def _get(url, params, retries=3):
     for attempt in range(retries + 1):
-        response = requests.get(
-            CHART_URL,
-            params={"instrument": "stock", "ticker": ticker, "timeframe": "d", "barsCount": count},
-            headers={"User-Agent": USER_AGENT},
-            timeout=20,
-        )
+        response = requests.get(url, params=params, headers={"User-Agent": USER_AGENT}, timeout=20)
         if response.status_code in (429, 500, 502, 503, 504) and attempt < retries:
             time.sleep(2 ** attempt)
             continue
         response.raise_for_status()
-        return parse_chart(response.json(), ticker)
+        return response
+
+
+def fetch_bars(ticker, count):
+    response = _get(CHART_URL, {"instrument": "stock", "ticker": ticker, "timeframe": "d", "barsCount": count})
+    return parse_chart(response.json(), ticker)
+
+
+def parse_earnings(html):
+    """Earnings report times (UTC) from the chart events embedded in a Finviz quote page."""
+    marker = '"chartEvents":'
+    start = html.find(marker + "[")
+    if start < 0:
+        raise ValueError("the quote page has no chart events")
+    events, _ = json.JSONDecoder().raw_decode(html[start + len(marker):])
+    return sorted(datetime.fromtimestamp(e["dateTimestamp"], timezone.utc) for e in events
+                  if isinstance(e, dict) and e.get("eventType") == "chartEvent/earnings" and isinstance(e.get("dateTimestamp"), (int, float)))
+
+
+def fetch_earnings(ticker):
+    # The weekly chart view carries about ten years of report dates; the daily view only two.
+    return parse_earnings(_get(QUOTE_URL, {"t": ticker, "p": "w"}).text)
 
 
 def new_york_time(now):
@@ -418,14 +438,37 @@ EVALUATORS = {"pullback": evaluate_pullback, "breakout": evaluate_breakout}
 
 
 # ---------------------------------------------------------------- validation
+#
+# Execution model, also returned as validation.assumptions:
+# - Signals use completed bars up to and including the signal day t only.
+# - Pullback: buy stop at the entry, valid on bar t+1 only; a gap above it fills at the open.
+#   Breakout: buy at the open of bar t+1. A fill at or below the stop is skipped.
+# - Each bar is handled in time order: first its open, then its range. An open at or beyond
+#   the stop or target exits at that open. Inside a bar the order of high and low is unknown,
+#   so when both the stop and the target are inside the range, the stop counts.
+# - Trades still open after `validation_horizon` bars exit at that bar's close.
+# - One trade per ticker and strategy at a time. Trades of different tickers overlap freely and
+#   each risks 1R, so drawdown is a sum over concurrent trades, not a portfolio simulation.
+# - Costs are a round trip in basis points of the fill price, converted to R per trade.
+
+COST_BPS = (0, 10, 25, 50)
+FORWARD_DAYS = (5, 10, 20)
+ASSUMPTIONS = [
+    "Signals on day t use completed daily bars up to t only; the partial bar of the current session is dropped.",
+    "Pullback fills with a buy stop on the next bar only, at the open if it gaps above the entry. Breakout fills at the next open. Fills at or below the stop are skipped.",
+    "Bars are processed in time order: an open at or beyond the stop or target exits at the open; inside a bar the stop counts before the target.",
+    "MAE uses the full low of each bar held, including the part of the fill bar before a buy stop triggered, so it is conservative.",
+    "Trades not stopped or at target exit at the close of the last bar of the horizon.",
+    "Costs are round trip in basis points of the fill price; no market impact or borrow modelling.",
+    "One trade per ticker and strategy at a time; trades of different tickers overlap and each risks 1R. Drawdown sums them in exit order and is not a portfolio simulation.",
+    "Forward returns run from the next open (the first possible fill) to the close k sessions after the signal, and are computed only for signals with k bars of future data. They include overlapping signals; a non-overlapping subset is reported too.",
+    "Selection bias: the tickers come from today's Finviz screen, so every one of them exists and passed today's filters. Survivorship bias: delisted and acquired stocks are missing. Both make past results look better than a real-time run would have been.",
+    "Earnings dates come from the Finviz quote page and are the actual report times as Finviz shows them today, not the dates that were scheduled at the time.",
+]
 
 
 def simulate(bars, t, signal, horizon):
-    """Outcome of a signal on bar t, using only bars after t.
-
-    Pullback: buy-stop at entry, valid on the next bar only. Breakout: buy at the next open.
-    When the stop and the target fall in the same bar, the stop counts (conservative).
-    """
+    """Outcome of a signal on bar t, using only bars after t."""
     levels = signal["levels"]
     stop, target = levels["stop"], levels["target"]
     i = t + 1
@@ -440,59 +483,192 @@ def simulate(bars, t, signal, horizon):
     if fill <= stop:
         return {"outcome": "not_filled", "detail": "opened below the stop"}
     risk = fill - stop
+    atr = (signal.get("indicators") or {}).get("atr14") or risk
+    low = high = fill
+
+    def finish(j, price, outcome, gap):
+        return {"outcome": outcome, "gap": gap, "fill": round(fill, 4), "fill_date": bars.dates[i].isoformat(),
+                "exit": round(price, 4), "exit_date": bars.dates[j].isoformat(), "risk": round(risk, 4),
+                "r": round((price - fill) / risk, 4), "bars_held": j - t,
+                "mae_r": round((fill - min(low, price)) / risk, 3), "mfe_r": round((max(high, price) - fill) / risk, 3),
+                "mae_atr": round((fill - min(low, price)) / atr, 3), "mfe_atr": round((max(high, price) - fill) / atr, 3)}
+
     for j in range(i, i + horizon):
+        opening = fill if j == i else bars.open[j]
+        if opening >= target:
+            return finish(j, opening, "target", True)
+        if opening <= stop:  # only on later bars, the fill is above the stop
+            return finish(j, opening, "stop", True)
         if bars.low[j] <= stop:
-            exit_price, outcome = (stop if j == i else min(bars.open[j], stop)), "stop"
-        elif bars.high[j] >= target:
-            exit_price, outcome = (target if j == i else max(bars.open[j], target)), "target"
-        else:
-            continue
-        return {"outcome": outcome, "fill": round(fill, 2), "exit": round(exit_price, 2), "exit_date": bars.dates[j].isoformat(),
-                "r": round((exit_price - fill) / risk, 2), "bars_held": j - t}
+            return finish(j, stop, "stop", False)
+        low = min(low, bars.low[j])
+        if bars.high[j] >= target:
+            return finish(j, target, "target", False)
+        high = max(high, bars.high[j])
     j = i + horizon - 1
-    return {"outcome": "timeout", "fill": round(fill, 2), "exit": round(bars.close[j], 2), "exit_date": bars.dates[j].isoformat(),
-            "r": round((bars.close[j] - fill) / risk, 2), "bars_held": j - t}
+    return finish(j, bars.close[j], "timeout", False)
 
 
-def validate(bars, series, strategies, days, cfg):
+def market_regime(dates, closes):
+    """Benchmark regime per date, from benchmark closes up to that date."""
+    sma200, ema20, ema50 = sma(closes, 200), ema(closes, 20), ema(closes, 50)
+    regime = {}
+    for d, c, m, fast, slow in zip(dates, closes, sma200, ema20, ema50):
+        if m is None or slow is None:
+            regime[d] = "unknown"
+        elif c < m:
+            regime[d] = "bear: below SMA200"
+        else:
+            regime[d] = "uptrend: above SMA200, EMA20 > EMA50" if fast > slow else "correction: above SMA200, EMA20 < EMA50"
+    return regime
+
+
+def forward_returns(bars, t, market=None):
+    """Returns from the next open to the close k sessions after t, and the same for the benchmark."""
+    out = {}
+    if t + 1 >= len(bars):
+        return out
+    start = bars.open[t + 1]
+    for k in FORWARD_DAYS:
+        if t + k >= len(bars):
+            continue
+        value = bars.close[t + k] / start - 1
+        out[f"fwd_{k}"] = value
+        if market:
+            m_start, m_end = market["open"].get(bars.dates[t + 1]), market["close"].get(bars.dates[t + k])
+            if m_start and m_end:
+                out[f"excess_{k}"] = value - (m_end / m_start - 1)
+    return out
+
+
+def reaction_sessions(events, calendar):
+    """Session whose open first reflects each report: the same day before 09:30 New York, else the next session."""
+    sessions = set()
+    for event in events:
+        local = new_york_time(event)
+        position = bisect.bisect_left(calendar, local.date())
+        if (local.hour, local.minute) >= (9, 30) and position < len(calendar) and calendar[position] == local.date():
+            position += 1
+        if position < len(calendar):
+            sessions.add(calendar[position])
+    return {"since": min(new_york_time(e).date() for e in events) if events else None, "sessions": sessions}
+
+
+def earnings_flags(trade, info):
+    if not info or not info["since"] or date.fromisoformat(trade["signal_date"]) < info["since"]:
+        return {"known": False}
+    fill, exit_ = date.fromisoformat(trade["fill_date"]), date.fromisoformat(trade["exit_date"])
+    signal = date.fromisoformat(trade["signal_date"])
+    return {"known": True,
+            "held_through": any(fill < s <= exit_ for s in info["sessions"]),
+            "reaction_at_entry": signal in info["sessions"] or fill in info["sessions"]}
+
+
+def validate(bars, series, strategies, days, cfg, market=None, earnings=None):
     """Walk forward over `days` signal days that ended at least `horizon` bars ago, so every trade can finish.
 
-    One open trade per ticker and strategy at a time."""
+    Returns the trades (one open trade per ticker and strategy), every qualified signal with its
+    forward returns, and the forward returns of every day in the window (the base rate)."""
     horizon = cfg["validation_horizon"]
-    last = len(bars) - 1 - horizon
-    trades = []
+    last = len(bars) - 1 - max(horizon, max(FORWARD_DAYS))
+    window = range(max(cfg["min_bars"] - 1, last - days), last)
+    base = [forward_returns(bars, t, market) for t in window]
+    trades, signals = [], []
+    regime = (market or {}).get("regime", {})
     for strategy in strategies:
-        busy_until = -1
-        for t in range(max(cfg["min_bars"] - 1, last - days), last):
-            if t <= busy_until:
-                continue
+        busy_until, previous = -1, None
+        for t in window:
             signal = EVALUATORS[strategy](bars, series, t, cfg)
             if not signal["qualified"]:
                 continue
+            signals.append({"strategy": strategy, "ticker": bars.ticker, "signal_date": signal["signal_date"],
+                            "overlaps": previous is not None and t - previous < max(FORWARD_DAYS), **forward_returns(bars, t, market)})
+            previous = t
+            if t <= busy_until:
+                continue
             outcome = simulate(bars, t, signal, horizon)
-            trades.append({"ticker": bars.ticker, "strategy": strategy, "signal_date": signal["signal_date"],
-                           "score": signal["score"], **signal["levels"], **outcome})
-            if "bars_held" in outcome:
+            trade = {"ticker": bars.ticker, "strategy": strategy, "signal_date": signal["signal_date"], "score": signal["score"],
+                     "regime": regime.get(bars.dates[t], "unknown"), **signal["levels"], **outcome}
+            if "r" in outcome:
+                trade["earnings"] = earnings_flags(trade, earnings)
                 busy_until = t + outcome["bars_held"]
-    return trades
+            trades.append(trade)
+    return trades, signals, base
 
 
-def summarize(trades):
-    closed = [x for x in trades if "r" in x]
-    wins = [x for x in closed if x["r"] > 0]
-    gains, losses = sum(x["r"] for x in wins), -sum(x["r"] for x in closed if x["r"] <= 0)
-    return {
-        "signals": len(trades),
+def net_r(trade, bps):
+    return trade["r"] - bps / 1e4 * trade["fill"] / trade["risk"]
+
+
+def metrics(values):
+    """values: R per trade in exit order."""
+    if not values:
+        return {"trades": 0}
+    gains, losses = sum(v for v in values if v > 0), -sum(v for v in values if v <= 0)
+    total = peak = drawdown = 0.0
+    for v in values:
+        total += v
+        peak = max(peak, total)
+        drawdown = max(drawdown, peak - total)
+    return {"trades": len(values), "expectancy_r": round(statistics.fmean(values), 3), "median_r": round(statistics.median(values), 3),
+            "win_rate": round(sum(v > 0 for v in values) / len(values), 3), "profit_factor": round(gains / losses, 2) if losses else None,
+            "total_r": round(total, 2), "max_drawdown_r": round(drawdown, 2), "largest_loss_r": round(min(values), 2)}
+
+
+def _medians(trades):
+    if not trades:
+        return {"trades": 0}
+    return {"trades": len(trades), **{f"median_{k}": round(statistics.median(x[k] for x in trades), 2) for k in ("mae_r", "mfe_r", "mae_atr", "mfe_atr")}}
+
+
+def _forward(rows):
+    out = {}
+    for k in FORWARD_DAYS:
+        values = [x[f"fwd_{k}"] for x in rows if f"fwd_{k}" in x]
+        excess = [x[f"excess_{k}"] for x in rows if f"excess_{k}" in x]
+        out[f"{k}d"] = {"n": len(values)} if not values else {
+            "n": len(values), "mean_pct": round(100 * statistics.fmean(values), 2), "median_pct": round(100 * statistics.median(values), 2),
+            "positive": round(sum(v > 0 for v in values) / len(values), 3),
+            "mean_excess_pct": round(100 * statistics.fmean(excess), 2) if excess else None}
+    return out
+
+
+def summarize(trades, signals=()):
+    closed = sorted((x for x in trades if "r" in x), key=lambda x: (x["exit_date"], x["signal_date"], x["ticker"]))
+    gap_stops = [x for x in closed if x["outcome"] == "stop" and x["gap"]]
+    known = [x for x in closed if x.get("earnings", {}).get("known")]
+    summary = {
+        "trades": len(trades),
         "not_filled": sum(x["outcome"] == "not_filled" for x in trades),
         "still_open": sum(x["outcome"] == "open" for x in trades),
         "closed": len(closed),
-        "targets": sum(x["outcome"] == "target" for x in closed),
-        "stops": sum(x["outcome"] == "stop" for x in closed),
-        "timeouts": sum(x["outcome"] == "timeout" for x in closed),
-        "win_rate": round(len(wins) / len(closed), 3) if closed else None,
-        "average_r": round((gains - losses) / len(closed), 3) if closed else None,
-        "profit_factor": round(gains / losses, 2) if losses else None,
+        "exits": {k: sum(x["outcome"] == k for x in closed) for k in ("stop", "target", "timeout")},
+        "costs": {f"{bps}bp": metrics([net_r(x, bps) for x in closed]) for bps in COST_BPS},
+        "gaps": {
+            "stop_exits_through_gap": len(gap_stops),
+            "extra_loss_beyond_stop_r": round(sum(-1 - x["r"] for x in gap_stops), 2),
+            "worst_gap_stop_r": round(min((x["r"] for x in gap_stops), default=0), 2),
+            "target_exits_at_open": sum(x["outcome"] == "target" and x["gap"] for x in closed),
+        },
+        "mae_mfe": {"all": _medians(closed), **{k: _medians([x for x in closed if x["outcome"] == k]) for k in ("stop", "target", "timeout")}},
+        "by_regime": {name: {"gross": metrics([x["r"] for x in closed if x["regime"] == name]),
+                             "expectancy_r_10bp": metrics([net_r(x, 10) for x in closed if x["regime"] == name])["expectancy_r"]}
+                      for name in sorted({x["regime"] for x in closed})},
+        "earnings": {
+            "trades_with_known_dates": len(known),
+            "trades_without_dates": len(closed) - len(known),
+            "held_through_report": metrics([x["r"] for x in known if x["earnings"]["held_through"]]),
+            "not_held_through_report": metrics([x["r"] for x in known if not x["earnings"]["held_through"]]),
+            "report_at_signal_or_entry": metrics([x["r"] for x in known if x["earnings"]["reaction_at_entry"]]),
+        },
+        "forward_returns": {
+            "all_signals": _forward(signals),
+            "non_overlapping_signals": _forward([x for x in signals if not x["overlaps"]]),
+            "overlapping_signals": sum(x["overlaps"] for x in signals),
+        },
     }
+    summary["gross"] = summary["costs"]["0bp"]
+    return summary
 
 
 # ---------------------------------------------------------------- main
@@ -551,11 +727,12 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "both", max_ti
     count = cfg["min_bars"] + validation_days + cfg["validation_horizon"] + 60
 
     names, source = discover(finviz_url, tickers, max_tickers)
-    benchmarks, benchmark_info, data_errors = {}, {}, []
+    benchmarks, benchmark_bars, benchmark_info, data_errors = {}, {}, {}, []
     for name in cfg["benchmarks"]:
         try:
             bars = completed_bars(fetch_bars(name, count), now)
             benchmarks[name] = {d: c for d, c in zip(bars.dates, bars.close) if math.isfinite(c) and c > 0}
+            benchmark_bars[name] = bars
             benchmark_info[name] = {"as_of": bars.dates[-1].isoformat(), "close": round(bars.close[-1], 2)}
         except (requests.RequestException, ValueError) as error:
             data_errors.append({"ticker": name, "reason": f"benchmark: {error}"})
@@ -564,9 +741,12 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "both", max_ti
         raise RuntimeError("no benchmark data, so the market calendar and relative strength cannot be checked")
     calendar = sorted(set().union(*benchmarks.values()))
     rs_benchmarks = [b for b in cfg["benchmarks"] if b in benchmarks]
+    reference = benchmark_bars[rs_benchmarks[0]]
+    market = {"name": rs_benchmarks[0], "open": dict(zip(reference.dates, reference.open)),
+              "close": dict(zip(reference.dates, reference.close)), "regime": market_regime(reference.dates, reference.close)}
 
     results = {s: {"qualified": [], "rejected": []} for s in strategies}
-    trades = []
+    trades, signals, base, without_earnings, screened = [], [], [], [], 0
     for name in names:
         try:
             bars = completed_bars(fetch_bars(name, count), now)
@@ -577,6 +757,7 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "both", max_ti
         if problems:
             data_errors.append({"ticker": name, "reason": "; ".join(problems)})
             continue
+        screened += 1
         series = compute(bars, {b: benchmarks[b] for b in rs_benchmarks}, cfg)
         for s in strategies:
             signal = EVALUATORS[s](bars, series, len(bars) - 1, {**cfg, "benchmarks": rs_benchmarks})
@@ -585,7 +766,18 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "both", max_ti
             else:
                 results[s]["rejected"].append({"ticker": name, "failed": [c for c in signal["checks"] if not c["passed"]]})
         if validation_days:
-            trades += validate(bars, series, strategies, validation_days, {**cfg, "benchmarks": rs_benchmarks})
+            info = None
+            try:
+                info = reaction_sessions(fetch_earnings(name), calendar)
+            except (requests.RequestException, ValueError):
+                pass
+            if not info or not info["since"]:
+                without_earnings.append(name)
+            time.sleep(cfg["request_pause"])
+            more = validate(bars, series, strategies, validation_days, {**cfg, "benchmarks": rs_benchmarks}, market, info)
+            trades += more[0]
+            signals += more[1]
+            base += more[2]
     for s in strategies:
         results[s]["qualified"].sort(key=lambda x: (-x["score"], x["ticker"]))
 
@@ -602,8 +794,17 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "both", max_ti
         "validation": None if not validation_days else {
             "days": validation_days,
             "horizon_bars": cfg["validation_horizon"],
-            "note": "Tickers come from today's screen, so past results carry selection bias. Fills ignore slippage and fees.",
-            "summary": {s: summarize([x for x in trades if x["strategy"] == s]) for s in strategies},
+            "cost_scenarios_bps": list(COST_BPS),
+            "forward_days": list(FORWARD_DAYS),
+            "market_regime_benchmark": market["name"],
+            "assumptions": ASSUMPTIONS,
+            "earnings_data": {
+                "source": "Finviz quote page chart events (weekly view), report time decides the reaction session",
+                "tickers_with_dates": screened - len(without_earnings),
+                "tickers_without_dates": without_earnings,
+            },
+            "universe_base_rate": _forward(base),
+            "summary": {s: summarize([x for x in trades if x["strategy"] == s], [x for x in signals if x["strategy"] == s]) for s in strategies},
             "trades": trades,
         },
         "settings": cfg,
