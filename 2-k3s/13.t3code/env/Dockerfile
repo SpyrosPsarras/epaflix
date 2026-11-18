@@ -10,10 +10,10 @@ COPY env/tools/os-packages.txt /tmp/os-packages.txt
 RUN apt-get update && xargs -a /tmp/os-packages.txt apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* /etc/ssh/ssh_host_*
 RUN if [ "$T3_RUNTIME_VARIANT" != homelab ]; then \
-      curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft.gpg \
+      curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft.gpg \
       && echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft.gpg] https://packages.microsoft.com/repos/azure-cli/ bookworm main' > /etc/apt/sources.list.d/azure-cli.list; \
     fi \
-    && curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.36/deb/Release.key | gpg --dearmor -o /usr/share/keyrings/kubernetes.gpg \
+    && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 https://pkgs.k8s.io/core:/stable:/v1.36/deb/Release.key | gpg --dearmor -o /usr/share/keyrings/kubernetes.gpg \
     && echo 'deb [signed-by=/usr/share/keyrings/kubernetes.gpg] https://pkgs.k8s.io/core:/stable:/v1.36/deb/ /' > /etc/apt/sources.list.d/kubernetes.list \
     && apt-get update && apt-get install -y --no-install-recommends kubectl $([ "$T3_RUNTIME_VARIANT" = homelab ] || echo azure-cli) \
     && rm -rf /var/lib/apt/lists/*
