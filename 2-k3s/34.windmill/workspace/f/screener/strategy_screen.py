@@ -1177,7 +1177,10 @@ CREATE OR REPLACE TRIGGER signals_no_truncate BEFORE TRUNCATE ON screener.signal
     FOR EACH STATEMENT EXECUTE FUNCTION screener.guard_signal();
 """
 
-LOAD_SQL = SCHEMA_SQL + "SELECT * FROM screener.signals WHERE closed_at IS NULL ORDER BY id;"
+# Active signals, plus the recent closed ones: they are known keys and their trades block overlapping new signals.
+LOAD_SQL = SCHEMA_SQL + """SELECT * FROM screener.signals
+WHERE closed_at IS NULL OR signal_date >= current_date - 120 OR exit_date >= current_date - 120
+ORDER BY id;"""
 
 _NEW_COLUMNS = ORIGINAL_FIELDS + STATE_FIELDS
 _UPDATE_COLUMNS = ("id",) + STATE_FIELDS
@@ -1305,27 +1308,29 @@ def _busy_until(state):
 
 def select_new(stored, updates, candidates):
     """Candidates that may be inserted: one trade per strategy, ticker and direction at a time, like the validation.
-    A signal is skipped while an earlier one of the same key is pending or open, or before that one's exit date."""
+    A signal is skipped if it comes after a stored one of the same strategy, ticker and direction that is still pending
+    or open, or not later than that one's exit date. Keys already stored are left out silently."""
     by_id = {u["id"]: u for u in updates}
-    busy = {}
+    spans = {}
     for row in stored:
         until = _busy_until({**row, **by_id.get(row["id"], {})})
-        key = (row["strategy"], row["ticker"], row["direction"])
         if until is not None:
-            busy[key] = max(busy.get(key, date.min), until)
+            spans.setdefault((row["strategy"], row["ticker"], row["direction"]), []).append((_day(row["signal_date"]), until))
     known = {(r["strategy"], r["ticker"], str(r["signal_date"])[:10], r["direction"]) for r in stored}
     keep, skipped = [], []
     for row in sorted(candidates, key=lambda r: (r["signal_date"], r["strategy"], r["ticker"])):
         key = (row["strategy"], row["ticker"], row["direction"])
         if (*key[:2], row["signal_date"], key[2]) in known:
             continue
-        if _day(row["signal_date"]) <= busy.get(key, date.min):
+        day = _day(row["signal_date"])
+        if any(start < day <= until for start, until in spans.get(key, [])):
             skipped.append({k: row[k] for k in ("strategy", "ticker", "signal_date", "direction")})
             continue
         keep.append(row)
+        known.add((*key[:2], row["signal_date"], key[2]))
         until = _busy_until(row)
         if until is not None:
-            busy[key] = max(busy.get(key, date.min), until)
+            spans.setdefault(key, []).append((day, until))
     return keep, skipped
 
 
@@ -1805,8 +1810,9 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
     names, source, sectors = discover(finviz_url, tickers, max_tickers)
     query = datatable_query() if persist else None
     stored = query(LOAD_SQL) if persist else []
+    active = [row for row in stored if row.get("closed_at") is None]
     pending_by_ticker = {}
-    for row in stored:
+    for row in active:
         pending_by_ticker.setdefault(row["ticker"], []).append(row)
     updates, new_rows = [], []
     benchmarks, benchmark_bars, benchmark_info, data_errors = {}, {}, {}, []
@@ -1988,7 +1994,7 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
                         _json_safe(market_info), _json_safe(candidates))
         stats = query(STATS_SQL)
         by_id = {u["id"]: u for u in updates}
-        merged = [{**row, **by_id.get(row["id"], {})} for row in stored]
+        merged = [{**row, **by_id.get(row["id"], {})} for row in active]
         result["persistence"] = {
             "data_table": DATA_TABLE, "schema": "screener",
             "inserted": (written[0] if written else {}).get("inserted"), "updated": (written[0] if written else {}).get("updated"),

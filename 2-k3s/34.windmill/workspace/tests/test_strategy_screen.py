@@ -1301,7 +1301,9 @@ def write(db, new=(), updates=(), as_of="2026-11-17"):
 def test_schema_is_idempotent_and_loads_active_signals(db):
     assert db(ss.LOAD_SQL) == [] and db(ss.LOAD_SQL) == []
     assert write(db, [stored_row(), stored_row(ticker="BBB", status="not_triggered")]) == {"inserted": 2, "updated": 0, "run_id": 1}
-    (active,) = db(ss.LOAD_SQL)
+    loaded = db(ss.LOAD_SQL)
+    assert [(r["ticker"], r["closed_at"] is None) for r in loaded] == [("AAA", True), ("BBB", False)]
+    active = loaded[0]
     assert active["ticker"] == "AAA" and active["signal_date"] == "2026-11-02" and active["original"] == {"warnings": []}
     assert active["closed_at"] is None and active["id"] == 1
     assert db.one("SELECT closed_at IS NOT NULL AS closed FROM screener.signals WHERE ticker = 'BBB'")["closed"]
@@ -1331,7 +1333,9 @@ def test_active_signals_update_until_closed_then_freeze(db):
     assert write(db, updates=[closing])["updated"] == 1
     assert db.one("SELECT closed_at IS NOT NULL AS closed, r FROM screener.signals") == {"closed": True, "r": 2.0}
     assert write(db, updates=[update_for(1, status="stopped", r=-1.0)])["updated"] == 0  # a closed signal is skipped
-    assert db(ss.LOAD_SQL) == []
+    assert [r["closed_at"] is not None for r in db(ss.LOAD_SQL)] == [True]
+    write(db, [stored_row(ticker="OLD", signal_date="2020-01-02", status="stopped", exit_date="2020-01-10", r=-1.0)])
+    assert [r["ticker"] for r in db(ss.LOAD_SQL)] == ["AAA"]
     assert db.one("SELECT status, r FROM screener.signals") == {"status": "target", "r": 2.0}
 
 
@@ -1424,10 +1428,14 @@ def test_stored_update_short_signal():
 
 
 def test_select_new_one_trade_per_key_at_a_time():
-    stored = [{**stored_row(status="open"), "id": 1}, {**stored_row(ticker="BBB", status="open"), "id": 2}]
+    stored = [{**stored_row(status="open"), "id": 1}, {**stored_row(ticker="BBB", status="open"), "id": 2},
+              {**stored_row(ticker="DDD", signal_date="2026-10-20", status="target", exit_date="2026-10-28"), "id": 3}]
     updates = [{"id": 2, "status": "stopped", "exit_date": "2026-11-06"}]
     candidates = [
         stored_row(signal_date="2026-11-02"),                    # the stored signal itself: already known
+        stored_row(ticker="DDD", signal_date="2026-10-20"),      # a stored closed signal: known
+        stored_row(ticker="DDD", signal_date="2026-10-27"),      # inside its trade: busy
+        stored_row(signal_date="2026-10-30", status="not_triggered"),  # before the open AAA signal: allowed
         stored_row(signal_date="2026-11-05"),                    # AAA still open: busy
         stored_row(ticker="BBB", signal_date="2026-11-06"),      # BBB closed on its exit date: busy that day
         stored_row(ticker="BBB", signal_date="2026-11-09"),      # after the exit: new
@@ -1438,9 +1446,10 @@ def test_select_new_one_trade_per_key_at_a_time():
     ]
     keep, skipped = ss.select_new(stored, updates, candidates)
     assert [(r["strategy"], r["ticker"], r["signal_date"]) for r in keep] == [
-        ("pullback", "CCC", "2026-11-03"), ("pullback", "CCC", "2026-11-04"), ("breakout", "AAA", "2026-11-05"),
-        ("pullback", "BBB", "2026-11-09")]
-    assert [(r["ticker"], r["signal_date"]) for r in skipped] == [("AAA", "2026-11-05"), ("BBB", "2026-11-06"), ("BBB", "2026-11-10")]
+        ("pullback", "AAA", "2026-10-30"), ("pullback", "CCC", "2026-11-03"), ("pullback", "CCC", "2026-11-04"),
+        ("breakout", "AAA", "2026-11-05"), ("pullback", "BBB", "2026-11-09")]
+    assert [(r["ticker"], r["signal_date"]) for r in skipped] == [
+        ("DDD", "2026-10-27"), ("AAA", "2026-11-05"), ("BBB", "2026-11-06"), ("BBB", "2026-11-10")]
 
 
 def test_new_row_from_a_live_signal_and_a_recomputed_one():
@@ -1475,17 +1484,17 @@ def test_main_persists_and_follows_signals(offline, db, monkeypatch):
     assert again["inserted"] == 0 and again["updated"] == first["inserted"] and again["new"] == []
     stored = db(ss.LOAD_SQL)
     assert len(stored) == first["inserted"] and all(r["live"] and r["status"] == "pending" for r in stored)
+    assert again["skipped_busy"] == first["skipped_busy"] == []
 
     # A new session: PULL left the screen and its chart cannot be loaded, BRK is still there.
     for name in [k for k in offline if k != "_sent"]:
         offline[name] = offline[name] + [offline[name][-1]]
     pull_rows = offline.pop("PULL")
     later = ss.main(tickers="BRK", track_days=0, persist=True)
-    stored = {(r["ticker"], r["strategy"]): r for r in db(ss.LOAD_SQL)}
+    stored = {(r["ticker"], r["strategy"]): r for r in db(ss.LOAD_SQL) if r["closed_at"] is None}
     assert stored[("PULL", "pullback")]["data_status"] == "unavailable" and stored[("PULL", "pullback")]["status"] == "pending"
     assert stored[("PULL", "pullback")]["stale_days"] == 1
     assert [r["ticker"] for r in later["persistence"]["data_unavailable"]] == ["PULL"]
-    assert stored[("BRK", "breakout")]["status"] in ("open", "skipped") or ("BRK", "breakout") not in stored
 
     # The data comes back: PULL is followed again even though it is not in the screen.
     offline["PULL"] = pull_rows + [pull_rows[-1]]
@@ -1503,7 +1512,8 @@ def test_main_backfills_recomputed_signals_as_not_live(offline, db, monkeypatch)
     rows = db.conn.execute("SELECT ticker, strategy, live, status FROM screener.signals ORDER BY ticker, strategy").fetchall()
     assert rows and all(not r["live"] for r in rows) and out["inserted"] == len(rows)
     assert {r["ticker"] for r in rows} == {"PULL", "BRK"}
-    assert ss.main(tickers="PULL,BRK", track_days=5, persist=True)["persistence"]["inserted"] == 0
+    again = ss.main(tickers="PULL,BRK", track_days=5, persist=True)["persistence"]
+    assert again["inserted"] == 0 and again["skipped_busy"] == []
 
 
 def test_main_without_persist_never_touches_the_data_table(offline, monkeypatch):
