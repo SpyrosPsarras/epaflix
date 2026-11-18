@@ -1,3 +1,4 @@
 finviz==2.1.0
+requests==2.34.2
 wmill==1.866.0
 pytest==8.4.2
