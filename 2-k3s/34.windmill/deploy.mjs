@@ -18,6 +18,20 @@ export function commitOf(tarball) {
   return commit;
 }
 
+// git archive sets every entry's mtime to the commit time.
+export function committedAt(tarball) {
+  const tar = gunzipSync(tarball);
+  const size = parseInt(tar.subarray(124, 136).toString(), 8);
+  const entry = 512 + Math.ceil(size / 512) * 512;
+  const committed = parseInt(tar.subarray(entry + 136, entry + 148).toString(), 8);
+  if (tar[156] !== 0x67 || !Number.isSafeInteger(committed) || committed <= 0) throw new Error("tarball has no commit time");
+  return committed;
+}
+
+export function due(committed, now) {
+  return now.getTime() / 1000 - committed < 15 * 60 || now.getUTCMinutes() % 10 === 0;
+}
+
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, { stdio: "inherit", ...options });
   if (result.status !== 0) throw new Error(result.error?.message ?? `${command} exited with ${result.status ?? result.signal}`);
@@ -30,6 +44,10 @@ if (import.meta.main) {
     if (!response.ok) throw new Error(`download failed with HTTP ${response.status}`);
     const tarball = Buffer.from(await response.arrayBuffer());
     commit = commitOf(tarball);
+    if (!due(committedAt(tarball), new Date())) {
+      console.log(JSON.stringify({ commit, outcome: "skipped" }));
+      process.exit(0);
+    }
     const work = mkdtempSync(join(tmpdir(), "deploy-"));
     const archive = join(work, "source.tar.gz");
     const source = join(work, "source");

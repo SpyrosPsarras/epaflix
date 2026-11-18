@@ -190,7 +190,7 @@ Dropped with Task 2. Authentik does not gate the Discord bots.
 ### Task 7: Rollout and acceptance (each step after Spyros confirms)
 
 - [ ] **Step 0: Discord IDs.** Spyros creates the roles and channels (Task 0 Step 1) and sends the two channel IDs and two role IDs. The server ID is already in both `openclaw` Secrets, read from the invite. Write them into the SOPS files. No bot gets Manage Roles or Manage Channels.
-- [ ] **Step 1: GitHub ruleset.** Add `refs/heads/bots/**` to `exclude` of ruleset `owner-only`. Check that the `PR required` ruleset and `main` protection are unchanged. If the personal token lacks admin rights, give Spyros the exact setting to change.
+- [ ] **Step 1: GitHub ruleset.** Set `exclude` of ruleset `owner-only` to `refs/heads/bots/**`, `refs/heads/bots/**/*` and `~DEFAULT_BRANCH`. Check that the `PR required` ruleset and `main` protection are unchanged. If the personal token lacks admin rights, give Spyros the exact setting to change.
 - [ ] **Step 2a: Image first.** PR 1 holds only Task 2c. After review-gate and Spyros's approval it merges, the workflow pushes the image, and the printed digest replaces the placeholder in both Deployments on this branch.
 - [ ] **Step 2: Open PR 2 with everything else, run review-gate, merge after Spyros approves.** Argo picks up `app-discord.yaml` through `app-of-apps`. Dry-run then real sync at the merged SHA for the new app and the changed `servarr`, `windmill` and `observability` resources.
 - [ ] **Step 3: Recycling bin.** For Radarr, Sonarr and Lidarr, set Recycling Bin to `.recycle` inside each root folder and cleanup to 7 days through `PUT /api/v3/config/mediamanagement` (`/api/v1/` for Lidarr). Confirm Jellyfin and Navidrome do not list `.recycle` folders.

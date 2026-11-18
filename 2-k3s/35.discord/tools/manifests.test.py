@@ -162,6 +162,9 @@ class AgentChecks:
         config = self.config
         self.assertEqual(config["agents"]["defaults"]["sandbox"]["mode"], "off")
         self.assertEqual(config["agents"]["defaults"]["model"]["primary"], self.MODEL)
+        self.assertEqual(config["agents"]["defaults"]["thinkingDefault"], "high")
+        for model in config["models"]["providers"]["cliproxy"]["models"]:
+            self.assertIs(model["reasoning"], True)
         self.assertIs(config["agents"]["defaults"]["skipBootstrap"], True)
         self.assertEqual(config["models"]["providers"]["cliproxy"]["baseUrl"], "http://cliproxy.remote-pi.svc.cluster.local:8317")
         self.assertEqual(config["models"]["providers"]["cliproxy"]["api"], "anthropic-messages")
@@ -188,7 +191,7 @@ class AgentChecks:
 
 class MediaTests(AgentChecks, unittest.TestCase):
     APP, NAMESPACE, CONTAINER, RELOAD = "media", "discord-media", "gateway", "openclaw"
-    MODEL = "cliproxy/claude-haiku-5-5"
+    MODEL = "cliproxy/claude-sonnet-5-5"
     CONFIG_FILES = ["AGENTS.md", "openclaw.json"]
     EXTRA_EGRESS = {
         ("servarr", (("app", app),), (("TCP", port),))
@@ -242,7 +245,7 @@ class MediaTests(AgentChecks, unittest.TestCase):
 class WindmillTests(AgentChecks, unittest.TestCase):
     APP, NAMESPACE, CONTAINER, RELOAD = "windmill", "discord-windmill", "openclaw", "openclaw,github-app"
     MODEL = "cliproxy/claude-opus-5-5"
-    CONFIG_FILES = ["AGENTS.md", "gh", "gh-token.mjs", "git-credential-gh-token", "gitconfig", "openclaw.json"]
+    CONFIG_FILES = ["AGENTS.md", "gh", "gh-token.mjs", "git-credential-gh-token", "gitconfig", "openclaw.json", "scripts-path.sh"]
     EXTRA_EGRESS = set()
 
     def mounts(self, volume):
@@ -304,6 +307,26 @@ class WindmillTests(AgentChecks, unittest.TestCase):
         self.assertIn("helper = /scripts/git-credential-gh-token", gitconfig)
         self.assertIn("name = homelab-windmill-bot[bot]", gitconfig)
 
+    def test_profile_volume(self):
+        volumes = {volume["name"]: volume for volume in self.pod["volumes"]}
+        self.assertEqual(volumes["profile"]["configMap"], {
+            "name": "openclaw-config",
+            "defaultMode": 0o444,
+            "items": [{"key": "scripts-path.sh", "path": "scripts-path.sh"}],
+        })
+        self.assertEqual(self.mounts("profile"), [
+            ("openclaw", {"name": "profile", "mountPath": "/etc/profile.d", "readOnly": True}),
+        ])
+
+    def test_login_shell_path(self):
+        profile = DISCORD / "windmill/scripts-path.sh"
+        run = subprocess.run(
+            ["sh", "-c", 'PATH=/usr/local/bin:/usr/bin:/bin; . "$1"; printf %s "$PATH"', "sh", str(profile)],
+            capture_output=True, text=True, check=True,
+        )
+        self.assertTrue(run.stdout.startswith("/scripts:"))
+        self.assertIn("/usr/local/bin", run.stdout.split(":"))
+
     def test_clone_repo(self):
         clone = self.inits["clone-repo"]
         script = " ".join(clone["command"])
@@ -325,6 +348,11 @@ class WindmillTests(AgentChecks, unittest.TestCase):
             "-m pytest -q 2-k3s/34.windmill/workspace/tests",
             "gh pr create",
             "gh pr merge --auto --merge",
+            "gh pr checks",
+            "--watch",
+            "mergedAt",
+            "every minute",
+            "15 minutes",
             "git fetch && git rebase origin/main && git push --force-with-lease",
             "Never merge `main`",
             "gh pr merge --disable-auto",

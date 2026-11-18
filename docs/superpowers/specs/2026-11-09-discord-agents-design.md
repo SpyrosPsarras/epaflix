@@ -120,7 +120,7 @@ These would make it a failure even if it works:
 | Namespace | `discord-media` | `discord-windmill` |
 | Discord channel | `#media` | `#windmill` |
 | Discord role | `media` | `windmill` |
-| Model via CLIProxy | Claude Haiku 5.5 | Claude Opus 5.5 |
+| Model via CLIProxy | Claude Sonnet 5.5 | Claude Opus 5.5 |
 | Holds | Seerr, Radarr, Sonarr, Lidarr, Bazarr, Jellyfin API keys | GitHub App key, installed on epaflix only |
 | Egress | DNS, CLIProxy, SearXNG, the media apps, public 443 | DNS, CLIProxy, SearXNG, public 443 |
 
@@ -176,7 +176,8 @@ does not remove their Discord access.
 - OpenClaw's GitHub App support only reads. A sidecar container holds the
   App key, mints a 1-hour installation token for epaflix every 30 minutes
   and shares only the token with the agent container.
-- Ruleset `owner-only` excludes `bots/**`. The App gets no bypass, so it
+- Ruleset `owner-only` excludes `refs/heads/bots/**`, `refs/heads/bots/**/*`
+  and `~DEFAULT_BRANCH`. The App gets no bypass, so it
   can push only `bots/...` branches and reaches `main` only through a PR.
 - The agent works in a clone on its PVC, pushes a `bots/windmill/...`
   branch, opens a PR and turns on auto-merge.
@@ -184,7 +185,8 @@ does not remove their Discord access.
   bot PR if any changed path, old or new name, is outside
   `2-k3s/34.windmill/workspace/**`. It reads the file list from the GitHub
   API without checking out PR code, and the bot cannot edit `ci.yml`.
-- A CronJob `windmill-deploy` in namespace `windmill`, every 10 minutes,
+- A CronJob `windmill-deploy` in namespace `windmill`, every minute (commits
+  under 15 minutes old deploy on each run, older ones every 10 minutes),
   downloads `main` and runs `wmill sync push --keep-deleted` for
   `2-k3s/34.windmill/workspace/f/` into workspace `screener`. It holds only
   the Windmill token, has no ServiceAccount token, and reaches only
@@ -247,7 +249,7 @@ change in C1 is a PR-free GitHub setting, done after Spyros confirms.
 
 ## Calls made in this design
 
-- C1. `bots/**` excluded from `owner-only`; no bypass for the App.
+- C1. `refs/heads/bots/**`, `refs/heads/bots/**/*` and `~DEFAULT_BRANCH` excluded from `owner-only`; no bypass for the App.
 - C2. Seerr requests use Seerr's admin API key (accepted risk).
 - C3. No CLIProxy cap at first; the per-key usage alert `DiscordModelUsageHigh` instead.
 - C4. No sync from Authentik; Spyros assigns Discord roles by hand (see

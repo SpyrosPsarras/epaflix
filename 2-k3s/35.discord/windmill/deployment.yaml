@@ -206,6 +206,9 @@ spec:
             - name: scripts
               mountPath: /scripts
               readOnly: true
+            - name: profile
+              mountPath: /etc/profile.d
+              readOnly: true
             - name: gh-token
               mountPath: /run/gh
               readOnly: true
@@ -267,6 +270,12 @@ spec:
               - {key: git-credential-gh-token, path: git-credential-gh-token}
               - {key: gitconfig, path: gitconfig}
               - {key: gh-token.mjs, path: gh-token.mjs}
+        - name: profile
+          configMap:
+            name: openclaw-config
+            defaultMode: 0444
+            items:
+              - {key: scripts-path.sh, path: scripts-path.sh}
         - name: github-app
           secret:
             secretName: github-app

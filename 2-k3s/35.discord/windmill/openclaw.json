@@ -12,13 +12,14 @@
         "baseUrl": "http://cliproxy.remote-pi.svc.cluster.local:8317",
         "api": "anthropic-messages",
         "apiKey": "${CLIPROXY_API_KEY}",
-        "models": [{ "id": "claude-opus-5-5", "name": "Claude Opus 5.5", "input": ["text"] }]
+        "models": [{ "id": "claude-opus-5-5", "name": "Claude Opus 5.5", "reasoning": true, "input": ["text"] }]
       }
     }
   },
   "agents": {
     "defaults": {
       "model": { "primary": "cliproxy/claude-opus-5-5" },
+      "thinkingDefault": "high",
       "sandbox": { "mode": "off" },
       "skipBootstrap": true
     }
