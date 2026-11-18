@@ -1,0 +1,43 @@
+summary: Pullback and breakout screener with OHLCV indicators (no email)
+description: See 2-k3s/34.windmill/README.md in the homelab repo.
+kind: script
+schema:
+  $schema: https://json-schema.org/draft/2020-12/schema
+  type: object
+  order:
+    - finviz_url
+    - tickers
+    - strategy
+    - max_tickers
+    - validation_days
+    - settings
+  properties:
+    finviz_url:
+      type: string
+      description: Finviz screener address for discovery, https://finviz.com/screener.ashx?...
+      default: ''
+    tickers:
+      type: string
+      description: Or a comma-separated list of tickers instead of a Finviz URL
+      default: ''
+    strategy:
+      type: string
+      description: Which strategy to run
+      enum:
+        - both
+        - pullback
+        - breakout
+      default: both
+    max_tickers:
+      type: integer
+      description: Most tickers to fetch and screen, 1 to 200
+      default: 50
+    validation_days:
+      type: integer
+      description: Walk-forward validation over this many past sessions, 0 to skip
+      default: 0
+    settings:
+      type: object
+      description: 'Optional overrides of the thresholds, e.g. {"min_rel_volume": 2}. See DEFAULTS in the script'
+      default: {}
+  required: []
