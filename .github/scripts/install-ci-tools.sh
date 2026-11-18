@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+cache=${CI_TOOLS_CACHE:-$HOME/.cache/ci-tools}
+
 dl() {
   url=$1; out=$2; n=0
   until curl -fsSL -o "$out" "$url"; do
@@ -16,39 +18,56 @@ dl() {
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-for tool in "$@"; do
+fetch() {
+  local tool=$1 version=$2
   case "$tool" in
     helm)
-      : "${HELM_VERSION:?}"
-      helm_tgz="helm-v${HELM_VERSION}-linux-amd64.tar.gz"
+      helm_tgz="helm-v${version}-linux-amd64.tar.gz"
       dl "https://get.helm.sh/${helm_tgz}" "$tmp/${helm_tgz}"
       dl "https://get.helm.sh/${helm_tgz}.sha256sum" "$tmp/${helm_tgz}.sha256sum"
       ( cd "$tmp" && sha256sum -c "${helm_tgz}.sha256sum" )
       tar -xzf "$tmp/${helm_tgz}" -C "$tmp"
-      sudo mv "$tmp/linux-amd64/helm" /usr/local/bin/helm
-      helm version
+      mv "$tmp/linux-amd64/helm" "$tmp/bin"
       ;;
     kustomize)
-      : "${KUSTOMIZE_VERSION:?}"
-      dl "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv${KUSTOMIZE_VERSION}/kustomize_v${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" "$tmp/kustomize.tar.gz"
+      dl "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv${version}/kustomize_v${version}_linux_amd64.tar.gz" "$tmp/kustomize.tar.gz"
       tar -xzf "$tmp/kustomize.tar.gz" -C "$tmp"
-      sudo mv "$tmp/kustomize" /usr/local/bin/kustomize
-      kustomize version
+      mv "$tmp/kustomize" "$tmp/bin"
       ;;
     promtool)
-      : "${PROMTOOL_VERSION:?}"
-      prom_tgz="prometheus-${PROMTOOL_VERSION}.linux-amd64.tar.gz"
-      prom_url="https://github.com/prometheus/prometheus/releases/download/v${PROMTOOL_VERSION}"
+      prom_tgz="prometheus-${version}.linux-amd64.tar.gz"
+      prom_url="https://github.com/prometheus/prometheus/releases/download/v${version}"
       dl "${prom_url}/${prom_tgz}" "$tmp/${prom_tgz}"
       dl "${prom_url}/sha256sums.txt" "$tmp/prom-sha256sums.txt"
       ( cd "$tmp" && grep " ${prom_tgz}\$" prom-sha256sums.txt | sha256sum -c - )
-      tar -xzf "$tmp/${prom_tgz}" -C "$tmp" "prometheus-${PROMTOOL_VERSION}.linux-amd64/promtool"
-      sudo mv "$tmp/prometheus-${PROMTOOL_VERSION}.linux-amd64/promtool" /usr/local/bin/promtool
-      promtool --version
+      tar -xzf "$tmp/${prom_tgz}" -C "$tmp" "prometheus-${version}.linux-amd64/promtool"
+      mv "$tmp/prometheus-${version}.linux-amd64/promtool" "$tmp/bin"
       ;;
+  esac
+}
+
+for tool in "$@"; do
+  case "$tool" in
+    helm) version=${HELM_VERSION:?} ;;
+    kustomize) version=${KUSTOMIZE_VERSION:?} ;;
+    promtool) version=${PROMTOOL_VERSION:?} ;;
     *)
       echo "Unknown tool: $tool" >&2
       exit 1
       ;;
+  esac
+  cached="$cache/$tool-$version"
+  if [ -x "$cached" ]; then
+    echo "$tool $version from cache"
+  else
+    fetch "$tool" "$version"
+    mkdir -p "$cache"
+    mv "$tmp/bin" "$cached"
+  fi
+  sudo install -m 0755 "$cached" "/usr/local/bin/$tool"
+  case "$tool" in
+    helm) helm version ;;
+    kustomize) kustomize version ;;
+    promtool) promtool --version ;;
   esac
 done
