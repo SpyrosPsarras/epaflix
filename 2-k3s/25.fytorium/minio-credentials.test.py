@@ -18,11 +18,14 @@ class CredentialTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.home = Path(self.temp.name)
         self.values = ["synthetic-admin-user", "synthetic-admin-password", "synthetic-app-user", "synthetic-app-password"]
-        self.folders = [{"id": "admin-folder", "name": "Personal"}, {"id": "app-folder", "name": "Fytorium"}]
+        self.folders = [{"id": "admin-folder", "name": "Personal"}]
+        self.collections = [{"id": "app-collection", "name": "homelab"}]
         self.items = [
-            {"name": name, "folderId": folder, "type": 1,
+            {"name": name, "folderId": folder, "collectionIds": collections, "type": 1,
              "login": dict(zip(("username", "password"), self.values[index:index + 2]))}
-            for name, folder, index in (("MinIO Object Store", "admin-folder", 0), ("fytorium - minio", "app-folder", 2))]
+            for name, folder, collections, index in (
+                ("MinIO Object Store", "admin-folder", [], 0),
+                ("fytorium - minio", None, ["app-collection"], 2))]
         self.env = dict(os.environ, PATH=str(self.home) + os.pathsep + os.environ["PATH"],
                         BW_SESSION="synthetic-owner-session", TEST_DIR=str(self.home))
         self.stub("bw", '''import json, os, sys
@@ -30,9 +33,9 @@ from pathlib import Path
 home = Path(os.environ["TEST_DIR"])
 assert sys.argv[1] == "--nointeraction"
 args = sys.argv[2:]
-assert args in (["status"], ["list", "folders"],
+assert args in (["status"], ["list", "folders"], ["list", "collections"],
                 ["list", "items", "--folderid", "admin-folder", "--search", "MinIO Object Store"],
-                ["list", "items", "--folderid", "app-folder", "--search", "fytorium - minio"])
+                ["list", "items", "--collectionid", "app-collection", "--search", "fytorium - minio"])
 if os.environ.get("TEST_BW_ERROR"):
     print("synthetic-admin-password", file=sys.stderr)
     sys.exit(1)
@@ -65,12 +68,14 @@ else:
         path.chmod(0o700)
 
     def write_fixtures(self, status="unlocked"):
-        for name, data in (("status", {"status": status}), ("folders", self.folders), ("items", self.items)):
+        for name, data in (("status", {"status": status}), ("folders", self.folders),
+                           ("collections", self.collections), ("items", self.items)):
             (self.home / (name + ".json")).write_text(json.dumps(data))
 
     def run_setup(self, success=False):
         result = subprocess.run(["bash", str(SCRIPT)], env=self.env, capture_output=True, text=True, timeout=10)
         self.assertTrue(all(value not in result.stdout + result.stderr for value in self.values))
+        self.assertNotIn("Traceback", result.stderr)
         self.assertEqual(result.returncode, 0 if success else 1)
         self.assertEqual((self.home / "applied").exists(), success)
         return result
@@ -119,10 +124,26 @@ else:
                 (self.home / "items.json").write_text(json.dumps(items))
                 self.run_setup()
 
+    def test_app_item_in_folder_only_is_rejected(self):
+        self.folders.append({"id": "app-folder", "name": "homelab"})
+        self.items[1].update(folderId="app-folder", collectionIds=None)
+        self.write_fixtures()
+        self.run_setup()
+
+    def test_duplicate_collection_names_are_rejected(self):
+        self.collections.append({"id": "decoy-collection", "name": "homelab"})
+        self.write_fixtures()
+        self.run_setup()
+
+    def test_app_item_in_another_collection_is_rejected(self):
+        self.items[1]["collectionIds"] = ["decoy-collection"]
+        self.write_fixtures()
+        self.run_setup()
+
     def test_cli_failure_withholds_diagnostics(self):
         self.env["TEST_BW_ERROR"] = "1"
         result = self.run_setup()
-        self.assertEqual(result.stderr, "Bitwarden credential lookup failed; expected one login per folder and item.\n")
+        self.assertEqual(result.stderr, "Bitwarden credential lookup failed; expected one login per folder or collection and item.\n")
 
 
 if __name__ == "__main__":

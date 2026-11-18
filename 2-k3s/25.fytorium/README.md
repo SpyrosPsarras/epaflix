@@ -18,7 +18,7 @@ Keep credentials out of git, command arguments and logs.
 | --- | --- |
 | `/Fytorium/fytorium - postgres` | Username `fytorium`, password. Used for `fytorium-db-role` and `DATABASE_URL`: `postgresql://fytorium:<urlencoded pw>@postgres-cluster-rw.postgres-system.svc:5432/fytorium` |
 | `/Fytorium/fytorium - authentik oidc` | Username = `OIDC_CLIENT_ID`, password = `OIDC_CLIENT_SECRET`. Also supplies the client id and secret in the Authentik blueprint. |
-| `/Fytorium/fytorium - minio` | Username = access key `fytorium-app`, password = secret key. Used for `MINIO_ACCESS_KEY` and `MINIO_SECRET_KEY`. |
+| Collection `homelab`, `fytorium - minio` | Username = access key `fytorium-app`, password = secret key. Used for `MINIO_ACCESS_KEY` and `MINIO_SECRET_KEY`. |
 | `/Fytorium/fytorium - vapid` | Password = `VAPID_PRIVATE_KEY`, custom field `public key` = `VAPID_PUBLIC_KEY`, custom field `subject` = `VAPID_SUBJECT`, set to `https://fytorium.epaflix.com`. |
 | `/Fytorium/fytorium - firebase` | Optional backup copy of the Firebase files. The live server key is only in `fytorium-fcm.enc.yaml` (see below). A lost key is replaced by generating a new one in Firebase: Project settings → Service accounts. |
 | `/Personal/plantnet - api key` | Password = `PLANTNET_API_KEY` |
@@ -73,8 +73,10 @@ Repository CI blocks all-zero placeholder digests.
    `FYTORIUM_MINIO_URL` overrides the endpoint for isolated local tests; fake
    `MINIO_ADMIN_USERNAME`, `MINIO_ADMIN_PASSWORD`, `VAULT_USERNAME` and
    `VAULT_PASSWORD` can exercise `--apply` without vault access. The normal
-   invocation reads both login items by exact folder and name from the owner's
-   Bitwarden session, passing credentials to `--apply` only through its environment.
+   invocation reads the admin login `MinIO Object Store` from folder `Personal`
+   and the app login `fytorium - minio` from collection `homelab`, matching container
+   and item names exactly in the owner's Bitwarden session. It passes credentials
+   to `--apply` only through its environment.
    Silo replaced MinIO but keeps the same endpoint and compatible admin API.
 2. Apply both tracked Pi-hole DNS changes using `1-proxmox/pihole/README.md`.
    The dnsmasq A record points at `192.168.10.102`; the matching Unbound static

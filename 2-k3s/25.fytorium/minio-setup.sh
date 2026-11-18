@@ -75,8 +75,8 @@ case "${1:-}" in
     printf 'Docker image: %s; built from mc.Dockerfile if not cached locally\n' "$mc_image"
     printf 'Admin credentials in environment, app keys on stdin\n'
     cat <<'COMMANDS'
-Bitwarden admin login: Personal / MinIO Object Store
-Bitwarden app login: Fytorium / fytorium - minio
+Bitwarden admin login: folder Personal / MinIO Object Store
+Bitwarden app login: collection homelab / fytorium - minio
 MinIO URL: https://minio.epaflix.com (FYTORIUM_MINIO_URL overrides for local tests)
 mc mb --ignore-existing fytorium/fytorium-photos
 mc version suspend fytorium/fytorium-photos
@@ -111,17 +111,18 @@ def bw(*args):
 try:
     if bw("status").get("status") != "unlocked":
         sys.exit("Bitwarden CLI must be installed and unlocked with BW_SESSION exported.")
-    folders = bw("list", "folders")
     env = os.environ.copy()
-    for folder, name, prefix in (("Personal", "MinIO Object Store", "MINIO_ADMIN"),
-                                 ("Fytorium", "fytorium - minio", "VAULT")):
-        matches = [entry for entry in folders if entry.get("name") == folder]
+    for kind, container, name, prefix in (("folder", "Personal", "MinIO Object Store", "MINIO_ADMIN"),
+                                          ("collection", "homelab", "fytorium - minio", "VAULT")):
+        containers = bw("list", "folders" if kind == "folder" else "collections")
+        matches = [entry for entry in containers if entry.get("name") == container]
         if len(matches) != 1 or not matches[0].get("id"):
             raise ValueError()
-        folder_id = matches[0]["id"]
-        items = bw("list", "items", "--folderid", folder_id, "--search", name)
-        matches = [entry for entry in items if entry.get("folderId") == folder_id
-                   and entry.get("name") == name]
+        container_id = matches[0]["id"]
+        items = bw("list", "items", "--" + kind + "id", container_id, "--search", name)
+        matches = [entry for entry in items if entry.get("name") == name
+                   and (entry.get("folderId") == container_id if kind == "folder" else
+                        container_id in (entry.get("collectionIds") or []))]
         if len(matches) != 1 or matches[0].get("type") != 1:
             raise ValueError()
         login = matches[0]["login"]
@@ -132,7 +133,7 @@ try:
             env[prefix + "_" + field.upper()] = value
     os.execve(sys.argv[1], [sys.argv[1], "--apply"], env)
 except Exception:
-    sys.exit("Bitwarden credential lookup failed; expected one login per folder and item.")
+    sys.exit("Bitwarden credential lookup failed; expected one login per folder or collection and item.")
 PY
     ;;
   --apply)
