@@ -87,8 +87,8 @@ class AgentChecks:
             self.assertTrue(pinned_image(self.APP, container["image"]).startswith(IMAGE + "@sha256:"))
             self.assertRegex(pinned_image(self.APP, container["image"]), r"@sha256:[0-9a-f]{64}$")
             self.assertIs(container["securityContext"]["readOnlyRootFilesystem"], True)
-        self.assertEqual(self.gateway["resources"]["requests"], {"cpu": "250m", "memory": "1Gi"})
-        self.assertEqual(self.gateway["resources"]["limits"], {"cpu": "2", "memory": "2Gi"})
+        self.assertEqual(self.gateway["resources"]["requests"], {"cpu": "250m", "memory": self.MEMORY[0]})
+        self.assertEqual(self.gateway["resources"]["limits"], {"cpu": "2", "memory": self.MEMORY[1]})
         self.assertIn("/startupz", str(self.gateway["startupProbe"]))
         self.assertIn("/startupz", str(self.gateway["readinessProbe"]))
         self.assertIn("/healthz", str(self.gateway["livenessProbe"]))
@@ -223,6 +223,7 @@ class AgentChecks:
 class MediaTests(AgentChecks, unittest.TestCase):
     APP, NAMESPACE, CONTAINER, RELOAD = "media", "discord-media", "gateway", "openclaw"
     MODEL = "cliproxy/claude-sonnet-5-5"
+    MEMORY = ("1Gi", "2Gi")
     SAME_TOPIC = "the same movie, series, album or artist"
     CONFIG_FILES = ["AGENTS.md", "openclaw.json"]
     EXTRA_EGRESS = {
@@ -277,6 +278,7 @@ class MediaTests(AgentChecks, unittest.TestCase):
 class WindmillTests(AgentChecks, unittest.TestCase):
     APP, NAMESPACE, CONTAINER, RELOAD = "windmill", "discord-windmill", "openclaw", "openclaw,github-app"
     MODEL = "cliproxy/claude-opus-5-5"
+    MEMORY = ("1536Mi", "4Gi")
     SAME_TOPIC = "the same Windmill script or flow"
     CONFIG_FILES = ["AGENTS.md", "gh", "gh-token.mjs", "git-credential-gh-token", "gitconfig", "openclaw.json", "scripts-path.sh"]
     EXTRA_EGRESS = set()
