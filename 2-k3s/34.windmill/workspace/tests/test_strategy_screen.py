@@ -331,6 +331,51 @@ def test_breakout_qualifies_with_levels_and_reasons():
     assert sum(s["points"] for s in result["scoring"]) == 100
 
 
+def _with_beta(evaluator, rows, beta, cfg=CFG):
+    bars = make_bars(rows)
+    series = ss.compute(bars, {}, cfg)
+    series["sector_etf"] = None
+    series["beta"] = [beta] * len(bars)
+    return evaluator(bars, series, len(bars) - 1, cfg)
+
+
+@pytest.mark.parametrize("evaluator,rows", [(ss.evaluate_pullback, pullback_rows), (ss.evaluate_breakout, breakout_rows)])
+def test_high_beta_widens_the_long_stop(evaluator, rows):
+    base = _with_beta(evaluator, rows(), 1.0)
+    wide = _with_beta(evaluator, rows(), 2.0)
+    atr14 = wide["indicators"]["atr14"]
+    assert base["qualified"] and wide["qualified"] and "base_stop" not in base["levels"]
+    b, w = base["levels"], wide["levels"]
+    assert w["entry"] == b["entry"] and w["target"] == b["target"] and w["base_stop"] == b["stop"]
+    assert w["stop_buffer_atr"] == 1.0 and w["stop"] == round(b["stop"] - 1.0 * atr14, 2)
+    assert w["risk_per_share"] > b["risk_per_share"] and w["reward_risk"] < b["reward_risk"]
+    assert [c["name"] for c in wide["checks"]] == [c["name"] for c in base["checks"]]  # qualification uses the rule's stop
+    off = _with_beta(evaluator, rows(), 2.0, ss.settings_with_defaults({"high_beta_stop_atr": 0}))
+    assert off["levels"] == b
+    assert _with_beta(evaluator, rows(), 1.29)["levels"] == b and _with_beta(evaluator, rows(), None)["levels"] == b
+
+
+def test_recommendation_says_what_why_and_the_plan():
+    q = {"ticker": "ABC", "strategy": "breakout", "direction": "long", "action": "long", "regime": "bullish", "beta": 1.6,
+         "holding_days": 37, "time_exit": "2026-01-30", "sector_trend": "up", "sector_etf": "XLK",
+         "levels": {"entry": 100.0, "stop": 92.0, "base_stop": 96.0, "stop_buffer_atr": 0.8, "target": 120.0, "reward_risk": 2.5,
+                    "resistance": 99.0},
+         "indicators": {"rel_volume": 2.4},
+         "scoring": [{"name": "strong_volume", "points": 20, "earned": 20, "detail": "relative volume 2.40"},
+                     {"name": "tight_base", "points": 10, "earned": 0, "detail": "x"},
+                     {"name": "outperforms_market", "points": 15, "earned": 15, "detail": "+8.0% vs QQQ"}]}
+    text = ss.recommendation(q)
+    assert text.startswith("ABC: PROPOSED LONG breakout (first choice in a bull market")
+    assert "fresh close above the 99.0 resistance on 2.4x average volume" in text
+    assert "strong volume (relative volume 2.40); stronger than the market (+8.0% vs QQQ)" in text and "tight base" not in text
+    assert "stop 92.0 (0.8 ATR below the rule's 96.0 because beta is 1.6), target 120.0, reward/risk 2.5" in text
+    assert "exit by 2026-01-30 (37 sessions)" in text
+    watch = ss.recommendation({**q, "action": "watch", "sector_trend": "down"})
+    assert "WATCH ONLY, sector ETF XLK trending down" in watch
+    assert "WATCH ONLY, market neutral" in ss.recommendation({**q, "action": "watch", "regime": "neutral", "sector_trend": None})
+    assert "NO TRADE, market bearish" in ss.recommendation({**q, "action": "no_trade", "regime": "bearish"})
+
+
 def test_breakout_without_volume_is_rejected():
     rows = breakout_rows()
     rows[-1] = rows[-1][:4] + (1_000_000,)
@@ -1104,6 +1149,8 @@ def test_main_returns_structured_results(offline, capsys):
     assert market["sector_laggards"][0] == "XLE" and len(market["sector_leaders"]) == 3
     assert [(c["ticker"], c["strategy"]) for c in result["candidates"]] == [("BRK", "breakout"), ("PULL", "pullback"), ("BRK", "squeeze")]
     assert result["candidates"][0]["action"] == "long"
+    assert [c["priority"] for c in result["candidates"]] == [1, 2, 3]
+    assert result["candidates"][0]["recommendation"].startswith("BRK: PROPOSED LONG breakout")
     assert "email" not in offline["_sent"] and offline["_sent"] == []
 
 
@@ -1144,6 +1191,7 @@ def test_main_emails_candidates_only_when_asked(offline):
     assert to == "trader@example.com" and result["email"] == {"to": "trader@example.com", "subject": subject}
     assert subject.startswith(f"Strategy screen {result['as_of']}: market bullish, 2 setups")
     assert "PULL" in html and "RALY" in html and "Favoured: pullback, breakout, squeeze" in html and "TLT " in html
+    assert "<b>Proposed</b>: 1 of 2 setups" in html and "PULL: PROPOSED LONG pullback" in html and "RALY: WATCH ONLY" in html
     with pytest.raises(ValueError, match="email"):
         ss.main(tickers="PULL", email="not an address")
 

@@ -15,6 +15,9 @@ Every setup carries its direction, entry, stop, target, reward/risk, score, rela
 its sector ETF, the market regime (bullish / neutral / bearish from QQQ's trend and sector-ETF breadth)
 and its sector ETF's trend. They turn it into an action: long or short when the regime and sector agree,
 watch, countertrend_watch or no_trade otherwise. The regime never changes which setups qualify.
+Each candidate carries a `recommendation` line: proposed or watch only and why, the strategy and its rank in a bull
+market (breakout, then pullback, then squeeze), the score items it earned and the plan. LONG pullback and breakout
+stops sit high_beta_stop_atr x beta ATR lower for stocks with beta >= high_beta_min.
 `track_days` adds the status of the signals of the previous sessions (open, target, stopped, time exit,
 not triggered, skipped). Every setup is a 30-45 session swing: the time exit depends on the stock's beta vs SPY
 (higher beta, shorter hold). The SHORT and squeeze rules are untested hypotheses: validate before trading them.
@@ -80,6 +83,11 @@ DEFAULTS = {
     "max_zero_volume_days": 2,
     "rs_lookback": 63,
     "max_risk_atr": 2.5,
+    # Wider stop for high-beta stocks, LONG pullback and breakout: at beta >= high_beta_min the stop moves
+    # high_beta_stop_atr x beta ATR lower. Entry, target and the checks use the stop before this buffer. In the bull
+    # backtest (600 stocks, 2016-2026) this raised R per trade for beta >= 1.3 and did not help squeezes.
+    "high_beta_min": 1.3,
+    "high_beta_stop_atr": 0.5,
     # Pullback / EMA bounce
     "pullback_min_atr": 1.0,
     "touch_atr": 0.25,
@@ -532,6 +540,17 @@ def _levels(entry, stop, target, direction="long"):
             "risk_per_share": round(risk, 2), "reward_risk": round(sign * (target - entry) / risk, 2) if risk > 0 else None}
 
 
+def high_beta_stop(levels, series, t, atr_value, cfg):
+    """LONG levels with the stop moved high_beta_stop_atr x beta ATR lower when beta >= high_beta_min; others unchanged.
+    `base_stop` keeps the stop of the setup rule and `stop_buffer_atr` the ATRs added."""
+    beta = _beta_at(series, t)
+    if not levels or beta is None or beta < cfg["high_beta_min"] or cfg["high_beta_stop_atr"] <= 0 or not atr_value:
+        return levels
+    buffer = cfg["high_beta_stop_atr"] * beta
+    out = _levels(levels["entry"], levels["stop"] - buffer * atr_value, levels["target"])
+    return {**levels, **out, "base_stop": levels["stop"], "stop_buffer_atr": round(buffer, 2)}
+
+
 def evaluate_pullback(bars, series, t, cfg):
     checks, scores = [], []
     ctx = _context(bars, series, t, cfg)
@@ -572,6 +591,7 @@ def evaluate_pullback(bars, series, t, cfg):
     _points(scores, "closes_above_prior_high", 10, c[t] > h[t - 1], f"close {c[t]:.2f} vs previous high {h[t - 1]:.2f}")
     _points(scores, "ema_stack", 10, c[t] > e20 > e50 > m200, "close > EMA20 > EMA50 > SMA200")
     _points(scores, "reward_risk_3", 10, (levels["reward_risk"] or 0) >= 2.5, f"reward/risk {levels['reward_risk']}, best 2.5 or more")
+    levels = high_beta_stop(levels, series, t, a, cfg)
     return _with_rs(_result("pullback", bars, t, checks, scores, levels, ctx), series, t, cfg)
 
 
@@ -637,6 +657,7 @@ def evaluate_breakout(bars, series, t, cfg):
     year_high = max(h[t - 251:t + 1])
     _points(scores, "near_52w_high", 10, c[t] >= 0.9 * year_high, f"close {c[t] / year_high:.0%} of the 52-week high {year_high:.2f}")
     _points(scores, "reward_risk_3", 10, (levels["reward_risk"] or 0) >= 3, f"reward/risk {levels['reward_risk']}, best 3 or more")
+    levels = high_beta_stop(levels, series, t, a, cfg)
     return _with_rs(_result("breakout", bars, t, checks, scores, levels, ctx), series, t, cfg)
 
 
@@ -1718,9 +1739,74 @@ def holding_rule(cfg, beta_vs=BETA_BENCHMARK):
                     f"{cfg['beta_high']:g}, linear in between, {holding_days(None, cfg)} if beta is unknown; then exit at the close"}
 
 
+# Order of the strategies within an action, and why, from the bull backtest (600 stocks, 2016-2026, net of 10 bp).
+STRATEGY_PRIORITY = {
+    "breakout": (1, "first choice in a bull market: best R per trade of the long setups in the bull backtest"),
+    "pullback": (2, "second choice in a bull market: small but steady edge in the bull backtest"),
+    "squeeze": (3, "weakest long setup in the bull backtest: no edge after 2022, keep it small"),
+    "rally_rejection": (1, "short hypothesis, not validated"),
+    "breakdown": (1, "short hypothesis, not validated"),
+}
+REASON_LABELS = {
+    "outperforms_market": "stronger than the market", "outperforms_sector": "stronger than its sector",
+    "underperforms_market": "weaker than the market", "underperforms_sector": "weaker than its sector",
+    "rs_line_high": "relative strength at a high", "strong_volume": "strong volume", "strong_close": "strong close",
+    "tight_base": "tight base", "near_52w_high": "near the 52-week high", "reward_risk_3": "high reward/risk",
+    "healthy_rsi": "healthy RSI", "volume_dry_up": "volume dried up on the pullback", "reversal_volume": "volume rose on the reversal",
+    "closes_above_prior_high": "closed above the previous high", "ema_stack": "EMAs stacked up", "heavy_volume": "heavy volume",
+    "gap_up": "gap up", "beaten_down": "beaten down before", "room_to_52w_high": "room to the 52-week high",
+}
+
+
+def _verdict(q):
+    action, regime, direction = q["action"], q.get("regime"), q["direction"]
+    if action in ("long", "short"):
+        return f"PROPOSED {action.upper()}"
+    if action == "no_trade":
+        return f"NO TRADE, market {regime}"
+    if action == "countertrend_watch":
+        return f"WATCH ONLY, against the {regime} market"
+    table = actions_table(q["strategy"])
+    if table.get(regime) in ("long", "short") and q.get("sector_trend") in ("down", "up"):
+        return f"WATCH ONLY, sector ETF {q.get('sector_etf') or ''} trending {q['sector_trend']}".replace("  ", " ")
+    return f"WATCH ONLY, market {regime}" if direction == "long" or regime != "bullish" else "WATCH ONLY"
+
+
+def _setup_text(q):
+    s, levels, ind = q["strategy"], q["levels"], q.get("indicators") or {}
+    vol = ind.get("rel_volume")
+    vol_text = f" on {vol:.1f}x average volume" if vol else ""
+    if s == "pullback":
+        touch = next((c["detail"] for c in q.get("checks", []) if c["name"] == "ema_touch"), "")
+        return f"pullback in an uptrend ({touch}) and a reversal day" if touch else "pullback in an uptrend and a reversal day"
+    if s == "breakout":
+        return f"fresh close above the {levels.get('resistance')} resistance{vol_text}"
+    if s == "squeeze":
+        return f"close above the 20-day high {levels.get('breakout_level')}{vol_text}"
+    if s == "rally_rejection":
+        return "rally rejected at resistance in a downtrend"
+    return f"close below support{vol_text}"
+
+
+def recommendation(q):
+    """One line for the reader: proposed or not and why, the strategy and its rank, the reasons the score found, the plan."""
+    priority, note = STRATEGY_PRIORITY.get(q["strategy"], (9, ""))
+    earned = sorted((x for x in q.get("scoring", []) if x["earned"]), key=lambda x: -x["points"])[:3]
+    reasons = "; ".join(f"{REASON_LABELS.get(x['name'], x['name'].replace('_', ' '))} ({x['detail']})" for x in earned)
+    levels = q["levels"]
+    stop = f"stop {levels['stop']}"
+    if levels.get("stop_buffer_atr"):
+        stop += f" ({levels['stop_buffer_atr']:g} ATR below the rule's {levels['base_stop']} because beta is {q.get('beta')})"
+    plan = (f"{stop}, target {levels['target']}, reward/risk {levels['reward_risk']}, "
+            f"exit by {q['time_exit']} ({q['holding_days']} sessions) if neither is hit")
+    return (f"{q['ticker']}: {_verdict(q)} {q['strategy']} ({note}). Why: {_setup_text(q)}"
+            + (f"; {reasons}" if reasons else "") + f". Plan: {plan}.")
+
+
 def candidate_row(strategy, q):
     levels = q["levels"]
     return {"ticker": q["ticker"], "strategy": strategy, "direction": q["direction"], "action": q["action"], "score": q["score"],
+            "priority": STRATEGY_PRIORITY.get(strategy, (9, ""))[0], "recommendation": recommendation({**q, "strategy": strategy}),
             "beta": q["beta"], "holding_days": q["holding_days"], "time_exit": q["time_exit"],
             "entry": levels["entry"], "stop": levels["stop"], "target": levels["target"], "reward_risk": levels["reward_risk"],
             "sector": q["sector"], "sector_trend": q["sector_trend"], "warnings": q["warnings"]}
@@ -1739,6 +1825,9 @@ def email_html(result):
                                        f"20 days {pct(v['change_20d'])})" for k, v in context.items()) + "</p>")
     rows = result["candidates"]
     if rows:
+        proposed = [r for r in rows if r["action"] in ("long", "short")]
+        parts.append(f"<p><b>Proposed</b>: {len(proposed)} of {len(rows)} setups. Best first; the rest are watch only.</p><ol>"
+                     + "".join(f"<li>{escape(r['recommendation'])}</li>" for r in rows) + "</ol>")
         keys = ["ticker", "strategy", "action", "score", "entry", "stop", "target", "reward_risk", "beta", "holding_days", "time_exit",
                 "sector", "warnings"]
         head = "".join(f"<th>{k}</th>" for k in keys)
@@ -1942,7 +2031,7 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
     for s in strategies:
         results[s]["qualified"].sort(key=lambda x: (-x["score"], x["ticker"]))
     candidates = sorted((candidate_row(s, q) for s in strategies for q in results[s]["qualified"]),
-                        key=lambda x: (ACTION_ORDER.get(x["action"], 9), -x["score"], x["ticker"], x["strategy"]))
+                        key=lambda x: (ACTION_ORDER.get(x["action"], 9), x["priority"], -x["score"], x["ticker"], x["strategy"]))
 
     duration = time.monotonic() - started
     counts = ", ".join(f"{s} {len(results[s]['qualified'])}" for s in strategies)
