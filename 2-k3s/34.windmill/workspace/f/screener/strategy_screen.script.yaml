@@ -1,4 +1,4 @@
-summary: Pullback and breakout screener with OHLCV indicators (no email)
+summary: Four-strategy screener (long pullback and breakout, short rally rejection and breakdown) by market regime
 description: See 2-k3s/34.windmill/README.md in the homelab repo.
 kind: script
 schema:
@@ -12,6 +12,7 @@ schema:
     - track_days
     - validation_days
     - settings
+    - email
   properties:
     finviz_url:
       type: string
@@ -23,12 +24,17 @@ schema:
       default: ''
     strategy:
       type: string
-      description: Which strategy to run
+      description: 'Which strategies to run: all, long, short, both (= long, kept for older runs) or a single one'
       enum:
+        - all
+        - long
+        - short
         - both
         - pullback
         - breakout
-      default: both
+        - rally_rejection
+        - breakdown
+      default: all
     max_tickers:
       type: integer
       description: Most tickers to fetch and screen, 1 to 200
@@ -45,4 +51,8 @@ schema:
       type: object
       description: 'Optional overrides of the thresholds, e.g. {"min_rel_volume": 2}. See DEFAULTS in the script'
       default: {}
+    email:
+      type: string
+      description: Optional address to email the candidates to (uses resource f/screener/smtp); empty sends nothing
+      default: ''
   required: []

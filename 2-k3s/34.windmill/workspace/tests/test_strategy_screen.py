@@ -55,6 +55,37 @@ def breakout_rows():
     return rows
 
 
+def downtrend(n, start=300.0, slope=-0.5, volume=1_000_000):
+    rows = []
+    for i in range(n):
+        close = start + slope * i
+        rows.append((close + 0.2, close + 1, close - 1, close, volume))
+    return rows
+
+
+def rally_rows(steps=(1.1, 0.9, 1.0, 1.2)):
+    rows = downtrend(290)
+    close = rows[-1][3]
+    for _ in range(3):  # leg down to the rally low
+        close -= 1.5
+        rows.append((close + 1.2, close + 1.4, close - 0.6, close, 1_200_000))
+    for step in steps:  # quiet rally back toward EMA20
+        close += step
+        rows.append((close - 0.7, close + 0.6, close - 0.9, close, 700_000))
+    rows.append((close + 0.5, close + 2.6, close - 1.8, close - 1.6, 1_300_000))  # rejection bar
+    return rows
+
+
+def breakdown_rows(last=(201.5, 201.7, 198.0, 198.4, 3_000_000)):
+    rows = downtrend(240, 330, -0.5)
+    for j in range(60):  # base above support at 200
+        close = max(207 - 0.05 * j - 3.5 * math.sin(j * 0.7), 201.5)
+        low = 200.0 if j in (15, 35, 52) else max(close - 1.5, 201.0)
+        rows.append((close + 0.3, close + 1.5, low, close, 1_000_000))
+    rows.append(last)  # breakdown on volume
+    return rows
+
+
 def run(evaluator, rows, cfg=CFG, benchmarks=None, sector_etf=None):
     bars = make_bars(rows)
     assert ss.quality_problems(bars, bars.dates, cfg) == []
@@ -305,6 +336,214 @@ def test_resistance_counts_separate_tests():
     rows = [(1, h, 0.5, 1, 1) for h in (5, 10, 9.8, 5, 5, 9.9, 5, 10, 5, 5)]
     level, age, touches, low = ss.resistance(make_bars(rows), 10, 10, 0.5)
     assert (level, age, touches, low) == (10, 3, 3, 0.5)
+
+
+# ---------------------------------------------------------------- SHORT strategies
+
+
+def test_rally_rejection_qualifies_with_short_levels():
+    rows = rally_rows()
+    result = run(ss.evaluate_rally_rejection, rows)
+    assert result["qualified"], failed(result)
+    assert result["direction"] == "short" and result["strategy"] == "rally_rejection"
+    levels, atr14 = result["levels"], result["indicators"]["atr14"]
+    assert levels["entry"] == round(rows[-1][2] - 0.01, 2)
+    assert levels["stop"] == round(max(r[1] for r in rows[-3:]) + 0.2 * atr14, 2)
+    assert levels["stop"] > levels["entry"] > levels["target"] and levels["reward_risk"] >= 1.5
+    assert levels["target_source"].startswith("2R")
+    scores = {s["name"]: s["earned"] for s in result["scoring"]}
+    assert set(scores) == {"underperforms_market", "underperforms_sector", "rsi_turning_down", "rally_volume_dry_up",
+                           "rejection_volume", "upper_wick", "below_sma200", "failed_reclaim"}
+    assert sum(s["points"] for s in result["scoring"]) == 100 and result["score"] == 55
+
+
+@pytest.mark.parametrize("steps, check", [
+    ((0.2, 0.2, 3.8, 0.2), "rally_not_a_spike"),
+    ((0.1, 0.1, 0.1, 0.1), "rally_size"),
+    ((1.6, -0.4, -0.4, 1.4), "rally_participation"),
+])
+def test_rally_rejection_needs_a_real_rally(steps, check):
+    assert check in failed(run(ss.evaluate_rally_rejection, rally_rows(steps)))
+
+
+def test_rally_rejection_rejects_a_two_bar_pop():
+    rows = rally_rows()[:-5]
+    close = rows[-1][3]
+    rows += [(close + 0.1, close + 0.3, close - 3.0, close - 2.8, 1_000_000)]  # new low one bar before the signal...
+    close -= 2.8
+    rows += [(close, close + 3.6, close - 0.2, close + 3.4, 900_000), (close + 3.5, close + 5.0, close + 1.0, close + 1.2, 1_300_000)]
+    assert "rally_duration" in failed(run(ss.evaluate_rally_rejection, rows))
+
+
+def test_rally_rejection_needs_downtrend_resistance_and_bearish_bar():
+    up = run(ss.evaluate_rally_rejection, pullback_rows())
+    assert "downtrend" in failed(up)
+    rows = rally_rows()
+    o, h, l, c, v = rows[-1]
+    green = rows[:-1] + [(l + 0.2, h, l, h - 0.2, v)]
+    assert "bearish_bar" in failed(run(ss.evaluate_rally_rejection, green))
+    reclaimed = rally_rows((2.5, 2.5, 2.5, 2.5))  # closes back above EMA20 and never reaches EMA50
+    assert failed(run(ss.evaluate_rally_rejection, reclaimed)) == ["resistance_rejection"]
+
+
+def test_rally_rejection_flags_gaps_inside_the_rally():
+    rows = rally_rows()
+    o, h, l, c, v = rows[-3]
+    gap_open = rows[-4][1] + 4
+    rows[-3] = (gap_open, gap_open + 0.5, min(l, c - 0.5), c, v)  # opens far above the previous high, closes back down
+    assert any("gap up" in n for n in run(ss.evaluate_rally_rejection, rows)["notes"])
+
+
+def test_breakdown_qualifies_with_short_levels():
+    rows = breakdown_rows()
+    result = run(ss.evaluate_breakdown, rows)
+    assert result["qualified"], failed(result)
+    levels, atr14 = result["levels"], result["indicators"]["atr14"]
+    assert levels["support"] == 200.0 and levels["entry"] == 197.99
+    assert levels["stop"] == round(max(rows[-1][1], 200.0) + 0.5 * atr14, 2)
+    assert levels["reward_risk"] >= 2 and result["score"] == 75
+    assert sum(s["points"] for s in result["scoring"]) == 100
+    assert result["indicators"]["ema20_distance_atr"] > 0 and result["indicators"]["rel_volume"] == 3.0
+
+
+@pytest.mark.parametrize("last, check", [
+    ((201.5, 201.7, 192.0, 192.2, 3_000_000), "not_extended"),
+    ((201.5, 202.5, 199.0, 202.0, 3_000_000), "fresh_breakdown"),
+    ((199.0, 201.0, 198.5, 199.8, 3_000_000), "bearish_bar"),
+])
+def test_breakdown_rejections(last, check):
+    assert check in failed(run(ss.evaluate_breakdown, breakdown_rows(last)))
+
+
+def test_breakdown_needs_price_below_ema50_and_short_liquidity():
+    assert "below_ema50" in failed(run(ss.evaluate_breakdown, breakout_rows()))
+    thin = [(o, h, l, c, 50_000) for o, h, l, c, _ in breakdown_rows()]
+    assert {"liquidity"} <= set(failed(run(ss.evaluate_breakdown, thin)))
+    assert "liquidity" not in failed(run(ss.evaluate_pullback, [(o, h, l, c, 60_000) for o, h, l, c, _ in pullback_rows()]))
+
+
+def test_support_mirrors_resistance():
+    rows = [(10, 11, 9, 10, 1), (10, 11, 9.1, 10, 1), (10, 12, 8, 10, 1), (10, 11, 9.5, 10, 1), (10, 11, 8.2, 10, 1), (10, 11, 9.5, 10, 1)]
+    level, age, touches, high = ss.support(make_bars(rows), 6, 6, 0.5)
+    assert (level, age, touches, high) == (8, 4, 2, 12)
+
+
+def test_next_support_uses_confirmed_swing_lows_only():
+    rows = downtrend(260, 200, 0.0)
+    rows[240] = (200, 201, 190, 200, 1)  # swing low at 190, confirmed 5 bars later
+    bars = make_bars(rows)
+    series = ss.compute(bars, {}, CFG)
+    assert ss.next_support(bars, series, 259, 196.0, 2.0, 1.0) == (190.1, "swing-low support 190.00 + 0.1 ATR")
+    target, source = ss.next_support(bars, series, 244, 196.0, 2.0, 1.0)  # not confirmed yet at t = 244
+    assert target == 192.0 and source.startswith("2R")
+    assert ss.next_support(bars, series, 259, 196.0, 1.0, 1.0)[1].startswith("2R")  # 6R away: beyond 3R
+    assert ss.next_support(bars, series, 259, 191.0, 2.0, 1.0)[1].startswith("2R")  # less than 1R below the entry
+
+
+def short_signal(entry=10.0, stop=11.0, target=8.0, strategy="rally_rejection", atr14=1.0):
+    return {"strategy": strategy, "levels": {"entry": entry, "stop": stop, "target": target}, "indicators": {"atr14": atr14}}
+
+
+@pytest.mark.parametrize("bar, detail", [
+    ((11.2, 11.5, 9.5, 10.0, 1), "opened at or above the stop"),
+    ((7.9, 8.2, 7.5, 8.0, 1), "opened at or below the target"),
+    ((8.9, 9.0, 8.5, 8.8, 1), "gap fill leaves 0.43R of reward"),
+])
+def test_short_pending_order_is_cancelled(bar, detail):
+    out = ss.simulate(future([bar] * 3), 0, short_signal(), 2)
+    assert out == {"outcome": "not_filled", "detail": detail}
+    assert ss.track(future([bar] * 3), 0, short_signal(), 2)["status"] == "skipped"
+
+
+def test_short_gap_fill_risk_cap():
+    out = ss.simulate(future([(9.5, 9.6, 9.0, 9.2, 1)] * 2), 0, short_signal(stop=12.5, target=4.0, atr14=1.0), 2)
+    assert out == {"outcome": "not_filled", "detail": "gap fill leaves a risk of 3.00 ATR"}
+
+
+def test_short_not_triggered_and_fills():
+    assert ss.simulate(future([(10.5, 10.8, 10.1, 10.6, 1)] * 2), 0, short_signal(), 2) == {"outcome": "not_filled"}
+    win = ss.simulate(future([(10.5, 10.6, 9.8, 9.9, 1), (9.5, 9.6, 7.9, 8.0, 1)]), 0, short_signal(), 2)
+    assert (win["outcome"], win["fill"], win["exit"], win["r"], win["gap"]) == ("target", 10.0, 8.0, 2.0, False)
+    gap = ss.simulate(future([(9.8, 9.9, 9.5, 9.6, 1), (11.5, 11.8, 11.0, 11.2, 1)]), 0, short_signal(), 2)
+    assert (gap["outcome"], gap["fill"], gap["exit"], gap["gap"]) == ("stop", 9.8, 11.5, True) and gap["r"] == round((9.8 - 11.5) / 1.2, 4)
+    target_gap = ss.simulate(future([(10.5, 10.6, 9.8, 9.9, 1), (7.5, 7.8, 7.2, 7.4, 1)]), 0, short_signal(), 2)
+    assert (target_gap["outcome"], target_gap["exit"], target_gap["r"]) == ("target", 7.5, 2.5)
+    timeout = ss.simulate(future([(10.5, 10.6, 9.8, 9.9, 1), (9.9, 10.4, 9.5, 9.6, 1), (9.6, 9.9, 9.2, 9.4, 1)]), 0, short_signal(), 3)
+    assert (timeout["outcome"], timeout["exit"], timeout["r"]) == ("timeout", 9.4, 0.6)
+    assert (timeout["mae_r"], timeout["mfe_r"]) == (0.6, 0.8)  # adverse = highs, favourable = lows
+
+
+def test_short_ambiguous_bars_assume_the_stop():
+    entry_bar = ss.simulate(future([(10.5, 11.2, 9.9, 10.0, 1)] * 2), 0, short_signal(), 2)
+    assert (entry_bar["outcome"], entry_bar["r"], entry_bar["ambiguous"]) == ("stop", -1.0, "fill_and_stop_same_bar")
+    both = ss.simulate(future([(10.5, 10.6, 9.9, 10.1, 1), (10.0, 11.1, 7.9, 9.0, 1)]), 0, short_signal(), 2)
+    assert (both["outcome"], both["exit"], both["ambiguous"]) == ("stop", 11.0, "stop_and_target_same_bar")
+    gap_fill = ss.simulate(future([(9.8, 11.2, 9.5, 10.0, 1)] * 2), 0, short_signal(), 2)
+    assert gap_fill["outcome"] == "stop" and gap_fill["ambiguous"] is None  # filled at the open, so the high came after
+
+
+def test_short_track_open_and_breakout_fill_unchanged():
+    running = ss.track(future([(10.5, 10.6, 9.8, 9.9, 1), (9.9, 10.0, 9.4, 9.5, 1)]), 0, short_signal(), 10)
+    assert running["status"] == "open" and running["fill"] == 10.0 and running["last_close"] == 9.5 and running["r_now"] == 0.5
+    long_out = ss.simulate(future([(10, 10.5, 9.6, 10.2, 1), (10.5, 12.3, 10.4, 12.1, 1)]), 0, signal("breakout", 0, 9, 12), 2)
+    assert (long_out["outcome"], long_out["fill"], long_out["r"]) == ("target", 10, 2.0)
+
+
+def test_short_validation_and_tracking_use_the_short_horizon():
+    rows = rally_rows() + [(153.6, 153.9, 153.2, 153.5, 1_000_000)] * 22  # fills the sell stop, then goes nowhere
+    t = len(rows) - 23
+    bars = make_bars(rows)
+    series = ss.compute(bars, {}, CFG)
+    trades, _, _ = ss.validate(bars, series, ["rally_rejection"], 25, CFG)
+    trade = [x for x in trades if x["signal_date"] == bars.dates[t].isoformat()][0]
+    assert trade["direction"] == "short" and trade["outcome"] == "timeout" and trade["bars_held"] == CFG["short_validation_horizon"]
+    tracked = ss.track_signals(bars, series, ["rally_rejection"], 25, CFG, {bars.dates[t]: "bearish"})
+    first = [x for x in tracked if x["signal_date"] == bars.dates[t].isoformat()][0]
+    assert first["action"] == "short" and first["status"] == "time_exit" and first["direction"] == "short" and first["fill"] == 153.39
+
+
+def test_action_for_regime_and_sector():
+    assert ss.action_for("long", "bullish") == "long" and ss.action_for("long", "bullish", "down") == "watch"
+    assert ss.action_for("long", "bearish", "up") == "no_trade" and ss.action_for("long", "neutral") == "watch"
+    assert ss.action_for("short", "bearish") == "short" and ss.action_for("short", "bearish", "up") == "watch"
+    assert ss.action_for("short", "bullish", "down") == "countertrend_watch" and ss.action_for("short", "unknown") == "watch"
+
+
+def test_trend_labels():
+    closes = [100 + i for i in range(230)] + [329 - 3 * i for i in range(100)]
+    labels = ss.trend_labels(sessions(len(closes)), closes, 20)
+    values = list(labels.values())
+    assert values[150] is None and values[229] == "up" and values[-1] == "down" and "mixed" in values
+
+
+AAPL_SNAPSHOT = (
+    '<td>Earnings</td>'
+    '<a href="x">Earnings</a></div></td><td class="snapshot-td2" align="left"><div class="snapshot-td-content">'
+    '<a href="stock?t=AAPL&ty=ea" class="hover:underline"><b><small class="text-2xs">Jan 29 AMC</small></b></a></div></td>'
+    '<a href="x">Short Float</a></div></td><td class="snapshot-td2" align="left"><div class="snapshot-td-content">'
+    '<a href="stock?t=AAPL&ty=si" class="hover:underline"><b>24.50%</b></a></div></td>'
+    '<a href="x">Short Ratio</a></div></td><td class="snapshot-td2" align="left"><div class="snapshot-td-content">'
+    '<a href="stock?t=AAPL&ty=si" class="hover:underline"><b>6.20</b></a></div></td>')
+
+
+def test_parse_snapshot():
+    out = ss.parse_snapshot(AAPL_SNAPSHOT, date(2026, 12, 20))
+    assert out == {"earnings": date(2027, 1, 29), "earnings_text": "Jan 29 AMC", "short_float": 0.245, "short_ratio": 6.2}
+    assert ss.parse_snapshot(AAPL_SNAPSHOT, date(2026, 2, 10))["earnings"] == date(2026, 1, 29)
+    assert ss.parse_snapshot("<html></html>", date(2026, 1, 1)) == {"earnings": None, "earnings_text": None, "short_float": None, "short_ratio": None}
+
+
+def test_short_checks():
+    as_of = date(2027, 1, 25)
+    snap = ss.parse_snapshot(AAPL_SNAPSHOT, as_of)
+    signal = {"checks": []}
+    warnings = ss.short_checks(signal, snap, as_of, CFG)
+    assert signal["checks"][0]["name"] == "no_earnings_soon" and not signal["checks"][0]["passed"]
+    assert warnings == ["squeeze risk: short float 24.5% (high)", "squeeze risk: 6.2 days to cover"]
+    signal = {"checks": []}
+    ss.short_checks(signal, snap, date(2027, 1, 10), CFG)
+    assert signal["checks"][0]["passed"]
+    assert ss.short_checks({"checks": []}, None, as_of, CFG) == ["earnings date and short float unknown (quote page not loaded)"]
 
 
 def test_relative_strength_scoring_uses_benchmarks():
@@ -658,8 +897,11 @@ def test_discover_tickers_and_finviz(monkeypatch):
 
 @pytest.fixture
 def offline(monkeypatch):
-    rows = {"PULL": pullback_rows(), "BRK": breakout_rows(), "QQQ": uptrend(301, 300, 0.1)}
+    rows = {"PULL": pullback_rows(), "BRK": breakout_rows(), "QQQ": uptrend(301, 300, 0.1),
+            "RALY": downtrend(3, 301.5) + rally_rows(), "BRKD": breakdown_rows()}
     rows["PULL"] = uptrend(4) + rows["PULL"]  # same length as the others
+    for k, etf in enumerate(ss.DEFAULTS["context_etfs"]):
+        rows[etf] = uptrend(301, 400 + k, 0.2 if etf != "IWM" else -0.05)
     for k, etf in enumerate(sorted(set(ss.SECTOR_ETFS.values()))):
         rows[etf] = uptrend(301, 50 + k, 0.05 if etf != "XLE" else -0.02)
     monkeypatch.setattr(ss.time, "sleep", lambda s: None)
@@ -684,6 +926,16 @@ def offline(monkeypatch):
         return "Technology"
 
     monkeypatch.setattr(ss, "fetch_sector", sector)
+
+    def snapshot(ticker, today):
+        if ticker == "BRKD":
+            return {"earnings": today + timedelta(days=3), "earnings_text": "soon", "short_float": 0.05, "short_ratio": 1.0}
+        return {"earnings": today - timedelta(days=20), "earnings_text": "past", "short_float": 0.25, "short_ratio": 2.0}
+
+    monkeypatch.setattr(ss, "fetch_snapshot", snapshot)
+    sent = []
+    monkeypatch.setattr(ss, "send_email", lambda to, subject, html: sent.append((to, subject, html)))
+    rows["_sent"] = sent
     return rows
 
 
@@ -707,8 +959,46 @@ def test_main_returns_structured_results(offline, capsys):
     brk = result["results"]["breakout"]["qualified"][0]
     assert brk["sector"] is None and brk["relative_strength"]["sector"] == {"benchmark": None, "change": None}
     tracking = result["tracking"]
-    assert tracking["days"] == 10 and set(tracking["summary"]) == {"pullback", "breakout"} and isinstance(tracking["signals"], list)
+    assert tracking["days"] == 10 and set(tracking["summary"]) == set(ss.STRATEGIES) and isinstance(tracking["signals"], list)
+    assert tracking["horizon_bars"] == {"pullback": 20, "breakout": 20, "rally_rejection": 10, "breakdown": 10}
     assert "Summary: 3 tickers, 1 data errors, regime bullish, qualified: pullback 1, breakout 1" in capsys.readouterr().out
+    assert market["actions"] == {"pullback": "long", "breakout": "long", "rally_rejection": "countertrend_watch", "breakdown": "countertrend_watch"}
+    assert market["favoured"] == ["pullback", "breakout"] and market["short_setups"] == "countertrend_watch"
+    assert set(market["context"]) == {"SPY", "IWM", "SMH"} and market["context"]["SPY"]["trend"] == "up"
+    assert market["benchmark"]["trend"] == "up" and market["benchmark"]["vs_sma200"] > 0 and market["benchmark"]["rsi14"] is not None
+    assert market["sector_laggards"][0] == "XLE" and len(market["sector_leaders"]) == 3
+    assert [c["ticker"] for c in result["candidates"]] == ["BRK", "PULL"] and result["candidates"][0]["action"] == "long"
+    assert "email" not in offline["_sent"] and offline["_sent"] == []
+
+
+def test_main_screens_short_setups(offline):
+    result = ss.main(tickers="RALY,BRKD,PULL", strategy="short")
+    assert list(result["results"]) == ["rally_rejection", "breakdown"]
+    rally = result["results"]["rally_rejection"]["qualified"]
+    assert [q["ticker"] for q in rally] == ["RALY"]
+    q = rally[0]
+    assert q["direction"] == "short" and q["action"] == "countertrend_watch" and q["sector_trend"] == "up"  # bullish market
+    assert "squeeze risk: short float 25.0% (high)" in q["warnings"]
+    brkd = {r["ticker"]: r["failed"] for r in result["results"]["breakdown"]["rejected"]}
+    assert [c["name"] for c in brkd["BRKD"]] == ["no_earnings_soon"]  # qualified on price, blocked by earnings in 3 days
+    assert [(c["ticker"], c["strategy"], c["action"]) for c in result["candidates"]] == [("RALY", "rally_rejection", "countertrend_watch")]
+
+
+def test_main_emails_candidates_only_when_asked(offline):
+    result = ss.main(tickers="PULL,RALY", email="trader@example.com")
+    (to, subject, html), = offline["_sent"]
+    assert to == "trader@example.com" and result["email"] == {"to": "trader@example.com", "subject": subject}
+    assert subject.startswith(f"Strategy screen {result['as_of']}: market bullish, 2 setups")
+    assert "PULL" in html and "RALY" in html and "Favoured: pullback, breakout" in html
+    with pytest.raises(ValueError, match="email"):
+        ss.main(tickers="PULL", email="not an address")
+
+
+def test_email_html_without_candidates():
+    market = {"regime": "neutral", "favoured": [], "breadth": {"above_sma200": 5, "sector_etfs": 11},
+              "benchmark": {"ticker": "QQQ", "close": 1.0, "vs_sma200": -0.02, "change_20d": None}}
+    html = ss.email_html({"market": market, "candidates": []})
+    assert "No setup qualified today" in html and "Favoured: none" in html and "-2.0%" in html
 
 
 def test_main_single_strategy_and_validation(offline):
@@ -737,15 +1027,17 @@ def test_main_without_benchmarks_fails(offline, monkeypatch):
     ({"tickers": "AAPL", "max_tickers": 0}, "max_tickers"),
     ({"tickers": "AAPL", "validation_days": 5000}, "validation_days"),
     ({"tickers": "AAPL", "track_days": 61}, "track_days"),
+    ({"tickers": "AAPL", "settings": {"context_etfs": "SPY"}}, "context_etfs"),
 ])
 def test_main_rejects_bad_inputs(offline, kwargs, message):
     with pytest.raises(ValueError, match=message):
         ss.main(**kwargs)
 
 
-def test_never_sends_email_or_touches_resources():
+def test_email_is_the_only_resource_use():
     source = Path(ss.__file__).read_text()
-    assert "smtplib" not in source and "wmill" not in source
+    assert source.count("wmill.") == 1 and "wmill.get_resource(SMTP_RESOURCE)" in source
+    assert source.count("send_email(") == 2 and "if email.strip():" in source
 
 
 def test_requirements_header_is_pinned_for_ci():
