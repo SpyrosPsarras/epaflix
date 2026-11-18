@@ -387,6 +387,26 @@ def test_simulate_intrabar_stop_and_target_exits():
     assert (target["outcome"], target["exit"], target["r"], target["gap"]) == ("target", 12, 2.0, False)
 
 
+def test_simulate_flags_ambiguous_bars_and_assumes_the_stop():
+    both = ss.simulate(future([(10, 10.5, 9.6, 10.2, 1), (10.5, 12.5, 8.8, 11, 1)]), 0, signal("breakout", 0, 9, 12), 2)
+    assert (both["outcome"], both["exit"], both["r"], both["ambiguous"]) == ("stop", 9, -1.0, "stop_and_target_same_bar")
+    entry_bar = ss.simulate(future([(10, 11, 8.9, 10.5, 1)] * 2), 0, signal("pullback", 10.6, 9, 12), 2)
+    assert (entry_bar["outcome"], entry_bar["fill"], entry_bar["ambiguous"]) == ("stop", 10.6, "fill_and_stop_same_bar")
+    clean = ss.simulate(future([(10, 10.5, 9.6, 10.2, 1), (10, 10.2, 8.9, 9.5, 1)]), 0, signal("breakout", 0, 9, 12), 2)
+    assert clean["outcome"] == "stop" and clean["ambiguous"] is None
+    gap_open = ss.simulate(future([(10.7, 11, 8.9, 10.5, 1)] * 2), 0, signal("pullback", 10.6, 9, 12), 2)
+    assert gap_open["outcome"] == "stop" and gap_open["ambiguous"] is None  # filled at the open, so the low came after
+    assert ss.summarize([{**both, "signal_date": "2025-01-01", "ticker": "A", "regime": "bullish"}])["ambiguous_bars"] == {
+        "stop_and_target_same_bar": 1, "fill_and_stop_same_bar": 0}
+
+
+def test_track_flags_ambiguous_bars():
+    flat = [(10, 10, 10, 10, 1)] * 3
+    both = make_bars(flat + [(10.0, 10.5, 9.9, 10.2, 1), (10.2, 12.3, 8.9, 10, 1)])
+    result = ss.track(both, 2, pullback_signal(), 20)
+    assert (result["status"], result["r"], result["ambiguous"]) == ("stopped", -1.0, "stop_and_target_same_bar")
+
+
 def test_simulate_mae_and_mfe():
     sig = {**signal("breakout", 0, 8, 20), "indicators": {"atr14": 0.5}}
     out = ss.simulate(future([(10, 11, 9.5, 10.5, 1), (10.5, 12, 9, 11, 1), (11, 11.5, 10, 10.8, 1)]), 0, sig, 3)

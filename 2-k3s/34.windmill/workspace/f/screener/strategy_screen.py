@@ -505,7 +505,7 @@ FORWARD_DAYS = (5, 10, 20)
 ASSUMPTIONS = [
     "Signals on day t use completed daily bars up to t only; the partial bar of the current session is dropped.",
     "Pullback fills with a buy stop on the next bar only, at the open if it gaps above the entry. Breakout fills at the next open. Fills at or below the stop are skipped.",
-    "Bars are processed in time order: an open at or beyond the stop or target exits at the open; inside a bar the stop counts before the target.",
+    "Bars are processed in time order: an open at or beyond the stop or target exits at the open. Daily bars do not show the order of prices inside a bar, so two cases use the conservative assumption and are flagged in `ambiguous`: a bar that touches both the stop and the target counts as stopped (`stop_and_target_same_bar`), and on the bar where a pullback buy stop triggers inside the bar, a low at or below the stop counts as stopped even though it may have come before the fill (`fill_and_stop_same_bar`).",
     "MAE uses the full low of each bar held, including the part of the fill bar before a buy stop triggered, so it is conservative.",
     "Trades not stopped or at target exit at the close of the last bar of the horizon.",
     "Costs are round trip in basis points of the fill price; no market impact or borrow modelling.",
@@ -531,21 +531,26 @@ def _fill(bars, i, signal):
 
 
 def _walk(bars, i, fill, stop, target, end):
-    """Bars i..end-1 in time order. Returns (j, price, outcome, gap, low, high); j is None if nothing was hit."""
+    """Bars i..end-1 in time order. Returns (j, price, outcome, gap, low, high, ambiguous); j is None if nothing was hit.
+
+    Inside a bar the stop counts before the target (conservative); `ambiguous` names the case when the bar alone cannot
+    tell the order: both levels touched, or the stop touched on the bar where a buy stop filled above the open."""
     low = high = fill
     for j in range(i, end):
         opening = fill if j == i else bars.open[j]
         if opening >= target:
-            return j, opening, "target", True, low, high
+            return j, opening, "target", True, low, high, None
         if opening <= stop:  # only on later bars, the fill is above the stop
-            return j, opening, "stop", True, low, high
+            return j, opening, "stop", True, low, high, None
         if bars.low[j] <= stop:
-            return j, stop, "stop", False, low, high
+            ambiguous = ("stop_and_target_same_bar" if bars.high[j] >= target
+                         else "fill_and_stop_same_bar" if j == i and fill > bars.open[j] else None)
+            return j, stop, "stop", False, low, high, ambiguous
         low = min(low, bars.low[j])
         if bars.high[j] >= target:
-            return j, target, "target", False, low, high
+            return j, target, "target", False, low, high, None
         high = max(high, bars.high[j])
-    return None, None, None, False, low, high
+    return None, None, None, False, low, high, None
 
 
 def simulate(bars, t, signal, horizon):
@@ -560,10 +565,10 @@ def simulate(bars, t, signal, horizon):
         return {"outcome": "not_filled"} if reason == "not_filled" else {"outcome": "not_filled", "detail": reason}
     risk = fill - stop
     atr = (signal.get("indicators") or {}).get("atr14") or risk
-    j, price, outcome, gap, low, high = _walk(bars, i, fill, stop, target, i + horizon)
+    j, price, outcome, gap, low, high, ambiguous = _walk(bars, i, fill, stop, target, i + horizon)
     if j is None:
         j, price, outcome = i + horizon - 1, bars.close[i + horizon - 1], "timeout"
-    return {"outcome": outcome, "gap": gap, "fill": round(fill, 4), "fill_date": bars.dates[i].isoformat(),
+    return {"outcome": outcome, "gap": gap, "ambiguous": ambiguous, "fill": round(fill, 4), "fill_date": bars.dates[i].isoformat(),
             "exit": round(price, 4), "exit_date": bars.dates[j].isoformat(), "risk": round(risk, 4),
             "r": round((price - fill) / risk, 4), "bars_held": j - t,
             "mae_r": round((fill - min(low, price)) / risk, 3), "mfe_r": round((max(high, price) - fill) / risk, 3),
@@ -595,11 +600,11 @@ def track(bars, t, signal, horizon):
     risk = fill - levels["stop"]
     base = {"fill_date": bars.dates[i].isoformat(), "fill": round(fill, 4)}
     end = min(i + horizon, len(bars))
-    j, price, outcome, gap, _, _ = _walk(bars, i, fill, levels["stop"], levels["target"], end)
+    j, price, outcome, gap, _, _, ambiguous = _walk(bars, i, fill, levels["stop"], levels["target"], end)
     if j is None and i + horizon <= len(bars):
         j, price, outcome = i + horizon - 1, bars.close[i + horizon - 1], "time_exit"
     if j is not None:
-        return {"status": {"stop": "stopped"}.get(outcome, outcome), **base, "gap": gap, "exit_date": bars.dates[j].isoformat(),
+        return {"status": {"stop": "stopped"}.get(outcome, outcome), **base, "gap": gap, "ambiguous": ambiguous, "exit_date": bars.dates[j].isoformat(),
                 "exit": round(price, 4), "r": round((price - fill) / risk, 3), "bars_held": j - t}
     last = len(bars) - 1
     return {"status": "open", **base, "last_close": round(bars.close[last], 4), "r_now": round((bars.close[last] - fill) / risk, 3),
@@ -823,6 +828,7 @@ def summarize(trades, signals=()):
             "worst_gap_stop_r": round(min((x["r"] for x in gap_stops), default=0), 2),
             "target_exits_at_open": sum(x["outcome"] == "target" and x["gap"] for x in closed),
         },
+        "ambiguous_bars": {k: sum(x.get("ambiguous") == k for x in closed) for k in ("stop_and_target_same_bar", "fill_and_stop_same_bar")},
         "mae_mfe": {"all": _medians(closed), **{k: _medians([x for x in closed if x["outcome"] == k]) for k in ("stop", "target", "timeout")}},
         "by_regime": {name: {"gross": metrics([x["r"] for x in closed if x["regime"] == name]),
                              "expectancy_r_10bp": metrics([net_r(x, 10) for x in closed if x["regime"] == name])["expectancy_r"]}
