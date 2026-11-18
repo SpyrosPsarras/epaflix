@@ -102,7 +102,7 @@ spec:
               mountPath: /keeper
       containers:
         - name: t3
-          image: ghcr.io/spyrospsarras/t3-runtime:work-inputs-d3d3df052d241121c4f86b066fed81d3
+          image: ghcr.io/spyrospsarras/t3-runtime:work-inputs-92bb8735d5378a8e8a0f103798fc9062
           imagePullPolicy: IfNotPresent
           command: [bash, /scripts/entrypoint.sh]
           env:
