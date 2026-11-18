@@ -17,7 +17,8 @@ and its sector ETF's trend. They turn it into an action: long or short when the 
 watch, countertrend_watch or no_trade otherwise. The regime never changes which setups qualify.
 Each candidate carries a `recommendation` line: proposed or watch only and why, the strategy and its rank in a bull
 market (breakout, then pullback, then squeeze), the score items it earned and the plan. LONG pullback and breakout
-stops sit high_beta_stop_atr x beta ATR lower for stocks with beta >= high_beta_min.
+stops sit high_beta_stop_atr x beta ATR lower for stocks with beta >= high_beta_min. The LONG score weights come from a
+bull-market backtest and include the market (QQQ above its EMA50, not overheated) and the sector ETF trend.
 `track_days` adds the status of the signals of the previous sessions (open, target, stopped, time exit,
 not triggered, skipped). Every setup is a 30-45 session swing: the time exit depends on the stock's beta vs SPY
 (higher beta, shorter hold). The SHORT and squeeze rules are untested hypotheses: validate before trading them.
@@ -88,6 +89,12 @@ DEFAULTS = {
     # backtest (600 stocks, 2016-2026) this raised R per trade for beta >= 1.3 and did not help squeezes.
     "high_beta_min": 1.3,
     "high_beta_stop_atr": 0.5,
+    # Score thresholds of the LONG setups, set on the bull backtest (thresholds from signals before 2022-07, checked after)
+    "score_beta_min": 1.2,  # pullback: points for beta above this
+    "score_min_atr_pct": 0.0215,  # pullback, breakout: points for ATR14 / close above this (the median of the signals)
+    "score_strong_rs": 0.05,  # breakout, squeeze: points for relative strength vs the market above this
+    "market_hot_change": 0.03,  # breakout, squeeze: points when the market rose less than this in 21 sessions
+    "breakout_heavy_volume": 3.0,  # breakout: points for relative volume at or above this
     # Pullback / EMA bounce
     "pullback_min_atr": 1.0,
     "touch_atr": 0.25,
@@ -478,9 +485,63 @@ def relative_strength_at(series, t, cfg):
     return out
 
 
+def market_context(dates, market_bars, sector_bars=None, slope=20):
+    """Per stock date, from bars up to that date only: the market benchmark above its EMA50, its 21-session change, the
+    sector ETF in an uptrend (see trend_labels) and the sector ETF's 63-session change minus the market's. None if unknown."""
+    keys = ("market_above_ema50", "market_change_21", "sector_uptrend", "sector_vs_market_63")
+    out = {k: [None] * len(dates) for k in keys}
+    if market_bars is None:
+        return out
+    m_index, mc = {d: i for i, d in enumerate(market_bars.dates)}, market_bars.close
+    m50 = ema(mc, 50)
+    if sector_bars is not None:
+        s_index, sc = {d: i for i, d in enumerate(sector_bars.dates)}, sector_bars.close
+        trend = trend_labels(sector_bars.dates, sc, slope)
+    for k, d in enumerate(dates):
+        i = m_index.get(d)
+        if i is None:
+            continue
+        if m50[i] is not None:
+            out["market_above_ema50"][k] = mc[i] > m50[i]
+        if i >= 21:
+            out["market_change_21"][k] = mc[i] / mc[i - 21] - 1
+        j = s_index.get(d) if sector_bars is not None else None
+        if j is not None:
+            out["sector_uptrend"][k] = None if trend.get(d) is None else trend[d] == "up"
+            if i >= 63 and j >= 63:
+                out["sector_vs_market_63"][k] = (sc[j] / sc[j - 63]) - (mc[i] / mc[i - 63])
+    return out
+
+
+def _at(series, key, t):
+    values = series.get(key)
+    return values[t] if values and t < len(values) else None
+
+
+def _market_score(scores, series, t, cfg, points):
+    """Points from the market and the sector ETF: (market above EMA50, market not hot, sector ETF uptrend, sector ETF beats
+    the market over 63 sessions); 0 skips an item."""
+    market = cfg["benchmarks"][0] if cfg["benchmarks"] else "market"
+    above, change = _at(series, "market_above_ema50", t), _at(series, "market_change_21", t)
+    up, vs = _at(series, "sector_uptrend", t), _at(series, "sector_vs_market_63", t)
+    etf = series.get("sector_etf") or "sector ETF"
+    items = [
+        ("market_above_ema50", above is True, f"{market} {'above' if above else 'below'} its EMA50" if above is not None else "no market data"),
+        ("market_not_hot", change is not None and change < cfg["market_hot_change"],
+         f"{market} {change * 100:+.1f}% in 21 sessions, best under {cfg['market_hot_change'] * 100:+.0f}%" if change is not None else "no market data"),
+        ("sector_uptrend", up is True, f"{etf} {'in an uptrend' if up else 'not in an uptrend'}" if up is not None else "no sector ETF data"),
+        ("sector_beats_market", vs is not None and vs > 0, f"{etf} {vs * 100:+.1f}% vs {market} over 63 sessions" if vs is not None else "no sector ETF data"),
+    ]
+    for (name, earned, detail), value in zip(items, points):
+        if value:
+            _points(scores, name, value, earned, detail)
+
+
 def _rs_score(scores, series, t, cfg, points, weaker=False):
     rs = relative_strength_at(series, t, cfg)
     for key, value in zip(("market", "sector"), points):
+        if not value:
+            continue
         item = rs.get(key, {"benchmark": None, "change": None})
         change = item["change"]
         if change is not None:
@@ -551,6 +612,13 @@ def high_beta_stop(levels, series, t, atr_value, cfg):
     return {**levels, **out, "base_stop": levels["stop"], "stop_buffer_atr": round(buffer, 2)}
 
 
+def _strong_rs(scores, series, t, cfg, points):
+    change = (relative_strength_at(series, t, cfg).get("market") or {}).get("change")
+    _points(scores, "strong_rs", points, change is not None and change > cfg["score_strong_rs"],
+            f"{change * 100:+.1f}% vs the market over {cfg['rs_lookback']} bars, best above {cfg['score_strong_rs'] * 100:+.0f}%"
+            if change is not None else "no aligned benchmark data")
+
+
 def evaluate_pullback(bars, series, t, cfg):
     checks, scores = [], []
     ctx = _context(bars, series, t, cfg)
@@ -583,14 +651,14 @@ def evaluate_pullback(bars, series, t, cfg):
     _check(checks, "risk_size", 0 < risk <= cfg["max_risk_atr"] * a, f"risk {risk:.2f} = {risk / a:.2f} ATR, maximum {cfg['max_risk_atr']:g}")
     _check(checks, "reward_risk", levels["reward_risk"] is not None and levels["reward_risk"] >= cfg["pullback_min_rr"],
            f"reward/risk {levels['reward_risk']} to the 20-day high, minimum {cfg['pullback_min_rr']:g}")
-    _rs_score(scores, series, t, cfg, (20, 10))
-    _points(scores, "healthy_rsi", 15, 40 <= ctx["rsi14"] <= 60, f"RSI14 {ctx['rsi14']:.1f}, best 40-60")
-    quiet = sum(v[t - 5:t]) / 5
-    _points(scores, "volume_dry_up", 15, quiet < ctx["volume_avg50"], f"pullback volume {quiet / ctx['volume_avg50']:.2f}x the 50-day average")
-    _points(scores, "reversal_volume", 10, v[t] > v[t - 1], f"signal volume {v[t]:,.0f} vs {v[t - 1]:,.0f} the day before")
-    _points(scores, "closes_above_prior_high", 10, c[t] > h[t - 1], f"close {c[t]:.2f} vs previous high {h[t - 1]:.2f}")
-    _points(scores, "ema_stack", 10, c[t] > e20 > e50 > m200, "close > EMA20 > EMA50 > SMA200")
-    _points(scores, "reward_risk_3", 10, (levels["reward_risk"] or 0) >= 2.5, f"reward/risk {levels['reward_risk']}, best 2.5 or more")
+    # Weights from the bull backtest: only items that ranked in both periods (before and after mid-2022).
+    _rs_score(scores, series, t, cfg, (0, 38))
+    beta = _beta_at(series, t)
+    _points(scores, "high_beta", 30, beta is not None and beta > cfg["score_beta_min"],
+            f"beta {beta:.2f}, best above {cfg['score_beta_min']:g}" if beta is not None else "beta unknown")
+    _points(scores, "wide_range", 17, a / c[t] > cfg["score_min_atr_pct"],
+            f"ATR14 {a / c[t]:.1%} of the price, best above {cfg['score_min_atr_pct']:.2%}")
+    _points(scores, "closes_above_prior_high", 15, c[t] > h[t - 1], f"close {c[t]:.2f} vs previous high {h[t - 1]:.2f}")
     levels = high_beta_stop(levels, series, t, a, cfg)
     return _with_rs(_result("pullback", bars, t, checks, scores, levels, ctx), series, t, cfg)
 
@@ -642,21 +710,22 @@ def evaluate_breakout(bars, series, t, cfg):
     _check(checks, "risk_size", 0 < risk <= cfg["max_risk_atr"] * a, f"risk {risk:.2f} = {risk / a:.2f} ATR, maximum {cfg['max_risk_atr']:g}")
     _check(checks, "reward_risk", levels["reward_risk"] is not None and levels["reward_risk"] >= cfg["breakout_min_rr"],
            f"reward/risk {levels['reward_risk']} to the measured move, minimum {cfg['breakout_min_rr']:g}")
+    # Weights from the bull backtest: only items that ranked in both periods (before and after mid-2022).
     benchmarks = cfg["benchmarks"]
-    _points(scores, "strong_volume", 20, rel_volume >= 2, f"relative volume {rel_volume:.2f}, best 2 or more")
-    _rs_score(scores, series, t, cfg, (15, 10))
-    line = series.get(f"rs_line_{benchmarks[0]}", [None] * (t + 1)) if benchmarks else [None] * (t + 1)
-    window = [x for x in line[t - 49:t + 1] if x is not None]
-    _points(scores, "rs_line_high", 15, line[t] is not None and line[t] >= max(window),
-            f"relative strength line vs {benchmarks[0] if benchmarks else '-'} at a 50-day high" if line[t] is not None else "no aligned benchmark data")
+    _rs_score(scores, series, t, cfg, (18, 0))
     span = h[t] - l[t]
     location = (c[t] - l[t]) / span if span > 0 else 0.0
-    _points(scores, "strong_close", 10, location >= 0.75, f"close at {location:.0%} of the day's range")
-    tight = (level - min(l[t - 10:t])) / a
-    _points(scores, "tight_base", 10, tight <= 3, f"last 10 bars span {tight:.1f} ATR below resistance, best 3 or less")
-    year_high = max(h[t - 251:t + 1])
-    _points(scores, "near_52w_high", 10, c[t] >= 0.9 * year_high, f"close {c[t] / year_high:.0%} of the 52-week high {year_high:.2f}")
-    _points(scores, "reward_risk_3", 10, (levels["reward_risk"] or 0) >= 3, f"reward/risk {levels['reward_risk']}, best 3 or more")
+    _points(scores, "strong_close", 15, location >= 0.75, f"close at {location:.0%} of the day's range, best 75% or more")
+    _market_score(scores, series, t, cfg, (13, 9, 8, 0))
+    _points(scores, "wide_range", 12, a / c[t] > cfg["score_min_atr_pct"],
+            f"ATR14 {a / c[t]:.1%} of the price, best above {cfg['score_min_atr_pct']:.2%}")
+    _points(scores, "strong_volume", 12, rel_volume >= cfg["breakout_heavy_volume"],
+            f"relative volume {rel_volume:.2f}, best {cfg['breakout_heavy_volume']:g} or more")
+    _strong_rs(scores, series, t, cfg, 7)
+    line = series.get(f"rs_line_{benchmarks[0]}", [None] * (t + 1)) if benchmarks else [None] * (t + 1)
+    window = [x for x in line[t - 49:t + 1] if x is not None]
+    _points(scores, "rs_line_high", 6, line[t] is not None and line[t] >= max(window),
+            f"relative strength line vs {benchmarks[0] if benchmarks else '-'} at a 50-day high" if line[t] is not None else "no aligned benchmark data")
     levels = high_beta_stop(levels, series, t, a, cfg)
     return _with_rs(_result("breakout", bars, t, checks, scores, levels, ctx), series, t, cfg)
 
@@ -854,12 +923,12 @@ def evaluate_squeeze(bars, series, t, cfg):
     year_high = max(h[t - 251:t + 1])
     drawdown = min(l[t - 62:t + 1]) / year_high - 1
     ctx["low_vs_52w_high"] = drawdown
-    # 60 points from price here; squeeze_checks adds 40 from short interest.
-    _points(scores, "heavy_volume", 15, rel_volume >= 3, f"relative volume {rel_volume:.2f}, best 3 or more")
-    _rs_score(scores, series, t, cfg, (10, 5))
-    _points(scores, "gap_up", 10, o[t] > h[t - 1], f"open {o[t]:.2f} vs previous high {h[t - 1]:.2f}")
-    _points(scores, "beaten_down", 10, drawdown <= -0.2, f"3-month low {drawdown:+.0%} vs the 52-week high {year_high:.2f}, best -20% or lower")
-    _points(scores, "room_to_52w_high", 10, year_high >= levels["target"], f"52-week high {year_high:.2f} vs target {levels['target']:.2f}")
+    # 60 points from price and market here, weights from the bull backtest; squeeze_checks adds 40 from short interest.
+    _market_score(scores, series, t, cfg, (0, 22, 0, 0))
+    _rs_score(scores, series, t, cfg, (0, 13))
+    _strong_rs(scores, series, t, cfg, 12)
+    _rs_score(scores, series, t, cfg, (5, 0))
+    _market_score(scores, series, t, cfg, (0, 0, 5, 3))
     return _with_rs(_result("squeeze", bars, t, checks, scores, levels, ctx), series, t, cfg)
 
 
@@ -1755,6 +1824,9 @@ REASON_LABELS = {
     "healthy_rsi": "healthy RSI", "volume_dry_up": "volume dried up on the pullback", "reversal_volume": "volume rose on the reversal",
     "closes_above_prior_high": "closed above the previous high", "ema_stack": "EMAs stacked up", "heavy_volume": "heavy volume",
     "gap_up": "gap up", "beaten_down": "beaten down before", "room_to_52w_high": "room to the 52-week high",
+    "high_beta": "high beta", "wide_range": "wide daily range", "strong_rs": "strong relative strength",
+    "market_above_ema50": "market above its EMA50", "market_not_hot": "market not overheated",
+    "sector_uptrend": "sector ETF in an uptrend", "sector_beats_market": "sector ETF stronger than the market",
 }
 
 
@@ -1966,6 +2038,7 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
         if etf in sector_closes:
             closes["sector"] = sector_closes[etf]
         series = compute(bars, closes, cfg, beta_closes)
+        series.update(market_context(bars.dates, reference, sector_bars.get(etf), cfg["regime_slope_bars"]))
         beta = _beta_at(series, len(bars) - 1)
         hold = horizon_for(cfg, series, len(bars) - 1)
         series["sector_etf"] = etf if etf in sector_closes else None

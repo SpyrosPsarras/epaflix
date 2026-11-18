@@ -355,6 +355,46 @@ def test_high_beta_widens_the_long_stop(evaluator, rows):
     assert _with_beta(evaluator, rows(), 1.29)["levels"] == b and _with_beta(evaluator, rows(), None)["levels"] == b
 
 
+def test_market_context_uses_bars_up_to_each_date():
+    market = make_bars(uptrend(120, 100, 1.0), "QQQ")
+    sector = make_bars(uptrend(400, 50, 0.5), "XLK", start=date(2024, 3, 25))
+    dates = market.dates
+    ctx = ss.market_context(dates, market, sector)
+    assert ctx["market_change_21"][20] is None and ctx["market_change_21"][119] == pytest.approx(219 / 198 - 1)
+    assert ctx["market_above_ema50"][119] is True and ctx["sector_uptrend"][119] is True
+    j = sector.dates.index(dates[119])
+    assert ctx["sector_vs_market_63"][119] == pytest.approx(sector.close[j] / sector.close[j - 63] - 219 / 156)
+    early = ss.market_context(dates[:60], market.head(60), sector)
+    assert all(early[k] == ctx[k][:60] for k in ctx)  # no look-ahead
+    assert ss.market_context(dates, None) == {k: [None] * len(dates) for k in ctx}
+
+
+def test_breakout_scores_market_and_volume():
+    rows = breakout_rows()
+    bars = make_bars(rows)
+    series = ss.compute(bars, {}, CFG)
+    series["sector_etf"] = "XLK"
+    n = len(bars)
+    series.update({"market_above_ema50": [True] * n, "market_change_21": [0.01] * n, "sector_uptrend": [True] * n,
+                   "sector_vs_market_63": [0.02] * n})
+    result = ss.evaluate_breakout(bars, series, n - 1, CFG)
+    earned = {x["name"]: x["earned"] for x in result["scoring"]}
+    assert sum(x["points"] for x in result["scoring"]) == 100
+    assert earned["market_above_ema50"] == 13 and earned["market_not_hot"] == 9 and earned["sector_uptrend"] == 8
+    assert earned["strong_volume"] == 12 and earned["strong_close"] == 15  # 3.0x volume, close at the top of the range
+    hot = {**series, "market_change_21": [0.05] * n, "market_above_ema50": [False] * n}
+    earned = {x["name"]: x["earned"] for x in ss.evaluate_breakout(bars, hot, n - 1, CFG)["scoring"]}
+    assert earned["market_not_hot"] == 0 and earned["market_above_ema50"] == 0
+
+
+def test_pullback_scores_beta_and_range():
+    high = _with_beta(ss.evaluate_pullback, pullback_rows(), 1.25)
+    low = _with_beta(ss.evaluate_pullback, pullback_rows(), 1.0)
+    assert {x["name"]: x["earned"] for x in high["scoring"]}["high_beta"] == 30
+    assert {x["name"]: x["earned"] for x in low["scoring"]}["high_beta"] == 0 and high["score"] == low["score"] + 30
+    assert {x["name"] for x in high["scoring"]} == {"outperforms_sector", "high_beta", "wide_range", "closes_above_prior_high"}
+
+
 def test_recommendation_says_what_why_and_the_plan():
     q = {"ticker": "ABC", "strategy": "breakout", "direction": "long", "action": "long", "regime": "bullish", "beta": 1.6,
          "holding_days": 37, "time_exit": "2026-01-30", "sector_trend": "up", "sector_etf": "XLK",
@@ -413,7 +453,8 @@ def test_squeeze_price_trigger_qualifies():
     assert levels["breakout_level"] == round(max(r[1] for r in rows[-21:-1]), 2)
     assert sum(x["points"] for x in result["scoring"]) == 60  # the other 40 come from short interest, live only
     earned = {x["name"]: x["earned"] for x in result["scoring"]}
-    assert earned["heavy_volume"] == 15 and earned["gap_up"] == 10 and earned["beaten_down"] == 10 and result["score"] == 45
+    assert set(earned) == {"market_not_hot", "outperforms_sector", "strong_rs", "outperforms_market", "sector_uptrend", "sector_beats_market"}
+    assert result["score"] == 0  # no market or sector data in this fixture
     assert result["indicators"]["low_vs_52w_high"] < -0.2
 
 
@@ -443,7 +484,7 @@ def test_squeeze_checks_add_short_interest():
     signal = squeeze_signal()
     warnings = ss.squeeze_checks(signal, {"short_float": 0.31, "short_ratio": 6.5, "earnings": as_of + timedelta(days=4),
                                           "earnings_text": "Nov 21 AMC"}, as_of, CFG)
-    assert signal["qualified"] and signal["score"] == 85 and sum(x["points"] for x in signal["scoring"]) == 100
+    assert signal["qualified"] and signal["score"] == 40 and sum(x["points"] for x in signal["scoring"]) == 100
     assert warnings == ["earnings Nov 21 AMC in 4 days: gap risk both ways", "short float 31.0%, 6.5 days to cover"]
     low = squeeze_signal()
     ss.squeeze_checks(low, {"short_float": 0.08, "short_ratio": 9.0, "earnings": None, "earnings_text": None}, as_of, CFG)
@@ -715,7 +756,9 @@ def test_relative_strength_scoring_uses_benchmarks():
     soaring = {d: 100.0 * 1.02 ** i for i, d in enumerate(dates)}
     result = run(ss.evaluate_pullback, rows, benchmarks={"QQQ": flat, "sector": soaring}, sector_etf="XLK")
     scores = {s["name"]: s for s in result["scoring"]}
-    assert scores["outperforms_market"]["earned"] == 20 and scores["outperforms_sector"]["earned"] == 0
+    assert scores["outperforms_sector"]["earned"] == 0 and "outperforms_market" not in scores  # pullback scores the sector only
+    beats = run(ss.evaluate_pullback, rows, benchmarks={"QQQ": soaring, "sector": flat}, sector_etf="XLK")
+    assert {s["name"]: s["earned"] for s in beats["scoring"]}["outperforms_sector"] == 38
     assert "vs XLK over 63 bars" in scores["outperforms_sector"]["detail"]
     rs = result["relative_strength"]
     assert rs["market"]["benchmark"] == "QQQ" and rs["market"]["change"] > 0
@@ -1157,7 +1200,9 @@ def test_main_returns_structured_results(offline, capsys):
 def test_main_screens_squeeze_candidates(offline):
     result = ss.main(tickers="SQZ,SQLO", strategy="squeeze", track_days=0)
     (q,) = result["results"]["squeeze"]["qualified"]
-    assert q["ticker"] == "SQZ" and q["score"] == 75 and q["action"] == "long" and "short float 25.0%, 2.0 days to cover" in q["warnings"]
+    assert {x["name"] for x in q["scoring"] if x["earned"]} == {"market_not_hot", "outperforms_market", "sector_uptrend",
+                                                                "sector_beats_market", "short_float_25"}
+    assert q["ticker"] == "SQZ" and q["score"] == 55 and q["action"] == "long" and "short float 25.0%, 2.0 days to cover" in q["warnings"]
     (r,) = result["results"]["squeeze"]["rejected"]
     assert r["ticker"] == "SQLO" and [c["name"] for c in r["failed"]] == ["short_interest"]
     assert [(c["ticker"], c["strategy"]) for c in result["candidates"]] == [("SQZ", "squeeze")]
