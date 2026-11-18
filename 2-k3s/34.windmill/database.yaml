@@ -78,3 +78,41 @@ spec:
   owner: windmill
   ensure: present
   databaseReclaimPolicy: retain
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: DatabaseRole
+metadata:
+  name: screener
+  namespace: postgres-system
+  labels:
+    app.kubernetes.io/name: windmill
+    app.kubernetes.io/component: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  cluster:
+    name: postgres-cluster
+  name: screener
+  ensure: present
+  login: true
+  passwordSecret:
+    name: screener-db-role
+  databaseRoleReclaimPolicy: retain
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: screener
+  namespace: postgres-system
+  labels:
+    app.kubernetes.io/name: windmill
+    app.kubernetes.io/component: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  cluster:
+    name: postgres-cluster
+  name: screener
+  owner: screener
+  ensure: present
+  databaseReclaimPolicy: retain

@@ -10,3 +10,4 @@ metadata:
 files:
   - windmill-secrets.enc.yaml
   - windmill-deploy.enc.yaml
+  - screener-db-role.enc.yaml

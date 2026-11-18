@@ -84,6 +84,8 @@ Workers use their own ServiceAccount `windmill-worker` without a token. Their Ne
 
 `windmill-secrets.enc.yaml` holds Secret `windmill-db-role` in `postgres-system` and Secret `windmill-database` in `windmill`, both at sync wave `-2`. The database password appears in both. It was generated at random when the file was encrypted and exists only there. To rotate it, change it in both Secrets in one PR. CNPG updates the role. Then restart `windmill-app` and the workers so they read the new URL.
 
+`screener-db-role.enc.yaml` holds Secret `screener-db-role` in `postgres-system`, the login of role `screener`. That role owns database `screener`, which backs the Data Table `main` of workspace `screener` through resource `f/screener/signals_db`. Windmill's own `windmill` role cannot create databases, so Git defines this pair instead of Windmill. The password was generated at random when the file was encrypted. To rotate it, change it in the SOPS file, let CNPG update the role, then update the password in `f/screener/signals_db`.
+
 The `windmill-sso` client id and secret exist only in the Authentik blueprint and in Windmill's database. To rotate them, change the blueprint in a PR, then repeat step 2 of the first login.
 
 ## DNS
