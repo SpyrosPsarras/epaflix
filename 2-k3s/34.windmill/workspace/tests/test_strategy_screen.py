@@ -1,8 +1,12 @@
+import glob
 import inspect
 import json
 import math
+import os
 import re
+import subprocess
 import sys
+import tempfile
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -1206,7 +1210,7 @@ def test_script_yaml_matches_main_signature():
 
 # ---------------------------------------------------------------- persistent tracking
 #
-# The SQL runs against a real PostgreSQL 16 (pgserver) through an adapter that executes like Windmill's postgresql
+# The SQL runs against a real PostgreSQL (the runner's, or pgserver's binaries locally) through an adapter that executes like Windmill's postgresql
 # executor: statements split on ";" outside quotes and dollar quotes, run one by one in autocommit, each binding only the
 # $n it uses (renumbered), lists and dicts sent as JSON, and the rows of the last statement returned as JSON.
 
@@ -1256,13 +1260,35 @@ class WindmillLike:
         return self.conn.execute(sql, params or None).fetchone()
 
 
+def postgres_bin():
+    """A PostgreSQL bin directory: PG_BIN, the newest /usr/lib/postgresql/*/bin (GitHub runners ship one), or pgserver."""
+    candidates = [os.environ.get("PG_BIN", "")]
+    candidates += sorted(glob.glob("/usr/lib/postgresql/*/bin"), key=lambda p: int(re.sub(r"\D", "", p) or 0), reverse=True)
+    try:
+        import pgserver
+        candidates.append(str(Path(pgserver.__file__).parent / "pginstall" / "bin"))
+    except ImportError:
+        pass
+    for path in candidates:
+        if path and Path(path, "initdb").exists() and Path(path, "pg_ctl").exists():
+            return Path(path)
+    return None
+
+
 @pytest.fixture(scope="session")
 def pg_server(tmp_path_factory):
-    pgserver = pytest.importorskip("pgserver")
     pytest.importorskip("psycopg")
-    server = pgserver.get_server(tmp_path_factory.mktemp("pg"), cleanup_mode="stop")
-    yield server
-    server.cleanup()
+    bin_dir = postgres_bin()
+    if bin_dir is None:
+        pytest.skip("no PostgreSQL binaries (set PG_BIN)")
+    root = tmp_path_factory.mktemp("pg")
+    data, sockets = root / "data", Path(tempfile.mkdtemp(prefix="pg"))  # a short path: socket paths are limited to 107 bytes
+    subprocess.run([bin_dir / "initdb", "-D", data, "-U", "postgres", "--auth=trust", "--no-sync", "-E", "UTF8"],
+                   check=True, capture_output=True)
+    subprocess.run([bin_dir / "pg_ctl", "-D", data, "-l", root / "log", "-w", "-o",
+                    f"-k {sockets} -c listen_addresses='' -c fsync=off", "start"], check=True, capture_output=True)
+    yield f"host={sockets} user=postgres"
+    subprocess.run([bin_dir / "pg_ctl", "-D", data, "-m", "immediate", "stop"], capture_output=True)
 
 
 @pytest.fixture
@@ -1270,9 +1296,9 @@ def db(pg_server):
     import psycopg
     from psycopg.rows import dict_row
     name = f"t_{uuid.uuid4().hex[:12]}"
-    with psycopg.connect(pg_server.get_uri(), autocommit=True) as admin:
+    with psycopg.connect(f"{pg_server} dbname=postgres", autocommit=True) as admin:
         admin.execute(f'CREATE DATABASE "{name}"')
-    conn = psycopg.connect(pg_server.get_uri(name), autocommit=True, cursor_factory=psycopg.RawCursor, row_factory=dict_row)
+    conn = psycopg.connect(f"{pg_server} dbname={name}", autocommit=True, cursor_factory=psycopg.RawCursor, row_factory=dict_row)
     yield WindmillLike(conn)
     conn.close()
 
