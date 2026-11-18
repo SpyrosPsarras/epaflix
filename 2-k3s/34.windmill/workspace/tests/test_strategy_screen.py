@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "f" / "screener"))
 import strategy_screen as ss
 
 CFG = ss.settings_with_defaults(None)
+CFG20 = ss.settings_with_defaults({"swing_min_days": 20, "swing_max_days": 20})  # short fixtures: a fixed 20-session hold
 
 
 def sessions(n, start=date(2025, 1, 6)):
@@ -83,6 +84,15 @@ def breakdown_rows(last=(201.5, 201.7, 198.0, 198.4, 3_000_000)):
         low = 200.0 if j in (15, 35, 52) else max(close - 1.5, 201.0)
         rows.append((close + 0.3, close + 1.5, low, close, 1_000_000))
     rows.append(last)  # breakdown on volume
+    return rows
+
+
+def squeeze_rows(last=(183.0, 187.0, 182.6, 186.4, 3_500_000)):
+    rows = downtrend(240, 300, -0.5)
+    for j in range(60):  # base around 181 after a long fall
+        close = 181 + 1.5 * math.sin(j * 0.6)
+        rows.append((close - 0.2, close + 1.0, close - 1.0, close, 1_000_000))
+    rows.append(last)  # gap up, breakout above the 20-day high on 3.5x volume
     return rows
 
 
@@ -338,6 +348,66 @@ def test_resistance_counts_separate_tests():
     assert (level, age, touches, low) == (10, 3, 3, 0.5)
 
 
+# ---------------------------------------------------------------- squeeze
+
+
+def test_squeeze_price_trigger_qualifies():
+    rows = squeeze_rows()
+    result = run(ss.evaluate_squeeze, rows)
+    assert result["qualified"], failed(result)
+    assert result["direction"] == "long" and ss.ENTRY_TYPES["squeeze"] == "open"
+    levels, atr14 = result["levels"], result["indicators"]["atr14"]
+    assert levels["entry"] == 186.4 and levels["stop"] == round(182.6 - 0.2 * atr14, 2) and levels["reward_risk"] == 2.0
+    assert levels["breakout_level"] == round(max(r[1] for r in rows[-21:-1]), 2)
+    assert sum(x["points"] for x in result["scoring"]) == 60  # the other 40 come from short interest, live only
+    earned = {x["name"]: x["earned"] for x in result["scoring"]}
+    assert earned["heavy_volume"] == 15 and earned["gap_up"] == 10 and earned["beaten_down"] == 10 and result["score"] == 45
+    assert result["indicators"]["low_vs_52w_high"] < -0.2
+
+
+@pytest.mark.parametrize("last, check", [
+    ((183.0, 187.0, 182.6, 186.4, 1_500_000), "volume"),
+    ((181.0, 183.2, 180.0, 182.5, 3_500_000), "range_breakout"),
+    ((183.0, 187.0, 182.0, 183.8, 3_500_000), "strong_close"),
+    ((183.0, 194.0, 182.6, 193.5, 3_500_000), "not_extended"),
+])
+def test_squeeze_rejections(last, check):
+    assert check in failed(run(ss.evaluate_squeeze, squeeze_rows(last)))
+
+
+def test_squeeze_needs_price_above_the_emas():
+    rows = downtrend(301, 300, -0.5)
+    o, h, l, c, v = rows[-1]
+    rows[-1] = (o, max(r[1] for r in rows[-21:-1]) + 1, l, max(r[1] for r in rows[-21:-1]) + 0.9, 5_000_000)
+    assert "above_emas" in failed(run(ss.evaluate_squeeze, rows))
+
+
+def squeeze_signal():
+    return run(ss.evaluate_squeeze, squeeze_rows())
+
+
+def test_squeeze_checks_add_short_interest():
+    as_of = date(2026, 11, 17)
+    signal = squeeze_signal()
+    warnings = ss.squeeze_checks(signal, {"short_float": 0.31, "short_ratio": 6.5, "earnings": as_of + timedelta(days=4),
+                                          "earnings_text": "Nov 21 AMC"}, as_of, CFG)
+    assert signal["qualified"] and signal["score"] == 85 and sum(x["points"] for x in signal["scoring"]) == 100
+    assert warnings == ["earnings Nov 21 AMC in 4 days: gap risk both ways", "short float 31.0%, 6.5 days to cover"]
+    low = squeeze_signal()
+    ss.squeeze_checks(low, {"short_float": 0.08, "short_ratio": 9.0, "earnings": None, "earnings_text": None}, as_of, CFG)
+    assert not low["qualified"] and low["score"] is None and failed(low) == ["short_interest"]
+    unknown = squeeze_signal()
+    ss.squeeze_checks(unknown, None, as_of, CFG)
+    assert not unknown["qualified"] and "quote page not loaded" in unknown["checks"][-1]["detail"]
+
+
+def test_squeeze_actions_and_horizon():
+    assert ss.action_for("long", "bearish", None, "squeeze") == "countertrend_watch"
+    assert ss.action_for("long", "bearish", None, "breakout") == "no_trade"
+    assert ss.action_for("long", "bullish", "down", "squeeze") == "watch" and ss.action_for("long", "bullish", "up", "squeeze") == "long"
+    assert ss.STRATEGY_GROUPS["long"] == ("pullback", "breakout", "squeeze") and ss.STRATEGY_GROUPS["both"] == ("pullback", "breakout")
+
+
 # ---------------------------------------------------------------- SHORT strategies
 
 
@@ -489,17 +559,57 @@ def test_short_track_open_and_breakout_fill_unchanged():
     assert (long_out["outcome"], long_out["fill"], long_out["r"]) == ("target", 10, 2.0)
 
 
-def test_short_validation_and_tracking_use_the_short_horizon():
-    rows = rally_rows() + [(153.6, 153.9, 153.2, 153.5, 1_000_000)] * 22  # fills the sell stop, then goes nowhere
-    t = len(rows) - 23
+def test_short_validation_and_tracking_hold_for_the_swing_period():
+    rows = rally_rows() + [(153.6, 153.9, 153.2, 153.5, 1_000_000)] * 50  # fills the sell stop, then goes nowhere
+    t = len(rows) - 51
     bars = make_bars(rows)
-    series = ss.compute(bars, {}, CFG)
-    trades, _, _ = ss.validate(bars, series, ["rally_rejection"], 25, CFG)
+    series = ss.compute(bars, {}, CFG)  # no beta benchmark: the midpoint of 30-45
+    trades, _, _ = ss.validate(bars, series, ["rally_rejection"], 60, CFG)
     trade = [x for x in trades if x["signal_date"] == bars.dates[t].isoformat()][0]
-    assert trade["direction"] == "short" and trade["outcome"] == "timeout" and trade["bars_held"] == CFG["short_validation_horizon"]
-    tracked = ss.track_signals(bars, series, ["rally_rejection"], 25, CFG, {bars.dates[t]: "bearish"})
+    assert trade["direction"] == "short" and trade["outcome"] == "timeout" and trade["bars_held"] == 38
+    assert trade["holding_days"] == 38 and trade["beta"] is None
+    tracked = ss.track_signals(bars, series, ["rally_rejection"], 60, CFG, {bars.dates[t]: "bearish"})
     first = [x for x in tracked if x["signal_date"] == bars.dates[t].isoformat()][0]
     assert first["action"] == "short" and first["status"] == "time_exit" and first["direction"] == "short" and first["fill"] == 153.39
+    assert first["holding_days"] == 38 and first["bars_held"] == 38
+
+
+def beta_pair(beta, n=300):
+    """Benchmark closes by date and stock bars whose daily returns are exactly beta times the benchmark's."""
+    days = sessions(n)
+    bench, stock = [100.0], [50.0]
+    for i in range(1, n):
+        r = 0.01 * math.sin(i * 1.7) + 0.004 * math.cos(i * 0.3)
+        bench.append(bench[-1] * (1 + r))
+        stock.append(stock[-1] * (1 + beta * r))
+    return dict(zip(days, bench)), make_bars([(c, c, c, c, 1) for c in stock])
+
+
+@pytest.mark.parametrize("beta, days", [(0.6, 45), (1.0, 45), (1.4, 39), (1.6, 36), (2.0, 30), (3.1, 30)])
+def test_beta_sets_the_holding_period(beta, days):
+    closes, bars = beta_pair(beta)
+    series = ss.compute(bars, {}, CFG, closes)
+    assert series["beta"][58] is None and series["beta"][-1] == pytest.approx(beta)
+    assert ss.holding_days(series["beta"][-1], CFG) == days == ss.horizon_for(CFG, series, len(bars) - 1)
+
+
+def test_holding_days_settings_and_dates():
+    assert ss.holding_days(None, CFG) == 38
+    same = ss.settings_with_defaults({"swing_min_days": 21, "swing_max_days": 32, "beta_low": 0.8, "beta_high": 1.6})
+    assert ss.holding_days(0.5, same) == 32 and ss.holding_days(1.2, same) == 26 and ss.holding_days(2, same) == 21
+    with pytest.raises(ValueError, match="swing_min_days"):
+        ss.settings_with_defaults({"swing_min_days": 50})
+    assert ss.add_sessions(date(2026, 11, 13), 1) == date(2026, 11, 16)  # Friday + 1 session = Monday
+    assert ss.add_sessions(date(2026, 11, 17), 30) == date(2026, 12, 29)
+    rule = ss.holding_rule(CFG)
+    assert rule["beta_vs"] == "SPY" and "45 at beta <= 1, 30 at beta >= 2" in rule["rule"]
+
+
+def test_rolling_beta_skips_missing_benchmark_dates():
+    closes, bars = beta_pair(1.5)
+    del closes[bars.dates[150]]
+    beta = ss.rolling_beta(bars, closes, 252)
+    assert beta[-1] == pytest.approx(1.5, rel=0.05) and ss.rolling_beta(bars, {}, 252)[-1] is None
 
 
 def test_action_for_regime_and_sector():
@@ -658,7 +768,7 @@ def test_simulate_mae_and_mfe():
 def test_validate_walks_forward_without_overlap():
     rows = breakout_rows() + [(192 + i, 193.5 + i, 191.5 + i, 193 + i, 1_000_000) for i in range(25)]
     bars = make_bars(rows)
-    trades, signals, base = ss.validate(bars, ss.compute(bars, {}, CFG), ["breakout"], 40, CFG)
+    trades, signals, base = ss.validate(bars, ss.compute(bars, {}, CFG20), ["breakout"], 40, CFG20)
     assert [t["signal_date"] for t in trades] == [bars.dates[300].isoformat()]
     assert trades[0]["outcome"] == "target" and trades[0]["fill"] == 192 and trades[0]["regime"] == "unknown"
     assert trades[0]["earnings"] == {"known": False}
@@ -696,7 +806,7 @@ def test_overlapping_signals_are_flagged():
     original = ss.EVALUATORS["breakout"]
     ss.EVALUATORS["breakout"] = fake
     try:
-        _, signals, _ = ss.validate(bars, ss.compute(bars, {}, CFG), ["breakout"], 60, CFG)
+        _, signals, _ = ss.validate(bars, ss.compute(bars, {}, CFG20), ["breakout"], 60, CFG20)
     finally:
         ss.EVALUATORS["breakout"] = original
     assert [s["overlaps"] for s in signals] == [False, True, False]
@@ -895,10 +1005,24 @@ def test_discover_tickers_and_finviz(monkeypatch):
     assert seen["rows"] == 2
 
 
+def test_discover_merges_several_finviz_urls(monkeypatch):
+    lists = {"a": [{"Ticker": "AAA", "Sector": "Technology"}, {"Ticker": "BBB", "Sector": "Energy"}, {"Ticker": "XXX"}],
+             "b": [{"Ticker": "BBB", "Sector": "Energy"}, {"Ticker": "CCC", "Sector": "Healthcare"}]}
+    monkeypatch.setattr(ss.Screener, "init_from_url", lambda url, rows=None: iter(lists[url[-1]]))
+    urls = "https://finviz.com/screener.ashx?v=111&f=cap_midover,sh_price_o5&o=a\n  https://finviz.com/screener.ashx?f=sh_short_o15&o=b\n"
+    names, source, sectors = ss.discover(urls, "", 2)
+    assert names == ["AAA", "BBB", "CCC"] and source == "finviz"  # 2 from each, duplicates dropped, commas inside URLs kept
+    assert sectors == {"AAA": "Technology", "BBB": "Energy", "CCC": "Healthcare"}
+    with pytest.raises(ValueError, match="at most 3"):
+        ss.discover(" ".join(["https://finviz.com/screener.ashx"] * 4), "", 2)
+    with pytest.raises(ValueError, match="evil"):
+        ss.discover("https://finviz.com/screener.ashx https://evil.example/x", "", 2)
+
+
 @pytest.fixture
 def offline(monkeypatch):
     rows = {"PULL": pullback_rows(), "BRK": breakout_rows(), "QQQ": uptrend(301, 300, 0.1),
-            "RALY": downtrend(3, 301.5) + rally_rows(), "BRKD": breakdown_rows()}
+            "RALY": downtrend(3, 301.5) + rally_rows(), "BRKD": breakdown_rows(), "SQZ": squeeze_rows(), "SQLO": squeeze_rows()}
     rows["PULL"] = uptrend(4) + rows["PULL"]  # same length as the others
     for k, etf in enumerate(ss.DEFAULTS["context_etfs"]):
         rows[etf] = uptrend(301, 400 + k, 0.2 if etf != "IWM" else -0.05)
@@ -928,7 +1052,7 @@ def offline(monkeypatch):
     monkeypatch.setattr(ss, "fetch_sector", sector)
 
     def snapshot(ticker, today):
-        if ticker == "BRKD":
+        if ticker in ("BRKD", "SQLO"):
             return {"earnings": today + timedelta(days=3), "earnings_text": "soon", "short_float": 0.05, "short_ratio": 1.0}
         return {"earnings": today - timedelta(days=20), "earnings_text": "past", "short_float": 0.25, "short_ratio": 2.0}
 
@@ -943,6 +1067,7 @@ def test_main_returns_structured_results(offline, capsys):
     result = ss.main(tickers="PULL,BRK,NOPE")
     assert [q["ticker"] for q in result["results"]["pullback"]["qualified"]] == ["PULL"]
     assert [q["ticker"] for q in result["results"]["breakout"]["qualified"]] == ["BRK"]
+    assert [q["ticker"] for q in result["results"]["squeeze"]["qualified"]] == ["BRK"]  # the breakout bar, short float 25%
     assert {r["ticker"] for r in result["results"]["pullback"]["rejected"]} == {"BRK"}
     assert all(r["failed"] for r in result["results"]["breakout"]["rejected"])
     assert result["data_errors"] == [{"ticker": "NOPE", "reason": "chart data is for another ticker"}]
@@ -960,15 +1085,37 @@ def test_main_returns_structured_results(offline, capsys):
     assert brk["sector"] is None and brk["relative_strength"]["sector"] == {"benchmark": None, "change": None}
     tracking = result["tracking"]
     assert tracking["days"] == 10 and set(tracking["summary"]) == set(ss.STRATEGIES) and isinstance(tracking["signals"], list)
-    assert tracking["horizon_bars"] == {"pullback": 20, "breakout": 20, "rally_rejection": 10, "breakdown": 10}
+    assert tracking["holding_days"]["min"] == 30 and tracking["holding_days"]["max"] == 45 and result["holding"]["beta_vs"] == "SPY"
+    assert all(q["holding_days"] == ss.holding_days(q["beta"], result["settings"]) for s in ss.STRATEGIES for q in result["results"][s]["qualified"])
+    assert result["candidates"][0]["time_exit"] == ss.add_sessions(date.fromisoformat(result["as_of"]), result["candidates"][0]["holding_days"]).isoformat()
     assert "Summary: 3 tickers, 1 data errors, regime bullish, qualified: pullback 1, breakout 1" in capsys.readouterr().out
-    assert market["actions"] == {"pullback": "long", "breakout": "long", "rally_rejection": "countertrend_watch", "breakdown": "countertrend_watch"}
-    assert market["favoured"] == ["pullback", "breakout"] and market["short_setups"] == "countertrend_watch"
-    assert set(market["context"]) == {"SPY", "IWM", "SMH"} and market["context"]["SPY"]["trend"] == "up"
+    assert market["actions"] == {"pullback": "long", "breakout": "long", "squeeze": "long",
+                                 "rally_rejection": "countertrend_watch", "breakdown": "countertrend_watch"}
+    assert market["favoured"] == ["pullback", "breakout", "squeeze"] and market["short_setups"] == "countertrend_watch"
+    assert set(market["context"]) == {"SPY", "IWM", "MDY", "SMH", "TLT", "HYG"} and market["context"]["TLT"]["trend"] == "up"
     assert market["benchmark"]["trend"] == "up" and market["benchmark"]["vs_sma200"] > 0 and market["benchmark"]["rsi14"] is not None
     assert market["sector_laggards"][0] == "XLE" and len(market["sector_leaders"]) == 3
-    assert [c["ticker"] for c in result["candidates"]] == ["BRK", "PULL"] and result["candidates"][0]["action"] == "long"
+    assert [(c["ticker"], c["strategy"]) for c in result["candidates"]] == [("BRK", "breakout"), ("PULL", "pullback"), ("BRK", "squeeze")]
+    assert result["candidates"][0]["action"] == "long"
     assert "email" not in offline["_sent"] and offline["_sent"] == []
+
+
+def test_main_screens_squeeze_candidates(offline):
+    result = ss.main(tickers="SQZ,SQLO", strategy="squeeze", track_days=0)
+    (q,) = result["results"]["squeeze"]["qualified"]
+    assert q["ticker"] == "SQZ" and q["score"] == 75 and q["action"] == "long" and "short float 25.0%, 2.0 days to cover" in q["warnings"]
+    (r,) = result["results"]["squeeze"]["rejected"]
+    assert r["ticker"] == "SQLO" and [c["name"] for c in r["failed"]] == ["short_interest"]
+    assert [(c["ticker"], c["strategy"]) for c in result["candidates"]] == [("SQZ", "squeeze")]
+
+
+def test_tracked_squeeze_signals_need_short_float_today(offline):
+    for ticker in ("SQZ", "SQLO"):
+        offline[ticker] = offline[ticker] + [(186.5, 187.0, 186.0, 186.6, 1_000_000)] * 2
+    for name in [k for k in offline if k not in ("SQZ", "SQLO", "_sent")]:
+        offline[name] = offline[name] + [offline[name][-1]] * 2
+    tracked = ss.main(tickers="SQZ,SQLO", strategy="squeeze", track_days=5)["tracking"]["signals"]
+    assert [(x["ticker"], x["short_float_today"], x["status"]) for x in tracked] == [("SQZ", 0.25, "open")]
 
 
 def test_main_screens_short_setups(offline):
@@ -989,7 +1136,7 @@ def test_main_emails_candidates_only_when_asked(offline):
     (to, subject, html), = offline["_sent"]
     assert to == "trader@example.com" and result["email"] == {"to": "trader@example.com", "subject": subject}
     assert subject.startswith(f"Strategy screen {result['as_of']}: market bullish, 2 setups")
-    assert "PULL" in html and "RALY" in html and "Favoured: pullback, breakout" in html
+    assert "PULL" in html and "RALY" in html and "Favoured: pullback, breakout, squeeze" in html and "TLT " in html
     with pytest.raises(ValueError, match="email"):
         ss.main(tickers="PULL", email="not an address")
 
@@ -1002,7 +1149,7 @@ def test_email_html_without_candidates():
 
 
 def test_main_single_strategy_and_validation(offline):
-    result = ss.main(tickers="BRK", strategy="breakout", validation_days=20)
+    result = ss.main(tickers="BRK", strategy="breakout", validation_days=20, settings={"swing_min_days": 20, "swing_max_days": 20})
     assert list(result["results"]) == ["breakout"] and set(result["validation"]["summary"]) == {"breakout"}
     validation = result["validation"]
     assert validation["cost_scenarios_bps"] == [0, 10, 25, 50] and validation["forward_days"] == [5, 10, 20]

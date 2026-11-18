@@ -3,7 +3,8 @@
 #requests==2.34.2
 #wmill==1.866.0
 
-"""Four-strategy screener: LONG Pullback / EMA bounce and Breakout / momentum, SHORT Rally rejection and Breakdown.
+"""Strategy screener: LONG Pullback / EMA bounce and Breakout / momentum, SHORT Rally rejection and Breakdown,
+plus a Potential short squeeze watchlist (LONG).
 
 Finviz finds the candidates. Daily OHLCV comes from the Finviz chart endpoint
 (split adjusted, same host as the screener, no API key). Every indicator is
@@ -15,11 +16,14 @@ its sector ETF, the market regime (bullish / neutral / bearish from QQQ's trend 
 and its sector ETF's trend. They turn it into an action: long or short when the regime and sector agree,
 watch, countertrend_watch or no_trade otherwise. The regime never changes which setups qualify.
 `track_days` adds the status of the signals of the previous sessions (open, target, stopped, time exit,
-not triggered, skipped). The SHORT rules are untested hypotheses: validate before trading them.
+not triggered, skipped). Every setup is a 30-45 session swing: the time exit depends on the stock's beta vs SPY
+(higher beta, shorter hold). The SHORT and squeeze rules are untested hypotheses: validate before trading them.
+`finviz_url` takes one or more screener URLs (one per line), e.g. a large/mid-cap list and a high-short-float list.
 """
 
 import bisect
 import json
+from collections import deque
 import math
 import re
 import smtplib
@@ -39,11 +43,13 @@ CHART_URL = "https://finviz.com/api/quote"
 QUOTE_URL = "https://finviz.com/quote.ashx"
 USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
 TICKER = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
-STRATEGIES = ("pullback", "breakout", "rally_rejection", "breakdown")
-DIRECTIONS = {"pullback": "long", "breakout": "long", "rally_rejection": "short", "breakdown": "short"}
-ENTRY_TYPES = {"pullback": "stop", "breakout": "open", "rally_rejection": "stop", "breakdown": "stop"}
-STRATEGY_GROUPS = {"all": STRATEGIES, "long": ("pullback", "breakout"), "both": ("pullback", "breakout"),
+STRATEGIES = ("pullback", "breakout", "squeeze", "rally_rejection", "breakdown")
+DIRECTIONS = {"pullback": "long", "breakout": "long", "squeeze": "long", "rally_rejection": "short", "breakdown": "short"}
+ENTRY_TYPES = {"pullback": "stop", "breakout": "open", "squeeze": "open", "rally_rejection": "stop", "breakdown": "stop"}
+STRATEGY_GROUPS = {"all": STRATEGIES, "long": ("pullback", "breakout", "squeeze"), "both": ("pullback", "breakout"),
                    "short": ("rally_rejection", "breakdown")}
+MAX_URLS = 3
+BETA_BENCHMARK = "SPY"  # beta is measured against the S&P 500, like Finviz; QQQ if SPY is not loaded
 SMTP_RESOURCE = "f/screener/smtp"
 # A daily bar counts as final this long after the 16:00 New York close (Finviz free data is delayed).
 SESSION_FINAL_AFTER = (16, 20)
@@ -57,7 +63,10 @@ SECTOR_ETFS = {"Technology": "XLK", "Financial": "XLF", "Healthcare": "XLV", "In
 # What a LONG setup means in each market regime. Short setups are not screened yet.
 ACTIONS = {"bullish": "long", "neutral": "watch", "bearish": "no_trade", "unknown": "watch"}
 SHORT_ACTIONS = {"bullish": "countertrend_watch", "neutral": "watch", "bearish": "short", "unknown": "watch"}
+# Squeezes also happen in bear-market rallies, so a bearish regime makes them countertrend, not forbidden.
+SQUEEZE_ACTIONS = {"bullish": "long", "neutral": "watch", "bearish": "countertrend_watch", "unknown": "watch"}
 ACTIONS_BY_DIRECTION = {"long": ACTIONS, "short": SHORT_ACTIONS}
+ACTIONS_BY_STRATEGY = {"squeeze": SQUEEZE_ACTIONS}
 ACTION_ORDER = {"long": 0, "short": 0, "watch": 1, "countertrend_watch": 2, "no_trade": 3}
 
 DEFAULTS = {
@@ -104,15 +113,30 @@ DEFAULTS = {
     "breakdown_min_rsi": 25.0,
     "breakdown_stop_atr": 0.5,
     "breakdown_min_rr": 2.0,
+    # Potential short squeeze (LONG, hypothesis): price trigger here, short interest live only
+    "squeeze_lookback": 20,
+    "squeeze_min_rel_volume": 2.0,
+    "squeeze_close_location": 0.6,
+    "squeeze_max_extension_atr": 3.0,
+    "squeeze_max_rsi": 80.0,
+    "squeeze_stop_atr": 0.2,
+    "squeeze_target_r": 2.0,
+    "squeeze_min_short_float": 0.15,
     # Market regime: QQQ vs its SMA200 and the SMA200 slope, plus breadth = share of sector ETFs above their SMA200
     "regime_slope_bars": 20,
     "breadth_bullish": 0.6,
     "breadth_bearish": 0.4,
     # Market overview only: trend of these ETFs next to QQQ
-    "context_etfs": ["SPY", "IWM", "SMH"],
+    # SPY/IWM: broad and small-cap market, SMH: semis, MDY: mid caps, TLT: long Treasuries, HYG: high-yield credit
+    "context_etfs": ["SPY", "IWM", "MDY", "SMH", "TLT", "HYG"],
     # Validation and tracking: bars from the fill, LONG and SHORT
-    "validation_horizon": 20,
-    "short_validation_horizon": 10,
+    # Swing holding period in sessions: swing_max_days for beta <= beta_low, swing_min_days for beta >= beta_high,
+    # linear in between; the midpoint when beta is unknown. Trades not stopped or at target exit at that close.
+    "swing_min_days": 30,
+    "swing_max_days": 45,
+    "beta_low": 1.0,
+    "beta_high": 2.0,
+    "beta_lookback": 252,
     "request_pause": 0.4,
 }
 
@@ -364,7 +388,47 @@ def swing_lows(low, k):
     return [k <= p < n - k and low[p] == min(low[p - k:p + k + 1]) for p in range(n)]
 
 
-def compute(bars, benchmarks, cfg):
+def rolling_beta(bars, benchmark, lookback):
+    """Beta of daily returns vs the benchmark closes (a date -> close dict) over the last `lookback` return pairs up to
+    each bar; None before 60 pairs. Returns are taken between consecutive dates that both have prices."""
+    out, pairs = [None] * len(bars), deque()
+    sx = sy = sxx = sxy = 0.0
+    previous = None
+    for i, (d, c) in enumerate(zip(bars.dates, bars.close)):
+        b = benchmark.get(d)
+        if b and c and c > 0:
+            if previous:
+                x, y = b / previous[1] - 1, c / previous[0] - 1
+                pairs.append((x, y))
+                sx, sy, sxx, sxy = sx + x, sy + y, sxx + x * x, sxy + x * y
+                if len(pairs) > lookback:
+                    x, y = pairs.popleft()
+                    sx, sy, sxx, sxy = sx - x, sy - y, sxx - x * x, sxy - x * y
+            previous = (c, b)
+        n = len(pairs)
+        if n >= 60:
+            variance = sxx / n - (sx / n) ** 2
+            if variance > 1e-12:
+                out[i] = (sxy / n - sx * sy / n / n) / variance
+    return out
+
+
+def holding_days(beta, cfg):
+    """Sessions to hold a swing: swing_max_days at beta <= beta_low, swing_min_days at beta >= beta_high, linear between."""
+    low, high = cfg["swing_min_days"], cfg["swing_max_days"]
+    if beta is None:
+        return round((low + high) / 2)
+    span = cfg["beta_high"] - cfg["beta_low"]
+    share = min(1.0, max(0.0, (beta - cfg["beta_low"]) / span)) if span > 0 else float(beta >= cfg["beta_low"])
+    return int(round(high - share * (high - low)))
+
+
+def _beta_at(series, t):
+    values = series.get("beta")
+    return values[t] if values and t < len(values) else None
+
+
+def compute(bars, benchmarks, cfg, beta_closes=None):
     series = {
         "ema20": ema(bars.close, 20),
         "ema50": ema(bars.close, 50),
@@ -377,6 +441,7 @@ def compute(bars, benchmarks, cfg):
     }
     for name, closes in benchmarks.items():
         series[f"rs_line_{name}"], series[f"rs_{name}"] = relative_strength(bars, closes, cfg["rs_lookback"])
+    series["beta"] = rolling_beta(bars, beta_closes, cfg["beta_lookback"]) if beta_closes else [None] * len(bars)
     return series
 
 
@@ -724,7 +789,58 @@ def evaluate_breakdown(bars, series, t, cfg):
     return result
 
 
-EVALUATORS = {"pullback": evaluate_pullback, "breakout": evaluate_breakout,
+# ---------------------------------------------------------------- Potential short squeeze (LONG, hypothesis, not validated)
+
+
+def evaluate_squeeze(bars, series, t, cfg):
+    """Price part of a potential short squeeze: a breakout above the 20-day high on heavy volume with a strong close,
+    above EMA20 and EMA50, not yet extended. No uptrend is required: squeezes often start in beaten-down stocks.
+
+    Short interest (short float, days to cover) is only known for today, so squeeze_checks adds it live; validation and
+    backtests can only test this price trigger. Entry at the next open, stop under the signal bar, target squeeze_target_r."""
+    checks, scores = [], []
+    ctx = _context(bars, series, t, cfg)
+    if ctx is None:
+        _check(checks, "history", False, "not enough history for EMA50, SMA200 and ATR14")
+        return _result("squeeze", bars, t, checks, scores, None, None)
+    o, h, l, c, v = bars.open, bars.high, bars.low, bars.close, bars.volume
+    a, e20, e50 = ctx["atr14"], ctx["ema20"], ctx["ema50"]
+    lookback = cfg["squeeze_lookback"]
+    _liquidity(checks, ctx, cfg)
+    level, previous_level = max(h[t - lookback:t]), max(h[t - 1 - lookback:t - 1])
+    _check(checks, "range_breakout", c[t] > level and c[t - 1] <= previous_level,
+           f"close {c[t]:.2f} vs {lookback}-day high {level:.2f}; previous close {c[t - 1]:.2f} vs {previous_level:.2f}")
+    _check(checks, "above_emas", c[t] > e20 and c[t] > e50, f"close {c[t]:.2f}, EMA20 {e20:.2f}, EMA50 {e50:.2f}")
+    rel_volume = v[t] / ctx["volume_avg50"] if ctx["volume_avg50"] else 0.0
+    ctx["rel_volume"] = rel_volume
+    _check(checks, "volume", rel_volume >= cfg["squeeze_min_rel_volume"],
+           f"relative volume {rel_volume:.2f}, minimum {cfg['squeeze_min_rel_volume']:g}")
+    span = h[t] - l[t]
+    location = (c[t] - l[t]) / span if span > 0 else 0.0
+    _check(checks, "strong_close", location >= cfg["squeeze_close_location"],
+           f"close at {location:.0%} of the day's range, minimum {cfg['squeeze_close_location']:.0%}")
+    extension = (c[t] - e20) / a
+    _check(checks, "not_extended", extension <= cfg["squeeze_max_extension_atr"] and ctx["rsi14"] <= cfg["squeeze_max_rsi"],
+           f"{extension:.2f} ATR above EMA20 (maximum {cfg['squeeze_max_extension_atr']:g}), RSI14 {ctx['rsi14']:.1f} (maximum {cfg['squeeze_max_rsi']:g})")
+    entry = c[t]
+    stop = l[t] - cfg["squeeze_stop_atr"] * a
+    risk = entry - stop
+    levels = _levels(entry, stop, entry + cfg["squeeze_target_r"] * risk)
+    levels["breakout_level"] = round(level, 2)
+    _check(checks, "risk_size", 0 < risk <= cfg["max_risk_atr"] * a, f"risk {risk:.2f} = {risk / a:.2f} ATR, maximum {cfg['max_risk_atr']:g}")
+    year_high = max(h[t - 251:t + 1])
+    drawdown = min(l[t - 62:t + 1]) / year_high - 1
+    ctx["low_vs_52w_high"] = drawdown
+    # 60 points from price here; squeeze_checks adds 40 from short interest.
+    _points(scores, "heavy_volume", 15, rel_volume >= 3, f"relative volume {rel_volume:.2f}, best 3 or more")
+    _rs_score(scores, series, t, cfg, (10, 5))
+    _points(scores, "gap_up", 10, o[t] > h[t - 1], f"open {o[t]:.2f} vs previous high {h[t - 1]:.2f}")
+    _points(scores, "beaten_down", 10, drawdown <= -0.2, f"3-month low {drawdown:+.0%} vs the 52-week high {year_high:.2f}, best -20% or lower")
+    _points(scores, "room_to_52w_high", 10, year_high >= levels["target"], f"52-week high {year_high:.2f} vs target {levels['target']:.2f}")
+    return _with_rs(_result("squeeze", bars, t, checks, scores, levels, ctx), series, t, cfg)
+
+
+EVALUATORS = {"pullback": evaluate_pullback, "breakout": evaluate_breakout, "squeeze": evaluate_squeeze,
               "rally_rejection": evaluate_rally_rejection, "breakdown": evaluate_breakdown}
 
 
@@ -737,7 +853,7 @@ EVALUATORS = {"pullback": evaluate_pullback, "breakout": evaluate_breakout,
 # - Each bar is handled in time order: first its open, then its range. An open at or beyond
 #   the stop or target exits at that open. Inside a bar the order of high and low is unknown,
 #   so when both the stop and the target are inside the range, the stop counts.
-# - Trades still open after `validation_horizon` bars exit at that bar's close.
+# - Trades still open after their holding period (30-45 sessions by beta, see holding_days) exit at that bar's close.
 # - One trade per ticker and strategy at a time. Trades of different tickers overlap freely and
 #   each risks 1R, so drawdown is a sum over concurrent trades, not a portfolio simulation.
 # - Costs are a round trip in basis points of the fill price, converted to R per trade.
@@ -756,6 +872,7 @@ ASSUMPTIONS = [
     "Forward returns run from the next open (the first possible fill) to the close k sessions after the signal, and are computed only for signals with k bars of future data. They include overlapping signals; a non-overlapping subset is reported too.",
     "Selection bias: the tickers come from today's Finviz screen, so every one of them exists and passed today's filters. Survivorship bias: delisted and acquired stocks are missing. Both make past results look better than a real-time run would have been.",
     "Earnings dates come from the Finviz quote page and are the actual report times as Finviz shows them today, not the dates that were scheduled at the time.",
+    "Squeeze: there is no history of short interest, so validation tests only its price trigger (on every ticker, whatever its short float). Live, a squeeze also needs today's short float; tracked squeeze signals are kept only for tickers whose short float today meets the minimum, a proxy.",
 ]
 
 
@@ -811,8 +928,9 @@ def _unmirror(result, sign):
     return result if sign == 1 else {k: (-v if k in PRICE_KEYS and v is not None else v) for k, v in result.items()}
 
 
-def horizon_for(cfg, strategy):
-    return cfg["short_validation_horizon"] if DIRECTIONS[strategy] == "short" else cfg["validation_horizon"]
+def horizon_for(cfg, series, t):
+    """Holding period of a signal on bar t, from the stock's beta at t (no later data)."""
+    return holding_days(_beta_at(series, t), cfg)
 
 
 def _walk(bars, i, fill, stop, target, end):
@@ -912,7 +1030,7 @@ def track_signals(bars, series, strategies, days, cfg, regime=None, sector_trend
     regime, sector_trend = regime or {}, sector_trend or {}
     out = []
     for strategy in strategies:
-        horizon, direction = horizon_for(cfg, strategy), DIRECTIONS[strategy]
+        direction = DIRECTIONS[strategy]
         busy_until = -1
         for t in range(max(cfg["min_bars"] - 1, last - days), last):
             if t <= busy_until:
@@ -920,12 +1038,13 @@ def track_signals(bars, series, strategies, days, cfg, regime=None, sector_trend
             signal = EVALUATORS[strategy](bars, series, t, cfg)
             if not signal["qualified"]:
                 continue
+            horizon = horizon_for(cfg, series, t)
             status = track(bars, t, signal, horizon)
             label = regime.get(bars.dates[t], "unknown")
             trend = sector_trend.get(bars.dates[t])
             out.append({"strategy": strategy, "direction": direction, "ticker": bars.ticker, "signal_date": signal["signal_date"],
-                        "score": signal["score"], "regime": label, "sector_trend": trend, "action": action_for(direction, label, trend),
-                        **signal["levels"], **status})
+                        "score": signal["score"], "regime": label, "sector_trend": trend, "action": action_for(direction, label, trend, strategy),
+                        "holding_days": horizon, **signal["levels"], **status})
             if status["status"] not in ("not_triggered", "skipped"):
                 busy_until = t + status["bars_held"]
     return out
@@ -940,10 +1059,15 @@ def tracking_summary(rows):
             if any(x["status"] == "open" for x in rows) else None}
 
 
-def action_for(direction, regime_label, sector_trend=None):
+def actions_table(strategy):
+    return ACTIONS_BY_STRATEGY.get(strategy) or ACTIONS_BY_DIRECTION[DIRECTIONS[strategy]]
+
+
+def action_for(direction, regime_label, sector_trend=None, strategy=None):
     """What to do with a qualified setup. The market regime decides; a sector ETF trending against the trade turns
     long/short into watch. Nothing here changes qualification."""
-    action = ACTIONS_BY_DIRECTION[direction].get(regime_label, "watch")
+    table = actions_table(strategy) if strategy else ACTIONS_BY_DIRECTION[direction]
+    action = table.get(regime_label, "watch")
     if (action == "long" and sector_trend == "down") or (action == "short" and sector_trend == "up"):
         return "watch"
     return action
@@ -1028,7 +1152,7 @@ def market_summary(name, bars, breadth_by_date, regime, sector_bars, cfg, contex
                      "trend": snap["trend"], "change_63d": snap["change_63d"]}
     ranked = sorted((x for x in etfs.items() if x[1]["change_63d"] is not None), key=lambda x: -x[1]["change_63d"])
     label = regime.get(d, "unknown")
-    actions = {s: ACTIONS_BY_DIRECTION[DIRECTIONS[s]][label] for s in STRATEGIES}
+    actions = {s: actions_table(s)[label] for s in STRATEGIES}
     return {"as_of": d.isoformat(), "regime": label, "long_setups": ACTIONS[label], "short_setups": SHORT_ACTIONS[label],
             "actions": actions,
             "favoured": [s for s in STRATEGIES if actions[s] in ("long", "short")],
@@ -1038,7 +1162,8 @@ def market_summary(name, bars, breadth_by_date, regime, sector_bars, cfg, contex
             "sector_leaders": [k for k, _ in ranked[:3]], "sector_laggards": [k for k, _ in ranked[::-1][:3]],
             "rules": "bullish: benchmark above a rising SMA200 and breadth >= {:g}; bearish: below the SMA200 and the SMA200 falling or "
                      "breadth <= {:g}; otherwise neutral. LONG setups: bullish -> long, neutral -> watch, bearish -> no_trade. "
-                     "SHORT setups: bearish -> short, neutral -> watch, bullish -> countertrend_watch. A sector ETF trending against "
+                     "SHORT setups: bearish -> short, neutral -> watch, bullish -> countertrend_watch. Squeeze: bullish -> long, neutral -> watch, "
+                     "bearish -> countertrend_watch. Bonds (TLT, HYG) are context only, not part of the rules. A sector ETF trending against "
                      "the trade turns long/short into watch.".format(cfg["breadth_bullish"], cfg["breadth_bearish"])}
 
 
@@ -1088,13 +1213,12 @@ def validate(bars, series, strategies, days, cfg, market=None, earnings=None):
 
     Returns the trades (one open trade per ticker and strategy), every qualified signal with its
     forward returns, and the forward returns of every day in the window (the base rate)."""
-    last = len(bars) - 1 - max([horizon_for(cfg, s) for s in strategies] + [max(FORWARD_DAYS)])
+    last = len(bars) - 1 - max(cfg["swing_max_days"], max(FORWARD_DAYS))
     window = range(max(cfg["min_bars"] - 1, last - days), last)
     base = [forward_returns(bars, t, market) for t in window]
     trades, signals = [], []
     regime = (market or {}).get("regime", {})
     for strategy in strategies:
-        horizon = horizon_for(cfg, strategy)
         busy_until, previous = -1, None
         for t in window:
             signal = EVALUATORS[strategy](bars, series, t, cfg)
@@ -1105,9 +1229,12 @@ def validate(bars, series, strategies, days, cfg, market=None, earnings=None):
             previous = t
             if t <= busy_until:
                 continue
+            horizon = horizon_for(cfg, series, t)
             outcome = simulate(bars, t, signal, horizon)
+            beta = _beta_at(series, t)
             trade = {"ticker": bars.ticker, "strategy": strategy, "direction": DIRECTIONS[strategy], "signal_date": signal["signal_date"], "score": signal["score"],
-                     "regime": regime.get(bars.dates[t], "unknown"), **signal["levels"], **outcome}
+                     "regime": regime.get(bars.dates[t], "unknown"), "beta": None if beta is None else round(beta, 2), "holding_days": horizon,
+                     **signal["levels"], **outcome}
             if "r" in outcome:
                 trade["earnings"] = earnings_flags(trade, earnings)
                 busy_until = t + outcome["bars_held"]
@@ -1208,12 +1335,14 @@ def settings_with_defaults(settings):
         elif isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
             raise ValueError(f"setting {key} must be a number of 0 or more")
         cfg[key] = value
-    for key in ("min_bars", "breakout_lookback", "min_base_bars", "min_touches", "validation_horizon", "rs_lookback", "regime_slope_bars",
-                "rally_min_bars", "breakdown_lookback", "short_validation_horizon"):
+    for key in ("min_bars", "breakout_lookback", "min_base_bars", "min_touches", "rs_lookback", "regime_slope_bars",
+                "rally_min_bars", "breakdown_lookback", "squeeze_lookback", "swing_min_days", "swing_max_days", "beta_lookback"):
         cfg[key] = int(cfg[key])
         if cfg[key] < 1:
             raise ValueError(f"setting {key} must be 1 or more")
     cfg["earnings_block_days"] = int(cfg["earnings_block_days"])
+    if cfg["swing_min_days"] > cfg["swing_max_days"]:
+        raise ValueError("swing_min_days must not be above swing_max_days")
     cfg["min_bars"] = max(cfg["min_bars"], 253, cfg["breakout_lookback"] + 2, cfg["breakdown_lookback"] + 2)
     return cfg
 
@@ -1225,16 +1354,23 @@ def discover(finviz_url, tickers, max_tickers):
         if bad:
             raise ValueError(f"not tickers: {', '.join(bad)}")
         return list(dict.fromkeys(names))[:max_tickers], "tickers", {}
-    url = urlparse(finviz_url)
-    if url.scheme != "https" or url.hostname not in FINVIZ_HOSTS:
-        raise ValueError(f"not a Finviz screener URL: {finviz_url}")
-    try:
-        rows = list(Screener.init_from_url(finviz_url, rows=max_tickers))
-    except NoResults:
-        rows = []
-    rows = [r for r in rows if TICKER.match(r.get("Ticker", ""))]
-    sectors = {r["Ticker"]: r["Sector"] for r in rows if r.get("Sector") in SECTOR_ETFS}
-    return list(dict.fromkeys(r["Ticker"] for r in rows))[:max_tickers], "finviz", sectors
+    urls = finviz_url.split()
+    if len(urls) > MAX_URLS:
+        raise ValueError(f"at most {MAX_URLS} Finviz URLs, one per line")
+    for address in urls:
+        url = urlparse(address)
+        if url.scheme != "https" or url.hostname not in FINVIZ_HOSTS:
+            raise ValueError(f"not a Finviz screener URL: {address}")
+    names, sectors = [], {}
+    for address in urls:  # up to max_tickers from each URL, in order, without duplicates
+        try:
+            rows = list(Screener.init_from_url(address, rows=max_tickers))
+        except NoResults:
+            rows = []
+        rows = [r for r in rows if TICKER.match(r.get("Ticker", ""))][:max_tickers]
+        sectors.update({r["Ticker"]: r["Sector"] for r in rows if r.get("Sector") in SECTOR_ETFS})
+        names += [r["Ticker"] for r in rows]
+    return list(dict.fromkeys(names)), "finviz", sectors
 
 
 EMAIL = re.compile(r"^[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+$")
@@ -1261,9 +1397,54 @@ def short_checks(signal, snapshot, as_of, cfg):
     return warnings
 
 
+def squeeze_checks(signal, snapshot, as_of, cfg):
+    """Live-only squeeze checks from today's quote page: short float at least squeeze_min_short_float (required), points for
+    a high short float and many days to cover, and an earnings warning. Recomputes the score."""
+    warnings = []
+    short_float = (snapshot or {}).get("short_float")
+    ratio = (snapshot or {}).get("short_ratio")
+    if snapshot is None:
+        detail = "short float unknown (quote page not loaded)"
+    elif short_float is None:
+        detail = "short float not shown on the quote page"
+    else:
+        detail = f"short float {short_float:.1%}, minimum {cfg['squeeze_min_short_float']:.0%}"
+    _check(signal["checks"], "short_interest", short_float is not None and short_float >= cfg["squeeze_min_short_float"], detail)
+    _points(signal["scoring"], "short_float_25", 20, short_float is not None and short_float >= 0.25,
+            f"short float {'-' if short_float is None else f'{short_float:.1%}'}, best 25% or more")
+    _points(signal["scoring"], "days_to_cover_5", 20, ratio is not None and ratio >= 5,
+            f"{'-' if ratio is None else f'{ratio:.1f}'} days to cover, best 5 or more")
+    earnings = (snapshot or {}).get("earnings")
+    if earnings is not None and 0 <= (earnings - as_of).days <= cfg["earnings_block_days"]:
+        warnings.append(f"earnings {snapshot['earnings_text']} in {(earnings - as_of).days} days: gap risk both ways")
+    elif snapshot is not None and earnings is None:
+        warnings.append("next earnings date unknown")
+    if short_float is not None:
+        warnings.append(f"short float {short_float:.1%}" + ("" if ratio is None else f", {ratio:.1f} days to cover"))
+    signal["qualified"] = all(c["passed"] for c in signal["checks"])
+    signal["score"] = sum(x["earned"] for x in signal["scoring"]) if signal["qualified"] else None
+    return warnings
+
+
+def add_sessions(day, n):
+    """day + n weekdays: an estimate of a future session date (market holidays are not known here)."""
+    while n > 0:
+        day += timedelta(days=1)
+        n -= day.weekday() < 5
+    return day
+
+
+def holding_rule(cfg, beta_vs=BETA_BENCHMARK):
+    return {"min": cfg["swing_min_days"], "max": cfg["swing_max_days"], "beta_low": cfg["beta_low"], "beta_high": cfg["beta_high"],
+            "beta_vs": beta_vs,
+            "rule": f"sessions to hold: {cfg['swing_max_days']} at beta <= {cfg['beta_low']:g}, {cfg['swing_min_days']} at beta >= "
+                    f"{cfg['beta_high']:g}, linear in between, {holding_days(None, cfg)} if beta is unknown; then exit at the close"}
+
+
 def candidate_row(strategy, q):
     levels = q["levels"]
     return {"ticker": q["ticker"], "strategy": strategy, "direction": q["direction"], "action": q["action"], "score": q["score"],
+            "beta": q["beta"], "holding_days": q["holding_days"], "time_exit": q["time_exit"],
             "entry": levels["entry"], "stop": levels["stop"], "target": levels["target"], "reward_risk": levels["reward_risk"],
             "sector": q["sector"], "sector_trend": q["sector_trend"], "warnings": q["warnings"]}
 
@@ -1275,16 +1456,21 @@ def email_html(result):
     parts = [f"<p><b>Market {escape(m['regime'])}</b> ({escape(b['ticker'])} {b['close']}, {pct(b['vs_sma200'])} vs SMA200, "
              f"20 days {pct(b['change_20d'])}; {m['breadth']['above_sma200']} of {m['breadth']['sector_etfs']} sector ETFs above their SMA200). "
              f"Favoured: {escape(', '.join(m['favoured']) or 'none')}.</p>"]
+    context = m.get("context") or {}
+    if context:
+        parts.append("<p>" + "; ".join(f"{escape(k)} {v['close']} ({escape(str(v['trend']))}, {pct(v['vs_sma200'])} vs SMA200, "
+                                       f"20 days {pct(v['change_20d'])})" for k, v in context.items()) + "</p>")
     rows = result["candidates"]
     if rows:
-        keys = ["ticker", "strategy", "action", "score", "entry", "stop", "target", "reward_risk", "sector", "warnings"]
+        keys = ["ticker", "strategy", "action", "score", "entry", "stop", "target", "reward_risk", "beta", "holding_days", "time_exit",
+                "sector", "warnings"]
         head = "".join(f"<th>{k}</th>" for k in keys)
         body = "".join("<tr>" + "".join(f"<td>{escape('; '.join(r[k]) if isinstance(r[k], list) else str(r[k]))}</td>" for k in keys) + "</tr>"
                        for r in rows)
         parts.append(f"<table border='1' cellpadding='4' cellspacing='0'><tr>{head}</tr>{body}</table>")
     else:
         parts.append("<p>No setup qualified today.</p>")
-    parts.append("<p>Screening only, not advice. SHORT rules are untested hypotheses.</p>")
+    parts.append("<p>Screening only, not advice. SHORT and squeeze rules are untested hypotheses.</p>")
     return "".join(parts)
 
 
@@ -1333,7 +1519,7 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
     if email.strip() and not EMAIL.match(email.strip()):
         raise ValueError(f"not an email address: {email}")
     cfg = settings_with_defaults(settings)
-    longest = max(horizon_for(cfg, s) for s in strategies)
+    longest = cfg["swing_max_days"]
     count = cfg["min_bars"] + max(validation_days + longest, track_days) + 60
 
     names, source, sectors = discover(finviz_url, tickers, max_tickers)
@@ -1365,6 +1551,9 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
     regime = market_regime(reference.dates, reference.close, breadth_by_date, cfg)
     market = {"name": rs_benchmarks[0], "open": dict(zip(reference.dates, reference.open)),
               "close": dict(zip(reference.dates, reference.close)), "regime": regime}
+    beta_source = context_bars.get(BETA_BENCHMARK) or reference
+    holding = holding_rule(cfg, beta_source.ticker)
+    beta_closes = {d: c for d, c in zip(beta_source.dates, beta_source.close) if math.isfinite(c) and c > 0}
     market_info = market_summary(rs_benchmarks[0], reference, breadth_by_date, regime, sector_bars, cfg, context_bars)
     run_cfg = {**cfg, "benchmarks": rs_benchmarks}
     as_of = calendar[-1]
@@ -1393,34 +1582,48 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
         closes = {b: benchmarks[b] for b in rs_benchmarks}
         if etf in sector_closes:
             closes["sector"] = sector_closes[etf]
-        series = compute(bars, closes, cfg)
+        series = compute(bars, closes, cfg, beta_closes)
+        beta = _beta_at(series, len(bars) - 1)
+        hold = horizon_for(cfg, series, len(bars) - 1)
         series["sector_etf"] = etf if etf in sector_closes else None
         trends = sector_trends.get(etf, {})
         label, trend = regime.get(bars.dates[-1], "unknown"), trends.get(bars.dates[-1])
-        snapshot, snapshot_loaded = None, False
+        loaded = {}
+
+        def snapshot(name=name):
+            if "value" not in loaded:
+                try:
+                    loaded["value"] = fetch_snapshot(name, as_of)
+                except (requests.RequestException, ValueError):
+                    loaded["value"] = None
+                time.sleep(cfg["request_pause"])
+            return loaded["value"]
+
         for s in strategies:
             signal = EVALUATORS[s](bars, series, len(bars) - 1, run_cfg)
             warnings = signal_warnings(signal) if signal["qualified"] else []
             if signal["qualified"] and signal["direction"] == "short":
-                if not snapshot_loaded:
-                    snapshot_loaded = True
-                    try:
-                        snapshot = fetch_snapshot(name, as_of)
-                    except (requests.RequestException, ValueError):
-                        snapshot = None
-                    time.sleep(cfg["request_pause"])
-                warnings += short_checks(signal, snapshot, as_of, cfg) + signal.get("notes", [])
+                warnings += short_checks(signal, snapshot(), as_of, cfg) + signal.get("notes", [])
                 signal["qualified"] = all(c["passed"] for c in signal["checks"])
+            elif signal["qualified"] and s == "squeeze":
+                warnings += squeeze_checks(signal, snapshot(), as_of, cfg)
             if signal["qualified"]:
                 results[s]["qualified"].append({
                     **{k: signal[k] for k in ("ticker", "signal_date", "score", "direction")}, "regime": label,
-                    "action": action_for(signal["direction"], label, trend), "sector": sector, "sector_etf": series["sector_etf"],
-                    "sector_trend": trend, "warnings": warnings,
+                    "action": action_for(signal["direction"], label, trend, s), "sector": sector, "sector_etf": series["sector_etf"],
+                    "sector_trend": trend, "beta": None if beta is None else round(beta, 2), "holding_days": hold,
+                    "time_exit": add_sessions(as_of, hold).isoformat(), "warnings": warnings,
                     **{k: signal[k] for k in ("levels", "relative_strength", "checks", "scoring", "indicators")}})
             else:
                 results[s]["rejected"].append({"ticker": name, "failed": [c for c in signal["checks"] if not c["passed"]]})
         if track_days:
-            tracked += track_signals(bars, series, strategies, track_days, run_cfg, regime, trends)
+            rows = track_signals(bars, series, strategies, track_days, run_cfg, regime, trends)
+            if any(x["strategy"] == "squeeze" for x in rows):
+                short_float = (snapshot() or {}).get("short_float")
+                keep = short_float is not None and short_float >= cfg["squeeze_min_short_float"]
+                rows = [x if x["strategy"] != "squeeze" else {**x, "short_float_today": short_float} for x in rows
+                        if x["strategy"] != "squeeze" or keep]
+            tracked += rows
         if validation_days:
             info = None
             try:
@@ -1449,20 +1652,22 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
         "universe": {"source": source, "tickers": len(names), "data_errors": len(data_errors)},
         "market": market_info,
         "benchmarks": benchmark_info,
+        "holding": holding,
         "candidates": candidates,
         "results": results,
         "tracking": None if not track_days else {
             "days": track_days,
-            "horizon_bars": {s: horizon_for(cfg, s) for s in strategies},
+            "holding_days": holding,
             "note": "Signals of the previous sessions, recomputed from today's data with the execution rules of the validation. "
-                    "Only tickers in today's universe are tracked; one active signal per ticker and strategy.",
+                    "Only tickers in today's universe are tracked; one active signal per ticker and strategy. Squeeze signals are "
+                    "kept only for tickers whose short float today meets squeeze_min_short_float.",
             "summary": {s: tracking_summary([x for x in tracked if x["strategy"] == s]) for s in strategies},
             "signals": tracked,
         },
         "data_errors": data_errors,
         "validation": None if not validation_days else {
             "days": validation_days,
-            "horizon_bars": {s: horizon_for(cfg, s) for s in strategies},
+            "holding_days": holding,
             "cost_scenarios_bps": list(COST_BPS),
             "forward_days": list(FORWARD_DAYS),
             "market_regime_benchmark": market["name"],

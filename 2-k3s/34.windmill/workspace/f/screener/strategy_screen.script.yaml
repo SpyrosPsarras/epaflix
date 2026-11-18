@@ -1,4 +1,4 @@
-summary: Four-strategy screener (long pullback and breakout, short rally rejection and breakdown) by market regime
+summary: Strategy screener (long pullback, breakout, squeeze; short rally rejection, breakdown) by market regime
 description: See 2-k3s/34.windmill/README.md in the homelab repo.
 kind: script
 schema:
@@ -16,7 +16,7 @@ schema:
   properties:
     finviz_url:
       type: string
-      description: Finviz screener address for discovery, https://finviz.com/screener.ashx?...
+      description: One or more Finviz screener addresses (up to 3, one per line), https://finviz.com/screener.ashx?...
       default: ''
     tickers:
       type: string
@@ -32,12 +32,13 @@ schema:
         - both
         - pullback
         - breakout
+        - squeeze
         - rally_rejection
         - breakdown
       default: all
     max_tickers:
       type: integer
-      description: Most tickers to fetch and screen, 1 to 200
+      description: Most tickers to take from each Finviz URL (or from the list), 1 to 200
       default: 50
     track_days:
       type: integer
