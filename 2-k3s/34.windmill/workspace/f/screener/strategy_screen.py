@@ -19,6 +19,8 @@ watch, countertrend_watch or no_trade otherwise. The regime never changes which 
 not triggered, skipped). Every setup is a 30-45 session swing: the time exit depends on the stock's beta vs SPY
 (higher beta, shorter hold). The SHORT and squeeze rules are untested hypotheses: validate before trading them.
 `finviz_url` takes one or more screener URLs (one per line), e.g. a large/mid-cap list and a high-short-float list.
+With `persist`, every signal is stored in the Windmill data table `main` (schema `screener`) and followed until it
+closes, even after its ticker leaves the screen; closed signals cannot change (enforced by the database).
 """
 
 import bisect
@@ -1042,9 +1044,11 @@ def track_signals(bars, series, strategies, days, cfg, regime=None, sector_trend
             status = track(bars, t, signal, horizon)
             label = regime.get(bars.dates[t], "unknown")
             trend = sector_trend.get(bars.dates[t])
+            beta = _beta_at(series, t)
             out.append({"strategy": strategy, "direction": direction, "ticker": bars.ticker, "signal_date": signal["signal_date"],
                         "score": signal["score"], "regime": label, "sector_trend": trend, "action": action_for(direction, label, trend, strategy),
-                        "holding_days": horizon, **signal["levels"], **status})
+                        "beta": None if beta is None else round(beta, 2), "holding_days": horizon, "atr14": signal["indicators"]["atr14"],
+                        "signal_close": bars.close[t], **signal["levels"], **status})
             if status["status"] not in ("not_triggered", "skipped"):
                 busy_until = t + status["bars_held"]
     return out
@@ -1061,6 +1065,274 @@ def tracking_summary(rows):
 
 def actions_table(strategy):
     return ACTIONS_BY_STRATEGY.get(strategy) or ACTIONS_BY_DIRECTION[DIRECTIONS[strategy]]
+
+
+# ---------------------------------------------------------------- persistent tracking (Windmill data table)
+#
+# One row per signal, keyed by (strategy, ticker, signal_date, direction). The original fields are written once; the
+# trade state (status, fill, exit, R, data status) changes only while the signal is pending or open. Once closed, a row
+# cannot change or be deleted: a trigger in the database refuses it. Every run is idempotent: inserts skip existing
+# keys, and the state of an active signal is recomputed from the full price history with the same execution rules.
+
+DATA_TABLE = "main"
+ACTIVE_STATUSES = ("pending", "open")
+CLOSED_STATUSES = ("target", "stopped", "time_exit", "not_triggered", "skipped")
+ORIGINAL_FIELDS = ("strategy", "ticker", "signal_date", "direction", "live", "score", "regime", "sector", "sector_trend", "action",
+                   "entry", "stop", "target", "reward_risk", "atr14", "signal_close", "beta", "holding_days", "original")
+STATE_FIELDS = ("status", "detail", "fill_date", "fill", "exit_date", "exit", "r", "r_now", "last_close", "bars_held", "bars_left",
+                "gap", "ambiguous", "price_factor", "data_status", "data_note", "last_data_date", "stale_days")
+COLUMN_TYPES = {"strategy": "text", "ticker": "text", "signal_date": "date", "direction": "text", "live": "boolean",
+                "score": "double precision", "regime": "text", "sector": "text", "sector_trend": "text", "action": "text",
+                "entry": "double precision", "stop": "double precision", "target": "double precision", "reward_risk": "double precision",
+                "atr14": "double precision", "signal_close": "double precision", "beta": "double precision", "holding_days": "integer",
+                "original": "jsonb", "status": "text", "detail": "text", "fill_date": "date", "fill": "double precision",
+                "exit_date": "date", "exit": "double precision", "r": "double precision", "r_now": "double precision",
+                "last_close": "double precision", "bars_held": "integer", "bars_left": "integer", "gap": "boolean", "ambiguous": "text",
+                "price_factor": "double precision", "data_status": "text", "data_note": "text", "last_data_date": "date",
+                "stale_days": "integer"}
+_ACTIVE_SQL = ", ".join(f"'{x}'" for x in ACTIVE_STATUSES)
+_CLOSED_SQL = ", ".join(f"'{x}'" for x in CLOSED_STATUSES)
+
+SCHEMA_SQL = f"""
+CREATE SCHEMA IF NOT EXISTS screener;
+CREATE TABLE IF NOT EXISTS screener.signals (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    strategy text NOT NULL,
+    ticker text NOT NULL,
+    signal_date date NOT NULL,
+    direction text NOT NULL CHECK (direction IN ('long', 'short')),
+    live boolean NOT NULL,
+    score double precision,
+    regime text,
+    sector text,
+    sector_trend text,
+    action text,
+    entry double precision NOT NULL,
+    stop double precision NOT NULL,
+    target double precision NOT NULL,
+    reward_risk double precision,
+    atr14 double precision,
+    signal_close double precision NOT NULL CHECK (signal_close > 0),
+    beta double precision,
+    holding_days integer NOT NULL CHECK (holding_days > 0),
+    original jsonb NOT NULL DEFAULT '{{}}',
+    first_seen_at timestamptz NOT NULL DEFAULT now(),
+    status text NOT NULL CHECK (status IN ({_ACTIVE_SQL}, {_CLOSED_SQL})),
+    detail text,
+    fill_date date,
+    fill double precision,
+    exit_date date,
+    exit double precision,
+    r double precision,
+    r_now double precision,
+    last_close double precision,
+    bars_held integer,
+    bars_left integer,
+    gap boolean,
+    ambiguous text,
+    price_factor double precision NOT NULL DEFAULT 1,
+    data_status text NOT NULL DEFAULT 'ok' CHECK (data_status IN ('ok', 'unavailable')),
+    data_note text,
+    last_data_date date,
+    stale_days integer NOT NULL DEFAULT 0,
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    closed_at timestamptz,
+    UNIQUE (strategy, ticker, signal_date, direction),
+    CHECK ((closed_at IS NULL) = (status IN ({_ACTIVE_SQL})))
+);
+CREATE INDEX IF NOT EXISTS signals_active ON screener.signals (ticker) WHERE closed_at IS NULL;
+CREATE TABLE IF NOT EXISTS screener.runs (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    run_at timestamptz NOT NULL DEFAULT now(),
+    as_of date NOT NULL,
+    regime text,
+    universe integer,
+    data_errors integer,
+    inserted integer,
+    updated integer,
+    market jsonb,
+    candidates jsonb
+);
+CREATE OR REPLACE FUNCTION screener.guard_signal() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF TG_OP = 'TRUNCATE' THEN
+        RAISE EXCEPTION 'screener.signals is a history: it cannot be truncated';
+    END IF;
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION 'screener.signals is a history: signal % cannot be deleted', OLD.id;
+    END IF;
+    IF OLD.closed_at IS NOT NULL THEN
+        RAISE EXCEPTION 'signal % is closed and cannot change', OLD.id;
+    END IF;
+    IF (NEW.id, NEW.first_seen_at, {", ".join("NEW." + f for f in ORIGINAL_FIELDS)})
+       IS DISTINCT FROM (OLD.id, OLD.first_seen_at, {", ".join("OLD." + f for f in ORIGINAL_FIELDS)}) THEN
+        RAISE EXCEPTION 'the original fields of signal % cannot change', OLD.id;
+    END IF;
+    RETURN NEW;
+END
+$$;
+CREATE OR REPLACE TRIGGER signals_guard BEFORE UPDATE OR DELETE ON screener.signals
+    FOR EACH ROW EXECUTE FUNCTION screener.guard_signal();
+CREATE OR REPLACE TRIGGER signals_no_truncate BEFORE TRUNCATE ON screener.signals
+    FOR EACH STATEMENT EXECUTE FUNCTION screener.guard_signal();
+"""
+
+LOAD_SQL = SCHEMA_SQL + "SELECT * FROM screener.signals WHERE closed_at IS NULL ORDER BY id;"
+
+_NEW_COLUMNS = ORIGINAL_FIELDS + STATE_FIELDS
+_UPDATE_COLUMNS = ("id",) + STATE_FIELDS
+WRITE_SQL = f"""
+WITH new_rows AS (
+    SELECT * FROM jsonb_to_recordset($1::jsonb) AS x({", ".join(f'"{c}" {COLUMN_TYPES[c]}' for c in _NEW_COLUMNS)})
+), ins AS (
+    INSERT INTO screener.signals ({", ".join(f'"{c}"' for c in _NEW_COLUMNS)}, closed_at)
+    SELECT {", ".join(f'"{c}"' for c in _NEW_COLUMNS)}, CASE WHEN status IN ({_CLOSED_SQL}) THEN now() END FROM new_rows
+    ON CONFLICT (strategy, ticker, signal_date, direction) DO NOTHING
+    RETURNING id
+), changes AS (
+    SELECT * FROM jsonb_to_recordset($2::jsonb) AS x(id bigint, {", ".join(f'"{c}" {COLUMN_TYPES[c]}' for c in STATE_FIELDS)})
+), upd AS (
+    UPDATE screener.signals s SET {", ".join(f'"{c}" = c."{c}"' for c in STATE_FIELDS)}, updated_at = now(),
+        closed_at = CASE WHEN c.status IN ({_CLOSED_SQL}) THEN now() END
+    FROM changes c
+    WHERE s.id = c.id AND s.closed_at IS NULL
+    RETURNING s.id
+), run AS (
+    INSERT INTO screener.runs (as_of, regime, universe, data_errors, inserted, updated, market, candidates)
+    SELECT $3::date, $4, $5, $6, (SELECT count(*) FROM ins), (SELECT count(*) FROM upd), $7::jsonb, $8::jsonb
+    RETURNING id
+)
+SELECT (SELECT count(*) FROM ins) AS inserted, (SELECT count(*) FROM upd) AS updated, (SELECT id FROM run) AS run_id;
+"""
+
+STATS_SQL = """
+SELECT strategy, live,
+       count(*) AS signals,
+       count(*) FILTER (WHERE closed_at IS NULL) AS active,
+       count(*) FILTER (WHERE status IN ('not_triggered', 'skipped')) AS not_filled,
+       count(r) FILTER (WHERE closed_at IS NOT NULL) AS closed_trades,
+       count(*) FILTER (WHERE closed_at IS NOT NULL AND r > 0) AS winners,
+       avg(r) FILTER (WHERE closed_at IS NOT NULL) AS average_r,
+       sum(r) FILTER (WHERE closed_at IS NOT NULL) AS total_r,
+       count(*) FILTER (WHERE data_status = 'unavailable' AND closed_at IS NULL) AS data_unavailable
+FROM screener.signals
+GROUP BY strategy, live
+ORDER BY strategy, live DESC;
+"""
+
+
+def datatable_query(name=DATA_TABLE):
+    """A function running one SQL text with positional $n arguments on a Windmill data table; returns the rows of the
+    last statement. Lists and dicts are sent as JSON."""
+    def run(sql, *args):
+        rows = wmill.datatable(name).query(sql, *args).fetch()
+        return rows if isinstance(rows, list) else []
+    return run
+
+
+def _day(value):
+    return value if isinstance(value, date) else date.fromisoformat(str(value)[:10])
+
+
+def sessions_after(calendar, start, end):
+    """Number of sessions in the calendar after `start` up to and including `end`."""
+    return max(0, bisect.bisect_right(calendar, end) - bisect.bisect_right(calendar, start))
+
+
+def _json_safe(value):
+    return json.loads(json.dumps(value, default=str))
+
+
+def stored_update(row, bars, calendar, as_of, note=None):
+    """New state of a stored active signal, recomputed from its ticker's bars. bars None (or a history without the
+    signal date) keeps the last known trade state and marks the data unavailable, with the sessions it is behind."""
+    signal_date = _day(row["signal_date"])
+    last_known = _day(row["last_data_date"]) if row.get("last_data_date") else signal_date
+    t = None
+    if bars is not None:
+        i = bisect.bisect_left(bars.dates, signal_date)
+        t = i if i < len(bars) and bars.dates[i] == signal_date else None
+        if t is None:
+            note = f"signal date {signal_date} not in the price history"
+    if t is None or row["strategy"] not in DIRECTIONS:
+        if t is not None:
+            note = f"unknown strategy {row['strategy']}"
+        keep = {k: row.get(k) for k in STATE_FIELDS}
+        return {"id": row["id"], **keep, "data_status": "unavailable", "data_note": note or "no price data",
+                "last_data_date": last_known.isoformat(), "stale_days": sessions_after(calendar, last_known, as_of)}
+    factor = bars.close[t] / row["signal_close"]
+    if abs(factor - 1) < 0.005:  # rounding; a real change means a split or another adjustment of the history
+        factor = 1.0
+    levels = {k: row[k] * factor for k in ("entry", "stop", "target")}
+    signal = {"strategy": row["strategy"], "levels": levels, "indicators": {"atr14": (row.get("atr14") or 0) * factor or None}}
+    state = {"status": "pending"} if t == len(bars) - 1 else track(bars, t, signal, int(row["holding_days"]))
+    out = {"id": row["id"], **{k: None for k in STATE_FIELDS}, **{k: v for k, v in state.items() if k in STATE_FIELDS}}
+    for k in ("fill", "exit", "last_close"):  # back to the prices of the signal day, like entry, stop and target
+        if out[k] is not None:
+            out[k] = round(out[k] / factor, 4)
+    out.update({"price_factor": round(factor, 6), "data_status": "ok", "last_data_date": bars.dates[-1].isoformat(),
+                "stale_days": sessions_after(calendar, bars.dates[-1], as_of),
+                "data_note": None if factor == 1.0 else f"prices adjusted by {factor:.4f} since the signal (split?)"})
+    return out
+
+
+def new_row(item, live, last_data_date):
+    """A row for screener.signals from a qualified signal of today (live) or a recomputed past signal (not live)."""
+    levels = item["levels"] if "levels" in item else item
+    original = {"warnings": item.get("warnings", []), "sector_etf": item.get("sector_etf"),
+                "scoring": [{"name": x["name"], "earned": x["earned"]} for x in item.get("scoring", [])],
+                "levels": {k: v for k, v in levels.items() if k not in ("entry", "stop", "target", "reward_risk")} if "levels" in item else {}}
+    if not live:
+        original["note"] = "recomputed later from the price history; live-only checks (earnings, short interest) not applied"
+    row = {"strategy": item["strategy"], "ticker": item["ticker"], "signal_date": item["signal_date"], "direction": item["direction"],
+           "live": live, "score": item.get("score"), "regime": item.get("regime"), "sector": item.get("sector"),
+           "sector_trend": item.get("sector_trend"), "action": item.get("action"), "entry": levels["entry"], "stop": levels["stop"],
+           "target": levels["target"], "reward_risk": levels.get("reward_risk"),
+           "atr14": item["indicators"]["atr14"] if "indicators" in item else item.get("atr14"),
+           "signal_close": item["indicators"]["close"] if "indicators" in item else item["signal_close"],
+           "beta": item.get("beta"), "holding_days": item["holding_days"], "original": _json_safe(original),
+           **{k: None for k in STATE_FIELDS}, "price_factor": 1.0, "data_status": "ok", "last_data_date": last_data_date, "stale_days": 0}
+    row.update({k: item[k] for k in STATE_FIELDS if k in item and item[k] is not None})
+    row["status"] = item.get("status", "pending")
+    return row
+
+
+def _busy_until(state):
+    if state["status"] in ACTIVE_STATUSES:
+        return date.max
+    return _day(state["exit_date"]) if state.get("exit_date") else None
+
+
+def select_new(stored, updates, candidates):
+    """Candidates that may be inserted: one trade per strategy, ticker and direction at a time, like the validation.
+    A signal is skipped while an earlier one of the same key is pending or open, or before that one's exit date."""
+    by_id = {u["id"]: u for u in updates}
+    busy = {}
+    for row in stored:
+        until = _busy_until({**row, **by_id.get(row["id"], {})})
+        key = (row["strategy"], row["ticker"], row["direction"])
+        if until is not None:
+            busy[key] = max(busy.get(key, date.min), until)
+    known = {(r["strategy"], r["ticker"], str(r["signal_date"])[:10], r["direction"]) for r in stored}
+    keep, skipped = [], []
+    for row in sorted(candidates, key=lambda r: (r["signal_date"], r["strategy"], r["ticker"])):
+        key = (row["strategy"], row["ticker"], row["direction"])
+        if (*key[:2], row["signal_date"], key[2]) in known:
+            continue
+        if _day(row["signal_date"]) <= busy.get(key, date.min):
+            skipped.append({k: row[k] for k in ("strategy", "ticker", "signal_date", "direction")})
+            continue
+        keep.append(row)
+        until = _busy_until(row)
+        if until is not None:
+            busy[key] = max(busy.get(key, date.min), until)
+    return keep, skipped
+
+
+def stored_view(row):
+    keys = ("strategy", "ticker", "direction", "signal_date", "live", "status", "entry", "stop", "target", "fill", "exit",
+            "exit_date", "r", "r_now", "holding_days", "bars_left", "data_status", "data_note", "stale_days")
+    return {k: (str(row[k])[:10] if k in ("signal_date", "exit_date") and row.get(k) else row.get(k)) for k in keys}
 
 
 def action_for(direction, regime_label, sector_trend=None, strategy=None):
@@ -1470,6 +1742,14 @@ def email_html(result):
         parts.append(f"<table border='1' cellpadding='4' cellspacing='0'><tr>{head}</tr>{body}</table>")
     else:
         parts.append("<p>No setup qualified today.</p>")
+    stored = result.get("persistence")
+    if stored:
+        def line(r):
+            text = f"{r['ticker']} {r['strategy']} {r['status']}"
+            return escape(text + (f" {r['r']:+.2f}R" if r.get("r") is not None else ""))
+        parts.append(f"<p><b>Tracked signals</b>: {len(stored['active'])} active, {stored['inserted']} new. "
+                     f"Closed today: {', '.join(line(r) for r in stored['closed_today']) or 'none'}. "
+                     f"Data unavailable: {escape(', '.join(r['ticker'] for r in stored['data_unavailable'])) or 'none'}.</p>")
     parts.append("<p>Screening only, not advice. SHORT and squeeze rules are untested hypotheses.</p>")
     return "".join(parts)
 
@@ -1499,7 +1779,7 @@ def _load(name, count, now, data_errors, label, pause):
 
 
 def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tickers: int = 50, track_days: int = 10,
-         validation_days: int = 0, settings: dict | None = None, email: str = "") -> dict:
+         validation_days: int = 0, settings: dict | None = None, email: str = "", persist: bool = False) -> dict:
     started = time.monotonic()
     now = datetime.now(timezone.utc)
     if strategy in STRATEGY_GROUPS:
@@ -1523,6 +1803,12 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
     count = cfg["min_bars"] + max(validation_days + longest, track_days) + 60
 
     names, source, sectors = discover(finviz_url, tickers, max_tickers)
+    query = datatable_query() if persist else None
+    stored = query(LOAD_SQL) if persist else []
+    pending_by_ticker = {}
+    for row in stored:
+        pending_by_ticker.setdefault(row["ticker"], []).append(row)
+    updates, new_rows = [], []
     benchmarks, benchmark_bars, benchmark_info, data_errors = {}, {}, {}, []
     for name in cfg["benchmarks"]:
         bars = _load(name, count, now, data_errors, "benchmark", cfg["request_pause"])
@@ -1569,7 +1855,9 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
         time.sleep(cfg["request_pause"])
         if problems:
             data_errors.append({"ticker": name, "reason": "; ".join(problems)})
+            updates += [stored_update(row, None, calendar, as_of, "; ".join(problems)) for row in pending_by_ticker.pop(name, [])]
             continue
+        updates += [stored_update(row, bars, calendar, as_of) for row in pending_by_ticker.pop(name, [])]
         screened += 1
         sector = sectors.get(name)
         if sector is None and source == "tickers":
@@ -1609,7 +1897,7 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
                 warnings += squeeze_checks(signal, snapshot(), as_of, cfg)
             if signal["qualified"]:
                 results[s]["qualified"].append({
-                    **{k: signal[k] for k in ("ticker", "signal_date", "score", "direction")}, "regime": label,
+                    **{k: signal[k] for k in ("ticker", "signal_date", "score", "direction")}, "strategy": s, "regime": label,
                     "action": action_for(signal["direction"], label, trend, s), "sector": sector, "sector_etf": series["sector_etf"],
                     "sector_trend": trend, "beta": None if beta is None else round(beta, 2), "holding_days": hold,
                     "time_exit": add_sessions(as_of, hold).isoformat(), "warnings": warnings,
@@ -1623,7 +1911,7 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
                 keep = short_float is not None and short_float >= cfg["squeeze_min_short_float"]
                 rows = [x if x["strategy"] != "squeeze" else {**x, "short_float_today": short_float} for x in rows
                         if x["strategy"] != "squeeze" or keep]
-            tracked += rows
+            tracked += [{**x, "sector": sector} for x in rows]
         if validation_days:
             info = None
             try:
@@ -1637,6 +1925,14 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
             trades += more[0]
             signals += more[1]
             base += more[2]
+    for name, rows in sorted(pending_by_ticker.items()):  # stored signals whose ticker is not in today's universe
+        try:
+            bars = completed_bars(fetch_bars(name, count), now)
+            problems = quality_problems(bars, calendar, cfg)
+        except (requests.RequestException, ValueError) as error:
+            bars, problems = None, [str(error)]
+        time.sleep(cfg["request_pause"])
+        updates += [stored_update(row, None if problems else bars, calendar, as_of, "; ".join(problems) or None) for row in rows]
     for s in strategies:
         results[s]["qualified"].sort(key=lambda x: (-x["score"], x["ticker"]))
     candidates = sorted((candidate_row(s, q) for s in strategies for q in results[s]["qualified"]),
@@ -1684,6 +1980,28 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
         "settings": cfg,
         "duration_seconds": round(duration, 2),
     }
+    if persist:
+        candidates_new = [new_row(q, True, as_of.isoformat()) for s in strategies for q in results[s]["qualified"]]
+        candidates_new += [new_row(x, False, as_of.isoformat()) for x in tracked]
+        new_rows, skipped = select_new(stored, updates, candidates_new)
+        written = query(WRITE_SQL, new_rows, updates, as_of.isoformat(), market_info["regime"], len(names), len(data_errors),
+                        _json_safe(market_info), _json_safe(candidates))
+        stats = query(STATS_SQL)
+        by_id = {u["id"]: u for u in updates}
+        merged = [{**row, **by_id.get(row["id"], {})} for row in stored]
+        result["persistence"] = {
+            "data_table": DATA_TABLE, "schema": "screener",
+            "inserted": (written[0] if written else {}).get("inserted"), "updated": (written[0] if written else {}).get("updated"),
+            "run_id": (written[0] if written else {}).get("run_id"),
+            "new": [stored_view(r) for r in new_rows],
+            "active": [stored_view(r) for r in merged if r["status"] in ACTIVE_STATUSES]
+                      + [stored_view(r) for r in new_rows if r["status"] in ACTIVE_STATUSES],
+            "closed_today": [stored_view(r) for r in merged if r["status"] in CLOSED_STATUSES],
+            "data_unavailable": [stored_view(r) for r in merged if r["data_status"] == "unavailable"],
+            "skipped_busy": skipped,
+            "stats": stats,
+            "note": "live = recorded on its signal day with the live checks; not live = recomputed later from the price history.",
+        }
     if email.strip():
         subject = f"Strategy screen {as_of.isoformat()}: market {market_info['regime']}, {len(candidates)} setups"
         send_email(email.strip(), subject, email_html(result))

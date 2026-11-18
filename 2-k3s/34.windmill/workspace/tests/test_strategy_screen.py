@@ -1,6 +1,9 @@
 import inspect
+import json
 import math
+import re
 import sys
+import uuid
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -1181,10 +1184,11 @@ def test_main_rejects_bad_inputs(offline, kwargs, message):
         ss.main(**kwargs)
 
 
-def test_email_is_the_only_resource_use():
+def test_windmill_is_used_only_for_email_and_the_data_table():
     source = Path(ss.__file__).read_text()
-    assert source.count("wmill.") == 1 and "wmill.get_resource(SMTP_RESOURCE)" in source
+    assert source.count("wmill.") == 2 and "wmill.get_resource(SMTP_RESOURCE)" in source and "wmill.datatable(name)" in source
     assert source.count("send_email(") == 2 and "if email.strip():" in source
+    assert source.count("datatable_query()") == 1 and "datatable_query() if persist else None" in source
 
 
 def test_requirements_header_is_pinned_for_ci():
@@ -1198,3 +1202,319 @@ def test_script_yaml_matches_main_signature():
     text = Path(ss.__file__).with_name("strategy_screen.script.yaml").read_text()
     order = text.split("order:\n")[1].split("  properties:")[0].split()
     assert [x for x in order if x != "-"] == list(inspect.signature(ss.main).parameters)
+
+
+# ---------------------------------------------------------------- persistent tracking
+#
+# The SQL runs against a real PostgreSQL 16 (pgserver) through an adapter that executes like Windmill's postgresql
+# executor: statements split on ";" outside quotes and dollar quotes, run one by one in autocommit, each binding only the
+# $n it uses (renumbered), lists and dicts sent as JSON, and the rows of the last statement returned as JSON.
+
+
+def split_sql(sql):
+    out, start, i, quote = [], 0, 0, None
+    while i < len(sql):
+        if quote:
+            if sql.startswith(quote, i):
+                i += len(quote)
+                quote = None
+            else:
+                i += 1
+            continue
+        tag = re.match(r"\$[A-Za-z_]*\$", sql[i:])
+        if sql[i] == "'" or tag:
+            quote = "'" if sql[i] == "'" else tag.group(0)
+            i += len(quote)
+            continue
+        if sql[i] == ";":
+            out.append(sql[start:i + 1])
+            start = i + 1
+        i += 1
+    if sql[start:].strip():
+        out.append(sql[start:])
+    return [x for x in out if x.strip(" \n;")]
+
+
+class WindmillLike:
+    def __init__(self, conn):
+        self.conn, self.calls = conn, []
+
+    def __call__(self, sql, *args):
+        from psycopg.types.json import Json
+        self.calls.append(sql)
+        rows = []
+        for statement in split_sql(sql):
+            used = sorted({int(x) for x in re.findall(r"\$(\d+)", statement)})
+            number = {old: k + 1 for k, old in enumerate(used)}
+            text = re.sub(r"\$(\d+)", lambda m: f"${number[int(m.group(1))]}", statement)
+            params = [Json(args[old - 1]) if isinstance(args[old - 1], (list, dict)) else args[old - 1] for old in used]
+            cursor = self.conn.execute(text, params or None)
+            rows = cursor.fetchall() if cursor.description else []
+        return json.loads(json.dumps(rows, default=str))
+
+    def one(self, sql, *params):
+        return self.conn.execute(sql, params or None).fetchone()
+
+
+@pytest.fixture(scope="session")
+def pg_server(tmp_path_factory):
+    pgserver = pytest.importorskip("pgserver")
+    pytest.importorskip("psycopg")
+    server = pgserver.get_server(tmp_path_factory.mktemp("pg"), cleanup_mode="stop")
+    yield server
+    server.cleanup()
+
+
+@pytest.fixture
+def db(pg_server):
+    import psycopg
+    from psycopg.rows import dict_row
+    name = f"t_{uuid.uuid4().hex[:12]}"
+    with psycopg.connect(pg_server.get_uri(), autocommit=True) as admin:
+        admin.execute(f'CREATE DATABASE "{name}"')
+    conn = psycopg.connect(pg_server.get_uri(name), autocommit=True, cursor_factory=psycopg.RawCursor, row_factory=dict_row)
+    yield WindmillLike(conn)
+    conn.close()
+
+
+def test_split_sql_keeps_function_bodies_whole():
+    parts = split_sql(ss.LOAD_SQL)
+    body = [x for x in parts if "guard_signal() RETURNS" in x]
+    assert len(body) == 1 and "RETURN NEW;" in body[0] and body[0].rstrip().endswith("$$;")
+    assert parts[-1].strip().startswith("SELECT * FROM screener.signals")
+
+
+def stored_row(**over):
+    row = {"strategy": "pullback", "ticker": "AAA", "signal_date": "2026-11-02", "direction": "long", "live": True, "score": 60,
+           "regime": "bullish", "sector": "Technology", "sector_trend": "up", "action": "long", "entry": 10.0, "stop": 9.0,
+           "target": 12.0, "reward_risk": 2.0, "atr14": 0.5, "signal_close": 9.9, "beta": 1.2, "holding_days": 3,
+           "original": {"warnings": []}, **{k: None for k in ss.STATE_FIELDS}, "status": "pending", "price_factor": 1.0,
+           "data_status": "ok", "last_data_date": "2026-11-02", "stale_days": 0}
+    row.update(over)
+    return row
+
+
+def write(db, new=(), updates=(), as_of="2026-11-17"):
+    return db(ss.WRITE_SQL, list(new), list(updates), as_of, "neutral", 10, 1, {"regime": "neutral"}, [{"ticker": "AAA"}])[0]
+
+
+def test_schema_is_idempotent_and_loads_active_signals(db):
+    assert db(ss.LOAD_SQL) == [] and db(ss.LOAD_SQL) == []
+    assert write(db, [stored_row(), stored_row(ticker="BBB", status="not_triggered")]) == {"inserted": 2, "updated": 0, "run_id": 1}
+    (active,) = db(ss.LOAD_SQL)
+    assert active["ticker"] == "AAA" and active["signal_date"] == "2026-11-02" and active["original"] == {"warnings": []}
+    assert active["closed_at"] is None and active["id"] == 1
+    assert db.one("SELECT closed_at IS NOT NULL AS closed FROM screener.signals WHERE ticker = 'BBB'")["closed"]
+
+
+def test_reruns_insert_nothing_twice(db):
+    db(ss.LOAD_SQL)
+    assert write(db, [stored_row()])["inserted"] == 1
+    changed = stored_row(score=99, entry=11.0)  # same key: the original row wins
+    assert write(db, [changed])["inserted"] == 0
+    row = db.one("SELECT score, entry FROM screener.signals")
+    assert row == {"score": 60, "entry": 10.0}
+    assert db.one("SELECT count(*) AS n, max(inserted) AS i FROM screener.runs") == {"n": 2, "i": 1}
+
+
+def update_for(row_id, **state):
+    return {"id": row_id, **{k: None for k in ss.STATE_FIELDS}, "price_factor": 1.0, "data_status": "ok", "stale_days": 0,
+            "last_data_date": "2026-11-17", **state}
+
+
+def test_active_signals_update_until_closed_then_freeze(db):
+    db(ss.LOAD_SQL)
+    write(db, [stored_row()])
+    assert write(db, updates=[update_for(1, status="open", fill=10.0, fill_date="2026-11-03", r_now=0.4, bars_held=2)])["updated"] == 1
+    assert db.one("SELECT status, r_now, closed_at FROM screener.signals") == {"status": "open", "r_now": 0.4, "closed_at": None}
+    closing = update_for(1, status="target", fill=10.0, exit=12.0, exit_date="2026-11-05", r=2.0, bars_held=3)
+    assert write(db, updates=[closing])["updated"] == 1
+    assert db.one("SELECT closed_at IS NOT NULL AS closed, r FROM screener.signals") == {"closed": True, "r": 2.0}
+    assert write(db, updates=[update_for(1, status="stopped", r=-1.0)])["updated"] == 0  # a closed signal is skipped
+    assert db(ss.LOAD_SQL) == []
+    assert db.one("SELECT status, r FROM screener.signals") == {"status": "target", "r": 2.0}
+
+
+@pytest.mark.parametrize("statement, message", [
+    ("UPDATE screener.signals SET r = 5 WHERE ticker = 'BBB'", "is closed and cannot change"),
+    ("UPDATE screener.signals SET entry = 5 WHERE ticker = 'AAA'", "original fields"),
+    ("UPDATE screener.signals SET original = '{}' WHERE ticker = 'AAA'", "original fields"),
+    ("UPDATE screener.signals SET signal_date = '2026-11-03' WHERE ticker = 'AAA'", "original fields"),
+    ("DELETE FROM screener.signals WHERE ticker = 'AAA'", "cannot be deleted"),
+    ("TRUNCATE screener.signals", "cannot be truncated"),
+    ("UPDATE screener.signals SET status = 'won' WHERE ticker = 'AAA'", "check constraint"),
+    ("UPDATE screener.signals SET status = 'target' WHERE ticker = 'AAA'", "check constraint"),  # closed needs closed_at
+])
+def test_database_refuses_changes_to_history(db, statement, message):
+    import psycopg
+    db(ss.LOAD_SQL)
+    write(db, [stored_row(original={"warnings": ["x"]}), stored_row(ticker="BBB", status="stopped", r=-1.0, exit_date="2026-11-04")])
+    with pytest.raises(psycopg.Error, match=message):
+        db.conn.execute(statement)
+    assert db.one("SELECT count(*) AS n FROM screener.signals")["n"] == 2
+    db.conn.execute("UPDATE screener.signals SET r_now = 0.5 WHERE ticker = 'AAA'")  # the trade state of an active signal may change
+
+
+def test_stats_per_strategy_and_live_flag(db):
+    db(ss.LOAD_SQL)
+    write(db, [stored_row(ticker="A1", status="target", r=2.0, exit_date="2026-11-05"),
+               stored_row(ticker="A2", status="stopped", r=-1.0, exit_date="2026-11-05"),
+               stored_row(ticker="A3", status="not_triggered"),
+               stored_row(ticker="A4"),
+               stored_row(ticker="B1", live=False, status="stopped", r=-1.0, exit_date="2026-11-04")])
+    live, recomputed = db(ss.STATS_SQL)
+    assert live == {"strategy": "pullback", "live": True, "signals": 4, "active": 1, "not_filled": 1, "closed_trades": 2, "winners": 1,
+                    "average_r": 0.5, "total_r": 1.0, "data_unavailable": 0}
+    assert recomputed["live"] is False and recomputed["closed_trades"] == 1 and recomputed["average_r"] == -1.0
+
+
+# ---------------------------------------------------------------- stored signal state (no database)
+
+CAL = sessions(10, date(2026, 11, 2))
+
+
+def stored_bars(rows, start=date(2026, 11, 2)):
+    return make_bars(rows, "AAA", start)
+
+
+def test_stored_update_follows_the_trade_from_pending_to_target():
+    row = {**stored_row(), "id": 7}
+    bars = stored_bars([(9.8, 10, 9.6, 9.9, 1)])
+    assert ss.stored_update(row, bars, CAL, CAL[0])["status"] == "pending"
+    bars = stored_bars([(9.8, 10, 9.6, 9.9, 1), (10.1, 10.5, 9.9, 10.4, 1)])
+    state = ss.stored_update(row, bars, CAL, CAL[1])
+    assert (state["status"], state["fill"], state["r_now"], state["bars_left"], state["data_status"]) == ("open", 10.1, 0.273, 2, "ok")
+    assert set(state) == {"id", *ss.STATE_FIELDS} and state["last_data_date"] == CAL[1].isoformat() and state["stale_days"] == 0
+    bars = stored_bars([(9.8, 10, 9.6, 9.9, 1), (10.1, 10.5, 9.9, 10.4, 1), (10.5, 12.5, 10.4, 12.2, 1)])
+    done = ss.stored_update(row, bars, CAL, CAL[2])
+    assert (done["status"], done["exit"], done["r"], done["r_now"], done["bars_left"]) == ("target", 12.0, round(1.9 / 1.1, 3), None, None)
+
+
+def test_stored_update_time_exit_uses_the_stored_holding_days():
+    row = {**stored_row(holding_days=2), "id": 1}
+    bars = stored_bars([(9.8, 10, 9.6, 9.9, 1), (10.1, 10.5, 9.9, 10.4, 1), (10.4, 10.8, 10.2, 10.6, 1)])
+    state = ss.stored_update(row, bars, CAL, CAL[2])
+    assert state["status"] == "time_exit" and state["exit"] == 10.6 and state["bars_held"] == 2
+
+
+def test_stored_update_keeps_original_prices_after_a_split():
+    row = {**stored_row(), "id": 1}
+    rows = [(9.8, 10, 9.6, 9.9, 1), (10.1, 10.5, 9.9, 10.4, 1)]
+    split = stored_bars([tuple(x / 2 for x in r[:4]) + (r[4] * 2,) for r in rows])  # 2:1 split adjusts the whole history
+    state = ss.stored_update(row, split, CAL, CAL[1])
+    assert state["price_factor"] == 0.5 and "adjusted by 0.5000" in state["data_note"]
+    assert (state["status"], state["fill"], state["last_close"], state["r_now"]) == ("open", 10.1, 10.4, 0.273)
+
+
+def test_stored_update_marks_missing_data_without_closing():
+    row = {**stored_row(status="open", fill=10.1, fill_date="2026-11-03", r_now=0.3, last_data_date="2026-11-04"), "id": 3}
+    state = ss.stored_update(row, None, CAL, CAL[6], "chart data is for another ticker")
+    assert (state["status"], state["fill"], state["r_now"]) == ("open", 10.1, 0.3)
+    assert (state["data_status"], state["data_note"], state["stale_days"], state["last_data_date"]) == (
+        "unavailable", "chart data is for another ticker", 4, "2026-11-04")
+    late = ss.stored_update(row, stored_bars([(1, 1, 1, 1, 1)], date(2026, 11, 9)), CAL, CAL[6])
+    assert late["data_status"] == "unavailable" and "not in the price history" in late["data_note"] and late["status"] == "open"
+
+
+def test_stored_update_short_signal():
+    row = {**stored_row(strategy="breakdown", direction="short", entry=10.0, stop=11.0, target=8.0, signal_close=10.2), "id": 2}
+    bars = stored_bars([(10.3, 10.4, 10.1, 10.2, 1), (9.9, 10.0, 7.9, 8.1, 1)])
+    state = ss.stored_update(row, bars, CAL, CAL[1])
+    assert (state["status"], state["fill"], state["exit"], state["r"]) == ("target", 9.9, 8.0, round(1.9 / 1.1, 3))
+
+
+def test_select_new_one_trade_per_key_at_a_time():
+    stored = [{**stored_row(status="open"), "id": 1}, {**stored_row(ticker="BBB", status="open"), "id": 2}]
+    updates = [{"id": 2, "status": "stopped", "exit_date": "2026-11-06"}]
+    candidates = [
+        stored_row(signal_date="2026-11-02"),                    # the stored signal itself: already known
+        stored_row(signal_date="2026-11-05"),                    # AAA still open: busy
+        stored_row(ticker="BBB", signal_date="2026-11-06"),      # BBB closed on its exit date: busy that day
+        stored_row(ticker="BBB", signal_date="2026-11-09"),      # after the exit: new
+        stored_row(ticker="BBB", signal_date="2026-11-10"),      # the new BBB signal is pending: busy
+        stored_row(ticker="CCC", signal_date="2026-11-03", status="not_triggered"),
+        stored_row(ticker="CCC", signal_date="2026-11-04"),      # the previous one never filled: new
+        stored_row(strategy="breakout", signal_date="2026-11-05"),  # another strategy: new
+    ]
+    keep, skipped = ss.select_new(stored, updates, candidates)
+    assert [(r["strategy"], r["ticker"], r["signal_date"]) for r in keep] == [
+        ("pullback", "CCC", "2026-11-03"), ("pullback", "CCC", "2026-11-04"), ("breakout", "AAA", "2026-11-05"),
+        ("pullback", "BBB", "2026-11-09")]
+    assert [(r["ticker"], r["signal_date"]) for r in skipped] == [("AAA", "2026-11-05"), ("BBB", "2026-11-06"), ("BBB", "2026-11-10")]
+
+
+def test_new_row_from_a_live_signal_and_a_recomputed_one():
+    live = run(ss.evaluate_pullback, pullback_rows())
+    item = {**live, "action": "watch", "regime": "neutral", "sector": "Technology", "sector_trend": "up", "sector_etf": "XLK",
+            "warnings": ["w"], "beta": 1.3, "holding_days": 40}
+    row = ss.new_row(item, True, "2026-11-17")
+    assert set(row) == set(ss.ORIGINAL_FIELDS) | set(ss.STATE_FIELDS)
+    assert row["live"] and row["status"] == "pending" and row["signal_close"] == pytest.approx(pullback_rows()[-1][3])
+    assert row["entry"] == live["levels"]["entry"] and row["atr14"] == live["indicators"]["atr14"]
+    assert row["original"]["warnings"] == ["w"] and row["original"]["sector_etf"] == "XLK" and len(row["original"]["scoring"]) == len(live["scoring"])
+    json.dumps(row)
+    tracked = {"strategy": "breakout", "direction": "long", "ticker": "BBB", "signal_date": "2026-11-10", "score": 70, "regime": "bullish",
+               "sector_trend": "up", "action": "long", "beta": None, "holding_days": 38, "atr14": 1.5, "signal_close": 50.0, "entry": 50.0,
+               "stop": 48.0, "target": 56.0, "risk_per_share": 2.0, "reward_risk": 3.0, "status": "stopped", "fill": 50.2,
+               "fill_date": "2026-11-11", "exit": 48.0, "exit_date": "2026-11-12", "r": -1.1, "bars_held": 2, "gap": False,
+               "ambiguous": None, "sector": "Energy"}
+    old = ss.new_row(tracked, False, "2026-11-17")
+    assert not old["live"] and old["status"] == "stopped" and old["r"] == -1.1 and old["sector"] == "Energy"
+    assert "not applied" in old["original"]["note"]
+
+
+# ---------------------------------------------------------------- main with persist
+
+
+def test_main_persists_and_follows_signals(offline, db, monkeypatch):
+    monkeypatch.setattr(ss, "datatable_query", lambda name=ss.DATA_TABLE: db)
+    first = ss.main(tickers="PULL,BRK", track_days=0, persist=True)["persistence"]
+    assert first["inserted"] == len(first["new"]) > 0 and first["updated"] == 0 and first["run_id"] == 1
+    assert {(r["ticker"], r["status"]) for r in first["new"]} >= {("PULL", "pending"), ("BRK", "pending")}
+    again = ss.main(tickers="PULL,BRK", track_days=0, persist=True)["persistence"]
+    assert again["inserted"] == 0 and again["updated"] == first["inserted"] and again["new"] == []
+    stored = db(ss.LOAD_SQL)
+    assert len(stored) == first["inserted"] and all(r["live"] and r["status"] == "pending" for r in stored)
+
+    # A new session: PULL left the screen and its chart cannot be loaded, BRK is still there.
+    for name in [k for k in offline if k != "_sent"]:
+        offline[name] = offline[name] + [offline[name][-1]]
+    pull_rows = offline.pop("PULL")
+    later = ss.main(tickers="BRK", track_days=0, persist=True)
+    stored = {(r["ticker"], r["strategy"]): r for r in db(ss.LOAD_SQL)}
+    assert stored[("PULL", "pullback")]["data_status"] == "unavailable" and stored[("PULL", "pullback")]["status"] == "pending"
+    assert stored[("PULL", "pullback")]["stale_days"] == 1
+    assert [r["ticker"] for r in later["persistence"]["data_unavailable"]] == ["PULL"]
+    assert stored[("BRK", "breakout")]["status"] in ("open", "skipped") or ("BRK", "breakout") not in stored
+
+    # The data comes back: PULL is followed again even though it is not in the screen.
+    offline["PULL"] = pull_rows + [pull_rows[-1]]
+    ss.main(tickers="BRK", track_days=0, persist=True)
+    pull = db.one("SELECT status, data_status, stale_days FROM screener.signals WHERE ticker = 'PULL' AND strategy = 'pullback'")
+    assert pull["data_status"] == "ok" and pull["stale_days"] == 0 and pull["status"] != "pending"
+    assert db.one("SELECT count(*) AS n FROM screener.runs")["n"] == 4
+
+
+def test_main_backfills_recomputed_signals_as_not_live(offline, db, monkeypatch):
+    monkeypatch.setattr(ss, "datatable_query", lambda name=ss.DATA_TABLE: db)
+    for name in [k for k in offline if k != "_sent"]:
+        offline[name] = offline[name] + [offline[name][-1]] * 2
+    out = ss.main(tickers="PULL,BRK", track_days=5, persist=True)["persistence"]
+    rows = db.conn.execute("SELECT ticker, strategy, live, status FROM screener.signals ORDER BY ticker, strategy").fetchall()
+    assert rows and all(not r["live"] for r in rows) and out["inserted"] == len(rows)
+    assert {r["ticker"] for r in rows} == {"PULL", "BRK"}
+    assert ss.main(tickers="PULL,BRK", track_days=5, persist=True)["persistence"]["inserted"] == 0
+
+
+def test_main_without_persist_never_touches_the_data_table(offline, monkeypatch):
+    monkeypatch.setattr(ss, "datatable_query", lambda name=ss.DATA_TABLE: pytest.fail("data table used"))
+    assert "persistence" not in ss.main(tickers="PULL", track_days=0)
+
+
+def test_email_lists_tracked_signals():
+    market = {"regime": "neutral", "favoured": [], "breadth": {"above_sma200": 5, "sector_etfs": 11},
+              "benchmark": {"ticker": "QQQ", "close": 1.0, "vs_sma200": -0.02, "change_20d": None}}
+    persistence = {"active": [{}], "inserted": 2, "closed_today": [{"ticker": "AAA", "strategy": "pullback", "status": "target", "r": 2.0}],
+                   "data_unavailable": [{"ticker": "ZZZ"}]}
+    html = ss.email_html({"market": market, "candidates": [], "persistence": persistence})
+    assert "1 active, 2 new" in html and "AAA pullback target +2.00R" in html and "Data unavailable: ZZZ" in html

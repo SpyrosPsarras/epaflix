@@ -2,3 +2,5 @@ finviz==2.1.0
 requests==2.34.2
 wmill==1.866.0
 pytest==8.4.2
+pgserver==0.1.4
+psycopg[binary]==3.3.9
