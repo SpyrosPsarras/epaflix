@@ -90,10 +90,15 @@ for status in ("preparing", "starting", "running"):
     make_db(db_busy, ("completed", now - 9000, now - 5000), (status, now - 7000, None))
     near(idle(db_busy, ttys=[now - 9000]), 0)
 
-for status, requested in (("queued", 2 * 86400), ("queued", 60), ("waiting", 7000)):
+for status, requested, expected in (("queued", 2 * 86400, 2 * 86400), ("queued", 60, 60),
+                                    ("waiting", 3600, 0), ("waiting", 25 * 3600, 25 * 3600)):
     db_held = TMP / f"{status}-{requested}.sqlite"
     make_db(db_held, (status, now - requested, None))
-    near(idle(db_held), requested)
+    near(idle(db_held), expected)
+
+db_stale_waiting = TMP / "stale-waiting.sqlite"
+make_db(db_stale_waiting, ("waiting", now - 25 * 3600, None), ("completed", now - 900, now - 600))
+near(idle(db_stale_waiting), 600)
 
 db_requested = TMP / "requested.sqlite"
 make_db(db_requested, ("completed", now - 3000, now - 2500), ("cancelled", now - 1000, None))
