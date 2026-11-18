@@ -7,6 +7,12 @@ A private Discord server with one AI agent per channel. Argo CD app `discord` de
 | `#media` | Discord role `media` | Uses the Seerr, Radarr, Sonarr, Lidarr, Bazarr and Jellyfin APIs. Finds and deletes movies, series and music, and fetches subtitles. Requests movies and series only through Seerr. Adds music in Lidarr. Deletes run without the owner's approval. Radarr, Sonarr and Lidarr keep deleted files in their recycling bin for 7 days. |
 | `#windmill` | Discord role `windmill` | Changes the Windmill workspace. It pushes a `bots/windmill/...` branch, opens a PR and turns on auto-merge. CI fails any bot PR that touches files outside `2-k3s/34.windmill/workspace/`. The bot reports when the PR merged. The deploy runs every minute and pushes it to Windmill. `2-k3s/34.windmill/README.md` has the details. |
 
+## Threads
+
+Each new message in `#media` or `#windmill` opens a thread on that message, and the bot answers only inside it. Each thread is a separate OpenClaw session. Threads close after 7 days without activity, and a new message in a closed thread reopens it. OpenClaw names each thread from its first message with one small model call.
+
+A topic is a thread, whoever started it. On the first message of a new thread, the bot lists the channel's open and closed threads. If one already covers the topic, it replies once with a link to that thread and stays silent in the new thread from then on. That check is the model's judgment, set in each `AGENTS.md`, so it can miss a duplicate or flag one wrongly. `agents.defaults.silentReply.group: "allow"` lets the bot stay silent.
+
 ## Notifications channel
 
 `#notifications` receives homelab alerts through one Discord webhook. No agent reads it. The notifications vault item holds the webhook URL as its password and the `@notifications` role ID in field `roleID`.
@@ -93,6 +99,7 @@ Renovate opens one PR, group `openclaw-discord image`, that moves the base image
 2. Create the Windmill GitHub App with contents and pull requests write, and checks, commit statuses and actions read. Give it no workflows or administration permission. Install it on this repo only and store its private key in the vault.
 3. In Windmill workspace `screener`, create a token for a non-admin user with write access to `f/screener` only, and store it in the vault.
 4. Give yourself both roles, then invite family members and give each the roles they need.
+5. Give both bots Create Public Threads and Send Messages in Threads in their channel.
 
 ## Follow-ups
 

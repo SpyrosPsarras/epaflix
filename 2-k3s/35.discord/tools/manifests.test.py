@@ -95,6 +95,32 @@ class AgentChecks:
         kinds = {doc.get("kind") for path in (DISCORD / self.APP).glob("*.yaml") if not path.name.endswith(".enc.yaml") for doc in documents(f"{self.APP}/{path.name}")}
         self.assertNotIn("Service", kinds)
 
+    def test_agents_md_threads(self):
+        text = (DISCORD / f"{self.APP}/AGENTS.md").read_text()
+        markers = [
+            "## Threads",
+            "Reply only in the current thread.",
+            "Never post in the main channel or in another thread",
+            "never create a thread",
+            "A topic is a thread, whoever started it.",
+            "On the first message of a thread, before anything else",
+            'openclaw message thread list --channel discord --guild-id "$DISCORD_GUILD_ID" --channel-id "$DISCORD_CHANNEL_ID" --json',
+            'openclaw message thread list --channel discord --guild-id "$DISCORD_GUILD_ID" --channel-id "$DISCORD_CHANNEL_ID" --include-archived --json',
+            "--before <nextBefore>",
+            "Skip the current thread.",
+            "openclaw message read --channel discord --target channel:<thread id> --limit 20 --json",
+            "This is already covered in <#thread id>.",
+            "I won't reply in this thread.",
+            "Do not handle the request.",
+            "with `NO_REPLY` only",
+            "Never answer `NO_REPLY` anywhere else.",
+        ]
+        positions = [text.index(marker) for marker in markers]
+        self.assertEqual(positions, sorted(positions))
+        self.assertEqual(re.findall(r"^## .*", text, re.M)[0], "## Threads")
+        self.assertIn(self.SAME_TOPIC, text)
+        self.assertNotIn("in the channel", text)
+
     def test_secret_env_and_readonly_config(self):
         for container in [self.gateway, self.inits["render-config"]]:
             self.assertEqual(container["envFrom"], [{"secretRef": {"name": "openclaw"}}])
@@ -166,6 +192,7 @@ class AgentChecks:
         for model in config["models"]["providers"]["cliproxy"]["models"]:
             self.assertIs(model["reasoning"], True)
         self.assertIs(config["agents"]["defaults"]["skipBootstrap"], True)
+        self.assertEqual(config["agents"]["defaults"]["silentReply"], {"group": "allow"})
         self.assertEqual(config["models"]["providers"]["cliproxy"]["baseUrl"], "http://cliproxy.remote-pi.svc.cluster.local:8317")
         self.assertEqual(config["models"]["providers"]["cliproxy"]["api"], "anthropic-messages")
         self.assertEqual(config["models"]["providers"]["cliproxy"]["apiKey"], "${CLIPROXY_API_KEY}")
@@ -183,7 +210,11 @@ class AgentChecks:
         self.assertEqual(list(discord["guilds"]), ["__DISCORD_GUILD_ID__"])
         channels = discord["guilds"]["__DISCORD_GUILD_ID__"]["channels"]
         self.assertEqual(list(channels), ["__DISCORD_CHANNEL_ID__"])
-        self.assertEqual(channels["__DISCORD_CHANNEL_ID__"]["roles"], ["${DISCORD_ROLE_ID}"])
+        channel = channels["__DISCORD_CHANNEL_ID__"]
+        self.assertEqual(channel["roles"], ["${DISCORD_ROLE_ID}"])
+        self.assertIs(channel["autoThread"], True)
+        self.assertEqual(channel["autoThreadName"], "generated")
+        self.assertEqual(channel["autoArchiveDuration"], 10080)
         generator = documents(f"{self.APP}/kustomization.yaml")[0]["configMapGenerator"][0]
         self.assertEqual(sorted(generator["files"]), self.CONFIG_FILES)
 
@@ -192,6 +223,7 @@ class AgentChecks:
 class MediaTests(AgentChecks, unittest.TestCase):
     APP, NAMESPACE, CONTAINER, RELOAD = "media", "discord-media", "gateway", "openclaw"
     MODEL = "cliproxy/claude-sonnet-5-5"
+    SAME_TOPIC = "the same movie, series, album or artist"
     CONFIG_FILES = ["AGENTS.md", "openclaw.json"]
     EXTRA_EGRESS = {
         ("servarr", (("app", app),), (("TCP", port),))
@@ -245,6 +277,7 @@ class MediaTests(AgentChecks, unittest.TestCase):
 class WindmillTests(AgentChecks, unittest.TestCase):
     APP, NAMESPACE, CONTAINER, RELOAD = "windmill", "discord-windmill", "openclaw", "openclaw,github-app"
     MODEL = "cliproxy/claude-opus-5-5"
+    SAME_TOPIC = "the same Windmill script or flow"
     CONFIG_FILES = ["AGENTS.md", "gh", "gh-token.mjs", "git-credential-gh-token", "gitconfig", "openclaw.json", "scripts-path.sh"]
     EXTRA_EGRESS = set()
 

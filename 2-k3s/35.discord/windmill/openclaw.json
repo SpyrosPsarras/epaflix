@@ -21,7 +21,8 @@
       "model": { "primary": "cliproxy/claude-opus-5-5" },
       "thinkingDefault": "high",
       "sandbox": { "mode": "off" },
-      "skipBootstrap": true
+      "skipBootstrap": true,
+      "silentReply": { "group": "allow" }
     }
   },
   "tools": {
@@ -51,7 +52,7 @@
       "guilds": {
         "__DISCORD_GUILD_ID__": {
           "channels": {
-            "__DISCORD_CHANNEL_ID__": { "enabled": true, "requireMention": false, "roles": ["${DISCORD_ROLE_ID}"] }
+            "__DISCORD_CHANNEL_ID__": { "enabled": true, "requireMention": false, "roles": ["${DISCORD_ROLE_ID}"], "autoThread": true, "autoThreadName": "generated", "autoArchiveDuration": 10080 }
           }
         }
       }
