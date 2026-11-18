@@ -12,12 +12,17 @@ schema:
     - stop
     - target
     - condition
+    - dry_run
   properties:
     condition:
       type: string
       description: Optional filter, e.g. [RSI] < 30
       default: ''
       originalType: string
+    dry_run:
+      type: boolean
+      description: Screen and return the results without sending any email
+      default: false
     email:
       type: string
       description: Where the results go

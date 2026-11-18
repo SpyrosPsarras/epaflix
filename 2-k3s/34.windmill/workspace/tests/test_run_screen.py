@@ -262,3 +262,51 @@ def test_main_prints_run_summary(monkeypatch, outbox, capsys):
     monkeypatch.setattr(rs, "fetch_rows", lambda url: ROWS)
     rs.main(URL, "user@example.com", "[Price]", "[Price] - [ATR]", condition="[RSI] < 30")
     assert re.fullmatch(r"Summary: 3 fetched from Finviz, 1 passed, \d+\.\d\ds\n", capsys.readouterr().out)
+
+
+def test_main_dry_run_returns_results_without_email(monkeypatch, outbox, capsys):
+    monkeypatch.setattr(rs, "fetch_rows", lambda url: ROWS)
+    result = rs.main(URL, "user@example.com", "[Price] * 1.01", "[Price] - 2 * [ATR]", "[Price] + 3 * [ATR]", "[RSI] < 30", dry_run=True)
+    assert outbox == []
+    duration = result.pop("duration_seconds")
+    assert isinstance(duration, float) and duration >= 0
+    assert result == {
+        "dry_run": True,
+        "fetched": 3,
+        "passed": 1,
+        "results": [{"ticker": "AAA", "entry": 10.1, "stop": 7.0, "target": 14.5, "condition": True}],
+        "skipped": [{"ticker": "CCC", "reason": "missing ATR"}],
+    }
+    assert "3 fetched from Finviz, 1 passed" in capsys.readouterr().out
+
+
+def test_main_dry_run_without_optional_rules(monkeypatch, outbox):
+    monkeypatch.setattr(rs, "fetch_rows", lambda url: ROWS[:2])
+    result = rs.main(URL, "user@example.com", "[Price]", "[Price] - [ATR]", dry_run=True)
+    assert outbox == []
+    assert result["results"] == [
+        {"ticker": "AAA", "entry": 10.0, "stop": 8.5, "target": None, "condition": None},
+        {"ticker": "BBB", "entry": 20.0, "stop": 18.0, "target": None, "condition": None},
+    ]
+
+
+def test_main_dry_run_failure_raises_without_email(monkeypatch, outbox):
+    monkeypatch.setattr(rs, "fetch_rows", lambda url: pytest.fail("scraped despite a bad rule"))
+    with pytest.raises(ValueError, match="^entry rule: "):
+        rs.main(URL, "user@example.com", "min()", "[Price]", dry_run=True)
+    assert outbox == []
+
+
+def test_main_default_still_emails_and_returns_list(monkeypatch, outbox):
+    monkeypatch.setattr(rs, "fetch_rows", lambda url: ROWS[:2])
+    result = rs.main(URL, "user@example.com", "[Price]", "[Price] - [ATR]", dry_run=False)
+    assert [m["Ticker"] for m in result] == ["AAA", "BBB"]
+    (to, subject, html, csv_text), = outbox
+    assert "2 matches" in subject and csv_text.startswith("Ticker,")
+
+
+def test_script_schema_lists_dry_run():
+    text = Path(rs.__file__).with_name("run_screen.script.yaml").read_text()
+    assert "    - condition\n    - dry_run\n  properties:" in text
+    assert re.search(r"\n    dry_run:\n      type: boolean\n      description: .+\n      default: false\n", text)
+    assert "- dry_run" not in text.split("required:")[1]
