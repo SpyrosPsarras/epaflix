@@ -30,7 +30,10 @@ OVERRIDES = {
 
 
 def docker(*args, check=True):
-    return subprocess.run(['docker', *args], capture_output=True, text=True, check=check)
+    result = subprocess.run(['docker', *args], capture_output=True, text=True)
+    if check and result.returncode:
+        raise RuntimeError(f'docker {" ".join(args)} exited {result.returncode}: {result.stderr.strip()[-500:]}')
+    return result
 
 
 def wait_for(predicate, seconds):
@@ -58,7 +61,7 @@ class KubeVipFailoverTest(unittest.TestCase):
         docker('network', 'create', '--subnet', SUBNET, NETWORK)
         docker('run', '-d', '--name', f'{PREFIX}-k3s', '--privileged', '--network', NETWORK, '--ip', API_IP,
                K3S, 'server', '--disable', 'traefik,servicelb,metrics-server')
-        if not wait_for(lambda: docker('exec', f'{PREFIX}-k3s', 'kubectl', 'get', '--raw', '/readyz',
+        if not wait_for(lambda: docker('exec', f'{PREFIX}-k3s', 'kubectl', '-n', 'kube-system', 'get', 'lease',
                                        check=False).returncode == 0, 180):
             raise RuntimeError('k3s never became ready')
         kubeconfig = docker('exec', f'{PREFIX}-k3s', 'cat', '/etc/rancher/k3s/k3s.yaml').stdout
