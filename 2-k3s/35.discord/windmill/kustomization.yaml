@@ -28,6 +28,7 @@ configMapGenerator:
       - gh
       - git-credential-gh-token
       - gitconfig
+      - scripts-path.sh
 
 images:
   # Built by build-openclaw-discord.yml from images/openclaw-discord; pin the digest it prints.

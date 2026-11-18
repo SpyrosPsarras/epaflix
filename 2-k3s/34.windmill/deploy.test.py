@@ -33,7 +33,7 @@ class DeployTests(unittest.TestCase):
 
     def test_schedule_and_history(self):
         spec = self.cronjob["spec"]
-        self.assertEqual(spec["schedule"], "*/10 * * * *")
+        self.assertEqual(spec["schedule"], "* * * * *")
         self.assertEqual(spec["concurrencyPolicy"], "Forbid")
         self.assertEqual(spec["successfulJobsHistoryLimit"], 1)
         self.assertEqual(spec["failedJobsHistoryLimit"], 3)

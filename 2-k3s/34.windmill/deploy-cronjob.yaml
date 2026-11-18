@@ -7,7 +7,7 @@ metadata:
   labels:
     app.kubernetes.io/name: windmill-deploy
 spec:
-  schedule: "*/10 * * * *"
+  schedule: "* * * * *"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 3

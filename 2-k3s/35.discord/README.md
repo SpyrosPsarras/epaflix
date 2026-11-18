@@ -5,7 +5,7 @@ A private Discord server with one AI agent per channel. Argo CD app `discord` de
 | Channel | Who sees it | What the agent does |
 | --- | --- | --- |
 | `#media` | Discord role `media` | Uses the Seerr, Radarr, Sonarr, Lidarr, Bazarr and Jellyfin APIs. Finds and deletes movies, series and music, and fetches subtitles. Requests movies and series only through Seerr. Adds music in Lidarr. Deletes run without the owner's approval. Radarr, Sonarr and Lidarr keep deleted files in their recycling bin for 7 days. |
-| `#windmill` | Discord role `windmill` | Changes the Windmill workspace. It pushes a `bots/windmill/...` branch, opens a PR and turns on auto-merge. CI fails any bot PR that touches files outside `2-k3s/34.windmill/workspace/`. After the merge, `windmill-deploy` pushes it to Windmill. `2-k3s/34.windmill/README.md` has the details. |
+| `#windmill` | Discord role `windmill` | Changes the Windmill workspace. It pushes a `bots/windmill/...` branch, opens a PR and turns on auto-merge. CI fails any bot PR that touches files outside `2-k3s/34.windmill/workspace/`. The bot reports when the PR merged. The deploy runs every minute and pushes it to Windmill. `2-k3s/34.windmill/README.md` has the details. |
 
 ## Notifications channel
 
@@ -55,7 +55,7 @@ Alerts: `DiscordAgentErrors` at 5 or more error lines in 15 minutes, `DiscordMod
 
 - Each agent can read every secret in its own pod, including its Discord bot token and CLIProxy key, because OpenClaw's exec tool sees the Gateway's environment and files. The NetworkPolicy does not stop it: an agent can send what it holds to any public HTTPS host. The limit that matters is what each pod holds.
 - The Seerr key is Seerr's admin key. The agent could change Seerr settings or read the Radarr, Sonarr and Jellyfin keys stored there, which it already holds.
-- The `#windmill` agent can read its 1-hour GitHub token. The token works only on this repo, rulesets let it push only `bots/` branches, and the CI path check fails its PRs outside the Windmill workspace.
+- The `#windmill` agent can read its 1-hour GitHub token. The token works only on this repo, ruleset `owner-only` excludes `bots/**` and `bots/**/*`, and the CI path check fails its PRs outside the Windmill workspace.
 - Code the bot merges runs inside `windmill-deploy`, so it could copy the Windmill deploy token into the screener workspace. That is why the token belongs to a non-admin user with write access to `f/screener` only.
 
 ## Rotating a secret

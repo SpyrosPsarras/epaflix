@@ -26,7 +26,7 @@
       "automerge": false
     },
     {
-      "description": "Windmill script requirement headers (2-k3s/34.windmill/workspace/f/**): a bump changes the script, so Windmill re-resolves its lock and the committed run_screen.script.lock/.script.yaml/wmill-lock.yaml go stale, which makes windmill-deploy push a new script version every 10 minutes. Merge by hand, then refresh those files with wmill sync pull (2-k3s/34.windmill/README.md, Deploy).",
+      "description": "Windmill script requirement headers (2-k3s/34.windmill/workspace/f/**): a bump changes the script, so Windmill re-resolves its lock and the committed run_screen.script.lock/.script.yaml/wmill-lock.yaml go stale, which makes windmill-deploy push a new script version on every deploy. Merge by hand, then refresh those files with wmill sync pull (2-k3s/34.windmill/README.md, Deploy).",
       "matchFileNames": ["2-k3s/34.windmill/workspace/**"],
       "automerge": false
     },
