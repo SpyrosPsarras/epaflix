@@ -55,18 +55,13 @@ def iso(ts):
     return datetime.fromtimestamp(ts, timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
-def make_db(path, message=None, item=None, requested=None, completed=None):
+def make_db(path, *runs):
     with sqlite3.connect(path) as c:
-        c.execute("CREATE TABLE orchestration_v2_projection_messages (updated_at TEXT)")
-        c.execute("CREATE TABLE orchestration_v2_projection_turn_items (updated_at TEXT)")
-        c.execute("CREATE TABLE orchestration_v2_projection_runs (requested_at TEXT, completed_at TEXT)")
-        if message:
-            c.execute("INSERT INTO orchestration_v2_projection_messages VALUES (?)", (iso(message),))
-        if item:
-            c.execute("INSERT INTO orchestration_v2_projection_turn_items VALUES (?)", (iso(item),))
-        if requested:
-            c.execute("INSERT INTO orchestration_v2_projection_runs VALUES (?, ?)",
-                      (iso(requested), iso(completed) if completed else None))
+        c.execute("CREATE TABLE orchestration_v2_projection_runs (run_id TEXT PRIMARY KEY, status TEXT NOT NULL,"
+                  " requested_at TEXT NOT NULL, completed_at TEXT)")
+        for i, (status, requested, completed) in enumerate(runs):
+            c.execute("INSERT INTO orchestration_v2_projection_runs VALUES (?, ?, ?, ?)",
+                      (f"run-{i}", status, iso(requested), iso(completed) if completed else None))
 
 
 def idle(db, ttys=()):
@@ -86,18 +81,24 @@ def near(out, expected):
 
 now = time.time()
 db = TMP / "state.sqlite"
-make_db(db, message=now - 4000, item=now - 600, requested=now - 9000, completed=now - 5000)
-near(idle(db), 600)
+make_db(db, ("completed", now - 9000, now - 5000), ("failed", now - 3000, now - 2500))
+near(idle(db), 2500)
 near(idle(db, ttys=[now - 9000, now - 120]), 120)
 
-db2 = TMP / "state2.sqlite"
-make_db(db2, requested=now - 3000, completed=now - 2500)
-near(idle(db2, ttys=[now - 9000]), 2500)
+for status in ("queued", "preparing", "starting", "running", "waiting"):
+    db_busy = TMP / f"{status}.sqlite"
+    make_db(db_busy, ("completed", now - 9000, now - 5000), (status, now - 7000, None))
+    near(idle(db_busy, ttys=[now - 9000]), 0)
 
-db3 = TMP / "empty.sqlite"
-make_db(db3)
-out = idle(db3)
+db_requested = TMP / "requested.sqlite"
+make_db(db_requested, ("completed", now - 3000, now - 2500), ("cancelled", now - 1000, None))
+near(idle(db_requested), 1000)
+
+db_empty = TMP / "empty.sqlite"
+make_db(db_empty)
+out = idle(db_empty)
 assert out.returncode == 0 and int(out.stdout) > 10**9, out
+near(idle(db_empty, ttys=[now - 300]), 300)
 
 assert idle(TMP / "missing.sqlite").returncode != 0
 
