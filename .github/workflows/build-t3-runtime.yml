@@ -19,14 +19,35 @@ jobs:
         variant: [mixed, homelab, work]
     env:
       T3_RUNTIME_VARIANT: ${{ matrix.variant }}
+      LOCAL_IMAGE: ${{ matrix.variant == 'mixed' && 't3-runtime:dev' || format('t3-runtime:{0}-dev', matrix.variant) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Build and boot without production credentials
+      - name: Image references and shared files match their inputs
         run: |
           bash 2-k3s/13.t3code/env/tools/sync-runtime-image.sh
           git diff --exit-code -- 2-k3s/13.t3code/one/statefulset.yaml 2-k3s/13.t3code-homelab/statefulset.yaml 2-k3s/13.t3code-work/statefulset.yaml
           bash 2-k3s/13.t3code/one/tools/sync-shared.sh --check
-          bash 2-k3s/13.t3code/env/tools/smoke.sh
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1
+      - name: Build and save the layer cache PR builds read
+        timeout-minutes: 45
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: 2-k3s/13.t3code
+          file: 2-k3s/13.t3code/env/Dockerfile
+          build-args: T3_RUNTIME_VARIANT=${{ matrix.variant }}
+          tags: ${{ env.LOCAL_IMAGE }}
+          load: true
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=t3-runtime-${{ matrix.variant }}
+          cache-to: type=gha,scope=t3-runtime-${{ matrix.variant }},mode=max,ignore-error=true
+      - name: Boot without production credentials
+        env:
+          T3_RUNTIME_IMAGE: ${{ env.LOCAL_IMAGE }}
+        run: bash 2-k3s/13.t3code/env/tools/smoke.sh
       - name: Log in to GHCR
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
@@ -38,9 +59,9 @@ jobs:
           image=ghcr.io/spyrospsarras/t3-runtime
           variant=${{ matrix.variant }}
           tag=$(bash 2-k3s/13.t3code/env/tools/runtime-tag.sh "$variant")
-          source=t3-runtime:dev
+          source=$LOCAL_IMAGE
           prefix=
-          if [[ $variant != mixed ]]; then source=t3-runtime:$variant-dev; prefix=$variant-; fi
+          if [[ $variant != mixed ]]; then prefix=$variant-; fi
           for target in "${prefix}inputs-$tag" "${prefix}${{ github.sha }}" "${prefix}latest"; do
             docker tag "$source" "$image:$target"
             for attempt in 1 2 3; do docker push "$image:$target" && break; [[ $attempt == 3 ]] && exit 1; sleep $((attempt * 15)); done

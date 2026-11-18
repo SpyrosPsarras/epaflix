@@ -87,6 +87,12 @@ jobs:
           ./.github/hooks/test-unittest-shard.sh
           EOF
 
+      - name: Cache CI tools
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-tools
+          key: ci-tools-${{ github.job }}-${{ env.HELM_VERSION }}-${{ env.KUSTOMIZE_VERSION }}-${{ env.PROMTOOL_VERSION }}-${{ hashFiles('.github/scripts/install-ci-tools.sh') }}
+
       - name: Install tools
         run: bash .github/scripts/install-ci-tools.sh helm kustomize
 
@@ -111,11 +117,24 @@ jobs:
           print("All YAML parses cleanly.")
           PY
 
+      - name: Week for the Helm chart cache
+        id: week
+        run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Helm charts
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/helm-charts
+          key: helm-charts-${{ steps.week.outputs.week }}-${{ hashFiles('2-k3s/**/kustomization.yaml') }}
+          restore-keys: helm-charts-${{ steps.week.outputs.week }}-
+
       - name: Helm chart pins resolve
         run: |
           python3 - <<'PY'
-          import glob, subprocess, sys, yaml, os, time
+          import glob, hashlib, pathlib, shutil, subprocess, sys, tarfile, yaml, os, time
           os.makedirs("/tmp/charts", exist_ok=True)
+          cache = pathlib.Path.home() / ".cache/helm-charts"
+          used = set()
 
           def helm_pull(cmd, attempts=6):
               for i in range(attempts):
@@ -147,14 +166,24 @@ jobs:
                   print(f"[{f}] {name} {ver} <- {repo}")
                   key = (name, repo, ver)
                   if key not in pulled:
-                      if repo.startswith("oci://"):
-                          cmd = ["helm", "pull", f"{repo}/{name}", "--version", ver, "-d", "/tmp/charts", "--untar"]
+                      d = cache / hashlib.sha256("\n".join(key).encode()).hexdigest()[:16]
+                      used.add(d.name)
+                      if not list(d.glob("*.tgz")):
+                          d.mkdir(parents=True, exist_ok=True)
+                          if repo.startswith("oci://"):
+                              cmd = ["helm", "pull", f"{repo}/{name}", "--version", ver, "-d", str(d)]
+                          else:
+                              cmd = ["helm", "pull", name, "--repo", repo, "--version", ver, "-d", str(d)]
+                          r = helm_pull(cmd)
+                          if r.returncode != 0:
+                              shutil.rmtree(d, ignore_errors=True)
+                              fail.append(f"{name} {ver} ({repo}): {r.stderr.strip()}")
+                              continue
                       else:
-                          cmd = ["helm", "pull", name, "--repo", repo, "--version", ver, "-d", "/tmp/charts", "--untar"]
-                      r = helm_pull(cmd)
-                      if r.returncode != 0:
-                          fail.append(f"{name} {ver} ({repo}): {r.stderr.strip()}")
-                          continue
+                          print("  from cache")
+                      shutil.rmtree(f"/tmp/charts/{name}", ignore_errors=True)
+                      with tarfile.open(next(d.glob("*.tgz"))) as tgz:
+                          tgz.extractall("/tmp/charts", filter="data")
                       pulled.add(key)
                   vf = c.get("valuesFile")
                   tcmd = ["helm", "template", name, f"/tmp/charts/{name}"]
@@ -165,6 +194,9 @@ jobs:
                   t = subprocess.run(tcmd, capture_output=True, text=True)
                   if t.returncode != 0:
                       fail.append(f"{name} {ver} values schema: {t.stderr.strip()}")
+          for stale in cache.glob("*"):
+              if stale.name not in used:
+                  shutil.rmtree(stale)
           if fail:
               print("\nUnresolvable Helm chart pins or invalid values:")
               print("\n".join(fail))
@@ -290,6 +322,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Cache CI tools
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-tools
+          key: ci-tools-${{ github.job }}-${{ env.HELM_VERSION }}-${{ env.KUSTOMIZE_VERSION }}-${{ env.PROMTOOL_VERSION }}-${{ hashFiles('.github/scripts/install-ci-tools.sh') }}
+
       - name: Install tools
         run: |
           set -euo pipefail
@@ -324,6 +362,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Cache CI tools
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-tools
+          key: ci-tools-${{ github.job }}-${{ env.HELM_VERSION }}-${{ env.KUSTOMIZE_VERSION }}-${{ env.PROMTOOL_VERSION }}-${{ hashFiles('.github/scripts/install-ci-tools.sh') }}
 
       - name: Install test dependencies
         run: |
@@ -364,6 +408,12 @@ jobs:
       SHARD: ${{ matrix.shard }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Cache CI tools
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-tools
+          key: ci-tools-${{ github.job }}-${{ env.HELM_VERSION }}-${{ env.KUSTOMIZE_VERSION }}-${{ env.PROMTOOL_VERSION }}-${{ hashFiles('.github/scripts/install-ci-tools.sh') }}
 
       - name: Install test dependencies
         run: |
@@ -460,8 +510,8 @@ jobs:
         with:
           fetch-depth: 2
 
-      - name: T3 install and runtime smoke
-        timeout-minutes: 75
+      - name: Pick the runtime image
+        id: image
         env:
           VARIANT: ${{ matrix.variant }}
           EVENT: ${{ github.event_name }}
@@ -471,6 +521,7 @@ jobs:
           if [[ $EVENT == pull_request ]] && git diff --quiet HEAD^1 HEAD -- \
             2-k3s/13.t3code 2-k3s/13.t3code-homelab 2-k3s/13.t3code-work .github/workflows/ci.yml .github/workflows/build-t3-runtime.yml; then
             echo "No T3 runtime input changed, so the smoke is skipped."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           prefix=
@@ -478,11 +529,40 @@ jobs:
           image=ghcr.io/spyrospsarras/t3-runtime:${prefix}inputs-$(bash 2-k3s/13.t3code/env/tools/runtime-tag.sh "$VARIANT")
           # The tag hashes every image input, so a published image with it was built from these files.
           if docker pull -q "$image"; then
-            export T3_RUNTIME_IMAGE=$image
+            echo "ref=$image" >> "$GITHUB_OUTPUT"
           else
-            echo "No published $image, so smoke.sh builds it."
+            echo "No published $image, so it is built here."
+            echo "ref=t3-runtime:ci-$VARIANT" >> "$GITHUB_OUTPUT"
+            echo "build=true" >> "$GITHUB_OUTPUT"
           fi
-          T3_RUNTIME_VARIANT="$VARIANT" bash 2-k3s/13.t3code/env/tools/smoke.sh
+
+      - name: Set up Buildx
+        if: steps.image.outputs.build == 'true'
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1
+
+      - name: Build the runtime image from the main branch layer cache
+        if: steps.image.outputs.build == 'true'
+        timeout-minutes: 45
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: 2-k3s/13.t3code
+          file: 2-k3s/13.t3code/env/Dockerfile
+          build-args: T3_RUNTIME_VARIANT=${{ matrix.variant }}
+          tags: ${{ steps.image.outputs.ref }}
+          load: true
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=t3-runtime-${{ matrix.variant }}
+
+      - name: T3 install and runtime smoke
+        if: steps.image.outputs.skip != 'true'
+        timeout-minutes: 75
+        env:
+          T3_RUNTIME_VARIANT: ${{ matrix.variant }}
+          T3_RUNTIME_IMAGE: ${{ steps.image.outputs.ref }}
+        run: bash 2-k3s/13.t3code/env/tools/smoke.sh
 
   kube-vip:
     if: >-
@@ -491,6 +571,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Cache CI tools
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-tools
+          key: ci-tools-${{ github.job }}-${{ env.HELM_VERSION }}-${{ env.KUSTOMIZE_VERSION }}-${{ env.PROMTOOL_VERSION }}-${{ hashFiles('.github/scripts/install-ci-tools.sh') }}
 
       - name: Install test dependencies
         run: |

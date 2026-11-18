@@ -416,21 +416,26 @@ class WorkRuntimeTests(unittest.TestCase):
         build = workflow['jobs']['build']
         self.assertEqual(build['strategy']['matrix']['variant'], ['mixed', 'homelab', 'work'])
         steps = {step.get('name'): step for step in build['steps'] if 'name' in step}
-        verification = steps['Build and boot without production credentials']['run']
+        verification = steps['Image references and shared files match their inputs']['run']
+        self.assertEqual(steps['Build and save the layer cache PR builds read']['with']['build-args'],
+                         'T3_RUNTIME_VARIANT=${{ matrix.variant }}')
+        self.assertIn('smoke.sh', steps['Boot without production credentials']['run'])
         for name in ('13.t3code/one', '13.t3code-homelab', '13.t3code-work'):
             self.assertIn(f'2-k3s/{name}/statefulset.yaml', verification)
         publish = steps['Publish the tested image']['run']
         self.assertIn('ghcr.io/spyrospsarras/t3-runtime', publish)
-        self.assertIn('source=t3-runtime:$variant-dev; prefix=$variant-', publish)
+        self.assertIn('source=$LOCAL_IMAGE', publish)
+        self.assertEqual(build['env']['LOCAL_IMAGE'], "${{ matrix.variant == 'mixed' && 't3-runtime:dev' || format('t3-runtime:{0}-dev', matrix.variant) }}")
         ci = yaml.load((ROOT.parents[1] / '.github/workflows/ci.yml').read_text(), Loader=yaml.BaseLoader)
         ci_steps = {step.get('name'): step for job in ci['jobs'].values()
                     for step in job['steps'] if 'name' in step}
         self.assertIn('2-k3s/13.t3code-work', ci_steps['Kustomize build (sops-free dirs)']['run'])
         self.assertIn('work-runtime.test.py', ci_steps['T3 config and placement tests']['run'])
-        smoke = ci_steps['T3 install and runtime smoke']['run']
+        smoke = ci_steps['T3 install and runtime smoke']
         self.assertEqual(ci['jobs']['smoke']['strategy']['matrix']['variant'], ['mixed', 'homelab', 'work'])
-        self.assertIn('T3_RUNTIME_VARIANT="$VARIANT"', smoke)
-        self.assertIn('2-k3s/13.t3code 2-k3s/13.t3code-homelab 2-k3s/13.t3code-work', smoke)
+        self.assertEqual(smoke['env']['T3_RUNTIME_VARIANT'], '${{ matrix.variant }}')
+        self.assertIn('smoke.sh', smoke['run'])
+        self.assertIn('2-k3s/13.t3code 2-k3s/13.t3code-homelab 2-k3s/13.t3code-work', ci_steps['Pick the runtime image']['run'])
         pins = ci_steps['Runtime image pins match their inputs']['run']
         for name in ('13.t3code/one', '13.t3code-homelab', '13.t3code-work'):
             self.assertIn(f'2-k3s/{name}/statefulset.yaml', pins)
