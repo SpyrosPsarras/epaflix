@@ -8,6 +8,7 @@ import io
 import math
 import re
 import smtplib
+import time
 from datetime import date
 from email.message import EmailMessage
 from html import escape
@@ -174,6 +175,7 @@ def to_csv(matches):
 
 
 def main(finviz_url: str, email: str, entry: str, stop: str, target: str = "", condition: str = "") -> list[dict]:
+    started = time.monotonic()
     try:
         rules = {name: (rule or "").strip() for name, rule in
                  {"entry": entry, "stop": stop, "target": target, "condition": condition}.items()}
@@ -188,10 +190,12 @@ def main(finviz_url: str, email: str, entry: str, stop: str, target: str = "", c
                     compile_rule(rule)
                 except ValueError as error:
                     raise ValueError(f"{name} rule: {error}") from None
-        matches, skipped = screen(fetch_rows(finviz_url), rules)
+        rows = fetch_rows(finviz_url)
+        matches, skipped = screen(rows, rules)
     except Exception as error:
         send_email(email, f"Screener {date.today()}: failed", f"<p>The screen failed:</p><pre>{escape(str(error))}</pre>", None)
         raise
     count = len(matches)
     send_email(email, f"Screener {date.today()}: {count} match{'' if count == 1 else 'es'}", to_html(matches, skipped), to_csv(matches))
+    print(f"Summary: {len(rows)} fetched from Finviz, {count} passed, {time.monotonic() - started:.2f}s")
     return matches
