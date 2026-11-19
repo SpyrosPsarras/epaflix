@@ -75,6 +75,16 @@ spec:
               value: "true"
             - name: FORGEJO__service__REQUIRE_SIGNIN_VIEW
               value: "true"
+            - name: FORGEJO__service__ENABLE_REVERSE_PROXY_AUTHENTICATION
+              value: "true"
+            - name: FORGEJO__service__ENABLE_REVERSE_PROXY_AUTO_REGISTRATION
+              value: "true"
+            - name: FORGEJO__security__REVERSE_PROXY_AUTHENTICATION_USER
+              value: X-authentik-username
+            - name: FORGEJO__security__REVERSE_PROXY_TRUSTED_PROXIES
+              value: 10.42.0.0/16
+            - name: FORGEJO__repository__ENABLE_PUSH_CREATE_USER
+              value: "true"
             - name: FORGEJO__mailer__ENABLED
               value: "false"
             - name: FORGEJO__oauth2__ENABLED

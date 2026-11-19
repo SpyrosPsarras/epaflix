@@ -44,10 +44,10 @@ rackpeek-sync CronJob (repo homelab-live) ──┘
   - `FORGEJO__server__DISABLE_SSH=true`, `ROOT_URL=https://git.epaflix.com`, `FORGEJO__service__DISABLE_REGISTRATION=true`, no mailer
 - Ingress: IngressRoute modeled on `2-k3s/27.speedtest/ingress.yaml`. It uses `security-headers` and `authentik-forwardauth`, has the outpost path at priority 15, and redirects http.
 - Authentik blueprint (`2-k3s/07.authentik-deployment/authentik-iac-blueprint.enc.yaml`): proxy provider `forward_single`, application, binding to `authentik Admins`, outpost membership.
-- Login: Authentik forward-auth, then Forgejo's own login. Forgejo OIDC is out of scope.
+- Login: Authentik only. Forgejo trusts the `X-authentik-username` header from Traefik (`ENABLE_REVERSE_PROXY_AUTHENTICATION`, auto-registration). Forgejo does not check who sends the header, so the NetworkPolicy is the only guard: Traefik replaces the header with Authentik's value, and pods in namespace `rackpeek` can reach Forgejo directly and act as any web user, including the admin. Only RackPeek runs there. The API is not header-authenticated, so the bot uses tokens. PR 2 must check that RackPeek's first Git action on the empty remote is a push. Forgejo OIDC is out of scope. Not exposed to the internet; LAN and Tailscale only.
 - Network policy: ingress from Traefik and from namespace `rackpeek` on the HTTP port. Egress to Postgres and DNS.
 - DNS: `git.epaflix.com` in `1-proxmox/pihole/dnsmasq.d/10-epaflix.conf` and a local-zone in `1-proxmox/pihole/unbound-no-aaaa-leak.conf`. Pi-hole is not managed by Argo. After merge, the files are copied to the Pi-hole container and it restarts, as described in `1-proxmox/pihole/README.md`. That is a live change and needs the owner's OK.
-- Owner steps after deploy: create the admin account, the bot user `rackpeek-bot`, the private repos `rackpeek-config` and `homelab-live`, and two `write:repository` tokens. A hidden-input script writes the tokens to SOPS.
+- Owner steps after deploy, from the owner's terminal with the `forgejo admin user` CLI: create the admin account under the owner's Authentik username, the bot user `rackpeek-bot`, and two `write:repository` tokens. The bot's first push creates the private repos `rackpeek-config` and `homelab-live` (`ENABLE_PUSH_CREATE_USER`). A hidden-input script writes the tokens to SOPS.
 
 ### RackPeek (PR 2, `2-k3s/37.rackpeek`)
 
