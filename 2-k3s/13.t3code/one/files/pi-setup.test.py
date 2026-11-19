@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
+from urllib.error import HTTPError
 
 
 ROOT = Path(__file__).resolve().parent
@@ -42,6 +43,11 @@ class SetupTests(unittest.TestCase):
                                              'CLIPROXYAPI_API_KEY': 'fake-key'})
         environment.start()
         self.addCleanup(environment.stop)
+        fetch = patch('urllib.request.urlopen')
+        self.urlopen = fetch.start()
+        self.addCleanup(fetch.stop)
+        self.model_response = self.urlopen.return_value.__enter__.return_value
+        self.model_response.read.return_value = b'{"data": []}'
 
     def write(self, base_url='http://proxy.test', instance='homelab'):
         with patch.dict(os.environ, {'ANTHROPIC_BASE_URL': base_url, 'MCP_HUB_INSTANCE': instance,
@@ -55,6 +61,87 @@ class SetupTests(unittest.TestCase):
                 'or-glm-5.3-flash': 'openrouter/z-ai/glm-5.3-flash',
                 'or-deepseek-v4-flash': 'openrouter/deepseek/deepseek-v4-flash',
                 'or-minimax-m3:free': 'openrouter/minimax/minimax-m3'}})
+
+    def test_account_claude_models_get_aliases_and_overrides(self):
+        self.model_response.read.return_value = b'''{"data": [
+            {"id": "acme/claude-opus-5-5", "owned_by": "anthropic"},
+            {"id": "team/claude-fable-5-2", "owned_by": "anthropic"},
+            {"id": "acme/claude-haiku-5-5", "owned_by": "anthropic"},
+            {"id": "acme/claude-opus-4-6-thinking", "owned_by": "anthropic"},
+            {"id": "claude-opus-5-5", "owned_by": "anthropic"},
+            {"id": "openrouter/deepseek-v4-flash", "owned_by": "openrouter"},
+            {"id": "codex/gpt-5-6", "owned_by": "openai"}
+        ]}'''
+        path = self.agent / 'models.json'
+        path.write_text(json.dumps({'userKey': True, 'providers': {'cliproxy': {'modelOverrides': {
+            'claude-opus-5-5': {'contextWindow': 512000},
+            'old/claude-opus-5-5': {'name': 'Old Opus 5.5'}}}}}))
+        self.write()
+        config = json.loads((self.agent / 'pi-cliproxyapi-provider/config.json').read_text())
+        self.assertEqual(config['modelAliases'], {**self.setup.ALIASES,
+            'acme/claude-opus-5-5': 'anthropic/claude-opus-5-5',
+            'team/claude-fable-5-2': 'anthropic/claude-fable-5-2',
+            'acme/claude-haiku-5-5': 'anthropic/claude-haiku-5-5'})
+        models = json.loads(path.read_text())
+        self.assertTrue(models['userKey'])
+        self.assertEqual(models['providers']['cliproxy']['modelOverrides'], {
+            'claude-opus-5-5': {'contextWindow': 512000},
+            'claude-haiku-5-5': {'contextWindow': 100000},
+            'acme/claude-opus-5-5': {'name': 'Acme Opus 5.5'},
+            'team/claude-fable-5-2': {'name': 'Team Fable 5.2'},
+            'acme/claude-haiku-5-5': {'name': 'Acme Haiku 5.5', 'contextWindow': 100000}})
+
+    def test_model_request_uses_proxy_endpoint_and_anthropic_token_once(self):
+        token = 'fixture-key'
+        with patch.dict(os.environ, {'ANTHROPIC_AUTH_TOKEN': token,
+                                     'ANTHROPIC_BASE_URL': 'http://proxy.test///'}):
+            self.setup.write(self.home, self.safety, self.ssh)
+        self.urlopen.assert_called_once()
+        request = self.urlopen.call_args.args[0]
+        self.assertEqual(request.full_url, 'http://proxy.test/v1/models')
+        self.assertEqual(request.get_method(), 'GET')
+        self.assertEqual(request.get_header('Authorization'), f'Bearer {token}')
+        self.assertEqual(self.urlopen.call_args.kwargs['timeout'], 5)
+
+    def test_missing_anthropic_token_skips_model_request(self):
+        with patch.dict(os.environ), contextlib.redirect_stderr(io.StringIO()) as errors:
+            os.environ.pop('ANTHROPIC_AUTH_TOKEN')
+            self.setup.write(self.home, self.safety, self.ssh)
+        self.urlopen.assert_not_called()
+        self.assertEqual(errors.getvalue(),
+                         'pi-setup: proxy model list unavailable; account model entries skipped\n')
+
+    def test_model_fetch_failures_warn_without_secrets_and_keep_static_config(self):
+        token = 'fixture-key'
+        for failure, error, response in [
+            ('network', OSError(token), b''),
+            ('HTTP status', HTTPError('http://proxy.test/v1/models', 401, token, None, None), b''),
+            ('bad JSON', None, b'{broken'),
+            ('invalid model list', None, b'{"data": null}'),
+        ]:
+            with self.subTest(failure=failure):
+                path = self.agent / 'models.json'
+                path.write_text(json.dumps({'userKey': True, 'providers': {'cliproxy': {'modelOverrides': {
+                    'old/claude-opus-5-5': {'name': 'Old Opus 5.5'},
+                    'old/claude-haiku-5-5': {'name': 'Old Haiku 5.5', 'contextWindow': 100000},
+                    'old/claude-opus-4-6-thinking': {'name': 'Custom Thinking'},
+                    'claude-haiku-5-5': {'contextWindow': 100000}}}}}))
+                self.urlopen.side_effect = error
+                self.model_response.read.return_value = response
+                with patch.dict(os.environ, {'ANTHROPIC_AUTH_TOKEN': token}), \
+                        contextlib.redirect_stderr(io.StringIO()) as errors:
+                    self.setup.write(self.home, self.safety, self.ssh)
+                self.assertNotIn(token, errors.getvalue())
+                self.assertEqual(errors.getvalue(),
+                                 'pi-setup: proxy model list unavailable; account model entries skipped\n')
+                config = json.loads((self.agent / 'pi-cliproxyapi-provider/config.json').read_text())
+                self.assertEqual(config['modelAliases'], self.setup.ALIASES)
+                models = json.loads(path.read_text())
+                self.assertTrue(models['userKey'])
+                self.assertEqual(models['providers']['cliproxy']['modelOverrides'], {
+                    'old/claude-opus-4-6-thinking': {'name': 'Custom Thinking'},
+                    'claude-haiku-5-5': {'contextWindow': 100000}})
+                self.assertIn('cliproxy-textgen', models['providers'])
 
     def test_work_settings_load_davidhorn_skills_from_clone(self):
         self.write(instance='work')
@@ -159,6 +246,7 @@ class SetupTests(unittest.TestCase):
                     with patch.dict(os.environ, environment, clear=True):
                         with contextlib.redirect_stderr(io.StringIO()) as errors:
                             self.setup.write(self.home, self.safety, self.ssh)
+                    self.urlopen.assert_not_called()
                     self.assertIn('pi-setup: ANTHROPIC_BASE_URL is empty; previous models.json kept', errors.getvalue())
                     self.assertIn('pi-setup: ANTHROPIC_BASE_URL is empty; previous provider config kept', errors.getvalue())
                     self.assertEqual(path.exists(), existing)
@@ -244,7 +332,8 @@ print('wrapper OK')
         settings = self.agent / 'settings.json'
         settings.write_text('{broken')
         result = subprocess.run(['python3', str(ROOT / 'pi-setup.py'), 'write',
-                                 str(self.home), self.safety], capture_output=True, text=True)
+                                 str(self.home), self.safety], capture_output=True, text=True,
+                                env={**os.environ, 'ANTHROPIC_BASE_URL': ''})
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('pi-setup write: JSONDecodeError:', result.stderr)
 

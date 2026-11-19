@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Write Pi startup configuration without exposing credentials."""
 import argparse
+from http.client import HTTPException
 import json
 import os
 from pathlib import Path
+import re
 import sys
 import tempfile
+import urllib.request
 
 
 PACKAGES = ['pi-cliproxyapi-provider',
@@ -16,6 +19,8 @@ ALIASES = {
     'or-glm-5.3-flash': 'openrouter/z-ai/glm-5.3-flash',
     'or-deepseek-v4-flash': 'openrouter/deepseek/deepseek-v4-flash',
     'or-minimax-m3:free': 'openrouter/minimax/minimax-m3'}
+ACCOUNT_CLAUDE_ID = re.compile(r'([a-z0-9][a-z0-9-]*)/(claude-([a-z]+)-(\d+(?:-\d+)*))')
+HAIKU_CONTEXT_WINDOW = 100000
 
 
 def atomic_write(path, content):
@@ -33,25 +38,59 @@ def write_json(path, data):
     atomic_write(path, json.dumps(data, indent=2) + '\n')
 
 
-def write_provider(home):
-    base_url = os.environ.get('ANTHROPIC_BASE_URL', '').rstrip('/')
+def fetch_account_models(base_url):
+    aliases, overrides = {}, {}
+    if not base_url:
+        return aliases, overrides
+    try:
+        token = os.environ.get('ANTHROPIC_AUTH_TOKEN')
+        if not token:
+            raise ValueError
+        request = urllib.request.Request(base_url + '/v1/models')
+        request.add_unredirected_header('Authorization', f'Bearer {token}')
+        with urllib.request.urlopen(request, timeout=5) as response:
+            payload = json.load(response)
+        if not isinstance(payload, dict) or not isinstance(payload.get('data'), list):
+            raise ValueError
+    except (HTTPException, OSError, ValueError, RecursionError):
+        print('pi-setup: proxy model list unavailable; account model entries skipped', file=sys.stderr)
+        return aliases, overrides
+
+    for model in payload['data']:
+        model_id = model.get('id') if isinstance(model, dict) else None
+        match = ACCOUNT_CLAUDE_ID.fullmatch(model_id) if isinstance(model_id, str) else None
+        if not match:
+            continue
+        prefix, claude_id, family, version = match.groups()
+        aliases[model_id] = 'anthropic/' + claude_id
+        override = {'name': f"{prefix.capitalize()} {family.capitalize()} {version.replace('-', '.')}"}
+        if family == 'haiku':
+            override['contextWindow'] = HAIKU_CONTEXT_WINDOW
+        overrides[model_id] = override
+    return aliases, overrides
+
+
+def write_provider(home, base_url, account_aliases):
     if not base_url:
         print('pi-setup: ANTHROPIC_BASE_URL is empty; previous provider config kept', file=sys.stderr)
         return
     write_json(home / '.pi/agent/pi-cliproxyapi-provider/config.json', {
-        'providerName': 'cliproxy', 'baseUrl': base_url + '/v1', 'modelAliases': ALIASES})
+        'providerName': 'cliproxy', 'baseUrl': base_url + '/v1', 'modelAliases': {**ALIASES, **account_aliases}})
 
 
-def write_models(home):
-    base_url = os.environ.get('ANTHROPIC_BASE_URL', '').rstrip('/')
+def write_models(home, base_url, account_overrides):
     if not base_url:
         print('pi-setup: ANTHROPIC_BASE_URL is empty; previous models.json kept', file=sys.stderr)
         return
     path = home / '.pi/agent/models.json'
     models = json.loads(path.read_text()) if path.exists() else {}
     providers = models.setdefault('providers', {})
-    providers.setdefault('cliproxy', {}).setdefault('modelOverrides', {})['claude-haiku-5-5'] = {
-        'contextWindow': 100000}
+    overrides = providers.setdefault('cliproxy', {}).setdefault('modelOverrides', {})
+    for model_id in tuple(overrides):
+        if ACCOUNT_CLAUDE_ID.fullmatch(model_id):
+            del overrides[model_id]
+    overrides['claude-haiku-5-5'] = {'contextWindow': HAIKU_CONTEXT_WINDOW}
+    overrides.update(account_overrides)
     providers['cliproxy-textgen'] = {
         'baseUrl': base_url, 'api': 'anthropic-messages', 'apiKey': '$CLIPROXYAPI_API_KEY',
         'models': [{'id': 'claude-haiku-5-5', 'name': 'Claude Haiku 5.5 (text generation)',
@@ -74,8 +113,10 @@ def write(home, safety_entry, ssh_path=Path('/scripts/homelab-ssh.md')):
     settings.setdefault('pi-cliproxyapi-provider', {})['gpt56ContextWindow'] = 'canonical'
     settings.setdefault('retry', {})['maxRetries'] = 8
     write_json(settings_path, settings)
-    write_models(home)
-    write_provider(home)
+    base_url = os.environ.get('ANTHROPIC_BASE_URL', '').rstrip('/')
+    account_aliases, account_overrides = fetch_account_models(base_url)
+    write_models(home, base_url, account_overrides)
+    write_provider(home, base_url, account_aliases)
     try:
         instructions = (home / '.claude/AGENTS.md').read_text() + '\n' + ssh_path.read_text()
     except OSError:
