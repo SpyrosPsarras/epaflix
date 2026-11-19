@@ -28,8 +28,8 @@ PROMETHEUS = {
 }
 # vpn-picker's only port is its LoadBalancer port, which arrives from a node address.
 OPEN = {"vpn-picker"}
-# These older policies name each caller instead of admitting the whole namespace.
-NAMED_CALLERS = {"lidarr", "navidrome", "digarr"}
+# These policies name each caller instead of admitting the whole namespace.
+NAMED_CALLERS = {"lidarr", "navidrome", "digarr", "tdarr"}
 # qBittorrent's peers arrive inside the VPN tunnel in the pod, not over the pod network.
 CLOSED = {("qbittorrent", "bt-tcp"), ("qbittorrent", "bt-udp")}
 
@@ -77,10 +77,18 @@ def admitted(app, port):
 class ServarrNetworkPolicyTests(unittest.TestCase):
     def test_each_app_has_exactly_one_ingress_only_policy(self):
         policies = kind("NetworkPolicy")
-        self.assertEqual(sorted(policy["metadata"]["name"] for policy in policies), [f"{app}-ingress" for app in APPS])
+        expected = [f"{app}-ingress" for app in APPS]
+        if "tdarr" in APPS:
+            expected.append("tdarr-node-egress")
+        self.assertCountEqual([policy["metadata"]["name"] for policy in policies], expected)
         for policy in policies:
             name, spec = policy["metadata"]["name"], policy["spec"]
             with self.subTest(policy=name):
+                if name == "tdarr-node-egress":
+                    self.assertEqual(spec["podSelector"], {"matchLabels": {"app": "tdarr-node"}})
+                    self.assertEqual(spec["policyTypes"], ["Egress"])
+                    self.assertNotIn("ingress", spec)
+                    continue
                 self.assertEqual(spec["podSelector"], {"matchLabels": {"app": name.removesuffix("-ingress")}})
                 self.assertEqual(spec["policyTypes"], ["Ingress"])
                 self.assertNotIn("egress", spec)
@@ -103,6 +111,17 @@ class ServarrNetworkPolicyTests(unittest.TestCase):
                     self.assertTrue(peers)
                     if app not in NAMED_CALLERS and (app, port["name"]) not in SCRAPED:
                         self.assertIn(SAME_NAMESPACE, peers)
+
+    def test_media_bot_can_only_reach_tdarr_proxy(self):
+        if "tdarr" not in SERVICES:
+            self.skipTest("Tdarr is not deployed")
+        media_bot = {
+            "namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "discord-media"}},
+            "podSelector": {"matchLabels": {"app.kubernetes.io/name": "openclaw"}},
+        }
+        self.assertEqual(admitted(*pod_port("tdarr", 8265)), [TRAEFIK])
+        self.assertEqual(admitted(*pod_port("tdarr", 8266)), [{"podSelector": {"matchLabels": {"app": "tdarr-node"}}}])
+        self.assertEqual(admitted(*pod_port("tdarr", 8267)), [media_bot])
 
     def test_routed_apps_admit_traefik(self):
         for route in kind("IngressRoute"):

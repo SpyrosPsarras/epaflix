@@ -96,6 +96,15 @@ spec:
       ports:
         - {protocol: TCP, port: 8096}
     - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: servarr
+          podSelector:
+            matchLabels:
+              app: tdarr
+      ports:
+        - {protocol: TCP, port: 8267}
+    - to:
         - ipBlock:
             cidr: 0.0.0.0/0
             except:

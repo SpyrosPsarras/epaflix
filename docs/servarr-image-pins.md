@@ -59,3 +59,5 @@ RENOVATE_ROOT=/tmp/servarr-renovate/node_modules/renovate node .github/hooks/tes
 The check invokes Renovate's actual Kustomize extractor, versioning APIs, update classifier and ordered package rules. It checks valid digest-bearing dependencies, Sonarr 4 to 5 classification, patch discovery, automerge for digest, patch and minor updates but not majors, and the development-image exceptions. Registry tag-to-digest checks are separate because tags can legitimately be rebuilt after this change.
 
 The issue's withdrawn `imagePullPolicy` item does not require a manifest change. A changed digest changes the pod template and starts a rollout regardless of pull policy.
+
+Tdarr server and node were added at `3.08.00` (`ghcr.io/haveagitgat/tdarr@sha256:84743e5ae433a5b49cb463b2dff2679eb02f0cac24fb88c830f49bf8aa9f1c04`, `ghcr.io/haveagitgat/tdarr_node@sha256:25153299cc9c2fcd99202cc36171c2e42ba7ef11823959c018e5c5bf2733581f`). Renovate group `tdarr` moves both together without automerge; bump `tdarr/plugins.sha256` and the plugin commit only after checking the DoVi plugins against the new release.

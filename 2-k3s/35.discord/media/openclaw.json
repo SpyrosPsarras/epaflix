@@ -27,6 +27,8 @@
   },
   "tools": {
     "profile": "coding",
+    "alsoAllow": ["message"],
+    "message": { "actions": { "allow": ["thread-list", "read"] } },
     "exec": { "host": "gateway", "mode": "full" },
     "web": { "search": { "provider": "searxng" } }
   },

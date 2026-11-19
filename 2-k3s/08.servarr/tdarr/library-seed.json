@@ -1,0 +1,118 @@
+{
+  "settings": {
+    "cache": "/temp",
+    "mediaInfoScan": true,
+    "flowId": "lg-c1-compat",
+    "pluginIDs": [],
+    "decisionMaker": {
+      "settingsPlugin": false,
+      "settingsFlows": true,
+      "settingsVideo": false,
+      "videoExcludeSwitch": true,
+      "video_codec_names_exclude": [
+        {
+          "codec": "hevc",
+          "checked": false
+        },
+        {
+          "codec": "h264",
+          "checked": true
+        }
+      ],
+      "video_size_range_include": {
+        "min": 0,
+        "max": 100000
+      },
+      "video_height_range_include": {
+        "min": 0,
+        "max": 3000
+      },
+      "video_width_range_include": {
+        "min": 0,
+        "max": 4000
+      },
+      "settingsAudio": false,
+      "audioExcludeSwitch": true,
+      "audio_codec_names_exclude": [
+        {
+          "codec": "mp3",
+          "checked": true
+        },
+        {
+          "codec": "aac",
+          "checked": false
+        }
+      ],
+      "audio_size_range_include": {
+        "min": 0,
+        "max": 10
+      }
+    },
+    "folderToFolderConversion": false,
+    "folderToFolderConversionDeleteSource": false
+  },
+  "onCreate": {
+    "foldersToIgnore": "",
+    "foldersToIgnoreCaseInsensitive": false,
+    "folderWatchScanInterval": 300,
+    "scannerThreadCount": 2,
+    "output": "",
+    "folderToFolderRecordHistory": true,
+    "copyIfConditionsMet": false,
+    "container": ".mkv",
+    "containerFilter": "mkv,mp4,mov,m4v,mpg,mpeg,avi,flv,webm,wmv,vob,evo,iso,m2ts,ts",
+    "folderWatching": false,
+    "useFsEvents": false,
+    "scheduledScanFindNew": false,
+    "processLibrary": true,
+    "processTranscodes": false,
+    "processHealthChecks": false,
+    "scanOnStart": false,
+    "exifToolScan": false,
+    "ffprobeShowData": false,
+    "isDirectoryLibrary": false,
+    "closedCaptionScan": false,
+    "scanButtons": true,
+    "scanFound": "",
+    "navItemSelected": "navSourceFolder",
+    "pluginCommunity": true,
+    "handbrake": true,
+    "ffmpeg": false,
+    "handbrakescan": false,
+    "ffmpegscan": true,
+    "preset": "-Z \"Very Fast 1080p30\"",
+    "schedule": [],
+    "totalHealthCheckCount": 0,
+    "totalTranscodeCount": 0,
+    "sizeDiff": 0,
+    "holdNewFiles": true,
+    "holdFor": 600,
+    "holdForDisplayUnit": "minutes",
+    "pluginStackOverview": true,
+    "filterResolutionsSkip": "",
+    "filterCodecsSkip": "",
+    "filterContainersSkip": "",
+    "filterHardlinked": false,
+    "processPluginsSequentially": true
+  },
+  "libraries": [
+    {
+      "_id": "movies",
+      "name": "movies",
+      "folder": "/media/movies",
+      "priority": 0
+    },
+    {
+      "_id": "tvshows",
+      "name": "tvshows",
+      "folder": "/media/tvshows",
+      "priority": 1
+    },
+    {
+      "_id": "animes",
+      "name": "animes",
+      "folder": "/media/animes",
+      "priority": 2
+    }
+  ]
+}

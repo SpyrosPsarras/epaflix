@@ -240,6 +240,12 @@
       "matchPackageNames": ["!helm/helm", "!kubernetes-sigs/kustomize"],
       "matchUpdateTypes": ["major"],
       "automerge": false
+    },
+    {
+      "description": "Tdarr nodes refuse a server of another version, and the pinned DoVi flow plugins target one Tdarr release, so server and node move together in one PR, reviewed by hand.",
+      "matchPackageNames": ["ghcr.io/haveagitgat/tdarr", "ghcr.io/haveagitgat/tdarr_node"],
+      "groupName": "tdarr",
+      "automerge": false
     }
   ],
   "customManagers": [
