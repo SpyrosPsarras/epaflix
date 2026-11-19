@@ -867,7 +867,10 @@ def test_simulate_mae_and_mfe():
 def test_validate_walks_forward_without_overlap():
     rows = breakout_rows() + [(192 + i, 193.5 + i, 191.5 + i, 193 + i, 1_000_000) for i in range(25)]
     bars = make_bars(rows)
-    trades, signals, base = ss.validate(bars, ss.compute(bars, {}, CFG20), ["breakout"], 40, CFG20)
+    held = ss.validate(bars, ss.compute(bars, {}, CFG20), ["breakout"], 40, CFG20)[0]
+    assert held[0]["outcome"] == "held_open" and held[0]["exit"] == rows[-1][3]  # the steady rise keeps the ADX trend on
+    plain = ss.settings_with_defaults({"swing_min_days": 20, "swing_max_days": 20, "momentum_hold_adx": 0})
+    trades, signals, base = ss.validate(bars, ss.compute(bars, {}, plain), ["breakout"], 40, plain)
     assert [t["signal_date"] for t in trades] == [bars.dates[300].isoformat()]
     assert trades[0]["outcome"] == "target" and trades[0]["fill"] == 192 and trades[0]["regime"] == "unknown"
     assert trades[0]["earnings"] == {"known": False}
@@ -1183,9 +1186,9 @@ def test_main_returns_structured_results(offline, capsys):
     brk = result["results"]["breakout"]["qualified"][0]
     assert brk["sector"] is None and brk["relative_strength"]["sector"] == {"benchmark": None, "change": None}
     tracking = result["tracking"]
-    assert tracking["days"] == 10 and set(tracking["summary"]) == set(ss.STRATEGIES) and isinstance(tracking["signals"], list)
+    assert tracking["days"] == 10 and set(tracking["summary"]) == set(ss.STRATEGY_GROUPS["all"]) and isinstance(tracking["signals"], list)
     assert tracking["holding_days"]["min"] == 30 and tracking["holding_days"]["max"] == 45 and result["holding"]["beta_vs"] == "SPY"
-    assert all(q["holding_days"] == ss.holding_days(q["beta"], result["settings"]) for s in ss.STRATEGIES for q in result["results"][s]["qualified"])
+    assert all(q["holding_days"] == ss.holding_days(q["beta"], result["settings"]) for s in result["results"] for q in result["results"][s]["qualified"])
     assert result["candidates"][0]["time_exit"] == ss.add_sessions(date.fromisoformat(result["as_of"]), result["candidates"][0]["holding_days"]).isoformat()
     assert "Summary: 3 tickers, 1 data errors, regime bullish, qualified: pullback 1, breakout 1" in capsys.readouterr().out
     assert market["actions"] == {"pullback": "long", "breakout": "long", "squeeze": "long",
@@ -1224,15 +1227,21 @@ def test_tracked_squeeze_signals_need_short_float_today(offline):
     assert [(x["ticker"], x["short_float_today"], x["status"]) for x in tracked] == [("SQZ", 0.25, "open")]
 
 
+def test_breakdown_runs_only_by_name():
+    assert "breakdown" not in ss.STRATEGY_GROUPS["all"] and "breakdown" not in ss.STRATEGY_GROUPS["short"]
+    assert set(ss.STRATEGY_GROUPS["all"]) == set(ss.STRATEGIES) - {"breakdown"}
+
+
 def test_main_screens_short_setups(offline):
     result = ss.main(tickers="RALY,BRKD,PULL", strategy="short")
-    assert list(result["results"]) == ["rally_rejection", "breakdown", "run_break", "dead_cat"]
+    assert list(result["results"]) == ["rally_rejection", "run_break", "dead_cat"]
     rally = result["results"]["rally_rejection"]["qualified"]
     assert [q["ticker"] for q in rally] == ["RALY"]
     q = rally[0]
     assert q["direction"] == "short" and q["action"] == "countertrend_watch" and q["sector_trend"] == "up"  # bullish market
     assert "squeeze risk: short float 25.0% (high)" in q["warnings"]
-    brkd = {r["ticker"]: r["failed"] for r in result["results"]["breakdown"]["rejected"]}
+    breakdown = ss.main(tickers="RALY,BRKD,PULL", strategy="breakdown")["results"]["breakdown"]
+    brkd = {r["ticker"]: r["failed"] for r in breakdown["rejected"]}
     assert [c["name"] for c in brkd["BRKD"]] == ["no_earnings_soon"]  # qualified on price, blocked by earnings in 3 days
     assert [(c["ticker"], c["strategy"], c["action"]) for c in result["candidates"]] == [("RALY", "rally_rejection", "countertrend_watch")]
 
@@ -1658,7 +1667,7 @@ def test_email_lists_tracked_signals():
 
 def run_break_rows():
     """A 74% run to 250, a flat top that lets EMA50 catch up, then the first close below EMA50 on a bearish bar."""
-    return uptrend(200, 50, 1.0) + [(249.8, 251, 249, 250, 1_000_000)] * 60 + [(250, 250.5, 247, 247.5, 1_000_000)]
+    return uptrend(200, 50, 1.0) + [(249.8, 251, 249, 250, 1_000_000)] * 60 + [(250, 250.5, 247, 247.5, 1_500_000)]
 
 
 def test_run_break_first_close_below_ema50_after_a_run():
@@ -1671,8 +1680,8 @@ def test_run_break_first_close_below_ema50_after_a_run():
     assert signal["levels"]["stop"] == round(251 + 0.2 * series["atr14"][t], 2)
     assert signal["indicators"]["prior_run"] > 0.7 and "+74%" in ss._setup_text(signal)
     failed = [c["name"] for c in ss.evaluate_run_break(bars, series, t - 1, CFG)["checks"] if not c["passed"]]
-    assert failed == ["first_close_below_ema50", "bearish_bar"]
-    small = make_bars(uptrend(200, 200, 0.2) + [(249.8, 251, 249, 250, 1_000_000)] * 60 + [(250, 250.5, 247, 247.5, 1_000_000)])
+    assert failed == ["first_close_below_ema50", "bearish_bar", "volume"]
+    small = make_bars(uptrend(200, 200, 0.2) + [(249.8, 251, 249, 250, 1_000_000)] * 60 + [(250, 250.5, 247, 247.5, 1_500_000)])
     weak = ss.evaluate_run_break(small, ss.compute(small, {}, CFG), t, CFG)
     assert [c["name"] for c in weak["checks"] if not c["passed"]] == ["prior_run"]
 
@@ -1954,20 +1963,21 @@ def test_momentum_hold_through_simulate_uses_the_adx_trend_and_skips_shorts():
 
 
 def test_momentum_hold_setting_and_holding_rule():
-    assert CFG["momentum_hold_adx"] == 0 and "ADX" not in ss.holding_rule(CFG)["rule"]
-    assert "ADX14 >= 20" in ss.holding_rule(ss.settings_with_defaults({"momentum_hold_adx": 20}))["rule"]
+    assert CFG["momentum_hold_adx"] == 20 and "ADX14 >= 20" in ss.holding_rule(CFG)["rule"]
+    assert "ADX" not in ss.holding_rule(ss.settings_with_defaults({"momentum_hold_adx": 0}))["rule"]
     with pytest.raises(ValueError, match="momentum_hold_adx"):
         ss.settings_with_defaults({"momentum_hold_adx": 101})
 
 
-def test_run_break_volume_confirmation_is_optional():
-    bars = make_bars(run_break_rows())
-    t = len(bars) - 1
-    series = ss.compute(bars, {}, CFG)
-    assert "volume" not in [c["name"] for c in ss.evaluate_run_break(bars, series, t, CFG)["checks"]]
-    strict = ss.settings_with_defaults({"run_break_min_rel_volume": 1.25})
-    assert failed(ss.evaluate_run_break(bars, series, t, strict)) == ["volume"]
+def test_run_break_needs_volume_unless_turned_off():
     rows = run_break_rows()
-    rows[-1] = rows[-1][:4] + (1_500_000,)
-    loud = make_bars(rows)
-    assert ss.evaluate_run_break(loud, ss.compute(loud, {}, strict), t, strict)["qualified"]
+    rows[-1] = rows[-1][:4] + (1_000_000,)
+    quiet = make_bars(rows)
+    t = len(quiet) - 1
+    series = ss.compute(quiet, {}, CFG)
+    assert CFG["run_break_min_rel_volume"] == 1.25 and failed(ss.evaluate_run_break(quiet, series, t, CFG)) == ["volume"]
+    off = ss.settings_with_defaults({"run_break_min_rel_volume": 0})
+    off_checks = ss.evaluate_run_break(quiet, series, t, off)
+    assert off_checks["qualified"] and "volume" not in [c["name"] for c in off_checks["checks"]]
+    loud = make_bars(run_break_rows())
+    assert ss.evaluate_run_break(loud, ss.compute(loud, {}, CFG), t, CFG)["qualified"]
