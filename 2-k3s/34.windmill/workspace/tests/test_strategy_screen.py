@@ -1852,3 +1852,42 @@ def test_main_proposes_tight_longs_on_a_bounce_inside_a_decline(offline):
     row = next(c for c in result["candidates"] if c["strategy"] == "pullback")
     assert "tight long on a bounce inside a decline" in row["recommendation"] and "(10 sessions)" in row["recommendation"]
     assert "<b>Index tight long</b>: QQQ buy at the next open" in offline["_sent"][0][2]
+
+
+def cooling_rows():
+    """An overextended rise (+33% vs the SMA200), then six days down: a pullback right after it."""
+    rows = uptrend(300, 100, 1.0)
+    close = rows[-1][3]
+    for _ in range(6):
+        close -= 2.5
+        rows.append((close + 1, close + 1.5, close - 1, close, 1_000_000))
+    return rows
+
+
+def test_long_setups_are_watch_only_in_a_pullback_right_after_an_overextended_market():
+    bars = make_bars(cooling_rows(), "QQQ")
+    phases = ss.market_phase(bars, {}, CFG)
+    last, top = phases[bars.dates[-1]], phases[bars.dates[-7]]
+    assert last["phase"] == "pullback" and last["decline"] is None and last["after_overextended"] and ss.after_overextended(last)
+    assert top["phase"] == "uptrend" and top["overextended"] and not top["after_overextended"]
+    assert not ss.market_phase(bars, {}, {**CFG, "overextended_bull": 0.5})[bars.dates[-1]]["after_overextended"]
+    assert ss.phase_advice(last, CFG).count("LONG setups are watch only") == 1
+    for strategy in ("pullback", "breakout", "squeeze"):
+        assert ss.action_for("long", "bullish", "up", strategy, None, False, True) == "watch"
+        assert ss.action_for("long", "bullish", "up", strategy, None, False, False) == "long"
+    # still 15%+ above the SMA200: SHORT setups stay put debit spreads
+    assert ss.action_for("short", "bullish", "up", "rally_rejection", ss.spread_context(last), False, True) == "bear_put_spread"
+    q = {"action": "watch", "regime": "bullish", "direction": "long", "strategy": "breakout", "after_overextended": True}
+    assert ss._verdict(q) == "WATCH ONLY, pullback right after an overextended market"
+
+
+def test_main_keeps_longs_watch_only_right_after_an_overextended_market(offline):
+    offline["QQQ"] = cooling_rows()[-301:]
+    result = ss.main(tickers="PULL,BRK", strategy="all")
+    market = result["market"]
+    assert market["phase"]["after_overextended"] and market["phase"]["advice"].startswith("Phase pullback")
+    assert market["actions"]["pullback"] == "watch" and market["actions"]["breakout"] == "watch"
+    assert not {"pullback", "breakout", "squeeze"} & set(market["favoured"]) and "rally_rejection" in market["favoured"]
+    rows = [c for c in result["candidates"] if c["direction"] == "long"]
+    assert rows and all(c["action"] == "watch" for c in rows)
+    assert all("WATCH ONLY, pullback right after an overextended market" in c["recommendation"] for c in rows)
