@@ -1704,9 +1704,17 @@ def test_market_phase_switches_and_advice():
     assert at(267)["phase"] == "falling" and at(269)["drawdown"] == round(329 / 359 - 1, 4) and not at(269)["deep"]
     assert at(271)["phase"] == "bounce" and at(271)["previous"] == "falling" and at(271)["bounce_atr"] >= 2
     assert at(len(bars) - 1)["phase"] == "uptrend" and at(len(bars) - 1)["decline"] is None
+    assert ss.bounce_long(at(271)) and ss.index_long_day(at(271)) and not ss.index_long_day(at(272))
+    assert not ss.bounce_long(at(262)) and not ss.bounce_long(at(267))
     text = ss.phase_advice(at(271), CFG)
-    assert text.startswith("SWITCH today from falling to bounce (-6.7% from the ") and ", correction)" in text
-    assert "dead cat" in text and "Do not short the bounce; the trigger is the rejection" in text
+    assert text.startswith("ALERT: bounce inside a decline started today. Proposal: a tight long on the benchmark")
+    assert "SWITCH today from falling to bounce (-6.7% from the " in text and ", correction)" in text
+    assert "Tight long the bounce: pullback setups become long for 10 sessions" in text
+    assert "back to a put debit spread at the rejection" in text
+    # in a bounce inside a decline only pullbacks become (tight) longs, whatever the regime
+    assert ss.action_for("long", "bearish", "down", "pullback", "bear", True) == "long"
+    assert ss.action_for("long", "bearish", None, "breakout", "bear", True) == "no_trade"
+    assert ss.action_for("short", "bearish", None, "rally_rejection", "bear", True) == "bear_put_spread"
     assert ss.phase_advice(at(263), CFG).startswith(f"Phase pullback since {bars.dates[262].isoformat()} (after uptrend)")
     assert ss.phase_advice(None) .startswith("Market phase unknown")
     # a bearish regime is a decline whatever the drawdown; no run and no extension means no correction
@@ -1719,17 +1727,17 @@ def test_bear_put_debit_spread_plan_and_recommendation():
     phase = {"decline": "correction", "deep": True}
     plan = ss.put_spread_plan(100.0, date(2026, 2, 16), phase["decline"], phase["deep"], CFG)
     assert plan["type"] == "bear put debit spread" and plan["max_loss"] == "the debit paid"
-    assert plan["legs"] == [{"buy": 100.0, "sell": 95.0}] and plan["sessions"] == 10  # short-dated: 10 sessions, not 30-45
-    assert plan["expiry_after"] == "2026-03-09" and plan["exit_by"] == "2026-03-02" and plan["take_profit"] == 0.5
-    longer = ss.put_spread_plan(100.0, date(2026, 2, 16), "bear", False, {**CFG, "put_spread_days": 15})
-    assert longer["exit_by"] == "2026-03-09" and longer["expiry_after"] == "2026-03-16"
+    assert plan["legs"] == [{"buy": 100.0, "sell": 95.0}] and plan["sessions"] == 5  # short-dated: 5 sessions, not 30-45
+    assert plan["expiry_after"] == "2026-03-02" and plan["exit_by"] == "2026-02-23" and plan["take_profit"] == 0.5
+    index = ss.put_spread_plan(100.0, date(2026, 2, 16), "bear", False, CFG, CFG["index_put_spread_days"])
+    assert index["sessions"] == 10 and index["exit_by"] == "2026-03-02" and index["expiry_after"] == "2026-03-09"
     q = {"ticker": "RALY", "strategy": "rally_rejection", "direction": "short", "action": "bear_put_spread", "regime": "neutral",
          "levels": {"entry": 99.0, "stop": 104.0, "target": 90.0, "reward_risk": 1.8}, "scoring": [], "indicators": {},
-         "holding_days": 38, "time_exit": "2026-03-02", "put_spread": plan}
+         "holding_days": 38, "time_exit": "2026-02-23", "put_spread": plan}
     text = ss.recommendation(q)
-    assert text.startswith("RALY: PROPOSED BEAR PUT DEBIT SPREAD (bear put debit spread trigger: -0.09 / -0.14")
-    assert "buy the 100.0 put and sell the 95.0 put, expiry after 2026-03-09" in text and "short-dated debit spread" in text
-    assert "worth 50% of the strike width, else close by 2026-03-02; the most you can lose is the debit" in text
+    assert text.startswith("RALY: PROPOSED BEAR PUT DEBIT SPREAD (bear put debit spread trigger: -0.08 / -0.08")
+    assert "buy the 100.0 put and sell the 95.0 put, expiry after 2026-03-02" in text and "short-dated debit spread" in text
+    assert "worth 50% of the strike width, else close by 2026-02-23; the most you can lose is the debit" in text
     assert "deep in the decline, the worst case" in text and "stop 104.0" not in text
 
 
@@ -1825,3 +1833,22 @@ def test_main_proposes_an_index_debit_spread_on_a_dead_cat_rejection(offline):
 def test_dead_cat_setting_limits():
     with pytest.raises(ValueError, match="dead_cat_below_bars"):
         ss.settings_with_defaults({"dead_cat_below_bars": 25})
+
+
+def test_main_proposes_tight_longs_on_a_bounce_inside_a_decline(offline):
+    offline["QQQ"] = uptrend(29, 71, 1.0) + phase_rows()[:272]  # the benchmark's bounce starts on the last day
+    result = ss.main(tickers="PULL,BRK", strategy="all", email="trader@example.com")
+    market = result["market"]
+    phase = market["phase"]
+    assert phase["phase"] == "bounce" and phase["switched"] and phase["decline"] == "correction"
+    assert market["phase"]["advice"].startswith("ALERT: bounce inside a decline started today. Proposal: a tight long")
+    plan = market["index_long"]
+    assert plan["ticker"] == "QQQ" and plan["type"] == "tight long" and plan["sessions"] == 20 and market["index_put_spread"] is None
+    assert plan["stop"] == min(r[2] for r in offline["QQQ"][-CFG["bounce_low_bars"]:])
+    assert plan["target"] is None or plan["target"] > plan["close"]
+    assert market["actions"]["pullback"] == "long"
+    pull, = result["results"]["pullback"]["qualified"]
+    assert pull["action"] == "long" and pull["tight_long"] and pull["holding_days"] == 10
+    row = next(c for c in result["candidates"] if c["strategy"] == "pullback")
+    assert "tight long on a bounce inside a decline" in row["recommendation"] and "(10 sessions)" in row["recommendation"]
+    assert "<b>Index tight long</b>: QQQ buy at the next open" in offline["_sent"][0][2]
