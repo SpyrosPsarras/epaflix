@@ -21,8 +21,8 @@ stops sit high_beta_stop_atr x beta ATR lower for stocks with beta >= high_beta_
 bull-market backtest and include the market (QQQ above its EMA50, not overheated) and the sector ETF trend.
 The market phase of the benchmark (uptrend, pullback; in a decline, i.e. a bear regime or a correction after a run or a
 big extension: falling, bounce, above_ema50) comes with a recommendation and flags the day it switches. SHORT setups are
-not traded short: in a decline they are proposed as bull put credit spreads (strikes, expiry and exit in `put_spread`),
-from a 2016-2026 backtest in which the shorts lost and the spreads earned.
+not traded short: in a decline they are proposed as bear put debit spreads with a defined risk (strikes, expiry and exit
+in `put_spread`). In the 2016-2026 backtest both the shorts and these debit spreads lost on average in a decline.
 `track_days` adds the status of the signals of the previous sessions (open, target, stopped, time exit,
 not triggered, skipped). Every setup is a 30-45 session swing: the time exit depends on the stock's beta vs SPY
 (higher beta, shorter hold). The squeeze rules are an untested hypothesis: validate before trading them.
@@ -76,17 +76,19 @@ SECTOR_ETFS = {"Technology": "XLK", "Financial": "XLF", "Healthcare": "XLV", "In
 ACTIONS = {"bullish": "long", "neutral": "watch", "bearish": "no_trade", "unknown": "watch"}
 # SHORT setups are not traded short: in the bear backtest (600 stocks and 55 ETFs, 2016-2026) shorting them lost in bear
 # markets and corrections, while the stocks rose 4-9% on average over the next 30-45 sessions. In a decline (bear regime
-# or correction, see market_phase) they time a bull put credit spread instead; action_for applies the correction too.
-SHORT_ACTIONS = {"bullish": "countertrend_watch", "neutral": "watch", "bearish": "bull_put_spread", "unknown": "watch"}
+# or correction, see market_phase) they time a bear put debit spread instead, so the loss is capped at the debit (the
+# chosen strategy for now; it lost too, see STRATEGY_PRIORITY). action_for applies the correction too.
+SHORT_ACTIONS = {"bullish": "countertrend_watch", "neutral": "watch", "bearish": "bear_put_spread", "unknown": "watch"}
 # Squeezes also happen in bear-market rallies, so a bearish regime makes them countertrend, not forbidden.
 SQUEEZE_ACTIONS = {"bullish": "long", "neutral": "watch", "bearish": "countertrend_watch", "unknown": "watch"}
 ACTIONS_BY_DIRECTION = {"long": ACTIONS, "short": SHORT_ACTIONS}
 ACTIONS_BY_STRATEGY = {"squeeze": SQUEEZE_ACTIONS}
-ACTION_ORDER = {"long": 0, "short": 0, "bull_put_spread": 0, "watch": 1, "countertrend_watch": 2, "no_trade": 3}
-TRADE_ACTIONS = ("long", "short", "bull_put_spread")
-# Bull put credit spread on a SHORT setup in a decline: (sell, buy) put strikes as shares of the last close, nearest
-# listed strikes. Both earned in the backtest; the first more, the second with more room.
-PUT_SPREAD_STRIKES = ((1.00, 0.95), (0.95, 0.90))
+ACTION_ORDER = {"long": 0, "short": 0, "bear_put_spread": 0, "watch": 1, "countertrend_watch": 2, "no_trade": 3}
+TRADE_ACTIONS = ("long", "short", "bear_put_spread")
+# Bear put debit spread on a SHORT setup in a decline: (buy, sell) put strikes as shares of the last close, nearest listed
+# strikes: at the money / 10% lower, the variant with the smallest loss in the backtest. The plan also offers the stock's
+# target as the short strike (as tested, about the same result).
+PUT_SPREAD_STRIKES = (1.00, 0.90)
 
 DEFAULTS = {
     "benchmarks": ["QQQ"],
@@ -172,9 +174,10 @@ DEFAULTS = {
     "correction_extension": 0.10,
     "bounce_low_bars": 10,  # bounce: the close bounce_atr ATR above the low of the last bounce_low_bars, or above EMA20
     "bounce_atr": 2.0,
-    "deep_drawdown": 0.15,  # bull put spreads earned the most with the benchmark this far below its high
-    # Bull put credit spread plan: close at this share of the credit; expiry about this many days after the time exit
-    "put_spread_take_profit": 0.5,
+    "deep_drawdown": 0.15,  # debit spreads on SHORT setups lost the most with the benchmark this far below its high
+    # Bear put debit spread plan: take profit when the spread is worth this share of the strike width; expiry about this
+    # many days after the time exit
+    "put_spread_take_profit": 0.8,
     "put_spread_expiry_days": 7,
     # Market overview only: trend of these ETFs next to QQQ
     # SPY/IWM: broad and small-cap market, SMH: semis, MDY: mid caps, TLT: long Treasuries, HYG: high-yield credit
@@ -915,7 +918,7 @@ def evaluate_breakdown(bars, series, t, cfg):
 
 
 def evaluate_run_break(bars, series, t, cfg):
-    """Correction after a run (SHORT setup, a bull put spread trigger in a decline): the stock rose run_break_min_run or more
+    """Correction after a run (SHORT setup, a bear put debit spread trigger in a decline): the stock rose run_break_min_run or more
     in the 126 sessions before its highest close of the last run_break_high_bars, closed above EMA50 on at least
     run_break_above_bars of the previous 20 sessions, and now makes its first close below EMA50 with a bearish bar
     (close below the open, in the lower half of the range). Entry at the next open, stop run_break_stop_atr ATR above the
@@ -1507,10 +1510,10 @@ def stored_view(row):
 
 def action_for(direction, regime_label, sector_trend=None, strategy=None, decline=None):
     """What to do with a qualified setup. The market regime decides; a sector ETF trending against the trade turns
-    long/short into watch. A SHORT setup in a decline (bear regime or correction, from market_phase) becomes a bull put
-    spread whatever the sector does. Nothing here changes qualification."""
+    long/short into watch. A SHORT setup in a decline (bear regime or correction, from market_phase) becomes a bear put
+    debit spread whatever the sector does. Nothing here changes qualification."""
     if direction == "short" and (decline or regime_label == "bearish"):
-        return "bull_put_spread"
+        return "bear_put_spread"
     table = actions_table(strategy) if strategy else ACTIONS_BY_DIRECTION[direction]
     action = table.get(regime_label, "watch")
     if (action == "long" and sector_trend == "down") or (action == "short" and sector_trend == "up"):
@@ -1531,22 +1534,23 @@ def trend_labels(dates, closes, slope):
 
 
 PHASE_ADVICE = {
-    "uptrend": "Uptrend: long setups as ranked (breakout, then pullback, then squeeze). No shorts and no bull put spreads: "
-               "outside a decline neither earned anything in the backtest.",
+    "uptrend": "Uptrend: long setups as ranked (breakout, then pullback, then squeeze). No shorts and no put spreads: "
+               "outside a decline SHORT setups lost in the backtest (debit spreads about -0.2 to -0.3 of the debit).",
     "pullback": "Pullback in a rising market (benchmark below its EMA20, no correction): the weakest stretch for the "
                 "benchmark in the backtest (QQQ +1.3% over the next 30 sessions on average, +1.8% in an uptrend). Keep longs "
-                "small and take only the best-scored breakouts and pullbacks; no shorts and no bull put spreads (slightly "
-                "negative here).",
-    "falling": "Decline, still falling: sell bull put spreads on the SHORT setups (rally rejection, run break, breakdown), "
-               "about +0.16 per trade on the capital at risk in the backtest, more with the benchmark {deep:.0%} or more "
-               "below its high. Do not short: shorts lost here.",
+                "small and take only the best-scored breakouts and pullbacks; no shorts and no put spreads (debit spreads "
+                "about -0.1 of the debit here).",
+    "falling": "Decline, still falling: SHORT setups (rally rejection, run break, breakdown) as bear put debit spreads only, "
+               "never a short. In the backtest they lost about 0.35-0.5 of the debit per trade here (about 1 in 4 won) and "
+               "more with the benchmark {deep:.0%} or more below its high: keep each spread small.",
     "bounce": "Bounce inside a decline (benchmark {bounce_atr:g} ATR above its {bounce_low_bars}-day low or above its EMA20, "
               "still below its EMA50). In 2016-2026 most such bounces led on to a recovery rather than failing as a dead cat "
-              "(QQQ +3.8% over the next 30 sessions, up 62% of the time). Keep selling bull put spreads on SHORT setups "
-              "(about +0.15 per trade), long pullbacks also did well; do not short the bounce.",
+              "(QQQ +3.8% over the next 30 sessions, up 62% of the time). Debit spreads on SHORT setups opened here lost about "
+              "0.35-0.45 of the debit; long pullbacks did well. Do not short the bounce; wait for a rally rejection before a "
+              "new debit spread.",
     "above_ema50": "Decline with the benchmark above its EMA50 (early in a correction, or recovering): shorts lost the most "
-                   "here (-0.4 to -0.5R). Bull put spreads stayed positive and breakouts did well on few trades: favour longs "
-                   "and bull put spreads.",
+                   "here (-0.4 to -0.5R) and debit spreads about 0.35-0.6 of the debit; breakouts did well on few trades. "
+                   "Favour longs; debit spreads only small.",
 }
 
 
@@ -1687,10 +1691,10 @@ def market_summary(name, bars, breadth_by_date, regime, sector_bars, cfg, contex
             "sector_leaders": [k for k, _ in ranked[:3]], "sector_laggards": [k for k, _ in ranked[::-1][:3]],
             "rules": "bullish: benchmark above a rising SMA200 and breadth >= {:g}; bearish: below the SMA200 and the SMA200 falling or "
                      "breadth <= {:g}; otherwise neutral. LONG setups: bullish -> long, neutral -> watch, bearish -> no_trade. "
-                     "SHORT setups: in a decline (bearish regime or correction, see phase) -> bull_put_spread, otherwise neutral -> watch, "
+                     "SHORT setups: in a decline (bearish regime or correction, see phase) -> bear_put_spread, otherwise neutral -> watch, "
                      "bullish -> countertrend_watch. Squeeze: bullish -> long, neutral -> watch, "
                      "bearish -> countertrend_watch. Bonds (TLT, HYG) are context only, not part of the rules. A sector ETF trending against "
-                     "the trade turns long/short into watch; it does not change bull_put_spread.".format(cfg["breadth_bullish"], cfg["breadth_bearish"])}
+                     "the trade turns long/short into watch; it does not change bear_put_spread.".format(cfg["breadth_bullish"], cfg["breadth_bearish"])}
 
 
 def forward_returns(bars, t, market=None):
@@ -1871,6 +1875,8 @@ def settings_with_defaults(settings):
     cfg["put_spread_expiry_days"] = int(cfg["put_spread_expiry_days"])
     if cfg["run_break_high_bars"] > 120 or cfg["run_break_above_bars"] > 20 or cfg["phase_high_bars"] > 120:
         raise ValueError("run_break_high_bars and phase_high_bars must be 120 or less, run_break_above_bars 20 or less")
+    if not 0 < cfg["put_spread_take_profit"] <= 1:
+        raise ValueError("put_spread_take_profit is a share of the strike width: more than 0 and at most 1")
     if cfg["swing_min_days"] > cfg["swing_max_days"]:
         raise ValueError("swing_min_days must not be above swing_max_days")
     cfg["min_bars"] = max(cfg["min_bars"], 253, cfg["breakout_lookback"] + 2, cfg["breakdown_lookback"] + 2)
@@ -1976,11 +1982,11 @@ STRATEGY_PRIORITY = {
     "breakout": (1, "first choice in a bull market: best R per trade of the long setups in the bull backtest"),
     "pullback": (2, "second choice in a bull market: small but steady edge in the bull backtest"),
     "squeeze": (3, "weakest long setup in the bull backtest: no edge after 2022, keep it small"),
-    # SHORT setups as bull put spread triggers in a decline (bear backtest: credit spread, close at 50% of the credit,
-    # return on the capital at risk, before / after 2022-07)
-    "rally_rejection": (1, "first bull put spread trigger in a decline: +0.19 / +0.16 per trade in the bear backtest"),
-    "run_break": (2, "second bull put spread trigger in a decline: +0.21 / +0.12 per trade in the bear backtest"),
-    "breakdown": (3, "third bull put spread trigger in a decline: +0.14 / +0.11 per trade in the bear backtest"),
+    # SHORT setups as bear put debit spread triggers in a decline (bear backtest: ATM / -10% spread, take profit at 80% of
+    # the width, else the time exit; return on the debit, before / after 2022-07). All three lost on average.
+    "rally_rejection": (1, "bear put debit spread trigger in a decline: -0.41 / -0.45 of the debit per trade in the bear backtest"),
+    "run_break": (2, "bear put debit spread trigger in a decline: -0.51 / -0.36 of the debit per trade in the bear backtest"),
+    "breakdown": (3, "bear put debit spread trigger in a decline: -0.49 / -0.38 of the debit per trade in the bear backtest"),
 }
 REASON_LABELS = {
     "outperforms_market": "stronger than the market", "outperforms_sector": "stronger than its sector",
@@ -1998,8 +2004,8 @@ REASON_LABELS = {
 
 def _verdict(q):
     action, regime, direction = q["action"], q.get("regime"), q["direction"]
-    if action == "bull_put_spread":
-        return "PROPOSED BULL PUT SPREAD"
+    if action == "bear_put_spread":
+        return "PROPOSED BEAR PUT DEBIT SPREAD"
     if action in ("long", "short"):
         return f"PROPOSED {action.upper()}"
     if action == "no_trade":
@@ -2038,13 +2044,15 @@ def recommendation(q):
     reasons = "; ".join(f"{REASON_LABELS.get(x['name'], x['name'].replace('_', ' '))} ({x['detail']})" for x in earned)
     levels = q["levels"]
     spread = q.get("put_spread")
-    if q["action"] == "bull_put_spread" and spread:
+    if q["action"] == "bear_put_spread" and spread:
         legs = spread["legs"]
-        plan = (f"sell the {legs[0]['sell']} put and buy the {legs[0]['buy']} put (or {legs[1]['sell']} / {legs[1]['buy']} for more room), "
-                f"expiry after {spread['expiry_after']}, close at {spread['take_profit']:.0%} of the credit or by {spread['exit_by']}")
-        deep = "; market deep in the decline, the best case in the backtest" if spread.get("deep") else ""
-        return (f"{q['ticker']}: {_verdict(q)} ({note}). Why: {_setup_text(q)} in a {spread['decline']}, where such stocks rose "
-                f"on average over the next 30-45 sessions instead of falling{deep}. Plan: {plan}.")
+        alt = f" (or sell the {legs[1]['sell']} put at the stock's target)" if len(legs) > 1 else ""
+        plan = (f"buy the {legs[0]['buy']} put and sell the {legs[0]['sell']} put{alt}, expiry after {spread['expiry_after']}, "
+                f"take profit when the spread is worth {spread['take_profit']:.0%} of the strike width, else close by "
+                f"{spread['exit_by']}; the most you can lose is the debit")
+        deep = "; market deep in the decline, the worst case in the backtest" if spread.get("deep") else ""
+        return (f"{q['ticker']}: {_verdict(q)} ({note}). Why: {_setup_text(q)} in a {spread['decline']}; a debit spread caps "
+                f"the loss, as such stocks rose on average over the next 30-45 sessions{deep}. Plan: {plan}.")
     stop = f"stop {levels['stop']}"
     if levels.get("stop_buffer_atr"):
         stop += f" ({levels['stop_buffer_atr']:g} ATR below the rule's {levels['base_stop']} because beta is {q.get('beta')})"
@@ -2063,14 +2071,19 @@ def candidate_row(strategy, q):
             "sector": q["sector"], "sector_trend": q["sector_trend"], "warnings": q["warnings"], "put_spread": q.get("put_spread")}
 
 
-def put_spread_plan(close, time_exit, phase, cfg):
-    """Bull put credit spread for a SHORT setup in a decline: strikes from PUT_SPREAD_STRIKES on the last close, the first
-    expiry after the time exit plus put_spread_expiry_days, closed at put_spread_take_profit of the credit or at the time exit."""
+def put_spread_plan(close, target, time_exit, phase, cfg):
+    """Bear put debit spread for a SHORT setup in a decline: buy and sell strikes from PUT_SPREAD_STRIKES on the last close
+    (or sell at the stock's target when it is below the close), the first expiry after the time exit plus
+    put_spread_expiry_days, take profit at put_spread_take_profit of the strike width or close at the time exit."""
     expiry = date.fromisoformat(time_exit) + timedelta(days=cfg["put_spread_expiry_days"])
-    return {"type": "bull put credit spread", "decline": phase["decline"], "deep": phase["deep"],
-            "legs": [{"sell": round(close * a, 2), "buy": round(close * b, 2)} for a, b in PUT_SPREAD_STRIKES],
+    buy, sell = PUT_SPREAD_STRIKES
+    legs = [{"buy": round(close * buy, 2), "sell": round(close * sell, 2)}]
+    if target is not None and 0 < target < close * buy:
+        legs.append({"buy": round(close * buy, 2), "sell": round(target, 2)})
+    return {"type": "bear put debit spread", "decline": phase["decline"], "deep": phase["deep"], "legs": legs,
             "expiry_after": expiry.isoformat(), "take_profit": cfg["put_spread_take_profit"], "exit_by": time_exit,
-            "note": "nearest listed strikes; the stock's stop and target do not apply to the spread"}
+            "max_loss": "the debit paid",
+            "note": "nearest listed strikes; the stock's stop does not apply to the spread"}
 
 
 def email_html(result):
@@ -2107,8 +2120,8 @@ def email_html(result):
         parts.append(f"<p><b>Tracked signals</b>: {len(stored['active'])} active, {stored['inserted']} new. "
                      f"Closed today: {', '.join(line(r) for r in stored['closed_today']) or 'none'}. "
                      f"Data unavailable: {escape(', '.join(r['ticker'] for r in stored['data_unavailable'])) or 'none'}.</p>")
-    parts.append("<p>Screening only, not advice. SHORT setups are not traded short; in a decline they time bull put spreads, "
-                 "whose results come from a backtest with modelled option prices. Squeeze rules are untested hypotheses.</p>")
+    parts.append("<p>Screening only, not advice. SHORT setups are not traded short; in a decline they time bear put debit spreads "
+                 "(they lost on average in the backtest), whose results come from a backtest with modelled option prices. Squeeze rules are untested hypotheses.</p>")
     return "".join(parts)
 
 
@@ -2265,8 +2278,9 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
                     "action": action, "sector": sector, "sector_etf": series["sector_etf"],
                     "sector_trend": trend, "beta": None if beta is None else round(beta, 2), "holding_days": hold,
                     "time_exit": time_exit, "warnings": warnings,
-                    "put_spread": put_spread_plan(bars.close[-1], time_exit, {"decline": "bear", "deep": False, **phase_now}, cfg)
-                    if action == "bull_put_spread" else None,
+                    "put_spread": put_spread_plan(bars.close[-1], signal["levels"].get("target"), time_exit,
+                                                  {"decline": "bear", "deep": False, **phase_now}, cfg)
+                    if action == "bear_put_spread" else None,
                     **{k: signal[k] for k in ("levels", "relative_strength", "checks", "scoring", "indicators")}})
             else:
                 results[s]["rejected"].append({"ticker": name, "failed": [c for c in signal["checks"] if not c["passed"]]})

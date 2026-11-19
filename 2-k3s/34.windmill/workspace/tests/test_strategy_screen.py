@@ -663,7 +663,7 @@ def test_short_validation_and_tracking_hold_for_the_swing_period():
     assert trade["holding_days"] == 38 and trade["beta"] is None
     tracked = ss.track_signals(bars, series, ["rally_rejection"], 60, CFG, {bars.dates[t]: "bearish"})
     first = [x for x in tracked if x["signal_date"] == bars.dates[t].isoformat()][0]
-    assert first["action"] == "bull_put_spread" and first["status"] == "time_exit" and first["direction"] == "short" and first["fill"] == 153.39
+    assert first["action"] == "bear_put_spread" and first["status"] == "time_exit" and first["direction"] == "short" and first["fill"] == 153.39
     assert first["holding_days"] == 38 and first["bars_held"] == 38
 
 
@@ -708,11 +708,11 @@ def test_rolling_beta_skips_missing_benchmark_dates():
 def test_action_for_regime_and_sector():
     assert ss.action_for("long", "bullish") == "long" and ss.action_for("long", "bullish", "down") == "watch"
     assert ss.action_for("long", "bearish", "up") == "no_trade" and ss.action_for("long", "neutral") == "watch"
-    assert ss.action_for("short", "bearish") == "bull_put_spread" and ss.action_for("short", "bearish", "up") == "bull_put_spread"
+    assert ss.action_for("short", "bearish") == "bear_put_spread" and ss.action_for("short", "bearish", "up") == "bear_put_spread"
     assert ss.action_for("short", "bullish", "down") == "countertrend_watch" and ss.action_for("short", "unknown") == "watch"
-    # a correction makes SHORT setups bull put spreads in any regime; LONG setups keep the regime's action
-    assert ss.action_for("short", "bullish", "up", "breakdown", "correction") == "bull_put_spread"
-    assert ss.action_for("short", "neutral", None, "run_break", "correction") == "bull_put_spread"
+    # a correction makes SHORT setups bear put debit spreads in any regime; LONG setups keep the regime's action
+    assert ss.action_for("short", "bullish", "up", "breakdown", "correction") == "bear_put_spread"
+    assert ss.action_for("short", "neutral", None, "run_break", "correction") == "bear_put_spread"
     assert ss.action_for("long", "neutral", None, "pullback", "correction") == "watch"
 
 
@@ -1704,7 +1704,7 @@ def test_market_phase_switches_and_advice():
     assert at(len(bars) - 1)["phase"] == "uptrend" and at(len(bars) - 1)["decline"] is None
     text = ss.phase_advice(at(271), CFG)
     assert text.startswith("SWITCH today from falling to bounce (-6.7% from the ") and ", correction)" in text
-    assert "dead cat" in text and "do not short the bounce" in text
+    assert "dead cat" in text and "Do not short the bounce; wait for a rally rejection" in text
     assert ss.phase_advice(at(263), CFG).startswith(f"Phase pullback since {bars.dates[262].isoformat()} (after uptrend)")
     assert ss.phase_advice(None) .startswith("Market phase unknown")
     # a bearish regime is a decline whatever the drawdown; no run and no extension means no correction
@@ -1713,39 +1713,45 @@ def test_market_phase_switches_and_advice():
     assert flat[bars.dates[269]]["decline"] is None and flat[bars.dates[269]]["phase"] == "pullback"
 
 
-def test_bull_put_spread_plan_and_recommendation():
+def test_bear_put_debit_spread_plan_and_recommendation():
     phase = {"decline": "correction", "deep": True}
-    plan = ss.put_spread_plan(100.0, "2026-03-02", phase, CFG)
-    assert plan["legs"] == [{"sell": 100.0, "buy": 95.0}, {"sell": 95.0, "buy": 90.0}]
-    assert plan["expiry_after"] == "2026-03-09" and plan["exit_by"] == "2026-03-02" and plan["take_profit"] == 0.5
-    q = {"ticker": "RALY", "strategy": "rally_rejection", "direction": "short", "action": "bull_put_spread", "regime": "neutral",
+    plan = ss.put_spread_plan(100.0, 93.0, "2026-03-02", phase, CFG)
+    assert plan["type"] == "bear put debit spread" and plan["max_loss"] == "the debit paid"
+    assert plan["legs"] == [{"buy": 100.0, "sell": 90.0}, {"buy": 100.0, "sell": 93.0}]
+    assert plan["expiry_after"] == "2026-03-09" and plan["exit_by"] == "2026-03-02" and plan["take_profit"] == 0.8
+    assert ss.put_spread_plan(100.0, None, "2026-03-02", phase, CFG)["legs"] == [{"buy": 100.0, "sell": 90.0}]
+    q = {"ticker": "RALY", "strategy": "rally_rejection", "direction": "short", "action": "bear_put_spread", "regime": "neutral",
          "levels": {"entry": 99.0, "stop": 104.0, "target": 90.0, "reward_risk": 1.8}, "scoring": [], "indicators": {},
          "holding_days": 38, "time_exit": "2026-03-02", "put_spread": plan}
     text = ss.recommendation(q)
-    assert text.startswith("RALY: PROPOSED BULL PUT SPREAD (first bull put spread trigger in a decline")
-    assert "sell the 100.0 put and buy the 95.0 put (or 95.0 / 90.0 for more room), expiry after 2026-03-09" in text
-    assert "close at 50% of the credit or by 2026-03-02" in text and "deep in the decline" in text and "stop 104.0" not in text
+    assert text.startswith("RALY: PROPOSED BEAR PUT DEBIT SPREAD (bear put debit spread trigger in a decline: -0.41 / -0.45")
+    assert "buy the 100.0 put and sell the 90.0 put (or sell the 93.0 put at the stock's target), expiry after 2026-03-09" in text
+    assert "worth 80% of the strike width, else close by 2026-03-02; the most you can lose is the debit" in text
+    assert "deep in the decline, the worst case" in text and "stop 104.0" not in text
 
 
-def test_main_proposes_bull_put_spreads_in_a_correction(offline):
+def test_main_proposes_bear_put_debit_spreads_in_a_correction(offline):
     offline["QQQ"] = uptrend(289, 200, 0.5) + [(343 - 1.8 * k, 344 - 1.8 * k, 341 - 1.8 * k, 342 - 1.8 * k, 1_000_000) for k in range(12)]
     result = ss.main(tickers="RALY,PULL", strategy="all", email="trader@example.com")
     market = result["market"]
     assert market["phase"]["decline"] == "correction" and market["phase"]["drawdown"] <= -0.05
-    assert market["short_setups"] == "bull_put_spread" and market["actions"]["breakdown"] == "bull_put_spread"
+    assert market["short_setups"] == "bear_put_spread" and market["actions"]["breakdown"] == "bear_put_spread"
+    assert "bear put debit spreads only, never a short" in market["phase"]["advice"]
     assert market["actions"]["pullback"] == "long" and "rally_rejection" in market["favoured"]
     (q,) = result["results"]["rally_rejection"]["qualified"]
-    assert q["action"] == "bull_put_spread" and q["sector_trend"] == "up"  # the sector does not veto the spread
-    assert q["put_spread"]["decline"] == "correction" and len(q["put_spread"]["legs"]) == 2
+    assert q["action"] == "bear_put_spread" and q["sector_trend"] == "up"  # the sector does not veto the spread
+    assert q["put_spread"]["decline"] == "correction" and q["put_spread"]["legs"][0]["buy"] > q["put_spread"]["legs"][0]["sell"]
     row = [c for c in result["candidates"] if c["ticker"] == "RALY"][0]
-    assert row["put_spread"] == q["put_spread"] and "PROPOSED BULL PUT SPREAD" in row["recommendation"]
+    assert row["put_spread"] == q["put_spread"] and "PROPOSED BEAR PUT DEBIT SPREAD" in row["recommendation"]
     assert result["results"]["pullback"]["qualified"][0]["put_spread"] is None
     html = offline["_sent"][0][2]
-    assert "<b>Market phase " in html and "RALY: PROPOSED BULL PUT SPREAD" in html and "<b>Proposed</b>: 2 of 2 setups" in html
+    assert "<b>Market phase " in html and "RALY: PROPOSED BEAR PUT DEBIT SPREAD" in html and "<b>Proposed</b>: 2 of 2 setups" in html
 
 
 def test_settings_check_run_break_and_phase_windows():
     with pytest.raises(ValueError, match="120 or less"):
         ss.settings_with_defaults({"phase_high_bars": 200})
+    with pytest.raises(ValueError, match="put_spread_take_profit"):
+        ss.settings_with_defaults({"put_spread_take_profit": 1.5})
     cfg = ss.settings_with_defaults({"bounce_low_bars": 5.0, "put_spread_expiry_days": 3.0})
     assert cfg["bounce_low_bars"] == 5 and isinstance(cfg["put_spread_expiry_days"], int)
