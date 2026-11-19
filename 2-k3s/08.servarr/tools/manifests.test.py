@@ -165,6 +165,27 @@ class TdarrTests(unittest.TestCase):
         for line in checksums:
             self.assertRegex(line, r"^[0-9a-f]{64}  ")
 
+    def test_media_proxy_service_targets_sidecar(self):
+        pod = self.pod("Deployment", "tdarr")
+        sidecar = next((container for container in pod["containers"] if container["name"] == "media-proxy"), None)
+        self.assertIsNotNone(sidecar, "Tdarr media proxy sidecar is missing")
+        notify = next(container for container in self.pod("DaemonSet", "tdarr-node")["containers"]
+                      if container["name"] == "notify-proxy")
+        self.assertEqual(sidecar["image"], notify["image"])
+        self.assertEqual(sidecar["securityContext"], notify["securityContext"])
+        self.assertEqual(sidecar["resources"], notify["resources"])
+        self.assertEqual(sidecar["ports"], [{"name": "media-proxy", "containerPort": 8267}])
+        self.assertEqual(sidecar["command"], ["python3", "/proxy/media-proxy.py"])
+        self.assertEqual(sidecar["volumeMounts"], [{"name": "media-proxy", "mountPath": "/proxy", "readOnly": True}])
+        self.assertNotIn("env", sidecar)
+        self.assertNotIn("envFrom", sidecar)
+        self.assertIn({"name": "media-proxy", "configMap": {"name": "tdarr-media-proxy"}}, pod["volumes"])
+        kustomization, = documents("kustomization.yaml")
+        self.assertIn({"name": "tdarr-media-proxy", "files": ["tdarr/media-proxy.py"]},
+                      kustomization["configMapGenerator"])
+        ports = resource("tdarr/tdarr.yaml", "Service", "tdarr")["spec"]["ports"]
+        self.assertIn({"name": "media-proxy", "port": 8267, "targetPort": "media-proxy"}, ports)
+
     def test_network_policy(self):
         path = "tdarr/network-policy.yaml"
         self.assertTrue((SERVARR / path).is_file(), "Tdarr network policies are missing")
@@ -182,9 +203,9 @@ class TdarrTests(unittest.TestCase):
         self.assertEqual(server["podSelector"], peer({"app": "tdarr"})["podSelector"])
         self.assertEqual(server["policyTypes"], ["Ingress"])
         self.assertCountEqual(server["ingress"], [
-            {"from": [peer({"app.kubernetes.io/name": "traefik"}, "traefik-system"),
-                      peer({"app.kubernetes.io/name": "openclaw"}, "discord-media")], "ports": [tcp(8265)]},
+            {"from": [peer({"app.kubernetes.io/name": "traefik"}, "traefik-system")], "ports": [tcp(8265)]},
             {"from": [peer({"app": "tdarr-node"})], "ports": [tcp(8266)]},
+            {"from": [peer({"app.kubernetes.io/name": "openclaw"}, "discord-media")], "ports": [tcp(8267)]},
         ])
         node = resource(path, "NetworkPolicy", "tdarr-node-egress")["spec"]
         self.assertEqual(node["podSelector"], peer({"app": "tdarr-node"})["podSelector"])

@@ -112,6 +112,17 @@ class ServarrNetworkPolicyTests(unittest.TestCase):
                     if app not in NAMED_CALLERS and (app, port["name"]) not in SCRAPED:
                         self.assertIn(SAME_NAMESPACE, peers)
 
+    def test_media_bot_can_only_reach_tdarr_proxy(self):
+        if "tdarr" not in SERVICES:
+            self.skipTest("Tdarr is not deployed")
+        media_bot = {
+            "namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "discord-media"}},
+            "podSelector": {"matchLabels": {"app.kubernetes.io/name": "openclaw"}},
+        }
+        self.assertEqual(admitted(*pod_port("tdarr", 8265)), [TRAEFIK])
+        self.assertEqual(admitted(*pod_port("tdarr", 8266)), [{"podSelector": {"matchLabels": {"app": "tdarr-node"}}}])
+        self.assertEqual(admitted(*pod_port("tdarr", 8267)), [media_bot])
+
     def test_routed_apps_admit_traefik(self):
         for route in kind("IngressRoute"):
             for rule in route["spec"]["routes"]:

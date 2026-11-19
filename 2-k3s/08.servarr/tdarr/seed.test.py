@@ -5,6 +5,7 @@ import subprocess
 import sys
 import threading
 import unittest
+from http.client import HTTPConnection
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
@@ -244,6 +245,126 @@ class NotifyProxyTests(unittest.TestCase):
                     instance.shutdown()
                 for worker in workers:
                     worker.join()
+
+
+class MediaProxyTests(unittest.TestCase):
+    PATH = "/media/movies/A Movie/It’s a file [1080p].mkv"
+
+    def setUp(self):
+        script = HERE / "media-proxy.py"
+        self.assertTrue(script.is_file(), "the Tdarr media proxy is missing")
+        self.calls = []
+        self.records = {}
+        self.upstream_status = 200
+        test = self
+
+        class Tdarr(BaseHTTPRequestHandler):
+            def do_POST(self):
+                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                test.calls.append((self.path, body))
+                if self.path == "/api/v2/cruddb":
+                    request = body["data"]
+                    record = test.records.get((request["collection"], request["docID"]))
+                    reply = b"" if record is None else json.dumps(record).encode()
+                else:
+                    reply = b"OK"
+                self.send_response(test.upstream_status)
+                self.end_headers()
+                self.wfile.write(reply)
+
+            def log_message(self, *args):
+                pass
+
+        tdarr = self.start_server(Tdarr)
+        handler = runpy.run_path(str(script))["Handler"]
+        handler.tdarr_port = tdarr.server_port
+        self.proxy = self.start_server(handler)
+
+    def start_server(self, handler):
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        worker = threading.Thread(target=server.serve_forever)
+        worker.start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(worker.join)
+        self.addCleanup(server.shutdown)
+        return server
+
+    def request(self, route, body=None, method="POST"):
+        connection = HTTPConnection("127.0.0.1", self.proxy.server_port, timeout=2)
+        try:
+            connection.request(method, route, json.dumps(body), {"Content-Type": "application/json"})
+            response = connection.getresponse()
+            result = response.read()
+            return response.status, json.loads(result) if response.status == 200 else result
+        finally:
+            connection.close()
+
+    def lookup(self, collection, path):
+        return "/api/v2/cruddb", {"data": {"collection": collection, "mode": "getById", "docID": path, "obj": {}}}
+
+    def test_invalid_paths_never_reach_tdarr(self):
+        paths = [
+            "media/movies/a.mkv", "/media/movies", "/media/movies/", "/media/movies-copy/a.mkv",
+            "/media/downloads/a.mkv", "/media/tvshows/../movies/a.mkv", "/media/animes/./a.mkv",
+            "/media/movies//a.mkv", "//media/movies/a.mkv", "/media/movies/a.mkv/",
+            "/media/movies/a\x00.mkv", "/media/movies/a\nb.mkv", None, [self.PATH],
+        ]
+        for route in ("/status", "/queue"):
+            for body in [{"path": path} for path in paths] + [{}, {"path": self.PATH, "holdUntil": 99}]:
+                with self.subTest(route=route, body=body):
+                    self.assertEqual(self.request(route, body)[0], 400)
+        self.assertEqual(self.calls, [])
+
+    def test_only_two_post_routes(self):
+        for method, route, expected in (
+            ("POST", "/api/v2/cruddb", 404), ("POST", "/api/v2/bulk-update-files", 404),
+            ("POST", "/status?all=1", 404), ("POST", "//status", 404), ("POST", "/queue/", 404),
+            ("GET", "/status", 405), ("DELETE", "/queue", 405), ("CUSTOM", "/queue", 405),
+        ):
+            with self.subTest(method=method, route=route):
+                self.assertEqual(self.request(route, {"path": self.PATH}, method)[0], expected)
+        self.assertEqual(self.calls, [])
+
+    def test_status_whitelists_record_fields(self):
+        for library in ("movies", "tvshows", "animes"):
+            path = self.PATH.replace("/movies/", f"/{library}/")
+            with self.subTest(library=library):
+                self.records["FileJSONDB", path] = {
+                    "_id": path, "file": path, "DB": library, "TranscodeDecisionMaker": "Queued",
+                    "lastTranscodeDate": 1234, "ffProbeData": {"extra": True},
+                }
+                self.records["StagedJSONDB", path] = {"_id": path, "status": "requireReview", "job": {"jobId": "secret"}}
+                expected = {"path": path, "TranscodeDecisionMaker": "Queued", "lastTranscodeDate": 1234}
+                self.calls.clear()
+                self.assertEqual(self.request("/status", {"path": path}), (200, {**expected, "requireReview": True}))
+                self.assertEqual(self.calls, [self.lookup("FileJSONDB", path), self.lookup("StagedJSONDB", path)])
+                self.records["StagedJSONDB", path]["status"] = "success"
+                self.assertEqual(self.request("/status", {"path": path}), (200, expected))
+                del self.records["StagedJSONDB", path]
+                self.assertEqual(self.request("/status", {"path": path}), (200, expected))
+
+    def test_queue_updates_only_one_known_file(self):
+        self.records["FileJSONDB", self.PATH] = {"_id": self.PATH, "DB": "movies"}
+        self.assertEqual(self.request("/queue", {"path": self.PATH}), (200, {"queued": True}))
+        self.assertEqual(self.calls, [self.lookup("FileJSONDB", self.PATH), ("/api/v2/bulk-update-files", {"data": {
+            "fileIds": [self.PATH], "updatedObj": {"TranscodeDecisionMaker": "Queued", "holdUntil": 0},
+        }})])
+
+    def test_unknown_or_mismatched_file_cannot_be_queued(self):
+        for record in (None, {"_id": self.PATH, "DB": "tvshows"}, {"_id": self.PATH + ".other", "DB": "movies"}):
+            with self.subTest(record=record):
+                self.records["FileJSONDB", self.PATH] = record
+                self.calls.clear()
+                self.assertEqual(self.request("/queue", {"path": self.PATH})[0], 404)
+                self.assertEqual(self.calls, [self.lookup("FileJSONDB", self.PATH)])
+
+    def test_upstream_error_is_not_forwarded(self):
+        self.records["FileJSONDB", self.PATH] = {"error": "internal details"}
+        self.upstream_status = 500
+        status, body = self.request("/queue", {"path": self.PATH})
+        self.assertEqual(status, 502)
+        self.assertNotIn(b"internal details", body)
+        self.assertEqual(self.calls, [self.lookup("FileJSONDB", self.PATH)])
 
 
 if __name__ == "__main__":

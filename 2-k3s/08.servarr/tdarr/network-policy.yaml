@@ -17,6 +17,9 @@ spec:
           podSelector:
             matchLabels:
               app.kubernetes.io/name: traefik
+      ports:
+        - {protocol: TCP, port: 8265}
+    - from:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: discord-media
@@ -24,7 +27,7 @@ spec:
             matchLabels:
               app.kubernetes.io/name: openclaw
       ports:
-        - {protocol: TCP, port: 8265}
+        - {protocol: TCP, port: 8267}
     - from:
         - podSelector:
             matchLabels:

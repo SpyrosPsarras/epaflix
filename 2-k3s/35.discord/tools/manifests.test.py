@@ -228,14 +228,15 @@ class MediaTests(AgentChecks, unittest.TestCase):
     CONFIG_FILES = ["AGENTS.md", "openclaw.json"]
     EXTRA_EGRESS = {
         ("servarr", (("app", app),), (("TCP", port),))
-        for app, port in {"seerr": 5055, "radarr": 7878, "sonarr": 8989, "lidarr": 8686, "bazarr": 6767, "jellyfin": 8096}.items()
+        for app, port in {"seerr": 5055, "radarr": 7878, "sonarr": 8989, "lidarr": 8686, "bazarr": 6767, "jellyfin": 8096, "tdarr": 8267}.items()
     }
 
     def test_servarr_admits_media_agent(self):
         for _, pod_labels, ports in self.EXTRA_EGRESS:
             app, port = dict(pod_labels)["app"], dict(ports)["TCP"]
             with self.subTest(app=app):
-                policy = yaml.safe_load((ROOT / f"2-k3s/08.servarr/{app}/network-policy.yaml").read_text())
+                policies = documents(f"../08.servarr/{app}/network-policy.yaml")
+                policy = next(doc for doc in policies if doc["metadata"]["name"] == f"{app}-ingress")
                 rule = {"from": [{"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "discord-media"}}, "podSelector": {"matchLabels": self.pod_labels}}], "ports": [{"port": port, "protocol": "TCP"}]}
                 self.assertIn(rule, policy["spec"]["ingress"])
 
@@ -252,7 +253,7 @@ class MediaTests(AgentChecks, unittest.TestCase):
             "Never print, echo or repeat",
             "If more than one item matches",
             "recycling bin for 7 days",
-            "Refuse",
+            "## Anything else",
         ]
         positions = [text.index(marker) for marker in markers]
         self.assertEqual(positions, sorted(positions))
@@ -268,6 +269,27 @@ class MediaTests(AgentChecks, unittest.TestCase):
         text = (DISCORD / "media/AGENTS.md").read_text()
         self.assertIn("only through Seerr. Never add them in Radarr or Sonarr.", text)
         self.assertIsNone(re.search(r"(POST|PUT) /(api/v3/)?(movie|series)\b|/(movie|series)/lookup|--data-urlencode \"query=|\badd\b[^.]*\bmovies\b", text))
+
+    def test_media_egress_tdarr(self):
+        policy = resource("media/network-policy.yaml", "NetworkPolicy", "openclaw")
+        ports = [rule[-1] for rule in peers(policy) if rule[:2] == ("servarr", (("app", "tdarr"),))]
+        self.assertEqual(ports, [(("TCP", 8267),)])
+
+    def test_agents_tdarr_section(self):
+        text = (DISCORD / "media/AGENTS.md").read_text()
+        heading = "### Tdarr: make a file play on the TV"
+        self.assertIn(heading, text)
+        section = re.split(r"\n#{2,3} ", text.split(heading, 1)[1], maxsplit=1)[0]
+        for marker in [
+            "http://tdarr.servarr.svc.cluster.local:8267",
+            "Look up the file in Radarr or Sonarr first",
+            "/moviefile?movieId=", "/episodefile/",
+            "/media/movies/", "/media/tvshows/", "/media/animes/",
+            "Tdarr only fixes DTS audio and Dolby Vision. Refuse any other conversion, re-encode or downscale.",
+            "Report the job result", "needs review", "lastTranscodeDate", "TranscodeDecisionMaker",
+        ]:
+            self.assertIn(marker, section)
+        self.assertNotIn(":8265", text)
 
     def test_no_discord_ids_in_plaintext(self):
         for path in DISCORD.rglob("*"):

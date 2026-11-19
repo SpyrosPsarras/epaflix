@@ -104,6 +104,9 @@ configMapGenerator:
   - name: tdarr-notify-proxy
     files:
       - tdarr/notify-proxy.py
+  - name: tdarr-media-proxy
+    files:
+      - tdarr/media-proxy.py
 images:
   # Version tags make release changes typed Renovate updates (#1129).
   # Keep digests alongside tags. Exceptions and registry evidence: docs/servarr-image-pins.md.

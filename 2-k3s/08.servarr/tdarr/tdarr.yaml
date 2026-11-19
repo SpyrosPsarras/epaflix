@@ -123,7 +123,28 @@ spec:
               memory: 64Mi
           volumeMounts:
             - {name: seed, mountPath: /seed, readOnly: true}
+        - name: media-proxy
+          image: docker.io/library/python:3.13-alpine
+          command: [python3, /proxy/media-proxy.py]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          ports:
+            - {name: media-proxy, containerPort: 8267}
+          resources:
+            requests:
+              cpu: 10m
+              memory: 24Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          volumeMounts:
+            - {name: media-proxy, mountPath: /proxy, readOnly: true}
       volumes:
+        - name: media-proxy
+          configMap:
+            name: tdarr-media-proxy
         - name: seed
           configMap:
             name: tdarr-seed
@@ -151,6 +172,7 @@ spec:
   ports:
     - {name: http, port: 8265, targetPort: http}
     - {name: node, port: 8266, targetPort: node}
+    - {name: media-proxy, port: 8267, targetPort: media-proxy}
 ---
 apiVersion: apps/v1
 kind: DaemonSet
