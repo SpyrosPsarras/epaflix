@@ -1,27 +1,5 @@
-import base64
-import imaplib
 import json
-import re
 import sys
-
-
-def all_mail_folder(list_lines: list[bytes]) -> str:
-    for line in list_lines:
-        if not isinstance(line, bytes):
-            continue
-        match = re.fullmatch(rb'\(([^)]*)\)\s+(?:"(?:\\.|[^"\\])*"|NIL)\s+(.+)', line)
-        if match and b'\\all' in match[1].lower().split():
-            mailbox = match[2]
-            if mailbox.startswith(b'"') and mailbox.endswith(b'"'):
-                mailbox = re.sub(rb'\\(["\\])', rb'\1', mailbox[1:-1])
-            return re.sub(
-                r'&([^-]*)-',
-                lambda part: base64.b64decode(
-                    part[1] + '=' * (-len(part[1]) % 4), altchars=b'+,', validate=True,
-                ).decode('utf-16-be') if part[1] else '&',
-                mailbox.decode('utf-8'),
-            )
-    raise ValueError('No IMAP mailbox has the All flag')
 
 
 def main():
@@ -45,13 +23,6 @@ def main():
     ):
         raise ValueError('The receipts workflow needs document-added triggers')
     ai_tag = Tag.objects.get(name='paperless-gpt-auto')
-
-    with imaplib.IMAP4_SSL('imap.gmail.com', 993) as mailbox:
-        mailbox.login(config['email'], config['password'])
-        status, lines = mailbox.list()
-        if status != 'OK':
-            raise ValueError('IMAP folder discovery failed')
-        folder = all_mail_folder(lines)
 
     names = []
     with transaction.atomic():
@@ -77,10 +48,10 @@ def main():
         )
         names.append('gmail')
         rules = [
-            ('gmail-receipt-bodies', 'paperless-receipt', MailRule.ConsumptionScope.EML_ONLY, 'paperless-done-eml'),
-            ('gmail-attachments', folder, MailRule.ConsumptionScope.ATTACHMENTS_ONLY, 'paperless-done-att'),
+            ('gmail-receipt-bodies', 'paperless-receipt-body', MailRule.ConsumptionScope.EML_ONLY, 'paperless-done-eml', None),
+            ('gmail-attachments', 'paperless-receipt', MailRule.ConsumptionScope.ATTACHMENTS_ONLY, 'paperless-done-att', '*.pdf,*.doc,*.docx,*.xls,*.xlsx,*.odt,*.ods'),
         ]
-        for order, (name, mail_folder, scope, label) in enumerate(rules, 1):
+        for order, (name, folder, scope, label, filename_filter) in enumerate(rules, 1):
             rule, _ = MailRule.objects.update_or_create(
                 name=name,
                 defaults={
@@ -88,7 +59,7 @@ def main():
                     'account': account,
                     'order': order,
                     'enabled': True,
-                    'folder': mail_folder,
+                    'folder': folder,
                     'maximum_age': 0,
                     'action': MailRule.MailAction.TAG,
                     'action_parameter': label,
@@ -97,13 +68,12 @@ def main():
                     'assign_correspondent': None,
                     'assign_owner_from_rule': True,
                     'attachment_type': MailRule.AttachmentProcessing.ATTACHMENTS_ONLY,
+                    'filter_attachment_filename_include': filename_filter,
                     'consumption_scope': scope,
                     'stop_processing': False,
                 },
             )
-            rule.assign_tags.set(
-                [tags['source:gmail'], ai_tag] if order == 1 else [tags['source:gmail']],
-            )
+            rule.assign_tags.set([tags['source:gmail'], ai_tag])
             names.append(name)
         for trigger in triggers:
             trigger.filter_has_not_tags.add(tags['source:gmail'], tags['source:drive'])

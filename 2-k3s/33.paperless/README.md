@@ -39,11 +39,11 @@ Removing someone from `Servarr users` stops new web logins only. Their API token
 2. Open https://paperless.epaflix.com in a browser and log in through Authentik.
 3. Open My Profile, create an API token and copy it.
 4. In Paperless Go, choose "Login with API token", enter server `https://paperless.epaflix.com` and paste the token.
-5. Scan receipts with the camera's Receipt preset, or share a photo or PDF to Paperless Go. paperless-gpt fills in the title, shop, date and `Total` within a few minutes.
+5. Scan receipts with the camera's Receipt preset, or share a photo or PDF to Paperless Go. paperless-gpt fills in the title, shop and `Total` within a few minutes.
 
 OCR runs Tesseract with `nor+eng+deu+ell` and `PAPERLESS_OCR_USER_ARGS={"oversample": 300}`. Paperless Go saves receipt scans as JPEG pages at about 137 ppi. On 2026-11-09 OCRmyPDF found 5 of 7 key strings on a real receipt at that resolution, 6 of 7 at 300 and 4 of 7 at 400. Made-up German and Greek receipts scored the same at every setting. Without `ell` the Greek receipt dropped to 1 of 6, so Greek stays in the default languages.
 
-Owner check on 2026-11-09: one real receipt scanned in Paperless Go reached Paperless as a PDF with OCR text. paperless-gpt set the title, shop, date and `Total` in 2 minutes 12 seconds, and the next share-lists run made the shop visible to everyone. Its date was wrong until the date prompt fix below. `Total` got no currency code although the receipt prints one; the owner chose to leave the currency prompt unchanged.
+Owner check on 2026-11-09: one real receipt scanned in Paperless Go reached Paperless as a PDF with OCR text. paperless-gpt set the title, shop, date and `Total` in 2 minutes 12 seconds, and the next share-lists run made the shop visible to everyone. Its date was wrong before the prompt was revised. paperless-gpt no longer sets dates. `Total` got no currency code although the receipt prints one; the owner chose to leave the currency prompt unchanged.
 
 Browser login inside the app is requested upstream in Paperless Go issue #51. For it, Authentik provider `paperless` is a public client and allows the strict redirect URI `com.ventouxlabs.paperlessgo:/oidc-callback`. Authentik skips the secret check for public clients, so the web login, which still sends the secret, keeps working. Authentik does not force PKCE on public clients; the strict redirect URIs limit where Authentik sends login codes. Until a Paperless Go release has "Sign in with Authentik", use the API token steps above.
 
@@ -51,7 +51,9 @@ Browser login inside the app is requested upstream in Paperless Go issue #51. Fo
 
 Deployment `paperless-gpt`, image `icereed/paperless-gpt`, reads Paperless OCR text and asks Ollama `qwen3.5:9b` at `http://ollama.ai.svc.cluster.local:30068` with thinking off. LLM OCR stays off. It calls `http://paperless:8000` with the API token of user `paperless-gpt`.
 
-Workflow `Tag new receipts for AI` tags new documents `paperless-gpt-auto`, except those tagged `source:gmail` or `source:drive`. paperless-gpt polls that tag and sets the title, the shop as correspondent, tags, document type, created date and `Total`. Then it removes `paperless-gpt-auto` and adds `paperless-gpt-auto-complete`, or `paperless-gpt-failed` when Paperless rejects a value. It creates those two tags at startup. It picks only existing tags and document types and may create new shops.
+Workflow `Tag new receipts for AI` tags new documents `paperless-gpt-auto`, except those tagged `source:gmail` or `source:drive`. The Gmail rules assign it themselves, as Mail rules describes. paperless-gpt polls that tag and sets the title, the shop as correspondent, tags, document type and `Total`. Then it removes `paperless-gpt-auto` and adds `paperless-gpt-auto-complete`, or `paperless-gpt-failed` when Paperless rejects a value. It creates those two tags at startup. It picks only existing tags and document types and may create new shops.
+
+With `AUTO_GENERATE_CREATED_DATE=false`, paperless-gpt leaves the created date alone. Paperless uses the mail's Date header for email bodies. For attachments and phone scans, it uses the first date it finds in the document text, or the import day.
 
 It runs as 1000:1000. The entrypoint skips its user setup when not root. Its files live on `paperless-data`: `gpt/config` with `settings.json`, `gpt/prompts`, and `gpt/db` with the SQLite undo history. On first start it copies the image's `default_prompts` into the empty `gpt/prompts`, and on later starts it updates every prompt nobody edited.
 
@@ -81,9 +83,9 @@ The POST replaces all settings, so the command sends back the current ones with 
 
 ### Prompts
 
-`LLM_LANGUAGE=Norwegian, English, German or Greek` fills `{{.Language}}` in the title, tag, shop, document type, date and custom field prompts, rendered as "Norwegian, English, German Or Greek". Two prompts change, in the UI under Settings, saved to `gpt/prompts`:
+`LLM_LANGUAGE=Norwegian, English, German or Greek` fills `{{.Language}}` in the title, tag, shop, document type, date and custom field prompts, rendered as "Norwegian, English, German Or Greek". Two prompts were edited in the UI under Settings and saved to `gpt/prompts`.
 
-`created_date_prompt.tmpl`, a new second line:
+`created_date_prompt.tmpl` is unused while `AUTO_GENERATE_CREATED_DATE=false`. Keep this line in case date generation is turned back on:
 
 ```text
 On a receipt this is the purchase date as printed on the receipt. The receipts write the day first, as DD.MM.YYYY, DD.MM.YY, DD/MM/YYYY or DD-MM-YYYY: the first number is the day and the second is the month. Take the date only from the content, never from these instructions.
@@ -97,7 +99,7 @@ On a receipt this is the purchase date as printed on the receipt. The receipts w
 
 The date line has no example date. An earlier version had one, and on a real receipt with noisy OCR the AI returned that example date. On 2026-11-09 the current wording gave the right date on that receipt twice and on six made-up receipts in Norwegian, German, English and Greek with formats DD.MM.YYYY, DD.MM.YY, DD/MM/YYYY and DD-MM-YYYY.
 
-Known limits: a US receipt that prints the month first gets the wrong date, and `kr` on a Swedish or Danish receipt may become NOK. Fix those by hand. An edited prompt no longer follows upstream defaults. After an image update, compare it with the new `default_prompts`.
+If AI date generation is turned back on, the date prompt can misread US receipts that print the month first. The custom field prompt may turn `kr` on a Swedish or Danish receipt into NOK. Fix those by hand. An edited prompt no longer follows upstream defaults. After an image update, compare it with the new `default_prompts`.
 
 ## Email and Drive import
 
@@ -109,20 +111,30 @@ Deployment and Service `paperless-converters` run Tika on port 9998 and Gotenber
 
 The owner enables Gmail 2-Step Verification and IMAP, creates an app password and stores it in a vault item holding the Gmail app password, `<gmail-imap-item>`. He creates his own Paperless API token under My Profile and stores it in a vault item holding the owner's Paperless API token, `<paperless-token-item>`. Never put either value in Git, shell arguments or logs.
 
-With owner approval, create Gmail label `paperless-receipt` and a receipt-word filter, preview the matches, then apply it to existing mail. Add this label by hand when the filter misses a receipt. The design records the filter query.
+Both Gmail filters exclude Promotions, Social and Forums. They match mail that meets any of these criteria:
+
+- The subject contains one of these words or phrases: receipt, invoice, bill, kvittering, faktura, regning, ordrebekreftelse, order confirmation, Rechnung, Quittung, Bestellbestätigung, απόδειξη, τιμολόγιο, λογαριασμός.
+- The sender is on a short list of known billing senders.
+- The sender is on a longer list of billing senders and a receipt word appears anywhere in the mail.
+
+The attachment filter adds `paperless-receipt` using `filename:(pdf OR doc OR docx OR xls OR xlsx OR odt OR ods)`. The body filter adds `paperless-receipt-body` using `-filename:(pdf OR doc OR docx OR xls OR xlsx OR odt OR ods)`.
+
+The old body-wide keyword filter was deleted and its label removed from all mail. The two current filters were applied to existing mail on 2026-11-18. If a filter misses a receipt, add `paperless-receipt` by hand to import eligible attachments or `paperless-receipt-body` to import the email body when there are no eligible attachments.
 
 ### Mail rules
 
-`ingest/configure.py` creates or updates mail account `gmail` and these rules. Both have no age limit, use the email subject as title, assign no correspondent and tag documents `source:gmail`.
+`ingest/configure.py` creates or updates mail account `gmail` and these rules. Both have no age limit, use the email subject as title, assign no correspondent and tag documents `source:gmail` and `paperless-gpt-auto`.
 
-| Order | Rule | Folder | Import | Gmail label after import |
-|---|---|---|---|---|
-| 1 | `gmail-receipt-bodies` | `paperless-receipt` | Email body as PDF | `paperless-done-eml` |
-| 2 | `gmail-attachments` | Discovered IMAP All Mail folder | Attachments, not inline images | `paperless-done-att` |
+| Order | Rule | Folder | Import | Filename filter | Gmail label after import |
+|---|---|---|---|---|---|
+| 1 | `gmail-receipt-bodies` | `paperless-receipt-body` | Email body as PDF | None | `paperless-done-eml` |
+| 2 | `gmail-attachments` | `paperless-receipt` | Attachments only, excluding inline files | `*.pdf,*.doc,*.docx,*.xls,*.xlsx,*.odt,*.ods` | `paperless-done-att` |
 
-The separate done labels let both rules process the same message. A receipt with an attachment can produce both an email PDF and an attachment document. Rule 1 also assigns `paperless-gpt-auto`. The receipts workflow uses `filter_has_not_tags` to skip `source:gmail` and `source:drive`, so only receipt emails enter AI processing through the rule. Phone and web uploads keep their existing behavior.
+The Gmail filters decide which rule sees a message, so a receipt mail produces either its PDF or Office attachments or its email body, never both. Mail with only images or logos gets `paperless-receipt-body`. When `gmail-attachments` finds no matching attachment, for example a PDF sent inline, Processed Mails lists the message as processed without import, Gmail gets no done label and nothing is imported. Add `paperless-receipt-body` by hand to import its body instead.
 
-To re-import one message, delete its entry under Mail > Processed Mails and remove the matching done label in Gmail. Leave `paperless-receipt` in place for a receipt body. Re-importing creates a second document if the first still exists. Use the Duplicates filter in Paperless to find duplicates.
+With `PAPERLESS_CONSUMER_DELETE_DUPLICATES=true`, Paperless rejects files identical to existing documents, even those in the trash. When Paperless rejects a file as a duplicate, Processed Mails lists the message as failed, Gmail gets no done label and Paperless does not retry the message. Other new attachments from that message are still imported.
+
+To re-import a message, permanently delete the old document if it still exists. Delete the message's entry under Mail > Processed Mails and remove the matching done label in Gmail, if present. Leave the receipt label in place.
 
 ### Configure Gmail
 
@@ -178,7 +190,7 @@ vault run --name '<paperless-token-item>' --password-env VAULT_PL_TOKEN -- \
 
 The script defaults to Paperless at `http://127.0.0.1:18000` and the homelab hub's `/drive` endpoint. It tags uploads `source:drive`, uses the Drive name as title and exports Google Docs, Sheets and Slides as PDFs. Unsupported types appear as skipped in the manifest. It downloads one file at a time, removes the local copy after each attempt and limits downloads to 1 GiB per rolling hour.
 
-Rerun with the same `--out` directory to resume from `manifest.jsonl` and skip already uploaded file IDs. If an upload response was lost, a rerun can create a second document. Use the Duplicates filter to find it. Keep that directory private and retain it between runs. `report.json` contains cumulative counts and `failed_ids`, not a per-run upload count. Compare runs until no new uploads occur, check `stopped` and the failed list, and verify upload tasks in Paperless. An accepted upload is not proof that Paperless finished processing it.
+Rerun with the same `--out` directory to resume from `manifest.jsonl` and skip already uploaded file IDs. If an upload response was lost, a rerun may retry the same file. Paperless rejects it if it is identical to a document already imported. Keep that directory private and retain it between runs. `report.json` contains cumulative counts and `failed_ids`, not a per-run upload count. Compare runs until no new uploads occur, check `stopped` and the failed list, and verify upload tasks in Paperless. An accepted upload is not proof that Paperless finished processing it.
 
 ## Shared lists
 
