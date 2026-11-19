@@ -1,10 +1,30 @@
 # Import all Gmail and Drive documents into Paperless
 
+## Revision 2026-11-18
+
+G1 is dropped. The original mailbox-wide import brought in photos, logos and newsletter files. Gmail now uses two receipt filters. Both exclude Promotions, Social and Forums and match mail that meets any of these criteria:
+
+- The subject contains one of these words or phrases: receipt, invoice, bill, kvittering, faktura, regning, ordrebekreftelse, order confirmation, Rechnung, Quittung, Bestellbestätigung, απόδειξη, τιμολόγιο, λογαριασμός.
+- The sender is on a short list of known billing senders.
+- The sender is on a longer list of billing senders and a receipt word appears anywhere in the mail.
+
+The old body-wide keyword filter was deleted and its label removed from all mail. The two current filters were applied to existing mail on 2026-11-18.
+
+- `filename:(pdf OR doc OR docx OR xls OR xlsx OR odt OR ods)` adds `paperless-receipt`. The `gmail-attachments` rule imports only matching attachments, excludes inline files and sets `paperless-done-att` after import.
+- `-filename:(pdf OR doc OR docx OR xls OR xlsx OR odt OR ods)` adds `paperless-receipt-body`. The `gmail-receipt-bodies` rule imports the body as a PDF and sets `paperless-done-eml` after import. Mail with only images or logos goes through this rule.
+
+If a filter misses a receipt, add the label by hand. Use `paperless-receipt` for eligible attachments or `paperless-receipt-body` when there are none. Both rules assign `paperless-gpt-auto`.
+
+With `PAPERLESS_CONSUMER_DELETE_DUPLICATES=true`, Paperless rejects files identical to existing documents. The 10-minute mail check queued unfinished mail again during the first backlog, which created 22,039 copies.
+
+With `AUTO_GENERATE_CREATED_DATE=false`, paperless-gpt leaves created dates alone. It could not see the mail's Date header and overwrote correct dates with guesses.
+
 ## Intent
 
 Paperless becomes the owner's single source of truth for documents and
 receipts. Everything he already keeps in his personal Gmail and Google
 Drive moves in once, and new Gmail documents keep arriving on their own.
+The Gmail scope is superseded by Revision 2026-11-18.
 He confirmed that the personal account holds no work data.
 
 This reverses one non-goal of
@@ -15,6 +35,7 @@ that design stays.
 
 - G1. Every attachment of every Gmail message, from all years, lands in
   Paperless. New ones arrive within the 10-minute mail check.
+  Superseded by Revision 2026-11-18.
 - G2. Receipts that exist only as an email body land in Paperless as a
   PDF of the email.
 - G3. Every Drive file the owner owns lands in Paperless once. Google
@@ -40,7 +61,8 @@ that design stays.
 - File types Paperless cannot read, such as `.apk`, `.zip`, video and
   audio. They are skipped and listed.
 - Removing the duplicate that appears when a receipt email has an
-  attachment: its PDF email and its attachment both land.
+  attachment: its PDF email and its attachment both land. Superseded
+  by Revision 2026-11-18.
 - Other people's accounts.
 
 ## Anti-goals
@@ -71,7 +93,7 @@ that design stays.
   stop the rule.
 - Imported mail gets the rule's owner when the rule has "assign owner
   from rule" set.
-- Checked over IMAP on 2026-11-10: the all-mail folder is
+- Historical IMAP check on 2026-11-10: the all-mail folder is
   `[Gmail]/All Mail`, and the server reports `X-GM-EXT-1`, so labels
   work.
 - The Drive tool's download link points at `localhost:8001` inside the
@@ -160,6 +182,8 @@ take the Paperless web UI or uploads offline.
 
 ### Receipt label in Gmail
 
+Superseded by Revision 2026-11-18.
+
 - A Gmail filter adds label `paperless-receipt` to new mail matching
   receipt words in the four receipt languages: receipt, invoice, order
   confirmation, kvittering, faktura, ordrebekreftelse, Rechnung,
@@ -176,7 +200,10 @@ take the Paperless web UI or uploads offline.
 Both rules: owner is the owner's Paperless user, assign owner from
 rule, `maximum_age` 0, action "tag", tag `source:gmail`, correspondent
 "do not assign", title from subject. Rule 1 also
-assigns `paperless-gpt-auto`, so receipt emails get AI fields.
+assigns `paperless-gpt-auto`, so receipt emails get AI fields. The AI
+assignment is superseded by Revision 2026-11-18.
+
+The rule table below is superseded by Revision 2026-11-18.
 
 | Order | Name | Folder | Scope | Gmail label set after import |
 |---|---|---|---|---|
@@ -272,7 +299,8 @@ A one-off script run by the agent:
   and the work hub render.
 - R3. The attachment rule also imports junk such as calendar files,
   banners and tiny images attached as real files. The owner deletes them
-  in Paperless, or the builder adds a filename exclusion.
+  in Paperless, or the builder adds a filename exclusion. Superseded
+  by Revision 2026-11-18.
 - R4. The receipt filter misses some receipts and catches some
   marketing mail.
 - R5. The app password opens the whole mailbox. Paperless keeps it in
@@ -285,7 +313,7 @@ A one-off script run by the agent:
 
 - Tika and Gotenberg resource requests and limits. The pod runs on a
   worker with about 22 GiB allocatable memory.
-- The final receipt word list.
+- The final receipt word list. Superseded by Revision 2026-11-18.
 - The Drive script's language and layout.
 - Whether Traefik or Cloudflare limits upload size below 133 MB. If
   so, upload through the LAN Traefik address.

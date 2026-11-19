@@ -36,6 +36,7 @@ spec:
             - {name: OLLAMA_THINK, value: "false"}
             - {name: LLM_LANGUAGE, value: "Norwegian, English, German or Greek"}
             - {name: AUTO_TAG, value: paperless-gpt-auto}
+            - {name: AUTO_GENERATE_CREATED_DATE, value: "false"}
           # The entrypoint skips its chown and su-exec when not root; the NFS export squashes to 1000 anyway.
           securityContext:
             runAsUser: 1000

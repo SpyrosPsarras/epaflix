@@ -26,7 +26,6 @@ class IngestTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.drive = load("drive_import")
-        cls.configure = load("configure")
 
     def test_parse_page(self):
         text = '\n'.join([
@@ -98,26 +97,6 @@ class IngestTests(unittest.TestCase):
         self.assertFalse(self.drive.download_complete(9, 10))
         self.assertFalse(self.drive.download_complete(11, 10))
 
-    def test_all_mail_folder(self):
-        lines = [b'(\\HasNoChildren) "/" "INBOX"', b'(\\HasNoChildren \\All) "/" "[Gmail]/Alle e-poster"']
-        self.assertEqual(self.configure.all_mail_folder(lines), '[Gmail]/Alle e-poster')
-        self.assertEqual(self.configure.all_mail_folder([b'(\\All) "/" "a\\"b\\\\c"']), 'a"b\\c')
-        self.assertEqual(self.configure.all_mail_folder([b'(\\All) "/" AllMail']), 'AllMail')
-        with self.assertRaises(ValueError):
-            self.configure.all_mail_folder([lines[0]])
-
-    def test_all_mail_folder_modified_utf7(self):
-        fixtures = [
-            (b'[Gmail]/&AMk-l&AOk-ments', '[Gmail]/Éléments'),
-            ('[Gmail]/Éléments'.encode('utf-8'), '[Gmail]/Éléments'),
-            (b'&-', '&'),
-            (b'[Gmail]/&A4wDuwOx- &A8QDsQ- &A7wDtwO9A80DvAOxA8QDsQ-', '[Gmail]/Όλα τα μηνύματα'),
-            (b'&,,8-', '\uffff'),
-        ]
-        for encoded, expected in fixtures:
-            with self.subTest(encoded=encoded):
-                self.assertEqual(self.configure.all_mail_folder([b'(\\All) "/" "' + encoded + b'"']), expected)
-
 
 class ConfigureRuntimeTests(unittest.TestCase):
     @classmethod
@@ -180,28 +159,10 @@ class ConfigureRuntimeTests(unittest.TestCase):
                 MailRule=SimpleNamespace(objects=self.rules, ConsumptionScope=SimpleNamespace(ATTACHMENTS_ONLY=1, EML_ONLY=2), AttachmentProcessing=SimpleNamespace(ATTACHMENTS_ONLY=1), MailAction=SimpleNamespace(TAG=5), TitleSource=SimpleNamespace(FROM_SUBJECT=1), CorrespondentSource=SimpleNamespace(FROM_NOTHING=1)),
             ),
         }
-        class Mailbox:
-            def __init__(self, *args, **kwargs):
-                pass
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *args):
-                pass
-
-            def login(self, username, password):
-                if username != 'mail@example.test' or password != 'synthetic-password':
-                    raise ValueError('wrong credentials')
-
-            def list(self):
-                return 'OK', [b'(\\All) "/" "[Gmail]/Alle e-poster"']
-
-        self.mailbox = Mailbox
 
     def run_configure(self, shell=False):
         data = json.dumps({'owner': 'owner@example.test', 'email': 'mail@example.test', 'password': 'synthetic-password'})
-        with patch.dict(sys.modules, self.modules), patch.object(self.configure.imaplib, 'IMAP4_SSL', self.mailbox), patch.object(sys, 'stdin', io.StringIO(data)), contextlib.redirect_stdout(io.StringIO()) as output:
+        with patch.dict(sys.modules, self.modules), patch.object(sys, 'stdin', io.StringIO(data)), contextlib.redirect_stdout(io.StringIO()) as output:
             if shell:
                 runpy.run_path(str(HERE / 'configure.py'), run_name='django.core.management.commands.shell')
             else:
@@ -223,14 +184,16 @@ class ConfigureRuntimeTests(unittest.TestCase):
             self.assertEqual(self.tags.rows[name].matching_algorithm, 0)
         receipt = self.rules.rows['gmail-receipt-bodies']
         attachments = self.rules.rows['gmail-attachments']
-        self.assertEqual((receipt.order, receipt.folder, receipt.consumption_scope, receipt.action_parameter), (1, 'paperless-receipt', 2, 'paperless-done-eml'))
-        self.assertEqual((attachments.order, attachments.folder, attachments.consumption_scope, attachments.action_parameter), (2, '[Gmail]/Alle e-poster', 1, 'paperless-done-att'))
+        self.assertEqual((receipt.order, receipt.folder, receipt.consumption_scope, receipt.action_parameter), (1, 'paperless-receipt-body', 2, 'paperless-done-eml'))
+        self.assertEqual((attachments.order, attachments.folder, attachments.consumption_scope, attachments.action_parameter), (2, 'paperless-receipt', 1, 'paperless-done-att'))
+        self.assertIsNone(receipt.filter_attachment_filename_include)
+        self.assertEqual(attachments.filter_attachment_filename_include, '*.pdf,*.doc,*.docx,*.xls,*.xlsx,*.odt,*.ods')
         for rule in [receipt, attachments]:
             self.assertIs(rule.owner, self.owner)
             self.assertTrue(rule.assign_owner_from_rule)
             self.assertEqual((rule.maximum_age, rule.action, rule.assign_title_from, rule.assign_correspondent_from, rule.attachment_type), (0, 5, 1, 1, 1))
         self.assertEqual([tag.name for tag in receipt.assign_tags.items], ['source:gmail', 'paperless-gpt-auto'])
-        self.assertEqual([tag.name for tag in attachments.assign_tags.items], ['source:gmail'])
+        self.assertEqual([tag.name for tag in attachments.assign_tags.items], ['source:gmail', 'paperless-gpt-auto'])
         self.assertEqual([tag.name for tag in self.trigger.filter_has_not_tags.items], ['source:gmail', 'source:drive'])
 
     def test_missing_prerequisite_changes_nothing(self):
