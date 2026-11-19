@@ -1,0 +1,205 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tdarr
+  namespace: servarr
+  labels:
+    app: tdarr
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: tdarr
+  template:
+    metadata:
+      labels:
+        app: tdarr
+    spec:
+      automountServiceAccountToken: false
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values: [k3s-worker-61, k3s-worker-62, k3s-worker-63, k3s-worker-64, k3s-worker-65]
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 568
+        runAsGroup: 0
+        fsGroup: 568
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: fetch-plugins
+          image: ghcr.io/haveagitgat/tdarr:3.08.00
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          command: [sh, -ec]
+          args:
+            - |
+              cd "$(mktemp -d)"
+              mkdir -p checkHDRType/1.0.0 checkDoViProfile/1.0.0
+              curl --fail-early -fsSL --proto '=https' --proto-redir '=https' --retry 3 --max-time 30 \
+                -o checkHDRType/1.0.0/index.js https://raw.githubusercontent.com/nichols89ben/Tdarr_DoVi_Processing/5be0b5a341140b36fd6d32d33401b7f3a329965e/FlowPlugins/LocalFlowPlugins/DoVI/checkHDRType/1.0.0/index.js \
+                -o checkDoViProfile/1.0.0/index.js https://raw.githubusercontent.com/nichols89ben/Tdarr_DoVi_Processing/5be0b5a341140b36fd6d32d33401b7f3a329965e/FlowPlugins/LocalFlowPlugins/DoVI/checkDoViProfile/1.0.0/index.js
+              sha256sum -c /checksums/plugins.sha256
+              umask 002
+              mkdir -p /storage/configs
+              for file in checkHDRType/1.0.0/index.js checkDoViProfile/1.0.0/index.js; do
+                install -Dm644 "$file" "/storage/server/Tdarr/Plugins/FlowPlugins/LocalFlowPlugins/DoVI/$file"
+              done
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          volumeMounts:
+            - name: config
+              mountPath: /storage
+            - name: plugin-checksums
+              mountPath: /checksums
+              readOnly: true
+      containers:
+        - name: tdarr
+          image: ghcr.io/haveagitgat/tdarr:3.08.00
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          env:
+            - {name: TZ, value: Europe/Oslo}
+            - {name: UMASK, value: "002"}
+            - {name: internalNode, value: "false"}
+            - {name: serverIP, value: "0.0.0.0"}
+            - {name: serverPort, value: "8266"}
+            - {name: webUIPort, value: "8265"}
+            - {name: inContainer, value: "true"}
+            - {name: enableDockerAutoUpdater, value: "false"}
+          ports:
+            - {name: http, containerPort: 8265}
+            - {name: node, containerPort: 8266}
+          readinessProbe:
+            tcpSocket:
+              port: http
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+          volumeMounts:
+            - {name: config, mountPath: /app/server, subPath: server}
+            - {name: config, mountPath: /app/configs, subPath: configs}
+            - {name: media, mountPath: /media/movies, subPath: movies}
+            - {name: media, mountPath: /media/tvshows, subPath: tvshows}
+            - {name: media, mountPath: /media/animes, subPath: animes}
+            - {name: media, mountPath: /temp, subPath: tdarr-cache}
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: tdarr-server-iscsi
+        - name: media
+          persistentVolumeClaim:
+            claimName: servarr-media
+        - name: plugin-checksums
+          configMap:
+            name: tdarr-plugin-checksums
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tdarr
+  namespace: servarr
+  labels:
+    app: tdarr
+spec:
+  type: ClusterIP
+  selector:
+    app: tdarr
+  ports:
+    - {name: http, port: 8265, targetPort: http}
+    - {name: node, port: 8266, targetPort: node}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: tdarr-node
+  namespace: servarr
+  labels:
+    app: tdarr-node
+spec:
+  selector:
+    matchLabels:
+      app: tdarr-node
+  template:
+    metadata:
+      labels:
+        app: tdarr-node
+    spec:
+      automountServiceAccountToken: false
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values: [k3s-worker-61, k3s-worker-62, k3s-worker-63, k3s-worker-64, k3s-worker-65]
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 568
+        runAsGroup: 0
+        fsGroup: 568
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: tdarr-node
+          image: ghcr.io/haveagitgat/tdarr_node:3.08.00
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          env:
+            - {name: TZ, value: Europe/Oslo}
+            - {name: UMASK, value: "002"}
+            - name: nodeName
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - {name: serverURL, value: "http://tdarr.servarr.svc.cluster.local:8266"}
+            - {name: inContainer, value: "true"}
+            - {name: nodeType, value: mapped}
+            - {name: transcodecpuWorkers, value: "1"}
+            - {name: healthcheckcpuWorkers, value: "1"}
+            - {name: transcodegpuWorkers, value: "0"}
+            - {name: healthcheckgpuWorkers, value: "0"}
+            - {name: enableDockerAutoUpdater, value: "false"}
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          volumeMounts:
+            - {name: media, mountPath: /media/movies, subPath: movies}
+            - {name: media, mountPath: /media/tvshows, subPath: tvshows}
+            - {name: media, mountPath: /media/animes, subPath: animes}
+            - {name: media, mountPath: /temp, subPath: tdarr-cache}
+      volumes:
+        - name: media
+          persistentVolumeClaim:
+            claimName: servarr-media

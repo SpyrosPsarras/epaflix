@@ -1,0 +1,74 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tdarr-ingress
+  namespace: servarr
+spec:
+  podSelector:
+    matchLabels:
+      app: tdarr
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: discord-media
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: openclaw
+      ports:
+        - {protocol: TCP, port: 8265}
+    - from:
+        - podSelector:
+            matchLabels:
+              app: tdarr-node
+      ports:
+        - {protocol: TCP, port: 8266}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tdarr-node-egress
+  namespace: servarr
+spec:
+  podSelector:
+    matchLabels:
+      app: tdarr-node
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: tdarr
+      ports:
+        - {protocol: TCP, port: 8266}
+    - to:
+        - podSelector:
+            matchLabels:
+              app: radarr
+      ports:
+        - {protocol: TCP, port: 7878}
+    - to:
+        - podSelector:
+            matchLabels:
+              app: sonarr
+      ports:
+        - {protocol: TCP, port: 8989}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}

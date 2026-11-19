@@ -75,6 +75,9 @@ resources:
   - unpackerr/unpackerr.yaml
   - vpn-picker
   - configarr/configarr.yaml
+  - tdarr/tdarr.yaml
+  - tdarr/network-policy.yaml
+  - tdarr/ingressroute.yaml
 generators:
   - _shared/secrets/ksops-generator.yaml
 configMapGenerator:
@@ -90,11 +93,18 @@ configMapGenerator:
   - name: bazarr-autotranslate-main
     files:
       - main.py=bazarr-autotranslate/files/main.py
+  - name: tdarr-plugin-checksums
+    files:
+      - tdarr/plugins.sha256
 images:
   # Version tags make release changes typed Renovate updates (#1129).
   # Keep digests alongside tags. Exceptions and registry evidence: docs/servarr-image-pins.md.
   - name: jellyfin/jellyfin
     newTag: 12.4@sha256:fea863d0cd9ec445985d9c75fc6ed64e38a1d2766cf0c250a33d553f4fc1b771
+  - name: ghcr.io/haveagitgat/tdarr
+    newTag: 3.08.00@sha256:84743e5ae433a5b49cb463b2dff2679eb02f0cac24fb88c830f49bf8aa9f1c04
+  - name: ghcr.io/haveagitgat/tdarr_node
+    newTag: 3.08.00@sha256:25153299cc9c2fcd99202cc36171c2e42ba7ef11823959c018e5c5bf2733581f
   - name: ghcr.io/raydak-labs/configarr
     newTag: 1.38.0@sha256:36d15adcc815557409a9437bc51468edfd1ac05ef6b46336dff650a56d2cc6a3
   - name: ghcr.io/linuxserver/sonarr

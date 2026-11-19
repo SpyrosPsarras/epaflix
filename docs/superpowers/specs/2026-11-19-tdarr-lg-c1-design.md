@@ -62,7 +62,7 @@ Both third-party steps read MediaInfo fields (`HDR_Format`, `HDR_Format_Profile`
 
 ### Bot (`#media`)
 
-- `AGENTS.md` gets a Tdarr section: find the file in Radarr or Sonarr, queue it in Tdarr through its API, check its status, and report the result. Tdarr's API key goes in Secret `openclaw` like the other keys.
+- `AGENTS.md` gets a Tdarr section: find the file in Radarr or Sonarr, queue it in Tdarr through its API, check its status, and report the result. Tdarr runs without its own auth, like Radarr: the UI sits behind Authentik, and the NetworkPolicy admits the API port only from Traefik and the bot, so the bot needs no key.
 - The NetworkPolicy allows the gateway to reach the Tdarr server only.
 - The bot cannot pick a flow or pass ffmpeg arguments, only queue a file.
 
