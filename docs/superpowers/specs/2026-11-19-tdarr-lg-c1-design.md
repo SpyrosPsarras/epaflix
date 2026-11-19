@@ -36,7 +36,7 @@ The `#media` bot could not help. Spyros wants the same request to be solvable fr
 
 Dolby Vision fix:
 
-- O4: strip the Dolby Vision layer and keep MKV. **Chosen by Spyros.** The file becomes HDR10 and keeps its name and subtitles.
+- O4: strip the Dolby Vision layer and keep MKV. **Chosen by Spyros.** The file keeps its base layer, name and subtitles.
 - O5: remux to MP4 and keep Dolby Vision. Rejected: needs third-party plugins, changes the file extension under Radarr and drops image subtitles.
 
 ## Design
@@ -45,19 +45,19 @@ Dolby Vision fix:
 
 - Tdarr server as a Deployment with its config on an iSCSI PVC, behind the existing ingress and Authentik like the other servarr apps.
 - Tdarr node as a DaemonSet on the 5 k3s workers: one node per host. Each node runs one CPU transcode worker and one health-check worker. Each has CPU and memory limits, so an out-of-memory kill restarts only that node's container. Free workers take the next file from the queue; Tdarr has no "least busy node" choice.
-- Server and nodes mount `servarr-media` at the same paths, so no path translation is needed. The transcode cache is an emptyDir per node, sized and limited so it cannot fill the node disk.
-- Libraries: movies, TV shows, animes. After the copy test, the owner enables Folder Watch and Transcodes in each library. The watcher polls NFS every 300 seconds instead of relying on file-system events. Tdarr holds newly indexed files for 10 minutes before processing to give copy imports time to finish. This is a queue delay, not a check that the file has stopped changing.
-- The seed leaves Folder Watch and Transcodes off on creation and preserves the owner's settings on restart. New libraries have Tdarr's built-in hourly find-new scan enabled. It adds only unindexed files, including any the watcher missed.
+- Server and nodes mount `servarr-media` at the same paths, so no path translation is needed. They mount the transcode cache at `/temp` from the `tdarr-cache` subPath of the `servarr-media` NFS share.
+- Libraries: movies, TV shows, animes. Once Folder Watch is enabled, it polls NFS every 300 seconds instead of relying on file-system events. Tdarr holds newly indexed files for 10 minutes before processing to give copy imports time to finish. This is a queue delay, not a check that the file has stopped changing.
+- The seed leaves Folder Watch and Transcodes off on creation and preserves the owner's settings on restart. The hourly find-new scan indexes new files even while Transcodes is off, but indexing does not run the flow. Enabling Transcodes allows Tdarr to process every indexed problem file in that library, not just files queued through the bot.
 
 ### Flow (community flow plugins, official or third-party)
 
 Non-official community plugins are allowed. No custom code in the flow.
 
-1. Check Audio Codec for `dts` (official). For Dolby Vision: Check HDR type, then Check DoVi Profile, both from [nichols89ben/Tdarr_DoVi_Processing](https://github.com/nichols89ben/Tdarr_DoVi_Processing), pinned to commit `5be0b5a34114` (2026-11-14, Tdarr 3.08.00). Strip only profile 8, and profile 7 with one video stream, both of which have an HDR10 base layer. Profiles 4 and 5 have no HDR10 base, so they go to Require Review and are not touched.
+1. Check Audio Codec for `dts` (official). For Dolby Vision: Check HDR type, then Check DoVi Profile, both from [nichols89ben/Tdarr_DoVi_Processing](https://github.com/nichols89ben/Tdarr_DoVi_Processing), pinned to commit `5be0b5a34114` (2026-11-14, Tdarr 3.08.00). Strip only profile 8 and single-stream profile 7. The strip keeps whatever base layer exists, usually HDR10 but sometimes HLG or SDR. Check that it survives the copy test. Profiles 4, 5 and dual-stream 7 go to Require Review and are not touched.
 2. Neither problem: end with "not required". The file is not touched.
-3. Otherwise build one ffmpeg command: copy the video, copy subtitles and other audio, convert DTS tracks to E-AC3 at 640k, and strip the Dolby Vision layer with the bitstream filter `dovi_rpu=strip=1` (ffmpeg 7.1 or newer).
+3. Otherwise build one ffmpeg command: copy the video, copy subtitles and other audio, convert DTS tracks to E-AC3 at 640k, and strip the Dolby Vision layer with `-bsf:v:0 dovi_rpu=strip=1` (ffmpeg 7.1 or newer).
 4. Check the new file: duration ratio close to 1, and a health check.
-5. Replace the original file, then tell Radarr or Sonarr to rescan (Notify Radarr or Sonarr plugin). The plugin calls a loopback proxy in the node pod that holds the Arr keys and forwards only lookups and refresh commands, so no key sits in the flow, Tdarr's database or job reports.
+5. Replace the original file, then tell Radarr or Sonarr to rescan (Notify Radarr or Sonarr plugin). The plugin calls a loopback proxy in the node pod that holds the Arr keys and forwards only lookups, refresh commands and command status reads (`GET /api/v3/command/<id>`), so no key sits in the flow, Tdarr's database or job reports.
 
 Both third-party steps read MediaInfo fields (`HDR_Format`, `HDR_Format_Profile`). Check DoVi Profile throws on files without Dolby Vision, so it runs only on Check HDR type's Dolby Vision branch. The repo has no license file; it is used unmodified for personal use. The plugins are copied into Tdarr's `LocalFlowPlugins` from the pinned commit at deploy time.
 
@@ -74,16 +74,15 @@ Radarr profile `UHD Bluray + WEB` scores the five DTS formats -1 instead of TRaS
 ### Observability
 
 - Tdarr server and node logs go to Loki like the other servarr apps.
-- Alert when a Tdarr transcode fails, if a log line marks it reliably.
+- No alert: Tdarr 3.08.00 logs transcode failures only in job reports. Follow-up: alert from Tdarr's API.
 
 ## Verified on 2026-11-19
 
-- `ghcr.io/haveagitgat/tdarr_node:latest` ships `tdarr-ffmpeg` 8.1.2-Jellyfin with bitstream filter `dovi_rpu` and option `strip`. Pin that image by digest.
-- On 5-second video samples of both movies, `-c copy -bsf:v dovi_rpu=strip=1` removed the DOVI configuration record and the per-frame Dolby Vision RPU, and kept HEVC Main 10, PQ transfer, BT.2020, mastering display, content light level and HDR10+ (SMPTE 2094-40) metadata. Tested with Jellyfin's ffmpeg 8.1.3, same filter; nothing was written to the library.
+- The tested Tdarr node image ships `tdarr-ffmpeg` 8.1.2-Jellyfin with bitstream filter `dovi_rpu` and option `strip`. The manifests pin the server and node to 3.08.00 by digest.
+- On 5-second video samples of both movies, a stream copy with `dovi_rpu=strip=1` removed the DOVI configuration record and the per-frame Dolby Vision RPU, and kept HEVC Main 10, PQ transfer, BT.2020, mastering display, content light level and HDR10+ (SMPTE 2094-40) metadata. Tested with Jellyfin's ffmpeg 8.1.3, same filter; nothing was written to the library.
 
 ## Left to the builder
 
-- Tdarr image tags and digests, resource numbers, cache size.
 - The cause of the gateway OOM kills.
 - Confirm Tdarr fills `mediaInfo` for library files (library scan setting), since both Dolby Vision steps depend on it.
-- Test on a copy of one file before the flow runs on the library, and process The Odyssey and Heart of the Beast last.
+- Test copies of both movies in a temporary library while the seeded libraries have Transcodes and Folder Watch off. Remove the test library and folder. Then enable Transcodes for movies, queue The Odyssey and Heart of the Beast through the bot, and confirm playback on the C1. Only then enable Transcodes and Folder Watch for all three libraries.

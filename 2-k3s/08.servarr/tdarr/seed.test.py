@@ -139,20 +139,23 @@ class FlowTests(unittest.TestCase):
 
 
 class SeedTests(unittest.TestCase):
-    def test_readiness_and_seed_handle_http_disconnects(self):
+    def test_readiness_and_seed_handle_bad_http_responses(self):
         requests = []
 
         class Handler(BaseHTTPRequestHandler):
+            def reply(self, body):
+                if body is not None:
+                    self.send_response(200)
+                    self.end_headers()
+                    self.wfile.write(body)
+
             def do_GET(self):
                 requests.append(self.path)
-                if len(requests) == 1:
-                    return
-                self.send_response(200)
-                self.end_headers()
-                self.wfile.write(b'{"status":"good"}')
+                self.reply(first_status if len(requests) == 1 else b'{"status":"good"}')
 
             def do_POST(self):
                 requests.append(self.path)
+                self.reply(crud_response)
 
             def log_message(self, *args):
                 pass
@@ -164,8 +167,15 @@ class SeedTests(unittest.TestCase):
                 base = f"http://127.0.0.1:{server.server_port}"
                 ready_file = Path(tmp) / "ready"
                 command = [sys.executable, str(HERE / "seed.py"), base]
-                for wait_for_ready in (False, True):
-                    with self.subTest(wait_for_ready=wait_for_ready):
+                for wait_for_ready, first_status, crud_response in (
+                    (False, None, None),
+                    (False, None, b"null"),
+                    (True, None, None),
+                    (True, b"starting", None),
+                    (True, b"{}", None),
+                    (True, b"null", None),
+                ):
+                    with self.subTest(wait_for_ready=wait_for_ready, first_status=first_status, crud_response=crud_response):
                         requests.clear()
                         args = ["--ready-file", str(ready_file)] if wait_for_ready else []
                         expected = ["/api/v2/status"] * 2 if wait_for_ready else []

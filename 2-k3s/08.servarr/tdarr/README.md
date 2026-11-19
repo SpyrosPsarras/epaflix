@@ -8,9 +8,15 @@ UI labels below come from the Tdarr 3.08.00 web bundle and are checked again in 
 
 Tdarr does not re-encode or resize video, change filenames or containers, or remove tracks. Other audio, subtitles and attachments are copied when a file needs a fix. If neither fix applies, Tdarr leaves the file alone.
 
+## First rollout
+
+1. Keep **Transcodes** and **Folder Watch** off in the three seeded libraries. The hourly find-new scan still indexes new files, but indexing does not run the flow. Turning on Transcodes lets Tdarr process every indexed problem file in that library, including files you did not queue through the bot.
+2. Turn off **Hourly Scan** in `movies` so it cannot claim the test samples, and turn it back on in step 3. In the Tdarr UI, create a temporary library at `/media/movies/_tdarr-test` with flow `lg-c1-compat`, **Scan with MediaInfo** on, cache `/temp` and **Transcodes** on. Copy five-minute samples of The Odyssey and Heart of the Beast plus a known-good sample into that folder and scan it. Use `ffprobe` before and after to check that Dolby Vision is gone, the base layer and any HDR10 or HDR10+ metadata remain, DTS is now E-AC3 at 640 kb/s, and other streams are unchanged. The known-good sample must end `Not required`. See [Task 7](../../../docs/superpowers/plans/2026-11-19-tdarr-lg-c1.md#task-7-live-rollout-owner-confirms-each-step) for the copy and probe commands. After the checks pass, delete the temporary library and test folder.
+3. Enable **Transcodes** for `movies` only. Queue The Odyssey and Heart of the Beast through the bot and confirm both play on the C1. Only then enable **Transcodes** and **Folder Watch** for all three libraries and turn **Hourly Scan** back on in `movies`.
+
 ## Enable and queue work
 
-New libraries start with **Folder Watch** and **Transcodes** off. After the copy test, enable both for each library under **Libraries** → **Source**. New libraries default to 300-second polling with **Use File System Events** off and **Hold Files After Scanning** set to 10 minutes. **Hourly Scan (Find new)** is on by default. This built-in hourly find-new scan adds only unindexed files. Confirm these settings on existing libraries too, since the seed preserves owner changes. To pause automatic work, turn off Folder Watch, Transcodes and Hourly Scan (Find new).
+Find the library controls under **Libraries** → **Source**. New libraries default to 300-second polling with **Use File System Events** off and **Hold Files After Scanning** set to 10 minutes. **Hourly Scan (Find new)** is on by default and adds only unindexed files. Confirm these settings on existing libraries too, since the seed preserves owner changes. To pause automatic work, turn off Folder Watch, Transcodes and Hourly Scan (Find new).
 
 Replacing a file breaks its hardlink to the still-seeding torrent, so converted new downloads use double disk space until the torrent is removed.
 
@@ -26,7 +32,7 @@ To requeue an indexed file, find its exact path in **Search** and click **Requeu
 
 The `seed` sidecar gates server pod readiness. If seeding fails, the `tdarr` Service loses its ready endpoint. Check `kubectl -n servarr logs deploy/tdarr -c seed` and add `--previous` if it restarted. If Tdarr itself is running, inspect it without the Service via `kubectl -n servarr port-forward pod/<tdarr-pod> 8265:8265`. Use the seed error to fix the input or existing library conflict, then verify the replacement pod is Ready after the fix rolls out.
 
-`notify-proxy` lets the node trigger a Radarr or Sonarr refresh over loopback without putting Arr credentials in Tdarr.
+`notify-proxy` lets the node look up a Radarr or Sonarr item, trigger a refresh and read the command status over loopback without putting Arr credentials in Tdarr.
 
 `media-proxy` lets the bot check or queue one indexed path without exposing Tdarr's full API.
 

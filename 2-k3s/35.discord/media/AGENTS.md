@@ -60,10 +60,10 @@ Tdarr only fixes DTS audio and Dolby Vision. Refuse any other conversion, re-enc
 
 Look up the file in Radarr or Sonarr first. Use the filtered movie or series lookup above to get its `id`. If the title, episode or file is ambiguous, ask which one. Queue one file, never a season or a library.
 
-- Radarr: use `GET /moviefile?movieId=<id>` and take the chosen file's `path`. `/media/movies/...` maps to `/media/movies/...` in Tdarr.
-- Sonarr: use `GET /episode?seriesId=<id>` to find the episode's `episodeFileId`, then `GET /episodefile/<episodeFileId>` for the file's `path`. `/media/tvshows/...` maps to `/media/tvshows/...`, and `/media/animes/...` maps to `/media/animes/...`.
+- Radarr: use `GET /moviefile?movieId=<id>` and take the chosen file's `path`.
+- Sonarr: use `GET /episode?seriesId=<id>` to find the episode's `episodeFileId`, then `GET /episodefile/<episodeFileId>` for the file's `path`.
 
-Both apps mount the same library as Tdarr. Keep the filename and the full path exactly as returned. If the app only returns `relativePath`, append it to the movie or series record's `path` with one slash. Do not guess missing paths or queue a path outside the three roots above.
+Both apps mount the same library as Tdarr. Keep the filename and the full path exactly as returned. If the app only returns `relativePath`, append it to the movie or series record's `path` with one slash. Queue only file paths starting with `/media/movies/`, `/media/tvshows/` or `/media/animes/`. Do not guess missing paths.
 
 Set `TDARR_PATH` to the exact file path. Put it in single quotes and write each `'` in it as `'\''`, as for Seerr search text. Run the status call first and keep the returned `lastTranscodeDate` in the thread's context for later comparison.
 

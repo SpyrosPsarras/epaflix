@@ -127,10 +127,7 @@ class TdarrTests(unittest.TestCase):
         for pod in self.pods():
             self.assertEqual(self.media_mounts(pod).get("/temp"), "tdarr-cache")
             for volume in pod["volumes"]:
-                if "emptyDir" in volume:
-                    size = volume["emptyDir"].get("sizeLimit", "")
-                    self.assertRegex(size, r"^\d+[KMG]i$")
-                    self.assertLessEqual(int(size[:-2]) * {"Ki": 1, "Mi": 1024, "Gi": 1024**2}[size[-2:]], 1024**2)
+                self.assertNotIn("emptyDir", volume, volume["name"])
 
     def test_media_paths_match(self):
         for pod in self.pods():
