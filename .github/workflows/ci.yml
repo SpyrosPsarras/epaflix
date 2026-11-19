@@ -80,6 +80,7 @@ jobs:
           python3 .github/hooks/test-servarr-network-policies.py
           python3 2-k3s/33.paperless/ingest/ingest.test.py -v
           python3 2-k3s/08.servarr/tools/manifests.test.py -v
+          python3 2-k3s/08.servarr/tdarr/seed.test.py -v
           python3 2-k3s/35.discord/tools/manifests.test.py -v
           python3 2-k3s/36.home-assistant/tools/manifests.test.py -v
           python3 3-devices/esphome/tools/devices.test.py -v

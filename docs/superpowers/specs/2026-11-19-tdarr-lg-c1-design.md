@@ -56,15 +56,15 @@ Non-official community plugins are allowed. No custom code in the flow.
 2. Neither problem: end with "not required". The file is not touched.
 3. Otherwise build one ffmpeg command: copy the video, copy subtitles and other audio, convert DTS tracks to E-AC3 at 640k, and strip the Dolby Vision layer with the bitstream filter `dovi_rpu=strip=1` (ffmpeg 7.1 or newer).
 4. Check the new file: duration ratio close to 1, and a health check.
-5. Replace the original file, then tell Radarr or Sonarr to rescan (Notify Radarr or Sonarr plugin).
+5. Replace the original file, then tell Radarr or Sonarr to rescan (Notify Radarr or Sonarr plugin). The plugin calls a loopback proxy in the node pod that holds the Arr keys and forwards only lookups and refresh commands, so no key sits in the flow, Tdarr's database or job reports.
 
 Both third-party steps read MediaInfo fields (`HDR_Format`, `HDR_Format_Profile`). Check DoVi Profile throws on files without Dolby Vision, so it runs only on Check HDR type's Dolby Vision branch. The repo has no license file; it is used unmodified for personal use. The plugins are copied into Tdarr's `LocalFlowPlugins` from the pinned commit at deploy time.
 
 ### Bot (`#media`)
 
-- `AGENTS.md` gets a Tdarr section: find the file in Radarr or Sonarr, queue it in Tdarr through its API, check its status, and report the result. Tdarr runs without its own auth, like Radarr: the UI sits behind Authentik, and the NetworkPolicy admits the API port only from Traefik and the bot, so the bot needs no key.
-- The NetworkPolicy allows the gateway to reach the Tdarr server only.
-- The bot cannot pick a flow or pass ffmpeg arguments, only queue a file.
+- `AGENTS.md` gets a Tdarr section: find the file in Radarr or Sonarr, queue it through the Tdarr allowlist sidecar, check its status, and report the result. Tdarr runs without its own auth, like Radarr: the UI sits behind Authentik and only Traefik reaches the API port, so the bot needs no key.
+- The gateway's NetworkPolicy allows only the sidecar's port on the Tdarr server.
+- The bot cannot pick a flow or pass ffmpeg arguments, only queue a file. It never reaches Tdarr's raw API, which could rewrite the flow: a sidecar in the Tdarr server pod exposes only "read one file's status by exact path" and "queue one file", and the NetworkPolicy gives the bot only that port.
 
 ### Configarr
 

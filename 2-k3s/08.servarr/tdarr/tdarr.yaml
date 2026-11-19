@@ -78,6 +78,7 @@ spec:
             - {name: TZ, value: Europe/Oslo}
             - {name: UMASK, value: "002"}
             - {name: internalNode, value: "false"}
+            - {name: auth, value: "false"}
             - {name: serverIP, value: "0.0.0.0"}
             - {name: serverPort, value: "8266"}
             - {name: webUIPort, value: "8265"}
@@ -103,7 +104,29 @@ spec:
             - {name: media, mountPath: /media/tvshows, subPath: tvshows}
             - {name: media, mountPath: /media/animes, subPath: animes}
             - {name: media, mountPath: /temp, subPath: tdarr-cache}
+        - name: seed
+          image: docker.io/library/python:3.13-alpine
+          command: [python3, /seed/seed.py, "http://127.0.0.1:8265", --ready-file, /tmp/tdarr-seeded]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          readinessProbe:
+            exec:
+              command: [test, -f, /tmp/tdarr-seeded]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 24Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          volumeMounts:
+            - {name: seed, mountPath: /seed, readOnly: true}
       volumes:
+        - name: seed
+          configMap:
+            name: tdarr-seed
         - name: config
           persistentVolumeClaim:
             claimName: tdarr-server-iscsi
@@ -199,7 +222,37 @@ spec:
             - {name: media, mountPath: /media/tvshows, subPath: tvshows}
             - {name: media, mountPath: /media/animes, subPath: animes}
             - {name: media, mountPath: /temp, subPath: tdarr-cache}
+        - name: notify-proxy
+          image: docker.io/library/python:3.13-alpine
+          command: [python3, /notify/notify-proxy.py]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          env:
+            - name: RADARR_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: unpackerr-secret
+                  key: UN_RADARR_0_API_KEY
+            - name: SONARR_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: unpackerr-secret
+                  key: UN_SONARR_0_API_KEY
+          resources:
+            requests:
+              cpu: 10m
+              memory: 24Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          volumeMounts:
+            - {name: notify-proxy, mountPath: /notify, readOnly: true}
       volumes:
+        - name: notify-proxy
+          configMap:
+            name: tdarr-notify-proxy
         - name: media
           persistentVolumeClaim:
             claimName: servarr-media

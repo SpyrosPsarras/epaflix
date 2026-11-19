@@ -1,0 +1,614 @@
+{
+  "_id": "lg-c1-compat",
+  "name": "LG C1 compatibility",
+  "priority": 0,
+  "isUiLocked": false,
+  "flowPlugins": [
+    {
+      "id": "input",
+      "name": "Input File",
+      "sourceRepo": "Community",
+      "pluginName": "inputFile",
+      "version": "1.0.0",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "inputsDB": {}
+    },
+    {
+      "id": "audio",
+      "name": "Check for DTS Audio",
+      "sourceRepo": "Community",
+      "pluginName": "checkAudioCodec",
+      "version": "1.0.0",
+      "position": {
+        "x": 0,
+        "y": 100
+      },
+      "inputsDB": {
+        "codec": "dts"
+      }
+    },
+    {
+      "id": "scout",
+      "name": "Begin DTS Stream Selection",
+      "sourceRepo": "Community",
+      "pluginName": "ffmpegCommandStart",
+      "version": "1.0.0",
+      "position": {
+        "x": -280,
+        "y": 200
+      },
+      "inputsDB": {}
+    },
+    {
+      "id": "mark_dts",
+      "name": "Mark DTS Streams in Temporary Command",
+      "sourceRepo": "Community",
+      "pluginName": "ffmpegCommandRemoveStreamByProperty",
+      "version": "1.0.0",
+      "position": {
+        "x": -280,
+        "y": 300
+      },
+      "inputsDB": {
+        "codecType": "audio",
+        "propertyToCheck": "codec_name",
+        "valuesToRemove": "dts",
+        "condition": "equals"
+      }
+    },
+    {
+      "id": "remember_dts",
+      "name": "Save DTS Stream Arguments",
+      "sourceRepo": "Community",
+      "pluginName": "setFlowVariable",
+      "version": "1.0.0",
+      "position": {
+        "x": -280,
+        "y": 400
+      },
+      "inputsDB": {
+        "variable": "dtsArgs",
+        "value": "{{#args.variables.ffmpegCommand.streams}}{{#removed}} -c:{{index}} eac3 -b:{{index}} 640k{{/removed}}{{/args.variables.ffmpegCommand.streams}}"
+      }
+    },
+    {
+      "id": "hdr",
+      "name": "Check HDR Type",
+      "sourceRepo": "Local",
+      "pluginName": "checkHDRType",
+      "version": "1.0.0",
+      "position": {
+        "x": 0,
+        "y": 500
+      },
+      "inputsDB": {}
+    },
+    {
+      "id": "profile",
+      "name": "Check DoVi Profile",
+      "sourceRepo": "Local",
+      "pluginName": "checkDoViProfile",
+      "version": "1.0.0",
+      "position": {
+        "x": 300,
+        "y": 600
+      },
+      "inputsDB": {}
+    },
+    {
+      "id": "mkv",
+      "name": "Check for MKV",
+      "sourceRepo": "Community",
+      "pluginName": "checkFileExtension",
+      "version": "1.0.0",
+      "position": {
+        "x": 300,
+        "y": 700
+      },
+      "inputsDB": {
+        "extensions": "mkv"
+      }
+    },
+    {
+      "id": "review",
+      "name": "Require Review for Unsupported Dolby Vision",
+      "sourceRepo": "Community",
+      "pluginName": "requireReview",
+      "version": "1.0.0",
+      "position": {
+        "x": 610,
+        "y": 700
+      },
+      "inputsDB": {}
+    },
+    {
+      "id": "has_dts",
+      "name": "Check for DTS Audio",
+      "sourceRepo": "Community",
+      "pluginName": "checkAudioCodec",
+      "version": "1.0.0",
+      "position": {
+        "x": 0,
+        "y": 800
+      },
+      "inputsDB": {
+        "codec": "dts"
+      }
+    },
+    {
+      "id": "begin_dts",
+      "name": "Begin DTS Conversion",
+      "sourceRepo": "Community",
+      "pluginName": "ffmpegCommandStart",
+      "version": "1.0.0",
+      "position": {
+        "x": 0,
+        "y": 900
+      },
+      "inputsDB": {}
+    },
+    {
+      "id": "begin_strip",
+      "name": "Begin Dolby Vision Strip",
+      "sourceRepo": "Community",
+      "pluginName": "ffmpegCommandStart",
+      "version": "1.0.0",
+      "position": {
+        "x": 300,
+        "y": 900
+      },
+      "inputsDB": {}
+    },
+    {
+      "id": "dts_args",
+      "name": "Convert DTS and Copy Other Streams",
+      "sourceRepo": "Community",
+      "pluginName": "ffmpegCommandCustomArguments",
+      "version": "1.0.0",
+      "position": {
+        "x": 0,
+        "y": 1000
+      },
+      "inputsDB": {
+        "outputArguments": "-c:v copy -c:s copy {{{args.variables.user.dtsArgs}}}"
+      }
+    },
+    {
+      "id": "strip_args",
+      "name": "Strip Dolby Vision and Convert Any DTS",
+      "sourceRepo": "Community",
+      "pluginName": "ffmpegCommandCustomArguments",
+      "version": "1.0.0",
+      "position": {
+        "x": 300,
+        "y": 1000
+      },
+      "inputsDB": {
+        "outputArguments": "-c:v copy -c:s copy {{{args.variables.user.dtsArgs}}} -bsf:v:0 dovi_rpu=strip=1"
+      }
+    },
+    {
+      "id": "execute",
+      "name": "Execute FFmpeg",
+      "sourceRepo": "Community",
+      "pluginName": "ffmpegCommandExecute",
+      "version": "1.0.0",
+      "position": {
+        "x": 150,
+        "y": 1100
+      },
+      "inputsDB": {}
+    },
+    {
+      "id": "known_duration",
+      "name": "Require Original Duration",
+      "sourceRepo": "Community",
+      "pluginName": "checkFlowVariable",
+      "version": "1.0.0",
+      "position": {
+        "x": 150,
+        "y": 1200
+      },
+      "inputsDB": {
+        "variable": "{{{args.originalLibraryFile.ffProbeData.format.duration}}}",
+        "condition": "!=",
+        "value": ",0,0.000000,N/A"
+      }
+    },
+    {
+      "id": "ratio",
+      "name": "Compare File Duration Within 1%",
+      "sourceRepo": "Community",
+      "pluginName": "compareFileDurationRatio",
+      "version": "1.0.0",
+      "position": {
+        "x": 150,
+        "y": 1300
+      },
+      "inputsDB": {
+        "greaterThan": "99",
+        "lessThan": "101"
+      }
+    },
+    {
+      "id": "bad_duration",
+      "name": "Fail on Missing or Changed Duration",
+      "sourceRepo": "Community",
+      "pluginName": "failFlow",
+      "version": "1.0.0",
+      "position": {
+        "x": -170,
+        "y": 1400
+      },
+      "inputsDB": {}
+    },
+    {
+      "id": "health",
+      "name": "Run Full CPU Health Check",
+      "sourceRepo": "Community",
+      "pluginName": "runHealthCheck",
+      "version": "1.0.0",
+      "position": {
+        "x": 150,
+        "y": 1400
+      },
+      "inputsDB": {
+        "type": "thorough",
+        "gpuAcceleration": "none"
+      }
+    },
+    {
+      "id": "replace",
+      "name": "Replace Original File",
+      "sourceRepo": "Community",
+      "pluginName": "replaceOriginalFile",
+      "version": "1.0.0",
+      "position": {
+        "x": 150,
+        "y": 1500
+      },
+      "inputsDB": {}
+    },
+    {
+      "id": "movie",
+      "name": "Check if Movie Library",
+      "sourceRepo": "Community",
+      "pluginName": "checkFlowVariable",
+      "version": "1.0.0",
+      "position": {
+        "x": 150,
+        "y": 1600
+      },
+      "inputsDB": {
+        "variable": "{{{args.librarySettings._id}}}",
+        "condition": "==",
+        "value": "movies"
+      }
+    },
+    {
+      "id": "radarr",
+      "name": "Notify Radarr",
+      "sourceRepo": "Community",
+      "pluginName": "notifyRadarrOrSonarr",
+      "version": "3.0.0",
+      "position": {
+        "x": 0,
+        "y": 1700
+      },
+      "inputsDB": {
+        "arr": "radarr",
+        "arr_host": "http://127.0.0.1:18268/radarr",
+        "unmonitor_after_refresh": "false"
+      }
+    },
+    {
+      "id": "sonarr",
+      "name": "Notify Sonarr",
+      "sourceRepo": "Community",
+      "pluginName": "notifyRadarrOrSonarr",
+      "version": "3.0.0",
+      "position": {
+        "x": 300,
+        "y": 1700
+      },
+      "inputsDB": {
+        "arr": "sonarr",
+        "arr_host": "http://127.0.0.1:18268/sonarr",
+        "unmonitor_after_refresh": "false"
+      }
+    }
+  ],
+  "flowEdges": [
+    {
+      "id": "input-1-audio",
+      "source": "input",
+      "sourceHandle": "1",
+      "target": "audio",
+      "targetHandle": null,
+      "animated": true,
+      "type": "smoothstep"
+    },
+    {
+      "id": "audio-1-scout",
+      "source": "audio",
+      "sourceHandle": "1",
+      "target": "scout",
+      "targetHandle": null,
+      "animated": true,
+      "type": "smoothstep"
+    },
+    {
+      "id": "audio-2-hdr",
+      "source": "audio",
+      "sourceHandle": "2",
+      "target": "hdr",
+      "targetHandle": null,
+      "animated": true,
+      "type": "smoothstep"
+    },
+    {
+      "id": "scout-1-mark_dts",
+      "source": "scout",
+      "sourceHandle": "1",
+      "target": "mark_dts",
+      "targetHandle": null,
+      "animated": true,
+      "type": "smoothstep"
+    },
+    {
+      "id": "mark_dts-1-remember_dts",
+      "source": "mark_dts",
+      "sourceHandle": "1",
+      "target": "remember_dts",
+      "targetHandle": null,
+      "animated": true,
+      "type": "smoothstep"
+    },
+    {
+      "id": "remember_dts-1-hdr",
+      "source": "remember_dts",
+      "sourceHandle": "1",
+      "target": "hdr",
+      "targetHandle": null,
+      "animated": true,
+      "type": "smoothstep"
+    },
+    {
+      "id": "hdr-1-profile",
+      "source": "hdr",
+      "sourceHandle": "1",
+      "target": "profile",
+      "targetHandle": null,
+      "animated": true,
+      "type": "smoothstep"
+    },
+    {
+      "id": "hdr-2-has_dts",
+      "source": "hdr",
+      "sourceHandle": "2",
+      "target": "has_dts",
+      "targetHandle": null,
+      "animated": true,
+      "type": "smoothstep"
+    },
+    {
+      "id": "hdr-3-has_dts",
+      "source": "hdr",
+      "sourceHandle": "3",
+      "target": "has_dts",
+      "targetHandle": null,
+      "animated": true,
+      "type": "smoothstep"
+    },
+    {
+      "id": "hdr-4-has_dts",
+      "source": "hdr",
+      "sourceHandle": "4",
+      "target": "has_dts",
+      "targetHandle": null,
+      "animated": true,
+      "type": "smoothstep"
+    },
+    {
+      "id": "profile-1-review",
+      "source": "profile",
+      "sourceHandle": "1",
+      "target": "review",
+      "targetHandle": null,
+      "animated": true,
+      "type": "smoothstep"
+    },
+    {
+      "id": "profile-2-review",
+      "source": "profile",
+      "sourceHandle": "2",
+      "target": "review",
+      "targetHandle": null,
+      "animated": true,
+      "type": "smoothstep"
+    },
+    {
+      "id": "profile-4-review",
+      "source": "profile",
+      "sourceHandle": "4",
+      "target": "review",
+      "targetHandle": null,
+      "animated": true,
+      "type": "smoothstep"
+    },
+    {
+      "id": "profile-3-mkv",
+      "source": "profile",
+      "sourceHandle": "3",
+      "target": "mkv",
+      "targetHandle": null,
+      "animated": true,
+      "type": "smoothstep"
+    },
+    {
+      "id": "profile-5-mkv",
+      "source": "profile",
+      "sourceHandle": "5",
+      "target": "mkv",
+      "targetHandle": null,
+      "animated": true,
+      "type": "smoothstep"
+    },
+    {
+      "id": "mkv-1-begin_strip",
+      "source": "mkv",
+      "sourceHandle": "1",
+      "target": "begin_strip",
+      "targetHandle": null,
+      "animated": true,
+      "type": "smoothstep"
+    },
+    {
+      "id": "mkv-2-has_dts",
+      "source": "mkv",
+      "sourceHandle": "2",
+      "target": "has_dts",
+      "targetHandle": null,
+      "animated": true,
+      "type": "smoothstep"
+    },
+    {
+      "id": "has_dts-1-begin_dts",
+      "source": "has_dts",
+      "sourceHandle": "1",
+      "target": "begin_dts",
+      "targetHandle": null,
+      "animated": true,
+      "type": "smoothstep"
+    },
+    {
+      "id": "begin_dts-1-dts_args",
+      "source": "begin_dts",
+      "sourceHandle": "1",
+      "target": "dts_args",
+      "targetHandle": null,
+      "animated": true,
+      "type": "smoothstep"
+    },
+    {
+      "id": "begin_strip-1-strip_args",
+      "source": "begin_strip",
+      "sourceHandle": "1",
+      "target": "strip_args",
+      "targetHandle": null,
+      "animated": true,
+      "type": "smoothstep"
+    },
+    {
+      "id": "dts_args-1-execute",
+      "source": "dts_args",
+      "sourceHandle": "1",
+      "target": "execute",
+      "targetHandle": null,
+      "animated": true,
+      "type": "smoothstep"
+    },
+    {
+      "id": "strip_args-1-execute",
+      "source": "strip_args",
+      "sourceHandle": "1",
+      "target": "execute",
+      "targetHandle": null,
+      "animated": true,
+      "type": "smoothstep"
+    },
+    {
+      "id": "execute-1-known_duration",
+      "source": "execute",
+      "sourceHandle": "1",
+      "target": "known_duration",
+      "targetHandle": null,
+      "animated": true,
+      "type": "smoothstep"
+    },
+    {
+      "id": "known_duration-1-ratio",
+      "source": "known_duration",
+      "sourceHandle": "1",
+      "target": "ratio",
+      "targetHandle": null,
+      "animated": true,
+      "type": "smoothstep"
+    },
+    {
+      "id": "known_duration-2-bad_duration",
+      "source": "known_duration",
+      "sourceHandle": "2",
+      "target": "bad_duration",
+      "targetHandle": null,
+      "animated": true,
+      "type": "smoothstep"
+    },
+    {
+      "id": "ratio-1-health",
+      "source": "ratio",
+      "sourceHandle": "1",
+      "target": "health",
+      "targetHandle": null,
+      "animated": true,
+      "type": "smoothstep"
+    },
+    {
+      "id": "ratio-2-bad_duration",
+      "source": "ratio",
+      "sourceHandle": "2",
+      "target": "bad_duration",
+      "targetHandle": null,
+      "animated": true,
+      "type": "smoothstep"
+    },
+    {
+      "id": "ratio-3-bad_duration",
+      "source": "ratio",
+      "sourceHandle": "3",
+      "target": "bad_duration",
+      "targetHandle": null,
+      "animated": true,
+      "type": "smoothstep"
+    },
+    {
+      "id": "health-1-replace",
+      "source": "health",
+      "sourceHandle": "1",
+      "target": "replace",
+      "targetHandle": null,
+      "animated": true,
+      "type": "smoothstep"
+    },
+    {
+      "id": "replace-1-movie",
+      "source": "replace",
+      "sourceHandle": "1",
+      "target": "movie",
+      "targetHandle": null,
+      "animated": true,
+      "type": "smoothstep"
+    },
+    {
+      "id": "movie-1-radarr",
+      "source": "movie",
+      "sourceHandle": "1",
+      "target": "radarr",
+      "targetHandle": null,
+      "animated": true,
+      "type": "smoothstep"
+    },
+    {
+      "id": "movie-2-sonarr",
+      "source": "movie",
+      "sourceHandle": "2",
+      "target": "sonarr",
+      "targetHandle": null,
+      "animated": true,
+      "type": "smoothstep"
+    }
+  ]
+}

@@ -96,6 +96,14 @@ configMapGenerator:
   - name: tdarr-plugin-checksums
     files:
       - tdarr/plugins.sha256
+  - name: tdarr-seed
+    files:
+      - tdarr/flow-lg-c1.json
+      - tdarr/library-seed.json
+      - tdarr/seed.py
+  - name: tdarr-notify-proxy
+    files:
+      - tdarr/notify-proxy.py
 images:
   # Version tags make release changes typed Renovate updates (#1129).
   # Keep digests alongside tags. Exceptions and registry evidence: docs/servarr-image-pins.md.
@@ -105,6 +113,8 @@ images:
     newTag: 3.08.00@sha256:84743e5ae433a5b49cb463b2dff2679eb02f0cac24fb88c830f49bf8aa9f1c04
   - name: ghcr.io/haveagitgat/tdarr_node
     newTag: 3.08.00@sha256:25153299cc9c2fcd99202cc36171c2e42ba7ef11823959c018e5c5bf2733581f
+  - name: docker.io/library/python
+    newTag: 3.13-alpine@sha256:9ef1a599f863231c3d91e941389bfdc4a2d6070557243d54df1a4e57015b960e
   - name: ghcr.io/raydak-labs/configarr
     newTag: 1.38.0@sha256:36d15adcc815557409a9437bc51468edfd1ac05ef6b46336dff650a56d2cc6a3
   - name: ghcr.io/linuxserver/sonarr
