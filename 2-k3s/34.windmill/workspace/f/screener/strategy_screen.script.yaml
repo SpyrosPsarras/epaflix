@@ -1,4 +1,4 @@
-summary: Strategy screener (long pullback, breakout, squeeze; short rally rejection, breakdown) by market regime
+summary: Strategy screener (long pullback, breakout, squeeze; short rally rejection, breakdown, run break, dead cat at the 200-day line as bear put debit spreads in a decline or an overextended bull market) by market regime and phase
 description: See 2-k3s/34.windmill/README.md in the homelab repo.
 kind: script
 schema:
@@ -36,6 +36,8 @@ schema:
         - squeeze
         - rally_rejection
         - breakdown
+        - run_break
+        - dead_cat
       default: all
     max_tickers:
       type: integer
