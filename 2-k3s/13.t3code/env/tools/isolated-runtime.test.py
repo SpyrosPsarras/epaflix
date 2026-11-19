@@ -4,6 +4,7 @@ import base64
 import copy
 import hashlib
 import importlib
+import io
 import json
 import os
 from pathlib import Path
@@ -123,7 +124,8 @@ class RuntimeTests(unittest.TestCase):
         ssh = ROOT.parent / '13.t3code-homelab/files/homelab-ssh.md'
         for _ in range(2):
             self.prepare()
-            with patch.dict(os.environ, {'ANTHROPIC_BASE_URL': 'http://127.0.0.1:18317'}):
+            with patch.dict(os.environ, {'ANTHROPIC_BASE_URL': 'http://127.0.0.1:18317'}), \
+                    patch('urllib.request.urlopen', return_value=io.BytesIO(b'{"data": []}')):
                 setup.write(self.home, '/fixture/safety', ssh)
             for name in ('.claude/AGENTS.md', '.codex/AGENTS.md'):
                 self.assertEqual((self.home / name).read_text(), expected)
