@@ -1843,7 +1843,7 @@ def test_main_proposes_tight_longs_on_a_bounce_inside_a_decline(offline):
     assert phase["phase"] == "bounce" and phase["switched"] and phase["decline"] == "correction"
     assert market["phase"]["advice"].startswith("ALERT: bounce inside a decline started today. Proposal: a tight long")
     plan = market["index_long"]
-    assert plan["ticker"] == "QQQ" and plan["type"] == "tight long" and plan["sessions"] == 20 and market["index_put_spread"] is None
+    assert plan["ticker"] == "QQQ" and plan["type"] == "tight long" and plan["sessions"] == 10 and market["index_put_spread"] is None
     assert plan["stop"] == min(r[2] for r in offline["QQQ"][-CFG["bounce_low_bars"]:])
     assert plan["target"] is None or plan["target"] > plan["close"]
     assert market["actions"]["pullback"] == "long"

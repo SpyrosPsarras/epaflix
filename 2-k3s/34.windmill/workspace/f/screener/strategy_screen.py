@@ -197,7 +197,7 @@ DEFAULTS = {
     # on the day the benchmark's bounce starts, a long on the benchmark up to its 200-day line, stop at the bounce low,
     # for index_long_days sessions at most
     "bounce_long_days": 10,
-    "index_long_days": 20,
+    "index_long_days": 10,
     "put_spread_take_profit": 0.5,
     "put_spread_expiry_days": 7,
     # Market overview only: trend of these ETFs next to QQQ
@@ -1735,8 +1735,9 @@ def phase_advice(info, cfg=None):
                  "(-0.07 / -0.14). ")
     elif index_long_day(info):
         alert = ("ALERT: bounce inside a decline started today. Proposal: a tight long on the benchmark (see index_long) up "
-                 "to its 200-day line, where the next put debit spread comes on a rejection. Backtest 2016-2026: on QQQ "
-                 "+1.8% / +3.4% per trade before / after 2022-07, 72% won (50 cases); on SPY +0.3% / +3.2%, 63% won. ")
+                 "to its 200-day line, where the next put debit spread comes on a rejection. Backtest 2016-2026, 10 sessions at most: "
+                 "on QQQ +0.8% / +1.6% per trade before / after 2022-07, 64% won (50 cases); on SPY +0.4% / +1.5%, 61% won; "
+                 "worst trade about -11%. ")
     return alert + head + text
 
 
