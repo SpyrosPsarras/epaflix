@@ -68,7 +68,7 @@ Both third-party steps read MediaInfo fields (`HDR_Format`, `HDR_Format_Profile`
 
 ### Configarr
 
-Custom formats with a negative score for DTS-family audio and for Dolby Vision without an HDR10 fallback, in the Radarr and Sonarr profiles. Releases with DTS are still accepted when nothing else exists; Tdarr then fixes them.
+Radarr profile `UHD Bluray + WEB` scores the five DTS formats -1 instead of TRaSH's +1250 to +4500, so DTS ranks below every other audio format while a DTS-only release still clears `min_format_score` -2. Sonarr profile `WEB-2160p` leaves DTS at 0: its floor is +1, so any penalty would reject DTS-only releases. Tdarr fixes the DTS files that still arrive. `DV (w/o HDR fallback)` stays at its existing score.
 
 ### Observability
 

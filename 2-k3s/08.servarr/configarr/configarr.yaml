@@ -340,6 +340,15 @@ data:
           assign_scores_to:
           - name: UHD Bluray + WEB
             score: -500
+        - trash_ids:
+          - 1c1a4c5e823891c75bc50380a6866f73
+          - f9f847ac70a0af62ea4a08280b859636
+          - 8e109e50e0a0b83a5098b056e13bf6db
+          - dcf3ec6938fa32445f590a4da84256cd
+          - 2f22d89048b01681dde8afe203bf2e95
+          assign_scores_to:
+          - name: UHD Bluray + WEB
+            score: -1
     lidarr:
       main:
         base_url: http://lidarr.servarr.svc.cluster.local:8686
