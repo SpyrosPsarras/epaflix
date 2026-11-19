@@ -8,5 +8,11 @@ resources:
   - service.yaml
   - ingress.yaml
 
+images:
+  - name: searxng/searxng
+    newTag: 2026.9.3-8f452ee89
+  - name: bash
+    newTag: 5.2-alpine3.19
+
 generators:
   - ksops-generator.yaml

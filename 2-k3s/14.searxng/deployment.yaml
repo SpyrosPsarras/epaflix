@@ -25,7 +25,7 @@ spec:
         fsGroup: 977
       initContainers:
         - name: render-config
-          image: bash:5.2-alpine3.19
+          image: bash
           command:
             - bash
             - -c
@@ -47,7 +47,7 @@ spec:
               mountPath: /rendered
       containers:
         - name: searxng
-          image: searxng/searxng:2026.9.3-8f452ee89
+          image: searxng/searxng
           env:
             - name: SEARXNG_SETTINGS_PATH
               value: /etc/searxng/settings.yml
