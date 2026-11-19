@@ -29,7 +29,8 @@ debit spreads lost on average.
 `track_days` adds the status of the signals of the previous sessions (open, target, stopped, time exit,
 not triggered, skipped). Every setup is a 30-45 session swing: the time exit depends on the stock's beta vs SPY
 (higher beta, shorter hold). With momentum_hold_adx above 0, a LONG trade that reaches its target or time exit while
-the ADX trend is up stays open until that trend ends (off by default). The squeeze rules are an untested hypothesis: validate before trading them.
+the ADX trend is up stays open until that trend ends (momentum_hold_adx, 0 turns it off). Breakdown runs only when
+asked for by name (strategy breakdown): it lost in every backtest window. The squeeze rules are an untested hypothesis: validate before trading them.
 `finviz_url` takes one or more screener URLs (one per line), e.g. a large/mid-cap list and a high-short-float list.
 With `persist`, every signal is stored in the Windmill data table `main` (schema `screener`) and followed until it
 closes, even after its ticker leaves the screen; closed signals cannot change (enforced by the database).
@@ -62,8 +63,12 @@ DIRECTIONS = {"pullback": "long", "breakout": "long", "squeeze": "long", "rally_
               "run_break": "short", "dead_cat": "short"}
 ENTRY_TYPES = {"pullback": "stop", "breakout": "open", "squeeze": "open", "rally_rejection": "stop", "breakdown": "stop",
                "run_break": "open", "dead_cat": "open"}
-STRATEGY_GROUPS = {"all": STRATEGIES, "long": ("pullback", "breakout", "squeeze"), "both": ("pullback", "breakout"),
-                   "short": ("rally_rejection", "breakdown", "run_break", "dead_cat")}
+# Breakdown runs only when asked for by name: it lost in every 750-session window of the backtest (about 105 large caps,
+# 2017-2020 -18.5R, 2020-2023 -63.5R, 2023-2026 -8.7R), also in a bearish regime (-59.9R in 83 trades), and no filter on
+# the regime, trend, RSI, volume, relative strength, stop size or score, nor a closer target, made it positive in all three.
+OFF_BY_DEFAULT = ("breakdown",)
+STRATEGY_GROUPS = {"all": tuple(s for s in STRATEGIES if s not in OFF_BY_DEFAULT), "long": ("pullback", "breakout", "squeeze"),
+                   "both": ("pullback", "breakout"), "short": ("rally_rejection", "run_break", "dead_cat")}
 MAX_URLS = 3
 BETA_BENCHMARK = "SPY"  # beta is measured against the S&P 500, like Finviz; QQQ if SPY is not loaded
 SMTP_RESOURCE = "f/screener/smtp"
@@ -157,10 +162,10 @@ DEFAULTS = {
     "run_break_above_bars": 15,
     "run_break_stop_atr": 0.2,
     "run_break_target_r": 2.0,
-    # Optional volume confirmation of the run break bar (0 = off): relative volume vs the 50-day average at least this. In the
+    # Volume confirmation of the run break bar (0 = off): relative volume vs the 50-day average at least this. In the
     # backtest (about 105 large caps, three 750-session windows 2017-2026) 1.25 cut the run break loss in every window
     # (-30.3R to -13.4R, -24.2R to -5.0R, -11.9R to +12.8R) by keeping about a fifth of the signals; still negative before 2023.
-    "run_break_min_rel_volume": 0.0,
+    "run_break_min_rel_volume": 1.25,
     # Dead cat bounce rejected at the 200-day line (EMA200 or SMA200): closed below it on dead_cat_below_bars of the last
     # 20, bounced dead_cat_bounce_atr ATR off the 20-day low, a high of the last 3 bars within dead_cat_touch_atr ATR of
     # the line, and a bearish close below it. Also an alert when the benchmark does it (market_phase).
@@ -218,13 +223,13 @@ DEFAULTS = {
     "beta_low": 1.0,
     "beta_high": 2.0,
     "beta_lookback": 252,
-    # Momentum hold of LONG trades (0 = off, else the ADX14 level, e.g. 20). When the target or the time exit comes with
+    # Momentum hold of LONG trades (0 = off, else the ADX14 level). When the target or the time exit comes with
     # ADX14 >= this and +DI > -DI (at the previous close for the target, at that close for the time exit), the trade stays
     # open; the stop does not apply while that trend held at the previous close; the trade exits at the next open after the
     # first close with the trend off. In the backtest (about 105 large caps, $10,000, 5% risk per trade, at most 25% per
     # position) level 20 lifted the LONG portfolio in all three 750-session windows: +10% to +16% (2017-2020), +59% to +68%
     # (2020-2023), +57% to +88% (2023-2026); R per trade rose only in the last two.
-    "momentum_hold_adx": 0.0,
+    "momentum_hold_adx": 20.0,
     "request_pause": 0.4,
 }
 
@@ -992,7 +997,7 @@ def evaluate_run_break(bars, series, t, cfg):
     """Correction after a run (SHORT setup, a bear put debit spread trigger in a decline): the stock rose run_break_min_run or more
     in the 126 sessions before its highest close of the last run_break_high_bars, closed above EMA50 on at least
     run_break_above_bars of the previous 20 sessions, and now makes its first close below EMA50 with a bearish bar
-    (close below the open, in the lower half of the range), on run_break_min_rel_volume relative volume if that is above 0.
+    (close below the open, in the lower half of the range), on run_break_min_rel_volume relative volume (0 turns that off).
     Entry at the next open, stop run_break_stop_atr ATR above the
     5-day high, target run_break_target_r R. Not scored: the backtest found no item that ranks these signals."""
     checks, scores = [], []
@@ -1957,7 +1962,7 @@ def market_summary(name, bars, breadth_by_date, regime, sector_bars, cfg, contex
             "phase": None if phase is None else {**phase, "advice": phase_advice(phase, cfg)},
             "index_put_spread": index_spread, "index_long": index_long,
             "actions": actions,
-            "favoured": [s for s in STRATEGIES if actions[s] in TRADE_ACTIONS],
+            "favoured": [s for s in STRATEGY_GROUPS["all"] if actions[s] in TRADE_ACTIONS],
             "benchmark": {"ticker": name, **trend_snapshot(bars, cfg)},
             "context": {k: trend_snapshot(b, cfg) for k, b in sorted((context_bars or {}).items())},
             "breadth": {"above_sma200": count[0] if count else None, "sector_etfs": count[1] if count else 0, "etfs": etfs},
