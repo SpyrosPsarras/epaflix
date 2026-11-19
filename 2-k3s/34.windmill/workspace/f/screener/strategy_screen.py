@@ -28,7 +28,8 @@ with a defined risk, short-dated for a fast move (strikes, expiry and exit in `p
 debit spreads lost on average.
 `track_days` adds the status of the signals of the previous sessions (open, target, stopped, time exit,
 not triggered, skipped). Every setup is a 30-45 session swing: the time exit depends on the stock's beta vs SPY
-(higher beta, shorter hold). The squeeze rules are an untested hypothesis: validate before trading them.
+(higher beta, shorter hold). With momentum_hold_adx above 0, a LONG trade that reaches its target or time exit while
+the ADX trend is up stays open until that trend ends (off by default). The squeeze rules are an untested hypothesis: validate before trading them.
 `finviz_url` takes one or more screener URLs (one per line), e.g. a large/mid-cap list and a high-short-float list.
 With `persist`, every signal is stored in the Windmill data table `main` (schema `screener`) and followed until it
 closes, even after its ticker leaves the screen; closed signals cannot change (enforced by the database).
@@ -156,6 +157,10 @@ DEFAULTS = {
     "run_break_above_bars": 15,
     "run_break_stop_atr": 0.2,
     "run_break_target_r": 2.0,
+    # Optional volume confirmation of the run break bar (0 = off): relative volume vs the 50-day average at least this. In the
+    # backtest (about 105 large caps, three 750-session windows 2017-2026) 1.25 cut the run break loss in every window
+    # (-30.3R to -13.4R, -24.2R to -5.0R, -11.9R to +12.8R) by keeping about a fifth of the signals; still negative before 2023.
+    "run_break_min_rel_volume": 0.0,
     # Dead cat bounce rejected at the 200-day line (EMA200 or SMA200): closed below it on dead_cat_below_bars of the last
     # 20, bounced dead_cat_bounce_atr ATR off the 20-day low, a high of the last 3 bars within dead_cat_touch_atr ATR of
     # the line, and a bearish close below it. Also an alert when the benchmark does it (market_phase).
@@ -213,6 +218,13 @@ DEFAULTS = {
     "beta_low": 1.0,
     "beta_high": 2.0,
     "beta_lookback": 252,
+    # Momentum hold of LONG trades (0 = off, else the ADX14 level, e.g. 20). When the target or the time exit comes with
+    # ADX14 >= this and +DI > -DI (at the previous close for the target, at that close for the time exit), the trade stays
+    # open; the stop does not apply while that trend held at the previous close; the trade exits at the next open after the
+    # first close with the trend off. In the backtest (about 105 large caps, $10,000, 5% risk per trade, at most 25% per
+    # position) level 20 lifted the LONG portfolio in all three 750-session windows: +10% to +16% (2017-2020), +59% to +68%
+    # (2020-2023), +57% to +88% (2023-2026); R per trade rose only in the last two.
+    "momentum_hold_adx": 0.0,
     "request_pause": 0.4,
 }
 
@@ -432,6 +444,41 @@ def rsi(close, n=14):
     gains = wilder([None] + [max(c, 0.0) for c in changes[1:]], n)
     losses = wilder([None] + [max(-c, 0.0) for c in changes[1:]], n)
     return [None if g is None else 100.0 if l == 0 else 100 - 100 / (1 + g / l) for g, l in zip(gains, losses)]
+
+
+def adx(high, low, close, n=14):
+    """Wilder's ADX with +DI and -DI: (adx, plus_di, minus_di), None until there is enough history."""
+    m = len(close)
+    plus, minus = [None] * m, [None] * m
+    for i in range(1, m):
+        up, down = high[i] - high[i - 1], low[i - 1] - low[i]
+        plus[i] = up if up > down and up > 0 else 0.0
+        minus[i] = down if down > up and down > 0 else 0.0
+    tr, p, q = wilder(true_range(high, low, close), n), wilder(plus, n), wilder(minus, n)
+    pdi, ndi, dx = [None] * m, [None] * m, [None] * m
+    for i in range(m):
+        if tr[i]:
+            pdi[i], ndi[i] = 100 * p[i] / tr[i], 100 * q[i] / tr[i]
+            total = pdi[i] + ndi[i]
+            dx[i] = 100 * abs(pdi[i] - ndi[i]) / total if total else 0.0
+    out = [None] * m
+    first = next((i for i, x in enumerate(dx) if x is not None), None)
+    if first is not None and first + 2 * n - 1 <= m:
+        current = sum(dx[first:first + n]) / n
+        out[first + n - 1] = current
+        for i in range(first + n, m):
+            current = (current * (n - 1) + dx[i]) / n
+            out[i] = current
+    return out, pdi, ndi
+
+
+def trend_up(bars, level):
+    """Per bar: ADX14 >= level and +DI > -DI at that close (the momentum hold condition)."""
+    cached = getattr(bars, "_adx", None)
+    if cached is None or len(cached[0]) != len(bars):
+        cached = adx(bars.high, bars.low, bars.close)
+        bars._adx = cached
+    return [a is not None and a >= level and p > q for a, p, q in zip(*cached)]
 
 
 def prior_mean(values, n):
@@ -945,7 +992,8 @@ def evaluate_run_break(bars, series, t, cfg):
     """Correction after a run (SHORT setup, a bear put debit spread trigger in a decline): the stock rose run_break_min_run or more
     in the 126 sessions before its highest close of the last run_break_high_bars, closed above EMA50 on at least
     run_break_above_bars of the previous 20 sessions, and now makes its first close below EMA50 with a bearish bar
-    (close below the open, in the lower half of the range). Entry at the next open, stop run_break_stop_atr ATR above the
+    (close below the open, in the lower half of the range), on run_break_min_rel_volume relative volume if that is above 0.
+    Entry at the next open, stop run_break_stop_atr ATR above the
     5-day high, target run_break_target_r R. Not scored: the backtest found no item that ranks these signals."""
     checks, scores = [], []
     ctx = _context(bars, series, t, cfg)
@@ -969,6 +1017,10 @@ def evaluate_run_break(bars, series, t, cfg):
     location = (c[t] - l[t]) / span if span > 0 else 1.0
     _check(checks, "bearish_bar", c[t] < o[t] and span > 0 and location <= 0.5,
            f"open {o[t]:.2f}, close {c[t]:.2f}, close at {location:.0%} of the day's range, maximum 50%")
+    if cfg["run_break_min_rel_volume"] > 0:
+        rel_volume = bars.volume[t] / ctx["volume_avg50"] if ctx["volume_avg50"] else 0.0
+        _check(checks, "volume", rel_volume >= cfg["run_break_min_rel_volume"],
+               f"relative volume {rel_volume:.2f}, minimum {cfg['run_break_min_rel_volume']:g}")
     entry = c[t]
     stop = max(h[t - 4:t + 1]) + cfg["run_break_stop_atr"] * a
     risk = stop - entry
@@ -1117,6 +1169,8 @@ ASSUMPTIONS = [
     "Bars are processed in time order: an open at or beyond the stop or target exits at the open. Daily bars do not show the order of prices inside a bar, so two cases use the conservative assumption and are flagged in `ambiguous`: a bar that touches both the stop and the target counts as stopped (`stop_and_target_same_bar`), and on the bar where a pullback buy stop triggers inside the bar, a low at or below the stop counts as stopped even though it may have come before the fill (`fill_and_stop_same_bar`).",
     "MAE uses the full low of each bar held, including the part of the fill bar before a buy stop triggered, so it is conservative.",
     "Trades not stopped or at target exit at the close of the last bar of the horizon.",
+    "With momentum_hold_adx above 0, LONG trades follow the momentum hold (see DEFAULTS): outcome `momentum` when the trend ended, "
+    "`held_open` when the trend still holds at the last bar (valued at the last close and counted with the closed trades).",
     "Costs are round trip in basis points of the fill price; no market impact or borrow modelling.",
     "One trade per ticker and strategy at a time; trades of different tickers overlap and each risks 1R. Drawdown sums them in exit order and is not a portfolio simulation.",
     "Forward returns run from the next open (the first possible fill) to the close k sessions after the signal, and are computed only for signals with k bars of future data. They include overlapping signals; a non-overlapping subset is reported too.",
@@ -1206,13 +1260,56 @@ def _walk(bars, i, fill, stop, target, end):
     return None, None, None, False, low, high, None
 
 
-def simulate(bars, t, signal, horizon):
-    """Outcome of a signal on bar t, using only bars after t."""
+def _walk_hold(bars, i, fill, stop, target, end, on):
+    """_walk for a LONG trade with the momentum hold; on[j] is the trend at the close of bar j. A target, or the time exit
+    at the close of bar end - 1, with the trend on (at the previous close for the target, at that close for the time exit)
+    starts the hold; the stop does not apply while the trend was on at the previous close; in the hold the trade exits at
+    the next open after the first close with the trend off (outcome momentum). Returns the _walk tuple plus whether the hold
+    started; j is None while the trade is still open at the last bar."""
+    low = high = fill
+    hold = False
+    for j in range(i, len(bars)):
+        on_prev = on[j - 1]
+        opening = fill if j == i else bars.open[j]
+        if not hold and opening >= target:
+            if not on_prev:
+                return j, opening, "target", True, low, high, None, hold
+            hold = True
+        if not on_prev:
+            if j > i and opening <= stop:
+                return j, opening, "stop", True, low, high, None, hold
+            if bars.low[j] <= stop:
+                ambiguous = ("stop_and_target_same_bar" if not hold and bars.high[j] >= target
+                             else "fill_and_stop_same_bar" if j == i and fill > bars.open[j] else None)
+                return j, stop, "stop", False, low, high, ambiguous, hold
+        low = min(low, bars.low[j])
+        if not hold:
+            if bars.high[j] >= target:
+                if not on_prev:
+                    return j, target, "target", False, low, high, None, hold
+                hold = True
+            elif j >= end - 1:
+                if not on[j]:
+                    return j, bars.close[j], "timeout", False, low, high, None, hold
+                hold = True
+        high = max(high, bars.high[j])
+        if hold and not on[j] and j + 1 < len(bars):
+            return j + 1, bars.open[j + 1], "momentum", False, min(low, bars.open[j + 1]), max(high, bars.open[j + 1]), None, hold
+    return None, None, None, False, low, high, None, hold
+
+
+def _hold_trend(bars, signal, hold_adx):
+    return trend_up(bars, hold_adx) if hold_adx and DIRECTIONS[signal["strategy"]] == "long" else None
+
+
+def simulate(bars, t, signal, horizon, hold_adx=0):
+    """Outcome of a signal on bar t, using only bars after t. hold_adx > 0: momentum hold of LONG trades."""
+    on = _hold_trend(bars, signal, hold_adx)
     bars, signal, sign = _oriented(bars, signal)
-    return _unmirror(_simulate(bars, t, signal, horizon), sign)
+    return _unmirror(_simulate(bars, t, signal, horizon, on), sign)
 
 
-def _simulate(bars, t, signal, horizon):
+def _simulate(bars, t, signal, horizon, on=None):
     levels = signal["levels"]
     stop, target = levels["stop"], levels["target"]
     i = t + 1
@@ -1223,9 +1320,14 @@ def _simulate(bars, t, signal, horizon):
         return {"outcome": "not_filled"} if reason == "not_filled" else {"outcome": "not_filled", "detail": reason}
     risk = fill - stop
     atr = (signal.get("indicators") or {}).get("atr14") or risk
-    j, price, outcome, gap, low, high, ambiguous = _walk(bars, i, fill, stop, target, i + horizon)
-    if j is None:
-        j, price, outcome = i + horizon - 1, bars.close[i + horizon - 1], "timeout"
+    if on is None:
+        j, price, outcome, gap, low, high, ambiguous = _walk(bars, i, fill, stop, target, i + horizon)
+        if j is None:
+            j, price, outcome = i + horizon - 1, bars.close[i + horizon - 1], "timeout"
+    else:
+        j, price, outcome, gap, low, high, ambiguous, _ = _walk_hold(bars, i, fill, stop, target, i + horizon, on)
+        if j is None:
+            j, price, outcome = len(bars) - 1, bars.close[-1], "held_open"
     return {"outcome": outcome, "gap": gap, "ambiguous": ambiguous, "fill": round(fill, 4), "fill_date": bars.dates[i].isoformat(),
             "exit": round(price, 4), "exit_date": bars.dates[j].isoformat(), "risk": round(risk, 4),
             "r": round((price - fill) / risk, 4), "bars_held": j - t,
@@ -1244,17 +1346,18 @@ def signal_warnings(signal):
     return out
 
 
-def track(bars, t, signal, horizon):
+def track(bars, t, signal, horizon, hold_adx=0):
     """Status today of a past signal on bar t < len(bars) - 1, with the same execution rules as simulate.
 
     not_triggered: the pullback buy stop was not reached on the next bar; skipped: opened below the stop;
     stopped / target: exit hit; time_exit: still open after `horizon` bars, closed at that bar's close;
-    open: still running, valued at the last close."""
+    open: still running, valued at the last close. hold_adx > 0: momentum hold of LONG trades, whose end is a time_exit."""
+    on = _hold_trend(bars, signal, hold_adx)
     bars, signal, sign = _oriented(bars, signal)
-    return _unmirror(_track(bars, t, signal, horizon), sign)
+    return _unmirror(_track(bars, t, signal, horizon, on), sign)
 
 
-def _track(bars, t, signal, horizon):
+def _track(bars, t, signal, horizon, on=None):
     levels = signal["levels"]
     i = t + 1
     fill, reason = _fill(bars, i, signal)
@@ -1262,16 +1365,27 @@ def _track(bars, t, signal, horizon):
         return {"status": "not_triggered" if reason == "not_filled" else "skipped", "detail": reason}
     risk = fill - levels["stop"]
     base = {"fill_date": bars.dates[i].isoformat(), "fill": round(fill, 4)}
-    end = min(i + horizon, len(bars))
-    j, price, outcome, gap, _, _, ambiguous = _walk(bars, i, fill, levels["stop"], levels["target"], end)
-    if j is None and i + horizon <= len(bars):
-        j, price, outcome = i + horizon - 1, bars.close[i + horizon - 1], "time_exit"
+    held = False
+    if on is None:
+        end = min(i + horizon, len(bars))
+        j, price, outcome, gap, _, _, ambiguous = _walk(bars, i, fill, levels["stop"], levels["target"], end)
+        if j is None and i + horizon <= len(bars):
+            j, price, outcome = i + horizon - 1, bars.close[i + horizon - 1], "time_exit"
+    else:
+        j, price, outcome, gap, _, _, ambiguous, held = _walk_hold(bars, i, fill, levels["stop"], levels["target"], i + horizon, on)
     if j is not None:
-        return {"status": {"stop": "stopped"}.get(outcome, outcome), **base, "gap": gap, "ambiguous": ambiguous, "exit_date": bars.dates[j].isoformat(),
-                "exit": round(price, 4), "r": round((price - fill) / risk, 3), "bars_held": j - t}
+        out = {"status": {"stop": "stopped", "timeout": "time_exit", "momentum": "time_exit"}.get(outcome, outcome), **base, "gap": gap,
+               "ambiguous": ambiguous, "exit_date": bars.dates[j].isoformat(), "exit": round(price, 4), "r": round((price - fill) / risk, 3),
+               "bars_held": j - t}
+        if outcome == "momentum":
+            out["detail"] = "momentum hold ended: the ADX trend turned off"
+        return out
     last = len(bars) - 1
-    return {"status": "open", **base, "last_close": round(bars.close[last], 4), "r_now": round((bars.close[last] - fill) / risk, 3),
-            "bars_held": last - t, "bars_left": horizon - (last - t)}
+    out = {"status": "open", **base, "last_close": round(bars.close[last], 4), "r_now": round((bars.close[last] - fill) / risk, 3),
+           "bars_held": last - t, "bars_left": max(horizon - (last - t), 0) if on is not None else horizon - (last - t)}
+    if held:
+        out["detail"] = "momentum hold: past the target or time exit, open while the ADX trend holds"
+    return out
 
 
 def track_signals(bars, series, strategies, days, cfg, regime=None, sector_trend=None, phases=None):
@@ -1289,7 +1403,7 @@ def track_signals(bars, series, strategies, days, cfg, regime=None, sector_trend
             if not signal["qualified"]:
                 continue
             horizon = horizon_for(cfg, series, t)
-            status = track(bars, t, signal, horizon)
+            status = track(bars, t, signal, horizon, cfg["momentum_hold_adx"])
             label = regime.get(bars.dates[t], "unknown")
             trend = sector_trend.get(bars.dates[t])
             beta = _beta_at(series, t)
@@ -1496,7 +1610,7 @@ def _json_safe(value):
     return json.loads(json.dumps(value, default=str))
 
 
-def stored_update(row, bars, calendar, as_of, note=None):
+def stored_update(row, bars, calendar, as_of, note=None, hold_adx=0):
     """New state of a stored active signal, recomputed from its ticker's bars. bars None (or a history without the
     signal date) keeps the last known trade state and marks the data unavailable, with the sessions it is behind."""
     signal_date = _day(row["signal_date"])
@@ -1518,7 +1632,7 @@ def stored_update(row, bars, calendar, as_of, note=None):
         factor = 1.0
     levels = {k: row[k] * factor for k in ("entry", "stop", "target")}
     signal = {"strategy": row["strategy"], "levels": levels, "indicators": {"atr14": (row.get("atr14") or 0) * factor or None}}
-    state = {"status": "pending"} if t == len(bars) - 1 else track(bars, t, signal, int(row["holding_days"]))
+    state = {"status": "pending"} if t == len(bars) - 1 else track(bars, t, signal, int(row["holding_days"]), hold_adx)
     out = {"id": row["id"], **{k: None for k in STATE_FIELDS}, **{k: v for k, v in state.items() if k in STATE_FIELDS}}
     for k in ("fill", "exit", "last_close"):  # back to the prices of the signal day, like entry, stop and target
         if out[k] is not None:
@@ -1920,7 +2034,7 @@ def validate(bars, series, strategies, days, cfg, market=None, earnings=None):
             if t <= busy_until:
                 continue
             horizon = horizon_for(cfg, series, t)
-            outcome = simulate(bars, t, signal, horizon)
+            outcome = simulate(bars, t, signal, horizon, cfg["momentum_hold_adx"])
             beta = _beta_at(series, t)
             trade = {"ticker": bars.ticker, "strategy": strategy, "direction": DIRECTIONS[strategy], "signal_date": signal["signal_date"], "score": signal["score"],
                      "regime": regime.get(bars.dates[t], "unknown"), "beta": None if beta is None else round(beta, 2), "holding_days": horizon,
@@ -1978,7 +2092,8 @@ def summarize(trades, signals=()):
         "not_filled": sum(x["outcome"] == "not_filled" for x in trades),
         "still_open": sum(x["outcome"] == "open" for x in trades),
         "closed": len(closed),
-        "exits": {k: sum(x["outcome"] == k for x in closed) for k in ("stop", "target", "timeout")},
+        "exits": {k: sum(x["outcome"] == k for x in closed) for k in ("stop", "target", "timeout")}
+                 | {k: n for k in ("momentum", "held_open") if (n := sum(x["outcome"] == k for x in closed))},
         "costs": {f"{bps}bp": metrics([net_r(x, bps) for x in closed]) for bps in COST_BPS},
         "gaps": {
             "stop_exits_through_gap": len(gap_stops),
@@ -2038,6 +2153,8 @@ def settings_with_defaults(settings):
             or cfg["dead_cat_below_bars"] > 20):
         raise ValueError("run_break_high_bars and phase_high_bars must be 120 or less, run_break_above_bars and "
                          "dead_cat_below_bars 20 or less")
+    if cfg["momentum_hold_adx"] > 100:
+        raise ValueError("momentum_hold_adx is an ADX level: 0 (off) to 100")
     if not 0 < cfg["put_spread_take_profit"] <= 1:
         raise ValueError("put_spread_take_profit is a share of the strike width: more than 0 and at most 1")
     if cfg["swing_min_days"] > cfg["swing_max_days"]:
@@ -2137,7 +2254,9 @@ def holding_rule(cfg, beta_vs=BETA_BENCHMARK):
     return {"min": cfg["swing_min_days"], "max": cfg["swing_max_days"], "beta_low": cfg["beta_low"], "beta_high": cfg["beta_high"],
             "beta_vs": beta_vs,
             "rule": f"sessions to hold: {cfg['swing_max_days']} at beta <= {cfg['beta_low']:g}, {cfg['swing_min_days']} at beta >= "
-                    f"{cfg['beta_high']:g}, linear in between, {holding_days(None, cfg)} if beta is unknown; then exit at the close"}
+                    f"{cfg['beta_high']:g}, linear in between, {holding_days(None, cfg)} if beta is unknown; then exit at the close"
+                    + (f"; LONG trades stay open past the target or time exit while ADX14 >= {cfg['momentum_hold_adx']:g} with "
+                       "+DI > -DI, and exit at the next open after that trend ends" if cfg["momentum_hold_adx"] else "")}
 
 
 # Order of the strategies within an action, and why, from the bull backtest (600 stocks, 2016-2026, net of 10 bp).
@@ -2434,7 +2553,7 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
             data_errors.append({"ticker": name, "reason": "; ".join(problems)})
             updates += [stored_update(row, None, calendar, as_of, "; ".join(problems)) for row in pending_by_ticker.pop(name, [])]
             continue
-        updates += [stored_update(row, bars, calendar, as_of) for row in pending_by_ticker.pop(name, [])]
+        updates += [stored_update(row, bars, calendar, as_of, hold_adx=cfg["momentum_hold_adx"]) for row in pending_by_ticker.pop(name, [])]
         screened += 1
         sector = sectors.get(name)
         if sector is None and source == "tickers":
@@ -2519,7 +2638,8 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
         except (requests.RequestException, ValueError) as error:
             bars, problems = None, [str(error)]
         time.sleep(cfg["request_pause"])
-        updates += [stored_update(row, None if problems else bars, calendar, as_of, "; ".join(problems) or None) for row in rows]
+        updates += [stored_update(row, None if problems else bars, calendar, as_of, "; ".join(problems) or None, cfg["momentum_hold_adx"])
+                    for row in rows]
     for s in strategies:
         results[s]["qualified"].sort(key=lambda x: (-x["score"], x["ticker"]))
     candidates = sorted((candidate_row(s, q) for s in strategies for q in results[s]["qualified"]),

@@ -1891,3 +1891,83 @@ def test_main_keeps_longs_watch_only_right_after_an_overextended_market(offline)
     rows = [c for c in result["candidates"] if c["direction"] == "long"]
     assert rows and all(c["action"] == "watch" for c in rows)
     assert all("WATCH ONLY, pullback right after an overextended market" in c["recommendation"] for c in rows)
+
+
+# ---------------------------------------------------------------- momentum hold and run break volume
+
+
+def test_adx_trend_up_in_a_rising_market_and_causal():
+    rows = uptrend(80, 50, 0.5)
+    bars = make_bars(rows)
+    a, pdi, ndi = ss.adx(bars.high, bars.low, bars.close)
+    assert a[26] is None and a[27] is not None  # first ADX after 2n - 1 bars of DX
+    assert a[-1] > 90 and pdi[-1] > ndi[-1] and ss.trend_up(bars, 20)[-1]
+    down = make_bars(rows + downtrend(30, rows[-1][3], -2.0))
+    a2, pdi2, ndi2 = ss.adx(down.high, down.low, down.close)
+    assert a2[:80] == a and pdi2[-1] < ndi2[-1] and not ss.trend_up(down, 20)[-1]
+
+
+def test_momentum_hold_ignores_the_stop_while_the_trend_was_on():
+    bars = future([(10, 10.5, 8.5, 10.2, 1), (10, 10.2, 8.8, 9.5, 1)])
+    out = ss._simulate(bars, 0, signal("breakout", 0, 9, 12), 2, [True, False, False])
+    assert out["outcome"] == "stop" and out["exit_date"] == bars.dates[2].isoformat() and out["r"] == -1.0
+    assert ss.simulate(bars, 0, signal("breakout", 0, 9, 12), 2)["exit_date"] == bars.dates[1].isoformat()
+
+
+def test_momentum_hold_past_the_time_exit_until_the_last_bar():
+    rows = [(10, 10.5, 9.6, 10.2, 1), (10.2, 10.6, 9.8, 10.4, 1), (10.4, 10.8, 10.0, 10.6, 1)]
+    held = ss._simulate(future(rows), 0, signal("breakout", 0, 9, 12), 2, [True] * 4)
+    assert held["outcome"] == "held_open" and held["exit"] == 10.6 and held["r"] == 0.6 and held["bars_held"] == 3
+    plain = ss._simulate(future(rows), 0, signal("breakout", 0, 9, 12), 2, [True, True, False, False])
+    assert plain["outcome"] == "timeout" and plain["exit"] == 10.4
+
+
+def test_momentum_hold_past_the_target_exits_the_open_after_the_trend_ends():
+    rows = [(10, 10.5, 9.6, 10.2, 1), (10.5, 12.3, 10.4, 12.1, 1), (12, 12.5, 11.8, 12.4, 1), (12.2, 12.6, 11.9, 12.0, 1)]
+    bars = future(rows)
+    on = [True, True, True, False, False]
+    out = ss._simulate(bars, 0, signal("breakout", 0, 9, 12), 2, on)
+    assert out["outcome"] == "momentum" and out["exit"] == 12.0 + 0.2 and out["exit_date"] == bars.dates[4].isoformat()
+    assert out["r"] == pytest.approx(2.2)
+    status = ss._track(bars, 0, signal("breakout", 0, 9, 12), 2, on)
+    assert status["status"] == "time_exit" and "momentum hold ended" in status["detail"] and status["exit"] == 12.2
+    open_now = ss._track(future(rows[:3]), 0, signal("breakout", 0, 9, 12), 2, on[:4])
+    assert open_now["status"] == "open" and open_now["bars_left"] == 0 and "momentum hold" in open_now["detail"]
+    assert ss.simulate(bars, 0, signal("breakout", 0, 9, 12), 2)["outcome"] == "target"
+
+
+def test_momentum_hold_through_simulate_uses_the_adx_trend_and_skips_shorts():
+    rows = uptrend(80, 50, 0.5)
+    rows += [(rows[-1][3] + 0.5 * k - 0.2, rows[-1][3] + 0.5 * k + 1, rows[-1][3] + 0.5 * k - 1, rows[-1][3] + 0.5 * k, 1_000_000)
+             for k in range(1, 6)]
+    rows += downtrend(15, rows[-1][3], -2.0)
+    bars = make_bars(rows)
+    t = 79
+    sig = signal("breakout", 0, 30.0, bars.close[t] + 1.5)
+    assert ss.simulate(bars, t, sig, 3)["outcome"] == "target"
+    out = ss.simulate(bars, t, sig, 3, 20)
+    on = ss.trend_up(bars, 20)
+    off = next(j for j in range(t + 1, len(bars)) if not on[j])
+    assert out["outcome"] == "momentum" and out["exit_date"] == bars.dates[off + 1].isoformat() and out["exit"] == bars.open[off + 1]
+    short = ss.simulate(bars, t, {"strategy": "rally_rejection", "levels": {"entry": 200, "stop": 300, "target": 1}}, 3, 20)
+    assert short == ss.simulate(bars, t, {"strategy": "rally_rejection", "levels": {"entry": 200, "stop": 300, "target": 1}}, 3)
+
+
+def test_momentum_hold_setting_and_holding_rule():
+    assert CFG["momentum_hold_adx"] == 0 and "ADX" not in ss.holding_rule(CFG)["rule"]
+    assert "ADX14 >= 20" in ss.holding_rule(ss.settings_with_defaults({"momentum_hold_adx": 20}))["rule"]
+    with pytest.raises(ValueError, match="momentum_hold_adx"):
+        ss.settings_with_defaults({"momentum_hold_adx": 101})
+
+
+def test_run_break_volume_confirmation_is_optional():
+    bars = make_bars(run_break_rows())
+    t = len(bars) - 1
+    series = ss.compute(bars, {}, CFG)
+    assert "volume" not in [c["name"] for c in ss.evaluate_run_break(bars, series, t, CFG)["checks"]]
+    strict = ss.settings_with_defaults({"run_break_min_rel_volume": 1.25})
+    assert failed(ss.evaluate_run_break(bars, series, t, strict)) == ["volume"]
+    rows = run_break_rows()
+    rows[-1] = rows[-1][:4] + (1_500_000,)
+    loud = make_bars(rows)
+    assert ss.evaluate_run_break(loud, ss.compute(loud, {}, strict), t, strict)["qualified"]
