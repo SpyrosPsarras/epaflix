@@ -20,9 +20,12 @@ market (breakout, then pullback, then squeeze), the score items it earned and th
 stops sit high_beta_stop_atr x beta ATR lower for stocks with beta >= high_beta_min. The LONG score weights come from a
 bull-market backtest and include the market (QQQ above its EMA50, not overheated) and the sector ETF trend.
 The market phase of the benchmark (uptrend, pullback; in a decline, i.e. a bear regime or a correction after a run or a
-big extension: falling, bounce, above_ema50) comes with a recommendation and flags the day it switches. SHORT setups are
-not traded short: in a decline they are proposed as bear put debit spreads with a defined risk (strikes, expiry and exit
-in `put_spread`). In the 2016-2026 backtest both the shorts and these debit spreads lost on average in a decline.
+big extension: falling, bounce, above_ema50) comes with a recommendation and flags the day it switches, an overextended
+bull market (benchmark overextended_bull or more above its SMA200), and a dead cat bounce of the benchmark rejected at
+its 200-day line (an alert with a debit spread on the benchmark). SHORT setups (rally rejection, run break, breakdown,
+dead cat) are not traded short: in a decline or an overextended bull market they are proposed as bear put debit spreads
+with a defined risk (strikes, expiry and exit in `put_spread`). In the 2016-2026 backtest both the shorts and these
+debit spreads lost on average.
 `track_days` adds the status of the signals of the previous sessions (open, target, stopped, time exit,
 not triggered, skipped). Every setup is a 30-45 session swing: the time exit depends on the stock's beta vs SPY
 (higher beta, shorter hold). The squeeze rules are an untested hypothesis: validate before trading them.
@@ -53,13 +56,13 @@ CHART_URL = "https://finviz.com/api/quote"
 QUOTE_URL = "https://finviz.com/quote.ashx"
 USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
 TICKER = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
-STRATEGIES = ("pullback", "breakout", "squeeze", "rally_rejection", "breakdown", "run_break")
+STRATEGIES = ("pullback", "breakout", "squeeze", "rally_rejection", "breakdown", "run_break", "dead_cat")
 DIRECTIONS = {"pullback": "long", "breakout": "long", "squeeze": "long", "rally_rejection": "short", "breakdown": "short",
-              "run_break": "short"}
+              "run_break": "short", "dead_cat": "short"}
 ENTRY_TYPES = {"pullback": "stop", "breakout": "open", "squeeze": "open", "rally_rejection": "stop", "breakdown": "stop",
-               "run_break": "open"}
+               "run_break": "open", "dead_cat": "open"}
 STRATEGY_GROUPS = {"all": STRATEGIES, "long": ("pullback", "breakout", "squeeze"), "both": ("pullback", "breakout"),
-                   "short": ("rally_rejection", "breakdown", "run_break")}
+                   "short": ("rally_rejection", "breakdown", "run_break", "dead_cat")}
 MAX_URLS = 3
 BETA_BENCHMARK = "SPY"  # beta is measured against the S&P 500, like Finviz; QQQ if SPY is not loaded
 SMTP_RESOURCE = "f/screener/smtp"
@@ -76,8 +79,8 @@ SECTOR_ETFS = {"Technology": "XLK", "Financial": "XLF", "Healthcare": "XLV", "In
 ACTIONS = {"bullish": "long", "neutral": "watch", "bearish": "no_trade", "unknown": "watch"}
 # SHORT setups are not traded short: in the bear backtest (600 stocks and 55 ETFs, 2016-2026) shorting them lost in bear
 # markets and corrections, while the stocks rose 4-9% on average over the next 30-45 sessions. In a decline (bear regime
-# or correction, see market_phase) they time a bear put debit spread instead, so the loss is capped at the debit (the
-# chosen strategy for now; it lost too, see STRATEGY_PRIORITY). action_for applies the correction too.
+# or correction) or an overextended bull market (see market_phase, spread_context) they time a bear put debit spread
+# instead, so the loss is capped at the debit (the chosen strategy for now; it lost too, see STRATEGY_PRIORITY).
 SHORT_ACTIONS = {"bullish": "countertrend_watch", "neutral": "watch", "bearish": "bear_put_spread", "unknown": "watch"}
 # Squeezes also happen in bear-market rallies, so a bearish regime makes them countertrend, not forbidden.
 SQUEEZE_ACTIONS = {"bullish": "long", "neutral": "watch", "bearish": "countertrend_watch", "unknown": "watch"}
@@ -152,6 +155,14 @@ DEFAULTS = {
     "run_break_above_bars": 15,
     "run_break_stop_atr": 0.2,
     "run_break_target_r": 2.0,
+    # Dead cat bounce rejected at the 200-day line (EMA200 or SMA200): closed below it on dead_cat_below_bars of the last
+    # 20, bounced dead_cat_bounce_atr ATR off the 20-day low, a high of the last 3 bars within dead_cat_touch_atr ATR of
+    # the line, and a bearish close below it. Also an alert when the benchmark does it (market_phase).
+    "dead_cat_below_bars": 15,
+    "dead_cat_bounce_atr": 2.0,
+    "dead_cat_touch_atr": 0.25,
+    "dead_cat_stop_atr": 0.2,
+    "dead_cat_target_r": 2.0,
     # Potential short squeeze (LONG, hypothesis): price trigger here, short interest live only
     "squeeze_lookback": 20,
     "squeeze_min_rel_volume": 2.0,
@@ -175,6 +186,7 @@ DEFAULTS = {
     "bounce_low_bars": 10,  # bounce: the close bounce_atr ATR above the low of the last bounce_low_bars, or above EMA20
     "bounce_atr": 2.0,
     "deep_drawdown": 0.15,  # debit spreads on SHORT setups lost the most with the benchmark this far below its high
+    "overextended_bull": 0.15,  # no decline and the benchmark this far above its SMA200 (QQQ: 13% of days 2016-2026)
     # Bear put debit spread plan: take profit when the spread is worth this share of the strike width; expiry about this
     # many days after the time exit
     "put_spread_take_profit": 0.8,
@@ -486,6 +498,7 @@ def compute(bars, benchmarks, cfg, beta_closes=None):
         "ema20": ema(bars.close, 20),
         "ema50": ema(bars.close, 50),
         "sma200": sma(bars.close, 200),
+        "ema200": ema(bars.close, 200),
         "atr14": atr(bars.high, bars.low, bars.close, 14),
         "rsi14": rsi(bars.close, 14),
         "volume_avg50": prior_mean(bars.volume, 50),
@@ -958,6 +971,62 @@ def evaluate_run_break(bars, series, t, cfg):
     return result
 
 
+def dead_cat_level(bars, lines, a, t, cfg):
+    """The 200-day line (name, value) a dead cat bounce was rejected at on bar t, else None. lines: name -> values."""
+    h, l, o, c = bars.high, bars.low, bars.open, bars.close
+    if t < 21 or a[t] is None or not a[t] or not (c[t] < o[t] and c[t] < c[t - 1]):
+        return None
+    if max(c[t - 5:t + 1]) - min(l[t - 20:t + 1]) < cfg["dead_cat_bounce_atr"] * a[t]:
+        return None
+    for name, values in lines.items():
+        line = values[t]
+        if line is None or c[t] >= line or max(h[t - 2:t + 1]) < line - cfg["dead_cat_touch_atr"] * a[t]:
+            continue
+        if sum(values[j] is not None and c[j] < values[j] for j in range(t - 20, t)) >= cfg["dead_cat_below_bars"]:
+            return name, line
+    return None
+
+
+def evaluate_dead_cat(bars, series, t, cfg):
+    """Dead cat bounce rejected at the 200-day line (SHORT setup, a bear put debit spread trigger in a decline or an
+    overextended bull market): the stock closed below its EMA200 or SMA200 on dead_cat_below_bars of the previous 20
+    sessions, bounced dead_cat_bounce_atr ATR or more off its 20-day low, reached the line (a high of the last 3 bars
+    within dead_cat_touch_atr ATR of it) and closed below it on a bearish bar (below the open and the previous close).
+    Entry at the next open, stop dead_cat_stop_atr ATR above the 3-day high, target dead_cat_target_r R. Not scored."""
+    checks, scores = [], []
+    ctx = _context(bars, series, t, cfg)
+    if ctx is None or series["ema200"][t] is None:
+        _check(checks, "history", False, "not enough history for EMA200, SMA200 and ATR14")
+        return _result("dead_cat", bars, t, checks, scores, None, None)
+    h, l, o, c = bars.high, bars.low, bars.open, bars.close
+    a = ctx["atr14"]
+    _liquidity(checks, ctx, cfg, short=True)
+    lines = {"EMA200": series["ema200"], "SMA200": series["sma200"]}
+    below = {k: sum(v[j] is not None and c[j] < v[j] for j in range(t - 20, t)) for k, v in lines.items()}
+    _check(checks, "below_200", max(below.values()) >= cfg["dead_cat_below_bars"],
+           f"{below['EMA200']} of the previous 20 closes below EMA200, {below['SMA200']} below SMA200, minimum {cfg['dead_cat_below_bars']}")
+    low = min(l[t - 20:t + 1])
+    bounce = (max(c[t - 5:t + 1]) - low) / a
+    _check(checks, "bounce", bounce >= cfg["dead_cat_bounce_atr"],
+           f"bounce of {bounce:.1f} ATR from the 20-day low {low:.2f}, minimum {cfg['dead_cat_bounce_atr']:g}")
+    hit = dead_cat_level(bars, lines, series["atr14"], t, cfg)
+    near = min(lines.items(), key=lambda kv: abs(kv[1][t] - max(h[t - 2:t + 1])))
+    name, line = hit or (near[0], near[1][t])
+    _check(checks, "rejected_at_200", hit is not None,
+           f"3-day high {max(h[t - 2:t + 1]):.2f}, close {c[t]:.2f} vs {name} {line:.2f} (open {o[t]:.2f}, previous close {c[t - 1]:.2f})")
+    entry = c[t]
+    stop = max(h[t - 2:t + 1]) + cfg["dead_cat_stop_atr"] * a
+    risk = stop - entry
+    levels = _levels(entry, stop, entry - cfg["dead_cat_target_r"] * risk, "short")
+    levels["target_source"] = f"{cfg['dead_cat_target_r']:g}R"
+    levels["line"], levels["line_name"] = round(line, 2), name
+    _check(checks, "risk_size", 0 < risk <= cfg["max_risk_atr"] * a, f"risk {risk:.2f} = {risk / a:.2f} ATR, maximum {cfg['max_risk_atr']:g}")
+    ctx["bounce_atr"] = bounce
+    result = _with_rs(_result("dead_cat", bars, t, checks, scores, levels, ctx), series, t, cfg)
+    result["max_risk_atr"] = cfg["max_risk_atr"]
+    return result
+
+
 # ---------------------------------------------------------------- Potential short squeeze (LONG, hypothesis, not validated)
 
 
@@ -1010,7 +1079,8 @@ def evaluate_squeeze(bars, series, t, cfg):
 
 
 EVALUATORS = {"pullback": evaluate_pullback, "breakout": evaluate_breakout, "squeeze": evaluate_squeeze,
-              "rally_rejection": evaluate_rally_rejection, "breakdown": evaluate_breakdown, "run_break": evaluate_run_break}
+              "rally_rejection": evaluate_rally_rejection, "breakdown": evaluate_breakdown, "run_break": evaluate_run_break,
+              "dead_cat": evaluate_dead_cat}
 
 
 # ---------------------------------------------------------------- validation
@@ -1214,7 +1284,7 @@ def track_signals(bars, series, strategies, days, cfg, regime=None, sector_trend
             beta = _beta_at(series, t)
             out.append({"strategy": strategy, "direction": direction, "ticker": bars.ticker, "signal_date": signal["signal_date"],
                         "score": signal["score"], "regime": label, "sector_trend": trend,
-                        "action": action_for(direction, label, trend, strategy, (phases.get(bars.dates[t]) or {}).get("decline")),
+                        "action": action_for(direction, label, trend, strategy, spread_context(phases.get(bars.dates[t]))),
                         "beta": None if beta is None else round(beta, 2), "holding_days": horizon, "atr14": signal["indicators"]["atr14"],
                         "signal_close": bars.close[t], **signal["levels"], **status})
             if status["status"] not in ("not_triggered", "skipped"):
@@ -1508,10 +1578,18 @@ def stored_view(row):
     return {k: (str(row[k])[:10] if k in ("signal_date", "exit_date") and row.get(k) else row.get(k)) for k in keys}
 
 
+def spread_context(phase):
+    """Where SHORT setups become bear put debit spreads: the decline (bear, correction) or "overextended", else None."""
+    if not phase:
+        return None
+    return phase.get("decline") or ("overextended" if phase.get("overextended") else None)
+
+
 def action_for(direction, regime_label, sector_trend=None, strategy=None, decline=None):
     """What to do with a qualified setup. The market regime decides; a sector ETF trending against the trade turns
-    long/short into watch. A SHORT setup in a decline (bear regime or correction, from market_phase) becomes a bear put
-    debit spread whatever the sector does. Nothing here changes qualification."""
+    long/short into watch. A SHORT setup in a decline (bear regime or correction) or an overextended bull market
+    (`decline` from spread_context) becomes a bear put debit spread whatever the sector does. Nothing here changes
+    qualification."""
     if direction == "short" and (decline or regime_label == "bearish"):
         return "bear_put_spread"
     table = actions_table(strategy) if strategy else ACTIONS_BY_DIRECTION[direction]
@@ -1536,6 +1614,10 @@ def trend_labels(dates, closes, slope):
 PHASE_ADVICE = {
     "uptrend": "Uptrend: long setups as ranked (breakout, then pullback, then squeeze). No shorts and no put spreads: "
                "outside a decline SHORT setups lost in the backtest (debit spreads about -0.2 to -0.3 of the debit).",
+    "overextended": "Overextended bull market (benchmark {ext:+.0%} vs its SMA200, minimum {overextended:.0%}): long setups "
+                    "as ranked, and SHORT setups (rally rejection, run break, breakdown, dead cat) as small bear put debit "
+                    "spreads, never a short. In the backtest a stock's dead cat rejection at the 200-day line in such a market "
+                    "lost about 0.25-0.4 of the debit per trade (about 1 in 3 won).",
     "pullback": "Pullback in a rising market (benchmark below its EMA20, no correction): the weakest stretch for the "
                 "benchmark in the backtest (QQQ +1.3% over the next 30 sessions on average, +1.8% in an uptrend). Keep longs "
                 "small and take only the best-scored breakouts and pullbacks; no shorts and no put spreads (debit spreads "
@@ -1561,11 +1643,14 @@ def market_phase(bars, regime, cfg=None):
     of the last phase_high_bars, after a correction_run rise in the 126 sessions before that high or with that high at
     least correction_extension above the SMA200 (a big extension); otherwise None.
     phase in a decline: above_ema50 (close at or above EMA50: early in a correction or recovering), bounce (close
-    bounce_atr ATR above the low of the last bounce_low_bars or above EMA20), else falling. Without a decline: pullback (close below EMA20), else uptrend.
-    `switched` marks the first day of a phase, `since` its first day and `previous` the phase before it."""
+    bounce_atr ATR above the low of the last bounce_low_bars or above EMA20), else falling. Without a decline: pullback
+    (close below EMA20), else uptrend; `overextended` when the close is overextended_bull or more above the SMA200.
+    `switched` marks the first day of a phase, `since` its first day and `previous` the phase before it.
+    `dead_cat` names the 200-day line (EMA200 or SMA200) when the benchmark's bounce was rejected there that day."""
     cfg = cfg or DEFAULTS
     c, h, l = bars.close, bars.high, bars.low
     e20, e50, m200, a = ema(c, 20), ema(c, 50), sma(c, 200), atr(h, l, c, 14)
+    lines = {"EMA200": ema(c, 200), "SMA200": m200}
     n_hi, n_lo = cfg["phase_high_bars"], cfg["bounce_low_bars"]
     out, last = {}, None
     for i, d in enumerate(bars.dates):
@@ -1589,7 +1674,10 @@ def market_phase(bars, regime, cfg=None):
         else:
             phase = "pullback" if c[i] < e20[i] else "uptrend"
         switched = last is not None and last["phase"] != phase
-        out[d] = {"phase": phase, "decline": decline, "drawdown": round(drawdown, 4), "high": round(c[k], 2), "high_date": bars.dates[k].isoformat(),
+        vs_sma200 = c[i] / m200[i] - 1
+        hit = dead_cat_level(bars, lines, a, i, cfg)
+        out[d] = {"phase": phase, "decline": decline, "vs_sma200": round(vs_sma200, 4),
+                  "overextended": decline is None and vs_sma200 >= cfg["overextended_bull"], "dead_cat": hit[0] if hit else None, "drawdown": round(drawdown, 4), "high": round(c[k], 2), "high_date": bars.dates[k].isoformat(),
                   "run_before_high": round(run, 4), "extension_at_high": None if extension is None else round(extension, 4),
                   "bounce_atr": round(bounce, 2), "deep": drawdown <= -cfg["deep_drawdown"], "switched": switched,
                   "previous": (last["phase"] if switched else last["previous"]) if last else None,
@@ -1603,11 +1691,19 @@ def phase_advice(info, cfg=None):
     if not info:
         return "Market phase unknown: not enough benchmark history."
     cfg = cfg or DEFAULTS
-    text = PHASE_ADVICE[info["phase"]].format(deep=cfg["deep_drawdown"], bounce_atr=cfg["bounce_atr"], bounce_low_bars=cfg["bounce_low_bars"])
+    key = "overextended" if info["phase"] == "uptrend" and info.get("overextended") else info["phase"]
+    text = PHASE_ADVICE[key].format(deep=cfg["deep_drawdown"], bounce_atr=cfg["bounce_atr"], bounce_low_bars=cfg["bounce_low_bars"],
+                                    ext=info.get("vs_sma200") or 0, overextended=cfg["overextended_bull"])
     where = f"{info['drawdown']:+.1%} from the {info['high_date']} high" + (f", {info['decline']}" if info["decline"] else "")
     head = (f"SWITCH today from {info['previous']} to {info['phase']} ({where}). " if info["switched"]
             else f"Phase {info['phase']} since {info['since']}" + (f" (after {info['previous']})" if info["previous"] else "") + f", {where}. ")
-    return head + text
+    alert = ""
+    if info.get("dead_cat"):
+        alert = (f"ALERT: dead cat bounce rejected at the benchmark's {info['dead_cat']} today. Proposal: a bear put debit spread "
+                 "on the benchmark (see index_put_spread), small. Backtest 2016-2026, few cases: on QQQ 4 of 11 such alerts won with "
+                 "the ATM / -10% spread over 45 sessions (-0.22 of the debit on average) and 6 of 11 with ATM / -5% over 30 "
+                 "sessions (+0.17); on SPY both lost (-0.39 / -0.13). ")
+    return alert + head + text
 
 
 def breadth(sector_bars):
@@ -1678,11 +1774,16 @@ def market_summary(name, bars, breadth_by_date, regime, sector_bars, cfg, contex
     ranked = sorted((x for x in etfs.items() if x[1]["change_63d"] is not None), key=lambda x: -x[1]["change_63d"])
     label = regime.get(d, "unknown")
     phase = (phases or {}).get(d)
-    decline = (phase or {}).get("decline")
+    decline = spread_context(phase)
     actions = {s: action_for(DIRECTIONS[s], label, None, s, decline) for s in STRATEGIES}
+    index_spread = None
+    if phase and phase.get("dead_cat"):
+        index_spread = {"ticker": name, **put_spread_plan(bars.close[-1], None, add_sessions(d, holding_days(1.0, cfg)).isoformat(),
+                                                          decline or "rejected at the 200-day line", phase["deep"], cfg)}
     return {"as_of": d.isoformat(), "regime": label, "long_setups": ACTIONS[label],
             "short_setups": action_for("short", label, None, None, decline),
             "phase": None if phase is None else {**phase, "advice": phase_advice(phase, cfg)},
+            "index_put_spread": index_spread,
             "actions": actions,
             "favoured": [s for s in STRATEGIES if actions[s] in TRADE_ACTIONS],
             "benchmark": {"ticker": name, **trend_snapshot(bars, cfg)},
@@ -1691,7 +1792,7 @@ def market_summary(name, bars, breadth_by_date, regime, sector_bars, cfg, contex
             "sector_leaders": [k for k, _ in ranked[:3]], "sector_laggards": [k for k, _ in ranked[::-1][:3]],
             "rules": "bullish: benchmark above a rising SMA200 and breadth >= {:g}; bearish: below the SMA200 and the SMA200 falling or "
                      "breadth <= {:g}; otherwise neutral. LONG setups: bullish -> long, neutral -> watch, bearish -> no_trade. "
-                     "SHORT setups: in a decline (bearish regime or correction, see phase) -> bear_put_spread, otherwise neutral -> watch, "
+                     "SHORT setups: in a decline (bearish regime or correction) or an overextended bull market (see phase) -> bear_put_spread, otherwise neutral -> watch, "
                      "bullish -> countertrend_watch. Squeeze: bullish -> long, neutral -> watch, "
                      "bearish -> countertrend_watch. Bonds (TLT, HYG) are context only, not part of the rules. A sector ETF trending against "
                      "the trade turns long/short into watch; it does not change bear_put_spread.".format(cfg["breadth_bullish"], cfg["breadth_bearish"])}
@@ -1867,14 +1968,16 @@ def settings_with_defaults(settings):
         cfg[key] = value
     for key in ("min_bars", "breakout_lookback", "min_base_bars", "min_touches", "rs_lookback", "regime_slope_bars",
                 "rally_min_bars", "breakdown_lookback", "squeeze_lookback", "swing_min_days", "swing_max_days", "beta_lookback",
-                "run_break_high_bars", "run_break_above_bars", "phase_high_bars", "bounce_low_bars"):
+                "run_break_high_bars", "run_break_above_bars", "phase_high_bars", "bounce_low_bars", "dead_cat_below_bars"):
         cfg[key] = int(cfg[key])
         if cfg[key] < 1:
             raise ValueError(f"setting {key} must be 1 or more")
     cfg["earnings_block_days"] = int(cfg["earnings_block_days"])
     cfg["put_spread_expiry_days"] = int(cfg["put_spread_expiry_days"])
-    if cfg["run_break_high_bars"] > 120 or cfg["run_break_above_bars"] > 20 or cfg["phase_high_bars"] > 120:
-        raise ValueError("run_break_high_bars and phase_high_bars must be 120 or less, run_break_above_bars 20 or less")
+    if (cfg["run_break_high_bars"] > 120 or cfg["run_break_above_bars"] > 20 or cfg["phase_high_bars"] > 120
+            or cfg["dead_cat_below_bars"] > 20):
+        raise ValueError("run_break_high_bars and phase_high_bars must be 120 or less, run_break_above_bars and "
+                         "dead_cat_below_bars 20 or less")
     if not 0 < cfg["put_spread_take_profit"] <= 1:
         raise ValueError("put_spread_take_profit is a share of the strike width: more than 0 and at most 1")
     if cfg["swing_min_days"] > cfg["swing_max_days"]:
@@ -1987,6 +2090,8 @@ STRATEGY_PRIORITY = {
     "rally_rejection": (1, "bear put debit spread trigger in a decline: -0.41 / -0.45 of the debit per trade in the bear backtest"),
     "run_break": (2, "bear put debit spread trigger in a decline: -0.51 / -0.36 of the debit per trade in the bear backtest"),
     "breakdown": (3, "bear put debit spread trigger in a decline: -0.49 / -0.38 of the debit per trade in the bear backtest"),
+    "dead_cat": (4, "bear put debit spread trigger: -0.41 / -0.27 of the debit per trade in bear markets, -0.31 / -0.33 in "
+                    "corrections, -0.39 / -0.25 in overextended bull markets in the backtest, about 1 in 3 won"),
 }
 REASON_LABELS = {
     "outperforms_market": "stronger than the market", "outperforms_sector": "stronger than its sector",
@@ -2031,6 +2136,10 @@ def _setup_text(q):
         return f"close above the 20-day high {levels.get('breakout_level')}{vol_text}"
     if s == "rally_rejection":
         return "rally rejected at resistance in a downtrend"
+    if s == "dead_cat":
+        bounce = ind.get("bounce_atr")
+        return (f"dead cat bounce rejected at the {levels.get('line_name', '200-day line')} {levels.get('line')}"
+                + (f" after a {bounce:.1f} ATR bounce" if bounce is not None else ""))
     if s == "run_break":
         run = ind.get("prior_run")
         return "first close below EMA50 after a run" + (f" of {run:+.0%}" if run is not None else "")
@@ -2071,7 +2180,7 @@ def candidate_row(strategy, q):
             "sector": q["sector"], "sector_trend": q["sector_trend"], "warnings": q["warnings"], "put_spread": q.get("put_spread")}
 
 
-def put_spread_plan(close, target, time_exit, phase, cfg):
+def put_spread_plan(close, target, time_exit, context, deep, cfg):
     """Bear put debit spread for a SHORT setup in a decline: buy and sell strikes from PUT_SPREAD_STRIKES on the last close
     (or sell at the stock's target when it is below the close), the first expiry after the time exit plus
     put_spread_expiry_days, take profit at put_spread_take_profit of the strike width or close at the time exit."""
@@ -2080,7 +2189,7 @@ def put_spread_plan(close, target, time_exit, phase, cfg):
     legs = [{"buy": round(close * buy, 2), "sell": round(close * sell, 2)}]
     if target is not None and 0 < target < close * buy:
         legs.append({"buy": round(close * buy, 2), "sell": round(target, 2)})
-    return {"type": "bear put debit spread", "decline": phase["decline"], "deep": phase["deep"], "legs": legs,
+    return {"type": "bear put debit spread", "decline": context, "deep": bool(deep), "legs": legs,
             "expiry_after": expiry.isoformat(), "take_profit": cfg["put_spread_take_profit"], "exit_by": time_exit,
             "max_loss": "the debit paid",
             "note": "nearest listed strikes; the stock's stop does not apply to the spread"}
@@ -2095,6 +2204,12 @@ def email_html(result):
              f"Favoured: {escape(', '.join(m['favoured']) or 'none')}.</p>"]
     if m.get("phase"):
         parts.append(f"<p><b>Market phase {escape(m['phase']['phase'])}</b>: {escape(m['phase']['advice'])}</p>")
+    spread = m.get("index_put_spread")
+    if spread:
+        leg = spread["legs"][0]
+        parts.append(f"<p><b>Index debit spread</b>: {escape(spread['ticker'])} buy the {leg['buy']} put, sell the {leg['sell']} put, "
+                     f"expiry after {spread['expiry_after']}, take profit at {spread['take_profit']:.0%} of the width, "
+                     f"else close by {spread['exit_by']}; the most you can lose is the debit.</p>")
     context = m.get("context") or {}
     if context:
         parts.append("<p>" + "; ".join(f"{escape(k)} {v['close']} ({escape(str(v['trend']))}, {pct(v['vs_sma200'])} vs SMA200, "
@@ -2120,7 +2235,7 @@ def email_html(result):
         parts.append(f"<p><b>Tracked signals</b>: {len(stored['active'])} active, {stored['inserted']} new. "
                      f"Closed today: {', '.join(line(r) for r in stored['closed_today']) or 'none'}. "
                      f"Data unavailable: {escape(', '.join(r['ticker'] for r in stored['data_unavailable'])) or 'none'}.</p>")
-    parts.append("<p>Screening only, not advice. SHORT setups are not traded short; in a decline they time bear put debit spreads "
+    parts.append("<p>Screening only, not advice. SHORT setups are not traded short; in a decline or an overextended bull market they time bear put debit spreads "
                  "(they lost on average in the backtest), whose results come from a backtest with modelled option prices. Squeeze rules are untested hypotheses.</p>")
     return "".join(parts)
 
@@ -2271,7 +2386,7 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
             elif signal["qualified"] and s == "squeeze":
                 warnings += squeeze_checks(signal, snapshot(), as_of, cfg)
             if signal["qualified"]:
-                action = action_for(signal["direction"], label, trend, s, phase_now.get("decline"))
+                action = action_for(signal["direction"], label, trend, s, spread_context(phase_now))
                 time_exit = add_sessions(as_of, hold).isoformat()
                 results[s]["qualified"].append({
                     **{k: signal[k] for k in ("ticker", "signal_date", "score", "direction")}, "strategy": s, "regime": label,
@@ -2279,7 +2394,7 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
                     "sector_trend": trend, "beta": None if beta is None else round(beta, 2), "holding_days": hold,
                     "time_exit": time_exit, "warnings": warnings,
                     "put_spread": put_spread_plan(bars.close[-1], signal["levels"].get("target"), time_exit,
-                                                  {"decline": "bear", "deep": False, **phase_now}, cfg)
+                                                  spread_context(phase_now) or "bear", phase_now.get("deep"), cfg)
                     if action == "bear_put_spread" else None,
                     **{k: signal[k] for k in ("levels", "relative_strength", "checks", "scoring", "indicators")}})
             else:

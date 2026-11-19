@@ -1189,7 +1189,9 @@ def test_main_returns_structured_results(offline, capsys):
     assert result["candidates"][0]["time_exit"] == ss.add_sessions(date.fromisoformat(result["as_of"]), result["candidates"][0]["holding_days"]).isoformat()
     assert "Summary: 3 tickers, 1 data errors, regime bullish, qualified: pullback 1, breakout 1" in capsys.readouterr().out
     assert market["actions"] == {"pullback": "long", "breakout": "long", "squeeze": "long",
-                                 "rally_rejection": "countertrend_watch", "breakdown": "countertrend_watch", "run_break": "countertrend_watch"}
+                                 "rally_rejection": "countertrend_watch", "breakdown": "countertrend_watch", "run_break": "countertrend_watch",
+                                 "dead_cat": "countertrend_watch"}
+    assert market["index_put_spread"] is None and market["phase"]["dead_cat"] is None
     assert market["favoured"] == ["pullback", "breakout", "squeeze"] and market["short_setups"] == "countertrend_watch"
     assert market["phase"]["phase"] == "uptrend" and market["phase"]["decline"] is None and "Uptrend: long setups" in market["phase"]["advice"]
     assert set(market["context"]) == {"SPY", "IWM", "MDY", "SMH", "TLT", "HYG"} and market["context"]["TLT"]["trend"] == "up"
@@ -1224,7 +1226,7 @@ def test_tracked_squeeze_signals_need_short_float_today(offline):
 
 def test_main_screens_short_setups(offline):
     result = ss.main(tickers="RALY,BRKD,PULL", strategy="short")
-    assert list(result["results"]) == ["rally_rejection", "breakdown", "run_break"]
+    assert list(result["results"]) == ["rally_rejection", "breakdown", "run_break", "dead_cat"]
     rally = result["results"]["rally_rejection"]["qualified"]
     assert [q["ticker"] for q in rally] == ["RALY"]
     q = rally[0]
@@ -1715,11 +1717,11 @@ def test_market_phase_switches_and_advice():
 
 def test_bear_put_debit_spread_plan_and_recommendation():
     phase = {"decline": "correction", "deep": True}
-    plan = ss.put_spread_plan(100.0, 93.0, "2026-03-02", phase, CFG)
+    plan = ss.put_spread_plan(100.0, 93.0, "2026-03-02", phase["decline"], phase["deep"], CFG)
     assert plan["type"] == "bear put debit spread" and plan["max_loss"] == "the debit paid"
     assert plan["legs"] == [{"buy": 100.0, "sell": 90.0}, {"buy": 100.0, "sell": 93.0}]
     assert plan["expiry_after"] == "2026-03-09" and plan["exit_by"] == "2026-03-02" and plan["take_profit"] == 0.8
-    assert ss.put_spread_plan(100.0, None, "2026-03-02", phase, CFG)["legs"] == [{"buy": 100.0, "sell": 90.0}]
+    assert ss.put_spread_plan(100.0, None, "2026-03-02", "bear", False, CFG)["legs"] == [{"buy": 100.0, "sell": 90.0}]
     q = {"ticker": "RALY", "strategy": "rally_rejection", "direction": "short", "action": "bear_put_spread", "regime": "neutral",
          "levels": {"entry": 99.0, "stop": 104.0, "target": 90.0, "reward_risk": 1.8}, "scoring": [], "indicators": {},
          "holding_days": 38, "time_exit": "2026-03-02", "put_spread": plan}
@@ -1755,3 +1757,67 @@ def test_settings_check_run_break_and_phase_windows():
         ss.settings_with_defaults({"put_spread_take_profit": 1.5})
     cfg = ss.settings_with_defaults({"bounce_low_bars": 5.0, "put_spread_expiry_days": 3.0})
     assert cfg["bounce_low_bars"] == 5 and isinstance(cfg["put_spread_expiry_days"], int)
+
+
+def dead_cat_rows(last=(171.5, 173.0, 168.8, 169.0, 1_500_000)):
+    rows, close = uptrend(240, 100, 0.5), 219.5
+    for _ in range(36):  # fall well below the 200-day lines
+        close -= 2.0
+        rows.append((close + 1.2, close + 1.5, close - 0.8, close, 1_000_000))
+    for _ in range(8):  # bounce back up to EMA200
+        close += 3.0
+        rows.append((close - 2.0, close + 0.8, close - 2.3, close, 1_000_000))
+    rows.append(last)  # rejected there
+    return rows
+
+
+def test_dead_cat_rejected_at_the_200_day_line():
+    bars = make_bars(dead_cat_rows())
+    series = ss.compute(bars, {}, CFG)
+    t = len(bars) - 1
+    signal = ss.evaluate_dead_cat(bars, series, t, CFG)
+    assert signal["qualified"] and signal["direction"] == "short" and signal["score"] == 0
+    assert signal["levels"]["line_name"] == "EMA200" and signal["levels"]["line"] == round(series["ema200"][t], 2)
+    assert signal["levels"]["entry"] == 169.0 and signal["levels"]["stop"] == round(173.0 + 0.2 * series["atr14"][t], 2)
+    assert ss._setup_text(signal).startswith("dead cat bounce rejected at the EMA200 172.0")
+    assert [c["name"] for c in ss.evaluate_dead_cat(bars, series, t - 1, CFG)["checks"] if not c["passed"]] == ["rejected_at_200"]
+    held = make_bars(dead_cat_rows((171.5, 173.0, 170.0, 172.5, 1_500_000)))  # closed above the open: no rejection
+    failed = ss.evaluate_dead_cat(held, ss.compute(held, {}, CFG), t, CFG)["checks"]
+    assert [c["name"] for c in failed if not c["passed"]] == ["rejected_at_200"]
+    strict = {**CFG, "dead_cat_bounce_atr": 9.0}
+    assert [c["name"] for c in ss.evaluate_dead_cat(bars, series, t, strict)["checks"] if not c["passed"]] == ["bounce", "rejected_at_200"]
+
+
+def test_market_phase_dead_cat_alert_and_overextended_bull():
+    bars = make_bars(dead_cat_rows(), "QQQ")
+    phases = ss.market_phase(bars, {}, CFG)
+    today, before = phases[bars.dates[-1]], phases[bars.dates[-2]]
+    assert today["dead_cat"] == "EMA200" and before["dead_cat"] is None and today["phase"] == "bounce" and not today["overextended"]
+    text = ss.phase_advice(today, CFG)
+    assert text.startswith("ALERT: dead cat bounce rejected at the benchmark's EMA200 today. Proposal: a bear put debit spread")
+    hot = make_bars(uptrend(300, 100, 1.0), "QQQ")
+    info = ss.market_phase(hot, {}, CFG)[hot.dates[-1]]
+    assert info["phase"] == "uptrend" and info["overextended"] and info["vs_sma200"] > 0.3 and ss.spread_context(info) == "overextended"
+    assert "Overextended bull market (benchmark +33% vs its SMA200, minimum 15%)" in ss.phase_advice(info, CFG)
+    assert not ss.market_phase(hot, {}, {**CFG, "overextended_bull": 0.5})[hot.dates[-1]]["overextended"]
+    # in an overextended bull market SHORT setups become debit spreads; LONG setups keep the regime's action
+    assert ss.action_for("short", "bullish", "up", "rally_rejection", ss.spread_context(info)) == "bear_put_spread"
+    assert ss.action_for("long", "bullish", "up", "breakout", ss.spread_context(info)) == "long"
+    assert ss.spread_context(None) is None and ss.spread_context({"decline": "bear", "overextended": False}) == "bear"
+
+
+def test_main_proposes_an_index_debit_spread_on_a_dead_cat_rejection(offline):
+    offline["QQQ"] = uptrend(20, 90, 0.5) + dead_cat_rows()
+    result = ss.main(tickers="PULL", strategy="all", email="trader@example.com")
+    market = result["market"]
+    assert market["phase"]["dead_cat"] == "EMA200" and market["phase"]["advice"].startswith("ALERT: dead cat bounce")
+    spread = market["index_put_spread"]
+    assert spread["ticker"] == "QQQ" and spread["legs"][0] == {"buy": 169.0, "sell": 152.1} and spread["type"] == "bear put debit spread"
+    assert market["actions"]["dead_cat"] == "bear_put_spread"
+    html = offline["_sent"][0][2]
+    assert "<b>Index debit spread</b>: QQQ buy the 169.0 put, sell the 152.1 put" in html
+
+
+def test_dead_cat_setting_limits():
+    with pytest.raises(ValueError, match="dead_cat_below_bars"):
+        ss.settings_with_defaults({"dead_cat_below_bars": 25})
