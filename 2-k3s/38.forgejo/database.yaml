@@ -1,0 +1,38 @@
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: DatabaseRole
+metadata:
+  name: forgejo
+  namespace: postgres-system
+  labels:
+    app.kubernetes.io/name: forgejo
+    app.kubernetes.io/component: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  cluster:
+    name: postgres-cluster
+  name: forgejo
+  ensure: present
+  login: true
+  passwordSecret:
+    name: forgejo-db-role
+  databaseRoleReclaimPolicy: retain
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: forgejo
+  namespace: postgres-system
+  labels:
+    app.kubernetes.io/name: forgejo
+    app.kubernetes.io/component: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  cluster:
+    name: postgres-cluster
+  name: forgejo
+  owner: forgejo
+  ensure: present
+  databaseReclaimPolicy: retain
