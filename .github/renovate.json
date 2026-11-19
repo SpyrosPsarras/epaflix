@@ -26,6 +26,13 @@
       "automerge": false
     },
     {
+      "description": "Forgejo and RackPeek majors auto-merge too, by owner decision. A Forgejo major migrates its database one way. To roll back, recover the forgejo database from the daily CNPG cluster backup; changes since that backup are lost.",
+      "matchManagers": ["kustomize"],
+      "matchPackageNames": ["codeberg.org/forgejo/forgejo", "aptacode/rackpeek"],
+      "matchUpdateTypes": ["major"],
+      "automerge": true
+    },
+    {
       "description": "Windmill script requirement headers (2-k3s/34.windmill/workspace/f/**): a bump changes the script, so Windmill re-resolves its lock and the committed run_screen.script.lock/.script.yaml/wmill-lock.yaml go stale, which makes windmill-deploy push a new script version on every deploy. Merge by hand, then refresh those files with wmill sync pull (2-k3s/34.windmill/README.md, Deploy).",
       "matchFileNames": ["2-k3s/34.windmill/workspace/**"],
       "automerge": false
