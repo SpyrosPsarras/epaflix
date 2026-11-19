@@ -8,6 +8,7 @@ import unittest
 from http.client import HTTPConnection
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -138,18 +139,68 @@ class FlowTests(unittest.TestCase):
 
 
 class SeedTests(unittest.TestCase):
+    def test_readiness_and_seed_handle_http_disconnects(self):
+        requests = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                requests.append(self.path)
+                if len(requests) == 1:
+                    return
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b'{"status":"good"}')
+
+            def do_POST(self):
+                requests.append(self.path)
+
+            def log_message(self, *args):
+                pass
+
+        with TemporaryDirectory(dir=Path.cwd()) as tmp, ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
+            worker = threading.Thread(target=server.serve_forever)
+            worker.start()
+            try:
+                base = f"http://127.0.0.1:{server.server_port}"
+                ready_file = Path(tmp) / "ready"
+                command = [sys.executable, str(HERE / "seed.py"), base]
+                for wait_for_ready in (False, True):
+                    with self.subTest(wait_for_ready=wait_for_ready):
+                        requests.clear()
+                        args = ["--ready-file", str(ready_file)] if wait_for_ready else []
+                        expected = ["/api/v2/status"] * 2 if wait_for_ready else []
+                        result = subprocess.run(command + args, capture_output=True, text=True, timeout=10)
+                        self.assertEqual(requests, expected + ["/api/v2/cruddb"])
+                        self.assertEqual(result.returncode, 1)
+                        self.assertEqual(result.stderr.strip(), "Tdarr configuration seed failed")
+                        self.assertFalse(ready_file.exists())
+            finally:
+                server.shutdown()
+                worker.join()
+
     def test_seed_idempotent(self):
         script = HERE / "seed.py"
         self.assertTrue(script.is_file(), "the seed entry point is missing")
         docs = {("LibrarySettingsJSONDB", "unmanaged"): {"_id": "unmanaged"}}
         writes = []
+        defaults = {
+            "folderWatching": False, "useFsEvents": False, "folderWatchScanInterval": 300,
+            "holdNewFiles": True, "holdFor": 600, "holdForDisplayUnit": "minutes",
+            "scheduledScanFindNew": True, "scanOnStart": False, "processTranscodes": False,
+        }
+        owner_settings = {
+            "folderWatching": True, "useFsEvents": True, "folderWatchScanInterval": 600,
+            "holdNewFiles": False, "holdFor": 3600, "holdForDisplayUnit": "hours",
+            "scheduledScanFindNew": False, "scanOnStart": True, "processTranscodes": True,
+            "totalTranscodeCount": 12,
+        }
 
         class Handler(BaseHTTPRequestHandler):
             def do_POST(self):
+                request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))["data"]
                 if self.path != "/api/v2/cruddb":
                     self.send_error(404)
                     return
-                request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))["data"]
                 collection, mode, doc_id, value = (request[key] for key in ("collection", "mode", "docID", "obj"))
                 key = (collection, doc_id)
                 result = b""
@@ -175,7 +226,8 @@ class SeedTests(unittest.TestCase):
             worker = threading.Thread(target=server.serve_forever)
             worker.start()
             try:
-                command = [sys.executable, str(script), f"http://127.0.0.1:{server.server_port}"]
+                base = f"http://127.0.0.1:{server.server_port}"
+                command = [sys.executable, str(script), base]
                 keys = [("FlowsJSONDB", "lg-c1-compat"), *[("LibrarySettingsJSONDB", name) for name in ("movies", "tvshows", "animes")]]
                 for mode in ("insert", "update"):
                     writes.clear()
@@ -189,12 +241,11 @@ class SeedTests(unittest.TestCase):
                         self.assertEqual(library["flowId"], "lg-c1-compat")
                         self.assertTrue(library["decisionMaker"]["settingsFlows"])
                         self.assertFalse(library["decisionMaker"]["settingsPlugin"])
+                        expected = owner_settings if mode == "update" and key == "movies" else defaults
+                        with self.subTest(mode=mode, library=key):
+                            self.assertEqual({setting: library.get(setting) for setting in expected}, expected)
                     if mode == "insert":
-                        self.assertFalse(docs["LibrarySettingsJSONDB", "movies"]["processTranscodes"])
-                        docs["LibrarySettingsJSONDB", "movies"]["processTranscodes"] = True
-                        docs["LibrarySettingsJSONDB", "movies"]["totalTranscodeCount"] = 12
-                self.assertTrue(docs["LibrarySettingsJSONDB", "movies"]["processTranscodes"])
-                self.assertEqual(docs["LibrarySettingsJSONDB", "movies"]["totalTranscodeCount"], 12)
+                        docs["LibrarySettingsJSONDB", "movies"].update(owner_settings)
                 self.assertEqual(docs["LibrarySettingsJSONDB", "unmanaged"], {"_id": "unmanaged"})
                 docs["LibrarySettingsJSONDB", "unmanaged"]["folder"] = "/media/movies/"
                 writes.clear()

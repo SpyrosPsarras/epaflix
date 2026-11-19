@@ -3,7 +3,6 @@ import json
 import threading
 import time
 from pathlib import Path, PurePosixPath
-from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 HERE = Path(__file__).resolve().parent
@@ -50,14 +49,14 @@ def main():
                 with urlopen(args.base_url + "/api/v2/status", timeout=2) as response:
                     if json.load(response)["status"] == "good":
                         break
-            except (URLError, TimeoutError):
+            except OSError:
                 pass
             time.sleep(2)
         else:
             raise SystemExit("Tdarr did not become ready")
     try:
         seed(args.base_url)
-    except (URLError, TimeoutError, ValueError, KeyError):
+    except (OSError, ValueError, KeyError):
         raise SystemExit("Tdarr configuration seed failed") from None
     print("Tdarr flow and libraries seeded", flush=True)
     if args.ready_file:

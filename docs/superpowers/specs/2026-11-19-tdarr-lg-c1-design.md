@@ -46,7 +46,8 @@ Dolby Vision fix:
 - Tdarr server as a Deployment with its config on an iSCSI PVC, behind the existing ingress and Authentik like the other servarr apps.
 - Tdarr node as a DaemonSet on the 5 k3s workers: one node per host. Each node runs one CPU transcode worker and one health-check worker. Each has CPU and memory limits, so an out-of-memory kill restarts only that node's container. Free workers take the next file from the queue; Tdarr has no "least busy node" choice.
 - Server and nodes mount `servarr-media` at the same paths, so no path translation is needed. The transcode cache is an emptyDir per node, sized and limited so it cannot fill the node disk.
-- Libraries: movies, TV shows, animes. Scheduled scans of the whole library are allowed, because the flow below touches only problem files.
+- Libraries: movies, TV shows, animes. After the copy test, the owner enables Folder Watch and Transcodes in each library. The watcher polls NFS every 300 seconds instead of relying on file-system events. Tdarr holds newly indexed files for 10 minutes before processing to give copy imports time to finish. This is a queue delay, not a check that the file has stopped changing.
+- The seed leaves Folder Watch and Transcodes off on creation and preserves the owner's settings on restart. New libraries have Tdarr's built-in hourly find-new scan enabled. It adds only unindexed files, including any the watcher missed.
 
 ### Flow (community flow plugins, official or third-party)
 

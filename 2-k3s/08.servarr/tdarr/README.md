@@ -10,7 +10,11 @@ Tdarr does not re-encode or resize video, change filenames or containers, or rem
 
 ## Enable and queue work
 
-The seed creates `movies`, `tvshows` and `animes` with transcodes and automatic scans off. After testing a copy, the owner can open **Libraries**, select a library, and turn on **Transcodes** under **Library Processing** in the source settings. The seed preserves that setting on restart. With automatic scans off, use a manual **Scan (Find new)** to index new files. The server and nodes share `/temp`, which is `tdarr-cache` on the `servarr-media` NFS volume. Create `/mnt/k3s-media/tdarr-cache` on the share and make it writable by UID 568 before rollout.
+New libraries start with **Folder Watch** and **Transcodes** off. After the copy test, enable both for each library under **Libraries** → **Source**. New libraries default to 300-second polling with **Use File System Events** off and **Hold Files After Scanning** set to 10 minutes. **Hourly Scan (Find new)** is on by default. This built-in hourly find-new scan adds only unindexed files. Confirm these settings on existing libraries too, since the seed preserves owner changes. To pause automatic work, turn off Folder Watch, Transcodes and Hourly Scan (Find new).
+
+Replacing a file breaks its hardlink to the still-seeding torrent, so converted new downloads use double disk space until the torrent is removed.
+
+The server and nodes share `/temp`, which is `tdarr-cache` on the `servarr-media` NFS volume. Create `/mnt/k3s-media/tdarr-cache` on the share and make it writable by UID 568 before rollout.
 
 To requeue an indexed file, find its exact path in **Search** and click **Requeue Transcode** on that row. For a failed job, check its report first in **Transcode: Error/Cancelled**. In `#media`, ask the bot to fix one movie or episode for the LG C1. Name the exact title and episode or edition if there is more than one. Ask for status in the same thread instead of asking it to queue again.
 
@@ -26,4 +30,4 @@ The `seed` sidecar gates server pod readiness. If seeding fails, the `tdarr` Ser
 
 `media-proxy` lets the bot check or queue one indexed path without exposing Tdarr's full API.
 
-To stop new jobs, turn off **Transcodes** for each library. Check for jobs already running. The flow replaces an original only after the duration check and a thorough health check pass. Tdarr keeps no backup of replaced originals. To undo a completed replacement, restore the original from an external backup or obtain the original release again. A refresh error can occur after replacement, so check the job report and the file before retrying.
+When pausing processing, check for jobs already running. The flow replaces an original only after the duration check and a thorough health check pass. Tdarr keeps no backup of replaced originals. To undo a completed replacement, restore the original from an external backup or obtain the original release again. A refresh error can occur after replacement, so check the job report and the file before retrying.
