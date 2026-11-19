@@ -29,7 +29,8 @@ debit spreads lost on average.
 `track_days` adds the status of the signals of the previous sessions (open, target, stopped, time exit,
 not triggered, skipped). Every setup is a 30-45 session swing: the time exit depends on the stock's beta vs SPY
 (higher beta, shorter hold). With momentum_hold_adx above 0, a LONG trade that reaches its target or time exit while
-the ADX trend is up stays open until that trend ends (momentum_hold_adx, 0 turns it off). Breakdown runs only when
+the ADX trend is up stays open until that trend ends (momentum_hold_adx, 0 turns it off). Proposed LONG candidates get a
+position of position_size (10%) of the budget, best first, while fewer than max_open_trades (10) live long trades are open. Breakdown runs only when
 asked for by name (strategy breakdown): it lost in every backtest window. The squeeze rules are an untested hypothesis: validate before trading them.
 `finviz_url` takes one or more screener URLs (one per line), e.g. a large/mid-cap list and a high-short-float list.
 With `persist`, every signal is stored in the Windmill data table `main` (schema `screener`) and followed until it
@@ -230,6 +231,12 @@ DEFAULTS = {
     # position) level 20 lifted the LONG portfolio in all three 750-session windows: +10% to +16% (2017-2020), +59% to +68%
     # (2020-2023), +57% to +88% (2023-2026); R per trade rose only in the last two.
     "momentum_hold_adx": 20.0,
+    # Position sizing of LONG trades: position_size of the budget per trade, at most max_open_trades open at once (one per
+    # ticker), the best candidates first. Open trades are the live LONG signals stored as open or pending (needs persist).
+    # In the backtest (about 105 large caps, longs, ADX hold) 10% x 10 made +36% / +30% / +88% in 2017-2020 / 2020-2023 /
+    # 2023-2026 with a maximum drawdown of 15-18%; 2.5% x 10 left about 80% of the budget in cash and made +9% / +8% / +18%.
+    "position_size": 0.10,
+    "max_open_trades": 10,
     "request_pause": 0.4,
 }
 
@@ -2360,6 +2367,39 @@ def recommendation(q):
             + (f"; {reasons}" if reasons else "") + f". Plan: {plan}.")
 
 
+def open_long_trades(rows):
+    """Live LONG trades that hold a slot: stored signals proposed as long, still pending or open."""
+    return [r for r in rows if r.get("live") and r.get("direction") == "long" and r.get("action") == "long"
+            and r.get("status") in ACTIVE_STATUSES]
+
+
+def assign_positions(candidates, open_rows, cfg, known=True):
+    """Give the proposed LONG candidates, best first, a position of position_size of the budget while fewer than
+    max_open_trades are open; one trade per ticker. Adds `position` to each candidate and a sentence to its recommendation;
+    returns the sizing summary."""
+    size, limit = cfg["position_size"], int(cfg["max_open_trades"])
+    held = {r["ticker"] for r in open_rows}
+    used = len(open_rows)
+    for c in candidates:
+        if c["direction"] != "long" or c["action"] != "long":
+            c["position"] = None
+            continue
+        if c["ticker"] in held:
+            c["position"] = {"size": 0.0, "slot": None, "reason": "already open"}
+            c["recommendation"] += " Size: none, a trade in this ticker is already open."
+        elif used >= limit:
+            c["position"] = {"size": 0.0, "slot": None, "reason": "no free slot"}
+            c["recommendation"] += f" Size: none, {limit} of {limit} trades are open; skip."
+        else:
+            used += 1
+            held.add(c["ticker"])
+            c["position"] = {"size": size, "slot": used, "reason": None}
+            c["recommendation"] += f" Size: {size:.0%} of the budget (trade {used} of at most {limit})."
+    return {"position_size": size, "max_open_trades": limit, "open_before": len(open_rows) if known else None,
+            "open_after": used if known else None, "free": max(limit - used, 0) if known else None,
+            "note": None if known else "open trades unknown without persist: every slot counted as free"}
+
+
 def candidate_row(strategy, q):
     levels = q["levels"]
     return {"ticker": q["ticker"], "strategy": strategy, "direction": q["direction"], "action": q["action"], "score": q["score"],
@@ -2431,11 +2471,18 @@ def email_html(result):
         proposed = [r for r in rows if r["action"] in TRADE_ACTIONS]
         parts.append(f"<p><b>Proposed</b>: {len(proposed)} of {len(rows)} setups. Best first; the rest are watch only.</p><ol>"
                      + "".join(f"<li>{escape(r['recommendation'])}</li>" for r in rows) + "</ol>")
-        keys = ["ticker", "strategy", "action", "score", "entry", "stop", "target", "reward_risk", "beta", "holding_days", "time_exit",
-                "sector", "warnings"]
+        sizing = result.get("sizing")
+        if sizing:
+            state = (f"{sizing['open_before']} open before today, {sizing['free']} free after it" if sizing["open_before"] is not None
+                     else sizing["note"])
+            parts.append(f"<p><b>Sizing</b>: {sizing['position_size']:.0%} of the budget per long trade, at most "
+                         f"{sizing['max_open_trades']} open ({escape(state)}).</p>")
+        keys = ["ticker", "strategy", "action", "size", "score", "entry", "stop", "target", "reward_risk", "beta", "holding_days",
+                "time_exit", "sector", "warnings"]
+        size = lambda r: "-" if not r.get("position") else f"{r['position']['size']:.0%}" if r["position"]["slot"] else r["position"]["reason"]
+        cell = lambda r, k: size(r) if k == "size" else "; ".join(r[k]) if isinstance(r[k], list) else str(r[k])
         head = "".join(f"<th>{k}</th>" for k in keys)
-        body = "".join("<tr>" + "".join(f"<td>{escape('; '.join(r[k]) if isinstance(r[k], list) else str(r[k]))}</td>" for k in keys) + "</tr>"
-                       for r in rows)
+        body = "".join("<tr>" + "".join(f"<td>{escape(cell(r, k))}</td>" for k in keys) + "</tr>" for r in rows)
         parts.append(f"<table border='1' cellpadding='4' cellspacing='0'><tr>{head}</tr>{body}</table>")
     else:
         parts.append("<p>No setup qualified today.</p>")
@@ -2649,6 +2696,8 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
         results[s]["qualified"].sort(key=lambda x: (-x["score"], x["ticker"]))
     candidates = sorted((candidate_row(s, q) for s in strategies for q in results[s]["qualified"]),
                         key=lambda x: (ACTION_ORDER.get(x["action"], 9), x["priority"], -x["score"], x["ticker"], x["strategy"]))
+    by_id = {u["id"]: u for u in updates}
+    sizing = assign_positions(candidates, open_long_trades([{**row, **by_id.get(row["id"], {})} for row in active]), cfg, persist)
 
     duration = time.monotonic() - started
     counts = ", ".join(f"{s} {len(results[s]['qualified'])}" for s in strategies)
@@ -2662,6 +2711,7 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
         "benchmarks": benchmark_info,
         "holding": holding,
         "candidates": candidates,
+        "sizing": sizing,
         "results": results,
         "tracking": None if not track_days else {
             "days": track_days,
