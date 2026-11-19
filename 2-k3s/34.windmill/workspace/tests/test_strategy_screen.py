@@ -1981,3 +1981,46 @@ def test_run_break_needs_volume_unless_turned_off():
     assert off_checks["qualified"] and "volume" not in [c["name"] for c in off_checks["checks"]]
     loud = make_bars(run_break_rows())
     assert ss.evaluate_run_break(loud, ss.compute(loud, {}, CFG), t, CFG)["qualified"]
+
+
+def sized_candidate(ticker, action="long", direction="long"):
+    return {"ticker": ticker, "direction": direction, "action": action, "recommendation": f"{ticker}: proposed."}
+
+
+def test_positions_fill_free_slots_best_first():
+    open_rows = ss.open_long_trades([stored_row(ticker=f"T{i}", status="open") for i in range(8)]
+                                    + [stored_row(ticker="WAIT"), stored_row(ticker="SHUT", status="target"),
+                                       stored_row(ticker="RECO", live=False, status="open"),
+                                       stored_row(ticker="WTCH", action="watch", status="open"),
+                                       stored_row(ticker="PUTS", direction="short", action="bear_put_spread", status="open")])
+    assert sorted(r["ticker"] for r in open_rows) == sorted([f"T{i}" for i in range(8)] + ["WAIT"])
+    rows = [sized_candidate("T3"), sized_candidate("NEW1"), sized_candidate("SPRD", "bear_put_spread", "short"),
+            sized_candidate("NEW2"), sized_candidate("SEEN", "watch")]
+    sizing = ss.assign_positions(rows, open_rows, CFG)
+    assert CFG["position_size"] == 0.10 and CFG["max_open_trades"] == 10
+    assert sizing == {"position_size": 0.10, "max_open_trades": 10, "open_before": 9, "open_after": 10, "free": 0, "note": None}
+    assert [r["position"] for r in rows] == [{"size": 0.0, "slot": None, "reason": "already open"},
+                                              {"size": 0.10, "slot": 10, "reason": None}, None,
+                                              {"size": 0.0, "slot": None, "reason": "no free slot"}, None]
+    assert rows[1]["recommendation"].endswith("Size: 10% of the budget (trade 10 of at most 10).")
+    assert rows[3]["recommendation"].endswith("Size: none, 10 of 10 trades are open; skip.")
+    assert rows[0]["recommendation"].endswith("a trade in this ticker is already open.")
+
+
+def test_positions_without_persist_count_every_slot_free():
+    rows = [sized_candidate(f"N{i}") for i in range(3)] + [sized_candidate("N0")]
+    sizing = ss.assign_positions(rows, [], ss.settings_with_defaults({"position_size": 0.2, "max_open_trades": 2}), known=False)
+    assert [r["position"]["slot"] for r in rows] == [1, 2, None, None] and rows[2]["position"]["reason"] == "no free slot"
+    assert rows[3]["position"]["reason"] == "already open"
+    assert sizing["open_before"] is None and sizing["note"].startswith("open trades unknown")
+
+
+def test_main_sizes_long_candidates_and_emails_it(offline):
+    result = ss.main(tickers="PULL,BRK", strategy="all", email="trader@example.com")
+    longs = [c for c in result["candidates"] if c["action"] == "long"]
+    assert [c["position"]["slot"] for c in longs] == [1, 2, None]  # BRK qualifies twice: breakout, then squeeze
+    assert longs[0]["ticker"] == longs[2]["ticker"] and longs[2]["position"]["reason"] == "already open"
+    assert all(c["position"] is None for c in result["candidates"] if c["action"] != "long")
+    assert result["sizing"]["note"] is not None
+    html = offline["_sent"][-1][2]
+    assert "<b>Sizing</b>: 10% of the budget per long trade, at most 10 open" in html and "<th>size</th>" in html
