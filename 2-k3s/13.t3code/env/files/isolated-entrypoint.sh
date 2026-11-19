@@ -29,17 +29,36 @@ mkdir -p "$HOME/projects"
 if [[ ! -d $project/.git ]]; then git clone -q "$repo" "$project"; fi
 [[ $(git -C "$project" remote get-url origin) == "$repo" ]]
 ai_skills=$HOME/work/ai-skills
-# pi-setup.py loads the work skills from this clone; a missing URL or a failed clone or pull must not block startup.
+# pi-setup.py loads the work skills from this clone; a missing URL or a failed move, clone or pull must not block startup.
 if [[ $MCP_HUB_INSTANCE == work ]]; then
-  skills_repo=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("skillsUrl") or "")' "$inputs/runtime.json")
-  if [[ -z $skills_repo ]]; then
-    echo 'work skills: runtime.json has no skillsUrl; ai-skills clone and update skipped' >&2
-  elif [[ -d $ai_skills/.git ]]; then
+  if [[ ! -e $ai_skills/.git ]]; then
+    skills_candidates=()
+    for git_dir in "$HOME"/*/ai-skills/.git; do
+      candidate=${git_dir%/.git}
+      if [[ -d $git_dir && ! -L $git_dir && ! -L $candidate && ! -L ${candidate%/ai-skills} ]]; then
+        skills_candidates+=("$candidate")
+      fi
+    done
+    if [[ ${#skills_candidates[@]} == 1 ]]; then
+      if [[ ! -L $HOME/work ]] && mkdir -p "$HOME/work" 2>/dev/null &&
+         mv -T -- "${skills_candidates[0]}" "$ai_skills" 2>/dev/null; then
+        echo 'work skills: moved ai-skills to ~/work/ai-skills' >&2
+      else
+        echo 'work skills: old ai-skills clone was not moved' >&2
+      fi
+    fi
+  fi
+  if [[ -e $ai_skills/.git ]]; then
     timeout 120 git -C "$ai_skills" pull -q --ff-only ||
       echo 'work skills: ai-skills update failed; keeping the current clone' >&2
   else
-    timeout 120 git clone -q "$skills_repo" "$ai_skills" ||
-      echo 'work skills: ai-skills clone failed; skills unavailable' >&2
+    skills_repo=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("skillsUrl") or "")' "$inputs/runtime.json")
+    if [[ -z $skills_repo ]]; then
+      echo 'work skills: runtime.json has no skillsUrl; ai-skills clone and update skipped' >&2
+    else
+      timeout 120 git clone -q "$skills_repo" "$ai_skills" ||
+        echo 'work skills: ai-skills clone failed; skills unavailable' >&2
+    fi
   fi
 fi
 SAFETY_ENTRY=$(/usr/bin/env -i HOME="$HOME" PATH=/usr/local/bin:/usr/bin:/bin \

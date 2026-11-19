@@ -251,10 +251,14 @@ explicit work differences:
   is registered. Only the work-prefixed hub grant is accepted.
 - `projectUrl`, `modelUrl`, instruction/skill bundle and grant hashes come
   from their work reviews. No model or Git grant is copied from another home.
-- `skillsUrl` is optional. It is the GitHub HTTPS `.git` URL of the work skills
-  repository that startup clones into `~/work/ai-skills`, and its `git` review
-  covers it. Without it, startup skips the clone and the update and logs
-  `work skills: runtime.json has no skillsUrl; ai-skills clone and update skipped`.
+- `skillsUrl` is optional. Startup pulls from the existing clone's origin in
+  `~/work/ai-skills`. If that clone is missing and startup finds exactly one
+  clone at `~/*/ai-skills` that is not reached through a symlink, it moves that
+  clone into place and pulls from it. If there is still no clone, startup
+  uses `skillsUrl` to clone it. The URL must be a GitHub HTTPS `.git` URL and be
+  covered by the `git` review. With no clone and no URL, startup logs
+  `work skills: runtime.json has no skillsUrl; ai-skills clone and update skipped`
+  and continues.
 - `runtime.json.approvals` requires exactly `git`, `models`, `policies`,
   `hub`, `laptop` and `routing`.
 - `runtime.json.sha256` covers the four input files besides `runtime.json`.

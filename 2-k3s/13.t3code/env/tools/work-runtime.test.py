@@ -111,35 +111,111 @@ class WorkRuntimeTests(unittest.TestCase):
             self.assertIn(ssh.read_text(), (self.home / '.codex/AGENTS.override.md').read_text())
             self.assertEqual((self.inputs / 'bundle.json').read_bytes(), payload)
 
-    def test_skills_clone_uses_the_private_url_and_is_skipped_without_one(self):
+    skills_skipped = 'work skills: runtime.json has no skillsUrl; ai-skills clone and update skipped\n'
+
+    def run_skills_startup(self):
+        self.validate()
         lines = (ROOT / 'env/files/isolated-entrypoint.sh').read_text().splitlines()
         start = next(i for i, line in enumerate(lines) if line.startswith('ai_skills='))
         block = '\n'.join(lines[start:lines.index('fi', start) + 1])
         fake = self.root / 'bin'
-        fake.mkdir()
-        (fake / 'git').write_text('#!/bin/sh\necho "$@" >>"$GIT_LOG"\n')
+        fake.mkdir(exist_ok=True)
+        (fake / 'git').write_text('#!/bin/sh\n[ "$1" != -C ] || [ -d "$2/.git" ] || exit 1\necho "$@" >>"$GIT_LOG"\n')
         (fake / 'git').chmod(0o755)
         log = self.root / 'git.log'
+        log.write_text('')
+        result = subprocess.run(['bash', '-eu', '-c', block], capture_output=True, text=True, env={
+            'PATH': f'{fake}:{os.environ["PATH"]}', 'HOME': str(self.home), 'GIT_LOG': str(log),
+            'MCP_HUB_INSTANCE': 'work', 'inputs': str(self.inputs)})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stderr, log.read_text()
 
-        def run():
-            log.write_text('')
-            result = subprocess.run(['bash', '-eu', '-c', block], capture_output=True, text=True, env={
-                'PATH': f'{fake}:{os.environ["PATH"]}', 'HOME': str(self.home), 'GIT_LOG': str(log),
-                'MCP_HUB_INSTANCE': 'work', 'inputs': str(self.inputs)})
-            self.assertEqual(result.returncode, 0, result.stderr)
-            return result.stderr, log.read_text()
-
-        self.validate()
+    def test_skills_clones_from_the_private_url(self):
         clone = self.home / 'work/ai-skills'
-        self.assertEqual(run(), ('', f'clone -q https://github.com/work/skills-fixture.git {clone}\n'))
-        (clone / '.git').mkdir(parents=True)
-        self.assertEqual(run(), ('', f'-C {clone} pull -q --ff-only\n'))
-        skipped = 'work skills: runtime.json has no skillsUrl; ai-skills clone and update skipped\n'
+        self.assertEqual(self.run_skills_startup(), ('', f'clone -q https://github.com/work/skills-fixture.git {clone}\n'))
+
+    def test_skills_skips_git_without_a_clone_or_url(self):
         for transform in (lambda obj: obj.pop('skillsUrl'), lambda obj: obj.update(skillsUrl='')):
-            fixture(self.inputs)
             self.change('runtime.json', transform)
-            self.validate()
-            self.assertEqual(run(), (skipped, ''))
+            self.assertEqual(self.run_skills_startup(), (self.skills_skipped, ''))
+
+    def test_skills_pulls_an_existing_clone_without_a_url(self):
+        clone = self.home / 'work/ai-skills'
+        (clone / '.git').mkdir(parents=True)
+        self.assertEqual(self.run_skills_startup(), ('', f'-C {clone} pull -q --ff-only\n'))
+        self.change('runtime.json', lambda obj: obj.pop('skillsUrl'))
+        self.assertEqual(self.run_skills_startup(), ('', f'-C {clone} pull -q --ff-only\n'))
+
+    def test_skills_moves_one_candidate_before_pulling(self):
+        self.prepare()
+        old = self.home / 'old checkout/ai-skills'
+        (old / '.git').mkdir(parents=True)
+        (old / 'notes').write_text('local changes')
+        clone = self.home / 'work/ai-skills'
+        self.change('runtime.json', lambda obj: obj.pop('skillsUrl'))
+        self.assertEqual(self.run_skills_startup(), (
+            'work skills: moved ai-skills to ~/work/ai-skills\n', f'-C {clone} pull -q --ff-only\n'))
+        self.assertEqual((clone / 'notes').read_text(), 'local changes')
+        self.assertFalse(old.exists())
+
+    def test_skills_leaves_two_candidates_in_place(self):
+        candidates = [self.home / name / 'ai-skills/.git' for name in ('previous', 'other')]
+        for candidate in candidates:
+            candidate.mkdir(parents=True)
+        self.change('runtime.json', lambda obj: obj.pop('skillsUrl'))
+        self.assertEqual(self.run_skills_startup(), (self.skills_skipped, ''))
+        self.assertTrue(all(candidate.is_dir() for candidate in candidates))
+        self.assertFalse((self.home / 'work/ai-skills').exists())
+
+    def assert_skills_skips_symlink(self, component):
+        self.prepare()
+        git_dir = self.home / 'previous/ai-skills/.git'
+        link = self.home / component
+        outside = self.root / 'outside'
+        outside_git = outside / git_dir.relative_to(link)
+        outside_git.mkdir(parents=True)
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(outside, target_is_directory=True)
+        self.change('runtime.json', lambda obj: obj.pop('skillsUrl'))
+        self.assertEqual(self.run_skills_startup(), (self.skills_skipped, ''))
+        self.assertEqual(link.readlink(), outside)
+        self.assertTrue(outside_git.is_dir())
+        self.assertFalse((self.home / 'work').exists())
+
+    def test_skills_skips_symlinked_parent(self):
+        self.assert_skills_skips_symlink('previous')
+
+    def test_skills_skips_symlinked_clone(self):
+        self.assert_skills_skips_symlink('previous/ai-skills')
+
+    def test_skills_skips_symlinked_git_dir(self):
+        self.assert_skills_skips_symlink('previous/ai-skills/.git')
+
+    def test_skills_does_not_move_into_a_symlinked_work_dir(self):
+        self.prepare()
+        old = self.home / 'previous/ai-skills/.git'
+        old.mkdir(parents=True)
+        outside = self.root / 'outside'
+        outside.mkdir()
+        (self.home / 'work').symlink_to(outside, target_is_directory=True)
+        self.change('runtime.json', lambda obj: obj.pop('skillsUrl'))
+        self.assertEqual(self.run_skills_startup(), (
+            'work skills: old ai-skills clone was not moved\n' + self.skills_skipped, ''))
+        self.assertTrue(old.is_dir())
+        self.assertEqual(list(outside.iterdir()), [])
+
+    def test_skills_move_failure_does_not_block_startup(self):
+        self.prepare()
+        old = self.home / 'previous/ai-skills/.git'
+        old.mkdir(parents=True)
+        clone = self.home / 'work/ai-skills'
+        clone.mkdir(parents=True)
+        (clone / 'keep').touch()
+        self.change('runtime.json', lambda obj: obj.pop('skillsUrl'))
+        self.assertEqual(self.run_skills_startup(), (
+            'work skills: old ai-skills clone was not moved\n' + self.skills_skipped, ''))
+        self.assertTrue(old.is_dir())
+        self.assertEqual(list(clone.iterdir()), [clone / 'keep'])
 
     def test_home_kubeconfig_persists_and_no_kubeconfig_input_is_accepted(self):
         self.prepare()
