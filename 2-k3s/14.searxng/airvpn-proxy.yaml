@@ -1,0 +1,95 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airvpn-proxy
+  namespace: searxng
+  labels:
+    app: airvpn-proxy
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: airvpn-proxy
+  template:
+    metadata:
+      labels:
+        app: airvpn-proxy
+    spec:
+      enableServiceLinks: false
+      dnsPolicy: None
+      dnsConfig:
+        nameservers:
+          - 127.0.0.1
+      containers:
+        - name: gluetun
+          image: qmcgaw/gluetun
+          env:
+            - name: VPN_SERVICE_PROVIDER
+              value: airvpn
+            - name: VPN_TYPE
+              value: wireguard
+            - name: SERVER_COUNTRIES
+              value: Netherlands,Germany,Sweden
+            - name: HTTPPROXY
+              value: "on"
+            - name: HEALTH_SERVER_ADDRESS
+              value: ":9999"
+            - name: FIREWALL_INPUT_PORTS
+              value: "8888,9999"
+            - name: FIREWALL_OUTBOUND_SUBNETS
+              value: 10.42.0.0/16
+          envFrom:
+            - secretRef:
+                name: airvpn-wireguard
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - (ip rule del table 51820; ip -6 rule del table 51820) || true
+          ports:
+            - containerPort: 8888
+              name: http
+            - containerPort: 9999
+              name: health
+          startupProbe:
+            httpGet:
+              path: /
+              port: health
+            failureThreshold: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: health
+          readinessProbe:
+            tcpSocket:
+              port: http
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: airvpn-proxy
+  namespace: searxng
+  labels:
+    app: airvpn-proxy
+spec:
+  type: ClusterIP
+  selector:
+    app: airvpn-proxy
+  ports:
+    - name: http
+      port: 8888
+      targetPort: http

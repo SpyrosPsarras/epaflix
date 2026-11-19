@@ -1,0 +1,50 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: searxng-egress
+  namespace: searxng
+spec:
+  podSelector:
+    matchLabels:
+      app: searxng
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - to:
+        - podSelector:
+            matchLabels:
+              app: airvpn-proxy
+      ports:
+        - {protocol: TCP, port: 8888}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: airvpn-proxy-ingress
+  namespace: searxng
+spec:
+  podSelector:
+    matchLabels:
+      app: airvpn-proxy
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: searxng
+      ports:
+        - {protocol: TCP, port: 8888}
+    - ports:
+        - {protocol: TCP, port: 9999}

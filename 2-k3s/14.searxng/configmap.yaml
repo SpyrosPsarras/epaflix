@@ -29,6 +29,10 @@ data:
       method: "GET"
     ui:
       static_use_hash: true
+    outgoing:
+      proxies:
+        all://:
+          - http://airvpn-proxy.searxng.svc.cluster.local:8888
     engines:
       - name: wikipedia
         timeout: 5.0
