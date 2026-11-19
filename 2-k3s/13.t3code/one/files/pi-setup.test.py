@@ -143,11 +143,11 @@ class SetupTests(unittest.TestCase):
                     'claude-haiku-5-5': {'contextWindow': 100000}})
                 self.assertIn('cliproxy-textgen', models['providers'])
 
-    def test_work_settings_load_davidhorn_skills_from_clone(self):
+    def test_work_settings_load_skills_from_clone(self):
         self.write(instance='work')
         settings = json.loads((self.agent / 'settings.json').read_text())
         self.assertEqual(settings['skills'], [
-            '!**/.agents/skills/ponytail/**', str(self.home / 'Davidhorn/ai-skills/plugins')])
+            '!**/.agents/skills/ponytail/**', str(self.home / 'work/ai-skills/plugins')])
 
     def test_settings_preserve_user_keys_and_rewrite_owned_resources(self):
         (self.agent / 'settings.json').write_text(json.dumps({
