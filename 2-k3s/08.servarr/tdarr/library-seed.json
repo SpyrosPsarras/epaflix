@@ -63,7 +63,7 @@
     "containerFilter": "mkv,mp4,mov,m4v,mpg,mpeg,avi,flv,webm,wmv,vob,evo,iso,m2ts,ts",
     "folderWatching": false,
     "useFsEvents": false,
-    "scheduledScanFindNew": true,
+    "scheduledScanFindNew": false,
     "processLibrary": true,
     "processTranscodes": false,
     "processHealthChecks": false,

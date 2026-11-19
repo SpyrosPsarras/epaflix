@@ -196,12 +196,12 @@ class SeedTests(unittest.TestCase):
         defaults = {
             "folderWatching": False, "useFsEvents": False, "folderWatchScanInterval": 300,
             "holdNewFiles": True, "holdFor": 600, "holdForDisplayUnit": "minutes",
-            "scheduledScanFindNew": True, "scanOnStart": False, "processTranscodes": False,
+            "scheduledScanFindNew": False, "scanOnStart": False, "processTranscodes": False,
         }
         owner_settings = {
             "folderWatching": True, "useFsEvents": True, "folderWatchScanInterval": 600,
             "holdNewFiles": False, "holdFor": 3600, "holdForDisplayUnit": "hours",
-            "scheduledScanFindNew": False, "scanOnStart": True, "processTranscodes": True,
+            "scheduledScanFindNew": True, "scanOnStart": True, "processTranscodes": True,
             "totalTranscodeCount": 12,
         }
 

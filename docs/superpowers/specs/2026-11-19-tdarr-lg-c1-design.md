@@ -47,7 +47,7 @@ Dolby Vision fix:
 - Tdarr node as a DaemonSet on the 5 k3s workers: one node per host. Each node runs one CPU transcode worker and one health-check worker. Each has CPU and memory limits, so an out-of-memory kill restarts only that node's container. Free workers take the next file from the queue; Tdarr has no "least busy node" choice.
 - Server and nodes mount `servarr-media` at the same paths, so no path translation is needed. They mount the transcode cache at `/temp` from the `tdarr-cache` subPath of the `servarr-media` NFS share.
 - Libraries: movies, TV shows, animes. Once Folder Watch is enabled, it polls NFS every 300 seconds instead of relying on file-system events. Tdarr holds newly indexed files for 10 minutes before processing to give copy imports time to finish. This is a queue delay, not a check that the file has stopped changing.
-- The seed leaves Folder Watch and Transcodes off on creation and preserves the owner's settings on restart. The hourly find-new scan indexes new files even while Transcodes is off, but indexing does not run the flow. Enabling Transcodes allows Tdarr to process every indexed problem file in that library, not just files queued through the bot.
+- The seed leaves Transcodes, Folder Watch, Hourly Scan (Find new) and Scan on startup off on creation and preserves the owner's settings on restart. Setting a file to `Queued` through the bot does not give it priority over other queued files. The owner can index a single exact path with Tdarr's `rescan-file` API without scanning the library. The bot still queues only already indexed paths.
 
 ### Flow (community flow plugins, official or third-party)
 
@@ -85,4 +85,5 @@ Radarr profile `UHD Bluray + WEB` scores the five DTS formats -1 instead of TRaS
 
 - The cause of the gateway OOM kills.
 - Confirm Tdarr fills `mediaInfo` for library files (library scan setting), since both Dolby Vision steps depend on it.
-- Test copies of both movies in a temporary library while the seeded libraries have Transcodes and Folder Watch off. Remove the test library and folder. Then enable Transcodes for movies, queue The Odyssey and Heart of the Beast through the bot, and confirm playback on the C1. Only then enable Transcodes and Folder Watch for all three libraries.
+- Test copies of both movies in a temporary library while Transcodes and automatic scans are off in the seeded libraries. Remove the test library and folder. Then index only The Odyssey (2026) and Heart of the Beast (2026), queue both through `#media` and enable Transcodes only in `movies`. Verify both conversions and playback on the C1 before scanning the backlog.
+- Enable Transcodes in `tvshows` and `animes` and run a manual find-new scan in all three libraries. Finish the backlog before turning on Folder Watch with polling and Hourly Scan (Find new) for new downloads.
