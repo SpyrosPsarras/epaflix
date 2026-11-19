@@ -8,3 +8,4 @@ metadata:
         path: ksops
 files:
   - searxng-secret.enc.yaml
+  - airvpn-wireguard.enc.yaml

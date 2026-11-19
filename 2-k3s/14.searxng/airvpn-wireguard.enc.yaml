@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: Secret
+metadata:
+    name: airvpn-wireguard
+    namespace: searxng
+type: Opaque
+stringData:
+    WIREGUARD_PRIVATE_KEY: ENC[AES256_GCM,data:eqQaYRBflwaeFrgF6nr3IS8gFQdgsq8knP9iw79wqZMKZxUqlalAeEC5h3o=,iv:GgRlzOw8TL7kn3X26g6YKk5Hq/I0yT4eq/7+edS7+Cs=,tag:G7fpc+bPM08gVtvWC9xcyA==,type:str]
+    WIREGUARD_PRESHARED_KEY: ENC[AES256_GCM,data:QLyjQV0IcPyrpofcFyjkS+O9LSO/DdbpySq7Td+mcw5zrETM1fCfkJLaH28=,iv:1VLzcF7Vnsyj1AY4Dt5Bn/k4VQrtoNT9JFzoPOpeE6g=,tag:d1KrNVDc1/TEqskB/b9LmQ==,type:str]
+    WIREGUARD_ADDRESSES: ENC[AES256_GCM,data:bg58ElsBfGBTSwsio6suww==,iv:LdXycpBaVbFpwZ6KqKpjZqNtYs4DVzO/1r2WJv3ts/8=,tag:cl1L52uYIrhIawcXUPQfNg==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSB2TFU0WVR3d1pBUVZDSFFC
+            OEx0YVVsanp1K3Y4OTV4RzFubDdQTzYxVm0wCmV6NTBVTVc5VlJOS3FhK2taT01w
+            K2JHR2F6Tml5ZWxjUHNUWC9IcUdsdlEKLS0tIGx2a3haWkRRZEdjUHloZ1krZDhF
+            TWUxVUR0YzNoeGtnQldBQXdXaWdySVEKmOMbGMtclRi2jiSJGLRGJKReDXtyYdBN
+            ZrYEBfsidJkrPV3WA7ixhZ2Zx/VcA6Cz8m96Xw3gjmN0suG0D50pHQ==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1586thf5vkcdf5lcn3zwjpu8ltkwyq8efrhj8lr0vdrrt9k5f3qgsxeg7gx
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-11-19T10:29:07Z"
+    mac: ENC[AES256_GCM,data:KQrJxu1ag3uCgrNXmUEOcPqW3ECcwuayjkh2xx8JHhuFvATL/XYmfFApjXGrjCgEAfKEKY7ZTznu8M15KK35zdoP7DJ2+uI92O/ECCXx35PSnRpLSUIZIVERQQIByqMB+6T2kR39KtAU2JzLxDgFWb5+2Niv3FrorqQ9P5OOg6I=,iv:nx4gMJH75hkEn6G5Todad49RgnyUEYrM/cVsNQtPU88=,tag:QuayS7/Tx8YeW4BO5grU2g==,type:str]
+    version: 3.13.3
