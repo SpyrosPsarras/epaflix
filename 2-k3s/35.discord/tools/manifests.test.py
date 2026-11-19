@@ -104,11 +104,8 @@ class AgentChecks:
             "never create a thread",
             "A topic is a thread, whoever started it.",
             "On the first message of a thread, before anything else",
-            'openclaw message thread list --channel discord --guild-id "$DISCORD_GUILD_ID" --channel-id "$DISCORD_CHANNEL_ID" --json',
-            'openclaw message thread list --channel discord --guild-id "$DISCORD_GUILD_ID" --channel-id "$DISCORD_CHANNEL_ID" --include-archived --json',
-            "--before <nextBefore>",
+            "nextBefore",
             "Skip the current thread.",
-            "openclaw message read --channel discord --target channel:<thread id> --limit 20 --json",
             "This is already covered in <#thread id>.",
             "I won't reply in this thread.",
             "Do not handle the request.",
@@ -260,6 +257,26 @@ class MediaTests(AgentChecks, unittest.TestCase):
         for key in ["SEERR", "RADARR", "SONARR", "LIDARR", "BAZARR", "JELLYFIN"]:
             self.assertIn(f"${key}_API_KEY", text)
 
+    def test_thread_lookup_stays_in_the_gateway(self):
+        text = (DISCORD / "media/AGENTS.md").read_text()
+        self.assertNotRegex(text, r"\bopenclaw\s+message\b")
+        tools = self.config["tools"]
+        self.assertIn("message", tools.get("alsoAllow", []))
+        self.assertCountEqual(tools["message"]["actions"]["allow"], ["thread-list", "read"])
+        for marker in ['action: "thread-list"', "includeArchived: true", 'action: "read"']:
+            self.assertIn(marker, text)
+
+    def test_agents_md_forbids_unfiltered_library_requests(self):
+        text = (DISCORD / "media/AGENTS.md").read_text()
+        for endpoint in ("movie", "series", "artist"):
+            with self.subTest(endpoint=endpoint):
+                self.assertNotRegex(text, rf"\bGET\s+/(?:api/v[13]/)?{endpoint}\b(?![/?-])")
+        with self.subTest(rule="no full library or saved responses"):
+            self.assertIn(
+                "Never call `/movie`, `/series` or `/artist` without a filter, and never save API responses to files.",
+                text,
+            )
+
     def test_agents_md_subtitle_source(self):
         text = (DISCORD / "media/AGENTS.md").read_text()
         for marker in ["GET /movies/history?radarrid=<id>", "GET /episodes/history?episodeid=<sonarrEpisodeId>", "`action` 6", "any other `action`"]:
@@ -399,6 +416,10 @@ class WindmillTests(AgentChecks, unittest.TestCase):
         text = (DISCORD / "windmill/AGENTS.md").read_text()
         for marker in [
             "#windmill",
+            'openclaw message thread list --channel discord --guild-id "$DISCORD_GUILD_ID" --channel-id "$DISCORD_CHANNEL_ID" --json',
+            'openclaw message thread list --channel discord --guild-id "$DISCORD_GUILD_ID" --channel-id "$DISCORD_CHANNEL_ID" --include-archived --json',
+            "--before <nextBefore>",
+            "openclaw message read --channel discord --target channel:<thread id> --limit 20 --json",
             "/home/node/work/epaflix",
             "2-k3s/34.windmill/workspace/",
             "bots/windmill/<short-name>",

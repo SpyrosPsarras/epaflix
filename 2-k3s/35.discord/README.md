@@ -57,6 +57,16 @@ On every start the `render-config` init container copies `openclaw.json` and `AG
 
 Alerts: `DiscordAgentErrors` at 5 or more error lines in 15 minutes, `DiscordModelUsageHigh` when one agent's CLIProxy key makes more than 300 requests in 24 hours, and `WindmillDeployFailed` in `2-k3s/10.observability/alertmanager-config/loki-log-alerts.yaml`. Crash loops raise the cluster-wide `KubePodCrashLooping`. A bot PR blocked by the path check shows as a failed `validate` check on GitHub, which notifies the owner; it raises no Loki alert, because that CI job runs on GitHub's runners.
 
+## Recovery after a gateway crash
+
+After a restart, OpenClaw can resume an interrupted request. If the same request crashes the gateway again, it can replay on each restart. Find the affected thread's full session key in the `dispatching restart-safe recovery for` log line, or match the thread ID to a key in `openclaw sessions --json` inside the `gateway` container. Once the `#media` gateway is reachable and the replay is active, replace `<session-key>` and run:
+
+```sh
+kubectl -n discord-media exec deploy/openclaw -c gateway -- openclaw gateway call sessions.abort --params '{"key":"<session-key>"}'
+```
+
+`status: "aborted"` confirms the turn was stopped. `status: "no-active-run"` does not confirm that a queued replay was stopped.
+
 ## Accepted risks
 
 - Each agent can read every secret in its own pod, including its Discord bot token and CLIProxy key, because OpenClaw's exec tool sees the Gateway's environment and files. The NetworkPolicy does not stop it: an agent can send what it holds to any public HTTPS host. The limit that matters is what each pod holds.
