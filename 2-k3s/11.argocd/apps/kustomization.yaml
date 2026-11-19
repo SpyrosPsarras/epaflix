@@ -14,6 +14,7 @@ resources:
   - app-deal-finder.yaml
   - app-discord.yaml
   - app-democratic-csi.yaml
+  - app-forgejo.yaml
   - app-fytorium.yaml
   - app-home-assistant.yaml
   - app-kube-vip.yaml
