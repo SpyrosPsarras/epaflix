@@ -41,15 +41,16 @@ spec:
           args:
             - pi-bridge
             # TEMP OVERRIDE (model-token-usage): fork build of abix5/pi-cliproxyapi-bridge that registers
-            # the usage.handle sink and serves cumulative per-model token counters as the "models" field
-            # on the contract v2 usage document (consumed by the dms-cliproxy-quota widget).
+            # the usage.handle sink and serves cumulative token counters per model ("models") and per
+            # account ("accounts[].tokens") on the contract v2 usage document (consumed by the
+            # dms-cliproxy-quota widget).
             # Revert to abix5/pi-cliproxyapi-bridge once upstream ships the usage sink (tracked in the
             # upstream-release-watch row; drop this comment and restore the # renovate: marker then).
             # Offered upstream as abix5/pi-cliproxyapi-bridge#3.
             # The # renovate: marker is deliberately absent: renovate would "downgrade" the fork to
             # upstream v0.9.1.
-            - "0.11.0"
-            - 5c97040d92465148f47b40e9c866301af2242d01d28483ec18fd56da685b887e
+            - "0.12.0"
+            - 2ee7087f759e7b3bab584e790d5b7d21d3235effe45f0ef3fff6e6b41f87bd7e
             - SpyrosPsarras/pi-cliproxyapi-bridge
           securityContext:
             allowPrivilegeEscalation: false
