@@ -38,3 +38,5 @@ data:
         timeout: 5.0
       - name: bing
         disabled: false
+      - name: yandex
+        disabled: false
