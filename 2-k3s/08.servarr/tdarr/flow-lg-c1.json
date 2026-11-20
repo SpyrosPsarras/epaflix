@@ -247,7 +247,7 @@
     },
     {
       "id": "health",
-      "name": "Run Full CPU Health Check",
+      "name": "Run Quick Health Check",
       "sourceRepo": "Community",
       "pluginName": "runHealthCheck",
       "version": "1.0.0",
@@ -256,7 +256,7 @@
         "y": 1400
       },
       "inputsDB": {
-        "type": "thorough",
+        "type": "quick",
         "gpuAcceleration": "none"
       }
     },

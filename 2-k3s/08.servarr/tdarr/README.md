@@ -11,7 +11,7 @@ Tdarr does not re-encode or resize video, change filenames or containers, or rem
 ## First rollout
 
 1. In `movies`, `tvshows` and `animes`, confirm **Transcodes**, **Folder Watch**, **Hourly Scan (Find new)** and **Scan on startup** are off. Do not run a whole-library scan yet. Turning on Transcodes can start any queued file in that library, not just files queued through the bot.
-2. In the Tdarr UI, create a temporary library at `/media/movies/_tdarr-test` with flow `lg-c1-compat`, **Scan with MediaInfo** on, cache `/temp` and **Transcodes** on. Leave automatic scans off. Copy five-minute samples of The Odyssey and Heart of the Beast plus a known-good sample into that folder and scan it. Use `ffprobe` before and after to check that Dolby Vision is gone, the base layer and any HDR10 or HDR10+ metadata remain, DTS is now E-AC3 at 640 kb/s, and other streams are unchanged. The known-good sample must end `Not required`. See [Task 7](../../../docs/superpowers/plans/2026-11-19-tdarr-lg-c1.md#task-7-live-rollout-owner-confirms-each-step) for the copy and probe commands. After the checks pass, delete the temporary library and test folder.
+2. In the Tdarr UI, create a temporary library at `/media/movies/_tdarr-test` with flow `lg-c1-compat`, **Scan with MediaInfo** on, cache `/media/movies/.tdarr-cache` and **Transcodes** on. Leave automatic scans off. Copy five-minute samples of The Odyssey and Heart of the Beast plus a known-good sample into that folder and scan it. Use `ffprobe` before and after to check that Dolby Vision is gone, the base layer and any HDR10 or HDR10+ metadata remain, DTS is now E-AC3 at 640 kb/s, and other streams are unchanged. The known-good sample must end `Not required`. See [Task 7](../../../docs/superpowers/plans/2026-11-19-tdarr-lg-c1.md#task-7-live-rollout-owner-confirms-each-step) for the copy and probe commands. After the checks pass, delete the temporary library and test folder.
 3. Index only the two originals, The Odyssey (2026) and Heart of the Beast (2026). From an owner terminal run `kubectl -n servarr port-forward svc/tdarr 8265:8265`. In another terminal set `file` to one exact original `/media/movies/...` file path from Radarr and run this once per film:
 
    ```sh
@@ -30,7 +30,9 @@ Find the library controls under **Libraries** → **Source**. New libraries defa
 
 Replacing a file breaks its hardlink to the still-seeding torrent, so converted new downloads use double disk space until the torrent is removed.
 
-The server and nodes share `/temp`, which is `tdarr-cache` on the `servarr-media` NFS volume. Create `/mnt/k3s-media/tdarr-cache` on the share and make it writable by UID 568 before rollout.
+The server and nodes mount only the `movies`, `tvshows` and `animes` subPaths of `servarr-media`. Each library uses `/media/<library>/.tdarr-cache` so Tdarr can rename the finished file within the same mount instead of copying it. The startup seed sets the cache and excludes `.tdarr-cache` from Tdarr scans, and replaces any other "Folders to ignore" terms set in the UI on every restart. Sonarr may still show it as an unmapped folder in a root-folder import. Do not import it.
+
+Before rollout, create `.tdarr-cache` inside each of `/mnt/k3s-media/movies`, `/mnt/k3s-media/tvshows` and `/mnt/k3s-media/animes` and make it writable by UID 568. Pause processing and let jobs finish before updating the server and nodes. Resume after the seed is Ready and all nodes are updated. Confirm the copy test has no `EXDEV` or copy fallback. Once the rollout is verified and no jobs need it, the owner can remove the old `/mnt/k3s-media/tdarr-cache`.
 
 To requeue an indexed file, find its exact path in **Search** and click **Requeue Transcode** on that row. For a failed job, check its report first in **Transcode: Error/Cancelled**. In `#media`, ask the bot to fix one movie or episode for the LG C1. Name the exact title and episode or edition if there is more than one. Ask for status in the same thread instead of asking it to queue again.
 
@@ -46,4 +48,4 @@ The `seed` sidecar gates server pod readiness. If seeding fails, the `tdarr` Ser
 
 `media-proxy` lets the bot check or queue one indexed path without exposing Tdarr's full API.
 
-When pausing processing, check for jobs already running. The flow replaces an original only after the duration check and a thorough health check pass. Tdarr keeps no backup of replaced originals. To undo a completed replacement, restore the original from an external backup or obtain the original release again. A refresh error can occur after replacement, so check the job report and the file before retrying.
+When pausing processing, check for jobs already running. The flow replaces an original only after the duration checks and the quick health check pass. The quick check scans streams with HandBrake without decoding the entire file. Tdarr keeps no backup of replaced originals. To undo a completed replacement, restore the original from an external backup or obtain the original release again. A refresh error can occur after replacement, so check the job report and the file before retrying.

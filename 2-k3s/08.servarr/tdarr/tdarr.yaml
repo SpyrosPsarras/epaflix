@@ -103,7 +103,6 @@ spec:
             - {name: media, mountPath: /media/movies, subPath: movies}
             - {name: media, mountPath: /media/tvshows, subPath: tvshows}
             - {name: media, mountPath: /media/animes, subPath: animes}
-            - {name: media, mountPath: /temp, subPath: tdarr-cache}
         - name: seed
           image: docker.io/library/python:3.13-alpine
           command: [python3, /seed/seed.py, "http://127.0.0.1:8265", --ready-file, /tmp/tdarr-seeded]
@@ -243,7 +242,6 @@ spec:
             - {name: media, mountPath: /media/movies, subPath: movies}
             - {name: media, mountPath: /media/tvshows, subPath: tvshows}
             - {name: media, mountPath: /media/animes, subPath: animes}
-            - {name: media, mountPath: /temp, subPath: tdarr-cache}
         - name: notify-proxy
           image: docker.io/library/python:3.13-alpine
           command: [python3, /notify/notify-proxy.py]
