@@ -123,17 +123,13 @@ class TdarrTests(unittest.TestCase):
         node = self.pod("DaemonSet", "tdarr-node")["containers"][0]["resources"]["limits"]
         self.assertEqual(node, {"memory": "4Gi", "cpu": "2"})
 
-    def test_cache_on_nfs(self):
+    def test_only_library_subpaths_are_mounted(self):
         for pod in self.pods():
-            self.assertEqual(self.media_mounts(pod).get("/temp"), "tdarr-cache")
+            self.assertEqual(self.media_mounts(pod), {
+                "/media/movies": "movies", "/media/tvshows": "tvshows", "/media/animes": "animes",
+            })
             for volume in pod["volumes"]:
                 self.assertNotIn("emptyDir", volume, volume["name"])
-
-    def test_media_paths_match(self):
-        for pod in self.pods():
-            mounts = self.media_mounts(pod)
-            for library in ("movies", "tvshows", "animes"):
-                self.assertEqual(mounts.get(f"/media/{library}"), library)
 
     def test_no_sa_token(self):
         for pod in self.pods():

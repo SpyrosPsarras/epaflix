@@ -45,7 +45,7 @@ Dolby Vision fix:
 
 - Tdarr server as a Deployment with its config on an iSCSI PVC, behind the existing ingress and Authentik like the other servarr apps.
 - Tdarr node as a DaemonSet on the 5 k3s workers: one node per host. Each node runs one CPU transcode worker and one health-check worker. Each has CPU and memory limits, so an out-of-memory kill restarts only that node's container. Free workers take the next file from the queue; Tdarr has no "least busy node" choice.
-- Server and nodes mount `servarr-media` at the same paths, so no path translation is needed. They mount the transcode cache at `/temp` from the `tdarr-cache` subPath of the `servarr-media` NFS share.
+- The server and nodes mount only the `movies`, `tvshows` and `animes` subPaths of `servarr-media` at matching `/media/<library>` paths. Each library uses its own `/media/<library>/.tdarr-cache` so Tdarr can rename the finished file into place within the same mount. The seed enforces the cache and the `.tdarr-cache` file filter on every start.
 - Libraries: movies, TV shows, animes. Once Folder Watch is enabled, it polls NFS every 300 seconds instead of relying on file-system events. Tdarr holds newly indexed files for 10 minutes before processing to give copy imports time to finish. This is a queue delay, not a check that the file has stopped changing.
 - The seed leaves Transcodes, Folder Watch, Hourly Scan (Find new) and Scan on startup off on creation and preserves the owner's settings on restart. Setting a file to `Queued` through the bot does not give it priority over other queued files. The owner can index a single exact path with Tdarr's `rescan-file` API without scanning the library. The bot still queues only already indexed paths.
 
@@ -56,7 +56,7 @@ Non-official community plugins are allowed. No custom code in the flow.
 1. Check Audio Codec for `dts` (official). For Dolby Vision: Check HDR type, then Check DoVi Profile, both from [nichols89ben/Tdarr_DoVi_Processing](https://github.com/nichols89ben/Tdarr_DoVi_Processing), pinned to commit `5be0b5a34114` (2026-11-14, Tdarr 3.08.00). Strip only profile 8 and single-stream profile 7. The strip keeps whatever base layer exists, usually HDR10 but sometimes HLG or SDR. Check that it survives the copy test. Profiles 4, 5 and dual-stream 7 go to Require Review and are not touched.
 2. Neither problem: end with "not required". The file is not touched.
 3. Otherwise build one ffmpeg command: copy the video, copy subtitles and other audio, convert DTS tracks to E-AC3 at 640k, and strip the Dolby Vision layer with `-bsf:v:0 dovi_rpu=strip=1` (ffmpeg 7.1 or newer).
-4. Check the new file: duration ratio close to 1, and a health check.
+4. Require known durations and a duration ratio close to 1, then run the official quick health check. HandBrake scans streams without decoding the entire file.
 5. Replace the original file, then tell Radarr or Sonarr to rescan (Notify Radarr or Sonarr plugin). The plugin calls a loopback proxy in the node pod that holds the Arr keys and forwards only lookups, refresh commands and command status reads (`GET /api/v3/command/<id>`), so no key sits in the flow, Tdarr's database or job reports.
 
 Both third-party steps read MediaInfo fields (`HDR_Format`, `HDR_Format_Profile`). Check DoVi Profile throws on files without Dolby Vision, so it runs only on Check HDR type's Dolby Vision branch. The repo has no license file; it is used unmodified for personal use. The plugins are copied into Tdarr's `LocalFlowPlugins` from the pinned commit at deploy time.

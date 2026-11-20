@@ -1,6 +1,6 @@
 {
   "settings": {
-    "cache": "/temp",
+    "foldersToIgnore": ".tdarr-cache",
     "mediaInfoScan": true,
     "flowId": "lg-c1-compat",
     "pluginIDs": [],
@@ -52,7 +52,6 @@
     "folderToFolderConversionDeleteSource": false
   },
   "onCreate": {
-    "foldersToIgnore": "",
     "foldersToIgnoreCaseInsensitive": false,
     "folderWatchScanInterval": 300,
     "scannerThreadCount": 2,
@@ -100,18 +99,21 @@
       "_id": "movies",
       "name": "movies",
       "folder": "/media/movies",
+      "cache": "/media/movies/.tdarr-cache",
       "priority": 0
     },
     {
       "_id": "tvshows",
       "name": "tvshows",
       "folder": "/media/tvshows",
+      "cache": "/media/tvshows/.tdarr-cache",
       "priority": 1
     },
     {
       "_id": "animes",
       "name": "animes",
       "folder": "/media/animes",
+      "cache": "/media/animes/.tdarr-cache",
       "priority": 2
     }
   ]

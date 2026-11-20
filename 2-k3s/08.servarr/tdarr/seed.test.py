@@ -124,7 +124,7 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(self.nodes["ratio"]["pluginName"], "compareFileDurationRatio")
         self.assertEqual(self.inputs("ratio"), {"greaterThan": "99", "lessThan": "101"})
         self.assertEqual(self.nodes["health"]["pluginName"], "runHealthCheck")
-        self.assertEqual(self.inputs("health"), {"type": "thorough", "gpuAcceleration": "none"})
+        self.assertEqual(self.inputs("health"), {"type": "quick", "gpuAcceleration": "none"})
         self.assertEqual(self.nodes["replace"]["pluginName"], "replaceOriginalFile")
         self.assertEqual({key for key, target in self.edges.items() if target == "replace"}, {("health", "1")})
         self.assertEqual({key for key, target in self.edges.items() if target == "health"}, {("ratio", "1")})
@@ -246,7 +246,8 @@ class SeedTests(unittest.TestCase):
                     for collection, key in keys[1:]:
                         library = docs[collection, key]
                         self.assertEqual(library["folder"], f"/media/{key}")
-                        self.assertEqual(library["cache"], "/temp")
+                        self.assertEqual(library["cache"], f"/media/{key}/.tdarr-cache")
+                        self.assertEqual(library["foldersToIgnore"], ".tdarr-cache")
                         self.assertTrue(library["mediaInfoScan"])
                         self.assertEqual(library["flowId"], "lg-c1-compat")
                         self.assertTrue(library["decisionMaker"]["settingsFlows"])
@@ -255,6 +256,8 @@ class SeedTests(unittest.TestCase):
                         with self.subTest(mode=mode, library=key):
                             self.assertEqual({setting: library.get(setting) for setting in expected}, expected)
                     if mode == "insert":
+                        for key in keys[1:]:
+                            docs[key].update(cache="/media/tdarr-cache", foldersToIgnore="")
                         docs["LibrarySettingsJSONDB", "movies"].update(owner_settings)
                 self.assertEqual(docs["LibrarySettingsJSONDB", "unmanaged"], {"_id": "unmanaged"})
                 docs["LibrarySettingsJSONDB", "unmanaged"]["folder"] = "/media/movies/"
