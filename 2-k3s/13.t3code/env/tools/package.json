@@ -13,6 +13,7 @@
     "@spences10/pi-redact": "0.1.0",
     "not-enough-retry": "0.4.0",
     "pi-cliproxyapi-provider": "0.16.13",
+    "pi-t3code-sticky-prefix": "0.1.0",
     "superpowers": "github:obra/superpowers#v7.0.2",
     "t3": "0.1.11-nightly.20261118.4864"
   }

@@ -44,6 +44,9 @@ try {
   const retry = settings.packages.find(path => path.endsWith('/not-enough-retry'))
   assert.ok(retry, 'not-enough-retry package missing')
   assert.ok(readFileSync(join(retry, 'extensions/not-enough-retry.ts')).length, 'not-enough-retry extension missing')
+  const stickyPrefix = settings.packages.find(path => path.endsWith('/pi-t3code-sticky-prefix'))
+  assert.ok(stickyPrefix, 'pi-t3code-sticky-prefix package missing')
+  assert.ok(existsSync(join(stickyPrefix, 'index.ts')), 'pi-t3code-sticky-prefix extension missing')
   console.log('parity: Pi commands, package skills, permission-system absence and extension loading PASS')
 } finally {
   clearTimeout(timer)
