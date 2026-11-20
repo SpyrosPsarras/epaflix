@@ -61,6 +61,14 @@ if [[ $MCP_HUB_INSTANCE == work ]]; then
     fi
   fi
 fi
+tstack=$HOME/tstack
+# pi-setup.py loads tstack skills from this clone; a failed clone or pull must not block startup.
+if [[ -e $tstack/.git ]]; then
+  timeout 120 git -C "$tstack" pull -q --ff-only || echo 'tstack: update failed; keeping the current clone' >&2
+else
+  timeout 120 git clone -q https://github.com/t3dotgg/tstack.git "$tstack" ||
+    echo 'tstack: clone failed; skills unavailable' >&2
+fi
 SAFETY_ENTRY=$(/usr/bin/env -i HOME="$HOME" PATH=/usr/local/bin:/usr/bin:/bin \
   /usr/bin/python3 -I -S /scripts/cc-safety-net-install.py | tail -n 1)
 python3 /scripts/pi-setup.py write "$HOME" "$SAFETY_ENTRY"

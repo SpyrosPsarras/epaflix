@@ -108,9 +108,14 @@ def write(home, safety_entry, ssh_path=Path('/scripts/homelab-ssh.md')):
     settings = json.loads(settings_path.read_text()) if settings_path.exists() else {}
     settings['packages'] = [str(Path('/tools/node_modules') / name) for name in PACKAGES] + [safety_entry]
     settings['skills'] = ['!**/.agents/skills/ponytail/**']
+    tstack = home / 'tstack/skills'
     if os.environ.get('MCP_HUB_INSTANCE') == 'work':
         # Work skills load from the owner's ai-skills clone; `git pull` there updates them.
         settings['skills'].append(str(home / 'work/ai-skills/plugins'))
+        # The other tstack skills open, merge or comment on PRs, which Davidhorn's PR skills own.
+        settings['skills'] += [str(tstack / name) for name in ('council', 'modernize', 'sol-loop')]
+    else:
+        settings['skills'].append(str(tstack))
     settings.setdefault('pi-cliproxyapi-provider', {})['gpt56ContextWindow'] = 'canonical'
     settings.setdefault('retry', {})['maxRetries'] = 8
     write_json(settings_path, settings)

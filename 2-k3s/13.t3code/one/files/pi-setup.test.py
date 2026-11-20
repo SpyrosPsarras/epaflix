@@ -147,7 +147,8 @@ class SetupTests(unittest.TestCase):
         self.write(instance='work')
         settings = json.loads((self.agent / 'settings.json').read_text())
         self.assertEqual(settings['skills'], [
-            '!**/.agents/skills/ponytail/**', str(self.home / 'work/ai-skills/plugins')])
+            '!**/.agents/skills/ponytail/**', str(self.home / 'work/ai-skills/plugins'),
+            *(str(self.home / 'tstack/skills' / name) for name in ('council', 'modernize', 'sol-loop'))])
 
     def test_settings_preserve_user_keys_and_rewrite_owned_resources(self):
         (self.agent / 'settings.json').write_text(json.dumps({
@@ -157,7 +158,7 @@ class SetupTests(unittest.TestCase):
         self.write()
         settings = json.loads((self.agent / 'settings.json').read_text())
         self.assertEqual(settings['theme'], 'light')
-        self.assertEqual(settings['skills'], ['!**/.agents/skills/ponytail/**'])
+        self.assertEqual(settings['skills'], ['!**/.agents/skills/ponytail/**', str(self.home / 'tstack/skills')])
         self.assertEqual(settings['pi-cliproxyapi-provider'], {'userKey': True, 'gpt56ContextWindow': 'canonical'})
         self.assertEqual(settings['retry'], {'baseDelayMs': 1000, 'maxRetries': 8})
         self.assertEqual(settings['packages'], [

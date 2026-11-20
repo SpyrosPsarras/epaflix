@@ -153,6 +153,9 @@ if [[ $variant == work && $round == first ]]; then
   grep -Fxq 'work skills: ai-skills clone failed; skills unavailable' /tmp/entrypoint.log ||
     fail 'offline ai-skills clone did not fail softly'
 fi
+if [[ $round == first ]]; then
+  grep -Fxq 'tstack: clone failed; skills unavailable' /tmp/entrypoint.log || fail 'offline tstack clone did not fail softly'
+fi
 if [[ $variant == homelab ]] && grep -Fq 'ai-skills' /tmp/entrypoint.log; then
   fail 'homelab attempted the ai-skills clone'
 fi
