@@ -484,6 +484,7 @@ jobs:
           bash 2-k3s/13.t3code/env/files/selftest.sh
           bash 1-proxmox/t3env/pin-vm-host.test.sh
           bash 2-k3s/maintenance/aaaa-tripwire-cronjob.test.sh
+          bash 2-k3s/maintenance/torrent-policy.test.sh
           bash -n 2-k3s/13.t3code-work/tools/owner-login.sh
           EOF
 
