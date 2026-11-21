@@ -2937,3 +2937,224 @@ tests:
       - eval_time: 6m
         alertname: MosquittoProbeFailed
         exp_alerts: *mosquitto_probe_failed
+
+  - name: One failed hit-and-run run fires TorrentPrivateStoppedEarly, one failed tracker run does not fire TorrentTrackerNotWorking
+    interval: 1m
+    input_series:
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="torrent-hnr-check-100"}'
+        values: "1750000000x20"
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-hnr-check-100",condition="true"}'
+        values: "0x20"
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="torrent-hnr-check-200"}'
+        values: "1750003600x20"
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-hnr-check-200",condition="true"}'
+        values: "1x20"
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-hnr-check-200",condition="false"}'
+        values: "0x20"
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-tracker-check-100",condition="true",instance="ksm-1"}'
+        values: "1x20"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: TorrentPrivateStoppedEarly
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: TorrentPrivateStoppedEarly
+        exp_alerts:
+          - exp_labels:
+              job_name: torrent-hnr-check-200
+              severity: warning
+              component: servarr
+            exp_annotations:
+              summary: "Private torrent stopped before its hit-and-run rule (or the check failed)"
+              description: "The hourly torrent-hnr-check Job (torrent-hnr-check-200) failed. Either a private torrent in a Cleanuparr category is stopped and meets neither its tracker's ratio nor its seed-time rule (2-k3s/08.servarr/cleanuparr/files/tracker-rules.json), a private torrent has a tracker host that only looks like a listed host or is unlisted next to a listed one, or the check could not run. Read the Job log for hash prefix, category and reason. Stopped early: resume the torrent in the qBittorrent WebUI. Lookalike or unknown host: add the host to tracker-rules.json or confirm which tracker it is. ERROR line: follow the logged error (qBittorrent read or rules file). REPORT ONLY."
+      - eval_time: 10m
+        alertname: TorrentTrackerNotWorking
+        exp_alerts: []
+
+  - name: Six failed tracker runs, each seen by two kube-state-metrics replicas, fire TorrentTrackerNotWorking
+    interval: 1m
+    input_series:
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-tracker-check-100",condition="true",instance="ksm-1"}'
+        values: "1x20"
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-tracker-check-100",condition="true",instance="ksm-2"}'
+        values: "1x20"
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="torrent-tracker-check-100",instance="ksm-1"}'
+        values: "1000x20"
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="torrent-tracker-check-100",instance="ksm-2"}'
+        values: "1000x20"
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-tracker-check-101",condition="true",instance="ksm-1"}'
+        values: "1x20"
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-tracker-check-101",condition="true",instance="ksm-2"}'
+        values: "1x20"
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="torrent-tracker-check-101",instance="ksm-1"}'
+        values: "4600x20"
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="torrent-tracker-check-101",instance="ksm-2"}'
+        values: "4600x20"
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-tracker-check-102",condition="true",instance="ksm-1"}'
+        values: "1x20"
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-tracker-check-102",condition="true",instance="ksm-2"}'
+        values: "1x20"
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="torrent-tracker-check-102",instance="ksm-1"}'
+        values: "8200x20"
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="torrent-tracker-check-102",instance="ksm-2"}'
+        values: "8200x20"
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-tracker-check-103",condition="true",instance="ksm-1"}'
+        values: "1x20"
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-tracker-check-103",condition="true",instance="ksm-2"}'
+        values: "1x20"
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="torrent-tracker-check-103",instance="ksm-1"}'
+        values: "11800x20"
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="torrent-tracker-check-103",instance="ksm-2"}'
+        values: "11800x20"
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-tracker-check-104",condition="true",instance="ksm-1"}'
+        values: "1x20"
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-tracker-check-104",condition="true",instance="ksm-2"}'
+        values: "1x20"
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="torrent-tracker-check-104",instance="ksm-1"}'
+        values: "15400x20"
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="torrent-tracker-check-104",instance="ksm-2"}'
+        values: "15400x20"
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-tracker-check-105",condition="true",instance="ksm-1"}'
+        values: "1x20"
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-tracker-check-105",condition="true",instance="ksm-2"}'
+        values: "1x20"
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="torrent-tracker-check-105",instance="ksm-1"}'
+        values: "19000x20"
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="torrent-tracker-check-105",instance="ksm-2"}'
+        values: "19000x20"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: TorrentTrackerNotWorking
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: servarr
+            exp_annotations:
+              summary: "Six torrent-tracker-check runs in a row failed"
+              description: "The six newest hourly torrent-tracker-check Jobs all failed. Each failure means at least one private torrent in a Cleanuparr category had no working tracker and at least one failing (not working, error or unreachable), or the check could not run; different runs may name different torrents. While a tracker is not working the site counts no seed time. Read the Job logs for hash prefixes and reasons: for a tracker finding, check the tracker site and the torrent's trackers in the qBittorrent WebUI; for an ERROR line, follow the logged error (qBittorrent read or rules file). REPORT ONLY."
+
+  - name: Five failed tracker runs, each seen by two kube-state-metrics replicas, do not fire TorrentTrackerNotWorking
+    interval: 1m
+    input_series:
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-tracker-check-100",condition="true",instance="ksm-1"}'
+        values: "1x20"
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="torrent-tracker-check-100",instance="ksm-1"}'
+        values: "1000x20"
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-tracker-check-100",condition="true",instance="ksm-2"}'
+        values: "1x20"
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="torrent-tracker-check-100",instance="ksm-2"}'
+        values: "1000x20"
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-tracker-check-101",condition="true",instance="ksm-1"}'
+        values: "1x20"
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="torrent-tracker-check-101",instance="ksm-1"}'
+        values: "4600x20"
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-tracker-check-101",condition="true",instance="ksm-2"}'
+        values: "1x20"
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="torrent-tracker-check-101",instance="ksm-2"}'
+        values: "4600x20"
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-tracker-check-102",condition="true",instance="ksm-1"}'
+        values: "1x20"
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="torrent-tracker-check-102",instance="ksm-1"}'
+        values: "8200x20"
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-tracker-check-102",condition="true",instance="ksm-2"}'
+        values: "1x20"
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="torrent-tracker-check-102",instance="ksm-2"}'
+        values: "8200x20"
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-tracker-check-103",condition="true",instance="ksm-1"}'
+        values: "1x20"
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="torrent-tracker-check-103",instance="ksm-1"}'
+        values: "11800x20"
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-tracker-check-103",condition="true",instance="ksm-2"}'
+        values: "1x20"
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="torrent-tracker-check-103",instance="ksm-2"}'
+        values: "11800x20"
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-tracker-check-104",condition="true",instance="ksm-1"}'
+        values: "1x20"
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="torrent-tracker-check-104",instance="ksm-1"}'
+        values: "15400x20"
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-tracker-check-104",condition="true",instance="ksm-2"}'
+        values: "1x20"
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="torrent-tracker-check-104",instance="ksm-2"}'
+        values: "15400x20"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: TorrentTrackerNotWorking
+        exp_alerts: []
+
+  - name: A success between failures breaks the TorrentTrackerNotWorking streak
+    interval: 1m
+    input_series:
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-tracker-check-100",condition="true",instance="ksm-1"}'
+        values: "1x20"
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="torrent-tracker-check-100",instance="ksm-1"}'
+        values: "1000x20"
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-tracker-check-101",condition="true",instance="ksm-1"}'
+        values: "1x20"
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="torrent-tracker-check-101",instance="ksm-1"}'
+        values: "4600x20"
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-tracker-check-102",condition="true",instance="ksm-1"}'
+        values: "1x20"
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="torrent-tracker-check-102",instance="ksm-1"}'
+        values: "8200x20"
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-tracker-check-103",condition="true",instance="ksm-1"}'
+        values: "0x20"
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="torrent-tracker-check-103",instance="ksm-1"}'
+        values: "11800x20"
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-tracker-check-104",condition="true",instance="ksm-1"}'
+        values: "1x20"
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="torrent-tracker-check-104",instance="ksm-1"}'
+        values: "15400x20"
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-tracker-check-105",condition="true",instance="ksm-1"}'
+        values: "1x20"
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="torrent-tracker-check-105",instance="ksm-1"}'
+        values: "19000x20"
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-tracker-check-106",condition="true",instance="ksm-1"}'
+        values: "1x20"
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="torrent-tracker-check-106",instance="ksm-1"}'
+        values: "22600x20"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: TorrentTrackerNotWorking
+        exp_alerts: []
+
+  - name: Six failures after an older success fire TorrentTrackerNotWorking
+    interval: 1m
+    input_series:
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-tracker-check-100",condition="true",instance="ksm-1"}'
+        values: "0x20"
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="torrent-tracker-check-100",instance="ksm-1"}'
+        values: "1000x20"
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-tracker-check-101",condition="true",instance="ksm-1"}'
+        values: "1x20"
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="torrent-tracker-check-101",instance="ksm-1"}'
+        values: "4600x20"
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-tracker-check-102",condition="true",instance="ksm-1"}'
+        values: "1x20"
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="torrent-tracker-check-102",instance="ksm-1"}'
+        values: "8200x20"
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-tracker-check-103",condition="true",instance="ksm-1"}'
+        values: "1x20"
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="torrent-tracker-check-103",instance="ksm-1"}'
+        values: "11800x20"
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-tracker-check-104",condition="true",instance="ksm-1"}'
+        values: "1x20"
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="torrent-tracker-check-104",instance="ksm-1"}'
+        values: "15400x20"
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-tracker-check-105",condition="true",instance="ksm-1"}'
+        values: "1x20"
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="torrent-tracker-check-105",instance="ksm-1"}'
+        values: "19000x20"
+      - series: 'kube_job_failed{namespace="servarr",job_name="torrent-tracker-check-106",condition="true",instance="ksm-1"}'
+        values: "1x20"
+      - series: 'kube_job_status_start_time{namespace="servarr",job_name="torrent-tracker-check-106",instance="ksm-1"}'
+        values: "22600x20"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: TorrentTrackerNotWorking
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: servarr
+            exp_annotations:
+              summary: "Six torrent-tracker-check runs in a row failed"
+              description: "The six newest hourly torrent-tracker-check Jobs all failed. Each failure means at least one private torrent in a Cleanuparr category had no working tracker and at least one failing (not working, error or unreachable), or the check could not run; different runs may name different torrents. While a tracker is not working the site counts no seed time. Read the Job logs for hash prefixes and reasons: for a tracker finding, check the tracker site and the torrent's trackers in the qBittorrent WebUI; for an ERROR line, follow the logged error (qBittorrent read or rules file). REPORT ONLY."

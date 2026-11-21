@@ -1,0 +1,128 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: torrent-hnr-check
+  namespace: servarr
+  labels:
+    app: torrent-hnr-check
+spec:
+  # :50, after the cleanuparr-policy reconcile (:40) has set limits and set-asides.
+  schedule: "50 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 6
+  failedJobsHistoryLimit: 6
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 600
+      ttlSecondsAfterFinished: 3600
+      template:
+        metadata:
+          labels:
+            app: torrent-hnr-check
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: torrent-hnr-check
+              image: python:3.13-alpine
+              imagePullPolicy: IfNotPresent
+              command: ["python3", "/script/torrent-hnr-check.py", "--mode", "early-stop"]
+              env:
+                - name: QBT_USERNAME
+                  valueFrom:
+                    secretKeyRef:
+                      name: qbittorrent-webui-credentials
+                      key: QBT_USERNAME
+                - name: QBT_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: qbittorrent-webui-credentials
+                      key: QBT_PASSWORD
+              volumeMounts:
+                - name: script
+                  mountPath: /script
+                  readOnly: true
+                - name: tracker-rules
+                  mountPath: /rules
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "250m"
+                  memory: "128Mi"
+          volumes:
+            - name: script
+              configMap:
+                name: torrent-hnr-check-script
+                defaultMode: 0555
+            - name: tracker-rules
+              configMap:
+                name: tracker-rules
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: torrent-tracker-check
+  namespace: servarr
+  labels:
+    app: torrent-tracker-check
+spec:
+  schedule: "10 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 6
+  # TorrentTrackerNotWorking counts six failed runs in a row, so six must stay.
+  failedJobsHistoryLimit: 6
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 600
+      # 6.5 h: the six latest hourly runs stay, the seventh is gone.
+      ttlSecondsAfterFinished: 23400
+      template:
+        metadata:
+          labels:
+            app: torrent-tracker-check
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: torrent-tracker-check
+              image: python:3.13-alpine
+              imagePullPolicy: IfNotPresent
+              command: ["python3", "/script/torrent-hnr-check.py", "--mode", "tracker"]
+              env:
+                - name: QBT_USERNAME
+                  valueFrom:
+                    secretKeyRef:
+                      name: qbittorrent-webui-credentials
+                      key: QBT_USERNAME
+                - name: QBT_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: qbittorrent-webui-credentials
+                      key: QBT_PASSWORD
+              volumeMounts:
+                - name: script
+                  mountPath: /script
+                  readOnly: true
+                - name: tracker-rules
+                  mountPath: /rules
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "250m"
+                  memory: "128Mi"
+          volumes:
+            - name: script
+              configMap:
+                name: torrent-hnr-check-script
+                defaultMode: 0555
+            - name: tracker-rules
+              configMap:
+                name: tracker-rules

@@ -84,6 +84,12 @@ configMapGenerator:
   - name: cleanuparr-seeding-guard
     files:
       - enforce-private-seeding.py=cleanuparr/files/enforce-private-seeding.py
+  # Fixed name: maintenance CronJobs in this namespace mount it too.
+  - name: tracker-rules
+    files:
+      - tracker-rules.json=cleanuparr/files/tracker-rules.json
+    options:
+      disableNameSuffixHash: true
   - name: cleanuparr-malware-blocklist
     files:
       - malware-blocklist.txt=cleanuparr/files/malware-blocklist.txt

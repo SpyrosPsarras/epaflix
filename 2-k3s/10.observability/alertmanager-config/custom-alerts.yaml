@@ -761,6 +761,42 @@ spec:
             summary: "qBittorrent torrent(s) stuck in missingFiles/error (or the check failed)"
             description: "The hourly qbt-stuck-torrent-check Job ({{ $labels.job_name }}) failed — either at least one torrent has been in qBittorrent `state` missingFiles or error for at least GRACE_MINUTES (15m), confirmed via two live snapshots taken GRACE_MINUTES apart (a torrent that recovers before the second snapshot, e.g. a recheck completing, is never reported), or the qBittorrent login/torrent-list fetch itself failed. This is the #610/#839 signature — a torrent can sit broken indefinitely with no *arr rule covering it (#482: `error` matches no Cleanuparr rule). Read the Job log for the affected hash prefix(es), state, category, size and age (never a torrent name), then inspect by hash in the qBittorrent WebUI. REPORT ONLY — this job never deletes, pauses or rechecks a torrent (`max_ratio_act=0` exists so private torrents are never auto-removed); any action is a human decision (#839)."
 
+    - name: torrent-hnr-check
+      interval: 60s
+      rules:
+        - alert: TorrentPrivateStoppedEarly
+          expr: |
+            max by (job_name) (
+              kube_job_failed{namespace="servarr", job_name=~"torrent-hnr-check.*"} > 0
+              and on (job_name) (
+                max by (job_name) (kube_job_status_start_time{namespace="servarr", job_name=~"torrent-hnr-check.*"})
+                  >= scalar(max(kube_job_status_start_time{namespace="servarr", job_name=~"torrent-hnr-check.*"}))
+              )
+            )
+          for: 5m
+          labels:
+            severity: warning
+            component: servarr
+          annotations:
+            summary: "Private torrent stopped before its hit-and-run rule (or the check failed)"
+            description: "The hourly torrent-hnr-check Job ({{ $labels.job_name }}) failed. Either a private torrent in a Cleanuparr category is stopped and meets neither its tracker's ratio nor its seed-time rule (2-k3s/08.servarr/cleanuparr/files/tracker-rules.json), a private torrent has a tracker host that only looks like a listed host or is unlisted next to a listed one, or the check could not run. Read the Job log for hash prefix, category and reason. Stopped early: resume the torrent in the qBittorrent WebUI. Lookalike or unknown host: add the host to tracker-rules.json or confirm which tracker it is. ERROR line: follow the logged error (qBittorrent read or rules file). REPORT ONLY."
+        - alert: TorrentTrackerNotWorking
+          # The six newest Jobs must all have failed, so a success breaks the streak.
+          # Deduplicated per Job so two kube-state-metrics replicas cannot double the count.
+          expr: |
+            count(
+              max by (job_name) (kube_job_failed{namespace="servarr", job_name=~"torrent-tracker-check.*"}) > 0
+              and on (job_name)
+              topk(6, max by (job_name) (kube_job_status_start_time{namespace="servarr", job_name=~"torrent-tracker-check.*"}))
+            ) >= 6
+          for: 5m
+          labels:
+            severity: warning
+            component: servarr
+          annotations:
+            summary: "Six torrent-tracker-check runs in a row failed"
+            description: "The six newest hourly torrent-tracker-check Jobs all failed. Each failure means at least one private torrent in a Cleanuparr category had no working tracker and at least one failing (not working, error or unreachable), or the check could not run; different runs may name different torrents. While a tracker is not working the site counts no seed time. Read the Job logs for hash prefixes and reasons: for a tracker finding, check the tracker site and the torrent's trackers in the qBittorrent WebUI; for an ERROR line, follow the logged error (qBittorrent read or rules file). REPORT ONLY."
+
     - name: alertmanager
       interval: 60s
       rules:
@@ -1132,7 +1168,7 @@ spec:
               )
               unless on (namespace, owner_name)
               max by (namespace, owner_name) (
-                kube_job_owner{namespace="servarr", owner_kind="CronJob", owner_name=~"cleanuparr-blocklist-drift|neutarr-config-drift|orphan-census|prowlarr-indexer-health|prowlarr-appsync-drift|cleanuparr-queuecleaner-health|blind-queue-check|qbt-stuck-torrent-check"}
+                kube_job_owner{namespace="servarr", owner_kind="CronJob", owner_name=~"cleanuparr-blocklist-drift|neutarr-config-drift|orphan-census|prowlarr-indexer-health|prowlarr-appsync-drift|cleanuparr-queuecleaner-health|blind-queue-check|qbt-stuck-torrent-check|torrent-hnr-check|torrent-tracker-check"}
                 or
                 kube_job_owner{namespace="observability", owner_kind="CronJob", owner_name="ntfy-canary-check"}
                 or

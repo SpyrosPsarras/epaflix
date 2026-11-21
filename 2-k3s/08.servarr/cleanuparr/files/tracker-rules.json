@@ -1,0 +1,16 @@
+{
+  "categories": ["radarr", "tv-sonarr", "animes", "music"],
+  "stalled_category": "private-stalled",
+  "trackers": [
+    {"name": "IPTorrents", "prowlarr": "IPTorrents", "hosts": ["127.0.0.1.stackoverflow.tech", "async.empirehost.me", "routing.bgp.technology"],
+     "hnr": {"ratio": 1.0, "hours": 336}, "cleanuparr": {"max_ratio": 5.0, "max_seed_hours": 2160}},
+    {"name": "TorrentDay", "prowlarr": "TorrentDay", "hosts": ["sync.td-peers.com", "td.jumbohostpro.eu"],
+     "hnr": {"ratio": 1.0, "hours": 72}, "cleanuparr": {"max_ratio": 5.0, "max_seed_hours": 2160}},
+    {"name": "AvistaZ", "prowlarr": "AvistaZ", "hosts": ["tracker.avistaz.to"],
+     "hnr": {"ratio": 0.9, "hours": 72, "hours_per_gb": 2, "large_gb": 50, "large_hours": 1440},
+     "cleanuparr": {"max_ratio": 5.0, "max_seed_hours": 2160}},
+    {"name": "Mpellas", "prowlarr": "Mpellas", "hosts": ["magtre.com"],
+     "hnr": null, "cleanuparr": {"max_ratio": 5.0, "max_seed_hours": 2160}}
+  ],
+  "default_private": {"hnr": {"ratio": null, "hours": 1440}, "cleanuparr": {"max_ratio": 5.0, "max_seed_hours": 2160}}
+}
