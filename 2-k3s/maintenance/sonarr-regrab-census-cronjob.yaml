@@ -495,7 +495,7 @@ spec:
   jobTemplate:
     spec:
       activeDeadlineSeconds: 300
-      backoffLimit: 0
+      backoffLimit: 2
       ttlSecondsAfterFinished: 2592000  # keep 30 days
       template:
         metadata:
