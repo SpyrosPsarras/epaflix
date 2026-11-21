@@ -36,10 +36,6 @@ spec:
       jsonPointers:
         - /spec/replicas
     - group: monitoring.coreos.com
-      kind: Prometheus
-      jsonPointers:
-        - /spec/replicas
-    - group: monitoring.coreos.com
       kind: Alertmanager
       jsonPointers:
         - /spec/replicas
