@@ -6,6 +6,7 @@ configuration:
   concurrency: 1
   forceReboot: false
   drainTimeout: 5m
+  period: 5m
   drainGracePeriod: "60"
   prometheusUrl: http://kube-prometheus-stack-prometheus.observability.svc.cluster.local:9090
   alertFilterMatchOnly: true
