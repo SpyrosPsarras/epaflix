@@ -42,10 +42,11 @@ authentik:
 server:
   enabled: true
   name: server
-  replicas: 1 # Single replica due to ReadWriteOnce storage
+  replicas: 2
 
-  deploymentStrategy:
-    type: Recreate
+  pdb:
+    enabled: true
+    minAvailable: 1
 
   ingress:
     enabled: false
@@ -78,24 +79,14 @@ server:
     timeoutSeconds: 5
     failureThreshold: 3
 
-  volumeMounts:
-    - name: media
-      mountPath: /media
-
-  volumes:
-    - name: media
-      persistentVolumeClaim:
-        claimName: authentik-media-pvc-iscsi
-
+  # Uploads under Customization > Files need shared storage or S3 first: each server pod's /data/media is its own container disk.
   affinity:
-    podAffinity:
+    podAntiAffinity:
       requiredDuringSchedulingIgnoredDuringExecution:
         - labelSelector:
-            matchExpressions:
-              - key: app.kubernetes.io/name
-                operator: In
-                values:
-                  - authentik
+            matchLabels:
+              app.kubernetes.io/name: authentik
+              app.kubernetes.io/component: server
           topologyKey: kubernetes.io/hostname
 
 worker:
@@ -159,17 +150,6 @@ worker:
     - name: blueprints-secret-authentik-iac-blueprint
       secret:
         secretName: authentik-iac-blueprint
-
-  affinity:
-    podAffinity:
-      requiredDuringSchedulingIgnoredDuringExecution:
-        - labelSelector:
-            matchExpressions:
-              - key: app.kubernetes.io/name
-                operator: In
-                values:
-                  - authentik
-          topologyKey: kubernetes.io/hostname
 
 postgresql:
   enabled: false
