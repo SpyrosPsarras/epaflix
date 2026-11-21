@@ -8,6 +8,7 @@ configuration:
   drainTimeout: 5m
   period: 5m
   drainGracePeriod: "60"
+  drainPodSelector: drain.epaflix.com/skip!=true
   prometheusUrl: http://kube-prometheus-stack-prometheus.observability.svc.cluster.local:9090
   alertFilterMatchOnly: true
   alertFilterRegexp: ^(K3sUpgradeJobActive|K3sNodeCordoned|KubeNodeNotReady|KubeNodeUnreachable|etcdMembersDown|etcdInsufficientMembers|etcdNoLeader)$
