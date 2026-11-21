@@ -111,7 +111,7 @@ for a in app-of-apps authentik discord gh-runner home-assistant remote-pi servar
 done
 k -n vaultwarden patch cronjob vaultwarden-backup -p '{"spec":{"suspend":true}}'
 scale() {
-  k -n app-authentik scale deploy authentik-server authentik-worker --replicas=$1
+  k -n app-authentik scale deploy authentik-worker --replicas=$1
   for n in discord-media discord-windmill; do k -n $n scale deploy openclaw --replicas=$1; done
   k -n gh-runner scale deploy gh-runner --replicas=$1
   k -n home-assistant scale deploy esphome home-assistant roborock --replicas=$1

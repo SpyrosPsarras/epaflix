@@ -186,11 +186,11 @@ spec:
               PrometheusStorageNearFull no longer tracks cap binding - this
               alert is the drift detector. Check prometheus_tsdb_head_series
               against the ~260k post-#1056 baseline; the pre-dedup state was
-              ~578k series and ~2.3 GiB/day. The 7d hold does NOT ride out
-              the current ramp: the hold ends ~2026-09-22 while the window
-              only reaches 13d around 2026-09-26, so expect ONE firing in
-              that week that clears by itself a few days later - not a new
-              incident. Do NOT raise retentionSize above the 25Gi claim: each
+              ~578k series and ~2.3 GiB/day. A fresh replica (a new or
+              wiped PVC) starts with no history, so it fires from day 7
+              until it holds 13 days and then clears by itself - not a new
+              incident; silence it for that pod only, ending at day 13,
+              and investigate if it still fires after that. Do NOT raise retentionSize above the 25Gi claim: each
               replica's PVC lives on its worker's root disk and Prometheus
               outgrowing it broke kubelet image GC (#463).
 
