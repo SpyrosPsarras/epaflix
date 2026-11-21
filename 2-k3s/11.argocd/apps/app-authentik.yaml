@@ -21,10 +21,6 @@ spec:
     syncOptions:
       - ServerSideApply=true
   ignoreDifferences:
-    - group: apps
-      kind: Deployment
-      jsonPointers:
-        - /spec/replicas
     - group: ""
       kind: Service
       jsonPointers:
