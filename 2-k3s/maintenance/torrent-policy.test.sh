@@ -64,4 +64,11 @@ grep -q 'files/torrent-hnr-check.py' "$here/kustomization.yaml" \
 [ "$(grep -c 'mountPath: /rules' "$hnr_cronjob")" = 2 ] \
     || fail "both hit-and-run CronJobs must mount tracker-rules at /rules"
 
+policy() { grep -A1 'name: SEEDING_POLICY' "$1" | sed -nE 's/^ *value: (report|enforce)$/\1/p'; }
+[ "$(grep -c 'name: SEEDING_POLICY' "$deployment")" -eq 1 ] \
+    && [ "$(grep -c 'name: SEEDING_POLICY' "$cronjob")" -eq 1 ] \
+    && [ "$(policy "$deployment" | wc -l)" -eq 1 ] && [ "$(policy "$cronjob" | wc -l)" -eq 1 ] \
+    && [ "$(policy "$deployment")" = "$(policy "$cronjob")" ] \
+    || fail "the Cleanuparr init container and cleanuparr-policy need one matching SEEDING_POLICY"
+
 echo "torrent-policy tests OK"

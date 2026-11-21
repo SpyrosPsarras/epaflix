@@ -30,9 +30,9 @@ spec:
               imagePullPolicy: IfNotPresent
               command: ["python3", "/script/cleanuparr-policy.py"]
               env:
-                # Set to "enforce" in the rollout PR after the owner reviewed a dry run.
+                # report: print planned changes only. Cleanuparr's own Dry Run guards deletions.
                 - name: SEEDING_POLICY
-                  value: report
+                  value: enforce
                 - name: CLEANUPARR_API_KEY
                   valueFrom:
                     secretKeyRef:
