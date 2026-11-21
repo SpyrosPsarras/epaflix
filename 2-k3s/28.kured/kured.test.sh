@@ -40,6 +40,7 @@ want("concurrency", "1")
 want("drain-timeout", "5m")
 want("period", "5m")
 want("drain-grace-period", "60")
+want("drain-pod-selector", "drain.epaflix.com/skip!=true")
 want("prometheus-url", "http://kube-prometheus-stack-prometheus.observability.svc.cluster.local:9090")
 want("alert-filter-match-only", "true")
 if "force-reboot" in args and args["force-reboot"] != "false":
