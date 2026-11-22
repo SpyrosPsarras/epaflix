@@ -30,7 +30,9 @@ debit spreads lost on average.
 not triggered, skipped). Every setup is a 30-45 session swing: the time exit depends on the stock's beta vs SPY
 (higher beta, shorter hold). With momentum_hold_adx above 0, a LONG trade that reaches its target or time exit while
 the ADX trend is up stays open until that trend ends (momentum_hold_adx, 0 turns it off). Proposed LONG candidates get a
-position of position_size (10%) of the budget, best first, while fewer than max_open_trades (10) live long trades are open. Breakdown runs only when
+position of position_size (10%) of the budget, best first, while fewer than max_open_trades (10) of your positions are
+held. Your positions come from the positions script (screener.positions, needs persist): every day each one gets hold or sell
+by the backtested exit rules, its flags, and a swap when a stalled position could make room for a new setup. Breakdown runs only when
 asked for by name (strategy breakdown): it lost in every backtest window. The squeeze rules are an untested hypothesis: validate before trading them.
 `finviz_url` takes one or more screener URLs (one per line), e.g. a large/mid-cap list and a high-short-float list.
 With `persist`, every signal is stored in the Windmill data table `main` (schema `screener`) and followed until it
@@ -232,11 +234,23 @@ DEFAULTS = {
     # (2020-2023), +57% to +88% (2023-2026); R per trade rose only in the last two.
     "momentum_hold_adx": 20.0,
     # Position sizing of LONG trades: position_size of the budget per trade, at most max_open_trades open at once (one per
-    # ticker), the best candidates first. Open trades are the live LONG signals stored as open or pending (needs persist).
+    # ticker), the best candidates first. Open trades are your positions recorded with the positions script (needs
+    # persist), less those the screen says to sell today.
     # In the backtest (about 105 large caps, longs, ADX hold) 10% x 10 made +36% / +30% / +88% in 2017-2020 / 2020-2023 /
     # 2023-2026 with a maximum drawdown of 15-18%; 2.5% x 10 left about 80% of the budget in cash and made +9% / +8% / +18%.
     "position_size": 0.10,
     "max_open_trades": 10,
+    # Your positions: stop and target when neither the position nor a screener LONG signal on that ticker in the 14 days
+    # before the buy gives them: position_stop_atr ATR14 (at the buy) below the buy price, a position_target_r R target.
+    "position_stop_atr": 2.0,
+    "position_target_r": 2.0,
+    # Swap: with every slot taken, a new LONG setup scoring swap_min_score or more may replace a stalled position, held
+    # swap_stalled_days sessions or more and within swap_band_r R of its buy price (0 days = off). In the backtest (10% x
+    # 10, ADX hold, two sets of about 105 large caps, three 750-session windows each) this beat no swap in 4 of 6 windows
+    # (+1023% against +876% over the six together); swapping only for a score 20 or 30 points higher lost in 5 and 6 of 6.
+    "swap_stalled_days": 10,
+    "swap_min_score": 60.0,
+    "swap_band_r": 0.5,
     "request_pause": 0.4,
 }
 
@@ -1599,6 +1613,30 @@ GROUP BY strategy, live
 ORDER BY strategy, live DESC;
 """
 
+# Your positions, written by the positions script. Kept identical to POSITIONS_SQL there (a test checks it): either script
+# may create the table first.
+POSITIONS_SQL = """
+CREATE SCHEMA IF NOT EXISTS screener;
+CREATE TABLE IF NOT EXISTS screener.positions (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    ticker text NOT NULL,
+    buy_date date NOT NULL,
+    buy_price double precision NOT NULL CHECK (buy_price > 0),
+    size double precision NOT NULL CHECK (size > 0 AND size <= 1),
+    stop double precision CHECK (stop IS NULL OR (stop > 0 AND stop < buy_price)),
+    target double precision CHECK (target IS NULL OR target > buy_price),
+    note text,
+    sell_date date,
+    sell_price double precision CHECK (sell_price IS NULL OR sell_price > 0),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    closed_at timestamptz,
+    CHECK ((sell_date IS NULL) = (closed_at IS NULL)),
+    CHECK (sell_date IS NULL OR sell_date >= buy_date)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS positions_one_open ON screener.positions (ticker) WHERE closed_at IS NULL;
+"""
+LOAD_POSITIONS_SQL = POSITIONS_SQL + """SELECT * FROM screener.positions WHERE closed_at IS NULL ORDER BY buy_date, id;"""
+
 
 def datatable_query(name=DATA_TABLE):
     """A function running one SQL text with positional $n arguments on a Windmill data table; returns the rows of the
@@ -1714,6 +1752,133 @@ def stored_view(row):
     keys = ("strategy", "ticker", "direction", "signal_date", "live", "status", "entry", "stop", "target", "fill", "exit",
             "exit_date", "r", "r_now", "holding_days", "bars_left", "data_status", "data_note", "stale_days")
     return {k: (str(row[k])[:10] if k in ("signal_date", "exit_date") and row.get(k) else row.get(k)) for k in keys}
+
+
+def position_signal(stored, ticker, buy_day):
+    """The latest live LONG screener signal on the ticker in the 14 days up to the buy, or None."""
+    rows = [r for r in stored if r["ticker"] == ticker and r["direction"] == "long" and r.get("live")
+            and buy_day - timedelta(days=14) <= _day(r["signal_date"]) <= buy_day]
+    return max(rows, key=lambda r: (_day(r["signal_date"]), r.get("id") or 0)) if rows else None
+
+
+def position_levels(pos, series, i, cfg, signal=None):
+    """Stop, target, holding period and where they come from: the position, else the screener signal, else the ATR rule."""
+    buy = float(pos["buy_price"])
+    hold = int(signal["holding_days"]) if signal else horizon_for(cfg, series, i)
+    stop, source = pos.get("stop"), "yours"
+    if not stop and signal and 0 < signal["stop"] < buy:
+        stop, source = float(signal["stop"]), f"the {signal['strategy']} signal of {str(signal['signal_date'])[:10]}"
+    if not stop:
+        atr = next((a for a in (series["atr14"][i], series["atr14"][-1]) if a), buy * 0.02)
+        stop, source = buy - cfg["position_stop_atr"] * atr, f"{cfg['position_stop_atr']:g} ATR below the buy"
+    target = pos.get("target")
+    if not target:
+        target = float(signal["target"]) if signal and signal["target"] > buy and source != "yours" else None
+        target = target or buy + cfg["position_target_r"] * (buy - stop)
+    return {"stop": round(float(stop), 4), "target": round(float(target), 4), "holding_days": hold, "levels_from": source}
+
+
+def position_view(pos):
+    return {"id": pos.get("id"), "ticker": pos["ticker"], "buy_date": str(pos["buy_date"])[:10], "buy_price": pos["buy_price"],
+            "size": pos["size"], "note": pos.get("note")}
+
+
+def position_unknown(pos, note):
+    return {**position_view(pos), "advice": "check", "reason": f"no price data today ({note})", "flags": [], "stalled": False,
+            "data_status": "unavailable"}
+
+
+def position_status(pos, bars, series, cfg, signal=None, short_today=(), earnings_days=None):
+    """Hold or sell for one of your positions, by the backtested exit rules from the buy day on: stop, target, time exit
+    after holding_days, and with momentum_hold_adx the ADX momentum hold (the stop does not apply while the trend is up;
+    past the target or the time exit it holds until the first close with the trend off). Adds the flags of the day."""
+    buy, buy_day = float(pos["buy_price"]), _day(pos["buy_date"])
+    last = len(bars) - 1
+    i = bisect.bisect_left(bars.dates, buy_day)
+    view = position_view(pos)
+    if i > last:
+        return {**view, "advice": "hold", "reason": "bought after the last completed session: first check after it closes",
+                "flags": [], "stalled": False, "data_status": "ok"}
+    i = max(i, 1)
+    levels = position_levels(pos, series, i, cfg, signal)
+    stop, target, hold = levels["stop"], levels["target"], levels["holding_days"]
+    on = trend_up(bars, cfg["momentum_hold_adx"]) if cfg["momentum_hold_adx"] else None
+    end = i + hold
+    if on is None:
+        j, price, outcome, *_ = _walk(bars, i, buy, stop, target, min(end, len(bars)))
+        held = False
+        if j is None and end - 1 <= last:
+            j, price, outcome = end - 1, bars.close[end - 1], "timeout"
+    else:
+        j, price, outcome, _, _, _, _, held = _walk_hold(bars, i, buy, stop, target, end, on)
+    close, atr = bars.close[last], series["atr14"][last]
+    risk = buy - stop
+    r_now = (close - buy) / risk
+    sessions = last - i
+    trend = "" if on is None else " with the ADX trend off"
+    if j is not None:
+        when = bars.dates[j].isoformat()
+        advice, reason = "sell", {
+            "stop": f"the stop {stop:g} was hit on {when}{trend}",
+            "target": f"the target {target:g} was reached on {when}" + ("" if on is None else " without an ADX uptrend"),
+            "timeout": f"time exit: the {hold} sessions since the buy ended on {when}{trend}",
+            "momentum": f"the momentum hold ended: the ADX trend turned off at the close of {bars.dates[j - 1].isoformat()}",
+        }[outcome]
+        reason += "; sell at the next open if you still hold it"
+    elif held and not on[last]:
+        advice, reason = "sell", "the momentum hold ended today (the ADX trend turned off): sell at the next open"
+    elif held:
+        advice, reason = "hold", ("momentum hold: past the target or the time exit while the ADX trend is up; sell at the next "
+                                  "open after the first close with the trend off")
+    else:
+        advice = "hold"
+        reason = (f"{max(end - 1 - last, 0)} of {hold} sessions left; sell at the stop {stop:g} or the target {target:g}"
+                  + ("" if on is None else "; while the ADX trend is up the stop is paused and the target or the time exit "
+                                             "starts a momentum hold instead"))
+    flags = []
+    e50 = series["ema50"][last]
+    if e50 and close < e50:
+        flags.append(f"closed below its EMA50 ({e50:.2f})")
+    if advice == "hold" and on is not None and not on[last] and atr and close - stop < 0.5 * atr:
+        flags.append("ADX trend off and the close within 0.5 ATR of the stop")
+    if earnings_days is not None and 0 <= earnings_days <= cfg["earnings_block_days"]:
+        flags.append(f"earnings in {earnings_days} days")
+    if short_today:
+        flags.append(f"SHORT setup today ({', '.join(short_today)}): the price action turned weak")
+    stalled = (advice == "hold" and not held and cfg["swap_stalled_days"] > 0 and sessions >= cfg["swap_stalled_days"]
+               and abs(r_now) <= cfg["swap_band_r"])
+    if stalled:
+        flags.append(f"stalled: {sessions} sessions, {r_now:+.2f}R")
+    return {**view, "advice": advice, "reason": reason, "flags": flags, "close": round(close, 4),
+            "return": round(close / buy - 1, 4), "r_now": round(r_now, 3), **levels, "sessions_held": sessions,
+            "momentum_hold": bool(held), "stalled": stalled, "exit_date": bars.dates[j].isoformat() if j is not None else None,
+            "exit_price": round(price, 4) if j is not None else None, "data_status": "ok"}
+
+
+def plan_swaps(candidates, statuses, cfg):
+    """With every slot taken: pair the best LONG setups left without a slot (score >= swap_min_score) with your stalled
+    positions, the weakest first. Marks both and returns the pairs."""
+    if not cfg["swap_stalled_days"]:
+        return []
+    seen, waiting = set(), []
+    for c in sorted(candidates, key=lambda x: -(x.get("score") or 0)):
+        if ((c.get("position") or {}).get("reason") == "no free slot" and (c.get("score") or 0) >= cfg["swap_min_score"]
+                and c["ticker"] not in seen):
+            seen.add(c["ticker"])
+            waiting.append(c)
+    stalled = sorted((p for p in statuses if p.get("stalled")), key=lambda p: p["r_now"])
+    pairs = []
+    for c, p in zip(waiting, stalled):
+        size = cfg["position_size"]
+        c["position"] = {"size": size, "slot": None, "reason": "swap", "replaces": p["ticker"]}
+        c["recommendation"] = (c["recommendation"].rsplit(" Size: ", 1)[0]
+                               + f" Swap: sell {p['ticker']} (stalled: {p['sessions_held']} sessions, {p['r_now']:+.2f}R) and buy"
+                               f" this at {size:.0%} of the budget.")
+        p["swap_for"] = c["ticker"]
+        p["flags"].append(f"swap: sell it to buy {c['ticker']} (score {c['score']:g})")
+        pairs.append({"sell": p["ticker"], "buy": c["ticker"], "score": c["score"], "r_now": p["r_now"],
+                      "sessions_held": p["sessions_held"]})
+    return pairs
 
 
 def spread_context(phase):
@@ -2367,37 +2532,36 @@ def recommendation(q):
             + (f"; {reasons}" if reasons else "") + f". Plan: {plan}.")
 
 
-def open_long_trades(rows):
-    """Live LONG trades that hold a slot: stored signals proposed as long, still pending or open."""
-    return [r for r in rows if r.get("live") and r.get("direction") == "long" and r.get("action") == "long"
-            and r.get("status") in ACTIVE_STATUSES]
-
-
-def assign_positions(candidates, open_rows, cfg, known=True):
+def assign_positions(candidates, positions, cfg, known=True):
     """Give the proposed LONG candidates, best first, a position of position_size of the budget while fewer than
-    max_open_trades are open; one trade per ticker. Adds `position` to each candidate and a sentence to its recommendation;
-    returns the sizing summary."""
+    max_open_trades slots are taken; one trade per ticker. The slots taken are your open positions less those to sell
+    today. Adds `position` to each candidate and a sentence to its recommendation; returns the sizing summary."""
     size, limit = cfg["position_size"], int(cfg["max_open_trades"])
-    held = {r["ticker"] for r in open_rows}
-    used = len(open_rows)
+    held, proposed = {p["ticker"] for p in positions}, set()
+    to_sell = sum(p["advice"] == "sell" for p in positions)
+    used = before = len(positions) - to_sell
     for c in candidates:
         if c["direction"] != "long" or c["action"] != "long":
             c["position"] = None
             continue
         if c["ticker"] in held:
             c["position"] = {"size": 0.0, "slot": None, "reason": "already open"}
-            c["recommendation"] += " Size: none, a trade in this ticker is already open."
+            c["recommendation"] += " Size: none, you already hold this ticker."
+        elif c["ticker"] in proposed:
+            c["position"] = {"size": 0.0, "slot": None, "reason": "already proposed"}
+            c["recommendation"] += " Size: none, this ticker is already proposed above as another setup."
         elif used >= limit:
             c["position"] = {"size": 0.0, "slot": None, "reason": "no free slot"}
-            c["recommendation"] += f" Size: none, {limit} of {limit} trades are open; skip."
+            c["recommendation"] += f" Size: none, {limit} of {limit} slots are taken; skip."
         else:
             used += 1
-            held.add(c["ticker"])
+            proposed.add(c["ticker"])
             c["position"] = {"size": size, "slot": used, "reason": None}
-            c["recommendation"] += f" Size: {size:.0%} of the budget (trade {used} of at most {limit})."
-    return {"position_size": size, "max_open_trades": limit, "open_before": len(open_rows) if known else None,
-            "open_after": used if known else None, "free": max(limit - used, 0) if known else None,
-            "note": None if known else "open trades unknown without persist: every slot counted as free"}
+            c["recommendation"] += f" Size: {size:.0%} of the budget (slot {used} of {limit})."
+    return {"position_size": size, "max_open_trades": limit, "open": len(positions) if known else None,
+            "to_sell": to_sell if known else None, "held": before if known else None, "proposed": used - before,
+            "free": max(limit - used, 0) if known else None,
+            "note": None if known else "your positions are unknown without persist: every slot counted as free"}
 
 
 def candidate_row(strategy, q):
@@ -2466,6 +2630,22 @@ def email_html(result):
     if context:
         parts.append("<p>" + "; ".join(f"{escape(k)} {v['close']} ({escape(str(v['trend']))}, {pct(v['vs_sma200'])} vs SMA200, "
                                        f"20 days {pct(v['change_20d'])})" for k, v in context.items()) + "</p>")
+    mine = result.get("positions")
+    if mine is not None:
+        sell = [p for p in mine["items"] if p["advice"] != "hold"]
+        parts.append(f"<p><b>My positions: {mine['open']} of {mine['max_open_trades']} open</b>"
+                     + (f", {len(sell)} to sell or check" if sell else "") + ".</p>")
+        def position_line(p):
+            head = f"{p['ticker']} bought {p['buy_date']} at {p['buy_price']:g} ({p['size']:.0%}): {p['advice'].upper()}"
+            if p["data_status"] != "ok":
+                return f"{head}, {p['reason']}."
+            return (f"{head}, {p['return']:+.1%} ({p['r_now']:+.2f}R), close {p['close']:g}, stop {p['stop']:g}, target "
+                    f"{p['target']:g} (from {p['levels_from']}). {p['reason'][0].upper()}{p['reason'][1:]}."
+                    + (f" Flags: {'; '.join(p['flags'])}." if p["flags"] else ""))
+        if mine["items"]:
+            parts.append("<ul>" + "".join(f"<li>{escape(position_line(p))}</li>" for p in mine["items"]) + "</ul>")
+        else:
+            parts.append("<p>None recorded: run f/screener/positions with action buy when you open a trade.</p>")
     rows = result["candidates"]
     if rows:
         proposed = [r for r in rows if r["action"] in TRADE_ACTIONS]
@@ -2473,13 +2653,15 @@ def email_html(result):
                      + "".join(f"<li>{escape(r['recommendation'])}</li>" for r in rows) + "</ol>")
         sizing = result.get("sizing")
         if sizing:
-            state = (f"{sizing['open_before']} open before today, {sizing['free']} free after it" if sizing["open_before"] is not None
-                     else sizing["note"])
+            state = (f"{sizing['open']} open, {sizing['to_sell']} to sell, {sizing['proposed']} proposed today, {sizing['free']} free"
+                     if sizing["open"] is not None else sizing["note"])
             parts.append(f"<p><b>Sizing</b>: {sizing['position_size']:.0%} of the budget per long trade, at most "
                          f"{sizing['max_open_trades']} open ({escape(state)}).</p>")
         keys = ["ticker", "strategy", "action", "size", "score", "entry", "stop", "target", "reward_risk", "beta", "holding_days",
                 "time_exit", "sector", "warnings"]
-        size = lambda r: "-" if not r.get("position") else f"{r['position']['size']:.0%}" if r["position"]["slot"] else r["position"]["reason"]
+        size = lambda r: ("-" if not r.get("position") else f"{r['position']['size']:.0%}" if r["position"]["slot"]
+                          else f"{r['position']['size']:.0%} if you sell {r['position']['replaces']}" if r["position"]["reason"] == "swap"
+                          else r["position"]["reason"])
         cell = lambda r, k: size(r) if k == "size" else "; ".join(r[k]) if isinstance(r[k], list) else str(r[k])
         head = "".join(f"<th>{k}</th>" for k in keys)
         body = "".join("<tr>" + "".join(f"<td>{escape(cell(r, k))}</td>" for k in keys) + "</tr>" for r in rows)
@@ -2551,6 +2733,8 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
     query = datatable_query() if persist else None
     stored = query(LOAD_SQL) if persist else []
     active = [row for row in stored if row.get("closed_at") is None]
+    positions = query(LOAD_POSITIONS_SQL) if persist else []
+    position_tickers, position_data = {p["ticker"] for p in positions}, {}
     pending_by_ticker = {}
     for row in active:
         pending_by_ticker.setdefault(row["ticker"], []).append(row)
@@ -2604,6 +2788,8 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
         if problems:
             data_errors.append({"ticker": name, "reason": "; ".join(problems)})
             updates += [stored_update(row, None, calendar, as_of, "; ".join(problems)) for row in pending_by_ticker.pop(name, [])]
+            if name in position_tickers:
+                position_data[name] = "; ".join(problems)
             continue
         updates += [stored_update(row, bars, calendar, as_of, hold_adx=cfg["momentum_hold_adx"]) for row in pending_by_ticker.pop(name, [])]
         screened += 1
@@ -2623,6 +2809,8 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
         beta = _beta_at(series, len(bars) - 1)
         hold = horizon_for(cfg, series, len(bars) - 1)
         series["sector_etf"] = etf if etf in sector_closes else None
+        if name in position_tickers:
+            position_data[name] = (bars, series)
         trends = sector_trends.get(etf, {})
         label, trend = regime.get(bars.dates[-1], "unknown"), trends.get(bars.dates[-1])
         loaded = {}
@@ -2692,12 +2880,40 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
         time.sleep(cfg["request_pause"])
         updates += [stored_update(row, None if problems else bars, calendar, as_of, "; ".join(problems) or None, cfg["momentum_hold_adx"])
                     for row in rows]
+    for name in sorted(position_tickers - set(position_data)):  # your positions whose ticker is not in today's universe
+        try:
+            bars = completed_bars(fetch_bars(name, count), now)
+            problems = quality_problems(bars, calendar, cfg)
+        except (requests.RequestException, ValueError) as error:
+            bars, problems = None, [str(error)]
+        time.sleep(cfg["request_pause"])
+        position_data[name] = ("; ".join(problems) if problems else
+                               (bars, compute(bars, {b: benchmarks[b] for b in rs_benchmarks}, cfg, beta_closes)))
+    shorts_today = {}
+    for s in strategies:
+        if DIRECTIONS[s] == "short":
+            for q in results[s]["qualified"]:
+                shorts_today.setdefault(q["ticker"], []).append(s)
+    statuses = []
+    for pos in positions:
+        data = position_data.get(pos["ticker"], "not loaded")
+        if isinstance(data, str):
+            statuses.append(position_unknown(pos, data))
+            continue
+        try:
+            snap = fetch_snapshot(pos["ticker"], as_of)
+        except (requests.RequestException, ValueError):
+            snap = None
+        time.sleep(cfg["request_pause"])
+        days = (snap["earnings"] - as_of).days if snap and snap.get("earnings") else None
+        statuses.append(position_status(pos, *data, cfg, position_signal(stored, pos["ticker"], _day(pos["buy_date"])),
+                                        shorts_today.get(pos["ticker"], ()), days))
     for s in strategies:
         results[s]["qualified"].sort(key=lambda x: (-x["score"], x["ticker"]))
     candidates = sorted((candidate_row(s, q) for s in strategies for q in results[s]["qualified"]),
                         key=lambda x: (ACTION_ORDER.get(x["action"], 9), x["priority"], -x["score"], x["ticker"], x["strategy"]))
-    by_id = {u["id"]: u for u in updates}
-    sizing = assign_positions(candidates, open_long_trades([{**row, **by_id.get(row["id"], {})} for row in active]), cfg, persist)
+    sizing = assign_positions(candidates, statuses, cfg, persist)
+    swaps = plan_swaps(candidates, statuses, cfg) if persist else []
 
     duration = time.monotonic() - started
     counts = ", ".join(f"{s} {len(results[s]['qualified'])}" for s in strategies)
@@ -2712,6 +2928,11 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
         "holding": holding,
         "candidates": candidates,
         "sizing": sizing,
+        "positions": None if not persist else {
+            "open": len(statuses), "max_open_trades": sizing["max_open_trades"], "to_sell": sizing["to_sell"],
+            "items": statuses, "swaps": swaps,
+            "note": "Record buys and sells with f/screener/positions. Advice by the backtested exit rules from your buy price.",
+        },
         "results": results,
         "tracking": None if not track_days else {
             "days": track_days,
@@ -2766,6 +2987,8 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
         }
     if email.strip():
         subject = f"Strategy screen {as_of.isoformat()}: market {market_info['regime']}, {len(candidates)} setups"
+        if persist:
+            subject += f", positions {len(statuses)}/{sizing['max_open_trades']}" + (f", {sizing['to_sell']} to sell" if sizing["to_sell"] else "")
         send_email(email.strip(), subject, email_html(result))
         result["email"] = {"to": email.strip(), "subject": subject}
     return result

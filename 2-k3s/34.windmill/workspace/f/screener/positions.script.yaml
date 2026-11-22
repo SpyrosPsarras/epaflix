@@ -1,0 +1,54 @@
+summary: 'My positions: record a buy or a sell, so the daily strategy screen says hold or sell for each one'
+description: See 2-k3s/34.windmill/README.md in the homelab repo.
+kind: script
+schema:
+  $schema: https://json-schema.org/draft/2020-12/schema
+  type: object
+  order:
+    - action
+    - ticker
+    - price
+    - day
+    - size
+    - stop
+    - target
+    - note
+  properties:
+    action:
+      type: string
+      description: buy when you open a trade, sell when you close it, list to see what is recorded
+      enum:
+        - buy
+        - sell
+        - list
+      default: list
+    ticker:
+      type: string
+      description: The stock, e.g. AAPL (not needed for list)
+      default: ''
+    price:
+      type: number
+      description: Your buy or sell price per share (not needed for list)
+      default: 0
+    day:
+      type: string
+      description: Day of the buy or sell, YYYY-MM-DD; empty = today
+      default: ''
+    size:
+      type: number
+      description: 'Buy only: share of the budget, 0.10 = 10%'
+      default: 0.1
+    stop:
+      type: number
+      description: 'Buy only, optional: your stop; 0 = take it from the screener signal, else 2 ATR below the price'
+      default: 0
+    target:
+      type: number
+      description: 'Buy only, optional: your target; 0 = take it from the screener signal, else 2R above the price'
+      default: 0
+    note:
+      type: string
+      description: Optional note
+      default: ''
+  required:
+    - action

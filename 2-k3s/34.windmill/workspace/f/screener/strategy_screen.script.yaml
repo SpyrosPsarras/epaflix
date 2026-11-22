@@ -61,6 +61,6 @@ schema:
       default: ''
     persist:
       type: boolean
-      description: Store every signal in the data table main (schema screener) and follow it until it closes
+      description: Store every signal in the data table main (schema screener) and follow it until it closes; also report hold or sell for your positions recorded with f/screener/positions
       default: false
   required: []
