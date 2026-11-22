@@ -6,8 +6,9 @@ Cloudflare public ingress remains in place. The NetBird client profiles and the 
 
 ## Deploy and enroll
 
+Argo CD Application `tailscale` deploys this directory. Check the router with:
+
 ```sh
-kubectl --context epaflix apply -k 2-k3s/21.tailscale
 kubectl --context epaflix -n tailscale exec deploy/subnet-router -- tailscale status
 ```
 
