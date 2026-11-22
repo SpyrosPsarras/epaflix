@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "f" / "screener"))
+import positions
 import strategy_screen as ss
 
 CFG = ss.settings_with_defaults(None)
@@ -1983,43 +1984,172 @@ def test_run_break_needs_volume_unless_turned_off():
     assert ss.evaluate_run_break(loud, ss.compute(loud, {}, CFG), t, CFG)["qualified"]
 
 
-def sized_candidate(ticker, action="long", direction="long"):
-    return {"ticker": ticker, "direction": direction, "action": action, "recommendation": f"{ticker}: proposed."}
+def sized_candidate(ticker, action="long", direction="long", score=50):
+    return {"ticker": ticker, "direction": direction, "action": action, "score": score, "recommendation": f"{ticker}: proposed."}
+
+
+def held(ticker, advice="hold", stalled=False, r_now=0.0, sessions=5):
+    return {"ticker": ticker, "advice": advice, "stalled": stalled, "r_now": r_now, "sessions_held": sessions, "flags": []}
 
 
 def test_positions_fill_free_slots_best_first():
-    open_rows = ss.open_long_trades([stored_row(ticker=f"T{i}", status="open") for i in range(8)]
-                                    + [stored_row(ticker="WAIT"), stored_row(ticker="SHUT", status="target"),
-                                       stored_row(ticker="RECO", live=False, status="open"),
-                                       stored_row(ticker="WTCH", action="watch", status="open"),
-                                       stored_row(ticker="PUTS", direction="short", action="bear_put_spread", status="open")])
-    assert sorted(r["ticker"] for r in open_rows) == sorted([f"T{i}" for i in range(8)] + ["WAIT"])
+    mine = [held(f"T{i}") for i in range(8)] + [held("WAIT"), held("GONE", "sell")]
     rows = [sized_candidate("T3"), sized_candidate("NEW1"), sized_candidate("SPRD", "bear_put_spread", "short"),
-            sized_candidate("NEW2"), sized_candidate("SEEN", "watch")]
-    sizing = ss.assign_positions(rows, open_rows, CFG)
+            sized_candidate("NEW2"), sized_candidate("SEEN", "watch"), sized_candidate("GONE")]
+    sizing = ss.assign_positions(rows, mine, CFG)
     assert CFG["position_size"] == 0.10 and CFG["max_open_trades"] == 10
-    assert sizing == {"position_size": 0.10, "max_open_trades": 10, "open_before": 9, "open_after": 10, "free": 0, "note": None}
+    assert sizing == {"position_size": 0.10, "max_open_trades": 10, "open": 10, "to_sell": 1, "held": 9, "proposed": 1,
+                      "free": 0, "note": None}  # the position to sell frees its slot
     assert [r["position"] for r in rows] == [{"size": 0.0, "slot": None, "reason": "already open"},
                                               {"size": 0.10, "slot": 10, "reason": None}, None,
-                                              {"size": 0.0, "slot": None, "reason": "no free slot"}, None]
-    assert rows[1]["recommendation"].endswith("Size: 10% of the budget (trade 10 of at most 10).")
-    assert rows[3]["recommendation"].endswith("Size: none, 10 of 10 trades are open; skip.")
-    assert rows[0]["recommendation"].endswith("a trade in this ticker is already open.")
+                                              {"size": 0.0, "slot": None, "reason": "no free slot"}, None,
+                                              {"size": 0.0, "slot": None, "reason": "already open"}]
+    assert rows[1]["recommendation"].endswith("Size: 10% of the budget (slot 10 of 10).")
+    assert rows[3]["recommendation"].endswith("Size: none, 10 of 10 slots are taken; skip.")
+    assert rows[0]["recommendation"].endswith("you already hold this ticker.")
 
 
 def test_positions_without_persist_count_every_slot_free():
     rows = [sized_candidate(f"N{i}") for i in range(3)] + [sized_candidate("N0")]
     sizing = ss.assign_positions(rows, [], ss.settings_with_defaults({"position_size": 0.2, "max_open_trades": 2}), known=False)
     assert [r["position"]["slot"] for r in rows] == [1, 2, None, None] and rows[2]["position"]["reason"] == "no free slot"
-    assert rows[3]["position"]["reason"] == "already open"
-    assert sizing["open_before"] is None and sizing["note"].startswith("open trades unknown")
+    assert rows[3]["position"]["reason"] == "already proposed"
+    assert rows[3]["recommendation"].endswith("already proposed above as another setup.")
+    assert sizing["open"] is None and sizing["note"].startswith("your positions are unknown")
+
+
+def test_swaps_replace_the_weakest_stalled_position_for_a_good_setup():
+    mine = [held("FLAT", stalled=True, r_now=0.1, sessions=12), held("WORS", stalled=True, r_now=-0.4, sessions=15)] + \
+           [held(f"T{i}") for i in range(8)]
+    rows = [sized_candidate("LOW", score=55), sized_candidate("BEST", score=85), sized_candidate("BEST", "long", score=80),
+            sized_candidate("GOOD", score=70), sized_candidate("MORE", score=65)]
+    ss.assign_positions(rows, mine, CFG)
+    pairs = ss.plan_swaps(rows, mine, CFG)
+    assert pairs == [{"sell": "WORS", "buy": "BEST", "score": 85, "r_now": -0.4, "sessions_held": 15},
+                     {"sell": "FLAT", "buy": "GOOD", "score": 70, "r_now": 0.1, "sessions_held": 12}]
+    assert rows[1]["position"] == {"size": 0.10, "slot": None, "reason": "swap", "replaces": "WORS"}
+    assert rows[1]["recommendation"] == "BEST: proposed. Swap: sell WORS (stalled: 15 sessions, -0.40R) and buy this at 10% of the budget."
+    assert rows[0]["position"]["reason"] == rows[4]["position"]["reason"] == "no free slot"  # score below 60, no stalled left
+    assert mine[1]["swap_for"] == "BEST" and mine[1]["flags"] == ["swap: sell it to buy BEST (score 85)"]
+    assert ss.plan_swaps(rows, mine, ss.settings_with_defaults({"swap_stalled_days": 0})) == []
+
+
+def position(**over):
+    return {"id": 1, "ticker": "TEST", "buy_date": "2025-12-01", "buy_price": 100.0, "size": 0.1, "stop": None, "target": None,
+            "note": None, **over}
+
+
+def bars_and_series(rows):
+    bars = make_bars(rows)
+    return bars, ss.compute(bars, {}, CFG)
+
+
+def test_position_holds_in_an_uptrend_with_levels_from_the_atr_rule():
+    bars, series = bars_and_series(uptrend(300, 100, 0.5))
+    buy_day = bars.dates[-6]
+    status = ss.position_status(position(buy_date=buy_day.isoformat(), buy_price=bars.close[-6]), bars, series, CFG)
+    atr = series["atr14"][len(bars) - 6]
+    assert status["advice"] == "hold" and status["levels_from"] == "2 ATR below the buy" and status["data_status"] == "ok"
+    assert status["stop"] == round(bars.close[-6] - 2 * atr, 4) and status["target"] == round(bars.close[-6] + 4 * atr, 4)
+    assert status["sessions_held"] == 5 and status["return"] > 0 and status["r_now"] > 0 and status["flags"] == []
+    assert status["reason"].startswith(f"{status['holding_days'] - 6} of {status['holding_days']} sessions left")
+
+
+def test_position_sells_at_the_stop_and_flags_the_day():
+    rows = uptrend(280, 100, 0.5) + downtrend(20, 239, -1.5)
+    bars, series = bars_and_series(rows)
+    buy = position(buy_date=bars.dates[275].isoformat(), buy_price=237.0, stop=230.0, target=260.0)
+    plain = ss.settings_with_defaults({"momentum_hold_adx": 0})
+    status = ss.position_status(buy, bars, series, plain, short_today=("run_break",), earnings_days=3)
+    assert status["advice"] == "sell" and status["levels_from"] == "yours" and status["exit_price"] == 230.0
+    assert status["reason"].startswith("the stop 230 was hit on ") and status["reason"].endswith("sell at the next open if you still hold it")
+    assert status["flags"] == [f"closed below its EMA50 ({series['ema50'][-1]:.2f})", "earnings in 3 days",
+                               "SHORT setup today (run_break): the price action turned weak"]
+
+
+def test_position_time_exit_and_levels_from_the_screener_signal():
+    bars, series = bars_and_series(uptrend(300, 100, 0.1))
+    day = bars.dates[290]
+    signal = {"strategy": "pullback", "signal_date": bars.dates[289].isoformat(), "stop": 120.0, "target": 140.0, "holding_days": 3}
+    stored = [{**signal, "ticker": "TEST", "direction": "long", "live": True, "id": 7},
+              {**signal, "ticker": "TEST", "direction": "long", "live": False, "id": 8, "signal_date": day.isoformat()},
+              {**signal, "ticker": "TEST", "direction": "long", "live": True, "id": 9, "signal_date": "2020-01-02"}]
+    found = ss.position_signal(stored, "TEST", day)
+    assert found["id"] == 7 and ss.position_signal(stored, "OTHER", day) is None
+    plain = ss.settings_with_defaults({"momentum_hold_adx": 0})
+    status = ss.position_status(position(buy_date=day.isoformat(), buy_price=bars.close[290]), bars, series, plain, found)
+    assert status["levels_from"] == f"the pullback signal of {bars.dates[289].isoformat()}" and status["holding_days"] == 3
+    assert (status["stop"], status["target"]) == (120.0, 140.0)
+    assert status["advice"] == "sell" and status["reason"].startswith(f"time exit: the 3 sessions since the buy ended on {bars.dates[292]}")
+    assert ss.position_status(position(buy_date=day.isoformat(), buy_price=bars.close[290]), bars, series, CFG, found)["advice"] == "hold"
+
+
+def test_position_stalls_and_unknowns():
+    rows = uptrend(270, 100, 0.5) + [(234.8, 235.6, 234.4, 235.0, 1_000_000)] * 30
+    bars, series = bars_and_series(rows)
+    flat = ss.position_status(position(buy_date=bars.dates[285].isoformat(), buy_price=235.0, stop=230.0), bars, series,
+                              ss.settings_with_defaults({"momentum_hold_adx": 0}))
+    assert flat["advice"] == "hold" and flat["stalled"] and flat["sessions_held"] == 14 and flat["r_now"] == 0.0
+    assert flat["flags"][-1] == "stalled: 14 sessions, +0.00R"
+    later = ss.position_status(position(buy_date="2030-01-02"), bars, series, CFG)
+    assert later["advice"] == "hold" and later["reason"].startswith("bought after the last completed session")
+    gone = ss.position_unknown(position(), "chart data is for another ticker")
+    assert gone["advice"] == "check" and gone["data_status"] == "unavailable" and "another ticker" in gone["reason"]
+
+
+def test_positions_sql_is_shared_by_both_scripts():
+    assert ss.POSITIONS_SQL == positions.POSITIONS_SQL and ss.LOAD_POSITIONS_SQL.startswith(positions.POSITIONS_SQL)
+
+
+def test_positions_script_records_buys_and_sells(db, monkeypatch):
+    monkeypatch.setattr(positions, "datatable_query", lambda name=positions.DATA_TABLE: db)
+    assert positions.main()["open_count"] == 0
+    out = positions.main("buy", " aapl ", 190.5, "2026-11-18", note="first")
+    assert out["position"]["ticker"] == "AAPL" and out["position"]["buy_date"] == "2026-11-18" and out["position"]["size"] == 0.1
+    assert out["position"]["stop"] is None and out["open_count"] == 1
+    positions.main("buy", "MSFT", 400, "2026-11-19", size=0.2, stop=380, target=440)
+    with pytest.raises(ValueError, match="already open"):
+        positions.main("buy", "AAPL", 191, "2026-11-19")
+    sold = positions.main("sell", "AAPL", 200.0, "2026-11-20")
+    assert sold["position"]["return"] == round(200 / 190.5 - 1, 4) and sold["open_count"] == 1
+    assert [r["ticker"] for r in sold["open"]] == ["MSFT"] and [r["ticker"] for r in sold["closed"]] == ["AAPL"]
+    assert positions.main("buy", "AAPL", 195, "2026-11-20")["open_count"] == 2  # a new trade once the old one is sold
+    for args, message in ((("sell", "NVDA", 100, "2026-11-20"), "no open position"), (("buy", "TSLA", 100, "2999-01-01"), "future"),
+                          (("buy", "bad ticker!", 100), "not a ticker"), (("buy", "TSLA", 0), "price"),
+                          (("buy", "TSLA", 100, "", 0.1, 101), "stop"), (("buy", "TSLA", 100, "", 0.1, 0, 99), "target"),
+                          (("buy", "TSLA", 100, "", 1.5), "size"), (("hold",), "action"), (("sell", "MSFT", 390, "2026-11-01"), "no open")):
+        with pytest.raises(ValueError, match=message):
+            positions.main(*args)
+    assert len(db(ss.LOAD_POSITIONS_SQL)) == 2
+
+
+def test_main_follows_my_positions(offline, db, monkeypatch):
+    monkeypatch.setattr(ss, "datatable_query", lambda name=ss.DATA_TABLE: db)
+    monkeypatch.setattr(positions, "datatable_query", lambda name=positions.DATA_TABLE: db)
+    days = make_bars(offline["PULL"]).dates
+    positions.main("buy", "PULL", offline["PULL"][-10][3], days[-10].isoformat())
+    positions.main("buy", "SQZ", offline["SQZ"][-5][3], days[-5].isoformat(), stop=offline["SQZ"][-5][3] - 5)  # not in the screen
+    positions.main("buy", "NOPE", 50, days[-3].isoformat())
+    result = ss.main(tickers="PULL,BRK", strategy="all", track_days=0, persist=True, email="trader@example.com")
+    mine = result["positions"]
+    assert mine["open"] == 3 and mine["max_open_trades"] == 10 and mine["swaps"] == []
+    by = {p["ticker"]: p for p in mine["items"]}
+    assert by["NOPE"]["advice"] == "check" and by["SQZ"]["levels_from"] == "yours" and by["SQZ"]["data_status"] == "ok"
+    assert by["PULL"]["advice"] in ("hold", "sell") and by["PULL"]["sessions_held"] == 9
+    sizing = result["sizing"]
+    assert sizing["open"] == 3 and sizing["held"] == 3 - sizing["to_sell"] and sizing["note"] is None
+    pull = [c for c in result["candidates"] if c["ticker"] == "PULL" and c["action"] == "long"]
+    assert all(c["position"]["reason"] == "already open" for c in pull)
+    to, subject, html = offline["_sent"][-1]
+    assert "positions 3/10" in subject and "<b>My positions: 3 of 10 open</b>" in html
+    assert "NOPE bought" in html and "CHECK, no price data today" in html and "SQZ bought" in html
 
 
 def test_main_sizes_long_candidates_and_emails_it(offline):
     result = ss.main(tickers="PULL,BRK", strategy="all", email="trader@example.com")
     longs = [c for c in result["candidates"] if c["action"] == "long"]
     assert [c["position"]["slot"] for c in longs] == [1, 2, None]  # BRK qualifies twice: breakout, then squeeze
-    assert longs[0]["ticker"] == longs[2]["ticker"] and longs[2]["position"]["reason"] == "already open"
+    assert longs[0]["ticker"] == longs[2]["ticker"] and longs[2]["position"]["reason"] == "already proposed"
     assert all(c["position"] is None for c in result["candidates"] if c["action"] != "long")
     assert result["sizing"]["note"] is not None
     html = offline["_sent"][-1][2]
