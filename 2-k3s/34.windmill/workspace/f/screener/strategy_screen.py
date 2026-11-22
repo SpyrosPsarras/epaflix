@@ -35,6 +35,9 @@ held. Your positions come from the positions script (screener.positions, needs p
 by the backtested exit rules, its flags, and a swap when a stalled position could make room for a new setup. Breakdown runs only when
 asked for by name (strategy breakdown): it lost in every backtest window. The squeeze rules are an untested hypothesis: validate before trading them.
 `finviz_url` takes one or more screener URLs (one per line), e.g. a large/mid-cap list and a high-short-float list.
+With `backdrop` (on by default) the email opens with the market backdrop, information only: the next Fed decision and the
+cut or hike odds of the fed funds futures, VIX futures and Nasdaq volatility, oil and metals, theme rotation ETFs ranked against
+SPY, and how each proposal and position moves with them.
 With `persist`, every signal is stored in the Windmill data table `main` (schema `screener`) and followed until it
 closes, even after its ticker leaves the screen; closed signals cannot change (enforced by the database).
 """
@@ -251,6 +254,9 @@ DEFAULTS = {
     "swap_stalled_days": 10,
     "swap_min_score": 60.0,
     "swap_band_r": 0.5,
+    # Market backdrop in the result and the email (1 on, 0 off): Fed, VIX, oil, metals, theme rotation, correlations.
+    # Information only; about 45 more requests.
+    "backdrop": 1,
     "request_pause": 0.4,
 }
 
@@ -2300,6 +2306,347 @@ def summarize(trades, signals=()):
     return summary
 
 
+# ---------------------------------------------------------------- market backdrop
+
+# Information only: none of it changes a score, a filter or a proposal. All from Finviz (futures chart, economic calendar).
+CALENDAR_URL = "https://finviz.com/api/calendar/economic"
+FED_DECISION = "Fed Interest Rate Decision"
+# Futures: front month, rolled by Finviz. VX stands in for the VIX index, the 20-day volatility of NQ for the Nasdaq VIX.
+BACKDROP_ASSETS = {"CL": "WTI crude", "QA": "Brent crude", "GC": "Gold", "SI": "Silver", "PL": "Platinum", "HG": "Copper",
+                   "GDX": "Gold miners", "SIL": "Silver miners"}
+BACKDROP_FUTURES = ("VX", "NQ", "ZQ", "DX", "ZN", "CL", "QA", "GC", "SI", "PL", "HG")
+DRIVERS = {"NQ": "Nasdaq", "CL": "oil", "GC": "gold", "DX": "dollar", "ZN": "10y note", "VX": "VIX"}
+# Theme rotation: each theme is an equal-weight basket of these ETFs or stocks (Optical has no ETF).
+ROTATION_THEMES = {
+    "Semiconductors": ("SMH",), "Memory": ("DRAM",), "Optical": ("COHR", "LITE", "CIEN", "FN", "AAOI", "CRDO", "ANET"),
+    "Software": ("IGV",), "Cybersecurity": ("CIBR",), "Robotics & AI": ("BOTZ",), "Quantum": ("QTUM",), "Space": ("UFO", "ARKX"),
+    "Uranium & nuclear": ("URA", "NLR"), "Solar": ("TAN",), "Lithium & batteries": ("LIT",), "Copper miners": ("COPX",),
+    "Gold miners": ("GDX",), "Silver miners": ("SIL",), "Metals & mining": ("XME",), "Commodities": ("DBC",), "Energy": ("XLE",),
+}
+ROTATION_LOOKBACKS = (21, 63)  # 1 and 3 months
+ROTATION_BACK = 20  # rank 4 weeks earlier
+CORRELATION_DAYS = 63
+VIX_SPIKE = 0.25  # VX up 25% or more in 5 sessions
+VIX_NOTES = {  # forward Nasdaq (NQ) returns 2020-2026, one count per episode; any day: 63 sessions +3.8%, up 70%
+    "spike": "in 2020-2026 a 25% VIX jump in 5 sessions was followed by a Nasdaq rise over the next 63 sessions 76% of the time "
+             "(+7.4% on average, 19 cases) against 70% (+3.8%) on any day; the first week often fell further",
+    "high": "a VIX of 25 or more without a jump was no rally signal in 2020-2026 (median Nasdaq return over the next 63 sessions "
+            "-2.6%, 25 cases)",
+    "low": "VIX in the lowest tenth of its year: complacent, but the Nasdaq still rose over the next 63 sessions 76% of the time",
+}
+
+
+def fetch_futures(ticker, count):
+    response = _get(CHART_URL, {"instrument": "futures", "ticker": ticker, "timeframe": "d", "barsCount": count})
+    return parse_chart(response.json(), ticker)
+
+
+def fetch_calendar(start, end):
+    """Economic calendar events from start to end (dates). Finviz cuts a response at about 90 events, so ask a week at once."""
+    payload = _get(CALENDAR_URL, {"dateFrom": start.isoformat(), "dateTo": end.isoformat()}).json()
+    if not isinstance(payload, list):
+        raise ValueError("the economic calendar is not a list")
+    return payload
+
+
+def _percent(text):
+    match = re.match(r"^\s*(-?\d+(?:\.\d+)?)\s*%?\s*$", str(text or ""))
+    return float(match.group(1)) if match else None
+
+
+def rate_decisions(events):
+    out = []
+    for e in events:
+        if isinstance(e, dict) and e.get("event") == FED_DECISION and isinstance(e.get("date"), str):
+            out.append({"date": date.fromisoformat(e["date"][:10]), "actual": _percent(e.get("actual")),
+                        "previous": _percent(e.get("previous")),
+                        "forecast": _percent(e.get("forecast")) or _percent(e.get("teforecast"))})
+    return sorted(out, key=lambda x: x["date"])
+
+
+def _days_in_month(day):
+    following = (day.replace(day=28) + timedelta(days=4)).replace(day=1)
+    return (following - timedelta(days=1)).day
+
+
+def implied_fed_move(month_close, previous_close, meeting, previous_decision=None):
+    """Rate change in percentage points that the 30-day fed funds futures price for a meeting in the current month.
+    The contract settles to the month's average rate (100 - price); a decision applies from the next day. The rate today is
+    the previous month's average, corrected for a decision in that month."""
+    n, d = _days_in_month(meeting), meeting.day
+    if n == d:
+        return None
+    now = 100 - previous_close
+    if previous_decision and previous_decision["actual"] is not None and previous_decision["previous"] is not None:
+        n0 = _days_in_month(previous_decision["date"])
+        now += (previous_decision["actual"] - previous_decision["previous"]) * previous_decision["date"].day / n0
+    return ((100 - month_close) - now) * n / (n - d)
+
+
+def fed_outlook(as_of, zq=None, fetch=None, weeks=10):
+    """The next Fed rate decision from the economic calendar (date, current rate, forecast) and, once its month has started,
+    the cut or hike probability priced by the 30-day fed funds futures (ZQ, front month)."""
+    fetch = fetch or fetch_calendar
+    found, start = [], as_of + timedelta(days=1)
+    for _ in range(weeks):
+        found = [x for x in rate_decisions(fetch(start, start + timedelta(days=6))) if x["date"] > as_of]
+        if found:
+            break
+        start += timedelta(days=7)
+    if not found:
+        return {"date": None, "note": f"no Fed rate decision in the calendar for the next {weeks} weeks"}
+    nxt = found[0]
+    out = {"date": nxt["date"].isoformat(), "days": (nxt["date"] - as_of).days, "rate": nxt["previous"], "forecast": nxt["forecast"],
+           "implied_move_bp": None, "probability": None, "outcome": None}
+    same_month = zq is not None and len(zq) and (zq.dates[-1].year, zq.dates[-1].month) == (nxt["date"].year, nxt["date"].month)
+    previous = [i for i, d in enumerate(zq.dates) if (d.year, d.month) < (nxt["date"].year, nxt["date"].month)] if same_month else []
+    if not previous:
+        out["note"] = "the futures price this meeting from the first day of its month on"
+        return out
+    first = nxt["date"].replace(day=1)
+    last_month = (first - timedelta(days=1)).replace(day=1)
+    decisions, start = [], last_month
+    while start < first:
+        decisions += [x for x in rate_decisions(fetch(start, min(start + timedelta(days=6), first - timedelta(days=1))))
+                      if last_month <= x["date"] < first]
+        start += timedelta(days=7)
+    move = implied_fed_move(zq.close[-1], zq.close[previous[-1]], nxt["date"], decisions[-1] if decisions else None)
+    if move is None:
+        out["note"] = "a decision on the last day of the month is not priced by that month's futures"
+        return out
+    out["implied_move_bp"] = round(move * 100)
+    out["outcome"] = "cut" if move < 0 else "hike"
+    out["probability"] = round(min(abs(move) / 0.25, 1.0), 2)
+    out["note"] = (f"the 30-day fed funds futures price {move * 100:+.0f} bp: about {out['probability']:.0%} chance of a 25 bp "
+                   f"{out['outcome']}" + (" (or a bigger move)" if abs(move) > 0.25 else ""))
+    return out
+
+
+def _finite(bars):
+    return [(d, c) for d, c in zip(bars.dates, bars.close) if math.isfinite(c) and c > 0]
+
+
+def _rank_in_year(values, i, n=252):
+    window = values[max(0, i - n + 1):i + 1]
+    return sum(v <= values[i] for v in window) / len(window)
+
+
+def _realized_vol(closes, i, n=20):
+    if i < n:
+        return None
+    returns = [math.log(closes[k] / closes[k - 1]) for k in range(i - n + 1, i + 1)]
+    return statistics.stdev(returns) * math.sqrt(252)
+
+
+def vix_view(vx, nq=None):
+    """VX level, its place in the last year, its 5-session change, and the 20-day volatility of the Nasdaq futures."""
+    closes = [c for _, c in _finite(vx)]
+    if len(closes) < 6:
+        return None
+    t = len(closes) - 1
+    change = closes[t] / closes[t - 5] - 1
+    rank = _rank_in_year(closes, t)
+    out = {"close": round(closes[t], 2), "year_rank": round(rank, 2), "change_5d": round(change, 4),
+           "spike": change >= VIX_SPIKE, "nasdaq_vol20": None, "nasdaq_vol_rank": None}
+    out["note"] = (VIX_NOTES["spike"] if out["spike"] else VIX_NOTES["high"] if closes[t] >= 25
+                   else VIX_NOTES["low"] if rank <= 0.1 else None)
+    if nq is not None:
+        q = [c for _, c in _finite(nq)]
+        vols = [_realized_vol(q, i) for i in range(len(q))]
+        known = [v for v in vols if v is not None]
+        if known:
+            out["nasdaq_vol20"] = round(known[-1], 3)
+            out["nasdaq_vol_rank"] = round(_rank_in_year(known, len(known) - 1), 2)
+    return out
+
+
+def asset_view(name, bars):
+    """Trend (close vs EMA50 vs EMA200), 1- and 3-month change, distance from the 1-year high and low, new 1-year high."""
+    closes = [c for _, c in _finite(bars)]
+    t = len(closes) - 1
+    if t < 63:
+        return None
+    e50, e200 = ema(closes, 50)[t], ema(closes, 200)[t]
+    year = closes[max(0, t - 251):t + 1]
+    trend = ("uptrend" if e200 and closes[t] > e50 > e200 else "downtrend" if e200 and closes[t] < e50 < e200 else "mixed")
+    return {"name": name, "ticker": bars.ticker, "close": round(closes[t], 4), "trend": trend,
+            "change_1m": round(closes[t] / closes[t - 21] - 1, 4), "change_3m": round(closes[t] / closes[t - 63] - 1, 4),
+            "from_high": round(closes[t] / max(year) - 1, 4), "from_low": round(closes[t] / min(year) - 1, 4),
+            "new_high": t >= 252 and closes[t] >= max(closes[t - 252:t])}
+
+
+def theme_rotation(theme_bars, spy, themes=ROTATION_THEMES, lookbacks=ROTATION_LOOKBACKS, back=ROTATION_BACK):
+    """Themes ranked by their average 1- and 3-month return less SPY's, with the rank 4 weeks earlier."""
+    days = [d for d, _ in _finite(spy)]
+    spy_close = dict(_finite(spy))
+    maps = {k: dict(_finite(b)) for k, b in theme_bars.items() if b is not None}
+
+    def relative(members, t):
+        out = []
+        for n in lookbacks:
+            if t - n < 0:
+                return None
+            a, b = days[t - n], days[t]
+            rets = [m[b] / m[a] - 1 for m in members if a in m and b in m]
+            if not rets:
+                return None
+            out.append(sum(rets) / len(rets) - (spy_close[b] / spy_close[a] - 1))
+        return out
+
+    rows, t = [], len(days) - 1
+    for theme, tickers in themes.items():
+        members = [maps[k] for k in tickers if k in maps]
+        now = relative(members, t) if members else None
+        if now is None:
+            continue
+        before = relative(members, t - back)
+        rows.append({"theme": theme, "tickers": [k for k in tickers if k in maps], "rel_1m": round(now[0], 4),
+                     "rel_3m": round(now[1], 4), "score": sum(now) / 2, "score_4w": None if before is None else sum(before) / 2})
+    for key, rank in (("score", "rank"), ("score_4w", "rank_4w")):
+        ranked = sorted((r for r in rows if r[key] is not None), key=lambda r: -r[key])
+        for k, r in enumerate(ranked, 1):
+            r[rank] = k
+    for r in rows:
+        r.setdefault("rank_4w", None)
+        r["score"] = round(r["score"], 4)
+        r["score_4w"] = None if r["score_4w"] is None else round(r["score_4w"], 4)
+    return sorted(rows, key=lambda r: r["rank"])
+
+
+def _returns(closes):
+    """Daily returns by date from a date -> close map."""
+    days = sorted(closes)
+    return {b: closes[b] / closes[a] - 1 for a, b in zip(days, days[1:])}
+
+
+def _correlation(a, b, days):
+    common = [d for d in days if d in a and d in b]
+    if len(common) < 0.75 * len(days):
+        return None
+    try:
+        return statistics.correlation([a[d] for d in common], [b[d] for d in common])
+    except statistics.StatisticsError:
+        return None
+
+
+def correlation_map(closes, drivers, themes, n=CORRELATION_DAYS):
+    """Correlation of the stock's daily returns over the last n sessions with each driver and theme basket."""
+    own = _returns(closes)
+    days = sorted(own)[-n:]
+    if len(days) < n:
+        return None
+    by_driver = {k: _correlation(own, v, days) for k, v in drivers.items()}
+    by_theme = {k: _correlation(own, v, days) for k, v in themes.items()}
+    by_driver = {k: round(v, 2) for k, v in by_driver.items() if v is not None}
+    by_theme = {k: round(v, 2) for k, v in by_theme.items() if v is not None}
+    best = max(by_theme, key=by_theme.get) if by_theme else None
+    return {"drivers": by_driver, "theme": best, "theme_correlation": by_theme.get(best)}
+
+
+def market_backdrop(as_of, now, count, cfg, context_bars, closes_by_ticker, mapping_tickers):
+    """Fed, VIX, oil and metals, theme rotation, and how today's proposals and your positions move with them."""
+    missing, futures, stocks = [], {}, {}
+
+    def load(ticker, fetch, label):
+        try:
+            bars = completed_bars(fetch(ticker, count), now)
+            if not _finite(bars):
+                raise ValueError("no prices")
+            return bars
+        except (requests.RequestException, ValueError) as error:
+            missing.append({"ticker": ticker, "data": label, "reason": str(error)})
+            return None
+        finally:
+            time.sleep(cfg["request_pause"])
+
+    for t in BACKDROP_FUTURES:
+        futures[t] = load(t, fetch_futures, "futures")
+    wanted = sorted({k for tickers in ROTATION_THEMES.values() for k in tickers} | {"SPY", "GDX", "SIL"})
+    for t in wanted:
+        stocks[t] = context_bars.get(t) or load(t, fetch_bars, "ETF or stock")
+    try:
+        fed = fed_outlook(as_of, futures.get("ZQ"), lambda a, b: _paused(fetch_calendar, cfg, a, b))
+    except (requests.RequestException, ValueError) as error:
+        missing.append({"ticker": "FOMC", "data": "economic calendar", "reason": str(error)})
+        fed = None
+    vix = vix_view(futures["VX"], futures.get("NQ")) if futures.get("VX") else None
+    assets = [v for v in (asset_view(name, futures.get(t) or stocks.get(t)) for t, name in BACKDROP_ASSETS.items()
+                          if futures.get(t) or stocks.get(t)) if v]
+    rotation = theme_rotation(stocks, stocks["SPY"]) if stocks.get("SPY") else []
+    drivers = {name: _returns(dict(_finite(futures[k]))) for k, name in DRIVERS.items() if futures.get(k) is not None}
+    themes = {}
+    for theme, tickers in ROTATION_THEMES.items():
+        series = [_returns(dict(_finite(stocks[k]))) for k in tickers if stocks.get(k) is not None]
+        if series:
+            days = set().union(*series)
+            themes[theme] = {d: sum(s[d] for s in series if d in s) / sum(d in s for s in series) for d in days}
+    mapping = []
+    for ticker in mapping_tickers:
+        if ticker in closes_by_ticker:
+            found = correlation_map(closes_by_ticker[ticker], drivers, themes)
+            if found:
+                mapping.append({"ticker": ticker, **found})
+    return {"fed": fed, "vix": vix, "assets": assets, "rotation": rotation, "mapping": mapping, "missing": missing,
+            "note": "Information only: it changes no score, filter or proposal. Futures are front month (VX for the VIX)."}
+
+
+def _paused(fetch, cfg, *args):
+    try:
+        return fetch(*args)
+    finally:
+        time.sleep(cfg["request_pause"])
+
+
+def backdrop_html(b):
+    pct = lambda x: "-" if x is None else f"{x:+.1%}"
+    items = []
+    fed = b.get("fed")
+    if fed and fed.get("date"):
+        rate = "" if fed["rate"] is None else f", rate now {fed['rate']:g}%"
+        forecast = "" if fed["forecast"] is None else f", forecast {fed['forecast']:g}%"
+        items.append(f"Fed: next decision {fed['date']} (in {fed['days']} days){rate}{forecast}; {fed['note']}.")
+    elif fed:
+        items.append(f"Fed: {fed['note']}.")
+    v = b.get("vix")
+    if v:
+        text = (f"VIX futures {v['close']:g} (higher than {v['year_rank']:.0%} of the last year), 5 days {pct(v['change_5d'])}"
+                + (" JUMP" if v["spike"] else ""))
+        if v["nasdaq_vol20"] is not None:
+            text += f"; Nasdaq 20-day volatility {v['nasdaq_vol20']:.0%} (higher than {v['nasdaq_vol_rank']:.0%} of the last year)"
+        items.append(text + (f". Note: {v['note']}." if v["note"] else "."))
+    for a in b.get("assets", []):
+        items.append(f"{a['name']} ({a['ticker']}) {a['close']:g}, {a['trend']}, 1 month {pct(a['change_1m'])}, 3 months "
+                     f"{pct(a['change_3m'])}, {pct(a['from_high'])} from its 1-year high, {pct(a['from_low'])} from its low"
+                     + (", NEW 1-YEAR HIGH" if a["new_high"] else "") + ".")
+    parts = ["<p><b>Market backdrop</b> (information only, no effect on scores)</p>"]
+    if items:
+        parts.append("<ul>" + "".join(f"<li>{escape(x)}</li>" for x in items) + "</ul>")
+    rot = b.get("rotation") or []
+    if rot:
+        def move(r):
+            if r["rank_4w"] is None:
+                return "-"
+            d = r["rank_4w"] - r["rank"]
+            return f"{r['rank_4w']} ({'up ' + str(d) if d > 0 else 'down ' + str(-d) if d < 0 else 'same'})"
+        body = "".join(f"<tr><td>{r['rank']}</td><td>{escape(r['theme'])}</td><td>{escape(', '.join(r['tickers']))}</td>"
+                       f"<td>{pct(r['rel_1m'])}</td><td>{pct(r['rel_3m'])}</td><td>{move(r)}</td></tr>" for r in rot)
+        parts.append("<p><b>Theme rotation</b>: return less SPY's, ranked by the average of 1 and 3 months.</p>"
+                     "<table border='1' cellpadding='4' cellspacing='0'><tr><th>rank</th><th>theme</th><th>tickers</th>"
+                     f"<th>1 month vs SPY</th><th>3 months vs SPY</th><th>rank 4 weeks ago</th></tr>{body}</table>")
+    mapping = b.get("mapping") or []
+    if mapping:
+        def line(m):
+            drivers = ", ".join(f"{k} {v:+.2f}" for k, v in m["drivers"].items())
+            theme = f"; moves most with {m['theme']} ({m['theme_correlation']:+.2f})" if m["theme"] else ""
+            return f"{m['ticker']}: {drivers}{theme}"
+        parts.append(f"<p><b>Correlation of daily returns, last {CORRELATION_DAYS} sessions</b> (proposals and your positions; "
+                     "+1 moves together, -1 opposite, 10y note is the bond price, so + means it gains when yields fall):</p><ul>"
+                     + "".join(f"<li>{escape(line(m))}</li>" for m in mapping) + "</ul>")
+    if b.get("missing"):
+        parts.append(f"<p>Backdrop data unavailable: {escape(', '.join(m['ticker'] for m in b['missing']))}.</p>")
+    return "".join(parts)
+
+
 # ---------------------------------------------------------------- main
 
 
@@ -2630,6 +2977,8 @@ def email_html(result):
     if context:
         parts.append("<p>" + "; ".join(f"{escape(k)} {v['close']} ({escape(str(v['trend']))}, {pct(v['vs_sma200'])} vs SMA200, "
                                        f"20 days {pct(v['change_20d'])})" for k, v in context.items()) + "</p>")
+    if result.get("backdrop"):
+        parts.append(backdrop_html(result["backdrop"]))
     mine = result.get("positions")
     if mine is not None:
         sell = [p for p in mine["items"] if p["advice"] != "hold"]
@@ -2778,6 +3127,7 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
 
     results = {s: {"qualified": [], "rejected": []} for s in strategies}
     trades, signals, base, without_earnings, screened, tracked = [], [], [], [], 0, []
+    closes_by_ticker = {}
     for name in names:
         try:
             bars = completed_bars(fetch_bars(name, count), now)
@@ -2793,6 +3143,7 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
             continue
         updates += [stored_update(row, bars, calendar, as_of, hold_adx=cfg["momentum_hold_adx"]) for row in pending_by_ticker.pop(name, [])]
         screened += 1
+        closes_by_ticker[name] = dict(_finite(bars))
         sector = sectors.get(name)
         if sector is None and source == "tickers":
             try:
@@ -2914,6 +3265,14 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
                         key=lambda x: (ACTION_ORDER.get(x["action"], 9), x["priority"], -x["score"], x["ticker"], x["strategy"]))
     sizing = assign_positions(candidates, statuses, cfg, persist)
     swaps = plan_swaps(candidates, statuses, cfg) if persist else []
+    backdrop = None
+    if cfg["backdrop"]:
+        for name, data in position_data.items():
+            if not isinstance(data, str):
+                closes_by_ticker.setdefault(name, dict(_finite(data[0])))
+        mapped = list(dict.fromkeys([c["ticker"] for c in candidates if c["action"] in TRADE_ACTIONS]
+                                    + [p["ticker"] for p in statuses if p["data_status"] == "ok"]))
+        backdrop = market_backdrop(as_of, now, count, cfg, context_bars, closes_by_ticker, mapped)
 
     duration = time.monotonic() - started
     counts = ", ".join(f"{s} {len(results[s]['qualified'])}" for s in strategies)
@@ -2928,6 +3287,7 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
         "holding": holding,
         "candidates": candidates,
         "sizing": sizing,
+        "backdrop": backdrop,
         "positions": None if not persist else {
             "open": len(statuses), "max_open_trades": sizing["max_open_trades"], "to_sell": sizing["to_sell"],
             "items": statuses, "swaps": swaps,
