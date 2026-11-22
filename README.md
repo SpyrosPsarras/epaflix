@@ -56,9 +56,9 @@ The script creates Secret `argocd/sops-age` with the key `keys.txt` from the age
 
 ## Not in git
 
-- Secrets created by hand, as of 2026-11-15, written as namespace/name:
+- Secrets created by hand, as of 2026-11-22, written as namespace/name:
   - Needed by step 4 and Argo CD: `argocd/sops-age`, `argocd/argocd-redis`, the two OIDC keys in `argocd/argocd-secret`, `postgres-system/postgres-superuser`, `postgres-system/postgres-app-user`.
-  - Apps: `renovate/renovate-secrets`, `kube-system/aaaa-tripwire-ssh`, `servarr/lingarr-db-env`, `servarr/probe-key`, `remote-pi/cliproxy-free-canary`, `remote-pi/cliproxy-free-canary-config`, `vaultwarden/vaultwarden-org-setup`, `tailscale/subnet-router-state`.
+  - Apps: `renovate/renovate-secrets`, `kube-system/aaaa-tripwire-ssh`, `tailscale/subnet-router-state`.
   - MCP hub: `mcp-hub/mcp-hub-notion-grant`, and in `mcp-hub-homelab` the Secrets `mcp-hub-instance`, `mcp-hub-gmail`, `mcp-hub-google-upstream`, `mcp-hub-searxng`.
   - Agent runtime: in `t3code-homelab` the Secrets `t3-runtime-inputs`, `t3-runtime-grants`, `vaultwarden-agent`, `t3-build-kubeconfig`, `homelab-agent-kubeconfig`. Also `t3code/manager-kubeconfig`, `t3code/manager-agent-kubeconfig`, `t3-build-homelab/builder-token`.
 - The Traefik CRDs. `05.traefik-deployment` sets `includeCRDs: false` and no Application renders them, so they stay at the version step 4 installed.
