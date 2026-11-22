@@ -63,7 +63,7 @@ The script creates Secret `argocd/sops-age` with the key `keys.txt` from the age
   - Agent runtime: in `t3code-homelab` the Secrets `t3-runtime-inputs`, `t3-runtime-grants`, `vaultwarden-agent`, `t3-build-kubeconfig`, `homelab-agent-kubeconfig`. Also `t3code/manager-kubeconfig`, `t3code/manager-agent-kubeconfig`, `t3-build-homelab/builder-token`.
 - The Traefik CRDs. `05.traefik-deployment` sets `includeCRDs: false` and no Application renders them, so they stay at the version step 4 installed.
 - Three `Endpoints` in `traefik-system`: `minio-external`, `pegaprox-ui`, `truenas-ui`. They are in `2-k3s/05.traefik-deployment/ingress/{minio,pegaprox,truenas}-proxy.yaml`, but Argo CD excludes the kind. Step 4 creates them. Apply later changes by hand.
-- `2-k3s/18.cloudflare-tunnel` and `2-k3s/21.tailscale` have no Application. Run `2-k3s/18.cloudflare-tunnel/deploy.sh` and follow [the Tailscale README](2-k3s/21.tailscale/README.md).
+- Tailscale enrollment and its admin console settings. Follow [the Tailscale README](2-k3s/21.tailscale/README.md).
 
 ## Postgres restore
 

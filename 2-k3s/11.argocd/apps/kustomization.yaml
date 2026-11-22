@@ -10,6 +10,7 @@ resources:
   - app-bread.yaml
   - app-cnpg-operator.yaml
   - app-cert-manager.yaml
+  - app-cloudflare-tunnel.yaml
   - app-coredns.yaml
   - app-deal-finder.yaml
   - app-discord.yaml
@@ -35,6 +36,7 @@ resources:
   - app-speedtest.yaml
   - app-system-upgrade-controller.yaml
   - app-system-upgrade-plans.yaml
+  - app-tailscale.yaml
   - app-t3-build.yaml
   - app-t3code.yaml
   - app-t3code-homelab.yaml
