@@ -1139,6 +1139,22 @@ def offline(monkeypatch):
         return make_bars(rows[ticker], ticker)
 
     monkeypatch.setattr(ss, "fetch_bars", fetch)
+    futures = {"VX": uptrend(296, 15, 0.01) + [(v, v + 0.5, v - 0.5, v, 1000) for v in (18, 19, 20, 22, 24)],
+               "NQ": uptrend(301, 20000, 5), "CL": downtrend(301, 90, -0.05), "GC": uptrend(301, 2000, 3),
+               "DX": uptrend(301, 100, 0.01)}
+    rows["SMH"] = uptrend(301, 400 + ss.DEFAULTS["context_etfs"].index("SMH"), 0.2)
+    rows["XLE"] = uptrend(301, 50 + sorted(set(ss.SECTOR_ETFS.values())).index("XLE"), -0.02)
+
+    def fetch_futures(ticker, count):
+        if ticker not in futures:
+            raise ValueError("chart data is for another ticker")
+        return make_bars(futures[ticker], ticker)
+
+    monkeypatch.setattr(ss, "fetch_futures", fetch_futures)
+    meeting = sessions(301)[-1] + timedelta(days=10)
+    monkeypatch.setattr(ss, "fetch_calendar", lambda a, b: [
+        {"event": ss.FED_DECISION, "date": f"{meeting.isoformat()}T14:00:00", "previous": "4%", "teforecast": "3.75%"}]
+        if a <= meeting <= b else [{"event": "CPI", "date": f"{a.isoformat()}T08:30:00"}])
 
     def earnings(ticker):
         if ticker != "BRK":
@@ -2121,6 +2137,97 @@ def test_positions_script_records_buys_and_sells(db, monkeypatch):
         with pytest.raises(ValueError, match=message):
             positions.main(*args)
     assert len(db(ss.LOAD_POSITIONS_SQL)) == 2
+
+
+def test_implied_fed_move_from_the_fed_funds_futures():
+    # September 2025: August averaged 4.33%, the September contract 95.77 (4.23%), decision on the 17th
+    assert ss.implied_fed_move(95.77, 95.67, date(2025, 9, 17)) == pytest.approx(-0.10 * 30 / 13)
+    # a 25 bp cut on 10 December lowered December's average: the rate after it is that average plus 0.25 x 10/31
+    december = {"date": date(2025, 12, 10), "actual": 3.75, "previous": 4.0}
+    move = ss.implied_fed_move(96.25, 96.20, date(2026, 1, 28), december)
+    assert move == pytest.approx((3.75 - (3.80 - 0.25 * 10 / 31)) * 31 / 3)
+    assert ss.implied_fed_move(96, 96, date(2026, 1, 31)) is None
+    assert ss._percent("4.25%") == 4.25 and ss._percent(" 4 ") == 4.0 and ss._percent(None) is None and ss._percent("n/a") is None
+
+
+def test_fed_outlook_reads_the_calendar_and_the_futures():
+    calls = []
+    events = [{"event": ss.FED_DECISION, "date": "2025-09-17T14:00:00", "previous": "4.5%", "forecast": "4.25%"},
+              {"event": ss.FED_DECISION, "date": "2025-07-30T14:00:00", "actual": "4.5%", "previous": "4.5%"},
+              {"event": "Fed Press Conference", "date": "2025-09-17T14:30:00"}, "junk"]
+
+    def fetch(a, b):
+        calls.append((a, b))
+        return [e for e in events if isinstance(e, dict) and a <= date.fromisoformat(e["date"][:10]) <= b]
+
+    days = [date(2025, 8, 28), date(2025, 8, 29), date(2025, 9, 2)]
+    zq = ss.Bars("ZQ", days, *[[95.67, 95.67, 95.77]] * 4, [1.0] * 3)
+    out = ss.fed_outlook(date(2025, 9, 2), zq, fetch)
+    assert (out["date"], out["days"], out["rate"], out["forecast"]) == ("2025-09-17", 15, 4.5, 4.25)
+    assert out["implied_move_bp"] == -23 and out["outcome"] == "cut" and out["probability"] == 0.92
+    assert out["note"] == "the 30-day fed funds futures price -23 bp: about 92% chance of a 25 bp cut"
+    assert calls[0] == (date(2025, 9, 3), date(2025, 9, 9)) and calls[-1][1] == date(2025, 8, 31)  # August checked for a decision
+    early = ss.fed_outlook(date(2025, 8, 20), zq.head(1), fetch)
+    assert early["date"] == "2025-09-17" and early["probability"] is None and "first day of its month" in early["note"]
+    assert ss.fed_outlook(date(2025, 10, 1), zq, fetch, weeks=2)["date"] is None
+
+
+def test_vix_view_flags_a_jump_and_nasdaq_volatility():
+    vx = make_bars(uptrend(300, 15, 0.0) + [(v, v, v, v, 1) for v in (16, 17, 18, 19, 20)])
+    out = ss.vix_view(vx, make_bars(uptrend(305, 20000, 5)))
+    assert out["spike"] and out["change_5d"] == pytest.approx(20 / 15 - 1, abs=1e-4) and out["year_rank"] == 1.0
+    assert out["note"] == ss.VIX_NOTES["spike"] and out["nasdaq_vol20"] is not None and 0 <= out["nasdaq_vol_rank"] <= 1
+    calm = ss.vix_view(make_bars([(v, v, v, v, 1) for v in [30 - 0.05 * i for i in range(300)]]))
+    assert not calm["spike"] and calm["note"] == ss.VIX_NOTES["low"] and calm["nasdaq_vol20"] is None
+    high = ss.vix_view(make_bars([(26, 26, 26, 26, 1)] * 10))
+    assert high["note"] == ss.VIX_NOTES["high"] and ss.vix_view(make_bars([(26, 26, 26, 26, 1)] * 5)) is None
+
+
+def test_asset_view_trend_and_new_high():
+    up = ss.asset_view("Gold", make_bars(uptrend(300, 100, 1), "GC"))
+    assert up["trend"] == "uptrend" and up["new_high"] and up["from_high"] == 0 and up["change_1m"] == round(399 / 378 - 1, 4)
+    down = ss.asset_view("Oil", make_bars(downtrend(300, 400, -1), "CL"))
+    assert down["trend"] == "downtrend" and not down["new_high"] and down["from_low"] == 0 and down["ticker"] == "CL"
+    assert ss.asset_view("Short", make_bars(uptrend(50))) is None
+
+
+def test_theme_rotation_ranks_against_spy_and_four_weeks_earlier():
+    spy = make_bars(uptrend(120, 100, 0.0))
+    late = uptrend(100, 100, 0.0) + uptrend(20, 100, 2)  # flat, then a rally in the last 4 weeks
+    bars = {"AAA": make_bars(uptrend(120, 100, 0.5)), "LATE": make_bars(late), "B1": make_bars(downtrend(120, 200, -0.5)),
+            "B2": make_bars(uptrend(120, 100, 0.0)), "NEW": make_bars(uptrend(30)), "GONE": None}
+    themes = {"Steady": ("AAA",), "Late": ("LATE",), "Basket": ("B1", "B2", "GONE"), "Young": ("NEW",), "None": ("GONE",)}
+    rows = ss.theme_rotation(bars, spy, themes)
+    assert [r["theme"] for r in rows] == ["Late", "Steady", "Basket"]
+    assert [(r["rank"], r["rank_4w"]) for r in rows] == [(1, 2), (2, 1), (3, 3)]
+    basket = rows[2]
+    assert basket["tickers"] == ["B1", "B2"] and basket["rel_1m"] == round(((200 - 0.5 * 119) / (200 - 0.5 * 98) - 1) / 2, 4)
+
+
+def test_correlation_map_finds_the_drivers_and_the_closest_theme():
+    days = sessions(80)
+    wave = [100 * (1 + 0.01 * math.sin(i)) + i * 0.1 for i in range(80)]
+    stock = dict(zip(days, wave))
+    same = ss._returns(dict(zip(days, [w * 2 for w in wave])))
+    opposite = {d: -r for d, r in same.items()}
+    out = ss.correlation_map(stock, {"oil": opposite, "gold": {}}, {"Twin": same, "Other": opposite})
+    assert out == {"drivers": {"oil": -1.0}, "theme": "Twin", "theme_correlation": 1.0}
+    assert ss.correlation_map(dict(list(stock.items())[:30]), {}, {}) is None
+
+
+def test_main_adds_the_market_backdrop(offline):
+    result = ss.main(tickers="PULL,BRK", strategy="all", track_days=0, email="trader@example.com")
+    b = result["backdrop"]
+    assert b["vix"]["spike"] and b["fed"]["forecast"] == 3.75 and b["fed"]["rate"] == 4.0 and b["fed"]["days"] == 10
+    assert [a["ticker"] for a in b["assets"]] == ["CL", "GC"]
+    assert {r["theme"] for r in b["rotation"]} == {"Semiconductors", "Energy"}  # the only ETFs the fixture has
+    assert [m["ticker"] for m in b["mapping"]] == list(dict.fromkeys(c["ticker"] for c in result["candidates"] if c["action"] == "long"))
+    assert set(b["mapping"][0]["drivers"]) == {"Nasdaq", "oil", "gold", "dollar", "VIX"} and b["mapping"][0]["theme"]
+    assert {"ZQ", "QA", "DRAM", "COHR"} <= {m["ticker"] for m in b["missing"]} and result["data_errors"] == []
+    html = offline["_sent"][-1][2]
+    assert "<b>Market backdrop</b>" in html and "Fed: next decision" in html and "JUMP" in html and "<b>Theme rotation</b>" in html
+    assert "Backdrop data unavailable: " in html
+    assert ss.main(tickers="PULL", settings={"backdrop": 0})["backdrop"] is None
 
 
 def test_main_follows_my_positions(offline, db, monkeypatch):
