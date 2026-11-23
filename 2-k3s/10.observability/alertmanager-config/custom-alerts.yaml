@@ -1401,7 +1401,7 @@ spec:
             description: >-
               The apps root dataset's node_filesystem_avail_bytes has been under 20 GiB for an
               hour. The root dataset has no quota, so this is the pool-wide space left. apps
-              holds all democratic-csi iSCSI zvols under apps/k8s/iscsi. They are sparse, so
+              holds the democratic-csi iSCSI zvols under apps/k8s/iscsi. They are sparse, so
               a full pool makes writes to every iSCSI PVC fail at once. 20 GiB free is about 80%
               used of the 95 GiB usable. The pool is one 100G virtual disk on the shared
               ssd-raid storage, the evanthoulaki SSD RAID 5 over iSCSI. To grow it, follow
@@ -1434,8 +1434,8 @@ spec:
               The pithari root dataset's node_filesystem_avail_bytes has been under 2 TiB for an
               hour. The root dataset has no quota, so this is the pool-wide space left after
               raidz2 parity, which reads far lower than `zpool list free`. pithari is raidz2 of
-              4 x 12 TB with 21 TiB usable, so 2 TiB free is about 90% used. It holds every
-              democratic-csi iSCSI zvol under pithari/k8s and Paperless under pithari/paperless.
+              4 x 12 TB with 21 TiB usable, so 2 TiB free is about 90% used. It holds the
+              democratic-csi iSCSI zvols under pithari/k8s and Paperless under pithari/paperless.
               The zvols are sparse, so a full pool makes writes to every iSCSI PVC fail at once.
               Check what grew (`zfs list -o space -r pithari` sorted by used) before deleting anything.
 
