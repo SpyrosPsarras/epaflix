@@ -13,6 +13,19 @@ spec:
       storage: 5Gi
 ---
 apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: home-assistant-config-pithari
+  namespace: home-assistant
+spec:
+  storageClassName: truenas-iscsi
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
 kind: ConfigMap
 metadata:
   name: home-assistant-configuration
@@ -321,7 +334,7 @@ spec:
       volumes:
         - name: config
           persistentVolumeClaim:
-            claimName: home-assistant-config
+            claimName: home-assistant-config-pithari
         - name: configuration
           configMap:
             name: home-assistant-configuration

@@ -12,6 +12,19 @@ spec:
     requests:
       storage: 5Gi
 ---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: esphome-config-pithari
+  namespace: home-assistant
+spec:
+  storageClassName: truenas-iscsi
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -71,7 +84,7 @@ spec:
       volumes:
         - name: config
           persistentVolumeClaim:
-            claimName: esphome-config
+            claimName: esphome-config-pithari
 ---
 apiVersion: v1
 kind: Service

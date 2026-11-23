@@ -14,6 +14,21 @@ spec:
     requests:
       storage: 2Gi
 ---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: roborock-data-pithari
+  namespace: home-assistant
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+spec:
+  storageClassName: truenas-iscsi
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
@@ -95,7 +110,7 @@ spec:
             secretName: api-rr-tls
         - name: data
           persistentVolumeClaim:
-            claimName: roborock-data
+            claimName: roborock-data-pithari
 ---
 apiVersion: v1
 kind: Service
