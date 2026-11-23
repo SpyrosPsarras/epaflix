@@ -10,8 +10,8 @@ driver:
       apiKey: ${TRUENAS_API_KEY}
       allowInsecure: true
     zfs:
-      datasetParentName: apps/k8s/iscsi/vols
-      detachedSnapshotsDatasetParentName: apps/k8s/iscsi/snaps
+      datasetParentName: pithari/k8s/iscsi/vols
+      detachedSnapshotsDatasetParentName: pithari/k8s/iscsi/snaps
     iscsi:
       targetPortal: "192.168.10.200:3260"
       namePrefix: k8s-
