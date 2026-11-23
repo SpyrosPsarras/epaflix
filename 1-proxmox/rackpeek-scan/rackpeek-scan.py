@@ -22,8 +22,8 @@ WALK_FILES = ("/etc/crontab", "/etc/fstab", "/etc/hosts", "/etc/sysctl.conf",
               "/etc/network/interfaces", "/etc/netplan")
 WALK_LIMIT = 5000
 
-SECRET_KEY = r"[A-Za-z0-9_.-]*(?:pass|pwhash|secret|token|key|credential|auth)[A-Za-z0-9_.-]*"
-KEY_SEP = re.compile(r"[\"']?(?P<key>" + SECRET_KEY + r")[\"']?\s*[:=]\s*", re.IGNORECASE)
+KEY_SEP = re.compile(r"(?<![A-Za-z0-9_.-])[\"']?(?P<key>[A-Za-z0-9_.-]+)[\"']?\s*[:=]\s*")
+SENSITIVE = re.compile(r"pass|pwhash|secret|token|key|credential|auth", re.IGNORECASE)
 BLOCK = re.compile(r"^[|>](?:[1-9][+-]?|[+-][1-9]?)?$")
 GUEST_FIELDS = ("cores", "sockets", "memory", "name", "ostype", "hostname")
 DISK_KEY = re.compile(r"^(scsi|virtio|sata|ide|efidisk|tpmstate|unused|mp)\d*$|^rootfs$")
@@ -31,19 +31,27 @@ CLI_FLAG = re.compile(
     r"(?P<pre>(?<![A-Za-z0-9_-])--?[A-Za-z0-9-]*(?:pass|secret|token|key|credential)[A-Za-z0-9-]*[ =])(?P<val>\"[^\"\n]*\"|'[^'\n]*'|[^\s;]+)",
     re.IGNORECASE)
 URL_TOKEN = re.compile(r"(?P<pre>://[^\s\"']*?/)[A-Za-z0-9_-]{32,}(?=[/?#\s\"']|$)", re.MULTILINE)
-URL_PASSWORD = re.compile(r"(?P<pre>[A-Za-z][A-Za-z0-9+.-]*://[^\s:/@]+:)[^\s@/]+(?P<at>@)")
+URL_PASSWORD = re.compile(r"(?P<pre>(?<![A-Za-z0-9+.-])[A-Za-z][A-Za-z0-9+.-]*://[^\s:/@]+:)[^\s@/]+(?P<at>@)")
 
 
 def under(path, prefix):
     return path == prefix or path.startswith(prefix + "/")
 
 
+def sensitive_key(key):
+    return bool(SENSITIVE.search(key))
+
+
 def mask_line(line):
-    m = KEY_SEP.search(line)
+    if ":" not in line and "=" not in line:
+        return line, None
+    m = next((m for m in KEY_SEP.finditer(line) if sensitive_key(m.group("key"))), None)
     if not m:
         return line, None
     rest = line[m.end():]
-    if rest.strip() in ("", "***", '"***"', "'***'"):
+    if rest.strip() == "":
+        return line, len(line) - len(line.lstrip())
+    if rest.strip() in ("***", '"***"', "'***'"):
         return line, None
     if BLOCK.match(rest.split("#")[0].strip()):
         return line, len(line) - len(line.lstrip())
@@ -63,7 +71,7 @@ def mask_text(text):
     for line in text.split("\n"):
         if cont:
             if line.lstrip().startswith(("#", ";")):
-                out.append(line)
+                out.append(mask_line(line)[0])
                 continue
             out.append("***" if line.strip() else line)
             cont = line.rstrip().endswith("\\")

@@ -79,6 +79,26 @@ class MaskText(unittest.TestCase):
         self.assertNotIn("ggg7", out)
         self.assertIn("ExecStart=/bin/x", out)
 
+    def test_mask_comment_inside_continuation(self):
+        out = scan.mask_text('Environment=API_TOKEN=a1 \\\n# password: hhh8\n  b2\n')
+        self.assertNotIn("hhh8", out)
+        self.assertNotIn("b2", out)
+
+    def test_mask_split_line_yaml(self):
+        out = scan.mask_text("db:\n  password:\n    iii9\n  host: h\n")
+        self.assertNotIn("iii9", out)
+        self.assertIn("host: h", out)
+
+    def test_mask_long_line_fast(self):
+        import time
+        start = time.time()
+        scan.mask_text("a" * 65536 + "\n" + "b" * 65536 + "=x\n")
+        self.assertLess(time.time() - start, 0.5)
+
+    def test_sensitive_key(self):
+        self.assertTrue(scan.sensitive_key("DB_PASSWORD"))
+        self.assertFalse(scan.sensitive_key("hostname"))
+
     def test_mask_keeps_plain(self):
         self.assertEqual(scan.mask_text("hostname=takaros\n"), "hostname=takaros\n")
 

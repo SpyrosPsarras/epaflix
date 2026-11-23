@@ -181,6 +181,21 @@ class CarryOver(unittest.TestCase):
         items = by_name(build.build_items(k8s, {}, fx.repo(), set(), indexed=None))
         self.assertNotIn("hidden-db", items["forgejo/deploy/forgejo"]["labels"]["uses"])
 
+    def test_split_line_secret_not_in_uses(self):
+        k8s = fx.k8s()
+        k8s["configmaps"][0]["data"]["app.yaml"] = "db:\n  password:\n    split-db.postgres-system.svc\n"
+        items = by_name(build.build_items(k8s, {}, fx.repo(), set(), indexed=None))
+        self.assertNotIn("split-db", items["forgejo/deploy/forgejo"]["labels"]["uses"])
+
+    def test_long_env_value_fast(self):
+        import time
+        k8s = fx.k8s()
+        k8s["deployments"][0]["spec"]["template"]["spec"]["containers"][0]["env"].append(
+            {"name": "BIG", "value": "z" * 65536})
+        start = time.time()
+        build.build_items(k8s, {}, fx.repo(), set())
+        self.assertLess(time.time() - start, 1.0)
+
     def test_failed_source_untouched(self):
         self.assertNotIn("vm/nick", self.run_carry({"k8s"}))
 

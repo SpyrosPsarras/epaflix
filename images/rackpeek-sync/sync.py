@@ -163,7 +163,7 @@ def safe_rel(path):
 
 
 def mask_configmap(data):
-    return {k: "***" if scanner.KEY_SEP.search(k + "=") else build.scrub(scanner.mask_text(v or ""))
+    return {k: "***" if scanner.sensitive_key(k) else build.scrub(scanner.mask_text(v or ""))
             for k, v in (data or {}).items()}
 
 
