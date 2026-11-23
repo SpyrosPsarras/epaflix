@@ -23,9 +23,10 @@ WALK_FILES = ("/etc/crontab", "/etc/fstab", "/etc/hosts", "/etc/sysctl.conf",
 WALK_LIMIT = 5000
 
 SECRET_KEY = r"[A-Za-z0-9_.-]*(?:pass|pwhash|secret|token|key|credential|auth)[A-Za-z0-9_.-]*"
-KEY_VALUE = re.compile(
-    r"(?P<pre>[\"']?" + SECRET_KEY + r"[\"']?\s*[:=]\s*)(?P<q>[\"']?)(?P<val>[^\"'\s,}#][^\"'\n,}]*?|)(?P=q)(?=\s*(?:[,}#\n]|$))",
-    re.IGNORECASE | re.MULTILINE)
+KEY_SEP = re.compile(r"[\"']?(?P<key>" + SECRET_KEY + r")[\"']?\s*[:=]\s*", re.IGNORECASE)
+BLOCK = ("|", ">", "|-", ">-", "|+", ">+")
+GUEST_FIELDS = ("cores", "sockets", "memory", "name", "ostype", "hostname")
+DISK_KEY = re.compile(r"^(scsi|virtio|sata|ide|efidisk|tpmstate|unused|mp)\d*$|^rootfs$")
 CLI_FLAG = re.compile(
     r"(?P<pre>(?<![A-Za-z0-9_-])--?[A-Za-z0-9-]*(?:pass|secret|token|key|credential)[A-Za-z0-9-]*[ =])(?P<val>\"[^\"\n]*\"|'[^'\n]*'|[^\s;]+)",
     re.IGNORECASE)
@@ -37,6 +38,19 @@ def under(path, prefix):
     return path == prefix or path.startswith(prefix + "/")
 
 
+def mask_line(line):
+    m = KEY_SEP.search(line)
+    if not m:
+        return line, None
+    rest = line[m.end():]
+    if rest.strip() in ("", "***", '"***"', "'***'"):
+        return line, None
+    if rest.strip() in BLOCK:
+        return line, len(line) - len(line.lstrip())
+    quote = rest[0] if rest[:1] in ("'", '"') else ""
+    return line[:m.end()] + quote + "***", None
+
+
 def mask_text(text):
     text = URL_PASSWORD.sub(lambda m: m.group("pre") + "***" + m.group("at"), text)
     while True:
@@ -45,13 +59,25 @@ def mask_text(text):
             break
         text = masked
     text = CLI_FLAG.sub(lambda m: m.group("pre") + "***", text)
+    out, block_indent = [], None
+    for line in text.split("\n"):
+        if block_indent is not None:
+            if line.strip() and len(line) - len(line.lstrip()) > block_indent:
+                out.append(" " * (block_indent + 2) + "***")
+                continue
+            block_indent = None
+        line, block_indent = mask_line(line)
+        out.append(line)
+    return "\n".join(out)
 
-    def repl(m):
-        if m.group("val") in ("", "***"):
-            return m.group(0)
-        return m.group("pre") + m.group("q") + "***" + m.group("q")
 
-    return KEY_VALUE.sub(repl, text)
+def guest_config(cfg):
+    out = {k: cfg[k] for k in GUEST_FIELDS if k in cfg}
+    for k, v in cfg.items():
+        if DISK_KEY.match(k) and isinstance(v, str):
+            parts = v.split(",")
+            out[k] = ",".join([parts[0]] + [p for p in parts[1:] if p.startswith("size=")])
+    return out
 
 
 def classify(path):
@@ -68,8 +94,20 @@ def classify(path):
     return "read"
 
 
+def has_symlink(root, path):
+    cur = root
+    for part in path.strip("/").split("/"):
+        cur = os.path.join(cur, part)
+        if os.path.islink(cur):
+            return True
+    return False
+
+
 def file_entry(path, root):
     full = os.path.join(root, path.lstrip("/"))
+    if has_symlink(root, path):
+        return {"path": path, "size": 0, "mtime": 0, "sha256": None, "content": None,
+                "masked": False, "kind": "symlink"}
     st = os.stat(full)
     entry = {"path": path, "size": st.st_size, "mtime": int(st.st_mtime),
              "sha256": None, "content": None, "masked": False, "kind": "name-only"}
@@ -212,6 +250,8 @@ def modified_conffiles(root):
             if len(parts) < 2 or parts[-1] == "obsolete" or not parts[0].startswith("/etc/"):
                 continue
             path, digest = parts[0], parts[1]
+            if has_symlink(root, path) or classify(path) != "read":
+                continue
             try:
                 with open(os.path.join(root, path.lstrip("/")), "rb") as f:
                     actual = hashlib.md5(f.read()).hexdigest()
@@ -254,7 +294,7 @@ def pve_info(errors):
                 path = f"/nodes/{r['node']}/{r['type']}/{r['vmid']}/config"
                 cfg = run_json(["pvesh", "get", path, "--output-format", "json"], errors)
                 if cfg is not None:
-                    guests[str(r["vmid"])] = {k: v for k, v in cfg.items() if k != "cipassword"}
+                    guests[str(r["vmid"])] = guest_config(cfg)
         info["guests"] = guests
         info["storage"] = run_json(["pvesh", "get", "/storage", "--output-format", "json"], errors)
     return info

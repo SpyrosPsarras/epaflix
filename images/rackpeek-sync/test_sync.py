@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 import unittest
@@ -13,13 +14,19 @@ class FakeIO:
         self.push_down = push_down
         self.leaks = list(leaks)
         self.posts = []
+        self.gets = 0
+        self.indexed = ["forgejo", "rackpeek", "loose"]
         self.pushed = []
         self.log = []
 
     def rpk_get(self):
         if self.rpk_down:
             raise OSError("connection refused")
-        return {"version": 5, "resources": fx.stored()}
+        self.gets += 1
+        stored = fx.stored()
+        if self.gets > 1:
+            stored[0]["notes"] = "edited during run"
+        return {"version": 5, "resources": stored}
 
     def rpk_post(self, body):
         self.posts.append(body)
@@ -40,9 +47,10 @@ class FakeIO:
     def gitleaks(self, tree):
         return self.leaks
 
-    def push_live(self, tree):
+    def push_live(self, tree, dirs):
         if self.push_down:
             raise OSError("forgejo down")
+        self.dirs = sorted(dirs)
         self.pushed.append(sorted(os.path.relpath(os.path.join(d, f), tree)
                                   for d, _, fs in os.walk(tree) for f in fs))
 
@@ -60,9 +68,11 @@ class Sync(unittest.TestCase):
         self.assertEqual(run(io), 0)
         body = io.posts[0]
         self.assertEqual(body["mode"], "Replace")
-        self.assertEqual(body["json"]["version"], 5)
-        self.assertNotIn("connections", body["json"])
-        for r in body["json"]["resources"]:
+        self.assertNotIn("json", body)
+        doc = json.loads(body["yaml"])
+        self.assertEqual(doc["version"], 5)
+        self.assertNotIn("connections", doc)
+        for r in doc["resources"]:
             self.assertIn("sync", r["tags"])
         self.assertTrue(any("takaros/etc/hosts" == p for p in io.pushed[0]))
         self.assertTrue(any(p == "k8s/forgejo/configmaps/forgejo-cfg.yaml" for p in io.pushed[0]))
@@ -70,10 +80,20 @@ class Sync(unittest.TestCase):
     def test_one_host_down(self):
         io = FakeIO(down_hosts={"truenas"})
         self.assertEqual(run(io), 1)
-        names = {r["name"] for r in io.posts[0]["json"]["resources"]}
+        names = {r["name"] for r in json.loads(io.posts[0]["yaml"])["resources"]}
         self.assertIn("hw/takaros", names)
         self.assertNotIn("truenas/app/silo", names)
         self.assertTrue(any("truenas" in line and "TimeoutError" in line for line in io.log))
+        self.assertNotIn("truenas", io.dirs)
+        self.assertIn("takaros", io.dirs)
+        self.assertIn("k8s", io.dirs)
+
+    def test_fresh_inventory_before_post(self):
+        io = FakeIO()
+        run(io)
+        doc = json.loads(io.posts[0]["yaml"])
+        forgejo = [r for r in doc["resources"] if r["name"] == "app/forgejo"][0]
+        self.assertEqual(forgejo["notes"], "edited during run")
 
     def test_rackpeek_down_posts_nothing(self):
         io = FakeIO(rpk_down=True)
@@ -95,10 +115,12 @@ class Sync(unittest.TestCase):
     def test_configmap_masked(self):
         tree = tempfile.mkdtemp()
         sync.write_tree(tree, {}, {"configmaps": [{"metadata": {"name": "c", "namespace": "n"},
-                                                     "data": {"x": "password=hunter2"}}]})
+                                                     "data": {"x": "password=hunter2", "DB_PASSWORD": "bare1",
+                                                              "url": "http://a.t3code-work.svc"}}]})
         with open(os.path.join(tree, "k8s/n/configmaps/c.yaml")) as f:
             text = f.read()
-        self.assertNotIn("hunter2", text)
+        for bad in ("hunter2", "bare1", "t3code-work"):
+            self.assertNotIn(bad, text)
 
 
 class Main(unittest.TestCase):

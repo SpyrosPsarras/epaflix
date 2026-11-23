@@ -10,10 +10,16 @@ KIND_SHORT = {"deployments": ("Deployment", "deploy"), "statefulsets": ("Statefu
               "daemonsets": ("DaemonSet", "ds"), "cronjobs": ("CronJob", "cronjob")}
 HOST_RE = re.compile(r"\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:svc(?:\.cluster\.local)?|epaflix\.com)\b")
 SECRET_DOC = re.compile(r"^kind:\s*Secret\s*$", re.M)
+EXCLUDED_REF = re.compile(r"[A-Za-z0-9.-]*\b(?:" + "|".join(EXCLUDED) + r")\b[A-Za-z0-9.-]*")
+SCAN_LABELS = ("os", "kernel", "files", "live-config", "packages", "scan-errors")
 
 
 def excluded(ns):
     return ns in EXCLUDED
+
+
+def scrub(text):
+    return EXCLUDED_REF.sub("***", text) if isinstance(text, str) else text
 
 
 def ns_of(obj):
@@ -160,7 +166,39 @@ def selects(selector, labels):
     return bool(selector) and all(labels.get(k) == v for k, v in selector.items())
 
 
-def build_k8s(k8s, repo, idx, zvols):
+def owners(k8s):
+    rs_owner = {(ns_of(r), name_of(r)): o.get("name") for r in k8s.get("replicasets", [])
+                for o in r.get("metadata", {}).get("ownerReferences", []) if o.get("kind") == "Deployment"}
+    job_owner = {(ns_of(j), name_of(j)): o.get("name") for j in k8s.get("jobs", [])
+                 for o in j.get("metadata", {}).get("ownerReferences", []) if o.get("kind") == "CronJob"}
+    nodes = {}
+    for p in k8s.get("pods", []):
+        ns, node = ns_of(p), p.get("spec", {}).get("nodeName")
+        if excluded(ns) or not node:
+            continue
+        for o in p.get("metadata", {}).get("ownerReferences", []):
+            kind, name = o.get("kind"), o.get("name")
+            if kind == "ReplicaSet" and (ns, name) in rs_owner:
+                key = ("Deployment", ns, rs_owner[(ns, name)])
+            elif kind == "Job" and (ns, name) in job_owner:
+                key = ("CronJob", ns, job_owner[(ns, name)])
+            elif kind in ("StatefulSet", "DaemonSet"):
+                key = (kind, ns, name)
+            else:
+                continue
+            nodes.setdefault(key, set()).add(node)
+    return nodes
+
+
+def pv_node(pv):
+    for term in (((pv.get("spec", {}).get("nodeAffinity") or {}).get("required") or {}).get("nodeSelectorTerms") or []):
+        for expr in term.get("matchExpressions") or []:
+            if expr.get("key") == "kubernetes.io/hostname" and expr.get("values"):
+                return expr["values"][0]
+    return None
+
+
+def build_k8s(k8s, repo, idx, zvols, guests, indexed):
     out = []
     apps = {}
     owner = {}
@@ -178,6 +216,8 @@ def build_k8s(k8s, repo, idx, zvols):
         status = app.get("status", {})
         label(it, "sync", (status.get("sync") or {}).get("status"))
         label(it, "health", (status.get("health") or {}).get("status"))
+        if indexed is not None and dest not in indexed:
+            label(it, "indexed", "no")
         out.append(it)
         for r in status.get("resources", []):
             if not excluded(r.get("namespace")):
@@ -188,6 +228,8 @@ def build_k8s(k8s, repo, idx, zvols):
             continue
         it = item("System", f"app/{n}", "k8s", ["k3s/epaflix"], type="other")
         label(it, "kind", "namespace")
+        if indexed is not None and n not in indexed:
+            label(it, "indexed", "no")
         out.append(it)
 
     cm_data = {(ns_of(c), name_of(c)): c.get("data") or {} for c in k8s.get("configmaps", []) if not excluded(ns_of(c))}
@@ -197,7 +239,7 @@ def build_k8s(k8s, repo, idx, zvols):
     services = [s for s in k8s.get("services", []) if not excluded(ns_of(s))]
     routes = [r for r in k8s.get("ingressroutes", []) if not excluded(ns_of(r))]
     netpols = [n for n in k8s.get("networkpolicies", []) if not excluded(ns_of(n))]
-    pods = [p for p in k8s.get("pods", []) if not excluded(ns_of(p))]
+    pod_nodes = owners(k8s)
     secret_keys_cache = {}
 
     for key, (kind_name, short) in KIND_SHORT.items():
@@ -212,9 +254,7 @@ def build_k8s(k8s, repo, idx, zvols):
             images, cms, secrets, env_values, claim_names = pod_refs(tpl)
             it = item("Service", f"{ns}/{short}/{name}", "k8s", [app_item])
             label(it, "images", sorted(set(images)))
-            nodes = sorted({p.get("spec", {}).get("nodeName") for p in pods
-                            if ns_of(p) == ns and name_of(p).startswith(name + "-") and p.get("spec", {}).get("nodeName")})
-            label(it, "nodes", nodes)
+            label(it, "nodes", sorted(pod_nodes.get((kind_name, ns, name), ())))
             app_path = apps.get(app, {}).get("path") if app else None
             label(it, "updates", updates(images, app_path, repo))
             label(it, "configmaps", [f"k8s/{ns}/configmaps/{c}.yaml" for c in cms])
@@ -237,7 +277,7 @@ def build_k8s(k8s, repo, idx, zvols):
             label(it, "auth", sorted(auth))
             uses = set()
             for text in env_values + [v for c in cms for v in cm_data.get((ns, c), {}).values()]:
-                uses.update(HOST_RE.findall(text or ""))
+                uses.update(h for h in HOST_RE.findall(text or "") if not EXCLUDED_REF.search(h))
             for np in netpols:
                 if ns_of(np) != ns or not selects((np.get("spec", {}).get("podSelector") or {}).get("matchLabels"), labels):
                     continue
@@ -260,9 +300,14 @@ def build_k8s(k8s, repo, idx, zvols):
                     handle = (pv.get("spec", {}).get("csi") or {}).get("volumeHandle")
                     local = (pv.get("spec", {}).get("local") or pv.get("spec", {}).get("hostPath") or {}).get("path")
                     if handle and handle in zvols:
-                        link += f" -> truenas:{zvols[handle]}"
+                        link += f" -> truenas:{zvols[handle]} -> pool {zvols[handle].split('/')[0]}"
                     elif local:
                         link += f" -> local:{local}"
+                        node = pv_node(pv)
+                        if node:
+                            disks = guests.get(node, {}).get("labels", {}).get("disks", "")
+                            vols = ", ".join(d.split("=", 1)[1] for d in disks.split(", ") if "=" in d)
+                            link += f" -> vm/{node}" + (f" ({vols})" if vols else "")
                 chains.append(link)
             label(it, "disk-chain", chains)
             out.append(it)
@@ -340,13 +385,15 @@ def build_hosts(scans, idx):
         g = guests_by_name.get((scan.get("host") or "").split(".")[0]) or guests_by_name.get(alias)
         if g:
             host_labels(g, alias, scan, idx)
-    return out, zvols
+    return out, zvols, guests_by_name
 
 
-def build_items(k8s, scans, repo, failed):
+def build_items(k8s, scans, repo, failed, indexed=None):
     idx = repo_index(repo)
-    host_items, zvols = build_hosts({a: s for a, s in scans.items() if a not in failed}, idx)
-    items = host_items + (build_k8s(k8s, repo, idx, zvols) if "k8s" not in failed else [])
+    host_items, zvols, guests = build_hosts({a: s for a, s in scans.items() if a not in failed}, idx)
+    items = host_items + (build_k8s(k8s, repo, idx, zvols, guests, indexed) if "k8s" not in failed else [])
+    for it in items:
+        it["labels"] = {k: scrub(v) for k, v in it["labels"].items()}
     seen, out = set(), []
     for it in items:
         key = it["name"].lower()
@@ -363,7 +410,14 @@ def carry_over(new, stored, ok_sources, today):
     out, seen = [], set()
     for it in new:
         old = stored_by.get(it["name"].lower())
+        if old and "sync" not in (old.get("tags") or []):
+            print(f"warning: {it['name']} exists without tag sync, left untouched", file=sys.stderr)
+            seen.add(it["name"].lower())
+            continue
         if old:
+            for k in SCAN_LABELS:
+                if k in (old.get("labels") or {}) and k not in it["labels"]:
+                    it["labels"][k] = old["labels"][k]
             if old.get("notes"):
                 it["notes"] = old["notes"]
             it["tags"] = sorted(set(it["tags"]) | {t for t in old.get("tags") or [] if t != "sync"})

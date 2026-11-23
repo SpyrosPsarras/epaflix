@@ -13,7 +13,8 @@ class Build(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.repo = fx.repo()
-        cls.items = build.build_items(fx.k8s(), fx.scans(), cls.repo, set())
+        cls.items = build.build_items(fx.k8s(), fx.scans(), cls.repo, set(),
+                                      indexed={"forgejo", "rackpeek"})
         cls.byname = by_name(cls.items)
 
     def test_names_and_runs_on(self):
@@ -55,8 +56,20 @@ class Build(unittest.TestCase):
         self.assertIn("ns/postgres-system", l["uses"])
         self.assertNotIn("ns/kube-system", l["uses"])
         self.assertEqual(l["git"], "managed by app/forgejo (2-k3s/38.forgejo)")
-        self.assertEqual(l["disk-chain"], "forgejo-data -> pv/pvc-111 -> truenas:apps/k8s/iscsi/vols/pvc-111")
         self.assertNotIn("ENC[", json.dumps(l))
+
+    def test_nodes_follow_owners(self):
+        self.assertEqual(self.byname["rackpeek/deploy/rackpeek"]["labels"]["nodes"], "k3s-worker-63")
+
+    def test_not_indexed(self):
+        self.assertEqual(self.byname["app/loose"]["labels"]["indexed"], "no")
+        self.assertNotIn("indexed", self.byname["app/forgejo"]["labels"])
+
+    def test_disk_chain_extended(self):
+        self.assertEqual(self.byname["forgejo/deploy/forgejo"]["labels"]["disk-chain"],
+                         "forgejo-data -> pv/pvc-111 -> truenas:apps/k8s/iscsi/vols/pvc-111 -> pool apps")
+        self.assertEqual(self.byname["loose/deploy/stray"]["labels"]["disk-chain"],
+                         "stray-data -> pv/pvc-222 -> local:/var/lib/rancher/k3s/storage/pvc-222 -> vm/k3s-worker-61 (ssd-raid5:vm-1061-disk-0)")
 
     def test_live_only(self):
         self.assertEqual(self.byname["loose/deploy/stray"]["labels"]["git"], "live only")
@@ -70,6 +83,7 @@ class Build(unittest.TestCase):
         self.assertNotIn("t3code-work", blob)
         self.assertNotIn("mcp-hub-work", blob)
         self.assertNotIn("pvc-999", blob)
+        self.assertNotIn("hub.", self.byname["forgejo/deploy/forgejo"]["labels"]["uses"])
         self.assertNotIn("evil", blob)
 
     def test_host_labels(self):
@@ -117,6 +131,18 @@ class CarryOver(unittest.TestCase):
         stored[0]["labels"]["gone-since"] = "2026-11-01"
         out = by_name(build.carry_over(self.new, stored, {"k8s"}, fx.TODAY))
         self.assertNotIn("gone-since", out["App/Forgejo"]["labels"])
+
+    def test_manual_name_collision_skipped(self):
+        new = [{"kind": "System", "name": "vm/truenas", "type": "vm", "tags": ["sync"], "labels": {"source": "takaros"}}]
+        out = build.carry_over(new, fx.stored(), {"takaros"}, fx.TODAY)
+        self.assertNotIn("vm/truenas", {i["name"].lower(): i for i in out} and [i["name"] for i in out])
+
+    def test_failed_guest_scan_keeps_facts(self):
+        new = [{"kind": "System", "name": "lxc/pihole", "type": "container", "tags": ["sync"],
+                "labels": {"source": "takaros", "vmid": "1030"}}]
+        out = by_name(build.carry_over(new, fx.stored(), {"takaros"}, fx.TODAY))
+        self.assertEqual(out["lxc/pihole"]["labels"]["os"], "OldOS")
+        self.assertEqual(out["lxc/pihole"]["labels"]["vmid"], "1030")
 
     def test_failed_source_untouched(self):
         self.assertNotIn("vm/nick", self.run_carry({"k8s"}))

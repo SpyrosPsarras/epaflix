@@ -36,6 +36,8 @@ K8S_NAMESPACED = {
     "statefulsets": "/apis/apps/v1/namespaces/{ns}/statefulsets",
     "daemonsets": "/apis/apps/v1/namespaces/{ns}/daemonsets",
     "cronjobs": "/apis/batch/v1/namespaces/{ns}/cronjobs",
+    "jobs": "/apis/batch/v1/namespaces/{ns}/jobs",
+    "replicasets": "/apis/apps/v1/namespaces/{ns}/replicasets",
     "networkpolicies": "/apis/networking.k8s.io/v1/namespaces/{ns}/networkpolicies",
     "ingressroutes": "/apis/traefik.io/v1alpha1/namespaces/{ns}/ingressroutes",
 }
@@ -114,7 +116,7 @@ class RealIO:
             found = json.load(f) or []
         return sorted({os.path.relpath(x["File"], tree) if os.path.isabs(x["File"]) else x["File"] for x in found})
 
-    def push_live(self, tree):
+    def push_live(self, tree, dirs):
         work = tempfile.mkdtemp()
         askpass = os.path.join(work, "askpass")
         with open(askpass, "w") as f:
@@ -135,11 +137,12 @@ class RealIO:
             os.makedirs(repo)
             git("init", "-q", "-b", "main")
             git("remote", "add", "origin", url)
-        for entry in os.listdir(repo):
-            if entry != ".git":
-                path = os.path.join(repo, entry)
-                shutil.rmtree(path) if os.path.isdir(path) else os.remove(path)
-        shutil.copytree(tree, repo, dirs_exist_ok=True)
+        for entry in dirs:
+            target = os.path.join(repo, entry)
+            if os.path.isdir(target):
+                shutil.rmtree(target)
+            if os.path.isdir(os.path.join(tree, entry)):
+                shutil.copytree(os.path.join(tree, entry), target)
         git("add", "-A")
         if git("diff", "--cached", "--quiet", check=False).returncode == 0:
             return
@@ -154,6 +157,11 @@ def safe_rel(path):
     return rel
 
 
+def mask_configmap(data):
+    return {k: "***" if scanner.KEY_SEP.search(k + "=") else build.scrub(scanner.mask_text(v or ""))
+            for k, v in (data or {}).items()}
+
+
 def write_tree(tree, scans, k8s):
     idx_lines = {}
     for alias, scan in scans.items():
@@ -166,7 +174,7 @@ def write_tree(tree, scans, k8s):
                 dest = os.path.join(base, safe_rel(f["path"]))
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
                 with open(dest, "w") as out:
-                    out.write(f["content"])
+                    out.write(build.scrub(f["content"]))
         with open(os.path.join(base, "FILES.tsv"), "w") as out:
             out.write("path\tkind\tsha256\tmasked\n" + "\n".join(sorted(lines)) + "\n")
         with open(os.path.join(base, "packages.txt"), "w") as out:
@@ -178,7 +186,7 @@ def write_tree(tree, scans, k8s):
             continue
         dest = os.path.join(tree, "k8s", ns, "configmaps", f"{name}.yaml")
         os.makedirs(os.path.dirname(dest), exist_ok=True)
-        data = {k: scanner.mask_text(v) for k, v in (cm.get("data") or {}).items()}
+        data = mask_configmap(cm.get("data"))
         with open(dest, "w") as out:
             json.dump({"name": name, "namespace": ns, "data": data}, out, indent=2, sort_keys=True)
     return idx_lines
@@ -231,17 +239,23 @@ def run(io, hosts, today, log):
         if os.path.isfile(path):
             os.remove(path)
         log(f"gitleaks: dropped {rel}")
+    dirs = sorted((set(scans) | ({"k8s"} if "k8s" not in failed else set())))
     try:
-        io.push_live(tree)
+        io.push_live(tree, dirs)
         log("forgejo: pushed homelab-live")
     except Exception as exc:
         exit_code = 1
         log(f"forgejo: push failed: {type(exc).__name__}: {exc}")
-    items = build.build_items(k8s, scans, repo, failed)
+    items = build.build_items(k8s, scans, repo, failed, set(getattr(io, "indexed", []) or []) or None)
     ok_sources = ({"k8s"} | set(hosts)) - failed
+    try:
+        stored = io.rpk_get().get("resources", [])
+    except Exception as exc:
+        log(f"rackpeek: read failed: {type(exc).__name__}: {exc}")
+        return 1
     resources = build.carry_over(items, stored, ok_sources, today)
     try:
-        io.rpk_post({"json": {"version": 5, "resources": resources}, "mode": "Replace"})
+        io.rpk_post({"yaml": json.dumps({"version": 5, "resources": resources}), "mode": "Replace"})
         log(f"rackpeek: posted {len(resources)} items")
     except Exception as exc:
         log(f"rackpeek: post failed: {type(exc).__name__}: {exc}")

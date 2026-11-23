@@ -15,8 +15,8 @@ class MaskText(unittest.TestCase):
         text = 'DB_PASSWORD=x\nexport TOKEN="y"\n{"apiKey": "z"}\npwhash: q\n'
         out = scan.mask_text(text)
         self.assertIn("DB_PASSWORD=***", out)
-        self.assertIn('export TOKEN="***"', out)
-        self.assertIn('"apiKey": "***"', out)
+        self.assertIn('export TOKEN="***', out)
+        self.assertIn('"apiKey": "***', out)
         self.assertIn("pwhash: ***", out)
         for value in ("=x", '"y"', '"z"', ": q"):
             self.assertNotIn(value, out)
@@ -40,6 +40,22 @@ class MaskText(unittest.TestCase):
         out = scan.mask_text("url https://hooks.example/api/webhooks/123/" + tok + "\n")
         self.assertNotIn(tok, out)
         self.assertIn("/123/***", out)
+
+    def test_mask_systemd_environment(self):
+        out = scan.mask_text('Environment="DB_PASSWORD=a b c"\nEnvironment=API_TOKEN=xyz\n')
+        for v in ("a b c", "xyz"):
+            self.assertNotIn(v, out)
+
+    def test_mask_comma_value(self):
+        out = scan.mask_text("password=ab,cd\n")
+        self.assertNotIn("cd", out)
+        self.assertNotIn("ab", out)
+
+    def test_mask_yaml_block(self):
+        out = scan.mask_text("db:\n  password: |\n    s3cr3t\n    more\n  host: h\n")
+        self.assertNotIn("s3cr3t", out)
+        self.assertNotIn("more", out)
+        self.assertIn("host: h", out)
 
     def test_mask_keeps_plain(self):
         self.assertEqual(scan.mask_text("hostname=takaros\n"), "hostname=takaros\n")
@@ -103,6 +119,24 @@ class FileEntry(unittest.TestCase):
         import hashlib
         self.assertEqual(entry["sha256"], hashlib.sha256(raw).hexdigest())
 
+    def test_symlink_not_followed(self):
+        self.write("/etc/ssh/ssh_host_ed25519_key", b"PRIVATE")
+        link = pathlib.Path(self.root, "usr/local/bin/x")
+        link.parent.mkdir(parents=True, exist_ok=True)
+        os.symlink(pathlib.Path(self.root, "etc/ssh/ssh_host_ed25519_key"), link)
+        entry = scan.file_entry("/usr/local/bin/x", self.root)
+        self.assertEqual(entry["kind"], "symlink")
+        self.assertIsNone(entry["sha256"])
+        self.assertIsNone(entry["content"])
+
+    def test_symlinked_dir_not_followed(self):
+        self.write("/var/lib/kubelet/secret.txt", b"PRIVATE")
+        os.makedirs(pathlib.Path(self.root, "usr/local"), exist_ok=True)
+        os.symlink(pathlib.Path(self.root, "var/lib/kubelet"), pathlib.Path(self.root, "usr/local/kube"))
+        entry = scan.file_entry("/usr/local/kube/secret.txt", self.root)
+        self.assertEqual(entry["kind"], "symlink")
+        self.assertIsNone(entry["content"])
+
     def test_collect_uses_root(self):
         for rel in ("/usr/local/bin/x", "/root/notes.txt", "/root/.ssh/id_rsa",
                     "/etc/systemd/system/a.service", "/var/lib/y", "/etc/cron.d/job"):
@@ -129,6 +163,18 @@ class Conffiles(unittest.TestCase):
             + "\n /etc/b.conf " + hashlib.md5(b"same").hexdigest()
             + "\n /etc/gone.conf " + hashlib.md5(b"z").hexdigest() + "\nDescription: d\n")
         self.assertEqual(scan.modified_conffiles(root), ["/etc/a.conf"])
+
+
+class GuestConfig(unittest.TestCase):
+    def test_only_allowed_fields(self):
+        cfg = {"cores": 4, "memory": "2048", "sockets": 1, "name": "vm1",
+               "scsi0": "local-lvm:vm-1-disk-0,size=32G,cache=writeback",
+               "args": "-fw_cfg name=opt/x,string=SECRET", "lxc.environment": "TOKEN=SECRET",
+               "cipassword": "SECRET", "description": "SECRET notes", "net0": "virtio=AA:BB"}
+        out = scan.guest_config(cfg)
+        self.assertNotIn("SECRET", str(out))
+        self.assertEqual(out["scsi0"], "local-lvm:vm-1-disk-0,size=32G")
+        self.assertEqual(out["cores"], 4)
 
 
 class Main(unittest.TestCase):
