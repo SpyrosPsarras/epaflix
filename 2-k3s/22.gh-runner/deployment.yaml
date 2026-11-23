@@ -81,7 +81,7 @@ spec:
       volumes:
         - name: state
           persistentVolumeClaim:
-            claimName: gh-runner-data-iscsi
+            claimName: gh-runner-data-pithari
         - name: ssh-key
           secret:
             secretName: gh-runner-secrets
