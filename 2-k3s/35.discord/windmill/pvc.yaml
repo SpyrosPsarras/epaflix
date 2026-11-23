@@ -9,3 +9,14 @@ spec:
   resources:
     requests:
       storage: 5Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: openclaw-state-pithari
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: truenas-iscsi
+  resources:
+    requests:
+      storage: 5Gi

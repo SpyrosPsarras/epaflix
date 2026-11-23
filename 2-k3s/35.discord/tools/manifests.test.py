@@ -153,10 +153,10 @@ class AgentChecks:
         self.assertIn(tmp["name"], [mount["name"] for mount in prepare["volumeMounts"]])
 
     def test_state_pvc(self):
-        pvc = resource(f"{self.APP}/pvc.yaml", "PersistentVolumeClaim", "openclaw-state")
+        pvc = resource(f"{self.APP}/pvc.yaml", "PersistentVolumeClaim", "openclaw-state-pithari")
         self.assertEqual(pvc["spec"]["storageClassName"], "truenas-iscsi")
         claims = [v["persistentVolumeClaim"]["claimName"] for v in self.pod["volumes"] if "persistentVolumeClaim" in v]
-        self.assertEqual(claims, ["openclaw-state"])
+        self.assertEqual(claims, ["openclaw-state-pithari"])
 
     def test_network_policy(self):
         policy = resource(f"{self.APP}/network-policy.yaml", "NetworkPolicy", "openclaw")

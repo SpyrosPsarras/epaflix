@@ -161,7 +161,7 @@ spec:
       volumes:
         - name: state
           persistentVolumeClaim:
-            claimName: openclaw-state
+            claimName: openclaw-state-pithari
         - name: config
           configMap:
             name: openclaw-config
