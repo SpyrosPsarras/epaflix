@@ -102,34 +102,39 @@ After a real loss, edit `cluster/postgres-cluster.yaml` before it is applied. Re
 
 ## Storage maintenance
 
-Every `truenas-iscsi` volume is on the TrueNAS `apps` pool. That pool is one disk of the TrueNAS VM on patroklos, and evanthoulaki serves the disk over iSCSI. See [patroklos](1-proxmox/patroklos/README.md#truenas-apps-disk). If TrueNAS or evanthoulaki is away for more than 2 minutes, the app volumes go read-only. A cordon does not prevent that. Stop the consumers first. Vaultwarden is one of them, so fetch any secret you need beforehand. An evanthoulaki reboot also stops Pi-hole, k3s-master-53 and two workers.
+Every `truenas-iscsi` volume is a zvol under `pithari/k8s/iscsi/vols` on the TrueNAS pool `pithari`, a raidz2 of four 12 TB disks in patroklos. Paperless mounts NFS from `pithari/paperless/data` on the same pool. Both datasets are encrypted with keys that TrueNAS stores and unlocks at boot; copies are in the vault items `truenas - pithari-k8s dataset key` and `truenas - pithari-paperless dataset key`. TrueNAS snapshot task `pithari` keeps daily recursive snapshots for 30 days. If TrueNAS is away for more than 2 minutes, the app volumes go read-only. A cordon does not prevent that. Stop the consumers first. Vaultwarden is one of them, so fetch any secret you need beforehand.
 
 ```sh
 k() { kubectl --context epaflix "$@"; }
-for a in app-of-apps authentik discord gh-runner home-assistant remote-pi servarr vaultwarden; do
+for a in app-of-apps authentik discord forgejo gh-runner home-assistant paperless rackpeek remote-pi servarr vaultwarden; do
   k -n argocd patch application $a --type json -p '[{"op":"remove","path":"/spec/syncPolicy/automated"}]'
 done
 k -n vaultwarden patch cronjob vaultwarden-backup -p '{"spec":{"suspend":true}}'
+for c in paperless-backup paperless-share-lists; do k -n paperless patch cronjob $c -p '{"spec":{"suspend":true}}'; done
 scale() {
   k -n app-authentik scale deploy authentik-worker --replicas=$1
   for n in discord-media discord-windmill; do k -n $n scale deploy openclaw --replicas=$1; done
+  k -n forgejo scale deploy forgejo --replicas=$1
   k -n gh-runner scale deploy gh-runner --replicas=$1
   k -n home-assistant scale deploy esphome home-assistant roborock --replicas=$1
+  k -n paperless scale deploy paperless paperless-gpt --replicas=$1
+  k -n rackpeek scale deploy rackpeek --replicas=$1
   k -n remote-pi scale deploy cpa-manager-plus --replicas=$1
   k -n servarr scale deploy bazarr bazarr-autotranslate cleanuparr jellysweep lidarr lingarr navidrome neutarr \
-    prowlarr qbittorrent radarr seerr sonarr streamystats --replicas=$1
+    prowlarr qbittorrent radarr seerr sonarr streamystats tdarr --replicas=$1
   k -n vaultwarden scale deploy vaultwarden --replicas=$1
 }
 scale 0
 k get volumeattachment | grep democratic-csi    # wait until this prints nothing, then reboot
 ```
 
-When TrueNAS is back and `ssh truenas zpool status apps` is healthy, start again:
+When TrueNAS is back, `ssh truenas zpool status pithari` is healthy and `ssh truenas zfs get -H keystatus pithari/k8s pithari/paperless` shows `available` twice, start again:
 
 ```sh
 scale 1
 k -n vaultwarden patch cronjob vaultwarden-backup -p '{"spec":{"suspend":false}}'
+for c in paperless-backup paperless-share-lists; do k -n paperless patch cronjob $c -p '{"spec":{"suspend":false}}'; done
 k -n argocd patch application app-of-apps --type merge -p '{"spec":{"syncPolicy":{"automated":{"selfHeal":true}}}}'
 ```
 
-`app-of-apps` then restores the sync policy of the other Applications. The consumer list is from 2026-11-15. Recheck it with `k get pvc -A | grep truenas-iscsi`.
+`app-of-apps` then restores the sync policy of the other Applications. The consumer list is from 2026-11-23. Recheck it with `k get pvc -A | grep truenas-iscsi` and the `paperless-data` PV.

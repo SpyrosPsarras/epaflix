@@ -110,19 +110,6 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: streamystats-data-iscsi
-  namespace: servarr
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 5Gi
-  storageClassName: truenas-iscsi
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
   name: streamystats-data-pithari
   namespace: servarr
 spec:

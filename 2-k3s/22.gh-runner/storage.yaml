@@ -2,22 +2,6 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: gh-runner-data-iscsi
-  namespace: gh-runner
-  labels:
-    app.kubernetes.io/name: gh-runner
-    app.kubernetes.io/component: storage
-spec:
-  accessModes:
-    - ReadWriteOnce
-  storageClassName: truenas-iscsi
-  resources:
-    requests:
-      storage: 5Gi
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
   name: gh-runner-data-pithari
   namespace: gh-runner
   labels:

@@ -2073,7 +2073,7 @@ tests:
               severity: warning
             exp_annotations:
               summary: "apps pool free space is under 20 GiB"
-              description: "The apps root dataset's node_filesystem_avail_bytes has been under 20 GiB for an hour. The root dataset has no quota, so this is the pool-wide space left. apps holds the democratic-csi iSCSI zvols under apps/k8s/iscsi. They are sparse, so a full pool makes writes to every iSCSI PVC on it fail at once. 20 GiB free is about 80% used of the 95 GiB usable. The pool is one 100G virtual disk on the shared ssd-raid storage, the evanthoulaki SSD RAID 5 over iSCSI. To grow it, follow \"TrueNAS apps disk\" in 1-proxmox/patroklos/README.md. Check what grew (`zfs list -o space -r apps` sorted by used) first."
+              description: "The apps root dataset's node_filesystem_avail_bytes has been under 20 GiB for an hour. The root dataset has no quota, so this is the pool-wide space left. apps holds TrueNAS's own apps under apps/ix-apps; the democratic-csi zvols moved to pithari on 2026-11-23. 20 GiB free is about 80% used of the 95 GiB usable. The pool is one 100G virtual disk on the shared ssd-raid storage, the evanthoulaki SSD RAID 5 over iSCSI. To grow it, follow \"TrueNAS apps disk\" in 1-proxmox/patroklos/README.md. Check what grew (`zfs list -o space -r apps` sorted by used) first."
       - eval_time: 70m
         alertname: TruenasAppsPoolFreeCritical
         exp_alerts:
@@ -2086,8 +2086,8 @@ tests:
               component: truenas-storage
               severity: critical
             exp_annotations:
-              summary: "apps pool free space is under 10 GiB - iSCSI PVC writes at risk"
-              description: "Pool-wide free space on apps (same metric semantics as TruenasAppsPoolFreeLow) has been under 10 GiB for 15 minutes, about 90% used. When it reaches zero, writes to the sparse iSCSI zvols fail and pods see I/O errors on their PVCs. Free space on apps now; do not grow a PVC until free space is back above 20 GiB."
+              summary: "apps pool free space is under 10 GiB - TrueNAS app writes at risk"
+              description: "Pool-wide free space on apps (same metric semantics as TruenasAppsPoolFreeLow) has been under 10 GiB for 15 minutes, about 90% used. When it reaches zero, TrueNAS apps under apps/ix-apps fail to write. Free space on apps now."
 
   - interval: 1m
     input_series:
@@ -2109,7 +2109,7 @@ tests:
               severity: warning
             exp_annotations:
               summary: "apps pool free space is under 20 GiB"
-              description: "The apps root dataset's node_filesystem_avail_bytes has been under 20 GiB for an hour. The root dataset has no quota, so this is the pool-wide space left. apps holds the democratic-csi iSCSI zvols under apps/k8s/iscsi. They are sparse, so a full pool makes writes to every iSCSI PVC on it fail at once. 20 GiB free is about 80% used of the 95 GiB usable. The pool is one 100G virtual disk on the shared ssd-raid storage, the evanthoulaki SSD RAID 5 over iSCSI. To grow it, follow \"TrueNAS apps disk\" in 1-proxmox/patroklos/README.md. Check what grew (`zfs list -o space -r apps` sorted by used) first."
+              description: "The apps root dataset's node_filesystem_avail_bytes has been under 20 GiB for an hour. The root dataset has no quota, so this is the pool-wide space left. apps holds TrueNAS's own apps under apps/ix-apps; the democratic-csi zvols moved to pithari on 2026-11-23. 20 GiB free is about 80% used of the 95 GiB usable. The pool is one 100G virtual disk on the shared ssd-raid storage, the evanthoulaki SSD RAID 5 over iSCSI. To grow it, follow \"TrueNAS apps disk\" in 1-proxmox/patroklos/README.md. Check what grew (`zfs list -o space -r apps` sorted by used) first."
       - eval_time: 70m
         alertname: TruenasAppsPoolFreeCritical
         exp_alerts: []
