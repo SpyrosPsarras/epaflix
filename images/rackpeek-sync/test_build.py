@@ -71,6 +71,14 @@ class Build(unittest.TestCase):
         self.assertEqual(self.byname["loose/deploy/stray"]["labels"]["disk-chain"],
                          "stray-data -> pv/pvc-222 -> local:/var/lib/rancher/k3s/storage/pvc-222 -> vm/k3s-worker-61")
 
+    def test_helm_chart_updates(self):
+        import os
+        repo = fx.repo()
+        os.makedirs(os.path.join(repo, "2-k3s/28.kured"))
+        with open(os.path.join(repo, "2-k3s/28.kured/kustomization.yaml"), "w") as f:
+            f.write("helmCharts:\n  - name: kured\n    version: 6.1.0\n")
+        self.assertEqual(build.updates(["ghcr.io/kubereboot/kured:1.17"], "2-k3s/28.kured", repo), "renovate (helm chart)")
+
     def test_live_only(self):
         self.assertEqual(self.byname["loose/deploy/stray"]["labels"]["git"], "live only")
 

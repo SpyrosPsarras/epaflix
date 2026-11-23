@@ -46,3 +46,17 @@ Run it now:
 kubectl -n rackpeek create job --from=cronjob/rackpeek-sync rackpeek-sync-manual
 kubectl -n rackpeek logs -f job/rackpeek-sync-manual
 ```
+
+## Notes and rescans
+
+Each item's notes say what it is, why it is set up that way and how it updates. The sync never writes notes; it copies them from the stored item on every run. The homelab agent writes them, and people can edit them in the UI.
+
+To rescan:
+
+1. One host: `ssh <host>` with the scan key prints the scan JSON. The forced command ignores the command you send.
+2. Everything now: `kubectl -n rackpeek create job --from=cronjob/rackpeek-sync rackpeek-sync-manual`.
+3. Agent pods: the sync does not read inside agent pods. The homelab agent compares its own live `AGENTS.md`, skills and MCP servers with Git when asked, and updates the notes of its `t3code-homelab` item.
+
+To change notes from a script, read the full item with `GET /api/inventory`, set `notes`, and post it back as `{"yaml": "<document>", "mode": "Replace"}`. The JSON form of the same request clears every connection in RackPeek 2.3.0.
+
+To scan a new host: copy `1-proxmox/rackpeek-scan/rackpeek-scan.py` to `/usr/local/sbin/rackpeek-scan`, add the scan key line from [rackpeek-scan](../../1-proxmox/rackpeek-scan/README.md) for the host's SSH user, add its host key to `sync-known-hosts.yaml`, its address to `sync-network-policy.yaml` and its entry to `HOSTS` in `sync-cronjob.yaml`.
