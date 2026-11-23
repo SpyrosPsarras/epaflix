@@ -1,0 +1,80 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: rackpeek-sync
+  namespace: rackpeek
+spec:
+  podSelector:
+    matchLabels:
+      app: rackpeek-sync
+  policyTypes:
+    - Ingress
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - to:
+        - ipBlock: {cidr: 10.0.0.51/32}
+        - ipBlock: {cidr: 10.0.0.52/32}
+        - ipBlock: {cidr: 10.0.0.53/32}
+      ports:
+        - {protocol: TCP, port: 6443}
+    - to:
+        - ipBlock: {cidr: 192.168.10.10/32}
+        - ipBlock: {cidr: 192.168.10.11/32}
+        - ipBlock: {cidr: 192.168.10.12/32}
+        - ipBlock: {cidr: 192.168.10.13/32}
+        - ipBlock: {cidr: 192.168.10.21/32}
+        - ipBlock: {cidr: 192.168.10.30/32}
+        - ipBlock: {cidr: 192.168.10.31/32}
+        - ipBlock: {cidr: 192.168.10.40/32}
+        - ipBlock: {cidr: 192.168.10.41/32}
+        - ipBlock: {cidr: 192.168.10.51/32}
+        - ipBlock: {cidr: 192.168.10.52/32}
+        - ipBlock: {cidr: 192.168.10.53/32}
+        - ipBlock: {cidr: 192.168.10.61/32}
+        - ipBlock: {cidr: 192.168.10.62/32}
+        - ipBlock: {cidr: 192.168.10.63/32}
+        - ipBlock: {cidr: 192.168.10.64/32}
+        - ipBlock: {cidr: 192.168.10.65/32}
+        - ipBlock: {cidr: 192.168.10.200/32}
+      ports:
+        - {protocol: TCP, port: 22}
+    - to:
+        - podSelector:
+            matchLabels:
+              app: rackpeek
+      ports:
+        - {protocol: TCP, port: 8080}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - {protocol: TCP, port: 8443}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 0.0.0.0/8
+              - 10.0.0.0/8
+              - 100.64.0.0/10
+              - 127.0.0.0/8
+              - 169.254.0.0/16
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 224.0.0.0/4
+      ports:
+        - {protocol: TCP, port: 443}

@@ -45,8 +45,12 @@ SCAN_WORKERS = 6
 
 class RealIO:
     def __init__(self, env):
-        self.env = env
+        self.env = dict(env)
         self.indexed = []
+        key = os.path.join(tempfile.mkdtemp(), "id")
+        shutil.copyfile(self.env["SSH_KEY_FILE"], key)
+        os.chmod(key, 0o600)
+        self.env["SSH_KEY_FILE"] = key
 
     def _rpk(self, method, body=None):
         req = urllib.request.Request(self.env["RPK_URL"].rstrip("/") + "/api/inventory", method=method,

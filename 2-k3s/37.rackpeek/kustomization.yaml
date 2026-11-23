@@ -8,6 +8,10 @@ resources:
   - service.yaml
   - ingress.yaml
   - network-policy.yaml
+  - sync-rbac.yaml
+  - sync-network-policy.yaml
+  - sync-known-hosts.yaml
+  - sync-cronjob.yaml
 
 generators:
   - ksops-generator.yaml
