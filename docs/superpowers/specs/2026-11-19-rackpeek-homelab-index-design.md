@@ -132,7 +132,7 @@ RackPeek has no service-to-service link type, so "uses" lives in labels and is f
 ## Secrets
 
 - Masking happens on the host, before anything leaves it:
-  1. Name-only list. These send name and size only, with no content and no hash: `/etc/ssh`, `/etc/pve/priv`, `/etc/rancher`, `/etc/proxmox-backup`, `/etc/pihole`, `/etc/wireguard`, `/etc/ssl/private`, `/etc/shadow*`, `*.key`, `*.pem`, `*.pw`, `id_*`, and all dotfiles and dotdirs under `/root`.
+  1. Name-only list. These send name and size only, with no content and no hash: `/etc/ssh`, `/etc/pve/priv`, `/etc/rancher`, `/etc/proxmox-backup`, `/etc/pihole`, `/etc/wireguard`, `/etc/ssl/private`, `/etc/shadow*`, `/etc/gshadow*`, `*.key`, `*.pem`, `*.pw`, `id_*`, and all dotfiles and dotdirs under `/root`.
   2. Binary files send name and hash only.
   3. In text files, a value whose key matches `pass|pwhash|secret|token|key|credential|auth`, and the password part of any `scheme://user:pass@` URL, are replaced by `***`.
 - Second check in the sync pod: `gitleaks` runs over the masked tree before the Forgejo commit and the RackPeek post. The content of any flagged file is dropped and the file is listed in the run log.
