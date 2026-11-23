@@ -19,3 +19,5 @@ generators:
 images:
   - name: aptacode/rackpeek
     newTag: v2.3.0@sha256:0c0939ccb5586fba29b88268922480dc0653f9ad066807d418691695aa19d9ec
+  - name: ghcr.io/spyrospsarras/rackpeek-sync
+    digest: sha256:6de57df2edd869c60a3252af67e1d1e8e7ad12086c38983d1d93e7400b2a3a02
