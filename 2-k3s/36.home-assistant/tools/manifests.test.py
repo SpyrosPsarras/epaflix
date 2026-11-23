@@ -125,8 +125,8 @@ class ManifestTests(unittest.TestCase):
             self.assertEqual(env[name]["valueFrom"], {"secretKeyRef": {"name": "esphome-auth", "key": name}})
         volumes = {v["name"]: v for v in pod["volumes"]}
         mount = next(m for m in container["volumeMounts"] if m["mountPath"] == "/config")
-        self.assertEqual(volumes[mount["name"]]["persistentVolumeClaim"]["claimName"], "esphome-config")
-        pvc = resource("esphome.yaml", "PersistentVolumeClaim", "esphome-config")
+        self.assertEqual(volumes[mount["name"]]["persistentVolumeClaim"]["claimName"], "esphome-config-pithari")
+        pvc = resource("esphome.yaml", "PersistentVolumeClaim", "esphome-config-pithari")
         self.assertEqual(pvc["spec"]["storageClassName"], "truenas-iscsi")
         self.assertEqual(pvc["spec"]["accessModes"], ["ReadWriteOnce"])
         self.assertEqual(pvc["spec"]["resources"]["requests"]["storage"], "5Gi")
@@ -187,8 +187,8 @@ class ManifestTests(unittest.TestCase):
             sorted((p["name"], p["targetPort"]) for p in service["spec"]["ports"]),
         )
         self.assertEqual(volumes[mounts["/run/certs"]["name"]]["secret"], {"secretName": "api-rr-tls"})
-        self.assertEqual(volumes[mounts["/data"]["name"]]["persistentVolumeClaim"], {"claimName": "roborock-data"})
-        pvc = resource("roborock.yaml", "PersistentVolumeClaim", "roborock-data")
+        self.assertEqual(volumes[mounts["/data"]["name"]]["persistentVolumeClaim"], {"claimName": "roborock-data-pithari"})
+        pvc = resource("roborock.yaml", "PersistentVolumeClaim", "roborock-data-pithari")
         self.assertEqual(pvc["metadata"]["annotations"], {"argocd.argoproj.io/sync-options": "Prune=false,Delete=false"})
         self.assertEqual(pvc["spec"]["storageClassName"], "truenas-iscsi")
         self.assertEqual(pvc["spec"]["accessModes"], ["ReadWriteOnce"])
@@ -406,7 +406,7 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(volumes[mount["name"]]["secret"]["secretName"], "home-assistant-secrets")
         claim = next(v for v in volumes.values() if "persistentVolumeClaim" in v)["persistentVolumeClaim"]["claimName"]
         pvc = resource("home-assistant.yaml", "PersistentVolumeClaim", claim)
-        self.assertEqual(claim, "home-assistant-config")
+        self.assertEqual(claim, "home-assistant-config-pithari")
         self.assertEqual(pvc["spec"]["storageClassName"], "truenas-iscsi")
         self.assertEqual(pvc["spec"]["accessModes"], ["ReadWriteOnce"])
         self.assertEqual(pvc["spec"]["resources"]["requests"]["storage"], "5Gi")
