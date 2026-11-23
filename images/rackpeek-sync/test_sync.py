@@ -47,10 +47,11 @@ class FakeIO:
     def gitleaks(self, tree):
         return self.leaks
 
-    def push_live(self, tree, dirs):
+    def push_live(self, tree, dirs, namespaces):
         if self.push_down:
             raise OSError("forgejo down")
         self.dirs = sorted(dirs)
+        self.namespaces = namespaces
         self.pushed.append(sorted(os.path.relpath(os.path.join(d, f), tree)
                                   for d, _, fs in os.walk(tree) for f in fs))
 
@@ -86,7 +87,17 @@ class Sync(unittest.TestCase):
         self.assertTrue(any("truenas" in line and "TimeoutError" in line for line in io.log))
         self.assertNotIn("truenas", io.dirs)
         self.assertIn("takaros", io.dirs)
-        self.assertIn("k8s", io.dirs)
+        self.assertIn("k8s/forgejo", io.dirs)
+        self.assertNotIn("k8s/t3code-work", io.dirs)
+        self.assertIn("loose", io.namespaces)
+
+    def test_final_payload_scrubbed(self):
+        io = FakeIO()
+        stored = fx.stored()
+        stored[0]["labels"]["uses"] = "x.t3code-work.svc"
+        io.rpk_get = lambda: {"version": 5, "resources": stored}
+        run(io)
+        self.assertNotIn("t3code-work", io.posts[0]["yaml"])
 
     def test_fresh_inventory_before_post(self):
         io = FakeIO()

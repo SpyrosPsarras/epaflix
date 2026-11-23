@@ -10,7 +10,8 @@ KIND_SHORT = {"deployments": ("Deployment", "deploy"), "statefulsets": ("Statefu
               "daemonsets": ("DaemonSet", "ds"), "cronjobs": ("CronJob", "cronjob")}
 HOST_RE = re.compile(r"\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:svc(?:\.cluster\.local)?|epaflix\.com)\b")
 SECRET_DOC = re.compile(r"^kind:\s*Secret\s*$", re.M)
-EXCLUDED_REF = re.compile(r"[A-Za-z0-9.-]*\b(?:" + "|".join(EXCLUDED) + r")\b[A-Za-z0-9.-]*")
+EXCLUDED_REF = re.compile(r"[^\s\"',;]*(?:" + "|".join(EXCLUDED) + r")[^\s\"',;]*", re.IGNORECASE)
+SENSITIVE_KEY = re.compile(r"pass|pwhash|secret|token|key|credential|auth", re.IGNORECASE)
 SCAN_LABELS = ("os", "kernel", "files", "live-config", "packages", "scan-errors")
 
 
@@ -145,7 +146,7 @@ def pod_refs(template):
             if "secretRef" in ef:
                 secrets.add(ef["secretRef"].get("name"))
         for e in c.get("env", []):
-            if "value" in e:
+            if "value" in e and not SENSITIVE_KEY.search(e.get("name", "")):
                 env_values.append(e["value"])
             ref = e.get("valueFrom", {})
             if "configMapKeyRef" in ref:
@@ -217,7 +218,7 @@ def build_k8s(k8s, repo, idx, zvols, guests, indexed):
         label(it, "sync", (status.get("sync") or {}).get("status"))
         label(it, "health", (status.get("health") or {}).get("status"))
         if indexed is not None and dest not in indexed:
-            label(it, "indexed", "no")
+            it["labels"]["indexed"] = "no"
         out.append(it)
         for r in status.get("resources", []):
             if not excluded(r.get("namespace")):
@@ -229,10 +230,11 @@ def build_k8s(k8s, repo, idx, zvols, guests, indexed):
         it = item("System", f"app/{n}", "k8s", ["k3s/epaflix"], type="other")
         label(it, "kind", "namespace")
         if indexed is not None and n not in indexed:
-            label(it, "indexed", "no")
+            it["labels"]["indexed"] = "no"
         out.append(it)
 
-    cm_data = {(ns_of(c), name_of(c)): c.get("data") or {} for c in k8s.get("configmaps", []) if not excluded(ns_of(c))}
+    cm_data = {(ns_of(c), name_of(c)): {k: v for k, v in (c.get("data") or {}).items() if not SENSITIVE_KEY.search(k)}
+               for c in k8s.get("configmaps", []) if not excluded(ns_of(c))}
     pvcs = {(ns_of(p), name_of(p)): p for p in k8s.get("persistentvolumeclaims", []) if not excluded(ns_of(p))}
     pvs = {name_of(p): p for p in k8s.get("persistentvolumes", [])
            if not excluded((p.get("spec", {}).get("claimRef") or {}).get("namespace"))}
@@ -304,10 +306,8 @@ def build_k8s(k8s, repo, idx, zvols, guests, indexed):
                     elif local:
                         link += f" -> local:{local}"
                         node = pv_node(pv)
-                        if node:
-                            disks = guests.get(node, {}).get("labels", {}).get("disks", "")
-                            vols = ", ".join(d.split("=", 1)[1] for d in disks.split(", ") if "=" in d)
-                            link += f" -> vm/{node}" + (f" ({vols})" if vols else "")
+                        if node and node in guests:
+                            link += f" -> vm/{node}"
                 chains.append(link)
             label(it, "disk-chain", chains)
             out.append(it)
@@ -414,9 +414,9 @@ def carry_over(new, stored, ok_sources, today):
             print(f"warning: {it['name']} exists without tag sync, left untouched", file=sys.stderr)
             seen.add(it["name"].lower())
             continue
-        if old:
+        if old and "live-config" not in it["labels"]:
             for k in SCAN_LABELS:
-                if k in (old.get("labels") or {}) and k not in it["labels"]:
+                if k in (old.get("labels") or {}):
                     it["labels"][k] = old["labels"][k]
             if old.get("notes"):
                 it["notes"] = old["notes"]

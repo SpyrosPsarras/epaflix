@@ -116,7 +116,7 @@ class RealIO:
             found = json.load(f) or []
         return sorted({os.path.relpath(x["File"], tree) if os.path.isabs(x["File"]) else x["File"] for x in found})
 
-    def push_live(self, tree, dirs):
+    def push_live(self, tree, dirs, namespaces):
         work = tempfile.mkdtemp()
         askpass = os.path.join(work, "askpass")
         with open(askpass, "w") as f:
@@ -143,6 +143,11 @@ class RealIO:
                 shutil.rmtree(target)
             if os.path.isdir(os.path.join(tree, entry)):
                 shutil.copytree(os.path.join(tree, entry), target)
+        k8s_dir = os.path.join(repo, "k8s")
+        if namespaces is not None and os.path.isdir(k8s_dir):
+            for ns in os.listdir(k8s_dir):
+                if ns not in namespaces:
+                    shutil.rmtree(os.path.join(k8s_dir, ns))
         git("add", "-A")
         if git("diff", "--cached", "--quiet", check=False).returncode == 0:
             return
@@ -239,14 +244,18 @@ def run(io, hosts, today, log):
         if os.path.isfile(path):
             os.remove(path)
         log(f"gitleaks: dropped {rel}")
-    dirs = sorted((set(scans) | ({"k8s"} if "k8s" not in failed else set())))
+    indexed = set(getattr(io, "indexed", None) or []) if "k8s" not in failed else None
+    namespaces = None if "k8s" in failed else {name_of_ns for name_of_ns in
+                                               (n["metadata"]["name"] for n in k8s.get("namespaces", []))
+                                               if not build.excluded(name_of_ns)}
+    dirs = sorted(set(scans) | {f"k8s/{ns}" for ns in (indexed or set())})
     try:
-        io.push_live(tree, dirs)
+        io.push_live(tree, dirs, namespaces)
         log("forgejo: pushed homelab-live")
     except Exception as exc:
         exit_code = 1
         log(f"forgejo: push failed: {type(exc).__name__}: {exc}")
-    items = build.build_items(k8s, scans, repo, failed, set(getattr(io, "indexed", []) or []) or None)
+    items = build.build_items(k8s, scans, repo, failed, indexed)
     ok_sources = ({"k8s"} | set(hosts)) - failed
     try:
         stored = io.rpk_get().get("resources", [])
@@ -254,6 +263,8 @@ def run(io, hosts, today, log):
         log(f"rackpeek: read failed: {type(exc).__name__}: {exc}")
         return 1
     resources = build.carry_over(items, stored, ok_sources, today)
+    for r in resources:
+        r["labels"] = {k: build.scrub(v) for k, v in (r.get("labels") or {}).items()}
     try:
         io.rpk_post({"yaml": json.dumps({"version": 5, "resources": resources}), "mode": "Replace"})
         log(f"rackpeek: posted {len(resources)} items")

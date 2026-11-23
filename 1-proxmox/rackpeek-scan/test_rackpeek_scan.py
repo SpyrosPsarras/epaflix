@@ -57,6 +57,18 @@ class MaskText(unittest.TestCase):
         self.assertNotIn("more", out)
         self.assertIn("host: h", out)
 
+    def test_mask_yaml_block_blank_line_and_comment(self):
+        out = scan.mask_text("password: | # note\n  aaa1\n\n  bbb2\nnext: ok\n")
+        self.assertNotIn("aaa1", out)
+        self.assertNotIn("bbb2", out)
+        self.assertIn("next: ok", out)
+
+    def test_mask_continued_line(self):
+        out = scan.mask_text('Environment="API_TOKEN=ccc3 \\\n  ddd4"\nExecStart=/bin/x\n')
+        self.assertNotIn("ccc3", out)
+        self.assertNotIn("ddd4", out)
+        self.assertIn("ExecStart=/bin/x", out)
+
     def test_mask_keeps_plain(self):
         self.assertEqual(scan.mask_text("hostname=takaros\n"), "hostname=takaros\n")
 

@@ -65,7 +65,7 @@ def k8s():
                  {"metadata": meta("rackpeek-77-aa", "rackpeek", ownerReferences=[{"kind": "ReplicaSet", "name": "rackpeek-77"}]),
                   "spec": {"nodeName": "k3s-worker-63"}},
                  {"metadata": meta("secret-pod-0", "t3code-work"), "spec": {"nodeName": "k3s-worker-65"}}],
-        "configmaps": [{"metadata": meta("forgejo-cfg", "forgejo"), "data": {"a": "url=http://rackpeek.rackpeek.svc:8080", "b": "http://hub.mcp-hub-work.svc:80"}}],
+        "configmaps": [{"metadata": meta("forgejo-cfg", "forgejo"), "data": {"a": "url=http://rackpeek.rackpeek.svc:8080", "b": "http://hub.mcp-hub-work.svc:80", "DB_PASSWORD": "secret-db.postgres-system.svc"}}],
         "services": [{"metadata": meta("forgejo", "forgejo"), "spec": {"selector": {"app": "forgejo"}}}],
         "ingressroutes": [{"metadata": meta("forgejo-https", "forgejo"),
                            "spec": {"entryPoints": ["internal"],

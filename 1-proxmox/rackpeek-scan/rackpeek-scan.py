@@ -45,7 +45,7 @@ def mask_line(line):
     rest = line[m.end():]
     if rest.strip() in ("", "***", '"***"', "'***'"):
         return line, None
-    if rest.strip() in BLOCK:
+    if rest.split("#")[0].strip() in BLOCK:
         return line, len(line) - len(line.lstrip())
     quote = rest[0] if rest[:1] in ("'", '"') else ""
     return line[:m.end()] + quote + "***", None
@@ -59,15 +59,23 @@ def mask_text(text):
             break
         text = masked
     text = CLI_FLAG.sub(lambda m: m.group("pre") + "***", text)
-    out, block_indent = [], None
+    out, block_indent, cont = [], None, False
     for line in text.split("\n"):
+        if cont:
+            out.append("***" if line.strip() else line)
+            cont = line.rstrip().endswith("\\")
+            continue
         if block_indent is not None:
-            if line.strip() and len(line) - len(line.lstrip()) > block_indent:
+            if not line.strip():
+                out.append(line)
+                continue
+            if len(line) - len(line.lstrip()) > block_indent:
                 out.append(" " * (block_indent + 2) + "***")
                 continue
             block_indent = None
-        line, block_indent = mask_line(line)
-        out.append(line)
+        masked, block_indent = mask_line(line)
+        cont = masked != line and line.rstrip().endswith("\\")
+        out.append(masked)
     return "\n".join(out)
 
 

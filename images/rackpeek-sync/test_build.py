@@ -69,7 +69,7 @@ class Build(unittest.TestCase):
         self.assertEqual(self.byname["forgejo/deploy/forgejo"]["labels"]["disk-chain"],
                          "forgejo-data -> pv/pvc-111 -> truenas:apps/k8s/iscsi/vols/pvc-111 -> pool apps")
         self.assertEqual(self.byname["loose/deploy/stray"]["labels"]["disk-chain"],
-                         "stray-data -> pv/pvc-222 -> local:/var/lib/rancher/k3s/storage/pvc-222 -> vm/k3s-worker-61 (ssd-raid5:vm-1061-disk-0)")
+                         "stray-data -> pv/pvc-222 -> local:/var/lib/rancher/k3s/storage/pvc-222 -> vm/k3s-worker-61")
 
     def test_live_only(self):
         self.assertEqual(self.byname["loose/deploy/stray"]["labels"]["git"], "live only")
@@ -84,7 +84,16 @@ class Build(unittest.TestCase):
         self.assertNotIn("mcp-hub-work", blob)
         self.assertNotIn("pvc-999", blob)
         self.assertNotIn("hub.", self.byname["forgejo/deploy/forgejo"]["labels"]["uses"])
+        self.assertNotIn("secret-db", self.byname["forgejo/deploy/forgejo"]["labels"]["uses"])
         self.assertNotIn("evil", blob)
+
+    def test_scrub_inside_tokens(self):
+        self.assertEqual(build.scrub("a FOO_t3code-work_BAR b"), "a *** b")
+        self.assertEqual(build.scrub("x.mcp-hub-work.svc"), "***")
+
+    def test_no_namespace_readable(self):
+        items = by_name(build.build_items(fx.k8s(), {}, fx.repo(), set(), indexed=set()))
+        self.assertEqual(items["app/forgejo"]["labels"]["indexed"], "no")
 
     def test_host_labels(self):
         self.assertEqual(self.byname["hw/takaros"]["labels"]["model"], "HP ProLiant DL380 Gen9")
@@ -143,6 +152,15 @@ class CarryOver(unittest.TestCase):
         out = by_name(build.carry_over(new, fx.stored(), {"takaros"}, fx.TODAY))
         self.assertEqual(out["lxc/pihole"]["labels"]["os"], "OldOS")
         self.assertEqual(out["lxc/pihole"]["labels"]["vmid"], "1030")
+
+    def test_fresh_scan_drops_old_errors(self):
+        new = [{"kind": "System", "name": "lxc/pihole", "type": "container", "tags": ["sync"],
+                "labels": {"source": "takaros", "os": "Debian", "live-config": "homelab-live/pihole/"}}]
+        stored = fx.stored()
+        stored[-1]["labels"]["scan-errors"] = "3"
+        out = by_name(build.carry_over(new, stored, {"takaros"}, fx.TODAY))
+        self.assertNotIn("scan-errors", out["lxc/pihole"]["labels"])
+        self.assertEqual(out["lxc/pihole"]["labels"]["os"], "Debian")
 
     def test_failed_source_untouched(self):
         self.assertNotIn("vm/nick", self.run_carry({"k8s"}))
