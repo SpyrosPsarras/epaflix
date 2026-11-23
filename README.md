@@ -112,7 +112,8 @@ done
 k -n vaultwarden patch cronjob vaultwarden-backup -p '{"spec":{"suspend":true}}'
 for c in paperless-backup paperless-share-lists; do k -n paperless patch cronjob $c -p '{"spec":{"suspend":true}}'; done
 # Wait for every unfinished Job, manual runs included; vaultwarden-backup scales Vaultwarden up on exit.
-until [ -z "$(k -n vaultwarden get jobs -o jsonpath='{.items[?(@.status.active)].metadata.name}')$(k -n paperless get jobs -o jsonpath='{.items[?(@.status.active)].metadata.name}')" ]; do sleep 10; done
+unfinished() { a=$(k -n vaultwarden get jobs -o json) && b=$(k -n paperless get jobs -o json) && printf '%s\n%s\n' "$a" "$b" | jq -s '[.[].items[]|select(any(.status.conditions[]?; (.type=="Complete" or .type=="Failed") and .status=="True")|not)]|length'; }
+until [ "$(unfinished)" = 0 ]; do sleep 10; done    # a failed kubectl or jq prints nothing and keeps waiting
 scale() {
   k -n app-authentik scale deploy authentik-worker --replicas=$1
   for n in discord-media discord-windmill; do k -n $n scale deploy openclaw --replicas=$1; done
