@@ -25,6 +25,26 @@ spec:
         fsGroup: 1654
         runAsNonRoot: true
       initContainers:
+        - name: config-owner
+          image: aptacode/rackpeek
+          command:
+            - chown
+            - 1654:1654
+            - /app/config
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            runAsNonRoot: false
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - CHOWN
+          volumeMounts:
+            - name: config
+              mountPath: /app/config
         - name: gitignore
           image: aptacode/rackpeek
           command:

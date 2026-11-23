@@ -12,7 +12,7 @@ RackPeek saves its YAML to the private Forgejo repo `rackpeek-bot/rackpeek-confi
 
 RackPeek accepts only HTTPS remotes, and `git.epaflix.com` sits behind Authentik forward auth. RackPeek therefore uses `git-internal.epaflix.com`: Traefik's internal listener (LAN only, wildcard certificate) routes only Git smart-HTTP paths (`/<owner>/<repo>.git/...`) to Forgejo, without forward auth. Forgejo still requires the bot token there.
 
-An init container adds `.dataprotection/` to `/app/config/.gitignore`. RackPeek keeps its ASP.NET Data Protection keys in that directory, and Git sync stages every file that is not ignored.
+The PVC's root directory is created owned by root, and libgit2 refuses a repository whose directory belongs to another user (`repository path '/app/config' is not owned by current user`). The `config-owner` init container runs as root with only `CHOWN` and gives `/app/config` itself to UID 1654. Another init container adds `.dataprotection/` to `/app/config/.gitignore`. RackPeek keeps its ASP.NET Data Protection keys in that directory, and Git sync stages every file that is not ignored.
 
 `rackpeek-secrets` also holds `HOMELAB_LIVE_TOKEN`, the bot's `homelab-live` token, for the nightly snapshot job (PR 3).
 
