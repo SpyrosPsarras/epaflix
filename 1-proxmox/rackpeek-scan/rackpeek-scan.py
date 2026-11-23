@@ -26,6 +26,10 @@ SECRET_KEY = r"[A-Za-z0-9_.-]*(?:pass|pwhash|secret|token|key|credential|auth)[A
 KEY_VALUE = re.compile(
     r"(?P<pre>[\"']?" + SECRET_KEY + r"[\"']?\s*[:=]\s*)(?P<q>[\"']?)(?P<val>[^\"'\s,}#][^\"'\n,}]*?|)(?P=q)(?=\s*(?:[,}#\n]|$))",
     re.IGNORECASE | re.MULTILINE)
+CLI_FLAG = re.compile(
+    r"(?P<pre>(?<![A-Za-z0-9_-])--?[A-Za-z0-9-]*(?:pass|secret|token|key|credential)[A-Za-z0-9-]*[ =])(?P<val>\"[^\"\n]*\"|'[^'\n]*'|[^\s;]+)",
+    re.IGNORECASE)
+URL_TOKEN = re.compile(r"(?P<pre>://[^\s\"']*?/)[A-Za-z0-9_-]{32,}(?=[/?#\s\"']|$)", re.MULTILINE)
 URL_PASSWORD = re.compile(r"(?P<pre>[A-Za-z][A-Za-z0-9+.-]*://[^\s:/@]+:)[^\s@/]+(?P<at>@)")
 
 
@@ -35,6 +39,12 @@ def under(path, prefix):
 
 def mask_text(text):
     text = URL_PASSWORD.sub(lambda m: m.group("pre") + "***" + m.group("at"), text)
+    while True:
+        masked = URL_TOKEN.sub(lambda m: m.group("pre") + "***", text)
+        if masked == text:
+            break
+        text = masked
+    text = CLI_FLAG.sub(lambda m: m.group("pre") + "***", text)
 
     def repl(m):
         if m.group("val") in ("", "***"):
@@ -45,7 +55,7 @@ def mask_text(text):
 
 
 def classify(path):
-    if any(under(path, d) for d in SKIP_DIRS):
+    if any(under(path, d) for d in SKIP_DIRS) or "/.git/" in path + "/":
         return "skip"
     if any(under(path, d) for d in NAME_ONLY_DIRS):
         return "name-only"
@@ -188,13 +198,28 @@ def packages(errors):
     return sorted(out.splitlines()) if out else []
 
 
-def modified_conffiles(errors):
+def modified_conffiles(root):
+    status = os.path.join(root, "var/lib/dpkg/status")
+    changed = []
     try:
-        res = subprocess.run(["dpkg", "--verify"], capture_output=True, text=True, timeout=120)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        errors.append(f"dpkg --verify: {type(exc).__name__}")
-        return []
-    return [line.split()[-1] for line in res.stdout.splitlines() if line.split() and line.split()[-1].startswith("/etc/")]
+        with open(status) as f:
+            text = f.read()
+    except OSError:
+        return changed
+    for block in re.findall(r"^Conffiles:\n((?: .*\n)+)", text, re.M):
+        for line in block.splitlines():
+            parts = line.split()
+            if len(parts) < 2 or parts[-1] == "obsolete" or not parts[0].startswith("/etc/"):
+                continue
+            path, digest = parts[0], parts[1]
+            try:
+                with open(os.path.join(root, path.lstrip("/")), "rb") as f:
+                    actual = hashlib.md5(f.read()).hexdigest()
+            except OSError:
+                continue
+            if actual != digest:
+                changed.append(path)
+    return sorted(set(changed))
 
 
 def unowned_etc(root, errors):
@@ -262,12 +287,14 @@ def scan():
     truenas = bool(run(["sh", "-c", "command -v midclt"], []))
     paths = set(collect_paths(root, pve))
     if os.path.isfile(os.path.join(root, "var/lib/dpkg/status")):
-        paths.update(modified_conffiles(errors))
+        paths.update(modified_conffiles(root))
         paths.update(unowned_etc(root, errors))
     files = []
     for path in sorted(paths):
         try:
             files.append(file_entry(path, root))
+        except FileNotFoundError:
+            continue
         except OSError as exc:
             errors.append(f"{path}: {type(exc).__name__}")
     return {"schema": SCHEMA, "host": socket.gethostname(), "os": os_info(root),

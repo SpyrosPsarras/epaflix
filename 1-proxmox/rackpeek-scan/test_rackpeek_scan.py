@@ -29,6 +29,18 @@ class MaskText(unittest.TestCase):
         line = "Authorization: " + "Bearer " + "abc123"
         self.assertEqual(scan.mask_text(line), "Authorization: ***")
 
+    def test_mask_cli_flag(self):
+        out = scan.mask_text('qm set 1 --cipassword "abc def" --name vm1\n')
+        self.assertIn("--cipassword ***", out)
+        self.assertIn("--name vm1", out)
+        self.assertNotIn("abc", out)
+
+    def test_mask_url_token_segment(self):
+        tok = "Ab3" * 12
+        out = scan.mask_text("url https://hooks.example/api/webhooks/123/" + tok + "\n")
+        self.assertNotIn(tok, out)
+        self.assertIn("/123/***", out)
+
     def test_mask_keeps_plain(self):
         self.assertEqual(scan.mask_text("hostname=takaros\n"), "hostname=takaros\n")
 
@@ -42,6 +54,9 @@ class Classify(unittest.TestCase):
 
     def test_skip_var_lib(self):
         self.assertEqual(scan.classify("/var/lib/rancher/x"), "skip")
+
+    def test_skip_git_dirs(self):
+        self.assertEqual(scan.classify("/etc/.pihole/.git/hooks/x.sample"), "skip")
 
     def test_read(self):
         self.assertEqual(scan.classify("/etc/hostname"), "read")
@@ -97,6 +112,23 @@ class FileEntry(unittest.TestCase):
                     "/etc/systemd/system/a.service", "/etc/cron.d/job"):
             self.assertIn(rel, paths)
         self.assertNotIn("/var/lib/y", paths)
+
+
+class Conffiles(unittest.TestCase):
+    def test_modified_conffiles(self):
+        import hashlib
+        root = tempfile.mkdtemp()
+        for rel, data in (("etc/a.conf", b"changed"), ("etc/b.conf", b"same")):
+            p = pathlib.Path(root, rel)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(data)
+        status = pathlib.Path(root, "var/lib/dpkg/status")
+        status.parent.mkdir(parents=True)
+        status.write_text(
+            "Package: x\nConffiles:\n /etc/a.conf " + hashlib.md5(b"orig").hexdigest()
+            + "\n /etc/b.conf " + hashlib.md5(b"same").hexdigest()
+            + "\n /etc/gone.conf " + hashlib.md5(b"z").hexdigest() + "\nDescription: d\n")
+        self.assertEqual(scan.modified_conffiles(root), ["/etc/a.conf"])
 
 
 class Main(unittest.TestCase):

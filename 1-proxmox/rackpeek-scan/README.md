@@ -8,7 +8,7 @@ Installed as `/usr/local/sbin/rackpeek-scan` (mode 0755, owner root) on every ho
 
 - OS: `/etc/os-release`, kernel, uptime.
 - Hardware: `dmidecode` (system, CPU, memory), `lsblk -J`, `ip -j addr`.
-- Packages: `dpkg-query`; modified conffiles from `dpkg --verify`; files under `/etc` that no package owns.
+- Packages: `dpkg-query`; config files whose md5 differs from the record in `/var/lib/dpkg/status`; files under `/etc` that no package owns.
 - Files: `/usr/local`, `/etc/systemd/system`, cron dirs and crontabs, `/etc/fstab`, `/etc/hosts`, sysctl, network config, everything under `/root`, and `/etc/pve` on Proxmox. At most 5000 files per folder.
 - Proxmox: `pvs`, `lvs`, `zpool status -P`. The online node whose name sorts first also reads the cluster with `pvesh`: resources, every guest's config and storage.
 - TrueNAS: pools, datasets, NFS shares, iSCSI extents and apps through `midclt`.
@@ -21,7 +21,7 @@ Masking happens here, before anything leaves the host.
 
 1. Name only (name, size and mtime, no hash, no content): `/etc/ssh`, `/etc/pve/priv`, `/etc/rancher`, `/etc/proxmox-backup`, `/etc/pihole`, `/etc/wireguard`, `/etc/ssl/private`, `/etc/shadow*`, `/etc/gshadow*`, `*.key`, `*.pem`, `*.pw`, `id_*`, and every dotfile and dotdir under `/root`.
 2. Binary files: name and sha256 of the raw file.
-3. Text files: sha256 of the raw file. Text up to 64 KiB is sent after masking: a value whose key contains `pass`, `pwhash`, `secret`, `token`, `key`, `credential` or `auth` becomes `***`, and so does the password part of a URL.
+3. Text files: sha256 of the raw file. Text up to 64 KiB is sent after masking: a value whose key contains `pass`, `pwhash`, `secret`, `token`, `key`, `credential` or `auth` becomes `***`, and so do the password part of a URL, the value after a command-line flag such as `--cipassword`, and URL path segments of 32 or more token characters (webhook tokens). `.git` folders are skipped.
 
 The sync runs gitleaks over everything again before it stores anything.
 

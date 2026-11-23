@@ -244,7 +244,7 @@ def build_k8s(k8s, repo, idx, zvols):
                 for rule in np.get("spec", {}).get("egress", []):
                     for peer in rule.get("to", []):
                         target = ((peer.get("namespaceSelector") or {}).get("matchLabels") or {}).get("kubernetes.io/metadata.name")
-                        if target and target != ns and not excluded(target):
+                        if target and target not in (ns, "kube-system") and not excluded(target):
                             uses.add(f"ns/{target}")
             label(it, "uses", sorted(u.replace(".cluster.local", "") for u in uses))
             label(it, "git", f"managed by app/{app} ({app_path})" if app else "live only")
@@ -310,7 +310,8 @@ def build_hosts(scans, idx):
                     if r.get("type") not in ("qemu", "lxc"):
                         continue
                     prefix = "vm" if r["type"] == "qemu" else "lxc"
-                    g = item("System", f"{prefix}/{r['name']}", alias, [f"pve/{r['node']}"],
+                    short = r["name"].split(".")[0]
+                    g = item("System", f"{prefix}/{short}", alias, [f"pve/{r['node']}"],
                              type="vm" if prefix == "vm" else "container")
                     cfg = (pve.get("guests") or {}).get(str(r["vmid"])) or {}
                     label(g, "vmid", str(r["vmid"]))
@@ -321,7 +322,7 @@ def build_hosts(scans, idx):
                     disks = [f"{k}={v.split(',')[0]}" for k, v in cfg.items()
                              if re.match(r"^(scsi|virtio|sata|ide|rootfs|mp)\d*$", k) and isinstance(v, str)]
                     label(g, "disks", sorted(disks))
-                    guests_by_name[r["name"]] = g
+                    guests_by_name[short] = g
                     out.append(g)
         tn = scan.get("truenas")
         if tn:
@@ -336,7 +337,7 @@ def build_hosts(scans, idx):
     for alias, scan in scans.items():
         if scan.get("pve"):
             continue
-        g = guests_by_name.get(scan.get("host")) or guests_by_name.get(alias)
+        g = guests_by_name.get((scan.get("host") or "").split(".")[0]) or guests_by_name.get(alias)
         if g:
             host_labels(g, alias, scan, idx)
     return out, zvols
