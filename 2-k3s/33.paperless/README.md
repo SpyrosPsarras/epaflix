@@ -204,7 +204,7 @@ kubectl -n paperless create job --from=cronjob/paperless-share-lists share-lists
 
 ## Storage
 
-PV `paperless-data-pithari` mounts NFS `192.168.10.200:/mnt/pithari/paperless/data`, the dataset `pithari/paperless/data` on the TrueNAS raidz2 pool `pithari`. It inherits the encryption of `pithari/paperless`, whose key TrueNAS stores and loads at boot, with a copy in the vault. The TrueNAS share allows the five k3s workers and maps every client to user and group `paperless` (1000:1000), which matches `USERMAP_UID`/`USERMAP_GID`. `PAPERLESS_DATA_DIR` is `data/`, `PAPERLESS_MEDIA_ROOT` is `media/` and paperless-gpt uses `gpt/` on that volume. The consume folder is `emptyDir`, because uploads through the API and web UI skip it.
+PV `paperless-data-pithari` mounts NFS `192.168.10.200:/mnt/pithari/paperless/data`, the dataset `pithari/paperless/data` on the TrueNAS raidz2 pool `pithari`. It inherits the encryption of `pithari/paperless`, whose key TrueNAS stores and is set to load at boot, with a copy in the vault. Unlock after a TrueNAS reboot has not been tested yet. The TrueNAS share allows the five k3s workers and maps every client to user and group `paperless` (1000:1000), which matches `USERMAP_UID`/`USERMAP_GID`. `PAPERLESS_DATA_DIR` is `data/`, `PAPERLESS_MEDIA_ROOT` is `media/` and paperless-gpt uses `gpt/` on that volume. The consume folder is `emptyDir`, because uploads through the API and web UI skip it.
 
 TrueNAS snapshot task `pithari` (recursive, daily 00:45, kept 30 days) protects the files against deletion. CronJob `paperless-backup` copies them to MinIO, as described in Backup. The database uses the CNPG backups to MinIO.
 

@@ -111,8 +111,8 @@ for a in app-of-apps authentik discord forgejo gh-runner home-assistant paperles
 done
 k -n vaultwarden patch cronjob vaultwarden-backup -p '{"spec":{"suspend":true}}'
 for c in paperless-backup paperless-share-lists; do k -n paperless patch cronjob $c -p '{"spec":{"suspend":true}}'; done
-k -n vaultwarden get cronjob vaultwarden-backup -o jsonpath='{.status.active}'    # repeat until empty; the backup scales Vaultwarden up on exit
-k -n paperless get cronjob -o jsonpath='{.items[*].status.active}'                # repeat until empty
+# Wait for every unfinished Job, manual runs included; vaultwarden-backup scales Vaultwarden up on exit.
+until [ -z "$(k -n vaultwarden get jobs -o jsonpath='{.items[?(@.status.active)].metadata.name}')$(k -n paperless get jobs -o jsonpath='{.items[?(@.status.active)].metadata.name}')" ]; do sleep 10; done
 scale() {
   k -n app-authentik scale deploy authentik-worker --replicas=$1
   for n in discord-media discord-windmill; do k -n $n scale deploy openclaw --replicas=$1; done
