@@ -41,7 +41,8 @@ O3 depends on R1: disks still on `apps` must keep mounting after the change. Che
 pithari/k8s                      encrypted, key stored on TrueNAS
 pithari/k8s/iscsi/vols/<pvc-…>   zvols, created by democratic-csi
 pithari/k8s/iscsi/snaps          detached snapshots (unused, snapshotter is off)
-pithari/paperless                encrypted, key stored on TrueNAS; NFS dataset
+pithari/paperless                encrypted, key stored on TrueNAS
+pithari/paperless/data           received from shypowder, NFS export
 pithari/immich                   later
 ```
 
@@ -83,9 +84,9 @@ Order: RackPeek first as the pilot (1 GiB, low traffic). Then Forgejo, Vaultward
 Follows "Move to TrueNAS" in `2-k3s/33.paperless/README.md`, with these specifics:
 
 1. Pause Argo for `app-of-apps` and `paperless` as above, scale Paperless and paperless-gpt to 0, and suspend `paperless-backup` and `paperless-share-lists`.
-2. Take snapshot `hdd/paperless@pithari-move` and send only that one: `ssh shypowder zfs send` piped into `ssh truenas zfs recv pithari/paperless`, through this pod. No new keys between hosts. 13.3 GB. The 42 sanoid snapshots stay on shypowder until `hdd/paperless` is deleted; restic in MinIO keeps the longer history. My call: nothing on TrueNAS would prune the sanoid names.
-3. Add a TrueNAS NFS share for `/mnt/pithari/paperless`: hosts `192.168.10.61`–`65`, all clients mapped to uid/gid 1000. Check that TrueNAS has a user and group with id 1000 first; the mapping needs one.
-4. PR: replace PV `paperless-data-shypowder` with one pointing at `192.168.10.200:/mnt/pithari/paperless`. Argo deletes and recreates PV and PVC. Scale up, resume CronJobs.
+2. Take snapshot `hdd/paperless@pithari-move` and send only that one: `ssh shypowder zfs send` piped into `ssh truenas zfs recv pithari/paperless/data`, through this pod. A non-raw receive cannot overwrite the encrypted `pithari/paperless`; the new child inherits its key. No new keys between hosts. 13.3 GB. The 42 sanoid snapshots stay on shypowder until `hdd/paperless` is deleted; restic in MinIO keeps the longer history. My call: nothing on TrueNAS would prune the sanoid names.
+3. Add a TrueNAS NFS share for `/mnt/pithari/paperless/data`: hosts `192.168.10.61`–`65`, all clients mapped to uid/gid 1000. Check that TrueNAS has a user and group with id 1000 first; the mapping needs one.
+4. PR: replace PV `paperless-data-shypowder` with one pointing at `192.168.10.200:/mnt/pithari/paperless/data`. Argo deletes and recreates PV and PVC. Scale up, resume CronJobs.
 5. After the owner confirms: stop the shypowder export. Deleting `hdd/paperless` is a cleanup step.
 
 Update the Storage section of the Paperless README.
