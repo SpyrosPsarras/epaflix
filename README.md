@@ -102,7 +102,7 @@ After a real loss, edit `cluster/postgres-cluster.yaml` before it is applied. Re
 
 ## Storage maintenance
 
-Every `truenas-iscsi` volume is a zvol under `pithari/k8s/iscsi/vols` on the TrueNAS pool `pithari`, a raidz2 of four 12 TB disks in patroklos. Paperless mounts NFS from `pithari/paperless/data` on the same pool. Both datasets are encrypted with keys that TrueNAS stores and unlocks at boot; copies are in the vault items `truenas - pithari-k8s dataset key` and `truenas - pithari-paperless dataset key`. TrueNAS snapshot task `pithari` keeps daily recursive snapshots for 30 days. If TrueNAS is away for more than 2 minutes, the app volumes go read-only. A cordon does not prevent that. Stop the consumers first. Vaultwarden is one of them, so fetch any secret you need beforehand.
+Every `truenas-iscsi` volume is a zvol under `pithari/k8s/iscsi/vols` on the TrueNAS pool `pithari`, a raidz2 of four 12 TB disks in patroklos. Paperless mounts NFS from `pithari/paperless/data` on the same pool. Both datasets are encrypted with keys that TrueNAS stores and loads at boot, with a copy of each key in the vault. Unlock after a reboot has not been tested yet, so check `keystatus` after the first one. TrueNAS snapshot task `pithari` keeps daily recursive snapshots for 30 days. If TrueNAS is away for more than 2 minutes, the app volumes go read-only. A cordon does not prevent that. Stop the consumers first. Vaultwarden is one of them, so fetch any secret you need beforehand.
 
 ```sh
 k() { kubectl --context epaflix "$@"; }
@@ -111,6 +111,8 @@ for a in app-of-apps authentik discord forgejo gh-runner home-assistant paperles
 done
 k -n vaultwarden patch cronjob vaultwarden-backup -p '{"spec":{"suspend":true}}'
 for c in paperless-backup paperless-share-lists; do k -n paperless patch cronjob $c -p '{"spec":{"suspend":true}}'; done
+k -n vaultwarden get cronjob vaultwarden-backup -o jsonpath='{.status.active}'    # repeat until empty; the backup scales Vaultwarden up on exit
+k -n paperless get cronjob -o jsonpath='{.items[*].status.active}'                # repeat until empty
 scale() {
   k -n app-authentik scale deploy authentik-worker --replicas=$1
   for n in discord-media discord-windmill; do k -n $n scale deploy openclaw --replicas=$1; done
@@ -125,7 +127,8 @@ scale() {
   k -n vaultwarden scale deploy vaultwarden --replicas=$1
 }
 scale 0
-k get volumeattachment | grep democratic-csi    # wait until this prints nothing, then reboot
+k get volumeattachment | grep democratic-csi    # wait until this prints nothing
+k -n paperless get pods                         # Paperless uses NFS, not a VolumeAttachment; wait until only paperless-converters runs, then reboot
 ```
 
 When TrueNAS is back, `ssh truenas zpool status pithari` is healthy and `ssh truenas zfs get -H keystatus pithari/k8s pithari/paperless` shows `available` twice, start again:
@@ -137,4 +140,4 @@ for c in paperless-backup paperless-share-lists; do k -n paperless patch cronjob
 k -n argocd patch application app-of-apps --type merge -p '{"spec":{"syncPolicy":{"automated":{"selfHeal":true}}}}'
 ```
 
-`app-of-apps` then restores the sync policy of the other Applications. The consumer list is from 2026-11-23. Recheck it with `k get pvc -A | grep truenas-iscsi` and the `paperless-data` PV.
+`app-of-apps` then restores the sync policy of the other Applications. The consumer list is from 2026-11-23. Recheck it with `k get pvc -A | grep truenas-iscsi` and PVC `paperless/paperless-data`, which is bound to the NFS PV `paperless-data-pithari`.

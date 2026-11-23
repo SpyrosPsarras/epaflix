@@ -1839,7 +1839,7 @@ tests:
               component: shypowder-storage
             exp_annotations:
               summary: "shypowder zpool hdd is degraded"
-              description: "node_zfs_zpool_state on 192.168.10.13 has reported zpool hdd as degraded for 5m. Pool hdd is one disk holding the only copy of the Paperless receipts, and rpool is the single-disk boot pool. Neither has redundancy. Run `zpool status -v hdd` on shypowder, read-only, to see the device's read/write/checksum error counts and whether they are still climbing before changing anything. Do not zpool clear, replace or online the device from this alert alone. If the exporter stops answering, this alert resolves without the pool being healthy; ShypowderExporterDown covers that."
+              description: "node_zfs_zpool_state on 192.168.10.13 has reported zpool hdd as degraded for 5m. Pool hdd is one disk and rpool is the single-disk boot pool. Neither has redundancy. Run `zpool status -v hdd` on shypowder, read-only, to see the device's read/write/checksum error counts and whether they are still climbing before changing anything. Do not zpool clear, replace or online the device from this alert alone. If the exporter stops answering, this alert resolves without the pool being healthy; ShypowderExporterDown covers that."
 
   - interval: 1m
     input_series:
@@ -1866,7 +1866,7 @@ tests:
               component: shypowder-storage
             exp_annotations:
               summary: "shypowder zpool rpool is degraded"
-              description: "node_zfs_zpool_state on 192.168.10.13 has reported zpool rpool as degraded for 5m. Pool hdd is one disk holding the only copy of the Paperless receipts, and rpool is the single-disk boot pool. Neither has redundancy. Run `zpool status -v rpool` on shypowder, read-only, to see the device's read/write/checksum error counts and whether they are still climbing before changing anything. Do not zpool clear, replace or online the device from this alert alone. If the exporter stops answering, this alert resolves without the pool being healthy; ShypowderExporterDown covers that."
+              description: "node_zfs_zpool_state on 192.168.10.13 has reported zpool rpool as degraded for 5m. Pool hdd is one disk and rpool is the single-disk boot pool. Neither has redundancy. Run `zpool status -v rpool` on shypowder, read-only, to see the device's read/write/checksum error counts and whether they are still climbing before changing anything. Do not zpool clear, replace or online the device from this alert alone. If the exporter stops answering, this alert resolves without the pool being healthy; ShypowderExporterDown covers that."
 
   - interval: 1m
     input_series:
@@ -1884,7 +1884,7 @@ tests:
               component: shypowder-storage
             exp_annotations:
               summary: "Prometheus cannot scrape the shypowder node exporter"
-              description: "Prometheus has had no successful scrape of shypowder-node-exporter at 192.168.10.13:9100 for 15 minutes, so ShypowderPoolUnhealthy and ShypowderPoolMissing cannot see pool hdd, the one disk holding the only copy of the Paperless receipts. Check that prometheus-node-exporter runs on shypowder and that 192.168.10.13:9100 answers from the cluster."
+              description: "Prometheus has had no successful scrape of shypowder-node-exporter at 192.168.10.13:9100 for 15 minutes, so ShypowderPoolUnhealthy and ShypowderPoolMissing cannot see pool hdd, the one disk behind hdd/data and local-hdd. Check that prometheus-node-exporter runs on shypowder and that 192.168.10.13:9100 answers from the cluster."
 
   - interval: 1m
     input_series:
@@ -1931,7 +1931,7 @@ tests:
               component: shypowder-storage
             exp_annotations:
               summary: "shypowder pool hdd is missing"
-              description: "node_zfs_zpool_state on shypowder has not reported pool hdd at all for 5m while the exporter answers. Pool hdd is not imported, so the Paperless NFS export has no data behind it. Run `zpool status hdd` and `zpool import` on shypowder, read-only, before changing anything. Do not import with -f from this alert alone."
+              description: "node_zfs_zpool_state on shypowder has not reported pool hdd at all for 5m while the exporter answers. Pool hdd is not imported, so hdd/data and the Proxmox storage local-hdd are unavailable. Run `zpool status hdd` and `zpool import` on shypowder, read-only, before changing anything. Do not import with -f from this alert alone."
 
   - interval: 1m
     input_series:

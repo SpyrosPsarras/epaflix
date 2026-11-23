@@ -22,7 +22,7 @@ The vLinker MC+ is an ELM327 v2.2 adapter over Bluetooth LE: service `18F0`, not
 
 ### Secrets
 
-`!secret` values live in `/config/secrets.yaml` on the `esphome-config` PVC, not in Git: `wifi_ssid`, `wifi_password`, `egolf_api_key`, `egolf_ota_password`, `vlinker_mac`. The API key and OTA password are also in the homelab vault item for this device.
+`!secret` values live in `/config/secrets.yaml` on the `esphome-config-pithari` PVC, not in Git: `wifi_ssid`, `wifi_password`, `egolf_api_key`, `egolf_ota_password`, `vlinker_mac`. The API key and OTA password are also in the homelab vault item for this device.
 
 ### Update
 
