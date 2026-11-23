@@ -130,6 +130,8 @@ def updates(images, app_path, repo):
         wf = os.path.join(repo, ".github/workflows", f"build-{short}.yml")
         if repo_name.startswith("ghcr.io/spyrospsarras/") and os.path.exists(wf):
             result.append(f"ci: build-{short}.yml")
+        elif repo_name not in kust_text and "helmCharts:" in kust_text:
+            result.append("renovate (helm chart)")
         elif repo_name in kust_text:
             rule = rules.get(repo_name, {})
             result.append("manual" if rule.get("enabled") is False else
