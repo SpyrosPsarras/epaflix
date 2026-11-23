@@ -20,4 +20,4 @@ images:
   - name: aptacode/rackpeek
     newTag: v2.3.0@sha256:0c0939ccb5586fba29b88268922480dc0653f9ad066807d418691695aa19d9ec
   - name: ghcr.io/spyrospsarras/rackpeek-sync
-    digest: sha256:73fd862f9baaab80f4bcd241395c9cda1fed89f3ccd07fb20534085fc52e5548
+    digest: sha256:f836c7321f5058c5905862963e72151538dd268e639153982768899fa0c52f05
