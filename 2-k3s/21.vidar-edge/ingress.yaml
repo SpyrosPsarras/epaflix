@@ -8,7 +8,7 @@ spec:
   entryPoints:
     - websecure
   routes:
-    - match: Host(`playlist.epaflix.com`)
+    - match: Host(`playlist.epaflix.com`) || Host(`humlen.epaflix.com`)
       kind: Rule
       middlewares:
         - name: security-headers
@@ -27,7 +27,7 @@ spec:
   entryPoints:
     - web
   routes:
-    - match: Host(`playlist.epaflix.com`)
+    - match: Host(`playlist.epaflix.com`) || Host(`humlen.epaflix.com`)
       kind: Rule
       middlewares:
         - name: redirect-https
@@ -45,7 +45,7 @@ spec:
   entryPoints:
     - internal
   routes:
-    - match: Host(`playlist.epaflix.com`)
+    - match: Host(`playlist.epaflix.com`) || Host(`humlen.epaflix.com`)
       kind: Rule
       services:
         - name: vidar-edge
