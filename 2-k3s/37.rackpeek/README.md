@@ -20,7 +20,7 @@ An init container adds `.dataprotection/` to `/app/config/.gitignore`. RackPeek 
 
    ```sh
    kubectl -n rackpeek get secret rackpeek-secrets -o go-template='{{.data.GIT_TOKEN|base64decode}}{{"\n"}}' \
-     | kubectl -n forgejo exec -i deploy/forgejo -- sh -c 'read -r t; curl -fsS -o /dev/null -w "%{http_code}\n" -H "Authorization: token [REDACTED:Authorization Credential] -H "Content-Type: application/json" -d "{\"name\":\"rackpeek-config\",\"private\":true}" http://127.0.0.1:3000/api/v1/user/repos'
+     | kubectl -n forgejo exec -i deploy/forgejo -- sh -c 'read -r t; curl -fsS -o /dev/null -w "%{http_code}\n" -H "Authorization: token $t" -H "Content-Type: application/json" -d "{\"name\":\"rackpeek-config\",\"private\":true}" http://127.0.0.1:3000/api/v1/user/repos'
    ```
 
 4. In the RackPeek UI, in this order: **Save** a first commit, then **Add Remote** `https://git-internal.epaflix.com/rackpeek-bot/rackpeek-config.git`, then **Push**. RackPeek's automatic first push on an empty remote fails on a repo without commits (it creates a branch before the first commit), so the first commit has to exist before the remote is added. Check in Forgejo that the commit has no `.dataprotection` files.
