@@ -6,7 +6,7 @@ metadata:
   namespace: forgejo
 spec:
   entryPoints:
-    - websecure
+    - internal
   routes:
     - match: Host(`git.epaflix.com`)
       kind: Rule
@@ -28,7 +28,7 @@ metadata:
   namespace: forgejo
 spec:
   entryPoints:
-    - websecure
+    - internal
   routes:
     - match: Host(`git.epaflix.com`) && PathPrefix(`/outpost.goauthentik.io/`)
       kind: Rule
@@ -38,24 +38,6 @@ spec:
           namespace: app-authentik
           port: 80
   tls: {}
----
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
-metadata:
-  name: forgejo-http
-  namespace: forgejo
-spec:
-  entryPoints:
-    - web
-  routes:
-    - match: Host(`git.epaflix.com`)
-      kind: Rule
-      middlewares:
-        - name: redirect-https
-          namespace: traefik-system
-      services:
-        - name: forgejo
-          port: 3000
 ---
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
