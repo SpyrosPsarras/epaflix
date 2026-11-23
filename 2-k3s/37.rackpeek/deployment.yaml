@@ -111,7 +111,7 @@ spec:
       volumes:
         - name: config
           persistentVolumeClaim:
-            claimName: rackpeek-config
+            claimName: rackpeek-config-pithari
         - name: app-tmp
           emptyDir: {}
         - name: tmp

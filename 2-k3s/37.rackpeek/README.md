@@ -1,6 +1,6 @@
 # RackPeek
 
-RackPeek is the homelab index: what runs where, where its config lives and whether that config is in Git. Its data is one YAML file on the `rackpeek-config` PVC at `/app/config`. Renovate updates the image pin in `kustomization.yaml`.
+RackPeek is the homelab index: what runs where, where its config lives and whether that config is in Git. Its data is one YAML file on the `rackpeek-config-pithari` PVC at `/app/config`. Renovate updates the image pin in `kustomization.yaml`.
 
 At https://rackpeek.epaflix.com, sign in through Authentik as a member of `authentik Admins`. The site is on Traefik's internal entrypoint only (LAN and Tailscale); from the internet it returns 404. RackPeek has no login of its own, so Authentik forward auth is the only gate for people. `/api` and `/mcp` also need the `X-Api-Key` header with `RPK_API_KEY` from Secret `rackpeek-secrets`. In-cluster callers use `http://rackpeek.rackpeek.svc:8080`.
 
