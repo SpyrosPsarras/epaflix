@@ -8,7 +8,10 @@ import sync
 
 
 class FakeIO:
-    def __init__(self, down_hosts=(), rpk_down=False, push_down=False, leaks=()):
+    def __init__(self, down_hosts=(), rpk_down=False, push_down=False, leaks=(), commit_down=False, post_down=False):
+        self.commit_down = commit_down
+        self.post_down = post_down
+        self.commits = []
         self.down_hosts = set(down_hosts)
         self.rpk_down = rpk_down
         self.push_down = push_down
@@ -29,7 +32,14 @@ class FakeIO:
         return {"version": 5, "resources": stored}
 
     def rpk_post(self, body):
+        if self.post_down:
+            raise OSError("post failed")
         self.posts.append(body)
+
+    def rpk_commit(self, message):
+        if self.commit_down:
+            raise RuntimeError("git_commit failed")
+        self.commits.append(message)
 
     def k8s(self):
         return fx.k8s()
@@ -77,6 +87,21 @@ class Sync(unittest.TestCase):
             self.assertIn("sync", r["tags"])
         self.assertTrue(any("takaros/etc/hosts" == p for p in io.pushed[0]))
         self.assertTrue(any(p == "k8s/forgejo/configmaps/forgejo-cfg.yaml" for p in io.pushed[0]))
+
+    def test_commit_after_post(self):
+        io = FakeIO()
+        self.assertEqual(run(io), 0)
+        self.assertEqual(io.commits, ["rackpeek-sync " + fx.TODAY])
+
+    def test_commit_failure_exits_1(self):
+        io = FakeIO(commit_down=True)
+        self.assertEqual(run(io), 1)
+        self.assertEqual(len(io.posts), 1)
+
+    def test_no_commit_when_post_fails(self):
+        io = FakeIO(post_down=True)
+        self.assertEqual(run(io), 1)
+        self.assertEqual(io.commits, [])
 
     def test_one_host_down(self):
         io = FakeIO(down_hosts={"truenas"})

@@ -67,6 +67,22 @@ class RealIO:
     def rpk_post(self, body):
         return self._rpk("POST", body)
 
+    def rpk_commit(self, message):
+        body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "params": {"name": "git_commit", "arguments": {"message": message, "push": True}}}
+        req = urllib.request.Request(self.env["RPK_URL"].rstrip("/") + "/mcp", method="POST",
+                                     data=json.dumps(body).encode(),
+                                     headers={"X-Api-Key": self.env["RPK_API_KEY"], "Content-Type": "application/json",
+                                              "Accept": "application/json, text/event-stream"})
+        with urllib.request.urlopen(req, timeout=300) as r:
+            text = r.read().decode()
+        data = next((json.loads(line[5:]) for line in text.splitlines() if line.startswith("data:")), None)
+        if data is None:
+            data = json.loads(text)
+        result = data.get("result") or {}
+        if "error" in data or result.get("isError"):
+            raise RuntimeError(json.dumps(data.get("error") or result.get("content"))[:300])
+
     def _k8s(self, path):
         host = "https://kubernetes.default.svc"
         with open(f"{SA}/token") as f:
@@ -271,6 +287,12 @@ def run(io, hosts, today, log):
     except Exception as exc:
         log(f"rackpeek: post failed: {type(exc).__name__}: {exc}")
         return 1
+    try:
+        io.rpk_commit(f"rackpeek-sync {today}")
+        log("rackpeek: committed and pushed rackpeek-config")
+    except Exception as exc:
+        exit_code = 1
+        log(f"rackpeek: commit failed: {type(exc).__name__}: {exc}")
     return 1 if failed else exit_code
 
 
