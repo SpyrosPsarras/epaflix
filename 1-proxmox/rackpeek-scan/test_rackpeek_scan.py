@@ -99,6 +99,16 @@ class MaskText(unittest.TestCase):
         self.assertTrue(scan.sensitive_key("DB_PASSWORD"))
         self.assertFalse(scan.sensitive_key("hostname"))
 
+    def test_mask_yaml_comment_value(self):
+        out = scan.mask_text("password: # note\n  jjj1\nnext: ok\n")
+        self.assertNotIn("jjj1", out)
+        self.assertIn("next: ok", out)
+
+    def test_mask_yaml_comment_between(self):
+        out = scan.mask_text("  password:\n# c\n    kkk2\n  next: ok\n")
+        self.assertNotIn("kkk2", out)
+        self.assertIn("next: ok", out)
+
     def test_mask_keeps_plain(self):
         self.assertEqual(scan.mask_text("hostname=takaros\n"), "hostname=takaros\n")
 

@@ -49,7 +49,7 @@ def mask_line(line):
     if not m:
         return line, None
     rest = line[m.end():]
-    if rest.strip() == "":
+    if rest.strip() == "" or rest.lstrip().startswith("#"):
         return line, len(line) - len(line.lstrip())
     if rest.strip() in ("***", '"***"', "'***'"):
         return line, None
@@ -79,6 +79,9 @@ def mask_text(text):
         if block_indent is not None:
             if not line.strip():
                 out.append(line)
+                continue
+            if line.lstrip().startswith("#"):
+                out.append(mask_line(line)[0])
                 continue
             if len(line) - len(line.lstrip()) > block_indent:
                 out.append(" " * (block_indent + 2) + "***")
