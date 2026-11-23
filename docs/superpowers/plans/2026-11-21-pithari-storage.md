@@ -77,7 +77,9 @@
 - [ ] **Step 4: Run** the promtool block. Expected: all PASS, `promtool check rules` SUCCESS.
 - [ ] **Step 5: Commit and PR** `feat(observability): alert on pithari free space`.
 
-### Task 4: Add the 26 `-pithari` PVCs (PR)
+### Task 4: Write the 26 `-pithari` twins (branch only, no PR)
+
+Argo reports an unbound PVC as Progressing, which would hold later sync waves (remote-pi, discord, home-assistant and others) for weeks. So the twins never merge ahead of their window: branch `t3/pithari-pvc-twins` is the source, and each window's switch PR carries its own twins.
 
 **Files (each gets a second PVC next to the old one):**
 - `2-k3s/07.authentik-deployment/storage/pv-pvc.yaml`, `2-k3s/35.discord/media/pvc.yaml`, `2-k3s/35.discord/windmill/pvc.yaml`, `2-k3s/38.forgejo/storage.yaml`, `2-k3s/22.gh-runner/storage.yaml`, `2-k3s/36.home-assistant/{esphome,home-assistant,roborock}.yaml`, `2-k3s/37.rackpeek/storage.yaml`, `2-k3s/17.remote-pi/cpamanager/storage.yaml`, `2-k3s/26.vaultwarden/storage.yaml`, `2-k3s/08.servarr/_shared/storage/{arr-configs,media-app-configs,utility-configs}.yaml`, `2-k3s/08.servarr/{bazarr-autotranslate/bazarr-autotranslate,cleanuparr/cleanuparr,jellysweep/jellysweep,neutarr/neutarr,streamystats/streamystats}.yaml`
@@ -87,7 +89,7 @@
 
 - [ ] **Step 1: Add each twin.** Copy the old PVC document, change only `metadata.name`. Keep any annotations (Argo sync options, waves).
 - [ ] **Step 2: Verify.** For each changed kustomize root, `kustomize build --enable-helm <root> | rg -c 'name: .*-pithari$'` matches the expected count; total 26 across roots.
-- [ ] **Step 3: Commit and PR** `feat(storage): add pithari twins of every iSCSI PVC`. After merge (owner yes), `kubectl get pvc -A | rg -- '-pithari'` shows 26 `Pending`.
+- [ ] **Step 3: Commit** on `t3/pithari-pvc-twins`. No PR.
 
 ### Task 5: Copy Job template (scratch, not committed)
 
@@ -96,11 +98,14 @@
 **Interfaces:**
 - Produces: a Job `copy-<new name>` in the PVC's namespace, parameters `NS`, `OLD`, `NEW`, rendered with `envsubst`.
 
-- [ ] **Step 1: Write the Job.** `backoffLimit: 0`, `restartPolicy: Never`, `ttlSecondsAfterFinished` unset (logs kept until deleted), runs as root, mounts `OLD` read-only at `/old` and `NEW` at `/new`. Image with rsync built in, pinned by digest (no package install: several namespaces have egress NetworkPolicies). Command:
+- [ ] **Step 1: Write the Job** in the scratch `copy-pvc.yaml`. `backoffLimit: 0`, `restartPolicy: Never`, `ttlSecondsAfterFinished` unset (logs kept until deleted), runs as root, mounts `OLD` read-only at `/old` and `NEW` at `/new`. Image with rsync built in, pinned by digest (no package install: several namespaces have egress NetworkPolicies). Placeholders `__NS__`, `__OLD__`, `__NEW__`, filled with `sed` (no `envsubst`: it would also expand the script's own variables). The script runs under `sh -e`, so a failing verify rsync stops it even when it only writes to stderr:
 
 ```sh
-rsync -aHAX --numeric-ids --delete /old/ /new/ && sync &&
-test -z "$(rsync -aHAXc -n --numeric-ids --delete --itemize-changes /old/ /new/)" && echo COPY_OK
+rsync -aHAX --numeric-ids --delete /old/ /new/
+sync
+diff=$(rsync -aHAXc -n --numeric-ids --delete --itemize-changes /old/ /new/)
+test -z "$diff" || { echo "$diff" | head -n 20; exit 1; }
+echo COPY_OK
 ```
 
 - [ ] **Step 2: Dry check.** `kubectl apply --dry-run=server` against the `rackpeek` namespace succeeds.
@@ -120,17 +125,17 @@ test -z "$(rsync -aHAXc -n --numeric-ids --delete --itemize-changes /old/ /new/)
 | W7 | discord | deploy openclaw in discord-media and discord-windmill | openclaw-state ×2 | `35.discord/{media,windmill}/deployment.yaml` |
 | W8 | gh-runner, remote-pi | deploy gh-runner, cpa-manager-plus | gh-runner-data-iscsi, cpa-manager-plus-data-iscsi | `22.gh-runner/deployment.yaml`, `17.remote-pi/cpamanager/deployment.yaml` |
 
-Vaultwarden is a consumer of nothing else, but fetch any secret needed for the window before W3.
+Fetch any secret needed for the window before W3. Vaultwarden and servarr Applications ignore `/spec/replicas`, so Argo never restores their scale; every window restores replicas by hand from the saved counts.
 
 **Per window:**
 
-- [ ] **Step 1: Prepare the switch PR** `feat(<app>): move storage to pithari`: change every `claimName` in the switch files to the new name. `kustomize build` of the root shows no old name in any pod spec. Do not merge yet.
+- [ ] **Step 1: Prepare the switch PR** `feat(<app>): move storage to pithari`: take the window's twin documents from `t3/pithari-pvc-twins` and change every `claimName` in the switch files to the new name. `kustomize build` of the root shows no old name in any pod spec. Do not merge yet.
 - [ ] **Step 2: Ask the owner** for the window (name the apps and the expected outage, a few minutes).
 - [ ] **Step 3: Pause Argo** for `app-of-apps` and the window's Applications.
-- [ ] **Step 4: Stop consumers.** Scale to 0, suspend CronJobs, wait until no pod mounts the PVCs and `kubectl get volumeattachment` lists none of the old PVs.
-- [ ] **Step 5: Copy** each PVC with the Task 5 Job. Expected: log ends `COPY_OK`, Job `Complete`. Any other result: restore Argo and consumers, stop the window, report.
-- [ ] **Step 6: Merge the switch PR** (owner already approved the window), restore Argo automation, wait for Argo `Synced Healthy` at the merged SHA.
-- [ ] **Step 7: Verify.** Pods Running on the `-pithari` PVCs (`kubectl get pod -o jsonpath` shows the new claim); app answers its health URL; `kubectl -n argocd get application` shows `automated` restored for every paused app. Delete the copy Job.
+- [ ] **Step 4: Stop consumers.** Save each Deployment's current replica count. Suspend CronJobs first, then wait until none of their Jobs is active (`vaultwarden-backup` scales Vaultwarden back to 1 in its exit trap). Then scale to 0. Wait until no pod mounts the PVCs and `kubectl get volumeattachment` lists none of the old PVs; recheck after one minute that nothing came back.
+- [ ] **Step 5: Create the twins and copy.** Create only the window's twin documents with `kubectl create -f` (extracted from the PR branch with python; never apply the whole file). Run the Task 5 Job per PVC. Expected: log ends `COPY_OK`, Job `Complete`. Any other result: delete the twins, restore Argo, the saved replica counts and CronJobs, stop the window, report.
+- [ ] **Step 6: Merge the switch PR** (owner already approved the window), restore Argo automation, wait for Argo `Synced` at the merged SHA. Argo adopts the hand-made twins. Scale every Deployment back to its saved count and unsuspend CronJobs that Git does not suspend.
+- [ ] **Step 7: Verify.** Pods Running on the `-pithari` PVCs (`kubectl get pod -o jsonpath` shows the new claim); app answers its health URL; Application `Healthy`; `kubectl -n argocd get application` shows `automated` restored for every paused app. Delete the copy Job.
 - [ ] **Step 8: Owner confirms** the app. Rollback before then: revert the switch PR (old PVC is untouched).
 
 W1 is the pilot: after W1, stop and report before W2.

@@ -71,10 +71,10 @@ The PVC's StorageClass stays, but a PVC cannot change its disk, so each one gets
 
 For each app (one window each, owner says yes first):
 
-1. PR 1 (can carry all 26 at once, merged after the driver check): add the new PVCs. `WaitForFirstConsumer` keeps them unbound until something mounts them.
+1. Prepare the window's PR with the new PVCs and the `claimName` switch. The new PVCs do not merge ahead of their window: Argo reports an unbound PVC as Progressing, which holds later sync waves.
 2. Pause Argo the way README "Storage maintenance" does: remove `spec.syncPolicy.automated` from `app-of-apps` and the app's Application (all of them have `selfHeal: true`, which would undo a manual scale). Then scale the app's Deployments to 0 and suspend any CronJob that mounts the disk (`vaultwarden-backup`). My call, because the repo already uses this procedure; the alternative is two PRs per window (replicas 0, then switch).
-3. Run a throwaway Job (not in Git) that mounts the old PVC read-only and the new one, and runs `rsync -aHAX --numeric-ids --delete old/ new/`, then a second `rsync -n` pass that must report no changes.
-4. Merge the app's PR that switches `claimName` to the new PVC. Restore `automated` on both Applications; Argo syncs the merged commit and brings the app back at its Git replica count and unsuspends CronJobs that Git declares unsuspended.
+3. Create the window's new PVCs by hand, then run a throwaway Job (not in Git) that mounts the old PVC read-only and the new one, and runs `rsync -aHAX --numeric-ids --delete old/ new/`, then a second `rsync -n` pass that must report no changes.
+4. Merge the app's PR. Restore `automated` on both Applications; Argo syncs the merged commit and adopts the new PVCs. Scale the Deployments back to their saved counts by hand (Vaultwarden and servarr ignore `/spec/replicas` in Argo) and unsuspend CronJobs. Before scaling down, wait for active CronJob runs to finish: `vaultwarden-backup` scales Vaultwarden back up in its exit trap.
 5. Owner checks the app. Until then, rollback is reverting that PR.
 
 Order: RackPeek first as the pilot (1 GiB, low traffic). Then Forgejo, Vaultwarden, Authentik media, Home Assistant (3 disks, one window). Then servarr (15 disks, one window), the two openclaw disks, gh-runner and cpa-manager.
