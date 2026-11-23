@@ -7,10 +7,10 @@ Hostnames https://ha.epaflix.com and https://esphome.epaflix.com on the Traefik 
 ## What runs
 
 - Deployment `home-assistant`, image `ghcr.io/home-assistant/home-assistant`, one replica with `strategy: Recreate`, because a second pod cannot attach the RWO iSCSI volume during a rollout. No `hostNetwork`.
-- PVC `home-assistant-config`, 5Gi `truenas-iscsi`, mounted at `/config`. It holds `.storage`, the UI-made automations, scripts and scenes, and the integration settings.
+- PVC `home-assistant-config-pithari`, 5Gi `truenas-iscsi`, mounted at `/config`. It holds `.storage`, the UI-made automations, scripts and scenes, and the integration settings.
 - ConfigMap `home-assistant-configuration` holds `configuration.yaml` and `http.json`. Init container `configuration` copies `configuration.yaml` into `/config` on every start. It creates `/config/.storage/http` from `http.json`, and `automations.yaml`, `scripts.yaml` and `scenes.yaml`, only when each is missing, so a restart keeps what was made in the UI.
 - Traefik reaches the pod through the pod network, so the trusted proxy is the pod CIDR `10.42.0.0/16`. Home Assistant 2026.11 keeps its HTTP settings in `.storage/http` and ignores `http:` in `configuration.yaml` after a one-time import that must be confirmed in the UI within 5 minutes. `http.json` seeds that file on a fresh volume, so Home Assistant starts with the proxy settings and no trial. After that Home Assistant owns the file: change HTTP settings in the UI, not in Git. NetworkPolicy `home-assistant-ingress` lets only Traefik pods reach port 8123.
-- Deployment `esphome`, image `ghcr.io/esphome/esphome`, one replica with `strategy: Recreate`, serves the ESPHome dashboard on port 6052 through Service `esphome`. PVC `esphome-config`, 5Gi `truenas-iscsi`, at `/config` holds the device YAML and build caches. The login comes from `ESPHOME_USERNAME` and `ESPHOME_PASSWORD` in Secret `esphome-auth`. NetworkPolicy `esphome-ingress` lets only Traefik pods reach port 6052.
+- Deployment `esphome`, image `ghcr.io/esphome/esphome`, one replica with `strategy: Recreate`, serves the ESPHome dashboard on port 6052 through Service `esphome`. PVC `esphome-config-pithari`, 5Gi `truenas-iscsi`, at `/config` holds the device YAML and build caches. The login comes from `ESPHOME_USERNAME` and `ESPHOME_PASSWORD` in Secret `esphome-auth`. NetworkPolicy `esphome-ingress` lets only Traefik pods reach port 6052.
 - The ESPHome device configs themselves live in `3-devices/esphome/` (the boards are not part of the cluster); that folder's README lists the devices and how to update them.
 - Reloader release `reloader-home-assistant` watches only this namespace and restarts Home Assistant when Secret `home-assistant-secrets` or ConfigMap `home-assistant-configuration` changes, ESPHome when Secret `esphome-auth` changes, the Roborock server when Secret `roborock-config` or `api-rr-tls` changes, and Mosquitto when Secret `mosquitto-config` changes. The releases in `16.reloader` watch only their own namespaces.
 
@@ -21,7 +21,7 @@ Deployment `roborock` runs [local_roborock_server](https://github.com/Python-rob
 - Hostname `api-rr.epaflix.com`. Service `roborock` is a LoadBalancer on `192.168.10.116` with `externalTrafficPolicy: Local`, so the vacuum's HTTPS and MQTT logins keep its own source IP, which onboarding needs. Ports: 555 HTTPS (admin dashboard at `/admin`) and 8881 MQTT over TLS. There is no Traefik route.
 - `/app/config.toml` comes read-only from Secret `roborock-config`. It holds the admin password hash, the session secret and the protocol login PIN hash. The dashboard's toggles for new connections and protocol auth try to rewrite this file and cannot, so change `new_connections_enabled` in Git only: re-encrypt `roborock-config` and let Argo CD sync.
 - Certificate `api-rr` (`letsencrypt-dns`) writes Secret `api-rr-tls`, mounted read-only at `/run/certs`. The server reads it only at start.
-- PVC `roborock-data`, 2Gi `truenas-iscsi`, at `/data`. `/data/runtime/` and `/data/state/` hold the device keys and credentials. Never delete either; the vacuum would need onboarding again.
+- PVC `roborock-data-pithari`, 2Gi `truenas-iscsi`, at `/data`. `/data/runtime/` and `/data/state/` hold the device keys and credentials. Never delete either; the vacuum would need onboarding again.
 - Requests 1 CPU and 1Gi, which onboarding needs.
 - NetworkPolicy `roborock-ingress` allows TCP 555 and 8881 from any source (the vacuum, Home Assistant, the laptop during onboarding). Egress stays open for the dashboard's cloud import.
 
@@ -71,10 +71,10 @@ History goes to database `homeassistant`, owned by role `homeassistant`, in `pos
 ## Recovery
 
 - History: restore `postgres-cluster` from its CNPG backup.
-- Configuration and UI-made objects: the `home-assistant-config` PVC. `configuration.yaml` comes back from Git on every start.
+- Configuration and UI-made objects: the `home-assistant-config-pithari` PVC. `configuration.yaml` comes back from Git on every start.
 - Home Assistant's own backups (Settings, System, Backups) land in `/config/backups` on the same PVC. They do not include the Postgres history.
-- ESPHome device YAML: the `esphome-config` PVC.
-- Roborock device keys and state: the `roborock-data` PVC.
+- ESPHome device YAML: the `esphome-config-pithari` PVC.
+- Roborock device keys and state: the `roborock-data-pithari` PVC.
 
 ## Known limits
 

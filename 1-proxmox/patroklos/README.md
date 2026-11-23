@@ -78,9 +78,9 @@ zpool set autotrim=on rpool
 
 ## TrueNAS apps disk
 
-The TrueNAS `apps` pool, which holds every democratic-csi iSCSI zvol, is one virtual disk: VM 1200 `scsi5`, serial `APPSSSD0`, 100G. It lives on storage `ssd-raid`, an LVM volume group on the evanthoulaki SSD RAID 5 (3 × 240 GB, P440ar logical drive 1). evanthoulaki shares that drive over iSCSI as `iqn.2026-11.com.epaflix:evanthoulaki.ssd-raid5` on `10.0.0.11:3260`. Its LIO ACL lists the initiators of shypowder and patroklos. `ssd-iscsi` and `ssd-raid` are enabled on those two nodes, and `ssd-raid` has `shared 1`. shypowder uses the same volume group for the k3s-worker-64 disk.
+The TrueNAS `apps` pool, which holds TrueNAS's own apps under `apps/ix-apps`, is one virtual disk: VM 1200 `scsi5`, serial `APPSSSD0`, 100G. It lives on storage `ssd-raid`, an LVM volume group on the evanthoulaki SSD RAID 5 (3 × 240 GB, P440ar logical drive 1). evanthoulaki shares that drive over iSCSI as `iqn.2026-11.com.epaflix:evanthoulaki.ssd-raid5` on `10.0.0.11:3260`. Its LIO ACL lists the initiators of shypowder and patroklos. `ssd-iscsi` and `ssd-raid` are enabled on those two nodes, and `ssd-raid` has `shared 1`. shypowder uses the same volume group for the k3s-worker-64 disk.
 
-While evanthoulaki or the 10G link is down, the `apps` pool and every iSCSI PVC are offline. If patroklos boots while the target is unreachable, Proxmox cannot activate `scsi5`, so expect VM 1200 to stay stopped until it is back.
+While evanthoulaki or the 10G link is down, the `apps` pool is offline. The democratic-csi zvols moved to `pithari` on 2026-11-23, so iSCSI PVCs no longer depend on evanthoulaki. If patroklos boots while the target is unreachable, Proxmox cannot activate `scsi5`, so expect VM 1200 to stay stopped until it is back.
 
 On 2026-11-07 the disk moved off `rpool` with `qm disk move 1200 scsi5 ssd-raid --delete 1` while TrueNAS was running. The 60G copy took 18 minutes. `rpool` went from 82.8G to 42.0G allocated.
 
