@@ -1,0 +1,82 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rackpeek
+  namespace: rackpeek
+  labels:
+    app: rackpeek
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: rackpeek
+  template:
+    metadata:
+      labels:
+        app: rackpeek
+    spec:
+      enableServiceLinks: false
+      securityContext:
+        runAsUser: 1654
+        runAsGroup: 1654
+        fsGroup: 1654
+        runAsNonRoot: true
+      containers:
+        - name: rackpeek
+          image: aptacode/rackpeek
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: RPK_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: rackpeek-secrets
+                  key: RPK_API_KEY
+            - name: GIT_USERNAME
+              value: rackpeek-bot
+            - name: GIT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: rackpeek-secrets
+                  key: GIT_TOKEN
+                  optional: true
+          ports:
+            - containerPort: 8080
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            - name: config
+              mountPath: /app/config
+            - name: app-tmp
+              mountPath: /app/tmp
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: rackpeek-config
+        - name: app-tmp
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
