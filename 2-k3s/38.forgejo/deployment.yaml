@@ -72,15 +72,21 @@ spec:
             - name: FORGEJO__server__START_SSH_SERVER
               value: "false"
             - name: FORGEJO__service__DISABLE_REGISTRATION
+              value: "false"
+            - name: FORGEJO__service__ALLOW_ONLY_EXTERNAL_REGISTRATION
               value: "true"
+            - name: FORGEJO__service__ENABLE_INTERNAL_SIGNIN
+              value: "false"
+            - name: FORGEJO__service__ENABLE_BASIC_AUTHENTICATION
+              value: "false"
             - name: FORGEJO__service__REQUIRE_SIGNIN_VIEW
               value: "true"
-            - name: FORGEJO__service__ENABLE_REVERSE_PROXY_AUTHENTICATION
+            - name: FORGEJO__oauth2_client__ENABLE_AUTO_REGISTRATION
               value: "true"
-            - name: FORGEJO__service__ENABLE_REVERSE_PROXY_AUTO_REGISTRATION
-              value: "true"
-            - name: FORGEJO__security__REVERSE_PROXY_AUTHENTICATION_USER
-              value: X-authentik-username
+            - name: FORGEJO__oauth2_client__USERNAME
+              value: email
+            - name: FORGEJO__oauth2_client__ACCOUNT_LINKING
+              value: disabled
             - name: FORGEJO__security__REVERSE_PROXY_TRUSTED_PROXIES
               value: 10.42.0.0/16
             - name: FORGEJO__repository__ENABLE_PUSH_CREATE_USER
