@@ -56,3 +56,19 @@ spec:
       services:
         - name: forgejo
           port: 3000
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: forgejo-git-internal
+  namespace: forgejo
+spec:
+  entryPoints:
+    - internal
+  routes:
+    - match: Host(`git-internal.epaflix.com`) && PathRegexp(`^/[^/]+/[^/]+\.git/`)
+      kind: Rule
+      services:
+        - name: forgejo
+          port: 3000
+  tls: {}

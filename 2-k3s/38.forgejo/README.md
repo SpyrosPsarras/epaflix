@@ -14,10 +14,10 @@ At https://git.epaflix.com, sign in through Authentik as a member of `authentik 
      | kubectl -n forgejo exec -i deploy/forgejo -- sh -c 'read -r id; read -r secret; forgejo admin auth add-oauth --name authentik --provider openidConnect --key "$id" --secret "$secret" --auto-discover-url https://auth.epaflix.com/application/o/forgejo-sso/.well-known/openid-configuration --scopes email --scopes profile --scopes forgejo --required-claim-name forgejo --group-claim-name forgejo --admin-group admin --skip-local-2fa'
    ```
 
-3. From your own terminal, create the bot and its two `write:repository` tokens, one for RackPeek's Git sync and one for the live config snapshot job. Each token prints once; paste it only into the agent's hidden-input card. The bot's first push creates the private repositories `rackpeek-config` and `homelab-live`.
+3. From your own terminal, create the bot and its two `write:repository` tokens, one for RackPeek's Git sync and one for the live config snapshot job. Each token prints once; paste it only into the agent's hidden-input card. The `rackpeek-config` token also has `write:user`, because Forgejo needs it to create the bot's repo through `POST /user/repos` (RackPeek README, step 3). The bot's first push creates the private repo `homelab-live`; `rackpeek-config` is created empty beforehand.
 
    ```sh
    kubectl -n forgejo exec deploy/forgejo -- forgejo admin user create --username rackpeek-bot --email <bot email> --random-password --must-change-password=false
-   kubectl -n forgejo exec deploy/forgejo -- forgejo admin user generate-access-token --username rackpeek-bot --token-name rackpeek-config --scopes write:repository --raw
+   kubectl -n forgejo exec deploy/forgejo -- forgejo admin user generate-access-token --username rackpeek-bot --token-name rackpeek-config --scopes write:repository,write:user --raw
    kubectl -n forgejo exec deploy/forgejo -- forgejo admin user generate-access-token --username rackpeek-bot --token-name homelab-live --scopes write:repository --raw
    ```
