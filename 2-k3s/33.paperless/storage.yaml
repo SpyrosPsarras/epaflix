@@ -3,7 +3,7 @@
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: paperless-data-shypowder
+  name: paperless-data-pithari
 spec:
   capacity:
     storage: 100Gi
@@ -18,8 +18,8 @@ spec:
     namespace: paperless
     name: paperless-data
   nfs:
-    server: 192.168.10.13
-    path: /hdd/paperless
+    server: 192.168.10.200
+    path: /mnt/pithari/paperless/data
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -30,7 +30,7 @@ spec:
   accessModes:
     - ReadWriteMany
   storageClassName: ""
-  volumeName: paperless-data-shypowder
+  volumeName: paperless-data-pithari
   resources:
     requests:
       storage: 100Gi

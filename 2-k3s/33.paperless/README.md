@@ -69,7 +69,7 @@ Then open http://localhost:8080. Anyone who can port-forward in `paperless` can 
 
 ### Custom field `Total`
 
-The setting and the two prompt edits below were applied on 2026-11-08 after the PR 3 sync. They live on the NFS volume, so a new pod keeps them. Prompt files can also be edited directly in `/hdd/paperless/gpt/prompts` on shypowder, followed by a restart of `paperless-gpt`.
+The setting and the two prompt edits below were applied on 2026-11-08 after the PR 3 sync. They live on the NFS volume, so a new pod keeps them. Prompt files can also be edited directly in `/mnt/pithari/paperless/data/gpt/prompts` on TrueNAS, followed by a restart of `paperless-gpt`.
 
 v0.31.0 has no environment variable for custom fields. The setting lives in `gpt/config/settings.json`. With the port-forward running, turn it on for field id 1 in append mode, which never overwrites a value already on the document:
 
@@ -204,9 +204,9 @@ kubectl -n paperless create job --from=cronjob/paperless-share-lists share-lists
 
 ## Storage
 
-PV `paperless-data-shypowder` mounts NFS `192.168.10.13:/hdd/paperless`, the ZFS dataset `hdd/paperless` on shypowder described in `1-proxmox/shypowder/README.md`. The export squashes every client to 1000:1000, which matches `USERMAP_UID`/`USERMAP_GID`. `PAPERLESS_DATA_DIR` is `data/`, `PAPERLESS_MEDIA_ROOT` is `media/` and paperless-gpt uses `gpt/` on that volume. The consume folder is `emptyDir`, because uploads through the API and web UI skip it.
+PV `paperless-data-pithari` mounts NFS `192.168.10.200:/mnt/pithari/paperless/data`, the dataset `pithari/paperless/data` on the TrueNAS raidz2 pool `pithari`. It inherits the encryption of `pithari/paperless`, whose key TrueNAS stores and unlocks at boot; a copy is in the vault item `truenas - pithari-paperless dataset key`. The TrueNAS share allows the five k3s workers and maps every client to user and group `paperless` (1000:1000), which matches `USERMAP_UID`/`USERMAP_GID`. `PAPERLESS_DATA_DIR` is `data/`, `PAPERLESS_MEDIA_ROOT` is `media/` and paperless-gpt uses `gpt/` on that volume. The consume folder is `emptyDir`, because uploads through the API and web UI skip it.
 
-Sanoid snapshots on shypowder protect the files against deletion, but they sit on the same single disk. CronJob `paperless-backup` copies the files to MinIO, as described in Backup. The database uses the CNPG backups to MinIO.
+TrueNAS snapshot task `pithari` (recursive, daily 00:45, kept 30 days) protects the files against deletion. CronJob `paperless-backup` copies them to MinIO, as described in Backup. The database uses the CNPG backups to MinIO.
 
 ## Backup
 
@@ -216,7 +216,7 @@ Paperless keeps running during the backup, so a snapshot can hold a document tha
 
 NetworkPolicy `paperless-backup` lets the pod reach DNS and Traefik's internal listener on TCP 8443, which serves `minio.epaflix.com`. A NetworkPolicy cannot filter by hostname, so the pod can also reach the other apps on that listener.
 
-MinIO shares the TrueNAS host. This backup survives the loss of the shypowder disk, not the loss of TrueNAS.
+MinIO runs on the same TrueNAS host, on pool `mpara-tank-lan`. The encrypted TrueNAS cloud sync of `mpara-tank-lan/minio` copies the bucket to Google Drive every night, so the files survive the loss of TrueNAS.
 
 ### Recreate the bucket and keys
 
@@ -281,15 +281,7 @@ A killed Job can leave a repository lock that fails the next Sunday run. Check t
 
 ### Move to TrueNAS
 
-When the 6×14 TB pool exists on TrueNAS:
-
-1. Scale Paperless and paperless-gpt to zero.
-2. `syncoid hdd/paperless` to a dataset on the new pool, snapshots included.
-3. Export that dataset over NFS from TrueNAS to the k3s workers, squashed to 1000:1000.
-4. In a PR, replace the PV with one pointing at TrueNAS, then scale up.
-5. After a check, stop the shypowder export. Deleting `hdd/paperless` needs the owner's approval.
-
-A PV's NFS source cannot change in place. Argo must delete and recreate the PV and PVC, with Paperless at zero.
+Done on 2026-11-23: one `zfs send` of snapshot `hdd/paperless@pithari-move` from shypowder into `pithari/paperless/data`, with Paperless at zero. A PV's NFS source cannot change in place, so Argo deleted and recreated the PV and PVC.
 
 ## Secrets
 
