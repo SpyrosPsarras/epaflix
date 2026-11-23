@@ -96,7 +96,7 @@ Argo reports an unbound PVC as Progressing, which would hold later sync waves (r
 **Files:** `copy-pvc.yaml` in a `mktemp -d -p .` scratch directory, deleted at the end.
 
 **Interfaces:**
-- Produces: a Job `copy-<new name>` in the PVC's namespace, parameters `NS`, `OLD`, `NEW`, rendered with `envsubst`.
+- Produces: a Job `copy-<new name>` in the PVC's namespace, placeholders `__NS__`, `__OLD__`, `__NEW__`, filled with `sed`.
 
 - [ ] **Step 1: Write the Job** in the scratch `copy-pvc.yaml`. `backoffLimit: 0`, `restartPolicy: Never`, `ttlSecondsAfterFinished` unset (logs kept until deleted), runs as root, mounts `OLD` read-only at `/old` and `NEW` at `/new`. Image with rsync built in, pinned by digest (no package install: several namespaces have egress NetworkPolicies). Placeholders `__NS__`, `__OLD__`, `__NEW__`, filled with `sed` (no `envsubst`: it would also expand the script's own variables). The script runs under `sh -e`, so a failing verify rsync stops it even when it only writes to stderr:
 
@@ -132,11 +132,11 @@ Fetch any secret needed for the window before W3. Vaultwarden and servarr Applic
 - [ ] **Step 1: Prepare the switch PR** `feat(<app>): move storage to pithari`: take the window's twin documents from `t3/pithari-pvc-twins` and change every `claimName` in the switch files to the new name. `kustomize build` of the root shows no old name in any pod spec. Do not merge yet.
 - [ ] **Step 2: Ask the owner** for the window (name the apps and the expected outage, a few minutes).
 - [ ] **Step 3: Pause Argo** for `app-of-apps` and the window's Applications.
-- [ ] **Step 4: Stop consumers.** Save each Deployment's current replica count. Suspend CronJobs first, then wait until none of their Jobs is active (`vaultwarden-backup` scales Vaultwarden back to 1 in its exit trap). Then scale to 0. Wait until no pod mounts the PVCs and `kubectl get volumeattachment` lists none of the old PVs; recheck after one minute that nothing came back.
-- [ ] **Step 5: Create the twins and copy.** Create only the window's twin documents with `kubectl create -f` (extracted from the PR branch with python; never apply the whole file). Run the Task 5 Job per PVC. Expected: log ends `COPY_OK`, Job `Complete`. Any other result: delete the twins, restore Argo, the saved replica counts and CronJobs, stop the window, report.
+- [ ] **Step 4: Stop consumers.** Suspend CronJobs first, then wait until none of their Jobs is active (`vaultwarden-backup` scales Vaultwarden back to 1 in its exit trap; confirm it did). Then save each Deployment's current replica count, then scale to 0. Wait until no pod mounts the PVCs and `kubectl get volumeattachment` lists none of the old PVs; recheck after one minute that nothing came back.
+- [ ] **Step 5: Create the twins and copy.** Create only the window's twin documents with `kubectl create -f`, extracted with python from the PR branch and given `metadata.namespace` explicitly (the discord twins have none in Git; kustomize adds it). Never apply the whole file. Check `kubectl -n <ns> get pvc <new>` in every target namespace. Run the Task 5 Job per PVC. Expected: log ends `COPY_OK`, Job `Complete`. Any other result: save the Job's logs and events, delete the Job, wait until its pod is gone and no volumeattachment names the old or new PV, then delete the twins, restore Argo, the saved replica counts and CronJobs, stop the window, report.
 - [ ] **Step 6: Merge the switch PR** (owner already approved the window), restore Argo automation, wait for Argo `Synced` at the merged SHA. Argo adopts the hand-made twins. Scale every Deployment back to its saved count and unsuspend CronJobs that Git does not suspend.
 - [ ] **Step 7: Verify.** Pods Running on the `-pithari` PVCs (`kubectl get pod -o jsonpath` shows the new claim); app answers its health URL; Application `Healthy`; `kubectl -n argocd get application` shows `automated` restored for every paused app. Delete the copy Job.
-- [ ] **Step 8: Owner confirms** the app. Rollback before then: revert the switch PR (old PVC is untouched).
+- [ ] **Step 8: Owner confirms** the app. Rollback before then: a PR that reverts only the `claimName` lines (keep the twins in Git, so Argo prune does not delete them), run with the same stop and restore steps. The old PVC is untouched.
 
 W1 is the pilot: after W1, stop and report before W2.
 
