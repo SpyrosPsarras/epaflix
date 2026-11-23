@@ -36,7 +36,6 @@ spec:
         - ipBlock: {cidr: 192.168.10.21/32}
         - ipBlock: {cidr: 192.168.10.30/32}
         - ipBlock: {cidr: 192.168.10.31/32}
-        - ipBlock: {cidr: 192.168.10.40/32}
         - ipBlock: {cidr: 192.168.10.41/32}
         - ipBlock: {cidr: 192.168.10.51/32}
         - ipBlock: {cidr: 192.168.10.52/32}

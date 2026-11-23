@@ -38,6 +38,8 @@ Every item the sync writes has tag `sync`. Notes and other tags on those items a
 
 The scan key is Secret `rackpeek-scan-key` (type `kubernetes.io/ssh-auth`); its public half is `scan-key.pub`. Host keys are pinned in ConfigMap `rackpeek-known-hosts`. The ServiceAccount reads through ClusterRole `rackpeek-reader`, bound per namespace in `sync-rbac.yaml`; a namespace without a binding is not indexed. `t3code-work` and `mcp-hub-work` are never bound and are skipped in code.
 
+The scanner is installed on 17 hosts. On TrueNAS `/usr` is read-only, so it lives at `/root/rackpeek-scan` and the forced command is `sudo -n python3 /root/rackpeek-scan`. `jumpbox` is not scanned: its login user has no sudo. It still appears as a guest from Proxmox.
+
 Run it now:
 
 ```sh
