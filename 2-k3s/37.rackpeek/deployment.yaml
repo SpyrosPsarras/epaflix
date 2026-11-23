@@ -50,7 +50,7 @@ spec:
           command:
             - sh
             - -c
-            - grep -qx '.dataprotection/' /app/config/.gitignore 2>/dev/null || echo '.dataprotection/' >> /app/config/.gitignore
+            - f=/app/config/.gitignore; if [ -s "$f" ] && [ -n "$(tail -c1 "$f")" ]; then echo >> "$f"; fi; for e in .dataprotection/ "*.bak.*"; do grep -qxF "$e" "$f" 2>/dev/null || echo "$e" >> "$f"; done
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

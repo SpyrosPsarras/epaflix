@@ -18,6 +18,9 @@ spec:
           podSelector:
             matchLabels:
               app.kubernetes.io/name: traefik
+        - podSelector:
+            matchLabels:
+              app: rackpeek-sync
       ports:
         - port: 8080
           protocol: TCP

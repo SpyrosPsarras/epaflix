@@ -12,9 +12,9 @@ RackPeek saves its YAML to the private Forgejo repo `rackpeek-bot/rackpeek-confi
 
 RackPeek accepts only HTTPS remotes, and `git.epaflix.com` sits behind Authentik forward auth. RackPeek therefore uses `git-internal.epaflix.com`: Traefik's internal listener (LAN only, wildcard certificate) routes only Git smart-HTTP paths (`/<owner>/<repo>.git/...`) to Forgejo, without forward auth. Forgejo still requires the bot token there.
 
-The PVC's root directory is created owned by root, and libgit2 refuses a repository whose directory belongs to another user (`repository path '/app/config' is not owned by current user`). The `config-owner` init container runs as root with only `CHOWN` and gives `/app/config` itself to UID 1654. Another init container adds `.dataprotection/` to `/app/config/.gitignore`. RackPeek keeps its ASP.NET Data Protection keys in that directory, and Git sync stages every file that is not ignored.
+The PVC's root directory is created owned by root, and libgit2 refuses a repository whose directory belongs to another user (`repository path '/app/config' is not owned by current user`). The `config-owner` init container runs as root with only `CHOWN` and gives `/app/config` itself to UID 1654. Another init container adds `.dataprotection/` and `*.bak.*` to `/app/config/.gitignore`. RackPeek keeps its ASP.NET Data Protection keys in `.dataprotection/` and writes `config.yaml.bak.<timestamp>` copies, and Git sync stages every file that is not ignored. The repo's branch is `master`.
 
-`rackpeek-secrets` also holds `HOMELAB_LIVE_TOKEN`, the bot's `homelab-live` token, for the nightly snapshot job (PR 3).
+`rackpeek-secrets` also holds `HOMELAB_LIVE_TOKEN`, the bot's `homelab-live` token, for the nightly sync below.
 
 1. With the owner's approval, copy the dnsmasq config to Pi-hole and restart `pihole-FTL`. Add the matching Unbound local zones to the live file, then check and reload Unbound. See the [Pi-hole README](../../1-proxmox/pihole/README.md).
 2. The owner creates `rackpeek-bot` and its `rackpeek-config` token ([Forgejo README](../38.forgejo/README.md), step 3) and enters the token in the agent's hidden-input card. The agent adds it as `GIT_TOKEN` to `secrets.enc.yaml` in a PR (done 2026-11-23). After Argo syncs it, restart the pod so Git sync turns on: `kubectl -n rackpeek rollout restart deploy/rackpeek`.
@@ -26,3 +26,21 @@ The PVC's root directory is created owned by root, and libgit2 refuses a reposit
    ```
 
 4. In the RackPeek UI, in this order: **Save** a first commit, then **Add Remote** `https://git-internal.epaflix.com/rackpeek-bot/rackpeek-config.git`, then **Push**. RackPeek's automatic first push on an empty remote fails on a repo without commits (it creates a branch before the first commit), so the first commit has to exist before the remote is added. Check in Forgejo that the commit has no `.dataprotection` files.
+
+## Nightly sync
+
+CronJob `rackpeek-sync` runs at 03:30 Europe/Athens. It reads the Kubernetes API (never Secrets), runs the read-only scanner on every allowlisted host over SSH ([rackpeek-scan](../../1-proxmox/rackpeek-scan/README.md)), and clones the public repo for Git status. Then it:
+
+1. commits the masked host files, package lists and ConfigMaps to Forgejo `rackpeek-bot/homelab-live`, after gitleaks drops anything it flags;
+2. posts all items to RackPeek with `mode: Replace`.
+
+Every item the sync writes has tag `sync`. Notes and other tags on those items are carried over, and items without tag `sync` are never touched. An item that a successful source no longer reports gets label `gone-since: <date>` and stays until a person deletes it. If a source fails, its items keep their last facts and the Job exits 1, which fires `KubeJobFailedLastRun`.
+
+The scan key is Secret `rackpeek-scan-key` (type `kubernetes.io/ssh-auth`); its public half is `scan-key.pub`. Host keys are pinned in ConfigMap `rackpeek-known-hosts`. The ServiceAccount reads through ClusterRole `rackpeek-reader`, bound per namespace in `sync-rbac.yaml`; a namespace without a binding is not indexed. `t3code-work` and `mcp-hub-work` are never bound and are skipped in code.
+
+Run it now:
+
+```sh
+kubectl -n rackpeek create job --from=cronjob/rackpeek-sync rackpeek-sync-manual
+kubectl -n rackpeek logs -f job/rackpeek-sync-manual
+```

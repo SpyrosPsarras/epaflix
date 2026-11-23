@@ -1,0 +1,89 @@
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: rackpeek-sync
+  namespace: rackpeek
+spec:
+  schedule: "30 3 * * *"
+  timeZone: Europe/Athens
+  concurrencyPolicy: Forbid
+  suspend: true
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 1800
+      template:
+        metadata:
+          labels:
+            app: rackpeek-sync
+        spec:
+          serviceAccountName: rackpeek-sync
+          restartPolicy: Never
+          enableServiceLinks: false
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            runAsNonRoot: true
+          containers:
+            - name: sync
+              image: ghcr.io/spyrospsarras/rackpeek-sync
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
+              env:
+                - name: RPK_URL
+                  value: http://rackpeek.rackpeek.svc:8080
+                - name: RPK_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: rackpeek-secrets
+                      key: RPK_API_KEY
+                - name: HOMELAB_LIVE_URL
+                  value: https://git-internal.epaflix.com/rackpeek-bot/homelab-live.git
+                - name: HOMELAB_LIVE_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: rackpeek-secrets
+                      key: HOMELAB_LIVE_TOKEN
+                - name: REPO_URL
+                  value: https://github.com/SpyrosPsarras/epaflix.git
+                - name: SSH_KEY_FILE
+                  value: /etc/rackpeek-scan/ssh-privatekey
+                - name: KNOWN_HOSTS_FILE
+                  value: /etc/rackpeek-known-hosts/known_hosts
+                - name: HOME
+                  value: /tmp
+                - name: HOSTS
+                  value: "takaros=root@192.168.10.10 evanthoulaki=root@192.168.10.11 patroklos=root@192.168.10.12 shypowder=root@192.168.10.13 pegaprox=root@192.168.10.21 pihole=root@192.168.10.30 proxmox-backup=root@192.168.10.31 jumpbox=spy@192.168.10.40 nick=ubuntu@192.168.10.41 k3s-master-51=ubuntu@192.168.10.51 k3s-master-52=ubuntu@192.168.10.52 k3s-master-53=ubuntu@192.168.10.53 k3s-worker-61=ubuntu@192.168.10.61 k3s-worker-62=ubuntu@192.168.10.62 k3s-worker-63=ubuntu@192.168.10.63 k3s-worker-64=ubuntu@192.168.10.64 k3s-worker-65=ubuntu@192.168.10.65 truenas=truenas_admin@192.168.10.200"
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  memory: 1Gi
+              volumeMounts:
+                - name: scan-key
+                  mountPath: /etc/rackpeek-scan
+                  readOnly: true
+                - name: known-hosts
+                  mountPath: /etc/rackpeek-known-hosts
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: scan-key
+              secret:
+                secretName: rackpeek-scan-key
+                defaultMode: 0440
+            - name: known-hosts
+              configMap:
+                name: rackpeek-known-hosts
+            - name: tmp
+              emptyDir: {}
