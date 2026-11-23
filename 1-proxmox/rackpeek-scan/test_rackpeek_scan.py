@@ -69,6 +69,16 @@ class MaskText(unittest.TestCase):
         self.assertNotIn("ddd4", out)
         self.assertIn("ExecStart=/bin/x", out)
 
+    def test_mask_yaml_indent_indicator(self):
+        out = scan.mask_text("password: |2\n  eee5\nnext: ok\n")
+        self.assertNotIn("eee5", out)
+        self.assertIn("next: ok", out)
+
+    def test_mask_continuation_across_comment(self):
+        out = scan.mask_text('Environment=API_TOKEN=fff6 \\\n# c\n  ggg7\nExecStart=/bin/x\n')
+        self.assertNotIn("ggg7", out)
+        self.assertIn("ExecStart=/bin/x", out)
+
     def test_mask_keeps_plain(self):
         self.assertEqual(scan.mask_text("hostname=takaros\n"), "hostname=takaros\n")
 

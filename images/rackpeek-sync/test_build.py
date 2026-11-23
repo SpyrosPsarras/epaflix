@@ -162,6 +162,25 @@ class CarryOver(unittest.TestCase):
         self.assertNotIn("scan-errors", out["lxc/pihole"]["labels"])
         self.assertEqual(out["lxc/pihole"]["labels"]["os"], "Debian")
 
+    def test_fresh_scan_keeps_notes_and_tags(self):
+        new = [{"kind": "System", "name": "app/forgejo", "type": "other", "tags": ["sync"],
+                "labels": {"source": "k8s", "live-config": "x"}}]
+        out = by_name(build.carry_over(new, fx.stored(), {"k8s"}, fx.TODAY))
+        self.assertEqual(out["app/forgejo"]["notes"], "why")
+        self.assertIn("critical", out["app/forgejo"]["tags"])
+
+    def test_scrub_long_token_fast(self):
+        import time
+        start = time.time()
+        build.scrub("a" * 65536)
+        self.assertLess(time.time() - start, 0.5)
+
+    def test_nested_secret_not_in_uses(self):
+        k8s = fx.k8s()
+        k8s["configmaps"][0]["data"]["app.yaml"] = "db:\n  password: hidden-db.postgres-system.svc\n"
+        items = by_name(build.build_items(k8s, {}, fx.repo(), set(), indexed=None))
+        self.assertNotIn("hidden-db", items["forgejo/deploy/forgejo"]["labels"]["uses"])
+
     def test_failed_source_untouched(self):
         self.assertNotIn("vm/nick", self.run_carry({"k8s"}))
 

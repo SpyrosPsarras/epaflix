@@ -1,8 +1,16 @@
 import hashlib
+import importlib.util
 import json
 import os
+import pathlib
 import re
 import sys
+
+_HERE = pathlib.Path(__file__).resolve().parent
+_SCANNER = next(p for p in (_HERE / "rackpeek_scan.py", _HERE.parent.parent / "1-proxmox/rackpeek-scan/rackpeek-scan.py") if p.exists())
+_spec = importlib.util.spec_from_file_location("rackpeek_scan", _SCANNER)
+scanner = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(scanner)
 
 EXCLUDED = ("t3code-work", "mcp-hub-work")
 DESKTOPS = ("shypowder",)
@@ -10,7 +18,7 @@ KIND_SHORT = {"deployments": ("Deployment", "deploy"), "statefulsets": ("Statefu
               "daemonsets": ("DaemonSet", "ds"), "cronjobs": ("CronJob", "cronjob")}
 HOST_RE = re.compile(r"\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:svc(?:\.cluster\.local)?|epaflix\.com)\b")
 SECRET_DOC = re.compile(r"^kind:\s*Secret\s*$", re.M)
-EXCLUDED_REF = re.compile(r"[^\s\"',;]*(?:" + "|".join(EXCLUDED) + r")[^\s\"',;]*", re.IGNORECASE)
+TOKEN = re.compile(r"[^\s\"',;]+")
 SENSITIVE_KEY = re.compile(r"pass|pwhash|secret|token|key|credential|auth", re.IGNORECASE)
 SCAN_LABELS = ("os", "kernel", "files", "live-config", "packages", "scan-errors")
 
@@ -19,8 +27,15 @@ def excluded(ns):
     return ns in EXCLUDED
 
 
+def has_excluded(token):
+    low = token.lower()
+    return any(name in low for name in EXCLUDED)
+
+
 def scrub(text):
-    return EXCLUDED_REF.sub("***", text) if isinstance(text, str) else text
+    if not isinstance(text, str):
+        return text
+    return TOKEN.sub(lambda m: "***" if has_excluded(m.group(0)) else m.group(0), text)
 
 
 def ns_of(obj):
@@ -279,7 +294,7 @@ def build_k8s(k8s, repo, idx, zvols, guests, indexed):
             label(it, "auth", sorted(auth))
             uses = set()
             for text in env_values + [v for c in cms for v in cm_data.get((ns, c), {}).values()]:
-                uses.update(h for h in HOST_RE.findall(text or "") if not EXCLUDED_REF.search(h))
+                uses.update(h for h in HOST_RE.findall(scanner.mask_text(text or "")) if not has_excluded(h))
             for np in netpols:
                 if ns_of(np) != ns or not selects((np.get("spec", {}).get("podSelector") or {}).get("matchLabels"), labels):
                     continue
@@ -418,6 +433,7 @@ def carry_over(new, stored, ok_sources, today):
             for k in SCAN_LABELS:
                 if k in (old.get("labels") or {}):
                     it["labels"][k] = old["labels"][k]
+        if old:
             if old.get("notes"):
                 it["notes"] = old["notes"]
             it["tags"] = sorted(set(it["tags"]) | {t for t in old.get("tags") or [] if t != "sync"})

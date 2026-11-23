@@ -24,7 +24,7 @@ WALK_LIMIT = 5000
 
 SECRET_KEY = r"[A-Za-z0-9_.-]*(?:pass|pwhash|secret|token|key|credential|auth)[A-Za-z0-9_.-]*"
 KEY_SEP = re.compile(r"[\"']?(?P<key>" + SECRET_KEY + r")[\"']?\s*[:=]\s*", re.IGNORECASE)
-BLOCK = ("|", ">", "|-", ">-", "|+", ">+")
+BLOCK = re.compile(r"^[|>](?:[1-9][+-]?|[+-][1-9]?)?$")
 GUEST_FIELDS = ("cores", "sockets", "memory", "name", "ostype", "hostname")
 DISK_KEY = re.compile(r"^(scsi|virtio|sata|ide|efidisk|tpmstate|unused|mp)\d*$|^rootfs$")
 CLI_FLAG = re.compile(
@@ -45,7 +45,7 @@ def mask_line(line):
     rest = line[m.end():]
     if rest.strip() in ("", "***", '"***"', "'***'"):
         return line, None
-    if rest.split("#")[0].strip() in BLOCK:
+    if BLOCK.match(rest.split("#")[0].strip()):
         return line, len(line) - len(line.lstrip())
     quote = rest[0] if rest[:1] in ("'", '"') else ""
     return line[:m.end()] + quote + "***", None
@@ -62,6 +62,9 @@ def mask_text(text):
     out, block_indent, cont = [], None, False
     for line in text.split("\n"):
         if cont:
+            if line.lstrip().startswith(("#", ";")):
+                out.append(line)
+                continue
             out.append("***" if line.strip() else line)
             cont = line.rstrip().endswith("\\")
             continue
