@@ -14,8 +14,10 @@ RackPeek accepts only HTTPS remotes, and `git.epaflix.com` sits behind Authentik
 
 An init container adds `.dataprotection/` to `/app/config/.gitignore`. RackPeek keeps its ASP.NET Data Protection keys in that directory, and Git sync stages every file that is not ignored.
 
+`rackpeek-secrets` also holds `HOMELAB_LIVE_TOKEN`, the bot's `homelab-live` token, for the nightly snapshot job (PR 3).
+
 1. With the owner's approval, copy the dnsmasq config to Pi-hole and restart `pihole-FTL`. Add the matching Unbound local zones to the live file, then check and reload Unbound. See the [Pi-hole README](../../1-proxmox/pihole/README.md).
-2. The owner creates `rackpeek-bot` and its `rackpeek-config` token ([Forgejo README](../38.forgejo/README.md), step 3) and enters the token in the agent's hidden-input card. The agent adds it as `GIT_TOKEN` to `secrets.enc.yaml` in a PR. After Argo syncs it, restart the pod so Git sync turns on: `kubectl -n rackpeek rollout restart deploy/rackpeek`.
+2. The owner creates `rackpeek-bot` and its `rackpeek-config` token ([Forgejo README](../38.forgejo/README.md), step 3) and enters the token in the agent's hidden-input card. The agent adds it as `GIT_TOKEN` to `secrets.enc.yaml` in a PR (done 2026-11-23). After Argo syncs it, restart the pod so Git sync turns on: `kubectl -n rackpeek rollout restart deploy/rackpeek`.
 3. Create the empty repo. RackPeek fetches as soon as a remote is added, so the repo must exist first:
 
    ```sh
