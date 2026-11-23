@@ -24,6 +24,22 @@ spec:
         runAsGroup: 1654
         fsGroup: 1654
         runAsNonRoot: true
+      initContainers:
+        - name: gitignore
+          image: aptacode/rackpeek
+          command:
+            - sh
+            - -c
+            - grep -qx '.dataprotection/' /app/config/.gitignore 2>/dev/null || echo '.dataprotection/' >> /app/config/.gitignore
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: config
+              mountPath: /app/config
       containers:
         - name: rackpeek
           image: aptacode/rackpeek

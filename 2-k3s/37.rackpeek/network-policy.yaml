@@ -47,9 +47,9 @@ spec:
     - to:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: forgejo
+              kubernetes.io/metadata.name: traefik-system
           podSelector:
             matchLabels:
-              app: forgejo
+              app.kubernetes.io/name: traefik
       ports:
-        - {protocol: TCP, port: 3000}
+        - {protocol: TCP, port: 8443}
