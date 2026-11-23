@@ -70,12 +70,25 @@ spec:
             name: bazarr-autotranslate-main
         - name: logs
           persistentVolumeClaim:
-            claimName: bazarr-autotranslate-logs-iscsi
+            claimName: bazarr-autotranslate-logs-pithari
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: bazarr-autotranslate-logs-iscsi
+  namespace: servarr
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 500Mi
+  storageClassName: truenas-iscsi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: bazarr-autotranslate-logs-pithari
   namespace: servarr
 spec:
   accessModes:

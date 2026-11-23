@@ -363,7 +363,7 @@ spec:
       volumes:
         - name: config
           persistentVolumeClaim:
-            claimName: qbittorrent-config-iscsi
+            claimName: qbittorrent-config-pithari
         - name: webapi-key-seed
           secret:
             secretName: qbittorrent-webapi-key

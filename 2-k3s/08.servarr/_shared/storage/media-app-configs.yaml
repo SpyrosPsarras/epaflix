@@ -15,7 +15,33 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
+  name: jellyseerr-config-pithari
+  namespace: servarr
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: truenas-iscsi
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
   name: navidrome-data-iscsi
+  namespace: servarr
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: truenas-iscsi
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: navidrome-data-pithari
   namespace: servarr
 spec:
   accessModes:

@@ -105,7 +105,7 @@ spec:
       volumes:
         - name: config
           persistentVolumeClaim:
-            claimName: bazarr-config-iscsi
+            claimName: bazarr-config-pithari
         - name: media
           persistentVolumeClaim:
             claimName: servarr-media

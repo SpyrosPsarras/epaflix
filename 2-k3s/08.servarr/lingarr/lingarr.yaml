@@ -200,7 +200,7 @@ spec:
       volumes:
         - name: config
           persistentVolumeClaim:
-            claimName: lingarr-config-iscsi
+            claimName: lingarr-config-pithari
         - name: media
           persistentVolumeClaim:
             claimName: servarr-media

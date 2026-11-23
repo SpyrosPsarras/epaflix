@@ -94,7 +94,7 @@ spec:
       volumes:
         - name: data
           persistentVolumeClaim:
-            claimName: navidrome-data-iscsi
+            claimName: navidrome-data-pithari
         - name: media
           persistentVolumeClaim:
             claimName: servarr-media
