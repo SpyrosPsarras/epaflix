@@ -67,7 +67,7 @@ spec:
             - {name: tmp, mountPath: /tmp}
       volumes:
         - name: data
-          persistentVolumeClaim: {claimName: vaultwarden-data-iscsi}
+          persistentVolumeClaim: {claimName: vaultwarden-data-pithari}
         - name: tmp
           emptyDir: {medium: Memory, sizeLimit: 64Mi}
 ---
