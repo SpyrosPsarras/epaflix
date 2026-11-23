@@ -2,7 +2,7 @@
 
 Forgejo holds RackPeek's config history and live homelab config snapshots in private Git repositories. The `forgejo` database in `postgres-cluster` holds metadata. Repositories and attachments live on the `forgejo-data` PVC. Renovate updates the image pin in `kustomization.yaml`.
 
-At https://git.epaflix.com, sign in through Authentik as a member of `authentik Admins`. Traefik forward auth gates the site, then Forgejo signs you in through the Authentik OIDC application `forgejo-sso`. Forgejo creates the account on first login from the part of your email before `@`. The `forgejo-role` scope sends `forgejo: admin` for `authentik Admins`, which makes the account a Forgejo admin. Password and basic-auth login are off; the bot uses tokens. RackPeek uses the internal service at `http://forgejo.forgejo.svc:3000`.
+At https://git.epaflix.com, sign in through Authentik as a member of `authentik Admins`. The site is on Traefik's internal entrypoint only (LAN and Tailscale); from the internet it returns 404. Traefik forward auth gates the site, then Forgejo signs you in through the Authentik OIDC application `forgejo-sso`. Forgejo creates the account on first login from the part of your email before `@`. The `forgejo-role` scope sends `forgejo: admin` for `authentik Admins`, which makes the account a Forgejo admin. Password and basic-auth login are off; the bot uses tokens. RackPeek uses the internal service at `http://forgejo.forgejo.svc:3000`.
 
 ## After deploy
 
