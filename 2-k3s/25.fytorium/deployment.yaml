@@ -39,7 +39,7 @@ spec:
             - name: MIN_APP_VERSION
               value: "1.0.0"
             - name: SERVER_VERSION
-              value: "c0625ea"
+              value: "11ef2e3"
             - name: ORIGIN
               value: https://fytorium.epaflix.com
             - name: OIDC_ISSUER

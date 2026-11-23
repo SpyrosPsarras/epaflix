@@ -49,7 +49,7 @@ insecure OIDC HTTP in this deployment. `FCM_BASE_URL` and
 
 `MIN_APP_VERSION` is `1.0.0`, matching the first release `android-v1.0.0`.
 Older apps receive HTTP 426. Raise it only when an app release is required.
-`SERVER_VERSION` is `c0625ea`, the source commit shown in `/api/meta`.
+`SERVER_VERSION` is `11ef2e3`, the source commit shown in `/api/meta`.
 Bump it whenever the image digest changes.
 
 ## First deploy
@@ -123,6 +123,13 @@ After source CI publishes a new image, bump its immutable digest in
 commit, and merge the homelab change. ArgoCD recreates the pod;
 migrations run again before readiness. No mutable tag rollout or manual restart
 is needed.
+
+To roll back to an image older than its migrations, run their down steps from
+the running new pod first, because the older image does not have those files:
+`kubectl -n fytorium exec deploy/fytorium -- dbmate --no-dump-schema --migrations-dir migrations rollback`
+once per migration (three for `11ef2e3` back to `c50ddb4`), then revert the
+digest. Reverting only the digest leaves plants with empty pot or soil fields,
+which the older web UI cannot show.
 
 On a phone on the LAN, log in, add a site and plant, and complete a task. Leave
 another task due, enable notifications on that phone and set the daily reminder
