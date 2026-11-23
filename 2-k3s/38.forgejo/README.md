@@ -7,7 +7,7 @@ At https://git.epaflix.com, sign in through Authentik as a member of `authentik 
 ## After deploy
 
 1. With the owner's approval, copy the dnsmasq config to Pi-hole and restart `pihole-FTL`. Add the matching Unbound local zone to the live file, then check and reload Unbound. See the [Pi-hole README](../../1-proxmox/pihole/README.md) for paths and commands.
-2. Add the Authentik login source once. The client id and secret go from Secret `forgejo-secrets` straight into the pod and are not printed. They also live in provider `forgejo-sso` of `2-k3s/07.authentik-deployment/authentik-iac-blueprint.enc.yaml`; rotate both files in the same PR, then run `forgejo admin auth update-oauth` the same way.
+2. Add the Authentik login source once. The client id and secret go from Secret `forgejo-secrets` straight into the pod and are not printed. They also live in provider `forgejo-sso` of `2-k3s/07.authentik-deployment/authentik-iac-blueprint.enc.yaml`; rotate both files in the same PR. Then find the source id with `forgejo admin auth list`, run the same pipe with `forgejo admin auth update-oauth --id <id> --key "$id" --secret "$secret"`, and restart Forgejo with `kubectl -n forgejo rollout restart deploy/forgejo`, because the running server keeps the old credentials.
 
    ```sh
    kubectl -n forgejo get secret forgejo-secrets -o go-template='{{.data.OIDC_CLIENT_ID|base64decode}}{{"\n"}}{{.data.OIDC_CLIENT_SECRET|base64decode}}{{"\n"}}' \
