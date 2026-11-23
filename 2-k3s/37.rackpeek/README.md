@@ -15,12 +15,12 @@ RackPeek accepts only HTTPS remotes, and `git.epaflix.com` sits behind Authentik
 An init container adds `.dataprotection/` to `/app/config/.gitignore`. RackPeek keeps its ASP.NET Data Protection keys in that directory, and Git sync stages every file that is not ignored.
 
 1. With the owner's approval, copy the dnsmasq config to Pi-hole and restart `pihole-FTL`. Add the matching Unbound local zones to the live file, then check and reload Unbound. See the [Pi-hole README](../../1-proxmox/pihole/README.md).
-2. The owner creates `rackpeek-bot` and its `rackpeek-config` token ([Forgejo README](../38.forgejo/README.md), step 3) and enters the token in the agent's hidden-input card. The agent adds it as `GIT_TOKEN` to `secrets.enc.yaml` in a PR.
-3. Create the empty repo before adding the remote. RackPeek fetches as soon as the remote is added, so the repo must exist. It must have no commits, so RackPeek takes its empty-remote path and pushes `main`:
+2. The owner creates `rackpeek-bot` and its `rackpeek-config` token ([Forgejo README](../38.forgejo/README.md), step 3) and enters the token in the agent's hidden-input card. The agent adds it as `GIT_TOKEN` to `secrets.enc.yaml` in a PR. After Argo syncs it, restart the pod so Git sync turns on: `kubectl -n rackpeek rollout restart deploy/rackpeek`.
+3. Create the empty repo. RackPeek fetches as soon as a remote is added, so the repo must exist first:
 
    ```sh
    kubectl -n rackpeek get secret rackpeek-secrets -o go-template='{{.data.GIT_TOKEN|base64decode}}{{"\n"}}' \
-     | kubectl -n forgejo exec -i deploy/forgejo -- sh -c 'read -r t; curl -fsS -o /dev/null -w "%{http_code}\n" -H "Authorization: token $t" -H "Content-Type: application/json" -d "{\"name\":\"rackpeek-config\",\"private\":true}" http://127.0.0.1:3000/api/v1/user/repos'
+     | kubectl -n forgejo exec -i deploy/forgejo -- sh -c 'read -r t; curl -fsS -o /dev/null -w "%{http_code}\n" -H "Authorization: token [REDACTED:Authorization Credential] -H "Content-Type: application/json" -d "{\"name\":\"rackpeek-config\",\"private\":true}" http://127.0.0.1:3000/api/v1/user/repos'
    ```
 
-4. After sync, restart the pod: `kubectl -n rackpeek rollout restart deploy/rackpeek`. In the RackPeek UI, add the remote `https://git-internal.epaflix.com/rackpeek-bot/rackpeek-config.git`. Check in Forgejo that the first commit has no `.dataprotection` files.
+4. In the RackPeek UI, in this order: **Save** a first commit, then **Add Remote** `https://git-internal.epaflix.com/rackpeek-bot/rackpeek-config.git`, then **Push**. RackPeek's automatic first push on an empty remote fails on a repo without commits (it creates a branch before the first commit), so the first commit has to exist before the remote is added. Check in Forgejo that the commit has no `.dataprotection` files.
