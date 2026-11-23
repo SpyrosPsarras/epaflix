@@ -71,12 +71,25 @@ spec:
             secretName: jellysweep-config
         - name: cache
           persistentVolumeClaim:
-            claimName: jellysweep-cache-iscsi
+            claimName: jellysweep-cache-pithari
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: jellysweep-cache-iscsi
+  namespace: servarr
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+  storageClassName: truenas-iscsi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jellysweep-cache-pithari
   namespace: servarr
 spec:
   accessModes:

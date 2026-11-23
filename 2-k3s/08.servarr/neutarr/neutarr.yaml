@@ -126,7 +126,7 @@ spec:
       volumes:
         - name: config
           persistentVolumeClaim:
-            claimName: neutarr-config-iscsi
+            claimName: neutarr-config-pithari
         - name: seed
           secret:
             secretName: neutarr-config-seed
@@ -163,6 +163,19 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: neutarr-config-iscsi
+  namespace: servarr
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: truenas-iscsi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: neutarr-config-pithari
   namespace: servarr
 spec:
   accessModes:

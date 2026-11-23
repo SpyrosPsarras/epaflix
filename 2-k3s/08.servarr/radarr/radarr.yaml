@@ -110,7 +110,7 @@ spec:
       volumes:
         - name: config
           persistentVolumeClaim:
-            claimName: radarr-config-iscsi
+            claimName: radarr-config-pithari
         - name: media
           persistentVolumeClaim:
             claimName: servarr-media

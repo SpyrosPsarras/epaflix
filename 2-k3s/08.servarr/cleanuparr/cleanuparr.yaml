@@ -131,7 +131,7 @@ spec:
       volumes:
         - name: config
           persistentVolumeClaim:
-            claimName: cleanuparr-config-iscsi
+            claimName: cleanuparr-config-pithari
         - name: media
           persistentVolumeClaim:
             claimName: servarr-media
@@ -168,6 +168,19 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: cleanuparr-config-iscsi
+  namespace: servarr
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: truenas-iscsi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cleanuparr-config-pithari
   namespace: servarr
 spec:
   accessModes:

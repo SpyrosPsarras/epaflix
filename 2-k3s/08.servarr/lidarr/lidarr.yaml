@@ -138,7 +138,7 @@ spec:
       volumes:
         - name: config
           persistentVolumeClaim:
-            claimName: lidarr-config-iscsi
+            claimName: lidarr-config-pithari
         - name: media
           persistentVolumeClaim:
             claimName: servarr-media

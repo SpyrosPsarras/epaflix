@@ -149,7 +149,7 @@ spec:
             name: tdarr-seed
         - name: config
           persistentVolumeClaim:
-            claimName: tdarr-server-iscsi
+            claimName: tdarr-server-pithari
         - name: media
           persistentVolumeClaim:
             claimName: servarr-media

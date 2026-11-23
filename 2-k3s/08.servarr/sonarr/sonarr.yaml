@@ -114,7 +114,7 @@ spec:
       volumes:
         - name: config
           persistentVolumeClaim:
-            claimName: sonarr-config-iscsi
+            claimName: sonarr-config-pithari
         - name: media
           persistentVolumeClaim:
             claimName: servarr-media
