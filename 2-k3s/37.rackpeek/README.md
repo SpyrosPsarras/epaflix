@@ -33,6 +33,7 @@ CronJob `rackpeek-sync` runs at 03:30 Europe/Athens. It reads the Kubernetes API
 
 1. commits the masked host files, package lists and ConfigMaps to Forgejo `rackpeek-bot/homelab-live`, after gitleaks drops anything it flags;
 2. posts all items to RackPeek with `mode: Replace`.
+3. commits and pushes `rackpeek-config` through RackPeek's MCP tool `git_commit`, so **Discard** in the UI returns to the last sync instead of an older save.
 
 Every item the sync writes has tag `sync`. Notes and other tags on those items are carried over, and items without tag `sync` are never touched. An item that a successful source no longer reports gets label `gone-since: <date>` and stays until a person deletes it. If a source fails, its items keep their last facts and the Job exits 1, which fires `KubeJobFailedLastRun`.
 
