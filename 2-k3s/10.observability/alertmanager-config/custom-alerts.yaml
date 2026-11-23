@@ -1401,8 +1401,8 @@ spec:
             description: >-
               The apps root dataset's node_filesystem_avail_bytes has been under 20 GiB for an
               hour. The root dataset has no quota, so this is the pool-wide space left. apps
-              holds all democratic-csi iSCSI zvols under apps/k8s/iscsi. They are sparse, so
-              a full pool makes writes to every iSCSI PVC fail at once. 20 GiB free is about 80%
+              holds the democratic-csi iSCSI zvols under apps/k8s/iscsi. They are sparse, so
+              a full pool makes writes to every iSCSI PVC on it fail at once. 20 GiB free is about 80%
               used of the 95 GiB usable. The pool is one 100G virtual disk on the shared
               ssd-raid storage, the evanthoulaki SSD RAID 5 over iSCSI. To grow it, follow
               "TrueNAS apps disk" in 1-proxmox/patroklos/README.md. Check what grew
@@ -1421,6 +1421,37 @@ spec:
               been under 10 GiB for 15 minutes, about 90% used. When it reaches zero, writes to
               the sparse iSCSI zvols fail and pods see I/O errors on their PVCs. Free space on
               apps now; do not grow a PVC until free space is back above 20 GiB.
+
+        - alert: TruenasPithariPoolFreeLow
+          expr: node_filesystem_avail_bytes{job="truenas-node-exporter", device="pithari", fstype="zfs"} < 2199023255552  # 2 TiB
+          for: 1h
+          labels:
+            severity: warning
+            component: truenas-storage
+          annotations:
+            summary: "pithari free space is under 2 TiB"
+            description: >-
+              The pithari root dataset's node_filesystem_avail_bytes has been under 2 TiB for an
+              hour. The root dataset has no quota, so this is the pool-wide space left after
+              raidz2 parity, which reads far lower than `zpool list free`. pithari is raidz2 of
+              4 x 12 TB with 21 TiB usable, so 2 TiB free is about 90% used. It holds the
+              democratic-csi iSCSI zvols under pithari/k8s and Paperless under pithari/paperless.
+              The zvols are sparse, so a full pool makes writes to every iSCSI PVC on it fail at once.
+              Check what grew (`zfs list -o space -r pithari` sorted by used) before deleting anything.
+
+        - alert: TruenasPithariPoolFreeCritical
+          expr: node_filesystem_avail_bytes{job="truenas-node-exporter", device="pithari", fstype="zfs"} < 1099511627776  # 1 TiB
+          for: 30m
+          labels:
+            severity: critical
+            component: truenas-storage
+          annotations:
+            summary: "pithari free space is under 1 TiB - iSCSI PVC writes at risk"
+            description: >-
+              Pool-wide free space on pithari (same metric semantics as TruenasPithariPoolFreeLow)
+              has been under 1 TiB for 30 minutes, about 95% used, the practical ZFS floor. When it
+              reaches zero, writes to the sparse iSCSI zvols fail and pods see I/O errors on their
+              PVCs. Free space on pithari now; do not grow a PVC until free space is back above 2 TiB.
 
     - name: truenas-pool-health
       interval: 60s
@@ -1441,7 +1472,7 @@ spec:
               counts are still climbing, and check the latest backups of that
               pool's data before changing anything. Do not zpool clear, replace or
               online a device from this alert alone. Do not assume redundancy:
-              mpara-tank-lan is raidz2, apps is one virtual disk with no ZFS
+              mpara-tank-lan and pithari are raidz2, apps is one virtual disk with no ZFS
               redundancy, and zpool status shows the layout of the others. If
               the exporter stops answering, this alert resolves without the pool
               being healthy; TargetDown covers that.
