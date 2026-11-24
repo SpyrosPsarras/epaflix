@@ -76,7 +76,7 @@ def idle(db, ttys=()):
 
 def near(out, expected):
     assert out.returncode == 0, out.stderr
-    assert abs(int(out.stdout) - expected) <= 2, (out.stdout, expected)
+    assert -2 <= int(out.stdout) - expected <= time.time() - now + 2, (out.stdout, expected, time.time() - now)
 
 
 now = time.time()
