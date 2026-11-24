@@ -1339,6 +1339,9 @@ def test_script_yaml_matches_main_signature():
 # The SQL runs against a real PostgreSQL (the runner's, or pgserver's binaries locally) through an adapter that executes like Windmill's postgresql
 # executor: statements split on ";" outside quotes and dollar quotes, run one by one in autocommit, each binding only the
 # $n it uses (renumbered), lists and dicts sent as JSON, and the rows of the last statement returned as JSON.
+# Like Windmill, every $n gets the type the wmill client declares for its Python value (wmill.client.infer_sql_type:
+# float FLOAT8, int BIGINT, str and None TEXT, list and dict JSON), so a None bound to a number column fails here too
+# unless the SQL casts it.
 
 
 def split_sql(sql):
@@ -1370,7 +1373,9 @@ class WindmillLike:
         self.conn, self.calls = conn, []
 
     def __call__(self, sql, *args):
+        from psycopg import sql as pgsql
         from psycopg.types.json import Json
+        from wmill.client import infer_sql_type
         self.calls.append(sql)
         rows = []
         for statement in split_sql(sql):
@@ -1378,7 +1383,17 @@ class WindmillLike:
             number = {old: k + 1 for k, old in enumerate(used)}
             text = re.sub(r"\$(\d+)", lambda m: f"${number[int(m.group(1))]}", statement)
             params = [Json(args[old - 1]) if isinstance(args[old - 1], (list, dict)) else args[old - 1] for old in used]
-            cursor = self.conn.execute(text, params or None)
+            if not used:
+                cursor = self.conn.execute(text)
+            else:
+                # prepared with the declared types, as Windmill does, then executed with the values
+                types = [infer_sql_type(args[old - 1]) for old in used]
+                self.conn.execute(f"PREPARE wm_stmt ({', '.join(types)}) AS {text.strip().rstrip(';')}")
+                try:
+                    values = ", ".join(f"{pgsql.Literal(v).as_string(self.conn)}::{t}" for v, t in zip(params, types))
+                    cursor = self.conn.execute(f"EXECUTE wm_stmt ({values})")
+                finally:
+                    self.conn.execute("DEALLOCATE wm_stmt")
             rows = cursor.fetchall() if cursor.description else []
         return json.loads(json.dumps(rows, default=str))
 
@@ -2137,6 +2152,36 @@ def test_positions_script_records_buys_and_sells(db, monkeypatch):
         with pytest.raises(ValueError, match=message):
             positions.main(*args)
     assert len(db(ss.LOAD_POSITIONS_SQL)) == 2
+
+
+@pytest.mark.parametrize("stop, target, note", [(0.0, 0.0, ""), (90.0, 0.0, ""), (0.0, 120.0, "x"), (90.0, 120.0, "x"),
+                                               (90, 120, "x")])
+def test_positions_buy_with_and_without_stop_and_target(db, monkeypatch, stop, target, note):
+    # Windmill declares None (an empty stop, target or note) as text: the SQL must cast it to the column type.
+    monkeypatch.setattr(positions, "datatable_query", lambda name=positions.DATA_TABLE: db)
+    out = positions.main("buy", "AAPL", 100.0, "2026-11-18", 0.1, stop, target, note)["position"]
+    assert out["stop"] == (float(stop) or None) and out["target"] == (float(target) or None) and out["note"] == (note or None)
+    row = db.one("SELECT pg_typeof(stop)::text AS stop_type, pg_typeof(target)::text AS target_type, stop, target, buy_price, size"
+                 " FROM screener.positions")
+    assert row == {"stop_type": "double precision", "target_type": "double precision", "stop": out["stop"],
+                   "target": out["target"], "buy_price": 100.0, "size": 0.1}
+    sold = positions.main("sell", "AAPL", 110, "2026-11-20")["position"]
+    assert sold["sell_price"] == 110.0 and sold["stop"] == out["stop"] and sold["target"] == out["target"]
+
+
+def test_wmill_declares_none_as_text_so_positions_sql_casts_every_argument(monkeypatch):
+    # What Windmill receives for a buy without stop or target: the cast in the SQL is what makes it valid.
+    import wmill.client
+    sent = {}
+    fake = type("Fake", (), {"run_inline_script_preview": lambda self, content, language, args: sent.update(sql=content) or []})()
+    monkeypatch.setattr(positions.wmill, "datatable", lambda name: wmill.client.DataTableClient(fake, name))
+    positions.datatable_query()(positions.BUY_SQL, "AAPL", "2026-11-18", 100.0, 0.1, None, None, None)
+    assert "-- $3 arg3 (FLOAT8)\n" in sent["sql"] and "-- $5 arg5 (TEXT)\n" in sent["sql"] and "-- $6 arg6 (TEXT)\n" in sent["sql"]
+    for sql_text in (positions.BUY_SQL, positions.SELL_SQL):
+        statement = sql_text[len(positions.POSITIONS_SQL):]
+        assert not re.search(r"\$\d+(?!\d|::)", statement), statement  # no uncast argument
+    assert all(f"${n}::double precision" in positions.BUY_SQL for n in (3, 4, 5, 6))
+    assert "$3::double precision" in positions.SELL_SQL
 
 
 def test_implied_fed_move_from_the_fed_funds_futures():

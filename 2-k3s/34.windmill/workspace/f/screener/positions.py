@@ -42,12 +42,17 @@ CREATE TABLE IF NOT EXISTS screener.positions (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS positions_one_open ON screener.positions (ticker) WHERE closed_at IS NULL;
 """
+# Every $n is cast to its column type. Windmill declares each argument's type from its Python value (wmill's
+# infer_sql_type), and None, an empty stop, target or note, is declared text: PostgreSQL refuses text in a double
+# precision column without a cast.
 BUY_SQL = POSITIONS_SQL + """INSERT INTO screener.positions (ticker, buy_date, buy_price, size, stop, target, note)
-VALUES ($1, $2::date, $3, $4, $5, $6, $7)
+VALUES ($1::text, $2::date, $3::double precision, $4::double precision, $5::double precision, $6::double precision,
+        $7::text)
 ON CONFLICT (ticker) WHERE closed_at IS NULL DO NOTHING
 RETURNING *;"""
-SELL_SQL = POSITIONS_SQL + """UPDATE screener.positions SET sell_date = $2::date, sell_price = $3, closed_at = now()
-WHERE ticker = $1 AND closed_at IS NULL AND buy_date <= $2::date
+SELL_SQL = POSITIONS_SQL + """UPDATE screener.positions SET sell_date = $2::date, sell_price = $3::double precision,
+    closed_at = now()
+WHERE ticker = $1::text AND closed_at IS NULL AND buy_date <= $2::date
 RETURNING *;"""
 LIST_SQL = POSITIONS_SQL + """SELECT * FROM screener.positions
 WHERE closed_at IS NULL OR sell_date >= current_date - 365
