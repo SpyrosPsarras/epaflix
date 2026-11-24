@@ -6,6 +6,12 @@ Date: 2026-11-19. Status: draft for owner approval.
 
 Nobody can see at a glance what runs where, where its config lives, and whether that config is in Git. Today the answer comes from asking an agent, which rescans by hand. The owner wants one admin-only web page that answers it for every host, VM, LXC, k3s app and object, disk and agent pod, kept current without manual work.
 
+## Why RackPeek, and the scope
+
+- The owner's first request was a service that holds the configuration and setup of the services and indexes everything, with the repo keeping only infrastructure as code. The pain behind it: not seeing at a glance what is installed, where each configuration lives and what is saved in Git, without asking an agent.
+- The owner chose RackPeek over NetBox and the other candidates: a UI for people, new and popular, no wheel reinvented, and "much more closer to what I want".
+- Scope, confirmed on 2026-11-24: an index is enough. Configuration stays where it is applied from: Git for everything Argo CD deploys, the host for host-only files. RackPeek shows where each piece lives and whether it is in Git; Forgejo `homelab-live` keeps a masked nightly copy of host-only files.
+
 ## Decisions
 
 - D1. Each RackPeek item has two parts. Facts (labels) are rewritten by the nightly sync. The explanation (notes) is written by an agent or a person, and the sync carries it over unchanged.
