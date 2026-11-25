@@ -28,7 +28,7 @@
   "tools": {
     "profile": "coding",
     "alsoAllow": ["message"],
-    "message": { "actions": { "allow": ["channel-edit"] } },
+    "message": { "actions": { "allow": ["thread-list", "read", "channel-edit"] } },
     "exec": { "host": "gateway", "mode": "full" },
     "web": { "search": { "provider": "searxng" } }
   },
