@@ -32,6 +32,8 @@ END
 $$;
 
 DO $$
+DECLARE
+  svc integer;
 BEGIN
   -- First boot: migrations have not created settings yet. Skipping here is the
   -- established behaviour of the sibling -c guard in lingarr.yaml; the values
@@ -41,39 +43,57 @@ BEGIN
     RETURN;
   END IF;
 
-  -- Upserts, not bare UPDATEs: lingarr tracks the :main dev branch, so a row
-  -- upstream stops seeding must not leave the pin silently absent - the same
-  -- INSERT ON CONFLICT shape the sibling guard in lingarr.yaml uses.
-  --
-  -- endpoint is the FULL chat-completions URL: LocalAiService POSTs to it
-  -- directly and treats a trailing ".../completions" as its chat-API switch.
-  -- Cluster-internal name, not the traefik one: no TLS hop, no ingress
-  -- dependency, and it still works when the LAN-facing path does not.
-  INSERT INTO settings (key, value) VALUES ('local_ai_endpoint', 'http://cliproxy-free.remote-pi.svc.cluster.local:8317/v1/chat/completions')
-   ON CONFLICT (key) DO UPDATE SET value = excluded.value;
+  -- Before Lingarr 1.5.0 the provider lives in settings. Migration M0026 moves
+  -- these keys into translation_services/translation_service_settings and
+  -- deletes them here, so they must be in place when it runs.
+  IF to_regclass('public.translation_services') IS NULL THEN
+    -- endpoint is the FULL chat-completions URL: LocalAiService POSTs to it
+    -- directly and treats a trailing ".../completions" as its chat-API switch.
+    -- Cluster-internal name, not the traefik one: no TLS hop, no ingress
+    -- dependency, and it still works when the LAN-facing path does not.
+    INSERT INTO settings (key, value) VALUES ('local_ai_endpoint', 'http://cliproxy-free.remote-pi.svc.cluster.local:8317/v1/chat/completions')
+     ON CONFLICT (key) DO UPDATE SET value = excluded.value;
+    -- The one alias lingarr may use, served by cliproxy-free's tiered pool.
+    INSERT INTO settings (key, value) VALUES ('local_ai_model', 'or-free')
+     ON CONFLICT (key) DO UPDATE SET value = excluded.value;
+    -- Empty string makes LocalAiService use its default OpenAI-shaped chat body.
+    INSERT INTO settings (key, value) VALUES ('local_ai_chat_request_template', '')
+     ON CONFLICT (key) DO UPDATE SET value = excluded.value;
+    -- localai only: a provider switch made in the UI survives only until the
+    -- next pod restart. To use a different provider, change it HERE.
+    INSERT INTO settings (key, value) VALUES ('service_type', '["localai"]')
+     ON CONFLICT (key) DO UPDATE SET value = excluded.value;
+    -- Written plaintext: Decrypt() falls back to the raw value on
+    -- CryptographicException. current_setting keeps the key out of the
+    -- statement text, so a failed write cannot log it.
+    INSERT INTO settings (key, value) VALUES ('local_ai_api_key', current_setting('lingarr.cliproxy_key'))
+     ON CONFLICT (key) DO UPDATE SET value = excluded.value;
+    -- UPDATE, not upsert: migration M0022 inserts this row with a plain INSERT.
+    -- Off sends every batch to the schema-less path (lingarr-translate/lingarr#574).
+    UPDATE settings SET value = 'true' WHERE key = 'local_ai_structured_output';
+    RETURN;
+  END IF;
 
-  -- The one alias lingarr may use, served by cliproxy-free's tiered pool.
-  INSERT INTO settings (key, value) VALUES ('local_ai_model', 'or-free')
-   ON CONFLICT (key) DO UPDATE SET value = excluded.value;
+  -- From Lingarr 1.5.0: exactly one service, localai, at position 0. Other
+  -- services added in the UI are removed with their settings, the same posture
+  -- as the service_type pin above.
+  SELECT id INTO svc FROM translation_services
+   WHERE provider = 'localai' ORDER BY "position", id LIMIT 1;
+  IF svc IS NULL THEN
+    INSERT INTO translation_services (provider, name, "position", created_at, updated_at)
+    VALUES ('localai', 'LocalAI / Ollama', 0, now() AT TIME ZONE 'utc', now() AT TIME ZONE 'utc')
+    RETURNING id INTO svc;
+  END IF;
+  DELETE FROM translation_services WHERE id <> svc;
+  UPDATE translation_services SET "position" = 0 WHERE id = svc AND "position" <> 0;
 
-  -- The previous ollama-era template carried ollama-only body fields
-  -- ("options"). Empty string makes LocalAiService fall back to its default
-  -- OpenAI-shaped chat body.
-  INSERT INTO settings (key, value) VALUES ('local_ai_chat_request_template', '')
-   ON CONFLICT (key) DO UPDATE SET value = excluded.value;
-
-  -- Provider selection: localai is lingarr's OpenAI-compatible service. Pinned
-  -- on every boot on purpose - a provider switch made in the UI survives only
-  -- until the next pod restart. Same posture as the batch-translation pins in
-  -- lingarr.yaml; if you want a different provider, change it HERE.
-  INSERT INTO settings (key, value) VALUES ('service_type', '["localai"]')
-   ON CONFLICT (key) DO UPDATE SET value = excluded.value;
-
-  -- Written plaintext: SettingService.Decrypt() falls back to the raw value on
-  -- CryptographicException, so LocalAiService reads it as-is. current_setting
-  -- keeps the key out of the statement text, so a failed write cannot log it.
-  INSERT INTO settings (key, value) VALUES ('local_ai_api_key', current_setting('lingarr.cliproxy_key'))
-   ON CONFLICT (key) DO UPDATE SET value = excluded.value;
+  INSERT INTO translation_service_settings (translation_service_id, key, value) VALUES
+    (svc, 'local_ai_endpoint', 'http://cliproxy-free.remote-pi.svc.cluster.local:8317/v1/chat/completions'),
+    (svc, 'local_ai_model', 'or-free'),
+    (svc, 'local_ai_chat_request_template', ''),
+    (svc, 'local_ai_api_key', current_setting('lingarr.cliproxy_key')),
+    (svc, 'local_ai_structured_output', 'true')
+   ON CONFLICT (translation_service_id, key) DO UPDATE SET value = excluded.value;
 END
 $$;
 
@@ -82,17 +102,35 @@ $$;
 DO $$
 DECLARE
   n integer;
+  services integer;
 BEGIN
   IF to_regclass('public.settings') IS NULL THEN RETURN; END IF;
 
-  SELECT count(*) INTO n
-    FROM settings
-   WHERE (key = 'local_ai_endpoint'
-          AND value = 'http://cliproxy-free.remote-pi.svc.cluster.local:8317/v1/chat/completions')
-      OR (key = 'local_ai_model'    AND value = 'or-free')
-      OR (key = 'local_ai_chat_request_template' AND value = '')
-      OR (key = 'service_type'      AND value = '["localai"]')
-      OR (key = 'local_ai_api_key'  AND value = current_setting('lingarr.cliproxy_key'));
+  IF to_regclass('public.translation_services') IS NULL THEN
+    SELECT count(*) INTO n
+      FROM settings
+     WHERE (key = 'local_ai_endpoint'
+            AND value = 'http://cliproxy-free.remote-pi.svc.cluster.local:8317/v1/chat/completions')
+        OR (key = 'local_ai_model'    AND value = 'or-free')
+        OR (key = 'local_ai_chat_request_template' AND value = '')
+        OR (key = 'service_type'      AND value = '["localai"]')
+        OR (key = 'local_ai_api_key'  AND value = current_setting('lingarr.cliproxy_key'));
+  ELSE
+    SELECT count(*) INTO services FROM translation_services;
+    SELECT count(*) INTO n
+      FROM translation_services s
+      JOIN translation_service_settings t ON t.translation_service_id = s.id
+     WHERE s.provider = 'localai' AND s."position" = 0
+       AND ((t.key = 'local_ai_endpoint'
+             AND t.value = 'http://cliproxy-free.remote-pi.svc.cluster.local:8317/v1/chat/completions')
+         OR (t.key = 'local_ai_model' AND t.value = 'or-free')
+         OR (t.key = 'local_ai_chat_request_template' AND t.value = '')
+         OR (t.key = 'local_ai_structured_output' AND t.value = 'true')
+         OR (t.key = 'local_ai_api_key' AND t.value = current_setting('lingarr.cliproxy_key')));
+    IF services <> 1 THEN
+      RAISE EXCEPTION 'AI provider pins incomplete: % translation services, want 1', services;
+    END IF;
+  END IF;
 
   IF n <> 5 THEN
     RAISE EXCEPTION 'AI provider pins incomplete: % of 5 settings hold the wanted values', n;

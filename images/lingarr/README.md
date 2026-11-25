@@ -1,9 +1,10 @@
 # Lingarr batch-contract build
 
-Upstream `ghcr.io/lingarr-translate/lingarr:1.4.1` at commit `f31ddbb` with one
+Upstream `ghcr.io/lingarr-translate/lingarr:1.5.0` at commit `1d451c6` with one
 patch, `batch-contract.patch`, republished as `ghcr.io/spyrospsarras/lingarr`.
-Release 1.4.1 ships part of behaviour 4 via lingarr-translate/lingarr#556.
-Behaviours 1, 2, 3, 5, 6 and 7 still need the overlay.
+Release 1.4.1 ships part of behaviour 4 via lingarr-translate/lingarr#556 and
+release 1.5.0 part of behaviour 2 via lingarr-translate/lingarr#615.
+Behaviours 1, 3, 5, 6 and 7 still need the overlay in full.
 
 ## What the patch changes
 
@@ -19,7 +20,8 @@ made big files untranslatable through Bazarr:
    same structured request (`TranslateBatchAsync` already had the loop).
 2. A structured response with fewer, extra, duplicate or empty positions was
    accepted as-is. `ValidateBatchCoverage` now rejects it (retryable). An empty
-   source line may still come back empty. Empty `choices` and null `content`
+   source line may still come back empty. Upstream 1.5.0 retries only missing
+   positions (`ValidateAllPositions`); both checks run. Empty `choices` and null `content`
    are retryable too instead of crashing the attempt.
 3. `SubtitleTranslationService.RunBatch` filled any position the batch service
    did not return with the English source and logged a warning. It now throws,
@@ -66,12 +68,18 @@ by the overlay. Upstream's individual-line content path and translated context
 remain intact. The upstream test asserting behaviour 3 is deleted; the controller
 tests for active duplicates are adapted to behaviour 4; upstream disconnect
 and API cancellation tests remain.
-The patched suite passes all 341 tests, including TranslationRequestServiceTests
+The patched suite passes all 503 tests, including TranslationRequestServiceTests
 for behaviours 4 and 6, the rate-limit retry tests for behaviour 5 and the
 `TranslateSubtitlesBatch_*` tests for behaviour 7.
 
-M0022 seeds `local_ai_structured_output=true`; the init container resets existing
-rows to true so lingarr-translate/lingarr#574 cannot bypass the batch contract.
+The init container (`2-k3s/08.servarr/lingarr/files/reconcile-ai-provider.sql`)
+pins the provider to `or-free` and keeps `local_ai_structured_output` true, so
+lingarr-translate/lingarr#574 cannot bypass the batch contract. Release 1.5.0
+migration M0026 moves these keys from `settings` into `translation_services` and
+`translation_service_settings`; the pin writes `settings` before M0026 and the
+new tables after it. `bash images/lingarr/test-provider-pin.sh` runs the init
+script against PostgreSQL at migrations 21, 23 and 26 with Lingarr's own
+migrations; run it whenever `UPSTREAM_COMMIT` moves.
 
 ## Measured need
 

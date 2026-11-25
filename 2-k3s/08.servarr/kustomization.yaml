@@ -162,7 +162,8 @@ images:
   - name: ghcr.io/linuxserver/bazarr
     newTag: 1.6.2@sha256:832820dec70bce9e912c6eee7a95baf6551e03dbc63325a7208daaa455423752
   # TEMP OVERRIDE (batch-contract, see images/lingarr/README.md): overlay source is upstream
-  # release 1.4.1 (f31ddbb) + images/lingarr/batch-contract.patch. Upstream's chat batch path
+  # release 1.5.0 (1d451c6) + images/lingarr/batch-contract.patch; the image pin follows
+  # in a separate PR after publishing. Upstream's chat batch path
   # published untranslated subtitles as translated (522 positions kept in English in 3h,
   # 2026-09-13), and its schema-less fallback crashed with NullReferenceException on null
   # model content (98 "All configured batch translation services failed." deaths 09-12..09-15). The
