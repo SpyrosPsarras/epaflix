@@ -1,4 +1,4 @@
-summary: 'My positions: record a buy or a sell, so the daily strategy screen says hold or sell for each one'
+summary: 'My positions: record a buy or a sell, so the daily strategy screen says hold or sell for each one; export emails KPIs and a CSV'
 description: See 2-k3s/34.windmill/README.md in the homelab repo.
 kind: script
 schema:
@@ -13,22 +13,26 @@ schema:
     - stop
     - target
     - note
+    - book
+    - email
+    - budget
   properties:
     action:
       type: string
-      description: buy when you open a trade, sell when you close it, list to see what is recorded
+      description: buy when you open a trade, sell when you close it, list to see what is recorded, export to email the KPIs and a CSV of the book
       enum:
         - buy
         - sell
         - list
+        - export
       default: list
     ticker:
       type: string
-      description: The stock, e.g. AAPL (not needed for list)
+      description: The stock, e.g. AAPL (not needed for list or export)
       default: ''
     price:
       type: number
-      description: Your buy or sell price per share (not needed for list)
+      description: Your buy or sell price per share (not needed for list or export)
       default: 0
     day:
       type: string
@@ -50,5 +54,21 @@ schema:
       type: string
       description: Optional note
       default: ''
+    book:
+      type: string
+      description: 'Which strategy, each with its own budget: swing is the screener''s trades and the only book the daily screen follows'
+      enum:
+        - swing
+        - pmcc
+        - holding
+      default: swing
+    email:
+      type: string
+      description: 'Export only: where the KPIs and the CSV go'
+      default: ''
+    budget:
+      type: number
+      description: 'Export only: the budget of this book, for P&L in money (size x budget)'
+      default: 10000
   required:
     - action

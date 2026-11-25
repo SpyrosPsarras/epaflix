@@ -1,4 +1,6 @@
+import csv
 import glob
+import io
 import inspect
 import json
 import math
@@ -2179,13 +2181,109 @@ def test_wmill_declares_none_as_text_so_positions_sql_casts_every_argument(monke
     sent = {}
     fake = type("Fake", (), {"run_inline_script_preview": lambda self, content, language, args: sent.update(sql=content) or []})()
     monkeypatch.setattr(positions.wmill, "datatable", lambda name: wmill.client.DataTableClient(fake, name))
-    positions.datatable_query()(positions.BUY_SQL, "AAPL", "2026-11-18", 100.0, 0.1, None, None, None)
+    positions.datatable_query()(positions.BUY_SQL, "AAPL", "2026-11-18", 100.0, 0.1, None, None, None, "swing")
     assert "-- $3 arg3 (FLOAT8)\n" in sent["sql"] and "-- $5 arg5 (TEXT)\n" in sent["sql"] and "-- $6 arg6 (TEXT)\n" in sent["sql"]
-    for sql_text in (positions.BUY_SQL, positions.SELL_SQL):
+    for sql_text in (positions.BUY_SQL, positions.SELL_SQL, positions.LIST_SQL, positions.EXPORT_SQL):
         statement = sql_text[len(positions.POSITIONS_SQL):]
         assert not re.search(r"\$\d+(?!\d|::)", statement), statement  # no uncast argument
     assert all(f"${n}::double precision" in positions.BUY_SQL for n in (3, 4, 5, 6))
     assert "$3::double precision" in positions.SELL_SQL
+
+
+def test_positions_script_yaml_matches_main_signature():
+    text = Path(positions.__file__).with_name("positions.script.yaml").read_text()
+    order = text.split("order:\n")[1].split("  properties:")[0].split()
+    assert [x for x in order if x != "-"] == list(inspect.signature(positions.main).parameters)
+    for book in positions.BOOKS:
+        assert f"        - {book}\n" in text
+
+
+OLD_POSITIONS_SQL = positions.POSITIONS_SQL.split("ALTER TABLE")[0] + (
+    "CREATE UNIQUE INDEX IF NOT EXISTS positions_one_open ON screener.positions (ticker) WHERE closed_at IS NULL;\n")
+
+
+def test_positions_table_before_books_gets_book_swing(db, monkeypatch):
+    # The live table was created without books: its rows become swing, and the one-open index moves to book and ticker.
+    db(OLD_POSITIONS_SQL + "INSERT INTO screener.positions (ticker, buy_date, buy_price, size) VALUES ('AAPL', '2026-11-18', 100, 0.1);")
+    db(OLD_POSITIONS_SQL + "INSERT INTO screener.positions (ticker, buy_date, buy_price, size, sell_date, sell_price, closed_at)"
+                           " VALUES ('MSFT', '2026-11-10', 400, 0.2, '2026-11-12', 420, now());")
+    monkeypatch.setattr(positions, "datatable_query", lambda name=positions.DATA_TABLE: db)
+    out = positions.main()
+    assert [r["ticker"] for r in out["open"]] == ["AAPL"] and [r["ticker"] for r in out["closed"]] == ["MSFT"]
+    assert {r["book"] for r in db("SELECT book FROM screener.positions")} == {"swing"}
+    indexes = {r["indexname"] for r in db("SELECT indexname FROM pg_indexes WHERE tablename = 'positions'")}
+    assert "positions_one_open" not in indexes and "positions_one_open_per_book" in indexes
+    db(ss.LOAD_POSITIONS_SQL)  # the screen's copy runs the same migration again without harm
+    assert [r["ticker"] for r in db(ss.LOAD_POSITIONS_SQL)] == ["AAPL"]
+
+
+def test_positions_books_are_kept_apart(db, monkeypatch):
+    monkeypatch.setattr(positions, "datatable_query", lambda name=positions.DATA_TABLE: db)
+    positions.main("buy", "AAPL", 100, "2026-11-18")
+    held = positions.main("buy", "AAPL", 101, "2026-11-18", 0.3, book="holding")  # the same ticker may be open in two books
+    assert held["book"] == "holding" and held["position"]["book"] == "holding" and held["open_count"] == 1
+    with pytest.raises(ValueError, match="already open in holding"):
+        positions.main("buy", "AAPL", 102, "2026-11-19", book="holding")
+    positions.main("buy", "KO", 60, "2026-11-18", book=" PMCC ")
+    sold = positions.main("sell", "AAPL", 110, "2026-11-20")
+    assert sold["position"]["book"] == "swing" and sold["open_count"] == 0 and len(sold["closed"]) == 1
+    assert positions.main(book="holding")["open"][0]["buy_price"] == 101
+    with pytest.raises(ValueError, match="no open position in KO"):
+        positions.main("sell", "KO", 61, "2026-11-20")  # KO is in pmcc, not swing
+    with pytest.raises(ValueError, match="book must be"):
+        positions.main(book="options")
+    assert db(ss.LOAD_POSITIONS_SQL) == []  # the screen follows only open swing positions
+
+
+def export_trades(db, monkeypatch):
+    sent = []
+    monkeypatch.setattr(positions, "datatable_query", lambda name=positions.DATA_TABLE: db)
+    monkeypatch.setattr(positions, "send_email", lambda *args: sent.append(args))
+    positions.main("buy", "AAA", 100, "2026-11-02", 0.1, stop=90)
+    positions.main("sell", "AAA", 120, "2026-11-06")      # +20% of 1000: +200, 2R
+    positions.main("buy", "BBB", 50, "2026-11-03", 0.2)
+    positions.main("sell", "BBB", 45, "2026-11-10")       # -10% of 2000: -200
+    positions.main("buy", "CCC", 10, "2026-11-04", 0.1)
+    positions.main("sell", "CCC", 10.5, "2026-11-12")     # +5% of 1000: +50
+    positions.main("buy", "DDD", 20, "2026-11-05", 0.15)  # open
+    positions.main("buy", "EEE", 30, "2026-11-05", 0.5, book="holding")  # another book
+    return sent
+
+
+def test_positions_export_emails_kpis_and_csv_of_one_book(db, monkeypatch):
+    sent = export_trades(db, monkeypatch)
+    out = positions.main("export", email=" me@example.com ", budget=10000)
+    stats = out["kpis"]
+    assert stats["closed_trades"] == 3 and stats["open_positions"] == 1 and stats["winners"] == 2 and stats["losers"] == 1
+    assert stats["realized_pnl"] == 50 and stats["realized_return_on_budget"] == 0.005 and stats["equity"] == 10050
+    assert stats["win_rate"] == round(2 / 3, 4) and stats["profit_factor"] == 1.25 and stats["expectancy_per_trade"] == 16.67
+    assert stats["average_win"] == 125 and stats["average_loss"] == -200 and stats["average_r"] == 2.0
+    assert stats["best_trade"] == "AAA" and stats["worst_trade"] == "BBB" and stats["average_days_held"] == round((4 + 7 + 8) / 3, 1)
+    assert stats["max_drawdown"] == round(200 / 10200, 4)  # 10200 after AAA, 10000 after BBB
+    assert stats["invested_open"] == 1500 and stats["cash_free"] == 8550
+    to, subject, html, csv_text, filename = sent[0]
+    assert to == "me@example.com" and filename.startswith("positions_swing_") and filename.endswith(".csv")
+    assert subject.startswith("Positions swing ") and "3 closed, 1 open, P&L +50.00" in subject
+    assert "Profit factor" in html and "1.25" in html and "+0.50%" in html
+    lines = csv_text.splitlines()
+    assert lines[0] == ",".join(positions.CSV_COLUMNS) and len(lines) == 5 and "EEE" not in csv_text
+    rows = {r["ticker"]: r for r in csv.DictReader(io.StringIO(csv_text))}
+    assert rows["AAA"]["pnl"] == "200.0" and rows["AAA"]["r_multiple"] == "2.0" and rows["AAA"]["invested"] == "1000.0"
+    assert rows["BBB"]["return"] == "-0.1" and rows["DDD"]["status"] == "open" and rows["DDD"]["pnl"] == ""
+    assert [t["ticker"] for t in out["positions"]] == ["AAA", "BBB", "CCC", "DDD"]
+
+
+def test_positions_export_other_book_budget_and_checks(db, monkeypatch):
+    sent = export_trades(db, monkeypatch)
+    out = positions.main("export", book="holding", email="me@example.com", budget=50000)
+    assert out["kpis"]["invested_open"] == 25000 and out["kpis"]["closed_trades"] == 0 and out["kpis"]["win_rate"] is None
+    assert "-" in sent[0][2] and [t["ticker"] for t in out["positions"]] == ["EEE"]
+    empty = positions.main("export", book="pmcc", email="me@example.com")
+    assert empty["positions"] == [] and empty["kpis"]["equity"] == 10000 and empty["kpis"]["max_drawdown"] == 0
+    for kwargs, message in (({"email": ""}, "email"), ({"email": "a@b.com, c@d.com"}, "email"), ({"email": "me@example.com", "budget": 0}, "budget")):
+        with pytest.raises(ValueError, match=message):
+            positions.main("export", **kwargs)
+    assert len(sent) == 2
 
 
 def test_implied_fed_move_from_the_fed_funds_futures():
