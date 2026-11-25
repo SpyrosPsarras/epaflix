@@ -788,8 +788,8 @@ nested = {"🏠" = ["fixture", {enabled = false}]}
                              [['homelab'], ['homelab-0'], ['homelab-0']])
             self.assertEqual(sts['spec']['updateStrategy']['type'], 'OnDelete')
             self.assertFalse(spec['automountServiceAccountToken'])
-            self.assertEqual({v['persistentVolumeClaim']['claimName'] for v in spec['volumes'] if 'persistentVolumeClaim' in v}, {'t3code-home', 't3code-vault'})
-            self.assertNotIn('hostPath', json.dumps(spec))
+            self.assertEqual({v['persistentVolumeClaim']['claimName'] for v in spec['volumes'] if 'persistentVolumeClaim' in v}, {'t3code-home', 't3code-vault', 't3code-tailscale'})
+            self.assertEqual([v['hostPath'] for v in spec['volumes'] if 'hostPath' in v], [{'path': '/dev/net/tun', 'type': 'CharDevice'}])
             self.assertEqual({v['secret']['secretName'] for v in spec['volumes'] if 'secret' in v},
                              {'t3-runtime-inputs', 't3-build-kubeconfig'})
             build = next(v['secret'] for v in spec['volumes'] if v['name'] == 't3-build-kubeconfig')

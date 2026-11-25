@@ -60,6 +60,40 @@ Desktop and phone clients reach the pod through the owner's T3 account.
 No SSH tunnel or pairing code is needed for the T3 app. The READMEs retain
 `connect-laptop.sh` for SSH acceptance and diagnostic checks.
 
+## Tailscale
+
+Both pods run a `tailscale` sidecar in kernel mode, so T3 can link to
+tailnet peers. Each pod joins the tailnet as `t3code-homelab` or `t3code-work`
+with `tag:t3code`. It accepts no subnet routes and no tailnet DNS. MagicDNS is
+off, so link peers by their `100.x` address. The
+[tailnet policy](../../21.tailscale/policy.json) lets `tag:t3code` reach only
+`spylinux` on TCP 3773. Its identity lives on the `t3code-tailscale` PVC,
+which only the sidecar mounts.
+
+First apply `policy.json` in the Tailscale admin console. Argo CD does not
+apply it, and `tag:t3code` must exist before a pod can request it.
+
+Then enroll each pod once, after the merged sync and the pod replacement. Open
+the login URL from the sidecar log under the owner account. The tag is approved
+with the login because the owner is its tag owner. The sidecar has a ten-year boot timeout,
+so a late enrollment does not restart it:
+
+```sh
+kubectl --context epaflix -n "$namespace" logs "$pod" -c tailscale | grep -m1 login.tailscale.com
+```
+
+In the Tailscale admin console, disable key expiry on both devices. Check:
+
+```sh
+kubectl --context epaflix -n "$namespace" exec "$pod" -c tailscale -- tailscale status
+```
+
+The laptop's T3 must listen on its tailnet address, for example
+`t3 serve --lan`. Then link it from the pod whenever needed, in Settings →
+Labs → Linked environments, or run `t3 pair` on the laptop and use a fresh
+code for each pod with
+`t3 environment link --pairing-code <code> http://100.119.235.123:3773`.
+
 ## Zed SSH access
 
 Zed still needs SSH to the pods. The owner decision is to use the same

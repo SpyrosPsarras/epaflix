@@ -1,0 +1,43 @@
+# Kernel mode: only tailnet addresses use tailscale0, so T3 links to tailnet peers without a proxy.
+# No probes and a ten-year boot timeout: a not-yet-enrolled sidecar must not restart or hold the pod NotReady.
+- op: add
+  path: /spec/template/spec/containers/-
+  value:
+    name: tailscale
+    image: tailscale/tailscale:v1.102.3
+    env:
+    - name: TS_HOSTNAME
+      valueFrom:
+        fieldRef: {fieldPath: metadata.namespace}
+    - {name: TS_USERSPACE, value: 'false'}
+    - {name: TS_STATE_DIR, value: /var/lib/tailscale}
+    - {name: TS_KUBE_SECRET, value: ''}
+    - {name: TS_AUTH_ONCE, value: 'true'}
+    - {name: TS_BOOT_TIMEOUT, value: 87600h}
+    - {name: TS_ACCEPT_DNS, value: 'false'}
+    - {name: TS_EXTRA_ARGS, value: '--advertise-tags=tag:t3code --accept-routes=false --netfilter-mode=off'}
+    - {name: TS_DISABLE_PORTMAPPER, value: 'true'}
+    securityContext:
+      runAsNonRoot: false
+      runAsUser: 0
+      runAsGroup: 0
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: [ALL]
+        add: [NET_ADMIN]
+    volumeMounts:
+    - {name: tailscale-state, mountPath: /var/lib/tailscale}
+    - {name: tun, mountPath: /dev/net/tun}
+    resources:
+      requests: {cpu: 10m, memory: 32Mi}
+      limits: {memory: 256Mi}
+- op: add
+  path: /spec/template/spec/volumes/-
+  value:
+    name: tailscale-state
+    persistentVolumeClaim: {claimName: t3code-tailscale}
+- op: add
+  path: /spec/template/spec/volumes/-
+  value:
+    name: tun
+    hostPath: {path: /dev/net/tun, type: CharDevice}

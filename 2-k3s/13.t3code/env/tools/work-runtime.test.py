@@ -579,8 +579,8 @@ class WorkRuntimeTests(unittest.TestCase):
             self.assertEqual(sts['spec']['updateStrategy']['type'], 'OnDelete')
             self.assertEqual(sts['spec']['persistentVolumeClaimRetentionPolicy'], {'whenDeleted': 'Retain', 'whenScaled': 'Retain'})
             self.assertFalse(pod['automountServiceAccountToken'])
-            self.assertNotIn('hostPath', json.dumps(pod))
-            self.assertEqual({v['persistentVolumeClaim']['claimName'] for v in pod['volumes'] if 'persistentVolumeClaim' in v}, {'t3code-home', 't3code-vault', 't3code-keeper'})
+            self.assertEqual([v['hostPath'] for v in pod['volumes'] if 'hostPath' in v], [{'path': '/dev/net/tun', 'type': 'CharDevice'}])
+            self.assertEqual({v['persistentVolumeClaim']['claimName'] for v in pod['volumes'] if 'persistentVolumeClaim' in v}, {'t3code-home', 't3code-vault', 't3code-keeper', 't3code-tailscale'})
             secret_names = {v['secret']['secretName'] for v in pod['volumes'] if 'secret' in v}
             secret_names.update(source['secret']['name'] for v in pod['volumes']
                                 for source in v.get('projected', {}).get('sources', []) if 'secret' in source)
@@ -591,7 +591,7 @@ class WorkRuntimeTests(unittest.TestCase):
             self.assertEqual({item['key'] for item in inputs['secret']['items']}, runtime.WORK_INPUTS | {'runtime.json'})
             image = pod['containers'][0]['image']
             self.assertIn(':work-inputs-', image)
-            self.assertTrue(all(c['image'] == image for c in pod['containers'] + pod['initContainers']))
+            self.assertTrue(all(c['image'] == image for c in pod['containers'] + pod['initContainers'] if c['name'] != 'tailscale'))
             self.assertEqual(next(e['value'] for e in pod['containers'][0]['env'] if e['name'] == 'MCP_HUB_INSTANCE'), 'work')
             for doc in docs:
                 if doc['kind'] in {'Job', 'CronJob'}:

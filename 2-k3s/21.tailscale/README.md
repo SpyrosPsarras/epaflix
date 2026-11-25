@@ -15,6 +15,7 @@ kubectl --context epaflix -n tailscale exec deploy/subnet-router -- tailscale st
 On first deployment, open the login URL from `tailscale status` and enroll under the same account as the clients. The one-hour boot timeout allows time for this step. In the Tailscale admin console:
 
 - D1. Apply `policy.json` as the access policy for this dedicated personal tailnet. It replaces the policy; merge it if the tailnet later has other users or services.
+- D1a. `policy.json` also lets the T3 pods' `tag:t3code` reach only `spylinux` on TCP 3773. Enrollment of those pods is in the [T3 client access guide](../13.t3code/env/client-access.md#tailscale).
 - D2. Approve both advertised routes on `epaflix-subnet-router` and disable that device's key expiry.
 - D3. Configure DNS from `dns.json`: sole nameserver `192.168.10.30`, override local DNS, no split DNS, and MagicDNS off. These JSON files are admin/API inputs, not Kubernetes resources.
 
