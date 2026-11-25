@@ -41,3 +41,9 @@
   value:
     name: tun
     hostPath: {path: /dev/net/tun, type: CharDevice}
+# T3 links over plain http only to *.ts.net names; MagicDNS is off, so pin the laptop's name.
+- op: add
+  path: /spec/template/spec/hostAliases
+  value:
+  - ip: 100.119.235.123
+    hostnames: [spylinux.tailea078a.ts.net]

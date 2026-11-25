@@ -65,7 +65,7 @@ No SSH tunnel or pairing code is needed for the T3 app. The READMEs retain
 Both pods run a `tailscale` sidecar in kernel mode, so T3 can link to
 tailnet peers. Each pod joins the tailnet as `t3code-homelab` or `t3code-work`
 with `tag:t3code`. It accepts no subnet routes and no tailnet DNS. MagicDNS is
-off, so link peers by their `100.x` address. The
+off, so the pods resolve tailnet names only through `hostAliases`. The
 [tailnet policy](../../21.tailscale/policy.json) lets `tag:t3code` reach only
 `spylinux` on TCP 3773. Its identity lives on the `t3code-tailscale` PVC,
 which only the sidecar mounts.
@@ -92,7 +92,10 @@ The laptop's T3 must listen on its tailnet address, for example
 `t3 serve --lan`. Then link it from the pod whenever needed, in Settings →
 Labs → Linked environments, or run `t3 pair` on the laptop and use a fresh
 code for each pod with
-`t3 environment link --pairing-code <code> http://100.119.235.123:3773`.
+`t3 environment link --pairing-code <code> http://spylinux.tailea078a.ts.net:3773`.
+T3 refuses plain `http` to a `100.x` address but accepts `*.ts.net` names.
+MagicDNS is off, so a `hostAliases` entry in both pods maps that name to
+`100.119.235.123`. Update it if the laptop's tailnet address changes.
 
 ## Zed SSH access
 
