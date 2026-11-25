@@ -3279,6 +3279,83 @@ def extreme_html(x):
             + "".join(f"<li>{escape(t)}</li>" for t in lines) + "</ul>")
 
 
+def _without_backtest(text):
+    """The advice without its backtest sentences: the short email gives the plan, the run result keeps the numbers."""
+    return " ".join(s for s in re.split(r"(?<=\.)\s+", text or "") if "backtest" not in s)
+
+
+def _why(row):
+    text = row.get("recommendation") or ""
+    why = text.split(" Why: ", 1)[1].split(". Plan: ", 1)[0] if " Why: " in text else ""
+    why = why.replace(", the worst case in the backtest", "")
+    return "; ".join(x for x in why.split("; ") if "backtest" not in x)
+
+
+def _spread(r):
+    return r.get("put_spread") if r["action"] == "bear_put_spread" and r.get("put_spread") else None
+
+
+def _size_cell(r):
+    p = r.get("position")
+    if not p:
+        return "spread, small" if r["action"] == "bear_put_spread" else "-"
+    if p["slot"]:
+        return f"{p['size']:.0%}"
+    return f"{p['size']:.0%} if you sell {p['replaces']}" if p["reason"] == "swap" else p["reason"]
+
+
+def _plan_cell(r):
+    spread = r.get("put_spread")
+    if r["action"] == "bear_put_spread" and spread:
+        leg = spread["legs"][0]
+        return (f"buy {leg['buy']} put, sell {leg['sell']} put, expiry after {spread['expiry_after']}, "
+                f"take profit {spread['take_profit']:.0%} of width")
+    if r["action"] == "long":
+        return "buy next open"
+    return "watch"
+
+
+def _notes_cell(r):
+    notes = list(r.get("warnings") or [])
+    overlap = (r.get("position") or {}).get("overlap")
+    if overlap:
+        notes.append("same exposure as " + ", ".join(f"{o['ticker']} ({o['correlation']:.2f})" for o in overlap))
+    if r.get("alternatives"):
+        notes.append("alternatives " + ", ".join(r["alternatives"]))
+    alt = (r.get("position") or {}).get("alternative_to")
+    if alt:
+        notes.append("alternative to " + ", ".join(alt))
+    return "; ".join(notes) or "-"
+
+
+COMPACT_COLUMNS = [  # header, cell
+    ("#", None), ("ticker", lambda r: r["ticker"]), ("setup", lambda r: r["strategy"]),
+    ("action", lambda r: r["action"].replace("_", " ")), ("size", _size_cell), ("score", lambda r: f"{r['score']:g}"),
+    ("entry", lambda r: f"{r['entry']:g}"), ("stop", lambda r: f"{r['stop']:g}"), ("target", lambda r: f"{r['target']:g}"),
+    ("R:R", lambda r: f"{r['reward_risk']:g}"),
+    ("hold", lambda r: f"{_spread(r)['sessions'] if _spread(r) else r['holding_days']} sessions"),
+    ("exit by", lambda r: _spread(r)["exit_by"] if _spread(r) else str(r["time_exit"])),
+    ("plan", _plan_cell), ("industry", lambda r: r.get("industry") or (f"ETF: {r['etf']}" if r.get("etf") else "-")),
+    ("notes", _notes_cell),
+]
+
+
+def proposals_html(rows):
+    """The setups as a table, proposed first then watch only, and why the top proposal qualified."""
+    proposed = [r for r in rows if r["action"] in TRADE_ACTIONS]
+    ordered = proposed + [r for r in rows if r["action"] not in TRADE_ACTIONS]
+    if not rows:
+        return "<p>No setup qualified today.</p>"
+    title = (f"<p><b>Proposed</b>: {len(proposed)} of {len(rows)} setups, best first.</p>" if proposed
+             else f"<p><b>Proposed</b>: none today ({len(rows)} setups, all watch only).</p>")
+    head = "".join(f"<th>{escape(h)}</th>" for h, _ in COMPACT_COLUMNS)
+    body = "".join("<tr>" + "".join(f"<td>{i}</td>" if cell is None else f"<td>{escape(str(cell(r)))}</td>"
+                                     for _, cell in COMPACT_COLUMNS) + "</tr>" for i, r in enumerate(ordered, 1))
+    table = f"<table border='1' cellpadding='4' cellspacing='0'><tr>{head}</tr>{body}</table>"
+    why = f"<p><b>Top pick {escape(proposed[0]['ticker'])}</b>: {escape(_why(proposed[0]))}.</p>" if proposed and _why(proposed[0]) else ""
+    return title + why + table
+
+
 def compact_email_html(result):
     """The short daily email: market line, extreme move, proposals as they are, your positions, the 3 fastest rotating
     ETFs, and the alerts of the day; everything else stays in the run result."""
@@ -3291,7 +3368,7 @@ def compact_email_html(result):
             f"{pct(b.get('vs_sma200'))} vs SMA200, 20 days {pct(b.get('change_20d'))}. Long setups: {escape(str(m.get('long_setups')))}.</p>")
     parts = [head]
     if phase.get("switched") or phase.get("dead_cat") or m.get("index_long"):
-        parts.append(f"<p>{escape(phase.get('advice', ''))}</p>")
+        parts.append(f"<p>{escape(_without_backtest(phase.get('advice', '')))}</p>")
     spread = m.get("index_put_spread")
     if spread:
         leg = spread["legs"][0]
@@ -3308,15 +3385,7 @@ def compact_email_html(result):
 
     rows = result.get("candidates") or []
     proposed = [r for r in rows if r["action"] in TRADE_ACTIONS]
-    if proposed:
-        parts.append(f"<p><b>Proposed</b>: {len(proposed)} of {len(rows)} setups, best first.</p><ol>"
-                     + "".join(f"<li>{escape(r['recommendation'])}</li>" for r in proposed) + "</ol>")
-    else:
-        parts.append(f"<p><b>Proposed</b>: none today ({len(rows)} setups, all watch only).</p>" if rows
-                     else "<p>No setup qualified today.</p>")
-    watch = [r for r in rows if r["action"] not in TRADE_ACTIONS]
-    if watch:
-        parts.append("<p>Watch only: " + escape(", ".join(f"{r['ticker']} {r['strategy']}" for r in watch)) + ".</p>")
+    parts.append(proposals_html(rows))
     sizing = result.get("sizing")
     if sizing and any(r["action"] == "long" for r in proposed):
         state = (f"{sizing['open']} open, {sizing['to_sell']} to sell, {sizing['proposed']} proposed today, {sizing['free']} free"

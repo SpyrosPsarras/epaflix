@@ -2389,7 +2389,8 @@ def test_etf_breakout_needs_accelerating_rotation(offline):
     assert {"ticker": "USO", "reason": "chart data is for another ticker"} in result["etf_setups"]["missing"]
     assert all(e["ticker"] != "USO" for e in result["data_errors"])
     assert "<td>ETF: Biotech</td>" in ss.email_html({**result, "settings": {**result["settings"], "compact_report": 0}})
-    assert "XBI: PROPOSED LONG breakout" in ss.email_html(result) and "<li>XBI Biotech: " in ss.email_html(result)
+    assert "<td>XBI</td><td>breakout</td><td>long</td>" in ss.email_html(result) and "<li>XBI Biotech: " in ss.email_html(result)
+    assert "<td>ETF: Biotech</td>" in ss.email_html(result)
     strict = ss.main(tickers="PULL", settings={"etf_min_acceleration": 0.5})
     assert all(c["ticker"] != "XBI" for c in strict["candidates"])
     off = ss.main(tickers="PULL", settings={"etf_setups": 0})
@@ -2563,9 +2564,12 @@ def test_compact_email_is_the_default(offline):
     offline["QQQ"] = jump_rows(0.045, 300, 300.0)
     result = ss.main(tickers="PULL,RALY", email="trader@example.com")
     html = offline["_sent"][-1][2]
-    assert result["settings"]["compact_report"] == 1 and "<table" not in html
-    assert "<b>Proposed</b>: 1 of 2 setups, best first." in html and "PULL: PROPOSED LONG pullback" in html
-    assert "Watch only: RALY rally_rejection." in html
+    assert result["settings"]["compact_report"] == 1 and "PROPOSED LONG" not in html
+    assert "<b>Proposed</b>: 1 of 2 setups, best first.</p><p><b>Top pick PULL</b>: pullback in an uptrend" in html
+    assert ("<tr><td>1</td><td>PULL</td><td>pullback</td><td>long</td><td>10%</td><td>83</td><td>237.81</td><td>170.25</td>"
+            "<td>245.5</td><td>0.11</td><td>30 sessions</td><td>2026-04-13</td><td>buy next open</td>") in html
+    assert "<tr><td>2</td><td>RALY</td><td>rally_rejection</td>" in html and "<td>watch</td>" in html
+    assert "backtest" not in html.split("Extreme move")[0]
     assert result["extreme_move"]["change"] == 0.045 and "Extreme move: QQQ +4.5% today" in html
     assert "<b>Alerts</b>" in html and "VIX futures 24.0: +34% in 5 sessions. In 2020-2026" in html and "in 5 sessions" in html
     assert "Rotation, fastest accelerating ETFs" in html or not [r for r in result["etf_setups"]["rotation"] if r["acceleration"] > 0]
@@ -2576,10 +2580,39 @@ def test_compact_email_is_the_default(offline):
 
 def test_compact_email_with_positions_and_nothing_proposed():
     result = {**email_result([full_status(), ss.position_unknown(position(ticker="GONE"), "no chart")]), "settings": {"compact_report": 1},
-              "candidates": [{"ticker": "RALY", "strategy": "rally_rejection", "action": "watch", "recommendation": "RALY: WATCH ONLY"}],
+              "candidates": [{"ticker": "RALY", "strategy": "rally_rejection", "action": "watch", "recommendation": "RALY: WATCH ONLY",
+                              "score": 40, "entry": 150.0, "stop": 158.2, "target": 143.7, "reward_risk": 2.0, "holding_days": 30,
+                              "time_exit": "2026-04-13", "industry": None, "warnings": ["earnings in 5 days"]}],
               "backdrop": {"alerts": []}}
     html = ss.email_html(result)
-    assert "<b>Proposed</b>: none today (1 setups, all watch only)." in html and "Watch only: RALY rally_rejection." in html
+    assert "<b>Proposed</b>: none today (1 setups, all watch only).</p><table" in html and "Top pick" not in html
+    assert "<td>watch</td><td>-</td><td>earnings in 5 days</td></tr>" in html
     assert html.index("GONE bought") < html.index("FULL bought")  # to check first
     assert "Alerts: none" in html and "Extreme move" not in html
     assert "None recorded" not in ss.email_html({**email_result([]), "settings": {"compact_report": 1}})
+
+
+def test_compact_proposals_spread_row_notes_and_advice_without_backtest():
+    spread = {"legs": [{"buy": 301.08, "sell": 286.03}], "expiry_after": "2026-12-08", "take_profit": 0.5, "exit_by": "2026-12-01",
+              "sessions": 5}
+    rows = [{"ticker": "AVGO", "strategy": "rally_rejection", "action": "bear_put_spread", "score": 61, "entry": 301.08, "stop": 320.5,
+             "target": 270.0, "reward_risk": 1.6, "holding_days": 30, "time_exit": "2027-01-08", "put_spread": spread,
+             "industry": "Semiconductors", "warnings": [], "position": None,
+             "recommendation": "AVGO: PROPOSED BEAR PUT DEBIT SPREAD (x backtest). Why: rally rejected at resistance in a "
+                               "downtrend in a correction; caps the loss; market deep in the decline, the worst case in the backtest; "
+                               "+0.1R in the backtest. Plan: buy the 301.08 put. Size: none."},
+            {"ticker": "MA", "strategy": "pullback", "action": "long", "score": 70, "entry": 500.0, "stop": 480.0, "target": 540.0,
+             "reward_risk": 2.0, "holding_days": 10, "time_exit": "2026-12-09", "industry": "Credit Services", "warnings": [],
+             "alternatives": ["V"], "position": {"size": 0.1, "slot": 1, "reason": None,
+                                                  "overlap": [{"ticker": "AXP", "correlation": 0.83}]}, "recommendation": "MA"}]
+    html = ss.proposals_html(rows)
+    assert ("<b>Top pick AVGO</b>: rally rejected at resistance in a downtrend in a correction; caps the loss; market deep in "
+            "the decline.</p>") in html
+    assert ("<td>bear put spread</td><td>spread, small</td><td>61</td><td>301.08</td><td>320.5</td><td>270</td><td>1.6</td>"
+            "<td>5 sessions</td><td>2026-12-01</td><td>buy 301.08 put, sell 286.03 put, expiry after 2026-12-08, take profit "
+            "50% of width</td><td>Semiconductors</td><td>-</td>") in html
+    assert "<td>same exposure as AXP (0.83); alternatives V</td>" in html
+    advice = ("SWITCH today from bounce to falling. Decline, still falling: SHORT setups as bear put debit spreads only. In the "
+              "backtest the short-dated spreads lost about 0.06-0.13 of the debit per trade here (48% won). Keep each spread small.")
+    assert ss._without_backtest(advice) == ("SWITCH today from bounce to falling. Decline, still falling: SHORT setups as bear put "
+                                            "debit spreads only. Keep each spread small.")
