@@ -18,7 +18,7 @@ spec:
   template:
     metadata:
       annotations:
-        t3code.epaflix.com/inputs-grants-revision: "r16"
+        t3code.epaflix.com/inputs-grants-revision: "r17"
       labels:
         app.kubernetes.io/name: t3code
     spec:
@@ -94,7 +94,7 @@ spec:
               mountPath: /run/t3-vault
       containers:
         - name: t3
-          image: ghcr.io/spyrospsarras/t3-runtime:homelab-inputs-5300c93f3896dc0c98ba70dc4cebd1d7
+          image: ghcr.io/spyrospsarras/t3-runtime:homelab-inputs-5a9a6ac46c3fba5208f35839632af51c
           imagePullPolicy: IfNotPresent
           command: [bash, /scripts/entrypoint.sh]
           env:

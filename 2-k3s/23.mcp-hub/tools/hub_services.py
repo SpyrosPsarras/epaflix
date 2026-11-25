@@ -3,7 +3,7 @@
 import json
 
 PATHS = {name: "/" + name for name in
-         ("gmail", "searxng", "notion", "vaultwarden", "kubernetes", "drive")}
+         ("gmail", "searxng", "notion", "vaultwarden", "kubernetes", "drive", "skills")}
 CLIENT_NAMES = {name: name for name in PATHS}
 CLIENT_NAMES["kubernetes"] = "kubernetes-epaflix"
 ENVIRONMENTS = ("homelab", "work")

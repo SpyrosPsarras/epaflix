@@ -21,6 +21,18 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: rackpeek
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: mcp-hub-homelab
+          podSelector:
+            matchLabels:
+              app: skills-mcp
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: mcp-hub-work
+          podSelector:
+            matchLabels:
+              app: skills-mcp
       ports:
         - port: 3000
           protocol: TCP

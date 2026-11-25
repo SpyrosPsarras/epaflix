@@ -6,6 +6,7 @@ resources:
   - ../base
   - ../searxng
   - ../google
+  - ../skills
   - namespace.yaml
   - ingress.yaml
 
@@ -13,6 +14,7 @@ configMapGenerator:
   - name: mcp-hub-instance-settings
     literals:
       - environment=homelab
+      - skills-repo=http://forgejo.forgejo.svc.cluster.local:3000/spypsarras/skills.git
 
 patches:
   - patch: |-
@@ -24,4 +26,4 @@ patches:
         template:
           metadata:
             annotations:
-              mcp-hub.epaflix.com/inputs-revision: "r4"
+              mcp-hub.epaflix.com/inputs-revision: "r5"

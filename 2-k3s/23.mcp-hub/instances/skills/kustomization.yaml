@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - skills.yaml
+
+configMapGenerator:
+  - name: skills-runner
+    files:
+      - skills.py
+
+images:
+  - name: registry.k8s.io/git-sync/git-sync
+    newTag: v4.8.0@sha256:a20644562fba94773e594885cb001aadb5a3172175f13ac1215e5b2033c9200e

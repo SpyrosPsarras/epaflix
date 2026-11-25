@@ -4,10 +4,10 @@
 They have separate namespaces, Services, Deployments, health probes,
 ServiceAccounts, client grants and upstream credentials.
 
-The active approved homelab inventory is `searxng`, `gmail` and `drive`.
+The active approved homelab inventory is `searxng`, `gmail`, `drive` and `skills`.
 The owner stages Gmail and Drive with fresh consent through
 `bootstrap-gmail.py --instance homelab --context <approved-context>`.
-The work inventory is `searxng` and `notion`. The owner stages Notion with
+The work inventory is `searxng`, `notion` and `skills`. The owner stages Notion with
 fresh work-account consent through `bootstrap-notion.py --instance work --context <approved-context>`;
 the work hub and runtime
 counters roll it out.
@@ -55,7 +55,7 @@ invalid client digests, so this example cannot start a deployment:
 ```
 
 For work, `environment` must be `work`. Service names are `gmail`,
-`searxng`, `drive`, `kubernetes` and `notion`. An empty list, unknown or
+`searxng`, `drive`, `kubernetes`, `notion` and `skills`. An empty list, unknown or
 duplicate name, environment mismatch, malformed client digest, missing
 connection or extra connection prevents startup. Both instances reject
 retired vault route names and the retired reader marker. Both T3 pods read

@@ -169,7 +169,8 @@ class SetupTests(unittest.TestCase):
             '/tools/node_modules/superpowers',
             '/tools/node_modules/@dietrichgebert/ponytail',
             '/tools/node_modules/not-enough-retry',
-            '/tools/node_modules/pi-t3code-sticky-prefix', self.safety])
+            '/tools/node_modules/pi-t3code-sticky-prefix',
+            '/tools/node_modules/@jangmanj/pi-mcp-ext', self.safety])
         before = {p.relative_to(self.agent): p.read_bytes() for p in self.agent.rglob('*') if p.is_file()}
         self.write()
         self.assertEqual(before, {p.relative_to(self.agent): p.read_bytes() for p in self.agent.rglob('*') if p.is_file()})

@@ -73,8 +73,8 @@ class SearchTests(unittest.TestCase):
                 docs = list(yaml.safe_load_all(subprocess.check_output([
                     "kustomize", "build", str(HUB / "instances" / environment)])))
                 deployments = {doc["metadata"]["name"]: doc for doc in docs if doc["kind"] == "Deployment"}
-                self.assertEqual(set(deployments), {"mcp-hub", "searxng-mcp", "workspace-mcp"}
-                                 if environment == "homelab" else {"mcp-hub", "searxng-mcp"})
+                self.assertEqual(set(deployments), {"mcp-hub", "searxng-mcp", "skills-mcp", "workspace-mcp"}
+                                 if environment == "homelab" else {"mcp-hub", "searxng-mcp", "skills-mcp"})
                 search_deployment = deployments["searxng-mcp"]
                 template = search_deployment["spec"]["template"]
                 pod = template["spec"]
@@ -83,7 +83,7 @@ class SearchTests(unittest.TestCase):
                                  {"name": "mcp-hub-searxng", "key": "token"})
                 self.assertEqual(template["metadata"]["annotations"]["mcp-hub.epaflix.com/inputs-revision"], "r1")
                 self.assertEqual(deployments["mcp-hub"]["spec"]["template"]["metadata"]["annotations"][
-                    "mcp-hub.epaflix.com/inputs-revision"], "r4" if environment == "homelab" else "r3")
+                    "mcp-hub.epaflix.com/inputs-revision"], "r5" if environment == "homelab" else "r4")
                 selector = search_deployment["spec"]["selector"]["matchLabels"]
                 self.assertEqual(selector, {"app": "work-searxng-mcp" if environment == "work" else "searxng-mcp"})
                 self.assertEqual(template["metadata"]["labels"], selector)

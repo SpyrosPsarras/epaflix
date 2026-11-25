@@ -379,6 +379,8 @@ jobs:
           bash .github/scripts/install-ci-tools.sh kustomize
           # Same pin as instances/{base/deployment,google/workspace,searxng/searxng}.yaml in 23.mcp-hub.
           python3 -m venv /tmp/mcp-hub && /tmp/mcp-hub/bin/pip install -q --disable-pip-version-check mcp==2.2.0 -r .github/hooks/requirements.txt
+          # Same pin as 23.mcp-hub/instances/skills/skills.yaml; FastMCP needs a newer mcp than the hub pin.
+          python3 -m venv /tmp/skills-mcp && /tmp/skills-mcp/bin/pip install -q --disable-pip-version-check fastmcp==4.2.6 -r .github/hooks/requirements.txt
           python3 -m venv /tmp/screener
           /tmp/screener/bin/pip install -q --disable-pip-version-check -r 2-k3s/34.windmill/workspace/requirements-test.txt
 
@@ -388,6 +390,7 @@ jobs:
           python3 .github/scripts/run-parallel.py <<'EOF'
           WORKSPACE_MCP_IMAGE_TEST=1 /tmp/mcp-hub/bin/python -m unittest discover -s 2-k3s/23.mcp-hub/tests -p test_google.py -v
           /tmp/mcp-hub/bin/python -m unittest discover -s 2-k3s/23.mcp-hub/tests -v
+          /tmp/skills-mcp/bin/python -m unittest discover -s 2-k3s/23.mcp-hub/tests -p test_skills.py -v
           /tmp/screener/bin/python -m pytest -q 2-k3s/34.windmill/workspace/tests
           /tmp/mcp-hub/bin/python 2-k3s/23.mcp-hub/files/mcp_hub.py --selftest
           python3 2-k3s/23.mcp-hub/tools/hub_clients.py --selftest
