@@ -35,6 +35,12 @@ curl -fsSL -o "$tmp/gh-checksums.txt" "$gh_url/gh_${GH_VERSION}_checksums.txt"
 (cd "$tmp" && sha256sum --check --ignore-missing gh-checksums.txt)
 tar -xzf "$tmp/$gh_tgz" -C "$tmp"
 install -m 0755 "$tmp/gh_${GH_VERSION}_linux_amd64/bin/gh" /usr/local/bin/gh
+tea_xz="tea-${TEA_VERSION}-linux-amd64.xz"
+curl -fsSL -o "$tmp/$tea_xz" "https://dl.gitea.com/tea/${TEA_VERSION}/$tea_xz"
+curl -fsSL -o "$tmp/$tea_xz.sha256" "https://dl.gitea.com/tea/${TEA_VERSION}/$tea_xz.sha256"
+(cd "$tmp" && sha256sum -c "$tea_xz.sha256")
+xz -d "$tmp/$tea_xz"
+install -m 0755 "$tmp/tea-${TEA_VERSION}-linux-amd64" /usr/local/bin/tea
 if [[ ${T3_RUNTIME_VARIANT:-} == work ]]; then
   kubelogin_url="https://github.com/Azure/kubelogin/releases/download/v${KUBELOGIN_VERSION}"
   curl -fsSL -o "$tmp/kubelogin-linux-amd64.zip" "$kubelogin_url/kubelogin-linux-amd64.zip"

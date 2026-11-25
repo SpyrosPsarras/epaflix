@@ -25,7 +25,7 @@ HUB_URL = 'http://mcp-hub.mcp-hub-homelab.svc.cluster.local:8000'
 PROJECT_URL = 'https://github.com/SpyrosPsarras/epaflix.git'
 APPROVAL_REFERENCE = 'issue-1836'
 REQUIRED_GRANTS = {'model-token', 'hub-token'}
-OPTIONAL_GRANTS = {'github-token'}
+OPTIONAL_GRANTS = {'github-token', 'forgejo-token'}
 DEFAULT_SKILL_FILE = Path('/tools/node_modules/@dietrichgebert/ponytail/skills/ponytail/SKILL.md')
 
 

@@ -473,6 +473,7 @@ jobs:
           bash 2-k3s/28.kured/node-apt/apply.test.sh
           python3 2-k3s/13.t3code-homelab/tools/github-scope.test.py -v
           python3 2-k3s/13.t3code/env/tools/rotate-skills.test.py -v
+          python3 2-k3s/13.t3code/env/tools/forgejo-grant.test.py -v
           python3 2-k3s/13.t3code/one/tools/manager-kubeconfig.test.py -v
           python3 2-k3s/29.t3-build/tools/build-kubeconfig.test.py -v
           python3 2-k3s/29.t3-build/tools/rbac.test.py -v

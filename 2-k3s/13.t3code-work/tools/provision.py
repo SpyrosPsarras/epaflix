@@ -291,6 +291,8 @@ def inputs(directory):
                                'ANTHROPIC_AUTH_TOKEN': runtime_grants['model-token'].decode(),
                                'MCP_HUB_TOKEN': runtime_grants['hub-token'].decode(),
                                'GITHUB_TOKEN': runtime_grants['github-token'].decode()})
+            if 'forgejo-token' in runtime_grants:
+                os.environ['FORGEJO_TOKEN'] = runtime_grants['forgejo-token'].decode()
             validator.validate(reviewed, home, 'work')
         finally:
             os.environ.clear()

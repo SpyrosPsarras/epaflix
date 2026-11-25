@@ -96,6 +96,8 @@ def validate(inputs, home, environment):
     grants = {'model-token': os.environ['ANTHROPIC_AUTH_TOKEN'], 'hub-token': token}
     if config['gitAuth'] == 'github-token':
         grants['github-token'] = os.environ['GITHUB_TOKEN']
+    if os.environ.get('FORGEJO_TOKEN'):
+        grants['forgejo-token'] = os.environ['FORGEJO_TOKEN']
     if config['grantSha256'] != {name: hashlib.sha256(value.encode()).hexdigest() for name, value in grants.items()}:
         raise InputError('Credential grants do not match their reviews')
     if any(os.environ.get(name) for name in ('SSH_AUTH_SOCK', 'GH_TOKEN', 'AZURE_CONFIG_DIR')):
@@ -241,7 +243,7 @@ def apply(inputs, home, environment):
     safety_path = home / '.cc-safety-net/policy.json'
     safety = json.loads(safety_path.read_text())
     denied = safety.setdefault('secret_protection', {}).setdefault('deny_paths', [])
-    for path in (str(home / '.ssh'), str(home / '.config/t3-sshd'), str(inputs), '/run/t3-grants', '/run/t3-work-ssh', str(home / '.azure')):
+    for path in (str(home / '.ssh'), str(home / '.config/t3-sshd'), str(home / '.config/tea'), str(inputs), '/run/t3-grants', '/run/t3-work-ssh', str(home / '.azure')):
         if path not in denied:
             denied.append(path)
     hub_clients.write_json(str(safety_path), safety)

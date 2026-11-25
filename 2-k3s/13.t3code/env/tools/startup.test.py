@@ -121,6 +121,22 @@ class StartupTest(unittest.TestCase):
                                 ('credential.helper', '/scripts/git-credential-github.sh' if auth == 'github-token' else '')):
                             actual = subprocess.check_output(['git', 'config', '--global', '--get', key], env=env, text=True)
                             self.assertEqual(actual.rstrip('\n'), expected)
+            with self.subTest(variant=variant, auth='forgejo'), tempfile.TemporaryDirectory() as home:
+                env = {'HOME': home, 'PATH': os.environ['PATH'], 'GIT_CONFIG_NOSYSTEM': '1', 'MCP_HUB_INSTANCE': variant}
+                command = 'set -euo pipefail\nread_config() { echo public; }\n' + git_setup
+                tea_config = Path(home) / '.config/tea/config.yml'
+                helper = ['git', 'config', '--global', '--get-all', 'credential.https://git.epaflix.com.helper']
+                for _ in range(2):
+                    subprocess.run(['bash', '-c', command], env={**env, 'FORGEJO_TOKEN': 'a' * 40}, check=True)
+                    self.assertEqual(tea_config.stat().st_mode & 0o777, 0o600)
+                    login = yaml.safe_load(tea_config.read_text())['logins']
+                    self.assertEqual(login, [{'name': 'git.epaflix.com', 'url': 'https://git.epaflix.com',
+                                              'token': 'a' * 40, 'default': True, 'user': f't3-{variant}'}])
+                    self.assertEqual(subprocess.check_output(helper, env=env, text=True), '\n!tea login helper\n')
+                self.assertNotEqual(subprocess.run(['bash', '-c', command], env={**env, 'FORGEJO_TOKEN': 'bad'}).returncode, 0)
+                subprocess.run(['bash', '-c', command], env=env, check=True)
+                self.assertFalse(tea_config.exists())
+                self.assertNotEqual(subprocess.run(helper, env=env).returncode, 0)
 
     def test_vault_credentials_and_storage_are_isolated_from_t3_and_sshd(self):
         for variant in ('homelab', 'work'):
