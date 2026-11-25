@@ -162,8 +162,7 @@ images:
   - name: ghcr.io/linuxserver/bazarr
     newTag: 1.6.2@sha256:832820dec70bce9e912c6eee7a95baf6551e03dbc63325a7208daaa455423752
   # TEMP OVERRIDE (batch-contract, see images/lingarr/README.md): overlay source is upstream
-  # release 1.5.0 (1d451c6) + images/lingarr/batch-contract.patch; the image pin follows
-  # in a separate PR after publishing. Upstream's chat batch path
+  # release 1.5.0 (1d451c6) + images/lingarr/batch-contract.patch. Upstream's chat batch path
   # published untranslated subtitles as translated (522 positions kept in English in 3h,
   # 2026-09-13), and its schema-less fallback crashed with NullReferenceException on null
   # model content (98 "All configured batch translation services failed." deaths 09-12..09-15). The
@@ -186,7 +185,7 @@ images:
   # Renovate must not track this image (disabled in .github/renovate.json).
   - name: ghcr.io/lingarr-translate/lingarr
     newName: ghcr.io/spyrospsarras/lingarr
-    digest: sha256:aadf06b6cffe9c7d4fd19baeaaceec84c8a07d4f245d1b92bb6542edaeeb0020
+    digest: sha256:e6df9804a601bf0a8addf1a4fe5cb8bf219061643858b203a992e2c16537fb0b
   - name: iampuid0/neutarr
     newTag: 1.11.1@sha256:c3df05a854c93aac640708e002e8fe85193f73da8406c8a230a5484a342a1107
   - name: qbittorrentofficial/qbittorrent-nox
