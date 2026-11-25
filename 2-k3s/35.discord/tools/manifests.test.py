@@ -449,6 +449,14 @@ class WindmillTests(AgentChecks, unittest.TestCase):
         ]:
             self.assertIn(marker, text)
 
+    def test_can_rename_only_threads(self):
+        tools = self.config["tools"]
+        self.assertIn("message", tools.get("alsoAllow", []))
+        self.assertEqual(tools["message"]["actions"]["allow"], ["channel-edit"])
+        text = (DISCORD / "windmill/AGENTS.md").read_text()
+        for marker in ['action: "channel-edit"', "only of the current thread"]:
+            self.assertIn(marker, text)
+
 
 @unittest.skipUnless(shutil.which("node"), "node is not installed")
 class RenderTests(unittest.TestCase):
