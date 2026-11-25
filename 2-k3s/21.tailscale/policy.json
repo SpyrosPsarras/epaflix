@@ -1,7 +1,17 @@
 {
+  "tagOwners": {
+    "tag:t3code": ["spypsarras@gmail.com"]
+  },
+  "hosts": {
+    "spylinux": "100.119.235.123"
+  },
   "grants": [{
     "src": ["spypsarras@gmail.com"],
     "dst": ["192.168.10.0/24", "10.0.0.0/24", "autogroup:self"],
     "ip": ["*"]
+  }, {
+    "src": ["tag:t3code"],
+    "dst": ["spylinux"],
+    "ip": ["tcp:3773"]
   }]
 }

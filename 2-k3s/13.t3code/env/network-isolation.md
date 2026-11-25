@@ -52,6 +52,12 @@ owner SSH. Dedicated per-machine SSH keys and sshd's forwarding restriction to
 3773 remain the control. Same-pod loopback needs no rule. Standard NetworkPolicy
 does not isolate kubelet/node traffic, including the API server's exec path.
 
+The `tailscale` sidecar sends tailnet traffic as encrypted UDP to public
+addresses, which both overlays already allow. NetworkPolicy cannot see the
+tailnet destinations inside it. The [tailnet policy](../../21.tailscale/policy.json)
+is the control: `tag:t3code` may reach only `spylinux` on TCP 3773, and the
+sidecar accepts no subnet routes, so it opens no path to the home LAN.
+
 DNS and API rules cover every pod so idle-rollout can use Kubernetes exec
 without a direct runtime HTTP connection. Image-prepull runs `true`; node image
 pulls do not use pod egress. No mixed-backend or observability policy is changed.

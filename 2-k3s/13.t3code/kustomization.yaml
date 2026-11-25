@@ -4,6 +4,12 @@ kind: Component
 resources:
   - one/image-prepull.yaml
   - one/idle-rollout.yaml
+  - env/tailscale.yaml
+
+patches:
+  - path: env/tailscale-sidecar.yaml
+    target:
+      kind: StatefulSet
 
 configMapGenerator:
   - name: t3code-idle-rollout
