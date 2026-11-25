@@ -4,7 +4,7 @@ The `t3code` pod in `../one/` runs the image built from this directory.
 
 - Debian packages live in `tools/os-packages.txt`.
 - Pi, Claude Code, Codex, T3 and Pi extension pins live in `tools/package.json` and its npm lockfile.
-- Helm, Kustomize, Argo CD, SOPS, GitHub CLI and kubelogin versions live in `../versions.env`.
+- Helm, Kustomize, Argo CD, SOPS, GitHub CLI, Gitea CLI (`tea`, for Forgejo) and kubelogin versions live in `../versions.env`.
 
 The Dockerfile defaults to `mixed`. `--build-arg T3_RUNTIME_VARIANT=homelab` omits Azure CLI and Bitwarden CLI. `--build-arg T3_RUNTIME_VARIANT=work` includes Azure CLI and kubelogin but omits Bitwarden CLI. All three variants keep the pinned T3, Pi, Claude Code, Codex and cluster tools. Both isolated images provide `/etc/codex` for enforced requirements. See the [homelab backend](../../13.t3code-homelab/README.md) and [work backend](../../13.t3code-work/README.md) for required private inputs and remaining live acceptance.
 

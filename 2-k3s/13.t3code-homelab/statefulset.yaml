@@ -18,7 +18,7 @@ spec:
   template:
     metadata:
       annotations:
-        t3code.epaflix.com/inputs-grants-revision: "r17"
+        t3code.epaflix.com/inputs-grants-revision: "r18"
       labels:
         app.kubernetes.io/name: t3code
     spec:
@@ -94,7 +94,7 @@ spec:
               mountPath: /run/t3-vault
       containers:
         - name: t3
-          image: ghcr.io/spyrospsarras/t3-runtime:homelab-inputs-5a9a6ac46c3fba5208f35839632af51c
+          image: ghcr.io/spyrospsarras/t3-runtime:homelab-inputs-76054ee772ef3a65e774f01574185088
           imagePullPolicy: IfNotPresent
           command: [bash, /scripts/entrypoint.sh]
           env:
@@ -133,6 +133,12 @@ spec:
                 secretKeyRef:
                   name: t3-runtime-grants
                   key: github-token
+                  optional: true
+            - name: FORGEJO_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: t3-runtime-grants
+                  key: forgejo-token
                   optional: true
           securityContext:
             allowPrivilegeEscalation: false

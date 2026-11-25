@@ -3,7 +3,7 @@ set -euo pipefail
 trap 'status=$?; if (( status != 0 )); then echo "inventory: line $LINENO failed ($status): $BASH_COMMAND" >&2; fi' EXIT
 root=$(cd "$(dirname "$0")/../.." && pwd)
 variant=${T3_RUNTIME_VARIANT:-mixed}
-for tool in tree kubectl gh helm kustomize argocd sops git curl ssh python3; do
+for tool in tree kubectl gh tea helm kustomize argocd sops git curl ssh python3; do
   command -v "$tool" >/dev/null
 done
 [[ -x /usr/sbin/sshd ]]
@@ -46,6 +46,7 @@ case "$variant" in
 esac
 source "$root/versions.env"
 [[ $(gh --version | head -1) == "gh version $GH_VERSION "* ]]
+[[ $(tea --version) == *"$TEA_VERSION"* ]]
 pin() { node -p "require('/tools/package.json').dependencies['$1']"; }
 ver() {
   local out status attempt err

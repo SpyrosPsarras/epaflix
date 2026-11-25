@@ -6,6 +6,10 @@ At https://git.epaflix.com, sign in through Authentik as a member of `authentik 
 
 The hubs' `skills-mcp` pods read `spypsarras/skills` (homelab) and `spypsarras/skills-work` (work) through the internal service. Bots `skills-homelab-bot` and `skills-work-bot` each have read access to one repo; their `read:repository` tokens live in Secret `skills-git` in `mcp-hub-homelab` and `mcp-hub-work`. The network policy admits only those pods from the hub namespaces. See the [MCP hub README](../23.mcp-hub/README.md#skills).
 
+Token clients skip Authentik. Route `forgejo-token-https` sends Git smart-HTTP requests (`/<owner>/<repo>/info/refs`, `git-upload-pack`, `git-receive-pack`) and `/api/v1/` requests that carry `Authorization: token …` straight to Forgejo, which then requires a valid token. Browsers and API calls without a token still go through forward auth.
+
+T3 Code reaches Forgejo through `tea` as one bot per machine: `t3-laptop`, `t3-homelab` and `t3-work`. A bot sees only repositories that list it as a collaborator. The pod tokens come from `13.t3code/env/tools/forgejo-grant.py`, see the [Forgejo grant](../13.t3code/env/isolated-runtime.md#forgejo-grant).
+
 ## After deploy
 
 1. With the owner's approval, copy the dnsmasq config to Pi-hole and restart `pihole-FTL`. Add the matching Unbound local zone to the live file, then check and reload Unbound. See the [Pi-hole README](../../1-proxmox/pihole/README.md) for paths and commands.

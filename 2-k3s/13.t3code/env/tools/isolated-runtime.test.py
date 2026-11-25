@@ -252,6 +252,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertIn('/fixture/restricted', safety['secret_protection']['deny_paths'])
         self.assertIn(str(self.inputs), safety['secret_protection']['deny_paths'])
         self.assertIn(str(self.home / '.config/t3-sshd'), safety['secret_protection']['deny_paths'])
+        self.assertIn(str(self.home / '.config/tea'), safety['secret_protection']['deny_paths'])
         hook = self.home / '.config/t3-policy/guard.py'
         result = subprocess.run(['python3', str(hook)], input=json.dumps({'tool_input': {'command': 'git push'}}), text=True)
         self.assertEqual(result.returncode, 2)
@@ -602,12 +603,19 @@ nested = {"🏠" = ["fixture", {enabled = false}]}
         with self.assertRaises(ValueError): self.validate()
         fixture(self.inputs)
         for name, value in [('MCP_HUB_TOKEN', 'legacy'), ('MCP_HUB_TOKEN', 'work.' + 'w' * 43),
-                            ('ANTHROPIC_AUTH_TOKEN', ''), ('ANTHROPIC_AUTH_TOKEN', 'unreviewed-model-grant'), ('GITHUB_TOKEN', 'unapproved'),
+                            ('ANTHROPIC_AUTH_TOKEN', ''), ('ANTHROPIC_AUTH_TOKEN', 'unreviewed-model-grant'), ('GITHUB_TOKEN', 'unapproved'), ('FORGEJO_TOKEN', 'unapproved'),
                             ('SSH_AUTH_SOCK', '/fixture/agent'), ('GH_TOKEN', 'unapproved'), ('AZURE_CONFIG_DIR', '/fixture/cloud'),
                             ('BW_SESSION', 'unapproved')]:
             with self.subTest(name=name), patch.dict(os.environ, {name: value}):
                 with self.assertRaises(ValueError): self.validate()
         (self.inputs / 'policies.json').unlink()
+        with self.assertRaises(ValueError): self.validate()
+
+    def test_forgejo_grant_must_match_its_review(self):
+        token = 'f' * 40
+        with patch.dict(os.environ, {'FORGEJO_TOKEN': token}):
+            self.change('runtime.json', lambda obj: obj['grantSha256'].update({'forgejo-token': hashlib.sha256(token.encode()).hexdigest()}))
+            self.validate()
         with self.assertRaises(ValueError): self.validate()
 
     def test_invalid_hub_inventory_urls_and_vault_are_rejected(self):
@@ -812,7 +820,8 @@ nested = {"🏠" = ["fixture", {enabled = false}]}
             self.assertEqual(refs, {
                 'ANTHROPIC_AUTH_TOKEN': {'name': 't3-runtime-grants', 'key': 'model-token'},
                 'MCP_HUB_TOKEN': {'name': 't3-runtime-grants', 'key': 'hub-token'},
-                'GITHUB_TOKEN': {'name': 't3-runtime-grants', 'key': 'github-token', 'optional': True}})
+                'GITHUB_TOKEN': {'name': 't3-runtime-grants', 'key': 'github-token', 'optional': True},
+                'FORGEJO_TOKEN': {'name': 't3-runtime-grants', 'key': 'forgejo-token', 'optional': True}})
             manifest = overlay / 'statefulset.yaml'
             previous = next(doc for doc in render() if doc['kind'] == 'StatefulSet')['spec']['template']
             sources = list(yaml.safe_load_all(manifest.read_text()))

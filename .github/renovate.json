@@ -319,7 +319,7 @@
       "customType": "regex",
       "managerFilePatterns": ["/^2-k3s/13\\.t3code/versions\\.env$/"],
       "matchStrings": [
-        "(?:ARGOCD|SOPS|GH|KUBELOGIN|KEEPERCOMMANDER)_VERSION=(?<currentValue>\\S+)\\s*#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)"
+        "(?:ARGOCD|SOPS|GH|TEA|KUBELOGIN|KEEPERCOMMANDER)_VERSION=(?<currentValue>\\S+)\\s*#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)"
       ],
       "versioningTemplate": "semver",
       "extractVersionTemplate": "^v?(?<version>.+)$"
