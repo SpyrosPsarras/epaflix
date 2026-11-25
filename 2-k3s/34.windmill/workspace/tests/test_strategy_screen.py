@@ -736,9 +736,10 @@ AAPL_SNAPSHOT = (
 
 def test_parse_snapshot():
     out = ss.parse_snapshot(AAPL_SNAPSHOT, date(2026, 12, 20))
-    assert out == {"earnings": date(2027, 1, 29), "earnings_text": "Jan 29 AMC", "short_float": 0.245, "short_ratio": 6.2}
+    assert out == {"earnings": date(2027, 1, 29), "earnings_text": "Jan 29 AMC", "short_float": 0.245, "short_ratio": 6.2, "industry": None}
     assert ss.parse_snapshot(AAPL_SNAPSHOT, date(2026, 2, 10))["earnings"] == date(2026, 1, 29)
-    assert ss.parse_snapshot("<html></html>", date(2026, 1, 1)) == {"earnings": None, "earnings_text": None, "short_float": None, "short_ratio": None}
+    assert ss.parse_snapshot("<html></html>", date(2026, 1, 1)) == {"earnings": None, "earnings_text": None, "short_float": None, "short_ratio": None,
+                                                                    "industry": None}
 
 
 def test_short_checks():
@@ -1092,7 +1093,7 @@ def test_settings_overrides_and_validation():
 
 
 def test_discover_tickers_and_finviz(monkeypatch):
-    assert ss.discover("", "aapl, msft,AAPL", 5) == (["AAPL", "MSFT"], "tickers", {})
+    assert ss.discover("", "aapl, msft,AAPL", 5) == (["AAPL", "MSFT"], "tickers", {}, {})
     with pytest.raises(ValueError, match="not tickers"):
         ss.discover("", "AAPL,rm -rf", 5)
     with pytest.raises(ValueError, match="Finviz"):
@@ -1101,10 +1102,11 @@ def test_discover_tickers_and_finviz(monkeypatch):
 
     def screen(url, rows=None):
         seen["rows"] = rows
-        return iter([{"Ticker": "AAA", "Sector": "Technology"}, {"Ticker": "BBB", "Sector": "Unknown"}])
+        return iter([{"Ticker": "AAA", "Sector": "Technology", "Industry": "Semiconductors"}, {"Ticker": "BBB", "Sector": "Unknown"}])
 
     monkeypatch.setattr(ss.Screener, "init_from_url", screen)
-    assert ss.discover("https://finviz.com/screener.ashx?v=171", "", 2) == (["AAA", "BBB"], "finviz", {"AAA": "Technology"})
+    assert ss.discover("https://finviz.com/screener.ashx?v=171", "", 2) == (["AAA", "BBB"], "finviz", {"AAA": "Technology"},
+                                                                               {"AAA": "Semiconductors"})
     assert seen["rows"] == 2
 
 
@@ -1113,7 +1115,7 @@ def test_discover_merges_several_finviz_urls(monkeypatch):
              "b": [{"Ticker": "BBB", "Sector": "Energy"}, {"Ticker": "CCC", "Sector": "Healthcare"}]}
     monkeypatch.setattr(ss.Screener, "init_from_url", lambda url, rows=None: iter(lists[url[-1]]))
     urls = "https://finviz.com/screener.ashx?v=111&f=cap_midover,sh_price_o5&o=a\n  https://finviz.com/screener.ashx?f=sh_short_o15&o=b\n"
-    names, source, sectors = ss.discover(urls, "", 2)
+    names, source, sectors, industries = ss.discover(urls, "", 2)
     assert names == ["AAA", "BBB", "CCC"] and source == "finviz"  # 2 from each, duplicates dropped, commas inside URLs kept
     assert sectors == {"AAA": "Technology", "BBB": "Energy", "CCC": "Healthcare"}
     with pytest.raises(ValueError, match="at most 3"):
@@ -1163,12 +1165,12 @@ def offline(monkeypatch):
 
     monkeypatch.setattr(ss, "fetch_earnings", earnings)
 
-    def sector(ticker):
+    def profile(ticker):
         if ticker == "BRK":
             raise ValueError("no sector")
-        return "Technology"
+        return "Technology", "Software"
 
-    monkeypatch.setattr(ss, "fetch_sector", sector)
+    monkeypatch.setattr(ss, "fetch_profile", profile)
 
     def snapshot(ticker, today):
         if ticker in ("BRKD", "SQLO"):
@@ -2306,3 +2308,86 @@ def test_main_sizes_long_candidates_and_emails_it(offline):
     assert result["sizing"]["note"] is not None
     html = offline["_sent"][-1][2]
     assert "<b>Sizing</b>: 10% of the budget per long trade, at most 10 open" in html and "<th>size</th>" in html
+
+
+# ---------------------------------------------------------------- diversification and ETF breakouts
+def test_parse_industry_from_the_quote_header():
+    page = ('<a href="/screener/stocks?v=111&f=sec_financial" class="quote-header_category">Financial</a>\n'
+            '<a href="/screener/stocks?v=111&f=industry_creditservices" class="quote-header_category" title="Credit Services">'
+            '<span class="min-w-0 truncate">Credit Services</span></a>')
+    assert ss.parse_industry(page) == "Credit Services" and ss.parse_sector(page) == "Financial"
+    assert ss.parse_industry('<a href="screener.ashx?v=111&f=ind_semiconductors" class="tab-link">Semiconductors</a>') == "Semiconductors"
+    assert ss.parse_industry("<html></html>") is None
+    assert ss.parse_snapshot(page, date(2026, 1, 1))["industry"] == "Credit Services"
+
+
+def industry_candidate(ticker, industry, score=50, strategy="breakout"):
+    return {**sized_candidate(ticker, score=score), "industry": industry, "strategy": strategy}
+
+
+def test_at_most_two_per_industry_the_rest_are_alternatives():
+    mine = [{**held("V"), "industry": "Credit Services"}, {**held("OLD", "sell"), "industry": "Semiconductors"}]
+    rows = [industry_candidate("MA", "Credit Services", 80), industry_candidate("NVDA", "Semiconductors", 75),
+            industry_candidate("AXP", "Credit Services", 70, "pullback"), industry_candidate("AVGO", "Semiconductors", 65),
+            industry_candidate("AMD", "Semiconductors", 60), industry_candidate("XLK", None, 55)]
+    assert CFG["max_per_industry"] == 2
+    sizing = ss.assign_positions(rows, mine, CFG)
+    assert [r["position"]["reason"] for r in rows] == [None, None, "same industry", None, "same industry", None]
+    assert rows[2]["position"]["alternative_to"] == ["V", "MA"]  # your position counts; the one to sell does not
+    assert rows[2]["recommendation"].endswith("Size: none, alternative to your V, MA: at most 2 trades per industry (Credit Services).")
+    assert rows[0]["alternatives"] == ["AXP"] and rows[0]["recommendation"].endswith(
+        "Alternatives in the same industry: AXP (pullback, score 70).")
+    assert rows[1]["alternatives"] == rows[3]["alternatives"] == ["AMD"]
+    assert sizing["proposed"] == 4
+    one = ss.settings_with_defaults({"max_per_industry": 1})
+    rows = [industry_candidate("MA", "Credit Services", 80), industry_candidate("AXP", "Credit Services", 70)]
+    ss.assign_positions(rows, [], one, known=False)
+    assert rows[1]["recommendation"].endswith("alternative to MA: at most 1 trade per industry (Credit Services).")
+    off = ss.settings_with_defaults({"max_per_industry": 0})
+    rows = [industry_candidate(t, "Credit Services") for t in ("MA", "AXP", "COF")]
+    ss.assign_positions(rows, [], off, known=False)
+    assert [r["position"]["slot"] for r in rows] == [1, 2, 3]
+
+
+def test_correlated_proposal_gets_a_note_only():
+    days = sessions(80)
+    base = [100 * (1 + 0.01 * math.sin(i * 1.3)) ** i for i in range(80)]
+    other = [100 + 0.3 * ((i * 7) % 11) for i in range(80)]
+    closes = {"V": dict(zip(days, base)), "MA": dict(zip(days, [x * 1.5 for x in base])), "XOM": dict(zip(days, other))}
+    mine = [{**held("V"), "industry": "Credit Services"}]
+    rows = [industry_candidate("MA", "Banks"), industry_candidate("XOM", "Oil")]
+    ss.assign_positions(rows, mine, CFG, closes=closes)
+    assert rows[0]["position"]["slot"] == 2 and rows[0]["position"]["overlap"] == [{"ticker": "V", "correlation": 1.0}]
+    assert "Same exposure: it moves with your V (correlation 1.00) over 63 sessions" in rows[0]["recommendation"]
+    assert "overlap" not in rows[1]["position"]
+    rows = [industry_candidate("MA", "Banks")]
+    ss.assign_positions(rows, mine, ss.settings_with_defaults({"overlap_correlation": 0}), closes=closes)
+    assert "overlap" not in rows[0]["position"]
+
+
+def test_rotation_acceleration():
+    days = sessions(70)
+    spy = {d: 100.0 for d in days}
+    etf = {d: 100.0 for d in days[:-10]} | {d: 100.0 + i for i, d in enumerate(days[-10:], 1)}
+    out = ss.rotation_acceleration(etf, spy)
+    assert out["rs5"] == round(110 / 105 - 1, 4) and out["rs10"] == round(110 / 100 - 1, 4) == out["rs63"]
+    assert out["acceleration"] == round(0.1 - 0.1 * 10 / 63, 4) and out["as_of"] == days[-1].isoformat()
+    assert ss.rotation_acceleration({d: 1.0 for d in days[:50]}, spy) is None
+
+
+def test_etf_breakout_needs_accelerating_rotation(offline):
+    offline["XBI"] = breakout_rows()
+    result = ss.main(tickers="PULL")
+    etf = [c for c in result["candidates"] if c["ticker"] == "XBI"]
+    assert len(etf) == 1 and etf[0]["etf"] == "Biotech" and etf[0]["action"] == "long" and etf[0]["position"]["slot"]
+    assert etf[0]["rotation"]["acceleration"] > 0 and "Biotech ETF, return less SPY's: 5 sessions" in etf[0]["recommendation"]
+    assert "47 ETFs" in etf[0]["recommendation"]
+    rotation = result["etf_setups"]["rotation"]
+    assert [r["acceleration"] for r in rotation] == sorted((r["acceleration"] for r in rotation), reverse=True)
+    assert {"ticker": "USO", "reason": "chart data is for another ticker"} in result["etf_setups"]["missing"]
+    assert all(e["ticker"] != "USO" for e in result["data_errors"])
+    assert "<td>ETF: Biotech</td>" in ss.email_html(result)
+    strict = ss.main(tickers="PULL", settings={"etf_min_acceleration": 0.5})
+    assert all(c["ticker"] != "XBI" for c in strict["candidates"])
+    off = ss.main(tickers="PULL", settings={"etf_setups": 0})
+    assert off["etf_setups"] is None and all(c["ticker"] != "XBI" for c in off["candidates"])

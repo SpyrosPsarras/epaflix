@@ -254,6 +254,21 @@ DEFAULTS = {
     "swap_stalled_days": 10,
     "swap_min_score": 60.0,
     "swap_band_r": 0.5,
+    # Diversification: at most max_per_industry LONG trades per Finviz industry (0 = no limit), counting your positions
+    # (less those to sell today) and the proposals above; a setup past that is listed as an alternative to the ones
+    # taken. In the backtest (10% x 10, ADX hold, the six windows of the swap study) 2 per industry made +942% against
+    # +876% without a limit, better in 4 of 6 windows; 1 per industry made +665%, as the gains come in clusters
+    # (semiconductors 2023-2026). A proposal whose daily returns over the last 63 sessions correlate overlap_correlation
+    # or more with a position or an earlier proposal gets a note only (0 = off): skipping them made +825%.
+    "max_per_industry": 2,
+    "overlap_correlation": 0.8,
+    # ETF breakouts (1 on, 0 off): the breakout rules on the sector, industry and theme ETFs of ETF_SETUPS, proposed
+    # when the ETF's rotation accelerates: its 10-session return less SPY's above its 63-session one scaled to 10
+    # sessions by more than etf_min_acceleration. Backtest (47 ETFs, 2016-2026, ADX hold, net of 10 bp, bullish market):
+    # +1.01R / +0.64R per trade before / after mid-2022 (39 / 55 trades) with the acceleration above 0, -0.50R / +0.03R
+    # (8 / 22) without it; about 35 more requests.
+    "etf_setups": 1,
+    "etf_min_acceleration": 0.0,
     # Market backdrop in the result and the email (1 on, 0 off): Fed, VIX, oil, metals, theme rotation, correlations.
     # Information only; about 45 more requests.
     "backdrop": 1,
@@ -325,8 +340,20 @@ def parse_sector(html):
     return match.group(1).strip() if match and match.group(1).strip() in SECTOR_ETFS else None
 
 
+def parse_industry(html):
+    """Finviz industry name from a quote page, or None."""
+    match = re.search(r'f=ind(?:ustry)?_[a-z0-9]+"[^>]*>(?:<span[^>]*>)?([^<]+)<', html)
+    return match.group(1).strip() if match and match.group(1).strip() else None
+
+
 def fetch_sector(ticker):
     return parse_sector(_get(QUOTE_URL, {"t": ticker, "p": "d"}).text)
+
+
+def fetch_profile(ticker):
+    """Sector and industry from one quote page."""
+    html = _get(QUOTE_URL, {"t": ticker, "p": "d"}).text
+    return parse_sector(html), parse_industry(html)
 
 
 SNAPSHOT_FIELD = r'>{}</a></div></td><td[^>]*><div[^>]*><a[^>]*><b>(?:<small[^>]*>)?([^<]+)<'
@@ -337,7 +364,7 @@ def parse_snapshot(html, today):
     """Earnings date (the next one, or the last one if none is scheduled), short float and short ratio from a Finviz quote page.
 
     Finviz shows the earnings date without a year; the year that puts it closest to today is used."""
-    out = {"earnings": None, "earnings_text": None, "short_float": None, "short_ratio": None}
+    out = {"earnings": None, "earnings_text": None, "short_float": None, "short_ratio": None, "industry": parse_industry(html)}
     match = re.search(SNAPSHOT_FIELD.format("Earnings"), html)
     if match:
         text = match.group(1).strip()
@@ -2324,6 +2351,20 @@ ROTATION_THEMES = {
     "Gold miners": ("GDX",), "Silver miners": ("SIL",), "Metals & mining": ("XME",), "Commodities": ("DBC",), "Energy": ("XLE",),
 }
 ROTATION_LOOKBACKS = (21, 63)  # 1 and 3 months
+# ETFs screened for breakouts when their rotation against SPY accelerates (the 47 of the backtest).
+ETF_SETUPS = {
+    "XLK": "Technology", "XLF": "Financials", "XLV": "Health care", "XLI": "Industrials", "XLY": "Consumer cyclical",
+    "XLP": "Consumer staples", "XLE": "Energy", "XLU": "Utilities", "XLB": "Materials", "XLRE": "Real estate",
+    "XLC": "Communication", "SMH": "Semiconductors", "SOXX": "Semiconductors", "IGV": "Software", "SKYY": "Cloud",
+    "CIBR": "Cybersecurity", "XBI": "Biotech", "IBB": "Biotech", "KRE": "Regional banks", "KBE": "Banks",
+    "ITB": "Homebuilders", "XHB": "Homebuilders", "XRT": "Retail", "XOP": "Oil & gas producers", "OIH": "Oil services",
+    "XME": "Metals & mining", "GDX": "Gold miners", "GDXJ": "Junior gold miners", "SIL": "Silver miners",
+    "URA": "Uranium", "TAN": "Solar", "ICLN": "Clean energy", "LIT": "Lithium & batteries", "COPX": "Copper miners",
+    "ARKK": "Innovation", "KWEB": "China internet", "IYT": "Transports", "JETS": "Airlines", "PAVE": "Infrastructure",
+    "ITA": "Aerospace & defense", "XAR": "Aerospace & defense", "IHI": "Medical devices", "BOTZ": "Robotics & AI",
+    "FDN": "Internet", "GLD": "Gold", "SLV": "Silver", "USO": "Oil",
+}
+ACCELERATION_WINDOWS = (5, 10, 20, 63)
 ROTATION_BACK = 20  # rank 4 weeks earlier
 CORRELATION_DAYS = 63
 VIX_SPIKE = 0.25  # VX up 25% or more in 5 sessions
@@ -2513,6 +2554,38 @@ def theme_rotation(theme_bars, spy, themes=ROTATION_THEMES, lookbacks=ROTATION_L
     return sorted(rows, key=lambda r: r["rank"])
 
 
+def rotation_acceleration(closes, spy_closes, windows=ACCELERATION_WINDOWS):
+    """Return less SPY's over each window (sessions) to the last common day, and the acceleration: the 10-session
+    relative return less the 63-session one scaled to 10 sessions. None without enough common history."""
+    days = sorted(d for d in closes if d in spy_closes)
+    if len(days) <= max(windows):
+        return None
+    end = days[-1]
+    out = {"as_of": end.isoformat()}
+    for n in windows:
+        start = days[-1 - n]
+        out[f"rs{n}"] = round((closes[end] / closes[start] - 1) - (spy_closes[end] / spy_closes[start] - 1), 4)
+    out["acceleration"] = round(out["rs10"] - out["rs63"] * 10 / 63, 4)
+    return out
+
+
+def etf_breakout(bars, closes, reference, spy_closes, cfg, run_cfg, beta_closes=None):
+    """The breakout rules on an ETF plus one check: its rotation against SPY accelerates. Returns signal, series, rotation."""
+    series = compute(bars, closes, cfg, beta_closes)
+    series.update(market_context(bars.dates, reference, None, cfg["regime_slope_bars"]))
+    series["sector_etf"] = None
+    signal = evaluate_breakout(bars, series, len(bars) - 1, run_cfg)
+    rotation = rotation_acceleration(dict(_finite(bars)), spy_closes)
+    if rotation is None:
+        _check(signal["checks"], "rotation_acceleration", False, "not enough SPY history")
+    else:
+        _check(signal["checks"], "rotation_acceleration", rotation["acceleration"] > cfg["etf_min_acceleration"],
+               f"10 sessions {rotation['rs10']:+.1%} vs SPY against the 63-session pace {rotation['rs63'] * 10 / 63:+.1%}: "
+               f"acceleration {rotation['acceleration']:+.1%}, minimum above {cfg['etf_min_acceleration']:+.1%}")
+    signal["qualified"] = all(c["passed"] for c in signal["checks"])
+    return signal, series, rotation
+
+
 def _returns(closes):
     """Daily returns by date from a date -> close map."""
     days = sorted(closes)
@@ -2693,7 +2766,7 @@ def discover(finviz_url, tickers, max_tickers):
         bad = [x for x in names if not TICKER.match(x)]
         if bad:
             raise ValueError(f"not tickers: {', '.join(bad)}")
-        return list(dict.fromkeys(names))[:max_tickers], "tickers", {}
+        return list(dict.fromkeys(names))[:max_tickers], "tickers", {}, {}
     urls = finviz_url.split()
     if len(urls) > MAX_URLS:
         raise ValueError(f"at most {MAX_URLS} Finviz URLs, one per line")
@@ -2701,7 +2774,7 @@ def discover(finviz_url, tickers, max_tickers):
         url = urlparse(address)
         if url.scheme != "https" or url.hostname not in FINVIZ_HOSTS:
             raise ValueError(f"not a Finviz screener URL: {address}")
-    names, sectors = [], {}
+    names, sectors, industries = [], {}, {}
     for address in urls:  # up to max_tickers from each URL, in order, without duplicates
         try:
             rows = list(Screener.init_from_url(address, rows=max_tickers))
@@ -2709,8 +2782,9 @@ def discover(finviz_url, tickers, max_tickers):
             rows = []
         rows = [r for r in rows if TICKER.match(r.get("Ticker", ""))][:max_tickers]
         sectors.update({r["Ticker"]: r["Sector"] for r in rows if r.get("Sector") in SECTOR_ETFS})
+        industries.update({r["Ticker"]: r["Industry"].strip() for r in rows if (r.get("Industry") or "").strip()})
         names += [r["Ticker"] for r in rows]
-    return list(dict.fromkeys(names)), "finviz", sectors
+    return list(dict.fromkeys(names)), "finviz", sectors, industries
 
 
 EMAIL = re.compile(r"^[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+$")
@@ -2872,39 +2946,96 @@ def recommendation(q):
         stop += f" ({levels['stop_buffer_atr']:g} ATR below the rule's {levels['base_stop']} because beta is {q.get('beta')})"
     plan = (f"{stop}, target {levels['target']}, reward/risk {levels['reward_risk']}, "
             f"exit by {q['time_exit']} ({q['holding_days']} sessions) if neither is hit")
+    if q.get("etf"):
+        note = ("breakout of a sector or theme ETF whose rotation accelerates: +1.01 / +0.64R per trade before / after "
+                "mid-2022 in the bull backtest of 47 ETFs")
     if q.get("tight_long"):
         note = ("tight long on a bounce inside a decline: +0.09 / +0.55R per trade over 10 sessions in the backtest, 60% "
                 "won; close before the 200-day line rejection")
+    rotation = q.get("rotation")
+    if rotation:
+        reasons = (f"{q['etf']} ETF, return less SPY's: 5 sessions {rotation['rs5']:+.1%}, 10 {rotation['rs10']:+.1%}, "
+                   f"20 {rotation['rs20']:+.1%}, 63 {rotation['rs63']:+.1%} (acceleration {rotation['acceleration']:+.1%})"
+                   + (f"; {reasons}" if reasons else ""))
     return (f"{q['ticker']}: {_verdict(q)} {q['strategy']} ({note}). Why: {_setup_text(q)}"
             + (f"; {reasons}" if reasons else "") + f". Plan: {plan}.")
 
 
-def assign_positions(candidates, positions, cfg, known=True):
+def _overlaps(ticker, others, closes, threshold, n=CORRELATION_DAYS):
+    """Those of `others` whose daily returns over the last n sessions correlate `threshold` or more with the ticker's."""
+    if not threshold or ticker not in closes:
+        return []
+    own = _returns(closes[ticker])
+    days = sorted(own)[-n:]
+    if len(days) < n:
+        return []
+    found = []
+    for other in others:
+        if other in closes and other != ticker:
+            value = _correlation(own, _returns(closes[other]), days)
+            if value is not None and value >= threshold:
+                found.append({"ticker": other, "correlation": round(value, 2)})
+    return found
+
+
+def assign_positions(candidates, positions, cfg, known=True, closes=None):
     """Give the proposed LONG candidates, best first, a position of position_size of the budget while fewer than
-    max_open_trades slots are taken; one trade per ticker. The slots taken are your open positions less those to sell
-    today. Adds `position` to each candidate and a sentence to its recommendation; returns the sizing summary."""
-    size, limit = cfg["position_size"], int(cfg["max_open_trades"])
-    held, proposed = {p["ticker"] for p in positions}, set()
+    max_open_trades slots are taken; one trade per ticker, at most max_per_industry per industry. The slots taken are your
+    open positions less those to sell today. A setup past the industry limit becomes an alternative to the trades of
+    that industry; a proposal moving with a position or an earlier proposal (overlap_correlation) gets a note. Adds
+    `position` to each candidate and a sentence to its recommendation; returns the sizing summary."""
+    size, limit, cap = cfg["position_size"], int(cfg["max_open_trades"]), int(cfg["max_per_industry"])
+    held, proposed = {p["ticker"] for p in positions}, {}
     to_sell = sum(p["advice"] == "sell" for p in positions)
     used = before = len(positions) - to_sell
+    kept = [p["ticker"] for p in positions if p["advice"] != "sell"]
+    by_industry = {}
+    for p in positions:
+        if p["advice"] != "sell" and p.get("industry"):
+            by_industry.setdefault(p["industry"], []).append(p["ticker"])
     for c in candidates:
         if c["direction"] != "long" or c["action"] != "long":
             c["position"] = None
             continue
+        industry = c.get("industry")
+        same = by_industry.get(industry, []) if industry else []
         if c["ticker"] in held:
             c["position"] = {"size": 0.0, "slot": None, "reason": "already open"}
             c["recommendation"] += " Size: none, you already hold this ticker."
         elif c["ticker"] in proposed:
             c["position"] = {"size": 0.0, "slot": None, "reason": "already proposed"}
             c["recommendation"] += " Size: none, this ticker is already proposed above as another setup."
+        elif cap and len(same) >= cap:
+            c["position"] = {"size": 0.0, "slot": None, "reason": "same industry", "alternative_to": list(same)}
+            names = ", ".join(f"your {t}" if t in held else t for t in same)
+            c["recommendation"] += (f" Size: none, alternative to {names}: at most {cap} trade{'s' if cap > 1 else ''} "
+                                    f"per industry ({industry}).")
+            for t in same:
+                if t in proposed:
+                    proposed[t].setdefault("alternatives", []).append(c)
         elif used >= limit:
             c["position"] = {"size": 0.0, "slot": None, "reason": "no free slot"}
             c["recommendation"] += f" Size: none, {limit} of {limit} slots are taken; skip."
         else:
             used += 1
-            proposed.add(c["ticker"])
+            overlap = _overlaps(c["ticker"], kept + list(proposed), closes or {}, cfg["overlap_correlation"])
+            proposed[c["ticker"]] = {"row": c}
+            if industry:
+                by_industry.setdefault(industry, []).append(c["ticker"])
             c["position"] = {"size": size, "slot": used, "reason": None}
             c["recommendation"] += f" Size: {size:.0%} of the budget (slot {used} of {limit})."
+            if overlap:
+                c["position"]["overlap"] = overlap
+                c["recommendation"] += (" Same exposure: it moves with " + ", ".join(
+                    f"{'your ' if o['ticker'] in held else ''}{o['ticker']} (correlation {o['correlation']:.2f})" for o in overlap)
+                    + f" over {CORRELATION_DAYS} sessions; together they act as a larger position.")
+    for item in proposed.values():
+        if item.get("alternatives"):
+            row = item["row"]
+            row["alternatives"] = [a["ticker"] for a in item["alternatives"]]
+            row["recommendation"] += " Alternatives in the same industry: " + ", ".join(
+                f"{a['ticker']} ({a['strategy']}, score {a['score']:g})" if a.get("strategy") else a["ticker"]
+                for a in item["alternatives"]) + "."
     return {"position_size": size, "max_open_trades": limit, "open": len(positions) if known else None,
             "to_sell": to_sell if known else None, "held": before if known else None, "proposed": used - before,
             "free": max(limit - used, 0) if known else None,
@@ -2917,7 +3048,8 @@ def candidate_row(strategy, q):
             "priority": STRATEGY_PRIORITY.get(strategy, (9, ""))[0], "recommendation": recommendation({**q, "strategy": strategy}),
             "beta": q["beta"], "holding_days": q["holding_days"], "time_exit": q["time_exit"],
             "entry": levels["entry"], "stop": levels["stop"], "target": levels["target"], "reward_risk": levels["reward_risk"],
-            "sector": q["sector"], "sector_trend": q["sector_trend"], "warnings": q["warnings"], "put_spread": q.get("put_spread")}
+            "sector": q["sector"], "industry": q.get("industry"), "sector_trend": q["sector_trend"], "warnings": q["warnings"],
+            "put_spread": q.get("put_spread"), "etf": q.get("etf"), "rotation": q.get("rotation")}
 
 
 def index_long_plan(bars, as_of, cfg):
@@ -3007,11 +3139,11 @@ def email_html(result):
             parts.append(f"<p><b>Sizing</b>: {sizing['position_size']:.0%} of the budget per long trade, at most "
                          f"{sizing['max_open_trades']} open ({escape(state)}).</p>")
         keys = ["ticker", "strategy", "action", "size", "score", "entry", "stop", "target", "reward_risk", "beta", "holding_days",
-                "time_exit", "sector", "warnings"]
+                "time_exit", "sector", "industry", "warnings"]
         size = lambda r: ("-" if not r.get("position") else f"{r['position']['size']:.0%}" if r["position"]["slot"]
                           else f"{r['position']['size']:.0%} if you sell {r['position']['replaces']}" if r["position"]["reason"] == "swap"
                           else r["position"]["reason"])
-        cell = lambda r, k: size(r) if k == "size" else "; ".join(r[k]) if isinstance(r[k], list) else str(r[k])
+        cell = lambda r, k: size(r) if k == "size" else (r.get("etf") and f"ETF: {r['etf']}" or "-") if k == "industry" and not r.get(k) else "; ".join(r[k]) if isinstance(r[k], list) else str(r[k])
         head = "".join(f"<th>{k}</th>" for k in keys)
         body = "".join("<tr>" + "".join(f"<td>{escape(cell(r, k))}</td>" for k in keys) + "</tr>" for r in rows)
         parts.append(f"<table border='1' cellpadding='4' cellspacing='0'><tr>{head}</tr>{body}</table>")
@@ -3078,7 +3210,7 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
     longest = cfg["swing_max_days"]
     count = cfg["min_bars"] + max(validation_days + longest, track_days) + 60
 
-    names, source, sectors = discover(finviz_url, tickers, max_tickers)
+    names, source, sectors, industries = discover(finviz_url, tickers, max_tickers)
     query = datatable_query() if persist else None
     stored = query(LOAD_SQL) if persist else []
     active = [row for row in stored if row.get("closed_at") is None]
@@ -3144,13 +3276,15 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
         updates += [stored_update(row, bars, calendar, as_of, hold_adx=cfg["momentum_hold_adx"]) for row in pending_by_ticker.pop(name, [])]
         screened += 1
         closes_by_ticker[name] = dict(_finite(bars))
-        sector = sectors.get(name)
-        if sector is None and source == "tickers":
+        sector, industry = sectors.get(name), industries.get(name)
+        if source == "tickers":
             try:
-                sector = fetch_sector(name)
+                sector, industry = fetch_profile(name)
             except (requests.RequestException, ValueError):
-                sector = None
+                sector = industry = None
             time.sleep(cfg["request_pause"])
+            if industry:
+                industries[name] = industry
         etf = SECTOR_ETFS.get(sector)
         closes = {b: benchmarks[b] for b in rs_benchmarks}
         if etf in sector_closes:
@@ -3191,7 +3325,7 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
                 time_exit = add_sessions(as_of, hold_s).isoformat()
                 results[s]["qualified"].append({
                     **{k: signal[k] for k in ("ticker", "signal_date", "score", "direction")}, "strategy": s, "regime": label,
-                    "action": action, "sector": sector, "sector_etf": series["sector_etf"],
+                    "action": action, "sector": sector, "industry": industry, "sector_etf": series["sector_etf"],
                     "sector_trend": trend, "beta": None if beta is None else round(beta, 2), "holding_days": hold_s,
                     "time_exit": time_exit, "warnings": warnings, "tight_long": tight,
                     "after_overextended": signal["direction"] == "long" and after_overextended(phase_now),
@@ -3240,6 +3374,47 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
         time.sleep(cfg["request_pause"])
         position_data[name] = ("; ".join(problems) if problems else
                                (bars, compute(bars, {b: benchmarks[b] for b in rs_benchmarks}, cfg, beta_closes)))
+    etf_bars, etf_rotation, etf_missing = {}, [], []
+    spy_bars = context_bars.get("SPY") or benchmark_bars.get("SPY")
+    if cfg["etf_setups"] and "breakout" in strategies:
+        for etf in (["SPY"] if spy_bars is None else []) + list(ETF_SETUPS):
+            bars = sector_bars.get(etf) or context_bars.get(etf) or benchmark_bars.get(etf)
+            if bars is None:
+                try:
+                    bars = completed_bars(fetch_bars(etf, count), now)
+                    problems = quality_problems(bars, calendar, cfg)
+                except (requests.RequestException, ValueError) as error:
+                    problems = [str(error)]
+                time.sleep(cfg["request_pause"])
+                if problems:
+                    etf_missing.append({"ticker": etf, "reason": "; ".join(problems)})
+                    continue
+            if etf == "SPY":
+                spy_bars = bars
+            else:
+                etf_bars[etf] = bars
+    if etf_bars and spy_bars is not None:
+        spy_closes = dict(_finite(spy_bars))
+        label_now = regime.get(reference.dates[-1], "unknown")
+        for etf, bars in etf_bars.items():
+            signal, series, rotation = etf_breakout(bars, {b: benchmarks[b] for b in rs_benchmarks}, reference, spy_closes, cfg,
+                                                    run_cfg, beta_closes)
+            if rotation:
+                etf_rotation.append({"ticker": etf, "name": ETF_SETUPS[etf], **rotation})
+            if not signal["qualified"] or etf in names:
+                continue
+            beta = _beta_at(series, len(bars) - 1)
+            hold = horizon_for(cfg, series, len(bars) - 1)
+            action = action_for("long", label_now, None, "breakout", spread_context(phase_now), bounce_long(phase_now),
+                                after_overextended(phase_now))
+            results["breakout"]["qualified"].append({
+                **{k: signal[k] for k in ("ticker", "signal_date", "score", "direction")}, "strategy": "breakout",
+                "regime": label_now, "action": action, "sector": None, "industry": None, "sector_etf": None,
+                "sector_trend": None, "beta": None if beta is None else round(beta, 2), "holding_days": hold,
+                "time_exit": add_sessions(as_of, hold).isoformat(), "warnings": signal_warnings(signal), "tight_long": False,
+                "after_overextended": after_overextended(phase_now), "put_spread": None, "etf": ETF_SETUPS[etf],
+                "rotation": rotation, **{k: signal[k] for k in ("levels", "relative_strength", "checks", "scoring", "indicators")}})
+        etf_rotation.sort(key=lambda r: -r["acceleration"])
     shorts_today = {}
     for s in strategies:
         if DIRECTIONS[s] == "short":
@@ -3259,20 +3434,25 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
         days = (snap["earnings"] - as_of).days if snap and snap.get("earnings") else None
         statuses.append(position_status(pos, *data, cfg, position_signal(stored, pos["ticker"], _day(pos["buy_date"])),
                                         shorts_today.get(pos["ticker"], ()), days))
+        statuses[-1]["industry"] = industries.get(pos["ticker"]) or (snap or {}).get("industry")
+    for status in statuses:
+        status.setdefault("industry", industries.get(status["ticker"]))
     for s in strategies:
         results[s]["qualified"].sort(key=lambda x: (-x["score"], x["ticker"]))
     candidates = sorted((candidate_row(s, q) for s in strategies for q in results[s]["qualified"]),
                         key=lambda x: (ACTION_ORDER.get(x["action"], 9), x["priority"], -x["score"], x["ticker"], x["strategy"]))
-    sizing = assign_positions(candidates, statuses, cfg, persist)
+    for name, data in position_data.items():
+        if not isinstance(data, str):
+            closes_by_ticker.setdefault(name, dict(_finite(data[0])))
+    for name, bars in etf_bars.items():
+        closes_by_ticker.setdefault(name, dict(_finite(bars)))
+    sizing = assign_positions(candidates, statuses, cfg, persist, closes_by_ticker)
     swaps = plan_swaps(candidates, statuses, cfg) if persist else []
     backdrop = None
     if cfg["backdrop"]:
-        for name, data in position_data.items():
-            if not isinstance(data, str):
-                closes_by_ticker.setdefault(name, dict(_finite(data[0])))
         mapped = list(dict.fromkeys([c["ticker"] for c in candidates if c["action"] in TRADE_ACTIONS]
                                     + [p["ticker"] for p in statuses if p["data_status"] == "ok"]))
-        backdrop = market_backdrop(as_of, now, count, cfg, context_bars, closes_by_ticker, mapped)
+        backdrop = market_backdrop(as_of, now, count, cfg, {**etf_bars, **context_bars}, closes_by_ticker, mapped)
 
     duration = time.monotonic() - started
     counts = ", ".join(f"{s} {len(results[s]['qualified'])}" for s in strategies)
@@ -3288,6 +3468,10 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
         "candidates": candidates,
         "sizing": sizing,
         "backdrop": backdrop,
+        "etf_setups": None if not cfg["etf_setups"] or "breakout" not in strategies else {
+            "checked": len(etf_bars), "missing": etf_missing, "rotation": etf_rotation,
+            "note": "Breakout rules on sector and theme ETFs, proposed only when the rotation against SPY accelerates. The "
+                    "acceleration alone did not predict the next 21 or 63 sessions in the backtest; it only filters breakouts."},
         "positions": None if not persist else {
             "open": len(statuses), "max_open_trades": sizing["max_open_trades"], "to_sell": sizing["to_sell"],
             "items": statuses, "swaps": swaps,
