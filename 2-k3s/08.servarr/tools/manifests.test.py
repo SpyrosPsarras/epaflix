@@ -72,6 +72,11 @@ class ConfigarrTests(unittest.TestCase):
         config = configarr()
         self.assertEqual(dts_scores(config, "sonarr"), dict.fromkeys(DTS_PROFILES["sonarr"][1], []))
 
+    def test_lidarr_accepts_flac_but_ranks_it_last(self):
+        profile, = configarr()["lidarr"]["main"]["quality_profiles"]
+        self.assertEqual([q["name"] for q in profile["qualities"]][-2:], ["FLAC", "FLAC 24bit"])
+        self.assertEqual(profile["upgrade"]["until_quality"], "320")
+
 
 class TdarrTests(unittest.TestCase):
     def pod(self, kind, name):

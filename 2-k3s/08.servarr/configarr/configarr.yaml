@@ -372,6 +372,8 @@ data:
           - name: MP3-VBR-V0
           - name: AAC-256
           - name: MP3-256
+          - name: FLAC
+          - name: FLAC 24bit
         metadata_profiles:
         - name: Studio
           primary_types:
