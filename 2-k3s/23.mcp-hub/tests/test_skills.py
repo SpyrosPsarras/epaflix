@@ -118,7 +118,8 @@ class SkillsRenderTests(unittest.TestCase):
                 serve_env = {env["name"]: env for env in containers["skills"]["env"]}
                 self.assertEqual(serve_env["SKILLS_UPSTREAM_TOKEN"]["valueFrom"]["secretKeyRef"],
                                  {"name": "mcp-hub-skills", "key": "token"})
-                self.assertEqual(serve_env["SKILLS_ROOT"]["value"], "/git/" + sync_env["GITSYNC_LINK"]["value"])
+                self.assertEqual(sync_env["GITSYNC_ROOT"]["value"], "/git/root")
+                self.assertEqual(serve_env["SKILLS_ROOT"]["value"], "/git/root/" + sync_env["GITSYNC_LINK"]["value"])
                 self.assertIn('until [ -e "$SKILLS_ROOT" ]; do sleep 2; done && exec python', containers["skills"]["command"][2])
                 mounts = {mount["name"]: mount for mount in containers["skills"]["volumeMounts"]}
                 self.assertTrue(mounts["git"]["readOnly"])
