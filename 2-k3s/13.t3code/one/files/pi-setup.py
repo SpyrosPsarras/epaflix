@@ -15,7 +15,7 @@ PACKAGES = ['pi-cliproxyapi-provider',
             '@spences10/pi-redact', '@juicesharp/rpiv-todo',
             '@juicesharp/rpiv-ask-user-question',
             'superpowers', '@dietrichgebert/ponytail', 'not-enough-retry',
-            'pi-t3code-sticky-prefix']
+            'pi-t3code-sticky-prefix', '@jangmanj/pi-mcp-ext']
 ALIASES = {
     'or-glm-5.3-flash': 'openrouter/z-ai/glm-5.3-flash',
     'or-deepseek-v4-flash': 'openrouter/deepseek/deepseek-v4-flash',

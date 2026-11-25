@@ -1,0 +1,180 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: skills-mcp
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: skills-mcp
+  template:
+    metadata:
+      annotations:
+        mcp-hub.epaflix.com/inputs-revision: r1
+      labels:
+        app: skills-mcp
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: git-sync
+          image: registry.k8s.io/git-sync/git-sync
+          env:
+            - name: GITSYNC_REPO
+              valueFrom:
+                configMapKeyRef:
+                  name: mcp-hub-instance-settings
+                  key: skills-repo
+            - name: GITSYNC_REF
+              value: main
+            - name: GITSYNC_ROOT
+              value: /git
+            - name: GITSYNC_LINK
+              value: skills
+            - name: GITSYNC_PERIOD
+              value: 60s
+            - name: GITSYNC_MAX_FAILURES
+              value: "-1"
+            - name: GITSYNC_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: skills-git
+                  key: username
+            - name: GITSYNC_PASSWORD_FILE
+              value: /secrets/skills-git/token
+            - name: GITSYNC_HTTP_BIND
+              value: ":8080"
+            - name: HOME
+              value: /tmp
+          ports:
+            - name: sync
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /
+              port: sync
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 5m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: git
+              mountPath: /git
+            - name: git-tmp
+              mountPath: /tmp
+            - name: skills-git
+              mountPath: /secrets/skills-git
+              readOnly: true
+        - name: skills
+          image: docker.io/library/python:3.13-alpine
+          command:
+            - sh
+            - -c
+            - >-
+              pip install -q --no-cache-dir --disable-pip-version-check
+              --target /opt/py fastmcp==4.2.6 &&
+              until [ -e "$SKILLS_ROOT" ]; do sleep 2; done &&
+              exec python /runner/skills.py
+          env:
+            - name: SKILLS_UPSTREAM_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-hub-skills
+                  key: token
+            - name: SKILLS_ROOT
+              value: /git/skills
+            - name: PYTHONPATH
+              value: /app:/opt/py
+            - name: HOME
+              value: /tmp
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+          ports:
+            - name: http
+              containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 90
+          resources:
+            requests:
+              cpu: 10m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: app
+              mountPath: /app
+              readOnly: true
+            - name: runner
+              mountPath: /runner
+              readOnly: true
+            - name: git
+              mountPath: /git
+              readOnly: true
+            - name: py
+              mountPath: /opt/py
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: app
+          configMap:
+            name: mcp-hub-app
+        - name: runner
+          configMap:
+            name: skills-runner
+        - name: skills-git
+          secret:
+            secretName: skills-git
+            defaultMode: 0440
+            items:
+              - key: token
+                path: token
+        - name: git
+          emptyDir: {}
+        - name: git-tmp
+          emptyDir: {}
+        - name: py
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: skills-mcp
+spec:
+  selector:
+    app: skills-mcp
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

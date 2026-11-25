@@ -780,7 +780,7 @@ class RenderTests(unittest.TestCase):
             deployment = next(doc for doc in documents if doc["kind"] == "Deployment" and doc["metadata"]["name"] == "mcp-hub")
             template = deployment["spec"]["template"]
             self.assertEqual(deployment["metadata"]["namespace"], "mcp-hub-homelab")
-            self.assertEqual(template["metadata"]["annotations"][annotation], "r4")
+            self.assertEqual(template["metadata"]["annotations"][annotation], "r5")
             volume = next(volume for volume in template["spec"]["volumes"] if volume["name"] == "instance")
             self.assertEqual(volume["secret"]["secretName"], "mcp-hub-instance")
             secret = next(doc for doc in documents if doc["kind"] == "Secret")
@@ -788,7 +788,7 @@ class RenderTests(unittest.TestCase):
             self.assertEqual(secret["metadata"]["namespace"], "mcp-hub-homelab")
             work = render(root / "instances/work")
             work_hub = next(doc for doc in work if doc["kind"] == "Deployment" and doc["metadata"]["name"] == "mcp-hub")
-            self.assertEqual(work_hub["spec"]["template"]["metadata"]["annotations"][annotation], "r3")
+            self.assertEqual(work_hub["spec"]["template"]["metadata"]["annotations"][annotation], "r4")
 
             credentials = json.loads((overlay / "credentials.json").read_text())
             credentials["upstreams"]["searxng"]["token"] = "synthetic-rotated-upstream"
@@ -799,12 +799,12 @@ class RenderTests(unittest.TestCase):
             self.assertEqual(next(doc for doc in rotated if doc["kind"] == "Deployment" and doc["metadata"]["name"] == "mcp-hub"), deployment)
 
             path = root / "instances/homelab/kustomization.yaml"
-            path.write_text(path.read_text().replace('"r4"', '"synthetic-r5"'))
+            path.write_text(path.read_text().replace('"r5"', '"synthetic-r6"'))
             revised = render(overlay)
             rolled = next(doc for doc in revised if doc["kind"] == "Deployment" and doc["metadata"]["name"] == "mcp-hub")
             self.assertNotEqual(rolled["spec"]["template"], template)
-            self.assertEqual(rolled["spec"]["template"]["metadata"]["annotations"][annotation], "synthetic-r5")
-            rolled["spec"]["template"]["metadata"]["annotations"][annotation] = "r4"
+            self.assertEqual(rolled["spec"]["template"]["metadata"]["annotations"][annotation], "synthetic-r6")
+            rolled["spec"]["template"]["metadata"]["annotations"][annotation] = "r5"
             self.assertEqual(revised, rotated)
             self.assertEqual(render(root / "instances/work"), work)
 
@@ -831,13 +831,13 @@ class RenderTests(unittest.TestCase):
             self.assertNotEqual(rotated_work_secret["data"], original_work_secret["data"])
             self.assertEqual(rotated_work_template, original_work_template)
             path = root / "instances/work/kustomization.yaml"
-            path.write_text(path.read_text().replace('"r3"', '"synthetic-r4"'))
+            path.write_text(path.read_text().replace('"r4"', '"synthetic-r5"'))
             revised_work = render(work_overlay)
             revised_work_template = next(doc for doc in revised_work if doc["kind"] == "Deployment"
                                          and doc["metadata"]["name"] == "mcp-hub")["spec"]["template"]
             self.assertNotEqual(revised_work_template, original_work_template)
-            self.assertEqual(revised_work_template["metadata"]["annotations"][annotation], "synthetic-r4")
-            revised_work_template["metadata"]["annotations"][annotation] = "r3"
+            self.assertEqual(revised_work_template["metadata"]["annotations"][annotation], "synthetic-r5")
+            revised_work_template["metadata"]["annotations"][annotation] = "r4"
             self.assertEqual(revised_work, rotated_work)
             self.assertEqual(render(root / "instances/searxng"), original_search)
             self.assertEqual(render(overlay), original_homelab)
