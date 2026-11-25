@@ -13,5 +13,9 @@
     "src": ["tag:t3code"],
     "dst": ["spylinux"],
     "ip": ["tcp:3773"]
+  }, {
+    "src": ["spypsarras@gmail.com"],
+    "dst": ["tag:t3code"],
+    "ip": ["tcp:3773"]
   }]
 }

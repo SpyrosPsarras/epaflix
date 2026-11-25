@@ -97,6 +97,21 @@ T3 refuses plain `http` to a `100.x` address but accepts `*.ts.net` names.
 MagicDNS is off, so a `hostAliases` entry in both pods maps that name to
 `100.119.235.123`. Update it if the laptop's tailnet address changes.
 
+The sidecar also serves tailnet TCP 3773 to T3 on `127.0.0.1:3773`, from
+`env/files/tailscale-serve.json`. T3 itself still binds only loopback. The
+policy lets the owner's devices reach `tag:t3code` on TCP 3773. The phone uses
+Pi-hole with MagicDNS off, so
+[`40-tailnet.conf`](../../../1-proxmox/pihole/dnsmasq.d/40-tailnet.conf) maps
+each pod's `*.ts.net` name to its tailnet address. Update it if a pod is
+enrolled again and gets a new address. To pair the phone, mint a code in the pod
+and open it at the pod's tailnet name:
+
+```sh
+code=$(kubectl --context epaflix -n "$namespace" exec "$pod" -c t3 -- \
+  t3 pair --label phone --base-dir /home/t3/.t3 | grep -o 'token=[A-Z0-9]*' | cut -d= -f2)
+qrencode -t ansiutf8 "http://$namespace.tailea078a.ts.net:3773/pair#token=$code"
+```
+
 ## Zed SSH access
 
 Zed still needs SSH to the pods. The owner decision is to use the same

@@ -12,6 +12,9 @@ patches:
       kind: StatefulSet
 
 configMapGenerator:
+  - name: t3code-tailscale-serve
+    files:
+      - serve.json=env/files/tailscale-serve.json
   - name: t3code-idle-rollout
     files:
       - one/files/idle-rollout.sh

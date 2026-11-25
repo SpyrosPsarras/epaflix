@@ -57,6 +57,8 @@ addresses, which both overlays already allow. NetworkPolicy cannot see the
 tailnet destinations inside it. The [tailnet policy](../../21.tailscale/policy.json)
 is the control: `tag:t3code` may reach only `spylinux` on TCP 3773, and the
 sidecar accepts no subnet routes, so it opens no path to the home LAN.
+Inbound, the sidecar serves tailnet TCP 3773 to T3 on loopback. Only the
+owner's devices may reach it, and T3 pairing still authenticates each client.
 
 DNS and API rules cover every pod so idle-rollout can use Kubernetes exec
 without a direct runtime HTTP connection. Image-prepull runs `true`; node image

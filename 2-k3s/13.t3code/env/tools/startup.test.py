@@ -186,7 +186,7 @@ class StartupTest(unittest.TestCase):
                     self.assertEqual(uid, 0)
                     self.assertFalse(container['securityContext']['allowPrivilegeEscalation'])
                     self.assertEqual(container['securityContext']['capabilities'], {'drop': ['ALL'], 'add': ['NET_ADMIN']})
-                    self.assertEqual({mount['name'] for mount in container['volumeMounts']}, {'tailscale-state', 'tun'})
+                    self.assertEqual({mount['name'] for mount in container['volumeMounts']}, {'tailscale-state', 'tun', 'tailscale-serve'})
                     self.assertEqual(env['TS_USERSPACE']['value'], 'false')
                     self.assertIn('--accept-routes=false', env['TS_EXTRA_ARGS']['value'])
                     self.assertFalse(bw)
@@ -201,7 +201,7 @@ class StartupTest(unittest.TestCase):
                     self.assertNotIn('envFrom', container)
                     self.assertFalse(any(entry.get('valueFrom', {}).get('secretKeyRef', {}).get('name') == 'vaultwarden-agent'
                                          for entry in env.values()))
-                    self.assertFalse(any(mount['name'] in ('vault-data', 'vault-tmp', 'keeper-data', 'keeper-tmp', 'tailscale-state', 'tun')
+                    self.assertFalse(any(mount['name'] in ('vault-data', 'vault-tmp', 'keeper-data', 'keeper-tmp', 'tailscale-state', 'tun', 'tailscale-serve')
                                          for mount in container['volumeMounts']))
             for init in spec['initContainers']:
                 self.assertNotIn('envFrom', init)
