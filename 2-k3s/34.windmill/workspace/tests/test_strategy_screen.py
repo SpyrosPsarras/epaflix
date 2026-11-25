@@ -1266,7 +1266,7 @@ def test_main_screens_short_setups(offline):
 
 
 def test_main_emails_candidates_only_when_asked(offline):
-    result = ss.main(tickers="PULL,RALY", email="trader@example.com")
+    result = ss.main(tickers="PULL,RALY", settings={"compact_report": 0}, email="trader@example.com")
     (to, subject, html), = offline["_sent"]
     assert to == "trader@example.com" and result["email"] == {"to": "trader@example.com", "subject": subject, "status": "sent",
                                                                 "short_report": False}
@@ -1788,7 +1788,7 @@ def test_bear_put_debit_spread_plan_and_recommendation():
 
 def test_main_proposes_bear_put_debit_spreads_in_a_correction(offline):
     offline["QQQ"] = uptrend(289, 200, 0.5) + [(343 - 1.8 * k, 344 - 1.8 * k, 341 - 1.8 * k, 342 - 1.8 * k, 1_000_000) for k in range(12)]
-    result = ss.main(tickers="RALY,PULL", strategy="all", email="trader@example.com")
+    result = ss.main(tickers="RALY,PULL", strategy="all", settings={"compact_report": 0}, email="trader@example.com")
     market = result["market"]
     assert market["phase"]["decline"] == "correction" and market["phase"]["drawdown"] <= -0.05
     assert market["short_setups"] == "bear_put_spread" and market["actions"]["breakdown"] == "bear_put_spread"
@@ -2265,7 +2265,7 @@ def test_correlation_map_finds_the_drivers_and_the_closest_theme():
 
 
 def test_main_adds_the_market_backdrop(offline):
-    result = ss.main(tickers="PULL,BRK", strategy="all", track_days=0, email="trader@example.com")
+    result = ss.main(tickers="PULL,BRK", strategy="all", track_days=0, settings={"compact_report": 0}, email="trader@example.com")
     b = result["backdrop"]
     assert b["vix"]["spike"] and b["fed"]["forecast"] == 3.75 and b["fed"]["rate"] == 4.0 and b["fed"]["days"] == 10
     assert [a["ticker"] for a in b["assets"]] == ["CL", "GC"]
@@ -2302,7 +2302,7 @@ def test_main_follows_my_positions(offline, db, monkeypatch):
 
 
 def test_main_sizes_long_candidates_and_emails_it(offline):
-    result = ss.main(tickers="PULL,BRK", strategy="all", email="trader@example.com")
+    result = ss.main(tickers="PULL,BRK", strategy="all", settings={"compact_report": 0}, email="trader@example.com")
     longs = [c for c in result["candidates"] if c["action"] == "long"]
     assert [c["position"]["slot"] for c in longs] == [1, 2, None]  # BRK qualifies twice: breakout, then squeeze
     assert longs[0]["ticker"] == longs[2]["ticker"] and longs[2]["position"]["reason"] == "already proposed"
@@ -2388,7 +2388,8 @@ def test_etf_breakout_needs_accelerating_rotation(offline):
     assert [r["acceleration"] for r in rotation] == sorted((r["acceleration"] for r in rotation), reverse=True)
     assert {"ticker": "USO", "reason": "chart data is for another ticker"} in result["etf_setups"]["missing"]
     assert all(e["ticker"] != "USO" for e in result["data_errors"])
-    assert "<td>ETF: Biotech</td>" in ss.email_html(result)
+    assert "<td>ETF: Biotech</td>" in ss.email_html({**result, "settings": {**result["settings"], "compact_report": 0}})
+    assert "XBI: PROPOSED LONG breakout" in ss.email_html(result) and "<li>XBI Biotech: " in ss.email_html(result)
     strict = ss.main(tickers="PULL", settings={"etf_min_acceleration": 0.5})
     assert all(c["ticker"] != "XBI" for c in strict["candidates"])
     off = ss.main(tickers="PULL", settings={"etf_setups": 0})
@@ -2510,3 +2511,75 @@ def test_database_write_error_still_emails_with_a_warning(offline, db, monkeypat
     html = offline["_sent"][-1][2]
     assert html.startswith("<p><b>Not saved</b>: the database write failed (RuntimeError: connection lost)")
     assert result["email"]["status"] == "sent"
+
+
+# ---------------------------------------------------------------- compact report, extreme move, alerts
+def jump_rows(change, n=300, start=100.0):
+    rows = uptrend(n, start, 0.1)
+    last = rows[-1][3]
+    close = last * (1 + change)
+    rows.append((last, max(last, close) + 0.5, min(last, close) - 0.5, close, 2_000_000))
+    return rows
+
+
+def test_extreme_move_odds_levels_and_proposal():
+    up = make_bars(jump_rows(0.04), "QQQ")
+    day = up.dates[-1]
+    x = ss.extreme_move(up, day, {"decline": None}, CFG)
+    assert CFG["extreme_move"] == 0.03 and x["change"] == 0.04 and (x["direction"], x["size"], x["market"]) == ("up", "3-5%", "no decline")
+    assert x["stats"]["n"] == 27 and x["proposal"] == "put spread" and x["put_spread"]["legs"][0]["buy"] == x["close"]
+    assert list(x["levels"].values()) == sorted(x["levels"].values(), reverse=True) and x["levels"]["high"] == round(up.high[-1], 2)
+    assert x["tight_long"]["stop"] == round(min(up.low[-10:]), 2)
+    html = ss.extreme_html(x)
+    assert "Extreme move: QQQ +4.0% today" in html and "PROPOSED: put spread" in html and "outside a decline" in html
+    assert "10 sessions later 15% (any day 59%)" in html and "Key levels: high " in html
+    bear = ss.extreme_move(up, day, {"decline": "bear", "deep": True}, CFG)
+    assert bear["market"] == "decline" and bear["proposal"] is None and "No proposal: neither trade won" in ss.extreme_html(bear)
+    big = ss.extreme_move(make_bars(jump_rows(-0.07), "QQQ"), day, {"decline": "bear"}, CFG)
+    assert (big["direction"], big["size"], big["market"], big["stats"]["n"]) == ("down", "5%+", "any", 54)
+    assert ss.extreme_move(make_bars(jump_rows(0.02), "QQQ"), day, {}, CFG) is None
+    assert ss.extreme_move(up, day, {}, ss.settings_with_defaults({"extreme_move": 0})) is None
+
+
+def test_macro_alerts_only_past_their_levels():
+    flat = make_bars(uptrend(30, 100, 0.0))
+    series = {"VX": make_bars(uptrend(29, 20, 0.0) + [(20, 24, 20, 23.2, 1)], "VX"),   # +16% in a session
+              "CL": make_bars(uptrend(25, 60, 0.0) + [(60, 67, 60, 61 + i * 1.5, 1) for i in range(5)], "CL"),  # +11.5% in 5
+              "GC": flat, "DX": make_bars(uptrend(29, 100, 0.0) + [(100, 101, 99, 99.5, 1)], "DX")}  # -0.5%: quiet
+    fed = {"date": "2026-12-09", "days": 5, "rate": 4.0, "forecast": 3.75, "note": "the futures price this meeting later"}
+    rotation = [{"theme": "Gold miners", "tickers": ["GDX"], "rank": 2, "rank_4w": 7, "rel_1m": 0.08},
+                {"theme": "Software", "tickers": ["IGV"], "rank": 1, "rank_4w": 1, "rel_1m": 0.05},
+                {"theme": "Commodities", "tickers": ["DBC"], "rank": 3, "rank_4w": 9, "rel_1m": -0.08}]  # up only as others fell
+    alerts = ss.macro_alerts(series, fed, rotation)
+    assert alerts == ["VIX futures 23.2: +16% today.",
+                      "WTI crude (CL) 67: +11.7% in 5 sessions.",
+                      "Fed decision 2026-12-09 (in 5 days), rate now 4%, forecast 3.75%; the futures price this meeting later.",
+                      "Theme rotation: Gold miners (GDX) rose to rank 2 of the themes from 7 four weeks ago (+8.0% vs SPY in 1 month)."]
+    assert ss.macro_alerts({"GC": flat}, {**fed, "days": 20}, rotation[1:]) == []
+    assert ss.macro_alerts({}, None, [{**rotation[0], "rank_4w": 4}]) == []  # one place up is no rotation
+
+
+def test_compact_email_is_the_default(offline):
+    offline["QQQ"] = jump_rows(0.045, 300, 300.0)
+    result = ss.main(tickers="PULL,RALY", email="trader@example.com")
+    html = offline["_sent"][-1][2]
+    assert result["settings"]["compact_report"] == 1 and "<table" not in html
+    assert "<b>Proposed</b>: 1 of 2 setups, best first." in html and "PULL: PROPOSED LONG pullback" in html
+    assert "Watch only: RALY rally_rejection." in html
+    assert result["extreme_move"]["change"] == 0.045 and "Extreme move: QQQ +4.5% today" in html
+    assert "<b>Alerts</b>" in html and "VIX futures 24.0: +34% in 5 sessions. In 2020-2026" in html and "in 5 sessions" in html
+    assert "Rotation, fastest accelerating ETFs" in html or not [r for r in result["etf_setups"]["rotation"] if r["acceleration"] > 0]
+    assert "Market backdrop" not in html and "Correlation of daily returns" not in html
+    long_html = ss.email_html({**result, "settings": {**result["settings"], "compact_report": 0}})
+    assert "<table" in long_html and "Market backdrop" in long_html
+
+
+def test_compact_email_with_positions_and_nothing_proposed():
+    result = {**email_result([full_status(), ss.position_unknown(position(ticker="GONE"), "no chart")]), "settings": {"compact_report": 1},
+              "candidates": [{"ticker": "RALY", "strategy": "rally_rejection", "action": "watch", "recommendation": "RALY: WATCH ONLY"}],
+              "backdrop": {"alerts": []}}
+    html = ss.email_html(result)
+    assert "<b>Proposed</b>: none today (1 setups, all watch only)." in html and "Watch only: RALY rally_rejection." in html
+    assert html.index("GONE bought") < html.index("FULL bought")  # to check first
+    assert "Alerts: none" in html and "Extreme move" not in html
+    assert "None recorded" not in ss.email_html({**email_result([]), "settings": {"compact_report": 1}})
