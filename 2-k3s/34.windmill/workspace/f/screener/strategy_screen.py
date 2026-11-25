@@ -272,6 +272,11 @@ DEFAULTS = {
     # Market backdrop in the result and the email (1 on, 0 off): Fed, VIX, oil, metals, theme rotation, correlations.
     # Information only; about 45 more requests.
     "backdrop": 1,
+    # Email: 1 the short report (proposals, positions, the 3 fastest rotating ETFs, extreme move, alerts only when a level
+    # in ALERT_LEVELS is crossed), 0 the long one with every setup and the full backdrop.
+    "compact_report": 1,
+    # Extreme move block when the benchmark closes this much up or down on the day (0 = off); odds from EXTREME_STATS.
+    "extreme_move": 0.03,
     "request_pause": 0.4,
 }
 
@@ -2670,7 +2675,9 @@ def market_backdrop(as_of, now, count, cfg, context_bars, closes_by_ticker, mapp
             found = correlation_map(closes_by_ticker[ticker], drivers, themes)
             if found:
                 mapping.append({"ticker": ticker, **found})
-    return {"fed": fed, "vix": vix, "assets": assets, "rotation": rotation, "mapping": mapping, "missing": missing,
+    alerts = macro_alerts({**{k: v for k, v in stocks.items() if v is not None},
+                           **{k: v for k, v in futures.items() if v is not None}}, fed, rotation)
+    return {"fed": fed, "vix": vix, "assets": assets, "rotation": rotation, "mapping": mapping, "missing": missing, "alerts": alerts,
             "note": "Information only: it changes no score, filter or proposal. Futures are front month (VX for the VIX)."}
 
 
@@ -3149,7 +3156,212 @@ def build_email(result):
         return fallback_email_html(result, error), f"{type(error).__name__}: {error}"
 
 
+# Extreme move days of QQQ, 2000-2026 (study on the daily bars since 1999): what the next 10 sessions did and how the
+# benchmark tight long (index_long_plan) and the 10-session put debit spread (ATM / -5%, take profit at 50% of the width,
+# priced with Black-Scholes on realized volatility, 3% cost) did. Any day: higher 10 sessions later 59% of the time; a
+# spread bought every third day lost 0.22 of the debit on average and won 41%. Neither trade won on average in any bucket
+# but one (an up day outside a decline, not confirmed on SPY), so the email shows the odds and the levels, no proposal.
+EXTREME_STATS = {  # key: (direction, size, market); n cases, shares of cases, f10 = median close-to-close return
+    ("up", "3-5%", "decline"): dict(n=122, up5=0.50, up10=0.49, f10=-0.001, lost_low=0.63, new_high=0.93, long_mean=-0.007,
+                                    long_win=0.50, spread_mean=-0.09, spread_win=0.61),
+    ("up", "3-5%", "no decline"): dict(n=27, up5=0.30, up10=0.15, f10=-0.027, lost_low=0.74, new_high=0.85, long_mean=-0.025,
+                                       long_win=0.19, spread_mean=0.11, spread_win=0.70),
+    ("up", "5%+", "any"): dict(n=60, up5=0.45, up10=0.50, f10=-0.004, lost_low=0.65, new_high=0.90, long_mean=-0.015,
+                               long_win=0.42, spread_mean=-0.07, spread_win=0.65),
+    ("down", "3-5%", "decline"): dict(n=181, up5=0.52, up10=0.51, f10=0.003, lost_low=0.88, new_high=0.69, long_mean=-0.005,
+                                      long_win=0.24, spread_mean=-0.08, spread_win=0.61),
+    ("down", "3-5%", "no decline"): dict(n=20, up5=0.45, up10=0.50, f10=-0.001, lost_low=0.95, new_high=0.55, long_mean=-0.007,
+                                         long_win=0.20, spread_mean=-0.07, spread_win=0.55),
+    ("down", "5%+", "any"): dict(n=54, up5=0.65, up10=0.46, f10=-0.004, lost_low=0.98, new_high=0.67, long_mean=-0.009,
+                                 long_win=0.15, spread_mean=-0.00, spread_win=0.67),
+}
+EXTREME_BASE = {"up10": 0.59, "spread_mean": -0.22, "spread_win": 0.41}
+
+
+def extreme_move(bars, as_of, phase, cfg):
+    """On a benchmark day of extreme_move or more (close to close): the historical odds of the next 10 sessions, the key
+    levels, and both index trades (tight long, put debit spread) with their backtest. None on an ordinary day."""
+    if not cfg["extreme_move"] or len(bars) < 201:
+        return None
+    c, h, l = bars.close, bars.high, bars.low
+    day = c[-1] / c[-2] - 1
+    if abs(day) < cfg["extreme_move"]:
+        return None
+    direction = "up" if day > 0 else "down"
+    decline = (phase or {}).get("decline")
+    size = "5%+" if abs(day) >= 0.05 else "3-5%"
+    market = "any" if size == "5%+" else "decline" if decline else "no decline"
+    stats = EXTREME_STATS[(direction, size, market)]
+    e20, e50, e200, m200 = ema(c, 20)[-1], ema(c, 50)[-1], ema(c, 200)[-1], sma(c, 200)[-1]
+    levels = {"high": h[-1], "middle": (h[-1] + l[-1]) / 2, "low": l[-1], "previous close": c[-2],
+              f"{cfg['bounce_low_bars']}-day low": min(l[-cfg["bounce_low_bars"]:]), "EMA20": e20, "EMA50": e50, "EMA200": e200,
+              "SMA200": m200}
+    levels = {k: round(v, 2) for k, v in sorted(levels.items(), key=lambda x: -x[1]) if v}
+    spread = put_spread_plan(c[-1], as_of, decline or "extreme move", (phase or {}).get("deep"), cfg, cfg["index_put_spread_days"])
+    long_plan = index_long_plan(bars, as_of, cfg)
+    lean = "put spread" if stats["spread_mean"] > 0 else None
+    return {"ticker": bars.ticker, "change": round(day, 4), "direction": direction, "size": size, "market": market,
+            "close": round(c[-1], 2), "stats": stats, "base": EXTREME_BASE, "levels": levels, "tight_long": long_plan,
+            "put_spread": spread, "proposal": lean, "long_stop": f"low of the last {cfg['bounce_low_bars']} sessions",
+            "note": ("the put spread won on average only here (27 cases, mostly 1999-2015) and not on SPY: small size" if lean
+                     else "neither trade won on average after such days: no proposal, the odds and levels are for orientation")}
+
+
+# Market alerts: shown only when a move is about as large as the top 5% of daily or 5-session moves in 2020-2026.
+ALERT_LEVELS = {  # ticker: (name, 1-session move, 5-session move), both as absolute changes
+    "CL": ("WTI crude", 0.05, 0.10), "QA": ("Brent crude", 0.05, 0.10), "GC": ("Gold", 0.025, 0.05), "SI": ("Silver", 0.05, 0.10),
+    "PL": ("Platinum", 0.045, 0.09), "HG": ("Copper", 0.03, 0.07), "DX": ("Dollar index", 0.01, 0.02),
+    "ZN": ("10y note", 0.01, 0.02), "GDX": ("Gold miners", 0.05, 0.10), "SIL": ("Silver miners", 0.06, 0.12),
+}
+VIX_ALERT = (0.15, VIX_SPIKE, 30.0)  # VX up 15% in a session, up 25% in 5 sessions, or at 30 or more
+FED_ALERT_DAYS = 7
+THEME_ALERT_RANKS = 3  # a theme new in the top 3 of the rotation table, 3 or more places higher than 4 weeks earlier, beating SPY
+
+
+def _changes(bars):
+    closes = [c for _, c in _finite(bars)] if bars is not None else []
+    if len(closes) < 6:
+        return None
+    return closes[-1], closes[-1] / closes[-2] - 1, closes[-1] / closes[-6] - 1
+
+
+def macro_alerts(series, fed=None, rotation=()):
+    """The market moves worth a look today, as sentences; `series` maps tickers (futures and ETFs) to bars."""
+    out = []
+    vx = _changes(series.get("VX"))
+    if vx:
+        close, one, five = vx
+        why = [x for x, hit in ((f"{one:+.0%} today", one >= VIX_ALERT[0]), (f"{five:+.0%} in 5 sessions", five >= VIX_ALERT[1]),
+                                (f"at {close:.1f}", close >= VIX_ALERT[2])) if hit]
+        if why:
+            note = VIX_NOTES["spike"] if five >= VIX_ALERT[1] else VIX_NOTES["high"] if close >= 25 else ""
+            out.append(f"VIX futures {close:.1f}: " + ", ".join(why) + (f". {note[0].upper()}{note[1:]}." if note else "."))
+    for ticker, (name, day, week) in ALERT_LEVELS.items():
+        found = _changes(series.get(ticker))
+        if not found:
+            continue
+        close, one, five = found
+        why = [x for x, hit in ((f"{one:+.1%} today", abs(one) >= day), (f"{five:+.1%} in 5 sessions", abs(five) >= week)) if hit]
+        if why:
+            out.append(f"{name} ({ticker}) {close:g}: " + ", ".join(why) + ".")
+    if fed and fed.get("date") and fed.get("days") is not None and fed["days"] <= FED_ALERT_DAYS:
+        rate = "" if fed.get("rate") is None else f", rate now {fed['rate']:g}%"
+        forecast = "" if fed.get("forecast") is None else f", forecast {fed['forecast']:g}%"
+        out.append(f"Fed decision {fed['date']} (in {fed['days']} days){rate}{forecast}; {fed.get('note') or ''}.".replace("; .", "."))
+    for r in rotation:
+        if (r.get("rank") and r["rank"] <= THEME_ALERT_RANKS and r.get("rank_4w") and r["rank_4w"] - r["rank"] >= THEME_ALERT_RANKS
+                and (r.get("rel_1m") or 0) > 0):
+            out.append(f"Theme rotation: {r['theme']} ({', '.join(r['tickers'])}) rose to rank {r['rank']} of the themes from "
+                       f"{r['rank_4w']} four weeks ago ({r['rel_1m']:+.1%} vs SPY in 1 month).")
+    return out
+
+
+def extreme_html(x):
+    s, base, lv = x["stats"], x["base"], x["levels"]
+    where = {"decline": "inside a decline", "no decline": "outside a decline", "any": "in any market"}[x["market"]]
+    long_plan, spread = x["tight_long"], x["put_spread"]
+    leg = spread["legs"][0]
+    target = (f"target the {long_plan['target_line']} {long_plan['target']}" if long_plan.get("target") else "no 200-day line above")
+    lines = [
+        f"History (QQQ since 2000, {s['n']} days {x['direction']} {x['size']} {where}): higher 5 sessions later {s['up5']:.0%}, "
+        f"10 sessions later {s['up10']:.0%} (any day {base['up10']:.0%}), median 10-session change {s['f10']:+.1%}; today's low "
+        f"was broken within 10 sessions {s['lost_low']:.0%} of the time, today's high exceeded {s['new_high']:.0%}.",
+        "Key levels: " + ", ".join(f"{k} {v:g}" for k, v in lv.items()) + ".",
+        f"Tight long: buy at the next open, stop {long_plan['stop']} (the {x['long_stop']}), {target}, out by "
+        f"{long_plan['exit_by']}. Backtest: {s['long_mean']:+.1%} per trade on average, won {s['long_win']:.0%}.",
+        f"Put debit spread: buy the {leg['buy']} put, sell the {leg['sell']} put, expiry after {spread['expiry_after']}, take "
+        f"profit at {spread['take_profit']:.0%} of the width, else close by {spread['exit_by']}. Backtest: {s['spread_mean']:+.2f} "
+        f"of the debit on average, won {s['spread_win']:.0%} (a spread on any day: {base['spread_mean']:+.2f}, won "
+        f"{base['spread_win']:.0%}).",
+        (f"PROPOSED: {x['proposal']}; {x['note']}." if x["proposal"] else f"No proposal: {x['note']}."),
+    ]
+    return (f"<p><b>Extreme move: {escape(x['ticker'])} {x['change']:+.1%} today</b> (close {x['close']:g})</p><ul>"
+            + "".join(f"<li>{escape(t)}</li>" for t in lines) + "</ul>")
+
+
+def compact_email_html(result):
+    """The short daily email: market line, extreme move, proposals as they are, your positions, the 3 fastest rotating
+    ETFs, and the alerts of the day; everything else stays in the run result."""
+    m = result["market"]
+    b = m["benchmark"]
+    pct = lambda x: "N/A" if x is None else f"{x:+.1%}"
+    phase = m.get("phase") or {}
+    head = (f"<p><b>Market {escape(m['regime'])}</b>, phase {escape(str(phase.get('phase', 'unknown')))}"
+            f"{' (' + escape(phase['decline']) + ')' if phase.get('decline') else ''}: {escape(b['ticker'])} {b['close']}, "
+            f"{pct(b.get('vs_sma200'))} vs SMA200, 20 days {pct(b.get('change_20d'))}. Long setups: {escape(str(m.get('long_setups')))}.</p>")
+    parts = [head]
+    if phase.get("switched") or phase.get("dead_cat") or m.get("index_long"):
+        parts.append(f"<p>{escape(phase.get('advice', ''))}</p>")
+    spread = m.get("index_put_spread")
+    if spread:
+        leg = spread["legs"][0]
+        parts.append(f"<p><b>Index debit spread</b>: {escape(spread['ticker'])} buy the {leg['buy']} put, sell the {leg['sell']} put, "
+                     f"expiry after {spread['expiry_after']}, take profit at {spread['take_profit']:.0%} of the width, "
+                     f"else close by {spread['exit_by']}; the most you can lose is the debit.</p>")
+    long_plan = m.get("index_long")
+    if long_plan:
+        target = (f"target the {long_plan['target_line']} at {long_plan['target']}" if long_plan["target"] else "no 200-day line above")
+        parts.append(f"<p><b>Index tight long</b>: {escape(long_plan['ticker'])} buy at the next open, {target}, stop "
+                     f"{long_plan['stop']} (the bounce low), else close by {long_plan['exit_by']}.</p>")
+    if result.get("extreme_move"):
+        parts.append(extreme_html(result["extreme_move"]))
+
+    rows = result.get("candidates") or []
+    proposed = [r for r in rows if r["action"] in TRADE_ACTIONS]
+    if proposed:
+        parts.append(f"<p><b>Proposed</b>: {len(proposed)} of {len(rows)} setups, best first.</p><ol>"
+                     + "".join(f"<li>{escape(r['recommendation'])}</li>" for r in proposed) + "</ol>")
+    else:
+        parts.append(f"<p><b>Proposed</b>: none today ({len(rows)} setups, all watch only).</p>" if rows
+                     else "<p>No setup qualified today.</p>")
+    watch = [r for r in rows if r["action"] not in TRADE_ACTIONS]
+    if watch:
+        parts.append("<p>Watch only: " + escape(", ".join(f"{r['ticker']} {r['strategy']}" for r in watch)) + ".</p>")
+    sizing = result.get("sizing")
+    if sizing and any(r["action"] == "long" for r in proposed):
+        state = (f"{sizing['open']} open, {sizing['to_sell']} to sell, {sizing['proposed']} proposed today, {sizing['free']} free"
+                 if sizing["open"] is not None else sizing["note"])
+        parts.append(f"<p>Sizing: {sizing['position_size']:.0%} per long trade, at most {sizing['max_open_trades']} open "
+                     f"({escape(state)}).</p>")
+
+    mine = result.get("positions")
+    if mine is not None:
+        items = mine.get("items") or []
+        act = [p for p in items if p.get("advice") != "hold"]
+        parts.append(f"<p><b>My positions: {_fmt(mine.get('open'), 'd')} of {_fmt(mine.get('max_open_trades'), 'd')} open</b>"
+                     + (f", {len(act)} to sell or check" if act else "") + ".</p>")
+        if items:
+            ordered = act + [p for p in items if p.get("advice") == "hold"]
+            parts.append("<ul>" + "".join(f"<li>{escape(position_line(p))}</li>" for p in ordered) + "</ul>")
+
+    etf = result.get("etf_setups") or {}
+    top = [r for r in etf.get("rotation") or [] if r.get("acceleration", 0) > 0][:3]
+    if top:
+        parts.append("<p><b>Rotation, fastest accelerating ETFs vs SPY</b> (5 / 10 / 20 / 63 sessions; information, ETF trades "
+                     "come only from a breakout above):</p><ul>" + "".join(
+                         f"<li>{escape(r['ticker'])} {escape(r['name'])}: {pct(r['rs5'])} / {pct(r['rs10'])} / {pct(r['rs20'])} / "
+                         f"{pct(r['rs63'])}, acceleration {pct(r['acceleration'])}</li>" for r in top) + "</ul>")
+
+    backdrop = result.get("backdrop")
+    if backdrop is not None:
+        alerts = backdrop.get("alerts") or []
+        parts.append("<p><b>Alerts</b></p><ul>" + "".join(f"<li>{escape(a)}</li>" for a in alerts) + "</ul>" if alerts else
+                     "<p>Alerts: none (VIX, oil, metals, dollar, 10y note, Fed and theme rotation within their usual range).</p>")
+
+    stored = result.get("persistence")
+    if stored and (stored.get("closed_today") or stored.get("data_unavailable")):
+        def line(r):
+            return f"{r['ticker']} {r['strategy']} {r['status']}" + (f" {r['r']:+.2f}R" if r.get("r") is not None else "")
+        parts.append(f"<p>Tracked signals closed today: {escape(', '.join(line(r) for r in stored['closed_today']) or 'none')}; "
+                     f"data unavailable: {escape(', '.join(r['ticker'] for r in stored['data_unavailable']) or 'none')}.</p>")
+    parts.append("<p>Screening only, not advice. Full details (all setups, checks, backdrop, correlations) are in the Windmill run "
+                 "result; settings compact_report 0 restores the long email.</p>")
+    return "".join(parts)
+
+
 def email_html(result):
+    if (result.get("settings") or {}).get("compact_report"):
+        return compact_email_html(result)
     m = result["market"]
     b = m["benchmark"]
     pct = lambda x: "-" if x is None else f"{x:+.1%}"
@@ -3314,6 +3526,7 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
     beta_closes = {d: c for d, c in zip(beta_source.dates, beta_source.close) if math.isfinite(c) and c > 0}
     market_info = market_summary(rs_benchmarks[0], reference, breadth_by_date, regime, sector_bars, cfg, context_bars, phases)
     phase_now = phases.get(reference.dates[-1]) or {}
+    extreme = extreme_move(reference, reference.dates[-1], phase_now, cfg)
     run_cfg = {**cfg, "benchmarks": rs_benchmarks}
     as_of = calendar[-1]
 
@@ -3529,6 +3742,7 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
         "candidates": candidates,
         "sizing": sizing,
         "backdrop": backdrop,
+        "extreme_move": extreme,
         "etf_setups": None if not cfg["etf_setups"] or "breakout" not in strategies else {
             "checked": len(etf_bars), "missing": etf_missing, "rotation": etf_rotation,
             "note": "Breakout rules on sector and theme ETFs, proposed only when the rotation against SPY accelerates. The "
