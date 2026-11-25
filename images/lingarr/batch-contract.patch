@@ -1,19 +1,19 @@
 diff --git a/Lingarr.Server.Tests/Controllers/TranslateControllerContentTests.cs b/Lingarr.Server.Tests/Controllers/TranslateControllerContentTests.cs
-index 2db1fc0..802a4b3 100644
+index 4883cab..fa56cb4 100644
 --- a/Lingarr.Server.Tests/Controllers/TranslateControllerContentTests.cs
 +++ b/Lingarr.Server.Tests/Controllers/TranslateControllerContentTests.cs
-@@ -53,7 +53,7 @@ public class TranslateControllerContentTests : IDisposable
-
+@@ -55,7 +55,7 @@ public class TranslateControllerContentTests : IDisposable
+ 
      public TranslateControllerContentTests()
      {
 -        _connection = new SqliteConnection("DataSource=:memory:");
 +        _connection = new SqliteConnection($"DataSource=file:controller_{Guid.NewGuid():N}?mode=memory&cache=shared");
          _connection.Open();
-
+ 
          var options = new DbContextOptionsBuilder<LingarrDbContext>()
-@@ -207,7 +207,11 @@ public class TranslateControllerContentTests : IDisposable
+@@ -212,7 +212,11 @@ public class TranslateControllerContentTests : IDisposable
              _translationRequestService,
-             _settingServiceMock.Object,
+             _translationServiceInstanceServiceMock.Object,
              new LanguageCodeService(),
 -            NullLogger<TranslateController>.Instance);
 +            NullLogger<TranslateController>.Instance)
@@ -22,9 +22,9 @@ index 2db1fc0..802a4b3 100644
 +        };
 +        TranslationRequestService.DuplicatePollInterval = TimeSpan.FromMilliseconds(1);
      }
-
+ 
      public void Dispose()
-@@ -588,7 +592,7 @@ public class TranslateControllerContentTests : IDisposable
+@@ -601,7 +605,7 @@ public class TranslateControllerContentTests : IDisposable
      }
  
      [Fact]
@@ -33,7 +33,7 @@ index 2db1fc0..802a4b3 100644
      {
          _context.TranslationRequests.Add(new TranslationRequest
          {
-@@ -602,13 +606,20 @@ public class TranslateControllerContentTests : IDisposable
+@@ -615,13 +619,20 @@ public class TranslateControllerContentTests : IDisposable
          });
          await _context.SaveChangesAsync();
  
@@ -58,7 +58,7 @@ index 2db1fc0..802a4b3 100644
      }
  
      [Fact]
-@@ -682,14 +693,22 @@ public class TranslateControllerContentTests : IDisposable
+@@ -695,14 +706,22 @@ public class TranslateControllerContentTests : IDisposable
      [Theory]
      [InlineData(TranslationStatus.Pending)]
      [InlineData(TranslationStatus.InProgress)]
@@ -69,7 +69,7 @@ index 2db1fc0..802a4b3 100644
 -        SeedRequest(status);
 +        SeedRequest(TranslationStatus.Completed, "older");
 +        var running = SeedRequest(status);
-
+ 
 -        var response = await _controller.TranslateContent(NewContent("First line", "Second line"));
 +        var pendingResponse = _controller.TranslateContent(NewContent("First line", "Second line"));
 +        Assert.False(pendingResponse.IsCompleted);
@@ -80,15 +80,15 @@ index 2db1fc0..802a4b3 100644
 +        await other.TranslationRequests.Where(request => request.Id == running.Id)
 +            .ExecuteUpdateAsync(setters => setters.SetProperty(request => request.Status, TranslationStatus.Completed));
 +        var results = AssertOk(await pendingResponse.WaitAsync(TimeSpan.FromSeconds(5)));
-
+ 
 -        Assert.Equal(StatusCodes.Status409Conflict, Assert.IsType<ConflictObjectResult>(response.Result).StatusCode);
 +        Assert.Equal(new[] { "stored 0", "stored 1" }, results.Select(line => line.Line));
          Assert.Equal(2, await _context.TranslationRequests.CountAsync());
          VerifyNoLineCall();
          VerifyNoBatchCall();
-@@ -776,7 +795,10 @@ public class TranslateControllerContentTests : IDisposable
+@@ -789,7 +808,10 @@ public class TranslateControllerContentTests : IDisposable
              _createTranslationRequestService(_progressService),
-             _settingServiceMock.Object,
+             _translationServiceInstanceServiceMock.Object,
              new LanguageCodeService(),
 -            NullLogger<TranslateController>.Instance);
 +            NullLogger<TranslateController>.Instance)
@@ -97,10 +97,10 @@ index 2db1fc0..802a4b3 100644
 +        };
          var content = NewContent("First line", "Second line");
          content.Lines.Reverse();
-
-@@ -803,7 +825,10 @@ public class TranslateControllerContentTests : IDisposable
+ 
+@@ -816,7 +838,10 @@ public class TranslateControllerContentTests : IDisposable
              _createTranslationRequestService(_progressService),
-             _settingServiceMock.Object,
+             _translationServiceInstanceServiceMock.Object,
              new LanguageCodeService(),
 -            NullLogger<TranslateController>.Instance);
 +            NullLogger<TranslateController>.Instance)
@@ -109,8 +109,8 @@ index 2db1fc0..802a4b3 100644
 +        };
          var content = NewContent("First line", "First line");
          content.Lines[1].Position = 0;
-
-@@ -895,6 +920,31 @@ public class TranslateControllerContentTests : IDisposable
+ 
+@@ -908,6 +933,31 @@ public class TranslateControllerContentTests : IDisposable
          Assert.NotNull(translationRequest.CompletedAt);
      }
  
@@ -337,7 +337,7 @@ index c003f43..62d2cae 100644
  
      #endregion
 diff --git a/Lingarr.Server.Tests/Services/Translation/LocalAiServiceTests.cs b/Lingarr.Server.Tests/Services/Translation/LocalAiServiceTests.cs
-index 3355617..864db0b 100644
+index ead4bfe..dc59118 100644
 --- a/Lingarr.Server.Tests/Services/Translation/LocalAiServiceTests.cs
 +++ b/Lingarr.Server.Tests/Services/Translation/LocalAiServiceTests.cs
 @@ -39,6 +39,7 @@ public class LocalAiServiceTests
@@ -348,7 +348,7 @@ index 3355617..864db0b 100644
  
      public LocalAiServiceTests()
      {
-@@ -92,18 +93,190 @@ public class LocalAiServiceTests
+@@ -127,18 +128,190 @@ public class LocalAiServiceTests
          VerifyRequestsSent(3); // MaxRetries
      }
  
@@ -416,7 +416,7 @@ index 3355617..864db0b 100644
 +        VerifyAllRequestsCarriedResponseFormat();
 +        VerifyWarningLogged("returned an unparsable response", Times.Once());
 +    }
-
+ 
 -        // The chat endpoint tries structured output first and falls back to plain JSON parsing,
 -        // so a failing attempt sends two requests before the retry kicks in.
 +    [Theory]
@@ -546,7 +546,7 @@ index 3355617..864db0b 100644
  
          // Act
          var result = await _service.TranslateBatchAsync(Batch(), "en", "es", CancellationToken.None);
-@@ -111,8 +284,24 @@ public class LocalAiServiceTests
+@@ -146,8 +319,24 @@ public class LocalAiServiceTests
          // Assert
          Assert.Equal(2, result.Count);
          Assert.Equal("Mundo", result[2]);
@@ -573,7 +573,7 @@ index 3355617..864db0b 100644
      }
  
      [Fact]
-@@ -187,9 +376,23 @@ public class LocalAiServiceTests
+@@ -222,9 +411,23 @@ public class LocalAiServiceTests
      private static HttpResponseMessage GenerateResponse(string translatedJson) =>
          JsonResponse(new { model = "gemma4:e4b", response = translatedJson, done = true });
  
@@ -597,7 +597,7 @@ index 3355617..864db0b 100644
      private static HttpResponseMessage JsonResponse(object body) => new()
      {
          StatusCode = HttpStatusCode.OK,
-@@ -229,7 +432,11 @@ public class LocalAiServiceTests
+@@ -264,7 +467,11 @@ public class LocalAiServiceTests
                  "SendAsync",
                  ItExpr.IsAny<HttpRequestMessage>(),
                  ItExpr.IsAny<CancellationToken>())
@@ -610,8 +610,8 @@ index 3355617..864db0b 100644
      }
  
      private List<string> CaptureRequestBodies(Func<HttpResponseMessage> responseFactory)
-@@ -248,16 +455,28 @@ public class LocalAiServiceTests
-
+@@ -283,16 +490,28 @@ public class LocalAiServiceTests
+ 
      private void SetupResponseSequence(params HttpResponseMessage[] responses)
      {
 -        var sequence = _httpMessageHandlerMock.Protected()
@@ -648,10 +648,10 @@ index 3355617..864db0b 100644
      private void VerifyRequestsSent(int count)
 diff --git a/Lingarr.Server.Tests/Services/TranslationRequestServiceTests.cs b/Lingarr.Server.Tests/Services/TranslationRequestServiceTests.cs
 new file mode 100644
-index 0000000..fec67a7
+index 0000000..9c31b18
 --- /dev/null
 +++ b/Lingarr.Server.Tests/Services/TranslationRequestServiceTests.cs
-@@ -0,0 +1,492 @@
+@@ -0,0 +1,497 @@
 +using System;
 +using System.Collections.Generic;
 +using System.Linq;
@@ -747,7 +747,7 @@ index 0000000..fec67a7
 +
 +        var factoryMock = new Mock<ITranslationServiceFactory>();
 +        factoryMock
-+            .Setup(f => f.CreateTranslationServices(It.IsAny<IReadOnlyList<string>>()))
++            .Setup(f => f.CreateTranslationServices(It.IsAny<IReadOnlyList<TranslationServiceInstance>>()))
 +            .Returns(new List<TranslationServiceEntry>
 +            {
 +                new("localai", translationServiceMock.Object, batchInterface.Object)
@@ -759,7 +759,6 @@ index 0000000..fec67a7
 +            .ReturnsAsync(new Dictionary<string, string>
 +            {
 +                [SettingKeys.Translation.UseBatchTranslation] = "true",
-+                [SettingKeys.Translation.ServiceType] = "[\"localai\"]",
 +                [SettingKeys.Translation.MaxBatchSize] = "25",
 +                [SettingKeys.Translation.StripSubtitleFormatting] = "false",
 +                [SettingKeys.Translation.PreserveLineBreaks] = "false"
@@ -779,12 +778,18 @@ index 0000000..fec67a7
 +            .SetupGet(h => h.Clients)
 +            .Returns(hubClientsMock.Object);
 +
++        var instanceServiceMock = new Mock<ITranslationServiceInstanceService>();
++        instanceServiceMock
++            .Setup(i => i.GetInstances())
++            .ReturnsAsync([new TranslationServiceInstance { Id = 1, Provider = "localai", Name = "LocalAI", Position = 0 }]);
++
 +        var progressServiceMock = new Mock<IProgressService>();
 +        var service = new TranslationRequestService(
 +            dbContext,
 +            new Mock<IBackgroundJobClient>().Object,
 +            hubContextMock.Object,
 +            factoryMock.Object,
++            instanceServiceMock.Object,
 +            progressServiceMock.Object,
 +            new Mock<IStatisticsService>().Object,
 +            mediaServiceMock.Object,
@@ -1145,10 +1150,10 @@ index 0000000..fec67a7
 +    }
 +}
 diff --git a/Lingarr.Server/Controllers/TranslateController.cs b/Lingarr.Server/Controllers/TranslateController.cs
-index e448a72..712d370 100644
+index 609fced..a115cdd 100644
 --- a/Lingarr.Server/Controllers/TranslateController.cs
 +++ b/Lingarr.Server/Controllers/TranslateController.cs
-@@ -103,18 +103,15 @@ public class TranslateController : ControllerBase
+@@ -101,18 +101,15 @@ public class TranslateController : ControllerBase
      /// Translates subtitle content, supporting both single line and batch translation.
      /// </summary>
      /// <param name="translateAbleSubtitleContent">The translation request containing one or more subtitle items</param>
@@ -1171,10 +1176,10 @@ index e448a72..712d370 100644
          }
          catch (Exception ex)
 diff --git a/Lingarr.Server/Interfaces/Services/ITranslationRequestService.cs b/Lingarr.Server/Interfaces/Services/ITranslationRequestService.cs
-index 4b6f7db..4e99280 100644
+index 0724258..235a7e7 100644
 --- a/Lingarr.Server/Interfaces/Services/ITranslationRequestService.cs
 +++ b/Lingarr.Server/Interfaces/Services/ITranslationRequestService.cs
-@@ -183,7 +183,8 @@ public interface ITranslationRequestService
+@@ -195,7 +195,8 @@ public interface ITranslationRequestService
      /// Translate subtitle content without using jobs, Used for other Apps API Intergration (ex. Bazarr).
      /// </summary>
      /// <param name="translateAbleContent">The translation to translate</param>
@@ -1188,7 +1193,7 @@ index 4b6f7db..4e99280 100644
  }
 \ No newline at end of file
 diff --git a/Lingarr.Server/Lingarr.Server.csproj b/Lingarr.Server/Lingarr.Server.csproj
-index 37060e2..732c4b7 100644
+index 92e5865..36684a4 100644
 --- a/Lingarr.Server/Lingarr.Server.csproj
 +++ b/Lingarr.Server/Lingarr.Server.csproj
 @@ -13,6 +13,12 @@
@@ -1305,7 +1310,7 @@ index fd5a36a..0a75f5c 100644
  
              if (stripSubtitleFormatting)
 diff --git a/Lingarr.Server/Services/Translation/LocalAiService.cs b/Lingarr.Server/Services/Translation/LocalAiService.cs
-index 8a09288..e542a96 100644
+index a8f9b85..4f6b0a3 100644
 --- a/Lingarr.Server/Services/Translation/LocalAiService.cs
 +++ b/Lingarr.Server/Services/Translation/LocalAiService.cs
 @@ -331,16 +331,7 @@ public class LocalAiService : BaseLanguageService, ITranslationService, IBatchTr
@@ -1385,10 +1390,10 @@ index 8a09288..e542a96 100644
              }
  
              var translatedItems =
--                JsonSerializer.Deserialize<List<StructuredBatchResponse>>(translationsElement.GetRawText());
+-                JsonSerializer.Deserialize<List<StructuredBatchResponse>>(translationsElement.GetRawText(), StructuredBatchSerializerOptions);
 -
 -            if (translatedItems == null)
-+                JsonSerializer.Deserialize<List<StructuredBatchResponse?>>(translationsElement.GetRawText());
++                JsonSerializer.Deserialize<List<StructuredBatchResponse?>>(translationsElement.GetRawText(), StructuredBatchSerializerOptions);
 +            if (translatedItems == null || translatedItems.Any(item => item is null))
              {
 -                throw new TranslationParseException("Failed to deserialize translated subtitles");
@@ -1453,10 +1458,10 @@ index 8a09288..e542a96 100644
          List<BatchSubtitleItem> subtitleBatch,
          CancellationToken cancellationToken)
 diff --git a/Lingarr.Server/Services/TranslationRequestService.cs b/Lingarr.Server/Services/TranslationRequestService.cs
-index 092bdc4..e1229ee 100644
+index c58d370..c60fe79 100644
 --- a/Lingarr.Server/Services/TranslationRequestService.cs
 +++ b/Lingarr.Server/Services/TranslationRequestService.cs
-@@ -741,8 +741,9 @@ public class TranslationRequestService : ITranslationRequestService
+@@ -793,8 +793,9 @@ public class TranslationRequestService : ITranslationRequestService
      }
  
      /// <inheritdoc />
@@ -1468,7 +1473,7 @@ index 092bdc4..e1229ee 100644
      {
          // Resolve internal media id from the client's ArrMediaId
          var mediaId = await GetMediaId(translateAbleContent.ArrMediaId, translateAbleContent.MediaType);
-@@ -803,21 +804,7 @@ public class TranslationRequestService : ITranslationRequestService
+@@ -854,21 +855,7 @@ public class TranslationRequestService : ITranslationRequestService
                           && r.SourceLanguage == translationRequest.SourceLanguage
                           && r.TargetLanguage == translationRequest.TargetLanguage);
  
@@ -1491,7 +1496,7 @@ index 092bdc4..e1229ee 100644
  
              var latestRequest = await matchingRequests
                  .OrderByDescending(r => r.CreatedAt)
-@@ -888,6 +875,8 @@ public class TranslationRequestService : ITranslationRequestService
+@@ -939,6 +926,8 @@ public class TranslationRequestService : ITranslationRequestService
                  _logger.LogDebug("Batch translation configuration: maxSize={maxSize}, stripFormatting={stripFormatting}, totalLines={totalLines}",
                      maxSize, stripSubtitleFormatting, totalSize);
  
@@ -1500,7 +1505,7 @@ index 092bdc4..e1229ee 100644
                  await subtitleTranslator.TranslateSubtitlesBatch(
                      subtitleItems,
                      translationRequest,
-@@ -964,6 +953,10 @@ public class TranslationRequestService : ITranslationRequestService
+@@ -1015,6 +1004,10 @@ public class TranslationRequestService : ITranslationRequestService
          }
          catch (OperationCanceledException ex)
          {
@@ -1511,7 +1516,7 @@ index 092bdc4..e1229ee 100644
              // ExecuteUpdateAsync bypasses change-tracking so a concurrent write cannot abort this save.
              var now = DateTimeOffset.UtcNow;
              await _dbContext.TranslationRequests
-@@ -1009,6 +1002,126 @@ public class TranslationRequestService : ITranslationRequestService
+@@ -1060,6 +1053,126 @@ public class TranslationRequestService : ITranslationRequestService
          }
      }
  
