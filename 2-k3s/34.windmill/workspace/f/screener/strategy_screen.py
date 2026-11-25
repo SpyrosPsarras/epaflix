@@ -1671,9 +1671,13 @@ CREATE TABLE IF NOT EXISTS screener.positions (
     CHECK ((sell_date IS NULL) = (closed_at IS NULL)),
     CHECK (sell_date IS NULL OR sell_date >= buy_date)
 );
-CREATE UNIQUE INDEX IF NOT EXISTS positions_one_open ON screener.positions (ticker) WHERE closed_at IS NULL;
+ALTER TABLE screener.positions ADD COLUMN IF NOT EXISTS book text NOT NULL DEFAULT 'swing';
+DROP INDEX IF EXISTS screener.positions_one_open;
+CREATE UNIQUE INDEX IF NOT EXISTS positions_one_open_per_book ON screener.positions (book, ticker) WHERE closed_at IS NULL;
 """
-LOAD_POSITIONS_SQL = POSITIONS_SQL + """SELECT * FROM screener.positions WHERE closed_at IS NULL ORDER BY buy_date, id;"""
+# Only the swing book is the screener's: pmcc and holding positions have their own budget and are not followed here.
+LOAD_POSITIONS_SQL = POSITIONS_SQL + """SELECT * FROM screener.positions WHERE closed_at IS NULL AND book = 'swing'
+ORDER BY buy_date, id;"""
 
 
 def datatable_query(name=DATA_TABLE):
