@@ -184,7 +184,7 @@ class TranslationTests(unittest.IsolatedAsyncioTestCase):
 
         def save_and_stop(state):
             save(state)
-            if any(entry.get("result") in ("completed", "failed") for entry in state.values()):
+            if any(entry.get("result") in ("completed", "failed", "rejected") for entry in state.values()):
                 app.shutdown_event.set()
 
         with patch.object(httpx, "AsyncClient", lambda **kwargs: client), \
@@ -265,7 +265,7 @@ class TranslationTests(unittest.IsolatedAsyncioTestCase):
             ("missing", [[old], [old]], 200, "failed"),
             ("restart", [[old], []], 200, "failed"),
             ("unrelated", [[old, job(15, "completed", "Search")], [old, job(15, "completed", "Search")]], 200, "failed"),
-            ("non-2xx", [[old]], 500, "failed"),
+            ("non-2xx", [[old]], 500, "rejected"),
             ("timeout", [[old], [job(10, "running")]], 200, "failed"),
             ("newest", [[old], [job(10, "completed"), job(11, "failed")]], 200, "failed"),
         )
@@ -282,7 +282,7 @@ class TranslationTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(entry["phase"], "translate")
                 self.assertEqual(entry["result"], result)
                 self.assertEqual(entry["rounds"], 3)
-                end_elapsed = self.elapsed - (3600 if result == "failed" else 0)
+                end_elapsed = self.elapsed - {"failed": 3600, "rejected": 30}.get(result, 0)
                 self.assertEqual(entry["ts"], self.now + end_elapsed)
                 self.assertEqual(json.loads(Path(app.state_path).read_text())["s1:el"], entry)
                 self.assertEqual(3600 in self.sleeps, result == "failed")
@@ -319,6 +319,23 @@ class TranslationTests(unittest.IsolatedAsyncioTestCase):
                     await app.translation_worker(app.base_url, app.api_key)
                 self.assertEqual(sends, [0, expected_delay])
                 self.assertEqual(app.state["s2:el"]["result"], "completed")
+
+    async def test_rejected_send_skips_failure_pause(self):
+        self.seed({"s1:el": ready(100, 1), "s2:el": ready(200, 2)})
+        client = Client([[]], patch_status=500)
+        sends = []
+
+        def record_send(client):
+            sends.append(self.elapsed)
+            client.patch_status = 500 if len(sends) == 1 else 200
+            if len(sends) == 2:
+                app.shutdown_event.set()
+
+        client.on_patch = record_send
+        with patch.object(httpx, "AsyncClient", lambda **kwargs: client):
+            await app.translation_worker(app.base_url, app.api_key)
+        self.assertEqual(sends, [0, 30])
+        self.assertEqual(app.state["s1:el"]["result"], "rejected")
 
     async def test_state_save_error_is_logged_and_worker_continues(self):
         self.seed({"s1:el": ready(100, 1), "s2:el": ready(200, 2)})

@@ -140,7 +140,9 @@ provider search rounds, 8h apart. If all three find nothing, they become
 ready for translation. The worker translates one file at a time, shortest
 base-language subtitle first. Still-wanted items retry translation 24h after
 the attempt ends, whether it completed or failed, without new search rounds.
-After a failure, the worker pauses all sends for 1h.
+After a failure, the worker pauses all sends for 1h. A send that Bazarr
+refuses (for example a source subtitle missing from disk) spends no quota:
+the item waits 24h and the worker moves on after 30s.
 
 Between 2026-09-20 and 2026-09-25 Lingarr completed about 930 file
 translations. The scan on 2026-09-25 still counted 469 English-only files,
