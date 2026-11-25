@@ -3,7 +3,7 @@
 This is a separate backend, not a deployment claim. Issue #1837 tracks its
 first deployment and live acceptance. Mixed and homelab keep their Applications
 and homes. Employer approval is confirmed. Azure enrollment, the dedicated
-organization GitHub PAT and T3 Connect linking remain owner steps.
+organization GitHub PAT and Tailscale enrollment remain owner steps.
 
 The work namespace `t3code-work` has its own PVC, clean home, T3 identity,
 provider grants, histories, SSH host key and `projects/work` checkout. The
@@ -15,9 +15,9 @@ Homelab still has no Azure CLI, `kubelogin`, Azure cache or work grants. No imag
 private instructions, service inventories or credentials.
 
 T3 binds only `127.0.0.1:3773` and advertises no direct LAN endpoint. App
-access uses T3 Connect or SSH only, not the pod IP. The `t3code` Service retains
+access uses Tailscale or SSH only, not the pod IP. The `t3code` Service retains
 the StatefulSet identity with SSH only on 2222; it no longer exposes HTTP.
-See [client access](../13.t3code/env/client-access.md) for relay and SSH checks.
+See [client access](../13.t3code/env/client-access.md) for Tailscale and SSH checks.
 
 Files for the owner's desktops go in `~/handoffs/`, where the desktops pull them over SSH; the pod never pushes them ([handoffs and builds](../29.t3-build/README.md#handoffs)).
 
@@ -473,7 +473,7 @@ tracing or shell recording enabled.
 
    Azure session files remain in the work PVC, not a Kubernetes Secret or the
    mixed home. Add clusters as in [Kubernetes clusters](#kubernetes-clusters).
-   Connect homePC and laptop through the owner's T3 account as described below.
+   Connect homePC and laptop: [pair the app over Tailscale](../13.t3code/env/client-access.md#tailscale).
    Complete one harmless thread on each, verify instructions/hooks, discovery,
    read-only cluster access and restart persistence before accepting #1837.
 
@@ -489,19 +489,11 @@ For hub Secret changes, follow
 Runtime grant/input rotations still require the stop/change/revision/start
 procedure above; these first-setup tools refuse rotation.
 
-## T3 Connect
+## App access
 
-This pod is live on T3 Connect. Follow the shared
-[T3 Connect and Zed SSH procedure](../13.t3code/env/client-access.md).
-The one-time owner link command for this pod is:
-
-```sh
-kubectl --context epaflix -n t3code-work exec -it work-0 -c t3 -- \
-  t3 connect link --headless --base-dir /home/t3/.t3
-```
-
-Work sessions then pass through T3's relay, which the owner's employer
-approval must cover.
+Apps reach this pod over Tailscale at
+`http://t3code-work.tailea078a.ts.net:3773`; T3 Connect is unlinked. Follow the
+shared [Tailscale and Zed SSH procedure](../13.t3code/env/client-access.md).
 
 ## Dedicated laptop diagnostic connection
 
@@ -538,8 +530,8 @@ change `~/.ssh/config`, import a keyring or use a general SSH agent.
    `t3-work`. Both use `ssh -F`, pinned host keys, `IdentityAgent none` and no
    agent forwarding. The server permits forwarding only to T3 on port 3773.
 4. A4: Check `http://127.0.0.1:23773/health` and
-   `http://127.0.0.1:23773/.well-known/t3/environment`. For app access, select
-   work through the owner's T3 account; retain homelab and mixed.
+   `http://127.0.0.1:23773/.well-known/t3/environment`. For app access,
+   [pair the app over Tailscale](../13.t3code/env/client-access.md#tailscale); retain homelab and mixed.
 
 This login is inbound backend access, not an outbound work SSH grant.
 
@@ -697,7 +689,7 @@ pipeline assertions no longer run.
 - L2: Log in to Azure, add one work cluster, exercise the required policy
   checks and make one harmless read-only API request. Confirm the epaflix API
   is unreachable from the `t3` container.
-- L3: Select work through T3 Connect from the laptop and finish a harmless
+- L3: Select work over Tailscale from the laptop and finish a harmless
   agent thread and provider-delegated task. Confirm environment-specific
   thread access, record identity/history privately, restart and verify
   persistence and discovery.

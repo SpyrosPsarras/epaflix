@@ -441,24 +441,18 @@ or provider environments. Every configured MCP server URL must start with
 hub token or work/cloud login cache. Check that the mixed backend remains
 healthy, without reading its home or histories.
 
-### T3 Connect
+### App access
 
-This pod is live on T3 Connect. T3 binds only `127.0.0.1:3773` and advertises
-no direct LAN endpoint. App access uses T3 Connect or SSH only, not the pod IP.
-The `t3code` Service retains the StatefulSet identity with SSH only on 2222;
-it no longer exposes HTTP. Follow the shared
-[T3 Connect and Zed SSH procedure](../13.t3code/env/client-access.md).
-The one-time owner link command for this pod is:
-
-```sh
-kubectl --context epaflix -n t3code-homelab exec -it homelab-0 -c t3 -- \
-  t3 connect link --headless --base-dir /home/t3/.t3
-```
+T3 binds only `127.0.0.1:3773` and advertises no direct LAN endpoint. Apps
+reach it over Tailscale at `http://t3code-homelab.tailea078a.ts.net:3773`; T3
+Connect is unlinked. The `t3code` Service retains the StatefulSet identity with
+SSH only on 2222; it no longer exposes HTTP. Follow the shared
+[Tailscale and Zed SSH procedure](../13.t3code/env/client-access.md).
 
 ### homePC and laptop acceptance
 
 The SSH tunnel below is an acceptance and diagnostic check, not the normal
-client connection. Use T3 Connect for app access.
+client connection. Use Tailscale for app access.
 
 Prepare a dedicated identity on each client and provision only its public key
 in the stopped input-rotation window. Never share a private key between clients.
@@ -486,8 +480,8 @@ bash 2-k3s/13.t3code/env/tools/connect-laptop.sh \
 
 Keep the tunnel running. From another homePC terminal, check
 `http://127.0.0.1:13773/health` and
-`http://127.0.0.1:13773/.well-known/t3/environment`. Select this backend in T3
-through the owner's T3 account. Keep the mixed environment entry.
+`http://127.0.0.1:13773/.well-known/t3/environment`. For app access,
+[pair the app over Tailscale](../13.t3code/env/client-access.md#tailscale). Keep the mixed environment entry.
 
 Create a T3 thread in the homelab project with the Pi provider and an enabled
 `cliproxy/` model. Send exactly:

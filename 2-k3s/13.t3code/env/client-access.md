@@ -1,64 +1,29 @@
-# T3 Connect and Zed SSH access
+# Tailscale and Zed SSH access
 
-## T3 Connect
+## App access
 
-The isolated homelab and work servers bind only `127.0.0.1:3773`. The app
-connects through T3 Connect or an SSH tunnel, never the pod IP or a cluster
-HTTP Service. Loopback binding prevents T3 from advertising an unreachable
-pod IP as a direct LAN endpoint. T3 Connect registers the loopback HTTP origin
-for its managed `cloudflared` tunnel, so it does not need inbound port 3773.
+The isolated homelab and work servers bind only `127.0.0.1:3773`. Desktop and
+phone apps reach them over Tailscale (below), never the pod IP or a cluster
+HTTP Service. T3 Connect is unlinked in both pods; `t3 connect link` would
+enable it again.
 
 Kubelet probes run `curl` inside the T3 container against the loopback health
 URL. The `t3code` ClusterIP Service remains the StatefulSet
 `serviceName` to avoid changing that immutable field, but exposes only SSH on
 2222. Client SSH uses the separate `t3code-ssh` LoadBalancer. Idle-rollout uses
 Kubernetes exec, image-prepull runs `true`, and hub/model calls are outbound;
-none needs an HTTP Service or pod-IP access to 3773.
+none needs an HTTP Service or pod-IP access to 3773. Remove any
+operator-created `t3code-direct-endpoint-temporary` NetworkPolicy; the tracked
+policies allow only SSH ingress on 2222.
 
-After both replacement pods pass T3 Connect and SSH acceptance, remove any
-operator-created `t3code-direct-endpoint-temporary` NetworkPolicy from their
-namespaces. The tracked policies continue to allow only SSH ingress on 2222.
+Both runtime Applications automatically sync merged revisions with pruning and
+without self-healing. For pending GitOps updates, `OnDelete` keeps the current
+pod running until the idle-rollout job replaces it after 30 idle minutes, or an
+operator approves an earlier replacement. For input or grant changes, follow
+[input rotation](isolated-runtime.md#input-rotation) and pause both
+`app-of-apps` and the runtime Application before scaling down.
 
-Linking is a one-time owner step. Run the namespace-specific link command in
-the [homelab README](../../13.t3code-homelab/README.md#t3-connect) or
-[work README](../../13.t3code-work/README.md#t3-connect) in the owner's private
-terminal. On first use, accept the offer to install the managed relay client,
-`cloudflared`, into the pod's persistent T3 home. The owner approves the
-device code with the owner's T3 account.
-
-The link takes effect at the next server start. Both runtime Applications
-automatically sync merged revisions with pruning and without self-healing.
-For pending GitOps updates, `OnDelete` keeps the current pod running until
-the idle-rollout job replaces it after 30 idle minutes, or an operator
-approves an earlier replacement.
-For input or grant changes, follow [input rotation](isolated-runtime.md#input-rotation)
-and pause both `app-of-apps` and the runtime Application before scaling down.
-
-For linking alone, replace the pod in an idle window. Set `namespace` to
-`t3code-homelab` or `t3code-work` for the pod being linked:
-
-```sh
-namespace=t3code-homelab
-pod=${namespace#t3code-}-0
-kubectl --context epaflix -n "$namespace" delete pod "$pod"
-```
-
-After the replacement pod is ready, check status:
-
-```sh
-kubectl --context epaflix -n "$namespace" exec "$pod" -c t3 -- \
-  t3 connect status --base-dir /home/t3/.t3
-```
-
-Status must show `Exposure: enabled`, `Environment link: provisioned` and
-relay URL `https://relay.t3.codes`. The `t3` container log must show
-`Relay client tunnel connection registered`. Authorization and the relay
-client live in the persistent home and survive restarts. Run
-`t3 connect unlink --base-dir /home/t3/.t3` in the `t3` container to disable it.
-
-Desktop and phone clients reach the pod through the owner's T3 account.
-No SSH tunnel or pairing code is needed for the T3 app. The READMEs retain
-`connect-laptop.sh` for SSH acceptance and diagnostic checks.
+The READMEs retain `connect-laptop.sh` for SSH acceptance and diagnostic checks.
 
 ## Tailscale
 
@@ -69,6 +34,13 @@ off, so the pods resolve tailnet names only through `hostAliases`. The
 [tailnet policy](../../21.tailscale/policy.json) lets `tag:t3code` reach only
 `spylinux` on TCP 3773. Its identity lives on the `t3code-tailscale` PVC,
 which only the sidecar mounts.
+
+Set `namespace` to `t3code-homelab` or `t3code-work` for the commands below:
+
+```sh
+namespace=t3code-homelab
+pod=${namespace#t3code-}-0
+```
 
 First apply `policy.json` in the Tailscale admin console. Argo CD does not
 apply it, and `tag:t3code` must exist before a pod can request it.
@@ -103,13 +75,16 @@ policy lets the owner's devices reach `tag:t3code` on TCP 3773. The phone uses
 Pi-hole with MagicDNS off, so
 [`40-tailnet.conf`](../../../1-proxmox/pihole/dnsmasq.d/40-tailnet.conf) maps
 each pod's `*.ts.net` name to its tailnet address. Update it if a pod is
-enrolled again and gets a new address. To pair the phone, mint a code in the pod
-and open it at the pod's tailnet name:
+enrolled again and gets a new address. To pair a phone or desktop app, mint a
+code in the pod and open it at the pod's tailnet name. Scan the QR code on the
+phone, or open the printed URL in the desktop app:
 
 ```sh
+client=phone
 code=$(kubectl --context epaflix -n "$namespace" exec "$pod" -c t3 -- \
-  t3 pair --label phone --base-dir /home/t3/.t3 | grep -o 'token=[A-Z0-9]*' | cut -d= -f2)
-qrencode -t ansiutf8 "http://$namespace.tailea078a.ts.net:3773/pair#token=$code"
+  t3 pair --label "$client" --base-dir /home/t3/.t3 | grep -o 'token=[A-Z0-9]*' | cut -d= -f2)
+url="http://$namespace.tailea078a.ts.net:3773/pair#token=$code"
+echo "$url"; qrencode -t ansiutf8 "$url"
 ```
 
 ## Zed SSH access

@@ -36,13 +36,13 @@ destinations. Namespace and pod selectors are combined. Its public rule
 excludes RFC1918, zero, loopback, link-local, shared-address, multicast and
 reserved high address ranges. Public work cluster APIs, such as AKS, use this rule.
 No work endpoint is published. Neither overlay adds an IPv6 allow rule.
-Public IPv4 egress has no port restriction and permits T3 Connect HTTPS
+Public IPv4 egress has no port restriction and permits Tailscale
 and Cloudflare tunnel TCP/UDP 7844. It also carries SSH to GitHub on TCP 22.
 The generated SSH config, not the policy, limits outbound SSH to approved work IPs and `github.com`.
 
 TCP 2222 accepts ingress from any IPv4 source; direct ports 3773 and 8087 stay
 closed. T3 binds only `127.0.0.1:3773`, advertises no direct LAN endpoint and
-accepts app access through T3 Connect or SSH. Its probes use in-container
+accepts app access through Tailscale or SSH. Its probes use in-container
 loopback HTTP, not the pod IP. Both SSH LoadBalancers use
 `externalTrafficPolicy: Cluster`. Owner LAN traffic to the runtime on worker-61
 arrives masqueraded as the pod-range address of the worker that holds the
