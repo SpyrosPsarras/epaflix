@@ -16,7 +16,7 @@ import uuid
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
-FORWARD = ("accept", "content-type", "mcp-session-id", "mcp-protocol-version", "last-event-id")
+FORWARD = ("accept", "content-type", "last-event-id")
 RETURN = ("content-type", "mcp-session-id", "cache-control")
 
 
@@ -119,7 +119,8 @@ def route(path, upstream):
     async def forward(request):
         body = await request.body()
         # identity: the raw bytes are streamed back without a Content-Encoding header.
-        headers = {k: v for k, v in request.headers.items() if k in FORWARD} | {"accept-encoding": "identity"}
+        headers = {k: v for k, v in request.headers.items()
+                   if k in FORWARD or k.startswith("mcp-")} | {"accept-encoding": "identity"}
         for attempt in (0, 1):
             try:
                 extra = await anyio.to_thread.run_sync(upstream.credential)

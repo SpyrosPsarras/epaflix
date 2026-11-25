@@ -242,12 +242,14 @@ def _selftest():
 
         # Forwarding: the hub token stays home, the upstream credential and MCP headers go out.
         r = c.post("/plain", json=init, headers={**auth, "Mcp-Session-Id": "s1", "Mcp-Protocol-Version": "2025-06-18",
-                                                  "Cookie": "c=1"})
+                                                  "Mcp-Method": "initialize", "Mcp-Name": "n",
+                                                  "Mcp-Param-Region": "r", "Cookie": "c=1"})
         assert r.status_code == 200 and r.json()["result"] == {"method": "initialize"}, r.text[:300]
         assert r.headers["mcp-session-id"] == "s1" and "x-internal" not in r.headers, r.headers
         h = seen[-1]
         assert h["x-hub-secret"] == "s3" and "authorization" not in h and "cookie" not in h, h
         assert h["mcp-session-id"] == "s1" and h["mcp-protocol-version"] == "2025-06-18", h
+        assert (h["mcp-method"], h["mcp-name"], h["mcp-param-region"]) == ("initialize", "n", "r"), h
         r = c.post("/plain", json={"jsonrpc": "2.0", "id": 7, "method": "stream"}, headers=auth)
         assert r.headers["content-type"].startswith("text/event-stream") and '"id":7' in r.text, (r.headers, r.text)
         assert c.delete("/plain", headers=auth).status_code == 200
