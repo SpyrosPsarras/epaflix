@@ -5,7 +5,8 @@ ROUND_SPACING_HOURS apart. Failed search requests do not count. Ready items
 translate one at a time, smallest source subtitle first, while the worker
 waits for Bazarr's translation jobs to end. Still-wanted items retry after
 TRANSLATE_GRACE_HOURS from attempt end without new search rounds. A failed
-attempt pauses all sends for FAILURE_PAUSE_MINUTES.
+attempt pauses all sends for FAILURE_PAUSE_MINUTES. A send Bazarr refuses
+spends no quota, so the worker moves on to the next item.
 Bazarr's own six-hourly wanted search keeps running.
 """
 
@@ -324,12 +325,13 @@ async def translation_worker(base_url, api_key):
                 params = {"action": "translate", **entry["job"]}
                 size = entry["size"]
                 started = time.monotonic()
-                result = "failed"
+                result = "rejected"
                 logger.info(f"[translate] Sending {key} path='{params['path']}' size={size}")
                 try:
                     response = await client.patch(f"{base_url}/api/subtitles",
                                                   headers={"X-API-KEY": api_key}, params=params)
                     response.raise_for_status()
+                    result = "failed"
                     while time.monotonic() - started < translation_job_timeout_seconds:
                         await asyncio.sleep(JOB_POLL_SECONDS)
                         snapshot = await get_idle_translation_jobs(client, base_url, api_key)
@@ -354,6 +356,8 @@ async def translation_worker(base_url, api_key):
                 if result == "failed":
                     logger.info(f"[translate] Pausing sends for {failure_pause_seconds / 60:g} minutes after failure")
                     await asyncio.sleep(failure_pause_seconds)
+                elif result == "rejected":
+                    await asyncio.sleep(JOB_POLL_SECONDS)
             except Exception as e:
                 logger.error(f"[translate] {key or 'worker'} iteration failed: {type(e).__name__}: {e}")
                 await asyncio.sleep(JOB_POLL_SECONDS)
