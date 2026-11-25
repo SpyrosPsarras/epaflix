@@ -1,5 +1,6 @@
 {
   "tagOwners": {
+    "tag:vidar": ["spypsarras@gmail.com"],
     "tag:t3code": ["spypsarras@gmail.com"]
   },
   "hosts": {
@@ -9,6 +10,10 @@
     "src": ["spypsarras@gmail.com"],
     "dst": ["192.168.10.0/24", "10.0.0.0/24", "autogroup:self"],
     "ip": ["*"]
+  }, {
+    "src": ["tag:vidar"],
+    "dst": ["192.168.10.42"],
+    "ip": ["22"]
   }, {
     "src": ["tag:t3code"],
     "dst": ["spylinux"],
