@@ -73,6 +73,7 @@ kubectl -n discord-media exec deploy/openclaw -c gateway -- openclaw gateway cal
 - The Seerr key is Seerr's admin key. The agent could change Seerr settings or read the Radarr, Sonarr and Jellyfin keys stored there, which it already holds.
 - The `#media` agent can queue any indexed file in the movies, TV or anime libraries if it knows the exact path. It could queue many files one at a time. Its NetworkPolicy allows only Tdarr's sidecar port, so it cannot reach the raw API, change flows or approve staged files. Tdarr libraries are seeded with transcodes off, so a queued file waits until the owner turns processing on after the first copy test.
 - The `#windmill` agent can read its 1-hour GitHub token. The token works only on this repo, ruleset `owner-only` excludes `bots/**` and `bots/**/*`, and the CI path check fails its PRs outside the Windmill workspace.
+- The `#windmill` agent can rename threads with the `message` tool's `channel-edit` action. `AGENTS.md` limits it to the current thread and its name, but the tool does not enforce that. The Discord plugin's built-in tool checks that the person asking has Manage Threads on the target thread, or Manage Channels on a channel. The exception is reopening an unlocked thread, where Send Messages and View Channel on that thread are enough.
 - Code the bot merges runs inside `windmill-deploy`, so it could copy the Windmill deploy token into the screener workspace. That is why the token belongs to a non-admin user with write access to `f/screener` only.
 
 ## Rotating a secret
