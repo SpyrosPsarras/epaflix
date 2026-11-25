@@ -1816,9 +1816,19 @@ def position_view(pos):
             "size": pos["size"], "note": pos.get("note")}
 
 
+# Fields of a position status that need prices; None when there are none yet (unavailable data, bought today).
+POSITION_PRICE_FIELDS = ("close", "return", "r_now", "stop", "target", "holding_days", "levels_from", "sessions_held",
+                         "exit_date", "exit_price")
+
+
+def _no_prices(pos, **known):
+    return {**{k: None for k in POSITION_PRICE_FIELDS}, "stop": pos.get("stop") or None, "target": pos.get("target") or None,
+            "levels_from": "yours" if pos.get("stop") or pos.get("target") else None, "momentum_hold": False, **known}
+
+
 def position_unknown(pos, note):
-    return {**position_view(pos), "advice": "check", "reason": f"no price data today ({note})", "flags": [], "stalled": False,
-            "data_status": "unavailable"}
+    return {**position_view(pos), **_no_prices(pos), "advice": "check", "reason": f"no price data today ({note})", "flags": [],
+            "stalled": False, "data_status": "unavailable"}
 
 
 def position_status(pos, bars, series, cfg, signal=None, short_today=(), earnings_days=None):
@@ -1829,9 +1839,10 @@ def position_status(pos, bars, series, cfg, signal=None, short_today=(), earning
     last = len(bars) - 1
     i = bisect.bisect_left(bars.dates, buy_day)
     view = position_view(pos)
-    if i > last:
-        return {**view, "advice": "hold", "reason": "bought after the last completed session: first check after it closes",
-                "flags": [], "stalled": False, "data_status": "ok"}
+    if i > last:  # e.g. recorded today and the screen ran before today's session closed
+        return {**view, **_no_prices(pos), "advice": "hold",
+                "reason": f"bought after the last completed session ({bars.dates[last].isoformat()}): first check after it closes",
+                "flags": [], "stalled": False, "data_status": "pending"}
     i = max(i, 1)
     levels = position_levels(pos, series, i, cfg, signal)
     stop, target, hold = levels["stop"], levels["target"], levels["holding_days"]
@@ -3083,6 +3094,61 @@ def put_spread_plan(close, as_of, context, deep, cfg, days=None):
             "note": "nearest listed strikes; the stock's stop does not apply to the spread"}
 
 
+def _fmt(value, spec, suffix=""):
+    """A number in the given format, or N/A when it is missing or not a finite number (never a misleading 0)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return "N/A"
+    try:
+        return format(value, spec) + suffix
+    except (TypeError, ValueError):
+        return "N/A"
+
+
+def position_line(p):
+    """One line of the email for a position status; any missing price field shows N/A."""
+    advice = str(p.get("advice") or "check").upper()
+    head = (f"{p.get('ticker', '?')} bought {p.get('buy_date') or 'N/A'} at {_fmt(p.get('buy_price'), 'g')} "
+            f"({_fmt(p.get('size'), '.0%')}): {advice}")
+    reason = str(p.get("reason") or "no reason given")
+    flags = p.get("flags") or []
+    tail = f" Flags: {'; '.join(map(str, flags))}." if flags else ""
+    if p.get("data_status") == "unavailable":
+        return f"{head}, {reason}.{tail}"
+    levels = f" (from {p['levels_from']})" if p.get("levels_from") else ""
+    return (f"{head}, {_fmt(p.get('return'), '+.1%')} ({_fmt(p.get('r_now'), '+.2f', 'R')}), close {_fmt(p.get('close'), 'g')}, "
+            f"stop {_fmt(p.get('stop'), 'g')}, target {_fmt(p.get('target'), 'g')}{levels}. {reason[:1].upper()}{reason[1:]}.{tail}")
+
+
+def fallback_email_html(result, error):
+    """A plain report when email_html fails: the error, the proposals and the positions, every field read defensively."""
+    parts = [f"<p><b>The full report could not be built</b> ({escape(f'{type(error).__name__}: {error}')}). The screening "
+             "run itself completed; this is a short version.</p>"]
+    market = result.get("market") or {}
+    parts.append(f"<p>As of {escape(str(result.get('as_of')))}, market {escape(str(market.get('regime', 'N/A')))}.</p>")
+    rows = result.get("candidates") or []
+    parts.append("<ol>" + "".join(f"<li>{escape(str(r.get('recommendation') or r.get('ticker')))}</li>" for r in rows) + "</ol>"
+                 if rows else "<p>No setup qualified today.</p>")
+    items = (result.get("positions") or {}).get("items") or []
+    lines = []
+    for p in items:
+        try:
+            lines.append(position_line(p))
+        except Exception:  # noqa: BLE001 - the fallback must not fail
+            lines.append(f"{p.get('ticker', '?')}: status unavailable")
+    if items:
+        parts.append("<p><b>My positions</b></p><ul>" + "".join(f"<li>{escape(x)}</li>" for x in lines) + "</ul>")
+    parts.append("<p>Screening only, not advice.</p>")
+    return "".join(parts)
+
+
+def build_email(result):
+    """The email body and the formatting error, if any (then the body is the fallback report)."""
+    try:
+        return email_html(result), None
+    except Exception as error:  # noqa: BLE001 - a formatting bug must not cost the run or the email
+        return fallback_email_html(result, error), f"{type(error).__name__}: {error}"
+
+
 def email_html(result):
     m = result["market"]
     b = m["benchmark"]
@@ -3113,18 +3179,12 @@ def email_html(result):
         parts.append(backdrop_html(result["backdrop"]))
     mine = result.get("positions")
     if mine is not None:
-        sell = [p for p in mine["items"] if p["advice"] != "hold"]
-        parts.append(f"<p><b>My positions: {mine['open']} of {mine['max_open_trades']} open</b>"
+        items = mine.get("items") or []
+        sell = [p for p in items if p.get("advice") != "hold"]
+        parts.append(f"<p><b>My positions: {_fmt(mine.get('open'), 'd')} of {_fmt(mine.get('max_open_trades'), 'd')} open</b>"
                      + (f", {len(sell)} to sell or check" if sell else "") + ".</p>")
-        def position_line(p):
-            head = f"{p['ticker']} bought {p['buy_date']} at {p['buy_price']:g} ({p['size']:.0%}): {p['advice'].upper()}"
-            if p["data_status"] != "ok":
-                return f"{head}, {p['reason']}."
-            return (f"{head}, {p['return']:+.1%} ({p['r_now']:+.2f}R), close {p['close']:g}, stop {p['stop']:g}, target "
-                    f"{p['target']:g} (from {p['levels_from']}). {p['reason'][0].upper()}{p['reason'][1:]}."
-                    + (f" Flags: {'; '.join(p['flags'])}." if p["flags"] else ""))
-        if mine["items"]:
-            parts.append("<ul>" + "".join(f"<li>{escape(position_line(p))}</li>" for p in mine["items"]) + "</ul>")
+        if items:
+            parts.append("<ul>" + "".join(f"<li>{escape(position_line(p))}</li>" for p in items) + "</ul>")
         else:
             parts.append("<p>None recorded: run f/screener/positions with action buy when you open a trade.</p>")
     rows = result["candidates"]
@@ -3451,13 +3511,14 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
     backdrop = None
     if cfg["backdrop"]:
         mapped = list(dict.fromkeys([c["ticker"] for c in candidates if c["action"] in TRADE_ACTIONS]
-                                    + [p["ticker"] for p in statuses if p["data_status"] == "ok"]))
+                                    + [p["ticker"] for p in statuses if p["data_status"] != "unavailable"]))
         backdrop = market_backdrop(as_of, now, count, cfg, {**etf_bars, **context_bars}, closes_by_ticker, mapped)
 
     duration = time.monotonic() - started
     counts = ", ".join(f"{s} {len(results[s]['qualified'])}" for s in strategies)
     print(f"Summary: {len(names)} tickers, {len(data_errors)} data errors, regime {market_info['regime']}, qualified: {counts}, {duration:.1f}s")
     tracked.sort(key=lambda x: (x["signal_date"], x["strategy"], x["ticker"]), reverse=True)
+    errors = {}  # stages after the screening: persistence, email_format, email_delivery
     result = {
         "generated_at": now.isoformat(timespec="seconds"),
         "as_of": as_of.isoformat(),
@@ -3511,9 +3572,14 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
         candidates_new = [new_row(q, True, as_of.isoformat()) for s in strategies for q in results[s]["qualified"]]
         candidates_new += [new_row(x, False, as_of.isoformat()) for x in tracked]
         new_rows, skipped = select_new(stored, updates, candidates_new)
-        written = query(WRITE_SQL, new_rows, updates, as_of.isoformat(), market_info["regime"], len(names), len(data_errors),
-                        _json_safe(market_info), _json_safe(candidates))
-        stats = query(STATS_SQL)
+        try:  # one statement, one transaction: all rows are written or none
+            written = query(WRITE_SQL, new_rows, updates, as_of.isoformat(), market_info["regime"], len(names), len(data_errors),
+                            _json_safe(market_info), _json_safe(candidates))
+            stats = query(STATS_SQL)
+        except Exception as error:  # noqa: BLE001 - the screening result and the email still go out
+            errors["persistence"] = f"{type(error).__name__}: {error}"
+            print(f"Persistence failed: {errors['persistence']}")
+            written, stats = [], []
         by_id = {u["id"]: u for u in updates}
         merged = [{**row, **by_id.get(row["id"], {})} for row in active]
         result["persistence"] = {
@@ -3527,12 +3593,28 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
             "data_unavailable": [stored_view(r) for r in merged if r["data_status"] == "unavailable"],
             "skipped_busy": skipped,
             "stats": stats,
+            "status": "failed" if "persistence" in errors else "ok",
             "note": "live = recorded on its signal day with the live checks; not live = recomputed later from the price history.",
         }
     if email.strip():
         subject = f"Strategy screen {as_of.isoformat()}: market {market_info['regime']}, {len(candidates)} setups"
         if persist:
             subject += f", positions {len(statuses)}/{sizing['max_open_trades']}" + (f", {sizing['to_sell']} to sell" if sizing["to_sell"] else "")
-        send_email(email.strip(), subject, email_html(result))
-        result["email"] = {"to": email.strip(), "subject": subject}
+        html, problem = build_email(result)
+        if problem:
+            errors["email_format"] = problem
+            subject += " (short report)"
+        if "persistence" in errors:
+            html = (f"<p><b>Not saved</b>: the database write failed ({escape(errors['persistence'])}); tracked signals were not "
+                    "updated. The next run retries them without duplicates.</p>") + html
+        try:
+            send_email(email.strip(), subject, html)
+            status = "sent"
+        except Exception as error:  # noqa: BLE001 - the screening result stays valid without the email
+            errors["email_delivery"] = f"{type(error).__name__}: {error}"
+            status = "failed"
+        result["email"] = {"to": email.strip(), "subject": subject, "status": status, "short_report": bool(problem)}
+    result["errors"] = errors
+    for stage, text in errors.items():
+        print(f"{stage} failed: {text}")
     return result
