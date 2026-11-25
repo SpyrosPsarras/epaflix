@@ -1268,7 +1268,9 @@ def test_main_screens_short_setups(offline):
 def test_main_emails_candidates_only_when_asked(offline):
     result = ss.main(tickers="PULL,RALY", email="trader@example.com")
     (to, subject, html), = offline["_sent"]
-    assert to == "trader@example.com" and result["email"] == {"to": "trader@example.com", "subject": subject}
+    assert to == "trader@example.com" and result["email"] == {"to": "trader@example.com", "subject": subject, "status": "sent",
+                                                                "short_report": False}
+    assert result["errors"] == {}
     assert subject.startswith(f"Strategy screen {result['as_of']}: market bullish, 2 setups")
     assert "PULL" in html and "RALY" in html and "Favoured: pullback, breakout, squeeze" in html and "TLT " in html
     assert "<b>Proposed</b>: 1 of 2 setups" in html and "PULL: PROPOSED LONG pullback" in html and "RALY: WATCH ONLY" in html
@@ -2391,3 +2393,120 @@ def test_etf_breakout_needs_accelerating_rotation(offline):
     assert all(c["ticker"] != "XBI" for c in strict["candidates"])
     off = ss.main(tickers="PULL", settings={"etf_setups": 0})
     assert off["etf_setups"] is None and all(c["ticker"] != "XBI" for c in off["candidates"])
+
+
+# ---------------------------------------------------------------- position lines and a failing email or database
+def full_status(**over):
+    return {"id": 1, "ticker": "FULL", "buy_date": "2026-11-02", "buy_price": 100.0, "size": 0.1, "note": None, "advice": "hold",
+            "reason": "5 of 30 sessions left", "flags": ["closed below its EMA50 (101.00)"], "close": 103.0, "return": 0.03,
+            "r_now": 0.75, "stop": 96.0, "target": 108.0, "holding_days": 30, "levels_from": "yours", "sessions_held": 5,
+            "momentum_hold": False, "stalled": False, "exit_date": None, "exit_price": None, "data_status": "ok", **over}
+
+
+def test_position_line_complete_incomplete_and_unavailable():
+    assert ss.position_line(full_status()) == (
+        "FULL bought 2026-11-02 at 100 (10%): HOLD, +3.0% (+0.75R), close 103, stop 96, target 108 (from yours). "
+        "5 of 30 sessions left. Flags: closed below its EMA50 (101.00).")
+    # a zero return is shown as a zero, a missing one as N/A
+    assert "+0.0% (+0.00R)" in ss.position_line(full_status(**{"return": 0.0, "r_now": 0.0}))
+    bare = {"ticker": "BARE", "buy_date": "2026-11-25", "buy_price": 50.0, "size": 0.1, "advice": "hold", "data_status": "ok"}
+    assert ss.position_line(bare) == ("BARE bought 2026-11-25 at 50 (10%): HOLD, N/A (N/A), close N/A, stop N/A, target N/A. "
+                                      "No reason given.")
+    nulls = full_status(**{k: None for k in ss.POSITION_PRICE_FIELDS}, flags=None)
+    assert "N/A (N/A), close N/A, stop N/A, target N/A. 5 of 30" in ss.position_line(nulls)
+    assert "nan" not in ss.position_line(full_status(close=float("nan"))).lower()
+    gone = ss.position_unknown(position(ticker="GONE"), "chart data is for another ticker")
+    assert ss.position_line(gone) == ("GONE bought 2025-12-01 at 100 (10%): CHECK, no price data today (chart data is for "
+                                      "another ticker).")
+    assert {k: gone[k] for k in ss.POSITION_PRICE_FIELDS} == {k: None for k in ss.POSITION_PRICE_FIELDS}
+
+
+def test_position_bought_after_the_last_session_has_every_field():
+    bars, series = bars_and_series(uptrend(300, 100, 0.5))
+    today = ss.position_status(position(buy_date="2030-01-02", stop=90.0), bars, series, CFG)
+    assert today["data_status"] == "pending" and today["advice"] == "hold" and not today["stalled"]
+    assert set(ss.POSITION_PRICE_FIELDS) <= set(today) and today["return"] is None and today["r_now"] is None
+    assert (today["stop"], today["target"], today["levels_from"]) == (90.0, None, "yours")
+    assert ss.position_line(today).startswith("TEST bought 2030-01-02 at 100 (10%): HOLD, N/A (N/A), close N/A, stop 90, "
+                                              "target N/A (from yours). Bought after the last completed session")
+    done = ss.position_status(position(buy_date=bars.dates[280].isoformat(), buy_price=bars.close[280]), bars, series, CFG)
+    assert set(done) >= set(today) - {"momentum_hold"} and done["data_status"] == "ok"
+
+
+def email_result(items):
+    market = {"regime": "neutral", "favoured": [], "breadth": {"above_sma200": 5, "sector_etfs": 11},
+              "benchmark": {"ticker": "QQQ", "close": 500.0, "vs_sma200": 0.01, "change_20d": -0.02}}
+    return {"as_of": "2026-11-24", "market": market, "candidates": [], "positions": None if items is None else {
+        "open": len(items), "max_open_trades": 10, "to_sell": 0, "items": items, "swaps": []}}
+
+
+@pytest.mark.parametrize("items, expected", [
+    ([full_status()], "FULL bought 2026-11-02 at 100 (10%): HOLD, +3.0% (+0.75R)"),
+    ([{"ticker": "BARE", "buy_date": "2026-11-25", "buy_price": 50.0, "size": 0.1, "advice": "hold", "data_status": "pending",
+       "reason": "bought after the last completed session"}], "BARE bought 2026-11-25 at 50 (10%): HOLD, N/A (N/A)"),
+    ([ss.position_unknown(position(ticker="GONE"), "no chart")], "GONE bought 2025-12-01 at 100 (10%): CHECK, no price data"),
+    ([], "None recorded: run f/screener/positions"),
+    (None, "No setup qualified today."),
+])
+def test_email_html_with_complete_incomplete_unavailable_and_no_positions(items, expected):
+    assert expected in ss.email_html(email_result(items))
+
+
+def test_email_formatting_error_sends_the_short_report(offline, monkeypatch):
+    monkeypatch.setattr(ss, "email_html", lambda result: {}["return"])
+    result = ss.main(tickers="PULL,RALY", email="trader@example.com")
+    (to, subject, html), = offline["_sent"]
+    assert subject.endswith("(short report)") and "The full report could not be built</b> (KeyError: &#x27;return&#x27;)" in html
+    assert "PULL: PROPOSED LONG pullback" in html and result["errors"] == {"email_format": "KeyError: 'return'"}
+    assert result["email"]["status"] == "sent" and result["email"]["short_report"] and result["candidates"]
+
+
+def test_email_delivery_error_keeps_the_screening_result(offline, monkeypatch):
+    def broken(to, subject, html):
+        raise OSError("SMTP refused")
+    monkeypatch.setattr(ss, "send_email", broken)
+    result = ss.main(tickers="PULL", email="trader@example.com")
+    assert result["email"]["status"] == "failed" and result["errors"] == {"email_delivery": "OSError: SMTP refused"}
+    assert result["results"]["pullback"]["qualified"]
+
+
+def test_rerun_after_an_email_failure_adds_no_duplicate_signals(offline, db, monkeypatch):
+    monkeypatch.setattr(ss, "datatable_query", lambda name=ss.DATA_TABLE: db)
+    monkeypatch.setattr(positions, "datatable_query", lambda name=positions.DATA_TABLE: db)
+    positions.main("buy", "BRK", 150.0)  # today: after the fixture's last session, as in the failed run
+    broken, sent, real_html = {"on": True}, offline["_sent"], ss.email_html
+
+    def html(result):
+        return {}["return"] if broken["on"] else real_html(result)
+
+    def send(to, subject, body):
+        if broken["on"]:
+            raise OSError("SMTP down")
+        sent.append((to, subject, body))
+    monkeypatch.setattr(ss, "email_html", html)
+    monkeypatch.setattr(ss, "send_email", send)
+    first = ss.main(tickers="PULL,BRK", track_days=5, persist=True, email="trader@example.com")
+    assert set(first["errors"]) == {"email_format", "email_delivery"} and first["persistence"]["inserted"] > 0
+    keys = "SELECT strategy, ticker, signal_date, direction FROM screener.signals ORDER BY 1, 2, 3, 4"
+    before = db.conn.execute(keys).fetchall()
+    broken["on"] = False
+    again = ss.main(tickers="PULL,BRK", track_days=5, persist=True, email="trader@example.com")
+    assert again["errors"] == {} and again["persistence"]["inserted"] == 0 and again["persistence"]["new"] == []
+    assert db.conn.execute(keys).fetchall() == before
+    brk = {p["ticker"]: p for p in again["positions"]["items"]}["BRK"]
+    assert brk["data_status"] == "pending" and brk["return"] is None
+    assert "BRK bought" in sent[-1][2] and "HOLD, N/A (N/A), close N/A" in sent[-1][2]
+
+
+def test_database_write_error_still_emails_with_a_warning(offline, db, monkeypatch):
+    def flaky(sql, *args):
+        if sql == ss.WRITE_SQL:
+            raise RuntimeError("connection lost")
+        return db(sql, *args)
+    monkeypatch.setattr(ss, "datatable_query", lambda name=ss.DATA_TABLE: flaky)
+    result = ss.main(tickers="PULL", track_days=0, persist=True, email="trader@example.com")
+    assert result["errors"] == {"persistence": "RuntimeError: connection lost"} and result["persistence"]["status"] == "failed"
+    assert result["persistence"]["inserted"] is None and db.one("SELECT count(*) AS n FROM screener.signals")["n"] == 0
+    html = offline["_sent"][-1][2]
+    assert html.startswith("<p><b>Not saved</b>: the database write failed (RuntimeError: connection lost)")
+    assert result["email"]["status"] == "sent"
