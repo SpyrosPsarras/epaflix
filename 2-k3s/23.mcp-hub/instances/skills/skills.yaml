@@ -37,7 +37,7 @@ spec:
             - name: GITSYNC_REF
               value: main
             - name: GITSYNC_ROOT
-              value: /git
+              value: /git/root
             - name: GITSYNC_LINK
               value: skills
             - name: GITSYNC_PERIOD
@@ -99,7 +99,7 @@ spec:
                   name: mcp-hub-skills
                   key: token
             - name: SKILLS_ROOT
-              value: /git/skills
+              value: /git/root/skills
             - name: PYTHONPATH
               value: /app:/opt/py
             - name: HOME
