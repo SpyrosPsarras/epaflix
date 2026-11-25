@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -7,6 +8,7 @@ import sys
 import unittest
 from unittest.mock import patch
 
+import httpx2
 from starlette.testclient import TestClient
 import yaml
 
@@ -40,6 +42,25 @@ class SearchTests(unittest.TestCase):
                 fetch.assert_called_once()
             for route in ("/gmail", "/drive", "/kubernetes", "/notion", "/vault-secret", "/vaultwarden"):
                 self.assertEqual(client.post(route, headers=headers).status_code, 404)
+
+    def test_hub_forwards_2026_07_28_requests(self):
+        token = "synthetic_search_fixture_0001"
+        backend = search.app(token)
+        upstream = search.mcp_hub.Upstream("searxng", "http://backend/mcp", lambda: {"Authorization": "Bearer " + token},
+                                           transport=httpx2.ASGITransport(app=backend))
+        hub = search.mcp_hub.build_app({"fixture": hashlib.sha256(b"homelab.fixture").hexdigest()}, modules=(),
+                                       ups=[("/searxng", upstream)], environment="homelab")
+        meta = {"io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                "io.modelcontextprotocol/clientCapabilities": {}}
+        with TestClient(backend), TestClient(hub) as client:
+            reply = client.post("/searxng", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list",
+                                                  "params": {"_meta": meta}},
+                                headers={"Authorization": "Bearer homelab.fixture",
+                                         "Accept": "application/json, text/event-stream",
+                                         "MCP-Protocol-Version": "2026-07-28", "Mcp-Method": "tools/list"})
+        self.assertEqual(reply.status_code, 200, reply.text)
+        self.assertEqual(reply.json()["result"]["resultType"], "complete")
+        self.assertEqual([tool["name"] for tool in reply.json()["result"]["tools"]], ["searxng_search"])
 
     def test_empty_or_client_prefixed_upstream_credentials_refuse(self):
         for token in ("", "work.fixture", "homelab.fixture", "white space"):
