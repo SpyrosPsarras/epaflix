@@ -1,4 +1,5 @@
 # Kernel mode: only tailnet addresses use tailscale0, so T3 links to tailnet peers without a proxy.
+# Serve forwards tailnet TCP 3773 to T3 on loopback, so owner devices reach T3 without T3 binding a pod address.
 # No probes and a ten-year boot timeout: a not-yet-enrolled sidecar must not restart or hold the pod NotReady.
 - op: add
   path: /spec/template/spec/containers/-
@@ -17,6 +18,7 @@
     - {name: TS_ACCEPT_DNS, value: 'false'}
     - {name: TS_EXTRA_ARGS, value: '--advertise-tags=tag:t3code --accept-routes=false --netfilter-mode=off'}
     - {name: TS_DISABLE_PORTMAPPER, value: 'true'}
+    - {name: TS_SERVE_CONFIG, value: /etc/tailscale-serve/serve.json}
     securityContext:
       runAsNonRoot: false
       runAsUser: 0
@@ -28,6 +30,7 @@
     volumeMounts:
     - {name: tailscale-state, mountPath: /var/lib/tailscale}
     - {name: tun, mountPath: /dev/net/tun}
+    - {name: tailscale-serve, mountPath: /etc/tailscale-serve, readOnly: true}
     resources:
       requests: {cpu: 10m, memory: 32Mi}
       limits: {memory: 256Mi}
@@ -42,6 +45,11 @@
     name: tun
     hostPath: {path: /dev/net/tun, type: CharDevice}
 # T3 links over plain http only to *.ts.net names; MagicDNS is off, so pin the laptop's name.
+- op: add
+  path: /spec/template/spec/volumes/-
+  value:
+    name: tailscale-serve
+    configMap: {name: t3code-tailscale-serve}
 - op: add
   path: /spec/template/spec/hostAliases
   value:
