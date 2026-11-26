@@ -63,6 +63,13 @@ Open a tunnel only when a task needs an address behind it, and close it when don
 The owner's laptop uses the same profiles, so if `vpn up` fails or stays connecting, tell the owner instead of retrying.
 Only the vpn sidecar holds the configs. Do not look for them.
 
+## Web pages behind a company login (work pod only)
+
+The preview browser is not signed in, and a company login that needs the owner's security key cannot finish in this pod.
+For screenshots of such a page, load the matching skill from the `skills` hub with `mcp_skills` and use its scripted browser.
+This overrides the Browser preference for those pages. Do not open the sign-in page, ask the owner to log in there,
+search old sessions for a method, or draw mockups in place of real screenshots. If no skill covers the page, say so.
+
 ## Disk space
 
 This pod's home and `/tmp` sit on a node disk that other pods share. The home has no quota.
