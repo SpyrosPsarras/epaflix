@@ -29,7 +29,7 @@ configuration is an application boundary, not a network firewall.
 ## Forgejo grant
 
 The optional `forgejo-token` grant signs `tea` in to `https://git.epaflix.com` as bot
-`t3-homelab` or `t3-work`. T3 Code's Forgejo source control provider uses that
+`skills-homelab-bot` or `skills-work-bot`. T3 Code's Forgejo source control provider uses that
 login. Startup writes `~/.config/tea/config.yml` with mode 0600 and sends Git
 credentials for that host through `tea login helper`. Without the grant,
 startup removes both.
@@ -42,7 +42,7 @@ python3 2-k3s/13.t3code/env/tools/forgejo-grant.py --context epaflix --environme
 ```
 
 The helper requires the stopped backend and checks the existing grants against
-their reviewed digests. It creates the bot if it is missing and mints a token
+their reviewed digests. It requires the existing bot and mints a token
 with `write:repository`, `write:issue`, `read:user` and `read:organization`.
 Then it adds the token to `t3-runtime-grants` and its digest to `runtime.json`.
 It prints neither. After a partial failure, a rerun finishes the digest without
@@ -50,9 +50,11 @@ minting again. It refuses a stored token that differs from its reviewed digest.
 To revoke the grant, delete the token in Forgejo, then remove the Secret key and
 its `grantSha256` entry in the same rotation.
 
-The bots work on existing repositories that list them as collaborators. T3's
-Publish to Forgejo, which creates a repository, is not supported: it would need
-`write:user` and leave the repository owned by the bot.
+Each bot has write access to one repository, `spypsarras/skills` or
+`spypsarras/skills-work`. The hubs' git-sync tokens on the same bots keep
+`read:repository` and cannot push. T3's Publish to Forgejo, which creates a
+repository, is not supported: it would need `write:user` and leave the
+repository owned by the bot.
 
 ## Image-shipped runtime facts
 

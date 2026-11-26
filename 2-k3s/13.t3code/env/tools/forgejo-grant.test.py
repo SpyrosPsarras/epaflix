@@ -17,7 +17,7 @@ def encoded(value):
 
 
 class FakeCluster(grant.Cluster):
-    def __init__(self, pod=False, reviewed=None):
+    def __init__(self, pod=False, reviewed=None, users=('skills-work-bot',)):
         super().__init__('synthetic')
         grants = {'model-token': b'synthetic-model', 'hub-token': b'work.synthetic'}
         runtime = {'environment': 'work', 'grantSha256': reviewed or {name: grant.digest(value) for name, value in grants.items()},
@@ -29,7 +29,7 @@ class FakeCluster(grant.Cluster):
                                               'data': {name: encoded(value) for name, value in grants.items()}},
             ('secret', 't3-runtime-inputs'): {'metadata': {'resourceVersion': '2'},
                                               'data': {'runtime.json': encoded(json.dumps(runtime).encode())}}}
-        self.users, self.minted = [], 0
+        self.users, self.minted = list(users), 0
 
     def get(self, namespace, kind, name):
         assert namespace == 't3code-work'
@@ -45,9 +45,6 @@ class FakeCluster(grant.Cluster):
     def forgejo(self, *args):
         if args[0] == 'list':
             return ' '.join(['ID', 'Username', *self.users]).encode()
-        if args[0] == 'create':
-            self.users.append(args[2])
-            return b''
         self.minted += 1
         assert args[args.index('--username') + 1] in self.users
         return TOKEN + b'\n'
@@ -58,7 +55,7 @@ class ForgejoGrantTests(unittest.TestCase):
         cluster = FakeCluster()
         for _ in range(2):
             grant.install(cluster, 'work')
-        self.assertEqual((cluster.users, cluster.minted), (['t3-work'], 1))
+        self.assertEqual(cluster.minted, 1)
         data = cluster.objects[('secret', 't3-runtime-grants')]['data']
         self.assertEqual(base64.b64decode(data['forgejo-token']), TOKEN)
         raw = base64.b64decode(cluster.objects[('secret', 't3-runtime-inputs')]['data']['runtime.json'])
@@ -66,8 +63,8 @@ class ForgejoGrantTests(unittest.TestCase):
         self.assertEqual(runtime['grantSha256']['forgejo-token'], hashlib.sha256(TOKEN).hexdigest())
         self.assertEqual(json.dumps(runtime).encode(), raw)
 
-    def test_refuses_a_running_backend_or_unreviewed_grants(self):
-        for cluster in (FakeCluster(pod=True), FakeCluster(reviewed={'model-token': 'stale'})):
+    def test_refuses_a_running_backend_unreviewed_grants_or_a_missing_bot(self):
+        for cluster in (FakeCluster(pod=True), FakeCluster(reviewed={'model-token': 'stale'}), FakeCluster(users=())):
             with self.subTest(), self.assertRaises(ValueError):
                 grant.install(cluster, 'work')
             self.assertEqual(cluster.minted, 0)

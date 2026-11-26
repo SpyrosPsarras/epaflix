@@ -31,7 +31,7 @@ git config --global --unset-all credential.https://git.epaflix.com.helper || tru
 if [[ -n ${FORGEJO_TOKEN:-} ]]; then
   [[ $FORGEJO_TOKEN =~ ^[0-9a-f]{40}$ ]]
   mkdir -p "${tea_config%/*}"
-  (umask 077; printf 'logins:\n  - name: git.epaflix.com\n    url: https://git.epaflix.com\n    token: %s\n    default: true\n    user: t3-%s\n' \
+  (umask 077; printf 'logins:\n  - name: git.epaflix.com\n    url: https://git.epaflix.com\n    token: %s\n    default: true\n    user: skills-%s-bot\n' \
     "$FORGEJO_TOKEN" "$MCP_HUB_INSTANCE" > "$tea_config")
   git config --global credential.https://git.epaflix.com.helper ''
   git config --global --add credential.https://git.epaflix.com.helper '!tea login helper'
