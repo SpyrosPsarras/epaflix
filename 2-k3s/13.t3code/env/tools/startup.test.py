@@ -182,6 +182,17 @@ class StartupTest(unittest.TestCase):
                     self.assertFalse(bw)
                     self.assertFalse(any('valueFrom' in entry for entry in env.values()))
                     self.assertNotIn('ports', container)
+                elif name == 'vpn':
+                    # Work only: root with NET_ADMIN, and the only container that mounts the VPN configs.
+                    self.assertEqual(variant, 'work')
+                    self.assertEqual(uid, 0)
+                    self.assertTrue(container['securityContext']['readOnlyRootFilesystem'])
+                    self.assertFalse(container['securityContext']['allowPrivilegeEscalation'])
+                    self.assertEqual(container['securityContext']['capabilities'], {'drop': ['ALL'], 'add': ['NET_ADMIN']})
+                    self.assertEqual(container['command'], ['vpn', 'serve'])
+                    self.assertEqual({mount['name'] for mount in container['volumeMounts']}, {'vpn-config', 'vpn-control', 'vpn-tmp', 'tun'})
+                    self.assertFalse(env)
+                    self.assertNotIn('ports', container)
                 elif name == 'tailscale':
                     self.assertEqual(uid, 0)
                     self.assertFalse(container['securityContext']['allowPrivilegeEscalation'])
@@ -201,7 +212,7 @@ class StartupTest(unittest.TestCase):
                     self.assertNotIn('envFrom', container)
                     self.assertFalse(any(entry.get('valueFrom', {}).get('secretKeyRef', {}).get('name') == 'vaultwarden-agent'
                                          for entry in env.values()))
-                    self.assertFalse(any(mount['name'] in ('vault-data', 'vault-tmp', 'keeper-data', 'keeper-tmp', 'tailscale-state', 'tun', 'tailscale-serve')
+                    self.assertFalse(any(mount['name'] in ('vault-data', 'vault-tmp', 'keeper-data', 'keeper-tmp', 'tailscale-state', 'tun', 'tailscale-serve', 'vpn-config', 'vpn-tmp')
                                          for mount in container['volumeMounts']))
             for init in spec['initContainers']:
                 self.assertNotIn('envFrom', init)

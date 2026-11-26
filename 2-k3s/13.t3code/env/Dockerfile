@@ -52,6 +52,14 @@ RUN if [ "$T3_RUNTIME_VARIANT" = work ]; then \
       && groupadd -g 1002 keeper && useradd -u 1002 -g 1002 -M -d /keeper -s /usr/sbin/nologin keeper; \
     fi \
     && rm /tmp/keeper-client.py
+# Work only: office VPN clients for the vpn sidecar, and the `vpn` command for every container.
+COPY env/files/vpn.sh /tmp/vpn.sh
+RUN if [ "$T3_RUNTIME_VARIANT" = work ]; then \
+      apt-get update && apt-get install -y --no-install-recommends iproute2 openvpn wireguard-tools \
+      && rm -rf /var/lib/apt/lists/* \
+      && install -m 0555 /tmp/vpn.sh /usr/local/bin/vpn; \
+    fi \
+    && rm /tmp/vpn.sh
 # The vault sidecar runs as uid 1001. OpenSSH tools (ssh-keygen validates work host keys) refuse a uid without a passwd entry.
 RUN if [ "$T3_RUNTIME_VARIANT" != mixed ]; then groupadd -g 1001 vault && useradd -u 1001 -g 1001 -M -d /vault -s /usr/sbin/nologin vault; fi
 ENV HOME=/home/t3

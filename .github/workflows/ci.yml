@@ -451,6 +451,7 @@ jobs:
           python3 .github/scripts/unittest-shard.py 2-k3s/13.t3code/env/tools/vault-startup.test.py 1 2
           python3 2-k3s/13.t3code/env/tools/work-runtime.test.py -v
           python3 2-k3s/13.t3code/env/tools/keeper-client.test.py -v
+          python3 2-k3s/13.t3code/env/tools/vpn.test.py -v
           python3 2-k3s/13.t3code/env/tools/work-ssh.test.py -v
           python3 2-k3s/13.t3code/one/files/vault-ssh-agent.test.py
           python3 2-k3s/25.fytorium/minio-credentials.test.py -v
