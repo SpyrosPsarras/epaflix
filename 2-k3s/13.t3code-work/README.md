@@ -211,6 +211,51 @@ Offline checks: `python3 2-k3s/13.t3code/env/tools/keeper-client.test.py -v`.
 They run against fake Commander objects. Nothing here has been run against a
 live Keeper tenant yet.
 
+## Office VPN
+
+The `vpn` sidecar opens the owner's office VPNs (OpenVPN or WireGuard) on
+request, like NetworkManager on the laptop. Tunnels start closed, and a pod
+restart closes them.
+
+```sh
+vpn status
+vpn up <site>        # waits up to 60 s for the tunnel
+vpn down <site>
+```
+
+- The sidecar runs as root with `NET_ADMIN` and the node's `/dev/net/tun`, the
+  same device the tailscale sidecar uses. It is the only container that mounts
+  the configs. The `t3` and `sshd` containers can open and close a tunnel
+  through the shared `/run/t3-vpn` directory but cannot read its keys.
+- Tunnel routes apply to the whole pod. OpenVPN ignores a pushed default route
+  (`--pull-filter ignore redirect-gateway`, like the laptop's never-default),
+  and WireGuard routes only its `AllowedIPs`. Office DNS is dropped, so office
+  host names do not resolve.
+- NetworkPolicy sees only the encrypted UDP to the VPN server, which the public
+  IPv4 rule already allows. Traffic inside a tunnel is not subject to the
+  private-range block.
+- The pod uses the laptop's profiles, so connect only one of them at a time.
+  Two WireGuard peers with the same key take the tunnel from each other, and
+  the OpenVPN server may drop the older session.
+
+The owner creates the Secret from the laptop. Argo does not manage it. Each
+key's name before the extension is the site name (`a-z`, `0-9`, `-`, at most
+11 characters). `.ovpn` is OpenVPN with inline certificates and no password
+prompt; `.conf` is WireGuard in wg-quick format.
+
+```sh
+kubectl --context epaflix -n t3code-work create secret generic t3code-vpn \
+  --from-file=<site>.ovpn=<OpenVPN profile> --from-file=<site>.conf=<WireGuard config>
+```
+
+The Secret is optional. Without it the pod still starts and `vpn status`
+reports no sites. Edits reach the sidecar within about a minute, without a
+restart. When `vpn up` reports a failure, the reason is in
+`kubectl --context epaflix -n t3code-work logs work-0 -c vpn`.
+
+Offline checks: `python3 2-k3s/13.t3code/env/tools/vpn.test.py -v`, with stub
+`openvpn`, `wg-quick` and `ip`. No tunnel has been opened from the pod yet.
+
 ## Network isolation
 
 See [network policies and post-merge checks](../13.t3code/env/network-isolation.md).

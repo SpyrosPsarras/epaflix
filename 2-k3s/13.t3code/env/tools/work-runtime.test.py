@@ -553,7 +553,7 @@ class WorkRuntimeTests(unittest.TestCase):
         self.assertEqual(allowed, {'versions.env', 'env/', 'env/Dockerfile', 'env/tools/',
             'env/tools/os-packages.txt', 'env/tools/install-cluster-tools.sh',
             'env/tools/package.json', 'env/tools/package-lock.json',
-            'env/files/', 'env/files/vault-client.py', 'env/files/keeper-client.py', 'env/files/isolated-guidance.md',
+            'env/files/', 'env/files/vault-client.py', 'env/files/keeper-client.py', 'env/files/vpn.sh', 'env/files/isolated-guidance.md',
             'one/', 'one/files/', 'one/files/cc-safety-net-install.py',
             'one/files/cc-safety-net.patch', 'one/files/cc-safety-net-hashes.json'})
 
@@ -584,7 +584,7 @@ class WorkRuntimeTests(unittest.TestCase):
             secret_names = {v['secret']['secretName'] for v in pod['volumes'] if 'secret' in v}
             secret_names.update(source['secret']['name'] for v in pod['volumes']
                                 for source in v.get('projected', {}).get('sources', []) if 'secret' in source)
-            self.assertEqual(secret_names, {'t3-runtime-inputs', 't3-work-ssh'})
+            self.assertEqual(secret_names, {'t3-runtime-inputs', 't3-work-ssh', 't3code-vpn'})
             self.assertNotIn('/run/t3-build', json.dumps(pod))
             self.assertFalse({'KUBECONFIG', 'T3_BUILD_KUBECONFIG'} & {e['name'] for e in pod['containers'][0]['env']})
             inputs = next(v for v in pod['volumes'] if v['name'] == 'inputs')

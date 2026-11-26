@@ -34,3 +34,4 @@ replacements:
           - spec.template.spec.containers.[name=vault].image
           - spec.template.spec.initContainers.[name=keeper-storage].image
           - spec.template.spec.containers.[name=keeper].image
+          - spec.template.spec.containers.[name=vpn].image

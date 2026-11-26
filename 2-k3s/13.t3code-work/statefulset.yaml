@@ -102,7 +102,7 @@ spec:
               mountPath: /keeper
       containers:
         - name: t3
-          image: ghcr.io/spyrospsarras/t3-runtime:work-inputs-d361c92715c172857e19f175c470d8aa
+          image: ghcr.io/spyrospsarras/t3-runtime:work-inputs-84e731d494016de0a9339f987785d8da
           imagePullPolicy: IfNotPresent
           command: [bash, /scripts/entrypoint.sh]
           env:
@@ -168,6 +168,8 @@ spec:
             - name: vault-scope
               mountPath: /run/t3-vault
               readOnly: true
+            - name: vpn-control
+              mountPath: /run/t3-vpn
             - name: machine-info
               mountPath: /etc/machine-info
               subPath: machine-info
@@ -226,6 +228,8 @@ spec:
               readOnly: true
             - name: tmp
               mountPath: /tmp
+            - name: vpn-control
+              mountPath: /run/t3-vpn
           livenessProbe:
             exec:
               command: [bash, /scripts/sshd.sh, check]
@@ -340,7 +344,50 @@ spec:
               memory: 128Mi
             limits:
               memory: 512Mi
+        # Office VPNs on request (`vpn up <site>`). Only this container mounts the configs; tunnel routes are pod-wide.
+        - name: vpn
+          image: t3-runtime-from-t3-container
+          imagePullPolicy: IfNotPresent
+          command: [vpn, serve]
+          securityContext:
+            runAsNonRoot: false
+            runAsUser: 0
+            runAsGroup: 0
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+              add: [NET_ADMIN]
+          volumeMounts:
+            - name: vpn-config
+              mountPath: /run/t3-vpn-config
+              readOnly: true
+            - name: vpn-control
+              mountPath: /run/t3-vpn
+            - name: vpn-tmp
+              mountPath: /tmp
+            - name: tun
+              mountPath: /dev/net/tun
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 128Mi
       volumes:
+        - name: vpn-config
+          secret:
+            secretName: t3code-vpn
+            optional: true
+            defaultMode: 0400
+        - name: vpn-control
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+        - name: vpn-tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
         - name: machine-info
           configMap:
             name: t3code-machine-info

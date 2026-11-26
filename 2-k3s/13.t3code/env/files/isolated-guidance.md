@@ -56,6 +56,13 @@ Never use epaflix from here; its API is blocked on purpose. Keep kubeconfigs in 
 `az aks get-credentials -g <group> -n <cluster>` then `kubelogin convert-kubeconfig -l azurecli`, or write a kubeconfig
 the owner gives you as text. If `az` is not logged in, run `az login --use-device-code` and give the owner the code.
 
+## Office VPN (work pod only)
+
+`vpn status` lists the owner's office VPN sites. `vpn up <site>` opens one and `vpn down <site>` closes it.
+Open a tunnel only when a task needs an address behind it, and close it when done; its routes apply to the whole pod.
+The owner's laptop uses the same profiles, so if `vpn up` fails or stays connecting, tell the owner instead of retrying.
+Only the vpn sidecar holds the configs. Do not look for them.
+
 ## Disk space
 
 This pod's home and `/tmp` sit on a node disk that other pods share. The home has no quota.

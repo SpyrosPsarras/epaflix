@@ -39,6 +39,10 @@ No work endpoint is published. Neither overlay adds an IPv6 allow rule.
 Public IPv4 egress has no port restriction and permits Tailscale
 and Cloudflare tunnel TCP/UDP 7844. It also carries SSH to GitHub on TCP 22.
 The generated SSH config, not the policy, limits outbound SSH to approved work IPs and `github.com`.
+The work `vpn` sidecar opens the owner's office tunnels on request
+([office VPN](../../13.t3code-work/README.md#office-vpn)). Their encrypted UDP
+uses the public rule. The policy cannot see inside a tunnel, so the office
+routes are not covered by the private-range block.
 
 TCP 2222 accepts ingress from any IPv4 source; direct ports 3773 and 8087 stay
 closed. T3 binds only `127.0.0.1:3773`, advertises no direct LAN endpoint and
