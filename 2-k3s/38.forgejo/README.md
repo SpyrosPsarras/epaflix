@@ -4,11 +4,11 @@ Forgejo holds RackPeek's config history, live homelab config snapshots and the a
 
 At https://git.epaflix.com, sign in through Authentik as a member of `authentik Admins`. The site is on Traefik's internal entrypoint only (LAN and Tailscale); from the internet it returns 404. Traefik forward auth gates the site, then Forgejo signs you in through the Authentik OIDC application `forgejo-sso`. Forgejo creates the account on first login from the part of your email before `@`. The `forgejo-role` scope sends `forgejo: admin` for `authentik Admins`, which makes the account a Forgejo admin. Password and basic-auth login are off; the bot uses tokens. RackPeek uses the internal service at `http://forgejo.forgejo.svc:3000`.
 
-The hubs' `skills-mcp` pods read `spypsarras/skills` (homelab) and `spypsarras/skills-work` (work) through the internal service. Bots `skills-homelab-bot` and `skills-work-bot` each have read access to one repo; their `read:repository` tokens live in Secret `skills-git` in `mcp-hub-homelab` and `mcp-hub-work`. The network policy admits only those pods from the hub namespaces. See the [MCP hub README](../23.mcp-hub/README.md#skills).
+The hubs' `skills-mcp` pods read `spypsarras/skills` (homelab) and `spypsarras/skills-work` (work) through the internal service. Bots `skills-homelab-bot` and `skills-work-bot` each have write access to one repo. Their hub tokens are `read:repository` and live in Secret `skills-git` in `mcp-hub-homelab` and `mcp-hub-work`. The network policy admits only those pods from the hub namespaces. See the [MCP hub README](../23.mcp-hub/README.md#skills).
 
 Token clients skip Authentik. Route `forgejo-token-https` sends Git smart-HTTP requests (`/<owner>/<repo>/info/refs`, `git-upload-pack`, `git-receive-pack`) and `/api/v1/` requests that carry `Authorization: token …` straight to Forgejo, which then requires a valid token. Browsers and API calls without a token still go through forward auth.
 
-T3 Code reaches Forgejo through `tea` as one bot per machine: `t3-laptop`, `t3-homelab` and `t3-work`. A bot sees only repositories that list it as a collaborator. The pod tokens come from `13.t3code/env/tools/forgejo-grant.py`, see the [Forgejo grant](../13.t3code/env/isolated-runtime.md#forgejo-grant).
+T3 Code reaches Forgejo through `tea`. The homelab and work pods sign in as `skills-homelab-bot` and `skills-work-bot` with a second token each, and the laptop signs in as `spypsarras`. The pod tokens come from `13.t3code/env/tools/forgejo-grant.py`, see the [Forgejo grant](../13.t3code/env/isolated-runtime.md#forgejo-grant).
 
 ## After deploy
 

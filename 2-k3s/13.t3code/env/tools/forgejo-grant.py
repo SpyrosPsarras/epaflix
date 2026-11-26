@@ -47,8 +47,7 @@ class Cluster:
 
 def mint(cluster, user):
     if user not in cluster.forgejo('list').decode().split():
-        cluster.forgejo('create', '--username', user, '--email', f'{user}@noreply.git.epaflix.com',
-                        '--random-password', '--must-change-password=false')
+        raise ValueError('The Forgejo bot does not exist')
     token = cluster.forgejo('generate-access-token', '--username', user, '--token-name',
                             f'{user}-{time.strftime("%Y%m%d%H%M%S")}', '--scopes', SCOPES, '--raw').strip()
     if not re.fullmatch(rb'[0-9a-f]{40}', token):
@@ -79,7 +78,7 @@ def install(cluster, environment):
     if bound is not None and (token is None or digest(token) != bound):
         raise ValueError('The stored Forgejo grant does not match its review')
     if token is None:
-        token = mint(cluster, 't3-' + environment)
+        token = mint(cluster, f'skills-{environment}-bot')
         cluster.patch(namespace, 't3-runtime-grants', grants_secret['metadata']['resourceVersion'],
                       [{'op': 'add', 'path': '/data/forgejo-token', 'value': base64.b64encode(token).decode()}])
     updated = {**runtime, 'grantSha256': {**runtime['grantSha256'], 'forgejo-token': digest(token)}}
@@ -87,7 +86,7 @@ def install(cluster, environment):
         cluster.patch(namespace, 't3-runtime-inputs', inputs_secret['metadata']['resourceVersion'],
                       [{'op': 'replace', 'path': '/data/runtime.json',
                         'value': base64.b64encode(json_bytes(updated, sort_keys=sort_keys)).decode()}])
-    print(f'Forgejo grant for t3-{environment} installed. Advance the input revision before starting the backend.')
+    print(f'Forgejo grant for skills-{environment}-bot installed. Advance the input revision before starting the backend.')
 
 
 def main():

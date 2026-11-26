@@ -131,7 +131,7 @@ class StartupTest(unittest.TestCase):
                     self.assertEqual(tea_config.stat().st_mode & 0o777, 0o600)
                     login = yaml.safe_load(tea_config.read_text())['logins']
                     self.assertEqual(login, [{'name': 'git.epaflix.com', 'url': 'https://git.epaflix.com',
-                                              'token': 'a' * 40, 'default': True, 'user': f't3-{variant}'}])
+                                              'token': 'a' * 40, 'default': True, 'user': f'skills-{variant}-bot'}])
                     self.assertEqual(subprocess.check_output(helper, env=env, text=True), '\n!tea login helper\n')
                 self.assertNotEqual(subprocess.run(['bash', '-c', command], env={**env, 'FORGEJO_TOKEN': 'bad'}).returncode, 0)
                 subprocess.run(['bash', '-c', command], env=env, check=True)
