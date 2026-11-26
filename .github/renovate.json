@@ -248,10 +248,16 @@
       "automerge": false
     },
     {
-      "description": "Postgres majors for postgres-cluster: merge only once ghcr.io/tensorchord/vchord-scratch has a pg<new major> tag, and move the vchord extension image and the barman serverName in the same PR. The merge stops every database and runs pg_upgrade, so follow step 3 of docs/superpowers/specs/2026-11-26-postgres-18-design.md. Minors auto-merge: CNPG restarts one instance at a time with a switchover.",
+      "description": "Postgres majors for postgres-cluster: merge only once ghcr.io/tensorchord/vchord-scratch has a pg<new major> tag, and move the vchord extension image and the barman serverName in the same PR. The merge stops every database and runs pg_upgrade, so follow step 3 of docs/superpowers/specs/2026-11-26-postgres-18-design.md.",
       "matchPackageNames": ["ghcr.io/cloudnative-pg/postgresql"],
       "matchUpdateTypes": ["major"],
       "automerge": false
+    },
+    {
+      "description": "Postgres minors auto-merge, but only at night: CNPG restarts each replica and then the primary (primaryUpdateMethod: restart), so every app loses its connection briefly. The Renovate CronJob runs hourly and automergeSchedule defaults to any time.",
+      "matchPackageNames": ["ghcr.io/cloudnative-pg/postgresql"],
+      "matchUpdateTypes": ["minor"],
+      "automergeSchedule": ["after 2am and before 6am"]
     }
   ],
   "customManagers": [
