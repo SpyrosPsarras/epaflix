@@ -12,6 +12,7 @@ resources:
   - ingress/traefik-dashboard-sso.yaml
   - ingress/truenas-proxy.yaml
   - ingress/pegaprox-proxy.yaml
+  - ingress/pdm-proxy.yaml
   - ingress/minio-proxy.yaml
   - ingress/t3code-proxy.yaml
   - servicemonitor.yaml

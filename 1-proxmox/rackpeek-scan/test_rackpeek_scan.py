@@ -117,7 +117,9 @@ class Classify(unittest.TestCase):
     def test_name_only(self):
         for path in ("/etc/ssh/sshd_config", "/root/.bashrc", "/root/.ssh/x",
                      "/etc/x/a.pem", "/etc/x/b.key", "/etc/x/c.pw",
-                     "/home/u/id_ed25519", "/etc/shadow-", "/etc/gshadow", "/etc/gshadow-", "/etc/pve/priv/authkey"):
+                     "/home/u/id_ed25519", "/etc/shadow-", "/etc/gshadow", "/etc/gshadow-", "/etc/pve/priv/authkey",
+                     "/etc/proxmox-datacenter-manager/remotes.shadow",
+                     "/etc/proxmox-datacenter-manager/access/domains.cfg"):
             self.assertEqual(scan.classify(path), "name-only", path)
 
     def test_skip_var_lib(self):

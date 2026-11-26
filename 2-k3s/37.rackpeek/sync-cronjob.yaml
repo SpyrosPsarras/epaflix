@@ -61,7 +61,7 @@ spec:
                 - name: HOME
                   value: /tmp
                 - name: HOSTS
-                  value: "takaros=root@192.168.10.10 evanthoulaki=root@192.168.10.11 patroklos=root@192.168.10.12 shypowder=root@192.168.10.13 pegaprox=root@192.168.10.21 pihole=root@192.168.10.30 proxmox-backup=root@192.168.10.31 nick=ubuntu@192.168.10.41 k3s-master-51=ubuntu@192.168.10.51 k3s-master-52=ubuntu@192.168.10.52 k3s-master-53=ubuntu@192.168.10.53 k3s-worker-61=ubuntu@192.168.10.61 k3s-worker-62=ubuntu@192.168.10.62 k3s-worker-63=ubuntu@192.168.10.63 k3s-worker-64=ubuntu@192.168.10.64 k3s-worker-65=ubuntu@192.168.10.65 truenas=truenas_admin@192.168.10.200"
+                  value: "takaros=root@192.168.10.10 evanthoulaki=root@192.168.10.11 patroklos=root@192.168.10.12 shypowder=root@192.168.10.13 pegaprox=root@192.168.10.21 pdm=root@192.168.10.22 pihole=root@192.168.10.30 proxmox-backup=root@192.168.10.31 nick=ubuntu@192.168.10.41 k3s-master-51=ubuntu@192.168.10.51 k3s-master-52=ubuntu@192.168.10.52 k3s-master-53=ubuntu@192.168.10.53 k3s-worker-61=ubuntu@192.168.10.61 k3s-worker-62=ubuntu@192.168.10.62 k3s-worker-63=ubuntu@192.168.10.63 k3s-worker-64=ubuntu@192.168.10.64 k3s-worker-65=ubuntu@192.168.10.65 truenas=truenas_admin@192.168.10.200"
               resources:
                 requests:
                   cpu: 100m

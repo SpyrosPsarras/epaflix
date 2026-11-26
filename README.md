@@ -15,7 +15,7 @@ All commands run from the repo root and need `kubectl`, `helm`, `kustomize`, `so
 ## Rebuild from zero
 
 1. Proxmox hosts. Notes exist for [patroklos](1-proxmox/patroklos/README.md) and [shypowder](1-proxmox/shypowder/README.md). takaros and evanthoulaki have none, and no VM definitions are in git.
-2. Guests. The k3s nodes are Ubuntu 24.04 VMs with `eth0` on `192.168.10.0/24` and `eth1` on `10.0.0.0/24`. Pi-hole comes first because the nodes resolve through `192.168.10.30`. takaros runs k3s-master-51, k3s-worker-61 and 62. evanthoulaki runs k3s-master-53, k3s-worker-63 and 65, and the LXC containers pihole and pegaprox. patroklos runs k3s-master-52, the truenas VM and the backup server in an LXC container. shypowder runs k3s-worker-64 with the GPU.
+2. Guests. The k3s nodes are Ubuntu 24.04 VMs with `eth0` on `192.168.10.0/24` and `eth1` on `10.0.0.0/24`. Pi-hole comes first because the nodes resolve through `192.168.10.30`. takaros runs k3s-master-51, k3s-worker-61 and 62. evanthoulaki runs k3s-master-53, k3s-worker-63 and 65, the pdm VM (Proxmox Datacenter Manager) and the LXC containers pihole and pegaprox. patroklos runs k3s-master-52, the truenas VM and the backup server in an LXC container. shypowder runs k3s-worker-64 with the GPU.
 3. k3s `v1.36.5+k3s1`, the version in `2-k3s/maintenance/system-upgrade/plans`. Install with the upstream script. `/etc/rancher/k3s/config.yaml` on the first server:
 
    ```yaml
@@ -62,7 +62,7 @@ The script creates Secret `argocd/sops-age` with the key `keys.txt` from the age
   - MCP hub: `mcp-hub/mcp-hub-notion-grant`, and in `mcp-hub-homelab` the Secrets `mcp-hub-instance`, `mcp-hub-gmail`, `mcp-hub-google-upstream`, `mcp-hub-searxng`.
   - Agent runtime: in `t3code-homelab` the Secrets `t3-runtime-inputs`, `t3-runtime-grants`, `vaultwarden-agent`, `t3-build-kubeconfig`, `homelab-agent-kubeconfig`. Also `t3code/manager-kubeconfig`, `t3code/manager-agent-kubeconfig`, `t3-build-homelab/builder-token`.
 - The Traefik CRDs. `05.traefik-deployment` sets `includeCRDs: false` and no Application renders them, so they stay at the version step 4 installed.
-- Three `Endpoints` in `traefik-system`: `minio-external`, `pegaprox-ui`, `truenas-ui`. They are in `2-k3s/05.traefik-deployment/ingress/{minio,pegaprox,truenas}-proxy.yaml`, but Argo CD excludes the kind. Step 4 creates them. Apply later changes by hand.
+- Four `Endpoints` in `traefik-system`: `minio-external`, `pdm-ui`, `pegaprox-ui`, `truenas-ui`. They are in `2-k3s/05.traefik-deployment/ingress/{minio,pdm,pegaprox,truenas}-proxy.yaml`, but Argo CD excludes the kind. Step 4 creates them. Apply later changes by hand.
 - Tailscale enrollment and its admin console settings. Follow [the Tailscale README](2-k3s/21.tailscale/README.md).
 
 ## Postgres restore
