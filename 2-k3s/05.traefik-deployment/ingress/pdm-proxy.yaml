@@ -1,0 +1,84 @@
+---
+
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: pdm-ui
+  namespace: traefik-system
+subsets:
+  - addresses:
+      - ip: 192.168.10.22
+    ports:
+      - name: https
+        port: 8443
+        protocol: TCP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pdm-ui
+  namespace: traefik-system
+  labels:
+    app: pdm-ui
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - name: https
+      port: 8443
+      protocol: TCP
+
+---
+apiVersion: traefik.io/v1alpha1
+kind: ServersTransport
+metadata:
+  name: pdm-insecure
+  namespace: traefik-system
+spec:
+  insecureSkipVerify: true
+  serverName: pdm.epaflix.com
+
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: pdm-https
+  namespace: traefik-system
+spec:
+  entryPoints:
+    - internal
+  routes:
+    - match: Host(`pdm.epaflix.com`)
+      kind: Rule
+      priority: 10
+      middlewares:
+        - name: security-headers
+          namespace: traefik-system
+        - name: authentik-forwardauth
+          namespace: traefik-system
+      services:
+        - name: pdm-ui
+          port: 8443
+          scheme: https
+          serversTransport: pdm-insecure
+  tls: {}
+
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: pdm-outpost-https
+  namespace: traefik-system
+spec:
+  entryPoints:
+    - internal
+  routes:
+    - match: Host(`pdm.epaflix.com`) && PathPrefix(`/outpost.goauthentik.io/`)
+      kind: Rule
+      priority: 15
+      services:
+        - name: authentik-server
+          namespace: app-authentik
+          port: 80
+  tls: {}
