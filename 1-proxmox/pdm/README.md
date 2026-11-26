@@ -59,3 +59,20 @@ qm start 1022
 ## Repositories
 
 `pdm-no-subscription` enabled, the enterprise source disabled.
+
+## Login
+
+Realm `authentik` (type `openid`), issuer `https://auth.epaflix.com/application/o/pdm-sso/`, username claim `preferred_username`, no autocreate. The Authentik side is `pdm-sso` and `pdm-forwardauth` in `2-k3s/07.authentik-deployment/authentik-iac-blueprint.enc.yaml`, both limited to the Authentik group `PDM Admins`. The client ID and secret are in the vault. Each admin is a PDM user `<authentik-username>@authentik` with `Administrator` on `/`, created before the first login, and a member of `PDM Admins` in Authentik. The group is created empty by the blueprint: after the first sync, add the admin to it in Authentik, or both Authentik apps deny the login.
+
+If Authentik is down, log in at `https://192.168.10.22:8443` as `root@pam`.
+
+## Remotes
+
+| Remote | Endpoints | Token | Role |
+| --- | --- | --- | --- |
+| `e-pavli` (PVE) | `takaros`, `evanthoulaki`, `patroklos`, `shypowder` `.epaflix.com:8006` | `pdm@pve!pdm`, secret in the vault | `PVEVMAdmin` and `PVEAuditor` on `/` |
+| `proxmox-backup` (PBS) | `192.168.10.31:8007` with the certificate fingerprint | `pdm@pbs!pdm`, secret in the vault | `Audit` on `/` |
+
+The PVE nodes use Let's Encrypt certificates, so they need no fingerprint. The PBS certificate is self-signed. When it changes, PDM shows a fingerprint error. Read the new value with `openssl x509 -in /etc/proxmox-backup/proxy.pem -noout -fingerprint -sha256` on the PBS and update the remote under Remotes, Edit.
+
+`PVEVMAdmin` lets PDM start, stop, migrate and snapshot guests. `PVEAuditor` lets it read nodes, storage and tasks. PDM cannot manage users, permissions, storage or packages on the cluster. `Audit` on the PBS only shows datastores, tasks and status.
