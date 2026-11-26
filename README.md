@@ -82,23 +82,23 @@ kind: Cluster
 metadata: {name: pg-restore-test, namespace: pg-restore-test}
 spec:
   instances: 1
-  imageName: ghcr.io/cloudnative-pg/postgresql:16
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.7-standard-trixie
   storage: {size: 20Gi, storageClass: local-path}
   bootstrap: {recovery: {source: live}}
   externalClusters:
     - name: live
       plugin:
         name: barman-cloud.cloudnative-pg.io
-        parameters: {barmanObjectName: postgres-minio-store, serverName: postgres-cluster}
+        parameters: {barmanObjectName: postgres-minio-store, serverName: postgres-cluster-pg18}
 EOF
 k -n pg-restore-test wait --for=condition=Ready cluster/pg-restore-test --timeout=15m
 k -n pg-restore-test exec pg-restore-test-1 -c postgres -- psql -U postgres -Atc 'select datname from pg_database'
 k delete ns pg-restore-test
 ```
 
-The first command must show one server, `postgres-cluster`, with a recent `lastSuccessfulBackupTime`. Run it again after the teardown. A second server name means the test cluster archived into the live backups. That is why the test cluster has no `plugins:` block, so do not add one. Compare the database list and `count(*)` on real tables with live. `n_live_tup` reads 0 on a fresh restore.
+The first command must show the server `postgres-cluster-pg18` with a recent `lastSuccessfulBackupTime`. `postgres-cluster` holds the PostgreSQL 16 backups from before the upgrade until they are deleted. Run it again after the teardown. Any other server name means the test cluster archived into the live backups. That is why the test cluster has no `plugins:` block, so do not add one. Compare the database list and `count(*)` on real tables with live. `n_live_tup` reads 0 on a fresh restore.
 
-After a real loss, edit `cluster/postgres-cluster.yaml` before it is applied. Replace `bootstrap.initdb` with the `bootstrap.recovery` and `externalClusters` blocks above, and add `serverName: postgres-cluster-2` to the `plugins` parameters so new WAL goes to an empty path.
+After a real loss, edit `cluster/postgres-cluster.yaml` before it is applied. Replace `bootstrap.initdb` with the `bootstrap.recovery` and `externalClusters` blocks above, and change `serverName` in the `plugins` parameters to `postgres-cluster-pg18-2` so new WAL goes to an empty path.
 
 ## Storage maintenance
 
