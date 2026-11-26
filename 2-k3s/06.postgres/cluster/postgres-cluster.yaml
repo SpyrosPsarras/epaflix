@@ -6,7 +6,7 @@ metadata:
   namespace: postgres-system
 spec:
   instances: 3
-  imageName: ghcr.io/cloudnative-pg/postgresql:16
+  imageName: ghcr.io/cloudnative-pg/postgresql:16.16-standard-trixie
   storage:
     storageClass: local-path
     size: 20Gi

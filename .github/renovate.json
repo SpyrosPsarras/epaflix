@@ -246,6 +246,12 @@
       "matchPackageNames": ["ghcr.io/haveagitgat/tdarr", "ghcr.io/haveagitgat/tdarr_node"],
       "groupName": "tdarr",
       "automerge": false
+    },
+    {
+      "description": "Postgres majors for postgres-cluster: merge only once ghcr.io/tensorchord/vchord-scratch has a pg<new major> tag, and move the vchord extension image and the barman serverName in the same PR. The merge stops every database and runs pg_upgrade, so follow step 3 of docs/superpowers/specs/2026-11-26-postgres-18-design.md. Minors auto-merge: CNPG restarts one instance at a time with a switchover.",
+      "matchPackageNames": ["ghcr.io/cloudnative-pg/postgresql"],
+      "matchUpdateTypes": ["major"],
+      "automerge": false
     }
   ],
   "customManagers": [
@@ -343,6 +349,14 @@
       ],
       "depNameTemplate": "AirVPN/AirVPN-Suite",
       "datasourceTemplate": "custom.airvpn-suite-x86_64"
+    },
+    {
+      "description": "The postgres-cluster image. The kubernetes manager only scans the files listed at the top and only reads image:, not CNPG's imageName:. Versioning accepts only <major>.<minor>-standard-trixie, so the timestamped, minimal and bookworm tags never come up.",
+      "customType": "regex",
+      "managerFilePatterns": ["/^2-k3s/06\\.postgres/cluster/postgres-cluster\\.yaml$/"],
+      "matchStrings": ["imageName: (?<depName>ghcr\\.io/cloudnative-pg/postgresql):(?<currentValue>\\S+)"],
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "regex:^(?<major>\\d+)\\.(?<minor>\\d+)-standard-trixie$"
     }
   ],
   "customDatasources": {
