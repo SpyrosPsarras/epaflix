@@ -2640,6 +2640,76 @@ def test_extreme_move_odds_levels_and_proposal():
     assert ss.extreme_move(up, day, {}, ss.settings_with_defaults({"extreme_move": 0})) is None
 
 
+def recovery_rows():
+    """An uptrend, a 36% fall below the 200-day lines, a base, then a bounce rejected at the EMA200 (the last bar)."""
+    rows = uptrend(300, 100.0, 0.5)
+    close = rows[-1][3]
+    for _ in range(30):
+        close -= 3.0
+        rows.append((close + 1.5, close + 2, close - 1, close, 1_000_000))
+    for i in range(20):
+        c = close + (1 if i % 2 else -1)
+        rows.append((c, c + 1.5, c - 1.5, c, 1_000_000))
+    closes = [r[3] for r in rows]
+    step = (min(ss.ema(closes, 200)[-1], ss.sma(closes, 200)[-1]) - 1 - close) / 6
+    for _ in range(6):
+        close += step
+        rows.append((close - step / 2, close + 0.5, close - step / 2 - 0.5, close, 1_000_000))
+    closes = [r[3] for r in rows]
+    line = min(ss.ema(closes, 200)[-1], ss.sma(closes, 200)[-1])
+    rows.append((close, line + 0.2, close - 3, close - 2.5, 1_000_000))
+    return rows
+
+
+def test_recovery_watch_rejection_then_return_or_continuation():
+    rows = recovery_rows()
+    rejected = ss.recovery_watch(make_bars(rows, "QQQ"), date(2026, 5, 19), CFG)
+    assert CFG["recovery_watch"] == 1 and CFG["recovery_drawdown"] == 0.15 and CFG["recovery_window"] == 40
+    assert rejected["status"] == "rejected" and rejected["high"] == 249.5 and rejected["drawdown"] < -0.15
+    r = rejected["rejection"]
+    assert r["line"] == "EMA200" and r["low"] == 157.0 and r["high"] == round(max(x[1] for x in rows[-3:]), 2)
+    assert rejected["proposal"] is None and "CONTINUATION below 157" in ss.recovery_html(rejected)
+
+    up = make_bars(rows + [(200.0, 212.0, 199.0, 210.0, 2_000_000)], "QQQ")
+    back = ss.recovery_watch(up, up.dates[-1], CFG)
+    assert back["status"] == "return" and back["today"] and back["outcome_date"] == up.dates[-1].isoformat()
+    p = back["proposal"]
+    assert (p["buy"], p["sell"], p["take_profit"], p["size"], p["max_open"]) == (210.0, 241.5, 0.8, [0.01, 0.02], 3)
+    assert p["expiry_after"] == (up.dates[-1] + timedelta(days=182)).isoformat()
+    assert p["exit_by"] == (up.dates[-1] + timedelta(days=152)).isoformat()
+    html = ss.recovery_html(back)
+    assert "Recovery watch: QQQ RETURN" in html and "PROPOSED: bull call debit spread on QQQ, buy the 210 call, sell the 241.5" in html
+    assert "1%-2% of the budget, at most 3 open" in html and "Backtest since 1999" in html
+
+    later = make_bars(rows + [(200.0, 212.0, 199.0, 210.0, 2_000_000), (210.0, 211.0, 207.0, 209.0, 1_000_000)], "QQQ")
+    seen = ss.recovery_watch(later, later.dates[-1], CFG)
+    assert seen["status"] == "return" and not seen["today"] and seen["proposal"] is None
+    assert "no new entry later" in ss.recovery_html(seen)
+
+    down = make_bars(rows + [(180.0, 181.0, 150.0, 151.0, 2_000_000)], "QQQ")
+    cont = ss.recovery_watch(down, down.dates[-1], CFG)
+    assert cont["status"] == "continuation" and cont["today"] and cont["proposal"] is None
+    assert "CONTINUATION on" in ss.recovery_html(cont) and "Alert only" in ss.recovery_html(cont)
+
+    flat = make_bars(rows + [(186.0, 187.0, 185.0, 186.0, 1_000_000)] * 41, "QQQ")
+    assert ss.recovery_watch(flat, flat.dates[-1], CFG)["status"] == "armed"  # the window ended: waiting for the next rejection
+    assert "Waiting for a bounce rejected" in ss.recovery_html(ss.recovery_watch(flat, flat.dates[-1], CFG))
+
+
+def test_recovery_watch_only_in_a_deep_decline():
+    calm = make_bars(uptrend(320, 100.0, 0.5), "QQQ")
+    assert ss.recovery_watch(calm, calm.dates[-1], CFG) is None
+    bars = make_bars(recovery_rows(), "QQQ")
+    assert ss.recovery_watch(bars, bars.dates[-1], ss.settings_with_defaults({"recovery_watch": 0})) is None
+    assert ss.recovery_watch(bars, bars.dates[-1], ss.settings_with_defaults({"recovery_drawdown": 0.4})) is None
+    with pytest.raises(ValueError, match="recovery_drawdown"):
+        ss.settings_with_defaults({"recovery_drawdown": 1})
+    x = ss.recovery_watch(bars, bars.dates[-1], CFG)
+    result = {**email_result([]), "settings": {"compact_report": 1}, "recovery_watch": x}
+    assert "Recovery watch: QQQ REJECTED" in ss.email_html(result)
+    assert "Recovery watch: QQQ REJECTED" in ss.email_html({**result, "settings": {"compact_report": 0}})
+
+
 def test_macro_alerts_only_past_their_levels():
     flat = make_bars(uptrend(30, 100, 0.0))
     series = {"VX": make_bars(uptrend(29, 20, 0.0) + [(20, 24, 20, 23.2, 1)], "VX"),   # +16% in a session
@@ -2669,6 +2739,7 @@ def test_compact_email_is_the_default(offline):
     assert "<tr><td>2</td><td>RALY</td><td>rally_rejection</td>" in html and "<td>watch</td>" in html
     assert "backtest" not in html.split("Extreme move")[0]
     assert result["extreme_move"]["change"] == 0.045 and "Extreme move: QQQ +4.5% today" in html
+    assert result["recovery_watch"] is None and "Recovery watch" not in html
     assert "<b>Alerts</b>" in html and "VIX futures 24.0: +34% in 5 sessions. In 2020-2026" in html and "in 5 sessions" in html
     assert "Rotation, fastest accelerating ETFs" in html or not [r for r in result["etf_setups"]["rotation"] if r["acceleration"] > 0]
     assert "Market backdrop" not in html and "Correlation of daily returns" not in html

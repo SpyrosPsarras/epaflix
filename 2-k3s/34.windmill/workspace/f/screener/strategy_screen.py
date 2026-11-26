@@ -277,6 +277,17 @@ DEFAULTS = {
     "compact_report": 1,
     # Extreme move block when the benchmark closes this much up or down on the day (0 = off); odds from EXTREME_STATS.
     "extreme_move": 0.03,
+    # Recovery watch (1 on, 0 off): while the benchmark is recovery_drawdown or more below its 252-day high (or was in the
+    # last recovery_armed_bars sessions and is still below that high), a bounce rejected at the 200-day line (the dead cat
+    # rule) is followed for recovery_window sessions. RETURN: a close above the rejection's 3-day high and above the
+    # EMA200 and SMA200 -> a bull call debit spread, 6 months, ATM / +15%, 1-2% of the budget. CONTINUATION: a close below
+    # the bounce low -> an alert only. Backtest (since 1999, Black-Scholes on realized volatility): RETURN spreads made
+    # +50% / +64% of the debit on QQQ / SPY (22 / 16 signals, won 68% / 81%) against +21% / +13% on every 10th day of such
+    # declines; put spreads after CONTINUATION lost on SPY.
+    "recovery_watch": 1,
+    "recovery_drawdown": 0.15,
+    "recovery_armed_bars": 63,
+    "recovery_window": 40,
     "request_pause": 0.4,
 }
 
@@ -2762,7 +2773,7 @@ def settings_with_defaults(settings):
     for key in ("min_bars", "breakout_lookback", "min_base_bars", "min_touches", "rs_lookback", "regime_slope_bars",
                 "rally_min_bars", "breakdown_lookback", "squeeze_lookback", "swing_min_days", "swing_max_days", "beta_lookback",
                 "run_break_high_bars", "run_break_above_bars", "phase_high_bars", "bounce_low_bars", "dead_cat_below_bars", "dead_cat_alert_gap", "put_spread_days", "after_overextended_bars",
-                "index_put_spread_days", "bounce_long_days", "index_long_days"):
+                "index_put_spread_days", "bounce_long_days", "index_long_days", "recovery_armed_bars", "recovery_window"):
         cfg[key] = int(cfg[key])
         if cfg[key] < 1:
             raise ValueError(f"setting {key} must be 1 or more")
@@ -2774,6 +2785,8 @@ def settings_with_defaults(settings):
                          "dead_cat_below_bars 20 or less")
     if cfg["momentum_hold_adx"] > 100:
         raise ValueError("momentum_hold_adx is an ADX level: 0 (off) to 100")
+    if not 0 < cfg["recovery_drawdown"] < 1:
+        raise ValueError("recovery_drawdown is a share below the 252-day high: more than 0 and less than 1")
     if not 0 < cfg["put_spread_take_profit"] <= 1:
         raise ValueError("put_spread_take_profit is a share of the strike width: more than 0 and at most 1")
     if cfg["swing_min_days"] > cfg["swing_max_days"]:
@@ -3211,6 +3224,115 @@ def extreme_move(bars, as_of, phase, cfg):
                      else "neither trade won on average after such days: no proposal, the odds and levels are for orientation")}
 
 
+RECOVERY_CALL_STRIKES = (1.00, 1.15)  # bull call debit spread on the benchmark: buy at the money, sell 15% higher
+RECOVERY_EXPIRY_DAYS = 182
+RECOVERY_TAKE_PROFIT = 0.8  # of the strike width
+RECOVERY_CLOSE_BEFORE_DAYS = 30
+RECOVERY_SIZE = (0.01, 0.02)  # share of the budget per spread
+RECOVERY_MAX_OPEN = 3
+RECOVERY_RECENT = 5  # sessions an outcome stays in the block after its day
+RECOVERY_STATS = ("Backtest since 1999: after a RETURN the spread made +50% / +64% of the debit on QQQ / SPY on average "
+                  "(22 / 16 signals, won 68% / 81%; +21% / +13% on every 10th day of such declines); the index made a new low "
+                  "within 6 months after 4 / 3 of them; few signals since 2016, and the 2008 and 3/2022 ones lost about the "
+                  "whole debit")
+
+
+def recovery_watch(bars, as_of, cfg):
+    """Recovery watch on the benchmark after a deep decline: None outside one (or when recovery_watch is 0), else the state
+    of the dead cat rejection at the 200-day line and the break that follows it.
+
+    Context: the close recovery_drawdown or more below the highest close of the last 252 sessions, or it was so within the
+    last recovery_armed_bars sessions and the close is still below that high. A rejection (dead_cat_level, at most one per
+    dead_cat_alert_gap sessions; a later one replaces a live one) sets the levels: the high of its last 3 bars and the low of
+    its last 21 bars (the bounce low). Within recovery_window sessions the first close above that high and above both
+    200-day lines is RETURN, the first close below the bounce low CONTINUATION, else the watch is armed again.
+    status: armed | rejected | return | continuation; `today` when the outcome is today's close (the only day with a
+    proposal: the bull call debit spread for RETURN, none for CONTINUATION)."""
+    if not cfg["recovery_watch"] or len(bars) < 260:
+        return None
+    h, l, c = bars.high, bars.low, bars.close
+    n = len(c)
+    e200, m200, a = ema(c, 200), sma(c, 200), atr(h, l, c, 14)
+    lines = {"EMA200": e200, "SMA200": m200}
+    depth, armed, window = cfg["recovery_drawdown"], cfg["recovery_armed_bars"], cfg["recovery_window"]
+    hit, ref, ref_i, live, last_rej = None, None, None, None, None
+    for i in range(n):
+        lo = max(0, i - 251)
+        top = max(range(lo, i + 1), key=lambda j: c[j])
+        if c[i] <= c[top] * (1 - depth):
+            hit, ref, ref_i = i, c[top], top
+        context = hit is not None and i - hit <= armed and c[i] < ref
+        if not context:
+            live = None
+            continue
+        if live and live["outcome"] is None:
+            if c[i] < live["low"]:
+                live.update(outcome="continuation", outcome_i=i)
+            elif (c[i] > live["high"] and e200[i] is not None and m200[i] is not None and c[i] > max(e200[i], m200[i])):
+                live.update(outcome="return", outcome_i=i)
+            elif i - live["i"] >= window:
+                live.update(outcome="expired", outcome_i=i)
+        if i >= 21 and (last_rej is None or i - last_rej > cfg["dead_cat_alert_gap"]):
+            rej = dead_cat_level(bars, lines, a, i, cfg)
+            if rej:
+                live = {"i": i, "line": rej[0], "level": rej[1], "high": max(h[i - 2:i + 1]), "low": min(l[i - 20:i + 1]),
+                        "outcome": None, "outcome_i": None}
+                last_rej = i
+    if not (hit is not None and n - 1 - hit <= armed and c[-1] < ref):
+        return None
+    status, today = "armed", False
+    if live and live["outcome"] is None:
+        status = "rejected"
+    elif live and live["outcome"] in ("return", "continuation") and n - 1 - live["outcome_i"] <= RECOVERY_RECENT:
+        status, today = live["outcome"], live["outcome_i"] == n - 1
+    d = bars.dates
+    out = {"ticker": bars.ticker, "status": status, "today": today, "close": round(c[-1], 2),
+           "drawdown": round(c[-1] / ref - 1, 4), "high": round(ref, 2), "high_date": d[ref_i].isoformat(),
+           "EMA200": None if e200[-1] is None else round(e200[-1], 2), "SMA200": None if m200[-1] is None else round(m200[-1], 2),
+           "rejection": None, "outcome_date": None, "proposal": None, "stats": RECOVERY_STATS}
+    if live and status != "armed":
+        out["rejection"] = {"date": d[live["i"]].isoformat(), "line": live["line"], "level": round(live["level"], 2),
+                            "high": round(live["high"], 2), "low": round(live["low"], 2),
+                            "until": add_sessions(d[live["i"]], window).isoformat()}
+        if live["outcome_i"] is not None:
+            out["outcome_date"] = d[live["outcome_i"]].isoformat()
+    if status == "return" and today:
+        expiry = as_of + timedelta(days=RECOVERY_EXPIRY_DAYS)
+        buy, sell = RECOVERY_CALL_STRIKES
+        out["proposal"] = {"type": "bull call debit spread", "buy": round(c[-1] * buy, 2), "sell": round(c[-1] * sell, 2),
+                           "expiry_after": expiry.isoformat(), "take_profit": RECOVERY_TAKE_PROFIT,
+                           "exit_by": (expiry - timedelta(days=RECOVERY_CLOSE_BEFORE_DAYS)).isoformat(),
+                           "size": list(RECOVERY_SIZE), "max_open": RECOVERY_MAX_OPEN, "max_loss": "the debit paid"}
+    return out
+
+
+def recovery_html(x):
+    lines_ = ", ".join(f"{k} {x[k]:g}" for k in ("EMA200", "SMA200") if x.get(k) is not None)
+    head = (f"<p><b>Recovery watch: {escape(x['ticker'])} {x['status'].upper()}</b> ({x['close']:g}, {x['drawdown']:+.1%} from "
+            f"the 252-day high {x['high']:g} of {x['high_date']})</p>")
+    r, items = x.get("rejection"), []
+    if x["status"] == "armed":
+        items.append(f"Waiting for a bounce rejected at the 200-day line ({lines_}); then a close above the rejection's 3-day "
+                     f"high and both lines is RETURN, a close below the bounce low CONTINUATION.")
+    else:
+        items.append(f"Dead cat rejected at the {r['line']} {r['level']:g} on {r['date']}: RETURN above {r['high']:g} and the "
+                     f"200-day lines ({lines_}), CONTINUATION below {r['low']:g} (the bounce low), watched until {r['until']}.")
+    if x["status"] == "return":
+        if x["proposal"]:
+            p = x["proposal"]
+            items.append(f"PROPOSED: bull call debit spread on {x['ticker']}, buy the {p['buy']:g} call, sell the {p['sell']:g} "
+                         f"call, expiry after {p['expiry_after']}, take profit at {p['take_profit']:.0%} of the width, else close "
+                         f"by {p['exit_by']}; {p['size'][0]:.0%}-{p['size'][1]:.0%} of the budget, at most {p['max_open']} open; "
+                         f"the most you can lose is the debit.")
+        else:
+            items.append(f"RETURN on {x['outcome_date']}: the proposal was for that day; no new entry later.")
+        items.append(x["stats"] + ".")
+    elif x["status"] == "continuation":
+        items.append(f"CONTINUATION on {x['outcome_date']}: the decline goes on. Alert only: put spreads after this break "
+                     f"lost in the backtest.")
+    return head + "<ul>" + "".join(f"<li>{escape(t)}</li>" for t in items) + "</ul>"
+
+
 # Market alerts: shown only when a move is about as large as the top 5% of daily or 5-session moves in 2020-2026.
 ALERT_LEVELS = {  # ticker: (name, 1-session move, 5-session move), both as absolute changes
     "CL": ("WTI crude", 0.05, 0.10), "QA": ("Brent crude", 0.05, 0.10), "GC": ("Gold", 0.025, 0.05), "SI": ("Silver", 0.05, 0.10),
@@ -3386,6 +3508,8 @@ def compact_email_html(result):
                      f"{long_plan['stop']} (the bounce low), else close by {long_plan['exit_by']}.</p>")
     if result.get("extreme_move"):
         parts.append(extreme_html(result["extreme_move"]))
+    if result.get("recovery_watch"):
+        parts.append(recovery_html(result["recovery_watch"]))
 
     rows = result.get("candidates") or []
     proposed = [r for r in rows if r["action"] in TRADE_ACTIONS]
@@ -3456,6 +3580,8 @@ def email_html(result):
         parts.append(f"<p><b>Index tight long</b>: {escape(long_plan['ticker'])} buy at the next open, {target}, stop "
                      f"{long_plan['stop']} (the bounce low), else close by {long_plan['exit_by']}; "
                      f"{escape(long_plan['note'])}.</p>")
+    if result.get("recovery_watch"):
+        parts.append(recovery_html(result["recovery_watch"]))
     context = m.get("context") or {}
     if context:
         parts.append("<p>" + "; ".join(f"{escape(k)} {v['close']} ({escape(str(v['trend']))}, {pct(v['vs_sma200'])} vs SMA200, "
@@ -3600,6 +3726,7 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
     market_info = market_summary(rs_benchmarks[0], reference, breadth_by_date, regime, sector_bars, cfg, context_bars, phases)
     phase_now = phases.get(reference.dates[-1]) or {}
     extreme = extreme_move(reference, reference.dates[-1], phase_now, cfg)
+    recovery = recovery_watch(reference, reference.dates[-1], cfg)
     run_cfg = {**cfg, "benchmarks": rs_benchmarks}
     as_of = calendar[-1]
 
@@ -3816,6 +3943,7 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
         "sizing": sizing,
         "backdrop": backdrop,
         "extreme_move": extreme,
+        "recovery_watch": recovery,
         "etf_setups": None if not cfg["etf_setups"] or "breakout" not in strategies else {
             "checked": len(etf_bars), "missing": etf_missing, "rotation": etf_rotation,
             "note": "Breakout rules on sector and theme ETFs, proposed only when the rotation against SPY accelerates. The "
