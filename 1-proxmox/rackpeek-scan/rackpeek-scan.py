@@ -11,7 +11,7 @@ SCHEMA = 1
 MAX_CONTENT = 64 * 1024
 PROBE_TIMEOUT = 20
 
-NAME_ONLY_DIRS = ("/etc/ssh", "/etc/pve/priv", "/etc/rancher", "/etc/proxmox-backup",
+NAME_ONLY_DIRS = ("/etc/ssh", "/etc/pve/priv", "/etc/rancher", "/etc/proxmox-backup", "/etc/proxmox-datacenter-manager",
                   "/etc/pihole", "/etc/wireguard", "/etc/ssl/private")
 NAME_ONLY_GLOBS = ("/etc/shadow*", "/etc/gshadow*", "*.key", "*.pem", "*.pw", "id_*")
 SKIP_DIRS = ("/var/lib",)

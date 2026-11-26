@@ -19,7 +19,7 @@ Installed as `/usr/local/sbin/rackpeek-scan` (mode 0755, owner root) on every ho
 
 Masking happens here, before anything leaves the host.
 
-1. Name only (name, size and mtime, no hash, no content): `/etc/ssh`, `/etc/pve/priv`, `/etc/rancher`, `/etc/proxmox-backup`, `/etc/pihole`, `/etc/wireguard`, `/etc/ssl/private`, `/etc/shadow*`, `/etc/gshadow*`, `*.key`, `*.pem`, `*.pw`, `id_*`, and every dotfile and dotdir under `/root`.
+1. Name only (name, size and mtime, no hash, no content): `/etc/ssh`, `/etc/pve/priv`, `/etc/rancher`, `/etc/proxmox-backup`, `/etc/proxmox-datacenter-manager`, `/etc/pihole`, `/etc/wireguard`, `/etc/ssl/private`, `/etc/shadow*`, `/etc/gshadow*`, `*.key`, `*.pem`, `*.pw`, `id_*`, and every dotfile and dotdir under `/root`.
 2. Binary files: name and sha256 of the raw file.
 3. Text files: sha256 of the raw file. Text up to 64 KiB is sent after masking: a value whose key contains `pass`, `pwhash`, `secret`, `token`, `key`, `credential` or `auth` becomes `***`, and so do the password part of a URL, the value after a command-line flag such as `--cipassword`, and URL path segments of 32 or more token characters (webhook tokens). `.git` folders are skipped.
 
