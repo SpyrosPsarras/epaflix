@@ -6,10 +6,23 @@ import build
 DESIGN = "Homelab index"
 NS = uuid.UUID("5d0f3c3e-6a51-4f0b-9a57-3c2b9e1f7a10")
 MARK = ("managed-by", "homelab-sync")
-SYNC_KEYS = frozenset({MARK[0], "tags", "source", "gone-since", "indexed", "auth", "configmaps", "cpu", "disk-chain",
-                       "disks", "files", "git", "health", "images", "ingress", "kernel", "kind", "live-config", "memory",
-                       "model", "namespace", "nodes", "os", "packages", "path", "scan-errors", "secrets", "serial",
-                       "state", "sync", "updates", "uses", "version", "vmid"})
+NAME_KEY = "index-name"
+HOST_KEYS = {"files", "live-config", "os", "kernel", "packages", "scan-errors"}
+COMMON_KEYS = {MARK[0], NAME_KEY, "tags", "source", "gone-since"}
+SYNC_KEYS = {
+    "hw": COMMON_KEYS | {"model", "serial", "cpu", "memory"},
+    "pve": COMMON_KEYS | HOST_KEYS,
+    "vm": COMMON_KEYS | HOST_KEYS | {"vmid", "disks"},
+    "lxc": COMMON_KEYS | HOST_KEYS | {"vmid", "disks"},
+    "app": COMMON_KEYS | {"kind", "namespace", "path", "sync", "health", "indexed"},
+    "k3s": COMMON_KEYS | {"nodes"},
+}
+
+
+def sync_keys(name):
+    return SYNC_KEYS.get(name.split("/", 1)[0].lower(), COMMON_KEYS)
+
+
 TYPES = {"hw": "server", "pve": "proxmox", "vm": "vm", "lxc": "lxc"}
 ROWS = ("hw", "pve", "app", "k3s")
 OWNED = ("label", "type", "ip", "check_method", "check_target", "properties", "notes",
@@ -55,7 +68,7 @@ def ips(hosts, scans):
 
 
 def _props(it):
-    props = [{"key": MARK[0], "value": MARK[1]}] if "sync" in (it.get("tags") or []) else []
+    props = [{"key": MARK[0], "value": MARK[1]}, {"key": NAME_KEY, "value": it["name"]}] if "sync" in (it.get("tags") or []) else []
     other = sorted(t for t in it.get("tags") or [] if t != "sync")
     if other:
         props.append({"key": "tags", "value": ", ".join(other)})
@@ -63,9 +76,16 @@ def _props(it):
     return [dict(p, icon=None, visible=False) for p in props]
 
 
+def _prop(node, key):
+    return next((p.get("value") for p in node.get("properties") or [] if p.get("key") == key), None)
+
+
+def _name(node):
+    return _prop(node, NAME_KEY) or node.get("label") or ""
+
+
 def _is_sync(node):
-    return node.get("id") == node_id(node.get("label") or "") and any(
-        (p.get("key"), p.get("value")) == MARK for p in node.get("properties") or [])
+    return _prop(node, MARK[0]) == MARK[1] and node.get("id") == node_id(_name(node))
 
 
 def check_canvas(canvas):
@@ -75,12 +95,13 @@ def check_canvas(canvas):
     return canvas
 
 
-def _merge_props(new, old):
+def _merge_props(new, old, reserved):
     old_by = {p.get("key"): p for p in old or []}
     out = [dict(p, icon=(old_by.get(p["key"]) or {}).get("icon"), visible=(old_by.get(p["key"]) or {}).get("visible", False))
            for p in new]
     keys = {p["key"] for p in new}
-    return out + [p for p in old or [] if p.get("key") not in keys and p.get("key") not in SYNC_KEYS]
+    return out + [dict(p, value=build.scrub(str(p.get("value") or ""))) for p in old or []
+                  if p.get("key") not in keys and p.get("key") not in reserved]
 
 
 def stored_items(canvas):
@@ -92,7 +113,8 @@ def stored_items(canvas):
         props = {p.get("key"): p.get("value") for p in n.get("properties") or []}
         tags = ["sync"] + [t.strip() for t in (props.pop("tags", "") or "").split(",") if t.strip()]
         props.pop(MARK[0], None)
-        items.append({"name": n["label"], "tags": tags, "labels": props, "notes": n.get("notes"), "runsOn": [], "node": n})
+        props.pop(NAME_KEY, None)
+        items.append({"name": _name(n), "tags": tags, "labels": props, "notes": n.get("notes"), "runsOn": [], "node": n})
     return items, raw
 
 
@@ -133,7 +155,7 @@ def _place(name, parent, taken, children):
 
 def payload(items, canvas, ip_map, design_id):
     stored = {n["id"]: n for n in canvas.get("nodes") or [] if _is_sync(n)}
-    raw = [n for n in canvas.get("nodes") or [] if not _is_sync(n)]
+    raw = [dict(n, changed_facts=[]) for n in canvas.get("nodes") or [] if not _is_sync(n)]
     raw_ids = {n["id"] for n in raw}
     nodes_items = [it for it in items if it.get("kind") != "Service"]
     names = {it["name"].lower() for it in nodes_items}
@@ -147,7 +169,7 @@ def payload(items, canvas, ip_map, design_id):
         if n.get("parent_id"):
             children[n["parent_id"]] = children.get(n["parent_id"], 0) + 1
         else:
-            row = _row(n.get("label") or "")
+            row = _row(_name(n))
             taken.add((row, round((n.get("pos_x") or 0) / _step(row))))
     for it in nodes_items:
         name = it["name"]
@@ -157,7 +179,7 @@ def payload(items, canvas, ip_map, design_id):
         old = stored.get(nid)
         if old and "node" in it:
             node = dict(old)
-            node["properties"] = _merge_props(_props(it), old.get("properties"))
+            node["properties"] = _merge_props(_props(it), old.get("properties"), sync_keys(name))
             node["notes"] = it.get("notes")
             nodes.append(node)
             continue
@@ -179,7 +201,7 @@ def payload(items, canvas, ip_map, design_id):
             "ip": ip,
             "check_method": "ping" if ip else None,
             "check_target": ip,
-            "properties": _merge_props(_props(it), (old or {}).get("properties")),
+            "properties": _merge_props(_props(it), (old or {}).get("properties"), sync_keys(name)),
             "notes": it.get("notes"),
             "parent_id": parent,
             "container_mode": node_type(name) == "proxmox",

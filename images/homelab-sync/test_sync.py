@@ -63,7 +63,7 @@ class FakeIO:
         return [{"id": doc_id, "node_id": nid, "title": title} for nid, (doc_id, _, title) in self.docs.items()]
 
     def document(self, doc_id):
-        return next({"id": d, "body": b} for d, b, _ in self.docs.values() if d == doc_id)
+        return next({"id": d, "body": b, "title": t} for d, b, t in self.docs.values() if d == doc_id)
 
     def create_document(self, body):
         self.created_docs.append(body)
@@ -217,6 +217,38 @@ class Sync(unittest.TestCase):
         io.k8s = lambda: dict(fx.k8s(), deployments=[d for d in fx.k8s()["deployments"] if d["metadata"]["name"] != "stray"])
         run(io)
         self.assertIn(("doc-1", {"body": "No workloads.\n", "revision_reason": "import"}), io.updated_docs)
+
+    def test_page_renamed_after_list_not_written(self):
+        first = FakeIO()
+        run(first)
+        nid = nodes(first)["app/forgejo"]["id"]
+        io = FakeIO(docs={nid: ("doc-1", "old", "app/forgejo workloads")})
+        io.document = lambda doc_id: {"id": doc_id, "body": "old", "title": "My runbook"}
+        self.assertEqual(run(io), 1)
+        self.assertEqual(io.updated_docs, [])
+
+    def test_truenas_page_kept_when_truenas_scan_fails(self):
+        first = FakeIO(design=False)
+        run(first)
+        saved = first.saves[0]
+        nid = nodes(first)["vm/truenas"]["id"]
+        io = FakeIO(down_hosts={"truenas"}, docs={nid: ("doc-1", "## truenas/app/silo\n", "vm/truenas workloads")})
+        io.canvas = lambda design_id: json.loads(json.dumps(
+            {"nodes": saved["nodes"], "edges": [], "viewport": {}, "custom_style": None}))
+        self.assertEqual(run(io), 1)
+        self.assertIn("vm/truenas", nodes(io))
+        self.assertEqual(io.updated_docs, [])
+
+    def test_renamed_sync_node_still_synced(self):
+        first = FakeIO()
+        run(first)
+        saved = json.loads(json.dumps(first.saves[0]))
+        next(n for n in saved["nodes"] if n["label"] == "app/forgejo")["label"] = "Forgejo (git)"
+        io = FakeIO()
+        io.canvas = lambda design_id: json.loads(json.dumps(
+            {"nodes": saved["nodes"], "edges": [], "viewport": {}, "custom_style": None}))
+        self.assertEqual(run(io), 0)
+        self.assertEqual(sum(1 for n in io.saves[0]["nodes"] if n["id"] == hl.node_id("app/forgejo")), 1)
 
     def test_incomplete_canvas_saves_nothing(self):
         io = FakeIO()

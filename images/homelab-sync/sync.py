@@ -241,7 +241,7 @@ def write_docs(io, items, fresh, node_ids, log):
     existing = {d.get("node_id"): d for d in io.documents()}
     docs = hl.workload_docs(items)
     for name in fresh:
-        if name not in docs and (existing.get(node_ids.get(name.lower())) or {}).get("title") == f"{name} workloads":
+        if name.lower().startswith("app/") and name not in docs and (existing.get(node_ids.get(name.lower())) or {}).get("title") == f"{name} workloads":
             docs[name] = "No workloads.\n"
     conflicts = 0
     for parent, body in sorted(docs.items()):
@@ -254,8 +254,13 @@ def write_docs(io, items, fresh, node_ids, log):
         elif doc.get("title") != f"{parent} workloads":
             conflicts += 1
             log(f"homelable: {parent} already has page {doc.get('title')!r}, workloads not written")
-        elif (io.document(doc["id"]) or {}).get("body") != body:
-            io.update_document(doc["id"], {"body": body, "revision_reason": "import"})
+        else:
+            current = io.document(doc["id"]) or {}
+            if current.get("title") != f"{parent} workloads":
+                conflicts += 1
+                log(f"homelable: {parent} page was renamed to {current.get('title')!r}, workloads not written")
+            elif current.get("body") != body:
+                io.update_document(doc["id"], {"body": body, "revision_reason": "import"})
     log("homelable: workload pages written")
     return conflicts
 
@@ -348,7 +353,7 @@ def run(io, hosts, today, log, seed=False):
         return 1
     try:
         fresh = [i["name"] for i in items if i.get("kind") != "Service"]
-        if write_docs(io, resources, fresh, {n["label"].lower(): n["id"] for n in body["nodes"] if hl._is_sync(n)}, log):
+        if write_docs(io, resources, fresh, {hl._name(n).lower(): n["id"] for n in body["nodes"] if hl._is_sync(n)}, log):
             exit_code = 1
     except Exception as exc:
         exit_code = 1

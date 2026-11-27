@@ -88,7 +88,7 @@ class Homelable(unittest.TestCase):
         canvas["viewport"] = {"x": 1, "y": 2, "zoom": 0.5}
         canvas["custom_style"] = {"bg": "dark"}
         body = hl.payload(fresh_items(), canvas, {}, "d1")
-        self.assertIn(mine, body["nodes"])
+        self.assertIn(dict(mine, changed_facts=[]), body["nodes"])
         self.assertEqual(body["edges"], [edge])
         self.assertEqual(body["viewport"], {"x": 1, "y": 2, "zoom": 0.5})
         self.assertEqual(body["custom_style"], {"bg": "dark"})
@@ -113,7 +113,7 @@ class Homelable(unittest.TestCase):
         twin = dict(next(n for n in canvas["nodes"] if n["label"] == "hw/takaros"), id="hand-twin", pos_x=7)
         canvas["nodes"].append(twin)
         body = hl.payload(fresh_items(), canvas, {}, "d1")
-        self.assertIn(twin, body["nodes"])
+        self.assertIn(dict(twin, changed_facts=[]), body["nodes"])
         self.assertEqual(sum(1 for n in body["nodes"] if n["label"] == "hw/takaros"), 2)
 
     def test_human_properties_kept(self):
@@ -126,7 +126,18 @@ class Homelable(unittest.TestCase):
         self.assertEqual((props["health"]["icon"], props["health"]["visible"]), ("heart", True))
 
     def test_sync_keys_cover_build_labels(self):
-        self.assertFalse({k for i in fresh_items() for k in i["labels"]} - hl.SYNC_KEYS)
+        for i in fresh_items():
+            if i["kind"] != "Service":
+                self.assertFalse(set(i["labels"]) - hl.sync_keys(i["name"]), i["name"])
+
+    def test_human_property_with_workload_key_kept(self):
+        canvas = canvas_of(hl.payload(fresh_items(), {}, {}, "d1"))
+        n = next(x for x in canvas["nodes"] if x["label"] == "app/forgejo")
+        n["properties"].append({"key": "version", "value": "pinned by me", "icon": None, "visible": True})
+        n["properties"].append({"key": "owner", "value": "see t3code-work", "icon": None, "visible": True})
+        props = {p["key"]: p["value"] for p in by_label(hl.payload(fresh_items(), canvas, {}, "d1"))["app/forgejo"]["properties"]}
+        self.assertEqual(props["version"], "pinned by me")
+        self.assertNotIn("t3code-work", props["owner"])
 
     def test_seed_skips_excluded(self):
         resources = fx.stored() + [
