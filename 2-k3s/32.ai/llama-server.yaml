@@ -104,7 +104,7 @@ spec:
                 - >-
                   curl -sf -m 50 http://127.0.0.1:8080/v1/chat/completions -H 'Content-Type: application/json'
                   -d '{"messages":[{"role":"user","content":"What is 17 plus 25? Reply with the number only."}],"chat_template_kwargs":{"enable_thinking":false},"max_tokens":8,"temperature":0}'
-                  | grep -q '"content":"42'
+                  | grep -q '"content":"42"'
             periodSeconds: 10
             timeoutSeconds: 60
             failureThreshold: 30

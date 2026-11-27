@@ -1274,9 +1274,7 @@ spec:
       interval: 60s
       rules:
         - alert: LlamaServerDown
-          expr: |
-            max(kube_deployment_status_replicas_available{namespace="ai",deployment="llama-server"}) == 0
-              or absent(kube_deployment_status_replicas_available{namespace="ai",deployment="llama-server"})
+          expr: (max(kube_deployment_status_replicas_available{namespace="ai",deployment="llama-server"}) or vector(0)) == 0
           for: 15m
           labels:
             severity: warning

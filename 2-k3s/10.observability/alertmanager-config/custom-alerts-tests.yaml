@@ -369,8 +369,24 @@ tests:
         alertname: LlamaServerDown
         exp_alerts:
           - exp_labels:
-              namespace: ai
-              deployment: llama-server
+              severity: warning
+              component: ai
+            exp_annotations:
+              summary: llama-server is unavailable
+              description: "llama-server has no available replica or its Deployment is absent, so paperless-gpt, Open WebUI and CLIProxy's ollama provider get no local model. Its startup probe also fails when the model answers a test prompt wrong. Renovate deploys PrismML releases unattended: if the last ghcr.io/spyrospsarras/llama-prism bump in 2-k3s/32.ai/kustomization.yaml came just before this, revert that Renovate PR. Otherwise check the pod log in ai and /srv/llama-server on k3s-worker-64."
+  - name: llama-server keeps one timer when the Deployment disappears at zero
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="ai",deployment="llama-server"}'
+        values: '0x9'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: LlamaServerDown
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: LlamaServerDown
+        exp_alerts:
+          - exp_labels:
               severity: warning
               component: ai
             exp_annotations:
