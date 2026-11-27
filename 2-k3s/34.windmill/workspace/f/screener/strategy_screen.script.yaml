@@ -53,7 +53,7 @@ schema:
       default: 0
     settings:
       type: object
-      description: 'Optional overrides of the thresholds, e.g. {"min_rel_volume": 2}. See DEFAULTS in the script'
+      description: 'Optional overrides of the thresholds, e.g. {"min_rel_volume": 2}. {"intraday": 1} for a manual run while the market is open: uses today''s prices so far, marks the email intraday and saves nothing. See DEFAULTS in the script'
       default: {}
     email:
       type: string
