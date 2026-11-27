@@ -1,5 +1,5 @@
 #requirements:
-#wmill==1.866.0
+#wmill==1.882.0
 
 """My positions: record the stocks you bought and sold, so the daily strategy screen follows them.
 
