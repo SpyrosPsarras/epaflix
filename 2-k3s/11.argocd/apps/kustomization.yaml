@@ -18,6 +18,7 @@ resources:
   - app-forgejo.yaml
   - app-fytorium.yaml
   - app-home-assistant.yaml
+  - app-immich.yaml
   - app-kube-vip.yaml
   - app-kured.yaml
   - app-kube-vip-cloud-provider.yaml

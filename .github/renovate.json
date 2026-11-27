@@ -263,6 +263,16 @@
       "description": "VectorChord for postgres-cluster never auto-merges. After the merge, run ALTER EXTENSION vchord UPDATE and REINDEX INDEX face_index and clip_index in the Immich database (Immich docs, Pre-existing Postgres). A Postgres major needs a new pg<major> tag and new /usr/lib/postgresql/<major> and /usr/share/postgresql/<major> paths in the extension entry, by hand.",
       "matchPackageNames": ["ghcr.io/tensorchord/vchord-scratch"],
       "automerge": false
+    },
+    {
+      "description": "Immich server, machine learning and chart move together and never auto-merge. A server update runs database migrations in postgres-cluster, and the phone apps must stay on the same major and minor as the server (Immich FAQ). Read the release notes for breaking changes, then merge. The cluster's daily backup is the rollback.",
+      "matchPackageNames": [
+        "ghcr.io/immich-app/immich-server",
+        "ghcr.io/immich-app/immich-machine-learning",
+        "immich"
+      ],
+      "groupName": "immich",
+      "automerge": false
     }
   ],
   "customManagers": [

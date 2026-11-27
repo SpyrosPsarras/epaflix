@@ -592,6 +592,28 @@ spec:
             summary: "Latest Paperless file backup failed"
             description: "Paperless backup Job {{ $labels.job_name }} failed. Check its Job logs for an S3, repository lock or unreadable file error. Runbook: 2-k3s/33.paperless/README.md, section Backup."
 
+    - name: immich
+      interval: 60s
+      rules:
+        - alert: ImmichServerDown
+          expr: (max(kube_deployment_status_replicas_available{namespace="immich",deployment="immich-server"}) or vector(0)) == 0
+          for: 15m
+          labels:
+            severity: warning
+            component: immich
+          annotations:
+            summary: "Immich is unavailable"
+            description: "The Immich server has no available replica or its Deployment is absent. Phones stop backing up. Check the immich-server Deployment, its NFS volume immich-library and the immich database in postgres-cluster. Runbook: 2-k3s/39.immich/README.md."
+        - alert: ImmichMachineLearningDown
+          expr: (max(kube_deployment_status_replicas_available{namespace="immich",deployment="immich-machine-learning"}) or vector(0)) == 0
+          for: 15m
+          labels:
+            severity: warning
+            component: immich
+          annotations:
+            summary: "Immich machine learning is unavailable"
+            description: "Immich machine learning has no available replica or its Deployment is absent. Uploads still work, but faces and smart search stop being indexed. It runs on the shared GPU of k3s-worker-64: check for out of memory and the nvidia device plugin. Runbook: 2-k3s/39.immich/README.md."
+
     - name: windmill
       interval: 60s
       rules:

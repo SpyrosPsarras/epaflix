@@ -1,0 +1,82 @@
+immich:
+  metrics:
+    enabled: true
+  persistence:
+    library:
+      existingClaim: immich-library
+  existingConfiguration: immich-config
+  configurationKind: Secret
+
+valkey:
+  enabled: true
+
+server:
+  controllers:
+    main:
+      pod:
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1001
+          runAsGroup: 1001
+          fsGroup: 1001
+      containers:
+        main:
+          image:
+            repository: ghcr.io/immich-app/immich-server
+            tag: v3.4.2@sha256:fc880c1bf665b4aab1e74c15e56ab871225989cd546536e6b77e771869af06bd
+          env:
+            TZ: Europe/Athens
+            DB_HOSTNAME: postgres-cluster-rw.postgres-system.svc
+            DB_PORT: "5432"
+            DB_DATABASE_NAME: immich
+            DB_USERNAME: immich
+            DB_PASSWORD:
+              valueFrom:
+                secretKeyRef:
+                  name: immich-db
+                  key: password
+            DB_VECTOR_EXTENSION: vectorchord
+          resources:
+            requests:
+              cpu: 250m
+              memory: 1Gi
+            limits:
+              memory: 4Gi
+
+machine-learning:
+  controllers:
+    main:
+      # The GPU has 4 time-slices and all 4 are taken, so a rolling update would wait for a fifth.
+      strategy: Recreate
+      pod:
+        runtimeClassName: nvidia
+        nodeSelector:
+          gpu: nvidia
+        tolerations:
+          - key: nvidia.com/gpu
+            operator: Exists
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1001
+          runAsGroup: 1001
+          fsGroup: 1001
+      containers:
+        main:
+          image:
+            repository: ghcr.io/immich-app/immich-machine-learning
+            tag: v3.4.2-cuda@sha256:0a8aeaeb6771da78c4f54bc00b429b113267db50aa121aa6e30f78ef86a31e33
+          env:
+            HOME: /cache
+          resources:
+            requests:
+              cpu: 100m
+              memory: 1Gi
+              nvidia.com/gpu: 1
+            limits:
+              memory: 6Gi
+              nvidia.com/gpu: 1
+  persistence:
+    cache:
+      enabled: true
+      type: persistentVolumeClaim
+      existingClaim: immich-ml-cache
