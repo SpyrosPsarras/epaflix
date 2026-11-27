@@ -8,6 +8,7 @@ resources:
   - ingress.yaml
   - ../searxng
   - ../skills
+  - ../outlook
 
 configMapGenerator:
   - name: mcp-hub-instance-settings
@@ -46,4 +47,4 @@ patches:
         template:
           metadata:
             annotations:
-              mcp-hub.epaflix.com/inputs-revision: "r4"
+              mcp-hub.epaflix.com/inputs-revision: "r5"

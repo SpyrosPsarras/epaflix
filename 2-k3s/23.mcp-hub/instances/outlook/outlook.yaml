@@ -1,0 +1,192 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: outlook-mcp
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: mcp-hub-outlook-grant
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [mcp-hub-outlook-grant]
+    verbs: [get, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mcp-hub-outlook-grant
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: mcp-hub-outlook-grant
+subjects:
+  - kind: ServiceAccount
+    name: outlook-mcp
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: outlook-mcp
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: outlook-mcp
+  template:
+    metadata:
+      annotations:
+        mcp-hub.epaflix.com/inputs-revision: "r1"
+      labels:
+        app: outlook-mcp
+    spec:
+      serviceAccountName: outlook-mcp
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 10
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: raw
+          image: ghcr.io/softeria/ms-365-mcp-server:0.191.1
+          args: ["--http", "127.0.0.1:3000", "--org-mode", "--preset", "mail"]
+          env:
+            - name: HOME
+              value: /tmp
+            - name: MS365_MCP_LOG_DIR
+              value: /tmp/logs
+            - name: MS365_MCP_USE_KEYTAR
+              value: "0"
+          readinessProbe:
+            exec:
+              command: [wget, -q, -O, /dev/null, http://127.0.0.1:3000/health]
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          livenessProbe:
+            exec:
+              command: [wget, -q, -O, /dev/null, http://127.0.0.1:3000/health]
+            initialDelaySeconds: 60
+            periodSeconds: 60
+          resources:
+            requests:
+              cpu: 10m
+              memory: 160Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: raw-tmp
+              mountPath: /tmp
+        - name: gateway
+          image: docker.io/library/python:3.13-alpine
+          command:
+            - sh
+            - -c
+            - >-
+              pip install -q --no-cache-dir --disable-pip-version-check
+              --target /opt/py mcp==2.2.0 &&
+              exec python /runner/gateway.py
+          env:
+            - name: OUTLOOK_UPSTREAM_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-hub-outlook-upstream
+                  key: token
+            - name: HUB_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: PYTHONPATH
+              value: /app:/opt/py
+            - name: HOME
+              value: /tmp
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+          ports:
+            - name: http
+              containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 60
+          resources:
+            requests:
+              cpu: 10m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: app
+              mountPath: /app
+              readOnly: true
+            - name: runner
+              mountPath: /runner/gateway.py
+              subPath: gateway.py
+              readOnly: true
+            - name: grant-access
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+              readOnly: true
+            - name: py
+              mountPath: /opt/py
+            - name: gateway-tmp
+              mountPath: /tmp
+      volumes:
+        - name: app
+          configMap:
+            name: mcp-hub-app
+        - name: runner
+          configMap:
+            name: outlook-runner
+        - name: grant-access
+          projected:
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  expirationSeconds: 3600
+              - configMap:
+                  name: kube-root-ca.crt
+                  items:
+                    - key: ca.crt
+                      path: ca.crt
+        - name: raw-tmp
+          emptyDir: {sizeLimit: 256Mi}
+        - name: gateway-tmp
+          emptyDir: {}
+        - name: py
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: outlook-mcp
+spec:
+  selector:
+    app: outlook-mcp
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
