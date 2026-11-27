@@ -86,7 +86,7 @@ class SetupTests(unittest.TestCase):
         self.assertTrue(models['userKey'])
         self.assertEqual(models['providers']['cliproxy']['modelOverrides'], {
             'claude-opus-5-5': {'contextWindow': 512000},
-            'claude-haiku-5-5': {'contextWindow': 100000},
+            'claude-haiku-5-5': {'contextWindow': 100000}, 'ollama-qwen3.8-bonsai-27b': {'contextWindow': 94208},
             'acme/claude-opus-5-5': {'name': 'Acme Opus 5.5'},
             'team/claude-fable-5-2': {'name': 'Team Fable 5.2'},
             'acme/claude-haiku-5-5': {'name': 'Acme Haiku 5.5', 'contextWindow': 100000}})
@@ -140,7 +140,7 @@ class SetupTests(unittest.TestCase):
                 self.assertTrue(models['userKey'])
                 self.assertEqual(models['providers']['cliproxy']['modelOverrides'], {
                     'old/claude-opus-4-6-thinking': {'name': 'Custom Thinking'},
-                    'claude-haiku-5-5': {'contextWindow': 100000}})
+                    'claude-haiku-5-5': {'contextWindow': 100000}, 'ollama-qwen3.8-bonsai-27b': {'contextWindow': 94208}})
                 self.assertIn('cliproxy-textgen', models['providers'])
 
     def test_work_settings_load_skills_from_clone(self):
@@ -161,6 +161,7 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(settings['skills'], ['!**/.agents/skills/ponytail/**', str(self.home / 'tstack/skills')])
         self.assertEqual(settings['pi-cliproxyapi-provider'], {'userKey': True, 'gpt56ContextWindow': 'canonical'})
         self.assertEqual(settings['retry'], {'baseDelayMs': 1000, 'maxRetries': 8})
+        self.assertEqual(settings['httpIdleTimeoutMs'], 600000)
         self.assertEqual(settings['packages'], [
             '/tools/node_modules/pi-cliproxyapi-provider',
             '/tools/node_modules/@spences10/pi-redact',
@@ -180,7 +181,7 @@ class SetupTests(unittest.TestCase):
         path = self.agent / 'models.json'
         self.assertTrue(path.exists(), 'Text generation provider is missing')
         self.assertEqual(json.loads(path.read_text()), {'providers': {
-            'cliproxy': {'modelOverrides': {'claude-haiku-5-5': {'contextWindow': 100000}}},
+            'cliproxy': {'modelOverrides': {'claude-haiku-5-5': {'contextWindow': 100000}, 'ollama-qwen3.8-bonsai-27b': {'contextWindow': 94208}}},
             'cliproxy-textgen': {
             'baseUrl': 'http://proxy.test', 'api': 'anthropic-messages',
             'apiKey': '$CLIPROXYAPI_API_KEY', 'models': [{
@@ -215,7 +216,7 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(json.loads(path.read_text())['providers']['cliproxy'], {
             'baseUrl': 'http://custom.test', 'userKey': ['keep'], 'modelOverrides': {
                 'claude-opus-5-5': {'contextWindow': 512000},
-                'claude-haiku-5-5': {'contextWindow': 100000}}})
+                'claude-haiku-5-5': {'contextWindow': 100000}, 'ollama-qwen3.8-bonsai-27b': {'contextWindow': 94208}}})
         before = path.read_bytes()
         self.write()
         self.assertEqual(path.read_bytes(), before)

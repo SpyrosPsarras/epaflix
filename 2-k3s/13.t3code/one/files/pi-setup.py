@@ -22,6 +22,10 @@ ALIASES = {
     'or-minimax-m3:free': 'openrouter/minimax/minimax-m3'}
 ACCOUNT_CLAUDE_ID = re.compile(r'([a-z0-9][a-z0-9-]*)/(claude-([a-z]+)-(\d+(?:-\d+)*))')
 HAIKU_CONTEXT_WINDOW = 100000
+# Matches --ctx-size of llama-server in 2-k3s/32.ai/llama-server.yaml, so Pi compacts before it overflows.
+LOCAL_MODEL_CONTEXT_WINDOW = 94208
+# A cold 90K-token prompt on llama-server reads for about 311 s before the first byte; Pi's default is 300 s.
+HTTP_IDLE_TIMEOUT_MS = 600000
 
 
 def atomic_write(path, content):
@@ -91,6 +95,7 @@ def write_models(home, base_url, account_overrides):
         if ACCOUNT_CLAUDE_ID.fullmatch(model_id):
             del overrides[model_id]
     overrides['claude-haiku-5-5'] = {'contextWindow': HAIKU_CONTEXT_WINDOW}
+    overrides['ollama-qwen3.8-bonsai-27b'] = {'contextWindow': LOCAL_MODEL_CONTEXT_WINDOW}
     overrides.update(account_overrides)
     providers['cliproxy-textgen'] = {
         'baseUrl': base_url, 'api': 'anthropic-messages', 'apiKey': '$CLIPROXYAPI_API_KEY',
@@ -118,6 +123,7 @@ def write(home, safety_entry, ssh_path=Path('/scripts/homelab-ssh.md')):
         settings['skills'].append(str(tstack))
     settings.setdefault('pi-cliproxyapi-provider', {})['gpt56ContextWindow'] = 'canonical'
     settings.setdefault('retry', {})['maxRetries'] = 8
+    settings['httpIdleTimeoutMs'] = HTTP_IDLE_TIMEOUT_MS
     write_json(settings_path, settings)
     base_url = os.environ.get('ANTHROPIC_BASE_URL', '').rstrip('/')
     account_aliases, account_overrides = fetch_account_models(base_url)
