@@ -1,7 +1,7 @@
 #requirements:
 #finviz==2.1.0
 #requests==2.34.2
-#wmill==1.866.0
+#wmill==1.882.0
 
 """Strategy screener: LONG Pullback / EMA bounce and Breakout / momentum, SHORT Rally rejection, Breakdown and Run break,
 plus a Potential short squeeze watchlist (LONG).
