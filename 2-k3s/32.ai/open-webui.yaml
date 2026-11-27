@@ -54,8 +54,9 @@ spec:
             - {name: UMASK_SET, value: "002"}
             - {name: USER_ID, value: "568"}
             - {name: USE_OLLAMA_DOCKER, value: "false"}
-            - {name: OLLAMA_BASE_URL, value: "http://ollama.ai.svc.cluster.local:30068"}
-            - {name: OLLAMA_BASE_URLS, value: "http://ollama.ai.svc.cluster.local:30068"}
+            - {name: ENABLE_OLLAMA_API, value: "false"}
+            - {name: ENABLE_OPENAI_API, value: "true"}
+            - {name: OPENAI_API_BASE_URL, value: "http://llama-server.ai.svc.cluster.local:8080/v1"}
             - name: REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -98,8 +99,6 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /app/backend/data
-            - name: models
-              mountPath: /root/.ollama
         - name: redis
           image: ghcr.io/valkey-io/valkey:9.1.3
           args: ["--port", "6379", "--requirepass", "$(REDIS_PASSWORD)"]
@@ -154,9 +153,6 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: open-webui-data
-        - name: models
-          persistentVolumeClaim:
-            claimName: ollama-data
         - name: redis-data
           emptyDir: {}
 ---

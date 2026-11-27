@@ -30,10 +30,11 @@ spec:
           env:
             - {name: PAPERLESS_BASE_URL, value: "http://paperless:8000"}
             - {name: PAPERLESS_PUBLIC_URL, value: "https://paperless.epaflix.com"}
-            - {name: LLM_PROVIDER, value: ollama}
-            - {name: LLM_MODEL, value: "qwen3.5:9b"}
-            - {name: OLLAMA_HOST, value: "http://ollama.ai.svc.cluster.local:30068"}
-            - {name: OLLAMA_THINK, value: "false"}
+            - {name: LLM_PROVIDER, value: openai}
+            - {name: LLM_MODEL, value: "qwen3.8-bonsai:27b"}
+            - {name: OPENAI_BASE_URL, value: "http://llama-server.ai.svc.cluster.local:8080/v1"}
+            # llama-server checks no key, but paperless-gpt refuses to start without one.
+            - {name: OPENAI_API_KEY, value: none}
             - {name: LLM_LANGUAGE, value: "Norwegian, English, German or Greek"}
             - {name: AUTO_TAG, value: paperless-gpt-auto}
             - {name: AUTO_GENERATE_CREATED_DATE, value: "false"}

@@ -17,7 +17,7 @@ def resource(path, kind, name):
 
 class GpuAppsTests(unittest.TestCase):
     def test_gpu_scheduling(self):
-        for path, name in [("2-k3s/08.servarr/jellyfin/jellyfin.yaml", "jellyfin"), ("2-k3s/32.ai/ollama.yaml", "ollama")]:
+        for path, name in [("2-k3s/08.servarr/jellyfin/jellyfin.yaml", "jellyfin"), ("2-k3s/32.ai/llama-server.yaml", "llama-server")]:
             deployment = resource(path, "Deployment", name)
             self.assertEqual(deployment["spec"]["replicas"], 1)
             self.assertEqual(deployment["spec"]["strategy"]["type"], "Recreate")
@@ -33,7 +33,7 @@ class GpuAppsTests(unittest.TestCase):
     def test_local_data_is_prebound_and_retained(self):
         for path, namespace, claims in [
             ("2-k3s/08.servarr/jellyfin/storage.yaml", "servarr", {"jellyfin-config": "/srv/jellyfin/config"}),
-            ("2-k3s/32.ai/storage.yaml", "ai", {"ollama-data": "/srv/ollama", "open-webui-data": "/srv/open-webui"}),
+            ("2-k3s/32.ai/storage.yaml", "ai", {"llama-server-data": "/srv/llama-server", "open-webui-data": "/srv/open-webui"}),
         ]:
             for name, local_path in claims.items():
                 pv = resource(path, "PersistentVolume", name + "-pv")["spec"]
@@ -67,13 +67,14 @@ class GpuAppsTests(unittest.TestCase):
             self.assertEqual(route["spec"]["routes"][0]["match"], "Host(`jellyfin.epaflix.com`)")
             self.assertEqual(route["spec"]["routes"][0]["services"], [{"name": "jellyfin", "port": 8096}])
 
-    def test_open_webui_uses_external_ollama_and_local_redis(self):
+    def test_open_webui_uses_llama_server_and_local_redis(self):
         pod = resource("2-k3s/32.ai/open-webui.yaml", "Deployment", "open-webui")["spec"]["template"]["spec"]
         self.assertNotIn("runtimeClassName", pod)
         webui, redis = pod["containers"]
         env = {entry["name"]: entry for entry in webui["env"]}
         self.assertEqual(env["USE_OLLAMA_DOCKER"]["value"], "false")
-        self.assertEqual(env["OLLAMA_BASE_URL"]["value"], "http://ollama.ai.svc.cluster.local:30068")
+        self.assertEqual(env["ENABLE_OLLAMA_API"]["value"], "false")
+        self.assertEqual(env["OPENAI_API_BASE_URL"]["value"], "http://llama-server.ai.svc.cluster.local:8080/v1")
         self.assertIn("127.0.0.1:6379", env["REDIS_URL"]["value"])
         self.assertEqual(env["REDIS_PASSWORD"]["valueFrom"]["secretKeyRef"]["name"], "open-webui-redis-env")
         self.assertEqual(webui["envFrom"], [{"secretRef": {"name": "open-webui-env"}}])
@@ -83,6 +84,18 @@ class GpuAppsTests(unittest.TestCase):
             self.assertIn("readinessProbe", container)
             self.assertIn("livenessProbe", container)
 
+    def test_llama_server_model_and_consumers(self):
+        path = "2-k3s/32.ai/llama-server.yaml"
+        container = resource(path, "Deployment", "llama-server")["spec"]["template"]["spec"]["containers"][0]
+        self.assertEqual(container["args"][container["args"].index("--alias") + 1], "qwen3.8-bonsai:27b")
+        self.assertEqual(container["args"][container["args"].index("--parallel") + 1], "1")
+        self.assertEqual(resource(path, "Service", "llama-server")["spec"]["ports"][0]["port"], 8080)
+        gpt = resource("2-k3s/33.paperless/paperless-gpt.yaml", "Deployment", "paperless-gpt")["spec"]["template"]["spec"]["containers"][0]
+        env = {entry["name"]: entry.get("value") for entry in gpt["env"]}
+        self.assertEqual(env["LLM_PROVIDER"], "openai")
+        self.assertEqual(env["LLM_MODEL"], "qwen3.8-bonsai:27b")
+        self.assertEqual(env["OPENAI_BASE_URL"], "http://llama-server.ai.svc.cluster.local:8080/v1")
+
     def test_open_webui_is_lan_only(self):
         routes = documents("2-k3s/32.ai/ingressroute.yaml")
         self.assertEqual(len(routes), 1)
@@ -90,7 +103,7 @@ class GpuAppsTests(unittest.TestCase):
 
     def test_memory_limits_leave_node_headroom(self):
         total_mib = 0
-        for path, name in [("2-k3s/08.servarr/jellyfin/jellyfin.yaml", "jellyfin"), ("2-k3s/32.ai/ollama.yaml", "ollama"), ("2-k3s/32.ai/open-webui.yaml", "open-webui")]:
+        for path, name in [("2-k3s/08.servarr/jellyfin/jellyfin.yaml", "jellyfin"), ("2-k3s/32.ai/llama-server.yaml", "llama-server"), ("2-k3s/32.ai/open-webui.yaml", "open-webui")]:
             containers = resource(path, "Deployment", name)["spec"]["template"]["spec"]["containers"]
             for container in containers:
                 memory = container["resources"]["limits"]["memory"]

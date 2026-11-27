@@ -4,14 +4,14 @@ namespace: ai
 resources:
   - namespace.yaml
   - storage.yaml
-  - ollama.yaml
+  - llama-server.yaml
   - open-webui.yaml
   - ingressroute.yaml
 generators:
   - ksops-generator.yaml
 images:
-  - name: ollama/ollama
-    newTag: 0.40.16@sha256:910d0d8107b538fb0894e63163eb195de0cc7aefcbc666dc62d3b18f71124592
+  - name: ghcr.io/spyrospsarras/llama-prism
+    newTag: prism-b12232-f702476@sha256:PENDING
   - name: ghcr.io/open-webui/open-webui
     newTag: v0.12.5-ollama@sha256:4157f2f3a40048d2968610085e4f6e2415c760521014dbd8517e891b6122b818
   - name: ghcr.io/valkey-io/valkey

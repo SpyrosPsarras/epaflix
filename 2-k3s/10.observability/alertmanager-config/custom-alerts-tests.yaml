@@ -360,7 +360,7 @@ tests:
               component: paperless
             exp_annotations:
               summary: paperless-gpt is unavailable
-              description: "paperless-gpt has no available replica or its Deployment is absent. Receipts keep their paperless-gpt-auto tag until it returns. Check the paperless-gpt Deployment, Ollama in ai and the Paperless API token."
+              description: "paperless-gpt has no available replica or its Deployment is absent. Receipts keep their paperless-gpt-auto tag until it returns. Check the paperless-gpt Deployment, llama-server in ai and the Paperless API token."
   - name: paperless-gpt missing deployment fires after 15 minutes
     interval: 1m
     input_series: []
@@ -378,7 +378,7 @@ tests:
               component: paperless
             exp_annotations:
               summary: paperless-gpt is unavailable
-              description: "paperless-gpt has no available replica or its Deployment is absent. Receipts keep their paperless-gpt-auto tag until it returns. Check the paperless-gpt Deployment, Ollama in ai and the Paperless API token."
+              description: "paperless-gpt has no available replica or its Deployment is absent. Receipts keep their paperless-gpt-auto tag until it returns. Check the paperless-gpt Deployment, llama-server in ai and the Paperless API token."
   - name: paperless-gpt healthy deployment stays silent
     interval: 1m
     input_series:

@@ -49,7 +49,7 @@ Browser login inside the app is requested upstream in Paperless Go issue #51. Fo
 
 ## paperless-gpt
 
-Deployment `paperless-gpt`, image `icereed/paperless-gpt`, reads Paperless OCR text and asks Ollama `qwen3.5:9b` at `http://ollama.ai.svc.cluster.local:30068` with thinking off. LLM OCR stays off. It calls `http://paperless:8000` with the API token of user `paperless-gpt`.
+Deployment `paperless-gpt`, image `icereed/paperless-gpt`, reads Paperless OCR text and asks `qwen3.8-bonsai:27b` on llama-server at `http://llama-server.ai.svc.cluster.local:8080/v1` through its OpenAI provider. The model thinks before each answer. LLM OCR stays off. It calls `http://paperless:8000` with the API token of user `paperless-gpt`.
 
 Workflow `Tag new receipts for AI` tags new documents `paperless-gpt-auto`, except those tagged `source:gmail` or `source:drive`. The Gmail rules assign it themselves, as Mail rules describes. paperless-gpt polls that tag and sets the title, the shop as correspondent, tags, document type and `Total`. Then it removes `paperless-gpt-auto` and adds `paperless-gpt-auto-complete`, or `paperless-gpt-failed` when Paperless rejects a value. It creates those two tags at startup. It picks only existing tags and document types and may create new shops.
 
