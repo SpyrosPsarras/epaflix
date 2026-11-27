@@ -12,7 +12,7 @@ slskd connects to Soulseek and Soularr feeds it Lidarr's missing albums. Design:
 ## Files
 
 - slskd shares `/media/music` read-only and downloads to `/media/downloads/soulseek`. Incomplete files go to `/media/downloads/soulseek-incomplete`. The `download-dirs` init container creates both, because slskd refuses to start without them.
-- slskd deletes completed and incomplete files nobody has accessed for 30 days (`retention` in ConfigMap `slskd-config`). Soularr moves albums Lidarr rejects into `/media/downloads/soulseek/failed_imports`, so they are covered by the same retention.
+- slskd deletes completed and incomplete files nobody has accessed for 30 days (`retention` in ConfigMap `slskd-config`). Soularr moves albums Lidarr rejects into `/media/downloads/soulseek/failed_imports`, which is inside the downloads folder. I have not checked that slskd retention scans folders slskd did not create itself; check `failed_imports` after 30 days.
 
 ## Secret
 
