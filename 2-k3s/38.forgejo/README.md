@@ -10,6 +10,19 @@ Token clients skip Authentik. Route `forgejo-token-https` sends Git smart-HTTP r
 
 T3 Code reaches Forgejo through `tea`. The homelab and work pods sign in as `skills-homelab-bot` and `skills-work-bot` with a second token each, and the laptop signs in as `spypsarras`. The pod tokens come from `13.t3code/env/tools/forgejo-grant.py`, see the [Forgejo grant](../13.t3code/env/isolated-runtime.md#forgejo-grant).
 
+## Agent instructions
+
+`AGENTS.md` at the root of `spypsarras/skills` and `spypsarras/skills-work` holds the T3 runtimes' agent rules and the owner's preferences. The pods load a push within about a minute, see [Instructions from Forgejo](../13.t3code/env/isolated-runtime.md#instructions-from-forgejo). Each bot pushes `AGENTS.md` changes to its own repo directly. That is the owner's choice. The agent can change its own rules, and Forgejo's commit history shows who changed what. To require owner review of `AGENTS.md` while bots keep pushing skills, give `main` this branch protection rule:
+
+- Push restricted to an allowlist with only `spypsarras`, deploy keys off.
+- Merge restricted to an allowlist with only `spypsarras`.
+- Unprotected file patterns `*/**`.
+- No protected file patterns.
+
+Forgejo then accepts a push from a user outside the allowlist only when every changed file matches an unprotected pattern (`routers/private/hook_pre_receive.go` in v17.0.2). Patterns are lowercase globs with `/` and `.` as separators, so `*/**` matches every file inside a top-level folder whose name has no dot. That covers every skill and no root file. The bots keep pushing skill changes to `main`, and a bot change to `AGENTS.md` has to be a pull request that only the owner can merge. Do not list `AGENTS.md` as a protected file pattern. Forgejo also refuses to merge pull requests that touch protected files.
+
+After saving the rule, check both directions. A bot push that adds a root file fails with `Not allowed to push to protected branch main`. A bot push that changes only a skill folder succeeds.
+
 ## After deploy
 
 1. With the owner's approval, copy the dnsmasq config to Pi-hole and restart `pihole-FTL`. Add the matching Unbound local zone to the live file, then check and reload Unbound. See the [Pi-hole README](../../1-proxmox/pihole/README.md) for paths and commands.

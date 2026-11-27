@@ -23,6 +23,7 @@ configMapGenerator:
     files:
       - entrypoint.sh=env/files/isolated-entrypoint.sh
       - env/files/isolated-config.py
+      - env/files/instructions-sync.py
       - env/files/ssh-agent-ready.sh
       - pi.sh=env/files/isolated-pi.sh
       - sshd.sh=env/files/isolated-sshd.sh
@@ -82,6 +83,7 @@ replacements:
         fieldPaths:
           - spec.template.spec.initContainers.[name=runtime-state].image
           - spec.template.spec.containers.[name=sshd].image
+          - spec.template.spec.containers.[name=instructions].image
   - source:
       kind: StatefulSet
       fieldPath: spec.template.spec.affinity

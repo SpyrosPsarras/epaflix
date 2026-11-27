@@ -85,6 +85,7 @@ SAFETY_ENTRY=$(/usr/bin/env -i HOME="$HOME" PATH=/usr/local/bin:/usr/bin:/bin \
 python3 /scripts/pi-setup.py write "$HOME" "$SAFETY_ENTRY"
 [[ -s $HOME/.pi/agent/pi-cliproxyapi-provider/config.json ]]
 python3 /scripts/isolated-config.py apply "$inputs" "$HOME" "$MCP_HUB_INSTANCE"
+python3 /scripts/instructions-sync.py once
 /scripts/pi.sh list | python3 /scripts/pi-setup.py check-packages "$HOME"
 if [[ $MCP_HUB_INSTANCE == homelab ]]; then
   bash /scripts/ssh-config.sh

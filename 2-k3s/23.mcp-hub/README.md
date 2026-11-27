@@ -27,7 +27,9 @@ input rotation and offline checks. Desktop setup is in
 the `skills-mcp` pod runs git-sync, which pulls `main` every 60 seconds
 with the read-only bot token in Secret `skills-git` (`username`, `token`),
 and a FastMCP server that rereads the synced folder on every request. A push
-reaches clients within about a minute, without a restart. The server starts
+reaches clients within about a minute, without a restart. A root `AGENTS.md`
+in these repos is not a skill. The T3 runtimes load it as agent instructions,
+see [Forgejo agent instructions](../38.forgejo/README.md#agent-instructions). The server starts
 only after git-sync's first successful pull, so a broken first checkout
 fails startup instead of serving an empty set. A broken skill folder is
 logged and the last valid set keeps serving from memory; a restart on a
