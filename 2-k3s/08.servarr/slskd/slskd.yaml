@@ -127,6 +127,7 @@ spec:
             - { name: SLSKD_METRICS_NO_AUTH, value: "true" }
             - { name: SLSKD_SLSK_LISTEN_PORT, value: "46327" }
             - { name: SLSKD_SHARED_DIR, value: /media/music }
+            - { name: SLSKD_SHARE_CACHE_RETENTION, value: "1440" }
             - { name: SLSKD_DOWNLOADS_DIR, value: /media/downloads/soulseek }
             - { name: SLSKD_INCOMPLETE_DIR, value: /media/downloads/soulseek-incomplete }
             - { name: SLSKD_VPN, value: "true" }

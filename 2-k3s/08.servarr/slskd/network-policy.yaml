@@ -29,6 +29,3 @@ spec:
       ports:
         - port: 5030
           protocol: TCP
-    - ports:
-        - port: 9999
-          protocol: TCP

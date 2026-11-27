@@ -47,7 +47,7 @@
   - `test_no_service_links`: `enableServiceLinks is False`, and `dnsConfig.nameservers == ["127.0.0.1"]`.
   - `test_library_read_only`: the media mounts are `{"/media/music": ("music", True), "/media/downloads": ("downloads", False)}`.
   - `test_paths_and_retention`: `SLSKD_SHARED_DIR=/media/music`, `SLSKD_DOWNLOADS_DIR=/media/downloads/soulseek`, `SLSKD_INCOMPLETE_DIR=/media/downloads/soulseek-incomplete`, and `SLSKD_CONFIG` points at the mounted `slskd.yml`. Parsed, that file's `retention` equals `{"search": 1440, "files": {"complete": 43200, "incomplete": 43200}}`.
-  - `test_ingress_sources`: in `slskd-ingress`, the rule for port 5030 admits only the Traefik selector, `app: soularr` and the Prometheus selector. Port 9999 has a rule with no `from`.
+  - `test_ingress_sources`: in `slskd-ingress`, the rule for port 5030 admits only the Traefik selector, `app: soularr` and the Prometheus selector. No rule without `from` (CI hook `test-servarr-network-policies.py`).
   - `test_images_pinned`: the `slskd/slskd` and `qmcgaw/gluetun` tags match `^v?\d+\.\d+\.\d+@sha256:[0-9a-f]{64}$`.
 - [ ] **Step 2:** `python3 2-k3s/08.servarr/tools/manifests.test.py SlskdTests`. Expected: errors because the files are missing.
 - [ ] **Step 3: Write the manifests.**

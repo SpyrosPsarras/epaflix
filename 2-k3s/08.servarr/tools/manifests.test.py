@@ -280,6 +280,7 @@ class SlskdTests(unittest.TestCase):
         self.assertEqual(env["SLSKD_SHARED_DIR"], "/media/music")
         self.assertEqual(env["SLSKD_DOWNLOADS_DIR"], "/media/downloads/soulseek")
         self.assertEqual(env["SLSKD_INCOMPLETE_DIR"], "/media/downloads/soulseek-incomplete")
+        self.assertEqual(env["SLSKD_SHARE_CACHE_RETENTION"], "1440")
         mount = next(m for m in self.container("slskd")["volumeMounts"] if m["name"] == "slskd-yml")
         self.assertEqual(env["SLSKD_CONFIG"], mount["mountPath"] + "/slskd.yml")
         config = yaml.safe_load(resource("slskd/slskd.yaml", "ConfigMap", "slskd-config")["data"]["slskd.yml"])
@@ -291,7 +292,6 @@ class SlskdTests(unittest.TestCase):
         self.assertCountEqual(rules, [
             {"from": [peer({"app.kubernetes.io/name": "traefik"}, "traefik-system"), peer({"app": "soularr"}),
                       peer({"app.kubernetes.io/name": "prometheus"}, "observability")], "ports": tcp(5030)},
-            {"ports": tcp(9999)},
         ])
 
     def test_images_pinned(self):

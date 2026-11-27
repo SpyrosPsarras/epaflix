@@ -13,7 +13,7 @@ Lidarr misses 187 of 290 monitored albums. A test search on 15 random missing al
 - D3. The agent generates the Soulseek account, stores it in a new vault item and in the SOPS secret, and never shows it in chat.
 - D4. The slskd web UI is at `slskd.epaflix.com`, behind Authentik like Lidarr.
 - D5. AirVPN has a free slot for a third always-on tunnel.
-- D6. slskd deletes Soulseek files nobody has accessed for 30 days, both completed and incomplete. Cleanuparr can't do this: it supports no Soulseek client, and its orphan scan would move albums before Soularr imports them.
+- D6. slskd deletes Soulseek files after 30 days, both completed and incomplete. Build note: slskd 0.26.2 measures age from last write, not last access. Downloads are not modified after they finish, so the effect is the same. Cleanuparr can't do this: it supports no Soulseek client, and its orphan scan would move albums before Soularr imports them.
 
 ## Approaches considered for the VPN (D1)
 
@@ -71,7 +71,7 @@ Lidarr misses 187 of 290 monitored albums. A test search on 15 random missing al
 
 ### Network and DNS
 
-- NetworkPolicy `slskd-ingress`: port 5030 only from Traefik, `app: soularr` and Prometheus. Port 9999 from any source, so kubelet probes work, as in SearXNG's policy.
+- NetworkPolicy `slskd-ingress`: port 5030 only from Traefik, `app: soularr` and Prometheus. Kubelet probes come from the node and need no rule (CI's `test-servarr-network-policies.py` requires a `from` on every rule).
 - `lidarr-ingress` also admits `app: soularr` on 8686.
 - Soularr gets no ingress rule, because it has no listening port.
 - After the merge, the agent adds `address=/slskd.epaflix.com/<Traefik IP>` to `1-proxmox/pihole/dnsmasq.d/10-epaflix.conf` and the `local-zone` line to `1-proxmox/pihole/unbound-no-aaaa-leak.conf`, then applies both on CT 1030, following the Lidarr README.
