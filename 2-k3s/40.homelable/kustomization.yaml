@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - storage.yaml
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+  - network-policy.yaml
+
+generators:
+  - ksops-generator.yaml
+
+images:
+  - name: ghcr.io/pouzor/homelable-backend
+    newTag: 3.8.0@sha256:f4f8b8061af27084c793803614e0009f3440fbbf7cc12033438868a86452d60a
+  - name: ghcr.io/pouzor/homelable-frontend
+    newTag: 3.8.0@sha256:629a18054f13b54e9c6dfbab059aca27bbf4bcc083a8366d43706d59aa5c6520

@@ -106,7 +106,7 @@ Every `truenas-iscsi` volume is a zvol under `pithari/k8s/iscsi/vols` on the Tru
 
 ```sh
 k() { kubectl --context epaflix "$@"; }
-for a in app-of-apps authentik discord forgejo gh-runner home-assistant paperless rackpeek remote-pi servarr vaultwarden; do
+for a in app-of-apps authentik discord forgejo gh-runner home-assistant homelable paperless rackpeek remote-pi servarr vaultwarden; do
   k -n argocd patch application $a --type json -p '[{"op":"remove","path":"/spec/syncPolicy/automated"}]'
 done
 k -n vaultwarden patch cronjob vaultwarden-backup -p '{"spec":{"suspend":true}}'
@@ -120,6 +120,7 @@ scale() {
   k -n forgejo scale deploy forgejo --replicas=$1
   k -n gh-runner scale deploy gh-runner --replicas=$1
   k -n home-assistant scale deploy esphome home-assistant roborock --replicas=$1
+  k -n homelable scale deploy homelable --replicas=$1
   k -n paperless scale deploy paperless paperless-gpt --replicas=$1
   k -n rackpeek scale deploy rackpeek --replicas=$1
   k -n remote-pi scale deploy cpa-manager-plus --replicas=$1
