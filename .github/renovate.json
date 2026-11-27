@@ -33,6 +33,13 @@
       "automerge": true
     },
     {
+      "description": "Homelable backend and frontend move together. Review by hand: an upgrade migrates the SQLite database one way, and the only automatic copy is homelab.db.back-<version> on the PVC.",
+      "matchManagers": ["kustomize"],
+      "matchPackageNames": ["ghcr.io/pouzor/homelable-backend", "ghcr.io/pouzor/homelable-frontend"],
+      "groupName": "homelable",
+      "automerge": false
+    },
+    {
       "description": "Windmill script requirement headers (2-k3s/34.windmill/workspace/f/**): a bump changes the script, so Windmill re-resolves its lock and the committed run_screen.script.lock/.script.yaml/wmill-lock.yaml go stale, which makes windmill-deploy push a new script version on every deploy. Merge by hand, then refresh those files with wmill sync pull (2-k3s/34.windmill/README.md, Deploy).",
       "matchFileNames": ["2-k3s/34.windmill/workspace/**"],
       "automerge": false
