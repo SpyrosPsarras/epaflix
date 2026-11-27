@@ -8,6 +8,10 @@ resources:
   - service.yaml
   - ingress.yaml
   - network-policy.yaml
+  - homelab-sync-rbac.yaml
+  - homelab-sync-network-policy.yaml
+  - homelab-known-hosts.yaml
+  - homelab-sync-cronjob.yaml
 
 generators:
   - ksops-generator.yaml
@@ -17,3 +21,5 @@ images:
     newTag: 3.8.0@sha256:f4f8b8061af27084c793803614e0009f3440fbbf7cc12033438868a86452d60a
   - name: ghcr.io/pouzor/homelable-frontend
     newTag: 3.8.0@sha256:629a18054f13b54e9c6dfbab059aca27bbf4bcc083a8366d43706d59aa5c6520
+  - name: ghcr.io/spyrospsarras/homelab-sync
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000

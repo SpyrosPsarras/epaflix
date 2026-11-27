@@ -18,7 +18,7 @@
 - `LIVEVIEW_KEY`, `DOCS_VIEW_KEY`, `HOMEPAGE_API_KEY` are never set. No MCP container.
 - `SECRET_KEY` at least 32 bytes. Secrets are generated inside the command that encrypts them; no secret value in output, logs or Git plaintext.
 - Design name `Homelab index`. Node id `str(uuid5(NS, item_name.lower()))` with one fixed `NS` constant.
-- Node property `sync` = `yes` marks sync-owned nodes. The sync never writes another design.
+- Node property `managed-by` = `homelab-sync` marks sync-owned nodes (`sync` is taken by the Argo sync status label). The sync never writes another design.
 - Never read, list or name anything in `t3code-work` or `mcp-hub-work` (existing `build.excluded`).
 - Schedule `30 3 * * *`, `Europe/Athens`, `concurrencyPolicy: Forbid`, unchanged.
 - No comments in code. Conventional commit titles, no co-author.
@@ -34,7 +34,7 @@
 ## Review Focus
 
 1. Homelable unreachable or returns 5xx on the canvas read: nothing is saved, no document is written, exit 1. Test in Task 6.
-2. A node drawn by hand on `Homelab index` (no `sync` property), and an edge someone drew: both are in the save payload unchanged. Test in Task 5.
+2. A node drawn by hand on `Homelab index` (no `managed-by` property), and an edge someone drew: both are in the save payload unchanged. Test in Task 5.
 3. The Kubernetes source fails: app nodes keep their last facts and their workload documents are not rewritten. Test in Task 6.
 4. A request through the ingress carrying `X-MCP-Service-Key` gets no access. Check in Task 3.
 5. Seed when RackPeek is down: no design is created, nothing saved, exit 1, and the next run seeds again. Test in Task 6.
@@ -109,7 +109,7 @@
   - `node_id(name: str) -> str`
   - `node_type(name: str) -> str`: prefix `hw/` server, `pve/` proxmox, `vm/` vm, `lxc/` lxc, else generic
   - `ips(hosts: dict[str, str], scans: dict) -> dict[str, str]`: item name to IPv4. `hw/<alias>` for scans with `pve`, `vm/<alias>`/`lxc/<alias>` for other `HOSTS` aliases (value after `@`); unscanned guests from `pve.guests[vmid]` `net0` (`ip=`) or `ipconfig0` (`ip=`), CIDR suffix dropped, `dhcp` skipped. `pve/*` never.
-  - `stored_items(canvas: dict) -> tuple[list[dict], list[dict]]`: sync nodes as items (label to `name`, property `sync` to tag `sync`, property `tags` to the other tags, remaining properties to `labels`, `notes`) and the raw non-sync nodes
+  - `stored_items(canvas: dict) -> tuple[list[dict], list[dict]]`: sync nodes as items (label to `name`, property `managed-by: homelab-sync` to tag `sync`, property `tags` to the other tags, remaining properties to `labels`, `notes`) and the raw non-sync nodes
   - `seed_items(resources: list[dict]) -> list[dict]`: RackPeek resources with each `Service` item's notes appended to its `runsOn[0]` item's notes as `\n\n### <name>\n<notes>`, `Service` items dropped
   - `payload(items: list[dict], canvas: dict, ip_map: dict[str, str], design_id: str) -> dict`: the `canvas/save` body
   - `workload_docs(items: list[dict]) -> dict[str, str]`: parent item name to Markdown body
@@ -121,7 +121,7 @@
   - `test_service_items_not_nodes`: no node label in `payload(...)["nodes"]` starts with a workload name from `build.build_items`.
   - `test_guest_nested`: `vm/*` node `parent_id == node_id("pve/<host>")`; `pve/*` node has `type == "proxmox"` and `container_mode is True`.
   - `test_ping_check`: nodes in `ip_map` have `ip`, `check_method == "ping"`, `check_target == ip`; others have neither.
-  - `test_hand_made_kept`: a stored node without property `sync`, and a stored edge, appear unchanged in the payload; stored `viewport` and `custom_style` are copied.
+  - `test_hand_made_kept`: a stored node without property `managed-by`, and a stored edge, appear unchanged in the payload; stored `viewport` and `custom_style` are copied.
   - `test_geometry_kept`: a stored sync node's `pos_x`, `pos_y`, `width`, `height`, `custom_colors`, `custom_icon` survive; a new node gets a position no other node has.
   - `test_workload_docs`: one body per parent, one table row per `Service` item, sorted by name, no row for an excluded namespace.
   - `test_seed_notes`: a `Service` item with notes adds `### <name>` and the notes to its parent's notes; parent without notes gets only that section.
@@ -140,7 +140,7 @@
 - Produces: env `HL_URL`, `HL_SERVICE_KEY` (required); `RPK_URL`, `RPK_API_KEY` (optional, seed only). `RealIO` methods: `designs() -> list[dict]`, `create_design(name: str) -> str`, `canvas(design_id: str) -> dict`, `save(body: dict) -> None`, `documents() -> list[dict]`, `document(doc_id: str) -> dict`, `create_document(body: dict) -> None`, `update_document(doc_id: str, body: dict) -> None`, `git_sync() -> None`, `rpk_get() -> dict`. All Homelable calls under `/api/v1/` with header `X-MCP-Service-Key`. `rpk_post` and `rpk_commit` are removed.
 
 - [ ] **Step 1: Write failing tests** (rework `FakeIO` to the methods above; keep every existing test's intent):
-  - `test_happy_path_body`: one `save` whose nodes include `hw/takaros` with `sync` property; then `git_sync` called once.
+  - `test_happy_path_body`: one `save` whose nodes include `hw/takaros` with property `managed-by: homelab-sync`; then `git_sync` called once.
   - `test_fresh_read_before_save`: notes edited on the second `canvas` read are the ones saved.
   - `test_homelable_down_saves_nothing`: `canvas` raises: no `save`, no document call, exit 1.
   - `test_seed_from_rackpeek`: no design named `Homelab index` and `rpk_get` returns `fx.stored()`: design created, saved notes come from RackPeek, workload notes appended to parents.
@@ -159,9 +159,9 @@
 
 **Files:**
 - Move from `2-k3s/37.rackpeek/` to `2-k3s/40.homelable/` with names `homelab-sync*`: `sync-cronjob.yaml`, `sync-rbac.yaml`, `sync-network-policy.yaml`, `sync-known-hosts.yaml`, `scan-key.pub`
-- Modify: both `kustomization.yaml`s, both `secrets.enc.yaml`s, `2-k3s/37.rackpeek/network-policy.yaml`, `2-k3s/38.forgejo/network-policy.yaml`, `2-k3s/37.rackpeek/README.md`, `2-k3s/40.homelable/README.md`, `1-proxmox/homelab-scan/README.md`, `2-k3s/13.t3code/env/isolated-runtime.md`, `README.md`
+- Modify: both `kustomization.yaml`s, both `secrets.enc.yaml`s, `2-k3s/37.rackpeek/network-policy.yaml`, `2-k3s/38.forgejo/README.md`, `2-k3s/37.rackpeek/README.md`, `2-k3s/40.homelable/README.md`, `1-proxmox/homelab-scan/README.md`, `2-k3s/13.t3code/env/isolated-runtime.md`, `README.md`
 
-- [ ] **Step 1: Manifests.** CronJob, ServiceAccount, labels and ClusterRoles renamed `homelab-sync*`; RoleBinding subjects point to namespace `homelable`; image `ghcr.io/spyrospsarras/homelab-sync@<digest from the PR B build>`; env `HL_URL=http://homelable.homelable.svc`, `HL_SERVICE_KEY` from `homelable-secrets/MCP_SERVICE_KEY`, `RPK_URL=http://rackpeek.rackpeek.svc:8080`, `RPK_API_KEY` and `HOMELAB_LIVE_TOKEN` from a new Secret `homelab-sync-secrets`, scan key Secret renamed `homelab-scan-key`. Egress: replace the RackPeek 8080 rule with `homelable` pods port 80, add `rackpeek` pods 8080 (seed). `rackpeek` ingress admits `app: homelab-sync` from namespace `homelable` instead of `rackpeek-sync`. Forgejo ingress admits namespace `homelable` next to `rackpeek`.
+- [ ] **Step 1: Manifests.** CronJob, ServiceAccount, labels and ClusterRoles renamed `homelab-sync*`; RoleBinding subjects point to namespace `homelable`; image `ghcr.io/spyrospsarras/homelab-sync@<digest from the PR B build>`; env `HL_URL=http://homelable.homelable.svc`, `HL_SERVICE_KEY` from `homelable-secrets/MCP_SERVICE_KEY`, `RPK_URL=http://rackpeek.rackpeek.svc:8080`, `RPK_API_KEY` and `HOMELAB_LIVE_TOKEN` from a new Secret `homelab-sync-secrets`, scan key Secret renamed `homelab-scan-key`. Egress: replace the RackPeek 8080 rule with `homelable` pods port 80, add `rackpeek` pods 8080 (seed). `rackpeek` ingress admits `app: homelab-sync` from namespace `homelable` instead of `rackpeek-sync`.
 - [ ] **Step 2: Secrets.** Move `rackpeek-scan-key` into `2-k3s/40.homelable/secrets.enc.yaml` as `homelab-scan-key`, add `homelab-sync-secrets` (`RPK_API_KEY`, `HOMELAB_LIVE_TOKEN`), copying values decrypt-to-private-temp and re-encrypt, never printed. Leave `rackpeek-secrets` intact.
 - [ ] **Step 3: Docs.** RackPeek README: read-only since the switch, points to Homelable. Homelable README gets the nightly sync section from the RackPeek README, adjusted. `isolated-runtime.md` Forgejo sentence: "Traefik, RackPeek, Homelable and the hubs' skills pods". Root `README.md` and `1-proxmox/homelab-scan/README.md`: sync now lives in `40.homelable`. Homelable README also says how the homelab agent writes notes: `kubectl -n homelable port-forward`, then `PATCH /api/v1/nodes/{id}` with `notes`, key read inside the command.
 - [ ] **Step 4: Verify** both folders with the Task 1 Step 4 build and server dry-run. `rg -n 'rackpeek-sync' 2-k3s` returns nothing.

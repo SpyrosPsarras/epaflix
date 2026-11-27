@@ -1,6 +1,6 @@
 # Forgejo
 
-Forgejo holds RackPeek's config history, live homelab config snapshots and the agent skills the MCP hubs serve, in private Git repositories. The `forgejo` database in `postgres-cluster` holds metadata. Repositories and attachments live on the `forgejo-data-pithari` PVC. Renovate updates the image pin in `kustomization.yaml`.
+Forgejo holds the Homelable index history, live homelab config snapshots and the agent skills the MCP hubs serve, in private Git repositories. The `forgejo` database in `postgres-cluster` holds metadata. Repositories and attachments live on the `forgejo-data-pithari` PVC. Renovate updates the image pin in `kustomization.yaml`.
 
 At https://git.epaflix.com, sign in through Authentik as a member of `authentik Admins`. The site is on Traefik's internal entrypoint only (LAN and Tailscale); from the internet it returns 404. Traefik forward auth gates the site, then Forgejo signs you in through the Authentik OIDC application `forgejo-sso`. Forgejo creates the account on first login from the part of your email before `@`. The `forgejo-role` scope sends `forgejo: admin` for `authentik Admins`, which makes the account a Forgejo admin. Password and basic-auth login are off; the bot uses tokens. RackPeek uses the internal service at `http://forgejo.forgejo.svc:3000`.
 
@@ -33,10 +33,10 @@ After saving the rule, check both directions. A bot push that adds a root file f
      | kubectl -n forgejo exec -i deploy/forgejo -- sh -c 'read -r id; read -r secret; forgejo admin auth add-oauth --name authentik --provider openidConnect --key "$id" --secret "$secret" --auto-discover-url https://auth.epaflix.com/application/o/forgejo-sso/.well-known/openid-configuration --scopes email --scopes profile --scopes forgejo --required-claim-name forgejo --group-claim-name forgejo --admin-group admin --skip-local-2fa'
    ```
 
-3. From your own terminal, create the bot and its two `write:repository` tokens, one for RackPeek's Git sync and one for the live config snapshot job. Each token prints once; paste it only into the agent's hidden-input card. The `rackpeek-config` token also has `write:user`, because Forgejo needs it to create the bot's repo through `POST /user/repos` (RackPeek README, step 3). The bot's first push creates the private repo `homelab-live`; `rackpeek-config` is created empty beforehand.
+3. From your own terminal, create the bot and its two `write:repository` tokens, one for Homelable's Git sync and one for the live config snapshot job. Each token prints once; paste it only into the agent's hidden-input card. The first token also has `write:user`, because Forgejo needs it to create the bot's repo through `POST /user/repos`. The bot's first push creates the private repo `homelab-live`; `homelable-config` is created empty beforehand ([Homelable README](../40.homelable/README.md#git-history)). The bot was first created as `rackpeek-bot`. Renaming it to `homelab-bot` in Site administration keeps its repos and tokens.
 
    ```sh
-   kubectl -n forgejo exec deploy/forgejo -- forgejo admin user create --username rackpeek-bot --email <bot email> --random-password --must-change-password=false
-   kubectl -n forgejo exec deploy/forgejo -- forgejo admin user generate-access-token --username rackpeek-bot --token-name rackpeek-config --scopes write:repository,write:user --raw
-   kubectl -n forgejo exec deploy/forgejo -- forgejo admin user generate-access-token --username rackpeek-bot --token-name homelab-live --scopes write:repository --raw
+   kubectl -n forgejo exec deploy/forgejo -- forgejo admin user create --username homelab-bot --email <bot email> --random-password --must-change-password=false
+   kubectl -n forgejo exec deploy/forgejo -- forgejo admin user generate-access-token --username homelab-bot --token-name homelable-config --scopes write:repository,write:user --raw
+   kubectl -n forgejo exec deploy/forgejo -- forgejo admin user generate-access-token --username homelab-bot --token-name homelab-live --scopes write:repository --raw
    ```
