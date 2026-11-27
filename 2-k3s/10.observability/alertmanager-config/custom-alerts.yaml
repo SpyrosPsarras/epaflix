@@ -596,9 +596,7 @@ spec:
       interval: 60s
       rules:
         - alert: ImmichServerDown
-          expr: |
-            max(kube_deployment_status_replicas_available{namespace="immich",deployment="immich-server"}) == 0
-              or absent(kube_deployment_status_replicas_available{namespace="immich",deployment="immich-server"})
+          expr: (max(kube_deployment_status_replicas_available{namespace="immich",deployment="immich-server"}) or vector(0)) == 0
           for: 15m
           labels:
             severity: warning
@@ -607,9 +605,7 @@ spec:
             summary: "Immich is unavailable"
             description: "The Immich server has no available replica or its Deployment is absent. Phones stop backing up. Check the immich-server Deployment, its NFS volume immich-library and the immich database in postgres-cluster. Runbook: 2-k3s/39.immich/README.md."
         - alert: ImmichMachineLearningDown
-          expr: |
-            max(kube_deployment_status_replicas_available{namespace="immich",deployment="immich-machine-learning"}) == 0
-              or absent(kube_deployment_status_replicas_available{namespace="immich",deployment="immich-machine-learning"})
+          expr: (max(kube_deployment_status_replicas_available{namespace="immich",deployment="immich-machine-learning"}) or vector(0)) == 0
           for: 15m
           labels:
             severity: warning

@@ -46,6 +46,8 @@ server:
 machine-learning:
   controllers:
     main:
+      # The GPU has 4 time-slices and all 4 are taken, so a rolling update would wait for a fifth.
+      strategy: Recreate
       pod:
         runtimeClassName: nvidia
         nodeSelector:

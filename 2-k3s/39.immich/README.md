@@ -48,7 +48,7 @@ Runs on `k3s-worker-64` with one time-slice of the RTX 2070 SUPER, shared with O
 
 ## Offsite copy
 
-TrueNAS cloud sync task `immich photos to Google Drive (encrypted)` copies `upload/` and `profile/` from `/mnt/pithari/immich` to Google Drive `/epaflix-offsite/immich` every day at 03:00. It uses COPY mode, so deletes in Immich never reach Drive, and Drive grows with everything ever uploaded. Encryption uses the same password and salt as task 1, vault item `truenas - offsite sync encryption`. TrueNAS's own alerts report a failed run.
+TrueNAS cloud sync task `immich photos to Google Drive (encrypted)` copies `upload/` and `profile/` from `/mnt/pithari/immich` to Google Drive `/epaflix-offsite/immich` every day at 03:00. It uses COPY mode, so deletes in Immich never reach Drive, and Drive grows with everything ever uploaded. Encryption uses the same password and salt as task 1, so the existing offsite encryption credentials in the vault read both. TrueNAS's own alerts report a failed run.
 
 Restore one user's originals: create a TrueNAS cloud sync PULL task from the same folder with the same encryption settings into an empty dataset, then upload the files to Immich again.
 
