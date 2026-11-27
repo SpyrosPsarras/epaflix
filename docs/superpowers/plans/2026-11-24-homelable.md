@@ -81,7 +81,7 @@
 - [ ] **Step 2:** Request the Argo sync of `homelable` at the merged SHA (dry-run first, per the access guide).
 - [ ] **Step 3: Checks**, record each result in the PR:
   - Pod Ready; frontend started with the capabilities set in Task 1 (adjust in a follow-up commit if not).
-  - `curl -s -o /dev/null -w '%{http_code}' -H 'X-MCP-Service-Key: x' https://homelable.epaflix.com/api/v1/designs` from the LAN returns 401 with detail `Not authenticated`, not `Invalid MCP service key`, which proves Traefik removed the header. The same from inside the namespace with the real key (key read inside the command, never printed) returns 200.
+  - `curl -s -w ' %{http_code}' -H 'X-MCP-Service-Key: x' https://homelable.epaflix.com/api/v1/designs` from the LAN prints `{"detail":"Not authenticated"} 401`, that is 401 with detail `Not authenticated`, not `Invalid MCP service key`, which proves Traefik removed the header. The same from inside the namespace with the real key (key read inside the command, never printed) returns 200.
   - Login through Authentik as an `authentik Admins` member works; a user outside the group is refused by Authentik.
   - `kubectl -n homelable exec deploy/homelable -c backend -- ping -c1 192.168.10.30` succeeds.
   - `/liveview`, `/docsview` and `/api/v1/stats/summary` refuse without login.
