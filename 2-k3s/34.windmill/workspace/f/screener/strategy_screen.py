@@ -142,6 +142,13 @@ DEFAULTS = {
     "min_rel_volume": 1.5,
     "breakout_stop_atr": 0.5,
     "breakout_min_rr": 2.0,
+    # Breakout target of low-beta stocks (0 = off): at beta below breakout_low_beta the target is breakout_low_beta_target_r
+    # R above the entry instead of the measured move; the reward_risk check still uses the measured move. In the backtest
+    # (600 stocks, 2016-2026, two universes of 300 x three windows) 2R beat the measured move in all six cells for beta < 1
+    # (-47R to -14R in about 656 trades): those breakouts reached the measured move only about 1 time in 6. For beta >= 1
+    # no closer target (3-8 ATR, 1.5-4R, 50-75% of the move) beat it, and no score band had a target that held everywhere.
+    "breakout_low_beta": 1.0,
+    "breakout_low_beta_target_r": 2.0,
     # SHORT, both strategies (hypotheses, not validated)
     "short_min_price": 10.0,
     "short_min_dollar_volume": 20_000_000.0,
@@ -892,6 +899,14 @@ def evaluate_breakout(bars, series, t, cfg):
     _check(checks, "risk_size", 0 < risk <= cfg["max_risk_atr"] * a, f"risk {risk:.2f} = {risk / a:.2f} ATR, maximum {cfg['max_risk_atr']:g}")
     _check(checks, "reward_risk", levels["reward_risk"] is not None and levels["reward_risk"] >= cfg["breakout_min_rr"],
            f"reward/risk {levels['reward_risk']} to the measured move, minimum {cfg['breakout_min_rr']:g}")
+    beta = _beta_at(series, t)
+    if cfg["breakout_low_beta_target_r"] > 0 and beta is not None and beta < cfg["breakout_low_beta"] and risk > 0:
+        measured = levels["target"]
+        levels = {**levels, **_levels(entry, stop, entry + cfg["breakout_low_beta_target_r"] * risk)}
+        levels["measured_target"] = measured
+        levels["target_source"] = f"{cfg['breakout_low_beta_target_r']:g}R (beta {beta:.2f} below {cfg['breakout_low_beta']:g})"
+    else:
+        levels["target_source"] = "measured move"
     # Weights from the bull backtest: only items that ranked in both periods (before and after mid-2022).
     benchmarks = cfg["benchmarks"]
     _rs_score(scores, series, t, cfg, (18, 0))
@@ -2979,7 +2994,10 @@ def recommendation(q):
     stop = f"stop {levels['stop']}"
     if levels.get("stop_buffer_atr"):
         stop += f" ({levels['stop_buffer_atr']:g} ATR below the rule's {levels['base_stop']} because beta is {q.get('beta')})"
-    plan = (f"{stop}, target {levels['target']}, reward/risk {levels['reward_risk']}, "
+    target = f"target {levels['target']}"
+    if levels.get("measured_target"):
+        target += f" ({levels['target_source']}; the measured move {levels['measured_target']} is rarely reached)"
+    plan = (f"{stop}, {target}, reward/risk {levels['reward_risk']}, "
             f"exit by {q['time_exit']} ({q['holding_days']} sessions) if neither is hit")
     if q.get("etf"):
         note = ("breakout of a sector or theme ETF whose rotation accelerates: +1.01 / +0.64R per trade before / after "

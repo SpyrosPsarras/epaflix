@@ -358,6 +358,24 @@ def test_high_beta_widens_the_long_stop(evaluator, rows):
     assert _with_beta(evaluator, rows(), 1.29)["levels"] == b and _with_beta(evaluator, rows(), None)["levels"] == b
 
 
+def test_low_beta_breakout_targets_2r():
+    base = _with_beta(ss.evaluate_breakout, breakout_rows(), 1.0)
+    low = _with_beta(ss.evaluate_breakout, breakout_rows(), 0.53)
+    b, lv = base["levels"], low["levels"]
+    assert base["qualified"] and low["qualified"] and b["target_source"] == "measured move" and "measured_target" not in b
+    assert lv["entry"] == b["entry"] and lv["stop"] == b["stop"] and lv["measured_target"] == b["target"]
+    assert lv["target"] == round(b["entry"] + 2 * (b["entry"] - b["stop"]), 2) < b["target"] and lv["reward_risk"] == 2.0
+    assert lv["target_source"] == "2R (beta 0.53 below 1)"
+    assert low["checks"] == base["checks"]  # qualification still uses the measured move
+    off = _with_beta(ss.evaluate_breakout, breakout_rows(), 0.53, ss.settings_with_defaults({"breakout_low_beta_target_r": 0}))
+    assert off["levels"] == b
+    three = _with_beta(ss.evaluate_breakout, breakout_rows(), 0.9, ss.settings_with_defaults({"breakout_low_beta_target_r": 3}))
+    assert three["levels"]["reward_risk"] == 3.0
+    q = {"ticker": "DIS", "strategy": "breakout", "direction": "long", "action": "watch", "regime": "neutral", "beta": 0.53,
+         "holding_days": 45, "time_exit": "2027-01-27", "levels": lv, "indicators": {}, "scoring": []}
+    assert f"target {lv['target']} (2R (beta 0.53 below 1); the measured move {b['target']} is rarely reached)" in ss.recommendation(q)
+
+
 def test_market_context_uses_bars_up_to_each_date():
     market = make_bars(uptrend(120, 100, 1.0), "QQQ")
     sector = make_bars(uptrend(400, 50, 0.5), "XLK", start=date(2024, 3, 25))
