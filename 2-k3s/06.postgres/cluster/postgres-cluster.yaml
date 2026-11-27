@@ -107,7 +107,7 @@ spec:
       memory: 2Gi
     limits:
       memory: 2Gi
-  smartShutdownTimeout: 180
+  smartShutdownTimeout: 30
   startDelay: 3600
   stopDelay: 1800
   superuserSecret:
