@@ -1,0 +1,49 @@
+---
+# The export maps every client to immich 1001:1001 on TrueNAS.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: immich-library-pithari
+spec:
+  capacity:
+    storage: 10Ti
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  mountOptions:
+    - nfsvers=4.2
+    - hard
+  claimRef:
+    namespace: immich
+    name: immich-library
+  nfs:
+    server: 192.168.10.200
+    path: /mnt/pithari/immich
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: immich-library
+  namespace: immich
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: ""
+  volumeName: immich-library-pithari
+  resources:
+    requests:
+      storage: 10Ti
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: immich-ml-cache
+  namespace: immich
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: truenas-iscsi
+  resources:
+    requests:
+      storage: 10Gi

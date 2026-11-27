@@ -39,7 +39,7 @@ The groundwork is done. `postgres-cluster` runs PostgreSQL 18.7 with VectorChord
 Checked on 2026-11-27.
 
 - Immich v3.4.2 is the latest release. The official chart `immich` 0.13.4 in `immich-app/immich-charts` builds on bjw-s app-template. It can deploy Valkey (`valkey.enabled`), the server and machine learning. It takes an existing claim for the library (`immich.persistence.library.existingClaim`) and renders `immich.configuration` into a ConfigMap or Secret (`configurationKind`).
-- Immich OpenID settings (Immich docs, "OAuth Authentication"): the redirect URIs are `app.immich:///oauth-callback` (phone app), `https://<host>/auth/login` and `https://<host>/user-settings`. The role claim is `immich_role` ("user" or "admin"), Auto Register defaults to true, and Default Storage Quota 0 means unlimited.
+- Immich OpenID settings (Immich docs, "OAuth Authentication"): the redirect URIs are `app.immich:///oauth-callback` (phone app), `https://<host>/auth/login` and `https://<host>/user-settings`. The role claim is `immich_role` ("user" or "admin"), Auto Register defaults to true. In the v3.4.2 source, a default storage quota of `null` or -1 means unlimited, and 0 means 0 GiB.
 - Immich against an existing Postgres (Immich docs, "Pre-existing Postgres"): it works with Postgres 14 to below 20, pgvector 0.7 to below 0.9 and VectorChord 0.3 to below 2.0. Without superuser rights the extensions must exist before Immich starts: `vchord` (with `vector`) and `earthdistance` (with `cube`). Its automatic database dumps need superuser (`pg_dumpall`).
 - Repo patterns: Paperless mounts NFS from `pithari` through a static PV (`2-k3s/33.paperless/storage.yaml`), sits on Traefik `websecure` at `192.168.10.101`, and logs in through an Authentik OpenID provider in the encrypted blueprint. Windmill installs a Helm chart through kustomize `helmCharts` and defines its database with CNPG `Database` and `DatabaseRole` objects in `postgres-system`. Ollama runs on the GPU node with `runtimeClassName: nvidia`, nodeSelector `gpu: nvidia` and the `nvidia.com/gpu` toleration and resource.
 - Public `*.epaflix.com` is a proxied Cloudflare wildcard. Every name, including `immich`, resolves to Cloudflare edge addresses. From there, traffic reaches Traefik on `192.168.10.101` through the tunnel (`2-k3s/18.cloudflare-tunnel`) or through the router's forward of 443, which answers as Traefik with a valid certificate. Cloudflare Free refuses request bodies over 100 MB. As of Immich v3.4.2, an upload is one request per file, and chunked upload is on Immich's roadmap (discussion #32061). On home Wi-Fi, Pi-hole sends `*.epaflix.com` to `192.168.10.101` directly, with no limit.
@@ -82,7 +82,9 @@ Chart values:
 - Server image `ghcr.io/immich-app/immich-server`, and machine learning `ghcr.io/immich-app/immich-machine-learning` with the `-cuda` tag. Both pinned by tag and digest to the same Immich version.
 - Machine learning goes on `k3s-worker-64` with `runtimeClassName: nvidia`, nodeSelector `gpu: nvidia`, the toleration and `nvidia.com/gpu: 1` (one time-slice), as Ollama does. It keeps Immich's default models and the default model TTL of 5 minutes, so it frees its GPU memory when idle. The owner chose the shared GPU knowing R10.
 - The config file comes from a SOPS Secret, not from chart values, because it holds the OpenID client secret. It sets:
-  - `oauth`: enabled, issuer `https://auth.epaflix.com/application/o/immich/`, client id and secret, scope `openid email profile`, autoRegister true, autoLaunch true, roleClaim `immich_role`, defaultStorageQuota 0.
+  - `oauth`: enabled, issuer `https://auth.epaflix.com/application/o/immich/`, client id and secret, scope `openid email profile`, autoRegister true, autoLaunch true, roleClaim `immich_role`, scope `openid email profile immich`, defaultStorageQuota `null`.
+  - `passkey.enabled: false`, so no one can log in around Authentik with a passkey, which v3 turns on by default.
+  - `server.publicUsers: false`, so users cannot list each other.
   - `storageTemplate.enabled: false`. My call: with the template on, Immich moves and renames originals, and every move would leave another copy in the COPY-mode Drive sync. Originals stay under `upload/<user id>/`.
   - `passwordLogin.enabled: false`.
   - `server.externalDomain: https://immich.epaflix.com`.
@@ -103,7 +105,7 @@ In the encrypted blueprint, following Paperless and Fytorium:
 - IngressRoutes on `websecure` and `web` (redirect) for `immich.epaflix.com`, as Paperless has, with the `security-headers` middleware. No forward auth. Traefik sets no body size limit by default. The builder confirms that no middleware or entrypoint setting caps uploads.
 - Public DNS needs no change: the proxied wildcard already covers `immich`. Uploads over 100 MB fail through Cloudflare. The phone app keeps them queued and they finish on home Wi-Fi. **R14.** Revisit when Immich ships chunked upload.
 - Pi-hole: `address=/immich.epaflix.com/192.168.10.101` and the matching `unbound-no-aaaa-leak.conf` entry, as for Paperless. Without it, home phones would also go through Cloudflare and never finish big uploads.
-- NetworkPolicies: server ingress only from Traefik. Machine learning ingress only from the server. Valkey ingress only from the server. Egress from the server to Postgres, Valkey, machine learning and Authentik.
+- NetworkPolicies: server ingress only from Traefik and Prometheus. Machine learning and Valkey ingress only from the server. No egress policies, as with Paperless: the server reaches Authentik through its public hostname.
 
 ### Offsite copy
 

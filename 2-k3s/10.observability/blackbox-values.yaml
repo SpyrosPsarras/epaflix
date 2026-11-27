@@ -101,6 +101,9 @@ serviceMonitor:
     - name: windmill
       url: https://192.168.10.101
       hostname: windmill.epaflix.com
+    - name: immich
+      url: https://192.168.10.101
+      hostname: immich.epaflix.com
     - name: home-assistant
       url: https://192.168.10.102
       hostname: ha.epaflix.com

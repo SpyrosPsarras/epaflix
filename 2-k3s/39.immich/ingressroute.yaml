@@ -1,0 +1,37 @@
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: immich-https
+  namespace: immich
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`immich.epaflix.com`)
+      kind: Rule
+      middlewares:
+        - name: security-headers
+          namespace: traefik-system
+      services:
+        - name: immich-server
+          port: 2283
+  tls: {}
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: immich-http
+  namespace: immich
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`immich.epaflix.com`)
+      kind: Rule
+      middlewares:
+        - name: redirect-https
+          namespace: traefik-system
+      services:
+        - name: immich-server
+          port: 2283

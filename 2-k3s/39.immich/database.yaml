@@ -1,0 +1,44 @@
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: DatabaseRole
+metadata:
+  name: immich
+  namespace: postgres-system
+  labels:
+    app.kubernetes.io/name: immich
+    app.kubernetes.io/component: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  cluster:
+    name: postgres-cluster
+  name: immich
+  ensure: present
+  login: true
+  passwordSecret:
+    name: immich-db-role
+  databaseRoleReclaimPolicy: retain
+---
+# Immich runs without superuser, so the extensions it needs exist before it starts.
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: immich
+  namespace: postgres-system
+  labels:
+    app.kubernetes.io/name: immich
+    app.kubernetes.io/component: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  cluster:
+    name: postgres-cluster
+  name: immich
+  owner: immich
+  ensure: present
+  databaseReclaimPolicy: retain
+  extensions:
+    - name: vector
+    - name: vchord
+    - name: cube
+    - name: earthdistance

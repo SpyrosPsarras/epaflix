@@ -64,6 +64,60 @@ tests:
       - eval_time: 30m
         alertname: DigarrDown
         exp_alerts: []
+  - name: ImmichServerDown fires after 15 minutes without a replica
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="immich",deployment="immich-server"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: ImmichServerDown
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: ImmichServerDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: immich
+            exp_annotations:
+              summary: Immich is unavailable
+              description: "The Immich server has no available replica or its Deployment is absent. Phones stop backing up. Check the immich-server Deployment, its NFS volume immich-library and the immich database in postgres-cluster. Runbook: 2-k3s/39.immich/README.md."
+  - name: ImmichServerDown stays quiet with a replica
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="immich",deployment="immich-server"}'
+        values: '1x30'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: ImmichServerDown
+        exp_alerts: []
+  - name: ImmichMachineLearningDown fires after 15 minutes without a replica
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="immich",deployment="immich-machine-learning"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: ImmichMachineLearningDown
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: ImmichMachineLearningDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: immich
+            exp_annotations:
+              summary: Immich machine learning is unavailable
+              description: "Immich machine learning has no available replica or its Deployment is absent. Uploads still work, but faces and smart search stop being indexed. It runs on the shared GPU of k3s-worker-64: check for out of memory and the nvidia device plugin. Runbook: 2-k3s/39.immich/README.md."
+  - name: ImmichMachineLearningDown stays quiet with a replica
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="immich",deployment="immich-machine-learning"}'
+        values: '1x30'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: ImmichMachineLearningDown
+        exp_alerts: []
   - name: Paperless unavailable deployment fires after 15 minutes
     interval: 1m
     input_series:
