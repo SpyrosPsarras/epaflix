@@ -108,9 +108,10 @@ example one without a Forgejo grant, uses the bundle's `instructions.md`. That
 fallback still changes only through input rotation. Codex and Claude direct instances are disabled
 here, and their `AGENTS.md` files stay bundle-based.
 
-Whoever can push `AGENTS.md` sets the agent's rules, and the pod's own bot can
-write to its repo. Protect `main` before adding the file, as described in
-[Forgejo agent instructions](../../38.forgejo/README.md#agent-instructions).
+Each pod's bot pushes `AGENTS.md` changes to its own repo directly, so an agent
+can change the rules of every new session. Forgejo's commit history and the
+sidecar's `updated <sha>` lines record each change. To require owner review
+instead, see [Forgejo agent instructions](../../38.forgejo/README.md#agent-instructions).
 
 ## Personal instructions and skills
 

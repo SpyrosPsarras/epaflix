@@ -12,7 +12,7 @@ T3 Code reaches Forgejo through `tea`. The homelab and work pods sign in as `ski
 
 ## Agent instructions
 
-`AGENTS.md` at the root of `spypsarras/skills` and `spypsarras/skills-work` holds the T3 runtimes' agent rules and the owner's preferences. The pods load a push within about a minute, see [Instructions from Forgejo](../13.t3code/env/isolated-runtime.md#instructions-from-forgejo). The bots can write to these repos, so give `main` in each one this branch protection rule before `AGENTS.md` exists:
+`AGENTS.md` at the root of `spypsarras/skills` and `spypsarras/skills-work` holds the T3 runtimes' agent rules and the owner's preferences. The pods load a push within about a minute, see [Instructions from Forgejo](../13.t3code/env/isolated-runtime.md#instructions-from-forgejo). Each bot pushes `AGENTS.md` changes to its own repo directly. That is the owner's choice. The agent can change its own rules, and Forgejo's commit history shows who changed what. To require owner review of `AGENTS.md` while bots keep pushing skills, give `main` this branch protection rule:
 
 - Push restricted to an allowlist with only `spypsarras`, deploy keys off.
 - Merge restricted to an allowlist with only `spypsarras`.
