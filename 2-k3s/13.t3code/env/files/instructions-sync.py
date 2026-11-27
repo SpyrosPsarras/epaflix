@@ -15,6 +15,7 @@ REPOS = {'homelab': 'https://git.epaflix.com/spypsarras/skills.git',
 LIMIT = 65536
 CACHE = '.local/share/t3-instructions'
 MESSAGES = {'unprepared': 'instructions: home not prepared yet',
+            'nocache': 'instructions: cache unavailable; current file kept',
             'unchanged': 'instructions: unchanged',
             'kept': 'instructions: fetch failed or file invalid; last good copy in use',
             'fallback': 'instructions: fetch failed or file invalid; bundle instructions in use'}
@@ -71,10 +72,15 @@ def main():
     last = None
     while True:
         if (home / '.config/t3-runtime/environment').exists():
-            (home / CACHE).mkdir(parents=True, exist_ok=True)
-            with open(home / CACHE / 'lock', 'w') as lock:
-                fcntl.flock(lock, fcntl.LOCK_EX)
-                status = sync(home, REPOS[instance], SSH_GUIDES[instance])
+            try:
+                (home / CACHE).mkdir(parents=True, exist_ok=True)
+                lock = open(home / CACHE / 'lock', 'w')
+            except OSError:
+                status = 'nocache'
+            else:
+                with lock:
+                    fcntl.flock(lock, fcntl.LOCK_EX)
+                    status = sync(home, REPOS[instance], SSH_GUIDES[instance])
         else:
             status = 'unprepared'
         if status != last:

@@ -191,6 +191,19 @@ class InstructionsSyncTest(unittest.TestCase):
         self.assertEqual(run.returncode, 0)
         self.assertEqual(out, b'instructions: fetch failed or file invalid; bundle instructions in use\n')
 
+    def test_cli_unusable_cache_keeps_file(self):
+        (self.home / '.config/t3-runtime').mkdir(parents=True)
+        (self.home / '.config/t3-runtime/environment').write_text('homelab\n')
+        (self.home / '.local/share').mkdir(parents=True)
+        (self.home / '.local/share/t3-instructions').write_text('not a directory\n')
+        self.target.parent.mkdir(parents=True)
+        self.target.write_text('previous\n')
+        result = self.run_once()
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, 'instructions: cache unavailable; current file kept\n')
+        self.assertEqual(result.stderr, '')
+        self.assertEqual(self.target.read_text(), 'previous\n')
+
     def test_cli_waits_for_prepared_home(self):
         result = self.run_once()
         self.assertEqual(result.returncode, 0)
