@@ -78,6 +78,37 @@ stays in each variant's own guide, with access determined by its generated SSH
 config rather than image-baked approval state. Homelab keeps its existing guide;
 work's placeholder points to its work guide and host approval procedure.
 
+## Instructions from Forgejo
+
+Pi's `~/.pi/agent/AGENTS.md` starts with `AGENTS.md` from `main` of the
+owner's private Forgejo repo, `spypsarras/skills` for homelab and
+`spypsarras/skills-work` for work. `env/files/instructions-sync.py` fetches it
+over `https://git.epaflix.com` with the pod's `tea` login and writes that text,
+then this image's runtime facts, then the variant's SSH guide. It does not use
+the in-cluster Forgejo service, whose ingress policy admits only Traefik,
+RackPeek and the hubs' skills pods.
+
+Startup runs the script once after `isolated-config.py apply`. The
+`instructions` sidecar runs it every 60 seconds and logs a line when the
+result changes: `instructions: updated <sha>`, `instructions: unchanged` or
+`instructions: fetch failed or file invalid; current file kept`. Read it with
+`kubectl -n t3code-homelab logs homelab-0 -c instructions`. A push reaches new
+Pi sessions within about a minute. Open sessions keep their text, because Pi
+reads `AGENTS.md` only when a session starts or on `/reload`.
+
+The script never empties the file. A failed fetch, a missing file, or a file
+that is blank, not UTF-8 or over 64 KiB leaves the current `AGENTS.md` alone.
+It waits for the home marker that `isolated-config.py prepare` writes, so a
+first boot still starts from an empty home. Without a Forgejo grant every
+fetch fails, and the bundle instructions that `pi-setup.py` writes at boot
+stay in use. The bundle's `instructions.md` is that fallback and still changes
+only through input rotation. Codex and Claude direct instances are disabled
+here, and their `AGENTS.md` files stay bundle-based.
+
+Whoever can push `AGENTS.md` sets the agent's rules, and the pod's own bot can
+write to its repo. Protect `main` before adding the file, as described in
+[Forgejo agent instructions](../../38.forgejo/README.md#agent-instructions).
+
 ## Personal instructions and skills
 
 The mixed backend's `env/files/private-config.py` and its synchronized `one/`
@@ -106,7 +137,9 @@ scoped `vault run` client. Read exact-name and environment-variable rules in
 `env/files/vault-client.py`, and write rules in [vault-writes.md](vault-writes.md).
 
 For an existing backend, use [skills-only rotation](#skills-only-rotation)
-when only bundle skills change. Changes to `instructions.md`, `sourceHome`,
+when only bundle skills change. Agent instructions change in Forgejo, see
+[Instructions from Forgejo](#instructions-from-forgejo). Changes to the fallback
+`instructions.md`, `sourceHome`,
 grants, policies or any other input still require the full
 [input rotation](#input-rotation). For full bundle changes, rotate only
 `bundle.json` and its `runtime.json` sha256 entry. Preserve every unrelated
@@ -458,7 +491,7 @@ T3 worktrees. Preferences cannot bypass those managed requirements.
 ## Input rotation
 
 [Skills-only rotation](#skills-only-rotation) is the only exception to the
-pause and scale-down below. Instructions, grants, policies and all other
+pause and scale-down below. Fallback instructions, grants, policies and all other
 input changes use this full procedure.
 
 The homelab and work Applications automatically sync merged revisions with
