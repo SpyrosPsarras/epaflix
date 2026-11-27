@@ -8,7 +8,7 @@ The groundwork is done. `postgres-cluster` runs PostgreSQL 18.7 with VectorChord
 
 ## Goals
 
-- Immich at `https://immich.epaflix.com`, reachable from the internet, so phones back up from anywhere, long videos included.
+- Immich at `https://immich.epaflix.com`, reachable from the internet through the existing Cloudflare path, so phones back up from anywhere. Files over 100 MB finish only on home Wi-Fi (see Network).
 - Login only through Authentik OpenID. Every member of "Servarr users" can log in, and Immich creates the account on first login. Password login is off. Members of "authentik Admins" are Immich admins.
 - One private library per user. Shared albums, share links and partner sharing stay available as Immich features, each opt-in by the user.
 - No storage quotas (owner's choice).
@@ -23,6 +23,9 @@ The groundwork is done. `postgres-cluster` runs PostgreSQL 18.7 with VectorChord
 - No external libraries (photos read in place from other folders).
 - No per-user quotas, now or as a default.
 - No other photo apps, no Immich Kiosk or Frame.
+- No DNS-only record or DDNS for a path around Cloudflare. The owner chose to keep the proxy.
+- No Immich storage template.
+- No new monitoring for TrueNAS cloud sync. TrueNAS's own alerts report a failed task, as they do for task 1. Prometheus alerting on cloud sync is a follow-up for both tasks.
 
 ## Anti-goals
 
@@ -39,6 +42,8 @@ Checked on 2026-11-27.
 - Immich OpenID settings (Immich docs, "OAuth Authentication"): the redirect URIs are `app.immich:///oauth-callback` (phone app), `https://<host>/auth/login` and `https://<host>/user-settings`. The role claim is `immich_role` ("user" or "admin"), Auto Register defaults to true, and Default Storage Quota 0 means unlimited.
 - Immich against an existing Postgres (Immich docs, "Pre-existing Postgres"): it works with Postgres 14 to below 20, pgvector 0.7 to below 0.9 and VectorChord 0.3 to below 2.0. Without superuser rights the extensions must exist before Immich starts: `vchord` (with `vector`) and `earthdistance` (with `cube`). Its automatic database dumps need superuser (`pg_dumpall`).
 - Repo patterns: Paperless mounts NFS from `pithari` through a static PV (`2-k3s/33.paperless/storage.yaml`), sits on Traefik `websecure` at `192.168.10.101`, and logs in through an Authentik OpenID provider in the encrypted blueprint. Windmill installs a Helm chart through kustomize `helmCharts` and defines its database with CNPG `Database` and `DatabaseRole` objects in `postgres-system`. Ollama runs on the GPU node with `runtimeClassName: nvidia`, nodeSelector `gpu: nvidia` and the `nvidia.com/gpu` toleration and resource.
+- Public `*.epaflix.com` is a proxied Cloudflare wildcard. Every name, including `immich`, resolves to Cloudflare edge addresses. From there, traffic reaches Traefik on `192.168.10.101` through the tunnel (`2-k3s/18.cloudflare-tunnel`) or through the router's forward of 443, which answers as Traefik with a valid certificate. Cloudflare Free refuses request bodies over 100 MB. As of Immich v3.4.2, an upload is one request per file, and chunked upload is on Immich's roadmap (discussion #32061). On home Wi-Fi, Pi-hole sends `*.epaflix.com` to `192.168.10.101` directly, with no limit.
+- The GPU device plugin time-slices the one RTX 2070 SUPER (8 GB) into 4 slots. Memory is not split. Ollama and Jellyfin transcoding already use the GPU.
 - Offsite today: TrueNAS cloud sync task 1 pushes `/mnt/mpara-tank-lan/minio` to Google Drive folder `/epaflix-offsite/minio`, encrypted, SYNC mode, daily at 22:00. The `postgres-cluster` backups in MinIO reach Google Drive that way.
 
 ## Approaches
@@ -75,9 +80,10 @@ Chart values:
 
 - Chart `valkey.enabled: true`, emptyDir, as the chart ships it.
 - Server image `ghcr.io/immich-app/immich-server`, and machine learning `ghcr.io/immich-app/immich-machine-learning` with the `-cuda` tag. Both pinned by tag and digest to the same Immich version.
-- Machine learning goes on `k3s-worker-64` with `runtimeClassName: nvidia`, nodeSelector `gpu: nvidia`, the toleration and `nvidia.com/gpu: 1`, as Ollama does. **R10.** Ollama already takes the one GPU. The builder checks how the device plugin shares it (time-slicing or not) before choosing between a request and a shared setup.
+- Machine learning goes on `k3s-worker-64` with `runtimeClassName: nvidia`, nodeSelector `gpu: nvidia`, the toleration and `nvidia.com/gpu: 1` (one time-slice), as Ollama does. It keeps Immich's default models and the default model TTL of 5 minutes, so it frees its GPU memory when idle. The owner chose the shared GPU knowing R10.
 - The config file comes from a SOPS Secret, not from chart values, because it holds the OpenID client secret. It sets:
-  - `oauth`: enabled, issuer `https://auth.epaflix.com/application/o/immich/`, client id and secret, scope `openid email profile`, autoRegister true, autoLaunch true, roleClaim `immich_role`, storageLabelClaim `preferred_username`, defaultStorageQuota 0.
+  - `oauth`: enabled, issuer `https://auth.epaflix.com/application/o/immich/`, client id and secret, scope `openid email profile`, autoRegister true, autoLaunch true, roleClaim `immich_role`, defaultStorageQuota 0.
+  - `storageTemplate.enabled: false`. My call: with the template on, Immich moves and renames originals, and every move would leave another copy in the COPY-mode Drive sync. Originals stay under `upload/<user id>/`.
   - `passwordLogin.enabled: false`.
   - `server.externalDomain: https://immich.epaflix.com`.
   - `backup.database.enabled: false`.
@@ -95,21 +101,22 @@ In the encrypted blueprint, following Paperless and Fytorium:
 ### Network
 
 - IngressRoutes on `websecure` and `web` (redirect) for `immich.epaflix.com`, as Paperless has, with the `security-headers` middleware. No forward auth. Traefik sets no body size limit by default. The builder confirms that no middleware or entrypoint setting caps uploads.
-- Pi-hole: `address=/immich.epaflix.com/192.168.10.101` and the matching `unbound-no-aaaa-leak.conf` entry, as for Paperless. The builder checks how public DNS reaches the other public hosts and does the same.
+- Public DNS needs no change: the proxied wildcard already covers `immich`. Uploads over 100 MB fail through Cloudflare. The phone app keeps them queued and they finish on home Wi-Fi. **R14.** Revisit when Immich ships chunked upload.
+- Pi-hole: `address=/immich.epaflix.com/192.168.10.101` and the matching `unbound-no-aaaa-leak.conf` entry, as for Paperless. Without it, home phones would also go through Cloudflare and never finish big uploads.
 - NetworkPolicies: server ingress only from Traefik. Machine learning ingress only from the server. Valkey ingress only from the server. Egress from the server to Postgres, Valkey, machine learning and Authentik.
 
 ### Offsite copy
 
 TrueNAS cloud sync task 2: `/mnt/pithari/immich` to Google Drive folder `/epaflix-offsite/immich`. It uses the existing Google Drive credential, encryption on with new filename and data keys, and runs daily at 03:00, after the 00:45 snapshot.
 
-- It copies only what cannot be rebuilt: `upload/`, `library/` and `profile/`. It skips `thumbs/` and `encoded-video/`, which Immich rebuilds.
+- It copies only what cannot be rebuilt: `upload/` and `profile/`. It skips `thumbs/`, `encoded-video/` and `backups/`. Immich rebuilds the first two, and the third stays empty because Immich's own database dumps are off.
 - Mode COPY, not SYNC. A photo deleted in Immich stays in Drive. **My call**, because of the anti-goal: SYNC would empty Drive one day after a mistaken delete. Drive grows by everything ever uploaded. A later pruning job is a follow-up, not part of this.
 - **Owner step:** store the new cloud sync encryption password and salt in the vault. Without them the Drive copy cannot be read.
 - **R9.** The Google Drive plan's free space is unknown to the agent. The owner checks it before friends start uploading.
 
 ### Monitoring
 
-- Alerts: Immich server down, machine learning down, the cloud sync task failed or did not run in 36 hours. `pithari` free space already has an alert.
+- Alerts: Immich server down, machine learning down. `pithari` free space already has an alert. TrueNAS's own alerts cover a failed cloud sync.
 - Blackbox probe on `https://immich.epaflix.com/api/server/ping`, as for other public hosts.
 
 ### Owner steps
@@ -121,7 +128,8 @@ TrueNAS cloud sync task 2: `/mnt/pithari/immich` to Google Drive folder `/epafli
 ## Risks
 
 - **R9.** Google Drive fills up. Owner check above. Cloud sync failure alerts catch it later.
-- **R10.** GPU contention with Ollama. Builder checks first.
+- **R10.** GPU memory. Ollama's model, Jellyfin transcodes and Immich's models share 8 GB. When they all load at once, one of them can fail with out of memory. Accepted by the owner. If it happens often, the fix is a shorter Ollama keep-alive or Immich on CPU.
+- **R14.** Uploads over 100 MB need home Wi-Fi until Immich has chunked upload.
 - **R11.** Immich upgrades run database migrations on the shared cluster. Renovate never auto-merges Immich. The cluster's daily backup is the rollback.
 - **R12.** VectorChord updates need `ALTER EXTENSION vchord UPDATE` and `REINDEX` of `face_index` and `clip_index` in `immich`. The Renovate rule from #2477 already says so.
 - **R13.** The site is public. Login goes only through Authentik, and share links are public by design, so anyone with a link can open that album.
