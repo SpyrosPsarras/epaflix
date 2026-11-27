@@ -60,10 +60,10 @@ class FakeIO:
         self.saves.append(body)
 
     def documents(self):
-        return [{"id": doc_id, "node_id": nid} for nid, (doc_id, _) in self.docs.items()]
+        return [{"id": doc_id, "node_id": nid, "title": title} for nid, (doc_id, _, title) in self.docs.items()]
 
     def document(self, doc_id):
-        return next({"id": d, "body": b} for d, b in self.docs.values() if d == doc_id)
+        return next({"id": d, "body": b} for d, b, _ in self.docs.values() if d == doc_id)
 
     def create_document(self, body):
         self.created_docs.append(body)
@@ -185,7 +185,7 @@ class Sync(unittest.TestCase):
     def test_doc_unchanged_not_written(self):
         first = FakeIO()
         run(first)
-        docs = {d["node_id"]: (f"doc-{i}", d["body"]) for i, d in enumerate(first.created_docs)}
+        docs = {d["node_id"]: (f"doc-{i}", d["body"], d["title"]) for i, d in enumerate(first.created_docs)}
         io = FakeIO(docs=docs)
         run(io)
         self.assertEqual(io.created_docs, [])
@@ -195,10 +195,63 @@ class Sync(unittest.TestCase):
         first = FakeIO()
         run(first)
         nid = nodes(first)["app/forgejo"]["id"]
-        io = FakeIO(docs={nid: ("doc-1", "old")})
+        io = FakeIO(docs={nid: ("doc-1", "old", "app/forgejo workloads")})
         run(io)
         self.assertEqual(io.updated_docs[0][0], "doc-1")
         self.assertEqual(io.updated_docs[0][1]["revision_reason"], "import")
+
+    def test_hand_written_page_not_overwritten(self):
+        first = FakeIO()
+        run(first)
+        nid = nodes(first)["app/forgejo"]["id"]
+        io = FakeIO(docs={nid: ("doc-1", "my runbook", "Forgejo runbook")})
+        self.assertEqual(run(io), 1)
+        self.assertEqual(io.updated_docs, [])
+        self.assertFalse(any(d["node_id"] == nid for d in io.created_docs))
+
+    def test_last_workload_gone_empties_page(self):
+        first = FakeIO()
+        run(first)
+        nid = nodes(first)["app/loose"]["id"]
+        io = FakeIO(docs={nid: ("doc-1", "## loose/deploy/stray\n", "app/loose workloads")})
+        io.k8s = lambda: dict(fx.k8s(), deployments=[d for d in fx.k8s()["deployments"] if d["metadata"]["name"] != "stray"])
+        run(io)
+        self.assertIn(("doc-1", {"body": "No workloads.\n", "revision_reason": "import"}), io.updated_docs)
+
+    def test_incomplete_canvas_saves_nothing(self):
+        io = FakeIO()
+        io.canvas = lambda design_id: {}
+        self.assertEqual(run(io), 1)
+        self.assertEqual(io.saves, [])
+
+    def test_incomplete_second_read_saves_nothing(self):
+        io = FakeIO()
+        orig = io.canvas
+        io.canvas = lambda design_id: orig(design_id) if io.canvas_reads == 0 else {"nodes": []}
+        self.assertEqual(run(io), 1)
+        self.assertEqual(io.saves, [])
+
+    def test_seed_again_when_design_empty(self):
+        io = FakeIO()
+        io.canvas = lambda design_id: {"nodes": [], "edges": [], "viewport": {}, "custom_style": None}
+        self.assertEqual(run(io, seed=True), 0)
+        self.assertEqual(io.created_designs, [])
+        self.assertEqual(nodes(io)["app/forgejo"]["notes"], "why\n\n### forgejo/deploy/forgejo\nrootless")
+
+    def test_failed_host_keeps_guest_in_box(self):
+        first = FakeIO()
+        run(first)
+        saved = first.saves[0]
+        io = FakeIO(down_hosts={"takaros"})
+        io.canvas = lambda design_id: json.loads(json.dumps(
+            {"nodes": saved["nodes"], "edges": [], "viewport": {}, "custom_style": None}))
+        self.assertEqual(run(io), 1)
+        got = nodes(io)
+        before = {n["label"]: n for n in saved["nodes"]}
+        self.assertEqual(got["lxc/pihole"]["parent_id"], before["pve/takaros"]["id"])
+        for name in ("lxc/pihole", "pve/takaros", "hw/takaros"):
+            self.assertEqual({k: v for k, v in got[name].items() if k != "properties"},
+                             {k: v for k, v in before[name].items() if k != "properties"})
 
     def test_k8s_down_keeps_docs(self):
         io = FakeIO(k8s_down=True)

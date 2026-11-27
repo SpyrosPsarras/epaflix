@@ -1,9 +1,15 @@
 import re
 import uuid
 
+import build
+
 DESIGN = "Homelab index"
 NS = uuid.UUID("5d0f3c3e-6a51-4f0b-9a57-3c2b9e1f7a10")
 MARK = ("managed-by", "homelab-sync")
+SYNC_KEYS = frozenset({MARK[0], "tags", "source", "gone-since", "indexed", "auth", "configmaps", "cpu", "disk-chain",
+                       "disks", "files", "git", "health", "images", "ingress", "kernel", "kind", "live-config", "memory",
+                       "model", "namespace", "nodes", "os", "packages", "path", "scan-errors", "secrets", "serial",
+                       "state", "sync", "updates", "uses", "version", "vmid"})
 TYPES = {"hw": "server", "pve": "proxmox", "vm": "vm", "lxc": "lxc"}
 ROWS = ("hw", "pve", "app", "k3s")
 OWNED = ("label", "type", "ip", "check_method", "check_target", "properties", "notes",
@@ -58,7 +64,23 @@ def _props(it):
 
 
 def _is_sync(node):
-    return any((p.get("key"), p.get("value")) == MARK for p in node.get("properties") or [])
+    return node.get("id") == node_id(node.get("label") or "") and any(
+        (p.get("key"), p.get("value")) == MARK for p in node.get("properties") or [])
+
+
+def check_canvas(canvas):
+    if not (isinstance(canvas, dict) and isinstance(canvas.get("nodes"), list) and isinstance(canvas.get("edges"), list)
+            and isinstance(canvas.get("viewport"), dict) and "custom_style" in canvas):
+        raise ValueError("incomplete canvas response")
+    return canvas
+
+
+def _merge_props(new, old):
+    old_by = {p.get("key"): p for p in old or []}
+    out = [dict(p, icon=(old_by.get(p["key"]) or {}).get("icon"), visible=(old_by.get(p["key"]) or {}).get("visible", False))
+           for p in new]
+    keys = {p["key"] for p in new}
+    return out + [p for p in old or [] if p.get("key") not in keys and p.get("key") not in SYNC_KEYS]
 
 
 def stored_items(canvas):
@@ -70,11 +92,14 @@ def stored_items(canvas):
         props = {p.get("key"): p.get("value") for p in n.get("properties") or []}
         tags = ["sync"] + [t.strip() for t in (props.pop("tags", "") or "").split(",") if t.strip()]
         props.pop(MARK[0], None)
-        items.append({"name": n["label"], "tags": tags, "labels": props, "notes": n.get("notes"), "runsOn": []})
+        items.append({"name": n["label"], "tags": tags, "labels": props, "notes": n.get("notes"), "runsOn": [], "node": n})
     return items, raw
 
 
 def seed_items(resources):
+    resources = [dict(r, notes=build.scrub(r["notes"]) if r.get("notes") else r.get("notes")) for r in resources
+                 if not build.has_excluded(r.get("name") or "")
+                 and not any(build.has_excluded(x) for x in r.get("runsOn") or [])]
     by_name = {r["name"].lower(): dict(r) for r in resources if r.get("kind") != "Service"}
     for r in sorted((r for r in resources if r.get("kind") == "Service" and r.get("notes")), key=lambda r: r["name"]):
         parent = by_name.get(((r.get("runsOn") or [""])[0]).lower())
@@ -107,22 +132,21 @@ def _place(name, parent, taken, children):
 
 
 def payload(items, canvas, ip_map, design_id):
-    stored = {(n.get("label") or "").lower(): n for n in canvas.get("nodes") or [] if _is_sync(n)}
+    stored = {n["id"]: n for n in canvas.get("nodes") or [] if _is_sync(n)}
     raw = [n for n in canvas.get("nodes") or [] if not _is_sync(n)]
     raw_ids = {n["id"] for n in raw}
     nodes_items = [it for it in items if it.get("kind") != "Service"]
     names = {it["name"].lower() for it in nodes_items}
-    taken, children, nodes = set(), {}, []
-    for n in stored.values():
-        if n.get("parent_id"):
-            children[n["parent_id"]] = children.get(n["parent_id"], 0) + 1
     guests = {}
     for it in nodes_items:
         host = ((it.get("runsOn") or [""])[0] or "").lower()
         if node_type(it["name"]) in ("vm", "lxc") and host.startswith("pve/"):
             guests[host] = guests.get(host, 0) + 1
+    taken, children, nodes = set(), {}, []
     for n in stored.values():
-        if n.get("parent_id") is None:
+        if n.get("parent_id"):
+            children[n["parent_id"]] = children.get(n["parent_id"], 0) + 1
+        else:
             row = _row(n.get("label") or "")
             taken.add((row, round((n.get("pos_x") or 0) / _step(row))))
     for it in nodes_items:
@@ -130,13 +154,19 @@ def payload(items, canvas, ip_map, design_id):
         nid = node_id(name)
         if nid in raw_ids:
             continue
-        old = stored.get(name.lower())
+        old = stored.get(nid)
+        if old and "node" in it:
+            node = dict(old)
+            node["properties"] = _merge_props(_props(it), old.get("properties"))
+            node["notes"] = it.get("notes")
+            nodes.append(node)
+            continue
         base = {k: v for k, v in (old or {}).items() if k not in OWNED}
-        base["id"] = old["id"] if old else nid
+        base["id"] = nid
         parent = None
         host = (it.get("runsOn") or [None])[0] or ""
         if node_type(name) in ("vm", "lxc") and host.lower().startswith("pve/") and host.lower() in names:
-            parent = (stored.get(host.lower()) or {}).get("id") or node_id(host)
+            parent = node_id(host)
         if not old:
             base["pos_x"], base["pos_y"] = _place(name, parent, taken, children)
             if node_type(name) == "proxmox":
@@ -149,7 +179,7 @@ def payload(items, canvas, ip_map, design_id):
             "ip": ip,
             "check_method": "ping" if ip else None,
             "check_target": ip,
-            "properties": _props(it),
+            "properties": _merge_props(_props(it), (old or {}).get("properties")),
             "notes": it.get("notes"),
             "parent_id": parent,
             "container_mode": node_type(name) == "proxmox",
@@ -161,6 +191,9 @@ def payload(items, canvas, ip_map, design_id):
     for n in nodes:
         if n["parent_id"] not in ids:
             n["parent_id"] = None
+    missing = set(stored) - ids
+    if missing:
+        raise ValueError(f"{len(missing)} stored nodes would be deleted")
     return {"design_id": design_id, "nodes": nodes + raw, "edges": canvas.get("edges") or [],
             "viewport": canvas.get("viewport") or {}, "custom_style": canvas.get("custom_style")}
 

@@ -230,35 +230,45 @@ def write_tree(tree, scans, k8s):
 
 def read_stored(io, seed):
     design = next((d for d in io.designs() if d.get("name") == hl.DESIGN), None)
-    if design:
-        canvas = io.canvas(design["id"])
-        return design, canvas, hl.stored_items(canvas)[0]
-    return None, {}, hl.seed_items(io.rpk_get().get("resources", [])) if seed else []
+    canvas = hl.check_canvas(io.canvas(design["id"])) if design else {}
+    stored = hl.stored_items(canvas)[0]
+    if stored or not seed:
+        return design, canvas, stored, False
+    return design, canvas, hl.seed_items(io.rpk_get().get("resources", [])), True
 
 
-def write_docs(io, items, node_ids, log):
-    existing = {d.get("node_id"): d["id"] for d in io.documents()}
-    for parent, body in hl.workload_docs(items).items():
+def write_docs(io, items, fresh, node_ids, log):
+    existing = {d.get("node_id"): d for d in io.documents()}
+    docs = hl.workload_docs(items)
+    for name in fresh:
+        if name not in docs and (existing.get(node_ids.get(name.lower())) or {}).get("title") == f"{name} workloads":
+            docs[name] = "No workloads.\n"
+    conflicts = 0
+    for parent, body in sorted(docs.items()):
         nid = node_ids.get(parent.lower())
         if not nid:
             continue
-        doc_id = existing.get(nid)
-        if doc_id is None:
+        doc = existing.get(nid)
+        if doc is None:
             io.create_document({"kind": "node", "title": f"{parent} workloads", "node_id": nid, "body": body})
-        elif (io.document(doc_id) or {}).get("body") != body:
-            io.update_document(doc_id, {"body": body, "revision_reason": "import"})
+        elif doc.get("title") != f"{parent} workloads":
+            conflicts += 1
+            log(f"homelable: {parent} already has page {doc.get('title')!r}, workloads not written")
+        elif (io.document(doc["id"]) or {}).get("body") != body:
+            io.update_document(doc["id"], {"body": body, "revision_reason": "import"})
     log("homelable: workload pages written")
+    return conflicts
 
 
 def run(io, hosts, today, log, seed=False):
     exit_code = 0
     try:
-        design, canvas, stored = read_stored(io, seed)
+        design, canvas, stored, seeded = read_stored(io, seed)
     except Exception as exc:
         log(f"homelable: read failed: {type(exc).__name__}: {exc}")
         return 1
-    if design is None:
-        log(f"homelable: no design {hl.DESIGN!r}, seeding {len(stored)} items" + (" from RackPeek" if seed else ""))
+    if seeded:
+        log(f"homelable: {hl.DESIGN!r} has no sync nodes, seeding {len(stored)} items from RackPeek")
     work = tempfile.mkdtemp()
     repo = os.path.join(work, "repo")
     os.makedirs(repo)
@@ -314,8 +324,10 @@ def run(io, hosts, today, log, seed=False):
     ok_sources = ({"k8s"} | set(hosts)) - failed
     if design:
         try:
-            canvas = io.canvas(design["id"])
-            stored = hl.stored_items(canvas)[0]
+            canvas = hl.check_canvas(io.canvas(design["id"]))
+            fresh_stored = hl.stored_items(canvas)[0]
+            if fresh_stored or not seeded:
+                stored = fresh_stored
         except Exception as exc:
             log(f"homelable: read failed: {type(exc).__name__}: {exc}")
             return 1
@@ -324,6 +336,8 @@ def run(io, hosts, today, log, seed=False):
     resources += [s for s in stored if s["name"].lower() not in kept]
     for r in resources:
         r["labels"] = {k: build.scrub(v) for k, v in (r.get("labels") or {}).items()}
+        if r.get("notes"):
+            r["notes"] = build.scrub(r["notes"])
     try:
         design_id = design["id"] if design else io.create_design(hl.DESIGN)
         body = hl.payload(resources, canvas, hl.ips(hosts, scans), design_id)
@@ -333,7 +347,9 @@ def run(io, hosts, today, log, seed=False):
         log(f"homelable: save failed: {type(exc).__name__}: {exc}")
         return 1
     try:
-        write_docs(io, resources, {n["label"].lower(): n["id"] for n in body["nodes"]}, log)
+        fresh = [i["name"] for i in items if i.get("kind") != "Service"]
+        if write_docs(io, resources, fresh, {n["label"].lower(): n["id"] for n in body["nodes"] if hl._is_sync(n)}, log):
+            exit_code = 1
     except Exception as exc:
         exit_code = 1
         log(f"homelable: workload pages failed: {type(exc).__name__}: {exc}")

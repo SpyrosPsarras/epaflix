@@ -108,6 +108,38 @@ class Homelable(unittest.TestCase):
         positions = [(x["pos_x"], x["pos_y"]) for x in nodes.values() if x["parent_id"] is None]
         self.assertEqual(len(positions), len(set(positions)))
 
+    def test_same_ip_hand_card_kept(self):
+        canvas = canvas_of(hl.payload(fresh_items(), {}, {}, "d1"))
+        twin = dict(next(n for n in canvas["nodes"] if n["label"] == "hw/takaros"), id="hand-twin", pos_x=7)
+        canvas["nodes"].append(twin)
+        body = hl.payload(fresh_items(), canvas, {}, "d1")
+        self.assertIn(twin, body["nodes"])
+        self.assertEqual(sum(1 for n in body["nodes"] if n["label"] == "hw/takaros"), 2)
+
+    def test_human_properties_kept(self):
+        canvas = canvas_of(hl.payload(fresh_items(), {}, {}, "d1"))
+        n = next(x for x in canvas["nodes"] if x["label"] == "app/forgejo")
+        n["properties"].append({"key": "owner", "value": "spyros", "icon": "user", "visible": True})
+        next(p for p in n["properties"] if p["key"] == "health").update(icon="heart", visible=True)
+        props = {p["key"]: p for p in by_label(hl.payload(fresh_items(), canvas, {}, "d1"))["app/forgejo"]["properties"]}
+        self.assertEqual(props["owner"], {"key": "owner", "value": "spyros", "icon": "user", "visible": True})
+        self.assertEqual((props["health"]["icon"], props["health"]["visible"]), ("heart", True))
+
+    def test_sync_keys_cover_build_labels(self):
+        self.assertFalse({k for i in fresh_items() for k in i["labels"]} - hl.SYNC_KEYS)
+
+    def test_seed_skips_excluded(self):
+        resources = fx.stored() + [
+            {"kind": "System", "name": "app/t3code-work", "tags": ["sync"], "labels": {}, "runsOn": []},
+            {"kind": "Service", "name": "t3code-work/sts/x", "tags": ["sync"], "labels": {},
+             "runsOn": ["app/forgejo"], "notes": "secret stuff"},
+            {"kind": "Service", "name": "forgejo/deploy/y", "tags": ["sync"], "labels": {},
+             "runsOn": ["app/forgejo"], "notes": "see hub.mcp-hub-work.svc"}]
+        seeded = {r["name"]: r for r in hl.seed_items(resources)}
+        self.assertNotIn("app/t3code-work", seeded)
+        self.assertNotIn("t3code-work", seeded["app/forgejo"]["notes"])
+        self.assertNotIn("mcp-hub-work", seeded["app/forgejo"]["notes"])
+
     def test_workload_docs(self):
         docs = hl.workload_docs(fresh_items())
         self.assertIn("app/forgejo", docs)
