@@ -40,6 +40,8 @@ cut or hike odds of the fed funds futures, VIX futures and Nasdaq volatility, oi
 SPY, and how each proposal and position moves with them.
 With `persist`, every signal is stored in the Windmill data table `main` (schema `screener`) and followed until it
 closes, even after its ticker leaves the screen; closed signals cannot change (enforced by the database).
+With the setting `intraday` 1 (for a manual run while the market is open) today's unfinished bar is kept, so prices,
+setups and your positions show the state at the time of the run; the email says so, and nothing is saved.
 """
 
 import bisect
@@ -282,6 +284,11 @@ DEFAULTS = {
     # Email: 1 the short report (proposals, positions, the 3 fastest rotating ETFs, extreme move, alerts only when a level
     # in ALERT_LEVELS is crossed), 0 the long one with every setup and the full backdrop.
     "compact_report": 1,
+    # Intraday snapshot (1 on, 0 off), for a manual run while the market is open: keep today's unfinished bar with the
+    # prices at the time of the run (Finviz, may be about 15 minutes late). Signals are backtested on completed days only,
+    # volume checks see part of the day, and a stop, target or setup may change by the close. The email is marked
+    # intraday and nothing is saved (no signals, no run, no position state), so the evening report stays the reference.
+    "intraday": 0,
     # Extreme move block when the benchmark closes this much up or down on the day (0 = off); odds from EXTREME_STATS.
     "extreme_move": 0.03,
     # Recovery watch (1 on, 0 off): while the benchmark is recovery_drawdown or more below its 252-day high (or was in the
@@ -433,7 +440,10 @@ def new_york_time(now):
 
 
 def completed_bars(bars, now):
-    """Drop today's bar until the session is over, so a signal never uses a partial day."""
+    """Drop today's bar until the session is over, so a signal never uses a partial day. now None keeps every bar
+    (the intraday setting)."""
+    if now is None:
+        return bars
     local = new_york_time(now)
     keep = len(bars)
     while keep and (bars.dates[keep - 1] > local.date() or (
@@ -3675,10 +3685,32 @@ def _load(name, count, now, data_errors, label, pause):
         time.sleep(pause)
 
 
+def utc_now():
+    return datetime.now(timezone.utc)
+
+
+def intraday_info(now, as_of):
+    """What an intraday run saw: the New York time and whether as_of is a session still in progress."""
+    local = new_york_time(now)
+    at = local.strftime("%H:%M") + " ET"
+    partial = as_of == local.date() and (local.hour, local.minute) < SESSION_FINAL_AFTER
+    note = (f"today's bar is not complete: prices as of {at} (Finviz, may be about 15 minutes late)" if partial else
+            f"no session in progress at {at}: the same data as a normal run, up to {as_of.isoformat()}")
+    return {"at": at, "partial": partial, "note": note + "; nothing saved"}
+
+
+def intraday_html(info):
+    if not info["partial"]:
+        return f"<p><b>Intraday run</b>: {escape(info['note'])}.</p>"
+    return (f"<p><b>Intraday snapshot at {escape(info['at'])}</b>: {escape(info['note'])}. Signals are backtested on "
+            "completed days only; volume checks see part of the day, and a stop, target, sell advice or setup may change by "
+            "the close. The evening report stays the reference.</p>")
+
+
 def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tickers: int = 50, track_days: int = 10,
          validation_days: int = 0, settings: dict | None = None, email: str = "", persist: bool = False) -> dict:
     started = time.monotonic()
-    now = datetime.now(timezone.utc)
+    now = utc_now()
     if strategy in STRATEGY_GROUPS:
         strategies = list(STRATEGY_GROUPS[strategy])
     elif strategy in STRATEGIES:
@@ -3696,6 +3728,8 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
     if email.strip() and not EMAIL.match(email.strip()):
         raise ValueError(f"not an email address: {email}")
     cfg = settings_with_defaults(settings)
+    intraday = bool(cfg["intraday"])
+    cutoff = None if intraday else now  # completed_bars keeps today's unfinished bar with None
     longest = cfg["swing_max_days"]
     count = cfg["min_bars"] + max(validation_days + longest, track_days) + 60
 
@@ -3711,7 +3745,7 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
     updates, new_rows = [], []
     benchmarks, benchmark_bars, benchmark_info, data_errors = {}, {}, {}, []
     for name in cfg["benchmarks"]:
-        bars = _load(name, count, now, data_errors, "benchmark", cfg["request_pause"])
+        bars = _load(name, count, cutoff, data_errors, "benchmark", cfg["request_pause"])
         if bars is not None:
             benchmarks[name] = {d: c for d, c in zip(bars.dates, bars.close) if math.isfinite(c) and c > 0}
             benchmark_bars[name] = bars
@@ -3723,14 +3757,14 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
     reference = benchmark_bars[rs_benchmarks[0]]
     sector_bars, sector_closes, sector_trends = {}, {}, {}
     for etf in sorted(set(SECTOR_ETFS.values())):
-        bars = _load(etf, count, now, data_errors, "sector ETF", cfg["request_pause"])
+        bars = _load(etf, count, cutoff, data_errors, "sector ETF", cfg["request_pause"])
         if bars is not None:
             sector_bars[etf] = bars
             sector_closes[etf] = {d: c for d, c in zip(bars.dates, bars.close) if math.isfinite(c) and c > 0}
             sector_trends[etf] = trend_labels(bars.dates, bars.close, cfg["regime_slope_bars"])
     context_bars = {}
     for name in cfg["context_etfs"]:
-        bars = _load(name, count, now, data_errors, "context ETF", cfg["request_pause"])
+        bars = _load(name, count, cutoff, data_errors, "context ETF", cfg["request_pause"])
         if bars is not None:
             context_bars[name] = bars
     breadth_by_date = breadth(sector_bars)
@@ -3753,7 +3787,7 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
     closes_by_ticker = {}
     for name in names:
         try:
-            bars = completed_bars(fetch_bars(name, count), now)
+            bars = completed_bars(fetch_bars(name, count), cutoff)
             problems = quality_problems(bars, calendar, cfg)
         except (requests.RequestException, ValueError) as error:
             problems = [str(error)]
@@ -3849,7 +3883,7 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
             base += more[2]
     for name, rows in sorted(pending_by_ticker.items()):  # stored signals whose ticker is not in today's universe
         try:
-            bars = completed_bars(fetch_bars(name, count), now)
+            bars = completed_bars(fetch_bars(name, count), cutoff)
             problems = quality_problems(bars, calendar, cfg)
         except (requests.RequestException, ValueError) as error:
             bars, problems = None, [str(error)]
@@ -3858,7 +3892,7 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
                     for row in rows]
     for name in sorted(position_tickers - set(position_data)):  # your positions whose ticker is not in today's universe
         try:
-            bars = completed_bars(fetch_bars(name, count), now)
+            bars = completed_bars(fetch_bars(name, count), cutoff)
             problems = quality_problems(bars, calendar, cfg)
         except (requests.RequestException, ValueError) as error:
             bars, problems = None, [str(error)]
@@ -3872,7 +3906,7 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
             bars = sector_bars.get(etf) or context_bars.get(etf) or benchmark_bars.get(etf)
             if bars is None:
                 try:
-                    bars = completed_bars(fetch_bars(etf, count), now)
+                    bars = completed_bars(fetch_bars(etf, count), cutoff)
                     problems = quality_problems(bars, calendar, cfg)
                 except (requests.RequestException, ValueError) as error:
                     problems = [str(error)]
@@ -3943,7 +3977,7 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
     if cfg["backdrop"]:
         mapped = list(dict.fromkeys([c["ticker"] for c in candidates if c["action"] in TRADE_ACTIONS]
                                     + [p["ticker"] for p in statuses if p["data_status"] != "unavailable"]))
-        backdrop = market_backdrop(as_of, now, count, cfg, {**etf_bars, **context_bars}, closes_by_ticker, mapped)
+        backdrop = market_backdrop(as_of, cutoff, count, cfg, {**etf_bars, **context_bars}, closes_by_ticker, mapped)
 
     duration = time.monotonic() - started
     counts = ", ".join(f"{s} {len(results[s]['qualified'])}" for s in strategies)
@@ -3953,6 +3987,7 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
     result = {
         "generated_at": now.isoformat(timespec="seconds"),
         "as_of": as_of.isoformat(),
+        "intraday": intraday_info(now, as_of) if intraday else None,
         "universe": {"source": source, "tickers": len(names), "data_errors": len(data_errors)},
         "market": market_info,
         "benchmarks": benchmark_info,
@@ -4001,7 +4036,7 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
         "settings": cfg,
         "duration_seconds": round(duration, 2),
     }
-    if persist:
+    if persist and not intraday:
         candidates_new = [new_row(q, True, as_of.isoformat()) for s in strategies for q in results[s]["qualified"]]
         candidates_new += [new_row(x, False, as_of.isoformat()) for x in tracked]
         new_rows, skipped = select_new(stored, updates, candidates_new)
@@ -4030,13 +4065,16 @@ def main(finviz_url: str = "", tickers: str = "", strategy: str = "all", max_tic
             "note": "live = recorded on its signal day with the live checks; not live = recomputed later from the price history.",
         }
     if email.strip():
-        subject = f"Strategy screen {as_of.isoformat()}: market {market_info['regime']}, {len(candidates)} setups"
+        when = f" intraday {result['intraday']['at']}" if intraday else ""
+        subject = f"Strategy screen {as_of.isoformat()}{when}: market {market_info['regime']}, {len(candidates)} setups"
         if persist:
             subject += f", positions {len(statuses)}/{sizing['max_open_trades']}" + (f", {sizing['to_sell']} to sell" if sizing["to_sell"] else "")
         html, problem = build_email(result)
         if problem:
             errors["email_format"] = problem
             subject += " (short report)"
+        if intraday:
+            html = intraday_html(result["intraday"]) + html
         if "persistence" in errors:
             html = (f"<p><b>Not saved</b>: the database write failed ({escape(errors['persistence'])}); tracked signals were not "
                     "updated. The next run retries them without duplicates.</p>") + html

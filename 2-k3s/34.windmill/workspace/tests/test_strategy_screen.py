@@ -2417,6 +2417,56 @@ def test_main_follows_my_positions(offline, db, monkeypatch):
     assert "NOPE bought" in html and "CHECK, no price data today" in html and "SQZ bought" in html
 
 
+def _during_last_session(monkeypatch):
+    last = sessions(301)[-1]  # the last bar of the offline data, a winter day: 15:00 UTC is 10:00 in New York
+    monkeypatch.setattr(ss, "utc_now", lambda: datetime(last.year, last.month, last.day, 15, tzinfo=timezone.utc))
+    return last
+
+
+def test_completed_bars_keeps_every_bar_without_a_cutoff():
+    bars = make_bars(uptrend(5), start=date(2026, 11, 12))
+    assert ss.completed_bars(bars, None) is bars
+
+
+def test_main_intraday_keeps_todays_unfinished_bar_and_marks_the_email(offline, monkeypatch):
+    last = _during_last_session(monkeypatch)
+    normal = ss.main(tickers="PULL", track_days=0, email="trader@example.com")
+    assert normal["as_of"] == sessions(301)[-2].isoformat() and normal["intraday"] is None
+    assert "intraday" not in offline["_sent"][-1][1] and "Intraday" not in offline["_sent"][-1][2]
+    live = ss.main(tickers="PULL", track_days=0, settings={"intraday": 1}, email="trader@example.com")
+    assert live["as_of"] == last.isoformat() and live["settings"]["intraday"] == 1
+    assert live["intraday"]["partial"] and live["intraday"]["at"] == "10:00 ET" and "nothing saved" in live["intraday"]["note"]
+    to, subject, html = offline["_sent"][-1]
+    assert subject.startswith(f"Strategy screen {last.isoformat()} intraday 10:00 ET: market ")
+    assert html.startswith("<p><b>Intraday snapshot at 10:00 ET</b>: today&#x27;s bar is not complete")
+
+
+def test_intraday_info_outside_a_session():
+    friday = date(2026, 11, 27)
+    info = ss.intraday_info(datetime(2026, 11, 28, 15, tzinfo=timezone.utc), friday)  # Saturday
+    assert not info["partial"] and "no session in progress at 10:00 ET" in info["note"] and "2026-11-27" in info["note"]
+    assert "Intraday run" in ss.intraday_html(info) and "snapshot" not in ss.intraday_html(info)
+    after_close = ss.intraday_info(datetime(2026, 11, 27, 21, 30, tzinfo=timezone.utc), friday)
+    assert not after_close["partial"] and after_close["at"] == "16:30 ET"
+
+
+def test_main_intraday_reads_positions_but_saves_nothing(offline, db, monkeypatch):
+    monkeypatch.setattr(ss, "datatable_query", lambda name=ss.DATA_TABLE: db)
+    monkeypatch.setattr(positions, "datatable_query", lambda name=positions.DATA_TABLE: db)
+    _during_last_session(monkeypatch)
+    days = make_bars(offline["PULL"]).dates
+    positions.main("buy", "PULL", offline["PULL"][-10][3], days[-10].isoformat())
+    result = ss.main(tickers="PULL,BRK", track_days=5, persist=True, settings={"intraday": 1}, email="trader@example.com")
+    assert result["positions"]["open"] == 1 and result["positions"]["items"][0]["sessions_held"] == 9
+    assert "persistence" not in result and result["errors"] == {}
+    assert "positions 1/10" in offline["_sent"][-1][1]
+    signals = db.one("SELECT count(*) AS n FROM screener.signals")["n"] if db.one(
+        "SELECT to_regclass('screener.signals') AS t")["t"] else 0
+    runs = db.one("SELECT count(*) AS n FROM screener.runs")["n"] if db.one(
+        "SELECT to_regclass('screener.runs') AS t")["t"] else 0
+    assert signals == runs == 0
+
+
 def test_main_sizes_long_candidates_and_emails_it(offline):
     result = ss.main(tickers="PULL,BRK", strategy="all", settings={"compact_report": 0}, email="trader@example.com")
     longs = [c for c in result["candidates"] if c["action"] == "long"]
