@@ -10,9 +10,11 @@ import subprocess
 import sys
 import tempfile
 import urllib.error
+import urllib.parse
 import urllib.request
 
 import build
+import homelable as hl
 
 HERE = pathlib.Path(__file__).resolve().parent
 SCANNER = next(p for p in (HERE / "homelab_scan.py", HERE.parent.parent / "1-proxmox/homelab-scan/homelab-scan.py") if p.exists())
@@ -54,34 +56,47 @@ class RealIO:
         os.chmod(key, 0o600)
         self.env["SSH_KEY_FILE"] = key
 
-    def _rpk(self, method, body=None):
-        req = urllib.request.Request(self.env["RPK_URL"].rstrip("/") + "/api/inventory", method=method,
+    def _hl(self, method, path, body=None):
+        req = urllib.request.Request(self.env["HL_URL"].rstrip("/") + "/api/v1/" + path, method=method,
                                      data=json.dumps(body).encode() if body is not None else None,
-                                     headers={"X-Api-Key": self.env["RPK_API_KEY"], "Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=120) as r:
-            return json.load(r)
+                                     headers={"X-MCP-Service-Key": self.env["HL_SERVICE_KEY"],
+                                              "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=300) as r:
+            data = r.read()
+        return json.loads(data) if data else None
+
+    def designs(self):
+        return self._hl("GET", "designs")
+
+    def create_design(self, name):
+        return self._hl("POST", "designs", {"name": name, "design_type": "network"})["id"]
+
+    def canvas(self, design_id):
+        return self._hl("GET", "canvas?design_id=" + urllib.parse.quote(design_id))
+
+    def save(self, body):
+        self._hl("POST", "canvas/save", body)
+
+    def documents(self):
+        return self._hl("GET", "documents?kind=node")
+
+    def document(self, doc_id):
+        return self._hl("GET", "documents/" + urllib.parse.quote(doc_id))
+
+    def create_document(self, body):
+        self._hl("POST", "documents", body)
+
+    def update_document(self, doc_id, body):
+        self._hl("PATCH", "documents/" + urllib.parse.quote(doc_id), body)
+
+    def git_sync(self):
+        self._hl("POST", "git-sync")
 
     def rpk_get(self):
-        return self._rpk("GET")
-
-    def rpk_post(self, body):
-        return self._rpk("POST", body)
-
-    def rpk_commit(self, message):
-        body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-                "params": {"name": "git_commit", "arguments": {"message": message, "push": True}}}
-        req = urllib.request.Request(self.env["RPK_URL"].rstrip("/") + "/mcp", method="POST",
-                                     data=json.dumps(body).encode(),
-                                     headers={"X-Api-Key": self.env["RPK_API_KEY"], "Content-Type": "application/json",
-                                              "Accept": "application/json, text/event-stream"})
-        with urllib.request.urlopen(req, timeout=300) as r:
-            text = r.read().decode()
-        data = next((json.loads(line[5:]) for line in text.splitlines() if line.startswith("data:")), None)
-        if data is None:
-            data = json.loads(text)
-        result = data.get("result") or {}
-        if "error" in data or result.get("isError"):
-            raise RuntimeError(json.dumps(data.get("error") or result.get("content"))[:300])
+        req = urllib.request.Request(self.env["RPK_URL"].rstrip("/") + "/api/inventory",
+                                     headers={"X-Api-Key": self.env["RPK_API_KEY"]})
+        with urllib.request.urlopen(req, timeout=120) as r:
+            return json.load(r)
 
     def _k8s(self, path):
         host = "https://kubernetes.default.svc"
@@ -213,13 +228,37 @@ def write_tree(tree, scans, k8s):
     return idx_lines
 
 
-def run(io, hosts, today, log):
+def read_stored(io, seed):
+    design = next((d for d in io.designs() if d.get("name") == hl.DESIGN), None)
+    if design:
+        canvas = io.canvas(design["id"])
+        return design, canvas, hl.stored_items(canvas)[0]
+    return None, {}, hl.seed_items(io.rpk_get().get("resources", [])) if seed else []
+
+
+def write_docs(io, items, node_ids, log):
+    existing = {d.get("node_id"): d["id"] for d in io.documents()}
+    for parent, body in hl.workload_docs(items).items():
+        nid = node_ids.get(parent.lower())
+        if not nid:
+            continue
+        doc_id = existing.get(nid)
+        if doc_id is None:
+            io.create_document({"kind": "node", "title": f"{parent} workloads", "node_id": nid, "body": body})
+        elif (io.document(doc_id) or {}).get("body") != body:
+            io.update_document(doc_id, {"body": body, "revision_reason": "import"})
+    log("homelable: workload pages written")
+
+
+def run(io, hosts, today, log, seed=False):
     exit_code = 0
     try:
-        stored = io.rpk_get().get("resources", [])
+        design, canvas, stored = read_stored(io, seed)
     except Exception as exc:
-        log(f"rackpeek: read failed: {type(exc).__name__}: {exc}")
+        log(f"homelable: read failed: {type(exc).__name__}: {exc}")
         return 1
+    if design is None:
+        log(f"homelable: no design {hl.DESIGN!r}, seeding {len(stored)} items" + (" from RackPeek" if seed else ""))
     work = tempfile.mkdtemp()
     repo = os.path.join(work, "repo")
     os.makedirs(repo)
@@ -273,31 +312,42 @@ def run(io, hosts, today, log):
         log(f"forgejo: push failed: {type(exc).__name__}: {exc}")
     items = build.build_items(k8s, scans, repo, failed, indexed)
     ok_sources = ({"k8s"} | set(hosts)) - failed
-    try:
-        stored = io.rpk_get().get("resources", [])
-    except Exception as exc:
-        log(f"rackpeek: read failed: {type(exc).__name__}: {exc}")
-        return 1
+    if design:
+        try:
+            canvas = io.canvas(design["id"])
+            stored = hl.stored_items(canvas)[0]
+        except Exception as exc:
+            log(f"homelable: read failed: {type(exc).__name__}: {exc}")
+            return 1
     resources = build.carry_over(items, stored, ok_sources, today)
+    kept = {r["name"].lower() for r in resources}
+    resources += [s for s in stored if s["name"].lower() not in kept]
     for r in resources:
         r["labels"] = {k: build.scrub(v) for k, v in (r.get("labels") or {}).items()}
     try:
-        io.rpk_post({"yaml": json.dumps({"version": 5, "resources": resources}), "mode": "Replace"})
-        log(f"rackpeek: posted {len(resources)} items")
+        design_id = design["id"] if design else io.create_design(hl.DESIGN)
+        body = hl.payload(resources, canvas, hl.ips(hosts, scans), design_id)
+        io.save(body)
+        log(f"homelable: saved {len(body['nodes'])} nodes")
     except Exception as exc:
-        log(f"rackpeek: post failed: {type(exc).__name__}: {exc}")
+        log(f"homelable: save failed: {type(exc).__name__}: {exc}")
         return 1
     try:
-        io.rpk_commit(f"rackpeek-sync {today}")
-        log("rackpeek: committed and pushed rackpeek-config")
+        write_docs(io, resources, {n["label"].lower(): n["id"] for n in body["nodes"]}, log)
     except Exception as exc:
         exit_code = 1
-        log(f"rackpeek: commit failed: {type(exc).__name__}: {exc}")
+        log(f"homelable: workload pages failed: {type(exc).__name__}: {exc}")
+    try:
+        io.git_sync()
+        log("homelable: git sync pushed homelable-config")
+    except Exception as exc:
+        exit_code = 1
+        log(f"homelable: git sync failed: {type(exc).__name__}: {exc}")
     return 1 if failed else exit_code
 
 
 def main():
-    needed = ("RPK_URL", "RPK_API_KEY", "HOMELAB_LIVE_URL", "HOMELAB_LIVE_TOKEN", "REPO_URL",
+    needed = ("HL_URL", "HL_SERVICE_KEY", "HOMELAB_LIVE_URL", "HOMELAB_LIVE_TOKEN", "REPO_URL",
               "SSH_KEY_FILE", "KNOWN_HOSTS_FILE", "HOSTS")
     missing = [k for k in needed if not os.environ.get(k)]
     if missing:
@@ -305,7 +355,8 @@ def main():
         return 1
     hosts = dict(pair.split("=", 1) for pair in os.environ["HOSTS"].split())
     today = datetime.date.today().isoformat()
-    return run(RealIO(os.environ), hosts, today, lambda line: print(line, flush=True))
+    seed = bool(os.environ.get("RPK_URL") and os.environ.get("RPK_API_KEY"))
+    return run(RealIO(os.environ), hosts, today, lambda line: print(line, flush=True), seed)
 
 
 if __name__ == "__main__":

@@ -4,44 +4,88 @@ import tempfile
 import unittest
 
 import fixtures as fx
+import homelable as hl
 import sync
+
+DESIGN_ID = "d-index"
+
+
+def stored_canvas():
+    body = hl.payload(hl.seed_items(fx.stored()), {}, {}, DESIGN_ID)
+    return {"nodes": body["nodes"], "edges": body["edges"], "viewport": {}, "custom_style": None}
 
 
 class FakeIO:
-    def __init__(self, down_hosts=(), rpk_down=False, push_down=False, leaks=(), commit_down=False, post_down=False):
-        self.commit_down = commit_down
-        self.post_down = post_down
-        self.commits = []
+    def __init__(self, down_hosts=(), hl_down=False, push_down=False, leaks=(), git_sync_down=False,
+                 save_down=False, design=True, rpk_down=False, k8s_down=False, docs=None):
         self.down_hosts = set(down_hosts)
-        self.rpk_down = rpk_down
+        self.hl_down = hl_down
         self.push_down = push_down
         self.leaks = list(leaks)
-        self.posts = []
-        self.gets = 0
+        self.git_sync_down = git_sync_down
+        self.save_down = save_down
+        self.rpk_down = rpk_down
+        self.k8s_down = k8s_down
+        self.design = design
+        self.docs = dict(docs or {})
+        self.saves = []
+        self.created_designs = []
+        self.created_docs = []
+        self.updated_docs = []
+        self.git_syncs = 0
+        self.canvas_reads = 0
         self.indexed = ["forgejo", "rackpeek", "loose"]
         self.pushed = []
         self.log = []
 
+    def designs(self):
+        if self.hl_down:
+            raise OSError("connection refused")
+        return [{"id": "other", "name": "My map"}] + ([{"id": DESIGN_ID, "name": hl.DESIGN}] if self.design else [])
+
+    def create_design(self, name):
+        self.created_designs.append(name)
+        return DESIGN_ID
+
+    def canvas(self, design_id):
+        self.canvas_reads += 1
+        canvas = stored_canvas()
+        if self.canvas_reads > 1:
+            next(n for n in canvas["nodes"] if n["label"] == "app/forgejo")["notes"] = "edited during run"
+        return canvas
+
+    def save(self, body):
+        if self.save_down:
+            raise OSError("save failed")
+        self.saves.append(body)
+
+    def documents(self):
+        return [{"id": doc_id, "node_id": nid} for nid, (doc_id, _) in self.docs.items()]
+
+    def document(self, doc_id):
+        return next({"id": d, "body": b} for d, b in self.docs.values() if d == doc_id)
+
+    def create_document(self, body):
+        self.created_docs.append(body)
+
+    def update_document(self, doc_id, body):
+        self.updated_docs.append((doc_id, body))
+
+    def git_sync(self):
+        if self.git_sync_down:
+            raise RuntimeError("502")
+        self.git_syncs += 1
+
     def rpk_get(self):
         if self.rpk_down:
-            raise OSError("connection refused")
-        self.gets += 1
-        stored = fx.stored()
-        if self.gets > 1:
-            stored[0]["notes"] = "edited during run"
-        return {"version": 5, "resources": stored}
-
-    def rpk_post(self, body):
-        if self.post_down:
-            raise OSError("post failed")
-        self.posts.append(body)
-
-    def rpk_commit(self, message):
-        if self.commit_down:
-            raise RuntimeError("git_commit failed")
-        self.commits.append(message)
+            raise OSError("rackpeek down")
+        return {"version": 5, "resources": fx.stored() + [
+            {"kind": "Service", "name": "forgejo/deploy/forgejo", "tags": ["sync"], "labels": {},
+             "runsOn": ["app/forgejo"], "notes": "rootless"}]}
 
     def k8s(self):
+        if self.k8s_down:
+            raise OSError("api down")
         return fx.k8s()
 
     def clone_repo(self, dest):
@@ -69,46 +113,117 @@ class FakeIO:
 HOSTS = {"takaros": "root@192.168.10.10", "truenas": "truenas_admin@192.168.10.200"}
 
 
-def run(io):
-    return sync.run(io, HOSTS, fx.TODAY, io.log.append)
+def run(io, seed=False):
+    return sync.run(io, HOSTS, fx.TODAY, io.log.append, seed)
+
+
+def nodes(io):
+    return {n["label"]: n for n in io.saves[0]["nodes"]}
 
 
 class Sync(unittest.TestCase):
     def test_happy_path_body(self):
         io = FakeIO()
         self.assertEqual(run(io), 0)
-        body = io.posts[0]
-        self.assertEqual(body["mode"], "Replace")
-        self.assertNotIn("json", body)
-        doc = json.loads(body["yaml"])
-        self.assertEqual(doc["version"], 5)
-        self.assertNotIn("connections", doc)
-        for r in doc["resources"]:
-            self.assertIn("sync", r["tags"])
+        self.assertEqual(len(io.saves), 1)
+        self.assertEqual(io.saves[0]["design_id"], DESIGN_ID)
+        self.assertIn({"key": "managed-by", "value": "homelab-sync", "icon": None, "visible": False},
+                      nodes(io)["hw/takaros"]["properties"])
+        self.assertEqual(nodes(io)["hw/takaros"]["check_target"], "192.168.10.10")
+        self.assertEqual(io.git_syncs, 1)
+        self.assertEqual(io.created_designs, [])
         self.assertTrue(any("takaros/etc/hosts" == p for p in io.pushed[0]))
         self.assertTrue(any(p == "k8s/forgejo/configmaps/forgejo-cfg.yaml" for p in io.pushed[0]))
 
-    def test_commit_after_post(self):
+    def test_gone_and_hand_made(self):
         io = FakeIO()
+        run(io)
+        got = nodes(io)
+        gone = {p["key"]: p["value"] for p in got["app/old-thing"]["properties"]}
+        self.assertEqual(gone["gone-since"], fx.TODAY)
+        self.assertIn("my-switch-notes", got)
+        self.assertNotIn("managed-by", {p["key"] for p in got["my-switch-notes"]["properties"]})
+
+    def test_fresh_read_before_save(self):
+        io = FakeIO()
+        run(io)
+        self.assertEqual(nodes(io)["app/forgejo"]["notes"], "edited during run")
+
+    def test_homelable_down_saves_nothing(self):
+        io = FakeIO(hl_down=True)
+        self.assertEqual(run(io), 1)
+        self.assertEqual(io.saves, [])
+        self.assertEqual(io.created_docs + io.updated_docs, [])
+        self.assertEqual(io.pushed, [])
+
+    def test_seed_from_rackpeek(self):
+        io = FakeIO(design=False)
+        self.assertEqual(run(io, seed=True), 0)
+        self.assertEqual(io.created_designs, [hl.DESIGN])
+        self.assertEqual(nodes(io)["app/forgejo"]["notes"], "why\n\n### forgejo/deploy/forgejo\nrootless")
+        self.assertIn("VM/Truenas", nodes(io))
+
+    def test_seed_rackpeek_down(self):
+        io = FakeIO(design=False, rpk_down=True)
+        self.assertEqual(run(io, seed=True), 1)
+        self.assertEqual(io.created_designs, [])
+        self.assertEqual(io.saves, [])
+
+    def test_no_seed_without_rpk_env(self):
+        io = FakeIO(design=False)
         self.assertEqual(run(io), 0)
-        self.assertEqual(io.commits, ["rackpeek-sync " + fx.TODAY])
+        self.assertEqual(io.created_designs, [hl.DESIGN])
+        self.assertIsNone(nodes(io)["app/forgejo"]["notes"])
 
-    def test_commit_failure_exits_1(self):
-        io = FakeIO(commit_down=True)
-        self.assertEqual(run(io), 1)
-        self.assertEqual(len(io.posts), 1)
+    def test_workload_docs_created(self):
+        io = FakeIO()
+        run(io)
+        doc = next(d for d in io.created_docs if d["node_id"] == nodes(io)["app/forgejo"]["id"])
+        self.assertEqual(doc["kind"], "node")
+        self.assertIn("## forgejo/deploy/forgejo", doc["body"])
 
-    def test_no_commit_when_post_fails(self):
-        io = FakeIO(post_down=True)
+    def test_doc_unchanged_not_written(self):
+        first = FakeIO()
+        run(first)
+        docs = {d["node_id"]: (f"doc-{i}", d["body"]) for i, d in enumerate(first.created_docs)}
+        io = FakeIO(docs=docs)
+        run(io)
+        self.assertEqual(io.created_docs, [])
+        self.assertEqual(io.updated_docs, [])
+
+    def test_doc_changed_updated(self):
+        first = FakeIO()
+        run(first)
+        nid = nodes(first)["app/forgejo"]["id"]
+        io = FakeIO(docs={nid: ("doc-1", "old")})
+        run(io)
+        self.assertEqual(io.updated_docs[0][0], "doc-1")
+        self.assertEqual(io.updated_docs[0][1]["revision_reason"], "import")
+
+    def test_k8s_down_keeps_docs(self):
+        io = FakeIO(k8s_down=True)
         self.assertEqual(run(io), 1)
-        self.assertEqual(io.commits, [])
+        self.assertFalse(any(d["title"].startswith("app/") for d in io.created_docs))
+        self.assertEqual(io.updated_docs, [])
+        self.assertIn("app/forgejo", nodes(io))
+        self.assertNotIn("gone-since", {p["key"] for p in nodes(io)["app/forgejo"]["properties"]})
+
+    def test_git_sync_failure_exits_1(self):
+        io = FakeIO(git_sync_down=True)
+        self.assertEqual(run(io), 1)
+        self.assertEqual(len(io.saves), 1)
+
+    def test_save_failure_no_docs(self):
+        io = FakeIO(save_down=True)
+        self.assertEqual(run(io), 1)
+        self.assertEqual(io.created_docs, [])
+        self.assertEqual(io.git_syncs, 0)
 
     def test_one_host_down(self):
         io = FakeIO(down_hosts={"truenas"})
         self.assertEqual(run(io), 1)
-        names = {r["name"] for r in json.loads(io.posts[0]["yaml"])["resources"]}
-        self.assertIn("hw/takaros", names)
-        self.assertNotIn("truenas/app/silo", names)
+        self.assertIn("hw/takaros", nodes(io))
+        self.assertFalse(any(d["title"].startswith("vm/truenas") for d in io.created_docs))
         self.assertTrue(any("truenas" in line and "TimeoutError" in line for line in io.log))
         self.assertNotIn("truenas", io.dirs)
         self.assertIn("takaros", io.dirs)
@@ -118,29 +233,23 @@ class Sync(unittest.TestCase):
 
     def test_final_payload_scrubbed(self):
         io = FakeIO()
-        stored = fx.stored()
-        stored[0]["labels"]["uses"] = "x.t3code-work.svc"
-        io.rpk_get = lambda: {"version": 5, "resources": stored}
+        orig = io.canvas
+
+        def canvas(design_id):
+            c = orig(design_id)
+            n = next(x for x in c["nodes"] if x["label"] == "app/forgejo")
+            n["properties"].append({"key": "uses", "value": "x.t3code-work.svc", "icon": None, "visible": False})
+            return c
+
+        io.canvas = canvas
         run(io)
-        self.assertNotIn("t3code-work", io.posts[0]["yaml"])
+        self.assertNotIn("t3code-work", json.dumps(io.saves[0]))
+        self.assertFalse(any("t3code-work" in d["body"] for d in io.created_docs))
 
-    def test_fresh_inventory_before_post(self):
-        io = FakeIO()
-        run(io)
-        doc = json.loads(io.posts[0]["yaml"])
-        forgejo = [r for r in doc["resources"] if r["name"] == "app/forgejo"][0]
-        self.assertEqual(forgejo["notes"], "edited during run")
-
-    def test_rackpeek_down_posts_nothing(self):
-        io = FakeIO(rpk_down=True)
-        self.assertEqual(run(io), 1)
-        self.assertEqual(io.posts, [])
-        self.assertEqual(io.pushed, [])
-
-    def test_forgejo_down_still_posts(self):
+    def test_forgejo_down_still_saves(self):
         io = FakeIO(push_down=True)
         self.assertEqual(run(io), 1)
-        self.assertEqual(len(io.posts), 1)
+        self.assertEqual(len(io.saves), 1)
 
     def test_gitleaks_drops_file(self):
         io = FakeIO(leaks=["takaros/root/fan.sh"])
@@ -161,7 +270,7 @@ class Sync(unittest.TestCase):
 
 class Main(unittest.TestCase):
     def test_missing_env_exits_1(self):
-        for k in ("RPK_API_KEY", "HOSTS"):
+        for k in ("HL_SERVICE_KEY", "HOSTS"):
             os.environ.pop(k, None)
         self.assertEqual(sync.main(), 1)
 
