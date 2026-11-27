@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 SOURCE = Path(__file__).resolve().parents[1] / 'files/instructions-sync.py'
 spec = importlib.util.spec_from_file_location('instructions_sync', SOURCE)
@@ -120,6 +121,33 @@ class InstructionsSyncTest(unittest.TestCase):
         self.target.write_text('bundle\n')
         self.assertEqual(self.sync(UNREACHABLE), 'kept')
         self.assertEqual(self.target.read_bytes(), good)
+
+    def test_overlapping_invalid_fetch_never_becomes_good(self):
+        self.publish(b'# Rules\n')
+        bad = self.remote.parent / 'bad.git'
+        git('clone', '-q', '--bare', str(self.remote), str(bad))
+        bad_work = self.remote.parent / 'bad-work'
+        git('clone', '-q', str(bad), str(bad_work))
+        (bad_work / 'AGENTS.md').write_text('  \n')
+        git('commit', '-q', '-am', 'blank', cwd=bad_work)
+        git('push', '-q', 'origin', 'main', cwd=bad_work)
+        cache = self.home / '.local/share/t3-instructions'
+        original = sync_module.read
+        calls = []
+
+        def overlapping(cache_dir, ref):
+            result = original(cache_dir, ref)
+            if not calls:
+                calls.append(ref)
+                sync_module.git(cache, 'fetch', '-q', bad.as_uri(), '+refs/heads/main:refs/remotes/origin/main')
+            return result
+
+        with patch.object(sync_module, 'read', overlapping):
+            self.sync()
+        self.assertEqual(sync_module.read(cache, 'refs/heads/good'), '# Rules\n')
+        self.target.write_text('bundle\n')
+        self.assertEqual(self.sync(UNREACHABLE), 'kept')
+        self.assertTrue(self.target.read_text().startswith('# Rules\n'))
 
     def test_restart_after_invalid_push_restores_last_good(self):
         self.publish(b'# Rules\n')

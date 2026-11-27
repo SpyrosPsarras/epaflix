@@ -40,9 +40,10 @@ def sync(home, repo, ssh_path, guidance=GUIDANCE):
         if not (cache / 'HEAD').exists():
             git(cache, 'init', '-q', '--bare')
         git(cache, 'fetch', '-q', '--depth', '1', repo, '+refs/heads/main:refs/remotes/origin/main')
-        if read(cache, 'refs/remotes/origin/main') is not None:
-            git(cache, 'update-ref', 'refs/heads/good', 'refs/remotes/origin/main')
-            revision = git(cache, 'rev-parse', '--short', 'refs/heads/good').decode().strip()
+        candidate = git(cache, 'rev-parse', 'refs/remotes/origin/main').decode().strip()
+        if read(cache, candidate) is not None:
+            git(cache, 'update-ref', 'refs/heads/good', candidate)
+            revision = candidate[:12]
     except (OSError, subprocess.SubprocessError):
         revision = None
     text = read(cache, 'refs/heads/good')
