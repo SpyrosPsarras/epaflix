@@ -23,12 +23,20 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Read the release pin
+        id: source
+        run: |
+          release=$(awk -F'=' '/^ARG PRISM_RELEASE=/ {print $2}' images/llama-prism/Dockerfile)
+          [[ "$release" =~ ^prism-b[0-9]+-[0-9a-f]+$ ]]
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+
       - name: Verify the image before publishing anything
+        env:
+          RELEASE: ${{ steps.source.outputs.release }}
         run: |
           set -euo pipefail
           docker build -t llama-prism:dev images/llama-prism
-          release=$(awk -F'=' '/^ARG PRISM_RELEASE=/ {print $2}' images/llama-prism/Dockerfile)
-          build=$(echo "$release" | sed -E 's/^prism-b([0-9]+)-.*/\1/')
+          build=$(echo "$RELEASE" | sed -E 's/^prism-b([0-9]+)-.*/\1/')
           docker run --rm llama-prism:dev --version 2>&1 | tee version.txt
           grep -q "build $build," version.txt
 
@@ -48,6 +56,7 @@ jobs:
           push: true
           tags: |
             ghcr.io/spyrospsarras/llama-prism:${{ github.sha }}
+            ghcr.io/spyrospsarras/llama-prism:${{ steps.source.outputs.release }}
 
       - name: Print the digest to pin
         if: github.event_name != 'pull_request'
