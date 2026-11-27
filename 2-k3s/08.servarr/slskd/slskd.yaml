@@ -42,6 +42,22 @@ spec:
       securityContext:
         fsGroup: 568
       initContainers:
+        - name: download-dirs
+          image: busybox:1.36
+          command: ["sh", "-c", "mkdir -p /media/downloads/soulseek /media/downloads/soulseek-incomplete"]
+          securityContext:
+            runAsUser: 568
+            runAsGroup: 568
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: media
+              mountPath: /media/downloads
+              subPath: downloads
+          resources:
+            limits:
+              memory: 32Mi
         - name: gluetun
           image: qmcgaw/gluetun
           restartPolicy: Always

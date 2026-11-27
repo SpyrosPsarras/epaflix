@@ -256,6 +256,13 @@ class SlskdTests(unittest.TestCase):
             "SLSKD_SLSK_LISTEN_PORT": "46327",
         }.items(), env_of(self.container("slskd")).items())
 
+    def test_download_dirs_created_before_slskd(self):
+        init = self.pod()["initContainers"]
+        self.assertEqual(init[0]["name"], "download-dirs")
+        self.assertIn("mkdir -p /media/downloads/soulseek /media/downloads/soulseek-incomplete",
+                      " ".join(init[0]["command"]))
+        self.assertEqual(init[0]["securityContext"]["runAsUser"], 568)
+
     def test_no_service_links(self):
         pod = self.pod()
         self.assertIs(pod["enableServiceLinks"], False)
