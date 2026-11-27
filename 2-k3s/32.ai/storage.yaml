@@ -2,19 +2,19 @@
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: ollama-data-pv
+  name: llama-server-data-pv
 spec:
   capacity:
-    storage: 100Gi
+    storage: 20Gi
   accessModes:
     - ReadWriteOnce
   persistentVolumeReclaimPolicy: Retain
   storageClassName: gpu-local
   claimRef:
     namespace: ai
-    name: ollama-data
+    name: llama-server-data
   local:
-    path: /srv/ollama
+    path: /srv/llama-server
   nodeAffinity:
     required:
       nodeSelectorTerms:
@@ -27,16 +27,16 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: ollama-data
+  name: llama-server-data
   namespace: ai
 spec:
   accessModes:
     - ReadWriteOnce
   storageClassName: gpu-local
-  volumeName: ollama-data-pv
+  volumeName: llama-server-data-pv
   resources:
     requests:
-      storage: 100Gi
+      storage: 20Gi
 ---
 apiVersion: v1
 kind: PersistentVolume

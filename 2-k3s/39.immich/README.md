@@ -46,7 +46,7 @@ REINDEX INDEX clip_index;
 
 ## Machine learning
 
-Runs on `k3s-worker-64` with one time-slice of the RTX 2070 SUPER, shared with Ollama and Jellyfin. GPU memory is not split. If `ImmichMachineLearningDown` or out-of-memory errors repeat, shorten Ollama's keep-alive or move Immich machine learning to CPU (remove the GPU settings and use the image tag without `-cuda`).
+Runs on `k3s-worker-64` with one time-slice of the RTX 2070 SUPER, shared with llama-server and Jellyfin. GPU memory is not split, and llama-server holds about 7.5 GiB of the 8 GiB while it answers and for 5 idle minutes after, then unloads the model. Kubernetes restarts a crashed machine learning pod. Smart search and face detection jobs that failed meanwhile stay failed: queue them again with Missing in Administration, Jobs. The nightly job only retries missing thumbnails and face clustering. If `ImmichMachineLearningDown` or out-of-memory errors repeat, move Immich machine learning to CPU (remove the GPU settings and use the image tag without `-cuda`).
 
 ## Offsite copy
 

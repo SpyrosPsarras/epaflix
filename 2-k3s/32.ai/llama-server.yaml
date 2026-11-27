@@ -1,0 +1,141 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llama-server
+  namespace: ai
+  labels:
+    app: llama-server
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: llama-server
+  template:
+    metadata:
+      labels:
+        app: llama-server
+    spec:
+      runtimeClassName: nvidia
+      nodeSelector:
+        gpu: nvidia
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+      containers:
+        - name: llama-server
+          image: ghcr.io/spyrospsarras/llama-prism
+          # One slot and a q5_1 cache fit 32K tokens plus the MTP drafter in the 8 GiB card (7709 MiB measured).
+          args:
+            - "--model"
+            - "/models/Ternary-Bonsai-2.5-27B-PTQ1_0-mtp.gguf"
+            - "--alias"
+            - "qwen3.8-bonsai:27b"
+            - "--host"
+            - "0.0.0.0"
+            - "--port"
+            - "8080"
+            - "--n-gpu-layers"
+            - "999"
+            - "--flash-attn"
+            - "on"
+            - "--parallel"
+            - "1"
+            # The prompt cache in system RAM defaults to 8192 MiB, the whole memory limit.
+            - "--cache-ram"
+            - "2048"
+            # Unload the model after 5 idle minutes so Immich ML and Jellyfin can use the shared GPU memory.
+            - "--sleep-idle-seconds"
+            - "300"
+            - "--ctx-size"
+            - "32768"
+            - "--cache-type-k"
+            - "q5_1"
+            - "--cache-type-v"
+            - "q5_1"
+            - "--spec-type"
+            - "draft-mtp"
+            - "--spec-draft-n-max"
+            - "3"
+            - "--spec-draft-p-min"
+            - "0.1"
+            - "--temp"
+            - "1.0"
+            - "--top-p"
+            - "0.95"
+            - "--top-k"
+            - "20"
+            - "--min-p"
+            - "0"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          env:
+            - {name: NVIDIA_DRIVER_CAPABILITIES, value: all}
+            - {name: NVIDIA_VISIBLE_DEVICES, value: all}
+            - {name: TZ, value: Etc/UTC}
+          ports:
+            - name: http
+              containerPort: 8080
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+              nvidia.com/gpu: 1
+            limits:
+              cpu: "4"
+              memory: 8Gi
+              nvidia.com/gpu: 1
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+          volumeMounts:
+            - name: models
+              mountPath: /models
+              readOnly: true
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: llama-server-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llama-server
+  namespace: ai
+  labels:
+    app: llama-server
+spec:
+  type: ClusterIP
+  selector:
+    app: llama-server
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
