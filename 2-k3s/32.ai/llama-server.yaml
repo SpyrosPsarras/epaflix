@@ -33,7 +33,7 @@ spec:
       containers:
         - name: llama-server
           image: ghcr.io/spyrospsarras/llama-prism
-          # One slot and a q5_1 cache fit 32K tokens plus the MTP drafter in the 8 GiB card (7709 MiB measured).
+          # One slot and a q4_0 cache fit 94208 tokens in the 8 GiB card (7763 MiB with 115 MiB held elsewhere); 98304 did not.
           args:
             - "--model"
             - "/models/Ternary-Bonsai-2.5-27B-PTQ1_0-mtp.gguf"
@@ -56,17 +56,11 @@ spec:
             - "--sleep-idle-seconds"
             - "300"
             - "--ctx-size"
-            - "32768"
+            - "94208"
             - "--cache-type-k"
-            - "q5_1"
+            - "q4_0"
             - "--cache-type-v"
-            - "q5_1"
-            - "--spec-type"
-            - "draft-mtp"
-            - "--spec-draft-n-max"
-            - "3"
-            - "--spec-draft-p-min"
-            - "0.1"
+            - "q4_0"
             - "--temp"
             - "1.0"
             - "--top-p"
