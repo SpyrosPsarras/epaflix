@@ -41,7 +41,7 @@ jobs:
           grep -q "build $build," version.txt
 
       - name: Log in to GHCR
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
@@ -49,7 +49,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: images/llama-prism
@@ -59,5 +59,5 @@ jobs:
             ghcr.io/spyrospsarras/llama-prism:${{ steps.source.outputs.release }}
 
       - name: Print the digest to pin
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         run: docker buildx imagetools inspect ghcr.io/spyrospsarras/llama-prism:${{ github.sha }} --format '{{.Manifest.Digest}}'
