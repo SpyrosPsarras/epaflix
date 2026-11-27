@@ -438,6 +438,21 @@ spec:
             summary: "The Sonarr re-grab census could not complete"
             description: "The daily sonarr-regrab-census Job ({{ $labels.job_name }}) exited non-zero. The script itself only exits 2, meaning it could not complete the census safely; any other code is a crash or an OOM kill. Causes of exit 2: empty SONARR_API_KEY, a history fetch failure, a malformed paged payload, a self-contradicting page (totalRecords=0 with records present), a page not coming back newest-first (#834 sort lesson), pagination stopping short of totalRecords, totalRecords changing between pages, an empty page before totalRecords, or MAX_PAGES=24 pages (48000 rows) over the cap. Re-grabs themselves no longer fail the Job: the #1133 counts are in every Job log, and they cannot trend to zero before the #834 queue-read fix (Sonarr v5, #1131)."
 
+    - name: slskd
+      interval: 60s
+      rules:
+        - alert: SlskdDown
+          expr: |
+            max(kube_deployment_status_replicas_available{namespace="servarr",deployment="slskd"}) == 0
+              or absent(up{job="slskd"} == 1)
+          for: 15m
+          labels:
+            severity: warning
+            component: servarr
+          annotations:
+            summary: "slskd is unavailable"
+            description: "slskd has no available replica or Prometheus cannot scrape its metrics. Check the slskd Deployment and its gluetun sidecar in servarr; Soularr cannot search Soulseek while it is down."
+
     - name: lidarr
       interval: 60s
       rules:
