@@ -217,5 +217,122 @@ class TdarrTests(unittest.TestCase):
         ])
 
 
+def peer(app_labels, namespace=None):
+    selector = {"podSelector": {"matchLabels": app_labels}}
+    if namespace:
+        selector["namespaceSelector"] = {"matchLabels": {"kubernetes.io/metadata.name": namespace}}
+    return selector
+
+
+def env_of(container):
+    return {item["name"]: item.get("value", item.get("valueFrom")) for item in container.get("env", [])}
+
+
+def pinned(name):
+    kustomization, = documents("kustomization.yaml")
+    return next(image["newTag"] for image in kustomization["images"] if image["name"] == name)
+
+
+class SlskdTests(unittest.TestCase):
+    def pod(self):
+        return resource("slskd/slskd.yaml", "Deployment", "slskd")["spec"]["template"]["spec"]
+
+    def container(self, name):
+        pod = self.pod()
+        return next(c for c in pod["containers"] + pod.get("initContainers", []) if c["name"] == name)
+
+    def test_vpn_sidecar_gates_slskd(self):
+        gluetun = self.container("gluetun")
+        self.assertIn(gluetun, self.pod()["initContainers"])
+        self.assertEqual(gluetun["restartPolicy"], "Always")
+        self.assertIn("startupProbe", gluetun)
+        self.assertLessEqual({
+            "VPN_SERVICE_PROVIDER": "airvpn", "VPN_TYPE": "wireguard",
+            "SERVER_COUNTRIES": "Netherlands,Germany,Sweden", "FIREWALL_VPN_INPUT_PORTS": "46327",
+            "FIREWALL_INPUT_PORTS": "5030,9999", "FIREWALL_OUTBOUND_SUBNETS": "10.42.0.0/16",
+        }.items(), env_of(gluetun).items())
+        self.assertLessEqual({
+            "SLSKD_VPN": "true", "SLSKD_VPN_GLUETUN_URL": "http://127.0.0.1:8000",
+            "SLSKD_SLSK_LISTEN_PORT": "46327",
+        }.items(), env_of(self.container("slskd")).items())
+
+    def test_no_service_links(self):
+        pod = self.pod()
+        self.assertIs(pod["enableServiceLinks"], False)
+        self.assertEqual(pod["dnsConfig"]["nameservers"], ["127.0.0.1"])
+
+    def test_library_read_only(self):
+        media = {v["name"] for v in self.pod()["volumes"]
+                 if v.get("persistentVolumeClaim", {}).get("claimName") == "servarr-media"}
+        mounts = {m["mountPath"]: (m.get("subPath"), m.get("readOnly", False))
+                  for m in self.container("slskd")["volumeMounts"] if m["name"] in media}
+        self.assertEqual(mounts, {"/media/music": ("music", True), "/media/downloads": ("downloads", False)})
+
+    def test_paths_and_retention(self):
+        env = env_of(self.container("slskd"))
+        self.assertEqual(env["SLSKD_SHARED_DIR"], "/media/music")
+        self.assertEqual(env["SLSKD_DOWNLOADS_DIR"], "/media/downloads/soulseek")
+        self.assertEqual(env["SLSKD_INCOMPLETE_DIR"], "/media/downloads/soulseek-incomplete")
+        mount = next(m for m in self.container("slskd")["volumeMounts"] if m["name"] == "slskd-yml")
+        self.assertEqual(env["SLSKD_CONFIG"], mount["mountPath"] + "/slskd.yml")
+        config = yaml.safe_load(resource("slskd/slskd.yaml", "ConfigMap", "slskd-config")["data"]["slskd.yml"])
+        self.assertEqual(config["retention"], {"search": 1440, "files": {"complete": 43200, "incomplete": 43200}})
+
+    def test_ingress_sources(self):
+        rules = resource("slskd/network-policy.yaml", "NetworkPolicy", "slskd-ingress")["spec"]["ingress"]
+        tcp = lambda port: [{"port": port, "protocol": "TCP"}]
+        self.assertCountEqual(rules, [
+            {"from": [peer({"app.kubernetes.io/name": "traefik"}, "traefik-system"), peer({"app": "soularr"}),
+                      peer({"app.kubernetes.io/name": "prometheus"}, "observability")], "ports": tcp(5030)},
+            {"ports": tcp(9999)},
+        ])
+
+    def test_images_pinned(self):
+        for name in ("slskd/slskd", "qmcgaw/gluetun"):
+            self.assertRegex(pinned(name), r"^v?\d+\.\d+\.\d+@sha256:[0-9a-f]{64}$")
+
+
+class SoularrTests(unittest.TestCase):
+    def config(self):
+        import configparser
+        parser = configparser.RawConfigParser()
+        parser.read_string(resource("soularr/soularr.yaml", "ConfigMap", "soularr-config")["data"]["config.ini"])
+        return parser
+
+    def test_config_points_at_shared_downloads(self):
+        config = self.config()
+        self.assertEqual(config["Lidarr"]["download_dir"], "/media/downloads/soulseek")
+        self.assertEqual(config["Slskd"]["download_dir"], "/media/downloads/soulseek")
+        self.assertEqual(config["Lidarr"]["api_key"], "${LIDARR_API_KEY}")
+        self.assertEqual(config["Lidarr"]["host_url"], "http://lidarr:8686")
+        self.assertEqual(config["Slskd"]["host_url"], "http://slskd:5030")
+
+    def test_search_settings(self):
+        config = self.config()
+        self.assertEqual(config["Search Settings"]["allowed_filetypes"],
+                         "mp3 320,flac,flac 24/44.1,flac 24/48,flac 24/96,flac 24/192")
+        self.assertEqual(config["Search Settings"]["search_source"], "missing")
+        self.assertEqual(config["Search Settings"]["failed_import_denylist"], "True")
+        self.assertEqual(config["Logging"]["log_to_file"], "False")
+
+    def test_runtime(self):
+        pod = resource("soularr/soularr.yaml", "Deployment", "soularr")["spec"]["template"]["spec"]
+        container, = pod["containers"]
+        env = env_of(container)
+        self.assertEqual(env["LIDARR_API_KEY"], {"secretKeyRef": {"name": "music-stack", "key": "lidarr-api-key"}})
+        self.assertEqual(env["SCRIPT_INTERVAL"], "300")
+        self.assertEqual(env["WEBUI_ENABLED"], "false")
+        self.assertEqual(container["args"], ["--config-dir", "/config", "--var-dir", "/data"])
+        data = next(m for m in container["volumeMounts"] if m["mountPath"] == "/data")
+        volume = next(v for v in pod["volumes"] if v["name"] == data["name"])
+        self.assertEqual(volume["persistentVolumeClaim"]["claimName"], "soularr-data-pithari")
+        self.assertRegex(pinned("mrusse08/soularr"), r"^v\d+\.\d+\.\d+@sha256:[0-9a-f]{64}$")
+
+    def test_lidarr_admits_soularr(self):
+        rules = resource("lidarr/network-policy.yaml", "NetworkPolicy", "lidarr-ingress")["spec"]["ingress"]
+        self.assertTrue(any(peer({"app": "soularr"}) in rule["from"] and {"port": 8686, "protocol": "TCP"} in rule["ports"]
+                            for rule in rules))
+
+
 if __name__ == "__main__":
     unittest.main()
