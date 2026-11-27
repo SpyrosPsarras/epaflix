@@ -129,7 +129,7 @@ TrueNAS cloud sync task 2: `/mnt/pithari/immich` to Google Drive folder `/epafli
 
 - **R9.** Google Drive fills up. Owner check above. Cloud sync failure alerts catch it later.
 - **R10.** GPU memory. Ollama's model, Jellyfin transcodes and Immich's models share 8 GB. When they all load at once, one of them can fail with out of memory. Accepted by the owner. If it happens often, the fix is a shorter Ollama keep-alive or Immich on CPU.
-- **R14.** Uploads over 100 MB need home Wi-Fi until Immich has chunked upload.
+- **R14.** Uploads over 100 MB need home Wi-Fi until Immich has chunked upload. Feature request #1674 (2022, locked 2024) is unanswered. Server-side resumable upload (RUFH, the successor to tus) is open PR #22385, not merged as of 2026-10-30, and the phone app needs separate work after it. Users in that PR report the phone app retrying a failed big upload many times on outside Wi-Fi, hundreds of GB of wasted traffic. Tell users to keep the phone app's cellular upload for videos off. When #22385 and app support ship, drop this risk and recheck through Cloudflare.
 - **R11.** Immich upgrades run database migrations on the shared cluster. Renovate never auto-merges Immich. The cluster's daily backup is the rollback.
 - **R12.** VectorChord updates need `ALTER EXTENSION vchord UPDATE` and `REINDEX` of `face_index` and `clip_index` in `immich`. The Renovate rule from #2477 already says so.
 - **R13.** The site is public. Login goes only through Authentik, and share links are public by design, so anyone with a link can open that album.
