@@ -12,7 +12,8 @@ SSH_GUIDES = {'homelab': Path('/scripts/homelab-ssh.md'), 'work': Path('/scripts
 REPOS = {'homelab': 'https://git.epaflix.com/spypsarras/skills.git',
          'work': 'https://git.epaflix.com/spypsarras/skills-work.git'}
 LIMIT = 65536
-MESSAGES = {'unchanged': 'instructions: unchanged',
+MESSAGES = {'unprepared': 'instructions: home not prepared yet',
+            'unchanged': 'instructions: unchanged',
             'kept': 'instructions: fetch failed or file invalid; current file kept'}
 
 
@@ -60,7 +61,10 @@ def main():
     home = Path(os.environ['HOME'])
     last = None
     while True:
-        status = sync(home, REPOS[instance], SSH_GUIDES[instance])
+        if (home / '.config/t3-runtime/environment').exists():
+            status = sync(home, REPOS[instance], SSH_GUIDES[instance])
+        else:
+            status = 'unprepared'
         if status != last:
             print(MESSAGES.get(status, f'instructions: {status}'), flush=True)
             last = status

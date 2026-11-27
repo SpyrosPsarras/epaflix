@@ -96,14 +96,25 @@ class InstructionsSyncTest(unittest.TestCase):
         self.assertEqual(self.sync(UNREACHABLE), 'kept')
         self.assertEqual(self.target.read_text(), 'previous\n')
 
+    def run_once(self):
+        env = {'HOME': str(self.home), 'PATH': os.environ['PATH'], 'MCP_HUB_INSTANCE': 'homelab'}
+        return subprocess.run(['python3', str(SOURCE), 'once'], env=env, capture_output=True, text=True, timeout=60)
+
     def test_cli_once_quiet_on_failure(self):
+        (self.home / '.config/t3-runtime').mkdir(parents=True)
+        (self.home / '.config/t3-runtime/environment').write_text('homelab\n')
         (self.home / '.gitconfig').write_text(
             f'[url "{UNREACHABLE.removesuffix("x.git")}"]\n\tinsteadOf = https://git.epaflix.com/spypsarras/\n')
-        env = {'HOME': str(self.home), 'PATH': os.environ['PATH'], 'MCP_HUB_INSTANCE': 'homelab'}
-        result = subprocess.run(['python3', str(SOURCE), 'once'], env=env, capture_output=True, text=True, timeout=60)
+        result = self.run_once()
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout, 'instructions: fetch failed or file invalid; current file kept\n')
         self.assertEqual(result.stderr, '')
+
+    def test_cli_waits_for_prepared_home(self):
+        result = self.run_once()
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, 'instructions: home not prepared yet\n')
+        self.assertEqual(list(self.home.iterdir()), [])
 
     def test_repo_per_environment(self):
         self.assertEqual(sync_module.REPOS, {

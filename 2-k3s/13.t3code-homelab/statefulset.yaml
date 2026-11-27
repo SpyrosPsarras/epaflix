@@ -237,6 +237,33 @@ spec:
               memory: 32Mi
             limits:
               memory: 8Gi
+        - name: instructions
+          image: t3-runtime-from-t3-container
+          imagePullPolicy: IfNotPresent
+          command: [python3, /scripts/instructions-sync.py, loop]
+          env:
+            - name: HOME
+              value: /home/t3
+            - name: PATH
+              value: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+            - name: MCP_HUB_INSTANCE
+              value: homelab
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: home
+              mountPath: /home/t3
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
         - name: vault
           image: t3-runtime-from-t3-container
           imagePullPolicy: IfNotPresent

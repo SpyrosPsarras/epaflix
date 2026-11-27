@@ -456,6 +456,7 @@ jobs:
           python3 2-k3s/13.t3code/one/files/vault-ssh-agent.test.py
           python3 2-k3s/25.fytorium/minio-credentials.test.py -v
           python3 2-k3s/13.t3code/env/tools/startup.test.py -v
+          python3 2-k3s/13.t3code/env/tools/instructions-sync.test.py -v
           python3 2-k3s/13.t3code/env/tools/homelab-ssh.test.py -v
           python3 2-k3s/13.t3code/env/tools/t3-build.test.py -v
           bash 2-k3s/13.t3code/env/tools/runtime-variants.test.sh
