@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import fcntl
 import importlib.util
 import os
 from pathlib import Path
@@ -171,6 +172,24 @@ class InstructionsSyncTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout, 'instructions: fetch failed or file invalid; bundle instructions in use\n')
         self.assertEqual(result.stderr, '')
+
+    def test_runs_are_serialized(self):
+        (self.home / '.config/t3-runtime').mkdir(parents=True)
+        (self.home / '.config/t3-runtime/environment').write_text('homelab\n')
+        (self.home / '.gitconfig').write_text(
+            f'[url "{UNREACHABLE.removesuffix("x.git")}"]\n\tinsteadOf = https://git.epaflix.com/spypsarras/\n')
+        cache = self.home / '.local/share/t3-instructions'
+        cache.mkdir(parents=True)
+        env = {'HOME': str(self.home), 'PATH': os.environ['PATH'], 'MCP_HUB_INSTANCE': 'homelab'}
+        with open(cache / 'lock', 'w') as held:
+            fcntl.flock(held, fcntl.LOCK_EX)
+            run = subprocess.Popen(['python3', str(SOURCE), 'once'], env=env,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            with self.assertRaises(subprocess.TimeoutExpired):
+                run.wait(timeout=2)
+        out, _ = run.communicate(timeout=60)
+        self.assertEqual(run.returncode, 0)
+        self.assertEqual(out, b'instructions: fetch failed or file invalid; bundle instructions in use\n')
 
     def test_cli_waits_for_prepared_home(self):
         result = self.run_once()

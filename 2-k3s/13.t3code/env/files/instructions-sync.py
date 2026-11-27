@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Install the owner's Forgejo AGENTS.md as Pi's instructions; keep the current file on any failure."""
+import fcntl
 import os
 from pathlib import Path
 import subprocess
@@ -12,6 +13,7 @@ SSH_GUIDES = {'homelab': Path('/scripts/homelab-ssh.md'), 'work': Path('/scripts
 REPOS = {'homelab': 'https://git.epaflix.com/spypsarras/skills.git',
          'work': 'https://git.epaflix.com/spypsarras/skills-work.git'}
 LIMIT = 65536
+CACHE = '.local/share/t3-instructions'
 MESSAGES = {'unprepared': 'instructions: home not prepared yet',
             'unchanged': 'instructions: unchanged',
             'kept': 'instructions: fetch failed or file invalid; last good copy in use',
@@ -33,7 +35,7 @@ def read(cache, ref):
 
 
 def sync(home, repo, ssh_path, guidance=GUIDANCE):
-    cache = home / '.local/share/t3-instructions'
+    cache = home / CACHE
     revision = None
     try:
         cache.mkdir(parents=True, exist_ok=True)
@@ -69,7 +71,10 @@ def main():
     last = None
     while True:
         if (home / '.config/t3-runtime/environment').exists():
-            status = sync(home, REPOS[instance], SSH_GUIDES[instance])
+            (home / CACHE).mkdir(parents=True, exist_ok=True)
+            with open(home / CACHE / 'lock', 'w') as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX)
+                status = sync(home, REPOS[instance], SSH_GUIDES[instance])
         else:
             status = 'unprepared'
         if status != last:
