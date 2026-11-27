@@ -33,6 +33,9 @@ spec:
         - podSelector:
             matchLabels:
               app: digarr
+        - podSelector:
+            matchLabels:
+              app: soularr
       ports:
         - port: 8686
           protocol: TCP

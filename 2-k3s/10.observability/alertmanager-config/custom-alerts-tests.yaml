@@ -379,6 +379,57 @@ tests:
       - eval_time: 90m
         alertname: NavidromeDown
         exp_alerts: []
+  - name: slskd unavailable replica fires after 15 minutes
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="servarr",deployment="slskd"}'
+        values: '0x20'
+      - series: 'up{job="slskd"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: SlskdDown
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: SlskdDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: servarr
+            exp_annotations:
+              summary: slskd is unavailable
+              description: "slskd has no available replica or Prometheus cannot scrape its metrics. Check the slskd Deployment and its gluetun sidecar in servarr; Soularr cannot search Soulseek while it is down."
+  - name: slskd failed scrape fires after 15 minutes
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="servarr",deployment="slskd"}'
+        values: '1x20'
+      - series: 'up{job="slskd"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: SlskdDown
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: SlskdDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: servarr
+            exp_annotations:
+              summary: slskd is unavailable
+              description: "slskd has no available replica or Prometheus cannot scrape its metrics. Check the slskd Deployment and its gluetun sidecar in servarr; Soularr cannot search Soulseek while it is down."
+  - name: slskd healthy stays silent
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="servarr",deployment="slskd"}'
+        values: '1x90'
+      - series: 'up{job="slskd"}'
+        values: '1x90'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: SlskdDown
+        exp_alerts: []
   - name: Lidarr unavailable deployment fires after 15 minutes
     interval: 1m
     input_series:

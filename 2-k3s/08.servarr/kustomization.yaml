@@ -18,6 +18,11 @@ resources:
   - lidarr/network-policy.yaml
   - lidarr/ingressroute.yaml
   - lidarr/pdb.yaml
+  - slskd/slskd.yaml
+  - slskd/network-policy.yaml
+  - slskd/ingressroute.yaml
+  - slskd/pdb.yaml
+  - soularr/soularr.yaml
   - navidrome/navidrome.yaml
   - navidrome/network-policy.yaml
   - navidrome/ingressroute.yaml
@@ -134,6 +139,12 @@ images:
     newTag: 2.2.1@sha256:6192ceaea41065d36d05a29d643da0787cd1479da930d4502eca94e602d09889
   - name: navidrome/navidrome
     newTag: 0.64.2@sha256:38dc2727bfcfd5ede290f8ada114fc90368146f265ae4701ddddbcbe2a44ee52
+  - name: slskd/slskd
+    newTag: 0.26.2@sha256:d0963a3e5b16facd295bf4f2156dad0182f246b1b21a032cae12f5494c694843
+  - name: qmcgaw/gluetun
+    newTag: v3.41.3@sha256:fa19cc76b2af13d57a8d3dc3066f2ada061b1c761b8aecf989b3877c0486e027
+  - name: mrusse08/soularr
+    newTag: v1.2.3@sha256:e448d49d0ca6091a35653ff9198ebb4a3acf42abfc2f2056490a9a0f0cffd210
   - name: ghcr.io/onedr0p/exportarr
     newTag: v2.3.0@sha256:af535d94061cf97a52e1661945ffba78c03f9443eae7c0da1a80a5a4be56b520
   - name: ghcr.io/linuxserver/radarr

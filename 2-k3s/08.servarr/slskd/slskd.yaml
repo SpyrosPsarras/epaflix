@@ -1,0 +1,217 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: slskd-config
+  namespace: servarr
+data:
+  slskd.yml: |
+    retention:
+      search: 1440
+      files:
+        complete: 43200
+        incomplete: 43200
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: slskd
+  annotations:
+    secret.reloader.stakater.com/reload: "slskd"
+  namespace: servarr
+  labels:
+    app: slskd
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: slskd
+  template:
+    metadata:
+      labels:
+        app: slskd
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      dnsPolicy: None
+      dnsConfig:
+        nameservers:
+          - 127.0.0.1
+      securityContext:
+        fsGroup: 568
+      initContainers:
+        - name: download-dirs
+          image: busybox:1.36
+          command: ["sh", "-c", "mkdir -p /media/downloads/soulseek /media/downloads/soulseek-incomplete"]
+          securityContext:
+            runAsUser: 568
+            runAsGroup: 568
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: media
+              mountPath: /media/downloads
+              subPath: downloads
+          resources:
+            limits:
+              memory: 32Mi
+        - name: gluetun
+          image: qmcgaw/gluetun
+          restartPolicy: Always
+          env:
+            - { name: VPN_SERVICE_PROVIDER, value: airvpn }
+            - { name: VPN_TYPE, value: wireguard }
+            - { name: SERVER_COUNTRIES, value: "Netherlands,Germany,Sweden" }
+            - { name: FIREWALL_VPN_INPUT_PORTS, value: "46327" }
+            - { name: FIREWALL_INPUT_PORTS, value: "5030,9999" }
+            - { name: FIREWALL_OUTBOUND_SUBNETS, value: 10.42.0.0/16 }
+            - { name: HEALTH_SERVER_ADDRESS, value: ":9999" }
+            - name: WIREGUARD_PRIVATE_KEY
+              valueFrom: { secretKeyRef: { name: slskd, key: WIREGUARD_PRIVATE_KEY } }
+            - name: WIREGUARD_PRESHARED_KEY
+              valueFrom: { secretKeyRef: { name: slskd, key: WIREGUARD_PRESHARED_KEY } }
+            - name: WIREGUARD_ADDRESSES
+              valueFrom: { secretKeyRef: { name: slskd, key: WIREGUARD_ADDRESSES } }
+            - name: HTTP_CONTROL_SERVER_AUTH_DEFAULT_ROLE
+              valueFrom: { secretKeyRef: { name: slskd, key: HTTP_CONTROL_SERVER_AUTH_DEFAULT_ROLE } }
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - (ip rule del table 51820; ip -6 rule del table 51820) || true
+          ports:
+            - containerPort: 9999
+              name: health
+          startupProbe:
+            httpGet:
+              path: /
+              port: health
+            failureThreshold: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: health
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+      containers:
+        - name: slskd
+          image: slskd/slskd
+          securityContext:
+            runAsUser: 568
+            runAsGroup: 568
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - { name: TZ, value: Europe/Oslo }
+            - { name: SLSKD_APP_DIR, value: /app }
+            - { name: SLSKD_CONFIG, value: /etc/slskd/slskd.yml }
+            - { name: SLSKD_HTTP_PORT, value: "5030" }
+            - { name: SLSKD_NO_HTTPS, value: "true" }
+            - { name: SLSKD_NO_AUTH, value: "true" }
+            - { name: SLSKD_METRICS, value: "true" }
+            - { name: SLSKD_METRICS_NO_AUTH, value: "true" }
+            - { name: SLSKD_SLSK_LISTEN_PORT, value: "46327" }
+            - { name: SLSKD_SHARED_DIR, value: /media/music }
+            - { name: SLSKD_SHARE_CACHE_RETENTION, value: "1440" }
+            - { name: SLSKD_DOWNLOADS_DIR, value: /media/downloads/soulseek }
+            - { name: SLSKD_INCOMPLETE_DIR, value: /media/downloads/soulseek-incomplete }
+            - { name: SLSKD_VPN, value: "true" }
+            - { name: SLSKD_VPN_GLUETUN_URL, value: "http://127.0.0.1:8000" }
+            - name: SLSKD_VPN_GLUETUN_API_KEY
+              valueFrom: { secretKeyRef: { name: slskd, key: SLSKD_VPN_GLUETUN_API_KEY } }
+            - name: SLSKD_SLSK_USERNAME
+              valueFrom: { secretKeyRef: { name: slskd, key: SLSKD_SLSK_USERNAME } }
+            - name: SLSKD_SLSK_PASSWORD
+              valueFrom: { secretKeyRef: { name: slskd, key: SLSKD_SLSK_PASSWORD } }
+          ports:
+            - containerPort: 5030
+              name: http
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          volumeMounts:
+            - name: config
+              mountPath: /app
+            - name: slskd-yml
+              mountPath: /etc/slskd
+              readOnly: true
+            - name: media
+              mountPath: /media/music
+              subPath: music
+              readOnly: true
+            - name: media
+              mountPath: /media/downloads
+              subPath: downloads
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: slskd-config-pithari
+        - name: slskd-yml
+          configMap:
+            name: slskd-config
+        - name: media
+          persistentVolumeClaim:
+            claimName: servarr-media
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: slskd
+  namespace: servarr
+  labels:
+    app: slskd
+spec:
+  type: ClusterIP
+  selector:
+    app: slskd
+  ports:
+    - name: http
+      port: 5030
+      targetPort: http
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: slskd
+  namespace: servarr
+  labels:
+    app: slskd
+spec:
+  jobLabel: app
+  namespaceSelector:
+    matchNames:
+      - servarr
+  selector:
+    matchLabels:
+      app: slskd
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 60s
