@@ -258,6 +258,11 @@
       "matchPackageNames": ["ghcr.io/cloudnative-pg/postgresql"],
       "matchUpdateTypes": ["minor"],
       "automergeSchedule": ["after 2am and before 6am"]
+    },
+    {
+      "description": "VectorChord for postgres-cluster never auto-merges. After the merge, run ALTER EXTENSION vchord UPDATE and REINDEX INDEX face_index and clip_index in the Immich database (Immich docs, Pre-existing Postgres). A Postgres major needs a new pg<major> tag and new /usr/lib/postgresql/<major> and /usr/share/postgresql/<major> paths in the extension entry, by hand.",
+      "matchPackageNames": ["ghcr.io/tensorchord/vchord-scratch"],
+      "automerge": false
     }
   ],
   "customManagers": [
@@ -363,6 +368,14 @@
       "matchStrings": ["imageName: (?<depName>ghcr\\.io/cloudnative-pg/postgresql):(?<currentValue>\\S+)"],
       "datasourceTemplate": "docker",
       "versioningTemplate": "regex:^(?<major>\\d+)\\.(?<minor>\\d+)-standard-trixie$"
+    },
+    {
+      "description": "The VectorChord extension image in postgres-cluster. The pg<major> part is the compatibility, so Renovate only offers VectorChord releases for the same Postgres major.",
+      "customType": "regex",
+      "managerFilePatterns": ["/^2-k3s/06\\.postgres/cluster/postgres-cluster\\.yaml$/"],
+      "matchStrings": ["reference: (?<depName>ghcr\\.io/tensorchord/vchord-scratch):(?<currentValue>[^@\\s]+)@(?<currentDigest>sha256:[a-f0-9]{64})"],
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "regex:^pg(?<compatibility>\\d+)-v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)$"
     }
   ],
   "customDatasources": {
