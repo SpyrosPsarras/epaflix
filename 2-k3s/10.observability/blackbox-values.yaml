@@ -71,6 +71,11 @@ serviceMonitor:
         action: replace
         targetLabel: job
         replacement: mosquitto-probe
+      - sourceLabels: [__param_target]
+        regex: 'https://immich\.epaflix\.com/api/server/ping'
+        action: replace
+        targetLabel: job
+        replacement: immich-probe
   targets:
     - name: takaros
       url: https://192.168.10.10:8006
