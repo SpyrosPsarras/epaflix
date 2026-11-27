@@ -31,7 +31,7 @@ spec:
             - {name: PAPERLESS_BASE_URL, value: "http://paperless:8000"}
             - {name: PAPERLESS_PUBLIC_URL, value: "https://paperless.epaflix.com"}
             - {name: LLM_PROVIDER, value: ollama}
-            - {name: LLM_MODEL, value: "qwen3.5:9b"}
+            - {name: LLM_MODEL, value: "qwen3.8-bonsai:27b"}
             - {name: OLLAMA_HOST, value: "http://ollama.ai.svc.cluster.local:30068"}
             - {name: OLLAMA_THINK, value: "false"}
             - {name: LLM_LANGUAGE, value: "Norwegian, English, German or Greek"}

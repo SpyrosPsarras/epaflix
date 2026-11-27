@@ -12,7 +12,16 @@ Jellyfin's `/config` and Open WebUI's data were copied from TrueNAS once on 2026
 | Open WebUI | `/srv/open-webui` | `/app/backend/data` |
 | Ollama | `/srv/ollama` | `/root/.ollama` |
 
-Ollama's directory starts empty. Re-download the required models before switching its consumers: `qwen3.5:9b`, `gemma4:e4b`, `lfm2.5:8b`, and `aya-expanse:8b`.
+Ollama serves one model, `qwen3.8-bonsai:27b`, built by hand from PrismML's Ternary Bonsai 2.5 `Q2_0` file without its vision projector. Paperless-gpt calls it directly. CLIProxy's `ollama` provider, set in the management panel, offers it as `ollama-qwen3.8-bonsai-27b` and as the low-priority `or-minimax-m3:free` failover. To rebuild it on an empty `/srv/ollama`:
+
+```sh
+kubectl -n ai exec deploy/ollama -- ollama pull hf.co/prism-ml/Ternary-Bonsai-2.5-27B-GGUF:Ternary-Bonsai-2.5-27B-Q2_0.gguf
+kubectl -n ai exec deploy/ollama -- ollama show --modelfile hf.co/prism-ml/Ternary-Bonsai-2.5-27B-GGUF:Ternary-Bonsai-2.5-27B-Q2_0.gguf
+kubectl -n ai exec deploy/ollama -- sh -c 'printf "FROM <first FROM blob path>\nPARAMETER num_ctx 8192\nPARAMETER temperature 1.0\nPARAMETER top_p 0.95\nPARAMETER top_k 20\nPARAMETER min_p 0\n" > /tmp/Modelfile && ollama create qwen3.8-bonsai:27b -f /tmp/Modelfile'
+kubectl -n ai exec deploy/ollama -- ollama rm hf.co/prism-ml/Ternary-Bonsai-2.5-27B-GGUF:Ternary-Bonsai-2.5-27B-Q2_0.gguf
+```
+
+Use the full file name as the tag. The short tag `:Q2_0` resolves to the `PQ2_0` file, which needs PrismML's llama.cpp fork. `Q2_0` needs llama.cpp `b11556` or newer; older builds load it without a warning and produce garbage. It does not fit fully in the 8 GiB GPU: even with an empty card, forcing all layers onto the GPU runs out of memory at a 4096 context.
 
 Static local PVs retain this data and pin all three apps to `k3s-worker-64`. They cannot fail over to another node. The `gpu-local` no-provisioner StorageClass is owned by servarr's `jellyfin/storage.yaml`. No app uses dynamic local-path provisioning. Local PV capacity is a binding declaration, not a disk quota.
 
