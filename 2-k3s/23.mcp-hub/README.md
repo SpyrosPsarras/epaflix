@@ -5,7 +5,7 @@ client grants, service allowlists and upstream credentials. The root directory
 holds shared code and tools; deployable overlays live under `instances/`.
 
 Homelab serves `searxng`, `gmail`, `drive` and `skills`. Work serves
-`searxng`, `notion` and `skills`. Each hub mounts only its approved allowlist. Clients authenticate
+`searxng`, `notion`, `skills` and `outlook`. Each hub mounts only its approved allowlist. Clients authenticate
 with their own environment-prefixed bearer token; the hub replaces it with
 an independent upstream credential. Neither hub exposes vault routes.
 `GET /healthz` is the only unauthenticated route.
@@ -15,7 +15,7 @@ and self-healing. Stage matching private inputs before merging revision
 bumps. No account identity or credential belongs in this public repository.
 
 See [instance configuration and rollout](instances/README.md) for service
-inventories, Google consent, Notion refresh ownership, client generation,
+inventories, Google consent, Notion refresh ownership, work Outlook, client generation,
 input rotation and offline checks. Desktop setup is in
 [local client provisioning](instances/local-clients.md).
 

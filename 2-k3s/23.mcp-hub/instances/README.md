@@ -7,10 +7,11 @@ ServiceAccounts, client grants and upstream credentials.
 The active approved homelab inventory is `searxng`, `gmail`, `drive` and `skills`.
 The owner stages Gmail and Drive with fresh consent through
 `bootstrap-gmail.py --instance homelab --context <approved-context>`.
-The work inventory is `searxng`, `notion` and `skills`. The owner stages Notion with
-fresh work-account consent through `bootstrap-notion.py --instance work --context <approved-context>`;
+The work inventory is `searxng`, `notion`, `skills` and `outlook`. The owner stages Notion with
+fresh work-account consent through `bootstrap-notion.py --instance work --context <approved-context>`,
+and Outlook through `bootstrap-outlook.py` (see [Work Outlook](#work-outlook));
 the work hub and runtime
-counters roll it out.
+counters roll them out.
 Both include the shared authenticated backend in `searxng/`, with an independent upstream
 Secret in each namespace. Provisioning, the dedicated work client and owner enrollment
 are documented in [the work backend](../../13.t3code-work/README.md#first-deployment-for-1837).
@@ -55,7 +56,7 @@ invalid client digests, so this example cannot start a deployment:
 ```
 
 For work, `environment` must be `work`. Service names are `gmail`,
-`searxng`, `drive`, `kubernetes`, `notion` and `skills`. An empty list, unknown or
+`searxng`, `drive`, `kubernetes`, `notion`, `skills` and `outlook`. An empty list, unknown or
 duplicate name, environment mismatch, malformed client digest, missing
 connection or extra connection prevents startup. Both instances reject
 retired vault route names and the retired reader marker. Both T3 pods read
@@ -208,6 +209,54 @@ OpenCode.
    Regenerate client configs and remove stale managed entries. Resume homelab
    consumers only after these checks pass. Live
    send-draft, trash and sharing checks remain owner-run.
+
+## Work Outlook
+
+Only work includes `../outlook`. The `outlook-mcp` pod runs Softeria's
+`ms-365-mcp-server` (pinned image) with `--org-mode --preset mail`: 48
+tools to read, search, send, reply, forward, move and delete mail, and to
+manage folders, rules, categories and attachments in the owner's own
+mailbox. The raw server listens only on `127.0.0.1:3000`. Its own bearer
+check only rejects missing or expired tokens, so the `gateway` container
+is the boundary: it requires the independent bearer from
+`mcp-hub-outlook-upstream/token`, drops it, and forwards with a Microsoft
+Graph access token instead. The hub connection is
+`{"url": "http://outlook-mcp.mcp-hub-work.svc.cluster.local:8000/mcp", "token": "<that bearer>"}`.
+
+The gateway owns `mcp-hub-outlook-grant` with the same refresh code as
+Notion (`files/notion_grant.py`): one refresher, the rotated refresh token
+written back right away. Only the gateway container mounts the pod's
+ServiceAccount token, and its Role permits get/patch on that one Secret,
+so the third-party server never sees the refresh token. Microsoft refresh
+tokens expire after 90 days without use; Outlook tools then answer
+"Microsoft grant expired" and the owner signs in again. The raw server
+reports Graph 401s as tool errors, not HTTP 401, so the gateway keeps an
+access token until it nears expiry (up to 90 minutes). After a new sign-in,
+restart `outlook-mcp` to use the new grant at once.
+
+The Entra app registration is a single-tenant public client with the
+delegated scopes `Mail.ReadWrite`, `Mail.Send`, `MailboxSettings.Read`,
+`MailboxSettings.ReadWrite`, `User.Read` and `offline_access`, consented
+for the owner only, with assignment required. Its IDs stay out of this repo.
+
+The raw server writes one audit line per Graph call to its container log:
+tool, status, counts and, for sends, recipient domains. It includes the
+signed-in account's UPN, never message content.
+
+1. O1: Run `tools/bootstrap-outlook.py --context <approved-context> --tenant <tenant-id> --client-id <app-id>`
+   on a machine with kubectl. Enter the expected account when asked, open
+   the printed Microsoft page, enter the code and sign in. The script
+   checks the account and scopes before it writes the grant Secret.
+2. O2: Mint the upstream bearer inside the private provisioning process,
+   stage it in `mcp-hub-work/mcp-hub-outlook-upstream/token` and as the
+   `outlook` connection in `mcp-hub-instance/credentials.json`, and add
+   `outlook` to both work `services.json` allowlists, hub and runtime. Use
+   resource-version checks and suppress Secret output.
+3. O3: Bump the work hub's `mcp-hub.epaflix.com/inputs-revision` and, through
+   the [runtime input rotation procedure](../../13.t3code/env/isolated-runtime.md#input-rotation),
+   the work runtime's `t3code.epaflix.com/inputs-grants-revision`.
+4. O4: Verify a direct request to `outlook-mcp` without the bearer or with
+   an ordinary client token returns 401, and one mail read through the hub.
 
 ## Notion refresh ownership
 
