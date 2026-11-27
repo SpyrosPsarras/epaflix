@@ -27,3 +27,12 @@ A copy in namespace `slskd-scratch` with emptyDir volumes, deleted before the PR
 - A TCP connection from the home network to the exit IP on 46327 succeeded. Port 46328 stayed closed.
 - `/metrics` returned 139 `slskd_` lines.
 - Stopping the tunnel through gluetun's control API made slskd log "Disconnected from the Soulseek server; VPN is required" and a direct connection to 1.1.1.1 timed out. Starting it again reconnected slskd within a second.
+
+## Rollout (2026-11-27)
+
+PR #2475 merged as `de01ca6e`. Argo `servarr`, `observability` and `authentik` synced to it.
+
+- slskd: gluetun connected to AirVPN Amsterdam, and slskd logged in to Soulseek. The first share scan found 1,111 files in 153 folders and took 85 s.
+- Soularr: the first run started during that scan and got connection refused, then retried after 5 minutes. Within 15 minutes Lidarr imported 7 albums (79 tracks) from `/media/downloads/soulseek`, and missing albums went from 187 to 180.
+- Pi-hole on CT 1030: backups `/root/10-epaflix.conf.bak-20261127-slskd` and `/root/no-aaaa-leak.conf.bak-20261127-slskd`. Copied `dnsmasq.d/10-epaflix.conf` (live equalled the repo before the change). Inserted the `slskd.epaflix.com.` local-zone after `lidarr`, because the live unbound file differs from the repo in comments and order but has the same zones. `unbound-checkconf` clean, `unbound-control reload`, `systemctl restart pihole-FTL`. `slskd.epaflix.com` A is `192.168.10.101`, AAAA empty.
+- `https://slskd.epaflix.com/` redirects to Authentik. A busybox pod in `default` cannot reach `slskd:5030`. Prometheus has `up{job="slskd"} == 1` and `SlskdDown` is inactive.
