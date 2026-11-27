@@ -52,6 +52,9 @@ spec:
             # The prompt cache in system RAM defaults to 8192 MiB, the whole memory limit.
             - "--cache-ram"
             - "2048"
+            # Unload the model after 5 idle minutes so Immich ML and Jellyfin can use the shared GPU memory.
+            - "--sleep-idle-seconds"
+            - "300"
             - "--ctx-size"
             - "32768"
             - "--cache-type-k"
