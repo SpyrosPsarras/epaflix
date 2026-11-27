@@ -90,19 +90,22 @@ RackPeek and the hubs' skills pods.
 
 Startup runs the script once after `isolated-config.py apply`. The
 `instructions` sidecar runs it every 60 seconds and logs a line when the
-result changes: `instructions: updated <sha>`, `instructions: unchanged` or
-`instructions: fetch failed or file invalid; current file kept`. Read it with
+result changes: `instructions: updated <sha>`, `instructions: unchanged`,
+`... last good copy in use` or `... bundle instructions in use`. Read it with
 `kubectl -n t3code-homelab logs homelab-0 -c instructions`. A push reaches new
 Pi sessions within about a minute. Open sessions keep their text, because Pi
 reads `AGENTS.md` only when a session starts or on `/reload`.
 
-The script never empties the file. A failed fetch, a missing file, or a file
-that is blank, not UTF-8 or over 64 KiB leaves the current `AGENTS.md` alone.
-It waits for the home marker that `isolated-config.py prepare` writes, so a
-first boot still starts from an empty home. Without a Forgejo grant every
-fetch fails, and the bundle instructions that `pi-setup.py` writes at boot
-stay in use. The bundle's `instructions.md` is that fallback and still changes
-only through input rotation. Codex and Claude direct instances are disabled
+The script reads only `refs/heads/main`, so a tag named `main` cannot replace
+the protected branch. A file that is missing, blank, not UTF-8, over 64 KiB or
+a directory is ignored. The last file that passed those checks stays in
+`~/.local/share/t3-instructions` as ref `good`, and every run installs it. A
+restart while Forgejo is unreachable therefore restores the last good copy
+over the bundle text that `pi-setup.py` writes at boot. The script waits for
+the home marker that `isolated-config.py prepare` writes, so a first boot
+still starts from an empty home. Only a pod that never had a good copy, for
+example one without a Forgejo grant, uses the bundle's `instructions.md`. That
+fallback still changes only through input rotation. Codex and Claude direct instances are disabled
 here, and their `AGENTS.md` files stay bundle-based.
 
 Whoever can push `AGENTS.md` sets the agent's rules, and the pod's own bot can

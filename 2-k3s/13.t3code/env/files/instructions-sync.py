@@ -14,44 +14,50 @@ REPOS = {'homelab': 'https://git.epaflix.com/spypsarras/skills.git',
 LIMIT = 65536
 MESSAGES = {'unprepared': 'instructions: home not prepared yet',
             'unchanged': 'instructions: unchanged',
-            'kept': 'instructions: fetch failed or file invalid; current file kept'}
+            'kept': 'instructions: fetch failed or file invalid; last good copy in use',
+            'fallback': 'instructions: fetch failed or file invalid; bundle instructions in use'}
 
 
-def fetch(home, repo):
-    cache = home / '.local/share/t3-instructions'
-    env = {**os.environ, 'GIT_TERMINAL_PROMPT': '0'}
+def git(cache, *args):
+    return subprocess.run(['git', '-C', str(cache), *args], env={**os.environ, 'GIT_TERMINAL_PROMPT': '0'},
+                          capture_output=True, timeout=30, check=True).stdout
 
-    def git(*args):
-        return subprocess.run(['git', *args], env=env, capture_output=True, timeout=30, check=True).stdout
 
+def read(cache, ref):
     try:
-        if not (cache / 'HEAD').exists():
-            git('init', '-q', '--bare', str(cache))
-        git('-C', str(cache), 'fetch', '-q', '--depth', '1', repo, 'main')
-        return git('-C', str(cache), 'show', 'FETCH_HEAD:AGENTS.md'), \
-            git('-C', str(cache), 'rev-parse', '--short', 'FETCH_HEAD').decode().strip()
-    except (OSError, subprocess.SubprocessError):
-        return None, None
+        data = git(cache, 'cat-file', 'blob', f'{ref}:AGENTS.md')
+        text = data.decode() if len(data) <= LIMIT else ''
+    except (OSError, subprocess.SubprocessError, UnicodeDecodeError):
+        return None
+    return text if text.strip() else None
 
 
 def sync(home, repo, ssh_path, guidance=GUIDANCE):
-    data, revision = fetch(home, repo)
+    cache = home / '.local/share/t3-instructions'
+    revision = None
     try:
-        text = data.decode() if data is not None and len(data) <= LIMIT else ''
-    except UnicodeDecodeError:
-        text = ''
-    if not text.strip():
-        return 'kept'
+        cache.mkdir(parents=True, exist_ok=True)
+        if not (cache / 'HEAD').exists():
+            git(cache, 'init', '-q', '--bare')
+        git(cache, 'fetch', '-q', '--depth', '1', repo, '+refs/heads/main:refs/remotes/origin/main')
+        if read(cache, 'refs/remotes/origin/main') is not None:
+            git(cache, 'update-ref', 'refs/heads/good', 'refs/remotes/origin/main')
+            revision = git(cache, 'rev-parse', '--short', 'refs/heads/good').decode().strip()
+    except (OSError, subprocess.SubprocessError):
+        revision = None
+    text = read(cache, 'refs/heads/good')
+    if text is None:
+        return 'fallback'
     content = (text + '\n' + guidance.read_text() + '\n' + ssh_path.read_text()).encode()
     target = home / '.pi/agent/AGENTS.md'
-    if target.exists() and target.read_bytes() == content:
-        return 'unchanged'
-    target.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as handle:
-        handle.write(content)
-    os.chmod(handle.name, 0o600)
-    os.replace(handle.name, target)
-    return f'updated {revision}'
+    if not (target.exists() and target.read_bytes() == content):
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as handle:
+            handle.write(content)
+        os.replace(handle.name, target)
+        if revision:
+            return f'updated {revision}'
+    return 'unchanged' if revision else 'kept'
 
 
 def main():
