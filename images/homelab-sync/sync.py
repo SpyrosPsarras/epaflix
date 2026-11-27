@@ -15,8 +15,8 @@ import urllib.request
 import build
 
 HERE = pathlib.Path(__file__).resolve().parent
-SCANNER = next(p for p in (HERE / "rackpeek_scan.py", HERE.parent.parent / "1-proxmox/rackpeek-scan/rackpeek-scan.py") if p.exists())
-_spec = importlib.util.spec_from_file_location("rackpeek_scan", SCANNER)
+SCANNER = next(p for p in (HERE / "homelab_scan.py", HERE.parent.parent / "1-proxmox/homelab-scan/homelab-scan.py") if p.exists())
+_spec = importlib.util.spec_from_file_location("homelab_scan", SCANNER)
 scanner = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(scanner)
 
@@ -136,11 +136,11 @@ class RealIO:
         work = tempfile.mkdtemp()
         askpass = os.path.join(work, "askpass")
         with open(askpass, "w") as f:
-            f.write("#!/bin/sh\ncase \"$1\" in Username*) echo rackpeek-bot;; *) echo \"$HOMELAB_LIVE_TOKEN\";; esac\n")
+            f.write("#!/bin/sh\ncase \"$1\" in Username*) echo homelab-bot;; *) echo \"$HOMELAB_LIVE_TOKEN\";; esac\n")
         os.chmod(askpass, 0o700)
         env = dict(os.environ, GIT_ASKPASS=askpass, GIT_TERMINAL_PROMPT="0",
-                   GIT_AUTHOR_NAME="rackpeek-sync", GIT_AUTHOR_EMAIL="rackpeek-bot@epaflix.com",
-                   GIT_COMMITTER_NAME="rackpeek-sync", GIT_COMMITTER_EMAIL="rackpeek-bot@epaflix.com")
+                   GIT_AUTHOR_NAME="homelab-sync", GIT_AUTHOR_EMAIL="homelab-bot@epaflix.com",
+                   GIT_COMMITTER_NAME="homelab-sync", GIT_COMMITTER_EMAIL="homelab-bot@epaflix.com")
         repo = os.path.join(work, "live")
         url = self.env["HOMELAB_LIVE_URL"]
 

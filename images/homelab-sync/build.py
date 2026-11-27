@@ -7,8 +7,8 @@ import re
 import sys
 
 _HERE = pathlib.Path(__file__).resolve().parent
-_SCANNER = next(p for p in (_HERE / "rackpeek_scan.py", _HERE.parent.parent / "1-proxmox/rackpeek-scan/rackpeek-scan.py") if p.exists())
-_spec = importlib.util.spec_from_file_location("rackpeek_scan", _SCANNER)
+_SCANNER = next(p for p in (_HERE / "homelab_scan.py", _HERE.parent.parent / "1-proxmox/homelab-scan/homelab-scan.py") if p.exists())
+_spec = importlib.util.spec_from_file_location("homelab_scan", _SCANNER)
 scanner = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(scanner)
 

@@ -1,8 +1,10 @@
-# rackpeek-scan
+# homelab-scan
 
-Read-only host scanner for the RackPeek homelab index. The nightly `rackpeek-sync` Job in namespace `rackpeek` connects with the scan key, and the key's forced command runs this script. It prints one JSON document and takes no input: it ignores its arguments, stdin and `SSH_ORIGINAL_COMMAND`.
+Read-only host scanner for the Homelable homelab index. The nightly `homelab-sync` Job in namespace `homelable` connects with the scan key, and the key's forced command runs this script. It prints one JSON document and takes no input: it ignores its arguments, stdin and `SSH_ORIGINAL_COMMAND`.
 
-Installed as `/usr/local/sbin/rackpeek-scan` (mode 0755, owner root) on every host in the allowlist of `docs/superpowers/specs/2026-11-19-rackpeek-homelab-index-design.md`.
+Installed as `/usr/local/sbin/homelab-scan` (mode 0755, owner root) on every host in the allowlist of `docs/superpowers/specs/2026-11-19-rackpeek-homelab-index-design.md`.
+
+On TrueNAS `/usr` is read-only, so it lives at `/root/homelab-scan` and the forced command is `sudo -n python3 /root/homelab-scan`.
 
 ## What it reads
 
@@ -30,17 +32,17 @@ The sync runs gitleaks over everything again before it stores anything.
 The scan key goes into the SSH user's `authorized_keys` with:
 
 ```text
-restrict,from="<k3s node addresses>",command="/usr/local/sbin/rackpeek-scan" ssh-ed25519 ... rackpeek-scan
+restrict,from="<k3s node addresses>",command="/usr/local/sbin/homelab-scan" ssh-ed25519 ... homelab-scan
 ```
 
-For a user that is not root, the command is `sudo -n /usr/local/sbin/rackpeek-scan`, and `/etc/sudoers.d/rackpeek-scan` allows only that file:
+For a user that is not root, the command is `sudo -n /usr/local/sbin/homelab-scan`, and `/etc/sudoers.d/homelab-scan` allows only that file:
 
 ```text
-<user> ALL=(root) NOPASSWD: /usr/local/sbin/rackpeek-scan
+<user> ALL=(root) NOPASSWD: /usr/local/sbin/homelab-scan
 ```
 
 ## Tests
 
 ```sh
-python3 -m unittest 1-proxmox/rackpeek-scan/test_rackpeek_scan.py -v
+python3 -m unittest 1-proxmox/homelab-scan/test_homelab_scan.py -v
 ```
