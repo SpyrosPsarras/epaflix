@@ -278,6 +278,29 @@
       "description": "The CNPG operator and barman cloud plugin never auto-merge. An operator update rolls the instance manager in every Postgres pod and can change CRDs, so read its release notes and merge when a short reconnect is fine.",
       "matchPackageNames": ["cloudnative-pg/cloudnative-pg", "cloudnative-pg/plugin-barman-cloud"],
       "automerge": false
+    },
+    {
+      "description": "PrismML llama.cpp release behind images/llama-prism. Auto-merges by owner decision. sync-checksum.sh copies the CUDA 12.8 asset's SHA-256 from GitHub's release API into PRISM_SHA256, and build-llama-prism checks the build number. A merge publishes ghcr.io/spyrospsarras/llama-prism with the release as its tag.",
+      "matchPackageNames": ["PrismML-Eng/llama.cpp"],
+      "automerge": true,
+      "postUpgradeTasks": {
+        "commands": ["bash images/llama-prism/sync-checksum.sh"],
+        "fileFilters": ["images/llama-prism/Dockerfile"],
+        "executionMode": "branch"
+      }
+    },
+    {
+      "description": "Deploy each llama-prism image by owner decision: Renovate follows the release tag in 2-k3s/32.ai/kustomization.yaml, pins its digest and auto-merges, and Argo rolls llama-server. Our own build, so no release-age wait. The llama-server startup probe fails a release that cannot answer a test prompt, and LlamaServerDown reports it to Discord.",
+      "matchPackageNames": ["ghcr.io/spyrospsarras/llama-prism"],
+      "versioning": "regex:^prism-b(?<patch>\\d+)-[0-9a-f]+$",
+      "automerge": true,
+      "minimumReleaseAge": null
+    },
+    {
+      "description": "The llama-prism base stays on CUDA 12: the PrismML asset is the CUDA 12.8 build and loads libcudart.so.12.",
+      "matchPackageNames": ["nvidia/cuda"],
+      "matchFileNames": ["images/llama-prism/Dockerfile"],
+      "allowedVersions": "<13"
     }
   ],
   "customManagers": [
@@ -410,6 +433,15 @@
       "depNameTemplate": "cloudnative-pg/plugin-barman-cloud",
       "datasourceTemplate": "github-releases",
       "extractVersionTemplate": "^v(?<version>\\d+\\.\\d+\\.\\d+)$"
+    },
+    {
+      "description": "PRISM_RELEASE in images/llama-prism/Dockerfile follows PrismML's llama.cpp fork releases (prism-b<build>-<commit>).",
+      "customType": "regex",
+      "managerFilePatterns": ["/^images/llama-prism/Dockerfile$/"],
+      "matchStrings": ["ARG PRISM_RELEASE=(?<currentValue>\\S+)"],
+      "depNameTemplate": "PrismML-Eng/llama.cpp",
+      "datasourceTemplate": "github-releases",
+      "versioningTemplate": "regex:^prism-b(?<patch>\\d+)-[0-9a-f]+$"
     }
   ],
   "customDatasources": {
