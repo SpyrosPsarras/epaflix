@@ -14,7 +14,7 @@ The pod sits on the normal pod network, so scans see hosts and open ports on `19
 
 SQLite and uploads are on PVC `homelable-data-pithari` at `/app/data`. On a version change the backend copies the database to `homelab.db.back-<version>` once. Renovate opens Homelable updates for review only, because an upgrade migrates the database one way.
 
-Settings saved in the UI go to `/app/data/scan_config.json` and would override the environment. Init container `reset-settings` deletes that file at every start, so the manifests stay the source of truth. Change settings here, not in the UI.
+Settings saved in the UI go to `/app/data/scan_config.json` and would override the environment. The backend command deletes that file every time the container starts, so the manifests stay the source of truth. Change settings here, not in the UI.
 
 ## Keys
 
@@ -24,7 +24,7 @@ Scripts call `http://homelable.homelable.svc` with `X-MCP-Service-Key`. The ingr
 
 ## Git history
 
-`GIT_SYNC_*` pushes documents and diagrams, including node notes and properties, to the private Forgejo repo `homelab-bot/homelable-config` over `https://git-internal.epaflix.com`, when someone presses Sync or the nightly sync calls it. The token is the bot's `write:repository` token. Forgejo creates the repo on the first push.
+`GIT_SYNC_*` pushes documents and diagrams, including node notes and properties, to the private Forgejo repo `homelab-bot/homelable-config` over `https://git-internal.epaflix.com`, when someone presses Sync or the nightly sync calls it. The token is the bot's `write:repository` token. Homelable runs `git ls-remote` before its first push, and Forgejo answers 404 for a repo that does not exist, so the repo was created empty beforehand with the bot's `write:user` token (`POST /api/v1/user/repos`, `private: true`), the same way as RackPeek's `rackpeek-config`.
 
 ## Homelab index
 

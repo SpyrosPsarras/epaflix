@@ -53,7 +53,7 @@
 
 - [ ] **Step 1: Manifests.** Copy the shape of `2-k3s/37.rackpeek` (namespace, PVC, Deployment, Service, one IngressRoute without the Authentik outpost route, NetworkPolicy, ksops). Differences, all from the spec's Deployment section:
   - PVC `homelable-data-pithari`, 1Gi, `truenas-iscsi`, mounted at `/app/data` in `backend`.
-  - Init container `reset-settings` (backend image) runs `rm -f /app/data/scan_config.json`.
+  - The backend command runs `rm -f /app/data/scan_config.json` before `exec uvicorn`, so every container restart drops UI settings.
   - `backend`: `allowPrivilegeEscalation: false`, drop `ALL`, add `NET_RAW`; env from `homelable-secrets` plus `AUTH_MODE=oidc`, `OIDC_*` URLs per Homelable `docs/oidc-auth.md` for Authentik slug `homelable`, `CORS_ORIGINS=https://homelable.epaflix.com`, `SCANNER_RANGES=192.168.10.0/24`, `STATUS_CHECKER_INTERVAL=60`, `GIT_SYNC_*` for `https://git-internal.epaflix.com/homelab-bot/homelable-config.git` branch `main` user `rackpeek-bot`. Probe `GET /api/v1/health` port 8000.
   - `frontend`: `BACKEND_UPSTREAM=127.0.0.1:8000`, drop `ALL`, add back only the capabilities nginx needs (find by running it in Task 3). Probe `GET /` port 80.
   - Middleware `strip-service-key` (headers, `customRequestHeaders: {X-MCP-Service-Key: ""}`) in namespace `homelable`, on the IngressRoute after `security-headers`. No forward auth.
@@ -81,7 +81,7 @@
 - [ ] **Step 2:** Request the Argo sync of `homelable` at the merged SHA (dry-run first, per the access guide).
 - [ ] **Step 3: Checks**, record each result in the PR:
   - Pod Ready; frontend started with the capabilities set in Task 1 (adjust in a follow-up commit if not).
-  - `curl -s -o /dev/null -w '%{http_code}' -H 'X-MCP-Service-Key: x' https://homelable.epaflix.com/api/v1/designs` from the LAN returns 401. The same from inside the namespace with the real key (key read inside the command, never printed) returns 200.
+  - `curl -s -o /dev/null -w '%{http_code}' -H 'X-MCP-Service-Key: x' https://homelable.epaflix.com/api/v1/designs` from the LAN returns 401 with detail `Not authenticated`, not `Invalid MCP service key`, which proves Traefik removed the header. The same from inside the namespace with the real key (key read inside the command, never printed) returns 200.
   - Login through Authentik as an `authentik Admins` member works; a user outside the group is refused by Authentik.
   - `kubectl -n homelable exec deploy/homelable -c backend -- ping -c1 192.168.10.30` succeeds.
   - `/liveview`, `/docsview` and `/api/v1/stats/summary` refuse without login.

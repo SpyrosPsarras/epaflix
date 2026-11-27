@@ -19,25 +19,13 @@ spec:
         app: homelable
     spec:
       enableServiceLinks: false
-      initContainers:
-        - name: reset-settings
-          image: ghcr.io/pouzor/homelable-backend
-          command:
-            - rm
-            - -f
-            - /app/data/scan_config.json
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities:
-              drop:
-                - ALL
-          volumeMounts:
-            - name: data
-              mountPath: /app/data
       containers:
         - name: backend
           image: ghcr.io/pouzor/homelable-backend
+          command:
+            - sh
+            - -c
+            - rm -f /app/data/scan_config.json && exec uvicorn app.main:app --host 0.0.0.0 --port 8000
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
