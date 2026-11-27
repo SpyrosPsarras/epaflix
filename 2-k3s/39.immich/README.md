@@ -10,6 +10,8 @@ Login goes only through Authentik OpenID, provider and application `immich` in t
 
 Phone app: server URL `https://immich.epaflix.com`, then "Login with Authentik".
 
+A fresh install with no users shows Immich's "Admin Registration" page to anyone, even with password login off, and `/api/auth/admin-sign-up` accepts the first caller as admin. Right after a fresh install, register there yourself with the exact email of your Authentik account and a random password you do not keep. Your first Authentik login then links to that account by email, and `immich_role: admin` keeps it admin. Afterwards the endpoint answers 400 "Admin setup is not available". Done on 2026-11-27.
+
 To add a friend, add them to "Servarr users" in Authentik. To remove one, take them out of the group, then delete their user in Immich Administration. Immich keeps their photos until the user is deleted.
 
 ## Configuration

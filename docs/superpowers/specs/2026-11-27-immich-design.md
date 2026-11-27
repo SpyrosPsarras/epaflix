@@ -124,7 +124,7 @@ TrueNAS cloud sync task 2: `/mnt/pithari/immich` to Google Drive folder `/epafli
 ### Owner steps
 
 1. Export the `pithari/immich` dataset key and the cloud sync encryption secrets into the vault.
-2. First login as an admin through Authentik, then invite friends by adding them to "Servarr users".
+2. Right after the first deploy, register the Immich admin on the "Admin Registration" page with the Authentik account's email and a throwaway password. Immich shows that page to anyone until a user exists (found live). Then log in through Authentik, which links by email, and invite friends by adding them to "Servarr users".
 3. Check the Google Drive plan's free space (R9).
 
 ## Risks
