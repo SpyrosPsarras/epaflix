@@ -26,6 +26,8 @@ server:
             tag: v3.4.2@sha256:fc880c1bf665b4aab1e74c15e56ab871225989cd546536e6b77e771869af06bd
           env:
             TZ: Europe/Athens
+            # Immich defaults to host '::', which makes its metrics exporter answer 400 to every request: the exporter builds its base URL as http://:::8081/, which is invalid.
+            IMMICH_HOST: 0.0.0.0
             DB_HOSTNAME: postgres-cluster-rw.postgres-system.svc
             DB_PORT: "5432"
             DB_DATABASE_NAME: immich
