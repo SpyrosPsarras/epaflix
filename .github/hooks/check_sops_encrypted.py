@@ -32,9 +32,6 @@ from typing import Any, Iterable
 import yaml
 
 
-BARMAN_PATH = "2-k3s/06.postgres/operator-kustomization/barman-manifest.yaml"
-BARMAN_KEY = "SIDECAR_IMAGE"
-
 PLACEHOLDER_PATTERNS = (
     re.compile(r"<[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*>"),
     re.compile(r"REPLACE_WITH_[A-Z0-9]+(?:_[A-Z0-9]+)*"),
@@ -91,13 +88,6 @@ SOPS_TIMESTAMP_RE = re.compile(
 AGE_RECIPIENT_RE = re.compile(r"^age1[023456789acdefghjklmnpqrstuvwxyz]{58}$")
 AGE_BEGIN = "-----BEGIN AGE ENCRYPTED FILE-----"
 AGE_END = "-----END AGE ENCRYPTED FILE-----"
-OCI_IMAGE_RE = re.compile(
-    r"^(?=.{1,255}$)"
-    r"(?:[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[0-9]+)?/)?"
-    r"(?:[a-z0-9]+(?:[._-][a-z0-9]+)*/)*"
-    r"[a-z0-9]+(?:[._-][a-z0-9]+)*"
-    r"(?::[A-Za-z0-9_][A-Za-z0-9._-]{0,127}|@sha256:[a-f0-9]{64})$"
-)
 
 
 class UniqueKeyLoader(yaml.SafeLoader):
@@ -400,33 +390,6 @@ def valid_sops_document(path: str, document: int, doc: dict[Any, Any]) -> bool:
     return ok
 
 
-def valid_barman_exception(path: str, document: int, doc: dict[Any, Any]) -> bool | None:
-    """Return None when this document is not the one narrow path exception."""
-    if path != BARMAN_PATH:
-        return None
-    data = doc.get("data")
-    if not isinstance(data, dict) or BARMAN_KEY not in data:
-        return None
-    string_data = doc.get("stringData")
-    if set(data) != {BARMAN_KEY} or string_data not in (None, {}):
-        report(path, document, ("data",), "non-sensitive exception has an unapproved payload shape")
-        return False
-
-    encoded = data.get(BARMAN_KEY)
-    if not isinstance(encoded, str):
-        report(path, document, ("data", BARMAN_KEY), "non-sensitive exception value is malformed")
-        return False
-    try:
-        decoded = base64.b64decode(re.sub(r"\s+", "", encoded), validate=True).decode("utf-8")
-    except (binascii.Error, UnicodeDecodeError):
-        report(path, document, ("data", BARMAN_KEY), "non-sensitive exception value is malformed")
-        return False
-    if not OCI_IMAGE_RE.fullmatch(decoded):
-        report(path, document, ("data", BARMAN_KEY), "non-sensitive exception value has an unapproved shape")
-        return False
-    return True
-
-
 def validate_plaintext(
     path: str,
     document: int,
@@ -542,19 +505,6 @@ def validate_file(path: str, raw: bytes) -> bool:
         encrypted_suffix = path.endswith(".enc.yaml")
         if has_sops or encrypted_suffix:
             if not valid_sops_document(path, number, doc):
-                ok = False
-            continue
-
-        exception_result = valid_barman_exception(path, number, doc)
-        if exception_result is not None:
-            if not exception_result:
-                ok = False
-            elif not validate_plaintext(
-                path,
-                number,
-                doc,
-                exempt_value_paths=frozenset({("data", BARMAN_KEY)}),
-            ):
                 ok = False
             continue
 
