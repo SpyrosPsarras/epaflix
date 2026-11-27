@@ -273,6 +273,11 @@
       ],
       "groupName": "immich",
       "automerge": false
+    },
+    {
+      "description": "The CNPG operator and barman cloud plugin never auto-merge. An operator update rolls the instance manager in every Postgres pod and can change CRDs, so read its release notes and merge when a short reconnect is fine.",
+      "matchPackageNames": ["cloudnative-pg/cloudnative-pg", "cloudnative-pg/plugin-barman-cloud"],
+      "automerge": false
     }
   ],
   "customManagers": [
@@ -386,6 +391,25 @@
       "matchStrings": ["reference: (?<depName>ghcr\\.io/tensorchord/vchord-scratch):(?<currentValue>[^@\\s]+)@(?<currentDigest>sha256:[a-f0-9]{64})"],
       "datasourceTemplate": "docker",
       "versioningTemplate": "regex:^pg(?<compatibility>\\d+)-v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)$"
+    },
+    {
+      "description": "The CNPG operator and the barman cloud plugin are installed from their pinned release manifests in 2-k3s/06.postgres/operator-kustomization/kustomization.yaml. The operator URL holds the version twice, so the template rewrites the whole URL.",
+      "customType": "regex",
+      "managerFilePatterns": ["/^2-k3s/06\\.postgres/operator-kustomization/kustomization\\.yaml$/"],
+      "matchStrings": ["https://github\\.com/cloudnative-pg/cloudnative-pg/releases/download/v(?<currentValue>\\d+\\.\\d+\\.\\d+)/cnpg-\\d+\\.\\d+\\.\\d+\\.yaml"],
+      "depNameTemplate": "cloudnative-pg/cloudnative-pg",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>\\d+\\.\\d+\\.\\d+)$",
+      "autoReplaceStringTemplate": "https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v{{{newValue}}}/cnpg-{{{newValue}}}.yaml"
+    },
+    {
+      "description": "The barman cloud plugin release manifest, see the CNPG operator manager above.",
+      "customType": "regex",
+      "managerFilePatterns": ["/^2-k3s/06\\.postgres/operator-kustomization/kustomization\\.yaml$/"],
+      "matchStrings": ["https://github\\.com/cloudnative-pg/plugin-barman-cloud/releases/download/v(?<currentValue>\\d+\\.\\d+\\.\\d+)/manifest\\.yaml"],
+      "depNameTemplate": "cloudnative-pg/plugin-barman-cloud",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>\\d+\\.\\d+\\.\\d+)$"
     }
   ],
   "customDatasources": {

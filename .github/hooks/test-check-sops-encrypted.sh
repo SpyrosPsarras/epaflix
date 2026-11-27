@@ -96,7 +96,6 @@ YAML
 plaintext_templates=(
   "2-k3s/05.traefik-deployment/certificates/cloudflare-origin-cert.yaml"
   "2-k3s/06.postgres/cluster/postgres-secret.yaml"
-  "2-k3s/06.postgres/operator-kustomization/barman-manifest.yaml"
   "2-k3s/07.authentik-deployment/secret-app.yaml"
   "2-k3s/08.servarr/seerr/authentik-oidc-secret.yaml"
   "2-k3s/11.argocd/oidc-secret.yaml"
@@ -187,44 +186,6 @@ for path in "${plaintext_templates[@]}" "${synthetic_templates[@]}"; do
 done
 git -C "$tmp" add "${plaintext_templates[@]}" "${synthetic_templates[@]}"
 expect_pass "comment-only edits to all $((${#plaintext_templates[@]} + ${#synthetic_templates[@]})) plaintext Secret files pass"
-
-reset_repo
-barman="2-k3s/06.postgres/operator-kustomization/barman-manifest.yaml"
-printf '\n# fixture: comment-only barman edit\n' >>"$tmp/$barman"
-git -C "$tmp" add "$barman"
-expect_pass "active barman image Secret passes its narrow validator"
-
-reset_repo
-python3 - "$tmp/$barman" <<'PY'
-from pathlib import Path
-import sys
-path = Path(sys.argv[1])
-text = path.read_text()
-text = text.replace(
-    "metadata:\n  name: plugin-barman-cloud-f998mh5292\n",
-    "metadata:\n  annotations:\n    synthetic.example/review: github_pat_SYNTHETIC_BARMAN_ANNOTATION_000000\n  name: plugin-barman-cloud-f998mh5292\n",
-    1,
-)
-path.write_text(text)
-PY
-git -C "$tmp" add "$barman"
-expect_fail "barman image exception does not exempt credential-shaped annotations"
-
-reset_repo
-python3 - "$tmp/$barman" <<'PY'
-from pathlib import Path
-import sys
-path = Path(sys.argv[1])
-text = path.read_text()
-text = text.replace(
-    "data:\n  SIDECAR_IMAGE: |\n",
-    "data:\n  SYNTHETIC_EXTRA_FIELD: <SYNTHETIC_EXTRA_FIELD>\n  SIDECAR_IMAGE: |\n",
-    1,
-)
-path.write_text(text)
-PY
-git -C "$tmp" add "$barman"
-expect_fail "barman path does not grant blanket trust to extra payload fields"
 
 reset_repo
 postgres="2-k3s/06.postgres/cluster/postgres-secret.yaml"
