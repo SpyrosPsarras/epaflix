@@ -49,6 +49,9 @@ spec:
             - "on"
             - "--parallel"
             - "1"
+            # The prompt cache in system RAM defaults to 8192 MiB, the whole memory limit.
+            - "--cache-ram"
+            - "2048"
             - "--ctx-size"
             - "32768"
             - "--cache-type-k"

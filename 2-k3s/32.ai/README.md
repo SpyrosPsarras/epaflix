@@ -21,9 +21,10 @@ Settings in `llama-server.yaml` come from tests on this card with release `prism
 The model file does not ship in Git. On an empty `/srv/llama-server`, download it on `k3s-worker-64` and check its SHA-256 against the Hugging Face file page:
 
 ```sh
-sudo mkdir -p /srv/llama-server
+sudo install -d -m 755 /srv/llama-server
 sudo curl -fL -o /srv/llama-server/Ternary-Bonsai-2.5-27B-PTQ1_0-mtp.gguf https://huggingface.co/prism-ml/Ternary-Bonsai-2.5-27B-GGUF/resolve/28a7093cc25bc151cc2b284c5570f12ce343fdcf/Ternary-Bonsai-2.5-27B-PTQ1_0-mtp.gguf
 echo 'e0fc5f3d47b9c926d52677d303b19df356a2376614b3e1cb9973865fc04ca431  /srv/llama-server/Ternary-Bonsai-2.5-27B-PTQ1_0-mtp.gguf' | sha256sum -c -
+sudo chmod 644 /srv/llama-server/Ternary-Bonsai-2.5-27B-PTQ1_0-mtp.gguf
 ```
 
 ## Placement
