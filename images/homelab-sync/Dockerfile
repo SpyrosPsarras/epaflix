@@ -19,7 +19,7 @@ RUN set -eu; \
     cd /; rm -rf /tmp/gl
 
 WORKDIR /app
-COPY images/homelab-sync/build.py images/homelab-sync/sync.py images/homelab-sync/fixtures.py images/homelab-sync/test_build.py images/homelab-sync/test_sync.py /app/
+COPY images/homelab-sync/build.py images/homelab-sync/homelable.py images/homelab-sync/test_homelable.py images/homelab-sync/sync.py images/homelab-sync/fixtures.py images/homelab-sync/test_build.py images/homelab-sync/test_sync.py /app/
 COPY 1-proxmox/homelab-scan/homelab-scan.py /app/homelab_scan.py
 
 USER 1000
