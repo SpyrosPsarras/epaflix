@@ -1,7 +1,10 @@
+from collections import Counter
+from datetime import timedelta
 import email
 import email.policy
 import hashlib
 from html.parser import HTMLParser
+import io
 from pathlib import Path
 import re
 import unicodedata
@@ -10,7 +13,8 @@ from typing import NamedTuple
 RECEIPT = 'paperless-receipt'
 BODY = 'paperless-receipt-body'
 DONE = 'paperless-done'
-NOT_DONE = f'-label:{DONE} -label:paperless-done-att -label:paperless-done-eml -in:drafts'
+FAILED = 'paperless-failed'
+NOT_DONE = f'-label:{DONE} -label:{FAILED} -label:paperless-done-att -label:paperless-done-eml -in:drafts'
 QUERIES = [f'(label:{RECEIPT} OR label:{BODY}) {NOT_DONE}', f'newer_than:7d {NOT_DONE}']
 THREAD_FIELD = 'Gmail thread'
 JOINED = 'All files: '
@@ -36,10 +40,15 @@ class Plan(NamedTuple):
     versions: list[Part]
     note: str | None
     done: bool
+    failed: bool = False
 
 
 def checksum(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def key(part: Part) -> str:
+    return checksum(part.data)[:12]
 
 
 def safe_name(name: str) -> str:
@@ -154,17 +163,19 @@ def plan_message(kind, parts, eml, note, present, queued, failed, has_root) -> P
     else:
         files = parts
     pending = [f for f in files if checksum(f.data) not in present]
-    ready = [f for f in pending if f.name not in queued and f.name not in failed]
+    if any(key(f) in failed for f in pending):
+        return Plan(None, [], None, False, True)
+    ready = [f for f in pending if key(f) not in queued]
     if has_root:
         return Plan(None, ready, note, not pending)
     if not pending:
         return Plan(None, [], None, True)
-    waiting = any(f.name in queued for f in pending)
-    return Plan(None if waiting or not ready else ready[0], [], None, False)
+    return Plan(None if len(ready) < len(pending) else ready[0], [], None, False)
 
 
 def joined_label(ids: list[int]) -> str:
-    return JOINED + ', '.join(map(str, ids))
+    label = JOINED + ', '.join(map(str, ids))
+    return label if len(label) <= 64 else f'{JOINED}{len(ids)} files #{checksum(label.encode())[:8]}'
 
 
 def needs_join(originals: list[tuple[int, bool]], newest_label: str | None) -> list[int] | None:
@@ -193,3 +204,216 @@ def parse_gm_fetch(lines) -> dict[str, tuple[str, str, set[str]]]:
             _labels(labels.group(1)) if labels else set(),
         )
     return result
+
+
+def handle_message(mailbox, store, uid, thrid, labels, thread_doc, state, counts):
+    queued, queued_threads, failed = state
+    raw = mailbox.message(uid)
+    msg = email.message_from_bytes(raw, policy=email.policy.default)
+    kind = classify(labels, thread_doc is not None, is_reply(msg))
+    if kind is None:
+        return
+    counts['read'] += 1
+    subject = str(msg['Subject'] or '').strip() or 'Gmail'
+    parts = eligible_parts(msg, subject)
+    eml = Part(f'{safe_name(subject)}.eml', eml_bytes(raw))
+    present = store.present({checksum(f.data) for f in [*parts, eml]})
+    root = thread_doc if kind == 'followup' else store.root_with_thread(present, thrid)
+    date = msg['Date'].datetime if msg['Date'] and msg['Date'].datetime else None
+    note = note_text(str(msg['From'] or ''), store.local(date), body_text(msg)) if date else None
+    plan = plan_message(kind, parts, eml, note, present, queued, failed, root is not None)
+    if plan.new:
+        store.queue(plan.new, root_id=None, thrid=thrid, title=subject)
+        queued.add(key(plan.new))
+        queued_threads.add(thrid)
+        counts['created'] += 1
+    for part in plan.versions:
+        store.queue(part, root_id=root, thrid=thrid, title=subject)
+        queued.add(key(part))
+        counts['versions'] += 1
+    if plan.note and store.add_note(root, plan.note):
+        counts['notes'] += 1
+    if plan.done:
+        mailbox.mark(uid, DONE)
+        counts['done'] += 1
+    elif plan.failed:
+        mailbox.mark(uid, FAILED)
+        counts['import_failed'] += 1
+    else:
+        counts['waiting'] += 1
+
+
+def sync(mailbox, store, now) -> Counter:
+    counts = Counter()
+    state = store.tasks(now)
+    meta = mailbox.metadata(mailbox.search(QUERIES))
+    for uid in sorted(meta, key=int):
+        msgid, thrid, labels = meta[uid]
+        thread_doc = store.document_for_thread(thrid)
+        if thread_doc is None and not labels & {RECEIPT, BODY}:
+            continue
+        if thread_doc is None and thrid in state[1]:
+            counts['waiting'] += 1
+            continue
+        try:
+            handle_message(mailbox, store, uid, thrid, labels, thread_doc, state, counts)
+        except Exception as error:
+            counts['failed'] += 1
+            print(f'thread-sync: message {msgid} failed: {type(error).__name__}', flush=True)
+    queued, _, failed = state
+    for root in store.join_candidates(now):
+        ids = needs_join(store.originals(root), store.newest_label(root))
+        if ids and f'join{root}' not in queued | failed:
+            store.queue_join(root, ids)
+            counts['joined'] += 1
+    return counts
+
+
+class DjangoStore:
+    def __init__(self):
+        from django.conf import settings
+        from documents.models import CustomField, Document, Note, PaperlessTask, Tag
+        from paperless_mail.models import MailAccount
+        self.settings, self.Document, self.Note, self.Task = settings, Document, Note, PaperlessTask
+        self.account = MailAccount.objects.get(name='gmail')
+        self.owner = self.account.owner
+        self.field, _ = CustomField.objects.get_or_create(name=THREAD_FIELD, defaults={'data_type': CustomField.FieldDataType.STRING})
+        self.tag_ids = [Tag.objects.get(name=name).id for name in ['source:gmail', 'paperless-gpt-auto']]
+
+    def tasks(self, now):
+        queued, threads, failed = set(), set(), set()
+        Status = self.Task.Status
+        for task in self.Task.objects.filter(task_type=self.Task.TaskType.CONSUME_FILE, date_created__gte=now - timedelta(hours=24)):
+            data = task.input_data or {}
+            name = str(data.get('filename') or '').split('-', 1)[0]
+            if task.status in (Status.PENDING, Status.STARTED) and task.date_created >= now - timedelta(hours=6):
+                queued.add(name)
+                threads.update(str(value) for value in ((data.get('overrides') or {}).get('custom_fields') or {}).values())
+            elif task.status == Status.FAILURE:
+                failed.add(name)
+        return queued, threads, failed
+
+    def _thread_roots(self, thrid):
+        return self.field.fields.filter(value_text=thrid, document__deleted_at__isnull=True, document__root_document__isnull=True)
+
+    def document_for_thread(self, thrid):
+        return self._thread_roots(thrid).order_by('-document_id').values_list('document_id', flat=True).first()
+
+    def present(self, sums):
+        return set(self.Document.global_objects.filter(checksum__in=sums).values_list('checksum', flat=True))
+
+    def root_with_thread(self, present, thrid):
+        roots = {doc.root_document_id or doc.id for doc in self.Document.global_objects.filter(checksum__in=present)}
+        return self._thread_roots(thrid).filter(document_id__in=roots).values_list('document_id', flat=True).first()
+
+    def queue(self, part, root_id, thrid, title, label=None, file_key=None):
+        import tempfile
+        from documents.data_models import ConsumableDocument, DocumentMetadataOverrides, DocumentSource
+        from documents.tasks import consume_file
+        self.settings.SCRATCH_DIR.mkdir(parents=True, exist_ok=True)
+        path = Path(tempfile.mkdtemp(prefix='thread-sync-', dir=self.settings.SCRATCH_DIR)) / f'{file_key or key(part)}-{part.name}'
+        path.write_bytes(part.data)
+        if root_id is None:
+            overrides = DocumentMetadataOverrides(title=title, filename=part.name, tag_ids=self.tag_ids, owner_id=self.owner.id, custom_fields={self.field.id: thrid})
+        else:
+            overrides = DocumentMetadataOverrides(filename=part.name, version_label=label or part.name[:64], owner_id=self.owner.id)
+        consume_file.apply_async(
+            kwargs={'input_doc': ConsumableDocument(source=DocumentSource.MailFetch, original_file=path, root_document_id=root_id), 'overrides': overrides},
+            headers={'trigger_source': self.Task.TriggerSource.EMAIL_CONSUME},
+        )
+
+    def add_note(self, doc_id, text):
+        if self.Note.objects.filter(document_id=doc_id, note=text).exists():
+            return False
+        self.Note.objects.create(document_id=doc_id, note=text, user=self.owner)
+        return True
+
+    def local(self, date):
+        from django.utils import timezone
+        return timezone.localtime(date) if timezone.is_aware(date) else date
+
+    def join_candidates(self, now):
+        return list(self.Document.objects.filter(
+            root_document__isnull=False, added__gte=now - timedelta(days=2), root_document__deleted_at__isnull=True,
+        ).values_list('root_document_id', flat=True).distinct())
+
+    def _versions(self, root):
+        return list(self.Document.objects.filter(root_document_id=root).order_by('version_index', 'id'))
+
+    def _pdf(self, doc):
+        path = doc.source_path if doc.mime_type == 'application/pdf' else doc.archive_path
+        return path if path and Path(path).is_file() else None
+
+    def originals(self, root):
+        docs = [self.Document.objects.get(pk=root)] + [v for v in self._versions(root) if not (v.version_label or '').startswith(JOINED)]
+        return [(doc.id, self._pdf(doc) is not None) for doc in docs]
+
+    def newest_label(self, root):
+        versions = self._versions(root)
+        return versions[-1].version_label if versions else None
+
+    def queue_join(self, root, ids):
+        import pikepdf
+        joined = pikepdf.new()
+        sources = [pikepdf.open(self._pdf(self.Document.global_objects.get(pk=doc_id))) for doc_id in ids]
+        try:
+            for source in sources:
+                joined.pages.extend(source.pages)
+            buffer = io.BytesIO()
+            joined.save(buffer, static_id=True)
+        finally:
+            for source in sources:
+                source.close()
+        self.queue(Part(f'All files {root}.pdf', buffer.getvalue()), root_id=root, thrid=None, title=None, label=joined_label(ids), file_key=f'join{root}')
+
+
+class GmailBox:
+    def __init__(self, account):
+        self.account = account
+
+    def __enter__(self):
+        from imap_tools import MailBox
+        self.box = MailBox(self.account.imap_server, self.account.imap_port).login(self.account.username, self.account.password, '[Gmail]/All Mail')
+        return self
+
+    def __exit__(self, *exc):
+        self.box.logout()
+
+    def _ok(self, response):
+        status, data = response
+        if status != 'OK':
+            raise OSError(f'IMAP {status}')
+        return data
+
+    def search(self, queries):
+        uids = set()
+        for query in queries:
+            uids.update(self._ok(self.box.client.uid('search', None, 'X-GM-RAW', f'"{query}"'))[0].split())
+        return sorted((uid.decode() for uid in uids), key=int)
+
+    def metadata(self, uids):
+        if not uids:
+            return {}
+        return parse_gm_fetch(self._ok(self.box.client.uid('fetch', ','.join(uids), '(UID X-GM-MSGID X-GM-THRID X-GM-LABELS)')))
+
+    def message(self, uid):
+        data = self._ok(self.box.client.uid('fetch', uid, '(BODY.PEEK[])'))
+        return next(item[1] for item in data if isinstance(item, tuple))
+
+    def mark(self, uid, label):
+        self._ok(self.box.client.uid('store', uid, '+X-GM-LABELS', f'({label})'))
+
+
+def main():
+    from django.utils import timezone
+    store = DjangoStore()
+    with GmailBox(store.account) as mailbox:
+        counts = sync(mailbox, store, timezone.now())
+    print('thread-sync: ' + ' '.join(f'{key}={counts[key]}' for key in ['read', 'created', 'versions', 'joined', 'notes', 'done', 'waiting', 'import_failed', 'failed']), flush=True)
+
+
+if __name__ in ('__main__', 'django.core.management.commands.shell'):
+    try:
+        main()
+    except Exception as error:
+        raise SystemExit(f'thread-sync failed: {type(error).__name__}') from None

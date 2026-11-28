@@ -588,7 +588,9 @@ class ThreadSyncTests(unittest.TestCase):
     def plan(self, kind, parts, note='note', present=(), queued=(), failed=(), has_root=False):
         eml = self.ts.Part('Faktura 12.eml', b'eml')
         present = {self.ts.checksum(p.data) for p in present}
-        return self.ts.plan_message(kind, parts, eml, note, present, set(queued), set(failed), has_root)
+        names = {p.name: p for p in [eml, *parts]}
+        key = lambda name: self.ts.key(names[name])
+        return self.ts.plan_message(kind, parts, eml, note, present, {key(n) for n in queued}, {key(n) for n in failed}, has_root)
 
     def test_plan_message_idempotent(self):
         a, b = self.ts.Part('a.pdf', b'a'), self.ts.Part('b.pdf', b'b')
@@ -602,9 +604,10 @@ class ThreadSyncTests(unittest.TestCase):
     def test_plan_message_waits_on_failed(self):
         a, b = self.ts.Part('a.pdf', b'a'), self.ts.Part('b.pdf', b'b')
         self.assertEqual(self.plan('attachments', [a, b], queued=['a.pdf']), self.ts.Plan(None, [], None, False))
-        self.assertEqual(self.plan('attachments', [a, b], failed=['a.pdf']), self.ts.Plan(b, [], None, False))
-        self.assertEqual(self.plan('followup', [a, b], failed=['a.pdf'], has_root=True), self.ts.Plan(None, [b], 'note', False))
+        self.assertEqual(self.plan('attachments', [a, b], failed=['a.pdf']), self.ts.Plan(None, [], None, False, True))
+        self.assertEqual(self.plan('followup', [a, b], failed=['b.pdf'], has_root=True), self.ts.Plan(None, [], None, False, True))
         self.assertEqual(self.plan('followup', [a], queued=['a.pdf'], has_root=True), self.ts.Plan(None, [], 'note', False))
+        self.assertEqual(self.plan('followup', [a], present=[a], failed=['a.pdf'], has_root=True), self.ts.Plan(None, [], 'note', True))
 
     def test_plan_body_and_fallback(self):
         eml = self.ts.Part('Faktura 12.eml', b'eml')
@@ -621,6 +624,12 @@ class ThreadSyncTests(unittest.TestCase):
         self.assertIsNone(n([(1, True), (2, False)], 'b.pdf'))
         self.assertIsNone(n([(1, True), (2, True)], 'All files: 1, 2'))
         self.assertEqual(n([(1, True), (2, True), (3, True)], 'All files: 1, 2'), [1, 2, 3])
+        many = list(range(26800, 26820))
+        label = self.ts.joined_label(many)
+        self.assertLessEqual(len(label), 64)
+        self.assertTrue(label.startswith('All files: 20 files #'))
+        self.assertNotEqual(label, self.ts.joined_label(many[:-1] + [1]))
+        self.assertIsNone(n([(i, True) for i in many], label))
 
     def test_parse_gm_fetch(self):
         lines = [
@@ -632,6 +641,171 @@ class ThreadSyncTests(unittest.TestCase):
             '94095': ('1856', '1855', {'\\Important', 'paperless-receipt', 'Old label'}),
             '94114': ('1857', '1855', set()),
         })
+
+
+class FakeBox:
+    def __init__(self):
+        self.messages = {}
+
+    def add(self, uid, thrid, labels, msg):
+        self.messages[uid] = [f'm{uid}', thrid, set(labels), msg.as_bytes()]
+
+    def search(self, queries):
+        return [uid for uid, (_, _, labels, _) in self.messages.items() if not labels & {'paperless-done', 'paperless-failed'}]
+
+    def metadata(self, uids):
+        return {uid: tuple(self.messages[uid][:3]) for uid in uids}
+
+    def message(self, uid):
+        if self.messages[uid][3] is None:
+            raise OSError('broken')
+        return self.messages[uid][3]
+
+    def mark(self, uid, label):
+        self.messages[uid][2].add(label)
+
+
+class FakeStore:
+    def __init__(self, ts):
+        self.ts = ts
+        self.docs, self.threads, self.labels = {}, {}, {}
+        self.queued, self.notes, self.joins = [], [], []
+        self.waiting = (set(), set(), set())
+
+    def consume(self, data, root=None, thrid=None, label=None):
+        doc_id = len(self.docs) + 1
+        self.docs[self.ts.checksum(data)] = (doc_id, root or doc_id)
+        if root is None:
+            self.threads.setdefault(thrid, []).append(doc_id)
+        self.labels[root or doc_id] = label
+        return doc_id
+
+    def tasks(self, now):
+        return tuple(set(items) for items in self.waiting)
+
+    def document_for_thread(self, thrid):
+        return max(self.threads.get(thrid, []), default=None)
+
+    def present(self, sums):
+        return {s for s in sums if s in self.docs}
+
+    def root_with_thread(self, present, thrid):
+        roots = {self.docs[s][1] for s in present}
+        return next((r for r in self.threads.get(thrid, []) if r in roots), None)
+
+    def queue(self, part, root_id, thrid, title):
+        self.queued.append((part.name, root_id, thrid, title))
+
+    def add_note(self, doc_id, text):
+        if (doc_id, text) in self.notes:
+            return False
+        self.notes.append((doc_id, text))
+        return True
+
+    def local(self, date):
+        return date
+
+    def join_candidates(self, now):
+        return sorted({root for doc_id, root in self.docs.values() if doc_id != root})
+
+    def originals(self, root):
+        return [(doc_id, True) for doc_id, r in sorted(self.docs.values()) if r == root]
+
+    def newest_label(self, root):
+        return self.labels.get(root)
+
+    def queue_join(self, root, ids):
+        self.joins.append((root, ids))
+
+
+class ThreadSyncRuntimeTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.ts = load('thread_sync')
+
+    def test_sync_thread_end_to_end(self):
+        from datetime import datetime, timezone
+        box, store, now = FakeBox(), FakeStore(self.ts), datetime(2026, 11, 28, tzinfo=timezone.utc)
+        invoice = mail(body='Here it is', parts=[('application', 'pdf', b'%PDF-invoice', 'invoice.pdf', 'attachment')])
+        box.add('10', 't1', {'paperless-receipt'}, invoice)
+        box.add('11', 't9', set(), mail(body='Newsletter'))
+
+        counts = self.ts.sync(box, store, now)
+        self.assertEqual(store.queued, [('invoice.pdf', None, 't1', 'Faktura 12')])
+        self.assertNotIn('paperless-done', box.messages['10'][2])
+        self.assertEqual(counts['created'], 1)
+
+        store.waiting = ({self.ts.key(self.ts.Part('invoice.pdf', b'%PDF-invoice'))}, {'t1'}, set())
+        store.queued.clear()
+        self.ts.sync(box, store, now)
+        self.assertEqual(store.queued, [])
+
+        root = store.consume(b'%PDF-invoice', thrid='t1')
+        store.waiting = (set(), set(), set())
+        reply = mail(body='Corrected copy\n\nOn Fri, 27 Nov 2026 Shop <shop@example.test> wrote:\n> Here it is', parts=[('application', 'pdf', b'%PDF-corrected', 'corrected.pdf', 'attachment')], headers={'In-Reply-To': '<a@example.test>'})
+        box.add('12', 't1', set(), reply)
+        box.add('13', 't1', set(), mail(body='Monthly bill, not a reply'))
+        self.ts.sync(box, store, now)
+        self.assertIn('paperless-done', box.messages['10'][2])
+        self.assertEqual(store.queued, [('corrected.pdf', root, 't1', 'Faktura 12')])
+        self.assertEqual([text.splitlines()[-1] for _, text in store.notes], ['Here it is', 'Corrected copy'])
+        self.assertNotIn('paperless-done', box.messages['12'][2])
+        self.assertNotIn('paperless-done', box.messages['13'][2])
+
+        store.consume(b'%PDF-corrected', root=root, label='corrected.pdf')
+        store.queued.clear()
+        counts = self.ts.sync(box, store, now)
+        self.assertIn('paperless-done', box.messages['12'][2])
+        self.assertEqual(store.queued, [])
+        self.assertEqual(len(store.notes), 2)
+        self.assertEqual(store.joins, [(root, [1, 2])])
+        self.assertEqual(counts['joined'], 1)
+
+        store.labels[root] = 'All files: 1, 2'
+        store.joins.clear()
+        self.ts.sync(box, store, now)
+        self.assertEqual(store.joins, [])
+
+        store.labels[root] = 'corrected.pdf'
+        store.waiting = ({f'join{root}'}, set(), set())
+        self.ts.sync(box, store, now)
+        self.assertEqual(store.joins, [])
+
+    def test_sync_body_reply_becomes_note(self):
+        from datetime import datetime, timezone
+        box, store, now = FakeBox(), FakeStore(self.ts), datetime(2026, 11, 28, tzinfo=timezone.utc)
+        root = store.consume(b'%PDF-invoice', thrid='t1')
+        box.add('20', 't1', {'paperless-receipt-body'}, mail(body='Scroll down in the attachment', headers={'References': '<a@example.test>'}))
+        self.ts.sync(box, store, now)
+        self.assertEqual(store.queued, [])
+        self.assertEqual(store.notes[0][0], root)
+        self.assertTrue(store.notes[0][1].startswith('From Shop <shop@example.test>, 2026-11-27 14:57'))
+        self.assertIn('paperless-done', box.messages['20'][2])
+
+    def test_sync_failure_is_per_message(self):
+        from datetime import datetime, timezone
+        box, store, now = FakeBox(), FakeStore(self.ts), datetime(2026, 11, 28, tzinfo=timezone.utc)
+        box.add('30', 't3', {'paperless-receipt-body'}, mail())
+        box.messages['30'][3] = None
+        box.add('31', 't4', {'paperless-receipt-body'}, mail(body='Receipt'))
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            counts = self.ts.sync(box, store, now)
+        self.assertEqual(counts['failed'], 1)
+        self.assertEqual(output.getvalue(), 'thread-sync: message m30 failed: OSError\n')
+        self.assertEqual([q[0] for q in store.queued], ['Faktura 12.eml'])
+
+    def test_sync_failed_import_labels_message(self):
+        from datetime import datetime, timezone
+        box, store, now = FakeBox(), FakeStore(self.ts), datetime(2026, 11, 28, tzinfo=timezone.utc)
+        box.add('40', 't5', {'paperless-receipt-body'}, mail(body='Receipt'))
+        eml = self.ts.Part('Faktura 12.eml', self.ts.eml_bytes(box.messages['40'][3]))
+        store.waiting = (set(), set(), {self.ts.key(eml)})
+        counts = self.ts.sync(box, store, now)
+        self.assertEqual(store.queued, [])
+        self.assertEqual(box.messages['40'][2], {'paperless-receipt-body', 'paperless-failed'})
+        self.assertEqual(counts['import_failed'], 1)
+        self.ts.sync(box, store, now)
+        self.assertEqual(counts['import_failed'], 1)
 
 
 if __name__ == '__main__':
