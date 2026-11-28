@@ -174,7 +174,27 @@ def to_csv(matches):
     return buffer.getvalue()
 
 
-def main(finviz_url: str, email: str, entry: str, stop: str, target: str = "", condition: str = "") -> list[dict]:
+def dry_run_result(matches, skipped, rules, fetched, duration):
+    return {
+        "dry_run": True,
+        "fetched": fetched,
+        "passed": len(matches),
+        "duration_seconds": round(duration, 2),
+        "results": [
+            {
+                "ticker": m["Ticker"],
+                "entry": m["entry"],
+                "stop": m["stop"],
+                "target": m.get("target"),
+                "condition": True if rules["condition"] else None,
+            }
+            for m in matches
+        ],
+        "skipped": [{"ticker": t, "reason": r} for t, r in skipped],
+    }
+
+
+def main(finviz_url: str, email: str, entry: str, stop: str, target: str = "", condition: str = "", dry_run: bool = False) -> list[dict] | dict:
     started = time.monotonic()
     try:
         rules = {name: (rule or "").strip() for name, rule in
@@ -193,9 +213,15 @@ def main(finviz_url: str, email: str, entry: str, stop: str, target: str = "", c
         rows = fetch_rows(finviz_url)
         matches, skipped = screen(rows, rules)
     except Exception as error:
+        if dry_run:
+            raise
         send_email(email, f"Screener {date.today()}: failed", f"<p>The screen failed:</p><pre>{escape(str(error))}</pre>", None)
         raise
     count = len(matches)
+    if dry_run:
+        duration = time.monotonic() - started
+        print(f"Summary: {len(rows)} fetched from Finviz, {count} passed, {duration:.2f}s (dry run, no email)")
+        return dry_run_result(matches, skipped, rules, len(rows), duration)
     send_email(email, f"Screener {date.today()}: {count} match{'' if count == 1 else 'es'}", to_html(matches, skipped), to_csv(matches))
     print(f"Summary: {len(rows)} fetched from Finviz, {count} passed, {time.monotonic() - started:.2f}s")
     return matches
