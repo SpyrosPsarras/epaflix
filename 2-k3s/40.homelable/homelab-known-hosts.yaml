@@ -2,8 +2,8 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: rackpeek-known-hosts
-  namespace: rackpeek
+  name: homelab-known-hosts
+  namespace: homelable
 data:
   known_hosts: |
     192.168.10.10 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINntK1nXANCp6E5UCwECFCNsllrIXpU1JdtNsDosgnSn

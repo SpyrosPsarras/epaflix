@@ -2,8 +2,8 @@
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: rackpeek-sync
-  namespace: rackpeek
+  name: homelab-sync
+  namespace: homelable
 spec:
   schedule: "30 3 * * *"
   timeZone: Europe/Athens
@@ -18,9 +18,9 @@ spec:
       template:
         metadata:
           labels:
-            app: rackpeek-sync
+            app: homelab-sync
         spec:
-          serviceAccountName: rackpeek-sync
+          serviceAccountName: homelab-sync
           restartPolicy: Never
           enableServiceLinks: false
           securityContext:
@@ -30,7 +30,7 @@ spec:
             runAsNonRoot: true
           containers:
             - name: sync
-              image: ghcr.io/spyrospsarras/rackpeek-sync
+              image: ghcr.io/spyrospsarras/homelab-sync
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true
@@ -38,26 +38,33 @@ spec:
                   drop:
                     - ALL
               env:
+                - name: HL_URL
+                  value: http://homelable.homelable.svc
+                - name: HL_SERVICE_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: homelable-secrets
+                      key: MCP_SERVICE_KEY
                 - name: RPK_URL
                   value: http://rackpeek.rackpeek.svc:8080
                 - name: RPK_API_KEY
                   valueFrom:
                     secretKeyRef:
-                      name: rackpeek-secrets
+                      name: homelab-sync-secrets
                       key: RPK_API_KEY
                 - name: HOMELAB_LIVE_URL
-                  value: https://git-internal.epaflix.com/rackpeek-bot/homelab-live.git
+                  value: https://git-internal.epaflix.com/homelab-bot/homelab-live.git
                 - name: HOMELAB_LIVE_TOKEN
                   valueFrom:
                     secretKeyRef:
-                      name: rackpeek-secrets
+                      name: homelab-sync-secrets
                       key: HOMELAB_LIVE_TOKEN
                 - name: REPO_URL
                   value: https://github.com/SpyrosPsarras/epaflix.git
                 - name: SSH_KEY_FILE
-                  value: /etc/rackpeek-scan/ssh-privatekey
+                  value: /etc/homelab-scan/ssh-privatekey
                 - name: KNOWN_HOSTS_FILE
-                  value: /etc/rackpeek-known-hosts/known_hosts
+                  value: /etc/homelab-known-hosts/known_hosts
                 - name: HOME
                   value: /tmp
                 - name: HOSTS
@@ -70,20 +77,20 @@ spec:
                   memory: 1Gi
               volumeMounts:
                 - name: scan-key
-                  mountPath: /etc/rackpeek-scan
+                  mountPath: /etc/homelab-scan
                   readOnly: true
                 - name: known-hosts
-                  mountPath: /etc/rackpeek-known-hosts
+                  mountPath: /etc/homelab-known-hosts
                   readOnly: true
                 - name: tmp
                   mountPath: /tmp
           volumes:
             - name: scan-key
               secret:
-                secretName: rackpeek-scan-key
+                secretName: homelab-scan-key
                 defaultMode: 0440
             - name: known-hosts
               configMap:
-                name: rackpeek-known-hosts
+                name: homelab-known-hosts
             - name: tmp
               emptyDir: {}

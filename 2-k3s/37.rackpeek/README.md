@@ -27,37 +27,6 @@ The PVC's root directory is created owned by root, and libgit2 refuses a reposit
 
 4. In the RackPeek UI, in this order: **Save** a first commit, then **Add Remote** `https://git-internal.epaflix.com/rackpeek-bot/rackpeek-config.git`, then **Push**. RackPeek's automatic first push on an empty remote fails on a repo without commits (it creates a branch before the first commit), so the first commit has to exist before the remote is added. Check in Forgejo that the commit has no `.dataprotection` files.
 
-## Nightly sync
+## Replaced by Homelable
 
-CronJob `rackpeek-sync` runs at 03:30 Europe/Athens. It reads the Kubernetes API (never Secrets), runs the read-only scanner on every allowlisted host over SSH ([rackpeek-scan](../../1-proxmox/rackpeek-scan/README.md)), and clones the public repo for Git status. Then it:
-
-1. commits the masked host files, package lists and ConfigMaps to Forgejo `rackpeek-bot/homelab-live`, after gitleaks drops anything it flags;
-2. posts all items to RackPeek with `mode: Replace`.
-3. commits and pushes `rackpeek-config` through RackPeek's MCP tool `git_commit`, so **Discard** in the UI returns to the last sync instead of an older save.
-
-Every item the sync writes has tag `sync`. Notes and other tags on those items are carried over, and items without tag `sync` are never touched. An item that a successful source no longer reports gets label `gone-since: <date>` and stays until a person deletes it. If a source fails, its items keep their last facts and the Job exits 1, which fires `KubeJobFailedLastRun`.
-
-The scan key is Secret `rackpeek-scan-key` (type `kubernetes.io/ssh-auth`); its public half is `scan-key.pub`. Host keys are pinned in ConfigMap `rackpeek-known-hosts`. The ServiceAccount reads through ClusterRole `rackpeek-reader`, bound per namespace in `sync-rbac.yaml`; a namespace without a binding is not indexed. `t3code-work` and `mcp-hub-work` are never bound and are skipped in code.
-
-The scanner is installed on 17 hosts. On TrueNAS `/usr` is read-only, so it lives at `/root/rackpeek-scan` and the forced command is `sudo -n python3 /root/rackpeek-scan`. `jumpbox` is not scanned: its login user has no sudo. It still appears as a guest from Proxmox.
-
-Run it now:
-
-```sh
-kubectl -n rackpeek create job --from=cronjob/rackpeek-sync rackpeek-sync-manual
-kubectl -n rackpeek logs -f job/rackpeek-sync-manual
-```
-
-## Notes and rescans
-
-Each item's notes say what it is, why it is set up that way and how it updates. The sync never writes notes; it copies them from the stored item on every run. The homelab agent writes them, and people can edit them in the UI.
-
-To rescan:
-
-1. One host: `ssh <host>` with the scan key prints the scan JSON. The forced command ignores the command you send.
-2. Everything now: `kubectl -n rackpeek create job --from=cronjob/rackpeek-sync rackpeek-sync-manual`.
-3. Agent pods: the sync does not read inside agent pods. The homelab agent compares its own live `AGENTS.md`, skills and MCP servers with Git when asked, and updates the notes of its `t3code-homelab` item.
-
-To change notes from a script, read the full item with `GET /api/inventory`, set `notes`, and post it back as `{"yaml": "<document>", "mode": "Replace"}`. The JSON form of the same request clears every connection in RackPeek 2.3.0.
-
-To scan a new host: copy `1-proxmox/rackpeek-scan/rackpeek-scan.py` to `/usr/local/sbin/rackpeek-scan`, add the scan key line from [rackpeek-scan](../../1-proxmox/rackpeek-scan/README.md) for the host's SSH user, add its host key to `sync-known-hosts.yaml`, its address to `sync-network-policy.yaml` and its entry to `HOSTS` in `sync-cronjob.yaml`.
+The nightly sync moved to [Homelable](../40.homelable/README.md#nightly-sync), and its first run copied RackPeek's notes there. RackPeek no longer gets updates and stays as a read-only fallback until it is removed. Write notes in Homelable.

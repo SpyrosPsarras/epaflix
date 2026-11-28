@@ -28,4 +28,36 @@ Scripts call `http://homelable.homelable.svc` with `X-MCP-Service-Key`. The ingr
 
 ## Homelab index
 
-The nightly sync owns the design `Homelab index` and rewrites it every night. Draw your own maps on other designs. The UI saves a whole design at once, so a tab opened on `Homelab index` before the 03:30 sync and saved after it deletes the nodes that run added; the next run puts them back.
+The nightly sync owns the design `Homelab index` and rewrites it every night. Do not rename it: the next run would create a new `Homelab index` and move the synced nodes into it. Draw your own maps on other designs. The UI saves a whole design at once, so a tab opened on `Homelab index` before the 03:30 sync and saved after it deletes the nodes that run added; the next run puts them back.
+
+## Nightly sync
+
+CronJob `homelab-sync` runs at 03:30 Europe/Athens. It reads the Kubernetes API (never Secrets), runs the read-only scanner on every allowlisted host over SSH ([homelab-scan](../../1-proxmox/homelab-scan/README.md)), and clones the public repo for Git status. Then it:
+
+1. commits the masked host files, package lists and ConfigMaps to Forgejo `homelab-bot/homelab-live`, after gitleaks drops anything it flags;
+2. reads `Homelab index` again and saves it with every host, Proxmox host, guest, Argo app and namespace as a node;
+3. writes each Argo app's workloads (and TrueNAS's apps) to that node's page, only when the text changed and the page is still titled `<node> workloads`. A page whose last workload is gone keeps its last list;
+4. presses Git sync, so `homelab-bot/homelable-config` gets the night's state.
+
+Sync nodes carry properties `managed-by: homelab-sync` and `index-name`. Their notes, position, size, colours, icon, edges and any property you add are carried over; their name, type, IP, ping check and the properties the sync sets come from the sync. Nodes without that property are sent back unchanged. A node that a successful source no longer reports gets property `gone-since: <date>` and stays until a person deletes it. If a source fails, its nodes keep their last facts, its pages are not rewritten, and the Job exits 1, which fires `KubeJobFailedLastRun`. If Homelable cannot be read, nothing is saved.
+
+Hosts and guests with a known address (the `HOSTS` list, or a static `ip=` in the Proxmox guest config) get a ping check. Guests on DHCP get none. Guests sit inside their Proxmox host's box.
+
+When `Homelab index` does not exist yet, the first run creates it and copies notes from RackPeek (`RPK_URL`), appending each workload's notes to its app's notes under a `### <workload>` heading. If RackPeek cannot be read, nothing is created and the next run tries again.
+
+The scan key is Secret `homelab-scan-key` (type `kubernetes.io/ssh-auth`); its public half is `homelab-scan-key.pub`. Host keys are pinned in ConfigMap `homelab-known-hosts`. The ServiceAccount reads through ClusterRole `homelab-sync-reader`, bound per namespace in `homelab-sync-rbac.yaml`; a namespace without a binding is not indexed. `t3code-work` and `mcp-hub-work` are never bound and are skipped in code. `jumpbox` is not scanned: its login user has no sudo. It still appears as a guest from Proxmox.
+
+Run it now:
+
+```sh
+kubectl -n homelable create job --from=cronjob/homelab-sync homelab-sync-manual
+kubectl -n homelable logs -f job/homelab-sync-manual
+```
+
+## Notes and rescans
+
+Each node's notes say what it is, why it is set up that way and how it updates. The homelab agent writes them, and people can edit them in the UI. Workload notes go in the app's notes. Do not edit the workload pages; the next run overwrites them.
+
+To change a node's notes from a script, `PATCH /api/v1/nodes/<id>` with `{"notes": "..."}`.
+
+To scan a new host: copy `1-proxmox/homelab-scan/homelab-scan.py` to `/usr/local/sbin/homelab-scan`, add the scan key line from [homelab-scan](../../1-proxmox/homelab-scan/README.md) for the host's SSH user, add its host key to `homelab-known-hosts.yaml`, its address to `homelab-sync-network-policy.yaml` and its entry to `HOSTS` in `homelab-sync-cronjob.yaml`.

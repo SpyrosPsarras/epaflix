@@ -8,10 +8,6 @@ resources:
   - service.yaml
   - ingress.yaml
   - network-policy.yaml
-  - sync-rbac.yaml
-  - sync-network-policy.yaml
-  - sync-known-hosts.yaml
-  - sync-cronjob.yaml
 
 generators:
   - ksops-generator.yaml
@@ -19,5 +15,3 @@ generators:
 images:
   - name: aptacode/rackpeek
     newTag: v2.3.0@sha256:0c0939ccb5586fba29b88268922480dc0653f9ad066807d418691695aa19d9ec
-  - name: ghcr.io/spyrospsarras/rackpeek-sync
-    digest: sha256:f836c7321f5058c5905862963e72151538dd268e639153982768899fa0c52f05

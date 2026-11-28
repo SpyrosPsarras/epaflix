@@ -18,9 +18,12 @@ spec:
           podSelector:
             matchLabels:
               app.kubernetes.io/name: traefik
-        - podSelector:
+        - namespaceSelector:
             matchLabels:
-              app: rackpeek-sync
+              kubernetes.io/metadata.name: homelable
+          podSelector:
+            matchLabels:
+              app: homelab-sync
       ports:
         - port: 8080
           protocol: TCP

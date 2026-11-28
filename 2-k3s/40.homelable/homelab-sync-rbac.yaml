@@ -2,13 +2,13 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: rackpeek-sync
-  namespace: rackpeek
+  name: homelab-sync
+  namespace: homelable
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: rackpeek-reader
+  name: homelab-sync-reader
 rules:
   - apiGroups: [""]
     resources: [pods, services, configmaps, persistentvolumeclaims, serviceaccounts]
@@ -35,7 +35,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: rackpeek-cluster-reader
+  name: homelab-sync-cluster-reader
 rules:
   - apiGroups: [""]
     resources: [nodes, persistentvolumes, namespaces]
@@ -47,516 +47,530 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: rackpeek-cluster-reader
+  name: homelab-sync-cluster-reader
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: rackpeek-cluster-reader
+  name: homelab-sync-cluster-reader
 subjects:
   - kind: ServiceAccount
-    name: rackpeek-sync
-    namespace: rackpeek
+    name: homelab-sync
+    namespace: homelable
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: rackpeek-reader
+  name: homelab-sync-reader
   namespace: ai
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: rackpeek-reader
+  name: homelab-sync-reader
 subjects:
   - kind: ServiceAccount
-    name: rackpeek-sync
-    namespace: rackpeek
+    name: homelab-sync
+    namespace: homelable
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: rackpeek-reader
+  name: homelab-sync-reader
   namespace: app-authentik
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: rackpeek-reader
+  name: homelab-sync-reader
 subjects:
   - kind: ServiceAccount
-    name: rackpeek-sync
-    namespace: rackpeek
+    name: homelab-sync
+    namespace: homelable
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: rackpeek-reader
+  name: homelab-sync-reader
   namespace: argocd
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: rackpeek-reader
+  name: homelab-sync-reader
 subjects:
   - kind: ServiceAccount
-    name: rackpeek-sync
-    namespace: rackpeek
+    name: homelab-sync
+    namespace: homelable
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: rackpeek-reader
+  name: homelab-sync-reader
   namespace: bread
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: rackpeek-reader
+  name: homelab-sync-reader
 subjects:
   - kind: ServiceAccount
-    name: rackpeek-sync
-    namespace: rackpeek
+    name: homelab-sync
+    namespace: homelable
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: rackpeek-reader
+  name: homelab-sync-reader
   namespace: cert-manager
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: rackpeek-reader
+  name: homelab-sync-reader
 subjects:
   - kind: ServiceAccount
-    name: rackpeek-sync
-    namespace: rackpeek
+    name: homelab-sync
+    namespace: homelable
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: rackpeek-reader
+  name: homelab-sync-reader
   namespace: cloudflare-tunnel
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: rackpeek-reader
+  name: homelab-sync-reader
 subjects:
   - kind: ServiceAccount
-    name: rackpeek-sync
-    namespace: rackpeek
+    name: homelab-sync
+    namespace: homelable
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: rackpeek-reader
+  name: homelab-sync-reader
   namespace: cnpg-system
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: rackpeek-reader
+  name: homelab-sync-reader
 subjects:
   - kind: ServiceAccount
-    name: rackpeek-sync
-    namespace: rackpeek
+    name: homelab-sync
+    namespace: homelable
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: rackpeek-reader
+  name: homelab-sync-reader
   namespace: deal-finder
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: rackpeek-reader
+  name: homelab-sync-reader
 subjects:
   - kind: ServiceAccount
-    name: rackpeek-sync
-    namespace: rackpeek
+    name: homelab-sync
+    namespace: homelable
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: rackpeek-reader
+  name: homelab-sync-reader
   namespace: default
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: rackpeek-reader
+  name: homelab-sync-reader
 subjects:
   - kind: ServiceAccount
-    name: rackpeek-sync
-    namespace: rackpeek
+    name: homelab-sync
+    namespace: homelable
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: rackpeek-reader
+  name: homelab-sync-reader
   namespace: democratic-csi
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: rackpeek-reader
+  name: homelab-sync-reader
 subjects:
   - kind: ServiceAccount
-    name: rackpeek-sync
-    namespace: rackpeek
+    name: homelab-sync
+    namespace: homelable
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: rackpeek-reader
+  name: homelab-sync-reader
   namespace: discord-media
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: rackpeek-reader
+  name: homelab-sync-reader
 subjects:
   - kind: ServiceAccount
-    name: rackpeek-sync
-    namespace: rackpeek
+    name: homelab-sync
+    namespace: homelable
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: rackpeek-reader
+  name: homelab-sync-reader
   namespace: discord-windmill
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: rackpeek-reader
+  name: homelab-sync-reader
 subjects:
   - kind: ServiceAccount
-    name: rackpeek-sync
-    namespace: rackpeek
+    name: homelab-sync
+    namespace: homelable
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: rackpeek-reader
+  name: homelab-sync-reader
   namespace: forgejo
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: rackpeek-reader
+  name: homelab-sync-reader
 subjects:
   - kind: ServiceAccount
-    name: rackpeek-sync
-    namespace: rackpeek
+    name: homelab-sync
+    namespace: homelable
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: rackpeek-reader
+  name: homelab-sync-reader
   namespace: fytorium
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: rackpeek-reader
+  name: homelab-sync-reader
 subjects:
   - kind: ServiceAccount
-    name: rackpeek-sync
-    namespace: rackpeek
+    name: homelab-sync
+    namespace: homelable
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: rackpeek-reader
+  name: homelab-sync-reader
   namespace: gh-runner
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: rackpeek-reader
+  name: homelab-sync-reader
 subjects:
   - kind: ServiceAccount
-    name: rackpeek-sync
-    namespace: rackpeek
+    name: homelab-sync
+    namespace: homelable
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: rackpeek-reader
+  name: homelab-sync-reader
   namespace: home-assistant
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: rackpeek-reader
+  name: homelab-sync-reader
 subjects:
   - kind: ServiceAccount
-    name: rackpeek-sync
-    namespace: rackpeek
+    name: homelab-sync
+    namespace: homelable
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: rackpeek-reader
+  name: homelab-sync-reader
   namespace: kube-system
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: rackpeek-reader
+  name: homelab-sync-reader
 subjects:
   - kind: ServiceAccount
-    name: rackpeek-sync
-    namespace: rackpeek
+    name: homelab-sync
+    namespace: homelable
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: rackpeek-reader
+  name: homelab-sync-reader
   namespace: mcp-hub-homelab
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: rackpeek-reader
+  name: homelab-sync-reader
 subjects:
   - kind: ServiceAccount
-    name: rackpeek-sync
-    namespace: rackpeek
+    name: homelab-sync
+    namespace: homelable
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: rackpeek-reader
+  name: homelab-sync-reader
   namespace: observability
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: rackpeek-reader
+  name: homelab-sync-reader
 subjects:
   - kind: ServiceAccount
-    name: rackpeek-sync
-    namespace: rackpeek
+    name: homelab-sync
+    namespace: homelable
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: rackpeek-reader
+  name: homelab-sync-reader
   namespace: paperless
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: rackpeek-reader
+  name: homelab-sync-reader
 subjects:
   - kind: ServiceAccount
-    name: rackpeek-sync
-    namespace: rackpeek
+    name: homelab-sync
+    namespace: homelable
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: rackpeek-reader
+  name: homelab-sync-reader
   namespace: postgres-system
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: rackpeek-reader
+  name: homelab-sync-reader
 subjects:
   - kind: ServiceAccount
-    name: rackpeek-sync
-    namespace: rackpeek
+    name: homelab-sync
+    namespace: homelable
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: rackpeek-reader
-  namespace: rackpeek
+  name: homelab-sync-reader
+  namespace: homelable
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: rackpeek-reader
+  name: homelab-sync-reader
 subjects:
   - kind: ServiceAccount
-    name: rackpeek-sync
-    namespace: rackpeek
+    name: homelab-sync
+    namespace: homelable
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: rackpeek-reader
+  name: homelab-sync-reader
   namespace: remote-pi
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: rackpeek-reader
+  name: homelab-sync-reader
 subjects:
   - kind: ServiceAccount
-    name: rackpeek-sync
-    namespace: rackpeek
+    name: homelab-sync
+    namespace: homelable
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: rackpeek-reader
+  name: homelab-sync-reader
   namespace: renovate
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: rackpeek-reader
+  name: homelab-sync-reader
 subjects:
   - kind: ServiceAccount
-    name: rackpeek-sync
-    namespace: rackpeek
+    name: homelab-sync
+    namespace: homelable
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: rackpeek-reader
+  name: homelab-sync-reader
   namespace: searxng
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: rackpeek-reader
+  name: homelab-sync-reader
 subjects:
   - kind: ServiceAccount
-    name: rackpeek-sync
-    namespace: rackpeek
+    name: homelab-sync
+    namespace: homelable
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: rackpeek-reader
+  name: homelab-sync-reader
   namespace: servarr
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: rackpeek-reader
+  name: homelab-sync-reader
 subjects:
   - kind: ServiceAccount
-    name: rackpeek-sync
-    namespace: rackpeek
+    name: homelab-sync
+    namespace: homelable
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: rackpeek-reader
+  name: homelab-sync-reader
   namespace: speedtest
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: rackpeek-reader
+  name: homelab-sync-reader
 subjects:
   - kind: ServiceAccount
-    name: rackpeek-sync
-    namespace: rackpeek
+    name: homelab-sync
+    namespace: homelable
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: rackpeek-reader
+  name: homelab-sync-reader
   namespace: system-upgrade
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: rackpeek-reader
+  name: homelab-sync-reader
 subjects:
   - kind: ServiceAccount
-    name: rackpeek-sync
-    namespace: rackpeek
+    name: homelab-sync
+    namespace: homelable
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: rackpeek-reader
+  name: homelab-sync-reader
   namespace: t3-build-homelab
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: rackpeek-reader
+  name: homelab-sync-reader
 subjects:
   - kind: ServiceAccount
-    name: rackpeek-sync
-    namespace: rackpeek
+    name: homelab-sync
+    namespace: homelable
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: rackpeek-reader
+  name: homelab-sync-reader
   namespace: t3code
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: rackpeek-reader
+  name: homelab-sync-reader
 subjects:
   - kind: ServiceAccount
-    name: rackpeek-sync
-    namespace: rackpeek
+    name: homelab-sync
+    namespace: homelable
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: rackpeek-reader
+  name: homelab-sync-reader
   namespace: t3code-homelab
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: rackpeek-reader
+  name: homelab-sync-reader
 subjects:
   - kind: ServiceAccount
-    name: rackpeek-sync
-    namespace: rackpeek
+    name: homelab-sync
+    namespace: homelable
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: rackpeek-reader
+  name: homelab-sync-reader
   namespace: tailscale
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: rackpeek-reader
+  name: homelab-sync-reader
 subjects:
   - kind: ServiceAccount
-    name: rackpeek-sync
-    namespace: rackpeek
+    name: homelab-sync
+    namespace: homelable
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: rackpeek-reader
+  name: homelab-sync-reader
   namespace: traefik-system
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: rackpeek-reader
+  name: homelab-sync-reader
 subjects:
   - kind: ServiceAccount
-    name: rackpeek-sync
-    namespace: rackpeek
+    name: homelab-sync
+    namespace: homelable
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: rackpeek-reader
+  name: homelab-sync-reader
   namespace: vaultwarden
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: rackpeek-reader
+  name: homelab-sync-reader
 subjects:
   - kind: ServiceAccount
-    name: rackpeek-sync
-    namespace: rackpeek
+    name: homelab-sync
+    namespace: homelable
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: rackpeek-reader
+  name: homelab-sync-reader
   namespace: vidar-edge
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: rackpeek-reader
+  name: homelab-sync-reader
 subjects:
   - kind: ServiceAccount
-    name: rackpeek-sync
-    namespace: rackpeek
+    name: homelab-sync
+    namespace: homelable
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: rackpeek-reader
+  name: homelab-sync-reader
   namespace: windmill
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: rackpeek-reader
+  name: homelab-sync-reader
 subjects:
   - kind: ServiceAccount
-    name: rackpeek-sync
-    namespace: rackpeek
+    name: homelab-sync
+    namespace: homelable
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: homelab-sync-reader
+  namespace: rackpeek
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: homelab-sync-reader
+subjects:
+  - kind: ServiceAccount
+    name: homelab-sync
+    namespace: homelable
