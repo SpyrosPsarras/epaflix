@@ -120,7 +120,7 @@ Both Gmail filters exclude Promotions, Social and Forums. They match mail that m
 
 The attachment filter adds `paperless-receipt` using `filename:(pdf OR doc OR docx OR xls OR xlsx OR odt OR ods)`. The body filter adds `paperless-receipt-body` using `-filename:(pdf OR doc OR docx OR xls OR xlsx OR odt OR ods)`.
 
-The old body-wide keyword filter was deleted and its label removed from all mail. The two current filters were applied to existing mail on 2026-11-18. If a filter misses a receipt, add `paperless-receipt` by hand to import eligible attachments or `paperless-receipt-body` to import the email body. Replies need no label; thread-sync finds them by thread.
+The old body-wide keyword filter was deleted and its label removed from all mail. The two current filters were applied to existing mail on 2026-11-18. If a filter misses a receipt, add `paperless-receipt` or `paperless-receipt-body` by hand. Either label opts the message in; thread-sync imports its PDF and Office files and uses the email page only when there are none. Replies need no label; thread-sync finds them by thread.
 
 ### Gmail threads
 
@@ -147,11 +147,11 @@ kubectl -n paperless logs deploy/paperless -c thread-sync --tail 20
 
 To retry a failed message, fix the cause, wait until the failed task in the Paperless task list is 24 hours old, then remove `paperless-failed`. Removing it earlier puts the label back on the next run. To import a message again, permanently delete its document or version, then remove `paperless-done`. A file whose checksum exists in Paperless, trash included, is never imported twice.
 
-The mail rules `gmail-receipt-bodies` and `gmail-attachments` stay in Paperless, disabled, so Mail > Processed Mails keeps their history. Until `ingest/configure.py` disables them and their queued imports finish, thread-sync logs `waiting until the old Gmail mail rules are disabled` and imports nothing.
+The mail rules `gmail-receipt-bodies` and `gmail-attachments` stay in Paperless, disabled, so Mail > Processed Mails keeps their history. Until `ingest/thread_migrate.py` has run and turned them off, and their imports from the last 24 hours have finished, thread-sync logs `waiting until thread_migrate.py has run` and imports nothing. `ingest/configure.py` never turns an existing rule on or off.
 
 ### Migrate existing Gmail documents
 
-`ingest/thread_migrate.py` applies the same rules to documents the old mail rules imported. It matches each message labelled `paperless-done-att` or `paperless-done-eml` to its documents by SHA-256, sets `Gmail thread`, turns replies' email pages into notes and moves those pages to the trash, and makes replies' files versions. Without `THREAD_MIGRATE_APPLY=1` it only prints the plan as document IDs. Run the dry run, have the owner approve the printed `version` and `delete` lines, then apply:
+`ingest/thread_migrate.py` applies the same rules to documents the old mail rules imported. It matches each message labelled `paperless-done-att` or `paperless-done-eml` to its documents by SHA-256, sets `Gmail thread`, turns replies' email pages into notes and moves those pages to the trash, and makes replies' files versions. Without `THREAD_MIGRATE_APPLY=1` it only prints the plan as document IDs. With it, it applies the plan, turns the old mail rules off, waits for their queued imports, then repeats the plan for mail from the last two days so late imports are covered. thread-sync starts on its next run. Run `ingest/configure.py` first so the `Gmail thread` field exists, run the dry run, have the owner approve the printed `version` and `delete` lines, then apply:
 
 ```sh
 kubectl -n paperless exec -i deploy/paperless -c thread-sync -- python3 manage.py shell -v 0 < 2-k3s/33.paperless/ingest/thread_migrate.py
@@ -181,7 +181,7 @@ Read the private `$D/configure.out`. Run the vault command again to check that s
 kubectl -n paperless exec "$POD" -c paperless -- rm /tmp/configure.py
 ```
 
-`ingest/configure.py` keeps both mail rules disabled and creates custom field `Gmail thread`. Check the `thread-sync` log and the Paperless task list after the next run. To rotate the app password, the owner updates the vault item, then rerun this setup with the same owner and email. Mail account credentials live in the Paperless database, not a Kubernetes Secret.
+`ingest/configure.py` creates custom field `Gmail thread` and leaves the rules' on or off state alone; new rules start off. After the migration, check the `thread-sync` log and the Paperless task list. To rotate the app password, the owner updates the vault item, then rerun this setup with the same owner and email. Mail account credentials live in the Paperless database, not a Kubernetes Secret.
 
 ### Import Drive
 

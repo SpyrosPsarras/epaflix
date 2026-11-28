@@ -2,6 +2,7 @@ import email
 import email.policy
 import os
 import sys
+import time
 from collections import Counter
 from typing import NamedTuple
 
@@ -48,9 +49,9 @@ def plan_threads(messages: list[Msg]) -> list[tuple]:
     return actions
 
 
-def scan(box, store) -> list[Msg]:
+def scan(box, store, query=QUERY) -> list[Msg]:
     messages = []
-    meta = box.metadata(box.search([QUERY]))
+    meta = box.metadata(box.search([query]))
     for uid in sorted(meta, key=int):
         _, thrid, labels = meta[uid]
         raw = box.message(uid)
@@ -88,18 +89,32 @@ def apply(actions, store):
             store.Document.objects.get(pk=value).delete()
 
 
-def main():
-    store = DjangoStore()
-    with GmailBox(store.account) as box:
-        messages = scan(box, store)
-    actions = plan_threads(messages)
-    print(f'messages={len(messages)} unmatched={sum(not m.doc_ids for m in messages)}', dict(Counter(a[0] for a in actions)))
-    for action, root, value in actions:
+def report(messages, actions, detail=True):
+    print(f'messages={len(messages)} unmatched={sum(not m.doc_ids for m in messages)}', dict(Counter(a[0] for a in actions)), flush=True)
+    for action, root, value in actions if detail else []:
         if action in ('version', 'delete'):
             print(action, root, value)
-    if os.environ.get('THREAD_MIGRATE_APPLY') == '1':
+
+
+def main():
+    from django.utils import timezone
+    store = DjangoStore().load()
+    with GmailBox(store.account) as box:
+        messages = scan(box, store)
+        actions = plan_threads(messages)
+        report(messages, actions)
+        if os.environ.get('THREAD_MIGRATE_APPLY') != '1':
+            return
         apply(actions, store)
-        print('applied')
+        store.account.rules.update(enabled=False)
+        print('applied; old mail rules off, waiting for their queued imports', flush=True)
+        while store.old_rules_active(timezone.now()):
+            time.sleep(30)
+        messages = scan(box, store, f'({QUERY}) newer_than:2d')
+        actions = plan_threads(messages)
+        report(messages, actions)
+        apply(actions, store)
+        print('done; thread-sync starts on its next run', flush=True)
 
 
 if __name__ in ('__main__', 'django.core.management.commands.shell'):

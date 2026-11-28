@@ -134,10 +134,10 @@ class ConfigureRuntimeTests(unittest.TestCase):
                     return self.rows[name], False
                 return self.update_or_create(name, defaults)
 
-            def update_or_create(self, name, defaults):
+            def update_or_create(self, name, defaults, create_defaults=None):
                 created = name not in self.rows
                 row = self.rows.setdefault(name, SimpleNamespace(name=name, assign_tags=Relation()))
-                for key, value in defaults.items():
+                for key, value in (create_defaults or defaults).items() if created else defaults.items():
                     setattr(row, key, value)
                 return row, created
 
@@ -178,7 +178,11 @@ class ConfigureRuntimeTests(unittest.TestCase):
 
     def test_configuration_is_private_and_idempotent(self):
         self.run_configure()
+        self.assertFalse(self.rules.rows['gmail-attachments'].enabled)
+        self.rules.rows['gmail-attachments'].enabled = True
         self.run_configure(shell=True)
+        self.assertTrue(self.rules.rows['gmail-attachments'].enabled)
+        self.rules.rows['gmail-attachments'].enabled = False
         self.assertEqual(len(self.accounts.rows), 1)
         self.assertEqual(len(self.rules.rows), 2)
         self.assertEqual(len(self.tags.rows), 3)

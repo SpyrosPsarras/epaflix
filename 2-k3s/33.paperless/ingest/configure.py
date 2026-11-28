@@ -54,27 +54,25 @@ def main():
             ('gmail-attachments', 'paperless-receipt', MailRule.ConsumptionScope.ATTACHMENTS_ONLY, 'paperless-done-att', '*.pdf,*.doc,*.docx,*.xls,*.xlsx,*.odt,*.ods'),
         ]
         for order, (name, folder, scope, label, filename_filter) in enumerate(rules, 1):
-            rule, _ = MailRule.objects.update_or_create(
-                name=name,
-                defaults={
-                    'owner': owner,
-                    'account': account,
-                    'order': order,
-                    'enabled': False,
-                    'folder': folder,
-                    'maximum_age': 0,
-                    'action': MailRule.MailAction.TAG,
-                    'action_parameter': label,
-                    'assign_title_from': MailRule.TitleSource.FROM_SUBJECT,
-                    'assign_correspondent_from': MailRule.CorrespondentSource.FROM_NOTHING,
-                    'assign_correspondent': None,
-                    'assign_owner_from_rule': True,
-                    'attachment_type': MailRule.AttachmentProcessing.ATTACHMENTS_ONLY,
-                    'filter_attachment_filename_include': filename_filter,
-                    'consumption_scope': scope,
-                    'stop_processing': False,
-                },
-            )
+            defaults = {
+                'owner': owner,
+                'account': account,
+                'order': order,
+                'folder': folder,
+                'maximum_age': 0,
+                'action': MailRule.MailAction.TAG,
+                'action_parameter': label,
+                'assign_title_from': MailRule.TitleSource.FROM_SUBJECT,
+                'assign_correspondent_from': MailRule.CorrespondentSource.FROM_NOTHING,
+                'assign_correspondent': None,
+                'assign_owner_from_rule': True,
+                'attachment_type': MailRule.AttachmentProcessing.ATTACHMENTS_ONLY,
+                'filter_attachment_filename_include': filename_filter,
+                'consumption_scope': scope,
+                'stop_processing': False,
+            }
+            # thread_migrate.py turns existing rules off once it has migrated their documents.
+            rule, _ = MailRule.objects.update_or_create(name=name, defaults=defaults, create_defaults={**defaults, 'enabled': False})
             rule.assign_tags.set([tags['source:gmail'], ai_tag])
             names.append(name)
         for trigger in triggers:

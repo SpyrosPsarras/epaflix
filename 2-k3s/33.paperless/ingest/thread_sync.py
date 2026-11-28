@@ -268,20 +268,25 @@ def sync(mailbox, store, now) -> Counter:
 class DjangoStore:
     def __init__(self):
         from django.conf import settings
-        from documents.models import CustomField, Document, Note, PaperlessTask, Tag
+        from documents.models import Document, Note, PaperlessTask
         from paperless_mail.models import MailAccount
         self.settings, self.Document, self.Note, self.Task = settings, Document, Note, PaperlessTask
         self.account = MailAccount.objects.get(name='gmail')
         self.owner = self.account.owner
+
+    def load(self):
+        from documents.models import CustomField, Tag
         self.field = CustomField.objects.get(name=THREAD_FIELD)
         self.tag_ids = [Tag.objects.get(name=name).id for name in ['source:gmail', 'paperless-gpt-auto']]
+        return self
 
     def old_rules_active(self, now):
         if self.account.rules.filter(enabled=True).exists():
             return True
+        # shortcut: 1,714 tasks from the 2026-11-18 backlog stay pending with an empty queue, so only the last day counts.
         pending = self.Task.objects.filter(
             task_type=self.Task.TaskType.CONSUME_FILE, status__in=[self.Task.Status.PENDING, self.Task.Status.STARTED],
-            date_created__gte=now - timedelta(hours=6),
+            date_created__gte=now - timedelta(hours=24),
         )
         return any((task.input_data or {}).get('mailrule_id') for task in pending)
 
@@ -415,8 +420,9 @@ def main():
     from django.utils import timezone
     store = DjangoStore()
     if store.old_rules_active(timezone.now()):
-        print('thread-sync: waiting until the old Gmail mail rules are disabled and their imports finish', flush=True)
+        print('thread-sync: waiting until thread_migrate.py has run and the old mail rules are off', flush=True)
         return
+    store.load()
     with GmailBox(store.account) as mailbox:
         counts = sync(mailbox, store, timezone.now())
     print('thread-sync: ' + ' '.join(f'{key}={counts[key]}' for key in ['read', 'created', 'versions', 'joined', 'notes', 'done', 'waiting', 'import_failed', 'failed']), flush=True)
