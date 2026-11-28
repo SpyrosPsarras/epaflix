@@ -97,6 +97,13 @@
       "allowedVersions": "<=2026.8.0"
     },
     {
+      "description": "Temporary (#2507): @jangmanj/pi-mcp-ext is pinned to a fork commit that merges our two upstream skills PRs, so Renovate must not move it. upstream-release-watch.yml reopens #2507 when upstream ships them, declines one, or 2027-01-28 passes. Delete this rule when switching back to the npm release.",
+      "matchManagers": ["npm"],
+      "matchFileNames": ["2-k3s/13.t3code/env/tools/package.json"],
+      "matchPackageNames": ["@jangmanj/pi-mcp-ext"],
+      "enabled": false
+    },
+    {
       "description": "Authentik: chart version and container image move together upstream. Group them in one PR so ArgoCD never sees a chart/image schema mismatch.",
       "matchManagers": ["kustomize"],
       "matchPackageNames": [

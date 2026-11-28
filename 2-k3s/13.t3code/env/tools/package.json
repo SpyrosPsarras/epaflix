@@ -7,7 +7,7 @@
     "@bitwarden/cli": "2026.8.0",
     "@dietrichgebert/ponytail": "5.3.3",
     "@earendil-works/pi-coding-agent": "1.6.0",
-    "@jangmanj/pi-mcp-ext": "0.2.2",
+    "@jangmanj/pi-mcp-ext": "github:SpyrosPsarras/pi-mcp-ext#926ae3d9ef5c4897be7a90f52b414799581fa0a0",
     "@juicesharp/rpiv-ask-user-question": "2.15.0",
     "@juicesharp/rpiv-todo": "2.15.0",
     "@openai/codex": "0.172.0",

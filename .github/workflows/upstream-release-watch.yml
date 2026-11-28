@@ -72,6 +72,24 @@ jobs:
             upstreamRepo: "abix5/pi-cliproxyapi-bridge"
             pinnedVersion: "v0.9.1"
             whatToDoWhenItMoves: "The cluster runs a temporary fork build of pi-bridge (TEMP OVERRIDE comment above the fetch-pi-bridge args in 2-k3s/17.remote-pi/cliproxy/deployment.yaml) that adds the usage.handle per-model token sink (models field on the contract v2 usage document, consumed by dms-cliproxy-quota). Check the release notes (or its git log) for the usage sink (tokenstats.go, tokenModelSnapshot, or a models field on the usage document). If present: execute the revert checklist in epaflix issue #1290 - repoint fetch-pi-bridge at abix5/pi-cliproxyapi-bridge, restore the renovate marker, delete this watch row - all in one PR, then close #1290. If not, do nothing: close the signal and leave the temp pin in place."
+          - issue: "2507"
+            upstreamRepo: "JangMan-J/pi-mcp-ext"
+            probe: "pi-mcp-ext-skill-prs"
+            whatToDoWhenItMoves: >-
+              The T3 runtimes pin @jangmanj/pi-mcp-ext to fork commit 926ae3d (branch t3-runtime-pin of
+              SpyrosPsarras/pi-mcp-ext), which merges our upstream PR 3 (PI_MCP_EXT_SKILL_AUTO_APPROVE) and
+              PR 4 (skills in the system prompt, /mcp-skill commands).
+              If upstream shipped both, make one PR that sets @jangmanj/pi-mcp-ext in
+              2-k3s/13.t3code/env/tools/package.json to the released version, runs
+              bash 2-k3s/13.t3code/env/tools/sync-lock.sh and bash 2-k3s/13.t3code/env/tools/sync-runtime-image.sh,
+              deletes the "Temporary (#2507)" rule in .github/renovate.json, keeps
+              PI_MCP_EXT_SKILL_AUTO_APPROVE=skills in 2-k3s/13.t3code/env/files/isolated-pi.sh unless the release
+              README renamed it, drops the fork sentences from 2-k3s/13.t3code/env/README.md and
+              2-k3s/23.mcp-hub/README.md, and deletes this row and the pi-mcp-ext-skill-prs probe. After it merges,
+              delete the t3-runtime-pin branch on the fork and close #2507.
+              If upstream declined a PR or the deadline passed, the fork stays: make one PR that rewords the
+              renovate rule and both READMEs from temporary to permanent and deletes this row and the probe, then
+              close #2507. From then on, rebase t3-runtime-pin onto new upstream releases by hand.
 
     name: "#${{ matrix.issue }} ${{ matrix.upstreamRepo }}"
 
@@ -244,6 +262,78 @@ jobs:
               echo "     <(gh api 'repos/$UPSTREAM/contents/$RULE_FILE?ref=$LATEST' --jq .content | base64 -d)"
               echo 'DETECTOR_EOF'
               echo "linkLine=Rule template at latest: https://github.com/$UPSTREAM/blob/$LATEST/$RULE_FILE"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "$PROBE" = "pi-mcp-ext-skill-prs" ]; then
+            PACKAGE="@jangmanj/pi-mcp-ext"
+            DEADLINE="2027-01-28"
+            MERGED=""
+            DECLINED=""
+            OPEN=""
+            for PR_NUMBER in 3 4; do
+              if ! PR=$(gh api "repos/$UPSTREAM/pulls/$PR_NUMBER" --jq '[.state, (.merged | tostring), (.merge_commit_sha // "")] | join(" ")'); then
+                echo "signal=error" >> "$GITHUB_OUTPUT"
+                echo "detail=could not read repos/$UPSTREAM/pulls/$PR_NUMBER" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              read -r STATE IS_MERGED MERGE_SHA <<< "$PR"
+              if [ "$IS_MERGED" = "true" ]; then
+                MERGED="$MERGED $MERGE_SHA"
+              elif [ "$STATE" = "closed" ]; then
+                DECLINED="$DECLINED PR $PR_NUMBER"
+              else
+                OPEN="$OPEN PR $PR_NUMBER"
+              fi
+            done
+
+            if ! META=$(curl -fsS "https://registry.npmjs.org/${PACKAGE/\//%2f}"); then
+              echo "signal=error" >> "$GITHUB_OUTPUT"
+              echo "detail=could not read $PACKAGE from the npm registry" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            LATEST=$(jq -r '."dist-tags".latest // ""' <<< "$META")
+            GIT_HEAD=$(jq -r --arg v "$LATEST" '.versions[$v].gitHead // ""' <<< "$META")
+            echo "merged:${MERGED:- none} declined:${DECLINED:- none} open:${OPEN:- none} npm latest: $LATEST from ${GIT_HEAD:-an unknown commit}"
+
+            SHIPPED=false
+            if [ -z "$DECLINED$OPEN" ] && [ -n "$GIT_HEAD" ]; then
+              SHIPPED=true
+              for SHA in $MERGED; do
+                if ! STATUS=$(gh api "repos/$UPSTREAM/compare/$SHA...$GIT_HEAD" --jq '.status'); then
+                  echo "signal=error" >> "$GITHUB_OUTPUT"
+                  echo "detail=could not compare merge commit $SHA with npm release commit $GIT_HEAD in $UPSTREAM" >> "$GITHUB_OUTPUT"
+                  exit 0
+                fi
+                case "$STATUS" in ahead|identical) ;; *) SHIPPED=false ;; esac
+              done
+            fi
+
+            TODAY=$(date -u +%F)
+            if [ "$SHIPPED" = true ]; then
+              HEADLINE="Upstream shipped both skills PRs in \`$PACKAGE@$LATEST\` (published from \`${GIT_HEAD:0:7}\`). Switch the T3 runtimes back to the npm release."
+            elif [ -n "$DECLINED" ]; then
+              HEADLINE="Upstream closed$DECLINED without merging. Keep the fork for good."
+            elif [[ ! "$TODAY" < "$DEADLINE" ]]; then
+              HEADLINE="The $DEADLINE deadline passed before upstream shipped both skills PRs (still open:${OPEN:- none}, npm latest \`$LATEST\`). Keep the fork for good."
+            else
+              echo "signal=unchanged" >> "$GITHUB_OUTPUT"
+              echo "observed=upstream has not shipped both skills PRs (still open:${OPEN:- none}), npm latest is $LATEST, and the $DEADLINE deadline has not passed." >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            echo "signal=moved" >> "$GITHUB_OUTPUT"
+            echo "latest=$LATEST" >> "$GITHUB_OUTPUT"
+            {
+              echo 'headline<<DETECTOR_EOF'
+              echo "$HEADLINE"
+              echo 'DETECTOR_EOF'
+              echo 'verify<<DETECTOR_EOF'
+              echo "for pr in 3 4; do gh api repos/$UPSTREAM/pulls/\$pr --jq '{number,state,merged,merge_commit_sha}'; done"
+              echo "curl -s https://registry.npmjs.org/${PACKAGE/\//%2f} | jq '.\"dist-tags\".latest as \$v | {latest: \$v, gitHead: .versions[\$v].gitHead}'"
+              echo 'DETECTOR_EOF'
+              echo "linkLine=npm package: https://www.npmjs.com/package/$PACKAGE"
             } >> "$GITHUB_OUTPUT"
             exit 0
           fi
