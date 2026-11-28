@@ -333,8 +333,8 @@ class DjangoStore:
 
     def join_candidates(self, now):
         return list(self.Document.objects.filter(
-            root_document__isnull=False, added__gte=now - timedelta(days=2), root_document__deleted_at__isnull=True,
-        ).values_list('root_document_id', flat=True).distinct())
+            root_document__isnull=True, modified__gte=now - timedelta(days=2), versions__isnull=False,
+        ).values_list('id', flat=True).distinct())
 
     def _versions(self, root):
         return list(self.Document.objects.filter(root_document_id=root).order_by('version_index', 'id'))
@@ -391,9 +391,11 @@ class GmailBox:
         return sorted((uid.decode() for uid in uids), key=int)
 
     def metadata(self, uids):
-        if not uids:
-            return {}
-        return parse_gm_fetch(self._ok(self.box.client.uid('fetch', ','.join(uids), '(UID X-GM-MSGID X-GM-THRID X-GM-LABELS)')))
+        result = {}
+        for start in range(0, len(uids), 500):
+            chunk = ','.join(uids[start:start + 500])
+            result.update(parse_gm_fetch(self._ok(self.box.client.uid('fetch', chunk, '(UID X-GM-MSGID X-GM-THRID X-GM-LABELS)'))))
+        return result
 
     def message(self, uid):
         data = self._ok(self.box.client.uid('fetch', uid, '(BODY.PEEK[])'))

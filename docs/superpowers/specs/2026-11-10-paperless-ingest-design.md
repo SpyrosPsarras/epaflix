@@ -1,5 +1,9 @@
 # Import all Gmail and Drive documents into Paperless
 
+## Revision 2026-11-28
+
+The two mail rules are disabled. Container `thread-sync` imports Gmail receipts and makes one document per conversation, as `2026-11-28-paperless-gmail-threads-design.md` describes. The Gmail filters and labels below stay.
+
 ## Revision 2026-11-18
 
 G1 is dropped. The original mailbox-wide import brought in photos, logos and newsletter files. Gmail now uses two receipt filters. Both exclude Promotions, Social and Forums and match mail that meets any of these criteria:

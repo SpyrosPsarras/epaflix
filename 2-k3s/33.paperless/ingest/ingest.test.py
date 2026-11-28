@@ -816,5 +816,38 @@ class ThreadSyncRuntimeTests(unittest.TestCase):
         self.assertEqual(counts['import_failed'], 1)
 
 
+class ThreadMigrateTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.ts = load('thread_sync')
+        cls.tm = load('thread_migrate')
+
+    def test_plan_threads(self):
+        Msg = self.tm.Msg
+        messages = [
+            Msg('5', 't1', 5, True, 'eml', [15], 'n5'),
+            Msg('1', 't1', 1, False, 'att', [10, 11], 'n1'),
+            Msg('2', 't1', 2, True, 'eml', [12], 'n2'),
+            Msg('3', 't1', 3, True, 'att', [13], 'n3'),
+            Msg('4', 't1', 4, False, 'eml', [14], 'n4'),
+            Msg('6', 't2', 1, True, 'eml', [], 'n6'),
+            Msg('7', 't2', 2, True, 'eml', [17], None),
+            Msg('8', 't2', 3, True, 'att', [18], None),
+        ]
+        self.assertEqual(self.tm.plan_threads(messages), [
+            ('field', 10, 't1'), ('version', 10, 11), ('note', 10, 'n1'),
+            ('note', 10, 'n2'), ('delete', 10, 12),
+            ('version', 10, 13), ('note', 10, 'n3'),
+            ('field', 14, 't1'),
+            ('note', 14, 'n5'), ('delete', 14, 15),
+            ('field', 17, 't2'),
+            ('version', 17, 18),
+        ])
+
+    def test_plan_threads_is_idempotent_for_merged_documents(self):
+        Msg = self.tm.Msg
+        self.assertEqual(self.tm.plan_threads([Msg('1', 't1', 1, False, 'att', [10], None), Msg('2', 't1', 2, True, 'att', [10], None)]), [('field', 10, 't1')])
+
+
 if __name__ == '__main__':
     unittest.main()

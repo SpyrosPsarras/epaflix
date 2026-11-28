@@ -37,21 +37,21 @@ On 2026-11-27 a shop sent an invoice PDF. Paperless imported it as document 2684
 
 A second container, `thread-sync`, in the Paperless pod. It uses the Paperless image, environment and volume, and runs `ingest/thread_sync.py` through `manage.py shell` every 10 minutes. A kustomize `configMapGenerator` ships the script. It reads the Gmail login from Paperless mail account `gmail`, so no new secret exists. It queues imports on Paperless's own task queue with `consume_file`, like an upload from the UI.
 
-The script fails a message, not the run. A message that fails keeps no done label, is logged with its Gmail message ID and is retried next run. An error outside a message, such as a lost IMAP connection, exits the container, and Kubernetes restarts it.
+The script fails a message, not the run. A message that hits an error keeps no done label, is logged with its Gmail message ID and is retried next run. A message whose Paperless import failed gets `paperless-failed` and waits until the owner removes that label. An error outside a message, such as a lost IMAP connection, exits the container, and Kubernetes restarts it.
 
 ### State
 
 - Gmail thread to document: custom field `Gmail thread` (string) on the document, set at import.
-- Message handled: Gmail label `paperless-done` on the message. Old mail keeps `paperless-done-att` and `paperless-done-eml`, and the script skips those too.
+- Message handled: Gmail label `paperless-done` on the message. Import failed: `paperless-failed`. Old mail keeps `paperless-done-att` and `paperless-done-eml`, and the script skips those too.
 - File already imported: Paperless checksum, SHA-256 of the original file. A file whose checksum exists on any document or version, trash included, is not imported again.
-- File still queued: a pending or started `consume_file` task from the last 6 hours with the same filename in `PaperlessTask.input_data`. The script waits for it. A failed task with that filename in the last 24 hours makes the script skip the file and log it, so a broken file is retried once a day, not every run.
+- File still queued: a pending or started `consume_file` task from the last 6 hours with the same filename in `PaperlessTask.input_data`. The script waits for it. Queued files are named `<first 12 hex of SHA-256>-<name>`, so two mails with `invoice.pdf` never collide. A failed task for that file in the last 24 hours puts `paperless-failed` on the message.
 - Note already written: a note on the document with the same text.
 
 Every step checks this state first, so a run can stop anywhere and the next run picks up.
 
 ### Which messages each run reads
 
-From `[Gmail]/All Mail`, oldest first, without `paperless-done`, `paperless-done-att` or `paperless-done-eml`:
+From `[Gmail]/All Mail`, oldest first, without `paperless-done`, `paperless-failed`, `paperless-done-att` or `paperless-done-eml`:
 
 1. `label:paperless-receipt OR label:paperless-receipt-body`, any age. This covers labels the owner adds by hand to old mail.
 2. `newer_than:7d`, for later messages in conversations that already have a document. Unlabelled messages, such as the owner's own replies, are found this way.
@@ -74,15 +74,15 @@ The message gets `paperless-done` once every file is imported and the note exist
 
 ### Joined file
 
-When a document has two or more original files, each with a PDF, and its newest version does not already join all of them, the script builds one PDF from them in version order. Original PDFs are used as they are. Office files and email pages use Paperless's archive PDF. It imports that PDF as the newest version, labelled `All files: <document IDs>`. The IDs show which files it holds and tell the next run whether it is current. Originals stay as older versions.
+The join pass looks at documents with versions whose modified time is in the last 2 days. When a document has two or more original files, each with a PDF, and its newest version does not already join all of them, the script builds one PDF from them in version order. Original PDFs are used as they are. Office files and email pages use Paperless's archive PDF. It imports that PDF as the newest version, labelled `All files: <document IDs>`, or `All files: <count> files #<hash>` when the IDs pass the 64-character label limit. The label shows which files it holds and tell the next run whether it is current. Originals stay as older versions.
 
 ### Existing documents
 
 A one-off script, `ingest/thread_migrate.py`, dry-run by default:
 
-1. It matches each Gmail document to its mail. It uses the `ProcessedMail` row (folder and UID), the Gmail thread from IMAP, and the document with the same original filename added within one hour after the row's processed time. It sets `Gmail thread` on matches and lists the rest.
-2. For conversations with more than one document, the oldest stays. Later email pages become notes and are deleted. Later files become versions through `merge_as_versions`, then the joined file is built.
-3. The dry run prints the plan: document IDs only, no mail text. Deletions run only after the owner approves that list.
+1. It reads every Gmail message with `paperless-done-att` or `paperless-done-eml` and matches it to its documents by SHA-256. Paperless stored the attachment bytes and the email with `From` moved first, which is what `eligible_parts` and `eml_bytes` produce. A check on 2026-11-28 matched documents 26843, 26844 and 26845 exactly.
+2. It applies the same rules as the sync, oldest message first. A message that starts a conversation keeps its document and gets `Gmail thread`. A reply's email page becomes a note on that document and goes to the trash. A reply's files become versions through `merge_as_versions`. The sync's join pass then builds the joined file, because merging updates the document's modified time.
+3. The dry run prints the plan: document IDs only, no mail text. `THREAD_MIGRATE_APPLY=1` runs it, only after the owner approves that list. Trashed documents stay restorable for 30 days.
 
 ### Mail rules and setup
 
@@ -103,7 +103,7 @@ README sections Email and Drive import, Mail rules and Configure Gmail describe 
 - R1. Messages more than 7 days late after an outage miss group 2. Labelled ones still arrive through group 1. Fix by adding the label by hand, or widening the window for one run.
 - R2. The quote cut misses a mail client's format, and a note carries the quoted history. Notes get longer but nothing is lost.
 - R3. A reply that carries a new, unrelated receipt becomes a version of the old document. The owner splits it in the UI.
-- R4. The migration matches by filename and time. Unmatched documents keep working as single documents.
+- R4. Documents the migration cannot match by checksum keep working as single documents.
 - R5. The `thread-sync` container restarts Paperless's pod when its script changes, about one minute of downtime per change.
 
 ## Left to the builder
