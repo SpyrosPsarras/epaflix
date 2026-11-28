@@ -509,5 +509,130 @@ class DriveRuntimeTests(unittest.TestCase):
             self.assertEqual(len(self.exports), 1)
 
 
+def mail(body='Hi', html=None, parts=(), headers=None):
+    from email.message import EmailMessage
+    msg = EmailMessage()
+    msg['Subject'] = 'Faktura 12'
+    msg['From'] = 'Shop <shop@example.test>'
+    msg['To'] = 'owner@example.test'
+    msg['Date'] = 'Fri, 27 Nov 2026 14:57:30 +0000'
+    for key, value in (headers or {}).items():
+        msg[key] = value
+    msg.set_content(body)
+    if html is not None:
+        msg.add_alternative(html, subtype='html')
+    for maintype, subtype, data, filename, disposition in parts:
+        msg.add_attachment(data, maintype=maintype, subtype=subtype, filename=filename, disposition=disposition)
+    if not body and html is not None:
+        msg = EmailMessage()
+        msg['Subject'] = 'Faktura 12'
+        msg['From'] = 'Shop <shop@example.test>'
+        msg.set_content(html, subtype='html')
+    return msg
+
+
+class ThreadSyncTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.ts = load('thread_sync')
+
+    def test_eligible_parts_inline_nameless_pdf(self):
+        msg = mail(parts=[('application', 'pdf', b'%PDF-1', None, 'inline'), ('image', 'png', b'png', 'logo.png', 'inline'), ('application', 'octet-stream', b'doc', 'x.docx', 'attachment'), ('application', 'pdf', b'%PDF-2', None, 'inline')])
+        parts = self.ts.eligible_parts(msg, 'Faktura 12')
+        self.assertEqual(parts, [
+            self.ts.Part('Faktura 12.pdf', b'%PDF-1'),
+            self.ts.Part('x.docx', b'doc'),
+            self.ts.Part('Faktura 12 2.pdf', b'%PDF-2'),
+        ])
+        self.assertEqual(self.ts.eligible_parts(mail(parts=[('application', 'pdf', b'%PDF', 'a/b:c.pdf', 'attachment')]), 'x')[0].name, 'a_b_c.pdf')
+
+    def test_cut_quote(self):
+        for marker in ['> old', 'On Fri, 27 Nov 2026 Shop <shop@example.test> wrote:', 'Den 27. nov. 2026 skrev Shop:', '-----Original Message-----', 'From: Shop', 'Fra: Shop']:
+            with self.subTest(marker=marker):
+                self.assertEqual(self.ts.cut_quote(f'Thanks\n\n{marker}\nold text'), 'Thanks')
+        self.assertEqual(self.ts.cut_quote('Hi\nOn Fri, 27 Nov 2026 at 15:57, Shop <\nshop@example.test> wrote:\nold'), 'Hi')
+        self.assertEqual(self.ts.cut_quote('  Hi\n\n\n\nthere  '), 'Hi\n\nthere')
+
+    def test_body_text_html_only(self):
+        text = self.ts.body_text(mail(body='', html='<p>Hi<br>there</p><style>p{}</style><blockquote>old</blockquote>'))
+        self.assertEqual(text, 'Hi\nthere')
+        nested = self.ts.html_text('<p>Hi</p><div class="gmail_quote"><div>old<br>older</div><img src=x>oldest</div><p>after</p>')
+        self.assertEqual(nested.split(), ['Hi', 'after'])
+        self.assertEqual(self.ts.body_text(mail(body='Plain\n> quoted', html='<p>Html</p>')), 'Plain')
+
+    def test_note_text(self):
+        from datetime import datetime
+        self.assertEqual(self.ts.note_text('Shop <shop@example.test>', datetime(2026, 11, 27, 15, 57), 'Thanks'), 'From Shop <shop@example.test>, 2026-11-27 15:57\n\nThanks')
+        self.assertIsNone(self.ts.note_text('Shop', datetime(2026, 11, 27), ''))
+
+    def test_eml_bytes_starts_with_from(self):
+        raw = b'Subject: x\r\nFrom: a@example.test\r\n\r\nbody\r\n'
+        out = self.ts.eml_bytes(raw)
+        self.assertTrue(out.startswith(b'From: a@example.test'))
+        self.assertEqual(out, self.ts.eml_bytes(raw))
+
+    def test_is_reply(self):
+        self.assertFalse(self.ts.is_reply(mail()))
+        self.assertTrue(self.ts.is_reply(mail(headers={'In-Reply-To': '<a@example.test>'})))
+        self.assertTrue(self.ts.is_reply(mail(headers={'References': '<a@example.test>'})))
+
+    def test_classify_non_reply_in_known_thread(self):
+        c = self.ts.classify
+        self.assertEqual(c({'paperless-receipt'}, True, False), 'attachments')
+        self.assertEqual(c(set(), True, True), 'followup')
+        self.assertEqual(c({'paperless-receipt-body'}, True, True), 'followup')
+        self.assertIsNone(c(set(), True, False))
+        self.assertIsNone(c(set(), False, True))
+        self.assertEqual(c({'paperless-receipt-body'}, False, True), 'body')
+
+    def plan(self, kind, parts, note='note', present=(), queued=(), failed=(), has_root=False):
+        eml = self.ts.Part('Faktura 12.eml', b'eml')
+        present = {self.ts.checksum(p.data) for p in present}
+        return self.ts.plan_message(kind, parts, eml, note, present, set(queued), set(failed), has_root)
+
+    def test_plan_message_idempotent(self):
+        a, b = self.ts.Part('a.pdf', b'a'), self.ts.Part('b.pdf', b'b')
+        self.assertEqual(self.plan('attachments', [a, b], present=[a, b], has_root=True), self.ts.Plan(None, [], 'note', True))
+        self.assertEqual(self.plan('attachments', [a, b]), self.ts.Plan(a, [], None, False))
+        self.assertEqual(self.plan('attachments', [a, b], present=[a], has_root=True), self.ts.Plan(None, [b], 'note', False))
+        self.assertEqual(self.plan('followup', [a], has_root=True), self.ts.Plan(None, [a], 'note', False))
+        self.assertEqual(self.plan('followup', [], has_root=True), self.ts.Plan(None, [], 'note', True))
+        self.assertEqual(self.plan('attachments', [a], present=[a]), self.ts.Plan(None, [], None, True))
+
+    def test_plan_message_waits_on_failed(self):
+        a, b = self.ts.Part('a.pdf', b'a'), self.ts.Part('b.pdf', b'b')
+        self.assertEqual(self.plan('attachments', [a, b], queued=['a.pdf']), self.ts.Plan(None, [], None, False))
+        self.assertEqual(self.plan('attachments', [a, b], failed=['a.pdf']), self.ts.Plan(b, [], None, False))
+        self.assertEqual(self.plan('followup', [a, b], failed=['a.pdf'], has_root=True), self.ts.Plan(None, [b], 'note', False))
+        self.assertEqual(self.plan('followup', [a], queued=['a.pdf'], has_root=True), self.ts.Plan(None, [], 'note', False))
+
+    def test_plan_body_and_fallback(self):
+        eml = self.ts.Part('Faktura 12.eml', b'eml')
+        a = self.ts.Part('a.pdf', b'a')
+        self.assertEqual(self.plan('body', [a]), self.ts.Plan(eml, [], None, False))
+        self.assertEqual(self.plan('attachments', []), self.ts.Plan(eml, [], None, False))
+        self.assertEqual(self.plan('body', [], present=[eml], has_root=True), self.ts.Plan(None, [], None, True))
+        self.assertEqual(self.plan('followup', [], has_root=True).new, None)
+
+    def test_needs_join(self):
+        n = self.ts.needs_join
+        self.assertIsNone(n([(1, True)], None))
+        self.assertEqual(n([(1, True), (2, True)], 'b.pdf'), [1, 2])
+        self.assertIsNone(n([(1, True), (2, False)], 'b.pdf'))
+        self.assertIsNone(n([(1, True), (2, True)], 'All files: 1, 2'))
+        self.assertEqual(n([(1, True), (2, True), (3, True)], 'All files: 1, 2'), [1, 2, 3])
+
+    def test_parse_gm_fetch(self):
+        lines = [
+            b'1 (X-GM-THRID 1855 X-GM-MSGID 1856 X-GM-LABELS ("\\\\Important" paperless-receipt "Old label") UID 94095)',
+            (b'2 (UID 94114 X-GM-THRID 1855 X-GM-MSGID 1857 X-GM-LABELS () BODY[] {4}', b'body'),
+            b')',
+        ]
+        self.assertEqual(self.ts.parse_gm_fetch(lines), {
+            '94095': ('1856', '1855', {'\\Important', 'paperless-receipt', 'Old label'}),
+            '94114': ('1857', '1855', set()),
+        })
+
+
 if __name__ == '__main__':
     unittest.main()
