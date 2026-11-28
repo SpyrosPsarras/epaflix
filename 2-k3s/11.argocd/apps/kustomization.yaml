@@ -30,7 +30,6 @@ resources:
   - app-observability.yaml
   - app-paperless.yaml
   - app-postgres.yaml
-  - app-rackpeek.yaml
   - app-reloader.yaml
   - app-remote-pi.yaml
   - app-renovate.yaml

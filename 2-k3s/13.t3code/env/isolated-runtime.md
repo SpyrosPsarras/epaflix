@@ -85,8 +85,8 @@ owner's private Forgejo repo, `spypsarras/skills` for homelab and
 `spypsarras/skills-work` for work. `env/files/instructions-sync.py` fetches it
 over `https://git.epaflix.com` with the pod's `tea` login and writes that text,
 then this image's runtime facts, then the variant's SSH guide. It does not use
-the in-cluster Forgejo service, whose ingress policy admits only Traefik,
-RackPeek and the hubs' skills pods.
+the in-cluster Forgejo service, whose ingress policy admits only Traefik
+and the hubs' skills pods.
 
 Startup runs the script once after `isolated-config.py apply`. The
 `instructions` sidecar runs it every 60 seconds and logs a line when the

@@ -45,13 +45,6 @@ spec:
                     secretKeyRef:
                       name: homelable-secrets
                       key: MCP_SERVICE_KEY
-                - name: RPK_URL
-                  value: http://rackpeek.rackpeek.svc:8080
-                - name: RPK_API_KEY
-                  valueFrom:
-                    secretKeyRef:
-                      name: homelab-sync-secrets
-                      key: RPK_API_KEY
                 - name: HOMELAB_LIVE_URL
                   value: https://git-internal.epaflix.com/homelab-bot/homelab-live.git
                 - name: HOMELAB_LIVE_TOKEN

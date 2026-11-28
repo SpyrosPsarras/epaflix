@@ -11,20 +11,19 @@ DESIGN_ID = "d-index"
 
 
 def stored_canvas():
-    body = hl.payload(hl.seed_items(fx.stored()), {}, {}, DESIGN_ID)
+    body = hl.payload(fx.stored(), {}, {}, DESIGN_ID)
     return {"nodes": body["nodes"], "edges": body["edges"], "viewport": {}, "custom_style": None}
 
 
 class FakeIO:
     def __init__(self, down_hosts=(), hl_down=False, push_down=False, leaks=(), git_sync_down=False,
-                 save_down=False, design=True, rpk_down=False, k8s_down=False, docs=None):
+                 save_down=False, design=True, k8s_down=False, docs=None):
         self.down_hosts = set(down_hosts)
         self.hl_down = hl_down
         self.push_down = push_down
         self.leaks = list(leaks)
         self.git_sync_down = git_sync_down
         self.save_down = save_down
-        self.rpk_down = rpk_down
         self.k8s_down = k8s_down
         self.design = design
         self.docs = dict(docs or {})
@@ -76,13 +75,6 @@ class FakeIO:
             raise RuntimeError("502")
         self.git_syncs += 1
 
-    def rpk_get(self):
-        if self.rpk_down:
-            raise OSError("rackpeek down")
-        return {"version": 5, "resources": fx.stored() + [
-            {"kind": "Service", "name": "forgejo/deploy/forgejo", "tags": ["sync"], "labels": {},
-             "runsOn": ["app/forgejo"], "notes": "rootless"}]}
-
     def k8s(self):
         if self.k8s_down:
             raise OSError("api down")
@@ -113,8 +105,8 @@ class FakeIO:
 HOSTS = {"takaros": "root@192.168.10.10", "truenas": "truenas_admin@192.168.10.200"}
 
 
-def run(io, seed=False):
-    return sync.run(io, HOSTS, fx.TODAY, io.log.append, seed)
+def run(io):
+    return sync.run(io, HOSTS, fx.TODAY, io.log.append)
 
 
 def nodes(io):
@@ -156,20 +148,7 @@ class Sync(unittest.TestCase):
         self.assertEqual(io.created_docs + io.updated_docs, [])
         self.assertEqual(io.pushed, [])
 
-    def test_seed_from_rackpeek(self):
-        io = FakeIO(design=False)
-        self.assertEqual(run(io, seed=True), 0)
-        self.assertEqual(io.created_designs, [hl.DESIGN])
-        self.assertEqual(nodes(io)["app/forgejo"]["notes"], "why\n\n### forgejo/deploy/forgejo\nrootless")
-        self.assertIn("VM/Truenas", nodes(io))
-
-    def test_seed_rackpeek_down(self):
-        io = FakeIO(design=False, rpk_down=True)
-        self.assertEqual(run(io, seed=True), 1)
-        self.assertEqual(io.created_designs, [])
-        self.assertEqual(io.saves, [])
-
-    def test_no_seed_without_rpk_env(self):
+    def test_first_run_creates_design(self):
         io = FakeIO(design=False)
         self.assertEqual(run(io), 0)
         self.assertEqual(io.created_designs, [hl.DESIGN])
@@ -283,13 +262,6 @@ class Sync(unittest.TestCase):
         io.canvas = lambda design_id: orig(design_id) if io.canvas_reads == 0 else {"nodes": []}
         self.assertEqual(run(io), 1)
         self.assertEqual(io.saves, [])
-
-    def test_seed_again_when_design_empty(self):
-        io = FakeIO()
-        io.canvas = lambda design_id: {"nodes": [], "edges": [], "viewport": {}, "custom_style": None}
-        self.assertEqual(run(io, seed=True), 0)
-        self.assertEqual(io.created_designs, [])
-        self.assertEqual(nodes(io)["app/forgejo"]["notes"], "why\n\n### forgejo/deploy/forgejo\nrootless")
 
     def test_failed_host_keeps_guest_in_box(self):
         first = FakeIO()

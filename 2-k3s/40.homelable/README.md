@@ -1,6 +1,6 @@
 # Homelable
 
-Homelable is the homelab index: a drawn network and rack canvas with live up/down checks, Markdown pages, and a network scanner. It replaces RackPeek. Design: [docs/superpowers/specs/2026-11-24-homelable-design.md](../../docs/superpowers/specs/2026-11-24-homelable-design.md).
+Homelable is the homelab index: a drawn network and rack canvas with live up/down checks, Markdown pages, and a network scanner. It replaced RackPeek in 2026-11. Design: [docs/superpowers/specs/2026-11-24-homelable-design.md](../../docs/superpowers/specs/2026-11-24-homelable-design.md).
 
 At https://homelable.epaflix.com, sign in through Authentik as a member of `authentik Admins`. The site is on Traefik's internal entrypoint only (LAN and Tailscale). Login is OpenID only (`AUTH_MODE=oidc`): Homelable turns its local login off, and it has no group check of its own, so the policy binding on Authentik application `homelable` is the only gate. The provider and application live in `2-k3s/07.authentik-deployment/authentik-iac-blueprint.enc.yaml`; the client id and secret exist there and in `secrets.enc.yaml`, so change them in both in the same commit.
 
@@ -24,7 +24,7 @@ Scripts call `http://homelable.homelable.svc` with `X-MCP-Service-Key`. The ingr
 
 ## Git history
 
-`GIT_SYNC_*` pushes documents and diagrams, including node notes and properties, to the private Forgejo repo `homelab-bot/homelable-config` over `https://git-internal.epaflix.com`, when someone presses Sync or the nightly sync calls it. The token is the bot's `write:repository` token. Homelable runs `git ls-remote` before its first push, and Forgejo answers 404 for a repo that does not exist, so the repo was created empty beforehand with the bot's `write:user` token (`POST /api/v1/user/repos`, `private: true`), the same way as RackPeek's `rackpeek-config`.
+`GIT_SYNC_*` pushes documents and diagrams, including node notes and properties, to the private Forgejo repo `homelab-bot/homelable-config` over `https://git-internal.epaflix.com`, when someone presses Sync or the nightly sync calls it. The token is the bot's `write:repository` token. Homelable runs `git ls-remote` before its first push, and Forgejo answers 404 for a repo that does not exist, so the repo was created empty beforehand with the bot's `write:user` token (`POST /api/v1/user/repos`, `private: true`).
 
 ## Homelab index
 
@@ -43,7 +43,7 @@ Sync nodes carry properties `managed-by: homelab-sync` and `index-name`. Their n
 
 Hosts and guests with a known address (the `HOSTS` list, or a static `ip=` in the Proxmox guest config) get a ping check. Guests on DHCP get none. Guests sit inside their Proxmox host's box.
 
-When `Homelab index` does not exist yet, the first run creates it and copies notes from RackPeek (`RPK_URL`), appending each workload's notes to its app's notes under a `### <workload>` heading. If RackPeek cannot be read, nothing is created and the next run tries again.
+Notes came over from RackPeek, which Homelable replaced, on the first run (2026-11-28).
 
 The scan key is Secret `homelab-scan-key` (type `kubernetes.io/ssh-auth`); its public half is `homelab-scan-key.pub`. Host keys are pinned in ConfigMap `homelab-known-hosts`. The ServiceAccount reads through ClusterRole `homelab-sync-reader`, bound per namespace in `homelab-sync-rbac.yaml`; a namespace without a binding is not indexed. `t3code-work` and `mcp-hub-work` are never bound and are skipped in code. `jumpbox` is not scanned: its login user has no sudo. It still appears as a guest from Proxmox.
 
