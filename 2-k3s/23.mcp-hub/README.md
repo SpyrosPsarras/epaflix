@@ -41,7 +41,10 @@ Clients need the Skills extension. Pi has none built in, so the laptop,
 homePC and both T3 runtimes load the `@jangmanj/pi-mcp-ext` package, whose
 `mcp_skills` tool lists, loads and reads skills and asks for approval before
 the first load of each skill in a session. The T3 runtimes' Pi launcher sets
-`PI_MCP_EXT_INCLUDE=skills`, so the package opens only that server.
+`PI_MCP_EXT_INCLUDE=skills`, so the package opens only that server, and
+`PI_MCP_EXT_SKILL_AUTO_APPROVE=skills`, so the runtimes' fork pin
+([#2507](https://github.com/SpyrosPsarras/epaflix/issues/2507)) loads hub skills
+without the prompt and lists them in the system prompt.
 
 Shared gateway modules live in `files/`. `tools/hub_clients.py` and
 `tools/hub_services.py` have byte copies maintained by
