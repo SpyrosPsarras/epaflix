@@ -132,7 +132,7 @@ images:
   - name: ghcr.io/raydak-labs/configarr
     newTag: 1.38.0@sha256:36d15adcc815557409a9437bc51468edfd1ac05ef6b46336dff650a56d2cc6a3
   - name: ghcr.io/linuxserver/sonarr
-    newTag: 4.0.20@sha256:673dc4609a5672bc8e46069c86ffcea283a86b48d34a6c93d8da8c24a1b87571
+    newTag: 4.0.20@sha256:339814bbf50599ac3b59077c252f29833d0138b59a062d0e82ce37bdc7f04f86
   - name: ghcr.io/linuxserver/lidarr
     newTag: 3.1.6@sha256:a91ef0642c15c9bd7c4260fee98fa99972c61601e37c8a96411d6a9cf0e9ad40
   - name: ghcr.io/iuliandita/digarr
