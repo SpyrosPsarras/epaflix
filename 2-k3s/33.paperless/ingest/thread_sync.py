@@ -17,6 +17,7 @@ FAILED = 'paperless-failed'
 NOT_DONE = f'-label:{DONE} -label:{FAILED} -label:paperless-done-att -label:paperless-done-eml -in:drafts'
 QUERIES = [f'(label:{RECEIPT} OR label:{BODY}) {NOT_DONE}', f'newer_than:7d {NOT_DONE}']
 THREAD_FIELD = 'Gmail thread'
+LEGACY_RULES = ['gmail-receipt-bodies', 'gmail-attachments']
 JOINED = 'All files: '
 EXTENSIONS = {
     'application/pdf': 'pdf',
@@ -281,8 +282,9 @@ class DjangoStore:
         return self
 
     def old_rules_active(self, now):
-        if self.account.rules.filter(enabled=True).exists():
-            return True
+        return self.account.rules.filter(name__in=LEGACY_RULES).exists() or self.legacy_pending(now)
+
+    def legacy_pending(self, now):
         # shortcut: 1,714 tasks from the 2026-11-18 backlog stay pending with an empty queue, so only the last day counts.
         pending = self.Task.objects.filter(
             task_type=self.Task.TaskType.CONSUME_FILE, status__in=[self.Task.Status.PENDING, self.Task.Status.STARTED],

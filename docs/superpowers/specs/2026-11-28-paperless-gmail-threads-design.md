@@ -35,7 +35,7 @@ On 2026-11-27 a shop sent an invoice PDF. Paperless imported it as document 2684
 
 ### Where it runs
 
-A second container, `thread-sync`, in the Paperless pod. It uses the Paperless image, environment and volume, and runs `ingest/thread_sync.py` through `manage.py shell` every 10 minutes. A kustomize `configMapGenerator` ships the script. It reads the Gmail login from Paperless mail account `gmail`, so no new secret exists. It queues imports on Paperless's own task queue with `consume_file`, like an upload from the UI. It imports nothing while an old mail rule is enabled or an old-rule import from the last 24 hours is still queued. The migration turns the rules off as its last step, so the sync starts only after existing documents carry `Gmail thread`. The 24-hour window skips 1,714 tasks from the 2026-11-18 backlog that stay pending while the queue is empty. It looks up the `Gmail thread` field and never creates it.
+A second container, `thread-sync`, in the Paperless pod. It uses the Paperless image, environment and volume, and runs `ingest/thread_sync.py` through `manage.py shell` every 10 minutes. A kustomize `configMapGenerator` ships the script. It reads the Gmail login from Paperless mail account `gmail`, so no new secret exists. It queues imports on Paperless's own task queue with `consume_file`, like an upload from the UI. It imports nothing while mail rules named `gmail-receipt-bodies` or `gmail-attachments` exist or an old-rule import from the last 24 hours is still queued. The migration renames the rules to `… (retired)` as its last step, so the sync starts only after existing documents carry `Gmail thread`. The 24-hour window skips 1,714 tasks from the 2026-11-18 backlog that stay pending while the queue is empty. It looks up the `Gmail thread` field and never creates it.
 
 The script fails a message, not the run. A message that hits an error keeps no done label, is logged with its Gmail message ID and is retried next run. A message whose Paperless import failed gets `paperless-failed` and waits until the owner removes that label. An error outside a message, such as a lost IMAP connection, exits the container, and Kubernetes restarts it.
 
@@ -81,11 +81,11 @@ A one-off script, `ingest/thread_migrate.py`, dry-run by default:
 
 1. It reads every Gmail message with `paperless-done-att` or `paperless-done-eml` and matches it to its documents by SHA-256. Paperless stored the attachment bytes and the email with `From` moved first, which is what `eligible_parts` and `eml_bytes` produce. A check on 2026-11-28 matched documents 26843, 26844 and 26845 exactly.
 2. It applies the same rules as the sync, oldest message first. A message that starts a conversation keeps its document and gets `Gmail thread`. A reply's email page becomes a note on that document and goes to the trash. A reply's files become versions through `merge_as_versions`. The sync's join pass then builds the joined file, because merging updates the document's modified time.
-3. The dry run prints the plan: document IDs only, no mail text. `THREAD_MIGRATE_APPLY=1` runs it, only after the owner approves that list. Then it turns the old mail rules off, waits for their queued imports and repeats the plan for mail from the last two days. Trashed documents stay restorable for 30 days.
+3. The dry run prints the plan, document IDs only, and a fingerprint of its version and delete actions. `THREAD_MIGRATE_APPLY=<fingerprint>` turns the old rules off, waits for their queued imports, plans once more over all messages and applies only when the fingerprint matches what the owner approved. Then it renames the rules. Trashed documents stay restorable for 30 days.
 
 ### Mail rules and setup
 
-`ingest/configure.py` creates the `Gmail thread` custom field and keeps the mail account setup. It never turns an existing rule on or off; new rules start off. The rules stay in Paperless so Processed Mails keeps its history.
+`ingest/configure.py` creates the `Gmail thread` custom field and keeps the mail account setup. It no longer creates mail rules. The retired rules stay in Paperless so Processed Mails keeps its history.
 
 ### Observability
 
@@ -95,7 +95,7 @@ A one-off script, `ingest/thread_migrate.py`, dry-run by default:
 
 ### Docs
 
-README sections Email and Drive import, Mail rules and Configure Gmail describe the new flow, the labels and how to re-import a message: remove `paperless-done`, delete the document or version, and the next run imports it again.
+README sections Email and Drive import, Gmail threads, Migrate existing Gmail documents and Configure Gmail describe the new flow, the labels and how to re-import a message: remove `paperless-done`, delete the document or version, and the next run imports it again.
 
 ## Risks
 

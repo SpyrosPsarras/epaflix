@@ -178,13 +178,9 @@ class ConfigureRuntimeTests(unittest.TestCase):
 
     def test_configuration_is_private_and_idempotent(self):
         self.run_configure()
-        self.assertFalse(self.rules.rows['gmail-attachments'].enabled)
-        self.rules.rows['gmail-attachments'].enabled = True
         self.run_configure(shell=True)
-        self.assertTrue(self.rules.rows['gmail-attachments'].enabled)
-        self.rules.rows['gmail-attachments'].enabled = False
         self.assertEqual(len(self.accounts.rows), 1)
-        self.assertEqual(len(self.rules.rows), 2)
+        self.assertEqual(self.rules.rows, {})
         self.assertEqual(len(self.tags.rows), 3)
         account = self.accounts.rows['gmail']
         self.assertIs(account.owner, self.owner)
@@ -192,20 +188,7 @@ class ConfigureRuntimeTests(unittest.TestCase):
         for name in ['source:gmail', 'source:drive']:
             self.assertIsNone(self.tags.rows[name].owner)
             self.assertEqual(self.tags.rows[name].matching_algorithm, 0)
-        receipt = self.rules.rows['gmail-receipt-bodies']
-        attachments = self.rules.rows['gmail-attachments']
-        self.assertEqual((receipt.order, receipt.folder, receipt.consumption_scope, receipt.action_parameter), (1, 'paperless-receipt-body', 2, 'paperless-done-eml'))
-        self.assertEqual((attachments.order, attachments.folder, attachments.consumption_scope, attachments.action_parameter), (2, 'paperless-receipt', 1, 'paperless-done-att'))
-        self.assertIsNone(receipt.filter_attachment_filename_include)
-        self.assertEqual(attachments.filter_attachment_filename_include, '*.pdf,*.doc,*.docx,*.xls,*.xlsx,*.odt,*.ods')
-        for rule in [receipt, attachments]:
-            self.assertIs(rule.owner, self.owner)
-            self.assertTrue(rule.assign_owner_from_rule)
-            self.assertEqual((rule.maximum_age, rule.action, rule.assign_title_from, rule.assign_correspondent_from, rule.attachment_type), (0, 5, 1, 1, 1))
-            self.assertFalse(rule.enabled)
         self.assertEqual(self.fields.rows['Gmail thread'].data_type, 'string')
-        self.assertEqual([tag.name for tag in receipt.assign_tags.items], ['source:gmail', 'paperless-gpt-auto'])
-        self.assertEqual([tag.name for tag in attachments.assign_tags.items], ['source:gmail', 'paperless-gpt-auto'])
         self.assertEqual([tag.name for tag in self.trigger.filter_has_not_tags.items], ['source:gmail', 'source:drive'])
 
     def test_missing_prerequisite_changes_nothing(self):
@@ -869,6 +852,14 @@ class ThreadMigrateTests(unittest.TestCase):
     def test_plan_threads_never_trashes_root(self):
         Msg = self.tm.Msg
         self.assertEqual(self.tm.plan_threads([Msg('1', 't1', 1, False, 'att', [10], None), Msg('2', 't1', 2, True, 'eml', [10], 'n2')]), [('field', 10, 't1'), ('note', 10, 'n2')])
+
+    def test_fingerprint_covers_destructive_actions_only(self):
+        fp = self.tm.fingerprint
+        base = [('field', 10, 't1'), ('note', 10, 'n'), ('version', 10, 11), ('delete', 10, 12)]
+        self.assertEqual(len(fp(base)), 12)
+        self.assertEqual(fp(base), fp([('field', 10, 't1'), ('version', 10, 11), ('delete', 10, 12), ('note', 10, 'other')]))
+        self.assertNotEqual(fp(base), fp(base + [('delete', 10, 13)]))
+        self.assertNotEqual(fp(base), fp(base[:3]))
 
     def test_plan_threads_is_idempotent_for_merged_documents(self):
         Msg = self.tm.Msg

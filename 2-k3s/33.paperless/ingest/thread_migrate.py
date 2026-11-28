@@ -7,7 +7,7 @@ from collections import Counter
 from typing import NamedTuple
 
 sys.path[:0] = ['/ingest']
-from thread_sync import DjangoStore, GmailBox, body_text, checksum, eligible_parts, eml_bytes, is_reply, note_text  # noqa: E402
+from thread_sync import LEGACY_RULES, DjangoStore, GmailBox, body_text, checksum, eligible_parts, eml_bytes, is_reply, note_text  # noqa: E402
 
 QUERY = 'label:paperless-done-att OR label:paperless-done-eml'
 
@@ -89,32 +89,42 @@ def apply(actions, store):
             store.Document.objects.get(pk=value).delete()
 
 
-def report(messages, actions, detail=True):
+def fingerprint(actions) -> str:
+    return checksum(repr([a for a in actions if a[0] in ('version', 'delete')]).encode())[:12]
+
+
+def report(messages, actions):
     print(f'messages={len(messages)} unmatched={sum(not m.doc_ids for m in messages)}', dict(Counter(a[0] for a in actions)), flush=True)
-    for action, root, value in actions if detail else []:
+    for action, root, value in actions:
         if action in ('version', 'delete'):
             print(action, root, value)
+    print(f'fingerprint={fingerprint(actions)}', flush=True)
 
 
 def main():
     from django.utils import timezone
     store = DjangoStore().load()
+    approved = os.environ.get('THREAD_MIGRATE_APPLY')
+    rules = store.account.rules.filter(name__in=LEGACY_RULES)
+    if approved:
+        rules.update(enabled=False)
+        print('old mail rules off, waiting for their queued imports', flush=True)
+        while store.legacy_pending(timezone.now()):
+            time.sleep(30)
     with GmailBox(store.account) as box:
         messages = scan(box, store)
-        actions = plan_threads(messages)
-        report(messages, actions)
-        if os.environ.get('THREAD_MIGRATE_APPLY') != '1':
-            return
-        apply(actions, store)
-        store.account.rules.update(enabled=False)
-        print('applied; old mail rules off, waiting for their queued imports', flush=True)
-        while store.old_rules_active(timezone.now()):
-            time.sleep(30)
-        messages = scan(box, store, f'({QUERY}) newer_than:2d')
-        actions = plan_threads(messages)
-        report(messages, actions)
-        apply(actions, store)
-        print('done; thread-sync starts on its next run', flush=True)
+    actions = plan_threads(messages)
+    report(messages, actions)
+    if not approved:
+        return
+    if fingerprint(actions) != approved:
+        print('plan changed since the approved dry run: review the plan above, then run again with its fingerprint', flush=True)
+        return
+    apply(actions, store)
+    for rule in rules:
+        rule.name = f'{rule.name} (retired)'
+        rule.save(update_fields=['name'])
+    print('done; thread-sync starts on its next run', flush=True)
 
 
 if __name__ in ('__main__', 'django.core.management.commands.shell'):
