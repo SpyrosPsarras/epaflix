@@ -89,7 +89,7 @@ Writer:
 7. New nodes get grid positions inside their parent.
 8. One `POST /api/v1/canvas/save` with the full list. If the read in step 6 failed, nothing is saved and the Job exits 1, because a save without the stored nodes would delete them.
 9. Then `POST /api/v1/git-sync`. Failure sets exit 1 but keeps the save. Pushed diagrams come from `load_canvas` and include notes and properties (`routes/git_sync.py`, `_collect`). They also include `status` and `last_seen`, so expect one commit a night.
-10. Auth header `X-MCP-Service-Key` from Secret `homelab-sync-homelable` (same value as in `homelable-secrets`). URL `http://homelable.homelable.svc`.
+10. Auth header `X-MCP-Service-Key` from `homelable-secrets/MCP_SERVICE_KEY`. URL `http://homelable.homelable.svc`.
 
 Labels and notes pass through `build.scrub` as today.
 
