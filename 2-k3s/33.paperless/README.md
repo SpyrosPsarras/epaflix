@@ -147,7 +147,7 @@ kubectl -n paperless logs deploy/paperless -c thread-sync --tail 20
 
 To retry a failed message, fix the cause, wait until the failed task in the Paperless task list is 24 hours old, then remove `paperless-failed`. Removing it earlier puts the label back on the next run. To import a message again, permanently delete its document or version, then remove `paperless-done`. A file whose checksum exists in Paperless, trash included, is never imported twice.
 
-While mail rules named `gmail-receipt-bodies` or `gmail-attachments` exist, or their imports from the last 24 hours are queued, thread-sync logs `waiting until thread_migrate.py has run` and imports nothing. The migration turns those rules off and, as its last step, renames them to `… (retired)`, so Mail > Processed Mails keeps their history. `ingest/configure.py` no longer creates mail rules.
+While mail rules named `gmail-receipt-bodies` or `gmail-attachments` exist, or a mail fetch or their imports from the last 24 hours are queued or running, thread-sync logs `waiting until thread_migrate.py has run` and imports nothing. The migration turns those rules off and, as its last step, renames them to `… (retired)`, so Mail > Processed Mails keeps their history. `ingest/configure.py` no longer creates mail rules.
 
 ### Migrate existing Gmail documents
 
