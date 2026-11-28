@@ -6,7 +6,7 @@
     "@anthropic-ai/claude-code": "2.1.332",
     "@bitwarden/cli": "2026.8.0",
     "@dietrichgebert/ponytail": "5.3.3",
-    "@earendil-works/pi-coding-agent": "1.6.0",
+    "@earendil-works/pi-coding-agent": "1.6.1",
     "@jangmanj/pi-mcp-ext": "github:SpyrosPsarras/pi-mcp-ext#926ae3d9ef5c4897be7a90f52b414799581fa0a0",
     "@juicesharp/rpiv-ask-user-question": "2.15.0",
     "@juicesharp/rpiv-todo": "2.15.0",
@@ -16,6 +16,6 @@
     "pi-cliproxyapi-provider": "0.16.24",
     "pi-t3code-sticky-prefix": "0.1.2",
     "superpowers": "github:obra/superpowers#v7.0.2",
-    "t3": "0.1.14-nightly.20261128.5385"
+    "t3": "0.1.14-nightly.20261128.5399"
   }
 }
