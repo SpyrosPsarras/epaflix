@@ -171,7 +171,7 @@ images:
   - name: ghcr.io/zelak312/bazarr_autotranslate
     newTag: v1.0.0@sha256:5388463f8e45320c00a472763a8e0fb4584a255d6d31b98f9063b9eb5cada5cf
   - name: ghcr.io/linuxserver/bazarr
-    newTag: 1.6.2@sha256:832820dec70bce9e912c6eee7a95baf6551e03dbc63325a7208daaa455423752
+    newTag: 1.6.2@sha256:b3db4247d3afa0c68bc5aa311bedd67b1caf4b3eabc3a85577682970435d5013
   # TEMP OVERRIDE (batch-contract, see images/lingarr/README.md): overlay source is upstream
   # release 1.5.0 (1d451c6) + images/lingarr/batch-contract.patch. Upstream's chat batch path
   # published untranslated subtitles as translated (522 positions kept in English in 3h,
