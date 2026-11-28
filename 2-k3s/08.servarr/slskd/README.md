@@ -5,7 +5,7 @@ slskd connects to Soulseek and Soularr feeds it Lidarr's missing albums. Design:
 ## Network
 
 - slskd leaves only through the gluetun sidecar, which runs AirVPN device `slskd` over WireGuard. AirVPN forwards TCP port 46327 to that device, and slskd listens on it.
-- gluetun drops traffic outside the tunnel. slskd's VPN integration polls gluetun's control server on `127.0.0.1:8000` with the API key from Secret `slskd`, and stays off Soulseek while the tunnel is down.
+- gluetun drops traffic outside the tunnel. slskd's VPN integration polls gluetun's control server on `127.0.0.1:8000` with the API key from Secret `slskd`, and stays off Soulseek while the tunnel is down. One failed poll counts as down, and the 1 s default timeout failed whenever a Soularr search flooded slskd's thread pool, so the timeout is 10 s. gluetun's firewall, not this poll, is what keeps traffic in the tunnel.
 - `enableServiceLinks` is off because slskd reads every `SLSKD_*` variable as a setting, including the ones the Service would inject.
 - `https://slskd.epaflix.com` uses Traefik forward auth and permits only `authentik Admins`. slskd's own login is off. `slskd-ingress` admits TCP 5030 only from Traefik, Soularr and Prometheus. Kubelet probes come from the node and need no rule.
 
