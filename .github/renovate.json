@@ -26,9 +26,9 @@
       "automerge": false
     },
     {
-      "description": "Forgejo and RackPeek majors auto-merge too, by owner decision. A Forgejo major migrates its database one way. To roll back, recover the forgejo database from the daily CNPG cluster backup; changes since that backup are lost.",
+      "description": "Forgejo majors auto-merge too, by owner decision. A Forgejo major migrates its database one way. To roll back, recover the forgejo database from the daily CNPG cluster backup; changes since that backup are lost.",
       "matchManagers": ["kustomize"],
-      "matchPackageNames": ["codeberg.org/forgejo/forgejo", "aptacode/rackpeek"],
+      "matchPackageNames": ["codeberg.org/forgejo/forgejo"],
       "matchUpdateTypes": ["major"],
       "automerge": true
     },

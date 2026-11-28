@@ -92,12 +92,6 @@ class RealIO:
     def git_sync(self):
         self._hl("POST", "git-sync")
 
-    def rpk_get(self):
-        req = urllib.request.Request(self.env["RPK_URL"].rstrip("/") + "/api/inventory",
-                                     headers={"X-Api-Key": self.env["RPK_API_KEY"]})
-        with urllib.request.urlopen(req, timeout=120) as r:
-            return json.load(r)
-
     def _k8s(self, path):
         host = "https://kubernetes.default.svc"
         with open(f"{SA}/token") as f:
@@ -228,13 +222,10 @@ def write_tree(tree, scans, k8s):
     return idx_lines
 
 
-def read_stored(io, seed):
+def read_stored(io):
     design = next((d for d in io.designs() if d.get("name") == hl.DESIGN), None)
     canvas = hl.check_canvas(io.canvas(design["id"])) if design else {}
-    stored = hl.stored_items(canvas)[0]
-    if stored or not seed:
-        return design, canvas, stored, False
-    return design, canvas, hl.seed_items(io.rpk_get().get("resources", [])), True
+    return design, canvas, hl.stored_items(canvas)[0]
 
 
 def write_docs(io, items, node_ids, log):
@@ -262,15 +253,13 @@ def write_docs(io, items, node_ids, log):
     return conflicts
 
 
-def run(io, hosts, today, log, seed=False):
+def run(io, hosts, today, log):
     exit_code = 0
     try:
-        design, canvas, stored, seeded = read_stored(io, seed)
+        design, canvas, stored = read_stored(io)
     except Exception as exc:
         log(f"homelable: read failed: {type(exc).__name__}: {exc}")
         return 1
-    if seeded:
-        log(f"homelable: {hl.DESIGN!r} has no sync nodes, seeding {len(stored)} items from RackPeek")
     work = tempfile.mkdtemp()
     repo = os.path.join(work, "repo")
     os.makedirs(repo)
@@ -327,9 +316,7 @@ def run(io, hosts, today, log, seed=False):
     if design:
         try:
             canvas = hl.check_canvas(io.canvas(design["id"]))
-            fresh_stored = hl.stored_items(canvas)[0]
-            if fresh_stored or not seeded:
-                stored = fresh_stored
+            stored = hl.stored_items(canvas)[0]
         except Exception as exc:
             log(f"homelable: read failed: {type(exc).__name__}: {exc}")
             return 1
@@ -372,8 +359,7 @@ def main():
         return 1
     hosts = dict(pair.split("=", 1) for pair in os.environ["HOSTS"].split())
     today = datetime.date.today().isoformat()
-    seed = bool(os.environ.get("RPK_URL") and os.environ.get("RPK_API_KEY"))
-    return run(RealIO(os.environ), hosts, today, lambda line: print(line, flush=True), seed)
+    return run(RealIO(os.environ), hosts, today, lambda line: print(line, flush=True))
 
 
 if __name__ == "__main__":

@@ -142,18 +142,6 @@ class Homelable(unittest.TestCase):
         self.assertNotIn("t3code-work", props["owner"])
         self.assertEqual((props["replicas"], props["critical"]), (0, False))
 
-    def test_seed_skips_excluded(self):
-        resources = fx.stored() + [
-            {"kind": "System", "name": "app/t3code-work", "tags": ["sync"], "labels": {}, "runsOn": []},
-            {"kind": "Service", "name": "t3code-work/sts/x", "tags": ["sync"], "labels": {},
-             "runsOn": ["app/forgejo"], "notes": "secret stuff"},
-            {"kind": "Service", "name": "forgejo/deploy/y", "tags": ["sync"], "labels": {},
-             "runsOn": ["app/forgejo"], "notes": "see hub.mcp-hub-work.svc"}]
-        seeded = {r["name"]: r for r in hl.seed_items(resources)}
-        self.assertNotIn("app/t3code-work", seeded)
-        self.assertNotIn("t3code-work", seeded["app/forgejo"]["notes"])
-        self.assertNotIn("mcp-hub-work", seeded["app/forgejo"]["notes"])
-
     def test_workload_docs(self):
         docs = hl.workload_docs(fresh_items())
         self.assertIn("app/forgejo", docs)
@@ -162,16 +150,6 @@ class Homelable(unittest.TestCase):
         self.assertFalse(any("t3code-work" in b for b in docs.values()))
         self.assertEqual(docs, hl.workload_docs(list(reversed(fresh_items()))))
 
-    def test_seed_notes(self):
-        resources = fx.stored() + [
-            {"kind": "Service", "name": "forgejo/deploy/forgejo", "tags": ["sync"], "labels": {},
-             "runsOn": ["app/forgejo"], "notes": "rootless image"},
-            {"kind": "Service", "name": "old/deploy/x", "tags": ["sync"], "labels": {},
-             "runsOn": ["app/old-thing"], "notes": "only one"}]
-        seeded = {r["name"]: r for r in hl.seed_items(resources)}
-        self.assertEqual(seeded["app/forgejo"]["notes"], "why\n\n### forgejo/deploy/forgejo\nrootless image")
-        self.assertEqual(seeded["app/old-thing"]["notes"], "### old/deploy/x\nonly one")
-        self.assertNotIn("forgejo/deploy/forgejo", seeded)
 
 
 if __name__ == "__main__":

@@ -118,20 +118,6 @@ def stored_items(canvas):
     return items, raw
 
 
-def seed_items(resources):
-    resources = [dict(r, notes=build.scrub(r["notes"]) if r.get("notes") else r.get("notes")) for r in resources
-                 if not build.has_excluded(r.get("name") or "")
-                 and not any(build.has_excluded(x) for x in r.get("runsOn") or [])]
-    by_name = {r["name"].lower(): dict(r) for r in resources if r.get("kind") != "Service"}
-    for r in sorted((r for r in resources if r.get("kind") == "Service" and r.get("notes")), key=lambda r: r["name"]):
-        parent = by_name.get(((r.get("runsOn") or [""])[0]).lower())
-        if parent is None:
-            continue
-        section = f"### {r['name']}\n{r['notes']}"
-        parent["notes"] = f"{parent['notes']}\n\n{section}" if parent.get("notes") else section
-    return list(by_name.values())
-
-
 def _row(name):
     prefix = name.split("/", 1)[0].lower()
     return ROWS.index(prefix) if prefix in ROWS else len(ROWS)
