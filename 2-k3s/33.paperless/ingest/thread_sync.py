@@ -150,15 +150,11 @@ def is_reply(msg) -> bool:
 def classify(labels: set[str], thread_has_document: bool, reply: bool) -> str | None:
     if thread_has_document and reply:
         return 'followup'
-    if RECEIPT in labels:
-        return 'attachments'
-    if BODY in labels:
-        return 'body'
-    return None
+    return 'new' if labels & {RECEIPT, BODY} else None
 
 
 def plan_message(kind, parts, eml, note, present, queued, failed, has_root) -> Plan:
-    if kind == 'body' or (kind == 'attachments' and not parts):
+    if kind == 'new' and not parts:
         files, note = [eml], None
     else:
         files = parts
@@ -252,7 +248,7 @@ def sync(mailbox, store, now) -> Counter:
         thread_doc = store.document_for_thread(thrid)
         if thread_doc is None and not labels & {RECEIPT, BODY}:
             continue
-        if thread_doc is None and thrid in state[1]:
+        if thrid in state[1]:
             counts['waiting'] += 1
             continue
         try:
@@ -277,8 +273,17 @@ class DjangoStore:
         self.settings, self.Document, self.Note, self.Task = settings, Document, Note, PaperlessTask
         self.account = MailAccount.objects.get(name='gmail')
         self.owner = self.account.owner
-        self.field, _ = CustomField.objects.get_or_create(name=THREAD_FIELD, defaults={'data_type': CustomField.FieldDataType.STRING})
+        self.field = CustomField.objects.get(name=THREAD_FIELD)
         self.tag_ids = [Tag.objects.get(name=name).id for name in ['source:gmail', 'paperless-gpt-auto']]
+
+    def old_rules_active(self, now):
+        if self.account.rules.filter(enabled=True).exists():
+            return True
+        pending = self.Task.objects.filter(
+            task_type=self.Task.TaskType.CONSUME_FILE, status__in=[self.Task.Status.PENDING, self.Task.Status.STARTED],
+            date_created__gte=now - timedelta(hours=6),
+        )
+        return any((task.input_data or {}).get('mailrule_id') for task in pending)
 
     def tasks(self, now):
         queued, threads, failed = set(), set(), set()
@@ -303,8 +308,8 @@ class DjangoStore:
         return set(self.Document.global_objects.filter(checksum__in=sums).values_list('checksum', flat=True))
 
     def root_with_thread(self, present, thrid):
-        roots = {doc.root_document_id or doc.id for doc in self.Document.global_objects.filter(checksum__in=present)}
-        return self._thread_roots(thrid).filter(document_id__in=roots).values_list('document_id', flat=True).first()
+        own = self.Document.objects.filter(checksum__in=present, root_document__isnull=True).values_list('id', flat=True)
+        return self._thread_roots(thrid).filter(document_id__in=list(own)).values_list('document_id', flat=True).first()
 
     def queue(self, part, root_id, thrid, title, label=None, file_key=None):
         from documents.data_models import ConsumableDocument, DocumentMetadataOverrides, DocumentSource
@@ -334,6 +339,7 @@ class DjangoStore:
     def join_candidates(self, now):
         return list(self.Document.objects.filter(
             root_document__isnull=True, modified__gte=now - timedelta(days=2), versions__isnull=False,
+            custom_fields__field=self.field,
         ).values_list('id', flat=True).distinct())
 
     def _versions(self, root):
@@ -408,6 +414,9 @@ class GmailBox:
 def main():
     from django.utils import timezone
     store = DjangoStore()
+    if store.old_rules_active(timezone.now()):
+        print('thread-sync: waiting until the old Gmail mail rules are disabled and their imports finish', flush=True)
+        return
     with GmailBox(store.account) as mailbox:
         counts = sync(mailbox, store, timezone.now())
     print('thread-sync: ' + ' '.join(f'{key}={counts[key]}' for key in ['read', 'created', 'versions', 'joined', 'notes', 'done', 'waiting', 'import_failed', 'failed']), flush=True)

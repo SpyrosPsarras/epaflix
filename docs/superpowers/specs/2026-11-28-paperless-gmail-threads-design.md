@@ -35,7 +35,7 @@ On 2026-11-27 a shop sent an invoice PDF. Paperless imported it as document 2684
 
 ### Where it runs
 
-A second container, `thread-sync`, in the Paperless pod. It uses the Paperless image, environment and volume, and runs `ingest/thread_sync.py` through `manage.py shell` every 10 minutes. A kustomize `configMapGenerator` ships the script. It reads the Gmail login from Paperless mail account `gmail`, so no new secret exists. It queues imports on Paperless's own task queue with `consume_file`, like an upload from the UI.
+A second container, `thread-sync`, in the Paperless pod. It uses the Paperless image, environment and volume, and runs `ingest/thread_sync.py` through `manage.py shell` every 10 minutes. A kustomize `configMapGenerator` ships the script. It reads the Gmail login from Paperless mail account `gmail`, so no new secret exists. It queues imports on Paperless's own task queue with `consume_file`, like an upload from the UI. It imports nothing while an old mail rule is enabled or an old-rule import is still queued, so the two importers never overlap during the switch. It looks up the `Gmail thread` field and never creates it.
 
 The script fails a message, not the run. A message that hits an error keeps no done label, is logged with its Gmail message ID and is retried next run. A message whose Paperless import failed gets `paperless-failed` and waits until the owner removes that label. An error outside a message, such as a lost IMAP connection, exits the container, and Kubernetes restarts it.
 
@@ -56,15 +56,14 @@ From `[Gmail]/All Mail`, oldest first, without `paperless-done`, `paperless-fail
 1. `label:paperless-receipt OR label:paperless-receipt-body`, any age. This covers labels the owner adds by hand to old mail.
 2. `newer_than:7d`, for later messages in conversations that already have a document. Unlabelled messages, such as the owner's own replies, are found this way.
 
-A message is a follow-up when its Gmail thread has a document and the message has an `In-Reply-To` or `References` header (F4). Other messages in group 2 are left alone.
+A message is a follow-up when its Gmail thread has a document and the message has an `In-Reply-To` or `References` header (F4). Other messages in group 2 are left alone. While a new document for a thread is still queued, every message of that thread waits, so a reply never lands on the previous document by mistake. A mail finds its own document by the document's own file, not by a version, so an unchanged terms PDF shared with last month's invoice does not pull the new invoice into last month's document.
 
 ### What happens to a message
 
 | Message | Action |
 |---|---|
 | Follow-up | Text becomes a note. Each eligible file becomes a version, labelled with its filename. |
-| Labelled `paperless-receipt`, not a follow-up | The first eligible file creates the document. The other files become versions on the next run, when the document exists. Text becomes a note. With no eligible file, it is handled like `paperless-receipt-body`. |
-| Labelled `paperless-receipt-body`, not a follow-up | The raw mail is imported as `.eml`, which Paperless turns into the email page as today. |
+| Labelled `paperless-receipt` or `paperless-receipt-body`, not a follow-up | The first eligible file creates the document. The other files become versions on the next run, when the document exists. Text becomes a note. With no eligible file, the raw mail is imported as `.eml`, which Paperless turns into the email page as today. The Gmail filters check filenames, so a nameless inline PDF can carry the body label; the script still finds it. |
 
 Eligible files are PDF, DOC, DOCX, XLS, XLSX, ODT and ODS, detected by MIME type, attached or inline, with or without a filename (G4). New documents get title from subject, owner, tags `source:gmail` and `paperless-gpt-auto`, and the `Gmail thread` field. Paperless skips workflows for versions (`documents/signals/handlers.py`, `run_workflows`), so versions never reach paperless-gpt.
 
@@ -74,7 +73,7 @@ The message gets `paperless-done` once every file is imported and the note exist
 
 ### Joined file
 
-The join pass looks at documents with versions whose modified time is in the last 2 days. When a document has two or more original files, each with a PDF, and its newest version does not already join all of them, the script builds one PDF from them in version order. Original PDFs are used as they are. Office files and email pages use Paperless's archive PDF. It imports that PDF as the newest version, labelled `All files: <document IDs>`, or `All files: <count> files #<hash>` when the IDs pass the 64-character label limit. The label shows which files it holds and tell the next run whether it is current. Originals stay as older versions.
+The join pass looks at documents with `Gmail thread` and versions whose modified time is in the last 2 days. Drive imports and uploads are never joined. When a document has two or more original files, each with a PDF, and its newest version does not already join all of them, the script builds one PDF from them in version order. Original PDFs are used as they are. Office files and email pages use Paperless's archive PDF. It imports that PDF as the newest version, labelled `All files: <document IDs>`, or `All files: <count> files #<hash>` when the IDs pass the 64-character label limit. The label shows which files it holds and tell the next run whether it is current. Originals stay as older versions.
 
 ### Existing documents
 

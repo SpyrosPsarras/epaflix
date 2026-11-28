@@ -35,7 +35,8 @@ def plan_threads(messages: list[Msg]) -> list[tuple]:
                 if msg.kind == 'eml':
                     if msg.note:
                         actions.append(('note', root, msg.note))
-                    actions.append(('delete', root, msg.doc_ids[0]))
+                    if msg.doc_ids[0] != root:
+                        actions.append(('delete', root, msg.doc_ids[0]))
                     continue
                 actions += [('version', root, doc_id) for doc_id in msg.doc_ids if doc_id != root]
             else:
@@ -59,6 +60,8 @@ def scan(box, store) -> list[Msg]:
         doc_ids = []
         for data in files:
             doc = store.Document.objects.filter(checksum=checksum(data)).first()
+            if doc and doc.root_document_id and kind == 'eml':
+                continue
             doc_id = doc and (doc.root_document_id or doc.id)
             if doc_id and doc_id not in doc_ids:
                 doc_ids.append(doc_id)

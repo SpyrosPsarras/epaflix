@@ -126,7 +126,7 @@ The old body-wide keyword filter was deleted and its label removed from all mail
 
 Container `thread-sync` in the Paperless pod imports Gmail receipts every 10 minutes with `ingest/thread_sync.py`; design: [Gmail threads](../../docs/superpowers/specs/2026-11-28-paperless-gmail-threads-design.md). One receipt conversation becomes one document:
 
-- The first mail labelled `paperless-receipt` creates the document from its first PDF or Office file, attached or inline. Its other files become versions on the next run. A mail labelled `paperless-receipt-body`, or `paperless-receipt` without an eligible file, creates the document from the email page.
+- The first mail labelled `paperless-receipt` or `paperless-receipt-body` creates the document from its first PDF or Office file, attached or inline. Its other files become versions on the next run. A labelled mail without such a file creates the document from the email page.
 - Later replies in the same Gmail thread, including the owner's, add their text as a note and their files as versions. A mail counts as a reply only with an `In-Reply-To` or `References` header, so monthly bills that Gmail groups by subject stay separate documents. Replies go to the newest document of the thread.
 - When a document has two or more files, the newest version is one PDF joining all of them, labelled `All files: <ids>`. Preview, phone app and search show that file. The originals stay as older versions.
 - New documents get title from subject, the owner, tags `source:gmail` and `paperless-gpt-auto`, and custom field `Gmail thread`. Paperless skips workflows for versions, so paperless-gpt only reads the first file.
@@ -145,9 +145,9 @@ Each run logs one line, for example `thread-sync: read=2 created=1 versions=0 jo
 kubectl -n paperless logs deploy/paperless -c thread-sync --tail 20
 ```
 
-To retry a failed message, fix the cause and remove `paperless-failed`. To import a message again, permanently delete its document or version, then remove `paperless-done`. A file whose checksum exists in Paperless, trash included, is never imported twice.
+To retry a failed message, fix the cause, wait until the failed task in the Paperless task list is 24 hours old, then remove `paperless-failed`. Removing it earlier puts the label back on the next run. To import a message again, permanently delete its document or version, then remove `paperless-done`. A file whose checksum exists in Paperless, trash included, is never imported twice.
 
-The mail rules `gmail-receipt-bodies` and `gmail-attachments` stay in Paperless, disabled, so Mail > Processed Mails keeps their history.
+The mail rules `gmail-receipt-bodies` and `gmail-attachments` stay in Paperless, disabled, so Mail > Processed Mails keeps their history. Until `ingest/configure.py` disables them and their queued imports finish, thread-sync logs `waiting until the old Gmail mail rules are disabled` and imports nothing.
 
 ### Migrate existing Gmail documents
 

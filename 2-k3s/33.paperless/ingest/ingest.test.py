@@ -586,12 +586,12 @@ class ThreadSyncTests(unittest.TestCase):
 
     def test_classify_non_reply_in_known_thread(self):
         c = self.ts.classify
-        self.assertEqual(c({'paperless-receipt'}, True, False), 'attachments')
+        self.assertEqual(c({'paperless-receipt'}, True, False), 'new')
         self.assertEqual(c(set(), True, True), 'followup')
         self.assertEqual(c({'paperless-receipt-body'}, True, True), 'followup')
         self.assertIsNone(c(set(), True, False))
         self.assertIsNone(c(set(), False, True))
-        self.assertEqual(c({'paperless-receipt-body'}, False, True), 'body')
+        self.assertEqual(c({'paperless-receipt-body'}, False, True), 'new')
 
     def plan(self, kind, parts, note='note', present=(), queued=(), failed=(), has_root=False):
         eml = self.ts.Part('Faktura 12.eml', b'eml')
@@ -602,27 +602,27 @@ class ThreadSyncTests(unittest.TestCase):
 
     def test_plan_message_idempotent(self):
         a, b = self.ts.Part('a.pdf', b'a'), self.ts.Part('b.pdf', b'b')
-        self.assertEqual(self.plan('attachments', [a, b], present=[a, b], has_root=True), self.ts.Plan(None, [], 'note', True))
-        self.assertEqual(self.plan('attachments', [a, b]), self.ts.Plan(a, [], None, False))
-        self.assertEqual(self.plan('attachments', [a, b], present=[a], has_root=True), self.ts.Plan(None, [b], 'note', False))
+        self.assertEqual(self.plan('new', [a, b], present=[a, b], has_root=True), self.ts.Plan(None, [], 'note', True))
+        self.assertEqual(self.plan('new', [a, b]), self.ts.Plan(a, [], None, False))
+        self.assertEqual(self.plan('new', [a, b], present=[a], has_root=True), self.ts.Plan(None, [b], 'note', False))
         self.assertEqual(self.plan('followup', [a], has_root=True), self.ts.Plan(None, [a], 'note', False))
         self.assertEqual(self.plan('followup', [], has_root=True), self.ts.Plan(None, [], 'note', True))
-        self.assertEqual(self.plan('attachments', [a], present=[a]), self.ts.Plan(None, [], None, True))
+        self.assertEqual(self.plan('new', [a], present=[a]), self.ts.Plan(None, [], None, True))
 
     def test_plan_message_waits_on_failed(self):
         a, b = self.ts.Part('a.pdf', b'a'), self.ts.Part('b.pdf', b'b')
-        self.assertEqual(self.plan('attachments', [a, b], queued=['a.pdf']), self.ts.Plan(None, [], None, False))
-        self.assertEqual(self.plan('attachments', [a, b], failed=['a.pdf']), self.ts.Plan(None, [], None, False, True))
+        self.assertEqual(self.plan('new', [a, b], queued=['a.pdf']), self.ts.Plan(None, [], None, False))
+        self.assertEqual(self.plan('new', [a, b], failed=['a.pdf']), self.ts.Plan(None, [], None, False, True))
         self.assertEqual(self.plan('followup', [a, b], failed=['b.pdf'], has_root=True), self.ts.Plan(None, [], None, False, True))
         self.assertEqual(self.plan('followup', [a], queued=['a.pdf'], has_root=True), self.ts.Plan(None, [], 'note', False))
         self.assertEqual(self.plan('followup', [a], present=[a], failed=['a.pdf'], has_root=True), self.ts.Plan(None, [], 'note', True))
 
-    def test_plan_body_and_fallback(self):
+    def test_plan_files_first_then_email_page(self):
         eml = self.ts.Part('Faktura 12.eml', b'eml')
         a = self.ts.Part('a.pdf', b'a')
-        self.assertEqual(self.plan('body', [a]), self.ts.Plan(eml, [], None, False))
-        self.assertEqual(self.plan('attachments', []), self.ts.Plan(eml, [], None, False))
-        self.assertEqual(self.plan('body', [], present=[eml], has_root=True), self.ts.Plan(None, [], None, True))
+        self.assertEqual(self.plan('new', [a]), self.ts.Plan(a, [], None, False))
+        self.assertEqual(self.plan('new', []), self.ts.Plan(eml, [], None, False))
+        self.assertEqual(self.plan('new', [], present=[eml], has_root=True), self.ts.Plan(None, [], None, True))
         self.assertEqual(self.plan('followup', [], has_root=True).new, None)
 
     def test_needs_join(self):
@@ -698,7 +698,7 @@ class FakeStore:
         return {s for s in sums if s in self.docs}
 
     def root_with_thread(self, present, thrid):
-        roots = {self.docs[s][1] for s in present}
+        roots = {doc_id for s in present for doc_id, root in [self.docs[s]] if doc_id == root}
         return next((r for r in self.threads.get(thrid, []) if r in roots), None)
 
     def queue(self, part, root_id, thrid, title):
@@ -790,6 +790,24 @@ class ThreadSyncRuntimeTests(unittest.TestCase):
         self.assertTrue(store.notes[0][1].startswith('From Shop <shop@example.test>, 2026-11-27 14:57'))
         self.assertIn('paperless-done', box.messages['20'][2])
 
+    def test_sync_waits_for_queued_new_document_of_thread(self):
+        from datetime import datetime, timezone
+        box, store, now = FakeBox(), FakeStore(self.ts), datetime(2026, 11, 28, tzinfo=timezone.utc)
+        store.consume(b'%PDF-october', thrid='t1')
+        box.add('50', 't1', set(), mail(body='About November', headers={'In-Reply-To': '<nov@example.test>'}))
+        store.waiting = ({'x'}, {'t1'}, set())
+        counts = self.ts.sync(box, store, now)
+        self.assertEqual((store.queued, store.notes, counts['waiting']), ([], [], 1))
+
+    def test_sync_shared_secondary_file_does_not_pick_old_document(self):
+        from datetime import datetime, timezone
+        box, store, now = FakeBox(), FakeStore(self.ts), datetime(2026, 11, 28, tzinfo=timezone.utc)
+        october = store.consume(b'%PDF-october', thrid='t1')
+        store.consume(b'%PDF-terms', root=october, label='terms.pdf')
+        box.add('60', 't1', {'paperless-receipt'}, mail(parts=[('application', 'pdf', b'%PDF-november', 'november.pdf', 'attachment'), ('application', 'pdf', b'%PDF-terms', 'terms.pdf', 'attachment')]))
+        self.ts.sync(box, store, now)
+        self.assertEqual(store.queued, [('november.pdf', None, 't1', 'Faktura 12')])
+
     def test_sync_failure_is_per_message(self):
         from datetime import datetime, timezone
         box, store, now = FakeBox(), FakeStore(self.ts), datetime(2026, 11, 28, tzinfo=timezone.utc)
@@ -843,6 +861,10 @@ class ThreadMigrateTests(unittest.TestCase):
             ('field', 17, 't2'),
             ('version', 17, 18),
         ])
+
+    def test_plan_threads_never_trashes_root(self):
+        Msg = self.tm.Msg
+        self.assertEqual(self.tm.plan_threads([Msg('1', 't1', 1, False, 'att', [10], None), Msg('2', 't1', 2, True, 'eml', [10], 'n2')]), [('field', 10, 't1'), ('note', 10, 'n2')])
 
     def test_plan_threads_is_idempotent_for_merged_documents(self):
         Msg = self.tm.Msg
