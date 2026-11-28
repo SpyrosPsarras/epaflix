@@ -19,6 +19,9 @@ permissions:
 
 jobs:
   no-merge-commits:
+    # A title or body edit must not re-run this required check: a fresh pending
+    # run hides the earlier green one from an agent deciding whether to merge.
+    if: github.event.action != 'edited' || github.event.changes.base != null
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
