@@ -100,7 +100,7 @@ def _merge_props(new, old, reserved):
     out = [dict(p, icon=(old_by.get(p["key"]) or {}).get("icon"), visible=(old_by.get(p["key"]) or {}).get("visible", False))
            for p in new]
     keys = {p["key"] for p in new}
-    return out + [dict(p, value=build.scrub(str(p.get("value") or ""))) for p in old or []
+    return out + [dict(p, value=build.scrub(p["value"])) if isinstance(p.get("value"), str) else p for p in old or []
                   if p.get("key") not in keys and p.get("key") not in reserved]
 
 

@@ -243,12 +243,49 @@ class Sync(unittest.TestCase):
         first = FakeIO()
         run(first)
         saved = json.loads(json.dumps(first.saves[0]))
-        next(n for n in saved["nodes"] if n["label"] == "app/forgejo")["label"] = "Forgejo (git)"
+        node = next(n for n in saved["nodes"] if n["label"] == "app/forgejo")
+        node["label"] = "Forgejo (git)"
+        next(p for p in node["properties"] if p["key"] == "health")["value"] = "Stale"
         io = FakeIO()
         io.canvas = lambda design_id: json.loads(json.dumps(
             {"nodes": saved["nodes"], "edges": [], "viewport": {}, "custom_style": None}))
         self.assertEqual(run(io), 0)
-        self.assertEqual(sum(1 for n in io.saves[0]["nodes"] if n["id"] == hl.node_id("app/forgejo")), 1)
+        got = next(n for n in io.saves[0]["nodes"] if n["id"] == hl.node_id("app/forgejo"))
+        self.assertEqual({p["key"]: p["value"] for p in got["properties"]}["health"], "Healthy")
+        self.assertNotIn("changed_facts", got)
+
+    def test_unindexed_namespace_page_kept(self):
+        first = FakeIO(design=False)
+        run(first)
+        saved = first.saves[0]
+        nid = nodes(first)["app/loose"]["id"]
+        io = FakeIO(docs={nid: ("doc-1", "## loose/deploy/stray\n", "app/loose workloads")})
+        io.canvas = lambda design_id: json.loads(json.dumps(
+            {"nodes": saved["nodes"], "edges": [], "viewport": {}, "custom_style": None}))
+        io.indexed = ["forgejo", "rackpeek"]
+        io.k8s = lambda: dict(fx.k8s(), deployments=[d for d in fx.k8s()["deployments"] if d["metadata"]["name"] != "stray"])
+        run(io)
+        self.assertEqual(io.updated_docs, [])
+
+    def test_truenas_without_apps_empties_page(self):
+        first = FakeIO(design=False)
+        run(first)
+        saved = first.saves[0]
+        nid = nodes(first)["vm/truenas"]["id"]
+        io = FakeIO(docs={nid: ("doc-1", "## truenas/app/silo\n", "vm/truenas workloads")})
+        io.canvas = lambda design_id: json.loads(json.dumps(
+            {"nodes": saved["nodes"], "edges": [], "viewport": {}, "custom_style": None}))
+        orig = io.scan
+
+        def scan(alias, target):
+            out = orig(alias, target)
+            if out.get("truenas"):
+                out["truenas"]["apps"] = []
+            return out
+
+        io.scan = scan
+        run(io)
+        self.assertIn(("doc-1", {"body": "No workloads.\n", "revision_reason": "import"}), io.updated_docs)
 
     def test_incomplete_canvas_saves_nothing(self):
         io = FakeIO()

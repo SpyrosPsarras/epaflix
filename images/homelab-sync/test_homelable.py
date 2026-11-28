@@ -135,9 +135,12 @@ class Homelable(unittest.TestCase):
         n = next(x for x in canvas["nodes"] if x["label"] == "app/forgejo")
         n["properties"].append({"key": "version", "value": "pinned by me", "icon": None, "visible": True})
         n["properties"].append({"key": "owner", "value": "see t3code-work", "icon": None, "visible": True})
+        n["properties"].append({"key": "replicas", "value": 0, "icon": None, "visible": True})
+        n["properties"].append({"key": "critical", "value": False, "icon": None, "visible": True})
         props = {p["key"]: p["value"] for p in by_label(hl.payload(fresh_items(), canvas, {}, "d1"))["app/forgejo"]["properties"]}
         self.assertEqual(props["version"], "pinned by me")
         self.assertNotIn("t3code-work", props["owner"])
+        self.assertEqual((props["replicas"], props["critical"]), (0, False))
 
     def test_seed_skips_excluded(self):
         resources = fx.stored() + [
