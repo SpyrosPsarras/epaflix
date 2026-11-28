@@ -22,4 +22,4 @@ images:
   - name: ghcr.io/pouzor/homelable-frontend
     newTag: 3.8.0@sha256:629a18054f13b54e9c6dfbab059aca27bbf4bcc083a8366d43706d59aa5c6520
   - name: ghcr.io/spyrospsarras/homelab-sync
-    digest: sha256:27eab1465c279b4d2cac9b7ed6e55eb166a2f38c89d067836a6de8df2c2bcd3d
+    digest: sha256:e70363cdac8cd9fa2d53048a3e44e23fdb242ae2af0f4b66f4a5358bdae3fe89
