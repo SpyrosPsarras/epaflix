@@ -117,7 +117,7 @@ def write(home, safety_entry, ssh_path=Path('/scripts/homelab-ssh.md')):
     if os.environ.get('MCP_HUB_INSTANCE') == 'work':
         # Work skills load from the owner's ai-skills clone; `git pull` there updates them.
         settings['skills'].append(str(home / 'work/ai-skills/plugins'))
-        # The other tstack skills open, merge or comment on PRs, which Davidhorn's PR skills own.
+        # The other tstack skills open, merge or comment on PRs, which the work organization's PR skills own.
         settings['skills'] += [str(tstack / name) for name in ('council', 'modernize', 'sol-loop')]
     else:
         settings['skills'].append(str(tstack))
