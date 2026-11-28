@@ -1,12 +1,12 @@
-name: build-rackpeek-sync
+name: build-homelab-sync
 
 
 on:
   push:
     branches: [main]
-    paths: ['images/rackpeek-sync/**', '1-proxmox/rackpeek-scan/**', '.github/workflows/build-rackpeek-sync.yml']
+    paths: ['images/homelab-sync/**', '1-proxmox/homelab-scan/**', '.github/workflows/build-homelab-sync.yml']
   pull_request:
-    paths: ['images/rackpeek-sync/**', '1-proxmox/rackpeek-scan/**', '.github/workflows/build-rackpeek-sync.yml']
+    paths: ['images/homelab-sync/**', '1-proxmox/homelab-scan/**', '.github/workflows/build-homelab-sync.yml']
   workflow_dispatch:
 
 permissions:
@@ -26,8 +26,8 @@ jobs:
 
       - name: Verify the image before publishing anything
         run: |
-          docker build -f images/rackpeek-sync/Dockerfile -t rackpeek-sync:dev .
-          bash images/rackpeek-sync/test.sh
+          docker build -f images/homelab-sync/Dockerfile -t homelab-sync:dev .
+          bash images/homelab-sync/test.sh
 
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
@@ -42,12 +42,12 @@ jobs:
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
-          file: images/rackpeek-sync/Dockerfile
+          file: images/homelab-sync/Dockerfile
           push: true
           tags: |
-            ghcr.io/spyrospsarras/rackpeek-sync:${{ github.sha }}
-            ghcr.io/spyrospsarras/rackpeek-sync:latest
+            ghcr.io/spyrospsarras/homelab-sync:${{ github.sha }}
+            ghcr.io/spyrospsarras/homelab-sync:latest
 
       - name: Print the digest to pin
         if: github.event_name != 'pull_request'
-        run: docker buildx imagetools inspect ghcr.io/spyrospsarras/rackpeek-sync:${{ github.sha }} --format '{{.Manifest.Digest}}'
+        run: docker buildx imagetools inspect ghcr.io/spyrospsarras/homelab-sync:${{ github.sha }} --format '{{.Manifest.Digest}}'

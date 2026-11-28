@@ -5,7 +5,7 @@ import tempfile
 import unittest
 
 HERE = pathlib.Path(__file__).resolve().parent
-spec = importlib.util.spec_from_file_location("scan", HERE / "rackpeek-scan.py")
+spec = importlib.util.spec_from_file_location("scan", HERE / "homelab-scan.py")
 scan = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(scan)
 
@@ -235,12 +235,12 @@ class Main(unittest.TestCase):
     def test_ignores_original_command(self):
         os.environ["SSH_ORIGINAL_COMMAND"] = "rm -rf /"
         root = tempfile.mkdtemp()
-        os.environ["RACKPEEK_SCAN_ROOT"] = root
+        os.environ["HOMELAB_SCAN_ROOT"] = root
         doc = scan.scan()
         self.assertEqual(doc["schema"], 1)
         self.assertIsInstance(doc["errors"], list)
         del os.environ["SSH_ORIGINAL_COMMAND"]
-        del os.environ["RACKPEEK_SCAN_ROOT"]
+        del os.environ["HOMELAB_SCAN_ROOT"]
 
 
 if __name__ == "__main__":

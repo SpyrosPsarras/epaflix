@@ -343,7 +343,7 @@ def truenas_info(errors):
 
 
 def scan():
-    root = os.environ.get("RACKPEEK_SCAN_ROOT", "/")
+    root = os.environ.get("HOMELAB_SCAN_ROOT", "/")
     errors = []
     pve = os.path.isdir(os.path.join(root, "etc/pve"))
     truenas = bool(run(["sh", "-c", "command -v midclt"], []))

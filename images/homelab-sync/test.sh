@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-IMAGE="${1:-rackpeek-sync:dev}"
+IMAGE="${1:-homelab-sync:dev}"
 
 echo "== 1. tools =="
 docker run --rm --entrypoint sh "$IMAGE" -c 'ssh -V && git --version && gitleaks version && ssh -G -o BatchMode=yes localhost >/dev/null'
