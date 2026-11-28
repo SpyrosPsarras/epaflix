@@ -28,4 +28,4 @@ configMapGenerator:
 images:
   # Built by build-openclaw-discord.yml from images/openclaw-discord; pin the digest it prints.
   - name: ghcr.io/spyrospsarras/openclaw-discord
-    digest: sha256:ee910d4c4a83256218c592fb039ba7d383796e10a3b7525deb5767a6396349bb
+    digest: sha256:74ae38a60a859908e33535581f01a0046ebc3b5c4cf645c5603a109502ed04b9
