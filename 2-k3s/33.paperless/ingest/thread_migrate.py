@@ -109,7 +109,7 @@ def main():
     if approved:
         rules.update(enabled=False)
         print('old mail rules off, waiting for their queued imports', flush=True)
-        while store.legacy_pending(timezone.now()):
+        while store.legacy_pending(timezone.now(), fetch=True):
             time.sleep(30)
     with GmailBox(store.account) as box:
         messages = scan(box, store)

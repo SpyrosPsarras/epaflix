@@ -284,10 +284,10 @@ class DjangoStore:
     def old_rules_active(self, now):
         return self.account.rules.filter(name__in=LEGACY_RULES).exists() or self.legacy_pending(now)
 
-    def legacy_pending(self, now):
+    def legacy_pending(self, now, fetch=False):
         # shortcut: tasks from the 2026-11-18 backlog stay pending with an empty queue, so only the last day counts.
         pending = self.Task.objects.filter(
-            task_type__in=[self.Task.TaskType.CONSUME_FILE, self.Task.TaskType.MAIL_FETCH],
+            task_type__in=[self.Task.TaskType.CONSUME_FILE, self.Task.TaskType.MAIL_FETCH] if fetch else [self.Task.TaskType.CONSUME_FILE],
             status__in=[self.Task.Status.PENDING, self.Task.Status.STARTED],
             date_created__gte=now - timedelta(hours=24),
         )
