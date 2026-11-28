@@ -12,7 +12,7 @@ Startup and readiness use `/health`, which checks the database and returns `dbBa
 
 ## Owner-first login
 
-Digarr makes the first account admin, including accounts provisioned by proxy auth. Keep other users out until the owner has logged in through Authentik and verified the admin role. Do not add household members to `Music users` before this check. The owner confirmed the admin role on 2026-11-28. `Servarr users` is a child group of `Music users`, so every Servarr member can sign in. Existing usernames retain their permissions when proxy auth matches them.
+Digarr makes the first account admin, including accounts provisioned by proxy auth. `Servarr users` is a child group of `Music users`, so every Servarr member can sign in. The owner confirmed the admin role on 2026-11-28. After a fresh install or a restore with an empty Digarr database, allow only `authentik Admins` until the owner has logged in and verified the admin role. Existing usernames retain their permissions when proxy auth matches them.
 
 ## Live checks after owner-approved sync
 
